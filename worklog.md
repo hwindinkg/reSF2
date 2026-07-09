@@ -225,3 +225,46 @@ Stage Summary:
   skeleton_punching_bag.xml + body.xml + all other model XMLs from
   files.dz. This will allow rendering the real 3D punching bag model
   and real character body parts.
+
+---
+Task ID: stage-7.5
+Agent: main
+Task: Stage 7.5 — Fix Windows build, render body.xml mesh, load skeleton edges
+
+Work Log:
+- Fixed Windows build errors:
+  - std::min ambiguity (MSVC strict): use std::min<uint32_t> for mixed
+    uint32_t/int arguments in hit_anim/bag_swing decay.
+  - LNK4006 duplicate stbi symbols: extracted STB_IMAGE_IMPLEMENTATION
+    and STB_IMAGE_WRITE_IMPLEMENTATION into a single compilation unit
+    (stb_image_impl.cpp) instead of defining them in both renderer.cpp
+    and software_renderer.cpp.
+  - Fixed int->float conversion warnings (C4244).
+  - Fixed [[nodiscard]] warning (C4834): check make_gl_current() return.
+- User provided body.xml and punching_bag.xml (extracted from files.dz
+  on Windows). These are the real fighter body mesh + punching bag model.
+- Implemented body.xml mesh rendering:
+  - Parses <Nodes> (BODY-NodeN, BODY-MacroNodeN), <Edges> (BODY-EdgeN),
+    <Figures> (Capsules with Edge/Radius1/Radius2, Triangles with
+    Node1/Node2/Node3).
+  - Renders capsules as thick lines (light gray, radius from XML).
+  - Renders triangles as filled polygons (dark gray, rasterized with
+    barycentric interpolation).
+  - Resolves MacroNodes recursively as weighted averages of child nodes
+    (using LCC1..LCC4 coefficients).
+- Fixed skeleton.xml edge parsing to also load Type="Muscle" entries
+  (Muscle115..120) which are referenced by body.xml capsules.
+  Now loads 193 edges (111 Edge + 82 Muscle).
+- The dzip repo (https://github.com/kugelrund/dzip) is for Quake demo
+  files, NOT for Marmalade's DTRZ format. Not usable. User must extract
+  files.dz on Windows using dzip.exe + extract_dz.bat.
+
+Stage Summary:
+- Windows build now compiles successfully (all 3 fixes applied).
+- Body mesh from body.xml renders: 15 nodes, 36 edges, 82 capsules,
+  29 triangles. Character now has a filled body shape (not just stick
+  figure) with thick capsule limbs and filled triangle torso.
+- Skeleton edges loaded: 193 entries (Edge + Muscle types).
+- VLM-verified: character has "filled torso area with thickness".
+- Next: need skeleton_punching_bag.xml to render the real punching bag
+  3D model (currently using btn_punching_bag.png icon as placeholder).
