@@ -332,3 +332,49 @@ Stage Summary:
   character body mesh present.
 - Next: decode .bin animation files so character can walk/punch instead
   of static T-pose.
+
+---
+Task ID: stage-7.7
+Agent: main
+Task: Stage 7.7 — Engine flow analysis + scroll menu (matching original logic)
+
+Work Log:
+- Created detailed engine flow analysis (docs/18_engine_flow_analysis.md)
+  documenting the complete original engine behavior:
+  - cocos2d-x 2.2.6 + Marmalade SDK 8.2.1 stack
+  - Module/Screen system (LoadingScreen → EntryScreen → ActScreen → Dojo)
+  - cocoGUI JSON format (CocosBuilder 3.10) for UI layout
+  - Scroll/Roll menu: MenuRoll_left/center/right + Paper_left/right
+  - Scale9 rendering for stretchable scroll center
+  - Asset loading order from .s3e strings
+  - Model/animation system: skeleton + body + .bin animation format
+
+- Analyzed .bin animation format:
+  - u32 frame_count + frame_count * 809-byte frames
+  - Each frame: 1 byte type (1=keyframe, 5=interframe) + 202 big-endian floats
+  - Float Y values match skeleton.xml Y values (verified NPivot=169.5)
+  - Node ordering differs from skeleton.xml (need mapping)
+
+- Implemented scroll/parchment menu (matching original game):
+  - Loads MenuRoll_left/center/right.png from textures/scrolls/common/
+  - Loads Paper_left/right.png and Shadow_roll.png
+  - Collapsed: short roll bar with "MENU" text
+  - Expanded: full scroll with paper area + 7 menu icons
+  - Uses Scale9-style center stretching for the roll bar
+  - Paper area has parchment background with menu icon buttons
+
+- Applied same scroll menu to main.cpp (GLFW interactive version):
+  - Added scroll_textures_ member
+  - load_menu_textures() now loads scroll textures
+  - render_menu_expanded() uses scroll/roll UI
+  - Collapsed menu button uses MenuRoll textures
+  - Updated click hitbox to match new button position
+
+- All 4 unit tests pass.
+
+Stage Summary:
+- Engine flow fully documented from .s3e reverse engineering.
+- Menu now uses real scroll/parchment textures (MenuRoll + Paper).
+- Both headless and GLFW versions have the scroll menu.
+- VLM-verified: scroll menu visible with wooden roll caps and paper area.
+- Next: decode .bin animation node mapping to enable skeletal animation.
