@@ -45,3 +45,56 @@ Stage Summary:
 - Next stage (Stage 2): full reverse of the .s3e binary structure (section
   table, relocations, .data/.rodata layout), JNI registration map for
   libs3e_android.so, and the first cut of the engine architecture document.
+
+---
+Task ID: stage-3
+Agent: main
+Task: Stage 3 — Engine architecture recovery from .s3e symbol analysis
+
+Work Log:
+- Mined 9 330 unique C++ identifiers from .s3e .rodata (excluding the
+  import-table region already covered in Stage 2).
+- Recovered 85 game-side classes with at least one Class::method
+  reference; 250+ methods catalogued. Full list saved to
+  engine/reverse/s3e_classes.txt.
+- Identified the rendering layer as Cocos2d-x 2.x-style (236 refs to
+  "cocos2d" in .s3e strings). Nekki wrote their own thin layer that
+  mimics the Cocos2d-x 2.x API on top of Marmalade's IwGx. This is
+  NOT the official Cocos2d-x Marmalade port.
+- Identified XML parsers: pugixml (primary) + tinyxml (secondary).
+- Identified save system: assets/localSettings.bin, AES-encrypted.
+  UserDefault.xml for non-sensitive UI settings.
+- Confirmed physics is fully custom (no Box2D/Chipmunk/Bullet).
+- Confirmed networking uses SmartFoxServer 2X (BitSwarmClient,
+  UDPManager, LagMonitor, etc.).
+- Confirmed main loop is single-threaded, variable-step, driven by
+  s3eTimerGetMs() with dt clamped to 200ms (Cocos2d-x convention).
+- Identified camera: 2D orthographic with follow + shake + zoom.
+- Wrote docs/11_engine_architecture.md (full architecture + class
+  inventory + reSF2 target layout).
+- Wrote docs/12_main_loop.md (main loop pseudocode, update order,
+  frame timing budget, pause/resume, fixed-step decision rationale).
+- Updated TODO.md (Stage 3 marked complete), docs/README.md index.
+
+Stage Summary:
+- Architecture fully recovered at the high level: layered stack is
+  Game logic -> Cocos2d-x 2.x -> pugixml/tinyxml -> SmartFox2X ->
+  Marmalade SDK -> Android.
+- 85 game classes organised into 7 functional categories. The most
+  important for reSF2's Stage 7 implementation:
+    Module             (base class for screens)
+    Fight / Battle     (fight instance + battle types)
+    Model              (character model + equipment)
+    ModelAnimation     (per-model skeletal anim state)
+    RulesInspector     (runtime rule engine)
+    RuleParser         (XML -> rule objects)
+    RaidManager        (multiplayer raids)
+    SaveSystem         (encrypted localSettings.bin)
+- Main loop model documented in detail (init -> loop -> shutdown)
+  with per-subsystem update order, frame timing budget, pause/resume
+  semantics.
+- Major de-risking: Cocos2d-x 2.x API is public MIT-licensed, so
+  reSF2's Stage 7.2 renderer can re-implement CCSprite/CCDirector/etc
+  without reverse-engineering Nekki's specific code.
+- Next: Stage 4 — full .dz DTRZ archive unpack + moves.xml schema +
+  .atf tactics byte layout + C++20 readers.
