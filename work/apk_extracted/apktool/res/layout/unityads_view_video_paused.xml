@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout android:orientation="vertical" android:background="#a9000000" android:layout_width="fill_parent" android:layout_height="fill_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <include android:id="@id/unityAdsPauseButton" android:layout_width="120.0dip" android:layout_height="120.0dip" android:layout_centerInParent="true" layout="@layout/unityads_button_pause" />
+    <TextView android:textColor="#ffffffff" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginBottom="45.0dip" android:text="@string/unityads_tap_to_continue" android:layout_alignParentBottom="true" android:layout_centerHorizontal="true" />
+</RelativeLayout>
