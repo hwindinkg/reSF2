@@ -268,3 +268,67 @@ Stage Summary:
 - VLM-verified: character has "filled torso area with thickness".
 - Next: need skeleton_punching_bag.xml to render the real punching bag
   3D model (currently using btn_punching_bag.png icon as placeholder).
+
+---
+Task ID: stage-7.6
+Agent: main
+Task: Stage 7.6 — Y-UP coordinate system fix, real 3D punching bag, detailed RE plan
+
+Work Log:
+- Created detailed reverse engineering plan (docs/17_detailed_reverse_plan.md)
+  documenting:
+  - Original engine: cocos2d-x 2.2.6 + Marmalade SDK 8.2.1
+  - Coordinate systems: cocos2d uses Y-UP (origin bottom-left), location
+    params.xml uses Y-UP (origin center, positive Y = up)
+  - Skeleton/model local coords: Y-UP (0 = feet, positive = up)
+  - Texture atlas coords: Y-DOWN (PNG top-left origin), cocos2d internally
+    flips V
+  - Rendering pipeline: CCDirector ortho projection, CCLayers with parallax,
+    CCSprites positioned at center (anchorPoint 0.5, 0.5)
+  - Body model: triangles (visual mesh) + capsules (collision), MacroNodes
+    = weighted blend of skeleton joints
+
+- CRITICAL FIX: Changed coordinate system from Y-DOWN back to Y-UP (cocos2d
+  convention). The original game uses Y-UP throughout (confirmed by
+  analyzing params.xml ceiling/floor mask positions and cocos2d-x 2.2.6
+  default projection). Previous Y-DOWN implementation inverted the scene.
+
+- Fixed software renderer:
+  - Camera2D::world_to_screen: sy = view_height/2 - dy (Y-UP to Y-DOWN screen)
+  - draw_textured_quad: (x,y) = bottom-left corner, quad extends up (+Y)
+  - UV mapping: world bottom (y) -> atlas bottom (v1), world top (y+h) ->
+    atlas top (v0)
+
+- Fixed GL renderer:
+  - Camera2D::view_projection: standard ortho (bottom=y-hh, top=y+hh) = Y-UP
+  - draw_line_world: Y-UP world -> Y-DOWN screen (invert Y)
+  - Removed double V-flip in location rendering (was fv0=1-v1 + SpriteBatch
+    1-v0, now just SpriteBatch handles the flip)
+
+- Implemented real 3D punching bag model from user-provided
+  skeleton_punching_bag.xml + punching_bag.xml:
+  - 15 nodes (NNeck, NBottom, NPivot, Node4-7, Node12, Node13-18)
+  - 23 edges (Body, Edge8-11, Edge15-32)
+  - 11 capsules (Edge16/17 = main bag r=25, others = chain r=2)
+  - Renders as thick capsules: dark red bag body + gray chain
+
+- Updated character placement to use PlayerPositionY from params.xml
+  directly (matches original engine placement).
+
+- Fixed HUD Top_Panel rendering: tile horizontally instead of stretching
+  with invalid UV >1.0.
+
+- All 4 unit tests pass.
+
+Stage Summary:
+- Coordinate system is now Y-UP throughout (matching cocos2d-x 2.2.6).
+- Dojo background is upright (floor at bottom, ceiling at top).
+- Real 3D punching bag model renders with chain hanging from ceiling.
+- Character body mesh renders (capsules + triangles from body.xml).
+- HUD uses real Top_Panel/gold/energy/Level_bar textures.
+- Menu button on left side uses real Settings_normal icon; expanded menu
+  shows 7 real icons (Dojo/Map/Shop/Profile/Settings/Fight/Lottery).
+- VLM-verified: background upright, punching bag with chain visible,
+  character body mesh present.
+- Next: decode .bin animation files so character can walk/punch instead
+  of static T-pose.
