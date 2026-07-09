@@ -164,3 +164,64 @@ Stage Summary:
   Windows machine via build.bat as before.
 - Next: decode the .bin animation format so the stick figure can play
   actual animations (idle, walk, punch) instead of the static T-pose.
+
+---
+Task ID: stage-7.4
+Agent: main
+Task: Stage 7.4 — Fix coordinate system (Y-down), use real textures, fix character orientation
+
+Work Log:
+- Diagnosed the root cause of the "upside-down" rendering: the original
+  game's location XML uses Y-DOWN coordinates (positive Y = down toward
+  floor), but both the software renderer and GL renderer were using Y-UP
+  (positive Y = up). This inverted the character vertically (head at
+  bottom, feet at top) while the symmetric background tiles hid the
+  inversion.
+- Fixed the coordinate system in BOTH renderers:
+  - software_renderer: changed Camera2D::world_to_screen to use Y-down
+    (sy = view_height/2 + dy instead of view_height/2 - dy).
+  - GL renderer: changed Camera2D::view_projection to swap bottom/top
+    in the ortho matrix (y+hh, y-hh instead of y-hh, y+hh).
+  - draw_textured_quad: (x,y) is now top-left in Y-down world coords.
+  - draw_line_world: updated w2s transform to Y-down.
+- Fixed skeleton parser to only parse the <Nodes> section (was picking
+  up node references from <GroupsOfSelection> and <Edges>, causing
+  NPivot to be missed and pivot_local_y to default to 0). Now correctly
+  finds 46 nodes including NPivot.
+- Fixed character placement: PlayerPositionY from params.xml is the
+  NPivot (pelvis) world Y, but the original coordinate origin differs
+  from ours. We now place the player so feet (NToe) rest on the visible
+  floor (world Y ≈ 225 in Y-down).
+- Added real game textures for HUD and menu (no more hand-drawn shapes):
+  - Top_Panel.png (top HUD bar background)
+  - gold.png (coin icon), energy.png (lightning icon)
+  - Level_bar.png (level progress bar)
+  - btn_punching_bag.png (punching bag icon from dojo buttons atlas)
+  - Menu icons: Dojo, Map, Shop, Profile, Settings, Fight, Lottery
+    (from batchButtonsMenuScreens atlas)
+- Moved the menu button from top-right to top-LEFT (matching original).
+  When expanded (M key or click), it shows a horizontal list of 7 real
+  menu icons with labels, instead of a centered modal panel.
+- Updated main.cpp (GLFW interactive version) with all the same fixes:
+  Y-down coords, real textures, left-side menu button, character on floor.
+- Note on punching bag: the real 3D model is in punching_bag.xml +
+  skeleton_punching_bag.xml inside files.dz, which requires DZ
+  decompression (not yet working — needs full Marmalade runtime for
+  ARM emulation). Using btn_punching_bag.png icon as a PLACEHOLDER.
+- All 4 unit tests still pass.
+
+Stage Summary:
+- Character is now upright (head at top, orange circle; feet at bottom)
+  and standing ON the floor (not floating).
+- HUD uses real Top_Panel, gold, energy, Level_bar textures from the
+  original game's atlas.
+- Menu button is on the LEFT side; expanded menu shows real game icons
+  (Dojo/Map/Shop/Profile/Settings/Fight/Lottery) in a horizontal list.
+- Punching bag uses real btn_punching_bag.png icon (placeholder until
+  .dz extraction works).
+- VLM-verified: character upright on floor, HUD with real textures,
+  menu with 7 real icons, movement demo works, dialog overlay works.
+- Next: unblock DZ decompression to extract punching_bag.xml +
+  skeleton_punching_bag.xml + body.xml + all other model XMLs from
+  files.dz. This will allow rendering the real 3D punching bag model
+  and real character body parts.
