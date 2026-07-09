@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout android:background="#ff000000" android:clickable="false" android:layout_width="fill_parent" android:layout_height="fill_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <view android:id="@id/unityAdsVideoView" android:padding="0.0dip" android:clickable="false" android:layout_width="fill_parent" android:layout_height="fill_parent" android:layout_centerInParent="true" class="com.unity3d.ads.android.video.UnityAdsVideoView" />
+    <LinearLayout android:orientation="horizontal" android:layout_width="fill_parent" android:layout_height="wrap_content">
+        <RelativeLayout android:gravity="left" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_weight="0.5">
+            <TextView android:textColor="@android:color/white" android:id="@id/unityAdsVideoSkipText" android:paddingLeft="0.0dip" android:paddingTop="0.0dip" android:paddingRight="15.0dip" android:paddingBottom="11.0dip" android:clickable="true" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="4.0dip" android:layout_marginTop="3.0dip" android:layout_marginStart="4.0dip" />
+        </RelativeLayout>
+        <TextView android:textColor="@android:color/white" android:gravity="right" android:id="@id/unityAdsVideoBufferingText" android:padding="0.0dip" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="3.0dip" android:layout_marginRight="3.0dip" android:text="@string/unityads_buffering_text" android:layout_weight="0.5" android:layout_marginEnd="3.0dip" />
+    </LinearLayout>
+    <LinearLayout android:id="@id/unityAdsVideoCountDown" android:padding="0.0dip" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginRight="3.0dip" android:layout_marginBottom="3.0dip" android:layout_alignParentRight="true" android:layout_alignParentBottom="true" android:layout_marginEnd="3.0dip" android:layout_alignParentEnd="true">
+        <TextView android:textColor="@android:color/white" android:id="@id/unityAdsVideoTimeLeftPrefix" android:padding="0.0dip" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/unityads_video_end_prefix" />
+        <TextView android:textColor="@android:color/white" android:id="@id/unityAdsVideoTimeLeftText" android:padding="0.0dip" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="2.0dip" android:layout_marginRight="2.0dip" />
+        <TextView android:textColor="@android:color/white" android:id="@id/unityAdsVideoTimeLeftSuffix" android:padding="0.0dip" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/unityads_video_end_suffix" />
+    </LinearLayout>
+    <include android:id="@id/unityAdsAudioToggleView" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentLeft="true" android:layout_alignParentBottom="true" android:layout_alignParentStart="true" layout="@layout/unityads_button_audio_toggle" />
+</RelativeLayout>

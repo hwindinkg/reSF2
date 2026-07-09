@@ -1,0 +1,173 @@
+{
+  "ID": "300c1171-372f-42c7-a491-3a2410f68336",
+  "Version": "3.10.0.0",
+  "Name": "Paper",
+  "Content": {
+    "Content": {
+      "Animation": {
+        "Duration": 0,
+        "Speed": 1.0,
+        "Timelines": [],
+        "ctype": "TimelineActionData"
+      },
+      "AnimationList": [],
+      "ObjectData": {
+        "Tag": 34,
+        "Children": [
+          {
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/scrolls/common/Roll_MAP.jpg",
+              "Plist": ""
+            },
+            "Scale9OriginX": 126,
+            "Scale9OriginY": 251,
+            "Scale9Width": 132,
+            "Scale9Height": 260,
+            "AnchorPoint": {
+              "ScaleX": 0.5,
+              "ScaleY": 0.5
+            },
+            "Position": {
+              "X": 92.0,
+              "Y": 131.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentXEnabled": true,
+            "PositionPercentYEnabled": true,
+            "PrePosition": {
+              "X": 0.5,
+              "Y": 0.5
+            },
+            "PercentWidthEnable": true,
+            "PercentHeightEnable": true,
+            "PercentWidthEnabled": true,
+            "PercentHeightEnabled": true,
+            "PreSize": {
+              "X": 1.0,
+              "Y": 1.0
+            },
+            "Tag": 35,
+            "ActionTag": -615219329,
+            "Size": {
+              "X": 184.0,
+              "Y": 262.0
+            },
+            "Name": "RollBG",
+            "ctype": "ImageViewObjectData"
+          },
+          {
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/scrolls/common/Paper_left.png",
+              "Plist": ""
+            },
+            "Scale9OriginX": 19,
+            "Scale9OriginY": 251,
+            "Scale9Width": 20,
+            "Scale9Height": 260,
+            "AnchorPoint": {
+              "ScaleX": 1.0,
+              "ScaleY": 0.5
+            },
+            "Position": {
+              "X": 0.0,
+              "Y": 131.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentYEnabled": true,
+            "PrePosition": {
+              "X": 0.0,
+              "Y": 0.5
+            },
+            "PercentHeightEnable": true,
+            "PercentHeightEnabled": true,
+            "PreSize": {
+              "X": 0.3152,
+              "Y": 1.0
+            },
+            "LeftMargin": -58.0,
+            "RightMargin": 184.0,
+            "Tag": 36,
+            "ActionTag": 1110219347,
+            "Size": {
+              "X": 58.0,
+              "Y": 262.0
+            },
+            "Name": "PaperLeft",
+            "ctype": "ImageViewObjectData"
+          },
+          {
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/scrolls/common/Paper_right.png",
+              "Plist": ""
+            },
+            "Scale9OriginX": 19,
+            "Scale9OriginY": 251,
+            "Scale9Width": 20,
+            "Scale9Height": 260,
+            "AnchorPoint": {
+              "ScaleY": 0.5
+            },
+            "Position": {
+              "X": 184.0,
+              "Y": 131.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentXEnabled": true,
+            "PositionPercentYEnabled": true,
+            "PrePosition": {
+              "X": 1.0,
+              "Y": 0.5
+            },
+            "PercentHeightEnable": true,
+            "PercentHeightEnabled": true,
+            "PreSize": {
+              "X": 0.3152,
+              "Y": 1.0
+            },
+            "LeftMargin": 184.0,
+            "RightMargin": -58.0,
+            "Tag": 37,
+            "ActionTag": -297350689,
+            "Size": {
+              "X": 58.0,
+              "Y": 262.0
+            },
+            "Name": "PaperRight",
+            "ctype": "ImageViewObjectData"
+          }
+        ],
+        "Size": {
+          "X": 184.0,
+          "Y": 262.0
+        },
+        "Name": "Content",
+        "ctype": "LayerObjectData"
+      },
+      "UsedResources": [
+        "../../data/assets/768/textures/scrolls/common/Paper_left.png",
+        "../../data/assets/768/textures/scrolls/common/Paper_right.png",
+        "../../data/assets/768/textures/scrolls/common/Roll_MAP.jpg"
+      ],
+      "ctype": "GameFileData"
+    }
+  },
+  "Type": "Layer"
+}
