@@ -1,0 +1,587 @@
+E:\reSF2>git pull && build.bat rebuild
+remote: Enumerating objects: 7, done.
+remote: Counting objects: 100% (7/7), done.
+remote: Compressing objects: 100% (1/1), done.
+remote: Total 4 (delta 3), reused 4 (delta 3), pack-reused 0 (from 0)
+Unpacking objects: 100% (4/4), 362 bytes | 19.00 KiB/s, done.
+From https://github.com/hwindinkg/reSF2
+   19289df..cc472e2  main       -> origin/main
+Updating 19289df..cc472e2
+Fast-forward
+ engine/CMakeLists.txt | 5 -----
+ 1 file changed, 5 deletions(-)
+Cleaning build directory...
+
+=== Configuring (Config: Release) ===
+-- Selecting Windows SDK version 10.0.22621.0 to target Windows 10.0.19044.
+-- The CXX compiler identification is MSVC 19.44.35228.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: D:/MicrosoftVisualStudio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+-- Looking for pthread_create in pthreads
+-- Looking for pthread_create in pthreads - not found
+-- Looking for pthread_create in pthread
+-- Looking for pthread_create in pthread - not found
+-- Found Threads: TRUE
+-- ZLIB not found on system — auto-downloading via FetchContent
+-- The C compiler identification is MSVC 19.44.35228.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: D:/MicrosoftVisualStudio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Looking for sys/types.h
+-- Looking for sys/types.h - found
+-- Looking for stdint.h
+-- Looking for stdint.h - found
+-- Looking for stddef.h
+-- Looking for stddef.h - found
+-- Check size of off64_t
+-- Check size of off64_t - failed
+-- Looking for fseeko
+-- Looking for fseeko - not found
+-- Looking for unistd.h
+-- Looking for unistd.h - not found
+-- Renaming
+--     E:/reSF2/build/_deps/zlib-src/zconf.h
+-- to 'zconf.h.included' because this file is included with zlib
+-- but CMake generates it automatically in the build directory.
+-- Including Win32 support
+--
+-- reSF2 0.0.3
+--   C++ standard        : 23
+--   Build type          : Release
+--   Compiler            : MSVC 19.44.35228.0
+--   Warnings as errors  : OFF
+--   Sanitizers          : OFF
+--   Tests               : ON
+--   Runtime executable  : ON
+--   GLFW backend        : ON
+--
+-- Configuring done (35.1s)
+-- Generating done (0.4s)
+-- Build files have been written to: E:/reSF2/build
+
+=== Building ===
+Версия MSBuild 17.14.40+3e7442088 для .NET Framework
+
+  1>Checking Build System
+  Building Custom Rule E:/reSF2/build/_deps/glfw-src/src/CMakeLists.txt
+  context.c
+  Building Custom Rule E:/reSF2/build/_deps/zlib-src/CMakeLists.txt
+  Building Custom Rule E:/reSF2/engine/renderer/CMakeLists.txt
+  Building Custom Rule E:/reSF2/build/_deps/zlib-src/CMakeLists.txt
+  renderer.cpp
+  adler32.c
+  adler32.c
+  compress.c
+  compress.c
+  crc32.c
+  crc32.c
+  deflate.c
+  deflate.c
+  gzclose.c
+  gzclose.c
+  gzlib.c
+  gzlib.c
+  gzread.c
+  gzread.c
+  gzwrite.c
+  gzwrite.c
+  inflate.c
+  inflate.c
+  infback.c
+  infback.c
+  inftrees.c
+  inftrees.c
+  inffast.c
+  inffast.c
+  trees.c
+  trees.c
+  uncompr.c
+  uncompr.c
+  zutil.c
+  zutil.c
+  Создание кода...
+  Создание кода...
+  init.c
+  input.c
+  monitor.c
+  platform.c
+E:\reSF2\engine\renderer\renderer.cpp(34,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(34,28): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glGenBuffers" [E:\reSF2\build\engine\r
+enderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(34,41): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(35,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(35,28): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glBindBuffer" [E:\reSF2\build\engine\r
+enderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(35,41): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(36,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(36,28): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glBufferData" [E:\reSF2\build\engine\r
+enderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(36,41): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(37,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(37,28): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glDeleteBuffers" [E:\reSF2\build\engin
+e\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(37,44): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(38,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(38,30): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glCreateShader" [E:\reSF2\build\engine
+\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(38,45): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(39,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(39,30): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glShaderSource" [E:\reSF2\build\engine
+\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(39,45): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(40,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(40,31): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glCompileShader" [E:\reSF2\build\engin
+e\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(40,47): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(41,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(41,30): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glDeleteShader" [E:\reSF2\build\engine
+\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(41,45): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(42,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(42,31): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glCreateProgram" [E:\reSF2\build\engin
+e\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(42,47): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(43,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(43,30): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glAttachShader" [E:\reSF2\build\engine
+\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(43,45): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(44,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(44,29): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glLinkProgram" [E:\reSF2\build\engine\
+renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(44,43): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(45,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(45,31): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glDeleteProgram" [E:\reSF2\build\engin
+e\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(45,47): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(46,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(46,28): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glUseProgram" [E:\reSF2\build\engine\r
+enderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(46,41): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(47,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(47,29): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glGetShaderiv" [E:\reSF2\build\engine\
+renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(47,43): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(48,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(48,34): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glGetShaderInfoLog" [E:\reSF2\build\en
+gine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(48,53): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(49,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(49,30): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glGetProgramiv" [E:\reSF2\build\engine
+\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(49,45): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(50,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(50,35): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glGetProgramInfoLog" [E:\reSF2\build\e
+ngine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(50,55): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(51,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(51,36): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glGetUniformLocation" [E:\reSF2\build\
+engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(51,57): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(52,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(52,34): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glUniformMatrix4fv" [E:\reSF2\build\en
+gine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(52,53): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(53,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(53,27): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glUniform1i" [E:\reSF2\build\engine\re
+nderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(53,39): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(54,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(54,27): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glUniform4f" [E:\reSF2\build\engine\re
+nderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(54,39): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(55,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(55,27): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glUniform1f" [E:\reSF2\build\engine\re
+nderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(55,39): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(56,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(56,41): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glEnableVertexAttribArray" [E:\reSF2\b
+uild\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(56,67): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(57,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(57,42): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glDisableVertexAttribArray" [E:\reSF2\
+build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(57,69): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(58,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(58,37): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glVertexAttribPointer" [E:\reSF2\build
+\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(58,59): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(59,8): error C4430: отсутствует специфика
+тор типа - предполагается int. Примечание. C++ не поддерживает int по умолчанию
+ [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(59,31): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "glActiveTexture" [E:\reSF2\build\engin
+e\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(59,47): error C2059: синтаксическая ошибк
+а: = [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(62,9): error C2065: glGenBuffers: необъяв
+ленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(63,5): error C2065: glGenBuffers: необъяв
+ленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(63,41): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(64,5): error C2065: glBindBuffer: необъяв
+ленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(64,41): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(65,5): error C2065: glBufferData: необъяв
+ленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(65,41): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(66,5): error C2065: glDeleteBuffers: необ
+ъявленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(66,44): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(67,5): error C2065: glCreateShader: необъ
+явленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(67,45): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(68,5): error C2065: glShaderSource: необъ
+явленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(68,45): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(69,5): error C2065: glCompileShader: необ
+ъявленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(69,47): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(70,5): error C2065: glDeleteShader: необъ
+явленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(70,45): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(71,5): error C2065: glCreateProgram: необ
+ъявленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(71,47): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(72,5): error C2065: glAttachShader: необъ
+явленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(72,45): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(73,5): error C2065: glLinkProgram: необъя
+вленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(73,43): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(74,5): error C2065: glDeleteProgram: необ
+ъявленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(74,47): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(75,5): error C2065: glUseProgram: необъяв
+ленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(75,41): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(76,5): error C2065: glGetShaderiv: необъя
+вленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(76,43): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(77,5): error C2065: glGetShaderInfoLog: н
+еобъявленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxpr
+oj]
+E:\reSF2\engine\renderer\renderer.cpp(77,53): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(78,5): error C2065: glGetProgramiv: необъ
+явленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(78,45): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(79,5): error C2065: glGetProgramInfoLog:
+необъявленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxp
+roj]
+E:\reSF2\engine\renderer\renderer.cpp(79,55): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(80,5): error C2065: glGetUniformLocation:
+ необъявленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcx
+proj]
+E:\reSF2\engine\renderer\renderer.cpp(80,57): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(81,5): error C2065: glUniformMatrix4fv: н
+еобъявленный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxpr
+oj]
+E:\reSF2\engine\renderer\renderer.cpp(81,53): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(82,5): error C2065: glUniform1i: необъявл
+енный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(82,39): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(83,5): error C2065: glUniform4f: необъявл
+енный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(83,39): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(84,5): error C2065: glUniform1f: необъявл
+енный идентификатор [E:\reSF2\build\engine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(84,39): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(85,5): error C2065: glEnableVertexAttribA
+rray: необъявленный идентификатор [E:\reSF2\build\engine\renderer\resf2_rendere
+r.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(85,67): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(86,5): error C2065: glDisableVertexAttrib
+Array: необъявленный идентификатор [E:\reSF2\build\engine\renderer\resf2_render
+er.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(86,69): error C2146: синтаксическая ошибк
+а: отсутствие ";" перед идентификатором "wglGetProcAddress" [E:\reSF2\build\eng
+ine\renderer\resf2_renderer.vcxproj]
+E:\reSF2\engine\renderer\renderer.cpp(86,69): error C1003: число ошибок превыша
+ет 100; остановка компиляции [E:\reSF2\build\engine\renderer\resf2_renderer.vcx
+proj]
+  vulkan.c
+  window.c
+  zlibstatic.vcxproj -> E:\reSF2\build\lib\Release\zlibstatic.lib
+     Создается библиотека E:/reSF2/build/lib/Release/zlib.lib и объект E:/reSF2
+  /build/lib/Release/zlib.exp
+  egl_context.c
+  Building Custom Rule E:/reSF2/engine/reverse/CMakeLists.txt
+  zlib.vcxproj -> E:\reSF2\build\bin\Release\zlib.dll
+  osmesa_context.c
+  s3e_container.cpp
+  null_init.c
+  null_monitor.c
+  null_window.c
+  null_joystick.c
+  win32_module.c
+  win32_time.c
+  plist_atlas.cpp
+  win32_thread.c
+  win32_init.c
+  win32_joystick.c
+  win32_monitor.c
+  win32_window.c
+  atf_tactics.cpp
+  Создание кода...
+  Компиляция...
+  wgl_context.c
+  Создание кода...
+  bitmap_font.cpp
+  glfw.vcxproj -> E:\reSF2\build\lib\Release\glfw3.lib
+  Building Custom Rule E:/reSF2/engine/platform/CMakeLists.txt
+  platform.cpp
+  Создание кода...
+  glfw_platform.cpp
+  resf2_reverse.vcxproj -> E:\reSF2\build\lib\Release\resf2_reverse.lib
+  Building Custom Rule E:/reSF2/tests/CMakeLists.txt
+  Building Custom Rule E:/reSF2/tests/CMakeLists.txt
+  test_s3e_container.cpp
+  test_asset_loaders.cpp
+E:\reSF2\engine\platform\glfw_platform.cpp(111,84): warning C4100: "mods": неис
+пользованный параметр [E:\reSF2\build\engine\platform\resf2_platform.vcxproj]
+E:\reSF2\engine\platform\glfw_platform.cpp(111,58): warning C4100: "scancode":
+неиспользованный параметр [E:\reSF2\build\engine\platform\resf2_platform.vcxpro
+j]
+E:\reSF2\engine\platform\glfw_platform.cpp(129,82): warning C4100: "mods": неис
+пользованный параметр [E:\reSF2\build\engine\platform\resf2_platform.vcxproj]
+E:\reSF2\engine\platform\glfw_platform.cpp(192,73): warning C4100: "height": не
+использованный параметр [E:\reSF2\build\engine\platform\resf2_platform.vcxproj]
+E:\reSF2\engine\platform\glfw_platform.cpp(192,62): warning C4100: "width": неи
+спользованный параметр [E:\reSF2\build\engine\platform\resf2_platform.vcxproj]
+E:\reSF2\engine\platform\glfw_platform.cpp(192,55): warning C4100: "w": неиспол
+ьзованный параметр [E:\reSF2\build\engine\platform\resf2_platform.vcxproj]
+  Создание кода...
+  resf2_platform.vcxproj -> E:\reSF2\build\lib\Release\resf2_platform.lib
+  Building Custom Rule E:/reSF2/engine/runtime/CMakeLists.txt
+  asset_manager.cpp
+  test_s3e_container.vcxproj -> E:\reSF2\build\bin\Release\test_s3e_container.e
+  xe
+  test_asset_loaders.vcxproj -> E:\reSF2\build\bin\Release\test_asset_loaders.e
+  xe
+  loop.cpp
+  Создание кода...
+  resf2_runtime.vcxproj -> E:\reSF2\build\lib\Release\resf2_runtime.lib
+  Building Custom Rule E:/reSF2/tests/CMakeLists.txt
+  Building Custom Rule E:/reSF2/tests/CMakeLists.txt
+  test_asset_manager.cpp
+  test_platform_loop.cpp
+E:\reSF2\tests\test_platform_loop.cpp(53,11): warning C4834: удаление возвращае
+мого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_plat
+form_loop.vcxproj]
+E:\reSF2\tests\test_platform_loop.cpp(64,11): warning C4834: удаление возвращае
+мого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_plat
+form_loop.vcxproj]
+E:\reSF2\tests\test_platform_loop.cpp(67,18): warning C4834: удаление возвращае
+мого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_plat
+form_loop.vcxproj]
+E:\reSF2\tests\test_platform_loop.cpp(76,18): warning C4834: удаление возвращае
+мого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_plat
+form_loop.vcxproj]
+E:\reSF2\tests\test_platform_loop.cpp(90,11): warning C4834: удаление возвращае
+мого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_plat
+form_loop.vcxproj]
+E:\reSF2\tests\test_platform_loop.cpp(128,11): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_pla
+tform_loop.vcxproj]
+E:\reSF2\tests\test_platform_loop.cpp(150,11): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_pla
+tform_loop.vcxproj]
+E:\reSF2\tests\test_platform_loop.cpp(210,11): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_pla
+tform_loop.vcxproj]
+E:\reSF2\tests\test_platform_loop.cpp(237,11): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_pla
+tform_loop.vcxproj]
+E:\reSF2\tests\test_platform_loop.cpp(254,11): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_pla
+tform_loop.vcxproj]
+E:\reSF2\tests\test_platform_loop.cpp(260,17): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_pla
+tform_loop.vcxproj]
+E:\reSF2\tests\test_asset_manager.cpp(116,12): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_ass
+et_manager.vcxproj]
+E:\reSF2\tests\test_asset_manager.cpp(132,12): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_ass
+et_manager.vcxproj]
+E:\reSF2\tests\test_asset_manager.cpp(149,12): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_ass
+et_manager.vcxproj]
+E:\reSF2\tests\test_asset_manager.cpp(184,12): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_ass
+et_manager.vcxproj]
+E:\reSF2\tests\test_asset_manager.cpp(210,12): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_ass
+et_manager.vcxproj]
+E:\reSF2\tests\test_asset_manager.cpp(239,12): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_ass
+et_manager.vcxproj]
+E:\reSF2\tests\test_asset_manager.cpp(264,12): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_ass
+et_manager.vcxproj]
+E:\reSF2\tests\test_asset_manager.cpp(289,12): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_ass
+et_manager.vcxproj]
+E:\reSF2\tests\test_asset_manager.cpp(311,12): warning C4834: удаление возвраща
+емого значения функции с атрибутом [[nodiscard]] [E:\reSF2\build\tests\test_ass
+et_manager.vcxproj]
+  test_platform_loop.vcxproj -> E:\reSF2\build\bin\Release\test_platform_loop.e
+  xe
+  test_asset_manager.vcxproj -> E:\reSF2\build\bin\Release\test_asset_manager.e
+  xe
+
+ERROR: Build failed.
+
+E:\reSF2>
