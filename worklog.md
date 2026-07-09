@@ -98,3 +98,69 @@ Stage Summary:
   without reverse-engineering Nekki's specific code.
 - Next: Stage 4 — full .dz DTRZ archive unpack + moves.xml schema +
   .atf tactics byte layout + C++20 readers.
+
+---
+Task ID: stage-7.3
+Agent: main
+Task: Stage 7.3 — Dojo scene with character, HUD, menu, dialog (headless-tested)
+
+Work Log:
+- Added a software renderer (engine/renderer/software_renderer.{hpp,cpp}) that
+  renders to an in-memory RGBA framebuffer and saves PNGs via stb_image_write.
+  No GL/GPU/window-system dependency. Same public API surface as the GL
+  Renderer (camera, draw_textured_quad, begin_frame/end_frame) plus primitive
+  shapes for HUD/UI (filled rects, circles, thick lines in screen & world
+  space).
+- Added headless_main.cpp — a non-interactive driver that boots the engine
+  through the full sequence (loading screen → dojo → player → punching bag →
+  HUD → menu → dialog → movement demo) and saves a PNG screenshot at each
+  stage. Verified visually with the VLM.
+- Extended the GL Renderer with the same screen-space primitives
+  (draw_textured_quad_screen, draw_filled_rect_screen, draw_filled_circle_screen,
+  draw_line_screen, draw_line_world) so the GLFW build has feature parity with
+  the headless build. Uses a 1x1 white texture + tinted quads for filled
+  shapes.
+- Rewrote main.cpp to add: player character (skeletal stick figure from
+  skeleton.xml with 47 nodes, thick gray bones + red joints + orange head),
+  punching bag (procedural dark-red rectangle with chain at enemy position),
+  HUD (money / energy / level badges + menu button in top-right, position
+  label + control hint at bottom), menu overlay (Map/Shop/Settings/Save/Exit),
+  dialog overlay (Sensei intro line), player movement (A/D + arrows),
+  hit animation (Space — extends front arm, swings bag if close),
+  menu toggle (M or click menu button), dialog toggle (T).
+- Fixed a camera synchronisation bug in headless_main.cpp: the Game class had
+  its own Camera2D member that was never connected to the renderer's camera,
+  so textured quads used the renderer's default camera (0,0,1.0) while lines
+  used the Game's camera. Unified by removing the Game's camera_ member and
+  using renderer_.camera() everywhere.
+- Updated CMakeLists.txt: added RESF2_BUILD_HEADLESS option and a
+  resf2_headless target that links only resf2_renderer + resf2_reverse
+  (no GLFW, no platform, no GL). Updated engine/renderer/CMakeLists.txt to
+  conditionally compile renderer.cpp + gl_loader.cpp only when OpenGL is
+  found (headless builds skip them).
+- All 4 existing unit tests still pass on Linux (test_s3e_container,
+  test_asset_loaders, test_asset_manager, test_platform_loop).
+- Copied stb_image_write.h into engine/renderer/ (from GLFW's deps bundle)
+  for PNG output.
+
+Stage Summary:
+- Engine boot sequence fully verified headlessly on Linux:
+    01_loading.png          — startLoading.xml assets rendered
+    02_dojo_background.png  — params.xml + 4 atlases + parallax layers
+    03_dojo_player.png      — stick-figure fighter at player position
+    04_dojo_punching_bag.png — procedural bag at enemy position
+    05_dojo_hud.png         — money/energy/level/menu button overlay
+    06_dojo_menu.png        — menu panel (Map/Shop/Settings/Save/Exit)
+    07_dojo_player_left.png — player moved 150px left
+    08_dojo_player_right.png — player moved 200px right
+    09_dojo_dialog.png      — Sensei story dialog panel
+- VLM (glm-4.6v) confirms: stick figure with red joints in standing pose,
+  punching bag visible, HUD text "72 450 5/5 LVL 7" + menu button, menu
+  overlay with all 5 options, dialog with Sensei intro, player position
+  changes between movement demo screenshots.
+- The interactive GLFW build (main.cpp) has the same feature set but could
+  not be compiled on this Linux machine (missing libxrandr-dev and related
+  X11 headers; no root access). It should build and run on the user's
+  Windows machine via build.bat as before.
+- Next: decode the .bin animation format so the stick figure can play
+  actual animations (idle, walk, punch) instead of the static T-pose.
