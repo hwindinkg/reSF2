@@ -378,3 +378,47 @@ Stage Summary:
 - Both headless and GLFW versions have the scroll menu.
 - VLM-verified: scroll menu visible with wooden roll caps and paper area.
 - Next: decode .bin animation node mapping to enable skeletal animation.
+
+---
+Task ID: stage-7.8
+Agent: main
+Task: Stage 7.8 — Add body model rendering to GLFW version, fix skeleton parser
+
+Work Log:
+- CRITICAL FIX: main.cpp (GLFW version) was completely missing body model
+  loading and rendering. Only the headless version had it. This was the root
+  cause of the user seeing "only a square" instead of a character body.
+
+- Added to main.cpp:
+  - BodyMacroNode and BodyTriangle structs (for body.xml mesh)
+  - SkelEdge struct (for skeleton edge parsing)
+  - body_model_ and skeleton_edges_ members
+  - load_body_model() function (parses body.xml: Nodes, MacroNodes, Edges,
+    Capsules, Triangles)
+  - resolve_body_node() function (resolves node names to world coords,
+    handles BodyNode, SkelNode, MacroNode recursively)
+  - render_body_model() function (renders capsule edges as world-space lines)
+  - Called load_body_model() in on_update after load_skeleton()
+  - Called render_body_model() at the start of render_character()
+
+- Fixed skeleton parser in main.cpp:
+  - Was only searching for `<N` (missed Weapon-Node entries that start with `<W`)
+  - Now searches for all Type="Node" tags (finds all 54 nodes including weapons)
+  - Added <Edges> section parsing (Type="Edge" and Type="Muscle")
+  - Now loads 193 edges (111 Edge + 82 Muscle) needed for body capsule resolution
+
+- Session restart recovery:
+  - SSH keys lost in session restart — generated new ed25519 key
+  - Public key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAHH/McxeN/Ka2YZHHU7dJRc8yqfldrAYVYJDp7M8ryT
+  - User needs to add this as a deploy key to the GitHub repo
+  - Recreated ssh_wrapper.py (paramiko-based SSH for git push)
+  - Reinstalled cmake and paramiko via pip
+
+- All 4 unit tests pass.
+
+Stage Summary:
+- GL renderer (main.cpp) now has full body model rendering matching headless.
+- Skeleton parser fixed to find all 54 nodes (including Weapon-Node) and 193 edges.
+- Body mesh from body.xml renders as capsule edges (light gray lines).
+- Scroll menu uses real MenuRoll/Paper textures.
+- Next: user needs to add new SSH deploy key to GitHub for push access.
