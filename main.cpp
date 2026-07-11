@@ -761,14 +761,14 @@ public:
             } else if (move_state_ == 1) {  // MOVING_BACK
                 // Use latched key state — don't exit step on transient false readings
                 if (!back_latched && step_min_played) {
-                    move_state_ = 0; play_animation("stance_idle", true);
+                    move_state_ = 0; need_switch_to_idle_ = true;
                 } else if (fwd_latched && !back_latched && step_min_played) {
                     move_state_ = 2;
                     play_animation("step_forward", true);
                 }
             } else if (move_state_ == 2) {  // MOVING_FORWARD
                 if (!fwd_latched && step_min_played) {
-                    move_state_ = 0; play_animation("stance_idle", true);
+                    move_state_ = 0; need_switch_to_idle_ = true;
                 } else if (back_latched && !fwd_latched && step_min_played) {
                     move_state_ = 1;
                     play_animation("step_back", true);
@@ -777,27 +777,18 @@ public:
         }
 
         // Exit special move state when animation finishes
+        // DON'T call play_animation here — update_animation must run first
+        // to apply the final frame's root motion. Set a flag instead.
         if (move_state_ == 10 && hit_anim_ == 0) {
             move_state_ = 0;
-            if (start_stance_playing_) {
-                // After start stance, transition to combat idle
-                start_stance_playing_ = false;
-                if (animations_.count("stance_idle")) {
-                    play_animation("stance_idle", true);
-                } else {
-                    play_animation("stance_idle", true);
-                }
-            } else {
-                play_animation("stance_idle", true);
-            }
+            need_switch_to_idle_ = true;
         }
         // Exit duck state when Down released AND min duration played
-        // (prevents duck from cutting off immediately on S tap)
         if (move_state_ == 11) {
             duck_play_time_ += dt;
             if (!key_down && duck_play_time_ >= 300) {
                 move_state_ = 0;
-                play_animation("stance_idle", true);
+                need_switch_to_idle_ = true;
             }
         }
 
@@ -808,9 +799,19 @@ public:
         renderer_->camera().set_zoom(zoom_);
 
         // === UPDATE ANIMATION ===
-        // MUST run BEFORE hit_anim_ check so the final frame's root motion
-        // is applied before switching to idle.
+        // MUST run BEFORE any play_animation calls so the final frame's
+        // root motion is applied before switching to idle.
         update_animation(dt);
+
+        // After update_animation, switch to idle if requested.
+        // This ensures the previous animation's final displacement is applied.
+        if (need_switch_to_idle_) {
+            need_switch_to_idle_ = false;
+            if (start_stance_playing_) {
+                start_stance_playing_ = false;
+            }
+            play_animation("stance_idle", true);
+        }
 
         // === HIT DETECTION ===
         if (hit_anim_ > 0) {
@@ -868,7 +869,7 @@ public:
                 }
             }
             if (hit_anim_ == 0) {
-                play_animation("stance_idle", true);
+                need_switch_to_idle_ = true;
                 current_move_.clear();
                 bag_hit_ = false;
             }
@@ -3186,6 +3187,7 @@ private:
     int back_held_ms_ = 0;  // ms since back key was last held (for latching)
     uint32_t last_kick_press_ms_ = 0;  // for double-tap detection (DoubleSweep)
     bool start_stance_playing_ = false;  // true during start stance animation
+    bool need_switch_to_idle_ = false;  // deferred switch to idle (after update_animation)
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
