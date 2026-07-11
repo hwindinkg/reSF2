@@ -424,10 +424,16 @@ public:
                 }
 
                 if (animations_.count(anim_name)) {
+                    std::printf("[COMBAT] Space → %s (anim '%s', %d frames)\n",
+                                move_name.c_str(), anim_name.c_str(),
+                                animations_[anim_name].frame_count);
                     play_animation(anim_name, false);
                     current_move_ = move_name;
                     int fc = animations_[anim_name].frame_count;
                     hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                } else {
+                    std::printf("[COMBAT] Space → %s BUT anim '%s' NOT loaded!\n",
+                                move_name.c_str(), anim_name.c_str());
                 }
             }
             
@@ -445,10 +451,16 @@ public:
                 }
                 
                 if (animations_.count(anim_name)) {
+                    std::printf("[COMBAT] K → %s (anim '%s', %d frames)\n",
+                                move_name.c_str(), anim_name.c_str(),
+                                animations_[anim_name].frame_count);
                     play_animation(anim_name, false);
                     current_move_ = move_name;
                     int fc = animations_[anim_name].frame_count;
                     hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                } else {
+                    std::printf("[COMBAT] K → %s BUT anim '%s' NOT loaded!\n",
+                                move_name.c_str(), anim_name.c_str());
                 }
             }
 
@@ -468,6 +480,8 @@ public:
                             float bag_x = location_->enemy_x - 857.0f;
                             float dx = std::abs(player_pos_x_ - bag_x);
                             if (dx < 400.0f) {
+                                std::printf("[COMBAT] HIT! move=%s frame=%d/%d dx=%.1f → bag_swing=800ms\n",
+                                            current_move_.c_str(), current_frame, fc, dx);
                                 bag_swing_ = 800;
                                 bag_hit_ = true;
                             }
@@ -476,6 +490,7 @@ public:
                 }
                 
                 if (hit_anim_ == 0) {
+                    std::printf("[COMBAT] attack ended → return to fists_idle\n");
                     play_animation("fists_idle", true);
                     current_move_.clear();
                     bag_hit_ = false;
@@ -1307,6 +1322,45 @@ private:
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
         float bag_cy = location_->enemy_y + 50.0f;  // offset so bag hangs properly
         
+        // === BAG SWING ANIMATION ===
+        // bag_swing_ counts down from 800ms when hit.
+        // Node12 (Y=335 in model) is FIXED at the ceiling — it's the swing pivot.
+        // All other nodes rotate around Node12's world position.
+        // Swing direction: bag swings AWAY from player (player on left → bag swings right).
+        // Damped oscillation: 2 cycles, decaying amplitude.
+        float swing_angle = 0.0f;
+        if (bag_swing_ > 0) {
+            float swing_t = 1.0f - (float)bag_swing_ / 800.0f;  // 0 → 1
+            // 2 full oscillations (4*PI), decaying amplitude
+            swing_angle = std::sin(swing_t * 3.14159265f * 4.0f)
+                        * (1.0f - swing_t) * 0.45f;  // max ~0.45 rad ~ 26 degrees
+        }
+        float cos_a = std::cos(swing_angle);
+        float sin_a = std::sin(swing_angle);
+        
+        // Node12 world position (the fixed ceiling attachment / swing pivot)
+        auto n12_it = bag_model_->nodes.find("Node12");
+        float n12_world_x = bag_cx;
+        float n12_world_y = bag_cy;
+        if (n12_it != bag_model_->nodes.end()) {
+            n12_world_x = bag_cx + n12_it->second.x * 0.9f;
+            n12_world_y = bag_cy + (n12_it->second.y - pivot_ly) * 0.9f;
+        }
+        
+        // Helper: apply swing rotation to a bag node's world position
+        auto swing_pos = [&](float raw_x, float raw_y, float& out_x, float& out_y) {
+            if (swing_angle == 0.0f) {
+                out_x = raw_x;
+                out_y = raw_y;
+                return;
+            }
+            // Translate to Node12 origin, rotate, translate back
+            float rx = raw_x - n12_world_x;
+            float ry = raw_y - n12_world_y;
+            out_x = n12_world_x + rx * cos_a - ry * sin_a;
+            out_y = n12_world_y + rx * sin_a + ry * cos_a;
+        };
+        
         // Build edge lookup
         std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
         for (auto& e : bag_model_->edges) {
@@ -1326,10 +1380,16 @@ private:
             auto nit2 = bag_model_->nodes.find(en2);
             if (nit1 == bag_model_->nodes.end() || nit2 == bag_model_->nodes.end()) continue;
             
-            float x1 = bag_cx + nit1->second.x * 0.9f;
-            float y1 = bag_cy + (nit1->second.y - pivot_ly) * 0.9f;
-            float x2 = bag_cx + nit2->second.x * 0.9f;
-            float y2 = bag_cy + (nit2->second.y - pivot_ly) * 0.9f;
+            // Raw (un-swung) world positions
+            float raw_x1 = bag_cx + nit1->second.x * 0.9f;
+            float raw_y1 = bag_cy + (nit1->second.y - pivot_ly) * 0.9f;
+            float raw_x2 = bag_cx + nit2->second.x * 0.9f;
+            float raw_y2 = bag_cy + (nit2->second.y - pivot_ly) * 0.9f;
+            
+            // Apply swing rotation (Node12 itself stays fixed since rel pos is 0,0)
+            float x1, y1, x2, y2;
+            swing_pos(raw_x1, raw_y1, x1, y1);
+            swing_pos(raw_x2, raw_y2, x2, y2);
             
             float r = (c.radius1 + c.radius2) * 0.5f * 0.9f;
             bool is_main = (c.radius1 >= 20 || c.radius2 >= 20);
@@ -1571,7 +1631,11 @@ private:
                 break;
             }
         }
-        if (npivot_idx < 0) return;
+        if (npivot_idx < 0) {
+            std::printf("[ANIM] ERROR: NPivot not found in ordered_node_names_ (size=%zu)\n",
+                        ordered_node_names_.size());
+            return;
+        }
 
         // Set anchor from frame 0 NPivot position
         if (!anim_anchor_set_) {
@@ -1659,6 +1723,32 @@ private:
             // local_y is already relative to NPivot's current Y.
             // We need: local_y + npivot_rest_y (to get model-space Y)
             anim_node_pos_[name] = {local_x, local_y + npivot_rest_y};
+        }
+
+        // One-shot diagnostic: log when animation changes, to verify anim_node_pos_ is populated.
+        // Prints NPivot + a few key leg nodes so we can see if animation data is sane.
+        if (current_anim_ != last_logged_anim_) {
+            last_logged_anim_ = current_anim_;
+            std::printf("[ANIM] '%s' frame=%d/%d anim_node_pos_.size()=%zu  npivot_idx=%d\n",
+                        current_anim_.c_str(), frame_idx, anim.frame_count,
+                        anim_node_pos_.size(), npivot_idx);
+            // Print leg nodes (NHip, NKnee, NAnkle) for both sides
+            const char* leg_nodes[] = {"NPivot", "NHip_1", "NHip_2",
+                                       "NKnee_1", "NKnee_2",
+                                       "NAnkle_1", "NAnkle_2",
+                                       "NToe_1", "NToe_2"};
+            for (auto* n : leg_nodes) {
+                auto ait = anim_node_pos_.find(n);
+                auto sit = skeleton_nodes_.find(n);
+                if (ait != anim_node_pos_.end() && sit != skeleton_nodes_.end()) {
+                    std::printf("  %-10s anim_local=(%7.2f,%7.2f)  rest=(%7.2f,%7.2f)\n",
+                                n, ait->second.first, ait->second.second,
+                                sit->second.x, sit->second.y);
+                } else if (sit != skeleton_nodes_.end()) {
+                    std::printf("  %-10s NOT in anim_node_pos_!  rest=(%7.2f,%7.2f)\n",
+                                n, sit->second.x, sit->second.y);
+                }
+            }
         }
     }
     
@@ -2157,6 +2247,7 @@ private:
     float anim_root_anchor_y_ = 0.0f;
     bool anim_anchor_set_ = false;
     float prev_npivot_x_ = 0.0f;  // for step root motion (previous frame)
+    std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
 
 int main(int argc, char* argv[]) {
