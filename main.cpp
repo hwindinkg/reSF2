@@ -420,44 +420,49 @@ public:
             const float MOVE_SPEED = 200.0f;  // units per second
             float dt_sec = dt / 1000.0f;
             
+            // Step cooldown: when a step animation starts, set a cooldown timer.
+            // During cooldown, the step animation plays fully (16 frames at 30fps ≈ 533ms).
+            // The player can still move (velocity-based) but the animation won't restart.
+            // This matches the original game where each step has a visible delay.
+            const uint32_t STEP_COOLDOWN_MS = 500;  // ~15 frames at 30fps
+            
             // Only allow movement if not attacking
             if (hit_anim_ == 0) {
                 if (want_move_left && !want_move_right) {
                     facing_right_ = false;
                     player_pos_x_ -= MOVE_SPEED * dt_sec;
-                    // Play step_back animation for visual effect.
-                    // Only switch to step_back if currently idle — don't interrupt
-                    // an in-progress step animation (prevents flickering).
-                    if (current_anim_ == "fists_idle" && animations_.count("step_back")) {
+                    // Only start a new step animation if cooldown has expired
+                    // and we're in idle (not already stepping)
+                    if (step_cooldown_ == 0 && current_anim_ == "fists_idle" && 
+                        animations_.count("step_back")) {
                         play_animation("step_back", true);
+                        step_cooldown_ = STEP_COOLDOWN_MS;
                     }
                 } else if (want_move_right && !want_move_left) {
                     facing_right_ = true;
                     player_pos_x_ += MOVE_SPEED * dt_sec;
-                    if (current_anim_ == "fists_idle" && animations_.count("step_forward")) {
+                    if (step_cooldown_ == 0 && current_anim_ == "fists_idle" &&
+                        animations_.count("step_forward")) {
                         play_animation("step_forward", true);
+                        step_cooldown_ = STEP_COOLDOWN_MS;
                     }
                 } else {
-                    // Not moving — return to idle only if currently in a step animation
-                    // that has finished (don't interrupt mid-step)
+                    // Not moving — return to idle only if step animation has finished
                     if (current_anim_ == "step_forward" || current_anim_ == "step_back") {
-                        // Let the step animation finish naturally before returning to idle
-                        auto anim_it = animations_.find(current_anim_);
-                        if (anim_it != animations_.end()) {
-                            int fc = anim_it->second.frame_count;
-                            int current_frame = (int)(anim_time_ * 30.0f);
-                            // Return to idle only when step animation has played past 75%
-                            if (current_frame >= fc * 3 / 4) {
-                                play_animation("fists_idle", true);
-                            }
+                        if (step_cooldown_ == 0) {
+                            play_animation("fists_idle", true);
                         }
-                    } else if (current_anim_ != "fists_idle" && 
+                    } else if (current_anim_ != "fists_idle" &&
                                current_anim_.find("punch") == std::string::npos &&
                                current_anim_.find("kick") == std::string::npos &&
                                current_anim_.find("cut") == std::string::npos) {
                         play_animation("fists_idle", true);
                     }
                 }
+            }
+            // Decrement step cooldown
+            if (step_cooldown_ > 0) {
+                step_cooldown_ -= std::min<uint32_t>(step_cooldown_, dt);
             }
             
             // Camera follows player (fixed Y, no W/S camera movement)
@@ -523,77 +528,89 @@ public:
                 }
             }
 
+            // === UPDATE ANIMATION ===
+            // Must run BEFORE hit detection so anim_node_pos_ and anim_time_
+            // are synchronized with the current frame. Without this, hit detection
+            // uses stale limb positions from the previous frame, causing hits to
+            // trigger at the wrong time (or not at all).
+            update_animation(dt);
+
             // Update hit timer and check for hit detection
             if (hit_anim_ > 0) {
                 hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
                 
                 // Hit detection: check if the attacking limb actually reaches the bag.
-                // We use the animated position of the attacking limb (wrist for punches,
-                // foot/ankle for kicks) and check distance to the bag's center.
-                // Only triggers during the move's attack interval (from moves.xml).
+                // Uses the move's Attack interval from moves.xml (Start/End frames).
+                // Only triggers during the exact attack window (typically 2-4 frames).
                 if (!bag_hit_ && bag_model_ && location_) {
                     auto anim_it = animations_.find(current_anim_);
                     if (anim_it != animations_.end()) {
                         int fc = anim_it->second.frame_count;
                         int current_frame = (int)(anim_time_ * 30.0f);
                         // Get attack interval from moves.xml
-                        int attack_start = fc / 4;
-                        int attack_end = fc * 3 / 4;
                         auto move_it = moves_.find(current_move_);
-                        if (move_it != moves_.end()) {
-                            if (move_it->second.attack_start > 0)
-                                attack_start = move_it->second.attack_start;
-                            if (move_it->second.attack_end > 0)
-                                attack_end = move_it->second.attack_end;
-                        }
-                        if (current_frame >= attack_start && current_frame <= attack_end) {
-                            // Determine which limb is attacking based on the move name
-                            std::string limb_node;
-                            bool is_kick = (current_move_.find("Kick") != std::string::npos ||
-                                           current_move_.find("Sweep") != std::string::npos);
-                            if (is_kick) {
-                                limb_node = "NToe_1";
-                            } else {
-                                limb_node = "NWrist_1";
-                            }
-                            
-                            // Get the limb's animated world position
-                            auto ait = anim_node_pos_.find(limb_node);
-                            if (ait != anim_node_pos_.end()) {
-                                float limb_lx = ait->second.first;
-                                float limb_ly = ait->second.second;
-                                auto pivot_it = skeleton_nodes_.find("NPivot");
-                                float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
-                                float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx) * 0.9f;
-                                float limb_wy = player_pos_y_ + (limb_ly - pivot_ly) * 0.9f;
+                        if (move_it != moves_.end() && move_it->second.attack_start > 0) {
+                            int attack_start = move_it->second.attack_start;
+                            int attack_end = move_it->second.attack_end > 0 ? 
+                                           move_it->second.attack_end : attack_start;
+                            // moves.xml uses 1-indexed frames, our animation is 0-indexed.
+                            // Convert: subtract 1 from Start and End.
+                            int frame_start = attack_start - 1;
+                            int frame_end = attack_end - 1;
+                            if (current_frame >= frame_start && current_frame <= frame_end) {
+                                // Determine which limb is attacking
+                                std::string limb_node;
+                                bool is_kick = (current_move_.find("Kick") != std::string::npos ||
+                                               current_move_.find("Sweep") != std::string::npos);
+                                if (is_kick) {
+                                    limb_node = "NToe_1";
+                                } else {
+                                    limb_node = "NWrist_1";
+                                }
                                 
-                                // Bag center position
-                                float bag_cx = location_->enemy_x - 857.0f;
-                                float bag_cy = location_->enemy_y + 50.0f;
-                                
-                                float dx = limb_wx - bag_cx;
-                                float dy = limb_wy - bag_cy;
-                                float dist = std::sqrt(dx*dx + dy*dy);
-                                
-                                // Hit threshold: 80 units (tighter than before)
-                                if (dist < 80.0f) {
-                                    // Apply impulse to the nearest bag node (NNeck for high hits, NPivot for low hits)
-                                    // Determine which bag node to push based on the limb's Y position
-                                    std::string target_node = "NNeck";  // default: push the neck (middle of bag)
-                                    if (limb_wy < bag_cy - 30) target_node = "NBottom";  // low hit → push bottom
-                                    else if (limb_wy > bag_cy + 30) target_node = "Node4";  // high hit → push upper
-                                    // Impulse direction: bag swings AWAY from attacker
-                                    float impulse_dir = (dx < 0) ? 1.0f : -1.0f;
-                                    float impulse_strength = is_kick ? 15.0f : 10.0f;
-                                    apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
-                                    std::printf("[COMBAT] HIT! move=%s frame=%d/%d limb=%s dist=%.1f → impulse on %s: (%.1f, 0)\n",
-                                                current_move_.c_str(), current_frame, fc,
-                                                limb_node.c_str(), dist, target_node.c_str(),
-                                                impulse_dir * impulse_strength);
-                                    bag_hit_ = true;
+                                // Get the limb's animated world position
+                                auto ait = anim_node_pos_.find(limb_node);
+                                if (ait != anim_node_pos_.end()) {
+                                    float limb_lx = ait->second.first;
+                                    float limb_ly = ait->second.second;
+                                    auto pivot_it = skeleton_nodes_.find("NPivot");
+                                    float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
+                                    float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx) * 0.9f;
+                                    float limb_wy = player_pos_y_ + (limb_ly - pivot_ly) * 0.9f;
+                                    
+                                    // Bag center position (use Verlet node positions for accuracy)
+                                    float bag_cx = location_->enemy_x - 857.0f;
+                                    float bag_cy = location_->enemy_y + 50.0f;
+                                    // Check against the bag's NPivot Verlet position (more accurate)
+                                    auto bv_it = bag_verlet_.find("NPivot");
+                                    if (bv_it != bag_verlet_.end()) {
+                                        bag_cx = bv_it->second.x;
+                                        bag_cy = bv_it->second.y;
+                                    }
+                                    
+                                    float dx = limb_wx - bag_cx;
+                                    float dy = limb_wy - bag_cy;
+                                    float dist = std::sqrt(dx*dx + dy*dy);
+                                    
+                                    // Hit threshold: 60 units (tight, only true contacts)
+                                    if (dist < 60.0f) {
+                                        // Apply impulse to the nearest bag node based on hit height
+                                        std::string target_node = "NNeck";
+                                        if (limb_wy < bag_cy - 30) target_node = "NBottom";
+                                        else if (limb_wy > bag_cy + 30) target_node = "Node4";
+                                        float impulse_dir = (dx < 0) ? 1.0f : -1.0f;
+                                        float impulse_strength = is_kick ? 15.0f : 10.0f;
+                                        apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
+                                        std::printf("[COMBAT] HIT! move=%s frame=%d/%d [%d-%d] limb=%s dist=%.1f → impulse on %s\n",
+                                                    current_move_.c_str(), current_frame, fc,
+                                                    frame_start, frame_end,
+                                                    limb_node.c_str(), dist, target_node.c_str());
+                                        bag_hit_ = true;
+                                    }
                                 }
                             }
                         }
+                        // If no Attack interval found, skip hit detection entirely
                     }
                 }
                 
@@ -606,9 +623,6 @@ public:
 
             // Update bag Verlet physics (original game uses Verlet integration)
             update_bag_verlet(dt / 1000.0f);
-            
-            // Update animation
-            update_animation(dt);
 
             // Zoom presets
             if (input.keys_just_pressed[(size_t)plat::Key::Num1]) zoom_ = 1.0f;
@@ -944,20 +958,22 @@ private:
                 auto& frame = atlas.atlas->frames[fit->second];
                 float tw = (float)atlas.atlas->metadata.texture_w;
                 float th = (float)atlas.atlas->metadata.texture_h;
-                // Flip V coordinates: Cocos2d uses Y-DOWN for sprites, but our
-                // renderer uses Y-UP. To match the original game's rendering,
-                // we flip the V axis so the texture appears right-side up.
+                // Original V coordinates — no flip.
+                // stbi_load puts PNG row 0 (top) first. glTexImage2D puts row 0 at V=0.
+                // Atlas frame.atlas_y is measured from top (V=0 side). So:
+                //   v0 = atlas_y / th (top of frame, maps to world top in draw_quad)
+                //   v1 = (atlas_y + atlas_h) / th (bottom of frame, maps to world bottom)
                 float u0, v0, u1, v1;
                 if (frame.rotated) {
                     u0 = frame.atlas_x / tw;
-                    v1 = frame.atlas_y / th;  // flipped: v1 = top
+                    v0 = frame.atlas_y / th;
                     u1 = (frame.atlas_x + frame.atlas_h) / tw;
-                    v0 = (frame.atlas_y + frame.atlas_w) / th;  // flipped: v0 = bottom
+                    v1 = (frame.atlas_y + frame.atlas_w) / th;
                 } else {
                     u0 = frame.atlas_x / tw;
-                    v1 = frame.atlas_y / th;  // flipped: v1 = top
+                    v0 = frame.atlas_y / th;
                     u1 = (frame.atlas_x + frame.atlas_w) / tw;
-                    v0 = (frame.atlas_y + frame.atlas_h) / th;  // flipped: v0 = bottom
+                    v1 = (frame.atlas_y + frame.atlas_h) / th;
                 }
                 // Render at the image's original coordinates with parallax shift.
                 // Y is inverted: params.xml uses Y-DOWN, our world is Y-UP.
@@ -965,8 +981,29 @@ private:
                 float world_x = img.x - parallax_shift;
                 float px = world_x - img.w / 2.0f;
                 float py = world_y - img.h / 2.0f;  // bottom-left (world Y-UP: +Y = up)
-                renderer_->draw_textured_quad(*atlas.texture, px, py, img.w, img.h,
-                                              u0, v0, u1, v1);
+                // For parallax layers (factor < 1), tile the image horizontally
+                // to fill the screen. This prevents the background from flying
+                // off-screen when the camera moves.
+                if (parallax_factor < 0.99f) {
+                    // Calculate visible world range
+                    float hw = (float)platform_->window_width() / (2.0f * zoom_);
+                    float vis_left = cam_x_ - hw;
+                    float vis_right = cam_x_ + hw;
+                    // Tile from leftmost visible to rightmost visible
+                    float tile_w = img.w;
+                    float start_x = px;
+                    // Find the leftmost tile that's visible
+                    while (start_x + tile_w > vis_left) start_x -= tile_w;
+                    while (start_x < vis_left) start_x += tile_w;
+                    start_x -= tile_w;  // go one more to the left for safety
+                    for (float tx = start_x; tx < vis_right; tx += tile_w) {
+                        renderer_->draw_textured_quad(*atlas.texture, tx, py, img.w, img.h,
+                                                      u0, v0, u1, v1);
+                    }
+                } else {
+                    renderer_->draw_textured_quad(*atlas.texture, px, py, img.w, img.h,
+                                                  u0, v0, u1, v1);
+                }
             }
         }
         loc_logged = true;
@@ -2528,6 +2565,7 @@ private:
     float cam_x_ = 0, cam_y_ = 0;
     bool facing_right_ = true;
     int hit_anim_ = 0;    // ms remaining
+    uint32_t step_cooldown_ = 0;  // ms remaining before next step animation can start
     int bag_swing_ = 0;   // ms remaining (legacy, for compatibility)
     bool bag_hit_ = false;  // bag already hit during current attack
     float bag_swing_dir_ = 1.0f;  // +1 = swing right, -1 = swing left
