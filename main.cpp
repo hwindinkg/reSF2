@@ -616,7 +616,7 @@ public:
                 play_animation(anim_name, false);
                 current_move_ = move_name;
                 int fc = animations_[anim_name].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 15.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 0;
                 // Skip special moves / step this frame — attack takes priority
                 goto after_combat;
@@ -659,7 +659,7 @@ public:
                 play_animation(anim_name, false);
                 current_move_ = move_name;
                 int fc = animations_[anim_name].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 15.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 0;
                 goto after_combat;
             }
@@ -684,7 +684,7 @@ public:
                 play_animation("front_flip", false);
                 current_move_ = "FrontFlip";
                 int fc = animations_["front_flip"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 15.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 10;
                 std::printf("[MOVE] Front Flip!\n");
             }
@@ -693,7 +693,7 @@ public:
                 play_animation("back_flip", false);
                 current_move_ = "BackFlip";
                 int fc = animations_["back_flip"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 15.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 10;
                 std::printf("[MOVE] Back Flip!\n");
             }
@@ -702,7 +702,7 @@ public:
                 play_animation("jump", false);
                 current_move_ = "JumpUp";
                 int fc = animations_["jump"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 15.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 10;
                 std::printf("[MOVE] Jump!\n");
             }
@@ -711,7 +711,7 @@ public:
                 play_animation("forward_roll", false);
                 current_move_ = "ForwardRoll";
                 int fc = animations_["forward_roll"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 15.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 10;
                 std::printf("[MOVE] Forward Roll!\n");
             }
@@ -720,7 +720,7 @@ public:
                 play_animation("back_roll", false);
                 current_move_ = "BackRoll";
                 int fc = animations_["back_roll"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 15.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 10;
                 std::printf("[MOVE] Back Roll!\n");
             }
@@ -808,6 +808,8 @@ public:
         renderer_->camera().set_zoom(zoom_);
 
         // === UPDATE ANIMATION ===
+        // MUST run BEFORE hit_anim_ check so the final frame's root motion
+        // is applied before switching to idle.
         update_animation(dt);
 
         // === HIT DETECTION ===
@@ -817,7 +819,7 @@ public:
                 auto anim_it = animations_.find(current_anim_);
                 if (anim_it != animations_.end()) {
                     int fc = anim_it->second.frame_count;
-                    int current_frame = (int)(anim_time_ * 15.0f);
+                    int current_frame = (int)(anim_time_ * 20.0f);
                     auto move_it = moves_.find(current_move_);
                     if (move_it != moves_.end() && move_it->second.attack_start > 0) {
                         int attack_start = move_it->second.attack_start;
@@ -1012,7 +1014,7 @@ private:
             play_animation("stance_2", false);
             current_move_ = "StartStance";
             int fc = animations_["stance_2"].frame_count;
-            hit_anim_ = (uint32_t)(fc * 1000.0f / 15.0f);
+            hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
             move_state_ = 10;  // special move state (non-interruptible)
             start_stance_playing_ = true;
             std::printf("[STANCE] Playing start stance (stance_2, %d frames)\n", fc);
@@ -2324,18 +2326,16 @@ private:
             }
         }
 
-        // Animation timing:
-        // The original game uses physics timestep (1/60 or 1/120) but
-        // animation frames advance at a SLOWER rate. The .bin files store
-        // keyframes, and the game interpolates between them.
-        // Testing shows 15fps animation feels closest to the original game.
-        // (The original may use MidFrames=2 from moves.xml to control
-        // sub-frame interpolation, effectively halving the 30fps rate.)
+        // Animation timing (from moves.xml + original binary):
+        // MidFrames=2 in moves.xml means each keyframe lasts (1+MidFrames)=3
+        // physics ticks. At 60fps physics → 60/3 = 20fps animation.
+        // step_forward (16 frames) = 16/20 = 800ms per loop.
+        // high_punch (12 frames) = 12/20 = 600ms.
         float dt = dt_ms / 1000.0f;
         anim_time_ += dt;
 
         // Calculate current frame (with looping)
-        float frame_f = anim_time_ * 15.0f;
+        float frame_f = anim_time_ * 20.0f;
         int frame_idx = (int)frame_f;
         bool anim_finished = false;
         if (anim_loop_) {
