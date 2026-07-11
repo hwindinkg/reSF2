@@ -402,30 +402,39 @@ public:
                 init_location();
             }
         } else if (state_ == GameState::Location) {
-            // === MOVEMENT SYSTEM (root motion, looping step animation) ===
-            // When key is held: step animation plays in a LOOP.
-            // When key is released: switch to idle.
-            // Root motion uses delta accumulation with wrap-around filter.
-            // This eliminates ALL animation switching jitter.
+            // === MOVEMENT SYSTEM (root motion with input hysteresis) ===
+            // Input on Windows can flicker (glfwGetKey returns RELEASE
+            // intermittently for held keys). We use hysteresis: once moving,
+            // require N frames of "no key" before switching to idle.
             
             bool want_move_left = input.keys_down[(size_t)plat::Key::A] ||
                                   input.keys_down[(size_t)plat::Key::ArrowLeft];
             bool want_move_right = input.keys_down[(size_t)plat::Key::D] ||
                                    input.keys_down[(size_t)plat::Key::ArrowRight];
+            bool any_move = want_move_left || want_move_right;
+            
+            // Hysteresis: if no key pressed, increment no_key_frames_.
+            // Only treat as "stopped" after 5 frames of no key.
+            if (any_move) {
+                no_key_frames_ = 0;
+            } else {
+                no_key_frames_++;
+            }
+            bool stopped = (no_key_frames_ > 5);
             
             if (hit_anim_ == 0) {
                 if (want_move_left && !want_move_right) {
                     facing_right_ = false;
                     if (current_anim_ != "step_back" && animations_.count("step_back")) {
-                        play_animation("step_back", true);  // LOOP
+                        play_animation("step_back", true);
                     }
                 } else if (want_move_right && !want_move_left) {
                     facing_right_ = true;
                     if (current_anim_ != "step_forward" && animations_.count("step_forward")) {
-                        play_animation("step_forward", true);  // LOOP
+                        play_animation("step_forward", true);
                     }
-                } else {
-                    // Not moving — switch to idle
+                } else if (stopped) {
+                    // Key released for 5+ frames — switch to idle
                     if (current_anim_ != "fists_idle" &&
                         current_anim_.find("punch") == std::string::npos &&
                         current_anim_.find("kick") == std::string::npos &&
@@ -433,6 +442,7 @@ public:
                         play_animation("fists_idle", true);
                     }
                 }
+                // If not stopped (key flicker), keep current animation — no switch
             }
             
             // Camera follows player (fixed Y, no W/S camera movement)
@@ -2710,6 +2720,7 @@ private:
     float prev_root_offset_ = 0.0f;  // offset from frame-0 NPivot (for root motion)
     float step_start_player_x_ = 0.0f;  // player X when step started (for absolute root motion)
     float y_adjust_smoothed_ = 0.0f;  // smoothed Y adjustment for feet normalization
+    int no_key_frames_ = 0;  // frames with no movement key pressed (for hysteresis)
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
