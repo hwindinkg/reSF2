@@ -2,6 +2,15 @@
 //
 // GLFW-based platform backend implementation.
 // Uses GLFW3 for window/input + system OpenGL for GL context.
+//
+// IMPORTANT (Windows only): GLFW on some Windows 10 builds (notably 19044)
+// delivers spurious GLFW_RELEASE events for held keys, which makes the
+// GLFW key state flicker true→false→true every frame and breaks any
+// state machine that depends on stable key state (movement in reSF2).
+// To work around this, on Windows we bypass GLFW's key event system
+// entirely and query the OS keyboard directly via GetAsyncKeyState().
+// GLFW is still used for window management, GL context, mouse and
+// lifecycle events.
 
 #include "glfw_platform.hpp"
 
@@ -13,6 +22,18 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
+
+#ifdef _WIN32
+// Define WIN32_LEAN_AND_MEAN to keep <windows.h> small; we only need
+// GetAsyncKeyState() and the VK_* constants.
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN 1
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX 1
+#  endif
+#  include <windows.h>
+#endif
 
 namespace resf2::platform {
 
@@ -105,6 +126,91 @@ static int key_index_to_glfw(int idx) {
     return key_to_glfw(static_cast<Key>(idx));
 }
 
+#ifdef _WIN32
+// Map a GLFW key code to a Win32 Virtual Key code.
+// Returns -1 if no meaningful mapping exists (e.g. GLFW_KEY_UNKNOWN).
+//
+// We translate the GLFW code (which mirrors USB HID usage codes for most
+// keys) into the corresponding Win32 VK code. GetAsyncKeyState() takes
+// a VK code and reports the realtime OS-level key state.
+static int glfw_key_to_vk(int glfw_key) {
+    switch (glfw_key) {
+        // Letters
+        case GLFW_KEY_A: return 'A';
+        case GLFW_KEY_B: return 'B';
+        case GLFW_KEY_C: return 'C';
+        case GLFW_KEY_D: return 'D';
+        case GLFW_KEY_E: return 'E';
+        case GLFW_KEY_F: return 'F';
+        case GLFW_KEY_G: return 'G';
+        case GLFW_KEY_H: return 'H';
+        case GLFW_KEY_I: return 'I';
+        case GLFW_KEY_J: return 'J';
+        case GLFW_KEY_K: return 'K';
+        case GLFW_KEY_L: return 'L';
+        case GLFW_KEY_M: return 'M';
+        case GLFW_KEY_N: return 'N';
+        case GLFW_KEY_O: return 'O';
+        case GLFW_KEY_P: return 'P';
+        case GLFW_KEY_Q: return 'Q';
+        case GLFW_KEY_R: return 'R';
+        case GLFW_KEY_S: return 'S';
+        case GLFW_KEY_T: return 'T';
+        case GLFW_KEY_U: return 'U';
+        case GLFW_KEY_V: return 'V';
+        case GLFW_KEY_W: return 'W';
+        case GLFW_KEY_X: return 'X';
+        case GLFW_KEY_Y: return 'Y';
+        case GLFW_KEY_Z: return 'Z';
+        // Digits (top row)
+        case GLFW_KEY_0: return '0';
+        case GLFW_KEY_1: return '1';
+        case GLFW_KEY_2: return '2';
+        case GLFW_KEY_3: return '3';
+        case GLFW_KEY_4: return '4';
+        case GLFW_KEY_5: return '5';
+        case GLFW_KEY_6: return '6';
+        case GLFW_KEY_7: return '7';
+        case GLFW_KEY_8: return '8';
+        case GLFW_KEY_9: return '9';
+        // Function keys
+        case GLFW_KEY_F1:  return VK_F1;
+        case GLFW_KEY_F2:  return VK_F2;
+        case GLFW_KEY_F3:  return VK_F3;
+        case GLFW_KEY_F4:  return VK_F4;
+        case GLFW_KEY_F5:  return VK_F5;
+        case GLFW_KEY_F6:  return VK_F6;
+        case GLFW_KEY_F7:  return VK_F7;
+        case GLFW_KEY_F8:  return VK_F8;
+        case GLFW_KEY_F9:  return VK_F9;
+        case GLFW_KEY_F10: return VK_F10;
+        case GLFW_KEY_F11: return VK_F11;
+        case GLFW_KEY_F12: return VK_F12;
+        // Navigation / editing
+        case GLFW_KEY_ESCAPE:    return VK_ESCAPE;
+        case GLFW_KEY_ENTER:     return VK_RETURN;
+        case GLFW_KEY_SPACE:     return VK_SPACE;
+        case GLFW_KEY_TAB:       return VK_TAB;
+        case GLFW_KEY_BACKSPACE: return VK_BACK;
+        case GLFW_KEY_UP:        return VK_UP;
+        case GLFW_KEY_DOWN:      return VK_DOWN;
+        case GLFW_KEY_LEFT:      return VK_LEFT;
+        case GLFW_KEY_RIGHT:     return VK_RIGHT;
+        // Modifiers — distinguish left/right via VK_LSHIFT/VK_RSHIFT etc.
+        // GetAsyncKeyState() supports both the generic (VK_SHIFT) and the
+        // handed (VK_LSHIFT) codes; we use the handed ones to match the
+        // Key enum granularity.
+        case GLFW_KEY_LEFT_SHIFT:   return VK_LSHIFT;
+        case GLFW_KEY_RIGHT_SHIFT:  return VK_RSHIFT;
+        case GLFW_KEY_LEFT_CONTROL: return VK_LCONTROL;
+        case GLFW_KEY_RIGHT_CONTROL:return VK_RCONTROL;
+        case GLFW_KEY_LEFT_ALT:     return VK_LMENU;
+        case GLFW_KEY_RIGHT_ALT:    return VK_RMENU;
+        default: return -1;
+    }
+}
+#endif  // _WIN32
+
 struct GlfwPlatform::Impl {
     GLFWwindow* window = nullptr;
     InputState input{};
@@ -115,12 +221,32 @@ struct GlfwPlatform::Impl {
     PauseCallback resume_cb;
     std::string asset_root;
 
+#ifdef _WIN32
+    // On Windows we poll GetAsyncKeyState() every frame instead of trusting
+    // GLFW key callbacks. To compute edge transitions (just_pressed /
+    // just_released) we need the previous frame's down-state per key.
+    std::array<bool, kMaxKeys> prev_keys_down_{};
+#endif
+
     static void key_callback(GLFWwindow* w, int key, int scancode, int action, int mods) {
         Impl* self = static_cast<Impl*>(glfwGetWindowUserPointer(w));
         if (!self) return;
+
+#ifdef _WIN32
+        // On Windows we ignore GLFW key events entirely and rely on
+        // GetAsyncKeyState() polled in poll_events(). GLFW on Win10 19044
+        // emits spurious GLFW_RELEASE events for held keys, which corrupts
+        // keys_down. We still receive other GLFW callbacks (mouse, focus,
+        // close) normally.
+        (void)key;
+        (void)scancode;
+        (void)action;
+        (void)mods;
+        return;
+#else
         int idx = glfw_to_key_index(key);
         if (idx < 0 || idx >= static_cast<int>(kMaxKeys)) return;
-        
+
         if (action == GLFW_PRESS) {
             if (!self->input.keys_down[idx]) {
                 self->input.keys_just_pressed[idx] = true;
@@ -133,6 +259,7 @@ struct GlfwPlatform::Impl {
             self->input.keys_down[idx] = false;
         }
         // GLFW_REPEAT: do nothing — key stays down
+#endif
     }
 
     static void mouse_button_callback(GLFWwindow* w, int button, int action, int mods) {
@@ -280,14 +407,59 @@ bool GlfwPlatform::poll_events() {
 
     glfwPollEvents();
 
-    // IMPORTANT: Do NOT use glfwGetKey() — it's broken on this Windows setup.
-    // Instead, rely ENTIRELY on the key_callback for key state.
-    // The callback sets keys_down on PRESS/REPEAT and clears on RELEASE.
-    // keys_just_pressed/just_released are set on edge transitions.
-    // To handle GLFW's spurious RELEASE events for held keys, we use
-    // sticky keys mode: glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE)
-    // This ensures PRESS events are not lost and RELEASE only fires once.
+#ifdef _WIN32
+    // Win32 path: bypass GLFW key state entirely.
+    //
+    // GLFW on Windows 10 (build 19044) emits spurious GLFW_RELEASE events
+    // for held keys, which causes keys_down to flicker true→false→true
+    // every frame. This breaks the movement state machine in main.cpp
+    // (step_forward ↔ fists_idle jitter). All 7 previously attempted
+    // GLFW-only workarounds failed because the bad RELEASE events are
+    // indistinguishable from real ones at the GLFW layer.
+    //
+    // GetAsyncKeyState(vk) returns a SHORT where the high bit (0x8000)
+    // is set iff the key is currently down at the OS level. This is the
+    // same source of truth that DirectInput / RawInput derive from, and
+    // is immune to GLFW's event-queue glitches.
+    //
+    // We iterate over every key index in our Key enum (0..AltRight), map
+    // it to a GLFW code, then to a Win32 VK code, and poll the OS. Edge
+    // transitions are computed against prev_keys_down_ so that
+    // keys_just_pressed / keys_just_released remain accurate.
+    const int kMaxKeyIdx = static_cast<int>(Key::AltRight) + 1;
+    for (int i = 0; i < kMaxKeyIdx; ++i) {
+        int glfw_key = key_index_to_glfw(i);
+        if (glfw_key < 0) {
+            impl_->input.keys_down[i] = false;
+            impl_->prev_keys_down_[i] = false;
+            continue;
+        }
+        int vk = glfw_key_to_vk(glfw_key);
+        if (vk < 0) {
+            // Key is in our enum but has no Win32 VK mapping — leave
+            // its state untouched (treated as not down).
+            impl_->input.keys_down[i] = false;
+            impl_->prev_keys_down_[i] = false;
+            continue;
+        }
+        SHORT state = GetAsyncKeyState(vk);
+        bool down = (state & 0x8000) != 0;
+        bool was_down = impl_->prev_keys_down_[i];
+
+        if (down && !was_down) {
+            impl_->input.keys_just_pressed[i] = true;
+        } else if (!down && was_down) {
+            impl_->input.keys_just_released[i] = true;
+        }
+        impl_->input.keys_down[i] = down;
+        impl_->prev_keys_down_[i] = down;
+    }
+#else
+    // Non-Windows path: rely on the GLFW key callback (registered in
+    // init()) for keys_down / keys_just_pressed / keys_just_released.
+    // Sticky-keys mode ensures we never miss a PRESS event between polls.
     glfwSetInputMode(impl_->window, GLFW_STICKY_KEYS, GLFW_TRUE);
+#endif
 
     return !impl_->quit_requested;
 }

@@ -1163,3 +1163,35 @@ Stage Summary:
 - Idle: feet on floor (NPivot Y normalized across animations).
 - Steps: 200ms delay between steps for natural rhythm.
 - Profile: correct crop using source_size_w/h (no neighboring sprite).
+
+---
+Task ID: win32-input-fix
+Agent: main (chat session)
+Task: Fix movement jitter caused by GLFW sending spurious GLFW_RELEASE events for held keys on Windows 10 (build 19044). 7 previous GLFW-only workarounds all failed. Recommended fix: bypass GLFW and use Win32 GetAsyncKeyState() directly under #ifdef _WIN32.
+
+Work Log:
+- Cloned repo from https://github.com/hwindinkg/reSF2.git (SSH keys absent in this environment — used HTTPS instead). Synced into /home/z/my-project.
+- Read HANDOFF.md and engine/platform/glfw_platform.cpp to locate the broken poll_events(). The previous attempt was using GLFW_STICKY_KEYS + callback-only input, which still flickered because the spurious RELEASE events arrive via the callback itself.
+- Extracted local copies of libglfw3-dev and libgl-dev .deb files (already in repo root) to /home/z/my-project/.local-prefix/usr to get GL/GLFW headers on a system without root.
+- Installed cmake 4.4.0 via pip (--break-system-packages) to /home/z/.local/bin.
+- Applied the fix to engine/platform/glfw_platform.cpp:
+  * Added #ifdef _WIN32 block at top: #include <windows.h> with WIN32_LEAN_AND_MEAN and NOMINMAX guards.
+  * Added static helper glfw_key_to_vk() that maps GLFW_KEY_* codes to Win32 VK_* codes (letters, digits, F1-F12, navigation keys, modifiers — distinguishing left/right via VK_LSHIFT/VK_RSHIFT etc.).
+  * Added std::array<bool, kMaxKeys> prev_keys_down_ member to Impl (Windows only) so we can compute just_pressed / just_released edges against the previous frame's state.
+  * Modified key_callback() to early-return on Windows (we ignore GLFW key events entirely; mouse/close/focus callbacks still work normally).
+  * Rewrote poll_events() to call GetAsyncKeyState() per key on Windows, computing edges from prev_keys_down_. The non-Windows path is unchanged (still uses GLFW_STICKY_KEYS + callback).
+- Updated engine/platform/CMakeLists.txt: explicit `target_link_libraries(resf2_platform PRIVATE user32)` inside the existing WIN32 block (user32.dll hosts GetAsyncKeyState).
+- Wrote two verification scripts under scripts/:
+  * verify_glfw_platform_compile.sh — compiles glfw_platform.cpp on Linux (non-_WIN32 path).
+  * verify_glfw_platform_compile_win32.sh — forces -D_WIN32 on Linux g++ to compile-test the Win32 branch. Uses a mock <windows.h> (scripts/mock_windows.h) providing SHORT, GetAsyncKeyState, and VK_* constants. Uses -D__stdcall= to make GL/GLFW headers parse on Linux (g++ on Linux doesn't recognize the __stdcall alternate keyword; on real Windows MSVC/MinGW it's a real calling-convention attribute and we leave it untouched).
+- Ran all three verifications successfully:
+  * Non-Win32 path: compiles cleanly (only pre-existing -Wunused-parameter warnings).
+  * Win32 path (with mock windows.h): compiles cleanly (same warnings + expected -Wunused-function on glfw_to_key_index, which is dead code in the Win32 path because key_callback early-returns).
+  * Platform lib build via cmake (RESF2_USE_GLFW=OFF): builds cleanly.
+
+Stage Summary:
+- Win32 input fix applied and compile-verified on both branches. The Win32 path now bypasses GLFW's key event system entirely and polls GetAsyncKeyState() every frame, which is immune to the spurious RELEASE events.
+- Edge transitions (keys_just_pressed / keys_just_released) are preserved by tracking prev_keys_down_ — main.cpp's existing input handling (Escape to quit, A/D for movement, Space for punch, K for kick, etc.) should work unchanged.
+- Could NOT push to remote from this environment: SSH key /home/z/.ssh/id_ed25519_resf2 and wrapper /home/z/ssh_wrapper.py do not exist here, and there are no HTTPS credentials. Changes are committed locally; user must push manually.
+- The movement jitter (problem #1 in HANDOFF.md) should be resolved once this is built and run on the user's Windows machine. Root motion (problem #2) should also start working because animation state will be stable.
+- Artifacts: engine/platform/glfw_platform.cpp (modified), engine/platform/CMakeLists.txt (modified), scripts/mock_windows.h (new), scripts/verify_glfw_platform_compile.sh (new), scripts/verify_glfw_platform_compile_win32.sh (new).

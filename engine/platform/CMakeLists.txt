@@ -35,5 +35,10 @@ if(RESF2_USE_GLFW)
     # On Windows, GLFW needs the Win32 subsystem
     if(WIN32)
         target_compile_definitions(resf2_platform PRIVATE GLFW_EXPOSE_NATIVE_WIN32)
+        # We bypass GLFW key events on Windows and call GetAsyncKeyState()
+        # directly, which lives in user32.dll. opengl32 already pulls in
+        # user32 implicitly, but link it explicitly so the dependency is
+        # self-documenting and survives future link-order changes.
+        target_link_libraries(resf2_platform PRIVATE user32)
     endif()
 endif()
