@@ -302,19 +302,15 @@ void Renderer::draw_filled_triangle_world(
 
 void Renderer::draw_filled_circle_screen(float cx, float cy, float radius,
                                          Color4B color) {
-    // Render as 16 triangle segments (actual circle, not square)
     Mat4 mvp = screen_proj(width_, height_);
     batch_->begin(*white_tex_, *default_shader_, mvp);
-    const int segments = 16;
-    float angle_step = 2.0f * 3.14159265f / segments;
-    for (int i = 0; i < segments; ++i) {
-        float a0 = i * angle_step;
-        float a1 = (i + 1) * angle_step;
-        float x0 = cx + std::cos(a0) * radius;
-        float y0 = cy + std::sin(a0) * radius;
-        float x1 = cx + std::cos(a1) * radius;
-        float y1 = cy + std::sin(a1) * radius;
-        batch_->draw_triangle(cx, cy, x0, y0, x1, y1, color);
+    const int segs = 16;
+    float step = 6.28318530f / segs;
+    for (int i = 0; i < segs; ++i) {
+        float a0 = i * step, a1 = (i + 1) * step;
+        batch_->draw_triangle(cx, cy,
+            cx + std::cos(a0) * radius, cy + std::sin(a0) * radius,
+            cx + std::cos(a1) * radius, cy + std::sin(a1) * radius, color);
     }
     batch_->end();
 }
@@ -323,16 +319,13 @@ void Renderer::draw_filled_circle_world(float cx, float cy, float radius,
                                         Color4B color) {
     Mat4 mvp = camera_.view_projection();
     batch_->begin(*white_tex_, *default_shader_, mvp);
-    const int segments = 12;
-    float angle_step = 2.0f * 3.14159265f / segments;
-    for (int i = 0; i < segments; ++i) {
-        float a0 = i * angle_step;
-        float a1 = (i + 1) * angle_step;
-        float x0 = cx + std::cos(a0) * radius;
-        float y0 = cy + std::sin(a0) * radius;
-        float x1 = cx + std::cos(a1) * radius;
-        float y1 = cy + std::sin(a1) * radius;
-        batch_->draw_triangle(cx, cy, x0, y0, x1, y1, color);
+    const int segs = 12;
+    float step = 6.28318530f / segs;
+    for (int i = 0; i < segs; ++i) {
+        float a0 = i * step, a1 = (i + 1) * step;
+        batch_->draw_triangle(cx, cy,
+            cx + std::cos(a0) * radius, cy + std::sin(a0) * radius,
+            cx + std::cos(a1) * radius, cy + std::sin(a1) * radius, color);
     }
     batch_->end();
 }

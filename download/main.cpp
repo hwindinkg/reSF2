@@ -150,13 +150,62 @@ struct SkelEdge {
 };
 
 // ---------- Animation system ----------
-// .bin format (from Gymnast-Tool-Suite Blender plugin):
-// u32 frame_count (LE) + per frame: 1 byte skip + u32 node_count (LE) + node_count * (X, Y, -Z) LE floats
-// Node order = ALL skeleton.xml nodes in XML order (54 Node + 1 COM + 12 MacroNode = 67)
-// Positions are ABSOLUTE. Local = abs - NPivot_world_pos.
+// .bin format (VERIFIED from Gymnast-Tool-Suite Blender plugin source):
+//
+// File structure:
+//   u32 frame_count              (LITTLE-ENDIAN)
+//   frame_count * variable bytes (one record per frame)
+//
+// Each frame:
+//   byte 0     : skip byte (type flag: 1=keyframe, 5=interframe)
+//   bytes 1..4 : u32 node_count (LITTLE-ENDIAN)
+//   bytes 5..  : node_count × 3 floats (X, Y, -Z), each LITTLE-ENDIAN f32
+//
+// Coordinate mapping (from plugin: struct.pack("fff", pos.x, pos.z, -pos.y)):
+//   bin stores (blender.x, blender.z, -blender.y)
+//   blender.x = game.X, blender.y = game.Z, blender.z = game.Y
+//   So bin stores: (game.X, game.Y, -game.Z)
+//
+// Node order: ALL skeleton.xml nodes in XML order (54 Node + 1 COM + 12 MacroNode = 67)
+// Body.xml nodes are NOT stored in .bin — they're derived from skeleton nodes at runtime.
+//
+// Positions are ABSOLUTE (world space). To get LOCAL positions, subtract
+// NPivot's world position (NPivot is node index 18 in XML order).
+// ---------- Move definition (from moves.xml) ----------
+struct MoveDef {
+    std::string name;
+    std::string filename;
+    std::string template_name;
+    int first_frame = 0;
+    int end_frame = 0;
+    int priority = 0;
+    
+    // Attack interval (frames where hit detection is active)
+    int attack_start = -1;
+    int attack_end = -1;
+    
+    // Attack edges (body parts that deal damage)
+    std::vector<std::string> attack_edges;
+    
+    // Damage value
+    float damage = 0.0f;
+    
+    // Block interval (can block during these frames)
+    int block_start = -1;
+    
+    // Uninterrupt interval (can't be interrupted)
+    int uninterrupt_start = -1;
+    int uninterrupt_end = -1;
+    
+    // Key combination
+    std::vector<std::string> key_types;  // "Punch", "Kick", "Forward", etc.
+};
+
 struct AnimationData {
     std::string name;
     int frame_count = 0;
+    // frames[fi][i] = (X, Y, Z) in game coords for node i at frame fi
+    // Z is already converted from -Z to Z
     std::vector<std::vector<std::tuple<float,float,float>>> node_positions;
 
     bool load(const std::string& path) {
@@ -167,20 +216,27 @@ struct AnimationData {
         f.seekg(0);
         std::vector<uint8_t> data(sz);
         f.read((char*)data.data(), sz);
+
         frame_count = read_u32_le(data.data(), 0);
         if (frame_count <= 0 || frame_count > 10000) return false;
+
         node_positions.resize(frame_count);
         size_t offset = 4;
         for (int fi = 0; fi < frame_count; ++fi) {
             if (offset + 5 > sz) break;
+            uint8_t skip = data[offset];
             uint32_t nc = read_u32_le(data.data(), offset + 1);
             offset += 5;
+            
             auto& nodes = node_positions[fi];
-            for (uint32_t i = 0; i < nc && offset + 12 <= sz; ++i) {
+            nodes.reserve(nc);
+            for (uint32_t i = 0; i < nc; ++i) {
+                if (offset + 12 > sz) break;
                 float fx, fy, fneg_z;
                 memcpy(&fx, &data[offset], 4);
-                memcpy(&fy, &data[offset+4], 4);
-                memcpy(&fneg_z, &data[offset+8], 4);
+                memcpy(&fy, &data[offset + 4], 4);
+                memcpy(&fneg_z, &data[offset + 8], 4);
+                // bin stores (game.X, game.Y, -game.Z)
                 nodes.push_back({fx, fy, -fneg_z});
                 offset += 12;
             }
@@ -188,6 +244,7 @@ struct AnimationData {
         return !node_positions.empty();
     }
 
+    // Get animated (X, Y, Z) for node `idx` at frame `fi` (absolute world coords)
     bool get_node_pos(int fi, int idx, float& x, float& y, float& z) const {
         if (fi < 0 || fi >= (int)node_positions.size()) return false;
         const auto& nodes = node_positions[fi];
@@ -201,13 +258,6 @@ struct AnimationData {
         return (uint32_t)p[off] | ((uint32_t)p[off+1] << 8) |
                ((uint32_t)p[off+2] << 16) | ((uint32_t)p[off+3] << 24);
     }
-};
-
-struct MoveDef {
-    std::string name, filename, template_name;
-    int first_frame = 0, priority = 0;
-    int attack_start = -1, attack_end = -1;
-    float damage = 0.0f;
 };
 
 struct BodyNode {
@@ -315,47 +365,131 @@ public:
                 init_location();
             }
         } else if (state_ == GameState::Location) {
-            // MOVEMENT
-            bool wl = input.keys_down[(size_t)plat::Key::A] || input.keys_down[(size_t)plat::Key::ArrowLeft];
-            bool wr = input.keys_down[(size_t)plat::Key::D] || input.keys_down[(size_t)plat::Key::ArrowRight];
+            // === MOVEMENT SYSTEM (from moves.xml) ===
+            // A/D = step_forward / step_back (Type="MOVE")
+            // Step animations have root motion (NPivot moves ~66px per step)
+            // During attacks, movement is BLOCKED (can't move while attacking)
+            
+            bool want_move_left = input.keys_down[(size_t)plat::Key::A] ||
+                                  input.keys_down[(size_t)plat::Key::ArrowLeft];
+            bool want_move_right = input.keys_down[(size_t)plat::Key::D] ||
+                                   input.keys_down[(size_t)plat::Key::ArrowRight];
+            
+            // Only allow movement if not attacking
             if (hit_anim_ == 0) {
-                if (wl && !wr) { facing_right_ = false;
-                    if (current_anim_ != "step_back" && animations_.count("step_back")) play_animation("step_back", true);
-                } else if (wr && !wl) { facing_right_ = true;
-                    if (current_anim_ != "step_forward" && animations_.count("step_forward")) play_animation("step_forward", true);
-                } else { if (current_anim_ != "fists_idle" && current_anim_.find("punch")==std::string::npos &&
-                    current_anim_.find("kick")==std::string::npos && current_anim_.find("cut")==std::string::npos)
-                    play_animation("fists_idle", true); }
+                if (want_move_left && !want_move_right) {
+                    facing_right_ = false;
+                    // Play step_back animation (moving left = facing left = stepping back)
+                    if (current_anim_ != "step_back" && animations_.count("step_back")) {
+                        play_animation("step_back", true);
+                    }
+                } else if (want_move_right && !want_move_left) {
+                    facing_right_ = true;
+                    if (current_anim_ != "step_forward" && animations_.count("step_forward")) {
+                        play_animation("step_forward", true);
+                    }
+                } else {
+                    // Not moving — return to idle
+                    if (current_anim_ != "fists_idle" && 
+                        current_anim_.find("punch") == std::string::npos &&
+                        current_anim_.find("kick") == std::string::npos &&
+                        current_anim_.find("cut") == std::string::npos) {
+                        play_animation("fists_idle", true);
+                    }
+                }
             }
-            cam_x_ = player_pos_x_ + 200.0f; renderer_->camera().set_target(cam_x_, cam_y_); renderer_->camera().set_zoom(zoom_);
-            // COMBAT
+            
+            // Camera follows player (fixed Y, no W/S camera movement)
+            cam_x_ = player_pos_x_ + 200.0f;
+            renderer_->camera().set_target(cam_x_, cam_y_);
+            renderer_->camera().set_zoom(zoom_);
+
+            // === COMBAT SYSTEM (from moves.xml) ===
+            // Punch moves: Space + direction
             if (input.keys_just_pressed[(size_t)plat::Key::Space] && hit_anim_ == 0) {
-                std::string an = "high_punch";
-                if (wr) an = "double_punch"; else if (wl) an = "spinning_punch";
-                else if (input.keys_down[(size_t)plat::Key::W]||input.keys_down[(size_t)plat::Key::ArrowUp]) an = "upper_cut";
-                else if (input.keys_down[(size_t)plat::Key::S]||input.keys_down[(size_t)plat::Key::ArrowDown]) an = "low_punch";
-                if (animations_.count(an)) { play_animation(an, false); hit_anim_ = (uint32_t)(animations_[an].frame_count*1000.0f/30.0f); }
+                std::string move_name, anim_name;
+                
+                if (want_move_right) {
+                    move_name = "DoublePunch"; anim_name = "double_punch";
+                } else if (want_move_left) {
+                    move_name = "SpinningPunch"; anim_name = "spinning_punch";
+                } else if (input.keys_down[(size_t)plat::Key::W] || input.keys_down[(size_t)plat::Key::ArrowUp]) {
+                    move_name = "UpperCut"; anim_name = "upper_cut";
+                } else if (input.keys_down[(size_t)plat::Key::S] || input.keys_down[(size_t)plat::Key::ArrowDown]) {
+                    move_name = "LowPunch"; anim_name = "low_punch";
+                } else {
+                    move_name = "HighPunch"; anim_name = "high_punch";
+                }
+
+                if (animations_.count(anim_name)) {
+                    play_animation(anim_name, false);
+                    current_move_ = move_name;
+                    int fc = animations_[anim_name].frame_count;
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                }
             }
+            
+            // Kick moves: K + direction
             if (input.keys_just_pressed[(size_t)plat::Key::K] && hit_anim_ == 0) {
-                std::string an = "high_kick";
-                if (input.keys_down[(size_t)plat::Key::S]||input.keys_down[(size_t)plat::Key::ArrowDown]) an = "sweep";
-                else if (wl) an = "back_kick"; else if (wr) an = "front_kick";
-                if (animations_.count(an)) { play_animation(an, false); hit_anim_ = (uint32_t)(animations_[an].frame_count*1000.0f/30.0f); }
+                std::string move_name, anim_name;
+                if (input.keys_down[(size_t)plat::Key::S] || input.keys_down[(size_t)plat::Key::ArrowDown]) {
+                    move_name = "Sweep"; anim_name = "sweep";
+                } else if (want_move_left) {
+                    move_name = "BackKick"; anim_name = "back_kick";
+                } else if (want_move_right) {
+                    move_name = "FrontKick"; anim_name = "front_kick";
+                } else {
+                    move_name = "HighKick"; anim_name = "high_kick";
+                }
+                
+                if (animations_.count(anim_name)) {
+                    play_animation(anim_name, false);
+                    current_move_ = move_name;
+                    int fc = animations_[anim_name].frame_count;
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                }
             }
+
+            // Update hit timer and check for hit detection
             if (hit_anim_ > 0) {
                 hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
+                
+                // Simple hit detection: check if near bag during middle of animation
+                // (attack frames are typically in the middle third of the animation)
                 if (!bag_hit_ && bag_model_ && location_) {
-                    auto ai = animations_.find(current_anim_);
-                    if (ai != animations_.end()) { int cf = (int)(anim_time_*30.0f); int fc = ai->second.frame_count;
-                        if (cf >= fc/4 && cf <= fc*3/4) { float bx = location_->enemy_x - 857.0f;
-                            if (std::abs(player_pos_x_-bx) < 400.0f) { bag_swing_ = 800; bag_hit_ = true; } } } }
-                if (hit_anim_ == 0) { play_animation("fists_idle", true); bag_hit_ = false; }
+                    auto anim_it = animations_.find(current_anim_);
+                    if (anim_it != animations_.end()) {
+                        int fc = anim_it->second.frame_count;
+                        int current_frame = (int)(anim_time_ * 30.0f);
+                        // Check if in middle third (typical attack window)
+                        if (current_frame >= fc / 4 && current_frame <= fc * 3 / 4) {
+                            float bag_x = location_->enemy_x - 857.0f;
+                            float dx = std::abs(player_pos_x_ - bag_x);
+                            if (dx < 400.0f) {
+                                bag_swing_ = 800;
+                                bag_hit_ = true;
+                            }
+                        }
+                    }
+                }
+                
+                if (hit_anim_ == 0) {
+                    play_animation("fists_idle", true);
+                    current_move_.clear();
+                    bag_hit_ = false;
+                }
             }
+
             if (bag_swing_ > 0) bag_swing_ -= std::min<uint32_t>(bag_swing_, dt);
+            
+            // Update animation
             update_animation(dt);
+
+            // Zoom presets
             if (input.keys_just_pressed[(size_t)plat::Key::Num1]) zoom_ = 1.0f;
             if (input.keys_just_pressed[(size_t)plat::Key::Num2]) zoom_ = 0.7f;
             if (input.keys_just_pressed[(size_t)plat::Key::Num3]) zoom_ = 1.5f;
+            // NO W/S camera movement — W/S are used for attack direction modifiers
         }
     }
 
@@ -712,33 +846,72 @@ private:
             }
             pos = end + 2;
         }
-        // Parse MacroNodes
+        
+        // Also parse Type="MacroNode" tags — these are weighted-average nodes
+        // (e.g., MacroNode1_1, MacroNode2_1) used by capsule edges.
+        // They have direct X, Y, Z rest-pose coordinates in the XML.
         pos = 0;
+        int macro_count = 0;
         while ((pos = nodes_xml.find("Type=\"MacroNode\"", pos)) != std::string::npos) {
-            auto ts = nodes_xml.rfind('<', pos); auto end = nodes_xml.find("/>", pos);
+            auto ts = nodes_xml.rfind('<', pos);
+            auto end = nodes_xml.find("/>", pos);
             if (ts == std::string::npos || end == std::string::npos) break;
-            auto tag = nodes_xml.substr(ts, end - ts); auto sp = tag.find(' ');
-            if (sp != std::string::npos) { SkelNode n; n.name = tag.substr(1, sp - 1);
-                n.x = tof(xml_attr(tag, "X")); n.y = tof(xml_attr(tag, "Y")); n.z = tof(xml_attr(tag, "Z"));
-                skeleton_nodes_[n.name] = n; } pos = end + 2; }
-        // Parse CenterOfMass
+            auto tag = nodes_xml.substr(ts, end - ts);
+            auto sp = tag.find(' ');
+            if (sp != std::string::npos) {
+                SkelNode n;
+                n.name = tag.substr(1, sp - 1);
+                n.x = tof(xml_attr(tag, "X"));
+                n.y = tof(xml_attr(tag, "Y"));
+                n.z = tof(xml_attr(tag, "Z"));
+                skeleton_nodes_[n.name] = n;
+                macro_count++;
+            }
+            pos = end + 2;
+        }
+        
+        // Also parse Type="CenterOfMass" (COM node)
         pos = 0;
         while ((pos = nodes_xml.find("Type=\"CenterOfMass\"", pos)) != std::string::npos) {
-            auto ts = nodes_xml.rfind('<', pos); auto end = nodes_xml.find("/>", pos);
+            auto ts = nodes_xml.rfind('<', pos);
+            auto end = nodes_xml.find("/>", pos);
             if (ts == std::string::npos || end == std::string::npos) break;
-            auto tag = nodes_xml.substr(ts, end - ts); auto sp = tag.find(' ');
-            if (sp != std::string::npos) { SkelNode n; n.name = tag.substr(1, sp - 1);
-                n.x = tof(xml_attr(tag, "X")); n.y = tof(xml_attr(tag, "Y")); n.z = tof(xml_attr(tag, "Z"));
-                skeleton_nodes_[n.name] = n; } pos = end + 2; }
-        // Build ordered_node_names_
-        ordered_node_names_.clear(); pos = 0;
-        while (true) { auto ts = nodes_xml.find('<', pos); if (ts == std::string::npos) break;
-            auto te = nodes_xml.find("/>", ts); if (te == std::string::npos) break;
-            auto tag = nodes_xml.substr(ts, te - ts);
+            auto tag = nodes_xml.substr(ts, end - ts);
+            auto sp = tag.find(' ');
+            if (sp != std::string::npos) {
+                SkelNode n;
+                n.name = tag.substr(1, sp - 1);
+                n.x = tof(xml_attr(tag, "X"));
+                n.y = tof(xml_attr(tag, "Y"));
+                n.z = tof(xml_attr(tag, "Z"));
+                skeleton_nodes_[n.name] = n;
+            }
+            pos = end + 2;
+        }
+        
+        // Build ordered_node_names_ — ALL nodes in XML order.
+        // This matches the .bin node order (67 nodes: 54 Node + 1 COM + 12 MacroNode).
+        ordered_node_names_.clear();
+        pos = 0;
+        while (true) {
+            // Find next node tag (any Type)
+            auto tag_start = nodes_xml.find('<', pos);
+            if (tag_start == std::string::npos) break;
+            auto tag_end = nodes_xml.find("/>", tag_start);
+            if (tag_end == std::string::npos) break;
+            auto tag = nodes_xml.substr(tag_start, tag_end - tag_start);
+            // Check if this tag has X/Y attributes (is a node)
             if (tag.find("X=\"") != std::string::npos && tag.find("Y=\"") != std::string::npos) {
-                auto sp = tag.find(' '); if (sp != std::string::npos) ordered_node_names_.push_back(tag.substr(1, sp - 1)); }
-            pos = te + 2; }
-        std::printf("  Skeleton: %zu nodes, %zu ordered\n", skeleton_nodes_.size(), ordered_node_names_.size());
+                auto sp = tag.find(' ');
+                if (sp != std::string::npos) {
+                    std::string name = tag.substr(1, sp - 1);
+                    ordered_node_names_.push_back(name);
+                }
+            }
+            pos = tag_end + 2;
+        }
+        std::printf("  Skeleton: %zu nodes (%d MacroNodes, ordered: %zu)\n",
+                    skeleton_nodes_.size(), macro_count, ordered_node_names_.size());
 
         // Parse <Edges> section for Edge and Muscle types
         auto edges_start = xml.find("<Edges>");
@@ -864,6 +1037,8 @@ private:
                 c.edge_name = xml_attr(tag, "Edge");
                 c.radius1 = tof(xml_attr(tag, "Radius1"));
                 c.radius2 = tof(xml_attr(tag, "Radius2"));
+                c.margin1 = tof(xml_attr(tag, "Margin1"));
+                c.margin2 = tof(xml_attr(tag, "Margin2"));
                 body_model_->capsules.push_back(c);
                 pos = end + 2;
             }
@@ -891,8 +1066,8 @@ private:
                                               float world_cx, float world_cy,
                                               bool face_right, float pivot_local_y) {
         if (!body_model_) return {world_cx, world_cy};
-        
-        // Check if this node has an animated position
+
+        // Check if this node has an animated position (from .bin animation)
         auto ait = anim_node_pos_.find(name);
         if (ait != anim_node_pos_.end()) {
             float lx = ait->second.first, ly = ait->second.second;
@@ -900,7 +1075,7 @@ private:
             float sy = world_cy + (ly - pivot_local_y) * 0.9f;
             return {world_cx + sx, sy};
         }
-        
+
         auto bit = body_model_->nodes.find(name);
         if (bit != body_model_->nodes.end()) {
             float lx = bit->second.x, ly = bit->second.y;
@@ -938,6 +1113,12 @@ private:
         auto pivot_it = skeleton_nodes_.find("NPivot");
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
+        // Apply animation root-motion offset (whole-body shift from .bin)
+        // NOTE: anim_root_dx_/dy_ are always 0 now (update_animation is a
+        // no-op). This code is kept for when per-node animation is restored.
+        float world_cx = player_pos_x_ + (facing_right_ ? anim_root_dx_ : -anim_root_dx_);
+        float world_cy = player_pos_y_ + anim_root_dy_;
+
         // Build edge lookup from both body.xml edges and skeleton.xml edges
         std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
         for (auto& e : body_model_->edges)
@@ -955,40 +1136,51 @@ private:
             sy = (1.0f - (wy - bottom) / (top - bottom)) * platform_->window_height();
         };
 
-        // Render capsules as thick lines in world space
+        // Render character as unified dark silhouette.
+        // Render ALL capsules (including duplicates — they overlap to fill gaps
+        // at joints). Apply Margin1/Margin2 to trim ends properly.
         ren::Color4B silhouette_col{20, 20, 25, 255};
+
         for (auto& c : body_model_->capsules) {
             auto eit = edge_map.find(c.edge_name);
             if (eit == edge_map.end()) continue;
             auto [x1, y1] = resolve_body_node(eit->second.first,
-                player_pos_x_, player_pos_y_, facing_right_, pivot_local_y);
+                world_cx, world_cy, facing_right_, pivot_local_y);
             auto [x2, y2] = resolve_body_node(eit->second.second,
-                player_pos_x_, player_pos_y_, facing_right_, pivot_local_y);
+                world_cx, world_cy, facing_right_, pivot_local_y);
+            // Apply margin (trim capsule ends to prevent overlap artifacts)
+            float m1 = c.margin1, m2 = c.margin2;
+            float mx1 = x1 + (x2 - x1) * m1;
+            float my1 = y1 + (y2 - y1) * m1;
+            float mx2 = x2 - (x2 - x1) * m2;
+            float my2 = y2 - (y2 - y1) * m2;
+            
             float r = (c.radius1 + c.radius2) * 0.5f * 0.9f;
-            float dx = x2 - x1, dy = y2 - y1;
+            float dx = mx2 - mx1, dy = my2 - my1;
             float len = std::sqrt(dx*dx + dy*dy);
             if (len < 0.5f) continue;
             float ux = dx / len, uy = dy / len;
             float px = -uy, py = ux;
             float ht = std::max(r, 1.0f);
-            float ax = x1 + px*ht, ay = y1 + py*ht;
-            float bx = x2 + px*ht, by = y2 + py*ht;
-            float cx = x2 - px*ht, cy_ = y2 - py*ht;
-            float dx_ = x1 - px*ht, dy_ = y1 - py*ht;
+            float ax = mx1 + px*ht, ay = my1 + py*ht;
+            float bx = mx2 + px*ht, by = my2 + py*ht;
+            float cx = mx2 - px*ht, cy_ = my2 - py*ht;
+            float dx_ = mx1 - px*ht, dy_ = my1 - py*ht;
             renderer_->draw_filled_triangle_world(ax, ay, bx, by, cx, cy_, silhouette_col);
             renderer_->draw_filled_triangle_world(ax, ay, cx, cy_, dx_, dy_, silhouette_col);
-            renderer_->draw_filled_circle_world(x1, y1, ht, silhouette_col);
-            renderer_->draw_filled_circle_world(x2, y2, ht, silhouette_col);
+            // Circle caps at both ends — fills gaps at joints
+            renderer_->draw_filled_circle_world(mx1, my1, ht, silhouette_col);
+            renderer_->draw_filled_circle_world(mx2, my2, ht, silhouette_col);
         }
 
-        // Render triangles as filled silhouette
+        // Render triangles (small parts)
         for (auto& t : body_model_->triangles) {
             auto [tx0, ty0] = resolve_body_node(t.n1,
-                player_pos_x_, player_pos_y_, facing_right_, pivot_local_y);
+                world_cx, world_cy, facing_right_, pivot_local_y);
             auto [tx1, ty1] = resolve_body_node(t.n2,
-                player_pos_x_, player_pos_y_, facing_right_, pivot_local_y);
+                world_cx, world_cy, facing_right_, pivot_local_y);
             auto [tx2, ty2] = resolve_body_node(t.n3,
-                player_pos_x_, player_pos_y_, facing_right_, pivot_local_y);
+                world_cx, world_cy, facing_right_, pivot_local_y);
             renderer_->draw_filled_triangle_world(tx0, ty0, tx1, ty1, tx2, ty2, silhouette_col);
         }
     }
@@ -996,8 +1188,15 @@ private:
     // ---------- Character rendering ----------
     // Skeleton local coords: Y-UP (0 = feet, positive = up).
     // World coords: Y-UP (cocos2d convention, positive = up).
+    //
+    // Render ONLY the body silhouette (capsules + triangles).
+    // The skeleton lines and joints are NOT rendered — they were causing
+    // the "half black, half white squares" effect (white bones drawn over
+    // dark silhouette). The original game renders only the silhouette.
     void render_character() {
+        // Render body mesh (silhouette from capsules + triangles)
         render_body_model();
+        // No skeleton lines, no joints — silhouette only.
     }
 
     // ---------- Punching bag (real 3D model from skeleton_punching_bag.xml) ----------
@@ -1081,6 +1280,8 @@ private:
                     c.edge_name = xml_attr(tag, "Edge");
                     c.radius1 = tof(xml_attr(tag, "Radius1"));
                     c.radius2 = tof(xml_attr(tag, "Radius2"));
+                    c.margin1 = tof(xml_attr(tag, "Margin1"));
+                    c.margin2 = tof(xml_attr(tag, "Margin2"));
                     bag_model_->capsules.push_back(c);
                     pos = end + 2;
                 }
@@ -1093,30 +1294,27 @@ private:
 
     void render_punching_bag() {
         if (!bag_model_ || !location_) return;
-        // Position bag relative to player (same offset as player)
-        float bag_cx = (location_->enemy_x - 857.0f);  // Apply same offset as player
-        float pivot_ly = 109.0f;
+        
+        // Bag position: enemy_x from params.xml, adjusted to world space
+        float bag_cx = location_->enemy_x - 857.0f;
+        
+        // Bag NPivot Y in model space = 109.0
+        // The bag hangs from Node12 (Y=335) which is fixed at ceiling
+        // Place bag so NPivot is at enemy_y
         auto pit = bag_model_->nodes.find("NPivot");
-        if (pit != bag_model_->nodes.end()) pivot_ly = pit->second.y;
-        float bag_cy = location_->enemy_y;
-
+        float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
+        float bag_cy = location_->enemy_y + 50.0f;  // offset so bag hangs properly
+        
+        // Build edge lookup
         std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
         for (auto& e : bag_model_->edges) {
             edge_map[e.name] = {e.end1, e.end2};
         }
-
-        // Helper: convert world coords to screen coords (for fallback)
-        float hw = (float)platform_->window_width() / (2.0f * zoom_);
-        float hh = (float)platform_->window_height() / (2.0f * zoom_);
-        float left = cam_x_ - hw, right = cam_x_ + hw;
-        float bottom = cam_y_ - hh, top = cam_y_ + hh;
-        auto w2s = [&](float wx, float wy, float& sx, float& sy) {
-            sx = (wx - left) / (right - left) * platform_->window_width();
-            sy = (1.0f - (wy - bottom) / (top - bottom)) * platform_->window_height();
-        };
-
-        ren::Color4B bag_col{100, 30, 30, 255};
-        ren::Color4B chain_col{180, 180, 180, 255};
+        
+        // Render bag as unified silhouette (same approach as character)
+        ren::Color4B bag_body_col{100, 30, 30, 255};     // dark red for main bag
+        ren::Color4B bag_chain_col{160, 160, 160, 255};   // gray for chain
+        
         for (auto& c : bag_model_->capsules) {
             auto eit = edge_map.find(c.edge_name);
             if (eit == edge_map.end()) continue;
@@ -1125,28 +1323,31 @@ private:
             auto nit1 = bag_model_->nodes.find(en1);
             auto nit2 = bag_model_->nodes.find(en2);
             if (nit1 == bag_model_->nodes.end() || nit2 == bag_model_->nodes.end()) continue;
+            
             float x1 = bag_cx + nit1->second.x * 0.9f;
             float y1 = bag_cy + (nit1->second.y - pivot_ly) * 0.9f;
             float x2 = bag_cx + nit2->second.x * 0.9f;
             float y2 = bag_cy + (nit2->second.y - pivot_ly) * 0.9f;
+            
             float r = (c.radius1 + c.radius2) * 0.5f * 0.9f;
             bool is_main = (c.radius1 >= 20 || c.radius2 >= 20);
-
-            // Draw as world-space thick line (2 triangles)
+            
             float dx = x2 - x1, dy = y2 - y1;
             float len = std::sqrt(dx*dx + dy*dy);
             if (len < 0.5f) continue;
             float ux = dx / len, uy = dy / len;
             float px = -uy, py = ux;
-            float thickness = std::max(r, 1.0f);
-            float ht = thickness;
-            ren::Color4B col = is_main ? bag_col : chain_col;
+            float ht = std::max(r, 1.0f);
+            
+            ren::Color4B col = is_main ? bag_body_col : bag_chain_col;
             float ax = x1 + px*ht, ay = y1 + py*ht;
             float bx = x2 + px*ht, by = y2 + py*ht;
             float cx_ = x2 - px*ht, cy_ = y2 - py*ht;
             float dx_ = x1 - px*ht, dy_ = y1 - py*ht;
             renderer_->draw_filled_triangle_world(ax, ay, bx, by, cx_, cy_, col);
             renderer_->draw_filled_triangle_world(ax, ay, cx_, cy_, dx_, dy_, col);
+            renderer_->draw_filled_circle_world(x1, y1, ht, col);
+            renderer_->draw_filled_circle_world(x2, y2, ht, col);
         }
     }
 
@@ -1154,70 +1355,312 @@ private:
     // ---------- Animation loading ----------
     void load_animations() {
         auto root = std::filesystem::path(asset_root_);
-        std::vector<std::filesystem::path> dirs = {
-            root/"assets"/"animations"/"binary", root/"animations"/"binary",
-            root/"assets"/"animations", root/"animations" };
-        const char* names[] = { "fists1_stance_idle", "high_punch", "heavy_punch",
-            "low_punch", "double_punch", "spinning_punch", "upper_cut",
-            "high_kick", "front_kick", "back_kick", "sweep",
-            "step_forward", "step_back" };
-        for (auto& n : names) for (auto& d : dirs) {
-            auto p = d / (std::string(n) + ".bin");
-            if (std::filesystem::exists(p)) { AnimationData a; a.name = n;
-                if (a.load(p.string())) { animations_[n] = std::move(a); break; } } }
-        if (animations_.count("fists1_stance_idle")) animations_["fists_idle"] = animations_["fists1_stance_idle"];
+        // Search for animation .bin files in multiple paths
+        std::vector<std::filesystem::path> search_dirs = {
+            root/"assets"/"animations"/"binary",
+            root/"animations"/"binary",
+            root/"assets"/"animations",
+            root/"animations",
+        };
+        
+        // Load key animations (using actual game file names from moves.xml)
+        const char* anim_names[] = {
+            "fists1_stance_idle", "fists2_stance_idle",
+            "high_punch", "heavy_punch", "low_punch",
+            "double_punch", "spinning_punch", "upper_cut",
+            "high_kick", "front_kick", "back_kick",
+            "sweep", "low_kick", "high_knee_up",
+            "axe_idle", "axe_stance_idle",
+            "stance_1", "stance_2",
+            "step_forward", "step_back",
+            "back_flip", "back_flip_kick",
+        };
+        
+        for (auto& name : anim_names) {
+            std::string filename = std::string(name) + ".bin";
+            for (auto& dir : search_dirs) {
+                auto path = dir / filename;
+                if (std::filesystem::exists(path)) {
+                    AnimationData anim;
+                    anim.name = name;
+                    if (anim.load(path.string())) {
+                        std::printf("  Animation '%s': %d frames\n", name, anim.frame_count);
+                        animations_[name] = std::move(anim);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Map common names to actual files
+        if (animations_.count("fists1_stance_idle") && !animations_.count("fists_idle")) {
+            animations_["fists_idle"] = animations_["fists1_stance_idle"];
+        }
+        // Punch animations are loaded directly (high_punch, heavy_punch, low_punch)
+        
         std::printf("  Animations loaded: %zu\n", animations_.size());
     }
+
+    // ---------- Move definitions (from moves.xml) ----------
     void load_moves() {
         auto root = std::filesystem::path(asset_root_);
-        std::string mp;
-        for (auto& d : {root/"assets"/"animations", root/"animations"}) {
-            auto p = d / "moves.xml"; if (std::filesystem::exists(p)) { mp = p.string(); break; } }
-        if (mp.empty()) return;
-        auto xml = read_text(mp); size_t pos = 0;
+        std::vector<std::filesystem::path> search_dirs = {
+            root/"assets"/"animations",
+            root/"animations",
+            root/"assets",
+        };
+        
+        std::string moves_path;
+        for (auto& dir : search_dirs) {
+            auto path = dir / "moves.xml";
+            if (std::filesystem::exists(path)) { moves_path = path.string(); break; }
+        }
+        if (moves_path.empty()) {
+            std::printf("  moves.xml NOT FOUND!\n");
+            return;
+        }
+        
+        auto xml = read_text(moves_path);
+        // Simple XML parser for <Move> tags
+        size_t pos = 0;
         while ((pos = xml.find("<Move ", pos)) != std::string::npos) {
-            if (pos > 4 && xml.substr(pos-4, 4) == "<!--") { pos += 6; continue; }
-            auto et = xml.find(">", pos); if (et == std::string::npos) break;
-            auto tag = xml.substr(pos, et - pos); MoveDef m; m.name = xml_attr(tag, "Name");
-            m.filename = xml_attr(tag, "FileName");
-            auto me = xml.find("</Move>", pos); if (me == std::string::npos) { pos = et; continue; }
-            if (!m.filename.empty()) moves_[m.name] = std::move(m); pos = me + 7; }
+            // Skip commented out moves
+            if (pos > 4 && xml.substr(pos - 4, 4) == "<!--") {
+                pos += 6;
+                continue;
+            }
+            
+            auto end_tag = xml.find(">", pos);
+            if (end_tag == std::string::npos) break;
+            auto tag = xml.substr(pos, end_tag - pos);
+            
+            MoveDef move;
+            move.name = xml_attr(tag, "Name");
+            move.filename = xml_attr(tag, "FileName");
+            move.template_name = xml_attr(tag, "Template");
+            move.first_frame = (int)tof(xml_attr(tag, "FirstFrame"));
+            move.end_frame = (int)tof(xml_attr(tag, "EndFrame"));
+            move.priority = (int)tof(xml_attr(tag, "Priority"));
+            
+            // Find </Move> to get inner content
+            auto move_end = xml.find("</Move>", pos);
+            if (move_end == std::string::npos) { pos = end_tag; continue; }
+            auto inner = xml.substr(end_tag + 1, move_end - end_tag - 1);
+            
+            // Parse Intervals
+            size_t ip = 0;
+            while ((ip = inner.find("Type=\"Attack\"", ip)) != std::string::npos ||
+                   (ip = inner.find("Name=\"Attack\"", ip)) != std::string::npos) {
+                auto ts = inner.rfind('<', ip);
+                auto te = inner.find("/>", ip);
+                if (ts == std::string::npos || te == std::string::npos) break;
+                auto iv_tag = inner.substr(ts, te - ts);
+                move.attack_start = (int)tof(xml_attr(iv_tag, "Start"));
+                move.attack_end = (int)tof(xml_attr(iv_tag, "End"));
+                ip = te + 2;
+            }
+            
+            // Parse attack edges
+            ip = 0;
+            while ((ip = inner.find("<Edge ", ip)) != std::string::npos) {
+                auto te = inner.find("/>", ip);
+                if (te == std::string::npos) break;
+                auto e_tag = inner.substr(ip, te - ip);
+                auto ename = xml_attr(e_tag, "Name");
+                if (!ename.empty()) move.attack_edges.push_back(ename);
+                ip = te + 2;
+            }
+            
+            // Parse damage
+            ip = 0;
+            while ((ip = inner.find("<Damage ", ip)) != std::string::npos) {
+                auto te = inner.find("/>", ip);
+                if (te == std::string::npos) break;
+                auto d_tag = inner.substr(ip, te - ip);
+                auto val = xml_attr(d_tag, "Value");
+                if (!val.empty()) {
+                    move.damage = tof(val);
+                    break;  // take first damage value
+                }
+                ip = te + 2;
+            }
+            
+            // Parse keys
+            ip = 0;
+            while ((ip = inner.find("<Key ", ip)) != std::string::npos) {
+                auto te = inner.find("/>", ip);
+                if (te == std::string::npos) break;
+                auto k_tag = inner.substr(ip, te - ip);
+                auto ktype = xml_attr(k_tag, "Type");
+                if (!ktype.empty()) move.key_types.push_back(ktype);
+                ip = te + 2;
+            }
+            
+            // Parse Block interval
+            ip = 0;
+            if ((ip = inner.find("Type=\"Block\"", 0)) != std::string::npos) {
+                auto ts = inner.rfind('<', ip);
+                auto te = inner.find("/>", ip);
+                if (ts != std::string::npos && te != std::string::npos) {
+                    auto b_tag = inner.substr(ts, te - ts);
+                    move.block_start = (int)tof(xml_attr(b_tag, "Start"));
+                }
+            }
+            
+            // Parse Uninterrupt interval
+            ip = 0;
+            if ((ip = inner.find("Name=\"Uninterrupt\"", 0)) != std::string::npos) {
+                auto ts = inner.rfind('<', ip);
+                auto te = inner.find("/>", ip);
+                if (ts != std::string::npos && te != std::string::npos) {
+                    auto u_tag = inner.substr(ts, te - ts);
+                    move.uninterrupt_start = (int)tof(xml_attr(u_tag, "Start"));
+                    move.uninterrupt_end = (int)tof(xml_attr(u_tag, "End"));
+                }
+            }
+            
+            if (!move.filename.empty()) {
+                moves_[move.name] = std::move(move);
+            }
+            pos = move_end + 7;
+        }
         std::printf("  Moves loaded: %zu\n", moves_.size());
     }
     
-    // Update animation state and compute animated node positions
+    // Update animation state and compute per-node animated positions.
+    //
+    // The .bin stores ABSOLUTE world positions for all 67 skeleton.xml nodes
+    // (in XML order). To get LOCAL positions (model-space), subtract NPivot's
+    // world position from all nodes.
+    //
+    // Root motion: applied as delta from frame 0 NPivot position.
     void update_animation(uint32_t dt_ms) {
         anim_node_pos_.clear();
-        auto it = animations_.find(current_anim_); if (it == animations_.end()) return;
-        auto& anim = it->second; if (anim.frame_count == 0 || ordered_node_names_.empty()) return;
-        int npi = -1; for (int i = 0; i < (int)ordered_node_names_.size(); ++i)
-            if (ordered_node_names_[i] == "NPivot") { npi = i; break; }
-        if (npi < 0) return;
-        anim_time_ += (dt_ms / 1000.0f) * anim_speed_ / 30.0f;
-        float ff = anim_time_ * 30.0f; int fi = (int)ff;
-        if (anim_loop_) { if (anim.frame_count > 0) fi %= anim.frame_count; }
-        else if (fi >= anim.frame_count) fi = anim.frame_count - 1;
-        if (fi < 0) fi = 0; int ni = anim.frame_count > 0 ? ((fi+1) % anim.frame_count) : 0;
-        float a = ff - (int)ff; if (a < 0) a = 0; if (a > 1) a = 1;
-        float px0, py0, pz0, px1, py1, pz1;
-        if (!anim.get_node_pos(fi, npi, px0, py0, pz0)) return;
-        if (!anim.get_node_pos(ni, npi, px1, py1, pz1)) { px1 = px0; py1 = py0; }
-        float npx = px0 + (px1-px0)*a, npy = py0 + (py1-py0)*a;
+        anim_root_dx_ = 0.0f;
+        anim_root_dy_ = 0.0f;
+
+        auto it = animations_.find(current_anim_);
+        if (it == animations_.end()) {
+            if (!animations_.empty()) {
+                current_anim_ = animations_.begin()->first;
+                it = animations_.find(current_anim_);
+            } else {
+                return;
+            }
+        }
+
+        auto& anim = it->second;
+        if (anim.frame_count == 0 || ordered_node_names_.empty()) return;
+
+        // Find NPivot index in ordered_node_names_
+        int npivot_idx = -1;
+        for (int i = 0; i < (int)ordered_node_names_.size(); ++i) {
+            if (ordered_node_names_[i] == "NPivot") {
+                npivot_idx = i;
+                break;
+            }
+        }
+        if (npivot_idx < 0) return;
+
+        // Set anchor from frame 0 NPivot position
+        if (!anim_anchor_set_) {
+            float px, py, pz;
+            if (anim.get_node_pos(0, npivot_idx, px, py, pz)) {
+                anim_root_anchor_x_ = px;
+                anim_root_anchor_y_ = py;
+                anim_anchor_set_ = true;
+            }
+        }
+
+        // Advance time
+        float dt = dt_ms / 1000.0f;
+        anim_time_ += dt * anim_speed_ / 30.0f;
+
+        // Calculate current frame (with looping)
+        float frame_f = anim_time_ * 30.0f;
+        int frame_idx = (int)frame_f;
+        if (anim_loop_) {
+            if (anim.frame_count > 0)
+                frame_idx = frame_idx % anim.frame_count;
+        } else if (frame_idx >= anim.frame_count) {
+            frame_idx = anim.frame_count - 1;
+        }
+        if (frame_idx < 0) frame_idx = 0;
+
+        int next_idx = anim.frame_count > 0
+            ? ((frame_idx + 1) % anim.frame_count) : 0;
+        float alpha = frame_f - (int)frame_f;
+        if (alpha < 0) alpha = 0;
+        if (alpha > 1) alpha = 1;
+
+        // Get NPivot position at current frame (for root offset)
+        float npx0, npy0, npz0, npx1, npy1, npz1;
+        if (!anim.get_node_pos(frame_idx, npivot_idx, npx0, npy0, npz0)) return;
+        if (!anim.get_node_pos(next_idx, npivot_idx, npx1, npy1, npz1)) {
+            npx1 = npx0; npy1 = npy0; npz1 = npz0;
+        }
+        float npivot_x = npx0 + (npx1 - npx0) * alpha;
+        float npivot_y = npy0 + (npy1 - npy0) * alpha;
+
+        // Root motion: applied for step animations (step_forward, step_back)
+        // step_forward: NPivot X goes 169→235 (delta positive → move right)
+        // step_back: NPivot X goes 235→169 (delta negative → move left)
+        // No facing/direction multiplier needed — delta already has correct sign.
         if (current_anim_ == "step_forward" || current_anim_ == "step_back") {
-            float d = npx - prev_npivot_x_; if (std::abs(d) < 50.0f) player_pos_x_ += d * 0.9f;
-            prev_npivot_x_ = npx; } else { prev_npivot_x_ = npx; }
-        auto pit = skeleton_nodes_.find("NPivot");
-        float nry = pit != skeleton_nodes_.end() ? pit->second.y : 169.48f;
+            if (anim_anchor_set_) {
+                float delta = npivot_x - prev_npivot_x_;
+                // Only apply if delta is reasonable (not a loop wrap-around)
+                if (std::abs(delta) < 50.0f) {
+                    player_pos_x_ += delta * 0.9f;
+                }
+            }
+            prev_npivot_x_ = npivot_x;
+        } else {
+            prev_npivot_x_ = npivot_x;
+        }
+        anim_root_dx_ = 0.0f;
+        anim_root_dy_ = 0.0f;
+
+        // Get NPivot's rest-pose Y (from skeleton_nodes_)
+        auto pivot_it = skeleton_nodes_.find("NPivot");
+        float npivot_rest_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
+
+        // For each node in the .bin, compute LOCAL position and store in anim_node_pos_
         for (int i = 0; i < (int)ordered_node_names_.size() && i < 67; ++i) {
+            const std::string& name = ordered_node_names_[i];
+            
             float x0, y0, z0, x1, y1, z1;
-            if (!anim.get_node_pos(fi, i, x0, y0, z0)) continue;
-            if (!anim.get_node_pos(ni, i, x1, y1, z1)) { x1 = x0; y1 = y0; }
-            anim_node_pos_[ordered_node_names_[i]] = {x0+(x1-x0)*a - npx, y0+(y1-y0)*a - npy + nry};
+            if (!anim.get_node_pos(frame_idx, i, x0, y0, z0)) continue;
+            if (!anim.get_node_pos(next_idx, i, x1, y1, z1)) {
+                x1 = x0; y1 = y0; z1 = z0;
+            }
+            
+            // Interpolate
+            float abs_x = x0 + (x1 - x0) * alpha;
+            float abs_y = y0 + (y1 - y0) * alpha;
+            
+            // Convert to LOCAL: subtract NPivot's world position
+            float local_x = abs_x - npivot_x;
+            float local_y = abs_y - npivot_y;
+            
+            // Store: anim_node_pos_ maps node name -> (local_X, local_Y)
+            // The Y needs to be relative to NPivot's rest Y (for rendering)
+            // local_y is already relative to NPivot's current Y.
+            // We need: local_y + npivot_rest_y (to get model-space Y)
+            anim_node_pos_[name] = {local_x, local_y + npivot_rest_y};
         }
     }
     
     void play_animation(const std::string& name, bool loop = true) {
-        if (animations_.count(name)) { current_anim_ = name; anim_time_ = 0.0f; anim_loop_ = loop; }
+        if (animations_.count(name)) {
+            current_anim_ = name;
+            anim_time_ = 0.0f;
+            anim_loop_ = loop;
+            // Reset anchor so update_animation() re-reads frame 0 root pos
+            anim_anchor_set_ = false;
+            anim_root_dx_ = 0.0f;
+            anim_root_dy_ = 0.0f;
+        }
     }
 
     void load_hud_textures() {
@@ -1656,11 +2099,9 @@ private:
     std::unordered_map<std::string, AtlasRef> atlases_;
     std::unordered_map<std::string, SkelNode> skeleton_nodes_;
     std::unordered_map<std::string, SkelEdge> skeleton_edges_;
+    // Ordered list of ALL skeleton.xml node names (Node + COM + MacroNode)
+    // in XML order. This matches the .bin node order.
     std::vector<std::string> ordered_node_names_;
-    std::unordered_map<std::string, MoveDef> moves_;
-    std::string current_move_;
-    bool bag_hit_ = false;
-    float prev_npivot_x_ = 0.0f;
     std::unique_ptr<BodyModel> body_model_;
     std::unique_ptr<BodyModel> bag_model_;
     std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> hud_textures_;
@@ -1675,17 +2116,36 @@ private:
     bool facing_right_ = true;
     int hit_anim_ = 0;    // ms remaining
     int bag_swing_ = 0;   // ms remaining
+    bool bag_hit_ = false;  // bag already hit during current attack
     bool quit_requested_ = false;
     
     // Animation state
     std::unordered_map<std::string, AnimationData> animations_;
+    std::unordered_map<std::string, MoveDef> moves_;
+    std::string current_move_;  // Name of currently playing move (for hit detection)
     std::string current_anim_ = "fists_idle";
     float anim_time_ = 0.0f;  // seconds into current animation
     float anim_speed_ = 30.0f;  // FPS for animation playback
     bool anim_loop_ = true;
-    
+
     // Animated node positions (override skeleton rest pose during animation)
     std::unordered_map<std::string, std::pair<float, float>> anim_node_pos_;  // name -> (x, y)
+
+    // Root motion offset (delta from animation frame 0).
+    // .bin float[1] = absolute root X, float[2] = absolute root Y.
+    // We use the DELTA from frame 0 to move the whole model during animation
+    // (e.g. lunge forward during punch, steps during walk). This is safe —
+    // it moves the entire character without tearing, since all nodes shift
+    // together. Per-node animation (limb movement) requires the unsolved
+    // .bin node-mapping table and is therefore disabled.
+    float anim_root_dx_ = 0.0f;
+    float anim_root_dy_ = 0.0f;
+    // Anchor: root position at frame 0 of the current animation (subtracted
+    // so the model doesn't snap to the .bin's world coordinates).
+    float anim_root_anchor_x_ = 0.0f;
+    float anim_root_anchor_y_ = 0.0f;
+    bool anim_anchor_set_ = false;
+    float prev_npivot_x_ = 0.0f;  // for step root motion (previous frame)
 };
 
 int main(int argc, char* argv[]) {
