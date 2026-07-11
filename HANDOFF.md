@@ -143,12 +143,14 @@ bash scripts/verify_main_compile.sh
 |-----|--------|
 | W | Up — Jump (W+D=front flip, W+A=back flip) |
 | A | Left — Back step (relative to facing) |
-| S | Down — Block (hold), or Sweep/LowPunch when attacking |
+| S | Down — Duck (hold), or Sweep/LowPunch/Elbow/DodgeKick when attacking |
 | D | Right — Forward step (relative to facing) |
-| O | Punch (D=heavy, A=spinning, W=upper, S=low) |
-| P | Kick (D=front, A=back, S=sweep) |
+| O | Punch (D=heavy, A=spinning, W=upper, S=low, S+A=elbow strike) |
+| P | Kick (D=front, A=back, S=sweep, S+D=dodge reverse kick) |
 | S+D | Forward roll (dodge) |
 | S+A | Back roll (dodge) |
+| S (hold) | Duck (crouch) |
+| Block | AUTOMATIC (when idle, not attacking) |
 | M | Toggle scroll menu |
 | T | Toggle dialog overlay |
 | N | New Game — go to Map |
@@ -157,6 +159,10 @@ bash scripts/verify_main_compile.sh
 | Esc | Quit / close overlay / back |
 
 **Facing**: character auto-faces the enemy (punching bag) every frame. When you walk past the enemy, the character turns around. Direction keys (A/D) are interpreted relative to facing: if facing right, D=forward; if facing left, A=forward. Root motion is inverted when facing left.
+
+**Root motion (X)**: pure threshold-based delta filtering. Sub-frame interpolated deltas (~3-8 per render) are applied; wrap-around deltas (≥30) are filtered. +66 per step_forward loop, +404 per forward_roll.
+
+**Root motion (Y)**: absolute offset from frame 0 NPivot Y (for jumps/flips). Smoothly decays to 0 after landing for asymmetric animations like back_flip.
 
 ---
 

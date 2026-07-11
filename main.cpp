@@ -354,11 +354,12 @@ public:
         std::printf("reSF2 initialized.\n");
         std::printf("Controls (original SF2 layout):\n");
         std::printf("  W/A/S/D     - Up / Left / Down / Right (movement + attack direction)\n");
-        std::printf("  O           - Punch (W=upper, S=low, D=heavy, A=spinning)\n");
-        std::printf("  P           - Kick (S=sweep, D=front, A=back)\n");
+        std::printf("  O           - Punch (W=upper, S=low, D=heavy, A=spinning, S+A=elbow)\n");
+        std::printf("  P           - Kick (S=sweep, D=front, A=back, S+D=dodge reverse)\n");
         std::printf("  W           - Jump (W+D=front flip, W+A=back flip)\n");
         std::printf("  S+D / S+A   - Forward roll / Back roll\n");
-        std::printf("  S (hold)    - Block\n");
+        std::printf("  S (hold)    - Duck (crouch)\n");
+        std::printf("  Block       - AUTOMATIC (when idle, not attacking)\n");
         std::printf("  M or click menu - Toggle menu\n");
         std::printf("  T           - Toggle dialog\n");
         std::printf("  N           - New game (go to Map)\n");
@@ -587,14 +588,16 @@ public:
         }
         bool step_min_played = step_play_time_ >= 400;
 
-        // === SPECIAL MOVES (jumps, rolls, flips) ===
+        // === SPECIAL MOVES (jumps, rolls, flips, duck) ===
         // From moves.xml templates:
         //   JumpUp: 1key|Up|Jump → W
         //   FrontFlip: 1key|UpForward|Jump → W+D (Up+Forward)
         //   BackFlip: 1key|UpBack|Jump|Retreat → W+A (Up+Back)
         //   ForwardRoll: 1key|DownForward → S+D (Down+Forward)
         //   BackRoll: 1key|DownBack|Retreat → S+A (Down+Back)
-        //   BackHandflip: 2key|Back|Retreat → A (hold? or double-tap)
+        //   Duck: 1key|Down → S (hold to crouch)
+        // Block is AUTOMATIC in the original game (when idle, not attacking).
+        // No key for block — removed the S=block binding.
         if (hit_anim_ == 0 && move_state_ < 10) {
             bool up_pressed = input.keys_just_pressed[(size_t)plat::Key::W] ||
                               input.keys_just_pressed[(size_t)plat::Key::ArrowUp];
@@ -646,15 +649,15 @@ public:
                 move_state_ = 10;
                 std::printf("[MOVE] Back Roll!\n");
             }
-            // Block: hold Down (S) without other direction
-            else if (key_down && !key_forward && !key_back && current_anim_ != "middle_block" && animations_.count("middle_block")) {
-                play_animation("middle_block", true);
-                current_move_ = "MiddleBlock";
-                move_state_ = 11;
+            // Duck: hold Down (S) without other direction
+            else if (key_down && !key_forward && !key_back && current_anim_ != "duck" && animations_.count("duck")) {
+                play_animation("duck", true);
+                current_move_ = "Duck";
+                move_state_ = 11;  // ducking state
             }
         }
 
-        // === STEP MOVEMENT (only when not in special move/block) ===
+        // === STEP MOVEMENT (only when not in special move/duck) ===
         // Forward = step_forward, Back = step_back (relative to facing)
         if (hit_anim_ == 0 && move_state_ < 10) {
             if (move_state_ == 0) {  // IDLE
@@ -687,7 +690,7 @@ public:
             move_state_ = 0;
             play_animation("fists_idle", true);
         }
-        // Exit block state when Down released
+        // Exit duck state when Down released
         if (move_state_ == 11 && !key_down) {
             move_state_ = 0;
             play_animation("fists_idle", true);
@@ -705,9 +708,11 @@ public:
         //   SpinningPunch: Back|Punch → A+O (Back+O)
         //   UpperCut: Up|Punch → W+O
         //   LowPunch: Down|Punch → S+O
+        //   ElbowStrike: DownBack|Punch → S+A+O (Down+Back+Punch)
         if (punch_pressed && hit_anim_ == 0 && move_state_ < 10) {
             std::string move_name, anim_name;
-            if (key_forward && !key_back) { move_name = "HeavyPunch"; anim_name = "heavy_punch"; }
+            if (key_down && key_back) { move_name = "ElbowStrike"; anim_name = "elbow_strike"; }
+            else if (key_forward && !key_back) { move_name = "HeavyPunch"; anim_name = "heavy_punch"; }
             else if (key_back && !key_forward) { move_name = "SpinningPunch"; anim_name = "spinning_punch"; }
             else if (key_up) { move_name = "UpperCut"; anim_name = "upper_cut"; }
             else if (key_down) { move_name = "LowPunch"; anim_name = "low_punch"; }
@@ -729,10 +734,11 @@ public:
         //   FrontKick: Forward|Kick → D+P (Forward+P)
         //   BackKick: Back|Kick → A+P (Back+P)
         //   Sweep: Down|Kick → S+P
-        //   LowKick: Down|Kick (short) → S+P
+        //   DodgeReverseKick: DownForward|Kick → S+D+P (Down+Forward+Kick)
         if (kick_pressed && hit_anim_ == 0 && move_state_ < 10) {
             std::string move_name, anim_name;
-            if (key_forward && !key_back) { move_name = "FrontKick"; anim_name = "front_kick"; }
+            if (key_down && key_forward) { move_name = "DodgeReverseKick"; anim_name = "dodge_reverse_kick"; }
+            else if (key_forward && !key_back) { move_name = "FrontKick"; anim_name = "front_kick"; }
             else if (key_back && !key_forward) { move_name = "BackKick"; anim_name = "back_kick"; }
             else if (key_down) { move_name = "Sweep"; anim_name = "sweep"; }
             else { move_name = "HighKick"; anim_name = "high_kick"; }
@@ -2010,7 +2016,10 @@ private:
             "forward_roll", "back_roll",
             "jump", "jump_away",
             "front_flip", "back_handflip",
-            // Blocks
+            "duck",  // crouch (S hold)
+            "elbow_strike",  // S+A+O (DownBack|Punch)
+            "dodge_reverse_kick",  // S+D+P (DownForward|Kick)
+            // Blocks (used for hit reactions, not player-triggered)
             "high_block", "middle_block", "overhead_block",
             "sweep_block",
             // Hit reactions
@@ -2272,17 +2281,26 @@ private:
         // NPivot Y differs from the rest pose (e.g., idle vs step).
         anim_npivot_bin_y_ = npivot_y;
 
-        // Root motion: smooth interpolated delta with wrap-around detection.
+        // Root motion: SUB-FRAME interpolated delta with strict wrap filter.
         //
-        // X root motion: delta accumulation. We use the INTERPOLATED npivot_x
-        // for smooth per-frame movement. Wrap-around (loop) is detected when
-        // frame_idx DECREASES (e.g., 15→0). The large wrap delta (~66) is
-        // filtered by threshold 33. Delta is inverted when facing left.
+        // X root motion: delta accumulation using INTERPOLATED npivot_x.
+        // At 60fps render / 30fps anim, each anim frame lasts ~2 render frames.
+        // Sub-frame deltas are small (~3-8 per anim frame, split across 2 renders).
+        // Wrap-around (loop) produces a single large delta (~66) when frame_idx
+        // goes from 15→0. We filter out any delta >= 33 (wrap threshold).
         //
-        // Y root motion: ABSOLUTE offset from frame 0 NPivot Y (not delta).
-        // This is set once per animation (anim_root_anchor_y_) and gives
-        // jump_y_offset_ = npivot_y - anchor_y. This naturally returns to 0
-        // at the end of jump/flip animations (frame 0 == frame N-1 in Y).
+        // PROBLEM with previous approach: wrap detection used prev_frame_idx_,
+        // but at 60fps render / 30fps anim, frame_idx sometimes DOESN'T change
+        // between renders (both renders see same frame_idx). The old check
+        // 'prev_frame_idx_ == frame_idx && anim_loop_' treated this as wrap and
+        // skipped the sub-frame delta — losing ~50% of movement.
+        //
+        // NEW: pure threshold-based filtering. No frame_idx wrap detection.
+        // - step_forward per-render delta: ~3-8 (sub-frame interpolation)
+        // - step_forward wrap delta: ~66 (filtered by threshold 30)
+        // - forward_roll per-render delta: ~15 (max)
+        // - forward_roll wrap delta: ~404 (filtered)
+        // Threshold 30 safely separates them.
         bool is_root_motion_anim = !anim_loop_ ||
             current_anim_ == "step_forward" || current_anim_ == "step_back" ||
             current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
@@ -2293,25 +2311,19 @@ private:
             current_anim_ == "front_kick" || current_anim_ == "back_kick" ||
             current_anim_ == "upper_cut" || current_anim_ == "high_punch";
 
-        // X root motion: delta accumulation
+        // X root motion: pure threshold-based delta
         if (is_root_motion_anim) {
             if (prev_npivot_set_) {
                 float delta = npivot_x - prev_npivot_x_;
-                // Wrap: ONLY when frame_idx decreased (true loop boundary).
-                // Do NOT treat "frame_idx unchanged" as wrap — that happens
-                // every other frame at 60fps render / 30fps anim and would
-                // skip valid interpolated deltas.
-                bool wrapped = (prev_frame_idx_ > frame_idx);
-                if (!wrapped && std::abs(delta) < 33.0f) {
+                // Filter out wrap-around deltas (>= 30 = loop boundary)
+                if (std::abs(delta) < 30.0f) {
                     player_pos_x_ += facing_right_ ? delta : -delta;
                 }
             }
             prev_npivot_x_ = npivot_x;
             prev_npivot_set_ = true;
-            prev_frame_idx_ = frame_idx;
         } else {
             prev_npivot_set_ = false;
-            prev_frame_idx_ = -1;
         }
 
         // Y root motion: absolute offset from frame 0 (for jumps/flips)
