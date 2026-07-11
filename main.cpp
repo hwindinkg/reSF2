@@ -108,6 +108,7 @@ static std::vector<std::filesystem::path> model_paths(const std::string& asset_r
         exe / ".." / ".." / "assets" / "models" / filename,
         exe / ".." / "assets" / "models" / filename,
         exe / "assets" / "models" / filename,
+        exe / ".." / ".." / "assets" / "animations" / "binary" / filename,  // for .bin search
     };
 }
 
@@ -713,7 +714,6 @@ private:
     }
 
     void load_atlas(const std::string& name, const std::string& loc) {
-        auto exe = get_exe_dir();
         auto root = std::filesystem::path(asset_root_);
         for (const auto& dir : {root/"assets"/"1536"/"locations"/loc,
                                  root/"assets"/"1536"/"textures",
@@ -722,7 +722,6 @@ private:
                                  root/"1536"/"textures",
                                  root/"1536",
                                  root/"assets",
-            exe / ".." / ".." / "assets" / "animations",  // repo assets
                                  root}) {
             auto pp = dir/(name+".plist"), pn = dir/(name+".png");
             if (std::filesystem::exists(pp) && std::filesystem::exists(pn)) {
@@ -1358,12 +1357,14 @@ private:
     // ---------- Animation loading ----------
     void load_animations() {
         auto root = std::filesystem::path(asset_root_);
+        auto exe = get_exe_dir();
         // Search for animation .bin files in multiple paths
         std::vector<std::filesystem::path> search_dirs = {
             root/"assets"/"animations"/"binary",
             root/"animations"/"binary",
             root/"assets"/"animations",
             root/"animations",
+            exe/".." / ".." / "assets" / "animations" / "binary",  // repo assets
         };
         
         // Load key animations (using actual game file names from moves.xml)
@@ -1412,7 +1413,7 @@ private:
             root/"assets"/"animations",
             root/"animations",
             root/"assets",
-            exe / ".." / ".." / "assets" / "animations",  // repo assets
+            exe/".." / ".." / "assets" / "animations",  // repo assets
         };
         
         std::string moves_path;
