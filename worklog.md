@@ -1126,3 +1126,40 @@ Stage Summary:
 - Floor: correct dimensions for rotated frames, no holes.
 - Movement: no facing change during active step.
 - Profile icon: correct un-rotation with swapped dimensions.
+
+---
+Task ID: stage-8.11
+Agent: main
+Task: Fix idle floating, step delay, Profile icon crop
+
+Work Log:
+- IDLE FLOATING FIX — NPivot Y normalization:
+  * Different animations have different NPivot Y values in .bin files:
+    fists_idle: NPivot Y = 87.40 (feet at Y=0.17/1.40)
+    step_forward: NPivot Y = 106.21 (feet at Y=1.33/2.24)
+  * render_body_model used fixed pivot_local_y = 169.48 (rest pose).
+    This caused feet to be at different world Y for different animations.
+  * Fix: store animated NPivot Y (anim_npivot_bin_y_) in update_animation.
+    In render_body_model, compute y_normalize = rest_y - anim_y.
+    world_cy = player_pos_y_ + y_normalize.
+  * Now feet position is consistent across all animations.
+
+- STEP DELAY FIX:
+  * Added +200ms delay between steps (STEP_DURATION_MS + 200 = 733ms total).
+  * step_cooldown_ now includes both step duration AND inter-step delay.
+  * This creates visible pause between steps matching original game.
+
+- PROFILE ICON CROP FIX:
+  * "Part of another button on left" = pre-cropped texture included
+    neighboring sprite from atlas.
+  * Root cause: using atlas_w/atlas_h (post-rotation) or swapped dimensions
+    didn't match the actual sprite size in atlas.
+  * Fix: use source_size_w/source_size_h (original untrimmed dimensions)
+    from plist when available. These are the TRUE original sprite dimensions.
+  * Applied to both load_atlas (location textures) and load_texture_atlas_to_hud.
+  * Un-rotation formula unchanged: sx = atlas_x + (fh-1-y), sy = atlas_y + x.
+
+Stage Summary:
+- Idle: feet on floor (NPivot Y normalized across animations).
+- Steps: 200ms delay between steps for natural rhythm.
+- Profile: correct crop using source_size_w/h (no neighboring sprite).
