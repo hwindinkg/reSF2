@@ -105,7 +105,7 @@ static std::vector<std::filesystem::path> model_paths(const std::string& asset_r
         root / "models" / filename,
         root / "assets" / "models" / filename,
         root / "assets" / "assets" / "models" / filename,  // sf2/assets/assets/models/
-        exe / ".." / ".." / "assets" / "models" / filename,
+        exe / ".." / ".." / ".." / "assets" / "models" / filename,
         exe / ".." / "assets" / "models" / filename,
         exe / "assets" / "models" / filename,
         exe / ".." / ".." / "assets" / "animations" / "binary" / filename,  // for .bin search
