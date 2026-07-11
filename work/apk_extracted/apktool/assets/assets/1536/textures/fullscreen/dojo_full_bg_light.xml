@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Images Scale="1.5">
- <Image File="textures/fullscreen/dojo_full_bg_light_left.jpg" X="-910" Y="-512" />
- <Image File="textures/fullscreen/dojo_full_bg_light_right.jpg" X="0" Y="-512" />
-</Images>
