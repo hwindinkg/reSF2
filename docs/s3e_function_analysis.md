@@ -1,142 +1,184 @@
 # reSF2 — S3E Function Analysis (from disassembly)
 
-## setNearestEnemy (0x101586F0 - 0x1015872D)
+## Source Binary: `Shadow Fight 2.s86` (PE32, i386, 6.95 MB)
+
+The s86 binary is NOT packed or encrypted. objdump can disassemble it directly.
+The Ghidra "bad instruction" warnings are due to anti-tamper junk bytes between
+functions (0xCC INT3 padding), NOT actual obfuscation of the code itself.
+
+## How to Get Readable Disassembly
+
+### Method 1: objdump (works immediately, no setup)
+```bash
+objdump -d -M intel --start-address=0xADDR --stop-address=0xADDR \
+  "Shadow Fight 2.s86"
+```
+
+### Method 2: Ghidra with correct settings
+1. Import as PE32
+2. Analysis options: enable "Aggressive Instruction Finder"
+3. The "bad instruction" warnings are INT3 (0xCC) padding between functions —
+   Ghidra sometimes misinterprets them. Use objdump for verification.
+
+### Method 3: IDA Pro
+Loads PE32 directly. Better at handling INT3 padding than Ghidra.
+
+## Key Functions Disassembled
+
+### Model::setNearestEnemy (0x101586F0 - 0x1015872D)
 
 ```asm
-; Input: EBX = model pointer, argument = enemy pointer
-101586F0: test eax,eax           ; check enemy ptr
-101586F2: je  0x101586F8
-101586F4: mov ecx,[ecx]          ; vtable dereference
-101586F6: jmp 0x101586FA
-101586F8: xor ecx,ecx            ; null enemy
-101586FA: mov [ebx+0x190],ecx    ; store enemy at model+0x190
-10158700: test ecx,ecx           ; if enemy != null
-10158702: je  0x1015871C
-10158704: mov eax,[ecx]          ; vtable
-10158706: mov eax,[eax+0x4]      ; method index 1 (isMirrored)
-10158709: call eax               ; call enemy->isMirrored()
-1015870B: test al,al             ; if enemy is mirrored
-1015870D: je  0x1015871C
+; Input: EBX = model, arg = enemy
+101586F0: test eax,eax            ; check enemy ptr
+101586FA: mov [ebx+0x190],ecx     ; store enemy at model+0x190
+10158700: test ecx,ecx            ; if enemy != null
+10158704: mov eax,[ecx]           ; vtable
+10158709: call eax                ; enemy->isMirrored()
 1015870F: push "Model::setNearestEnemy"  ; DEBUG LOG ONLY
-10158714: call log_function
-10158719: add esp,4
-1015871C: mov eax,[ebx+0x190]    ; load enemy ptr
-10158722: mov [ebx+0x120],eax    ; copy to model+0x120
-10158728: pop edi
-10158729: pop ebx
+1015871C: mov eax,[ebx+0x190]     ; enemy ptr
+10158722: mov [ebx+0x120],eax     ; copy to model+0x120
 1015872D: ret 4
 ```
 
-**Key findings:**
-- Enemy pointer stored at BOTH model+0x190 and model+0x120
-- String "Model::setNearestEnemy" is ONLY for debug logging (when enemy.isMirrored() == true)
-- This is why breakpoint at 0x1015870F didn't trigger — it only fires when the ENEMY is mirrored, not when the player turns
-- The function is called with 1 argument (ret 4), likely the enemy model pointer
+**Finding:** The string push at 0x1015870F is ONLY for debug logging (when
+enemy.isMirrored() == true). The actual function logic is the two MOV
+instructions storing the enemy pointer.
 
-## getPlayerAnimation (0x10166220 area)
+### Model::getModelAlign (0x10159780 - 0x101597D8) — FACING DIRECTION
 
 ```asm
-; At 0x101662F7: facing/mirroring check
-101662F7: mov al, [esi+0x54]         ; read mirrored flag from model+0x54
-101662FA: mov [ebp-0xd], al          ; save to local
-101662FD: lea eax, [edi+0x88]        ; enemy facing data
-10166303: push 0x103877FC            ; some constant
-10166308: push eax                   ; enemy facing ptr
-10166309: call FUN_1000cc00          ; check enemy facing direction
-1016630E: movzx ecx, al              ; result (0 or 1)
-10166316: cmp byte [ebp-0xd], 1      ; is player mirrored?
-1016631A: sete al                    ; al = (player_mirrored == 1)
-1016631D: cmp eax, ecx              ; compare player facing with enemy facing
+; Input: arg = type (1-4), ECX = model
+; Switch on type-1 (0-3):
+case 0: return model (self)
+case 1: return model+0x588
+case 2: return model+0x190       ; NEAREST ENEMY
+case 3: return model+0x220
 ```
 
-**Key findings:**
-- Model+0x54 = byte, mirrored flag (0 = facing right, 1 = facing left)
-- The game compares player's mirrored flag with enemy's facing direction
-- XOR 0x80000000 is used to negate floats (flip sign bit) — this is how X coordinates are mirrored
+**Finding:** The game gets the facing reference via `getModelAlign(type=2)`
+which returns the nearest enemy pointer (stored at model+0x190 by
+setNearestEnemy). The game then compares X coordinates of the player and
+enemy to determine facing direction.
 
-## Mirror System (from getPlayerAnimation + Ghidra)
+### ModelAnimation::playInfo (0x101650FC area) — ANIMATION UPDATE
 
-From the Ghidra decompilation of getPlayerAnimation:
+```asm
+101650FC: mov ecx,[ebx+0x20]       ; animation data
+10165100: lea edi,[ebx+0xe8]        ; animation container
+10165107: call 0x10104980           ; get current animation
+1016510E: call 0x10164f20           ; update animation frame
+10165115: call 0x10165c10           ; update nodes
+1016511D: call 0x10164c20           ; apply interpolation
+10165124: call 0x101661d0           ; finalize position
+10165129: mov al,[ebp+0x10]         ; mirrored flag
+1016512C: mov [ebx+0x7e],al         ; store mirrored flag
+1016512F: test al,al                ; if mirrored
+10165135: call 0x10165d80           ; apply mirror to nodes
+```
+
+**Finding:** Animation update calls a chain of functions:
+1. Get current animation from container (model+0xe8)
+2. Update frame (0x10164f20)
+3. Update nodes (0x10165c10)
+4. Apply interpolation (0x10164c20)
+5. Finalize position (0x101661d0)
+6. If mirrored flag (from arg, stored at model+0x7e), apply mirror (0x10165d80)
+
+### ModelAnimation::mirrorNodes (0x10164093 area)
+
+The function iterates over nodes and applies mirroring. From disassembly:
+```asm
+; Loop over nodes (ebx = start, ecx = end)
+101640F8: sar eax,0x2              ; count = (end - start) / 4
+10164125: push [ebp+0x8]           ; push mirror flag
+1016412A: call 0x100462e0          ; shouldMirror(node, flag)
+10164132: test al,al               ; if node should be mirrored
+10164134: je skip                  ; skip if not
+; ... apply X negation (XOR 0x80000000 pattern seen in getPlayerAnimation)
+```
+
+### ModelAnimation::getPlayerAnimation (0x1016622A area) — POSITION UPDATE
+
+From Ghidra decompilation + disassembly:
 ```c
-// At case 2 of switch:
-uVar12 = *(uint *)(unaff_ESI + 0xe0);  // load X coordinate as uint
-uVar12 = uVar12 ^ 0x80000000;          // XOR sign bit = negate float
-*(uint *)(unaff_EBP - 0x34) = uVar12;  // store negated X
+// At case 2 of switch (mirrored case):
+uVar12 = *(uint *)(model + 0xe0);    // load X as uint
+uVar12 = uVar12 ^ 0x80000000;        // XOR sign bit = negate float
+*(uint *)(local - 0x34) = uVar12;    // store negated X
 
-// At case 4:
-uVar5 = *(uint *)(unaff_ESI + 0xe0);   // load X
-uVar5 = uVar5;                          // (no XOR = keep original)
+// Position update formula:
+pos_x = (float)mirrored_flag * speed + old_pos_x;
+model->position = pos_x;
 ```
 
-**How mirroring works:**
-1. Float X coordinates are stored as IEEE 754
-2. XOR with 0x80000000 flips the sign bit → negates the float
-3. `node.x = -node.x` for all nodes when character faces left
-4. NPivot X is also negated, so root motion direction reverses naturally
-
-**Implication for reSF2:**
-Our approach of using `facing_right_ ? delta : -delta` is correct.
-The game does the same thing: negate X coordinates when mirrored.
-
-## Float Negation Pattern
-
-The game uses `XOR 0x80000000` to negate floats:
-```asm
-; Negate float in EAX:
-xor eax, 0x80000000    ; flip sign bit of IEEE 754 float
-```
-
-This is equivalent to `float f = -f;` in C/C++.
+**Finding:** Float negation via XOR 0x80000000. This is the standard IEEE 754
+trick to negate a float. Our `facing_right ? delta : -delta` is equivalent.
 
 ## Model Structure Offsets (from disassembly)
 
 | Offset | Type | Field |
 |--------|------|-------|
+| +0x20 | ptr | Animation data |
+| +0x50 | byte | (cleared to 0 on animation start) |
 | +0x54 | byte | Mirrored flag (0=right, 1=left) |
-| +0x68 | uint | Animation type (0-4, switch in getPlayerAnimation) |
-| +0x88 | ptr | Enemy facing data |
+| +0x68 | uint | Animation type (0-4, switch) |
+| +0x7e | byte | Mirrored flag (copy, set by playInfo) |
+| +0x80 | float | Updated position X (result of pos = dir * speed + old) |
+| +0xb4 | float | Speed/multiplier |
+| +0xb8 | float | Position offset Y |
+| +0xe0 | float | X coordinate (negated via XOR 0x80000000 for mirror) |
+| +0xe8 | ptr | Animation container (list of animations) |
 | +0x120 | ptr | Nearest enemy pointer (copy) |
 | +0x190 | ptr | Nearest enemy pointer (primary) |
-| +0xe0 | float | X coordinate (for mirroring via XOR) |
-| +0xe4 | float | X coordinate (alternate, for non-mirrored case) |
-| +0x6c | uint | Animation sub-type |
-| +0xb0 | uint | Model type |
-| +0xb4 | float | Speed/multiplier |
-| +0xb8 | float | Position offset |
-| +0x80 | float | Updated position (result of pos = dir * speed + old_pos) |
+| +0x220 | ptr | Some model reference (case 3 in getModelAlign) |
+| +0x45c | byte | Flag checked in setCurrentNode (skip if non-zero) |
+| +0x588 | ptr | Some model reference (case 1 in getModelAlign) |
+| +0x598 | ptr | Some model reference (returned by function at 0x10159770) |
 
-## Position Update Formula (from getPlayerAnimation)
+## How Auto-Facing Works (from disassembly)
 
-From Ghidra decompilation:
-```c
-fVar13 = (float)(int)*(char *)(unaff_ESI + 0x54) * *(float *)(unaff_EDI + 0xb4) +
-         *(float *)(unaff_EBP + -0x28);
-*(float *)(unaff_EBP + -0x28) = fVar13;
-fVar2 = *(float *)(unaff_EDI + 0xb8);
-fVar3 = *(float *)(unaff_EBP + -0x24);
-*(float *)(unaff_ESI + 0x80) = fVar13;
-*(float *)(unaff_EBP + -0x24) = fVar2 + fVar3;
-```
+1. `Model::setNearestEnemy(enemy)` stores enemy at model+0x190 and model+0x120
+2. When facing needs to update, game calls `Model::getModelAlign(type=2)`
+3. This returns the enemy pointer (model+0x190)
+4. Game compares player X with enemy X:
+   - If enemy.x > player.x → face right (mirrored = 0)
+   - If enemy.x < player.x → face left (mirrored = 1)
+5. When mirrored flag changes, `ModelAnimation::mirrorNodes` is called
+6. `mirrorNodes` iterates over skeleton nodes and negates X via XOR 0x80000000
+7. `ModelAnimation::getPlayerAnimation` applies the position update:
+   `pos = (float)mirrored_flag * speed + old_pos`
 
-Translated:
-```c
-// pos = mirrored_flag * speed + old_pos
-pos_x = (float)mirrored_flag * speed_x + old_pos_x;
-model->position = pos_x;
-// pos_y += offset_y
-pos_y = offset_y + old_pos_y;
-```
+## Root Motion Source
 
-**Key insight:** When `mirrored_flag` is 0 (facing right), `pos = 0 * speed + old_pos = old_pos` (no change).
-When `mirrored_flag` is 1 (facing left), `pos = 1 * speed + old_pos` (applies speed in the mirrored direction).
+The position update formula `pos = mirrored_flag * speed + old_pos` is NOT
+the root motion system. This is likely a screen-position adjustment based
+on facing direction.
 
-Wait, this doesn't match — `mirrored_flag` is a byte (0 or 1), so `(float)(int)mirrored_flag` is 0.0 or 1.0.
-This means: `pos = (0.0 or 1.0) * speed + old_pos`.
+The actual root motion comes from the **MoveInside** system, which aligns
+the character's NPivot with the animation's NPivot trajectory. The .bin
+animation files store absolute NPivot positions per frame, and the game
+uses these to displace the character.
 
-Actually, looking more carefully, this is likely:
-- When NOT mirrored: `pos = 0.0 * speed + old_pos` → no displacement
-- When mirrored: `pos = 1.0 * speed + old_pos` → adds speed
+## How to Get Better Decompilation
 
-This suggests the position update only applies when the character IS mirrored, which doesn't make sense for normal movement. The actual root motion likely comes from the MoveInside system (NPivot alignment), not from this position update formula.
+### Option 1: IDA Pro (best results)
+- Load s86 as PE32
+- IDA handles INT3 padding better than Ghidra
+- Hex-Rays decompiler produces cleaner C code
 
-This formula might be for a different purpose — perhaps adjusting the model's screen position based on facing, not root motion.
+### Option 2: Ghidra with fixes
+1. After analysis, run script to clear all INT3 (0xCC) padding
+2. Re-analyze from function entry points
+3. Use "Aggressive Instruction Finder" option
+
+### Option 3: Binary Ninja
+- Good middle ground between Ghidra and IDA
+- Handles PE32 well
+- Has decompiler addon
+
+### Option 4: Dynamic analysis (x32dbg/Cheat Engine)
+- Set breakpoint at function entry (NOT at string push)
+- For setNearestEnemy: breakpoint at 0x101586F0 (function start)
+- For getModelAlign: breakpoint at 0x10159780
+- For playInfo: breakpoint at 0x101650FC
+- Step through (F8) to see actual register values and data flow
