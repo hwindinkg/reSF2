@@ -2324,10 +2324,15 @@ private:
             }
         }
 
-        // Animation timing:
-        // .bin files are 30fps. anim_time_ accumulates real seconds.
-        // frame_f = anim_time_ * 30 gives current frame at 30fps.
-        // At 60fps render: 0.5 anim frames per render → smooth interpolation.
+        // Animation timing (from original game analysis):
+        // Game uses fixed timestep: 1/60 (0.01667) or 1/120 (0.00833).
+        // Animations advance by accumulating timestep into a float counter.
+        // .bin files store frame data at 30fps, but the game interpolates
+        // between frames at the physics rate.
+        //
+        // Simplified: anim_time_ = accumulated real seconds.
+        // frame_f = anim_time_ * 30.0 → 30fps animation playback.
+        // At 60fps render: 0.5 frames per render → smooth interpolation.
         // step_forward (16 frames) = 16/30 = 533ms per loop.
         float dt = dt_ms / 1000.0f;
         anim_time_ += dt;
@@ -2426,6 +2431,11 @@ private:
             current_anim_ == "upper_cut" || current_anim_ == "high_punch";
 
         if (is_root_motion_anim) {
+            // On first frame of new animation (prev_frame_idx_ == -1),
+            // sync step_start to current position.
+            if (prev_frame_idx_ == -1) {
+                step_start_player_x_ = player_pos_x_;
+            }
             // Detect loop wrap for looping animations
             if (anim_loop_ && prev_frame_idx_ >= 0 && prev_frame_idx_ > frame_idx) {
                 float last_npx, last_npy, last_npz;
@@ -2434,18 +2444,11 @@ private:
                     step_start_player_x_ += anim_facing_right_ ? cycle_disp : -cycle_disp;
                 }
             }
-            // Detect animation switch (prev_frame_idx_ == -1 means new animation)
-            // Sync step_start_player_x_ to current position so displacement
-            // is measured from where the character actually IS.
-            if (prev_frame_idx_ == -1) {
-                step_start_player_x_ = player_pos_x_;
-            }
             prev_frame_idx_ = frame_idx;
 
-            // Absolute positioning: player_pos = start + displacement
             float displacement = npivot_x - anim_root_anchor_x_;
             player_pos_x_ = step_start_player_x_ + (anim_facing_right_ ? displacement : -displacement);
-            // Clamp to location wall boundaries
+            // Clamp to walls
             if (location_ && location_->wall > 0 && location_->width > 0) {
                 const float X_OFFSET = 983.0f;
                 float left_bound = location_->wall - X_OFFSET;
@@ -2455,8 +2458,6 @@ private:
             }
         } else {
             prev_frame_idx_ = -1;
-            // Non-root-motion: keep step_start synced for next root-motion anim
-            step_start_player_x_ = player_pos_x_;
         }
 
         // Y root motion: absolute positioning (same approach as X)
