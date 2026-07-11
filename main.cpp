@@ -738,9 +738,9 @@ public:
         // Windows setups (the key is physically held, but GetAsyncKeyState
         // occasionally returns 'up' for one frame).
         if (hit_anim_ == 0 && move_state_ < 10) {
-            // Track key-held history for latching
-            if (key_forward) fwd_held_ms_ = 100; else if (fwd_held_ms_ > 0) fwd_held_ms_ -= dt;
-            if (key_back) back_held_ms_ = 100; else if (back_held_ms_ > 0) back_held_ms_ -= dt;
+            // Track key-held history for latching (200ms window for flicker tolerance)
+            if (key_forward) fwd_held_ms_ = 200; else if (fwd_held_ms_ > 0) fwd_held_ms_ -= (int)dt;
+            if (key_back) back_held_ms_ = 200; else if (back_held_ms_ > 0) back_held_ms_ -= (int)dt;
             bool fwd_latched = fwd_held_ms_ > 0;
             bool back_latched = back_held_ms_ > 0;
 
@@ -2316,34 +2316,37 @@ private:
         // NPivot Y differs from the rest pose (e.g., idle vs step).
         anim_npivot_bin_y_ = npivot_y;
 
-        // Root motion: ABSOLUTE approach using anim_root_anchor_x_.
+        // Root motion: ABSOLUTE POSITIONING approach.
         //
-        // Key insight: NPivot X in .bin is the character's WORLD X position
-        // in the animation's local coordinate space. The .bin stores NPivot
-        // going from 169.45 → 235.45 for step_forward (one step = +66 units).
+        // Instead of accumulating deltas (which is fragile — wrap-around,
+        // flicker, float drift), we use absolute positioning:
         //
-        // Approach: track the ANCHOR (frame 0 NPivot X) when the animation
-        // starts. Each frame, compute the displacement from the anchor:
+        // When an animation starts, we save:
+        //   step_start_player_x_ = player_pos_x_ at animation start
+        //   anim_root_anchor_x_ = NPivot X at frame 0
+        //
+        // Each frame:
         //   displacement = npivot_x - anim_root_anchor_x_
-        // The PLAYER's world position should advance by the CHANGE in this
-        // displacement from the previous frame:
-        //   player_pos_x_ += displacement - prev_root_offset_
+        //   player_pos_x_ = step_start_player_x_ + (facing_right_ ? displacement : -displacement)
         //
-        // For a looping animation (step_forward), when it wraps from frame 15
-        // back to frame 0, npivot_x jumps from 235.45 to 169.45. The anchor
-        // (169.45) doesn't change, so displacement goes from +66 back to 0.
-        // The delta (0 - 66 = -66) is the wrap-around. We detect this by
-        // checking if the delta is large (>= 30) and skip it.
+        // For looping animations (step_forward), when the animation wraps:
+        //   - displacement jumps from +66 back to 0
+        //   - player_pos_x_ jumps from start+66 back to start
+        //   - To prevent this, we COMMIT the step at the wrap point:
+        //     step_start_player_x_ += 66 (or -66 for step_back)
+        //   - Now displacement starts at 0 again, player_pos = new_start + 0
         //
-        // But we ALSO need to UPDATE the anchor when the animation loops,
-        // so that the next cycle's displacement is measured from the new
-        // starting position. We do this by detecting a large negative delta
-        // (wrap) and shifting the anchor by +66 (one step's worth).
+        // Wrap detection: frame_idx decreased (15 → 0)
+        // Commit amount: NPivot[last] - NPivot[0] = 235.45 - 169.45 = 66
+        //              = anim_root_anchor_x_ + full_cycle_displacement
+        //              But easier: = NPivot at frame 0 of NEXT cycle - NPivot at frame 0 of THIS cycle
+        //              Since it's the same animation, it's always 0. So we commit
+        //              the displacement at the last frame before wrap.
         //
-        // For non-looping animations (forward_roll, jump, etc.), the anchor
-        // stays fixed and the full displacement is applied once.
-        //
-        // Mirror: when facing left, delta is inverted.
+        // For non-looping animations (forward_roll, jump, etc.):
+        //   - No wrap, displacement goes from 0 to final value (e.g. +404 for roll)
+        //   - player_pos_x_ = step_start_player_x_ + displacement (applied smoothly)
+        //   - When animation ends, step_start_player_x_ already includes the full displacement
         bool is_root_motion_anim = !anim_loop_ ||
             current_anim_ == "step_forward" || current_anim_ == "step_back" ||
             current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
@@ -2355,40 +2358,44 @@ private:
             current_anim_ == "upper_cut" || current_anim_ == "high_punch";
 
         if (is_root_motion_anim) {
-            float displacement = npivot_x - anim_root_anchor_x_;
-            float delta = displacement - prev_root_offset_;
-            // Filter out wrap-around (large delta from animation loop)
-            if (std::abs(delta) < 30.0f) {
-                player_pos_x_ += facing_right_ ? delta : -delta;
+            // Detect loop wrap for looping animations
+            if (anim_loop_ && prev_frame_idx_ >= 0 && prev_frame_idx_ > frame_idx) {
+                // Animation wrapped (e.g., frame 15 → frame 0)
+                // Commit the full cycle displacement to step_start_player_x_
+                // The displacement at the last frame was (NPivot[last] - anchor)
+                // We need to add that to step_start_player_x_ so the next cycle
+                // starts from the advanced position.
+                // NPivot[last] - NPivot[0] = total displacement per cycle
+                float last_npx, last_npy, last_npz;
+                if (anim.get_node_pos(anim.frame_count - 1, npivot_idx, last_npx, last_npy, last_npz)) {
+                    float cycle_disp = last_npx - anim_root_anchor_x_;
+                    step_start_player_x_ += facing_right_ ? cycle_disp : -cycle_disp;
+                }
             }
-            prev_root_offset_ = displacement;
+            prev_frame_idx_ = frame_idx;
+
+            // Absolute positioning: player_pos = start + displacement
+            float displacement = npivot_x - anim_root_anchor_x_;
+            player_pos_x_ = step_start_player_x_ + (facing_right_ ? displacement : -displacement);
         } else {
-            prev_root_offset_ = 0.0f;
+            prev_frame_idx_ = -1;
         }
 
-        // Y root motion: delta accumulation (for jumps/flips)
-        // Uses same threshold approach as X. NPivot Y goes up during jump
-        // (character leaves ground) and returns to ~same value at landing.
-        // For back_flip: Y[0]=92, Y[mid]=266, Y[last]=106 — asymmetric, but
-        // delta accumulation handles it correctly (rises, then falls back).
+        // Y root motion: absolute positioning (same approach as X)
+        // For jumps/flips: player Y offset = NPivot Y - frame 0 NPivot Y
+        // This naturally returns to 0 at the end (frame 0 Y == frame N-1 Y
+        // for symmetric jumps like jump, front_flip).
+        // For back_flip (Y[0]=92, Y[last]=106): offset goes 0 → +174 → +14.
+        // The +14 residual is handled by the smooth decay below.
         bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                             current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                             current_anim_ == "back_handflip");
-        if (is_jump_anim) {
-            if (prev_npivot_y_set_) {
-                float dy = npivot_y - prev_npivot_y_;
-                // Filter out large deltas (animation boundary, non-looping)
-                if (std::abs(dy) < 30.0f) {
-                    jump_y_offset_ += dy;
-                }
-            }
-            prev_npivot_y_ = npivot_y;
-            prev_npivot_y_set_ = true;
+        if (is_jump_anim && anim_anchor_set_) {
+            jump_y_offset_ = npivot_y - anim_root_anchor_y_;
         } else {
             // Non-jump: smoothly decay to 0
             jump_y_offset_ *= 0.80f;
             if (std::abs(jump_y_offset_) < 0.5f) jump_y_offset_ = 0;
-            prev_npivot_y_set_ = false;
         }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
@@ -2464,6 +2471,9 @@ private:
             prev_npivot_set_ = false;
             prev_npivot_y_set_ = false;
             prev_frame_idx_ = -1;
+            // Save current player position as the start point for root motion.
+            // update_animation() will set player_pos_x_ = step_start_player_x_ + displacement
+            step_start_player_x_ = player_pos_x_;
             // Reset jump offset when switching TO a non-jump animation
             if (name != "jump" && name != "jump_away" &&
                 name != "front_flip" && name != "back_flip" &&
