@@ -408,44 +408,45 @@ public:
             //
             // The animation plays fully (16 frames at 30fps ≈ 533ms) before
             // a new step can start. This creates the visible delay between steps.
-            // We do NOT move the player manually — the root motion from the
-            // animation drives the movement.
-            //
-            // During attacks, movement is BLOCKED.
+            // When the key is held, steps repeat continuously.
             
             bool want_move_left = input.keys_down[(size_t)plat::Key::A] ||
                                   input.keys_down[(size_t)plat::Key::ArrowLeft];
             bool want_move_right = input.keys_down[(size_t)plat::Key::D] ||
                                    input.keys_down[(size_t)plat::Key::ArrowRight];
             
-            // Step cooldown: prevents starting a new step while one is playing.
-            // step_forward/step_back = 16 frames at 30fps = ~533ms.
-            const uint32_t STEP_DURATION_MS = 533;
-            
             // Only allow movement if not attacking
             if (hit_anim_ == 0) {
                 if (want_move_left && !want_move_right) {
                     facing_right_ = false;
-                    // Only start a new step if cooldown expired and we're idle
-                    if (step_cooldown_ == 0 && current_anim_ == "fists_idle" &&
-                        animations_.count("step_back")) {
-                        play_animation("step_back", false);  // non-looping!
-                        step_cooldown_ = STEP_DURATION_MS;
+                    // Start a new step if: cooldown expired AND currently idle
+                    // OR currently in a finished step animation
+                    bool can_step = (step_cooldown_ == 0) &&
+                                   (current_anim_ == "fists_idle" ||
+                                    current_anim_ == "step_back" ||
+                                    current_anim_ == "step_forward");
+                    if (can_step && animations_.count("step_back")) {
+                        play_animation("step_back", false);
+                        step_cooldown_ = 533;  // 16 frames at 30fps
                     }
                 } else if (want_move_right && !want_move_left) {
                     facing_right_ = true;
-                    if (step_cooldown_ == 0 && current_anim_ == "fists_idle" &&
-                        animations_.count("step_forward")) {
-                        play_animation("step_forward", false);  // non-looping!
-                        step_cooldown_ = STEP_DURATION_MS;
+                    bool can_step = (step_cooldown_ == 0) &&
+                                   (current_anim_ == "fists_idle" ||
+                                    current_anim_ == "step_back" ||
+                                    current_anim_ == "step_forward");
+                    if (can_step && animations_.count("step_forward")) {
+                        play_animation("step_forward", false);
+                        step_cooldown_ = 533;
                     }
                 } else {
                     // Not moving — return to idle when step finishes
-                    if (current_anim_ == "step_forward" || current_anim_ == "step_back") {
-                        if (step_cooldown_ == 0) {
-                            play_animation("fists_idle", true);
-                        }
+                    if ((current_anim_ == "step_forward" || current_anim_ == "step_back") &&
+                        step_cooldown_ == 0) {
+                        play_animation("fists_idle", true);
                     } else if (current_anim_ != "fists_idle" &&
+                               current_anim_ != "step_forward" &&
+                               current_anim_ != "step_back" &&
                                current_anim_.find("punch") == std::string::npos &&
                                current_anim_.find("kick") == std::string::npos &&
                                current_anim_.find("cut") == std::string::npos) {
@@ -572,9 +573,9 @@ public:
                                     float limb_wy = player_pos_y_ + (limb_ly - pivot_ly) * 0.9f;
                                     
                                     // Bag center position (use Verlet node positions for accuracy)
-                                    // Y is inverted: params.xml Y-DOWN → world Y-UP
+                                    // Same coordinate system as player — no Y-invert
                                     float bag_cx = location_->enemy_x - 857.0f;
-                                    float bag_cy = -location_->enemy_y + 50.0f;
+                                    float bag_cy = location_->enemy_y - 45.0f + 50.0f;
                                     // Check against the bag's NPivot Verlet position (more accurate)
                                     auto bv_it = bag_verlet_.find("NPivot");
                                     if (bv_it != bag_verlet_.end()) {
@@ -725,13 +726,20 @@ private:
         load_menu_textures();
         load_hud_font();
         if (location_) {
-            // Use PlayerPositionX/Y from params.xml.
+            // Player position from params.xml.
             // params.xml uses Y-DOWN (Y=0 at top, positive Y = down).
-            // Our world is Y-UP (positive Y = up). Invert Y.
-            // Player at y=-93 in params → world y=+93 (above center).
-            // Floor at y=225 in params → world y=-225 (below center, correct).
-            player_pos_x_ = location_->player_x - 857.0f;  // 690 - 857 = -167
-            player_pos_y_ = -location_->player_y;  // invert Y
+            // Our world is Y-UP (positive Y = up). Location images are Y-inverted
+            // in render_location (world_y = -img.y). Player Y is NOT inverted
+            // because the player/enemy positions use a different reference point.
+            //
+            // The floor (layer_3) is at img.y=225 in params → world_y=-225.
+            // Player NPivot at params y=-93. Player feet are ~87 units below
+            // NPivot (model: NPivot=169.48, NToe≈72, diff≈97, ×0.9 scale=87).
+            // For feet to touch floor: player_pos_y_ - 87 = -225
+            // → player_pos_y_ = -225 + 87 = -138.
+            // Offset from params value: -138 - (-93) = -45.
+            player_pos_x_ = location_->player_x - 857.0f;
+            player_pos_y_ = location_->player_y - 45.0f;  // align feet with floor
         }
         // Camera follows player with offset (player on left third)
         cam_x_ = player_pos_x_ + 200.0f;
@@ -955,18 +963,9 @@ private:
                 float tw = (float)atlas.atlas->metadata.texture_w;
                 float th = (float)atlas.atlas->metadata.texture_h;
                 // UV coordinates for the atlas frame.
-                // When frame.rotated=true, the sprite is stored rotated 90° CW
-                // in the atlas. The atlas region is (atlas_h wide × atlas_w tall),
-                // but the original sprite is (atlas_w wide × atlas_h tall).
-                // We handle rotation by swapping the UV coordinates so the
-                // texture appears un-rotated when rendered on a quad of the
-                // ORIGINAL dimensions (img.w × img.h).
                 float u0, v0, u1, v1;
                 if (frame.rotated) {
-                    // Rotated 90° CW: swap U and V to un-rotate
-                    // Atlas region: (atlas_x, atlas_y) to (atlas_x + atlas_h, atlas_y + atlas_w)
-                    // Original sprite: (atlas_w wide × atlas_h tall)
-                    // To un-rotate, map: dst(u,v) → src(v, 1-u) in atlas space
+                    // Rotated 90° CW: swap w/h in UV space to un-rotate
                     u0 = frame.atlas_x / tw;
                     v0 = frame.atlas_y / th;
                     u1 = (frame.atlas_x + frame.atlas_h) / tw;
@@ -981,17 +980,11 @@ private:
                 // Y is inverted: params.xml uses Y-DOWN, our world is Y-UP.
                 float world_y = -img.y;
                 float world_x = img.x - parallax_shift;
-                // For rotated frames, swap quad dimensions to match the
-                // un-rotated sprite (atlas_w × atlas_h instead of img.w × img.h).
+                // Use img.w × img.h for quad dimensions (the intended display size).
+                // Do NOT swap dimensions for rotated frames — the UV mapping
+                // handles the rotation.
                 float quad_w = img.w;
                 float quad_h = img.h;
-                if (frame.rotated) {
-                    // The original sprite dimensions are (atlas_w × atlas_h),
-                    // which is the SWAP of the stored (atlas_h × atlas_w).
-                    // Use the original sprite dimensions for the quad.
-                    quad_w = (float)frame.atlas_w;
-                    quad_h = (float)frame.atlas_h;
-                }
                 float px = world_x - quad_w / 2.0f;
                 float py = world_y - quad_h / 2.0f;  // bottom-left (world Y-UP: +Y = up)
                 // For parallax layers (factor < 1), tile the image horizontally
@@ -1530,9 +1523,10 @@ private:
         bag_verlet_.clear();
         bag_constraints_.clear();
         // World position of the bag's NPivot (where it hangs in the world)
-        // Y is inverted: params.xml Y-DOWN → world Y-UP
+        // Same coordinate system as player — no Y-invert, use params Y directly
+        // with the same -45 offset to align with the floor.
         float bag_cx = location_ ? (location_->enemy_x - 857.0f) : 0.0f;
-        float bag_cy = location_ ? (-location_->enemy_y + 50.0f) : 0.0f;
+        float bag_cy = location_ ? (location_->enemy_y - 45.0f + 50.0f) : 0.0f;
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
         // Initialize nodes: world position = bag_center + (node_local - NPivot_local)
@@ -1638,10 +1632,10 @@ private:
         // Bag NPivot Y in model space = 109.0
         // The bag hangs from Node12 (Y=335) which is fixed at ceiling
         // Place bag so NPivot is at enemy_y
-        // Y is inverted: params.xml Y-DOWN → world Y-UP
+        // Same coordinate system as player — no Y-invert
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
-        float bag_cy = -location_->enemy_y + 50.0f;  // invert Y, offset so bag hangs properly
+        float bag_cy = location_->enemy_y - 45.0f + 50.0f;  // align with floor + offset
         
         // === BAG RENDERING (Verlet physics) ===
         // The bag's skeleton nodes are simulated with Verlet integration.
@@ -1948,19 +1942,31 @@ private:
         // Calculate current frame (with looping)
         float frame_f = anim_time_ * 30.0f;
         int frame_idx = (int)frame_f;
+        bool anim_finished = false;
         if (anim_loop_) {
             if (anim.frame_count > 0)
                 frame_idx = frame_idx % anim.frame_count;
         } else if (frame_idx >= anim.frame_count) {
             frame_idx = anim.frame_count - 1;
+            anim_finished = true;
         }
         if (frame_idx < 0) frame_idx = 0;
 
-        int next_idx = anim.frame_count > 0
-            ? ((frame_idx + 1) % anim.frame_count) : 0;
-        float alpha = frame_f - (int)frame_f;
-        if (alpha < 0) alpha = 0;
-        if (alpha > 1) alpha = 1;
+        // For non-looping animations that have finished, don't interpolate
+        // with frame 0 (which would cause wrap-around and backward movement).
+        // Instead, stay exactly at the last frame.
+        int next_idx;
+        float alpha;
+        if (anim_finished) {
+            next_idx = frame_idx;
+            alpha = 0.0f;
+        } else {
+            next_idx = anim.frame_count > 0
+                ? ((frame_idx + 1) % anim.frame_count) : 0;
+            alpha = frame_f - (int)frame_f;
+            if (alpha < 0) alpha = 0;
+            if (alpha > 1) alpha = 1;
+        }
 
         // Get NPivot position at current frame (for root offset)
         float npx0, npy0, npz0, npx1, npy1, npz1;
@@ -2161,15 +2167,14 @@ private:
                 for (int x = 0; x < fw; ++x) {
                     int sx, sy;
                     if (frame.rotated) {
-                        // Frame is stored rotated 90° CW in atlas.
-                        // To un-rotate (90° CCW), destination (x,y) maps to:
-                        //   source_x = atlas_x + y
-                        //   source_y = atlas_y + (fw - 1 - x)
-                        // This is because 90° CW rotation maps:
-                        //   original(x,y) → stored(y, fw-1-x)
-                        // So inverse: stored(sx,sy) → original(sy-atlas_y, fw-1-(sx-atlas_x))
+                        // Cocos2d stores rotated frames rotated 90° CW.
+                        // To un-rotate, we need to figure out the correct mapping.
+                        // After testing, the correct formula is:
+                        //   sx = atlas_x + y
+                        //   sy = atlas_y + x
+                        // (90° CCW un-rotation without flip)
                         sx = frame.atlas_x + y;
-                        sy = frame.atlas_y + (fw - 1 - x);
+                        sy = frame.atlas_y + x;
                     } else {
                         sx = frame.atlas_x + x;
                         sy = frame.atlas_y + y;
