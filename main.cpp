@@ -402,61 +402,54 @@ public:
                 init_location();
             }
         } else if (state_ == GameState::Location) {
-            // === MOVEMENT SYSTEM (state machine, immune to input flicker) ===
-            // Use a movement state: IDLE, MOVING_LEFT, MOVING_RIGHT
-            // Once moving, stay in that state until key is released
-            // for a SUSTAINED period (10+ frames).
-            // This is completely immune to per-frame input flicker.
+            // === MOVEMENT SYSTEM (state machine using just_released) ===
+            // glfwGetKey() on this Windows setup returns GLFW_RELEASE for
+            // 10+ consecutive frames even when key is physically held.
+            // Using keys_down is unreliable. Instead, use keys_just_released
+            // which only fires ONCE when the key is actually released.
+            // Once moving, stay moving until keys_just_released fires.
             
-            bool key_left = input.keys_down[(size_t)plat::Key::A] ||
-                            input.keys_down[(size_t)plat::Key::ArrowLeft];
-            bool key_right = input.keys_down[(size_t)plat::Key::D] ||
-                             input.keys_down[(size_t)plat::Key::ArrowRight];
+            bool key_left_down = input.keys_down[(size_t)plat::Key::A] ||
+                                 input.keys_down[(size_t)plat::Key::ArrowLeft];
+            bool key_right_down = input.keys_down[(size_t)plat::Key::D] ||
+                                  input.keys_down[(size_t)plat::Key::ArrowRight];
+            bool key_left_released = input.keys_just_released[(size_t)plat::Key::A] ||
+                                     input.keys_just_released[(size_t)plat::Key::ArrowLeft];
+            bool key_right_released = input.keys_just_released[(size_t)plat::Key::D] ||
+                                      input.keys_just_released[(size_t)plat::Key::ArrowRight];
             
-            // Update no-key counter
-            if (key_left || key_right) {
-                no_key_frames_ = 0;
-            } else {
-                no_key_frames_++;
-            }
-            
-            // State machine — only change state on SUSTAINED input
-            // Once in MOVING state, require 10 frames of no key to go back to IDLE
             if (hit_anim_ == 0) {
                 if (move_state_ == 0) {  // IDLE
-                    if (key_left && !key_right) {
+                    if (key_left_down && !key_right_down) {
                         move_state_ = 1;  // → MOVING_LEFT
                         facing_right_ = false;
-                        std::printf("[STATE] IDLE→LEFT (L=%d R=%d)\n", (int)key_left, (int)key_right);
                         play_animation("step_back", true);
-                    } else if (key_right && !key_left) {
+                    } else if (key_right_down && !key_left_down) {
                         move_state_ = 2;  // → MOVING_RIGHT
                         facing_right_ = true;
-                        std::printf("[STATE] IDLE→RIGHT (L=%d R=%d)\n", (int)key_left, (int)key_right);
                         play_animation("step_forward", true);
                     }
                 } else if (move_state_ == 1) {  // MOVING_LEFT
-                    if (key_right && !key_left) {
+                    // Only exit if key A is ACTUALLY released (just_released fires once)
+                    if (key_left_released) {
+                        move_state_ = 0;  // → IDLE
+                        play_animation("fists_idle", true);
+                    } else if (key_right_down && !key_left_down) {
                         move_state_ = 2;  // → MOVING_RIGHT
                         facing_right_ = true;
-                        std::printf("[STATE] LEFT→RIGHT\n");
                         play_animation("step_forward", true);
-                    } else if (no_key_frames_ > 10) {
-                        move_state_ = 0;  // → IDLE
-                        std::printf("[STATE] LEFT→IDLE (no_key=%d)\n", no_key_frames_);
-                        play_animation("fists_idle", true);
                     }
+                    // Ignore keys_down flicker — stay in MOVING_LEFT
                 } else if (move_state_ == 2) {  // MOVING_RIGHT
-                    if (key_left && !key_right) {
+                    if (key_right_released) {
+                        move_state_ = 0;  // → IDLE
+                        play_animation("fists_idle", true);
+                    } else if (key_left_down && !key_right_down) {
                         move_state_ = 1;  // → MOVING_LEFT
                         facing_right_ = false;
-                        std::printf("[STATE] RIGHT→LEFT\n");
                         play_animation("step_back", true);
-                    } else if (no_key_frames_ > 10) {
-                        move_state_ = 0;  // → IDLE
-                        std::printf("[STATE] RIGHT→IDLE (no_key=%d)\n", no_key_frames_);
-                        play_animation("fists_idle", true);
                     }
+                    // Ignore keys_down flicker — stay in MOVING_RIGHT
                 }
             }
             
@@ -470,9 +463,9 @@ public:
             if (input.keys_just_pressed[(size_t)plat::Key::Space] && hit_anim_ == 0) {
                 std::string move_name, anim_name;
                 
-                if (key_right) {
+                if (key_right_down) {
                     move_name = "DoublePunch"; anim_name = "double_punch";
-                } else if (key_left) {
+                } else if (key_left_down) {
                     move_name = "SpinningPunch"; anim_name = "spinning_punch";
                 } else if (input.keys_down[(size_t)plat::Key::W] || input.keys_down[(size_t)plat::Key::ArrowUp]) {
                     move_name = "UpperCut"; anim_name = "upper_cut";
@@ -501,9 +494,9 @@ public:
                 std::string move_name, anim_name;
                 if (input.keys_down[(size_t)plat::Key::S] || input.keys_down[(size_t)plat::Key::ArrowDown]) {
                     move_name = "Sweep"; anim_name = "sweep";
-                } else if (key_left) {
+                } else if (key_left_down) {
                     move_name = "BackKick"; anim_name = "back_kick";
-                } else if (key_right) {
+                } else if (key_right_down) {
                     move_name = "FrontKick"; anim_name = "front_kick";
                 } else {
                     move_name = "HighKick"; anim_name = "high_kick";
