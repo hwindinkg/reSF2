@@ -417,11 +417,15 @@ public:
                 if (want_move_left && !want_move_right) {
                     facing_right_ = false;
                     if (current_anim_ != "step_back" && animations_.count("step_back")) {
+                        std::printf("[MOVE] D → step_back (was %s, L=%d R=%d)\n",
+                                    current_anim_.c_str(), (int)want_move_left, (int)want_move_right);
                         play_animation("step_back", true);  // LOOP
                     }
                 } else if (want_move_right && !want_move_left) {
                     facing_right_ = true;
                     if (current_anim_ != "step_forward" && animations_.count("step_forward")) {
+                        std::printf("[MOVE] D → step_forward (was %s, L=%d R=%d)\n",
+                                    current_anim_.c_str(), (int)want_move_left, (int)want_move_right);
                         play_animation("step_forward", true);  // LOOP
                     }
                 } else {
@@ -430,6 +434,8 @@ public:
                         current_anim_.find("punch") == std::string::npos &&
                         current_anim_.find("kick") == std::string::npos &&
                         current_anim_.find("cut") == std::string::npos) {
+                        std::printf("[MOVE] → fists_idle (was %s, L=%d R=%d)\n",
+                                    current_anim_.c_str(), (int)want_move_left, (int)want_move_right);
                         play_animation("fists_idle", true);
                     }
                 }
