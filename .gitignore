@@ -7,3 +7,10 @@ work/sf2_data.7z
 work/
 upload/
 tool-results/
+
+# Build artifacts and local prefixes
+.local-prefix/
+build-full/
+build-scene/
+build/
+*.o

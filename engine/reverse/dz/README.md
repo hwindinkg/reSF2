@@ -1,38 +1,85 @@
 # DZ (Marmalade derbh) decompression — RE notes
 
-## Status: 90% complete (blocked on init_array constructor setup)
+## Status: Container format fully decoded. Compression algorithm identified (arithmetic/range coding). Decompressor implementation blocked on ARM emulation setup.
 
-## What we know
+## Corrected container format (this session)
 
-### The .dz file format (DTRZ container)
-- Header: `DTRZ` + u16 num_files + u16 num_dirs + u8 version
-- Names list: null-terminated strings (files + dirs)
-- Dir assignment table: 224 x 6 bytes (name_idx + sentinel + parent_dir)
-- File table: 120 x 16 bytes (4 x u24 LE value + u8 type/CRC byte)
-  - field 0: u24=0, u8=CRC
-  - field 1: u24=offset, u8=CRC
-  - field 2: u24=comp_size, u8=CRC
-  - field 3: u24=uncomp_size, u8=0x04 (DZ compression type)
-- Data section: DZ-compressed file payloads
+The previous parser (parse_dz.py) had the file table field order wrong. The correct format, verified by dumping raw bytes and checking offset/size consistency:
 
-### The DZ algorithm
-- Located in `libs3e_android.so` at function 0x51f60 (read handler)
-- Actual decode step at 0x389f8 (called from read handler)
+### DTRZ header
+- 4 bytes: `DTRZ` magic
+- u16 LE: num_files
+- u16 LE: num_dirs
+- u8: version (0)
+
+### Names section
+- num_files null-terminated UTF-8 strings (file names, in order)
+- num_dirs null-terminated UTF-8 strings (directory names)
+
+### File attribute table
+- num_files × 6 bytes (purpose unknown — possibly folder index + flags + CRC)
+
+### Lengths header
+- 4 bytes (two u16 LE values — possibly total comp/uncomp sizes or block counts)
+
+### File table (num_files × 16 bytes)
+Each 16-byte entry is 4 fields of (u24 LE value + u8):
+
+| Field | Bytes | u24 value    | u8 byte     |
+|-------|-------|--------------|-------------|
+| 0     | 0-3   | uncomp_size  | CRC         |
+| 1     | 4-7   | data_offset  | CRC         |
+| 2     | 8-11  | comp_size    | **type**    |
+| 3     | 12-15 | reserved (0) | CRC         |
+
+**Type values observed:**
+- `4` — all 120 files in files.dz use this type
+- `8` — all 557 files in animations.dz use this type
+- Both are DZ compression variants (the algorithm is the same; the type byte may indicate a parameter/variant)
+
+### Data section
+Starts immediately after the file table. All offsets in the file table are relative to the start of this section.
+
+**Key finding: DZ is a STREAMING compressor.** File offsets overlap:
+- files_list.xml: off=3, comp=23, uncomp=25
+- settings.xml: off=3, comp=23, uncomp=28 (same offset/comp, different uncomp!)
+- localization.xml: off=4, comp=27, uncomp=348
+
+This means the entire data section is one continuous compressed stream. Each file's "offset" is the position in the stream where that file's decoding STARTS, and the decompressor state carries over between files. To decompress file N, you must first decode all previous files 0..N-1.
+
+## Entropy analysis (this session)
+
+Shannon entropy of DZ-compressed blocks:
+- Small files (comp < 50 bytes): 4.2–4.7 bits/byte
+- Medium files (comp 100–500 bytes): 6.8–7.6 bits/byte
+- Large files (comp > 500 bytes): 7.5–7.9 bits/byte
+
+**Conclusion:** High entropy for larger blocks confirms this is real compression (arithmetic/range coding as documented), NOT XOR obfuscation. The low entropy for tiny files is expected — arithmetic coding has fixed overhead for initialization.
+
+## The DZ algorithm (from ARM disassembly)
+
+- Located in `libs3e_android.so`:
+  - Read handler: function 0x51f60
+  - Actual decode step: function 0x389f8 (called from read handler)
 - Uses arithmetic/range coding with:
   - 5-byte context window (last 5 decoded bytes)
   - 32-bit hash from window: `window[1]<<24 | window[2]<<16 | window[3]<<8 | window[4]`
   - CRC32 table (poly 0x04C11DB7, big-endian) for context hashing
   - Probability model with reference tables (RefOffsetTables, RefLengthTables)
+  - LZ77-style match references
 
 ### Function pointer table
-- .data section at 0xc3000 contains compression coder function pointers:
-  - type=1 → 0x000b3358 (Copy coder?)
-  - type=2 → 0x000b3368 (ZLib coder)
-  - type=3 → 0x000b3370 (BZip coder)
-  - type=4 → 0x000b3378 (DZ coder)
-  - type=5 → 0x000b3380 (LZMA coder)
+.data section at 0xc3000 contains compression coder function pointers:
+- type=1 → 0x000b3358 (Copy coder)
+- type=2 → 0x000b3368 (ZLib coder)
+- type=3 → 0x000b3370 (BZip coder)
+- type=4 → 0x000b3378 (DZ coder)
+- type=5 → 0x000b3380 (LZMA coder)
 
-### ARM emulation via Unicorn
+(Type 8 observed in animations.dz is not in this table — it may be a variant of type 4, or a different coder pointer that's set up at runtime.)
+
+## ARM emulation via Unicorn — blocked
+
 - libs3e_android.so loads correctly into Unicorn ARM emulator
 - ELF relocations applied (2095 relocations)
 - init_array constructors: 8 functions at 0xd830-0xdac8
@@ -40,74 +87,28 @@
 - s3eCompressionDecompInit returns a pointer (0xc8592) instead of type index (1-4)
   - This is because the init_array constructors don't fully set up the
     function pointer table at 0xc8578
-  - The DZ coder init function pointer (0x000b3378) was manually set
-  - But the full init path still fails
+- Full DZ decompression via ARM emulation requires a complete Marmalade
+  runtime environment (thread state, allocator pool, config system).
 
-### Next steps to unblock
-1. **Fix init_array constructors**: The 3 failing constructors (0xd830, 0xd86c, 0xd8d8)
-   need PLT stubs for __cxa_atexit and potentially other C++ runtime functions.
-   Once they run, the function pointer table should be properly initialized.
+## Recommended paths forward
 
-2. **Alternative: call DZ coder directly**: Instead of going through the s3eCompression
-   dispatch layer, call the DZ coder init/read functions at 0x000b3378 directly
-   with a properly set up context struct.
+1. **Windows dzip.exe workaround** (recommended for asset extraction):
+   - Use `dzip.exe` + `extract_dz.bat` on a Windows PC to extract all .dz archives
+   - Copy extracted files to reSF2 assets directory
+   - reSF2's AssetManager loads them directly without .dz support
 
-3. **Alternative: manual port**: Port the DZ arithmetic decoder (at 0x389f8, ~250
-   ARM instructions) to Python/C++ by following the disassembly. The algorithm
-   uses:
-   - Range coding with 32-bit range
-   - 5-byte context window for probability modeling
-   - CRC32-derived hash for context table lookup
-   - LZ77-style match references
+2. **Manual port of DZ decoder** (for in-engine .dz support):
+   - Port the ~250 ARM instructions at 0x389f8 to C++/Python
+   - The algorithm is documented above (arithmetic coding + 5-byte context + CRC32 hash + LZ77 matches)
+   - This is clean-room (re-implementing from algorithm description, not copying code)
+   - The streaming nature (overlapping offsets) must be handled: decompress the entire archive as one stream
+
+3. **Alternative: Ghidra analysis** — load libs3e_android.so into Ghidra with the S3ELoader plugin, decompile the DZ decode function at 0x389f8, and port the decompiled C to Python/C++.
 
 ## Files
-- `dz_arm_emu.py` — First attempt at Unicorn ARM emulation (basic)
-- `dz_arm_emu2.py` — With malloc stubs + crash debugging
-- `dz_arm_emu3.py` — With auto-mapping for unmapped memory
-- `dz_arm_emu4.py` — With ELF relocation processing
-- `dz_arm_emu5.py` (to create) — With fixed init_array + direct DZ coder call
-
-## Windows extraction workaround
-
-Since the ARM emulation approach is blocked on the function pointer
-table initialization, a simpler workaround is available:
-
-1. Download `dzip.exe` and `extract_dz.bat` from the reSF2 download folder
-2. Place both files in the same directory on your Windows PC
-3. Run: `extract_dz.bat "C:\path\to\extracted\apk\assets"`
-4. This creates subdirectories with the extracted XML and .bin files
-5. Copy these back to your reSF2 assets directory
-
-The extracted files can then be loaded directly by reSF2's AssetManager
-without needing .dz support at all.
-
-## Latest findings (session 5)
-
-### Root cause identified
-1. `s3eCompressionDecompInit` at 0x51414 OVERWRITES the function pointer
-   at [context+0x64] with the context base address (0xc8514) at
-   instruction 0x5152c: `str r1, [sb, #0x24]` where sb = context + 0x40.
-   This clobbers any pre-set function pointer.
-
-2. After the overwrite, at 0x518c0: `ldr r3, [r1, #0x64]` reads back
-   0xc8514 (the context address itself, not a function pointer).
-   Then `blx r3` branches to 0xc8514 which is in BSS — crash.
-
-3. The DZ coder init function at 0x50be4 needs:
-   - A proper global allocator (GOT[0xc20d8] = "t_Int32Ret_NoSS")
-   - A properly initialized thread state
-   - Multiple global structures
-
-4. Even with the allocator fixed (GOT → s3eMallocBase), the coder
-   init at 0x50be4 crashes because it needs more Marmalade runtime
-   state that we haven't set up.
-
-### Conclusion
-Full DZ decompression via ARM emulation requires a complete Marmalade
-runtime environment (thread state, allocator pool, config system).
-This is beyond what we can reasonably set up in Unicorn.
-
-### Recommended path
-Use the Windows `dzip.exe` + `extract_dz.bat` workaround to extract
-all .dz archives on a Windows PC. The extracted files can then be
-loaded directly by reSF2's AssetManager without .dz support.
+- `dz_parse_correct.py` (in scripts/) — corrected container parser with entropy analysis
+- `dz_dump_format.py` (in scripts/) — raw hex dump of DTRZ header for format verification
+- `dz_entropy_analysis.py` (in scripts/) — Shannon entropy analysis of DZ blocks
+- `parse_dz.py` (in scripts/) — old parser with incorrect field order (kept for reference)
+- `dz_final.py` (in scripts/) — Unicorn ARM emulation attempt (blocked on init_array)
+- `dz_decode_v2.py` (in scripts/) — manual port attempt (incomplete, algorithm not fully correct)
