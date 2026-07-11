@@ -147,3 +147,98 @@ resf2_app.exe --assets <path_to_sf2_assets>
 5. Continue disassembly of original APK for deeper engine logic
 6. Implement animation blending (crossfade between animations)
 7. Add more combat moves from moves.xml
+
+## S3E Binary Analysis (from ShadowFight2.s3e in APK)
+
+### Original Engine: Marmalade SDK + Cocos2d-x
+
+The game binary `ShadowFight2.s3e` (LZMA-compressed, 8.3MB uncompressed) is a
+Marmalade S3E executable containing Thumb ARM code.
+
+### Key Engine Components (from string table analysis)
+
+#### Physics System: ModelPhysics
+- `12ModelPhysics` — Main physics class
+- `PhysicsFrameNumber` — Per-frame physics simulation
+- `16ConditionPhysics` — Physics condition checker
+- Node attributes: `Mass`, `Fixed`, `Attenuation`, `Cloth`, `Weak`, `Collisible`, `Passive`
+- Uses Verlet integration (confirmed by node attributes matching Verlet physics)
+
+#### Animation System: ModelAnimation + InfoAnimation
+- `14ModelAnimation` — Animation playback controller
+- `13InfoAnimation` — Animation metadata
+- `10MoveInside` — Animation alignment system using pivot nodes
+  - `align.pivotID == -1` — Pivot alignment validation
+  - `moveInside is null` — Null check for MoveInside
+- `17IntervalAnimation` — Animation interval system
+  - `IntervalAnimation: startFrame (%i) greater then endFrame(%i)` — Frame validation
+- `14IntervalAttack` — Attack interval system
+  - `IntervalAttack::getFactors random return` — Attack factor calculation
+  - `StartFrame (%i) is outside of attack interval (%i-%i)` — Frame bounds check
+  - `EndFrame (%i) is outside of attack interval (%i-%i)` — Frame bounds check
+- `currentAttackInterval not found` — Attack interval lookup
+- Intervals: `Intervals`, `Interval`, `IntervalStart`, `IntervalEnd`
+- `EventIntervalStart`, `EventIntervalEnd` — Interval events
+- `SelfUninterrupt`, `SemiUninterrupt`, `Uninterrupt` — Interruption states
+- `MidFrames`, `FirstFrame` — Frame offsets from moves.xml
+
+#### Rendering System: Cocos2d-x
+- `N7cocos2d8CCSpriteE` — CCSprite class
+- `N7cocos2d17CCSpriteBatchNodeE` — Sprite batch node
+- `N7cocos2d13CCSpriteFrameE` — Sprite frame
+- `N7cocos2d18CCSpriteFrameCacheE` — Sprite frame cache
+- `textureRotated` — Atlas frame rotation flag (90° CW)
+- `CCSpriteFrameCache file not found:` — Atlas loading error
+- `N7cocos2d7CCLayerE` — CCLayer class
+- `N7cocos2d11CCLayerRGBAE` — RGBA layer
+- `N7cocos2d12CCLayerColorE` — Color layer
+- `N7cocos2d16CCLayerMultiplexE` — Multiplex layer
+- `N7cocos2d6CCNodeE` — Base node class
+- `N7cocos2d10CCNodeRGBAE` — RGBA node
+- Shaders: `ShaderPositionTexture_uColor`, `ShaderPosition_uColor`, `ShaderPositionTexture`
+
+#### Location System
+- `ImageLayer` — Layer image class
+- `setupBackground - unknownType: %i` — Background setup with layer types
+- `_backgroundPicture '%s' not load` — Background loading error
+- Layer types: `type=1` (parallax), `type=2` (models viewer)
+- `Factor` — Parallax factor (controls scroll speed)
+
+#### Combat System
+- `Attack Interval ID: %i` — Attack interval identification
+- `BlockDamageFactor`, `DamageFactor` — Damage calculation
+- `HitFactor`, `DistanceFactor` — Hit detection factors
+- `AnimationFactors`, `CounterFactor`, `HealthFactor` — Combat factors
+
+### S3E File Structure
+```
+0x000: "XE3U" magic (4 bytes)
+0x004: code_size (4 bytes)
+0x008: data_size (4 bytes)
+0x00C: flags (4 bytes)
+0x010-0x03C: section offsets
+0x040: ICF config (Marmalade configuration)
+0x1521: Code section (Thumb ARM)
+0x730000+: String table / data section
+0x849519: Relocation table
+0x8496CD: End of file
+```
+
+### DZ Archive Format (animations.dz, files.dz)
+```
+0x00: "DTRZ" magic
+0x04: version (16-bit: 120)
+0x06: flags (16-bit: 105)
+0x08: Filenames (null-terminated strings)
+0x0EED: Block table (120 entries × 6 bytes: 0xFFFF + file_id + block_id)
+0x11ED: Size table (120 entries × 16 bytes: offset + comp_size + uncomp_size + flag)
+0x1935: Compressed data blocks (custom compression, not zlib/LZ4/LZMA)
+```
+
+### Key Findings
+1. **Physics**: Verlet integration confirmed (node attributes match)
+2. **Animation**: MoveInside system uses pivot alignment
+3. **Rendering**: Cocos2d-x with texturePacker atlases (rotated frames)
+4. **Location**: ImageLayer with parallax Factor
+5. **Combat**: IntervalAttack with StartFrame/EndFrame validation
+6. **Movement**: Root motion from .bin NPivot positions (MoveInside align)

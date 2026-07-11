@@ -1,0 +1,1148 @@
+=== ALL Physics/Rendering/Animation strings ===
+
+0x001554: glBindRenderbuffer
+0x001567: glIsRenderbuffer
+0x001578: glGenFramebuffers
+0x00159b: glRenderbufferStorage
+0x0015b1: glGetFramebufferAttachmentParameteriv
+0x0015d7: glDeleteFramebuffers
+0x0015ec: glGenRenderbuffers
+0x0015ff: glGetRenderbufferParameteriv
+0x00161c: glDeleteRenderbuffers
+0x001632: glBindFramebuffer
+0x001644: glFramebufferRenderbuffer
+0x00165e: glFramebufferTexture2D
+0x001675: glCheckFramebufferStatus
+0x00168e: glIsFramebuffer
+0x001a1c: glBindTexture
+0x001bfd: glGetShaderInfoLog
+0x001c56: glDrawBuffers
+0x001d0b: glShaderSource
+0x001d9f: glClientActiveTexture
+0x001dca: glGenTextures
+0x001e87: glRenderbufferStorageMultisample
+0x001efb: glGetShaderSource
+0x001f70: glShaderBinary
+0x001ffe: glActiveTexture
+0x00200e: glBindImageTexture
+0x002021: glDrawArrays
+0x002161: glGetShaderiv
+0x0022c5: glDrawElements
+0x0024e3: glActiveShaderProgram
+0x0024f9: glDeleteShader
+0x00262a: glFramebufferParameteri
+0x002732: glFramebufferTextureLayer
+0x0027b3: glAttachShader
+0x00293e: glCreateShader
+0x002983: glCompileShader
+0x002a0c: glDeleteTextures
+0x73628d: Invalid alternation operators within (?...) block.
+0x736341: Alternation operators are not allowed inside a DEFINE block.
+0x736a21: gl.renderer
+0x736a39: gl.max_texture_size
+0x736a4d: gl.max_texture_units
+0x736a65: GL_IMG_texture_compression_pvrtc
+0x736ab1: GL_IMG_texture_format_BGRA888
+0x736ae9: GL_EXT_discard_framebuffer
+0x736b05: gl.supports_discard_framebuffer
+0x736c31: cocos2d.x.texture.pixel_format_for_png
+0x736c7d: cocos2d.x.texture.pvrv2_has_alpha_premultiplied
+0x737175: N7cocos2d12CCRemoveSelfE
+0x73724d: N7cocos2d16CCActionIntervalE
+0x7372f9: N7cocos2d8CCMoveByE
+0x73730d: N7cocos2d8CCMoveToE
+0x737481: N7cocos2d9CCAnimateE
+0x7376a1: N7cocos2d17CCTextureProtocolE
+0x7376c5: N7cocos2d11CCAtlasNodeE
+0x7376dd: ShaderPositionTexture_uColor
+0x737889: ShaderPosition_uColor
+0x73790d: ShaderPositionTexture
+0x737981: N7cocos2d12CCLabelAtlasE
+0x7379a5: textureFilename
+0x737c19: ShaderPositionTextureColor
+0x737c85: N7cocos2d7CCLayerE
+0x737c99: N7cocos2d11CCLayerRGBAE
+0x737cb1: N7cocos2d12CCLayerColorE
+0x737ccd: N7cocos2d15CCLayerGradientE
+0x737ce9: N7cocos2d16CCLayerMultiplexE
+0x737d09: ShaderPositionColor
+0x737df9: N7cocos2d19CCTransitionMoveInLE
+0x737e19: N7cocos2d19CCTransitionMoveInRE
+0x737e39: N7cocos2d19CCTransitionMoveInTE
+0x737e59: N7cocos2d19CCTransitionMoveInBE
+0x73814d: N7cocos2d15CCRenderTextureE
+0x738489: gravityx
+0x738495: gravityy
+0x7386e1: textureFileName
+0x7386f1: textureImageData
+0x739dbd: isFixedPitch
+0x739e4d: ForceBoldThreshold
+0x739f2d: ForceBold
+0x739f59: ExpansionFactor
+0x73a369: IsFixedPitch
+0x73a379: IsFixedV
+0x749fc5: Cannot remove compression scheme %s; not registered
+0x74a6a5: OptoelectricConversionFactor
+0x74a935: CustomRendered
+0x74a955: WhiteBalance
+0x74ac4d: WhitePoint
+0x74ada5: ReferenceBlackWhite
+0x74ae15: TextureFormat
+0x74ae25: TextureWrapModes
+0x74afe9: WhiteLevel
+0x74b0cd: AsShotWhiteXY
+0x74b315: ImageLayer
+0x74cea5: No space for state block
+0x76617d: %s: No space for LogLuv state block
+0x766375: No space for LZW state block
+0x767481: Frame setup failed
+0x7674b5: no memory during frame initialization.
+0x76834d: Incorrect keyframe parameters.
+0x76836d: Frame not displayable.
+0x768419: Not a key frame.
+0x768fe1: <CCGLProgram = %08zX | Program = %i, VertexShader = %i, FragmentShader = %i>
+0x769085: CC_Texture0
+0x769091: N7cocos2d13CCShaderCacheE
+0x7690cd: ShaderPositionTextureColorAlphaTest
+0x7690f1: ShaderPositionTextureA8Color
+0x769119: ShaderPositionLengthTextureColor
+0x76913d: Shader_ControlSwitch
+0x76ae5d: N7cocos2d16CCAnimationFrameE
+0x76ae7d: N7cocos2d11CCAnimationE
+0x76ae95: N7cocos2d16CCAnimationCacheE
+0x76aeb5: frames
+0x76aecd: restoreOriginalFrame
+0x76aee5: spriteframe
+0x76af0d: animations
+0x76af25: spritesheets
+0x76af35: N7cocos2d8CCSpriteE
+0x76af49: cc_2x2_white_image
+0x76af5d: N7cocos2d17CCSpriteBatchNodeE
+0x76af7d: N7cocos2d13CCSpriteFrameE
+0x76af99: N7cocos2d18CCSpriteFrameCacheE
+0x76afd9: frame
+0x76aff5: spriteSize
+0x76b001: spriteOffset
+0x76b011: spriteSourceSize
+0x76b025: textureRect
+0x76b031: textureRotated
+0x76b049: CCSpriteFrameCache file not found: 
+0x76b4f9: N7cocos2d11CCTexture2DE
+0x76b511: N7cocos2d17CCTextureKeepDataE
+0x76b531: N7cocos2d17CCTextureWithMaskE
+0x76b551: <CCTexture2D | Name = %u | Dimensions = %u x %u | Coordinates = (%.2f, %.2f)>
+0x76b5f1: N7cocos2d14CCTextureAtlasE
+0x76b60d: N7cocos2d14CCTextureCacheE
+0x76b659: <CCTextureCache | Number of textures = %u>
+0x76b6c9: cocos2d: CCTextureCache dumpDebugInfo: %ld textures, for %lu KB (%.2f MB)
+0x76b725: N7cocos2d12CCTextureETCE
+0x76b87d: N7cocos2d12CCTexturePVRE
+0x76e311: random device read would block error
+0x76e4a5: RSA wrong block type for RSA function
+0x76f3bd: non-blocking socket wants data to be read
+0x76f3e9: handshake layer not ready yet, complete first
+0x76f441: record layer version error
+0x76f45d: non-blocking socket write buffer full
+0x76f5c5: record layer length error
+0x76f799: N7cocos2d9extension14CCScale9SpriteE
+0x76f991: LayerObjectData
+0x76fb19: HorizontalAlignmentType
+0x76fc01: VisibleForFrame
+0x76fcc9: 13ObjectFactory
+0x76fcd9: 7Animate
+0x76fd37: @Atextures/misc/Arrow.png
+0x76fd99: Error: setValue (frames = %i) - use setValue instead
+0x76ff15: 7StepBar
+0x76ffbd: 15AnimationButton
+0x770009: 14MoveableButton
+0x7700ad: 22HorizontalContentMover
+0x770141: _backgroundPicture '%s' not load
+0x770165: ERROR: Slider - scrollToItem (frames < 0 (%i))
+0x77026d: 20VerticalContentMover
+0x7702c1: alignnext
+0x770385: Set Texture
+0x770391: 11BatchSprite
+0x7703f1: textures/no_image.png
+0x770409: 14ChangingSprite
+0x77041d: textures/misc/pixel.png
+0x770435: 14ClippingSprite
+0x7704c9: textures/misc/no_image.png
+0x7705a1: 6Sprite
+0x7705d9: 19TiledChangingSprite
+0x7705f1: 10TimeSprite
+0x770685: 12TextureVideo
+0x770695: 11VideoSprite
+0x770af9: force_update
+0x7732d1: Font::stringToAlign - unknown align: %s
+0x7732f9: Font::stringToCCAlign - unknown align: %s
+0x773355: Font::getRealAlignment - unknown align: %i
+0x7733fd: textures/
+0x77341d: textures/fullscreen/
+0x77345d: Aligns
+0x773fb5: Step has to be applied to node set
+0x774021: Two axis specifiers in one step
+0x7756d1: Fight2
+0x7756d9: FightType
+0x775705: OnFightEnd
+0x775795: textures/misc/botCompleted.png
+0x7757b5: 15FightStatistics
+0x775aed: PlayerLevel
+0x775b41: N5boost6detail17sp_counted_impl_pIN3sf26PlayerEEE
+0x775e45: Fights
+0x775e65: AttributesAlign
+0x776455: AutoTuneFactor
+0x7764c5: PlayerRating
+0x7764e1: PlayerRatingMagic
+0x776509: PlayerRatingRanged
+0x776591: NotAnimation
+0x776761: Error: fight with name=%s not found
+0x7767bd: ListSF::isConditionFightCount - No handler for this object type: %i
+0x776801: ListSF::isConditionFightCount - No handler for this compare type: %i
+0x7769f5: TresholdDamageFraction
+0x776a2d: ReplayInterval
+0x7770bd: textures/misc/
+0x7775d1: FightID
+0x777715: fight_reward
+0x7779a1: FightIDS
+0x7779d1: RaidTutorialStep
+0x777b75: BattleDaily::setRosterFight ERROR - no fightList found in _fights
+0x777bb9: BattlePeriodic::initBattles WARNING - no duel fights found, repeatTime has not been set!
+0x777c4d: DamageColor
+0x777c9d: 9FightList
+0x777cf1: FightList::getReward - wrong index: %i from %i (we need this error?)
+0x777d39: FightList::putRule ERROR - wrong rule type %i. Rule not added to fight.
+0x777e35: 29QuestActionChangePlayerAvatar
+0x777ed5: Moves
+0x7780f5: dlgButtonFight
+0x7781c1: FightName
+0x778519: 16QuestActionFight
+0x77852d: 25QuestActionForceExecution
+0x7787b5: 21QuestActionRemovePack
+0x7789dd: 34QuestActionSetRaidInfoTutorialStep
+0x778a99: Atlas
+0x778abd: 32QuestActionShowRaidFightTutorial
+0x778ee5: ForceExecution
+0x779171: RemovePack
+0x77922d: ChangePlayerAvatar
+0x7792a5: ShowRaidFightTutorial
+0x7792d1: SetRaidInfoTutorialStep
+0x779445: ERROR: QuestCondition::fightCurrencyCostFunction - cant fight fight: "%s"
+0x779491: ERROR: QuestCondition::fightCurrencyCostFunction - currencyName is empty
+0x779591: ERROR: QuestCondition::fightFunction - cant fight fight: "%s"
+0x77966d: ERROR: QuestCondition::fightFunction - unknown property: "%s"
+0x779899: _$Fight
+0x7798a9: _$FightResult
+0x77996d: _$FightAvgFPS
+0x779a51: FightCurrencyCost
+0x779aed: RaidFightEnter
+0x779afd: RaidFightEnd
+0x779dd9: 13RaidFightList
+0x779ead: FightResult
+0x779ec5: FightAvgFPS
+0x779fa9: textures/fullscreen/loading.xml
+0x779fed: fight5_ninja_in_the_night
+0x77a06b: �Btextures/fight/popups/result/MW_stripe.png
+0x77a099: textures/fight/popups/result/MW_Bottomstripe.png
+0x77a0cd: textures/fight/popups/result/Background_Center.jpg
+0x77a101: textures/fight/popups/result/Background_Left.png
+0x77a135: textures/fight/popups/result/Background_Right.png
+0x77a169: textures/scrolls/common/Roll_MAP.jpg
+0x77a191: textures/scrolls/common/Paper_left_light.png
+0x77a1c1: textures/scrolls/common/Paper_right_light.png
+0x77a1f1: textures/fight/popups/result/Background_Shadow.png
+0x77a225: ERROR: setupBackground - unknownType: %i
+0x77a265: /textures/misc/checkboxOff.png
+0x77a285: /textures/misc/checkboxOn.png
+0x77a31d: textures/misc/brick.png
+0x77a3d1: |<textures/misc/ticket.png><offsetX=
+0x77a40d: startFight
+0x77a41d: textures/misc/ticket.png
+0x77a449: dlgForButton{textures/misc/ticket.png}{
+0x77a471: }{textures/misc/ruby.png}{
+0x77a611: 25EndRaidFightTimeoutDialog
+0x77a639: 14EndFightDialog
+0x77a64d: textures/fight/popups/result/Label_Win.png
+0x77a679: textures/fight/popups/result/Label_Lose.png
+0x77a6a5: textures/fight/popups/result/Label_Timesup.png
+0x77a6d5: textures/misc/level.png
+0x77a6f1: white
+0x77a701: textures/sliders/immunityBig/batchSlidersImmunityBig
+0x77a839: textures/fight/popups/result/backlight.png
+0x77a865: 20RaidFightTextContent
+0x77a881: 23RaidEndFightBaseContent
+0x77a8b9: 18EndRaidFightDialog
+0x77a901: CheckInternetDamageReject
+0x77a951: EndRaidFightDialog unknown state: %i
+0x77a9d5: dlgDamageRejectText
+0x77aa11: textures/misc/rating_icon_big.png
+0x77aa39: textures/raids/currencies/
+0x77aa55: textures/raids/spheres_reward/
+0x77aa89: textures/misc/ruby_big.png
+0x77aab1: 27RaidFinFightCurrencyContent
+0x77aad1: 25RaidFinFightRatingContent
+0x77ab29: N5boost6detail17sp_counted_impl_pIN3sf230RaidBattlePlayerFinishResponseEEE
+0x77ab79: 24RaidFinFightChestContent
+0x77ab95: 23EndRaidFinalFightDialog
+0x77abb1: raid_battle_player_finish
+0x77abe5: dlgFinalFightError
+0x77abf9: textures/raids/chests_giant/
+0x77ac61: textures/raids/chests_giant/effect_chest_back_light.png
+0x77ac99: Error no reward inside player
+0x77acf9: FinalFightTryAgain
+0x77ad0d: 27EndRaidFinalFightLoseDialog
+0x77ad2d: 23RaidDamageResultContent
+0x77ad99: 23EndRaidRoundFightDialog
+0x77adf1: dlgDamageRejectTitle
+0x77ae4d: dlgExitFightMessage
+0x77ae71: dlgExitFightTitle
+0x77af69: textures/misc/energy.png
+0x77b1e9: textures/buttons/misc/debug_btn.png
+0x77b25d: textures/fullscreen/dojo_full_bg.xml
+0x77b295: textures/effects/ui/
+0x77b2b5: textures/lottery/pointer_bronze.png
+0x77b2e1: textures/lottery/Scroll_silver.xml
+0x77b305: textures/lottery/pointer_silver.png
+0x77b329: textures/lottery/Scroll_gold.xml
+0x77b34d: textures/lottery/pointer_gold.png
+0x77b371: textures/lottery/scroll_shadow_horizontal.xml
+0x77b3a1: textures/lottery/Scroll_bronze.xml
+0x77b4a9: textures/misc/ruby.png
+0x77b4e1: N23LotteryDialogSliderItem11PerksSpriteE
+0x77b56d: raid_fight_ready
+0x77b5d1: textures/raids/misc/
+0x77b699: textures/load_rotate.png
+0x77b6e1: 16PauseFightDialog
+0x77b709: textures/fight/pause/batchPause
+0x77b815: lblDamage
+0x77b831: dlgForButton{textures/misc/pixel.png}{
+0x77b8ad: textures/raids/consumables/batchConsumables
+0x77b8ed: textures/scrolls/common/roll_fade_4.png
+0x77b915: startFinalFight
+0x77b941: http://assets.nekkimobile.ru/shadowfight/data/config_SF2.xml
+0x77b981: http://assets.nekkimobile.ru/shadowfight/data/config_shadowfight_raid_stage.xml
+0x77b9d1: http://assets.nekkimobile.ru/shadowfight/data/config_shadowfight_test.xml
+0x77ba1d: http://sf2assets.nekkimobile.ru/shadowfight/data/config_shadowfight_raid_dev.xml
+0x77bb11: textures/misc/forge_green.png
+0x77bb31: textures/misc/forge_purple.png
+0x77bb81: ResetPlayer
+0x77bd0d: 14RaidInfoSprite
+0x77bd45: textures/effects/fight/
+0x77bd61: hit_blade
+0x77bd6d: textures/raids/raid_info/raid_info_panel.png
+0x77bdc1: textures/raids/misc/shield2.png
+0x77bde1: textures/misc/clocks2.png
+0x77be01: textures/raids/bars/raid_bar_blue.png
+0x77be29: textures/raids/bars/raid_bar_brown.png
+0x77be75: boss_hit_
+0x77be81: RaidInfoSprite::updateCooldownFinishTime(long long time) %i
+0x77bebd: 15RaidPlayersRoll
+0x77bee9: textures/misc/indicatorRed.png
+0x77bf09: textures/misc/indicatorGreen.png
+0x77bf2d: textures/misc/swords.png
+0x77bf49: LackOfDamageHint
+0x77bf71: textures/raids/raid_info/select_me.png
+0x77c0f5: textures/scrolls/common/Roll_Top_MAP.png
+0x77c121: textures/scrolls/common/MenuRoll_left.png
+0x77c14d: textures/scrolls/common/Top_left_light.png
+0x77c179: textures/scrolls/common/MenuRoll_right.png
+0x77c1a5: textures/raids/progress/arrow_active.png
+0x77c1d1: textures/raids/progress/arrow_dark.png
+0x77c29d: textures/raids/leaderboard/dan.png
+0x77c2dd: FakePlayer
+0x77c2e9: textures/scrolls/common/roll_fade_2.png
+0x77c3c5: 24RaidPlayersTableViewCell
+0x77c471: LBnewPlayer
+0x77c4cd: textures/raids/leaderboard/leaderboard_pos_
+0x77c531: textures/raids/progress/
+0x77c559: 20RaidPlayerInfoDialog
+0x77c6a9: textures/raids/effects/
+0x77c6fd: textures/raids/leaderboard/danBgNew.png
+0x77c839: textures/misc/load_rotate.png
+0x77c949: fake player
+0x77ca21: 17RaidTopPlayerCell
+0x77ca35: textures/raids/Top100Dialog/roll_frame_gold.png
+0x77ca65: textures/raids/Top100Dialog/roll_frame_silver.png
+0x77ca99: textures/raids/Top100Dialog/roll_frame_bronze.png
+0x77cacd: dan_background
+0x77cb25: textures/misc/line_sale.png
+0x77cb45: |<textures/misc/ruby_sale.png> 
+0x77cbd5: textures/icons/level.png
+0x77ce79: textures/sliders/settings/batchSlidersSettings
+0x77d15d: textures/buttons/menu/settings/batchSettings
+0x77d1cd: /textures/screens/shop/pieces/stripe.png
+0x77d239: textures/sliders/difficulty/batchSlidersDifficulty
+0x77d3e5: 15SelectAnimation
+0x77d439: FightBeaten
+0x77d559: BlockedRound
+0x77d569: FirstHits
+0x77d57d: RestrictedAnimation
+0x77d591: HeadHitRound
+0x77d685: RaidChargeDamage
+0x77d715: Head_Hit.png
+0x77d76d: 13PlayerLifeBar
+0x77d7a9: textures/fight/bars/batchFightBars
+0x77d7e1: HealthBar_Hit.png
+0x77d7f5: 8PreFight
+0x77d809: 11ScreenFight
+0x77d819: textures/fight/labels/batchFightLabels
+0x77d859: fight.png
+0x77d8c9: textures/misc/Round_Undone.png
+0x77d8e9: textures/misc/Round_Done.png
+0x77d90d: textures/fight/hits/hitBatch
+0x77d93d: textures/fullscreen/VS_Fon.xml
+0x77d96d: textures/fullscreen/Stripe_left.png
+0x77d991: textures/fullscreen/Stripe_right.png
+0x77d9b9: textures/misc/VS.png
+0x77d9d1: N11ViewerFight11PointsTableE
+0x77d9f1: 11ViewerFight
+0x77da05: FightPause.png
+0x77da29: textures/buttons/fight/FightPause.png
+0x77da51: textures/buttons/fight/Pause_pressed.png
+0x77da7d: 13CountersFight
+0x77da99: 5Fight
+0x77dac5: Fight::onUserComboIncrease ERROR - Model is not player nor enemy
+0x77db09: Fight::fillFightListParametersBuffer ERROR - fightList is NULL
+0x77db49: ------------------------------Started Fight: %s ------------------------------
+0x77dcbd: AnimationPlayer
+0x77dccd: AnimationBot
+0x77dd05: Fight::updateFightDataDamage ERROR - wrong RuleAppliance %i
+0x77dd41: Fight::resetLife: wrong RuleAppliance - %i
+0x77dd6d: Fight::updateLife: wrong RuleAppliance - %i
+0x77dd99: CriticalHit
+0x77dda5: HeadHit
+0x77ddad: Fight::getModelIndexByScreenModel - Unknown model: %i
+0x77dde5: Fight::getModelByScreenModel - Unknown model: %i
+0x77de19: Fight::setCurrentFight - fight not NULL
+0x77de41: Fight::removeModel - cant find model
+0x77de69: Fight::getModelByAppliance ERROR - wrong appliance %i
+0x77dea1: Fight::fillMagicAndMissilesBuffer ERROR - model is NULL
+0x77ded9: Fight::setMagicAndMissilesFromBuffer ERROR - model is NULL
+0x77df15: Fight::setFightListParametersFromBuffer ERROR - fightList is NULL
+0x77df65: Fight - Cant listen to ScreenModel user
+0x77df8d: Fight - Cant listen to ScreenModel bot
+0x77dfd1: Block
+0x77dfd9: StepFrame
+0x77e041: DamageConverter
+0x77e0b5: Fight creation
+0x77e0c5: Fight::Fight - data == 0
+0x77e161: textures/buttons/fight/batchButtonsFight
+0x77e1e5: textures/buttons/fight/Charge_Highlight.png
+0x77e211: textures/buttons/fight/btn_charge_normal.png
+0x77e241: textures/buttons/fight/magic_progress.png
+0x77e29d: textures/buttons/fight/ranged_full.png
+0x77e2c5: textures/buttons/fight/magic_full.png
+0x77e31d: textures/buttons/fight/thrown_amount.png
+0x77e38d: textures/joystick/JoystickContainer_norm.png
+0x77e3bd: textures/joystick/JoystickContainer_action.png
+0x77e3ed: textures/joystick/Joystick_norm.png
+0x77e411: textures/joystick/Joystick_action.png
+0x77e465: textures/buttons/gamepad/androidTV/
+0x77e489: textures/buttons/gamepad/WinStore/
+0x77e4ad: textures/buttons/gamepad/amazon/
+0x77e609: 19GamepadButtonSprite
+0x77e679: 20HandledSpriteButtons
+0x77e6ad: textures/joystick/batchJoystick.plist
+0x77e6d5: textures/joystick/batchJoystick.png
+0x77e8a1: PlayerPositionY
+0x77e905: PlayerPositionX
+0x77e955: FrictionForce
+0x77e9d5: 12SubcontainerI11IntervalNewE
+0x77e9f5: 12SubcontainerI9IntervalsE
+0x77ea51: 9ContainerI11IntervalNewE
+0x77eaa5: 9ContainerI9IntervalsE
+0x77eb01: 12SubcontainerIP13InfoAnimationE
+0x77eb25: 9ContainerIP13InfoAnimationE
+0x77ebf9: Intervals
+0x77ec05: Interval
+0x77ec11: Move
+0x77ec19: UnexpectedMoves
+0x77ec29: IgnoredEnemyAnimations
+0x77ec5d: CautiousMovements
+0x77ec85: RandomizingEnemyAnimation
+0x77eca1: MissileAnimations
+0x77ecb5: MagicAnimations
+0x77ecd9: AttackMoves
+0x77ecfd: ShowErrorIfAnimationNotFound
+0x77ed89: MovementsTables
+0x77ed99: AttackTables
+0x77eda9: MovementsMainIterations
+0x77edc1: MovementsLastIteration
+0x77ede9: MoveLengthIntervals
+0x77ee29: ThrowableIntervals
+0x77eec1:   outcometablesforattack:
+0x77eedd:   movementsTable:
+0x77eefd: outcometablesforattack = %s/%s *empty*
+0x77ef35: movementsTable = %s/%s *empty*
+0x77ef99: assets/tactics/attack/
+0x77efb9: RandomAnimation
+0x77efd5: AttackTable
+0x77efe1: MovementsTable
+0x77effd: AttackTableOld
+0x77f021: QuickAttack
+0x77f0ed: QuickAttackChance
+0x77f11d: RoundFactor
+0x77f135: CounterAttackChance
+0x77f155: BlockChance
+0x77f161: UseSafeAttackChance
+0x77f175: TableAttackChance
+0x77f189: QuickAttacks
+0x77f1a1: CautiousMovementsChance
+0x77f1f1: FrameError
+0x77f221: AnimationWeights
+0x77f251: AnimationFactors
+0x77f265: CurrentAnimation
+0x77f27d: CounterFactor
+0x77f28d: DamageFactor
+0x77f29d: HealthFactor
+0x77f2ad: EnemyHealthFactor
+0x77f2c1: AnimationFramesFactor
+0x77f2d9: ChildFramesFactor
+0x77f2ed: MagicBulletFactor
+0x77f301: MissileBulletFactor
+0x77f315: HitFactor
+0x77f321: DistanceFactor
+0x77f33d: FactorType
+0x77f47d: pFrames != _intervals.end()
+0x77f4d1: pAnimations != _animations.end()
+0x77f4f5: pInterframes != _interframes.end()
+0x77f519: pAnimIntervals != _animationsWithIntervals.end()
+0x77f54d: AnimationTablesForAnimation remove for %s
+0x77f579: assets/tactics/movements/
+0x77f595: assets/tactics/outcometablesforattack/
+0x77f755: big frame %d
+0x77f765: NPivot
+0x77f7cd:                                   UseSafeAttack: %s / %.4f
+0x77f809:                                     TableAttack: %s / %.4f
+0x77f881:                                  QuickAttack[%d]: %s / %.4f
+0x77f8f9:                            UseCautiousMovements: %s / %.4f
+0x77f96d:                                      FrameError: %d
+0x77f9a1:                                       Intervals: %s
+0x77f9d5:                                  EnemyIntervals: %s
+0x77fa7d:                                                  EnAnim       EnHeel_1   EnHeel_2   EnNPivot
+0x77fa84:                                           EnAnim       EnHeel_1   EnHeel_2   EnNPivot
+0x77fadd:                                       MyAnim   %10.4f   %10.4f %10.4f %10.4f
+0x77fbcd:                                       MyNPivot %10.4f   %10.4f %10.4f %10.4f
+0x77fc1d: enemyAnimation is null
+0x77fc35:                                       Animation: %s %d/%d/%d
+0x77fc75:                                  EnemyAnimation: %s %d/%d/%d
+0x77fce1: enemy no play animation
+0x77fcf9: bot no play animation
+0x77fd11: CounterAttack
+0x77fd45: Attack
+0x77fd69: Animation %s not found
+0x77fe11: 14ModelAnimation
+0x77fe35: In %s animation %d nodes, but in model only %u
+0x77fe65: ModelAnimation::mirrorNodes - nodes not found: "%s"
+0x77fe99: _animationInfo->moveInside->align.pivotID == -1
+0x77fec9: ModelAnimation::getPlayerAnimation - unknown type: %i
+0x77ff35: ModelAnimation::playInfo - empty animation "%s"
+0x77ff65: Animation error need: '%s' (Priority %i); Animation played: '%s' (Priority %i)
+0x780005: 15ActionAnimation
+0x78009d: OnBackground
+0x7800b5: StopFollowframe
+0x780109: 15ActionHitEffect
+0x780261: CreatePlayer
+0x7802bd: HitEffect
+0x780321: 18ConditionAnimation
+0x780381: 25ConditionCurrentAnimation
+0x78039d: ConditionCurrentAnimation: getAnimationNames - wrong type: %i
+0x7803dd: $Move
+0x7803e5: $NoAnimation$
+0x7803f5: Physics
+0x78049d: 17ConditionInterval
+0x78058d: 16ConditionPhysics
+0x7805a1: 15ConditionPlayer
+0x7806d1: 14EventAnimation
+0x78071d: AnimationStart
+0x78072d: AnimationEnd
+0x78073d: IntervalStart
+0x78074d: IntervalEnd
+0x780759: EveryFrame
+0x7807ad: WallHit
+0x7807b5: 17EventAnimationEnd
+0x7807c9: 19EventAnimationStart
+0x7807e1: 8EventHit
+0x7807ed: 16EventIntervalEnd
+0x780801: 18EventIntervalStart
+0x780865: MovesParser::eventsParse - unknown event "%s"
+0x7808a9: N13InfoAnimation10MoveInsideE
+0x7808c9: 13InfoAnimation
+0x7808d9: moveInside is null
+0x7808ed: Animation load error
+0x780979: Impulse
+0x7809a1: this animation == tactic equivalent for %s
+0x7809cd: assets/animations/binary/
+0x7809e9: textures/effects/magic/
+0x780a01: 17IntervalAnimation
+0x780a15: IntervalAnimation: startFrame (%i) greater then endFrame(%i) (%s) 
+0x780a59: 14IntervalAttack
+0x780a6d: IntervalAttack::getFactors random return
+0x780ac1: IgnoresBlock
+0x780ae5: AttackingParts
+0x780af5: StartFrame (%i) is outside of attack interval (%i-%i) - %s
+0x780b31: EndFrame (%i) is outside of attack interval (%i-%i) - %s
+0x780b89: Movesxml
+0x780bc1: Align
+0x780bd5: assets/animations/moves_result.xml
+0x780bf9: ERROR: MovesMaps::getIndex - no map for index: %s
+0x780c49: CurrentInterval
+0x780c59: PhysicsFrameNumber
+0x780d25: Pivot
+0x780d39: NextAnimation
+0x780d49: FrameShift
+0x780d91: ERROR: alignParse - wrong axis "%s" in "%s"
+0x780dc9: MidFrames
+0x780dd5: EndFrame
+0x780e01: StyleFactor
+0x780e19: NoInterpolationFrames
+0x780e31: AlignOnParentWallCollision
+0x780e59: CameraCOMAlignStage
+0x781045: DistancePoint: getPositionFrame - unknown frame: %i
+0x7810b1: Player->Bot
+0x7810bd: Bot->Player
+0x7810c9:  currentAttackInterval not found
+0x7810ed: %5i Hit: %11s                   Attack:           %s / %u
+0x781129:                              Attack Interval ID: %i
+0x78115d:                                      BaseDamage: %.4f
+0x7811d1:                               BlockDamageFactor: %d
+0x781205:                                           Block: %s / %.4f
+0x781241:                                    DamageFactor: %d / %.4f
+0x78127d:                                 DamageAttribute: %s / %d    Shift: %.4f
+0x7812c5: damage attribute %s not found
+0x781385:                                    Delta.Factor: %.4f    Shift: %.4f
+0x78140d:                                       HitDamage: %.3f (%.3f)
+0x7816bd: Collisible
+0x781711: CenterOfMass
+0x781721: Cloth
+0x781729: Attenuation
+0x781741: Fixed
+0x781749: Weak
+0x781815: Model::getModelAlign aligned to Self instead of Enemy
+0x78184d: 'Pivot' node '%s' not found for '%s' animation
+0x78197d: attacker is null
+0x781991: Model::getTotalDamage - wtf so strong
+0x7819b9: Both is player! Wat!?
+0x7819d1: SetBtnCooldown button = %s, frames = %i
+0x781a59: _CenterOfMass_
+0x781a69: 12ModelPhysics
+0x781add: 15RenderContainer
+0x781b0d: textures/misc/shapes.plist
+0x781b29: textures/misc/shapes.png
+0x781b45: ViewerModel::removeObjectByIndex - wrong index
+0x781b8d: N6Render13CoordinateNetE
+0x781ba9: 6Render
+0x781bb1: textures/fight/pointers/arrow.png
+0x781bd5: textures/misc/drop_blood.png
+0x781bf5: textures/fight/rules/ringout/
+0x781c15: textures/fight/rules/hotground/
+0x781c6d: 17AnimationListRule
+0x781cc5: 15ChangeFightRule
+0x781d15: 16DamageFactorRule
+0x781d2f: �?RepeatFactor
+0x781d41: 10DamageRule
+0x781e01: 11InFightRule
+0x781e11: InFightRule::getWinnerAppliance ERROR  - wrong playerAppliance %i
+0x781e5d: InFightRule::copyInFightRule ERROR - wrong rule type %i
+0x781efd: DamagePart
+0x781f6d: 15NoAnimationRule
+0x782039: PointsPerHit
+0x782095: textures/fight/rules/randomarea/
+0x7820c1: FramesOn
+0x7820d5: FramesOff
+0x782165: EachFight
+0x7821a9: FramesAfterHit
+0x7821c9: 18RemoveIntervalRule
+0x7821e1: RemoveIntervalRule::initRule - wrong player appliance - %i
+0x78226d: RuleParser::parseInFightRule ERROR - wrong rule applyTo %s
+0x7822a9: RuleParser::parseInFightRule ERROR - wrong rule type %i
+0x782381: NoAnimation
+0x7823b5: RemoveInterval
+0x78244d: ChangeFight
+0x78256d: RulesInspector::applyNoAnimationRules ERROR - modelParameters is NULL
+0x782811: image/battles/pressed/batchBattlesPressed
+0x78283d: image/battles/locked_active/batchBattlesLockedActive
+0x782875: image/battles/locked/batchBattlesLocked
+0x78289d: image/battles/base/batchBattlesBase
+0x7828c1: image/battles/active/batchBattlesActive
+0x7828e9: image/battles/batchBattles
+0x782909: 11FightScreen
+0x782941: textures/raids/map/raid_down_arrow.png
+0x782969: textures/misc/forge_red.png
+0x782985: textures/raids/map/raid_down.png
+0x7829a9: textures/buttons/map/timer.png
+0x782a15: textures/misc/video.png
+0x782b6d: textures/sliders/enemies/batchSlidersEnemies
+0x782b9d: textures/sliders/immunity/batchSlidersImmunity
+0x782cb5: dlgStoryBtnFight
+0x782ce5: textures/panels/top/dan_0.png
+0x782d05: ERROR: openStatus() - unknown fight type: %i
+0x782d35: textures/misc/batchIndicators
+0x782da9: textures/raids/misc/shield.png
+0x782dd5: textures/misc/clocks.png
+0x782df1: textures/misc/players.png
+0x782e35: textures/raids/bars/gold.png
+0x782e55: textures/raids/bars/silver.png
+0x782e75: textures/raids/bars/bronze.png
+0x782ecd: |<textures/misc/rating_icon.png>
+0x782f35: textures/misc/batchBulbs
+0x782f95: /textures/buttons/map/
+0x783079: textures/raids/daily/map/
+0x7830a1: textures/raids/map/map_shadow.png
+0x7830c5: 16MoveableMapPanel
+0x7830e9: textures/raids/map/raid_up.png
+0x783165: textures/logo_360.png
+0x78317d: textures/logos/loadingGame.png
+0x78319d: textures/fullscreen/startLoadingChina.xml
+0x7831c9: textures/fullscreen/startLoadingJapan.xml
+0x7831f5: textures/fullscreen/startLoadingKorea.xml
+0x783221: textures/fullscreen/startLoading.xml
+0x7832f5: 8HitGauge
+0x783371: lotteryBtnHit
+0x783381: textures/lottery/background.jpg
+0x7833d1: textures/panels/top/Level_bar.png
+0x7833f5: textures/panels/top/Level_bar_Empty.png
+0x78341d: textures/lottery/batchLottery
+0x78343d: textures/screens/profile/pieces/batchScreensProfilePieces
+0x7834a1: textures/misc/notification_circle.png
+0x7834c9: textures/misc/notification_ellipse.png
+0x783661: textures/buttons/dojo/batchButtonsDojo
+0x78369d: textures/panels/top/batchPanelsTop
+0x7836c1: textures/buttons/menu/screens/batchButtonsMenuScreens
+0x7837c1: 19MainMenuMaterSprite
+0x78381d: textures/misc/ruby_sale.png
+0x783941: Panel_Player
+0x783975: MainMenuRaidRatingPanel::updatePlayerInfo -> player is NULL
+0x783b81: tutorial_training_fight
+0x783f81: textures/logoChina.png
+0x783f99: textures/logoJapan.png
+0x783fb1: textures/logoKorea.png
+0x784215: ; Draws: 
+0x784285: textures/scrolls/common/Shadow_roll.png
+0x7842dd: textures/buttons/common/Highlight_Button.png
+0x78441d: textures/buttons/keyboard/w.png
+0x78443d: textures/buttons/keyboard/a.png
+0x78445d: textures/buttons/keyboard/s.png
+0x78447d: textures/buttons/keyboard/d.png
+0x78449d: tutorial_move
+0x7844c1: tutorial_fight
+0x78450d: tutorial_dojo_new_move
+0x784565: <\textures\buttons\gamepad\WinStore\2.png>
+0x784591: <\textures\buttons\gamepad\xbox\2.png>
+0x7845b9: tutorial_profile_moves
+0x7845d1: tutorial_block
+0x784605: textures/buttons/keyboard/o.png
+0x784625: textures/buttons/keyboard/p.png
+0x7847c9: 26RaidFightActionEquipCharge
+0x7847e9: 27RaidFightActionShowFightBtn
+0x784809: 35RaidFightActionOpenDialogBuyCharges
+0x784831: 33RaidFightActionOpenDialogGiveGems
+0x784855: 26RaidFightActionFlashBuyBtn
+0x784875: Error! RaidFightActionShowFightBtn::enableFightBtnAndShowArrow. Where is RaidViewContainer?
+0x7848e5: dlgRaidGiveGems{textures/misc/ruby.png}{
+0x784911: Error! RaidFightActionFlashBuyBtn::run. Where is BuyConsumablesDialog?
+0x784b01: 17TutorialRaidFight
+0x784ddd: 22ResponseHandlerFactory
+0x784eb1: N5boost6detail17sp_counted_impl_pIN3sf214ExtendedPlayerEEE
+0x785219: create_player
+0x785229: get_player
+0x7852d1: Error: onCreatePlayerResponse empty response
+0x785315: Error: onCreatePlayerResponse - unknown error
+0x785345: Error: onGetPlayerResponse empty response
+0x7857d5: Reset Player Cheat Success
+0x7857f1: Reset Player Cheat Fail
+0x7858dd: PlayerId - 
+0x785935: reset_player_cheat
+0x7859b9: c - currency|s - stop raid|d - show device id|r - reset player|cc - close connection|ri - raid info
+0x785ae9: textures/scrolls/common/Paper_right.png
+0x785b11: textures/raids/chat/tab_light.png
+0x785b35: textures/raids/chat/tab_dark.png
+0x785b61: textures/raids/chat/editbox.png
+0x785b95: textures/raids/chat/button_send_0.png
+0x785bbd: textures/raids/chat/button_send_1.png
+0x785be5: textures/scrolls/common/roll_fade_3.png
+0x785c0d: 14MoveableChatSF
+0x785c21: textures/raids/chat/button_chat-2.png
+0x785c49: textures/raids/chat/button_chat-2_red.png
+0x785c75: textures/screens/shop/buttons/shopButtons
+0x785d35: N5boost6detail17sp_counted_impl_pIN3sf211ShortPlayerEEE
+0x785d6d: N5boost6detail17sp_counted_impl_pIN3sf216RaidBattlePlayerEEE
+0x785dc5: onRefreshPlayerEvent fail
+0x785e11: refresh_player_event
+0x785e29: refresh_raid_player_event
+0x785ead: onRefreshRaidPlayerEvent fail
+0x785ecd: LackOfDamageMessage
+0x786155: 10PlayerData
+0x786175: PlayerData::onRaidBattlePlayerFinishResponse error
+0x786801: LeaderboardUpdateInterval
+0x7868b9: DamagePerRound
+0x7868c9: DamagePerBattle
+0x7868d9: DamagePerSeason
+0x786965: HitsPerBattle
+0x786975: HitsPerSeason
+0x7869c9: 34RaidClearZonesAfterFightEndHandler
+0x786a51: KeysRestoredText{textures/misc/Key0.png}{
+0x786a7d: KeysNotRestoredText{textures/misc/Key0.png}{
+0x786bc5: textures/panels/top/dan_1.png
+0x786d29: raid_battle_player_start resposnse fail
+0x786d7d: update Raid Player before setting RaidBattleInfo
+0x786ddd: raid_battle_player_start
+0x786f15: Player not found
+0x786f2d: Detected restricted equipment in player info 
+0x786f5d: get_public_player
+0x786f71: wrong player id %llx
+0x786f89: Error onGetPublicPlayer
+0x786fa1: Error onGetPlayers
+0x7871b5: PlayerGetCreate
+0x7871e9: 20RaidPlayerInfoHelper
+0x787201: N5boost6detail17sp_counted_impl_pIN3sf212ShortPlayersEEE
+0x78723d: 12PlayersCache
+0x78724d: Error: no such ShortPlayer in cache
+0x787271: get_short_players
+0x787285: Error: PlayersCache::onGetPlayers
+0x78730d: textures/fight/popups/achievement/achievement_panel.png
+0x7874a1: image/combobuttons/base_damage.png
+0x787501: 24MoveableParametersSprite
+0x787575: textures/screens/profile/param_level_bars/bar_2.png
+0x7875a9: textures/screens/profile/param_level_bars/bar_0.png
+0x7875dd: textures/screens/profile/param_level_bars/bar_4.png
+0x787651: textures/screens/profile/param_level_bars/bar_5.png
+0x787685: textures/screens/profile/param_level_bars/bar_1.png
+0x7876b9: textures/screens/profile/param_level_bars/bar_3.png
+0x787811: UnarmedDamage
+0x787821: WeaponDamage
+0x787831: RangedDamage
+0x787841: MagicDamage
+0x7878c1: 16ParametersSprite
+0x787901: textures/screens/shop/pieces/Info_Panel.png
+0x78792d: image/attributes/batchAttributes
+0x787979: textures/fullscreen/dojo_full_bg_light.xml
+0x7879a5: textures/screens/shop/pieces/Roll_Shadow.png
+0x7879e9: textures/misc/googleplayservice.png
+0x787bc9: textures/screens/profile/buttons/batchScreensProfileButtons
+0x787c39: 15RightInfoSprite
+0x787cf1: icons_kick_blocked.png
+0x787d5d: 15UserPerksSprite
+0x788019: N3sf219CreatePlayerRequestE
+0x788035: N3sf28PlayerIdE
+0x788045: N3sf29PlayerIdsE
+0x788059: N3sf211PlayerStatsE
+0x78806d: N3sf211ShortPlayerE
+0x788081: N3sf212ShortPlayersE
+0x788099: N3sf212PublicPlayerE
+0x78819d: N3sf26PlayerE
+0x7881ad: N3sf214ExtendedPlayerE
+0x788205: N3sf216RaidBattlePlayerE
+0x788285: N3sf23HitE
+0x788311: N3sf229RaidBattlePlayerFinishRequestE
+0x788339: N3sf230RaidBattlePlayerFinishResponseE
+0x7883cd: N3sf212LeaguePlayerE
+0x78875d: sf2.CreatePlayerRequest
+0x788775: sf2.PlayerId
+0x788785: sf2.PlayerIds
+0x788795: sf2.PlayerStats
+0x7887a5: sf2.ShortPlayer
+0x7887b5: sf2.ShortPlayers
+0x7887c9: sf2.PublicPlayer
+0x7888a5: sf2.Player
+0x7888b1: sf2.ExtendedPlayer
+0x7888fd: sf2.RaidBattlePlayer
+0x78896d: sf2.Hit
+0x7889e9: sf2.RaidBattlePlayerFinishRequest
+0x788a0d: sf2.RaidBattlePlayerFinishResponse
+0x788a8d: sf2.LeaguePlayer
+0x788b4d: 18RaidPlayerInfoView
+0x788b65: P18RaidPlayerInfoView
+0x788b7d: 20PlayerInfoHeaderView
+0x788b95: 21GeneralPlayerInfoView
+0x788be1: PlayerNameLabel
+0x788c21: hintInfoAvgDamage
+0x788c5d: hintInfoWeakestLink
+0x788cb1: assets/cocoGUI/raids/playerInfo/player_info_header.json
+0x788d05: assets/cocoGUI/raids/playerInfo/general_info.json
+0x788d55: 16RaidPlayerScreen
+0x788d7d: textures/raids/raid_info//dojo_light_left.jpg
+0x788dad: textures/scrolls/common/Paper_left.png
+0x788dd5: textures/screens/profile/pieces/alpha-gradient_up.png
+0x788e0d: textures/screens/profile/pieces/alpha-gradient_down.png
+0x788e45: textures/panels/top/Top_Panel.png
+0x788e69: textures/raids/raid_info/ico/
+0x788f11: ����textures/misc/jackdaw_green.png
+0x788f35: textures/misc/wear.png
+0x788f4d: textures/misc/lock.png
+0x788f65: textures/screens/shop/pieces/sale_min.png
+0x788f91: textures/screens/shop/pieces/sale_max.png
+0x788fbd: textures/misc/star.png
+0x789061: 19MaterialPriceSprite
+0x789079: 17RecipePriceSprite
+0x7890a1: textures/misc/random.png
+0x789125: /textures/screens/shop/pieces/stripe2.png
+0x78919d: 10InfoSprite
+0x7891fd: InfoSprite::errorCallItem, task: %i
+0x7892bd: Error - InfoSprite::setDiscountLabel, wrong valueType %i
+0x789389: InfoSprite::setPercentMark ERROR - calling null item
+0x789409: 18MoveableInfoSprite
+0x789421: 17MoveableLeftPanel
+0x789435: 23MoveablePerksInfoSprite
+0x789549: 15PerksInfoSprite
+0x7895a9: textures/misc/hourglass.png
+0x789a51: image/enchantments/batchEnchantments
+0x789cbd: fight_amount
+0x78a011: fight_end
+0x78a09d: fight_name
+0x78a0d1: fights
+0x78a25d: fight_type
+0x78a2b1: fight_time_elapsed
+0x78a2d9: fight_result
+0x78a2e9: player_damage
+0x78a2f9: enemy_damage
+0x78a351: fight_start
+0x78a3d9: LevelStep
+0x78a4d9: CacheTexturesLog
+0x78a6dd: ArrowFlashingFrames
+0x78a7d5: OscillationFactor
+0x78a81d: DifficultyIsFirstFrame
+0x78a835: PrizeIsFirstFrame
+0x78a861: FadeFrames
+0x78a885: PulseFrames
+0x78a8dd: AnimationSpeed
+0x78a9f5: LowerHitZone
+0x78aa05: UpperHitZone
+0x78ad21: com.nekki.shadowfight
+0x78ade9: textures/buttons/pieces/batchButtonsPieces
+0x78ae2d: BtnWhitePressedRight.png
+0x78aed1: BtnWhitePressedLeft.png
+0x78af6d: BtnWhitePressedCenter.png
+0x78b00d: BtnWhiteRight.png
+0x78b081: BtnWhiteLeft.png
+0x78b0f9: BtnWhiteCenter.png
+0x78b16d: textures/screens/shop/buttons/
+0x78b3c5: assets/animations.dz
+0x78b3dd: animations archive is attached successfully.
+0x78b40d: animations archive UNsuccessfull.
+0x78b445: assets/animations/moves.xml
+0x78b461: textures/scrolls/common/Roll_left.png
+0x78b489: textures/scrolls/common/Roll_center.png
+0x78b4b1: textures/scrolls/common/Roll_right.png
+0x78b4d9: textures/scrolls/common/MenuRoll_center.png
+0x78b545: textures/hints/batchHints
+0x78b5ad: Load animations
+0x78b5d5: Init hintbox textures
+0x78b9ad: assets/animations/moves.xml.hash
+0x78ba75: assets/animations/moves_result.xml.hash
+0x78be19: BlockDamage
+0x78bec9: TutorialStepTimeout
+0x78bedd: PivotNode
+0x78bef5: MinHits
+0x78bf61: BlockDamageFactor
+0x78bf75: BlockDefense
+0x78bf85: DamageDoublingRange
+0x78bfe1: AverageBaseDamage
+0x78bff5: AttributesAlignLimits
+0x78c00d: AlignTargetAttributes
+0x78c035: HitGauge
+0x78c051: RaitingFight
+0x78c061: HitEffects
+0x78c0a1: ForcedLogConditions
+0x78c0b5: FrameRate
+0x78c169: ModifiedAlignFormula
+0x78c27d: No fight are logging - can crash
+0x78c2a1: player_magic_used
+0x78c319: DamageRecharge
+0x78c345: Hits
+0x78c34d: ------------------------------Print texture cache ------------------------------
+0x78c445: push_energy_to_fight
+0x78c531: DamageRecharge for Magic not found
+0x78c555: FrameReduction
+0x78c585: CriticalHitChance
+0x78c599: HeadHitChance
+0x78c5fd: DamageMultiplier
+0x78c611: NetDamage
+0x78c6dd: StylePerHit
+0x78c6e9: Error: InternalSettings->StyleLevels: Attribute StylePerHit is absent!
+0x78c86d: DefaultPrizeBaseFactor
+0x78c97d: RaidFinalFightTutorial
+0x78c9e1: Surrender
+0x78c9ed: 0 == fightList
+0x78ca45: assets/animations/moves.xsd
+0x78d881: dlgGotGift{textures/misc/ruby.png}{
+0x78d8ad: dlgGotGift{textures/misc/gold.png}{
+0x78d9ee: ID='%d' SilhouetteItemID='%d' WeaponID='%d' Strength='%f' Stamina='%f' Dan='%d' Damage='%f' Difficulty='%f' FirstName='%s' LastName='%s'  Level='%d' LotteryLevel='%u' 
+0x78da99: - WeaponDamage:   %3.3f
+0x78dab1: - UnarmedDamage:  %3.3f
+0x78daf9: - RangedDamage:   %3.3f
+0x78db11: - MagicDamage:    %3.3f
+0x78dc09: BaseDamage
+0x78dc15: isPlayer
+0x78dcc9: CurrentFight
+0x78dce1: PlayerAttribute
+0x78dcf1: PlayerParameter
+0x78de15: 25PerkActionDisableInterval
+0x78df0d: 16PerkActionSetHit
+0x78df21: 22PerkActionSetModFrames
+0x78df55: 23PerkActionChangeImpulse
+0x78df71: 30PerkActionChangeHitEffectScale
+0x78df95: 37PerkActionChangeAdditionalDamageValue
+0x78dfe9: DisableInterval
+0x78dff9: SetHit
+0x78e011: SetModFrames
+0x78e065: ChangeImpulse
+0x78e075: ChangeHitEffectScale
+0x78e08d: ChangeAdditionalDamageValue
+0x78e0b5: IntervalName
+0x78e0c5: IntervalType
+0x78e0dd: PerFrameValue
+0x78e1ed: 29PerkConditionCurrentAnimation
+0x78e20d: 28PerkConditionCurrentInterval
+0x78e37d: 16PerkEventPostHit
+0x78e3a9: 19PerkEventEveryFrame
+0x78e401: 23PerkEventAnimationStart
+0x78e41d: 21PerkEventAnimationEnd
+0x78e479: HitPreCrit
+0x78e485: HitPostCrit
+0x78e491: PostHit
+0x78e4e5: DamageMin
+0x78e4f1: DamageMax
+0x78e545: SetCooldown button = %s, frames = %i
+0x78e5b9: Error: No fight on perk start
+0x78e619: - WeaponDamage:     %3.3f
+0x78e635: - UnarmedDamage:    %3.3f
+0x78e689: - RangedDamage:     %3.3f
+0x78e6a5: - MagicDamage:      %3.3f
+0x78e6c1: - RaidChargeDamage: %3.3f
+0x78e86d: Did you include this file in your mkb's "assets" block?
+0x78e8ea: Could not open memory block for serialising
+0x78ea8b: IDCT output block size %d not supported
+0x78eb50: Sampling factors too large for interleaved scan
+0x78ec2d: Bogus sampling factors
+0x78f53e: Define Restart Interval %u
+0x78f79e: Start Of Frame 0x%02x: width=%u, height=%u, components=%d
+0x79285e: invalid block type
+0x792871: invalid stored block lengths
+0x79381c: Invalid cHRM white point
+0x793d77: Application must supply a known background gamma
+0x795427: CacheTextures
+0x79544d: CacheShaders
+0x795a3b: Microsoft (R) HLSL Shader Compiler 9.29.952.3111
+0x796019: Microsoft (R) HLSL Shader Compiler 9.29.952.3111
+0x79615a:       inColour;varying mediump vec2    outUV;void main(void){    gl_FragColor = texture2D(inSampler0, outUV) * inColour;}
+0x79629b: GlesFrameBuffNoAlpha
+0x7962ca: ForceConfigID
+0x79632f: PVRVFrame
+0x79647c: glFramebufferTextureEXT
+0x79664d: AlphaInFrameBuffer
+0x7966c5: GL_OES_texture_mirrored_repeat
+0x79675f: GL_OES_texture_cube_map
+0x796777: GL_OES_texture_half_float_linear
+0x796808: GL_OES_framebuffer_object
+0x796822: GL_EXT_shader_texture_lod
+0x796849: GL_EXT_texture_compression_s3tc
+0x79687f: GL_IMG_shader_binary
+0x7968cd: GL_OES_compressed_ETC1_RGB8_texture
+0x796903: GL_QCOM_writeonly_rendering
+0x79691f: GL_AMD_compressed_3DC_texture
+0x79693d: GL_IMG_texture_env_enhanced_fixed_function
+0x796968: GL_APPLE_texture_format_BGRA8888
+0x796989: GL_EXT_discard_framebuffer
+0x7969b7: GL_EXT_texture_compression_dxt1
+0x7969d7: GL_ANGLE_texture_compression_dxt3
+0x7969f9: GL_ANGLE_texture_compression_dxt5
+0x796a31: GL_ARB_texture_env_combine
+0x796a4c: GL_IMG_multisampled_render_to_texture
+0x796a81: GL_APPLE_texture_2D_limited_npot
+0x796aa2: GL_OES_texture_npot
+0x796ab6: GL_APPLE_framebuffer_multisample
+0x796ad7: GL_ARM_mali_shader_binary
+0x796af1: GL_EXT_texture_format_BGRA8888
+0x796b2b: GL_OES_texture_half_float
+0x796b84: GL_ANGLE_framebuffer_multisample
+0x796ba5: GL_QCOM_tiled_rendering
+0x796bcd: GL_ATI_extended_texture_coordinate_data_formats
+0x796bfd: GL_ANGLE_framebuffer_blit
+0x796c52: GL_APPLE_texture_max_level
+0x796c6d: GL_OES_texture_3D
+0x796c7f: GL_OES_draw_texture
+0x796ca4: GL_VIV_shader_binary
+0x796cd1: GL_EXT_texture_lod_bias
+0x796d4c: GL_OES_texture_env_crossbar
+0x796d7e: GL_EXT_multi_draw_arrays
+0x796d97: GL_EXT_texture_type_2_10_10_10_REV
+0x796dba: GL_OES_fbo_render_mipmap
+0x796dd3: GL_OES_compressed_paletted_texture
+0x796e2d: GL_OES_texture_float
+0x796e42: GL_OES_texture_float_linear
+0x796e5e: GL_EXT_texture_filter_anisotropic
+0x796ef2: GL_OES_depth_texture
+0x796f07: GL_IMG_texture_compression_pvrtc
+0x796f28: GL_AMD_compressed_ATC_texture
+0x796f5d: GL_ANGLE_depth_texture
+0x796fa0: GL_KHR_texture_compression_astc_ldr
+0x796ff2: GL_OES_shader_image_atomic
+0x79700d: GL_OES_shader_multisample_interpolation
+0x797035: GL_OES_texture_stencil8
+0x79704d: GL_OES_texture_storage_multisample_2d_array
+0x79708b: GL_EXT_draw_buffers_indexed
+0x7970a7: GL_EXT_geometry_shader
+0x7970be: GL_EXT_gpu_shader5
+0x7970ef: GL_EXT_shader_io_blocks
+0x797107: GL_EXT_tessellation_shader
+0x797122: GL_EXT_texture_border_clamp
+0x79713e: GL_EXT_texture_buffer
+0x797154: GL_EXT_texture_cube_map_array
+0x797172: GL_EXT_texture_sRGB_decode
+0x7971d0: GL_ATI_texture_compression_atitc
+0x7973be: glIsRenderbufferOES
+0x7973d2: glBindRenderbufferOES
+0x7973e8: glDeleteRenderbuffersOES
+0x797401: glGenRenderbuffersOES
+0x797417: glRenderbufferStorageOES
+0x797430: glGetRenderbufferParameterivOES
+0x797450: glIsFramebufferOES
+0x797463: glBindFramebufferOES
+0x797478: glDeleteFramebuffersOES
+0x797490: glGenFramebuffersOES
+0x7974a5: glCheckFramebufferStatusOES
+0x7974c1: glFramebufferRenderbufferOES
+0x7974de: glFramebufferTexture2DOES
+0x7974f8: glGetFramebufferAttachmentParameterivOES
+0x797535: glExtGetShadersQCOM
+0x797597: glDiscardFramebufferEXT
+0x797645: glGetFixedvOES
+0x797893: glRenderbufferStorageMultisampleIMG
+0x7978b7: glFramebufferTexture2DMultisampleIMG
+0x7978dc: glRenderbufferStorageMultisampleAPPLE
+0x797902: glResolveMultisampleFramebufferAPPLE
+0x79793e: glEGLImageTargetTexture2DOES
+0x79795b: glEGLImageTargetRenderbufferStorageOES
+0x797982: glExtGetTexturesQCOM
+0x7979ab: glExtGetRenderbuffersQCOM
+0x7979c5: glExtGetFramebuffersQCOM
+0x797a74: glDrawTexsOES
+0x797a82: glDrawTexiOES
+0x797a90: glDrawTexxOES
+0x797a9e: glDrawTexsvOES
+0x797aad: glDrawTexivOES
+0x797abc: glDrawTexxvOES
+0x797acb: glDrawTexfOES
+0x797ad9: glDrawTexfvOES
+0x797afa: glMultiDrawArraysEXT
+0x797b0f: glMultiDrawElementsEXT
+0x797d47: FrameBufferObject
+0x797d59: RenderBufferObject
+0x797d7b: SimulateNoShaderCompiler
+0x797d94: LoadPreCompiledShaderBinaries
+0x797db2: PreCompileShaderBinariesPlatform
+0x797de6: Shader
+0x797e28: PreCompileShaderBinariesOutputDir
+0x797e56: MergeShaderStringArrays
+0x797e6e: Texture
+0x797e7e: AllowTextureAllocInBind
+0x7992d9: Memory block deallocated twice
+0x7992f9: Deallocating a block that was never allocated
+0x799329: Deallocating a memory block allocated for another type
+0x799361: Size of block passed to deallocate() doesn't match block size
+0x7993a1: Pointer underrun - safety margin at front of memory block overwritten
+0x7993e9: Pointer overrrun - safety margin at back of memory block overwritten
+0x79a555: WARNING: user stack wasn't 8 bytes aligned!
+0x79a66d: N10__cxxabiv115__forced_unwindE
+0x79add5: alignof 
+0x79f145: Identifier removed
