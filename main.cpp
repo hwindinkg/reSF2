@@ -543,11 +543,14 @@ public:
         }
 
         // === DYNAMIC FACING ===
-        // Character faces the enemy. Only update when IDLE (move_state_==0)
-        // — NOT during step movement, attacks, or special moves. This prevents
-        // the "walk past enemy → facing flips → step direction reverses →
-        // character returns to start" bug.
-        if (location_ && hit_anim_ == 0 && move_state_ == 0) {
+        // Character faces the enemy. Update facing DYNAMICALLY during step
+        // movement too — the original game does this. When the character
+        // walks past the enemy, it turns around mid-step.
+        // BUT: don't flip during attacks/special moves (hit_anim_ > 0, move_state_ >= 10).
+        // The step animation's root motion uses anim_facing_right_ (locked at
+        // animation start), so flipping facing_right_ mid-step doesn't affect
+        // the current step's displacement. The NEXT step will use the new facing.
+        if (location_ && hit_anim_ == 0 && move_state_ < 10) {
             float bag_x = location_->enemy_x - 983.0f;
             bool should_face_right = (bag_x >= player_pos_x_);
             float dist_to_enemy = std::abs(bag_x - player_pos_x_);
@@ -758,14 +761,14 @@ public:
             } else if (move_state_ == 1) {  // MOVING_BACK
                 // Use latched key state — don't exit step on transient false readings
                 if (!back_latched && step_min_played) {
-                    move_state_ = 0; play_animation("fists_idle", true);
+                    move_state_ = 0; play_animation("stance_idle", true);
                 } else if (fwd_latched && !back_latched && step_min_played) {
                     move_state_ = 2;
                     play_animation("step_forward", true);
                 }
             } else if (move_state_ == 2) {  // MOVING_FORWARD
                 if (!fwd_latched && step_min_played) {
-                    move_state_ = 0; play_animation("fists_idle", true);
+                    move_state_ = 0; play_animation("stance_idle", true);
                 } else if (back_latched && !fwd_latched && step_min_played) {
                     move_state_ = 1;
                     play_animation("step_back", true);
@@ -776,7 +779,17 @@ public:
         // Exit special move state when animation finishes
         if (move_state_ == 10 && hit_anim_ == 0) {
             move_state_ = 0;
-            play_animation("fists_idle", true);
+            if (start_stance_playing_) {
+                // After start stance, transition to combat idle
+                start_stance_playing_ = false;
+                if (animations_.count("stance_idle")) {
+                    play_animation("stance_idle", true);
+                } else {
+                    play_animation("stance_idle", true);
+                }
+            } else {
+                play_animation("stance_idle", true);
+            }
         }
         // Exit duck state when Down released AND min duration played
         // (prevents duck from cutting off immediately on S tap)
@@ -784,7 +797,7 @@ public:
             duck_play_time_ += dt;
             if (!key_down && duck_play_time_ >= 300) {
                 move_state_ = 0;
-                play_animation("fists_idle", true);
+                play_animation("stance_idle", true);
             }
         }
 
@@ -853,7 +866,7 @@ public:
                 }
             }
             if (hit_anim_ == 0) {
-                play_animation("fists_idle", true);
+                play_animation("stance_idle", true);
                 current_move_.clear();
                 bag_hit_ = false;
             }
@@ -990,6 +1003,22 @@ private:
         cam_x_ = player_pos_x_ + 200.0f;
         cam_y_ = -50.0f;  // shows floor and character properly
         zoom_ = 1.0f;
+
+        // Play start stance animation (from moves.xml: FistsStartStance-Right)
+        // This is the intro animation before the fight begins.
+        // stance_2.bin = right-facing start stance.
+        // Cannot be interrupted — plays once, then transitions to stance_idle.
+        if (animations_.count("stance_2")) {
+            play_animation("stance_2", false);
+            current_move_ = "StartStance";
+            int fc = animations_["stance_2"].frame_count;
+            hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+            move_state_ = 10;  // special move state (non-interruptible)
+            start_stance_playing_ = true;
+            std::printf("[STANCE] Playing start stance (stance_2, %d frames)\n", fc);
+        } else if (animations_.count("stance_idle")) {
+            play_animation("stance_idle", true);
+        }
     }
 
     void render_loading_screen(plat::Platform& platform) {
@@ -2062,6 +2091,8 @@ private:
         // Load key animations (using actual game file names from moves.xml)
         const char* anim_names[] = {
             "fists1_stance_idle", "fists2_stance_idle",
+            "stance_idle",  // combat idle (from moves.xml StanceIdle)
+            "stance_1", "stance_2",  // start stance (left/right)
             "high_punch", "heavy_punch", "low_punch",
             "double_punch", "spinning_punch", "upper_cut",
             "high_kick", "front_kick", "back_kick",
@@ -2397,27 +2428,24 @@ private:
         if (is_root_motion_anim) {
             // Detect loop wrap for looping animations
             if (anim_loop_ && prev_frame_idx_ >= 0 && prev_frame_idx_ > frame_idx) {
-                // Animation wrapped (e.g., frame 15 → frame 0)
                 float last_npx, last_npy, last_npz;
                 if (anim.get_node_pos(anim.frame_count - 1, npivot_idx, last_npx, last_npy, last_npz)) {
                     float cycle_disp = last_npx - anim_root_anchor_x_;
-                    // Use SAVED facing (locked at animation start), not current facing
                     step_start_player_x_ += anim_facing_right_ ? cycle_disp : -cycle_disp;
                 }
+            }
+            // Detect animation switch (prev_frame_idx_ == -1 means new animation)
+            // Sync step_start_player_x_ to current position so displacement
+            // is measured from where the character actually IS.
+            if (prev_frame_idx_ == -1) {
+                step_start_player_x_ = player_pos_x_;
             }
             prev_frame_idx_ = frame_idx;
 
             // Absolute positioning: player_pos = start + displacement
-            // Use SAVED facing (locked at animation start) to prevent teleport
-            // when facing changes between frames
             float displacement = npivot_x - anim_root_anchor_x_;
             player_pos_x_ = step_start_player_x_ + (anim_facing_right_ ? displacement : -displacement);
-            // Clamp to location wall boundaries (from params.xml Wall attribute)
-            // params.xml uses game coordinates where 0 = left edge, Width = right edge.
-            // Wall="305" means left wall at x=305, right wall at x=Width-Wall=1655.
-            // Our world is offset by X_OFFSET=983, so:
-            //   left wall in our world = 305 - 983 = -678
-            //   right wall in our world = (1960-305) - 983 = 672
+            // Clamp to location wall boundaries
             if (location_ && location_->wall > 0 && location_->width > 0) {
                 const float X_OFFSET = 983.0f;
                 float left_bound = location_->wall - X_OFFSET;
@@ -2427,9 +2455,7 @@ private:
             }
         } else {
             prev_frame_idx_ = -1;
-            // Non-root-motion animations (idle, duck, block) do NOT modify
-            // player_pos_x_. Keep step_start_player_x_ synced with current
-            // position so the next root-motion animation starts from here.
+            // Non-root-motion: keep step_start synced for next root-motion anim
             step_start_player_x_ = player_pos_x_;
         }
 
@@ -3155,6 +3181,7 @@ private:
     int fwd_held_ms_ = 0;  // ms since forward key was last held (for latching)
     int back_held_ms_ = 0;  // ms since back key was last held (for latching)
     uint32_t last_kick_press_ms_ = 0;  // for double-tap detection (DoubleSweep)
+    bool start_stance_playing_ = false;  // true during start stance animation
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
