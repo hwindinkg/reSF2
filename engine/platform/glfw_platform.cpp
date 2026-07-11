@@ -116,19 +116,23 @@ struct GlfwPlatform::Impl {
     std::string asset_root;
 
     static void key_callback(GLFWwindow* w, int key, int scancode, int action, int mods) {
-        // Key state is handled entirely by glfwGetKey() in poll_events().
-        // This callback is only used for just_pressed/just_released edge detection
-        // and window close events.
         Impl* self = static_cast<Impl*>(glfwGetWindowUserPointer(w));
         if (!self) return;
         int idx = glfw_to_key_index(key);
         if (idx < 0 || idx >= static_cast<int>(kMaxKeys)) return;
-        // DO NOT modify keys_down here — glfwGetKey() is authoritative.
+        
         if (action == GLFW_PRESS) {
-            self->input.keys_just_pressed[idx] = true;
+            if (!self->input.keys_down[idx]) {
+                self->input.keys_just_pressed[idx] = true;
+            }
+            self->input.keys_down[idx] = true;
         } else if (action == GLFW_RELEASE) {
-            self->input.keys_just_released[idx] = true;
+            if (self->input.keys_down[idx]) {
+                self->input.keys_just_released[idx] = true;
+            }
+            self->input.keys_down[idx] = false;
         }
+        // GLFW_REPEAT: do nothing — key stays down
     }
 
     static void mouse_button_callback(GLFWwindow* w, int button, int action, int mods) {
@@ -276,39 +280,14 @@ bool GlfwPlatform::poll_events() {
 
     glfwPollEvents();
 
-    // IMPORTANT FIX: On some Windows configurations, glfwGetKey() returns
-    // GLFW_RELEASE intermittently for held keys. We apply a debounce:
-    // keys_down stays true for a few frames after release, then clears.
-    // This prevents the flicker that causes step/idle animation switching.
-    static std::array<int, 256> key_release_timer = {};  // frames since release
-    
-    for (int i = 0; i < static_cast<int>(Key::AltRight) + 1; ++i) {
-        int glfw_key = key_index_to_glfw(i);
-        if (glfw_key >= 0 && impl_->window) {
-            int state = glfwGetKey(impl_->window, glfw_key);
-            bool hw_down = (state == GLFW_PRESS || state == GLFW_REPEAT);
-            
-            if (hw_down) {
-                // Hardware says key is down — reset release timer
-                key_release_timer[i] = 0;
-                if (!impl_->input.keys_down[i]) {
-                    impl_->input.keys_just_pressed[i] = true;
-                }
-                impl_->input.keys_down[i] = true;
-            } else {
-                // Hardware says key is up — debounce: keep it down for 3 frames
-                key_release_timer[i]++;
-                if (key_release_timer[i] > 3) {
-                    // Key has been released for 3+ frames — actually release
-                    if (impl_->input.keys_down[i]) {
-                        impl_->input.keys_just_released[i] = true;
-                    }
-                    impl_->input.keys_down[i] = false;
-                }
-                // Otherwise keep keys_down true (debounce)
-            }
-        }
-    }
+    // IMPORTANT: Do NOT use glfwGetKey() — it's broken on this Windows setup.
+    // Instead, rely ENTIRELY on the key_callback for key state.
+    // The callback sets keys_down on PRESS/REPEAT and clears on RELEASE.
+    // keys_just_pressed/just_released are set on edge transitions.
+    // To handle GLFW's spurious RELEASE events for held keys, we use
+    // sticky keys mode: glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE)
+    // This ensures PRESS events are not lost and RELEASE only fires once.
+    glfwSetInputMode(impl_->window, GLFW_STICKY_KEYS, GLFW_TRUE);
 
     return !impl_->quit_requested;
 }
