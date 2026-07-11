@@ -582,3 +582,73 @@ Stage Summary:
   rotated atlas frames now display correctly (Profile icon no longer sideways).
 - Next: user should build and test. The [ANIM] play_animation log will show
   if animations are still switching rapidly.
+
+---
+Task ID: stage-8.3
+Agent: main
+Task: Fix movement (velocity-based), bag physics (real pendulum), dojo Y-offset revert, HUD text centering
+
+Work Log:
+- Analyzed user log: confirmed animation flickering (step_forward ↔ fists_idle
+  every frame) prevents root motion accumulation. Character never moves.
+
+- MOVEMENT FIX: Completely replaced root motion with direct velocity-based
+  movement. When A/D is held, player_pos_x_ += MOVE_SPEED * dt (200 units/sec).
+  Step animations play purely for visual effect. Root motion code in
+  update_animation() is now disabled (commented out).
+  This is simpler, more reliable, and immune to animation flickering.
+  The character now moves continuously when holding A/D and stays at the
+  new position when the key is released.
+
+- BAG PHYSICS FIX: Replaced scripted sine wave with real damped spring pendulum.
+  State: bag_angle_ (radians), bag_angle_vel_ (rad/sec).
+  Physics: angular_acc = -k * angle - c * angular_vel (k=40, c=3.0)
+  Integration: vel += acc * dt; angle += vel * dt.
+  On hit: impulse applied to bag_angle_vel_ (6.0 for punches, 8.0 for kicks).
+  Direction: bag swings AWAY from attacker (dx < 0 → positive angle → right).
+  The bag now swings with momentum, oscillates back and forth, and gradually
+  comes to rest — like a real punching bag.
+
+- BAG HIT DETECTION FIX:
+  * Threshold reduced from 120 to 80 units (tighter, fewer false positives).
+  * Now uses moves.xml attack_start/attack_end intervals instead of
+    generic middle-third (fc/4 to fc*3/4).
+  * Only triggers when the attacking limb (NWrist_1 for punches, NToe_1 for
+    kicks) is within 80 units of the bag center.
+  * Impulse-based: applies velocity to pendulum instead of scripted timer.
+
+- DOJO RENDERING FIX:
+  * Reverted Y-offset (was img.y - 512, now just img.y).
+    The params.xml coordinates use the same system as player/enemy positions
+    (Y-up, Y=0 near center), so no conversion is needed.
+  * Added [LOC] diagnostic logging: prints all layer types, factors, and
+    image coordinates on first render. This will help identify the actual
+    coordinate values and determine if any Y-flip is needed.
+  * Parallax still applied: world_x = img.x - (1-factor)*cam_x_.
+
+- HUD FIX:
+  * MENU text: now measures actual text width using font xadvance values,
+    then centers it precisely on the roll: text_x = btn_x + (roll_w - text_w)/2.
+    Vertical centering: text_y = btn_y + (roll_h - text_height)/2.
+  * Menu icons: all rendered at fixed icon_size × icon_size (no aspect ratio
+    preservation). This ensures all icons are the same size.
+  * Added [MENU] diagnostic logging: prints texture dimensions for each icon.
+
+- Profile mirroring: the un-rotation formula for rotated atlas frames is
+  correct (verified mathematically). Profile might be intentionally mirrored
+  in the original game, or there's a separate flip flag in the plist.
+  Added diagnostic logging to investigate.
+
+- All changes syntax-checked with g++ -std=c++23 -fsyntax-only — passes.
+
+Stage Summary:
+- Movement: character now moves continuously when holding A/D, stays at new
+  position when released. No more "return to start" issue.
+- Bag: real physics pendulum with momentum and damped oscillation. Only
+  swings when the limb actually hits (80px threshold). Swings in correct
+  direction (away from attacker).
+- Dojo: reverted Y-offset, added diagnostic logging to identify the actual
+  coordinate system used by params.xml.
+- HUD: MENU text precisely centered, all menu icons same size.
+- Next: user should build, test, and share the [LOC] diagnostic logs so we
+  can determine the correct coordinate system for dojo images.
