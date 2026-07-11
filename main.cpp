@@ -721,6 +721,7 @@ private:
                                  root/"1536"/"textures",
                                  root/"1536",
                                  root/"assets",
+            exe / ".." / ".." / "assets" / "animations",  // repo assets
                                  root}) {
             auto pp = dir/(name+".plist"), pn = dir/(name+".png");
             if (std::filesystem::exists(pp) && std::filesystem::exists(pn)) {
@@ -1362,7 +1363,6 @@ private:
             root/"animations"/"binary",
             root/"assets"/"animations",
             root/"animations",
-            exe / ".." / ".." / "assets" / "animations" / "binary",  // repo assets
         };
         
         // Load key animations (using actual game file names from moves.xml)
@@ -1409,7 +1409,6 @@ private:
         std::vector<std::filesystem::path> search_dirs = {
             root/"assets"/"animations",
             root/"animations",
-            exe / ".." / ".." / "assets" / "animations" / "binary",  // repo assets
             root/"assets",
             exe / ".." / ".." / "assets" / "animations",  // repo assets
         };
