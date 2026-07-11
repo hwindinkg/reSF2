@@ -2323,7 +2323,12 @@ private:
             // This is 0 at start, rises during jump, returns to 0 at end.
             jump_y_offset_ = npivot_y - anim_root_anchor_y_;
         } else {
-            jump_y_offset_ = 0;
+            // Not a jump animation: smoothly decay jump_y_offset_ to 0.
+            // This handles the case where a jump/flip ended with non-zero
+            // offset (e.g. back_flip ends at +14 because Y[0]=92, Y[last]=106).
+            // The character "lands" back to ground level over a few frames.
+            jump_y_offset_ *= 0.80f;
+            if (std::abs(jump_y_offset_) < 0.5f) jump_y_offset_ = 0;
         }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
