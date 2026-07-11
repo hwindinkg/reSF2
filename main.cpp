@@ -518,6 +518,7 @@ public:
 private:
     // ---------- Loading screen ----------
     void load_loading_screen() {
+        auto root = std::filesystem::path(asset_root_);
         std::string xml_path;
         // Search for startLoading.xml in multiple possible paths
         for (const auto& dir : {root/"assets"/"1536"/"textures"/"fullscreen",
@@ -619,6 +620,7 @@ private:
 
     // ---------- Location ----------
     void load_location(const std::string& name) {
+        auto root = std::filesystem::path(asset_root_);
         std::string params_path;
         for (const auto& dir : {root/"assets"/"locations"/name,
                                  root/"locations"/name,
@@ -711,6 +713,7 @@ private:
     }
 
     void load_atlas(const std::string& name, const std::string& loc) {
+        auto exe = get_exe_dir();
         auto root = std::filesystem::path(asset_root_);
         for (const auto& dir : {root/"assets"/"1536"/"locations"/loc,
                                  root/"assets"/"1536"/"textures",
