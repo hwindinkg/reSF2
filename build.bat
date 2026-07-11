@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo === Configuring (Config: Release) ===
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DRESF2_BUILD_TESTS=ON -DRESF2_BUILD_RUNTIME=ON -DRESF2_USE_GLFW=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DRESF2_BUILD_TESTS=ON -DRESF2_BUILD_RUNTIME=ON -DRESF2_USE_GLFW=ON -DRESF2_BUILD_TOOLS=OFF
 if errorlevel 1 (
     echo CMake configuration failed!
     exit /b 1
