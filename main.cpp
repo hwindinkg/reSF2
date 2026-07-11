@@ -1314,7 +1314,7 @@ private:
         }
         
         // Render bag as unified silhouette (same approach as character)
-        ren::Color4B bag_body_col{100, 30, 30, 255};     // dark red for main bag
+        ren::Color4B bag_body_col{35, 35, 40, 255};      // dark neutral for bag body
         ren::Color4B bag_chain_col{160, 160, 160, 255};   // gray for chain
         
         for (auto& c : bag_model_->capsules) {
@@ -1364,7 +1364,7 @@ private:
             root/"animations"/"binary",
             root/"assets"/"animations",
             root/"animations",
-            exe/".." / ".." / "assets" / "animations" / "binary",  // repo assets
+            exe / ".." / ".." / ".." / "assets" / "animations" / "binary",  // repo assets
         };
         
         // Load key animations (using actual game file names from moves.xml)
@@ -1402,6 +1402,11 @@ private:
         }
         // Punch animations are loaded directly (high_punch, heavy_punch, low_punch)
         
+        if (animations_.empty()) {
+            std::printf("  Animations: NONE! Searched:\n");
+            for (auto& dir : search_dirs) std::printf("    %s\n", dir.string().c_str());
+            std::printf("  exe dir: %s\n", exe.string().c_str());
+        }
         std::printf("  Animations loaded: %zu\n", animations_.size());
     }
 
@@ -1413,7 +1418,7 @@ private:
             root/"assets"/"animations",
             root/"animations",
             root/"assets",
-            exe/".." / ".." / "assets" / "animations",  // repo assets
+            exe / ".." / ".." / ".." / "assets" / "animations",  // repo assets
         };
         
         std::string moves_path;
