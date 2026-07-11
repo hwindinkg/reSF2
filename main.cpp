@@ -1007,7 +1007,11 @@ private:
                                                       u0, v0, u1, v1);
                     }
                 } else {
-                    renderer_->draw_textured_quad(*atlas.texture, px, py, quad_w, quad_h,
+                    // For foreground layers (factor = 1.0), render once.
+                    // Add 1px overlap to prevent gaps between adjacent tiles
+                    // (floor segments, wall segments, etc.)
+                    renderer_->draw_textured_quad(*atlas.texture, px - 0.5f, py, 
+                                                  quad_w + 1.0f, quad_h,
                                                   u0, v0, u1, v1);
                 }
             }
@@ -2167,13 +2171,18 @@ private:
                 for (int x = 0; x < fw; ++x) {
                     int sx, sy;
                     if (frame.rotated) {
-                        // Cocos2d stores rotated frames rotated 90° CW.
-                        // To un-rotate, we need to figure out the correct mapping.
-                        // After testing, the correct formula is:
-                        //   sx = atlas_x + y
-                        //   sy = atlas_y + x
-                        // (90° CCW un-rotation without flip)
-                        sx = frame.atlas_x + y;
+                        // Cocos2d texturePacker rotates frames 90° CW.
+                        // The atlas region is (atlas_h wide × atlas_w tall) —
+                        // i.e., the width and height are swapped compared to
+                        // the original sprite (atlas_w × atlas_h).
+                        //
+                        // To un-rotate (90° CCW), we map destination (x,y)
+                        // to source coordinates. The 90° CW rotation maps:
+                        //   original(x, y) → stored(y, fw-1-x)
+                        // So the inverse (90° CCW) is:
+                        //   stored(sx_rel, sy_rel) → original(sy_rel, fw-1-sx_rel)
+                        // Therefore: destination(x, y) ← source(atlas_x + (fw-1-y), atlas_y + x)
+                        sx = frame.atlas_x + (fw - 1 - y);
                         sy = frame.atlas_y + x;
                     } else {
                         sx = frame.atlas_x + x;
