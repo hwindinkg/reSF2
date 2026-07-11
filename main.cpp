@@ -402,47 +402,59 @@ public:
                 init_location();
             }
         } else if (state_ == GameState::Location) {
-            // === MOVEMENT SYSTEM (root motion with input hysteresis) ===
-            // Input on Windows can flicker (glfwGetKey returns RELEASE
-            // intermittently for held keys). We use hysteresis: once moving,
-            // require N frames of "no key" before switching to idle.
+            // === MOVEMENT SYSTEM (state machine, immune to input flicker) ===
+            // Use a movement state: IDLE, MOVING_LEFT, MOVING_RIGHT
+            // Once moving, stay in that state until key is released
+            // for a SUSTAINED period (10+ frames).
+            // This is completely immune to per-frame input flicker.
             
-            bool want_move_left = input.keys_down[(size_t)plat::Key::A] ||
-                                  input.keys_down[(size_t)plat::Key::ArrowLeft];
-            bool want_move_right = input.keys_down[(size_t)plat::Key::D] ||
-                                   input.keys_down[(size_t)plat::Key::ArrowRight];
-            bool any_move = want_move_left || want_move_right;
+            bool key_left = input.keys_down[(size_t)plat::Key::A] ||
+                            input.keys_down[(size_t)plat::Key::ArrowLeft];
+            bool key_right = input.keys_down[(size_t)plat::Key::D] ||
+                             input.keys_down[(size_t)plat::Key::ArrowRight];
             
-            // Hysteresis: if no key pressed, increment no_key_frames_.
-            // Only treat as "stopped" after 5 frames of no key.
-            if (any_move) {
+            // Update no-key counter
+            if (key_left || key_right) {
                 no_key_frames_ = 0;
             } else {
                 no_key_frames_++;
             }
-            bool stopped = (no_key_frames_ > 5);
             
+            // State machine — only change state on SUSTAINED input
+            // Once in MOVING state, require 10 frames of no key to go back to IDLE
             if (hit_anim_ == 0) {
-                if (want_move_left && !want_move_right) {
-                    facing_right_ = false;
-                    if (current_anim_ != "step_back" && animations_.count("step_back")) {
+                if (move_state_ == 0) {  // IDLE
+                    if (key_left && !key_right) {
+                        move_state_ = 1;  // → MOVING_LEFT
+                        facing_right_ = false;
                         play_animation("step_back", true);
-                    }
-                } else if (want_move_right && !want_move_left) {
-                    facing_right_ = true;
-                    if (current_anim_ != "step_forward" && animations_.count("step_forward")) {
+                    } else if (key_right && !key_left) {
+                        move_state_ = 2;  // → MOVING_RIGHT
+                        facing_right_ = true;
                         play_animation("step_forward", true);
                     }
-                } else if (stopped) {
-                    // Key released for 5+ frames — switch to idle
-                    if (current_anim_ != "fists_idle" &&
-                        current_anim_.find("punch") == std::string::npos &&
-                        current_anim_.find("kick") == std::string::npos &&
-                        current_anim_.find("cut") == std::string::npos) {
+                } else if (move_state_ == 1) {  // MOVING_LEFT
+                    // Stay moving left unless key released for 10+ frames
+                    // or opposite key pressed
+                    if (key_right && !key_left) {
+                        move_state_ = 2;  // → MOVING_RIGHT
+                        facing_right_ = true;
+                        play_animation("step_forward", true);
+                    } else if (no_key_frames_ > 10) {
+                        move_state_ = 0;  // → IDLE
+                        play_animation("fists_idle", true);
+                    }
+                    // If key_left flickers, no_key_frames_ resets when it comes back
+                } else if (move_state_ == 2) {  // MOVING_RIGHT
+                    if (key_left && !key_right) {
+                        move_state_ = 1;  // → MOVING_LEFT
+                        facing_right_ = false;
+                        play_animation("step_back", true);
+                    } else if (no_key_frames_ > 10) {
+                        move_state_ = 0;  // → IDLE
                         play_animation("fists_idle", true);
                     }
                 }
-                // If not stopped (key flicker), keep current animation — no switch
             }
             
             // Camera follows player (fixed Y, no W/S camera movement)
@@ -455,9 +467,9 @@ public:
             if (input.keys_just_pressed[(size_t)plat::Key::Space] && hit_anim_ == 0) {
                 std::string move_name, anim_name;
                 
-                if (want_move_right) {
+                if (key_right) {
                     move_name = "DoublePunch"; anim_name = "double_punch";
-                } else if (want_move_left) {
+                } else if (key_left) {
                     move_name = "SpinningPunch"; anim_name = "spinning_punch";
                 } else if (input.keys_down[(size_t)plat::Key::W] || input.keys_down[(size_t)plat::Key::ArrowUp]) {
                     move_name = "UpperCut"; anim_name = "upper_cut";
@@ -486,9 +498,9 @@ public:
                 std::string move_name, anim_name;
                 if (input.keys_down[(size_t)plat::Key::S] || input.keys_down[(size_t)plat::Key::ArrowDown]) {
                     move_name = "Sweep"; anim_name = "sweep";
-                } else if (want_move_left) {
+                } else if (key_left) {
                     move_name = "BackKick"; anim_name = "back_kick";
-                } else if (want_move_right) {
+                } else if (key_right) {
                     move_name = "FrontKick"; anim_name = "front_kick";
                 } else {
                     move_name = "HighKick"; anim_name = "high_kick";
@@ -2721,6 +2733,7 @@ private:
     float step_start_player_x_ = 0.0f;  // player X when step started (for absolute root motion)
     float y_adjust_smoothed_ = 0.0f;  // smoothed Y adjustment for feet normalization
     int no_key_frames_ = 0;  // frames with no movement key pressed (for hysteresis)
+    int move_state_ = 0;  // 0=IDLE, 1=MOVING_LEFT, 2=MOVING_RIGHT
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
