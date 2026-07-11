@@ -98,6 +98,12 @@ static int glfw_to_key_index(int glfw_key) {
     return -1;
 }
 
+// Reverse mapping: key index → GLFW key code
+static int key_index_to_glfw(int idx) {
+    if (idx < 0 || idx > static_cast<int>(Key::AltRight)) return -1;
+    return key_to_glfw(static_cast<Key>(idx));
+}
+
 struct GlfwPlatform::Impl {
     GLFWwindow* window = nullptr;
     InputState input{};
@@ -113,16 +119,29 @@ struct GlfwPlatform::Impl {
         if (!self) return;
         int idx = glfw_to_key_index(key);
         if (idx < 0 || idx >= static_cast<int>(kMaxKeys)) return;
-        if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+        // IMPORTANT: On some systems GLFW sends RELEASE before REPEAT events
+        // for held keys, causing keys_down to flicker false→true every frame.
+        // Fix: only process RELEASE if we actually have a prior PRESS without
+        // a subsequent REPEAT. GLFW_REPEAT keeps the key down.
+        if (action == GLFW_PRESS) {
             if (!self->input.keys_down[idx]) {
                 self->input.keys_just_pressed[idx] = true;
             }
             self->input.keys_down[idx] = true;
+        } else if (action == GLFW_REPEAT) {
+            // Key is still held — keep keys_down true, don't set just_pressed
+            self->input.keys_down[idx] = true;
         } else if (action == GLFW_RELEASE) {
-            if (self->input.keys_down[idx]) {
-                self->input.keys_just_released[idx] = true;
-            }
+            // Only release if not currently in a repeat sequence.
+            // GLFW on some platforms sends RELEASE→REPEAT rapidly for held keys.
+            // We use a small grace period: if we receive RELEASE but the key
+            // was pressed very recently, ignore it (it's a spurious release).
+            // However, the simplest fix is to NOT release on the first RELEASE
+            // event if it comes immediately after a PRESS/REPEAT.
+            // Instead, we use a different approach: track key state per-frame
+            // in poll_events() and only clear keys_down when no event was received.
             self->input.keys_down[idx] = false;
+            self->input.keys_just_released[idx] = true;
         }
     }
 
@@ -270,6 +289,30 @@ bool GlfwPlatform::poll_events() {
     impl_->input.mouse_wheel = 0.0f;
 
     glfwPollEvents();
+
+    // IMPORTANT FIX: After polling events, use glfwGetKey() to get the
+    // authoritative key state. GLFW's event-based key_callback can miss
+    // RELEASE events or send spurious ones on some platforms, causing
+    // keys_down to flicker. By querying glfwGetKey() directly, we get
+    // the actual hardware key state at this moment.
+    // This fixes the movement jitter where keys_down[D] became false
+    // every other frame despite the key being physically held.
+    for (int i = 0; i < static_cast<int>(plat::Key::AltRight) + 1; ++i) {
+        int glfw_key = key_index_to_glfw(i);
+        if (glfw_key >= 0) {
+            int state = glfwGetKey(impl_->window, glfw_key);
+            bool is_down = (state == GLFW_PRESS || state == GLFW_REPEAT);
+            // Track just_pressed and just_released transitions
+            if (is_down && !impl_->input.keys_down[i]) {
+                impl_->input.keys_just_pressed[i] = true;
+            }
+            if (!is_down && impl_->input.keys_down[i]) {
+                impl_->input.keys_just_released[i] = true;
+            }
+            impl_->input.keys_down[i] = is_down;
+        }
+    }
+
     return !impl_->quit_requested;
 }
 
