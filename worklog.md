@@ -1026,3 +1026,48 @@ Stage Summary:
 - Profile icon rotation fixed with correct Cocos2d un-rotation formula
 - Floor gaps fixed with 1px overlap
 - README updated with comprehensive reverse engineering documentation
+
+---
+Task ID: stage-8.9
+Agent: main
+Task: Fix movement (displacement-based), background rotation (pre-crop), Y-invert player/bag
+
+Work Log:
+- MOVEMENT FIX — Displacement-based approach:
+  * Root motion from .bin was causing character to return to start due to
+    anchor resets across animations.
+  * New approach: each step moves player by fixed 66 units (matching
+    step_forward.bin NPivot delta 169→235).
+  * Step is active for 533ms (16 frames at 30fps).
+  * Player position is smoothly interpolated: player_pos_x_ = start_x + displacement * progress.
+  * Step cooldown prevents new step until current finishes.
+  * Variables: step_active_, step_duration_, step_start_x_, step_displacement_.
+
+- BACKGROUND ROTATION FIX — Pre-cropped textures:
+  * Rotated atlas frames were appearing sideways because UV mapping
+    couldn't properly un-rotate them.
+  * New approach: during load_atlas, pre-crop all rotated frames into
+    individual un-rotated textures (using same un-rotation formula as HUD).
+  * AtlasRef now has `cropped` map: frame_name → un-rotated Texture2D.
+  * render_location checks atlas.cropped first; if found, uses pre-cropped
+    texture with standard UV mapping (no rotation needed).
+  * Non-rotated frames still use atlas texture with UV mapping.
+
+- Y-INVERT PLAYER/BAG:
+  * Player and bag positions now use -location_->player_y / -location_->enemy_y.
+  * This matches the location image Y-inversion (world_y = -img.y).
+  * Player at params y=-93 → world y=+93 (above center).
+  * Bag at params y=-105 → world y=+105+50=155 (above center, +50 offset for hanging).
+  * Removed previous -45 offset which was incorrect.
+
+- S3E ANALYSIS (from previous stage):
+  * Downloaded APK, extracted ShadowFight2.s3e (8.3MB Marmalade binary)
+  * Identified: ModelPhysics (Verlet), ModelAnimation (MoveInside), IntervalAttack
+  * DZ archive format documented (custom compression)
+  * All findings in README
+
+Stage Summary:
+- Movement: displacement-based, 66 units per step, no return-to-start bug.
+- Background: pre-cropped un-rotated textures for rotated atlas frames.
+- Player/bag Y: inverted to match location image coordinate system.
+- Next: user should test and report if positions are correct.
