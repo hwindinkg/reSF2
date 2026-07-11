@@ -619,7 +619,6 @@ private:
 
     // ---------- Location ----------
     void load_location(const std::string& name) {
-        auto root = std::filesystem::path(asset_root_);
         std::string params_path;
         for (const auto& dir : {root/"assets"/"locations"/name,
                                  root/"locations"/name,
