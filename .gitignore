@@ -1,2 +1,6 @@
 skills/
 node_modules/
+sf2_apk.apk
+work/sf2_data.7z
+*.apk
+*.7z
