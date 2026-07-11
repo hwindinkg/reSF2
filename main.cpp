@@ -43,6 +43,8 @@
 #include "engine/renderer/renderer.hpp"
 #include "engine/reverse/plist_atlas.hpp"
 #include "engine/reverse/bitmap_font.hpp"
+#include "engine/scene/scene_system.hpp"
+#include "engine/scene/scenes.hpp"
 #include "engine/renderer/stb_image.h"
 
 namespace plat = resf2::platform;
@@ -50,6 +52,7 @@ namespace rt = resf2::runtime;
 namespace ren = resf2::renderer;
 namespace plist = resf2::reverse::plist;
 namespace font = resf2::reverse::font;
+namespace scene = resf2::scene;
 
 // ---------- Small helpers ----------
 
@@ -327,13 +330,22 @@ struct LoadingImg {
 };
 
 // ---------- Game states ----------
+//
+// The old monolithic GameState { Loading, Location } has been replaced by
+// the scene::SceneManager (see engine/scene/scene_system.hpp). The enum is
+// kept only for the Overlay system, which is a sub-state within the
+// MainMenu/Battle scenes.
 
-enum class GameState { Loading, Location };
 enum class Overlay { None, Menu, Dialog };
 
 // ---------- Game ----------
+//
+// The Game class is the SceneHost — it owns the SceneManager and implements
+// the scene::SceneHost interface. Individual scenes (MainMenu, Battle, Map,
+// etc.) call back into Game via the host interface to load assets, render
+// the dojo, save progress, etc.
 
-class Game final : public rt::IGame {
+class Game final : public rt::IGame, public scene::SceneHost {
 public:
     explicit Game(std::string asset_root) : asset_root_(std::move(asset_root)) {}
 
@@ -343,24 +355,152 @@ public:
         std::printf("Controls:\n");
         std::printf("  A/D or Left/Right  - move player\n");
         std::printf("  W/S or Up/Down     - move camera (debug)\n");
-        std::printf("  Space              - hit (punch the bag)\n");
+        std::printf("  Space              - hit (punch the bag) / advance dialogue\n");
         std::printf("  M or click menu    - toggle menu\n");
         std::printf("  T                  - toggle dialog\n");
+        std::printf("  N                  - new game (go to Map)\n");
+        std::printf("  Y/L                - declare victory/defeat (debug, in Battle)\n");
         std::printf("  1/2/3              - zoom presets\n");
-        std::printf("  Esc                - quit / close overlay\n\n");
+        std::printf("  Esc                - quit / close overlay / back\n\n");
 
         renderer_ = std::make_unique<ren::Renderer>();
         if (!renderer_->init(platform.window_width(), platform.window_height())) {
             renderer_.reset(); return;
         }
         renderer_->set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+
+        // Load loading screen textures (used by LoadingScene via render_loading_screen)
         if (!asset_root_.empty()) load_loading_screen();
+
+        // Register all scenes with the SceneManager
+        scene_manager_.register_scene(scene::SceneId::Boot,
+            [] { return std::make_unique<scene::BootScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Loading,
+            [] { return std::make_unique<scene::LoadingScene>(); });
+        scene_manager_.register_scene(scene::SceneId::MainMenu,
+            [] { return std::make_unique<scene::MainMenuScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Map,
+            [] { return std::make_unique<scene::MapScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Shop,
+            [] { return std::make_unique<scene::ShopScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Settings,
+            [] { return std::make_unique<scene::SettingsScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Dialogue,
+            [] { return std::make_unique<scene::DialogueScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Battle,
+            [] { return std::make_unique<scene::BattleScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Results,
+            [] { return std::make_unique<scene::ResultsScene>(); });
+
+        // Start the scene flow at Boot
+        scene::SceneContext ctx{*this, platform, *renderer_, 0};
+        scene_manager_.start(scene::SceneId::Boot, ctx);
     }
 
     void on_update(plat::Platform& platform, uint32_t dt) override {
-        const auto& input = platform.input();
+        if (!renderer_) return;
 
-        // Esc: close overlay if open, else quit
+        // Build the scene context and delegate to the SceneManager.
+        // The current scene's on_update handles all input and game logic.
+        // For MainMenu/Battle, the scene calls host_update_gameplay() which
+        // contains the movement, combat, and animation code.
+        scene::SceneContext ctx{*this, platform, *renderer_, dt};
+        scene_manager_.update(ctx);
+    }
+
+    void on_render(plat::Platform& platform) override {
+        if (!renderer_) return;
+        renderer_->begin_frame();
+        scene::SceneContext ctx{*this, platform, *renderer_, 0};
+        scene_manager_.render(ctx);
+        renderer_->end_frame();
+    }
+
+    void on_shutdown(plat::Platform&) override {
+        if (renderer_) renderer_->shutdown();
+    }
+
+    bool quit_requested() const noexcept { return quit_requested_; }
+
+    // ---------- scene::SceneHost implementation ----------
+    //
+    // These methods are called by the scenes (MainMenu, Battle, etc.) via
+    // the SceneHost interface to interact with the game state.
+
+    void request_scene_transition(scene::SceneId to) override {
+        scene_manager_.transition_to(to);
+    }
+
+    void host_load_location() override {
+        if (!location_loaded_) {
+            init_location();
+        }
+    }
+
+    bool host_location_loaded() const noexcept override {
+        return location_loaded_;
+    }
+
+    bool host_save_progress() override {
+        // Minimal save: write a JSON file next to the executable with
+        // completed levels and currency. This is a stub — the real save
+        // format will be determined once the story/progress asset format
+        // is decoded from DZ archives.
+        try {
+            auto save_path = std::filesystem::temp_directory_path() / "resf2_save.json";
+            std::ofstream f(save_path);
+            if (!f) return false;
+            f << "{\n";
+            f << "  \"version\": 1,\n";
+            f << "  \"current_level\": \"" << current_level_ << "\",\n";
+            f << "  \"battle_result\": \"" << battle_result_ << "\",\n";
+            f << "  \"completed_levels\": ["; 
+            for (size_t i = 0; i < completed_levels_.size(); ++i) {
+                if (i) f << ", ";
+                f << "\"" << completed_levels_[i] << "\"";
+            }
+            f << "],\n";
+            f << "  \"currency\": " << currency_ << "\n";
+            f << "}\n";
+            std::printf("[save] wrote %s\n", save_path.string().c_str());
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool host_load_progress() override {
+        try {
+            auto save_path = std::filesystem::temp_directory_path() / "resf2_save.json";
+            if (!std::filesystem::exists(save_path)) return false;
+            std::printf("[save] found %s (loading not yet implemented)\n",
+                        save_path.string().c_str());
+            // TODO: parse JSON and restore state
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    void host_set_dialogue(std::vector<std::pair<std::string, std::string>> lines) override {
+        dialogue_lines_ = std::move(lines);
+        dialogue_index_ = 0;
+    }
+
+    void host_set_current_level(std::string level_id) override {
+        current_level_ = std::move(level_id);
+    }
+
+    std::string host_get_battle_result() const override {
+        return battle_result_;
+    }
+
+    // Called by MainMenuScene and BattleScene to update the dojo gameplay
+    // (movement, combat, animation, physics, overlays).
+    void host_update_gameplay(uint32_t dt) {
+        const auto& input = platform_->input();
+
+        // Esc: close overlay if open, else request quit (handled by scene)
         if (input.keys_just_pressed[(size_t)plat::Key::Escape]) {
             if (overlay_ != Overlay::None) overlay_ = Overlay::None;
             else quit_requested_ = true;
@@ -387,7 +527,7 @@ public:
 
         // Animate menu expand/collapse (300ms transition)
         float target_progress = (overlay_ == Overlay::Menu) ? 1.0f : 0.0f;
-        float anim_speed = 1000.0f / 300.0f;  // 300ms full transition
+        float anim_speed = 1000.0f / 300.0f;
         if (menu_anim_progress_ < target_progress) {
             menu_anim_progress_ += (float)dt / anim_speed;
             if (menu_anim_progress_ > target_progress) menu_anim_progress_ = target_progress;
@@ -396,253 +536,179 @@ public:
             if (menu_anim_progress_ < target_progress) menu_anim_progress_ = target_progress;
         }
 
-        if (state_ == GameState::Loading) {
-            loading_timer_ += dt;
-            if (loading_timer_ > 1500) {
-                init_location();
-            }
-        } else if (state_ == GameState::Location) {
-            // === MOVEMENT SYSTEM (state machine using just_released) ===
-            // glfwGetKey() on this Windows setup returns GLFW_RELEASE for
-            // 10+ consecutive frames even when key is physically held.
-            // Using keys_down is unreliable. Instead, use keys_just_released
-            // which only fires ONCE when the key is actually released.
-            // Once moving, stay moving until keys_just_released fires.
-            
-            bool key_left_down = input.keys_down[(size_t)plat::Key::A] ||
-                                 input.keys_down[(size_t)plat::Key::ArrowLeft];
-            bool key_right_down = input.keys_down[(size_t)plat::Key::D] ||
-                                  input.keys_down[(size_t)plat::Key::ArrowRight];
-            bool key_left_released = input.keys_just_released[(size_t)plat::Key::A] ||
-                                     input.keys_just_released[(size_t)plat::Key::ArrowLeft];
-            bool key_right_released = input.keys_just_released[(size_t)plat::Key::D] ||
-                                      input.keys_just_released[(size_t)plat::Key::ArrowRight];
-            
-            if (hit_anim_ == 0) {
-                if (move_state_ == 0) {  // IDLE
-                    if (key_left_down && !key_right_down) {
-                        move_state_ = 1;  // → MOVING_LEFT
-                        facing_right_ = false;
-                        play_animation("step_back", true);
-                    } else if (key_right_down && !key_left_down) {
-                        move_state_ = 2;  // → MOVING_RIGHT
-                        facing_right_ = true;
-                        play_animation("step_forward", true);
-                    }
-                } else if (move_state_ == 1) {  // MOVING_LEFT
-                    // Only exit if key A is ACTUALLY released (just_released fires once)
-                    if (key_left_released) {
-                        move_state_ = 0;  // → IDLE
-                        play_animation("fists_idle", true);
-                    } else if (key_right_down && !key_left_down) {
-                        move_state_ = 2;  // → MOVING_RIGHT
-                        facing_right_ = true;
-                        play_animation("step_forward", true);
-                    }
-                    // Ignore keys_down flicker — stay in MOVING_LEFT
-                } else if (move_state_ == 2) {  // MOVING_RIGHT
-                    if (key_right_released) {
-                        move_state_ = 0;  // → IDLE
-                        play_animation("fists_idle", true);
-                    } else if (key_left_down && !key_right_down) {
-                        move_state_ = 1;  // → MOVING_LEFT
-                        facing_right_ = false;
-                        play_animation("step_back", true);
-                    }
-                    // Ignore keys_down flicker — stay in MOVING_RIGHT
+        // === MOVEMENT SYSTEM (state machine using just_released) ===
+        bool key_left_down = input.keys_down[(size_t)plat::Key::A] ||
+                             input.keys_down[(size_t)plat::Key::ArrowLeft];
+        bool key_right_down = input.keys_down[(size_t)plat::Key::D] ||
+                              input.keys_down[(size_t)plat::Key::ArrowRight];
+        bool key_left_released = input.keys_just_released[(size_t)plat::Key::A] ||
+                                 input.keys_just_released[(size_t)plat::Key::ArrowLeft];
+        bool key_right_released = input.keys_just_released[(size_t)plat::Key::D] ||
+                                  input.keys_just_released[(size_t)plat::Key::ArrowRight];
+
+        if (hit_anim_ == 0) {
+            if (move_state_ == 0) {  // IDLE
+                if (key_left_down && !key_right_down) {
+                    move_state_ = 1; facing_right_ = false;
+                    play_animation("step_back", true);
+                } else if (key_right_down && !key_left_down) {
+                    move_state_ = 2; facing_right_ = true;
+                    play_animation("step_forward", true);
+                }
+            } else if (move_state_ == 1) {  // MOVING_LEFT
+                if (key_left_released) {
+                    move_state_ = 0; play_animation("fists_idle", true);
+                } else if (key_right_down && !key_left_down) {
+                    move_state_ = 2; facing_right_ = true;
+                    play_animation("step_forward", true);
+                }
+            } else if (move_state_ == 2) {  // MOVING_RIGHT
+                if (key_right_released) {
+                    move_state_ = 0; play_animation("fists_idle", true);
+                } else if (key_left_down && !key_right_down) {
+                    move_state_ = 1; facing_right_ = false;
+                    play_animation("step_back", true);
                 }
             }
-            
-            // Camera follows player (fixed Y, no W/S camera movement)
-            cam_x_ = player_pos_x_ + 200.0f;
-            renderer_->camera().set_target(cam_x_, cam_y_);
-            renderer_->camera().set_zoom(zoom_);
+        }
 
-            // === COMBAT SYSTEM (from moves.xml) ===
-            // Punch moves: Space + direction
-            if (input.keys_just_pressed[(size_t)plat::Key::Space] && hit_anim_ == 0) {
-                std::string move_name, anim_name;
-                
-                if (key_right_down) {
-                    move_name = "DoublePunch"; anim_name = "double_punch";
-                } else if (key_left_down) {
-                    move_name = "SpinningPunch"; anim_name = "spinning_punch";
-                } else if (input.keys_down[(size_t)plat::Key::W] || input.keys_down[(size_t)plat::Key::ArrowUp]) {
-                    move_name = "UpperCut"; anim_name = "upper_cut";
-                } else if (input.keys_down[(size_t)plat::Key::S] || input.keys_down[(size_t)plat::Key::ArrowDown]) {
-                    move_name = "LowPunch"; anim_name = "low_punch";
-                } else {
-                    move_name = "HighPunch"; anim_name = "high_punch";
-                }
+        // Camera follows player
+        cam_x_ = player_pos_x_ + 200.0f;
+        renderer_->camera().set_target(cam_x_, cam_y_);
+        renderer_->camera().set_zoom(zoom_);
 
-                if (animations_.count(anim_name)) {
-                    std::printf("[COMBAT] Space → %s (anim '%s', %d frames)\n",
-                                move_name.c_str(), anim_name.c_str(),
-                                animations_[anim_name].frame_count);
-                    play_animation(anim_name, false);
-                    current_move_ = move_name;
-                    int fc = animations_[anim_name].frame_count;
-                    hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
-                } else {
-                    std::printf("[COMBAT] Space → %s BUT anim '%s' NOT loaded!\n",
-                                move_name.c_str(), anim_name.c_str());
-                }
+        // === COMBAT: Punch (Space + direction) ===
+        if (input.keys_just_pressed[(size_t)plat::Key::Space] && hit_anim_ == 0) {
+            std::string move_name, anim_name;
+            if (key_right_down) { move_name = "DoublePunch"; anim_name = "double_punch"; }
+            else if (key_left_down) { move_name = "SpinningPunch"; anim_name = "spinning_punch"; }
+            else if (input.keys_down[(size_t)plat::Key::W] || input.keys_down[(size_t)plat::Key::ArrowUp]) {
+                move_name = "UpperCut"; anim_name = "upper_cut";
+            } else if (input.keys_down[(size_t)plat::Key::S] || input.keys_down[(size_t)plat::Key::ArrowDown]) {
+                move_name = "LowPunch"; anim_name = "low_punch";
+            } else { move_name = "HighPunch"; anim_name = "high_punch"; }
+
+            if (animations_.count(anim_name)) {
+                std::printf("[COMBAT] Space -> %s (anim '%s', %d frames)\n",
+                            move_name.c_str(), anim_name.c_str(),
+                            animations_[anim_name].frame_count);
+                play_animation(anim_name, false);
+                current_move_ = move_name;
+                int fc = animations_[anim_name].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
             }
-            
-            // Kick moves: K + direction
-            if (input.keys_just_pressed[(size_t)plat::Key::K] && hit_anim_ == 0) {
-                std::string move_name, anim_name;
-                if (input.keys_down[(size_t)plat::Key::S] || input.keys_down[(size_t)plat::Key::ArrowDown]) {
-                    move_name = "Sweep"; anim_name = "sweep";
-                } else if (key_left_down) {
-                    move_name = "BackKick"; anim_name = "back_kick";
-                } else if (key_right_down) {
-                    move_name = "FrontKick"; anim_name = "front_kick";
-                } else {
-                    move_name = "HighKick"; anim_name = "high_kick";
-                }
-                
-                if (animations_.count(anim_name)) {
-                    std::printf("[COMBAT] K → %s (anim '%s', %d frames)\n",
-                                move_name.c_str(), anim_name.c_str(),
-                                animations_[anim_name].frame_count);
-                    play_animation(anim_name, false);
-                    current_move_ = move_name;
-                    int fc = animations_[anim_name].frame_count;
-                    hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
-                } else {
-                    std::printf("[COMBAT] K → %s BUT anim '%s' NOT loaded!\n",
-                                move_name.c_str(), anim_name.c_str());
-                }
+        }
+
+        // === COMBAT: Kick (K + direction) ===
+        if (input.keys_just_pressed[(size_t)plat::Key::K] && hit_anim_ == 0) {
+            std::string move_name, anim_name;
+            if (input.keys_down[(size_t)plat::Key::S] || input.keys_down[(size_t)plat::Key::ArrowDown]) {
+                move_name = "Sweep"; anim_name = "sweep";
+            } else if (key_left_down) { move_name = "BackKick"; anim_name = "back_kick"; }
+            else if (key_right_down) { move_name = "FrontKick"; anim_name = "front_kick"; }
+            else { move_name = "HighKick"; anim_name = "high_kick"; }
+
+            if (animations_.count(anim_name)) {
+                std::printf("[COMBAT] K -> %s (anim '%s', %d frames)\n",
+                            move_name.c_str(), anim_name.c_str(),
+                            animations_[anim_name].frame_count);
+                play_animation(anim_name, false);
+                current_move_ = move_name;
+                int fc = animations_[anim_name].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
             }
+        }
 
-            // === UPDATE ANIMATION ===
-            // Must run BEFORE hit detection so anim_node_pos_ and anim_time_
-            // are synchronized with the current frame. Without this, hit detection
-            // uses stale limb positions from the previous frame, causing hits to
-            // trigger at the wrong time (or not at all).
-            update_animation(dt);
+        // === UPDATE ANIMATION ===
+        update_animation(dt);
 
-            // Update hit timer and check for hit detection
-            if (hit_anim_ > 0) {
-                hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
-                
-                // Hit detection: check if the attacking limb actually reaches the bag.
-                // Uses the move's Attack interval from moves.xml (Start/End frames).
-                // Only triggers during the exact attack window (typically 2-4 frames).
-                if (!bag_hit_ && bag_model_ && location_) {
-                    auto anim_it = animations_.find(current_anim_);
-                    if (anim_it != animations_.end()) {
-                        int fc = anim_it->second.frame_count;
-                        int current_frame = (int)(anim_time_ * 30.0f);
-                        // Get attack interval from moves.xml
-                        auto move_it = moves_.find(current_move_);
-                        if (move_it != moves_.end() && move_it->second.attack_start > 0) {
-                            int attack_start = move_it->second.attack_start;
-                            int attack_end = move_it->second.attack_end > 0 ? 
-                                           move_it->second.attack_end : attack_start;
-                            // moves.xml uses 1-indexed frames, our animation is 0-indexed.
-                            // Convert: subtract 1 from Start and End.
-                            int frame_start = attack_start - 1;
-                            int frame_end = attack_end - 1;
-                            if (current_frame >= frame_start && current_frame <= frame_end) {
-                                // Determine which limb is attacking
-                                std::string limb_node;
-                                bool is_kick = (current_move_.find("Kick") != std::string::npos ||
-                                               current_move_.find("Sweep") != std::string::npos);
-                                if (is_kick) {
-                                    limb_node = "NToe_1";
-                                } else {
-                                    limb_node = "NWrist_1";
+        // === HIT DETECTION ===
+        if (hit_anim_ > 0) {
+            hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
+            if (!bag_hit_ && bag_model_ && location_) {
+                auto anim_it = animations_.find(current_anim_);
+                if (anim_it != animations_.end()) {
+                    int fc = anim_it->second.frame_count;
+                    int current_frame = (int)(anim_time_ * 30.0f);
+                    auto move_it = moves_.find(current_move_);
+                    if (move_it != moves_.end() && move_it->second.attack_start > 0) {
+                        int attack_start = move_it->second.attack_start;
+                        int attack_end = move_it->second.attack_end > 0 ?
+                                       move_it->second.attack_end : attack_start;
+                        int frame_start = attack_start - 1;
+                        int frame_end = attack_end - 1;
+                        if (current_frame >= frame_start && current_frame <= frame_end) {
+                            std::string limb_node;
+                            bool is_kick = (current_move_.find("Kick") != std::string::npos ||
+                                           current_move_.find("Sweep") != std::string::npos);
+                            limb_node = is_kick ? "NToe_1" : "NWrist_1";
+                            auto ait = anim_node_pos_.find(limb_node);
+                            if (ait != anim_node_pos_.end()) {
+                                float limb_lx = ait->second.first;
+                                float limb_ly = ait->second.second;
+                                auto pivot_it = skeleton_nodes_.find("NPivot");
+                                float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
+                                float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx);
+                                float limb_wy = player_pos_y_ + (limb_ly - pivot_ly);
+                                float bag_cx = location_->enemy_x - 983.0f;
+                                float bag_cy = location_->enemy_y + 81.0f;
+                                auto bv_it = bag_verlet_.find("NPivot");
+                                if (bv_it != bag_verlet_.end()) {
+                                    bag_cx = bv_it->second.x; bag_cy = bv_it->second.y;
                                 }
-                                
-                                // Get the limb's animated world position
-                                auto ait = anim_node_pos_.find(limb_node);
-                                if (ait != anim_node_pos_.end()) {
-                                    float limb_lx = ait->second.first;
-                                    float limb_ly = ait->second.second;
-                                    auto pivot_it = skeleton_nodes_.find("NPivot");
-                                    float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
-                                    float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx) * 1.0f;
-                                    float limb_wy = player_pos_y_ + (limb_ly - pivot_ly) * 1.0f;
-                                    
-                                    // Bag center position (use Verlet node positions for accuracy)
-                                    // Same coordinate system as player — no Y-invert
-                                    float bag_cx = location_->enemy_x - 983.0f;
-                                    float bag_cy = location_->enemy_y + 81.0f;
-                                    // Check against the bag's NPivot Verlet position (more accurate)
-                                    auto bv_it = bag_verlet_.find("NPivot");
-                                    if (bv_it != bag_verlet_.end()) {
-                                        bag_cx = bv_it->second.x;
-                                        bag_cy = bv_it->second.y;
-                                    }
-                                    
-                                    float dx = limb_wx - bag_cx;
-                                    float dy = limb_wy - bag_cy;
-                                    float dist = std::sqrt(dx*dx + dy*dy);
-                                    
-                                    // Hit threshold: 70 units (reliable hit detection)
-                                    if (dist < 70.0f) {
-                                        // Apply impulse to the nearest bag node based on hit height
-                                        std::string target_node = "NNeck";
-                                        if (limb_wy < bag_cy - 30) target_node = "NBottom";
-                                        else if (limb_wy > bag_cy + 30) target_node = "Node4";
-                                        float impulse_dir = (dx < 0) ? 1.0f : -1.0f;
-                                        // Stronger impulse for heavier bag
-                                        float impulse_strength = is_kick ? 25.0f : 18.0f;
-                                        apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
-                                        std::printf("[COMBAT] HIT! move=%s frame=%d/%d [%d-%d] limb=%s dist=%.1f → impulse on %s\n",
-                                                    current_move_.c_str(), current_frame, fc,
-                                                    frame_start, frame_end,
-                                                    limb_node.c_str(), dist, target_node.c_str());
-                                        bag_hit_ = true;
-                                    }
+                                float dx = limb_wx - bag_cx;
+                                float dy = limb_wy - bag_cy;
+                                float dist = std::sqrt(dx*dx + dy*dy);
+                                if (dist < 70.0f) {
+                                    std::string target_node = "NNeck";
+                                    if (limb_wy < bag_cy - 30) target_node = "NBottom";
+                                    else if (limb_wy > bag_cy + 30) target_node = "Node4";
+                                    float impulse_dir = (dx < 0) ? 1.0f : -1.0f;
+                                    float impulse_strength = is_kick ? 25.0f : 18.0f;
+                                    apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
+                                    std::printf("[COMBAT] HIT! move=%s frame=%d/%d [%d-%d] limb=%s dist=%.1f -> %s\n",
+                                                current_move_.c_str(), current_frame, fc,
+                                                frame_start, frame_end,
+                                                limb_node.c_str(), dist, target_node.c_str());
+                                    bag_hit_ = true;
                                 }
                             }
                         }
-                        // If no Attack interval found, skip hit detection entirely
                     }
                 }
-                
-                if (hit_anim_ == 0) {
-                    play_animation("fists_idle", true);
-                    current_move_.clear();
-                    bag_hit_ = false;
-                }
             }
-
-            // Update bag Verlet physics (original game uses Verlet integration)
-            update_bag_verlet(dt / 1000.0f);
-
-            // Zoom presets
-            if (input.keys_just_pressed[(size_t)plat::Key::Num1]) zoom_ = 1.0f;
-            if (input.keys_just_pressed[(size_t)plat::Key::Num2]) zoom_ = 0.7f;
-            if (input.keys_just_pressed[(size_t)plat::Key::Num3]) zoom_ = 1.5f;
-            // NO W/S camera movement — W/S are used for attack direction modifiers
+            if (hit_anim_ == 0) {
+                play_animation("fists_idle", true);
+                current_move_.clear();
+                bag_hit_ = false;
+            }
         }
+
+        // Update bag Verlet physics
+        update_bag_verlet(dt / 1000.0f);
+
+        // Zoom presets
+        if (input.keys_just_pressed[(size_t)plat::Key::Num1]) zoom_ = 1.0f;
+        if (input.keys_just_pressed[(size_t)plat::Key::Num2]) zoom_ = 0.7f;
+        if (input.keys_just_pressed[(size_t)plat::Key::Num3]) zoom_ = 1.5f;
     }
 
-    void on_render(plat::Platform& platform) override {
-        if (!renderer_) return;
-        renderer_->begin_frame();
-        if (state_ == GameState::Loading) render_loading_screen(platform);
-        else if (state_ == GameState::Location) {
-            render_location();
-            render_punching_bag();
-            render_character();
-            render_hud(platform);
-            // Render menu expansion animation (also during transition)
-            if (menu_anim_progress_ > 0.01f) render_menu_expanded(platform);
-            if (overlay_ == Overlay::Dialog) render_dialog_overlay(platform);
-        }
-        renderer_->end_frame();
+    // Called by MainMenuScene and BattleScene to render the dojo scene
+    // (background, character, bag, HUD, menu/dialog overlays).
+    void host_render_scene() {
+        if (!location_loaded_) return;
+        render_location();
+        render_punching_bag();
+        render_character();
+        render_hud(*platform_);
+        if (menu_anim_progress_ > 0.01f) render_menu_expanded(*platform_);
+        if (overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
     }
 
-    void on_shutdown(plat::Platform&) override {
-        if (renderer_) renderer_->shutdown();
+    // Called by LoadingScene to render the loading screen.
+    void host_render_loading() {
+        render_loading_screen(*platform_);
     }
-
-    bool quit_requested() const noexcept { return quit_requested_; }
 
 private:
     // ---------- Loading screen ----------
@@ -658,8 +724,7 @@ private:
             if (std::filesystem::exists(p)) { xml_path = p.string(); break; }
         }
         if (xml_path.empty()) {
-            std::printf("  startLoading.xml not found, skipping loading screen\n");
-            init_location();
+            std::printf("  startLoading.xml not found, loading screen will be blank\n");
             return;
         }
         auto xml = read_text(xml_path);
@@ -694,17 +759,16 @@ private:
             pos = end + 2;
         }
         if (loading_images_.empty()) {
-            std::printf("  No loading images found, skipping loading screen\n");
-            init_location();
+            std::printf("  No loading images found, loading screen will be blank\n");
         }
     }
 
     // Initialize the dojo location: load all assets and set up the scene.
-    // Called either from the loading timer (after 1.5s) or directly from
-    // load_loading_screen() if the loading screen is not available.
+    // Called by host_load_location() (SceneHost interface) when entering
+    // MainMenu or Battle scene.
     void init_location() {
         load_location("dojo");
-        state_ = GameState::Location;
+        location_loaded_ = true;
         if (location_ && !location_->color.empty()) {
             auto c = std::stoul(location_->color, nullptr, 16);
             renderer_->set_clear_color(
@@ -2647,14 +2711,25 @@ private:
     std::string asset_root_;
     std::unique_ptr<ren::Renderer> renderer_;
 
-    GameState state_ = GameState::Loading;
+    // --- Scene management ---
+    scene::SceneManager scene_manager_;
+    bool location_loaded_ = false;
+
+    // --- Dialogue / story state ---
+    std::vector<std::pair<std::string, std::string>> dialogue_lines_;
+    size_t dialogue_index_ = 0;
+
+    // --- Level / progress state ---
+    std::string current_level_;
+    std::string battle_result_;  // "victory" / "defeat" / ""
+    std::vector<std::string> completed_levels_;
+    int currency_ = 1000;  // starting gold (stub)
+
     Overlay overlay_ = Overlay::None;
     float menu_anim_progress_ = 0.0f;  // 0 = collapsed, 1 = fully expanded
     bool loc_icons_logged = false;  // one-shot diagnostic for menu icon sizes
-    uint32_t loading_timer_ = 0;
     float load_scale_ = 1.0f, zoom_ = 1.0f;
     std::vector<LoadingImg> loading_images_;
-
     std::unique_ptr<GameLocation> location_;
     std::unordered_map<std::string, AtlasRef> atlases_;
     std::unordered_map<std::string, SkelNode> skeleton_nodes_;

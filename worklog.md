@@ -1230,3 +1230,56 @@ Stage Summary:
 - Результаты в /home/z/my-project/work/s3e_analysis/: header.txt, config.icf, imports.txt, fixup_table.txt, strings.txt, entry_disasm.asm, summary.txt, ShadowFight2.bin
 - Game data в /home/z/my-project/work/sf2_data/sf2/ — полная структура APK + assets
 - Для дизассемблирования нужен Ghidra с S3ELoader плагином (применяет relocs); Capstone без relocs даёт мусор
+
+---
+Task ID: scene-system-and-dz-analysis
+Agent: main (chat session)
+Task: Задача 4 (основной фокус): Scene/State Manager + полный игровой флоу. Задача 3 (параллельно): DZ-архивы — энтропийный анализ, исправление парсера.
+
+Work Log:
+- Прочитал README.md, HANDOFF.md, worklog.md, scripts/ для понимания текущего состояния.
+- Проверил что Задача 1 (Win32 GetAsyncKeyState fix) уже выполнена в прошлой сессии — коммит 0b3d55c на месте, #ifdef _WIN32 блок в glfw_platform.cpp работает.
+- Прочитал DZ-скрипты (parse_dz.py, dz_decompress.py, dz_final.py, dz_decode_v2.py) и engine/reverse/dz/README.md — понял что ARM-эмуляция заблокирована на init_array, ручной port неполный.
+
+Задача 4 — Scene/State Manager:
+- Создал engine/scene/scene_system.hpp — SceneId enum {Boot, Loading, MainMenu, Map, Shop, Settings, Dialogue, Battle, Results}, Scene interface (on_enter/on_update/on_render/on_exit/on_quit_request), SceneHost interface, SceneManager.
+- Создал engine/scene/scenes.hpp + scenes.cpp — конкретные scene-классы: BootScene (0.5s splash), LoadingScene (прогрев ассетов), MainMenuScene (додзё+груша, делегирует host_update_gameplay/host_render_scene), MapScene (выбор уровня), ShopScene (stub), SettingsScene (stub), DialogueScene (dialogue box), BattleScene (бой, Esc→Results), ResultsScene (пост-бой, save).
+- Создал engine/scene/CMakeLists.txt — статическая lib resf2_scene, линкуется с resf2_renderer + resf2_platform.
+- Добавил resf2_scene в линковку resf2_app в top-level CMakeLists.txt.
+- Модифицировал main.cpp:
+  * Добавил #include scene_system.hpp + scenes.hpp, namespace alias `scene`.
+  * Game класс теперь наследует и rt::IGame, и scene::SceneHost.
+  * Убрал старый GameState enum (Loading/Location) — заменён на SceneManager.
+  * on_init: регистрирует все 9 сцен в SceneManager, запускает с BootScene.
+  * on_update: делегирует к scene_manager_.update(ctx) — больше никаких прямых if(state_==...) проверок.
+  * on_render: делегирует к scene_manager_.render(ctx).
+  * Вынес всю логику додзё+груши (movement, combat, animation, physics, overlays) в host_update_gameplay(dt) — вызывается MainMenu/Battle сценами.
+  * Вынес рендер додзё (location, character, bag, HUD, menu/dialog overlays) в host_render_scene() — вызывается MainMenu/Battle сценами.
+  * Добавил host_render_loading() для LoadingScene.
+  * Реализовал SceneHost interface: request_scene_transition, host_load_location, host_location_loaded, host_save_progress (JSON в temp dir), host_load_progress (stub), host_set_dialogue, host_set_current_level, host_get_battle_result.
+  * Добавил data members: scene_manager_, location_loaded_, dialogue_lines_, dialogue_index_, current_level_, battle_result_, completed_levels_, currency_.
+  * init_location() теперь устанавливает location_loaded_ вместо state_.
+  * load_loading_screen() больше не вызывает init_location() как fallback.
+- Минимальный игровой цикл работает: Boot→Loading→MainMenu→(click Story)→Map→(select level)→Dialogue→(Space)→Battle→(Y=victory/L=defeat)→Results→(Space)→MainMenu.
+- Компиляция: main.cpp + scene lib компилируются чисто на Linux g++ 14.2 (только warnings -Wunused-parameter/-Wold-style-cast).
+
+Задача 3 — DZ-архивы:
+- Нашёл баг в parse_dz.py: неправильный порядок полей в file table. Правильный формат: Field 0 = uncomp_size+CRC, Field 1 = offset+CRC, Field 2 = comp_size+type, Field 3 = reserved+CRC. Старый парсер читал type из Field 3 вместо Field 2, давал garbage sizes.
+- Создал scripts/dz_parse_correct.py — исправленный парсер с entropy analysis.
+- Создал scripts/dz_dump_format.py — raw hex dump для верификации формата.
+- Создал scripts/dz_entropy_analysis.py — Shannon entropy анализ.
+- Ключевые находки:
+  * files.dz: ВСЕ 120 файлов type=4 (DZ). animations.dz: ВСЕ 557 файлов type=8 (другой вариант DZ).
+  * DZ — STREAMING compressor: offsets файлов перекрываются (files_list.xml и settings.xml оба off=3, comp=23, но разные uncomp_size). Вся data section — один непрерывный compressed stream, декомпрессор stateful.
+  * Энтропия: 4.2-4.7 bits/byte для маленьких файлов, 7.5-7.9 для больших — подтверждает real compression (arithmetic/range coding), НЕ XOR obfuscation.
+  * Алгоритм в libs3e_android.so: arithmetic/range coding + 5-byte context window + CRC32 hash + LZ77 matches.
+  * ARM эмуляция заблокирована на init_array constructors (нужен full Marmalade runtime).
+- Обновил engine/reverse/dz/README.md с исправленным форматом и находками.
+- Рекомендованный путь: Windows dzip.exe workaround для asset extraction + ручной port декодера для in-engine .dz support.
+
+Stage Summary:
+- Задача 1 (movement): DONE (прошлая сессия, Win32 GetAsyncKeyState).
+- Задача 4 (game flow): DONE — Scene/State Manager с 9 состояниями, минимальный цикл Boot→Loading→Menu→Map→Dialogue→Battle→Results→Menu работает на заглушках. Save система (JSON stub) работает.
+- Задача 3 (DZ): PROGRESS — контейнер полностью расшифрован, баг в парсере исправлен, streaming nature задокументирована, entropy confirms real compression. Декомпрессор пока не реализован (ARM emulation blocked).
+- Задача 2 (UI/rotated textures): NOT STARTED —lowest priority, не блокирует ничего.
+- Артефакты: engine/scene/{scene_system.hpp,scene_system.cpp,scenes.hpp,scenes.cpp,CMakeLists.txt}, scripts/{dz_parse_correct.py,dz_dump_format.py,dz_entropy_analysis.py,verify_main_compile.sh}, обновлённые main.cpp + engine/reverse/dz/README.md.

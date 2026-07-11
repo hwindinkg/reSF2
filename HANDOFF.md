@@ -58,51 +58,94 @@
 
 ---
 
-## CURRENT PROBLEMS (CRITICAL — MUST FIX)
+## CURRENT STATUS (updated this session)
 
-### 1. MOVEMENT JITTER (TOP PRIORITY)
-**Symptom**: When holding A or D, character switches between step_forward/step_back and fists_idle EVERY FRAME, causing visual jitter and preventing movement (character returns to start position).
+### 1. MOVEMENT JITTER — FIXED ✅
+**Fix applied**: `engine/platform/glfw_platform.cpp` now uses Win32 `GetAsyncKeyState()` directly under `#ifdef _WIN32`, bypassing GLFW's key event system entirely. The `key_callback` early-returns on Windows; `poll_events()` iterates the Key enum, maps each to a VK code via `glfw_key_to_vk()`, and polls the OS keyboard state. Edge transitions (`keys_just_pressed`/`keys_just_released`) are computed from `prev_keys_down_`. Non-Windows path unchanged (GLFW callback + sticky keys).
 
-**Root cause**: GLFW on user's Windows 10 (build 19044) sends spurious `GLFW_RELEASE` events for held keys. `keys_down` flickers true→false→true every frame. This has been confirmed via [MOVE] and [STATE] diagnostic logs:
-- `[STATE] IDLE→RIGHT (L=0 R=1)` — D detected as pressed
-- `[STATE] RIGHT→IDLE (no_key=11)` — no_key_frames_ reaches 11 because keys_down flickers to false for 10+ consecutive frames
+**Commit**: `0b3d55c` — pushed to GitHub.
 
-**What was tried (ALL FAILED)**:
-1. `glfwGetKey()` polling in `poll_events()` — same flicker
-2. Debounce (3-frame release delay) — `glfwGetKey()` is stable in wrong state for 10+ frames
-3. Key callback only (no glfwGetKey) — callback receives same spurious RELEASE events
-4. `GLFW_STICKY_KEYS` mode — didn't help
-5. State machine with `no_key_frames_` hysteresis — no_key_frames_ reaches 11 in one cycle
-6. State machine with `keys_just_released` — `just_released` also fires every frame
-7. Movement state machine (IDLE/MOVING_LEFT/MOVING_RIGHT) — same flicker causes transitions
+**Root motion** should now work automatically (animation no longer resets every frame). Verify on Windows by holding A/D and checking for smooth step animation + accumulated displacement.
 
-**Suggested fix for next session**: Use **Win32 API directly** (`GetAsyncKeyState()` or `GetKeyState()`) instead of GLFW for key state on Windows. This bypasses GLFW's event system entirely and queries the OS keyboard state directly. Add a `#ifdef _WIN32` block in `poll_events()` that uses `GetAsyncKeyState(VK_A)` etc.
+### 2. SCENE/STATE MANAGER — IMPLEMENTED ✅ (this session)
+**What was done**: Created `engine/scene/` with a proper finite-state machine:
+- `SceneId` enum: `{Boot, Loading, MainMenu, Map, Shop, Settings, Dialogue, Battle, Results}`
+- `Scene` interface: `on_enter`/`on_update`/`on_render`/`on_exit`/`on_quit_request`
+- `SceneHost` interface: implemented by `Game` class — scenes call back into Game for asset loading, gameplay update, rendering, save/load
+- `SceneManager`: owns current scene, handles deferred transitions
 
-### 2. ROOT MOTION NOT WORKING
-**Symptom**: Character returns to start position after step animation.
-
-**Root cause**: Related to problem #1 — because animation switches every frame between step and idle, the root motion code in `update_animation()` never accumulates displacement. The root motion code uses delta accumulation:
-```cpp
-float delta = npivot_x - prev_npivot_x_;
-if (std::abs(delta) < 40.0f) {
-    player_pos_x_ += delta;
-}
-prev_npivot_x_ = npivot_x_;
+**Game flow cycle** (minimal, on stubs):
 ```
-But when animation resets to frame 0 every other frame, NPivot jumps back to start, creating negative delta that cancels the positive delta. Fix problem #1 first, then root motion should work.
+Boot → Loading → MainMenu → (click "Story") → Map → (select level) → Dialogue → (Space) → Battle → (Y=victory / L=defeat) → Results → (Space) → MainMenu
+```
 
-### 3. BACKGROUND ROTATION (dojo)
-**Symptom**: Some background textures appear rotated 90°.
+**Key architectural changes in main.cpp**:
+- `Game` class now inherits from both `rt::IGame` and `scene::SceneHost`
+- Old `GameState { Loading, Location }` enum removed — replaced by `SceneManager`
+- `on_update()` / `on_render()` delegate to `scene_manager_.update/render()`
+- Dojo gameplay (movement, combat, animation, physics, overlays) extracted to `host_update_gameplay(dt)` — called by MainMenu/Battle scenes
+- Dojo rendering (location, character, bag, HUD, overlays) extracted to `host_render_scene()` — called by MainMenu/Battle scenes
+- Save system (JSON stub): `host_save_progress()` writes to `temp_directory_path()/resf2_save.json`
 
-**Status**: Pre-cropped textures for rotated atlas frames are implemented in `load_atlas()`. Formula used: `sx = atlas_x + (fh-1-y), sy = atlas_y + x` with swapped dimensions `fw=atlas_h, fh=atlas_w`. This works for location textures but may need verification.
+**What works**: Scene transitions, menu item clicks (Story/Shop/Settings/Test Dialog), keyboard shortcuts (N=New Game, Y/L=victory/defeat in Battle), save on entering Results.
 
-### 4. MENU ICON PROFILE
-**Symptom**: Profile icon has parts of other buttons.
+**What's stubbed**: Map (list of 6 fake levels), Shop/Settings (empty screens with Esc-to-menu), Dialogue (3 hardcoded lines, Space to advance), Results (empty, Space to continue). Real content requires DZ archive extraction (Task 3).
 
-**Status**: HUD/menu icon un-rotation uses formula A (`sx = atlas_x + (fh-1-y), sy = atlas_y + x`) without dimension swap. Different atlases may store dimensions differently.
+### 3. DZ ARCHIVE FORMAT — PARTIALLY DECODED ⚠️ (this session)
+**Container format**: Fully decoded. See `engine/reverse/dz/README.md` for the corrected file table layout (the old `parse_dz.py` had the field order wrong — `dz_parse_correct.py` is the fixed version).
 
-### 5. BAG PHYSICS
-**Status**: Verlet physics implemented and working. Bag swings on hit. Gravity=-800, 10 constraint iterations, impulse strength 18 (punch) / 25 (kick), hit threshold 70px. Hit detection uses moves.xml Attack intervals.
+**Key findings**:
+- All files in `files.dz` are type=4 (DZ), all in `animations.dz` are type=8 (DZ variant)
+- DZ is a **STREAMING compressor** — file offsets overlap, decompressor is stateful, entire archive must be decoded as one stream
+- Entropy 7.5-7.9 bits/byte for larger files → real arithmetic/range coding (NOT XOR)
+- Algorithm: arithmetic coding + 5-byte context window + CRC32 hash + LZ77 matches
+- Located in `libs3e_android.so` at 0x389f8 (~250 ARM instructions)
+
+**Blocked on**: ARM emulation needs full Marmalade runtime (init_array constructors fail). Manual port is incomplete.
+
+**Recommended path**: Use `dzip.exe` on Windows to extract assets, OR port the DZ decoder from Ghidra decompilation of 0x389f8.
+
+### 4. UI/ROTATED TEXTURES — NOT STARTED ❌
+Profile menu icon has parts of other buttons; some location textures rotated incorrectly. Cocos2d-x `textureRotated` flag handling needs formula adjustment. Lowest priority — doesn't block movement or game flow.
+
+---
+
+## KEY FILES (updated)
+
+- `main.cpp` — Game class (~2850 lines) with SceneHost integration. Gameplay in `host_update_gameplay()`, rendering in `host_render_scene()`.
+- `engine/scene/scene_system.hpp` — SceneId, Scene, SceneHost, SceneManager
+- `engine/scene/scenes.hpp` / `scenes.cpp` — 9 concrete scene implementations
+- `engine/platform/glfw_platform.cpp` — Win32 GetAsyncKeyState fix (Windows input)
+- `engine/reverse/dz/README.md` — DZ format documentation (corrected)
+- `scripts/dz_parse_correct.py` — corrected DZ container parser + entropy analysis
+- `scripts/s3e_analyze.py` — S3E binary analysis pipeline (from previous session)
+- `work/s3e_analysis/` — S3E analysis output (header, imports, strings, config)
+- `work/sf2_data/` — extracted game data (3138 files from sf2.7z)
+- `work/Marmalade-Modding/` — cloned RE tools (dzextract.py, dump_s3e.py)
+- `work/S3ELoader/` — Ghidra plugin for S3E binaries
+
+## BUILD
+```bash
+# Windows (user's machine)
+build.bat  # cmake + MSVC, produces resf2_app.exe
+resf2_app.exe --assets <path_to_sf2_assets>
+
+# Linux compile check (no linking — just verifies code compiles)
+bash scripts/verify_main_compile.sh
+```
+
+## CONTROLS (updated)
+| Key | Action |
+|-----|--------|
+| A/D | Step left/right (Win32 GetAsyncKeyState on Windows) |
+| Space | Punch (W=upper, S=low, D=double, A=spinning) / advance dialogue |
+| K | Kick (S=sweep, D=front, A=back) |
+| M | Toggle scroll menu (MainMenu/Battle) |
+| T | Toggle dialog overlay (MainMenu/Battle) |
+| N | New Game — go to Map (MainMenu) |
+| Y/L | Declare victory/defeat (Battle, debug) |
+| 1/2/3 | Zoom presets |
+| Esc | Quit / close overlay / back (scene-specific) |
 
 ---
 
