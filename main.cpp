@@ -926,12 +926,10 @@ private:
                         std::vector<std::uint8_t> px((size_t)fw * fh * 4);
                         for (int y = 0; y < fh; ++y) {
                             for (int x = 0; x < fw; ++x) {
-                                // Un-rotate 90° CCW (Cocos2d stores rotated 90° CW)
-                                // 90° CW: original(x,y) → stored(H-1-y, x)
-                                // where H = original height = fh = atlas_w
-                                // Inverse: dest(x,y) ← source(atlas_x + (fh-1-y), atlas_y + x)
-                                int sx = frame.atlas_x + (fh - 1 - y);
-                                int sy = frame.atlas_y + x;
+                                // Cocos2d texturePacker rotates 90° CW.
+                                // Inverse: dest(x,y) ← source(atlas_x + y, atlas_y + (fw-1-x))
+                                int sx = frame.atlas_x + y;
+                                int sy = frame.atlas_y + (fw - 1 - x);
                                 if (sx < 0 || sy < 0 || sx >= aw || sy >= ah) continue;
                                 int src_idx = (sy * aw + sx) * 4;
                                 int dst_idx = (y * fw + x) * 4;
@@ -1405,13 +1403,21 @@ private:
         auto pivot_it = skeleton_nodes_.find("NPivot");
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
-        // No Y normalization — different animations have different NPivot Y values
-        // in .bin files (idle=87.40, step=106.21). This means feet position varies
-        // slightly between animations. In the original game, the character's world
-        // position is set by params.xml and the animation plays relative to that.
-        // The slight floating in idle is expected (original game behavior).
+        // Y normalization: keep feet on floor across all animations.
+        // Different animations have different NPivot Y values in .bin files:
+        //   fists_idle: NToe_2 ly = 82.27 (character stands taller → feet float)
+        //   step/punch: NToe_2 ly = 64.60 (combat stance → feet on floor)
+        // We use the step animation as reference (looks correct).
+        // Adjustment = (reference_ly - current_ly) where reference_ly = 64.60.
+        // This moves the character DOWN in idle (by ~17 units), not UP.
+        float ly_lowest = pivot_local_y;
+        for (auto& [name, pos] : anim_node_pos_) {
+            if (pos.second < ly_lowest) ly_lowest = pos.second;
+        }
+        const float REF_FEET_LY = 64.60f;  // NToe_2 ly in step_forward.bin
+        float y_adjust = REF_FEET_LY - ly_lowest;
         float world_cx = player_pos_x_;
-        float world_cy = player_pos_y_;
+        float world_cy = player_pos_y_ + y_adjust;
 
         // Build edge lookup from both body.xml edges and skeleton.xml edges
         std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
@@ -2250,10 +2256,12 @@ private:
                 for (int x = 0; x < fw; ++x) {
                     int sx, sy;
                     if (frame.rotated) {
-                        // Un-rotate 90° CCW (Cocos2d stores rotated 90° CW)
-                        // dest(x,y) ← source(atlas_x + (fh-1-y), atlas_y + x)
-                        sx = frame.atlas_x + (fh - 1 - y);
-                        sy = frame.atlas_y + x;
+                        // Cocos2d texturePacker rotates 90° CW.
+                        // 90° CW: original(x,y) → stored(H-1-y, x) where H=original height
+                        // Inverse: dest(x,y) ← source(atlas_x + y, atlas_y + (fw-1-x))
+                        // This is the 90° CCW un-rotation.
+                        sx = frame.atlas_x + y;
+                        sy = frame.atlas_y + (fw - 1 - x);
                     } else {
                         sx = frame.atlas_x + x;
                         sy = frame.atlas_y + y;
