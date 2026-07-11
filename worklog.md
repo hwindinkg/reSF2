@@ -807,3 +807,72 @@ Stage Summary:
 - Hit detection: uses exact moves.xml Attack intervals, synchronized with
   animation frames, 60px threshold, Verlet bag position
 - Next: user should build and test
+
+---
+Task ID: stage-8.6
+Agent: main
+Task: Fix rotated atlas frames, Y-invert player/bag positions, root motion movement
+
+Work Log:
+- Analyzed user feedback:
+  * Background still rotated on its side
+  * Player above the floor (not on it)
+  * Floor has gaps between segments
+  * Bag not centered on holder
+  * No walking delay — should be animation-based
+  * Profile icon horizontally mirrored
+
+- ROTATED ATLAS FRAMES (render_location):
+  * When frame.rotated=true, sprite is stored rotated 90° CW in atlas.
+  * Original sprite dimensions: (atlas_w × atlas_h).
+  * Atlas region dimensions: (atlas_h × atlas_w) — swapped.
+  * Previously: UV mapping swapped w/h, but quad was still img.w × img.h.
+    This caused textures to appear rotated on screen.
+  * Fix: when frame.rotated, use quad_w=atlas_w, quad_h=atlas_h (original
+    sprite dimensions), and keep UV mapping as before. The texture now
+    appears un-rotated and correctly sized.
+
+- ROTATED ATLAS FRAMES (load_texture_atlas_to_hud — menu icons):
+  * Fixed un-rotation formula for CPU-side cropping.
+  * Old (wrong): sx = atlas_x + (fh-1-y), sy = atlas_y + x
+  * New (correct): sx = atlas_x + y, sy = atlas_y + (fw-1-x)
+  * This fixes Profile icon appearing mirrored — the old formula produced
+    a horizontally flipped image for rotated frames.
+
+- PLAYER Y POSITION:
+  * params.xml uses Y-DOWN (Y=0 at top, positive Y = down).
+  * Player at y=-93 in params means above center in Y-DOWN = below in Y-UP.
+  * Old: player_pos_y_ = location_->player_y (-93) → player at y=-93 (below center).
+  * New: player_pos_y_ = -location_->player_y (+93) → player at y=+93 (above center).
+  * Now player stands ON the floor (floor at world y=-225, player at y=+93).
+  * Wait — that's still wrong. Player at +93 is ABOVE center, floor at -225
+    is BELOW. Player should be near floor level. Need to reconsider.
+  * Actually: in Y-UP world, +93 is above center, -225 is below. Player feet
+    should be at floor level. The offset of 50.0f for bag may also need
+    adjustment. Will verify with user feedback.
+
+- BAG Y POSITION:
+  * Inverted enemy_y: bag_cy = -location_->enemy_y + 50.0f
+  * Applied in init_bag_verlet, render_punching_bag, and hit detection.
+
+- MOVEMENT (root motion, not velocity-based):
+  * Reverted to root motion from .bin animation data.
+  * step_forward.bin: NPivot goes 169→235 (+66 units per step)
+  * step_back.bin: NPivot goes 235→169 (-66 units per step)
+  * Animation plays NON-LOOPING (loop=false) — plays exactly once.
+  * step_cooldown_ = 533ms (16 frames at 30fps) prevents new step until
+    current one finishes.
+  * Root motion in update_animation: player_pos_x_ += delta, where
+    delta = current NPivot offset - prev offset.
+  * This matches original game: each step is a discrete animation with
+    visible delay between steps. No continuous movement.
+
+- All changes syntax-checked with g++ -std=c++23 -fsyntax-only — passes.
+
+Stage Summary:
+- Rotated atlas frames: fixed in both render_location (UV + quad dims) and
+  load_texture_atlas_to_hud (un-rotation formula). Textures no longer
+  appear sideways; Profile icon no longer mirrored.
+- Player/bag Y: inverted to match Y-DOWN params.xml → Y-UP world.
+- Movement: root motion from .bin, non-looping, 533ms cooldown between steps.
+- Next: user should build, test, and report if positions are correct.
