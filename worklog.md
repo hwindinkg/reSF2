@@ -1071,3 +1071,58 @@ Stage Summary:
 - Background: pre-cropped un-rotated textures for rotated atlas frames.
 - Player/bag Y: inverted to match location image coordinate system.
 - Next: user should test and report if positions are correct.
+
+---
+Task ID: stage-8.10
+Agent: main
+Task: Fix scale, Y position, rotated texture dimensions, bag X, movement facing
+
+Work Log:
+- ANALYSIS: Found root causes of all remaining issues:
+  1. Player too high: 0.9 scale factor was compressing character by 10%.
+     NPivot-to-feet = 96 units (no scale) vs 87 (with 0.9 scale).
+     Without scale: player at y=-93, feet at -189, floor at -193. Gap = 4. ✓
+  2. Floor holes: Pre-cropped texture dimensions were WRONG for rotated frames.
+     atlas_w/atlas_h are ATLAS (post-rotation) dimensions. Original sprite
+     dimensions are SWAPPED: original_w = atlas_h, original_h = atlas_w.
+     Pre-crop was creating texture at atlas_w × atlas_h (atlas dimensions)
+     instead of atlas_h × atlas_w (original dimensions).
+  3. Bag not centered: X offset 857 was wrong. Holder (layer_5) at x=-10,
+     bag at enemy_x - 857 = 116. Need bag at -10, so offset = 983.
+  4. Movement facing: facing_right_ was changed immediately when key changed,
+     even during active step. Now only changes when new step starts.
+  5. Background issues: 1px overlap was distorting segments. Removed.
+
+- FIX 1: Removed 0.9 scale factor everywhere (character + bag rendering).
+  Changed all `* 0.9f` to `* 1.0f` in resolve_body_node, render_body_model,
+  init_bag_verlet, render_punching_bag, and hit detection.
+
+- FIX 2: Player Y position — no invert, no offset.
+  player_pos_y_ = location_->player_y (direct from params.xml)
+  Floor at world_y = -225 (inverted image), top at -193.
+  Player NPivot at -93, feet at -93 - 96 = -189. Gap = 4. ✓
+
+- FIX 3: Bag Y position — bag_cy = enemy_y + 81.
+  Ceiling at world_y = +202 (layer_5 at y=-202, inverted).
+  Node12 (ceiling attachment) at bag_cy + 226 = -24 + 226 = 202. At ceiling! ✓
+
+- FIX 4: Bag X position — X_OFFSET = 983 (was 857).
+  Aligns bag with holder: bag_cx = 973 - 983 = -10 = holder x. ✓
+
+- FIX 5: Rotated frame dimensions — swap fw/fh for rotated frames.
+  Both load_atlas (location textures) and load_texture_atlas_to_hud (HUD/menu).
+  fw = atlas_h (original width), fh = atlas_w (original height).
+  Un-rotation formula: sx = atlas_x + (fh-1-y), sy = atlas_y + x.
+
+- FIX 6: Movement facing — don't change facing_right_ during active step.
+  Only update when new step starts.
+
+- FIX 7: Removed 1px overlap that was distorting floor segments.
+
+Stage Summary:
+- Player Y: feet on floor (gap = 4 units). No 0.9 scale.
+- Bag Y: Node12 at ceiling. Chain reaches holder.
+- Bag X: centered on holder (both at x=-10).
+- Floor: correct dimensions for rotated frames, no holes.
+- Movement: no facing change during active step.
+- Profile icon: correct un-rotation with swapped dimensions.
