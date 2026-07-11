@@ -402,50 +402,37 @@ public:
                 init_location();
             }
         } else if (state_ == GameState::Location) {
-            // === MOVEMENT SYSTEM (displacement-based, matching original) ===
-            // The original game uses root motion from .bin NPivot positions.
-            // Our implementation had issues with anchor resets causing the
-            // character to return to start. Instead, we use a simpler approach:
-            // each step moves the player by a fixed displacement (66 units,
-            // matching step_forward.bin's NPivot delta of 169→235).
-            // The displacement is applied smoothly over the animation duration.
+            // === MOVEMENT SYSTEM (root motion from .bin animation) ===
+            // The original game uses root motion: NPivot position changes in the
+            // .bin animation drive player movement. This gives natural non-linear
+            // movement (slow start, fast middle, slow end) that matches the
+            // animation visually.
+            //
+            // step_forward.bin: NPivot X goes 169→235 (delta +66 per step)
+            // step_back.bin: NPivot X goes 235→169 (delta -66 per step)
+            //
+            // The animation plays non-looping (once). The step_cooldown_ timer
+            // prevents starting a new step until the current one finishes.
+            // The non-looping wrap-around bug is fixed (animation stays at
+            // last frame instead of interpolating with frame 0).
             
             bool want_move_left = input.keys_down[(size_t)plat::Key::A] ||
                                   input.keys_down[(size_t)plat::Key::ArrowLeft];
             bool want_move_right = input.keys_down[(size_t)plat::Key::D] ||
                                    input.keys_down[(size_t)plat::Key::ArrowRight];
             
-            // Step displacement: 66 units per step (from .bin NPivot delta)
-            const float STEP_DISPLACEMENT = 66.0f;
             const uint32_t STEP_DURATION_MS = 533;  // 16 frames at 30fps
-            
-            // Apply smooth movement during step animation
-            if (step_active_ && step_duration_ > 0) {
-                float progress = 1.0f - (float)step_duration_ / (float)STEP_DURATION_MS;
-                if (progress > 1.0f) progress = 1.0f;
-                float target_x = step_start_x_ + step_displacement_ * progress;
-                player_pos_x_ = target_x;
-                step_duration_ -= std::min<uint32_t>(step_duration_, dt);
-                if (step_duration_ <= 0) {
-                    step_active_ = false;
-                }
-            }
             
             // Only allow movement if not attacking
             if (hit_anim_ == 0) {
                 if (want_move_left && !want_move_right) {
-                    // Don't change facing during an active step — wait until it finishes
                     if (!step_active_) facing_right_ = false;
-                    // Start a new step if no step is active (cooldown creates delay)
                     if (!step_active_ && step_cooldown_ == 0 &&
                         animations_.count("step_back")) {
                         facing_right_ = false;
                         play_animation("step_back", false);
-                        step_cooldown_ = STEP_DURATION_MS;  // no extra delay
+                        step_cooldown_ = STEP_DURATION_MS;
                         step_active_ = true;
-                        step_duration_ = STEP_DURATION_MS;
-                        step_start_x_ = player_pos_x_;
-                        step_displacement_ = -STEP_DISPLACEMENT;  // move left
                     }
                 } else if (want_move_right && !want_move_left) {
                     if (!step_active_) facing_right_ = true;
@@ -453,14 +440,10 @@ public:
                         animations_.count("step_forward")) {
                         facing_right_ = true;
                         play_animation("step_forward", false);
-                        step_cooldown_ = STEP_DURATION_MS;  // no extra delay
+                        step_cooldown_ = STEP_DURATION_MS;
                         step_active_ = true;
-                        step_duration_ = STEP_DURATION_MS;
-                        step_start_x_ = player_pos_x_;
-                        step_displacement_ = STEP_DISPLACEMENT;  // move right
                     }
                 } else {
-                    // Not moving — return to idle when step finishes
                     if (!step_active_ && step_cooldown_ == 0 &&
                         (current_anim_ == "step_forward" || current_anim_ == "step_back")) {
                         play_animation("fists_idle", true);
@@ -474,7 +457,17 @@ public:
                     }
                 }
             }
-            // Decrement step cooldown
+            // Check if step animation finished
+            if (step_active_) {
+                auto anim_it = animations_.find(current_anim_);
+                if (anim_it != animations_.end()) {
+                    int fc = anim_it->second.frame_count;
+                    int current_frame = (int)(anim_time_ * 30.0f);
+                    if (current_frame >= fc - 1) {
+                        step_active_ = false;
+                    }
+                }
+            }
             if (step_cooldown_ > 0) {
                 step_cooldown_ -= std::min<uint32_t>(step_cooldown_, dt);
             }
@@ -607,14 +600,15 @@ public:
                                     float dy = limb_wy - bag_cy;
                                     float dist = std::sqrt(dx*dx + dy*dy);
                                     
-                                    // Hit threshold: 60 units (tight, only true contacts)
-                                    if (dist < 60.0f) {
+                                    // Hit threshold: 70 units (reliable hit detection)
+                                    if (dist < 70.0f) {
                                         // Apply impulse to the nearest bag node based on hit height
                                         std::string target_node = "NNeck";
                                         if (limb_wy < bag_cy - 30) target_node = "NBottom";
                                         else if (limb_wy > bag_cy + 30) target_node = "Node4";
                                         float impulse_dir = (dx < 0) ? 1.0f : -1.0f;
-                                        float impulse_strength = is_kick ? 15.0f : 10.0f;
+                                        // Stronger impulse for heavier bag
+                                        float impulse_strength = is_kick ? 25.0f : 18.0f;
                                         apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
                                         std::printf("[COMBAT] HIT! move=%s frame=%d/%d [%d-%d] limb=%s dist=%.1f → impulse on %s\n",
                                                     current_move_.c_str(), current_frame, fc,
@@ -926,10 +920,11 @@ private:
                         std::vector<std::uint8_t> px((size_t)fw * fh * 4);
                         for (int y = 0; y < fh; ++y) {
                             for (int x = 0; x < fw; ++x) {
-                                // Cocos2d texturePacker rotates 90° CW.
-                                // Inverse: dest(x,y) ← source(atlas_x + y, atlas_y + (fw-1-x))
-                                int sx = frame.atlas_x + y;
-                                int sy = frame.atlas_y + (fw - 1 - x);
+                                // Un-rotate 90° CCW (Cocos2d stores rotated 90° CW)
+                                // Formula A (proven correct for location textures):
+                                // dest(x,y) ← source(atlas_x + (fh-1-y), atlas_y + x)
+                                int sx = frame.atlas_x + (fh - 1 - y);
+                                int sy = frame.atlas_y + x;
                                 if (sx < 0 || sy < 0 || sx >= aw || sy >= ah) continue;
                                 int src_idx = (sy * aw + sx) * 4;
                                 int dst_idx = (y * fw + x) * 4;
@@ -1683,8 +1678,8 @@ private:
     // 3. Apply damping (attenuation)
     void update_bag_verlet(float dt) {
         if (!bag_verlet_init_ || !bag_model_) return;
-        const float GRAVITY = -500.0f;  // downward acceleration (units/sec^2)
-        const int CONSTRAINT_ITERATIONS = 8;
+        const float GRAVITY = -800.0f;  // downward acceleration (heavier bag)
+        const int CONSTRAINT_ITERATIONS = 10;
         // 1. Verlet integration
         for (auto& [name, n] : bag_verlet_) {
             if (n.fixed) continue;
@@ -2081,15 +2076,27 @@ private:
         // NPivot Y differs from the rest pose (e.g., idle vs step).
         anim_npivot_bin_y_ = npivot_y;
 
-        // Root motion: DISABLED. Root motion from .bin was causing issues
-        // (character returning to start due to anchor reset across animations).
-        // Instead, movement is handled in on_update() using a simple
-        // displacement-based approach: when a step animation starts, we
-        // compute a target displacement and smoothly move the player over
-        // the animation duration.
-        prev_root_offset_ = 0.0f;
-        anim_root_dx_ = 0.0f;
-        anim_root_dy_ = 0.0f;
+        // Root motion: drives player movement from .bin animation data.
+        // NPivot X changes in the animation are applied to player_pos_x_.
+        // This gives natural non-linear movement matching the animation.
+        //
+        // The non-looping wrap-around bug is fixed: when animation finishes,
+        // it stays at the last frame (no interpolation with frame 0).
+        // The step_active_ flag in on_update() prevents starting a new step
+        // until the current one finishes.
+        if (current_anim_ == "step_forward" || current_anim_ == "step_back") {
+            if (anim_anchor_set_) {
+                float current_offset = npivot_x - anim_root_anchor_x_;
+                float delta = current_offset - prev_root_offset_;
+                // Filter out large deltas (cross-animation jumps)
+                if (std::abs(delta) < 40.0f) {
+                    player_pos_x_ += delta;
+                }
+                prev_root_offset_ = current_offset;
+            }
+        } else {
+            prev_root_offset_ = 0.0f;
+        }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
         auto pivot_it = skeleton_nodes_.find("NPivot");
@@ -2240,28 +2247,21 @@ private:
         for (auto& [name, idx] : result->name_index) {
             auto& frame = result->frames[idx];
             // Handle rotated frames:
-            // For rotated frames, atlas_w/atlas_h are ATLAS (post-rotation) dimensions.
-            // Original sprite dimensions are swapped: original_w = atlas_h, original_h = atlas_w.
-            int fw, fh;
-            if (frame.rotated) {
-                fw = frame.atlas_h;  // original width (swapped)
-                fh = frame.atlas_w;  // original height (swapped)
-            } else {
-                fw = frame.atlas_w;
-                fh = frame.atlas_h;
-            }
+            // For rotated frames, do NOT swap dimensions (atlas_w/atlas_h are original).
+            // The atlas region has swapped dimensions, but we create the texture
+            // at original dimensions.
+            int fw = frame.atlas_w;
+            int fh = frame.atlas_h;
             auto tex = std::make_unique<ren::Texture2D>();
             std::vector<std::uint8_t> px((size_t)fw * fh * 4);
             for (int y = 0; y < fh; ++y) {
                 for (int x = 0; x < fw; ++x) {
                     int sx, sy;
                     if (frame.rotated) {
-                        // Cocos2d texturePacker rotates 90° CW.
-                        // 90° CW: original(x,y) → stored(H-1-y, x) where H=original height
-                        // Inverse: dest(x,y) ← source(atlas_x + y, atlas_y + (fw-1-x))
-                        // This is the 90° CCW un-rotation.
-                        sx = frame.atlas_x + y;
-                        sy = frame.atlas_y + (fw - 1 - x);
+                        // Un-rotate 90° CCW (no swap, formula A):
+                        // dest(x,y) ← source(atlas_x + (fh-1-y), atlas_y + x)
+                        sx = frame.atlas_x + (fh - 1 - y);
+                        sy = frame.atlas_y + x;
                     } else {
                         sx = frame.atlas_x + x;
                         sy = frame.atlas_y + y;
