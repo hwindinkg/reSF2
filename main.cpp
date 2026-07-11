@@ -624,10 +624,26 @@ public:
         //   FrontKick: Forward|Kick → D+P (Forward+P)
         //   BackKick: Back|Kick → A+P (Back+P)
         //   Sweep: Down|Kick → S+P
+        //   DoubleSweep: 3key|Down|Kick → S+P+P (double-tap P while holding S)
         //   DodgeReverseKick: DownForward|Kick → S+D+P (Down+Forward+Kick)
         if (kick_pressed && hit_anim_ == 0 && (move_state_ < 10 || move_state_ == 11)) {
+            // Track double-tap for DoubleSweep (S held + P pressed twice within 300ms)
+            uint32_t now = platform_->now_ms();
+            bool double_sweep = false;
+            if (key_down && !key_forward && !key_back) {
+                if (last_kick_press_ms_ > 0 && (now - last_kick_press_ms_) < 300) {
+                    double_sweep = true;
+                }
+                last_kick_press_ms_ = now;
+            } else {
+                last_kick_press_ms_ = 0;
+            }
+
             std::string move_name, anim_name;
-            if (key_down && key_forward) { move_name = "DodgeReverseKick"; anim_name = "dodge_reverse_kick"; }
+            if (double_sweep && animations_.count("double_sweep")) {
+                move_name = "DoubleSweep"; anim_name = "double_sweep";
+                last_kick_press_ms_ = 0;  // reset so triple-tap doesn't re-trigger
+            } else if (key_down && key_forward) { move_name = "DodgeReverseKick"; anim_name = "dodge_reverse_kick"; }
             else if (key_forward && !key_back) { move_name = "FrontKick"; anim_name = "front_kick"; }
             else if (key_back && !key_forward) { move_name = "BackKick"; anim_name = "back_kick"; }
             else if (key_down) { move_name = "Sweep"; anim_name = "sweep"; }
@@ -703,8 +719,10 @@ public:
                 move_state_ = 10;
                 std::printf("[MOVE] Back Roll!\n");
             }
-            // Duck: hold Down (S) without other direction
-            else if (key_down && !key_forward && !key_back && current_anim_ != "duck" && animations_.count("duck")) {
+            // Duck: tap Down (S) without other direction — enters duck stance
+            // but does NOT block attacks (attacks are checked before this).
+            // Duck is a hold-to-crouch: stays in duck while S is held.
+            else if (down_pressed && !key_forward && !key_back && current_anim_ != "duck" && animations_.count("duck")) {
                 play_animation("duck", true);
                 current_move_ = "Duck";
                 move_state_ = 11;  // ducking state
@@ -713,7 +731,19 @@ public:
 
         // === STEP MOVEMENT (only when not in special move/duck) ===
         // Forward = step_forward, Back = step_back (relative to facing)
+        //
+        // LATCHING: once a step starts, it continues as long as the key is
+        // held OR was held within the last 100ms. This compensates for
+        // transient false 'key up' readings from GetAsyncKeyState on some
+        // Windows setups (the key is physically held, but GetAsyncKeyState
+        // occasionally returns 'up' for one frame).
         if (hit_anim_ == 0 && move_state_ < 10) {
+            // Track key-held history for latching
+            if (key_forward) fwd_held_ms_ = 100; else if (fwd_held_ms_ > 0) fwd_held_ms_ -= dt;
+            if (key_back) back_held_ms_ = 100; else if (back_held_ms_ > 0) back_held_ms_ -= dt;
+            bool fwd_latched = fwd_held_ms_ > 0;
+            bool back_latched = back_held_ms_ > 0;
+
             if (move_state_ == 0) {  // IDLE
                 if (key_forward && !key_back && !key_down) {
                     move_state_ = 2;  // MOVING_FORWARD
@@ -723,16 +753,17 @@ public:
                     play_animation("step_back", true);
                 }
             } else if (move_state_ == 1) {  // MOVING_BACK
-                if (step_min_played && !key_back) {
+                // Use latched key state — don't exit step on transient false readings
+                if (!back_latched && step_min_played) {
                     move_state_ = 0; play_animation("fists_idle", true);
-                } else if (key_forward && !key_back && step_min_played) {
+                } else if (fwd_latched && !back_latched && step_min_played) {
                     move_state_ = 2;
                     play_animation("step_forward", true);
                 }
             } else if (move_state_ == 2) {  // MOVING_FORWARD
-                if (step_min_played && !key_forward) {
+                if (!fwd_latched && step_min_played) {
                     move_state_ = 0; play_animation("fists_idle", true);
-                } else if (key_back && !key_forward && step_min_played) {
+                } else if (back_latched && !fwd_latched && step_min_played) {
                     move_state_ = 1;
                     play_animation("step_back", true);
                 }
@@ -2022,6 +2053,7 @@ private:
             "duck",  // crouch (S hold)
             "elbow_strike",  // S+A+O (DownBack|Punch)
             "dodge_reverse_kick",  // S+D+P (DownForward|Kick)
+            "double_sweep",  // S+P+P (Down|Kick, double-tap)
             // Blocks (used for hit reactions, not player-triggered)
             "high_block", "middle_block", "overhead_block",
             "sweep_block",
@@ -2284,26 +2316,34 @@ private:
         // NPivot Y differs from the rest pose (e.g., idle vs step).
         anim_npivot_bin_y_ = npivot_y;
 
-        // Root motion: SUB-FRAME interpolated delta with strict wrap filter.
+        // Root motion: ABSOLUTE approach using anim_root_anchor_x_.
         //
-        // X root motion: delta accumulation using INTERPOLATED npivot_x.
-        // At 60fps render / 30fps anim, each anim frame lasts ~2 render frames.
-        // Sub-frame deltas are small (~3-8 per anim frame, split across 2 renders).
-        // Wrap-around (loop) produces a single large delta (~66) when frame_idx
-        // goes from 15→0. We filter out any delta >= 33 (wrap threshold).
+        // Key insight: NPivot X in .bin is the character's WORLD X position
+        // in the animation's local coordinate space. The .bin stores NPivot
+        // going from 169.45 → 235.45 for step_forward (one step = +66 units).
         //
-        // PROBLEM with previous approach: wrap detection used prev_frame_idx_,
-        // but at 60fps render / 30fps anim, frame_idx sometimes DOESN'T change
-        // between renders (both renders see same frame_idx). The old check
-        // 'prev_frame_idx_ == frame_idx && anim_loop_' treated this as wrap and
-        // skipped the sub-frame delta — losing ~50% of movement.
+        // Approach: track the ANCHOR (frame 0 NPivot X) when the animation
+        // starts. Each frame, compute the displacement from the anchor:
+        //   displacement = npivot_x - anim_root_anchor_x_
+        // The PLAYER's world position should advance by the CHANGE in this
+        // displacement from the previous frame:
+        //   player_pos_x_ += displacement - prev_root_offset_
         //
-        // NEW: pure threshold-based filtering. No frame_idx wrap detection.
-        // - step_forward per-render delta: ~3-8 (sub-frame interpolation)
-        // - step_forward wrap delta: ~66 (filtered by threshold 30)
-        // - forward_roll per-render delta: ~15 (max)
-        // - forward_roll wrap delta: ~404 (filtered)
-        // Threshold 30 safely separates them.
+        // For a looping animation (step_forward), when it wraps from frame 15
+        // back to frame 0, npivot_x jumps from 235.45 to 169.45. The anchor
+        // (169.45) doesn't change, so displacement goes from +66 back to 0.
+        // The delta (0 - 66 = -66) is the wrap-around. We detect this by
+        // checking if the delta is large (>= 30) and skip it.
+        //
+        // But we ALSO need to UPDATE the anchor when the animation loops,
+        // so that the next cycle's displacement is measured from the new
+        // starting position. We do this by detecting a large negative delta
+        // (wrap) and shifting the anchor by +66 (one step's worth).
+        //
+        // For non-looping animations (forward_roll, jump, etc.), the anchor
+        // stays fixed and the full displacement is applied once.
+        //
+        // Mirror: when facing left, delta is inverted.
         bool is_root_motion_anim = !anim_loop_ ||
             current_anim_ == "step_forward" || current_anim_ == "step_back" ||
             current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
@@ -2314,36 +2354,41 @@ private:
             current_anim_ == "front_kick" || current_anim_ == "back_kick" ||
             current_anim_ == "upper_cut" || current_anim_ == "high_punch";
 
-        // X root motion: pure threshold-based delta
         if (is_root_motion_anim) {
-            if (prev_npivot_set_) {
-                float delta = npivot_x - prev_npivot_x_;
-                // Filter out wrap-around deltas (>= 30 = loop boundary)
-                if (std::abs(delta) < 30.0f) {
-                    player_pos_x_ += facing_right_ ? delta : -delta;
-                }
+            float displacement = npivot_x - anim_root_anchor_x_;
+            float delta = displacement - prev_root_offset_;
+            // Filter out wrap-around (large delta from animation loop)
+            if (std::abs(delta) < 30.0f) {
+                player_pos_x_ += facing_right_ ? delta : -delta;
             }
-            prev_npivot_x_ = npivot_x;
-            prev_npivot_set_ = true;
+            prev_root_offset_ = displacement;
         } else {
-            prev_npivot_set_ = false;
+            prev_root_offset_ = 0.0f;
         }
 
-        // Y root motion: absolute offset from frame 0 (for jumps/flips)
+        // Y root motion: delta accumulation (for jumps/flips)
+        // Uses same threshold approach as X. NPivot Y goes up during jump
+        // (character leaves ground) and returns to ~same value at landing.
+        // For back_flip: Y[0]=92, Y[mid]=266, Y[last]=106 — asymmetric, but
+        // delta accumulation handles it correctly (rises, then falls back).
         bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                             current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                             current_anim_ == "back_handflip");
-        if (is_jump_anim && anim_anchor_set_) {
-            // jump_y_offset_ = current NPivot Y - frame 0 NPivot Y
-            // This is 0 at start, rises during jump, returns to 0 at end.
-            jump_y_offset_ = npivot_y - anim_root_anchor_y_;
+        if (is_jump_anim) {
+            if (prev_npivot_y_set_) {
+                float dy = npivot_y - prev_npivot_y_;
+                // Filter out large deltas (animation boundary, non-looping)
+                if (std::abs(dy) < 30.0f) {
+                    jump_y_offset_ += dy;
+                }
+            }
+            prev_npivot_y_ = npivot_y;
+            prev_npivot_y_set_ = true;
         } else {
-            // Not a jump animation: smoothly decay jump_y_offset_ to 0.
-            // This handles the case where a jump/flip ended with non-zero
-            // offset (e.g. back_flip ends at +14 because Y[0]=92, Y[last]=106).
-            // The character "lands" back to ground level over a few frames.
+            // Non-jump: smoothly decay to 0
             jump_y_offset_ *= 0.80f;
             if (std::abs(jump_y_offset_) < 0.5f) jump_y_offset_ = 0;
+            prev_npivot_y_set_ = false;
         }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
@@ -3025,6 +3070,9 @@ private:
     int no_key_frames_ = 0;  // frames with no movement key pressed (for hysteresis)
     int move_state_ = 0;  // 0=IDLE, 1=MOVING_LEFT, 2=MOVING_RIGHT, 10=special, 11=block
     uint32_t step_play_time_ = 0;  // ms the current step animation has been playing
+    int fwd_held_ms_ = 0;  // ms since forward key was last held (for latching)
+    int back_held_ms_ = 0;  // ms since back key was last held (for latching)
+    uint32_t last_kick_press_ms_ = 0;  // for double-tap detection (DoubleSweep)
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
