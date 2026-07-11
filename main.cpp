@@ -140,6 +140,8 @@ struct LocationLayer {
 struct GameLocation {
     std::string color;
     float width = 0, height = 0;
+    float wall = 0;      // Wall position from params.xml (distance from center to wall)
+    float floor = 0;     // Floor position from params.xml
     float player_x = 0, player_y = 0;
     float enemy_x = 0, enemy_y = 0;
     std::vector<LocationLayer> layers;
@@ -611,7 +613,7 @@ public:
                 play_animation(anim_name, false);
                 current_move_ = move_name;
                 int fc = animations_[anim_name].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
                 move_state_ = 0;
                 // Skip special moves / step this frame — attack takes priority
                 goto after_combat;
@@ -654,7 +656,7 @@ public:
                 play_animation(anim_name, false);
                 current_move_ = move_name;
                 int fc = animations_[anim_name].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
                 move_state_ = 0;
                 goto after_combat;
             }
@@ -679,7 +681,7 @@ public:
                 play_animation("front_flip", false);
                 current_move_ = "FrontFlip";
                 int fc = animations_["front_flip"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
                 move_state_ = 10;
                 std::printf("[MOVE] Front Flip!\n");
             }
@@ -688,7 +690,7 @@ public:
                 play_animation("back_flip", false);
                 current_move_ = "BackFlip";
                 int fc = animations_["back_flip"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
                 move_state_ = 10;
                 std::printf("[MOVE] Back Flip!\n");
             }
@@ -697,7 +699,7 @@ public:
                 play_animation("jump", false);
                 current_move_ = "JumpUp";
                 int fc = animations_["jump"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
                 move_state_ = 10;
                 std::printf("[MOVE] Jump!\n");
             }
@@ -706,7 +708,7 @@ public:
                 play_animation("forward_roll", false);
                 current_move_ = "ForwardRoll";
                 int fc = animations_["forward_roll"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
                 move_state_ = 10;
                 std::printf("[MOVE] Forward Roll!\n");
             }
@@ -715,7 +717,7 @@ public:
                 play_animation("back_roll", false);
                 current_move_ = "BackRoll";
                 int fc = animations_["back_roll"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
                 move_state_ = 10;
                 std::printf("[MOVE] Back Roll!\n");
             }
@@ -1039,6 +1041,8 @@ private:
             loc.color = xml_attr(tag, "Color");
             loc.width = tof(xml_attr(tag, "Width"));
             loc.height = tof(xml_attr(tag, "Height"));
+            loc.wall = tof(xml_attr(tag, "Wall"));
+            loc.floor = tof(xml_attr(tag, "Floor"));
         }
         size_t pos = 0;
         while ((pos = xml.find("<Layer", pos)) != std::string::npos) {
@@ -2293,18 +2297,12 @@ private:
         // .bin animations are at 30 FPS. The original game runs at 60fps
         // physics with 30fps animation + frame interpolation.
         // anim_time_ is in "animation frames" (1.0 = 1 frame).
-        // We advance by dt * anim_speed_ / 30.0f where anim_speed_ = 30.
-        // This gives: anim_time_ += dt (seconds) * 1.0
-        //   frame_f = anim_time_ * 30 = 30 * dt = ~0.5 per render frame at 60fps
-        //   → 2 render frames per animation frame → correct 30fps at 60fps render.
-        //
-        // BUT: if animations look too fast, the game might use a slower rate.
-        // The original s86 binary uses s3eTimerGetMs() and the animation
-        // frame rate is controlled by the .bin file's frame timing.
-        // Try reducing anim_speed_ if needed.
+        // At 60fps render: dt ≈ 16.67ms = 0.01667s
+        //   anim_time_ += 0.01667 * 30 / 30 = 0.01667
+        //   frame_f = 0.01667 * 30 = 0.5 → 2 renders per anim frame → 30fps anim
+        // This is the CORRECT original speed.
         float dt = dt_ms / 1000.0f;
-        // Use 0.5x speed to match original game feel (animations were 2x too fast)
-        anim_time_ += dt * (anim_speed_ * 0.5f) / 30.0f;
+        anim_time_ += dt * anim_speed_ / 30.0f;
 
         // Calculate current frame (with looping)
         float frame_f = anim_time_ * 30.0f;
@@ -2417,10 +2415,13 @@ private:
             // when facing changes between frames
             float displacement = npivot_x - anim_root_anchor_x_;
             player_pos_x_ = step_start_player_x_ + (anim_facing_right_ ? displacement : -displacement);
-            // Clamp to location boundaries
-            if (location_) {
-                float left_bound = location_->player_x - 983.0f - 300.0f;
-                float right_bound = location_->enemy_x - 983.0f + 300.0f;
+            // Clamp to location wall boundaries (from params.xml Wall attribute)
+            // Wall="305" means walls are at ±305 from world center (0).
+            // World center is at X=0. Player and enemy positions are offset by X_OFFSET=983.
+            // So walls in world space: left = -wall, right = +wall
+            if (location_ && location_->wall > 0) {
+                float left_bound = -location_->wall;
+                float right_bound = location_->wall;
                 if (player_pos_x_ < left_bound) player_pos_x_ = left_bound;
                 if (player_pos_x_ > right_bound) player_pos_x_ = right_bound;
             }
