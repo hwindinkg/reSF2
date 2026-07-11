@@ -982,9 +982,11 @@ private:
             player_pos_x_ = location_->player_x - X_OFFSET;
             player_pos_y_ = location_->player_y;  // no invert, no offset
         }
-        // Camera follows player with offset (player on left third)
+        // Camera: follow player but keep a proper Y that shows the floor.
+        // The dojo floor (layer_3) is at world Y ≈ -193. Player at Y ≈ -93.
+        // Camera Y should be around -50 to show player + floor + ceiling.
         cam_x_ = player_pos_x_ + 200.0f;
-        cam_y_ = 0;
+        cam_y_ = -50.0f;  // shows floor and character properly
         zoom_ = 1.0f;
     }
 
@@ -2275,6 +2277,24 @@ private:
         }
 
         // Advance time
+        // Animation playback: .bin files are at 30 FPS.
+        // anim_time_ is in "animation seconds" where 1.0 = 1 frame.
+        // frame_idx = (int)(anim_time_) gives the current frame.
+        //
+        // OLD BUG: anim_time_ += dt * anim_speed_ / 30.0f  (double division by 30)
+        //   With anim_speed_ = 30: anim_time_ += dt * 30/30 = dt * 1.0
+        //   Then frame_f = anim_time_ * 30 = dt * 30 → 30 frames per real second
+        //   BUT dt is already in seconds, so this gives 30 fps. CORRECT for 30fps anim.
+        //   HOWEVER: the REAL game runs at 60fps physics with 30fps animation
+        //   interpolation. Our dt is ~16ms (60fps). So we advance anim_time_ by
+        //   16ms * 1.0 = 0.016 per frame, giving frame_f = 0.016 * 30 = 0.48
+        //   per render frame. That means ~2 render frames per anim frame = correct.
+        //
+        // Actually the math is correct. The issue is anim_speed_ default.
+        // The original game likely plays animations at the .bin's native 30fps.
+        // Let's verify: step_forward has 16 frames. At 30fps = 533ms per loop.
+        // If it looks "too fast", the game might run at 60fps animation (not 30).
+        // Try anim_speed_ = 30.0f (native) first.
         float dt = dt_ms / 1000.0f;
         anim_time_ += dt * anim_speed_ / 30.0f;
 
@@ -2483,8 +2503,12 @@ private:
             prev_npivot_set_ = false;
             prev_npivot_y_set_ = false;
             prev_frame_idx_ = -1;
-            // Save current player position as the start point for root motion.
+            // For root motion: save current player position as the start point.
+            // This is the position the character is at when the animation starts.
             // update_animation() will set player_pos_x_ = step_start_player_x_ + displacement
+            // IMPORTANT: player_pos_x_ at this point already includes any displacement
+            // from the previous animation (because update_animation() ran last frame).
+            // So we save the CURRENT position, not some stale value.
             step_start_player_x_ = player_pos_x_;
             // Lock facing at animation start. Root motion uses this saved value
             // instead of current facing_right_ to prevent teleport when facing
