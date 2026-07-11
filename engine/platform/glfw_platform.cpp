@@ -115,32 +115,17 @@ struct GlfwPlatform::Impl {
     std::string asset_root;
 
     static void key_callback(GLFWwindow* w, int key, int scancode, int action, int mods) {
+        // Key state is handled entirely by glfwGetKey() in poll_events().
+        // This callback is only used for just_pressed/just_released edge detection
+        // and window close events.
         Impl* self = static_cast<Impl*>(glfwGetWindowUserPointer(w));
         if (!self) return;
         int idx = glfw_to_key_index(key);
         if (idx < 0 || idx >= static_cast<int>(kMaxKeys)) return;
-        // IMPORTANT: On some systems GLFW sends RELEASE before REPEAT events
-        // for held keys, causing keys_down to flicker false→true every frame.
-        // Fix: only process RELEASE if we actually have a prior PRESS without
-        // a subsequent REPEAT. GLFW_REPEAT keeps the key down.
+        // DO NOT modify keys_down here — glfwGetKey() is authoritative.
         if (action == GLFW_PRESS) {
-            if (!self->input.keys_down[idx]) {
-                self->input.keys_just_pressed[idx] = true;
-            }
-            self->input.keys_down[idx] = true;
-        } else if (action == GLFW_REPEAT) {
-            // Key is still held — keep keys_down true, don't set just_pressed
-            self->input.keys_down[idx] = true;
+            self->input.keys_just_pressed[idx] = true;
         } else if (action == GLFW_RELEASE) {
-            // Only release if not currently in a repeat sequence.
-            // GLFW on some platforms sends RELEASE→REPEAT rapidly for held keys.
-            // We use a small grace period: if we receive RELEASE but the key
-            // was pressed very recently, ignore it (it's a spurious release).
-            // However, the simplest fix is to NOT release on the first RELEASE
-            // event if it comes immediately after a PRESS/REPEAT.
-            // Instead, we use a different approach: track key state per-frame
-            // in poll_events() and only clear keys_down when no event was received.
-            self->input.keys_down[idx] = false;
             self->input.keys_just_released[idx] = true;
         }
     }
