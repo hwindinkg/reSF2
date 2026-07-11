@@ -179,6 +179,12 @@ public:
     // Handle a quit request. Returns true if the scene allows quit.
     bool handle_quit_request(SceneContext& ctx);
 
+    // Clear all just_pressed input flags. Called after a scene transition
+    // to prevent input carryover from the previous scene (e.g. a click that
+    // triggered the transition should not also trigger actions in the new
+    // scene on its first frame).
+    void clear_input_edges(platform::Platform& platform);
+
     [[nodiscard]] SceneId current_id() const noexcept { return current_id_; }
     [[nodiscard]] bool has_pending_transition() const noexcept { return pending_.has_value(); }
 

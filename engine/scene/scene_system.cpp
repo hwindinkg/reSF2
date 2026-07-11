@@ -4,6 +4,8 @@
 
 #include "scene_system.hpp"
 
+#include "../platform/platform.hpp"
+
 #include <cstdio>
 #include <optional>
 #include <utility>
@@ -110,6 +112,24 @@ void SceneManager::apply_transition(SceneContext& ctx) {
     current_id_ = to;
     std::printf("[scene] enter %s\n", scene_name(current_id_));
     current_->on_enter(ctx);
+
+    // CRITICAL: clear all just_pressed input edges after a scene transition.
+    // Without this, the click/key that triggered the transition (e.g. clicking
+    // "Story" in MainMenu) would still be "just_pressed" on the new scene's
+    // first on_update, causing it to immediately trigger an action and
+    // transition back. This was the root cause of the "scene immediately
+    // transitions back" bug.
+    clear_input_edges(ctx.platform);
+}
+
+void SceneManager::clear_input_edges(platform::Platform& platform) {
+    auto& input = const_cast<platform::InputState&>(platform.input());
+    input.keys_just_pressed.fill(false);
+    input.keys_just_released.fill(false);
+    for (auto& p : input.pointers) {
+        p.just_pressed = false;
+        p.just_released = false;
+    }
 }
 
 }  // namespace resf2::scene

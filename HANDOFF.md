@@ -138,22 +138,25 @@ resf2_app.exe --assets <path_to_sf2_assets>
 bash scripts/verify_main_compile.sh
 ```
 
-## CONTROLS (updated)
+## CONTROLS (updated — original SF2 layout)
 | Key | Action |
 |-----|--------|
-| A/D | Step left/right (Win32 GetAsyncKeyState, root motion accumulates +66/loop) |
-| W | Jump |
-| Shift+W | Jump away (backward leap) |
-| Shift+A/D | Back roll / Forward roll (dodge with big displacement) |
-| S (hold) | Block (middle_block stance) |
-| Space | Punch (W=upper, S=low, D=double, A=spinning) / advance dialogue |
-| K | Kick (S=sweep, D=front, A=back) |
-| M | Toggle scroll menu (MainMenu/Battle) |
-| T | Toggle dialog overlay (MainMenu/Battle) |
-| N | New Game — go to Map (MainMenu) |
+| W | Up — Jump (W+D=front flip, W+A=back flip) |
+| A | Left — Back step (relative to facing) |
+| S | Down — Block (hold), or Sweep/LowPunch when attacking |
+| D | Right — Forward step (relative to facing) |
+| O | Punch (D=heavy, A=spinning, W=upper, S=low) |
+| P | Kick (D=front, A=back, S=sweep) |
+| S+D | Forward roll (dodge) |
+| S+A | Back roll (dodge) |
+| M | Toggle scroll menu |
+| T | Toggle dialog overlay |
+| N | New Game — go to Map |
 | Y/L | Declare victory/defeat (Battle, debug) |
 | 1/2/3 | Zoom presets |
-| Esc | Quit / close overlay / back (scene-specific) |
+| Esc | Quit / close overlay / back |
+
+**Facing**: character auto-faces the enemy (punching bag) every frame. When you walk past the enemy, the character turns around. Direction keys (A/D) are interpreted relative to facing: if facing right, D=forward; if facing left, A=forward. Root motion is inverted when facing left.
 
 ---
 
