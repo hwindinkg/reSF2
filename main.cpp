@@ -726,6 +726,7 @@ public:
                 play_animation("duck", true);
                 current_move_ = "Duck";
                 move_state_ = 11;  // ducking state
+                duck_play_time_ = 0;
             }
         }
 
@@ -775,10 +776,14 @@ public:
             move_state_ = 0;
             play_animation("fists_idle", true);
         }
-        // Exit duck state when Down released
-        if (move_state_ == 11 && !key_down) {
-            move_state_ = 0;
-            play_animation("fists_idle", true);
+        // Exit duck state when Down released AND min duration played
+        // (prevents duck from cutting off immediately on S tap)
+        if (move_state_ == 11) {
+            duck_play_time_ += dt;
+            if (!key_down && duck_play_time_ >= 300) {
+                move_state_ = 0;
+                play_animation("fists_idle", true);
+            }
         }
 
         after_combat:
@@ -2370,22 +2375,20 @@ private:
             // Detect loop wrap for looping animations
             if (anim_loop_ && prev_frame_idx_ >= 0 && prev_frame_idx_ > frame_idx) {
                 // Animation wrapped (e.g., frame 15 → frame 0)
-                // Commit the full cycle displacement to step_start_player_x_
-                // The displacement at the last frame was (NPivot[last] - anchor)
-                // We need to add that to step_start_player_x_ so the next cycle
-                // starts from the advanced position.
-                // NPivot[last] - NPivot[0] = total displacement per cycle
                 float last_npx, last_npy, last_npz;
                 if (anim.get_node_pos(anim.frame_count - 1, npivot_idx, last_npx, last_npy, last_npz)) {
                     float cycle_disp = last_npx - anim_root_anchor_x_;
-                    step_start_player_x_ += facing_right_ ? cycle_disp : -cycle_disp;
+                    // Use SAVED facing (locked at animation start), not current facing
+                    step_start_player_x_ += anim_facing_right_ ? cycle_disp : -cycle_disp;
                 }
             }
             prev_frame_idx_ = frame_idx;
 
             // Absolute positioning: player_pos = start + displacement
+            // Use SAVED facing (locked at animation start) to prevent teleport
+            // when facing changes between frames
             float displacement = npivot_x - anim_root_anchor_x_;
-            player_pos_x_ = step_start_player_x_ + (facing_right_ ? displacement : -displacement);
+            player_pos_x_ = step_start_player_x_ + (anim_facing_right_ ? displacement : -displacement);
         } else {
             prev_frame_idx_ = -1;
         }
@@ -2483,6 +2486,10 @@ private:
             // Save current player position as the start point for root motion.
             // update_animation() will set player_pos_x_ = step_start_player_x_ + displacement
             step_start_player_x_ = player_pos_x_;
+            // Lock facing at animation start. Root motion uses this saved value
+            // instead of current facing_right_ to prevent teleport when facing
+            // changes between frames (e.g., character walks past enemy during step).
+            anim_facing_right_ = facing_right_;
             // Reset jump offset when switching TO a non-jump animation
             if (name != "jump" && name != "jump_away" &&
                 name != "front_flip" && name != "back_flip" &&
@@ -3085,10 +3092,12 @@ private:
     float jump_y_offset_ = 0.0f;  // accumulated Y offset from jump root motion
     float prev_root_offset_ = 0.0f;  // offset from frame-0 NPivot (for root motion)
     float step_start_player_x_ = 0.0f;  // player X when step started (for absolute root motion)
+    bool anim_facing_right_ = true;  // facing locked at animation start (for root motion direction)
     float y_adjust_smoothed_ = 0.0f;  // smoothed Y adjustment for feet normalization
     int no_key_frames_ = 0;  // frames with no movement key pressed (for hysteresis)
     int move_state_ = 0;  // 0=IDLE, 1=MOVING_LEFT, 2=MOVING_RIGHT, 10=special, 11=block
     uint32_t step_play_time_ = 0;  // ms the current step animation has been playing
+    uint32_t duck_play_time_ = 0;  // ms the duck animation has been playing
     int fwd_held_ms_ = 0;  // ms since forward key was last held (for latching)
     int back_held_ms_ = 0;  // ms since back key was last held (for latching)
     uint32_t last_kick_press_ms_ = 0;  // for double-tap detection (DoubleSweep)
