@@ -259,7 +259,7 @@ public:
         Color4B color
     );
 
-    // Filled circle in screen space (approximated with triangle fan).
+    // Filled circle in screen space (triangle fan).
     void draw_filled_circle_screen(
         float cx, float cy, float radius,
         Color4B color
