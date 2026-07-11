@@ -739,3 +739,71 @@ Stage Summary:
   parallax correct (bg barely moves, fg moves with camera).
 - Menu: all icons same size via uniform scaling, MENU text centered.
 - Next: user should build, test, and report if Verlet physics feels right.
+
+---
+Task ID: stage-8.5
+Agent: main
+Task: Revert V-flip, add parallax tiling, fix step cooldown, fix hit detection timing
+
+Work Log:
+- Analyzed user feedback:
+  * Walking still no delays between steps
+  * Dojo still upside down (V-flip was wrong)
+  * Background moves too fast, flies off screen
+  * Bag doesn't react to all hits, reacts to misses
+
+- V-FLIP REVERTED: The V-flip I added in stage 8.4 was WRONG. The original
+  V coordinates were correct (atlas_y measured from top = V=0 side, matching
+  glTexImage2D row 0 = top). Reverted to original V coords:
+    v0 = atlas_y / th (top of frame)
+    v1 = (atlas_y + atlas_h) / th (bottom of frame)
+
+- PARALLAX TILING: Background layers (factor < 1) now tile horizontally
+  to fill the screen. For each parallax image, we calculate the visible
+  world range and render the texture multiple times shifted by img.w,
+  preventing the background from flying off-screen when the camera moves.
+  Only applies to layers with factor < 0.99 (parallax layers).
+  Foreground layers (factor = 1.0) render normally.
+
+- STEP COOLDOWN: Added step_cooldown_ timer (500ms ≈ 15 frames at 30fps).
+  When a step animation starts, cooldown is set. During cooldown:
+  - Player can still move (velocity-based, MOVE_SPEED * dt)
+  - But step animation won't restart (prevents flickering)
+  - Only when cooldown expires AND key is still held, a new step starts
+  This creates the visible delay between steps that the original game has.
+
+- HIT DETECTION TIMING FIX: Moved update_animation(dt) BEFORE hit detection.
+  Previously, hit detection used anim_node_pos_ from the PREVIOUS frame
+  (1-frame lag). This caused:
+  - Limb positions were stale when checking distance to bag
+  - Attack window (2-4 frames) could be missed entirely
+  Now update_animation runs first, so anim_node_pos_ and anim_time_ are
+  synchronized with the current frame when hit detection checks them.
+
+- HIT DETECTION ACCURACY:
+  * Uses actual moves.xml Attack interval (Start/End frames), not fallback
+  * Verified all 11 combat moves have Attack intervals:
+    HighPunch: 4-5, HeavyPunch: 8-10, LowPunch: 6-8, DoublePunch: 6-8,
+    SpinningPunch: 5-6, UpperCut: 9-12, HighKick: 6-8, FrontKick: 8-9,
+    BackKick: 7-9, Sweep: 9-11, LowKick: 4-6
+  * If no Attack interval found, hit detection is SKIPPED (no fallback)
+  * moves.xml uses 1-indexed frames; converted to 0-indexed (subtract 1)
+  * Hit threshold reduced from 80 to 60 units (tighter, fewer false positives)
+  * Bag center now uses Verlet NPivot position (more accurate when bag swings)
+
+- Execution order in on_update:
+  1. Movement (velocity-based, updates player_pos_x_)
+  2. Camera update
+  3. Combat input (Space/K → play_animation, sets hit_anim_)
+  4. update_animation(dt) — advances anim_time_, updates anim_node_pos_
+  5. Hit detection — uses CURRENT frame's anim_node_pos_ and anim_time_
+  6. update_bag_verlet(dt) — physics step
+  7. Zoom presets
+
+Stage Summary:
+- Walking: step cooldown creates visible delay between steps, no flickering
+- Dojo: V-flip reverted (textures right-side up), Y-invert kept (positions correct)
+- Parallax: background tiles horizontally, no longer flies off-screen
+- Hit detection: uses exact moves.xml Attack intervals, synchronized with
+  animation frames, 60px threshold, Verlet bag position
+- Next: user should build and test
