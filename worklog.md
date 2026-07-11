@@ -876,3 +876,74 @@ Stage Summary:
 - Player/bag Y: inverted to match Y-DOWN params.xml → Y-UP world.
 - Movement: root motion from .bin, non-looping, 533ms cooldown between steps.
 - Next: user should build, test, and report if positions are correct.
+
+---
+Task ID: stage-8.7
+Agent: main
+Task: Fix non-looping animation wrap-around, step continuity, player Y, Profile rotation, README
+
+Work Log:
+- CRITICAL BUG FIX — Non-looping animation wrap-around:
+  When a non-looping animation (step_forward/step_back) reached the last frame,
+  the code continued to interpolate with frame 0 (next_idx = (frame_idx+1) % count).
+  This caused NPivot to interpolate from frame 15 (NPivot=235) back toward frame 0
+  (NPivot=169), creating a large negative delta that moved the character backward
+  at high speed. This was the "returns to start" and "opposite direction at huge
+  speed" bug.
+  Fix: when non-looping animation is finished (frame_idx >= frame_count-1),
+  set next_idx = frame_idx and alpha = 0. The animation stays exactly at the
+  last frame with no interpolation.
+
+- MOVEMENT FIX — Continuous stepping:
+  Changed can_step condition to allow starting a new step when current animation
+  is step_forward/step_back (not just fists_idle). This allows continuous
+  stepping when the key is held — each step plays fully (533ms) then a new
+  step starts immediately.
+
+- PLAYER Y POSITION:
+  Reverted Y-invert (was -location_->player_y, now location_->player_y).
+  Added -45 offset to align player feet with floor.
+  Floor (layer_3) at params y=225 → world_y=-225 (inverted location).
+  Player NPivot at params y=-93. Feet are ~87 units below NPivot (model space).
+  For feet at floor: player_pos_y_ - 87 = -225 → player_pos_y_ = -138.
+  Offset: -138 - (-93) = -45.
+  player_pos_y_ = location_->player_y - 45.0f
+
+- BAG Y POSITION:
+  Reverted Y-invert. Using same -45 offset as player.
+  bag_cy = location_->enemy_y - 45.0f + 50.0f
+
+- PROFILE ICON ROTATION:
+  Tried formula #4: sx = atlas_x + y, sy = atlas_y + x
+  (90° CCW un-rotation without flip)
+  Previous formulas:
+  - #3 (old): sx = atlas_x + (fh-1-y), sy = atlas_y + x → horizontally mirrored
+  - #1 (new): sx = atlas_x + y, sy = atlas_y + (fw-1-x) → upside down
+  - #4 (current): sx = atlas_x + y, sy = atlas_y + x → testing
+
+- DOJO BACKGROUND ROTATION:
+  Reverted quad dimension swap for rotated frames in render_location.
+  Now uses img.w × img.h for quad dimensions (intended display size).
+  UV mapping handles rotation via swapped w/h in UV space.
+
+- README UPDATE:
+  Comprehensive rewrite with current reverse engineering status:
+  - What works (character rendering, Verlet physics, root motion, hit detection)
+  - What's in progress (dojo rotation, floor gaps, bag centering)
+  - Original engine architecture (Cocos2d-x, ModelPhysics, MoveInside, IntervalAttack)
+  - .bin animation format
+  - moves.xml attack intervals table
+  - Coordinate systems documentation
+  - Verlet physics documentation
+  - File structure
+  - Build instructions
+  - Next steps
+
+Stage Summary:
+- Non-looping animation wrap-around FIXED — character no longer returns to start
+  or moves backward at high speed.
+- Continuous stepping works — each step plays fully, then next step starts.
+- Player Y aligned with floor (feet at floor level).
+- Profile icon rotation formula being tested (#4).
+- Dojo background quad dimensions reverted to img.w × img.h.
+- README updated with comprehensive reverse engineering status.
