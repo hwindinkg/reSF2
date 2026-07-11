@@ -427,31 +427,34 @@ public:
                     if (key_left && !key_right) {
                         move_state_ = 1;  // → MOVING_LEFT
                         facing_right_ = false;
+                        std::printf("[STATE] IDLE→LEFT (L=%d R=%d)\n", (int)key_left, (int)key_right);
                         play_animation("step_back", true);
                     } else if (key_right && !key_left) {
                         move_state_ = 2;  // → MOVING_RIGHT
                         facing_right_ = true;
+                        std::printf("[STATE] IDLE→RIGHT (L=%d R=%d)\n", (int)key_left, (int)key_right);
                         play_animation("step_forward", true);
                     }
                 } else if (move_state_ == 1) {  // MOVING_LEFT
-                    // Stay moving left unless key released for 10+ frames
-                    // or opposite key pressed
                     if (key_right && !key_left) {
                         move_state_ = 2;  // → MOVING_RIGHT
                         facing_right_ = true;
+                        std::printf("[STATE] LEFT→RIGHT\n");
                         play_animation("step_forward", true);
                     } else if (no_key_frames_ > 10) {
                         move_state_ = 0;  // → IDLE
+                        std::printf("[STATE] LEFT→IDLE (no_key=%d)\n", no_key_frames_);
                         play_animation("fists_idle", true);
                     }
-                    // If key_left flickers, no_key_frames_ resets when it comes back
                 } else if (move_state_ == 2) {  // MOVING_RIGHT
                     if (key_left && !key_right) {
                         move_state_ = 1;  // → MOVING_LEFT
                         facing_right_ = false;
+                        std::printf("[STATE] RIGHT→LEFT\n");
                         play_animation("step_back", true);
                     } else if (no_key_frames_ > 10) {
                         move_state_ = 0;  // → IDLE
+                        std::printf("[STATE] RIGHT→IDLE (no_key=%d)\n", no_key_frames_);
                         play_animation("fists_idle", true);
                     }
                 }
