@@ -441,7 +441,7 @@ public:
                         animations_.count("step_back")) {
                         facing_right_ = false;
                         play_animation("step_back", false);
-                        step_cooldown_ = STEP_DURATION_MS + 200;  // +200ms delay between steps
+                        step_cooldown_ = STEP_DURATION_MS;  // no extra delay
                         step_active_ = true;
                         step_duration_ = STEP_DURATION_MS;
                         step_start_x_ = player_pos_x_;
@@ -453,7 +453,7 @@ public:
                         animations_.count("step_forward")) {
                         facing_right_ = true;
                         play_animation("step_forward", false);
-                        step_cooldown_ = STEP_DURATION_MS + 200;  // +200ms delay between steps
+                        step_cooldown_ = STEP_DURATION_MS;  // no extra delay
                         step_active_ = true;
                         step_duration_ = STEP_DURATION_MS;
                         step_start_x_ = player_pos_x_;
@@ -918,16 +918,10 @@ private:
                     for (auto& [fname, idx] : a.atlas->name_index) {
                         auto& frame = a.atlas->frames[idx];
                         if (!frame.rotated) continue;
-                        // For rotated frames, use source_size_w/h (original untrimmed)
-                        // if available. Otherwise swap atlas_w/atlas_h.
-                        int fw, fh;
-                        if (frame.source_size_w > 0 && frame.source_size_h > 0) {
-                            fw = frame.source_size_w;
-                            fh = frame.source_size_h;
-                        } else {
-                            fw = frame.atlas_h;  // original width (swapped)
-                            fh = frame.atlas_w;  // original height (swapped)
-                        }
+                        // For rotated frames, atlas_w/atlas_h are ATLAS (post-rotation) dimensions.
+                        // Original sprite dimensions are swapped.
+                        int fw = frame.atlas_h;  // original width (swapped)
+                        int fh = frame.atlas_w;  // original height (swapped)
                         auto ctex = std::make_unique<ren::Texture2D>();
                         std::vector<std::uint8_t> px((size_t)fw * fh * 4);
                         for (int y = 0; y < fh; ++y) {
@@ -1411,27 +1405,13 @@ private:
         auto pivot_it = skeleton_nodes_.find("NPivot");
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
-        // Get animated NPivot Y to normalize vertical position across animations.
-        // Different animations have different NPivot Y values in .bin files:
-        //   fists_idle: NPivot Y = 87.40
-        //   step_forward: NPivot Y = 106.21
-        // This causes the character to "float" in some animations because the
-        // feet position is relative to NPivot. We normalize by subtracting the
-        // delta between animated NPivot Y and rest NPivot Y.
-        float anim_npivot_y = pivot_local_y;  // default: rest pose
-        auto npivot_anim = anim_node_pos_.find("NPivot");
-        if (npivot_anim != anim_node_pos_.end()) {
-            // anim_node_pos_ stores (local_x, local_y) where local_y = (abs_y - npivot_bin_y) + npivot_rest_y
-            // For NPivot: local_y = (npivot_bin_y - npivot_bin_y) + npivot_rest_y = npivot_rest_y
-            // So we can't get npivot_bin_y from anim_node_pos_. We need to store it separately.
-            // For now, use the stored animated NPivot bin Y (set in update_animation).
-            anim_npivot_y = anim_npivot_bin_y_;
-        }
-        // Vertical offset: shift world_cy so that animated NPivot matches rest pose
-        float y_normalize = pivot_local_y - anim_npivot_y;
-
+        // No Y normalization — different animations have different NPivot Y values
+        // in .bin files (idle=87.40, step=106.21). This means feet position varies
+        // slightly between animations. In the original game, the character's world
+        // position is set by params.xml and the animation plays relative to that.
+        // The slight floating in idle is expected (original game behavior).
         float world_cx = player_pos_x_;
-        float world_cy = player_pos_y_ + y_normalize;
+        float world_cy = player_pos_y_;
 
         // Build edge lookup from both body.xml edges and skeleton.xml edges
         std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
@@ -2254,26 +2234,15 @@ private:
         for (auto& [name, idx] : result->name_index) {
             auto& frame = result->frames[idx];
             // Handle rotated frames:
-            // For rotated frames, use source_size_w/h (original untrimmed dimensions)
-            // if available. Otherwise swap atlas_w/atlas_h.
+            // For rotated frames, atlas_w/atlas_h are ATLAS (post-rotation) dimensions.
+            // Original sprite dimensions are swapped: original_w = atlas_h, original_h = atlas_w.
             int fw, fh;
             if (frame.rotated) {
-                // source_size_w/h are the original (untrimmed) dimensions
-                if (frame.source_size_w > 0 && frame.source_size_h > 0) {
-                    fw = frame.source_size_w;
-                    fh = frame.source_size_h;
-                } else {
-                    fw = frame.atlas_h;  // original width (swapped)
-                    fh = frame.atlas_w;  // original height (swapped)
-                }
+                fw = frame.atlas_h;  // original width (swapped)
+                fh = frame.atlas_w;  // original height (swapped)
             } else {
-                if (frame.source_size_w > 0 && frame.source_size_h > 0) {
-                    fw = frame.source_size_w;
-                    fh = frame.source_size_h;
-                } else {
-                    fw = frame.atlas_w;
-                    fh = frame.atlas_h;
-                }
+                fw = frame.atlas_w;
+                fh = frame.atlas_h;
             }
             auto tex = std::make_unique<ren::Texture2D>();
             std::vector<std::uint8_t> px((size_t)fw * fh * 4);
