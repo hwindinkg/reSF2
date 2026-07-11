@@ -2534,13 +2534,12 @@ private:
             prev_npivot_set_ = false;
             prev_npivot_y_set_ = false;
             prev_frame_idx_ = -1;
-            // For root motion: save current player position as the start point.
-            // This is the position the character is at when the animation starts.
-            // update_animation() will set player_pos_x_ = step_start_player_x_ + displacement
-            // IMPORTANT: player_pos_x_ at this point already includes any displacement
-            // from the previous animation (because update_animation() ran last frame).
-            // So we save the CURRENT position, not some stale value.
-            step_start_player_x_ = player_pos_x_;
+            // For root motion: step_start_player_x_ is synced in the NON-root-motion
+            // branch below (every frame when not doing root motion). When we switch
+            // to a root-motion animation, step_start_player_x_ already holds the
+            // correct current position from the last idle/non-root frame.
+            // Do NOT set it here — player_pos_x_ at this point is from the PREVIOUS
+            // frame's update_animation(), which may be stale.
             // Lock facing at animation start. Root motion uses this saved value
             // instead of current facing_right_ to prevent teleport when facing
             // changes between frames (e.g., character walks past enemy during step).
