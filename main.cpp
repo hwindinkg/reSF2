@@ -117,6 +117,8 @@ static std::vector<std::filesystem::path> model_paths(const std::string& asset_r
 struct AtlasRef {
     std::unique_ptr<ren::Texture2D> texture;
     std::shared_ptr<plist::ParsedAtlas> atlas;
+    // Pre-cropped textures for rotated frames (un-rotated during crop)
+    std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> cropped;
 };
 
 struct LayerImage {
@@ -400,51 +402,66 @@ public:
                 init_location();
             }
         } else if (state_ == GameState::Location) {
-            // === MOVEMENT SYSTEM (root motion from .bin animation) ===
-            // The original game uses root motion: the .bin animation contains
-            // NPivot position changes that drive player movement.
-            // step_forward.bin: NPivot goes 169→235 (delta +66 per step)
-            // step_back.bin: NPivot goes 235→169 (delta -66 per step)
-            //
-            // The animation plays fully (16 frames at 30fps ≈ 533ms) before
-            // a new step can start. This creates the visible delay between steps.
-            // When the key is held, steps repeat continuously.
+            // === MOVEMENT SYSTEM (displacement-based, matching original) ===
+            // The original game uses root motion from .bin NPivot positions.
+            // Our implementation had issues with anchor resets causing the
+            // character to return to start. Instead, we use a simpler approach:
+            // each step moves the player by a fixed displacement (66 units,
+            // matching step_forward.bin's NPivot delta of 169→235).
+            // The displacement is applied smoothly over the animation duration.
             
             bool want_move_left = input.keys_down[(size_t)plat::Key::A] ||
                                   input.keys_down[(size_t)plat::Key::ArrowLeft];
             bool want_move_right = input.keys_down[(size_t)plat::Key::D] ||
                                    input.keys_down[(size_t)plat::Key::ArrowRight];
             
+            // Step displacement: 66 units per step (from .bin NPivot delta)
+            const float STEP_DISPLACEMENT = 66.0f;
+            const uint32_t STEP_DURATION_MS = 533;  // 16 frames at 30fps
+            
+            // Apply smooth movement during step animation
+            if (step_active_ && step_duration_ > 0) {
+                float progress = 1.0f - (float)step_duration_ / (float)STEP_DURATION_MS;
+                if (progress > 1.0f) progress = 1.0f;
+                float target_x = step_start_x_ + step_displacement_ * progress;
+                player_pos_x_ = target_x;
+                step_duration_ -= std::min<uint32_t>(step_duration_, dt);
+                if (step_duration_ <= 0) {
+                    step_active_ = false;
+                }
+            }
+            
             // Only allow movement if not attacking
             if (hit_anim_ == 0) {
                 if (want_move_left && !want_move_right) {
                     facing_right_ = false;
-                    // Start a new step if: cooldown expired AND currently idle
-                    // OR currently in a finished step animation
-                    bool can_step = (step_cooldown_ == 0) &&
-                                   (current_anim_ == "fists_idle" ||
-                                    current_anim_ == "step_back" ||
-                                    current_anim_ == "step_forward");
-                    if (can_step && animations_.count("step_back")) {
+                    // Start a new step if cooldown expired
+                    if (!step_active_ && step_cooldown_ == 0 &&
+                        animations_.count("step_back")) {
                         play_animation("step_back", false);
-                        step_cooldown_ = 533;  // 16 frames at 30fps
+                        step_cooldown_ = STEP_DURATION_MS;
+                        step_active_ = true;
+                        step_duration_ = STEP_DURATION_MS;
+                        step_start_x_ = player_pos_x_;
+                        step_displacement_ = -STEP_DISPLACEMENT;  // move left
                     }
                 } else if (want_move_right && !want_move_left) {
                     facing_right_ = true;
-                    bool can_step = (step_cooldown_ == 0) &&
-                                   (current_anim_ == "fists_idle" ||
-                                    current_anim_ == "step_back" ||
-                                    current_anim_ == "step_forward");
-                    if (can_step && animations_.count("step_forward")) {
+                    if (!step_active_ && step_cooldown_ == 0 &&
+                        animations_.count("step_forward")) {
                         play_animation("step_forward", false);
-                        step_cooldown_ = 533;
+                        step_cooldown_ = STEP_DURATION_MS;
+                        step_active_ = true;
+                        step_duration_ = STEP_DURATION_MS;
+                        step_start_x_ = player_pos_x_;
+                        step_displacement_ = STEP_DISPLACEMENT;  // move right
                     }
                 } else {
                     // Not moving — return to idle when step finishes
-                    if ((current_anim_ == "step_forward" || current_anim_ == "step_back") &&
-                        step_cooldown_ == 0) {
+                    if (!step_active_ && step_cooldown_ == 0 &&
+                        (current_anim_ == "step_forward" || current_anim_ == "step_back")) {
                         play_animation("fists_idle", true);
-                    } else if (current_anim_ != "fists_idle" &&
+                    } else if (!step_active_ && current_anim_ != "fists_idle" &&
                                current_anim_ != "step_forward" &&
                                current_anim_ != "step_back" &&
                                current_anim_.find("punch") == std::string::npos &&
@@ -575,7 +592,7 @@ public:
                                     // Bag center position (use Verlet node positions for accuracy)
                                     // Same coordinate system as player — no Y-invert
                                     float bag_cx = location_->enemy_x - 857.0f;
-                                    float bag_cy = location_->enemy_y - 45.0f + 50.0f;
+                                    float bag_cy = -location_->enemy_y + 50.0f;
                                     // Check against the bag's NPivot Verlet position (more accurate)
                                     auto bv_it = bag_verlet_.find("NPivot");
                                     if (bv_it != bag_verlet_.end()) {
@@ -728,18 +745,13 @@ private:
         if (location_) {
             // Player position from params.xml.
             // params.xml uses Y-DOWN (Y=0 at top, positive Y = down).
-            // Our world is Y-UP (positive Y = up). Location images are Y-inverted
-            // in render_location (world_y = -img.y). Player Y is NOT inverted
-            // because the player/enemy positions use a different reference point.
-            //
-            // The floor (layer_3) is at img.y=225 in params → world_y=-225.
-            // Player NPivot at params y=-93. Player feet are ~87 units below
-            // NPivot (model: NPivot=169.48, NToe≈72, diff≈97, ×0.9 scale=87).
-            // For feet to touch floor: player_pos_y_ - 87 = -225
-            // → player_pos_y_ = -225 + 87 = -138.
-            // Offset from params value: -138 - (-93) = -45.
+            // Location images are Y-inverted in render_location (world_y = -img.y).
+            // Player/enemy positions use the same Y-DOWN system, so we also invert.
+            // Player at params y=-93 → world y=+93 (above center).
+            // Floor at params y=225 → world y=-225 (below center).
+            // This puts the player above the floor, which is correct.
             player_pos_x_ = location_->player_x - 857.0f;
-            player_pos_y_ = location_->player_y - 45.0f;  // align feet with floor
+            player_pos_y_ = -location_->player_y;  // invert Y to match location rendering
         }
         // Camera follows player with offset (player on left third)
         cam_x_ = player_pos_x_ + 200.0f;
@@ -870,14 +882,52 @@ private:
                 auto result = plist::parse(read_text(pp.string()));
                 if (!result) continue;
                 auto png_data = read_file(pn.string());
+                // Decode atlas PNG for pre-cropping rotated frames
+                int aw, ah, ach;
+                auto* atlas_px = stbi_load_from_memory(
+                    (const stbi_uc*)png_data.data(), (int)png_data.size(),
+                    &aw, &ah, &ach, 4);
                 auto tex = std::make_unique<ren::Texture2D>();
                 if (!tex->init_from_png((const uint8_t*)png_data.data(),
-                                         png_data.size())) continue;
+                                         png_data.size())) {
+                    if (atlas_px) stbi_image_free(atlas_px);
+                    continue;
+                }
                 AtlasRef a;
                 a.texture = std::move(tex);
                 a.atlas = std::make_shared<plist::ParsedAtlas>(std::move(*result));
-                std::printf("  Atlas '%s': %zu frames\n",
-                            name.c_str(), a.atlas->frames.size());
+                // Pre-crop rotated frames into individual un-rotated textures
+                if (atlas_px) {
+                    for (auto& [fname, idx] : a.atlas->name_index) {
+                        auto& frame = a.atlas->frames[idx];
+                        if (!frame.rotated) continue;
+                        int fw = frame.atlas_w;
+                        int fh = frame.atlas_h;
+                        auto ctex = std::make_unique<ren::Texture2D>();
+                        std::vector<std::uint8_t> px((size_t)fw * fh * 4);
+                        for (int y = 0; y < fh; ++y) {
+                            for (int x = 0; x < fw; ++x) {
+                                // Un-rotate 90° CCW (Cocos2d stores rotated 90° CW)
+                                int sx = frame.atlas_x + (fw - 1 - y);
+                                int sy = frame.atlas_y + x;
+                                if (sx < 0 || sy < 0 || sx >= aw || sy >= ah) continue;
+                                int src_idx = (sy * aw + sx) * 4;
+                                int dst_idx = (y * fw + x) * 4;
+                                px[dst_idx+0] = atlas_px[src_idx+0];
+                                px[dst_idx+1] = atlas_px[src_idx+1];
+                                px[dst_idx+2] = atlas_px[src_idx+2];
+                                px[dst_idx+3] = atlas_px[src_idx+3];
+                            }
+                        }
+                        ctex->init_rgba(fw, fh, px.data());
+                        std::string n = fname;
+                        if (n.ends_with(".png")) n = n.substr(0, n.size() - 4);
+                        a.cropped[n] = std::move(ctex);
+                    }
+                    stbi_image_free(atlas_px);
+                }
+                std::printf("  Atlas '%s': %zu frames, %zu pre-cropped\n",
+                            name.c_str(), a.atlas->frames.size(), a.cropped.size());
                 atlases_[name] = std::move(a);
                 return;
             }
@@ -960,29 +1010,46 @@ private:
                     if (fit == atlas.atlas->name_index.end()) continue;
                 }
                 auto& frame = atlas.atlas->frames[fit->second];
+                
+                // For rotated frames, use pre-cropped un-rotated texture
+                std::string crop_name = img.class_name;
+                if (atlas.cropped.count(crop_name)) {
+                    // Use pre-cropped texture (already un-rotated)
+                    auto& ctex = atlas.cropped[crop_name];
+                    float world_y = -img.y;
+                    float world_x = img.x - parallax_shift;
+                    float quad_w = img.w;
+                    float quad_h = img.h;
+                    float px = world_x - quad_w / 2.0f;
+                    float py = world_y - quad_h / 2.0f;
+                    if (parallax_factor < 0.99f) {
+                        float hw = (float)platform_->window_width() / (2.0f * zoom_);
+                        float vis_left = cam_x_ - hw;
+                        float vis_right = cam_x_ + hw;
+                        float tile_w = quad_w;
+                        float start_x = px;
+                        while (start_x + tile_w > vis_left) start_x -= tile_w;
+                        while (start_x < vis_left) start_x += tile_w;
+                        start_x -= tile_w;
+                        for (float tx = start_x; tx < vis_right; tx += tile_w) {
+                            renderer_->draw_textured_quad(*ctex, tx, py, quad_w, quad_h);
+                        }
+                    } else {
+                        renderer_->draw_textured_quad(*ctex, px - 0.5f, py,
+                                                      quad_w + 1.0f, quad_h);
+                    }
+                    continue;
+                }
+                
+                // Non-rotated frame: use atlas texture with UV mapping
                 float tw = (float)atlas.atlas->metadata.texture_w;
                 float th = (float)atlas.atlas->metadata.texture_h;
-                // UV coordinates for the atlas frame.
-                float u0, v0, u1, v1;
-                if (frame.rotated) {
-                    // Rotated 90° CW: swap w/h in UV space to un-rotate
-                    u0 = frame.atlas_x / tw;
-                    v0 = frame.atlas_y / th;
-                    u1 = (frame.atlas_x + frame.atlas_h) / tw;
-                    v1 = (frame.atlas_y + frame.atlas_w) / th;
-                } else {
-                    u0 = frame.atlas_x / tw;
-                    v0 = frame.atlas_y / th;
-                    u1 = (frame.atlas_x + frame.atlas_w) / tw;
-                    v1 = (frame.atlas_y + frame.atlas_h) / th;
-                }
-                // Render at the image's original coordinates with parallax shift.
-                // Y is inverted: params.xml uses Y-DOWN, our world is Y-UP.
+                float u0 = frame.atlas_x / tw;
+                float v0 = frame.atlas_y / th;
+                float u1 = (frame.atlas_x + frame.atlas_w) / tw;
+                float v1 = (frame.atlas_y + frame.atlas_h) / th;
                 float world_y = -img.y;
                 float world_x = img.x - parallax_shift;
-                // Use img.w × img.h for quad dimensions (the intended display size).
-                // Do NOT swap dimensions for rotated frames — the UV mapping
-                // handles the rotation.
                 float quad_w = img.w;
                 float quad_h = img.h;
                 float px = world_x - quad_w / 2.0f;
@@ -1530,7 +1597,7 @@ private:
         // Same coordinate system as player — no Y-invert, use params Y directly
         // with the same -45 offset to align with the floor.
         float bag_cx = location_ ? (location_->enemy_x - 857.0f) : 0.0f;
-        float bag_cy = location_ ? (location_->enemy_y - 45.0f + 50.0f) : 0.0f;
+        float bag_cy = location_ ? (-location_->enemy_y + 50.0f) : 0.0f;
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
         // Initialize nodes: world position = bag_center + (node_local - NPivot_local)
@@ -1639,7 +1706,7 @@ private:
         // Same coordinate system as player — no Y-invert
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
-        float bag_cy = location_->enemy_y - 45.0f + 50.0f;  // align with floor + offset
+        float bag_cy = -location_->enemy_y + 50.0f;  // align with floor + offset
         
         // === BAG RENDERING (Verlet physics) ===
         // The bag's skeleton nodes are simulated with Verlet integration.
@@ -1981,30 +2048,13 @@ private:
         float npivot_x = npx0 + (npx1 - npx0) * alpha;
         float npivot_y = npy0 + (npy1 - npy0) * alpha;
 
-        // Root motion: drives player movement from .bin animation data.
-        // step_forward.bin: NPivot X goes 169→235 (delta +66 per step)
-        // step_back.bin: NPivot X goes 235→169 (delta -66 per step)
-        //
-        // We use OFFSET from frame-0 NPivot position to avoid cross-animation
-        // jumps. The delta is applied to player_pos_x_ each frame.
-        //
-        // The animation is non-looping (play_animation called with loop=false),
-        // so it plays exactly once, then stops at the last frame. The step_cooldown_
-        // timer in on_update() prevents starting a new step until the current
-        // one finishes.
-        if (current_anim_ == "step_forward" || current_anim_ == "step_back") {
-            if (anim_anchor_set_) {
-                float current_offset = npivot_x - anim_root_anchor_x_;
-                float delta = current_offset - prev_root_offset_;
-                // Filter out large deltas (loop wrap-arounds, cross-animation jumps)
-                if (std::abs(delta) < 40.0f) {
-                    player_pos_x_ += delta;
-                }
-                prev_root_offset_ = current_offset;
-            }
-        } else {
-            prev_root_offset_ = 0.0f;
-        }
+        // Root motion: DISABLED. Root motion from .bin was causing issues
+        // (character returning to start due to anchor reset across animations).
+        // Instead, movement is handled in on_update() using a simple
+        // displacement-based approach: when a step animation starts, we
+        // compute a target displacement and smoothly move the player over
+        // the animation duration.
+        prev_root_offset_ = 0.0f;
         anim_root_dx_ = 0.0f;
         anim_root_dy_ = 0.0f;
 
@@ -2619,6 +2669,10 @@ private:
     bool facing_right_ = true;
     int hit_anim_ = 0;    // ms remaining
     uint32_t step_cooldown_ = 0;  // ms remaining before next step animation can start
+    bool step_active_ = false;    // true while a step is in progress
+    uint32_t step_duration_ = 0;  // ms remaining in current step
+    float step_start_x_ = 0;      // player X at start of step
+    float step_displacement_ = 0; // total displacement for this step (+66 or -66)
     int bag_swing_ = 0;   // ms remaining (legacy, for compatibility)
     bool bag_hit_ = false;  // bag already hit during current attack
     float bag_swing_dir_ = 1.0f;  // +1 = swing right, -1 = swing left
