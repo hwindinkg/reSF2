@@ -613,7 +613,7 @@ public:
                 play_animation(anim_name, false);
                 current_move_ = move_name;
                 int fc = animations_[anim_name].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_speed_);
                 move_state_ = 0;
                 // Skip special moves / step this frame — attack takes priority
                 goto after_combat;
@@ -656,7 +656,7 @@ public:
                 play_animation(anim_name, false);
                 current_move_ = move_name;
                 int fc = animations_[anim_name].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_speed_);
                 move_state_ = 0;
                 goto after_combat;
             }
@@ -681,7 +681,7 @@ public:
                 play_animation("front_flip", false);
                 current_move_ = "FrontFlip";
                 int fc = animations_["front_flip"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_speed_);
                 move_state_ = 10;
                 std::printf("[MOVE] Front Flip!\n");
             }
@@ -690,7 +690,7 @@ public:
                 play_animation("back_flip", false);
                 current_move_ = "BackFlip";
                 int fc = animations_["back_flip"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_speed_);
                 move_state_ = 10;
                 std::printf("[MOVE] Back Flip!\n");
             }
@@ -699,7 +699,7 @@ public:
                 play_animation("jump", false);
                 current_move_ = "JumpUp";
                 int fc = animations_["jump"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_speed_);
                 move_state_ = 10;
                 std::printf("[MOVE] Jump!\n");
             }
@@ -708,7 +708,7 @@ public:
                 play_animation("forward_roll", false);
                 current_move_ = "ForwardRoll";
                 int fc = animations_["forward_roll"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_speed_);
                 move_state_ = 10;
                 std::printf("[MOVE] Forward Roll!\n");
             }
@@ -717,7 +717,7 @@ public:
                 play_animation("back_roll", false);
                 current_move_ = "BackRoll";
                 int fc = animations_["back_roll"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f * 30.0f / anim_speed_);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_speed_);
                 move_state_ = 10;
                 std::printf("[MOVE] Back Roll!\n");
             }
@@ -804,7 +804,7 @@ public:
                 auto anim_it = animations_.find(current_anim_);
                 if (anim_it != animations_.end()) {
                     int fc = anim_it->second.frame_count;
-                    int current_frame = (int)(anim_time_ * 30.0f);
+                    int current_frame = (int)(anim_time_ * anim_speed_);
                     auto move_it = moves_.find(current_move_);
                     if (move_it != moves_.end() && move_it->second.attack_start > 0) {
                         int attack_start = move_it->second.attack_start;
@@ -2302,7 +2302,7 @@ private:
         anim_time_ += dt;
 
         // Calculate current frame (with looping)
-        float frame_f = anim_time_ * 30.0f;
+        float frame_f = anim_time_ * anim_speed_;
         int frame_idx = (int)frame_f;
         bool anim_finished = false;
         if (anim_loop_) {
@@ -2413,12 +2413,15 @@ private:
             float displacement = npivot_x - anim_root_anchor_x_;
             player_pos_x_ = step_start_player_x_ + (anim_facing_right_ ? displacement : -displacement);
             // Clamp to location wall boundaries (from params.xml Wall attribute)
-            // Wall="305" means walls are at ±305 from world center (0).
-            // World center is at X=0. Player and enemy positions are offset by X_OFFSET=983.
-            // So walls in world space: left = -wall, right = +wall
-            if (location_ && location_->wall > 0) {
-                float left_bound = -location_->wall;
-                float right_bound = location_->wall;
+            // params.xml uses game coordinates where 0 = left edge, Width = right edge.
+            // Wall="305" means left wall at x=305, right wall at x=Width-Wall=1655.
+            // Our world is offset by X_OFFSET=983, so:
+            //   left wall in our world = 305 - 983 = -678
+            //   right wall in our world = (1960-305) - 983 = 672
+            if (location_ && location_->wall > 0 && location_->width > 0) {
+                const float X_OFFSET = 983.0f;
+                float left_bound = location_->wall - X_OFFSET;
+                float right_bound = (location_->width - location_->wall) - X_OFFSET;
                 if (player_pos_x_ < left_bound) player_pos_x_ = left_bound;
                 if (player_pos_x_ > right_bound) player_pos_x_ = right_bound;
             }
