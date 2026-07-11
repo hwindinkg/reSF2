@@ -427,6 +427,7 @@ public:
             if (hit_anim_ == 0) {
                 if (want_move_left && !want_move_right) {
                     if (!step_active_) facing_right_ = false;
+                    // Start new step only when: not active AND cooldown expired
                     if (!step_active_ && step_cooldown_ == 0 &&
                         animations_.count("step_back")) {
                         facing_right_ = false;
@@ -446,6 +447,7 @@ public:
                         step_active_ = true;
                     }
                 } else {
+                    // Not moving — return to idle when step finishes
                     if (!step_active_ && step_cooldown_ == 0 &&
                         (current_anim_ == "step_forward" || current_anim_ == "step_back")) {
                         play_animation("fists_idle", true);
@@ -459,7 +461,8 @@ public:
                     }
                 }
             }
-            // Check if step animation finished
+            // Check if step animation finished (reached last frame)
+            // Use fc-2 to allow the last frame to render before switching
             if (step_active_) {
                 auto anim_it = animations_.find(current_anim_);
                 if (anim_it != animations_.end()) {
@@ -467,6 +470,9 @@ public:
                     int current_frame = (int)(anim_time_ * 30.0f);
                     if (current_frame >= fc - 1) {
                         step_active_ = false;
+                        // Don't switch to idle immediately — let cooldown expire
+                        // The movement code above will start a new step when cooldown=0
+                        // and key is still held, or switch to idle when key released
                     }
                 }
             }
