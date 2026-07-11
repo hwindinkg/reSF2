@@ -403,18 +403,12 @@ public:
             }
         } else if (state_ == GameState::Location) {
             // === MOVEMENT SYSTEM (root motion from .bin animation) ===
-            // The original game uses root motion: NPivot position changes in the
-            // .bin animation drive player movement. This gives natural non-linear
-            // movement (slow start, fast middle, slow end) that matches the
-            // animation visually.
-            //
-            // step_forward.bin: NPivot X goes 169→235 (delta +66 per step)
-            // step_back.bin: NPivot X goes 235→169 (delta -66 per step)
-            //
-            // The animation plays non-looping (once). The step_cooldown_ timer
-            // prevents starting a new step until the current one finishes.
-            // The non-looping wrap-around bug is fixed (animation stays at
-            // last frame instead of interpolating with frame 0).
+            // Simplified: step_cooldown_ is the ONLY gate.
+            // - When cooldown == 0 and key held: start new step
+            // - When cooldown > 0: step in progress, don't touch animation
+            // - When cooldown == 0 and key released: switch to idle
+            // The non-looping animation stays at last frame when finished.
+            // Root motion code in update_animation handles position.
             
             bool want_move_left = input.keys_down[(size_t)plat::Key::A] ||
                                   input.keys_down[(size_t)plat::Key::ArrowLeft];
@@ -423,59 +417,33 @@ public:
             
             const uint32_t STEP_DURATION_MS = 533;  // 16 frames at 30fps
             
-            // Only allow movement if not attacking
             if (hit_anim_ == 0) {
                 if (want_move_left && !want_move_right) {
-                    if (!step_active_) facing_right_ = false;
-                    // Start new step only when: not active AND cooldown expired
-                    if (!step_active_ && step_cooldown_ == 0 &&
-                        animations_.count("step_back")) {
+                    if (step_cooldown_ == 0) {
                         facing_right_ = false;
                         step_start_player_x_ = player_pos_x_;
                         play_animation("step_back", false);
                         step_cooldown_ = STEP_DURATION_MS;
-                        step_active_ = true;
                     }
                 } else if (want_move_right && !want_move_left) {
-                    if (!step_active_) facing_right_ = true;
-                    if (!step_active_ && step_cooldown_ == 0 &&
-                        animations_.count("step_forward")) {
+                    if (step_cooldown_ == 0) {
                         facing_right_ = true;
                         step_start_player_x_ = player_pos_x_;
                         play_animation("step_forward", false);
                         step_cooldown_ = STEP_DURATION_MS;
-                        step_active_ = true;
                     }
                 } else {
-                    // Not moving — return to idle when step finishes
-                    if (!step_active_ && step_cooldown_ == 0 &&
-                        (current_anim_ == "step_forward" || current_anim_ == "step_back")) {
-                        play_animation("fists_idle", true);
-                    } else if (!step_active_ && current_anim_ != "fists_idle" &&
-                               current_anim_ != "step_forward" &&
-                               current_anim_ != "step_back" &&
-                               current_anim_.find("punch") == std::string::npos &&
-                               current_anim_.find("kick") == std::string::npos &&
-                               current_anim_.find("cut") == std::string::npos) {
+                    // Not moving — switch to idle ONLY when cooldown expired
+                    if (step_cooldown_ == 0 &&
+                        current_anim_ != "fists_idle" &&
+                        current_anim_.find("punch") == std::string::npos &&
+                        current_anim_.find("kick") == std::string::npos &&
+                        current_anim_.find("cut") == std::string::npos) {
                         play_animation("fists_idle", true);
                     }
                 }
             }
-            // Check if step animation finished (reached last frame)
-            // Use fc-2 to allow the last frame to render before switching
-            if (step_active_) {
-                auto anim_it = animations_.find(current_anim_);
-                if (anim_it != animations_.end()) {
-                    int fc = anim_it->second.frame_count;
-                    int current_frame = (int)(anim_time_ * 30.0f);
-                    if (current_frame >= fc - 1) {
-                        step_active_ = false;
-                        // Don't switch to idle immediately — let cooldown expire
-                        // The movement code above will start a new step when cooldown=0
-                        // and key is still held, or switch to idle when key released
-                    }
-                }
-            }
+            // Decrement step cooldown
             if (step_cooldown_ > 0) {
                 step_cooldown_ -= std::min<uint32_t>(step_cooldown_, dt);
             }
