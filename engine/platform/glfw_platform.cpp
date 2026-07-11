@@ -6,6 +6,7 @@
 #include "glfw_platform.hpp"
 
 #include <GLFW/glfw3.h>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -275,26 +276,37 @@ bool GlfwPlatform::poll_events() {
 
     glfwPollEvents();
 
-    // IMPORTANT FIX: After polling events, use glfwGetKey() to get the
-    // authoritative key state. GLFW's event-based key_callback can miss
-    // RELEASE events or send spurious ones on some platforms, causing
-    // keys_down to flicker. By querying glfwGetKey() directly, we get
-    // the actual hardware key state at this moment.
-    // This fixes the movement jitter where keys_down[D] became false
-    // every other frame despite the key being physically held.
+    // IMPORTANT FIX: On some Windows configurations, glfwGetKey() returns
+    // GLFW_RELEASE intermittently for held keys. We apply a debounce:
+    // keys_down stays true for a few frames after release, then clears.
+    // This prevents the flicker that causes step/idle animation switching.
+    static std::array<int, 256> key_release_timer = {};  // frames since release
+    
     for (int i = 0; i < static_cast<int>(Key::AltRight) + 1; ++i) {
         int glfw_key = key_index_to_glfw(i);
-        if (glfw_key >= 0) {
+        if (glfw_key >= 0 && impl_->window) {
             int state = glfwGetKey(impl_->window, glfw_key);
-            bool is_down = (state == GLFW_PRESS || state == GLFW_REPEAT);
-            // Track just_pressed and just_released transitions
-            if (is_down && !impl_->input.keys_down[i]) {
-                impl_->input.keys_just_pressed[i] = true;
+            bool hw_down = (state == GLFW_PRESS || state == GLFW_REPEAT);
+            
+            if (hw_down) {
+                // Hardware says key is down — reset release timer
+                key_release_timer[i] = 0;
+                if (!impl_->input.keys_down[i]) {
+                    impl_->input.keys_just_pressed[i] = true;
+                }
+                impl_->input.keys_down[i] = true;
+            } else {
+                // Hardware says key is up — debounce: keep it down for 3 frames
+                key_release_timer[i]++;
+                if (key_release_timer[i] > 3) {
+                    // Key has been released for 3+ frames — actually release
+                    if (impl_->input.keys_down[i]) {
+                        impl_->input.keys_just_released[i] = true;
+                    }
+                    impl_->input.keys_down[i] = false;
+                }
+                // Otherwise keep keys_down true (debounce)
             }
-            if (!is_down && impl_->input.keys_down[i]) {
-                impl_->input.keys_just_released[i] = true;
-            }
-            impl_->input.keys_down[i] = is_down;
         }
     }
 
