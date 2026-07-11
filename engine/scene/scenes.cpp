@@ -114,14 +114,15 @@ void MainMenuScene::on_update(SceneContext& ctx) {
     // that trigger scene transitions. These are scene-specific.
     const auto& input = ctx.platform.input();
 
-    // Menu items are at x=10, y=58+i*45, w=130, h=40 (approximate).
-    // i=0: Story, i=1: Shop, i=2: Settings, i=3: Continue/Dialogue
+    // Menu items are positioned BELOW the menu button (which is at y=58,
+    // h=40, so ends at y=98). Items start at y=103 to avoid overlap.
+    // Each item is 45px tall.
     struct MenuItem { const char* name; SceneId target; float y; };
     MenuItem items[] = {
-        {"Story",    SceneId::Map,      58.0f + 0 * 45.0f},
-        {"Shop",     SceneId::Shop,     58.0f + 1 * 45.0f},
-        {"Settings", SceneId::Settings, 58.0f + 2 * 45.0f},
-        {"Test Dialog", SceneId::Dialogue, 58.0f + 3 * 45.0f},
+        {"Story",    SceneId::Map,      103.0f + 0 * 45.0f},
+        {"Shop",     SceneId::Shop,     103.0f + 1 * 45.0f},
+        {"Settings", SceneId::Settings, 103.0f + 2 * 45.0f},
+        {"Test Dialog", SceneId::Dialogue, 103.0f + 3 * 45.0f},
     };
     for (const auto& item : items) {
         if (clicked_in(input, 10.0f, item.y, 130.0f, 40.0f)) {
@@ -132,7 +133,7 @@ void MainMenuScene::on_update(SceneContext& ctx) {
                 ctx.host.host_set_dialogue({
                     {"Sly", "Welcome back, fighter."},
                     {"Sly", "The tournament awaits. Are you ready?"},
-                    {"Narrator", "Round 1 — Fight!"},
+                    {"Narrator", "Round 1 - Fight!"},
                 });
                 ctx.host.host_set_current_level("test_battle");
             }
