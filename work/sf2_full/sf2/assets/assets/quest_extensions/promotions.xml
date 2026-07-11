@@ -1,0 +1,1110 @@
+<Quests>
+  <Quest Name="promo_RealMoneyItemRegister_Pile_s" Priority="0">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Purchase(_$Purchase).Name" Value2="Pile_Gems_s" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="LastRealPurchaseTime" Value="?SysInfo().Time" />
+      <SetVariable Name="LastRealPurchase" Value="Pile_Gems" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_RealMoneyItemRegister_Bag_s" Priority="0">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Purchase(_$Purchase).Name" Value2="Bag_Gems_s" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="LastRealPurchaseTime" Value="?SysInfo().Time" />
+      <SetVariable Name="LastRealPurchase" Value="Bag_Gems" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_RealMoneyItemRegister_Chest_s" Priority="0">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Purchase(_$Purchase).Name" Value2="Chest_Gems_s" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="LastRealPurchaseTime" Value="?SysInfo().Time" />
+      <SetVariable Name="LastRealPurchase" Value="Chest_Gems" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_RealMoneyItemRegister_Casket_s" Priority="0">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Purchase(_$Purchase).Name" Value2="Casket_Gems_s" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="LastRealPurchaseTime" Value="?SysInfo().Time" />
+      <SetVariable Name="LastRealPurchase" Value="Casket_Gems" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_ShopBuyReplacement">
+    <Events>
+      <PrePurchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Item(_$Purchase).SubType" Value2="Bonus" />
+      <Operator Type="Or">
+        <Operator Type="And">
+          <Greater Value1="?Timer(Timer_FirstPayment).Value" Value2="0" />
+          <Equal Value1="?Purchase(_$Purchase).Name" Value2="_promo_FirstPayment_Item" />
+        </Operator>
+        <Operator Type="And">
+          <Greater Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+          <Equal Value1="?Purchase(_$Purchase).Name" Value2="_LastRealPurchase" />
+        </Operator>
+        <Operator Type="And">
+          <Greater Value1="?Timer(Timer_IncreasePayment).Value" Value2="0" />
+          <Equal Value1="?Purchase(_$Purchase).Name" Value2="_promo_SalePurchase" />
+        </Operator>
+      </Operator>
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_PurchasedItemBuffer" Value="?Purchase(_$Purchase).Name" />
+      <SetVariable Name="promo_PurchasedBufferItemToPurchase" Value="?Concat(?Purchase(_$Purchase).Name,_s)" />
+      <Activate ActionID="promo_PurchaseBuffer" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_PurchaseBuffer_z7_bag" Priority="10">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="promo_PurchaseBuffer" />
+      <Equal Value1="?Purchase(_promo_PurchasedItemBuffer).Name" Value2="Bag_Gems_Zone7" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_PurchasedBufferItemToPurchase" Value="Bag_Gems_s" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_PurchaseBuffer_z7_chest" Priority="10">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="promo_PurchaseBuffer" />
+      <Equal Value1="?Purchase(_promo_PurchasedItemBuffer).Name" Value2="Chest_Gems_Zone7" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_PurchasedBufferItemToPurchase" Value="Chest_Gems_s" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_PurchaseBuffer_z7_casket" Priority="10">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="promo_PurchaseBuffer" />
+      <Equal Value1="?Purchase(_promo_PurchasedItemBuffer).Name" Value2="Casket_Gems_Zone7" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_PurchasedBufferItemToPurchase" Value="Casket_Gems_s" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_PurchaseBufferBuyItem" Priority="9">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="promo_PurchaseBuffer" />
+    </Conditions>
+    <Actions>
+      <BuyItem Name="_promo_PurchasedBufferItemToPurchase" Currency="Real" />
+    </Actions>
+  </Quest>
+  
+  
+
+<!-- First Payment Promotion -->
+  <Quest Name="promo_FirstPayment_OnFightEnter" Priority="10" Group="FightEnter" Unresumable="1">
+    <Events>
+      <FightEnter />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Fight(_$Fight).Battle" Value2="Survival" />
+      <Equal Value1="_SurvivalsInAZoneCount" Value2="5" />
+      <Operator Type="Or">
+        <Equal Value1="_StarterPackOfferEnded" Value2="1" />
+        <Less Value1="?Fight(ZONE_1|BOSS_LYNX|6).WinCount" Value2="1" Not="1" />
+      </Operator>
+      <Greater Not="1" Value1="?Timer(Timer_StarterPack).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_FirstPayment).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_IncreasePayment).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(sale_Timer).Value" Value2="0" />
+      <Greater Not="1" Value1="_DiscipleFlag" Value2="0" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_FirstPayment_Item" Value="Pile_Gems" />
+      <ClearQuestQueue Name="SurvivalPayReminder" />
+      <ActivateTimer Name="Timer_FirstPayment" Value="1800" />
+      <ShowMapButton Name="Button_FirstPayment" Image="?Item(_promo_FirstPayment_Item).Image" Timer="Timer_FirstPayment" />
+      <Discount Item="_promo_FirstPayment_Item" NewAmount="?Multi(_promo_Multiplier,?Item(_promo_FirstPayment_Item).RecieveBonus)" Period="?Timer(Timer_FirstPayment).Value" Toggle="1" />
+      <Dialog Type="Multiline" Title="dlgSpecialOfferTitle" Image="?Item(_promo_FirstPayment_Item).Image">
+        <Line Text="dlgFirstPaymentOffer{?Concat(%,_promo_FirstPayment_Item}{?Multi(?Sub(_promo_Multiplier,1),100)}"/>
+        <PriceLine Text="dlgProfitablePrice{textures/misc/ruby.png}{?Multi(_promo_Multiplier,?Item(_promo_FirstPayment_Item).RecieveBonus)}{?Item(_promo_FirstPayment_Item).RealPrice}" TextColor="0xfefe95" />
+        <Button Type="Right" Color="Green" Text="dlgBuyButton">
+          <SetVariable Name="promo_PurchasedItemBuffer" Value="_promo_FirstPayment_Item" />
+          <SetVariable Name="promo_PurchasedBufferItemToPurchase" Value="?Concat(_promo_FirstPayment_Item,_s)" />
+          <Activate ActionID="promo_PurchaseBuffer" />
+        </Button>
+        <Button Type="Left" Color="Red" Text="dlgLaterBtn" >
+          <Dialog Type="Multiline" Title="dlgSpecialOfferTitle" Image="?Item(_promo_FirstPayment_Item).Image">
+            <Line Text="dlgFirstPaymentRefusal">
+              <Timer Name="Timer_FirstPayment" />
+            </Line>
+            <Button Type="Right" Color="Beige" Text="dlgStoryBtnOk" />
+          </Dialog>
+          <Fight Name="_$Fight" />
+        </Button>
+      </Dialog>
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_FirstPayment_OnPress" Unresumable="1">
+    <Events>
+      <MapButtonPress />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ButtonName" Value2="Button_FirstPayment" />
+    </Conditions>
+    <Actions>
+      <Dialog Type="Multiline" Title="dlgSpecialOfferTitle" Image="?Item(_promo_FirstPayment_Item).Image">
+        <Line Text="dlgFirstPaymentOffer{?Concat(%,_promo_FirstPayment_Item}{?Multi(?Sub(_promo_Multiplier,1),100)}"/>
+        <PriceLine Text="dlgProfitablePrice{textures/misc/ruby.png}{?Multi(_promo_Multiplier,?Item(_promo_FirstPayment_Item).RecieveBonus)}{?Item(_promo_FirstPayment_Item).RealPrice}" TextColor="0xfefe95" />
+        <Button Type="Right" Color="Green" Text="dlgBuyButton">
+          <SetVariable Name="promo_PurchasedItemBuffer" Value="_promo_FirstPayment_Item" />
+          <SetVariable Name="promo_PurchasedBufferItemToPurchase" Value="?Concat(_promo_FirstPayment_Item,_s)" />
+          <Activate ActionID="promo_PurchaseBuffer" />
+        </Button>
+        <Button Type="Left" Color="Red" Text="dlgLaterBtn" >
+          <Dialog Type="Multiline" Title="dlgSpecialOfferTitle" Image="?Item(_promo_FirstPayment_Item).Image">
+            <Line Text="dlgFirstPaymentRefusal">
+              <Timer Name="Timer_FirstPayment" />
+            </Line>
+            <Button Type="Right" Color="Beige" Text="dlgStoryBtnOk" />
+          </Dialog>
+        </Button>
+      </Dialog>
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_FirstPayment_OnRestart" Priority="10" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="PseudoSessionStart" />
+      <Greater Value1="?Timer(Timer_FirstPayment).Value" Value2="0" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_promo_FirstPayment_Item" NewAmount="?Multi(_promo_Multiplier,?Item(_promo_FirstPayment_Item).RecieveBonus)" Period="?Timer(Timer_FirstPayment).Value" Toggle="1" />
+      <Dialog Type="Multiline" Title="dlgSpecialOfferTitle" Image="?Item(_promo_FirstPayment_Item).Image">
+        <Line Text="dlgFirstPaymentOffer{?Concat(%,_promo_FirstPayment_Item}{?Multi(?Sub(_promo_Multiplier,1),100)}"/>
+        <PriceLine Text="dlgProfitablePrice{textures/misc/ruby.png}{?Multi(_promo_Multiplier,?Item(_promo_FirstPayment_Item).RecieveBonus)}{?Item(_promo_FirstPayment_Item).RealPrice}" TextColor="0xfefe95" />
+        <Button Type="Right" Color="Green" Text="dlgBuyButton">
+          <SetVariable Name="promo_PurchasedItemBuffer" Value="_promo_FirstPayment_Item" />
+          <SetVariable Name="promo_PurchasedBufferItemToPurchase" Value="?Concat(_promo_FirstPayment_Item,_s)" />
+          <Activate ActionID="promo_PurchaseBuffer" />
+        </Button>
+        <Button Type="Left" Color="Red" Text="dlgLaterBtn" >
+          <Dialog Type="Multiline" Title="dlgSpecialOfferTitle" Image="?Item(_promo_FirstPayment_Item).Image">
+            <Line Text="dlgFirstPaymentRefusal">
+              <Timer Name="Timer_FirstPayment" />
+            </Line>
+            <Button Type="Right" Color="Beige" Text="dlgStoryBtnOk" />
+          </Dialog>
+        </Button>
+      </Dialog>
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_FirstPayment_Bought" Priority="5">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Greater Value1="?Timer(Timer_FirstPayment).Value" Value2="0" />
+      <Operator Type="Or">
+        <Equal Value1="?Item(_$Purchase).SubType" Value2="Gold" />
+        <Equal Value1="?Item(_$Purchase).SubType" Value2="Bonus" />
+      </Operator>
+    </Conditions>
+    <Actions>
+      <Discount Item="_promo_FirstPayment_Item" Toggle="0" />
+      <EndTimer Name="Timer_FirstPayment"/>
+      <HideMapButton Name="Button_FirstPayment"/>
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_FirstPayment_Dismiss">
+    <Events>
+      <TimerEnd />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$TimerName" Value2="Timer_FirstPayment" />
+    </Conditions>
+    <Actions>
+      <HideMapButton Name="Button_FirstPayment"/>
+    </Actions>
+  </Quest>
+
+<!-- Payment Repeat Promotion -->
+
+  <Quest Name="FindRepeatPaymentItem">
+    <Conditions>
+      <Equal Value1="?Item(_$Iterator).SubType" Value2="?Item(_LastRealPurchase).SubType" />
+      <Equal Value1="?Slice(_$Iterator,0,5)" Value2="?Slice(_LastRealPurchase,0,5)" />
+      <Equal Value1="?Item(_$Iterator).Availability" Value2="1" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="LastRealPurchase" Value="_$Iterator" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_RepeatPayment_IntermissionChestRemoval" Priority="995" >
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Operator Type="Or">
+        <Equal Value1="_$ActionID" Value2="IntermissionChestRemoval" />
+        <Equal Value1="_$ActionID" Value2="Intermission_Denomination" />
+      </Operator>
+      <Greater Value1="?Fight(ZONE_6|BOSS_SAMURAI|6).WinCount" Value2="0" />
+      <Equal Value1="?Item(_LastRealPurchase).Name" Value2="Chest_Coins_6" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="LastRealPurchase" Value="Bag_Coins_Platinum" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_RepeatPayment_SessionStart_Gold" Priority="10" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Operator Type="Or">
+        <Operator Type="And">
+          <Equal Value1="_$ActionID" Value2="PseudoSessionStart" />
+          <Greater Not="1" Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+        </Operator>
+        <Operator Type="And">
+          <Equal Value1="_$ActionID" Value2="Intermission_Denomination" />
+          <Greater Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+        </Operator>
+      </Operator>
+      <Operator Type="And" Not="1">
+        <Greater Value1="?Fight(ZONE_6|BOSS_SAMURAI|6).WinCount" Value2="0" />
+        <Equal Value1="?Item(_LastRealPurchase).Name" Value2="Chest_Coins_6" />
+      </Operator>
+      <Greater Value1="_DiscipleFlag" Value2="0" />
+      <GreaterEqual Value1="?Sub(?SysInfo().Time,_LastRealPurchaseTime)" Value2="345600" />
+      <Greater Not="1" Value1="?Timer(Timer_FirstPayment).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_StarterPack).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_IncreasePayment).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(sale_Timer).Value" Value2="0" />
+      <Equal Value1="?Item(_LastRealPurchase).SubType" Value2="Gold" />
+      <Greater Not="1" Value1="_RepeatPaymentOffered" Value2="0" />
+    </Conditions>
+    <Actions>
+      <Foreach Type="PaidItems" Name="FindRepeatPaymentItem" />
+<!--      <Foreach Type="PaidItems" Name="FindRepeatPaymentItem" />
+      <Discount Item="_LastRealPurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_LastRealPurchase).RecieveGold)" Period="?Timer(Timer_RepeatPayment).Value" Toggle="1" />-->
+      <ActivateTimer Name="Timer_RepeatPayment" Value="1800" />
+      <ShowMapButton Name="Button_RepeatPayment" Image="?Item(_LastRealPurchase).Image" Timer="Timer_RepeatPayment" />
+      <Activate ActionID="IntermissionChestRemoval" />
+      <Activate ActionID="RepeatPaymentDialog" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_RepeatPayment_SessionStart_Ruby" Priority="10" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Operator Type="Or">
+        <Operator Type="And">
+          <Equal Value1="_$ActionID" Value2="PseudoSessionStart" />
+          <Greater Not="1" Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+        </Operator>
+        <Operator Type="And">
+          <Equal Value1="_$ActionID" Value2="Intermission_Denomination" />
+          <Greater Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+        </Operator>
+      </Operator>
+      <Greater Value1="_DiscipleFlag" Value2="0" />
+      <GreaterEqual Value1="?Sub(?SysInfo().Time,_LastRealPurchaseTime)" Value2="345600" />
+      <Greater Not="1" Value1="?Timer(Timer_FirstPayment).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_StarterPack).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_IncreasePayment).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(sale_Timer).Value" Value2="0" />
+      <Equal Value1="?Item(_LastRealPurchase).SubType" Value2="Bonus" />
+      <Greater Not="1" Value1="_RepeatPaymentOffered" Value2="0" />
+    </Conditions>
+    <Actions>
+      <Foreach Type="PaidItems" Name="FindRepeatPaymentItem" />
+<!--      <Foreach Type="PaidItems" Name="FindRepeatPaymentItem" />
+      <Discount Item="_LastRealPurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_LastRealPurchase).RecieveBonus)" Period="?Timer(Timer_RepeatPayment).Value" Toggle="1" />-->
+      <ActivateTimer Name="Timer_RepeatPayment" Value="1800" />
+      <ShowMapButton Name="Button_RepeatPayment" Image="?Item(_LastRealPurchase).Image" Timer="Timer_RepeatPayment" />
+      <Activate ActionID="RepeatPaymentDialog" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_RepeatPayment_Press" Unresumable="1">
+    <Events>
+      <MapButtonPress />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ButtonName" Value2="Button_RepeatPayment" />
+    </Conditions>
+    <Actions>
+      <Foreach Type="PaidItems" Name="FindRepeatPaymentItem" />
+      <Activate ActionID="RepeatPaymentDialog" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_RepeatPayment_OnRestart" Priority="10" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="PseudoSessionStart" />
+      <Greater Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+    </Conditions>
+    <Actions>
+      <Foreach Type="PaidItems" Name="FindRepeatPaymentItem" />
+      <Activate ActionID="RepeatPaymentDialog" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="RepeatPaymentDialogGold" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="RepeatPaymentDialog" />
+      <Equal Value1="?Item(_LastRealPurchase).SubType" Value2="Gold" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_LastRealPurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_LastRealPurchase).RecieveGold)" Period="?Timer(Timer_RepeatPayment).Value" Toggle="1" />
+      <Dialog Type="Multiline" Title="dlgSpecialOfferTitle" Image="?Item(_LastRealPurchase).Image">
+        <Line Text="dlgRepeatPaymentOffer_Gold{?Concat(%,_LastRealPurchase)}{?Multi(?Sub(_promo_Multiplier,1),100)}">
+          <Timer Name="Timer_RepeatPayment" />
+        </Line>
+        <PriceLine Text="dlgProfitablePrice{?Concat(textures/misc/,?Player().CoinIcon)}{?Multi(_promo_Multiplier,?Item(_LastRealPurchase).RecieveGold)}{?Item(_LastRealPurchase).RealPrice}" TextColor="0xfefe95" />
+        <Button Type="Right" Color="Green" Text="dlgBuyButton">
+          <BuyItem Name="_LastRealPurchase" Currency="Real" />
+        </Button>
+        <Button Type="Left" Color="Red" Text="dlgLaterBtn" />
+      </Dialog>
+    </Actions>
+  </Quest>
+
+  <Quest Name="RepeatPaymentDialogRuby" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="RepeatPaymentDialog" />
+      <Equal Value1="?Item(_LastRealPurchase).SubType" Value2="Bonus" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_LastRealPurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_LastRealPurchase).RecieveBonus)" Period="?Timer(Timer_RepeatPayment).Value" Toggle="1" />
+      <Dialog Type="Multiline" Title="dlgSpecialOfferTitle" Image="?Item(_LastRealPurchase).Image">
+        <Line Text="dlgRepeatPaymentOffer_Ruby{?Concat(%,_LastRealPurchase)}{?Multi(?Sub(_promo_Multiplier,1),100)}">
+          <Timer Name="Timer_RepeatPayment" />
+        </Line>
+        <PriceLine Text="dlgProfitablePrice{?Concat(textures/misc/ruby.png)}{?Multi(_promo_Multiplier,?Item(_LastRealPurchase).RecieveBonus)}{?Item(_LastRealPurchase).RealPrice}" TextColor="0xfefe95" />
+        <Button Type="Right" Color="Green" Text="dlgBuyButton">
+          <SetVariable Name="promo_PurchasedItemBuffer" Value="_LastRealPurchase" />
+          <SetVariable Name="promo_PurchasedBufferItemToPurchase" Value="?Concat(_LastRealPurchase,_s)" />
+          <Activate ActionID="promo_PurchaseBuffer" />
+        </Button>
+        <Button Type="Left" Color="Red" Text="dlgLaterBtn" />
+      </Dialog>
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_RepeatPayment_Bought" Priority="5">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Greater Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+      <Operator Type="Or">
+        <Equal Value1="?Item(_$Purchase).SubType" Value2="Gold" />
+        <Equal Value1="?Item(_$Purchase).SubType" Value2="Bonus" />
+      </Operator>
+    </Conditions>
+    <Actions>
+      <SetVariable Name="RepeatPaymentOffered" Value="1" />
+      <Discount Item="_LastRealPurchase" Toggle="0" />
+      <EndTimer Name="Timer_RepeatPayment"/>
+      <HideMapButton Name="Button_RepeatPayment"/>
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_RepeatPayment_Dismiss">
+    <Events>
+      <TimerEnd />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$TimerName" Value2="Timer_RepeatPayment" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="RepeatPaymentOffered" Value="1" />
+      <Discount Item="_LastRealPurchase" Toggle="0" />
+      <HideMapButton Name="Button_RepeatPayment"/>
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_RepeatPayment_IntermissionChestRemove" Priority="995" >
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="Intermission_Denomination" />
+      <Equal Value1="_LastRealPurchase" Value2="Chest_Coins_6" />
+      <Greater Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_LastRealPurchase" Toggle="0" />
+      <HideMapButton Name="Button_RepeatPayment"/>
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_RepeatPayment_ZoneSwitch" Priority="995" >
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Operator Type="Or">
+        <Equal Value1="_$ActionID" Value2="ZoneSwitch" />
+        <Equal Value1="_$ActionID" Value2="Intermission_Denomination" />
+      </Operator>
+      <Equal Not="1" Value1="_LastRealPurchase" Value2="Chest_Coins_6" />
+      <Greater Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+      <Equal Value1="?Item(_LastRealPurchase).SubType" Value2="Gold" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_LastRealPurchase" Toggle="0" />
+      <HideMapButton Name="Button_RepeatPayment"/>
+      <Foreach Type="PaidItems" Name="FindRepeatPaymentItem" />
+      <Discount Item="_LastRealPurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_LastRealPurchase).RecieveGold)" Period="?Timer(Timer_RepeatPayment).Value" Toggle="1" />
+      <ShowMapButton Name="Button_RepeatPayment" Image="?Item(_LastRealPurchase).Image" Timer="Timer_RepeatPayment" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_RepeatPayment_ZoneSwitch_Bonus" Priority="995" >
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="ZoneSwitch" />
+      <Greater Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+      <Equal Value1="?Item(_LastRealPurchase).SubType" Value2="Bonus" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_LastRealPurchase" Toggle="0" />
+      <HideMapButton Name="Button_RepeatPayment"/>
+      <Foreach Type="PaidItems" Name="FindRepeatPaymentItem" />
+      <Discount Item="_LastRealPurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_LastRealPurchase).RecieveBonus)" Period="?Timer(Timer_RepeatPayment).Value" Toggle="1" />
+      <ShowMapButton Name="Button_RepeatPayment" Image="?Item(_LastRealPurchase).Image" Timer="Timer_RepeatPayment" />
+    </Actions>
+  </Quest>
+
+<!-- Payment Increase Promotion --> 
+  
+  <Quest Name="promo_IncreasePayment_OnPurchase">
+    <Events>
+      <PrePurchase />
+    </Events>
+    <Conditions>
+      <GreaterEqual Value1="?Fight(ZONE_1|Tournament|5).WinCount" Value2="1" />
+      <Greater Value1="?UniformIntRandom(1,100)" Value2="50" />
+      <Greater Value1="_DiscipleFlag" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_RepeatPayment).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_StarterPack).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_FirstPayment).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(Timer_IncreasePayment).Value" Value2="0" />
+      <Greater Not="1" Value1="?Timer(sale_Timer).Value" Value2="0" />
+      <Operator Type="And">
+        <Operator Type="Or">
+          <Operator Type="And">
+            <Equal Value1="_$Purchase" Value2="Pile_Gems" />
+            <Equal Value1="_Show_Promo_Pile_Gems" Value2="1" />
+          </Operator>
+          <Operator Type="And">
+            <Equal Value1="?Slice(_$Purchase,0,10)" Value2="Casket_Gems" />
+            <Equal Value1="_Show_Promo_Casket_Gems" Value2="1" />
+          </Operator>
+          <Operator Type="And">
+            <Equal Value1="?Slice(_$Purchase,0,7)" Value2="Bag_Gems" />
+            <Equal Value1="_Show_Promo_Bag_Gems" Value2="1" />
+          </Operator>
+<!--          <Operator Type="And">
+            <Equal Value1="?Slice(_$Purchase,0,9)" Value2="Chest_Gems" />
+            <Equal Value1="_Show_Promo_Chest_Gems" Value2="1" />
+          </Operator>-->
+          <Operator Type="And">
+            <Equal Value1="?Slice(_$Purchase,0,9)" Value2="Pile_Coins" />
+            <Equal Value1="_Show_Promo_Pile_Coins" Value2="1" />
+          </Operator>
+          <Operator Type="And">
+            <Equal Value1="?Slice(_$Purchase,0,8)" Value2="Bag_Coins" />
+            <Equal Value1="_Show_Promo_Bag_Coins" Value2="1" />
+          </Operator>
+        </Operator>
+        <Operator Type="Or">
+          <Operator Type="And">
+            <Equal Value1="?Item(_$Purchase).SubType" Value2="Bonus" />
+            <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Greater" />
+          </Operator>
+          <Operator Type="And">
+            <Equal Not="1" Value1="?Slice(_promo_IncreasePayment_Item_Gold,0,12)" Value2="Greater_Coins" />
+            <Equal Value1="?Item(_$Purchase).SubType" Value2="Gold" />
+          </Operator>
+        </Operator>
+      </Operator>
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_PrePurchase" Value="_$Purchase" />
+      <Activate ActionID="IncreasePayment_Launch" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="Unlock_Promo_Pile_Gems" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,8)" Value2="Pile_Gems" />
+      <Equal Not="1" Value1="_Show_Promo_Pile_Gems" Value2="1" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="Show_Promo_Pile_Gems" Value="1" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="Unlock_Promo_Casket_Gems" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,10)" Value2="Casket_Gems" />
+      <Equal Not="1" Value1="_Show_Promo_Casket_Gems" Value2="1" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="Show_Promo_Casket_Gems" Value="1" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="Unlock_Promo_Bag_Gems" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,7)" Value2="Bag_Gems" />
+      <Equal Not="1" Value1="_Show_Promo_Bag_Gems" Value2="1" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="Show_Promo_Bag_Gems" Value="1" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="Unlock_Promo_Chest_Gems" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,9)" Value2="Chest_Gems" />
+      <Equal Not="1" Value1="_Show_Promo_Chest_Gems" Value2="1" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="Show_Promo_Chest_Gems" Value="1" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="Unlock_Promo_Pile_Coins" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,9)" Value2="Pile_Coins" />
+      <Equal Not="1" Value1="_Show_Promo_Pile_Coins" Value2="1" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="Show_Promo_Pile_Coins" Value="1" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="Unlock_Promo_Bag_Coins" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,8)" Value2="Bag_Coins" />
+      <Equal Not="1" Value1="_Show_Promo_Bag_Coins" Value2="1" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="Show_Promo_Bag_Coins" Value="1" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="FindNextGradePaidItem_Pile_Gems" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$Purchase" Value2="Pile_Gems" />
+      <Equal Not="1" Value1="_Shroud_Loss" Value2="1" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Bag_Gems" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Chest_Gems" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Greater" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Bonus" Value="Casket_Gems" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="FindNextGradePaidItem_Pile_Gems_Zone7" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$Purchase" Value2="Pile_Gems" />
+      <Equal Value1="_Shroud_Loss" Value2="1" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Bag_Gems" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Chest_Gems" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Greater" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Bonus" Value="Casket_Gems_Zone7" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="FindNextGradePaidItem_Casket_Gems" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,10)" Value2="Casket_Gems" />
+      <Equal Not="1" Value1="_Shroud_Loss" Value2="1" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Chest_Gems" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Greater" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Bonus" Value="Bag_Gems" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="FindNextGradePaidItem_Casket_Gems_Zone7" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,10)" Value2="Casket_Gems" />
+      <Equal Value1="_Shroud_Loss" Value2="1" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Chest_Gems" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Greater" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Bonus" Value="Bag_Gems_Zone7" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="FindNextGradePaidItem_Bag_Gems" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,7)" Value2="Bag_Gems" />
+      <Equal Not="1" Value1="_Shroud_Loss" Value2="1" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Greater" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Bonus" Value="Chest_Gems" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="FindNextGradePaidItem_Bag_Gems_Zone7" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,7)" Value2="Bag_Gems" />
+      <Equal Value1="_Shroud_Loss" Value2="1" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Greater" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Bonus" Value="Chest_Gems_Zone7" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="FindNextGradePaidItem_Chest_Gems" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,9)" Value2="Chest_Gems" />
+      <Equal Not="1" Value1="_promo_IncreasePayment_Item_Bonus" Value2="Greater" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Bonus" Value="Greater" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="FindNextGradePaidItem_Pile_Coins" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,9)" Value2="Pile_Coins" />
+      <Equal Not="1" Value1="?Slice(_promo_IncreasePayment_Item_Gold,0,8)" Value2="Bag_Coins" />
+      <Equal Not="1" Value1="?Slice(_promo_IncreasePayment_Item_Gold,0,10)" Value2="Chest_Coins" />
+      <Equal Not="1" Value1="?Slice(_promo_IncreasePayment_Item_Gold,0,12)" Value2="Greater_Coins" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Gold" Value="?Concat(Bag,?Slice(_$Purchase,4,25))" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="FindNextGradePaidItem_Bag_Coins" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,8)" Value2="Bag_Coins" />
+      <Equal Not="1" Value1="?Slice(_$Purchase,0,10)" Value2="Bag_Coins_P" />
+      <Equal Not="1" Value1="?Slice(_promo_IncreasePayment_Item_Gold,0,10)" Value2="Chest_Coins" />
+      <Equal Not="1" Value1="?Slice(_promo_IncreasePayment_Item_Gold,0,12)" Value2="Greater_Coins" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Gold" Value="?Concat(Chest,?Slice(_$Purchase,3,25))" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="FindNextGradePaidItem_Bag_Coins" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,10)" Value2="Bag_Coins_P" />
+      <Equal Not="1" Value1="?Slice(_promo_IncreasePayment_Item_Gold,0,12)" Value2="Greater_Coins" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Gold" Value="?Concat(Greater,?Slice(_$Purchase,3,25))" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="FindNextGradePaidItem_Chest_Coins" Unresumable="1">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Slice(_$Purchase,0,10)" Value2="Chest_Coins" />
+      <Equal Not="1" Value1="?Slice(_promo_IncreasePayment_Item_Gold,0,12)" Value2="Greater_Coins" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_IncreasePayment_Item_Gold" Value="?Concat(Greater,?Slice(_$Purchase,5,25))" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_IncreasePayment_Bonus_Launch" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="IncreasePayment_Launch" />
+      <Equal Value1="?Item(_promo_PrePurchase).SubType" Value2="Bonus" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_SalePurchase" Value="_promo_IncreasePayment_Item_Bonus" />
+      <ActivateTimer Name="Timer_IncreasePayment" Value="1800" />
+      <ShowMapButton Name="Button_IncreasePayment" Image="?Item(_promo_IncreasePayment_Item_Bonus).Image" Timer="Timer_IncreasePayment" />
+      <OpenShop Tab="Ruby" Item="_promo_IncreasePayment_Item_Bonus" />
+      <Activate ActionID="IncreasePayment_Offer" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_IncreasePayment_Gold_Launch" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="IncreasePayment_Launch" />
+      <Equal Value1="?Item(_promo_PrePurchase).SubType" Value2="Gold" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_SalePurchase" Value="_promo_IncreasePayment_Item_Gold" />
+      <ActivateTimer Name="Timer_IncreasePayment" Value="1800" />
+      <ShowMapButton Name="Button_IncreasePayment" Image="?Item(_promo_IncreasePayment_Item_Gold).Image" Timer="Timer_IncreasePayment" />
+      <OpenShop Tab="Ruby" Item="_promo_IncreasePayment_Item_Gold" />
+      <Activate ActionID="IncreasePayment_Offer" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_IncreasePayment_OnPress">
+    <Events>
+      <MapButtonPress />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ButtonName" Value2="Button_IncreasePayment" />
+    </Conditions>
+    <Actions>
+      <Activate ActionID="IncreasePayment_Offer" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_IncreasePayment_OnRestart" Priority="10" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="PseudoSessionStart" />
+      <Greater Value1="?Timer(Timer_IncreasePayment).Value" Value2="0" />
+    </Conditions>
+    <Actions>
+      <Activate ActionID="IncreasePayment_Offer" />
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_IncreasePayment_Offer_Gold" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="IncreasePayment_Offer" />
+      <Equal Value1="?Item(_promo_PrePurchase).SubType" Value2="Gold" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_promo_SalePurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_promo_SalePurchase).RecieveGold)" Period="?Timer(Timer_IncreasePayment).Value" Toggle="1" />
+      <Dialog Type="Multiline" Title="dlgSpecialOfferTitle" Image="?Item(_promo_SalePurchase).Image">
+        <Line Text="dlgRepeatPaymentOffer_Gold{?Concat(%,_promo_SalePurchase)}{?Multi(?Sub(_promo_Multiplier,1),100)}">
+          <Timer Name="Timer_IncreasePayment" />
+        </Line>
+        <PriceLine Text="dlgProfitablePrice{?Concat(textures/misc/,?Player().CoinIcon)}{?Multi(_promo_Multiplier,?Item(_promo_SalePurchase).RecieveGold)}{?Item(_promo_SalePurchase).RealPrice}" TextColor="0xfefe95" />
+        <Button Type="Right" Color="Green" Text="dlgBuyButton">
+          <BuyItem Name="_promo_SalePurchase" Currency="Real" />
+        </Button>
+        <Button Type="Left" Color="Red" Text="dlgLaterBtn" />
+      </Dialog>
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_IncreasePayment_Offer_Ruby" Unresumable="1">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="IncreasePayment_Offer" />
+      <Equal Value1="?Item(_promo_PrePurchase).SubType" Value2="Bonus" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_promo_SalePurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_promo_SalePurchase).RecieveBonus)" Period="?Timer(Timer_IncreasePayment).Value" Toggle="1" />
+      <Dialog Type="Multiline" Title="dlgSpecialOfferTitle" Image="?Item(_promo_SalePurchase).Image">
+        <Line Text="dlgRepeatPaymentOffer_Ruby{?Concat(%,_promo_SalePurchase)}{?Multi(?Sub(_promo_Multiplier,1),100)}">
+          <Timer Name="Timer_IncreasePayment" />
+        </Line>
+        <PriceLine Text="dlgProfitablePrice{?Concat(textures/misc/ruby.png)}{?Multi(_promo_Multiplier,?Item(_promo_SalePurchase).RecieveBonus)}{?Item(_promo_SalePurchase).RealPrice}" TextColor="0xfefe95" />
+        <Button Type="Right" Color="Green" Text="dlgBuyButton">
+          <SetVariable Name="promo_PurchasedItemBuffer" Value="_promo_SalePurchase" />
+          <SetVariable Name="promo_PurchasedBufferItemToPurchase" Value="?Concat(_promo_SalePurchase,_s)" />
+          <Activate ActionID="promo_PurchaseBuffer" />
+        </Button>
+        <Button Type="Left" Color="Red" Text="dlgLaterBtn" />
+      </Dialog>
+    </Actions>
+  </Quest>
+
+  <Quest Name="promo_IncreasePayment_Bought" Priority="5">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Greater Value1="?Timer(Timer_IncreasePayment).Value" Value2="0" />
+      <Operator Type="Or">
+        <Equal Value1="?Item(_$Purchase).SubType" Value2="Bonus" />
+        <Equal Value1="?Item(_$Purchase).SubType" Value2="Gold" />
+      </Operator>
+    </Conditions>
+    <Actions>
+      <Discount Item="_promo_SalePurchase" Toggle="0" />
+      <EndTimer Name="Timer_IncreasePayment"/>
+      <HideMapButton Name="Button_IncreasePayment"/>
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_IncreasePayment_Dismiss">
+    <Events>
+      <TimerEnd />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$TimerName" Value2="Timer_IncreasePayment" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_promo_SalePurchase" Toggle="0" />
+      <HideMapButton Name="Button_IncreasePayment"/>
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_IncreasePayment_IntermissionChestRemove" Priority="995" >
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="Intermission_Denomination" />
+      <Equal Value1="_promo_SalePurchase" Value2="Chest_Coins_6" />
+      <Greater Value1="?Timer(Timer_IncreasePayment).Value" Value2="0" />
+    </Conditions>
+    <Actions>
+      <Discount Item="Chest_Coins_6" Toggle="0" />
+      <SetVariable Name="promo_SalePurchase" Value="Bag_Coins_Platinum" />
+      <HideMapButton Name="Button_IncreasePayment"/>
+      <ShowMapButton Name="Button_IncreasePayment" Image="?Item(_promo_SalePurchase).Image" Timer="Timer_IncreasePayment" />
+      <Discount Item="_promo_SalePurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_promo_SalePurchase).RecieveGold)" Period="?Timer(Timer_IncreasePayment).Value" Toggle="1" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_IncreasePayment_ZoneSwitch" Priority="995" >
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Operator Type="Or">
+        <Equal Value1="_$ActionID" Value2="ZoneSwitch" />
+        <Equal Value1="_$ActionID" Value2="Intermission_Denomination" />
+      </Operator>
+      <Equal Not="1" Value1="_promo_SalePurchase" Value2="Chest_Coins_6" />
+      <Greater Value1="?Timer(Timer_IncreasePayment).Value" Value2="0" />
+      <Equal Value1="?Item(_promo_SalePurchase).SubType" Value2="Gold" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_promo_SalePurchase" Toggle="0" />
+      <HideMapButton Name="Button_IncreasePayment"/>
+      <Foreach Type="PaidItems" Name="FindSameGradeItem" />
+      <ShowMapButton Name="Button_IncreasePayment" Image="?Item(_promo_SalePurchase).Image" Timer="Timer_IncreasePayment" />
+      <Discount Item="_promo_SalePurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_promo_SalePurchase).RecieveGold)" Period="?Timer(Timer_IncreasePayment).Value" Toggle="1" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="promo_IncreasePayment_ZoneSwitchBonus" Priority="995" >
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="ZoneSwitch" />
+      <Greater Value1="?Timer(Timer_IncreasePayment).Value" Value2="0" />
+      <Equal Value1="?Item(_promo_SalePurchase).SubType" Value2="Bonus" />
+    </Conditions>
+    <Actions>
+      <Discount Item="_promo_SalePurchase" Toggle="0" />
+      <HideMapButton Name="Button_IncreasePayment"/>
+      <Foreach Type="PaidItems" Name="FindSameGradeItem" />
+      <ShowMapButton Name="Button_IncreasePayment" Image="?Item(_promo_SalePurchase).Image" Timer="Timer_IncreasePayment" />
+      <Discount Item="_promo_SalePurchase" NewAmount="?Multi(_promo_Multiplier,?Item(_promo_SalePurchase).RecieveBonus)" Period="?Timer(Timer_IncreasePayment).Value" Toggle="1" />
+    </Actions>
+  </Quest>
+  
+  <Quest Name="FindSameGradeItem">
+    <Conditions>
+      <Equal Value1="?Item(_$Iterator).SubType" Value2="?Item(_promo_SalePurchase).SubType" />
+      <Equal Value1="?Slice(_$Iterator,0,5)" Value2="?Slice(_promo_SalePurchase,0,5)" />
+      <Equal Value1="?Item(_$Iterator).Availability" Value2="1" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="promo_SalePurchase" Value="_$Iterator" />
+    </Actions>
+  </Quest>
+  
+  <!-- KUSARIGAMA PROMO -->
+  <Quest Name="KusarigamaDiscountLaunch">
+    <Events>
+      <FightEnd />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$Fight" Value2="ZONE_2|Tournament|1" />
+      <Equal Value1="_$FightResult" Value2="Win" />
+      <Greater Not="1" Value1="?Item(WEAPON_SUPER_KUSARIGAMA).Quantity" Value2="0" />
+      <Greater Not="1" Value1="_DiscipleFlag" Value2="0" />
+      <Greater Not="1" Value1="_KusarigamaDiscountLevel" Value2="0" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="DiscountType" Value="Regular" />
+      <SetVariable Name="DiscountItem" Value="WEAPON_SUPER_KUSARIGAMA" />
+      <SetVariable Name="DiscountItemFinal" Value="WEAPON_SUPER_KUSARIGAMA" />
+      <SetVariable Name="KusarigamaDiscountLevel" Value="?Player().Level" />
+      <Discount Item="WEAPON_SUPER_KUSARIGAMA" Percent="30" Toggle="1" />
+      <Dialog Type="Multiline" Title="_Title_Assistant" Image="_Avatar_Assistant_1">
+        <Line Text="blank{?Concat(discount1,_DiscountType,Weapon,Offer)}" ButtonText="dlgStoryBtnMore" />
+        <Button Type="Right" Color="Beige" Text="dlgStoryBtnShowme">
+          <OpenShop Tab="Weapon" Item="WEAPON_SUPER_KUSARIGAMA" />
+        </Button>
+        <Button Type="Left" Color="Red" Text="dlgStoryBtnNothanks" />
+      </Dialog>
+    </Actions>
+  </Quest>
+
+  <Quest Name="KusarigamaDiscount">
+    <Events>
+      <Activate />
+    </Events>
+    <Conditions>
+      <Equal Value1="_$ActionID" Value2="PseudoSessionStart" />
+      <Greater Not="1" Value1="?Item(WEAPON_SUPER_KUSARIGAMA).Quantity" Value2="0" />
+      <Equal Value1="?Player().Level" Value2="_KusarigamaDiscountLevel" />
+      <Greater Value1="_KusarigamaDiscountLevel" Value2="0" />
+    </Conditions>
+    <Actions>
+      <SetVariable Name="DiscountType" Value="Regular" />
+      <SetVariable Name="DiscountItem" Value="WEAPON_SUPER_KUSARIGAMA" />
+      <SetVariable Name="DiscountItemFinal" Value="WEAPON_SUPER_KUSARIGAMA" />
+      <Dialog Type="Multiline" Title="_Title_Assistant" Image="_Avatar_Assistant_1">
+        <Line Text="discount1OnGameEnter" ButtonText="dlgStoryBtnMore" />
+        <Button Type="Right" Color="Beige" Text="dlgStoryBtnShowme">
+          <Discount Item="WEAPON_SUPER_KUSARIGAMA" Percent="30" Toggle="1" />
+          <OpenShop Tab="Weapon" Item="WEAPON_SUPER_KUSARIGAMA" />
+          <ClearQuestQueue Name="FightsLeft" />
+          <ClearQuestQueue Name="ScriptsResumeOnStart" />
+        </Button>
+        <Button Type="Left" Color="Red" Text="dlgStoryBtnCancel"/>
+      </Dialog>
+    </Actions>
+  </Quest>
+
+  <Quest Name="KusarigamaBought">
+    <Events>
+      <Purchase />
+    </Events>
+    <Conditions>
+      <Equal Value1="?Purchase(_$Purchase).Name" Value2="WEAPON_SUPER_KUSARIGAMA" />
+      <Greater Value1="_KusarigamaDiscountLevel" Value2="0" />
+      <Equal Value1="?Player().Level" Value2="_KusarigamaDiscountLevel" />
+      <Equal Value1="?Purchase(_$Purchase).UpgradeLevel" Value2="600" />
+    </Conditions>
+    <Actions>
+      <GiveItem Name="WEAPON_SUPER_KUSARIGAMA" Quantity="-1" />
+      <GiveItem Name="?Concat(WEAPON_SUPER_KUSARIGAMA|,?Sum(?Multi(100,?Player().Level)))" PutOn="1" Quantity="1" />
+      <UpdateScene />
+    </Actions>
+  </Quest>
+</Quests>
