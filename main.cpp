@@ -2289,9 +2289,18 @@ private:
         // For non-looping animations that have finished, don't interpolate
         // with frame 0 (which would cause wrap-around and backward movement).
         // Instead, stay exactly at the last frame.
+        //
+        // For LOOPING animations at the LAST frame, also don't interpolate
+        // with frame 0 — this causes the character to slide backward during
+        // the wrap (235→169 for step_forward). Hold at the last frame until
+        // frame_idx actually wraps to 0.
         int next_idx;
         float alpha;
         if (anim_finished) {
+            next_idx = frame_idx;
+            alpha = 0.0f;
+        } else if (anim_loop_ && frame_idx == anim.frame_count - 1) {
+            // Last frame of a looping animation: don't interpolate with frame 0
             next_idx = frame_idx;
             alpha = 0.0f;
         } else {
