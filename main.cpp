@@ -1577,10 +1577,10 @@ private:
         //   step/punch: NToe_2 ly = 64.60 (combat stance → feet on floor)
         // We use the step animation as reference (looks correct).
         // Adjustment = (reference_ly - current_ly) where reference_ly = 64.60.
-        // SMOOTH the adjustment to prevent visual jumps when switching animations.
         //
-        // For jump/air animations: DISABLE Y normalization so the character
-        // actually leaves the ground (root motion Y is applied via jump_y_offset_).
+        // For jump/air animations: DISABLE Y normalization (target=0) so the
+        // character actually leaves the ground. Use INSTANT snap (not smoothed)
+        // to prevent "diving" before jump and "floating" after.
         bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                             current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                             current_anim_ == "back_handflip");
@@ -1590,8 +1590,13 @@ private:
         }
         const float REF_FEET_LY = 64.60f;
         float target_y_adjust = is_jump_anim ? 0.0f : (REF_FEET_LY - ly_lowest);
-        // Smoothly interpolate y_adjust to prevent jitter on animation switch
-        y_adjust_smoothed_ += (target_y_adjust - y_adjust_smoothed_) * 0.15f;
+        if (is_jump_anim) {
+            // Instant snap for jump — no smoothing (prevents pre-jump dive)
+            y_adjust_smoothed_ = target_y_adjust;
+        } else {
+            // Smooth interpolation for ground animations
+            y_adjust_smoothed_ += (target_y_adjust - y_adjust_smoothed_) * 0.15f;
+        }
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_ + jump_y_offset_;
 
@@ -2269,62 +2274,56 @@ private:
 
         // Root motion: smooth interpolated delta with wrap-around detection.
         //
-        // We use the INTERPOLATED npivot_x (smooth per-frame movement).
-        // To handle loop wrap-around: when frame_idx wraps (decreases or
-        // jumps to 0 from N-1), we skip the delta for that frame and
-        // re-sync prev_npivot_x_ to the current value. This gives smooth
-        // movement AND correct total displacement per loop.
+        // X root motion: delta accumulation. We use the INTERPOLATED npivot_x
+        // for smooth per-frame movement. Wrap-around (loop) is detected when
+        // frame_idx DECREASES (e.g., 15→0). The large wrap delta (~66) is
+        // filtered by threshold 33. Delta is inverted when facing left.
         //
-        // Mirror: when facing left, the delta is inverted (character moves
-        // in the opposite direction in world space).
-        bool is_root_motion_anim = !anim_loop_ ||  // non-looping anims always get root motion
+        // Y root motion: ABSOLUTE offset from frame 0 NPivot Y (not delta).
+        // This is set once per animation (anim_root_anchor_y_) and gives
+        // jump_y_offset_ = npivot_y - anchor_y. This naturally returns to 0
+        // at the end of jump/flip animations (frame 0 == frame N-1 in Y).
+        bool is_root_motion_anim = !anim_loop_ ||
             current_anim_ == "step_forward" || current_anim_ == "step_back" ||
             current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
-            current_anim_ == "jump_away" || current_anim_ == "back_flip" ||
-            current_anim_ == "back_handflip" || current_anim_ == "front_flip" ||
+            current_anim_ == "jump" || current_anim_ == "jump_away" ||
+            current_anim_ == "back_flip" || current_anim_ == "back_handflip" ||
+            current_anim_ == "front_flip" ||
             current_anim_ == "double_punch" || current_anim_ == "spinning_punch" ||
             current_anim_ == "front_kick" || current_anim_ == "back_kick" ||
             current_anim_ == "upper_cut" || current_anim_ == "high_punch";
 
+        // X root motion: delta accumulation
         if (is_root_motion_anim) {
-            if (prev_npivot_x_ != 0.0f || prev_npivot_set_) {
+            if (prev_npivot_set_) {
                 float delta = npivot_x - prev_npivot_x_;
-                // Detect wrap-around: if frame_idx decreased or wrapped to 0
-                bool wrapped = (prev_frame_idx_ > frame_idx) ||
-                               (prev_frame_idx_ == frame_idx && anim_loop_);
+                // Wrap: ONLY when frame_idx decreased (true loop boundary).
+                // Do NOT treat "frame_idx unchanged" as wrap — that happens
+                // every other frame at 60fps render / 30fps anim and would
+                // skip valid interpolated deltas.
+                bool wrapped = (prev_frame_idx_ > frame_idx);
                 if (!wrapped && std::abs(delta) < 33.0f) {
-                    // Apply delta, inverted if facing left
                     player_pos_x_ += facing_right_ ? delta : -delta;
                 }
             }
             prev_npivot_x_ = npivot_x;
             prev_npivot_set_ = true;
-
-            // Y root motion for jumps: apply NPivot Y delta as vertical offset
-            // (but only for jump animations where Y actually changes)
-            if (current_anim_ == "jump" || current_anim_ == "jump_away" ||
-                current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
-                current_anim_ == "back_handflip") {
-                if (prev_npivot_y_set_) {
-                    float dy = npivot_y - prev_npivot_y_;
-                    // NPivot Y goes UP during jump (character leaves ground).
-                    // In our world, Y-UP is positive. Apply directly.
-                    jump_y_offset_ += dy;
-                    // Clamp: don't let jump offset go below 0 (ground)
-                    if (jump_y_offset_ < 0) jump_y_offset_ = 0;
-                }
-                prev_npivot_y_ = npivot_y;
-                prev_npivot_y_set_ = true;
-            } else {
-                // Non-jump animation: decay jump offset back to 0
-                jump_y_offset_ = 0;
-                prev_npivot_y_set_ = false;
-            }
             prev_frame_idx_ = frame_idx;
         } else {
             prev_npivot_set_ = false;
-            prev_npivot_y_set_ = false;
             prev_frame_idx_ = -1;
+        }
+
+        // Y root motion: absolute offset from frame 0 (for jumps/flips)
+        bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
+                            current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
+                            current_anim_ == "back_handflip");
+        if (is_jump_anim && anim_anchor_set_) {
+            // jump_y_offset_ = current NPivot Y - frame 0 NPivot Y
+            // This is 0 at start, rises during jump, returns to 0 at end.
+            jump_y_offset_ = npivot_y - anim_root_anchor_y_;
+        } else {
+            jump_y_offset_ = 0;
         }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
