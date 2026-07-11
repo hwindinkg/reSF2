@@ -1,0 +1,143 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<Stages>
+  <Zones>
+    <Zone Name="ZONE_RAID" FileName="Raid1">
+      <Battle Name="RAIDBOSS_FIRE_LOCKED" Alias="RAIDBOSS_FIRE_LOCKED" Title="RAIDBOSS_FIRE_LOCKED_TITLE" Icon="vulcan_raid" Preview="vulcan_raid" Type="TOURNAMENT" X="0" Y="-190" Location="vulcan_raid" Music="fight10_black_warrior">
+        <RaidData RaidID="1" Power="5" RaidSize="1" RaidTime="3660" FinalBattlePower="-10" > <!-- Special raid parameters -->
+        <Matcher BaseLimit="0.02" AutoLimitSpread="0" LimitSpreadSpeed="10" PriorityPlayerShare="0.4" PowerScaler="0.3" DefaultPlayerPower="5" />
+         <AttributesAlign>
+            <Delta Factor="0" Shift="0" Priority="1"/>
+            <Delta Factor="1" Shift="-10" Priority="1"/>
+          </AttributesAlign>
+        </RaidData>
+        <Fight Name="1" Power="0" Rounds="1" RoundTime="99" Replays="0" Locked="1" Description="space">
+          <Rewards>
+            <Reward Result="Lose"/>
+            <Reward Result="Win">
+              <Currency Drop="1" ShowReward="1" Name="Key1" ExpectedValue="1" />
+            </Reward>
+          </Rewards>
+          <Warriors>
+            <Warrior Tactic="Standard44" FirstName="NAME_KENJI" Avatar="character_disciple" Voice="Male" ShieldTotal="1000" ShieldStack="19" WarriorPower="5" WeaponDamage="5" UnarmedDamage="5" BodyDefense="5" HeadDefense="3" RangedDamage="5" MagicDamage="5" EnchantmentResistance="5" CriticalChance="1000" BlockDamageFactor="-23219" MagicPainRecharge="-10000" MagicDamageRecharge="0" ShockCriticalHitChance="0" ShockHeadHitChance="2500">
+              <AttributesAlign>
+                <Delta Factor="0" Shift="0" Priority="1"/>
+                <Delta Factor="1" Shift="-10" Priority="1"/>
+              </AttributesAlign>
+              <Perks>
+                <Perk Name="PERK_BEGINNER"/>
+              </Perks> 
+              <Items>
+                <Item Name="WEAPON_KUNAI"/>
+                <Item Name="BODY_SHIN"/>
+                <Item Name="HELM_GREEN_MASK"/>
+                <Item Name="Skeleton"/>
+              </Items>        
+            </Warrior>
+          </Warriors>
+        </Fight>
+      </Battle>
+      <Battle Name="RAIDBOSS_Stone" Alias="RAIDBOSS_Stone" Title="RAIDBOSS_Stone_Title" Icon="megalith_raid" Preview="megalith_raid" Type="TOURNAMENT" X="-350" Y="-150" Location="megalith_raid" Music="raid_crystal">
+        <RaidData RaidID="2" Power="5" RaidSize="1" RaidTime="3660" FinalBattlePower="-10" > <!-- Special raid parameters -->
+        <Matcher BaseLimit="0.02" AutoLimitSpread="0" LimitSpreadSpeed="10" PriorityPlayerShare="0.4" PowerScaler="0.3" DefaultPlayerPower="5" />
+         <AttributesAlign>
+            <Delta Factor="0" Shift="0" Priority="1"/>
+            <Delta Factor="1" Shift="-10" Priority="1"/>
+          </AttributesAlign>
+        </RaidData>
+        <Fight Name="1" Power="0" Rounds="1" RoundTime="99" Replays="0" Locked="1" Description="space">
+          <Rewards>
+            <Reward Result="Lose"/>
+            <Reward Result="Win">
+              <Currency Drop="1" ShowReward="1" Name="Key1" ExpectedValue="1"/>
+            </Reward>
+          </Rewards>
+          <Warriors>
+            <Warrior Tactic="Standard44" FirstName="NAME_KENJI" Avatar="character_disciple" Voice="Male" ShieldTotal="1000" ShieldStack="19" WarriorPower="5" WeaponDamage="5" UnarmedDamage="5" BodyDefense="5" HeadDefense="3" RangedDamage="5" MagicDamage="5" EnchantmentResistance="5" CriticalChance="1000" BlockDamageFactor="-23219" MagicPainRecharge="-10000" MagicDamageRecharge="0" ShockCriticalHitChance="0" ShockHeadHitChance="2500">
+              <AttributesAlign>
+                <Delta Factor="0" Shift="0" Priority="1"/>
+                <Delta Factor="1" Shift="-10" Priority="1"/>
+              </AttributesAlign>
+              <Perks>
+                <Perk Name="PERK_BEGINNER"/>
+              </Perks> 
+              <Items>
+                <Item Name="WEAPON_KUNAI"/>
+                <Item Name="BODY_SHIN"/>
+                <Item Name="HELM_GREEN_MASK"/>
+                <Item Name="Skeleton"/>
+              </Items>        
+            </Warrior>
+          </Warriors>
+        </Fight>
+      </Battle>
+      <Battle Name="RAIDBOSS_Mushroom" Alias="RAIDBOSS_Mushroom" Title="RAIDBOSS_Mushroom_Title" Icon="fungus_raid" Preview="fungus_raid" Type="TOURNAMENT" X="-200" Y="-10" Location="fungus_raid" Music="raid_fungus">
+        <RaidData RaidID="3" Power="5" RaidSize="1" RaidTime="3660" FinalBattlePower="-10" > <!-- Special raid parameters -->
+        <Matcher BaseLimit="0.02" AutoLimitSpread="0" LimitSpreadSpeed="10" PriorityPlayerShare="0.4" PowerScaler="0.3" DefaultPlayerPower="5" />
+         <AttributesAlign>
+            <Delta Factor="0" Shift="0" Priority="1"/>
+            <Delta Factor="1" Shift="-10" Priority="1"/>
+          </AttributesAlign>
+        </RaidData>
+        <Fight Name="1" Power="0" Rounds="1" RoundTime="99" Replays="0" Locked="1" Description="space">
+          <Rewards>
+            <Reward Result="Lose"/>
+            <Reward Result="Win">
+              <Currency Drop="1" ShowReward="1" Name="Key1" ExpectedValue="1"/>
+            </Reward>
+          </Rewards>
+          <Warriors>
+            <Warrior Tactic="Standard44" FirstName="NAME_KENJI" Avatar="character_disciple" Voice="Male" ShieldTotal="1000" ShieldStack="19" WarriorPower="5" WeaponDamage="5" UnarmedDamage="5" BodyDefense="5" HeadDefense="3" RangedDamage="5" MagicDamage="5" EnchantmentResistance="5" CriticalChance="1000" BlockDamageFactor="-23219" MagicPainRecharge="-10000" MagicDamageRecharge="0" ShockCriticalHitChance="0" ShockHeadHitChance="2500">
+              <AttributesAlign>
+                <Delta Factor="0" Shift="0" Priority="1"/>
+                <Delta Factor="1" Shift="-10" Priority="1"/>
+              </AttributesAlign>
+              <Perks>
+                <Perk Name="PERK_BEGINNER"/>
+              </Perks> 
+              <Items>
+                <Item Name="WEAPON_KUNAI"/>
+                <Item Name="BODY_SHIN"/>
+                <Item Name="HELM_GREEN_MASK"/>
+                <Item Name="Skeleton"/>
+              </Items>        
+            </Warrior>
+          </Warriors>
+        </Fight>
+      </Battle>
+      <!--<Battle Name="RAIDBOSS_Vortex" Alias="RAIDBOSS_Vortex" Title="RAIDBOSS_Vortex_Title" Icon="vortex_raid" Preview="vortex_raid" Type="RAID" X="-260" Y="123" Location="vortex_raid" Music="raids_vortex">
+            <RaidData RaidID="4" BossMMR="1" RaidSize="1" RaidTime="980" FinalBattlePower="5" RoundCoolDown="100" DamageColor="255,50,50"> 
+              <RaidCurrencyCost Name="Key3" Value="1"/>
+              <Matcher BaseLimit="0.02" AutoLimitSpread="0" LimitSpreadSpeed="10" PriorityPlayerShare="0.4" PowerScaler="0.3" DefaultPlayerPower="5" />
+              <AttributesAlign/>
+            </RaidData>
+            <Fight Name="1" Power="0" Rounds="1" RoundTime="45" Replays="0">
+              <Rewards TresholdDamageFraction="0.05" BaseRating="4500" PosRating="4100" DamageRatingScaler="1">
+                <Reward PosTo="1" PosRatingScaler="1" LootContainerName="RaidChestKeyVortexFirstPlace"/>
+                <Reward PosTo="2" PosRatingScaler="0.65" LootContainerName="RaidChestKeyVortexRestPlaces"/>
+                <Reward PosTo="3" PosRatingScaler="0.35" LootContainerName="RaidChestKeyVortexRestPlaces"/>
+                <Reward PosTo="7" PosRatingScaler="0" LootContainerName="RaidChestKeyVortexRestPlaces"/>
+              </Rewards>
+              <Warriors>
+                <Warrior Tactic="Standard44" FirstName="RAIDBOSS_Vortex" Avatar="boss_vortex" Voice="Male" ShieldTotal="21600" ShieldStack="75" WeaponDamage="18" UnarmedDamage="3" BodyDefense="15" HeadDefense="8" RangedDamage="15" MagicDamage="15" EnchantmentResistance="462" CriticalChance="1000" BlockDamageFactor="-23219" MagicPainRecharge="-10000" MagicDamageRecharge="0" ShockCriticalHitChance="0" ShockHeadHitChance="2500">
+                <AttributesAlign>
+                  <Delta Factor="0" Shift="0"/>
+                </AttributesAlign>
+                  <Perks>
+                    <Perk Name="PERK_ANTI_SHOCK" />
+                    <Perk Name="PERK_TELEPORTATION"/>
+                  </Perks>
+                  <Items>
+                    <Item Name="WEAPON_SILVER_GLAIVE"/>
+                    <Item Name="RANGED_FISH"/>
+                    <Item Name="BODY_FISH"/>
+                    <Item Name="HEAD_FISH"/>
+                    <Item Name="MAGIC_BOMB"/>
+                    <Item Name="Skeleton"/>
+                  </Items>
+                </Warrior>
+              </Warriors>
+            </Fight>
+          </Battle> -->
+    </Zone>
+  </Zones>
+</Stages>
