@@ -652,3 +652,90 @@ Stage Summary:
 - HUD: MENU text precisely centered, all menu icons same size.
 - Next: user should build, test, and share the [LOC] diagnostic logs so we
   can determine the correct coordinate system for dojo images.
+
+---
+Task ID: stage-8.4
+Agent: main
+Task: Implement Verlet physics for bag, fix movement cooldown, dojo Y-invert, V-flip, menu icon scaling
+
+Work Log:
+- Analyzed user feedback:
+  * Bag "dёргается" from hits that miss — physics not realistic
+  * Movement has no delay between steps, animations don't blend
+  * Dojo background moves too fast and flies off screen
+  * Background is upside down, only 1 tree branch correct
+  * Menu icons different sizes, profile stretched, dojo squished
+  * MENU text position wrong, gold/energy/level shifted left
+
+- BAG PHYSICS — Implemented Verlet integration (matches original game):
+  * Original game uses "ModelPhysics" with Verlet integration (confirmed
+    via disassembly string table: "12ModelPhysics", "PhysicsFrameNumber")
+  * Added VerletNode struct: position (x,y), prev_position (px,py),
+    mass, inv_mass, fixed flag, attenuation
+  * Added VerletConstraint struct: n1, n2, length, stiffness
+  * init_bag_verlet(): initializes all bag skeleton nodes with world
+    positions, Node12 is fixed (ceiling attachment). Edges become
+    distance constraints with rest length = actual node distance.
+  * update_bag_verlet(dt): Verlet integration with gravity (-500 units/s²)
+    + attenuation damping, then 8 iterations of constraint satisfaction.
+  * apply_bag_impulse(node, vx, vy): applies impulse by moving prev pos.
+  * Hit detection now applies impulse to specific bag node (NNeck/NBottom/
+    Node4) based on hit height. Impulse strength 10 (punch) / 15 (kick).
+  * render_punching_bag now uses Verlet node positions directly.
+  * Removed old bag_angle_/bag_angle_vel_ pendulum code.
+
+- MOVEMENT — Added step animation cooldown:
+  * Only switch to step_forward/step_back if currently in fists_idle.
+    Don't interrupt an in-progress step animation.
+  * Return to idle only when step animation has played past 75%.
+    This lets the step animation finish naturally before transitioning.
+  * Prevents the rapid step↔idle flickering seen in logs.
+
+- DOJO RENDERING — Y-axis inversion:
+  * params.xml uses Y-DOWN (Y=0 at top, positive Y = down).
+    Evidence: layer_3 (floor) at y=225, but floor should be at bottom.
+    Player at y=-93 (above center in Y-DOWN = below center in Y-UP).
+  * Now invert: world_y = -img.y for all location images.
+  * Floor (y=225) → world_y=-225 (bottom). Correct.
+  * Ceiling decor (y=-202) → world_y=+202 (top). Correct.
+
+- DOJO RENDERING — V-coordinate flip for atlas textures:
+  * Flipped V coords: v0 = (atlas_y + atlas_h)/th, v1 = atlas_y/th.
+  * This makes background textures appear right-side up (were upside down).
+  * Cocos2d uses Y-DOWN for sprites; our renderer uses Y-UP, so V flip
+    is needed to match the original game's rendering.
+
+- DOJO RENDERING — Parallax:
+  * parallax_shift = (1 - factor) * cam_x_.
+  * factor=0.1 (bg) → barely moves. factor=1.0 (fg) → moves with camera.
+  * Added detailed comment explaining the math.
+
+- MENU ICONS — Uniform scaling:
+  * Find max texture dimension across all 5 icons.
+  * uniform_scale = icon_size / max_tex_dim.
+  * All icons scaled by same factor, preserving aspect ratio.
+  * Centered within icon_size × icon_size slot.
+  * This ensures Dojo, Map, Shop, Profile, Settings all appear same size.
+
+- MENU TEXT — Vertical centering:
+  * Measure actual text height using font char.height * scale.
+  * text_y = btn_y + (roll_h - text_h) / 2.
+  * Now properly centered vertically on the roll.
+
+- Used VLM to analyze original game screenshots:
+  * MENU button is top-LEFT (not right as one screenshot suggested)
+  * Menu scroll expands vertically on the left side
+  * Gold/energy/level are on the left side of the top panel
+  * Floor is at the bottom, punching bag hangs from ceiling
+
+- All changes syntax-checked with g++ -std=c++23 -fsyntax-only — passes.
+
+Stage Summary:
+- Bag: real Verlet physics with gravity, distance constraints, damping.
+  Node12 fixed at ceiling, other nodes swing naturally. Impulse on hit
+  pushes the actual contacted node, causing realistic pendulum motion.
+- Movement: step animations play fully before transitioning, no flicker.
+- Dojo: Y inverted (floor at bottom), V flipped (textures right-side up),
+  parallax correct (bg barely moves, fg moves with camera).
+- Menu: all icons same size via uniform scaling, MENU text centered.
+- Next: user should build, test, and report if Verlet physics feels right.

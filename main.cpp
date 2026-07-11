@@ -265,12 +265,34 @@ struct AnimationData {
 struct BodyNode {
     std::string name;
     float x = 0, y = 0, z = 0;
+    float mass = 1.0f;
+    bool fixed = false;
+    float attenuation = 0.02f;  // damping coefficient
+    bool cloth = false;
 };
 
 struct BodyEdge {
     std::string name;
     std::string end1, end2;
     float length = 0;
+};
+
+// Verlet physics state for a single node.
+// Verlet integration: pos_new = 2*pos - pos_prev + acc * dt^2
+// No explicit velocity — velocity is implicit (pos - pos_prev).
+struct VerletNode {
+    float x = 0, y = 0;       // current position
+    float px = 0, py = 0;     // previous position (for Verlet integration)
+    float mass = 1.0f;
+    float inv_mass = 1.0f;    // 1/mass (0 if fixed)
+    bool fixed = false;
+    float attenuation = 0.02f;
+};
+
+struct VerletConstraint {
+    std::string n1, n2;
+    float length = 0;     // rest length
+    float stiffness = 1.0f;  // 1.0 = rigid, <1.0 = soft
 };
 
 struct BodyCapsule {
@@ -403,28 +425,36 @@ public:
                 if (want_move_left && !want_move_right) {
                     facing_right_ = false;
                     player_pos_x_ -= MOVE_SPEED * dt_sec;
-                    // Play step_back animation for visual effect (but don't reset if already playing)
-                    if (current_anim_ != "step_back" && 
-                        current_anim_.find("punch") == std::string::npos &&
-                        current_anim_.find("kick") == std::string::npos &&
-                        animations_.count("step_back")) {
+                    // Play step_back animation for visual effect.
+                    // Only switch to step_back if currently idle — don't interrupt
+                    // an in-progress step animation (prevents flickering).
+                    if (current_anim_ == "fists_idle" && animations_.count("step_back")) {
                         play_animation("step_back", true);
                     }
                 } else if (want_move_right && !want_move_left) {
                     facing_right_ = true;
                     player_pos_x_ += MOVE_SPEED * dt_sec;
-                    if (current_anim_ != "step_forward" &&
-                        current_anim_.find("punch") == std::string::npos &&
-                        current_anim_.find("kick") == std::string::npos &&
-                        animations_.count("step_forward")) {
+                    if (current_anim_ == "fists_idle" && animations_.count("step_forward")) {
                         play_animation("step_forward", true);
                     }
                 } else {
-                    // Not moving — return to idle
-                    if (current_anim_ != "fists_idle" && 
-                        current_anim_.find("punch") == std::string::npos &&
-                        current_anim_.find("kick") == std::string::npos &&
-                        current_anim_.find("cut") == std::string::npos) {
+                    // Not moving — return to idle only if currently in a step animation
+                    // that has finished (don't interrupt mid-step)
+                    if (current_anim_ == "step_forward" || current_anim_ == "step_back") {
+                        // Let the step animation finish naturally before returning to idle
+                        auto anim_it = animations_.find(current_anim_);
+                        if (anim_it != animations_.end()) {
+                            int fc = anim_it->second.frame_count;
+                            int current_frame = (int)(anim_time_ * 30.0f);
+                            // Return to idle only when step animation has played past 75%
+                            if (current_frame >= fc * 3 / 4) {
+                                play_animation("fists_idle", true);
+                            }
+                        }
+                    } else if (current_anim_ != "fists_idle" && 
+                               current_anim_.find("punch") == std::string::npos &&
+                               current_anim_.find("kick") == std::string::npos &&
+                               current_anim_.find("cut") == std::string::npos) {
                         play_animation("fists_idle", true);
                     }
                 }
@@ -547,16 +577,19 @@ public:
                                 
                                 // Hit threshold: 80 units (tighter than before)
                                 if (dist < 80.0f) {
-                                    // Apply impulse to pendulum
-                                    // Direction: bag swings AWAY from attacker
-                                    // If player is on the left (dx < 0), bag swings right (positive angle)
+                                    // Apply impulse to the nearest bag node (NNeck for high hits, NPivot for low hits)
+                                    // Determine which bag node to push based on the limb's Y position
+                                    std::string target_node = "NNeck";  // default: push the neck (middle of bag)
+                                    if (limb_wy < bag_cy - 30) target_node = "NBottom";  // low hit → push bottom
+                                    else if (limb_wy > bag_cy + 30) target_node = "Node4";  // high hit → push upper
+                                    // Impulse direction: bag swings AWAY from attacker
                                     float impulse_dir = (dx < 0) ? 1.0f : -1.0f;
-                                    // Impulse strength based on move type (kicks hit harder)
-                                    float impulse_strength = is_kick ? 8.0f : 6.0f;
-                                    bag_angle_vel_ += impulse_dir * impulse_strength;
-                                    std::printf("[COMBAT] HIT! move=%s frame=%d/%d limb=%s dist=%.1f → impulse=%.1f\n",
+                                    float impulse_strength = is_kick ? 15.0f : 10.0f;
+                                    apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
+                                    std::printf("[COMBAT] HIT! move=%s frame=%d/%d limb=%s dist=%.1f → impulse on %s: (%.1f, 0)\n",
                                                 current_move_.c_str(), current_frame, fc,
-                                                limb_node.c_str(), dist, impulse_dir * impulse_strength);
+                                                limb_node.c_str(), dist, target_node.c_str(),
+                                                impulse_dir * impulse_strength);
                                     bag_hit_ = true;
                                 }
                             }
@@ -571,25 +604,8 @@ public:
                 }
             }
 
-            // Update bag pendulum physics
-            // Model: damped spring pendulum
-            //   angular_acc = -k * angle - c * angular_vel
-            //   angular_vel += angular_acc * dt
-            //   angle += angular_vel * dt
-            // Parameters tuned for realistic punching bag behavior:
-            //   k = 40 (stiffness — how quickly it returns to center)
-            //   c = 3.0 (damping — how quickly oscillations die down)
-            {
-                float bag_dt = dt / 1000.0f;
-                const float k = 40.0f;      // spring constant
-                const float c = 3.0f;       // damping coefficient
-                float angular_acc = -k * bag_angle_ - c * bag_angle_vel_;
-                bag_angle_vel_ += angular_acc * bag_dt;
-                bag_angle_ += bag_angle_vel_ * bag_dt;
-                // Clamp to prevent runaway
-                if (bag_angle_ > 1.2f) { bag_angle_ = 1.2f; bag_angle_vel_ = 0; }
-                if (bag_angle_ < -1.2f) { bag_angle_ = -1.2f; bag_angle_vel_ = 0; }
-            }
+            // Update bag Verlet physics (original game uses Verlet integration)
+            update_bag_verlet(dt / 1000.0f);
             
             // Update animation
             update_animation(dt);
@@ -864,6 +880,13 @@ private:
         // to create the illusion of depth.
         static bool loc_logged = false;
         for (auto& layer : location_->layers) {
+            // Parallax: the layer's X position scrolls at `factor` of the camera speed.
+            // factor=1.0 → layer moves with camera (foreground).
+            // factor=0.5 → layer moves at half speed (appears further away).
+            // factor=0.1 → layer barely moves (far background).
+            // Implementation: shift the layer's X by -cam_x_ * (1 - factor).
+            // When the camera moves right (cam_x_ increases), the layer shifts left
+            // by (1-factor)*cam_x_, creating the parallax effect.
             float parallax_factor = layer.factor;
             if (parallax_factor <= 0.0f) parallax_factor = 1.0f;
             float parallax_shift = (1.0f - parallax_factor) * cam_x_;
@@ -893,8 +916,12 @@ private:
                         float hh = (float)platform_->window_height() / (2.0f * zoom_);
                         float left = cam_x_ - hw, right = cam_x_ + hw;
                         float bottom = cam_y_ - hh, top = cam_y_ + hh;
+                        // params.xml uses Y-DOWN (Y=0 at top, positive Y = down).
+                        // Our world is Y-UP (positive Y = up). Invert: world_y = -img.y
+                        // Player at y=-93 in params → world y=+93 (above center). Correct.
+                        // Floor at y=225 in params → world y=-225 (below center). Correct.
                         float world_x = img.x - parallax_shift;
-                        float world_y = img.y;
+                        float world_y = -img.y;
                         float sx = (world_x - img.w/2.0f - left) / (right - left) * platform_->window_width();
                         float sy = (1.0f - (world_y - img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
                         float ex = (world_x + img.w/2.0f - left) / (right - left) * platform_->window_width();
@@ -917,20 +944,24 @@ private:
                 auto& frame = atlas.atlas->frames[fit->second];
                 float tw = (float)atlas.atlas->metadata.texture_w;
                 float th = (float)atlas.atlas->metadata.texture_h;
+                // Flip V coordinates: Cocos2d uses Y-DOWN for sprites, but our
+                // renderer uses Y-UP. To match the original game's rendering,
+                // we flip the V axis so the texture appears right-side up.
                 float u0, v0, u1, v1;
                 if (frame.rotated) {
                     u0 = frame.atlas_x / tw;
-                    v0 = frame.atlas_y / th;
+                    v1 = frame.atlas_y / th;  // flipped: v1 = top
                     u1 = (frame.atlas_x + frame.atlas_h) / tw;
-                    v1 = (frame.atlas_y + frame.atlas_w) / th;
+                    v0 = (frame.atlas_y + frame.atlas_w) / th;  // flipped: v0 = bottom
                 } else {
                     u0 = frame.atlas_x / tw;
-                    v0 = frame.atlas_y / th;
+                    v1 = frame.atlas_y / th;  // flipped: v1 = top
                     u1 = (frame.atlas_x + frame.atlas_w) / tw;
-                    v1 = (frame.atlas_y + frame.atlas_h) / th;
+                    v0 = (frame.atlas_y + frame.atlas_h) / th;  // flipped: v0 = bottom
                 }
-                // Render at the image's original coordinates with parallax shift
-                float world_y = img.y;
+                // Render at the image's original coordinates with parallax shift.
+                // Y is inverted: params.xml uses Y-DOWN, our world is Y-UP.
+                float world_y = -img.y;
                 float world_x = img.x - parallax_shift;
                 float px = world_x - img.w / 2.0f;
                 float py = world_y - img.h / 2.0f;  // bottom-left (world Y-UP: +Y = up)
@@ -1379,6 +1410,10 @@ private:
                     n.name = tag.substr(1, sp - 1);
                     n.x = tof(xml_attr(tag, "X"));
                     n.y = tof(xml_attr(tag, "Y"));
+                    n.mass = tof(xml_attr(tag, "Mass"), 1.0f);
+                    n.fixed = (toi(xml_attr(tag, "Fixed")) != 0);
+                    n.attenuation = tof(xml_attr(tag, "Attenuation"), 0.02f);
+                    n.cloth = (toi(xml_attr(tag, "Cloth")) != 0);
                     bag_model_->nodes[n.name] = n;
                 }
                 pos = end + 2;
@@ -1433,6 +1468,114 @@ private:
         std::printf("  Punching bag: %zu nodes, %zu edges, %zu capsules\n",
                     bag_model_->nodes.size(), bag_model_->edges.size(),
                     bag_model_->capsules.size());
+        init_bag_verlet();
+    }
+
+    // Initialize Verlet physics state from the bag's skeleton nodes.
+    // Each node gets: position = (x, y), prev_position = (x, y) (at rest).
+    // Fixed nodes (Fixed="1") have inv_mass = 0 and don't move.
+    // Edges become distance constraints with rest length = edge.length.
+    void init_bag_verlet() {
+        if (!bag_model_) return;
+        bag_verlet_.clear();
+        bag_constraints_.clear();
+        // World position of the bag's NPivot (where it hangs in the world)
+        float bag_cx = location_ ? (location_->enemy_x - 857.0f) : 0.0f;
+        float bag_cy = location_ ? (location_->enemy_y + 50.0f) : 0.0f;
+        auto pit = bag_model_->nodes.find("NPivot");
+        float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
+        // Initialize nodes: world position = bag_center + (node_local - NPivot_local)
+        for (auto& [name, n] : bag_model_->nodes) {
+            VerletNode vn;
+            vn.x = bag_cx + n.x * 0.9f;
+            vn.y = bag_cy + (n.y - pivot_ly) * 0.9f;
+            vn.px = vn.x;  // at rest, prev = current
+            vn.py = vn.y;
+            vn.mass = n.mass;
+            vn.fixed = n.fixed;
+            vn.inv_mass = n.fixed ? 0.0f : (n.mass > 0.001f ? 1.0f / n.mass : 1.0f);
+            vn.attenuation = n.attenuation;
+            bag_verlet_[name] = vn;
+        }
+        // Initialize constraints from edges
+        for (auto& e : bag_model_->edges) {
+            VerletConstraint c;
+            c.n1 = e.end1;
+            c.n2 = e.end2;
+            // Compute rest length from actual node distance (or use edge.length)
+            auto n1 = bag_verlet_.find(e.end1);
+            auto n2 = bag_verlet_.find(e.end2);
+            if (n1 != bag_verlet_.end() && n2 != bag_verlet_.end()) {
+                float dx = n1->second.x - n2->second.x;
+                float dy = n1->second.y - n2->second.y;
+                c.length = std::sqrt(dx*dx + dy*dy);
+            } else {
+                c.length = e.length;
+            }
+            c.stiffness = 1.0f;
+            bag_constraints_.push_back(c);
+        }
+        bag_verlet_init_ = true;
+        std::printf("  Bag Verlet: %zu nodes, %zu constraints (Node12 fixed)\n",
+                    bag_verlet_.size(), bag_constraints_.size());
+    }
+
+    // Apply an impulse to a bag node (called when hit).
+    // Impulse = instantaneous velocity change = position offset added to prev pos.
+    // In Verlet: vel = (pos - prev), so to add velocity v, set prev -= v * dt.
+    void apply_bag_impulse(const std::string& node_name, float vx, float vy) {
+        auto it = bag_verlet_.find(node_name);
+        if (it == bag_verlet_.end()) return;
+        auto& n = it->second;
+        if (n.fixed) return;
+        // Apply impulse: move prev position opposite to velocity direction
+        n.px -= vx;
+        n.py -= vy;
+    }
+
+    // Update bag Verlet physics.
+    // 1. Integration: pos_new = 2*pos - prev + acc*dt^2 (gravity + damping)
+    // 2. Satisfy constraints (multiple iterations for stiffness)
+    // 3. Apply damping (attenuation)
+    void update_bag_verlet(float dt) {
+        if (!bag_verlet_init_ || !bag_model_) return;
+        const float GRAVITY = -500.0f;  // downward acceleration (units/sec^2)
+        const int CONSTRAINT_ITERATIONS = 8;
+        // 1. Verlet integration
+        for (auto& [name, n] : bag_verlet_) {
+            if (n.fixed) continue;
+            // Verlet: new_pos = pos + (pos - prev) * (1 - attenuation) + acc * dt^2
+            float vx = (n.x - n.px) * (1.0f - n.attenuation);
+            float vy = (n.y - n.py) * (1.0f - n.attenuation);
+            n.px = n.x;
+            n.py = n.y;
+            n.x += vx;
+            n.y += vy + GRAVITY * dt * dt;
+        }
+        // 2. Satisfy distance constraints
+        for (int iter = 0; iter < CONSTRAINT_ITERATIONS; ++iter) {
+            for (auto& c : bag_constraints_) {
+                auto n1 = bag_verlet_.find(c.n1);
+                auto n2 = bag_verlet_.find(c.n2);
+                if (n1 == bag_verlet_.end() || n2 == bag_verlet_.end()) continue;
+                auto& a = n1->second;
+                auto& b = n2->second;
+                float dx = b.x - a.x;
+                float dy = b.y - a.y;
+                float dist = std::sqrt(dx*dx + dy*dy);
+                if (dist < 0.0001f) continue;
+                float diff = (dist - c.length) / dist;
+                float w1 = a.inv_mass;
+                float w2 = b.inv_mass;
+                float wsum = w1 + w2;
+                if (wsum < 0.0001f) continue;
+                float f = c.stiffness * diff;
+                a.x += dx * f * (w1 / wsum);
+                a.y += dy * f * (w1 / wsum);
+                b.x -= dx * f * (w2 / wsum);
+                b.y -= dy * f * (w2 / wsum);
+            }
+        }
     }
 
     void render_punching_bag() {
@@ -1448,37 +1591,11 @@ private:
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
         float bag_cy = location_->enemy_y + 50.0f;  // offset so bag hangs properly
         
-        // === BAG SWING ANIMATION (physics-based pendulum) ===
-        // The bag hangs from Node12 (fixed ceiling point).
-        // bag_angle_ is updated by the pendulum physics in on_update().
-        // On hit, an impulse is applied to bag_angle_vel_, causing the bag
-        // to swing realistically with momentum and damped oscillation.
-        float swing_angle = bag_angle_;
-        float cos_a = std::cos(swing_angle);
-        float sin_a = std::sin(swing_angle);
-        
-        // Node12 world position (the fixed ceiling attachment / swing pivot)
-        auto n12_it = bag_model_->nodes.find("Node12");
-        float n12_world_x = bag_cx;
-        float n12_world_y = bag_cy;
-        if (n12_it != bag_model_->nodes.end()) {
-            n12_world_x = bag_cx + n12_it->second.x * 0.9f;
-            n12_world_y = bag_cy + (n12_it->second.y - pivot_ly) * 0.9f;
-        }
-        
-        // Helper: apply swing rotation to a bag node's world position
-        auto swing_pos = [&](float raw_x, float raw_y, float& out_x, float& out_y) {
-            if (swing_angle == 0.0f) {
-                out_x = raw_x;
-                out_y = raw_y;
-                return;
-            }
-            // Translate to Node12 origin, rotate, translate back
-            float rx = raw_x - n12_world_x;
-            float ry = raw_y - n12_world_y;
-            out_x = n12_world_x + rx * cos_a - ry * sin_a;
-            out_y = n12_world_y + rx * sin_a + ry * cos_a;
-        };
+        // === BAG RENDERING (Verlet physics) ===
+        // The bag's skeleton nodes are simulated with Verlet integration.
+        // Node12 is fixed (ceiling attachment). Other nodes swing freely
+        // subject to gravity + distance constraints (edges).
+        // We render capsules using the current Verlet node positions.
         
         // Build edge lookup
         std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
@@ -1495,20 +1612,26 @@ private:
             if (eit == edge_map.end()) continue;
             auto& en1 = eit->second.first;
             auto& en2 = eit->second.second;
-            auto nit1 = bag_model_->nodes.find(en1);
-            auto nit2 = bag_model_->nodes.find(en2);
-            if (nit1 == bag_model_->nodes.end() || nit2 == bag_model_->nodes.end()) continue;
             
-            // Raw (un-swung) world positions
-            float raw_x1 = bag_cx + nit1->second.x * 0.9f;
-            float raw_y1 = bag_cy + (nit1->second.y - pivot_ly) * 0.9f;
-            float raw_x2 = bag_cx + nit2->second.x * 0.9f;
-            float raw_y2 = bag_cy + (nit2->second.y - pivot_ly) * 0.9f;
-            
-            // Apply swing rotation (Node12 itself stays fixed since rel pos is 0,0)
+            // Get node positions from Verlet state (if available) or fall back to rest pose
             float x1, y1, x2, y2;
-            swing_pos(raw_x1, raw_y1, x1, y1);
-            swing_pos(raw_x2, raw_y2, x2, y2);
+            if (bag_verlet_init_) {
+                auto v1 = bag_verlet_.find(en1);
+                auto v2 = bag_verlet_.find(en2);
+                if (v1 == bag_verlet_.end() || v2 == bag_verlet_.end()) continue;
+                x1 = v1->second.x;
+                y1 = v1->second.y;
+                x2 = v2->second.x;
+                y2 = v2->second.y;
+            } else {
+                auto nit1 = bag_model_->nodes.find(en1);
+                auto nit2 = bag_model_->nodes.find(en2);
+                if (nit1 == bag_model_->nodes.end() || nit2 == bag_model_->nodes.end()) continue;
+                x1 = bag_cx + nit1->second.x * 0.9f;
+                y1 = bag_cy + (nit1->second.y - pivot_ly) * 0.9f;
+                x2 = bag_cx + nit2->second.x * 0.9f;
+                y2 = bag_cy + (nit2->second.y - pivot_ly) * 0.9f;
+            }
             
             float r = (c.radius1 + c.radius2) * 0.5f * 0.9f;
             bool is_main = (c.radius1 >= 20 || c.radius2 >= 20);
@@ -2145,7 +2268,18 @@ private:
                 // Center "MENU" text on the roll
                 ren::Color4B text_col{255, 240, 200, (uint8_t)(alpha * 255)};
                 float text_x = btn_x + (roll_w - text_w) / 2.0f;
-                float text_y = btn_y + (roll_h - 10.0f) / 2.0f;  // 10px approx text height
+                // Measure actual text height for vertical centering
+                float text_h = 0.0f;
+                if (hud_font_) {
+                    for (char c : std::string("MENU")) {
+                        std::int32_t cp = (std::uint8_t)c;
+                        auto it = hud_font_->char_index.find(cp);
+                        if (it != hud_font_->char_index.end()) {
+                            text_h = std::max(text_h, (float)hud_font_->chars[it->second].height * 0.22f);
+                        }
+                    }
+                }
+                float text_y = btn_y + (roll_h - text_h) / 2.0f;
                 render_text("MENU", text_x, text_y, 0.22f, text_col);
             } else {
                 ren::Color4B bg{60, 40, 20, 230};
@@ -2241,9 +2375,22 @@ private:
         }
 
         // Menu icons (vertical stack) — only render icons that fit within the animated height
-        // All icons are rendered at the SAME fixed size (icon_size × icon_size) to ensure
-        // visual consistency. The texture is stretched to fit, ignoring aspect ratio.
+        // All icons rendered with uniform scaling: scale = icon_size / max_texture_dimension
+        // This ensures all icons appear the same size on screen while preserving aspect ratio.
         const char* items[] = {"Dojo", "Map", "Shop", "Profile", "Settings"};
+        // Find max texture dimension across all icons for uniform scaling
+        int max_tex_dim = 1;
+        for (auto& name : items) {
+            std::string tex_name = std::string(name) + "_normal";
+            auto it = menu_textures_.find(tex_name);
+            if (it == menu_textures_.end()) {
+                it = menu_textures_.find(std::string(name) + "_Normal");
+            }
+            if (it != menu_textures_.end()) {
+                max_tex_dim = std::max(max_tex_dim, std::max(it->second->width(), it->second->height()));
+            }
+        }
+        float uniform_scale = icon_size / (float)max_tex_dim;
         float ix = btn_x + paper_padding + 10;
         float iy = paper_y + paper_padding;
         for (int idx = 0; idx < 5; ++idx) {
@@ -2259,13 +2406,18 @@ private:
                 it = menu_textures_.find(std::string(name) + "_Normal");
             }
             if (it != menu_textures_.end()) {
-                // Fixed size for all icons — stretch to fill icon_size × icon_size
-                renderer_->draw_textured_quad_screen(*it->second, ix, icon_y,
-                                                     icon_size, icon_size);
+                // Uniform scale: all icons scaled by same factor, preserving aspect ratio
+                float draw_w = it->second->width() * uniform_scale;
+                float draw_h = it->second->height() * uniform_scale;
+                // Center within the icon_size × icon_size slot
+                float draw_x = ix + (icon_size - draw_w) * 0.5f;
+                float draw_y = icon_y + (icon_size - draw_h) * 0.5f;
+                renderer_->draw_textured_quad_screen(*it->second, draw_x, draw_y,
+                                                     draw_w, draw_h);
                 if (!loc_icons_logged) {
-                    std::printf("[MENU] icon '%s': tex %dx%d → draw %.0fx%.0f\n",
+                    std::printf("[MENU] icon '%s': tex %dx%d → draw %.0fx%.0f (scale=%.2f)\n",
                                 name, it->second->width(), it->second->height(),
-                                icon_size, icon_size);
+                                draw_w, draw_h, uniform_scale);
                 }
             }
             render_text(name, ix + icon_size + 5, icon_y + 10, 0.16f, {60, 40, 20, 255});
@@ -2385,6 +2537,13 @@ private:
     // Each frame: spring restoring force + damping + integration.
     float bag_angle_ = 0.0f;       // current angle (radians, 0 = vertical)
     float bag_angle_vel_ = 0.0f;   // angular velocity (rad/sec)
+    // Verlet physics state for the punching bag.
+    // The original game uses Verlet integration for the bag's skeleton.
+    // Each node has position + previous position. Edges are distance constraints.
+    // Fixed nodes (Node12 = ceiling attachment) don't move.
+    std::unordered_map<std::string, VerletNode> bag_verlet_;
+    std::vector<VerletConstraint> bag_constraints_;
+    bool bag_verlet_init_ = false;
     bool quit_requested_ = false;
     
     // Animation state
