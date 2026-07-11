@@ -1,0 +1,375 @@
+# Game-side C++ classes recovered from .s3e string table
+# Source: ShadowFight2.bin (excluding import table region)
+# Format: ClassName (N methods)\n  method1\n  method2\n...
+
+ListSF (28 methods)
+  androidLicenseCallback
+  androidLicenseResult
+  appendCurrentVersion
+  buyItem
+  checkAndroidLicense
+  checkApplicationDump
+  checkApplicationVersion
+  customRosterTimer
+  deliveryTimer
+  duelAccessibilityTimer
+  energyRefillTimer
+  initSocial
+  isBuyItem
+  isConditionComplete
+  isConditionFightCount
+  loadNews
+  loadNextNews
+  login
+  loginComplete
+  loginResponse
+  onLoadConfig
+  onLoadNews
+  onSendDump
+  serverAPIAuthorize
+  setRosterBattle
+  socialAuthorizeTimeoutCallback
+  startPackTimer
+  timeUpdateCallback
+
+Fight (14 methods)
+  Fight
+  fillFightListParametersBuffer
+  fillMagicAndMissilesBuffer
+  getModelByAppliance
+  getModelByScreenModel
+  getModelIndexByScreenModel
+  onUserComboIncrease
+  removeModel
+  resetLife
+  setCurrentFight
+  setFightListParametersFromBuffer
+  setMagicAndMissilesFromBuffer
+  updateFightDataDamage
+  updateLife
+
+SponsorPay (11 methods)
+  SponsorPay
+  init
+  initStrings
+  interstitialCacheAD
+  interstitialShowAD
+  isInit
+  isReady
+  requestBalance
+  showOffer
+  sponsorPayCallback
+  sponsorPayCoinsCallback
+
+QuestCondition (8 methods)
+  fightCurrencyCostFunction
+  fightFunction
+  fullFunction
+  getDeliveryUpgradeTime
+  getSimOperator
+  itemFunction
+  shopAssertFunction
+  sysInfoFunction
+
+Model (7 methods)
+  equipRulesItems
+  getModelAlign
+  getModelByType
+  getTotalDamage
+  setCurrentNode
+  setNearestEnemy
+  startAction
+
+RulesInspector (6 methods)
+  applyNoAnimationRules
+  applyNoPerksRules
+  checkButtonRules
+  checkEvent
+  putPerkFromRule
+  putRule
+
+SponsorPayBanner (5 methods)
+  init
+  interstitialCacheAD
+  interstitialShowAD
+  isReady
+  sponsorPayCallback
+
+Metaps (4 methods)
+  getSelf
+  init
+  requestBalance
+  showOffer
+
+Tapjoy (4 methods)
+  onEventCallback
+  requestContent
+  sendEventAndRun
+  showEvent
+
+ConditionExtension (4 methods)
+  MathFunction
+  mathFunction
+  parseFunctions
+  setValue
+
+Roster (4 methods)
+  addBattle
+  parseSounds
+  setLotteryDecksMax
+  setLotteryFreeDecksMax
+
+RaidTopHundredDialog (4 methods)
+  onGetCurSeasonLeaderboardInfo
+  onGetCurSeasonLeaderboardInfoFail
+  onGetPrevSeasonLeaderboardInfo
+  onGetPrevSeasonLeaderboardInfoFail
+
+SystemProperties (3 methods)
+  fileExists
+  getPathType
+  setPicturePaths
+
+Font (3 methods)
+  getRealAlignment
+  stringToAlign
+  stringToCCAlign
+
+BattleDaily (3 methods)
+  nullDaily
+  setRosterFight
+  update
+
+ModelAnimation (3 methods)
+  getPlayerAnimation
+  mirrorNodes
+  playInfo
+
+RuleParser (3 methods)
+  parseInFightRule
+  parseRules
+  parseStyleType
+
+Module (3 methods)
+  getScreen
+  getScreenNameFromType
+  getScreenTypeFromString
+
+InfoSprite (3 methods)
+  errorCallItem
+  setDiscountLabel
+  setPercentMark
+
+Picture (2 methods)
+  getFolder
+  setPath
+
+TouchController (2 methods)
+  getTouchSize
+  setTouchSize
+
+DeviceComparison (2 methods)
+  getParameterFromString
+  updateParameter
+
+AndroidMarket (2 methods)
+  requestRestore
+  restorePurchase
+
+ComparisonExpression (2 methods)
+  compare
+  getTypeFromString
+
+Localization (2 methods)
+  getString
+  putParametersIntoString
+
+ConditionOperator (2 methods)
+  ConditionOperator
+  isEqual
+
+Battle (2 methods)
+  nullDaily
+  update
+
+BattlePeriodic (2 methods)
+  initBattles
+  update
+
+FightList (2 methods)
+  getReward
+  putRule
+
+InFightRule (2 methods)
+  copyInFightRule
+  getWinnerAppliance
+
+RandomRule (2 methods)
+  checkReset
+  resetRandom
+
+DisplayZone (2 methods)
+  activeBattle
+  recreateButtonByBattle
+
+ShopScreen (2 methods)
+  getDiffBetweenSameAttr
+  isEmptySlider
+
+QualityOption (2 methods)
+  getOptionFromString
+  turnOption
+
+ServerModule (1 methods)
+  serverRequestTimeoutCallback
+
+SessionTracker (1 methods)
+  fileExists
+
+EventLog (1 methods)
+  send
+
+LedgerManager (1 methods)
+  sendRequest
+
+PayLog (1 methods)
+  statusToString
+
+WindowsMarket (1 methods)
+  requestRestore
+
+HashChecker (1 methods)
+  FileHash
+
+FunctionExtension (1 methods)
+  parseObjects
+
+CodedInputStream (1 methods)
+  SetTotalBytesLimit
+
+CounterConditionsParser (1 methods)
+  parseCondition
+
+ItemInfo (1 methods)
+  getUpdateItemByIndex
+
+ItemMaker (1 methods)
+  createItem
+
+QuestActionSetEnergy (1 methods)
+  parse
+
+Quest (1 methods)
+  actionQuest
+
+QuestAction (1 methods)
+  getClassActionByType
+
+ItemDialog (1 methods)
+  getItemPositionX
+
+RaidInfoSprite (1 methods)
+  updateCooldownFinishTime
+
+RaidLeaguesDialog (1 methods)
+  onGetPreviousLeagueInfo
+
+ControlHub (1 methods)
+  setupGamepads
+
+Location (1 methods)
+  setPath
+
+NekkiMath (1 methods)
+  randomElement
+
+ActionEffect (1 methods)
+  parse
+
+ActionsParser (1 methods)
+  create
+
+ConditionDirection (1 methods)
+  isEqual
+
+MovesParser (1 methods)
+  eventsParse
+
+IntervalAttack (1 methods)
+  getFactors
+
+MovesMaps (1 methods)
+  getIndex
+
+DistancePoint (1 methods)
+  getPosition
+
+ModelObject (1 methods)
+  addComNodes
+
+ViewerModel (1 methods)
+  removeObjectByIndex
+
+AttributesRule (1 methods)
+  initRule
+
+RingoutRule (1 methods)
+  initRule
+
+LoseFallRule (1 methods)
+  initRule
+
+RemoveIntervalRule (1 methods)
+  initRule
+
+StageType (1 methods)
+  getStageByName
+
+MainMenuRaidRatingPanel (1 methods)
+  updatePlayerInfo
+
+RaidFightActionShowFightBtn (1 methods)
+  enableFightBtnAndShowArrow
+
+RaidFightActionFlashBuyBtn (1 methods)
+  run
+
+RaidActionWaitForRaidMap (1 methods)
+  run
+
+RaidActionIndicateRaidButton (1 methods)
+  showRaidToggleBtnArrow
+
+PlayerData (1 methods)
+  onRaidBattlePlayerFinishResponse
+
+RaidManager (1 methods)
+  onBattleFinishRoundEvent
+
+PlayersCache (1 methods)
+  onGetPlayers
+
+PerkContent (1 methods)
+  getKeyIcon
+
+SubItem (1 methods)
+  loadContent
+
+TrickItem (1 methods)
+  getKeyIcon
+
+GameLoader (1 methods)
+  getSalt
+
+LedgerManagerSF (1 methods)
+  giveReward
+
+ModelParameters (1 methods)
+  setItemsFromRules
+
+PerkConditionHealth (1 methods)
+  isEqual
+
+auto_ptr (1 methods)
+  get
+
