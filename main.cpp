@@ -402,50 +402,37 @@ public:
                 init_location();
             }
         } else if (state_ == GameState::Location) {
-            // === MOVEMENT SYSTEM (root motion from .bin animation) ===
-            // Simplified: step_cooldown_ is the ONLY gate.
-            // - When cooldown == 0 and key held: start new step
-            // - When cooldown > 0: step in progress, don't touch animation
-            // - When cooldown == 0 and key released: switch to idle
-            // The non-looping animation stays at last frame when finished.
-            // Root motion code in update_animation handles position.
+            // === MOVEMENT SYSTEM (root motion, looping step animation) ===
+            // When key is held: step animation plays in a LOOP.
+            // When key is released: switch to idle.
+            // Root motion uses delta accumulation with wrap-around filter.
+            // This eliminates ALL animation switching jitter.
             
             bool want_move_left = input.keys_down[(size_t)plat::Key::A] ||
                                   input.keys_down[(size_t)plat::Key::ArrowLeft];
             bool want_move_right = input.keys_down[(size_t)plat::Key::D] ||
                                    input.keys_down[(size_t)plat::Key::ArrowRight];
             
-            const uint32_t STEP_DURATION_MS = 533;  // 16 frames at 30fps
-            
             if (hit_anim_ == 0) {
                 if (want_move_left && !want_move_right) {
-                    if (step_cooldown_ == 0) {
-                        facing_right_ = false;
-                        step_start_player_x_ = player_pos_x_;
-                        play_animation("step_back", false);
-                        step_cooldown_ = STEP_DURATION_MS;
+                    facing_right_ = false;
+                    if (current_anim_ != "step_back" && animations_.count("step_back")) {
+                        play_animation("step_back", true);  // LOOP
                     }
                 } else if (want_move_right && !want_move_left) {
-                    if (step_cooldown_ == 0) {
-                        facing_right_ = true;
-                        step_start_player_x_ = player_pos_x_;
-                        play_animation("step_forward", false);
-                        step_cooldown_ = STEP_DURATION_MS;
+                    facing_right_ = true;
+                    if (current_anim_ != "step_forward" && animations_.count("step_forward")) {
+                        play_animation("step_forward", true);  // LOOP
                     }
                 } else {
-                    // Not moving — switch to idle ONLY when cooldown expired
-                    if (step_cooldown_ == 0 &&
-                        current_anim_ != "fists_idle" &&
+                    // Not moving — switch to idle
+                    if (current_anim_ != "fists_idle" &&
                         current_anim_.find("punch") == std::string::npos &&
                         current_anim_.find("kick") == std::string::npos &&
                         current_anim_.find("cut") == std::string::npos) {
                         play_animation("fists_idle", true);
                     }
                 }
-            }
-            // Decrement step cooldown
-            if (step_cooldown_ > 0) {
-                step_cooldown_ -= std::min<uint32_t>(step_cooldown_, dt);
             }
             
             // Camera follows player (fixed Y, no W/S camera movement)
@@ -2054,22 +2041,22 @@ private:
         // NPivot Y differs from the rest pose (e.g., idle vs step).
         anim_npivot_bin_y_ = npivot_y;
 
-        // Root motion: ABSOLUTE displacement from frame 0.
-        // Instead of accumulating deltas (which has anchor reset issues),
-        // we SET player_pos_x_ directly based on NPivot offset from frame 0.
-        //
-        // step_forward.bin: NPivot X goes 169→235 (displacement +66)
-        // step_back.bin: NPivot X goes 235→169 (displacement -66)
-        //
-        // When step starts, we save the player's X position and the NPivot X
-        // at frame 0. Each frame, we compute the displacement and SET
-        // player_pos_x_ = start_x + displacement. This prevents accumulation
-        // errors and anchor reset issues.
+        // Root motion: delta accumulation with wrap-around filter.
+        // For looping step animations, NPivot X goes 169→235 then wraps to 169.
+        // We accumulate positive deltas (forward movement) and filter out
+        // the large negative wrap-around delta (-66).
+        // This gives natural non-linear movement matching the animation.
         if (current_anim_ == "step_forward" || current_anim_ == "step_back") {
             if (anim_anchor_set_) {
-                float displacement = npivot_x - anim_root_anchor_x_;
-                player_pos_x_ = step_start_player_x_ + displacement;
+                float delta = npivot_x - prev_npivot_x_;
+                // Filter out wrap-around (when animation loops, delta jumps ~±66)
+                if (std::abs(delta) < 40.0f) {
+                    player_pos_x_ += delta;
+                }
             }
+            prev_npivot_x_ = npivot_x;
+        } else {
+            prev_npivot_x_ = 0.0f;
         }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
