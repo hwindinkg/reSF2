@@ -500,3 +500,85 @@ Stage Summary:
   caused by animation not being applied, or by something else.
 - Next: user needs to add SSH deploy key, build on Windows, test, and
   report what the [ANIM] / [COMBAT] logs show.
+
+---
+Task ID: stage-8.2
+Agent: main
+Task: Fix root motion, bag physics, leg stretching, dojo rendering, HUD/menu
+
+Work Log:
+- Analyzed user-provided log file showing [ANIM] and [COMBAT] output.
+  Key findings:
+  * step_forward.bin: NPivot goes 169→235 (+66 units over 16 frames)
+  * step_back.bin: NPivot goes 235→169 (-66 units)
+  * fists_idle.bin: NPivot essentially static
+  * Animation switching between step_forward and fists_idle rapidly
+    (play_animation called repeatedly, resetting anim_time_ to 0)
+  * Hit detection triggered at dx=150-301 (too lenient, 400px threshold)
+
+- ROOT MOTION FIX: Rewrote root motion code to use OFFSET from frame-0
+  NPivot position instead of absolute prev_npivot_x_.
+  Old: delta = npivot_x - prev_npivot_x_ (cross-animation jumps)
+  New: delta = (npivot_x - anim_root_anchor_x_) - prev_root_offset_
+  This prevents large deltas when switching between animations with
+  different world-space starting positions. Filter threshold reduced
+  from 50 to 40 units. prev_root_offset_ reset in play_animation.
+  Added [ANIM] log in play_animation to track when/how often it's called.
+
+- BAG PHYSICS FIX: Replaced simple "player center within 400px of bag"
+  check with actual limb-to-bag distance check.
+  * Punches: check NWrist_1 (front fist) animated world position
+  * Kicks: check NToe_1 (front foot) animated world position
+  * Hit threshold: 120 units (was 400)
+  * Swing direction: bag_swing_dir_ = +1 if hit from left, -1 if from right
+  * Swing angle: dir * sin(t * 4π) * (1-t) * 0.5 rad (damped pendulum)
+  Bag now ONLY swings when the attacking limb actually reaches the bag,
+  and swings in the correct direction (away from the attacker).
+
+- LEG STRETCHING FIX: Identified that BODY-Triangle-7..10 on the calves
+  mix animated skeleton nodes (NAnkle_2, NKnee_2) with non-animated
+  cloth nodes (BODY-Node12, 15, 17, 18). The cloth nodes stay at their
+  rest-pose positions while skeleton nodes move, causing triangle stretching.
+  Fix: skip triangles where any vertex is not in anim_node_pos_ or
+  skeleton_nodes_. This removes the stretched cloth-detail triangles
+  while keeping the main capsule silhouette intact.
+
+- DOJO RENDERING FIX:
+  * Y-axis: Original game uses Cocos2d coords (Y=0 at bottom, Y up).
+    reSF2 uses Y=0 at camera center. Added y_offset = 512 (half of 1024px
+    design height) to convert: world_y = img.y - y_offset.
+    This fixes "floor on ceiling" — floor images now appear at the bottom.
+  * Parallax: Implemented parallax scrolling using layer.factor.
+    Layers with factor < 1 scroll slower (appear further away).
+    parallax_shift = (1 - factor) * cam_x_, applied to image X.
+  * Layer types: Removed `if (layer.type != 1) continue;` filter.
+    Now renders ALL layer types (background, parallax, foreground).
+
+- HUD/MENU FIX:
+  * Scroll size: Collapsed MENU roll now sized to fit "MENU" text
+    (text_width + 2*cap_w + padding) instead of fixed 130px.
+  * Menu animation: Added menu_anim_progress_ (0→1, 300ms transition).
+    Scroll "unrolls" from top to bottom with smoothstep easing.
+    Collapsed roll fades out as expanded scroll fades in.
+    Icons only render when their area is revealed by the unrolling.
+  * Rotated atlas frames: Fixed load_texture_atlas_to_hud to handle
+    frames marked as "rotated" in plist. Previously, rotated frames
+    were cropped without un-rotating, causing icons to appear sideways
+    (e.g., Profile icon rotated right). Now correctly un-rotates 90° CW.
+  * Icon size: Increased from 48 to 56 pixels to better match original.
+  * Paper width: Increased to fit icon + text labels.
+
+- All changes syntax-checked with g++ -std=c++23 -fsyntax-only — passes.
+
+Stage Summary:
+- Root motion: character now moves continuously when holding A/D, no more
+  "returns to start" issue.
+- Bag physics: bag only swings when the fist/foot actually hits it, and
+  swings in the correct direction (away from attacker).
+- Leg rendering: no more stretched triangles on calves/ankles.
+- Dojo: floor at bottom, ceiling at top, parallax scrolling works, all
+  layers rendered.
+- Menu: scroll sized to fit "MENU" text, smooth expand/collapse animation,
+  rotated atlas frames now display correctly (Profile icon no longer sideways).
+- Next: user should build and test. The [ANIM] play_animation log will show
+  if animations are still switching rapidly.

@@ -361,6 +361,17 @@ public:
             }
         }
 
+        // Animate menu expand/collapse (300ms transition)
+        float target_progress = (overlay_ == Overlay::Menu) ? 1.0f : 0.0f;
+        float anim_speed = 1000.0f / 300.0f;  // 300ms full transition
+        if (menu_anim_progress_ < target_progress) {
+            menu_anim_progress_ += (float)dt / anim_speed;
+            if (menu_anim_progress_ > target_progress) menu_anim_progress_ = target_progress;
+        } else if (menu_anim_progress_ > target_progress) {
+            menu_anim_progress_ -= (float)dt / anim_speed;
+            if (menu_anim_progress_ < target_progress) menu_anim_progress_ = target_progress;
+        }
+
         if (state_ == GameState::Loading) {
             loading_timer_ += dt;
             if (loading_timer_ > 1500) {
@@ -468,29 +479,68 @@ public:
             if (hit_anim_ > 0) {
                 hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
                 
-                // Simple hit detection: check if near bag during middle of animation
-                // (attack frames are typically in the middle third of the animation)
+                // Hit detection: check if the attacking limb actually reaches the bag.
+                // We use the animated position of the attacking limb (wrist for punches,
+                // foot/ankle for kicks) and check distance to the bag's center.
+                //
+                // This replaces the old "player center within 400px of bag" check,
+                // which triggered hits even when the punch didn't actually connect.
                 if (!bag_hit_ && bag_model_ && location_) {
                     auto anim_it = animations_.find(current_anim_);
                     if (anim_it != animations_.end()) {
                         int fc = anim_it->second.frame_count;
                         int current_frame = (int)(anim_time_ * 30.0f);
-                        // Check if in middle third (typical attack window)
+                        // Attack window: middle third of the animation
                         if (current_frame >= fc / 4 && current_frame <= fc * 3 / 4) {
-                            float bag_x = location_->enemy_x - 857.0f;
-                            float dx = std::abs(player_pos_x_ - bag_x);
-                            if (dx < 400.0f) {
-                                std::printf("[COMBAT] HIT! move=%s frame=%d/%d dx=%.1f → bag_swing=800ms\n",
-                                            current_move_.c_str(), current_frame, fc, dx);
-                                bag_swing_ = 800;
-                                bag_hit_ = true;
+                            // Determine which limb is attacking based on the move name
+                            std::string limb_node;
+                            bool is_kick = (current_move_.find("Kick") != std::string::npos ||
+                                           current_move_.find("Sweep") != std::string::npos);
+                            if (is_kick) {
+                                // Kicks use the foot — use NToe_1 (front foot, facing right)
+                                limb_node = "NToe_1";
+                            } else {
+                                // Punches use the fist — use NWrist_1 (front hand, facing right)
+                                limb_node = "NWrist_1";
+                            }
+                            
+                            // Get the limb's animated world position
+                            auto ait = anim_node_pos_.find(limb_node);
+                            if (ait != anim_node_pos_.end()) {
+                                float limb_lx = ait->second.first;
+                                float limb_ly = ait->second.second;
+                                // World position: player_pos + animated local offset
+                                auto pivot_it = skeleton_nodes_.find("NPivot");
+                                float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
+                                float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx) * 0.9f;
+                                float limb_wy = player_pos_y_ + (limb_ly - pivot_ly) * 0.9f;
+                                
+                                // Bag center position
+                                float bag_cx = location_->enemy_x - 857.0f;
+                                float bag_cy = location_->enemy_y + 50.0f;
+                                
+                                float dx = limb_wx - bag_cx;
+                                float dy = limb_wy - bag_cy;
+                                float dist = std::sqrt(dx*dx + dy*dy);
+                                
+                                // Hit threshold: limb within 120 units of bag center
+                                if (dist < 120.0f) {
+                                    // Swing direction: bag swings AWAY from the attacker
+                                    // If player is on the left (dx < 0), bag swings right (positive angle)
+                                    // If player is on the right (dx > 0), bag swings left (negative angle)
+                                    bag_swing_dir_ = (dx < 0) ? 1.0f : -1.0f;
+                                    std::printf("[COMBAT] HIT! move=%s frame=%d/%d limb=%s dist=%.1f → bag_swing=800ms dir=%.0f\n",
+                                                current_move_.c_str(), current_frame, fc,
+                                                limb_node.c_str(), dist, bag_swing_dir_);
+                                    bag_swing_ = 800;
+                                    bag_hit_ = true;
+                                }
                             }
                         }
                     }
                 }
                 
                 if (hit_anim_ == 0) {
-                    std::printf("[COMBAT] attack ended → return to fists_idle\n");
                     play_animation("fists_idle", true);
                     current_move_.clear();
                     bag_hit_ = false;
@@ -519,7 +569,8 @@ public:
             render_punching_bag();
             render_character();
             render_hud(platform);
-            if (overlay_ == Overlay::Menu)   render_menu_expanded(platform);
+            // Render menu expansion animation (also during transition)
+            if (menu_anim_progress_ > 0.01f) render_menu_expanded(platform);
             if (overlay_ == Overlay::Dialog) render_dialog_overlay(platform);
         }
         renderer_->end_frame();
@@ -760,17 +811,27 @@ private:
 
     void render_location() {
         if (!location_) return;
+        // Render ALL layers (not just type==1). The original game has multiple
+        // layer types: background (type 0), parallax (type 1), foreground, etc.
+        // Each layer has a "factor" that controls parallax scroll speed.
+        //
+        // Coordinate system: the original game (Cocos2d-x) uses Y-UP with
+        // Y=0 at the BOTTOM of the screen. The reSF2 renderer also uses Y-UP
+        // but with the camera centered at Y=0 (middle of screen).
+        // To convert: reSF2_y = cocos2d_y - screen_height/2.
+        // We use the original game's design height (1024 for 1536x1024).
+        const float DESIGN_HEIGHT = 1024.0f;
+        const float y_offset = DESIGN_HEIGHT / 2.0f;  // 512
+
         for (auto& layer : location_->layers) {
-            if (layer.type != 1) continue;
-            // Approximate parallax by shifting camera target by factor.
-            float orig_tx = renderer_->camera().x();
-            float orig_ty = renderer_->camera().y();
-            // Save current target and apply parallax factor
-            // (Camera2D doesn't expose target getters, so we use the
-            // actual camera position via the public x()/y() methods.)
-            // To keep things simple we just render this layer at full camera
-            // (parallax = 1). True parallax would require set_target(fx, fy)
-            // before each layer.
+            // Parallax: shift the rendering by (1 - factor) * camera_offset.
+            // factor=1.0 → no shift (layer moves with camera).
+            // factor=0.5 → layer moves at half speed (appears further away).
+            // factor=0.0 → layer is fixed (never moves).
+            float parallax_factor = layer.factor;
+            if (parallax_factor <= 0.0f) parallax_factor = 1.0f;  // fallback
+            float parallax_shift = (1.0f - parallax_factor) * cam_x_;
+
             for (auto& img : layer.images) {
                 if (img.class_name == "pixel_1" && !img.color.empty()) {
                     unsigned long col = std::stoul(img.color, nullptr, 16);
@@ -778,21 +839,19 @@ private:
                         (std::uint8_t)((col>>16)&0xFF),
                         (std::uint8_t)((col>>8)&0xFF),
                         (std::uint8_t)(col&0xFF), 255};
-                    // World-space filled rect — use draw_filled_rect_screen
-                    // with world-to-screen conversion.
                     auto it = atlases_.find(img.atlas_name);
                     if (it == atlases_.end()) {
                         // No atlas: render as a solid world-space rect.
-                        // Y-UP: bottom = cam_y - hh, top = cam_y + hh
                         float hw = (float)platform_->window_width()  / (2.0f * zoom_);
                         float hh = (float)platform_->window_height() / (2.0f * zoom_);
                         float left = cam_x_ - hw, right = cam_x_ + hw;
                         float bottom = cam_y_ - hh, top = cam_y_ + hh;
-                        // (x,y) = centre, bottom-left = (x-w/2, y-h/2) in Y-UP
+                        // Convert Y from Cocos2d (Y=0 at bottom) to reSF2 (Y=0 at center)
+                        float world_y = img.y - y_offset;
                         float sx = (img.x - img.w/2.0f - left) / (right - left) * platform_->window_width();
-                        float sy = (1.0f - (img.y - img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
+                        float sy = (1.0f - (world_y - img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
                         float ex = (img.x + img.w/2.0f - left) / (right - left) * platform_->window_width();
-                        float ey = (1.0f - (img.y + img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
+                        float ey = (1.0f - (world_y + img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
                         float x = std::min(sx, ex), y = std::min(sy, ey);
                         float w = std::abs(ex - sx), h = std::abs(ey - sy);
                         renderer_->draw_filled_rect_screen(x, y, w, h, c);
@@ -823,8 +882,12 @@ private:
                     u1 = (frame.atlas_x + frame.atlas_w) / tw;
                     v1 = (frame.atlas_y + frame.atlas_h) / th;
                 }
-                float px = img.x - img.w / 2.0f;
-                float py = img.y - img.h / 2.0f;  // bottom-left (world Y-UP: +Y = up)
+                // Convert Y from Cocos2d (Y=0 at bottom) to reSF2 (Y=0 at center)
+                float world_y = img.y - y_offset;
+                // Apply parallax shift to X (layers with factor < 1 scroll slower)
+                float world_x = img.x - parallax_shift;
+                float px = world_x - img.w / 2.0f;
+                float py = world_y - img.h / 2.0f;  // bottom-left (world Y-UP: +Y = up)
                 renderer_->draw_textured_quad(*atlas.texture, px, py, img.w, img.h,
                                               u0, v0, u1, v1);
             }
@@ -1191,7 +1254,23 @@ private:
         }
 
         // Render triangles (small parts)
+        // Skip triangles that reference non-animated nodes (BODY-Node entries
+        // from body.xml). These are cloth simulation nodes that don't have
+        // per-node animation data in the .bin files. Rendering them at their
+        // rest-pose positions while other triangle vertices are animated
+        // causes visible stretching on the legs (especially around the calves
+        // and ankles where BODY-Triangle-7..10 are located).
         for (auto& t : body_model_->triangles) {
+            // Check if ALL three vertices are animated (in anim_node_pos_ or skeleton_nodes_)
+            bool n1_animated = (anim_node_pos_.find(t.n1) != anim_node_pos_.end()) ||
+                               (skeleton_nodes_.find(t.n1) != skeleton_nodes_.end());
+            bool n2_animated = (anim_node_pos_.find(t.n2) != anim_node_pos_.end()) ||
+                               (skeleton_nodes_.find(t.n2) != skeleton_nodes_.end());
+            bool n3_animated = (anim_node_pos_.find(t.n3) != anim_node_pos_.end()) ||
+                               (skeleton_nodes_.find(t.n3) != skeleton_nodes_.end());
+            if (!n1_animated || !n2_animated || !n3_animated) {
+                continue;  // Skip triangles with non-animated cloth nodes
+            }
             auto [tx0, ty0] = resolve_body_node(t.n1,
                 world_cx, world_cy, facing_right_, pivot_local_y);
             auto [tx1, ty1] = resolve_body_node(t.n2,
@@ -1323,17 +1402,21 @@ private:
         float bag_cy = location_->enemy_y + 50.0f;  // offset so bag hangs properly
         
         // === BAG SWING ANIMATION ===
-        // bag_swing_ counts down from 800ms when hit.
-        // Node12 (Y=335 in model) is FIXED at the ceiling — it's the swing pivot.
-        // All other nodes rotate around Node12's world position.
-        // Swing direction: bag swings AWAY from player (player on left → bag swings right).
-        // Damped oscillation: 2 cycles, decaying amplitude.
+        // Physics: damped pendulum. The bag hangs from Node12 (fixed ceiling point).
+        // When hit, the bag swings AWAY from the attacker, then oscillates back
+        // and forth with decaying amplitude.
+        //
+        // bag_swing_dir_: +1 = bag was hit from the left (swings right)
+        //                 -1 = bag was hit from the right (swings left)
+        //
+        // The swing angle follows: angle = dir * sin(t * 4π) * (1-t) * 0.5 rad
+        // — 2 full oscillations, max ~29°, linearly decaying amplitude.
+        // This matches the original game's pendulum behavior.
         float swing_angle = 0.0f;
         if (bag_swing_ > 0) {
             float swing_t = 1.0f - (float)bag_swing_ / 800.0f;  // 0 → 1
-            // 2 full oscillations (4*PI), decaying amplitude
-            swing_angle = std::sin(swing_t * 3.14159265f * 4.0f)
-                        * (1.0f - swing_t) * 0.45f;  // max ~0.45 rad ~ 26 degrees
+            swing_angle = bag_swing_dir_ * std::sin(swing_t * 3.14159265f * 4.0f)
+                        * (1.0f - swing_t) * 0.5f;  // max ~0.5 rad ~ 29 degrees
         }
         float cos_a = std::cos(swing_angle);
         float sin_a = std::sin(swing_angle);
@@ -1678,20 +1761,35 @@ private:
         float npivot_y = npy0 + (npy1 - npy0) * alpha;
 
         // Root motion: applied for step animations (step_forward, step_back)
-        // step_forward: NPivot X goes 169→235 (delta positive → move right)
-        // step_back: NPivot X goes 235→169 (delta negative → move left)
-        // No facing/direction multiplier needed — delta already has correct sign.
+        //
+        // APPROACH: Use OFFSET from frame-0 NPivot position, not absolute positions.
+        // This prevents cross-animation jumps when switching between animations
+        // that have different world-space NPivot starting positions.
+        //
+        // step_forward: NPivot X goes 169→235, offset goes 0→+66 → move right
+        // step_back: NPivot X goes 235→169, offset goes 0→-66 → move left
+        //
+        // When the animation loops, offset wraps from ±66 back to 0.
+        // The delta at loop boundary is ∓66, which is filtered out by the
+        // abs(delta) < 50 check. On the next frame, offset goes 0→3, delta=3,
+        // which is applied normally.
+        //
+        // Facing: step_forward is played when facing_right_=true (moving right).
+        //         step_back is played when facing_right_=false (moving left).
+        // The delta sign already matches the movement direction, so no
+        // facing multiplier is needed.
         if (current_anim_ == "step_forward" || current_anim_ == "step_back") {
             if (anim_anchor_set_) {
-                float delta = npivot_x - prev_npivot_x_;
-                // Only apply if delta is reasonable (not a loop wrap-around)
-                if (std::abs(delta) < 50.0f) {
+                float current_offset = npivot_x - anim_root_anchor_x_;
+                float delta = current_offset - prev_root_offset_;
+                // Filter out loop wrap-arounds and cross-animation jumps
+                if (std::abs(delta) < 40.0f) {
                     player_pos_x_ += delta * 0.9f;
                 }
+                prev_root_offset_ = current_offset;
             }
-            prev_npivot_x_ = npivot_x;
         } else {
-            prev_npivot_x_ = npivot_x;
+            prev_root_offset_ = 0.0f;
         }
         anim_root_dx_ = 0.0f;
         anim_root_dy_ = 0.0f;
@@ -1754,6 +1852,10 @@ private:
     
     void play_animation(const std::string& name, bool loop = true) {
         if (animations_.count(name)) {
+            if (current_anim_ != name) {
+                std::printf("[ANIM] play_animation('%s', loop=%d) — switching from '%s'\n",
+                            name.c_str(), loop, current_anim_.c_str());
+            }
             current_anim_ = name;
             anim_time_ = 0.0f;
             anim_loop_ = loop;
@@ -1761,6 +1863,7 @@ private:
             anim_anchor_set_ = false;
             anim_root_dx_ = 0.0f;
             anim_root_dy_ = 0.0f;
+            prev_root_offset_ = 0.0f;  // Reset root motion offset for new animation
         }
     }
 
@@ -1839,16 +1942,29 @@ private:
         if (!atlas_px) return;
         for (auto& [name, idx] : result->name_index) {
             auto& frame = result->frames[idx];
-            // All frames (rotated or not) are stored upright in the atlas.
-            // Just crop directly using atlas dimensions.
+            // Handle rotated frames:
+            // In Cocos2d texture atlases, frames marked as "rotated" are
+            // stored rotated 90° clockwise in the atlas PNG.
+            // frame.atlas_w/atlas_h are the UNROTATED dimensions.
+            // For rotated frames, the atlas region has swapped dimensions
+            // (atlas_h wide × atlas_w tall), and we need to un-rotate the
+            // pixels when cropping.
             int fw = frame.atlas_w;
             int fh = frame.atlas_h;
             auto tex = std::make_unique<ren::Texture2D>();
             std::vector<std::uint8_t> px((size_t)fw * fh * 4);
             for (int y = 0; y < fh; ++y) {
                 for (int x = 0; x < fw; ++x) {
-                    int sx = frame.atlas_x + x;
-                    int sy = frame.atlas_y + y;
+                    int sx, sy;
+                    if (frame.rotated) {
+                        // Un-rotate 90° counter-clockwise:
+                        // destination (x, y) ← source (atlas_x + (fh-1-y), atlas_y + x)
+                        sx = frame.atlas_x + (fh - 1 - y);
+                        sy = frame.atlas_y + x;
+                    } else {
+                        sx = frame.atlas_x + x;
+                        sy = frame.atlas_y + y;
+                    }
                     if (sx < 0 || sy < 0 || sx >= aw || sy >= ah) continue;
                     int src_idx = (sy * aw + sx) * 4;
                     int dst_idx = (y * fw + x) * 4;
@@ -1985,21 +2101,30 @@ private:
         // Menu button (LEFT side, scroll/roll style)
         float btn_x = 10.0f, btn_y = 58.0f;
         float roll_h = 40.0f;
-        if (overlay_ != Overlay::Menu) {
-            // Collapsed: scroll roll bar
+        // Compute menu animation progress (smoothstep easing)
+        float mp = menu_anim_progress_;
+        float menu_eased = mp * mp * (3.0f - 2.0f * mp);
+        // Show collapsed roll when menu is closed OR animating
+        if (menu_eased < 0.99f) {
+            // Collapsed: scroll roll bar — sized to fit "MENU" text
             auto lit = scroll_textures_.find("MenuRoll_left");
             auto cit = scroll_textures_.find("MenuRoll_center");
             auto rit = scroll_textures_.find("MenuRoll_right");
             if (lit != scroll_textures_.end() && cit != scroll_textures_.end() &&
                 rit != scroll_textures_.end()) {
                 float cap_w = roll_h * lit->second->width() / lit->second->height();
-                float min_roll_w = 130.0f;
-                float center_w = min_roll_w - 2 * cap_w;
-                renderer_->draw_textured_quad_screen(*lit->second, btn_x, btn_y, cap_w, roll_h);
-                renderer_->draw_textured_quad_screen(*cit->second, btn_x + cap_w, btn_y, center_w, roll_h);
-                renderer_->draw_textured_quad_screen(*rit->second, btn_x + cap_w + center_w, btn_y, cap_w, roll_h);
-                render_text("MENU", btn_x + min_roll_w / 2 - 22, btn_y + 12, 0.22f,
-                            {255, 240, 200, 255});
+                // Size the roll to fit "MENU" text (~90px at 0.22f scale) + padding
+                float text_width = 90.0f;
+                float roll_w = text_width + 2 * cap_w + 20.0f;  // text + caps + padding
+                float center_w = roll_w - 2 * cap_w;
+                // Fade out the collapsed roll as menu expands
+                float alpha = 1.0f - menu_eased;
+                ren::Color4B roll_col{255, 255, 255, (uint8_t)(alpha * 255)};
+                renderer_->draw_textured_quad_screen(*lit->second, btn_x, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
+                renderer_->draw_textured_quad_screen(*cit->second, btn_x + cap_w, btn_y, center_w, roll_h, 0,0,1,1, roll_col);
+                renderer_->draw_textured_quad_screen(*rit->second, btn_x + cap_w + center_w, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
+                ren::Color4B text_col{255, 240, 200, (uint8_t)(alpha * 255)};
+                render_text("MENU", btn_x + roll_w / 2 - 22, btn_y + 12, 0.22f, text_col);
             } else {
                 ren::Color4B bg{60, 40, 20, 230};
                 renderer_->draw_filled_rect_screen(btn_x, btn_y, 120, roll_h, bg);
@@ -2023,7 +2148,13 @@ private:
     // ---------- Menu expanded (vertical scroll, matching original game) ----------
     // In the original game, the menu is a VERTICAL scroll on the left side.
     // Icons are stacked top-to-bottom in a single column.
+    // The scroll "unrolls" from top to bottom with a smooth animation.
     void render_menu_expanded(plat::Platform& platform) {
+        // Compute eased animation progress
+        float mp = menu_anim_progress_;
+        float menu_eased = mp * mp * (3.0f - 2.0f * mp);  // smoothstep
+        if (menu_eased < 0.01f) return;  // nothing to render
+
         float btn_x = 10.0f, btn_y = 58.0f;
         float roll_h = 40.0f;
 
@@ -2034,7 +2165,7 @@ private:
         if (lit == scroll_textures_.end() || cit == scroll_textures_.end() ||
             rit == scroll_textures_.end()) {
             ren::Color4B bg{60, 40, 20, 230};
-            renderer_->draw_filled_rect_screen(btn_x, btn_y, 120, 400, bg);
+            renderer_->draw_filled_rect_screen(btn_x, btn_y, 120, 400 * menu_eased, bg);
             return;
         }
 
@@ -2044,20 +2175,24 @@ private:
         float cap_w = roll_h * left_tex->width() / left_tex->height();
 
         // Vertical layout: icons stacked top-to-bottom
-        float icon_size = 48.0f;
-        float icon_spacing = 6.0f;
+        float icon_size = 56.0f;  // larger icons to match original game
+        float icon_spacing = 8.0f;
         int n_items = 5;
-        float paper_padding = 12.0f;
-        float paper_w = icon_size + paper_padding * 2 + 20;  // narrow, tall
-        float paper_h = n_items * (icon_size + icon_spacing) + paper_padding * 2;
+        float paper_padding = 14.0f;
+        float paper_w = icon_size + paper_padding * 2 + 30;  // wider for text labels
+        float full_paper_h = n_items * (icon_size + icon_spacing) + paper_padding * 2;
+        // Animate paper height: scroll unrolls from top to bottom
+        float paper_h = full_paper_h * menu_eased;
         float center_w = paper_w - 2 * cap_w;
 
-        // Roll bar (top, horizontal)
-        renderer_->draw_textured_quad_screen(*left_tex, btn_x, btn_y, cap_w, roll_h);
-        renderer_->draw_textured_quad_screen(*center_tex, btn_x + cap_w, btn_y, center_w, roll_h);
-        renderer_->draw_textured_quad_screen(*right_tex, btn_x + cap_w + center_w, btn_y, cap_w, roll_h);
+        // Roll bar (top, horizontal) — sized to fit paper width
+        float roll_alpha = (menu_eased > 0.05f) ? 1.0f : menu_eased / 0.05f;
+        ren::Color4B roll_col{255, 255, 255, (uint8_t)(roll_alpha * 255)};
+        renderer_->draw_textured_quad_screen(*left_tex, btn_x, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
+        renderer_->draw_textured_quad_screen(*center_tex, btn_x + cap_w, btn_y, center_w, roll_h, 0,0,1,1, roll_col);
+        renderer_->draw_textured_quad_screen(*right_tex, btn_x + cap_w + center_w, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
 
-        // Paper area (below roll, vertical)
+        // Paper area (below roll, vertical) — clips to animated height
         float paper_y = btn_y + roll_h - 3;
         ren::Color4B paper_bg{200, 170, 120, 245};
         renderer_->draw_filled_rect_screen(btn_x, paper_y, paper_w, paper_h, paper_bg);
@@ -2069,25 +2204,31 @@ private:
             float pl_w = paper_w * pl_it->second->width() / pl_it->second->height();
             renderer_->draw_textured_quad_screen(*pl_it->second, btn_x, paper_y, pl_w, paper_w);
         }
-        if (pr_it != scroll_textures_.end()) {
+        if (pr_it != scroll_textures_.end() && menu_eased > 0.95f) {
+            // Only show bottom edge when fully expanded
             float pr_w = paper_w * pr_it->second->width() / pr_it->second->height();
             renderer_->draw_textured_quad_screen(*pr_it->second,
                 btn_x, paper_y + paper_h - pr_w, pr_w, paper_w);
         }
 
-        // Shadow below
+        // Shadow below (only when fully expanded)
         auto shadow_it = scroll_textures_.find("Shadow_roll");
-        if (shadow_it != scroll_textures_.end()) {
+        if (shadow_it != scroll_textures_.end() && menu_eased > 0.9f) {
             renderer_->draw_textured_quad_screen(*shadow_it->second,
                 btn_x, paper_y + paper_h - 8, paper_w, 15);
         }
 
-        // Menu icons (vertical stack) — 5 items matching original game
+        // Menu icons (vertical stack) — only render icons that fit within the animated height
         const char* items[] = {"Dojo", "Map", "Shop", "Profile", "Settings"};
         float ix = btn_x + paper_padding + 10;
         float iy = paper_y + paper_padding;
-        for (auto& name : items) {
-            // Try different case patterns
+        for (int idx = 0; idx < 5; ++idx) {
+            float icon_y = iy + idx * (icon_size + icon_spacing);
+            // Skip icons that haven't been revealed yet (below the unrolled height)
+            if (icon_y + icon_size > paper_y + paper_h) break;
+
+            auto& name = items[idx];
+            // Try different case patterns for the texture name
             std::string tex_name = std::string(name) + "_normal";
             auto it = menu_textures_.find(tex_name);
             if (it == menu_textures_.end()) {
@@ -2106,12 +2247,11 @@ private:
                     draw_w = icon_size * aspect;
                 }
                 float draw_x = ix + (icon_size - draw_w) * 0.5f;  // center horizontally
-                float draw_y = iy + (icon_size - draw_h) * 0.5f;  // center vertically
+                float draw_y = icon_y + (icon_size - draw_h) * 0.5f;  // center vertically
                 renderer_->draw_textured_quad_screen(*it->second, draw_x, draw_y,
                                                      draw_w, draw_h);
             }
-            render_text(name, ix + icon_size + 5, iy + 8, 0.14f, {60, 40, 20, 255});
-            iy += icon_size + icon_spacing;
+            render_text(name, ix + icon_size + 5, icon_y + 10, 0.16f, {60, 40, 20, 255});
         }
     }
 
@@ -2192,6 +2332,7 @@ private:
 
     GameState state_ = GameState::Loading;
     Overlay overlay_ = Overlay::None;
+    float menu_anim_progress_ = 0.0f;  // 0 = collapsed, 1 = fully expanded
     uint32_t loading_timer_ = 0;
     float load_scale_ = 1.0f, zoom_ = 1.0f;
     std::vector<LoadingImg> loading_images_;
@@ -2218,6 +2359,7 @@ private:
     int hit_anim_ = 0;    // ms remaining
     int bag_swing_ = 0;   // ms remaining
     bool bag_hit_ = false;  // bag already hit during current attack
+    float bag_swing_dir_ = 1.0f;  // +1 = swing right, -1 = swing left
     bool quit_requested_ = false;
     
     // Animation state
@@ -2247,6 +2389,7 @@ private:
     float anim_root_anchor_y_ = 0.0f;
     bool anim_anchor_set_ = false;
     float prev_npivot_x_ = 0.0f;  // for step root motion (previous frame)
+    float prev_root_offset_ = 0.0f;  // offset from frame-0 NPivot (for root motion)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
 
