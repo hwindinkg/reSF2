@@ -1380,15 +1380,17 @@ private:
         //   step/punch: NToe_2 ly = 64.60 (combat stance → feet on floor)
         // We use the step animation as reference (looks correct).
         // Adjustment = (reference_ly - current_ly) where reference_ly = 64.60.
-        // This moves the character DOWN in idle (by ~17 units), not UP.
+        // SMOOTH the adjustment to prevent visual jumps when switching animations.
         float ly_lowest = pivot_local_y;
         for (auto& [name, pos] : anim_node_pos_) {
             if (pos.second < ly_lowest) ly_lowest = pos.second;
         }
         const float REF_FEET_LY = 64.60f;  // NToe_2 ly in step_forward.bin
-        float y_adjust = REF_FEET_LY - ly_lowest;
+        float target_y_adjust = REF_FEET_LY - ly_lowest;
+        // Smoothly interpolate y_adjust to prevent jitter on animation switch
+        y_adjust_smoothed_ += (target_y_adjust - y_adjust_smoothed_) * 0.15f;
         float world_cx = player_pos_x_;
-        float world_cy = player_pos_y_ + y_adjust;
+        float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
         // Build edge lookup from both body.xml edges and skeleton.xml edges
         std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
@@ -2720,6 +2722,7 @@ private:
     float prev_npivot_x_ = 0.0f;  // for step root motion (previous frame)
     float prev_root_offset_ = 0.0f;  // offset from frame-0 NPivot (for root motion)
     float step_start_player_x_ = 0.0f;  // player X when step started (for absolute root motion)
+    float y_adjust_smoothed_ = 0.0f;  // smoothed Y adjustment for feet normalization
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
