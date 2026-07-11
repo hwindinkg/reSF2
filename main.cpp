@@ -436,12 +436,12 @@ public:
                 if (want_move_left && !want_move_right) {
                     // Don't change facing during an active step — wait until it finishes
                     if (!step_active_) facing_right_ = false;
-                    // Start a new step if cooldown expired
+                    // Start a new step if no step is active (cooldown creates delay)
                     if (!step_active_ && step_cooldown_ == 0 &&
                         animations_.count("step_back")) {
                         facing_right_ = false;
                         play_animation("step_back", false);
-                        step_cooldown_ = STEP_DURATION_MS;
+                        step_cooldown_ = STEP_DURATION_MS + 200;  // +200ms delay between steps
                         step_active_ = true;
                         step_duration_ = STEP_DURATION_MS;
                         step_start_x_ = player_pos_x_;
@@ -453,7 +453,7 @@ public:
                         animations_.count("step_forward")) {
                         facing_right_ = true;
                         play_animation("step_forward", false);
-                        step_cooldown_ = STEP_DURATION_MS;
+                        step_cooldown_ = STEP_DURATION_MS + 200;  // +200ms delay between steps
                         step_active_ = true;
                         step_duration_ = STEP_DURATION_MS;
                         step_start_x_ = player_pos_x_;
@@ -918,12 +918,16 @@ private:
                     for (auto& [fname, idx] : a.atlas->name_index) {
                         auto& frame = a.atlas->frames[idx];
                         if (!frame.rotated) continue;
-                        // For rotated frames, atlas_w/atlas_h are the ATLAS (post-rotation)
-                        // dimensions. The ORIGINAL sprite dimensions are swapped:
-                        // original_w = atlas_h, original_h = atlas_w.
-                        // We create the pre-cropped texture at original dimensions.
-                        int fw = frame.atlas_h;  // original width (swapped)
-                        int fh = frame.atlas_w;  // original height (swapped)
+                        // For rotated frames, use source_size_w/h (original untrimmed)
+                        // if available. Otherwise swap atlas_w/atlas_h.
+                        int fw, fh;
+                        if (frame.source_size_w > 0 && frame.source_size_h > 0) {
+                            fw = frame.source_size_w;
+                            fh = frame.source_size_h;
+                        } else {
+                            fw = frame.atlas_h;  // original width (swapped)
+                            fh = frame.atlas_w;  // original height (swapped)
+                        }
                         auto ctex = std::make_unique<ren::Texture2D>();
                         std::vector<std::uint8_t> px((size_t)fw * fh * 4);
                         for (int y = 0; y < fh; ++y) {
@@ -1407,11 +1411,27 @@ private:
         auto pivot_it = skeleton_nodes_.find("NPivot");
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
-        // Apply animation root-motion offset (whole-body shift from .bin)
-        // NOTE: anim_root_dx_/dy_ are always 0 now (update_animation is a
-        // no-op). This code is kept for when per-node animation is restored.
-        float world_cx = player_pos_x_ + (facing_right_ ? anim_root_dx_ : -anim_root_dx_);
-        float world_cy = player_pos_y_ + anim_root_dy_;
+        // Get animated NPivot Y to normalize vertical position across animations.
+        // Different animations have different NPivot Y values in .bin files:
+        //   fists_idle: NPivot Y = 87.40
+        //   step_forward: NPivot Y = 106.21
+        // This causes the character to "float" in some animations because the
+        // feet position is relative to NPivot. We normalize by subtracting the
+        // delta between animated NPivot Y and rest NPivot Y.
+        float anim_npivot_y = pivot_local_y;  // default: rest pose
+        auto npivot_anim = anim_node_pos_.find("NPivot");
+        if (npivot_anim != anim_node_pos_.end()) {
+            // anim_node_pos_ stores (local_x, local_y) where local_y = (abs_y - npivot_bin_y) + npivot_rest_y
+            // For NPivot: local_y = (npivot_bin_y - npivot_bin_y) + npivot_rest_y = npivot_rest_y
+            // So we can't get npivot_bin_y from anim_node_pos_. We need to store it separately.
+            // For now, use the stored animated NPivot bin Y (set in update_animation).
+            anim_npivot_y = anim_npivot_bin_y_;
+        }
+        // Vertical offset: shift world_cy so that animated NPivot matches rest pose
+        float y_normalize = pivot_local_y - anim_npivot_y;
+
+        float world_cx = player_pos_x_;
+        float world_cy = player_pos_y_ + y_normalize;
 
         // Build edge lookup from both body.xml edges and skeleton.xml edges
         std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
@@ -2070,6 +2090,11 @@ private:
         float npivot_x = npx0 + (npx1 - npx0) * alpha;
         float npivot_y = npy0 + (npy1 - npy0) * alpha;
 
+        // Store animated NPivot Y for render_body_model normalization.
+        // This prevents the character from "floating" in animations where
+        // NPivot Y differs from the rest pose (e.g., idle vs step).
+        anim_npivot_bin_y_ = npivot_y;
+
         // Root motion: DISABLED. Root motion from .bin was causing issues
         // (character returning to start due to anchor reset across animations).
         // Instead, movement is handled in on_update() using a simple
@@ -2229,15 +2254,26 @@ private:
         for (auto& [name, idx] : result->name_index) {
             auto& frame = result->frames[idx];
             // Handle rotated frames:
-            // For rotated frames, atlas_w/atlas_h are ATLAS (post-rotation) dimensions.
-            // Original sprite dimensions are swapped: original_w = atlas_h, original_h = atlas_w.
+            // For rotated frames, use source_size_w/h (original untrimmed dimensions)
+            // if available. Otherwise swap atlas_w/atlas_h.
             int fw, fh;
             if (frame.rotated) {
-                fw = frame.atlas_h;  // original width (swapped)
-                fh = frame.atlas_w;  // original height (swapped)
+                // source_size_w/h are the original (untrimmed) dimensions
+                if (frame.source_size_w > 0 && frame.source_size_h > 0) {
+                    fw = frame.source_size_w;
+                    fh = frame.source_size_h;
+                } else {
+                    fw = frame.atlas_h;  // original width (swapped)
+                    fh = frame.atlas_w;  // original height (swapped)
+                }
             } else {
-                fw = frame.atlas_w;
-                fh = frame.atlas_h;
+                if (frame.source_size_w > 0 && frame.source_size_h > 0) {
+                    fw = frame.source_size_w;
+                    fh = frame.source_size_h;
+                } else {
+                    fw = frame.atlas_w;
+                    fh = frame.atlas_h;
+                }
             }
             auto tex = std::make_unique<ren::Texture2D>();
             std::vector<std::uint8_t> px((size_t)fw * fh * 4);
@@ -2734,6 +2770,7 @@ private:
     bool anim_anchor_set_ = false;
     float prev_npivot_x_ = 0.0f;  // for step root motion (previous frame)
     float prev_root_offset_ = 0.0f;  // offset from frame-0 NPivot (for root motion)
+    float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
 
