@@ -430,6 +430,7 @@ public:
                     if (!step_active_ && step_cooldown_ == 0 &&
                         animations_.count("step_back")) {
                         facing_right_ = false;
+                        step_start_player_x_ = player_pos_x_;
                         play_animation("step_back", false);
                         step_cooldown_ = STEP_DURATION_MS;
                         step_active_ = true;
@@ -439,6 +440,7 @@ public:
                     if (!step_active_ && step_cooldown_ == 0 &&
                         animations_.count("step_forward")) {
                         facing_right_ = true;
+                        step_start_player_x_ = player_pos_x_;
                         play_animation("step_forward", false);
                         step_cooldown_ = STEP_DURATION_MS;
                         step_active_ = true;
@@ -2076,26 +2078,22 @@ private:
         // NPivot Y differs from the rest pose (e.g., idle vs step).
         anim_npivot_bin_y_ = npivot_y;
 
-        // Root motion: drives player movement from .bin animation data.
-        // NPivot X changes in the animation are applied to player_pos_x_.
-        // This gives natural non-linear movement matching the animation.
+        // Root motion: ABSOLUTE displacement from frame 0.
+        // Instead of accumulating deltas (which has anchor reset issues),
+        // we SET player_pos_x_ directly based on NPivot offset from frame 0.
         //
-        // The non-looping wrap-around bug is fixed: when animation finishes,
-        // it stays at the last frame (no interpolation with frame 0).
-        // The step_active_ flag in on_update() prevents starting a new step
-        // until the current one finishes.
+        // step_forward.bin: NPivot X goes 169→235 (displacement +66)
+        // step_back.bin: NPivot X goes 235→169 (displacement -66)
+        //
+        // When step starts, we save the player's X position and the NPivot X
+        // at frame 0. Each frame, we compute the displacement and SET
+        // player_pos_x_ = start_x + displacement. This prevents accumulation
+        // errors and anchor reset issues.
         if (current_anim_ == "step_forward" || current_anim_ == "step_back") {
             if (anim_anchor_set_) {
-                float current_offset = npivot_x - anim_root_anchor_x_;
-                float delta = current_offset - prev_root_offset_;
-                // Filter out large deltas (cross-animation jumps)
-                if (std::abs(delta) < 40.0f) {
-                    player_pos_x_ += delta;
-                }
-                prev_root_offset_ = current_offset;
+                float displacement = npivot_x - anim_root_anchor_x_;
+                player_pos_x_ = step_start_player_x_ + displacement;
             }
-        } else {
-            prev_root_offset_ = 0.0f;
         }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
@@ -2747,6 +2745,7 @@ private:
     bool anim_anchor_set_ = false;
     float prev_npivot_x_ = 0.0f;  // for step root motion (previous frame)
     float prev_root_offset_ = 0.0f;  // offset from frame-0 NPivot (for root motion)
+    float step_start_player_x_ = 0.0f;  // player X when step started (for absolute root motion)
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
