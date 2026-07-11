@@ -1405,7 +1405,6 @@ private:
     void load_moves() {
         auto root = std::filesystem::path(asset_root_);
         auto exe = get_exe_dir();
-        auto root = std::filesystem::path(asset_root_);
         std::vector<std::filesystem::path> search_dirs = {
             root/"assets"/"animations",
             root/"animations",
