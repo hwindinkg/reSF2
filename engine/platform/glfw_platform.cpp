@@ -297,7 +297,7 @@ bool GlfwPlatform::poll_events() {
     // the actual hardware key state at this moment.
     // This fixes the movement jitter where keys_down[D] became false
     // every other frame despite the key being physically held.
-    for (int i = 0; i < static_cast<int>(plat::Key::AltRight) + 1; ++i) {
+    for (int i = 0; i < static_cast<int>(Key::AltRight) + 1; ++i) {
         int glfw_key = key_index_to_glfw(i);
         if (glfw_key >= 0) {
             int state = glfwGetKey(impl_->window, glfw_key);
