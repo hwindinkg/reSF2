@@ -541,14 +541,13 @@ public:
         }
 
         // === DYNAMIC FACING ===
-        // Character always faces the enemy. Updated EVERY frame (not just idle)
-        // so the character turns around when walking past the enemy.
-        // During attacks/rolls, facing is locked (don't flip mid-attack).
-        if (location_ && hit_anim_ == 0 && move_state_ < 10) {
+        // Character faces the enemy. Only update when IDLE (move_state_==0)
+        // — NOT during step movement, attacks, or special moves. This prevents
+        // the "walk past enemy → facing flips → step direction reverses →
+        // character returns to start" bug.
+        if (location_ && hit_anim_ == 0 && move_state_ == 0) {
             float bag_x = location_->enemy_x - 983.0f;
             bool should_face_right = (bag_x >= player_pos_x_);
-            // Only flip if the character has actually crossed the enemy
-            // (prevents rapid flipping when standing close)
             float dist_to_enemy = std::abs(bag_x - player_pos_x_);
             if (dist_to_enemy > 30.0f) {
                 facing_right_ = should_face_right;
@@ -588,7 +587,62 @@ public:
         }
         bool step_min_played = step_play_time_ >= 400;
 
-        // === SPECIAL MOVES (jumps, rolls, flips, duck) ===
+        // === COMBAT: Punch (O) — checked BEFORE duck/special moves ===
+        // From moves.xml:
+        //   HighPunch: Central|Punch → O
+        //   HeavyPunch: Forward|Punch → D+O (Forward+O)
+        //   SpinningPunch: Back|Punch → A+O (Back+O)
+        //   UpperCut: Up|Punch → W+O
+        //   LowPunch: Down|Punch → S+O
+        //   ElbowStrike: DownBack|Punch → S+A+O (Down+Back+Punch)
+        // Attacks take priority over duck/special moves so S+O works even
+        // though S alone would enter duck.
+        if (punch_pressed && hit_anim_ == 0 && (move_state_ < 10 || move_state_ == 11)) {
+            std::string move_name, anim_name;
+            if (key_down && key_back) { move_name = "ElbowStrike"; anim_name = "elbow_strike"; }
+            else if (key_forward && !key_back) { move_name = "HeavyPunch"; anim_name = "heavy_punch"; }
+            else if (key_back && !key_forward) { move_name = "SpinningPunch"; anim_name = "spinning_punch"; }
+            else if (key_up) { move_name = "UpperCut"; anim_name = "upper_cut"; }
+            else if (key_down) { move_name = "LowPunch"; anim_name = "low_punch"; }
+            else { move_name = "HighPunch"; anim_name = "high_punch"; }
+
+            if (animations_.count(anim_name)) {
+                std::printf("[COMBAT] O -> %s (anim '%s')\n", move_name.c_str(), anim_name.c_str());
+                play_animation(anim_name, false);
+                current_move_ = move_name;
+                int fc = animations_[anim_name].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                move_state_ = 0;
+                // Skip special moves / step this frame — attack takes priority
+                goto after_combat;
+            }
+        }
+
+        // === COMBAT: Kick (P) — checked BEFORE duck/special moves ===
+        // From moves.xml:
+        //   HighKick: Central|Kick → P
+        //   FrontKick: Forward|Kick → D+P (Forward+P)
+        //   BackKick: Back|Kick → A+P (Back+P)
+        //   Sweep: Down|Kick → S+P
+        //   DodgeReverseKick: DownForward|Kick → S+D+P (Down+Forward+Kick)
+        if (kick_pressed && hit_anim_ == 0 && (move_state_ < 10 || move_state_ == 11)) {
+            std::string move_name, anim_name;
+            if (key_down && key_forward) { move_name = "DodgeReverseKick"; anim_name = "dodge_reverse_kick"; }
+            else if (key_forward && !key_back) { move_name = "FrontKick"; anim_name = "front_kick"; }
+            else if (key_back && !key_forward) { move_name = "BackKick"; anim_name = "back_kick"; }
+            else if (key_down) { move_name = "Sweep"; anim_name = "sweep"; }
+            else { move_name = "HighKick"; anim_name = "high_kick"; }
+
+            if (animations_.count(anim_name)) {
+                std::printf("[COMBAT] P -> %s (anim '%s')\n", move_name.c_str(), anim_name.c_str());
+                play_animation(anim_name, false);
+                current_move_ = move_name;
+                int fc = animations_[anim_name].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                move_state_ = 0;
+                goto after_combat;
+            }
+        }
         // From moves.xml templates:
         //   JumpUp: 1key|Up|Jump → W
         //   FrontFlip: 1key|UpForward|Jump → W+D (Up+Forward)
@@ -696,62 +750,11 @@ public:
             play_animation("fists_idle", true);
         }
 
-        // Camera follows player
+        after_combat:
+        // Camera follows player (always update, even after attack)
         cam_x_ = player_pos_x_ + 200.0f;
         renderer_->camera().set_target(cam_x_, cam_y_);
         renderer_->camera().set_zoom(zoom_);
-
-        // === COMBAT: Punch (O) ===
-        // From moves.xml:
-        //   HighPunch: Central|Punch → O
-        //   HeavyPunch: Forward|Punch → D+O (Forward+O)
-        //   SpinningPunch: Back|Punch → A+O (Back+O)
-        //   UpperCut: Up|Punch → W+O
-        //   LowPunch: Down|Punch → S+O
-        //   ElbowStrike: DownBack|Punch → S+A+O (Down+Back+Punch)
-        if (punch_pressed && hit_anim_ == 0 && move_state_ < 10) {
-            std::string move_name, anim_name;
-            if (key_down && key_back) { move_name = "ElbowStrike"; anim_name = "elbow_strike"; }
-            else if (key_forward && !key_back) { move_name = "HeavyPunch"; anim_name = "heavy_punch"; }
-            else if (key_back && !key_forward) { move_name = "SpinningPunch"; anim_name = "spinning_punch"; }
-            else if (key_up) { move_name = "UpperCut"; anim_name = "upper_cut"; }
-            else if (key_down) { move_name = "LowPunch"; anim_name = "low_punch"; }
-            else { move_name = "HighPunch"; anim_name = "high_punch"; }
-
-            if (animations_.count(anim_name)) {
-                std::printf("[COMBAT] O -> %s (anim '%s')\n", move_name.c_str(), anim_name.c_str());
-                play_animation(anim_name, false);
-                current_move_ = move_name;
-                int fc = animations_[anim_name].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
-                move_state_ = 0;
-            }
-        }
-
-        // === COMBAT: Kick (P) ===
-        // From moves.xml:
-        //   HighKick: Central|Kick → P
-        //   FrontKick: Forward|Kick → D+P (Forward+P)
-        //   BackKick: Back|Kick → A+P (Back+P)
-        //   Sweep: Down|Kick → S+P
-        //   DodgeReverseKick: DownForward|Kick → S+D+P (Down+Forward+Kick)
-        if (kick_pressed && hit_anim_ == 0 && move_state_ < 10) {
-            std::string move_name, anim_name;
-            if (key_down && key_forward) { move_name = "DodgeReverseKick"; anim_name = "dodge_reverse_kick"; }
-            else if (key_forward && !key_back) { move_name = "FrontKick"; anim_name = "front_kick"; }
-            else if (key_back && !key_forward) { move_name = "BackKick"; anim_name = "back_kick"; }
-            else if (key_down) { move_name = "Sweep"; anim_name = "sweep"; }
-            else { move_name = "HighKick"; anim_name = "high_kick"; }
-
-            if (animations_.count(anim_name)) {
-                std::printf("[COMBAT] P -> %s (anim '%s')\n", move_name.c_str(), anim_name.c_str());
-                play_animation(anim_name, false);
-                current_move_ = move_name;
-                int fc = animations_[anim_name].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
-                move_state_ = 0;
-            }
-        }
 
         // === UPDATE ANIMATION ===
         update_animation(dt);
