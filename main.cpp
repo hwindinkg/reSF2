@@ -824,7 +824,7 @@ public:
                                 float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx);
                                 float limb_wy = player_pos_y_ + (limb_ly - pivot_ly);
                                 float bag_cx = location_->enemy_x - 983.0f;
-                                float bag_cy = location_->enemy_y + 81.0f;
+                                float bag_cy = location_->enemy_y + 81.0f + y_adjust_smoothed_;
                                 auto bv_it = bag_verlet_.find("NPivot");
                                 if (bv_it != bag_verlet_.end()) {
                                     bag_cx = bv_it->second.x; bag_cy = bv_it->second.y;
@@ -1853,7 +1853,7 @@ private:
         // Same coordinate system as player — no Y-invert, use params Y directly
         // with the same -45 offset to align with the floor.
         float bag_cx = location_ ? (location_->enemy_x - 983.0f) : 0.0f;
-        float bag_cy = location_ ? (location_->enemy_y + 81.0f) : 0.0f;
+        float bag_cy = location_ ? (location_->enemy_y + 81.0f + y_adjust_smoothed_) : 0.0f;
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
         // Initialize nodes: world position = bag_center + (node_local - NPivot_local)
@@ -1958,11 +1958,24 @@ private:
         
         // Bag NPivot Y in model space = 109.0
         // The bag hangs from Node12 (Y=335) which is fixed at ceiling
-        // Place bag so NPivot is at enemy_y
-        // Same coordinate system as player — no Y-invert
+        // Node12 world Y should be at ceiling level.
+        // Ceiling (layer_5) is at params y=-202 → world_y = +202 (inverted).
+        // Node12 local Y = 335, NPivot local Y = 109.
+        // Node12 world Y = bag_cy + (335 - 109) = bag_cy + 226
+        // We need Node12 at world Y = 202 (ceiling):
+        //   bag_cy + 226 = 202 → bag_cy = -24
+        // enemy_y = -105. bag_cy = enemy_y + offset = -105 + 81 = -24. ✓
+        //
+        // BUT: the bag appears too high. The issue is that the player's
+        // y_adjust_smoothed_ adds ~+82 units (REF_FEET_LY - ly_lowest),
+        // making the player appear higher. The bag doesn't have this
+        // adjustment, so it looks relatively higher.
+        //
+        // FIX: apply the same y_adjust to the bag's rendering Y, so the
+        // bag and player are in the same coordinate space.
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
-        float bag_cy = location_->enemy_y + 81.0f;  // align with floor + offset
+        float bag_cy = location_->enemy_y + 81.0f + y_adjust_smoothed_;
         
         // === BAG RENDERING (Verlet physics) ===
         // The bag's skeleton nodes are simulated with Verlet integration.
@@ -2277,26 +2290,21 @@ private:
         }
 
         // Advance time
-        // Animation playback: .bin files are at 30 FPS.
-        // anim_time_ is in "animation seconds" where 1.0 = 1 frame.
-        // frame_idx = (int)(anim_time_) gives the current frame.
+        // .bin animations are at 30 FPS. The original game runs at 60fps
+        // physics with 30fps animation + frame interpolation.
+        // anim_time_ is in "animation frames" (1.0 = 1 frame).
+        // We advance by dt * anim_speed_ / 30.0f where anim_speed_ = 30.
+        // This gives: anim_time_ += dt (seconds) * 1.0
+        //   frame_f = anim_time_ * 30 = 30 * dt = ~0.5 per render frame at 60fps
+        //   → 2 render frames per animation frame → correct 30fps at 60fps render.
         //
-        // OLD BUG: anim_time_ += dt * anim_speed_ / 30.0f  (double division by 30)
-        //   With anim_speed_ = 30: anim_time_ += dt * 30/30 = dt * 1.0
-        //   Then frame_f = anim_time_ * 30 = dt * 30 → 30 frames per real second
-        //   BUT dt is already in seconds, so this gives 30 fps. CORRECT for 30fps anim.
-        //   HOWEVER: the REAL game runs at 60fps physics with 30fps animation
-        //   interpolation. Our dt is ~16ms (60fps). So we advance anim_time_ by
-        //   16ms * 1.0 = 0.016 per frame, giving frame_f = 0.016 * 30 = 0.48
-        //   per render frame. That means ~2 render frames per anim frame = correct.
-        //
-        // Actually the math is correct. The issue is anim_speed_ default.
-        // The original game likely plays animations at the .bin's native 30fps.
-        // Let's verify: step_forward has 16 frames. At 30fps = 533ms per loop.
-        // If it looks "too fast", the game might run at 60fps animation (not 30).
-        // Try anim_speed_ = 30.0f (native) first.
+        // BUT: if animations look too fast, the game might use a slower rate.
+        // The original s86 binary uses s3eTimerGetMs() and the animation
+        // frame rate is controlled by the .bin file's frame timing.
+        // Try reducing anim_speed_ if needed.
         float dt = dt_ms / 1000.0f;
-        anim_time_ += dt * anim_speed_ / 30.0f;
+        // Use 0.5x speed to match original game feel (animations were 2x too fast)
+        anim_time_ += dt * (anim_speed_ * 0.5f) / 30.0f;
 
         // Calculate current frame (with looping)
         float frame_f = anim_time_ * 30.0f;
@@ -2409,21 +2417,42 @@ private:
             // when facing changes between frames
             float displacement = npivot_x - anim_root_anchor_x_;
             player_pos_x_ = step_start_player_x_ + (anim_facing_right_ ? displacement : -displacement);
+            // Clamp to location boundaries
+            if (location_) {
+                float left_bound = location_->player_x - 983.0f - 300.0f;
+                float right_bound = location_->enemy_x - 983.0f + 300.0f;
+                if (player_pos_x_ < left_bound) player_pos_x_ = left_bound;
+                if (player_pos_x_ > right_bound) player_pos_x_ = right_bound;
+            }
         } else {
             prev_frame_idx_ = -1;
+            // Non-root-motion animations (idle, duck, block) do NOT modify
+            // player_pos_x_. The position stays where the previous animation
+            // left it. This prevents teleport-back when switching to idle.
         }
 
         // Y root motion: absolute positioning (same approach as X)
         // For jumps/flips: player Y offset = NPivot Y - frame 0 NPivot Y
-        // This naturally returns to 0 at the end (frame 0 Y == frame N-1 Y
-        // for symmetric jumps like jump, front_flip).
+        // This naturally returns to 0 at the end for symmetric jumps.
         // For back_flip (Y[0]=92, Y[last]=106): offset goes 0 → +174 → +14.
-        // The +14 residual is handled by the smooth decay below.
+        // The +14 residual is because back_flip starts crouched (Y=92) and
+        // ends standing (Y=106). The character should end at the SAME height
+        // as it started (ground level), not +14 above.
+        //
+        // FIX: clamp jump_y_offset_ to never go below 0 (ground) and
+        // force it to 0 when the animation finishes (anim_finished).
         bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                             current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                             current_anim_ == "back_handflip");
         if (is_jump_anim && anim_anchor_set_) {
-            jump_y_offset_ = npivot_y - anim_root_anchor_y_;
+            if (anim_finished) {
+                // Animation ended: force offset to 0 (character on ground)
+                jump_y_offset_ = 0;
+            } else {
+                jump_y_offset_ = npivot_y - anim_root_anchor_y_;
+                // Don't allow negative offset (character below ground)
+                if (jump_y_offset_ < 0) jump_y_offset_ = 0;
+            }
         } else {
             // Non-jump: smoothly decay to 0
             jump_y_offset_ *= 0.80f;
