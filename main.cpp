@@ -2293,16 +2293,13 @@ private:
             }
         }
 
-        // Advance time
-        // .bin animations are at 30 FPS. The original game runs at 60fps
-        // physics with 30fps animation + frame interpolation.
-        // anim_time_ is in "animation frames" (1.0 = 1 frame).
-        // At 60fps render: dt ≈ 16.67ms = 0.01667s
-        //   anim_time_ += 0.01667 * 30 / 30 = 0.01667
-        //   frame_f = 0.01667 * 30 = 0.5 → 2 renders per anim frame → 30fps anim
-        // This is the CORRECT original speed.
+        // Advance time — simple and correct
+        // anim_time_ accumulates real seconds.
+        // frame_f = anim_time_ * anim_speed_ gives the current frame.
+        // At 60fps render with anim_speed_=60: 1 frame per render → 60fps animation.
+        // step_forward (16 frames) = 16/60 = 267ms. Correct for original game.
         float dt = dt_ms / 1000.0f;
-        anim_time_ += dt * anim_speed_ / 30.0f;
+        anim_time_ += dt;
 
         // Calculate current frame (with looping)
         float frame_f = anim_time_ * 30.0f;
@@ -3118,7 +3115,7 @@ private:
     std::string current_move_;  // Name of currently playing move (for hit detection)
     std::string current_anim_ = "fists_idle";
     float anim_time_ = 0.0f;  // seconds into current animation
-    float anim_speed_ = 30.0f;  // FPS for animation playback
+    float anim_speed_ = 60.0f;  // FPS for animation playback (original game runs at 60fps)
     bool anim_loop_ = true;
 
     // Animated node positions (override skeleton rest pose during animation)
