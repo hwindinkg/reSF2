@@ -1283,3 +1283,67 @@ Stage Summary:
 - Задача 3 (DZ): PROGRESS — контейнер полностью расшифрован, баг в парсере исправлен, streaming nature задокументирована, entropy confirms real compression. Декомпрессор пока не реализован (ARM emulation blocked).
 - Задача 2 (UI/rotated textures): NOT STARTED —lowest priority, не блокирует ничего.
 - Артефакты: engine/scene/{scene_system.hpp,scene_system.cpp,scenes.hpp,scenes.cpp,CMakeLists.txt}, scripts/{dz_parse_correct.py,dz_dump_format.py,dz_entropy_analysis.py,verify_main_compile.sh}, обновлённые main.cpp + engine/reverse/dz/README.md.
+
+---
+Task ID: movement-fix-and-special-moves
+Agent: main (chat session)
+Task: Fix root motion (character returns to start on animation end/loop), add special moves (jumps, rolls, blocks), make character face enemy.
+
+Work Log:
+- Analyzed NPivot trajectory in .bin files via scripts/dump_npivot_trajectory.py:
+  * step_forward: NPivot X goes 169.45 → 235.45 (delta +66 per loop, 16 frames)
+  * step_back: NPivot X goes 235.45 → 169.45 (delta -66 per loop)
+  * fists1_stance_idle: NPivot X = -445.19 (different coordinate space!)
+  * forward_roll: NPivot X 194.45 → 598.45 (delta +404!)
+  * back_roll: NPivot X -20.55 → -370.55 (delta -350)
+  * jump: NPivot Y = 106.21 (no X displacement, vertical only)
+  * jump_away: NPivot X 169.45 → 228.60, Y goes up to 683.81
+
+- ROOT CAUSE of "character returns to start":
+  The old root motion code used INTERPOLATED npivot_x for delta computation.
+  When animation loops, interpolation between frame N-1 and frame 0 produces
+  intermediate NPivot values (235→202→169 for step_forward). Per-sub-frame
+  deltas (~-33) were below filter threshold (40), so they got applied to
+  player_pos_x_, canceling the +66 accumulated during forward movement.
+
+- FIX: Root motion now uses frame-INDEX NPivot (npx0, not interpolated npivot_x).
+  Only applies delta when prev_frame_idx_ != frame_idx. Loop wrap-around
+  produces single large delta (66+) filtered by threshold 30.
+  Added prev_frame_idx_ member, reset in play_animation().
+  Extended root motion to ALL animations with NPivot displacement: step,
+  roll, jump_away, back_flip, double_punch, spinning_punch, front_kick,
+  back_kick, upper_cut, high_punch.
+
+- FIX: "single key press interrupts animation" — added step_play_time_ counter.
+  Step animations must play ≥500ms before allowing transition to idle.
+  State machine checks !key_down (not just key_released) so even if release
+  event is missed, transition happens after min play time.
+
+- ADDED: Character auto-faces enemy (punching bag). When idle (move_state_==0,
+  no attack), facing_right_ is set based on bag_x vs player_pos_x_.
+
+- ADDED special moves:
+  * W = Jump (vertical, jump.bin)
+  * Shift+W = Jump away (backward leap, jump_away.bin)
+  * Shift+A = Back roll (dodge backward, back_roll.bin, -350 displacement)
+  * Shift+D = Forward roll (dodge forward, forward_roll.bin, +404 displacement)
+  * S (hold) = Block (middle_block.bin, looping)
+  * move_state_ 10 = special move (non-interruptible until anim finishes)
+  * move_state_ 11 = blocking (exits when S released)
+
+- ADDED animations to load list: forward_roll, back_roll, jump, jump_away,
+  front_flip, back_handflip, high_block, middle_block, overhead_block,
+  sweep_block, high_hit_fall, middle_hit_fall, overhead_hit_fall,
+  spinning_hit_fall, sweep_hit_fall.
+
+- Updated HANDOFF.md with root motion fix explanation and new controls.
+- Created scripts/dump_npivot_trajectory.py for .bin NPivot analysis.
+
+Stage Summary:
+- Root motion: FIXED. Character now correctly accumulates +66 per step_forward
+  loop, -66 per step_back loop. No more snap-back on animation end/loop.
+- Single key tap: FIXED. Step plays for at least 500ms before idle transition.
+- Face enemy: IMPLEMENTED. Character auto-faces bag when idle.
+- Special moves: ADDED. Jump (W), Jump away (Shift+W), Forward roll (Shift+D),
+  Back roll (Shift+A), Block (hold S).
+- All compile cleanly on Linux g++ 14.2.

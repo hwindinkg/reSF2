@@ -63,9 +63,13 @@
 ### 1. MOVEMENT JITTER — FIXED ✅
 **Fix applied**: `engine/platform/glfw_platform.cpp` now uses Win32 `GetAsyncKeyState()` directly under `#ifdef _WIN32`, bypassing GLFW's key event system entirely. The `key_callback` early-returns on Windows; `poll_events()` iterates the Key enum, maps each to a VK code via `glfw_key_to_vk()`, and polls the OS keyboard state. Edge transitions (`keys_just_pressed`/`keys_just_released`) are computed from `prev_keys_down_`. Non-Windows path unchanged (GLFW callback + sticky keys).
 
-**Commit**: `0b3d55c` — pushed to GitHub.
+**Root motion fix** (this session): The old root motion code used the INTERPOLATED NPivot X for delta computation. When the animation looped, the interpolation between frame N-1 and frame 0 produced intermediate NPivot values (e.g., 235→202→169 for step_forward). The per-sub-frame deltas (~-33) were below the filter threshold (40), so they got applied to `player_pos_x_`, canceling the +66 accumulated during forward movement. Result: character snapped back to start on each loop.
 
-**Root motion** should now work automatically (animation no longer resets every frame). Verify on Windows by holding A/D and checking for smooth step animation + accumulated displacement.
+**Fix**: Root motion now uses frame-INDEX NPivot (not interpolated). Only applies delta when `frame_idx` changes. Loop wrap-around produces a single large delta (66+) that gets filtered by threshold 30. This gives correct +66 displacement per step_forward loop.
+
+**Step min play time**: Step animations now play for at least 500ms before allowing transition to idle. This prevents "tap = instant cancel" — a brief key tap still produces a full step.
+
+**Commit**: `0b3d55c` (Win32 input) + this session's root motion fix.
 
 ### 2. SCENE/STATE MANAGER — IMPLEMENTED ✅ (this session)
 **What was done**: Created `engine/scene/` with a proper finite-state machine:
@@ -137,7 +141,11 @@ bash scripts/verify_main_compile.sh
 ## CONTROLS (updated)
 | Key | Action |
 |-----|--------|
-| A/D | Step left/right (Win32 GetAsyncKeyState on Windows) |
+| A/D | Step left/right (Win32 GetAsyncKeyState, root motion accumulates +66/loop) |
+| W | Jump |
+| Shift+W | Jump away (backward leap) |
+| Shift+A/D | Back roll / Forward roll (dodge with big displacement) |
+| S (hold) | Block (middle_block stance) |
 | Space | Punch (W=upper, S=low, D=double, A=spinning) / advance dialogue |
 | K | Kick (S=sweep, D=front, A=back) |
 | M | Toggle scroll menu (MainMenu/Battle) |
