@@ -434,10 +434,12 @@ public:
             // Only allow movement if not attacking
             if (hit_anim_ == 0) {
                 if (want_move_left && !want_move_right) {
-                    facing_right_ = false;
+                    // Don't change facing during an active step — wait until it finishes
+                    if (!step_active_) facing_right_ = false;
                     // Start a new step if cooldown expired
                     if (!step_active_ && step_cooldown_ == 0 &&
                         animations_.count("step_back")) {
+                        facing_right_ = false;
                         play_animation("step_back", false);
                         step_cooldown_ = STEP_DURATION_MS;
                         step_active_ = true;
@@ -446,9 +448,10 @@ public:
                         step_displacement_ = -STEP_DISPLACEMENT;  // move left
                     }
                 } else if (want_move_right && !want_move_left) {
-                    facing_right_ = true;
+                    if (!step_active_) facing_right_ = true;
                     if (!step_active_ && step_cooldown_ == 0 &&
                         animations_.count("step_forward")) {
+                        facing_right_ = true;
                         play_animation("step_forward", false);
                         step_cooldown_ = STEP_DURATION_MS;
                         step_active_ = true;
@@ -586,13 +589,13 @@ public:
                                     float limb_ly = ait->second.second;
                                     auto pivot_it = skeleton_nodes_.find("NPivot");
                                     float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
-                                    float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx) * 0.9f;
-                                    float limb_wy = player_pos_y_ + (limb_ly - pivot_ly) * 0.9f;
+                                    float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx) * 1.0f;
+                                    float limb_wy = player_pos_y_ + (limb_ly - pivot_ly) * 1.0f;
                                     
                                     // Bag center position (use Verlet node positions for accuracy)
                                     // Same coordinate system as player — no Y-invert
-                                    float bag_cx = location_->enemy_x - 857.0f;
-                                    float bag_cy = -location_->enemy_y + 50.0f;
+                                    float bag_cx = location_->enemy_x - 983.0f;
+                                    float bag_cy = location_->enemy_y + 81.0f;
                                     // Check against the bag's NPivot Verlet position (more accurate)
                                     auto bv_it = bag_verlet_.find("NPivot");
                                     if (bv_it != bag_verlet_.end()) {
@@ -743,15 +746,29 @@ private:
         load_menu_textures();
         load_hud_font();
         if (location_) {
-            // Player position from params.xml.
-            // params.xml uses Y-DOWN (Y=0 at top, positive Y = down).
-            // Location images are Y-inverted in render_location (world_y = -img.y).
-            // Player/enemy positions use the same Y-DOWN system, so we also invert.
-            // Player at params y=-93 → world y=+93 (above center).
-            // Floor at params y=225 → world y=-225 (below center).
-            // This puts the player above the floor, which is correct.
-            player_pos_x_ = location_->player_x - 857.0f;
-            player_pos_y_ = -location_->player_y;  // invert Y to match location rendering
+            // Player/enemy positions in params.xml use Y-DOWN, same as image
+            // coordinates. Location images are Y-inverted in render_location
+            // (world_y = -img.y). But player/enemy Y is used directly (NOT
+            // inverted) because the skeleton model space already has Y-UP
+            // with NPivot at Y=169 and feet at Y=73 (difference = 96).
+            //
+            // Floor (layer_3) at params y=225 → world_y = -225 (inverted image).
+            // Floor top surface at -225 + 32 = -193.
+            // Player NPivot at params y=-93 → world_y = -93 (direct).
+            // Player feet at -93 - 96 = -189. Floor at -193. Gap = 4. ✓
+            //
+            // Bag: enemy_y = -105. Bag NPivot at -105.
+            // Node12 (ceiling attachment) at -105 + 226 = 121.
+            // Ceiling (layer_5) at params y=-202 → world_y = +202.
+            // Need Node12 at ceiling: bag_cy + 226 = 202 → bag_cy = -24.
+            // Offset from enemy_y: -24 - (-105) = 81.
+            // bag_cy = enemy_y + 81.
+            //
+            // X offset: align bag with holder (layer_5 at x=-10).
+            // bag_cx = enemy_x - offset = -10 → offset = enemy_x + 10 = 983.
+            const float X_OFFSET = 983.0f;  // aligns bag with ceiling holder
+            player_pos_x_ = location_->player_x - X_OFFSET;
+            player_pos_y_ = location_->player_y;  // no invert, no offset
         }
         // Camera follows player with offset (player on left third)
         cam_x_ = player_pos_x_ + 200.0f;
@@ -901,14 +918,21 @@ private:
                     for (auto& [fname, idx] : a.atlas->name_index) {
                         auto& frame = a.atlas->frames[idx];
                         if (!frame.rotated) continue;
-                        int fw = frame.atlas_w;
-                        int fh = frame.atlas_h;
+                        // For rotated frames, atlas_w/atlas_h are the ATLAS (post-rotation)
+                        // dimensions. The ORIGINAL sprite dimensions are swapped:
+                        // original_w = atlas_h, original_h = atlas_w.
+                        // We create the pre-cropped texture at original dimensions.
+                        int fw = frame.atlas_h;  // original width (swapped)
+                        int fh = frame.atlas_w;  // original height (swapped)
                         auto ctex = std::make_unique<ren::Texture2D>();
                         std::vector<std::uint8_t> px((size_t)fw * fh * 4);
                         for (int y = 0; y < fh; ++y) {
                             for (int x = 0; x < fw; ++x) {
                                 // Un-rotate 90° CCW (Cocos2d stores rotated 90° CW)
-                                int sx = frame.atlas_x + (fw - 1 - y);
+                                // 90° CW: original(x,y) → stored(H-1-y, x)
+                                // where H = original height = fh = atlas_w
+                                // Inverse: dest(x,y) ← source(atlas_x + (fh-1-y), atlas_y + x)
+                                int sx = frame.atlas_x + (fh - 1 - y);
                                 int sy = frame.atlas_y + x;
                                 if (sx < 0 || sy < 0 || sx >= aw || sy >= ah) continue;
                                 int src_idx = (sy * aw + sx) * 4;
@@ -1035,8 +1059,8 @@ private:
                             renderer_->draw_textured_quad(*ctex, tx, py, quad_w, quad_h);
                         }
                     } else {
-                        renderer_->draw_textured_quad(*ctex, px - 0.5f, py,
-                                                      quad_w + 1.0f, quad_h);
+                        renderer_->draw_textured_quad(*ctex, px, py,
+                                                      quad_w, quad_h);
                     }
                     continue;
                 }
@@ -1075,10 +1099,8 @@ private:
                     }
                 } else {
                     // For foreground layers (factor = 1.0), render once.
-                    // Add 1px overlap to prevent gaps between adjacent tiles
-                    // (floor segments, wall segments, etc.)
-                    renderer_->draw_textured_quad(*atlas.texture, px - 0.5f, py, 
-                                                  quad_w + 1.0f, quad_h,
+                    // No overlap — the pre-cropped texture fix should resolve gaps.
+                    renderer_->draw_textured_quad(*atlas.texture, px, py, quad_w, quad_h,
                                                   u0, v0, u1, v1);
                 }
             }
@@ -1343,23 +1365,23 @@ private:
         auto ait = anim_node_pos_.find(name);
         if (ait != anim_node_pos_.end()) {
             float lx = ait->second.first, ly = ait->second.second;
-            float sx = (face_right ? lx : -lx) * 0.9f;
-            float sy = world_cy + (ly - pivot_local_y) * 0.9f;
+            float sx = (face_right ? lx : -lx) * 1.0f;
+            float sy = world_cy + (ly - pivot_local_y) * 1.0f;
             return {world_cx + sx, sy};
         }
 
         auto bit = body_model_->nodes.find(name);
         if (bit != body_model_->nodes.end()) {
             float lx = bit->second.x, ly = bit->second.y;
-            float sx = (face_right ? lx : -lx) * 0.9f;
-            float sy = world_cy + (ly - pivot_local_y) * 0.9f;
+            float sx = (face_right ? lx : -lx) * 1.0f;
+            float sy = world_cy + (ly - pivot_local_y) * 1.0f;
             return {world_cx + sx, sy};
         }
         auto sit = skeleton_nodes_.find(name);
         if (sit != skeleton_nodes_.end()) {
             float lx = sit->second.x, ly = sit->second.y;
-            float sx = (face_right ? lx : -lx) * 0.9f;
-            float sy = world_cy + (ly - pivot_local_y) * 0.9f;
+            float sx = (face_right ? lx : -lx) * 1.0f;
+            float sy = world_cy + (ly - pivot_local_y) * 1.0f;
             return {world_cx + sx, sy};
         }
         auto mit = body_model_->macro_nodes.find(name);
@@ -1427,7 +1449,7 @@ private:
             float mx2 = x2 - (x2 - x1) * m2;
             float my2 = y2 - (y2 - y1) * m2;
             
-            float r = (c.radius1 + c.radius2) * 0.5f * 0.9f;
+            float r = (c.radius1 + c.radius2) * 0.5f * 1.0f;
             float dx = mx2 - mx1, dy = my2 - my1;
             float len = std::sqrt(dx*dx + dy*dy);
             if (len < 0.5f) continue;
@@ -1596,15 +1618,15 @@ private:
         // World position of the bag's NPivot (where it hangs in the world)
         // Same coordinate system as player — no Y-invert, use params Y directly
         // with the same -45 offset to align with the floor.
-        float bag_cx = location_ ? (location_->enemy_x - 857.0f) : 0.0f;
-        float bag_cy = location_ ? (-location_->enemy_y + 50.0f) : 0.0f;
+        float bag_cx = location_ ? (location_->enemy_x - 983.0f) : 0.0f;
+        float bag_cy = location_ ? (location_->enemy_y + 81.0f) : 0.0f;
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
         // Initialize nodes: world position = bag_center + (node_local - NPivot_local)
         for (auto& [name, n] : bag_model_->nodes) {
             VerletNode vn;
-            vn.x = bag_cx + n.x * 0.9f;
-            vn.y = bag_cy + (n.y - pivot_ly) * 0.9f;
+            vn.x = bag_cx + n.x * 1.0f;
+            vn.y = bag_cy + (n.y - pivot_ly) * 1.0f;
             vn.px = vn.x;  // at rest, prev = current
             vn.py = vn.y;
             vn.mass = n.mass;
@@ -1698,7 +1720,7 @@ private:
         if (!bag_model_ || !location_) return;
         
         // Bag position: enemy_x from params.xml, adjusted to world space
-        float bag_cx = location_->enemy_x - 857.0f;
+        float bag_cx = location_->enemy_x - 983.0f;
         
         // Bag NPivot Y in model space = 109.0
         // The bag hangs from Node12 (Y=335) which is fixed at ceiling
@@ -1706,7 +1728,7 @@ private:
         // Same coordinate system as player — no Y-invert
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
-        float bag_cy = -location_->enemy_y + 50.0f;  // align with floor + offset
+        float bag_cy = location_->enemy_y + 81.0f;  // align with floor + offset
         
         // === BAG RENDERING (Verlet physics) ===
         // The bag's skeleton nodes are simulated with Verlet integration.
@@ -1744,13 +1766,13 @@ private:
                 auto nit1 = bag_model_->nodes.find(en1);
                 auto nit2 = bag_model_->nodes.find(en2);
                 if (nit1 == bag_model_->nodes.end() || nit2 == bag_model_->nodes.end()) continue;
-                x1 = bag_cx + nit1->second.x * 0.9f;
-                y1 = bag_cy + (nit1->second.y - pivot_ly) * 0.9f;
-                x2 = bag_cx + nit2->second.x * 0.9f;
-                y2 = bag_cy + (nit2->second.y - pivot_ly) * 0.9f;
+                x1 = bag_cx + nit1->second.x * 1.0f;
+                y1 = bag_cy + (nit1->second.y - pivot_ly) * 1.0f;
+                x2 = bag_cx + nit2->second.x * 1.0f;
+                y2 = bag_cy + (nit2->second.y - pivot_ly) * 1.0f;
             }
             
-            float r = (c.radius1 + c.radius2) * 0.5f * 0.9f;
+            float r = (c.radius1 + c.radius2) * 0.5f * 1.0f;
             bool is_main = (c.radius1 >= 20 || c.radius2 >= 20);
             
             float dx = x2 - x1, dy = y2 - y1;
@@ -2207,32 +2229,25 @@ private:
         for (auto& [name, idx] : result->name_index) {
             auto& frame = result->frames[idx];
             // Handle rotated frames:
-            // In Cocos2d texture atlases, frames marked as "rotated" are
-            // stored rotated 90° clockwise in the atlas PNG.
-            // frame.atlas_w/atlas_h are the UNROTATED dimensions.
-            // For rotated frames, the atlas region has swapped dimensions
-            // (atlas_h wide × atlas_w tall), and we need to un-rotate the
-            // pixels when cropping.
-            int fw = frame.atlas_w;
-            int fh = frame.atlas_h;
+            // For rotated frames, atlas_w/atlas_h are ATLAS (post-rotation) dimensions.
+            // Original sprite dimensions are swapped: original_w = atlas_h, original_h = atlas_w.
+            int fw, fh;
+            if (frame.rotated) {
+                fw = frame.atlas_h;  // original width (swapped)
+                fh = frame.atlas_w;  // original height (swapped)
+            } else {
+                fw = frame.atlas_w;
+                fh = frame.atlas_h;
+            }
             auto tex = std::make_unique<ren::Texture2D>();
             std::vector<std::uint8_t> px((size_t)fw * fh * 4);
             for (int y = 0; y < fh; ++y) {
                 for (int x = 0; x < fw; ++x) {
                     int sx, sy;
                     if (frame.rotated) {
-                        // Cocos2d texturePacker rotates frames 90° CW.
-                        // The atlas region is (atlas_h wide × atlas_w tall) —
-                        // i.e., the width and height are swapped compared to
-                        // the original sprite (atlas_w × atlas_h).
-                        //
-                        // To un-rotate (90° CCW), we map destination (x,y)
-                        // to source coordinates. The 90° CW rotation maps:
-                        //   original(x, y) → stored(y, fw-1-x)
-                        // So the inverse (90° CCW) is:
-                        //   stored(sx_rel, sy_rel) → original(sy_rel, fw-1-sx_rel)
-                        // Therefore: destination(x, y) ← source(atlas_x + (fw-1-y), atlas_y + x)
-                        sx = frame.atlas_x + (fw - 1 - y);
+                        // Un-rotate 90° CCW (Cocos2d stores rotated 90° CW)
+                        // dest(x,y) ← source(atlas_x + (fh-1-y), atlas_y + x)
+                        sx = frame.atlas_x + (fh - 1 - y);
                         sy = frame.atlas_y + x;
                     } else {
                         sx = frame.atlas_x + x;
