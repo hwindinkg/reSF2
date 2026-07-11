@@ -536,40 +536,123 @@ public:
             if (menu_anim_progress_ < target_progress) menu_anim_progress_ = target_progress;
         }
 
-        // === MOVEMENT SYSTEM (state machine using just_released) ===
+        // === FACE ENEMY ===
+        // Character always faces the enemy (punching bag), like in the original.
+        // The bag is at location_->enemy_x. Auto-face when idle (not moving/attacking).
+        if (location_ && hit_anim_ == 0 && move_state_ == 0) {
+            float bag_x = location_->enemy_x - 983.0f;
+            facing_right_ = (bag_x >= player_pos_x_);
+        }
+
+        // === MOVEMENT SYSTEM ===
+        // State machine: 0=IDLE, 1=MOVING_LEFT, 2=MOVING_RIGHT, 10=special, 11=block
+        // Step animations play for at least 500ms before allowing idle transition.
         bool key_left_down = input.keys_down[(size_t)plat::Key::A] ||
                              input.keys_down[(size_t)plat::Key::ArrowLeft];
         bool key_right_down = input.keys_down[(size_t)plat::Key::D] ||
                               input.keys_down[(size_t)plat::Key::ArrowRight];
+        bool key_up_down = input.keys_down[(size_t)plat::Key::W] ||
+                           input.keys_down[(size_t)plat::Key::ArrowUp];
+        bool key_down_held = input.keys_down[(size_t)plat::Key::S] ||
+                             input.keys_down[(size_t)plat::Key::ArrowDown];
+        bool shift_down = input.keys_down[(size_t)plat::Key::ShiftLeft] ||
+                          input.keys_down[(size_t)plat::Key::ShiftRight];
         bool key_left_released = input.keys_just_released[(size_t)plat::Key::A] ||
                                  input.keys_just_released[(size_t)plat::Key::ArrowLeft];
         bool key_right_released = input.keys_just_released[(size_t)plat::Key::D] ||
                                   input.keys_just_released[(size_t)plat::Key::ArrowRight];
 
-        if (hit_anim_ == 0) {
+        // Track step animation play time (prevents tap-to-cancel)
+        if (move_state_ == 1 || move_state_ == 2) {
+            step_play_time_ += dt;
+        } else {
+            step_play_time_ = 0;
+        }
+        bool step_min_played = step_play_time_ >= 500;
+
+        // === SPECIAL MOVES (jumps, rolls) — only when idle/not attacking ===
+        if (hit_anim_ == 0 && move_state_ < 10) {
+            // Roll: Shift + A/D
+            if (shift_down && input.keys_just_pressed[(size_t)plat::Key::D] && animations_.count("forward_roll")) {
+                play_animation("forward_roll", false);
+                current_move_ = "ForwardRoll";
+                int fc = animations_["forward_roll"].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                move_state_ = 10;
+                std::printf("[MOVE] Forward Roll!\n");
+            } else if (shift_down && input.keys_just_pressed[(size_t)plat::Key::A] && animations_.count("back_roll")) {
+                play_animation("back_roll", false);
+                current_move_ = "BackRoll";
+                int fc = animations_["back_roll"].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                move_state_ = 10;
+                std::printf("[MOVE] Back Roll!\n");
+            }
+            // Jump: W
+            else if (input.keys_just_pressed[(size_t)plat::Key::W] && !shift_down && animations_.count("jump")) {
+                play_animation("jump", false);
+                current_move_ = "Jump";
+                int fc = animations_["jump"].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                move_state_ = 10;
+                std::printf("[MOVE] Jump!\n");
+            }
+            // Jump away: Shift + W
+            else if (shift_down && input.keys_just_pressed[(size_t)plat::Key::W] && animations_.count("jump_away")) {
+                play_animation("jump_away", false);
+                current_move_ = "JumpAway";
+                int fc = animations_["jump_away"].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                move_state_ = 10;
+                std::printf("[MOVE] Jump Away!\n");
+            }
+            // Block: hold S (without Shift)
+            else if (key_down_held && !shift_down && current_anim_ != "middle_block" && animations_.count("middle_block")) {
+                play_animation("middle_block", true);
+                current_move_ = "MiddleBlock";
+                move_state_ = 11;
+                std::printf("[MOVE] Block!\n");
+            }
+        }
+
+        // === STEP MOVEMENT (only when not in special move/block) ===
+        if (hit_anim_ == 0 && move_state_ < 10) {
             if (move_state_ == 0) {  // IDLE
-                if (key_left_down && !key_right_down) {
-                    move_state_ = 1; facing_right_ = false;
+                if (key_left_down && !key_right_down && !key_down_held) {
+                    move_state_ = 1;
                     play_animation("step_back", true);
-                } else if (key_right_down && !key_left_down) {
-                    move_state_ = 2; facing_right_ = true;
+                } else if (key_right_down && !key_left_down && !key_down_held) {
+                    move_state_ = 2;
                     play_animation("step_forward", true);
                 }
             } else if (move_state_ == 1) {  // MOVING_LEFT
-                if (key_left_released) {
+                // After min play time: if key no longer held, go idle
+                if (step_min_played && !key_left_down) {
                     move_state_ = 0; play_animation("fists_idle", true);
-                } else if (key_right_down && !key_left_down) {
-                    move_state_ = 2; facing_right_ = true;
+                } else if (key_right_down && !key_left_down && step_min_played) {
+                    move_state_ = 2;
                     play_animation("step_forward", true);
                 }
+                // If key still down, keep stepping (root motion accumulates)
             } else if (move_state_ == 2) {  // MOVING_RIGHT
-                if (key_right_released) {
+                if (step_min_played && !key_right_down) {
                     move_state_ = 0; play_animation("fists_idle", true);
-                } else if (key_left_down && !key_right_down) {
-                    move_state_ = 1; facing_right_ = false;
+                } else if (key_left_down && !key_right_down && step_min_played) {
+                    move_state_ = 1;
                     play_animation("step_back", true);
                 }
             }
+        }
+
+        // Exit special move state when animation finishes
+        if (move_state_ == 10 && hit_anim_ == 0) {
+            move_state_ = 0;
+            play_animation("fists_idle", true);
+        }
+        // Exit block state when S released
+        if (move_state_ == 11 && !key_down_held) {
+            move_state_ = 0;
+            play_animation("fists_idle", true);
         }
 
         // Camera follows player
@@ -578,13 +661,13 @@ public:
         renderer_->camera().set_zoom(zoom_);
 
         // === COMBAT: Punch (Space + direction) ===
-        if (input.keys_just_pressed[(size_t)plat::Key::Space] && hit_anim_ == 0) {
+        if (input.keys_just_pressed[(size_t)plat::Key::Space] && hit_anim_ == 0 && move_state_ < 10) {
             std::string move_name, anim_name;
             if (key_right_down) { move_name = "DoublePunch"; anim_name = "double_punch"; }
             else if (key_left_down) { move_name = "SpinningPunch"; anim_name = "spinning_punch"; }
-            else if (input.keys_down[(size_t)plat::Key::W] || input.keys_down[(size_t)plat::Key::ArrowUp]) {
+            else if (key_up_down) {
                 move_name = "UpperCut"; anim_name = "upper_cut";
-            } else if (input.keys_down[(size_t)plat::Key::S] || input.keys_down[(size_t)plat::Key::ArrowDown]) {
+            } else if (key_down_held) {
                 move_name = "LowPunch"; anim_name = "low_punch";
             } else { move_name = "HighPunch"; anim_name = "high_punch"; }
 
@@ -596,13 +679,14 @@ public:
                 current_move_ = move_name;
                 int fc = animations_[anim_name].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                move_state_ = 0;
             }
         }
 
         // === COMBAT: Kick (K + direction) ===
-        if (input.keys_just_pressed[(size_t)plat::Key::K] && hit_anim_ == 0) {
+        if (input.keys_just_pressed[(size_t)plat::Key::K] && hit_anim_ == 0 && move_state_ < 10) {
             std::string move_name, anim_name;
-            if (input.keys_down[(size_t)plat::Key::S] || input.keys_down[(size_t)plat::Key::ArrowDown]) {
+            if (key_down_held) {
                 move_name = "Sweep"; anim_name = "sweep";
             } else if (key_left_down) { move_name = "BackKick"; anim_name = "back_kick"; }
             else if (key_right_down) { move_name = "FrontKick"; anim_name = "front_kick"; }
@@ -616,6 +700,7 @@ public:
                 current_move_ = move_name;
                 int fc = animations_[anim_name].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / 30.0f);
+                move_state_ = 0;
             }
         }
 
@@ -1867,6 +1952,16 @@ private:
             "stance_1", "stance_2",
             "step_forward", "step_back",
             "back_flip", "back_flip_kick",
+            // Special moves
+            "forward_roll", "back_roll",
+            "jump", "jump_away",
+            "front_flip", "back_handflip",
+            // Blocks
+            "high_block", "middle_block", "overhead_block",
+            "sweep_block",
+            // Hit reactions
+            "high_hit_fall", "middle_hit_fall", "overhead_hit_fall",
+            "spinning_hit_fall", "sweep_hit_fall",
         };
         
         for (auto& name : anim_names) {
@@ -2123,22 +2218,52 @@ private:
         // NPivot Y differs from the rest pose (e.g., idle vs step).
         anim_npivot_bin_y_ = npivot_y;
 
-        // Root motion: delta accumulation with wrap-around filter.
-        // For looping step animations, NPivot X goes 169→235 then wraps to 169.
-        // We accumulate positive deltas (forward movement) and filter out
-        // the large negative wrap-around delta (-66).
-        // This gives natural non-linear movement matching the animation.
-        if (current_anim_ == "step_forward" || current_anim_ == "step_back") {
-            if (anim_anchor_set_) {
-                float delta = npivot_x - prev_npivot_x_;
-                // Filter out wrap-around (when animation loops, delta jumps ~±66)
-                if (std::abs(delta) < 40.0f) {
-                    player_pos_x_ += delta;
+        // Root motion: frame-index-based delta accumulation.
+        //
+        // PROBLEM with previous approach: we used the INTERPOLATED npivot_x
+        // for root motion. When the animation loops, the interpolation
+        // between frame N-1 and frame 0 produces intermediate NPivot values
+        // (e.g., 235→202→169 for step_forward). The per-sub-frame deltas
+        // (~-33) were below the filter threshold (40), so they got applied
+        // to player_pos_x_, canceling the +66 accumulated during forward
+        // movement. Result: character snapped back to start on each loop.
+        //
+        // FIX: use frame-INDEX NPivot (npx0, not interpolated npivot_x) for
+        // root motion. Only apply delta when the frame index ADVANCES by
+        // exactly 1 (normal progression). When the frame index wraps (loop),
+        // the delta is NPivot[0]-NPivot[N-1] which is large and gets
+        // filtered. This gives correct +66 per loop for step_forward.
+        //
+        // Also extended to all root-motion animations: step, roll, jump_away,
+        // back_flip, etc. Any animation where NPivot X changes should apply
+        // root motion.
+        bool is_root_motion_anim = (
+            current_anim_ == "step_forward" || current_anim_ == "step_back" ||
+            current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
+            current_anim_ == "jump_away" || current_anim_ == "back_flip" ||
+            current_anim_ == "back_handflip" || current_anim_ == "front_flip" ||
+            current_anim_ == "double_punch" || current_anim_ == "spinning_punch" ||
+            current_anim_ == "front_kick" || current_anim_ == "back_kick" ||
+            current_anim_ == "upper_cut" || current_anim_ == "high_punch"
+        );
+        if (is_root_motion_anim) {
+            if (prev_frame_idx_ >= 0 && prev_frame_idx_ != frame_idx) {
+                // Frame advanced — compute delta from frame-index NPivot
+                float prev_npx, prev_npy, prev_npz;
+                if (anim.get_node_pos(prev_frame_idx_, npivot_idx, prev_npx, prev_npy, prev_npz)) {
+                    float delta = npx0 - prev_npx;  // frame-index delta, NOT interpolated
+                    // Filter out wrap-around (loop boundary).
+                    // Normal per-frame deltas: max ~15 (forward_roll).
+                    // Wrap-around deltas: min ~66 (step), max ~404 (forward_roll).
+                    // Threshold 30 safely separates them.
+                    if (std::abs(delta) < 30.0f) {
+                        player_pos_x_ += delta;
+                    }
                 }
             }
-            prev_npivot_x_ = npivot_x;
+            prev_frame_idx_ = frame_idx;
         } else {
-            prev_npivot_x_ = 0.0f;
+            prev_frame_idx_ = -1;
         }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
@@ -2211,6 +2336,7 @@ private:
             anim_root_dx_ = 0.0f;
             anim_root_dy_ = 0.0f;
             prev_root_offset_ = 0.0f;  // Reset root motion offset for new animation
+            prev_frame_idx_ = -1;  // Reset frame index so root motion doesn't compute a bogus delta
         }
     }
 
@@ -2800,11 +2926,13 @@ private:
     float anim_root_anchor_y_ = 0.0f;
     bool anim_anchor_set_ = false;
     float prev_npivot_x_ = 0.0f;  // for step root motion (previous frame)
+    int prev_frame_idx_ = -1;     // for frame-index-based root motion
     float prev_root_offset_ = 0.0f;  // offset from frame-0 NPivot (for root motion)
     float step_start_player_x_ = 0.0f;  // player X when step started (for absolute root motion)
     float y_adjust_smoothed_ = 0.0f;  // smoothed Y adjustment for feet normalization
     int no_key_frames_ = 0;  // frames with no movement key pressed (for hysteresis)
-    int move_state_ = 0;  // 0=IDLE, 1=MOVING_LEFT, 2=MOVING_RIGHT
+    int move_state_ = 0;  // 0=IDLE, 1=MOVING_LEFT, 2=MOVING_RIGHT, 10=special, 11=block
+    uint32_t step_play_time_ = 0;  // ms the current step animation has been playing
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
