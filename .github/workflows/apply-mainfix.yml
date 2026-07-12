@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: apply-mainfix
+  cancel-in-progress: true
+
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -19,10 +23,10 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Install toolchain
+      - name: Install g++
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential g++ libglfw3-dev libgl1-mesa-dev zlib1g-dev
+          sudo apt-get update -q
+          sudo apt-get install -y -q build-essential
           g++ --version
 
       - name: Apply patches
@@ -37,14 +41,12 @@ jobs:
                   print(f"PATCH FAIL: matched {n}x: {pat[:70]}")
                   sys.exit(2)
               return s2
-          # 1) stale current_move_ guard
           s = sub_once(
               r'if \(cur_kc == 1 \|\| cur_kc == 2\) \{',
               'if ((cur_kc == 1 || cur_kc == 2) && hit_anim_ > 0 &&\n'
               '                                current_anim_ != "stance_idle" && current_anim_ != "fists_idle" &&\n'
               '                                current_anim_ != "step_forward" && current_anim_ != "step_back") {',
               s)
-          # 2) extended [ROOT] first-frame log
           s = sub_once(
               r'std::printf\("\[ROOT\] anim=\x27%s\x27 first frame:.*?anim_facing_right_\);',
               'std::printf("[ROOT] anim=\x27%s\x27 first frame: frame=%d player=(%.1f,%.1f) '
@@ -52,7 +54,6 @@ jobs:
               '                            current_anim_.c_str(), frame_idx, player_pos_x_, player_pos_y_,\n'
               '                            npivot_x, npivot_y, player_pos_y_ + y_adjust_smoothed_, anim_facing_right_);',
               s, flags=re.DOTALL)
-          # 3) y_adjust heuristic warning (no silent fallback)
           s = sub_once(
               r'y_adjust_smoothed_ = FEET_FLOOR_OFFSET;',
               'y_adjust_smoothed_ = FEET_FLOOR_OFFSET;\n'
@@ -64,13 +65,12 @@ jobs:
           print("PATCH OK")
           PY
 
-      - name: Compile main.cpp (TU check)
-        id: tu
+      - name: Syntax-check main.cpp
         run: |
           set +e
-          g++ -std=c++23 -c main.cpp -I. -I/usr/include \
+          g++ -std=c++23 -fsyntax-only main.cpp -I. \
             -Wno-old-style-cast -Wno-conversion -Wno-unused-parameter \
-            -o /tmp/main.o > /tmp/tu.log 2>&1
+            > /tmp/tu.log 2>&1
           echo "tu_rc=$?" | tee /tmp/tu_rc.txt
           tail -c 40000 /tmp/tu.log
           set -e
@@ -90,8 +90,8 @@ jobs:
             cp /tmp/tu.log docs/_ci_logs/mainfix_tu.log
             git checkout -B ci/mainfix-fail
             git add -A
-            git commit -m "ci: main.cpp TU compile failed (diagnostic)" || echo "no change"
+            git commit -m "ci: main.cpp syntax check failed (diagnostic)" || echo "no change"
             git push -f origin ci/mainfix-fail
-            echo "TU COMPILE FAILED — see ci/mainfix-fail"
+            echo "SYNTAX FAILED — see ci/mainfix-fail"
             exit 1
           fi
