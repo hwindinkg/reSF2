@@ -2,26 +2,29 @@
 [2/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/vulkan.c.o
 [3/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/init.c.o
 [4/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/context.c.o
-[5/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_init.c.o
-[6/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/osmesa_context.c.o
-[7/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/monitor.c.o
-[8/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_monitor.c.o
-[9/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/window.c.o
-[10/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_joystick.c.o
-[11/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_window.c.o
-[12/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_thread.c.o
-[13/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/egl_context.c.o
-[14/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/input.c.o
-[15/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_module.c.o
-[16/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_time.c.o
+[5/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/window.c.o
+[6/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/monitor.c.o
+[7/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_monitor.c.o
+[8/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_joystick.c.o
+[9/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_init.c.o
+[10/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/egl_context.c.o
+[11/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/osmesa_context.c.o
+[12/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_window.c.o
+[13/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_module.c.o
+[14/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_time.c.o
+[15/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/input.c.o
+[16/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_thread.c.o
 [17/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/xkb_unicode.c.o
-[18/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/glx_context.c.o
+[18/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_poll.c.o
 [19/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_monitor.c.o
-[20/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_poll.c.o
-[21/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/linux_joystick.c.o
-[22/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_init.c.o
-[23/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_window.c.o
-[24/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/software_renderer.cpp.o
+[20/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/glx_context.c.o
+[21/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_init.c.o
+[22/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_window.c.o
+[23/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/linux_joystick.c.o
+[24/55] Linking C static library lib/libglfw3.a
+[25/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/gl_loader.cpp.o
+[26/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/s3e_container.cpp.o
+[27/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/software_renderer.cpp.o
 /home/runner/work/reSF2/reSF2/engine/renderer/software_renderer.cpp: In member function ‘bool resf2::soft::Texture::init_rgba(int, int, const uint8_t*)’:
 /home/runner/work/reSF2/reSF2/engine/renderer/software_renderer.cpp:29:27: warning: use of old-style cast to ‘size_t’ {aka ‘long unsigned int’} [-Wold-style-cast]
    29 |     pixels.resize((size_t)w * h * 4);
@@ -413,7 +416,39 @@
 /home/runner/work/reSF2/reSF2/engine/renderer/software_renderer.cpp:321:45: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
   321 |             float fx = px + 0.5f - x0, fy = py + 0.5f - y0;
       |                                             ^~
-[25/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o
+[28/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/platform.cpp.o
+[29/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/glfw_platform.cpp.o
+In file included from /home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:15:
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.hpp:13:1: warning: multi-line comment [-Wcomment]
+   13 | //   g++ -std=c++23 -Iengine -I/usr/include/GLFW -I/usr/include/GL \
+      | ^
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp: In static member function ‘static void resf2::platform::GlfwPlatform::Impl::key_callback(GLFWwindow*, int, int, int, int)’:
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:232:58: warning: unused parameter ‘scancode’ [-Wunused-parameter]
+  232 |     static void key_callback(GLFWwindow* w, int key, int scancode, int action, int mods) {
+      |                                                      ~~~~^~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:232:84: warning: unused parameter ‘mods’ [-Wunused-parameter]
+  232 |     static void key_callback(GLFWwindow* w, int key, int scancode, int action, int mods) {
+      |                                                                                ~~~~^~~~
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp: In static member function ‘static void resf2::platform::GlfwPlatform::Impl::mouse_button_callback(GLFWwindow*, int, int, int)’:
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:260:82: warning: unused parameter ‘mods’ [-Wunused-parameter]
+  260 |     static void mouse_button_callback(GLFWwindow* w, int button, int action, int mods) {
+      |                                                                              ~~~~^~~~
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp: In static member function ‘static void resf2::platform::GlfwPlatform::Impl::framebuffer_size_callback(GLFWwindow*, int, int)’:
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:323:55: warning: unused parameter ‘w’ [-Wunused-parameter]
+  323 |     static void framebuffer_size_callback(GLFWwindow* w, int width, int height) {
+      |                                           ~~~~~~~~~~~~^
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:323:62: warning: unused parameter ‘width’ [-Wunused-parameter]
+  323 |     static void framebuffer_size_callback(GLFWwindow* w, int width, int height) {
+      |                                                          ~~~~^~~~~
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:323:73: warning: unused parameter ‘height’ [-Wunused-parameter]
+  323 |     static void framebuffer_size_callback(GLFWwindow* w, int width, int height) {
+      |                                                                     ~~~~^~~~~~
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp: At global scope:
+/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:124:12: warning: ‘int resf2::platform::key_index_to_glfw(int)’ defined but not used [-Wunused-function]
+  124 | static int key_index_to_glfw(int idx) {
+      |            ^~~~~~~~~~~~~~~~~
+[30/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/atf_tactics.cpp.o
+[31/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o
 FAILED: [code=1] engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o 
 /usr/bin/c++  -I/home/runner/work/reSF2/reSF2/engine/renderer/.. -O3 -DNDEBUG -std=c++23 -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Wold-style-cast -Wcast-align -Woverloaded-virtual -Wconversion -Wnull-dereference -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -MD -MT engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o -MF engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o.d -o engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o -c /home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp
 /home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘bool resf2::renderer::Texture2D::init_from_png(const uint8_t*, std::size_t)’:
@@ -734,39 +769,48 @@ In file included from /usr/include/c++/13/bits/stl_uninitialized.h:63,
       |                                                               ^~~~~~~
       |                                                        --------------
       |                                                        static_cast<float> (height_)
-[26/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/gl_loader.cpp.o
-[27/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/platform.cpp.o
-[28/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/glfw_platform.cpp.o
-In file included from /home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:15:
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.hpp:13:1: warning: multi-line comment [-Wcomment]
-   13 | //   g++ -std=c++23 -Iengine -I/usr/include/GLFW -I/usr/include/GL \
-      | ^
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp: In static member function ‘static void resf2::platform::GlfwPlatform::Impl::key_callback(GLFWwindow*, int, int, int, int)’:
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:232:58: warning: unused parameter ‘scancode’ [-Wunused-parameter]
-  232 |     static void key_callback(GLFWwindow* w, int key, int scancode, int action, int mods) {
-      |                                                      ~~~~^~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:232:84: warning: unused parameter ‘mods’ [-Wunused-parameter]
-  232 |     static void key_callback(GLFWwindow* w, int key, int scancode, int action, int mods) {
-      |                                                                                ~~~~^~~~
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp: In static member function ‘static void resf2::platform::GlfwPlatform::Impl::mouse_button_callback(GLFWwindow*, int, int, int)’:
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:260:82: warning: unused parameter ‘mods’ [-Wunused-parameter]
-  260 |     static void mouse_button_callback(GLFWwindow* w, int button, int action, int mods) {
-      |                                                                              ~~~~^~~~
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp: In static member function ‘static void resf2::platform::GlfwPlatform::Impl::framebuffer_size_callback(GLFWwindow*, int, int)’:
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:323:55: warning: unused parameter ‘w’ [-Wunused-parameter]
-  323 |     static void framebuffer_size_callback(GLFWwindow* w, int width, int height) {
-      |                                           ~~~~~~~~~~~~^
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:323:62: warning: unused parameter ‘width’ [-Wunused-parameter]
-  323 |     static void framebuffer_size_callback(GLFWwindow* w, int width, int height) {
-      |                                                          ~~~~^~~~~
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:323:73: warning: unused parameter ‘height’ [-Wunused-parameter]
-  323 |     static void framebuffer_size_callback(GLFWwindow* w, int width, int height) {
-      |                                                                     ~~~~^~~~~~
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp: At global scope:
-/home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:124:12: warning: ‘int resf2::platform::key_index_to_glfw(int)’ defined but not used [-Wunused-function]
-  124 | static int key_index_to_glfw(int idx) {
-      |            ^~~~~~~~~~~~~~~~~
-[29/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/stb_image_impl.cpp.o
+[32/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/plist_atlas.cpp.o
+[33/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/dz_decoder.cpp.o
+In file included from /home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp:16:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘int resf2::dz::DzRangeDecoder::decode_bit(uint16_t&)’:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:50:18: warning: conversion from ‘int’ to ‘uint16_t’ {aka ‘short unsigned int’} may change value [-Wconversion]
+   50 |             prob += (0x800 - prob) >> 5;  // increase probability of 0
+      |             ~~~~~^~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘uint8_t resf2::dz::DzRangeDecoder::decode_byte_simple(uint16_t*)’:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:121:33: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
+  121 |         return (uint8_t)(m - 256);
+      |                                 ^
+      |                ------------------
+      |                static_cast<uint8_t> ((m - 256))
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘uint8_t resf2::dz::DzRangeDecoder::decode_byte_with_match(uint16_t*, uint8_t)’:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:139:33: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
+  139 |         return (uint8_t)(m - 256);
+      |                                 ^
+      |                ------------------
+      |                static_cast<uint8_t> ((m - 256))
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp: In member function ‘int resf2::dz::RangeCoder::decode_bit(uint16_t&)’:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp:102:18: warning: conversion from ‘int’ to ‘uint16_t’ {aka ‘short unsigned int’} may change value [-Wconversion]
+  102 |             prob += (0x800 - prob) >> 5;
+      |             ~~~~~^~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp: In static member function ‘static std::vector<unsigned char> resf2::dz::DzDecompressor::decompress(const uint8_t*, size_t, size_t)’:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp:199:25: warning: use of old-style cast to ‘int’ [-Wold-style-cast]
+  199 |     int max_iter = (int)uncomp_size * 10;
+      |                         ^~~~~~~~~~~
+      |                    ----------------
+      |                    static_cast<int> (uncomp_size)
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp:229:39: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
+  229 |             symbol = (uint8_t)(m - 256);
+      |                                       ^
+      |                      ------------------
+      |                      static_cast<uint8_t> ((m - 256))
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp: In static member function ‘static std::vector<unsigned char> resf2::dz::DzDecompressor::decompress_streaming(const uint8_t*, size_t, size_t, size_t)’:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp:310:53: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
+  310 |                 symbol = (uint8_t)((symbol << 1) | b);
+      |                                                     ^
+      |                          ---------
+      |                          static_cast<uint8_t> (      )
+[34/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/bitmap_font.cpp.o
+[35/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/stb_image_impl.cpp.o
 In file included from /home/runner/work/reSF2/reSF2/engine/renderer/stb_image_impl.cpp:12:
 /home/runner/work/reSF2/reSF2/engine/renderer/stb_image.h: In function ‘void stbi__start_mem(stbi__context*, const stbi_uc*, int)’:
 /home/runner/work/reSF2/reSF2/engine/renderer/stb_image.h:831:57: warning: use of old-style cast to ‘stbi_uc*’ {aka ‘unsigned char*’} [-Wold-style-cast]
@@ -2277,5 +2321,28 @@ In file included from /home/runner/work/reSF2/reSF2/engine/renderer/stb_image_im
 /home/runner/work/reSF2/reSF2/engine/renderer/stb_image_write.h:913:4: note: in expansion of macro ‘stbiw__sbpush’
   913 |    stbiw__sbpush(out, 0x78);   // DEFLATE 32K window
       |    ^~~~~~~~~~~~~
-[30/55] Linking C static library lib/libglfw3.a
+[36/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/dz_reader.cpp.o
+In file included from /home/runner/work/reSF2/reSF2/engine/reverse/dz_reader.cpp:6:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘int resf2::dz::DzRangeDecoder::decode_bit(uint16_t&)’:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:50:18: warning: conversion from ‘int’ to ‘uint16_t’ {aka ‘short unsigned int’} may change value [-Wconversion]
+   50 |             prob += (0x800 - prob) >> 5;  // increase probability of 0
+      |             ~~~~~^~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘uint8_t resf2::dz::DzRangeDecoder::decode_byte_simple(uint16_t*)’:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:121:33: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
+  121 |         return (uint8_t)(m - 256);
+      |                                 ^
+      |                ------------------
+      |                static_cast<uint8_t> ((m - 256))
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘uint8_t resf2::dz::DzRangeDecoder::decode_byte_with_match(uint16_t*, uint8_t)’:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:139:33: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
+  139 |         return (uint8_t)(m - 256);
+      |                                 ^
+      |                ------------------
+      |                static_cast<uint8_t> ((m - 256))
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_reader.cpp: In member function ‘std::vector<std::byte> resf2::dz::DzArchive::read_file(const std::string&) const’:
+/home/runner/work/reSF2/reSF2/engine/reverse/dz_reader.cpp:96:53: warning: use of old-style cast to ‘unsigned int’ [-Wold-style-cast]
+   96 |                             name.c_str(), (unsigned)comp_size, result.size());
+      |                                                     ^~~~~~~~~
+      |                                           -------------------
+      |                                           static_cast<unsigned> (comp_size)
 ninja: build stopped: subcommand failed.
