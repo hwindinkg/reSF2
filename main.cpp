@@ -43,6 +43,7 @@
 #include "engine/renderer/renderer.hpp"
 #include "engine/reverse/plist_atlas.hpp"
 #include "engine/reverse/bitmap_font.hpp"
+#include "engine/reverse/dz_reader.hpp"
 #include "engine/scene/scene_system.hpp"
 #include "engine/scene/scenes.hpp"
 #include "engine/renderer/stb_image.h"
@@ -57,11 +58,22 @@ namespace scene = resf2::scene;
 // ---------- Small helpers ----------
 
 static std::vector<std::byte> read_file(const std::string& path) {
+    // Try filesystem first
     std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f) return {};
-    auto sz = (size_t)f.tellg(); if (!sz) return {};
-    f.seekg(0); std::vector<std::byte> d(sz);
-    f.read((char*)d.data(), (std::streamsize)sz); return d;
+    if (f) {
+        auto sz = (size_t)f.tellg(); if (!sz) return {};
+        f.seekg(0); std::vector<std::byte> d(sz);
+        f.read((char*)d.data(), (std::streamsize)sz); return d;
+    }
+    // Try DZ archive
+    auto& dz = resf2::dz::DzRegistry::instance();
+    // Extract basename for DZ lookup
+    auto p = std::filesystem::path(path);
+    std::string basename = p.filename().string();
+    if (dz.has_file(basename)) {
+        return dz.read_file(basename);
+    }
+    return {};
 }
 
 static std::string read_text(const std::string& path) {
@@ -1114,6 +1126,18 @@ private:
     // Called by host_load_location() (SceneHost interface) when entering
     // MainMenu or Battle scene.
     void init_location() {
+        // Open DZ archives (for reading files that are only in .dz)
+        auto root = std::filesystem::path(asset_root_);
+        auto& dz = resf2::dz::DzRegistry::instance();
+        for (const auto& base : {root, root/"assets", root/"assets"/"assets"}) {
+            for (const auto& dz_name : {"files.dz", "animations.dz"}) {
+                auto dz_path = base / dz_name;
+                if (std::filesystem::exists(dz_path)) {
+                    dz.open_archive(dz_path.string());
+                }
+            }
+        }
+        
         load_location("dojo");
         location_loaded_ = true;
         if (location_ && !location_->color.empty()) {

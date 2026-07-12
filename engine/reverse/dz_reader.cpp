@@ -1,0 +1,274 @@
+// engine/reverse/dz_reader.cpp
+//
+// DZ archive reader implementation.
+
+#include "dz_reader.hpp"
+#include <cstdio>
+#include <algorithm>
+
+namespace resf2::dz {
+
+// ========== DzArchive ==========
+
+bool DzArchive::open(const std::string& path) {
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f) return false;
+    auto size = static_cast<size_t>(f.tellg());
+    if (size < 16) return false;
+    f.seekg(0);
+    raw_data_.resize(size);
+    f.read(reinterpret_cast<char*>(raw_data_.data()), static_cast<std::streamsize>(size));
+    f.close();
+    
+    if (!parse()) {
+        raw_data_.clear();
+        return false;
+    }
+    
+    opened_ = true;
+    std::printf("[DZ] Opened %s: %zu files\n", path.c_str(), entries_.size());
+    return true;
+}
+
+void DzArchive::close() {
+    raw_data_.clear();
+    entries_.clear();
+    file_names_.clear();
+    opened_ = false;
+}
+
+bool DzArchive::has_file(const std::string& name) const {
+    return entries_.find(name) != entries_.end();
+}
+
+std::vector<std::byte> DzArchive::read_file(const std::string& name) const {
+    auto it = entries_.find(name);
+    if (it == entries_.end()) return {};
+    
+    const auto& entry = it->second;
+    const auto* base = raw_data_.data() + entry.offset;
+    
+    // Find the next file's offset to determine compressed size
+    // We need to search all entries for the one with the smallest offset > entry.offset
+    uint32_t next_offset = static_cast<uint32_t>(raw_data_.size());
+    for (const auto& [n, e] : entries_) {
+        if (e.offset > entry.offset && e.offset < next_offset) {
+            next_offset = e.offset;
+        }
+    }
+    uint32_t comp_size = next_offset - entry.offset;
+    if (comp_size == 0) comp_size = entry.uncomp_size;  // fallback
+    
+    switch (entry.comp_type) {
+        case 1:  // Copy (no compression)
+            return std::vector<std::byte>(base, base + entry.uncomp_size);
+        
+        case 2:  // zlib
+            return decompress_zlib(base, comp_size);
+        
+        case 8:  // gzip
+            return decompress_gzip(base, comp_size);
+        
+        case 4:  // DZ custom (Marmalade arithmetic coding)
+            // Not yet implemented. Fall back to empty.
+            std::fprintf(stderr, "[DZ] WARNING: %s uses type=4 (DZ custom), not yet supported\n",
+                         name.c_str());
+            return {};
+        
+        default:
+            std::fprintf(stderr, "[DZ] Unknown compression type %u for %s\n",
+                         entry.comp_type, name.c_str());
+            return {};
+    }
+}
+
+bool DzArchive::parse() {
+    const auto* data = raw_data_.data();
+    auto size = raw_data_.size();
+    
+    if (size < 9) return false;
+    if (std::memcmp(data, "DTRZ", 4) != 0) return false;
+    
+    // Read header
+    uint16_t num_files = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
+    uint16_t num_dirs = static_cast<uint16_t>(data[6]) | (static_cast<uint16_t>(data[7]) << 8);
+    // data[8] = version (0)
+    
+    size_t pos = 9;
+    
+    // Read file names
+    std::vector<std::string> filenames;
+    filenames.reserve(num_files);
+    for (uint16_t i = 0; i < num_files; ++i) {
+        if (pos >= size) return false;
+        size_t end = pos;
+        while (end < size && data[end] != std::byte{0}) ++end;
+        filenames.emplace_back(reinterpret_cast<const char*>(data + pos), end - pos);
+        pos = end + 1;
+    }
+    
+    // Read folder names
+    uint16_t actual_num_dirs = num_dirs > 0 ? num_dirs - 1 : 0;
+    std::vector<std::string> folders;
+    folders.push_back("");  // root
+    for (uint16_t i = 0; i < actual_num_dirs; ++i) {
+        if (pos >= size) return false;
+        size_t end = pos;
+        while (end < size && data[end] != std::byte{0}) ++end;
+        folders.emplace_back(reinterpret_cast<const char*>(data + pos), end - pos);
+        pos = end + 1;
+    }
+    
+    // Skip file attribute table (num_files * 6 bytes)
+    // Each: folder_idx u16 + file_number u16 + flags u16
+    std::vector<uint16_t> file_folder_idx(num_files);
+    for (uint16_t i = 0; i < num_files; ++i) {
+        if (pos + 6 > size) return false;
+        file_folder_idx[i] = static_cast<uint16_t>(data[pos]) |
+                             (static_cast<uint16_t>(data[pos+1]) << 8);
+        pos += 6;
+    }
+    
+    // Skip lengths header (4 bytes: unknown u16 + count u16)
+    pos += 4;
+    
+    // Read file table (num_files * 16 bytes, 4 x u32 per entry)
+    // dzextract.py format: offset, length0, length1, type
+    // Our corrected format: (u24 uncomp + u8 CRC), (u24 offset + u8 CRC),
+    //                       (u24 comp_size + u8 type), (u24 reserved + u8 CRC)
+    // 
+    // BUT: testing showed dzextract's format works for gzip (type=8) archives.
+    // The difference is in how we interpret the 4 u32 fields.
+    // dzextract reads: offset(u32), len0(u32), len1(u32), type(u32)
+    // This works because the u24+u8 split doesn't matter when CRC bytes are 0.
+    
+    for (uint16_t i = 0; i < num_files; ++i) {
+        if (pos + 16 > size) return false;
+        
+        // Read as 4 u32 LE values
+        uint32_t offset, len0, len1, type_val;
+        std::memcpy(&offset, data + pos, 4);
+        std::memcpy(&len0, data + pos + 4, 4);
+        std::memcpy(&len1, data + pos + 8, 4);
+        std::memcpy(&type_val, data + pos + 12, 4);
+        pos += 16;
+        
+        DzFileEntry entry;
+        entry.name = filenames[i];
+        entry.offset = offset;
+        entry.uncomp_size = len0;  // len0 = uncompressed size
+        entry.comp_type = type_val;
+        
+        // Build folder path
+        if (i < file_folder_idx.size() && file_folder_idx[i] < folders.size()) {
+            entry.folder = folders[file_folder_idx[i]];
+        }
+        
+        // Store with both bare name and folder/name
+        entries_[entry.name] = entry;
+        if (!entry.folder.empty()) {
+            entries_[entry.folder + "/" + entry.name] = entry;
+        }
+        
+        file_names_.push_back(entry.name);
+    }
+    
+    return true;
+}
+
+std::vector<std::byte> DzArchive::decompress_gzip(const std::byte* data, size_t size) {
+    // Use zlib's gzip decompression (wbits=31)
+    z_stream strm = {};
+    strm.next_in = reinterpret_cast<const Bytef*>(data);
+    strm.avail_in = static_cast<uInt>(size);
+    
+    if (inflateInit2(&strm, 31) != Z_OK) return {};
+    
+    std::vector<std::byte> result;
+    result.resize(65536);  // start with 64KB
+    
+    int ret;
+    do {
+        strm.next_out = reinterpret_cast<Bytef*>(result.data() + strm.total_out);
+        strm.avail_out = static_cast<uInt>(result.size() - strm.total_out);
+        
+        ret = inflate(&strm, Z_NO_FLUSH);
+        
+        if (ret == Z_BUF_ERROR || strm.total_out >= result.size()) {
+            // Need more output space
+            result.resize(result.size() * 2);
+            continue;
+        }
+    } while (ret == Z_OK);
+    
+    inflateEnd(&strm);
+    
+    if (ret != Z_STREAM_END) return {};
+    
+    result.resize(strm.total_out);
+    return result;
+}
+
+std::vector<std::byte> DzArchive::decompress_zlib(const std::byte* data, size_t size) {
+    z_stream strm = {};
+    strm.next_in = reinterpret_cast<const Bytef*>(data);
+    strm.avail_in = static_cast<uInt>(size);
+    
+    if (inflateInit(&strm) != Z_OK) return {};
+    
+    std::vector<std::byte> result;
+    result.resize(65536);
+    
+    int ret;
+    do {
+        strm.next_out = reinterpret_cast<Bytef*>(result.data() + strm.total_out);
+        strm.avail_out = static_cast<uInt>(result.size() - strm.total_out);
+        
+        ret = inflate(&strm, Z_NO_FLUSH);
+        
+        if (ret == Z_BUF_ERROR || strm.total_out >= result.size()) {
+            result.resize(result.size() * 2);
+            continue;
+        }
+    } while (ret == Z_OK);
+    
+    inflateEnd(&strm);
+    
+    if (ret != Z_STREAM_END) return {};
+    
+    result.resize(strm.total_out);
+    return result;
+}
+
+// ========== DzRegistry ==========
+
+DzRegistry& DzRegistry::instance() {
+    static DzRegistry registry;
+    return registry;
+}
+
+bool DzRegistry::open_archive(const std::string& path) {
+    auto archive = std::make_unique<DzArchive>();
+    if (!archive->open(path)) return false;
+    archives_.push_back(std::move(archive));
+    return true;
+}
+
+std::vector<std::byte> DzRegistry::read_file(const std::string& name) {
+    for (auto& archive : archives_) {
+        if (archive->has_file(name)) {
+            auto data = archive->read_file(name);
+            if (!data.empty()) return data;
+        }
+    }
+    return {};
+}
+
+bool DzRegistry::has_file(const std::string& name) {
+    for (auto& archive : archives_) {
+        if (archive->has_file(name)) return true;
+    }
+    return false;
+}
+
+}  // namespace resf2::dz
