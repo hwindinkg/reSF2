@@ -92,16 +92,35 @@ Shannon entropy of DZ-compressed blocks:
 
 ## Recommended paths forward
 
-1. **Windows dzip.exe workaround** (recommended for asset extraction):
-   - Use `dzip.exe` + `extract_dz.bat` on a Windows PC to extract all .dz archives
-   - Copy extracted files to reSF2 assets directory
-   - reSF2's AssetManager loads them directly without .dz support
+1. **Fallback directory approach** (IMPLEMENTED in dz_reader.cpp):
+   - The DZ registry now supports `add_fallback_dir()` to register
+     directories containing pre-extracted files.
+   - When a file can't be decompressed from .dz (e.g. type=4 DZ custom),
+     the registry searches fallback directories for the file.
+   - Search paths tried (in order):
+     - `<dir>/<name>`
+     - `<dir>/files/<name>` (files.dz extracted contents)
+     - `<dir>/animations/<name>` (animations.dz XML files)
+     - `<dir>/animations/binary/<name>` (.bin animation files)
+     - `<dir>/files/assets/<name>` (deeper nesting)
+     - `<dir>/assets/files/<name>`
+     - `<dir>/assets/animations/<name>`
+     - `<dir>/assets/animations/binary/<name>`
+   - This allows the engine to work with pre-extracted assets while
+     still supporting .dz archives for files that can be decompressed
+     (gzip type=8).
+   - For type=4 DZ custom compression, users should pre-extract files.dz
+     using `dzip.exe -d files.dz` on Windows.
 
 2. **Manual port of DZ decoder** (for in-engine .dz support):
    - Port the ~250 ARM instructions at 0x389f8 to C++/Python
    - The algorithm is documented above (arithmetic coding + 5-byte context + CRC32 hash + LZ77 matches)
    - This is clean-room (re-implementing from algorithm description, not copying code)
    - The streaming nature (overlapping offsets) must be handled: decompress the entire archive as one stream
+   - Helper functions to port:
+     - 0x3751c: bit/model decode (range coder with context lookup)
+     - 0x37adc: range coder decode (the main decode loop)
+     - 0xc94c: memcpy helper
 
 3. **Alternative: Ghidra analysis** — load libs3e_android.so into Ghidra with the S3ELoader plugin, decompile the DZ decode function at 0x389f8, and port the decompiled C to Python/C++.
 
