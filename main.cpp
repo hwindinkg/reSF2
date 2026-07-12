@@ -949,6 +949,8 @@ public:
 
         // Exit special move state when animation finishes
         if (move_state_ == 10 && hit_anim_ == 0) {
+            std::printf("[STATE] move_state 10->0 (special ended), current_move='%s'\n",
+                        current_move_.c_str());
             move_state_ = 0;
             need_switch_to_idle_ = true;
             // Clear current_move_ so 3key combos don't trigger on next key press
