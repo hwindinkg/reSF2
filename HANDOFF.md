@@ -1,223 +1,124 @@
-# HANDOFF PROMPT FOR NEXT CHAT SESSION
+# HANDOFF — reSF2 (Shadow Fight 2 clean-room engine)
 
-## Project: reSF2 — Shadow Fight 2 Engine Reverse Engineering
+> Single source of truth for the current state of the repo. This file was
+> previously self-contradictory (top said FIXED, bottom repeated an older
+> "not working" block for the same items). It has been reconciled to reflect
+> the real HEAD `249b1a8`. Anything not proven against the original binary or
+> a real run is tagged **[HEURISTIC-TODO]**.
 
-### Git Repository
-- Remote: `git@github.com:hwindinkg/reSF2.git`
-- Git root: `/home/z/my-project/`
-- SSH key: `/home/z/.ssh/id_ed25519_resf2`
-- SSH wrapper: `/home/z/ssh_wrapper.py` (paramiko-based, for git push)
-- Push command: `cd /home/z/my-project && git add -A && git commit -m "..." && GIT_SSH_COMMAND="/home/z/ssh_wrapper.py" git push origin main`
+## Project
 
-### Game Files
-- APK: `https://chat.chobat.ru/Shadow+Fight+2_1.9.21.apk` (94MB, already downloaded to `/home/z/my-project/work/sf2.apk`)
-- Game data: `https://chat.chobat.ru/sf2.7z`
-- S3E binary: `/home/z/my-project/work/ShadowFight2.bin` (extracted from APK, LZMA-decompressed, 8.3MB)
-- DZ archives: `/home/z/my-project/work/assets/assets/files.dz` and `animations.dz`
+Clean-room reimplementation of the Shadow Fight 2 engine (APK v1.9.21) in
+C++23 / OpenGL ES 2.0-style GL. Marmalade SDK-style architecture; the original
+is Cocos2d-x on top of Marmalade. The original x86_64 PIE S3E binary and the
+Windows PE32 (`ShadowFight2.s86`) are partially reversed (see
+`docs/s3e_reverse_engineering.md` and `scripts/*_decompiled.c`).
 
-### Disassembly Tools & Repositories
-- **Marmalade-Modding**: `https://github.com/knot126/Marmalade-Modding` (cloned to `/home/z/my-project/work/Marmalade-Modding/`)
-  - `dzextract.py` — DZ archive extractor (needs modded gzip.py)
-  - `dump_s3e.py` — S3E header parser
-  - `docs/Dzip format.md` — DZ format documentation
-  - `docs/misc/IwS3ERead.h` — S3E header C header file
-- **S3ELoader**: `https://github.com/knot126/S3ELoader` (cloned to `/home/z/my-project/work/S3ELoader/`)
-  - Ghidra plugin for loading S3E binaries
-  - `src/main/java/s3eloader/S3ELoaderLoader.java` — S3E format parser
-- **Capstone**: Python disassembler (installed via pip, use `/usr/bin/python3`)
-- **S3E binary analysis docs**: `/home/z/my-project/docs/s3e_reverse_engineering.md`
+## External references
 
-### S3E Binary Key Facts
-- Architecture: **x86_64 PIE** (NOT ARM!)
-- Base address: `0x4A000000`
-- Magic: `XE3U` (version 4.40.0)
-- Code section: file offset `0x45251`, virtual `0x4A000000`, size `0x7B8000`
-- Data section: file offset `0x7FD251`, virtual `0x4A7B8000`, size `0x4C2C8`
-- Fixup table: file offset `0x1521`, size `0x43D30` (4 sections, 67461 relocations)
-- Strings at file offsets `0x70xxxx-0x79xxxx`
-- Engine: Marmalade SDK + Cocos2d-x
+- APK: https://chat.chobat.ru/Shadow+Fight+2_1.9.21.apk
+- Game data: https://chat.chobat.ru/sf2.7z
+- S3ELoader (Ghidra loader): https://github.com/knot126/S3ELoader
+- Marmalade-Modding: https://github.com/knot126/Marmalade-Modding
 
-### Key Engine Strings Found
-- `12ModelPhysics` — Verlet integration physics
-- `14ModelAnimation` — Animation controller
-- `13InfoAnimation` + `10MoveInside` — Animation alignment with pivotID
-- `14IntervalAttack` — Attack interval system (StartFrame/EndFrame)
-- `ImageLayer` — Location layer rendering
-- `setupBackground` — Background setup function
-- `textureRotated` — Atlas frame rotation flag (Cocos2d TexturePacker)
-- `LZF` — Possible DZ compression method
-- `derbh` — Marmalade archive system
+## Build
 
-### DZ Archive Format
-- Magic: `DTRZ`, 120 files, 104 folders
-- Block table: 120 entries × 6 bytes (0xFFFF + file_id + block_id)
-- Size table: 120 entries × 16 bytes (offset + comp_size + uncomp_size + flag)
-- All blocks have flag=4, first byte 0x1D
-- Compression: UNKNOWN (not zlib/gzip/deflate/LZ4/LZMA/bzip2/LZF)
-- s3e binary contains `decompress chunk` strings and embedded zlib 1.2.3
+See `BUILD.md`. Summary:
 
----
+- Windows: `build.bat` (CMake + VS 2022), output `build\bin\Release\resf2_app.exe`.
+- Linux: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build`.
+- GLFW 3.4 and zlib are auto-fetched via CMake FetchContent.
+- Run: `resf2_app --assets <path>`.
+- CI: `.github/workflows/linux-build.yml` builds the whole tree on
+  ubuntu-latest (GCC) and runs ctest. NOTE: CI is a GCC/Linux smoke test;
+  the shipping target is MSVC/Windows, so a green Linux build does not by
+  itself guarantee the Windows build and vice versa.
 
-## CURRENT STATUS (updated this session)
+## Subsystem status (last audit, HEAD 249b1a8)
 
-### 1. MOVEMENT JITTER — FIXED ✅
-**Fix applied**: `engine/platform/glfw_platform.cpp` now uses Win32 `GetAsyncKeyState()` directly under `#ifdef _WIN32`, bypassing GLFW's key event system entirely. The `key_callback` early-returns on Windows; `poll_events()` iterates the Key enum, maps each to a VK code via `glfw_key_to_vk()`, and polls the OS keyboard state. Edge transitions (`keys_just_pressed`/`keys_just_released`) are computed from `prev_keys_down_`. Non-Windows path unchanged (GLFW callback + sticky keys).
+| Subsystem | Done | State |
+|---|---:|---|
+| Input | 75% | Win32 `GetAsyncKeyState` polling on Windows, GLFW callbacks on Linux. **The two are never mixed** — mixing them reintroduces the repeated-keypress bug. Do not revert this. |
+| State/Move Manager | 45% | Hand-rolled FSM with magic states 0/1/2/10/11. `current_move_` can outlive the attack that set it. **[HEURISTIC-TODO]** replace with the original `Model::step` state logic (`scripts/dz_model_step_decompiled.c`). |
+| Jump / Y | 35% | No physical Y position/velocity. `y_adjust` is a global constant that grounds standing/crouch/jump but floats rolls. **[HEURISTIC-TODO]** per-move contact/pivot alignment (MoveInside). |
+| Root motion | 55% | X = absolute NPivot displacement, committed on loop wrap. Y-alignment is heuristic. |
+| Skeletal animation | 70% | `.bin` decoded (u32 count + per-frame nodes, absolute coords). transition/MidFrames/FirstFrame semantics **[HEURISTIC-TODO]**. |
+| Verlet bag | 60% | 15 nodes / 23 constraints / Node12 fixed match data. Full `ModelPhysics` (collisions/passive/weak/cloth) not implemented. |
+| Combat / hit detection | 40% | moves.xml intervals read; collision reduced to distance endpoint→bag node. No enemy capsules / block / reaction / damage pipeline. |
+| Rendering | 55% | Capsules/triangles/atlas/parallax OK. Rotated pre-cropped frames wrong; sprite batch flushes per quad. |
+| DZ archives | 40% | Container (type 1/2/8) parsed 1:1. **type 4 decoder is speculative** (LZMA-like range coder, NOT byte-proven). Falls back to pre-extracted files on disk. |
+| Scene/State manager | 30% | Boot/Loading/MainMenu implemented; Map/Shop/Settings/Results are stubs. |
+| Story/content | 10% | Placeholder levels and dialogue lines. |
+| Save system | 10% | Temp JSON stub; real `localSettings.bin`/AES/`UserDefault.xml` not implemented. |
 
-**Root motion fix** (this session): The old root motion code used the INTERPOLATED NPivot X for delta computation. When the animation looped, the interpolation between frame N-1 and frame 0 produced intermediate NPivot values (e.g., 235→202→169 for step_forward). The per-sub-frame deltas (~-33) were below the filter threshold (40), so they got applied to `player_pos_x_`, canceling the +66 accumulated during forward movement. Result: character snapped back to start on each loop.
+## Known open bugs (verified against HEAD, not yet fixed)
 
-**Fix**: Root motion now uses frame-INDEX NPivot (not interpolated). Only applies delta when `frame_idx` changes. Loop wrap-around produces a single large delta (66+) that gets filtered by threshold 30. This gives correct +66 displacement per step_forward loop.
+1. **Stale `current_move_`.** After a non-loop attack ends, the animation is
+   already `step_forward`/`stance_idle` but `current_move_` still points at the
+   finished attack, so the combat matcher treats the next press as a combo
+   continuation (`in_basic_attack` stays true). Fix direction: gate
+   `in_basic_attack` on the attack animation actually still playing, and clear
+   `current_move_`/`is_uninterrupt_`/`bag_hit_` when `hit_anim_` reaches 0.
+2. **Jump Y is a global constant.** `y_adjust=4` grounds jump but floats roll
+   (~84px). Needs per-move contact point. **[HEURISTIC-TODO]**
+3. **DZ type 4 decoder unproven.** Anchors: flag=4, first block byte `0x1D`.
+   Decompiled candidates live in `scripts/dz_*_decompiled.c`
+   (e.g. `dz_read_file_decompiled.c`, `dz_open_files_decompiled.c`). Needs
+   byte-level validation against real `.dz` files. **[HEURISTIC-TODO]**
+4. **Asset path/list hardcoding.** Several loaders enumerate fixed paths/lists
+   instead of reading what the archive/manifest declares. Audit and make
+   dynamic where the original enumerates content. **[HEURISTIC-TODO]**
 
-**Step min play time**: Step animations now play for at least 500ms before allowing transition to idle. This prevents "tap = instant cancel" — a brief key tap still produces a full step.
+## Invariants (do not violate)
 
-**Commit**: `0b3d55c` (Win32 input) + this session's root motion fix.
+- Never mix Win32 `GetAsyncKeyState` with GLFW keyboard callbacks for game
+  input. The combination re-triggers held keys every frame (confirmed in
+  prior-session logs). Windows = GetAsyncKeyState only; Linux = GLFW callbacks
+  only.
+- Never leave a silent fallback without a TODO comment and a warning log in
+  the code itself (not just in docs).
+- Tag every substantive change `[ORIGINAL]` (with binary address/symbol you
+  personally verified) or `[HEURISTIC-TODO]` (with what remains to be reversed).
+- Commit in compiling steps; do not leave the repo broken between commits.
 
-### 2. SCENE/STATE MANAGER — IMPLEMENTED ✅ (this session)
-**What was done**: Created `engine/scene/` with a proper finite-state machine:
-- `SceneId` enum: `{Boot, Loading, MainMenu, Map, Shop, Settings, Dialogue, Battle, Results}`
-- `Scene` interface: `on_enter`/`on_update`/`on_render`/`on_exit`/`on_quit_request`
-- `SceneHost` interface: implemented by `Game` class — scenes call back into Game for asset loading, gameplay update, rendering, save/load
-- `SceneManager`: owns current scene, handles deferred transitions
+## Key files
 
-**Game flow cycle** (minimal, on stubs):
-```
-Boot → Loading → MainMenu → (click "Story") → Map → (select level) → Dialogue → (Space) → Battle → (Y=victory / L=defeat) → Results → (Space) → MainMenu
-```
+- `main.cpp` — Game class + SceneHost (~3600 lines). Gameplay in
+  `host_update_gameplay()`, dojo draw in `host_render_scene()`.
+- `engine/platform/glfw_platform.cpp` — Win32 GetAsyncKeyState path (Windows),
+  GLFW callback path (Linux). Do not merge the two.
+- `engine/scene/` — scene FSM (9 scenes).
+- `engine/renderer/` — GL renderer + software renderer.
+- `engine/reverse/` — format parsers: `s3e_container`, `plist_atlas`,
+  `bitmap_font`, `atf_tactics`, `dz_reader` (container + type 1/2/8),
+  `dz_decoder` (type 4, speculative).
+- `scripts/*_decompiled.c` — decompiled original functions used as reference
+  (Model step, playInfo, key handling, DZ read path, etc.).
+- `docs/s3e_reverse_engineering.md` — S3E binary notes.
 
-**Key architectural changes in main.cpp**:
-- `Game` class now inherits from both `rt::IGame` and `scene::SceneHost`
-- Old `GameState { Loading, Location }` enum removed — replaced by `SceneManager`
-- `on_update()` / `on_render()` delegate to `scene_manager_.update/render()`
-- Dojo gameplay (movement, combat, animation, physics, overlays) extracted to `host_update_gameplay(dt)` — called by MainMenu/Battle scenes
-- Dojo rendering (location, character, bag, HUD, overlays) extracted to `host_render_scene()` — called by MainMenu/Battle scenes
-- Save system (JSON stub): `host_save_progress()` writes to `temp_directory_path()/resf2_save.json`
+## Controls (current, original SF2 layout)
 
-**What works**: Scene transitions, menu item clicks (Story/Shop/Settings/Test Dialog), keyboard shortcuts (N=New Game, Y/L=victory/defeat in Battle), save on entering Results.
-
-**What's stubbed**: Map (list of 6 fake levels), Shop/Settings (empty screens with Esc-to-menu), Dialogue (3 hardcoded lines, Space to advance), Results (empty, Space to continue). Real content requires DZ archive extraction (Task 3).
-
-### 3. DZ ARCHIVE FORMAT — PARTIALLY DECODED ⚠️ (this session)
-**Container format**: Fully decoded. See `engine/reverse/dz/README.md` for the corrected file table layout (the old `parse_dz.py` had the field order wrong — `dz_parse_correct.py` is the fixed version).
-
-**Key findings**:
-- All files in `files.dz` are type=4 (DZ), all in `animations.dz` are type=8 (DZ variant)
-- DZ is a **STREAMING compressor** — file offsets overlap, decompressor is stateful, entire archive must be decoded as one stream
-- Entropy 7.5-7.9 bits/byte for larger files → real arithmetic/range coding (NOT XOR)
-- Algorithm: arithmetic coding + 5-byte context window + CRC32 hash + LZ77 matches
-- Located in `libs3e_android.so` at 0x389f8 (~250 ARM instructions)
-
-**Blocked on**: ARM emulation needs full Marmalade runtime (init_array constructors fail). Manual port is incomplete.
-
-**Recommended path**: Use `dzip.exe` on Windows to extract assets, OR port the DZ decoder from Ghidra decompilation of 0x389f8.
-
-### 4. UI/ROTATED TEXTURES — NOT STARTED ❌
-Profile menu icon has parts of other buttons; some location textures rotated incorrectly. Cocos2d-x `textureRotated` flag handling needs formula adjustment. Lowest priority — doesn't block movement or game flow.
-
----
-
-## KEY FILES (updated)
-
-- `main.cpp` — Game class (~2850 lines) with SceneHost integration. Gameplay in `host_update_gameplay()`, rendering in `host_render_scene()`.
-- `engine/scene/scene_system.hpp` — SceneId, Scene, SceneHost, SceneManager
-- `engine/scene/scenes.hpp` / `scenes.cpp` — 9 concrete scene implementations
-- `engine/platform/glfw_platform.cpp` — Win32 GetAsyncKeyState fix (Windows input)
-- `engine/reverse/dz/README.md` — DZ format documentation (corrected)
-- `scripts/dz_parse_correct.py` — corrected DZ container parser + entropy analysis
-- `scripts/s3e_analyze.py` — S3E binary analysis pipeline (from previous session)
-- `work/s3e_analysis/` — S3E analysis output (header, imports, strings, config)
-- `work/sf2_data/` — extracted game data (3138 files from sf2.7z)
-- `work/Marmalade-Modding/` — cloned RE tools (dzextract.py, dump_s3e.py)
-- `work/S3ELoader/` — Ghidra plugin for S3E binaries
-
-## BUILD
-```bash
-# Windows (user's machine)
-build.bat  # cmake + MSVC, produces resf2_app.exe
-resf2_app.exe --assets <path_to_sf2_assets>
-
-# Linux compile check (no linking — just verifies code compiles)
-bash scripts/verify_main_compile.sh
-```
-
-## CONTROLS (updated — original SF2 layout)
 | Key | Action |
-|-----|--------|
-| W | Up — Jump (W+D=front flip, W+A=back flip) |
-| A | Left — Back step (relative to facing) |
-| S | Down — Duck (hold), or Sweep/LowPunch/Elbow/DodgeKick when attacking |
-| D | Right — Forward step (relative to facing) |
-| O | Punch (D=heavy, A=spinning, W=upper, S=low, S+A=elbow strike) |
-| P | Kick (D=front, A=back, S=sweep, S+D=dodge reverse kick) |
-| S+D | Forward roll (dodge) |
-| S+A | Back roll (dodge) |
+|---|---|
+| W/A/S/D | Up / Left / Down / Right (movement + attack direction) |
+| O | Punch (W=upper, S=low, D=heavy, A=spinning, S+A=elbow) |
+| P | Kick (S=sweep, D=front, A=back, S+D=dodge reverse) |
+| W | Jump (W+D=front flip, W+A=back flip) |
+| S+D / S+A | Forward roll / Back roll |
 | S (hold) | Duck (crouch) |
-| Block | AUTOMATIC (when idle, not attacking) |
-| M | Toggle scroll menu |
-| T | Toggle dialog overlay |
-| N | New Game — go to Map |
-| Y/L | Declare victory/defeat (Battle, debug) |
+| Block | Automatic (when idle, not attacking) |
+| M | Toggle menu |
+| T | Toggle dialog |
+| N | New game (go to Map) |
+| Y/L | Declare victory/defeat (debug, in Battle) |
 | 1/2/3 | Zoom presets |
 | Esc | Quit / close overlay / back |
 
-**Facing**: character auto-faces the enemy (punching bag) every frame. When you walk past the enemy, the character turns around. Direction keys (A/D) are interpreted relative to facing: if facing right, D=forward; if facing left, A=forward. Root motion is inverted when facing left.
+## Next entry points
 
-**Root motion (X)**: pure threshold-based delta filtering. Sub-frame interpolated deltas (~3-8 per render) are applied; wrap-around deltas (≥30) are filtered. +66 per step_forward loop, +404 per forward_roll.
-
-**Root motion (Y)**: absolute offset from frame 0 NPivot Y (for jumps/flips). Smoothly decays to 0 after landing for asymmetric animations like back_flip.
-
----
-
-## WHAT'S WORKING
-- ✅ Character body rendering (82 capsules + 29 triangles as silhouette)
-- ✅ Skeletal animation (23 animations from .bin files)
-- ✅ Animation interpolation (alpha blending between frames)
-- ✅ Verlet physics for punching bag
-- ✅ Hit detection (moves.xml Attack intervals, 70px threshold)
-- ✅ Bag impulse on hit (directional, height-based target node)
-- ✅ Dojo location rendering (parallax, Y-inverted)
-- ✅ Pre-cropped rotated atlas frames for location textures
-- ✅ HUD (gold, energy, level bar)
-- ✅ Menu scroll animation (300ms smoothstep)
-- ✅ Menu icons (uniform scaling)
-- ✅ Y normalization (feet on floor across animations, smoothed)
-- ✅ .bin animation format decoded
-- ✅ moves.xml parser (858 moves with attack intervals)
-- ✅ S3E binary analyzed (x86_64, Marmalade + Cocos2d-x)
-
-## WHAT'S NOT WORKING
-- ❌ Movement (GLFW input flicker causes animation jitter)
-- ❌ Root motion (depends on movement fix)
-- ❌ Some background textures still rotated
-- ❌ Profile menu icon has parts of other buttons
-- ❌ DZ archive decompression (custom compression unknown)
-
----
-
-## KEY FILES
-- `main.cpp` — All game logic (~2750 lines)
-- `engine/platform/glfw_platform.cpp` — GLFW input + window (BROKEN on user's Windows)
-- `engine/renderer/renderer.cpp` — OpenGL renderer
-- `engine/reverse/plist_atlas.cpp` — Atlas plist parser
-- `assets/models/` — skeleton.xml, body.xml, punching_bag.xml, skeleton_punching_bag.xml
-- `assets/animations/binary/` — 555 .bin animation files
-- `assets/animations/moves.xml` — 858 move definitions
-- `docs/s3e_reverse_engineering.md` — S3E binary analysis
-- `scripts/` — Python diagnostic scripts
-
-## BUILD
-```bash
-# Windows
-build.bat  # uses cmake + MSVC
-# Run
-resf2_app.exe --assets <path_to_sf2_assets>
-```
-
-## CONTROLS
-| Key | Action |
-|-----|--------|
-| A/D | Step left/right (root motion from .bin) |
-| Space | Punch (direction modifiers: W=upper, S=low, D=double, A=spinning) |
-| K | Kick (direction modifiers: S=sweep, D=front, A=back) |
-| M | Toggle menu |
-| T | Toggle dialog |
-| 1/2/3 | Zoom presets |
-| Esc | Quit |
+1. Stale `current_move_` guard + full state clear on attack end.
+2. Replace `y_adjust` constant with per-move contact alignment.
+3. Byte-validate DZ type 4 against real archives.
+4. De-hardcode asset enumeration.
+5. Extend `[ROOT]` logging to include player_x, player_y, npivot_x, npivot_y,
+   render_y and frame index (needed to diagnose the Y bug from a real run).
