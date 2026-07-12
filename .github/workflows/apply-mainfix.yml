@@ -1,5 +1,6 @@
 name: Apply main.cpp fix
 
+# retrigger: fix/mainfix pre-created as existing ref
 on:
   workflow_dispatch:
   push:
@@ -72,7 +73,7 @@ jobs:
           tail -c 40000 /tmp/tu.log
           set -e
 
-      - name: Push verified fix to branch, else dump log
+      - name: Push verified fix to fix/mainfix, else dump log
         run: |
           rc=$(grep -o '[0-9]*' /tmp/tu_rc.txt | head -1)
           git config user.name "reSF2 ci"
@@ -83,12 +84,12 @@ jobs:
             git push -f origin HEAD:refs/heads/fix/mainfix
             echo "PUSHED to fix/mainfix"
           else
+            git checkout -B ci/mainfix-fail
             mkdir -p docs/_ci_logs
             cp /tmp/tu.log docs/_ci_logs/mainfix_tu.log
-            git checkout -B ci/mainfix-fail
             git add -A
             git commit -m "ci: main.cpp syntax check failed (diagnostic)" || echo "no change"
-            git push -f origin ci/mainfix-fail
+            git push -f origin HEAD:refs/heads/ci-mainfix-fail
             echo "SYNTAX FAILED"
             exit 1
           fi
