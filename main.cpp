@@ -208,6 +208,23 @@ struct MoveDef {
     
     // Key combination
     std::vector<std::string> key_types;  // "Punch", "Kick", "Forward", etc.
+    
+    // Parsed from Template string
+    int key_count = 0;           // 1, 2, or 3 (from "1key", "2key", "3key")
+    std::string direction;        // "Central", "Forward", "Back", "Up", "Down", 
+                                  // "UpForward", "UpBack", "DownForward", "DownBack", ""
+    std::string move_type;        // "Punch", "Kick", "Jump", "Move", "Retreat", "Step", etc.
+    std::string weapon_filter;    // "Unarmed", "Weapon", "" (empty = any)
+    bool is_unarmed = false;      // Template contains "Unarmed"
+    bool is_jump = false;         // Template contains "Jump"
+    bool is_retreat = false;      // Template contains "Retreat"
+    bool is_step = false;         // Template contains "Step"
+    bool is_double_step = false;  // Template contains "DoubleStep"
+    bool is_block = false;        // Template contains "Block"
+    bool is_stance = false;       // Template contains "Stance"
+    bool is_idle = false;         // Template contains "Idle"
+    bool is_not_titan = false;    // Template contains "NotTitan"
+    std::string tactic_weapon;    // TacticWeapon attribute (e.g. "Fists")
 };
 
 struct AnimationData {
@@ -2112,7 +2129,7 @@ private:
     }
 
     // ---------- HUD textures (real game textures) ----------
-    // ---------- Animation loading ----------
+    // ---------- Animation loading (DYNAMIC: scan directory) ----------
     void load_animations() {
         auto root = std::filesystem::path(asset_root_);
         auto exe = get_exe_dir();
@@ -2123,49 +2140,56 @@ private:
             root/"assets"/"animations",
             root/"animations",
             exe / ".." / ".." / ".." / "assets" / "animations" / "binary",  // repo assets
+            exe / ".." / "assets" / "animations" / "binary",
         };
         
-        // Load key animations (using actual game file names from moves.xml)
-        const char* anim_names[] = {
-            "fists1_stance_idle", "fists2_stance_idle",
-            "stance_idle",  // combat idle (from moves.xml StanceIdle)
-            "stance_1", "stance_2",  // start stance (left/right)
-            "high_punch", "heavy_punch", "low_punch",
-            "double_punch", "spinning_punch", "upper_cut",
-            "high_kick", "front_kick", "back_kick",
-            "sweep", "low_kick", "high_knee_up",
-            "axe_idle", "axe_stance_idle",
-            "stance_1", "stance_2",
-            "step_forward", "step_back",
-            "back_flip", "back_flip_kick",
-            // Special moves
-            "forward_roll", "back_roll",
-            "jump", "jump_away",
-            "front_flip", "back_handflip",
-            "duck",  // crouch (S hold)
-            "elbow_strike",  // S+A+O (DownBack|Punch)
-            "dodge_reverse_kick",  // S+D+P (DownForward|Kick)
-            "double_sweep",  // S+P+P (Down|Kick, double-tap)
-            // Blocks (used for hit reactions, not player-triggered)
-            "high_block", "middle_block", "overhead_block",
-            "sweep_block",
-            // Hit reactions
-            "high_hit_fall", "middle_hit_fall", "overhead_hit_fall",
-            "spinning_hit_fall", "sweep_hit_fall",
-        };
+        // Find the first directory that exists and has .bin files
+        std::filesystem::path anim_dir;
+        for (auto& dir : search_dirs) {
+            if (std::filesystem::exists(dir) && !std::filesystem::is_empty(dir)) {
+                anim_dir = dir;
+                break;
+            }
+        }
         
-        for (auto& name : anim_names) {
-            std::string filename = std::string(name) + ".bin";
+        if (anim_dir.empty()) {
+            std::printf("  Animations: NO DIRECTORY FOUND! Searched:\n");
+            for (auto& dir : search_dirs) std::printf("    %s\n", dir.string().c_str());
+            return;
+        }
+        
+        // Dynamically load ALL .bin files from the directory
+        int loaded = 0;
+        for (auto& entry : std::filesystem::directory_iterator(anim_dir)) {
+            if (entry.path().extension() != ".bin") continue;
+            std::string name = entry.path().stem().string();
+            if (animations_.count(name)) continue;  // already loaded
+            AnimationData anim;
+            anim.name = name;
+            if (anim.load(entry.path().string())) {
+                animations_[name] = std::move(anim);
+                loaded++;
+            }
+        }
+        
+        // Also load from moves.xml FileName references (in case some are in subdirs)
+        for (auto& [move_name, move] : moves_) {
+            if (move.filename.empty()) continue;
+            std::string anim_name = move.filename;
+            // Remove .bin extension if present
+            if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                anim_name = anim_name.substr(0, anim_name.size()-4);
+            if (animations_.count(anim_name)) continue;
             for (auto& dir : search_dirs) {
-                auto path = dir / filename;
+                auto path = dir / (anim_name + ".bin");
                 if (std::filesystem::exists(path)) {
                     AnimationData anim;
-                    anim.name = name;
+                    anim.name = anim_name;
                     if (anim.load(path.string())) {
-                        std::printf("  Animation '%s': %d frames\n", name, anim.frame_count);
-                        animations_[name] = std::move(anim);
-                        break;
+                        animations_[anim_name] = std::move(anim);
+                        loaded++;
                     }
+                    break;
                 }
             }
         }
@@ -2174,14 +2198,8 @@ private:
         if (animations_.count("fists1_stance_idle") && !animations_.count("fists_idle")) {
             animations_["fists_idle"] = animations_["fists1_stance_idle"];
         }
-        // Punch animations are loaded directly (high_punch, heavy_punch, low_punch)
         
-        if (animations_.empty()) {
-            std::printf("  Animations: NONE! Searched:\n");
-            for (auto& dir : search_dirs) std::printf("    %s\n", dir.string().c_str());
-            std::printf("  exe dir: %s\n", exe.string().c_str());
-        }
-        std::printf("  Animations loaded: %zu\n", animations_.size());
+        std::printf("  Animations loaded: %zu (from %s)\n", animations_.size(), anim_dir.string().c_str());
     }
 
     // ---------- Move definitions (from moves.xml) ----------
@@ -2226,6 +2244,51 @@ private:
             move.first_frame = (int)tof(xml_attr(tag, "FirstFrame"));
             move.end_frame = (int)tof(xml_attr(tag, "EndFrame"));
             move.priority = (int)tof(xml_attr(tag, "Priority"));
+            
+            move.tactic_weapon = xml_attr(tag, "TacticWeapon");
+            
+            // Parse Template string into structured data
+            // Format: "1key|Central|Unarmed|Punch" or "2key|Forward|Unarmed|Kick"
+            if (!move.template_name.empty()) {
+                std::string tmpl = move.template_name;
+                // Split by '|'
+                size_t start = 0;
+                std::vector<std::string> parts;
+                while (start < tmpl.size()) {
+                    auto sep = tmpl.find('|', start);
+                    if (sep == std::string::npos) { parts.push_back(tmpl.substr(start)); break; }
+                    parts.push_back(tmpl.substr(start, sep - start));
+                    start = sep + 1;
+                }
+                // First part: key count (1key, 2key, 3key)
+                for (auto& p : parts) {
+                    if (p == "1key") move.key_count = 1;
+                    else if (p == "2key") move.key_count = 2;
+                    else if (p == "3key") move.key_count = 3;
+                    // Direction
+                    else if (p == "Central") move.direction = "Central";
+                    else if (p == "Forward") move.direction = "Forward";
+                    else if (p == "Back") move.direction = "Back";
+                    else if (p == "Up") move.direction = "Up";
+                    else if (p == "Down") move.direction = "Down";
+                    else if (p == "UpForward") move.direction = "UpForward";
+                    else if (p == "UpBack") move.direction = "UpBack";
+                    else if (p == "DownForward") move.direction = "DownForward";
+                    else if (p == "DownBack") move.direction = "DownBack";
+                    // Type
+                    else if (p == "Punch") move.move_type = "Punch";
+                    else if (p == "Kick") move.move_type = "Kick";
+                    else if (p == "Jump") { move.move_type = "Jump"; move.is_jump = true; }
+                    else if (p == "Retreat") { move.is_retreat = true; }
+                    else if (p == "Step") { move.is_step = true; }
+                    else if (p == "DoubleStep") { move.is_double_step = true; move.is_step = true; }
+                    else if (p == "Block") { move.is_block = true; }
+                    else if (p == "Stance") { move.is_stance = true; }
+                    else if (p == "IdleStance") { move.is_stance = true; move.is_idle = true; }
+                    else if (p == "Unarmed") { move.is_unarmed = true; move.weapon_filter = "Unarmed"; }
+                    else if (p == "NotTitan") { move.is_not_titan = true; }
+                }
+            }
             
             // Find </Move> to get inner content
             auto move_end = xml.find("</Move>", pos);
