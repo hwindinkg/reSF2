@@ -246,6 +246,12 @@ struct MoveDef {
     std::string required_perk;
     // Weapon subtype required (e.g. "Fists"). Empty = any weapon.
     std::string required_weapon_subtype;
+
+    // Uninterrupt interval (from moves.xml)
+    // When current frame is within [uninterrupt_start, uninterrupt_end],
+    // new moves are blocked. Outside this interval, new moves are allowed.
+    int uninterrupt_start = -1;  // -1 = no Uninterrupt interval
+    int uninterrupt_end = -1;
 };
 
 struct AnimationData {
@@ -588,7 +594,7 @@ public:
         // The step animation's root motion uses anim_facing_right_ (locked at
         // animation start), so flipping facing_right_ mid-step doesn't affect
         // the current step's displacement. The NEXT step will use the new facing.
-        if (location_ && hit_anim_ == 0 && move_state_ < 10) {
+        if (location_ && !is_uninterrupt_ && move_state_ < 10) {
             float bag_x = location_->enemy_x - 983.0f;
             bool should_face_right = (bag_x >= player_pos_x_);
             float dist_to_enemy = std::abs(bag_x - player_pos_x_);
@@ -672,7 +678,8 @@ public:
         // pressing Punch/Kick transitions to air_punch or air_axe_kick.
         // This is the original game's behavior: a short jump smoothly
         // transitions into an air attack.
-        if (hit_anim_ == 0 && (punch_pressed || kick_pressed)) {
+        // Allowed even during Uninterrupt (jump animations don't have Uninterrupt)
+        if ((punch_pressed || kick_pressed)) {
             bool in_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                                  current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                                  current_anim_ == "back_handflip");
@@ -692,11 +699,9 @@ public:
             }
         }
 
-        // Allow attacks when: hit_anim_ == 0 AND
-        //   move_state_ is 0 (idle), 1/2 (walking), 10 (special ended), or 11 (duck)
-        // Original game: attacks are blocked during Uninterrupt interval,
-        // but allowed during SemiUninterrupt and after animation ends.
-        if ((punch_pressed || kick_pressed) && hit_anim_ == 0) {
+        // Allow attacks when: NOT in Uninterrupt interval
+        // Original game: attacks blocked during Uninterrupt, allowed otherwise
+        if ((punch_pressed || kick_pressed) && !is_uninterrupt_) {
             // Determine direction from key state
             std::string cur_direction = "Central";  // default: no direction
             if (key_up && key_forward) cur_direction = "UpForward";
@@ -802,7 +807,8 @@ public:
 
         // === SPECIAL MOVES (jumps, rolls, duck) — from moves.xml ===
         // Match 1key moves with Jump, Step, or no type (Duck, Roll)
-        if (hit_anim_ == 0 && move_state_ < 10) {
+        // Allowed when NOT in Uninterrupt interval
+        if (!is_uninterrupt_ && move_state_ < 10) {
             bool up_pressed = input.keys_just_pressed[(size_t)plat::Key::W] ||
                               input.keys_just_pressed[(size_t)plat::Key::ArrowUp];
             bool down_pressed = input.keys_just_pressed[(size_t)plat::Key::S] ||
@@ -895,7 +901,7 @@ public:
 
         // === STEP MOVEMENT (from moves.xml: StepForward/StepBack) ===
         // Find step moves dynamically
-        if (hit_anim_ == 0 && move_state_ < 10) {
+        if (!is_uninterrupt_ && move_state_ < 10) {
             bool fwd_latched = fwd_held_ms_ > 0;
             bool back_latched = back_held_ms_ > 0;
 
@@ -949,6 +955,28 @@ public:
         // === HIT ANIM COUNTDOWN ===
         if (hit_anim_ > 0) {
             hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
+        }
+
+        // === UNINTERRUPT CHECK ===
+        // Original game: new moves are blocked only during Uninterrupt interval.
+        // We compute whether the current frame is within [uninterrupt_start, uninterrupt_end]
+        // of the current move. If not in Uninterrupt (or no Uninterrupt), new moves allowed.
+        is_uninterrupt_ = false;
+        if (hit_anim_ > 0 && !current_move_.empty()) {
+            auto move_it = moves_.find(current_move_);
+            if (move_it != moves_.end() && move_it->second.uninterrupt_start >= 0) {
+                auto anim_it = animations_.find(current_anim_);
+                if (anim_it != animations_.end()) {
+                    int current_frame = (int)(anim_time_ * 20.0f);
+                    // Uninterrupt interval is 1-indexed in moves.xml, our frames are 0-indexed
+                    int start = move_it->second.uninterrupt_start - 1;
+                    int end = move_it->second.uninterrupt_end > 0 ?
+                              move_it->second.uninterrupt_end - 1 : 9999;
+                    if (current_frame >= start && current_frame <= end) {
+                        is_uninterrupt_ = true;
+                    }
+                }
+            }
         }
 
         // Exit special move state when animation finishes
@@ -1941,46 +1969,47 @@ private:
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
         // Y normalization: keep feet on floor across all animations.
-        // Jump height is handled by jump_y_offset_ (root motion Y).
         //
-        // KEY INSIGHT from original game decompilation:
-        // The original uses MoveInside alignment which adjusts the model
-        // position so that the pivot node (NHeel_1) is at the floor.
-        // This is done EVERY frame, for ALL animations.
+        // The .bin animation stores ABSOLUTE world Y for each node.
+        // anim_node_pos_[name] = (abs_x - npivot_x, abs_y - npivot_y + npivot_rest_y)
+        // = local position relative to NPivot, shifted to rest-pose frame.
         //
-        // For jumps: the .bin animation already contains the correct Y
-        // positions for all nodes (including feet). When NPivot is at 106
-        // (crouch), the feet nodes are at ~64 (floor level). So we DON'T
-        // need y_adjust during jumps at all — the node positions handle it.
+        // In resolve_body_node: sy = world_cy + (ly - pivot_local_y)
+        //   where pivot_local_y = npivot_rest_y = 169.48
+        //   and ly = anim_node_pos_.y = (abs_y - npivot_y + npivot_rest_y)
+        //   So sy = world_cy + (abs_y - npivot_y + npivot_rest_y - npivot_rest_y)
+        //         = world_cy + abs_y - npivot_y
         //
-        // We only need jump_y_offset for the AIRBORNE phase (positive offset
-        // lifts the whole character up). During crouch, the node positions
-        // already keep feet at floor.
+        // For feet to be at floor (abs_y_feet ≈ 2):
+        //   world_cy + 2 - npivot_y = floor_y
+        //   world_cy = floor_y - 2 + npivot_y
         //
-        // To prevent the "snap" when transitioning between crouch and airborne:
-        // - Use full offset (npivot_y - rest_y), can be negative
-        // - Apply y_adjust ONLY for non-jump animations
-        // - For jump animations: jump_y_offset = full offset, y_adjust = 0
-        bool is_jump_render = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
-                               current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
-                               current_anim_ == "back_handflip" ||
-                               current_anim_ == "air_punch" || current_anim_ == "air_axe_kick");
-        if (is_jump_render) {
-            // During jumps: jump_y_offset_ handles Y (full offset, can be negative).
-            // y_adjust = 0. The node positions keep feet at floor during crouch.
-            y_adjust_smoothed_ = 0;
-        } else {
-            // Non-jump: apply y_adjust to keep feet on floor.
-            float ly_lowest = pivot_local_y;
-            for (auto& [name, pos] : anim_node_pos_) {
-                if (pos.second < ly_lowest) ly_lowest = pos.second;
-            }
-            const float REF_FEET_LY = 64.60f;
-            float target_y_adjust = REF_FEET_LY - ly_lowest;
-            y_adjust_smoothed_ = target_y_adjust;
+        // When standing: npivot_y = 169.48, feet_y = 2
+        //   world_cy = floor_y - 2 + 169.48 = floor_y + 167.48
+        //   y_adjust = 167.48 (keeps feet at floor)
+        //
+        // When crouching: npivot_y = 106.21, feet_y = 2
+        //   world_cy = floor_y - 2 + 106.21 = floor_y + 104.21
+        //   y_adjust = 104.21 (keeps feet at floor)
+        //
+        // When jumping: npivot_y = 243.93, feet_y = 175 (feet up)
+        //   world_cy = floor_y - 175 + 243.93 = floor_y + 68.93
+        //   y_adjust = 68.93 (character is higher)
+        //
+        // So y_adjust = (npivot_rest_y - npivot_y) + (feet_y_rest - feet_y_current)
+        // But since feet_y is already in the animation, we just need:
+        //   y_adjust = REF_FEET_LY - lowest_node_y
+        // where lowest_node_y is the lowest animated node Y (relative to rest frame).
+        //
+        // NO jump_y_offset needed! y_adjust handles everything.
+        float ly_lowest = pivot_local_y;
+        for (auto& [name, pos] : anim_node_pos_) {
+            if (pos.second < ly_lowest) ly_lowest = pos.second;
         }
+        const float REF_FEET_LY = 64.60f;
+        y_adjust_smoothed_ = REF_FEET_LY - ly_lowest;
         float world_cx = player_pos_x_;
-        float world_cy = player_pos_y_ + y_adjust_smoothed_ + jump_y_offset_;
+        float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
         // Build edge lookup from both body.xml edges and skeleton.xml edges
         std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
@@ -2848,29 +2877,18 @@ private:
             prev_frame_idx_ = -1;
         }
 
-        // Y root motion during jump/flip animations.
-        // The .bin stores absolute NPivot Y values:
-        //   - Rest/standing: ~169.48
-        //   - Crouch (jump start/end): ~106.21
-        //   - Jump peak: ~243.93
+        // Y root motion: NO LONGER NEEDED.
+        // y_adjust in render_body_model() now handles all Y positioning
+        // by keeping the lowest node at floor level. This works for:
+        //   - Standing (feet at floor)
+        //   - Crouching (feet still at floor, body lower)
+        //   - Jumping (feet up, body higher)
+        //   - Landing (feet at floor)
         //
-        // Use FULL offset (npivot_y - rest_y), including negative values.
-        // This gives smooth motion: crouch (negative) → rise (0) → peak (positive)
-        // → fall (0) → crouch (negative).
-        //
-        // y_adjust is 0 during jumps (set in render_body_model), so the
-        // node positions handle keeping feet at floor during crouch.
-        bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
-                            current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
-                            current_anim_ == "back_handflip" ||
-                            current_anim_ == "air_punch" || current_anim_ == "air_axe_kick");
-        if (is_jump_anim && anim_anchor_set_) {
-            auto pivot_it = skeleton_nodes_.find("NPivot");
-            float npivot_rest_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
-            jump_y_offset_ = npivot_y - npivot_rest_y;  // full offset, can be negative
-        } else {
-            jump_y_offset_ = 0;
-        }
+        // The .bin animation contains absolute world positions for all
+        // nodes, so the lowest node Y directly indicates how high the
+        // character is. No separate jump_y_offset needed.
+        jump_y_offset_ = 0;
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
         auto pivot_it = skeleton_nodes_.find("NPivot");
@@ -3574,6 +3592,7 @@ private:
     uint32_t last_kick_seen_ms_ = 0;   // sticky buffer for P key (150ms window)
     bool start_stance_playing_ = false;  // true during start stance animation
     bool need_switch_to_idle_ = false;  // deferred switch to idle (after update_animation)
+    bool is_uninterrupt_ = false;  // true when current frame is in Uninterrupt interval
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
