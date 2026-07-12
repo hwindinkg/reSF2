@@ -1,1 +1,1 @@
-configure_rc=1
+configure_rc=0

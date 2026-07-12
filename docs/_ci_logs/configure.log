@@ -13,12 +13,31 @@
 -- Check for working C compiler: /usr/bin/cc - skipped
 -- Detecting C compile features
 -- Detecting C compile features - done
--- Including Wayland support
 -- Including X11 support
--- Looking for memfd_create
--- Looking for memfd_create - found
-CMake Error at build/_deps/glfw-src/src/CMakeLists.txt:76 (message):
-  Failed to find wayland-scanner
-
-
--- Configuring incomplete, errors occurred!
+-- Found X11: /usr/include
+-- Looking for XOpenDisplay in /usr/lib/x86_64-linux-gnu/libX11.so;/usr/lib/x86_64-linux-gnu/libXext.so
+-- Looking for XOpenDisplay in /usr/lib/x86_64-linux-gnu/libX11.so;/usr/lib/x86_64-linux-gnu/libXext.so - found
+-- Looking for gethostbyname
+-- Looking for gethostbyname - found
+-- Looking for connect
+-- Looking for connect - found
+-- Looking for remove
+-- Looking for remove - found
+-- Looking for shmat
+-- Looking for shmat - found
+-- Looking for IceConnectionNumber in ICE
+-- Looking for IceConnectionNumber in ICE - found
+-- 
+-- reSF2 0.0.3
+--   C++ standard        : 23
+--   Build type          : Release
+--   Compiler            : GNU 13.3.0
+--   Warnings as errors  : OFF
+--   Sanitizers          : OFF
+--   Tests               : ON
+--   Runtime executable  : ON
+--   GLFW backend        : ON
+-- 
+-- Configuring done (2.9s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/runner/work/reSF2/reSF2/build
