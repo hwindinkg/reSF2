@@ -6,10 +6,12 @@
 > the real HEAD `249b1a8`. Anything not proven against the original binary or
 > a real run is tagged **[HEURISTIC-TODO]**.
 >
-> **Updated this session** to HEAD `f329ae5` (4 new commits: `5af53b3`
-> Linux/GCC build unblock, `96bfce1` Task B main.cpp patches, `9450c4f`
-> MoveInside pivot-node Y alignment, `f329ae5` DZ type-4 honest status).
-> See "Session changelog" at the bottom.
+> **Updated (regression recovery session)** to HEAD `cd17d38`. Previous
+> session's MoveInside Y heuristic (`9450c4f`) caused jump/flip/roll
+> regressions; this session: bisected, disabled the unverified formula,
+> fixed root-motion whitelist, added deterministic input replay +
+> [INPUT_DECISION] logging, traced MoveInside pipeline to 3-step chain.
+> See "Session changelog (regression recovery)" at the bottom.
 
 ## Project
 
@@ -39,48 +41,38 @@ See `BUILD.md`. Summary:
   the shipping target is MSVC/Windows, so a green Linux build does not by
   itself guarantee the Windows build and vice versa.
 
-## Subsystem status (audited this session, HEAD f329ae5)
+## Subsystem status (audited this session, HEAD cd17d38)
+
+Percentages reflect MEASURED behavior, not documentation/logging/discovery.
 
 | Subsystem | Done | State |
 |---|---:|---|
-| Input | 75% | Win32 `GetAsyncKeyState` polling on Windows, GLFW callbacks on Linux. **The two are never mixed** — mixing them reintroduces the repeated-keypress bug. Do not revert this. |
-| State/Move Manager | 50% | Hand-rolled FSM with magic states 0/1/2/10/11. `in_basic_attack` now honest (Task B): gated on `hit_anim_>0` AND `current_anim_` ∉ {stance_idle,fists_idle,step_forward,step_back}. Clear of `current_move_` on `hit_anim_==0` already existed. **[HEURISTIC-TODO]** replace the anim-name denylist with the original `CurrentAnimationName=="1key"|"2key"` template check once Model::step is byte-decoded. |
-| Jump / Y | 45% | MoveInside pivot-node Y alignment implemented (Task C): parses `<Pivot Part="NHeel_X"/>` from moves.xml (720/858 moves node-aligned, 57 animation-only), computes per-frame `y_adjust` to ground the pivot node to floor_y. **[ORIGINAL]** mechanism byte-verified (fcn.10165c10); **[HEURISTIC-TODO]** consumption formula NOT byte-confirmed (see docs/s3e_reverse_engineering.md "MoveInside"). Falls back to constant 4 for `Object="Animation"` moves. |
-| Root motion | 60% | X = absolute NPivot displacement, committed on loop wrap. Y-alignment now per-move (Task C). `[ROOT]` log expanded (Task B): per-frame `f/anim/fi/px/py/npx/npy/ry/face`. |
-| Skeletal animation | 70% | `.bin` decoded (u32 count + per-frame nodes, absolute coords). transition/MidFrames/FirstFrame semantics **[HEURISTIC-TODO]**. |
-| Verlet bag | 60% | 15 nodes / 23 constraints / Node12 fixed match data. Full `ModelPhysics` (collisions/passive/weak/cloth) not implemented. |
-| Combat / hit detection | 40% | moves.xml intervals read; collision reduced to distance endpoint→bag node. No enemy capsules / block / reaction / damage pipeline. |
-| Rendering (build) | 65% | Linux/GCC build unblocked (Task A): `<algorithm>` + `GL_GLEXT_PROTOTYPES` before `<GL/gl.h>` + GLFW X11-only + full-path GL linking. 0 errors on GCC 14.2.0. Runtime rendering unchanged (rotated pre-cropped frames still wrong; batch flushes per quad). |
-| DZ archives | 42% | Container (type 1/2/8) parsed 1:1. **type 4 decoder function verified to exist at 0x389f8 (ARM mode, capstone disasm)** but algorithm NOT byte-traced (Task D). Implementation remains speculative; falls back to pre-extracted files on disk. See docs/s3e_reverse_engineering.md "DZ type 4 decoder". |
+| Input | 75% | Win32 `GetAsyncKeyState` polling on Windows, GLFW callbacks on Linux. **Never mixed.** [DIAGNOSTIC] `--input-script` + `--max-frames` CLI for deterministic replay added (tick from `host_update_gameplay`, not `poll_events`, so script frames align with gameplay frames). [DIAGNOSTIC] `[INPUT_DECISION]` structured log with reject reasons (none/uninterrupt/no_candidate) at every O/P edge. |
+| State/Move Manager | 50% | Hand-rolled FSM. `in_basic_attack` honest (gated on `hit_anim_>0` + anim denylist). O/P from idle and step both work (verified with 10 deterministic scenarios). **[HEURISTIC-TODO]** replace denylist with `CurrentAnimationName=="1key"|"2key"` once Model::step is decoded. |
+| Jump / Y | 30% | **REGRESSION RECOVERED**: MoveInside Y heuristic (9450c4f) disabled (b31681b) — it caused jump/flip/roll to SINK. Back to constant `FEET_FLOOR_OFFSET=4` (flat render_y during jump). MoveInside pipeline traced to 3-step chain (capture→resolve+axis→consume) but consumption formula NOT byte-confirmed. **[HEURISTIC-TODO]** trace fcn.10164c20 + fcn.101661d0 to close the chain. |
+| Root motion | 50% | **FIXED**: `!anim_loop_` removed from whitelist (12778f8) — stance_2 no longer drifts player_x (was -293→-460, now stays -293). Grounded attacks (high_punch etc.) no longer slide the player. Whitelist is now explicit: step/roll/jump/flip/air-attack only. **[HEURISTIC-TODO]** make data-driven from MoveDef metadata. |
+| Skeletal animation | 70% | `.bin` decoded. transition/MidFrames/FirstFrame **[HEURISTIC-TODO]**. |
+| Verlet bag | 60% | 15 nodes / 23 constraints / Node12 fixed. Full `ModelPhysics` not implemented. |
+| Combat / hit detection | 40% | moves.xml intervals read; `[INPUT_DECISION]` logging added. No enemy capsules / block / damage pipeline. |
+| Rendering (build) | 65% | Linux/GCC build unblocked (5af53b3). Runtime rendering unchanged (rotated pre-cropped frames wrong; batch flushes per quad). |
+| DZ archives | 40% | Container (type 1/2/8) parsed 1:1. Type-4 decoder function @ 0x389f8 verified (ARM mode) but algorithm NOT traced. Falls back to pre-extracted files. |
 | Scene/State manager | 30% | Boot/Loading/MainMenu implemented; Map/Shop/Settings/Results are stubs. |
 | Story/content | 10% | Placeholder levels and dialogue lines. |
-| Save system | 10% | Temp JSON stub; real `localSettings.bin`/AES/`UserDefault.xml` not implemented. |
+| Save system | 10% | Temp JSON stub. |
 
-## Known open bugs (verified against HEAD f329ae5)
+## Known open bugs (verified against HEAD cd17d38)
 
-1. **~~Stale `current_move_`~~ → ADDRESSED (Task B, commit 96bfce1).**
-   `in_basic_attack` now requires `hit_anim_>0` AND the current animation
-   not being a neutral/idle anim. The clear of `current_move_` on
-   `hit_anim_==0` already existed (lines ~1037/1225/1236). **Remaining
-   [HEURISTIC-TODO]**: replace the animation-name denylist with the exact
-   original `CurrentAnimationName=="1key"|"2key"` template predicate once
-   Model::step/MoveInside is byte-decoded.
-2. **Jump/roll Y — PARTIALLY ADDRESSED (Task C, commit 9450c4f).**
-   MoveInside pivot-node grounding implemented (binary mechanism
-   byte-verified at fcn.10165c10; consumption formula NOT byte-confirmed).
-   Runtime Y-effect during combat NOT verified (idle run doesn't enter
-   combat; no xdotool for input injection). floor_y hardcoded to dojo
-   (-193). **[HEURISTIC-TODO]** trace the align_y (Model[0x5c]) consumption
-   in Model::step/render to confirm the formula.
-3. **DZ type 4 decoder unproven — PARTIALLY VERIFIED (Task D, commit f329ae5).**
-   Decoder function at 0x389f8 verified to exist (ARM mode), context struct
-   fields +0x14/+0x24/+0x28/+0x48 identified. Full algorithm NOT traced.
-   **[HEURISTIC-TODO]** disassemble 0x389f8..0x38d00 + range coder 0x37adc
-   + bit-tree 0x3751c, prove byte-identical output on a real .dz block.
-4. **Asset path/list hardcoding.** Several loaders enumerate fixed paths/lists
-   instead of reading what the archive/manifest declares. Audit and make
-   dynamic where the original enumerates content. **[HEURISTIC-TODO]**
-   (Task E, deferred — depends on DZ type-4 completion.)
+1. **~~Stale `current_move_`~~ → ADDRESSED (96bfce1).** `in_basic_attack`
+   honest. **[HEURISTIC-TODO]** replace denylist with original template check.
+2. **Jump/roll Y — REGRESSION RECOVERED, not fixed.** MoveInside Y formula
+   disabled (b31681b). render_y is flat at -89 during jump (character doesn't
+   visually jump). The 3-step MoveInside pipeline is traced (capture→resolve
+   →consume) but the consumption formula is NOT byte-confirmed. **[HEURISTIC-TODO]**
+   trace fcn.10164c20 (axis retrieval, `push 2`) + fcn.101661d0 (consumer) to
+   close the chain, then implement verified per-axis alignment.
+3. **DZ type 4 decoder — NOT working.** Function verified, algorithm NOT
+   traced. **[HEURISTIC-TODO]**.
+4. **Asset path/list hardcoding.** **[HEURISTIC-TODO]** (deferred).
 
 ## Invariants (do not violate)
 
@@ -129,27 +121,52 @@ See `BUILD.md`. Summary:
 
 ## Next entry points (updated this session)
 
-1. ~~Stale `current_move_` guard~~ — DONE (Task B, commit 96bfce1). Remaining:
-   replace the animation-name denylist with the original
-   `CurrentAnimationName=="1key"|"2key"` template predicate once
-   Model::step/MoveInside is byte-decoded.
-2. ~~Replace `y_adjust` constant with per-move contact alignment~~ — PARTIALLY
-   DONE (Task C, commit 9450c4f). MoveInside mechanism byte-verified at
-   fcn.10165c10; pivot-node grounding implemented. Remaining: trace the
-   align_y (Model[0x5c]) consumption formula in Model::step/render; verify
-   runtime Y-effect during a triggered combat move (needs input injection —
-   no xdotool in this sandbox); generalize floor_y beyond the dojo.
-3. ~~Byte-validate DZ type 4 against real archives~~ — PARTIALLY DONE (Task D,
-   commit f329ae5). Decoder function at 0x389f8 verified (ARM mode, capstone),
-   context struct fields identified. Remaining: trace the full decode loop
-   (0x389f8..0x38d00) + range coder (0x37adc) + bit-tree (0x3751c); prove
-   byte-identical output on a real `.dz` block (e.g. `settings.xml`).
-4. De-hardcode asset enumeration (Task E, deferred — depends on DZ type-4).
-5. ~~Extend `[ROOT]` logging~~ — DONE (Task B, commit 96bfce1). Per-frame
-   `f/anim/fi/px/py/npx/npy/ry/face` (291 [ROOT] lines in a 15s idle run vs
-   1 line before). See Testing/after_log_AFTER_TaskB.txt.
+1. **MoveInside Y consumption** — trace the 3-step pipeline end-to-end:
+   - Step 2: `fcn.10164c20` @ 0x10164c20 — what does `fcn.10103690(node_owner, axis=2, &out)`
+     return? What does `fcn.10103e80(animInfo, result)` do with it?
+   - Step 3: `fcn.101661d0` @ 0x101661d0 — reads Model+0x58/0x5c; how does it
+     produce the final transform?
+   - Then implement verified per-axis alignment (X|Z from moves.xml Axis attr).
+2. **Root-motion data-driven** — replace the animation-name whitelist with
+   MoveDef metadata lookup (is_step/is_jump/is_retreat). Requires a reverse
+   map from animation filename to MoveDef.
+3. **O/P during step on Windows** — the issue does NOT reproduce on Linux/Xvfb
+   with deterministic input. If it reoccurs on Windows, use `[INPUT_DECISION]`
+   log (cd17d38) to diagnose. Possible cause: `step_min_played` (400ms threshold)
+   may eat taps that arrive too early in a human-speed press.
+4. **DZ type 4 decoder** — trace 0x389f8..0x38d00 + range coder 0x37adc.
+5. **De-hardcode asset enumeration** — deferred (depends on DZ type-4).
 
-## Session changelog (this session, HEAD 249b1a8 → f329ae5)
+## Session changelog (regression recovery, HEAD a26567e → cd17d38)
+
+- `551b0c3` — test: deterministic input replay CLI + 10 regression scenarios.
+  `--input-script`/`--max-frames` args. `Platform::load_input_script` +
+  `tick_input_script` (called from `host_update_gameplay`, NOT `poll_events`,
+  so script frames align with gameplay frames). 10 scenarios in Testing/scenarios/.
+- `b31681b` — revert(main): disable unverified MoveInside render-Y consumption.
+  Recovery commit. Bisect confirmed 9450c4f is the first bad commit (jump
+  render_y: -89→-161 during NPivot rise 106→243). Formula disabled, back to
+  constant FEET_FLOOR_OFFSET=4. Parser + metadata kept. One-shot stderr warning.
+- `12778f8` — fix(root): restrict world root motion to movement moves only.
+  Removed `!anim_loop_` from is_root_motion_anim (stance_2 was drifting
+  player_x -293→-460). Removed grounded attacks from whitelist (high_punch
+  etc. no longer slide the player). Whitelist: step/roll/jump/flip/air-attack.
+- `cd17d38` — fix(input): add [INPUT_DECISION] structured logging for O/P
+  diagnosis. Machine-distinguishable reject reasons (none/uninterrupt/
+  no_candidate). candidate_count tracking. Verified: O and P both work from
+  step in Linux/Xvfb (HeavyPunch / FrontKick, reject=none).
+
+All 4 commits pushed to origin/main. `git log --oneline -6`:
+```
+cd17d38 fix(input): add [INPUT_DECISION] structured logging for O/P diagnosis
+12778f8 fix(root): restrict world root motion to movement moves only
+b31681b revert(main): disable unverified MoveInside render-Y consumption
+551b0c3 test: deterministic input replay CLI + 10 regression scenarios
+a26567e docs: update HANDOFF.md + worklog.md to HEAD f329ae5 (Task F)
+f329ae5 dz: honest status for type-4 decoder + verified 0x389f8 disasm (Task D)
+```
+
+## Session changelog (previous session, HEAD 249b1a8 → f329ae5)
 
 - `5af53b3` — build(linux): fix GCC compile of renderer.cpp + GLFW
   FetchContent on Wayland-less hosts. `<algorithm>` + `GL_GLEXT_PROTOTYPES`
