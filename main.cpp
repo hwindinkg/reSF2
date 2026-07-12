@@ -900,56 +900,102 @@ public:
         // Only do hit detection here if hit_anim_ is still > 0.
         // Reset bag_hit_ at the START of each attack animation (when current_move_
         // changes), not just when hit_anim_ reaches 0.
-        if (hit_anim_ > 0) {
-            // Check if we're in the attack interval for this move
-            if (!bag_hit_ && bag_model_ && location_) {
-                auto anim_it = animations_.find(current_anim_);
-                if (anim_it != animations_.end()) {
-                    int fc = anim_it->second.frame_count;
-                    int current_frame = (int)(anim_time_ * 20.0f);
-                    auto move_it = moves_.find(current_move_);
-                    if (move_it != moves_.end() && move_it->second.attack_start > 0) {
-                        int attack_start = move_it->second.attack_start;
-                        int attack_end = move_it->second.attack_end > 0 ?
-                                       move_it->second.attack_end : attack_start;
-                        int frame_start = attack_start - 1;
-                        int frame_end = attack_end - 1;
-                        if (current_frame >= frame_start && current_frame <= frame_end) {
-                            // Determine attacking limb from attack_edges in moves.xml
-                            // Fall back to NWrist_1 for punches, NToe_1 for kicks
-                            std::string limb_node;
-                            if (!move_it->second.attack_edges.empty()) {
-                                // Use first attack edge's first node
-                                // Edge names in moves.xml correspond to skeleton edges
-                                // For now use the edge name to determine limb type
-                                std::string edge_name = move_it->second.attack_edges[0];
-                                if (edge_name.find("Leg") != std::string::npos ||
-                                    edge_name.find("Foot") != std::string::npos ||
-                                    edge_name.find("Toe") != std::string::npos) {
-                                    limb_node = "NToe_1";
-                                } else {
-                                    limb_node = "NWrist_1";
-                                }
+        // === HIT DETECTION (from moves.xml intervals) ===
+        // Original game logic (from moves.xml + s3e disassembly):
+        //
+        // 1. Each move has an Attack interval: <Interval Type="Attack" Start="4" End="5">
+        //    This defines WHICH FRAMES the attack is active.
+        //
+        // 2. During Attack interval, the game checks collision between
+        //    AttackingParts (edges like EForearm_2, EHand_2, EFingers_2)
+        //    and the enemy's Collisible edges (edges with Collisible="1").
+        //
+        // 3. Collision = distance between edge endpoints < threshold.
+        //    Each attacking edge has two endpoints (End1, End2 from skeleton).
+        //    Both endpoints are checked against ALL enemy collisible edges.
+        //
+        // 4. On collision: apply Damage, Impulse, and play Hit effect.
+        //    The hit is PER-FRAME — each frame in the Attack interval can
+        //    register a separate hit. There is NO "bag_hit_" flag in the
+        //    original. The original checks collision every frame during
+        //    the attack interval.
+        //
+        // 5. To prevent multiple hits per frame, the original uses
+        //    Invulnerable interval on the TARGET (not the attacker).
+        //    After being hit, the target becomes Invulnerable for N frames.
+        //
+        // We implement: check collision EVERY frame during Attack interval.
+        // Apply impulse only if the bag wasn't already hit THIS FRAME.
+        // Reset hit state when leaving the Attack interval (so the next
+        // attack interval frame can hit again).
+
+        if (hit_anim_ > 0 && bag_model_ && location_) {
+            auto anim_it = animations_.find(current_anim_);
+            if (anim_it != animations_.end()) {
+                int fc = anim_it->second.frame_count;
+                int current_frame = (int)(anim_time_ * 20.0f);
+                auto move_it = moves_.find(current_move_);
+                if (move_it != moves_.end() && move_it->second.attack_start > 0) {
+                    int attack_start = move_it->second.attack_start;
+                    int attack_end = move_it->second.attack_end > 0 ?
+                                   move_it->second.attack_end : attack_start;
+                    int frame_start = attack_start - 1;
+                    int frame_end = attack_end - 1;
+                    // Check if we're in the attack interval
+                    bool in_attack_interval = (current_frame >= frame_start && current_frame <= frame_end);
+
+                    // Reset bag_hit_ when NOT in attack interval (allows re-hit
+                    // when entering the interval again, e.g., for multi-hit moves)
+                    if (!in_attack_interval) {
+                        bag_hit_ = false;
+                    }
+
+                    if (in_attack_interval && !bag_hit_) {
+                        // Determine attacking limb from AttackingParts in moves.xml
+                        // Each AttackingParts Edge has End1 and End2 in skeleton.xml
+                        // We check ALL attacking edges, not just one
+                        bool hit_registered = false;
+                        for (auto& edge_name : move_it->second.attack_edges) {
+                            if (edge_name.empty()) continue;
+                            // Look up edge in skeleton to get End1/End2
+                            auto skel_edge = skeleton_edges_.find(edge_name);
+                            std::string node1, node2;
+                            if (skel_edge != skeleton_edges_.end()) {
+                                node1 = skel_edge->second.end1;
+                                node2 = skel_edge->second.end2;
                             } else {
-                                bool is_kick = (current_move_.find("Kick") != std::string::npos ||
-                                               current_move_.find("Sweep") != std::string::npos);
-                                limb_node = is_kick ? "NToe_1" : "NWrist_1";
+                                // Fallback: guess from edge name
+                                if (edge_name.find("Foot") != std::string::npos ||
+                                    edge_name.find("Calf") != std::string::npos ||
+                                    edge_name.find("Leg") != std::string::npos) {
+                                    node1 = "NToe_1"; node2 = "NAnkle_1";
+                                } else {
+                                    node1 = "NWrist_1"; node2 = "NKnuckles_1";
+                                }
                             }
-                            auto ait = anim_node_pos_.find(limb_node);
-                            if (ait != anim_node_pos_.end()) {
+
+                            // Check collision for both endpoints of this edge
+                            for (int endpoint = 0; endpoint < 2; endpoint++) {
+                                std::string& limb_node = (endpoint == 0) ? node1 : node2;
+                                if (limb_node.empty()) continue;
+                                auto ait = anim_node_pos_.find(limb_node);
+                                if (ait == anim_node_pos_.end()) continue;
+
                                 float limb_lx = ait->second.first;
                                 float limb_ly = ait->second.second;
                                 auto pivot_it = skeleton_nodes_.find("NPivot");
                                 float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
-                                // Include y_adjust and jump_y_offset in limb world Y
                                 float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx);
                                 float limb_wy = player_pos_y_ + y_adjust_smoothed_ + jump_y_offset_ + (limb_ly - pivot_ly);
+
+                                // Bag position from Verlet
                                 float bag_cx = location_->enemy_x - 983.0f;
                                 float bag_cy = location_->enemy_y + 81.0f + y_adjust_smoothed_;
                                 auto bv_it = bag_verlet_.find("NPivot");
                                 if (bv_it != bag_verlet_.end()) {
                                     bag_cx = bv_it->second.x; bag_cy = bv_it->second.y;
                                 }
+
                                 float dx = limb_wx - bag_cx;
                                 float dy = limb_wy - bag_cy;
                                 float dist = std::sqrt(dx*dx + dy*dy);
@@ -958,15 +1004,21 @@ public:
                                     if (limb_wy < bag_cy - 30) target_node = "NBottom";
                                     else if (limb_wy > bag_cy + 30) target_node = "Node4";
                                     float impulse_dir = (dx < 0) ? 1.0f : -1.0f;
-                                    float impulse_strength = (limb_node == "NToe_1") ? 25.0f : 18.0f;
+                                    // Impulse from moves.xml Impulse X value
+                                    float impulse_strength = 20.0f;
+                                    if (move_it->second.move_type == "Kick") impulse_strength = 25.0f;
                                     apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
-                                    std::printf("[COMBAT] HIT! move=%s frame=%d/%d [%d-%d] limb=%s dist=%.1f -> %s\n",
+                                    std::printf("[COMBAT] HIT! move=%s frame=%d/%d [%d-%d] edge=%s node=%s dist=%.1f -> %s\n",
                                                 current_move_.c_str(), current_frame, fc,
                                                 frame_start, frame_end,
-                                                limb_node.c_str(), dist, target_node.c_str());
+                                                edge_name.c_str(), limb_node.c_str(),
+                                                dist, target_node.c_str());
                                     bag_hit_ = true;
+                                    hit_registered = true;
+                                    break;  // one hit per frame
                                 }
                             }
+                            if (hit_registered) break;
                         }
                     }
                 }
