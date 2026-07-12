@@ -120,6 +120,7 @@ if(RESF2_BUILD_RUNTIME)
         resf2_renderer
         resf2_runtime
         resf2_scene
+        resf2_reverse
         resf2_warnings
     )
     target_compile_features(resf2_app PRIVATE cxx_std_23)

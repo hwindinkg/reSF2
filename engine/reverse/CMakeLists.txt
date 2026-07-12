@@ -17,6 +17,7 @@ add_library(resf2_reverse STATIC
     plist_atlas.cpp
     atf_tactics.cpp
     bitmap_font.cpp
+    dz_reader.cpp
 )
 
 target_include_directories(resf2_reverse PUBLIC
