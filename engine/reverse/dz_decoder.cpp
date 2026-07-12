@@ -135,50 +135,36 @@ struct RangeCoder {
     }
 };
 
-// Probability tables
-// From the disassembly, the state structure has:
-//   state[8..0x11] = 9 probability tables, each 0x80 bytes = 64 × uint16_t
-//   state[0x10] = base + 0x400 (another table)
-//   state[0x11] = base + 0x480 (another table)
-// Plus additional tables at offsets 0xE60+0xC, 0x640+0x4, etc.
-//
-// Total probability table size: 0x500 = 1280 bytes = 640 × uint16_t
-
+// Probability tables — LZMA-style layout
+// From ARM decompilation (0x389f8, 0x3751c):
+//   state[8..0x11] = 9 tables of 64 × uint16_t (0x80 bytes each)
+//   state[0x10] = base + 0x400 (is-match table)
+//   state[0x11] = base + 0x480 (is-rep table)
+//   r4 + 0x640 + 4 = offset probs (64 entries)
+//   r4 + 0xE60 + 0xC = literal probs (256×8 = 2048 entries)
+//   r4 + 0x660 + 4 = match length probs (64 entries)
 struct DzProbTables {
-    // Main probability tables (initialized to 0x400 = 1024)
-    static constexpr uint16_t INIT_PROB = 0x400;
+    static constexpr uint16_t INIT_PROB = 0x400;  // 1024
 
-    // Table layout (from disassembly of FUN_000388a4):
-    //   [0x000..0x080) = 64 entries (main is-match flag)
-    //   [0x080..0x100) = 64 entries (match length)
-    //   [0x100..0x180) = 64 entries (output length)
-    //   [0x180..0x200) = 64 entries (literal context)
-    //   [0x200..0x280) = 64 entries (offset)
-    //   [0x280..0x300) = 64 entries (offset high bits)
-    //   [0x300..0x380) = 64 entries (length)
-    //   [0x380..0x400) = 64 entries (length high)
-    //   [0x400..0x480) = 64 entries (special)
-    //   [0x480..0x500) = 64 entries (special2)
-    uint16_t tables[10][64];
+    // Main tables (9 × 64 entries)
+    uint16_t tables[9][64];
 
-    // Additional tables from the code:
-    //   r4 + 0xE60 + 0xC = literal byte probs (256 × 8 = 2048 entries)
-    //   r4 + 0x640 + 0x4 = match length probs
+    // Literal context: 256 symbols × 8 bits = 2048 entries
     uint16_t literal_probs[256][8];
+
+    // Match length: 64 entries (bit-tree of 4 levels)
     uint16_t match_len_probs[64];
+
+    // Offset: 64 entries (bit-tree of 6 levels)
     uint16_t offset_probs[64];
 
     void init() {
-        for (int t = 0; t < 10; ++t) {
-            for (int i = 0; i < 64; ++i) {
+        for (int t = 0; t < 9; ++t)
+            for (int i = 0; i < 64; ++i)
                 tables[t][i] = INIT_PROB;
-            }
-        }
-        for (int i = 0; i < 256; ++i) {
-            for (int j = 0; j < 8; ++j) {
+        for (int i = 0; i < 256; ++i)
+            for (int j = 0; j < 8; ++j)
                 literal_probs[i][j] = INIT_PROB;
-            }
-        }
         for (int i = 0; i < 64; ++i) {
             match_len_probs[i] = INIT_PROB;
             offset_probs[i] = INIT_PROB;
@@ -195,10 +181,6 @@ std::vector<uint8_t> DzDecompressor::decompress(const uint8_t* compressed, size_
     }
 
     std::fprintf(stderr, "[DZ] decompress: comp=%zu, uncomp=%zu\n", comp_size, uncomp_size);
-    std::fprintf(stderr, "[DZ] first 16 bytes: ");
-    for (size_t i = 0; i < 16 && i < comp_size; ++i)
-        std::fprintf(stderr, "%02x ", compressed[i]);
-    std::fprintf(stderr, "\n");
 
     std::vector<uint8_t> output;
     output.reserve(uncomp_size);
@@ -209,49 +191,72 @@ std::vector<uint8_t> DzDecompressor::decompress(const uint8_t* compressed, size_
     DzProbTables probs;
     probs.init();
 
+    // 5-byte context window (LZMA-style)
     uint8_t window[5] = {0, 0, 0, 0, 0};
     int window_pos = 0;
+
     int literal_count = 0, match_count = 0, iterations = 0;
     int max_iter = (int)uncomp_size * 10;
 
     while (output.size() < uncomp_size && rc.pos < comp_size && iterations < max_iter) {
         iterations++;
+
+        // Update window with last output byte
         if (!output.empty()) {
             window[window_pos] = output.back();
             window_pos = (window_pos + 1) % 5;
         }
+
+        // Compute context from window using CRC32 hash
+        // From decompilation: context = (window[1]<<24)|(window[2]<<16)|(window[3]<<8)|window[4]
         uint32_t ctx = crc32_hash(window);
         uint32_t table_idx = ctx % 64;
+
+        // Decode is-match flag (table 0, index table_idx)
         int is_match = rc.decode_bit(probs.tables[0][table_idx]);
 
         if (!is_match) {
+            // Literal byte — decode 8 bits using bit-tree
             literal_count++;
             uint8_t prev_byte = output.empty() ? 0 : output.back();
             uint8_t symbol = 0;
+            // Use literal_probs[prev_byte] as the bit-tree
+            uint32_t m = 1;
             for (int bit = 0; bit < 8; ++bit) {
-                int b = rc.decode_bit(probs.literal_probs[prev_byte][bit]);
-                symbol = (symbol << 1) | (uint8_t)b;
+                int b = rc.decode_bit(probs.literal_probs[prev_byte][m]);
+                m = (m << 1) + b;
             }
+            symbol = (uint8_t)(m - 256);
             output.push_back(symbol);
         } else {
+            // Match — decode length and offset
             match_count++;
+
+            // Decode match length: bit-tree of 4 levels (values 0..15)
             uint32_t len_code = rc.decode_bit_tree(probs.match_len_probs, 4);
-            uint32_t match_len = len_code + 2;
+            uint32_t match_len = len_code + 2;  // 2..17
+
+            // Decode offset: bit-tree of 6 levels (values 0..63)
             uint32_t offset_code = rc.decode_bit_tree(probs.offset_probs, 6);
-            uint32_t match_offset = offset_code + 1;
+            uint32_t match_offset = offset_code + 1;  // 1..64
+
             if (match_offset > output.size()) {
                 std::fprintf(stderr, "[DZ] Invalid match: off=%u, out=%zu (lit=%d,mat=%d,iter=%d)\n",
                              match_offset, output.size(), literal_count, match_count, iterations);
                 return {};
             }
+
+            // Copy match
             size_t src_pos = output.size() - match_offset;
-            for (uint32_t i = 0; i < match_len && output.size() < uncomp_size; ++i)
+            for (uint32_t i = 0; i < match_len && output.size() < uncomp_size; ++i) {
                 output.push_back(output[src_pos++]);
+            }
         }
     }
 
     std::fprintf(stderr, "[DZ] result: %zu/%zu (lit=%d,mat=%d,iter=%d,in=%zu/%zu)\n",
                  output.size(), uncomp_size, literal_count, match_count, iterations, rc.pos, comp_size);
+
     if (!output.empty()) {
         std::fprintf(stderr, "[DZ] output first 32: ");
         for (size_t i = 0; i < 32 && i < output.size(); ++i)
