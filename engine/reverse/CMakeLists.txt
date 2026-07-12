@@ -18,6 +18,7 @@ add_library(resf2_reverse STATIC
     atf_tactics.cpp
     bitmap_font.cpp
     dz_reader.cpp
+    dz_decoder.cpp
 )
 
 target_include_directories(resf2_reverse PUBLIC

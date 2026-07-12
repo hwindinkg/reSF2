@@ -3,6 +3,7 @@
 // DZ archive reader implementation.
 
 #include "dz_reader.hpp"
+#include "dz_decoder.hpp"
 #include <cstdio>
 #include <algorithm>
 
@@ -69,11 +70,33 @@ std::vector<std::byte> DzArchive::read_file(const std::string& name) const {
         case 8:  // gzip
             return decompress_gzip(base, comp_size);
         
-        case 4:  // DZ custom (Marmalade arithmetic coding)
-            // Not yet implemented. Fall back to empty.
-            std::fprintf(stderr, "[DZ] WARNING: %s uses type=4 (DZ custom), not yet supported\n",
-                         name.c_str());
-            return {};
+        case 4:  // DZ custom (Marmalade arithmetic/range coding)
+        {
+            // Use our clean-room DZ decoder implementation.
+            // The DZ format uses overlapping offsets — files share one
+            // continuous compressed stream. For now, we try to decompress
+            // each file independently from its offset.
+            //
+            // Note: This may not work for all files because the range coder
+            // state carries over between files. For proper streaming support,
+            // we'd need to decompress the entire archive as one stream.
+            auto result = DzDecompressor::decompress(
+                reinterpret_cast<const uint8_t*>(base), comp_size,
+                entry.uncomp_size);
+            if (result.empty()) {
+                std::fprintf(stderr, "[DZ] WARNING: %s (type=4) decompression failed, "
+                             "trying streaming mode\n", name.c_str());
+                // Try streaming mode from the file's offset
+                result = DzDecompressor::decompress_streaming(
+                    reinterpret_cast<const uint8_t*>(base), comp_size,
+                    0, entry.uncomp_size);
+            }
+            if (!result.empty()) {
+                std::printf("[DZ] Decompressed %s: %zu -> %zu bytes\n",
+                            name.c_str(), comp_size, result.size());
+            }
+            return result;
+        }
         
         default:
             std::fprintf(stderr, "[DZ] Unknown compression type %u for %s\n",
