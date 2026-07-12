@@ -2045,18 +2045,37 @@ private:
         //   = world_cy + (abs_y - npivot_y + npivot_rest_y - npivot_rest_y)
         //   = world_cy + abs_y - npivot_y
         //
-        // We want: NPivot at player_pos_y_ (the game-defined player position).
-        // For NPivot: abs_y = npivot_y, so sy = world_cy + 0 = world_cy.
-        // So world_cy should = player_pos_y_ (NPivot world position).
+        // For NPivot: sy = world_cy (abs_y = npivot_y)
+        // For NToe_1 (standing): ly=65.52, pivot_local_y=169.48
+        //   sy = world_cy + (65.52 - 169.48) = world_cy - 103.96
         //
-        // y_adjust = 0 when NPivot is at rest pose (169.48).
-        // When NPivot moves (crouch/jump), we need to shift world_cy by
-        // the NPivot Y delta: y_adjust = anim_npivot_bin_y_ - npivot_rest_y
+        // Floor surface (layer_3 at params y=225, height=64):
+        //   world_y = -225 + 32 = -193 (top of floor image)
         //
-        // This keeps the character anchored to player_pos_y_ while allowing
-        // crouch (NPivot down → y_adjust negative → character lower)
-        // and jump (NPivot up → y_adjust positive → character higher).
-        y_adjust_smoothed_ = anim_npivot_bin_y_ - pivot_local_y;
+        // We need NToe_1 at floor surface:
+        //   world_cy - 103.96 = -193
+        //   world_cy = -193 + 103.96 = -89.04
+        //
+        // But player_pos_y_ = -93 (from params). Need y_adjust = +3.96.
+        //
+        // General formula: y_adjust = floor_surface + 103.96 - player_pos_y_
+        // But 103.96 = pivot_local_y - lowest_node_y (varies per animation)
+        // So: y_adjust = floor_surface + (pivot_local_y - lowest_node_y) - player_pos_y_
+        //             = floor_surface + pivot_local_y - lowest_node_y - player_pos_y_
+        //
+        // Actually simpler: y_adjust = (pivot_local_y - anim_npivot_bin_y_)
+        // This gives 0 when NPivot at rest, positive when crouching, negative when jumping.
+        // Combined with player_pos_y_, this keeps NPivot anchored.
+        //
+        // But we need +4 offset to align feet with floor surface.
+        // This offset = floor_surface - (player_pos_y_ - 103.96)
+        // = -193 - (-93 - 103.96) = -193 + 196.96 = 3.96
+        //
+        // We can compute this dynamically from location floor position.
+        // For now, use a fixed offset of 4 (matches dojo floor).
+        // TODO: compute from location_->floor and layer_3 image position.
+        constexpr float FEET_FLOOR_OFFSET = 4.0f;  // aligns feet with floor surface
+        y_adjust_smoothed_ = (anim_npivot_bin_y_ - pivot_local_y) + FEET_FLOOR_OFFSET;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
