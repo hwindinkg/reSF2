@@ -1,30 +1,348 @@
 [1/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/platform.c.o
-[2/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/vulkan.c.o
-[3/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/init.c.o
-[4/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/context.c.o
-[5/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/window.c.o
-[6/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/monitor.c.o
-[7/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_monitor.c.o
-[8/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_joystick.c.o
-[9/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_init.c.o
-[10/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/egl_context.c.o
-[11/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/osmesa_context.c.o
-[12/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_window.c.o
-[13/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_module.c.o
-[14/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_time.c.o
-[15/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/input.c.o
-[16/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_thread.c.o
+[2/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/context.c.o
+[3/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/vulkan.c.o
+[4/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/init.c.o
+[5/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_init.c.o
+[6/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/osmesa_context.c.o
+[7/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/monitor.c.o
+[8/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/window.c.o
+[9/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_joystick.c.o
+[10/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_monitor.c.o
+[11/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_module.c.o
+[12/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_thread.c.o
+[13/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/egl_context.c.o
+[14/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_window.c.o
+[15/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_time.c.o
+[16/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/input.c.o
 [17/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/xkb_unicode.c.o
 [18/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_poll.c.o
 [19/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_monitor.c.o
 [20/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/glx_context.c.o
-[21/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_init.c.o
-[22/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_window.c.o
-[23/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/linux_joystick.c.o
-[24/55] Linking C static library lib/libglfw3.a
-[25/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/gl_loader.cpp.o
-[26/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/s3e_container.cpp.o
-[27/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/software_renderer.cpp.o
+[21/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/linux_joystick.c.o
+[22/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_init.c.o
+[23/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_window.c.o
+[24/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o
+FAILED: [code=1] engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o 
+/usr/bin/c++  -I/home/runner/work/reSF2/reSF2/engine/renderer/.. -O3 -DNDEBUG -std=c++23 -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Wold-style-cast -Wcast-align -Woverloaded-virtual -Wconversion -Wnull-dereference -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -MD -MT engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o -MF engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o.d -o engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o -c /home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘bool resf2::renderer::Texture2D::init_from_png(const uint8_t*, std::size_t)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:42:56: warning: use of old-style cast to ‘int’ [-Wold-style-cast]
+   42 |     stbi_uc* pixels = stbi_load_from_memory(data, (int)size, &w, &h, &channels, 4);
+      |                                                        ^~~~
+      |                                                   ---------
+      |                                                   static_cast<int> (size)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In destructor ‘resf2::renderer::ShaderProgram::~ShaderProgram()’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:57:21: error: ‘glUseProgram’ was not declared in this scope
+   57 |     if (program_) { glUseProgram(0); glDeleteProgram(program_); }
+      |                     ^~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:57:38: error: ‘glDeleteProgram’ was not declared in this scope
+   57 |     if (program_) { glUseProgram(0); glDeleteProgram(program_); }
+      |                                      ^~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:58:25: error: ‘glDeleteShader’ was not declared in this scope
+   58 |     if (vertex_shader_) glDeleteShader(vertex_shader_);
+      |                         ^~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:59:27: error: ‘glDeleteShader’ was not declared in this scope
+   59 |     if (fragment_shader_) glDeleteShader(fragment_shader_);
+      |                           ^~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In function ‘unsigned int resf2::renderer::compile_shader(unsigned int, const std::string&)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:63:27: error: ‘glCreateShader’ was not declared in this scope
+   63 |     unsigned int shader = glCreateShader(type);
+      |                           ^~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:65:54: warning: use of old-style cast to ‘const GLchar* const*’ {aka ‘const char* const*’} [-Wold-style-cast]
+   65 |     glShaderSource(shader, 1, (const GLchar* const*)&p, nullptr);
+      |                                                      ^
+      |                               -
+      |                               const_cast<          -
+      |                                                    > ()
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:65:5: error: ‘glShaderSource’ was not declared in this scope
+   65 |     glShaderSource(shader, 1, (const GLchar* const*)&p, nullptr);
+      |     ^~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:66:5: error: ‘glCompileShader’ was not declared in this scope; did you mean ‘compile_shader’?
+   66 |     glCompileShader(shader);
+      |     ^~~~~~~~~~~~~~~
+      |     compile_shader
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:67:17: error: ‘glGetShaderiv’ was not declared in this scope
+   67 |     int ok = 0; glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+      |                 ^~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:69:25: error: ‘glGetShaderInfoLog’ was not declared in this scope
+   69 |         char log[1024]; glGetShaderInfoLog(shader, 1024, nullptr, log);
+      |                         ^~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:71:9: error: ‘glDeleteShader’ was not declared in this scope
+   71 |         glDeleteShader(shader); return 0;
+      |         ^~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘bool resf2::renderer::ShaderProgram::init(const std::string&, const std::string&)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:82:16: error: ‘glCreateProgram’ was not declared in this scope
+   82 |     program_ = glCreateProgram();
+      |                ^~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:83:5: error: ‘glAttachShader’ was not declared in this scope
+   83 |     glAttachShader(program_, vertex_shader_);
+      |     ^~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:85:5: error: ‘glLinkProgram’ was not declared in this scope; did you mean ‘glHistogram’?
+   85 |     glLinkProgram(program_);
+      |     ^~~~~~~~~~~~~
+      |     glHistogram
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:86:17: error: ‘glGetProgramiv’ was not declared in this scope
+   86 |     int ok = 0; glGetProgramiv(program_, GL_LINK_STATUS, &ok);
+      |                 ^~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:87:32: error: ‘glGetProgramInfoLog’ was not declared in this scope
+   87 |     if (!ok) { char log[1024]; glGetProgramInfoLog(program_, 1024, nullptr, log); std::fprintf(stderr, "Link error: %s\n", log); return false; }
+      |                                ^~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::ShaderProgram::use() const’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:91:35: error: ‘glUseProgram’ was not declared in this scope
+   91 | void ShaderProgram::use() const { glUseProgram(program_); }
+      |                                   ^~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::ShaderProgram::set_uniform_mat4(const char*, const resf2::renderer::Mat4&) const’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:92:84: error: ‘glGetUniformLocation’ was not declared in this scope
+   92 | void ShaderProgram::set_uniform_mat4(const char* n, const Mat4& m) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniformMatrix4fv(l, 1, GL_FALSE, m.m); }
+      |                                                                                    ^~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:92:131: error: ‘glUniformMatrix4fv’ was not declared in this scope
+   92 | void ShaderProgram::set_uniform_mat4(const char* n, const Mat4& m) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniformMatrix4fv(l, 1, GL_FALSE, m.m); }
+      |                                                                                                                                   ^~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::ShaderProgram::set_uniform_1i(const char*, int) const’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:93:74: error: ‘glGetUniformLocation’ was not declared in this scope
+   93 | void ShaderProgram::set_uniform_1i(const char* n, int v) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform1i(l, v); }
+      |                                                                          ^~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:93:121: error: ‘glUniform1i’ was not declared in this scope
+   93 | void ShaderProgram::set_uniform_1i(const char* n, int v) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform1i(l, v); }
+      |                                                                                                                         ^~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::ShaderProgram::set_uniform_4f(const char*, float, float, float, float) const’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:94:103: error: ‘glGetUniformLocation’ was not declared in this scope
+   94 | void ShaderProgram::set_uniform_4f(const char* n, float x, float y, float z, float w) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform4f(l, x, y, z, w); }
+      |                                                                                                       ^~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:94:150: error: ‘glUniform4f’ was not declared in this scope
+   94 | void ShaderProgram::set_uniform_4f(const char* n, float x, float y, float z, float w) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform4f(l, x, y, z, w); }
+      |                                                                                                                                                      ^~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::ShaderProgram::set_uniform_1f(const char*, float) const’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:95:76: error: ‘glGetUniformLocation’ was not declared in this scope
+   95 | void ShaderProgram::set_uniform_1f(const char* n, float v) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform1f(l, v); }
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:95:123: error: ‘glUniform1f’ was not declared in this scope
+   95 | void ShaderProgram::set_uniform_1f(const char* n, float v) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform1f(l, v); }
+      |                                                                                                                           ^~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In destructor ‘resf2::renderer::SpriteBatch::~SpriteBatch()’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:99:41: error: ‘glDeleteBuffers’ was not declared in this scope; did you mean ‘glSelectBuffer’?
+   99 | SpriteBatch::~SpriteBatch() { if (vbo_) glDeleteBuffers(1, &vbo_); }
+      |                                         ^~~~~~~~~~~~~~~
+      |                                         glSelectBuffer
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘bool resf2::renderer::SpriteBatch::init()’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:101:49: error: ‘glGenBuffers’ was not declared in this scope; did you mean ‘glReadBuffer’?
+  101 | bool SpriteBatch::init() { init_gl_functions(); glGenBuffers(1, &vbo_); vertices_.reserve(kMaxVertices); return vbo_ != 0; }
+      |                                                 ^~~~~~~~~~~~
+      |                                                 glReadBuffer
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::SpriteBatch::flush()’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:154:5: error: ‘glBindBuffer’ was not declared in this scope; did you mean ‘glReadBuffer’?
+  154 |     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+      |     ^~~~~~~~~~~~
+      |     glReadBuffer
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:155:5: error: ‘glBufferData’ was not declared in this scope
+  155 |     glBufferData(GL_ARRAY_BUFFER, vertices_.size() * sizeof(SpriteVertex), vertices_.data(), GL_DYNAMIC_DRAW);
+      |     ^~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:156:5: error: ‘glEnableVertexAttribArray’ was not declared in this scope
+  156 |     glEnableVertexAttribArray(0);
+      |     ^~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:157:5: error: ‘glVertexAttribPointer’ was not declared in this scope; did you mean ‘glVertexPointer’?
+  157 |     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(SpriteVertex), (void*)offsetof(SpriteVertex, x));
+      |     ^~~~~~~~~~~~~~~~~~~~~
+      |     glVertexPointer
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:162:55: warning: use of old-style cast to ‘int’ [-Wold-style-cast]
+  162 |     glDrawArrays(GL_TRIANGLES, 0, (int)vertices_.size());
+      |                                                       ^
+      |                                   -----
+      |                                   static_cast<int> (   )
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:163:5: error: ‘glDisableVertexAttribArray’ was not declared in this scope
+  163 |     glDisableVertexAttribArray(0); glDisableVertexAttribArray(1); glDisableVertexAttribArray(2);
+      |     ^~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Camera2D::update(uint32_t)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:173:16: warning: conversion from ‘uint32_t’ {aka ‘unsigned int’} to ‘float’ may change value [-Wconversion]
+  173 |     float dt = dt_ms / 1000.0f;
+      |                ^~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘resf2::renderer::Mat4 resf2::renderer::Camera2D::view_projection() const’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:183:26: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  183 |         float t = (float)shake_elapsed_ / shake_duration_, d = 1.0f - t;
+      |                          ^~~~~~~~~~~~~~
+      |                   -------
+      |                   static_cast<float> ( )
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:183:43: warning: conversion from ‘unsigned int’ to ‘float’ may change value [-Wconversion]
+  183 |         float t = (float)shake_elapsed_ / shake_duration_, d = 1.0f - t;
+      |                                           ^~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:184:27: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  184 |         sx = ((float)rand() / RAND_MAX - 0.5f) * shake_amplitude_ * d * 2;
+      |                           ^
+      |               -------------
+      |               static_cast<float> (rand())
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:184:31: warning: conversion from ‘int’ to ‘float’ changes value from ‘2147483647’ to ‘2.14748365e+9f’ [-Wfloat-conversion]
+  184 |         sx = ((float)rand() / RAND_MAX - 0.5f) * shake_amplitude_ * d * 2;
+      |                               ^~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:185:27: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  185 |         sy = ((float)rand() / RAND_MAX - 0.5f) * shake_amplitude_ * d * 2;
+      |                           ^
+      |               -------------
+      |               static_cast<float> (rand())
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:185:31: warning: conversion from ‘int’ to ‘float’ changes value from ‘2147483647’ to ‘2.14748365e+9f’ [-Wfloat-conversion]
+  185 |         sy = ((float)rand() / RAND_MAX - 0.5f) * shake_amplitude_ * d * 2;
+      |                               ^~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘bool resf2::renderer::Renderer::init(int, int)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:224:31: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  224 |     camera_ = Camera2D((float)w, (float)h);
+      |                               ^
+      |                        --------
+      |                        static_cast<float> (w)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:224:41: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  224 |     camera_ = Camera2D((float)w, (float)h);
+      |                                         ^
+      |                                  --------
+      |                                  static_cast<float> (h)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:225:31: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  225 |     camera_.set_target((float)w / 2, (float)h / 2);
+      |                               ^
+      |                        --------
+      |                        static_cast<float> (w)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:225:45: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  225 |     camera_.set_target((float)w / 2, (float)h / 2);
+      |                                             ^
+      |                                      --------
+      |                                      static_cast<float> (h)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Renderer::resize(int, int)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:240:31: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  240 |     camera_ = Camera2D((float)w, (float)h);
+      |                               ^
+      |                        --------
+      |                        static_cast<float> (w)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:240:41: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  240 |     camera_ = Camera2D((float)w, (float)h);
+      |                                         ^
+      |                                  --------
+      |                                  static_cast<float> (h)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:241:31: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  241 |     camera_.set_target((float)w / 2, (float)h / 2);
+      |                               ^
+      |                        --------
+      |                        static_cast<float> (w)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:241:45: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  241 |     camera_.set_target((float)w / 2, (float)h / 2);
+      |                                             ^
+      |                                      --------
+      |                                      static_cast<float> (h)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In function ‘resf2::renderer::Mat4 resf2::renderer::screen_proj(int, int)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:262:37: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  262 |     return Mat4::ortho(0.0f, (float)w, (float)h, 0.0f, -1.0f, 1.0f);
+      |                                     ^
+      |                              --------
+      |                              static_cast<float> (w)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:262:47: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  262 |     return Mat4::ortho(0.0f, (float)w, (float)h, 0.0f, -1.0f, 1.0f);
+      |                                               ^
+      |                                        --------
+      |                                        static_cast<float> (h)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Renderer::draw_filled_circle_screen(float, float, float, resf2::renderer::Color4B)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:310:20: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  310 |         float a0 = i * step, a1 = (i + 1) * step;
+      |                    ^
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:310:38: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  310 |         float a0 = i * step, a1 = (i + 1) * step;
+      |                                   ~~~^~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Renderer::draw_filled_circle_world(float, float, float, resf2::renderer::Color4B)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:325:20: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  325 |         float a0 = i * step, a1 = (i + 1) * step;
+      |                    ^
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:325:38: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
+  325 |         float a0 = i * step, a1 = (i + 1) * step;
+      |                                   ~~~^~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Renderer::draw_line_screen(float, float, float, float, resf2::renderer::Color4B)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:350:26: error: no matching function for call to ‘min(<brace-enclosed initializer list>)’
+  350 |     float minx = std::min({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /usr/include/c++/13/bits/stl_uninitialized.h:63,
+                 from /usr/include/c++/13/memory:69,
+                 from /home/runner/work/reSF2/reSF2/engine/renderer/renderer.hpp:17,
+                 from /home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:1:
+/usr/include/c++/13/bits/stl_algobase.h:233:5: note: candidate: ‘template<class _Tp> constexpr const _Tp& std::min(const _Tp&, const _Tp&)’
+  233 |     min(const _Tp& __a, const _Tp& __b)
+      |     ^~~
+/usr/include/c++/13/bits/stl_algobase.h:233:5: note:   template argument deduction/substitution failed:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:350:26: note:   candidate expects 2 arguments, 1 provided
+  350 |     float minx = std::min({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/13/bits/stl_algobase.h:281:5: note: candidate: ‘template<class _Tp, class _Compare> constexpr const _Tp& std::min(const _Tp&, const _Tp&, _Compare)’
+  281 |     min(const _Tp& __a, const _Tp& __b, _Compare __comp)
+      |     ^~~
+/usr/include/c++/13/bits/stl_algobase.h:281:5: note:   template argument deduction/substitution failed:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:350:26: note:   candidate expects 3 arguments, 1 provided
+  350 |     float minx = std::min({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:351:26: error: no matching function for call to ‘min(<brace-enclosed initializer list>)’
+  351 |     float miny = std::min({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/13/bits/stl_algobase.h:233:5: note: candidate: ‘template<class _Tp> constexpr const _Tp& std::min(const _Tp&, const _Tp&)’
+  233 |     min(const _Tp& __a, const _Tp& __b)
+      |     ^~~
+/usr/include/c++/13/bits/stl_algobase.h:233:5: note:   template argument deduction/substitution failed:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:351:26: note:   candidate expects 2 arguments, 1 provided
+  351 |     float miny = std::min({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/13/bits/stl_algobase.h:281:5: note: candidate: ‘template<class _Tp, class _Compare> constexpr const _Tp& std::min(const _Tp&, const _Tp&, _Compare)’
+  281 |     min(const _Tp& __a, const _Tp& __b, _Compare __comp)
+      |     ^~~
+/usr/include/c++/13/bits/stl_algobase.h:281:5: note:   template argument deduction/substitution failed:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:351:26: note:   candidate expects 3 arguments, 1 provided
+  351 |     float miny = std::min({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:352:26: error: no matching function for call to ‘max(<brace-enclosed initializer list>)’
+  352 |     float maxx = std::max({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/13/bits/stl_algobase.h:257:5: note: candidate: ‘template<class _Tp> constexpr const _Tp& std::max(const _Tp&, const _Tp&)’
+  257 |     max(const _Tp& __a, const _Tp& __b)
+      |     ^~~
+/usr/include/c++/13/bits/stl_algobase.h:257:5: note:   template argument deduction/substitution failed:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:352:26: note:   candidate expects 2 arguments, 1 provided
+  352 |     float maxx = std::max({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/13/bits/stl_algobase.h:303:5: note: candidate: ‘template<class _Tp, class _Compare> constexpr const _Tp& std::max(const _Tp&, const _Tp&, _Compare)’
+  303 |     max(const _Tp& __a, const _Tp& __b, _Compare __comp)
+      |     ^~~
+/usr/include/c++/13/bits/stl_algobase.h:303:5: note:   template argument deduction/substitution failed:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:352:26: note:   candidate expects 3 arguments, 1 provided
+  352 |     float maxx = std::max({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:353:26: error: no matching function for call to ‘max(<brace-enclosed initializer list>)’
+  353 |     float maxy = std::max({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/13/bits/stl_algobase.h:257:5: note: candidate: ‘template<class _Tp> constexpr const _Tp& std::max(const _Tp&, const _Tp&)’
+  257 |     max(const _Tp& __a, const _Tp& __b)
+      |     ^~~
+/usr/include/c++/13/bits/stl_algobase.h:257:5: note:   template argument deduction/substitution failed:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:353:26: note:   candidate expects 2 arguments, 1 provided
+  353 |     float maxy = std::max({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/13/bits/stl_algobase.h:303:5: note: candidate: ‘template<class _Tp, class _Compare> constexpr const _Tp& std::max(const _Tp&, const _Tp&, _Compare)’
+  303 |     max(const _Tp& __a, const _Tp& __b, _Compare __comp)
+      |     ^~~
+/usr/include/c++/13/bits/stl_algobase.h:303:5: note:   template argument deduction/substitution failed:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:353:26: note:   candidate expects 3 arguments, 1 provided
+  353 |     float maxy = std::max({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
+      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Renderer::draw_line_world(float, float, float, float, resf2::renderer::Color4B)’:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:361:23: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  361 |     float hw = (float)width_  / (2.0f * camera_.zoom());
+      |                       ^~~~~~
+      |                -------------
+      |                static_cast<float> (width_)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:362:23: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  362 |     float hh = (float)height_ / (2.0f * camera_.zoom());
+      |                       ^~~~~~~
+      |                --------------
+      |                static_cast<float> (height_)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In lambda function:
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:366:52: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  366 |         sx = (wx - left) / (right - left) * (float)width_;
+      |                                                    ^~~~~~
+      |                                             -------------
+      |                                             static_cast<float> (width_)
+/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:368:63: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
+  368 |         sy = (1.0f - (wy - bottom) / (top - bottom)) * (float)height_;
+      |                                                               ^~~~~~~
+      |                                                        --------------
+      |                                                        static_cast<float> (height_)
+[25/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/software_renderer.cpp.o
 /home/runner/work/reSF2/reSF2/engine/renderer/software_renderer.cpp: In member function ‘bool resf2::soft::Texture::init_rgba(int, int, const uint8_t*)’:
 /home/runner/work/reSF2/reSF2/engine/renderer/software_renderer.cpp:29:27: warning: use of old-style cast to ‘size_t’ {aka ‘long unsigned int’} [-Wold-style-cast]
    29 |     pixels.resize((size_t)w * h * 4);
@@ -416,8 +734,8 @@
 /home/runner/work/reSF2/reSF2/engine/renderer/software_renderer.cpp:321:45: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
   321 |             float fx = px + 0.5f - x0, fy = py + 0.5f - y0;
       |                                             ^~
-[28/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/platform.cpp.o
-[29/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/glfw_platform.cpp.o
+[26/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/platform.cpp.o
+[27/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/glfw_platform.cpp.o
 In file included from /home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:15:
 /home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.hpp:13:1: warning: multi-line comment [-Wcomment]
    13 | //   g++ -std=c++23 -Iengine -I/usr/include/GLFW -I/usr/include/GL \
@@ -447,370 +765,7 @@ In file included from /home/runner/work/reSF2/reSF2/engine/platform/glfw_platfor
 /home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:124:12: warning: ‘int resf2::platform::key_index_to_glfw(int)’ defined but not used [-Wunused-function]
   124 | static int key_index_to_glfw(int idx) {
       |            ^~~~~~~~~~~~~~~~~
-[30/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/atf_tactics.cpp.o
-[31/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o
-FAILED: [code=1] engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o 
-/usr/bin/c++  -I/home/runner/work/reSF2/reSF2/engine/renderer/.. -O3 -DNDEBUG -std=c++23 -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Wold-style-cast -Wcast-align -Woverloaded-virtual -Wconversion -Wnull-dereference -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -MD -MT engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o -MF engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o.d -o engine/renderer/CMakeFiles/resf2_renderer.dir/renderer.cpp.o -c /home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘bool resf2::renderer::Texture2D::init_from_png(const uint8_t*, std::size_t)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:42:56: warning: use of old-style cast to ‘int’ [-Wold-style-cast]
-   42 |     stbi_uc* pixels = stbi_load_from_memory(data, (int)size, &w, &h, &channels, 4);
-      |                                                        ^~~~
-      |                                                   ---------
-      |                                                   static_cast<int> (size)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In destructor ‘resf2::renderer::ShaderProgram::~ShaderProgram()’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:57:21: error: ‘glUseProgram’ was not declared in this scope
-   57 |     if (program_) { glUseProgram(0); glDeleteProgram(program_); }
-      |                     ^~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:57:38: error: ‘glDeleteProgram’ was not declared in this scope
-   57 |     if (program_) { glUseProgram(0); glDeleteProgram(program_); }
-      |                                      ^~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:58:25: error: ‘glDeleteShader’ was not declared in this scope
-   58 |     if (vertex_shader_) glDeleteShader(vertex_shader_);
-      |                         ^~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:59:27: error: ‘glDeleteShader’ was not declared in this scope
-   59 |     if (fragment_shader_) glDeleteShader(fragment_shader_);
-      |                           ^~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In function ‘unsigned int resf2::renderer::compile_shader(unsigned int, const std::string&)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:63:27: error: ‘glCreateShader’ was not declared in this scope
-   63 |     unsigned int shader = glCreateShader(type);
-      |                           ^~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:65:54: warning: use of old-style cast to ‘const GLchar* const*’ {aka ‘const char* const*’} [-Wold-style-cast]
-   65 |     glShaderSource(shader, 1, (const GLchar* const*)&p, nullptr);
-      |                                                      ^
-      |                               -
-      |                               const_cast<          -
-      |                                                    > ()
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:65:5: error: ‘glShaderSource’ was not declared in this scope
-   65 |     glShaderSource(shader, 1, (const GLchar* const*)&p, nullptr);
-      |     ^~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:66:5: error: ‘glCompileShader’ was not declared in this scope; did you mean ‘compile_shader’?
-   66 |     glCompileShader(shader);
-      |     ^~~~~~~~~~~~~~~
-      |     compile_shader
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:67:17: error: ‘glGetShaderiv’ was not declared in this scope
-   67 |     int ok = 0; glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
-      |                 ^~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:69:25: error: ‘glGetShaderInfoLog’ was not declared in this scope
-   69 |         char log[1024]; glGetShaderInfoLog(shader, 1024, nullptr, log);
-      |                         ^~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:71:9: error: ‘glDeleteShader’ was not declared in this scope
-   71 |         glDeleteShader(shader); return 0;
-      |         ^~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘bool resf2::renderer::ShaderProgram::init(const std::string&, const std::string&)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:82:16: error: ‘glCreateProgram’ was not declared in this scope
-   82 |     program_ = glCreateProgram();
-      |                ^~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:83:5: error: ‘glAttachShader’ was not declared in this scope
-   83 |     glAttachShader(program_, vertex_shader_);
-      |     ^~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:85:5: error: ‘glLinkProgram’ was not declared in this scope; did you mean ‘glHistogram’?
-   85 |     glLinkProgram(program_);
-      |     ^~~~~~~~~~~~~
-      |     glHistogram
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:86:17: error: ‘glGetProgramiv’ was not declared in this scope
-   86 |     int ok = 0; glGetProgramiv(program_, GL_LINK_STATUS, &ok);
-      |                 ^~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:87:32: error: ‘glGetProgramInfoLog’ was not declared in this scope
-   87 |     if (!ok) { char log[1024]; glGetProgramInfoLog(program_, 1024, nullptr, log); std::fprintf(stderr, "Link error: %s\n", log); return false; }
-      |                                ^~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::ShaderProgram::use() const’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:91:35: error: ‘glUseProgram’ was not declared in this scope
-   91 | void ShaderProgram::use() const { glUseProgram(program_); }
-      |                                   ^~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::ShaderProgram::set_uniform_mat4(const char*, const resf2::renderer::Mat4&) const’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:92:84: error: ‘glGetUniformLocation’ was not declared in this scope
-   92 | void ShaderProgram::set_uniform_mat4(const char* n, const Mat4& m) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniformMatrix4fv(l, 1, GL_FALSE, m.m); }
-      |                                                                                    ^~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:92:131: error: ‘glUniformMatrix4fv’ was not declared in this scope
-   92 | void ShaderProgram::set_uniform_mat4(const char* n, const Mat4& m) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniformMatrix4fv(l, 1, GL_FALSE, m.m); }
-      |                                                                                                                                   ^~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::ShaderProgram::set_uniform_1i(const char*, int) const’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:93:74: error: ‘glGetUniformLocation’ was not declared in this scope
-   93 | void ShaderProgram::set_uniform_1i(const char* n, int v) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform1i(l, v); }
-      |                                                                          ^~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:93:121: error: ‘glUniform1i’ was not declared in this scope
-   93 | void ShaderProgram::set_uniform_1i(const char* n, int v) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform1i(l, v); }
-      |                                                                                                                         ^~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::ShaderProgram::set_uniform_4f(const char*, float, float, float, float) const’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:94:103: error: ‘glGetUniformLocation’ was not declared in this scope
-   94 | void ShaderProgram::set_uniform_4f(const char* n, float x, float y, float z, float w) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform4f(l, x, y, z, w); }
-      |                                                                                                       ^~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:94:150: error: ‘glUniform4f’ was not declared in this scope
-   94 | void ShaderProgram::set_uniform_4f(const char* n, float x, float y, float z, float w) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform4f(l, x, y, z, w); }
-      |                                                                                                                                                      ^~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::ShaderProgram::set_uniform_1f(const char*, float) const’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:95:76: error: ‘glGetUniformLocation’ was not declared in this scope
-   95 | void ShaderProgram::set_uniform_1f(const char* n, float v) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform1f(l, v); }
-      |                                                                            ^~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:95:123: error: ‘glUniform1f’ was not declared in this scope
-   95 | void ShaderProgram::set_uniform_1f(const char* n, float v) const { int l = glGetUniformLocation(program_, n); if (l >= 0) glUniform1f(l, v); }
-      |                                                                                                                           ^~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In destructor ‘resf2::renderer::SpriteBatch::~SpriteBatch()’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:99:41: error: ‘glDeleteBuffers’ was not declared in this scope; did you mean ‘glSelectBuffer’?
-   99 | SpriteBatch::~SpriteBatch() { if (vbo_) glDeleteBuffers(1, &vbo_); }
-      |                                         ^~~~~~~~~~~~~~~
-      |                                         glSelectBuffer
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘bool resf2::renderer::SpriteBatch::init()’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:101:49: error: ‘glGenBuffers’ was not declared in this scope; did you mean ‘glReadBuffer’?
-  101 | bool SpriteBatch::init() { init_gl_functions(); glGenBuffers(1, &vbo_); vertices_.reserve(kMaxVertices); return vbo_ != 0; }
-      |                                                 ^~~~~~~~~~~~
-      |                                                 glReadBuffer
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::SpriteBatch::flush()’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:154:5: error: ‘glBindBuffer’ was not declared in this scope; did you mean ‘glReadBuffer’?
-  154 |     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-      |     ^~~~~~~~~~~~
-      |     glReadBuffer
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:155:5: error: ‘glBufferData’ was not declared in this scope
-  155 |     glBufferData(GL_ARRAY_BUFFER, vertices_.size() * sizeof(SpriteVertex), vertices_.data(), GL_DYNAMIC_DRAW);
-      |     ^~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:156:5: error: ‘glEnableVertexAttribArray’ was not declared in this scope
-  156 |     glEnableVertexAttribArray(0);
-      |     ^~~~~~~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:157:5: error: ‘glVertexAttribPointer’ was not declared in this scope; did you mean ‘glVertexPointer’?
-  157 |     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(SpriteVertex), (void*)offsetof(SpriteVertex, x));
-      |     ^~~~~~~~~~~~~~~~~~~~~
-      |     glVertexPointer
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:162:55: warning: use of old-style cast to ‘int’ [-Wold-style-cast]
-  162 |     glDrawArrays(GL_TRIANGLES, 0, (int)vertices_.size());
-      |                                                       ^
-      |                                   -----
-      |                                   static_cast<int> (   )
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:163:5: error: ‘glDisableVertexAttribArray’ was not declared in this scope
-  163 |     glDisableVertexAttribArray(0); glDisableVertexAttribArray(1); glDisableVertexAttribArray(2);
-      |     ^~~~~~~~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Camera2D::update(uint32_t)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:173:16: warning: conversion from ‘uint32_t’ {aka ‘unsigned int’} to ‘float’ may change value [-Wconversion]
-  173 |     float dt = dt_ms / 1000.0f;
-      |                ^~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘resf2::renderer::Mat4 resf2::renderer::Camera2D::view_projection() const’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:183:26: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  183 |         float t = (float)shake_elapsed_ / shake_duration_, d = 1.0f - t;
-      |                          ^~~~~~~~~~~~~~
-      |                   -------
-      |                   static_cast<float> ( )
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:183:43: warning: conversion from ‘unsigned int’ to ‘float’ may change value [-Wconversion]
-  183 |         float t = (float)shake_elapsed_ / shake_duration_, d = 1.0f - t;
-      |                                           ^~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:184:27: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  184 |         sx = ((float)rand() / RAND_MAX - 0.5f) * shake_amplitude_ * d * 2;
-      |                           ^
-      |               -------------
-      |               static_cast<float> (rand())
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:184:31: warning: conversion from ‘int’ to ‘float’ changes value from ‘2147483647’ to ‘2.14748365e+9f’ [-Wfloat-conversion]
-  184 |         sx = ((float)rand() / RAND_MAX - 0.5f) * shake_amplitude_ * d * 2;
-      |                               ^~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:185:27: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  185 |         sy = ((float)rand() / RAND_MAX - 0.5f) * shake_amplitude_ * d * 2;
-      |                           ^
-      |               -------------
-      |               static_cast<float> (rand())
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:185:31: warning: conversion from ‘int’ to ‘float’ changes value from ‘2147483647’ to ‘2.14748365e+9f’ [-Wfloat-conversion]
-  185 |         sy = ((float)rand() / RAND_MAX - 0.5f) * shake_amplitude_ * d * 2;
-      |                               ^~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘bool resf2::renderer::Renderer::init(int, int)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:224:31: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  224 |     camera_ = Camera2D((float)w, (float)h);
-      |                               ^
-      |                        --------
-      |                        static_cast<float> (w)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:224:41: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  224 |     camera_ = Camera2D((float)w, (float)h);
-      |                                         ^
-      |                                  --------
-      |                                  static_cast<float> (h)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:225:31: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  225 |     camera_.set_target((float)w / 2, (float)h / 2);
-      |                               ^
-      |                        --------
-      |                        static_cast<float> (w)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:225:45: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  225 |     camera_.set_target((float)w / 2, (float)h / 2);
-      |                                             ^
-      |                                      --------
-      |                                      static_cast<float> (h)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Renderer::resize(int, int)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:240:31: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  240 |     camera_ = Camera2D((float)w, (float)h);
-      |                               ^
-      |                        --------
-      |                        static_cast<float> (w)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:240:41: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  240 |     camera_ = Camera2D((float)w, (float)h);
-      |                                         ^
-      |                                  --------
-      |                                  static_cast<float> (h)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:241:31: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  241 |     camera_.set_target((float)w / 2, (float)h / 2);
-      |                               ^
-      |                        --------
-      |                        static_cast<float> (w)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:241:45: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  241 |     camera_.set_target((float)w / 2, (float)h / 2);
-      |                                             ^
-      |                                      --------
-      |                                      static_cast<float> (h)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In function ‘resf2::renderer::Mat4 resf2::renderer::screen_proj(int, int)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:262:37: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  262 |     return Mat4::ortho(0.0f, (float)w, (float)h, 0.0f, -1.0f, 1.0f);
-      |                                     ^
-      |                              --------
-      |                              static_cast<float> (w)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:262:47: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  262 |     return Mat4::ortho(0.0f, (float)w, (float)h, 0.0f, -1.0f, 1.0f);
-      |                                               ^
-      |                                        --------
-      |                                        static_cast<float> (h)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Renderer::draw_filled_circle_screen(float, float, float, resf2::renderer::Color4B)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:310:20: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
-  310 |         float a0 = i * step, a1 = (i + 1) * step;
-      |                    ^
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:310:38: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
-  310 |         float a0 = i * step, a1 = (i + 1) * step;
-      |                                   ~~~^~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Renderer::draw_filled_circle_world(float, float, float, resf2::renderer::Color4B)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:325:20: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
-  325 |         float a0 = i * step, a1 = (i + 1) * step;
-      |                    ^
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:325:38: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
-  325 |         float a0 = i * step, a1 = (i + 1) * step;
-      |                                   ~~~^~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Renderer::draw_line_screen(float, float, float, float, resf2::renderer::Color4B)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:350:26: error: no matching function for call to ‘min(<brace-enclosed initializer list>)’
-  350 |     float minx = std::min({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /usr/include/c++/13/bits/stl_uninitialized.h:63,
-                 from /usr/include/c++/13/memory:69,
-                 from /home/runner/work/reSF2/reSF2/engine/renderer/renderer.hpp:17,
-                 from /home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:1:
-/usr/include/c++/13/bits/stl_algobase.h:233:5: note: candidate: ‘template<class _Tp> constexpr const _Tp& std::min(const _Tp&, const _Tp&)’
-  233 |     min(const _Tp& __a, const _Tp& __b)
-      |     ^~~
-/usr/include/c++/13/bits/stl_algobase.h:233:5: note:   template argument deduction/substitution failed:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:350:26: note:   candidate expects 2 arguments, 1 provided
-  350 |     float minx = std::min({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/usr/include/c++/13/bits/stl_algobase.h:281:5: note: candidate: ‘template<class _Tp, class _Compare> constexpr const _Tp& std::min(const _Tp&, const _Tp&, _Compare)’
-  281 |     min(const _Tp& __a, const _Tp& __b, _Compare __comp)
-      |     ^~~
-/usr/include/c++/13/bits/stl_algobase.h:281:5: note:   template argument deduction/substitution failed:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:350:26: note:   candidate expects 3 arguments, 1 provided
-  350 |     float minx = std::min({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:351:26: error: no matching function for call to ‘min(<brace-enclosed initializer list>)’
-  351 |     float miny = std::min({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/usr/include/c++/13/bits/stl_algobase.h:233:5: note: candidate: ‘template<class _Tp> constexpr const _Tp& std::min(const _Tp&, const _Tp&)’
-  233 |     min(const _Tp& __a, const _Tp& __b)
-      |     ^~~
-/usr/include/c++/13/bits/stl_algobase.h:233:5: note:   template argument deduction/substitution failed:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:351:26: note:   candidate expects 2 arguments, 1 provided
-  351 |     float miny = std::min({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/usr/include/c++/13/bits/stl_algobase.h:281:5: note: candidate: ‘template<class _Tp, class _Compare> constexpr const _Tp& std::min(const _Tp&, const _Tp&, _Compare)’
-  281 |     min(const _Tp& __a, const _Tp& __b, _Compare __comp)
-      |     ^~~
-/usr/include/c++/13/bits/stl_algobase.h:281:5: note:   template argument deduction/substitution failed:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:351:26: note:   candidate expects 3 arguments, 1 provided
-  351 |     float miny = std::min({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:352:26: error: no matching function for call to ‘max(<brace-enclosed initializer list>)’
-  352 |     float maxx = std::max({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/usr/include/c++/13/bits/stl_algobase.h:257:5: note: candidate: ‘template<class _Tp> constexpr const _Tp& std::max(const _Tp&, const _Tp&)’
-  257 |     max(const _Tp& __a, const _Tp& __b)
-      |     ^~~
-/usr/include/c++/13/bits/stl_algobase.h:257:5: note:   template argument deduction/substitution failed:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:352:26: note:   candidate expects 2 arguments, 1 provided
-  352 |     float maxx = std::max({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/usr/include/c++/13/bits/stl_algobase.h:303:5: note: candidate: ‘template<class _Tp, class _Compare> constexpr const _Tp& std::max(const _Tp&, const _Tp&, _Compare)’
-  303 |     max(const _Tp& __a, const _Tp& __b, _Compare __comp)
-      |     ^~~
-/usr/include/c++/13/bits/stl_algobase.h:303:5: note:   template argument deduction/substitution failed:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:352:26: note:   candidate expects 3 arguments, 1 provided
-  352 |     float maxx = std::max({corners[0][0], corners[1][0], corners[2][0], corners[3][0]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:353:26: error: no matching function for call to ‘max(<brace-enclosed initializer list>)’
-  353 |     float maxy = std::max({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/usr/include/c++/13/bits/stl_algobase.h:257:5: note: candidate: ‘template<class _Tp> constexpr const _Tp& std::max(const _Tp&, const _Tp&)’
-  257 |     max(const _Tp& __a, const _Tp& __b)
-      |     ^~~
-/usr/include/c++/13/bits/stl_algobase.h:257:5: note:   template argument deduction/substitution failed:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:353:26: note:   candidate expects 2 arguments, 1 provided
-  353 |     float maxy = std::max({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/usr/include/c++/13/bits/stl_algobase.h:303:5: note: candidate: ‘template<class _Tp, class _Compare> constexpr const _Tp& std::max(const _Tp&, const _Tp&, _Compare)’
-  303 |     max(const _Tp& __a, const _Tp& __b, _Compare __comp)
-      |     ^~~
-/usr/include/c++/13/bits/stl_algobase.h:303:5: note:   template argument deduction/substitution failed:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:353:26: note:   candidate expects 3 arguments, 1 provided
-  353 |     float maxy = std::max({corners[0][1], corners[1][1], corners[2][1], corners[3][1]});
-      |                  ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In member function ‘void resf2::renderer::Renderer::draw_line_world(float, float, float, float, resf2::renderer::Color4B)’:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:361:23: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  361 |     float hw = (float)width_  / (2.0f * camera_.zoom());
-      |                       ^~~~~~
-      |                -------------
-      |                static_cast<float> (width_)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:362:23: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  362 |     float hh = (float)height_ / (2.0f * camera_.zoom());
-      |                       ^~~~~~~
-      |                --------------
-      |                static_cast<float> (height_)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp: In lambda function:
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:366:52: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  366 |         sx = (wx - left) / (right - left) * (float)width_;
-      |                                                    ^~~~~~
-      |                                             -------------
-      |                                             static_cast<float> (width_)
-/home/runner/work/reSF2/reSF2/engine/renderer/renderer.cpp:368:63: warning: use of old-style cast to ‘float’ [-Wold-style-cast]
-  368 |         sy = (1.0f - (wy - bottom) / (top - bottom)) * (float)height_;
-      |                                                               ^~~~~~~
-      |                                                        --------------
-      |                                                        static_cast<float> (height_)
-[32/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/plist_atlas.cpp.o
-[33/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/dz_decoder.cpp.o
-In file included from /home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp:16:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘int resf2::dz::DzRangeDecoder::decode_bit(uint16_t&)’:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:50:18: warning: conversion from ‘int’ to ‘uint16_t’ {aka ‘short unsigned int’} may change value [-Wconversion]
-   50 |             prob += (0x800 - prob) >> 5;  // increase probability of 0
-      |             ~~~~~^~~~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘uint8_t resf2::dz::DzRangeDecoder::decode_byte_simple(uint16_t*)’:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:121:33: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
-  121 |         return (uint8_t)(m - 256);
-      |                                 ^
-      |                ------------------
-      |                static_cast<uint8_t> ((m - 256))
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘uint8_t resf2::dz::DzRangeDecoder::decode_byte_with_match(uint16_t*, uint8_t)’:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:139:33: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
-  139 |         return (uint8_t)(m - 256);
-      |                                 ^
-      |                ------------------
-      |                static_cast<uint8_t> ((m - 256))
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp: In member function ‘int resf2::dz::RangeCoder::decode_bit(uint16_t&)’:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp:102:18: warning: conversion from ‘int’ to ‘uint16_t’ {aka ‘short unsigned int’} may change value [-Wconversion]
-  102 |             prob += (0x800 - prob) >> 5;
-      |             ~~~~~^~~~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp: In static member function ‘static std::vector<unsigned char> resf2::dz::DzDecompressor::decompress(const uint8_t*, size_t, size_t)’:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp:199:25: warning: use of old-style cast to ‘int’ [-Wold-style-cast]
-  199 |     int max_iter = (int)uncomp_size * 10;
-      |                         ^~~~~~~~~~~
-      |                    ----------------
-      |                    static_cast<int> (uncomp_size)
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp:229:39: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
-  229 |             symbol = (uint8_t)(m - 256);
-      |                                       ^
-      |                      ------------------
-      |                      static_cast<uint8_t> ((m - 256))
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp: In static member function ‘static std::vector<unsigned char> resf2::dz::DzDecompressor::decompress_streaming(const uint8_t*, size_t, size_t, size_t)’:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.cpp:310:53: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
-  310 |                 symbol = (uint8_t)((symbol << 1) | b);
-      |                                                     ^
-      |                          ---------
-      |                          static_cast<uint8_t> (      )
-[34/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/bitmap_font.cpp.o
-[35/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/stb_image_impl.cpp.o
+[28/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/stb_image_impl.cpp.o
 In file included from /home/runner/work/reSF2/reSF2/engine/renderer/stb_image_impl.cpp:12:
 /home/runner/work/reSF2/reSF2/engine/renderer/stb_image.h: In function ‘void stbi__start_mem(stbi__context*, const stbi_uc*, int)’:
 /home/runner/work/reSF2/reSF2/engine/renderer/stb_image.h:831:57: warning: use of old-style cast to ‘stbi_uc*’ {aka ‘unsigned char*’} [-Wold-style-cast]
@@ -2321,28 +2276,5 @@ In file included from /home/runner/work/reSF2/reSF2/engine/renderer/stb_image_im
 /home/runner/work/reSF2/reSF2/engine/renderer/stb_image_write.h:913:4: note: in expansion of macro ‘stbiw__sbpush’
   913 |    stbiw__sbpush(out, 0x78);   // DEFLATE 32K window
       |    ^~~~~~~~~~~~~
-[36/55] Building CXX object engine/reverse/CMakeFiles/resf2_reverse.dir/dz_reader.cpp.o
-In file included from /home/runner/work/reSF2/reSF2/engine/reverse/dz_reader.cpp:6:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘int resf2::dz::DzRangeDecoder::decode_bit(uint16_t&)’:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:50:18: warning: conversion from ‘int’ to ‘uint16_t’ {aka ‘short unsigned int’} may change value [-Wconversion]
-   50 |             prob += (0x800 - prob) >> 5;  // increase probability of 0
-      |             ~~~~~^~~~~~~~~~~~~~~~~~~~~~
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘uint8_t resf2::dz::DzRangeDecoder::decode_byte_simple(uint16_t*)’:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:121:33: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
-  121 |         return (uint8_t)(m - 256);
-      |                                 ^
-      |                ------------------
-      |                static_cast<uint8_t> ((m - 256))
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp: In member function ‘uint8_t resf2::dz::DzRangeDecoder::decode_byte_with_match(uint16_t*, uint8_t)’:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_decoder.hpp:139:33: warning: use of old-style cast to ‘uint8_t’ {aka ‘unsigned char’} [-Wold-style-cast]
-  139 |         return (uint8_t)(m - 256);
-      |                                 ^
-      |                ------------------
-      |                static_cast<uint8_t> ((m - 256))
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_reader.cpp: In member function ‘std::vector<std::byte> resf2::dz::DzArchive::read_file(const std::string&) const’:
-/home/runner/work/reSF2/reSF2/engine/reverse/dz_reader.cpp:96:53: warning: use of old-style cast to ‘unsigned int’ [-Wold-style-cast]
-   96 |                             name.c_str(), (unsigned)comp_size, result.size());
-      |                                                     ^~~~~~~~~
-      |                                           -------------------
-      |                                           static_cast<unsigned> (comp_size)
+[29/55] Linking C static library lib/libglfw3.a
 ninja: build stopped: subcommand failed.
