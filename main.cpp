@@ -246,12 +246,6 @@ struct MoveDef {
     std::string required_perk;
     // Weapon subtype required (e.g. "Fists"). Empty = any weapon.
     std::string required_weapon_subtype;
-
-    // Uninterrupt interval (from moves.xml)
-    // When current frame is within [uninterrupt_start, uninterrupt_end],
-    // new moves are blocked. Outside this interval, new moves are allowed.
-    int uninterrupt_start = -1;  // -1 = no Uninterrupt interval
-    int uninterrupt_end = -1;
 };
 
 struct AnimationData {
