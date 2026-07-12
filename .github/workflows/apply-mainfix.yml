@@ -1,0 +1,97 @@
+name: Apply main.cpp fix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/linux-build-check]
+    paths: ['.github/workflows/apply-mainfix.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential g++ libglfw3-dev libgl1-mesa-dev zlib1g-dev
+          g++ --version
+
+      - name: Apply patches
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          p = "main.cpp"
+          s = open(p, encoding="utf-8").read()
+          def sub_once(pat, repl, s, flags=0):
+              s2, n = re.subn(pat, repl, s, count=0, flags=flags)
+              if n != 1:
+                  print(f"PATCH FAIL: matched {n}x: {pat[:70]}")
+                  sys.exit(2)
+              return s2
+          # 1) stale current_move_ guard
+          s = sub_once(
+              r'if \(cur_kc == 1 \|\| cur_kc == 2\) \{',
+              'if ((cur_kc == 1 || cur_kc == 2) && hit_anim_ > 0 &&\n'
+              '                                current_anim_ != "stance_idle" && current_anim_ != "fists_idle" &&\n'
+              '                                current_anim_ != "step_forward" && current_anim_ != "step_back") {',
+              s)
+          # 2) extended [ROOT] first-frame log
+          s = sub_once(
+              r'std::printf\("\[ROOT\] anim=\x27%s\x27 first frame:.*?anim_facing_right_\);',
+              'std::printf("[ROOT] anim=\x27%s\x27 first frame: frame=%d player=(%.1f,%.1f) '
+              'npivot=(%.1f,%.1f) render_y=%.1f facing=%d\\n",\n'
+              '                            current_anim_.c_str(), frame_idx, player_pos_x_, player_pos_y_,\n'
+              '                            npivot_x, npivot_y, player_pos_y_ + y_adjust_smoothed_, anim_facing_right_);',
+              s, flags=re.DOTALL)
+          # 3) y_adjust heuristic warning (no silent fallback)
+          s = sub_once(
+              r'y_adjust_smoothed_ = FEET_FLOOR_OFFSET;',
+              'y_adjust_smoothed_ = FEET_FLOOR_OFFSET;\n'
+              '        { static bool warned_yadj = false; if (!warned_yadj) { warned_yadj = true;\n'
+              '            std::fprintf(stderr, "[HEURISTIC-TODO] y_adjust is a constant FEET_FLOOR_OFFSET: '
+              'grounds standing/crouch/jump but floats rolls ~84px. Needs per-move contact/pivot (MoveInside). See HANDOFF.md\\n"); } }',
+              s)
+          open(p, "w", encoding="utf-8").write(s)
+          print("PATCH OK")
+          PY
+
+      - name: Compile main.cpp (TU check)
+        id: tu
+        run: |
+          set +e
+          g++ -std=c++23 -c main.cpp -I. -I/usr/include \
+            -Wno-old-style-cast -Wno-conversion -Wno-unused-parameter \
+            -o /tmp/main.o > /tmp/tu.log 2>&1
+          echo "tu_rc=$?" | tee /tmp/tu_rc.txt
+          tail -c 40000 /tmp/tu.log
+          set -e
+
+      - name: Push to main if clean, else dump log
+        run: |
+          rc=$(grep -o '[0-9]*' /tmp/tu_rc.txt | head -1)
+          git config user.name "reSF2 ci"
+          git config user.email "ci@resf2.local"
+          if [ "$rc" = "0" ]; then
+            git add main.cpp
+            git commit -m "fix(main): stale current_move_ guard + extended [ROOT] diag log + y_adjust heuristic warning [HEURISTIC-TODO]" || echo "no change"
+            git push origin HEAD:main
+            echo "PUSHED TO MAIN"
+          else
+            mkdir -p docs/_ci_logs
+            cp /tmp/tu.log docs/_ci_logs/mainfix_tu.log
+            git checkout -B ci/mainfix-fail
+            git add -A
+            git commit -m "ci: main.cpp TU compile failed (diagnostic)" || echo "no change"
+            git push -f origin ci/mainfix-fail
+            echo "TU COMPILE FAILED — see ci/mainfix-fail"
+            exit 1
+          fi
