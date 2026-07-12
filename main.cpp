@@ -2038,44 +2038,27 @@ private:
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
         // Y normalization: player_pos_y_ is the NPivot world position.
-        // The .bin animation stores absolute node Y relative to NPivot.
-        // anim_node_pos_[name].y = abs_y - npivot_y + npivot_rest_y
-        //
-        // In resolve_body_node: sy = world_cy + (ly - pivot_local_y)
-        //   = world_cy + (abs_y - npivot_y + npivot_rest_y - npivot_rest_y)
+        // The .bin animation stores absolute node Y. anim_node_pos_[name].y
+        // = (abs_y - npivot_y + npivot_rest_y). In resolve_body_node:
+        //   sy = world_cy + (ly - pivot_local_y)
         //   = world_cy + abs_y - npivot_y
         //
-        // For NPivot: sy = world_cy (abs_y = npivot_y)
-        // For NToe_1 (standing): ly=65.52, pivot_local_y=169.48
-        //   sy = world_cy + (65.52 - 169.48) = world_cy - 103.96
+        // For standing: NPivot=169.48, NToe abs=65.52
+        //   sy = world_cy + 65.52 - 169.48 = world_cy - 103.96
+        // For crouch: NPivot=106.21, NToe abs=2.24
+        //   sy = world_cy + 2.24 - 106.21 = world_cy - 103.97
+        // The feet-to-NPivot distance is ~104 in BOTH cases!
+        // So y_adjust should be CONSTANT, not dependent on NPivot.
         //
-        // Floor surface (layer_3 at params y=225, height=64):
-        //   world_y = -225 + 32 = -193 (top of floor image)
+        // Floor surface at world_y = -193 (layer_3 at y=225, height=64).
+        // We need: world_cy - 104 = -193 → world_cy = -89
+        // player_pos_y_ = -93, so y_adjust = -89 - (-93) = 4
         //
-        // We need NToe_1 at floor surface:
-        //   world_cy - 103.96 = -193
-        //   world_cy = -193 + 103.96 = -89.04
-        //
-        // But player_pos_y_ = -93 (from params). Need y_adjust = +3.96.
-        //
-        // General formula: y_adjust = floor_surface + 103.96 - player_pos_y_
-        // But 103.96 = pivot_local_y - lowest_node_y (varies per animation)
-        // So: y_adjust = floor_surface + (pivot_local_y - lowest_node_y) - player_pos_y_
-        //             = floor_surface + pivot_local_y - lowest_node_y - player_pos_y_
-        //
-        // Actually simpler: y_adjust = (pivot_local_y - anim_npivot_bin_y_)
-        // This gives 0 when NPivot at rest, positive when crouching, negative when jumping.
-        // Combined with player_pos_y_, this keeps NPivot anchored.
-        //
-        // But we need +4 offset to align feet with floor surface.
-        // This offset = floor_surface - (player_pos_y_ - 103.96)
-        // = -193 - (-93 - 103.96) = -193 + 196.96 = 3.96
-        //
-        // We can compute this dynamically from location floor position.
-        // For now, use a fixed offset of 4 (matches dojo floor).
-        // TODO: compute from location_->floor and layer_3 image position.
-        constexpr float FEET_FLOOR_OFFSET = 4.0f;  // aligns feet with floor surface
-        y_adjust_smoothed_ = (anim_npivot_bin_y_ - pivot_local_y) + FEET_FLOOR_OFFSET;
+        // This +4 offset works for ALL animations because the .bin
+        // animation already handles crouch (NPivot down, feet stay) and
+        // jump (NPivot up, feet up) via per-node positions.
+        constexpr float FEET_FLOOR_OFFSET = 4.0f;
+        y_adjust_smoothed_ = FEET_FLOOR_OFFSET;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
 

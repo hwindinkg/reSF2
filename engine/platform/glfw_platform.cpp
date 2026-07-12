@@ -232,12 +232,24 @@ struct GlfwPlatform::Impl {
         Impl* self = static_cast<Impl*>(glfwGetWindowUserPointer(w));
         if (!self) return;
 
-        // On ALL platforms: use GLFW key callback for just_pressed/just_released
-        // to catch fast key presses that GetAsyncKeyState might miss.
+#ifdef _WIN32
+        // On Windows: only use GLFW for just_pressed (fast tap detection).
+        // Ignore GLFW_RELEASE entirely (spurious on Win10 19044).
+        // Ignore GLFW_REPEAT (causes infinite key repeat).
+        if (action != GLFW_PRESS) return;
+
         int idx = glfw_to_key_index(key);
         if (idx < 0 || idx >= static_cast<int>(kMaxKeys)) return;
 
-        if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+        // Only set just_pressed if not already down (prevents repeat)
+        if (!self->input.keys_down[idx]) {
+            self->input.keys_just_pressed[idx] = true;
+        }
+#else
+        int idx = glfw_to_key_index(key);
+        if (idx < 0 || idx >= static_cast<int>(kMaxKeys)) return;
+
+        if (action == GLFW_PRESS) {
             if (!self->input.keys_down[idx]) {
                 self->input.keys_just_pressed[idx] = true;
             }
@@ -248,6 +260,7 @@ struct GlfwPlatform::Impl {
             }
             self->input.keys_down[idx] = false;
         }
+#endif
     }
 
     static void mouse_button_callback(GLFWwindow* w, int button, int action, int mods) {
