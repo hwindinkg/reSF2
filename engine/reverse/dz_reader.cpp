@@ -92,10 +92,13 @@ std::vector<std::byte> DzArchive::read_file(const std::string& name) const {
                     0, entry.uncomp_size);
             }
             if (!result.empty()) {
-                std::printf("[DZ] Decompressed %s: %zu -> %zu bytes\n",
-                            name.c_str(), comp_size, result.size());
+                std::printf("[DZ] Decompressed %s: %u -> %zu bytes\n",
+                            name.c_str(), (unsigned)comp_size, result.size());
             }
-            return result;
+            // Convert vector<uint8_t> to vector<std::byte>
+            std::vector<std::byte> byte_result(result.size());
+            std::memcpy(byte_result.data(), result.data(), result.size());
+            return byte_result;
         }
         
         default:
