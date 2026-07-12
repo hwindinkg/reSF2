@@ -3042,16 +3042,27 @@ private:
         //   - No wrap, displacement goes from 0 to final value (e.g. +404 for roll)
         //   - player_pos_x_ = step_start_player_x_ + displacement (applied smoothly)
         //   - When animation ends, step_start_player_x_ already includes the full displacement
-        bool is_root_motion_anim = !anim_loop_ ||
+        //
+        // [HEURISTIC-TODO] Root-motion whitelist (commit b31681b follow-up).
+        // The previous condition `!anim_loop_ || ...` included ALL non-loop
+        // animations (stance_2, punches, kicks) in root motion, causing
+        // stance_2 to drift player_x by ~167 units and stationary attacks
+        // to slide the player. Fixed: only movement-type animations get
+        // root motion. Grounded attacks (high_punch, upper_cut, etc.) are
+        // removed — they should not displace the player. Air attacks
+        // (air_punch, air_axe_kick) are KEPT for now (momentum carry during
+        // airborne); this is [HEURISTIC-TODO] pending verification that
+        // the original applies root motion to air attacks.
+        // TODO: make this data-driven by looking up MoveDef by anim_name
+        // and checking is_step/is_jump/is_retreat (requires a reverse
+        // map from animation filename to MoveDef, not yet built).
+        bool is_root_motion_anim =
             current_anim_ == "step_forward" || current_anim_ == "step_back" ||
             current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
             current_anim_ == "jump" || current_anim_ == "jump_away" ||
             current_anim_ == "back_flip" || current_anim_ == "back_handflip" ||
             current_anim_ == "front_flip" ||
-            current_anim_ == "air_punch" || current_anim_ == "air_axe_kick" ||
-            current_anim_ == "double_punch" || current_anim_ == "spinning_punch" ||
-            current_anim_ == "front_kick" || current_anim_ == "back_kick" ||
-            current_anim_ == "upper_cut" || current_anim_ == "high_punch";
+            current_anim_ == "air_punch" || current_anim_ == "air_axe_kick";
 
         if (is_root_motion_anim) {
             // On first frame of new animation (prev_frame_idx_ == -1),
