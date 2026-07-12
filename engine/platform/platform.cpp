@@ -175,6 +175,16 @@ void NullPlatform::set_resume_callback(PauseCallback cb) noexcept {
     resume_cb_ = std::move(cb);
 }
 
+bool NullPlatform::load_input_script(const std::string& /*path*/) noexcept {
+    // NullPlatform has no real input backend; input-script replay is a
+    // GlfwPlatform feature. Tests that need scripted input use inject_key_*.
+    return false;
+}
+
+void NullPlatform::tick_input_script() noexcept {
+    // No-op: NullPlatform doesn't support input scripts.
+}
+
 // ---------- Test helpers ----------
 
 void NullPlatform::inject_key_down(Key k) noexcept {

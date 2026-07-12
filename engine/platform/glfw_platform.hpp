@@ -48,10 +48,15 @@ public:
     [[nodiscard]] std::string save_dir() const override;
     void set_pause_callback(PauseCallback cb) noexcept override;
     void set_resume_callback(PauseCallback cb) noexcept override;
+    [[nodiscard]] bool load_input_script(const std::string& path) noexcept override;
+    void tick_input_script() noexcept override { apply_input_script(); }
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    // [DIAGNOSTIC] Apply queued input-script events for the current frame.
+    void apply_input_script() noexcept;
 };
 
 }  // namespace resf2::platform

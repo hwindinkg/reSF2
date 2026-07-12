@@ -559,6 +559,10 @@ public:
     // Called by MainMenuScene and BattleScene to update the dojo gameplay
     // (movement, combat, animation, physics, overlays).
     void host_update_gameplay(uint32_t dt) {
+        // [DIAGNOSTIC] Advance input-script frame counter and apply events
+        // scheduled for this frame BEFORE reading input. This keeps script
+        // frame N aligned with gameplay frame N (Boot/Loading don't count).
+        platform_->tick_input_script();
         const auto& input = platform_->input();
 
         // Esc: close overlay if open, else request quit (handled by scene)
@@ -3845,11 +3849,17 @@ private:
 
 int main(int argc, char* argv[]) {
     std::string asset_root;
+    std::string input_script_path;
+    int max_frames = -1;  // -1 = unlimited
     for (int i = 1; i < argc; ++i) {
         std::string_view arg = argv[i];
         if (arg == "--assets" && i + 1 < argc) asset_root = argv[++i];
+        else if (arg == "--input-script" && i + 1 < argc) input_script_path = argv[++i];
+        else if (arg == "--max-frames" && i + 1 < argc) max_frames = std::atoi(argv[++i]);
         else if (arg == "--help" || arg == "-h") {
-            std::printf("Usage: resf2_app [--assets <path>]\n"); return 0;
+            std::printf("Usage: resf2_app [--assets <path>]\n"
+                        "                 [--input-script <path>] [--max-frames N]\n");
+            return 0;
         }
     }
     auto platform = std::make_unique<plat::GlfwPlatform>();
@@ -3859,6 +3869,10 @@ int main(int argc, char* argv[]) {
     if (!platform->init(cfg)) {
         std::fprintf(stderr, "Platform init failed.\n"); return 1;
     }
+    // [DIAGNOSTIC] Load deterministic input script if provided.
+    if (!input_script_path.empty()) {
+        platform->load_input_script(input_script_path);
+    }
     Game game(asset_root);
     if (!platform->make_gl_current()) {
         std::fprintf(stderr, "Failed to make GL context current.\n"); return 1;
@@ -3866,6 +3880,7 @@ int main(int argc, char* argv[]) {
     game.on_init(*platform);
     auto last_ms = platform->now_ms();
     bool was_paused = false;
+    int frame_count = 0;
     while (true) {
         if (!platform->poll_events()) break;
         if (platform->should_quit()) break;
@@ -3882,6 +3897,8 @@ int main(int argc, char* argv[]) {
         game.on_update(*platform, dt);
         game.on_render(*platform);
         platform->swap_buffers();
+        ++frame_count;
+        if (max_frames > 0 && frame_count >= max_frames) break;
     }
     game.on_shutdown(*platform);
     platform->shutdown();

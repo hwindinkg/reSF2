@@ -22,6 +22,8 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
+#include <unordered_map>
+#include <vector>
 
 #ifdef _WIN32
 // Define WIN32_LEAN_AND_MEAN to keep <windows.h> small; we only need
@@ -220,6 +222,22 @@ struct GlfwPlatform::Impl {
     PauseCallback pause_cb;
     PauseCallback resume_cb;
     std::string asset_root;
+
+    // [DIAGNOSTIC] Deterministic input replay script.
+    // Loaded via load_input_script(); applied during poll_events() on top
+    // of the real GLFW/GetAsyncKeyState input state.
+    struct ScriptEvent {
+        std::uint64_t frame = 0;       // 1-based frame index
+        int key_idx = -1;              // Key enum index
+        bool down = true;              // true=keydown, false=keyup
+    };
+    struct InputScript {
+        std::vector<ScriptEvent> events;
+        std::uint64_t cur = 0;         // next event index
+        std::uint64_t frame_counter = 0;  // incremented each poll_events()
+        bool armed = false;
+    };
+    InputScript input_script{};
 
 #ifdef _WIN32
     // On Windows we poll GetAsyncKeyState() every frame instead of trusting
@@ -465,7 +483,137 @@ bool GlfwPlatform::poll_events() {
     // GLFW key callback is disabled (spurious events on Win10 19044).
     // No merge needed — pure GetAsyncKeyState polling.
 
+    // [DIAGNOSTIC] Input-script events are applied via tick_input_script(),
+    // called from host_update_gameplay, so script frames align with gameplay
+    // frames (not poll_events frames, which also run during Boot/Loading).
+
     return !impl_->quit_requested;
+}
+
+// [DIAGNOSTIC] Apply queued input-script events for the current frame.
+// Events are ordered by frame index; we apply all events whose frame ==
+// current frame counter (1-based). keydown sets keys_down + keys_just_pressed;
+// keyup clears keys_down + sets keys_just_released. This overrides any real
+// input state for that key this frame, which is intentional for determinism.
+//
+// IMPORTANT: frame_counter is incremented HERE (not in poll_events) so that
+// script frames align with gameplay frames (host_update_gameplay calls),
+// not with raw poll_events calls (which also happen during Boot/Loading
+// before gameplay starts). This keeps script frame N == gameplay frame N.
+void GlfwPlatform::apply_input_script() noexcept {
+    auto& s = impl_->input_script;
+    if (!s.armed) return;
+    while (s.cur < s.events.size() && s.events[s.cur].frame <= s.frame_counter) {
+        const auto& ev = s.events[s.cur];
+        if (ev.key_idx >= 0 && ev.key_idx < (int)kMaxKeys) {
+            if (ev.down) {
+                if (!impl_->input.keys_down[ev.key_idx]) {
+                    impl_->input.keys_just_pressed[ev.key_idx] = true;
+                }
+                impl_->input.keys_down[ev.key_idx] = true;
+            } else {
+                if (impl_->input.keys_down[ev.key_idx]) {
+                    impl_->input.keys_just_released[ev.key_idx] = true;
+                }
+                impl_->input.keys_down[ev.key_idx] = false;
+            }
+        }
+        ++s.cur;
+    }
+    ++s.frame_counter;
+}
+
+// Parse a Key enum name (e.g. "W", "O", "ShiftLeft", "Space") into its index.
+// Returns -1 on unknown name.
+static int parse_key_name(const std::string& name) {
+    static const std::unordered_map<std::string, int> map = {
+        {"Escape", (int)Key::Escape}, {"Enter", (int)Key::Enter},
+        {"Space", (int)Key::Space}, {"Tab", (int)Key::Tab},
+        {"Backspace", (int)Key::Backspace},
+        {"ArrowUp", (int)Key::ArrowUp}, {"ArrowDown", (int)Key::ArrowDown},
+        {"ArrowLeft", (int)Key::ArrowLeft}, {"ArrowRight", (int)Key::ArrowRight},
+        {"A", (int)Key::A}, {"B", (int)Key::B}, {"C", (int)Key::C}, {"D", (int)Key::D},
+        {"E", (int)Key::E}, {"F", (int)Key::F}, {"G", (int)Key::G}, {"H", (int)Key::H},
+        {"I", (int)Key::I}, {"J", (int)Key::J}, {"K", (int)Key::K}, {"L", (int)Key::L},
+        {"M", (int)Key::M}, {"N", (int)Key::N}, {"O", (int)Key::O}, {"P", (int)Key::P},
+        {"Q", (int)Key::Q}, {"R", (int)Key::R}, {"S", (int)Key::S}, {"T", (int)Key::T},
+        {"U", (int)Key::U}, {"V", (int)Key::V}, {"W", (int)Key::W}, {"X", (int)Key::X},
+        {"Y", (int)Key::Y}, {"Z", (int)Key::Z},
+        {"ShiftLeft", (int)Key::ShiftLeft}, {"ShiftRight", (int)Key::ShiftRight},
+        {"CtrlLeft", (int)Key::CtrlLeft}, {"CtrlRight", (int)Key::CtrlRight},
+        {"AltLeft", (int)Key::AltLeft}, {"AltRight", (int)Key::AltRight},
+    };
+    auto it = map.find(name);
+    return it != map.end() ? it->second : -1;
+}
+
+bool GlfwPlatform::load_input_script(const std::string& path) noexcept {
+    auto& s = impl_->input_script;
+    s.events.clear();
+    s.cur = 0;
+    s.frame_counter = 0;
+    s.armed = false;
+    std::ifstream f(path);
+    if (!f) {
+        std::fprintf(stderr, "[INPUT_SCRIPT] cannot open %s\n", path.c_str());
+        return false;
+    }
+    std::string line;
+    int line_no = 0;
+    while (std::getline(f, line)) {
+        ++line_no;
+        // strip comment
+        auto hash = line.find('#');
+        if (hash != std::string::npos) line.erase(hash);
+        // tokenize
+        std::vector<std::string> tok;
+        size_t p = 0;
+        while (p < line.size()) {
+            while (p < line.size() && std::isspace((unsigned char)line[p])) ++p;
+            if (p >= line.size()) break;
+            size_t e = line.find_first_of(" \t\r\n", p);
+            if (e == std::string::npos) e = line.size();
+            tok.push_back(line.substr(p, e - p));
+            p = e;
+        }
+        if (tok.empty()) continue;
+        if (tok.size() < 3 || tok[0] != "frame") {
+            std::fprintf(stderr, "[INPUT_SCRIPT] line %d: expected 'frame <N> keydown|keyup <KEY>'\n", line_no);
+            return false;
+        }
+        std::uint64_t frame;
+        try { frame = std::stoull(tok[1]); }
+        catch (...) {
+            std::fprintf(stderr, "[INPUT_SCRIPT] line %d: bad frame number '%s'\n", line_no, tok[1].c_str());
+            return false;
+        }
+        bool down;
+        if (tok[2] == "keydown") down = true;
+        else if (tok[2] == "keyup") down = false;
+        else {
+            std::fprintf(stderr, "[INPUT_SCRIPT] line %d: expected keydown|keyup, got '%s'\n", line_no, tok[2].c_str());
+            return false;
+        }
+        if (tok.size() < 4) {
+            std::fprintf(stderr, "[INPUT_SCRIPT] line %d: missing key name\n", line_no);
+            return false;
+        }
+        int idx = parse_key_name(tok[3]);
+        if (idx < 0) {
+            std::fprintf(stderr, "[INPUT_SCRIPT] line %d: unknown key '%s'\n", line_no, tok[3].c_str());
+            return false;
+        }
+        s.events.push_back({frame, idx, down});
+    }
+    // sort by frame (stable for same-frame ordering)
+    std::stable_sort(s.events.begin(), s.events.end(),
+        [](const Impl::ScriptEvent& a, const Impl::ScriptEvent& b) {
+            return a.frame < b.frame;
+        });
+    s.armed = !s.events.empty();
+    std::fprintf(stderr, "[INPUT_SCRIPT] loaded %s: %zu events, armed=%d\n",
+                path.c_str(), s.events.size(), (int)s.armed);
+    return s.armed;
 }
 
 bool GlfwPlatform::should_quit() const noexcept {

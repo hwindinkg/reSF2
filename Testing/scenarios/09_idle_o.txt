@@ -1,0 +1,3 @@
+# Scenario 9: Idle, then press O.
+frame 180 keydown O
+frame 181 keyup O

@@ -1,0 +1,5 @@
+# Scenario 4: S+D — forward roll. Expect floor-level Y + rightward X.
+frame 180 keydown S
+frame 180 keydown D
+frame 185 keyup S
+frame 185 keyup D
