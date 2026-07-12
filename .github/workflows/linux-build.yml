@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   linux-build:
     runs-on: ubuntu-latest
@@ -15,35 +18,50 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential \
-            cmake \
-            ninja-build \
-            xorg-dev \
-            libgl1-mesa-dev \
-            zlib1g-dev
-          echo "--- toolchain versions ---"
+            build-essential cmake ninja-build xorg-dev libgl1-mesa-dev zlib1g-dev
           cmake --version
           g++ --version
 
       - name: Configure (CMake)
+        id: configure
         run: |
+          mkdir -p docs/_ci_logs
+          set +e
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DRESF2_BUILD_RUNTIME=ON \
             -DRESF2_USE_GLFW=ON \
             -DRESF2_BUILD_TESTS=ON \
-            -DRESF2_BUILD_TOOLS=OFF
+            -DRESF2_BUILD_TOOLS=OFF \
+            > docs/_ci_logs/configure.log 2>&1
+          echo "configure_rc=$?" | tee docs/_ci_logs/configure_rc.txt
+          tail -c 60000 docs/_ci_logs/configure.log
+          set -e
 
       - name: Build
-        run: cmake --build build --parallel
+        id: build
+        run: |
+          set +e
+          cmake --build build --parallel > docs/_ci_logs/build.log 2>&1
+          echo "build_rc=$?" | tee docs/_ci_logs/build_rc.txt
+          tail -c 120000 docs/_ci_logs/build.log
+          set -e
 
-      - name: List build outputs
+      - name: Tests (ctest)
+        id: ctest
+        run: |
+          set +e
+          ctest --test-dir build --output-on-failure > docs/_ci_logs/ctest.log 2>&1
+          echo "ctest_rc=$?" | tee docs/_ci_logs/ctest_rc.txt
+          tail -c 40000 docs/_ci_logs/ctest.log
+          set -e
+
+      - name: Commit logs
         if: always()
         run: |
-          echo "--- build/bin ---"
-          ls -la build/bin || true
-          echo "--- build/lib ---"
-          ls -la build/lib || true
-
-      - name: Run tests (ctest)
-        run: ctest --test-dir build --output-on-failure
+          git config user.name "reSF2 ci"
+          git config user.email "ci@resf2.local"
+          git add docs/_ci_logs
+          git commit -m "ci: build logs [skip ci]" || echo "nothing to commit"
+          git pull --rebase origin ci/linux-build-check || true
+          git push origin HEAD:ci/linux-build-check || true
