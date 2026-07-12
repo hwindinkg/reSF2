@@ -1,0 +1,1007 @@
+main.cpp:2110:34: warning: missing terminating " character
+ 2110 |             std::fprintf(stderr, "[HEURISTIC-TODO] y_adjust is a constant FEET_FLOOR_OFFSET: grounds standing/crouch/jump but floats rolls ~84px. Needs per-move contact/pivot (MoveInside). See HANDOFF.md
+      |                                  ^
+main.cpp:2110:34: error: missing terminating " character
+ 2110 |             std::fprintf(stderr, "[HEURISTIC-TODO] y_adjust is a constant FEET_FLOOR_OFFSET: grounds standing/crouch/jump but floats rolls ~84px. Needs per-move contact/pivot (MoveInside). See HANDOFF.md
+      |                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:2111:1: warning: missing terminating " character
+ 2111 | "); } }
+      | ^
+main.cpp:2111:1: error: missing terminating " character
+ 2111 | "); } }
+      | ^~~~~~~
+main.cpp:2951:29: warning: missing terminating " character
+ 2951 |                 std::printf("[ROOT] anim='%s' first frame: frame=%d player=(%.1f,%.1f) npivot=(%.1f,%.1f) render_y=%.1f facing=%d
+      |                             ^
+main.cpp:2951:29: error: missing terminating " character
+ 2951 |                 std::printf("[ROOT] anim='%s' first frame: frame=%d player=(%.1f,%.1f) npivot=(%.1f,%.1f) render_y=%.1f facing=%d
+      |                             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:2952:1: warning: missing terminating " character
+ 2952 | ",
+      | ^
+main.cpp:2952:1: error: missing terminating " character
+ 2952 | ",
+      | ^~
+main.cpp:3747:2: error: expected ‘}’ at end of input
+ 3747 | }
+      |  ^
+main.cpp:388:62: note: to match this ‘{’
+  388 | class Game final : public rt::IGame, public scene::SceneHost {
+      |                                                              ^
+main.cpp: In constructor ‘Game::Game(std::string)’:
+main.cpp:390:45: error: class ‘Game’ does not have any field named ‘asset_root_’
+  390 |     explicit Game(std::string asset_root) : asset_root_(std::move(asset_root)) {}
+      |                                             ^~~~~~~~~~~
+main.cpp: In member function ‘virtual void Game::on_init(resf2::platform::Platform&)’:
+main.cpp:393:9: error: ‘platform_’ was not declared in this scope; did you mean ‘platform’?
+  393 |         platform_ = &platform;
+      |         ^~~~~~~~~
+      |         platform
+main.cpp:410:9: error: ‘renderer_’ was not declared in this scope
+  410 |         renderer_ = std::make_unique<ren::Renderer>();
+      |         ^~~~~~~~~
+main.cpp:417:14: error: ‘asset_root_’ was not declared in this scope
+  417 |         if (!asset_root_.empty()) load_loading_screen();
+      |              ^~~~~~~~~~~
+main.cpp:420:9: error: ‘scene_manager_’ was not declared in this scope
+  420 |         scene_manager_.register_scene(scene::SceneId::Boot,
+      |         ^~~~~~~~~~~~~~
+main.cpp: In member function ‘virtual void Game::on_update(resf2::platform::Platform&, uint32_t)’:
+main.cpp:445:14: error: ‘renderer_’ was not declared in this scope
+  445 |         if (!renderer_) return;
+      |              ^~~~~~~~~
+main.cpp:451:51: error: ‘renderer_’ was not declared in this scope
+  451 |         scene::SceneContext ctx{*this, platform, *renderer_, dt};
+      |                                                   ^~~~~~~~~
+main.cpp:452:9: error: ‘scene_manager_’ was not declared in this scope
+  452 |         scene_manager_.update(ctx);
+      |         ^~~~~~~~~~~~~~
+main.cpp: In member function ‘virtual void Game::on_render(resf2::platform::Platform&)’:
+main.cpp:456:14: error: ‘renderer_’ was not declared in this scope
+  456 |         if (!renderer_) return;
+      |              ^~~~~~~~~
+main.cpp:457:9: error: ‘renderer_’ was not declared in this scope
+  457 |         renderer_->begin_frame();
+      |         ^~~~~~~~~
+main.cpp:459:9: error: ‘scene_manager_’ was not declared in this scope
+  459 |         scene_manager_.render(ctx);
+      |         ^~~~~~~~~~~~~~
+main.cpp: In member function ‘virtual void Game::on_shutdown(resf2::platform::Platform&)’:
+main.cpp:464:13: error: ‘renderer_’ was not declared in this scope
+  464 |         if (renderer_) renderer_->shutdown();
+      |             ^~~~~~~~~
+main.cpp: In member function ‘bool Game::quit_requested() const’:
+main.cpp:467:51: error: ‘quit_requested_’ was not declared in this scope; did you mean ‘quit_requested’?
+  467 |     bool quit_requested() const noexcept { return quit_requested_; }
+      |                                                   ^~~~~~~~~~~~~~~
+      |                                                   quit_requested
+main.cpp: In member function ‘virtual void Game::request_scene_transition(resf2::scene::SceneId)’:
+main.cpp:475:9: error: ‘scene_manager_’ was not declared in this scope
+  475 |         scene_manager_.transition_to(to);
+      |         ^~~~~~~~~~~~~~
+main.cpp: In member function ‘virtual void Game::host_load_location()’:
+main.cpp:479:14: error: ‘location_loaded_’ was not declared in this scope; did you mean ‘host_location_loaded’?
+  479 |         if (!location_loaded_) {
+      |              ^~~~~~~~~~~~~~~~
+      |              host_location_loaded
+main.cpp: In member function ‘virtual bool Game::host_location_loaded() const’:
+main.cpp:485:16: error: ‘location_loaded_’ was not declared in this scope; did you mean ‘host_location_loaded’?
+  485 |         return location_loaded_;
+      |                ^~~~~~~~~~~~~~~~
+      |                host_location_loaded
+main.cpp: In member function ‘virtual bool Game::host_save_progress()’:
+main.cpp:499:47: error: ‘current_level_’ was not declared in this scope
+  499 |             f << "  \"current_level\": \"" << current_level_ << "\",\n";
+      |                                               ^~~~~~~~~~~~~~
+main.cpp:500:47: error: ‘battle_result_’ was not declared in this scope
+  500 |             f << "  \"battle_result\": \"" << battle_result_ << "\",\n";
+      |                                               ^~~~~~~~~~~~~~
+main.cpp:502:36: error: ‘completed_levels_’ was not declared in this scope
+  502 |             for (size_t i = 0; i < completed_levels_.size(); ++i) {
+      |                                    ^~~~~~~~~~~~~~~~~
+main.cpp:507:40: error: ‘currency_’ was not declared in this scope
+  507 |             f << "  \"currency\": " << currency_ << "\n";
+      |                                        ^~~~~~~~~
+main.cpp: In member function ‘virtual void Game::host_set_dialogue(std::vector<std::pair<std::__cxx11::basic_string<char>, std::__cxx11::basic_string<char> > >)’:
+main.cpp:530:9: error: ‘dialogue_lines_’ was not declared in this scope
+  530 |         dialogue_lines_ = std::move(lines);
+      |         ^~~~~~~~~~~~~~~
+main.cpp:531:9: error: ‘dialogue_index_’ was not declared in this scope
+  531 |         dialogue_index_ = 0;
+      |         ^~~~~~~~~~~~~~~
+main.cpp: In member function ‘virtual void Game::host_set_current_level(std::string)’:
+main.cpp:535:9: error: ‘current_level_’ was not declared in this scope
+  535 |         current_level_ = std::move(level_id);
+      |         ^~~~~~~~~~~~~~
+main.cpp: In member function ‘virtual std::string Game::host_get_battle_result() const’:
+main.cpp:539:16: error: ‘battle_result_’ was not declared in this scope
+  539 |         return battle_result_;
+      |                ^~~~~~~~~~~~~~
+main.cpp: In member function ‘virtual void Game::host_update_gameplay(uint32_t)’:
+main.cpp:545:29: error: ‘platform_’ was not declared in this scope
+  545 |         const auto& input = platform_->input();
+      |                             ^~~~~~~~~
+main.cpp:549:17: error: ‘overlay_’ was not declared in this scope; did you mean ‘Overlay’?
+  549 |             if (overlay_ != Overlay::None) overlay_ = Overlay::None;
+      |                 ^~~~~~~~
+      |                 Overlay
+main.cpp:550:18: error: ‘quit_requested_’ was not declared in this scope; did you mean ‘quit_requested’?
+  550 |             else quit_requested_ = true;
+      |                  ^~~~~~~~~~~~~~~
+      |                  quit_requested
+main.cpp:554:13: error: ‘overlay_’ was not declared in this scope; did you mean ‘Overlay’?
+  554 |             overlay_ = (overlay_ == Overlay::Menu) ? Overlay::None : Overlay::Menu;
+      |             ^~~~~~~~
+      |             Overlay
+main.cpp:558:13: error: ‘overlay_’ was not declared in this scope; did you mean ‘Overlay’?
+  558 |             overlay_ = (overlay_ == Overlay::Dialog) ? Overlay::None : Overlay::Dialog;
+      |             ^~~~~~~~
+      |             Overlay
+main.cpp:567:21: error: ‘overlay_’ was not declared in this scope; did you mean ‘Overlay’?
+  567 |                     overlay_ = (overlay_ == Overlay::Menu) ? Overlay::None : Overlay::Menu;
+      |                     ^~~~~~~~
+      |                     Overlay
+main.cpp:573:34: error: ‘overlay_’ was not declared in this scope; did you mean ‘Overlay’?
+  573 |         float target_progress = (overlay_ == Overlay::Menu) ? 1.0f : 0.0f;
+      |                                  ^~~~~~~~
+      |                                  Overlay
+main.cpp:575:13: error: ‘menu_anim_progress_’ was not declared in this scope
+  575 |         if (menu_anim_progress_ < target_progress) {
+      |             ^~~~~~~~~~~~~~~~~~~
+main.cpp:591:13: error: ‘location_’ was not declared in this scope; did you mean ‘localtime_r’?
+  591 |         if (location_ && !is_uninterrupt_ && move_state_ < 10) {
+      |             ^~~~~~~~~
+      |             localtime_r
+main.cpp:591:27: error: ‘is_uninterrupt_’ was not declared in this scope
+  591 |         if (location_ && !is_uninterrupt_ && move_state_ < 10) {
+      |                           ^~~~~~~~~~~~~~~
+main.cpp:591:46: error: ‘move_state_’ was not declared in this scope
+  591 |         if (location_ && !is_uninterrupt_ && move_state_ < 10) {
+      |                                              ^~~~~~~~~~~
+main.cpp:593:48: error: ‘player_pos_x_’ was not declared in this scope
+  593 |             bool should_face_right = (bag_x >= player_pos_x_);
+      |                                                ^~~~~~~~~~~~~
+main.cpp:596:17: error: ‘facing_right_’ was not declared in this scope
+  596 |                 facing_right_ = should_face_right;
+      |                 ^~~~~~~~~~~~~
+main.cpp:616:28: error: ‘facing_right_’ was not declared in this scope
+  616 |         bool key_forward = facing_right_ ? key_right : key_left;
+      |                            ^~~~~~~~~~~~~
+main.cpp:629:25: error: ‘hit_anim_’ was not declared in this scope
+  629 |                         hit_anim_, is_uninterrupt_ ? 1 : 0, move_state_, current_move_.c_str());
+      |                         ^~~~~~~~~
+main.cpp:629:36: error: ‘is_uninterrupt_’ was not declared in this scope
+  629 |                         hit_anim_, is_uninterrupt_ ? 1 : 0, move_state_, current_move_.c_str());
+      |                                    ^~~~~~~~~~~~~~~
+main.cpp:629:61: error: ‘move_state_’ was not declared in this scope
+  629 |                         hit_anim_, is_uninterrupt_ ? 1 : 0, move_state_, current_move_.c_str());
+      |                                                             ^~~~~~~~~~~
+main.cpp:629:74: error: ‘current_move_’ was not declared in this scope
+  629 |                         hit_anim_, is_uninterrupt_ ? 1 : 0, move_state_, current_move_.c_str());
+      |                                                                          ^~~~~~~~~~~~~
+main.cpp:635:13: error: ‘move_state_’ was not declared in this scope
+  635 |         if (move_state_ == 1 || move_state_ == 2) {
+      |             ^~~~~~~~~~~
+main.cpp:636:13: error: ‘step_play_time_’ was not declared in this scope
+  636 |             step_play_time_ += dt;
+      |             ^~~~~~~~~~~~~~~
+main.cpp:638:13: error: ‘step_play_time_’ was not declared in this scope
+  638 |             step_play_time_ = 0;
+      |             ^~~~~~~~~~~~~~~
+main.cpp:640:32: error: ‘step_play_time_’ was not declared in this scope
+  640 |         bool step_min_played = step_play_time_ >= 400;
+      |                                ^~~~~~~~~~~~~~~
+main.cpp:646:26: error: ‘fwd_held_ms_’ was not declared in this scope
+  646 |         if (key_forward) fwd_held_ms_ = 200;
+      |                          ^~~~~~~~~~~~
+main.cpp:647:18: error: ‘fwd_held_ms_’ was not declared in this scope
+  647 |         else if (fwd_held_ms_ > 0) fwd_held_ms_ -= (int)dt;
+      |                  ^~~~~~~~~~~~
+main.cpp:648:23: error: ‘back_held_ms_’ was not declared in this scope
+  648 |         if (key_back) back_held_ms_ = 200;
+      |                       ^~~~~~~~~~~~~
+main.cpp:649:18: error: ‘back_held_ms_’ was not declared in this scope
+  649 |         else if (back_held_ms_ > 0) back_held_ms_ -= (int)dt;
+      |                  ^~~~~~~~~~~~~
+main.cpp:684:34: error: ‘current_anim_’ was not declared in this scope
+  684 |             bool in_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
+      |                                  ^~~~~~~~~~~~~
+main.cpp:687:33: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+  687 |             if (in_jump_anim && animations_.count("air_punch") && animations_.count("air_axe_kick")) {
+      |                                 ^~~~~~~~~~~
+      |                                 AnimationData
+main.cpp:693:17: error: ‘play_animation’ was not declared in this scope
+  693 |                 play_animation(air_anim, false);
+      |                 ^~~~~~~~~~~~~~
+main.cpp:694:17: error: ‘current_move_’ was not declared in this scope
+  694 |                 current_move_ = air_anim == "air_punch" ? "AirPunch" : "AxeKick";
+      |                 ^~~~~~~~~~~~~
+main.cpp:696:17: error: ‘hit_anim_’ was not declared in this scope; did you mean ‘air_anim’?
+  696 |                 hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+      |                 ^~~~~~~~~
+      |                 air_anim
+main.cpp:697:17: error: ‘move_state_’ was not declared in this scope
+  697 |                 move_state_ = 10;
+      |                 ^~~~~~~~~~~
+main.cpp:698:17: error: ‘need_switch_to_idle_’ was not declared in this scope
+  698 |                 need_switch_to_idle_ = false;
+      |                 ^~~~~~~~~~~~~~~~~~~~
+main.cpp:705:49: error: ‘is_uninterrupt_’ was not declared in this scope
+  705 |         if ((punch_pressed || kick_pressed) && !is_uninterrupt_) {
+      |                                                 ^~~~~~~~~~~~~~~
+main.cpp:728:18: error: ‘current_move_’ was not declared in this scope
+  728 |             if (!current_move_.empty()) {
+      |                  ^~~~~~~~~~~~~
+main.cpp:729:36: error: ‘moves_’ was not declared in this scope
+  729 |                 auto cur_move_it = moves_.find(current_move_);
+      |                                    ^~~~~~
+main.cpp:732:57: error: ‘hit_anim_’ was not declared in this scope
+  732 |                     if ((cur_kc == 1 || cur_kc == 2) && hit_anim_ > 0 &&
+      |                                                         ^~~~~~~~~
+main.cpp:733:33: error: ‘current_anim_’ was not declared in this scope
+  733 |                                 current_anim_ != "stance_idle" && current_anim_ != "fists_idle" &&
+      |                                 ^~~~~~~~~~~~~
+main.cpp:744:17: error: ‘location_’ was not declared in this scope; did you mean ‘localtime_r’?
+  744 |             if (location_ && bag_model_) {
+      |                 ^~~~~~~~~
+      |                 localtime_r
+main.cpp:744:30: error: ‘bag_model_’ was not declared in this scope
+  744 |             if (location_ && bag_model_) {
+      |                              ^~~~~~~~~~
+main.cpp:746:50: error: ‘player_pos_x_’ was not declared in this scope
+  746 |                 dist_to_enemy = std::abs(bag_x - player_pos_x_);
+      |                                                  ^~~~~~~~~~~~~
+main.cpp:751:39: error: ‘moves_’ was not declared in this scope; did you mean ‘move’?
+  751 |             for (auto& [name, move] : moves_) {
+      |                                       ^~~~~~
+      |                                       move
+main.cpp:794:22: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+  794 |                 if (!animations_.count(anim_name)) continue;
+      |                      ^~~~~~~~~~~
+      |                      AnimationData
+main.cpp:810:17: error: ‘play_animation’ was not declared in this scope
+  810 |                 play_animation(anim_name, false);
+      |                 ^~~~~~~~~~~~~~
+main.cpp:811:17: error: ‘current_move_’ was not declared in this scope
+  811 |                 current_move_ = best_move->name;
+      |                 ^~~~~~~~~~~~~
+main.cpp:812:26: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+  812 |                 int fc = animations_[anim_name].frame_count;
+      |                          ^~~~~~~~~~~
+      |                          AnimationData
+main.cpp:813:17: error: ‘hit_anim_’ was not declared in this scope
+  813 |                 hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+      |                 ^~~~~~~~~
+main.cpp:814:17: error: ‘move_state_’ was not declared in this scope
+  814 |                 move_state_ = 0;
+      |                 ^~~~~~~~~~~
+main.cpp:815:17: error: ‘need_switch_to_idle_’ was not declared in this scope
+  815 |                 need_switch_to_idle_ = false;
+      |                 ^~~~~~~~~~~~~~~~~~~~
+main.cpp:823:47: error: ‘moves_’ was not declared in this scope; did you mean ‘move’?
+  823 |                     for (auto& [name, move] : moves_) {
+      |                                               ^~~~~~
+      |                                               move
+main.cpp:830:44: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+  830 |                         bool anim_exists = animations_.count(anim_name) > 0;
+      |                                            ^~~~~~~~~~~
+      |                                            AnimationData
+main.cpp:845:14: error: ‘is_uninterrupt_’ was not declared in this scope
+  845 |         if (!is_uninterrupt_ && move_state_ < 10) {
+      |              ^~~~~~~~~~~~~~~
+main.cpp:845:33: error: ‘move_state_’ was not declared in this scope
+  845 |         if (!is_uninterrupt_ && move_state_ < 10) {
+      |                                 ^~~~~~~~~~~
+main.cpp:863:43: error: ‘moves_’ was not declared in this scope; did you mean ‘move’?
+  863 |                 for (auto& [name, move] : moves_) {
+      |                                           ^~~~~~
+      |                                           move
+main.cpp:881:26: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+  881 |                     if (!animations_.count(anim_name)) continue;
+      |                          ^~~~~~~~~~~
+      |                          AnimationData
+main.cpp:894:21: error: ‘play_animation’ was not declared in this scope
+  894 |                     play_animation(anim_name, false);
+      |                     ^~~~~~~~~~~~~~
+main.cpp:895:21: error: ‘current_move_’ was not declared in this scope
+  895 |                     current_move_ = best_move->name;
+      |                     ^~~~~~~~~~~~~
+main.cpp:896:30: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+  896 |                     int fc = animations_[anim_name].frame_count;
+      |                              ^~~~~~~~~~~
+      |                              AnimationData
+main.cpp:897:21: error: ‘hit_anim_’ was not declared in this scope
+  897 |                     hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+      |                     ^~~~~~~~~
+main.cpp:916:43: error: ‘moves_’ was not declared in this scope; did you mean ‘move’?
+  916 |                 for (auto& [name, move] : moves_) {
+      |                                           ^~~~~~
+      |                                           move
+main.cpp:933:26: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+  933 |                     if (!animations_.count(anim_name)) continue;
+      |                          ^~~~~~~~~~~
+      |                          AnimationData
+main.cpp:943:46: error: ‘current_anim_’ was not declared in this scope
+  943 |                     if (move_state_ != 11 || current_anim_ != duck_anim_name) {
+      |                                              ^~~~~~~~~~~~~
+main.cpp:945:25: error: ‘play_animation’ was not declared in this scope
+  945 |                         play_animation(duck_anim_name, true);
+      |                         ^~~~~~~~~~~~~~
+main.cpp:946:25: error: ‘current_move_’ was not declared in this scope
+  946 |                         current_move_ = duck_move->name;
+      |                         ^~~~~~~~~~~~~
+main.cpp:948:25: error: ‘duck_play_time_’ was not declared in this scope
+  948 |                         duck_play_time_ = 0;
+      |                         ^~~~~~~~~~~~~~~
+main.cpp:954:51: error: ‘moves_’ was not declared in this scope; did you mean ‘move’?
+  954 |                         for (auto& [name, move] : moves_) {
+      |                                                   ^~~~~~
+      |                                                   move
+main.cpp:971:14: error: ‘is_uninterrupt_’ was not declared in this scope
+  971 |         if (!is_uninterrupt_ && move_state_ < 10) {
+      |              ^~~~~~~~~~~~~~~
+main.cpp:971:33: error: ‘move_state_’ was not declared in this scope
+  971 |         if (!is_uninterrupt_ && move_state_ < 10) {
+      |                                 ^~~~~~~~~~~
+main.cpp:972:32: error: ‘fwd_held_ms_’ was not declared in this scope
+  972 |             bool fwd_latched = fwd_held_ms_ > 0;
+      |                                ^~~~~~~~~~~~
+main.cpp:973:33: error: ‘back_held_ms_’ was not declared in this scope
+  973 |             bool back_latched = back_held_ms_ > 0;
+      |                                 ^~~~~~~~~~~~~
+main.cpp:978:39: error: ‘moves_’ was not declared in this scope; did you mean ‘move’?
+  978 |             for (auto& [name, move] : moves_) {
+      |                                       ^~~~~~
+      |                                       move
+main.cpp:986:22: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+  986 |                 if (!animations_.count(anim_name)) continue;
+      |                      ^~~~~~~~~~~
+      |                      AnimationData
+main.cpp:996:42: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+  996 |             if (step_fwd_anim.empty() && animations_.count("step_forward")) step_fwd_anim = "step_forward";
+      |                                          ^~~~~~~~~~~
+      |                                          AnimationData
+main.cpp:997:43: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+  997 |             if (step_back_anim.empty() && animations_.count("step_back")) step_back_anim = "step_back";
+      |                                           ^~~~~~~~~~~
+      |                                           AnimationData
+main.cpp:1002:21: error: ‘play_animation’ was not declared in this scope
+ 1002 |                     play_animation(step_fwd_anim, true);
+      |                     ^~~~~~~~~~~~~~
+main.cpp:1005:21: error: ‘play_animation’ was not declared in this scope
+ 1005 |                     play_animation(step_back_anim, true);
+      |                     ^~~~~~~~~~~~~~
+main.cpp:1009:38: error: ‘need_switch_to_idle_’ was not declared in this scope
+ 1009 |                     move_state_ = 0; need_switch_to_idle_ = true;
+      |                                      ^~~~~~~~~~~~~~~~~~~~
+main.cpp:1012:21: error: ‘play_animation’ was not declared in this scope
+ 1012 |                     play_animation(step_fwd_anim, true);
+      |                     ^~~~~~~~~~~~~~
+main.cpp:1016:38: error: ‘need_switch_to_idle_’ was not declared in this scope
+ 1016 |                     move_state_ = 0; need_switch_to_idle_ = true;
+      |                                      ^~~~~~~~~~~~~~~~~~~~
+main.cpp:1019:21: error: ‘play_animation’ was not declared in this scope
+ 1019 |                     play_animation(step_back_anim, true);
+      |                     ^~~~~~~~~~~~~~
+main.cpp:1025:13: error: ‘hit_anim_’ was not declared in this scope
+ 1025 |         if (hit_anim_ > 0) {
+      |             ^~~~~~~~~
+main.cpp:1031:9: error: ‘is_uninterrupt_’ was not declared in this scope
+ 1031 |         is_uninterrupt_ = false;
+      |         ^~~~~~~~~~~~~~~
+main.cpp:1034:13: error: ‘move_state_’ was not declared in this scope
+ 1034 |         if (move_state_ == 10 && hit_anim_ == 0) {
+      |             ^~~~~~~~~~~
+main.cpp:1034:34: error: ‘hit_anim_’ was not declared in this scope
+ 1034 |         if (move_state_ == 10 && hit_anim_ == 0) {
+      |                                  ^~~~~~~~~
+main.cpp:1036:25: error: ‘current_move_’ was not declared in this scope
+ 1036 |                         current_move_.c_str());
+      |                         ^~~~~~~~~~~~~
+main.cpp:1038:13: error: ‘need_switch_to_idle_’ was not declared in this scope
+ 1038 |             need_switch_to_idle_ = true;
+      |             ^~~~~~~~~~~~~~~~~~~~
+main.cpp:1044:13: error: ‘move_state_’ was not declared in this scope
+ 1044 |         if (move_state_ == 11) {
+      |             ^~~~~~~~~~~
+main.cpp:1045:13: error: ‘duck_play_time_’ was not declared in this scope
+ 1045 |             duck_play_time_ += dt;
+      |             ^~~~~~~~~~~~~~~
+main.cpp:1048:17: error: ‘need_switch_to_idle_’ was not declared in this scope
+ 1048 |                 need_switch_to_idle_ = true;
+      |                 ^~~~~~~~~~~~~~~~~~~~
+main.cpp:1054:9: error: ‘cam_x_’ was not declared in this scope
+ 1054 |         cam_x_ = player_pos_x_ + 200.0f;
+      |         ^~~~~~
+main.cpp:1054:18: error: ‘player_pos_x_’ was not declared in this scope
+ 1054 |         cam_x_ = player_pos_x_ + 200.0f;
+      |                  ^~~~~~~~~~~~~
+main.cpp:1055:9: error: ‘renderer_’ was not declared in this scope
+ 1055 |         renderer_->camera().set_target(cam_x_, cam_y_);
+      |         ^~~~~~~~~
+main.cpp:1055:48: error: ‘cam_y_’ was not declared in this scope
+ 1055 |         renderer_->camera().set_target(cam_x_, cam_y_);
+      |                                                ^~~~~~
+main.cpp:1056:38: error: ‘zoom_’ was not declared in this scope
+ 1056 |         renderer_->camera().set_zoom(zoom_);
+      |                                      ^~~~~
+main.cpp:1061:9: error: ‘update_animation’ was not declared in this scope
+ 1061 |         update_animation(dt);
+      |         ^~~~~~~~~~~~~~~~
+main.cpp:1067:13: error: ‘hit_anim_’ was not declared in this scope
+ 1067 |         if (hit_anim_ > 0 && !current_move_.empty()) {
+      |             ^~~~~~~~~
+main.cpp:1067:31: error: ‘current_move_’ was not declared in this scope
+ 1067 |         if (hit_anim_ > 0 && !current_move_.empty()) {
+      |                               ^~~~~~~~~~~~~
+main.cpp:1068:28: error: ‘moves_’ was not declared in this scope
+ 1068 |             auto move_it = moves_.find(current_move_);
+      |                            ^~~~~~
+main.cpp:1070:32: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+ 1070 |                 auto anim_it = animations_.find(current_anim_);
+      |                                ^~~~~~~~~~~
+      |                                AnimationData
+main.cpp:1070:49: error: ‘current_anim_’ was not declared in this scope
+ 1070 |                 auto anim_it = animations_.find(current_anim_);
+      |                                                 ^~~~~~~~~~~~~
+main.cpp:1072:47: error: ‘anim_time_’ was not declared in this scope
+ 1072 |                     int current_frame = (int)(anim_time_ * 20.0f);
+      |                                               ^~~~~~~~~~
+main.cpp:1085:13: error: ‘need_switch_to_idle_’ was not declared in this scope
+ 1085 |         if (need_switch_to_idle_) {
+      |             ^~~~~~~~~~~~~~~~~~~~
+main.cpp:1087:17: error: ‘start_stance_playing_’ was not declared in this scope
+ 1087 |             if (start_stance_playing_) {
+      |                 ^~~~~~~~~~~~~~~~~~~~~
+main.cpp:1090:13: error: ‘play_animation’ was not declared in this scope
+ 1090 |             play_animation("stance_idle", true);
+      |             ^~~~~~~~~~~~~~
+main.cpp:1131:13: error: ‘hit_anim_’ was not declared in this scope
+ 1131 |         if (hit_anim_ > 0 && bag_model_ && location_) {
+      |             ^~~~~~~~~
+main.cpp:1131:30: error: ‘bag_model_’ was not declared in this scope
+ 1131 |         if (hit_anim_ > 0 && bag_model_ && location_) {
+      |                              ^~~~~~~~~~
+main.cpp:1131:44: error: ‘location_’ was not declared in this scope; did you mean ‘localtime_r’?
+ 1131 |         if (hit_anim_ > 0 && bag_model_ && location_) {
+      |                                            ^~~~~~~~~
+      |                                            localtime_r
+main.cpp:1132:28: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+ 1132 |             auto anim_it = animations_.find(current_anim_);
+      |                            ^~~~~~~~~~~
+      |                            AnimationData
+main.cpp:1132:45: error: ‘current_anim_’ was not declared in this scope
+ 1132 |             auto anim_it = animations_.find(current_anim_);
+      |                                             ^~~~~~~~~~~~~
+main.cpp:1135:43: error: ‘anim_time_’ was not declared in this scope
+ 1135 |                 int current_frame = (int)(anim_time_ * 20.0f);
+      |                                           ^~~~~~~~~~
+main.cpp:1136:32: error: ‘moves_’ was not declared in this scope
+ 1136 |                 auto move_it = moves_.find(current_move_);
+      |                                ^~~~~~
+main.cpp:1136:44: error: ‘current_move_’ was not declared in this scope
+ 1136 |                 auto move_it = moves_.find(current_move_);
+      |                                            ^~~~~~~~~~~~~
+main.cpp:1149:25: error: ‘bag_hit_’ was not declared in this scope
+ 1149 |                         bag_hit_ = false;
+      |                         ^~~~~~~~
+main.cpp:1152:48: error: ‘bag_hit_’ was not declared in this scope
+ 1152 |                     if (in_attack_interval && !bag_hit_) {
+      |                                                ^~~~~~~~
+main.cpp:1160:46: error: ‘skeleton_edges_’ was not declared in this scope
+ 1160 |                             auto skel_edge = skeleton_edges_.find(edge_name);
+      |                                              ^~~~~~~~~~~~~~~
+main.cpp:1180:44: error: ‘anim_node_pos_’ was not declared in this scope
+ 1180 |                                 auto ait = anim_node_pos_.find(limb_node);
+      |                                            ^~~~~~~~~~~~~~
+main.cpp:1185:49: error: ‘skeleton_nodes_’ was not declared in this scope
+ 1185 |                                 auto pivot_it = skeleton_nodes_.find("NPivot");
+      |                                                 ^~~~~~~~~~~~~~~
+main.cpp:1188:49: error: ‘player_pos_y_’ was not declared in this scope
+ 1188 |                                 float limb_wy = player_pos_y_ + y_adjust_smoothed_ + (limb_ly - pivot_ly);
+      |                                                 ^~~~~~~~~~~~~
+main.cpp:1188:65: error: ‘y_adjust_smoothed_’ was not declared in this scope
+ 1188 |                                 float limb_wy = player_pos_y_ + y_adjust_smoothed_ + (limb_ly - pivot_ly);
+      |                                                                 ^~~~~~~~~~~~~~~~~~
+main.cpp:1193:46: error: ‘bag_verlet_’ was not declared in this scope
+ 1193 |                                 auto bv_it = bag_verlet_.find("NPivot");
+      |                                              ^~~~~~~~~~~
+main.cpp:1209:37: error: ‘apply_bag_impulse’ was not declared in this scope
+ 1209 |                                     apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
+      |                                     ^~~~~~~~~~~~~~~~~
+main.cpp:1226:17: error: ‘need_switch_to_idle_’ was not declared in this scope
+ 1226 |                 need_switch_to_idle_ = true;
+      |                 ^~~~~~~~~~~~~~~~~~~~
+main.cpp:1227:17: error: ‘current_move_’ was not declared in this scope
+ 1227 |                 current_move_.clear();
+      |                 ^~~~~~~~~~~~~
+main.cpp:1228:17: error: ‘bag_hit_’ was not declared in this scope
+ 1228 |                 bag_hit_ = false;  // reset for next attack
+      |                 ^~~~~~~~
+main.cpp:1236:13: error: ‘hit_anim_’ was not declared in this scope
+ 1236 |         if (hit_anim_ == 0 && !current_move_.empty()) {
+      |             ^~~~~~~~~
+main.cpp:1236:32: error: ‘current_move_’ was not declared in this scope
+ 1236 |         if (hit_anim_ == 0 && !current_move_.empty()) {
+      |                                ^~~~~~~~~~~~~
+main.cpp:1237:13: error: ‘need_switch_to_idle_’ was not declared in this scope
+ 1237 |             need_switch_to_idle_ = true;
+      |             ^~~~~~~~~~~~~~~~~~~~
+main.cpp:1239:13: error: ‘bag_hit_’ was not declared in this scope
+ 1239 |             bag_hit_ = false;
+      |             ^~~~~~~~
+main.cpp:1243:9: error: ‘update_bag_verlet’ was not declared in this scope
+ 1243 |         update_bag_verlet(dt / 1000.0f);
+      |         ^~~~~~~~~~~~~~~~~
+main.cpp: In member function ‘virtual void Game::host_render_scene()’:
+main.cpp:1254:14: error: ‘location_loaded_’ was not declared in this scope; did you mean ‘host_location_loaded’?
+ 1254 |         if (!location_loaded_) return;
+      |              ^~~~~~~~~~~~~~~~
+      |              host_location_loaded
+main.cpp:1256:9: error: ‘render_punching_bag’ was not declared in this scope
+ 1256 |         render_punching_bag();
+      |         ^~~~~~~~~~~~~~~~~~~
+main.cpp:1257:9: error: ‘render_character’ was not declared in this scope
+ 1257 |         render_character();
+      |         ^~~~~~~~~~~~~~~~
+main.cpp:1258:21: error: ‘platform_’ was not declared in this scope
+ 1258 |         render_hud(*platform_);
+      |                     ^~~~~~~~~
+main.cpp:1258:9: error: ‘render_hud’ was not declared in this scope
+ 1258 |         render_hud(*platform_);
+      |         ^~~~~~~~~~
+main.cpp:1259:13: error: ‘menu_anim_progress_’ was not declared in this scope
+ 1259 |         if (menu_anim_progress_ > 0.01f) render_menu_expanded(*platform_);
+      |             ^~~~~~~~~~~~~~~~~~~
+main.cpp:1259:42: error: ‘render_menu_expanded’ was not declared in this scope
+ 1259 |         if (menu_anim_progress_ > 0.01f) render_menu_expanded(*platform_);
+      |                                          ^~~~~~~~~~~~~~~~~~~~
+main.cpp:1260:13: error: ‘overlay_’ was not declared in this scope; did you mean ‘Overlay’?
+ 1260 |         if (overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
+      |             ^~~~~~~~
+      |             Overlay
+main.cpp:1260:42: error: ‘render_dialog_overlay’ was not declared in this scope
+ 1260 |         if (overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
+      |                                          ^~~~~~~~~~~~~~~~~~~~~
+main.cpp: In member function ‘virtual void Game::host_render_loading()’:
+main.cpp:1265:32: error: ‘platform_’ was not declared in this scope
+ 1265 |         render_loading_screen(*platform_);
+      |                                ^~~~~~~~~
+main.cpp: In member function ‘void Game::load_loading_screen()’:
+main.cpp:1271:43: error: ‘asset_root_’ was not declared in this scope
+ 1271 |         auto root = std::filesystem::path(asset_root_);
+      |                                           ^~~~~~~~~~~
+main.cpp:1277:58: error: unable to deduce ‘std::initializer_list<auto>&&’ from ‘{<expression error>, <expression error>, <expression error>, <expression error>}’
+ 1277 |                                  root/"1536"/"fullscreen"}) {
+      |                                                          ^
+main.cpp:1286:9: error: ‘load_scale_’ was not declared in this scope
+ 1286 |         load_scale_ = std::min(
+      |         ^~~~~~~~~~~
+main.cpp:1287:20: error: ‘platform_’ was not declared in this scope
+ 1287 |             (float)platform_->window_width() / 1820.0f,
+      |                    ^~~~~~~~~
+main.cpp:1298:92: error: unable to deduce ‘std::initializer_list<auto>&&’ from ‘{<expression error>, <expression error>, <expression error>, root}’
+ 1298 |             for (const auto& base : {root/"assets"/"1536", root/"1536", root/"assets", root}) {
+      |                                                                                            ^
+main.cpp:1311:21: error: ‘loading_images_’ was not declared in this scope
+ 1311 |                     loading_images_.push_back({std::move(tex), x, y});
+      |                     ^~~~~~~~~~~~~~~
+main.cpp:1316:13: error: ‘loading_images_’ was not declared in this scope
+ 1316 |         if (loading_images_.empty()) {
+      |             ^~~~~~~~~~~~~~~
+main.cpp: In member function ‘void Game::init_location()’:
+main.cpp:1326:43: error: ‘asset_root_’ was not declared in this scope
+ 1326 |         auto root = std::filesystem::path(asset_root_);
+      |                                           ^~~~~~~~~~~
+main.cpp:1328:77: error: unable to deduce ‘std::initializer_list<auto>&&’ from ‘{root, <expression error>, <expression error>}’
+ 1328 |         for (const auto& base : {root, root/"assets", root/"assets"/"assets"}) {
+      |                                                                             ^
+main.cpp:1342:77: error: unable to deduce ‘std::initializer_list<auto>&&’ from ‘{root, <expression error>, <expression error>}’
+ 1342 |         for (const auto& base : {root, root/"assets", root/"assets"/"assets"}) {
+      |                                                                             ^
+main.cpp:1347:9: error: ‘location_loaded_’ was not declared in this scope; did you mean ‘host_location_loaded’?
+ 1347 |         location_loaded_ = true;
+      |         ^~~~~~~~~~~~~~~~
+      |         host_location_loaded
+main.cpp:1348:13: error: ‘location_’ was not declared in this scope; did you mean ‘localtime_r’?
+ 1348 |         if (location_ && !location_->color.empty()) {
+      |             ^~~~~~~~~
+      |             localtime_r
+main.cpp:1350:13: error: ‘renderer_’ was not declared in this scope
+ 1350 |             renderer_->set_clear_color(
+      |             ^~~~~~~~~
+main.cpp:1357:9: error: ‘load_punching_bag_model’ was not declared in this scope
+ 1357 |         load_punching_bag_model();
+      |         ^~~~~~~~~~~~~~~~~~~~~~~
+main.cpp:1358:9: error: ‘load_animations’ was not declared in this scope; did you mean ‘load_location’?
+ 1358 |         load_animations();
+      |         ^~~~~~~~~~~~~~~
+      |         load_location
+main.cpp:1359:9: error: ‘load_moves’ was not declared in this scope
+ 1359 |         load_moves();
+      |         ^~~~~~~~~~
+main.cpp:1360:9: error: ‘load_hud_textures’ was not declared in this scope
+ 1360 |         load_hud_textures();
+      |         ^~~~~~~~~~~~~~~~~
+main.cpp:1361:9: error: ‘load_menu_textures’ was not declared in this scope
+ 1361 |         load_menu_textures();
+      |         ^~~~~~~~~~~~~~~~~~
+main.cpp:1362:9: error: ‘load_hud_font’ was not declared in this scope
+ 1362 |         load_hud_font();
+      |         ^~~~~~~~~~~~~
+main.cpp:1363:13: error: ‘location_’ was not declared in this scope; did you mean ‘localtime_r’?
+ 1363 |         if (location_) {
+      |             ^~~~~~~~~
+      |             localtime_r
+main.cpp:1385:13: error: ‘player_pos_x_’ was not declared in this scope
+ 1385 |             player_pos_x_ = location_->player_x - X_OFFSET;
+      |             ^~~~~~~~~~~~~
+main.cpp:1386:13: error: ‘player_pos_y_’ was not declared in this scope
+ 1386 |             player_pos_y_ = location_->player_y;  // no invert (matches location rendering)
+      |             ^~~~~~~~~~~~~
+main.cpp:1391:9: error: ‘cam_x_’ was not declared in this scope
+ 1391 |         cam_x_ = player_pos_x_ + 200.0f;
+      |         ^~~~~~
+main.cpp:1391:18: error: ‘player_pos_x_’ was not declared in this scope
+ 1391 |         cam_x_ = player_pos_x_ + 200.0f;
+      |                  ^~~~~~~~~~~~~
+main.cpp:1392:9: error: ‘cam_y_’ was not declared in this scope
+ 1392 |         cam_y_ = -50.0f;  // shows floor and character properly
+      |         ^~~~~~
+main.cpp:1393:9: error: ‘zoom_’ was not declared in this scope
+ 1393 |         zoom_ = 1.0f;
+      |         ^~~~~
+main.cpp:1399:13: error: ‘animations_’ was not declared in this scope; did you mean ‘AnimationData’?
+ 1399 |         if (animations_.count("stance_2")) {
+      |             ^~~~~~~~~~~
+      |             AnimationData
+main.cpp:1400:13: error: ‘play_animation’ was not declared in this scope
+ 1400 |             play_animation("stance_2", false);
+      |             ^~~~~~~~~~~~~~
+main.cpp:1401:13: error: ‘current_move_’ was not declared in this scope
+ 1401 |             current_move_ = "StartStance";
+      |             ^~~~~~~~~~~~~
+main.cpp:1403:13: error: ‘hit_anim_’ was not declared in this scope
+ 1403 |             hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+      |             ^~~~~~~~~
+main.cpp:1404:13: error: ‘move_state_’ was not declared in this scope
+ 1404 |             move_state_ = 10;  // special move state (non-interruptible)
+      |             ^~~~~~~~~~~
+main.cpp:1405:13: error: ‘start_stance_playing_’ was not declared in this scope
+ 1405 |             start_stance_playing_ = true;
+      |             ^~~~~~~~~~~~~~~~~~~~~
+main.cpp:1408:13: error: ‘play_animation’ was not declared in this scope
+ 1408 |             play_animation("stance_idle", true);
+      |             ^~~~~~~~~~~~~~
+main.cpp: In member function ‘void Game::render_loading_screen(resf2::platform::Platform&)’:
+main.cpp:1413:30: error: ‘load_scale_’ was not declared in this scope
+ 1413 |         float tw = 1820.0f * load_scale_, th = 1024.0f * load_scale_;
+      |                              ^~~~~~~~~~~
+main.cpp:1415:48: error: ‘th’ was not declared in this scope; did you mean ‘tm’?
+ 1415 |         float oy = (platform.window_height() - th) / 2.0f;
+      |                                                ^~
+      |                                                tm
+main.cpp:1416:26: error: ‘loading_images_’ was not declared in this scope
+ 1416 |         for (auto& img : loading_images_) {
+      |                          ^~~~~~~~~~~~~~~
+main.cpp:1422:13: error: ‘renderer_’ was not declared in this scope
+ 1422 |             renderer_->draw_textured_quad_screen(*img.texture, x, y, w, h);
+      |             ^~~~~~~~~
+main.cpp: In member function ‘void Game::load_location(const std::string&)’:
+main.cpp:1428:43: error: ‘asset_root_’ was not declared in this scope
+ 1428 |         auto root = std::filesystem::path(asset_root_);
+      |                                           ^~~~~~~~~~~
+main.cpp:1432:71: error: unable to deduce ‘std::initializer_list<auto>&&’ from ‘{<expression error>, <expression error>, <expression error>}’
+ 1432 |                                  root/"assets"/"1536"/"locations"/name}) {
+      |                                                                       ^
+main.cpp:1441:9: error: ‘location_’ was not declared in this scope; did you mean ‘localtime_r’?
+ 1441 |         location_ = std::make_unique<GameLocation>(parse_location(xml));
+      |         ^~~~~~~~~
+      |         localtime_r
+main.cpp:1447:17: error: ‘atlases_’ was not declared in this scope
+ 1447 |             if (atlases_.count(layer.atlas_name)) continue;
+      |                 ^~~~~~~~
+main.cpp: In member function ‘void Game::load_atlas(const std::string&, const std::string&)’:
+main.cpp:1523:43: error: ‘asset_root_’ was not declared in this scope
+ 1523 |         auto root = std::filesystem::path(asset_root_);
+      |                                           ^~~~~~~~~~~
+main.cpp:1531:38: error: unable to deduce ‘std::initializer_list<auto>&&’ from ‘{<expression error>, <expression error>, <expression error>, <expression error>, <expression error>, <expression error>, <expression error>, root}’
+ 1531 |                                  root}) {
+      |                                      ^
+main.cpp:1533:72: error: ‘pn’ was not declared in this scope; did you mean ‘yn’?
+ 1533 |             if (std::filesystem::exists(pp) && std::filesystem::exists(pn)) {
+      |                                                                        ^~
+      |                                                                        yn
+main.cpp:1587:17: error: ‘atlases_’ was not declared in this scope
+ 1587 |                 atlases_[name] = std::move(a);
+      |                 ^~~~~~~~
+main.cpp: In member function ‘void Game::render_location()’:
+main.cpp:1595:14: error: ‘location_’ was not declared in this scope; did you mean ‘localtime_r’?
+ 1595 |         if (!location_) return;
+      |              ^~~~~~~~~
+      |              localtime_r
+main.cpp:1606:28: error: ‘location_’ was not declared in this scope; did you mean ‘localtime_r’?
+ 1606 |         for (auto& layer : location_->layers) {
+      |                            ^~~~~~~~~
+      |                            localtime_r
+main.cpp:1616:63: error: ‘cam_x_’ was not declared in this scope
+ 1616 |             float parallax_shift = (1.0f - parallax_factor) * cam_x_;
+      |                                                               ^~~~~~
+main.cpp:1636:31: error: ‘atlases_’ was not declared in this scope
+ 1636 |                     auto it = atlases_.find(img.atlas_name);
+      |                               ^~~~~~~~
+main.cpp:1639:43: error: ‘platform_’ was not declared in this scope
+ 1639 |                         float hw = (float)platform_->window_width()  / (2.0f * zoom_);
+      |                                           ^~~~~~~~~
+main.cpp:1639:80: error: ‘zoom_’ was not declared in this scope
+ 1639 |                         float hw = (float)platform_->window_width()  / (2.0f * zoom_);
+      |                                                                                ^~~~~
+main.cpp:1642:40: error: ‘cam_y_’ was not declared in this scope
+ 1642 |                         float bottom = cam_y_ - hh, top = cam_y_ + hh;
+      |                                        ^~~~~~
+main.cpp:1649:69: error: ‘right’ was not declared in this scope; did you mean ‘std::right’?
+ 1649 |                         float sx = (world_x - img.w/2.0f - left) / (right - left) * platform_->window_width();
+      |                                                                     ^~~~~
+      |                                                                     std::right
+In file included from /usr/include/c++/13/bits/locale_facets.h:43,
+                 from /usr/include/c++/13/locale:42,
+                 from /usr/include/c++/13/bits/fs_path.h:36,
+                 from /usr/include/c++/13/filesystem:49,
+                 from main.cpp:32:
+/usr/include/c++/13/bits/ios_base.h:1050:3: note: ‘std::right’ declared here
+ 1050 |   right(ios_base& __base)
+      |   ^~~~~
+main.cpp:1650:79: error: ‘top’ was not declared in this scope; did you mean ‘toi’?
+ 1650 |                         float sy = (1.0f - (world_y - img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
+      |                                                                               ^~~
+      |                                                                               toi
+main.cpp:1655:25: error: ‘renderer_’ was not declared in this scope
+ 1655 |                         renderer_->draw_filled_rect_screen(x, y, w, h, c);
+      |                         ^~~~~~~~~
+main.cpp:1659:27: error: ‘atlases_’ was not declared in this scope
+ 1659 |                 auto it = atlases_.find(img.atlas_name);
+      |                           ^~~~~~~~
+main.cpp:1682:43: error: ‘platform_’ was not declared in this scope
+ 1682 |                         float hw = (float)platform_->window_width() / (2.0f * zoom_);
+      |                                           ^~~~~~~~~
+main.cpp:1682:79: error: ‘zoom_’ was not declared in this scope
+ 1682 |                         float hw = (float)platform_->window_width() / (2.0f * zoom_);
+      |                                                                               ^~~~~
+main.cpp:1691:29: error: ‘renderer_’ was not declared in this scope
+ 1691 |                             renderer_->draw_textured_quad(*ctex, tx, py, quad_w, quad_h);
+      |                             ^~~~~~~~~
+main.cpp:1694:25: error: ‘renderer_’ was not declared in this scope
+ 1694 |                         renderer_->draw_textured_quad(*ctex, px, py,
+      |                         ^~~~~~~~~
+main.cpp:1718:39: error: ‘platform_’ was not declared in this scope
+ 1718 |                     float hw = (float)platform_->window_width() / (2.0f * zoom_);
+      |                                       ^~~~~~~~~
+main.cpp:1718:75: error: ‘zoom_’ was not declared in this scope
+ 1718 |                     float hw = (float)platform_->window_width() / (2.0f * zoom_);
+      |                                                                           ^~~~~
+main.cpp:1729:25: error: ‘renderer_’ was not declared in this scope
+ 1729 |                         renderer_->draw_textured_quad(*atlas.texture, tx, py, quad_w, quad_h,
+      |                         ^~~~~~~~~
+main.cpp:1735:21: error: ‘renderer_’ was not declared in this scope
+ 1735 |                     renderer_->draw_textured_quad(*atlas.texture, px, py, quad_w, quad_h,
+      |                     ^~~~~~~~~
+main.cpp: In member function ‘void Game::load_skeleton()’:
+main.cpp:1745:39: error: ‘asset_root_’ was not declared in this scope
+ 1745 |         auto candidates = model_paths(asset_root_, "skeleton.xml");
+      |                                       ^~~~~~~~~~~
+main.cpp:1771:17: error: ‘skeleton_nodes_’ was not declared in this scope
+ 1771 |                 skeleton_nodes_[n.name] = n;
+      |                 ^~~~~~~~~~~~~~~
+main.cpp:1793:17: error: ‘skeleton_nodes_’ was not declared in this scope
+ 1793 |                 skeleton_nodes_[n.name] = n;
+      |                 ^~~~~~~~~~~~~~~
+main.cpp:1813:17: error: ‘skeleton_nodes_’ was not declared in this scope
+ 1813 |                 skeleton_nodes_[n.name] = n;
+      |                 ^~~~~~~~~~~~~~~
+main.cpp:1820:9: error: ‘ordered_node_names_’ was not declared in this scope
+ 1820 |         ordered_node_names_.clear();
+      |         ^~~~~~~~~~~~~~~~~~~
+main.cpp:1840:21: error: ‘skeleton_nodes_’ was not declared in this scope
+ 1840 |                     skeleton_nodes_.size(), macro_count, ordered_node_names_.size());
+      |                     ^~~~~~~~~~~~~~~
+main.cpp:1867:21: error: ‘skeleton_edges_’ was not declared in this scope
+ 1867 |                     skeleton_edges_[e.name] = e;
+      |                     ^~~~~~~~~~~~~~~
+main.cpp:1872:48: error: ‘skeleton_edges_’ was not declared in this scope
+ 1872 |         std::printf("  Skeleton: %zu edges\n", skeleton_edges_.size());
+      |                                                ^~~~~~~~~~~~~~~
+main.cpp: In member function ‘void Game::load_body_model()’:
+main.cpp:1877:39: error: ‘asset_root_’ was not declared in this scope
+ 1877 |         auto candidates = model_paths(asset_root_, "body.xml");
+      |                                       ^~~~~~~~~~~
+main.cpp:1884:9: error: ‘body_model_’ was not declared in this scope; did you mean ‘BodyModel’?
+ 1884 |         body_model_ = std::make_unique<BodyModel>();
+      |         ^~~~~~~~~~~
+      |         BodyModel
+main.cpp: In member function ‘std::pair<float, float> Game::resolve_body_node(const std::string&, float, float, bool, float)’:
+main.cpp:1994:14: error: ‘body_model_’ was not declared in this scope; did you mean ‘BodyModel’?
+ 1994 |         if (!body_model_) return {world_cx, world_cy};
+      |              ^~~~~~~~~~~
+      |              BodyModel
+main.cpp:1997:20: error: ‘anim_node_pos_’ was not declared in this scope
+ 1997 |         auto ait = anim_node_pos_.find(name);
+      |                    ^~~~~~~~~~~~~~
+main.cpp:2001:36: error: ‘ly’ was not declared in this scope; did you mean ‘sy’?
+ 2001 |             float sy = world_cy + (ly - pivot_local_y) * 1.0f;
+      |                                    ^~
+      |                                    sy
+main.cpp:2005:20: error: ‘body_model_’ was not declared in this scope; did you mean ‘BodyModel’?
+ 2005 |         auto bit = body_model_->nodes.find(name);
+      |                    ^~~~~~~~~~~
+      |                    BodyModel
+main.cpp:2009:36: error: ‘ly’ was not declared in this scope; did you mean ‘sy’?
+ 2009 |             float sy = world_cy + (ly - pivot_local_y) * 1.0f;
+      |                                    ^~
+      |                                    sy
+main.cpp:2012:20: error: ‘skeleton_nodes_’ was not declared in this scope
+ 2012 |         auto sit = skeleton_nodes_.find(name);
+      |                    ^~~~~~~~~~~~~~~
+main.cpp:2016:36: error: ‘ly’ was not declared in this scope; did you mean ‘sy’?
+ 2016 |             float sy = world_cy + (ly - pivot_local_y) * 1.0f;
+      |                                    ^~
+      |                                    sy
+main.cpp: In member function ‘void Game::render_body_model()’:
+main.cpp:2038:14: error: ‘body_model_’ was not declared in this scope; did you mean ‘BodyModel’?
+ 2038 |         if (!body_model_) return;
+      |              ^~~~~~~~~~~
+      |              BodyModel
+main.cpp:2039:25: error: ‘skeleton_nodes_’ was not declared in this scope
+ 2039 |         auto pivot_it = skeleton_nodes_.find("NPivot");
+      |                         ^~~~~~~~~~~~~~~
+main.cpp:2108:9: error: ‘y_adjust_smoothed_’ was not declared in this scope
+ 2108 |         y_adjust_smoothed_ = FEET_FLOOR_OFFSET;
+      |         ^~~~~~~~~~~~~~~~~~
+main.cpp:2112:9: error: expected primary-expression before ‘float’
+ 2112 |         float world_cx = player_pos_x_;
+      |         ^~~~~
+main.cpp:2113:26: error: ‘player_pos_y_’ was not declared in this scope
+ 2113 |         float world_cy = player_pos_y_ + y_adjust_smoothed_;
+      |                          ^~~~~~~~~~~~~
+main.cpp:2117:24: error: ‘body_model_’ was not declared in this scope; did you mean ‘BodyModel’?
+ 2117 |         for (auto& e : body_model_->edges)
+      |                        ^~~~~~~~~~~
+      |                        BodyModel
+main.cpp:2119:32: error: ‘skeleton_edges_’ was not declared in this scope
+ 2119 |         for (auto& [name, e] : skeleton_edges_)
+      |                                ^~~~~~~~~~~~~~~
+main.cpp:2123:27: error: ‘platform_’ was not declared in this scope
+ 2123 |         float hw = (float)platform_->window_width() / (2.0f * zoom_);
+      |                           ^~~~~~~~~
+main.cpp:2123:63: error: ‘zoom_’ was not declared in this scope
+ 2123 |         float hw = (float)platform_->window_width() / (2.0f * zoom_);
+      |                                                               ^~~~~
+main.cpp:2125:22: error: ‘cam_x_’ was not declared in this scope
+ 2125 |         float left = cam_x_ - hw, right = cam_x_ + hw;
+      |                      ^~~~~~
+main.cpp:2126:24: error: ‘cam_y_’ was not declared in this scope
+ 2126 |         float bottom = cam_y_ - hh, top = cam_y_ + hh;
+      |                        ^~~~~~
+main.cpp: In lambda function:
+main.cpp:2128:33: error: ‘right’ was not declared in this scope; did you mean ‘std::right’?
+ 2128 |             sx = (wx - left) / (right - left) * platform_->window_width();
+      |                                 ^~~~~
+      |                                 std::right
+/usr/include/c++/13/bits/ios_base.h:1050:3: note: ‘std::right’ declared here
+ 1050 |   right(ios_base& __base)
+      |   ^~~~~
+main.cpp:2129:43: error: ‘top’ was not declared in this scope; did you mean ‘toi’?
+ 2129 |             sy = (1.0f - (wy - bottom) / (top - bottom)) * platform_->window_height();
+      |                                           ^~~
+      |                                           toi
+main.cpp: In member function ‘void Game::render_body_model()’:
+main.cpp:2137:24: error: ‘body_model_’ was not declared in this scope; did you mean ‘BodyModel’?
+ 2137 |         for (auto& c : body_model_->capsules) {
+      |                        ^~~~~~~~~~~
+      |                        BodyModel
+main.cpp:2141:17: error: ‘world_cx’ was not declared in this scope; did you mean ‘world_cy’?
+ 2141 |                 world_cx, world_cy, facing_right_, pivot_local_y);
+      |                 ^~~~~~~~
+      |                 world_cy
+main.cpp:2141:37: error: ‘facing_right_’ was not declared in this scope
+ 2141 |                 world_cx, world_cy, facing_right_, pivot_local_y);
+      |                                     ^~~~~~~~~~~~~
+main.cpp:2148:42: error: ‘m2’ was not declared in this scope; did you mean ‘mx2’?
+ 2148 |             float mx2 = x2 - (x2 - x1) * m2;
+      |                                          ^~
+      |                                          mx2
+main.cpp:2162:13: error: ‘renderer_’ was not declared in this scope
+ 2162 |             renderer_->draw_filled_triangle_world(ax, ay, bx, by, cx, cy_, silhouette_col);
+      |             ^~~~~~~~~
+main.cpp:2176:24: error: ‘body_model_’ was not declared in this scope; did you mean ‘BodyModel’?
+ 2176 |         for (auto& t : body_model_->triangles) {
+      |                        ^~~~~~~~~~~
+      |                        BodyModel
+main.cpp:2178:33: error: ‘anim_node_pos_’ was not declared in this scope
+ 2178 |             bool n1_animated = (anim_node_pos_.find(t.n1) != anim_node_pos_.end()) ||
+      |                                 ^~~~~~~~~~~~~~
+main.cpp:2188:17: error: ‘world_cx’ was not declared in this scope; did you mean ‘world_cy’?
+ 2188 |                 world_cx, world_cy, facing_right_, pivot_local_y);
+      |                 ^~~~~~~~
+      |                 world_cy
+main.cpp:2188:37: error: ‘facing_right_’ was not declared in this scope
+ 2188 |                 world_cx, world_cy, facing_right_, pivot_local_y);
+      |                                     ^~~~~~~~~~~~~
+main.cpp:2193:13: error: ‘renderer_’ was not declared in this scope
+ 2193 |             renderer_->draw_filled_triangle_world(tx0, ty0, tx1, ty1, tx2, ty2, silhouette_col);
+      |             ^~~~~~~~~
+main.cpp:2205:29: error: a function-definition is not allowed here before ‘{’ token
+ 2205 |     void render_character() {
+      |                             ^
+main.cpp:2212:36: error: a function-definition is not allowed here before ‘{’ token
+ 2212 |     void load_punching_bag_model() {
+      |                                    ^
+main.cpp:2313:28: error: a function-definition is not allowed here before ‘{’ token
+ 2313 |     void init_bag_verlet() {
+      |                            ^
+main.cpp:2363:78: error: a function-definition is not allowed here before ‘{’ token
+ 2363 |     void apply_bag_impulse(const std::string& node_name, float vx, float vy) {
+      |                                                                              ^
+main.cpp:2377:38: error: a function-definition is not allowed here before ‘{’ token
+ 2377 |     void update_bag_verlet(float dt) {
+      |                                      ^
+main.cpp:2418:32: error: a function-definition is not allowed here before ‘{’ token
+ 2418 |     void render_punching_bag() {
+      |                                ^
+main.cpp:2511:28: error: a function-definition is not allowed here before ‘{’ token
+ 2511 |     void load_animations() {
+      |                            ^
+main.cpp:2583:23: error: a function-definition is not allowed here before ‘{’ token
+ 2583 |     void load_moves() {
+      |                       ^
+main.cpp:2804:43: error: a function-definition is not allowed here before ‘{’ token
+ 2804 |     void update_animation(uint32_t dt_ms) {
+      |                                           ^
+main.cpp:3053:68: error: a function-definition is not allowed here before ‘{’ token
+ 3053 |     void play_animation(const std::string& name, bool loop = true) {
+      |                                                                    ^
+main.cpp:3089:30: error: a function-definition is not allowed here before ‘{’ token
+ 3089 |     void load_hud_textures() {
+      |                              ^
+main.cpp:3101:31: error: a function-definition is not allowed here before ‘{’ token
+ 3101 |     void load_menu_textures() {
+      |                               ^
+main.cpp:3149:5: error: a function-definition is not allowed here before ‘{’ token
+ 3149 |     {
+      |     ^
+main.cpp:3202:26: error: a function-definition is not allowed here before ‘{’ token
+ 3202 |     void load_hud_font() {
+      |                          ^
+main.cpp:3245:55: error: a function-definition is not allowed here before ‘{’ token
+ 3245 |                      float scale, ren::Color4B color) {
+      |                                                       ^
+main.cpp:3274:47: error: a function-definition is not allowed here before ‘{’ token
+ 3274 |     void render_hud(plat::Platform& platform) {
+      |                                               ^
+main.cpp:3391:57: error: a function-definition is not allowed here before ‘{’ token
+ 3391 |     void render_menu_expanded(plat::Platform& platform) {
+      |                                                         ^
+main.cpp:3512:56: error: a function-definition is not allowed here before ‘{’ token
+ 3512 |     void render_menu_overlay(plat::Platform& platform) {
+      |                                                        ^
+main.cpp:3556:58: error: a function-definition is not allowed here before ‘{’ token
+ 3556 |     void render_dialog_overlay(plat::Platform& platform) {
+      |                                                          ^
+main.cpp:3581:1: error: expected primary-expression before ‘private’
+ 3581 | private:
+      | ^~~~~~~
+main.cpp:3631:26: error: a function-definition is not allowed here before ‘{’ token
+ 3631 |     void bag_hit_reset() {
+      |                          ^
+main.cpp:3704:34: error: a function-definition is not allowed here before ‘{’ token
+ 3704 | int main(int argc, char* argv[]) {
+      |                                  ^
+main.cpp:3747:2: error: expected ‘}’ at end of input
+ 3747 | }
+      |  ^
+main.cpp:2037:30: note: to match this ‘{’
+ 2037 |     void render_body_model() {
+      |                              ^
+main.cpp: At global scope:
+main.cpp:3747:2: error: expected unqualified-id at end of input
+ 3747 | }
+      |  ^
