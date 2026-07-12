@@ -1,0 +1,400 @@
+// main.cpp
+//
+// Interactive GLFW-based reSF2 engine driver. Implements the full game
+// boot sequence for the Dojo location:
+//
+//   1. Loading screen (startLoading.xml assets)
+//   2. Dojo location (params.xml + parallax background layers)
+//   3. Player character (skeletal stick figure from skeleton.xml)
+//   4. Punching bag at the enemy position
+//   5. HUD overlay (money, energy, level, menu button)
+//   6. Menu overlay (Map / Shop / Settings / Save / Exit)
+//   7. Story dialog overlay (intro line from Sensei)
+//
+// Controls:
+//   A / D  or  Left / Right   Move player
+//   W / S  or  Up   / Down    Move camera (debug)
+//   Space                     Hit (visual feedback on punching bag)
+//   M  or  click menu button  Toggle menu overlay
+//   T                         Toggle dialog overlay
+//   1 / 2 / 3                 Zoom presets
+//   Esc                       Quit (or close menu if open)
+
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <string_view>
+#include <vector>
+#include <unordered_map>
+#include <memory>
+
+#include "engine/platform/platform.hpp"
+#include "engine/platform/glfw_platform.hpp"
+#include "engine/runtime/loop.hpp"
+#include "engine/renderer/renderer.hpp"
+#include "engine/reverse/plist_atlas.hpp"
+#include "engine/reverse/bitmap_font.hpp"
+#include "engine/reverse/dz_reader.hpp"
+#include "engine/scene/scene_system.hpp"
+#include "engine/scene/scenes.hpp"
+#include "engine/renderer/stb_image.h"
+
+namespace plat = resf2::platform;
+namespace rt = resf2::runtime;
+namespace ren = resf2::renderer;
+namespace plist = resf2::reverse::plist;
+namespace font = resf2::reverse::font;
+namespace scene = resf2::scene;
+
+// ---------- Small helpers ----------
+
+static std::vector<std::byte> read_file(const std::string& path) {
+    // Try filesystem first
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (f) {
+        auto sz = (size_t)f.tellg(); if (!sz) return {};
+        f.seekg(0); std::vector<std::byte> d(sz);
+        f.read((char*)d.data(), (std::streamsize)sz); return d;
+    }
+    // Try DZ archive
+    auto& dz = resf2::dz::DzRegistry::instance();
+    // Extract basename for DZ lookup
+    auto p = std::filesystem::path(path);
+    std::string basename = p.filename().string();
+    if (dz.has_file(basename)) {
+        return dz.read_file(basename);
+    }
+    return {};
+}
+
+static std::string read_text(const std::string& path) {
+    auto d = read_file(path); return std::string((const char*)d.data(), d.size());
+}
+
+static std::string xml_attr(const std::string& tag, const std::string& attr) {
+    auto pos = tag.find(attr + "=\""); if (pos == std::string::npos) return "";
+    pos += attr.size() + 2; auto end = tag.find('"', pos);
+    return tag.substr(pos, end - pos);
+}
+
+static float tof(const std::string& s, float def = 0.0f) {
+    if (s.empty()) return def;
+    try { return std::stof(s); } catch (...) { return def; }
+}
+
+static int toi(const std::string& s, int def = 0) {
+    if (s.empty()) return def;
+    try { return std::stoi(s); } catch (...) { return def; }
+}
+
+// Get the directory containing the executable. Used to find model XML files
+// that are shipped with the repo (assets/models/) but may not be in the
+// game's asset directory (they're inside files.dz which we can't read yet).
+static std::filesystem::path get_exe_dir() {
+#ifdef _WIN32
+    char buf[MAX_PATH];
+    GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    return std::filesystem::path(buf).parent_path();
+#else
+    return std::filesystem::current_path();
+#endif
+}
+
+// Build a list of search paths for model XML files.
+// Searches: asset_root/models/, asset_root/assets/models/,
+//           exe_dir/../../assets/models/ (repo-local)
+static std::vector<std::filesystem::path> model_paths(const std::string& asset_root, const char* filename) {
+    namespace fs = std::filesystem;
+    auto root = fs::path(asset_root);
+    return {
+        root / "models" / filename,
+        root / "assets" / "models" / filename,
+        root / "assets" / "assets" / "models" / filename,
+        root / "assets" / "assets" / "assets" / "models" / filename,
+    };
+}
+
+// ---------- Asset types ----------
+
+struct AtlasRef {
+    std::unique_ptr<ren::Texture2D> texture;
+    std::shared_ptr<plist::ParsedAtlas> atlas;
+    // Pre-cropped textures for rotated frames (un-rotated during crop)
+    std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> cropped;
+};
+
+struct LayerImage {
+    std::string atlas_name, class_name;
+    float x = 0, y = 0, w = 0, h = 0;
+    std::string color;
+};
+
+struct LocationLayer {
+    int type = 0;
+    float factor = 1.0f;
+    std::string atlas_name;
+    std::vector<LayerImage> images;
+};
+
+struct GameLocation {
+    std::string color;
+    float width = 0, height = 0;
+    float wall = 0;      // Wall position from params.xml (distance from center to wall)
+    float floor = 0;     // Floor position from params.xml
+    float player_x = 0, player_y = 0;
+    float enemy_x = 0, enemy_y = 0;
+    std::vector<LocationLayer> layers;
+};
+
+struct SkelNode {
+    std::string name;
+    float x = 0, y = 0, z = 0;
+};
+
+struct SkelEdge {
+    std::string name;
+    std::string end1, end2;
+    float radius = 0;
+};
+
+// ---------- Animation system ----------
+// .bin format (VERIFIED from Gymnast-Tool-Suite Blender plugin source):
+//
+// File structure:
+//   u32 frame_count              (LITTLE-ENDIAN)
+//   frame_count * variable bytes (one record per frame)
+//
+// Each frame:
+//   byte 0     : skip byte (type flag: 1=keyframe, 5=interframe)
+//   bytes 1..4 : u32 node_count (LITTLE-ENDIAN)
+//   bytes 5..  : node_count × 3 floats (X, Y, -Z), each LITTLE-ENDIAN f32
+//
+// Coordinate mapping (from plugin: struct.pack("fff", pos.x, pos.z, -pos.y)):
+//   bin stores (blender.x, blender.z, -blender.y)
+//   blender.x = game.X, blender.y = game.Z, blender.z = game.Y
+//   So bin stores: (game.X, game.Y, -game.Z)
+//
+// Node order: ALL skeleton.xml nodes in XML order (54 Node + 1 COM + 12 MacroNode = 67)
+// Body.xml nodes are NOT stored in .bin — they're derived from skeleton nodes at runtime.
+//
+// Positions are ABSOLUTE (world space). To get LOCAL positions, subtract
+// NPivot's world position (NPivot is node index 18 in XML order).
+// ---------- Move definition (from moves.xml) ----------
+struct MoveDef {
+    std::string name;
+    std::string filename;
+    std::string template_name;
+    int first_frame = 0;
+    int end_frame = 0;
+    int priority = 0;
+    
+    // Attack interval (frames where hit detection is active)
+    int attack_start = -1;
+    int attack_end = -1;
+    
+    // Attack edges (body parts that deal damage)
+    std::vector<std::string> attack_edges;
+    
+    // Damage value
+    float damage = 0.0f;
+    
+    // Block interval (can block during these frames)
+    int block_start = -1;
+    
+    // Uninterrupt interval (can't be interrupted)
+    int uninterrupt_start = -1;
+    int uninterrupt_end = -1;
+    
+    // Key combination
+    std::vector<std::string> key_types;  // "Punch", "Kick", "Forward", etc.
+    
+    // Parsed from Template string
+    int key_count = 0;           // 1, 2, or 3 (from "1key", "2key", "3key")
+    std::string direction;        // "Central", "Forward", "Back", "Up", "Down", 
+                                  // "UpForward", "UpBack", "DownForward", "DownBack", ""
+    std::string move_type;        // "Punch", "Kick", "Jump", "Move", "Retreat", "Step", etc.
+    std::string weapon_filter;    // "Unarmed", "Weapon", "" (empty = any)
+    bool is_unarmed = false;      // Template contains "Unarmed"
+    bool is_jump = false;         // Template contains "Jump"
+    bool is_retreat = false;      // Template contains "Retreat"
+    bool is_step = false;         // Template contains "Step"
+    bool is_double_step = false;  // Template contains "DoubleStep"
+    bool is_block = false;        // Template contains "Block"
+    bool is_stance = false;       // Template contains "Stance"
+    bool is_idle = false;         // Template contains "Idle"
+    bool is_not_titan = false;    // Template contains "NotTitan"
+    std::string tactic_weapon;    // TacticWeapon attribute (e.g. "Fists")
+
+    // Distance condition (from <Distance Min=".." Max=".." Axis="X">)
+    // Used to pick correct move based on enemy distance.
+    // Example: LowKick (Max=100) vs Sweep (Max=300) — pick by distance.
+    float distance_min = 0.0f;
+    float distance_max = 0.0f;  // 0 = no limit
+    bool has_distance_cond = false;
+
+    // Locks (from <Locks> section)
+    // Perk required (e.g. PERK_DOUBLE_SWEEP). Empty = no perk required.
+    std::string required_perk;
+    // Weapon subtype required (e.g. "Fists"). Empty = any weapon.
+    std::string required_weapon_subtype;
+};
+
+struct AnimationData {
+    std::string name;
+    int frame_count = 0;
+    // frames[fi][i] = (X, Y, Z) in game coords for node i at frame fi
+    // Z is already converted from -Z to Z
+    std::vector<std::vector<std::tuple<float,float,float>>> node_positions;
+
+    bool load(const std::string& path) {
+        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        if (!f) return false;
+        auto sz = (size_t)f.tellg();
+        if (sz < 4) return false;
+        f.seekg(0);
+        std::vector<uint8_t> data(sz);
+        f.read((char*)data.data(), sz);
+
+        frame_count = read_u32_le(data.data(), 0);
+        if (frame_count <= 0 || frame_count > 10000) return false;
+
+        node_positions.resize(frame_count);
+        size_t offset = 4;
+        for (int fi = 0; fi < frame_count; ++fi) {
+            if (offset + 5 > sz) break;
+            uint8_t skip = data[offset];
+            uint32_t nc = read_u32_le(data.data(), offset + 1);
+            offset += 5;
+            
+            auto& nodes = node_positions[fi];
+            nodes.reserve(nc);
+            for (uint32_t i = 0; i < nc; ++i) {
+                if (offset + 12 > sz) break;
+                float fx, fy, fneg_z;
+                memcpy(&fx, &data[offset], 4);
+                memcpy(&fy, &data[offset + 4], 4);
+                memcpy(&fneg_z, &data[offset + 8], 4);
+                // bin stores (game.X, game.Y, -game.Z)
+                nodes.push_back({fx, fy, -fneg_z});
+                offset += 12;
+            }
+        }
+        return !node_positions.empty();
+    }
+
+    // Get animated (X, Y, Z) for node `idx` at frame `fi` (absolute world coords)
+    bool get_node_pos(int fi, int idx, float& x, float& y, float& z) const {
+        if (fi < 0 || fi >= (int)node_positions.size()) return false;
+        const auto& nodes = node_positions[fi];
+        if (idx < 0 || idx >= (int)nodes.size()) return false;
+        auto [nx, ny, nz] = nodes[idx];
+        x = nx; y = ny; z = nz;
+        return true;
+    }
+
+    static uint32_t read_u32_le(const uint8_t* p, size_t off) {
+        return (uint32_t)p[off] | ((uint32_t)p[off+1] << 8) |
+               ((uint32_t)p[off+2] << 16) | ((uint32_t)p[off+3] << 24);
+    }
+};
+
+struct BodyNode {
+    std::string name;
+    float x = 0, y = 0, z = 0;
+    float mass = 1.0f;
+    bool fixed = false;
+    float attenuation = 0.02f;  // damping coefficient
+    bool cloth = false;
+};
+
+struct BodyEdge {
+    std::string name;
+    std::string end1, end2;
+    float length = 0;
+};
+
+// Verlet physics state for a single node.
+// Verlet integration: pos_new = 2*pos - pos_prev + acc * dt^2
+// No explicit velocity — velocity is implicit (pos - pos_prev).
+struct VerletNode {
+    float x = 0, y = 0;       // current position
+    float px = 0, py = 0;     // previous position (for Verlet integration)
+    float mass = 1.0f;
+    float inv_mass = 1.0f;    // 1/mass (0 if fixed)
+    bool fixed = false;
+    float attenuation = 0.02f;
+};
+
+struct VerletConstraint {
+    std::string n1, n2;
+    float length = 0;     // rest length
+    float stiffness = 1.0f;  // 1.0 = rigid, <1.0 = soft
+};
+
+struct BodyCapsule {
+    std::string edge_name;
+    float radius1 = 0, radius2 = 0;
+    float margin1 = 0, margin2 = 0;
+};
+
+struct BodyMacroNode {
+    std::string name;
+    std::string children[4];
+    float lcc[4] = {};
+};
+
+struct BodyTriangle {
+    std::string n1, n2, n3;
+};
+
+struct BodyModel {
+    std::unordered_map<std::string, BodyNode> nodes;
+    std::unordered_map<std::string, BodyMacroNode> macro_nodes;
+    std::vector<BodyEdge> edges;
+    std::vector<BodyCapsule> capsules;
+    std::vector<BodyTriangle> triangles;
+};
+
+struct LoadingImg {
+    std::unique_ptr<ren::Texture2D> texture;
+    float x = 0, y = 0;
+};
+
+// ---------- Game states ----------
+//
+// The old monolithic GameState { Loading, Location } has been replaced by
+// the scene::SceneManager (see engine/scene/scene_system.hpp). The enum is
+// kept only for the Overlay system, which is a sub-state within the
+// MainMenu/Battle scenes.
+
+enum class Overlay { None, Menu, Dialog };
+
+// ---------- Game ----------
+//
+// The Game class is the SceneHost — it owns the SceneManager and implements
+// the scene::SceneHost interface. Individual scenes (MainMenu, Battle, Map,
+// etc.) call back into Game via the host interface to load assets, render
+// the dojo, save progress, etc.
+
+class Game final : public rt::IGame, public scene::SceneHost {
+public:
+    explicit Game(std::string asset_root) : asset_root_(std::move(asset_root)) {}
+
+    void on_init(plat::Platform& platform) override {
+        platform_ = &platform;
+        std::printf("reSF2 initialized.\n");
+        std::printf("Controls (original SF2 layout):\n");
+        std::printf("  W/A/S/D     - Up / Left / Down / Right (movement + attack direction)\n");
+        std::printf("  O           - Punch (W=upper, S=low, D=heavy, A=spinning, S+A=elbow)\n");
+        std::printf("  P           - Kick (S=sweep, D=front, A=back, S+D=dodge reverse)\n");
+        std::printf("  W           - Jump (W+D=front flip, W+A=back flip)\n");
+        std::printf("  S+D / S+A   - Forward roll / Back roll\n");

@@ -1,0 +1,400 @@
+        // parallax_shift = (1 - factor) * cam_x_ — shifts the layer's X
+        // to create the illusion of depth.
+        static bool loc_logged = false;
+        for (auto& layer : location_->layers) {
+            // Parallax: the layer's X position scrolls at `factor` of the camera speed.
+            // factor=1.0 → layer moves with camera (foreground).
+            // factor=0.5 → layer moves at half speed (appears further away).
+            // factor=0.1 → layer barely moves (far background).
+            // Implementation: shift the layer's X by -cam_x_ * (1 - factor).
+            // When the camera moves right (cam_x_ increases), the layer shifts left
+            // by (1-factor)*cam_x_, creating the parallax effect.
+            float parallax_factor = layer.factor;
+            if (parallax_factor <= 0.0f) parallax_factor = 1.0f;
+            float parallax_shift = (1.0f - parallax_factor) * cam_x_;
+
+            if (!loc_logged) {
+                std::printf("[LOC] layer: type=%d factor=%.2f atlas=%s images=%zu\n",
+                            layer.type, layer.factor, layer.atlas_name.c_str(),
+                            layer.images.size());
+            }
+
+            for (auto& img : layer.images) {
+                if (!loc_logged) {
+                    std::printf("[LOC]   img: cls='%s' x=%.0f y=%.0f w=%.0f h=%.0f color='%s'\n",
+                                img.class_name.c_str(), img.x, img.y, img.w, img.h,
+                                img.color.c_str());
+                }
+                if (img.class_name == "pixel_1" && !img.color.empty()) {
+                    unsigned long col = std::stoul(img.color, nullptr, 16);
+                    ren::Color4B c{
+                        (std::uint8_t)((col>>16)&0xFF),
+                        (std::uint8_t)((col>>8)&0xFF),
+                        (std::uint8_t)(col&0xFF), 255};
+                    auto it = atlases_.find(img.atlas_name);
+                    if (it == atlases_.end()) {
+                        // No atlas: render as a solid world-space rect.
+                        float hw = (float)platform_->window_width()  / (2.0f * zoom_);
+                        float hh = (float)platform_->window_height() / (2.0f * zoom_);
+                        float left = cam_x_ - hw, right = cam_x_ + hw;
+                        float bottom = cam_y_ - hh, top = cam_y_ + hh;
+                        // params.xml uses Y-DOWN (Y=0 at top, positive Y = down).
+                        // Our world is Y-UP (positive Y = up). Invert: world_y = -img.y
+                        // Player at y=-93 in params → world y=+93 (above center). Correct.
+                        // Floor at y=225 in params → world y=-225 (below center). Correct.
+                        float world_x = img.x - parallax_shift;
+                        float world_y = -img.y;
+                        float sx = (world_x - img.w/2.0f - left) / (right - left) * platform_->window_width();
+                        float sy = (1.0f - (world_y - img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
+                        float ex = (world_x + img.w/2.0f - left) / (right - left) * platform_->window_width();
+                        float ey = (1.0f - (world_y + img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
+                        float x = std::min(sx, ex), y = std::min(sy, ey);
+                        float w = std::abs(ex - sx), h = std::abs(ey - sy);
+                        renderer_->draw_filled_rect_screen(x, y, w, h, c);
+                    }
+                    continue;
+                }
+                auto it = atlases_.find(img.atlas_name);
+                if (it == atlases_.end()) continue;
+                auto& atlas = it->second;
+                if (!atlas.texture || !atlas.atlas) continue;
+                auto fit = atlas.atlas->name_index.find(img.class_name + ".png");
+                if (fit == atlas.atlas->name_index.end()) {
+                    fit = atlas.atlas->name_index.find(img.class_name);
+                    if (fit == atlas.atlas->name_index.end()) continue;
+                }
+                auto& frame = atlas.atlas->frames[fit->second];
+                
+                // For rotated frames, use pre-cropped un-rotated texture
+                std::string crop_name = img.class_name;
+                if (atlas.cropped.count(crop_name)) {
+                    // Use pre-cropped texture (already un-rotated)
+                    auto& ctex = atlas.cropped[crop_name];
+                    float world_y = -img.y;
+                    float world_x = img.x - parallax_shift;
+                    float quad_w = img.w;
+                    float quad_h = img.h;
+                    float px = world_x - quad_w / 2.0f;
+                    float py = world_y - quad_h / 2.0f;
+                    if (parallax_factor < 0.99f) {
+                        float hw = (float)platform_->window_width() / (2.0f * zoom_);
+                        float vis_left = cam_x_ - hw;
+                        float vis_right = cam_x_ + hw;
+                        float tile_w = quad_w;
+                        float start_x = px;
+                        while (start_x + tile_w > vis_left) start_x -= tile_w;
+                        while (start_x < vis_left) start_x += tile_w;
+                        start_x -= tile_w;
+                        for (float tx = start_x; tx < vis_right; tx += tile_w) {
+                            renderer_->draw_textured_quad(*ctex, tx, py, quad_w, quad_h);
+                        }
+                    } else {
+                        renderer_->draw_textured_quad(*ctex, px, py,
+                                                      quad_w, quad_h);
+                    }
+                    continue;
+                }
+                
+                // Non-rotated frame: use atlas texture with UV mapping
+                float tw = (float)atlas.atlas->metadata.texture_w;
+                float th = (float)atlas.atlas->metadata.texture_h;
+                float u0 = frame.atlas_x / tw;
+                float v0 = frame.atlas_y / th;
+                float u1 = (frame.atlas_x + frame.atlas_w) / tw;
+                float v1 = (frame.atlas_y + frame.atlas_h) / th;
+                float world_y = -img.y;
+                float world_x = img.x - parallax_shift;
+                float quad_w = img.w;
+                float quad_h = img.h;
+                float px = world_x - quad_w / 2.0f;
+                float py = world_y - quad_h / 2.0f;  // bottom-left (world Y-UP: +Y = up)
+                // For parallax layers (factor < 1), tile the image horizontally
+                // to fill the screen. This prevents the background from flying
+                // off-screen when the camera moves.
+                if (parallax_factor < 0.99f) {
+                    // Calculate visible world range
+                    float hw = (float)platform_->window_width() / (2.0f * zoom_);
+                    float vis_left = cam_x_ - hw;
+                    float vis_right = cam_x_ + hw;
+                    // Tile from leftmost visible to rightmost visible
+                    float tile_w = quad_w;
+                    float start_x = px;
+                    // Find the leftmost tile that's visible
+                    while (start_x + tile_w > vis_left) start_x -= tile_w;
+                    while (start_x < vis_left) start_x += tile_w;
+                    start_x -= tile_w;  // go one more to the left for safety
+                    for (float tx = start_x; tx < vis_right; tx += tile_w) {
+                        renderer_->draw_textured_quad(*atlas.texture, tx, py, quad_w, quad_h,
+                                                      u0, v0, u1, v1);
+                    }
+                } else {
+                    // For foreground layers (factor = 1.0), render once.
+                    // No overlap — the pre-cropped texture fix should resolve gaps.
+                    renderer_->draw_textured_quad(*atlas.texture, px, py, quad_w, quad_h,
+                                                  u0, v0, u1, v1);
+                }
+            }
+        }
+        loc_logged = true;
+    }
+
+    // ---------- Skeleton ----------
+    void load_skeleton() {
+        auto candidates = model_paths(asset_root_, "skeleton.xml");
+        std::string path;
+        for (const auto& p : candidates) {
+            if (std::filesystem::exists(p)) { path = p.string(); break; }
+        }
+        if (path.empty()) { std::printf("  skeleton.xml NOT FOUND!\n"); return; }
+        auto xml = read_text(path);
+
+        // Parse <Nodes> section — find ALL Type="Node" tags (including Weapon-Node)
+        auto nodes_start = xml.find("<Nodes>");
+        auto nodes_end = xml.find("</Nodes>");
+        if (nodes_start == std::string::npos || nodes_end == std::string::npos) return;
+        std::string nodes_xml = xml.substr(nodes_start, nodes_end - nodes_start);
+        size_t pos = 0;
+        while ((pos = nodes_xml.find("Type=\"Node\"", pos)) != std::string::npos) {
+            auto ts = nodes_xml.rfind('<', pos);
+            auto end = nodes_xml.find("/>", pos);
+            if (ts == std::string::npos || end == std::string::npos) break;
+            auto tag = nodes_xml.substr(ts, end - ts);
+            auto sp = tag.find(' ');
+            if (sp != std::string::npos) {
+                SkelNode n;
+                n.name = tag.substr(1, sp - 1);
+                n.x = tof(xml_attr(tag, "X"));
+                n.y = tof(xml_attr(tag, "Y"));
+                n.z = tof(xml_attr(tag, "Z"));
+                skeleton_nodes_[n.name] = n;
+            }
+            pos = end + 2;
+        }
+        
+        // Also parse Type="MacroNode" tags — these are weighted-average nodes
+        // (e.g., MacroNode1_1, MacroNode2_1) used by capsule edges.
+        // They have direct X, Y, Z rest-pose coordinates in the XML.
+        pos = 0;
+        int macro_count = 0;
+        while ((pos = nodes_xml.find("Type=\"MacroNode\"", pos)) != std::string::npos) {
+            auto ts = nodes_xml.rfind('<', pos);
+            auto end = nodes_xml.find("/>", pos);
+            if (ts == std::string::npos || end == std::string::npos) break;
+            auto tag = nodes_xml.substr(ts, end - ts);
+            auto sp = tag.find(' ');
+            if (sp != std::string::npos) {
+                SkelNode n;
+                n.name = tag.substr(1, sp - 1);
+                n.x = tof(xml_attr(tag, "X"));
+                n.y = tof(xml_attr(tag, "Y"));
+                n.z = tof(xml_attr(tag, "Z"));
+                skeleton_nodes_[n.name] = n;
+                macro_count++;
+            }
+            pos = end + 2;
+        }
+        
+        // Also parse Type="CenterOfMass" (COM node)
+        pos = 0;
+        while ((pos = nodes_xml.find("Type=\"CenterOfMass\"", pos)) != std::string::npos) {
+            auto ts = nodes_xml.rfind('<', pos);
+            auto end = nodes_xml.find("/>", pos);
+            if (ts == std::string::npos || end == std::string::npos) break;
+            auto tag = nodes_xml.substr(ts, end - ts);
+            auto sp = tag.find(' ');
+            if (sp != std::string::npos) {
+                SkelNode n;
+                n.name = tag.substr(1, sp - 1);
+                n.x = tof(xml_attr(tag, "X"));
+                n.y = tof(xml_attr(tag, "Y"));
+                n.z = tof(xml_attr(tag, "Z"));
+                skeleton_nodes_[n.name] = n;
+            }
+            pos = end + 2;
+        }
+        
+        // Build ordered_node_names_ — ALL nodes in XML order.
+        // This matches the .bin node order (67 nodes: 54 Node + 1 COM + 12 MacroNode).
+        ordered_node_names_.clear();
+        pos = 0;
+        while (true) {
+            // Find next node tag (any Type)
+            auto tag_start = nodes_xml.find('<', pos);
+            if (tag_start == std::string::npos) break;
+            auto tag_end = nodes_xml.find("/>", tag_start);
+            if (tag_end == std::string::npos) break;
+            auto tag = nodes_xml.substr(tag_start, tag_end - tag_start);
+            // Check if this tag has X/Y attributes (is a node)
+            if (tag.find("X=\"") != std::string::npos && tag.find("Y=\"") != std::string::npos) {
+                auto sp = tag.find(' ');
+                if (sp != std::string::npos) {
+                    std::string name = tag.substr(1, sp - 1);
+                    ordered_node_names_.push_back(name);
+                }
+            }
+            pos = tag_end + 2;
+        }
+        std::printf("  Skeleton: %zu nodes (%d MacroNodes, ordered: %zu)\n",
+                    skeleton_nodes_.size(), macro_count, ordered_node_names_.size());
+
+        // Parse <Edges> section for Edge and Muscle types
+        auto edges_start = xml.find("<Edges>");
+        auto edges_end = xml.find("</Edges>");
+        if (edges_start != std::string::npos && edges_end != std::string::npos) {
+            std::string es = xml.substr(edges_start, edges_end - edges_start);
+            size_t ep = 0;
+            while (true) {
+                auto p1 = es.find("Type=\"Edge\"", ep);
+                auto p2 = es.find("Type=\"Muscle\"", ep);
+                size_t tp;
+                if (p1 == std::string::npos && p2 == std::string::npos) break;
+                if (p1 == std::string::npos) tp = p2;
+                else if (p2 == std::string::npos) tp = p1;
+                else tp = std::min(p1, p2);
+                auto ts = es.rfind('<', tp);
+                auto end = es.find("/>", tp);
+                if (ts == std::string::npos || end == std::string::npos) break;
+                auto tag = es.substr(ts, end - ts);
+                auto sp = tag.find(' ');
+                if (sp != std::string::npos) {
+                    SkelEdge e;
+                    e.name = tag.substr(1, sp - 1);
+                    e.end1 = xml_attr(tag, "End1");
+                    e.end2 = xml_attr(tag, "End2");
+                    e.radius = tof(xml_attr(tag, "Radius"));
+                    skeleton_edges_[e.name] = e;
+                }
+                ep = end + 2;
+            }
+        }
+        std::printf("  Skeleton: %zu edges\n", skeleton_edges_.size());
+    }
+
+    // ---------- Body model (body.xml) ----------
+    void load_body_model() {
+        auto candidates = model_paths(asset_root_, "body.xml");
+        std::string path;
+        for (const auto& p : candidates) {
+            if (std::filesystem::exists(p)) { path = p.string(); break; }
+        }
+        if (path.empty()) { std::printf("  body.xml NOT FOUND!\n"); return; }
+        auto xml = read_text(path);
+        body_model_ = std::make_unique<BodyModel>();
+
+        // Parse <Nodes> for BODY-NodeN and BODY-MacroNodeN
+        auto nodes_start = xml.find("<Nodes>");
+        auto nodes_end = xml.find("</Nodes>");
+        if (nodes_start != std::string::npos && nodes_end != std::string::npos) {
+            std::string ns = xml.substr(nodes_start, nodes_end - nodes_start);
+            size_t pos = 0;
+            while ((pos = ns.find("<BODY-", pos)) != std::string::npos) {
+                auto tag_start = ns.find("Type=\"", pos);
+                auto end = ns.find("/>", pos);
+                if (end == std::string::npos) break;
+                if (tag_start != std::string::npos && tag_start < end) {
+                    auto type_end = ns.find('"', tag_start + 6);
+                    std::string type = ns.substr(tag_start + 6, type_end - tag_start - 6);
+                    auto tag = ns.substr(pos, end - pos);
+                    auto sp = tag.find(' ');
+                    std::string name = tag.substr(1, sp - 1);
+                    if (type == "Node") {
+                        BodyNode n; n.name = name;
+                        n.x = tof(xml_attr(tag, "X"));
+                        n.y = tof(xml_attr(tag, "Y"));
+                        n.z = tof(xml_attr(tag, "Z"));
+                        body_model_->nodes[n.name] = n;
+                    } else if (type == "MacroNode") {
+                        BodyMacroNode mn; mn.name = name;
+                        mn.children[0] = xml_attr(tag, "ChildNode1");
+                        mn.children[1] = xml_attr(tag, "ChildNode2");
+                        mn.children[2] = xml_attr(tag, "ChildNode3");
+                        mn.children[3] = xml_attr(tag, "ChildNode4");
+                        mn.lcc[0] = tof(xml_attr(tag, "LCC1"));
+                        mn.lcc[1] = tof(xml_attr(tag, "LCC2"));
+                        mn.lcc[2] = tof(xml_attr(tag, "LCC3"));
+                        mn.lcc[3] = tof(xml_attr(tag, "LCC4"));
+                        body_model_->macro_nodes[mn.name] = mn;
+                    }
+                }
+                pos = end + 2;
+            }
+        }
+
+        // Parse <Edges>
+        auto edges_start = xml.find("<Edges>");
+        auto edges_end = xml.find("</Edges>");
+        if (edges_start != std::string::npos && edges_end != std::string::npos) {
+            std::string es = xml.substr(edges_start, edges_end - edges_start);
+            size_t pos = 0;
+            while ((pos = es.find("<BODY-", pos)) != std::string::npos) {
+                auto tag_start = es.find("Type=\"", pos);
+                auto end = es.find("/>", pos);
+                if (end == std::string::npos) break;
+                if (tag_start != std::string::npos && tag_start < end) {
+                    auto type_end = es.find('"', tag_start + 6);
+                    std::string type = es.substr(tag_start + 6, type_end - tag_start - 6);
+                    if (type == "Edge") {
+                        auto tag = es.substr(pos, end - pos);
+                        auto sp = tag.find(' ');
+                        BodyEdge e; e.name = tag.substr(1, sp - 1);
+                        e.end1 = xml_attr(tag, "End1");
+                        e.end2 = xml_attr(tag, "End2");
+                        body_model_->edges.push_back(e);
+                    }
+                }
+                pos = end + 2;
+            }
+        }
+
+        // Parse <Figures> for Capsules and Triangles
+        auto figs_start = xml.find("<Figures>");
+        auto figs_end = xml.find("</Figures>");
+        if (figs_start != std::string::npos && figs_end != std::string::npos) {
+            std::string fs = xml.substr(figs_start, figs_end - figs_start);
+            size_t pos = 0;
+            while ((pos = fs.find("Type=\"Capsule\"", pos)) != std::string::npos) {
+                auto ts = fs.rfind('<', pos);
+                auto end = fs.find("/>", pos);
+                if (ts == std::string::npos || end == std::string::npos) break;
+                auto tag = fs.substr(ts, end - ts);
+                BodyCapsule c;
+                c.edge_name = xml_attr(tag, "Edge");
+                c.radius1 = tof(xml_attr(tag, "Radius1"));
+                c.radius2 = tof(xml_attr(tag, "Radius2"));
+                c.margin1 = tof(xml_attr(tag, "Margin1"));
+                c.margin2 = tof(xml_attr(tag, "Margin2"));
+                body_model_->capsules.push_back(c);
+                pos = end + 2;
+            }
+            pos = 0;
+            while ((pos = fs.find("Type=\"Triangle\"", pos)) != std::string::npos) {
+                auto ts = fs.rfind('<', pos);
+                auto end = fs.find("/>", pos);
+                if (ts == std::string::npos || end == std::string::npos) break;
+                auto tag = fs.substr(ts, end - ts);
+                BodyTriangle t;
+                t.n1 = xml_attr(tag, "Node1");
+                t.n2 = xml_attr(tag, "Node2");
+                t.n3 = xml_attr(tag, "Node3");
+                body_model_->triangles.push_back(t);
+                pos = end + 2;
+            }
+        }
+        std::printf("  Body model: %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
+                    body_model_->nodes.size(), body_model_->edges.size(),
+                    body_model_->capsules.size(), body_model_->triangles.size());
+    }
+
+    // Resolve a node name to world coordinates (handles BodyNode, SkelNode, MacroNode).
+    std::pair<float, float> resolve_body_node(const std::string& name,
+                                              float world_cx, float world_cy,
+                                              bool face_right, float pivot_local_y) {
+        if (!body_model_) return {world_cx, world_cy};
+
+        // Check if this node has an animated position (from .bin animation)
+        auto ait = anim_node_pos_.find(name);
+        if (ait != anim_node_pos_.end()) {
+            float lx = ait->second.first, ly = ait->second.second;
+            float sx = (face_right ? lx : -lx) * 1.0f;
+            float sy = world_cy + (ly - pivot_local_y) * 1.0f;
+            return {world_cx + sx, sy};

@@ -1,0 +1,11 @@
+698:                need_switch_to_idle_ = false;
+813:                need_switch_to_idle_ = false;
+1007:                    move_state_ = 0; need_switch_to_idle_ = true;
+1014:                    move_state_ = 0; need_switch_to_idle_ = true;
+1036:            need_switch_to_idle_ = true;
+1046:                need_switch_to_idle_ = true;
+1083:        if (need_switch_to_idle_) {
+1084:            need_switch_to_idle_ = false;
+1224:                need_switch_to_idle_ = true;
+1235:            need_switch_to_idle_ = true;
+3691:    bool need_switch_to_idle_ = false;  // deferred switch to idle (after update_animation)

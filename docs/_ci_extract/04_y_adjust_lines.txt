@@ -1,0 +1,13 @@
+1186:                                float limb_wy = player_pos_y_ + y_adjust_smoothed_ + (limb_ly - pivot_ly);
+2050:        // y_adjust = 0 positions NPivot at player_pos_y_.
+2056:        // y_adjust = +4 shifts everything up so feet are at -192.96 ≈ floor.
+2090:        // y_adjust = -172.89 - (-93) = -79.89.
+2095:        // SOLUTION: Use NPivot-based y_adjust for jumps, lowest-node for rolls.
+2102:        // For now: use constant y_adjust = 4 (works for standing, crouch, jump).
+2106:        y_adjust_smoothed_ = FEET_FLOOR_OFFSET;
+2108:        float world_cy = player_pos_y_ + y_adjust_smoothed_;
+2430:        // y_adjust_smoothed_ adds ~+82 units (REF_FEET_LY - ly_lowest),
+2434:        // FIX: apply the same y_adjust to the bag's rendering Y, so the
+2438:        float bag_cy = location_->enemy_y + 81.0f + y_adjust_smoothed_;
+2978:        // y_adjust in render_body_model() now handles all Y positioning
+3679:    float y_adjust_smoothed_ = 0.0f;  // smoothed Y adjustment for feet normalization

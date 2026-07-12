@@ -1,0 +1,10 @@
+591:        if (location_ && !is_uninterrupt_ && move_state_ < 10) {
+629:                        hit_anim_, is_uninterrupt_ ? 1 : 0, move_state_, current_move_.c_str());
+705:        if ((punch_pressed || kick_pressed) && !is_uninterrupt_) {
+843:        if (!is_uninterrupt_ && move_state_ < 10) {
+969:        if (!is_uninterrupt_ && move_state_ < 10) {
+1027:        // is_uninterrupt_ will be computed after update_animation()
+1029:        is_uninterrupt_ = false;
+1064:        is_uninterrupt_ = false;
+1075:                        is_uninterrupt_ = true;
+3692:    bool is_uninterrupt_ = false;  // true when current frame is in Uninterrupt interval

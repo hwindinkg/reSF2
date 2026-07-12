@@ -1,0 +1,400 @@
+                                    if (limb_wy < bag_cy - 30) target_node = "NBottom";
+                                    else if (limb_wy > bag_cy + 30) target_node = "Node4";
+                                    float impulse_dir = (dx < 0) ? 1.0f : -1.0f;
+                                    // Impulse from moves.xml Impulse X value
+                                    float impulse_strength = 20.0f;
+                                    if (move_it->second.move_type == "Kick") impulse_strength = 25.0f;
+                                    apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
+                                    std::printf("[COMBAT] HIT! move=%s frame=%d/%d [%d-%d] edge=%s node=%s dist=%.1f -> %s\n",
+                                                current_move_.c_str(), current_frame, fc,
+                                                frame_start, frame_end,
+                                                edge_name.c_str(), limb_node.c_str(),
+                                                dist, target_node.c_str());
+                                    bag_hit_ = true;
+                                    hit_registered = true;
+                                    break;  // one hit per frame
+                                }
+                            }
+                            if (hit_registered) break;
+                        }
+                    }
+                }
+            }
+            if (hit_anim_ == 0) {
+                need_switch_to_idle_ = true;
+                current_move_.clear();
+                bag_hit_ = false;  // reset for next attack
+            }
+        }
+
+        // IMPORTANT: Also clear current_move_ when hit_anim_ reaches 0
+        // even if bag_model_ doesn't exist (no character loaded).
+        // This prevents 3key combos from triggering on the next key press
+        // when current_move_ is still set from a previous attack.
+        if (hit_anim_ == 0 && !current_move_.empty()) {
+            need_switch_to_idle_ = true;
+            current_move_.clear();
+            bag_hit_ = false;
+        }
+
+        // Update bag Verlet physics
+        update_bag_verlet(dt / 1000.0f);
+
+        // Zoom presets
+        if (input.keys_just_pressed[(size_t)plat::Key::Num1]) zoom_ = 1.0f;
+        if (input.keys_just_pressed[(size_t)plat::Key::Num2]) zoom_ = 0.7f;
+        if (input.keys_just_pressed[(size_t)plat::Key::Num3]) zoom_ = 1.5f;
+    }
+
+    // Called by MainMenuScene and BattleScene to render the dojo scene
+    // (background, character, bag, HUD, menu/dialog overlays).
+    void host_render_scene() {
+        if (!location_loaded_) return;
+        render_location();
+        render_punching_bag();
+        render_character();
+        render_hud(*platform_);
+        if (menu_anim_progress_ > 0.01f) render_menu_expanded(*platform_);
+        if (overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
+    }
+
+    // Called by LoadingScene to render the loading screen.
+    void host_render_loading() {
+        render_loading_screen(*platform_);
+    }
+
+private:
+    // ---------- Loading screen ----------
+    void load_loading_screen() {
+        auto root = std::filesystem::path(asset_root_);
+        std::string xml_path;
+        // Search for startLoading.xml in multiple possible paths
+        for (const auto& dir : {root/"assets"/"1536"/"textures"/"fullscreen",
+                                 root/"1536"/"textures"/"fullscreen",
+                                 root/"assets"/"1536"/"fullscreen",
+                                 root/"1536"/"fullscreen"}) {
+            auto p = dir/"startLoading.xml";
+            if (std::filesystem::exists(p)) { xml_path = p.string(); break; }
+        }
+        if (xml_path.empty()) {
+            std::printf("  startLoading.xml not found, loading screen will be blank\n");
+            return;
+        }
+        auto xml = read_text(xml_path);
+        load_scale_ = std::min(
+            (float)platform_->window_width() / 1820.0f,
+            (float)platform_->window_height() / 1024.0f);
+        size_t pos = 0;
+        while ((pos = xml.find("<Image", pos)) != std::string::npos) {
+            auto end = xml.find("/>", pos);
+            auto tag = xml.substr(pos, end - pos);
+            auto file = xml_attr(tag, "File");
+            auto x = tof(xml_attr(tag, "X"));
+            auto y = tof(xml_attr(tag, "Y"));
+            // Search for the image file in multiple paths
+            std::filesystem::path img_path;
+            for (const auto& base : {root/"assets"/"1536", root/"1536", root/"assets", root}) {
+                auto p = base / file;
+                if (std::filesystem::exists(p)) { img_path = p; break; }
+            }
+            if (!img_path.empty()) {
+                auto data = read_file(img_path.string());
+                int w, h, ch;
+                auto* px = stbi_load_from_memory(
+                    (const stbi_uc*)data.data(), (int)data.size(), &w, &h, &ch, 4);
+                if (px) {
+                    auto tex = std::make_unique<ren::Texture2D>();
+                    tex->init_rgba(w, h, px);
+                    stbi_image_free(px);
+                    loading_images_.push_back({std::move(tex), x, y});
+                }
+            }
+            pos = end + 2;
+        }
+        if (loading_images_.empty()) {
+            std::printf("  No loading images found, loading screen will be blank\n");
+        }
+    }
+
+    // Initialize the dojo location: load all assets and set up the scene.
+    // Called by host_load_location() (SceneHost interface) when entering
+    // MainMenu or Battle scene.
+    void init_location() {
+        // Open DZ archives (for reading files that are only in .dz)
+        auto root = std::filesystem::path(asset_root_);
+        auto& dz = resf2::dz::DzRegistry::instance();
+        for (const auto& base : {root, root/"assets", root/"assets"/"assets"}) {
+            for (const auto& dz_name : {"files.dz", "animations.dz"}) {
+                auto dz_path = base / dz_name;
+                if (std::filesystem::exists(dz_path)) {
+                    dz.open_archive(dz_path.string());
+                }
+            }
+        }
+        // Register fallback directories for extracted DZ contents.
+        // When a file can't be decompressed from .dz (e.g. type=4 DZ custom
+        // compression), the registry looks for the file in these directories.
+        // This allows the engine to work with pre-extracted assets while
+        // still supporting .dz archives for files that can be decompressed
+        // (gzip type=8).
+        for (const auto& base : {root, root/"assets", root/"assets"/"assets"}) {
+            dz.add_fallback_dir(base.string());
+        }
+        
+        load_location("dojo");
+        location_loaded_ = true;
+        if (location_ && !location_->color.empty()) {
+            auto c = std::stoul(location_->color, nullptr, 16);
+            renderer_->set_clear_color(
+                ((c>>16)&0xFF)/255.0f,
+                ((c>>8)&0xFF)/255.0f,
+                (c&0xFF)/255.0f, 1.0f);
+        }
+        load_skeleton();
+        load_body_model();
+        load_punching_bag_model();
+        load_animations();
+        load_moves();
+        load_hud_textures();
+        load_menu_textures();
+        load_hud_font();
+        if (location_) {
+            // Player/enemy positions in params.xml use Y-DOWN, same as image
+            // coordinates. Location images are Y-inverted in render_location
+            // (world_y = -img.y). But player/enemy Y is used directly (NOT
+            // inverted) because the skeleton model space already has Y-UP
+            // with NPivot at Y=169 and feet at Y=73 (difference = 96).
+            //
+            // Floor (layer_3) at params y=225 → world_y = -225 (inverted image).
+            // Floor top surface at -225 + 32 = -193.
+            // Player NPivot at params y=-93 → world_y = -93 (direct).
+            // Player feet at -93 - 96 = -189. Floor at -193. Gap = 4. ✓
+            //
+            // Bag: enemy_y = -105. Bag NPivot at -105.
+            // Node12 (ceiling attachment) at -105 + 226 = 121.
+            // Ceiling (layer_5) at params y=-202 → world_y = +202.
+            // Need Node12 at ceiling: bag_cy + 226 = 202 → bag_cy = -24.
+            // Offset from enemy_y: -24 - (-105) = 81.
+            // bag_cy = enemy_y + 81.
+            //
+            // X offset: align bag with holder (layer_5 at x=-10).
+            // bag_cx = enemy_x - offset = -10 → offset = enemy_x + 10 = 983.
+            const float X_OFFSET = 983.0f;  // aligns bag with ceiling holder
+            player_pos_x_ = location_->player_x - X_OFFSET;
+            player_pos_y_ = location_->player_y;  // no invert (matches location rendering)
+        }
+        // Camera: follow player but keep a proper Y that shows the floor.
+        // The dojo floor (layer_3) is at world Y ≈ -193. Player at Y ≈ -93.
+        // Camera Y should be around -50 to show player + floor + ceiling.
+        cam_x_ = player_pos_x_ + 200.0f;
+        cam_y_ = -50.0f;  // shows floor and character properly
+        zoom_ = 1.0f;
+
+        // Play start stance animation (from moves.xml: FistsStartStance-Right)
+        // This is the intro animation before the fight begins.
+        // stance_2.bin = right-facing start stance.
+        // Cannot be interrupted — plays once, then transitions to stance_idle.
+        if (animations_.count("stance_2")) {
+            play_animation("stance_2", false);
+            current_move_ = "StartStance";
+            int fc = animations_["stance_2"].frame_count;
+            hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+            move_state_ = 10;  // special move state (non-interruptible)
+            start_stance_playing_ = true;
+            std::printf("[STANCE] Playing start stance (stance_2, %d frames)\n", fc);
+        } else if (animations_.count("stance_idle")) {
+            play_animation("stance_idle", true);
+        }
+    }
+
+    void render_loading_screen(plat::Platform& platform) {
+        float tw = 1820.0f * load_scale_, th = 1024.0f * load_scale_;
+        float ox = (platform.window_width() - tw) / 2.0f;
+        float oy = (platform.window_height() - th) / 2.0f;
+        for (auto& img : loading_images_) {
+            if (!img.texture) continue;
+            float w = img.texture->width() * load_scale_;
+            float h = img.texture->height() * load_scale_;
+            float x = ox + (img.x + 910.0f) * load_scale_;
+            float y = oy + (img.y + 512.0f) * load_scale_;
+            renderer_->draw_textured_quad_screen(*img.texture, x, y, w, h);
+        }
+    }
+
+    // ---------- Location ----------
+    void load_location(const std::string& name) {
+        auto root = std::filesystem::path(asset_root_);
+        std::string params_path;
+        for (const auto& dir : {root/"assets"/"locations"/name,
+                                 root/"locations"/name,
+                                 root/"assets"/"1536"/"locations"/name}) {
+            auto p = dir/"params.xml";
+            if (std::filesystem::exists(p)) { params_path = p.string(); break; }
+        }
+        if (params_path.empty()) {
+            std::printf("Location '%s' not found!\n", name.c_str()); return;
+        }
+        std::printf("Loading location: %s\n", params_path.c_str());
+        auto xml = read_text(params_path);
+        location_ = std::make_unique<GameLocation>(parse_location(xml));
+        std::printf("  Player: (%.0f, %.0f)  Enemy: (%.0f, %.0f)\n",
+                    location_->player_x, location_->player_y,
+                    location_->enemy_x, location_->enemy_y);
+        for (auto& layer : location_->layers) {
+            if (layer.atlas_name.empty()) continue;
+            if (atlases_.count(layer.atlas_name)) continue;
+            load_atlas(layer.atlas_name, name);
+        }
+    }
+
+    GameLocation parse_location(const std::string& xml) {
+        GameLocation loc;
+        auto rp = xml.find("<Root");
+        if (rp != std::string::npos) {
+            auto end = xml.find('>', rp);
+            auto tag = xml.substr(rp, end - rp);
+            loc.color = xml_attr(tag, "Color");
+            loc.width = tof(xml_attr(tag, "Width"));
+            loc.height = tof(xml_attr(tag, "Height"));
+            loc.wall = tof(xml_attr(tag, "Wall"));
+            loc.floor = tof(xml_attr(tag, "Floor"));
+        }
+        size_t pos = 0;
+        while ((pos = xml.find("<Layer", pos)) != std::string::npos) {
+            auto end = xml.find('>', pos);
+            auto tag = xml.substr(pos, end - pos);
+            LocationLayer layer;
+            layer.type = toi(xml_attr(tag, "Type"));
+            layer.factor = tof(xml_attr(tag, "Factor"), 1.0f);
+            layer.atlas_name = xml_attr(tag, "Atlas");
+            auto le = xml.find("</Layer>", pos);
+            if (le == std::string::npos) le = xml.size();
+            size_t ip = pos;
+            while ((ip = xml.find("<Image", ip)) != std::string::npos && ip < le) {
+                auto ie = xml.find("/>", ip);
+                if (ie == std::string::npos) break;
+                auto itag = xml.substr(ip, ie - ip);
+                LayerImage img;
+                img.atlas_name = layer.atlas_name;
+                img.class_name = xml_attr(itag, "ClassName");
+                img.x = tof(xml_attr(itag, "X"));
+                img.y = tof(xml_attr(itag, "Y"));
+                img.w = tof(xml_attr(itag, "Width"));
+                img.h = tof(xml_attr(itag, "Height"));
+                img.color = xml_attr(itag, "Color");
+                layer.images.push_back(img);
+                ip = ie + 2;
+            }
+            ip = pos;
+            while ((ip = xml.find("<SimpleEffect", ip)) != std::string::npos && ip < le) {
+                auto ie = xml.find(">", ip);
+                if (ie == std::string::npos) break;
+                auto ee = xml.find("</SimpleEffect>", ip);
+                auto itag = xml.substr(ip, ie - ip);
+                LayerImage img;
+                img.atlas_name = layer.atlas_name;
+                img.class_name = xml_attr(itag, "ClassName");
+                img.x = tof(xml_attr(itag, "X"));
+                img.y = tof(xml_attr(itag, "Y"));
+                img.w = tof(xml_attr(itag, "Width"));
+                img.h = tof(xml_attr(itag, "Height"));
+                img.color = xml_attr(itag, "Color");
+                layer.images.push_back(img);
+                ip = ee != std::string::npos ? ee + 15 : ie + 1;
+            }
+            auto mv = xml.find("ModelsViewer", pos);
+            if (mv != std::string::npos && mv < le) {
+                auto me = xml.find("/>", mv);
+                auto mtag = xml.substr(mv, me - mv);
+                loc.player_x = tof(xml_attr(mtag, "PlayerPositionX"));
+                loc.player_y = tof(xml_attr(mtag, "PlayerPositionY"));
+                loc.enemy_x = tof(xml_attr(mtag, "EnemyPositionX"));
+                loc.enemy_y = tof(xml_attr(mtag, "EnemyPositionY"));
+            }
+            loc.layers.push_back(layer);
+            pos = le + 8;
+        }
+        return loc;
+    }
+
+    void load_atlas(const std::string& name, const std::string& loc) {
+        auto root = std::filesystem::path(asset_root_);
+        for (const auto& dir : {root/"assets"/"1536"/"locations"/loc,
+                                 root/"assets"/"1536"/"textures",
+                                 root/"assets"/"1536",
+                                 root/"1536"/"locations"/loc,
+                                 root/"1536"/"textures",
+                                 root/"1536",
+                                 root/"assets",
+                                 root}) {
+            auto pp = dir/(name+".plist"), pn = dir/(name+".png");
+            if (std::filesystem::exists(pp) && std::filesystem::exists(pn)) {
+                auto result = plist::parse(read_text(pp.string()));
+                if (!result) continue;
+                auto png_data = read_file(pn.string());
+                // Decode atlas PNG for pre-cropping rotated frames
+                int aw, ah, ach;
+                auto* atlas_px = stbi_load_from_memory(
+                    (const stbi_uc*)png_data.data(), (int)png_data.size(),
+                    &aw, &ah, &ach, 4);
+                auto tex = std::make_unique<ren::Texture2D>();
+                if (!tex->init_from_png((const uint8_t*)png_data.data(),
+                                         png_data.size())) {
+                    if (atlas_px) stbi_image_free(atlas_px);
+                    continue;
+                }
+                AtlasRef a;
+                a.texture = std::move(tex);
+                a.atlas = std::make_shared<plist::ParsedAtlas>(std::move(*result));
+                // Pre-crop rotated frames into individual un-rotated textures
+                if (atlas_px) {
+                    for (auto& [fname, idx] : a.atlas->name_index) {
+                        auto& frame = a.atlas->frames[idx];
+                        if (!frame.rotated) continue;
+                        // For rotated frames, atlas_w/atlas_h are ATLAS (post-rotation) dimensions.
+                        // Original sprite dimensions are swapped.
+                        int fw = frame.atlas_h;  // original width (swapped)
+                        int fh = frame.atlas_w;  // original height (swapped)
+                        auto ctex = std::make_unique<ren::Texture2D>();
+                        std::vector<std::uint8_t> px((size_t)fw * fh * 4);
+                        for (int y = 0; y < fh; ++y) {
+                            for (int x = 0; x < fw; ++x) {
+                                // Un-rotate 90° CCW (Cocos2d stores rotated 90° CW)
+                                // Formula A (proven correct for location textures):
+                                // dest(x,y) ← source(atlas_x + (fh-1-y), atlas_y + x)
+                                int sx = frame.atlas_x + (fh - 1 - y);
+                                int sy = frame.atlas_y + x;
+                                if (sx < 0 || sy < 0 || sx >= aw || sy >= ah) continue;
+                                int src_idx = (sy * aw + sx) * 4;
+                                int dst_idx = (y * fw + x) * 4;
+                                px[dst_idx+0] = atlas_px[src_idx+0];
+                                px[dst_idx+1] = atlas_px[src_idx+1];
+                                px[dst_idx+2] = atlas_px[src_idx+2];
+                                px[dst_idx+3] = atlas_px[src_idx+3];
+                            }
+                        }
+                        ctex->init_rgba(fw, fh, px.data());
+                        std::string n = fname;
+                        if (n.ends_with(".png")) n = n.substr(0, n.size() - 4);
+                        a.cropped[n] = std::move(ctex);
+                    }
+                    stbi_image_free(atlas_px);
+                }
+                std::printf("  Atlas '%s': %zu frames, %zu pre-cropped\n",
+                            name.c_str(), a.atlas->frames.size(), a.cropped.size());
+                atlases_[name] = std::move(a);
+                return;
+            }
+        }
+        std::printf("  Atlas '%s' NOT FOUND\n", name.c_str());
+    }
+
+    void render_location() {
+        if (!location_) return;
+        // Render ALL layers with parallax support.
+        //
+        // Coordinate system: params.xml uses the same coordinate system as
+        // the player/enemy positions (Y-up, Y=0 near center). We render
+        // images directly at their (img.x, img.y) positions.
+        //
+        // Parallax: layers with factor < 1 scroll slower than the camera.

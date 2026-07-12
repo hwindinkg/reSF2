@@ -1,0 +1,7 @@
+727:            bool in_basic_attack = false;
+735:                        in_basic_attack = true;
+765:                //   - If in_basic_attack (combo scenario): allow 3key
+767:                if (in_basic_attack) {
+804:                            in_basic_attack ? "[COMBO] " : "",
+820:                                cur_move_type.c_str(), cur_direction.c_str(), in_basic_attack ? 1 : 0);
+824:                        if (move.key_count == 3 && !in_basic_attack) continue;

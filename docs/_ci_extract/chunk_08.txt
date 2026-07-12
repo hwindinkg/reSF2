@@ -1,0 +1,400 @@
+            root/"1536"/"fonts"/"obelix.fnt",
+        };
+        std::string fnt_path, png_path;
+        for (const auto& p : candidates) {
+            if (std::filesystem::exists(p)) {
+                fnt_path = p.string();
+                auto png = p.parent_path() / (p.stem().string() + ".png");
+                if (!std::filesystem::exists(png)) {
+                    auto xml = read_text(fnt_path);
+                    auto fp = xml.find("file=\"");
+                    if (fp != std::string::npos) {
+                        fp += 6;
+                        auto end = xml.find('"', fp);
+                        std::string png_name = xml.substr(fp, end - fp);
+                        auto png2 = p.parent_path() / png_name;
+                        if (std::filesystem::exists(png2)) png = png2;
+                    }
+                }
+                if (std::filesystem::exists(png)) {
+                    png_path = png.string();
+                    break;
+                }
+            }
+        }
+        if (fnt_path.empty()) return;
+        auto result = font::parse(read_text(fnt_path));
+        if (!result) return;
+        hud_font_ = std::make_shared<font::ParsedFont>(std::move(*result));
+        auto png_data = read_file(png_path);
+        auto tex = std::make_unique<ren::Texture2D>();
+        if (!tex->init_from_png((const uint8_t*)png_data.data(), png_data.size())) return;
+        hud_font_tex_ = std::move(tex);
+        std::printf("  HUD font loaded: %s (%zu glyphs)\n",
+                    fnt_path.c_str(), hud_font_->chars.size());
+    }
+
+    void render_text(const std::string& text, float x, float y,
+                     float scale, ren::Color4B color) {
+        if (!hud_font_ || !hud_font_tex_) return;
+        float cx = x;
+        for (char c : text) {
+            std::int32_t cp = (std::uint8_t)c;
+            if (cp >= 0xC0 && cp <= 0xFF) cp = 0x0410 + (cp - 0xC0);
+            auto it = hud_font_->char_index.find(cp);
+            if (it == hud_font_->char_index.end()) {
+                it = hud_font_->char_index.find(32);
+                if (it == hud_font_->char_index.end()) continue;
+            }
+            auto& ch = hud_font_->chars[it->second];
+            if (ch.width > 0 && ch.height > 0) {
+                float u0 = (float)ch.x / hud_font_->common.scale_w;
+                float v0 = (float)ch.y / hud_font_->common.scale_h;
+                float u1 = (float)(ch.x + ch.width) / hud_font_->common.scale_w;
+                float v1 = (float)(ch.y + ch.height) / hud_font_->common.scale_h;
+                float px = cx + ch.xoffset * scale;
+                float py = y + ch.yoffset * scale;
+                float pw = ch.width * scale;
+                float ph = ch.height * scale;
+                renderer_->draw_textured_quad_screen(
+                    *hud_font_tex_, px, py, pw, ph, u0, v0, u1, v1, color);
+            }
+            cx += ch.xadvance * scale;
+        }
+    }
+
+    // ---------- HUD ----------
+    void render_hud(plat::Platform& platform) {
+        // Top panel background (real texture, tiled horizontally)
+        auto panel_it = hud_textures_.find("Top_Panel");
+        if (panel_it != hud_textures_.end()) {
+            auto& tex = panel_it->second;
+            float panel_h = 50.0f;
+            float tile_w = panel_h * tex->width() / tex->height();
+            float x = 0;
+            float win_w = (float)platform.window_width();
+            while (x < win_w) {
+                float draw_w = std::min(tile_w, win_w - x);
+                float u1 = draw_w / tile_w;
+                renderer_->draw_textured_quad_screen(*tex, x, 0, draw_w, panel_h,
+                                                     0, 0, u1, 1.0f);
+                x += draw_w;
+            }
+        } else {
+            ren::Color4B bar_bg{0, 0, 0, 180};
+            renderer_->draw_filled_rect_screen(0, 0,
+                (float)platform.window_width(), 50, bar_bg);
+        }
+
+        // Gold icon + amount
+        auto gold_it = hud_textures_.find("gold");
+        if (gold_it != hud_textures_.end()) {
+            renderer_->draw_textured_quad_screen(*gold_it->second, 10, 9, 32, 32);
+        }
+        render_text("72 450", 50, 15, 0.32f, {255, 240, 200, 255});
+
+        // Energy icon + value
+        auto energy_it = hud_textures_.find("energy");
+        if (energy_it != hud_textures_.end()) {
+            renderer_->draw_textured_quad_screen(*energy_it->second, 180, 9, 32, 32);
+        }
+        render_text("5 / 5", 220, 15, 0.32f, {200, 230, 255, 255});
+
+        // Level bar + level badge
+        auto lvlbar_it = hud_textures_.find("Level_bar");
+        if (lvlbar_it != hud_textures_.end()) {
+            renderer_->draw_textured_quad_screen(*lvlbar_it->second, 330, 15, 120, 20);
+        }
+        render_text("LVL 7", 460, 15, 0.30f, {255, 255, 255, 255});
+
+        // Menu button (LEFT side, scroll/roll style)
+        float btn_x = 10.0f, btn_y = 58.0f;
+        float roll_h = 40.0f;
+        // Compute menu animation progress (smoothstep easing)
+        float mp = menu_anim_progress_;
+        float menu_eased = mp * mp * (3.0f - 2.0f * mp);
+        // Show collapsed roll when menu is closed OR animating
+        if (menu_eased < 0.99f) {
+            // Collapsed: scroll roll bar — sized to fit "MENU" text
+            auto lit = scroll_textures_.find("MenuRoll_left");
+            auto cit = scroll_textures_.find("MenuRoll_center");
+            auto rit = scroll_textures_.find("MenuRoll_right");
+            if (lit != scroll_textures_.end() && cit != scroll_textures_.end() &&
+                rit != scroll_textures_.end()) {
+                float cap_w = roll_h * lit->second->width() / lit->second->height();
+                // Measure "MENU" text width at scale 0.22
+                float text_w = 0.0f;
+                if (hud_font_) {
+                    for (char c : std::string("MENU")) {
+                        std::int32_t cp = (std::uint8_t)c;
+                        auto it = hud_font_->char_index.find(cp);
+                        if (it != hud_font_->char_index.end()) {
+                            text_w += hud_font_->chars[it->second].xadvance * 0.22f;
+                        }
+                    }
+                }
+                float roll_w = text_w + 2 * cap_w + 16.0f;  // text + caps + padding
+                float center_w = roll_w - 2 * cap_w;
+                // Fade out the collapsed roll as menu expands
+                float alpha = 1.0f - menu_eased;
+                ren::Color4B roll_col{255, 255, 255, (uint8_t)(alpha * 255)};
+                renderer_->draw_textured_quad_screen(*lit->second, btn_x, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
+                renderer_->draw_textured_quad_screen(*cit->second, btn_x + cap_w, btn_y, center_w, roll_h, 0,0,1,1, roll_col);
+                renderer_->draw_textured_quad_screen(*rit->second, btn_x + cap_w + center_w, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
+                // Center "MENU" text on the roll
+                ren::Color4B text_col{255, 240, 200, (uint8_t)(alpha * 255)};
+                float text_x = btn_x + (roll_w - text_w) / 2.0f;
+                // Measure actual text height for vertical centering
+                float text_h = 0.0f;
+                if (hud_font_) {
+                    for (char c : std::string("MENU")) {
+                        std::int32_t cp = (std::uint8_t)c;
+                        auto it = hud_font_->char_index.find(cp);
+                        if (it != hud_font_->char_index.end()) {
+                            text_h = std::max(text_h, (float)hud_font_->chars[it->second].height * 0.22f);
+                        }
+                    }
+                }
+                float text_y = btn_y + (roll_h - text_h) / 2.0f;
+                render_text("MENU", text_x, text_y, 0.22f, text_col);
+            } else {
+                ren::Color4B bg{60, 40, 20, 230};
+                renderer_->draw_filled_rect_screen(btn_x, btn_y, 120, roll_h, bg);
+                render_text("MENU", btn_x + 40, btn_y + 12, 0.22f, {255, 240, 200, 255});
+            }
+        }
+
+        // Bottom hint
+        render_text("A/D - move    Space - hit    M - menu    T - dialog",
+                    20, (float)(platform.window_height() - 40), 0.26f,
+                    {200, 200, 200, 255});
+
+        // Position label
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "Pos: (%.0f, %.0f)",
+                      player_pos_x_, player_pos_y_);
+        render_text(buf, 20, (float)(platform.window_height() - 65), 0.26f,
+                    {180, 180, 180, 255});
+    }
+
+    // ---------- Menu expanded (vertical scroll, matching original game) ----------
+    // In the original game, the menu is a VERTICAL scroll on the left side.
+    // Icons are stacked top-to-bottom in a single column.
+    // The scroll "unrolls" from top to bottom with a smooth animation.
+    void render_menu_expanded(plat::Platform& platform) {
+        // Compute eased animation progress
+        float mp = menu_anim_progress_;
+        float menu_eased = mp * mp * (3.0f - 2.0f * mp);  // smoothstep
+        if (menu_eased < 0.01f) return;  // nothing to render
+
+        float btn_x = 10.0f, btn_y = 58.0f;
+        float roll_h = 40.0f;
+
+        auto lit = scroll_textures_.find("MenuRoll_left");
+        auto cit = scroll_textures_.find("MenuRoll_center");
+        auto rit = scroll_textures_.find("MenuRoll_right");
+
+        if (lit == scroll_textures_.end() || cit == scroll_textures_.end() ||
+            rit == scroll_textures_.end()) {
+            ren::Color4B bg{60, 40, 20, 230};
+            renderer_->draw_filled_rect_screen(btn_x, btn_y, 120, 400 * menu_eased, bg);
+            return;
+        }
+
+        auto& left_tex = lit->second;
+        auto& center_tex = cit->second;
+        auto& right_tex = rit->second;
+        float cap_w = roll_h * left_tex->width() / left_tex->height();
+
+        // Vertical layout: icons stacked top-to-bottom
+        float icon_size = 56.0f;  // larger icons to match original game
+        float icon_spacing = 8.0f;
+        int n_items = 5;
+        float paper_padding = 14.0f;
+        float paper_w = icon_size + paper_padding * 2 + 30;  // wider for text labels
+        float full_paper_h = n_items * (icon_size + icon_spacing) + paper_padding * 2;
+        // Animate paper height: scroll unrolls from top to bottom
+        float paper_h = full_paper_h * menu_eased;
+        float center_w = paper_w - 2 * cap_w;
+
+        // Roll bar (top, horizontal) — sized to fit paper width
+        float roll_alpha = (menu_eased > 0.05f) ? 1.0f : menu_eased / 0.05f;
+        ren::Color4B roll_col{255, 255, 255, (uint8_t)(roll_alpha * 255)};
+        renderer_->draw_textured_quad_screen(*left_tex, btn_x, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
+        renderer_->draw_textured_quad_screen(*center_tex, btn_x + cap_w, btn_y, center_w, roll_h, 0,0,1,1, roll_col);
+        renderer_->draw_textured_quad_screen(*right_tex, btn_x + cap_w + center_w, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
+
+        // Paper area (below roll, vertical) — clips to animated height
+        float paper_y = btn_y + roll_h - 3;
+        ren::Color4B paper_bg{200, 170, 120, 245};
+        renderer_->draw_filled_rect_screen(btn_x, paper_y, paper_w, paper_h, paper_bg);
+
+        // Paper edges (top and bottom)
+        auto pl_it = scroll_textures_.find("Paper_left");
+        auto pr_it = scroll_textures_.find("Paper_right");
+        if (pl_it != scroll_textures_.end()) {
+            float pl_w = paper_w * pl_it->second->width() / pl_it->second->height();
+            renderer_->draw_textured_quad_screen(*pl_it->second, btn_x, paper_y, pl_w, paper_w);
+        }
+        if (pr_it != scroll_textures_.end() && menu_eased > 0.95f) {
+            // Only show bottom edge when fully expanded
+            float pr_w = paper_w * pr_it->second->width() / pr_it->second->height();
+            renderer_->draw_textured_quad_screen(*pr_it->second,
+                btn_x, paper_y + paper_h - pr_w, pr_w, paper_w);
+        }
+
+        // Shadow below (only when fully expanded)
+        auto shadow_it = scroll_textures_.find("Shadow_roll");
+        if (shadow_it != scroll_textures_.end() && menu_eased > 0.9f) {
+            renderer_->draw_textured_quad_screen(*shadow_it->second,
+                btn_x, paper_y + paper_h - 8, paper_w, 15);
+        }
+
+        // Menu icons (vertical stack) — only render icons that fit within the animated height
+        // All icons rendered with uniform scaling: scale = icon_size / max_texture_dimension
+        // This ensures all icons appear the same size on screen while preserving aspect ratio.
+        const char* items[] = {"Dojo", "Map", "Shop", "Profile", "Settings"};
+        // Find max texture dimension across all icons for uniform scaling
+        int max_tex_dim = 1;
+        for (auto& name : items) {
+            std::string tex_name = std::string(name) + "_normal";
+            auto it = menu_textures_.find(tex_name);
+            if (it == menu_textures_.end()) {
+                it = menu_textures_.find(std::string(name) + "_Normal");
+            }
+            if (it != menu_textures_.end()) {
+                max_tex_dim = std::max(max_tex_dim, std::max(it->second->width(), it->second->height()));
+            }
+        }
+        float uniform_scale = icon_size / (float)max_tex_dim;
+        float ix = btn_x + paper_padding + 10;
+        float iy = paper_y + paper_padding;
+        for (int idx = 0; idx < 5; ++idx) {
+            float icon_y = iy + idx * (icon_size + icon_spacing);
+            // Skip icons that haven't been revealed yet (below the unrolled height)
+            if (icon_y + icon_size > paper_y + paper_h) break;
+
+            auto& name = items[idx];
+            // Try different case patterns for the texture name
+            std::string tex_name = std::string(name) + "_normal";
+            auto it = menu_textures_.find(tex_name);
+            if (it == menu_textures_.end()) {
+                it = menu_textures_.find(std::string(name) + "_Normal");
+            }
+            if (it != menu_textures_.end()) {
+                // Uniform scale: all icons scaled by same factor, preserving aspect ratio
+                float draw_w = it->second->width() * uniform_scale;
+                float draw_h = it->second->height() * uniform_scale;
+                // Center within the icon_size × icon_size slot
+                float draw_x = ix + (icon_size - draw_w) * 0.5f;
+                float draw_y = icon_y + (icon_size - draw_h) * 0.5f;
+                renderer_->draw_textured_quad_screen(*it->second, draw_x, draw_y,
+                                                     draw_w, draw_h);
+                if (!loc_icons_logged) {
+                    std::printf("[MENU] icon '%s': tex %dx%d → draw %.0fx%.0f (scale=%.2f)\n",
+                                name, it->second->width(), it->second->height(),
+                                draw_w, draw_h, uniform_scale);
+                }
+            }
+            render_text(name, ix + icon_size + 5, icon_y + 10, 0.16f, {60, 40, 20, 255});
+        }
+        loc_icons_logged = true;
+    }
+
+    // ---------- Menu overlay ----------
+    void render_menu_overlay(plat::Platform& platform) {
+        // Dim background
+        ren::Color4B dim{0, 0, 0, 160};
+        renderer_->draw_filled_rect_screen(
+            0, 0, (float)platform.window_width(), (float)platform.window_height(), dim);
+
+        float panel_w = 480, panel_h = 420;
+        float px = (platform.window_width() - panel_w) / 2.0f;
+        float py = (platform.window_height() - panel_h) / 2.0f;
+        ren::Color4B panel_bg{30, 30, 40, 240};
+        renderer_->draw_filled_rect_screen(px, py, panel_w, panel_h, panel_bg);
+        ren::Color4B border{120, 90, 50, 255};
+        renderer_->draw_filled_rect_screen(px, py, panel_w, 3, border);
+        renderer_->draw_filled_rect_screen(px, py + panel_h - 3, panel_w, 3, border);
+        renderer_->draw_filled_rect_screen(px, py, 3, panel_h, border);
+        renderer_->draw_filled_rect_screen(px + panel_w - 3, py, 3, panel_h, border);
+
+        render_text("MENU", px + panel_w/2 - 50, py + 30, 0.5f,
+                    {255, 220, 120, 255});
+
+        struct MenuItem { const char* label; const char* sub; };
+        MenuItem items[] = {
+            {"MAP",      "Travel to other locations"},
+            {"SHOP",     "Buy weapons, armour, helmets"},
+            {"SETTINGS", "Audio, graphics, controls"},
+            {"SAVE",     "Save progress"},
+            {"EXIT",     "Return to title screen"}
+        };
+        float by = py + 100;
+        for (auto& it : items) {
+            float bx = px + 30, bw = panel_w - 60, bh = 50;
+            ren::Color4B btn_bg{60, 60, 80, 220};
+            renderer_->draw_filled_rect_screen(bx, by, bw, bh, btn_bg);
+            ren::Color4B btn_brd{100, 100, 130, 255};
+            renderer_->draw_filled_rect_screen(bx, by, bw, 2, btn_brd);
+            render_text(it.label, bx + 20, by + 10, 0.40f,
+                        {255, 255, 255, 255});
+            render_text(it.sub, bx + 120, by + 15, 0.28f,
+                        {180, 180, 200, 255});
+            by += 60;
+        }
+    }
+
+    // ---------- Dialog overlay ----------
+    void render_dialog_overlay(plat::Platform& platform) {
+        float panel_w = (float)platform.window_width() - 100, panel_h = 140;
+        float px = 50, py = platform.window_height() - panel_h - 60;
+        ren::Color4B panel_bg{15, 15, 20, 230};
+        renderer_->draw_filled_rect_screen(px, py, panel_w, panel_h, panel_bg);
+        ren::Color4B border{140, 100, 50, 255};
+        renderer_->draw_filled_rect_screen(px, py, panel_w, 3, border);
+        renderer_->draw_filled_rect_screen(px, py + panel_h - 3, panel_w, 3, border);
+
+        render_text("SENSEI", px + 30, py + 15, 0.40f,
+                    {255, 220, 120, 255});
+        render_text("Welcome back, student.", px + 30, py + 55, 0.32f,
+                    {230, 230, 230, 255});
+        render_text("Train on the bag, then we will",
+                    px + 30, py + 80, 0.32f, {230, 230, 230, 255});
+        render_text("talk about your journey.",
+                    px + 30, py + 105, 0.32f, {230, 230, 230, 255});
+
+        ren::Color4B arrow{255, 220, 120, 255};
+        float ax = px + panel_w - 30, ay = py + panel_h - 25;
+        renderer_->draw_filled_rect_screen(ax, ay - 12, 12, 2, arrow);
+        renderer_->draw_filled_rect_screen(ax, ay - 12, 2, 12, arrow);
+        renderer_->draw_filled_rect_screen(ax + 10, ay - 12, 2, 12, arrow);
+    }
+
+private:
+    plat::Platform* platform_ = nullptr;
+    std::string asset_root_;
+    std::unique_ptr<ren::Renderer> renderer_;
+
+    // --- Scene management ---
+    scene::SceneManager scene_manager_;
+    bool location_loaded_ = false;
+
+    // --- Dialogue / story state ---
+    std::vector<std::pair<std::string, std::string>> dialogue_lines_;
+    size_t dialogue_index_ = 0;
+
+    // --- Level / progress state ---
+    std::string current_level_;
+    std::string battle_result_;  // "victory" / "defeat" / ""
+    std::vector<std::string> completed_levels_;
+    int currency_ = 1000;  // starting gold (stub)
+
+    Overlay overlay_ = Overlay::None;
+    float menu_anim_progress_ = 0.0f;  // 0 = collapsed, 1 = fully expanded
+    bool loc_icons_logged = false;  // one-shot diagnostic for menu icon sizes
+    float load_scale_ = 1.0f, zoom_ = 1.0f;
+    std::vector<LoadingImg> loading_images_;
+    std::unique_ptr<GameLocation> location_;
+    std::unordered_map<std::string, AtlasRef> atlases_;
+    std::unordered_map<std::string, SkelNode> skeleton_nodes_;

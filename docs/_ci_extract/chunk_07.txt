@@ -1,0 +1,400 @@
+        anim_root_dx_ = 0.0f;
+        anim_root_dy_ = 0.0f;
+
+        auto it = animations_.find(current_anim_);
+        if (it == animations_.end()) {
+            if (!animations_.empty()) {
+                current_anim_ = animations_.begin()->first;
+                it = animations_.find(current_anim_);
+            } else {
+                return;
+            }
+        }
+
+        auto& anim = it->second;
+        if (anim.frame_count == 0 || ordered_node_names_.empty()) return;
+
+        // Find NPivot index in ordered_node_names_
+        int npivot_idx = -1;
+        for (int i = 0; i < (int)ordered_node_names_.size(); ++i) {
+            if (ordered_node_names_[i] == "NPivot") {
+                npivot_idx = i;
+                break;
+            }
+        }
+        if (npivot_idx < 0) {
+            std::printf("[ANIM] ERROR: NPivot not found in ordered_node_names_ (size=%zu)\n",
+                        ordered_node_names_.size());
+            return;
+        }
+
+        // Set anchor from frame 0 NPivot position
+        if (!anim_anchor_set_) {
+            float px, py, pz;
+            if (anim.get_node_pos(0, npivot_idx, px, py, pz)) {
+                anim_root_anchor_x_ = px;
+                anim_root_anchor_y_ = py;
+                anim_anchor_set_ = true;
+            }
+        }
+
+        // Animation timing (from moves.xml + original binary):
+        // MidFrames=2 in moves.xml means each keyframe lasts (1+MidFrames)=3
+        // physics ticks. At 60fps physics → 60/3 = 20fps animation.
+        // step_forward (16 frames) = 16/20 = 800ms per loop.
+        // high_punch (12 frames) = 12/20 = 600ms.
+        float dt = dt_ms / 1000.0f;
+        anim_time_ += dt;
+
+        // Calculate current frame (with looping)
+        float frame_f = anim_time_ * 20.0f;
+        int frame_idx = (int)frame_f;
+        bool anim_finished = false;
+        if (anim_loop_) {
+            if (anim.frame_count > 0)
+                frame_idx = frame_idx % anim.frame_count;
+        } else if (frame_idx >= anim.frame_count) {
+            frame_idx = anim.frame_count - 1;
+            anim_finished = true;
+        }
+        if (frame_idx < 0) frame_idx = 0;
+
+        // For non-looping AND looping animations at the LAST frame,
+        // don't interpolate with frame 0. This prevents the NPivot from
+        // being pulled toward the start position (frame 0), which causes
+        // the "1-frame teleport to start" bug.
+        int next_idx;
+        float alpha;
+        if (anim_finished) {
+            next_idx = frame_idx;
+            alpha = 0.0f;
+        } else if (frame_idx == anim.frame_count - 1) {
+            // Last frame of ANY animation (looping or not): don't
+            // interpolate with frame 0. Hold at the last frame until
+            // the animation wraps (looping) or finishes (non-looping).
+            next_idx = frame_idx;
+            alpha = 0.0f;
+        } else {
+            next_idx = anim.frame_count > 0
+                ? ((frame_idx + 1) % anim.frame_count) : 0;
+            alpha = frame_f - (int)frame_f;
+            if (alpha < 0) alpha = 0;
+            if (alpha > 1) alpha = 1;
+        }
+
+        // Get NPivot position at current frame (for root offset)
+        float npx0, npy0, npz0, npx1, npy1, npz1;
+        if (!anim.get_node_pos(frame_idx, npivot_idx, npx0, npy0, npz0)) return;
+        if (!anim.get_node_pos(next_idx, npivot_idx, npx1, npy1, npz1)) {
+            npx1 = npx0; npy1 = npy0; npz1 = npz0;
+        }
+        float npivot_x = npx0 + (npx1 - npx0) * alpha;
+        float npivot_y = npy0 + (npy1 - npy0) * alpha;
+
+        // Store animated NPivot Y for render_body_model normalization.
+        // This prevents the character from "floating" in animations where
+        // NPivot Y differs from the rest pose (e.g., idle vs step).
+        anim_npivot_bin_y_ = npivot_y;
+
+        // Root motion: ABSOLUTE POSITIONING approach.
+        //
+        // Instead of accumulating deltas (which is fragile — wrap-around,
+        // flicker, float drift), we use absolute positioning:
+        //
+        // When an animation starts, we save:
+        //   step_start_player_x_ = player_pos_x_ at animation start
+        //   anim_root_anchor_x_ = NPivot X at frame 0
+        //
+        // Each frame:
+        //   displacement = npivot_x - anim_root_anchor_x_
+        //   player_pos_x_ = step_start_player_x_ + (facing_right_ ? displacement : -displacement)
+        //
+        // For looping animations (step_forward), when the animation wraps:
+        //   - displacement jumps from +66 back to 0
+        //   - player_pos_x_ jumps from start+66 back to start
+        //   - To prevent this, we COMMIT the step at the wrap point:
+        //     step_start_player_x_ += 66 (or -66 for step_back)
+        //   - Now displacement starts at 0 again, player_pos = new_start + 0
+        //
+        // Wrap detection: frame_idx decreased (15 → 0)
+        // Commit amount: NPivot[last] - NPivot[0] = 235.45 - 169.45 = 66
+        //              = anim_root_anchor_x_ + full_cycle_displacement
+        //              But easier: = NPivot at frame 0 of NEXT cycle - NPivot at frame 0 of THIS cycle
+        //              Since it's the same animation, it's always 0. So we commit
+        //              the displacement at the last frame before wrap.
+        //
+        // For non-looping animations (forward_roll, jump, etc.):
+        //   - No wrap, displacement goes from 0 to final value (e.g. +404 for roll)
+        //   - player_pos_x_ = step_start_player_x_ + displacement (applied smoothly)
+        //   - When animation ends, step_start_player_x_ already includes the full displacement
+        bool is_root_motion_anim = !anim_loop_ ||
+            current_anim_ == "step_forward" || current_anim_ == "step_back" ||
+            current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
+            current_anim_ == "jump" || current_anim_ == "jump_away" ||
+            current_anim_ == "back_flip" || current_anim_ == "back_handflip" ||
+            current_anim_ == "front_flip" ||
+            current_anim_ == "air_punch" || current_anim_ == "air_axe_kick" ||
+            current_anim_ == "double_punch" || current_anim_ == "spinning_punch" ||
+            current_anim_ == "front_kick" || current_anim_ == "back_kick" ||
+            current_anim_ == "upper_cut" || current_anim_ == "high_punch";
+
+        if (is_root_motion_anim) {
+            // On first frame of new animation (prev_frame_idx_ == -1),
+            // sync step_start to current position.
+            if (prev_frame_idx_ == -1) {
+                step_start_player_x_ = player_pos_x_;
+                std::printf("[ROOT] anim='%s' first frame: step_start=%.1f player_x=%.1f facing=%d\n",
+                            current_anim_.c_str(), step_start_player_x_, player_pos_x_, anim_facing_right_);
+            }
+            // Detect loop wrap for looping animations
+            if (anim_loop_ && prev_frame_idx_ >= 0 && prev_frame_idx_ > frame_idx) {
+                float last_npx, last_npy, last_npz;
+                if (anim.get_node_pos(anim.frame_count - 1, npivot_idx, last_npx, last_npy, last_npz)) {
+                    float cycle_disp = last_npx - anim_root_anchor_x_;
+                    step_start_player_x_ += anim_facing_right_ ? cycle_disp : -cycle_disp;
+                    std::printf("[ROOT] loop wrap: cycle_disp=%.1f step_start=%.1f\n",
+                                cycle_disp, step_start_player_x_);
+                }
+            }
+            prev_frame_idx_ = frame_idx;
+
+            float displacement = npivot_x - anim_root_anchor_x_;
+            float new_pos = step_start_player_x_ + (anim_facing_right_ ? displacement : -displacement);
+            // Only update if not clamped (clamp would cause teleport on next frame)
+            // Clamp to walls
+            if (location_ && location_->wall > 0 && location_->width > 0) {
+                const float X_OFFSET = 983.0f;
+                float left_bound = location_->wall - X_OFFSET;
+                float right_bound = (location_->width - location_->wall) - X_OFFSET;
+                if (new_pos < left_bound) new_pos = left_bound;
+                if (new_pos > right_bound) new_pos = right_bound;
+            }
+            player_pos_x_ = new_pos;
+        } else {
+            prev_frame_idx_ = -1;
+        }
+
+        // Y root motion: NO LONGER NEEDED.
+        // y_adjust in render_body_model() now handles all Y positioning
+        // by keeping the lowest node at floor level. This works for:
+        //   - Standing (feet at floor)
+        //   - Crouching (feet still at floor, body lower)
+        //   - Jumping (feet up, body higher)
+        //   - Landing (feet at floor)
+        //
+        // The .bin animation contains absolute world positions for all
+        // nodes, so the lowest node Y directly indicates how high the
+        // character is. No separate jump_y_offset needed.
+        jump_y_offset_ = 0;
+
+        // Get NPivot's rest-pose Y (from skeleton_nodes_)
+        auto pivot_it = skeleton_nodes_.find("NPivot");
+        float npivot_rest_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
+
+        // For each node in the .bin, compute LOCAL position and store in anim_node_pos_
+        for (int i = 0; i < (int)ordered_node_names_.size() && i < 67; ++i) {
+            const std::string& name = ordered_node_names_[i];
+            
+            float x0, y0, z0, x1, y1, z1;
+            if (!anim.get_node_pos(frame_idx, i, x0, y0, z0)) continue;
+            if (!anim.get_node_pos(next_idx, i, x1, y1, z1)) {
+                x1 = x0; y1 = y0; z1 = z0;
+            }
+            
+            // Interpolate
+            float abs_x = x0 + (x1 - x0) * alpha;
+            float abs_y = y0 + (y1 - y0) * alpha;
+            
+            // Convert to LOCAL: subtract NPivot's world position
+            float local_x = abs_x - npivot_x;
+            float local_y = abs_y - npivot_y;
+            
+            // Store: anim_node_pos_ maps node name -> (local_X, local_Y)
+            // The Y needs to be relative to NPivot's rest Y (for rendering)
+            // local_y is already relative to NPivot's current Y.
+            // We need: local_y + npivot_rest_y (to get model-space Y)
+            anim_node_pos_[name] = {local_x, local_y + npivot_rest_y};
+        }
+
+        // One-shot diagnostic: log when animation changes, to verify anim_node_pos_ is populated.
+        // Prints NPivot + a few key leg nodes so we can see if animation data is sane.
+        if (current_anim_ != last_logged_anim_) {
+            last_logged_anim_ = current_anim_;
+            std::printf("[ANIM] '%s' frame=%d/%d anim_node_pos_.size()=%zu  npivot_idx=%d\n",
+                        current_anim_.c_str(), frame_idx, anim.frame_count,
+                        anim_node_pos_.size(), npivot_idx);
+            // Print leg nodes (NHip, NKnee, NAnkle) for both sides
+            const char* leg_nodes[] = {"NPivot", "NHip_1", "NHip_2",
+                                       "NKnee_1", "NKnee_2",
+                                       "NAnkle_1", "NAnkle_2",
+                                       "NToe_1", "NToe_2"};
+            for (auto* n : leg_nodes) {
+                auto ait = anim_node_pos_.find(n);
+                auto sit = skeleton_nodes_.find(n);
+                if (ait != anim_node_pos_.end() && sit != skeleton_nodes_.end()) {
+                    std::printf("  %-10s anim_local=(%7.2f,%7.2f)  rest=(%7.2f,%7.2f)\n",
+                                n, ait->second.first, ait->second.second,
+                                sit->second.x, sit->second.y);
+                } else if (sit != skeleton_nodes_.end()) {
+                    std::printf("  %-10s NOT in anim_node_pos_!  rest=(%7.2f,%7.2f)\n",
+                                n, sit->second.x, sit->second.y);
+                }
+            }
+        }
+    }
+    
+    void play_animation(const std::string& name, bool loop = true) {
+        if (animations_.count(name)) {
+            if (current_anim_ != name) {
+                std::printf("[ANIM] play_animation('%s', loop=%d) — switching from '%s'\n",
+                            name.c_str(), loop, current_anim_.c_str());
+            }
+            current_anim_ = name;
+            anim_time_ = 0.0f;
+            anim_loop_ = loop;
+            // Reset anchor so update_animation() re-reads frame 0 root pos
+            anim_anchor_set_ = false;
+            anim_root_dx_ = 0.0f;
+            anim_root_dy_ = 0.0f;
+            prev_root_offset_ = 0.0f;
+            prev_npivot_set_ = false;
+            prev_npivot_y_set_ = false;
+            prev_frame_idx_ = -1;
+            // For root motion: step_start_player_x_ is synced in the NON-root-motion
+            // branch below (every frame when not doing root motion). When we switch
+            // to a root-motion animation, step_start_player_x_ already holds the
+            // correct current position from the last idle/non-root frame.
+            // Do NOT set it here — player_pos_x_ at this point is from the PREVIOUS
+            // frame's update_animation(), which may be stale.
+            // Lock facing at animation start. Root motion uses this saved value
+            // instead of current facing_right_ to prevent teleport when facing
+            // changes between frames (e.g., character walks past enemy during step).
+            anim_facing_right_ = facing_right_;
+            // Reset jump offset when switching TO a non-jump animation
+            if (name != "jump" && name != "jump_away" &&
+                name != "front_flip" && name != "back_flip" &&
+                name != "back_handflip") {
+                jump_y_offset_ = 0.0f;
+            }
+        }
+    }
+
+    void load_hud_textures() {
+        auto root = std::filesystem::path(asset_root_);
+        // Search both root/assets/1536/ and root/1536/ for textures
+        for (const auto& base : {root/"assets"/"1536", root/"1536"}) {
+            load_texture_atlas_to_hud(base/"textures"/"panels"/"top",
+                                      "batchPanelsTop");
+            load_texture_atlas_to_hud(base/"textures"/"buttons"/"dojo",
+                                      "batchButtonsDojo");
+        }
+        std::printf("  HUD textures loaded: %zu\n", hud_textures_.size());
+    }
+
+    void load_menu_textures() {
+        auto root = std::filesystem::path(asset_root_);
+        // Search both root/assets/1536/ and root/1536/
+        for (const auto& base : {root/"assets"/"1536", root/"1536"}) {
+            load_texture_atlas_to_hud(base/"textures"/"buttons"/"menu"/"screens",
+                                      "batchButtonsMenuScreens");
+        }
+        // Move menu atlas textures into menu_textures_
+        for (auto it = hud_textures_.begin(); it != hud_textures_.end(); ) {
+            if (it->first.find("_normal") != std::string::npos ||
+                it->first.find("_active") != std::string::npos ||
+                it->first.find("_pushed") != std::string::npos ||
+                it->first.find("_Normal") != std::string::npos ||
+                it->first.find("_Active") != std::string::npos ||
+                it->first.find("_Pushed") != std::string::npos) {
+                menu_textures_[it->first] = std::move(it->second);
+                it = hud_textures_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        // Load scroll/roll textures for parchment menu UI
+        for (const auto& base : {root/"assets"/"1536", root/"1536"}) {
+            auto scroll_dir = base/"textures"/"scrolls"/"common";
+            for (auto& name : {"MenuRoll_left", "MenuRoll_center", "MenuRoll_right",
+                               "Roll_left", "Roll_center", "Roll_right",
+                               "Paper_left", "Paper_right", "Shadow_roll"}) {
+                auto path = scroll_dir / (std::string(name) + ".png");
+                if (std::filesystem::exists(path)) {
+                    auto data = read_file(path.string());
+                    int w, h, ch;
+                    auto* px = stbi_load_from_memory(
+                        (const stbi_uc*)data.data(), (int)data.size(), &w, &h, &ch, 4);
+                    if (px) {
+                        auto tex = std::make_unique<ren::Texture2D>();
+                        tex->init_rgba(w, h, px);
+                        stbi_image_free(px);
+                        scroll_textures_[name] = std::move(tex);
+                    }
+                }
+            }
+        }
+        std::printf("  Menu textures loaded: %zu, scroll textures: %zu\n",
+                    menu_textures_.size(), scroll_textures_.size());
+    }
+
+    void load_texture_atlas_to_hud(
+        const std::filesystem::path& dir, const std::string& atlas_name)
+    {
+        auto pp = dir / (atlas_name + ".plist");
+        auto pn = dir / (atlas_name + ".png");
+        if (!std::filesystem::exists(pp) || !std::filesystem::exists(pn)) return;
+        auto result = plist::parse(read_text(pp.string()));
+        if (!result) return;
+        auto png_data = read_file(pn.string());
+        // Use stb_image to decode the PNG so we can crop frames on the CPU.
+        int aw, ah, ach;
+        auto* atlas_px = stbi_load_from_memory(
+            (const stbi_uc*)png_data.data(), (int)png_data.size(),
+            &aw, &ah, &ach, 4);
+        if (!atlas_px) return;
+        for (auto& [name, idx] : result->name_index) {
+            auto& frame = result->frames[idx];
+            // Handle rotated frames:
+            // For rotated frames, do NOT swap dimensions (atlas_w/atlas_h are original).
+            // The atlas region has swapped dimensions, but we create the texture
+            // at original dimensions.
+            int fw = frame.atlas_w;
+            int fh = frame.atlas_h;
+            auto tex = std::make_unique<ren::Texture2D>();
+            std::vector<std::uint8_t> px((size_t)fw * fh * 4);
+            for (int y = 0; y < fh; ++y) {
+                for (int x = 0; x < fw; ++x) {
+                    int sx, sy;
+                    if (frame.rotated) {
+                        // Un-rotate 90° CCW (no swap, formula A):
+                        // dest(x,y) ← source(atlas_x + (fh-1-y), atlas_y + x)
+                        sx = frame.atlas_x + (fh - 1 - y);
+                        sy = frame.atlas_y + x;
+                    } else {
+                        sx = frame.atlas_x + x;
+                        sy = frame.atlas_y + y;
+                    }
+                    if (sx < 0 || sy < 0 || sx >= aw || sy >= ah) continue;
+                    int src_idx = (sy * aw + sx) * 4;
+                    int dst_idx = (y * fw + x) * 4;
+                    px[dst_idx+0] = atlas_px[src_idx+0];
+                    px[dst_idx+1] = atlas_px[src_idx+1];
+                    px[dst_idx+2] = atlas_px[src_idx+2];
+                    px[dst_idx+3] = atlas_px[src_idx+3];
+                }
+            }
+            tex->init_rgba(fw, fh, px.data());
+            std::string n = name;
+            if (n.ends_with(".png")) n = n.substr(0, n.size() - 4);
+            hud_textures_[n] = std::move(tex);
+        }
+        stbi_image_free(atlas_px);
+    }
+
+    // ---------- HUD font ----------
+    void load_hud_font() {
+        auto root = std::filesystem::path(asset_root_);
+        std::vector<std::filesystem::path> candidates = {
+            root/"assets"/"1536"/"fonts"/"rus"/"optima.fnt",
+            root/"assets"/"1536"/"fonts"/"obelix.fnt",
+            root/"1536"/"fonts"/"rus"/"optima.fnt",

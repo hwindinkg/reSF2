@@ -1,0 +1,400 @@
+                if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                    anim_name = anim_name.substr(0, anim_name.size()-4);
+                std::printf("[COMBAT] %s%s -> %s (anim '%s', prio=%d, tmpl='%s', dist=%.1f)\n",
+                            in_basic_attack ? "[COMBO] " : "",
+                            cur_move_type.c_str(), best_move->name.c_str(),
+                            anim_name.c_str(), best_move->priority,
+                            best_move->template_name.c_str(), dist_to_enemy);
+                play_animation(anim_name, false);
+                current_move_ = best_move->name;
+                int fc = animations_[anim_name].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                move_state_ = 0;
+                need_switch_to_idle_ = false;
+                goto after_combat;
+            } else if (punch_pressed || kick_pressed) {
+                // Debug: no move found — log why
+                static int no_move_log = 0;
+                if (no_move_log < 3) {
+                    std::printf("[COMBAT] NO MOVE for %s dir='%s' basic=%d — candidates:\n",
+                                cur_move_type.c_str(), cur_direction.c_str(), in_basic_attack ? 1 : 0);
+                    for (auto& [name, move] : moves_) {
+                        if (move.move_type != cur_move_type) continue;
+                        if (move.direction != cur_direction) continue;
+                        if (move.key_count == 3 && !in_basic_attack) continue;
+                        std::string anim_name = move.filename;
+                        if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                            anim_name = anim_name.substr(0, anim_name.size()-4);
+                        bool anim_exists = animations_.count(anim_name) > 0;
+                        std::printf("  %s tmpl='%s' kc=%d tw='%s' titan=%d anim=%d\n",
+                                    name.c_str(), move.template_name.c_str(), move.key_count,
+                                    move.tactic_weapon.c_str(),
+                                    move.template_name.find("Titan") != std::string::npos ? 1 : 0,
+                                    anim_exists ? 1 : 0);
+                    }
+                    no_move_log++;
+                }
+            }
+        }
+
+        // === SPECIAL MOVES (jumps, rolls, duck) — from moves.xml ===
+        // Match 1key moves with Jump, Step, or no type (Duck, Roll)
+        // Allowed when NOT in Uninterrupt interval
+        if (!is_uninterrupt_ && move_state_ < 10) {
+            bool up_pressed = input.keys_just_pressed[(size_t)plat::Key::W] ||
+                              input.keys_just_pressed[(size_t)plat::Key::ArrowUp];
+            bool down_pressed = input.keys_just_pressed[(size_t)plat::Key::S] ||
+                                input.keys_just_pressed[(size_t)plat::Key::ArrowDown];
+
+            // Determine direction
+            std::string cur_direction;
+            if (up_pressed && key_forward) cur_direction = "UpForward";
+            else if (up_pressed && key_back) cur_direction = "UpBack";
+            else if (up_pressed) cur_direction = "Up";
+            else if (down_pressed && key_forward) cur_direction = "DownForward";
+            else if (down_pressed && key_back) cur_direction = "DownBack";
+            else if (down_pressed) cur_direction = "Down";
+
+            if (!cur_direction.empty()) {
+                // Find best matching move (Jump, or MOVE type with 1key)
+                const MoveDef* best_move = nullptr;
+                for (auto& [name, move] : moves_) {
+                    if (move.filename.empty() || move.template_name.empty()) continue;
+                    if (move.key_count != 1) continue;
+                    if (move.direction != cur_direction) continue;
+                    // Skip Titan moves (player is not a Titan)
+                    if (move.template_name.find("Titan") != std::string::npos &&
+                        move.template_name.find("NotTitan") == std::string::npos) continue;
+                    // Match Jump moves or MOVE type (not Wall, not Punch/Kick)
+                    if (move.template_name.find("Wall") != std::string::npos) continue;
+                    if (!move.is_jump && move.move_type != "Jump" &&
+                        move.move_type != "MOVE" && !move.move_type.empty()) continue;
+                    // Weapon filter
+                    if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
+                        move.tactic_weapon.find("Fists") == std::string::npos) continue;
+                    // Check animation
+                    std::string anim_name = move.filename;
+                    if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                        anim_name = anim_name.substr(0, anim_name.size()-4);
+                    if (!animations_.count(anim_name)) continue;
+                    if (!best_move || move.priority > best_move->priority) {
+                        best_move = &move;
+                    }
+                }
+
+                if (best_move) {
+                    std::string anim_name = best_move->filename;
+                    if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                        anim_name = anim_name.substr(0, anim_name.size()-4);
+                    std::printf("[MOVE] %s (anim '%s', prio=%d)\n",
+                                best_move->name.c_str(), anim_name.c_str(),
+                                best_move->priority);
+                    play_animation(anim_name, false);
+                    current_move_ = best_move->name;
+                    int fc = animations_[anim_name].frame_count;
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                    move_state_ = 10;
+                    goto after_combat;
+                }
+            }
+
+            // Duck: S held (or just pressed) with no direction
+            // Original game: holding S keeps you ducking. If you were attacking
+            // and the attack ends while S is held, you immediately duck again.
+            bool duck_input = key_down && !key_forward && !key_back;
+            if (duck_input && (move_state_ == 0 || move_state_ == 11)) {
+                // Debug: log duck attempt
+                static int duck_log_count = 0;
+                if (duck_log_count < 5) {
+                    std::printf("[DUCK] attempt — move_state=%d key_down=%d\n", move_state_, key_down ? 1 : 0);
+                    duck_log_count++;
+                }
+                // Find Duck move (1key|Down|NotTitan, Type=MOVE)
+                const MoveDef* duck_move = nullptr;
+                for (auto& [name, move] : moves_) {
+                    if (move.filename.empty()) continue;
+                    if (move.key_count != 1) continue;
+                    if (move.direction != "Down") continue;
+                    if (move.is_jump) continue;
+                    if (move.move_type == "Punch" || move.move_type == "Kick") continue;
+                    // Skip Titan moves (they require TitanGiantSword weapon)
+                    if (move.template_name.find("Titan") != std::string::npos &&
+                        move.template_name.find("NotTitan") == std::string::npos) continue;
+                    // Weapon filter — only allow Fists or empty
+                    if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
+                        move.tactic_weapon.find("Fists") == std::string::npos) continue;
+                    // Require NotTitan template (player is not a Titan)
+                    if (!move.is_not_titan) continue;
+                    std::string anim_name = move.filename;
+                    if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                        anim_name = anim_name.substr(0, anim_name.size()-4);
+                    if (!animations_.count(anim_name)) continue;
+                    if (!duck_move || move.priority > duck_move->priority) {
+                        duck_move = &move;
+                    }
+                }
+                if (duck_move) {
+                    std::string duck_anim_name = duck_move->filename;
+                    if (duck_anim_name.size() > 4 && duck_anim_name.substr(duck_anim_name.size()-4) == ".bin")
+                        duck_anim_name = duck_anim_name.substr(0, duck_anim_name.size()-4);
+                    // Only switch animation if not already ducking
+                    if (move_state_ != 11 || current_anim_ != duck_anim_name) {
+                        std::printf("[DUCK] found: %s (anim '%s')\n", duck_move->name.c_str(), duck_anim_name.c_str());
+                        play_animation(duck_anim_name, true);
+                        current_move_ = duck_move->name;
+                        move_state_ = 11;
+                        duck_play_time_ = 0;
+                    }
+                } else {
+                    static int no_duck_log = 0;
+                    if (no_duck_log < 2) {
+                        std::printf("[DUCK] no duck move found! Searching 1key|Down moves:\n");
+                        for (auto& [name, move] : moves_) {
+                            if (move.key_count != 1 || move.direction != "Down") continue;
+                            std::printf("  %s tmpl='%s' mt='%s' titan=%d not_titan=%d jump=%d\n",
+                                        name.c_str(), move.template_name.c_str(),
+                                        move.move_type.c_str(),
+                                        move.template_name.find("Titan") != std::string::npos ? 1 : 0,
+                                        move.is_not_titan ? 1 : 0,
+                                        move.is_jump ? 1 : 0);
+                        }
+                        no_duck_log++;
+                    }
+                }
+            }
+        }
+
+        // === STEP MOVEMENT (from moves.xml: StepForward/StepBack) ===
+        // Find step moves dynamically
+        if (!is_uninterrupt_ && move_state_ < 10) {
+            bool fwd_latched = fwd_held_ms_ > 0;
+            bool back_latched = back_held_ms_ > 0;
+
+            // Find step animation names from moves.xml
+            std::string step_fwd_anim, step_back_anim;
+            int step_fwd_prio = -1, step_back_prio = -1;
+            for (auto& [name, move] : moves_) {
+                if (move.filename.empty()) continue;
+                // Skip Titan moves (player is not a Titan)
+                if (move.template_name.find("Titan") != std::string::npos) continue;
+                if (!move.is_step || move.is_double_step) continue;
+                std::string anim_name = move.filename;
+                if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                    anim_name = anim_name.substr(0, anim_name.size()-4);
+                if (!animations_.count(anim_name)) continue;
+                if (move.direction == "Forward" && move.priority > step_fwd_prio) {
+                    step_fwd_anim = anim_name;
+                    step_fwd_prio = move.priority;
+                } else if (move.direction == "Back" && move.priority > step_back_prio) {
+                    step_back_anim = anim_name;
+                    step_back_prio = move.priority;
+                }
+            }
+            // Fallback if not found
+            if (step_fwd_anim.empty() && animations_.count("step_forward")) step_fwd_anim = "step_forward";
+            if (step_back_anim.empty() && animations_.count("step_back")) step_back_anim = "step_back";
+
+            if (move_state_ == 0) {  // IDLE
+                if (key_forward && !key_back && !key_down && !step_fwd_anim.empty()) {
+                    move_state_ = 2;
+                    play_animation(step_fwd_anim, true);
+                } else if (key_back && !key_forward && !key_down && !step_back_anim.empty()) {
+                    move_state_ = 1;
+                    play_animation(step_back_anim, true);
+                }
+            } else if (move_state_ == 1) {  // MOVING_BACK
+                if (!back_latched && step_min_played) {
+                    move_state_ = 0; need_switch_to_idle_ = true;
+                } else if (fwd_latched && !back_latched && step_min_played && !step_fwd_anim.empty()) {
+                    move_state_ = 2;
+                    play_animation(step_fwd_anim, true);
+                }
+            } else if (move_state_ == 2) {  // MOVING_FORWARD
+                if (!fwd_latched && step_min_played) {
+                    move_state_ = 0; need_switch_to_idle_ = true;
+                } else if (back_latched && !fwd_latched && step_min_played && !step_back_anim.empty()) {
+                    move_state_ = 1;
+                    play_animation(step_back_anim, true);
+                }
+            }
+        }
+
+        // === HIT ANIM COUNTDOWN ===
+        if (hit_anim_ > 0) {
+            hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
+        }
+
+        // is_uninterrupt_ will be computed after update_animation()
+        // (we need the updated anim_time_ to check the current frame)
+        is_uninterrupt_ = false;
+
+        // Exit special move state when animation finishes
+        if (move_state_ == 10 && hit_anim_ == 0) {
+            std::printf("[STATE] move_state 10->0 (special ended), current_move='%s'\n",
+                        current_move_.c_str());
+            move_state_ = 0;
+            need_switch_to_idle_ = true;
+            // Clear current_move_ so 3key combos don't trigger on next key press
+            current_move_.clear();
+        }
+        // Exit duck state when Down released
+        // No minimum duration — original game allows immediate release
+        if (move_state_ == 11) {
+            duck_play_time_ += dt;
+            if (!key_down && duck_play_time_ >= 100) {
+                move_state_ = 0;
+                need_switch_to_idle_ = true;
+            }
+        }
+
+        after_combat:
+        // Camera follows player (always update, even after attack)
+        cam_x_ = player_pos_x_ + 200.0f;
+        renderer_->camera().set_target(cam_x_, cam_y_);
+        renderer_->camera().set_zoom(zoom_);
+
+        // === UPDATE ANIMATION ===
+        // MUST run BEFORE any play_animation calls so the final frame's
+        // root motion is applied before switching to idle.
+        update_animation(dt);
+
+        // === UNINTERRUPT CHECK (after update_animation) ===
+        // Now anim_time_ is updated, so we can check the current frame.
+        // Original game: new moves are blocked only during Uninterrupt interval.
+        is_uninterrupt_ = false;
+        if (hit_anim_ > 0 && !current_move_.empty()) {
+            auto move_it = moves_.find(current_move_);
+            if (move_it != moves_.end() && move_it->second.uninterrupt_start >= 0) {
+                auto anim_it = animations_.find(current_anim_);
+                if (anim_it != animations_.end()) {
+                    int current_frame = (int)(anim_time_ * 20.0f);
+                    int start = move_it->second.uninterrupt_start - 1;
+                    int end = move_it->second.uninterrupt_end > 0 ?
+                              move_it->second.uninterrupt_end - 1 : 9999;
+                    if (current_frame >= start && current_frame <= end) {
+                        is_uninterrupt_ = true;
+                    }
+                }
+            }
+        }
+
+        // After update_animation, switch to idle if requested.
+        // This ensures the previous animation's final displacement is applied.
+        if (need_switch_to_idle_) {
+            need_switch_to_idle_ = false;
+            if (start_stance_playing_) {
+                start_stance_playing_ = false;
+            }
+            play_animation("stance_idle", true);
+        }
+
+        // === HIT DETECTION ===
+        // hit_anim_ countdown already done above (before special move exit).
+        // Only do hit detection here if hit_anim_ is still > 0.
+        // Reset bag_hit_ at the START of each attack animation (when current_move_
+        // changes), not just when hit_anim_ reaches 0.
+        // === HIT DETECTION (from moves.xml intervals) ===
+        // Original game logic (from moves.xml + s3e disassembly):
+        //
+        // 1. Each move has an Attack interval: <Interval Type="Attack" Start="4" End="5">
+        //    This defines WHICH FRAMES the attack is active.
+        //
+        // 2. During Attack interval, the game checks collision between
+        //    AttackingParts (edges like EForearm_2, EHand_2, EFingers_2)
+        //    and the enemy's Collisible edges (edges with Collisible="1").
+        //
+        // 3. Collision = distance between edge endpoints < threshold.
+        //    Each attacking edge has two endpoints (End1, End2 from skeleton).
+        //    Both endpoints are checked against ALL enemy collisible edges.
+        //
+        // 4. On collision: apply Damage, Impulse, and play Hit effect.
+        //    The hit is PER-FRAME — each frame in the Attack interval can
+        //    register a separate hit. There is NO "bag_hit_" flag in the
+        //    original. The original checks collision every frame during
+        //    the attack interval.
+        //
+        // 5. To prevent multiple hits per frame, the original uses
+        //    Invulnerable interval on the TARGET (not the attacker).
+        //    After being hit, the target becomes Invulnerable for N frames.
+        //
+        // We implement: check collision EVERY frame during Attack interval.
+        // Apply impulse only if the bag wasn't already hit THIS FRAME.
+        // Reset hit state when leaving the Attack interval (so the next
+        // attack interval frame can hit again).
+
+        // IMPORTANT: Clear current_move_ when attack ends, regardless of
+        // whether bag_model_ exists. Otherwise current_move_ stays set
+        // from a previous attack, causing 3key combos to trigger on the
+        // next key press (e.g., DoubleSweep after a single P press).
+        if (hit_anim_ > 0 && bag_model_ && location_) {
+            auto anim_it = animations_.find(current_anim_);
+            if (anim_it != animations_.end()) {
+                int fc = anim_it->second.frame_count;
+                int current_frame = (int)(anim_time_ * 20.0f);
+                auto move_it = moves_.find(current_move_);
+                if (move_it != moves_.end() && move_it->second.attack_start > 0) {
+                    int attack_start = move_it->second.attack_start;
+                    int attack_end = move_it->second.attack_end > 0 ?
+                                   move_it->second.attack_end : attack_start;
+                    int frame_start = attack_start - 1;
+                    int frame_end = attack_end - 1;
+                    // Check if we're in the attack interval
+                    bool in_attack_interval = (current_frame >= frame_start && current_frame <= frame_end);
+
+                    // Reset bag_hit_ when NOT in attack interval (allows re-hit
+                    // when entering the interval again, e.g., for multi-hit moves)
+                    if (!in_attack_interval) {
+                        bag_hit_ = false;
+                    }
+
+                    if (in_attack_interval && !bag_hit_) {
+                        // Determine attacking limb from AttackingParts in moves.xml
+                        // Each AttackingParts Edge has End1 and End2 in skeleton.xml
+                        // We check ALL attacking edges, not just one
+                        bool hit_registered = false;
+                        for (auto& edge_name : move_it->second.attack_edges) {
+                            if (edge_name.empty()) continue;
+                            // Look up edge in skeleton to get End1/End2
+                            auto skel_edge = skeleton_edges_.find(edge_name);
+                            std::string node1, node2;
+                            if (skel_edge != skeleton_edges_.end()) {
+                                node1 = skel_edge->second.end1;
+                                node2 = skel_edge->second.end2;
+                            } else {
+                                // Fallback: guess from edge name
+                                if (edge_name.find("Foot") != std::string::npos ||
+                                    edge_name.find("Calf") != std::string::npos ||
+                                    edge_name.find("Leg") != std::string::npos) {
+                                    node1 = "NToe_1"; node2 = "NAnkle_1";
+                                } else {
+                                    node1 = "NWrist_1"; node2 = "NKnuckles_1";
+                                }
+                            }
+
+                            // Check collision for both endpoints of this edge
+                            for (int endpoint = 0; endpoint < 2; endpoint++) {
+                                std::string& limb_node = (endpoint == 0) ? node1 : node2;
+                                if (limb_node.empty()) continue;
+                                auto ait = anim_node_pos_.find(limb_node);
+                                if (ait == anim_node_pos_.end()) continue;
+
+                                float limb_lx = ait->second.first;
+                                float limb_ly = ait->second.second;
+                                auto pivot_it = skeleton_nodes_.find("NPivot");
+                                float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
+                                float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx);
+                                float limb_wy = player_pos_y_ + y_adjust_smoothed_ + (limb_ly - pivot_ly);
+
+                                // Bag position from Verlet
+                                float bag_cx = location_->enemy_x - 983.0f;
+                                float bag_cy = location_->enemy_y + 81.0f;
+                                auto bv_it = bag_verlet_.find("NPivot");
+                                if (bv_it != bag_verlet_.end()) {
+                                    bag_cx = bv_it->second.x; bag_cy = bv_it->second.y;
+                                }
+
+                                float dx = limb_wx - bag_cx;
+                                float dy = limb_wy - bag_cy;
+                                float dist = std::sqrt(dx*dx + dy*dy);
+                                if (dist < 100.0f) {
+                                    std::string target_node = "NNeck";

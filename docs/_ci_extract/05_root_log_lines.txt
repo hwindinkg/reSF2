@@ -1,0 +1,2 @@
+2946:                std::printf("[ROOT] anim='%s' first frame: step_start=%.1f player_x=%.1f facing=%d\n",
+2955:                    std::printf("[ROOT] loop wrap: cycle_disp=%.1f step_start=%.1f\n",

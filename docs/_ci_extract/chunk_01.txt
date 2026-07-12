@@ -1,0 +1,400 @@
+        std::printf("  S (hold)    - Duck (crouch)\n");
+        std::printf("  Block       - AUTOMATIC (when idle, not attacking)\n");
+        std::printf("  M or click menu - Toggle menu\n");
+        std::printf("  T           - Toggle dialog\n");
+        std::printf("  N           - New game (go to Map)\n");
+        std::printf("  Y/L         - Declare victory/defeat (debug, in Battle)\n");
+        std::printf("  1/2/3       - Zoom presets\n");
+        std::printf("  Esc         - Quit / close overlay / back\n\n");
+
+        renderer_ = std::make_unique<ren::Renderer>();
+        if (!renderer_->init(platform.window_width(), platform.window_height())) {
+            renderer_.reset(); return;
+        }
+        renderer_->set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+
+        // Load loading screen textures (used by LoadingScene via render_loading_screen)
+        if (!asset_root_.empty()) load_loading_screen();
+
+        // Register all scenes with the SceneManager
+        scene_manager_.register_scene(scene::SceneId::Boot,
+            [] { return std::make_unique<scene::BootScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Loading,
+            [] { return std::make_unique<scene::LoadingScene>(); });
+        scene_manager_.register_scene(scene::SceneId::MainMenu,
+            [] { return std::make_unique<scene::MainMenuScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Map,
+            [] { return std::make_unique<scene::MapScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Shop,
+            [] { return std::make_unique<scene::ShopScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Settings,
+            [] { return std::make_unique<scene::SettingsScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Dialogue,
+            [] { return std::make_unique<scene::DialogueScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Battle,
+            [] { return std::make_unique<scene::BattleScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Results,
+            [] { return std::make_unique<scene::ResultsScene>(); });
+
+        // Start the scene flow at Boot
+        scene::SceneContext ctx{*this, platform, *renderer_, 0};
+        scene_manager_.start(scene::SceneId::Boot, ctx);
+    }
+
+    void on_update(plat::Platform& platform, uint32_t dt) override {
+        if (!renderer_) return;
+
+        // Build the scene context and delegate to the SceneManager.
+        // The current scene's on_update handles all input and game logic.
+        // For MainMenu/Battle, the scene calls host_update_gameplay() which
+        // contains the movement, combat, and animation code.
+        scene::SceneContext ctx{*this, platform, *renderer_, dt};
+        scene_manager_.update(ctx);
+    }
+
+    void on_render(plat::Platform& platform) override {
+        if (!renderer_) return;
+        renderer_->begin_frame();
+        scene::SceneContext ctx{*this, platform, *renderer_, 0};
+        scene_manager_.render(ctx);
+        renderer_->end_frame();
+    }
+
+    void on_shutdown(plat::Platform&) override {
+        if (renderer_) renderer_->shutdown();
+    }
+
+    bool quit_requested() const noexcept { return quit_requested_; }
+
+    // ---------- scene::SceneHost implementation ----------
+    //
+    // These methods are called by the scenes (MainMenu, Battle, etc.) via
+    // the SceneHost interface to interact with the game state.
+
+    void request_scene_transition(scene::SceneId to) override {
+        scene_manager_.transition_to(to);
+    }
+
+    void host_load_location() override {
+        if (!location_loaded_) {
+            init_location();
+        }
+    }
+
+    bool host_location_loaded() const noexcept override {
+        return location_loaded_;
+    }
+
+    bool host_save_progress() override {
+        // Minimal save: write a JSON file next to the executable with
+        // completed levels and currency. This is a stub — the real save
+        // format will be determined once the story/progress asset format
+        // is decoded from DZ archives.
+        try {
+            auto save_path = std::filesystem::temp_directory_path() / "resf2_save.json";
+            std::ofstream f(save_path);
+            if (!f) return false;
+            f << "{\n";
+            f << "  \"version\": 1,\n";
+            f << "  \"current_level\": \"" << current_level_ << "\",\n";
+            f << "  \"battle_result\": \"" << battle_result_ << "\",\n";
+            f << "  \"completed_levels\": ["; 
+            for (size_t i = 0; i < completed_levels_.size(); ++i) {
+                if (i) f << ", ";
+                f << "\"" << completed_levels_[i] << "\"";
+            }
+            f << "],\n";
+            f << "  \"currency\": " << currency_ << "\n";
+            f << "}\n";
+            std::printf("[save] wrote %s\n", save_path.string().c_str());
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool host_load_progress() override {
+        try {
+            auto save_path = std::filesystem::temp_directory_path() / "resf2_save.json";
+            if (!std::filesystem::exists(save_path)) return false;
+            std::printf("[save] found %s (loading not yet implemented)\n",
+                        save_path.string().c_str());
+            // TODO: parse JSON and restore state
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    void host_set_dialogue(std::vector<std::pair<std::string, std::string>> lines) override {
+        dialogue_lines_ = std::move(lines);
+        dialogue_index_ = 0;
+    }
+
+    void host_set_current_level(std::string level_id) override {
+        current_level_ = std::move(level_id);
+    }
+
+    std::string host_get_battle_result() const override {
+        return battle_result_;
+    }
+
+    // Called by MainMenuScene and BattleScene to update the dojo gameplay
+    // (movement, combat, animation, physics, overlays).
+    void host_update_gameplay(uint32_t dt) {
+        const auto& input = platform_->input();
+
+        // Esc: close overlay if open, else request quit (handled by scene)
+        if (input.keys_just_pressed[(size_t)plat::Key::Escape]) {
+            if (overlay_ != Overlay::None) overlay_ = Overlay::None;
+            else quit_requested_ = true;
+        }
+        // M: toggle menu
+        if (input.keys_just_pressed[(size_t)plat::Key::M]) {
+            overlay_ = (overlay_ == Overlay::Menu) ? Overlay::None : Overlay::Menu;
+        }
+        // T: toggle dialog
+        if (input.keys_just_pressed[(size_t)plat::Key::T]) {
+            overlay_ = (overlay_ == Overlay::Dialog) ? Overlay::None : Overlay::Dialog;
+        }
+
+        // Click: check menu button (left side)
+        for (const auto& p : input.pointers) {
+            if (p.just_pressed) {
+                float btn_x = 10.0f, btn_y = 58.0f, btn_w = 130.0f, btn_h = 40.0f;
+                if (p.x >= btn_x && p.x <= btn_x + btn_w &&
+                    p.y >= btn_y && p.y <= btn_y + btn_h) {
+                    overlay_ = (overlay_ == Overlay::Menu) ? Overlay::None : Overlay::Menu;
+                }
+            }
+        }
+
+        // Animate menu expand/collapse (300ms transition)
+        float target_progress = (overlay_ == Overlay::Menu) ? 1.0f : 0.0f;
+        float anim_speed = 1000.0f / 300.0f;
+        if (menu_anim_progress_ < target_progress) {
+            menu_anim_progress_ += (float)dt / anim_speed;
+            if (menu_anim_progress_ > target_progress) menu_anim_progress_ = target_progress;
+        } else if (menu_anim_progress_ > target_progress) {
+            menu_anim_progress_ -= (float)dt / anim_speed;
+            if (menu_anim_progress_ < target_progress) menu_anim_progress_ = target_progress;
+        }
+
+        // === DYNAMIC FACING ===
+        // Character faces the enemy. Update facing DYNAMICALLY during step
+        // movement too — the original game does this. When the character
+        // walks past the enemy, it turns around mid-step.
+        // BUT: don't flip during attacks/special moves (hit_anim_ > 0, move_state_ >= 10).
+        // The step animation's root motion uses anim_facing_right_ (locked at
+        // animation start), so flipping facing_right_ mid-step doesn't affect
+        // the current step's displacement. The NEXT step will use the new facing.
+        if (location_ && !is_uninterrupt_ && move_state_ < 10) {
+            float bag_x = location_->enemy_x - 983.0f;
+            bool should_face_right = (bag_x >= player_pos_x_);
+            float dist_to_enemy = std::abs(bag_x - player_pos_x_);
+            if (dist_to_enemy > 30.0f) {
+                facing_right_ = should_face_right;
+            }
+        }
+
+        // === INPUT: original SF2 controls ===
+        // W=up, A=left, S=down, D=right (absolute directions)
+        // O=punch, P=kick
+        // Direction keys are interpreted RELATIVE to facing:
+        //   If facing right: D=Forward, A=Back
+        //   If facing left:  A=Forward, D=Back
+        bool key_up = input.keys_down[(size_t)plat::Key::W] ||
+                      input.keys_down[(size_t)plat::Key::ArrowUp];
+        bool key_down = input.keys_down[(size_t)plat::Key::S] ||
+                        input.keys_down[(size_t)plat::Key::ArrowDown];
+        bool key_left = input.keys_down[(size_t)plat::Key::A] ||
+                        input.keys_down[(size_t)plat::Key::ArrowLeft];
+        bool key_right = input.keys_down[(size_t)plat::Key::D] ||
+                         input.keys_down[(size_t)plat::Key::ArrowRight];
+
+        // Convert absolute directions to relative (Forward/Back)
+        bool key_forward = facing_right_ ? key_right : key_left;
+        bool key_back = facing_right_ ? key_left : key_right;
+
+        bool punch_pressed = input.keys_just_pressed[(size_t)plat::Key::O];
+        bool kick_pressed = input.keys_just_pressed[(size_t)plat::Key::P];
+        // Also keep Space/K as fallback for testing
+        if (input.keys_just_pressed[(size_t)plat::Key::Space]) punch_pressed = true;
+        if (input.keys_just_pressed[(size_t)plat::Key::K]) kick_pressed = true;
+
+        // Debug: log key state and what blocks input
+        if (punch_pressed || kick_pressed) {
+            std::printf("[KEY] %s%s pressed — hit_anim=%u is_uninterrupt=%d move_state=%d current_move='%s'\n",
+                        punch_pressed ? "O" : "", kick_pressed ? "P" : "",
+                        hit_anim_, is_uninterrupt_ ? 1 : 0, move_state_, current_move_.c_str());
+        }
+        // Note: Removed sticky key buffer — it caused unwanted repeat attacks.
+        // GetAsyncKeyState is reliable; the original issue was elsewhere.
+
+        // Track step animation play time (prevents tap-to-cancel)
+        if (move_state_ == 1 || move_state_ == 2) {
+            step_play_time_ += dt;
+        } else {
+            step_play_time_ = 0;
+        }
+        bool step_min_played = step_play_time_ >= 400;
+
+        // Track key-held history for latching (200ms window for flicker tolerance)
+        // Update EVERY frame, even during attacks, so when the attack ends
+        // the key state is current. If player holds D during attack, when
+        // attack finishes, fwd_held_ms_ is still 200 → step starts immediately.
+        if (key_forward) fwd_held_ms_ = 200;
+        else if (fwd_held_ms_ > 0) fwd_held_ms_ -= (int)dt;
+        if (key_back) back_held_ms_ = 200;
+        else if (back_held_ms_ > 0) back_held_ms_ -= (int)dt;
+
+        // === DYNAMIC MOVE SELECTION (from moves.xml) ===
+        // The engine reads ALL moves from moves.xml at load time, including
+        // their Template strings (key_count, direction, move_type, etc.).
+        // Here we match the current key state against loaded moves and
+        // select the one with the highest priority.
+        //
+        // Key state:
+        //   key_forward (D relative to facing) → Forward
+        //   key_back (A relative to facing) → Back
+        //   key_up (W) → Up
+        //   key_down (S) → Down
+        //   Combinations: Up+Forward=UpForward, Down+Back=DownBack, etc.
+        //   punch_pressed (O) → Punch
+        //   kick_pressed (P) → Kick
+        //
+        // Move type detection (from moves.xml templates):
+        //   1key: Just tap Punch/Kick (no direction hold)
+        //   2key: Hold direction + tap Punch/Kick (e.g. Sweep = S+P)
+        //   3key: Combos — triggered when CURRENT animation is from a 1key
+        //         or 2key basic attack. This is the "second tap" combo.
+        //         Example: HeavyPunch (1key) → tap Punch again → DoublePunch (3key)
+        //
+        // Selection: find ALL moves matching (direction, move_type, key_count,
+        // is_unarmed, TacticWeapon=Fists or empty). Pick highest priority.
+        // For moves with <Distance> condition, only match if enemy is in range.
+
+        // === AIR ATTACKS (W+O / W+P during jump) ===
+        // If current animation is a Jump (jump, front_flip, back_flip, etc.),
+        // pressing Punch/Kick transitions to air_punch or air_axe_kick.
+        // This is the original game's behavior: a short jump smoothly
+        // transitions into an air attack.
+        // Allowed even during Uninterrupt (jump animations don't have Uninterrupt)
+        if ((punch_pressed || kick_pressed)) {
+            bool in_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
+                                 current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
+                                 current_anim_ == "back_handflip");
+            if (in_jump_anim && animations_.count("air_punch") && animations_.count("air_axe_kick")) {
+                std::string air_anim = punch_pressed ? "air_punch" : "air_axe_kick";
+                std::printf("[COMBAT] AIR %s -> %s (anim '%s')\n",
+                            punch_pressed ? "Punch" : "Kick",
+                            air_anim == "air_punch" ? "AirPunch" : "AxeKick",
+                            air_anim.c_str());
+                play_animation(air_anim, false);
+                current_move_ = air_anim == "air_punch" ? "AirPunch" : "AxeKick";
+                int fc = animations_[air_anim].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                move_state_ = 10;
+                need_switch_to_idle_ = false;
+                goto after_combat;
+            }
+        }
+
+        // Allow attacks when: NOT in Uninterrupt interval
+        // Original game: attacks blocked during Uninterrupt, allowed otherwise
+        if ((punch_pressed || kick_pressed) && !is_uninterrupt_) {
+            // Determine direction from key state
+            std::string cur_direction = "Central";  // default: no direction
+            if (key_up && key_forward) cur_direction = "UpForward";
+            else if (key_up && key_back) cur_direction = "UpBack";
+            else if (key_down && key_forward) cur_direction = "DownForward";
+            else if (key_down && key_back) cur_direction = "DownBack";
+            else if (key_up) cur_direction = "Up";
+            else if (key_down) cur_direction = "Down";
+            else if (key_forward) cur_direction = "Forward";
+            else if (key_back) cur_direction = "Back";
+
+            // Determine move type
+            std::string cur_move_type;
+            if (punch_pressed) cur_move_type = "Punch";
+            else if (kick_pressed) cur_move_type = "Kick";
+
+            // 3key combo detection: triggered when current animation is from
+            // a 1key or 2key basic attack (HeavyPunch, Sweep, etc.)
+            // The original game's 3key template requires:
+            //   CurrentAnimation Name="1key" OR Name="2key"
+            // Which means: the current move's template starts with "1key" or "2key".
+            bool in_basic_attack = false;
+            if (!current_move_.empty()) {
+                auto cur_move_it = moves_.find(current_move_);
+                if (cur_move_it != moves_.end()) {
+                    int cur_kc = cur_move_it->second.key_count;
+                    if (cur_kc == 1 || cur_kc == 2) {
+                        // Check if current attack animation is still playing
+                        // (hit_anim_ > 0 means attack in progress)
+                        in_basic_attack = true;
+                    }
+                }
+            }
+
+            // Compute distance to enemy (bag) for distance-based move selection
+            float dist_to_enemy = 1000.0f;  // default: far
+            if (location_ && bag_model_) {
+                float bag_x = location_->enemy_x - 983.0f;
+                dist_to_enemy = std::abs(bag_x - player_pos_x_);
+            }
+
+            // Find best matching move from moves.xml
+            const MoveDef* best_move = nullptr;
+            for (auto& [name, move] : moves_) {
+                // Skip moves with no filename or no template
+                if (move.filename.empty() || move.template_name.empty()) continue;
+                // Skip Titan moves (player is not a Titan)
+                // Note: "NotTitan" contains "Titan" as substring, so check
+                // for "Titan" but NOT preceded by "Not".
+                {
+                    size_t titan_pos = move.template_name.find("Titan");
+                    if (titan_pos != std::string::npos) {
+                        if (titan_pos < 3 || move.template_name.substr(titan_pos - 3, 3) != "Not") {
+                            continue;  // Real Titan move, skip
+                        }
+                    }
+                }
+                // Match move_type (Punch or Kick)
+                if (move.move_type != cur_move_type) continue;
+                //   - If in_basic_attack (combo scenario): allow 3key
+                //   - Otherwise: only 1key and 2key moves
+                if (in_basic_attack) {
+                    // 3key takes priority during basic attack
+                    if (move.key_count != 3) continue;
+                } else {
+                    // Not in basic attack: skip 3key moves
+                    if (move.key_count == 3) continue;
+                }
+                // Match direction
+                if (move.direction != cur_direction) continue;
+                // Match weapon (Unarmed or Fists or empty)
+                if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
+                    move.tactic_weapon.find("Fists") == std::string::npos) continue;
+                // Check distance condition (only from main <Conditions>, not <Tactics>)
+                // Note: <Tactics><Distance> is for AI move selection, not player.
+                // We skip distance check entirely — player can attack at any distance.
+                // (The original game uses distance only for AI tactic selection.)
+                // Check weapon subtype lock (e.g. DoublePunch requires Fists)
+                // For now, we assume player has Fists equipped, so Fists-locked moves pass.
+                // Other weapon subtypes are not yet supported.
+                if (!move.required_weapon_subtype.empty() &&
+                    move.required_weapon_subtype != "Fists") continue;
+                // Check if animation exists
+                std::string anim_name = move.filename;
+                if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                    anim_name = anim_name.substr(0, anim_name.size()-4);
+                if (!animations_.count(anim_name)) continue;
+                // Select by highest priority
+                if (!best_move || move.priority > best_move->priority) {
+                    best_move = &move;
+                }
+            }
+
+            if (best_move) {
+                std::string anim_name = best_move->filename;

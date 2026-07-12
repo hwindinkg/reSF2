@@ -1,0 +1,140 @@
+    std::unordered_map<std::string, SkelEdge> skeleton_edges_;
+    // Ordered list of ALL skeleton.xml node names (Node + COM + MacroNode)
+    // in XML order. This matches the .bin node order.
+    std::vector<std::string> ordered_node_names_;
+    std::unique_ptr<BodyModel> body_model_;
+    std::unique_ptr<BodyModel> bag_model_;
+    std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> hud_textures_;
+    std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> menu_textures_;
+    std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> scroll_textures_;
+
+    std::shared_ptr<font::ParsedFont> hud_font_;
+    std::unique_ptr<ren::Texture2D> hud_font_tex_;
+
+    float player_pos_x_ = 0, player_pos_y_ = 0;
+    float cam_x_ = 0, cam_y_ = 0;
+    bool facing_right_ = true;
+    int hit_anim_ = 0;    // ms remaining
+    uint32_t step_cooldown_ = 0;  // ms remaining before next step animation can start
+    bool step_active_ = false;    // true while a step is in progress
+    uint32_t step_duration_ = 0;  // ms remaining in current step
+    float step_start_x_ = 0;      // player X at start of step
+    float step_displacement_ = 0; // total displacement for this step (+66 or -66)
+    int bag_swing_ = 0;   // ms remaining (legacy, for compatibility)
+    void bag_hit_reset() {
+        bag_hit_ = false;
+    }
+    bool bag_hit_ = false;  // bag already hit during current attack
+    float bag_swing_dir_ = 1.0f;  // +1 = swing right, -1 = swing left
+    // Physics-based pendulum state for the punching bag.
+    // The bag hangs from Node12 (fixed ceiling point) and swings as a pendulum.
+    // On hit: an impulse is applied to bag_angle_vel_.
+    // Each frame: spring restoring force + damping + integration.
+    float bag_angle_ = 0.0f;       // current angle (radians, 0 = vertical)
+    float bag_angle_vel_ = 0.0f;   // angular velocity (rad/sec)
+    // Verlet physics state for the punching bag.
+    // The original game uses Verlet integration for the bag's skeleton.
+    // Each node has position + previous position. Edges are distance constraints.
+    // Fixed nodes (Node12 = ceiling attachment) don't move.
+    std::unordered_map<std::string, VerletNode> bag_verlet_;
+    std::vector<VerletConstraint> bag_constraints_;
+    bool bag_verlet_init_ = false;
+    bool quit_requested_ = false;
+    
+    // Animation state
+    std::unordered_map<std::string, AnimationData> animations_;
+    std::unordered_map<std::string, MoveDef> moves_;
+    std::string current_move_;  // Name of currently playing move (for hit detection)
+    std::string current_anim_ = "fists_idle";
+    float anim_time_ = 0.0f;  // seconds into current animation
+    float anim_speed_ = 30.0f;  // Animation FPS (bin files are 30fps)
+    bool anim_loop_ = true;
+
+    // Animated node positions (override skeleton rest pose during animation)
+    std::unordered_map<std::string, std::pair<float, float>> anim_node_pos_;  // name -> (x, y)
+
+    // Root motion offset (delta from animation frame 0).
+    // .bin float[1] = absolute root X, float[2] = absolute root Y.
+    // We use the DELTA from frame 0 to move the whole model during animation
+    // (e.g. lunge forward during punch, steps during walk). This is safe —
+    // it moves the entire character without tearing, since all nodes shift
+    // together. Per-node animation (limb movement) requires the unsolved
+    // .bin node-mapping table and is therefore disabled.
+    float anim_root_dx_ = 0.0f;
+    float anim_root_dy_ = 0.0f;
+    // Anchor: root position at frame 0 of the current animation (subtracted
+    // so the model doesn't snap to the .bin's world coordinates).
+    float anim_root_anchor_x_ = 0.0f;
+    float anim_root_anchor_y_ = 0.0f;
+    bool anim_anchor_set_ = false;
+    float prev_npivot_x_ = 0.0f;  // for root motion (previous frame's interpolated NPivot)
+    bool prev_npivot_set_ = false;
+    float prev_npivot_y_ = 0.0f;  // for jump Y root motion
+    bool prev_npivot_y_set_ = false;
+    int prev_frame_idx_ = -1;     // for wrap-around detection
+    float jump_y_offset_ = 0.0f;  // accumulated Y offset from jump root motion
+    float prev_root_offset_ = 0.0f;  // offset from frame-0 NPivot (for root motion)
+    float step_start_player_x_ = 0.0f;  // player X when step started (for absolute root motion)
+    bool anim_facing_right_ = true;  // facing locked at animation start (for root motion direction)
+    float y_adjust_smoothed_ = 0.0f;  // smoothed Y adjustment for feet normalization
+    int no_key_frames_ = 0;  // frames with no movement key pressed (for hysteresis)
+    int move_state_ = 0;  // 0=IDLE, 1=MOVING_LEFT, 2=MOVING_RIGHT, 10=special, 11=block
+    uint32_t step_play_time_ = 0;  // ms the current step animation has been playing
+    uint32_t duck_play_time_ = 0;  // ms the duck animation has been playing
+    int fwd_held_ms_ = 0;  // ms since forward key was last held (for latching)
+    int back_held_ms_ = 0;  // ms since back key was last held (for latching)
+    uint32_t last_kick_press_ms_ = 0;  // for double-tap detection (DoubleSweep)
+    uint32_t last_punch_press_ms_ = 0;  // for double-tap detection (DoublePunch)
+    uint32_t last_punch_seen_ms_ = 0;  // sticky buffer for O key (150ms window)
+    uint32_t last_kick_seen_ms_ = 0;   // sticky buffer for P key (150ms window)
+    bool start_stance_playing_ = false;  // true during start stance animation
+    bool need_switch_to_idle_ = false;  // deferred switch to idle (after update_animation)
+    bool is_uninterrupt_ = false;  // true when current frame is in Uninterrupt interval
+    float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
+    std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
+};
+
+int main(int argc, char* argv[]) {
+    std::string asset_root;
+    for (int i = 1; i < argc; ++i) {
+        std::string_view arg = argv[i];
+        if (arg == "--assets" && i + 1 < argc) asset_root = argv[++i];
+        else if (arg == "--help" || arg == "-h") {
+            std::printf("Usage: resf2_app [--assets <path>]\n"); return 0;
+        }
+    }
+    auto platform = std::make_unique<plat::GlfwPlatform>();
+    plat::WindowConfig cfg;
+    cfg.title = "reSF2 - Shadow Fight 2";
+    cfg.width = 1280; cfg.height = 720; cfg.vsync = true;
+    if (!platform->init(cfg)) {
+        std::fprintf(stderr, "Platform init failed.\n"); return 1;
+    }
+    Game game(asset_root);
+    if (!platform->make_gl_current()) {
+        std::fprintf(stderr, "Failed to make GL context current.\n"); return 1;
+    }
+    game.on_init(*platform);
+    auto last_ms = platform->now_ms();
+    bool was_paused = false;
+    while (true) {
+        if (!platform->poll_events()) break;
+        if (platform->should_quit()) break;
+        if (game.quit_requested()) break;
+        bool is_paused = platform->is_paused();
+        if (is_paused && !was_paused) { game.on_pause(*platform); was_paused = true; }
+        else if (!is_paused && was_paused) {
+            game.on_resume(*platform); was_paused = false; last_ms = platform->now_ms();
+        }
+        if (is_paused) { platform->sleep_ms(100); continue; }
+        auto now = platform->now_ms();
+        auto dt = (std::min)(now > last_ms ? (uint32_t)(now - last_ms) : 0u, 200u);
+        last_ms = now;
+        game.on_update(*platform, dt);
+        game.on_render(*platform);
+        platform->swap_buffers();
+    }
+    game.on_shutdown(*platform);
+    platform->shutdown();
+    return 0;
+}

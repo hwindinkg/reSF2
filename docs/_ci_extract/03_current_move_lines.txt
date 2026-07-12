@@ -1,0 +1,24 @@
+629:                        hit_anim_, is_uninterrupt_ ? 1 : 0, move_state_, current_move_.c_str());
+694:                current_move_ = air_anim == "air_punch" ? "AirPunch" : "AxeKick";
+728:            if (!current_move_.empty()) {
+729:                auto cur_move_it = moves_.find(current_move_);
+809:                current_move_ = best_move->name;
+893:                    current_move_ = best_move->name;
+944:                        current_move_ = duck_move->name;
+1034:                        current_move_.c_str());
+1037:            // Clear current_move_ so 3key combos don't trigger on next key press
+1038:            current_move_.clear();
+1065:        if (hit_anim_ > 0 && !current_move_.empty()) {
+1066:            auto move_it = moves_.find(current_move_);
+1094:        // Reset bag_hit_ at the START of each attack animation (when current_move_
+1125:        // IMPORTANT: Clear current_move_ when attack ends, regardless of
+1126:        // whether bag_model_ exists. Otherwise current_move_ stays set
+1134:                auto move_it = moves_.find(current_move_);
+1209:                                                current_move_.c_str(), current_frame, fc,
+1225:                current_move_.clear();
+1230:        // IMPORTANT: Also clear current_move_ when hit_anim_ reaches 0
+1233:        // when current_move_ is still set from a previous attack.
+1234:        if (hit_anim_ == 0 && !current_move_.empty()) {
+1236:            current_move_.clear();
+1399:            current_move_ = "StartStance";
+3647:    std::string current_move_;  // Name of currently playing move (for hit detection)
