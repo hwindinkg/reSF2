@@ -692,7 +692,11 @@ public:
             }
         }
 
-        if ((punch_pressed || kick_pressed) && hit_anim_ == 0 && (move_state_ < 10 || move_state_ == 11)) {
+        // Allow attacks when: hit_anim_ == 0 AND
+        //   move_state_ is 0 (idle), 1/2 (walking), 10 (special ended), or 11 (duck)
+        // Original game: attacks are blocked during Uninterrupt interval,
+        // but allowed during SemiUninterrupt and after animation ends.
+        if ((punch_pressed || kick_pressed) && hit_anim_ == 0) {
             // Determine direction from key state
             std::string cur_direction = "Central";  // default: no direction
             if (key_up && key_forward) cur_direction = "UpForward";
