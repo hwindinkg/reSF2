@@ -1,0 +1,45 @@
+name: Extract main.cpp regions
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/linux-build-check]
+    paths: [.github/workflows/extract-regions.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract regions
+        run: |
+          mkdir -p docs/_ci_extract
+          echo "total lines:" > docs/_ci_extract/00_meta.txt
+          wc -l main.cpp >> docs/_ci_extract/00_meta.txt
+
+          # Grep line numbers of key anchors so the next pass knows offsets.
+          grep -n 'in_basic_attack' main.cpp > docs/_ci_extract/01_in_basic_attack_lines.txt || true
+          grep -n 'hit_anim_' main.cpp > docs/_ci_extract/02_hit_anim_lines.txt || true
+          grep -n 'current_move_' main.cpp > docs/_ci_extract/03_current_move_lines.txt || true
+          grep -n 'y_adjust' main.cpp > docs/_ci_extract/04_y_adjust_lines.txt || true
+          grep -n 'ROOT' main.cpp > docs/_ci_extract/05_root_log_lines.txt || true
+          grep -n 'need_switch_to_idle_' main.cpp > docs/_ci_extract/06_need_switch_lines.txt || true
+          grep -n 'is_uninterrupt_' main.cpp > docs/_ci_extract/07_is_uninterrupt_lines.txt || true
+
+          # Dump the whole file in 400-line chunks so each chunk is small
+          # enough to read back via raw.githubusercontent without truncation.
+          split -l 400 -d --additional-suffix=.txt main.cpp docs/_ci_extract/chunk_
+          ls -la docs/_ci_extract
+
+      - name: Commit extracts
+        run: |
+          git config user.name "reSF2 ci"
+          git config user.email "ci@resf2.local"
+          git add docs/_ci_extract
+          git commit -m "ci: dump main.cpp region extracts for patch authoring" || echo "nothing to commit"
+          git push origin ci/linux-build-check
