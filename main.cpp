@@ -622,6 +622,25 @@ public:
         if (input.keys_just_pressed[(size_t)plat::Key::Space]) punch_pressed = true;
         if (input.keys_just_pressed[(size_t)plat::Key::K]) kick_pressed = true;
 
+        // Sticky key buffer for O/P: GetAsyncKeyState can miss very fast
+        // taps on some systems. If a key was pressed in the last 150ms but
+        // not consumed (e.g., during an attack), replay it now.
+        uint32_t now_ms = platform_->now_ms();
+        if (punch_pressed) last_punch_seen_ms_ = now_ms;
+        if (kick_pressed) last_kick_seen_ms_ = now_ms;
+        if (!punch_pressed && last_punch_seen_ms_ > 0 &&
+            (now_ms - last_punch_seen_ms_) < 150 &&
+            hit_anim_ == 0 && move_state_ < 10) {
+            punch_pressed = true;
+            last_punch_seen_ms_ = 0;  // consume
+        }
+        if (!kick_pressed && last_kick_seen_ms_ > 0 &&
+            (now_ms - last_kick_seen_ms_) < 150 &&
+            hit_anim_ == 0 && move_state_ < 10) {
+            kick_pressed = true;
+            last_kick_seen_ms_ = 0;  // consume
+        }
+
         // Track step animation play time (prevents tap-to-cancel)
         if (move_state_ == 1 || move_state_ == 2) {
             step_play_time_ += dt;
@@ -1008,6 +1027,10 @@ public:
         // Reset hit state when leaving the Attack interval (so the next
         // attack interval frame can hit again).
 
+        // IMPORTANT: Clear current_move_ when attack ends, regardless of
+        // whether bag_model_ exists. Otherwise current_move_ stays set
+        // from a previous attack, causing 3key combos to trigger on the
+        // next key press (e.g., DoubleSweep after a single P press).
         if (hit_anim_ > 0 && bag_model_ && location_) {
             auto anim_it = animations_.find(current_anim_);
             if (anim_it != animations_.end()) {
@@ -1107,6 +1130,16 @@ public:
                 current_move_.clear();
                 bag_hit_ = false;  // reset for next attack
             }
+        }
+
+        // IMPORTANT: Also clear current_move_ when hit_anim_ reaches 0
+        // even if bag_model_ doesn't exist (no character loaded).
+        // This prevents 3key combos from triggering on the next key press
+        // when current_move_ is still set from a previous attack.
+        if (hit_anim_ == 0 && !current_move_.empty()) {
+            need_switch_to_idle_ = true;
+            current_move_.clear();
+            bag_hit_ = false;
         }
 
         // Update bag Verlet physics
@@ -1914,18 +1947,30 @@ private:
         // between animations with different NPivot Y values.
         // Jump height is handled by jump_y_offset_ (root motion Y).
         //
-        // IMPORTANT: During jump/flip animations, y_adjust must be 0.
-        // Otherwise it counteracts the jump (pushes character down when
-        // feet are close to NPivot, pulls up when feet are far below).
-        // The jump_y_offset alone handles the Y movement for jumps.
+        // During jump/flip animations, we still apply y_adjust to keep feet
+        // on floor during the crouch phase (start/end of jump). The
+        // jump_y_offset_ handles the airborne phase (pushes character up
+        // when npivot_y > rest_npivot_y).
+        //
+        // When airborne (npivot_y > rest_npivot_y), y_adjust would pull the
+        // character down (feet to floor), which is wrong during a jump.
+        // So we only apply y_adjust when NOT airborne.
         bool is_jump_render = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                                current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                                current_anim_ == "back_handflip" ||
                                current_anim_ == "air_punch" || current_anim_ == "air_axe_kick");
-        if (is_jump_render) {
-            // During jumps, don't apply y_adjust — let jump_y_offset_ handle Y.
+        // Check if airborne: npivot_y > rest_npivot_y means character is
+        // higher than standing position (jumping up)
+        auto pivot_it_render = skeleton_nodes_.find("NPivot");
+        float rest_npivot_y_render = pivot_it_render != skeleton_nodes_.end() ? pivot_it_render->second.y : 169.48f;
+        bool is_airborne = is_jump_render && jump_y_offset_ > 0;
+        if (is_airborne) {
+            // During airborne phase, don't apply y_adjust — let jump_y_offset
+            // handle the height. Feet should be off the floor during jump.
             y_adjust_smoothed_ = 0;
         } else {
+            // During ground phase (crouch, stand, land), apply y_adjust
+            // to keep feet on floor.
             float ly_lowest = pivot_local_y;
             for (auto& [name, pos] : anim_node_pos_) {
                 if (pos.second < ly_lowest) ly_lowest = pos.second;
@@ -1933,9 +1978,7 @@ private:
             const float REF_FEET_LY = 64.60f;
             float target_y_adjust = REF_FEET_LY - ly_lowest;
             // INSTANT snap (no smoothing). The original game uses MoveInside
-            // pivot alignment which is instant — it reads the current frame's
-            // NPivot and adjusts immediately. Smoothing causes the "sliding"
-            // effect where feet float above floor for a few frames.
+            // pivot alignment which is instant.
             y_adjust_smoothed_ = target_y_adjust;
         }
         float world_cx = player_pos_x_;
@@ -2814,27 +2857,23 @@ private:
         //   - Jump peak: NPivot Y ≈ 243.93
         //   - Back_flip end: NPivot Y ≈ 106.21 (still crouching)
         //
-        // Using `npivot_y - frame0_y` (the old approach) caused snaps when
-        // frame 0 Y != last frame Y (e.g. back_flip: 92.21 → 106.21).
+        // jump_y_offset should be:
+        //   - 0 when crouching/standing (npivot_y <= rest_y) — y_adjust handles feet
+        //   - positive when airborne (npivot_y > rest_y) — character is jumping up
         //
-        // Using `npivot_y - rest_pose_y` (169.48) ensures:
-        //   - When character stands (NPivot Y = 169.48), offset = 0
-        //   - When character crouches (NPivot Y < 169.48), offset < 0 (lower)
-        //   - When character jumps (NPivot Y > 169.48), offset > 0 (higher)
-        //   - Transition to idle (NPivot Y = 169.48) is seamless (offset = 0)
-        //
-        // This also requires disabling y_adjust during jump animations,
-        // because y_adjust tries to keep feet on floor (counteracting jump).
+        // This prevents the character from sinking during crouch (negative offset
+        // would push the character down, but y_adjust keeps feet on floor).
         bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                             current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                             current_anim_ == "back_handflip" ||
                             current_anim_ == "air_punch" || current_anim_ == "air_axe_kick");
         if (is_jump_anim && anim_anchor_set_) {
-            // Use rest pose Y (skeleton NPivot Y) as the reference, not frame 0.
-            // This ensures the character's world Y is consistent with the rest pose.
             auto pivot_it = skeleton_nodes_.find("NPivot");
             float npivot_rest_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
-            jump_y_offset_ = npivot_y - npivot_rest_y;
+            float raw_offset = npivot_y - npivot_rest_y;
+            // Only apply positive offset (airborne). When crouching (negative),
+            // let y_adjust handle keeping feet on floor.
+            jump_y_offset_ = raw_offset > 0 ? raw_offset : 0;
         } else {
             jump_y_offset_ = 0;
         }
@@ -3537,6 +3576,8 @@ private:
     int back_held_ms_ = 0;  // ms since back key was last held (for latching)
     uint32_t last_kick_press_ms_ = 0;  // for double-tap detection (DoubleSweep)
     uint32_t last_punch_press_ms_ = 0;  // for double-tap detection (DoublePunch)
+    uint32_t last_punch_seen_ms_ = 0;  // sticky buffer for O key (150ms window)
+    uint32_t last_kick_seen_ms_ = 0;   // sticky buffer for P key (150ms window)
     bool start_stance_playing_ = false;  // true during start stance animation
     bool need_switch_to_idle_ = false;  // deferred switch to idle (after update_animation)
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
