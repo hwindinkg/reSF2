@@ -1433,3 +1433,82 @@ Stage Summary:
 - All claims tagged [ORIGINAL] (with binary address) or [HEURISTIC-TODO].
 - Proof logs in Testing/: base_log_BEFORE_TaskB.txt, after_log_AFTER_TaskB{.txt,.stderr.txt},
   after_log_AFTER_TaskC{.txt,.stderr.txt}.
+
+---
+## Session: regression recovery + Y/input diagnosis (HEAD a26567e → cd17d38)
+
+**Context**: Previous session's MoveInside Y heuristic (9450c4f) caused
+regressions: W+A/W+D flip moved down instead of up, roll sank, stance_2
+drifted player_x ~167 units, O during step often failed.
+
+**Bisect result** (deterministic input replay, scenario 01_w_jump):
+- 96bfce1 (before MoveInside): render_y flat at -89 during jump (NPivot
+  rises 106→243 but Y doesn't move — pre-existing flat baseline).
+- 9450c4f (MoveInside added): render_y -89→-161 during jump (SINKS).
+- => 9450c4f is the first bad commit. Confirmed.
+
+**Commits this session** (all pushed to origin/main):
+
+1. `551b0c3` — test: deterministic input replay CLI + 10 scenarios
+   - Platform::load_input_script + tick_input_script (virtual)
+   - GlfwPlatform::Impl::InputScript (events, cur, frame_counter, armed)
+   - tick from host_update_gameplay (NOT poll_events) so script frame N
+     == gameplay frame N (Boot/Loading don't count)
+   - --input-script/--max-frames CLI args
+   - 10 scenarios: W jump, W+D flip, W+A flip, S+D roll, S+A roll,
+     D+O, D+P, A+O, idle O, idle P
+
+2. `b31681b` — revert(main): disable MoveInside render-Y consumption
+   - Formula `y_adjust = floor_y - py - pivot_ly + rest_y` grounded heel
+     to floor every frame → wrong for airborne (heel lifts, formula
+     drags character down)
+   - Disabled: y_adjust = constant FEET_FLOOR_OFFSET=4 (96bfce1 baseline)
+   - Parser + MoveDef metadata KEPT for future use
+   - One-shot stderr [HEURISTIC-TODO] warning
+   - All 10 scenarios: render_y flat at -89.00 (no sinking) ✓
+
+3. `12778f8` — fix(root): restrict root motion to movement moves only
+   - Removed `!anim_loop_` from is_root_motion_anim
+   - stance_2 no longer drifts: px stays -293 (was -293→-460) ✓
+   - Removed grounded attacks from whitelist (high_punch etc. no slide)
+   - Whitelist: step/roll/jump/flip/air-attack only
+   - [HEURISTIC-TODO] make data-driven from MoveDef metadata
+
+4. `cd17d38` — fix(input): [INPUT_DECISION] structured logging
+   - Machine-distinguishable reject reasons: none/uninterrupt/no_candidate
+   - candidate_count tracking in combat matcher
+   - Logs at: success (reject=none), no candidate (reject=no_candidate),
+     uninterrupt block (reject=uninterrupt — NEW, was silently skipped)
+   - Verified: O and P both work from step (HeavyPunch/FrontKick, reject=none)
+   - Double-tap O: 2nd O correctly rejected with reject=uninterrupt
+
+**MoveInside reverse engineering** (this session):
+- Traced the consumption pipeline to a 3-STEP CHAIN (all byte-verified):
+  Step 1: fcn.10165c10 (capture) — pivotID→Model+0x58, node_array[pivotID]→Model+0x5c
+  Step 2: fcn.10164c20 (resolve+axis) — OVERWRITES Model+0x58/0x5c via fcn.1016db00,
+          then calls fcn.10103690(node_owner, axis=2, &out) + fcn.10103e80
+  Step 3: fcn.101661d0 (consumer) — reads Model+0x58/0x5c
+  Step 1b: Model::step @ 0x10162254 — push [esi+0x58] → fcn.10243750 returns
+           a PROGRESS FACTOR (clamped to [0,1]), NOT a Y-align
+- The heuristic formula was a SINGLE-STEP grounding that didn't match this
+  multi-step pipeline. Formula stays DISABLED until steps 2+3 are fully traced.
+- Documented in docs/s3e_reverse_engineering.md "Multi-step alignment pipeline"
+
+**Acceptance criteria status**:
+- Jump/flip: render_y flat (not sinking) ✓ — but NOT rising (character doesn't
+  visually jump). [HEURISTIC-TODO] until consumption formula is traced.
+- Roll: render_y flat (not sinking) ✓ — but NOT floor-contact-corrected.
+- Stance: stance_2 px stays -293 (no drift) ✓
+- stance_idle: no drift ✓
+- Step/roll X displacement: works ✓
+- O/P from idle: works ✓
+- O/P from step: works (Linux/Xvfb) ✓ — Windows issue not reproduced
+- Uninterrupt block: correctly rejects with reason ✓
+
+**What is NOT done**:
+- Jump/flip Y RISING (character doesn't visually jump — flat render_y)
+- Roll floor-contact correction
+- MoveInside consumption formula (steps 2+3 not fully traced)
+- Root-motion data-driven (still animation-name whitelist)
+- DZ type-4 decoder (not touched this session per user instruction)
+- Asset de-hardcoding (deferred)

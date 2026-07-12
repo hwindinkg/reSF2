@@ -216,29 +216,79 @@ Distribution in `assets/animations/moves.xml`:
 
 ### What is NOT yet byte-confirmed [HEURISTIC-TODO]
 
-1. The exact formula that consumes `Model+0x5c` (align_y) to produce the
-   render Y. `Axis="X|Z"` on most `<Align>` tags suggests MoveInside may
-   align only X and Z, with Y driven by the animation NPivot or physics —
-   not yet traced.
+1. The exact formula that consumes `Model+0x5c` (align_value) to produce
+   the render Y. `Axis="X|Z"` on most `<Align>` tags suggests MoveInside
+   may align only X and Z, with Y driven by the animation NPivot or
+   physics — not yet traced.
 2. Whether `node_array[pivotID]` is a flat float array of node Y values
    (current assumption) or a struct (the `*eax` deref before indexing
    suggests a container-of-arrays layout).
 3. The `Model+0xdc` "node-array owner" — likely the skeleton instance;
    `fcn.10048b30` is the accessor.
 
+### Multi-step alignment pipeline (traced this session)
+
+The MoveInside capture (`fcn.10165c10`) is only STEP 1 of a 3-step
+pipeline. The full chain (all byte-verified by objdump on ShadowFight2.s86):
+
+**Step 1: MoveInside capture** — `fcn.10165c10` (VA 0x10165c10)
+- Reads `moveInside->align.pivotID` from `animInfo+0x94 -> +0x70`
+- Stores `pivotID` at `Model+0x58`
+- Stores `node_array[pivotID]` (via `fcn.10048b30`) at `Model+0x5c`
+- If pivotID == -1: zeros `Model+0x5c`, warns
+- Called from `playInfo` at `0x10165115`
+
+**Step 2: Pivot resolution + axis retrieval** — `fcn.10164c20` (VA 0x10164c20)
+- Called from `playInfo` at `0x1016511d` (immediately after step 1)
+- Reads `Model+0x58` (old pivotID) at `0x10164ce2`
+- Calls `fcn.1016db00(node_owner, old_pivotID)` to resolve a NEW pivotID
+- If new pivotID != -1: **OVERWRITES** `Model+0x58` (new pivotID) and
+  `Model+0x5c` (node_array[new_pivotID]) at `0x10164cfd`/`0x10164d0a`
+- Then calls `fcn.10103690(node_owner, axis=2, &output)` — `push 2`
+  suggests axis index 2 (likely Z, given Axis="X|Z" maps to {0,2})
+- Then calls `fcn.10103e80(animInfo, result)` — applies the axis data
+
+**Step 3: Consumer** — `fcn.101661d0` (VA 0x101661d0)
+- Called from `playInfo` at `0x10165124`
+- Reads `Model+0x58` at `0x101662a1` (`push [esi+0x58]`)
+- Reads `Model+0x5c` at `0x10166356` (`mov ecx, [ecx+0x5c]`)
+- Full behavior not yet traced
+
+**Step 1b: Progress factor** — `Model::step` (`fcn.10161ad0`)
+- At `0x10162254`: `push [esi+0x58]` (pivotID) → `call 0x10243750`
+- `fcn.10243750` returns a float, clamped to [0, 1] range (compared with
+  1.0f at `0x1037439c`). This is a PROGRESS/TIMING factor, NOT a Y-align.
+- Sets `Model+0x50` flag based on the progress comparison.
+
+### Conclusion (this session)
+
+The MoveInside consumption chain is a MULTI-STEP PIPELINE:
+  capture (10165c10) → resolve+axis (10164c20) → consume (101661d0)
+  + progress (Model::step @ 10162254 → 10243750)
+
+The heuristic formula from commit 9450c4f (`y_adjust = floor_y -
+player_pos_y_ - pivot_node_ly + npivot_rest_y`) was a SINGLE-STEP
+grounding that did not match this pipeline. It grounded the heel to
+floor_y every frame, which is wrong for airborne moves (the heel
+legitimately leaves the floor during jumps/flips). This caused the
+Y-regression (character sinking during jump/flip/roll).
+
+**The Y consumption formula remains DISABLED** (recovery commit b31681b).
+Until steps 2+3 are fully traced (what `fcn.10103690(node_owner, 2, ...)`
+returns, what `fcn.10103e80` does with it, and how `fcn.101661d0` produces
+the final transform), the constant `FEET_FLOOR_OFFSET=4` baseline is used.
+
 ### reSF2 implementation (current, [HEURISTIC-TODO])
 
-`render_body_model()` in `main.cpp` now:
-- Parses `<Pivot Part="..."/>` into `MoveDef::moveinside_pivot_node`.
-- When the active move has a node pivot, computes
-  `y_adjust = floor_y - player_pos_y_ - pivot_node_ly + npivot_rest_y`
-  so the named pivot node sits at `floor_y` (dojo = -193).
-- Falls back to `FEET_FLOOR_OFFSET = 4` for `Object="Animation"` moves.
-- Exponential-smooths the result (`y_smooth_alpha = 0.3`).
-
-This grounds the pivot node (fixes the roll-float symptom when the active
-move has a heel pivot) but is an approximation of the real consumption
-formula, which remains to be byte-confirmed.
+`render_body_model()` in `main.cpp`:
+- Parses `<Pivot Part="..."/>` into `MoveDef::moveinside_pivot_node` +
+  `moveinside_is_animation` (720/858 moves node-aligned, 57 animation-only).
+- **DISABLED** (recovery commit b31681b): the heuristic Y formula from
+  9450c4f is disabled because it caused jump/flip/roll to sink. Uses
+  constant `FEET_FLOOR_OFFSET = 4` (96bfce1 baseline).
+- One-shot stderr warning fires every run documenting the disabled state.
+- The MoveInside parser + metadata are KEPT for future use once the
+  consumption pipeline (steps 2+3 above) is fully traced.
 
 ## DZ type 4 decoder — partial verification (this session)
 
