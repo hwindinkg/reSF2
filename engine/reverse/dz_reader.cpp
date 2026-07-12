@@ -255,20 +255,72 @@ bool DzRegistry::open_archive(const std::string& path) {
 }
 
 std::vector<std::byte> DzRegistry::read_file(const std::string& name) {
+    // First try to read from archives
     for (auto& archive : archives_) {
         if (archive->has_file(name)) {
             auto data = archive->read_file(name);
             if (!data.empty()) return data;
         }
     }
-    return {};
+    // If not found or decompression failed, try fallback directories
+    return read_from_fallback(name);
 }
 
 bool DzRegistry::has_file(const std::string& name) {
     for (auto& archive : archives_) {
         if (archive->has_file(name)) return true;
     }
+    // Also check fallback directories
+    for (const auto& dir : fallback_dirs_) {
+        std::filesystem::path p = std::filesystem::path(dir) / name;
+        if (std::filesystem::exists(p)) return true;
+        // Also check with common subpaths
+        p = std::filesystem::path(dir) / "files" / name;
+        if (std::filesystem::exists(p)) return true;
+        p = std::filesystem::path(dir) / "animations" / name;
+        if (std::filesystem::exists(p)) return true;
+        p = std::filesystem::path(dir) / "animations" / "binary" / name;
+        if (std::filesystem::exists(p)) return true;
+    }
     return false;
+}
+
+std::vector<std::byte> DzRegistry::read_from_fallback(const std::string& name) {
+    for (const auto& dir : fallback_dirs_) {
+        // Try several path patterns:
+        // 1. <dir>/<name>
+        // 2. <dir>/files/<name>  (for files.dz extracted contents)
+        // 3. <dir>/animations/<name>  (for animations.dz XML files)
+        // 4. <dir>/animations/binary/<name>  (for .bin files)
+        // 5. <dir>/files/assets/<name>  (deeper nesting)
+        std::vector<std::string> subpaths = {
+            name,
+            "files/" + name,
+            "animations/" + name,
+            "animations/binary/" + name,
+            "files/assets/" + name,
+            "assets/files/" + name,
+            "assets/animations/" + name,
+            "assets/animations/binary/" + name,
+        };
+        for (const auto& sub : subpaths) {
+            std::filesystem::path p = std::filesystem::path(dir) / sub;
+            if (std::filesystem::exists(p) && std::filesystem::is_regular_file(p)) {
+                std::ifstream f(p, std::ios::binary | std::ios::ate);
+                if (!f) continue;
+                auto size = static_cast<size_t>(f.tellg());
+                f.seekg(0);
+                std::vector<std::byte> data(size);
+                f.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(size));
+                if (!data.empty()) {
+                    std::printf("[DZ] Fallback: %s -> %s (%zu bytes)\n",
+                                name.c_str(), p.string().c_str(), data.size());
+                    return data;
+                }
+            }
+        }
+    }
+    return {};
 }
 
 }  // namespace resf2::dz

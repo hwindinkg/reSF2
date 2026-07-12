@@ -1203,6 +1203,15 @@ private:
                 }
             }
         }
+        // Register fallback directories for extracted DZ contents.
+        // When a file can't be decompressed from .dz (e.g. type=4 DZ custom
+        // compression), the registry looks for the file in these directories.
+        // This allows the engine to work with pre-extracted assets while
+        // still supporting .dz archives for files that can be decompressed
+        // (gzip type=8).
+        for (const auto& base : {root, root/"assets", root/"assets"/"assets"}) {
+            dz.add_fallback_dir(base.string());
+        }
         
         load_location("dojo");
         location_loaded_ = true;

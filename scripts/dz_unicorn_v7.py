@@ -280,6 +280,7 @@ mu.mem_write(INPUT_BUF, comp_data)
 OUTPUT_BUF = 0x92000000
 mu.mem_write(OUTPUT_BUF, b'\x00' * f['uncomp_size'])
 INPUT_SIZE_ADDR = 0x94000000
+mu.mem_map(INPUT_SIZE_ADDR, 0x1000)  # ensure mapped
 OUTPUT_SIZE_ADDR = 0x94000010
 mu.mem_write(INPUT_SIZE_ADDR, struct.pack("<I", len(comp_data)))
 mu.mem_write(OUTPUT_SIZE_ADDR, struct.pack("<I", f['uncomp_size']))

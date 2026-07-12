@@ -78,8 +78,19 @@ public:
     // Check if any archive has this file
     bool has_file(const std::string& name);
     
+    // Register a fallback directory for extracted files.
+    // When a file can't be decompressed from .dz (e.g. type=4 DZ custom),
+    // the registry looks for it in the fallback directory.
+    // This allows the engine to work with pre-extracted assets while
+    // still supporting .dz archives for files that can be decompressed.
+    void add_fallback_dir(const std::string& path) { fallback_dirs_.push_back(path); }
+    
 private:
     std::vector<std::unique_ptr<DzArchive>> archives_;
+    std::vector<std::string> fallback_dirs_;
+    
+    // Try to read from fallback directories
+    std::vector<std::byte> read_from_fallback(const std::string& name);
 };
 
 }  // namespace resf2::dz
