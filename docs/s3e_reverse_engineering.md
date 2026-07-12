@@ -147,6 +147,99 @@ Offset  Size  Description
 7. LZF (python-lzf, manual) — ❌ error in compressed data
 8. Various skip offsets (0-16 bytes) — ❌ all failed
 
+## MoveInside (pivot alignment) — byte-verified this session
+
+`fcn.10165c10` (VA `0x10165c10` in `ShadowFight2.s86`, PE32 i386, ImageBase
+`0x10000000`) is the MoveInside alignment entry, called from `playInfo`
+(`fcn.10164fa0`) at `0x10165115` during per-frame animation setup.
+
+Disassembly (verified by `objdump -d -M intel`):
+```asm
+10165c10: push esi
+10165c11: mov  esi, ecx              ; esi = this (Model)
+10165c14: mov  eax, [esi+0x20]       ; eax = this->animationInfo   (Model+0x20)
+10165c17: mov  eax, [eax+0x94]       ; eax = animationInfo->moveInside  (+0x94)
+10165c1d: mov  edi, [eax+0x70]       ; edi = moveInside->align.pivotID  (+0x70)
+10165c20: cmp  edi, 0xffffffff       ; pivotID == -1 ?
+10165c23: jle  0x10165c3e            ; yes -> warn & zero
+; pivotID != -1 (valid node index):
+10165c25: mov  ecx, [esi+0xdc]       ; ecx = this->[0xdc] (node-array owner)
+10165c2b: mov  [esi+0x58], edi       ; this->pivotID_cached = pivotID   (Model+0x58)
+10165c2e: call 0x10048b30            ; eax = node_array_base(this->[0xdc])
+10165c33: mov  eax, [eax]            ; eax = *node_array_base  (deref)
+10165c35: mov  eax, [eax+edi*4]      ; eax = node_array[pivotID]  (4-byte slot)
+10165c39: mov  [esi+0x5c], eax       ; this->align_y = node_array[pivotID]  (Model+0x5c)
+10165c3d: ret
+; pivotID == -1:
+10165c3e: push 0x105b21f8            ; "_animationInfo->moveInside->align.pivotID == -1"
+10165c43: mov  [esi+0x5c], 0x0       ; this->align_y = 0
+10165c4a: call 0x101472f0            ; s3eAssert/warn
+```
+
+Struct layout (byte-confirmed):
+| Offset | Field | Container |
+|--------|-------|-----------|
+| Model+0x20 | animationInfo ptr | Model |
+| animInfo+0x94 | moveInside ptr | animationInfo |
+| moveInside+0x70 | align.pivotID (int32, -1 = none) | moveInside |
+| Model+0x58 | pivotID cached | Model |
+| Model+0x5c | align_y (float: node_array[pivotID].Y, or 0) | Model |
+
+`Model::step` (`fcn.10161ad0`) reads `Model+0x58` (pivotID) at the call to
+`fcn.10243750` (line 899 in `scripts/dz_model_step_decompiled.c`), which
+returns a float used in Y-related math (`fstp dword [ebp-0x34]`).
+
+### moves.xml ↔ binary mapping
+
+moves.xml declares the pivot node per `<Template>` inside `<Align>`:
+```xml
+<Align Axis="X|Z">
+  <Pivot Object="Nodes" Part="NHeel_2"/>   <!-- grounded moves: heel contact -->
+  <Position Player="Me" Object="Pivot"/>
+</Align>
+```
+or
+```xml
+<Align Axis="X|Z">
+  <Pivot Object="Animation"/>              <!-- stance/anim-driven: pivotID = -1 -->
+  <Position Player="Parent" Object="Animation"/>
+</Align>
+```
+
+Distribution in `assets/animations/moves.xml`:
+- 437 `<Pivot Object="Nodes" Part="NHeel_2"/>` (most grounded moves)
+- 176 `NHeel_1`
+- 61 `Object="Animation"` (stance, magic, missile — pivotID = -1, align_y = 0)
+- 59 `Magic-Node2_1`
+- 25 `NPivot` (likely air/jump moves)
+- 14 `NNeck`, 13 `Ranged-Node2_1`, ...
+
+### What is NOT yet byte-confirmed [HEURISTIC-TODO]
+
+1. The exact formula that consumes `Model+0x5c` (align_y) to produce the
+   render Y. `Axis="X|Z"` on most `<Align>` tags suggests MoveInside may
+   align only X and Z, with Y driven by the animation NPivot or physics —
+   not yet traced.
+2. Whether `node_array[pivotID]` is a flat float array of node Y values
+   (current assumption) or a struct (the `*eax` deref before indexing
+   suggests a container-of-arrays layout).
+3. The `Model+0xdc` "node-array owner" — likely the skeleton instance;
+   `fcn.10048b30` is the accessor.
+
+### reSF2 implementation (current, [HEURISTIC-TODO])
+
+`render_body_model()` in `main.cpp` now:
+- Parses `<Pivot Part="..."/>` into `MoveDef::moveinside_pivot_node`.
+- When the active move has a node pivot, computes
+  `y_adjust = floor_y - player_pos_y_ - pivot_node_ly + npivot_rest_y`
+  so the named pivot node sits at `floor_y` (dojo = -193).
+- Falls back to `FEET_FLOOR_OFFSET = 4` for `Object="Animation"` moves.
+- Exponential-smooths the result (`y_smooth_alpha = 0.3`).
+
+This grounds the pivot node (fixes the roll-float symptom when the active
+move has a heel pivot) but is an approximation of the real consumption
+formula, which remains to be byte-confirmed.
+
 ## Key Findings Summary
 
 1. **Engine**: Marmalade SDK + Cocos2d-x (confirmed)

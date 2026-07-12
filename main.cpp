@@ -246,6 +246,23 @@ struct MoveDef {
     std::string required_perk;
     // Weapon subtype required (e.g. "Fists"). Empty = any weapon.
     std::string required_weapon_subtype;
+
+    // [ORIGINAL] MoveInside pivot alignment (from <Align><Pivot .../></Align>
+    // in moves.xml). Binary-verified: fcn.10165c10 reads
+    //   Model[0x20] -> animationInfo
+    //   animationInfo[0x94] -> moveInside
+    //   moveInside[0x70] -> align.pivotID
+    //   Model[0x5c] <- node_array[pivotID].Y   (align_y)
+    //   Model[0x58] <- pivotID                 (cached)
+    // When pivotID == -1 (Pivot Object="Animation"), align_y = 0.
+    // moves.xml <Pivot Object="Nodes" Part="NHeel_2"/> names the node;
+    // <Pivot Object="Animation"/> means no node alignment.
+    // [HEURISTIC-TODO] the exact formula that consumes align_y (Model[0x5c])
+    // to produce render Y is NOT yet byte-confirmed end-to-end; the per-frame
+    // y_adjust below is an approximation (ground the named pivot node to
+    // floor_y). See docs/s3e_reverse_engineering.md "MoveInside".
+    std::string moveinside_pivot_node;  // e.g. "NHeel_2"; empty = Object="Animation"
+    bool moveinside_is_animation = false;  // <Pivot Object="Animation"/>
 };
 
 struct AnimationData {
@@ -2126,29 +2143,64 @@ private:
         // Roll issue: character floats during roll, but roll is short (26 frames).
         // This is acceptable until we implement proper MoveInside alignment.
         constexpr float FEET_FLOOR_OFFSET = 4.0f;
-        // [HEURISTIC-TODO] y_adjust is a GLOBAL CONSTANT here, not per-move.
-        // The original aligns via MoveInside/pivotID (Model::step @ 0x10161ad0,
-        // playInfo @ 0x10164fa0) which selects a contact node (NHeel_1/NHeel_2
-        // for grounded moves, NPivot for jumps) and aligns it to the floor /
-        // pivot point. This constant grounds standing/crouch/jump but FLOATS
-        // rolls (~84px) and any move whose NPivot descends without the feet
-        // leaving the floor. Replace with per-move pivot alignment once
-        // MoveInside is byte-decoded (see docs/s3e_reverse_engineering.md,
-        // Task C entry). One-shot stderr warning so the heuristic is visible
-        // in every run, not just the source.
+        // [ORIGINAL] MoveInside pivot-based Y alignment (binary-verified
+        // mechanism, see docs/s3e_reverse_engineering.md "MoveInside"):
+        //   fcn.10165c10 reads moveInside->align.pivotID (moveInside @
+        //   animInfo+0x94, pivotID @ moveInside+0x70) and stores
+        //   node_array[pivotID].Y as align_y at Model+0x5c (0 if pivotID==-1).
+        // moves.xml <Pivot Object="Nodes" Part="NHeel_2"/> names the node.
+        // [HEURISTIC-TODO] the exact formula consuming align_y (Model[0x5c])
+        // to produce render Y is NOT byte-confirmed end-to-end. The
+        // approximation below grounds the named pivot node to floor_y:
+        //   y_adjust = floor_y - player_pos_y_ - pivot_local_y + npivot_rest_y
+        // which is algebraically equivalent to setting world_cy so that
+        //   pivot_node_world_y = floor_y
+        // where pivot_node_world_y = world_cy + (pivot_local_y - npivot_rest_y).
+        // Falls back to FEET_FLOOR_OFFSET when the move has no node pivot
+        // (<Pivot Object="Animation"/>) or no move is active. floor_y is
+        // hardcoded to the dojo floor (-193); generalizing to other locations
+        // is a separate [HEURISTIC-TODO].
+        // One-shot stderr warning so the heuristic is visible in every run.
         {
             static bool warned_once = false;
             if (!warned_once) {
                 warned_once = true;
                 std::fprintf(stderr,
-                    "[HEURISTIC-TODO] y_adjust_smoothed_ = FEET_FLOOR_OFFSET (4.0f) "
-                    "is a global constant, not per-move MoveInside alignment. "
-                    "Rolls/jumps with descending NPivot will float. "
-                    "Replace with Model::step pivotID contact alignment "
-                    "(Model::step @ 0x10161ad0, playInfo @ 0x10164fa0).\n");
+                    "[HEURISTIC-TODO] y_adjust uses MoveInside pivot-node grounding "
+                    "(approx, binary mechanism verified at fcn.10165c10; consumption "
+                    "formula NOT byte-confirmed). floor_y hardcoded to dojo (-193). "
+                    "Falls back to FEET_FLOOR_OFFSET=4 for <Pivot Object=\"Animation\"/> "
+                    "moves. See docs/s3e_reverse_engineering.md.\n");
             }
         }
-        y_adjust_smoothed_ = FEET_FLOOR_OFFSET;
+        constexpr float DOJO_FLOOR_Y = -193.0f;  // [HEURISTIC-TODO] generalize per-location
+        float target_y_adjust = FEET_FLOOR_OFFSET;  // fallback (Animation-pivot / no move)
+        if (!current_move_.empty()) {
+            auto mit = moves_.find(current_move_);
+            if (mit != moves_.end() && !mit->second.moveinside_pivot_node.empty()) {
+                const std::string& pn = mit->second.moveinside_pivot_node;
+                auto nit = anim_node_pos_.find(pn);
+                if (nit != anim_node_pos_.end()) {
+                    // pivot_node's animated local Y (anim_node_pos_ stores
+                    // local_y + npivot_rest_y, i.e. model-space Y), as the
+                    // .second of a pair<float,float> (x, y).
+                    float pivot_node_ly = nit->second.second;
+                    // node_world_y = world_cy + (node_ly - npivot_rest_y)
+                    //   (resolve_body_node: sy = world_cy + (ly - pivot_local_y),
+                    //    pivot_local_y here == npivot_rest_y from line 2061).
+                    // Ground the pivot node (pivot_world_y = floor_y):
+                    //   floor_y = world_cy + (pivot_node_ly - npivot_rest_y)
+                    //   y_adjust = world_cy - player_pos_y_
+                    //            = floor_y - player_pos_y_ - pivot_node_ly + npivot_rest_y
+                    target_y_adjust = DOJO_FLOOR_Y - player_pos_y_
+                                    - pivot_node_ly + pivot_local_y;
+                }
+            }
+        }
+        // Smooth y_adjust (avoid snapping when pivot node changes mid-anim).
+        // Simple exponential smoothing toward target.
+        constexpr float y_smooth_alpha = 0.3f;
+        y_adjust_smoothed_ += (target_y_adjust - y_adjust_smoothed_) * y_smooth_alpha;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
@@ -2825,13 +2877,47 @@ private:
                 }
                 ip = te + 2;
             }
-            
+
+            // [ORIGINAL] Parse MoveInside <Pivot> from <Align> section.
+            // Binary: moveInside->align.pivotID (moveInside @ animInfo+0x94,
+            // pivotID @ moveInside+0x70) is the node index, or -1 when
+            // <Pivot Object="Animation"/>. moves.xml names the node via
+            // Part="NHeel_2" etc. We store the name; the index lookup happens
+            // at render time via ordered_node_names_ (matches the binary's
+            // node_array[pivotID] deref in fcn.10165c10).
+            ip = inner.find("<Pivot ", 0);
+            if (ip != std::string::npos) {
+                auto te = inner.find("/>", ip);
+                if (te == std::string::npos) te = inner.find(">", ip);
+                if (te != std::string::npos) {
+                    auto p_tag = inner.substr(ip, te - ip);
+                    auto pobj = xml_attr(p_tag, "Object");
+                    auto ppart = xml_attr(p_tag, "Part");
+                    if (pobj == "Nodes" && !ppart.empty()) {
+                        move.moveinside_pivot_node = ppart;
+                    } else if (pobj == "Animation") {
+                        move.moveinside_is_animation = true;
+                    }
+                }
+            }
+
             if (!move.filename.empty()) {
                 moves_[move.name] = std::move(move);
             }
             pos = move_end + 7;
         }
         std::printf("  Moves loaded: %zu\n", moves_.size());
+        // [ORIGINAL] MoveInside pivot parse audit: count moves that declared
+        // a <Pivot> node alignment vs Object="Animation".
+        {
+            int with_node_pivot = 0, with_anim_pivot = 0;
+            for (auto& [n, m] : moves_) {
+                if (!m.moveinside_pivot_node.empty()) ++with_node_pivot;
+                else if (m.moveinside_is_animation) ++with_anim_pivot;
+            }
+            std::printf("  MoveInside pivots: %d node-aligned, %d animation-only\n",
+                        with_node_pivot, with_anim_pivot);
+        }
     }
     
     // Update animation state and compute per-node animated positions.
@@ -3738,7 +3824,7 @@ private:
     float prev_root_offset_ = 0.0f;  // offset from frame-0 NPivot (for root motion)
     float step_start_player_x_ = 0.0f;  // player X when step started (for absolute root motion)
     bool anim_facing_right_ = true;  // facing locked at animation start (for root motion direction)
-    float y_adjust_smoothed_ = 0.0f;  // smoothed Y adjustment for feet normalization
+    float y_adjust_smoothed_ = 4.0f;  // smoothed Y adjustment (init to FEET_FLOOR_OFFSET so frame 1 is grounded)
     uint64_t total_frame_count_ = 0;  // global frame counter (for [ROOT] log diagnostics)
     int no_key_frames_ = 0;  // frames with no movement key pressed (for hysteresis)
     int move_state_ = 0;  // 0=IDLE, 1=MOVING_LEFT, 2=MOVING_RIGHT, 10=special, 11=block
