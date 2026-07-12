@@ -750,10 +750,18 @@ public:
                 // Skip moves with no filename or no template
                 if (move.filename.empty() || move.template_name.empty()) continue;
                 // Skip Titan moves (player is not a Titan)
-                if (move.template_name.find("Titan") != std::string::npos) continue;
+                // Note: "NotTitan" contains "Titan" as substring, so check
+                // for "Titan" but NOT preceded by "Not".
+                {
+                    size_t titan_pos = move.template_name.find("Titan");
+                    if (titan_pos != std::string::npos) {
+                        if (titan_pos < 3 || move.template_name.substr(titan_pos - 3, 3) != "Not") {
+                            continue;  // Real Titan move, skip
+                        }
+                    }
+                }
                 // Match move_type (Punch or Kick)
                 if (move.move_type != cur_move_type) continue;
-                // Match key_count:
                 //   - If in_basic_attack (combo scenario): allow 3key
                 //   - Otherwise: only 1key and 2key moves
                 if (in_basic_attack) {
@@ -768,11 +776,10 @@ public:
                 // Match weapon (Unarmed or Fists or empty)
                 if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
                     move.tactic_weapon.find("Fists") == std::string::npos) continue;
-                // Check distance condition
-                if (move.has_distance_cond) {
-                    if (move.distance_max > 0 && dist_to_enemy > move.distance_max) continue;
-                    if (move.distance_min > 0 && dist_to_enemy < move.distance_min) continue;
-                }
+                // Check distance condition (only from main <Conditions>, not <Tactics>)
+                // Note: <Tactics><Distance> is for AI move selection, not player.
+                // We skip distance check entirely — player can attack at any distance.
+                // (The original game uses distance only for AI tactic selection.)
                 // Check weapon subtype lock (e.g. DoublePunch requires Fists)
                 // For now, we assume player has Fists equipped, so Fists-locked moves pass.
                 // Other weapon subtypes are not yet supported.
@@ -856,7 +863,8 @@ public:
                     if (move.key_count != 1) continue;
                     if (move.direction != cur_direction) continue;
                     // Skip Titan moves (player is not a Titan)
-                    if (move.template_name.find("Titan") != std::string::npos) continue;
+                    if (move.template_name.find("Titan") != std::string::npos &&
+                        move.template_name.find("NotTitan") == std::string::npos) continue;
                     // Match Jump moves or MOVE type (not Wall, not Punch/Kick)
                     if (move.template_name.find("Wall") != std::string::npos) continue;
                     if (!move.is_jump && move.move_type != "Jump" &&
@@ -910,7 +918,8 @@ public:
                     if (move.is_jump) continue;
                     if (move.move_type == "Punch" || move.move_type == "Kick") continue;
                     // Skip Titan moves (they require TitanGiantSword weapon)
-                    if (move.template_name.find("Titan") != std::string::npos) continue;
+                    if (move.template_name.find("Titan") != std::string::npos &&
+                        move.template_name.find("NotTitan") == std::string::npos) continue;
                     // Weapon filter — only allow Fists or empty
                     if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
                         move.tactic_weapon.find("Fists") == std::string::npos) continue;
