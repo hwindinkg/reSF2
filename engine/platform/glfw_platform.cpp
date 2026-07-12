@@ -407,18 +407,25 @@ bool GlfwPlatform::poll_events() {
     }
     // Don't reset keys_just_pressed/released here — do it AFTER glfwPollEvents()
     // so GLFW callbacks during glfwPollEvents() can set them.
-    impl_->glfw_key_consumed_.fill(false);  // reset consumed flag for new frame
+    // NOTE: glfw_key_consumed_ is NOT reset here — it's reset when
+    // GetAsyncKeyState detects the key was released (transition down→up).
     impl_->input.mouse_delta_x = 0;
     impl_->input.mouse_delta_y = 0;
     impl_->input.mouse_wheel = 0.0f;
 
     glfwPollEvents();
 
-    // Now reset just_pressed/released — but ONLY for keys that GetAsyncKeyState
-    // will handle. GLFW callbacks may have already set some during glfwPollEvents().
-    // We save the GLFW-set values and merge them after GetAsyncKeyState.
-    auto glfw_just_pressed = impl_->input.keys_just_pressed;
-    auto glfw_just_released = impl_->input.keys_just_released;
+    // Now reset just_pressed/released for GetAsyncKeyState cycle.
+    // GLFW callbacks during glfwPollEvents() may have set some.
+    // Only keep GLFW-set values (identified by glfw_key_consumed_ flag).
+    // Discard any stale values from previous frame.
+    std::array<bool, kMaxKeys> glfw_just_pressed{};
+    std::array<bool, kMaxKeys> glfw_just_released{};
+    for (size_t i = 0; i < kMaxKeys; ++i) {
+        if (impl_->glfw_key_consumed_[i] && impl_->input.keys_just_pressed[i]) {
+            glfw_just_pressed[i] = true;  // genuine GLFW press this frame
+        }
+    }
     impl_->input.keys_just_pressed.fill(false);
     impl_->input.keys_just_released.fill(false);
 
@@ -465,8 +472,10 @@ bool GlfwPlatform::poll_events() {
         // GetAsyncKeyState can miss fast taps, but GLFW callback catches them.
         if (down && !was_down && !impl_->input.keys_just_pressed[i]) {
             impl_->input.keys_just_pressed[i] = true;
+            impl_->glfw_key_consumed_[i] = true;  // prevent GLFW re-trigger
         } else if (!down && was_down) {
             impl_->input.keys_just_released[i] = true;
+            impl_->glfw_key_consumed_[i] = false;  // reset for next press
         }
         impl_->input.keys_down[i] = down;
         impl_->prev_keys_down_[i] = down;
