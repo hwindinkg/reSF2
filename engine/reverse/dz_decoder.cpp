@@ -188,7 +188,17 @@ struct DzProbTables {
 
 std::vector<uint8_t> DzDecompressor::decompress(const uint8_t* compressed, size_t comp_size,
                                                   size_t uncomp_size) {
-    if (comp_size < 4 || uncomp_size == 0) return {};
+    if (comp_size < 4 || uncomp_size == 0) {
+        std::fprintf(stderr, "[DZ] decompress: invalid input (comp=%zu, uncomp=%zu)\n",
+                     comp_size, uncomp_size);
+        return {};
+    }
+
+    std::fprintf(stderr, "[DZ] decompress: comp=%zu, uncomp=%zu\n", comp_size, uncomp_size);
+    std::fprintf(stderr, "[DZ] first 16 bytes: ");
+    for (size_t i = 0; i < 16 && i < comp_size; ++i)
+        std::fprintf(stderr, "%02x ", compressed[i]);
+    std::fprintf(stderr, "\n");
 
     std::vector<uint8_t> output;
     output.reserve(uncomp_size);
@@ -199,63 +209,58 @@ std::vector<uint8_t> DzDecompressor::decompress(const uint8_t* compressed, size_
     DzProbTables probs;
     probs.init();
 
-    // 5-byte context window
     uint8_t window[5] = {0, 0, 0, 0, 0};
     int window_pos = 0;
+    int literal_count = 0, match_count = 0, iterations = 0;
+    int max_iter = (int)uncomp_size * 10;
 
-    while (output.size() < uncomp_size && rc.pos < comp_size) {
-        // Update window with last output byte
+    while (output.size() < uncomp_size && rc.pos < comp_size && iterations < max_iter) {
+        iterations++;
         if (!output.empty()) {
             window[window_pos] = output.back();
             window_pos = (window_pos + 1) % 5;
         }
-
-        // Compute context hash
         uint32_t ctx = crc32_hash(window);
         uint32_t table_idx = ctx % 64;
-
-        // Decode is-match flag
         int is_match = rc.decode_bit(probs.tables[0][table_idx]);
 
         if (!is_match) {
-            // Literal byte
+            literal_count++;
             uint8_t prev_byte = output.empty() ? 0 : output.back();
             uint8_t symbol = 0;
             for (int bit = 0; bit < 8; ++bit) {
                 int b = rc.decode_bit(probs.literal_probs[prev_byte][bit]);
-                symbol = (symbol << 1) | b;
+                symbol = (symbol << 1) | (uint8_t)b;
             }
             output.push_back(symbol);
         } else {
-            // Match: decode length and offset
-            // Length: bit-tree of 4 levels (values 0..15, then +2 = 2..17)
+            match_count++;
             uint32_t len_code = rc.decode_bit_tree(probs.match_len_probs, 4);
             uint32_t match_len = len_code + 2;
-
-            // Offset: bit-tree of 6 levels (values 0..63)
             uint32_t offset_code = rc.decode_bit_tree(probs.offset_probs, 6);
             uint32_t match_offset = offset_code + 1;
-
             if (match_offset > output.size()) {
-                // Invalid match
-                std::fprintf(stderr, "[DZ] Invalid match: offset=%u, output_size=%zu\n",
-                             match_offset, output.size());
+                std::fprintf(stderr, "[DZ] Invalid match: off=%u, out=%zu (lit=%d,mat=%d,iter=%d)\n",
+                             match_offset, output.size(), literal_count, match_count, iterations);
                 return {};
             }
-
-            // Copy match
             size_t src_pos = output.size() - match_offset;
-            for (uint32_t i = 0; i < match_len && output.size() < uncomp_size; ++i) {
+            for (uint32_t i = 0; i < match_len && output.size() < uncomp_size; ++i)
                 output.push_back(output[src_pos++]);
-            }
         }
     }
 
-    if (output.size() != uncomp_size) {
-        std::fprintf(stderr, "[DZ] Size mismatch: expected %zu, got %zu\n",
-                     uncomp_size, output.size());
+    std::fprintf(stderr, "[DZ] result: %zu/%zu (lit=%d,mat=%d,iter=%d,in=%zu/%zu)\n",
+                 output.size(), uncomp_size, literal_count, match_count, iterations, rc.pos, comp_size);
+    if (!output.empty()) {
+        std::fprintf(stderr, "[DZ] output first 32: ");
+        for (size_t i = 0; i < 32 && i < output.size(); ++i)
+            std::fprintf(stderr, "%02x ", output[i]);
+        std::fprintf(stderr, "\n[DZ] as text: %.60s\n", output.data());
     }
-
+    if (output.size() != uncomp_size) {
+        std::fprintf(stderr, "[DZ] Size mismatch: exp=%zu got=%zu\n", uncomp_size, output.size());
+    }
     return output;
 }
 

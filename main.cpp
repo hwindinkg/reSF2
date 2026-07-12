@@ -621,25 +621,8 @@ public:
         // Also keep Space/K as fallback for testing
         if (input.keys_just_pressed[(size_t)plat::Key::Space]) punch_pressed = true;
         if (input.keys_just_pressed[(size_t)plat::Key::K]) kick_pressed = true;
-
-        // Sticky key buffer for O/P: GetAsyncKeyState can miss very fast
-        // taps on some systems. If a key was pressed in the last 150ms but
-        // not consumed (e.g., during an attack), replay it now.
-        uint32_t now_ms = platform_->now_ms();
-        if (punch_pressed) last_punch_seen_ms_ = now_ms;
-        if (kick_pressed) last_kick_seen_ms_ = now_ms;
-        if (!punch_pressed && last_punch_seen_ms_ > 0 &&
-            (now_ms - last_punch_seen_ms_) < 150 &&
-            hit_anim_ == 0 && move_state_ < 10) {
-            punch_pressed = true;
-            last_punch_seen_ms_ = 0;  // consume
-        }
-        if (!kick_pressed && last_kick_seen_ms_ > 0 &&
-            (now_ms - last_kick_seen_ms_) < 150 &&
-            hit_anim_ == 0 && move_state_ < 10) {
-            kick_pressed = true;
-            last_kick_seen_ms_ = 0;  // consume
-        }
+        // Note: Removed sticky key buffer — it caused unwanted repeat attacks.
+        // GetAsyncKeyState is reliable; the original issue was elsewhere.
 
         // Track step animation play time (prevents tap-to-cancel)
         if (move_state_ == 1 || move_state_ == 2) {
@@ -870,8 +853,11 @@ public:
                 }
             }
 
-            // Duck: S tap with no direction (Down, not DownForward/DownBack)
-            if (down_pressed && !key_forward && !key_back) {
+            // Duck: S held (or just pressed) with no direction
+            // Original game: holding S keeps you ducking. If you were attacking
+            // and the attack ends while S is held, you immediately duck again.
+            bool duck_input = key_down && !key_forward && !key_back;
+            if (duck_input && (move_state_ == 0 || move_state_ == 11)) {
                 // Find Duck move (1key|Down|NotTitan, Type=MOVE)
                 const MoveDef* duck_move = nullptr;
                 for (auto& [name, move] : moves_) {
@@ -888,14 +874,17 @@ public:
                         duck_move = &move;
                     }
                 }
-                if (duck_move && current_anim_ != duck_move->filename.substr(0, duck_move->filename.size()-4)) {
-                    std::string anim_name = duck_move->filename;
-                    if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
-                        anim_name = anim_name.substr(0, anim_name.size()-4);
-                    play_animation(anim_name, true);
-                    current_move_ = duck_move->name;
-                    move_state_ = 11;
-                    duck_play_time_ = 0;
+                if (duck_move) {
+                    std::string duck_anim_name = duck_move->filename;
+                    if (duck_anim_name.size() > 4 && duck_anim_name.substr(duck_anim_name.size()-4) == ".bin")
+                        duck_anim_name = duck_anim_name.substr(0, duck_anim_name.size()-4);
+                    // Only switch animation if not already ducking
+                    if (move_state_ != 11 || current_anim_ != duck_anim_name) {
+                        play_animation(duck_anim_name, true);
+                        current_move_ = duck_move->name;
+                        move_state_ = 11;
+                        duck_play_time_ = 0;
+                    }
                 }
             }
         }
@@ -963,10 +952,11 @@ public:
             move_state_ = 0;
             need_switch_to_idle_ = true;
         }
-        // Exit duck state when Down released AND min duration played
+        // Exit duck state when Down released
+        // No minimum duration — original game allows immediate release
         if (move_state_ == 11) {
             duck_play_time_ += dt;
-            if (!key_down && duck_play_time_ >= 300) {
+            if (!key_down && duck_play_time_ >= 100) {
                 move_state_ = 0;
                 need_switch_to_idle_ = true;
             }
@@ -1943,42 +1933,27 @@ private:
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
         // Y normalization: keep feet on floor across all animations.
-        // Use SMOOTHED interpolation to prevent visual jumps when switching
-        // between animations with different NPivot Y values.
         // Jump height is handled by jump_y_offset_ (root motion Y).
         //
-        // During jump/flip animations, we still apply y_adjust to keep feet
-        // on floor during the crouch phase (start/end of jump). The
-        // jump_y_offset_ handles the airborne phase (pushes character up
-        // when npivot_y > rest_npivot_y).
-        //
-        // When airborne (npivot_y > rest_npivot_y), y_adjust would pull the
-        // character down (feet to floor), which is wrong during a jump.
-        // So we only apply y_adjust when NOT airborne.
+        // During jump/flip animations, y_adjust must be 0 for ALL frames.
+        // The jump_y_offset_ handles the full Y position (including crouch
+        // phase where offset is negative). If y_adjust were applied during
+        // crouch, it would conflict with jump_y_offset_ and cause snapping.
         bool is_jump_render = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                                current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                                current_anim_ == "back_handflip" ||
                                current_anim_ == "air_punch" || current_anim_ == "air_axe_kick");
-        // Check if airborne: npivot_y > rest_npivot_y means character is
-        // higher than standing position (jumping up)
-        auto pivot_it_render = skeleton_nodes_.find("NPivot");
-        float rest_npivot_y_render = pivot_it_render != skeleton_nodes_.end() ? pivot_it_render->second.y : 169.48f;
-        bool is_airborne = is_jump_render && jump_y_offset_ > 0;
-        if (is_airborne) {
-            // During airborne phase, don't apply y_adjust — let jump_y_offset
-            // handle the height. Feet should be off the floor during jump.
+        if (is_jump_render) {
+            // During jumps, jump_y_offset_ handles Y position (can be negative
+            // during crouch, positive during airborne). No y_adjust.
             y_adjust_smoothed_ = 0;
         } else {
-            // During ground phase (crouch, stand, land), apply y_adjust
-            // to keep feet on floor.
             float ly_lowest = pivot_local_y;
             for (auto& [name, pos] : anim_node_pos_) {
                 if (pos.second < ly_lowest) ly_lowest = pos.second;
             }
             const float REF_FEET_LY = 64.60f;
             float target_y_adjust = REF_FEET_LY - ly_lowest;
-            // INSTANT snap (no smoothing). The original game uses MoveInside
-            // pivot alignment which is instant.
             y_adjust_smoothed_ = target_y_adjust;
         }
         float world_cx = player_pos_x_;
@@ -2850,19 +2825,20 @@ private:
             prev_frame_idx_ = -1;
         }
 
-        // Y root motion: absolute offset from REST POSE NPivot Y.
-        // The .bin animations store world positions where NPivot's Y varies:
-        //   - Rest pose (standing): NPivot Y ≈ 169.48 (from skeleton.xml)
-        //   - Jump start (crouching): NPivot Y ≈ 106.21
-        //   - Jump peak: NPivot Y ≈ 243.93
-        //   - Back_flip end: NPivot Y ≈ 106.21 (still crouching)
+        // Y root motion during jump/flip animations.
+        // The .bin stores absolute NPivot Y values:
+        //   - Rest/standing: ~169.48
+        //   - Crouch (jump start/end): ~106.21
+        //   - Jump peak: ~243.93
         //
-        // jump_y_offset should be:
-        //   - 0 when crouching/standing (npivot_y <= rest_y) — y_adjust handles feet
-        //   - positive when airborne (npivot_y > rest_y) — character is jumping up
+        // We use the FULL offset (npivot_y - rest_y), which can be negative
+        // during crouch. This gives perfectly smooth motion throughout the
+        // jump: crouch down → rise → peak → fall → crouch.
         //
-        // This prevents the character from sinking during crouch (negative offset
-        // would push the character down, but y_adjust keeps feet on floor).
+        // y_adjust is NOT applied during jumps — the offset alone positions
+        // the character correctly. The feet stay at floor level because
+        // the crouch animation brings the feet closer to NPivot (smaller
+        // negative offset), compensating for the lower NPivot position.
         bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                             current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                             current_anim_ == "back_handflip" ||
@@ -2870,10 +2846,7 @@ private:
         if (is_jump_anim && anim_anchor_set_) {
             auto pivot_it = skeleton_nodes_.find("NPivot");
             float npivot_rest_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
-            float raw_offset = npivot_y - npivot_rest_y;
-            // Only apply positive offset (airborne). When crouching (negative),
-            // let y_adjust handle keeping feet on floor.
-            jump_y_offset_ = raw_offset > 0 ? raw_offset : 0;
+            jump_y_offset_ = npivot_y - npivot_rest_y;  // full offset, can be negative
         } else {
             jump_y_offset_ = 0;
         }
