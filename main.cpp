@@ -621,6 +621,13 @@ public:
         // Also keep Space/K as fallback for testing
         if (input.keys_just_pressed[(size_t)plat::Key::Space]) punch_pressed = true;
         if (input.keys_just_pressed[(size_t)plat::Key::K]) kick_pressed = true;
+
+        // Debug: log key state and what blocks input
+        if (punch_pressed || kick_pressed) {
+            std::printf("[KEY] %s%s pressed — hit_anim=%u is_uninterrupt=%d move_state=%d current_move='%s'\n",
+                        punch_pressed ? "O" : "", kick_pressed ? "P" : "",
+                        hit_anim_, is_uninterrupt_ ? 1 : 0, move_state_, current_move_.c_str());
+        }
         // Note: Removed sticky key buffer — it caused unwanted repeat attacks.
         // GetAsyncKeyState is reliable; the original issue was elsewhere.
 
@@ -866,6 +873,12 @@ public:
             // and the attack ends while S is held, you immediately duck again.
             bool duck_input = key_down && !key_forward && !key_back;
             if (duck_input && (move_state_ == 0 || move_state_ == 11)) {
+                // Debug: log duck attempt
+                static int duck_log_count = 0;
+                if (duck_log_count < 5) {
+                    std::printf("[DUCK] attempt — move_state=%d key_down=%d\n", move_state_, key_down ? 1 : 0);
+                    duck_log_count++;
+                }
                 // Find Duck move (1key|Down|NotTitan, Type=MOVE)
                 const MoveDef* duck_move = nullptr;
                 for (auto& [name, move] : moves_) {
@@ -1123,11 +1136,11 @@ public:
                                 auto pivot_it = skeleton_nodes_.find("NPivot");
                                 float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
                                 float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx);
-                                float limb_wy = player_pos_y_ + y_adjust_smoothed_ + jump_y_offset_ + (limb_ly - pivot_ly);
+                                float limb_wy = player_pos_y_ + y_adjust_smoothed_ + (limb_ly - pivot_ly);
 
                                 // Bag position from Verlet
                                 float bag_cx = location_->enemy_x - 983.0f;
-                                float bag_cy = location_->enemy_y + 81.0f + y_adjust_smoothed_;
+                                float bag_cy = location_->enemy_y + 81.0f;
                                 auto bv_it = bag_verlet_.find("NPivot");
                                 if (bv_it != bag_verlet_.end()) {
                                     bag_cx = bv_it->second.x; bag_cy = bv_it->second.y;
@@ -1977,53 +1990,26 @@ private:
         auto pivot_it = skeleton_nodes_.find("NPivot");
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
-        // Y normalization: position character so NPivot is at correct height.
-        //
-        // The .bin animation stores ABSOLUTE world Y for each node.
+        // Y normalization: player_pos_y_ is the NPivot world position.
+        // The .bin animation stores absolute node Y relative to NPivot.
         // anim_node_pos_[name].y = abs_y - npivot_y + npivot_rest_y
         //
         // In resolve_body_node: sy = world_cy + (ly - pivot_local_y)
         //   = world_cy + (abs_y - npivot_y + npivot_rest_y - npivot_rest_y)
         //   = world_cy + abs_y - npivot_y
         //
-        // For feet to be at floor when standing:
-        //   world_cy + abs_y_feet - npivot_y = floor_y
-        //   world_cy = floor_y - abs_y_feet + npivot_y
+        // We want: NPivot at player_pos_y_ (the game-defined player position).
+        // For NPivot: abs_y = npivot_y, so sy = world_cy + 0 = world_cy.
+        // So world_cy should = player_pos_y_ (NPivot world position).
         //
-        // When standing: npivot_y=169.48, feet_y=2
-        //   y_adjust = npivot_y - feet_y = 167.48
-        // When crouching: npivot_y=106.21, feet_y=2
-        //   y_adjust = npivot_y - feet_y = 104.21 (character lower, feet on floor)
-        // When jumping: npivot_y=243.93, feet_y=189
-        //   y_adjust = npivot_y - feet_y = 54.78 (character higher, feet up)
+        // y_adjust = 0 when NPivot is at rest pose (169.48).
+        // When NPivot moves (crouch/jump), we need to shift world_cy by
+        // the NPivot Y delta: y_adjust = anim_npivot_bin_y_ - npivot_rest_y
         //
-        // But we don't know feet_y directly. Instead, use NPivot Y:
-        //   y_adjust = npivot_y - 2 (approximate, feet_y ≈ 2 when on floor)
-        //
-        // For jumps: NPivot goes up, so y_adjust increases, character rises.
-        // For crouch: NPivot goes down, so y_adjust decreases, character lowers.
-        // This gives correct Y position for ALL animations.
-        //
-        // Get current animated NPivot Y from anim_node_pos_
-        float current_npivot_y = pivot_local_y;  // default: rest pose
-        auto npivot_anim = anim_node_pos_.find("NPivot");
-        if (npivot_anim != anim_node_pos_.end()) {
-            // anim_node_pos_["NPivot"].y = 0 + npivot_rest_y (because abs_y - npivot_y = 0)
-            // Actually NPivot's local position is always (0, npivot_rest_y) because
-            // local = abs - npivot = 0. So we need npivot_y from the animation directly.
-            // We stored it in anim_npivot_bin_y_ during update_animation.
-            current_npivot_y = anim_npivot_bin_y_;
-        }
-        // y_adjust positions NPivot at floor + (npivot_y - feet_offset)
-        // feet_offset ≈ 2 (feet are 2 units above 0 in world coords when standing)
-        // Actually: when standing, NPivot is at 169.48, feet at 2.
-        // We want: world_cy + abs_y_feet - npivot_y = floor_y
-        //   world_cy = floor_y + npivot_y - abs_y_feet
-        //   y_adjust = npivot_y - abs_y_feet
-        // But abs_y_feet varies. Use approximation: y_adjust = npivot_y - 2
-        // This keeps feet at floor when standing/crouching (feet_y ≈ 2)
-        // and lifts character during jump (npivot_y high → y_adjust high)
-        y_adjust_smoothed_ = current_npivot_y - 2.0f;
+        // This keeps the character anchored to player_pos_y_ while allowing
+        // crouch (NPivot down → y_adjust negative → character lower)
+        // and jump (NPivot up → y_adjust positive → character higher).
+        y_adjust_smoothed_ = anim_npivot_bin_y_ - pivot_local_y;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
@@ -2233,7 +2219,7 @@ private:
         // Same coordinate system as player — no Y-invert, use params Y directly
         // with the same -45 offset to align with the floor.
         float bag_cx = location_ ? (location_->enemy_x - 983.0f) : 0.0f;
-        float bag_cy = location_ ? (location_->enemy_y + 81.0f + y_adjust_smoothed_) : 0.0f;
+        float bag_cy = location_ ? (location_->enemy_y + 81.0f) : 0.0f;
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
         // Initialize nodes: world position = bag_center + (node_local - NPivot_local)

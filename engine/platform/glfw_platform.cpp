@@ -232,22 +232,12 @@ struct GlfwPlatform::Impl {
         Impl* self = static_cast<Impl*>(glfwGetWindowUserPointer(w));
         if (!self) return;
 
-#ifdef _WIN32
-        // On Windows we ignore GLFW key events entirely and rely on
-        // GetAsyncKeyState() polled in poll_events(). GLFW on Win10 19044
-        // emits spurious GLFW_RELEASE events for held keys, which corrupts
-        // keys_down. We still receive other GLFW callbacks (mouse, focus,
-        // close) normally.
-        (void)key;
-        (void)scancode;
-        (void)action;
-        (void)mods;
-        return;
-#else
+        // On ALL platforms: use GLFW key callback for just_pressed/just_released
+        // to catch fast key presses that GetAsyncKeyState might miss.
         int idx = glfw_to_key_index(key);
         if (idx < 0 || idx >= static_cast<int>(kMaxKeys)) return;
 
-        if (action == GLFW_PRESS) {
+        if (action == GLFW_PRESS || action == GLFW_REPEAT) {
             if (!self->input.keys_down[idx]) {
                 self->input.keys_just_pressed[idx] = true;
             }
@@ -258,8 +248,6 @@ struct GlfwPlatform::Impl {
             }
             self->input.keys_down[idx] = false;
         }
-        // GLFW_REPEAT: do nothing — key stays down
-#endif
     }
 
     static void mouse_button_callback(GLFWwindow* w, int button, int action, int mods) {
@@ -446,7 +434,9 @@ bool GlfwPlatform::poll_events() {
         bool down = (state & 0x8000) != 0;
         bool was_down = impl_->prev_keys_down_[i];
 
-        if (down && !was_down) {
+        // Only set keys_just_pressed if GLFW callback didn't already set it.
+        // GetAsyncKeyState can miss fast taps, but GLFW callback catches them.
+        if (down && !was_down && !impl_->input.keys_just_pressed[i]) {
             impl_->input.keys_just_pressed[i] = true;
         } else if (!down && was_down) {
             impl_->input.keys_just_released[i] = true;
@@ -458,6 +448,12 @@ bool GlfwPlatform::poll_events() {
     // Non-Windows path: rely on the GLFW key callback (registered in
     // init()) for keys_down / keys_just_pressed / keys_just_released.
     // Sticky-keys mode ensures we never miss a PRESS event between polls.
+    glfwSetInputMode(impl_->window, GLFW_STICKY_KEYS, GLFW_TRUE);
+#endif
+
+    // On Windows: also enable sticky keys for GLFW callbacks to catch
+    // fast key presses that GetAsyncKeyState might miss between frames.
+#ifdef _WIN32
     glfwSetInputMode(impl_->window, GLFW_STICKY_KEYS, GLFW_TRUE);
 #endif
 
