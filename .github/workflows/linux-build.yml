@@ -33,6 +33,8 @@ jobs:
             -DRESF2_USE_GLFW=ON \
             -DRESF2_BUILD_TESTS=ON \
             -DRESF2_BUILD_TOOLS=OFF \
+            -DGLFW_BUILD_WAYLAND=OFF \
+            -DGLFW_BUILD_X11=ON \
             > docs/_ci_logs/configure.log 2>&1
           echo "configure_rc=$?" | tee docs/_ci_logs/configure_rc.txt
           tail -c 60000 docs/_ci_logs/configure.log
@@ -44,7 +46,7 @@ jobs:
           set +e
           cmake --build build --parallel > docs/_ci_logs/build.log 2>&1
           echo "build_rc=$?" | tee docs/_ci_logs/build_rc.txt
-          tail -c 120000 docs/_ci_logs/build.log
+          tail -c 200000 docs/_ci_logs/build.log
           set -e
 
       - name: Tests (ctest)
@@ -55,6 +57,13 @@ jobs:
           echo "ctest_rc=$?" | tee docs/_ci_logs/ctest_rc.txt
           tail -c 40000 docs/_ci_logs/ctest.log
           set -e
+
+      - name: Fail job if build broke
+        run: |
+          cfg=$(cat docs/_ci_logs/configure_rc.txt | grep -o '[0-9]*')
+          bld=$(cat docs/_ci_logs/build_rc.txt | grep -o '[0-9]*')
+          echo "configure_rc=$cfg build_rc=$bld"
+          test "$cfg" = "0" && test "$bld" = "0"
 
       - name: Commit logs
         if: always()
