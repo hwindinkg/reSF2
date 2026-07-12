@@ -17,10 +17,10 @@ jobs:
   apply:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout fix/mainfix
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: fix/mainfix
+          ref: main
           fetch-depth: 0
 
       - name: Show g++
@@ -72,13 +72,14 @@ jobs:
           tail -c 40000 /tmp/tu.log
           set -e
 
-      - name: Commit patched main.cpp to fix/mainfix
+      - name: Commit on main base, force-push to ci branch
         run: |
           rc=$(grep -o '[0-9]*' /tmp/tu_rc.txt | head -1)
           if [ "$rc" != "0" ]; then echo "syntax failed"; exit 1; fi
           git config user.name "reSF2 ci"
           git config user.email "ci@resf2.local"
           git add main.cpp
-          git commit -m "fix(main): stale current_move_ guard + extended [ROOT] diag log + y_adjust heuristic warning [HEURISTIC-TODO]" || { echo "no change"; exit 0; }
-          git push origin HEAD:fix/mainfix
-          echo "PUSHED to fix/mainfix"
+          git commit -m "fix(main): stale current_move_ guard + extended [ROOT] diag log + y_adjust heuristic warning [HEURISTIC-TODO]" || { echo "no change"; exit 1; }
+          git push --force origin HEAD:ci/linux-build-check
+          echo "FORCE-PUSHED main+patch to ci/linux-build-check"
+          git rev-parse HEAD | tee /tmp/newsha.txt
