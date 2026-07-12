@@ -233,6 +233,19 @@ struct MoveDef {
     bool is_idle = false;         // Template contains "Idle"
     bool is_not_titan = false;    // Template contains "NotTitan"
     std::string tactic_weapon;    // TacticWeapon attribute (e.g. "Fists")
+
+    // Distance condition (from <Distance Min=".." Max=".." Axis="X">)
+    // Used to pick correct move based on enemy distance.
+    // Example: LowKick (Max=100) vs Sweep (Max=300) — pick by distance.
+    float distance_min = 0.0f;
+    float distance_max = 0.0f;  // 0 = no limit
+    bool has_distance_cond = false;
+
+    // Locks (from <Locks> section)
+    // Perk required (e.g. PERK_DOUBLE_SWEEP). Empty = no perk required.
+    std::string required_perk;
+    // Weapon subtype required (e.g. "Fists"). Empty = any weapon.
+    std::string required_weapon_subtype;
 };
 
 struct AnimationData {
@@ -641,11 +654,41 @@ public:
         //   punch_pressed (O) → Punch
         //   kick_pressed (P) → Kick
         //
-        // Double-tap detection:
-        //   If same key pressed twice within 300ms → 3key (DoublePunch, DoubleSweep)
+        // Move type detection (from moves.xml templates):
+        //   1key: Just tap Punch/Kick (no direction hold)
+        //   2key: Hold direction + tap Punch/Kick (e.g. Sweep = S+P)
+        //   3key: Combos — triggered when CURRENT animation is from a 1key
+        //         or 2key basic attack. This is the "second tap" combo.
+        //         Example: HeavyPunch (1key) → tap Punch again → DoublePunch (3key)
         //
         // Selection: find ALL moves matching (direction, move_type, key_count,
         // is_unarmed, TacticWeapon=Fists or empty). Pick highest priority.
+        // For moves with <Distance> condition, only match if enemy is in range.
+
+        // === AIR ATTACKS (W+O / W+P during jump) ===
+        // If current animation is a Jump (jump, front_flip, back_flip, etc.),
+        // pressing Punch/Kick transitions to air_punch or air_axe_kick.
+        // This is the original game's behavior: a short jump smoothly
+        // transitions into an air attack.
+        if (hit_anim_ == 0 && (punch_pressed || kick_pressed)) {
+            bool in_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
+                                 current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
+                                 current_anim_ == "back_handflip");
+            if (in_jump_anim && animations_.count("air_punch") && animations_.count("air_axe_kick")) {
+                std::string air_anim = punch_pressed ? "air_punch" : "air_axe_kick";
+                std::printf("[COMBAT] AIR %s -> %s (anim '%s')\n",
+                            punch_pressed ? "Punch" : "Kick",
+                            air_anim == "air_punch" ? "AirPunch" : "AxeKick",
+                            air_anim.c_str());
+                play_animation(air_anim, false);
+                current_move_ = air_anim == "air_punch" ? "AirPunch" : "AxeKick";
+                int fc = animations_[air_anim].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                move_state_ = 10;
+                need_switch_to_idle_ = false;
+                goto after_combat;
+            }
+        }
 
         if ((punch_pressed || kick_pressed) && hit_anim_ == 0 && (move_state_ < 10 || move_state_ == 11)) {
             // Determine direction from key state
@@ -664,20 +707,29 @@ public:
             if (punch_pressed) cur_move_type = "Punch";
             else if (kick_pressed) cur_move_type = "Kick";
 
-            // Double-tap detection → 3key
-            uint32_t now = platform_->now_ms();
-            int cur_key_count = 1;
-            if (punch_pressed) {
-                if (cur_direction == "Forward" && last_punch_press_ms_ > 0 && (now - last_punch_press_ms_) < 300) {
-                    cur_key_count = 3;
+            // 3key combo detection: triggered when current animation is from
+            // a 1key or 2key basic attack (HeavyPunch, Sweep, etc.)
+            // The original game's 3key template requires:
+            //   CurrentAnimation Name="1key" OR Name="2key"
+            // Which means: the current move's template starts with "1key" or "2key".
+            bool in_basic_attack = false;
+            if (!current_move_.empty()) {
+                auto cur_move_it = moves_.find(current_move_);
+                if (cur_move_it != moves_.end()) {
+                    int cur_kc = cur_move_it->second.key_count;
+                    if (cur_kc == 1 || cur_kc == 2) {
+                        // Check if current attack animation is still playing
+                        // (hit_anim_ > 0 means attack in progress)
+                        in_basic_attack = true;
+                    }
                 }
-                last_punch_press_ms_ = now;
             }
-            if (kick_pressed) {
-                if (cur_direction == "Down" && last_kick_press_ms_ > 0 && (now - last_kick_press_ms_) < 300) {
-                    cur_key_count = 3;
-                }
-                last_kick_press_ms_ = now;
+
+            // Compute distance to enemy (bag) for distance-based move selection
+            float dist_to_enemy = 1000.0f;  // default: far
+            if (location_ && bag_model_) {
+                float bag_x = location_->enemy_x - 983.0f;
+                dist_to_enemy = std::abs(bag_x - player_pos_x_);
             }
 
             // Find best matching move from moves.xml
@@ -687,14 +739,31 @@ public:
                 if (move.filename.empty() || move.template_name.empty()) continue;
                 // Match move_type (Punch or Kick)
                 if (move.move_type != cur_move_type) continue;
-                // Match key_count (1key or 3key for double-tap)
-                if (cur_key_count == 3 && move.key_count != 3) continue;
-                if (cur_key_count == 1 && move.key_count == 3) continue;
+                // Match key_count:
+                //   - If in_basic_attack (combo scenario): allow 3key
+                //   - Otherwise: only 1key and 2key moves
+                if (in_basic_attack) {
+                    // 3key takes priority during basic attack
+                    if (move.key_count != 3) continue;
+                } else {
+                    // Not in basic attack: skip 3key moves
+                    if (move.key_count == 3) continue;
+                }
                 // Match direction
                 if (move.direction != cur_direction) continue;
                 // Match weapon (Unarmed or Fists or empty)
                 if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
                     move.tactic_weapon.find("Fists") == std::string::npos) continue;
+                // Check distance condition
+                if (move.has_distance_cond) {
+                    if (move.distance_max > 0 && dist_to_enemy > move.distance_max) continue;
+                    if (move.distance_min > 0 && dist_to_enemy < move.distance_min) continue;
+                }
+                // Check weapon subtype lock (e.g. DoublePunch requires Fists)
+                // For now, we assume player has Fists equipped, so Fists-locked moves pass.
+                // Other weapon subtypes are not yet supported.
+                if (!move.required_weapon_subtype.empty() &&
+                    move.required_weapon_subtype != "Fists") continue;
                 // Check if animation exists
                 std::string anim_name = move.filename;
                 if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
@@ -710,20 +779,17 @@ public:
                 std::string anim_name = best_move->filename;
                 if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
                     anim_name = anim_name.substr(0, anim_name.size()-4);
-                std::printf("[COMBAT] %s -> %s (anim '%s', prio=%d, tmpl='%s')\n",
+                std::printf("[COMBAT] %s%s -> %s (anim '%s', prio=%d, tmpl='%s', dist=%.1f)\n",
+                            in_basic_attack ? "[COMBO] " : "",
                             cur_move_type.c_str(), best_move->name.c_str(),
                             anim_name.c_str(), best_move->priority,
-                            best_move->template_name.c_str());
+                            best_move->template_name.c_str(), dist_to_enemy);
                 play_animation(anim_name, false);
                 current_move_ = best_move->name;
                 int fc = animations_[anim_name].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 0;
                 need_switch_to_idle_ = false;
-                if (cur_key_count == 3) {
-                    if (punch_pressed) last_punch_press_ms_ = 0;
-                    if (kick_pressed) last_kick_press_ms_ = 0;
-                }
                 goto after_combat;
             }
         }
@@ -1838,17 +1904,31 @@ private:
         // Use SMOOTHED interpolation to prevent visual jumps when switching
         // between animations with different NPivot Y values.
         // Jump height is handled by jump_y_offset_ (root motion Y).
-        float ly_lowest = pivot_local_y;
-        for (auto& [name, pos] : anim_node_pos_) {
-            if (pos.second < ly_lowest) ly_lowest = pos.second;
+        //
+        // IMPORTANT: During jump/flip animations, y_adjust must be 0.
+        // Otherwise it counteracts the jump (pushes character down when
+        // feet are close to NPivot, pulls up when feet are far below).
+        // The jump_y_offset alone handles the Y movement for jumps.
+        bool is_jump_render = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
+                               current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
+                               current_anim_ == "back_handflip" ||
+                               current_anim_ == "air_punch" || current_anim_ == "air_axe_kick");
+        if (is_jump_render) {
+            // During jumps, don't apply y_adjust — let jump_y_offset_ handle Y.
+            y_adjust_smoothed_ = 0;
+        } else {
+            float ly_lowest = pivot_local_y;
+            for (auto& [name, pos] : anim_node_pos_) {
+                if (pos.second < ly_lowest) ly_lowest = pos.second;
+            }
+            const float REF_FEET_LY = 64.60f;
+            float target_y_adjust = REF_FEET_LY - ly_lowest;
+            // INSTANT snap (no smoothing). The original game uses MoveInside
+            // pivot alignment which is instant — it reads the current frame's
+            // NPivot and adjusts immediately. Smoothing causes the "sliding"
+            // effect where feet float above floor for a few frames.
+            y_adjust_smoothed_ = target_y_adjust;
         }
-        const float REF_FEET_LY = 64.60f;
-        float target_y_adjust = REF_FEET_LY - ly_lowest;
-        // INSTANT snap (no smoothing). The original game uses MoveInside
-        // pivot alignment which is instant — it reads the current frame's
-        // NPivot and adjusts immediately. Smoothing causes the "sliding"
-        // effect where feet float above floor for a few frames.
-        y_adjust_smoothed_ = target_y_adjust;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_ + jump_y_offset_;
 
@@ -2483,6 +2563,47 @@ private:
                     move.uninterrupt_end = (int)tof(xml_attr(u_tag, "End"));
                 }
             }
+
+            // Parse Distance condition (from <Distance Min=".." Max=".." Axis="X">)
+            // Used to pick correct move based on enemy distance.
+            // Example: LowKick (Max=100) vs Sweep (no distance) — pick by distance.
+            ip = 0;
+            if ((ip = inner.find("<Distance ", 0)) != std::string::npos) {
+                auto te = inner.find(">", ip);
+                if (te != std::string::npos) {
+                    auto d_tag = inner.substr(ip, te - ip);
+                    auto dmin = xml_attr(d_tag, "Min");
+                    auto dmax = xml_attr(d_tag, "Max");
+                    if (!dmin.empty()) move.distance_min = tof(dmin);
+                    if (!dmax.empty()) move.distance_max = tof(dmax);
+                    move.has_distance_cond = true;
+                }
+            }
+
+            // Parse Locks section (perks, weapon subtype requirements)
+            // <Locks><Perk Name="PERK_DOUBLE_SWEEP"/></Locks>
+            // <Locks><Item Type="Weapon" SubType="Fists"/></Locks>
+            ip = 0;
+            if ((ip = inner.find("<Perk ", 0)) != std::string::npos) {
+                auto te = inner.find("/>", ip);
+                if (te != std::string::npos) {
+                    auto p_tag = inner.substr(ip, te - ip);
+                    auto pname = xml_attr(p_tag, "Name");
+                    if (!pname.empty()) move.required_perk = pname;
+                }
+            }
+            ip = 0;
+            while ((ip = inner.find("<Item ", ip)) != std::string::npos) {
+                auto te = inner.find("/>", ip);
+                if (te == std::string::npos) break;
+                auto i_tag = inner.substr(ip, te - ip);
+                auto itype = xml_attr(i_tag, "Type");
+                auto isub = xml_attr(i_tag, "SubType");
+                if (itype == "Weapon" && !isub.empty()) {
+                    move.required_weapon_subtype = isub;
+                }
+                ip = te + 2;
+            }
             
             if (!move.filename.empty()) {
                 moves_[move.name] = std::move(move);
@@ -2636,6 +2757,7 @@ private:
             current_anim_ == "jump" || current_anim_ == "jump_away" ||
             current_anim_ == "back_flip" || current_anim_ == "back_handflip" ||
             current_anim_ == "front_flip" ||
+            current_anim_ == "air_punch" || current_anim_ == "air_axe_kick" ||
             current_anim_ == "double_punch" || current_anim_ == "spinning_punch" ||
             current_anim_ == "front_kick" || current_anim_ == "back_kick" ||
             current_anim_ == "upper_cut" || current_anim_ == "high_punch";
@@ -2676,20 +2798,34 @@ private:
             prev_frame_idx_ = -1;
         }
 
-        // Y root motion: absolute offset from frame 0 NPivot Y.
-        // For jumps/flips: offset = NPivot Y - frame 0 NPivot Y.
-        // This handles the vertical arc of jumps.
-        // When animation finishes: force offset to 0 (character on ground).
-        // This fixes back_flip ending slightly above ground (Y[0]=92, Y[last]=106).
+        // Y root motion: absolute offset from REST POSE NPivot Y.
+        // The .bin animations store world positions where NPivot's Y varies:
+        //   - Rest pose (standing): NPivot Y ≈ 169.48 (from skeleton.xml)
+        //   - Jump start (crouching): NPivot Y ≈ 106.21
+        //   - Jump peak: NPivot Y ≈ 243.93
+        //   - Back_flip end: NPivot Y ≈ 106.21 (still crouching)
+        //
+        // Using `npivot_y - frame0_y` (the old approach) caused snaps when
+        // frame 0 Y != last frame Y (e.g. back_flip: 92.21 → 106.21).
+        //
+        // Using `npivot_y - rest_pose_y` (169.48) ensures:
+        //   - When character stands (NPivot Y = 169.48), offset = 0
+        //   - When character crouches (NPivot Y < 169.48), offset < 0 (lower)
+        //   - When character jumps (NPivot Y > 169.48), offset > 0 (higher)
+        //   - Transition to idle (NPivot Y = 169.48) is seamless (offset = 0)
+        //
+        // This also requires disabling y_adjust during jump animations,
+        // because y_adjust tries to keep feet on floor (counteracting jump).
         bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                             current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
-                            current_anim_ == "back_handflip");
+                            current_anim_ == "back_handflip" ||
+                            current_anim_ == "air_punch" || current_anim_ == "air_axe_kick");
         if (is_jump_anim && anim_anchor_set_) {
-            if (anim_finished) {
-                jump_y_offset_ = 0;
-            } else {
-                jump_y_offset_ = npivot_y - anim_root_anchor_y_;
-            }
+            // Use rest pose Y (skeleton NPivot Y) as the reference, not frame 0.
+            // This ensures the character's world Y is consistent with the rest pose.
+            auto pivot_it = skeleton_nodes_.find("NPivot");
+            float npivot_rest_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
+            jump_y_offset_ = npivot_y - npivot_rest_y;
         } else {
             jump_y_offset_ = 0;
         }
