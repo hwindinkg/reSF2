@@ -96,6 +96,16 @@ if(RESF2_USE_GLFW)
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    # [ORIGINAL] Sandboxes/CI without wayland-scanner must not enable the
+    # Wayland backend (GLFW 3.4 FetchContent hard-fails at configure time:
+    # "Failed to find wayland-scanner"). Force X11-only on Linux. Optional
+    # X11 components (Xcursor/Xrandr/Xinerama/Xi) are auto-disabled by
+    # GLFW's find_package(X11) when their headers are absent, so a reduced
+    # build still links against core X11.
+    if(NOT WIN32 AND NOT APPLE)
+        set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_X11    ON  CACHE BOOL "" FORCE)
+    endif()
     FetchContent_MakeAvailable(glfw)
 endif()
 

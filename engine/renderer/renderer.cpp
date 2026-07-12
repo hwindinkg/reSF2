@@ -3,6 +3,7 @@
 
 #include "stb_image.h"
 
+#include <algorithm>  // [ORIGINAL] std::min/std::max with initializer_list (draw_line_screen)
 #include <cmath>
 #include <cstdio>
 #include <cstring>
