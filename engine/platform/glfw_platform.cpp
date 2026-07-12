@@ -227,6 +227,7 @@ struct GlfwPlatform::Impl {
     // just_released) we need the previous frame's down-state per key.
     std::array<bool, kMaxKeys> prev_keys_down_{};
 #endif
+    std::array<bool, kMaxKeys> glfw_key_consumed_{};  // prevents spurious GLFW_PRESS re-trigger
 
     static void key_callback(GLFWwindow* w, int key, int scancode, int action, int mods) {
         Impl* self = static_cast<Impl*>(glfwGetWindowUserPointer(w));
@@ -236,14 +237,18 @@ struct GlfwPlatform::Impl {
         // On Windows: only use GLFW for just_pressed (fast tap detection).
         // Ignore GLFW_RELEASE entirely (spurious on Win10 19044).
         // Ignore GLFW_REPEAT (causes infinite key repeat).
+        // Use glfw_key_pressed_this_frame_ to prevent spurious GLFW_PRESS
+        // from setting just_pressed multiple times.
         if (action != GLFW_PRESS) return;
 
         int idx = glfw_to_key_index(key);
         if (idx < 0 || idx >= static_cast<int>(kMaxKeys)) return;
 
-        // Only set just_pressed if not already down (prevents repeat)
-        if (!self->input.keys_down[idx]) {
+        // Only set just_pressed if NOT already pressed this frame
+        // and NOT already down (GetAsyncKeyState from previous frame)
+        if (!self->glfw_key_consumed_[idx] && !self->input.keys_down[idx]) {
             self->input.keys_just_pressed[idx] = true;
+            self->glfw_key_consumed_[idx] = true;  // prevent re-trigger
         }
 #else
         int idx = glfw_to_key_index(key);
@@ -402,6 +407,7 @@ bool GlfwPlatform::poll_events() {
     }
     // Don't reset keys_just_pressed/released here — do it AFTER glfwPollEvents()
     // so GLFW callbacks during glfwPollEvents() can set them.
+    impl_->glfw_key_consumed_.fill(false);  // reset consumed flag for new frame
     impl_->input.mouse_delta_x = 0;
     impl_->input.mouse_delta_y = 0;
     impl_->input.mouse_wheel = 0.0f;
