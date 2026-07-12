@@ -1,0 +1,5 @@
+# Scenario 5: S+A — back roll. Expect floor-level Y + leftward X.
+frame 180 keydown S
+frame 180 keydown A
+frame 185 keyup S
+frame 185 keyup A

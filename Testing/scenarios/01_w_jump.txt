@@ -1,0 +1,3 @@
+# Scenario 1: W only — vertical jump. Expect render_y to rise above -89 then return.
+frame 180 keydown W
+frame 185 keyup W

@@ -1,0 +1,3 @@
+# Scenario 10: Idle, then press P.
+frame 180 keydown P
+frame 181 keyup P

@@ -197,6 +197,32 @@ public:
     using PauseCallback = std::function<void()>;
     virtual void set_pause_callback(PauseCallback cb) noexcept = 0;
     virtual void set_resume_callback(PauseCallback cb) noexcept = 0;
+
+    // ---- Deterministic input replay (DIAGNOSTIC) ----
+    //
+    // [DIAGNOSTIC] Loads a text script of timed keydown/keyup events that
+    // are applied ON TOP of the real platform input during poll_events().
+    // This does NOT replace the production input backend (GLFW callbacks on
+    // Linux, GetAsyncKeyState on Windows) — it merges scripted key state
+    // into the same InputState the game reads, so combat/movement logic
+    // exercises the identical code path as a human player.
+    //
+    // Script format (one event per line, '#' comments allowed):
+    //   frame <N> keydown <KEY>
+    //   frame <N> keyup <KEY>
+    // where <KEY> is a Key enum name (W,A,S,D,O,P,Space,ShiftLeft,...) and
+    // <N> is the 1-based frame index since on_init().
+    //
+    // Returns false on parse error (with a message on stderr). A successful
+    // load arms the script; it replays once and then the platform continues
+    // with real input only.
+    [[nodiscard]] virtual bool load_input_script(const std::string& path) noexcept = 0;
+
+    // [DIAGNOSTIC] Advance the input-script frame counter and apply any
+    // events scheduled for the new frame. Called once per gameplay frame
+    // (from host_update_gameplay), NOT from poll_events, so script frame N
+    // aligns with gameplay frame N (Boot/Loading frames don't count).
+    virtual void tick_input_script() noexcept = 0;
 };
 
 // ---------- Platform factory ----------
@@ -238,6 +264,8 @@ public:
     [[nodiscard]] std::string save_dir() const override;
     void set_pause_callback(PauseCallback cb) noexcept override;
     void set_resume_callback(PauseCallback cb) noexcept override;
+    [[nodiscard]] bool load_input_script(const std::string& path) noexcept override;
+    void tick_input_script() noexcept override;
 
     // Test helpers (not in the base interface)
     void inject_quit_request() noexcept { quit_requested_ = true; }
