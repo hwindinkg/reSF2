@@ -103,15 +103,10 @@ static std::filesystem::path get_exe_dir() {
 static std::vector<std::filesystem::path> model_paths(const std::string& asset_root, const char* filename) {
     namespace fs = std::filesystem;
     auto root = fs::path(asset_root);
-    auto exe = get_exe_dir();
     return {
         root / "models" / filename,
         root / "assets" / "models" / filename,
         root / "assets" / "assets" / "models" / filename,  // sf2/assets/assets/models/
-        exe / ".." / ".." / ".." / "assets" / "models" / filename,
-        exe / ".." / "assets" / "models" / filename,
-        exe / "assets" / "models" / filename,
-        exe / ".." / ".." / "assets" / "animations" / "binary" / filename,  // for .bin search
     };
 }
 
@@ -744,9 +739,10 @@ public:
                     if (move.filename.empty() || move.template_name.empty()) continue;
                     if (move.key_count != 1) continue;
                     if (move.direction != cur_direction) continue;
-                    // Match Jump moves or Move type
+                    // Match Jump moves or MOVE type (not Wall, not Punch/Kick)
+                    if (move.template_name.find("Wall") != std::string::npos) continue;
                     if (!move.is_jump && move.move_type != "Jump" &&
-                        move.move_type != "MOVE" && move.move_type.empty() == false) continue;
+                        move.move_type != "MOVE" && !move.move_type.empty()) continue;
                     // Weapon filter
                     if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
                         move.tactic_weapon.find("Fists") == std::string::npos) continue;
@@ -902,7 +898,10 @@ public:
         // === HIT DETECTION ===
         // hit_anim_ countdown already done above (before special move exit).
         // Only do hit detection here if hit_anim_ is still > 0.
+        // Reset bag_hit_ at the START of each attack animation (when current_move_
+        // changes), not just when hit_anim_ reaches 0.
         if (hit_anim_ > 0) {
+            // Check if we're in the attack interval for this move
             if (!bag_hit_ && bag_model_ && location_) {
                 auto anim_it = animations_.find(current_anim_);
                 if (anim_it != animations_.end()) {
@@ -975,7 +974,7 @@ public:
             if (hit_anim_ == 0) {
                 need_switch_to_idle_ = true;
                 current_move_.clear();
-                bag_hit_ = false;
+                bag_hit_ = false;  // reset for next attack
             }
         }
 
@@ -1768,9 +1767,11 @@ private:
         }
         const float REF_FEET_LY = 64.60f;
         float target_y_adjust = REF_FEET_LY - ly_lowest;
-        // Smooth interpolation (0.3 = fairly fast snap, prevents jitter but
-        // doesn't cause 1-frame teleport)
-        y_adjust_smoothed_ += (target_y_adjust - y_adjust_smoothed_) * 0.3f;
+        // INSTANT snap (no smoothing). The original game uses MoveInside
+        // pivot alignment which is instant — it reads the current frame's
+        // NPivot and adjusts immediately. Smoothing causes the "sliding"
+        // effect where feet float above floor for a few frames.
+        y_adjust_smoothed_ = target_y_adjust;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_ + jump_y_offset_;
 
@@ -2172,15 +2173,12 @@ private:
     // ---------- Animation loading (DYNAMIC: scan directory) ----------
     void load_animations() {
         auto root = std::filesystem::path(asset_root_);
-        auto exe = get_exe_dir();
         // Search for animation .bin files in multiple paths
         std::vector<std::filesystem::path> search_dirs = {
             root/"assets"/"animations"/"binary",
             root/"animations"/"binary",
             root/"assets"/"animations",
             root/"animations",
-            exe / ".." / ".." / ".." / "assets" / "animations" / "binary",  // repo assets
-            exe / ".." / "assets" / "animations" / "binary",
         };
         
         // Find the first directory that exists and has .bin files
@@ -2245,12 +2243,10 @@ private:
     // ---------- Move definitions (from moves.xml) ----------
     void load_moves() {
         auto root = std::filesystem::path(asset_root_);
-        auto exe = get_exe_dir();
         std::vector<std::filesystem::path> search_dirs = {
             root/"assets"/"animations",
             root/"animations",
             root/"assets",
-            exe / ".." / ".." / ".." / "assets" / "animations",  // repo assets
         };
         
         std::string moves_path;
@@ -2612,7 +2608,6 @@ private:
                 jump_y_offset_ = 0;
             } else {
                 jump_y_offset_ = npivot_y - anim_root_anchor_y_;
-                if (jump_y_offset_ < 0) jump_y_offset_ = 0;
             }
         } else {
             jump_y_offset_ = 0;
@@ -3252,6 +3247,9 @@ private:
     float step_start_x_ = 0;      // player X at start of step
     float step_displacement_ = 0; // total displacement for this step (+66 or -66)
     int bag_swing_ = 0;   // ms remaining (legacy, for compatibility)
+    void bag_hit_reset() {
+        bag_hit_ = false;
+    }
     bool bag_hit_ = false;  // bag already hit during current attack
     float bag_swing_dir_ = 1.0f;  // +1 = swing right, -1 = swing left
     // Physics-based pendulum state for the punching bag.
