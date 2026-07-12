@@ -240,6 +240,89 @@ This grounds the pivot node (fixes the roll-float symptom when the active
 move has a heel pivot) but is an approximation of the real consumption
 formula, which remains to be byte-confirmed.
 
+## DZ type 4 decoder — partial verification (this session)
+
+The DZ type-4 decoder lives in `libs3e_android.so` (ELF32, ARM, 800 KB).
+`objdump` on this host is x86-only, so capstone (pip-installed) was used
+to disassemble.
+
+### Verified [ORIGINAL]
+
+Function at VA `0x389f8` exists and is ARM-mode (not Thumb). Prologue +
+first ~40 instructions (capstone):
+```asm
+0x389f8: push {r4,r5,r6,r7,r8,sb,sl,fp,lr}
+0x389fc: sub sp, sp, #0x2c
+0x38a00: movw ip, #0xf8cb ; ip = 0xfffff8cb (constant, likely a mask/sentinel)
+0x38a04: mov sb, r0        ; sb (r9) = arg0 = decoder context pointer
+0x38a08: str r1, [sp, #0x1c]
+0x38a10: str r3, [sp, #0x18]
+0x38a14: ldr r1, [sp, #0x50]   ; arg4
+0x38a18: ldr r3, [r2]          ; *arg2
+0x38a1c: str r2, [sp, #0x24]
+0x38a20: ldr r1, [r1]          ; *arg4
+0x38a28: mov r3, #0
+0x38a2c: str r3, [r2]          ; *arg2 = 0
+0x38a34: str ip, [sp, #0x20]   ; stash sentinel
+0x38a3c: str r3, [r2]          ; (redundant store)
+0x38a40: ldr r3, [sb, #0x24]   ; ctx->in_pos  (context +0x24)
+0x38a44: ldr r4, [sb, #0x28]   ; ctx->in_size (context +0x28)
+0x38a48: ldr r2, [sp, #0x10]
+0x38a4c: cmp r3, r4
+0x38a50: moveq r3, #0
+0x38a54: streq r3, [sb, #0x24]
+0x38a5c: rsb r3, r3, r4        ; r3 = in_size - in_pos (remaining)
+0x38a60: cmp r2, r3
+0x38a64: ldrls r3, [sp, #0xc]
+0x38a70: addls r8, r3, r2      ; r8 = consumed + something
+0x38a7c: ldr r3, [sb, #0x48]   ; ctx->??? (context +0x48)
+0x38a80: sub r2, r3, #1
+0x38a84: cmp r2, #0x110        ; compare with 272
+0x38a88: bhi #0x38b04
+0x38a8c: ldr r2, [sp, #0xc]
+0x38a90: ldr r5, [sb, #0x14]   ; ctx->??? (context +0x14)
+...
+```
+
+Decoder context struct fields identified so far (byte-confirmed accesses):
+| Offset | Likely field | Evidence |
+|--------|--------------|----------|
+| ctx+0x14 | window/history base | ldr r5, [sb,#0x14] early in decode loop |
+| ctx+0x24 | input cursor (in_pos) | ldr/str, compared with ctx+0x28 |
+| ctx+0x28 | input size (in_size) | compared with ctx+0x24; rsb computes remaining |
+| ctx+0x48 | a count/limit (compared with 0x110=272) | sub r2,r3,#1; cmp r2,#0x110 |
+| ctx+0x4c/0x50/0x54 | output/arg pointers | passed via sp+0x50 etc. |
+
+### NOT verified [HEURISTIC-TODO]
+
+1. The full decode loop (200+ ARM insns at 0x389f8 + the range coder at
+   0x37adc + bit-tree at 0x3751c). Capstone can disassemble it, but
+   tracing the algorithm end-to-end and proving byte-identical output on
+   a real `.dz` block was not completed this session.
+2. The current `engine/reverse/dz_decoder.cpp` is the PREVIOUS session's
+   speculative LZMA-variant reimplementation. It has NOT been proven
+   correct against the binary. Type-4 blocks still fall back to
+   pre-extracted files on disk (`dz_reader::read_file` searches the
+   filesystem when the decoder cannot produce output).
+3. The container offsets in the older notes (0x0EED attribute table,
+   0x11BD location table) do NOT match `assets/files.dz` for THIS APK —
+   filenames end at 0x7c9, not 0x0EED. The `dz_reader.cpp` parse logic
+   handles this correctly (it walks filenames by null-terminator rather
+   than trusting fixed offsets), but the docs were stale. The 227-files
+   count in the run log vs the u16 file_count=120 at offset 4 suggests
+   `entries_` includes folder-prefixed entries; not yet reconciled.
+
+### Next-session entry points
+
+- Disassemble 0x389f8..0x38d00 fully (capstone), trace the decode loop,
+  and map each ctx+offset to a named field.
+- Disassemble 0x37adc (range coder) and 0x3751c (bit-tree) — these are
+  the helpers; their structure confirms whether this is LZMA-like or a
+  custom Marmalade derbh coder.
+- Extract one type-4 block from `files.dz` (e.g. `settings.xml`,
+  small) and diff the decoder's output against the pre-extracted file
+  in `assets/`.
+
 ## Key Findings Summary
 
 1. **Engine**: Marmalade SDK + Cocos2d-x (confirmed)
