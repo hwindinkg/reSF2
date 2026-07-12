@@ -859,18 +859,35 @@ public:
                         int frame_start = attack_start - 1;
                         int frame_end = attack_end - 1;
                         if (current_frame >= frame_start && current_frame <= frame_end) {
+                            // Determine attacking limb from attack_edges in moves.xml
+                            // Fall back to NWrist_1 for punches, NToe_1 for kicks
                             std::string limb_node;
-                            bool is_kick = (current_move_.find("Kick") != std::string::npos ||
-                                           current_move_.find("Sweep") != std::string::npos);
-                            limb_node = is_kick ? "NToe_1" : "NWrist_1";
+                            if (!move_it->second.attack_edges.empty()) {
+                                // Use first attack edge's first node
+                                // Edge names in moves.xml correspond to skeleton edges
+                                // For now use the edge name to determine limb type
+                                std::string edge_name = move_it->second.attack_edges[0];
+                                if (edge_name.find("Leg") != std::string::npos ||
+                                    edge_name.find("Foot") != std::string::npos ||
+                                    edge_name.find("Toe") != std::string::npos) {
+                                    limb_node = "NToe_1";
+                                } else {
+                                    limb_node = "NWrist_1";
+                                }
+                            } else {
+                                bool is_kick = (current_move_.find("Kick") != std::string::npos ||
+                                               current_move_.find("Sweep") != std::string::npos);
+                                limb_node = is_kick ? "NToe_1" : "NWrist_1";
+                            }
                             auto ait = anim_node_pos_.find(limb_node);
                             if (ait != anim_node_pos_.end()) {
                                 float limb_lx = ait->second.first;
                                 float limb_ly = ait->second.second;
                                 auto pivot_it = skeleton_nodes_.find("NPivot");
                                 float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
+                                // Include y_adjust and jump_y_offset in limb world Y
                                 float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx);
-                                float limb_wy = player_pos_y_ + (limb_ly - pivot_ly);
+                                float limb_wy = player_pos_y_ + y_adjust_smoothed_ + jump_y_offset_ + (limb_ly - pivot_ly);
                                 float bag_cx = location_->enemy_x - 983.0f;
                                 float bag_cy = location_->enemy_y + 81.0f + y_adjust_smoothed_;
                                 auto bv_it = bag_verlet_.find("NPivot");
@@ -880,12 +897,12 @@ public:
                                 float dx = limb_wx - bag_cx;
                                 float dy = limb_wy - bag_cy;
                                 float dist = std::sqrt(dx*dx + dy*dy);
-                                if (dist < 70.0f) {
+                                if (dist < 100.0f) {
                                     std::string target_node = "NNeck";
                                     if (limb_wy < bag_cy - 30) target_node = "NBottom";
                                     else if (limb_wy > bag_cy + 30) target_node = "Node4";
                                     float impulse_dir = (dx < 0) ? 1.0f : -1.0f;
-                                    float impulse_strength = is_kick ? 25.0f : 18.0f;
+                                    float impulse_strength = (limb_node == "NToe_1") ? 25.0f : 18.0f;
                                     apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
                                     std::printf("[COMBAT] HIT! move=%s frame=%d/%d [%d-%d] limb=%s dist=%.1f -> %s\n",
                                                 current_move_.c_str(), current_frame, fc,
@@ -1685,25 +1702,18 @@ private:
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
         // Y normalization: keep feet on floor across all animations.
-        // The original game uses MoveInside pivot alignment to keep the
-        // character's feet at the same world Y regardless of animation.
-        // We compute: target_y_adjust = REF_FEET_LY - ly_lowest
-        // where ly_lowest is the lowest animated node's local Y.
-        //
-        // For ALL animations (including jumps/flips): apply y_adjust so the
-        // character's feet stay on the floor. Jump height is handled by
-        // jump_y_offset_ (root motion Y), not by y_adjust.
-        //
-        // INSTANT snap (no smoothing) for ALL animations to prevent
-        // pre-jump dive and post-jump float. The original game snaps
-        // immediately when animation changes.
+        // Use SMOOTHED interpolation to prevent visual jumps when switching
+        // between animations with different NPivot Y values.
+        // Jump height is handled by jump_y_offset_ (root motion Y).
         float ly_lowest = pivot_local_y;
         for (auto& [name, pos] : anim_node_pos_) {
             if (pos.second < ly_lowest) ly_lowest = pos.second;
         }
         const float REF_FEET_LY = 64.60f;
         float target_y_adjust = REF_FEET_LY - ly_lowest;
-        y_adjust_smoothed_ = target_y_adjust;
+        // Smooth interpolation (0.3 = fairly fast snap, prevents jitter but
+        // doesn't cause 1-frame teleport)
+        y_adjust_smoothed_ += (target_y_adjust - y_adjust_smoothed_) * 0.3f;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_ + jump_y_offset_;
 
