@@ -592,6 +592,15 @@ public:
         }
         bool step_min_played = step_play_time_ >= 400;
 
+        // Track key-held history for latching (200ms window for flicker tolerance)
+        // Update EVERY frame, even during attacks, so when the attack ends
+        // the key state is current. If player holds D during attack, when
+        // attack finishes, fwd_held_ms_ is still 200 → step starts immediately.
+        if (key_forward) fwd_held_ms_ = 200;
+        else if (fwd_held_ms_ > 0) fwd_held_ms_ -= (int)dt;
+        if (key_back) back_held_ms_ = 200;
+        else if (back_held_ms_ > 0) back_held_ms_ -= (int)dt;
+
         // === COMBAT: Punch (O) — checked BEFORE duck/special moves ===
         // From moves.xml:
         //   HighPunch: Central|Punch → O
@@ -602,9 +611,24 @@ public:
         //   ElbowStrike: DownBack|Punch → S+A+O (Down+Back+Punch)
         // Attacks take priority over duck/special moves so S+O works even
         // though S alone would enter duck.
+        // DoublePunch: 3key|Forward|Punch → D+O+O (double-tap O while holding D)
         if (punch_pressed && hit_anim_ == 0 && (move_state_ < 10 || move_state_ == 11)) {
+            uint32_t now = platform_->now_ms();
+            bool double_punch = false;
+            if (key_forward && !key_back && !key_down && !key_up) {
+                if (last_punch_press_ms_ > 0 && (now - last_punch_press_ms_) < 300) {
+                    double_punch = true;
+                }
+                last_punch_press_ms_ = now;
+            } else {
+                last_punch_press_ms_ = 0;
+            }
+
             std::string move_name, anim_name;
-            if (key_down && key_back) { move_name = "ElbowStrike"; anim_name = "elbow_strike"; }
+            if (double_punch && animations_.count("double_punch")) {
+                move_name = "DoublePunch"; anim_name = "double_punch";
+                last_punch_press_ms_ = 0;
+            } else if (key_down && key_back) { move_name = "ElbowStrike"; anim_name = "elbow_strike"; }
             else if (key_forward && !key_back) { move_name = "HeavyPunch"; anim_name = "heavy_punch"; }
             else if (key_back && !key_forward) { move_name = "SpinningPunch"; anim_name = "spinning_punch"; }
             else if (key_up) { move_name = "UpperCut"; anim_name = "upper_cut"; }
@@ -618,7 +642,7 @@ public:
                 int fc = animations_[anim_name].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 0;
-                // Skip special moves / step this frame — attack takes priority
+                need_switch_to_idle_ = false;
                 goto after_combat;
             }
         }
@@ -661,6 +685,7 @@ public:
                 int fc = animations_[anim_name].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 0;
+                need_switch_to_idle_ = false;
                 goto after_combat;
             }
         }
@@ -744,9 +769,6 @@ public:
         // Windows setups (the key is physically held, but GetAsyncKeyState
         // occasionally returns 'up' for one frame).
         if (hit_anim_ == 0 && move_state_ < 10) {
-            // Track key-held history for latching (200ms window for flicker tolerance)
-            if (key_forward) fwd_held_ms_ = 200; else if (fwd_held_ms_ > 0) fwd_held_ms_ -= (int)dt;
-            if (key_back) back_held_ms_ = 200; else if (back_held_ms_ > 0) back_held_ms_ -= (int)dt;
             bool fwd_latched = fwd_held_ms_ > 0;
             bool back_latched = back_held_ms_ > 0;
 
@@ -2348,21 +2370,19 @@ private:
         }
         if (frame_idx < 0) frame_idx = 0;
 
-        // For non-looping animations that have finished, don't interpolate
-        // with frame 0 (which would cause wrap-around and backward movement).
-        // Instead, stay exactly at the last frame.
-        //
-        // For LOOPING animations at the LAST frame, also don't interpolate
-        // with frame 0 — this causes the character to slide backward during
-        // the wrap (235→169 for step_forward). Hold at the last frame until
-        // frame_idx actually wraps to 0.
+        // For non-looping AND looping animations at the LAST frame,
+        // don't interpolate with frame 0. This prevents the NPivot from
+        // being pulled toward the start position (frame 0), which causes
+        // the "1-frame teleport to start" bug.
         int next_idx;
         float alpha;
         if (anim_finished) {
             next_idx = frame_idx;
             alpha = 0.0f;
-        } else if (anim_loop_ && frame_idx == anim.frame_count - 1) {
-            // Last frame of a looping animation: don't interpolate with frame 0
+        } else if (frame_idx == anim.frame_count - 1) {
+            // Last frame of ANY animation (looping or not): don't
+            // interpolate with frame 0. Hold at the last frame until
+            // the animation wraps (looping) or finishes (non-looping).
             next_idx = frame_idx;
             alpha = 0.0f;
         } else {
@@ -3186,6 +3206,7 @@ private:
     int fwd_held_ms_ = 0;  // ms since forward key was last held (for latching)
     int back_held_ms_ = 0;  // ms since back key was last held (for latching)
     uint32_t last_kick_press_ms_ = 0;  // for double-tap detection (DoubleSweep)
+    uint32_t last_punch_press_ms_ = 0;  // for double-tap detection (DoublePunch)
     bool start_stance_playing_ = false;  // true during start stance animation
     bool need_switch_to_idle_ = false;  // deferred switch to idle (after update_animation)
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
