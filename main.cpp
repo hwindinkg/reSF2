@@ -805,6 +805,28 @@ public:
                 move_state_ = 0;
                 need_switch_to_idle_ = false;
                 goto after_combat;
+            } else if (punch_pressed || kick_pressed) {
+                // Debug: no move found — log why
+                static int no_move_log = 0;
+                if (no_move_log < 3) {
+                    std::printf("[COMBAT] NO MOVE for %s dir='%s' basic=%d — candidates:\n",
+                                cur_move_type.c_str(), cur_direction.c_str(), in_basic_attack ? 1 : 0);
+                    for (auto& [name, move] : moves_) {
+                        if (move.move_type != cur_move_type) continue;
+                        if (move.direction != cur_direction) continue;
+                        if (move.key_count == 3 && !in_basic_attack) continue;
+                        std::string anim_name = move.filename;
+                        if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                            anim_name = anim_name.substr(0, anim_name.size()-4);
+                        bool anim_exists = animations_.count(anim_name) > 0;
+                        std::printf("  %s tmpl='%s' kc=%d tw='%s' titan=%d anim=%d\n",
+                                    name.c_str(), move.template_name.c_str(), move.key_count,
+                                    move.tactic_weapon.c_str(),
+                                    move.template_name.find("Titan") != std::string::npos ? 1 : 0,
+                                    anim_exists ? 1 : 0);
+                    }
+                    no_move_log++;
+                }
             }
         }
 
@@ -908,10 +930,26 @@ public:
                         duck_anim_name = duck_anim_name.substr(0, duck_anim_name.size()-4);
                     // Only switch animation if not already ducking
                     if (move_state_ != 11 || current_anim_ != duck_anim_name) {
+                        std::printf("[DUCK] found: %s (anim '%s')\n", duck_move->name.c_str(), duck_anim_name.c_str());
                         play_animation(duck_anim_name, true);
                         current_move_ = duck_move->name;
                         move_state_ = 11;
                         duck_play_time_ = 0;
+                    }
+                } else {
+                    static int no_duck_log = 0;
+                    if (no_duck_log < 2) {
+                        std::printf("[DUCK] no duck move found! Searching 1key|Down moves:\n");
+                        for (auto& [name, move] : moves_) {
+                            if (move.key_count != 1 || move.direction != "Down") continue;
+                            std::printf("  %s tmpl='%s' mt='%s' titan=%d not_titan=%d jump=%d\n",
+                                        name.c_str(), move.template_name.c_str(),
+                                        move.move_type.c_str(),
+                                        move.template_name.find("Titan") != std::string::npos ? 1 : 0,
+                                        move.is_not_titan ? 1 : 0,
+                                        move.is_jump ? 1 : 0);
+                        }
+                        no_duck_log++;
                     }
                 }
             }
@@ -1140,7 +1178,7 @@ public:
 
                                 // Bag position from Verlet
                                 float bag_cx = location_->enemy_x - 983.0f;
-                                float bag_cy = location_->enemy_y + 81.0f;
+                                float bag_cy = -location_->enemy_y + 81.0f;
                                 auto bv_it = bag_verlet_.find("NPivot");
                                 if (bv_it != bag_verlet_.end()) {
                                     bag_cx = bv_it->second.x; bag_cy = bv_it->second.y;
@@ -1334,7 +1372,10 @@ private:
             // bag_cx = enemy_x - offset = -10 → offset = enemy_x + 10 = 983.
             const float X_OFFSET = 983.0f;  // aligns bag with ceiling holder
             player_pos_x_ = location_->player_x - X_OFFSET;
-            player_pos_y_ = location_->player_y;  // no invert, no offset
+            // Y INVERT: params.xml uses Y-DOWN, our world is Y-UP.
+            // Location images are rendered at world_y = -img.y.
+            // Player must use same coordinate system: world_y = -player_y.
+            player_pos_y_ = -location_->player_y;  // invert Y to match location
         }
         // Camera: follow player but keep a proper Y that shows the floor.
         // The dojo floor (layer_3) is at world Y ≈ -193. Player at Y ≈ -93.
@@ -2219,7 +2260,7 @@ private:
         // Same coordinate system as player — no Y-invert, use params Y directly
         // with the same -45 offset to align with the floor.
         float bag_cx = location_ ? (location_->enemy_x - 983.0f) : 0.0f;
-        float bag_cy = location_ ? (location_->enemy_y + 81.0f) : 0.0f;
+        float bag_cy = location_ ? (-location_->enemy_y + 81.0f) : 0.0f;
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
         // Initialize nodes: world position = bag_center + (node_local - NPivot_local)
