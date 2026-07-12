@@ -798,6 +798,13 @@ public:
             }
         }
 
+        // === HIT ANIM COUNTDOWN ===
+        // Must run BEFORE special move exit check so hit_anim_ == 0 is
+        // detected in the SAME frame, not the next one.
+        if (hit_anim_ > 0) {
+            hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
+        }
+
         // Exit special move state when animation finishes
         // DON'T call play_animation here — update_animation must run first
         // to apply the final frame's root motion. Set a flag instead.
@@ -836,8 +843,9 @@ public:
         }
 
         // === HIT DETECTION ===
+        // hit_anim_ countdown already done above (before special move exit).
+        // Only do hit detection here if hit_anim_ is still > 0.
         if (hit_anim_ > 0) {
-            hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
             if (!bag_hit_ && bag_model_ && location_) {
                 auto anim_it = animations_.find(current_anim_);
                 if (anim_it != animations_.end()) {
@@ -1677,31 +1685,25 @@ private:
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
         // Y normalization: keep feet on floor across all animations.
-        // Different animations have different NPivot Y values in .bin files:
-        //   fists_idle: NToe_2 ly = 82.27 (character stands taller → feet float)
-        //   step/punch: NToe_2 ly = 64.60 (combat stance → feet on floor)
-        // We use the step animation as reference (looks correct).
-        // Adjustment = (reference_ly - current_ly) where reference_ly = 64.60.
+        // The original game uses MoveInside pivot alignment to keep the
+        // character's feet at the same world Y regardless of animation.
+        // We compute: target_y_adjust = REF_FEET_LY - ly_lowest
+        // where ly_lowest is the lowest animated node's local Y.
         //
-        // For jump/air animations: DISABLE Y normalization (target=0) so the
-        // character actually leaves the ground. Use INSTANT snap (not smoothed)
-        // to prevent "diving" before jump and "floating" after.
-        bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
-                            current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
-                            current_anim_ == "back_handflip");
+        // For ALL animations (including jumps/flips): apply y_adjust so the
+        // character's feet stay on the floor. Jump height is handled by
+        // jump_y_offset_ (root motion Y), not by y_adjust.
+        //
+        // INSTANT snap (no smoothing) for ALL animations to prevent
+        // pre-jump dive and post-jump float. The original game snaps
+        // immediately when animation changes.
         float ly_lowest = pivot_local_y;
         for (auto& [name, pos] : anim_node_pos_) {
             if (pos.second < ly_lowest) ly_lowest = pos.second;
         }
         const float REF_FEET_LY = 64.60f;
-        float target_y_adjust = is_jump_anim ? 0.0f : (REF_FEET_LY - ly_lowest);
-        if (is_jump_anim) {
-            // Instant snap for jump — no smoothing (prevents pre-jump dive)
-            y_adjust_smoothed_ = target_y_adjust;
-        } else {
-            // Smooth interpolation for ground animations
-            y_adjust_smoothed_ += (target_y_adjust - y_adjust_smoothed_) * 0.15f;
-        }
+        float target_y_adjust = REF_FEET_LY - ly_lowest;
+        y_adjust_smoothed_ = target_y_adjust;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_ + jump_y_offset_;
 
@@ -2484,32 +2486,23 @@ private:
             prev_frame_idx_ = -1;
         }
 
-        // Y root motion: absolute positioning (same approach as X)
-        // For jumps/flips: player Y offset = NPivot Y - frame 0 NPivot Y
-        // This naturally returns to 0 at the end for symmetric jumps.
-        // For back_flip (Y[0]=92, Y[last]=106): offset goes 0 → +174 → +14.
-        // The +14 residual is because back_flip starts crouched (Y=92) and
-        // ends standing (Y=106). The character should end at the SAME height
-        // as it started (ground level), not +14 above.
-        //
-        // FIX: clamp jump_y_offset_ to never go below 0 (ground) and
-        // force it to 0 when the animation finishes (anim_finished).
+        // Y root motion: absolute offset from frame 0 NPivot Y.
+        // For jumps/flips: offset = NPivot Y - frame 0 NPivot Y.
+        // This handles the vertical arc of jumps.
+        // When animation finishes: force offset to 0 (character on ground).
+        // This fixes back_flip ending slightly above ground (Y[0]=92, Y[last]=106).
         bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                             current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                             current_anim_ == "back_handflip");
         if (is_jump_anim && anim_anchor_set_) {
             if (anim_finished) {
-                // Animation ended: force offset to 0 (character on ground)
                 jump_y_offset_ = 0;
             } else {
                 jump_y_offset_ = npivot_y - anim_root_anchor_y_;
-                // Don't allow negative offset (character below ground)
                 if (jump_y_offset_ < 0) jump_y_offset_ = 0;
             }
         } else {
-            // Non-jump: smoothly decay to 0
-            jump_y_offset_ *= 0.80f;
-            if (std::abs(jump_y_offset_) < 0.5f) jump_y_offset_ = 0;
+            jump_y_offset_ = 0;
         }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
