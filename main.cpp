@@ -106,7 +106,8 @@ static std::vector<std::filesystem::path> model_paths(const std::string& asset_r
     return {
         root / "models" / filename,
         root / "assets" / "models" / filename,
-        root / "assets" / "assets" / "models" / filename,  // sf2/assets/assets/models/
+        root / "assets" / "assets" / "models" / filename,
+        root / "assets" / "assets" / "assets" / "models" / filename,
     };
 }
 
@@ -2227,8 +2228,10 @@ private:
         auto root = std::filesystem::path(asset_root_);
         // Search for animation .bin files in multiple paths
         std::vector<std::filesystem::path> search_dirs = {
+            root/"assets"/"assets"/"animations"/"binary",
             root/"assets"/"animations"/"binary",
             root/"animations"/"binary",
+            root/"assets"/"assets"/"animations",
             root/"assets"/"animations",
             root/"animations",
         };
@@ -2296,8 +2299,10 @@ private:
     void load_moves() {
         auto root = std::filesystem::path(asset_root_);
         std::vector<std::filesystem::path> search_dirs = {
+            root/"assets"/"assets"/"animations",
             root/"assets"/"animations",
             root/"animations",
+            root/"assets"/"assets",
             root/"assets",
         };
         
