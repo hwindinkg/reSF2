@@ -729,7 +729,9 @@ public:
                 auto cur_move_it = moves_.find(current_move_);
                 if (cur_move_it != moves_.end()) {
                     int cur_kc = cur_move_it->second.key_count;
-                    if (cur_kc == 1 || cur_kc == 2) {
+                    if ((cur_kc == 1 || cur_kc == 2) && hit_anim_ > 0 &&
+                                current_anim_ != "stance_idle" && current_anim_ != "fists_idle" &&
+                                current_anim_ != "step_forward" && current_anim_ != "step_back") {
                         // Check if current attack animation is still playing
                         // (hit_anim_ > 0 means attack in progress)
                         in_basic_attack = true;
@@ -2104,6 +2106,9 @@ private:
         // This is acceptable until we implement proper MoveInside alignment.
         constexpr float FEET_FLOOR_OFFSET = 4.0f;
         y_adjust_smoothed_ = FEET_FLOOR_OFFSET;
+        { static bool warned_yadj = false; if (!warned_yadj) { warned_yadj = true;
+            std::fprintf(stderr, "[HEURISTIC-TODO] y_adjust is a constant FEET_FLOOR_OFFSET: grounds standing/crouch/jump but floats rolls ~84px. Needs per-move contact/pivot (MoveInside). See HANDOFF.md
+"); } }
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
@@ -2943,8 +2948,10 @@ private:
             // sync step_start to current position.
             if (prev_frame_idx_ == -1) {
                 step_start_player_x_ = player_pos_x_;
-                std::printf("[ROOT] anim='%s' first frame: step_start=%.1f player_x=%.1f facing=%d\n",
-                            current_anim_.c_str(), step_start_player_x_, player_pos_x_, anim_facing_right_);
+                std::printf("[ROOT] anim='%s' first frame: frame=%d player=(%.1f,%.1f) npivot=(%.1f,%.1f) render_y=%.1f facing=%d
+",
+                            current_anim_.c_str(), frame_idx, player_pos_x_, player_pos_y_,
+                            npivot_x, npivot_y, player_pos_y_ + y_adjust_smoothed_, anim_facing_right_);
             }
             // Detect loop wrap for looping animations
             if (anim_loop_ && prev_frame_idx_ >= 0 && prev_frame_idx_ > frame_idx) {
