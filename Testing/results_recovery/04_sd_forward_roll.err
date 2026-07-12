@@ -1,0 +1,2 @@
+[INPUT_SCRIPT] loaded Testing/scenarios/04_sd_forward_roll.txt: 4 events, armed=1
+[HEURISTIC-TODO] MoveInside Y consumption disabled: pivot capture is verified (fcn.10165c10), render-Y formula is not. Using constant FEET_FLOOR_OFFSET=4 (96bfce1 baseline). Jump/flip/roll Y will be flat until the consumption formula is traced.

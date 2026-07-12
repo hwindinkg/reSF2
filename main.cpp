@@ -2147,64 +2147,43 @@ private:
         // Roll issue: character floats during roll, but roll is short (26 frames).
         // This is acceptable until we implement proper MoveInside alignment.
         constexpr float FEET_FLOOR_OFFSET = 4.0f;
-        // [ORIGINAL] MoveInside pivot-based Y alignment (binary-verified
-        // mechanism, see docs/s3e_reverse_engineering.md "MoveInside"):
-        //   fcn.10165c10 reads moveInside->align.pivotID (moveInside @
-        //   animInfo+0x94, pivotID @ moveInside+0x70) and stores
-        //   node_array[pivotID].Y as align_y at Model+0x5c (0 if pivotID==-1).
-        // moves.xml <Pivot Object="Nodes" Part="NHeel_2"/> names the node.
-        // [HEURISTIC-TODO] the exact formula consuming align_y (Model[0x5c])
-        // to produce render Y is NOT byte-confirmed end-to-end. The
-        // approximation below grounds the named pivot node to floor_y:
-        //   y_adjust = floor_y - player_pos_y_ - pivot_local_y + npivot_rest_y
-        // which is algebraically equivalent to setting world_cy so that
-        //   pivot_node_world_y = floor_y
-        // where pivot_node_world_y = world_cy + (pivot_local_y - npivot_rest_y).
-        // Falls back to FEET_FLOOR_OFFSET when the move has no node pivot
-        // (<Pivot Object="Animation"/>) or no move is active. floor_y is
-        // hardcoded to the dojo floor (-193); generalizing to other locations
-        // is a separate [HEURISTIC-TODO].
-        // One-shot stderr warning so the heuristic is visible in every run.
+        // [HEURISTIC-TODO] MoveInside Y consumption DISABLED (recovery commit).
+        //
+        // The MoveInside pivot-node grounding formula (commit 9450c4f) was
+        //   y_adjust = floor_y - player_pos_y_ - pivot_node_ly + npivot_rest_y
+        // which grounds the named pivot node (e.g. NHeel_2) to floor_y every
+        // frame. This is WRONG for airborne moves (jump/flip): the heel
+        // legitimately leaves the floor during a jump, but the formula drags
+        // the entire character DOWN to keep the heel at floor_y, causing the
+        // character to sink below the floor (render_y: -89 -> -161 during
+        // a jump where NPivot rises 106 -> 243). It also sinks during rolls
+        // because the heel moves up as the body rotates.
+        //
+        // The MoveInside CAPTURE mechanism is byte-verified (fcn.10165c10
+        // reads pivotID from moveInside+0x70 and stores node_array[pivotID].Y
+        // at Model+0x5c), but the CONSUMPTION formula (how Model+0x5c
+        // transforms render Y) is NOT byte-confirmed. Until the consumption
+        // is traced end-to-end (reads of Model+0x58/0x5c, fcn.10243750, axis
+        // mask X|Z parsing), the Y formula is disabled and we fall back to
+        // the 96bfce1 baseline: constant FEET_FLOOR_OFFSET = 4.
+        //
+        // The MoveInside parser + MoveDef metadata (moveinside_pivot_node,
+        // moveinside_is_animation) are KEPT for future use once the
+        // consumption formula is verified.
+        //
+        // One-shot stderr warning so the disabled state is visible.
         {
             static bool warned_once = false;
             if (!warned_once) {
                 warned_once = true;
                 std::fprintf(stderr,
-                    "[HEURISTIC-TODO] y_adjust uses MoveInside pivot-node grounding "
-                    "(approx, binary mechanism verified at fcn.10165c10; consumption "
-                    "formula NOT byte-confirmed). floor_y hardcoded to dojo (-193). "
-                    "Falls back to FEET_FLOOR_OFFSET=4 for <Pivot Object=\"Animation\"/> "
-                    "moves. See docs/s3e_reverse_engineering.md.\n");
+                    "[HEURISTIC-TODO] MoveInside Y consumption disabled: pivot capture "
+                    "is verified (fcn.10165c10), render-Y formula is not. Using "
+                    "constant FEET_FLOOR_OFFSET=4 (96bfce1 baseline). Jump/flip/roll "
+                    "Y will be flat until the consumption formula is traced.\n");
             }
         }
-        constexpr float DOJO_FLOOR_Y = -193.0f;  // [HEURISTIC-TODO] generalize per-location
-        float target_y_adjust = FEET_FLOOR_OFFSET;  // fallback (Animation-pivot / no move)
-        if (!current_move_.empty()) {
-            auto mit = moves_.find(current_move_);
-            if (mit != moves_.end() && !mit->second.moveinside_pivot_node.empty()) {
-                const std::string& pn = mit->second.moveinside_pivot_node;
-                auto nit = anim_node_pos_.find(pn);
-                if (nit != anim_node_pos_.end()) {
-                    // pivot_node's animated local Y (anim_node_pos_ stores
-                    // local_y + npivot_rest_y, i.e. model-space Y), as the
-                    // .second of a pair<float,float> (x, y).
-                    float pivot_node_ly = nit->second.second;
-                    // node_world_y = world_cy + (node_ly - npivot_rest_y)
-                    //   (resolve_body_node: sy = world_cy + (ly - pivot_local_y),
-                    //    pivot_local_y here == npivot_rest_y from line 2061).
-                    // Ground the pivot node (pivot_world_y = floor_y):
-                    //   floor_y = world_cy + (pivot_node_ly - npivot_rest_y)
-                    //   y_adjust = world_cy - player_pos_y_
-                    //            = floor_y - player_pos_y_ - pivot_node_ly + npivot_rest_y
-                    target_y_adjust = DOJO_FLOOR_Y - player_pos_y_
-                                    - pivot_node_ly + pivot_local_y;
-                }
-            }
-        }
-        // Smooth y_adjust (avoid snapping when pivot node changes mid-anim).
-        // Simple exponential smoothing toward target.
-        constexpr float y_smooth_alpha = 0.3f;
-        y_adjust_smoothed_ += (target_y_adjust - y_adjust_smoothed_) * y_smooth_alpha;
+        y_adjust_smoothed_ = FEET_FLOOR_OFFSET;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
