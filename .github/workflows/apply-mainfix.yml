@@ -1,6 +1,5 @@
 name: Apply main.cpp fix
 
-# retrigger: fix/mainfix pre-created as existing ref
 on:
   workflow_dispatch:
   push:
@@ -22,7 +21,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0
 
       - name: Show g++
         run: g++ --version
@@ -73,23 +71,38 @@ jobs:
           tail -c 40000 /tmp/tu.log
           set -e
 
-      - name: Push verified fix to fix/mainfix, else dump log
+      - name: Commit to fix/mainfix via Contents API
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           rc=$(grep -o '[0-9]*' /tmp/tu_rc.txt | head -1)
-          git config user.name "reSF2 ci"
-          git config user.email "ci@resf2.local"
-          if [ "$rc" = "0" ]; then
-            git add main.cpp
-            git commit -m "fix(main): stale current_move_ guard + extended [ROOT] diag log + y_adjust heuristic warning [HEURISTIC-TODO]" || echo "no change"
-            git push -f origin HEAD:refs/heads/fix/mainfix
-            echo "PUSHED to fix/mainfix"
-          else
-            git checkout -B ci/mainfix-fail
-            mkdir -p docs/_ci_logs
-            cp /tmp/tu.log docs/_ci_logs/mainfix_tu.log
-            git add -A
-            git commit -m "ci: main.cpp syntax check failed (diagnostic)" || echo "no change"
-            git push -f origin HEAD:refs/heads/ci-mainfix-fail
-            echo "SYNTAX FAILED"
-            exit 1
-          fi
+          if [ "$rc" != "0" ]; then echo "syntax check failed"; exit 1; fi
+          python3 - <<'PY'
+          import base64, json, os, sys, urllib.request
+          tok = os.environ["GH_TOKEN"]
+          repo = "hwindinkg/reSF2"; branch = "fix/mainfix"; path = "main.cpp"
+          def api(method, url, data=None):
+              req = urllib.request.Request(url, data=(json.dumps(data).encode() if data else None), method=method)
+              req.add_header("Authorization", f"token {tok}")
+              req.add_header("Accept", "application/vnd.github+json")
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return r.status, json.loads(r.read().decode())
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read().decode())
+          st, cur = api("GET", f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}")
+          sha = cur.get("sha") if st == 200 else None
+          print("GET sha status", st, "sha", sha)
+          content = open(path, "rb").read()
+          body = {
+              "message": "fix(main): stale current_move_ guard + extended [ROOT] diag log + y_adjust heuristic warning [HEURISTIC-TODO]",
+              "content": base64.b64encode(content).decode(),
+              "branch": branch,
+          }
+          if sha: body["sha"] = sha
+          st2, res = api("PUT", f"https://api.github.com/repos/{repo}/contents/{path}", body)
+          print("PUT status", st2)
+          if st2 not in (200, 201):
+              print(json.dumps(res)[:800]); sys.exit(1)
+          print("commit", res.get("commit", {}).get("sha"))
+          PY
