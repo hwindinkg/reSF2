@@ -11,6 +11,21 @@
 #include <windows.h>
 #endif
 
+// [ORIGINAL] On Linux/macOS, GL_GLEXT_PROTOTYPES MUST be defined BEFORE
+// <GL/gl.h> so that <GL/glext.h> (pulled in by gl.h) emits real prototypes
+// for GL 2.0+ functions (glCreateShader, glGenBuffers, glUseProgram,
+// glUniform*, glActiveTexture, glVertexAttribPointer, ...). Mesa's gl.h
+// includes glext.h internally, and glext.h gates all prototype emission on
+// GL_GLEXT_PROTOTYPES. Defining it AFTER gl.h is a no-op because glext.h is
+// already include-guarded by then (verified this session: the original
+// ordering produced 'glUseProgram was not declared in this scope' on GCC).
+//
+// On Windows we do NOT want glext prototypes: we load GL 2.0+ at runtime via
+// wglGetProcAddress (see gl_loader.cpp), so the symbols are our own extern
+// pointers, not libGL prototypes.
+#ifndef _WIN32
+#define GL_GLEXT_PROTOTYPES 1
+#endif
 #include <GL/gl.h>
 
 // ---- Define missing GL types (Windows GL/gl.h only has OpenGL 1.1) ----
@@ -109,6 +124,15 @@ extern PFNGLACTIVETEXTUREPROC glActiveTexture;
 
 void init_gl_functions();
 #else
-// On Linux/macOS, functions are available directly
+// [ORIGINAL] Linux/macOS path.
+// GL_GLEXT_PROTOTYPES was defined above <GL/gl.h>, so gl.h already pulled in
+// <GL/glext.h> with real prototypes for GL 2.0+ functions. Those symbols are
+// exported by Mesa's libGL.so.1 (verified this session):
+//   nm -D /usr/lib/x86_64-linux-gnu/libGL.so.1 | grep glCreateShader
+//   -> 0000000000049660 T glCreateShader
+//   -> 000000000004c620 T glGenBuffers
+//   -> ... (all GL 2.0 symbols present)
+// and resolve at static link time from -lGL. No runtime loading needed,
+// unlike the Windows wglGetProcAddress path above.
 #define init_gl_functions() ((void)0)
 #endif

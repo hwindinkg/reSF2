@@ -29,7 +29,19 @@ if(RESF2_USE_GLFW)
         find_library(OPENGL_LIBRARY OpenGL REQUIRED)
         target_link_libraries(resf2_platform PRIVATE ${OPENGL_LIBRARY})
     else()
-        target_link_libraries(resf2_platform PRIVATE GL)
+        # [ORIGINAL] Use find_package(OpenGL) so we get the FULL resolved path
+        # to libGL (OPENGL_gl_LIBRARY / OPENGL_LIBRARIES). A bare `GL` link
+        # name fails on sandboxes without a system libgl-dev symlink, because
+        # CMAKE_LIBRARY_PATH only feeds find_library(), not the link -L flags.
+        # The full path links directly with no -L required.
+        find_package(OpenGL REQUIRED)
+        target_link_libraries(resf2_platform PRIVATE ${OPENGL_LIBRARIES})
+        # [ORIGINAL] GLFW's glfw3.h does `#include <GL/gl.h>`; on sandboxes
+        # without system libgl-dev, OPENGL_INCLUDE_DIR points at a
+        # user-extracted prefix holding GL/gl.h. Add it explicitly.
+        if(OPENGL_INCLUDE_DIR)
+            target_include_directories(resf2_platform PRIVATE ${OPENGL_INCLUDE_DIR})
+        endif()
     endif()
 
     # On Windows, GLFW needs the Win32 subsystem

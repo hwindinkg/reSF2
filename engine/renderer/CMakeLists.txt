@@ -37,6 +37,14 @@ target_include_directories(resf2_renderer PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
+# [ORIGINAL] find_package(OpenGL) sets OPENGL_INCLUDE_DIR (the dir containing
+# GL/gl.h). On sandboxes without system libgl-dev, that dir is a user-extracted
+# prefix; without adding it here, renderer.cpp/gl_loader.cpp fail with
+# "GL/gl.h: No such file or directory" even though the lib was found.
+if(RESF2_NEED_GL AND OPENGL_INCLUDE_DIR)
+    target_include_directories(resf2_renderer PRIVATE ${OPENGL_INCLUDE_DIR})
+endif()
+
 target_compile_features(resf2_renderer PUBLIC cxx_std_23)
 target_link_libraries(resf2_renderer PUBLIC resf2_warnings)
 
