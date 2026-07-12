@@ -135,7 +135,7 @@ Unable to find executable: /home/runner/work/reSF2/reSF2/build/bin/test_platform
 
 0% tests passed, 4 tests failed out of 4
 
-Total Test time (real) =   0.05 sec
+Total Test time (real) =   0.04 sec
 
 The following tests FAILED:
 	  1 - test_s3e_container (Not Run)
