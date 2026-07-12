@@ -729,9 +729,32 @@ public:
                 auto cur_move_it = moves_.find(current_move_);
                 if (cur_move_it != moves_.end()) {
                     int cur_kc = cur_move_it->second.key_count;
-                    if (cur_kc == 1 || cur_kc == 2) {
-                        // Check if current attack animation is still playing
-                        // (hit_anim_ > 0 means attack in progress)
+                    // [ORIGINAL] 3key combo requires the basic attack to STILL
+                    // be playing, matching the original's CurrentAnimationName
+                    // predicate (Model::step @ 0x10161ad0, playInfo @
+                    // 0x10164fa0). Conditions (per HANDOFF.md open bug #1):
+                    //   - current_move_'s template key_count is 1 or 2
+                    //   - hit_anim_ > 0 (attack timer still running)
+                    //   - current_anim_ is NOT one of the neutral/idle anims
+                    //     that signal the attack already ended:
+                    //     stance_idle / fists_idle / step_forward / step_back
+                    // The previous code only checked (cur_kc==1||cur_kc==2), so
+                    // after a non-loop attack ended, current_move_ still pointed
+                    // at the finished attack and the next press was wrongly
+                    // treated as a combo continuation (in_basic_attack stuck
+                    // true). This is the real defect; clearing current_move_ on
+                    // hit_anim_==0 already exists (lines ~1037/1225/1236).
+                    // [HEURISTIC-TODO] replace this hand predicate with the
+                    // exact original CurrentAnimationName=="1key"|"2key"
+                    // template-name check once Model::step/MoveInside decode is
+                    // byte-confirmed; the animation-name denylist above is an
+                    // approximation of "current anim is an attack anim".
+                    if ((cur_kc == 1 || cur_kc == 2)
+                        && hit_anim_ > 0
+                        && current_anim_ != "stance_idle"
+                        && current_anim_ != "fists_idle"
+                        && current_anim_ != "step_forward"
+                        && current_anim_ != "step_back") {
                         in_basic_attack = true;
                     }
                 }
@@ -2103,6 +2126,28 @@ private:
         // Roll issue: character floats during roll, but roll is short (26 frames).
         // This is acceptable until we implement proper MoveInside alignment.
         constexpr float FEET_FLOOR_OFFSET = 4.0f;
+        // [HEURISTIC-TODO] y_adjust is a GLOBAL CONSTANT here, not per-move.
+        // The original aligns via MoveInside/pivotID (Model::step @ 0x10161ad0,
+        // playInfo @ 0x10164fa0) which selects a contact node (NHeel_1/NHeel_2
+        // for grounded moves, NPivot for jumps) and aligns it to the floor /
+        // pivot point. This constant grounds standing/crouch/jump but FLOATS
+        // rolls (~84px) and any move whose NPivot descends without the feet
+        // leaving the floor. Replace with per-move pivot alignment once
+        // MoveInside is byte-decoded (see docs/s3e_reverse_engineering.md,
+        // Task C entry). One-shot stderr warning so the heuristic is visible
+        // in every run, not just the source.
+        {
+            static bool warned_once = false;
+            if (!warned_once) {
+                warned_once = true;
+                std::fprintf(stderr,
+                    "[HEURISTIC-TODO] y_adjust_smoothed_ = FEET_FLOOR_OFFSET (4.0f) "
+                    "is a global constant, not per-move MoveInside alignment. "
+                    "Rolls/jumps with descending NPivot will float. "
+                    "Replace with Model::step pivotID contact alignment "
+                    "(Model::step @ 0x10161ad0, playInfo @ 0x10164fa0).\n");
+            }
+        }
         y_adjust_smoothed_ = FEET_FLOOR_OFFSET;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
@@ -2800,6 +2845,7 @@ private:
         anim_node_pos_.clear();
         anim_root_dx_ = 0.0f;
         anim_root_dy_ = 0.0f;
+        ++total_frame_count_;  // [ROOT] diagnostic frame number
 
         auto it = animations_.find(current_anim_);
         if (it == animations_.end()) {
@@ -2943,8 +2989,14 @@ private:
             // sync step_start to current position.
             if (prev_frame_idx_ == -1) {
                 step_start_player_x_ = player_pos_x_;
-                std::printf("[ROOT] anim='%s' first frame: step_start=%.1f player_x=%.1f facing=%d\n",
-                            current_anim_.c_str(), step_start_player_x_, player_pos_x_, anim_facing_right_);
+                // [ORIGINAL] Expanded [ROOT] first-frame log: frame_idx,
+                // player_x/y, npivot_x/y, render_y (= player_pos_y_ +
+                // y_adjust_smoothed_), facing. Needed to diagnose the Y bug
+                // (y_adjust constant floats rolls) from a real run.
+                std::printf("[ROOT] f=%llu anim='%s' FIRST frame_idx=%d player=(%.1f,%.1f) npivot=(%.2f,%.2f) render_y=%.2f facing=%d\n",
+                            (unsigned long long)total_frame_count_, current_anim_.c_str(), frame_idx,
+                            player_pos_x_, player_pos_y_, npivot_x, npivot_y,
+                            player_pos_y_ + y_adjust_smoothed_, anim_facing_right_);
             }
             // Detect loop wrap for looping animations
             if (anim_loop_ && prev_frame_idx_ >= 0 && prev_frame_idx_ > frame_idx) {
@@ -2952,8 +3004,8 @@ private:
                 if (anim.get_node_pos(anim.frame_count - 1, npivot_idx, last_npx, last_npy, last_npz)) {
                     float cycle_disp = last_npx - anim_root_anchor_x_;
                     step_start_player_x_ += anim_facing_right_ ? cycle_disp : -cycle_disp;
-                    std::printf("[ROOT] loop wrap: cycle_disp=%.1f step_start=%.1f\n",
-                                cycle_disp, step_start_player_x_);
+                    std::printf("[ROOT] f=%llu loop wrap: cycle_disp=%.1f step_start=%.1f\n",
+                                (unsigned long long)total_frame_count_, cycle_disp, step_start_player_x_);
                 }
             }
             prev_frame_idx_ = frame_idx;
@@ -2973,6 +3025,16 @@ private:
         } else {
             prev_frame_idx_ = -1;
         }
+
+        // [ORIGINAL] Per-frame [ROOT] diagnostic: logs every frame so the Y
+        // trajectory during jumps/rolls/idle is visible in a real run.
+        // render_y = player_pos_y_ + y_adjust_smoothed_ (matches world_cy in
+        // render_body_model). y_adjust_smoothed_ here is the value from the
+        // last render_body_model() call (member persists across frames).
+        std::printf("[ROOT] f=%llu anim='%s' fi=%d px=%.1f py=%.1f npx=%.2f npy=%.2f ry=%.2f face=%d\n",
+                    (unsigned long long)total_frame_count_, current_anim_.c_str(), frame_idx,
+                    player_pos_x_, player_pos_y_, npivot_x, npivot_y,
+                    player_pos_y_ + y_adjust_smoothed_, anim_facing_right_);
 
         // Y root motion: NO LONGER NEEDED.
         // y_adjust in render_body_model() now handles all Y positioning
@@ -3677,6 +3739,7 @@ private:
     float step_start_player_x_ = 0.0f;  // player X when step started (for absolute root motion)
     bool anim_facing_right_ = true;  // facing locked at animation start (for root motion direction)
     float y_adjust_smoothed_ = 0.0f;  // smoothed Y adjustment for feet normalization
+    uint64_t total_frame_count_ = 0;  // global frame counter (for [ROOT] log diagnostics)
     int no_key_frames_ = 0;  // frames with no movement key pressed (for hysteresis)
     int move_state_ = 0;  // 0=IDLE, 1=MOVING_LEFT, 2=MOVING_RIGHT, 10=special, 11=block
     uint32_t step_play_time_ = 0;  // ms the current step animation has been playing
