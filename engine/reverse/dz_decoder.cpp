@@ -307,7 +307,7 @@ std::vector<uint8_t> DzDecompressor::decompress_streaming(
             uint8_t symbol = 0;
             for (int bit = 0; bit < 8; ++bit) {
                 int b = rc.decode_bit(probs.literal_probs[prev_byte][bit]);
-                symbol = (symbol << 1) | b;
+                symbol = (uint8_t)((symbol << 1) | b);
             }
             output.push_back(symbol);
         } else {
