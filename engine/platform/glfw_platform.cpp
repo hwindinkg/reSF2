@@ -234,22 +234,11 @@ struct GlfwPlatform::Impl {
         if (!self) return;
 
 #ifdef _WIN32
-        // On Windows: only use GLFW for just_pressed (fast tap detection).
-        // Ignore GLFW_RELEASE entirely (spurious on Win10 19044).
-        // Ignore GLFW_REPEAT (causes infinite key repeat).
-        // Use glfw_key_pressed_this_frame_ to prevent spurious GLFW_PRESS
-        // from setting just_pressed multiple times.
-        if (action != GLFW_PRESS) return;
-
-        int idx = glfw_to_key_index(key);
-        if (idx < 0 || idx >= static_cast<int>(kMaxKeys)) return;
-
-        // Only set just_pressed if NOT already pressed this frame
-        // and NOT already down (GetAsyncKeyState from previous frame)
-        if (!self->glfw_key_consumed_[idx] && !self->input.keys_down[idx]) {
-            self->input.keys_just_pressed[idx] = true;
-            self->glfw_key_consumed_[idx] = true;  // prevent re-trigger
-        }
+        // On Windows: IGNORE all GLFW key events.
+        // GetAsyncKeyState polling in poll_events() handles everything.
+        // GLFW on Win10 19044 has spurious events that cause key repeat bugs.
+        (void)key; (void)scancode; (void)action; (void)mods;
+        return;
 #else
         int idx = glfw_to_key_index(key);
         if (idx < 0 || idx >= static_cast<int>(kMaxKeys)) return;
@@ -401,33 +390,18 @@ void GlfwPlatform::shutdown() noexcept {
 
 bool GlfwPlatform::poll_events() {
     // Clear per-frame input flags
+    // Reset per-frame input state BEFORE glfwPollEvents and GetAsyncKeyState.
     for (auto& p : impl_->input.pointers) {
         p.just_pressed = false;
         p.just_released = false;
     }
-    // Don't reset keys_just_pressed/released here — do it AFTER glfwPollEvents()
-    // so GLFW callbacks during glfwPollEvents() can set them.
-    // NOTE: glfw_key_consumed_ is NOT reset here — it's reset when
-    // GetAsyncKeyState detects the key was released (transition down→up).
+    impl_->input.keys_just_pressed.fill(false);
+    impl_->input.keys_just_released.fill(false);
     impl_->input.mouse_delta_x = 0;
     impl_->input.mouse_delta_y = 0;
     impl_->input.mouse_wheel = 0.0f;
 
     glfwPollEvents();
-
-    // Now reset just_pressed/released for GetAsyncKeyState cycle.
-    // GLFW callbacks during glfwPollEvents() may have set some.
-    // Only keep GLFW-set values (identified by glfw_key_consumed_ flag).
-    // Discard any stale values from previous frame.
-    std::array<bool, kMaxKeys> glfw_just_pressed{};
-    std::array<bool, kMaxKeys> glfw_just_released{};
-    for (size_t i = 0; i < kMaxKeys; ++i) {
-        if (impl_->glfw_key_consumed_[i] && impl_->input.keys_just_pressed[i]) {
-            glfw_just_pressed[i] = true;  // genuine GLFW press this frame
-        }
-    }
-    impl_->input.keys_just_pressed.fill(false);
-    impl_->input.keys_just_released.fill(false);
 
 #ifdef _WIN32
     // Win32 path: bypass GLFW key state entirely.
@@ -487,22 +461,9 @@ bool GlfwPlatform::poll_events() {
     glfwSetInputMode(impl_->window, GLFW_STICKY_KEYS, GLFW_TRUE);
 #endif
 
-    // On Windows: also enable sticky keys for GLFW callbacks to catch
-    // fast key presses that GetAsyncKeyState might miss between frames.
-#ifdef _WIN32
-    glfwSetInputMode(impl_->window, GLFW_STICKY_KEYS, GLFW_TRUE);
-
-    // Merge GLFW callback-set just_pressed/released with GetAsyncKeyState results.
-    // GLFW catches fast taps that GetAsyncKeyState might miss.
-    for (size_t i = 0; i < kMaxKeys; ++i) {
-        if (glfw_just_pressed[i]) {
-            impl_->input.keys_just_pressed[i] = true;
-        }
-        if (glfw_just_released[i]) {
-            impl_->input.keys_just_released[i] = true;
-        }
-    }
-#endif
+    // On Windows: GetAsyncKeyState handles all key input.
+    // GLFW key callback is disabled (spurious events on Win10 19044).
+    // No merge needed — pure GetAsyncKeyState polling.
 
     return !impl_->quit_requested;
 }

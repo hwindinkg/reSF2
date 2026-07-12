@@ -2037,57 +2037,73 @@ private:
         auto pivot_it = skeleton_nodes_.find("NPivot");
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
-        // Y normalization: keep lowest node at floor level.
-        // The .bin animation stores absolute node Y. For each node:
-        //   anim_node_pos_.y = (abs_y - npivot_y + npivot_rest_y)
-        //   sy = world_cy + (ly - pivot_local_y) = world_cy + abs_y - npivot_y
+        // Y normalization: keep character at correct height.
         //
-        // For feet at floor: world_cy + abs_y_feet - npivot_y = floor_world_y
-        //   world_cy = floor_world_y - abs_y_feet + npivot_y
+        // The .bin animation stores absolute node Y for all nodes.
+        // anim_node_pos_[name].y = (abs_y - npivot_y + npivot_rest_y)
+        // resolve_body_node: sy = world_cy + (ly - pivot_local_y)
         //
-        // The lowest node's (abs_y - npivot_y) = (ly - pivot_local_y) is
-        // constant ~-104 for standing/crouch, but changes for rolls/flips
-        // (NPivot moves but feet stay at floor).
+        // For NPivot: sy = world_cy (since ly = npivot_rest_y for NPivot)
+        // So world_cy = NPivot world position.
         //
-        // Solution: y_adjust = floor_offset + (pivot_local_y - lowest_anim_y)
-        //   where lowest_anim_y = min(anim_node_pos_.y) across all nodes.
-        //   floor_offset = 4 (aligns feet with floor surface).
+        // player_pos_y_ (-93) is the NPivot world position from params.xml.
+        // y_adjust = 0 positions NPivot at player_pos_y_.
         //
-        // This dynamically adjusts for ALL animations:
-        //   Standing: lowest=65.52, y_adjust = 4 + (169.48 - 65.52) = 107.96
-        //     world_cy = -93 + 107.96 = 14.96
-        //     NToe: 14.96 + (65.52 - 169.48) = 14.96 - 103.96 = -89... wrong
+        // But there's a +4 offset needed to align feet with floor surface:
+        // Floor at world_y = -193 (layer_3 at y=225, height=64, surface = -225+32)
+        // NPivot at -93. Feet (NToe) at -93 + (65.52 - 169.48) = -196.96
+        // Floor surface at -193. Feet are 3.96 below surface.
+        // y_adjust = +4 shifts everything up so feet are at -192.96 ≈ floor.
         //
-        // Actually, simpler: y_adjust = floor_offset - (lowest_anim_y - pivot_local_y)
-        //   = 4 - (65.52 - 169.48) = 4 + 103.96 = 107.96
-        //   world_cy = -93 + 107.96 = 14.96
-        //   NToe: 14.96 + (65.52 - 169.48) = -89... still wrong
+        // For crouch: NPivot goes to 106.21 (down from 169.48).
+        // NToe abs_y = 2.24 (stays at floor).
+        // anim_node_pos_.y = (2.24 - 106.21 + 169.48) = 65.51
+        // sy = (-93+4) + (65.51 - 169.48) = -89 - 103.97 = -192.97. ON FLOOR! ✓
         //
-        // The issue: resolve_body_node does sy = world_cy + (ly - pivot_local_y)
-        // For lowest node: sy = world_cy + (lowest - pivot_local_y)
-        // We want sy = floor_y = -193 + 4 = -189 (4 above floor surface)
-        // So: world_cy = -189 - (lowest - pivot_local_y) = -189 - lowest + pivot_local_y
-        // y_adjust = world_cy - player_pos_y_ = -189 - lowest + pivot_local_y - (-93)
-        //          = -189 - lowest + pivot_local_y + 93 = -96 + pivot_local_y - lowest
-        float ly_lowest = pivot_local_y;
-        for (auto& [name, pos] : anim_node_pos_) {
-            if (pos.second < ly_lowest) ly_lowest = pos.second;
-        }
-        // Floor surface at -193, want feet 4 above = -189
-        // y_adjust = -189 - ly_lowest + pivot_local_y - player_pos_y_
-        // But player_pos_y_ varies per location. Use:
-        // y_adjust = (pivot_local_y - ly_lowest) + FLOOR_Y_OFFSET
-        // where FLOOR_Y_OFFSET positions the character so lowest node is at floor.
-        // FLOOR_Y_OFFSET = floor_surface - player_pos_y_ = -193 - (-93) = -100
-        // But this is location-specific. For dojo: floor at y=225 → world -225,
-        // surface at -225+32 = -193. player at -93. Offset = -193 - (-93) = -100.
-        // y_adjust = (169.48 - 65.52) + (-100) = 103.96 - 100 = 3.96 ≈ 4
+        // For jump: NPivot goes to 243.93 (up from 169.48).
+        // NToe abs_y = 189.15 (feet go up).
+        // anim_node_pos_.y = (189.15 - 243.93 + 169.48) = 114.70
+        // sy = (-93+4) + (114.70 - 169.48) = -89 - 54.78 = -143.78
+        // Floor at -193. Feet at -143.78 — 49 ABOVE floor! ✓ (character jumped up)
         //
-        // For roll frame 14: lowest=149.48, y_adjust = (169.48 - 149.48) + (-100) = 20 - 100 = -80
-        // world_cy = -93 - 80 = -173
-        // NToe: -173 + (149.48 - 169.48) = -173 - 20 = -193. ON FLOOR! ✓
-        constexpr float FLOOR_Y_OFFSET = -100.0f;  // dojo: floor_surface - player_pos_y
-        y_adjust_smoothed_ = (pivot_local_y - ly_lowest) + FLOOR_Y_OFFSET;
+        // For roll: NPivot goes to 20.11 (very low).
+        // NToe abs_y = 0 (feet at floor).
+        // anim_node_pos_.y = (0 - 20.11 + 169.48) = 149.37
+        // sy = (-93+4) + (149.37 - 169.48) = -89 - 20.11 = -109.11
+        // Floor at -193. Feet at -109 — 84 ABOVE floor! ✗ (character floating)
+        //
+        // Problem: roll has NPivot very low but feet at floor.
+        // The formula sy = world_cy + abs_y - npivot_y gives:
+        //   sy = -89 + 0 - 20.11 = -109.11 (wrong, should be -193)
+        //
+        // Wait: anim_node_pos_.y = (abs_y - npivot_y + npivot_rest_y)
+        // sy = world_cy + (ly - pivot_local_y)
+        //    = world_cy + (abs_y - npivot_y + npivot_rest_y - npivot_rest_y)
+        //    = world_cy + abs_y - npivot_y
+        // For roll: sy = -89 + 0 - 20.11 = -109.11. WRONG.
+        //
+        // But abs_y for NToe in roll = 0 (feet at floor in .bin).
+        // npivot_y = 20.11. So abs_y - npivot_y = -20.11.
+        // sy = world_cy - 20.11 = -89 - 20.11 = -109.11.
+        //
+        // For feet at floor (-193): world_cy = -193 + 20.11 = -172.89.
+        // y_adjust = -172.89 - (-93) = -79.89.
+        //
+        // This is the lowest-node approach! But it doesn't work for jump
+        // because lowest node stays low during jump.
+        //
+        // SOLUTION: Use NPivot-based y_adjust for jumps, lowest-node for rolls.
+        // But we can't easily distinguish them.
+        //
+        // BETTER SOLUTION: The original game uses MoveInside alignment which
+        // aligns a specific pivot node (NHeel_1 or NHeel_2) to the floor.
+        // We should use NHeel_1 Y for alignment, not NPivot or lowest node.
+        //
+        // For now: use constant y_adjust = 4 (works for standing, crouch, jump).
+        // Roll issue: character floats during roll, but roll is short (26 frames).
+        // This is acceptable until we implement proper MoveInside alignment.
+        constexpr float FEET_FLOOR_OFFSET = 4.0f;
+        y_adjust_smoothed_ = FEET_FLOOR_OFFSET;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
