@@ -2,11 +2,24 @@
 //
 // DZ (derbh) decompressor — clean-room reimplementation.
 //
-// Algorithm reverse-engineered from libs3e_android.so function at 0x389f8
-// (and helpers at 0x37adc, 0x37a5c, 0x37e28, 0x3751c, 0x37c44, 0x3772c).
+// [HEURISTIC-TODO] STATUS (audited this session):
+//   The decoder function in libs3e_android.so at VA 0x389f8 was VERIFIED to
+//   exist and is ARM-mode (capstone disasm, not Thumb). First 40 insns show
+//   a function taking a context pointer in r0 (sb) with fields accessed at
+//   +0x14, +0x24, +0x28, +0x48, +0x4c, +0x50, +0x54 — consistent with a
+//   streaming LZ/range decoder state (input cursor, buffer sizes, window).
+//   See docs/s3e_reverse_engineering.md "DZ type 4 decoder" for the
+//   disassembly excerpt.
 //
-// The DZ format is Marmalade's custom compression, which is an LZMA-variant
-// range coder with:
+//   HOWEVER, the full algorithm (200+ ARM insns at 0x389f8 + helpers at
+//   0x37adc range coder, 0x3751c bit-tree) is NOT byte-verified. The
+//   implementation below is the PREVIOUS session's speculative LZMA-variant
+//   reimplementation. It has NOT been proven to produce byte-identical
+//   output to the original on any real .dz block. Until the algorithm is
+//   fully traced, type-4 blocks fall back to pre-extracted files on disk
+//   (see dz_reader: has_file/read_file).
+//
+// Original algorithm description (from prior analysis, NOT re-verified):
 //   - 32-bit range coder (range + code registers)
 //   - 5-byte context window for probability modeling
 //   - CRC32-derived hash for context table lookup
