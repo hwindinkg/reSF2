@@ -179,7 +179,7 @@ bool DzArchive::parse() {
 std::vector<std::byte> DzArchive::decompress_gzip(const std::byte* data, size_t size) {
     // Use zlib's gzip decompression (wbits=31)
     z_stream strm = {};
-    strm.next_in = reinterpret_cast<const Bytef*>(data);
+    strm.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(data));
     strm.avail_in = static_cast<uInt>(size);
     
     if (inflateInit2(&strm, 31) != Z_OK) return {};
@@ -211,7 +211,7 @@ std::vector<std::byte> DzArchive::decompress_gzip(const std::byte* data, size_t 
 
 std::vector<std::byte> DzArchive::decompress_zlib(const std::byte* data, size_t size) {
     z_stream strm = {};
-    strm.next_in = reinterpret_cast<const Bytef*>(data);
+    strm.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(data));
     strm.avail_in = static_cast<uInt>(size);
     
     if (inflateInit(&strm) != Z_OK) return {};
