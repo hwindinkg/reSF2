@@ -1347,3 +1347,89 @@ Stage Summary:
 - Special moves: ADDED. Jump (W), Jump away (Shift+W), Forward roll (Shift+D),
   Back roll (Shift+A), Block (hold S).
 - All compile cleanly on Linux g++ 14.2.
+
+---
+## Session: SSH-key setup + Tasks A/B/C/D (HEAD 249b1a8 → f329ae5)
+
+**Setup**: Generated ed25519 SSH key (python `cryptography` lib, no
+ssh-keygen in sandbox). Wrote a drop-in `ssh` wrapper at ~/.local/bin/ssh
+using `asyncssh` (pip) since openssh-client isn't installed and there's no
+sudo. Wrapper handles binary git pack protocol (encoding=None) + read1-based
+stdin pumping for interactive upload-pack. Push to origin/main works.
+
+**Task A — Linux/GCC build unblock** (commit 5af53b3):
+- engine/renderer/renderer.cpp: added `#include <algorithm>` (std::min/max
+  initializer_list in draw_line_screen).
+- engine/renderer/gl_loader.hpp: `#define GL_GLEXT_PROTOTYPES` BEFORE
+  `<GL/gl.h>` on Linux so glext.h emits GL 2.0 prototypes (verified:
+  Mesa libGL.so.1 exports glCreateShader/glGenBuffers/etc.).
+- CMakeLists.txt: `-DGLFW_BUILD_WAYLAND=OFF -DGLFW_BUILD_X11=ON` to avoid
+  the wayland-scanner FetchContent failure.
+- engine/renderer/CMakeLists.txt + engine/platform/CMakeLists.txt:
+  propagate OPENGL_INCLUDE_DIR; use `${OPENGL_LIBRARIES}` (full path)
+  instead of bare `-lGL` (CMAKE_LIBRARY_PATH doesn't feed link -L flags).
+- Set up user-space _prefix/ by extracting bundled .deb files + apt-get
+  download (no sudo) of libxrandr-dev/libxinerama-dev/libxcursor-dev/
+  libxi-dev/libxext-dev/libxfixes-dev. Fixed broken .so symlinks to point
+  at system runtime .so.VERSION files.
+- Result: `cmake --build` = 0 errors; resf2_app (988 KB) runs on Xvfb,
+  loads DZ/skeleton/556 anims/858 moves, reaches MainMenu + [ROOT] log.
+
+**Task B — 3 patches to main.cpp** (commit 96bfce1):
+1. `in_basic_attack` honest: `(kc==1||kc==2) && hit_anim_>0 && current_anim_
+   ∉ {stance_idle,fists_idle,step_forward,step_back}`. The previous code
+   only checked key_count, so after a non-loop attack ended the next press
+   was wrongly treated as a combo continuation.
+2. Expanded [ROOT] log: per-frame `f/anim/fi/px/py/npx/npy/ry/face`.
+   Added `uint64_t total_frame_count_` member. BEFORE: 1 [ROOT] line.
+   AFTER: 291 [ROOT] lines in a 15s idle run.
+3. One-shot stderr [HEURISTIC-TODO] next to
+   `y_adjust_smoothed_ = FEET_FLOOR_OFFSET` (static bool guard).
+
+**Task C — MoveInside pivot-node Y alignment** (commit 9450c4f):
+- Byte-verified (objdump on ShadowFight2.s86 PE32, ImageBase 0x10000000):
+  fcn.10165c10 reads Model[0x20]→animInfo, animInfo[0x94]→moveInside,
+  moveInside[0x70]→align.pivotID, stores node_array[pivotID].Y at Model[0x5c]
+  (0 if pivotID==-1). Called from playInfo (0x10164fa0) at 0x10165115.
+  Model::step (0x10161ad0) reads Model[0x58] at the fcn.10243750 call.
+- moves.xml <Pivot Object="Nodes" Part="NHeel_X"/> names the pivot node.
+  Distribution: 437 NHeel_2, 176 NHeel_1, 61 Animation, 59 Magic-Node2_1,
+  25 NPivot, ... Parse audit: 720/858 moves node-aligned, 57 animation-only.
+- Implemented per-frame y_adjust = floor_y - player_pos_y_ - pivot_node_ly
+  + npivot_rest_y (grounds the pivot node to dojo floor -193). Falls back
+  to constant 4 for Object="Animation". Exponential-smoothed (alpha=0.3).
+- [HEURISTIC-TODO] consumption formula NOT byte-confirmed end-to-end
+  (Axis="X|Z" suggests MoveInside may align only X/Z; Y from anim/physics).
+  Runtime Y-effect during combat NOT verified (no xdotool for input injection).
+- Documented in docs/s3e_reverse_engineering.md "MoveInside" section with
+  full disasm + struct layout table.
+
+**Task D — DZ type-4 decoder honest status** (commit f329ae5):
+- objdump is x86-only on this host; installed capstone (pip) for ARM disasm.
+- Verified the decoder function EXISTS at VA 0x389f8 in libs3e_android.so
+  (ARM mode, not Thumb). First 40 insns + context struct field table
+  (+0x14 window, +0x24 in_pos, +0x28 in_size, +0x48 count/limit) in docs.
+- Full algorithm (200+ insns + range coder 0x37adc + bit-tree 0x3751c)
+  NOT traced this session. dz_decoder.cpp remains speculative; type-4
+  blocks still fall back to pre-extracted files on disk.
+- Corrected the stale "Algorithm reverse-engineered" claim in dz_decoder.hpp
+  to honest [HEURISTIC-TODO] status.
+- Found docs container offsets (0x0EED/0x11BD) don't match this APK's
+  files.dz (filenames end at 0x7c9); dz_reader.cpp handles this correctly
+  by walking null-terminated names.
+
+**Task E** (deferred — depends on DZ type-4 completion).
+
+**Task F** — HANDOFF.md + this worklog updated to HEAD f329ae5.
+
+Stage Summary:
+- 4 commits pushed to origin/main: 5af53b3, 96bfce1, 9450c4f, f329ae5.
+- Linux/GCC build: 0 errors (was broken on GCC per known-state).
+- in_basic_attack: honest (bug #1 addressed).
+- [ROOT] log: per-frame with full Y/X/npivot/render_y diagnostics (bug #5 done).
+- MoveInside: mechanism byte-verified, pivot-node Y alignment implemented
+  (heuristic formula, not byte-confirmed end-to-end).
+- DZ type-4: function verified, algorithm NOT traced (honest [HEURISTIC-TODO]).
+- All claims tagged [ORIGINAL] (with binary address) or [HEURISTIC-TODO].
+- Proof logs in Testing/: base_log_BEFORE_TaskB.txt, after_log_AFTER_TaskB{.txt,.stderr.txt},
+  after_log_AFTER_TaskC{.txt,.stderr.txt}.
