@@ -951,6 +951,8 @@ public:
         if (move_state_ == 10 && hit_anim_ == 0) {
             move_state_ = 0;
             need_switch_to_idle_ = true;
+            // Clear current_move_ so 3key combos don't trigger on next key press
+            current_move_.clear();
         }
         // Exit duck state when Down released
         // No minimum duration — original game allows immediate release
@@ -1935,19 +1937,24 @@ private:
         // Y normalization: keep feet on floor across all animations.
         // Jump height is handled by jump_y_offset_ (root motion Y).
         //
-        // During jump/flip animations, y_adjust must be 0 for ALL frames.
-        // The jump_y_offset_ handles the full Y position (including crouch
-        // phase where offset is negative). If y_adjust were applied during
-        // crouch, it would conflict with jump_y_offset_ and cause snapping.
+        // During jump animations:
+        //   - Airborne phase (jump_y_offset > 0): y_adjust = 0, let offset handle height
+        //   - Crouch phase (jump_y_offset == 0): apply y_adjust to keep feet on floor
+        //
+        // This prevents the character from sinking during crouch (negative
+        // offset would push character down, but y_adjust keeps feet at floor).
         bool is_jump_render = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                                current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                                current_anim_ == "back_handflip" ||
                                current_anim_ == "air_punch" || current_anim_ == "air_axe_kick");
-        if (is_jump_render) {
-            // During jumps, jump_y_offset_ handles Y position (can be negative
-            // during crouch, positive during airborne). No y_adjust.
+        bool is_airborne = is_jump_render && jump_y_offset_ > 0;
+        if (is_airborne) {
+            // During airborne phase, don't apply y_adjust — let jump_y_offset
+            // handle the height. Feet should be off the floor during jump.
             y_adjust_smoothed_ = 0;
         } else {
+            // During ground phase (crouch, stand, land), apply y_adjust
+            // to keep feet on floor.
             float ly_lowest = pivot_local_y;
             for (auto& [name, pos] : anim_node_pos_) {
                 if (pos.second < ly_lowest) ly_lowest = pos.second;
@@ -2831,14 +2838,19 @@ private:
         //   - Crouch (jump start/end): ~106.21
         //   - Jump peak: ~243.93
         //
-        // We use the FULL offset (npivot_y - rest_y), which can be negative
-        // during crouch. This gives perfectly smooth motion throughout the
-        // jump: crouch down → rise → peak → fall → crouch.
+        // Strategy: use the FULL offset (npivot_y - rest_y), but ONLY apply
+        // it when positive (airborne). When negative (crouching), apply
+        // y_adjust to keep feet on floor — BUT also add the negative offset
+        // so the character crouches down visually.
         //
-        // y_adjust is NOT applied during jumps — the offset alone positions
-        // the character correctly. The feet stay at floor level because
-        // the crouch animation brings the feet closer to NPivot (smaller
-        // negative offset), compensating for the lower NPivot position.
+        // The key insight: the .bin animation already includes the crouch
+        // motion in the per-node positions. When NPivot is at 106 (crouch),
+        // the feet nodes are at ~64 (floor level). So we DON'T need to
+        // adjust Y at all during crouch — the node positions handle it.
+        //
+        // We only need jump_y_offset for the AIRBORNE phase (positive offset
+        // lifts the whole character up). During crouch, y_adjust keeps feet
+        // on floor (same as non-jump animations).
         bool is_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                             current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                             current_anim_ == "back_handflip" ||
@@ -2846,7 +2858,10 @@ private:
         if (is_jump_anim && anim_anchor_set_) {
             auto pivot_it = skeleton_nodes_.find("NPivot");
             float npivot_rest_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
-            jump_y_offset_ = npivot_y - npivot_rest_y;  // full offset, can be negative
+            float raw_offset = npivot_y - npivot_rest_y;
+            // Only apply positive offset (airborne phase).
+            // During crouch (negative offset), y_adjust handles feet position.
+            jump_y_offset_ = raw_offset > 0 ? raw_offset : 0;
         } else {
             jump_y_offset_ = 0;
         }
