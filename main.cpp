@@ -790,6 +790,7 @@ public:
 
             // Find best matching move from moves.xml
             const MoveDef* best_move = nullptr;
+            int candidate_count = 0;  // [DIAGNOSTIC] for [INPUT_DECISION] log
             for (auto& [name, move] : moves_) {
                 // Skip moves with no filename or no template
                 if (move.filename.empty() || move.template_name.empty()) continue;
@@ -834,6 +835,8 @@ public:
                 if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
                     anim_name = anim_name.substr(0, anim_name.size()-4);
                 if (!animations_.count(anim_name)) continue;
+                // [DIAGNOSTIC] This move passed all filters — count it.
+                ++candidate_count;
                 // Select by highest priority
                 if (!best_move || move.priority > best_move->priority) {
                     best_move = &move;
@@ -849,6 +852,18 @@ public:
                             cur_move_type.c_str(), best_move->name.c_str(),
                             anim_name.c_str(), best_move->priority,
                             best_move->template_name.c_str(), dist_to_enemy);
+                // [DIAGNOSTIC] Structured O/P decision log for input diagnosis.
+                std::printf("[INPUT_DECISION] f=%llu btn=%s keys_down=%s%s%s%s just=%s%s "
+                            "face=%d dir=%s ms=%d anim='%s' move='%s' hit=%u unint=%d "
+                            "basic=%d cand=%d sel='%s' reject=none\n",
+                            (unsigned long long)total_frame_count_,
+                            punch_pressed ? "O" : "P",
+                            key_up?"W":"", key_down?"S":"", key_left?"A":"", key_right?"D":"",
+                            punch_pressed?"O":"", kick_pressed?"P":"",
+                            (int)facing_right_, cur_direction.c_str(), move_state_,
+                            current_anim_.c_str(), current_move_.c_str(),
+                            hit_anim_, is_uninterrupt_?1:0, (int)in_basic_attack,
+                            candidate_count, best_move->name.c_str());
                 play_animation(anim_name, false);
                 current_move_ = best_move->name;
                 int fc = animations_[anim_name].frame_count;
@@ -857,6 +872,18 @@ public:
                 need_switch_to_idle_ = false;
                 goto after_combat;
             } else if (punch_pressed || kick_pressed) {
+                // [DIAGNOSTIC] No candidate found — log structured reject.
+                std::printf("[INPUT_DECISION] f=%llu btn=%s keys_down=%s%s%s%s just=%s%s "
+                            "face=%d dir=%s ms=%d anim='%s' move='%s' hit=%u unint=%d "
+                            "basic=%d cand=%d sel='' reject=no_candidate\n",
+                            (unsigned long long)total_frame_count_,
+                            punch_pressed ? "O" : "P",
+                            key_up?"W":"", key_down?"S":"", key_left?"A":"", key_right?"D":"",
+                            punch_pressed?"O":"", kick_pressed?"P":"",
+                            (int)facing_right_, cur_direction.c_str(), move_state_,
+                            current_anim_.c_str(), current_move_.c_str(),
+                            hit_anim_, is_uninterrupt_?1:0, (int)in_basic_attack,
+                            candidate_count);
                 // Debug: no move found — log why
                 static int no_move_log = 0;
                 if (no_move_log < 3) {
@@ -879,6 +906,18 @@ public:
                     no_move_log++;
                 }
             }
+        } else if ((punch_pressed || kick_pressed) && is_uninterrupt_) {
+            // [DIAGNOSTIC] O/P pressed but blocked by Uninterrupt interval.
+            std::printf("[INPUT_DECISION] f=%llu btn=%s keys_down=%s%s%s%s just=%s%s "
+                        "face=%d dir=? ms=%d anim='%s' move='%s' hit=%u unint=%d "
+                        "basic=? cand=? sel='' reject=uninterrupt\n",
+                        (unsigned long long)total_frame_count_,
+                        punch_pressed ? "O" : "P",
+                        key_up?"W":"", key_down?"S":"", key_left?"A":"", key_right?"D":"",
+                        punch_pressed?"O":"", kick_pressed?"P":"",
+                        (int)facing_right_, move_state_,
+                        current_anim_.c_str(), current_move_.c_str(),
+                        hit_anim_, is_uninterrupt_?1:0);
         }
 
         // === SPECIAL MOVES (jumps, rolls, duck) — from moves.xml ===
