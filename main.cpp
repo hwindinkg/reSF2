@@ -742,6 +742,8 @@ public:
             for (auto& [name, move] : moves_) {
                 // Skip moves with no filename or no template
                 if (move.filename.empty() || move.template_name.empty()) continue;
+                // Skip Titan moves (player is not a Titan)
+                if (move.template_name.find("Titan") != std::string::npos) continue;
                 // Match move_type (Punch or Kick)
                 if (move.move_type != cur_move_type) continue;
                 // Match key_count:
@@ -824,6 +826,8 @@ public:
                     if (move.filename.empty() || move.template_name.empty()) continue;
                     if (move.key_count != 1) continue;
                     if (move.direction != cur_direction) continue;
+                    // Skip Titan moves (player is not a Titan)
+                    if (move.template_name.find("Titan") != std::string::npos) continue;
                     // Match Jump moves or MOVE type (not Wall, not Punch/Kick)
                     if (move.template_name.find("Wall") != std::string::npos) continue;
                     if (!move.is_jump && move.move_type != "Jump" &&
@@ -870,6 +874,13 @@ public:
                     if (move.direction != "Down") continue;
                     if (move.is_jump) continue;
                     if (move.move_type == "Punch" || move.move_type == "Kick") continue;
+                    // Skip Titan moves (they require TitanGiantSword weapon)
+                    if (move.template_name.find("Titan") != std::string::npos) continue;
+                    // Weapon filter — only allow Fists or empty
+                    if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
+                        move.tactic_weapon.find("Fists") == std::string::npos) continue;
+                    // Require NotTitan template (player is not a Titan)
+                    if (!move.is_not_titan) continue;
                     std::string anim_name = move.filename;
                     if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
                         anim_name = anim_name.substr(0, anim_name.size()-4);
@@ -1962,46 +1973,53 @@ private:
         auto pivot_it = skeleton_nodes_.find("NPivot");
         float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
 
-        // Y normalization: keep feet on floor across all animations.
+        // Y normalization: position character so NPivot is at correct height.
         //
         // The .bin animation stores ABSOLUTE world Y for each node.
-        // anim_node_pos_[name] = (abs_x - npivot_x, abs_y - npivot_y + npivot_rest_y)
-        // = local position relative to NPivot, shifted to rest-pose frame.
+        // anim_node_pos_[name].y = abs_y - npivot_y + npivot_rest_y
         //
         // In resolve_body_node: sy = world_cy + (ly - pivot_local_y)
-        //   where pivot_local_y = npivot_rest_y = 169.48
-        //   and ly = anim_node_pos_.y = (abs_y - npivot_y + npivot_rest_y)
-        //   So sy = world_cy + (abs_y - npivot_y + npivot_rest_y - npivot_rest_y)
-        //         = world_cy + abs_y - npivot_y
+        //   = world_cy + (abs_y - npivot_y + npivot_rest_y - npivot_rest_y)
+        //   = world_cy + abs_y - npivot_y
         //
-        // For feet to be at floor (abs_y_feet ≈ 2):
-        //   world_cy + 2 - npivot_y = floor_y
-        //   world_cy = floor_y - 2 + npivot_y
+        // For feet to be at floor when standing:
+        //   world_cy + abs_y_feet - npivot_y = floor_y
+        //   world_cy = floor_y - abs_y_feet + npivot_y
         //
-        // When standing: npivot_y = 169.48, feet_y = 2
-        //   world_cy = floor_y - 2 + 169.48 = floor_y + 167.48
-        //   y_adjust = 167.48 (keeps feet at floor)
+        // When standing: npivot_y=169.48, feet_y=2
+        //   y_adjust = npivot_y - feet_y = 167.48
+        // When crouching: npivot_y=106.21, feet_y=2
+        //   y_adjust = npivot_y - feet_y = 104.21 (character lower, feet on floor)
+        // When jumping: npivot_y=243.93, feet_y=189
+        //   y_adjust = npivot_y - feet_y = 54.78 (character higher, feet up)
         //
-        // When crouching: npivot_y = 106.21, feet_y = 2
-        //   world_cy = floor_y - 2 + 106.21 = floor_y + 104.21
-        //   y_adjust = 104.21 (keeps feet at floor)
+        // But we don't know feet_y directly. Instead, use NPivot Y:
+        //   y_adjust = npivot_y - 2 (approximate, feet_y ≈ 2 when on floor)
         //
-        // When jumping: npivot_y = 243.93, feet_y = 175 (feet up)
-        //   world_cy = floor_y - 175 + 243.93 = floor_y + 68.93
-        //   y_adjust = 68.93 (character is higher)
+        // For jumps: NPivot goes up, so y_adjust increases, character rises.
+        // For crouch: NPivot goes down, so y_adjust decreases, character lowers.
+        // This gives correct Y position for ALL animations.
         //
-        // So y_adjust = (npivot_rest_y - npivot_y) + (feet_y_rest - feet_y_current)
-        // But since feet_y is already in the animation, we just need:
-        //   y_adjust = REF_FEET_LY - lowest_node_y
-        // where lowest_node_y is the lowest animated node Y (relative to rest frame).
-        //
-        // NO jump_y_offset needed! y_adjust handles everything.
-        float ly_lowest = pivot_local_y;
-        for (auto& [name, pos] : anim_node_pos_) {
-            if (pos.second < ly_lowest) ly_lowest = pos.second;
+        // Get current animated NPivot Y from anim_node_pos_
+        float current_npivot_y = pivot_local_y;  // default: rest pose
+        auto npivot_anim = anim_node_pos_.find("NPivot");
+        if (npivot_anim != anim_node_pos_.end()) {
+            // anim_node_pos_["NPivot"].y = 0 + npivot_rest_y (because abs_y - npivot_y = 0)
+            // Actually NPivot's local position is always (0, npivot_rest_y) because
+            // local = abs - npivot = 0. So we need npivot_y from the animation directly.
+            // We stored it in anim_npivot_bin_y_ during update_animation.
+            current_npivot_y = anim_npivot_bin_y_;
         }
-        const float REF_FEET_LY = 64.60f;
-        y_adjust_smoothed_ = REF_FEET_LY - ly_lowest;
+        // y_adjust positions NPivot at floor + (npivot_y - feet_offset)
+        // feet_offset ≈ 2 (feet are 2 units above 0 in world coords when standing)
+        // Actually: when standing, NPivot is at 169.48, feet at 2.
+        // We want: world_cy + abs_y_feet - npivot_y = floor_y
+        //   world_cy = floor_y + npivot_y - abs_y_feet
+        //   y_adjust = npivot_y - abs_y_feet
+        // But abs_y_feet varies. Use approximation: y_adjust = npivot_y - 2
+        // This keeps feet at floor when standing/crouching (feet_y ≈ 2)
+        // and lifts character during jump (npivot_y high → y_adjust high)
+        y_adjust_smoothed_ = current_npivot_y - 2.0f;
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
@@ -2548,6 +2566,7 @@ private:
                     // Type
                     else if (p == "Punch") move.move_type = "Punch";
                     else if (p == "Kick") move.move_type = "Kick";
+                    else if (p == "TitanKick") move.move_type = "TitanKick";  // Titan-only
                     else if (p == "Jump") { move.move_type = "Jump"; move.is_jump = true; }
                     else if (p == "Retreat") { move.is_retreat = true; }
                     else if (p == "Step") { move.is_step = true; }
