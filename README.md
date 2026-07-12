@@ -1,87 +1,151 @@
 # reSF2 — Clean-room reimplementation of Shadow Fight 2
 
-## Current Status: Stage 9 — Scene Manager + Combat + Movement + RE
+A reverse-engineered recreation of the Shadow Fight 2 game engine,
+built from analysis of the original Android (ARM) and Windows (x86) binaries.
 
-### What works ✅
-- Window 1280×720, GLFW, OpenGL ES 2.0 renderer
-- **Win32 input fix** — `GetAsyncKeyState()` bypasses GLFW's spurious RELEASE events
-- **Scene/State Manager** — 9 scenes (Boot, Loading, MainMenu, Map, Shop, Settings, Dialogue, Battle, Results)
-- **Character rendering** — 82 capsules + 29 triangles as dark silhouette
-- **Skeletal animation** — 42 animations from .bin files, 30fps with interpolation
-- **Root motion (X)** — absolute positioning: `player_pos = step_start + displacement`
-- **Root motion (Y)** — absolute offset from frame 0 NPivot Y for jumps/flips
-- **Mirror/facing** — locked at animation start via `anim_facing_right_`
-- **Verlet physics** for punching bag (gravity, constraints, impulse on hit)
-- **Hit detection** — moves.xml Attack intervals, 70px threshold
-- **Combat** — O=punch, P=kick with W/A/S/D direction modifiers
-- **Special moves** — Jump, FrontFlip, BackFlip, ForwardRoll, BackRoll, Duck
-- **Wall boundaries** — parsed from params.xml `Wall="305"`, `Width="1960"`
-- **Camera** — Y=-50 to show floor properly, follows player X
-- Dojo location rendering (parallax, Y-inverted, pre-cropped rotated frames)
-- HUD (gold, energy, level bar), scroll/parchment menu, save system (JSON)
+## Current State
 
-### What's broken ❌
-- **Occasional teleport-back** — character sometimes snaps to animation start (root motion edge case)
-- **DZ archive decompression** — streaming compression (arithmetic coding) not yet implemented
-- **No real enemy** — punching bag only (no AI opponent)
-- **No real dialogue/map/shop** — stubs only, awaiting DZ extraction
-- **Rotated textures** — profile menu icon + some location backgrounds
-- **Bag Y position** — may still be slightly off
+### Working ✅
+- **Scene/state manager**: 9 scenes (Boot→Loading→MainMenu→Map→Shop→Settings→Dialogue→Battle→Results)
+- **Character rendering**: 82 capsules + 29 triangles from body.xml
+- **Skeleton animation**: Loads all 556 .bin animation files dynamically
+- **Root motion X**: Absolute positioning via NPivot displacement
+- **Root motion Y**: NPivot-based Y positioning (standing, crouching, jumping)
+- **Mirror/facing**: Animation-locked facing, dynamic facing updates
+- **Verlet physics**: Punching bag with distance constraints
+- **Hit detection**: Uses moves.xml Attack intervals, checks AttackingParts edges
+- **Combat system**: Dynamic move selection from moves.xml templates
+- **Move filtering**: Titan moves filtered, weapon subtype locks respected
+- **Uninterrupt interval**: New moves blocked only during Uninterrupt (not entire animation)
+- **Key handling**: GetAsyncKeyState polling on Windows, GLFW callbacks on Linux
+- **DZ archive reader**: Container parser (DTRZ format), gzip type=8 decompression
+- **Fallback directories**: Pre-extracted files loaded transparently when DZ decompression fails
 
-### Controls (original SF2 layout)
-| Key | Action |
-|-----|--------|
-| W | Jump (W+D=front flip, W+A=back flip) |
-| A | Left — Back step (relative to facing) |
-| S | Duck (tap), or Sweep/LowPunch/Elbow/DodgeKick when attacking |
-| D | Right — Forward step (relative to facing) |
-| O | Punch (D=heavy, A=spinning, W=upper, S=low, S+A=elbow) |
-| P | Kick (D=front, A=back, S=sweep, S+D=dodge reverse, S+P+P=double sweep) |
-| S+D | Forward roll (dodge) |
-| S+A | Back roll (dodge) |
-| M | Toggle scroll menu |
-| N | New game (go to Map) |
-| Y/L | Declare victory/defeat (Battle, debug) |
-| 1/2/3 | Zoom presets |
-| Esc | Quit / close overlay / back |
+### Partially Working ⚠️
+- **DZ type=4 decoder**: Range coder + bit-tree structure implemented but probability
+  model doesn't match original exactly. Falls back to pre-extracted files.
+- **3key combos**: DoublePunch, DoubleSweep work when triggered during basic attack
+- **Air attacks**: W+O/W+P during jump transitions to air_punch/air_axe_kick
+- **Jump animation**: Y positioning correct but slight visual issues at transition frames
 
-### S3E Binary Analysis
-Two binary versions analyzed:
-- **Android (ARM)**: XE3U LZMA container, ARMv7, needs S3ELoader plugin
-- **Windows (x86)**: PE32 DLL, i386, loads directly in Ghidra/objdump — **easier for RE**
+### Not Yet Implemented ❌
+- **DZ type=4 full decompression**: Streaming range coder with 5-byte context window
+- **Real enemy AI**: Only punching bag (no AI opponent)
+- **Dialogue/map/shop content**: Scene shells only, no real content
+- **Audio**: No sound playback
+- **Magic/ranged weapons**: Only Fists (unarmed) combat
 
-Key engine classes found in Windows binary (s86):
-- `ModelAnimation::mirrorNodes` (0x10164093) — skeleton mirroring via XOR 0x80000000
-- `ModelAnimation::getPlayerAnimation` (0x1016622A) — position update: `pos = mirrored * speed + old_pos`
-- `ModelAnimation::playInfo` (0x101650FC) — animation update chain (6 steps)
-- `Model::setNearestEnemy` (0x101586F0) — stores enemy at model+0x190
-- `Model::getModelAlign` (0x10159780) — facing direction via switch(type)
-- `IntervalAttack::getFactors` (0x10115921) — attack damage calc
+## Architecture
 
-**Animation timing**: game uses 1/120 physics timestep (0x3C088889 in binary), animations at 30fps. Original mirrored flag is signed byte: 0xFF=-1 (left), 0x01=+1 (right).
+### Engine Structure
+```
+main.cpp                    — Game logic + SceneHost (~3600 lines)
+engine/scene/               — Scene/state manager (9 scenes)
+engine/platform/            — GLFW platform (Win32 GetAsyncKeyState support)
+engine/renderer/            — OpenGL renderer
+engine/reverse/             — Format parsers:
+  - s3e_container.cpp       — Marmalade S3E container
+  - plist_atlas.cpp         — Cocos2d TexturePacker v2
+  - atf_tactics.cpp         — zlib-compressed tactics blob
+  - bitmap_font.cpp         — AngelCode BMFont
+  - dz_reader.cpp           — DZ archive reader (DTRZ container)
+  - dz_decoder.cpp          — DZ type=4 range coder decoder (WIP)
+assets/models/              — 72 model XML files
+assets/animations/          — moves.xml + binary/ (556 .bin files)
+assets/locations/           — 56 location directories
+reverse/binaries/           — Original game binaries for RE:
+  - ShadowFight2.s86        — Windows PE32 (6.95MB, i386)
+  - ShadowFight2_android.bin — Android S3E (XE3U, x86_64)
+  - libs3e_android.so       — Marmalade runtime (ARMv7)
+scripts/                    — Analysis & decompilation tools
+docs/                       — S3E reverse engineering documentation
+```
 
-See `docs/s3e_function_analysis.md`, `docs/s3e_windows_binary_re.md`, `docs/ghidra_decompilation_guide.md`.
+### Original Binary Analysis
 
-### Build
-```bash
-# Windows
-build.bat  # cmake + MSVC
-resf2_app.exe --assets <path_to_sf2_assets>
+**ShadowFight2.s86** (Windows PE32, i386):
+- Contains full game code, readable via objdump/radare2
+- Key function addresses:
+  - `0x10164fa0` — playInfo (animation update)
+  - `0x10161ad0` — Model.step (Uninterrupt check)
+  - `0x10161350` — Model.update
+  - `0x100b9ff0` — Fight.update (main battle loop)
+  - `0x100875a0` — ConditionKeys.virtual_8 (key condition check)
+  - `0x10121e10` — Key array comparison
+  - `0x10103d50` — Interval check (Uninterrupt/SemiUninterrupt)
+  - `0x102c9778` — DZ archive reader
+  - `0x102c9fbf` — DZ file read
+  - `0x102ca66b` — DZ file table reader
 
-# Linux compile check
+**libs3e_android.so** (ARMv7):
+- Contains DZ decoder at `0x389f8`
+- Range coder at `0x37adc`
+- Bit-tree decoder at `0x3751c`
+
+## How to Build
+
+### Windows
+```
+build.bat
+```
+Requires: CMake, MSVC, Windows SDK
+
+### Linux (compile check only)
+```
 bash scripts/verify_main_compile.sh
 ```
 
-### Next Steps
-1. **Fix teleport-back** — analyze root motion edge cases via s86 disassembly
-2. **Implement DZ decompression** — port from Ghidra decompilation or use dzip.exe
-3. **Add enemy** — load second character model, basic AI, hit detection
-4. **Real game content** — dialogue, map, shop from DZ archives
-5. **Fix rotated textures** — profile icon + location backgrounds
-6. **Audio** — s3eAudio API, background music, SFX
+## How to Run
 
-### Resources
-- APK: `https://chat.chobat.ru/Shadow+Fight+2_1.9.21.apk`
-- Game data: `https://chat.chobat.ru/sf2.7z`
-- Marmalade-Modding: `https://github.com/knot126/Marmalade-Modding`
-- S3ELoader (Ghidra): `https://github.com/knot126/S3ELoader`
+```
+resf2_app.exe --assets <path_to_assets>
+```
+
+Use `--assets E:\reSF2` to use the repository's pre-extracted assets.
+Use `--assets E:\reSF2\sf2\assets` to use original game assets (requires DZ decompression).
+
+## Controls (Original SF2 Layout)
+
+```
+W/A/S/D     — Up / Left / Down / Right (movement + attack direction)
+O           — Punch (W=upper, S=low, D=heavy, A=spinning, S+A=elbow)
+P           — Kick (S=sweep, D=front, A=back, S+D=dodge reverse)
+W           — Jump (W+D=front flip, W+A=back flip)
+S+D / S+A   — Forward roll / Back roll
+S (hold)    — Duck (crouch)
+Block       — Automatic (when idle, not attacking)
+M           — Toggle menu
+T           — Toggle dialog
+1/2/3       — Zoom presets
+Esc         — Quit
+```
+
+## Tools
+
+### Decompilation
+- `scripts/decompile_original.sh` — Decompile functions from ShadowFight2.s86 using radare2
+- `scripts/verify_engine_code.py` — Verify engine code against original patterns
+- `scripts/dz_*.py` — DZ archive analysis and decoder test scripts
+- `scripts/dz_*_decompiled.c` — Decompiled original functions (30+ files)
+
+### Verification
+- `scripts/verify_main_compile.sh` — Compile check (Linux, no linking)
+- `scripts/verify_engine_code.py` — Code pattern verification
+
+## Next Steps
+
+1. **DZ type=4 decoder**: Fix probability model to match original ARM code
+2. **Combat timing**: Verify Uninterrupt intervals match original exactly
+3. **Move transitions**: Implement proper transition frames from moves.xml
+4. **Enemy AI**: Port AI logic from original Fight.update
+5. **Audio**: Add sound playback from .wav files
+6. **More weapons**: Support weapon-specific moves beyond Fists
+
+## Reverse Engineering Documentation
+
+See `docs/` for detailed RE notes:
+- S3E binary format, JNI registration map
+- Engine architecture, main loop analysis
+- Animation format (.bin), tactics format (.atf)
+- Resource formats (.dz, .plist, .fnt)
+- DZ format analysis and decoder implementation notes

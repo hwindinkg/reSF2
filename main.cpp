@@ -915,6 +915,8 @@ public:
             int step_fwd_prio = -1, step_back_prio = -1;
             for (auto& [name, move] : moves_) {
                 if (move.filename.empty()) continue;
+                // Skip Titan moves (player is not a Titan)
+                if (move.template_name.find("Titan") != std::string::npos) continue;
                 if (!move.is_step || move.is_double_step) continue;
                 std::string anim_name = move.filename;
                 if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
@@ -962,27 +964,9 @@ public:
             hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
         }
 
-        // === UNINTERRUPT CHECK ===
-        // Original game: new moves are blocked only during Uninterrupt interval.
-        // We compute whether the current frame is within [uninterrupt_start, uninterrupt_end]
-        // of the current move. If not in Uninterrupt (or no Uninterrupt), new moves allowed.
+        // is_uninterrupt_ will be computed after update_animation()
+        // (we need the updated anim_time_ to check the current frame)
         is_uninterrupt_ = false;
-        if (hit_anim_ > 0 && !current_move_.empty()) {
-            auto move_it = moves_.find(current_move_);
-            if (move_it != moves_.end() && move_it->second.uninterrupt_start >= 0) {
-                auto anim_it = animations_.find(current_anim_);
-                if (anim_it != animations_.end()) {
-                    int current_frame = (int)(anim_time_ * 20.0f);
-                    // Uninterrupt interval is 1-indexed in moves.xml, our frames are 0-indexed
-                    int start = move_it->second.uninterrupt_start - 1;
-                    int end = move_it->second.uninterrupt_end > 0 ?
-                              move_it->second.uninterrupt_end - 1 : 9999;
-                    if (current_frame >= start && current_frame <= end) {
-                        is_uninterrupt_ = true;
-                    }
-                }
-            }
-        }
 
         // Exit special move state when animation finishes
         if (move_state_ == 10 && hit_anim_ == 0) {
@@ -1013,6 +997,26 @@ public:
         // MUST run BEFORE any play_animation calls so the final frame's
         // root motion is applied before switching to idle.
         update_animation(dt);
+
+        // === UNINTERRUPT CHECK (after update_animation) ===
+        // Now anim_time_ is updated, so we can check the current frame.
+        // Original game: new moves are blocked only during Uninterrupt interval.
+        is_uninterrupt_ = false;
+        if (hit_anim_ > 0 && !current_move_.empty()) {
+            auto move_it = moves_.find(current_move_);
+            if (move_it != moves_.end() && move_it->second.uninterrupt_start >= 0) {
+                auto anim_it = animations_.find(current_anim_);
+                if (anim_it != animations_.end()) {
+                    int current_frame = (int)(anim_time_ * 20.0f);
+                    int start = move_it->second.uninterrupt_start - 1;
+                    int end = move_it->second.uninterrupt_end > 0 ?
+                              move_it->second.uninterrupt_end - 1 : 9999;
+                    if (current_frame >= start && current_frame <= end) {
+                        is_uninterrupt_ = true;
+                    }
+                }
+            }
+        }
 
         // After update_animation, switch to idle if requested.
         // This ensures the previous animation's final displacement is applied.
