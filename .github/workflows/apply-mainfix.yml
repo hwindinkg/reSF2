@@ -72,7 +72,7 @@ jobs:
           tail -c 40000 /tmp/tu.log
           set -e
 
-      - name: Push to main if clean, else dump log
+      - name: Push verified fix to branch, else dump log
         run: |
           rc=$(grep -o '[0-9]*' /tmp/tu_rc.txt | head -1)
           git config user.name "reSF2 ci"
@@ -80,8 +80,8 @@ jobs:
           if [ "$rc" = "0" ]; then
             git add main.cpp
             git commit -m "fix(main): stale current_move_ guard + extended [ROOT] diag log + y_adjust heuristic warning [HEURISTIC-TODO]" || echo "no change"
-            git push origin HEAD:main
-            echo "PUSHED TO MAIN"
+            git push -f origin HEAD:refs/heads/fix/mainfix
+            echo "PUSHED to fix/mainfix"
           else
             mkdir -p docs/_ci_logs
             cp /tmp/tu.log docs/_ci_logs/mainfix_tu.log
@@ -89,6 +89,6 @@ jobs:
             git add -A
             git commit -m "ci: main.cpp syntax check failed (diagnostic)" || echo "no change"
             git push -f origin ci/mainfix-fail
-            echo "SYNTAX FAILED — see ci/mainfix-fail"
+            echo "SYNTAX FAILED"
             exit 1
           fi
