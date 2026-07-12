@@ -1178,7 +1178,7 @@ public:
 
                                 // Bag position from Verlet
                                 float bag_cx = location_->enemy_x - 983.0f;
-                                float bag_cy = -location_->enemy_y + 81.0f;
+                                float bag_cy = location_->enemy_y + 81.0f;
                                 auto bv_it = bag_verlet_.find("NPivot");
                                 if (bv_it != bag_verlet_.end()) {
                                     bag_cx = bv_it->second.x; bag_cy = bv_it->second.y;
@@ -1372,10 +1372,7 @@ private:
             // bag_cx = enemy_x - offset = -10 → offset = enemy_x + 10 = 983.
             const float X_OFFSET = 983.0f;  // aligns bag with ceiling holder
             player_pos_x_ = location_->player_x - X_OFFSET;
-            // Y INVERT: params.xml uses Y-DOWN, our world is Y-UP.
-            // Location images are rendered at world_y = -img.y.
-            // Player must use same coordinate system: world_y = -player_y.
-            player_pos_y_ = -location_->player_y;  // invert Y to match location
+            player_pos_y_ = location_->player_y;  // no invert (matches location rendering)
         }
         // Camera: follow player but keep a proper Y that shows the floor.
         // The dojo floor (layer_3) is at world Y ≈ -193. Player at Y ≈ -93.
@@ -2260,7 +2257,7 @@ private:
         // Same coordinate system as player — no Y-invert, use params Y directly
         // with the same -45 offset to align with the floor.
         float bag_cx = location_ ? (location_->enemy_x - 983.0f) : 0.0f;
-        float bag_cy = location_ ? (-location_->enemy_y + 81.0f) : 0.0f;
+        float bag_cy = location_ ? (location_->enemy_y + 81.0f) : 0.0f;
         auto pit = bag_model_->nodes.find("NPivot");
         float pivot_ly = pit != bag_model_->nodes.end() ? pit->second.y : 109.0f;
         // Initialize nodes: world position = bag_center + (node_local - NPivot_local)
