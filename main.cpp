@@ -618,213 +618,253 @@ public:
         if (key_back) back_held_ms_ = 200;
         else if (back_held_ms_ > 0) back_held_ms_ -= (int)dt;
 
-        // === COMBAT: Punch (O) — checked BEFORE duck/special moves ===
-        // From moves.xml:
-        //   HighPunch: Central|Punch → O
-        //   HeavyPunch: Forward|Punch → D+O (Forward+O)
-        //   SpinningPunch: Back|Punch → A+O (Back+O)
-        //   UpperCut: Up|Punch → W+O
-        //   LowPunch: Down|Punch → S+O
-        //   ElbowStrike: DownBack|Punch → S+A+O (Down+Back+Punch)
-        // Attacks take priority over duck/special moves so S+O works even
-        // though S alone would enter duck.
-        // DoublePunch: 3key|Forward|Punch → D+O+O (double-tap O while holding D)
-        if (punch_pressed && hit_anim_ == 0 && (move_state_ < 10 || move_state_ == 11)) {
+        // === DYNAMIC MOVE SELECTION (from moves.xml) ===
+        // The engine reads ALL moves from moves.xml at load time, including
+        // their Template strings (key_count, direction, move_type, etc.).
+        // Here we match the current key state against loaded moves and
+        // select the one with the highest priority.
+        //
+        // Key state:
+        //   key_forward (D relative to facing) → Forward
+        //   key_back (A relative to facing) → Back
+        //   key_up (W) → Up
+        //   key_down (S) → Down
+        //   Combinations: Up+Forward=UpForward, Down+Back=DownBack, etc.
+        //   punch_pressed (O) → Punch
+        //   kick_pressed (P) → Kick
+        //
+        // Double-tap detection:
+        //   If same key pressed twice within 300ms → 3key (DoublePunch, DoubleSweep)
+        //
+        // Selection: find ALL moves matching (direction, move_type, key_count,
+        // is_unarmed, TacticWeapon=Fists or empty). Pick highest priority.
+
+        if ((punch_pressed || kick_pressed) && hit_anim_ == 0 && (move_state_ < 10 || move_state_ == 11)) {
+            // Determine direction from key state
+            std::string cur_direction = "Central";  // default: no direction
+            if (key_up && key_forward) cur_direction = "UpForward";
+            else if (key_up && key_back) cur_direction = "UpBack";
+            else if (key_down && key_forward) cur_direction = "DownForward";
+            else if (key_down && key_back) cur_direction = "DownBack";
+            else if (key_up) cur_direction = "Up";
+            else if (key_down) cur_direction = "Down";
+            else if (key_forward) cur_direction = "Forward";
+            else if (key_back) cur_direction = "Back";
+
+            // Determine move type
+            std::string cur_move_type;
+            if (punch_pressed) cur_move_type = "Punch";
+            else if (kick_pressed) cur_move_type = "Kick";
+
+            // Double-tap detection → 3key
             uint32_t now = platform_->now_ms();
-            bool double_punch = false;
-            if (key_forward && !key_back && !key_down && !key_up) {
-                if (last_punch_press_ms_ > 0 && (now - last_punch_press_ms_) < 300) {
-                    double_punch = true;
+            int cur_key_count = 1;
+            if (punch_pressed) {
+                if (cur_direction == "Forward" && last_punch_press_ms_ > 0 && (now - last_punch_press_ms_) < 300) {
+                    cur_key_count = 3;
                 }
                 last_punch_press_ms_ = now;
-            } else {
-                last_punch_press_ms_ = 0;
             }
-
-            std::string move_name, anim_name;
-            if (double_punch && animations_.count("double_punch")) {
-                move_name = "DoublePunch"; anim_name = "double_punch";
-                last_punch_press_ms_ = 0;
-            } else if (key_down && key_back) { move_name = "ElbowStrike"; anim_name = "elbow_strike"; }
-            else if (key_forward && !key_back) { move_name = "HeavyPunch"; anim_name = "heavy_punch"; }
-            else if (key_back && !key_forward) { move_name = "SpinningPunch"; anim_name = "spinning_punch"; }
-            else if (key_up) { move_name = "UpperCut"; anim_name = "upper_cut"; }
-            else if (key_down) { move_name = "LowPunch"; anim_name = "low_punch"; }
-            else { move_name = "HighPunch"; anim_name = "high_punch"; }
-
-            if (animations_.count(anim_name)) {
-                std::printf("[COMBAT] O -> %s (anim '%s')\n", move_name.c_str(), anim_name.c_str());
-                play_animation(anim_name, false);
-                current_move_ = move_name;
-                int fc = animations_[anim_name].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
-                move_state_ = 0;
-                need_switch_to_idle_ = false;
-                goto after_combat;
-            }
-        }
-
-        // === COMBAT: Kick (P) — checked BEFORE duck/special moves ===
-        // From moves.xml:
-        //   HighKick: Central|Kick → P
-        //   FrontKick: Forward|Kick → D+P (Forward+P)
-        //   BackKick: Back|Kick → A+P (Back+P)
-        //   Sweep: Down|Kick → S+P
-        //   DoubleSweep: 3key|Down|Kick → S+P+P (double-tap P while holding S)
-        //   DodgeReverseKick: DownForward|Kick → S+D+P (Down+Forward+Kick)
-        if (kick_pressed && hit_anim_ == 0 && (move_state_ < 10 || move_state_ == 11)) {
-            // Track double-tap for DoubleSweep (S held + P pressed twice within 300ms)
-            uint32_t now = platform_->now_ms();
-            bool double_sweep = false;
-            if (key_down && !key_forward && !key_back) {
-                if (last_kick_press_ms_ > 0 && (now - last_kick_press_ms_) < 300) {
-                    double_sweep = true;
+            if (kick_pressed) {
+                if (cur_direction == "Down" && last_kick_press_ms_ > 0 && (now - last_kick_press_ms_) < 300) {
+                    cur_key_count = 3;
                 }
                 last_kick_press_ms_ = now;
-            } else {
-                last_kick_press_ms_ = 0;
             }
 
-            std::string move_name, anim_name;
-            if (double_sweep && animations_.count("double_sweep")) {
-                move_name = "DoubleSweep"; anim_name = "double_sweep";
-                last_kick_press_ms_ = 0;  // reset so triple-tap doesn't re-trigger
-            } else if (key_down && key_forward) { move_name = "DodgeReverseKick"; anim_name = "dodge_reverse_kick"; }
-            else if (key_forward && !key_back) { move_name = "FrontKick"; anim_name = "front_kick"; }
-            else if (key_back && !key_forward) { move_name = "BackKick"; anim_name = "back_kick"; }
-            else if (key_down) { move_name = "Sweep"; anim_name = "sweep"; }
-            else { move_name = "HighKick"; anim_name = "high_kick"; }
+            // Find best matching move from moves.xml
+            const MoveDef* best_move = nullptr;
+            for (auto& [name, move] : moves_) {
+                // Skip moves with no filename or no template
+                if (move.filename.empty() || move.template_name.empty()) continue;
+                // Match move_type (Punch or Kick)
+                if (move.move_type != cur_move_type) continue;
+                // Match key_count (1key or 3key for double-tap)
+                if (cur_key_count == 3 && move.key_count != 3) continue;
+                if (cur_key_count == 1 && move.key_count == 3) continue;
+                // Match direction
+                if (move.direction != cur_direction) continue;
+                // Match weapon (Unarmed or Fists or empty)
+                if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
+                    move.tactic_weapon.find("Fists") == std::string::npos) continue;
+                // Check if animation exists
+                std::string anim_name = move.filename;
+                if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                    anim_name = anim_name.substr(0, anim_name.size()-4);
+                if (!animations_.count(anim_name)) continue;
+                // Select by highest priority
+                if (!best_move || move.priority > best_move->priority) {
+                    best_move = &move;
+                }
+            }
 
-            if (animations_.count(anim_name)) {
-                std::printf("[COMBAT] P -> %s (anim '%s')\n", move_name.c_str(), anim_name.c_str());
+            if (best_move) {
+                std::string anim_name = best_move->filename;
+                if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                    anim_name = anim_name.substr(0, anim_name.size()-4);
+                std::printf("[COMBAT] %s -> %s (anim '%s', prio=%d, tmpl='%s')\n",
+                            cur_move_type.c_str(), best_move->name.c_str(),
+                            anim_name.c_str(), best_move->priority,
+                            best_move->template_name.c_str());
                 play_animation(anim_name, false);
-                current_move_ = move_name;
+                current_move_ = best_move->name;
                 int fc = animations_[anim_name].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 0;
                 need_switch_to_idle_ = false;
+                if (cur_key_count == 3) {
+                    if (punch_pressed) last_punch_press_ms_ = 0;
+                    if (kick_pressed) last_kick_press_ms_ = 0;
+                }
                 goto after_combat;
             }
         }
-        // From moves.xml templates:
-        //   JumpUp: 1key|Up|Jump → W
-        //   FrontFlip: 1key|UpForward|Jump → W+D (Up+Forward)
-        //   BackFlip: 1key|UpBack|Jump|Retreat → W+A (Up+Back)
-        //   ForwardRoll: 1key|DownForward → S+D (Down+Forward)
-        //   BackRoll: 1key|DownBack|Retreat → S+A (Down+Back)
-        //   Duck: 1key|Down → S (hold to crouch)
-        // Block is AUTOMATIC in the original game (when idle, not attacking).
-        // No key for block — removed the S=block binding.
+
+        // === SPECIAL MOVES (jumps, rolls, duck) — from moves.xml ===
+        // Match 1key moves with Jump, Step, or no type (Duck, Roll)
         if (hit_anim_ == 0 && move_state_ < 10) {
             bool up_pressed = input.keys_just_pressed[(size_t)plat::Key::W] ||
                               input.keys_just_pressed[(size_t)plat::Key::ArrowUp];
             bool down_pressed = input.keys_just_pressed[(size_t)plat::Key::S] ||
                                 input.keys_just_pressed[(size_t)plat::Key::ArrowDown];
 
-            // Jump + Forward = FrontFlip
-            if (up_pressed && key_forward && animations_.count("front_flip")) {
-                play_animation("front_flip", false);
-                current_move_ = "FrontFlip";
-                int fc = animations_["front_flip"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
-                move_state_ = 10;
-                std::printf("[MOVE] Front Flip!\n");
+            // Determine direction
+            std::string cur_direction;
+            if (up_pressed && key_forward) cur_direction = "UpForward";
+            else if (up_pressed && key_back) cur_direction = "UpBack";
+            else if (up_pressed) cur_direction = "Up";
+            else if (down_pressed && key_forward) cur_direction = "DownForward";
+            else if (down_pressed && key_back) cur_direction = "DownBack";
+            else if (down_pressed) cur_direction = "Down";
+
+            if (!cur_direction.empty()) {
+                // Find best matching move (Jump, or MOVE type with 1key)
+                const MoveDef* best_move = nullptr;
+                for (auto& [name, move] : moves_) {
+                    if (move.filename.empty() || move.template_name.empty()) continue;
+                    if (move.key_count != 1) continue;
+                    if (move.direction != cur_direction) continue;
+                    // Match Jump moves or Move type
+                    if (!move.is_jump && move.move_type != "Jump" &&
+                        move.move_type != "MOVE" && move.move_type.empty() == false) continue;
+                    // Weapon filter
+                    if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
+                        move.tactic_weapon.find("Fists") == std::string::npos) continue;
+                    // Check animation
+                    std::string anim_name = move.filename;
+                    if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                        anim_name = anim_name.substr(0, anim_name.size()-4);
+                    if (!animations_.count(anim_name)) continue;
+                    if (!best_move || move.priority > best_move->priority) {
+                        best_move = &move;
+                    }
+                }
+
+                if (best_move) {
+                    std::string anim_name = best_move->filename;
+                    if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                        anim_name = anim_name.substr(0, anim_name.size()-4);
+                    std::printf("[MOVE] %s (anim '%s', prio=%d)\n",
+                                best_move->name.c_str(), anim_name.c_str(),
+                                best_move->priority);
+                    play_animation(anim_name, false);
+                    current_move_ = best_move->name;
+                    int fc = animations_[anim_name].frame_count;
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                    move_state_ = 10;
+                    goto after_combat;
+                }
             }
-            // Jump + Back = BackFlip
-            else if (up_pressed && key_back && animations_.count("back_flip")) {
-                play_animation("back_flip", false);
-                current_move_ = "BackFlip";
-                int fc = animations_["back_flip"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
-                move_state_ = 10;
-                std::printf("[MOVE] Back Flip!\n");
-            }
-            // Jump (up only) = JumpUp
-            else if (up_pressed && !key_forward && !key_back && animations_.count("jump")) {
-                play_animation("jump", false);
-                current_move_ = "JumpUp";
-                int fc = animations_["jump"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
-                move_state_ = 10;
-                std::printf("[MOVE] Jump!\n");
-            }
-            // Down + Forward = ForwardRoll
-            else if (down_pressed && key_forward && animations_.count("forward_roll")) {
-                play_animation("forward_roll", false);
-                current_move_ = "ForwardRoll";
-                int fc = animations_["forward_roll"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
-                move_state_ = 10;
-                std::printf("[MOVE] Forward Roll!\n");
-            }
-            // Down + Back = BackRoll
-            else if (down_pressed && key_back && animations_.count("back_roll")) {
-                play_animation("back_roll", false);
-                current_move_ = "BackRoll";
-                int fc = animations_["back_roll"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
-                move_state_ = 10;
-                std::printf("[MOVE] Back Roll!\n");
-            }
-            // Duck: tap Down (S) without other direction — enters duck stance
-            // but does NOT block attacks (attacks are checked before this).
-            // Duck is a hold-to-crouch: stays in duck while S is held.
-            else if (down_pressed && !key_forward && !key_back && current_anim_ != "duck" && animations_.count("duck")) {
-                play_animation("duck", true);
-                current_move_ = "Duck";
-                move_state_ = 11;  // ducking state
-                duck_play_time_ = 0;
+
+            // Duck: S tap with no direction (Down, not DownForward/DownBack)
+            if (down_pressed && !key_forward && !key_back) {
+                // Find Duck move (1key|Down|NotTitan, Type=MOVE)
+                const MoveDef* duck_move = nullptr;
+                for (auto& [name, move] : moves_) {
+                    if (move.filename.empty()) continue;
+                    if (move.key_count != 1) continue;
+                    if (move.direction != "Down") continue;
+                    if (move.is_jump) continue;
+                    if (move.move_type == "Punch" || move.move_type == "Kick") continue;
+                    std::string anim_name = move.filename;
+                    if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                        anim_name = anim_name.substr(0, anim_name.size()-4);
+                    if (!animations_.count(anim_name)) continue;
+                    if (!duck_move || move.priority > duck_move->priority) {
+                        duck_move = &move;
+                    }
+                }
+                if (duck_move && current_anim_ != duck_move->filename.substr(0, duck_move->filename.size()-4)) {
+                    std::string anim_name = duck_move->filename;
+                    if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                        anim_name = anim_name.substr(0, anim_name.size()-4);
+                    play_animation(anim_name, true);
+                    current_move_ = duck_move->name;
+                    move_state_ = 11;
+                    duck_play_time_ = 0;
+                }
             }
         }
 
-        // === STEP MOVEMENT (only when not in special move/duck) ===
-        // Forward = step_forward, Back = step_back (relative to facing)
-        //
-        // LATCHING: once a step starts, it continues as long as the key is
-        // held OR was held within the last 100ms. This compensates for
-        // transient false 'key up' readings from GetAsyncKeyState on some
-        // Windows setups (the key is physically held, but GetAsyncKeyState
-        // occasionally returns 'up' for one frame).
+        // === STEP MOVEMENT (from moves.xml: StepForward/StepBack) ===
+        // Find step moves dynamically
         if (hit_anim_ == 0 && move_state_ < 10) {
             bool fwd_latched = fwd_held_ms_ > 0;
             bool back_latched = back_held_ms_ > 0;
 
+            // Find step animation names from moves.xml
+            std::string step_fwd_anim, step_back_anim;
+            int step_fwd_prio = -1, step_back_prio = -1;
+            for (auto& [name, move] : moves_) {
+                if (move.filename.empty()) continue;
+                if (!move.is_step || move.is_double_step) continue;
+                std::string anim_name = move.filename;
+                if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+                    anim_name = anim_name.substr(0, anim_name.size()-4);
+                if (!animations_.count(anim_name)) continue;
+                if (move.direction == "Forward" && move.priority > step_fwd_prio) {
+                    step_fwd_anim = anim_name;
+                    step_fwd_prio = move.priority;
+                } else if (move.direction == "Back" && move.priority > step_back_prio) {
+                    step_back_anim = anim_name;
+                    step_back_prio = move.priority;
+                }
+            }
+            // Fallback if not found
+            if (step_fwd_anim.empty() && animations_.count("step_forward")) step_fwd_anim = "step_forward";
+            if (step_back_anim.empty() && animations_.count("step_back")) step_back_anim = "step_back";
+
             if (move_state_ == 0) {  // IDLE
-                if (key_forward && !key_back && !key_down) {
-                    move_state_ = 2;  // MOVING_FORWARD
-                    play_animation("step_forward", true);
-                } else if (key_back && !key_forward && !key_down) {
-                    move_state_ = 1;  // MOVING_BACK
-                    play_animation("step_back", true);
+                if (key_forward && !key_back && !key_down && !step_fwd_anim.empty()) {
+                    move_state_ = 2;
+                    play_animation(step_fwd_anim, true);
+                } else if (key_back && !key_forward && !key_down && !step_back_anim.empty()) {
+                    move_state_ = 1;
+                    play_animation(step_back_anim, true);
                 }
             } else if (move_state_ == 1) {  // MOVING_BACK
-                // Use latched key state — don't exit step on transient false readings
                 if (!back_latched && step_min_played) {
                     move_state_ = 0; need_switch_to_idle_ = true;
-                } else if (fwd_latched && !back_latched && step_min_played) {
+                } else if (fwd_latched && !back_latched && step_min_played && !step_fwd_anim.empty()) {
                     move_state_ = 2;
-                    play_animation("step_forward", true);
+                    play_animation(step_fwd_anim, true);
                 }
             } else if (move_state_ == 2) {  // MOVING_FORWARD
                 if (!fwd_latched && step_min_played) {
                     move_state_ = 0; need_switch_to_idle_ = true;
-                } else if (back_latched && !fwd_latched && step_min_played) {
+                } else if (back_latched && !fwd_latched && step_min_played && !step_back_anim.empty()) {
                     move_state_ = 1;
-                    play_animation("step_back", true);
+                    play_animation(step_back_anim, true);
                 }
             }
         }
 
         // === HIT ANIM COUNTDOWN ===
-        // Must run BEFORE special move exit check so hit_anim_ == 0 is
-        // detected in the SAME frame, not the next one.
         if (hit_anim_ > 0) {
             hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
         }
 
         // Exit special move state when animation finishes
-        // DON'T call play_animation here — update_animation must run first
-        // to apply the final frame's root motion. Set a flag instead.
         if (move_state_ == 10 && hit_anim_ == 0) {
             move_state_ = 0;
             need_switch_to_idle_ = true;
