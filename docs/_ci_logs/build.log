@@ -1,22 +1,22 @@
 [1/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/platform.c.o
-[2/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/context.c.o
-[3/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/vulkan.c.o
-[4/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/init.c.o
-[5/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_init.c.o
-[6/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/osmesa_context.c.o
-[7/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/monitor.c.o
-[8/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/window.c.o
-[9/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_joystick.c.o
-[10/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_monitor.c.o
+[2/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/vulkan.c.o
+[3/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/init.c.o
+[4/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/context.c.o
+[5/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/monitor.c.o
+[6/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_init.c.o
+[7/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/window.c.o
+[8/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/osmesa_context.c.o
+[9/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_monitor.c.o
+[10/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_joystick.c.o
 [11/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_module.c.o
-[12/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_thread.c.o
-[13/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/egl_context.c.o
+[12/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/input.c.o
+[13/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_time.c.o
 [14/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/null_window.c.o
-[15/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_time.c.o
-[16/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/input.c.o
+[15/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/egl_context.c.o
+[16/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_thread.c.o
 [17/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/xkb_unicode.c.o
-[18/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_poll.c.o
-[19/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_monitor.c.o
+[18/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_monitor.c.o
+[19/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/posix_poll.c.o
 [20/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/glx_context.c.o
 [21/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/linux_joystick.c.o
 [22/55] Building C object _deps/glfw-build/src/CMakeFiles/glfw.dir/x11_init.c.o
@@ -734,8 +734,7 @@ In file included from /usr/include/c++/13/bits/stl_uninitialized.h:63,
 /home/runner/work/reSF2/reSF2/engine/renderer/software_renderer.cpp:321:45: warning: conversion from ‘int’ to ‘float’ may change value [-Wconversion]
   321 |             float fx = px + 0.5f - x0, fy = py + 0.5f - y0;
       |                                             ^~
-[26/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/platform.cpp.o
-[27/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/glfw_platform.cpp.o
+[26/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/glfw_platform.cpp.o
 In file included from /home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:15:
 /home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.hpp:13:1: warning: multi-line comment [-Wcomment]
    13 | //   g++ -std=c++23 -Iengine -I/usr/include/GLFW -I/usr/include/GL \
@@ -765,6 +764,7 @@ In file included from /home/runner/work/reSF2/reSF2/engine/platform/glfw_platfor
 /home/runner/work/reSF2/reSF2/engine/platform/glfw_platform.cpp:124:12: warning: ‘int resf2::platform::key_index_to_glfw(int)’ defined but not used [-Wunused-function]
   124 | static int key_index_to_glfw(int idx) {
       |            ^~~~~~~~~~~~~~~~~
+[27/55] Building CXX object engine/platform/CMakeFiles/resf2_platform.dir/platform.cpp.o
 [28/55] Building CXX object engine/renderer/CMakeFiles/resf2_renderer.dir/stb_image_impl.cpp.o
 In file included from /home/runner/work/reSF2/reSF2/engine/renderer/stb_image_impl.cpp:12:
 /home/runner/work/reSF2/reSF2/engine/renderer/stb_image.h: In function ‘void stbi__start_mem(stbi__context*, const stbi_uc*, int)’:
