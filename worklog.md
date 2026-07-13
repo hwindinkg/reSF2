@@ -1512,3 +1512,77 @@ drifted player_x ~167 units, O during step often failed.
 - Root-motion data-driven (still animation-name whitelist)
 - DZ type-4 decoder (not touched this session per user instruction)
 - Asset de-hardcoding (deferred)
+
+---
+## Session: MoveInside consumption trace + jitter test (HEAD be3610f → c83d626)
+
+**Context**: Previous session ended with 3 unpushed commits (921405b, 2c27cc1,
+7185a09). Sandbox reset wiped local repo — commits lost. This session:
+recovered commits, traced consumption formula, tested jittered input.
+
+**Recovery** (commit 82ba8ad):
+- Re-cloned repo (HEAD be3610f).
+- Re-extracted _prefix (GL/X11 headers + xdotool).
+- Re-applied 921405b (NPivot Y displacement for airborne) + 2c27cc1
+  (Y-sync + [HIT_CHECK] log) from documentation.
+- Verified: scenario 01 (W jump) ry[-184..-17] (rises), stance_2 flat -89.
+
+**MoveInside consumption formula — FULLY TRACED** (commit 3d94e68) [ORIGINAL]:
+
+fcn.101661d0 (Step 3 consumer) — complete data flow:
+  1. [ebp-0x34] = alignment Vec3 (from pivot node, jump table moveInside+0x68)
+  2. [ebp-0x28] = reference Vec3 (jump table moveInside+0x6c)
+  3. [ebp-0x4c] = [ebp-0x34] - [ebp-0x28] (Vec3 subtract via fcn.1028e890)
+  4. Model+0x80.x = (float)Model+0x54 * moveInside+0xb4 + [ebp-0x28].x
+  5. Model+0x80.y = moveInside+0xb8 + [ebp-0x28].y
+  6. Model+0x98 = [ebp-0x4c] (displacement Vec3)
+  7. 0x10166690(Model, x, y, z) applies final transform
+
+fcn.1028e890 @ 0x1028e890 = Vec3 subtract (movss/subss component-wise):
+  src.X - ref.X, src.Y - ref.Y, src.Z - ref.Z, then call 0x1028d850.
+
+Global Vec3 at 0x1065fb74 ≈ (0, 0, 0) — identity reference for airborne case 3.
+
+**moveInside+0x68 mode selector — NOT data-driven** [ORIGINAL]:
+All jump/flip/roll moves (JumpUp, FrontFlip, BackFlip, ForwardRoll, BackRoll,
+BackHandflip) have IDENTICAL Align in moves.xml:
+  Axis="X|Z", <Pivot Object="Nodes" Part="NHeel_X"/>, <Position Player="Me" Object="Pivot"/>
+NO moves.xml attribute distinguishes grounded vs airborne. moveInside+0x68 is
+RUNTIME-COMPUTED (animation name check, Template "Jump" keyword, .bin flags,
+or physics state). [HEURISTIC-TODO] trace write site — needs Ghidra type analysis.
+
+**Jittered input test** (commit c83d626) [DIAGNOSTIC]:
+15 jittered scenarios (10 standalone + 5 close-to-bag, ±2 frame jitter).
+5 close+jitter variants completed with hits:
+  variant 0: 0 HITs, variant 1: 2 HITs match=1, variant 2: 0 HITs,
+  variant 3: 2 HITs match=1, variant 4: 2 HITs match=1.
+Bug NOT REPRODUCED — 0 frames with match=0 AND bag_hit=1. Confirms
+"hit without animation" is Windows-specific (GetAsyncKeyState timing).
+
+**Before/after table**:
+  Scenario              BEFORE (be3610f)    AFTER (c83d626)
+  01 W jump             flat -89            ry[-184..-17] ✓
+  02 W+D flip           flat -89            ry[-192..-14] ✓
+  03 W+A flip           flat -89            ry[-174..0.8] ✓
+  04 S+D roll           flat -89            flat -89 (no regress)
+  09 idle O             flat -89            flat -89 (no regress)
+  12 rapid O            —                   reject=uninterrupt ✓
+  13 close rapid O      —                   2 HITs match=1 ✓
+  14-15 jitter (15 var) —                   0 bug frames ✓
+
+**Root cause table**:
+  Symptom                    Root cause                    Fix
+  Jump doesn't rise          y_adjust=4 (constant)         82ba8ad: NPivot displacement
+  Render/hit Y desync        y_adjust after hit detection  82ba8ad: moved to update_animation
+  Lost commits (session reset) sandbox wiped local repo    82ba8ad: restored from docs
+  MoveInside consumption     NOT TRACED before             3d94e68: fully traced (Model+0x80/0x98)
+  moveInside+0x68 selector   assumed data-driven           3d94e68: found runtime-computed
+  Hit without animation      NOT REPRODUCED on Linux       c83d626: jitter test, Windows-specific
+
+**What is NOT done**:
+  - Implement verified MoveInside formula (interim NPivot hack still active)
+  - Trace moveInside+0x68 write site (needs Ghidra type analysis)
+  - Grounded roll Y (still flat, depends on +0x68 selector)
+  - Root-motion data-driven (still animation-name whitelist)
+  - DZ type-4 decoder (not touched per user instruction)
+  - "Hit without animation" on Windows (needs Windows logs with [HIT_CHECK])
