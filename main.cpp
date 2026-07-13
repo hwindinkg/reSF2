@@ -1215,6 +1215,26 @@ public:
                 int fc = anim_it->second.frame_count;
                 int current_frame = (int)(anim_time_ * 20.0f);
                 auto move_it = moves_.find(current_move_);
+                // [DIAGNOSTIC] Per-frame hit-detection state log for
+                // "hit without animation" diagnosis (Task 2).
+                {
+                    std::string expected_anim;
+                    bool anim_match = false;
+                    if (move_it != moves_.end()) {
+                        expected_anim = move_it->second.filename;
+                        if (expected_anim.size() > 4 && expected_anim.substr(expected_anim.size()-4) == ".bin")
+                            expected_anim = expected_anim.substr(0, expected_anim.size()-4);
+                        anim_match = (expected_anim == current_anim_);
+                    }
+                    std::printf("[HIT_CHECK] f=%llu move='%s' anim='%s' exp_anim='%s' match=%d frame=%d/%d hit_anim=%u atk=%d-%d bag_hit=%d\n",
+                                (unsigned long long)total_frame_count_,
+                                current_move_.c_str(), current_anim_.c_str(),
+                                expected_anim.c_str(), (int)anim_match,
+                                current_frame, fc, hit_anim_,
+                                move_it != moves_.end() ? move_it->second.attack_start : -1,
+                                move_it != moves_.end() ? move_it->second.attack_end : -1,
+                                (int)bag_hit_);
+                }
                 if (move_it != moves_.end() && move_it->second.attack_start > 0) {
                     int attack_start = move_it->second.attack_start;
                     int attack_end = move_it->second.attack_end > 0 ?
@@ -2186,43 +2206,33 @@ private:
         // Roll issue: character floats during roll, but roll is short (26 frames).
         // This is acceptable until we implement proper MoveInside alignment.
         constexpr float FEET_FLOOR_OFFSET = 4.0f;
-        // [HEURISTIC-TODO] MoveInside Y consumption DISABLED (recovery commit).
+        // [ORIGINAL] MoveInside pipeline byte-verified (objdump on ShadowFight2.s86):
+        //   Step 1 (fcn.10165c10): captures pivotID -> Model+0x58, node_array[pivotID] -> Model+0x5c
+        //   Step 2 (fcn.10164c20): resolves new pivotID, calls fcn.10103690 (trivial accessor:
+        //     return this+0x7c, 3 bytes), then fcn.10103e80(axis=2) — called ONCE in entire binary
+        //   Step 3 (fcn.101661d0): reads Model[0xe8][axis=2][pivotID] (Vec3) via fcn.1028e490 (Vec3 copy)
+        //   Post-Step3: playInfo copies Z->X and Z->Y (memcpy). All axes get same Vec3.
+        //   fcn.1028e490 = Vec3 copy, fcn.1028e4c0 = Vec3 add, fcn.10102c70 = container accessor
+        // [HEURISTIC-TODO] consumption formula (how Vec3 -> world transform) NOT yet traced.
         //
-        // The MoveInside pivot-node grounding formula (commit 9450c4f) was
-        //   y_adjust = floor_y - player_pos_y_ - pivot_node_ly + npivot_rest_y
-        // which grounds the named pivot node (e.g. NHeel_2) to floor_y every
-        // frame. This is WRONG for airborne moves (jump/flip): the heel
-        // legitimately leaves the floor during a jump, but the formula drags
-        // the entire character DOWN to keep the heel at floor_y, causing the
-        // character to sink below the floor (render_y: -89 -> -161 during
-        // a jump where NPivot rises 106 -> 243). It also sinks during rolls
-        // because the heel moves up as the body rotates.
-        //
-        // The MoveInside CAPTURE mechanism is byte-verified (fcn.10165c10
-        // reads pivotID from moveInside+0x70 and stores node_array[pivotID].Y
-        // at Model+0x5c), but the CONSUMPTION formula (how Model+0x5c
-        // transforms render Y) is NOT byte-confirmed. Until the consumption
-        // is traced end-to-end (reads of Model+0x58/0x5c, fcn.10243750, axis
-        // mask X|Z parsing), the Y formula is disabled and we fall back to
-        // the 96bfce1 baseline: constant FEET_FLOOR_OFFSET = 4.
-        //
-        // The MoveInside parser + MoveDef metadata (moveinside_pivot_node,
-        // moveinside_is_animation) are KEPT for future use once the
-        // consumption formula is verified.
-        //
-        // One-shot stderr warning so the disabled state is visible.
-        {
-            static bool warned_once = false;
-            if (!warned_once) {
-                warned_once = true;
-                std::fprintf(stderr,
-                    "[HEURISTIC-TODO] MoveInside Y consumption disabled: pivot capture "
-                    "is verified (fcn.10165c10), render-Y formula is not. Using "
-                    "constant FEET_FLOOR_OFFSET=4 (96bfce1 baseline). Jump/flip/roll "
-                    "Y will be flat until the consumption formula is traced.\n");
-            }
-        }
-        y_adjust_smoothed_ = FEET_FLOOR_OFFSET;
+        // [HEURISTIC-TODO] Interim Y fix: apply NPivot Y displacement for airborne
+        // animations only. The .bin stores absolute NPivot Y per frame; the
+        // displacement (anim_npivot_bin_y_ - NPIVOT_REST_Y) represents how much
+        // NPivot has risen/lowered from rest. For airborne moves, this displacement
+        // is applied to world Y. For grounded moves (roll, step, stance, attacks),
+        // y_adjust stays at FEET_FLOOR_OFFSET=4 (flat).
+        // This is NOT the MoveInside formula — it's a targeted fix for 'jump doesn't rise'.
+        constexpr float NPIVOT_REST_Y_RENDER = 169.48f;  // from skeleton.xml NPivot rest pose
+        bool is_airborne_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
+                                 current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
+                                 current_anim_ == "back_handflip");
+        float npivot_y_displacement = is_airborne_anim
+            ? (anim_npivot_bin_y_ - NPIVOT_REST_Y_RENDER) : 0.0f;
+        float target_y_adjust = FEET_FLOOR_OFFSET + npivot_y_displacement;
+        // [ORIGINAL] y_adjust_smoothed_ is now computed in update_animation()
+        // (before hit detection) to avoid a 1-frame desync. See update_animation().
+        // Here we just USE the already-computed value.
+        (void)target_y_adjust;  // computed in update_animation() for sync
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
@@ -3167,6 +3177,26 @@ private:
         // nodes, so the lowest node Y directly indicates how high the
         // character is. No separate jump_y_offset needed.
         jump_y_offset_ = 0;
+
+        // [ORIGINAL] Compute y_adjust_smoothed_ HERE (in update_animation),
+        // not in render_body_model(). This ensures hit detection (which runs
+        // in host_update_gameplay AFTER update_animation but BEFORE
+        // host_render_scene/render_body_model) uses the CURRENT frame's
+        // y_adjust, not the previous frame's. Without this fix, there is a
+        // 1-frame desync between render Y and hit-detection Y, causing hits
+        // to register at the wrong height during airborne animations.
+        // [HEURISTIC-TODO] Same interim formula as render_body_model():
+        // NPivot Y displacement for airborne, constant for grounded.
+        {
+            constexpr float NPIVOT_REST_Y_UPDATE = 169.48f;
+            bool is_airborne = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
+                                current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
+                                current_anim_ == "back_handflip");
+            float npivot_y_disp = is_airborne
+                ? (anim_npivot_bin_y_ - NPIVOT_REST_Y_UPDATE) : 0.0f;
+            float target_y = 4.0f + npivot_y_disp;  // FEET_FLOOR_OFFSET + displacement
+            y_adjust_smoothed_ += (target_y - y_adjust_smoothed_) * 0.5f;
+        }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
         auto pivot_it = skeleton_nodes_.find("NPivot");

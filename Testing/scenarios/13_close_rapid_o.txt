@@ -1,0 +1,11 @@
+# Scenario 13: Walk to bag, then rapid O presses.
+frame 180 keydown D
+frame 260 keyup D
+frame 265 keydown O
+frame 266 keyup O
+frame 275 keydown O
+frame 276 keyup O
+frame 285 keydown O
+frame 286 keyup O
+frame 295 keydown O
+frame 296 keyup O
