@@ -6,12 +6,14 @@
 > the real HEAD `249b1a8`. Anything not proven against the original binary or
 > a real run is tagged **[HEURISTIC-TODO]**.
 >
-> **Updated (MoveInside consumption trace + jitter test)** to HEAD `c83d626`.
-> This session: recovered 3 lost commits (session reset), traced MoveInside
-> consumption formula end-to-end (Model+0x80/0x98, Vec3 subtract), found
-> moveInside+0x68 is NOT data-driven from moves.xml (runtime-computed),
-> jittered input test confirms "hit without animation" is Windows-specific.
-> See "Session changelog (consumption trace)" at the bottom.
+> **Updated (moveInside+0x68 write site search)** to HEAD `e69ce57`.
+> This session: corrected previous assumption (Model+0x68 ≠ moveInside+0x68),
+> found MoveInside constructor/destructor via RTTI vtable, confirmed +0x68
+> is NOT initialized in constructor (sub-structure with pointers at +0x88/
+> +0x94/+0xa0). Write site NOT found — needs Ghidra typed struct analysis.
+> Interim formula still works (no regression). Windows logs requested for
+> "hit without animation" diagnosis.
+> See "Session changelog (+0x68 write site search)" at the bottom.
 
 ## Project
 
@@ -132,6 +134,24 @@ Percentages reflect MEASURED behavior, not documentation/logging/discovery.
    may eat taps that arrive too early in a human-speed press.
 4. **DZ type 4 decoder** — trace 0x389f8..0x38d00 + range coder 0x37adc.
 5. **De-hardcode asset enumeration** — deferred (depends on DZ type-4).
+
+## Session changelog (+0x68 write site search, HEAD ce7ba32 → e69ce57)
+
+- `e69ce57` — reverse: correct moveInside+0x68 finding — writes are to Model+0x68.
+  [ORIGINAL] CORRECTION: 12 writes to [reg+0x68] in Model::step are to
+  Model+0x68 (edi=Model), NOT moveInside+0x68 (separate allocation via
+  animInfo+0x94 dereference). moveInside+0x68 is first field of a sub-structure
+  (pointers at +0x88/+0x94/+0xa0 freed in destructor). Constructor at
+  0x10101b00 (found via RTTI vtable at 0x105ac8e8) does NOT init +0x68.
+  Constructor has 0 direct call xrefs — inlined or placement new.
+  [HEURISTIC-TODO] write site needs Ghidra typed struct analysis.
+
+Task 2 (implement verified formula) BLOCKED — can't implement without
+finding how moveInside+0x68 is set. Interim NPivot Y displacement still
+active (no regression: jump ry[-183..-17], roll flat -89).
+
+Task 3 ("hit without animation") — Windows logs requested from user.
+Not reproduced on Linux (15 jittered variants, 0 bug frames).
 
 ## Session changelog (consumption trace, HEAD be3610f → c83d626)
 
