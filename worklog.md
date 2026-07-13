@@ -1853,3 +1853,51 @@ Also fixed move_state_ set to 0 (should be 10) after combat selection.
 Root cause identified: <Velocity> element from moves.xml → DM → j8
 accumulation system not implemented. This is the same missing mechanism
 that affects jump X/Z movement (Bug 2 from previous session).
+
+---
+## Session: cancel window + facing lock (HEAD c08f79f → 4f1fc05)
+
+**Context**: 5f392b0 removed is_uninterrupt_ entirely → regression: any attack
+can interrupt any animation. User confirmed: can interrupt startup frames,
+facing flips instantly during roll.
+
+**Task 1: Real cancel window mechanism**
+
+Шаг A: Found in sf2.js:
+- np.isEqual() (line 42544): CurrentAnimation condition checks if current
+  animation name matches + frame range (Min/Max)
+- 3key combos in moves.xml have <CurrentAnimation Name="HeavyPunch"/>
+- This means DoublePunch can ONLY trigger when HeavyPunch is playing
+
+Шаг B: moves.xml CurrentAnimation conditions for 3key combos:
+- DoublePunch: requires CurrentAnimation="HeavyPunch"
+- DoubleSweep: requires CurrentAnimation="Sweep"
+- BackFlipKick: requires CurrentAnimation="AxeKick"
+- (all 3key combos require a specific base attack)
+
+Шаг C: Our code had is_uninterrupt_ (wrong — AI only, not player gate).
+5f392b0 removed it entirely (wrong — no gate at all).
+Real gate: in_basic_attack blocks 1key/2key during attack, only 3key allowed.
+3key requires CurrentAnimation = specific attack name.
+
+Шаг D: Implemented:
+- MoveDef::required_current_animation field + parser
+- CurrentAnimation condition check in combat matcher
+- Simplified in_basic_attack (removed anim-name denylist)
+- Facing locked during root-motion moves + attacks (Task 2)
+
+Шаг E: Before/after (scenario 12, rapid O, Central):
+  BEFORE (5f392b0): 5/5 reject=none (any attack interrupts — WRONG)
+  AFTER (4f1fc05):   3/5 reject=none (correct: attack must end first)
+                     2/5 reject=no_candidate (correct: no 3key for Central)
+                     0/5 reject=uninterrupt (correct: no is_uninterrupt_)
+
+**Task 2: Facing lock during root-motion moves**
+- Added facing_locked flag: true during hit_anim_>0 + roll/jump/flip anims
+- Facing only updates when !facing_locked
+
+**What is NOT done**:
+- Task 3 (hit detection reach): not investigated (may be related to
+  missing Velocity/j8 system)
+- Velocity + j8 accumulation: still not implemented
+- DZ decoder: not touched
