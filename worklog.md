@@ -1644,3 +1644,85 @@ data-driven from moves.xml.
   or dynamic analysis (hardware breakpoint on write)
 - Task 2 (implement verified formula) BLOCKED by Task 1
 - Task 3 (hit without animation) — Windows logs requested, not yet received
+
+---
+## Session: jump-under-floor fix + roll wrapping analysis (HEAD 2f2a4ca → b86c453)
+
+**Context**: User reported regressions after 2f2a4ca (which claimed "no behavioral
+changes"): jump goes under floor, roll wraps, general animation degradation.
+
+**Step 1: Discrepancy investigation**
+- Verified HEAD: remote = local = 2f2a4ca ✓
+- Original commits 921405b/2c27cc1 NOT in git history (lost in session reset,
+  restored only as content in 82ba8ad). Cannot diff directly.
+- Read current Y-formula code: matches description (y_adjust = 4 + (npy - 169.48)
+  for airborne, computed in update_animation).
+- Clean build from scratch: 0 errors.
+
+**Step 2: Jump-under-floor root cause (numerically verified)**
+
+Python analysis of jump log (scenario 01):
+- Jump animation starts with NPivot Y=106.21 (below rest 169.48)
+- Interim formula: y_adjust = 4 + (106.21 - 169.48) = -59.27
+- render_y = -93 + (-59.27) = -152.27 (below floor -89!)
+
+Frame-by-frame verification (BEFORE fix):
+  frame 0: npy=106.21, raw_y_adj=-59.27, smoothed=-27.63, render_y=-120.63 BELOW
+  frame 1: npy=104.42, raw_y_adj=-61.06, smoothed=-44.35, render_y=-137.35 BELOW
+  frame 4: npy=90.89,  raw_y_adj=-74.59, smoothed=-68.34, render_y=-161.34 BELOW
+
+Root cause: crouch/anticipation phase at jump start (NPivot below rest) was
+incorrectly treated as "character should move down in world".
+
+**Fix** (commit 0820bfc): clamp npivot_y_displacement to >= 0 (upward only).
+When npy < rest (crouch), displacement is model-local, not world displacement.
+
+AFTER fix (verified):
+  01 W jump:   ry[-89..-17]  (was [-161..-17]) — no longer under floor ✓
+  02 W+D flip: ry[-89..-10]  (was [-192..-14]) — no longer under floor ✓
+  04 S+D roll: ry[-89..-89]  (flat, no regression) ✓
+  09 idle O:   ry[-89..-89]  (flat, no regression) ✓
+
+**Step 3: Roll wrapping root cause (numerically verified, NOT fixed)**
+
+.bin analysis:
+- floor_y = -193 (feet position)
+- render_y = -89 = NPivot world Y (center, ~104 above floor)
+- stance_idle: NPivot abs_y=105.80, NToe abs_y=0.92
+  NToe sy = -89 + 0.92 - 105.80 = -193.88 ✓ (on floor)
+- forward_roll frame 13 (mid): NPivot abs_y=25.02, NToe abs_y≈0.92
+  NToe sy = -89 + 0.92 - 25.02 = -113.10 (79.90 ABOVE floor!)
+  Feet lift off floor → visible "wrapping"
+
+Root cause: grounded y_adjust=4 (flat) doesn't compensate for NPivot descent.
+When NPivot descends (npy=25), abs_y - npivot_y increases, lifting nodes.
+
+Needed fix: y_adjust = 4 + (npy - 106) for grounded (106 = stance baseline).
+For roll mid: y_adjust = 4 + (25 - 106) = -77, keeping NToe at floor.
+
+NOT implemented — [HEURISTIC-TODO] (MoveInside not closed, premature formulas
+risky per 9450c4f experience).
+
+**Before/after table**:
+  Scenario         BEFORE (2f2a4ca)    AFTER (b86c453)
+  01 W jump        ry[-161..-17]       ry[-89..-17] ✓ (under floor fixed)
+  02 W+D flip      ry[-192..-14]       ry[-89..-10] ✓ (under floor fixed)
+  04 S+D roll      ry[-89..-89]        ry[-89..-89] (no change, wrapping still exists)
+  09 idle O        ry[-89..-89]        ry[-89..-89] (no regression)
+
+**Root cause table**:
+  Symptom              Root cause                          Fix
+  Jump under floor     y_adjust negative during crouch    0820bfc: clamp to >= 0
+  Roll wrapping        y_adjust flat, no grounded contact  [HEURISTIC-TODO] documented
+  General degradation  Partially explained by jump/roll   jump fix should help
+
+**Discrepancy with 2f2a4ca report**: EXPLAINED. The interim formula always had
+the jump-under-floor bug (present since 921405b). Previous testing checked
+ry min/max (showed variation) but didn't verify ry >= floor (-89). This session's
+frame-by-frame Python analysis revealed the bug.
+
+**What is NOT done**:
+  - Roll grounded contact fix ([HEURISTIC-TODO], needs MoveInside)
+  - Task 3 (input blocking) — not investigated (needs user clarification)
+  - Task 4 (general degradation) — partially addressed by jump fix
+  - DZ decoder — not touched (per user instruction)
