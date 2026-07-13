@@ -444,3 +444,37 @@ Decoder context struct fields identified so far (byte-confirmed accesses):
 6. **Location**: ImageLayer with parallax Factor, Y-DOWN coordinates
 7. **DZ Archive**: Custom compression (flag=4), possibly LZF or Derbh
 8. **Binary is pre-patched**: GOT entries contain absolute virtual addresses
+
+### moveInside+0x68 write site — NOT in Model::step (correction)
+
+[ORIGINAL] CORRECTION to previous session's assumption: the writes at
+0x10161bd1/ca8/cdb/d08/d3b/d6c/e9a/2019 in Model::step are to **Model+0x68**
+(edi=Model, set at 0x10161af8: `mov edi, ecx` where ecx=this=Model), NOT
+to moveInside+0x68. moveInside is a SEPARATE ALLOCATION (pointer at
+animInfo+0x94, confirmed by `mov edi, [eax+0x94]` in consumer fcn.101661d0
+— dereference, not lea). Model+0x68 ≠ moveInside+0x68.
+
+[ORIGINAL] moveInside+0x68 is the FIRST FIELD of a sub-structure starting
+at moveInside+0x68. The destructor at 0x10102320 does `lea edi, [esi+0x68]`
+then frees allocated pointers at [edi+0x20]=moveInside+0x88, [edi+0x2c]
+=moveInside+0x94, [edi+0x38]=moveInside+0xa0. These are container/array
+pointers within the sub-structure.
+
+[ORIGINAL] The MoveInside constructor at 0x10101b00 zeros fields +0x4
+through +0x64 but does NOT initialize +0x68. The vtable is stored at
+0x10101b1c: `mov [edi], 0x105ac8e8`. The constructor is NOT called
+directly from any function (grep for `call 0x10101b00` returns 0 results)
+— it is either inlined at the allocation site or called through placement
+new / operator new wrapper.
+
+[HEURISTIC-TODO] The actual write to moveInside+0x68 happens in a function
+not yet identified. Possible approaches for next session:
+1. Ghidra with proper MoveInside struct type — use "References to field"
+   with typed struct to filter out unrelated +0x68 writes
+2. Dynamic analysis — set a hardware breakpoint on moveInside+0x68 write
+3. Find the allocation site — search for `operator new(sizeof(MoveInside))`
+   pattern, then check if the constructor is inlined there
+4. The condition functions fcn.1015eeb0 and fcn.1015e410 (which determine
+   mode=1 vs mode=2 in Model::step) check Model fields (pivotID=+0x58,
+   align_y=+0x5c, flag=+0x54). These MAY be the same logic that determines
+   moveInside+0x68, just applied to a different struct field.
