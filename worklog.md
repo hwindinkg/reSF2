@@ -1816,3 +1816,40 @@ correct — feet stay on floor during roll, nodes rise during jump via abs_y.
   - Bug 1: further investigation if "freeze" is real or user perception
   - MoveInside X/Z alignment (container shift) not implemented
   - DZ decoder — not touched
+
+---
+## Session: input gate fix + uninterrupt analysis (HEAD ed0359f → 5f392b0)
+
+**Context**: User reports attacks block input for too long + character static during attacks.
+
+**Task 1: Input blocking after attack**
+
+Шаг A: Found in sf2.js the FULL input gate chain:
+- tKa() (line 15200): player input gate = !PCa || kh || Ua==null || Nd.nk
+- Uninterrupt (ocb/pcb, line 18770): used ONLY for AI tactics (ds.pcb)
+- Player can interrupt ANY animation at ANY time (EAnimationInterruptedEvent)
+
+Шаг B: moves.xml Uninterrupt intervals for player attacks:
+- HighPunch: Uninterrupt End=9 (no Start, defaults to 0) → frames 0-8 of 12
+- HeavyPunch: Uninterrupt Start=6 End=19 of 24
+- DoublePunch: NO Uninterrupt
+- BackKick: Uninterrupt Start=5 End=18
+
+Шаг C: Our code used is_uninterrupt_ as player input gate at 4 locations.
+This blocked input during Uninterrupt interval (up to 75% of animation).
+For moves without Uninterrupt (DoublePunch), move_state_==10 + hit_anim_
+blocked input for ENTIRE animation duration (1300ms).
+
+Шаг D: Removed is_uninterrupt_ and move_state_ < 10 from all player input
+gates. Player can now interrupt any animation at any time.
+Also fixed move_state_ set to 0 (should be 10) after combat selection.
+
+Шаг E: Before/after (scenario 12, rapid O):
+  BEFORE: 2 reject=uninterrupt (input incorrectly blocked)
+  AFTER:  0 reject=uninterrupt ✓
+  3 reject=no_candidate (CORRECT: no 3key combo for Central+Punch)
+
+**Task 2: X/Z displacement during attacks** — NOT completed this session.
+Root cause identified: <Velocity> element from moves.xml → DM → j8
+accumulation system not implemented. This is the same missing mechanism
+that affects jump X/Z movement (Bug 2 from previous session).
