@@ -478,3 +478,39 @@ not yet identified. Possible approaches for next session:
    mode=1 vs mode=2 in Model::step) check Model fields (pivotID=+0x58,
    align_y=+0x5c, flag=+0x54). These MAY be the same logic that determines
    moveInside+0x68, just applied to a different struct field.
+
+### Roll "wrapping" root cause — verified numerically (this session)
+
+[HEURISTIC-TODO] Grounded roll floor-contact issue.
+
+**Numerical verification** (from .bin data):
+- floor_y = -193 (feet should be at this Y)
+- render_y = -89 = NPivot world Y (center of model, ~104 above floor)
+- stance_idle frame 0: NPivot abs_y=105.80, NToe abs_y=0.92
+  - NToe sy = world_cy + abs_y - npivot_y = -89 + 0.92 - 105.80 = -193.88 ✓ (on floor)
+- forward_roll frame 13 (mid-roll): NPivot abs_y=25.02, NToe abs_y≈0.92
+  - NToe sy = -89 + 0.92 - 25.02 = -113.10 (79.90 ABOVE floor!)
+  - Feet lift off floor → visible "wrapping" upward
+
+**Root cause**: For grounded moves (roll), y_adjust stays at 4 (flat).
+When NPivot descends (npy=25 in roll mid), the formula
+`sy = world_cy + abs_y - npivot_y` subtracts the low npivot_y, making
+node world Y HIGHER (feet lift). The character "wraps" because NPivot
+descends in model-local space but world_cy doesn't compensate.
+
+**Needed fix** (NOT yet implemented — [HEURISTIC-TODO]):
+For grounded moves, y_adjust should compensate for NPivot descent:
+  y_adjust = FEET_FLOOR_OFFSET + (npy - npy_stance_baseline)
+where npy_stance_baseline ≈ 106 (NPivot Y in stance, NOT rest 169.48).
+For roll mid (npy=25): y_adjust = 4 + (25 - 106) = -77 (character moves down).
+This keeps NToe at floor: sy = (-93 + (-77)) + 0.92 - 25 = -193.08 ✓
+
+**Risk**: applying downward y_adjust for ALL grounded moves (including
+stance/combat) could break them. Need to verify that stance npy ≈ 106
+is stable (it is: stance_idle frame 0/78 both show 105.80).
+
+**Not implemented** because:
+1. MoveInside consumption formula not yet closed (moveInside+0x68 write
+   site not found — see previous sessions)
+2. Previous experience (9450c4f) showed premature formulas cause regressions
+3. Need to verify per-animation that npy_stance_baseline is consistent
