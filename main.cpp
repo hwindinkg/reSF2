@@ -2223,14 +2223,19 @@ private:
         // y_adjust stays at FEET_FLOOR_OFFSET=4 (flat).
         // This is NOT the MoveInside formula — it's a targeted fix for 'jump doesn't rise'.
         constexpr float NPIVOT_REST_Y_RENDER = 169.48f;  // from skeleton.xml NPivot rest pose
+        constexpr float STANCE_NPIVOT_Y_RENDER = 106.0f;  // NPivot Y at stance/contact
         bool is_airborne_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                                  current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                                  current_anim_ == "back_handflip");
+        bool is_roll_anim = (current_anim_ == "forward_roll" || current_anim_ == "back_roll");
         float npivot_y_displacement = 0.0f;
         if (is_airborne_anim) {
             float raw_disp = anim_npivot_bin_y_ - NPIVOT_REST_Y_RENDER;
             // FIX: only apply UPWARD displacement (npy > rest). See update_animation().
             npivot_y_displacement = raw_disp > 0.0f ? raw_disp : 0.0f;
+        } else if (is_roll_anim) {
+            // FIX 2: grounded roll floor-contact. See update_animation().
+            npivot_y_displacement = anim_npivot_bin_y_ - STANCE_NPIVOT_Y_RENDER;
         }
         float target_y_adjust = FEET_FLOOR_OFFSET + npivot_y_displacement;
         // [ORIGINAL] y_adjust_smoothed_ is now computed in update_animation()
@@ -3198,17 +3203,36 @@ private:
         // Verified numerically: without this clamp, jump frame 0-8 has
         // render_y -120..-161 (below floor -89) because npy starts at 106
         // (below rest 169.48), giving y_adjust = -59.
+        //
+        // FIX 2: grounded roll floor-contact correction. During roll, NPivot
+        // descends (npy=25 at mid-roll) but feet should stay on floor.
+        // Without correction: NToe sy = -89 + 0.92 - 25 = -113 (79px above
+        // floor -193). With correction: y_adjust = 4 + (npy - 106) = -77,
+        // keeping NToe at -193. Verified numerically from .bin data:
+        //   stance_idle: NToe sy = -89 + 0.92 - 105.80 = -193.88 ✓ (on floor)
+        //   forward_roll mid: NToe sy = -89 + 0.92 - 25.02 = -113.10 ✗ (wrapping)
+        //   with fix: NToe sy = (-89 + (-77)) + 0.92 - 25 = -193.08 ✓
+        // Stance baseline 106 = NPivot Y at frame 0 for ALL grounded anims
+        // (verified: 106.21 for step/roll/punch, 105.80 for stance_idle).
+        // Applied ONLY to roll (not blanket) because back_kick (npy=147) and
+        // low_punch (npy=77) may regress if blanket-corrected.
         {
             constexpr float NPIVOT_REST_Y_UPDATE = 169.48f;
+            constexpr float STANCE_NPIVOT_Y = 106.0f;  // NPivot Y at stance/contact
             bool is_airborne = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                                 current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                                 current_anim_ == "back_handflip");
+            bool is_roll = (current_anim_ == "forward_roll" || current_anim_ == "back_roll");
             float npivot_y_disp = 0.0f;
             if (is_airborne) {
                 float raw_disp = anim_npivot_bin_y_ - NPIVOT_REST_Y_UPDATE;
                 // Only apply upward displacement (character rises above floor).
                 // Downward displacement (crouch/anticipation) is model-local.
                 npivot_y_disp = raw_disp > 0.0f ? raw_disp : 0.0f;
+            } else if (is_roll) {
+                // Grounded roll: compensate for NPivot descent to keep feet on floor.
+                // Displacement is relative to stance baseline (106), not rest (169.48).
+                npivot_y_disp = anim_npivot_bin_y_ - STANCE_NPIVOT_Y;
             }
             float target_y = 4.0f + npivot_y_disp;  // FEET_FLOOR_OFFSET + displacement
             y_adjust_smoothed_ += (target_y - y_adjust_smoothed_) * 0.5f;
