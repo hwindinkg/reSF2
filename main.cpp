@@ -2222,20 +2222,11 @@ private:
         //   fcn.1028e490 = Vec3 copy, fcn.1028e4c0 = Vec3 add, fcn.10102c70 = container accessor
         // [HEURISTIC-TODO] consumption formula (how Vec3 -> world transform) NOT yet traced.
         //
-        // [HEURISTIC-TODO] Unified stance-baseline Y correction.
-        // See update_animation() for full documentation and numerical verification.
+        // [ORIGINAL] MoveInside Y alignment — VERIFIED from PC version sf2.js.
+        // See update_animation() for full documentation.
+        // y_adjust = ShiftY = 0 for all Axis="X|Z" moves (verified from moves.xml).
         // y_adjust_smoothed_ is computed in update_animation() (before hit detection).
         // Here we just USE the already-computed value.
-        constexpr float STANCE_NPIVOT_Y_RENDER = 106.0f;
-        bool is_airborne_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
-                                 current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
-                                 current_anim_ == "back_handflip");
-        float npivot_y_displacement = anim_npivot_bin_y_ - STANCE_NPIVOT_Y_RENDER;
-        if (is_airborne_anim) {
-            npivot_y_displacement = npivot_y_displacement > 0.0f ? npivot_y_displacement : 0.0f;
-        }
-        float target_y_adjust = FEET_FLOOR_OFFSET + npivot_y_displacement;
-        (void)target_y_adjust;  // computed in update_animation() for sync
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
 
@@ -3222,20 +3213,19 @@ private:
         // For grounded: allow negative displacement (character dips, feet stay
         // on floor — this is correct for roll, crouch, low attacks).
         {
-            constexpr float STANCE_NPIVOT_Y = 106.0f;  // NPivot Y at stance/contact
-            bool is_airborne = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
-                                current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
-                                current_anim_ == "back_handflip");
-            float npivot_y_disp = anim_npivot_bin_y_ - STANCE_NPIVOT_Y;
-            if (is_airborne) {
-                // Only apply upward displacement (character rises above floor).
-                // Downward displacement (crouch/anticipation/landing) is model-local.
-                npivot_y_disp = npivot_y_disp > 0.0f ? npivot_y_disp : 0.0f;
-            }
-            // For grounded: npivot_y_disp can be negative (dip) or positive (lift).
-            // This keeps feet on floor for ALL grounded anims.
-            float target_y = 4.0f + npivot_y_disp;  // FEET_FLOOR_OFFSET + displacement
-            y_adjust_smoothed_ += (target_y - y_adjust_smoothed_) * 0.5f;
+            // [ORIGINAL] MoveInside Y alignment — VERIFIED from PC version sf2.js.
+            // Formula: Gla(cI ? (ref-pivot).x : ShiftX,
+            //                dI ? (ref-pivot).y : ShiftY,
+            //                MY ? (ref-pivot).z : 0)
+            // For Axis="X|Z" (ALL current player moves): dI=false → Y = ShiftY.
+            // ShiftY is 0 for all player moves (jump/roll/punch/kick/step).
+            // Therefore y_adjust = ShiftY = 0 for ALL current moves.
+            // The visual jump/roll comes from per-node animation data (abs_y -
+            // npivot_y in resolve_body_node), NOT from world Y displacement.
+            // Previous interim hacks (NPivot Y displacement) were wrong — the
+            // original game does NOT move the model root in Y for Axis="X|Z" moves.
+            float target_y = 0.0f;  // ShiftY (verified: 0 for all player moves)
+            y_adjust_smoothed_ = target_y;
         }
 
         // Get NPivot's rest-pose Y (from skeleton_nodes_)
