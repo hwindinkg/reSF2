@@ -1586,3 +1586,61 @@ Bug NOT REPRODUCED — 0 frames with match=0 AND bag_hit=1. Confirms
   - Root-motion data-driven (still animation-name whitelist)
   - DZ type-4 decoder (not touched per user instruction)
   - "Hit without animation" on Windows (needs Windows logs with [HIT_CHECK])
+
+---
+## Session: moveInside+0x68 write site search (HEAD ce7ba32 → e69ce57)
+
+**Context**: Task 1 was to find where moveInside+0x68 (mode selector read by
+consumer fcn.101661d0) is WRITTEN. Previous session confirmed it's NOT
+data-driven from moves.xml.
+
+**Approach 1: capstone register tracking** (scripts/find_moveinside_68_writes.py)
+- Searched for all loads of [reg+0x94] (animInfo→moveInside pointer load)
+- Tracked destination register forward in same function for [reg+0x68] writes
+- Result: 0 writes found — moveInside+0x68 is NOT written in the same
+  function that loads the moveInside pointer.
+
+**Approach 2: grep for small constant writes (1-4) to [reg+0x68]**
+- Found 12 writes in Model::step area (0x10161b00-0x10162500)
+- Values: -2, 0, 1, 2, 5, 6, 9, 10
+- BUT: in Model::step, `edi = ecx = this = Model` (at 0x10161af8)
+- These writes are to **Model+0x68**, NOT moveInside+0x68!
+- moveInside is a SEPARATE ALLOCATION (pointer at animInfo+0x94, dereferenced
+  in consumer: `mov edi, [eax+0x94]` — deref, not lea)
+
+**Approach 3: RTTI vtable → constructor → init function**
+- Found MoveInside RTTI string `.?AUMoveInside@InfoAnimation@@` at 0x10649e40
+- Traced TypeDescriptor → CompleteObjectLocator → vtable at 0x105ac8e8
+- Found 2 xrefs to vtable in .text:
+  - 0x10101b1c: MoveInside constructor (zeros +0x4..+0x64, does NOT init +0x68)
+  - 0x1010232c: MoveInside destructor (frees sub-structure at +0x68)
+- Constructor has 0 direct call xrefs — inlined or placement new
+
+**[ORIGINAL] Key correction**: Model+0x68 ≠ moveInside+0x68.
+- Model+0x68 = state machine field (values -2/0/1/2/5/6/9/10)
+- moveInside+0x68 = mode selector (values 1-4 per consumer jump table)
+- These are DIFFERENT fields in DIFFERENT structs
+
+**[ORIGINAL] moveInside+0x68 is a sub-structure**:
+- Destructor does `lea edi, [esi+0x68]` then frees pointers at:
+  [edi+0x20]=moveInside+0x88, [edi+0x2c]=moveInside+0x94, [edi+0x38]=moveInside+0xa0
+- These are container/array pointers within the sub-structure
+- The first DWORD (+0x68) may be a type tag or count, not a simple mode enum
+
+**[ORIGINAL] Model+0x68 state machine** (in Model::step):
+- Switch on Model+0x70 (values 2/3/4 determine path)
+- Model+0x70==2: call fcn.1015e410 → if true, Model+0x68=2
+- Model+0x70==3/4: Model+0x68=0xa (error/default)
+- Separate path: call fcn.1015eeb0 → if true, Model+0x68=1
+- fcn.1015eeb0 checks: Model+0x58 (pivotID)!=0, Model+0x54 (flag)!=0,
+  Model+0x5c (align_y), Model+0xc (counter) % 924923530
+
+**Verification**: interim formula still works (no regression).
+- Scenario 01 (W jump): ry[-183..-17] ✓ (rises)
+- Scenario 04 (S+D roll): ry[-89..-89] ✓ (flat, no regression)
+
+**What is NOT done**:
+- moveInside+0x68 write site NOT found — needs Ghidra typed struct analysis
+  or dynamic analysis (hardware breakpoint on write)
+- Task 2 (implement verified formula) BLOCKED by Task 1
+- Task 3 (hit without animation) — Windows logs requested, not yet received
