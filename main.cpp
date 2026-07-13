@@ -2226,8 +2226,12 @@ private:
         bool is_airborne_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                                  current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                                  current_anim_ == "back_handflip");
-        float npivot_y_displacement = is_airborne_anim
-            ? (anim_npivot_bin_y_ - NPIVOT_REST_Y_RENDER) : 0.0f;
+        float npivot_y_displacement = 0.0f;
+        if (is_airborne_anim) {
+            float raw_disp = anim_npivot_bin_y_ - NPIVOT_REST_Y_RENDER;
+            // FIX: only apply UPWARD displacement (npy > rest). See update_animation().
+            npivot_y_displacement = raw_disp > 0.0f ? raw_disp : 0.0f;
+        }
         float target_y_adjust = FEET_FLOOR_OFFSET + npivot_y_displacement;
         // [ORIGINAL] y_adjust_smoothed_ is now computed in update_animation()
         // (before hit detection) to avoid a 1-frame desync. See update_animation().
@@ -3187,13 +3191,25 @@ private:
         // to register at the wrong height during airborne animations.
         // [HEURISTIC-TODO] Same interim formula as render_body_model():
         // NPivot Y displacement for airborne, constant for grounded.
+        // FIX: only apply UPWARD displacement (npy > rest). When npy < rest
+        // (crouch/anticipation phase at jump start), the NPivot descent is
+        // model-local (body crouches) and must NOT move the world position
+        // down — otherwise the character sinks below the floor.
+        // Verified numerically: without this clamp, jump frame 0-8 has
+        // render_y -120..-161 (below floor -89) because npy starts at 106
+        // (below rest 169.48), giving y_adjust = -59.
         {
             constexpr float NPIVOT_REST_Y_UPDATE = 169.48f;
             bool is_airborne = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                                 current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                                 current_anim_ == "back_handflip");
-            float npivot_y_disp = is_airborne
-                ? (anim_npivot_bin_y_ - NPIVOT_REST_Y_UPDATE) : 0.0f;
+            float npivot_y_disp = 0.0f;
+            if (is_airborne) {
+                float raw_disp = anim_npivot_bin_y_ - NPIVOT_REST_Y_UPDATE;
+                // Only apply upward displacement (character rises above floor).
+                // Downward displacement (crouch/anticipation) is model-local.
+                npivot_y_disp = raw_disp > 0.0f ? raw_disp : 0.0f;
+            }
             float target_y = 4.0f + npivot_y_disp;  // FEET_FLOOR_OFFSET + displacement
             y_adjust_smoothed_ += (target_y - y_adjust_smoothed_) * 0.5f;
         }
