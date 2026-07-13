@@ -1726,3 +1726,47 @@ frame-by-frame Python analysis revealed the bug.
   - Task 3 (input blocking) — not investigated (needs user clarification)
   - Task 4 (general degradation) — partially addressed by jump fix
   - DZ decoder — not touched (per user instruction)
+
+---
+## Session: roll floor-contact fix (HEAD 6ad3d5d → d4b66c3)
+
+**Context**: Continuing from previous session. Jump-under-floor was fixed
+(0820bfc), roll wrapping root cause was documented (b86c453) but NOT fixed.
+
+**Task 2: Roll floor-contact fix**
+
+.bin data analysis confirmed stance baseline:
+- ALL grounded anims start at npy≈106 (106.21 for step/roll/punch,
+  105.80 for stance_idle)
+- forward_roll: npy goes 106→19→106 (dips to 19 at mid-roll)
+- back_roll: npy goes 106→11→106
+
+Fix: for roll animations, apply stance-baseline correction:
+  y_adjust = 4 + (npy - 106)
+  - stance: y_adjust = 4 (flat, no change)
+  - roll mid: y_adjust = 4 + (25-106) = -77 (character dips, feet on floor)
+
+Applied ONLY to roll (not blanket) because:
+- back_kick (npy_max=147) would lift character incorrectly
+- low_punch (npy_min=77) would sink character incorrectly
+- These are model-local rotations, not world displacement
+
+**Before/after table** (deterministic input replay):
+  Scenario         BEFORE (6ad3d5d)     AFTER (d4b66c3)
+  01 W jump        ry[-89..-17]         ry[-89..-17] (no regression) ✓
+  02 W+D flip      ry[-89..-10]         ry[-89..-10] (no regression) ✓
+  03 W+A flip      ry[-89..3]           ry[-89..3]   (no regression) ✓
+  04 S+D roll      ry[-89..-89] flat    ry[-174..-88] (dips, contact) ✓
+  05 S+A roll      ry[-89..-89] flat    ry[-180..-88] (dips, contact) ✓
+  09 idle O        ry[-89..-89]         ry[-89..-89] (no regression) ✓
+
+**Root cause table**:
+  Symptom           Root cause                         Fix
+  Roll wrapping     y_adjust flat, no NPivot descent   d4b66c3: stance-baseline
+                    compensation for grounded roll     correction for roll only
+
+**What is NOT done**:
+  - Task 3 (input blocking) — not investigated
+  - Task 4 (general degradation) — partially addressed (jump + roll fixed)
+  - MoveInside consumption formula — still [HEURISTIC-TODO]
+  - DZ decoder — not touched (per user instruction)

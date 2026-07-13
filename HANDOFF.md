@@ -6,13 +6,13 @@
 > the real HEAD `249b1a8`. Anything not proven against the original binary or
 > a real run is tagged **[HEURISTIC-TODO]**.
 >
-> **Updated (jump-under-floor fix + roll wrapping analysis)** to HEAD `b86c453`.
+> **Updated (jump-under-floor fix + roll wrapping analysis)** to HEAD `d4b66c3`.
 > This session: found root cause of jump-under-floor regression (interim
 > formula applied negative y_adjust during crouch phase), fixed with
 > upward-only clamp. Verified numerically: jump ry[-89..-17] (was [-161..-17]).
 > Roll wrapping root cause documented (NToe lifts 79px above floor during
 > roll mid because y_adjust doesn't compensate for NPivot descent).
-> [HEURISTIC-TODO] grounded contact fix not implemented (MoveInside not closed).
+> Grounded roll contact fix IMPLEMENTED (d4b66c3) (MoveInside not closed).
 > See "Session changelog (jump fix + roll analysis)" at the bottom.
 
 ## Project
