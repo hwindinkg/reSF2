@@ -514,3 +514,104 @@ is stable (it is: stance_idle frame 0/78 both show 105.80).
    site not found — see previous sessions)
 2. Previous experience (9450c4f) showed premature formulas cause regressions
 3. Need to verify per-animation that npy_stance_baseline is consistent
+
+### MoveInside FULLY DECODED from PC version (sf2.js, this session)
+
+[ORIGINAL] The PC version of Shadow Fight 2 (Famobi HTML5/WebView2 port,
+downloaded from chat.chobat.ru/sf2_pc.7z) contains the game logic in
+JavaScript (www/sf2.502f0946.js, 1.6MB minified). This is NOT Unity —
+it's a web port using WebView2 + .NET 8 WinUI wrapper.
+
+The JavaScript code contains the MoveInside alignment logic in readable
+(minified but deobfuscatable) form, confirming and extending the binary
+analysis from previous sessions.
+
+#### Axis mask from moves.xml (cI/dI/MY flags)
+
+```javascript
+// From moves.xml <Align Axis="X|Z"> parsing:
+var k = a.attributes.get("Axis");
+b.cI = b.dI = b.MY = false;
+if (k == null) b.cI = b.dI = b.MY = true;
+else {
+    k = k.split("|");
+    for (let n of k) {
+        if (n == "X") b.cI = true;
+        else if (n == "Y") b.dI = true;
+        else if (n == "Z") b.MY = true;
+    }
+}
+```
+
+This means:
+- `Axis="X|Z"` → cI=true, dI=**false**, MY=true (Y NOT aligned by pivot!)
+- `Axis="X|Y|Z"` → cI=true, dI=true, MY=true (all axes aligned)
+- `Axis="X"` → cI=true, dI=false, MY=false
+
+#### ShiftX/ShiftY from moves.xml <Position> element
+
+```javascript
+b.dja = u.H(d.attributes.get("ShiftX"));  // constant X offset
+b.eja = u.H(d.attributes.get("ShiftY"));  // constant Y offset
+```
+
+When an axis is NOT in the Axis mask, its alignment uses the constant
+from ShiftX/ShiftY instead of the pivot node position.
+
+#### Alignment formula (Vec3 subtract + per-axis selection)
+
+```javascript
+// d = pivot node position (from .jc.Kh(2).data[pivotID])
+// e,f,g = reference position (from Position element: EObjectNodes/Pivot/etc)
+e += this.hd() * a.dja;  // facing * ShiftX
+f += a.eja;               // + ShiftY
+c = this.Fk;
+c.x = e - d.x;            // Vec3 subtract: ref - pivot
+c.y = f - d.y;
+c.z = g - d.z;
+this.Gla(a.cI ? c.x : a.dja,   // if X in Axis: use computed, else ShiftX
+         a.dI ? c.y : a.eja,   // if Y in Axis: use computed, else ShiftY
+         a.MY ? c.z : 0);      // if Z in Axis: use computed, else 0
+```
+
+`Gla(a,b,c)` = `this.jc.shift(a,b,c)` — shifts the alignment container.
+
+#### InAir check (physics-based, not move-type-based)
+
+```javascript
+case "InAir":
+    b = a.oa.Ic("NHeel_2").ma.y;
+    c.result = (0 - a.oa.Ic("NHeel_1").ma.y > 30 && 0 - b > 30) ? "1" : "0";
+```
+
+Character is "InAir" when BOTH heels are >30 units above floor (Y < -30).
+This is a RUNTIME PHYSICS CHECK, not a move-type classification — confirming
+the previous session's finding that moveInside+0x68 is runtime-computed.
+
+#### Key conclusions for reSF2
+
+1. For `Axis="X|Z"` moves (ALL grounded + airborne in current moves.xml):
+   Y alignment uses **ShiftY constant** (from `<Position ShiftY="...">`),
+   NOT the pivot node Y. This explains why the interim NPivot Y displacement
+   approach was wrong — the original game doesn't use pivot Y for alignment
+   when dI=false (Axis="X|Z").
+
+2. The `ShiftY` value in moves.xml is typically 0 (not specified), meaning
+   Y alignment = 0 (no Y shift) for ALL moves with `Axis="X|Z"`.
+
+3. The MoveInside formula is:
+   - X: `ref.x - pivot.x` (if cI) or `ShiftX` (if !cI)
+   - Y: `ref.y - pivot.y` (if dI) or `ShiftY` (if !dI) ← **THIS IS THE KEY**
+   - Z: `ref.z - pivot.z` (if MY) or `0` (if !MY)
+
+4. For reSF2: Y should be **0** (or ShiftY if specified) for ALL current
+   moves, because they all use `Axis="X|Z"` (dI=false). The character's
+   vertical position should come entirely from the animation data (NPivot Y
+   trajectory in .bin), NOT from MoveInside alignment.
+
+[HEURISTIC-TODO] Implement this verified formula in reSF2:
+- Parse `Axis` attribute → set cI/dI/MY flags
+- Parse `ShiftX`/`ShiftY` from `<Position>` → use as constants
+- For dI=false: y_adjust = ShiftY (typically 0)
+- For dI=true: y_adjust = ref.y - pivot.y (from .bin animation data)
+- Remove interim NPivot Y displacement hack
