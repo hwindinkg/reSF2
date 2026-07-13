@@ -1049,7 +1049,14 @@ public:
 
         // === STEP MOVEMENT (from moves.xml: StepForward/StepBack) ===
         // Find step moves dynamically
-        if (!is_uninterrupt_ && move_state_ < 10) {
+        // FIX: don't override attack animation with step when hit_anim_ > 0.
+        // Without this, pressing O while holding D selects HeavyPunch (goto
+        // after_combat skips step code for THAT frame), but on the NEXT frame
+        // the step code sees key_forward held and calls play_animation("step_forward"),
+        // overriding the attack animation. The attack never plays, but
+        // current_move_ and hit_anim_ remain set, causing stale is_uninterrupt_
+        // (checks HeavyPunch's interval against step_forward's frame count).
+        if (!is_uninterrupt_ && move_state_ < 10 && hit_anim_ == 0) {
             bool fwd_latched = fwd_held_ms_ > 0;
             bool back_latched = back_held_ms_ > 0;
 
@@ -2215,32 +2222,19 @@ private:
         //   fcn.1028e490 = Vec3 copy, fcn.1028e4c0 = Vec3 add, fcn.10102c70 = container accessor
         // [HEURISTIC-TODO] consumption formula (how Vec3 -> world transform) NOT yet traced.
         //
-        // [HEURISTIC-TODO] Interim Y fix: apply NPivot Y displacement for airborne
-        // animations only. The .bin stores absolute NPivot Y per frame; the
-        // displacement (anim_npivot_bin_y_ - NPIVOT_REST_Y) represents how much
-        // NPivot has risen/lowered from rest. For airborne moves, this displacement
-        // is applied to world Y. For grounded moves (roll, step, stance, attacks),
-        // y_adjust stays at FEET_FLOOR_OFFSET=4 (flat).
-        // This is NOT the MoveInside formula — it's a targeted fix for 'jump doesn't rise'.
-        constexpr float NPIVOT_REST_Y_RENDER = 169.48f;  // from skeleton.xml NPivot rest pose
-        constexpr float STANCE_NPIVOT_Y_RENDER = 106.0f;  // NPivot Y at stance/contact
+        // [HEURISTIC-TODO] Unified stance-baseline Y correction.
+        // See update_animation() for full documentation and numerical verification.
+        // y_adjust_smoothed_ is computed in update_animation() (before hit detection).
+        // Here we just USE the already-computed value.
+        constexpr float STANCE_NPIVOT_Y_RENDER = 106.0f;
         bool is_airborne_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                                  current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                                  current_anim_ == "back_handflip");
-        bool is_roll_anim = (current_anim_ == "forward_roll" || current_anim_ == "back_roll");
-        float npivot_y_displacement = 0.0f;
+        float npivot_y_displacement = anim_npivot_bin_y_ - STANCE_NPIVOT_Y_RENDER;
         if (is_airborne_anim) {
-            float raw_disp = anim_npivot_bin_y_ - NPIVOT_REST_Y_RENDER;
-            // FIX: only apply UPWARD displacement (npy > rest). See update_animation().
-            npivot_y_displacement = raw_disp > 0.0f ? raw_disp : 0.0f;
-        } else if (is_roll_anim) {
-            // FIX 2: grounded roll floor-contact. See update_animation().
-            npivot_y_displacement = anim_npivot_bin_y_ - STANCE_NPIVOT_Y_RENDER;
+            npivot_y_displacement = npivot_y_displacement > 0.0f ? npivot_y_displacement : 0.0f;
         }
         float target_y_adjust = FEET_FLOOR_OFFSET + npivot_y_displacement;
-        // [ORIGINAL] y_adjust_smoothed_ is now computed in update_animation()
-        // (before hit detection) to avoid a 1-frame desync. See update_animation().
-        // Here we just USE the already-computed value.
         (void)target_y_adjust;  // computed in update_animation() for sync
         float world_cx = player_pos_x_;
         float world_cy = player_pos_y_ + y_adjust_smoothed_;
@@ -3204,36 +3198,42 @@ private:
         // render_y -120..-161 (below floor -89) because npy starts at 106
         // (below rest 169.48), giving y_adjust = -59.
         //
-        // FIX 2: grounded roll floor-contact correction. During roll, NPivot
-        // descends (npy=25 at mid-roll) but feet should stay on floor.
-        // Without correction: NToe sy = -89 + 0.92 - 25 = -113 (79px above
-        // floor -193). With correction: y_adjust = 4 + (npy - 106) = -77,
-        // keeping NToe at -193. Verified numerically from .bin data:
-        //   stance_idle: NToe sy = -89 + 0.92 - 105.80 = -193.88 ✓ (on floor)
-        //   forward_roll mid: NToe sy = -89 + 0.92 - 25.02 = -113.10 ✗ (wrapping)
-        //   with fix: NToe sy = (-89 + (-77)) + 0.92 - 25 = -193.08 ✓
-        // Stance baseline 106 = NPivot Y at frame 0 for ALL grounded anims
-        // (verified: 106.21 for step/roll/punch, 105.80 for stance_idle).
-        // Applied ONLY to roll (not blanket) because back_kick (npy=147) and
-        // low_punch (npy=77) may regress if blanket-corrected.
+        // FIX 2: unified stance-baseline Y correction for ALL animations.
+        // Previous approach used rest Y (169.48) for airborne and flat 4 for
+        // grounded (roll-only correction). This caused:
+        //   - Jump barely lifts: baseline 169.48 too high, jump starts at 106,
+        //     so displacement = max(0, 106-169.48) = 0 for first ~7 frames.
+        //     Peak: 243-169.48 = 74 (render_y -15, barely visible).
+        //   - Feet through floor during stance_2: npy goes 132→95, but y_adjust=4
+        //     (flat). When npy=132: NToe sy = -89+0.92-132 = -220 (below floor!).
+        //   - Character floating: when npy=95 (below stance 106): NToe sy = -183
+        //     (10px above floor).
+        //
+        // Unified fix: use STANCE_NPIVOT_Y (106) as baseline for ALL anims.
+        //   y_adjust = 4 + (npy - 106)
+        //   - stance_2 npy=132: y_adj=30, NToe sy = (-89+30)+0.92-132 = -190 ✓
+        //   - stance_2 npy=95:  y_adj=-7, NToe sy = (-89-7)+0.92-95 = -190 ✓
+        //   - jump npy=106:     y_adj=4, render_y=-89 (on floor) ✓
+        //   - jump peak npy=243: y_adj=141, render_y=48 (visible jump!) ✓
+        //   - jump crouch npy=71: clamped to y_adj=4 (upward-only for airborne)
+        //
+        // For airborne: clamp displacement to >= 0 (upward only) to prevent
+        // under-floor during crouch/landing phase.
+        // For grounded: allow negative displacement (character dips, feet stay
+        // on floor — this is correct for roll, crouch, low attacks).
         {
-            constexpr float NPIVOT_REST_Y_UPDATE = 169.48f;
             constexpr float STANCE_NPIVOT_Y = 106.0f;  // NPivot Y at stance/contact
             bool is_airborne = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
                                 current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
                                 current_anim_ == "back_handflip");
-            bool is_roll = (current_anim_ == "forward_roll" || current_anim_ == "back_roll");
-            float npivot_y_disp = 0.0f;
+            float npivot_y_disp = anim_npivot_bin_y_ - STANCE_NPIVOT_Y;
             if (is_airborne) {
-                float raw_disp = anim_npivot_bin_y_ - NPIVOT_REST_Y_UPDATE;
                 // Only apply upward displacement (character rises above floor).
-                // Downward displacement (crouch/anticipation) is model-local.
-                npivot_y_disp = raw_disp > 0.0f ? raw_disp : 0.0f;
-            } else if (is_roll) {
-                // Grounded roll: compensate for NPivot descent to keep feet on floor.
-                // Displacement is relative to stance baseline (106), not rest (169.48).
-                npivot_y_disp = anim_npivot_bin_y_ - STANCE_NPIVOT_Y;
+                // Downward displacement (crouch/anticipation/landing) is model-local.
+                npivot_y_disp = npivot_y_disp > 0.0f ? npivot_y_disp : 0.0f;
             }
+            // For grounded: npivot_y_disp can be negative (dip) or positive (lift).
+            // This keeps feet on floor for ALL grounded anims.
             float target_y = 4.0f + npivot_y_disp;  // FEET_FLOOR_OFFSET + displacement
             y_adjust_smoothed_ += (target_y - y_adjust_smoothed_) * 0.5f;
         }
