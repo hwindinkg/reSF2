@@ -3245,15 +3245,25 @@ private:
             // Interpolate
             float abs_x = x0 + (x1 - x0) * alpha;
             float abs_y = y0 + (y1 - y0) * alpha;
-            
-            // Convert to LOCAL: subtract NPivot's world position
+
+            // [ORIGINAL] Node world Y = abs_y + fixed_offset, NOT abs_y - animated_npy.
+            // PC source: sf2.js eda() — node position = fq[frame] + j8 (velocity).
+            // j8 = 0 for moves without <Velocity> (all player moves).
+            // The .bin stores absolute node positions; the model world position
+            // provides the offset. NPivot Y in .bin changes during animation
+            // (crouch/jump/roll), but this is the ANIMATED node position, NOT
+            // the model world position. Subtracting animated npivot_y causes
+            // feet to lift off floor during roll (wrapping bug) and incorrectly
+            // shifts nodes when NPivot descends.
+            // FIX: use STANCE_NPIVOT_Y (106) as fixed baseline instead of
+            // animated npivot_y. This keeps the coordinate offset consistent:
+            //   node_world_y = world_cy + abs_y - 106 = -93 + abs_y - 106 = abs_y - 199
+            // For stance (NToe abs_y=0.92): sy = -198 (on floor -193 ✓)
+            // For roll mid (NToe abs_y=0.92, npy=25): sy = -198 (still on floor ✓)
+            // For jump peak (NToe abs_y=189): sy = -10 (high up ✓)
+            constexpr float STANCE_NPIVOT_Y_BASELINE = 106.0f;
             float local_x = abs_x - npivot_x;
-            float local_y = abs_y - npivot_y;
-            
-            // Store: anim_node_pos_ maps node name -> (local_X, local_Y)
-            // The Y needs to be relative to NPivot's rest Y (for rendering)
-            // local_y is already relative to NPivot's current Y.
-            // We need: local_y + npivot_rest_y (to get model-space Y)
+            float local_y = abs_y - STANCE_NPIVOT_Y_BASELINE;
             anim_node_pos_[name] = {local_x, local_y + npivot_rest_y};
         }
 
