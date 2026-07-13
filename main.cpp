@@ -269,6 +269,11 @@ struct MoveDef {
     // can ONLY trigger when HeavyPunch is the currently playing animation.
     // Empty = no CurrentAnimation condition (1key/2key moves).
     std::string required_current_animation;
+
+    // [ORIGINAL] Type from moves.xml Type="ATTACK" or Type="MOVE".
+    // ATTACK = combat move (punch/kick), MOVE = non-combat (duck/stance/step).
+    // Used to distinguish in_basic_attack (only ATTACK moves block 1key/2key).
+    bool is_attack = false;
 };
 
 struct AnimationData {
@@ -779,7 +784,11 @@ public:
                 auto cur_move_it = moves_.find(current_move_);
                 if (cur_move_it != moves_.end()) {
                     int cur_kc = cur_move_it->second.key_count;
-                    if (cur_kc == 1 || cur_kc == 2) {
+                    // [ORIGINAL] Only ATTACK moves (Type="ATTACK") trigger
+                    // in_basic_attack. MOVE moves (Duck, Stance, Step) do NOT
+                    // block 1key/2key attacks. This fixes S+O (LowPunch) not
+                    // working when Duck is active.
+                    if ((cur_kc == 1 || cur_kc == 2) && cur_move_it->second.is_attack) {
                         in_basic_attack = true;
                     }
                 }
@@ -2769,6 +2778,9 @@ private:
             move.priority = (int)tof(xml_attr(tag, "Priority"));
             
             move.tactic_weapon = xml_attr(tag, "TacticWeapon");
+            // [ORIGINAL] Parse Type="ATTACK" or Type="MOVE" from moves.xml
+            std::string move_type_attr = xml_attr(tag, "Type");
+            move.is_attack = (move_type_attr == "ATTACK");
             
             // Parse Template string into structured data
             // Format: "1key|Central|Unarmed|Punch" or "2key|Forward|Unarmed|Kick"
@@ -3138,26 +3150,31 @@ private:
         //   - player_pos_x_ = step_start_player_x_ + displacement (applied smoothly)
         //   - When animation ends, step_start_player_x_ already includes the full displacement
         //
-        // [HEURISTIC-TODO] Root-motion whitelist (commit b31681b follow-up).
-        // The previous condition `!anim_loop_ || ...` included ALL non-loop
-        // animations (stance_2, punches, kicks) in root motion, causing
-        // stance_2 to drift player_x by ~167 units and stationary attacks
-        // to slide the player. Fixed: only movement-type animations get
-        // root motion. Grounded attacks (high_punch, upper_cut, etc.) are
-        // removed — they should not displace the player. Air attacks
-        // (air_punch, air_axe_kick) are KEPT for now (momentum carry during
-        // airborne); this is [HEURISTIC-TODO] pending verification that
-        // the original applies root motion to air attacks.
-        // TODO: make this data-driven by looking up MoveDef by anim_name
-        // and checking is_step/is_jump/is_retreat (requires a reverse
-        // map from animation filename to MoveDef, not yet built).
+        // [ORIGINAL] Root-motion whitelist.
+        // PC source: sf2.js — NO <Velocity> for player moves (only projectiles).
+        // Player displacement comes entirely from NPivot X trajectory in .bin data.
+        // Verified: high_punch=35px, heavy_punch=104px, front_kick=156px, etc.
+        // stance_2 has large NPivot X displacement but should NOT move the player
+        // (it's a model-local animation, not world displacement).
+        // stance_idle/fists_idle are looping and have ~0 NPivot X displacement.
+        // Attacks ARE included — the original game DOES move the player during
+        // attacks via NPivot X. Previous code (12778f8) excluded attacks, causing
+        // the "character static during attack" bug.
         bool is_root_motion_anim =
             current_anim_ == "step_forward" || current_anim_ == "step_back" ||
             current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
             current_anim_ == "jump" || current_anim_ == "jump_away" ||
             current_anim_ == "back_flip" || current_anim_ == "back_handflip" ||
             current_anim_ == "front_flip" ||
-            current_anim_ == "air_punch" || current_anim_ == "air_axe_kick";
+            current_anim_ == "air_punch" || current_anim_ == "air_axe_kick" ||
+            // Attack animations — NPivot X provides forward displacement
+            current_anim_ == "high_punch" || current_anim_ == "heavy_punch" ||
+            current_anim_ == "double_punch" || current_anim_ == "spinning_punch" ||
+            current_anim_ == "upper_cut" || current_anim_ == "low_punch" ||
+            current_anim_ == "front_kick" || current_anim_ == "back_kick" ||
+            current_anim_ == "high_kick" || current_anim_ == "sweep" ||
+            current_anim_ == "axe_kick" || current_anim_ == "low_kick" ||
+            current_anim_ == "middle_kick";
 
         if (is_root_motion_anim) {
             // On first frame of new animation (prev_frame_idx_ == -1),
