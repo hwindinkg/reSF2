@@ -1770,3 +1770,49 @@ Applied ONLY to roll (not blanket) because:
   - Task 4 (general degradation) — partially addressed (jump + roll fixed)
   - MoveInside consumption formula — still [HEURISTIC-TODO]
   - DZ decoder — not touched (per user instruction)
+
+---
+## Session: full reverse engineering from PC version + node position fix (HEAD df59ea9 → 0112d4a)
+
+**Context**: User provided PC version (sf2_pc.7z). Analyzed sf2.js (80K lines beautified)
+to find the real game logic for 4 bugs.
+
+**Bug 1 (state machine freeze after attack)**: NOT A BUG in current code.
+User log shows attacks DO play (heavy_punch, double_punch, front_kick all play
+during movement). Step override fix (973687d, hit_anim_==0 check) is working.
+The "freeze" may be a different issue (is_uninterrupt_ interval too long?).
+
+**Bug 2 (jump without X/Z movement)**: Root motion uses NPivot X from .bin
+as world position. Original uses <Velocity> element from moves.xml (per-frame
+velocity accumulation via j8). Jump/roll have NO <Velocity> → j8=0 → no world
+displacement from animation. Horizontal movement comes from MoveInside X
+alignment (cI=true) which shifts the model container. [HEURISTIC-TODO] implement
+Velocity parsing + j8 accumulation system.
+
+**Bug 3 (legs disconnected from pivot)** + **Bug 4 (roll wrapping)**: FIXED.
+Root cause: our code subtracted animated npivot_y from abs_y in
+update_animation. PC source (sf2.js eda): node position = fq[frame] + j8,
+NO subtraction of animated NPivot. The .bin stores absolute positions; NPivot
+Y changes are animated node movement, not world position changes.
+
+Fix: use STANCE_NPIVOT_Y (106) as fixed baseline instead of animated npivot_y:
+  local_y = abs_y - 106  (was: abs_y - npivot_y)
+This gives consistent offset: node_world_y = -93 + abs_y - 106 = abs_y - 199
+- Stance NToe: -198 (on floor ✓)
+- Roll mid NToe: -198 (still on floor ✓, no wrapping)
+- Jump peak NToe: -10 (high up ✓, visual jump from abs_y data)
+
+**Before/after table**:
+  Scenario         BEFORE (df59ea9)     AFTER (0112d4a)
+  01 W jump        ry[-93..-93] flat    ry[-93..-93] (same, but nodes now correct)
+  04 S+D roll      ry[-93..-93] flat    ry[-93..-93] (same, but nodes now correct)
+  09 idle O        ry[-93..-93] flat    ry[-93..-93] (same, no regression)
+
+The ry values are the same (flat -93), but the PER-NODE positions are now
+correct — feet stay on floor during roll, nodes rise during jump via abs_y.
+
+**What is NOT done**:
+  - Bug 2: <Velocity> parsing + j8 accumulation (root motion system)
+  - Bug 1: further investigation if "freeze" is real or user perception
+  - MoveInside X/Z alignment (container shift) not implemented
+  - DZ decoder — not touched
