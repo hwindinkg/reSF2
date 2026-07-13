@@ -6,12 +6,12 @@
 > the real HEAD `249b1a8`. Anything not proven against the original binary or
 > a real run is tagged **[HEURISTIC-TODO]**.
 >
-> **Updated (regression recovery session)** to HEAD `cd17d38`. Previous
-> session's MoveInside Y heuristic (`9450c4f`) caused jump/flip/roll
-> regressions; this session: bisected, disabled the unverified formula,
-> fixed root-motion whitelist, added deterministic input replay +
-> [INPUT_DECISION] logging, traced MoveInside pipeline to 3-step chain.
-> See "Session changelog (regression recovery)" at the bottom.
+> **Updated (MoveInside consumption trace + jitter test)** to HEAD `c83d626`.
+> This session: recovered 3 lost commits (session reset), traced MoveInside
+> consumption formula end-to-end (Model+0x80/0x98, Vec3 subtract), found
+> moveInside+0x68 is NOT data-driven from moves.xml (runtime-computed),
+> jittered input test confirms "hit without animation" is Windows-specific.
+> See "Session changelog (consumption trace)" at the bottom.
 
 ## Project
 
@@ -47,32 +47,28 @@ Percentages reflect MEASURED behavior, not documentation/logging/discovery.
 
 | Subsystem | Done | State |
 |---|---:|---|
-| Input | 75% | Win32 `GetAsyncKeyState` polling on Windows, GLFW callbacks on Linux. **Never mixed.** [DIAGNOSTIC] `--input-script` + `--max-frames` CLI for deterministic replay added (tick from `host_update_gameplay`, not `poll_events`, so script frames align with gameplay frames). [DIAGNOSTIC] `[INPUT_DECISION]` structured log with reject reasons (none/uninterrupt/no_candidate) at every O/P edge. |
-| State/Move Manager | 50% | Hand-rolled FSM. `in_basic_attack` honest (gated on `hit_anim_>0` + anim denylist). O/P from idle and step both work (verified with 10 deterministic scenarios). **[HEURISTIC-TODO]** replace denylist with `CurrentAnimationName=="1key"|"2key"` once Model::step is decoded. |
-| Jump / Y | 30% | **REGRESSION RECOVERED**: MoveInside Y heuristic (9450c4f) disabled (b31681b) — it caused jump/flip/roll to SINK. Back to constant `FEET_FLOOR_OFFSET=4` (flat render_y during jump). MoveInside pipeline traced to 3-step chain (capture→resolve+axis→consume) but consumption formula NOT byte-confirmed. **[HEURISTIC-TODO]** trace fcn.10164c20 + fcn.101661d0 to close the chain. |
-| Root motion | 50% | **FIXED**: `!anim_loop_` removed from whitelist (12778f8) — stance_2 no longer drifts player_x (was -293→-460, now stays -293). Grounded attacks (high_punch etc.) no longer slide the player. Whitelist is now explicit: step/roll/jump/flip/air-attack only. **[HEURISTIC-TODO]** make data-driven from MoveDef metadata. |
-| Skeletal animation | 70% | `.bin` decoded. transition/MidFrames/FirstFrame **[HEURISTIC-TODO]**. |
-| Verlet bag | 60% | 15 nodes / 23 constraints / Node12 fixed. Full `ModelPhysics` not implemented. |
-| Combat / hit detection | 40% | moves.xml intervals read; `[INPUT_DECISION]` logging added. No enemy capsules / block / damage pipeline. |
-| Rendering (build) | 65% | Linux/GCC build unblocked (5af53b3). Runtime rendering unchanged (rotated pre-cropped frames wrong; batch flushes per quad). |
-| DZ archives | 40% | Container (type 1/2/8) parsed 1:1. Type-4 decoder function @ 0x389f8 verified (ARM mode) but algorithm NOT traced. Falls back to pre-extracted files. |
-| Scene/State manager | 30% | Boot/Loading/MainMenu implemented; Map/Shop/Settings/Results are stubs. |
-| Story/content | 10% | Placeholder levels and dialogue lines. |
+| Input | 75% | Win32 `GetAsyncKeyState` (Win) / GLFW (Linux). [DIAGNOSTIC] `--input-script`/`--max-frames` + `[INPUT_DECISION]` + `[HIT_CHECK]` logs. 15 jittered scenarios tested — "hit without animation" NOT reproduced on Linux. |
+| State/Move Manager | 50% | `in_basic_attack` honest. O/P from idle/step verified (13 scenarios). **[HEURISTIC-TODO]** replace denylist with original template check. |
+| Jump / Y | 42% | **INTERIM FIX**: NPivot Y displacement for airborne (jump rises: ry[-184..-17]). [ORIGINAL] MoveInside consumption FULLY TRACED: Model+0x80 = scaled pos, Model+0x98 = displacement Vec3, fcn.1028e890 = Vec3 subtract. [ORIGINAL] moveInside+0x68 is RUNTIME-COMPUTED (not from moves.xml — all jump/flip/roll have identical Align). **[HEURISTIC-TODO]** implement verified formula; trace where +0x68 is written. |
+| Root motion | 50% | `!anim_loop_` removed (12778f8). stance_2 px stays -293. Whitelist: step/roll/jump/flip/air-attack. **[HEURISTIC-TODO]** make data-driven. |
+| Hit detection | 42% | Y-sync fixed (y_adjust in update_animation). `[HIT_CHECK]` log verifies match=1. Jittered input (15 variants) — 0 bug frames. **Windows-specific bug** not reproduced. |
+| Skeletal animation | 70% | `.bin` decoded. **[HEURISTIC-TODO]** transition/MidFrames/FirstFrame. |
+| Verlet bag | 60% | 15 nodes / 23 constraints / Node12 fixed. |
+| Rendering (build) | 65% | Linux/GCC 0 errors. Runtime: rotated pre-cropped frames wrong. |
+| DZ archives | 40% | Container parsed. Type-4 @ 0x389f8 verified, NOT traced. |
+| Scene/State manager | 30% | Boot/Loading/MainMenu; Map/Shop/Settings/Results stubs. |
+| Story/content | 10% | Placeholder. |
 | Save system | 10% | Temp JSON stub. |
 
-## Known open bugs (verified against HEAD cd17d38)
+## Known open bugs (verified against HEAD c83d626)
 
-1. **~~Stale `current_move_`~~ → ADDRESSED (96bfce1).** `in_basic_attack`
-   honest. **[HEURISTIC-TODO]** replace denylist with original template check.
-2. **Jump/roll Y — REGRESSION RECOVERED, not fixed.** MoveInside Y formula
-   disabled (b31681b). render_y is flat at -89 during jump (character doesn't
-   visually jump). The 3-step MoveInside pipeline is traced (capture→resolve
-   →consume) but the consumption formula is NOT byte-confirmed. **[HEURISTIC-TODO]**
-   trace fcn.10164c20 (axis retrieval, `push 2`) + fcn.101661d0 (consumer) to
-   close the chain, then implement verified per-axis alignment.
-3. **DZ type 4 decoder — NOT working.** Function verified, algorithm NOT
-   traced. **[HEURISTIC-TODO]**.
-4. **Asset path/list hardcoding.** **[HEURISTIC-TODO]** (deferred).
+1. **~~Stale `current_move_`~~ → ADDRESSED (96bfce1).** **[HEURISTIC-TODO]** denylist.
+2. **Jump/flip Y — INTERIM FIX (82ba8ad/921405b).** NPivot displacement for airborne. [ORIGINAL] consumption formula traced (Model+0x80/0x98). **[HEURISTIC-TODO]** implement verified formula instead of interim; trace moveInside+0x68 write site.
+3. **moveInside+0x68 mode selector — NOT data-driven.** [ORIGINAL] all jump/flip/roll have identical Align in moves.xml. Runtime-computed. **[HEURISTIC-TODO]** trace write site (needs Ghidra type analysis).
+4. **"Hit without animation" — Windows-specific.** NOT reproduced on Linux (15 jittered variants, 0 bug frames). `[HIT_CHECK]` log in place for Windows diagnosis.
+5. **Grounded roll Y — still flat.** Roll uses FEET_FLOOR_OFFSET=4 (no floor-contact correction). **[HEURISTIC-TODO]** depends on Task 2 (moveInside+0x68) — don't patch with constant.
+6. **DZ type-4 decoder — NOT working.** **[HEURISTIC-TODO]**.
+7. **Asset path/list hardcoding.** **[HEURISTIC-TODO]** (deferred).
 
 ## Invariants (do not violate)
 
@@ -136,6 +132,31 @@ Percentages reflect MEASURED behavior, not documentation/logging/discovery.
    may eat taps that arrive too early in a human-speed press.
 4. **DZ type 4 decoder** — trace 0x389f8..0x38d00 + range coder 0x37adc.
 5. **De-hardcode asset enumeration** — deferred (depends on DZ type-4).
+
+## Session changelog (consumption trace, HEAD be3610f → c83d626)
+
+- `82ba8ad` — restore: recover lost commits 921405b/2c27cc1 after session reset.
+  Sandbox reset wiped local repo (3 unpushed commits lost). Restored:
+  NPivot Y displacement for airborne + Y-sync fix + [HIT_CHECK] logging.
+- `3d94e68` — reverse: trace MoveInside consumption formula + mode selector finding.
+  [ORIGINAL] Step 3 FULLY TRACED: Model+0x80 = scaled pos, Model+0x98 =
+  displacement, fcn.1028e890 = Vec3 subtract. Formula:
+    Model+0x80.x = (float)Model+0x54 * moveInside+0xb4 + [ebp-0x28].x
+    Model+0x80.y = moveInside+0xb8 + [ebp-0x28].y
+  [ORIGINAL] moveInside+0x68 is RUNTIME-COMPUTED (all jump/flip/roll have
+  identical Align in moves.xml — no attribute distinguishes grounded/airborne).
+- `c83d626` — test: jittered input scenarios for 'hit without animation' diagnosis.
+  15 jittered scenarios (±2 frame). Bug NOT reproduced on Linux (0 bug frames
+  across 5 close+jitter variants with hits). Confirms Windows-specific.
+
+All 3 commits pushed to origin/main. `git log --oneline -5`:
+```
+c83d626 test: jittered input scenarios for 'hit without animation' diagnosis
+3d94e68 reverse: trace MoveInside consumption formula + mode selector finding
+82ba8ad restore: recover lost commits 921405b/2c27cc1 after session reset
+be3610f docs: reconcile HANDOFF/worklog with measured behavior (regression recovery)
+cd17d38 fix(input): add [INPUT_DECISION] structured logging for O/P diagnosis
+```
 
 ## Session changelog (regression recovery, HEAD a26567e → cd17d38)
 
