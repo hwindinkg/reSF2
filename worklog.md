@@ -1901,3 +1901,37 @@ Real gate: in_basic_attack blocks 1key/2key during attack, only 3key allowed.
   missing Velocity/j8 system)
 - Velocity + j8 accumulation: still not implemented
 - DZ decoder: not touched
+
+---
+## Session: attack displacement + S+O + is_attack type (HEAD 2640177 → 437b663)
+
+**Task 2 (Velocity/j8) — CLOSED.**
+PC source analysis: NO player moves (attacks, jumps, rolls) have <Velocity> in
+moves.xml. Velocity is ONLY for projectiles (fireball, shuriken, etc.).
+Player displacement comes entirely from NPivot X trajectory in .bin animation
+data, which our root-motion system already handles. The "missing Velocity/j8
+system" was a red herring — the real fix was adding attacks to the root-motion
+whitelist (they were excluded in 12778f8).
+
+Verified .bin NPivot X displacement:
+  high_punch: 35px, heavy_punch: 104px, double_punch: 202px
+  front_kick: 156px, spinning_punch: 98px, low_punch: 0px
+
+**Task 1 (S+O LowPunch) — FIXED.**
+Root cause: Duck move (Type='MOVE', key_count=1) triggered in_basic_attack=true,
+blocking 2key moves. Fix: parse Type='ATTACK' from moves.xml; only ATTACK moves
+trigger in_basic_attack. MOVE moves (Duck, Stance, Step) don't block.
+
+**Before/after table:**
+  Scenario          BEFORE              AFTER
+  16 S+O            reject=no_candidate LowPunch selected ✓
+  09 idle O         px=-293 (static)   px=-293→-238 (54.7px forward) ✓
+  09 idle O         KEY=1 CMB=1         KEY=1 CMB=1 (no regression) ✓
+
+**User feedback requested:**
+1. Can you still interrupt any attack with any other attack? (should be NO,
+   except valid 3key combos in the right window)
+2. Does character flip facing during roll through enemy? (should be NO,
+   only after roll ends)
+3. Does S+O (LowPunch) work now?
+4. Does character move forward during attacks?
