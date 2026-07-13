@@ -260,6 +260,67 @@ pipeline. The full chain (all byte-verified by objdump on ShadowFight2.s86):
   1.0f at `0x1037439c`). This is a PROGRESS/TIMING factor, NOT a Y-align.
 - Sets `Model+0x50` flag based on the progress comparison.
 
+### Step 3 consumption formula — FULLY TRACED THIS SESSION
+
+`fcn.101661d0` computes the final alignment and writes it to Model fields.
+
+**Local Vec3 variables:**
+- `[ebp-0x34]` = alignment Vec3 (from pivot node, via jump table moveInside+0x68)
+- `[ebp-0x28]` = reference Vec3 (from jump table moveInside+0x6c)
+- `[ebp-0x4c]` = `[ebp-0x34]` - `[ebp-0x28]` (Vec3 subtract, via `fcn.1028e890`)
+
+**`fcn.1028e890`** @ `0x1028e890` — Vec3 subtract:
+```asm
+movss xmm0, [ecx+0x8]    ; src.Z
+subss xmm0, [eax+0x8]    ; - ref.Z
+movss xmm0, [ecx+0x4]    ; src.Y
+subss xmm0, [eax+0x4]    ; - ref.Y
+movss xmm0, [ecx]        ; src.X
+subss xmm0, [eax]        ; - ref.X
+call 0x1028d850           ; (probably normalize or store)
+```
+
+**Final formula** (byte-verified at `0x101663f5-0x1016642a`):
+```
+Model+0x80.x = (float)Model+0x54 * moveInside+0xb4 + [ebp-0x28].x
+Model+0x80.y = moveInside+0xb8 + [ebp-0x28].y
+Model+0x98   = [ebp-0x4c]   (displacement Vec3 = alignment - reference)
+```
+
+Then `0x10166690(Model, x, y, z)` is called with 3 floats from Model+0x98/0x9c/0xa0
+(scaled by moveInside+0x84/0x85/0x86 byte flags).
+
+**Global Vec3 at `0x1065fb74`** ≈ (0, 0, 0) — used as identity reference
+in airborne case 3 (moveInside+0x68 == 4). Verified by reading .data section.
+
+### moveInside+0x68 mode selector — NOT data-driven from moves.xml
+
+[ORIGINAL] All jump/flip/roll moves have IDENTICAL Align structure in
+moves.xml:
+- `Axis="X|Z"` (all)
+- `<Pivot Object="Nodes" Part="NHeel_X"/>` (all)
+- `<Position Player="Me" Object="Pivot"/>` (all)
+
+Verified for: JumpUp, FrontFlip, BackFlip, ForwardRoll, BackRoll, BackHandflip.
+NO attribute in moves.xml distinguishes grounded vs airborne alignment mode.
+
+The only hint: Template attr contains "Jump" keyword for JumpUp/FrontFlip/
+BackFlip, but NOT for ForwardRoll/BackRoll/BackHandflip. This is inconsistent
+— BackHandflip is airborne but lacks "Jump" in Template.
+
+**Conclusion**: `moveInside+0x68` is a RUNTIME-COMPUTED field, not parsed
+from moves.xml. It is likely set based on:
+1. Animation name (jump_*, front_flip, back_flip, back_handflip) — string check
+2. Template attr "Jump" keyword — partial match
+3. .bin animation data flags — not yet checked
+4. Physics state (airborne flag) — not yet checked
+
+[HEURISTIC-TODO] trace where moveInside+0x68 is WRITTEN (not read) in the
+binary. Requires finding the moveInside struct initialization code, probably
+in MoveInside constructor or InfoAnimation::load. String xref approach
+failed (too many +0x68 writes across unrelated structs). Need Ghidra with
+proper type analysis to filter by moveInside struct type.
+
 ### Conclusion (this session)
 
 The MoveInside consumption chain is a MULTI-STEP PIPELINE:
