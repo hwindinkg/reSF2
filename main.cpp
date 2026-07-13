@@ -263,6 +263,12 @@ struct MoveDef {
     // floor_y). See docs/s3e_reverse_engineering.md "MoveInside".
     std::string moveinside_pivot_node;  // e.g. "NHeel_2"; empty = Object="Animation"
     bool moveinside_is_animation = false;  // <Pivot Object="Animation"/>
+
+    // [ORIGINAL] CurrentAnimation condition from moves.xml <Conditions>.
+    // For 3key combos: <CurrentAnimation Name="HeavyPunch"/> means this move
+    // can ONLY trigger when HeavyPunch is the currently playing animation.
+    // Empty = no CurrentAnimation condition (1key/2key moves).
+    std::string required_current_animation;
 };
 
 struct AnimationData {
@@ -603,13 +609,17 @@ public:
 
         // === DYNAMIC FACING ===
         // Character faces the enemy. Update facing DYNAMICALLY during step
-        // movement too — the original game does this. When the character
-        // walks past the enemy, it turns around mid-step.
-        // BUT: don't flip during attacks/special moves (hit_anim_ > 0, move_state_ >= 10).
-        // The step animation's root motion uses anim_facing_right_ (locked at
-        // animation start), so flipping facing_right_ mid-step doesn't affect
-        // the current step's displacement. The NEXT step will use the new facing.
-        if (location_) {
+        // [ORIGINAL] PC source: sf2.js — facing is locked during root-motion
+        // moves (roll, jump, flip, attack). The original game only updates
+        // facing during idle/step states, not during special moves.
+        // Our root-motion whitelist (is_root_motion_anim) determines which
+        // animations lock facing. This prevents instant flip during roll.
+        bool facing_locked = hit_anim_ > 0 ||
+            current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
+            current_anim_ == "jump" || current_anim_ == "jump_away" ||
+            current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
+            current_anim_ == "back_handflip";
+        if (location_ && !facing_locked) {
             float bag_x = location_->enemy_x - 983.0f;
             bool should_face_right = (bag_x >= player_pos_x_);
             float dist_to_enemy = std::abs(bag_x - player_pos_x_);
@@ -722,11 +732,18 @@ public:
         }
 
         // [ORIGINAL] PC source: sf2.js tKa() — player input is NOT gated by
-        // Uninterrupt. Uninterrupt (ocb/pcb) is only used for AI tactics
-        // (ds.pcb at line 18770). Player can interrupt ANY animation at ANY
-        // time (new move fires EAnimationInterruptedEvent, line 16916).
-        // Our code incorrectly used is_uninterrupt_ as a player input gate.
-        // Fix: allow attacks unconditionally (new move interrupts current).
+        // Uninterrupt (which is AI-only, ocb/pcb at line 18770).
+        // BUT: 1key/2key attacks CANNOT interrupt another 1key/2key attack.
+        // Only 3key combos (which require CurrentAnimation=<specific attack>
+        // in moves.xml) can interrupt. This is the REAL cancel window:
+        //   - During attack animation (hit_anim_ > 0, current_anim_ is attack):
+        //     → Only 3key combos allowed (in_basic_attack = true)
+        //   - Outside attack (hit_anim_ == 0 or current_anim_ is idle/step):
+        //     → 1key/2key attacks allowed
+        // Previous fix (5f392b0) removed is_uninterrupt_ entirely, allowing
+        // ANY attack to interrupt ANY animation — regression.
+        // This gate replaces the old is_uninterrupt_ check with the correct
+        // logic: in_basic_attack blocks 1key/2key, allows only 3key.
         if (punch_pressed || kick_pressed) {
             // Determine direction from key state
             std::string cur_direction = "Central";  // default: no direction
@@ -746,40 +763,23 @@ public:
 
             // 3key combo detection: triggered when current animation is from
             // a 1key or 2key basic attack (HeavyPunch, Sweep, etc.)
-            // The original game's 3key template requires:
-            //   CurrentAnimation Name="1key" OR Name="2key"
-            // Which means: the current move's template starts with "1key" or "2key".
+            // [ORIGINAL] PC source: sf2.js CurrentAnimation condition (line 20079)
+            // + 3key combo moves.xml <CurrentAnimation Name="HeavyPunch"/> requirement.
+            // The cancel window works as:
+            //   - During attack (hit_anim_ > 0 AND current_move_ is 1key/2key attack):
+            //     in_basic_attack = true → only 3key combos can trigger
+            //   - After attack ends (hit_anim_ == 0 OR current_move_ cleared):
+            //     in_basic_attack = false → 1key/2key attacks allowed
+            // 3key combos require CurrentAnimation=<specific attack name> in moves.xml,
+            // so they can only trigger when the CORRECT base attack is playing.
+            // 1key/2key attacks have NO CurrentAnimation condition, but are blocked
+            // during in_basic_attack to prevent interrupting an ongoing attack.
             bool in_basic_attack = false;
-            if (!current_move_.empty()) {
+            if (!current_move_.empty() && hit_anim_ > 0) {
                 auto cur_move_it = moves_.find(current_move_);
                 if (cur_move_it != moves_.end()) {
                     int cur_kc = cur_move_it->second.key_count;
-                    // [ORIGINAL] 3key combo requires the basic attack to STILL
-                    // be playing, matching the original's CurrentAnimationName
-                    // predicate (Model::step @ 0x10161ad0, playInfo @
-                    // 0x10164fa0). Conditions (per HANDOFF.md open bug #1):
-                    //   - current_move_'s template key_count is 1 or 2
-                    //   - hit_anim_ > 0 (attack timer still running)
-                    //   - current_anim_ is NOT one of the neutral/idle anims
-                    //     that signal the attack already ended:
-                    //     stance_idle / fists_idle / step_forward / step_back
-                    // The previous code only checked (cur_kc==1||cur_kc==2), so
-                    // after a non-loop attack ended, current_move_ still pointed
-                    // at the finished attack and the next press was wrongly
-                    // treated as a combo continuation (in_basic_attack stuck
-                    // true). This is the real defect; clearing current_move_ on
-                    // hit_anim_==0 already exists (lines ~1037/1225/1236).
-                    // [HEURISTIC-TODO] replace this hand predicate with the
-                    // exact original CurrentAnimationName=="1key"|"2key"
-                    // template-name check once Model::step/MoveInside decode is
-                    // byte-confirmed; the animation-name denylist above is an
-                    // approximation of "current anim is an attack anim".
-                    if ((cur_kc == 1 || cur_kc == 2)
-                        && hit_anim_ > 0
-                        && current_anim_ != "stance_idle"
-                        && current_anim_ != "fists_idle"
-                        && current_anim_ != "step_forward"
-                        && current_anim_ != "step_back") {
+                    if (cur_kc == 1 || cur_kc == 2) {
                         in_basic_attack = true;
                     }
                 }
@@ -834,6 +834,14 @@ public:
                 // Other weapon subtypes are not yet supported.
                 if (!move.required_weapon_subtype.empty() &&
                     move.required_weapon_subtype != "Fists") continue;
+                // [ORIGINAL] CurrentAnimation condition check.
+                // PC source: sf2.js np.isEqual() (line 42544) — 3key combos
+                // require the current animation to match a specific name.
+                // e.g., DoublePunch requires CurrentAnimation="HeavyPunch".
+                // The Name in moves.xml matches the Move Name (not filename).
+                if (!move.required_current_animation.empty()) {
+                    if (current_move_ != move.required_current_animation) continue;
+                }
                 // Check if animation exists
                 std::string anim_name = move.filename;
                 if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
@@ -2944,6 +2952,30 @@ private:
                     } else if (pobj == "Animation") {
                         move.moveinside_is_animation = true;
                     }
+                }
+            }
+
+            // [ORIGINAL] Parse CurrentAnimation condition from <Conditions>.
+            // PC source: sf2.js np.isEqual() (line 42544) — checks if current
+            // animation name matches. 3key combos use this to require a specific
+            // base attack (e.g., DoublePunch requires CurrentAnimation="HeavyPunch").
+            {
+                size_t cap = inner.find("CurrentAnimation", 0);
+                while (cap != std::string::npos) {
+                    // Check it's not inside a comment
+                    if (cap > 4 && inner.substr(cap - 4, 4) == "<!--") {
+                        cap = inner.find("CurrentAnimation", cap + 1);
+                        continue;
+                    }
+                    auto tag_end = inner.find("/>", cap);
+                    if (tag_end == std::string::npos) break;
+                    auto tag = inner.substr(cap, tag_end - cap);
+                    auto name_val = xml_attr(tag, "Name");
+                    if (!name_val.empty()) {
+                        move.required_current_animation = name_val;
+                        break;  // take first CurrentAnimation condition
+                    }
+                    cap = inner.find("CurrentAnimation", tag_end + 1);
                 }
             }
 
