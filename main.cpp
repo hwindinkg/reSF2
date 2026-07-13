@@ -609,7 +609,7 @@ public:
         // The step animation's root motion uses anim_facing_right_ (locked at
         // animation start), so flipping facing_right_ mid-step doesn't affect
         // the current step's displacement. The NEXT step will use the new facing.
-        if (location_ && !is_uninterrupt_ && move_state_ < 10) {
+        if (location_) {
             float bag_x = location_->enemy_x - 983.0f;
             bool should_face_right = (bag_x >= player_pos_x_);
             float dist_to_enemy = std::abs(bag_x - player_pos_x_);
@@ -721,9 +721,13 @@ public:
             }
         }
 
-        // Allow attacks when: NOT in Uninterrupt interval
-        // Original game: attacks blocked during Uninterrupt, allowed otherwise
-        if ((punch_pressed || kick_pressed) && !is_uninterrupt_) {
+        // [ORIGINAL] PC source: sf2.js tKa() — player input is NOT gated by
+        // Uninterrupt. Uninterrupt (ocb/pcb) is only used for AI tactics
+        // (ds.pcb at line 18770). Player can interrupt ANY animation at ANY
+        // time (new move fires EAnimationInterruptedEvent, line 16916).
+        // Our code incorrectly used is_uninterrupt_ as a player input gate.
+        // Fix: allow attacks unconditionally (new move interrupts current).
+        if (punch_pressed || kick_pressed) {
             // Determine direction from key state
             std::string cur_direction = "Central";  // default: no direction
             if (key_up && key_forward) cur_direction = "UpForward";
@@ -868,7 +872,7 @@ public:
                 current_move_ = best_move->name;
                 int fc = animations_[anim_name].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
-                move_state_ = 0;
+                move_state_ = 10;
                 need_switch_to_idle_ = false;
                 goto after_combat;
             } else if (punch_pressed || kick_pressed) {
@@ -922,8 +926,14 @@ public:
 
         // === SPECIAL MOVES (jumps, rolls, duck) — from moves.xml ===
         // Match 1key moves with Jump, Step, or no type (Duck, Roll)
-        // Allowed when NOT in Uninterrupt interval
-        if (!is_uninterrupt_ && move_state_ < 10) {
+        // [ORIGINAL] PC source: sf2.js tKa() — input gated by:
+        //   !PCa (has opponent) || kh || Ua==null || Nd.nk → false
+        // NOT gated by Pe (animation playing) or Uninterrupt.
+        // New move INTERRUPTS current animation (EAnimationInterruptedEvent).
+        // Our code incorrectly blocked input via move_state_ >= 10 + hit_anim_.
+        // Fix: allow input when !is_uninterrupt_, regardless of move_state_.
+        // [ORIGINAL] Player can interrupt any animation (sf2.js tKa — no Uninterrupt gate).
+        if (true) {
             bool up_pressed = input.keys_just_pressed[(size_t)plat::Key::W] ||
                               input.keys_just_pressed[(size_t)plat::Key::ArrowUp];
             bool down_pressed = input.keys_just_pressed[(size_t)plat::Key::S] ||
@@ -1056,7 +1066,7 @@ public:
         // overriding the attack animation. The attack never plays, but
         // current_move_ and hit_anim_ remain set, causing stale is_uninterrupt_
         // (checks HeavyPunch's interval against step_forward's frame count).
-        if (!is_uninterrupt_ && move_state_ < 10 && hit_anim_ == 0) {
+        if (hit_anim_ == 0) {
             bool fwd_latched = fwd_held_ms_ > 0;
             bool back_latched = back_held_ms_ > 0;
 
@@ -1149,14 +1159,24 @@ public:
         update_animation(dt);
 
         // === UNINTERRUPT CHECK (after update_animation) ===
-        // Now anim_time_ is updated, so we can check the current frame.
-        // Original game: new moves are blocked only during Uninterrupt interval.
+        // [ORIGINAL] PC source: sf2.js ocb() — checks if current animation frame
+        // is within any <Interval Name="Uninterrupt"> start..finish range.
+        // Intervals are fired as events when the animation passes their start frame.
+        // Uninterrupt is NOT a global input lock — it only blocks during specific
+        // frames of the ATTACK animation (not stance_idle or other anims).
+        // FIX: only check is_uninterrupt_ when current_anim_ IS the attack animation.
+        // Previous code checked current_move_ (which stays set after anim ends),
+        // using stance_idle's frame count against the attack's Uninterrupt interval.
         is_uninterrupt_ = false;
         if (hit_anim_ > 0 && !current_move_.empty()) {
             auto move_it = moves_.find(current_move_);
             if (move_it != moves_.end() && move_it->second.uninterrupt_start >= 0) {
-                auto anim_it = animations_.find(current_anim_);
-                if (anim_it != animations_.end()) {
+                // [ORIGINAL] Only check Uninterrupt when the ATTACK animation is
+                // currently playing, not when we've switched to stance_idle.
+                std::string expected_anim = move_it->second.filename;
+                if (expected_anim.size() > 4 && expected_anim.substr(expected_anim.size()-4) == ".bin")
+                    expected_anim = expected_anim.substr(0, expected_anim.size()-4);
+                if (expected_anim == current_anim_) {
                     int current_frame = (int)(anim_time_ * 20.0f);
                     int start = move_it->second.uninterrupt_start - 1;
                     int end = move_it->second.uninterrupt_end > 0 ?
