@@ -1,0 +1,11 @@
+# Jittered rapid O variant 5
+frame 182 keydown O
+frame 183 keyup O
+frame 188 keydown O
+frame 189 keyup O
+frame 199 keydown O
+frame 201 keyup O
+frame 208 keydown O
+frame 209 keyup O
+frame 218 keydown O
+frame 220 keyup O

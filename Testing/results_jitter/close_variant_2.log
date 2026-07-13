@@ -1,0 +1,19 @@
+reSF2 initialized.
+Controls (original SF2 layout):
+  W/A/S/D     - Up / Left / Down / Right (movement + attack direction)
+  O           - Punch (W=upper, S=low, D=heavy, A=spinning, S+A=elbow)
+  P           - Kick (S=sweep, D=front, A=back, S+D=dodge reverse)
+  W           - Jump (W+D=front flip, W+A=back flip)
+  S+D / S+A   - Forward roll / Back roll
+  S (hold)    - Duck (crouch)
+  Block       - AUTOMATIC (when idle, not attacking)
+  M or click menu - Toggle menu
+  T           - Toggle dialog
+  N           - New game (go to Map)
+  Y/L         - Declare victory/defeat (debug, in Battle)
+  1/2/3       - Zoom presets
+  Esc         - Quit / close overlay / back
+
+  No loading images found, loading screen will be blank
+[scene] enter Boot
+[boot] splash

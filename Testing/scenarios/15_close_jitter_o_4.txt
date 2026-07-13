@@ -1,0 +1,13 @@
+# Close+jitter rapid O variant 4
+frame 180 keydown D
+frame 260 keyup D
+frame 265 keydown O
+frame 267 keyup O
+frame 274 keydown O
+frame 276 keyup O
+frame 283 keydown O
+frame 285 keyup O
+frame 297 keydown O
+frame 299 keyup O
+frame 307 keydown O
+frame 309 keyup O
