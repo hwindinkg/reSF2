@@ -6,14 +6,14 @@
 > the real HEAD `249b1a8`. Anything not proven against the original binary or
 > a real run is tagged **[HEURISTIC-TODO]**.
 >
-> **Updated (moveInside+0x68 write site search)** to HEAD `e69ce57`.
-> This session: corrected previous assumption (Model+0x68 ≠ moveInside+0x68),
-> found MoveInside constructor/destructor via RTTI vtable, confirmed +0x68
-> is NOT initialized in constructor (sub-structure with pointers at +0x88/
-> +0x94/+0xa0). Write site NOT found — needs Ghidra typed struct analysis.
-> Interim formula still works (no regression). Windows logs requested for
-> "hit without animation" diagnosis.
-> See "Session changelog (+0x68 write site search)" at the bottom.
+> **Updated (jump-under-floor fix + roll wrapping analysis)** to HEAD `b86c453`.
+> This session: found root cause of jump-under-floor regression (interim
+> formula applied negative y_adjust during crouch phase), fixed with
+> upward-only clamp. Verified numerically: jump ry[-89..-17] (was [-161..-17]).
+> Roll wrapping root cause documented (NToe lifts 79px above floor during
+> roll mid because y_adjust doesn't compensate for NPivot descent).
+> [HEURISTIC-TODO] grounded contact fix not implemented (MoveInside not closed).
+> See "Session changelog (jump fix + roll analysis)" at the bottom.
 
 ## Project
 
@@ -134,6 +134,40 @@ Percentages reflect MEASURED behavior, not documentation/logging/discovery.
    may eat taps that arrive too early in a human-speed press.
 4. **DZ type 4 decoder** — trace 0x389f8..0x38d00 + range coder 0x37adc.
 5. **De-hardcode asset enumeration** — deferred (depends on DZ type-4).
+
+## Session changelog (jump fix + roll analysis, HEAD 2f2a4ca → b86c453)
+
+- `0820bfc` — fix(y): clamp airborne displacement to upward-only (fix jump under floor).
+  [HEURISTIC-TODO] Root cause: jump animation starts with NPivot Y=106 (below rest
+  169.48). Interim formula y_adjust = 4 + (npy - 169.48) gave -59 at frame 0,
+  dragging render_y to -152 (below floor -89). Fix: clamp displacement to >= 0
+  (upward only). Verified numerically: jump ry[-89..-17] (was [-161..-17]).
+  No regression: roll flat -89, combat flat -89, flip ry[-89..-10].
+- `b86c453` — reverse: document roll 'wrapping' root cause (numerically verified).
+  [HEURISTIC-TODO] Roll wrapping: NToe lifts 79px above floor during roll mid
+  (npy=25, NToe sy=-113 vs floor -193). Root cause: grounded y_adjust=4 (flat)
+  doesn't compensate for NPivot descent. Needed: y_adjust = 4 + (npy - 106) for
+  grounded (106 = stance baseline, NOT rest 169.48). NOT implemented (MoveInside
+  not closed, premature formulas risky per 9450c4f experience).
+
+### Discrepancy with previous report (2f2a4ca)
+
+Previous report claimed "no behavioral changes" — but user saw regressions.
+**Explained**: the interim formula (restored in 82ba8ad after session reset)
+ALWAYS had the jump-under-floor bug — it was present since 921405b but not
+detected because previous testing only checked ry min/max (which showed
+variation) without verifying that ry never goes below floor (-89). The
+"no regression" verdict was based on incomplete numerical verification.
+This session's Python analysis (frame-by-frame y_adjust computation) revealed
+the bug. Fixed in 0820bfc.
+
+Both commits pushed to origin/main. `git log --oneline -4`:
+```
+b86c453 reverse: document roll 'wrapping' root cause (numerically verified)
+0820bfc fix(y): clamp airborne displacement to upward-only (fix jump under floor)
+2f2a4ca docs: reconcile HANDOFF/worklog with +0x68 write site search
+e69ce57 reverse: correct moveInside+0x68 finding — writes are to Model+0x68
+```
 
 ## Session changelog (+0x68 write site search, HEAD ce7ba32 → e69ce57)
 
