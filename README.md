@@ -3,149 +3,85 @@
 A reverse-engineered recreation of the Shadow Fight 2 game engine,
 built from analysis of the original Android (ARM) and Windows (x86) binaries.
 
-## Current State
+**⚠️ ОЧЕНЬ СЫРОЙ ДВИЖОК. НЕ ИГРА, А ТЕХНИЧЕСКОЕ ДЕМО.**
 
-### Working ✅
-- **Scene/state manager**: 9 scenes (Boot→Loading→MainMenu→Map→Shop→Settings→Dialogue→Battle→Results)
-- **Character rendering**: 82 capsules + 29 triangles from body.xml
-- **Skeleton animation**: Loads all 556 .bin animation files dynamically
-- **Root motion X**: Absolute positioning via NPivot displacement
-- **Root motion Y**: NPivot-based Y positioning (standing, crouching, jumping)
-- **Mirror/facing**: Animation-locked facing, dynamic facing updates
-- **Verlet physics**: Punching bag with distance constraints
-- **Hit detection**: Uses moves.xml Attack intervals, checks AttackingParts edges
-- **Combat system**: Dynamic move selection from moves.xml templates
-- **Move filtering**: Titan moves filtered, weapon subtype locks respected
-- **Uninterrupt interval**: New moves blocked only during Uninterrupt (not entire animation)
-- **Key handling**: GetAsyncKeyState polling on Windows, GLFW callbacks on Linux
-- **DZ archive reader**: Container parser (DTRZ format), gzip type=8 decompression
-- **Fallback directories**: Pre-extracted files loaded transparently when DZ decompression fails
+Текущая кодовая база — proof-of-concept с множеством известных и неизвестных дефектов.
+См. [PLAN_SYMBIAN.md](PLAN_SYMBIAN.md) для плана портирования на Symbian (Nokia N8).
 
-### Partially Working ⚠️
-- **DZ type=4 decoder**: Range coder + bit-tree structure implemented but probability
-  model doesn't match original exactly. Falls back to pre-extracted files.
-- **3key combos**: DoublePunch, DoubleSweep work when triggered during basic attack
-- **Air attacks**: W+O/W+P during jump transitions to air_punch/air_axe_kick
-- **Jump animation**: Y positioning correct but slight visual issues at transition frames
+## Текущее состояние (честно)
 
-### Not Yet Implemented ❌
-- **DZ type=4 full decompression**: Streaming range coder with 5-byte context window
-- **Real enemy AI**: Only punching bag (no AI opponent)
-- **Dialogue/map/shop content**: Scene shells only, no real content
-- **Audio**: No sound playback
-- **Magic/ranged weapons**: Only Fists (unarmed) combat
+### Работает, но сыро/криво ⚠️
+- **Загрузка локации Dojo**: Парсинг params.xml через самодельный string-based XML парсер (`xml_attr`). **Некорректно загружает слои** — Layer/Image тэги парсятся с ошибками позиционирования. Параллакс работает с артефактами.
+- **Рендер персонажа**: 82 капсулы + 29 треугольников из body.xml. Тёмный силуэт. Y-позиционирование — набор хаков (feet clipping, floating при roll).
+- **Скелетная анимация**: Загружает 556 .bin файлов. Корневая анимация NPivot X работает. NPivot Y — **сломан** (MoveInside alignment не доделан).
+- **Verlet физика**: Punching bag качается, импульсы работают.
+- **Hit detection**: Использует Attack интервалы из moves.xml. **Не всегда корректно** — баг с "hit без анимации".
+- **Combat**: 1key/2key/3key работает частично. Uninterrupt проверяется.
+- **moves.xml парсинг**: Примитивная XML-резка строк. **Криво парсит** — теряет ComplexInterval, некорректно парсит Distance условия, Locks секции, MoveInside Pivot.
+- **DZ архивы**: gzip (type=8) работает. type=4 декомпрессия **полностью сломана** — использует fallback к pre-extracted файлам.
+- **Scene manager**: 9 сцен есть, но Map/Shop/Settings/Dialogue — **пустышки** (только заглушки).
 
-## Architecture
+### Не сделано ❌
+- **Настоящий AI противника**: Только punching bag
+- **Audio**: Нет звука
+- **Magic/ranged**: Только Fists (unarmed)
+- **Другие локации**: Только dojo
+- **Сохранение/загрузка**: Заглушка (JSON в temp)
+- **Combat timing**: Uninterrupt интервалы не совпадают с оригиналом
+- **Move transitions**: Нет transition frames
+- **Управление**: Только клавиатура. Нет touch/тачскрина
+
+## Архитектура
 
 ### Engine Structure
 ```
-main.cpp                    — Game logic + SceneHost (~3600 lines)
-engine/scene/               — Scene/state manager (9 scenes)
-engine/platform/            — GLFW platform (Win32 GetAsyncKeyState support)
-engine/renderer/            — OpenGL renderer
-engine/reverse/             — Format parsers:
+main.cpp                    — Game logic + SceneHost (~4190 lines, МОНОЛИТ)
+engine/scene/               — Scene/state manager (9 scenes, заглушки)
+engine/platform/            — Platform abstraction (GLFW на Windows/Linux)
+engine/renderer/            — OpenGL 2.1 / GLES2 рендерер
+engine/reverse/             — Парсеры форматов:
   - s3e_container.cpp       — Marmalade S3E container
   - plist_atlas.cpp         — Cocos2d TexturePacker v2
   - atf_tactics.cpp         — zlib-compressed tactics blob
   - bitmap_font.cpp         — AngelCode BMFont
-  - dz_reader.cpp           — DZ archive reader (DTRZ container)
-  - dz_decoder.cpp          — DZ type=4 range coder decoder (WIP)
-assets/models/              — 72 model XML files
-assets/animations/          — moves.xml + binary/ (556 .bin files)
-assets/locations/           — 56 location directories
-reverse/binaries/           — Original game binaries for RE:
-  - ShadowFight2.s86        — Windows PE32 (6.95MB, i386)
-  - ShadowFight2_android.bin — Android S3E (XE3U, x86_64)
-  - libs3e_android.so       — Marmalade runtime (ARMv7)
-scripts/                    — Analysis & decompilation tools
-docs/                       — S3E reverse engineering documentation
+  - dz_reader.cpp           — DZ archive reader (DTRZ)
+  - dz_decoder.cpp          — DZ type=4 range coder decoder (СЛОМАН)
+assets/models/              — 72 model XML файла
+assets/animations/          — moves.xml + binary/ (556 .bin файлов)
+assets/locations/           — 56 location директорий
 ```
 
-### Original Binary Analysis
-
-**ShadowFight2.s86** (Windows PE32, i386):
-- Contains full game code, readable via objdump/radare2
-- Key function addresses:
-  - `0x10164fa0` — playInfo (animation update)
-  - `0x10161ad0` — Model.step (Uninterrupt check)
-  - `0x10161350` — Model.update
-  - `0x100b9ff0` — Fight.update (main battle loop)
-  - `0x100875a0` — ConditionKeys.virtual_8 (key condition check)
-  - `0x10121e10` — Key array comparison
-  - `0x10103d50` — Interval check (Uninterrupt/SemiUninterrupt)
-  - `0x102c9778` — DZ archive reader
-  - `0x102c9fbf` — DZ file read
-  - `0x102ca66b` — DZ file table reader
-
-**libs3e_android.so** (ARMv7):
-- Contains DZ decoder at `0x389f8`
-- Range coder at `0x37adc`
-- Bit-tree decoder at `0x3751c`
-
-## How to Build
+## Сборка (Desktop)
 
 ### Windows
 ```
 build.bat
 ```
-Requires: CMake, MSVC, Windows SDK
+Требуется: CMake ≥ 3.24, MSVC, C++23, Windows SDK
 
 ### Linux (compile check only)
 ```
 bash scripts/verify_main_compile.sh
 ```
 
-## How to Run
-
+## Запуск
 ```
-resf2_app.exe --assets <path_to_assets>
-```
-
-Use `--assets E:\reSF2` to use the repository's pre-extracted assets.
-Use `--assets E:\reSF2\sf2\assets` to use original game assets (requires DZ decompression).
-
-## Controls (Original SF2 Layout)
-
-```
-W/A/S/D     — Up / Left / Down / Right (movement + attack direction)
-O           — Punch (W=upper, S=low, D=heavy, A=spinning, S+A=elbow)
-P           — Kick (S=sweep, D=front, A=back, S+D=dodge reverse)
-W           — Jump (W+D=front flip, W+A=back flip)
-S+D / S+A   — Forward roll / Back roll
-S (hold)    — Duck (crouch)
-Block       — Automatic (when idle, not attacking)
-M           — Toggle menu
-T           — Toggle dialog
-1/2/3       — Zoom presets
-Esc         — Quit
+resf2_app.exe --assets E:\reSF2
 ```
 
-## Tools
+## Symbian порт (Nokia N8)
 
-### Decompilation
-- `scripts/decompile_original.sh` — Decompile functions from ShadowFight2.s86 using radare2
-- `scripts/verify_engine_code.py` — Verify engine code against original patterns
-- `scripts/dz_*.py` — DZ archive analysis and decoder test scripts
-- `scripts/dz_*_decompiled.c` — Decompiled original functions (30+ files)
-
-### Verification
-- `scripts/verify_main_compile.sh` — Compile check (Linux, no linking)
-- `scripts/verify_engine_code.py` — Code pattern verification
+Ведётся работа в ветке `symbian`. См. [PLAN_SYMBIAN.md](PLAN_SYMBIAN.md) для:
+- Подробный план портирования
+- Инструкция по сборке
+- Анализ отличий от PvZ-N95-Port
 
 ## Next Steps
 
-1. **DZ type=4 decoder**: Fix probability model to match original ARM code
-2. **Combat timing**: Verify Uninterrupt intervals match original exactly
-3. **Move transitions**: Implement proper transition frames from moves.xml
-4. **Enemy AI**: Port AI logic from original Fight.update
-5. **Audio**: Add sound playback from .wav files
-6. **More weapons**: Support weapon-specific moves beyond Fists
+1. **Сначала Symbian порт**: C++23→C++03, SymbianPlatform, GLES2, touch input
+2. **Потом фиксы багов**: DZ decoder, moves.xml парсер, dojo location
+3. **Потом контент**: AI, audio, weapons
 
 ## Reverse Engineering Documentation
 
-See `docs/` for detailed RE notes:
-- S3E binary format, JNI registration map
-- Engine architecture, main loop analysis
-- Animation format (.bin), tactics format (.atf)
-- Resource formats (.dz, .plist, .fnt)
-- DZ format analysis and decoder implementation notes
+See `docs/` for detailed RE notes.

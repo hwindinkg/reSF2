@@ -1,0 +1,719 @@
+{
+  "analytics": {
+    "enabled": true
+  },
+  "auth": {
+    "enabled": true,
+    "overlay": {
+      "enabled": true,
+      "autoShow": true,
+      "floatingButtonPosition": "topRight"
+    },
+    "cloudSave": {
+      "enabled": true
+    }
+  },
+  "console": {
+    "enabled": true,
+    "enforce": true
+  },
+  "iap": {
+    "products": [
+      {
+        "id": "6e2f738d-4e33-4f96-86e4-910d67dd9c97",
+        "sku": "Pile_Gems",
+        "title": "Pile of Gems",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "img_pile_gems.png"
+      },
+      {
+        "id": "965ca674-1bac-4b89-8a73-329695dba51e",
+        "sku": "Casket_Gems",
+        "title": "Casket of Gems",
+        "description": "",
+        "priceValue": 9.99,
+        "imageURI": "img_casket_gems_zone7.png"
+      },
+      {
+        "id": "6ef18c64-5fe4-41c0-ae43-b061625bd81f",
+        "sku": "Casket_Gems_Zone7",
+        "title": "Casket of Gems",
+        "description": "",
+        "priceValue": 9.99,
+        "imageURI": "img_casket_gems_zone7.png"
+      },
+      {
+        "id": "8670df6f-2f2b-4172-ba92-180731587749",
+        "sku": "Bag_Gems",
+        "title": "Bag of Gems",
+        "description": "",
+        "priceValue": 19.99,
+        "imageURI": "img_bag_gems.png"
+      },
+      {
+        "id": "ff9175b2-c0d7-4280-8144-f7b3711e9f7a",
+        "sku": "Bag_Gems_Zone7",
+        "title": "Bag of Gems",
+        "description": "",
+        "priceValue": 19.99,
+        "imageURI": "img_bag_gems_zone7.png"
+      },
+      {
+        "id": "ea2cf98a-dd9a-4a77-9fe9-e8a165e1e11b",
+        "sku": "Chest_Gems",
+        "title": "Chest of Gems",
+        "description": "",
+        "priceValue": 49.99,
+        "imageURI": "img_chest_gems.png"
+      },
+      {
+        "id": "5d23fab9-6c91-482e-bf52-ffd42c1b9266",
+        "sku": "Chest_Gems_Zone7",
+        "title": "Chest of Gems",
+        "description": "",
+        "priceValue": 49.99,
+        "imageURI": "img_casket_gems_zone7.png"
+      },
+      {
+        "id": "e10f9fae-dde1-4ce5-a4e1-76d3c4f4ee88",
+        "sku": "Chest_Gems_Zone7",
+        "title": "Chest of Gems",
+        "description": "",
+        "priceValue": 49.99,
+        "imageURI": "img_casket_gems_zone7.png"
+      },
+      {
+        "id": "516ccd94-930e-48cd-b0cd-04008c56e817",
+        "sku": "Pile_Coins",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins.png"
+      },
+      {
+        "id": "59d668eb-60fd-4725-941f-1cb6c84e3735",
+        "sku": "Pile_Coins_2",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins.png"
+      },
+      {
+        "id": "357482c0-738e-42f8-a914-0564eb688016",
+        "sku": "Pile_Coins_3",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins.png"
+      },
+      {
+        "id": "698f8de3-fe5f-40bd-8c69-27809c07728f",
+        "sku": "Pile_Coins_4",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins.png"
+      },
+      {
+        "id": "5ad6c57e-d785-447d-989b-52c2b8ff3aeb",
+        "sku": "Pile_Coins_5",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins.png"
+      },
+      {
+        "id": "cda5e363-7622-4ffd-a57a-01f997bb3ff6",
+        "sku": "Pile_Coins_6",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins.png"
+      },
+      {
+        "id": "bbaa86ea-a85d-4abf-a80b-4f8667e89baa",
+        "sku": "Pile_Coins_Platinum",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins_platinum.png"
+      },
+      {
+        "id": "cc6df146-6121-442d-a074-1f9f915b6ed9",
+        "sku": "Pile_Coins_Platinum_2",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins_platinum.png"
+      },
+      {
+        "id": "e2a53d9e-1a19-4abb-b778-b52f63a58b09",
+        "sku": "Pile_Coins_Platinum_3",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins_platinum.png"
+      },
+      {
+        "id": "d8773211-c8c3-416f-ba17-f3f278fe9244",
+        "sku": "Pile_Coins_Platinum_4",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins_platinum.png"
+      },
+      {
+        "id": "0bdf55af-87d5-49a0-a4d0-21c695b99e1f",
+        "sku": "Pile_Coins_Platinum_5",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins_platinum.png"
+      },
+      {
+        "id": "9f923547-a90f-4618-9b18-e9f57477e615",
+        "sku": "Pile_Coins_Platinum_6",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins_platinum.png"
+      },
+      {
+        "id": "89aa82f5-ef14-482b-b502-431e60e20e8a",
+        "sku": "Pile_Coins_Zone7",
+        "title": "Pile of Coins",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "img_pile_coins_zone7.png"
+      },
+      {
+        "id": "50df4cdb-c579-4829-9d2e-272bbf65b64b",
+        "sku": "Bag_Coins",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins.png"
+      },
+      {
+        "id": "72256fae-5aae-42d1-9eb0-897c58709b33",
+        "sku": "Bag_Coins_2",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins.png"
+      },
+      {
+        "id": "d10d6853-1351-41a6-8584-a6ff6006dabf",
+        "sku": "Bag_Coins_3",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins.png"
+      },
+      {
+        "id": "39806a3c-ea37-4a39-8f11-699332c4d63c",
+        "sku": "Bag_Coins_4",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins.png"
+      },
+      {
+        "id": "4964e5f2-2f09-4024-a413-ec0fc60b2134",
+        "sku": "Bag_Coins_5",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins.png"
+      },
+      {
+        "id": "406c388a-5446-4756-aef8-4bf8cc931753",
+        "sku": "Bag_Coins_6",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins.png"
+      },
+      {
+        "id": "cdb0ba94-b2f5-4fb4-88a6-980aaee58825",
+        "sku": "Bag_Coins_Platinum",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins_platinum.png"
+      },
+      {
+        "id": "2ee99d38-a559-49bd-8e98-a78ceea5f60e",
+        "sku": "Bag_Coins_Platinum_2",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins_platinum.png"
+      },
+      {
+        "id": "f13d55e5-4588-457b-b481-bd6e342ca011",
+        "sku": "Bag_Coins_Platinum_3",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins_platinum.png"
+      },
+      {
+        "id": "60219ff1-cd47-4d74-9b97-c283763ed0e1",
+        "sku": "Bag_Coins_Platinum_4",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins_platinum.png"
+      },
+      {
+        "id": "8bb38480-0f6b-4123-aa6b-9f54197813a2",
+        "sku": "Bag_Coins_Platinum_5",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins_platinum.png"
+      },
+      {
+        "id": "02e50a2e-1f5c-49f3-a97b-11a10729b00c",
+        "sku": "Bag_Coins_Platinum_6",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins_platinum.png"
+      },
+      {
+        "id": "d4c9b9e0-196b-4dce-b6ab-29b38c786ead",
+        "sku": "Bag_Coins_Zone7",
+        "title": "Bag of Coins",
+        "description": "",
+        "priceValue": 4.99,
+        "imageURI": "img_bag_coins_zone7.png"
+      },
+      {
+        "id": "f464bea6-7aea-4ca4-b2f2-8e815232eded",
+        "sku": "Chest_Coins",
+        "title": "Chest of Coins",
+        "description": "",
+        "priceValue": 19.99,
+        "imageURI": "img_chest_coins.png"
+      },
+      {
+        "id": "0b793a82-6138-4689-8a95-78721a84d723",
+        "sku": "Chest_Coins_2",
+        "title": "Chest of Coins",
+        "description": "",
+        "priceValue": 19.99,
+        "imageURI": "img_chest_coins.png"
+      },
+      {
+        "id": "0e0dfc6a-02fe-404d-b6ad-18a34b337330",
+        "sku": "Chest_Coins_3",
+        "title": "Chest of Coins",
+        "description": "",
+        "priceValue": 19.99,
+        "imageURI": "img_chest_coins.png"
+      },
+      {
+        "id": "37d123a0-4e58-4089-b23d-a76fa7a1ded5",
+        "sku": "Chest_Coins_4",
+        "title": "Chest of Coins",
+        "description": "",
+        "priceValue": 19.99,
+        "imageURI": "img_chest_coins.png"
+      },
+      {
+        "id": "6b316797-cb1c-4963-a338-075a63ba1aa7",
+        "sku": "Chest_Coins_5",
+        "title": "Chest of Coins",
+        "description": "",
+        "priceValue": 19.99,
+        "imageURI": "img_chest_coins.png"
+      },
+      {
+        "id": "5a5f10da-bdd2-48b1-a690-dcaebbc0f002",
+        "sku": "Chest_Coins_6",
+        "title": "Chest of Coins",
+        "description": "",
+        "priceValue": 19.99,
+        "imageURI": "img_chest_coins.png"
+      },
+      {
+        "id": "5d77d4b2-cd64-498e-9ab5-faf77305472b",
+        "sku": "Chest_Coins_Zone7",
+        "title": "Chest of Coins",
+        "description": "",
+        "priceValue": 19.99,
+        "imageURI": "img_chest_coins_zone7.png"
+      },
+      {
+        "id": "fb1e3b3e-92e3-419e-a5f1-cdba81b4d402",
+        "sku": "Chest_Coins_Zone7",
+        "title": "Chest of Coins",
+        "description": "",
+        "priceValue": 19.99,
+        "imageURI": "img_chest_coins_zone7.png"
+      },
+      {
+        "id": "4cd27286-261c-4259-a4d8-9317637e9409",
+        "sku": "Pack_Starter",
+        "title": "Starter Pack",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "starter_pack.png"
+      },
+      {
+        "id": "eec7e73e-08ee-4e24-9d57-b305613193ba",
+        "sku": "Premium_Pack_Zone1",
+        "title": "Furious Warrior Pack",
+        "description": "",
+        "priceValue": 0.99,
+        "imageURI": "premium_pack_zone1.png"
+      },
+      {
+        "id": "029d5b0b-1e7d-409c-b224-0e1e23989541",
+        "sku": "Premium_Pack_Zone2",
+        "title": "Grim Crow pack",
+        "description": "",
+        "priceValue": 9.99,
+        "imageURI": "premium_pack_zone2.png"
+      },
+      {
+        "id": "2724290f-fa47-4ae9-9d8a-7936795bf69e",
+        "sku": "Premium_Pack_Zone3",
+        "title": "Flames of Devastation Pack",
+        "description": "",
+        "priceValue": 9.99,
+        "imageURI": "premium_pack_zone3.png"
+      },
+      {
+        "id": "e76cc68b-6e26-4fdd-8ad0-8d0b30992a59",
+        "sku": "Premium_Pack_Zone4",
+        "title": "Elder's Wrath Pack",
+        "description": "",
+        "priceValue": 10.99,
+        "imageURI": "premium_pack_zone4.png"
+      },
+      {
+        "id": "322259ab-7a4d-4aba-b578-52f493ae621b",
+        "sku": "Premium_Pack_Zone5",
+        "title": "Lord Of Darkness Pack",
+        "description": "",
+        "priceValue": 10.99,
+        "imageURI": "premium_pack_zone5.png"
+      },
+      {
+        "id": "79637d10-d155-47ab-af28-25dcdc64933b",
+        "sku": "Premium_Pack_Zone6",
+        "title": "Imperial Guard Pack",
+        "description": "",
+        "priceValue": 10.99,
+        "imageURI": "premium_pack_zone6.png"
+      },
+      {
+        "id": "7021dab7-0f1c-4e6c-9156-e61556d2fb17",
+        "sku": "Unlimited_Energy",
+        "title": "Unlimited Energy",
+        "description": "",
+        "priceValue": 10.99,
+        "imageURI": "premium_pack_zone6.png"
+      },
+      {
+        "id": "016b3a56-0c11-4a8a-b129-628184feb554",
+        "sku": "DailyOffer_3_4",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_4.png"
+      },
+      {
+        "id": "3d490855-cb21-4502-a38c-410e5514fd56",
+        "sku": "DailyOffer_3_5",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_5.png"
+      },
+      {
+        "id": "9eb7ee4f-e59f-4716-bd15-c9e712015fbb",
+        "sku": "DailyOffer_3_7",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_7.png"
+      },
+      {
+        "id": "9982f3da-e012-4750-b6f9-775b281abc2f",
+        "sku": "DailyOffer_3_14",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_14.png"
+      },
+      {
+        "id": "67d8e3a5-1837-400c-bec9-98f5539a98e4",
+        "sku": "DailyOffer_3_52",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_52.png"
+      },
+      {
+        "id": "61ea51d3-1609-4f27-b13f-78bec2ef61ff",
+        "sku": "DailyOffer_3_11",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_11.png"
+      },
+      {
+        "id": "a8a8405a-bb9c-4957-9e27-b2e785c5d1c9",
+        "sku": "DailyOffer_3_26",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_26.png"
+      },
+      {
+        "id": "fdc5d44b-9902-4be8-a4f7-f4db38a3e215",
+        "sku": "DailyOffer_3_16",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_16.png"
+      },
+      {
+        "id": "fba97bbf-b4b6-4bce-98b8-7a498f689503",
+        "sku": "DailyOffer_3_6",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_6.png"
+      },
+      {
+        "id": "70fda9de-80ee-4c50-8243-7fd7680005e3",
+        "sku": "DailyOffer_3_31",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_31.png"
+      },
+      {
+        "id": "838480af-909c-4417-a5e2-2464699a0cf0",
+        "sku": "DailyOffer_9_6",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 8.99,
+        "imageURI": "daily_offer_9_6.png"
+      },
+      {
+        "id": "abbce1ef-dd99-430c-a28f-cd10475e883a",
+        "sku": "DailyOffer_9_12",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 8.99,
+        "imageURI": "daily_offer_9_12.png"
+      },
+      {
+        "id": "bcfd6c8b-9e6c-4851-b58f-4125ed963497",
+        "sku": "DailyOffer_15_8",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 14.99,
+        "imageURI": "daily_offer_15_8.png"
+      },
+      {
+        "id": "72e579bd-942c-4909-bae1-c19916035baf",
+        "sku": "DailyOffer_3_32",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_32.png"
+      },
+      {
+        "id": "0bfb7a3c-26d2-472b-b20c-d023e68d064b",
+        "sku": "DailyOffer_9_1",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 8.99,
+        "imageURI": "daily_offer_9_1.png"
+      },
+      {
+        "id": "89180296-a745-449a-85cc-fe5ad839b61b",
+        "sku": "DailyOffer_3_29",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_29.png"
+      },
+      {
+        "id": "8187079a-5976-4832-90f6-2f8ffa04cb53",
+        "sku": "DailyOffer_9_11",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 8.99,
+        "imageURI": "daily_offer_9_11.png"
+      },
+      {
+        "id": "f0e92d0a-e263-41d0-aa80-1b1ba1686121",
+        "sku": "DailyOffer_3_12",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_12.png"
+      },
+      {
+        "id": "b5aa117a-4f2a-488f-bd0d-e4c1ec74a9bf",
+        "sku": "DailyOffer_9_2",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 8.99,
+        "imageURI": "daily_offer_9_2.png"
+      },
+      {
+        "id": "86e54736-5c48-4522-b207-ce0d9fb0ddef",
+        "sku": "DailyOffer_3_18",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_18.png"
+      },
+      {
+        "id": "785e94ab-55fe-430e-bbf6-0273878b4cf8",
+        "sku": "DailyOffer_3_19",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_19.png"
+      },
+      {
+        "id": "c3bd152a-2315-409a-af63-c3157b475178",
+        "sku": "DailyOffer_3_40",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_40.png"
+      },
+      {
+        "id": "309f4675-6638-4b2e-8d19-6fa380bb4a72",
+        "sku": "DailyOffer_3_41",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_41.png"
+      },
+      {
+        "id": "feff6736-6da9-4110-a967-da9337d2a71b",
+        "sku": "DailyOffer_9_13",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 8.99,
+        "imageURI": "daily_offer_9_13.png"
+      },
+      {
+        "id": "b42cc471-7b7d-48dd-a18f-70b4721dca91",
+        "sku": "DailyOffer_15_7",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 14.99,
+        "imageURI": "daily_offer_15_7.png"
+      },
+      {
+        "id": "f19f53c0-bc47-499f-ad58-f55790eb5b25",
+        "sku": "DailyOffer_3_42",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_42.png"
+      },
+      {
+        "id": "020c4bbc-acc5-44af-b416-23f583e5f50b",
+        "sku": "DailyOffer_3_64",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_64.png"
+      },
+      {
+        "id": "8834ed67-c1c1-4ea9-bcd0-16c3e208b7cb",
+        "sku": "DailyOffer_9_9",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 8.99,
+        "imageURI": "daily_offer_9_9.png"
+      },
+      {
+        "id": "f1e64815-b90e-4ff3-a6c0-88b54cadaa6b",
+        "sku": "DailyOffer_3_22",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_22.png"
+      },
+      {
+        "id": "a4edbf99-c03f-411c-b287-b4dc8a0f857b",
+        "sku": "DailyOffer_3_37",
+        "title": "Daily Offer",
+        "description": "",
+        "priceValue": 2.99,
+        "imageURI": "daily_offer_3_37.png"
+      }
+    ]
+  },
+  "toolGameId": "ROujxRl3r9fAxA2RvAsA",
+  "gameId": "shadow-fight-2",
+  "name": "Shadow Fight 2",
+  "gameVersion": "1.0.6",
+  "version": "1.0.6",
+  "exportedAt": "2026-06-11T10:53:43.131Z",
+  "maxLevels": 0,
+  "features": {
+    "audio": true,
+    "copyright": true,
+    "credits": true,
+    "pause": true,
+    "progress": true,
+    "score": true,
+    "tutorial": true,
+    "version": true,
+    "visibilitychange": true,
+    "home": true,
+    "privacy": true,
+    "iap": true,
+    "standalone": false,
+    "rewarded": false
+  },
+  "ads": {
+    "initial": {
+      "retry": 2000,
+      "enabled": false,
+      "timeout": 250,
+      "preload": 250
+    },
+    "interstitial": {
+      "retry": 2000,
+      "timeout": 250,
+      "preload": 250,
+      "enabled": false,
+      "cooldown": 60
+    },
+    "rewarded": {
+      "retry": 2000,
+      "enabled": false,
+      "timeout": 250,
+      "preload": 500
+    },
+    "banner": {
+      "enabled": false,
+      "retry": 2000,
+      "preload": 250,
+      "timeout": 250
+    }
+  },
+  "storage": {
+    "shouldCompress": false,
+    "isLegacyMode": false
+  },
+  "windows": {}
+}

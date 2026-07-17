@@ -1,0 +1,9 @@
+# Scenario 19: Verify move_state stays 10 during attack.
+# Press O for HighPunch, then press direction keys (should not interrupt).
+# No [MOVE] line should appear between punch start and punch end.
+frame 180 keydown D
+frame 460 keyup D
+frame 465 keydown O
+frame 466 keyup O
+frame 470 keydown D
+frame 530 keyup D

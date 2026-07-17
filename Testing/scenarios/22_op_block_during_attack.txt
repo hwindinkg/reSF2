@@ -1,0 +1,9 @@
+# Scenario 22: O/P blocked during attack, O/P allowed after attack ends.
+frame 180 keydown D
+frame 460 keyup D
+frame 465 keydown O
+frame 466 keyup O
+frame 468 keydown O
+frame 469 keyup O
+frame 470 keydown P
+frame 471 keyup P

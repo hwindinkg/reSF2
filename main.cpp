@@ -206,6 +206,11 @@ struct MoveDef {
     
     // Damage value
     float damage = 0.0f;
+
+    // Impulse (from <Impulse X="..." Y="..."/> in Attack interval)
+    // Applied to the target on hit. X = horizontal push, Y = vertical lift.
+    float impulse_x = 0.0f;
+    float impulse_y = 0.0f;
     
     // Block interval (can block during these frames)
     int block_start = -1;
@@ -348,6 +353,8 @@ struct BodyEdge {
     std::string name;
     std::string end1, end2;
     float length = 0;
+    float radius = 0;
+    bool collisible = false;
 };
 
 // Verlet physics state for a single node.
@@ -415,7 +422,8 @@ enum class Overlay { None, Menu, Dialog };
 
 class Game final : public rt::IGame, public scene::SceneHost {
 public:
-    explicit Game(std::string asset_root) : asset_root_(std::move(asset_root)) {}
+    explicit Game(std::string asset_root, bool replay_mode = false, bool dump_state = false)
+        : asset_root_(std::move(asset_root)), replay_mode_(replay_mode), dump_state_(dump_state) {}
 
     void on_init(plat::Platform& platform) override {
         platform_ = &platform;
@@ -500,6 +508,11 @@ public:
     // the SceneHost interface to interact with the game state.
 
     void request_scene_transition(scene::SceneId to) override {
+        // In replay mode, skip the menu flow: Loading → direct to Battle
+        if (replay_mode_ && to == scene::SceneId::MainMenu) {
+            to = scene::SceneId::Battle;
+            std::printf("[REPLAY] Skipping menus, entering Battle directly\n");
+        }
         scene_manager_.transition_to(to);
     }
 
@@ -710,32 +723,6 @@ public:
         // is_unarmed, TacticWeapon=Fists or empty). Pick highest priority.
         // For moves with <Distance> condition, only match if enemy is in range.
 
-        // === AIR ATTACKS (W+O / W+P during jump) ===
-        // If current animation is a Jump (jump, front_flip, back_flip, etc.),
-        // pressing Punch/Kick transitions to air_punch or air_axe_kick.
-        // This is the original game's behavior: a short jump smoothly
-        // transitions into an air attack.
-        // Allowed even during Uninterrupt (jump animations don't have Uninterrupt)
-        if ((punch_pressed || kick_pressed)) {
-            bool in_jump_anim = (current_anim_ == "jump" || current_anim_ == "jump_away" ||
-                                 current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
-                                 current_anim_ == "back_handflip");
-            if (in_jump_anim && animations_.count("air_punch") && animations_.count("air_axe_kick")) {
-                std::string air_anim = punch_pressed ? "air_punch" : "air_axe_kick";
-                std::printf("[COMBAT] AIR %s -> %s (anim '%s')\n",
-                            punch_pressed ? "Punch" : "Kick",
-                            air_anim == "air_punch" ? "AirPunch" : "AxeKick",
-                            air_anim.c_str());
-                play_animation(air_anim, false);
-                current_move_ = air_anim == "air_punch" ? "AirPunch" : "AxeKick";
-                int fc = animations_[air_anim].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
-                move_state_ = 10;
-                need_switch_to_idle_ = false;
-                goto after_combat;
-            }
-        }
-
         // [ORIGINAL] PC source: sf2.js tKa() — player input is NOT gated by
         // Uninterrupt (which is AI-only, ocb/pcb at line 18770).
         // BUT: 1key/2key attacks CANNOT interrupt another 1key/2key attack.
@@ -744,14 +731,30 @@ public:
         //   - During attack animation (hit_anim_ > 0, current_anim_ is attack):
         //     → Only 3key combos allowed (in_basic_attack = true)
         //   - Outside attack (hit_anim_ == 0 or current_anim_ is idle/step):
-        //     → 1key/2key attacks allowed
+//     → 1key/2key attacks allowed
         // Previous fix (5f392b0) removed is_uninterrupt_ entirely, allowing
-        // ANY attack to interrupt ANY animation — regression.
+        // ANY attack to interrupt ANY animation - regression.
         // This gate replaces the old is_uninterrupt_ check with the correct
         // logic: in_basic_attack blocks 1key/2key, allows only 3key.
+        // [ORIGINAL] PC source: Pqb() (line 18769-18810) - move selection
+        // During attack animation (elapsed < total_len):
+        //   If in Uninterrupt interval: allow 3key chain attacks (YAa, Gea)
+        //   Else: return 0 (NO moves available - not even movement)
+        // After attack ends: normal move selection (1key, 2key, movement)
+        //
+        // In our code: move_state_ == 10 means in attack/special.
+        // hit_anim_ > 0 means attack animation playing.
+        // current_move_ tracks the move name.
+        // is_uninterrupt_ is true only during attack animation's Uninterrupt interval.
+        bool in_attack = (move_state_ == 10 && current_move_ != "StartStance" && hit_anim_ > 0);
+        {
+        std::string cur_direction;
+        std::string cur_move_type;
+        float dist_to_enemy;
+
         if (punch_pressed || kick_pressed) {
             // Determine direction from key state
-            std::string cur_direction = "Central";  // default: no direction
+            cur_direction = "Central";  // default: no direction
             if (key_up && key_forward) cur_direction = "UpForward";
             else if (key_up && key_back) cur_direction = "UpBack";
             else if (key_down && key_forward) cur_direction = "DownForward";
@@ -762,71 +765,45 @@ public:
             else if (key_back) cur_direction = "Back";
 
             // Determine move type
-            std::string cur_move_type;
             if (punch_pressed) cur_move_type = "Punch";
             else if (kick_pressed) cur_move_type = "Kick";
 
-            // 3key combo detection: triggered when current animation is from
-            // a 1key or 2key basic attack (HeavyPunch, Sweep, etc.)
-            // [ORIGINAL] PC source: sf2.js CurrentAnimation condition (line 20079)
-            // + 3key combo moves.xml <CurrentAnimation Name="HeavyPunch"/> requirement.
-            // The cancel window works as:
-            //   - During attack (hit_anim_ > 0 AND current_move_ is 1key/2key attack):
-            //     in_basic_attack = true → only 3key combos can trigger
-            //   - After attack ends (hit_anim_ == 0 OR current_move_ cleared):
-            //     in_basic_attack = false → 1key/2key attacks allowed
-            // 3key combos require CurrentAnimation=<specific attack name> in moves.xml,
-            // so they can only trigger when the CORRECT base attack is playing.
-            // 1key/2key attacks have NO CurrentAnimation condition, but are blocked
-            // during in_basic_attack to prevent interrupting an ongoing attack.
-            bool in_basic_attack = false;
-            if (!current_move_.empty() && hit_anim_ > 0) {
-                auto cur_move_it = moves_.find(current_move_);
-                if (cur_move_it != moves_.end()) {
-                    int cur_kc = cur_move_it->second.key_count;
-                    // [ORIGINAL] Only ATTACK moves (Type="ATTACK") trigger
-                    // in_basic_attack. MOVE moves (Duck, Stance, Step) do NOT
-                    // block 1key/2key attacks. This fixes S+O (LowPunch) not
-                    // working when Duck is active.
-                    if ((cur_kc == 1 || cur_kc == 2) && cur_move_it->second.is_attack) {
-                        in_basic_attack = true;
-                    }
-                }
-            }
-
             // Compute distance to enemy (bag) for distance-based move selection
-            float dist_to_enemy = 1000.0f;  // default: far
+            dist_to_enemy = 1000.0f;  // default: far
             if (location_ && bag_model_) {
-                float bag_x = location_->enemy_x - 983.0f;
-                dist_to_enemy = std::abs(bag_x - player_pos_x_);
-            }
 
-            // Find best matching move from moves.xml
+            // If in attack and NOT in Uninterrupt: block ALL combat input (Pqb returns 0)
+            // Original: if (this.$x < b.kJ() && !de.Ycb(b)) if (!this.ds.pcb(this.Fl)) return 0;
+            bool block_all_combat = in_attack && !is_uninterrupt_;
             const MoveDef* best_move = nullptr;
             int candidate_count = 0;  // [DIAGNOSTIC] for [INPUT_DECISION] log
             for (auto& [name, move] : moves_) {
                 // Skip moves with no filename or no template
                 if (move.filename.empty() || move.template_name.empty()) continue;
                 // Skip Titan moves (player is not a Titan)
-                // Note: "NotTitan" contains "Titan" as substring, so check
-                // for "Titan" but NOT preceded by "Not".
                 {
                     size_t titan_pos = move.template_name.find("Titan");
                     if (titan_pos != std::string::npos) {
                         if (titan_pos < 3 || move.template_name.substr(titan_pos - 3, 3) != "Not") {
-                            continue;  // Real Titan move, skip
+                            continue;
                         }
                     }
                 }
                 // Match move_type (Punch or Kick)
                 if (move.move_type != cur_move_type) continue;
-                //   - If in_basic_attack (combo scenario): allow 3key
-                //   - Otherwise: only 1key and 2key moves
-                if (in_basic_attack) {
-                    // 3key takes priority during basic attack
+
+                if (block_all_combat) {
+                    // During attack, not in Uninterrupt: NO combat moves at all
+                    continue;
+                } else if (in_attack && is_uninterrupt_) {
+                    // During attack, IN Uninterrupt: only 3key chain combos allowed
                     if (move.key_count != 3) continue;
+                    // 3key combos require CurrentAnimation match
+                    if (!move.required_current_animation.empty()) {
+                        if (current_move_ != move.required_current_animation) continue;
+                    }
                 } else {
-                    // Not in basic attack: skip 3key moves
+                    // Not in attack: normal 1key/2key selection, skip 3key
                     if (move.key_count == 3) continue;
                 }
                 // Match direction
@@ -869,7 +846,7 @@ public:
                 if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
                     anim_name = anim_name.substr(0, anim_name.size()-4);
                 std::printf("[COMBAT] %s%s -> %s (anim '%s', prio=%d, tmpl='%s', dist=%.1f)\n",
-                            in_basic_attack ? "[COMBO] " : "",
+                            (in_attack && !is_uninterrupt_) ? "[COMBO] " : "",
                             cur_move_type.c_str(), best_move->name.c_str(),
                             anim_name.c_str(), best_move->priority,
                             best_move->template_name.c_str(), dist_to_enemy);
@@ -883,7 +860,7 @@ public:
                             punch_pressed?"O":"", kick_pressed?"P":"",
                             (int)facing_right_, cur_direction.c_str(), move_state_,
                             current_anim_.c_str(), current_move_.c_str(),
-                            hit_anim_, is_uninterrupt_?1:0, (int)in_basic_attack,
+                            hit_anim_, is_uninterrupt_?1:0, (int)(in_attack && !is_uninterrupt_),
                             candidate_count, best_move->name.c_str());
                 play_animation(anim_name, false);
                 current_move_ = best_move->name;
@@ -903,17 +880,17 @@ public:
                             punch_pressed?"O":"", kick_pressed?"P":"",
                             (int)facing_right_, cur_direction.c_str(), move_state_,
                             current_anim_.c_str(), current_move_.c_str(),
-                            hit_anim_, is_uninterrupt_?1:0, (int)in_basic_attack,
+                            hit_anim_, is_uninterrupt_?1:0, (int)(in_attack && !is_uninterrupt_),
                             candidate_count);
                 // Debug: no move found — log why
                 static int no_move_log = 0;
                 if (no_move_log < 3) {
                     std::printf("[COMBAT] NO MOVE for %s dir='%s' basic=%d — candidates:\n",
-                                cur_move_type.c_str(), cur_direction.c_str(), in_basic_attack ? 1 : 0);
+                                cur_move_type.c_str(), cur_direction.c_str(), (in_attack && !is_uninterrupt_) ? 1 : 0);
                     for (auto& [name, move] : moves_) {
                         if (move.move_type != cur_move_type) continue;
                         if (move.direction != cur_direction) continue;
-                        if (move.key_count == 3 && !in_basic_attack) continue;
+                        if (move.key_count == 3 && !(in_attack && !is_uninterrupt_)) continue;
                         std::string anim_name = move.filename;
                         if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
                             anim_name = anim_name.substr(0, anim_name.size()-4);
@@ -940,30 +917,46 @@ public:
                         current_anim_.c_str(), current_move_.c_str(),
                         hit_anim_, is_uninterrupt_?1:0);
         }
+    }
+    }
 
-        // === SPECIAL MOVES (jumps, rolls, duck) — from moves.xml ===
+// === SPECIAL MOVES (jumps, rolls, duck) — from moves.xml ===
         // Match 1key moves with Jump, Step, or no type (Duck, Roll)
-        // [ORIGINAL] PC source: sf2.js tKa() — input gated by:
-        //   !PCa (has opponent) || kh || Ua==null || Nd.nk → false
-        // NOT gated by Pe (animation playing) or Uninterrupt.
-        // New move INTERRUPTS current animation (EAnimationInterruptedEvent).
-        // Our code incorrectly blocked input via move_state_ >= 10 + hit_anim_.
-        // Fix: allow input when !is_uninterrupt_, regardless of move_state_.
-        // [ORIGINAL] Player can interrupt any animation (sf2.js tKa — no Uninterrupt gate).
-        if (true) {
-            bool up_pressed = input.keys_just_pressed[(size_t)plat::Key::W] ||
-                              input.keys_just_pressed[(size_t)plat::Key::ArrowUp];
-            bool down_pressed = input.keys_just_pressed[(size_t)plat::Key::S] ||
-                                input.keys_just_pressed[(size_t)plat::Key::ArrowDown];
+        // [ORIGINAL] PC source: sf2.js Pqb() (line 18769-18810) -- move selector
+        // During attack (elapsed < total_len):
+        //   If in Uninterrupt: Pqb allows chain attacks (YAa/Gea) -- movement specials NOT included
+        //   If NOT in Uninterrupt: Pqb returns 0 -- NO moves available at all
+        // After attack ends: normal move selection (1key, 2key, movement specials, steps)
+        // movement specials (jump, duck, roll) are NEVER available during attack.
+        // Exclude StartStance -- player should act immediately after intro.
+        do {
+        if (!in_attack) {
+            // Trigger when ANY direction key is just pressed; use HELD keys for full direction.
+            // This correctly handles W+left (A just pressed while W held) → "UpBack"
+            bool any_dir_just_pressed =
+                input.keys_just_pressed[(size_t)plat::Key::W] ||
+                input.keys_just_pressed[(size_t)plat::Key::ArrowUp] ||
+                input.keys_just_pressed[(size_t)plat::Key::A] ||
+                input.keys_just_pressed[(size_t)plat::Key::ArrowLeft] ||
+                input.keys_just_pressed[(size_t)plat::Key::S] ||
+                input.keys_just_pressed[(size_t)plat::Key::ArrowDown] ||
+                input.keys_just_pressed[(size_t)plat::Key::D] ||
+                input.keys_just_pressed[(size_t)plat::Key::ArrowRight];
 
-            // Determine direction
+            if (!any_dir_just_pressed) break;
+
+            // Determine direction from HELD key state
             std::string cur_direction;
-            if (up_pressed && key_forward) cur_direction = "UpForward";
-            else if (up_pressed && key_back) cur_direction = "UpBack";
-            else if (up_pressed) cur_direction = "Up";
-            else if (down_pressed && key_forward) cur_direction = "DownForward";
-            else if (down_pressed && key_back) cur_direction = "DownBack";
-            else if (down_pressed) cur_direction = "Down";
+            bool up_held = input.keys_down[(size_t)plat::Key::W] ||
+                           input.keys_down[(size_t)plat::Key::ArrowUp];
+            bool down_held = input.keys_down[(size_t)plat::Key::S] ||
+                             input.keys_down[(size_t)plat::Key::ArrowDown];
+            if (up_held && key_forward) cur_direction = "UpForward";
+            else if (up_held && key_back) cur_direction = "UpBack";
+            else if (up_held) cur_direction = "Up";
+            else if (down_held && key_forward) cur_direction = "DownForward";
+            else if (down_held && key_back) cur_direction = "DownBack";
+            else if (down_held) cur_direction = "Down";
 
             if (!cur_direction.empty()) {
                 // Find best matching move (Jump, or MOVE type with 1key)
@@ -1072,18 +1065,19 @@ public:
                     }
                 }
             }
-        }
+        } while(0);
 
         // === STEP MOVEMENT (from moves.xml: StepForward/StepBack) ===
-        // Find step moves dynamically
-        // FIX: don't override attack animation with step when hit_anim_ > 0.
-        // Without this, pressing O while holding D selects HeavyPunch (goto
-        // after_combat skips step code for THAT frame), but on the NEXT frame
-        // the step code sees key_forward held and calls play_animation("step_forward"),
-        // overriding the attack animation. The attack never plays, but
-        // current_move_ and hit_anim_ remain set, causing stale is_uninterrupt_
-        // (checks HeavyPunch's interval against step_forward's frame count).
-        if (hit_anim_ == 0) {
+        // FIX: don't override attack animation with step when in an attack.
+        // hit_anim_ > 0 also applies during start_stance (stance_2), which
+        // should NOT block steps. Use is_in_attack to distinguish.
+        {
+        bool is_in_attack = false;
+        if (!current_move_.empty()) {
+            auto mit = moves_.find(current_move_);
+            if (mit != moves_.end() && mit->second.is_attack) is_in_attack = true;
+        }
+        if (!is_in_attack) {
             bool fwd_latched = fwd_held_ms_ > 0;
             bool back_latched = back_held_ms_ > 0;
 
@@ -1111,12 +1105,23 @@ public:
             if (step_fwd_anim.empty() && animations_.count("step_forward")) step_fwd_anim = "step_forward";
             if (step_back_anim.empty() && animations_.count("step_back")) step_back_anim = "step_back";
 
-            if (move_state_ == 0) {  // IDLE
+            if (move_state_ == 0 || start_stance_playing_) {  // IDLE (or start stance)
+                // [STEP_DEBUG] Log step conditions around start-stance end
+                if (total_frame_count_ >= 245 && total_frame_count_ <= 265) {
+                    std::printf("[STEPDBG] f=%llu ms=%d ss=%d ha=%u anim='%s' kf=%d kb=%d kd=%d sf='%s'\n",
+                                (unsigned long long)total_frame_count_,
+                                move_state_, (int)start_stance_playing_, hit_anim_,
+                                current_anim_.c_str(),
+                                (int)key_forward, (int)key_back, (int)key_down,
+                                step_fwd_anim.c_str());
+                }
                 if (key_forward && !key_back && !key_down && !step_fwd_anim.empty()) {
                     move_state_ = 2;
+                    start_stance_playing_ = false;
                     play_animation(step_fwd_anim, true);
                 } else if (key_back && !key_forward && !key_down && !step_back_anim.empty()) {
                     move_state_ = 1;
+                    start_stance_playing_ = false;
                     play_animation(step_back_anim, true);
                 }
             } else if (move_state_ == 1) {  // MOVING_BACK
@@ -1134,6 +1139,7 @@ public:
                     play_animation(step_back_anim, true);
                 }
             }
+        }
         }
 
         // === HIT ANIM COUNTDOWN ===
@@ -1332,45 +1338,113 @@ public:
                                 float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx);
                                 float limb_wy = player_pos_y_ + y_adjust_smoothed_ + (limb_ly - pivot_ly);
 
-                                // Bag position from Verlet
-                                float bag_cx = location_->enemy_x - 983.0f;
-                                float bag_cy = location_->enemy_y + 81.0f;
-                                auto bv_it = bag_verlet_.find("NPivot");
-                                if (bv_it != bag_verlet_.end()) {
-                                    bag_cx = bv_it->second.x; bag_cy = bv_it->second.y;
+                                // Get attacking edge radius from skeleton
+                                float atk_radius = 0;
+                                auto skel_it = skeleton_edges_.find(edge_name);
+                                if (skel_it != skeleton_edges_.end()) {
+                                    atk_radius = skel_it->second.radius;
                                 }
 
-                                float dx = limb_wx - bag_cx;
-                                float dy = limb_wy - bag_cy;
-                                float dist = std::sqrt(dx*dx + dy*dy);
-                                if (dist < 100.0f) {
-                                    std::string target_node = "NNeck";
-                                    if (limb_wy < bag_cy - 30) target_node = "NBottom";
-                                    else if (limb_wy > bag_cy + 30) target_node = "Node4";
-                                    float impulse_dir = (dx < 0) ? 1.0f : -1.0f;
-                                    // Impulse from moves.xml Impulse X value
-                                    float impulse_strength = 20.0f;
-                                    if (move_it->second.move_type == "Kick") impulse_strength = 25.0f;
-                                    apply_bag_impulse(target_node, impulse_dir * impulse_strength, 0.0f);
-                                    std::printf("[COMBAT] HIT! move=%s frame=%d/%d [%d-%d] edge=%s node=%s dist=%.1f -> %s\n",
-                                                current_move_.c_str(), current_frame, fc,
-                                                frame_start, frame_end,
-                                                edge_name.c_str(), limb_node.c_str(),
-                                                dist, target_node.c_str());
-                                    bag_hit_ = true;
-                                    hit_registered = true;
-                                    break;  // one hit per frame
+                                // Get world-space positions of both attacking edge endpoints
+                                auto ait2 = anim_node_pos_.find(node2);
+                                if (ait2 == anim_node_pos_.end()) continue;
+
+                                float limb2_lx = ait2->second.first;
+                                float limb2_ly = ait2->second.second;
+                                float limb2_wx = player_pos_x_ + (facing_right_ ? limb2_lx : -limb2_lx);
+                                float limb2_wy = player_pos_y_ + y_adjust_smoothed_ + (limb2_ly - pivot_ly);
+
+                                // Check against ALL collisible bag edges
+                                bool bag_hit_this_frame = false;
+                                for (auto& be : bag_model_->edges) {
+                                    if (!be.collisible) continue;
+                                    float bag_r = be.radius;
+                                    if (bag_r <= 0) continue;
+                                    if (be.end1.empty() || be.end2.empty()) continue;
+
+                                    // Get bag edge endpoints from Verlet
+                                    auto bv1 = bag_verlet_.find(be.end1);
+                                    auto bv2 = bag_verlet_.find(be.end2);
+                                    if (bv1 == bag_verlet_.end() || bv2 == bag_verlet_.end()) continue;
+
+                                    float be1x = bv1->second.x, be1y = bv1->second.y;
+                                    float be2x = bv2->second.x, be2y = bv2->second.y;
+
+                                    // Segment-segment closest distance, also returns hit ratio t along bag edge
+                                    float ex = limb2_wx - limb_wx, ey = limb2_wy - limb_wy;
+                                    float fx = be2x - be1x, fy = be2y - be1y;
+                                    float gx = limb_wx - be1x, gy = limb_wy - be1y;
+                                    float a = ex*ex + ey*ey;
+                                    float b = ex*fx + ey*fy;
+                                    float c = fx*fx + fy*fy;
+                                    float d = ex*gx + ey*gy;
+                                    float e = fx*gx + fy*gy;
+                                    float det = a*c - b*b;
+                                    float s, t;
+                                    if (det < 1e-12f) {
+                                        s = 0.0f;
+                                        t = (b > c) ? d / b : e / c;
+                                        t = std::max(0.0f, std::min(1.0f, t));
+                                    } else {
+                                        s = (b*e - c*d) / det;
+                                        t = (a*e - b*d) / det;
+                                        if (s < 0) { s = 0; t = e / c; t = std::max(0.0f, std::min(1.0f, t)); }
+                                        else if (s > 1) { s = 1; t = (b + e) / c; t = std::max(0.0f, std::min(1.0f, t)); }
+                                        else if (t < 0) { t = 0; s = -d / a; s = std::max(0.0f, std::min(1.0f, s)); }
+                                        else if (t > 1) { t = 1; s = (b - d) / a; s = std::max(0.0f, std::min(1.0f, s)); }
+                                    }
+                                    float px = limb_wx + s*ex, py = limb_wy + s*ey;
+                                    float qx = be1x + t*fx, qy = be1y + t*fy;
+                                    float rx = px - qx, ry = py - qy;
+                                    float sq_dist = rx*rx + ry*ry;
+                                    float threshold = atk_radius + bag_r;
+                                    if (sq_dist < threshold * threshold) {
+                                        std::printf("[COMBAT] HIT! move=%s frame=%d/%d [%d-%d] atk_edge=%s bag_edge=%s sq_dist=%.1f thresh=%.1f (atk_r=%.1f bag_r=%.1f)\n",
+                                                    current_move_.c_str(), current_frame, fc,
+                                                    frame_start, frame_end,
+                                                    edge_name.c_str(), be.name.c_str(),
+                                                    sq_dist, threshold*threshold, atk_radius, bag_r);
+                                        // [ORIGINAL] JS: Kwb() line 15467 creates impulse H(kw,gR,hR,1)
+                                        // from XML <Impulse X/Y/Z>, then strike() applies to defender physics.
+                                        // Apply the impulse to the bag edge's Verlet nodes.
+                                        float imp_x = move_it->second.impulse_x;
+                                        float imp_y = move_it->second.impulse_y;
+                                        if (imp_x != 0 || imp_y != 0) {
+                                            float dir = facing_right_ ? 1.0f : -1.0f;
+                                            // Distribute impulse by hit position along edge (original Bl.strike)
+                                            float hit_ratio = std::max(0.0f, std::min(1.0f, t));
+                                            float dist1 = 1.0f - hit_ratio;
+                                            float dist2 = hit_ratio;
+                                            apply_bag_impulse(be.end1, dir * imp_x * dist1, imp_y * dist1);
+                                            apply_bag_impulse(be.end2, dir * imp_x * dist2, imp_y * dist2);
+                                        }
+                                        bag_hit_ = true;
+                                        bag_hit_this_frame = true;
+                                        hit_registered = true;
+                                        break;
+                                    }
                                 }
+                                if (bag_hit_this_frame) break;
                             }
                             if (hit_registered) break;
                         }
                     }
                 }
             }
-            if (hit_anim_ == 0) {
+            if (hit_anim_ == 0 && move_state_ == 0) {
                 need_switch_to_idle_ = true;
                 current_move_.clear();
                 bag_hit_ = false;  // reset for next attack
+            }
+
+            // IMPORTANT: DON'T reset move_state_ here — hit_anim_ expiring
+            // (start stance countdown) should NOT interrupt step movement.
+            // Allow the MOVING_FORWARD/MOVING_BACK state machine to keep
+            // stepping. Only clear current_move_ so the next key press can
+            // trigger a new move.
+            if (hit_anim_ == 0 && move_state_ != 0 && !current_move_.empty()) {
+                current_move_.clear();
+                bag_hit_ = false;
             }
         }
 
@@ -1378,8 +1452,13 @@ public:
         // even if bag_model_ doesn't exist (no character loaded).
         // This prevents 3key combos from triggering on the next key press
         // when current_move_ is still set from a previous attack.
-        if (hit_anim_ == 0 && !current_move_.empty()) {
+        // Only force idle switch if not currently stepping.
+        if (hit_anim_ == 0 && !current_move_.empty() && move_state_ == 0) {
             need_switch_to_idle_ = true;
+            current_move_.clear();
+            bag_hit_ = false;
+        } else if (hit_anim_ == 0 && !current_move_.empty()) {
+            // Stepping — just clear the move name, don't interrupt the step
             current_move_.clear();
             bag_hit_ = false;
         }
@@ -1391,6 +1470,16 @@ public:
         if (input.keys_just_pressed[(size_t)plat::Key::Num1]) zoom_ = 1.0f;
         if (input.keys_just_pressed[(size_t)plat::Key::Num2]) zoom_ = 0.7f;
         if (input.keys_just_pressed[(size_t)plat::Key::Num3]) zoom_ = 1.5f;
+
+        // [DIAGNOSTIC] Structured frame state dump (--dump-state)
+        if (dump_state_) {
+            std::printf("[STATE] f=%llu ms=%d ha=%u anim='%s' move='%s' px=%.1f py=%.1f "
+                        "bag_hit=%d bag_angle=%.3f nv=%zu\n",
+                        (unsigned long long)total_frame_count_, move_state_, hit_anim_,
+                        current_anim_.c_str(), current_move_.c_str(),
+                        player_pos_x_, player_pos_y_,
+                        (int)bag_hit_, bag_angle_, bag_verlet_.size());
+        }
     }
 
     // Called by MainMenuScene and BattleScene to render the dojo scene
@@ -2086,6 +2175,8 @@ private:
                         BodyEdge e; e.name = tag.substr(1, sp - 1);
                         e.end1 = xml_attr(tag, "End1");
                         e.end2 = xml_attr(tag, "End2");
+                        e.radius = tof(xml_attr(tag, "Radius"));
+                        e.collisible = (xml_attr(tag, "Collisible") == "1");
                         body_model_->edges.push_back(e);
                     }
                 }
@@ -2426,6 +2517,8 @@ private:
                     e.name = tag.substr(1, sp - 1);
                     e.end1 = xml_attr(tag, "End1");
                     e.end2 = xml_attr(tag, "End2");
+                    e.radius = tof(xml_attr(tag, "Radius"));
+                    e.collisible = (xml_attr(tag, "Collisible") == "1");
                     bag_model_->edges.push_back(e);
                 }
                 pos = end + 2;
@@ -2520,9 +2613,12 @@ private:
         if (it == bag_verlet_.end()) return;
         auto& n = it->second;
         if (n.fixed) return;
-        // Apply impulse: move prev position opposite to velocity direction
-        n.px -= vx;
-        n.py -= vy;
+        // Original Bl.strike: node.ma += impulse / node.weight
+        // where ma = current position, weight = XML Mass attribute.
+        // Modifying current position (x) directly — NOT prev (px).
+        // In Verlet: x += delta => velocity += delta for next frame.
+        n.x += vx * n.inv_mass;
+        n.y += vy * n.inv_mass;
     }
 
     // Update bag Verlet physics.
@@ -2867,6 +2963,19 @@ private:
                     break;  // take first damage value
                 }
                 ip = te + 2;
+            }
+
+            // Parse Impulse (from <Impulse X="..." Y="..." Z="..."/> within Attack interval)
+            // [ORIGINAL] JS: Ul.init() line 24639-24640 reads kw/gR/hR from Impulse XML attribute.
+            // Used in Kwb() line 15467 to create the impulse vector applied to the target.
+            ip = inner.find("<Impulse ");
+            if (ip != std::string::npos) {
+                auto te = inner.find("/>", ip);
+                if (te != std::string::npos) {
+                    auto imp_tag = inner.substr(ip, te - ip);
+                    move.impulse_x = tof(xml_attr(imp_tag, "X"));
+                    move.impulse_y = tof(xml_attr(imp_tag, "Y"));
+                }
             }
             
             // Parse keys
@@ -4010,7 +4119,9 @@ private:
     uint32_t last_kick_seen_ms_ = 0;   // sticky buffer for P key (150ms window)
     bool start_stance_playing_ = false;  // true during start stance animation
     bool need_switch_to_idle_ = false;  // deferred switch to idle (after update_animation)
-    bool is_uninterrupt_ = false;  // true when current frame is in Uninterrupt interval
+    bool is_uninterrupt_ = false;
+    bool replay_mode_ = false;  // skip menus, go directly to Battle  // true when current frame is in Uninterrupt interval
+    bool dump_state_ = false;  // --dump-state: print structured state every frame
     float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
@@ -4019,14 +4130,19 @@ int main(int argc, char* argv[]) {
     std::string asset_root;
     std::string input_script_path;
     int max_frames = -1;  // -1 = unlimited
+    bool replay_mode = false;  // skip menus, go directly to Battle
+    bool dump_state = false;   // --dump-state: print structured state every frame
     for (int i = 1; i < argc; ++i) {
         std::string_view arg = argv[i];
         if (arg == "--assets" && i + 1 < argc) asset_root = argv[++i];
         else if (arg == "--input-script" && i + 1 < argc) input_script_path = argv[++i];
         else if (arg == "--max-frames" && i + 1 < argc) max_frames = std::atoi(argv[++i]);
+        else if (arg == "--replay") replay_mode = true;
+        else if (arg == "--dump-state") dump_state = true;
         else if (arg == "--help" || arg == "-h") {
             std::printf("Usage: resf2_app [--assets <path>]\n"
-                        "                 [--input-script <path>] [--max-frames N]\n");
+                        "                 [--input-script <path>] [--max-frames N]\n"
+                        "                 [--replay] [--dump-state]\n");
             return 0;
         }
     }
@@ -4041,7 +4157,7 @@ int main(int argc, char* argv[]) {
     if (!input_script_path.empty()) {
         platform->load_input_script(input_script_path);
     }
-    Game game(asset_root);
+    Game game(asset_root, replay_mode, dump_state);
     if (!platform->make_gl_current()) {
         std::fprintf(stderr, "Failed to make GL context current.\n"); return 1;
     }

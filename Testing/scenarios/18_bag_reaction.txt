@@ -1,0 +1,6 @@
+# Scenario 18: Walk to bag and throw a punch to verify bag reacts.
+# Look for [COMBAT] HIT! and [COMBAT] IMPULSE in the output.
+frame 180 keydown D
+frame 460 keyup D
+frame 465 keydown O
+frame 466 keyup O
