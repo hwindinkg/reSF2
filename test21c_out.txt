@@ -1,0 +1,806 @@
+[INPUT_SCRIPT] loaded E:\reSF2\Testing\scenarios\21_air_attack_chain.txt: 6 events, armed=1
+reSF2 initialized.
+Controls (original SF2 layout):
+  W/A/S/D     - Up / Left / Down / Right (movement + attack direction)
+  O           - Punch (W=upper, S=low, D=heavy, A=spinning, S+A=elbow)
+  P           - Kick (S=sweep, D=front, A=back, S+D=dodge reverse)
+  W           - Jump (W+D=front flip, W+A=back flip)
+  S+D / S+A   - Forward roll / Back roll
+  S (hold)    - Duck (crouch)
+  Block       - AUTOMATIC (when idle, not attacking)
+  M or click menu - Toggle menu
+  T           - Toggle dialog
+  N           - New game (go to Map)
+  Y/L         - Declare victory/defeat (debug, in Battle)
+  1/2/3       - Zoom presets
+  Esc         - Quit / close overlay / back
+
+[scene] enter Boot
+[boot] splash
+[scene] transition requested: Boot -> Loading
+[scene] exit Boot
+[scene] enter Loading
+[loading] start
+[DZ] Opened assets\files.dz: 227 files
+[DZ] Opened assets\animations.dz: 1112 files
+Loading location: assets\locations\dojo\params.xml
+  Player: (690, -93)  Enemy: (973, -105)
+  Atlas 'bg': 2 frames, 2 pre-cropped
+  Atlas 'atlas_layer1': 2 frames, 1 pre-cropped
+  Atlas 'atlas_layer2': 3 frames, 0 pre-cropped
+  Atlas 'atlas_layer3': 7 frames, 1 pre-cropped
+  Skeleton: 67 nodes (12 MacroNodes, ordered: 67)
+  Skeleton: 193 edges
+  Body model: 15 nodes, 36 edges, 82 capsules, 29 triangles
+  Punching bag: 15 nodes, 23 edges, 11 capsules
+  Bag Verlet: 15 nodes, 23 constraints (Node12 fixed)
+  Animations loaded: 556 (from assets\animations\binary)
+  Moves loaded: 858
+  MoveInside pivots: 720 node-aligned, 57 animation-only
+  HUD textures loaded: 30
+  Menu textures loaded: 21, scroll textures: 9
+  HUD font loaded: assets\1536\fonts\rus\optima.fnt (184 glyphs)
+[ANIM] play_animation('stance_2', loop=0) тАФ switching from 'fists_idle'
+[STANCE] Playing start stance (stance_2, 52 frames)
+[loading] assets loaded
+[scene] transition requested: Loading -> MainMenu
+[scene] exit Loading
+[scene] enter MainMenu
+[mainmenu] enter
+[LOC] layer: type=1 factor=0.10 atlas=bg images=2
+[LOC]   img: cls='background_1' x=-255 y=0 w=512 h=512 color=''
+[LOC]   img: cls='background_2' x=256 y=0 w=512 h=512 color=''
+[LOC] layer: type=1 factor=0.40 atlas=atlas_layer1 images=2
+[LOC]   img: cls='layer_1_1' x=-256 y=50 w=512 h=324 color=''
+[LOC]   img: cls='layer_1_2' x=256 y=50 w=256 h=316 color=''
+[LOC] layer: type=1 factor=1.00 atlas=atlas_layer2 images=3
+[LOC]   img: cls='layer_2_1' x=-512 y=20 w=512 h=512 color=''
+[LOC]   img: cls='layer_2_2' x=0 y=20 w=512 h=512 color=''
+[LOC]   img: cls='layer_2_3' x=512 y=20 w=512 h=512 color=''
+[LOC] layer: type=2 factor=1.00 atlas= images=0
+[LOC] layer: type=1 factor=1.00 atlas=atlas_layer3 images=14
+[LOC]   img: cls='layer_3_1' x=-640 y=225 w=256 h=64 color=''
+[LOC]   img: cls='layer_3_2' x=-384 y=225 w=256 h=64 color=''
+[LOC]   img: cls='layer_3_1' x=-128 y=225 w=256 h=64 color=''
+[LOC]   img: cls='layer_3_2' x=128 y=225 w=256 h=64 color=''
+[LOC]   img: cls='layer_3_1' x=384 y=225 w=256 h=64 color=''
+[LOC]   img: cls='layer_3_2' x=640 y=225 w=256 h=64 color=''
+[LOC]   img: cls='layer_5' x=-10 y=-202 w=316 h=148 color=''
+[LOC]   img: cls='left' x=-680 y=0 w=86 h=560 color=''
+[LOC]   img: cls='right' x=680 y=0 w=86 h=560 color=''
+[LOC]   img: cls='pixel_1' x=-890 y=0 w=350 h=860 color='0x281409'
+[LOC]   img: cls='pixel_1' x=890 y=0 w=350 h=860 color='0x281409'
+[LOC]   img: cls='pixel_1' x=0 y=-426 w=1960 h=400 color='0x281409'
+[LOC]   img: cls='pixel_1' x=0 y=470 w=1960 h=500 color='0x281409'
+[LOC]   img: cls='layer_4' x=480 y=0 w=600 h=560 color=''
+[ROOT] f=1 anim='stance_2' fi=0 px=-293.0 py=-93.0 npx=-362.81 npy=135.00 ry=-89.00 face=1
+[ANIM] 'stance_2' frame=0/52 anim_node_pos_.size()=67  npivot_idx=18
+  NPivot     anim_local=(   0.00, 198.49)  rest=( -15.83, 169.48)
+  NHip_1     anim_local=(   0.59, 198.06)  rest=(  -4.95, 171.10)
+  NHip_2     anim_local=(  -0.59, 198.96)  rest=( -26.71, 167.87)
+  NKnee_1    anim_local=(   1.15, 138.10)  rest=(  19.14, 187.20)
+  NKnee_2    anim_local=(   0.61, 139.01)  rest=( -41.69, 143.07)
+  NAnkle_1   anim_local=(  -2.26,  78.23)  rest=(   6.19, 130.31)
+  NAnkle_2   anim_local=(  -2.00,  79.09)  rest=( -32.41,  90.29)
+  NToe_1     anim_local=(  14.67,  65.84)  rest=(   4.86, 112.89)
+  NToe_2     anim_local=(  14.55,  66.23)  rest=( -27.23,  72.75)
+[HIT_CHECK] f=1 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=0/52 hit_anim=2558 atk=-1--1 bag_hit=0
+[ROOT] f=2 anim='stance_2' fi=1 px=-293.0 py=-93.0 npx=-364.51 npy=134.94 ry=-93.00 face=1
+[HIT_CHECK] f=2 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=1/52 hit_anim=2530 atk=-1--1 bag_hit=0
+[ROOT] f=3 anim='stance_2' fi=1 px=-293.0 py=-93.0 npx=-365.51 npy=134.91 ry=-93.00 face=1
+[HIT_CHECK] f=3 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=1/52 hit_anim=2518 atk=-1--1 bag_hit=0
+[ROOT] f=4 anim='stance_2' fi=1 px=-293.0 py=-93.0 npx=-366.51 npy=134.88 ry=-93.00 face=1
+[HIT_CHECK] f=4 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=1/52 hit_anim=2506 atk=-1--1 bag_hit=0
+[ROOT] f=5 anim='stance_2' fi=2 px=-293.0 py=-93.0 npx=-367.93 npy=134.55 ry=-93.00 face=1
+[HIT_CHECK] f=5 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=2/52 hit_anim=2495 atk=-1--1 bag_hit=0
+[ROOT] f=6 anim='stance_2' fi=2 px=-293.0 py=-93.0 npx=-369.77 npy=133.92 ry=-93.00 face=1
+[HIT_CHECK] f=6 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=2/52 hit_anim=2485 atk=-1--1 bag_hit=0
+[ROOT] f=7 anim='stance_2' fi=2 px=-293.0 py=-93.0 npx=-371.79 npy=133.23 ry=-93.00 face=1
+[HIT_CHECK] f=7 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=2/52 hit_anim=2474 atk=-1--1 bag_hit=0
+[ROOT] f=8 anim='stance_2' fi=2 px=-293.0 py=-93.0 npx=-373.82 npy=132.54 ry=-93.00 face=1
+[HIT_CHECK] f=8 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=2/52 hit_anim=2463 atk=-1--1 bag_hit=0
+[ROOT] f=9 anim='stance_2' fi=2 px=-293.0 py=-93.0 npx=-375.65 npy=131.92 ry=-93.00 face=1
+[HIT_CHECK] f=9 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=2/52 hit_anim=2453 atk=-1--1 bag_hit=0
+[ROOT] f=10 anim='stance_2' fi=3 px=-293.0 py=-93.0 npx=-377.87 npy=130.33 ry=-93.00 face=1
+[HIT_CHECK] f=10 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=3/52 hit_anim=2443 atk=-1--1 bag_hit=0
+[ROOT] f=11 anim='stance_2' fi=3 px=-293.0 py=-93.0 npx=-380.25 npy=128.32 ry=-93.00 face=1
+[HIT_CHECK] f=11 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=3/52 hit_anim=2433 atk=-1--1 bag_hit=0
+[ROOT] f=12 anim='stance_2' fi=3 px=-293.0 py=-93.0 npx=-382.86 npy=126.12 ry=-93.00 face=1
+[HIT_CHECK] f=12 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=3/52 hit_anim=2422 atk=-1--1 bag_hit=0
+[ROOT] f=13 anim='stance_2' fi=3 px=-293.0 py=-93.0 npx=-385.48 npy=123.91 ry=-93.00 face=1
+[HIT_CHECK] f=13 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=3/52 hit_anim=2411 atk=-1--1 bag_hit=0
+[ROOT] f=14 anim='stance_2' fi=4 px=-293.0 py=-93.0 npx=-388.09 npy=121.71 ry=-93.00 face=1
+[HIT_CHECK] f=14 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=4/52 hit_anim=2400 atk=-1--1 bag_hit=0
+[ROOT] f=15 anim='stance_2' fi=4 px=-293.0 py=-93.0 npx=-389.08 npy=118.65 ry=-93.00 face=1
+[HIT_CHECK] f=15 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=4/52 hit_anim=2389 atk=-1--1 bag_hit=0
+[ROOT] f=16 anim='stance_2' fi=4 px=-293.0 py=-93.0 npx=-390.06 npy=115.59 ry=-93.00 face=1
+[HIT_CHECK] f=16 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=4/52 hit_anim=2378 atk=-1--1 bag_hit=0
+[ROOT] f=17 anim='stance_2' fi=4 px=-293.0 py=-93.0 npx=-390.96 npy=112.80 ry=-93.00 face=1
+[HIT_CHECK] f=17 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=4/52 hit_anim=2368 atk=-1--1 bag_hit=0
+[ROOT] f=18 anim='stance_2' fi=4 px=-293.0 py=-93.0 npx=-392.03 npy=109.46 ry=-93.00 face=1
+[HIT_CHECK] f=18 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=4/52 hit_anim=2356 atk=-1--1 bag_hit=0
+[ROOT] f=19 anim='stance_2' fi=5 px=-293.0 py=-93.0 npx=-392.95 npy=106.62 ry=-93.00 face=1
+[HIT_CHECK] f=19 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=5/52 hit_anim=2346 atk=-1--1 bag_hit=0
+[ROOT] f=20 anim='stance_2' fi=5 px=-293.0 py=-93.0 npx=-393.97 npy=103.41 ry=-93.00 face=1
+[HIT_CHECK] f=20 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=5/52 hit_anim=2335 atk=-1--1 bag_hit=0
+[ROOT] f=21 anim='stance_2' fi=5 px=-293.0 py=-93.0 npx=-395.00 npy=100.21 ry=-93.00 face=1
+[HIT_CHECK] f=21 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=5/52 hit_anim=2324 atk=-1--1 bag_hit=0
+[ROOT] f=22 anim='stance_2' fi=5 px=-293.0 py=-93.0 npx=-396.03 npy=97.00 ry=-93.00 face=1
+[HIT_CHECK] f=22 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=5/52 hit_anim=2313 atk=-1--1 bag_hit=0
+[ROOT] f=23 anim='stance_2' fi=6 px=-293.0 py=-93.0 npx=-397.24 npy=93.20 ry=-93.00 face=1
+[HIT_CHECK] f=23 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=6/52 hit_anim=2300 atk=-1--1 bag_hit=0
+[ROOT] f=24 anim='stance_2' fi=6 px=-293.0 py=-93.0 npx=-398.30 npy=90.88 ry=-93.00 face=1
+[HIT_CHECK] f=24 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=6/52 hit_anim=2289 atk=-1--1 bag_hit=0
+[ROOT] f=25 anim='stance_2' fi=6 px=-293.0 py=-93.0 npx=-399.37 npy=88.57 ry=-93.00 face=1
+[HIT_CHECK] f=25 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=6/52 hit_anim=2278 atk=-1--1 bag_hit=0
+[ROOT] f=26 anim='stance_2' fi=6 px=-293.0 py=-93.0 npx=-400.53 npy=86.04 ry=-93.00 face=1
+[HIT_CHECK] f=26 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=6/52 hit_anim=2266 atk=-1--1 bag_hit=0
+[ROOT] f=27 anim='stance_2' fi=6 px=-293.0 py=-93.0 npx=-401.60 npy=83.72 ry=-93.00 face=1
+[HIT_CHECK] f=27 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=6/52 hit_anim=2255 atk=-1--1 bag_hit=0
+[ROOT] f=28 anim='stance_2' fi=7 px=-293.0 py=-93.0 npx=-402.82 npy=81.99 ry=-93.00 face=1
+[HIT_CHECK] f=28 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=7/52 hit_anim=2244 atk=-1--1 bag_hit=0
+[ROOT] f=29 anim='stance_2' fi=7 px=-293.0 py=-93.0 npx=-404.19 npy=80.74 ry=-93.00 face=1
+[HIT_CHECK] f=29 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=7/52 hit_anim=2233 atk=-1--1 bag_hit=0
+[ROOT] f=30 anim='stance_2' fi=7 px=-293.0 py=-93.0 npx=-405.56 npy=79.50 ry=-93.00 face=1
+[HIT_CHECK] f=30 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=7/52 hit_anim=2222 atk=-1--1 bag_hit=0
+[ROOT] f=31 anim='stance_2' fi=7 px=-293.0 py=-93.0 npx=-406.80 npy=78.37 ry=-93.00 face=1
+[HIT_CHECK] f=31 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=7/52 hit_anim=2212 atk=-1--1 bag_hit=0
+[ROOT] f=32 anim='stance_2' fi=7 px=-293.0 py=-93.0 npx=-408.16 npy=77.13 ry=-93.00 face=1
+[HIT_CHECK] f=32 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=7/52 hit_anim=2201 atk=-1--1 bag_hit=0
+[ROOT] f=33 anim='stance_2' fi=8 px=-293.0 py=-93.0 npx=-409.45 npy=77.66 ry=-93.00 face=1
+[HIT_CHECK] f=33 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=8/52 hit_anim=2191 atk=-1--1 bag_hit=0
+[ROOT] f=34 anim='stance_2' fi=8 px=-293.0 py=-93.0 npx=-410.87 npy=78.45 ry=-93.00 face=1
+[HIT_CHECK] f=34 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=8/52 hit_anim=2180 atk=-1--1 bag_hit=0
+[ROOT] f=35 anim='stance_2' fi=8 px=-293.0 py=-93.0 npx=-412.16 npy=79.17 ry=-93.00 face=1
+[HIT_CHECK] f=35 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=8/52 hit_anim=2170 atk=-1--1 bag_hit=0
+[ROOT] f=36 anim='stance_2' fi=8 px=-293.0 py=-93.0 npx=-413.44 npy=79.89 ry=-93.00 face=1
+[HIT_CHECK] f=36 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=8/52 hit_anim=2160 atk=-1--1 bag_hit=0
+[ROOT] f=37 anim='stance_2' fi=9 px=-293.0 py=-93.0 npx=-414.81 npy=80.70 ry=-93.00 face=1
+[HIT_CHECK] f=37 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=9/52 hit_anim=2149 atk=-1--1 bag_hit=0
+[ROOT] f=38 anim='stance_2' fi=9 px=-293.0 py=-93.0 npx=-415.53 npy=81.62 ry=-93.00 face=1
+[HIT_CHECK] f=38 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=9/52 hit_anim=2139 atk=-1--1 bag_hit=0
+[ROOT] f=39 anim='stance_2' fi=9 px=-293.0 py=-93.0 npx=-416.33 npy=82.63 ry=-93.00 face=1
+[HIT_CHECK] f=39 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=9/52 hit_anim=2128 atk=-1--1 bag_hit=0
+[ROOT] f=40 anim='stance_2' fi=9 px=-293.0 py=-93.0 npx=-417.13 npy=83.64 ry=-93.00 face=1
+[HIT_CHECK] f=40 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=9/52 hit_anim=2117 atk=-1--1 bag_hit=0
+[ROOT] f=41 anim='stance_2' fi=9 px=-293.0 py=-93.0 npx=-417.85 npy=84.56 ry=-93.00 face=1
+[HIT_CHECK] f=41 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=9/52 hit_anim=2107 atk=-1--1 bag_hit=0
+[ROOT] f=42 anim='stance_2' fi=10 px=-293.0 py=-93.0 npx=-418.55 npy=85.55 ry=-93.00 face=1
+[HIT_CHECK] f=42 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=10/52 hit_anim=2097 atk=-1--1 bag_hit=0
+[ROOT] f=43 anim='stance_2' fi=10 px=-293.0 py=-93.0 npx=-419.23 npy=86.83 ry=-93.00 face=1
+[HIT_CHECK] f=43 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=10/52 hit_anim=2086 atk=-1--1 bag_hit=0
+[ROOT] f=44 anim='stance_2' fi=10 px=-293.0 py=-93.0 npx=-419.92 npy=88.10 ry=-93.00 face=1
+[HIT_CHECK] f=44 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=10/52 hit_anim=2075 atk=-1--1 bag_hit=0
+[ROOT] f=45 anim='stance_2' fi=10 px=-293.0 py=-93.0 npx=-420.61 npy=89.37 ry=-93.00 face=1
+[HIT_CHECK] f=45 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=10/52 hit_anim=2064 atk=-1--1 bag_hit=0
+[ROOT] f=46 anim='stance_2' fi=10 px=-293.0 py=-93.0 npx=-421.29 npy=90.64 ry=-93.00 face=1
+[HIT_CHECK] f=46 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=10/52 hit_anim=2053 atk=-1--1 bag_hit=0
+[ROOT] f=47 anim='stance_2' fi=11 px=-293.0 py=-93.0 npx=-421.95 npy=92.05 ry=-93.00 face=1
+[HIT_CHECK] f=47 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=11/52 hit_anim=2043 atk=-1--1 bag_hit=0
+[ROOT] f=48 anim='stance_2' fi=11 px=-293.0 py=-93.0 npx=-422.70 npy=93.70 ry=-93.00 face=1
+[HIT_CHECK] f=48 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=11/52 hit_anim=2032 atk=-1--1 bag_hit=0
+[ROOT] f=49 anim='stance_2' fi=11 px=-293.0 py=-93.0 npx=-423.44 npy=95.36 ry=-93.00 face=1
+[HIT_CHECK] f=49 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=11/52 hit_anim=2021 atk=-1--1 bag_hit=0
+[ROOT] f=50 anim='stance_2' fi=11 px=-293.0 py=-93.0 npx=-424.18 npy=97.02 ry=-93.00 face=1
+[HIT_CHECK] f=50 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=11/52 hit_anim=2010 atk=-1--1 bag_hit=0
+[ROOT] f=51 anim='stance_2' fi=11 px=-293.0 py=-93.0 npx=-424.86 npy=98.53 ry=-93.00 face=1
+[HIT_CHECK] f=51 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=11/52 hit_anim=2000 atk=-1--1 bag_hit=0
+[ROOT] f=52 anim='stance_2' fi=12 px=-293.0 py=-93.0 npx=-426.30 npy=100.69 ry=-93.00 face=1
+[HIT_CHECK] f=52 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=12/52 hit_anim=1989 atk=-1--1 bag_hit=0
+[ROOT] f=53 anim='stance_2' fi=12 px=-293.0 py=-93.0 npx=-427.62 npy=102.66 ry=-93.00 face=1
+[HIT_CHECK] f=53 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=12/52 hit_anim=1979 atk=-1--1 bag_hit=0
+[ROOT] f=54 anim='stance_2' fi=12 px=-293.0 py=-93.0 npx=-429.06 npy=104.83 ry=-93.00 face=1
+[HIT_CHECK] f=54 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=12/52 hit_anim=1968 atk=-1--1 bag_hit=0
+[ROOT] f=55 anim='stance_2' fi=12 px=-293.0 py=-93.0 npx=-430.38 npy=106.79 ry=-93.00 face=1
+[HIT_CHECK] f=55 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=12/52 hit_anim=1958 atk=-1--1 bag_hit=0
+[ROOT] f=56 anim='stance_2' fi=13 px=-293.0 py=-93.0 npx=-431.84 npy=108.86 ry=-93.00 face=1
+[HIT_CHECK] f=56 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=13/52 hit_anim=1947 atk=-1--1 bag_hit=0
+[ROOT] f=57 anim='stance_2' fi=13 px=-293.0 py=-93.0 npx=-433.20 npy=110.48 ry=-93.00 face=1
+[HIT_CHECK] f=57 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=13/52 hit_anim=1937 atk=-1--1 bag_hit=0
+[ROOT] f=58 anim='stance_2' fi=13 px=-293.0 py=-93.0 npx=-434.69 npy=112.27 ry=-93.00 face=1
+[HIT_CHECK] f=58 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=13/52 hit_anim=1926 atk=-1--1 bag_hit=0
+[ROOT] f=59 anim='stance_2' fi=13 px=-293.0 py=-93.0 npx=-436.05 npy=113.90 ry=-93.00 face=1
+[HIT_CHECK] f=59 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=13/52 hit_anim=1916 atk=-1--1 bag_hit=0
+[ROOT] f=60 anim='stance_2' fi=13 px=-293.0 py=-93.0 npx=-437.41 npy=115.53 ry=-93.00 face=1
+[HIT_CHECK] f=60 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=13/52 hit_anim=1906 atk=-1--1 bag_hit=0
+[ROOT] f=61 anim='stance_2' fi=14 px=-293.0 py=-93.0 npx=-438.83 npy=117.19 ry=-93.00 face=1
+[HIT_CHECK] f=61 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=14/52 hit_anim=1896 atk=-1--1 bag_hit=0
+[ROOT] f=62 anim='stance_2' fi=14 px=-293.0 py=-93.0 npx=-440.50 npy=119.07 ry=-93.00 face=1
+[HIT_CHECK] f=62 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=14/52 hit_anim=1885 atk=-1--1 bag_hit=0
+[ROOT] f=63 anim='stance_2' fi=14 px=-293.0 py=-93.0 npx=-442.16 npy=120.94 ry=-93.00 face=1
+[HIT_CHECK] f=63 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=14/52 hit_anim=1874 atk=-1--1 bag_hit=0
+[ROOT] f=64 anim='stance_2' fi=14 px=-293.0 py=-93.0 npx=-443.67 npy=122.65 ry=-93.00 face=1
+[HIT_CHECK] f=64 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=14/52 hit_anim=1864 atk=-1--1 bag_hit=0
+[ROOT] f=65 anim='stance_2' fi=14 px=-293.0 py=-93.0 npx=-445.18 npy=124.36 ry=-93.00 face=1
+[HIT_CHECK] f=65 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=14/52 hit_anim=1854 atk=-1--1 bag_hit=0
+[ROOT] f=66 anim='stance_2' fi=15 px=-293.0 py=-93.0 npx=-446.44 npy=125.46 ry=-93.00 face=1
+[HIT_CHECK] f=66 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=15/52 hit_anim=1844 atk=-1--1 bag_hit=0
+[ROOT] f=67 anim='stance_2' fi=15 px=-293.0 py=-93.0 npx=-447.65 npy=126.21 ry=-93.00 face=1
+[HIT_CHECK] f=67 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=15/52 hit_anim=1833 atk=-1--1 bag_hit=0
+[ROOT] f=68 anim='stance_2' fi=15 px=-293.0 py=-93.0 npx=-448.75 npy=126.90 ry=-93.00 face=1
+[HIT_CHECK] f=68 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=15/52 hit_anim=1823 atk=-1--1 bag_hit=0
+[ROOT] f=69 anim='stance_2' fi=15 px=-293.0 py=-93.0 npx=-449.95 npy=127.66 ry=-93.00 face=1
+[HIT_CHECK] f=69 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=15/52 hit_anim=1812 atk=-1--1 bag_hit=0
+[ROOT] f=70 anim='stance_2' fi=15 px=-293.0 py=-93.0 npx=-451.16 npy=128.42 ry=-93.00 face=1
+[HIT_CHECK] f=70 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=15/52 hit_anim=1801 atk=-1--1 bag_hit=0
+[ROOT] f=71 anim='stance_2' fi=16 px=-293.0 py=-93.0 npx=-451.60 npy=128.32 ry=-93.00 face=1
+[HIT_CHECK] f=71 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=16/52 hit_anim=1791 atk=-1--1 bag_hit=0
+[ROOT] f=72 anim='stance_2' fi=16 px=-293.0 py=-93.0 npx=-452.01 npy=128.11 ry=-93.00 face=1
+[HIT_CHECK] f=72 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=16/52 hit_anim=1780 atk=-1--1 bag_hit=0
+[ROOT] f=73 anim='stance_2' fi=16 px=-293.0 py=-93.0 npx=-452.38 npy=127.92 ry=-93.00 face=1
+[HIT_CHECK] f=73 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=16/52 hit_anim=1770 atk=-1--1 bag_hit=0
+[ROOT] f=74 anim='stance_2' fi=16 px=-293.0 py=-93.0 npx=-452.79 npy=127.71 ry=-93.00 face=1
+[HIT_CHECK] f=74 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=16/52 hit_anim=1759 atk=-1--1 bag_hit=0
+[ROOT] f=75 anim='stance_2' fi=17 px=-293.0 py=-93.0 npx=-453.15 npy=127.42 ry=-93.00 face=1
+[HIT_CHECK] f=75 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=17/52 hit_anim=1749 atk=-1--1 bag_hit=0
+[ROOT] f=76 anim='stance_2' fi=17 px=-293.0 py=-93.0 npx=-453.38 npy=126.13 ry=-93.00 face=1
+[HIT_CHECK] f=76 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=17/52 hit_anim=1739 atk=-1--1 bag_hit=0
+[ROOT] f=77 anim='stance_2' fi=17 px=-293.0 py=-93.0 npx=-453.64 npy=124.71 ry=-93.00 face=1
+[HIT_CHECK] f=77 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=17/52 hit_anim=1728 atk=-1--1 bag_hit=0
+[ROOT] f=78 anim='stance_2' fi=17 px=-293.0 py=-93.0 npx=-453.87 npy=123.43 ry=-93.00 face=1
+[HIT_CHECK] f=78 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=17/52 hit_anim=1718 atk=-1--1 bag_hit=0
+[ROOT] f=79 anim='stance_2' fi=17 px=-293.0 py=-93.0 npx=-454.11 npy=122.14 ry=-93.00 face=1
+[HIT_CHECK] f=79 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=17/52 hit_anim=1708 atk=-1--1 bag_hit=0
+[ROOT] f=80 anim='stance_2' fi=18 px=-293.0 py=-93.0 npx=-454.33 npy=120.77 ry=-93.00 face=1
+[HIT_CHECK] f=80 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=18/52 hit_anim=1698 atk=-1--1 bag_hit=0
+[ROOT] f=81 anim='stance_2' fi=18 px=-293.0 py=-93.0 npx=-454.50 npy=119.09 ry=-93.00 face=1
+[HIT_CHECK] f=81 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=18/52 hit_anim=1688 atk=-1--1 bag_hit=0
+[ROOT] f=82 anim='stance_2' fi=18 px=-293.0 py=-93.0 npx=-454.69 npy=117.23 ry=-93.00 face=1
+[HIT_CHECK] f=82 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=18/52 hit_anim=1677 atk=-1--1 bag_hit=0
+[ROOT] f=83 anim='stance_2' fi=18 px=-293.0 py=-93.0 npx=-454.86 npy=115.55 ry=-93.00 face=1
+[HIT_CHECK] f=83 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=18/52 hit_anim=1667 atk=-1--1 bag_hit=0
+[ROOT] f=84 anim='stance_2' fi=18 px=-293.0 py=-93.0 npx=-455.05 npy=113.70 ry=-93.00 face=1
+[HIT_CHECK] f=84 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=18/52 hit_anim=1656 atk=-1--1 bag_hit=0
+[ROOT] f=85 anim='stance_2' fi=19 px=-293.0 py=-93.0 npx=-455.29 npy=112.23 ry=-93.00 face=1
+[HIT_CHECK] f=85 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=19/52 hit_anim=1646 atk=-1--1 bag_hit=0
+[ROOT] f=86 anim='stance_2' fi=19 px=-293.0 py=-93.0 npx=-455.68 npy=110.98 ry=-93.00 face=1
+[HIT_CHECK] f=86 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=19/52 hit_anim=1635 atk=-1--1 bag_hit=0
+[ROOT] f=87 anim='stance_2' fi=19 px=-293.0 py=-93.0 npx=-456.03 npy=109.85 ry=-93.00 face=1
+[HIT_CHECK] f=87 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=19/52 hit_anim=1625 atk=-1--1 bag_hit=0
+[ROOT] f=88 anim='stance_2' fi=19 px=-293.0 py=-93.0 npx=-456.42 npy=108.61 ry=-93.00 face=1
+[HIT_CHECK] f=88 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=19/52 hit_anim=1614 atk=-1--1 bag_hit=0
+[ROOT] f=89 anim='stance_2' fi=19 px=-293.0 py=-93.0 npx=-456.81 npy=107.36 ry=-93.00 face=1
+[HIT_CHECK] f=89 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=19/52 hit_anim=1603 atk=-1--1 bag_hit=0
+[ROOT] f=90 anim='stance_2' fi=20 px=-293.0 py=-93.0 npx=-457.10 npy=107.33 ry=-93.00 face=1
+[HIT_CHECK] f=90 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=20/52 hit_anim=1593 atk=-1--1 bag_hit=0
+[ROOT] f=91 anim='stance_2' fi=20 px=-293.0 py=-93.0 npx=-457.40 npy=107.83 ry=-93.00 face=1
+[HIT_CHECK] f=91 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=20/52 hit_anim=1582 atk=-1--1 bag_hit=0
+[ROOT] f=92 anim='stance_2' fi=20 px=-293.0 py=-93.0 npx=-457.67 npy=108.28 ry=-93.00 face=1
+[HIT_CHECK] f=92 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=20/52 hit_anim=1572 atk=-1--1 bag_hit=0
+[ROOT] f=93 anim='stance_2' fi=20 px=-293.0 py=-93.0 npx=-457.94 npy=108.73 ry=-93.00 face=1
+[HIT_CHECK] f=93 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=20/52 hit_anim=1562 atk=-1--1 bag_hit=0
+[ROOT] f=94 anim='stance_2' fi=20 px=-293.0 py=-93.0 npx=-458.27 npy=109.27 ry=-93.00 face=1
+[HIT_CHECK] f=94 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=20/52 hit_anim=1550 atk=-1--1 bag_hit=0
+[ROOT] f=95 anim='stance_2' fi=21 px=-293.0 py=-93.0 npx=-457.12 npy=111.20 ry=-93.00 face=1
+[HIT_CHECK] f=95 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=21/52 hit_anim=1539 atk=-1--1 bag_hit=0
+[ROOT] f=96 anim='stance_2' fi=21 px=-293.0 py=-93.0 npx=-456.08 npy=112.97 ry=-93.00 face=1
+[HIT_CHECK] f=96 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=21/52 hit_anim=1529 atk=-1--1 bag_hit=0
+[ROOT] f=97 anim='stance_2' fi=21 px=-293.0 py=-93.0 npx=-454.94 npy=114.90 ry=-93.00 face=1
+[HIT_CHECK] f=97 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=21/52 hit_anim=1518 atk=-1--1 bag_hit=0
+[ROOT] f=98 anim='stance_2' fi=21 px=-293.0 py=-93.0 npx=-453.90 npy=116.67 ry=-93.00 face=1
+[HIT_CHECK] f=98 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=21/52 hit_anim=1508 atk=-1--1 bag_hit=0
+[ROOT] f=99 anim='stance_2' fi=22 px=-293.0 py=-93.0 npx=-452.24 npy=118.78 ry=-93.00 face=1
+[HIT_CHECK] f=99 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=22/52 hit_anim=1497 atk=-1--1 bag_hit=0
+[ROOT] f=100 anim='stance_2' fi=22 px=-293.0 py=-93.0 npx=-449.19 npy=121.36 ry=-93.00 face=1
+[HIT_CHECK] f=100 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=22/52 hit_anim=1486 atk=-1--1 bag_hit=0
+[ROOT] f=101 anim='stance_2' fi=22 px=-293.0 py=-93.0 npx=-446.15 npy=123.95 ry=-93.00 face=1
+[HIT_CHECK] f=101 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=22/52 hit_anim=1475 atk=-1--1 bag_hit=0
+[ROOT] f=102 anim='stance_2' fi=22 px=-293.0 py=-93.0 npx=-443.38 npy=126.29 ry=-93.00 face=1
+[HIT_CHECK] f=102 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=22/52 hit_anim=1465 atk=-1--1 bag_hit=0
+[ROOT] f=103 anim='stance_2' fi=22 px=-293.0 py=-93.0 npx=-440.33 npy=128.88 ry=-93.00 face=1
+[HIT_CHECK] f=103 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=22/52 hit_anim=1454 atk=-1--1 bag_hit=0
+[ROOT] f=104 anim='stance_2' fi=23 px=-293.0 py=-93.0 npx=-437.30 npy=131.15 ry=-93.00 face=1
+[HIT_CHECK] f=104 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=23/52 hit_anim=1444 atk=-1--1 bag_hit=0
+[ROOT] f=105 anim='stance_2' fi=23 px=-293.0 py=-93.0 npx=-433.77 npy=133.59 ry=-93.00 face=1
+[HIT_CHECK] f=105 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=23/52 hit_anim=1433 atk=-1--1 bag_hit=0
+[ROOT] f=106 anim='stance_2' fi=23 px=-293.0 py=-93.0 npx=-430.55 npy=135.81 ry=-93.00 face=1
+[HIT_CHECK] f=106 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=23/52 hit_anim=1423 atk=-1--1 bag_hit=0
+[ROOT] f=107 anim='stance_2' fi=23 px=-293.0 py=-93.0 npx=-426.70 npy=138.47 ry=-93.00 face=1
+[HIT_CHECK] f=107 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=23/52 hit_anim=1411 atk=-1--1 bag_hit=0
+[ROOT] f=108 anim='stance_2' fi=23 px=-293.0 py=-93.0 npx=-423.49 npy=140.69 ry=-93.00 face=1
+[HIT_CHECK] f=108 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=23/52 hit_anim=1401 atk=-1--1 bag_hit=0
+[ROOT] f=109 anim='stance_2' fi=24 px=-293.0 py=-93.0 npx=-421.34 npy=141.73 ry=-93.00 face=1
+[HIT_CHECK] f=109 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=24/52 hit_anim=1390 atk=-1--1 bag_hit=0
+[ROOT] f=110 anim='stance_2' fi=24 px=-293.0 py=-93.0 npx=-419.51 npy=142.54 ry=-93.00 face=1
+[HIT_CHECK] f=110 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=24/52 hit_anim=1380 atk=-1--1 bag_hit=0
+[ROOT] f=111 anim='stance_2' fi=24 px=-293.0 py=-93.0 npx=-417.68 npy=143.35 ry=-93.00 face=1
+[HIT_CHECK] f=111 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=24/52 hit_anim=1370 atk=-1--1 bag_hit=0
+[ROOT] f=112 anim='stance_2' fi=24 px=-293.0 py=-93.0 npx=-415.67 npy=144.24 ry=-93.00 face=1
+[HIT_CHECK] f=112 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=24/52 hit_anim=1359 atk=-1--1 bag_hit=0
+[ROOT] f=113 anim='stance_2' fi=25 px=-293.0 py=-93.0 npx=-413.94 npy=144.95 ry=-93.00 face=1
+[HIT_CHECK] f=113 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=25/52 hit_anim=1349 atk=-1--1 bag_hit=0
+[ROOT] f=114 anim='stance_2' fi=25 px=-293.0 py=-93.0 npx=-413.09 npy=144.70 ry=-93.00 face=1
+[HIT_CHECK] f=114 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=25/52 hit_anim=1338 atk=-1--1 bag_hit=0
+[ROOT] f=115 anim='stance_2' fi=25 px=-293.0 py=-93.0 npx=-412.24 npy=144.45 ry=-93.00 face=1
+[HIT_CHECK] f=115 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=25/52 hit_anim=1327 atk=-1--1 bag_hit=0
+[ROOT] f=116 anim='stance_2' fi=25 px=-293.0 py=-93.0 npx=-411.38 npy=144.20 ry=-93.00 face=1
+[HIT_CHECK] f=116 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=25/52 hit_anim=1316 atk=-1--1 bag_hit=0
+[ROOT] f=117 anim='stance_2' fi=25 px=-293.0 py=-93.0 npx=-410.61 npy=143.97 ry=-93.00 face=1
+[HIT_CHECK] f=117 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=25/52 hit_anim=1306 atk=-1--1 bag_hit=0
+[ROOT] f=118 anim='stance_2' fi=26 px=-293.0 py=-93.0 npx=-410.01 npy=143.55 ry=-93.00 face=1
+[HIT_CHECK] f=118 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=26/52 hit_anim=1295 atk=-1--1 bag_hit=0
+[ROOT] f=119 anim='stance_2' fi=26 px=-293.0 py=-93.0 npx=-409.75 npy=142.97 ry=-93.00 face=1
+[HIT_CHECK] f=119 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=26/52 hit_anim=1285 atk=-1--1 bag_hit=0
+[ROOT] f=120 anim='stance_2' fi=26 px=-293.0 py=-93.0 npx=-409.46 npy=142.34 ry=-93.00 face=1
+[HIT_CHECK] f=120 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=26/52 hit_anim=1274 atk=-1--1 bag_hit=0
+[ROOT] f=121 anim='stance_2' fi=26 px=-293.0 py=-93.0 npx=-409.18 npy=141.71 ry=-93.00 face=1
+[HIT_CHECK] f=121 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=26/52 hit_anim=1263 atk=-1--1 bag_hit=0
+[ROOT] f=122 anim='stance_2' fi=26 px=-293.0 py=-93.0 npx=-408.92 npy=141.14 ry=-93.00 face=1
+[HIT_CHECK] f=122 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=26/52 hit_anim=1253 atk=-1--1 bag_hit=0
+[ROOT] f=123 anim='stance_2' fi=27 px=-293.0 py=-93.0 npx=-408.81 npy=140.58 ry=-93.00 face=1
+[HIT_CHECK] f=123 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=27/52 hit_anim=1243 atk=-1--1 bag_hit=0
+[ROOT] f=124 anim='stance_2' fi=27 px=-293.0 py=-93.0 npx=-408.76 npy=139.97 ry=-93.00 face=1
+[HIT_CHECK] f=124 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=27/52 hit_anim=1232 atk=-1--1 bag_hit=0
+[ROOT] f=125 anim='stance_2' fi=27 px=-293.0 py=-93.0 npx=-408.72 npy=139.36 ry=-93.00 face=1
+[HIT_CHECK] f=125 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=27/52 hit_anim=1221 atk=-1--1 bag_hit=0
+[ROOT] f=126 anim='stance_2' fi=27 px=-293.0 py=-93.0 npx=-408.68 npy=138.80 ry=-93.00 face=1
+[HIT_CHECK] f=126 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=27/52 hit_anim=1211 atk=-1--1 bag_hit=0
+[ROOT] f=127 anim='stance_2' fi=27 px=-293.0 py=-93.0 npx=-408.63 npy=138.19 ry=-93.00 face=1
+[HIT_CHECK] f=127 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=27/52 hit_anim=1200 atk=-1--1 bag_hit=0
+[ROOT] f=128 anim='stance_2' fi=28 px=-293.0 py=-93.0 npx=-408.72 npy=137.87 ry=-93.00 face=1
+[HIT_CHECK] f=128 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=28/52 hit_anim=1189 atk=-1--1 bag_hit=0
+[ROOT] f=129 anim='stance_2' fi=28 px=-293.0 py=-93.0 npx=-408.80 npy=137.58 ry=-93.00 face=1
+[HIT_CHECK] f=129 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=28/52 hit_anim=1179 atk=-1--1 bag_hit=0
+[ROOT] f=130 anim='stance_2' fi=28 px=-293.0 py=-93.0 npx=-408.88 npy=137.29 ry=-93.00 face=1
+[HIT_CHECK] f=130 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=28/52 hit_anim=1169 atk=-1--1 bag_hit=0
+[ROOT] f=131 anim='stance_2' fi=28 px=-293.0 py=-93.0 npx=-408.97 npy=136.98 ry=-93.00 face=1
+[HIT_CHECK] f=131 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=28/52 hit_anim=1158 atk=-1--1 bag_hit=0
+[ROOT] f=132 anim='stance_2' fi=29 px=-293.0 py=-93.0 npx=-409.05 npy=136.75 ry=-93.00 face=1
+[HIT_CHECK] f=132 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=29/52 hit_anim=1148 atk=-1--1 bag_hit=0
+[ROOT] f=133 anim='stance_2' fi=29 px=-293.0 py=-93.0 npx=-409.12 npy=136.77 ry=-93.00 face=1
+[HIT_CHECK] f=133 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=29/52 hit_anim=1138 atk=-1--1 bag_hit=0
+[ROOT] f=134 anim='stance_2' fi=29 px=-293.0 py=-93.0 npx=-409.19 npy=136.80 ry=-93.00 face=1
+[HIT_CHECK] f=134 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=29/52 hit_anim=1127 atk=-1--1 bag_hit=0
+[ROOT] f=135 anim='stance_2' fi=29 px=-293.0 py=-93.0 npx=-409.25 npy=136.83 ry=-93.00 face=1
+[HIT_CHECK] f=135 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=29/52 hit_anim=1117 atk=-1--1 bag_hit=0
+[ROOT] f=136 anim='stance_2' fi=29 px=-293.0 py=-93.0 npx=-409.32 npy=136.85 ry=-93.00 face=1
+[HIT_CHECK] f=136 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=29/52 hit_anim=1107 atk=-1--1 bag_hit=0
+[ROOT] f=137 anim='stance_2' fi=30 px=-293.0 py=-93.0 npx=-409.68 npy=136.90 ry=-93.00 face=1
+[HIT_CHECK] f=137 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=30/52 hit_anim=1096 atk=-1--1 bag_hit=0
+[ROOT] f=138 anim='stance_2' fi=30 px=-293.0 py=-93.0 npx=-410.47 npy=136.98 ry=-93.00 face=1
+[HIT_CHECK] f=138 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=30/52 hit_anim=1086 atk=-1--1 bag_hit=0
+[ROOT] f=139 anim='stance_2' fi=30 px=-293.0 py=-93.0 npx=-411.26 npy=137.05 ry=-93.00 face=1
+[HIT_CHECK] f=139 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=30/52 hit_anim=1076 atk=-1--1 bag_hit=0
+[ROOT] f=140 anim='stance_2' fi=30 px=-293.0 py=-93.0 npx=-412.13 npy=137.14 ry=-93.00 face=1
+[HIT_CHECK] f=140 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=30/52 hit_anim=1065 atk=-1--1 bag_hit=0
+[ROOT] f=141 anim='stance_2' fi=30 px=-293.0 py=-93.0 npx=-412.92 npy=137.21 ry=-93.00 face=1
+[HIT_CHECK] f=141 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=30/52 hit_anim=1055 atk=-1--1 bag_hit=0
+[ROOT] f=142 anim='stance_2' fi=31 px=-293.0 py=-93.0 npx=-414.35 npy=137.26 ry=-93.00 face=1
+[HIT_CHECK] f=142 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=31/52 hit_anim=1044 atk=-1--1 bag_hit=0
+[ROOT] f=143 anim='stance_2' fi=31 px=-293.0 py=-93.0 npx=-416.26 npy=137.27 ry=-93.00 face=1
+[HIT_CHECK] f=143 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=31/52 hit_anim=1033 atk=-1--1 bag_hit=0
+[ROOT] f=144 anim='stance_2' fi=31 px=-293.0 py=-93.0 npx=-418.16 npy=137.28 ry=-93.00 face=1
+[HIT_CHECK] f=144 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=31/52 hit_anim=1022 atk=-1--1 bag_hit=0
+[ROOT] f=145 anim='stance_2' fi=31 px=-293.0 py=-93.0 npx=-419.89 npy=137.29 ry=-93.00 face=1
+[HIT_CHECK] f=145 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=31/52 hit_anim=1012 atk=-1--1 bag_hit=0
+[ROOT] f=146 anim='stance_2' fi=31 px=-293.0 py=-93.0 npx=-421.79 npy=137.30 ry=-93.00 face=1
+[HIT_CHECK] f=146 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=31/52 hit_anim=1001 atk=-1--1 bag_hit=0
+[ROOT] f=147 anim='stance_2' fi=32 px=-293.0 py=-93.0 npx=-423.59 npy=137.32 ry=-93.00 face=1
+[HIT_CHECK] f=147 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=32/52 hit_anim=991 atk=-1--1 bag_hit=0
+[ROOT] f=148 anim='stance_2' fi=32 px=-293.0 py=-93.0 npx=-425.57 npy=137.34 ry=-93.00 face=1
+[HIT_CHECK] f=148 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=32/52 hit_anim=980 atk=-1--1 bag_hit=0
+[ROOT] f=149 anim='stance_2' fi=32 px=-293.0 py=-93.0 npx=-427.38 npy=137.36 ry=-93.00 face=1
+[HIT_CHECK] f=149 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=32/52 hit_anim=970 atk=-1--1 bag_hit=0
+[ROOT] f=150 anim='stance_2' fi=32 px=-293.0 py=-93.0 npx=-429.37 npy=137.39 ry=-93.00 face=1
+[HIT_CHECK] f=150 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=32/52 hit_anim=959 atk=-1--1 bag_hit=0
+[ROOT] f=151 anim='stance_2' fi=33 px=-293.0 py=-93.0 npx=-431.30 npy=137.34 ry=-93.00 face=1
+[HIT_CHECK] f=151 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=33/52 hit_anim=948 atk=-1--1 bag_hit=0
+[ROOT] f=152 anim='stance_2' fi=33 px=-293.0 py=-93.0 npx=-432.83 npy=136.99 ry=-93.00 face=1
+[HIT_CHECK] f=152 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=33/52 hit_anim=938 atk=-1--1 bag_hit=0
+[ROOT] f=153 anim='stance_2' fi=33 px=-293.0 py=-93.0 npx=-434.51 npy=136.61 ry=-93.00 face=1
+[HIT_CHECK] f=153 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=33/52 hit_anim=927 atk=-1--1 bag_hit=0
+[ROOT] f=154 anim='stance_2' fi=33 px=-293.0 py=-93.0 npx=-436.03 npy=136.26 ry=-93.00 face=1
+[HIT_CHECK] f=154 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=33/52 hit_anim=917 atk=-1--1 bag_hit=0
+[ROOT] f=155 anim='stance_2' fi=33 px=-293.0 py=-93.0 npx=-437.72 npy=135.87 ry=-93.00 face=1
+[HIT_CHECK] f=155 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=33/52 hit_anim=906 atk=-1--1 bag_hit=0
+[ROOT] f=156 anim='stance_2' fi=34 px=-293.0 py=-93.0 npx=-439.04 npy=135.37 ry=-93.00 face=1
+[HIT_CHECK] f=156 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=34/52 hit_anim=896 atk=-1--1 bag_hit=0
+[ROOT] f=157 anim='stance_2' fi=34 px=-293.0 py=-93.0 npx=-440.15 npy=134.57 ry=-93.00 face=1
+[HIT_CHECK] f=157 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=34/52 hit_anim=885 atk=-1--1 bag_hit=0
+[ROOT] f=158 anim='stance_2' fi=34 px=-293.0 py=-93.0 npx=-441.17 npy=133.84 ry=-93.00 face=1
+[HIT_CHECK] f=158 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=34/52 hit_anim=875 atk=-1--1 bag_hit=0
+[ROOT] f=159 anim='stance_2' fi=34 px=-293.0 py=-93.0 npx=-442.18 npy=133.11 ry=-93.00 face=1
+[HIT_CHECK] f=159 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=34/52 hit_anim=865 atk=-1--1 bag_hit=0
+[ROOT] f=160 anim='stance_2' fi=34 px=-293.0 py=-93.0 npx=-443.30 npy=132.30 ry=-93.00 face=1
+[HIT_CHECK] f=160 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=34/52 hit_anim=854 atk=-1--1 bag_hit=0
+[ROOT] f=161 anim='stance_2' fi=35 px=-293.0 py=-93.0 npx=-444.34 npy=131.58 ry=-93.00 face=1
+[HIT_CHECK] f=161 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=35/52 hit_anim=844 atk=-1--1 bag_hit=0
+[ROOT] f=162 anim='stance_2' fi=35 px=-293.0 py=-93.0 npx=-445.50 npy=130.81 ry=-93.00 face=1
+[HIT_CHECK] f=162 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=35/52 hit_anim=833 atk=-1--1 bag_hit=0
+[ROOT] f=163 anim='stance_2' fi=35 px=-293.0 py=-93.0 npx=-446.56 npy=130.10 ry=-93.00 face=1
+[HIT_CHECK] f=163 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=35/52 hit_anim=823 atk=-1--1 bag_hit=0
+[ROOT] f=164 anim='stance_2' fi=35 px=-293.0 py=-93.0 npx=-447.61 npy=129.39 ry=-93.00 face=1
+[HIT_CHECK] f=164 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=35/52 hit_anim=813 atk=-1--1 bag_hit=0
+[ROOT] f=165 anim='stance_2' fi=35 px=-293.0 py=-93.0 npx=-448.77 npy=128.62 ry=-93.00 face=1
+[HIT_CHECK] f=165 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=35/52 hit_anim=802 atk=-1--1 bag_hit=0
+[ROOT] f=166 anim='stance_2' fi=36 px=-293.0 py=-93.0 npx=-449.75 npy=128.13 ry=-93.00 face=1
+[HIT_CHECK] f=166 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=36/52 hit_anim=792 atk=-1--1 bag_hit=0
+[ROOT] f=167 anim='stance_2' fi=36 px=-293.0 py=-93.0 npx=-450.71 npy=127.71 ry=-93.00 face=1
+[HIT_CHECK] f=167 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=36/52 hit_anim=782 atk=-1--1 bag_hit=0
+[ROOT] f=168 anim='stance_2' fi=36 px=-293.0 py=-93.0 npx=-451.67 npy=127.28 ry=-93.00 face=1
+[HIT_CHECK] f=168 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=36/52 hit_anim=772 atk=-1--1 bag_hit=0
+[ROOT] f=169 anim='stance_2' fi=36 px=-293.0 py=-93.0 npx=-452.72 npy=126.81 ry=-93.00 face=1
+[HIT_CHECK] f=169 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=36/52 hit_anim=761 atk=-1--1 bag_hit=0
+[ROOT] f=170 anim='stance_2' fi=36 px=-293.0 py=-93.0 npx=-453.68 npy=126.39 ry=-93.00 face=1
+[HIT_CHECK] f=170 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=36/52 hit_anim=751 atk=-1--1 bag_hit=0
+[ROOT] f=171 anim='stance_2' fi=37 px=-293.0 py=-93.0 npx=-454.22 npy=126.09 ry=-93.00 face=1
+[HIT_CHECK] f=171 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=37/52 hit_anim=740 atk=-1--1 bag_hit=0
+[ROOT] f=172 anim='stance_2' fi=37 px=-293.0 py=-93.0 npx=-454.71 npy=125.81 ry=-93.00 face=1
+[HIT_CHECK] f=172 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=37/52 hit_anim=729 atk=-1--1 bag_hit=0
+[ROOT] f=173 anim='stance_2' fi=37 px=-293.0 py=-93.0 npx=-455.16 npy=125.55 ry=-93.00 face=1
+[HIT_CHECK] f=173 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=37/52 hit_anim=719 atk=-1--1 bag_hit=0
+[ROOT] f=174 anim='stance_2' fi=37 px=-293.0 py=-93.0 npx=-455.65 npy=125.27 ry=-93.00 face=1
+[HIT_CHECK] f=174 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=37/52 hit_anim=708 atk=-1--1 bag_hit=0
+[ROOT] f=175 anim='stance_2' fi=38 px=-293.0 py=-93.0 npx=-456.12 npy=125.04 ry=-93.00 face=1
+[HIT_CHECK] f=175 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=38/52 hit_anim=698 atk=-1--1 bag_hit=0
+[ROOT] f=176 anim='stance_2' fi=38 px=-293.0 py=-93.0 npx=-456.68 npy=124.97 ry=-93.00 face=1
+[HIT_CHECK] f=176 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=38/52 hit_anim=688 atk=-1--1 bag_hit=0
+[ROOT] f=177 anim='stance_2' fi=38 px=-293.0 py=-93.0 npx=-457.30 npy=124.88 ry=-93.00 face=1
+[HIT_CHECK] f=177 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=38/52 hit_anim=677 atk=-1--1 bag_hit=0
+[ROOT] f=178 anim='stance_2' fi=38 px=-293.0 py=-93.0 npx=-457.87 npy=124.80 ry=-93.00 face=1
+[HIT_CHECK] f=178 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=38/52 hit_anim=667 atk=-1--1 bag_hit=0
+[ROOT] f=179 anim='stance_2' fi=38 px=-293.0 py=-93.0 npx=-458.43 npy=124.72 ry=-93.00 face=1
+[HIT_CHECK] f=179 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=38/52 hit_anim=657 atk=-1--1 bag_hit=0
+[ROOT] f=180 anim='stance_2' fi=39 px=-293.0 py=-93.0 npx=-459.31 npy=124.61 ry=-93.00 face=1
+[HIT_CHECK] f=180 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=39/52 hit_anim=646 atk=-1--1 bag_hit=0
+[ROOT] f=181 anim='stance_2' fi=39 px=-293.0 py=-93.0 npx=-460.62 npy=124.46 ry=-93.00 face=1
+[HIT_CHECK] f=181 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=39/52 hit_anim=635 atk=-1--1 bag_hit=0
+[ROOT] f=182 anim='stance_2' fi=39 px=-293.0 py=-93.0 npx=-461.82 npy=124.31 ry=-93.00 face=1
+[HIT_CHECK] f=182 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=39/52 hit_anim=625 atk=-1--1 bag_hit=0
+[KEY] O pressed тАФ hit_anim=625 is_uninterrupt=0 move_state=10 current_move='StartStance'
+[INPUT_DECISION] f=182 btn=O keys_down=W just=O face=1 dir=Up ms=10 anim='stance_2' move='StartStance' hit=625 unint=0 basic=0 cand=0 sel='' reject=no_candidate
+[COMBAT] NO MOVE for Punch dir='Up' basic=0 тАФ candidates:
+  UpperCut tmpl='2key|Up|Unarmed|Punch' kc=2 tw='Fists' titan=0 anim=1
+  KatarsUpperCut tmpl='2key|Up|Unarmed|Punch' kc=2 tw='Katars|MonkKatars' titan=0 anim=1
+[ROOT] f=183 anim='stance_2' fi=39 px=-293.0 py=-93.0 npx=-463.13 npy=124.16 ry=-93.00 face=1
+[HIT_CHECK] f=183 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=39/52 hit_anim=614 atk=-1--1 bag_hit=0
+[ROOT] f=184 anim='stance_2' fi=39 px=-293.0 py=-93.0 npx=-464.32 npy=124.02 ry=-93.00 face=1
+[HIT_CHECK] f=184 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=39/52 hit_anim=604 atk=-1--1 bag_hit=0
+[KEY] P pressed тАФ hit_anim=604 is_uninterrupt=0 move_state=10 current_move='StartStance'
+[INPUT_DECISION] f=184 btn=P keys_down=W just=P face=1 dir=Up ms=10 anim='stance_2' move='StartStance' hit=604 unint=0 basic=0 cand=0 sel='' reject=no_candidate
+[COMBAT] NO MOVE for Kick dir='Up' basic=0 тАФ candidates:
+[ROOT] f=185 anim='stance_2' fi=40 px=-293.0 py=-93.0 npx=-466.03 npy=123.65 ry=-93.00 face=1
+[HIT_CHECK] f=185 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=40/52 hit_anim=594 atk=-1--1 bag_hit=0
+[ROOT] f=186 anim='stance_2' fi=40 px=-293.0 py=-93.0 npx=-468.29 npy=123.08 ry=-93.00 face=1
+[HIT_CHECK] f=186 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=40/52 hit_anim=583 atk=-1--1 bag_hit=0
+[ROOT] f=187 anim='stance_2' fi=40 px=-293.0 py=-93.0 npx=-470.34 npy=122.56 ry=-93.00 face=1
+[HIT_CHECK] f=187 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=40/52 hit_anim=573 atk=-1--1 bag_hit=0
+[ROOT] f=188 anim='stance_2' fi=40 px=-293.0 py=-93.0 npx=-472.39 npy=122.05 ry=-93.00 face=1
+[HIT_CHECK] f=188 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=40/52 hit_anim=563 atk=-1--1 bag_hit=0
+[ROOT] f=189 anim='stance_2' fi=40 px=-293.0 py=-93.0 npx=-474.44 npy=121.53 ry=-93.00 face=1
+[HIT_CHECK] f=189 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=40/52 hit_anim=553 atk=-1--1 bag_hit=0
+[ROOT] f=190 anim='stance_2' fi=41 px=-293.0 py=-93.0 npx=-477.12 npy=120.09 ry=-93.00 face=1
+[HIT_CHECK] f=190 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=41/52 hit_anim=542 atk=-1--1 bag_hit=0
+[ROOT] f=191 anim='stance_2' fi=41 px=-293.0 py=-93.0 npx=-479.70 npy=118.50 ry=-93.00 face=1
+[HIT_CHECK] f=191 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=41/52 hit_anim=532 atk=-1--1 bag_hit=0
+[ROOT] f=192 anim='stance_2' fi=41 px=-293.0 py=-93.0 npx=-482.54 npy=116.74 ry=-93.00 face=1
+[HIT_CHECK] f=192 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=41/52 hit_anim=521 atk=-1--1 bag_hit=0
+[ROOT] f=193 anim='stance_2' fi=41 px=-293.0 py=-93.0 npx=-485.12 npy=115.14 ry=-93.00 face=1
+[HIT_CHECK] f=193 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=41/52 hit_anim=511 atk=-1--1 bag_hit=0
+[ROOT] f=194 anim='stance_2' fi=42 px=-293.0 py=-93.0 npx=-487.96 npy=113.39 ry=-93.00 face=1
+[HIT_CHECK] f=194 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=42/52 hit_anim=500 atk=-1--1 bag_hit=0
+[ROOT] f=195 anim='stance_2' fi=42 px=-293.0 py=-93.0 npx=-490.98 npy=111.26 ry=-93.00 face=1
+[HIT_CHECK] f=195 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=42/52 hit_anim=490 atk=-1--1 bag_hit=0
+[ROOT] f=196 anim='stance_2' fi=42 px=-293.0 py=-93.0 npx=-494.31 npy=108.92 ry=-93.00 face=1
+[HIT_CHECK] f=196 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=42/52 hit_anim=479 atk=-1--1 bag_hit=0
+[ROOT] f=197 anim='stance_2' fi=42 px=-293.0 py=-93.0 npx=-497.64 npy=106.58 ry=-93.00 face=1
+[HIT_CHECK] f=197 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=42/52 hit_anim=468 atk=-1--1 bag_hit=0
+[ROOT] f=198 anim='stance_2' fi=42 px=-293.0 py=-93.0 npx=-500.67 npy=104.45 ry=-93.00 face=1
+[HIT_CHECK] f=198 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=42/52 hit_anim=458 atk=-1--1 bag_hit=0
+[ROOT] f=199 anim='stance_2' fi=43 px=-293.0 py=-93.0 npx=-503.98 npy=102.23 ry=-93.00 face=1
+[HIT_CHECK] f=199 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=43/52 hit_anim=447 atk=-1--1 bag_hit=0
+[ROOT] f=200 anim='stance_2' fi=43 px=-293.0 py=-93.0 npx=-506.95 npy=100.48 ry=-93.00 face=1
+[HIT_CHECK] f=200 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=43/52 hit_anim=437 atk=-1--1 bag_hit=0
+[ROOT] f=201 anim='stance_2' fi=43 px=-293.0 py=-93.0 npx=-509.92 npy=98.73 ry=-93.00 face=1
+[HIT_CHECK] f=201 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=43/52 hit_anim=427 atk=-1--1 bag_hit=0
+[ROOT] f=202 anim='stance_2' fi=43 px=-293.0 py=-93.0 npx=-513.19 npy=96.80 ry=-93.00 face=1
+[HIT_CHECK] f=202 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=43/52 hit_anim=416 atk=-1--1 bag_hit=0
+[ROOT] f=203 anim='stance_2' fi=43 px=-293.0 py=-93.0 npx=-516.15 npy=95.05 ry=-93.00 face=1
+[HIT_CHECK] f=203 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=43/52 hit_anim=406 atk=-1--1 bag_hit=0
+[ROOT] f=204 anim='stance_2' fi=44 px=-293.0 py=-93.0 npx=-518.94 npy=93.43 ry=-93.00 face=1
+[HIT_CHECK] f=204 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=44/52 hit_anim=395 atk=-1--1 bag_hit=0
+[ROOT] f=205 anim='stance_2' fi=44 px=-293.0 py=-93.0 npx=-521.14 npy=92.18 ry=-93.00 face=1
+[HIT_CHECK] f=205 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=44/52 hit_anim=384 atk=-1--1 bag_hit=0
+[ROOT] f=206 anim='stance_2' fi=44 px=-293.0 py=-93.0 npx=-523.15 npy=91.05 ry=-93.00 face=1
+[HIT_CHECK] f=206 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=44/52 hit_anim=374 atk=-1--1 bag_hit=0
+[ROOT] f=207 anim='stance_2' fi=44 px=-293.0 py=-93.0 npx=-525.15 npy=89.91 ry=-93.00 face=1
+[HIT_CHECK] f=207 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=44/52 hit_anim=364 atk=-1--1 bag_hit=0
+[ROOT] f=208 anim='stance_2' fi=44 px=-293.0 py=-93.0 npx=-527.36 npy=88.66 ry=-93.00 face=1
+[HIT_CHECK] f=208 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=44/52 hit_anim=353 atk=-1--1 bag_hit=0
+[ROOT] f=209 anim='stance_2' fi=45 px=-293.0 py=-93.0 npx=-528.45 npy=87.98 ry=-93.00 face=1
+[HIT_CHECK] f=209 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=45/52 hit_anim=343 atk=-1--1 bag_hit=0
+[ROOT] f=210 anim='stance_2' fi=45 px=-293.0 py=-93.0 npx=-529.16 npy=87.50 ry=-93.00 face=1
+[HIT_CHECK] f=210 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=45/52 hit_anim=333 atk=-1--1 bag_hit=0
+[ROOT] f=211 anim='stance_2' fi=45 px=-293.0 py=-93.0 npx=-529.93 npy=86.97 ry=-93.00 face=1
+[HIT_CHECK] f=211 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=45/52 hit_anim=322 atk=-1--1 bag_hit=0
+[ROOT] f=212 anim='stance_2' fi=45 px=-293.0 py=-93.0 npx=-530.71 npy=86.44 ry=-93.00 face=1
+[HIT_CHECK] f=212 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=45/52 hit_anim=311 atk=-1--1 bag_hit=0
+[ROOT] f=213 anim='stance_2' fi=45 px=-293.0 py=-93.0 npx=-531.49 npy=85.91 ry=-93.00 face=1
+[HIT_CHECK] f=213 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=45/52 hit_anim=300 atk=-1--1 bag_hit=0
+[ROOT] f=214 anim='stance_2' fi=46 px=-293.0 py=-93.0 npx=-531.59 npy=85.83 ry=-93.00 face=1
+[HIT_CHECK] f=214 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=46/52 hit_anim=290 atk=-1--1 bag_hit=0
+[ROOT] f=215 anim='stance_2' fi=46 px=-293.0 py=-93.0 npx=-531.68 npy=85.76 ry=-93.00 face=1
+[HIT_CHECK] f=215 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=46/52 hit_anim=280 atk=-1--1 bag_hit=0
+[ROOT] f=216 anim='stance_2' fi=46 px=-293.0 py=-93.0 npx=-531.79 npy=85.67 ry=-93.00 face=1
+[HIT_CHECK] f=216 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=46/52 hit_anim=269 atk=-1--1 bag_hit=0
+[ROOT] f=217 anim='stance_2' fi=46 px=-293.0 py=-93.0 npx=-531.89 npy=85.60 ry=-93.00 face=1
+[HIT_CHECK] f=217 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=46/52 hit_anim=259 atk=-1--1 bag_hit=0
+[ROOT] f=218 anim='stance_2' fi=47 px=-293.0 py=-93.0 npx=-531.95 npy=85.55 ry=-93.00 face=1
+[HIT_CHECK] f=218 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=47/52 hit_anim=248 atk=-1--1 bag_hit=0
+[ROOT] f=219 anim='stance_2' fi=47 px=-293.0 py=-93.0 npx=-531.80 npy=85.67 ry=-93.00 face=1
+[HIT_CHECK] f=219 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=47/52 hit_anim=238 atk=-1--1 bag_hit=0
+[ROOT] f=220 anim='stance_2' fi=47 px=-293.0 py=-93.0 npx=-531.64 npy=85.78 ry=-93.00 face=1
+[HIT_CHECK] f=220 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=47/52 hit_anim=228 atk=-1--1 bag_hit=0
+[ROOT] f=221 anim='stance_2' fi=47 px=-293.0 py=-93.0 npx=-531.48 npy=85.91 ry=-93.00 face=1
+[HIT_CHECK] f=221 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=47/52 hit_anim=217 atk=-1--1 bag_hit=0
+[ROOT] f=222 anim='stance_2' fi=47 px=-293.0 py=-93.0 npx=-531.33 npy=86.02 ry=-93.00 face=1
+[HIT_CHECK] f=222 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=47/52 hit_anim=207 atk=-1--1 bag_hit=0
+[ROOT] f=223 anim='stance_2' fi=48 px=-293.0 py=-93.0 npx=-531.17 npy=86.15 ry=-93.00 face=1
+[HIT_CHECK] f=223 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=48/52 hit_anim=197 atk=-1--1 bag_hit=0
+[ROOT] f=224 anim='stance_2' fi=48 px=-293.0 py=-93.0 npx=-530.96 npy=86.37 ry=-93.00 face=1
+[HIT_CHECK] f=224 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=48/52 hit_anim=185 atk=-1--1 bag_hit=0
+[ROOT] f=225 anim='stance_2' fi=48 px=-293.0 py=-93.0 npx=-530.77 npy=86.57 ry=-93.00 face=1
+[HIT_CHECK] f=225 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=48/52 hit_anim=174 atk=-1--1 bag_hit=0
+[ROOT] f=226 anim='stance_2' fi=48 px=-293.0 py=-93.0 npx=-530.60 npy=86.75 ry=-93.00 face=1
+[HIT_CHECK] f=226 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=48/52 hit_anim=164 atk=-1--1 bag_hit=0
+[ROOT] f=227 anim='stance_2' fi=48 px=-293.0 py=-93.0 npx=-530.41 npy=86.95 ry=-93.00 face=1
+[HIT_CHECK] f=227 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=48/52 hit_anim=153 atk=-1--1 bag_hit=0
+[ROOT] f=228 anim='stance_2' fi=49 px=-293.0 py=-93.0 npx=-530.27 npy=87.13 ry=-93.00 face=1
+[HIT_CHECK] f=228 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=49/52 hit_anim=142 atk=-1--1 bag_hit=0
+[ROOT] f=229 anim='stance_2' fi=49 px=-293.0 py=-93.0 npx=-530.15 npy=87.30 ry=-93.00 face=1
+[HIT_CHECK] f=229 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=49/52 hit_anim=132 atk=-1--1 bag_hit=0
+[ROOT] f=230 anim='stance_2' fi=49 px=-293.0 py=-93.0 npx=-530.03 npy=87.48 ry=-93.00 face=1
+[HIT_CHECK] f=230 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=49/52 hit_anim=121 atk=-1--1 bag_hit=0
+[ROOT] f=231 anim='stance_2' fi=49 px=-293.0 py=-93.0 npx=-529.92 npy=87.64 ry=-93.00 face=1
+[HIT_CHECK] f=231 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=49/52 hit_anim=111 atk=-1--1 bag_hit=0
+[ROOT] f=232 anim='stance_2' fi=49 px=-293.0 py=-93.0 npx=-529.80 npy=87.82 ry=-93.00 face=1
+[HIT_CHECK] f=232 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=49/52 hit_anim=100 atk=-1--1 bag_hit=0
+[ROOT] f=233 anim='stance_2' fi=50 px=-293.0 py=-93.0 npx=-529.80 npy=87.81 ry=-93.00 face=1
+[HIT_CHECK] f=233 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=50/52 hit_anim=90 atk=-1--1 bag_hit=0
+[ROOT] f=234 anim='stance_2' fi=50 px=-293.0 py=-93.0 npx=-529.82 npy=87.79 ry=-93.00 face=1
+[HIT_CHECK] f=234 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=50/52 hit_anim=79 atk=-1--1 bag_hit=0
+[ROOT] f=235 anim='stance_2' fi=50 px=-293.0 py=-93.0 npx=-529.83 npy=87.78 ry=-93.00 face=1
+[HIT_CHECK] f=235 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=50/52 hit_anim=68 atk=-1--1 bag_hit=0
+[ROOT] f=236 anim='stance_2' fi=50 px=-293.0 py=-93.0 npx=-529.84 npy=87.76 ry=-93.00 face=1
+[HIT_CHECK] f=236 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=50/52 hit_anim=58 atk=-1--1 bag_hit=0
+[ROOT] f=237 anim='stance_2' fi=51 px=-293.0 py=-93.0 npx=-529.84 npy=87.75 ry=-93.00 face=1
+[HIT_CHECK] f=237 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=51/52 hit_anim=47 atk=-1--1 bag_hit=0
+[ROOT] f=238 anim='stance_2' fi=51 px=-293.0 py=-93.0 npx=-529.84 npy=87.75 ry=-93.00 face=1
+[HIT_CHECK] f=238 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=51/52 hit_anim=37 atk=-1--1 bag_hit=0
+[ROOT] f=239 anim='stance_2' fi=51 px=-293.0 py=-93.0 npx=-529.84 npy=87.75 ry=-93.00 face=1
+[HIT_CHECK] f=239 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=51/52 hit_anim=27 atk=-1--1 bag_hit=0
+[ROOT] f=240 anim='stance_2' fi=51 px=-293.0 py=-93.0 npx=-529.84 npy=87.75 ry=-93.00 face=1
+[HIT_CHECK] f=240 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=51/52 hit_anim=16 atk=-1--1 bag_hit=0
+[ROOT] f=241 anim='stance_2' fi=51 px=-293.0 py=-93.0 npx=-529.84 npy=87.75 ry=-93.00 face=1
+[HIT_CHECK] f=241 move='StartStance' anim='stance_2' exp_anim='' match=0 frame=51/52 hit_anim=6 atk=-1--1 bag_hit=0
+[STATE] move_state 10->0 (special ended), current_move='StartStance'
+[ROOT] f=242 anim='stance_2' fi=51 px=-293.0 py=-93.0 npx=-529.84 npy=87.75 ry=-93.00 face=1
+[ANIM] play_animation('stance_idle', loop=1) тАФ switching from 'stance_2'
+[ROOT] f=243 anim='stance_idle' fi=0 px=-293.0 py=-93.0 npx=-392.49 npy=105.79 ry=-93.00 face=1
+[ANIM] 'stance_idle' frame=0/79 anim_node_pos_.size()=67  npivot_idx=18
+  NPivot     anim_local=(   0.00, 169.28)  rest=( -15.83, 169.48)
+  NHip_1     anim_local=(  10.70, 169.34)  rest=(  -4.95, 171.10)
+  NHip_2     anim_local=( -10.70, 169.22)  rest=( -26.71, 167.87)
+  NKnee_1    anim_local=(  60.62, 136.89)  rest=(  19.14, 187.20)
+  NKnee_2    anim_local=( -32.43, 127.28)  rest=( -41.69, 143.07)
+  NAnkle_1   anim_local=(  55.88,  77.98)  rest=(   6.19, 130.31)
+  NAnkle_2   anim_local=( -31.06,  76.93)  rest=( -32.41,  90.29)
+  NToe_1     anim_local=(  69.67,  65.31)  rest=(   4.86, 112.89)
+  NToe_2     anim_local=( -32.66,  64.41)  rest=( -27.23,  72.75)
+[ROOT] f=244 anim='stance_idle' fi=0 px=-293.0 py=-93.0 npx=-392.47 npy=105.78 ry=-93.00 face=1
+[ROOT] f=245 anim='stance_idle' fi=0 px=-293.0 py=-93.0 npx=-392.46 npy=105.78 ry=-93.00 face=1
+[STEPDBG] f=245 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=246 anim='stance_idle' fi=0 px=-293.0 py=-93.0 npx=-392.44 npy=105.77 ry=-93.00 face=1
+[STEPDBG] f=246 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=247 anim='stance_idle' fi=1 px=-293.0 py=-93.0 npx=-392.43 npy=105.76 ry=-93.00 face=1
+[STEPDBG] f=247 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=248 anim='stance_idle' fi=1 px=-293.0 py=-93.0 npx=-392.40 npy=105.74 ry=-93.00 face=1
+[STEPDBG] f=248 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=249 anim='stance_idle' fi=1 px=-293.0 py=-93.0 npx=-392.37 npy=105.72 ry=-93.00 face=1
+[STEPDBG] f=249 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=250 anim='stance_idle' fi=1 px=-293.0 py=-93.0 npx=-392.34 npy=105.71 ry=-93.00 face=1
+[STEPDBG] f=250 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=251 anim='stance_idle' fi=1 px=-293.0 py=-93.0 npx=-392.31 npy=105.69 ry=-93.00 face=1
+[STEPDBG] f=251 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=252 anim='stance_idle' fi=2 px=-293.0 py=-93.0 npx=-392.27 npy=105.67 ry=-93.00 face=1
+[STEPDBG] f=252 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=253 anim='stance_idle' fi=2 px=-293.0 py=-93.0 npx=-392.22 npy=105.63 ry=-93.00 face=1
+[STEPDBG] f=253 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=254 anim='stance_idle' fi=2 px=-293.0 py=-93.0 npx=-392.17 npy=105.60 ry=-93.00 face=1
+[STEPDBG] f=254 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=255 anim='stance_idle' fi=2 px=-293.0 py=-93.0 npx=-392.11 npy=105.56 ry=-93.00 face=1
+[STEPDBG] f=255 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=256 anim='stance_idle' fi=2 px=-293.0 py=-93.0 npx=-392.06 npy=105.53 ry=-93.00 face=1
+[STEPDBG] f=256 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=257 anim='stance_idle' fi=3 px=-293.0 py=-93.0 npx=-392.00 npy=105.49 ry=-93.00 face=1
+[STEPDBG] f=257 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=258 anim='stance_idle' fi=3 px=-293.0 py=-93.0 npx=-391.92 npy=105.44 ry=-93.00 face=1
+[STEPDBG] f=258 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=259 anim='stance_idle' fi=3 px=-293.0 py=-93.0 npx=-391.85 npy=105.39 ry=-93.00 face=1
+[STEPDBG] f=259 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=260 anim='stance_idle' fi=3 px=-293.0 py=-93.0 npx=-391.77 npy=105.34 ry=-93.00 face=1
+[STEPDBG] f=260 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=261 anim='stance_idle' fi=3 px=-293.0 py=-93.0 npx=-391.69 npy=105.28 ry=-93.00 face=1
+[STEPDBG] f=261 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=262 anim='stance_idle' fi=4 px=-293.0 py=-93.0 npx=-391.61 npy=105.22 ry=-93.00 face=1
+[STEPDBG] f=262 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=263 anim='stance_idle' fi=4 px=-293.0 py=-93.0 npx=-391.52 npy=105.16 ry=-93.00 face=1
+[STEPDBG] f=263 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=264 anim='stance_idle' fi=4 px=-293.0 py=-93.0 npx=-391.43 npy=105.09 ry=-93.00 face=1
+[STEPDBG] f=264 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=265 anim='stance_idle' fi=4 px=-293.0 py=-93.0 npx=-391.34 npy=105.02 ry=-93.00 face=1
+[STEPDBG] f=265 ms=0 ss=0 ha=0 anim='stance_idle' kf=0 kb=0 kd=0 sf='step_forward'
+[ROOT] f=266 anim='stance_idle' fi=5 px=-293.0 py=-93.0 npx=-391.25 npy=104.96 ry=-93.00 face=1
+[ROOT] f=267 anim='stance_idle' fi=5 px=-293.0 py=-93.0 npx=-391.16 npy=104.88 ry=-93.00 face=1
+[ROOT] f=268 anim='stance_idle' fi=5 px=-293.0 py=-93.0 npx=-391.07 npy=104.81 ry=-93.00 face=1
+[ROOT] f=269 anim='stance_idle' fi=5 px=-293.0 py=-93.0 npx=-390.97 npy=104.72 ry=-93.00 face=1
+[ROOT] f=270 anim='stance_idle' fi=5 px=-293.0 py=-93.0 npx=-390.88 npy=104.64 ry=-93.00 face=1
+[ROOT] f=271 anim='stance_idle' fi=6 px=-293.0 py=-93.0 npx=-390.79 npy=104.56 ry=-93.00 face=1
+[ROOT] f=272 anim='stance_idle' fi=6 px=-293.0 py=-93.0 npx=-390.68 npy=104.47 ry=-93.00 face=1
+[ROOT] f=273 anim='stance_idle' fi=6 px=-293.0 py=-93.0 npx=-390.58 npy=104.37 ry=-93.00 face=1
+[ROOT] f=274 anim='stance_idle' fi=6 px=-293.0 py=-93.0 npx=-390.49 npy=104.29 ry=-93.00 face=1
+[ROOT] f=275 anim='stance_idle' fi=6 px=-293.0 py=-93.0 npx=-390.38 npy=104.18 ry=-93.00 face=1
+[ROOT] f=276 anim='stance_idle' fi=7 px=-293.0 py=-93.0 npx=-390.29 npy=104.09 ry=-93.00 face=1
+[ROOT] f=277 anim='stance_idle' fi=7 px=-293.0 py=-93.0 npx=-390.20 npy=103.98 ry=-93.00 face=1
+[ROOT] f=278 anim='stance_idle' fi=7 px=-293.0 py=-93.0 npx=-390.11 npy=103.88 ry=-93.00 face=1
+[ROOT] f=279 anim='stance_idle' fi=7 px=-293.0 py=-93.0 npx=-390.02 npy=103.78 ry=-93.00 face=1
+[ROOT] f=280 anim='stance_idle' fi=7 px=-293.0 py=-93.0 npx=-389.93 npy=103.68 ry=-93.00 face=1
+[ROOT] f=281 anim='stance_idle' fi=8 px=-293.0 py=-93.0 npx=-389.84 npy=103.56 ry=-93.00 face=1
+[ROOT] f=282 anim='stance_idle' fi=8 px=-293.0 py=-93.0 npx=-389.76 npy=103.45 ry=-93.00 face=1
+[ROOT] f=283 anim='stance_idle' fi=8 px=-293.0 py=-93.0 npx=-389.68 npy=103.34 ry=-93.00 face=1
+[ROOT] f=284 anim='stance_idle' fi=8 px=-293.0 py=-93.0 npx=-389.60 npy=103.23 ry=-93.00 face=1
+[ROOT] f=285 anim='stance_idle' fi=9 px=-293.0 py=-93.0 npx=-389.52 npy=103.12 ry=-93.00 face=1
+[ROOT] f=286 anim='stance_idle' fi=9 px=-293.0 py=-93.0 npx=-389.46 npy=103.00 ry=-93.00 face=1
+[ROOT] f=287 anim='stance_idle' fi=9 px=-293.0 py=-93.0 npx=-389.40 npy=102.89 ry=-93.00 face=1
+[ROOT] f=288 anim='stance_idle' fi=9 px=-293.0 py=-93.0 npx=-389.33 npy=102.76 ry=-93.00 face=1
+[ROOT] f=289 anim='stance_idle' fi=9 px=-293.0 py=-93.0 npx=-389.27 npy=102.65 ry=-93.00 face=1
+[ROOT] f=290 anim='stance_idle' fi=10 px=-293.0 py=-93.0 npx=-389.22 npy=102.53 ry=-93.00 face=1
+[ROOT] f=291 anim='stance_idle' fi=10 px=-293.0 py=-93.0 npx=-389.17 npy=102.40 ry=-93.00 face=1
+[ROOT] f=292 anim='stance_idle' fi=10 px=-293.0 py=-93.0 npx=-389.14 npy=102.28 ry=-93.00 face=1
+[ROOT] f=293 anim='stance_idle' fi=10 px=-293.0 py=-93.0 npx=-389.10 npy=102.16 ry=-93.00 face=1
+[ROOT] f=294 anim='stance_idle' fi=10 px=-293.0 py=-93.0 npx=-389.05 npy=102.03 ry=-93.00 face=1
+[ROOT] f=295 anim='stance_idle' fi=11 px=-293.0 py=-93.0 npx=-389.02 npy=101.89 ry=-93.00 face=1
+[ROOT] f=296 anim='stance_idle' fi=11 px=-293.0 py=-93.0 npx=-389.01 npy=101.75 ry=-93.00 face=1
+[ROOT] f=297 anim='stance_idle' fi=11 px=-293.0 py=-93.0 npx=-388.99 npy=101.61 ry=-93.00 face=1
+[ROOT] f=298 anim='stance_idle' fi=11 px=-293.0 py=-93.0 npx=-388.97 npy=101.38 ry=-93.00 face=1
+[ROOT] f=299 anim='stance_idle' fi=12 px=-293.0 py=-93.0 npx=-388.97 npy=101.24 ry=-93.00 face=1
+[ROOT] f=300 anim='stance_idle' fi=12 px=-293.0 py=-93.0 npx=-388.98 npy=101.09 ry=-93.00 face=1
+[ROOT] f=301 anim='stance_idle' fi=12 px=-293.0 py=-93.0 npx=-388.99 npy=100.97 ry=-93.00 face=1
+[ROOT] f=302 anim='stance_idle' fi=12 px=-293.0 py=-93.0 npx=-389.00 npy=100.83 ry=-93.00 face=1
+[ROOT] f=303 anim='stance_idle' fi=12 px=-293.0 py=-93.0 npx=-389.01 npy=100.70 ry=-93.00 face=1
+[ROOT] f=304 anim='stance_idle' fi=13 px=-293.0 py=-93.0 npx=-389.05 npy=100.57 ry=-93.00 face=1
+[ROOT] f=305 anim='stance_idle' fi=13 px=-293.0 py=-93.0 npx=-389.08 npy=100.45 ry=-93.00 face=1
+[ROOT] f=306 anim='stance_idle' fi=13 px=-293.0 py=-93.0 npx=-389.12 npy=100.31 ry=-93.00 face=1
+[ROOT] f=307 anim='stance_idle' fi=13 px=-293.0 py=-93.0 npx=-389.15 npy=100.18 ry=-93.00 face=1
+[ROOT] f=308 anim='stance_idle' fi=14 px=-293.0 py=-93.0 npx=-389.18 npy=100.06 ry=-93.00 face=1
+[ROOT] f=309 anim='stance_idle' fi=14 px=-293.0 py=-93.0 npx=-389.23 npy=99.93 ry=-93.00 face=1
+[ROOT] f=310 anim='stance_idle' fi=14 px=-293.0 py=-93.0 npx=-389.29 npy=99.80 ry=-93.00 face=1
+[ROOT] f=311 anim='stance_idle' fi=14 px=-293.0 py=-93.0 npx=-389.34 npy=99.68 ry=-93.00 face=1
+[ROOT] f=312 anim='stance_idle' fi=14 px=-293.0 py=-93.0 npx=-389.40 npy=99.53 ry=-93.00 face=1
+[ROOT] f=313 anim='stance_idle' fi=15 px=-293.0 py=-93.0 npx=-389.46 npy=99.42 ry=-93.00 face=1
+[ROOT] f=314 anim='stance_idle' fi=15 px=-293.0 py=-93.0 npx=-389.54 npy=99.29 ry=-93.00 face=1
+[ROOT] f=315 anim='stance_idle' fi=15 px=-293.0 py=-93.0 npx=-389.61 npy=99.18 ry=-93.00 face=1
+[ROOT] f=316 anim='stance_idle' fi=15 px=-293.0 py=-93.0 npx=-389.68 npy=99.06 ry=-93.00 face=1
+[ROOT] f=317 anim='stance_idle' fi=15 px=-293.0 py=-93.0 npx=-389.76 npy=98.93 ry=-93.00 face=1
+[ROOT] f=318 anim='stance_idle' fi=16 px=-293.0 py=-93.0 npx=-389.84 npy=98.82 ry=-93.00 face=1
+[ROOT] f=319 anim='stance_idle' fi=16 px=-293.0 py=-93.0 npx=-389.93 npy=98.71 ry=-93.00 face=1
+[ROOT] f=320 anim='stance_idle' fi=16 px=-293.0 py=-93.0 npx=-390.02 npy=98.60 ry=-93.00 face=1
+[ROOT] f=321 anim='stance_idle' fi=16 px=-293.0 py=-93.0 npx=-390.11 npy=98.50 ry=-93.00 face=1
+[ROOT] f=322 anim='stance_idle' fi=17 px=-293.0 py=-93.0 npx=-390.20 npy=98.39 ry=-93.00 face=1
+[ROOT] f=323 anim='stance_idle' fi=17 px=-293.0 py=-93.0 npx=-390.30 npy=98.29 ry=-93.00 face=1
+[ROOT] f=324 anim='stance_idle' fi=17 px=-293.0 py=-93.0 npx=-390.41 npy=98.19 ry=-93.00 face=1
+[ROOT] f=325 anim='stance_idle' fi=17 px=-293.0 py=-93.0 npx=-390.52 npy=98.10 ry=-93.00 face=1
+[ROOT] f=326 anim='stance_idle' fi=17 px=-293.0 py=-93.0 npx=-390.61 npy=98.01 ry=-93.00 face=1
+[ROOT] f=327 anim='stance_idle' fi=18 px=-293.0 py=-93.0 npx=-390.72 npy=97.93 ry=-93.00 face=1
+[ROOT] f=328 anim='stance_idle' fi=18 px=-293.0 py=-93.0 npx=-390.83 npy=97.86 ry=-93.00 face=1
+[ROOT] f=329 anim='stance_idle' fi=18 px=-293.0 py=-93.0 npx=-390.94 npy=97.79 ry=-93.00 face=1
+[ROOT] f=330 anim='stance_idle' fi=18 px=-293.0 py=-93.0 npx=-391.06 npy=97.72 ry=-93.00 face=1
+[ROOT] f=331 anim='stance_idle' fi=18 px=-293.0 py=-93.0 npx=-391.17 npy=97.64 ry=-93.00 face=1
+[ROOT] f=332 anim='stance_idle' fi=19 px=-293.0 py=-93.0 npx=-391.29 npy=97.60 ry=-93.00 face=1
+[ROOT] f=333 anim='stance_idle' fi=19 px=-293.0 py=-93.0 npx=-391.41 npy=97.55 ry=-93.00 face=1
+[ROOT] f=334 anim='stance_idle' fi=19 px=-293.0 py=-93.0 npx=-391.54 npy=97.50 ry=-93.00 face=1
+[ROOT] f=335 anim='stance_idle' fi=19 px=-293.0 py=-93.0 npx=-391.65 npy=97.45 ry=-93.00 face=1
+[ROOT] f=336 anim='stance_idle' fi=20 px=-293.0 py=-93.0 npx=-391.78 npy=97.42 ry=-93.00 face=1
+[ROOT] f=337 anim='stance_idle' fi=20 px=-293.0 py=-93.0 npx=-391.91 npy=97.40 ry=-93.00 face=1
+[ROOT] f=338 anim='stance_idle' fi=20 px=-293.0 py=-93.0 npx=-392.04 npy=97.38 ry=-93.00 face=1
+[ROOT] f=339 anim='stance_idle' fi=20 px=-293.0 py=-93.0 npx=-392.16 npy=97.36 ry=-93.00 face=1
+[ROOT] f=340 anim='stance_idle' fi=21 px=-293.0 py=-93.0 npx=-392.29 npy=97.34 ry=-93.00 face=1
+[ROOT] f=341 anim='stance_idle' fi=21 px=-293.0 py=-93.0 npx=-392.40 npy=97.34 ry=-93.00 face=1
+[ROOT] f=342 anim='stance_idle' fi=21 px=-293.0 py=-93.0 npx=-392.53 npy=97.35 ry=-93.00 face=1
+[ROOT] f=343 anim='stance_idle' fi=21 px=-293.0 py=-93.0 npx=-392.66 npy=97.36 ry=-93.00 face=1
+[ROOT] f=344 anim='stance_idle' fi=21 px=-293.0 py=-93.0 npx=-392.77 npy=97.36 ry=-93.00 face=1
+[ROOT] f=345 anim='stance_idle' fi=22 px=-293.0 py=-93.0 npx=-392.90 npy=97.38 ry=-93.00 face=1
+[ROOT] f=346 anim='stance_idle' fi=22 px=-293.0 py=-93.0 npx=-393.02 npy=97.41 ry=-93.00 face=1
+[ROOT] f=347 anim='stance_idle' fi=22 px=-293.0 py=-93.0 npx=-393.13 npy=97.44 ry=-93.00 face=1
+[ROOT] f=348 anim='stance_idle' fi=22 px=-293.0 py=-93.0 npx=-393.27 npy=97.47 ry=-93.00 face=1
+[ROOT] f=349 anim='stance_idle' fi=22 px=-293.0 py=-93.0 npx=-393.38 npy=97.49 ry=-93.00 face=1
+[ROOT] f=350 anim='stance_idle' fi=23 px=-293.0 py=-93.0 npx=-393.50 npy=97.54 ry=-93.00 face=1
+[ROOT] f=351 anim='stance_idle' fi=23 px=-293.0 py=-93.0 npx=-393.62 npy=97.59 ry=-93.00 face=1
+[ROOT] f=352 anim='stance_idle' fi=23 px=-293.0 py=-93.0 npx=-393.73 npy=97.64 ry=-93.00 face=1
+[ROOT] f=353 anim='stance_idle' fi=23 px=-293.0 py=-93.0 npx=-393.85 npy=97.69 ry=-93.00 face=1
+[ROOT] f=354 anim='stance_idle' fi=24 px=-293.0 py=-93.0 npx=-393.96 npy=97.74 ry=-93.00 face=1
+[ROOT] f=355 anim='stance_idle' fi=24 px=-293.0 py=-93.0 npx=-394.06 npy=97.80 ry=-93.00 face=1
+[ROOT] f=356 anim='stance_idle' fi=24 px=-293.0 py=-93.0 npx=-394.18 npy=97.87 ry=-93.00 face=1
+[ROOT] f=357 anim='stance_idle' fi=24 px=-293.0 py=-93.0 npx=-394.30 npy=97.94 ry=-93.00 face=1
+[ROOT] f=358 anim='stance_idle' fi=24 px=-293.0 py=-93.0 npx=-394.41 npy=98.01 ry=-93.00 face=1
+[ROOT] f=359 anim='stance_idle' fi=25 px=-293.0 py=-93.0 npx=-394.53 npy=98.10 ry=-93.00 face=1
+[ROOT] f=360 anim='stance_idle' fi=25 px=-293.0 py=-93.0 npx=-394.65 npy=98.19 ry=-93.00 face=1
+[ROOT] f=361 anim='stance_idle' fi=25 px=-293.0 py=-93.0 npx=-394.75 npy=98.27 ry=-93.00 face=1
+[ROOT] f=362 anim='stance_idle' fi=25 px=-293.0 py=-93.0 npx=-394.84 npy=98.35 ry=-93.00 face=1
+[ROOT] f=363 anim='stance_idle' fi=26 px=-293.0 py=-93.0 npx=-394.95 npy=98.44 ry=-93.00 face=1
+[ROOT] f=364 anim='stance_idle' fi=26 px=-293.0 py=-93.0 npx=-395.03 npy=98.53 ry=-93.00 face=1
+[ROOT] f=365 anim='stance_idle' fi=26 px=-293.0 py=-93.0 npx=-395.11 npy=98.62 ry=-93.00 face=1
+[ROOT] f=366 anim='stance_idle' fi=26 px=-293.0 py=-93.0 npx=-395.20 npy=98.71 ry=-93.00 face=1
+[ROOT] f=367 anim='stance_idle' fi=26 px=-293.0 py=-93.0 npx=-395.29 npy=98.80 ry=-93.00 face=1
+[ROOT] f=368 anim='stance_idle' fi=27 px=-293.0 py=-93.0 npx=-395.36 npy=98.90 ry=-93.00 face=1
+[ROOT] f=369 anim='stance_idle' fi=27 px=-293.0 py=-93.0 npx=-395.43 npy=98.99 ry=-93.00 face=1
+[ROOT] f=370 anim='stance_idle' fi=27 px=-293.0 py=-93.0 npx=-395.50 npy=99.08 ry=-93.00 face=1
+[ROOT] f=371 anim='stance_idle' fi=27 px=-293.0 py=-93.0 npx=-395.57 npy=99.19 ry=-93.00 face=1
+[ROOT] f=372 anim='stance_idle' fi=27 px=-293.0 py=-93.0 npx=-395.65 npy=99.30 ry=-93.00 face=1
+[ROOT] f=373 anim='stance_idle' fi=28 px=-293.0 py=-93.0 npx=-395.71 npy=99.41 ry=-93.00 face=1
+[ROOT] f=374 anim='stance_idle' fi=28 px=-293.0 py=-93.0 npx=-395.76 npy=99.51 ry=-93.00 face=1
+[ROOT] f=375 anim='stance_idle' fi=28 px=-293.0 py=-93.0 npx=-395.82 npy=99.62 ry=-93.00 face=1
+[ROOT] f=376 anim='stance_idle' fi=28 px=-293.0 py=-93.0 npx=-395.87 npy=99.72 ry=-93.00 face=1
+[ROOT] f=377 anim='stance_idle' fi=29 px=-293.0 py=-93.0 npx=-395.92 npy=99.83 ry=-93.00 face=1
+[ROOT] f=378 anim='stance_idle' fi=29 px=-293.0 py=-93.0 npx=-395.96 npy=99.95 ry=-93.00 face=1
+[ROOT] f=379 anim='stance_idle' fi=29 px=-293.0 py=-93.0 npx=-395.99 npy=100.06 ry=-93.00 face=1
+[ROOT] f=380 anim='stance_idle' fi=29 px=-293.0 py=-93.0 npx=-396.02 npy=100.17 ry=-93.00 face=1
+[ROOT] f=381 anim='stance_idle' fi=29 px=-293.0 py=-93.0 npx=-396.06 npy=100.28 ry=-93.00 face=1
+[ROOT] f=382 anim='stance_idle' fi=30 px=-293.0 py=-93.0 npx=-396.08 npy=100.40 ry=-93.00 face=1
+[ROOT] f=383 anim='stance_idle' fi=30 px=-293.0 py=-93.0 npx=-396.10 npy=100.51 ry=-93.00 face=1
+[ROOT] f=384 anim='stance_idle' fi=30 px=-293.0 py=-93.0 npx=-396.11 npy=100.64 ry=-93.00 face=1
+[ROOT] f=385 anim='stance_idle' fi=30 px=-293.0 py=-93.0 npx=-396.12 npy=100.75 ry=-93.00 face=1
+[ROOT] f=386 anim='stance_idle' fi=30 px=-293.0 py=-93.0 npx=-396.13 npy=100.86 ry=-93.00 face=1
+[ROOT] f=387 anim='stance_idle' fi=31 px=-293.0 py=-93.0 npx=-396.12 npy=100.98 ry=-93.00 face=1
+[ROOT] f=388 anim='stance_idle' fi=31 px=-293.0 py=-93.0 npx=-396.12 npy=101.09 ry=-93.00 face=1
+[ROOT] f=389 anim='stance_idle' fi=31 px=-293.0 py=-93.0 npx=-396.11 npy=101.21 ry=-93.00 face=1
+[ROOT] f=390 anim='stance_idle' fi=31 px=-293.0 py=-93.0 npx=-396.10 npy=101.31 ry=-93.00 face=1
+[ROOT] f=391 anim='stance_idle' fi=32 px=-293.0 py=-93.0 npx=-396.08 npy=101.42 ry=-93.00 face=1
+[ROOT] f=392 anim='stance_idle' fi=32 px=-293.0 py=-93.0 npx=-396.05 npy=101.52 ry=-93.00 face=1
+[ROOT] f=393 anim='stance_idle' fi=32 px=-293.0 py=-93.0 npx=-396.02 npy=101.63 ry=-93.00 face=1
+[ROOT] f=394 anim='stance_idle' fi=32 px=-293.0 py=-93.0 npx=-396.00 npy=101.73 ry=-93.00 face=1
+[ROOT] f=395 anim='stance_idle' fi=32 px=-293.0 py=-93.0 npx=-395.97 npy=101.84 ry=-93.00 face=1
+[ROOT] f=396 anim='stance_idle' fi=33 px=-293.0 py=-93.0 npx=-395.93 npy=101.94 ry=-93.00 face=1
+[ROOT] f=397 anim='stance_idle' fi=33 px=-293.0 py=-93.0 npx=-395.88 npy=102.05 ry=-93.00 face=1
+[ROOT] f=398 anim='stance_idle' fi=33 px=-293.0 py=-93.0 npx=-395.84 npy=102.14 ry=-93.00 face=1
+[ROOT] f=399 anim='stance_idle' fi=33 px=-293.0 py=-93.0 npx=-395.79 npy=102.24 ry=-93.00 face=1
+[ROOT] f=400 anim='stance_idle' fi=33 px=-293.0 py=-93.0 npx=-395.74 npy=102.34 ry=-93.00 face=1
+[ROOT] f=401 anim='stance_idle' fi=34 px=-293.0 py=-93.0 npx=-395.68 npy=102.44 ry=-93.00 face=1
+[ROOT] f=402 anim='stance_idle' fi=34 px=-293.0 py=-93.0 npx=-395.62 npy=102.52 ry=-93.00 face=1
+[ROOT] f=403 anim='stance_idle' fi=34 px=-293.0 py=-93.0 npx=-395.56 npy=102.61 ry=-93.00 face=1
+[ROOT] f=404 anim='stance_idle' fi=34 px=-293.0 py=-93.0 npx=-395.50 npy=102.70 ry=-93.00 face=1
+[ROOT] f=405 anim='stance_idle' fi=35 px=-293.0 py=-93.0 npx=-395.43 npy=102.79 ry=-93.00 face=1
+[ROOT] f=406 anim='stance_idle' fi=35 px=-293.0 py=-93.0 npx=-395.36 npy=102.87 ry=-93.00 face=1
+[ROOT] f=407 anim='stance_idle' fi=35 px=-293.0 py=-93.0 npx=-395.27 npy=102.96 ry=-93.00 face=1
+[ROOT] f=408 anim='stance_idle' fi=35 px=-293.0 py=-93.0 npx=-395.19 npy=103.04 ry=-93.00 face=1
+[ROOT] f=409 anim='stance_idle' fi=35 px=-293.0 py=-93.0 npx=-395.12 npy=103.12 ry=-93.00 face=1
+[ROOT] f=410 anim='stance_idle' fi=36 px=-293.0 py=-93.0 npx=-395.04 npy=103.19 ry=-93.00 face=1
+[ROOT] f=411 anim='stance_idle' fi=36 px=-293.0 py=-93.0 npx=-394.94 npy=103.26 ry=-93.00 face=1
+[ROOT] f=412 anim='stance_idle' fi=36 px=-293.0 py=-93.0 npx=-394.85 npy=103.33 ry=-93.00 face=1
+[ROOT] f=413 anim='stance_idle' fi=36 px=-293.0 py=-93.0 npx=-394.77 npy=103.40 ry=-93.00 face=1
+[ROOT] f=414 anim='stance_idle' fi=36 px=-293.0 py=-93.0 npx=-394.68 npy=103.46 ry=-93.00 face=1
+[ROOT] f=415 anim='stance_idle' fi=37 px=-293.0 py=-93.0 npx=-394.58 npy=103.53 ry=-93.00 face=1
+[ROOT] f=416 anim='stance_idle' fi=37 px=-293.0 py=-93.0 npx=-394.47 npy=103.58 ry=-93.00 face=1
+[ROOT] f=417 anim='stance_idle' fi=37 px=-293.0 py=-93.0 npx=-394.37 npy=103.64 ry=-93.00 face=1
+[ROOT] f=418 anim='stance_idle' fi=37 px=-293.0 py=-93.0 npx=-394.27 npy=103.69 ry=-93.00 face=1
+[ROOT] f=419 anim='stance_idle' fi=37 px=-293.0 py=-93.0 npx=-394.17 npy=103.74 ry=-93.00 face=1
+[ROOT] f=420 anim='stance_idle' fi=38 px=-293.0 py=-93.0 npx=-394.05 npy=103.79 ry=-93.00 face=1
+[ROOT] f=421 anim='stance_idle' fi=38 px=-293.0 py=-93.0 npx=-393.94 npy=103.82 ry=-93.00 face=1
+[ROOT] f=422 anim='stance_idle' fi=38 px=-293.0 py=-93.0 npx=-393.83 npy=103.86 ry=-93.00 face=1
+[ROOT] f=423 anim='stance_idle' fi=38 px=-293.0 py=-93.0 npx=-393.72 npy=103.89 ry=-93.00 face=1
+[ROOT] f=424 anim='stance_idle' fi=38 px=-293.0 py=-93.0 npx=-393.61 npy=103.93 ry=-93.00 face=1
+[ROOT] f=425 anim='stance_idle' fi=39 px=-293.0 py=-93.0 npx=-393.48 npy=103.96 ry=-93.00 face=1
+[ROOT] f=426 anim='stance_idle' fi=39 px=-293.0 py=-93.0 npx=-393.36 npy=103.97 ry=-93.00 face=1
+[ROOT] f=427 anim='stance_idle' fi=39 px=-293.0 py=-93.0 npx=-393.25 npy=103.99 ry=-93.00 face=1
+[ROOT] f=428 anim='stance_idle' fi=39 px=-293.0 py=-93.0 npx=-393.12 npy=104.01 ry=-93.00 face=1
+[ROOT] f=429 anim='stance_idle' fi=39 px=-293.0 py=-93.0 npx=-393.00 npy=104.03 ry=-93.00 face=1
+[ROOT] f=430 anim='stance_idle' fi=40 px=-293.0 py=-93.0 npx=-392.87 npy=104.03 ry=-93.00 face=1
+[ROOT] f=431 anim='stance_idle' fi=40 px=-293.0 py=-93.0 npx=-392.74 npy=104.04 ry=-93.00 face=1
+[ROOT] f=432 anim='stance_idle' fi=40 px=-293.0 py=-93.0 npx=-392.60 npy=104.04 ry=-93.00 face=1
+[ROOT] f=433 anim='stance_idle' fi=40 px=-293.0 py=-93.0 npx=-392.48 npy=104.04 ry=-93.00 face=1
+[ROOT] f=434 anim='stance_idle' fi=41 px=-293.0 py=-93.0 npx=-392.34 npy=104.04 ry=-93.00 face=1
+[ROOT] f=435 anim='stance_idle' fi=41 px=-293.0 py=-93.0 npx=-392.22 npy=104.02 ry=-93.00 face=1
+[ROOT] f=436 anim='stance_idle' fi=41 px=-293.0 py=-93.0 npx=-392.08 npy=104.00 ry=-93.00 face=1
+[ROOT] f=437 anim='stance_idle' fi=41 px=-293.0 py=-93.0 npx=-391.94 npy=103.99 ry=-93.00 face=1
+[ROOT] f=438 anim='stance_idle' fi=41 px=-293.0 py=-93.0 npx=-391.81 npy=103.97 ry=-93.00 face=1
+[ROOT] f=439 anim='stance_idle' fi=42 px=-293.0 py=-93.0 npx=-391.68 npy=103.95 ry=-93.00 face=1

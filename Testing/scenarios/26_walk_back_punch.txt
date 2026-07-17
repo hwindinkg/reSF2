@@ -1,0 +1,6 @@
+# Scenario 26: Walk back (A held), press O while A held.
+# A+O should trigger SpinningPunch (2key|Back|Punch from moves.xml).
+frame 180 keydown A
+frame 460 keydown O
+frame 466 keyup O
+frame 700 keyup A

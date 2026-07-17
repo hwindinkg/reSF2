@@ -1,0 +1,10 @@
+# Scenario 17: Punch then try to duck during attack.
+# Verifies Duck does NOT interrupt an active punch animation.
+# Walk close to bag, throw HighPunch, immediately hold S (down=duck).
+# Duck should NOT start until after the punch animation ends.
+frame 180 keydown D
+frame 460 keyup D
+frame 465 keydown O
+frame 466 keyup O
+frame 470 keydown S
+frame 600 keyup S

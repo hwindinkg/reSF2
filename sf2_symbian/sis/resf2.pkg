@@ -1,0 +1,26 @@
+; Symbian SIS package for reSF2 (Nokia N8)
+; Target: S60 5th Edition (Symbian^1, OS 9.4)
+
+&EN
+
+#{"reSF2"},(0xE1234567),1,0,0
+
+; Platform UIDs - Nokia N8 = S60 5th Edition
+[0x101F7961], 0, 0, 0, {"S60 3rd Edition devices"}
+[0x102032BE], 0, 0, 0, {"S60 3rd Edition FP1 devices"}
+[0x102752AE], 0, 0, 0, {"S60 3rd Edition FP2 devices"}
+[0x1028315F], 0, 0, 0, {"S60 5th Edition devices (Nokia N8, N97, 5800, etc.)"}
+
+; Required language files
+; None (app is language-independent)
+
+; Files to install
+"$(EPOCROOT)Epoc32\release\gcce\urel\resf2.exe"         -"!:\sys\bin\resf2.exe"
+"$(EPOCROOT)Epoc32\data\z\resource\apps\resf2.rsc"      -"!:\resource\apps\resf2.rsc"
+"$(EPOCROOT)Epoc32\data\z\private\10003a3f\apps\resf2_reg.rsc" -"!:\private\10003a3f\import\apps\resf2_reg.rsc"
+
+; Note: Assets are NOT included in SIS (too large).
+; User must copy sf2_pc assets (or extracted dojo + animations) to:
+;   E:\Data\reSF2\   (memory card recommended)
+; or:
+;   C:\Data\reSF2\   (phone memory)

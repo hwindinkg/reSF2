@@ -236,6 +236,9 @@ struct GlfwPlatform::Impl {
         std::uint64_t cur = 0;         // next event index
         std::uint64_t frame_counter = 0;  // incremented each poll_events()
         bool armed = false;
+        // Persistent key state from script events (survives GetAsyncKeyState
+        // overwrite in poll_events). Only used when armed=true.
+        std::array<bool, kMaxKeys> keys_down{};
     };
     InputScript input_script{};
 
@@ -421,6 +424,17 @@ bool GlfwPlatform::poll_events() {
 
     glfwPollEvents();
 
+    // [DIAGNOSTIC] When input script is armed, skip real keyboard polling
+    // entirely — input comes ONLY from the script. This ensures deterministic
+    // replay without real-keyboard interference.
+    if (impl_->input_script.armed) {
+        // Advance prev_keys_down_ so edge detection works next frame.
+        for (int i = 0; i < kMaxKeys; ++i) {
+            impl_->prev_keys_down_[i] = impl_->input.keys_down[i];
+        }
+        return !impl_->quit_requested;
+    }
+
 #ifdef _WIN32
     // Win32 path: bypass GLFW key state entirely.
     //
@@ -479,14 +493,6 @@ bool GlfwPlatform::poll_events() {
     glfwSetInputMode(impl_->window, GLFW_STICKY_KEYS, GLFW_TRUE);
 #endif
 
-    // On Windows: GetAsyncKeyState handles all key input.
-    // GLFW key callback is disabled (spurious events on Win10 19044).
-    // No merge needed — pure GetAsyncKeyState polling.
-
-    // [DIAGNOSTIC] Input-script events are applied via tick_input_script(),
-    // called from host_update_gameplay, so script frames align with gameplay
-    // frames (not poll_events frames, which also run during Boot/Loading).
-
     return !impl_->quit_requested;
 }
 
@@ -511,11 +517,13 @@ void GlfwPlatform::apply_input_script() noexcept {
                     impl_->input.keys_just_pressed[ev.key_idx] = true;
                 }
                 impl_->input.keys_down[ev.key_idx] = true;
+                impl_->input_script.keys_down[ev.key_idx] = true;
             } else {
                 if (impl_->input.keys_down[ev.key_idx]) {
                     impl_->input.keys_just_released[ev.key_idx] = true;
                 }
                 impl_->input.keys_down[ev.key_idx] = false;
+                impl_->input_script.keys_down[ev.key_idx] = false;
             }
         }
         ++s.cur;

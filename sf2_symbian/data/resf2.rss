@@ -1,0 +1,33 @@
+#include <eikon.rh>
+#include <avkon.rh>
+#include <avkon.rsg>
+#include <avkon.mbg>
+
+NAME RESF     // 4-letter resource name
+
+RESOURCE RSS_SIGNATURE {}
+
+RESOURCE TBUF { buf=""; }
+
+RESOURCE EIK_APP_INFO
+    {
+    menubar = r_resf2_menubar;
+    cba     = R_AVKON_SOFTKEYS_OPTIONS_EXIT;
+    }
+
+RESOURCE MENU_BAR r_resf2_menubar
+    {
+    titles =
+        {
+        MENU_TITLE { menu_pane = r_resf2_menu; }
+        };
+    }
+
+RESOURCE MENU_PANE r_resf2_menu
+    {
+    items =
+        {
+        MENU_ITEM { command = 1; txt = "About"; },
+        MENU_ITEM { command = EAknCmdExit; txt = "Exit"; }
+        };
+    }
