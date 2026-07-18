@@ -47,10 +47,12 @@
 #include "engine/scene/scene_system.hpp"
 #include "engine/scene/scenes.hpp"
 #include "engine/renderer/stb_image.h"
+#include "engine/format/xml_doc.hpp"
 
 namespace plat = resf2::platform;
 namespace rt = resf2::runtime;
 namespace ren = resf2::renderer;
+namespace fmt = resf2::format;
 namespace plist = resf2::reverse::plist;
 namespace font = resf2::reverse::font;
 namespace scene = resf2::scene;
@@ -279,6 +281,27 @@ struct MoveDef {
     // ATTACK = combat move (punch/kick), MOVE = non-combat (duck/stance/step).
     // Used to distinguish in_basic_attack (only ATTACK moves block 1key/2key).
     bool is_attack = false;
+
+    // [ORIGINAL] Full interval lists parsed via engine/format/xml_doc.hpp
+    // (replaces the lossy string-based scan that only captured the FIRST
+    // Attack/Uninterrupt interval via `break`). The scalar fields above
+    // (attack_start/end, uninterrupt_start/end, block_start) are kept for
+    // backward compatibility and populated from the first element of these
+    // vectors. Combat logic should migrate to these vectors for 1:1 timing.
+    struct Interval {
+        std::string type;   // "Attack", "Block", "Uninterrupt", "Complex", ...
+        std::string name;   // Name attribute (e.g. "Attack", "Uninterrupt")
+        float start = 0;
+        float end = 0;
+        int damage = 0;
+        float impulse_x = 0;
+        float impulse_y = 0;
+        std::string hit_type;
+        std::vector<std::string> edges;
+        // ComplexInterval conditions (Type="Complex")
+        std::string condition_anim;     // CurrentAnimation condition inside interval
+    };
+    std::vector<Interval> intervals;
 };
 
 struct AnimationData {
@@ -3106,6 +3129,109 @@ private:
             }
             pos = move_end + 7;
         }
+
+        // [ORIGINAL] Full interval pass via engine/format/xml_doc.hpp.
+        // The string-based scan above only captured the FIRST Attack/Uninterrupt
+        // interval per move (uses `break`). This pass re-parses moves.xml with a
+        // real DOM parser and collects ALL intervals (Attack, Block, Uninterrupt,
+        // Complex) into MoveDef::intervals, including nested <Edge>/<Damage>/
+        // <Impulse>/<Hit> children and ComplexInterval conditions.
+        // Scalar fields (attack_start/end, uninterrupt_start/end, block_start)
+        // are re-derived from the first matching interval for backward compat.
+        {
+            fmt::XmlDocument doc;
+            if (doc.parse(xml)) {
+                const auto* root = doc.root();
+                if (root) {
+                    const auto* moves_node = root->first_child("Moves");
+                    if (!moves_node) {
+                        // try <Movesxml><Moves>
+                        auto* mx = root->first_child("Movesxml");
+                        if (mx) moves_node = mx->first_child("Moves");
+                    }
+                    if (moves_node) {
+                        int total_intervals = 0;
+                        for (const auto& child : moves_node->children) {
+                            if (child.name != "Move") continue;
+                            auto mname = child.attr("Name");
+                            auto it = moves_.find(mname);
+                            if (it == moves_.end()) continue;
+                            auto& move = it->second;
+                            move.intervals.clear();
+                            // Intervals can be direct children or inside <Intervals>
+                            std::vector<const fmt::XmlNode*> iv_nodes;
+                            for (const auto& c : child.children) {
+                                if (c.name == "Interval") iv_nodes.push_back(&c);
+                                else if (c.name == "Intervals") {
+                                    for (const auto& ic : c.children)
+                                        if (ic.name == "Interval") iv_nodes.push_back(&ic);
+                                }
+                            }
+                            for (const auto* ivn : iv_nodes) {
+                                MoveDef::Interval iv;
+                                iv.type = ivn->attr("Type");
+                                iv.name = ivn->attr("Name");
+                                iv.start = tof(ivn->attr("Start"));
+                                iv.end = tof(ivn->attr("End"));
+                                // Damage
+                                auto* dmg = ivn->first_child("Damage");
+                                if (dmg) iv.damage = (int)tof(dmg->attr("Value"));
+                                // Impulse
+                                auto* imp = ivn->first_child("Impulse");
+                                if (imp) {
+                                    iv.impulse_x = tof(imp->attr("X"));
+                                    iv.impulse_y = tof(imp->attr("Y"));
+                                }
+                                // Hit
+                                auto* hit = ivn->first_child("Hit");
+                                if (hit) iv.hit_type = hit->attr("Name");
+                                // Edges
+                                for (const auto& ec : ivn->children) {
+                                    if (ec.name == "Edge") {
+                                        auto en = ec.attr("Name");
+                                        if (!en.empty()) iv.edges.push_back(en);
+                                    }
+                                }
+                                // ComplexInterval: <CurrentAnimation Name="..."/>
+                                auto* ca = ivn->first_child("CurrentAnimation");
+                                if (ca) iv.condition_anim = ca->attr("Name");
+                                move.intervals.push_back(std::move(iv));
+                                total_intervals++;
+                            }
+                            // Re-derive scalar fields from first matching interval
+                            for (const auto& iv : move.intervals) {
+                                if (iv.type == "Attack" || iv.name == "Attack") {
+                                    if (move.attack_start < 0) {
+                                        move.attack_start = (int)iv.start;
+                                        move.attack_end = (int)iv.end;
+                                        if (iv.damage > 0) move.damage = (float)iv.damage;
+                                        if (iv.impulse_x != 0 || iv.impulse_y != 0) {
+                                            move.impulse_x = iv.impulse_x;
+                                            move.impulse_y = iv.impulse_y;
+                                        }
+                                        if (!iv.edges.empty() && move.attack_edges.empty())
+                                            move.attack_edges = iv.edges;
+                                    }
+                                } else if (iv.type == "Block" || iv.name == "Block") {
+                                    if (move.block_start < 0) move.block_start = (int)iv.start;
+                                } else if (iv.name == "Uninterrupt" || iv.type == "Uninterrupt") {
+                                    if (move.uninterrupt_start < 0) {
+                                        move.uninterrupt_start = (int)iv.start;
+                                        move.uninterrupt_end = (int)iv.end;
+                                    }
+                                }
+                            }
+                        }
+                        std::printf("  [xml_doc] %d total intervals parsed across %zu moves\n",
+                                    total_intervals, moves_.size());
+                    }
+                }
+            } else {
+                std::fprintf(stderr, "[moves] xml_doc parse warning: %s (string-based parse still used)\n",
+                             doc.error().c_str());
+            }
+        }
+
         std::printf("  Moves loaded: %zu\n", moves_.size());
         // [ORIGINAL] MoveInside pivot parse audit: count moves that declared
         // a <Pivot> node alignment vs Object="Animation".
