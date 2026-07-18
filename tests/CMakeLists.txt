@@ -47,3 +47,67 @@ target_link_libraries(test_platform_loop PRIVATE
 )
 target_compile_features(test_platform_loop PRIVATE cxx_std_23)
 add_test(NAME test_platform_loop COMMAND test_platform_loop)
+
+# Phase 2: moves.xml parser
+add_executable(test_moves_parser
+    test_moves_parser.cpp
+)
+target_link_libraries(test_moves_parser PRIVATE
+    resf2_fight
+    resf2_format
+    resf2_core
+    resf2_warnings
+)
+target_compile_features(test_moves_parser PRIVATE cxx_std_23)
+add_test(NAME test_moves_parser COMMAND test_moves_parser WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# Phase 2: Full asset pipeline test
+add_executable(test_asset_pipeline
+    test_asset_pipeline.cpp
+)
+target_link_libraries(test_asset_pipeline PRIVATE
+    resf2_fight
+    resf2_format
+    resf2_core
+    resf2_reverse
+    resf2_warnings
+    zlibstatic
+)
+target_compile_features(test_asset_pipeline PRIVATE cxx_std_23)
+add_test(NAME test_asset_pipeline COMMAND test_asset_pipeline WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# Phase 4: Stage / Campaign parser test
+add_executable(test_stage_parser
+    test_stage_parser.cpp
+)
+target_link_libraries(test_stage_parser PRIVATE
+    resf2_format
+    resf2_warnings
+)
+target_compile_features(test_stage_parser PRIVATE cxx_std_23)
+add_test(NAME test_stage_parser COMMAND test_stage_parser WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# Phase 4: List / Item catalog parser test
+add_executable(test_list_parser
+    test_list_parser.cpp
+)
+target_link_libraries(test_list_parser PRIVATE
+    resf2_format
+    resf2_warnings
+)
+target_compile_features(test_list_parser PRIVATE cxx_std_23)
+add_test(NAME test_list_parser COMMAND test_list_parser WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# JSON Atlas parser test (for sf2_pc format)
+add_executable(test_json_atlas
+    ../test_json_atlas.cpp
+)
+target_link_libraries(test_json_atlas PRIVATE
+    resf2_format
+    resf2_core
+    resf2_reverse
+    zlibstatic
+    resf2_warnings
+)
+target_compile_features(test_json_atlas PRIVATE cxx_std_23)
+add_test(NAME test_json_atlas COMMAND test_json_atlas WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

@@ -1065,6 +1065,7 @@ public:
                     }
                 }
             }
+        }
         } while(0);
 
         // === STEP MOVEMENT (from moves.xml: StepForward/StepBack) ===
