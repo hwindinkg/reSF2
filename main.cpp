@@ -703,7 +703,13 @@ public:
         // Note: Removed sticky key buffer — it caused unwanted repeat attacks.
         // GetAsyncKeyState is reliable; the original issue was elsewhere.
 
-        // Track step animation play time (prevents tap-to-cancel)
+        // [HEURISTIC-TODO] step_min_played: invented 400ms threshold to prevent
+        // tap-to-cancel of step animations. The original engine gates move
+        // transitions via the Uninterrupt interval in moves.xml (each Move's
+        // <Interval Name="Uninterrupt" Start=".." End=".."/>). Once combat
+        // logic migrates to use MoveDef::intervals (the full interval vector
+        // populated by the xml_doc pass), this 400ms heuristic should be
+        // replaced by: `is_in_uninterrupt(current_move_, anim_time_)`.
         if (move_state_ == 1 || move_state_ == 2) {
             step_play_time_ += dt;
         } else {
@@ -711,10 +717,12 @@ public:
         }
         bool step_min_played = step_play_time_ >= 400;
 
-        // Track key-held history for latching (200ms window for flicker tolerance)
-        // Update EVERY frame, even during attacks, so when the attack ends
-        // the key state is current. If player holds D during attack, when
-        // attack finishes, fwd_held_ms_ is still 200 → step starts immediately.
+        // [HEURISTIC-TODO] fwd_held_ms_/back_held_ms_: invented 200ms latch
+        // for direction keys. The original engine reads key state per-frame
+        // via the Marmalade keypad (dz_keypad_update_decompiled.c) with no
+        // latch — combos are gated by CurrentAnimation conditions, not key
+        // history. Remove this latch once combo logic uses MoveQuery with
+        // required_current_animation from moves.xml <Conditions>.
         if (key_forward) fwd_held_ms_ = 200;
         else if (fwd_held_ms_ > 0) fwd_held_ms_ -= (int)dt;
         if (key_back) back_held_ms_ = 200;
