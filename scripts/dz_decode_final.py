@@ -437,3 +437,46 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# ============================================================================
+# [HEURISTIC-TODO] DZ type-4 — current blocker analysis (for next session)
+# ============================================================================
+#SYMPTOM: s3eCompressionDecomp runs Init(0x51414) which self-registers a coder
+# in slot 0: sets slot+0x20 (flag)=1, slot+0x64 (coder init)=0x51208, then
+# calls blx r3 (=0x51208) at 0x518e0. But slot+0x68 (read fn) stays 0 because
+# Init writes r2 (=0, passed from s3eCompressionDecomp) to slot+0x68 at 0x51534.
+# The coder init 0x51208 then does `ldr r1, [r1, #0x28]` (= *(slot+0x68) = 0)
+# and calls memcpy(0x96e94) with src=0 → crash/early-return, output stays zero.
+#
+#ROOT CAUSE: the read function for type=4 is NOT registered by Init. It must
+# be registered separately, likely by a coder-registration function called
+# from an init_array constructor (which may not be running correctly due to
+# missing PLT stubs) OR by an explicit s3eCompression*Register API.
+#
+#CANDIDATE REGISTRATION SITES (str rX, [sb, #0x68] instructions found):
+#  0xef00, 0xefac, 0xf028, 0xf23c, 0xf260, 0xf2a4, 0xf2dc, 0xf314, 0xf34c,
+#  0xf364, 0xf388, 0xf3ac, 0xf3d0, 0xf3f4, 0xf438, 0xf470, 0xf488, 0xf4cc,
+#  0xf504  — these are clustered in 0xef00..0xf504, likely a table of coder
+#  registration functions (one per compression type: 1, 2, 4, 8).
+#
+#NEXT STEPS:
+# 1. Disassemble each candidate to find which sets slot+0x68 to a function
+#    in the 0x38xxx range (the DZ decoder lives at 0x389f8).
+# 2. Call that registration function explicitly before s3eCompressionDecomp.
+# 3. Alternative: call s3eCompressionDecompInit with proper args — Init takes
+#    (type, name_str, read_fn) but s3eCompressionDecomp passes read_fn=0.
+#    Maybe there's a higher-level API that passes the real read_fn.
+# 4. Alternative: use Ghidra typed-struct analysis on the coder table to
+#    find all writers to slot+0x68.
+#
+# Verified addresses [ORIGINAL]:
+ADDR_DECOMP      = 0x051c1c  # s3eCompressionDecomp
+ADDR_DECOMP_INIT = 0x051414  # s3eCompressionDecompInit
+ADDR_DECOMP_READ = 0x051a10  # s3eCompressionDecompRead
+ADDR_DECOMP_FIN  = 0x051250  # s3eCompressionDecompFinal
+ADDR_MALLOC      = 0x06e770  # s3eMallocBase
+ADDR_FREE        = 0x06e5f8  # s3eFreeBase
+CODER_TABLE      = 0x0c8514  # 4 slots x 0x88 bytes
+CANDIDATE_REG_SITES = [0xef00,0xefac,0xf028,0xf23c,0xf260,0xf2a4,0xf2dc,
+                       0xf314,0xf34c,0xf364,0xf388,0xf3ac,0xf3d0,0xf3f4,
+                       0xf438,0xf470,0xf488,0xf4cc,0xf504]
