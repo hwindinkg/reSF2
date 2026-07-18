@@ -132,6 +132,7 @@ if(RESF2_BUILD_RUNTIME)
         resf2_scene
         resf2_reverse
         resf2_format
+        resf2_audio
         resf2_warnings
     )
     target_compile_features(resf2_app PRIVATE cxx_std_23)
