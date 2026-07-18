@@ -45,48 +45,50 @@ bool DzArchive::has_file(const std::string& name) const {
 std::vector<std::byte> DzArchive::read_file(const std::string& name) const {
     auto it = entries_.find(name);
     if (it == entries_.end()) return {};
-    
+
     const auto& entry = it->second;
     const auto* base = raw_data_.data() + entry.offset;
-    
-    // Find the next file's offset to determine compressed size
-    // We need to search all entries for the one with the smallest offset > entry.offset
-    uint32_t next_offset = static_cast<uint32_t>(raw_data_.size());
-    for (const auto& [n, e] : entries_) {
-        if (e.offset > entry.offset && e.offset < next_offset) {
-            next_offset = e.offset;
+    // [ORIGINAL] comp_size is now stored in the entry (3rd u32 of the file table).
+    // Previously it was inferred from the next file's offset, which happened to
+    // equal comp_size — but only because files are laid out contiguously. Using
+    // the stored value is correct and avoids O(N) scans.
+    uint32_t comp_size = entry.comp_size;
+    if (comp_size == 0) {
+        // Fallback: infer from next file's offset (legacy behavior)
+        uint32_t next_offset = static_cast<uint32_t>(raw_data_.size());
+        for (const auto& [n, e] : entries_) {
+            if (e.offset > entry.offset && e.offset < next_offset) {
+                next_offset = e.offset;
+            }
         }
+        comp_size = next_offset - entry.offset;
     }
-    uint32_t comp_size = next_offset - entry.offset;
-    if (comp_size == 0) comp_size = entry.uncomp_size;  // fallback
-    
+
     switch (entry.comp_type) {
         case 1:  // Copy (no compression)
             return std::vector<std::byte>(base, base + entry.uncomp_size);
-        
+
         case 2:  // zlib
             return decompress_zlib(base, comp_size);
-        
+
         case 8:  // gzip
             return decompress_gzip(base, comp_size);
-        
+
         case 4:  // DZ custom (Marmalade arithmetic/range coding)
         {
-            // Use our clean-room DZ decoder implementation.
-            // The DZ format uses overlapping offsets — files share one
-            // continuous compressed stream. For now, we try to decompress
-            // each file independently from its offset.
-            //
-            // Note: This may not work for all files because the range coder
-            // state carries over between files. For proper streaming support,
-            // we'd need to decompress the entire archive as one stream.
+            // [HEURISTIC-TODO] DZ type-4 decoder is NOT byte-verified yet.
+            // The speculative LZMA-variant in dz_decoder.cpp does not produce
+            // correct output. Unicorn ARM emulation of libs3e_android.so is
+            // in progress (scripts/dz_decode_final.py): s3eCompressionDecomp
+            // calls Init which self-registers a coder, but the read function
+            // pointer (slot+0x68) is not being set — Read never runs.
+            // Until fixed, type-4 returns empty and DzRegistry falls back to
+            // pre-extracted files on disk (see read_from_fallback).
             auto result = DzDecompressor::decompress(
                 reinterpret_cast<const uint8_t*>(base), comp_size,
                 entry.uncomp_size);
             if (result.empty()) {
-                std::fprintf(stderr, "[DZ] WARNING: %s (type=4) decompression failed, "
-                             "trying streaming mode\n", name.c_str());
-                // Try streaming mode from the file's offset
+                // Streaming mode also attempted (also [HEURISTIC-TODO])
                 result = DzDecompressor::decompress_streaming(
                     reinterpret_cast<const uint8_t*>(base), comp_size,
                     0, entry.uncomp_size);
@@ -95,12 +97,11 @@ std::vector<std::byte> DzArchive::read_file(const std::string& name) const {
                 std::printf("[DZ] Decompressed %s: %u -> %zu bytes\n",
                             name.c_str(), (unsigned)comp_size, result.size());
             }
-            // Convert vector<uint8_t> to vector<std::byte>
             std::vector<std::byte> byte_result(result.size());
             std::memcpy(byte_result.data(), result.data(), result.size());
             return byte_result;
         }
-        
+
         default:
             std::fprintf(stderr, "[DZ] Unknown compression type %u for %s\n",
                          entry.comp_type, name.c_str());
@@ -158,47 +159,45 @@ bool DzArchive::parse() {
     // Skip lengths header (4 bytes: unknown u16 + count u16)
     pos += 4;
     
-    // Read file table (num_files * 16 bytes, 4 x u32 per entry)
-    // dzextract.py format: offset, length0, length1, type
-    // Our corrected format: (u24 uncomp + u8 CRC), (u24 offset + u8 CRC),
-    //                       (u24 comp_size + u8 type), (u24 reserved + u8 CRC)
-    // 
-    // BUT: testing showed dzextract's format works for gzip (type=8) archives.
-    // The difference is in how we interpret the 4 u32 fields.
-    // dzextract reads: offset(u32), len0(u32), len1(u32), type(u32)
-    // This works because the u24+u8 split doesn't matter when CRC bytes are 0.
-    
+    // [ORIGINAL] File table: num_files * 16 bytes, 4 x u32 per entry.
+    // Field order (verified against files.dz ground truth):
+    //   u32 offset       — absolute offset in .dz where compressed block starts
+    //   u32 comp_size    — compressed block size (offset[i+1] - offset[i] == comp_size[i])
+    //   u32 uncomp_size  — real decompressed size (matches file size on disk)
+    //   u32 type         — compression type (1=copy, 2=zlib, 4=DZ custom, 8=gzip)
+    // Previously the 2nd and 3rd fields were swapped (treated len0 as uncomp_size),
+    // which happened to work for type=8 gzip archives but is wrong for type=4.
     for (uint16_t i = 0; i < num_files; ++i) {
         if (pos + 16 > size) return false;
-        
-        // Read as 4 u32 LE values
-        uint32_t offset, len0, len1, type_val;
+
+        uint32_t offset, comp_size, uncomp_size, type_val;
         std::memcpy(&offset, data + pos, 4);
-        std::memcpy(&len0, data + pos + 4, 4);
-        std::memcpy(&len1, data + pos + 8, 4);
+        std::memcpy(&comp_size, data + pos + 4, 4);
+        std::memcpy(&uncomp_size, data + pos + 8, 4);
         std::memcpy(&type_val, data + pos + 12, 4);
         pos += 16;
-        
+
         DzFileEntry entry;
         entry.name = filenames[i];
         entry.offset = offset;
-        entry.uncomp_size = len0;  // len0 = uncompressed size
+        entry.comp_size = comp_size;
+        entry.uncomp_size = uncomp_size;
         entry.comp_type = type_val;
-        
+
         // Build folder path
         if (i < file_folder_idx.size() && file_folder_idx[i] < folders.size()) {
             entry.folder = folders[file_folder_idx[i]];
         }
-        
+
         // Store with both bare name and folder/name
         entries_[entry.name] = entry;
         if (!entry.folder.empty()) {
             entries_[entry.folder + "/" + entry.name] = entry;
         }
-        
+
         file_names_.push_back(entry.name);
     }
-    
+
     return true;
 }
 

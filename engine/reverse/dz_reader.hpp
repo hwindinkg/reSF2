@@ -27,10 +27,11 @@ namespace resf2::dz {
 
 struct DzFileEntry {
     std::string name;
-    uint32_t offset;      // absolute offset in .dz file
-    uint32_t uncomp_size; // decompressed size
-    uint32_t comp_type;   // 1=copy, 2=zlib, 4=DZ custom, 8=gzip
-    std::string folder;   // folder path
+    uint32_t offset;       // [ORIGINAL] absolute offset in .dz file where compressed block starts
+    uint32_t comp_size;    // [ORIGINAL] compressed block size (2nd u32; offset diff of adjacent files == this)
+    uint32_t uncomp_size;  // [ORIGINAL] real decompressed size (3rd u32; matches ground-truth file size on disk)
+    uint32_t comp_type;    // 1=copy, 2=zlib, 4=DZ custom, 8=gzip
+    std::string folder;    // folder path
 };
 
 class DzArchive {
