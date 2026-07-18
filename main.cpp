@@ -3392,25 +3392,34 @@ private:
         // Verified: high_punch=35px, heavy_punch=104px, front_kick=156px, etc.
         // stance_2 has large NPivot X displacement but should NOT move the player
         // (it's a model-local animation, not world displacement).
-        // stance_idle/fists_idle are looping and have ~0 NPivot X displacement.
-        // Attacks ARE included — the original game DOES move the player during
-        // attacks via NPivot X. Previous code (12778f8) excluded attacks, causing
-        // the "character static during attack" bug.
-        bool is_root_motion_anim =
-            current_anim_ == "step_forward" || current_anim_ == "step_back" ||
-            current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
-            current_anim_ == "jump" || current_anim_ == "jump_away" ||
-            current_anim_ == "back_flip" || current_anim_ == "back_handflip" ||
-            current_anim_ == "front_flip" ||
-            current_anim_ == "air_punch" || current_anim_ == "air_axe_kick" ||
-            // Attack animations — NPivot X provides forward displacement
-            current_anim_ == "high_punch" || current_anim_ == "heavy_punch" ||
-            current_anim_ == "double_punch" || current_anim_ == "spinning_punch" ||
-            current_anim_ == "upper_cut" || current_anim_ == "low_punch" ||
-            current_anim_ == "front_kick" || current_anim_ == "back_kick" ||
-            current_anim_ == "high_kick" || current_anim_ == "sweep" ||
-            current_anim_ == "axe_kick" || current_anim_ == "low_kick" ||
-            current_anim_ == "middle_kick";
+        // [ORIGINAL] Root-motion animation selection is now data-driven.
+        // Previously this was a hardcoded whitelist of animation filename
+        // strings (step_forward, jump, high_punch, ...) — pure отсебятина.
+        // The original engine decides root-motion via MoveDef metadata:
+        // Template tags Step/DoubleStep/Retreat/Jump + ATTACK moves with
+        // NPivot X displacement. We look up the MoveDef by current_anim_
+        // (which is the .bin filename) and check is_step/is_jump/is_retreat
+        // or is_attack. Fallback to the old whitelist only if no MoveDef
+        // matches (e.g. stance/idle anims not in moves.xml).
+        bool is_root_motion_anim = false;
+        {
+            auto it = std::find_if(moves_.begin(), moves_.end(),
+                [&](const auto& p) { return p.second.filename == current_anim_; });
+            if (it != moves_.end()) {
+                const auto& m = it->second;
+                is_root_motion_anim = m.is_step || m.is_jump || m.is_retreat || m.is_attack;
+            } else {
+                // [HEURISTIC-TODO] fallback whitelist for anims not in moves.xml
+                // (e.g. stance_idle, fists_idle). Remove once all anims have MoveDefs.
+                is_root_motion_anim =
+                    current_anim_ == "step_forward" || current_anim_ == "step_back" ||
+                    current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
+                    current_anim_ == "jump" || current_anim_ == "jump_away" ||
+                    current_anim_ == "back_flip" || current_anim_ == "back_handflip" ||
+                    current_anim_ == "front_flip" ||
+                    current_anim_ == "air_punch" || current_anim_ == "air_axe_kick";
+            }
+        }
 
         if (is_root_motion_anim) {
             // On first frame of new animation (prev_frame_idx_ == -1),
