@@ -203,15 +203,37 @@ bool DzArchive::parse() {
 }
 
 std::vector<std::byte> DzArchive::decompress_gzip(const std::byte* data, size_t size) {
-    // Use zlib's gzip decompression (wbits=31)
-    z_stream strm = {};
-    strm.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(data));
-    strm.avail_in = static_cast<uInt>(size);
+    // Some .dz archives store gzip with header but NO trailer (CRC + size).
+    // Standard gzip decompression (wbits=31) fails because it expects
+    // the 8-byte trailer at the end. We use raw deflate (wbits=-15)
+    // and skip the 10-byte gzip header.
+    //
+    // Also handle full gzip (with trailer) if the data has it.
+    bool has_gzip_hdr = (size >= 2 && data[0] == std::byte{0x1f} && data[1] == std::byte{0x8b});
     
-    if (inflateInit2(&strm, 31) != Z_OK) return {};
+    z_stream strm = {};
+    const Bytef* in;
+    uInt avail;
+    
+    if (has_gzip_hdr && size >= 10) {
+        // Skip the 10-byte gzip header, decompress as raw deflate
+        in = reinterpret_cast<const Bytef*>(data) + 10;
+        avail = static_cast<uInt>(size - 10);
+    } else if (has_gzip_hdr) {
+        // Header present but too small — raw deflate from start
+        in = reinterpret_cast<const Bytef*>(data);
+        avail = static_cast<uInt>(size);
+    } else {
+        in = reinterpret_cast<const Bytef*>(data);
+        avail = static_cast<uInt>(size);
+    }
+    strm.next_in = const_cast<Bytef*>(in);
+    strm.avail_in = avail;
+    
+    if (inflateInit2(&strm, -15) != Z_OK) return {};
     
     std::vector<std::byte> result;
-    result.resize(65536);  // start with 64KB
+    result.resize(65536);
     
     int ret;
     do {
@@ -221,7 +243,6 @@ std::vector<std::byte> DzArchive::decompress_gzip(const std::byte* data, size_t 
         ret = inflate(&strm, Z_NO_FLUSH);
         
         if (ret == Z_BUF_ERROR || strm.total_out >= result.size()) {
-            // Need more output space
             result.resize(result.size() * 2);
             continue;
         }
@@ -229,13 +250,14 @@ std::vector<std::byte> DzArchive::decompress_gzip(const std::byte* data, size_t 
     
     inflateEnd(&strm);
     
-    if (ret != Z_STREAM_END) return {};
+    if (ret != Z_STREAM_END && ret != Z_OK) return {};
     
     result.resize(strm.total_out);
     return result;
 }
 
 std::vector<std::byte> DzArchive::decompress_zlib(const std::byte* data, size_t size) {
+    // Try standard zlib first, fall back to raw deflate
     z_stream strm = {};
     strm.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(data));
     strm.avail_in = static_cast<uInt>(size);
@@ -260,8 +282,30 @@ std::vector<std::byte> DzArchive::decompress_zlib(const std::byte* data, size_t 
     
     inflateEnd(&strm);
     
-    if (ret != Z_STREAM_END) return {};
+    if (ret == Z_STREAM_END || (ret == Z_OK && strm.total_out > 0)) {
+        result.resize(strm.total_out);
+        return result;
+    }
     
+    // Fall back to raw deflate
+    inflateEnd(&strm);
+    strm = {};
+    strm.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(data));
+    strm.avail_in = static_cast<uInt>(size);
+    if (inflateInit2(&strm, -15) != Z_OK) return {};
+    result.clear();
+    result.resize(65536);
+    do {
+        strm.next_out = reinterpret_cast<Bytef*>(result.data() + strm.total_out);
+        strm.avail_out = static_cast<uInt>(result.size() - strm.total_out);
+        ret = inflate(&strm, Z_NO_FLUSH);
+        if (ret == Z_BUF_ERROR || strm.total_out >= result.size()) {
+            result.resize(result.size() * 2);
+            continue;
+        }
+    } while (ret == Z_OK);
+    inflateEnd(&strm);
+    if (ret != Z_STREAM_END && ret != Z_OK) return {};
     result.resize(strm.total_out);
     return result;
 }

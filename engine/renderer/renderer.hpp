@@ -51,7 +51,7 @@ struct Mat4 {
 };
 
 // ---- Texture2D ----
-// Wraps an OpenGL texture. Loaded from PNG via stb_image.
+// Wraps an OpenGL texture. Loaded from PNG/WebP/KTX via stb_image.
 class Texture2D {
 public:
     Texture2D();
@@ -65,6 +65,15 @@ public:
 
     // Load from PNG file data
     bool init_from_png(const std::uint8_t* data, std::size_t size);
+
+    // Load from WebP file data
+    bool init_from_webp(const std::uint8_t* data, std::size_t size);
+
+    // Load from KTX file data (GPU compressed textures)
+    bool init_from_ktx(const std::uint8_t* data, std::size_t size);
+
+    // Generic loader: detects format by magic bytes
+    bool init_from_memory(const std::uint8_t* data, std::size_t size);
 
     // Bind to a texture unit
     void bind(std::uint32_t unit = 0) const;

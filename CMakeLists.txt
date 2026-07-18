@@ -139,6 +139,26 @@ if(RESF2_BUILD_RUNTIME)
     )
 endif()
 
+# --- Port demo (modular engine integration) ------------------------------
+if(RESF2_BUILD_RUNTIME)
+    add_executable(resf2_port main_port.cpp)
+    target_link_libraries(resf2_port PRIVATE
+        resf2_fight
+        resf2_format
+        resf2_platform
+        resf2_renderer
+        resf2_core
+        resf2_reverse
+        resf2_warnings
+        ZLIB::ZLIB
+        glfw
+    )
+    target_compile_features(resf2_port PRIVATE cxx_std_23)
+    set_target_properties(resf2_port PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${RESF2_RUNTIME_OUTPUT_DIR}"
+    )
+endif()
+
 # --- Headless executable (software renderer, no GPU/GLFW needed) ---------
 if(RESF2_BUILD_HEADLESS)
     add_executable(resf2_headless headless_main.cpp)
