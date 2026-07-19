@@ -4389,6 +4389,16 @@ private:
             render_text("Press R to restart", ((float)platform.window_width() - 200) / 2.0f,
                 (float)platform.window_height() / 2.0f + 20, 0.4f, {200, 200, 200, 255});
         }
+        // [ORIGINAL] Controls hint (bottom-center, fades after first input)
+        if (total_frame_count_ < 360) {  // ~6 seconds at 60fps
+            uint8_t hint_alpha = (total_frame_count_ < 300) ? 200 :
+                (uint8_t)(200 * (360 - total_frame_count_) / 60);
+            std::string hint = "WASD move | O punch | P kick | S+D roll | R restart";
+            float hint_w = hint.size() * 8.0f * 0.3f;
+            render_text(hint, ((float)platform.window_width() - hint_w) / 2.0f,
+                (float)platform.window_height() - 60.0f, 0.3f,
+                {220, 220, 220, hint_alpha});
+        }
 
         // Menu button (LEFT side, scroll/roll style)
         float btn_x = 10.0f, btn_y = 58.0f;
