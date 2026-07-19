@@ -4176,6 +4176,17 @@ private:
                                       "batchPanelsTop");
             load_texture_atlas_to_hud(base/"textures"/"buttons"/"dojo",
                                       "batchButtonsDojo");
+            // [ORIGINAL] Load fight HUD textures: health bars, energy, timers.
+            load_texture_atlas_to_hud(base/"textures"/"fight"/"bars",
+                                      "batchFightBars");
+            load_texture_atlas_to_hud(base/"textures"/"buttons"/"fight",
+                                      "batchButtonsFight");
+            // [ORIGINAL] Load hit effect textures: hit_blade (18-frame spark
+            // animation), hit labels (Aggressive, Brutal, Critical, etc.)
+            load_texture_atlas_to_hud(base/"textures"/"effects"/"fight",
+                                      "hit_blade");
+            load_texture_atlas_to_hud(base/"textures"/"fight"/"hits",
+                                      "hitBatch");
         }
         std::printf("  HUD textures loaded: %zu\n", hud_textures_.size());
     }
@@ -4444,31 +4455,56 @@ private:
         }
         render_text("LVL 7", 460, 15, 0.30f, {255, 255, 255, 255});
 
-        // [ORIGINAL] Health bars for player and enemy (bottom-left and bottom-right).
-        // Original SF2: two health bars at bottom corners + energy bar below player.
-        // Red gradient, white border. Enemy bar mirrored on the right.
+        // [ORIGINAL] Health bars using original textures (HealthBar_Empty/Full/Hit).
+        // Original SF2: two health bars at bottom corners. Player on left (fills
+        // left-to-right), enemy on right (fills right-to-left, mirrored).
+        // Uses HealthBar_Empty (background), HealthBar_Full (fill, clipped to %),
+        // HealthBar_Hit (white flash overlay on hit).
         float hp_bar_w = 280.0f;
         float hp_bar_h = 18.0f;
         float hp_bar_y = (float)platform.window_height() - 30.0f;
         float hp_bar_pad = 16.0f;
+        auto tex_empty = hud_textures_.find("HealthBar_Empty");
+        auto tex_full = hud_textures_.find("HealthBar_Full");
+        auto tex_hit = hud_textures_.find("HealthBar_Hit");
+        bool use_textures = (tex_empty != hud_textures_.end() && tex_full != hud_textures_.end());
         // Player HP bar (bottom-left)
         float pl_x = hp_bar_pad;
         ren::Color4B hp_bg{30, 20, 20, 200};
         ren::Color4B hp_border{180, 160, 120, 255};
-        ren::Color4B hp_fill_low{180, 30, 30, 255};
-        ren::Color4B hp_fill_mid{200, 160, 40, 255};
-        ren::Color4B hp_fill_hi{60, 180, 70, 255};
-        renderer_->draw_filled_rect_screen(pl_x - 2, hp_bar_y - 2, hp_bar_w + 4, hp_bar_h + 4, hp_border);
-        renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w, hp_bar_h, hp_bg);
-        float pl_pct = player_fighter_.health / player_fighter_.max_health;
-        ren::Color4B pl_col = (pl_pct > 0.5f) ? hp_fill_hi : (pl_pct > 0.25f ? hp_fill_mid : hp_fill_low);
-        if (pl_pct > 0) {
-            renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w * pl_pct, hp_bar_h, pl_col);
-        }
-        // Player hit flash overlay
-        if (player_hit_flash_ > 0) {
-            ren::Color4B flash{255, 255, 255, (uint8_t)(player_hit_flash_ * 600.0f)};
-            renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w, hp_bar_h, flash);
+        if (use_textures) {
+            // Draw empty bar (background)
+            renderer_->draw_textured_quad_screen(*tex_empty->second,
+                pl_x, hp_bar_y, hp_bar_w, hp_bar_h, 0, 0, 1, 1);
+            // Draw full bar clipped to health percentage (left-to-right)
+            float pl_pct = player_fighter_.health / player_fighter_.max_health;
+            if (pl_pct > 0) {
+                renderer_->draw_textured_quad_screen(*tex_full->second,
+                    pl_x, hp_bar_y, hp_bar_w * pl_pct, hp_bar_h,
+                    0, 0, pl_pct, 1);
+            }
+            // Hit flash overlay
+            if (player_hit_flash_ > 0 && tex_hit != hud_textures_.end()) {
+                uint8_t a = (uint8_t)std::min(255.0f, player_hit_flash_ * 600.0f);
+                renderer_->draw_textured_quad_screen(*tex_hit->second,
+                    pl_x, hp_bar_y, hp_bar_w, hp_bar_h, 0, 0, 1, 1);
+            }
+        } else {
+            // Fallback: colored rectangles
+            renderer_->draw_filled_rect_screen(pl_x - 2, hp_bar_y - 2, hp_bar_w + 4, hp_bar_h + 4, hp_border);
+            renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w, hp_bar_h, hp_bg);
+            float pl_pct = player_fighter_.health / player_fighter_.max_health;
+            ren::Color4B hp_fill_hi{60, 180, 70, 255};
+            ren::Color4B hp_fill_mid{200, 160, 40, 255};
+            ren::Color4B hp_fill_low{180, 30, 30, 255};
+            ren::Color4B pl_col = (pl_pct > 0.5f) ? hp_fill_hi : (pl_pct > 0.25f ? hp_fill_mid : hp_fill_low);
+            if (pl_pct > 0) {
+                renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w * pl_pct, hp_bar_h, pl_col);
+            }
+            if (player_hit_flash_ > 0) {
+                ren::Color4B flash{255, 255, 255, (uint8_t)(player_hit_flash_ * 600.0f)};
+                renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w, hp_bar_h, flash);
+            }
         }
         render_text("YOU", pl_x + 4, hp_bar_y - 16, 0.26f, {255, 240, 200, 255});
         // Energy bar below player HP
@@ -4480,20 +4516,39 @@ private:
             renderer_->draw_filled_rect_screen(pl_x, en_bar_y, hp_bar_w * en_pct, en_bar_h,
                 ren::Color4B{80, 180, 255, 255});
         }
-        // Enemy HP bar (bottom-right, mirrored)
+        // Enemy HP bar (bottom-right, mirrored — fills right-to-left)
         float en_x = (float)platform.window_width() - hp_bar_w - hp_bar_pad;
-        renderer_->draw_filled_rect_screen(en_x - 2, hp_bar_y - 2, hp_bar_w + 4, hp_bar_h + 4, hp_border);
-        renderer_->draw_filled_rect_screen(en_x, hp_bar_y, hp_bar_w, hp_bar_h, hp_bg);
-        float en_pct2 = enemy_fighter_.health / enemy_fighter_.max_health;
-        ren::Color4B en_col = (en_pct2 > 0.5f) ? hp_fill_hi : (en_pct2 > 0.25f ? hp_fill_mid : hp_fill_low);
-        if (en_pct2 > 0) {
-            // Enemy bar fills from right to left
-            renderer_->draw_filled_rect_screen(en_x + hp_bar_w * (1.0f - en_pct2), hp_bar_y,
-                hp_bar_w * en_pct2, hp_bar_h, en_col);
-        }
-        if (enemy_hit_flash_ > 0) {
-            ren::Color4B flash{255, 255, 255, (uint8_t)(enemy_hit_flash_ * 600.0f)};
-            renderer_->draw_filled_rect_screen(en_x, hp_bar_y, hp_bar_w, hp_bar_h, flash);
+        if (use_textures) {
+            renderer_->draw_textured_quad_screen(*tex_empty->second,
+                en_x, hp_bar_y, hp_bar_w, hp_bar_h, 0, 0, 1, 1);
+            float en_pct2 = enemy_fighter_.health / enemy_fighter_.max_health;
+            if (en_pct2 > 0) {
+                // Enemy fills from right: draw full bar, clipped from left
+                renderer_->draw_textured_quad_screen(*tex_full->second,
+                    en_x + hp_bar_w * (1.0f - en_pct2), hp_bar_y,
+                    hp_bar_w * en_pct2, hp_bar_h,
+                    1.0f - en_pct2, 0, 1.0f, 1);
+            }
+            if (enemy_hit_flash_ > 0 && tex_hit != hud_textures_.end()) {
+                renderer_->draw_textured_quad_screen(*tex_hit->second,
+                    en_x, hp_bar_y, hp_bar_w, hp_bar_h, 0, 0, 1, 1);
+            }
+        } else {
+            renderer_->draw_filled_rect_screen(en_x - 2, hp_bar_y - 2, hp_bar_w + 4, hp_bar_h + 4, hp_border);
+            renderer_->draw_filled_rect_screen(en_x, hp_bar_y, hp_bar_w, hp_bar_h, hp_bg);
+            float en_pct2 = enemy_fighter_.health / enemy_fighter_.max_health;
+            ren::Color4B hp_fill_hi{60, 180, 70, 255};
+            ren::Color4B hp_fill_mid{200, 160, 40, 255};
+            ren::Color4B hp_fill_low{180, 30, 30, 255};
+            ren::Color4B en_col = (en_pct2 > 0.5f) ? hp_fill_hi : (en_pct2 > 0.25f ? hp_fill_mid : hp_fill_low);
+            if (en_pct2 > 0) {
+                renderer_->draw_filled_rect_screen(en_x + hp_bar_w * (1.0f - en_pct2), hp_bar_y,
+                    hp_bar_w * en_pct2, hp_bar_h, en_col);
+            }
+            if (enemy_hit_flash_ > 0) {
+                ren::Color4B flash{255, 255, 255, (uint8_t)(enemy_hit_flash_ * 600.0f)};
+                renderer_->draw_filled_rect_screen(en_x, hp_bar_y, hp_bar_w, hp_bar_h, flash);
+            }
         }
         render_text("ENEMY", en_x + hp_bar_w - 60, hp_bar_y - 16, 0.26f, {255, 200, 200, 255});
         // [ORIGINAL] Combo counter: shows hits landed in quick succession.
@@ -4847,26 +4902,28 @@ private:
     // Combo reset timer: if no hit landed for 2s, reset combo counter
     float combo_timer_ = 0.0f;
 
-    // [ORIGINAL] Hit spark particles: simple visual feedback on hit.
-    // Each spark is a small expanding circle that fades out.
+    // [ORIGINAL] Hit effect: uses original hit_blade texture (18-frame spark
+    // animation from assets/1536/textures/effects/fight/hit_blade.plist).
+    // The original SF2 renders this sprite at the hit point, cycling through
+    // frames 1-18 over ~0.3s, then removing it. Falls back to colored circles
+    // if the texture is not loaded.
     struct HitSpark {
         float x, y;          // world position
         float age = 0;       // seconds since spawn
         float lifetime = 0.3f;
-        ren::Color4B color;
+        float scale = 1.0f;  // size multiplier
     };
     std::vector<HitSpark> hit_sparks_;
-    void spawn_hit_sparks(float x, float y, int count = 8) {
-        for (int i = 0; i < count; ++i) {
-            HitSpark s;
-            s.x = x + ((float)(std::rand() % 40) - 20.0f);
-            s.y = y + ((float)(std::rand() % 40) - 20.0f);
-            s.age = 0;
-            s.lifetime = 0.25f + (float)(std::rand() % 10) / 50.0f;
-            s.color = ren::Color4B{255, (uint8_t)(180 + std::rand() % 75),
-                                   (uint8_t)(40 + std::rand() % 80), 255};
-            hit_sparks_.push_back(s);
-        }
+    void spawn_hit_sparks(float x, float y, int count = 1) {
+        // [ORIGINAL] Spawn a single hit_blade effect at the hit point.
+        // count is ignored — the original uses ONE animated sprite, not N circles.
+        HitSpark s;
+        s.x = x + ((float)(std::rand() % 20) - 10.0f);
+        s.y = y + ((float)(std::rand() % 20) - 10.0f);
+        s.age = 0;
+        s.lifetime = 0.36f;  // 18 frames at 50fps ≈ 0.36s
+        s.scale = 0.8f + (float)(std::rand() % 40) / 100.0f;
+        hit_sparks_.push_back(s);
     }
     void update_and_render_hit_sparks(float dt_sec) {
         for (auto& s : hit_sparks_) s.age += dt_sec;
@@ -4874,11 +4931,24 @@ private:
             [](const HitSpark& s) { return s.age >= s.lifetime; }), hit_sparks_.end());
         for (const auto& s : hit_sparks_) {
             float t = s.age / s.lifetime;
-            float radius = 3.0f + t * 8.0f;
-            uint8_t alpha = (uint8_t)(255 * (1.0f - t));
-            ren::Color4B c = s.color;
-            c.a = alpha;
-            renderer_->draw_filled_circle_world(s.x, s.y, radius, c);
+            // hit_blade has 18 frames (hit_blade_1.png .. hit_blade_18.png)
+            int frame = (int)(t * 18.0f) + 1;
+            if (frame > 18) frame = 18;
+            std::string tex_name = "hit_blade_" + std::to_string(frame);
+            auto it = hud_textures_.find(tex_name);
+            if (it != hud_textures_.end()) {
+                // Draw the hit_blade sprite at the hit point (world space)
+                float sz = 80.0f * s.scale;
+                renderer_->draw_textured_quad(*it->second,
+                    s.x - sz/2, s.y - sz/2, sz, sz, 0, 0, 1, 1);
+            } else {
+                // Fallback: colored circle (only if texture not loaded)
+                float radius = (3.0f + t * 8.0f) * s.scale;
+                uint8_t alpha = (uint8_t)(255 * (1.0f - t));
+                ren::Color4B c{255, (uint8_t)(180 + std::rand() % 75),
+                               (uint8_t)(40 + std::rand() % 80), alpha};
+                renderer_->draw_filled_circle_world(s.x, s.y, radius, c);
+            }
         }
     }
 
