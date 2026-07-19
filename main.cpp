@@ -852,6 +852,24 @@ public:
         bool key_forward = facing_right_ ? key_right : key_left;
         bool key_back = facing_right_ ? key_left : key_right;
 
+        // [ORIGINAL] Double-tap detection for DoubleStep (forward/back dash).
+        // Original SF2: tapping Forward twice quickly during ForwardStep
+        // triggers DoubleStepForward (a fast dash). The second tap must come
+        // within 300ms of the first, while ForwardStep is playing.
+        bool fwd_just_pressed = input.keys_just_pressed[(size_t)plat::Key::D] ||
+                                (facing_right_ && input.keys_just_pressed[(size_t)plat::Key::ArrowRight]) ||
+                                (!facing_right_ && input.keys_just_pressed[(size_t)plat::Key::ArrowLeft]);
+        bool back_just_pressed = input.keys_just_pressed[(size_t)plat::Key::A] ||
+                                 (facing_right_ && input.keys_just_pressed[(size_t)plat::Key::ArrowLeft]) ||
+                                 (!facing_right_ && input.keys_just_pressed[(size_t)plat::Key::ArrowRight]);
+        uint32_t now_ms = (uint32_t)(total_frame_count_ * dt);
+        if (fwd_just_pressed) {
+            if (now_ms - last_fwd_tap_ms_ < 300 && current_anim_ == "step_forward") {
+                double_step_fwd_requested_ = true;
+            }
+            last_fwd_tap_ms_ = now_ms;
+        }
+
         bool punch_pressed = input.keys_just_pressed[(size_t)plat::Key::O];
         bool kick_pressed = input.keys_just_pressed[(size_t)plat::Key::P];
         // Also keep Space/K as fallback for testing
@@ -984,15 +1002,33 @@ public:
             dist_to_enemy = 1000.0f;  // default: far
             if (location_ && bag_model_) {
 
-            // If in attack and NOT in Uninterrupt: block ALL combat input (Pqb returns 0)
-            // Original: if (this.$x < b.kJ() && !de.Ycb(b)) if (!this.ds.pcb(this.Fl)) return 0;
-            bool block_all_combat = in_attack && !is_uninterrupt_;
+            // [ORIGINAL] Combat interrupt logic (from sf2.js Pqb line 18769):
+            // - During attack animation (hit_anim_ > 0):
+            //   - If in Uninterrupt interval: allow 3key chain combos only
+            //   - If PAST attack interval (attack done, in recovery): allow
+            //     1key/2key attacks to interrupt (cancel recovery into new attack)
+            //   - Otherwise (in attack interval, not uninterrupt): block all
+            // - Outside attack: normal 1key/2key selection
+            //
+            // This fixes the "delay between attacks" — after the attack interval
+            // completes (hit registered), the player can immediately start a new
+            // attack without waiting for the full animation to finish.
+            bool past_attack_interval = false;
+            if (in_attack && !current_move_.empty()) {
+                auto cur_move_it = moves_.find(current_move_);
+                if (cur_move_it != moves_.end() && cur_move_it->second.attack_end > 0) {
+                    int current_frame = (int)(anim_time_ * 20.0f);
+                    if (current_frame >= cur_move_it->second.attack_end) {
+                        past_attack_interval = true;
+                    }
+                }
+            }
+            bool block_all_combat = in_attack && !is_uninterrupt_ && !past_attack_interval;
             const MoveDef* best_move = nullptr;
-            int candidate_count = 0;  // [DIAGNOSTIC] for [INPUT_DECISION] log
+            int candidate_count = 0;
             for (auto& [name, move] : moves_) {
-                // Skip moves with no filename or no template
                 if (move.filename.empty() || move.template_name.empty()) continue;
-                // Skip Titan moves (player is not a Titan)
+                // Skip Titan moves
                 {
                     size_t titan_pos = move.template_name.find("Titan");
                     if (titan_pos != std::string::npos) {
@@ -1001,21 +1037,20 @@ public:
                         }
                     }
                 }
-                // Match move_type (Punch or Kick)
                 if (move.move_type != cur_move_type) continue;
 
                 if (block_all_combat) {
-                    // During attack, not in Uninterrupt: NO combat moves at all
                     continue;
                 } else if (in_attack && is_uninterrupt_) {
-                    // During attack, IN Uninterrupt: only 3key chain combos allowed
+                    // In Uninterrupt: only 3key chain combos
                     if (move.key_count != 3) continue;
-                    // 3key combos require CurrentAnimation match
                     if (!move.required_current_animation.empty()) {
                         if (current_move_ != move.required_current_animation) continue;
                     }
+                } else if (in_attack && past_attack_interval) {
+                    // Past attack interval: allow 1key/2key to interrupt recovery
+                    if (move.key_count == 3) continue;
                 } else {
-                    // Not in attack: normal 1key/2key selection, skip 3key
                     if (move.key_count == 3) continue;
                 }
                 // Match direction
@@ -1356,7 +1391,17 @@ public:
                     play_animation(step_fwd_anim, true);
                 }
             } else if (move_state_ == 2) {  // MOVING_FORWARD
-                if (!fwd_latched && step_min_played) {
+                // [ORIGINAL] Double-tap Forward during ForwardStep → DoubleStepForward (dash)
+                if (double_step_fwd_requested_ && animations_.count("double_step_forward")) {
+                    play_animation("double_step_forward", false);
+                    move_state_ = 10;  // special (non-interruptible during dash)
+                    current_move_ = "DoubleStepForward";
+                    int fc = animations_["double_step_forward"].frame_count;
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                    double_step_fwd_requested_ = false;
+                    debug_log("[MOVE] f=%llu DoubleStepForward (dash)\n",
+                              (unsigned long long)total_frame_count_);
+                } else if (!fwd_latched && step_min_played) {
                     move_state_ = 0; need_switch_to_idle_ = true;
                 } else if (back_latched && !fwd_latched && step_min_played && !step_back_anim.empty()) {
                     move_state_ = 1;
@@ -1778,57 +1823,43 @@ public:
         if (overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
     }
 
-    // [ORIGINAL] Render the enemy skeleton fighter using .bin animation.
-    // The enemy uses the same animations_ database as the player, with its own
-    // enemy_anim_time_ and enemy_anim_ state. Node positions are resolved from
-    // the .bin frames (interpolated), giving proper skeletal animation.
+    // [ORIGINAL] Render the enemy using the SAME body_model (body.xml + head.xml)
+    // as the player, with enemy-specific position/facing/animation state.
+    // Full body + head model (capsules + triangles + skeleton edges).
     void render_enemy_fighter() {
-        if (enemy_fighter_.is_dead) return;
-        if (skeleton_nodes_.empty()) return;
-        // Get NPivot rest pose for Y normalization
+        if (enemy_fighter_.is_dead || !body_model_ || skeleton_nodes_.empty()) return;
         auto np_it = skeleton_nodes_.find("NPivot");
         if (np_it == skeleton_nodes_.end()) return;
         float npivot_rest_y = np_it->second.y;
-        // World position
-        float wx = enemy_pos_x_;
-        float wy = enemy_pos_y_ + enemy_y_adjust_;
-        // Enemy color
+        float world_cx = enemy_pos_x_;
+        float world_cy = enemy_pos_y_ + enemy_y_adjust_;
+        // Enemy color: dark red (vs player black), white flash on hit, blue block
         ren::Color4B enemy_col = (enemy_hit_flash_ > 0) ?
-            ren::Color4B{255, 100, 100, 255} : ren::Color4B{90, 30, 30, 255};
-        if (enemy_fighter_.is_blocking) enemy_col = ren::Color4B{60, 60, 120, 255};
-        // Get current animation frame for enemy
+            ren::Color4B{255, 180, 180, 255} : ren::Color4B{70, 30, 30, 255};
+        if (enemy_fighter_.is_blocking) enemy_col = ren::Color4B{40, 40, 80, 255};
+        // Get enemy animation frame
         std::string anim_name = enemy_anim_;
-        // Strip .bin if present
         if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
             anim_name = anim_name.substr(0, anim_name.size()-4);
         auto anim_it = animations_.find(anim_name);
         int frame_idx = 0, next_idx = 0;
         float alpha = 0;
-        bool has_anim = false;
-        if (anim_it != animations_.end() && anim_it->second.frame_count > 0) {
+        bool has_anim = (anim_it != animations_.end() && anim_it->second.frame_count > 0);
+        if (has_anim) {
             auto& anim = anim_it->second;
-            float fps = 20.0f;
-            float f = enemy_anim_time_ * fps;
+            float f = enemy_anim_time_ * 20.0f;
             frame_idx = (int)f % anim.frame_count;
             next_idx = (frame_idx + 1) % anim.frame_count;
             alpha = f - (int)f;
-            has_anim = true;
         }
-        // Resolve node position: use .bin animation if available, else rest pose.
-        // [ORIGINAL] Node positions in .bin are ABSOLUTE. To render correctly,
-        // we compute the node's position RELATIVE to the animated NPivot, then
-        // add the world NPivot position (wy). This prevents "stretched polygons"
-        // — all nodes move together relative to NPivot, keeping the model intact.
-        // Previously used npivot_rest_y (constant) instead of animated NPivot Y,
-        // causing nodes to spread apart when NPivot animated up/down.
+        // Compute animated NPivot (reference for all nodes — prevents stretching)
         float animated_npx = np_it->second.x, animated_npy = npivot_rest_y;
-        if (has_anim && anim_it != animations_.end()) {
-            auto& anim = anim_it->second;
+        if (has_anim) {
             for (int i = 0; i < (int)ordered_node_names_.size() && i < 67; ++i) {
                 if (ordered_node_names_[i] == "NPivot") {
                     float x0, y0, z0, x1, y1, z1;
-                    if (anim.get_node_pos(frame_idx, i, x0, y0, z0) &&
-                        anim.get_node_pos(next_idx, i, x1, y1, z1)) {
+                    if (anim_it->second.get_node_pos(frame_idx, i, x0, y0, z0) &&
+                        anim_it->second.get_node_pos(next_idx, i, x1, y1, z1)) {
                         animated_npx = x0 + (x1 - x0) * alpha;
                         animated_npy = y0 + (y1 - y0) * alpha;
                     }
@@ -1836,103 +1867,123 @@ public:
                 }
             }
         }
-        auto resolve_enemy_node = [&](const std::string& name, float& ox, float& oy) {
-            auto sit = skeleton_nodes_.find(name);
-            if (sit == skeleton_nodes_.end()) { ox = wx; oy = wy; return; }
-            float lx = sit->second.x, ly = sit->second.y;
-            if (has_anim && anim_it != animations_.end()) {
-                auto& anim = anim_it->second;
-                for (int i = 0; i < (int)ordered_node_names_.size() && i < 67; ++i) {
-                    if (ordered_node_names_[i] == name) {
-                        float x0, y0, z0, x1, y1, z1;
-                        if (anim.get_node_pos(frame_idx, i, x0, y0, z0) &&
-                            anim.get_node_pos(next_idx, i, x1, y1, z1)) {
-                            lx = x0 + (x1 - x0) * alpha;
-                            ly = y0 + (y1 - y0) * alpha;
+        // Build temp anim_node_pos for enemy
+        std::unordered_map<std::string, std::pair<float, float>> enemy_node_pos;
+        if (has_anim) {
+            for (int i = 0; i < (int)ordered_node_names_.size() && i < 67; ++i) {
+                const std::string& name = ordered_node_names_[i];
+                float x0, y0, z0, x1, y1, z1;
+                if (anim_it->second.get_node_pos(frame_idx, i, x0, y0, z0) &&
+                    anim_it->second.get_node_pos(next_idx, i, x1, y1, z1)) {
+                    enemy_node_pos[name] = {x0 + (x1 - x0) * alpha, y0 + (y1 - y0) * alpha};
+                }
+            }
+        }
+        // Resolve enemy node to world coords (std::function for recursion)
+        std::function<bool(const std::string&, float&, float&)> resolve = [&](const std::string& name, float& ox, float& oy) -> bool {
+            float lx, ly;
+            auto ait = enemy_node_pos.find(name);
+            if (ait != enemy_node_pos.end()) {
+                lx = ait->second.first; ly = ait->second.second;
+            } else {
+                auto sit = skeleton_nodes_.find(name);
+                if (sit != skeleton_nodes_.end()) {
+                    lx = sit->second.x; ly = sit->second.y;
+                } else {
+                    auto bit = body_model_->nodes.find(name);
+                    if (bit != body_model_->nodes.end()) {
+                        lx = bit->second.x; ly = bit->second.y;
+                    } else {
+                        auto mit = body_model_->macro_nodes.find(name);
+                        if (mit != body_model_->macro_nodes.end()) {
+                            float sum_lcc = 0, wxx = 0, wyy = 0;
+                            for (int i = 0; i < 4; ++i) {
+                                if (mit->second.children[i].empty()) continue;
+                                float cx, cy;
+                                if (!resolve(mit->second.children[i], cx, cy)) continue;
+                                wxx += cx * mit->second.lcc[i];
+                                wyy += cy * mit->second.lcc[i];
+                                sum_lcc += mit->second.lcc[i];
+                            }
+                            if (std::abs(sum_lcc) > 1e-6f) {
+                                ox = wxx / sum_lcc; oy = wyy / sum_lcc;
+                                return true;
+                            }
+                            return false;
                         }
-                        break;
+                        return false;
                     }
                 }
             }
-            // Relative to ANIMATED NPivot (prevents stretching)
             float dx = lx - animated_npx;
             float dy = ly - animated_npy;
-            ox = wx + (enemy_facing_right_ ? dx : -dx);
-            oy = wy + dy;
+            ox = world_cx + (enemy_facing_right_ ? dx : -dx);
+            oy = world_cy + dy;
+            return true;
         };
-        auto get_node = [&](const std::string& n) -> const SkelNode* {
-            auto it = skeleton_nodes_.find(n);
-            return it != skeleton_nodes_.end() ? &it->second : nullptr;
-        };
-        const SkelNode* head = get_node("NHead");
-        const SkelNode* neck = get_node("NNeck");
-        const SkelNode* chest = get_node("NChest");
-        const SkelNode* waist = get_node("NWaist");
-        const SkelNode* lshoulder = get_node("NShoulder_1");
-        const SkelNode* rshoulder = get_node("NShoulder_2");
-        const SkelNode* lelbow = get_node("NElbow_1");
-        const SkelNode* relbow = get_node("NElbow_2");
-        const SkelNode* lwrist = get_node("NWrist_1");
-        const SkelNode* rwrist = get_node("NWrist_2");
-        const SkelNode* lhip = get_node("NHip_1");
-        const SkelNode* rhip = get_node("NHip_2");
-        const SkelNode* lknee = get_node("NKnee_1");
-        const SkelNode* rknee = get_node("NKnee_2");
-        const SkelNode* lfoot = get_node("NToe_1");
-        const SkelNode* rfoot = get_node("NToe_2");
-        // Draw limbs as thick capsules (series of circles)
-        auto draw_limb = [&](const std::string& a, const std::string& b, float thickness) {
-            float ax, ay, bx, by;
-            resolve_enemy_node(a, ax, ay);
-            resolve_enemy_node(b, bx, by);
-            float dx = bx - ax, dy = by - ay;
+        // Edge map
+        std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
+        for (auto& e : body_model_->edges) edge_map[e.name] = {e.end1, e.end2};
+        for (auto& [name, e] : skeleton_edges_) edge_map[name] = {e.end1, e.end2};
+        // Render capsules
+        for (auto& c : body_model_->capsules) {
+            auto eit = edge_map.find(c.edge_name);
+            if (eit == edge_map.end()) continue;
+            float x1, y1, x2, y2;
+            if (!resolve(eit->second.first, x1, y1) || !resolve(eit->second.second, x2, y2)) continue;
+            float mx1 = x1 + (x2 - x1) * c.margin1, my1 = y1 + (y2 - y1) * c.margin1;
+            float mx2 = x2 - (x2 - x1) * c.margin2, my2 = y2 - (y2 - y1) * c.margin2;
+            float r = (c.radius1 + c.radius2) * 0.5f;
+            float dx = mx2 - mx1, dy = my2 - my1;
             float len = std::sqrt(dx*dx + dy*dy);
-            if (len < 0.5f) return;
-            int steps = std::max(2, (int)(len / (thickness * 0.5f)));
-            for (int i = 0; i <= steps; ++i) {
-                float t = (float)i / steps;
-                float cx = ax + dx * t, cy = ay + dy * t;
-                renderer_->draw_filled_circle_world(cx, cy, thickness, enemy_col);
-            }
-        };
-        // Draw body: spine (waist->chest->neck->head)
-        draw_limb("NWaist", "NChest", 8.0f);
-        draw_limb("NChest", "NNeck", 6.0f);
-        // Head as circle
-        if (head) {
-            float hx, hy;
-            resolve_enemy_node("NHead", hx, hy);
-            renderer_->draw_filled_circle_world(hx, hy, 12.0f, enemy_col);
+            if (len < 0.5f) continue;
+            float ux = dx / len, uy = dy / len;
+            float px = -uy, py = ux;
+            float ht = std::max(r, 1.0f);
+            renderer_->draw_filled_triangle_world(mx1+px*ht, my1+py*ht, mx2+px*ht, my2+py*ht,
+                mx2-px*ht, my2-py*ht, enemy_col);
+            renderer_->draw_filled_triangle_world(mx1+px*ht, my1+py*ht, mx2-px*ht, my2-py*ht,
+                mx1-px*ht, my1-py*ht, enemy_col);
+            renderer_->draw_filled_circle_world(mx1, my1, ht, enemy_col);
+            renderer_->draw_filled_circle_world(mx2, my2, ht, enemy_col);
         }
-        // Arms
-        draw_limb("NShoulder_1", "NElbow_1", 5.0f);
-        draw_limb("NElbow_1", "NWrist_1", 4.0f);
-        draw_limb("NShoulder_2", "NElbow_2", 5.0f);
-        draw_limb("NElbow_2", "NWrist_2", 4.0f);
-        // Legs
-        draw_limb("NWaist", "NHip_1", 7.0f);
-        draw_limb("NWaist", "NHip_2", 7.0f);
-        draw_limb("NHip_1", "NKnee_1", 6.0f);
-        draw_limb("NKnee_1", "NToe_1", 6.0f);
-        draw_limb("NHip_2", "NKnee_2", 6.0f);
-        draw_limb("NKnee_2", "NToe_2", 6.0f);
-        // Health bar above enemy (floating, drawn as 2 triangles = rect)
-        float hb_w = 60.0f, hb_h = 5.0f;
-        float hb_x = wx - hb_w / 2.0f;
-        float hb_y = wy + 80.0f;
-        renderer_->draw_filled_triangle_world(hb_x, hb_y, hb_x + hb_w, hb_y,
-            hb_x + hb_w, hb_y + hb_h, ren::Color4B{40, 40, 40, 255});
-        renderer_->draw_filled_triangle_world(hb_x, hb_y, hb_x + hb_w, hb_y + hb_h,
-            hb_x, hb_y + hb_h, ren::Color4B{40, 40, 40, 255});
-        float pct = enemy_fighter_.health / enemy_fighter_.max_health;
-        if (pct > 0) {
-            ren::Color4B c = (pct > 0.5f) ? ren::Color4B{60, 180, 70, 255} :
-                (pct > 0.25f ? ren::Color4B{200, 160, 40, 255} : ren::Color4B{180, 30, 30, 255});
-            float fw = hb_w * pct;
-            renderer_->draw_filled_triangle_world(hb_x, hb_y, hb_x + fw, hb_y,
-                hb_x + fw, hb_y + hb_h, c);
-            renderer_->draw_filled_triangle_world(hb_x, hb_y, hb_x + fw, hb_y + hb_h,
-                hb_x, hb_y + hb_h, c);
+        // Render skeleton edges with Radius (EHead, ENeck)
+        for (auto& [ename, sedge] : skeleton_edges_) {
+            if (sedge.radius <= 0) continue;
+            bool has_capsule = false;
+            for (auto& c : body_model_->capsules) {
+                if (c.edge_name == ename) { has_capsule = true; break; }
+            }
+            if (has_capsule) continue;
+            float x1, y1, x2, y2;
+            if (!resolve(sedge.end1, x1, y1) || !resolve(sedge.end2, x2, y2)) continue;
+            float r = sedge.radius;
+            float mx1 = x1 + (x2 - x1) * sedge.margin1, my1 = y1 + (y2 - y1) * sedge.margin1;
+            float mx2 = x2 - (x2 - x1) * sedge.margin2, my2 = y2 - (y2 - y1) * sedge.margin2;
+            float dx = mx2 - mx1, dy = my2 - my1;
+            float len = std::sqrt(dx*dx + dy*dy);
+            if (len < 0.5f) {
+                renderer_->draw_filled_circle_world((mx1+mx2)*0.5f, (my1+my2)*0.5f, r, enemy_col);
+                continue;
+            }
+            float ux = dx / len, uy = dy / len;
+            float px = -uy, py = ux;
+            float ht = std::max(r, 1.0f);
+            renderer_->draw_filled_triangle_world(mx1+px*ht, my1+py*ht, mx2+px*ht, my2+py*ht,
+                mx2-px*ht, my2-py*ht, enemy_col);
+            renderer_->draw_filled_triangle_world(mx1+px*ht, my1+py*ht, mx2-px*ht, my2-py*ht,
+                mx1-px*ht, my1-py*ht, enemy_col);
+            renderer_->draw_filled_circle_world(mx1, my1, ht, enemy_col);
+            renderer_->draw_filled_circle_world(mx2, my2, ht, enemy_col);
+        }
+        // Render triangles (skip cloth-node triangles — same as player)
+        for (auto& t : body_model_->triangles) {
+            auto is_cloth = [&](const std::string& n) { return body_model_->nodes.count(n) > 0; };
+            if (is_cloth(t.n1) || is_cloth(t.n2) || is_cloth(t.n3)) continue;
+            float tx0, ty0, tx1, ty1, tx2, ty2;
+            if (!resolve(t.n1, tx0, ty0) || !resolve(t.n2, tx1, ty1) ||
+                !resolve(t.n3, tx2, ty2)) continue;
+            renderer_->draw_filled_triangle_world(tx0, ty0, tx1, ty1, tx2, ty2, enemy_col);
         }
     }
 
@@ -2942,15 +2993,31 @@ private:
         // causes visible stretching on the legs (especially around the calves
         // and ankles where BODY-Triangle-7..10 are located).
         for (auto& t : body_model_->triangles) {
-            // Check if ALL three vertices can be resolved.
-            // [ORIGINAL] Nodes can be in: anim_node_pos_ (animated .bin),
-            // skeleton_nodes_ (rest pose), body_model_->nodes (HEAD-Node/BODY-Node),
-            // or body_model_->macro_nodes (HEAD-MacroNode/BODY-MacroNode).
-            auto can_resolve = [&](const std::string& n) {
-                return anim_node_pos_.count(n) || skeleton_nodes_.count(n) ||
-                       body_model_->nodes.count(n) || body_model_->macro_nodes.count(n);
+            // [ORIGINAL] Skip triangles that mix cloth nodes (BODY-Node/HEAD-Node)
+            // with skeletal nodes. Cloth nodes (BODY-Node*) have rest-pose positions
+            // in body.xml but NO per-frame animation data in .bin files — they're
+            // physics-simulated (Verlet) in the original. Rendering them at rest
+            // pose while other triangle vertices are animated causes severe
+            // stretching (especially on legs/calves where BODY-Triangle 7-11
+            // mix NAnkle/NKnee with BODY-Node*).
+            //
+            // Only render triangles where ALL 3 nodes are:
+            //   - skeletal (in anim_node_pos_ or skeleton_nodes_), OR
+            //   - MacroNodes (HEAD-MacroNode/BODY-MacroNode — these compute
+            //     position from skeletal children via LCC weights, so they
+            //     animate correctly)
+            auto is_cloth_node = [&](const std::string& n) {
+                return body_model_->nodes.count(n) > 0;  // BODY-Node/HEAD-Node
             };
-            if (!can_resolve(t.n1) || !can_resolve(t.n2) || !can_resolve(t.n3)) {
+            auto can_resolve_animated = [&](const std::string& n) {
+                return anim_node_pos_.count(n) || skeleton_nodes_.count(n) ||
+                       body_model_->macro_nodes.count(n);
+            };
+            if (is_cloth_node(t.n1) || is_cloth_node(t.n2) || is_cloth_node(t.n3)) {
+                continue;  // skip any triangle with a cloth node
+            }
+            if (!can_resolve_animated(t.n1) || !can_resolve_animated(t.n2) ||
+                !can_resolve_animated(t.n3)) {
                 continue;
             }
             auto [tx0, ty0] = resolve_body_node(t.n1,
@@ -4943,6 +5010,10 @@ private:
     uint32_t duck_play_time_ = 0;  // ms the duck animation has been playing
     int fwd_held_ms_ = 0;  // ms since forward key was last held (for latching)
     int back_held_ms_ = 0;  // ms since back key was last held (for latching)
+    // [ORIGINAL] Double-tap detection for DoubleStep (dash)
+    uint32_t last_fwd_tap_ms_ = 0;  // timestamp of last Forward tap
+    uint32_t last_back_tap_ms_ = 0;  // timestamp of last Back tap
+    bool double_step_fwd_requested_ = false;  // double-tap Forward detected
     uint32_t last_kick_press_ms_ = 0;  // for double-tap detection (DoubleSweep)
     uint32_t last_punch_press_ms_ = 0;  // for double-tap detection (DoublePunch)
     uint32_t last_punch_seen_ms_ = 0;  // sticky buffer for O key (150ms window)
