@@ -701,6 +701,8 @@ public:
                     player_fighter_.invuln_time = 0.3f;
                     player_fighter_.hits_taken++;
                     enemy_fighter_.hits_landed++; combo_timer_ = 2.0f;
+                    // Spawn hit sparks at player position
+                    spawn_hit_sparks(player_pos_x_, player_pos_y_ - 40, 8);
                     enemy_fighter_.energy = std::min(enemy_fighter_.max_energy,
                         enemy_fighter_.energy + dmg * 0.5f);
                     play_sound("armor", 0.5f);
@@ -1497,6 +1499,8 @@ public:
                                 play_sound("f_pl_attack" + std::to_string(snd_idx), 0.7f);
                                 play_sound("armor", 0.5f);
                                 bag_hit_ = true;  // prevent multi-hit per frame
+                                // Spawn hit sparks at enemy position
+                                spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
                                 if (enemy_fighter_.health <= 0) {
                                     enemy_fighter_.health = 0;
                                     enemy_fighter_.is_dead = true;
@@ -1727,6 +1731,7 @@ public:
         render_punching_bag();
         render_enemy_fighter();
         render_character();
+        update_and_render_hit_sparks(0.016f);  // ~60fps assumed
         render_hud(*platform_);
         if (menu_anim_progress_ > 0.01f) render_menu_expanded(*platform_);
         if (overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
@@ -4672,6 +4677,41 @@ private:
     float enemy_hit_flash_ = 0.0f;
     // Combo reset timer: if no hit landed for 2s, reset combo counter
     float combo_timer_ = 0.0f;
+
+    // [ORIGINAL] Hit spark particles: simple visual feedback on hit.
+    // Each spark is a small expanding circle that fades out.
+    struct HitSpark {
+        float x, y;          // world position
+        float age = 0;       // seconds since spawn
+        float lifetime = 0.3f;
+        ren::Color4B color;
+    };
+    std::vector<HitSpark> hit_sparks_;
+    void spawn_hit_sparks(float x, float y, int count = 8) {
+        for (int i = 0; i < count; ++i) {
+            HitSpark s;
+            s.x = x + ((float)(std::rand() % 40) - 20.0f);
+            s.y = y + ((float)(std::rand() % 40) - 20.0f);
+            s.age = 0;
+            s.lifetime = 0.25f + (float)(std::rand() % 10) / 50.0f;
+            s.color = ren::Color4B{255, (uint8_t)(180 + std::rand() % 75),
+                                   (uint8_t)(40 + std::rand() % 80), 255};
+            hit_sparks_.push_back(s);
+        }
+    }
+    void update_and_render_hit_sparks(float dt_sec) {
+        for (auto& s : hit_sparks_) s.age += dt_sec;
+        hit_sparks_.erase(std::remove_if(hit_sparks_.begin(), hit_sparks_.end(),
+            [](const HitSpark& s) { return s.age >= s.lifetime; }), hit_sparks_.end());
+        for (const auto& s : hit_sparks_) {
+            float t = s.age / s.lifetime;
+            float radius = 3.0f + t * 8.0f;
+            uint8_t alpha = (uint8_t)(255 * (1.0f - t));
+            ren::Color4B c = s.color;
+            c.a = alpha;
+            renderer_->draw_filled_circle_world(s.x, s.y, radius, c);
+        }
+    }
 
     // --- Enemy skeleton fighter state ---
     // [ORIGINAL] The enemy is a second skeleton fighter (same body.xml/skeleton.xml
