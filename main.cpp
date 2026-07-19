@@ -625,6 +625,90 @@ public:
         // Update audio engine (mix + write to backend)
         aud::AudioEngine::instance().update(dt_sec);
 
+        // [ORIGINAL] Enemy AI: simple state machine.
+        // States: 0=idle, 1=approach, 2=attack, 3=retreat, 4=block
+        // Decisions every 0.8s: based on distance to player + randomness.
+        if (!enemy_fighter_.is_dead && !player_fighter_.is_dead) {
+            enemy_ai_timer_ += dt_sec;
+            enemy_attack_cooldown_ = std::max(0.0f, enemy_attack_cooldown_ - dt_sec);
+            if (enemy_fighter_.hit_stun_time > 0) {
+                // Stunned — can't act
+                enemy_anim_ = "fists_hit";
+            } else if (enemy_ai_timer_ >= enemy_ai_decision_interval_) {
+                enemy_ai_timer_ = 0;
+                float dist = std::abs(enemy_pos_x_ - player_pos_x_);
+                int r = std::rand() % 100;
+                if (dist > 250) {
+                    enemy_ai_state_ = 1;  // approach
+                } else if (dist < 120) {
+                    if (r < 30) enemy_ai_state_ = 2;  // attack
+                    else if (r < 50) enemy_ai_state_ = 3;  // retreat
+                    else if (r < 70) enemy_ai_state_ = 4;  // block
+                    else enemy_ai_state_ = 0;  // idle
+                } else {
+                    if (r < 40) enemy_ai_state_ = 2;  // attack
+                    else if (r < 60) enemy_ai_state_ = 1;  // approach
+                    else enemy_ai_state_ = 0;  // idle
+                }
+            }
+            // Execute current AI state
+            enemy_fighter_.is_blocking = (enemy_ai_state_ == 4);
+            float enemy_speed = 90.0f;
+            if (enemy_ai_state_ == 1) {  // approach
+                if (enemy_pos_x_ > player_pos_x_) enemy_pos_x_ -= enemy_speed * dt_sec;
+                else enemy_pos_x_ += enemy_speed * dt_sec;
+                enemy_anim_ = "step_forward";
+                enemy_facing_right_ = (player_pos_x_ > enemy_pos_x_);
+            } else if (enemy_ai_state_ == 3) {  // retreat
+                if (enemy_pos_x_ < player_pos_x_) enemy_pos_x_ -= enemy_speed * dt_sec;
+                else enemy_pos_x_ += enemy_speed * dt_sec;
+                enemy_anim_ = "step_back";
+            } else if (enemy_ai_state_ == 2 && enemy_attack_cooldown_ <= 0) {  // attack
+                enemy_anim_ = "high_punch";
+                enemy_attacking_ = true;
+                enemy_attack_duration_ = 0.4f;
+                enemy_attack_cooldown_ = 1.5f;
+                play_sound("f_pl_attack2", 0.4f);
+                // [ORIGINAL] Enemy attack hits player if in range and player not blocking/invuln
+                float dist = std::abs(enemy_pos_x_ - player_pos_x_);
+                if (dist < 180 && player_fighter_.invuln_time <= 0 && !player_fighter_.is_dead) {
+                    float dmg = 6.0f;
+                    if (player_fighter_.is_blocking) {
+                        dmg *= 0.25f;
+                    } else {
+                        player_hit_flash_ = 0.3f;
+                    }
+                    player_fighter_.health -= dmg;
+                    player_fighter_.is_hit = true;
+                    player_fighter_.hit_stun_time = 0.25f;
+                    player_fighter_.invuln_time = 0.3f;
+                    player_fighter_.hits_taken++;
+                    enemy_fighter_.hits_landed++;
+                    enemy_fighter_.energy = std::min(enemy_fighter_.max_energy,
+                        enemy_fighter_.energy + dmg * 0.5f);
+                    play_sound("armor", 0.5f);
+                    if (player_fighter_.health <= 0) {
+                        player_fighter_.health = 0;
+                        player_fighter_.is_dead = true;
+                        battle_result_ = "defeat";
+                        play_sound("bodyfall3", 0.9f);
+                        std::printf("[COMBAT] Player defeated! battle_result=defeat\n");
+                    }
+                }
+            } else if (enemy_ai_state_ == 4) {  // block
+                enemy_anim_ = "fists_block";
+            } else {  // idle
+                enemy_anim_ = "fists_idle";
+            }
+            if (enemy_attacking_) {
+                enemy_attack_duration_ -= dt_sec;
+                if (enemy_attack_duration_ <= 0) enemy_attacking_ = false;
+            }
+            enemy_anim_time_ += dt_sec;
+            // Face the player
+            enemy_facing_right_ = (player_pos_x_ > enemy_pos_x_);
+        }
+
         // R: restart battle (after victory/defeat)
         if (input.keys_just_pressed[(size_t)plat::Key::R]) {
             if (player_fighter_.is_dead || enemy_fighter_.is_dead) {
@@ -1577,10 +1661,150 @@ public:
         if (!location_loaded_) return;
         render_location();
         render_punching_bag();
+        render_enemy_fighter();
         render_character();
         render_hud(*platform_);
         if (menu_anim_progress_ > 0.01f) render_menu_expanded(*platform_);
         if (overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
+    }
+
+    // [ORIGINAL] Render the enemy skeleton fighter as a simplified silhouette.
+    // Draws a dark figure at enemy_pos_x_ with the current AI animation pose.
+    // Uses the same skeleton_nodes_/body model as the player, but with a red
+    // tint to distinguish from the player's black silhouette.
+    // [HEURISTIC-TODO] This is a simplified render: it draws the rest-pose
+    // skeleton (no per-node .bin animation for the enemy yet). A full second-
+    // model render requires factoring render_body_model() to accept a
+    // FighterState + position + facing parameter.
+    void render_enemy_fighter() {
+        if (enemy_fighter_.is_dead) return;  // don't render dead enemy
+        // Use skeleton rest pose to draw a simplified humanoid silhouette
+        if (skeleton_nodes_.empty()) return;
+        // Key nodes for a stick-figure silhouette
+        auto get_node = [&](const std::string& n) -> const SkelNode* {
+            auto it = skeleton_nodes_.find(n);
+            return it != skeleton_nodes_.end() ? &it->second : nullptr;
+        };
+        const SkelNode* np = get_node("NPivot");
+        const SkelNode* head = get_node("NHead");
+        const SkelNode* neck = get_node("NNeck");
+        const SkelNode* chest = get_node("NChest");
+        const SkelNode* waist = get_node("NWaist");
+        const SkelNode* lshoulder = get_node("NShoulder_1");
+        const SkelNode* rshoulder = get_node("NShoulder_2");
+        const SkelNode* lelbow = get_node("NElbow_1");
+        const SkelNode* relbow = get_node("NElbow_2");
+        const SkelNode* lwrist = get_node("NWrist_1");
+        const SkelNode* rwrist = get_node("NWrist_2");
+        const SkelNode* lhip = get_node("NHip_1");
+        const SkelNode* rhip = get_node("NHip_2");
+        const SkelNode* lknee = get_node("NKnee_1");
+        const SkelNode* rknee = get_node("NKnee_2");
+        const SkelNode* lfoot = get_node("NToe_1");
+        const SkelNode* rfoot = get_node("NToe_2");
+        if (!np) return;
+        // World position: enemy_pos_x_, enemy_pos_y_ + y_adjust
+        float wx = enemy_pos_x_;
+        float wy = enemy_pos_y_ + enemy_y_adjust_;
+        // NPivot offset (skeleton is relative to NPivot)
+        float npy = np->y, npx = np->x;
+        // Enemy color: dark red silhouette (vs player's black)
+        ren::Color4B enemy_col = (enemy_hit_flash_ > 0) ?
+            ren::Color4B{255, 100, 100, 255} : ren::Color4B{90, 30, 30, 255};
+        if (enemy_fighter_.is_blocking) enemy_col = ren::Color4B{60, 60, 120, 255};
+        // Convert skeleton-local to world: world = (wx + (lx - npx) * facing, wy + (ly - npy))
+        auto to_world = [&](const SkelNode* n, float& ox, float& oy) {
+            if (!n) { ox = wx; oy = wy; return; }
+            float dx = n->x - npx;
+            float dy = n->y - npy;
+            ox = wx + (enemy_facing_right_ ? dx : -dx);
+            oy = wy + dy;
+        };
+        // Draw limbs as thick capsules (lines with circle caps)
+        auto draw_limb = [&](const SkelNode* a, const SkelNode* b, float thickness) {
+            if (!a || !b) return;
+            float ax, ay, bx, by;
+            to_world(a, ax, ay);
+            to_world(b, bx, by);
+            // Simple thick line via filled rect rotated
+            float dx = bx - ax, dy = by - ay;
+            float len = std::sqrt(dx*dx + dy*dy);
+            if (len < 0.5f) return;
+            // Draw a series of overlapping circles along the segment
+            int steps = std::max(2, (int)(len / (thickness * 0.5f)));
+            for (int i = 0; i <= steps; ++i) {
+                float t = (float)i / steps;
+                float cx = ax + dx * t, cy = ay + dy * t;
+                renderer_->draw_filled_circle_world(cx, cy, thickness, enemy_col);
+            }
+        };
+        // Animate: add a simple bob/attack offset based on enemy_anim_
+        float anim_phase = enemy_anim_time_ * 8.0f;  // ~8 Hz bob
+        float bob = (enemy_anim_ == "fists_idle") ? std::sin(anim_phase) * 1.5f : 0;
+        wy += bob;
+        // During attack, extend arm forward
+        bool attacking = (enemy_anim_ == "high_punch" || enemy_attacking_);
+        // Draw body: spine (waist->chest->neck->head)
+        draw_limb(waist, chest, 8.0f);
+        draw_limb(chest, neck, 6.0f);
+        if (head) {
+            float hx, hy;
+            to_world(head, hx, hy);
+            renderer_->draw_filled_circle_world(hx, hy, 12.0f, enemy_col);
+        }
+        // Arms
+        if (attacking) {
+            // Extend attacking arm toward player
+            float dir = enemy_facing_right_ ? 1.0f : -1.0f;
+            if (lshoulder && lwrist) {
+                float sx, sy, ex, ey;
+                to_world(lshoulder, sx, sy);
+                ex = sx + dir * 50.0f; ey = sy - 5.0f;
+                // Draw extended arm via circles
+                int steps = 6;
+                for (int i = 0; i <= steps; ++i) {
+                    float t = (float)i / steps;
+                    float cx = sx + (ex - sx) * t, cy = sy + (ey - sy) * t;
+                    renderer_->draw_filled_circle_world(cx, cy, 5.0f, enemy_col);
+                }
+                // Fist
+                renderer_->draw_filled_circle_world(ex, ey, 7.0f, enemy_col);
+            }
+            // Other arm tucked
+            draw_limb(rshoulder, relbow, 5.0f);
+            draw_limb(relbow, rwrist, 4.0f);
+        } else {
+            draw_limb(lshoulder, lelbow, 5.0f);
+            draw_limb(lelbow, lwrist, 4.0f);
+            draw_limb(rshoulder, relbow, 5.0f);
+            draw_limb(relbow, rwrist, 4.0f);
+        }
+        // Legs
+        draw_limb(waist, lhip, 7.0f);
+        draw_limb(waist, rhip, 7.0f);
+        draw_limb(lhip, lknee, 6.0f);
+        draw_limb(lknee, lfoot, 6.0f);
+        draw_limb(rhip, rknee, 6.0f);
+        draw_limb(rknee, rfoot, 6.0f);
+        // Health bar above enemy (small, floating) — drawn as 2 triangles (rect)
+        float hb_w = 60.0f, hb_h = 5.0f;
+        float hb_x = wx - hb_w / 2.0f;
+        float hb_y = wy + 80.0f;
+        // Background (dark)
+        renderer_->draw_filled_triangle_world(hb_x, hb_y, hb_x + hb_w, hb_y,
+            hb_x + hb_w, hb_y + hb_h, ren::Color4B{40, 40, 40, 255});
+        renderer_->draw_filled_triangle_world(hb_x, hb_y, hb_x + hb_w, hb_y + hb_h,
+            hb_x, hb_y + hb_h, ren::Color4B{40, 40, 40, 255});
+        float pct = enemy_fighter_.health / enemy_fighter_.max_health;
+        if (pct > 0) {
+            ren::Color4B c = (pct > 0.5f) ? ren::Color4B{60, 180, 70, 255} :
+                (pct > 0.25f ? ren::Color4B{200, 160, 40, 255} : ren::Color4B{180, 30, 30, 255});
+            float fw = hb_w * pct;
+            renderer_->draw_filled_triangle_world(hb_x, hb_y, hb_x + fw, hb_y,
+                hb_x + fw, hb_y + hb_h, c);
+            renderer_->draw_filled_triangle_world(hb_x, hb_y, hb_x + fw, hb_y + hb_h,
+                hb_x, hb_y + hb_h, c);
+        }
     }
 
     // Called by LoadingScene to render the loading screen.
@@ -1708,6 +1932,12 @@ private:
             const float X_OFFSET = 983.0f;  // aligns bag with ceiling holder
             player_pos_x_ = location_->player_x - X_OFFSET;
             player_pos_y_ = location_->player_y;  // no invert (matches location rendering)
+            // [ORIGINAL] Enemy fighter position: same as the punching bag/enemy
+            // spawn point from params.xml (enemy_x - X_OFFSET). The enemy
+            // skeleton stands here and AI controls its behavior.
+            enemy_pos_x_ = location_->enemy_x - 983.0f;
+            enemy_pos_y_ = location_->player_y;  // same Y as player (on floor)
+            enemy_facing_right_ = false;  // faces left toward player
         }
         // Camera: follow player but keep a proper Y that shows the floor.
         // The dojo floor (layer_3) is at world Y ≈ -193. Player at Y ≈ -93.
@@ -4366,6 +4596,22 @@ private:
     // Hit-flash visual feedback (time remaining for red flash on hit fighter)
     float player_hit_flash_ = 0.0f;
     float enemy_hit_flash_ = 0.0f;
+
+    // --- Enemy skeleton fighter state ---
+    // [ORIGINAL] The enemy is a second skeleton fighter (same body.xml/skeleton.xml
+    // as the player). For now we render a simplified silhouette + AI controls
+    // its position/animation. A full second-model render (with its own .bin
+    // animation state) is a larger refactor.
+    float enemy_pos_x_ = 0.0f;
+    float enemy_pos_y_ = 0.0f;
+    float enemy_anim_time_ = 0.0f;
+    std::string enemy_anim_ = "fists_idle";
+    bool enemy_facing_right_ = false;  // enemy faces left (toward player) by default
+    float enemy_y_adjust_ = 4.0f;
+    // Enemy attack timing
+    float enemy_attack_timer_ = 0.0f;
+    bool enemy_attacking_ = false;
+    float enemy_attack_duration_ = 0.0f;
 
     Overlay overlay_ = Overlay::None;
     float menu_anim_progress_ = 0.0f;  // 0 = collapsed, 1 = fully expanded
