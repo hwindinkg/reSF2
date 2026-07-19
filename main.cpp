@@ -622,6 +622,14 @@ public:
         if (enemy_fighter_.hit_stun_time > 0) enemy_fighter_.hit_stun_time = std::max(0.0f, enemy_fighter_.hit_stun_time - dt_sec);
         if (player_fighter_.invuln_time > 0) player_fighter_.invuln_time = std::max(0.0f, player_fighter_.invuln_time - dt_sec);
         if (enemy_fighter_.invuln_time > 0) enemy_fighter_.invuln_time = std::max(0.0f, enemy_fighter_.invuln_time - dt_sec);
+        // Combo timer: reset combo if no hit for 2 seconds
+        if (combo_timer_ > 0) {
+            combo_timer_ -= dt_sec;
+            if (combo_timer_ <= 0) {
+                player_fighter_.hits_landed = 0;
+                enemy_fighter_.hits_landed = 0;
+            }
+        }
         // Update audio engine (mix + write to backend)
         aud::AudioEngine::instance().update(dt_sec);
 
@@ -692,7 +700,7 @@ public:
                     player_fighter_.hit_stun_time = 0.25f;
                     player_fighter_.invuln_time = 0.3f;
                     player_fighter_.hits_taken++;
-                    enemy_fighter_.hits_landed++;
+                    enemy_fighter_.hits_landed++; combo_timer_ = 2.0f;
                     enemy_fighter_.energy = std::min(enemy_fighter_.max_energy,
                         enemy_fighter_.energy + dmg * 0.5f);
                     play_sound("armor", 0.5f);
@@ -1324,8 +1332,18 @@ public:
 
         after_combat:
         // Camera follows player (always update, even after attack)
+        // [ORIGINAL] Screen shake on hit: offset camera by a decaying random
+        // amount when player_hit_flash_ or enemy_hit_flash_ is active.
         cam_x_ = player_pos_x_ + 200.0f;
-        renderer_->camera().set_target(cam_x_, cam_y_);
+        float shake = 0.0f;
+        if (player_hit_flash_ > 0) shake = std::max(shake, player_hit_flash_ * 12.0f);
+        if (enemy_hit_flash_ > 0) shake = std::max(shake, enemy_hit_flash_ * 8.0f);
+        float shake_x = 0, shake_y = 0;
+        if (shake > 0.1f) {
+            shake_x = ((float)(std::rand() % 200) - 100.0f) / 100.0f * shake;
+            shake_y = ((float)(std::rand() % 200) - 100.0f) / 100.0f * shake;
+        }
+        renderer_->camera().set_target(cam_x_ + shake_x, cam_y_ + shake_y);
         renderer_->camera().set_zoom(zoom_);
 
         // === UPDATE ANIMATION ===
@@ -1471,7 +1489,7 @@ public:
                                 enemy_fighter_.hit_stun_time = 0.3f;
                                 enemy_fighter_.invuln_time = 0.4f;
                                 enemy_fighter_.hits_taken++;
-                                player_fighter_.hits_landed++;
+                                player_fighter_.hits_landed++; combo_timer_ = 2.0f;
                                 player_fighter_.energy = std::min(player_fighter_.max_energy,
                                     player_fighter_.energy + dmg * 0.5f);
                                 enemy_hit_flash_ = 0.25f;
@@ -1628,7 +1646,7 @@ public:
                                             enemy_fighter_.hit_stun_time = 0.3f;
                                             enemy_fighter_.invuln_time = 0.2f;
                                             enemy_fighter_.hits_taken++;
-                                            player_fighter_.hits_landed++;
+                                            player_fighter_.hits_landed++; combo_timer_ = 2.0f;
                                             player_fighter_.energy = std::min(player_fighter_.max_energy,
                                                 player_fighter_.energy + dmg * 0.5f);
                                             enemy_hit_flash_ = 0.2f;
@@ -4314,6 +4332,16 @@ private:
             renderer_->draw_filled_rect_screen(en_x, hp_bar_y, hp_bar_w, hp_bar_h, flash);
         }
         render_text("ENEMY", en_x + hp_bar_w - 60, hp_bar_y - 16, 0.26f, {255, 200, 200, 255});
+        // [ORIGINAL] Combo counter: shows hits landed in quick succession.
+        // Original SF2 shows a combo counter when you land multiple hits
+        // within a short window. We track player_fighter_.hits_landed.
+        if (player_fighter_.hits_landed > 0 && enemy_hit_flash_ > 0) {
+            std::string combo = std::to_string(player_fighter_.hits_landed) + " HITS";
+            float combo_scale = 0.6f + enemy_hit_flash_ * 0.4f;
+            float combo_x = (float)platform.window_width() / 2.0f - 40.0f;
+            float combo_y = (float)platform.window_height() / 2.0f - 100.0f;
+            render_text(combo, combo_x, combo_y, combo_scale, {255, 220, 100, 255});
+        }
         // Victory/Defeat overlay
         if (player_fighter_.is_dead || enemy_fighter_.is_dead) {
             ren::Color4B overlay_bg{0, 0, 0, 150};
@@ -4642,6 +4670,8 @@ private:
     // Hit-flash visual feedback (time remaining for red flash on hit fighter)
     float player_hit_flash_ = 0.0f;
     float enemy_hit_flash_ = 0.0f;
+    // Combo reset timer: if no hit landed for 2s, reset combo counter
+    float combo_timer_ = 0.0f;
 
     // --- Enemy skeleton fighter state ---
     // [ORIGINAL] The enemy is a second skeleton fighter (same body.xml/skeleton.xml
