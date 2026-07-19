@@ -48,11 +48,13 @@
 #include "engine/scene/scenes.hpp"
 #include "engine/renderer/stb_image.h"
 #include "engine/format/xml_doc.hpp"
+#include "engine/audio/audio.hpp"
 
 namespace plat = resf2::platform;
 namespace rt = resf2::runtime;
 namespace ren = resf2::renderer;
 namespace fmt = resf2::format;
+namespace aud = resf2::audio;
 namespace plist = resf2::reverse::plist;
 namespace font = resf2::reverse::font;
 namespace scene = resf2::scene;
@@ -611,6 +613,27 @@ public:
         // frame N aligned with gameplay frame N (Boot/Loading don't count).
         platform_->tick_input_script();
         const auto& input = platform_->input();
+        float dt_sec = (float)dt / 1000.0f;
+
+        // [ORIGINAL] Combat state update: decay hit flash, hit stun, invuln.
+        if (player_hit_flash_ > 0) player_hit_flash_ = std::max(0.0f, player_hit_flash_ - dt_sec);
+        if (enemy_hit_flash_ > 0) enemy_hit_flash_ = std::max(0.0f, enemy_hit_flash_ - dt_sec);
+        if (player_fighter_.hit_stun_time > 0) player_fighter_.hit_stun_time = std::max(0.0f, player_fighter_.hit_stun_time - dt_sec);
+        if (enemy_fighter_.hit_stun_time > 0) enemy_fighter_.hit_stun_time = std::max(0.0f, enemy_fighter_.hit_stun_time - dt_sec);
+        if (player_fighter_.invuln_time > 0) player_fighter_.invuln_time = std::max(0.0f, player_fighter_.invuln_time - dt_sec);
+        if (enemy_fighter_.invuln_time > 0) enemy_fighter_.invuln_time = std::max(0.0f, enemy_fighter_.invuln_time - dt_sec);
+        // Update audio engine (mix + write to backend)
+        aud::AudioEngine::instance().update(dt_sec);
+
+        // R: restart battle (after victory/defeat)
+        if (input.keys_just_pressed[(size_t)plat::Key::R]) {
+            if (player_fighter_.is_dead || enemy_fighter_.is_dead) {
+                player_fighter_ = FighterState{};
+                enemy_fighter_ = FighterState{};
+                battle_result_.clear();
+                std::printf("[COMBAT] Battle restarted\n");
+            }
+        }
 
         // Esc: close overlay if open, else request quit (handled by scene)
         if (input.keys_just_pressed[(size_t)plat::Key::Escape]) {
@@ -899,6 +922,10 @@ public:
                 hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                 move_state_ = 10;
                 need_switch_to_idle_ = false;
+                // [ORIGINAL] Play attack swing sound at attack start.
+                // Original SF2 plays f_pl_attack*.wav on the first attack frame.
+                int snd = (best_move->name.length() % 4) + 1;
+                play_sound("f_pl_attack" + std::to_string(snd), 0.5f);
                 goto after_combat;
             } else if (punch_pressed || kick_pressed) {
                 // [DIAGNOSTIC] No candidate found — log structured reject.
@@ -1453,6 +1480,36 @@ public:
                                         bag_hit_ = true;
                                         bag_hit_this_frame = true;
                                         hit_registered = true;
+                                        // [ORIGINAL] Play hit sound + apply damage to enemy fighter.
+                                        // Original SF2: on hit, plays armor/body sound + damage from
+                                        // MoveDef::damage (parsed from <Damage Value=".."/>).
+                                        // Pick a random attack sound for variety.
+                                        int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
+                                        play_sound("f_pl_attack" + std::to_string(snd_idx), 0.8f);
+                                        play_sound("armor", 0.6f);
+                                        // Apply damage to enemy (punching bag = enemy proxy)
+                                        if (!enemy_fighter_.is_dead && enemy_fighter_.invuln_time <= 0) {
+                                            float dmg = move_it->second.damage;
+                                            if (dmg <= 0) dmg = 8.0f;  // default per hit if not specified
+                                            // Blocking reduces damage by 75%
+                                            if (enemy_fighter_.is_blocking) dmg *= 0.25f;
+                                            enemy_fighter_.health -= dmg;
+                                            enemy_fighter_.is_hit = true;
+                                            enemy_fighter_.hit_stun_time = 0.3f;
+                                            enemy_fighter_.invuln_time = 0.2f;
+                                            enemy_fighter_.hits_taken++;
+                                            player_fighter_.hits_landed++;
+                                            player_fighter_.energy = std::min(player_fighter_.max_energy,
+                                                player_fighter_.energy + dmg * 0.5f);
+                                            enemy_hit_flash_ = 0.2f;
+                                            if (enemy_fighter_.health <= 0) {
+                                                enemy_fighter_.health = 0;
+                                                enemy_fighter_.is_dead = true;
+                                                battle_result_ = "victory";
+                                                play_sound("bodyfall1", 0.9f);
+                                                std::printf("[COMBAT] Enemy defeated! battle_result=victory\n");
+                                            }
+                                        }
                                         break;
                                     }
                                 }
@@ -1626,6 +1683,7 @@ private:
         load_hud_textures();
         load_menu_textures();
         load_hud_font();
+        load_sounds();
         if (location_) {
             // Player/enemy positions in params.xml use Y-DOWN, same as image
             // coordinates. Location images are Y-inverted in render_location
@@ -3807,6 +3865,54 @@ private:
                     fnt_path.c_str(), hud_font_->chars.size());
     }
 
+    // [ORIGINAL] Load sound effects from the original mobile assets.
+    // SF2 sounds are in assets/sounds/*.wav (16-bit PCM, Marmalade s3eAudio).
+    // We load key combat sounds: punches, kicks, hits, bodyfalls, blocks.
+    void load_sounds() {
+        auto& eng = aud::AudioEngine::instance();
+        eng.init();  // defaults to NullAudioBackend (no OpenAL yet)
+        auto root = std::filesystem::path(asset_root_);
+        // Search paths for sounds (mobile APK layout + extracted layout)
+        std::vector<std::filesystem::path> sound_dirs = {
+            root/"assets"/"assets"/"sounds",
+            root/"assets"/"sounds",
+            root/"sounds",
+        };
+        std::filesystem::path sound_dir;
+        for (const auto& d : sound_dirs) {
+            if (std::filesystem::exists(d)) { sound_dir = d; break; }
+        }
+        if (sound_dir.empty()) {
+            std::printf("[audio] sounds dir not found\n");
+            return;
+        }
+        // [ORIGINAL] Key SF2 sound files (from assets/sounds/):
+        // f_pl_attack1-4.wav — player punch/kick attack swings
+        // bodyfall1/3.wav — body hit ground
+        // armor.wav — armor hit
+        // coin_hit1-4.wav — coin pickup
+        // disk.wav, energy_flask5.wav — pickups
+        std::vector<std::string> needed = {
+            "f_pl_attack1", "f_pl_attack2", "f_pl_attack3", "f_pl_attack4",
+            "bodyfall1", "bodyfall3", "armor", "coin_hit1", "disk", "energy_flask5",
+            "buy", "f_cough"
+        };
+        int loaded = 0;
+        for (const auto& name : needed) {
+            auto path = sound_dir / (name + ".wav");
+            if (std::filesystem::exists(path)) {
+                if (eng.load_sound_file(name, path.string())) loaded++;
+            }
+        }
+        std::printf("[audio] Loaded %d/%zu sounds from %s\n",
+                    loaded, needed.size(), sound_dir.string().c_str());
+    }
+
+    // Play a sound by name (no-op if not loaded or backend is null)
+    void play_sound(const std::string& name, float volume = 1.0f) {
+        aud::AudioEngine::instance().play(name, volume, false);
+    }
+
     void render_text(const std::string& text, float x, float y,
                      float scale, ren::Color4B color) {
         if (!hud_font_ || !hud_font_tex_) return;
@@ -3879,6 +3985,74 @@ private:
             renderer_->draw_textured_quad_screen(*lvlbar_it->second, 330, 15, 120, 20);
         }
         render_text("LVL 7", 460, 15, 0.30f, {255, 255, 255, 255});
+
+        // [ORIGINAL] Health bars for player and enemy (bottom-left and bottom-right).
+        // Original SF2: two health bars at bottom corners + energy bar below player.
+        // Red gradient, white border. Enemy bar mirrored on the right.
+        float hp_bar_w = 280.0f;
+        float hp_bar_h = 18.0f;
+        float hp_bar_y = (float)platform.window_height() - 30.0f;
+        float hp_bar_pad = 16.0f;
+        // Player HP bar (bottom-left)
+        float pl_x = hp_bar_pad;
+        ren::Color4B hp_bg{30, 20, 20, 200};
+        ren::Color4B hp_border{180, 160, 120, 255};
+        ren::Color4B hp_fill_low{180, 30, 30, 255};
+        ren::Color4B hp_fill_mid{200, 160, 40, 255};
+        ren::Color4B hp_fill_hi{60, 180, 70, 255};
+        renderer_->draw_filled_rect_screen(pl_x - 2, hp_bar_y - 2, hp_bar_w + 4, hp_bar_h + 4, hp_border);
+        renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w, hp_bar_h, hp_bg);
+        float pl_pct = player_fighter_.health / player_fighter_.max_health;
+        ren::Color4B pl_col = (pl_pct > 0.5f) ? hp_fill_hi : (pl_pct > 0.25f ? hp_fill_mid : hp_fill_low);
+        if (pl_pct > 0) {
+            renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w * pl_pct, hp_bar_h, pl_col);
+        }
+        // Player hit flash overlay
+        if (player_hit_flash_ > 0) {
+            ren::Color4B flash{255, 255, 255, (uint8_t)(player_hit_flash_ * 600.0f)};
+            renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w, hp_bar_h, flash);
+        }
+        render_text("YOU", pl_x + 4, hp_bar_y - 16, 0.26f, {255, 240, 200, 255});
+        // Energy bar below player HP
+        float en_bar_y = hp_bar_y + hp_bar_h + 3;
+        float en_bar_h = 5.0f;
+        renderer_->draw_filled_rect_screen(pl_x, en_bar_y, hp_bar_w, en_bar_h, hp_bg);
+        float en_pct = player_fighter_.energy / player_fighter_.max_energy;
+        if (en_pct > 0) {
+            renderer_->draw_filled_rect_screen(pl_x, en_bar_y, hp_bar_w * en_pct, en_bar_h,
+                ren::Color4B{80, 180, 255, 255});
+        }
+        // Enemy HP bar (bottom-right, mirrored)
+        float en_x = (float)platform.window_width() - hp_bar_w - hp_bar_pad;
+        renderer_->draw_filled_rect_screen(en_x - 2, hp_bar_y - 2, hp_bar_w + 4, hp_bar_h + 4, hp_border);
+        renderer_->draw_filled_rect_screen(en_x, hp_bar_y, hp_bar_w, hp_bar_h, hp_bg);
+        float en_pct2 = enemy_fighter_.health / enemy_fighter_.max_health;
+        ren::Color4B en_col = (en_pct2 > 0.5f) ? hp_fill_hi : (en_pct2 > 0.25f ? hp_fill_mid : hp_fill_low);
+        if (en_pct2 > 0) {
+            // Enemy bar fills from right to left
+            renderer_->draw_filled_rect_screen(en_x + hp_bar_w * (1.0f - en_pct2), hp_bar_y,
+                hp_bar_w * en_pct2, hp_bar_h, en_col);
+        }
+        if (enemy_hit_flash_ > 0) {
+            ren::Color4B flash{255, 255, 255, (uint8_t)(enemy_hit_flash_ * 600.0f)};
+            renderer_->draw_filled_rect_screen(en_x, hp_bar_y, hp_bar_w, hp_bar_h, flash);
+        }
+        render_text("ENEMY", en_x + hp_bar_w - 60, hp_bar_y - 16, 0.26f, {255, 200, 200, 255});
+        // Victory/Defeat overlay
+        if (player_fighter_.is_dead || enemy_fighter_.is_dead) {
+            ren::Color4B overlay_bg{0, 0, 0, 150};
+            renderer_->draw_filled_rect_screen(0, 0,
+                (float)platform.window_width(), (float)platform.window_height(), overlay_bg);
+            std::string msg = enemy_fighter_.is_dead ? "VICTORY" : "DEFEAT";
+            ren::Color4B msg_col = enemy_fighter_.is_dead ?
+                ren::Color4B{255, 220, 100, 255} : ren::Color4B{220, 60, 60, 255};
+            float msg_scale = 1.5f;
+            float msg_w = msg.size() * 16.0f * msg_scale;
+            render_text(msg, ((float)platform.window_width() - msg_w) / 2.0f,
+                (float)platform.window_height() / 2.0f - 30, msg_scale, msg_col);
+            render_text("Press R to restart", ((float)platform.window_width() - 200) / 2.0f,
+                (float)platform.window_height() / 2.0f + 20, 0.4f, {200, 200, 200, 255});
+        }
 
         // Menu button (LEFT side, scroll/roll style)
         float btn_x = 10.0f, btn_y = 58.0f;
@@ -4162,6 +4336,36 @@ private:
     std::string battle_result_;  // "victory" / "defeat" / ""
     std::vector<std::string> completed_levels_;
     int currency_ = 1000;  // starting gold (stub)
+
+    // --- Combat state ---
+    // [ORIGINAL] SF2 combat: each fighter has health (100 by default),
+    // takes damage from Attack intervals (MoveDef::intervals[i].damage),
+    // and can block (reduces damage). A fight ends when one fighter's
+    // health reaches 0. The original uses a state machine per fighter
+    // (idle/walk/attack/hit/block/dead); here we track player + enemy.
+    struct FighterState {
+        float health = 100.0f;
+        float max_health = 100.0f;
+        float energy = 0.0f;        // 0..100, gained on hit, spent on magic
+        float max_energy = 100.0f;
+        bool is_blocking = false;
+        bool is_hit = false;        // currently in hit-reaction animation
+        float hit_stun_time = 0.0f; // remaining hit-stun (can't act)
+        float invuln_time = 0.0f;   // invulnerable (after being hit, brief)
+        int hits_landed = 0;
+        int hits_taken = 0;
+        bool is_dead = false;
+    };
+    FighterState player_fighter_;
+    FighterState enemy_fighter_;
+    // Enemy AI state (simple: approach, attack when in range, block sometimes)
+    float enemy_ai_timer_ = 0.0f;
+    float enemy_ai_decision_interval_ = 0.8f;  // seconds between AI decisions
+    int enemy_ai_state_ = 0;  // 0=idle, 1=approach, 2=attack, 3=retreat, 4=block
+    float enemy_attack_cooldown_ = 0.0f;
+    // Hit-flash visual feedback (time remaining for red flash on hit fighter)
+    float player_hit_flash_ = 0.0f;
+    float enemy_hit_flash_ = 0.0f;
 
     Overlay overlay_ = Overlay::None;
     float menu_anim_progress_ = 0.0f;  // 0 = collapsed, 1 = fully expanded
