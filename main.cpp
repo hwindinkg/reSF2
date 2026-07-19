@@ -869,6 +869,14 @@ public:
             }
             last_fwd_tap_ms_ = now_ms;
         }
+        // [ORIGINAL] Double-tap Back → fast retreat (no DoubleStepBackward anim
+        // exists, so use double_step_forward played in reverse direction = dash back)
+        if (back_just_pressed) {
+            if (now_ms - last_back_tap_ms_ < 300 && current_anim_ == "step_back") {
+                double_step_back_requested_ = true;
+            }
+            last_back_tap_ms_ = now_ms;
+        }
 
         bool punch_pressed = input.keys_just_pressed[(size_t)plat::Key::O];
         bool kick_pressed = input.keys_just_pressed[(size_t)plat::Key::P];
@@ -1384,7 +1392,19 @@ public:
                     play_animation(step_back_anim, true);
                 }
             } else if (move_state_ == 1) {  // MOVING_BACK
-                if (!back_latched && step_min_played) {
+                // [ORIGINAL] Double-tap Back during BackStep → fast retreat dash
+                if (double_step_back_requested_ && animations_.count("double_step_forward")) {
+                    // No DoubleStepBackward anim — use double_step_forward but
+                    // flip facing temporarily so root motion goes backward.
+                    play_animation("double_step_forward", false);
+                    move_state_ = 10;
+                    current_move_ = "DoubleStepBackward";
+                    int fc = animations_["double_step_forward"].frame_count;
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                    double_step_back_requested_ = false;
+                    debug_log("[MOVE] f=%llu DoubleStepBackward (retreat dash)\n",
+                              (unsigned long long)total_frame_count_);
+                } else if (!back_latched && step_min_played) {
                     move_state_ = 0; need_switch_to_idle_ = true;
                 } else if (fwd_latched && !back_latched && step_min_played && !step_fwd_anim.empty()) {
                     move_state_ = 2;
@@ -1976,10 +1996,18 @@ public:
             renderer_->draw_filled_circle_world(mx1, my1, ht, enemy_col);
             renderer_->draw_filled_circle_world(mx2, my2, ht, enemy_col);
         }
-        // Render triangles (skip cloth-node triangles — same as player)
+        // Render triangles (skip cloth-node AND MacroNode triangles)
+        // [ORIGINAL] HEAD-Triangle references HEAD-MacroNode, which uses LCC
+        // weights to compute position from skeleton children (NTop, NHeadF, etc.).
+        // These LCC weights are calibrated for rest pose — when skeleton animates,
+        // the weighted sum produces stretched/wrong positions. Without cloth
+        // simulation, these triangles can't render correctly. Skip them.
         for (auto& t : body_model_->triangles) {
-            auto is_cloth = [&](const std::string& n) { return body_model_->nodes.count(n) > 0; };
-            if (is_cloth(t.n1) || is_cloth(t.n2) || is_cloth(t.n3)) continue;
+            auto is_non_skel = [&](const std::string& n) {
+                return body_model_->nodes.count(n) > 0 ||
+                       body_model_->macro_nodes.count(n) > 0;
+            };
+            if (is_non_skel(t.n1) || is_non_skel(t.n2) || is_non_skel(t.n3)) continue;
             float tx0, ty0, tx1, ty1, tx2, ty2;
             if (!resolve(t.n1, tx0, ty0) || !resolve(t.n2, tx1, ty1) ||
                 !resolve(t.n3, tx2, ty2)) continue;
@@ -3006,18 +3034,22 @@ private:
             //   - MacroNodes (HEAD-MacroNode/BODY-MacroNode — these compute
             //     position from skeletal children via LCC weights, so they
             //     animate correctly)
-            auto is_cloth_node = [&](const std::string& n) {
-                return body_model_->nodes.count(n) > 0;  // BODY-Node/HEAD-Node
+            // [ORIGINAL] Skip triangles with cloth nodes (BODY-Node/HEAD-Node)
+            // AND triangles with MacroNodes (HEAD-MacroNode/BODY-MacroNode).
+            // MacroNodes use LCC weights calibrated for rest pose — when skeleton
+            // animates, weighted sum produces stretched positions. Without cloth
+            // simulation, only render triangles with pure skeletal nodes.
+            auto is_non_skel = [&](const std::string& n) {
+                return body_model_->nodes.count(n) > 0 ||
+                       body_model_->macro_nodes.count(n) > 0;
             };
-            auto can_resolve_animated = [&](const std::string& n) {
-                return anim_node_pos_.count(n) || skeleton_nodes_.count(n) ||
-                       body_model_->macro_nodes.count(n);
-            };
-            if (is_cloth_node(t.n1) || is_cloth_node(t.n2) || is_cloth_node(t.n3)) {
-                continue;  // skip any triangle with a cloth node
+            if (is_non_skel(t.n1) || is_non_skel(t.n2) || is_non_skel(t.n3)) {
+                continue;
             }
-            if (!can_resolve_animated(t.n1) || !can_resolve_animated(t.n2) ||
-                !can_resolve_animated(t.n3)) {
+            auto can_resolve = [&](const std::string& n) {
+                return anim_node_pos_.count(n) || skeleton_nodes_.count(n);
+            };
+            if (!can_resolve(t.n1) || !can_resolve(t.n2) || !can_resolve(t.n3)) {
                 continue;
             }
             auto [tx0, ty0] = resolve_body_node(t.n1,
@@ -3988,8 +4020,18 @@ private:
         // matches (e.g. stance/idle anims not in moves.xml).
         bool is_root_motion_anim = false;
         {
+            // [ORIGINAL] Match MoveDef by filename, stripping .bin suffix.
+            // MoveDef.filename = "double_step_forward.bin", current_anim_ = "double_step_forward".
+            // Without stripping, the lookup fails and root motion doesn't apply
+            // (e.g. DoubleStepForward dash plays animation but doesn't move player).
+            auto strip_bin = [](const std::string& s) {
+                if (s.size() > 4 && s.substr(s.size()-4) == ".bin")
+                    return s.substr(0, s.size()-4);
+                return s;
+            };
+            std::string cur_no_bin = strip_bin(current_anim_);
             auto it = std::find_if(moves_.begin(), moves_.end(),
-                [&](const auto& p) { return p.second.filename == current_anim_; });
+                [&](const auto& p) { return strip_bin(p.second.filename) == cur_no_bin; });
             if (it != moves_.end()) {
                 const auto& m = it->second;
                 is_root_motion_anim = m.is_step || m.is_jump || m.is_retreat || m.is_attack;
@@ -5014,6 +5056,7 @@ private:
     uint32_t last_fwd_tap_ms_ = 0;  // timestamp of last Forward tap
     uint32_t last_back_tap_ms_ = 0;  // timestamp of last Back tap
     bool double_step_fwd_requested_ = false;  // double-tap Forward detected
+    bool double_step_back_requested_ = false; // double-tap Back detected
     uint32_t last_kick_press_ms_ = 0;  // for double-tap detection (DoubleSweep)
     uint32_t last_punch_press_ms_ = 0;  // for double-tap detection (DoublePunch)
     uint32_t last_punch_seen_ms_ = 0;  // sticky buffer for O key (150ms window)
