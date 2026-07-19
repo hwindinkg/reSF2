@@ -655,17 +655,32 @@ public:
                 enemy_ai_timer_ = 0;
                 float dist = std::abs(enemy_pos_x_ - player_pos_x_);
                 int r = std::rand() % 100;
+                // [ORIGINAL] AI behavior tuned for engaging combat:
+                // - Far (>250px): approach
+                // - Mid (120-250px): attack range — prefer attack
+                // - Close (<120px): mix of attack/retreat/block to avoid clumping
                 if (dist > 250) {
                     enemy_ai_state_ = 1;  // approach
-                } else if (dist < 120) {
-                    if (r < 30) enemy_ai_state_ = 2;  // attack
-                    else if (r < 50) enemy_ai_state_ = 3;  // retreat
-                    else if (r < 70) enemy_ai_state_ = 4;  // block
+                } else if (dist > 120) {
+                    // Mid range: attack often, sometimes approach
+                    if (r < 50) enemy_ai_state_ = 2;  // attack
+                    else if (r < 70) enemy_ai_state_ = 1;  // approach
+                    else if (r < 80) enemy_ai_state_ = 4;  // block
                     else enemy_ai_state_ = 0;  // idle
                 } else {
-                    if (r < 40) enemy_ai_state_ = 2;  // attack
-                    else if (r < 60) enemy_ai_state_ = 1;  // approach
+                    // Close range: mix it up
+                    if (r < 35) enemy_ai_state_ = 2;  // attack
+                    else if (r < 55) enemy_ai_state_ = 3;  // retreat
+                    else if (r < 75) enemy_ai_state_ = 4;  // block
                     else enemy_ai_state_ = 0;  // idle
+                }
+                // Aggression: if player is low health, attack more
+                if (player_fighter_.health < 30 && r < 50) {
+                    enemy_ai_state_ = 2;  // press the advantage
+                }
+                // Self-preservation: if enemy low health, retreat/block more
+                if (enemy_fighter_.health < 30 && r < 60) {
+                    enemy_ai_state_ = (r < 30) ? 4 : 3;  // block or retreat
                 }
             }
             // Execute current AI state
@@ -734,6 +749,18 @@ public:
                 player_fighter_ = FighterState{};
                 enemy_fighter_ = FighterState{};
                 battle_result_.clear();
+                player_hit_flash_ = 0;
+                enemy_hit_flash_ = 0;
+                combo_timer_ = 0;
+                hit_sparks_.clear();
+                enemy_ai_timer_ = 0;
+                enemy_ai_state_ = 0;
+                enemy_attack_cooldown_ = 0;
+                enemy_attacking_ = false;
+                // Reset positions
+                if (location_) {
+                    enemy_pos_x_ = location_->enemy_x - 983.0f;
+                }
                 std::printf("[COMBAT] Battle restarted\n");
             }
         }
