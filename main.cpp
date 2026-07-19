@@ -1821,24 +1821,71 @@ public:
         if (overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
     }
 
-    // [ORIGINAL] Render the enemy skeleton fighter as a simplified silhouette.
-    // Draws a dark figure at enemy_pos_x_ with the current AI animation pose.
-    // Uses the same skeleton_nodes_/body model as the player, but with a red
-    // tint to distinguish from the player's black silhouette.
-    // [HEURISTIC-TODO] This is a simplified render: it draws the rest-pose
-    // skeleton (no per-node .bin animation for the enemy yet). A full second-
-    // model render requires factoring render_body_model() to accept a
-    // FighterState + position + facing parameter.
+    // [ORIGINAL] Render the enemy skeleton fighter using .bin animation.
+    // The enemy uses the same animations_ database as the player, with its own
+    // enemy_anim_time_ and enemy_anim_ state. Node positions are resolved from
+    // the .bin frames (interpolated), giving proper skeletal animation.
     void render_enemy_fighter() {
-        if (enemy_fighter_.is_dead) return;  // don't render dead enemy
-        // Use skeleton rest pose to draw a simplified humanoid silhouette
+        if (enemy_fighter_.is_dead) return;
         if (skeleton_nodes_.empty()) return;
-        // Key nodes for a stick-figure silhouette
+        // Get NPivot rest pose for Y normalization
+        auto np_it = skeleton_nodes_.find("NPivot");
+        if (np_it == skeleton_nodes_.end()) return;
+        float npivot_rest_y = np_it->second.y;
+        // World position
+        float wx = enemy_pos_x_;
+        float wy = enemy_pos_y_ + enemy_y_adjust_;
+        // Enemy color
+        ren::Color4B enemy_col = (enemy_hit_flash_ > 0) ?
+            ren::Color4B{255, 100, 100, 255} : ren::Color4B{90, 30, 30, 255};
+        if (enemy_fighter_.is_blocking) enemy_col = ren::Color4B{60, 60, 120, 255};
+        // Get current animation frame for enemy
+        std::string anim_name = enemy_anim_;
+        // Strip .bin if present
+        if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
+            anim_name = anim_name.substr(0, anim_name.size()-4);
+        auto anim_it = animations_.find(anim_name);
+        int frame_idx = 0, next_idx = 0;
+        float alpha = 0;
+        bool has_anim = false;
+        if (anim_it != animations_.end() && anim_it->second.frame_count > 0) {
+            auto& anim = anim_it->second;
+            float fps = 20.0f;
+            float f = enemy_anim_time_ * fps;
+            frame_idx = (int)f % anim.frame_count;
+            next_idx = (frame_idx + 1) % anim.frame_count;
+            alpha = f - (int)f;
+            has_anim = true;
+        }
+        // Resolve node position: use .bin animation if available, else rest pose
+        auto resolve_enemy_node = [&](const std::string& name, float& ox, float& oy) {
+            auto sit = skeleton_nodes_.find(name);
+            if (sit == skeleton_nodes_.end()) { ox = wx; oy = wy; return; }
+            float lx = sit->second.x, ly = sit->second.y;
+            if (has_anim && anim_it != animations_.end()) {
+                auto& anim = anim_it->second;
+                // Find node index in ordered_node_names_
+                for (int i = 0; i < (int)ordered_node_names_.size() && i < 67; ++i) {
+                    if (ordered_node_names_[i] == name) {
+                        float x0, y0, z0, x1, y1, z1;
+                        if (anim.get_node_pos(frame_idx, i, x0, y0, z0) &&
+                            anim.get_node_pos(next_idx, i, x1, y1, z1)) {
+                            lx = x0 + (x1 - x0) * alpha;
+                            ly = y0 + (y1 - y0) * alpha;
+                        }
+                        break;
+                    }
+                }
+            }
+            float dx = lx - np_it->second.x;
+            float dy = ly - npivot_rest_y;
+            ox = wx + (enemy_facing_right_ ? dx : -dx);
+            oy = wy + dy;
+        };
         auto get_node = [&](const std::string& n) -> const SkelNode* {
             auto it = skeleton_nodes_.find(n);
             return it != skeleton_nodes_.end() ? &it->second : nullptr;
         };
-        const SkelNode* np = get_node("NPivot");
         const SkelNode* head = get_node("NHead");
         const SkelNode* neck = get_node("NNeck");
         const SkelNode* chest = get_node("NChest");
@@ -1855,35 +1902,14 @@ public:
         const SkelNode* rknee = get_node("NKnee_2");
         const SkelNode* lfoot = get_node("NToe_1");
         const SkelNode* rfoot = get_node("NToe_2");
-        if (!np) return;
-        // World position: enemy_pos_x_, enemy_pos_y_ + y_adjust
-        float wx = enemy_pos_x_;
-        float wy = enemy_pos_y_ + enemy_y_adjust_;
-        // NPivot offset (skeleton is relative to NPivot)
-        float npy = np->y, npx = np->x;
-        // Enemy color: dark red silhouette (vs player's black)
-        ren::Color4B enemy_col = (enemy_hit_flash_ > 0) ?
-            ren::Color4B{255, 100, 100, 255} : ren::Color4B{90, 30, 30, 255};
-        if (enemy_fighter_.is_blocking) enemy_col = ren::Color4B{60, 60, 120, 255};
-        // Convert skeleton-local to world: world = (wx + (lx - npx) * facing, wy + (ly - npy))
-        auto to_world = [&](const SkelNode* n, float& ox, float& oy) {
-            if (!n) { ox = wx; oy = wy; return; }
-            float dx = n->x - npx;
-            float dy = n->y - npy;
-            ox = wx + (enemy_facing_right_ ? dx : -dx);
-            oy = wy + dy;
-        };
-        // Draw limbs as thick capsules (lines with circle caps)
-        auto draw_limb = [&](const SkelNode* a, const SkelNode* b, float thickness) {
-            if (!a || !b) return;
+        // Draw limbs as thick capsules (series of circles)
+        auto draw_limb = [&](const std::string& a, const std::string& b, float thickness) {
             float ax, ay, bx, by;
-            to_world(a, ax, ay);
-            to_world(b, bx, by);
-            // Simple thick line via filled rect rotated
+            resolve_enemy_node(a, ax, ay);
+            resolve_enemy_node(b, bx, by);
             float dx = bx - ax, dy = by - ay;
             float len = std::sqrt(dx*dx + dy*dy);
             if (len < 0.5f) return;
-            // Draw a series of overlapping circles along the segment
             int steps = std::max(2, (int)(len / (thickness * 0.5f)));
             for (int i = 0; i <= steps; ++i) {
                 float t = (float)i / steps;
@@ -1891,59 +1917,31 @@ public:
                 renderer_->draw_filled_circle_world(cx, cy, thickness, enemy_col);
             }
         };
-        // Animate: add a simple bob/attack offset based on enemy_anim_
-        float anim_phase = enemy_anim_time_ * 8.0f;  // ~8 Hz bob
-        float bob = (enemy_anim_ == "fists_idle") ? std::sin(anim_phase) * 1.5f : 0;
-        wy += bob;
-        // During attack, extend arm forward
-        bool attacking = (enemy_anim_ == "high_punch" || enemy_attacking_);
         // Draw body: spine (waist->chest->neck->head)
-        draw_limb(waist, chest, 8.0f);
-        draw_limb(chest, neck, 6.0f);
+        draw_limb("NWaist", "NChest", 8.0f);
+        draw_limb("NChest", "NNeck", 6.0f);
+        // Head as circle
         if (head) {
             float hx, hy;
-            to_world(head, hx, hy);
+            resolve_enemy_node("NHead", hx, hy);
             renderer_->draw_filled_circle_world(hx, hy, 12.0f, enemy_col);
         }
         // Arms
-        if (attacking) {
-            // Extend attacking arm toward player
-            float dir = enemy_facing_right_ ? 1.0f : -1.0f;
-            if (lshoulder && lwrist) {
-                float sx, sy, ex, ey;
-                to_world(lshoulder, sx, sy);
-                ex = sx + dir * 50.0f; ey = sy - 5.0f;
-                // Draw extended arm via circles
-                int steps = 6;
-                for (int i = 0; i <= steps; ++i) {
-                    float t = (float)i / steps;
-                    float cx = sx + (ex - sx) * t, cy = sy + (ey - sy) * t;
-                    renderer_->draw_filled_circle_world(cx, cy, 5.0f, enemy_col);
-                }
-                // Fist
-                renderer_->draw_filled_circle_world(ex, ey, 7.0f, enemy_col);
-            }
-            // Other arm tucked
-            draw_limb(rshoulder, relbow, 5.0f);
-            draw_limb(relbow, rwrist, 4.0f);
-        } else {
-            draw_limb(lshoulder, lelbow, 5.0f);
-            draw_limb(lelbow, lwrist, 4.0f);
-            draw_limb(rshoulder, relbow, 5.0f);
-            draw_limb(relbow, rwrist, 4.0f);
-        }
+        draw_limb("NShoulder_1", "NElbow_1", 5.0f);
+        draw_limb("NElbow_1", "NWrist_1", 4.0f);
+        draw_limb("NShoulder_2", "NElbow_2", 5.0f);
+        draw_limb("NElbow_2", "NWrist_2", 4.0f);
         // Legs
-        draw_limb(waist, lhip, 7.0f);
-        draw_limb(waist, rhip, 7.0f);
-        draw_limb(lhip, lknee, 6.0f);
-        draw_limb(lknee, lfoot, 6.0f);
-        draw_limb(rhip, rknee, 6.0f);
-        draw_limb(rknee, rfoot, 6.0f);
-        // Health bar above enemy (small, floating) — drawn as 2 triangles (rect)
+        draw_limb("NWaist", "NHip_1", 7.0f);
+        draw_limb("NWaist", "NHip_2", 7.0f);
+        draw_limb("NHip_1", "NKnee_1", 6.0f);
+        draw_limb("NKnee_1", "NToe_1", 6.0f);
+        draw_limb("NHip_2", "NKnee_2", 6.0f);
+        draw_limb("NKnee_2", "NToe_2", 6.0f);
+        // Health bar above enemy (floating, drawn as 2 triangles = rect)
         float hb_w = 60.0f, hb_h = 5.0f;
         float hb_x = wx - hb_w / 2.0f;
         float hb_y = wy + 80.0f;
-        // Background (dark)
         renderer_->draw_filled_triangle_world(hb_x, hb_y, hb_x + hb_w, hb_y,
             hb_x + hb_w, hb_y + hb_h, ren::Color4B{40, 40, 40, 255});
         renderer_->draw_filled_triangle_world(hb_x, hb_y, hb_x + hb_w, hb_y + hb_h,
