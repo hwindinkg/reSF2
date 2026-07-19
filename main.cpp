@@ -1453,6 +1453,43 @@ public:
                     }
 
                     if (in_attack_interval && !bag_hit_) {
+                        // [ORIGINAL] Distance-based hit detection on enemy fighter.
+                        // If the player's attack limb is within hit range of the
+                        // enemy fighter (enemy_pos_x_), register a hit. This works
+                        // alongside the bag-collision detection (bag stays at the
+                        // original spawn point as a visual punching bag; the enemy
+                        // fighter moves via AI and is hit by distance check).
+                        if (!enemy_fighter_.is_dead && enemy_fighter_.invuln_time <= 0) {
+                            float dist_to_enemy = std::abs(enemy_pos_x_ - player_pos_x_);
+                            // Hit range: 180px (covers punch/kick reach)
+                            if (dist_to_enemy < 180.0f) {
+                                float dmg = move_it->second.damage;
+                                if (dmg <= 0) dmg = 8.0f;
+                                if (enemy_fighter_.is_blocking) dmg *= 0.25f;
+                                enemy_fighter_.health -= dmg;
+                                enemy_fighter_.is_hit = true;
+                                enemy_fighter_.hit_stun_time = 0.3f;
+                                enemy_fighter_.invuln_time = 0.4f;
+                                enemy_fighter_.hits_taken++;
+                                player_fighter_.hits_landed++;
+                                player_fighter_.energy = std::min(player_fighter_.max_energy,
+                                    player_fighter_.energy + dmg * 0.5f);
+                                enemy_hit_flash_ = 0.25f;
+                                int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
+                                play_sound("f_pl_attack" + std::to_string(snd_idx), 0.7f);
+                                play_sound("armor", 0.5f);
+                                bag_hit_ = true;  // prevent multi-hit per frame
+                                if (enemy_fighter_.health <= 0) {
+                                    enemy_fighter_.health = 0;
+                                    enemy_fighter_.is_dead = true;
+                                    battle_result_ = "victory";
+                                    play_sound("bodyfall1", 0.9f);
+                                    std::printf("[COMBAT] Enemy defeated! battle_result=victory\n");
+                                }
+                                std::printf("[COMBAT] Player hit enemy: move=%s dist=%.1f dmg=%.1f enemy_hp=%.1f\n",
+                                    current_move_.c_str(), dist_to_enemy, dmg, enemy_fighter_.health);
+                            }
+                        }
                         // Determine attacking limb from AttackingParts in moves.xml
                         // Each AttackingParts Edge has End1 and End2 in skeleton.xml
                         // We check ALL attacking edges, not just one
