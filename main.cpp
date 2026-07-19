@@ -262,6 +262,7 @@ struct MoveDef {
     std::string weapon_filter;    // "Unarmed", "Weapon", "" (empty = any)
     bool is_unarmed = false;      // Template contains "Unarmed"
     bool is_jump = false;         // Template contains "Jump"
+    bool is_short_attack = false; // Template contains "ShortAttack"
     bool is_retreat = false;      // Template contains "Retreat"
     bool is_step = false;         // Template contains "Step"
     bool is_double_step = false;  // Template contains "DoubleStep"
@@ -729,34 +730,10 @@ public:
                 enemy_attack_duration_ = 0.4f;
                 enemy_attack_cooldown_ = 1.5f;
                 play_sound("f_pl_attack2", 0.4f);
-                // [ORIGINAL] Enemy attack hits player if in range and player not blocking/invuln
-                float dist = std::abs(enemy_pos_x_ - player_pos_x_);
-                if (dist < 180 && player_fighter_.invuln_time <= 0 && !player_fighter_.is_dead) {
-                    float dmg = 6.0f;
-                    if (player_fighter_.is_blocking) {
-                        dmg *= 0.25f;
-                    } else {
-                        player_hit_flash_ = 0.3f;
-                    }
-                    player_fighter_.health -= dmg;
-                    player_fighter_.is_hit = true;
-                    player_fighter_.hit_stun_time = 0.25f;
-                    player_fighter_.invuln_time = 0.3f;
-                    player_fighter_.hits_taken++;
-                    enemy_fighter_.hits_landed++; combo_timer_ = 2.0f;
-                    // Spawn hit sparks at player position
-                    spawn_hit_sparks(player_pos_x_, player_pos_y_ - 40, 8);
-                    enemy_fighter_.energy = std::min(enemy_fighter_.max_energy,
-                        enemy_fighter_.energy + dmg * 0.5f);
-                    play_sound("armor", 0.5f);
-                    if (player_fighter_.health <= 0) {
-                        player_fighter_.health = 0;
-                        player_fighter_.is_dead = true;
-                        battle_result_ = "defeat";
-                        play_sound("bodyfall3", 0.9f);
-                        std::printf("[COMBAT] Player defeated! battle_result=defeat\n");
-                    }
-                }
+                // [ORIGINAL] Dojo is TRAINING — enemy attacks don't deal damage.
+                // In the original, the Dojo sparring partner is a training dummy.
+                // Health/damage only applies in real fights (map battles).
+                // Enemy still plays attack animation + hit spark for visual feedback.
             } else if (enemy_ai_state_ == 4) {  // block
                 enemy_anim_ = "fists_block";
             } else {  // idle
@@ -791,6 +768,12 @@ public:
                 }
                 std::printf("[COMBAT] Battle restarted\n");
             }
+        }
+        // [ORIGINAL] B: toggle between punching bag and enemy fighter (Dojo training)
+        if (input.keys_just_pressed[(size_t)plat::Key::B]) {
+            show_enemy_ = !show_enemy_;
+            std::printf("[DOJO] Switched to %s\n", show_enemy_ ? "enemy fighter" : "punching bag");
+            debug_log("[DOJO] Switched to %s\n", show_enemy_ ? "enemy" : "bag");
         }
 
         // Esc: close overlay if open, else request quit (handled by scene)
@@ -1558,21 +1541,13 @@ public:
                         // alongside the bag-collision detection (bag stays at the
                         // original spawn point as a visual punching bag; the enemy
                         // fighter moves via AI and is hit by distance check).
-                        if (!enemy_fighter_.is_dead && enemy_fighter_.invuln_time <= 0) {
+                        if (show_enemy_ && enemy_fighter_.invuln_time <= 0) {
                             float dist_to_enemy = std::abs(enemy_pos_x_ - player_pos_x_);
                             // Hit range: 180px (covers punch/kick reach)
                             if (dist_to_enemy < 180.0f) {
-                                float dmg = move_it->second.damage;
-                                if (dmg <= 0) dmg = 8.0f;
-                                if (enemy_fighter_.is_blocking) dmg *= 0.25f;
-                                enemy_fighter_.health -= dmg;
-                                enemy_fighter_.is_hit = true;
-                                enemy_fighter_.hit_stun_time = 0.3f;
+                                // [ORIGINAL] Dojo training — no health damage, just
+                                // visual feedback (hit flash, sparks, sound, knockback).
                                 enemy_fighter_.invuln_time = 0.4f;
-                                enemy_fighter_.hits_taken++;
-                                player_fighter_.hits_landed++; combo_timer_ = 2.0f;
-                                player_fighter_.energy = std::min(player_fighter_.max_energy,
-                                    player_fighter_.energy + dmg * 0.5f);
                                 enemy_hit_flash_ = 0.25f;
                                 int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
                                 play_sound("f_pl_attack" + std::to_string(snd_idx), 0.7f);
@@ -1580,15 +1555,8 @@ public:
                                 bag_hit_ = true;  // prevent multi-hit per frame
                                 // Spawn hit sparks at enemy position
                                 spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
-                                if (enemy_fighter_.health <= 0) {
-                                    enemy_fighter_.health = 0;
-                                    enemy_fighter_.is_dead = true;
-                                    battle_result_ = "victory";
-                                    play_sound("bodyfall1", 0.9f);
-                                    std::printf("[COMBAT] Enemy defeated! battle_result=victory\n");
-                                }
-                                std::printf("[COMBAT] Player hit enemy: move=%s dist=%.1f dmg=%.1f enemy_hp=%.1f\n",
-                                    current_move_.c_str(), dist_to_enemy, dmg, enemy_fighter_.health);
+                                debug_log("[HIT] f=%llu move='%s' hit enemy dist=%.1f\n",
+                                    (unsigned long long)total_frame_count_, current_move_.c_str(), dist_to_enemy);
                             }
                         }
                         // Determine attacking limb from AttackingParts in moves.xml
@@ -1719,27 +1687,16 @@ public:
                                         play_sound("f_pl_attack" + std::to_string(snd_idx), 0.8f);
                                         play_sound("armor", 0.6f);
                                         // Apply damage to enemy (punching bag = enemy proxy)
-                                        if (!enemy_fighter_.is_dead && enemy_fighter_.invuln_time <= 0) {
-                                            float dmg = move_it->second.damage;
-                                            if (dmg <= 0) dmg = 8.0f;  // default per hit if not specified
-                                            // Blocking reduces damage by 75%
-                                            if (enemy_fighter_.is_blocking) dmg *= 0.25f;
-                                            enemy_fighter_.health -= dmg;
-                                            enemy_fighter_.is_hit = true;
-                                            enemy_fighter_.hit_stun_time = 0.3f;
+                                        // [ORIGINAL] Dojo training — no health damage.
+                                        // Just visual feedback (hit flash, sparks, sound).
+                                        if (enemy_fighter_.invuln_time <= 0) {
                                             enemy_fighter_.invuln_time = 0.2f;
-                                            enemy_fighter_.hits_taken++;
-                                            player_fighter_.hits_landed++; combo_timer_ = 2.0f;
-                                            player_fighter_.energy = std::min(player_fighter_.max_energy,
-                                                player_fighter_.energy + dmg * 0.5f);
                                             enemy_hit_flash_ = 0.2f;
-                                            if (enemy_fighter_.health <= 0) {
-                                                enemy_fighter_.health = 0;
-                                                enemy_fighter_.is_dead = true;
-                                                battle_result_ = "victory";
-                                                play_sound("bodyfall1", 0.9f);
-                                                std::printf("[COMBAT] Enemy defeated! battle_result=victory\n");
-                                            }
+                                            player_fighter_.hits_landed++; combo_timer_ = 2.0f;
+                                            int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
+                                            play_sound("f_pl_attack" + std::to_string(snd_idx), 0.7f);
+                                            play_sound("armor", 0.5f);
+                                            spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
                                         }
                                         break;
                                     }
@@ -1807,15 +1764,15 @@ public:
     void host_render_scene() {
         if (!location_loaded_) return;
         render_location();
-        // [ORIGINAL] Do NOT render the punching bag by default. In the original
-        // SF2, the Dojo has a DISCIPLE (enemy fighter) by default — the punching
-        // bag is an optional training dummy available only after purchase
-        // (sf2_beautified.js:63974 p.o.Y0() checks if bag is unlocked).
-        // The bag model is still loaded (for hit detection proxy) but not drawn.
-        // render_punching_bag();  // commented out — enemy fighter replaces it
-        render_enemy_fighter();
+        // [ORIGINAL] Dojo training mode: show either punching bag OR enemy fighter.
+        // Toggle with B key. Both are training dummies — no health, no win/lose.
+        if (show_enemy_) {
+            render_enemy_fighter();
+        } else {
+            render_punching_bag();
+        }
         render_character();
-        update_and_render_hit_sparks(0.016f);  // ~60fps assumed
+        update_and_render_hit_sparks(0.016f);
         render_hud(*platform_);
         if (menu_anim_progress_ > 0.01f) render_menu_expanded(*platform_);
         if (overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
@@ -1857,14 +1814,34 @@ public:
             alpha = f - (int)f;
             has_anim = true;
         }
-        // Resolve node position: use .bin animation if available, else rest pose
+        // Resolve node position: use .bin animation if available, else rest pose.
+        // [ORIGINAL] Node positions in .bin are ABSOLUTE. To render correctly,
+        // we compute the node's position RELATIVE to the animated NPivot, then
+        // add the world NPivot position (wy). This prevents "stretched polygons"
+        // — all nodes move together relative to NPivot, keeping the model intact.
+        // Previously used npivot_rest_y (constant) instead of animated NPivot Y,
+        // causing nodes to spread apart when NPivot animated up/down.
+        float animated_npx = np_it->second.x, animated_npy = npivot_rest_y;
+        if (has_anim && anim_it != animations_.end()) {
+            auto& anim = anim_it->second;
+            for (int i = 0; i < (int)ordered_node_names_.size() && i < 67; ++i) {
+                if (ordered_node_names_[i] == "NPivot") {
+                    float x0, y0, z0, x1, y1, z1;
+                    if (anim.get_node_pos(frame_idx, i, x0, y0, z0) &&
+                        anim.get_node_pos(next_idx, i, x1, y1, z1)) {
+                        animated_npx = x0 + (x1 - x0) * alpha;
+                        animated_npy = y0 + (y1 - y0) * alpha;
+                    }
+                    break;
+                }
+            }
+        }
         auto resolve_enemy_node = [&](const std::string& name, float& ox, float& oy) {
             auto sit = skeleton_nodes_.find(name);
             if (sit == skeleton_nodes_.end()) { ox = wx; oy = wy; return; }
             float lx = sit->second.x, ly = sit->second.y;
             if (has_anim && anim_it != animations_.end()) {
                 auto& anim = anim_it->second;
-                // Find node index in ordered_node_names_
                 for (int i = 0; i < (int)ordered_node_names_.size() && i < 67; ++i) {
                     if (ordered_node_names_[i] == name) {
                         float x0, y0, z0, x1, y1, z1;
@@ -1877,8 +1854,9 @@ public:
                     }
                 }
             }
-            float dx = lx - np_it->second.x;
-            float dy = ly - npivot_rest_y;
+            // Relative to ANIMATED NPivot (prevents stretching)
+            float dx = lx - animated_npx;
+            float dy = ly - animated_npy;
             ox = wx + (enemy_facing_right_ ? dx : -dx);
             oy = wy + dy;
         };
@@ -3430,7 +3408,15 @@ private:
                     else if (p == "Punch") move.move_type = "Punch";
                     else if (p == "Kick") move.move_type = "Kick";
                     else if (p == "TitanKick") move.move_type = "TitanKick";  // Titan-only
-                    else if (p == "Jump") { move.move_type = "Jump"; move.is_jump = true; }
+                    // [ORIGINAL] BUG FIX: "Jump" is a MODIFIER, not a move type.
+                    // Template "2key|Up|Unarmed|Kick|Jump" means: a Kick that is
+                    // also a Jump (air attack). Previously "Jump" OVERWROTE
+                    // move_type from "Kick" to "Jump", causing Up+Kick air attacks
+                    // (ReverseJumpKick, ShortJumpKick) to be filtered out by the
+                    // move_type != "Kick" check. Now "Jump" only sets the is_jump
+                    // flag, preserving the real move_type (Punch/Kick).
+                    else if (p == "Jump") { move.is_jump = true; }
+                    else if (p == "ShortAttack") { move.is_short_attack = true; }
                     else if (p == "Retreat") { move.is_retreat = true; }
                     else if (p == "Step") { move.is_step = true; }
                     else if (p == "DoubleStep") { move.is_double_step = true; move.is_step = true; }
@@ -3596,53 +3582,38 @@ private:
                 }
             }
 
-            // [ORIGINAL] Parse CurrentAnimation condition ONLY from the main
-            // <Conditions> section (NOT from <Transitions> or <Tactics>).
-            // PC source: sf2.js np.isEqual() (line 42544) — checks if current
-            // animation name matches. 3key combos use this to require a specific
-            // base attack (e.g., DoublePunch requires CurrentAnimation="HeavyPunch").
-            // BUG FIX: previously this scanned the ENTIRE <Move> inner content,
-            // which picked up <CurrentAnimation> from <Transitions> (e.g. UpperCut
-            // has <Transitions><Conditions><CurrentAnimation Name="JumpUp"/> for
-            // its jump-attack variant). That incorrectly gated UpperCut to require
-            // JumpUp as current animation, making W+O (Up+Punch) not work.
-            // Now we only scan the FIRST <Conditions> block that is a direct
-            // child of <Move> (not nested in <Transitions> or <Tactics>).
-            {
-                // Find <Conditions> blocks, skip those inside <Transitions>/<Tactics>
-                size_t search_pos = 0;
-                while (true) {
-                    size_t cond_pos = inner.find("<Conditions>", search_pos);
-                    if (cond_pos == std::string::npos) break;
-                    // Check if this <Conditions> is inside <Transitions> or <Tactics>
-                    // by looking for the nearest opening tag before it.
-                    size_t trans_pos = inner.rfind("<Transitions>", cond_pos);
-                    size_t tactics_pos = inner.rfind("<Tactics>", cond_pos);
-                    size_t trans_end = inner.rfind("</Transitions>", cond_pos);
-                    size_t tactics_end = inner.rfind("</Tactics>", cond_pos);
-                    bool in_transitions = (trans_pos != std::string::npos &&
-                        (trans_end == std::string::npos || trans_end < trans_pos));
-                    bool in_tactics = (tactics_pos != std::string::npos &&
-                        (tactics_end == std::string::npos || tactics_end < tactics_pos));
-                    size_t cond_end = inner.find("</Conditions>", cond_pos);
-                    if (cond_end == std::string::npos) break;
-                    if (!in_transitions && !in_tactics) {
-                        // This is the main <Conditions> — search for CurrentAnimation here
-                        std::string cond_block = inner.substr(cond_pos, cond_end - cond_pos);
-                        size_t cap = cond_block.find("CurrentAnimation");
+            // [ORIGINAL] Parse CurrentAnimation from <Transitions> for 3key combos.
+            // 3key combos (DoublePunch, DoubleSweep, etc.) define their chain
+            // requirement in <Transitions><Conditions><CurrentAnimation Name="X"/>
+            // — e.g. DoublePunch requires HeavyPunch, DoubleSweep requires Sweep.
+            // This is the REQUIRED animation that must be playing to start the combo.
+            //
+            // 1key/2key moves also have <Transitions> (e.g. UpperCut has a JumpUp
+            // transition for its air variant), but those are OPTIONAL interrupt
+            // windows, NOT start requirements — the move can be started from idle.
+            //
+            // So: only set required_current_animation for 3key moves (key_count==3).
+            // This fixes both:
+            //   - W+O (UpperCut) not working: was gated by JumpUp transition
+            //   - DoubleSweep re-triggering: now properly requires Sweep as current
+            if (move.key_count == 3) {
+                size_t trans_start = inner.find("<Transitions>");
+                if (trans_start != std::string::npos) {
+                    size_t trans_end = inner.find("</Transitions>", trans_start);
+                    if (trans_end != std::string::npos) {
+                        std::string trans_block = inner.substr(trans_start, trans_end - trans_start);
+                        size_t cap = trans_block.find("CurrentAnimation");
                         if (cap != std::string::npos) {
-                            auto tag_end = cond_block.find("/>", cap);
+                            auto tag_end = trans_block.find("/>", cap);
                             if (tag_end != std::string::npos) {
-                                auto tag = cond_block.substr(cap, tag_end - cap);
+                                auto tag = trans_block.substr(cap, tag_end - cap);
                                 auto name_val = xml_attr(tag, "Name");
                                 if (!name_val.empty()) {
                                     move.required_current_animation = name_val;
-                                    break;
                                 }
                             }
                         }
                     }
-                    search_pos = cond_end + 13;
                 }
             }
 
@@ -4453,138 +4424,20 @@ private:
         }
         render_text("LVL 7", 460, 15, 0.30f, {255, 255, 255, 255});
 
-        // [ORIGINAL] Health bars using original textures (HealthBar_Empty/Full/Hit).
-        // Original SF2: two health bars at bottom corners. Player on left (fills
-        // left-to-right), enemy on right (fills right-to-left, mirrored).
-        // Uses HealthBar_Empty (background), HealthBar_Full (fill, clipped to %),
-        // HealthBar_Hit (white flash overlay on hit).
-        float hp_bar_w = 280.0f;
-        float hp_bar_h = 18.0f;
-        float hp_bar_y = (float)platform.window_height() - 30.0f;
-        float hp_bar_pad = 16.0f;
-        auto tex_empty = hud_textures_.find("HealthBar_Empty");
-        auto tex_full = hud_textures_.find("HealthBar_Full");
-        auto tex_hit = hud_textures_.find("HealthBar_Hit");
-        bool use_textures = (tex_empty != hud_textures_.end() && tex_full != hud_textures_.end());
-        // Player HP bar (bottom-left)
-        float pl_x = hp_bar_pad;
-        ren::Color4B hp_bg{30, 20, 20, 200};
-        ren::Color4B hp_border{180, 160, 120, 255};
-        if (use_textures) {
-            // Draw empty bar (background)
-            renderer_->draw_textured_quad_screen(*tex_empty->second,
-                pl_x, hp_bar_y, hp_bar_w, hp_bar_h, 0, 0, 1, 1);
-            // Draw full bar clipped to health percentage (left-to-right)
-            float pl_pct = player_fighter_.health / player_fighter_.max_health;
-            if (pl_pct > 0) {
-                renderer_->draw_textured_quad_screen(*tex_full->second,
-                    pl_x, hp_bar_y, hp_bar_w * pl_pct, hp_bar_h,
-                    0, 0, pl_pct, 1);
-            }
-            // Hit flash overlay
-            if (player_hit_flash_ > 0 && tex_hit != hud_textures_.end()) {
-                uint8_t a = (uint8_t)std::min(255.0f, player_hit_flash_ * 600.0f);
-                renderer_->draw_textured_quad_screen(*tex_hit->second,
-                    pl_x, hp_bar_y, hp_bar_w, hp_bar_h, 0, 0, 1, 1);
-            }
-        } else {
-            // Fallback: colored rectangles
-            renderer_->draw_filled_rect_screen(pl_x - 2, hp_bar_y - 2, hp_bar_w + 4, hp_bar_h + 4, hp_border);
-            renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w, hp_bar_h, hp_bg);
-            float pl_pct = player_fighter_.health / player_fighter_.max_health;
-            ren::Color4B hp_fill_hi{60, 180, 70, 255};
-            ren::Color4B hp_fill_mid{200, 160, 40, 255};
-            ren::Color4B hp_fill_low{180, 30, 30, 255};
-            ren::Color4B pl_col = (pl_pct > 0.5f) ? hp_fill_hi : (pl_pct > 0.25f ? hp_fill_mid : hp_fill_low);
-            if (pl_pct > 0) {
-                renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w * pl_pct, hp_bar_h, pl_col);
-            }
-            if (player_hit_flash_ > 0) {
-                ren::Color4B flash{255, 255, 255, (uint8_t)(player_hit_flash_ * 600.0f)};
-                renderer_->draw_filled_rect_screen(pl_x, hp_bar_y, hp_bar_w, hp_bar_h, flash);
-            }
-        }
-        render_text("YOU", pl_x + 4, hp_bar_y - 16, 0.26f, {255, 240, 200, 255});
-        // Energy bar below player HP
-        float en_bar_y = hp_bar_y + hp_bar_h + 3;
-        float en_bar_h = 5.0f;
-        renderer_->draw_filled_rect_screen(pl_x, en_bar_y, hp_bar_w, en_bar_h, hp_bg);
-        float en_pct = player_fighter_.energy / player_fighter_.max_energy;
-        if (en_pct > 0) {
-            renderer_->draw_filled_rect_screen(pl_x, en_bar_y, hp_bar_w * en_pct, en_bar_h,
-                ren::Color4B{80, 180, 255, 255});
-        }
-        // Enemy HP bar (bottom-right, mirrored — fills right-to-left)
-        float en_x = (float)platform.window_width() - hp_bar_w - hp_bar_pad;
-        if (use_textures) {
-            renderer_->draw_textured_quad_screen(*tex_empty->second,
-                en_x, hp_bar_y, hp_bar_w, hp_bar_h, 0, 0, 1, 1);
-            float en_pct2 = enemy_fighter_.health / enemy_fighter_.max_health;
-            if (en_pct2 > 0) {
-                // Enemy fills from right: draw full bar, clipped from left
-                renderer_->draw_textured_quad_screen(*tex_full->second,
-                    en_x + hp_bar_w * (1.0f - en_pct2), hp_bar_y,
-                    hp_bar_w * en_pct2, hp_bar_h,
-                    1.0f - en_pct2, 0, 1.0f, 1);
-            }
-            if (enemy_hit_flash_ > 0 && tex_hit != hud_textures_.end()) {
-                renderer_->draw_textured_quad_screen(*tex_hit->second,
-                    en_x, hp_bar_y, hp_bar_w, hp_bar_h, 0, 0, 1, 1);
-            }
-        } else {
-            renderer_->draw_filled_rect_screen(en_x - 2, hp_bar_y - 2, hp_bar_w + 4, hp_bar_h + 4, hp_border);
-            renderer_->draw_filled_rect_screen(en_x, hp_bar_y, hp_bar_w, hp_bar_h, hp_bg);
-            float en_pct2 = enemy_fighter_.health / enemy_fighter_.max_health;
-            ren::Color4B hp_fill_hi{60, 180, 70, 255};
-            ren::Color4B hp_fill_mid{200, 160, 40, 255};
-            ren::Color4B hp_fill_low{180, 30, 30, 255};
-            ren::Color4B en_col = (en_pct2 > 0.5f) ? hp_fill_hi : (en_pct2 > 0.25f ? hp_fill_mid : hp_fill_low);
-            if (en_pct2 > 0) {
-                renderer_->draw_filled_rect_screen(en_x + hp_bar_w * (1.0f - en_pct2), hp_bar_y,
-                    hp_bar_w * en_pct2, hp_bar_h, en_col);
-            }
-            if (enemy_hit_flash_ > 0) {
-                ren::Color4B flash{255, 255, 255, (uint8_t)(enemy_hit_flash_ * 600.0f)};
-                renderer_->draw_filled_rect_screen(en_x, hp_bar_y, hp_bar_w, hp_bar_h, flash);
-            }
-        }
-        render_text("ENEMY", en_x + hp_bar_w - 60, hp_bar_y - 16, 0.26f, {255, 200, 200, 255});
-        // [ORIGINAL] Combo counter: shows hits landed in quick succession.
-        // Original SF2 shows a combo counter when you land multiple hits
-        // within a short window. We track player_fighter_.hits_landed.
-        if (player_fighter_.hits_landed > 0 && enemy_hit_flash_ > 0) {
-            std::string combo = std::to_string(player_fighter_.hits_landed) + " HITS";
-            float combo_scale = 0.6f + enemy_hit_flash_ * 0.4f;
-            float combo_x = (float)platform.window_width() / 2.0f - 40.0f;
-            float combo_y = (float)platform.window_height() / 2.0f - 100.0f;
-            render_text(combo, combo_x, combo_y, combo_scale, {255, 220, 100, 255});
-        }
-        // Victory/Defeat overlay
-        if (player_fighter_.is_dead || enemy_fighter_.is_dead) {
-            ren::Color4B overlay_bg{0, 0, 0, 150};
-            renderer_->draw_filled_rect_screen(0, 0,
-                (float)platform.window_width(), (float)platform.window_height(), overlay_bg);
-            std::string msg = enemy_fighter_.is_dead ? "VICTORY" : "DEFEAT";
-            ren::Color4B msg_col = enemy_fighter_.is_dead ?
-                ren::Color4B{255, 220, 100, 255} : ren::Color4B{220, 60, 60, 255};
-            float msg_scale = 1.5f;
-            float msg_w = msg.size() * 16.0f * msg_scale;
-            render_text(msg, ((float)platform.window_width() - msg_w) / 2.0f,
-                (float)platform.window_height() / 2.0f - 30, msg_scale, msg_col);
-            render_text("Press R to restart", ((float)platform.window_width() - 200) / 2.0f,
-                (float)platform.window_height() / 2.0f + 20, 0.4f, {200, 200, 200, 255});
-        }
-        // [ORIGINAL] Controls hint (bottom-center, fades after first input)
+        // [ORIGINAL] Dojo is a TRAINING area — NO health bars, NO victory/defeat.
+        // Health bars only appear in real fights (map battles). In Dojo, the
+        // player practices moves against a training dummy (bag or enemy fighter).
+        // The enemy fighter in Dojo is a sparring partner, not a real opponent.
+        // B key toggles between punching bag and enemy fighter.
         if (total_frame_count_ < 360) {  // ~6 seconds at 60fps
             uint8_t hint_alpha = (total_frame_count_ < 300) ? 200 :
                 (uint8_t)(200 * (360 - total_frame_count_) / 60);
-            std::string hint = "WASD move | O punch | P kick | S+D roll | R restart";
+            std::string hint = "WASD move | O punch | P kick | S+D roll | B toggle dummy";
             float hint_w = hint.size() * 8.0f * 0.3f;
             render_text(hint, ((float)platform.window_width() - hint_w) / 2.0f,
                 (float)platform.window_height() - 60.0f, 0.3f,
                 {220, 220, 220, hint_alpha});
         }
-
         // Menu button (LEFT side, scroll/roll style)
         float btn_x = 10.0f, btn_y = 58.0f;
         float roll_h = 40.0f;
@@ -4960,11 +4813,16 @@ private:
     float enemy_anim_time_ = 0.0f;
     std::string enemy_anim_ = "fists_idle";
     bool enemy_facing_right_ = false;  // enemy faces left (toward player) by default
-    float enemy_y_adjust_ = 4.0f;
+    float enemy_y_adjust_ = 0.0f;  // matches player's y_adjust_smoothed_ (ShiftY=0)
     // Enemy attack timing
     float enemy_attack_timer_ = 0.0f;
     bool enemy_attacking_ = false;
     float enemy_attack_duration_ = 0.0f;
+    // [ORIGINAL] Dojo training mode: toggle between punching bag and enemy.
+    // Original SF2: Dojo has a disciple (enemy) by default; punching bag is
+    // optional (purchasable). Button toggles between them (btn_punching_bag).
+    // In training mode, NO health bars, NO win/lose — just practice.
+    bool show_enemy_ = true;  // true = enemy fighter, false = punching bag
 
     Overlay overlay_ = Overlay::None;
     float menu_anim_progress_ = 0.0f;  // 0 = collapsed, 1 = fully expanded
