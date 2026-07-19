@@ -852,16 +852,20 @@ public:
         bool key_forward = facing_right_ ? key_right : key_left;
         bool key_back = facing_right_ ? key_left : key_right;
 
-        // [ORIGINAL] Double-tap detection for DoubleStep (forward/back dash).
-        // Original SF2: tapping Forward twice quickly during ForwardStep
-        // triggers DoubleStepForward (a fast dash). The second tap must come
-        // within 300ms of the first, while ForwardStep is playing.
-        bool fwd_just_pressed = input.keys_just_pressed[(size_t)plat::Key::D] ||
-                                (facing_right_ && input.keys_just_pressed[(size_t)plat::Key::ArrowRight]) ||
-                                (!facing_right_ && input.keys_just_pressed[(size_t)plat::Key::ArrowLeft]);
-        bool back_just_pressed = input.keys_just_pressed[(size_t)plat::Key::A] ||
-                                 (facing_right_ && input.keys_just_pressed[(size_t)plat::Key::ArrowLeft]) ||
-                                 (!facing_right_ && input.keys_just_pressed[(size_t)plat::Key::ArrowRight]);
+        // [ORIGINAL] Double-tap detection for DoubleStep/BackHandflip.
+        // Direction is RELATIVE to facing: D=Forward when facing right,
+        // A=Forward when facing left. This matches original SF2 where
+        // double-tap direction depends on character orientation.
+        bool fwd_just_pressed = facing_right_ ?
+            (input.keys_just_pressed[(size_t)plat::Key::D] ||
+             input.keys_just_pressed[(size_t)plat::Key::ArrowRight]) :
+            (input.keys_just_pressed[(size_t)plat::Key::A] ||
+             input.keys_just_pressed[(size_t)plat::Key::ArrowLeft]);
+        bool back_just_pressed = facing_right_ ?
+            (input.keys_just_pressed[(size_t)plat::Key::A] ||
+             input.keys_just_pressed[(size_t)plat::Key::ArrowLeft]) :
+            (input.keys_just_pressed[(size_t)plat::Key::D] ||
+             input.keys_just_pressed[(size_t)plat::Key::ArrowRight]);
         uint32_t now_ms = (uint32_t)(total_frame_count_ * dt);
         if (fwd_just_pressed) {
             if (now_ms - last_fwd_tap_ms_ < 300 && current_anim_ == "step_forward") {
@@ -1392,17 +1396,17 @@ public:
                     play_animation(step_back_anim, true);
                 }
             } else if (move_state_ == 1) {  // MOVING_BACK
-                // [ORIGINAL] Double-tap Back during BackStep → fast retreat dash
-                if (double_step_back_requested_ && animations_.count("double_step_forward")) {
-                    // No DoubleStepBackward anim — use double_step_forward but
-                    // flip facing temporarily so root motion goes backward.
-                    play_animation("double_step_forward", false);
+                // [ORIGINAL] Double-tap Back → BackHandflip (handstand flip retreat)
+                // Original moves.xml: BackHandflip has Keys=Back Tap + Back Tap,
+                // FileName=back_handflip.bin. It's a retreat move (not a dash).
+                if (double_step_back_requested_ && animations_.count("back_handflip")) {
+                    play_animation("back_handflip", false);
                     move_state_ = 10;
-                    current_move_ = "DoubleStepBackward";
-                    int fc = animations_["double_step_forward"].frame_count;
+                    current_move_ = "BackHandflip";
+                    int fc = animations_["back_handflip"].frame_count;
                     hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
                     double_step_back_requested_ = false;
-                    debug_log("[MOVE] f=%llu DoubleStepBackward (retreat dash)\n",
+                    debug_log("[MOVE] f=%llu BackHandflip (handstand retreat)\n",
                               (unsigned long long)total_frame_count_);
                 } else if (!back_latched && step_min_played) {
                     move_state_ = 0; need_switch_to_idle_ = true;
