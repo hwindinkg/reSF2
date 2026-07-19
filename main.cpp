@@ -867,16 +867,18 @@ public:
             (input.keys_just_pressed[(size_t)plat::Key::D] ||
              input.keys_just_pressed[(size_t)plat::Key::ArrowRight]);
         uint32_t now_ms = (uint32_t)(total_frame_count_ * dt);
+        // [ORIGINAL] Double-tap: use move_state_ instead of current_anim_ name.
+        // move_state_ == 2 = MOVING_FORWARD, == 1 = MOVING_BACK. This works
+        // regardless of which step animation is playing (step_forward vs
+        // weapon-specific variants like composite_sword_step_forward).
         if (fwd_just_pressed) {
-            if (now_ms - last_fwd_tap_ms_ < 300 && current_anim_ == "step_forward") {
+            if (now_ms - last_fwd_tap_ms_ < 300 && move_state_ == 2) {
                 double_step_fwd_requested_ = true;
             }
             last_fwd_tap_ms_ = now_ms;
         }
-        // [ORIGINAL] Double-tap Back → fast retreat (no DoubleStepBackward anim
-        // exists, so use double_step_forward played in reverse direction = dash back)
         if (back_just_pressed) {
-            if (now_ms - last_back_tap_ms_ < 300 && current_anim_ == "step_back") {
+            if (now_ms - last_back_tap_ms_ < 300 && move_state_ == 1) {
                 double_step_back_requested_ = true;
             }
             last_back_tap_ms_ = now_ms;
@@ -1359,6 +1361,10 @@ public:
                 // Skip Titan moves (player is not a Titan)
                 if (move.template_name.find("Titan") != std::string::npos) continue;
                 if (!move.is_step || move.is_double_step) continue;
+                // [ORIGINAL] Only use Unarmed steps — weapon-specific steps
+                // (composite_sword_step_forward, glaive_step_back, etc.) require
+                // that weapon equipped. Player has Fists only.
+                if (!move.is_unarmed && !move.weapon_filter.empty()) continue;
                 std::string anim_name = move.filename;
                 if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
                     anim_name = anim_name.substr(0, anim_name.size()-4);
@@ -4040,7 +4046,13 @@ private:
                 [&](const auto& p) { return strip_bin(p.second.filename) == cur_no_bin; });
             if (it != moves_.end()) {
                 const auto& m = it->second;
-                is_root_motion_anim = m.is_step || m.is_jump || m.is_retreat || m.is_attack;
+                // [ORIGINAL] Root motion applies to: steps, jumps, retreats, attacks,
+                // AND any MOVE type (rolls, flips, dashes). ForwardRoll has
+                // Type="MOVE" but no Step/Jump/Retreat tag — without this check,
+                // rolls wouldn't move the player.
+                is_root_motion_anim = m.is_step || m.is_jump || m.is_retreat ||
+                                      m.is_attack || m.is_double_step ||
+                                      (m.move_type.empty() && !m.is_block && !m.is_stance);
             } else {
                 // [HEURISTIC-TODO] fallback whitelist for anims not in moves.xml
                 // (e.g. stance_idle, fists_idle). Remove once all anims have MoveDefs.
