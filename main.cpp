@@ -625,6 +625,15 @@ public:
         // Update audio engine (mix + write to backend)
         aud::AudioEngine::instance().update(dt_sec);
 
+        // [ORIGINAL] Player block: automatic when idle (not attacking, not moving).
+        // Original SF2: block is automatic when standing still and not attacking.
+        // key_down (S) = duck (low block); standing = high block.
+        if (!player_fighter_.is_dead) {
+            bool player_idle = (hit_anim_ == 0 && move_state_ == 0 &&
+                                !start_stance_playing_);
+            player_fighter_.is_blocking = player_idle;
+        }
+
         // [ORIGINAL] Enemy AI: simple state machine.
         // States: 0=idle, 1=approach, 2=attack, 3=retreat, 4=block
         // Decisions every 0.8s: based on distance to player + randomness.
