@@ -2567,14 +2567,38 @@ private:
         if (path.empty()) { std::printf("  body.xml NOT FOUND!\n"); return; }
         auto xml = read_text(path);
         body_model_ = std::make_unique<BodyModel>();
+        parse_body_model_xml(xml, body_model_.get(), "BODY-");
+        // [ORIGINAL] Also load head.xml as part of the body model.
+        // head.xml has HEAD- prefixed nodes/macronodes + BODY- prefixed edges
+        // + HEAD-Triangle triangles. It references skeleton nodes NTop, NHeadF,
+        // NHeadS_1, NHeadS_2 via MacroNodes. Without this, the character has
+        // a capsule instead of a proper head model.
+        auto head_candidates = model_paths(asset_root_, "head.xml");
+        std::string head_path;
+        for (const auto& p : head_candidates) {
+            if (std::filesystem::exists(p)) { head_path = p.string(); break; }
+        }
+        if (!head_path.empty()) {
+            auto head_xml = read_text(head_path);
+            parse_body_model_xml(head_xml, body_model_.get(), "HEAD-");
+            std::printf("  head.xml loaded (merged into body model)\n");
+        }
+    }
 
-        // Parse <Nodes> for BODY-NodeN and BODY-MacroNodeN
+    // [ORIGINAL] Parse a body/head model XML file into a BodyModel.
+    // tag_prefix is "BODY-" for body.xml, "HEAD-" for head.xml.
+    // Edges use "BODY-Edge" in both files; capsules use "Capsule_"; triangles
+    // use "Type=\"Triangle\"" (prefix-agnostic). Nodes/MacroNodes use the prefix.
+    void parse_body_model_xml(const std::string& xml, BodyModel* model, const std::string& tag_prefix) {
+        std::string search_tag = "<" + tag_prefix;
+
+        // Parse <Nodes> for prefix-NodeN and prefix-MacroNodeN
         auto nodes_start = xml.find("<Nodes>");
         auto nodes_end = xml.find("</Nodes>");
         if (nodes_start != std::string::npos && nodes_end != std::string::npos) {
             std::string ns = xml.substr(nodes_start, nodes_end - nodes_start);
             size_t pos = 0;
-            while ((pos = ns.find("<BODY-", pos)) != std::string::npos) {
+            while ((pos = ns.find(search_tag, pos)) != std::string::npos) {
                 auto tag_start = ns.find("Type=\"", pos);
                 auto end = ns.find("/>", pos);
                 if (end == std::string::npos) break;
@@ -2589,7 +2613,7 @@ private:
                         n.x = tof(xml_attr(tag, "X"));
                         n.y = tof(xml_attr(tag, "Y"));
                         n.z = tof(xml_attr(tag, "Z"));
-                        body_model_->nodes[n.name] = n;
+                        model->nodes[n.name] = n;
                     } else if (type == "MacroNode") {
                         BodyMacroNode mn; mn.name = name;
                         mn.children[0] = xml_attr(tag, "ChildNode1");
@@ -2600,14 +2624,14 @@ private:
                         mn.lcc[1] = tof(xml_attr(tag, "LCC2"));
                         mn.lcc[2] = tof(xml_attr(tag, "LCC3"));
                         mn.lcc[3] = tof(xml_attr(tag, "LCC4"));
-                        body_model_->macro_nodes[mn.name] = mn;
+                        model->macro_nodes[mn.name] = mn;
                     }
                 }
                 pos = end + 2;
             }
         }
 
-        // Parse <Edges>
+        // Parse <Edges> — both body.xml and head.xml use "BODY-Edge" prefix
         auto edges_start = xml.find("<Edges>");
         auto edges_end = xml.find("</Edges>");
         if (edges_start != std::string::npos && edges_end != std::string::npos) {
@@ -2628,7 +2652,7 @@ private:
                         e.end2 = xml_attr(tag, "End2");
                         e.radius = tof(xml_attr(tag, "Radius"));
                         e.collisible = (xml_attr(tag, "Collisible") == "1");
-                        body_model_->edges.push_back(e);
+                        model->edges.push_back(e);
                     }
                 }
                 pos = end + 2;
@@ -2652,7 +2676,7 @@ private:
                 c.radius2 = tof(xml_attr(tag, "Radius2"));
                 c.margin1 = tof(xml_attr(tag, "Margin1"));
                 c.margin2 = tof(xml_attr(tag, "Margin2"));
-                body_model_->capsules.push_back(c);
+                model->capsules.push_back(c);
                 pos = end + 2;
             }
             pos = 0;
@@ -2665,13 +2689,13 @@ private:
                 t.n1 = xml_attr(tag, "Node1");
                 t.n2 = xml_attr(tag, "Node2");
                 t.n3 = xml_attr(tag, "Node3");
-                body_model_->triangles.push_back(t);
+                model->triangles.push_back(t);
                 pos = end + 2;
             }
         }
-        std::printf("  Body model: %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
-                    body_model_->nodes.size(), body_model_->edges.size(),
-                    body_model_->capsules.size(), body_model_->triangles.size());
+        std::printf("  [%s] model: %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
+                    tag_prefix.c_str(), model->nodes.size(), model->edges.size(),
+                    model->capsules.size(), model->triangles.size());
     }
 
     // Resolve a node name to world coordinates (handles BodyNode, SkelNode, MacroNode).
@@ -2918,15 +2942,16 @@ private:
         // causes visible stretching on the legs (especially around the calves
         // and ankles where BODY-Triangle-7..10 are located).
         for (auto& t : body_model_->triangles) {
-            // Check if ALL three vertices are animated (in anim_node_pos_ or skeleton_nodes_)
-            bool n1_animated = (anim_node_pos_.find(t.n1) != anim_node_pos_.end()) ||
-                               (skeleton_nodes_.find(t.n1) != skeleton_nodes_.end());
-            bool n2_animated = (anim_node_pos_.find(t.n2) != anim_node_pos_.end()) ||
-                               (skeleton_nodes_.find(t.n2) != skeleton_nodes_.end());
-            bool n3_animated = (anim_node_pos_.find(t.n3) != anim_node_pos_.end()) ||
-                               (skeleton_nodes_.find(t.n3) != skeleton_nodes_.end());
-            if (!n1_animated || !n2_animated || !n3_animated) {
-                continue;  // Skip triangles with non-animated cloth nodes
+            // Check if ALL three vertices can be resolved.
+            // [ORIGINAL] Nodes can be in: anim_node_pos_ (animated .bin),
+            // skeleton_nodes_ (rest pose), body_model_->nodes (HEAD-Node/BODY-Node),
+            // or body_model_->macro_nodes (HEAD-MacroNode/BODY-MacroNode).
+            auto can_resolve = [&](const std::string& n) {
+                return anim_node_pos_.count(n) || skeleton_nodes_.count(n) ||
+                       body_model_->nodes.count(n) || body_model_->macro_nodes.count(n);
+            };
+            if (!can_resolve(t.n1) || !can_resolve(t.n2) || !can_resolve(t.n3)) {
+                continue;
             }
             auto [tx0, ty0] = resolve_body_node(t.n1,
                 world_cx, world_cy, facing_right_, pivot_local_y);
