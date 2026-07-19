@@ -3547,6 +3547,8 @@ private:
                     else if (p == "ShortAttack") { move.is_short_attack = true; }
                     else if (p == "Retreat") { move.is_retreat = true; }
                     else if (p == "Step") { move.is_step = true; }
+                    else if (p == "ForwardStep") { move.is_step = true; move.direction = "Forward"; }
+                    else if (p == "BackStep") { move.is_step = true; move.direction = "Back"; move.is_retreat = true; }
                     else if (p == "DoubleStep") { move.is_double_step = true; move.is_step = true; }
                     else if (p == "Block") { move.is_block = true; }
                     else if (p == "Stance") { move.is_stance = true; }
@@ -4048,7 +4050,8 @@ private:
                     current_anim_ == "jump" || current_anim_ == "jump_away" ||
                     current_anim_ == "back_flip" || current_anim_ == "back_handflip" ||
                     current_anim_ == "front_flip" ||
-                    current_anim_ == "air_punch" || current_anim_ == "air_axe_kick";
+                    current_anim_ == "air_punch" || current_anim_ == "air_axe_kick" ||
+                    current_anim_ == "double_step_forward";
             }
         }
 
