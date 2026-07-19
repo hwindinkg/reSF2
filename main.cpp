@@ -27,8 +27,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -55,6 +57,31 @@ namespace rt = resf2::runtime;
 namespace ren = resf2::renderer;
 namespace fmt = resf2::format;
 namespace aud = resf2::audio;
+
+// [ORIGINAL] Debug logging to file (resf2_debug.log in the asset root).
+// Enabled by default; can be disabled with --no-log command-line flag.
+// Logs key gameplay events: move selection, hit detection, AI decisions,
+// animation transitions. Helps diagnose "no response to input" issues.
+namespace {
+    FILE* g_debug_log = nullptr;
+    bool g_debug_log_enabled = true;
+    void debug_log_init(const std::string& path) {
+        if (!g_debug_log_enabled) return;
+        g_debug_log = std::fopen(path.c_str(), "w");
+        if (g_debug_log) std::fprintf(g_debug_log, "=== reSF2 debug log ===\n");
+    }
+    void debug_log(const char* fmt, ...) {
+        if (!g_debug_log) return;
+        va_list args;
+        va_start(args, fmt);
+        std::vfprintf(g_debug_log, fmt, args);
+        va_end(args);
+        std::fflush(g_debug_log);
+    }
+    void debug_log_close() {
+        if (g_debug_log) { std::fclose(g_debug_log); g_debug_log = nullptr; }
+    }
+}
 namespace plist = resf2::reverse::plist;
 namespace font = resf2::reverse::font;
 namespace scene = resf2::scene;
@@ -168,6 +195,7 @@ struct SkelEdge {
     std::string name;
     std::string end1, end2;
     float radius = 0;
+    float margin1 = 0, margin2 = 0;
 };
 
 // ---------- Animation system ----------
@@ -852,6 +880,11 @@ public:
             std::printf("[KEY] %s%s pressed — hit_anim=%u is_uninterrupt=%d move_state=%d current_move='%s'\n",
                         punch_pressed ? "O" : "", kick_pressed ? "P" : "",
                         hit_anim_, is_uninterrupt_ ? 1 : 0, move_state_, current_move_.c_str());
+            debug_log("[KEY] f=%llu %s%s pressed hit_anim=%u unint=%d ms=%d move='%s' anim='%s' up=%d down=%d fwd=%d back=%d\n",
+                (unsigned long long)total_frame_count_,
+                punch_pressed ? "O" : "", kick_pressed ? "P" : "",
+                hit_anim_, is_uninterrupt_ ? 1 : 0, move_state_, current_move_.c_str(),
+                current_anim_.c_str(), (int)key_up, (int)key_down, (int)key_forward, (int)key_back);
         }
         // Note: Removed sticky key buffer — it caused unwanted repeat attacks.
         // GetAsyncKeyState is reliable; the original issue was elsewhere.
@@ -930,7 +963,19 @@ public:
         // hit_anim_ > 0 means attack animation playing.
         // current_move_ tracks the move name.
         // is_uninterrupt_ is true only during attack animation's Uninterrupt interval.
+        // [ORIGINAL] StartStance is UNINTERRUPTIBLE: the original SF2 uses a
+        // battle phase state machine (Je=1 StartStance, Je=2 Fight, Je=3 EndStance).
+        // During StartStance phase, player input is BLOCKED — the intro animation
+        // must play to completion. See sf2_beautified.js:23843 (Em.he condition).
+        // We set start_stance_playing_ = true when the stance starts, and clear it
+        // when the animation finishes. While true, ALL combat/movement input is
+        // skipped (the player can't punch/kick/move during the intro).
         bool in_attack = (move_state_ == 10 && current_move_ != "StartStance" && hit_anim_ > 0);
+        if (start_stance_playing_) {
+            // Block all input during StartStance intro (original behavior)
+            in_attack = true;
+            is_uninterrupt_ = false;  // not in uninterrupt — just blocked
+        }
         {
         std::string cur_direction;
         std::string cur_move_type;
@@ -1034,6 +1079,9 @@ public:
                             cur_move_type.c_str(), best_move->name.c_str(),
                             anim_name.c_str(), best_move->priority,
                             best_move->template_name.c_str(), dist_to_enemy);
+                debug_log("[MOVE] f=%llu %s dir=%s -> %s (cand=%d prio=%d)\n",
+                    (unsigned long long)total_frame_count_, cur_move_type.c_str(),
+                    cur_direction.c_str(), best_move->name.c_str(), candidate_count, best_move->priority);
                 // [DIAGNOSTIC] Structured O/P decision log for input diagnosis.
                 std::printf("[INPUT_DECISION] f=%llu btn=%s keys_down=%s%s%s%s just=%s%s "
                             "face=%d dir=%s ms=%d anim='%s' move='%s' hit=%u unint=%d "
@@ -1070,6 +1118,9 @@ public:
                             current_anim_.c_str(), current_move_.c_str(),
                             hit_anim_, is_uninterrupt_?1:0, (int)(in_attack && !is_uninterrupt_),
                             candidate_count);
+                debug_log("[MOVE] f=%llu %s dir=%s -> NO CANDIDATE (cand=%d ms=%d hit=%u unint=%d)\n",
+                    (unsigned long long)total_frame_count_, cur_move_type.c_str(),
+                    cur_direction.c_str(), candidate_count, move_state_, hit_anim_, is_uninterrupt_?1:0);
                 // Debug: no move found — log why
                 static int no_move_log = 0;
                 if (no_move_log < 3) {
@@ -1294,7 +1345,10 @@ public:
             if (step_fwd_anim.empty() && animations_.count("step_forward")) step_fwd_anim = "step_forward";
             if (step_back_anim.empty() && animations_.count("step_back")) step_back_anim = "step_back";
 
-            if (move_state_ == 0 || start_stance_playing_) {  // IDLE (or start stance)
+            if (move_state_ == 0 && !start_stance_playing_) {  // IDLE (NOT during start stance)
+                // [ORIGINAL] During StartStance, player input is blocked — the
+                // intro animation must play to completion (sf2.js battle phase
+                // Je=1 StartStance). Steps are NOT allowed during start stance.
                 // [STEP_DEBUG] Log step conditions around start-stance end
                 if (total_frame_count_ >= 245 && total_frame_count_ <= 265) {
                     std::printf("[STEPDBG] f=%llu ms=%d ss=%d ha=%u anim='%s' kf=%d kb=%d kd=%d sf='%s'\n",
@@ -1306,11 +1360,9 @@ public:
                 }
                 if (key_forward && !key_back && !key_down && !step_fwd_anim.empty()) {
                     move_state_ = 2;
-                    start_stance_playing_ = false;
                     play_animation(step_fwd_anim, true);
                 } else if (key_back && !key_forward && !key_down && !step_back_anim.empty()) {
                     move_state_ = 1;
-                    start_stance_playing_ = false;
                     play_animation(step_back_anim, true);
                 }
             } else if (move_state_ == 1) {  // MOVING_BACK
@@ -1755,7 +1807,12 @@ public:
     void host_render_scene() {
         if (!location_loaded_) return;
         render_location();
-        render_punching_bag();
+        // [ORIGINAL] Do NOT render the punching bag by default. In the original
+        // SF2, the Dojo has a DISCIPLE (enemy fighter) by default — the punching
+        // bag is an optional training dummy available only after purchase
+        // (sf2_beautified.js:63974 p.o.Y0() checks if bag is unlocked).
+        // The bag model is still loaded (for hit detection proxy) but not drawn.
+        // render_punching_bag();  // commented out — enemy fighter replaces it
         render_enemy_fighter();
         render_character();
         update_and_render_hit_sparks(0.016f);  // ~60fps assumed
@@ -2514,6 +2571,8 @@ private:
                     e.end1 = xml_attr(tag, "End1");
                     e.end2 = xml_attr(tag, "End2");
                     e.radius = tof(xml_attr(tag, "Radius"));
+                    e.margin1 = tof(xml_attr(tag, "Margin1"));
+                    e.margin2 = tof(xml_attr(tag, "Margin2"));
                     skeleton_edges_[e.name] = e;
                 }
                 ep = end + 2;
@@ -2824,6 +2883,53 @@ private:
             renderer_->draw_filled_triangle_world(ax, ay, bx, by, cx, cy_, silhouette_col);
             renderer_->draw_filled_triangle_world(ax, ay, cx, cy_, dx_, dy_, silhouette_col);
             // Circle caps at both ends — fills gaps at joints
+            renderer_->draw_filled_circle_world(mx1, my1, ht, silhouette_col);
+            renderer_->draw_filled_circle_world(mx2, my2, ht, silhouette_col);
+        }
+
+        // [ORIGINAL] Render skeleton edges that have a Radius but no capsule
+        // in body.xml (e.g. EHead, ENeck). The original game renders these as
+        // capsule-like shapes (thick lines with circle caps). skeleton.xml
+        // defines <EHead Radius="12"> and <ENeck Radius="6"> — without this,
+        // the character has NO HEAD (the body.xml capsules only cover torso/limbs).
+        for (auto& [ename, sedge] : skeleton_edges_) {
+            if (sedge.radius <= 0) continue;
+            // Skip if this edge already has a capsule in body.xml
+            bool has_capsule = false;
+            for (auto& c : body_model_->capsules) {
+                if (c.edge_name == ename) { has_capsule = true; break; }
+            }
+            if (has_capsule) continue;
+            // Resolve endpoints
+            auto it1 = skeleton_nodes_.find(sedge.end1);
+            auto it2 = skeleton_nodes_.find(sedge.end2);
+            if (it1 == skeleton_nodes_.end() || it2 == skeleton_nodes_.end()) continue;
+            auto [x1, y1] = resolve_body_node(sedge.end1,
+                world_cx, world_cy, facing_right_, pivot_local_y);
+            auto [x2, y2] = resolve_body_node(sedge.end2,
+                world_cx, world_cy, facing_right_, pivot_local_y);
+            float r = sedge.radius;
+            float m1 = sedge.margin1, m2 = sedge.margin2;
+            float mx1 = x1 + (x2 - x1) * m1;
+            float my1 = y1 + (y2 - y1) * m1;
+            float mx2 = x2 - (x2 - x1) * m2;
+            float my2 = y2 - (y2 - y1) * m2;
+            float dx = mx2 - mx1, dy = my2 - my1;
+            float len = std::sqrt(dx*dx + dy*dy);
+            if (len < 0.5f) {
+                // Degenerate — draw as circle at midpoint
+                renderer_->draw_filled_circle_world((mx1+mx2)*0.5f, (my1+my2)*0.5f, r, silhouette_col);
+                continue;
+            }
+            float ux = dx / len, uy = dy / len;
+            float px = -uy, py = ux;
+            float ht = std::max(r, 1.0f);
+            float ax = mx1 + px*ht, ay = my1 + py*ht;
+            float bx = mx2 + px*ht, by = my2 + py*ht;
+            float cx = mx2 - px*ht, cy_ = my2 - py*ht;
+            float dx_ = mx1 - px*ht, dy_ = my1 - py*ht;
+            renderer_->draw_filled_triangle_world(ax, ay, bx, by, cx, cy_, silhouette_col);
+            renderer_->draw_filled_triangle_world(ax, ay, cx, cy_, dx_, dy_, silhouette_col);
             renderer_->draw_filled_circle_world(mx1, my1, ht, silhouette_col);
             renderer_->draw_filled_circle_world(mx2, my2, ht, silhouette_col);
         }
@@ -3492,27 +3598,53 @@ private:
                 }
             }
 
-            // [ORIGINAL] Parse CurrentAnimation condition from <Conditions>.
+            // [ORIGINAL] Parse CurrentAnimation condition ONLY from the main
+            // <Conditions> section (NOT from <Transitions> or <Tactics>).
             // PC source: sf2.js np.isEqual() (line 42544) — checks if current
             // animation name matches. 3key combos use this to require a specific
             // base attack (e.g., DoublePunch requires CurrentAnimation="HeavyPunch").
+            // BUG FIX: previously this scanned the ENTIRE <Move> inner content,
+            // which picked up <CurrentAnimation> from <Transitions> (e.g. UpperCut
+            // has <Transitions><Conditions><CurrentAnimation Name="JumpUp"/> for
+            // its jump-attack variant). That incorrectly gated UpperCut to require
+            // JumpUp as current animation, making W+O (Up+Punch) not work.
+            // Now we only scan the FIRST <Conditions> block that is a direct
+            // child of <Move> (not nested in <Transitions> or <Tactics>).
             {
-                size_t cap = inner.find("CurrentAnimation", 0);
-                while (cap != std::string::npos) {
-                    // Check it's not inside a comment
-                    if (cap > 4 && inner.substr(cap - 4, 4) == "<!--") {
-                        cap = inner.find("CurrentAnimation", cap + 1);
-                        continue;
+                // Find <Conditions> blocks, skip those inside <Transitions>/<Tactics>
+                size_t search_pos = 0;
+                while (true) {
+                    size_t cond_pos = inner.find("<Conditions>", search_pos);
+                    if (cond_pos == std::string::npos) break;
+                    // Check if this <Conditions> is inside <Transitions> or <Tactics>
+                    // by looking for the nearest opening tag before it.
+                    size_t trans_pos = inner.rfind("<Transitions>", cond_pos);
+                    size_t tactics_pos = inner.rfind("<Tactics>", cond_pos);
+                    size_t trans_end = inner.rfind("</Transitions>", cond_pos);
+                    size_t tactics_end = inner.rfind("</Tactics>", cond_pos);
+                    bool in_transitions = (trans_pos != std::string::npos &&
+                        (trans_end == std::string::npos || trans_end < trans_pos));
+                    bool in_tactics = (tactics_pos != std::string::npos &&
+                        (tactics_end == std::string::npos || tactics_end < tactics_pos));
+                    size_t cond_end = inner.find("</Conditions>", cond_pos);
+                    if (cond_end == std::string::npos) break;
+                    if (!in_transitions && !in_tactics) {
+                        // This is the main <Conditions> — search for CurrentAnimation here
+                        std::string cond_block = inner.substr(cond_pos, cond_end - cond_pos);
+                        size_t cap = cond_block.find("CurrentAnimation");
+                        if (cap != std::string::npos) {
+                            auto tag_end = cond_block.find("/>", cap);
+                            if (tag_end != std::string::npos) {
+                                auto tag = cond_block.substr(cap, tag_end - cap);
+                                auto name_val = xml_attr(tag, "Name");
+                                if (!name_val.empty()) {
+                                    move.required_current_animation = name_val;
+                                    break;
+                                }
+                            }
+                        }
                     }
-                    auto tag_end = inner.find("/>", cap);
-                    if (tag_end == std::string::npos) break;
-                    auto tag = inner.substr(cap, tag_end - cap);
-                    auto name_val = xml_attr(tag, "Name");
-                    if (!name_val.empty()) {
-                        move.required_current_animation = name_val;
-                        break;  // take first CurrentAnimation condition
-                    }
-                    cap = inner.find("CurrentAnimation", tag_end + 1);
+                    search_pos = cond_end + 13;
                 }
             }
 
@@ -4886,12 +5018,20 @@ int main(int argc, char* argv[]) {
         else if (arg == "--max-frames" && i + 1 < argc) max_frames = std::atoi(argv[++i]);
         else if (arg == "--replay") replay_mode = true;
         else if (arg == "--dump-state") dump_state = true;
+        else if (arg == "--no-log") g_debug_log_enabled = false;
         else if (arg == "--help" || arg == "-h") {
             std::printf("Usage: resf2_app [--assets <path>]\n"
                         "                 [--input-script <path>] [--max-frames N]\n"
-                        "                 [--replay] [--dump-state]\n");
+                        "                 [--replay] [--dump-state] [--no-log]\n");
             return 0;
         }
+    }
+    // [ORIGINAL] Initialize debug log file in the asset root.
+    if (g_debug_log_enabled) {
+        std::string log_path = asset_root.empty() ? "resf2_debug.log" :
+            (std::filesystem::path(asset_root) / "resf2_debug.log").string();
+        debug_log_init(log_path);
+        std::printf("[LOG] Debug log: %s\n", log_path.c_str());
     }
     auto platform = std::make_unique<plat::GlfwPlatform>();
     plat::WindowConfig cfg;
@@ -4933,5 +5073,6 @@ int main(int argc, char* argv[]) {
     }
     game.on_shutdown(*platform);
     platform->shutdown();
+    debug_log_close();
     return 0;
 }
