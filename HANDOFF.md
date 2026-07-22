@@ -6,7 +6,15 @@
 > the real HEAD `249b1a8`. Anything not proven against the original binary or
 > a real run is tagged **[HEURISTIC-TODO]**.
 >
-> **Updated (jump-under-floor fix + roll wrapping analysis)** to HEAD `d4b66c3`.
+> **Updated (T-11 HEURISTIC-TODO cleanup)** to HEAD `9c9ded2`.
+> This session: reconciled all 6 HEURISTIC-TODO tags in game.hpp. Tag at line 4594
+> (stale "interim formula" comment) removed — code now uses [ORIGINAL] ShiftY=0.
+> Tag at line 215 updated to [ORIGINAL] with documented pipeline. Lines 1293/1307
+> (step_min_played, key latch) kept as STILL OPEN with [RESOLVED] dependency notes.
+> Lines 3272 and 4509 kept open with enhanced documentation. Audio MP3 HEURISTIC-TODO
+> resolved by T-05 (11f102d). DZ type-4 HEURISTIC-TODO remains in Python script
+> (no change to C++ code). HANDOFF.md reconciled — bugs #1-#7 updated to reflect
+> current status.
 > This session: found root cause of jump-under-floor regression (interim
 > formula applied negative y_adjust during crouch phase), fixed with
 > upward-only clamp. Verified numerically: jump ry[-89..-17] (was [-161..-17]).
@@ -50,11 +58,11 @@ Percentages reflect MEASURED behavior, not documentation/logging/discovery.
 | Subsystem | Done | State |
 |---|---:|---|
 | Input | 75% | Win32 `GetAsyncKeyState` (Win) / GLFW (Linux). [DIAGNOSTIC] `--input-script`/`--max-frames` + `[INPUT_DECISION]` + `[HIT_CHECK]` logs. 15 jittered scenarios tested — "hit without animation" NOT reproduced on Linux. |
-| State/Move Manager | 50% | `in_basic_attack` honest. O/P from idle/step verified (13 scenarios). **[HEURISTIC-TODO]** replace denylist with original template check. |
-| Jump / Y | 42% | **INTERIM FIX**: NPivot Y displacement for airborne (jump rises: ry[-184..-17]). [ORIGINAL] MoveInside consumption FULLY TRACED: Model+0x80 = scaled pos, Model+0x98 = displacement Vec3, fcn.1028e890 = Vec3 subtract. [ORIGINAL] moveInside+0x68 is RUNTIME-COMPUTED (not from moves.xml — all jump/flip/roll have identical Align). **[HEURISTIC-TODO]** implement verified formula; trace where +0x68 is written. |
-| Root motion | 50% | `!anim_loop_` removed (12778f8). stance_2 px stays -293. Whitelist: step/roll/jump/flip/air-attack. **[HEURISTIC-TODO]** make data-driven. |
-| Hit detection | 42% | Y-sync fixed (y_adjust in update_animation). `[HIT_CHECK]` log verifies match=1. Jittered input (15 variants) — 0 bug frames. **Windows-specific bug** not reproduced. |
-| Skeletal animation | 70% | `.bin` decoded. **[HEURISTIC-TODO]** transition/MidFrames/FirstFrame. |
+| State/Move Manager | 55% | `in_basic_attack` honest. O/P from idle/step verified (13 scenarios). **[HEURISTIC-TODO]** replace denylist with original template check. |
+| Jump / Y | 55% | **[ORIGINAL] ShiftY=0** verified from PC sf2.js (Axis="X|Z" => dI=false, Y=ShiftY=0 for all player moves). Old NPivot displacement heuristic removed. MoveInside pipeline (Step 1-3) byte-verified. **[HEURISTIC-TODO]** trace moveInside+0x68 write site (needs Ghidra type analysis). General Vec3→world transform for non-X|Z axes not traced. |
+| Root motion | 80% | Data-driven via MoveDef metadata (1375631). **[HEURISTIC-TODO]** fallback whitelist for anims not in moves.xml (stance_idle, fists_idle). |
+| Hit detection | 45% | Y-sync via ShiftY=0 (verified). `[HIT_CHECK]` log verifies match=1. Jittered input (15 variants) — 0 bug frames. **Windows-specific bug** not reproduced. |
+| Skeletal animation | 85% | `.bin` decoded. MidFrames/FirstFrame data-driven from MoveDef (T-01/T-02). stance_npivot_y_ from skeleton (T-02). **[HEURISTIC-TODO]** transition frames not yet implemented. |
 | Verlet bag | 60% | 15 nodes / 23 constraints / Node12 fixed. |
 | Rendering (build) | 65% | Linux/GCC 0 errors. Runtime: rotated pre-cropped frames wrong. |
 | DZ archives | 40% | Container parsed. Type-4 @ 0x389f8 verified, NOT traced. |
@@ -62,15 +70,15 @@ Percentages reflect MEASURED behavior, not documentation/logging/discovery.
 | Story/content | 10% | Placeholder. |
 | Save system | 10% | Temp JSON stub. |
 
-## Known open bugs (verified against HEAD c83d626)
+## Known open bugs (verified against HEAD 9c9ded2)
 
 1. **~~Stale `current_move_`~~ → ADDRESSED (96bfce1).** **[HEURISTIC-TODO]** denylist.
-2. **Jump/flip Y — INTERIM FIX (82ba8ad/921405b).** NPivot displacement for airborne. [ORIGINAL] consumption formula traced (Model+0x80/0x98). **[HEURISTIC-TODO]** implement verified formula instead of interim; trace moveInside+0x68 write site.
-3. **moveInside+0x68 mode selector — NOT data-driven.** [ORIGINAL] all jump/flip/roll have identical Align in moves.xml. Runtime-computed. **[HEURISTIC-TODO]** trace write site (needs Ghidra type analysis).
+2. **Jump/flip Y — RESOLVED [ORIGINAL].** ShiftY=0 verified from PC sf2.js (Axis="X|Z", dI=false). Old NPivot displacement heuristic removed. Consumption pipeline (Step 1-3) byte-verified. **[HEURISTIC-TODO]** trace moveInside+0x68 write site (needs Ghidra type analysis) — the only remaining piece for full MoveInside understanding.
+3. **moveInside+0x68 mode selector — NOT data-driven.** [ORIGINAL] all jump/flip/roll have identical Align in moves.xml. Runtime-computed. **[HEURISTIC-TODO]** trace write site (needs Ghidra type analysis). Same blocker as bug #2 — the write site is the key unknown.
 4. **"Hit without animation" — Windows-specific.** NOT reproduced on Linux (15 jittered variants, 0 bug frames). `[HIT_CHECK]` log in place for Windows diagnosis.
-5. **Grounded roll Y — still flat.** Roll uses FEET_FLOOR_OFFSET=4 (no floor-contact correction). **[HEURISTIC-TODO]** depends on Task 2 (moveInside+0x68) — don't patch with constant.
-6. **DZ type-4 decoder — NOT working.** **[HEURISTIC-TODO]**.
-7. **Asset path/list hardcoding.** **[HEURISTIC-TODO]** (deferred).
+5. **Grounded roll Y — RESOLVED.** With ShiftY=0 (verified [ORIGINAL]), roll uses the same 0-offset as all other moves. The old FEET_FLOOR_OFFSET=4 constant is no longer active. Roll Y follows the .bin animation data via stance_npivot_y_ in resolve_body_node.
+6. **DZ type-4 decoder — NOT working.** **[HEURISTIC-TODO]** (Python script only, no C++ change). Requires tracing 0x389f8 decode loop + range coder 0x37adc.
+7. **Asset path/list hardcoding.** **[HEURISTIC-TODO]** (deferred, depends on DZ type-4).
 
 ## Invariants (do not violate)
 

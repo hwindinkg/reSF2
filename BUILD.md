@@ -108,7 +108,7 @@ The engine loads:
 2. Extract the `assets/` folder to `sf2/assets/`
 3. `files.dz` and `animations.dz` are in `sf2/assets/assets/` — the engine
    reads `animations.dz` (type-8 gzip) directly. `files.dz` (type-4 custom)
-   is [HEURISTIC-TODO] — the engine falls back to the pre-extracted `assets/`
+    is [HEURISTIC-TODO] (Python) — the engine falls back to the pre-extracted `assets/`
    folder for now.
 
 ## Gameplay (Dojo battle)
@@ -181,6 +181,6 @@ To enable sound, integrate an OpenAL backend in `engine/audio/audio.cpp`
 the console), just not played through a real audio device yet.
 
 ### Character floats / sinks
-The Y-positioning uses an interim formula ([HEURISTIC-TODO] in main.cpp).
+The Y-positioning now uses [ORIGINAL] ShiftY=0 (verified from PC sf2.js).
 The character should stand on the floor in the Dojo. If Y is wrong, check
 the `[ROOT]` log lines for `npy` (NPivot Y) and `ry` (render Y) values.
