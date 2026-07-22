@@ -35,6 +35,8 @@
 #include "engine/audio/audio.hpp"
 #include "save.hpp"
 #include "player.hpp"
+#include "inventory.hpp"
+#include "shop.hpp"
 
 namespace plat = resf2::platform;
 namespace rt = resf2::runtime;
@@ -46,6 +48,8 @@ namespace font = resf2::reverse::font;
 namespace scene = resf2::scene;
 namespace save = resf2::save;
 namespace player = resf2::player;
+namespace inventory = resf2::inventory;
+namespace shop = resf2::shop;
 
 // ---------- Forward declarations for helper functions ----------
 // These are defined in helpers.cpp and used by inline Game methods.
@@ -527,6 +531,10 @@ public:
                     }
                 }
             }
+            // Initialize shop manager from loaded catalog
+            if (list_data_loaded_) {
+                shop_manager_.load_catalog(list_data_);
+            }
         }
 
         // Load saved progress (gold, wins, levels, inventory)
@@ -617,6 +625,8 @@ public:
         data.losses = player_losses_;
         data.current_level = current_level_;
         data.completed_levels = completed_levels_;
+        // Save inventory state
+        inventory_.to_save(data);
         // Keep the player_profile_ in sync too
         player_profile_ = player::PlayerProfile::from_save_data(data);
         return save_manager_.save(player_profile_.to_save_data());
@@ -633,8 +643,13 @@ public:
         completed_levels_ = data.completed_levels;
         // Build PlayerProfile from save data
         player_profile_ = player::PlayerProfile::from_save_data(data);
-        std::printf("[save] loaded %zu completed levels, %d gold, %dw %dl\n",
-                    completed_levels_.size(), currency_, player_wins_, player_losses_);
+        // Restore inventory from saved data
+        inventory_.from_save(data);
+        // Sync combat equipped weapon from inventory
+        sync_equipped_weapon();
+        std::printf("[save] loaded %zu completed levels, %d gold, %dw %dl, %zu items\n",
+                    completed_levels_.size(), currency_, player_wins_, player_losses_,
+                    data.owned_items.size());
         return true;
     }
 
@@ -705,6 +720,137 @@ public:
         std::printf("[currency] added %d, total %d\n", amount, currency_);
     }
 
+    // ---- Inventory / Shop ----
+
+    bool host_has_item(const std::string& item_id) const override {
+        return inventory_.has_item(item_id);
+    }
+
+    std::vector<std::string> host_get_owned_items() const override {
+        std::vector<std::string> result = inventory_.all_items();
+        // Also include equipped items
+        for (const auto& slot : inventory::kAllSlots) {
+            std::string eq = inventory_.equipped(slot);
+            if (!eq.empty()) result.push_back(eq);
+        }
+        return result;
+    }
+
+    std::string host_get_equipped(const std::string& slot) const override {
+        return inventory_.equipped(slot);
+    }
+
+    bool host_buy_item(const std::string& item_id) override {
+        auto* item = shop_manager_.find_item(item_id);
+        if (!item) {
+            std::printf("[shop] cannot buy %s: not found in catalog\n", item_id.c_str());
+            return false;
+        }
+        if (item->is_paid) {
+            std::printf("[shop] cannot buy %s: IAP item\n", item_id.c_str());
+            return false;
+        }
+        int level = host_get_player_level();
+        if (!shop_manager_.can_buy(item_id, currency_, level)) {
+            std::printf("[shop] cannot buy %s: gold=%d need=%d, level=%d need=%d\n",
+                        item_id.c_str(), currency_, item->price, level, item->level_req);
+            return false;
+        }
+        // Deduct gold
+        currency_ -= item->price;
+        std::printf("[shop] purchased %s for %d gold (remaining: %d)\n",
+                    item_id.c_str(), item->price, currency_);
+        // Add to inventory
+        inventory_.add_item(item_id);
+        // Sync PlayerProfile
+        player_profile_.add_item(item_id);
+        // Auto-save
+        host_save_progress();
+        return true;
+    }
+
+    bool host_sell_item(const std::string& item_id) override {
+        if (!inventory_.has_item(item_id)) {
+            std::printf("[shop] cannot sell %s: not owned\n", item_id.c_str());
+            return false;
+        }
+        int price = shop_manager_.sell_price(item_id);
+        if (price <= 0) {
+            std::printf("[shop] cannot sell %s: no sell value\n", item_id.c_str());
+            return false;
+        }
+        // Remove from inventory
+        inventory_.remove_item(item_id);
+        player_profile_.remove_item(item_id);
+        // Add gold
+        currency_ += price;
+        std::printf("[shop] sold %s for %d gold (total: %d)\n",
+                    item_id.c_str(), price, currency_);
+        // Auto-save
+        host_save_progress();
+        return true;
+    }
+
+    bool host_equip_item(const std::string& item_id) override {
+        if (!inventory_.has_item(item_id)) {
+            std::printf("[equip] cannot equip %s: not owned\n", item_id.c_str());
+            return false;
+        }
+        // Determine slot from item type in catalog
+        auto* item = shop_manager_.find_item(item_id);
+        if (!item) {
+            // Fallback: check list_data_ directly
+            for (const auto& li : list_data_.items) {
+                if (li.name == item_id) {
+                    const char* slot = shop::item_type_to_slot(li.type);
+                    if (!slot) {
+                        std::printf("[equip] unknown item type '%s' for %s\n",
+                                    li.type.c_str(), item_id.c_str());
+                        return false;
+                    }
+                    inventory_.equip(slot, item_id);
+                    player_profile_.equip_item(slot, item_id);
+                    std::printf("[equip] equipped %s in %s\n", item_id.c_str(), slot);
+                    host_save_progress();
+                    return true;
+                }
+            }
+            std::printf("[equip] cannot find item %s in catalog\n", item_id.c_str());
+            return false;
+        }
+        const char* slot = shop::item_type_to_slot(item->category);
+        if (!slot) {
+            std::printf("[equip] unknown category '%s' for %s\n",
+                        item->category.c_str(), item_id.c_str());
+            return false;
+        }
+        inventory_.equip(slot, item_id);
+        player_profile_.equip_item(slot, item_id);
+        // Sync combat weapon if equipping a weapon slot
+        if (slot == inventory::kSlotWeapon) {
+            sync_equipped_weapon();
+        }
+        std::printf("[equip] equipped %s in %s\n", item_id.c_str(), slot);
+        host_save_progress();
+        return true;
+    }
+
+    bool host_unequip_item(const std::string& slot) override {
+        if (!inventory_.equipped(slot).empty()) {
+            std::string item_id = inventory_.equipped(slot);
+            inventory_.unequip(slot);
+            player_profile_.equip_item(slot, "");  // clear the slot
+            // Sync combat weapon if unequipping weapon slot
+            if (slot == inventory::kSlotWeapon) {
+                sync_equipped_weapon();
+            }
+            std::printf("[equip] unequipped %s from %s\n", item_id.c_str(), slot.c_str());
+            host_save_progress();
+            return true;
+        }
+        return false;
+    }
+
     int host_get_player_level() const override {
         return 1 + player_wins_ / 5;
     }
@@ -735,6 +881,27 @@ public:
         player_losses_++;
         player_profile_.add_loss();
         std::printf("[stats] loss recorded, total losses: %d\n", player_losses_);
+    }
+
+    // Sync the combat equipped_weapon_ from the inventory.
+    // Called after loading save data and after equipping a weapon.
+    void sync_equipped_weapon() {
+        std::string inv_weapon = inventory_.equipped_weapon();
+        if (!inv_weapon.empty() && inv_weapon != equipped_weapon_) {
+            equipped_weapon_ = inv_weapon;
+            // Try to load the weapon model if location is loaded
+            if (location_loaded_) {
+                load_player_weapon(equipped_weapon_);
+            }
+            std::printf("[equip] combat weapon synced to: %s\n", equipped_weapon_.c_str());
+        } else if (inv_weapon.empty() && equipped_weapon_ != "Fists") {
+            // No weapon equipped → use fists
+            equipped_weapon_ = "Fists";
+            if (location_loaded_) {
+                load_player_weapon(equipped_weapon_);
+            }
+            std::printf("[equip] combat weapon reset to Fists\n");
+        }
     }
 
     // ---------- Audio hooks ----------
@@ -5204,6 +5371,10 @@ private:
     // PlayerProfile holds the authoritative player state (synced on save/load).
     resf2::save::SaveManager save_manager_;
     resf2::player::PlayerProfile player_profile_;
+
+    // Inventory and Shop
+    resf2::inventory::Inventory inventory_;
+    resf2::shop::ShopManager shop_manager_;
 
     resf2::format::StageData stage_data_;
     bool stages_loaded_ = false;

@@ -15,6 +15,7 @@
 #pragma once
 
 #include "scene_system.hpp"
+#include "../format/stage_parser.hpp"
 
 namespace resf2::scene {
 
@@ -71,29 +72,32 @@ public:
 };
 
 // ---------- Map scene (level selection) ----------
-// Stub: shows a list of levels. Selecting one transitions to Dialogue.
-// The real map UI (acts, episodes, paths) will be added once the asset
-// format is decoded.
+// Shows zones and battle nodes parsed from stages.xml.
 
 class MapScene final : public Scene {
 public:
     SceneId id() const noexcept override { return SceneId::Map; }
+    void update_selected_battle();
     void on_enter(SceneContext& ctx) override;
     void on_update(SceneContext& ctx) override;
     void on_render(SceneContext& ctx) override;
 private:
-    int selected_ = 0;
-    std::vector<std::string> levels_ = {
-        "Act 1 - Tutorial",
-        "Act 1 - Bodyguard 1",
-        "Act 1 - Bodyguard 2",
-        "Act 1 - Boss",
-        "Act 2 - Bodyguard 1",
-        "Act 2 - Boss",
+    struct ZoneEntry {
+        resf2::format::StageZone zone;
+        std::vector<size_t> battle_indices;
     };
+    std::vector<ZoneEntry> zone_battles_;
+    int selected_ = 0;
+    float scroll_x_ = 0;       // horizontal scroll position
+    float scroll_target_x_ = 0;
+    const resf2::format::StageBattle* selected_battle_ = nullptr;
+    std::string selected_zone_name_;
+    int reward_money_ = 0;
+    int reward_exp_ = 0;
+    int fight_power_ = 0;
 };
 
-// ---------- Shop scene (stub) ----------
+// ---------- Shop scene ----------
 
 class ShopScene final : public Scene {
 public:
@@ -101,6 +105,8 @@ public:
     void on_enter(SceneContext& ctx) override;
     void on_update(SceneContext& ctx) override;
     void on_render(SceneContext& ctx) override;
+private:
+    float scroll_y_ = 0.0f;  // vertical scroll offset for the item list
 };
 
 // ---------- Settings scene (stub) ----------
@@ -145,12 +151,14 @@ public:
     bool on_quit_request(SceneContext& ctx) override;
 private:
     uint32_t battle_timer_ms_ = 0;
+    uint32_t guard_timer_ms_ = 0;  // prevent immediate transitions after entering
     static constexpr uint32_t kBattleMaxMs = 5 * 60 * 1000;  // 5 min timeout
+    static constexpr uint32_t kGuardMs = 500;  // 500ms guard
 };
 
 // ---------- Results scene ----------
-// Post-battle screen. Shows victory/defeat and a button to return to
-// MainMenu. Stub for now — no rewards/equipment tracking yet.
+// Post-battle screen. Shows victory/defeat overlay with rewards and
+// a "Continue" button that transitions to Map or MainMenu.
 
 class ResultsScene final : public Scene {
 public:
@@ -158,6 +166,25 @@ public:
     void on_enter(SceneContext& ctx) override;
     void on_update(SceneContext& ctx) override;
     void on_render(SceneContext& ctx) override;
+private:
+    uint32_t guard_ms_ = 0;
+    static constexpr uint32_t kGuardMs = 400;
+    int reward_gold_ = 0;
+    int reward_xp_ = 0;
+    bool is_victory_ = false;
+    bool saved_ = false;
+};
+
+// ---------- Profile scene ----------
+// Shows player stats: level, wins/losses, inventory summary.
+
+class ProfileScene final : public Scene {
+public:
+    SceneId id() const noexcept override { return SceneId::Profile; }
+    void on_enter(SceneContext& ctx) override;
+    void on_update(SceneContext& ctx) override;
+    void on_render(SceneContext& ctx) override;
 };
 
 }  // namespace resf2::scene
+

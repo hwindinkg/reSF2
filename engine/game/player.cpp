@@ -91,6 +91,25 @@ bool PlayerProfile::has_item(const std::string& item_id) const {
     return false;
 }
 
+bool PlayerProfile::remove_item(const std::string& item_id) {
+    if (item_id.empty()) return false;
+    // If equipped, unequip first
+    if (equipped_weapon_ == item_id) equipped_weapon_.clear();
+    if (equipped_armor_ == item_id)  equipped_armor_.clear();
+    if (equipped_helmet_ == item_id) equipped_helmet_.clear();
+    if (equipped_ranged_ == item_id) equipped_ranged_.clear();
+    if (equipped_magic_ == item_id)  equipped_magic_.clear();
+    // Remove from owned items
+    for (auto it = owned_items_.begin(); it != owned_items_.end(); ++it) {
+        if (*it == item_id) {
+            owned_items_.erase(it);
+            std::printf("[player] removed item: %s\n", item_id.c_str());
+            return true;
+        }
+    }
+    return false;
+}
+
 // ============================================================
 // Equipment
 // ============================================================

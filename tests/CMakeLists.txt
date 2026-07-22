@@ -234,6 +234,18 @@ target_link_libraries(test_save_system PRIVATE
 target_compile_features(test_save_system PRIVATE cxx_std_23)
 add_test(NAME test_save_system COMMAND test_save_system WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# T-09: Inventory & Equipment System
+add_executable(test_inventory
+    test_inventory.cpp
+)
+target_link_libraries(test_inventory PRIVATE
+    resf2_game
+    resf2_format
+    resf2_warnings
+)
+target_compile_features(test_inventory PRIVATE cxx_std_23)
+add_test(NAME test_inventory COMMAND test_inventory WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # JSON Atlas parser test (for sf2_pc format)
 add_executable(test_json_atlas
     ../test_json_atlas.cpp

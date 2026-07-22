@@ -59,6 +59,11 @@ public:
     void add_item(const std::string& item_id);
     bool has_item(const std::string& item_id) const;
 
+    // Remove an item from the player's inventory.
+    // Also unequips if the item is currently equipped.
+    // Returns false if the item wasn't owned.
+    bool remove_item(const std::string& item_id);
+
     // Equip an item in a slot. The item must be in owned_items_ to equip it.
     // Returns false if the item is not owned.
     bool equip_item(const std::string& slot, const std::string& item_id);

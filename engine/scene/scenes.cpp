@@ -678,7 +678,43 @@ void ProfileScene::on_render(SceneContext& ctx) {
         ctx.host.host_render_text("Win Rate", panel_x + 40, sy, 0.28f, 200, 200, 220, 255);
         ctx.host.host_render_text(std::to_string(win_rate) + "%", panel_x + panel_w - 100, sy, 0.28f, 140, 190, 255, 255);
     }
+    sy += line_h + 10.0f;
+
+    // Equipped items section
+    r.draw_filled_rect_screen(panel_x, sy, panel_w, 2, {200, 170, 100, 150});
+    sy += 8.0f;
+    ctx.host.host_render_text("Equipped", panel_x + panel_w * 0.5f - 50, sy, 0.28f, 200, 170, 100, 255);
+    sy += 30.0f;
+
+    struct EquipSlot { const char* label; const char* slot; };
+    EquipSlot slots[] = {
+        {"Weapon:", "weapon"},
+        {"Armor:", "armor"},
+        {"Helmet:", "helmet"},
+        {"Ranged:", "ranged"},
+        {"Magic:", "magic"},
+    };
+    for (const auto& es : slots) {
+        std::string eq = ctx.host.host_get_equipped(es.slot);
+        if (eq.empty()) eq = "(none)";
+        ctx.host.host_render_text(es.label, panel_x + 40, sy, 0.24f, 200, 200, 220, 255);
+        ctx.host.host_render_text(eq, panel_x + 120, sy, 0.24f, 100, 200, 255, 255);
+        sy += 28.0f;
+    }
 }
+
+// ============================================================
+// ShopScene helpers
+// ============================================================
+
+// Forward declarations for helper functions used by ShopScene.
+// (Defined after ShopScene to keep category logic close to rendering.)
+
+// Get items for a category from list_data.
+static std::vector<resf2::format::ListItem> get_items_for_category(SceneContext& ctx, const std::string& category);
+
+// Map item type (from list.xml) to equipment slot name.
+static std::string slot_for_category(const std::string& type);
 
 // ============================================================
 // ShopScene
@@ -687,11 +723,7 @@ void ProfileScene::on_render(SceneContext& ctx) {
 void ShopScene::on_enter(SceneContext& ctx) {
     std::printf("[shop] enter\n");
     ctx.renderer.set_clear_color(0.04f, 0.04f, 0.07f, 1.0f);
-    // Load items from list.xml via host
-    auto* list_data = ctx.host.host_get_list_data();
-    if (list_data && !list_data->items.empty()) {
-        std::printf("[shop] loaded %zu items from catalog\n", list_data->items.size());
-    }
+    scroll_y_ = 0.0f;
 }
 
 void ShopScene::on_update(SceneContext& ctx) {
@@ -704,44 +736,69 @@ void ShopScene::on_update(SceneContext& ctx) {
         return;
     }
 
-    auto* list_data = ctx.host.host_get_list_data();
-    if (!list_data) return;
-
     float w = (float)ctx.platform.window_width();
     float bar_h = 60.0f;
 
-    // Click detection for buy buttons
-    int currency = ctx.host.host_get_currency();
-    float bx = w - 120.0f;
-    float cy = bar_h + 20.0f;
+    // Click on items
+    float cy = bar_h + 20.0f - scroll_y_;
     std::string categories[] = {"Weapon", "Armor", "Helm", "Ranged", "Magic"};
+
     for (auto& cat : categories) {
-        int cnt = 0;
-        int idx = 0;
-        for (const auto& entry : list_data->items) {
-            if (entry.type == cat && !entry.shop_hide && !entry.hidden && entry.price > 0) {
-                if (cnt == 0) {
-                    cy += 35.0f; // skip category header
-                }
-                float iy = cy + idx * 40.0f;
-                if (clicked_in(input, bx, iy, 80, 34)) {
-                    std::printf("[shop] buy %s (%d gold)\n", entry.name.c_str(), entry.price);
-                    if (currency >= entry.price) {
-                        std::printf("[shop] purchased %s!\n", entry.name.c_str());
-                        ctx.host.host_spend_currency(entry.price);
-                        // Auto-save after purchase
-                        ctx.host.host_save_progress();
-                    } else {
-                        std::printf("[shop] not enough gold!\n");
+        auto items = get_items_for_category(ctx, cat);
+        if (items.empty()) continue;
+
+        // Category header (clickable for scroll-to)
+        // Skip header rendering as it's just decoration
+        cy += 35.0f;
+
+        for (size_t idx = 0; idx < items.size(); ++idx) {
+            const auto& entry = items[idx];
+            float iy = cy + idx * 44.0f;
+
+            // Skip if off-screen
+            if (iy + 44 < 0 || iy > ctx.platform.window_height()) continue;
+
+            // Buy button
+            float bx = w - 165.0f;
+            bool owned = ctx.host.host_has_item(entry.name);
+            bool equipped = ctx.host.host_get_equipped(
+                slot_for_category(entry.type)) == entry.name;
+
+            if (!owned && !entry.is_paid) {
+                // BUY button
+                if (clicked_in(input, bx, iy + 4, 70, 34)) {
+                    if (ctx.host.host_buy_item(entry.name)) {
+                        ctx.host.host_play_ui_click();
                     }
                 }
-                cnt++;
-                idx++;
+            } else if (owned && !equipped) {
+                // EQUIP button
+                if (clicked_in(input, bx, iy + 4, 70, 34)) {
+                    if (ctx.host.host_equip_item(entry.name)) {
+                        ctx.host.host_play_ui_click();
+                    }
+                }
+            } else if (equipped) {
+                // UNEQUIP button
+                if (clicked_in(input, bx, iy + 4, 70, 34)) {
+                    std::string slot = slot_for_category(entry.type);
+                    if (ctx.host.host_unequip_item(slot)) {
+                        ctx.host.host_play_ui_click();
+                    }
+                }
+            }
+
+            // Sell button (only for owned, non-equipped items)
+            if (owned && !equipped) {
+                float sell_bx = w - 90.0f;
+                if (clicked_in(input, sell_bx, iy + 4, 70, 34)) {
+                    if (ctx.host.host_sell_item(entry.name)) {
+                        ctx.host.host_play_ui_click();
+                    }
+                }
             }
         }
-        if (cnt > 0) {
-            cy += cnt * 40.0f + 10.0f;
-        }
+        cy += items.size() * 44.0f + 10.0f;
     }
 }
 
@@ -761,58 +818,135 @@ void ShopScene::on_render(SceneContext& ctx) {
     // Gold display
     int currency = ctx.host.host_get_currency();
     std::string gold_str = "Gold: " + std::to_string(currency);
-    ctx.host.host_render_text(gold_str, w - 140, 18, 0.28f, 255, 220, 100, 255);
+    ctx.host.host_render_text(gold_str, w - 160, 18, 0.28f, 255, 220, 100, 255);
 
+    // Check if we have any catalog data
     auto* list_data = ctx.host.host_get_list_data();
     if (!list_data || list_data->items.empty()) {
         ctx.host.host_render_text("No items available", w * 0.5f - 80, h * 0.5f, 0.30f, 150, 150, 170, 200);
         return;
     }
 
-    // Draw items organized by type
+    int player_level = ctx.host.host_get_player_level();
+    float cy = bar_h + 20.0f - scroll_y_;
     std::string categories[] = {"Weapon", "Armor", "Helm", "Ranged", "Magic"};
-    float cy = bar_h + 20.0f;
 
     for (auto& cat : categories) {
-        int cnt = 0;
+        auto items = get_items_for_category(ctx, cat);
+        if (items.empty()) continue;
+
         // Category header
-        // Draw items
-        int idx = 0;
-        for (const auto& entry : list_data->items) {
-            if (entry.type == cat && !entry.shop_hide && !entry.hidden && entry.price > 0) {
-                if (cnt == 0) {
-                    // Category header
-                    r.draw_filled_rect_screen(20, cy, w - 40, 30, {40, 40, 55, 220});
-                    ctx.host.host_render_text(cat, 30, cy + 5, 0.28f, 200, 170, 100, 255);
-                    cy += 35.0f;
+        r.draw_filled_rect_screen(20, cy, w - 40, 30, {40, 40, 55, 220});
+        ctx.host.host_render_text(cat, 30, cy + 5, 0.28f, 200, 170, 100, 255);
+        cy += 35.0f;
+
+        for (size_t idx = 0; idx < items.size(); ++idx) {
+            const auto& entry = items[idx];
+            float iy = cy + idx * 44.0f;
+
+            // Skip if off-screen
+            if (iy + 44 < 0 || iy > h) continue;
+
+            // Item row background (alternating)
+            r.draw_filled_rect_screen(25, iy, w - 50, 40, (idx % 2 == 0) ?
+                ren::Color4B{30, 30, 45, 200} : ren::Color4B{25, 25, 40, 200});
+
+            // Item name
+            ctx.host.host_render_text(entry.name, 35, iy + 10, 0.24f, 200, 200, 220, 255);
+
+            // Stats
+            std::string stats;
+            if (entry.weapon_damage > 0)
+                stats += "DMG:" + std::to_string((int)entry.weapon_damage) + " ";
+            if (entry.body_defense > 0)
+                stats += "DEF:" + std::to_string((int)entry.body_defense) + " ";
+            if (entry.head_defense > 0)
+                stats += "HDEF:" + std::to_string((int)entry.head_defense) + " ";
+            if (entry.ranged_damage > 0)
+                stats += "RDMG:" + std::to_string((int)entry.ranged_damage) + " ";
+            if (entry.magic_damage > 0)
+                stats += "MDMG:" + std::to_string((int)entry.magic_damage) + " ";
+            ctx.host.host_render_text(stats, 210, iy + 2, 0.20f, 150, 150, 170, 200);
+
+            // Level requirement
+            if (entry.level > 1) {
+                ctx.host.host_render_text("Lv." + std::to_string(entry.level),
+                    210, iy + 22, 0.20f, 150, 150, 170, 200);
+            }
+
+            // IAP label
+            if (entry.is_paid) {
+                ctx.host.host_render_text("REAL $", w - 220, iy + 10, 0.22f, 255, 220, 100, 200);
+                continue;
+            }
+
+            bool owned = ctx.host.host_has_item(entry.name);
+            bool equipped = ctx.host.host_get_equipped(
+                slot_for_category(entry.type)) == entry.name;
+
+            // Price / Owned label
+            if (owned) {
+                ctx.host.host_render_text("OWNED", w - 230, iy + 2, 0.20f, 100, 200, 100, 200);
+                if (equipped) {
+                    ctx.host.host_render_text("EQUIPPED", w - 230, iy + 22, 0.20f, 100, 200, 255, 200);
                 }
-                float iy = cy + idx * 40.0f;
-                // Item row background (alternating)
-                r.draw_filled_rect_screen(25, iy, w - 50, 36, (cnt % 2 == 0) ?
-                    ren::Color4B{30, 30, 45, 200} : ren::Color4B{25, 25, 40, 200});
-                // Item name
-                ctx.host.host_render_text(entry.name, 35, iy + 7, 0.24f, 200, 200, 220, 255);
-                // Item level
-                if (entry.level > 0) {
-                    ctx.host.host_render_text("Lv." + std::to_string(entry.level), 200, iy + 7, 0.22f, 150, 150, 170, 200);
-                }
-                // Price
+            } else {
                 std::string price_str = std::to_string(entry.price) + "g";
-                ctx.host.host_render_text(price_str, w - 200, iy + 7, 0.24f, 255, 220, 100, 255);
-                // Buy button
-                float bx = w - 115.0f;
-                bool can_afford = currency >= entry.price;
-                r.draw_filled_rect_screen(bx, iy + 2, 80, 32, can_afford ?
+                ctx.host.host_render_text(price_str, w - 230, iy + 2, 0.22f, 255, 220, 100, 255);
+                if (entry.level > player_level) {
+                    ctx.host.host_render_text("LVL REQ", w - 230, iy + 22, 0.18f, 255, 100, 100, 200);
+                }
+            }
+
+            // Action buttons: BUY / EQUIP / UNEQUIP / SELL
+            float buy_bx = w - 165.0f;
+            float sell_bx = w - 90.0f;
+
+            if (!owned && !entry.is_paid) {
+                // BUY button
+                bool can_afford = currency >= entry.price && player_level >= entry.level;
+                bool can_buy = can_afford && entry.price > 0;
+                r.draw_filled_rect_screen(buy_bx, iy + 4, 70, 32, can_buy ?
                     ren::Color4B{50, 120, 50, 220} : ren::Color4B{60, 60, 60, 200});
-                ctx.host.host_render_text("BUY", bx + 20, iy + 6, 0.24f, 255, 255, 255, 255);
-                cnt++;
-                idx++;
+                ctx.host.host_render_text("BUY", buy_bx + 12, iy + 9, 0.22f, 255, 255, 255, 255);
+            } else if (owned && !equipped) {
+                // EQUIP button
+                r.draw_filled_rect_screen(buy_bx, iy + 4, 70, 32, {50, 80, 140, 220});
+                ctx.host.host_render_text("EQUIP", buy_bx + 6, iy + 9, 0.20f, 255, 255, 255, 255);
+                // SELL button
+                r.draw_filled_rect_screen(sell_bx, iy + 4, 70, 32, {140, 80, 40, 220});
+                ctx.host.host_render_text("SELL", sell_bx + 10, iy + 9, 0.22f, 255, 255, 255, 255);
+            } else if (equipped) {
+                // UNEQUIP button
+                r.draw_filled_rect_screen(buy_bx, iy + 4, 70, 32, {100, 60, 60, 220});
+                ctx.host.host_render_text("UNEQUIP", buy_bx + 1, iy + 9, 0.18f, 255, 255, 255, 255);
             }
         }
-        if (cnt > 0) {
-            cy += cnt * 40.0f + 10.0f;
+        cy += items.size() * 44.0f + 10.0f;
+    }
+}
+
+// Helper: get items for a category from ShopManager via list_data
+static std::vector<resf2::format::ListItem> get_items_for_category(SceneContext& ctx, const std::string& category) {
+    std::vector<resf2::format::ListItem> result;
+    auto* list_data = ctx.host.host_get_list_data();
+    if (!list_data) return result;
+    for (const auto& item : list_data->items) {
+        if (item.type == category && !item.shop_hide && !item.hidden && item.price > 0) {
+            result.push_back(item);
         }
     }
+    return result;
+}
+
+// Helper: map item type (from list.xml) to equipment slot name
+static std::string slot_for_category(const std::string& type) {
+    if (type == "Weapon") return "weapon";
+    if (type == "Armor")  return "armor";
+    if (type == "Helm")   return "helmet";
+    if (type == "Ranged") return "ranged";
+    if (type == "Magic")  return "magic";
+    return {};
 }
 
 // ============================================================
