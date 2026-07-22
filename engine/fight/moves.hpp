@@ -62,6 +62,17 @@ struct MoveDef {
     };
     std::vector<UninterruptInterval> uninterrupt_intervals;
 
+    // Invulnerable interval (target enters this during the move and cannot be hit)
+    struct InvulnerableInterval {
+        float start = 0;
+        float end = 0;
+        std::string name; // "Evade", "Recovery", "Boss"
+    };
+    std::vector<InvulnerableInterval> invulnerable_intervals;
+
+    // IgnoresInvulnerable — this attack can pierce target invulnerability
+    std::string ignores_invulnerable; // "Evade|Recovery" etc.
+
     // MoveInside (root motion pivot adjustment)
     struct MoveInside {
         Vec2 pivot;
