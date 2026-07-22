@@ -1040,7 +1040,7 @@ public:
             if (in_attack && !current_move_.empty()) {
                 auto cur_move_it = moves_.find(current_move_);
                 if (cur_move_it != moves_.end() && cur_move_it->second.attack_end > 0) {
-                    int current_frame = (int)(anim_time_ * 20.0f);
+                    int current_frame = (int)(anim_time_ * anim_fps_);
                     if (current_frame >= cur_move_it->second.attack_end) {
                         past_attack_interval = true;
                     }
@@ -1142,7 +1142,7 @@ public:
                 play_animation(anim_name, false);
                 current_move_ = best_move->name;
                 int fc = animations_[anim_name].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
                 move_state_ = 10;
                 need_switch_to_idle_ = false;
                 // [ORIGINAL] Play attack swing sound at attack start.
@@ -1279,7 +1279,7 @@ public:
                     play_animation(anim_name, false);
                     current_move_ = best_move->name;
                     int fc = animations_[anim_name].frame_count;
-                    hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
                     move_state_ = 10;
                     goto after_combat;
                 }
@@ -1423,7 +1423,7 @@ public:
                     move_state_ = 10;
                     current_move_ = "BackHandflip";
                     int fc = animations_["back_handflip"].frame_count;
-                    hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
                     double_step_back_requested_ = false;
                     debug_log("[MOVE] f=%llu BackHandflip (handstand retreat)\n",
                               (unsigned long long)total_frame_count_);
@@ -1440,7 +1440,7 @@ public:
                     move_state_ = 10;  // special (non-interruptible during dash)
                     current_move_ = "DoubleStepForward";
                     int fc = animations_["double_step_forward"].frame_count;
-                    hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
                     double_step_fwd_requested_ = false;
                     debug_log("[MOVE] f=%llu DoubleStepForward (dash)\n",
                               (unsigned long long)total_frame_count_);
@@ -1534,7 +1534,7 @@ public:
                     if (expected_anim.size() > 4 && expected_anim.substr(expected_anim.size()-4) == ".bin")
                         expected_anim = expected_anim.substr(0, expected_anim.size()-4);
                     if (expected_anim == current_anim_) {
-                        int current_frame = (int)(anim_time_ * 20.0f);
+                        int current_frame = (int)(anim_time_ * anim_fps_);
                         int start = un_start - 1;
                         int end = un_end > 0 ? un_end - 1 : 9999;
                         if (current_frame >= start && current_frame <= end) {
@@ -1597,7 +1597,7 @@ public:
             auto anim_it = animations_.find(current_anim_);
             if (anim_it != animations_.end()) {
                 int fc = anim_it->second.frame_count;
-                int current_frame = (int)(anim_time_ * 20.0f);
+                int current_frame = (int)(anim_time_ * anim_fps_);
                 auto move_it = moves_.find(current_move_);
                 // [DIAGNOSTIC] Per-frame hit-detection state log for
                 // "hit without animation" diagnosis (Task 2).
@@ -1692,7 +1692,7 @@ public:
                                 float limb_lx = ait->second.first;
                                 float limb_ly = ait->second.second;
                                 auto pivot_it = skeleton_nodes_.find("NPivot");
-                                float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
+                                float pivot_ly = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : stance_npivot_y_;
                                 float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx);
                                 float limb_wy = player_pos_y_ + y_adjust_smoothed_ + (limb_ly - pivot_ly);
 
@@ -1912,7 +1912,7 @@ public:
         bool has_anim = (anim_it != animations_.end() && anim_it->second.frame_count > 0);
         if (has_anim) {
             auto& anim = anim_it->second;
-            float f = enemy_anim_time_ * 20.0f;
+            float f = enemy_anim_time_ * 20.0f;  // enemy uses fixed 20fps (no MoveDef mid_frames)
             frame_idx = (int)f % anim.frame_count;
             next_idx = (frame_idx + 1) % anim.frame_count;
             alpha = f - (int)f;
@@ -2250,7 +2250,7 @@ private:
             play_animation("stance_2", false);
             current_move_ = "StartStance";
             int fc = animations_["stance_2"].frame_count;
-            hit_anim_ = (uint32_t)(fc * 1000.0f / 20.0f);
+            hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
             move_state_ = 10;  // special move state (non-interruptible)
             start_stance_playing_ = true;
             std::printf("[STANCE] Playing start stance (stance_2, %d frames)\n", fc);
@@ -2619,6 +2619,13 @@ private:
             std::string type = child.attr("Type");
             if (type == "MacroNode") ++macro_count;
         }
+        // Store NPivot Y baseline from skeleton rest-pose data
+        {
+            auto np_it = skeleton_nodes_.find("NPivot");
+            if (np_it != skeleton_nodes_.end()) {
+                stance_npivot_y_ = np_it->second.y;
+            }
+        }
         std::printf("  Skeleton: %zu nodes (%d MacroNodes, ordered: %zu)\n",
                     skeleton_nodes_.size(), macro_count, ordered_node_names_.size());
 
@@ -2799,7 +2806,7 @@ private:
     void render_body_model() {
         if (!body_model_) return;
         auto pivot_it = skeleton_nodes_.find("NPivot");
-        float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 170.0f;
+        float pivot_local_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : stance_npivot_y_;
 
         // Y normalization: keep character at correct height.
         //
@@ -3808,7 +3815,9 @@ private:
         anim_time_ += dt;
 
         // Calculate current frame (with looping)
-        float frame_f = anim_time_ * 20.0f;
+        // fps comes from MoveDef.mid_frames: fps = 60 / (1 + mid_frames)
+        // MidFrames=2 => fps=20, MidFrames=1 => fps=30
+        float frame_f = anim_time_ * anim_fps_;
         int frame_idx = (int)frame_f;
         bool anim_finished = false;
         if (anim_loop_) {
@@ -4062,9 +4071,9 @@ private:
             y_adjust_smoothed_ = target_y;
         }
 
-        // Get NPivot's rest-pose Y (from skeleton_nodes_)
-        auto pivot_it = skeleton_nodes_.find("NPivot");
-        float npivot_rest_y = pivot_it != skeleton_nodes_.end() ? pivot_it->second.y : 169.48f;
+        // Use data-driven NPivot Y baseline (from skeleton at load time,
+        // defaults to 106.0f — the .bin NPivot Y at frame 0 rest pose).
+        float npivot_rest_y = stance_npivot_y_;
 
         // For each node in the .bin, compute LOCAL position and store in anim_node_pos_
         for (int i = 0; i < (int)ordered_node_names_.size() && i < 67; ++i) {
@@ -4089,15 +4098,12 @@ private:
             // the model world position. Subtracting animated npivot_y causes
             // feet to lift off floor during roll (wrapping bug) and incorrectly
             // shifts nodes when NPivot descends.
-            // FIX: use STANCE_NPIVOT_Y (106) as fixed baseline instead of
-            // animated npivot_y. This keeps the coordinate offset consistent:
-            //   node_world_y = world_cy + abs_y - 106 = -93 + abs_y - 106 = abs_y - 199
-            // For stance (NToe abs_y=0.92): sy = -198 (on floor -193 ✓)
-            // For roll mid (NToe abs_y=0.92, npy=25): sy = -198 (still on floor ✓)
-            // For jump peak (NToe abs_y=189): sy = -10 (high up ✓)
-            constexpr float STANCE_NPIVOT_Y_BASELINE = 106.0f;
+            // FIX: use stance_npivot_y_ (106 default / 169.48 from skeleton) as
+            // fixed baseline instead of animated npivot_y. This keeps the
+            // coordinate offset consistent:
+            //   node_world_y = world_cy + abs_y - stance_npivot_y_
             float local_x = abs_x - npivot_x;
-            float local_y = abs_y - STANCE_NPIVOT_Y_BASELINE;
+            float local_y = abs_y - stance_npivot_y_;
             anim_node_pos_[name] = {local_x, local_y + npivot_rest_y};
         }
 
@@ -4137,6 +4143,36 @@ private:
             current_anim_ = name;
             anim_time_ = 0.0f;
             anim_loop_ = loop;
+            anim_fps_ = 20.0f;  // default: matches MidFrames=2 (60/3=20)
+
+            // Look up MoveDef by filename to get mid_frames and first_frame
+            {
+                std::string name_no_bin = name;
+                if (name_no_bin.size() > 4 &&
+                    name_no_bin.substr(name_no_bin.size() - 4) == ".bin")
+                    name_no_bin = name_no_bin.substr(0, name_no_bin.size() - 4);
+
+                for (const auto& [mname, move] : moves_) {
+                    std::string mfile = move.filename;
+                    if (mfile.size() > 4 &&
+                        mfile.substr(mfile.size() - 4) == ".bin")
+                        mfile = mfile.substr(0, mfile.size() - 4);
+
+                    if (mfile == name_no_bin) {
+                        // [ORIGINAL] MidFrames determines animation tick rate:
+                        // fps = 60 physics ticks/s / (1 + mid_frames) ticks per keyframe
+                        anim_fps_ = 60.0f / (1.0f + move.mid_frames);
+
+                        // [ORIGINAL] FirstFrame override: some moves start from
+                        // a specific .bin frame instead of frame 0.
+                        if (move.first_frame >= 0 && anim_fps_ > 0.0f) {
+                            anim_time_ = (float)move.first_frame / anim_fps_;
+                        }
+                        break;
+                    }
+                }
+            }
+
             // Reset anchor so update_animation() re-reads frame 0 root pos
             anim_anchor_set_ = false;
             anim_root_dx_ = 0.0f;
@@ -4924,6 +4960,7 @@ private:
     float anim_time_ = 0.0f;  // seconds into current animation
     float anim_speed_ = 30.0f;  // Animation FPS (bin files are 30fps)
     bool anim_loop_ = true;
+    float anim_fps_ = 20.0f;  // Animation FPS derived from MoveDef.mid_frames: 60 / (1 + mid_frames)
 
     // Animated node positions (override skeleton rest pose during animation)
     std::unordered_map<std::string, std::pair<float, float>> anim_node_pos_;  // name -> (x, y)
@@ -4973,7 +5010,9 @@ private:
     bool is_uninterrupt_ = false;
     bool replay_mode_ = false;  // skip menus, go directly to Battle  // true when current frame is in Uninterrupt interval
     bool dump_state_ = false;  // --dump-state: print structured state every frame
-    float anim_npivot_bin_y_ = 169.48f;  // animated NPivot Y from .bin (for Y normalization)
+    float stance_npivot_y_ = 106.0f;  // NPivot Y baseline from .bin frame 0 (rest pose)
+                                      // Overridden from skeleton[NPivot].Y at load_skeleton time.
+    float anim_npivot_bin_y_ = stance_npivot_y_;  // animated NPivot Y from .bin (for Y normalization)
     std::string last_logged_anim_;  // for one-shot diagnostic in update_animation
 };
 
