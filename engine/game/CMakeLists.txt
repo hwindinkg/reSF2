@@ -3,6 +3,8 @@ add_library(resf2_game STATIC
     helpers.cpp
     save.cpp
     player.cpp
+    inventory.cpp
+    shop.cpp
 )
 
 target_include_directories(resf2_game PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

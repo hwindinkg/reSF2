@@ -223,8 +223,38 @@ public:
     // Add gold (rewards from battle, etc.).
     virtual void host_add_currency(int amount) = 0;
 
-    // --- Player stats (for Profile scene) ---
+    // --- Inventory / Shop (for ShopScene and ProfileScene) ---
 
+    // Check if the player owns an item.
+    [[nodiscard]] virtual bool host_has_item(const std::string& item_id) const = 0;
+
+    // Get the list of owned item IDs.
+    [[nodiscard]] virtual std::vector<std::string> host_get_owned_items() const = 0;
+
+    // Get the item ID equipped in a slot ("weapon", "armor", etc.).
+    // Returns empty string if slot is empty.
+    [[nodiscard]] virtual std::string host_get_equipped(const std::string& slot) const = 0;
+
+    // Purchase an item from the shop. Deducts gold and adds to inventory.
+    // Returns false if the item cannot be bought (not enough gold, level req, etc.)
+    virtual bool host_buy_item(const std::string& item_id) = 0;
+
+    // Sell an item. Removes from inventory and adds gold (half price).
+    // Returns false if the item is not owned.
+    virtual bool host_sell_item(const std::string& item_id) = 0;
+
+    // Equip an item. Auto-detects slot from its type in list.xml.
+    // Returns false if the item is not owned.
+    virtual bool host_equip_item(const std::string& item_id) = 0;
+
+    // Unequip the item in the given slot, returning it to inventory.
+    // Returns false if the slot was already empty.
+    virtual bool host_unequip_item(const std::string& slot) = 0;
+
+
+
+    // --- Player stats (for Profile scene) ---
+    
     // Get the player's current level (computed from wins or saved).
     [[nodiscard]] virtual int host_get_player_level() const = 0;
 
