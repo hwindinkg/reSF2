@@ -61,6 +61,19 @@ target_link_libraries(test_moves_parser PRIVATE
 target_compile_features(test_moves_parser PRIVATE cxx_std_23)
 add_test(NAME test_moves_parser COMMAND test_moves_parser WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# Phase 3: Fighter state machine tests
+add_executable(test_fighter_states
+    test_fighter_states.cpp
+)
+target_link_libraries(test_fighter_states PRIVATE
+    resf2_fight
+    resf2_core
+    resf2_reverse
+    resf2_warnings
+)
+target_compile_features(test_fighter_states PRIVATE cxx_std_23)
+add_test(NAME test_fighter_states COMMAND test_fighter_states WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # Phase 2: Full asset pipeline test
 add_executable(test_asset_pipeline
     test_asset_pipeline.cpp
@@ -97,6 +110,83 @@ target_link_libraries(test_list_parser PRIVATE
 )
 target_compile_features(test_list_parser PRIVATE cxx_std_23)
 add_test(NAME test_list_parser COMMAND test_list_parser WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# Phase 0b: XML DOM-based parsers (body, skeleton, loading screen)
+add_executable(test_xml_parsers
+    test_xml_parsers.cpp
+)
+target_link_libraries(test_xml_parsers PRIVATE
+    resf2_format
+    resf2_warnings
+)
+target_compile_features(test_xml_parsers PRIVATE cxx_std_23)
+add_test(NAME test_xml_parsers COMMAND test_xml_parsers WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# T-04: All 56 Location loading
+add_executable(test_location_parser
+    test_location_parser.cpp
+)
+target_link_libraries(test_location_parser PRIVATE
+    resf2_format
+    resf2_warnings
+)
+target_compile_features(test_location_parser PRIVATE cxx_std_23)
+add_test(NAME test_location_parser COMMAND test_location_parser WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# DZ decoder utility unit tests (bit tree, CRC32)
+add_executable(test_dz_decoder_util
+    test_dz_decoder_util.cpp
+)
+target_link_libraries(test_dz_decoder_util PRIVATE
+    resf2_reverse
+    resf2_warnings
+)
+target_compile_features(test_dz_decoder_util PRIVATE cxx_std_23)
+add_test(NAME test_dz_decoder_util COMMAND test_dz_decoder_util)
+
+# DZ first-byte debug tracer
+add_executable(test_dz_first_byte
+    test_dz_first_byte.cpp
+)
+target_link_libraries(test_dz_first_byte PRIVATE
+    resf2_reverse
+    resf2_warnings
+)
+target_compile_features(test_dz_first_byte PRIVATE cxx_std_23)
+add_test(NAME test_dz_first_byte COMMAND test_dz_first_byte)
+
+# DZ probability layout analysis
+add_executable(test_dz_prob_layout
+    test_dz_prob_layout.cpp
+)
+target_link_libraries(test_dz_prob_layout PRIVATE
+    resf2_reverse
+    resf2_warnings
+)
+target_compile_features(test_dz_prob_layout PRIVATE cxx_std_23)
+add_test(NAME test_dz_prob_layout COMMAND test_dz_prob_layout)
+
+# DZ RangeSettings parser unit test
+add_executable(test_dz_range_settings
+    test_dz_range_settings.cpp
+)
+target_link_libraries(test_dz_range_settings PRIVATE
+    resf2_reverse
+    resf2_warnings
+)
+target_compile_features(test_dz_range_settings PRIVATE cxx_std_23)
+add_test(NAME test_dz_range_settings COMMAND test_dz_range_settings)
+
+# DZ decoder test against real .dz block data
+add_executable(test_dz_decode
+    test_dz_decode.cpp
+)
+target_link_libraries(test_dz_decode PRIVATE
+    resf2_reverse
+    resf2_warnings
+)
+target_compile_features(test_dz_decode PRIVATE cxx_std_23)
+add_test(NAME test_dz_decode COMMAND test_dz_decode WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # JSON Atlas parser test (for sf2_pc format)
 add_executable(test_json_atlas

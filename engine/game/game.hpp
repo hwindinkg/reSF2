@@ -242,6 +242,17 @@ struct MoveDef {
     };
     std::vector<Interval> intervals;
 
+    // InvulnerableInterval sub-struct (from <Interval Type="Invulnerable">)
+    struct InvulnerableInterval {
+        float start = 0;
+        float end = 0;
+        std::string name;
+    };
+    std::vector<InvulnerableInterval> invulnerable_intervals;
+
+    // IgnoresInvulnerable: name of invulnerability to ignore (from XML)
+    std::string ignores_invulnerable;
+
     // Sound events (from <Actions><Sound .../> in moves.xml)
     struct SoundEvent {
         float time = 0;        // frame number
@@ -392,7 +403,45 @@ enum class Overlay { None, Menu, Dialog };
 class Game final : public rt::IGame, public scene::SceneHost {
 public:
     explicit Game(std::string asset_root, bool replay_mode = false, bool dump_state = false)
-        : asset_root_(std::move(asset_root)), replay_mode_(replay_mode), dump_state_(dump_state) {}
+        : asset_root_(std::move(asset_root)), replay_mode_(replay_mode), dump_state_(dump_state) {
+        discover_locations();
+    }
+
+    // Discover all location names by scanning the assets/locations/ directory.
+    void discover_locations() {
+        location_names_.clear();
+        auto root = std::filesystem::path(asset_root_);
+        for (const auto& base : {root / "assets" / "locations",
+                                  root / "locations"}) {
+            if (!std::filesystem::exists(base)) continue;
+            for (auto& entry : std::filesystem::directory_iterator(base)) {
+                if (entry.is_directory()) {
+                    std::string name = entry.path().filename().string();
+                    if (std::filesystem::exists(entry.path() / "params.xml")) {
+                        location_names_.push_back(name);
+                    }
+                }
+            }
+            if (!location_names_.empty()) break;
+        }
+        std::printf("[LOCATIONS] Discovered %zu locations\n", location_names_.size());
+        if (!location_names_.empty()) {
+            std::printf("  First 5: ");
+            for (size_t i = 0; i < std::min(size_t{5}, location_names_.size()); ++i)
+                std::printf("%s ", location_names_[i].c_str());
+            std::printf("\n");
+        }
+    }
+
+    const std::vector<std::string>& location_names() const { return location_names_; }
+    size_t location_count() const { return location_names_.size(); }
+
+    void set_start_location(const std::string& name) {
+        if (!name.empty()) {
+            current_location_name_ = name;
+            std::printf("[GAME] Start location set to: %s\n", name.c_str());
+        }
+    }
 
     void on_init(plat::Platform& platform) override {
         platform_ = &platform;
@@ -2510,9 +2559,14 @@ private:
                         float sy = (1.0f - (bottom - vis_bottom2) / (vis_top2 - vis_bottom2)) * platform_->window_height();
                         float sw = img.w / (vis_right2 - vis_left2) * platform_->window_width();
                         float sh = img.h / (vis_top2 - vis_bottom2) * platform_->window_height();
-                        // Use location color mixed with a visible color so user knows it loaded
+                        // Use per-image Color from params.xml (<Image Color="RRGGBB" />) when available
                         uint8_t r = 100, g = 120, b = 160;
-                        if (location_ && !location_->color.empty()) {
+                        if (!img.color.empty()) {
+                            unsigned long col = std::stoul(img.color, nullptr, 16);
+                            r = (uint8_t)((col>>16)&0xFF);
+                            g = (uint8_t)((col>>8)&0xFF);
+                            b = (uint8_t)(col&0xFF);
+                        } else if (location_ && !location_->color.empty()) {
                             unsigned long col = std::stoul(location_->color, nullptr, 16);
                             r = (uint8_t)((col>>16)&0xFF); if (r < 30) r = 60;
                             g = (uint8_t)((col>>8)&0xFF); if (g < 30) g = 80;
@@ -4780,6 +4834,7 @@ private:
     // --- Scene management ---
     scene::SceneManager scene_manager_;
     std::string current_location_name_ = "dojo";
+    std::vector<std::string> location_names_;
     bool location_loaded_ = false;
 
     // --- Dialogue / story state ---
