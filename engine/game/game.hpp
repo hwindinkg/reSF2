@@ -37,6 +37,7 @@
 #include "player.hpp"
 #include "inventory.hpp"
 #include "shop.hpp"
+#include "location_manager.hpp"
 
 namespace plat = resf2::platform;
 namespace rt = resf2::runtime;
@@ -424,36 +425,16 @@ public:
 
     // Discover all location names by scanning the assets/locations/ directory.
     void discover_locations() {
-        location_names_.clear();
-        auto root = std::filesystem::path(asset_root_);
-        for (const auto& base : {root / "assets" / "locations",
-                                  root / "locations"}) {
-            if (!std::filesystem::exists(base)) continue;
-            for (auto& entry : std::filesystem::directory_iterator(base)) {
-                if (entry.is_directory()) {
-                    std::string name = entry.path().filename().string();
-                    if (std::filesystem::exists(entry.path() / "params.xml")) {
-                        location_names_.push_back(name);
-                    }
-                }
-            }
-            if (!location_names_.empty()) break;
-        }
-        std::printf("[LOCATIONS] Discovered %zu locations\n", location_names_.size());
-        if (!location_names_.empty()) {
-            std::printf("  First 5: ");
-            for (size_t i = 0; i < std::min(size_t{5}, location_names_.size()); ++i)
-                std::printf("%s ", location_names_[i].c_str());
-            std::printf("\n");
-        }
+        locations_.discover_locations(asset_root_);
     }
 
-    const std::vector<std::string>& location_names() const { return location_names_; }
-    size_t location_count() const { return location_names_.size(); }
+    const std::vector<std::string>& location_names() const { return locations_.location_names(); }
+    size_t location_count() const { return locations_.location_names().size(); }
 
     void set_start_location(const std::string& name) {
         if (!name.empty()) {
             current_location_name_ = name;
+            locations_.set_current_location_name(name);
             std::printf("[GAME] Start location set to: %s\n", name.c_str());
         }
     }
@@ -613,6 +594,7 @@ public:
         // from the dojo would be reused, showing the wrong background images.
         atlases_.clear();
         current_location_name_ = location.empty() ? "dojo" : location;
+        locations_.set_current_location_name(current_location_name_);
         location_loaded_ = false;
         init_location();
     }
@@ -2578,10 +2560,11 @@ private:
             dz.add_fallback_dir(base.string());
         }
         
-        load_location(current_location_name_);
+        locations_.load_location(locations_.current_location_name(), asset_root_);
+        location_ = locations_.location();  // sync raw pointer
         location_loaded_ = true;
         if (location_ && !location_->color.empty()) {
-            auto c = std::stoul(location_->color, nullptr, 16);
+            auto c = std::stoul(locations_.location()->color, nullptr, 16);
             renderer_->set_clear_color(
                 ((c>>16)&0xFF)/255.0f,
                 ((c>>8)&0xFF)/255.0f,
@@ -2601,35 +2584,12 @@ private:
         load_hud_font();
         load_sounds();
         if (location_) {
-            // Player/enemy positions in params.xml use Y-DOWN, same as image
-            // coordinates. Location images are Y-inverted in render_location
-            // (world_y = -img.y). But player/enemy Y is used directly (NOT
-            // inverted) because the skeleton model space already has Y-UP
-            // with NPivot at Y=169 and feet at Y=73 (difference = 96).
-            //
-            // Floor (layer_3) at params y=225 → world_y = -225 (inverted image).
-            // Floor top surface at -225 + 32 = -193.
-            // Player NPivot at params y=-93 → world_y = -93 (direct).
-            // Player feet at -93 - 96 = -189. Floor at -193. Gap = 4. ✓
-            //
-            // Bag: enemy_y = -105. Bag NPivot at -105.
-            // Node12 (ceiling attachment) at -105 + 226 = 121.
-            // Ceiling (layer_5) at params y=-202 → world_y = +202.
-            // Need Node12 at ceiling: bag_cy + 226 = 202 → bag_cy = -24.
-            // Offset from enemy_y: -24 - (-105) = 81.
-            // bag_cy = enemy_y + 81.
-            //
-            // X offset: align bag with holder (layer_5 at x=-10).
-            // bag_cx = enemy_x - offset = -10 → offset = enemy_x + 10 = 983.
-            const float X_OFFSET = 983.0f;  // aligns bag with ceiling holder
+            const float X_OFFSET = 983.0f;
             player_pos_x_ = location_->player_x - X_OFFSET;
-            player_pos_y_ = location_->player_y;  // no invert (matches location rendering)
-            // [ORIGINAL] Enemy fighter position: same as the punching bag/enemy
-            // spawn point from params.xml (enemy_x - X_OFFSET). The enemy
-            // skeleton stands here and AI controls its behavior.
+            player_pos_y_ = location_->player_y;
             enemy_pos_x_ = location_->enemy_x - 983.0f;
-            enemy_pos_y_ = location_->enemy_y;  // use enemy Y from params.xml (not player Y)
-            enemy_facing_right_ = false;  // faces left toward player
+            enemy_pos_y_ = location_->enemy_y;
+            enemy_facing_right_ = false;
         }
         // Camera: follow player but keep a proper Y that shows the floor.
         // The dojo floor (layer_3) is at world Y ≈ -193. Player at Y ≈ -93.
@@ -2671,81 +2631,8 @@ private:
 
     // ---------- Location ----------
     void load_location(const std::string& name) {
-        auto root = std::filesystem::path(asset_root_);
-        std::string params_path;
-        for (const auto& dir : {root/"assets"/"locations"/name,
-                                 root/"locations"/name,
-                                 root/"assets"/"1536"/"locations"/name}) {
-            auto p = dir/"params.xml";
-            if (std::filesystem::exists(p)) { params_path = p.string(); break; }
-        }
-        if (params_path.empty()) {
-            std::printf("Location '%s' not found!\n", name.c_str()); return;
-        }
-        std::printf("Loading location: %s\n", params_path.c_str());
-        auto xml = read_text(params_path);
-        location_ = std::make_unique<GameLocation>(parse_location(xml));
-        std::printf("  Player: (%.0f, %.0f)  Enemy: (%.0f, %.0f)\n",
-                    location_->player_x, location_->player_y,
-                    location_->enemy_x, location_->enemy_y);
-        for (auto& layer : location_->layers) {
-            if (layer.atlas_name.empty()) continue;
-            if (atlases_.count(layer.atlas_name)) continue;
-            load_atlas(layer.atlas_name, name);
-        }
-    }
-
-    GameLocation parse_location(const std::string& xml) {
-        fmt::XmlDocument doc;
-        if (!doc.parse(xml)) {
-            std::fprintf(stderr, "[location] xml_doc parse error: %s\n", doc.error().c_str());
-            return {};
-        }
-
-        GameLocation loc;
-        auto* root = doc.root()->first_child("Root");
-        if (!root) return loc;
-
-        loc.color = root->attr("Color");
-        loc.width = tof(root->attr("Width"));
-        loc.height = tof(root->attr("Height"));
-        loc.wall = tof(root->attr("Wall"));
-        loc.floor = tof(root->attr("Floor"));
-
-        for (const auto& child : root->children) {
-            if (child.name == "Layer") {
-                LocationLayer layer;
-                layer.type = toi(child.attr("Type"));
-                layer.factor = tof(child.attr("Factor"), 1.0f);
-                layer.atlas_name = child.attr("Atlas");
-
-                for (const auto& ic : child.children) {
-                    if (ic.name == "Image" || ic.name == "SimpleEffect") {
-                        LayerImage img;
-                        img.atlas_name = layer.atlas_name;
-                        img.class_name = ic.attr("ClassName");
-                        img.x = tof(ic.attr("X"));
-                        img.y = tof(ic.attr("Y"));
-                        img.w = tof(ic.attr("Width"));
-                        img.h = tof(ic.attr("Height"));
-                        img.color = ic.attr("Color");
-                        layer.images.push_back(img);
-                    }
-                }
-
-                auto* mv = child.first_child("ModelsViewer");
-                if (mv) {
-                    loc.player_x = tof(mv->attr("PlayerPositionX"));
-                    loc.player_y = tof(mv->attr("PlayerPositionY"));
-                    loc.enemy_x = tof(mv->attr("EnemyPositionX"));
-                    loc.enemy_y = tof(mv->attr("EnemyPositionY"));
-                }
-
-                loc.layers.push_back(std::move(layer));
-            }
-        }
-
-        return loc;
+        locations_.load_location(name, asset_root_);
+        location_ = locations_.location();
     }
 
     void load_atlas(const std::string& name, const std::string& loc) {
@@ -5343,7 +5230,7 @@ private:
     // --- Scene management ---
     scene::SceneManager scene_manager_;
     std::string current_location_name_ = "dojo";
-    std::vector<std::string> location_names_;
+    resf2::game::LocationManager locations_;
     bool location_loaded_ = false;
 
     // --- Dialogue / story state ---
@@ -5662,7 +5549,7 @@ private:
     bool loc_icons_logged = false;  // one-shot diagnostic for menu icon sizes
     float load_scale_ = 1.0f, zoom_ = 1.0f;
     std::vector<LoadingImg> loading_images_;
-    std::unique_ptr<GameLocation> location_;
+    resf2::game::GameLocation* location_ = nullptr;
     std::unordered_map<std::string, AtlasRef> atlases_;
     std::unordered_map<std::string, SkelNode> skeleton_nodes_;
     std::unordered_map<std::string, SkelEdge> skeleton_edges_;
