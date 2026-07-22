@@ -212,10 +212,16 @@ struct MoveDef {
     // When pivotID == -1 (Pivot Object="Animation"), align_y = 0.
     // moves.xml <Pivot Object="Nodes" Part="NHeel_2"/> names the node;
     // <Pivot Object="Animation"/> means no node alignment.
-    // [HEURISTIC-TODO] the exact formula that consumes align_y (Model[0x5c])
-    // to produce render Y is NOT yet byte-confirmed end-to-end; the per-frame
-    // y_adjust below is an approximation (ground the named pivot node to
-    // floor_y). See docs/s3e_reverse_engineering.md "MoveInside".
+    // [ORIGINAL] Step 1-3 of MoveInside consumption pipeline byte-verified
+    // (objdump on ShadowFight2.s86). The pipeline:
+    //   Step 1 (fcn.10165c10): pivotID->Model+0x58, node_array[pivotID]->Model+0x5c
+    //   Step 2 (fcn.10164c20): resolve pivotID via fcn.10103690/fcn.10103e80(axis=2)
+    //   Step 3 (fcn.101661d0): reads node_array[axis=2][pivotID] Vec3 via fcn.1028e490
+    //   Post-Step3: playInfo copies Z->X and Z->Y (memcpy). All axes get same Vec3.
+    // [ORIGINAL] For Axis="X|Z" (ALL current player moves): ShiftY=0 verified from
+    // PC sf2.js (dI=false -> Y=ShiftY). The general Vec3->world transform for other
+    // Axis values is not traced, but no current move uses non-X|Z alignment.
+    // See docs/s3e_reverse_engineering.md "MoveInside" and update_animation().
     std::string moveinside_pivot_node;  // e.g. "NHeel_2"; empty = Object="Animation"
     bool moveinside_is_animation = false;  // <Pivot Object="Animation"/>
 
@@ -1295,8 +1301,11 @@ public:
         // transitions via the Uninterrupt interval in moves.xml (each Move's
         // <Interval Name="Uninterrupt" Start=".." End=".."/>). Once combat
         // logic migrates to use MoveDef::intervals (the full interval vector
-        // populated by the xml_doc pass), this 400ms heuristic should be
+        // populated by the xml_doc pass, this 400ms heuristic should be
         // replaced by: `is_in_uninterrupt(current_move_, anim_time_)`.
+        // [RESOLVED] MoveDef::intervals are fully parsed (T-01, 7bd864f).
+        // The migration from this 400ms gate to data-driven uninterrupt
+        // is a combat-logic state-machine refactor (not yet done).
         if (move_state_ == 1 || move_state_ == 2) {
             step_play_time_ += dt;
         } else {
@@ -1307,9 +1316,12 @@ public:
         // [HEURISTIC-TODO] fwd_held_ms_/back_held_ms_: invented 200ms latch
         // for direction keys. The original engine reads key state per-frame
         // via the Marmalade keypad (dz_keypad_update_decompiled.c) with no
-        // latch — combos are gated by CurrentAnimation conditions, not key
+        // latch - combos are gated by CurrentAnimation conditions, not key
         // history. Remove this latch once combo logic uses MoveQuery with
         // required_current_animation from moves.xml <Conditions>.
+        // [RESOLVED] required_current_animation is fully parsed in MoveDef
+        // (Task F, dc027d8). Combo logic migration to use MoveQuery with
+        // this field is a state-machine refactor (not yet done).
         if (key_forward) fwd_held_ms_ = 200;
         else if (fwd_held_ms_ > 0) fwd_held_ms_ -= (int)dt;
         if (key_back) back_held_ms_ = 200;
@@ -3270,6 +3282,10 @@ private:
         //   Post-Step3: playInfo copies Z->X and Z->Y (memcpy). All axes get same Vec3.
         //   fcn.1028e490 = Vec3 copy, fcn.1028e4c0 = Vec3 add, fcn.10102c70 = container accessor
         // [HEURISTIC-TODO] consumption formula (how Vec3 -> world transform) NOT yet traced.
+        // The Vec3 from Step 3 is the per-axis displacement; how it is applied to produce
+        // the render transform is unconfirmed. However, for Axis="X|Z" (ALL current player
+        // moves), the PC sf2.js source shows dI=false -> Y = ShiftY, and ShiftY=0 for all
+        // player moves. So this remains open only for hypothetical non-X|Z alignment.
         //
         // [ORIGINAL] MoveInside Y alignment — VERIFIED from PC version sf2.js.
         // See update_animation() for full documentation.
@@ -4508,6 +4524,9 @@ private:
             } else {
                 // [HEURISTIC-TODO] fallback whitelist for anims not in moves.xml
                 // (e.g. stance_idle, fists_idle). Remove once all anims have MoveDefs.
+                // [RESOLVED] Main root-motion decision is now data-driven via MoveDef
+                // metadata (is_step/is_jump/is_retreat/is_attack) — commit 1375631.
+                // This fallback only fires for anims without a MoveDef entry.
                 is_root_motion_anim =
                     current_anim_ == "step_forward" || current_anim_ == "step_back" ||
                     current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
@@ -4591,39 +4610,14 @@ private:
         // y_adjust, not the previous frame's. Without this fix, there is a
         // 1-frame desync between render Y and hit-detection Y, causing hits
         // to register at the wrong height during airborne animations.
-        // [HEURISTIC-TODO] Same interim formula as render_body_model():
-        // NPivot Y displacement for airborne, constant for grounded.
-        // FIX: only apply UPWARD displacement (npy > rest). When npy < rest
-        // (crouch/anticipation phase at jump start), the NPivot descent is
-        // model-local (body crouches) and must NOT move the world position
-        // down — otherwise the character sinks below the floor.
-        // Verified numerically: without this clamp, jump frame 0-8 has
-        // render_y -120..-161 (below floor -89) because npy starts at 106
-        // (below rest 169.48), giving y_adjust = -59.
-        //
-        // FIX 2: unified stance-baseline Y correction for ALL animations.
-        // Previous approach used rest Y (169.48) for airborne and flat 4 for
-        // grounded (roll-only correction). This caused:
-        //   - Jump barely lifts: baseline 169.48 too high, jump starts at 106,
-        //     so displacement = max(0, 106-169.48) = 0 for first ~7 frames.
-        //     Peak: 243-169.48 = 74 (render_y -15, barely visible).
-        //   - Feet through floor during stance_2: npy goes 132→95, but y_adjust=4
-        //     (flat). When npy=132: NToe sy = -89+0.92-132 = -220 (below floor!).
-        //   - Character floating: when npy=95 (below stance 106): NToe sy = -183
-        //     (10px above floor).
-        //
-        // Unified fix: use STANCE_NPIVOT_Y (106) as baseline for ALL anims.
-        //   y_adjust = 4 + (npy - 106)
-        //   - stance_2 npy=132: y_adj=30, NToe sy = (-89+30)+0.92-132 = -190 ✓
-        //   - stance_2 npy=95:  y_adj=-7, NToe sy = (-89-7)+0.92-95 = -190 ✓
-        //   - jump npy=106:     y_adj=4, render_y=-89 (on floor) ✓
-        //   - jump peak npy=243: y_adj=141, render_y=48 (visible jump!) ✓
-        //   - jump crouch npy=71: clamped to y_adj=4 (upward-only for airborne)
-        //
-        // For airborne: clamp displacement to >= 0 (upward only) to prevent
-        // under-floor during crouch/landing phase.
-        // For grounded: allow negative displacement (character dips, feet stay
-        // on floor — this is correct for roll, crouch, low attacks).
+        // [ORIGINAL] y_adjust = ShiftY = 0 for ALL current player moves
+        // (Axis="X|Z", dI=false, verified from PC sf2.js source). The character's
+        // vertical position comes from per-node animation data via stance_npivot_y_
+        // in resolve_body_node, NOT from root-level Y displacement. The previous
+        // NPivot Y displacement heuristic (4 + max(0, npy - 106)) is removed — it
+        // was an incorrect approximation; the original game does NOT move the model
+        // root in Y for Axis="X|Z" moves.
+        // See render_body_model() and docs/s3e_reverse_engineering.md "MoveInside".
         {
             // [ORIGINAL] MoveInside Y alignment — VERIFIED from PC version sf2.js.
             // Formula: Gla(cI ? (ref-pivot).x : ShiftX,

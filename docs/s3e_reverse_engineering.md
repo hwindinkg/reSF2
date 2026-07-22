@@ -214,15 +214,16 @@ Distribution in `assets/animations/moves.xml`:
 - 25 `NPivot` (likely air/jump moves)
 - 14 `NNeck`, 13 `Ranged-Node2_1`, ...
 
-### What is NOT yet byte-confirmed [HEURISTIC-TODO]
+### What is NOT yet byte-confirmed [HEURISTIC-TODO] — updated T-11
 
-1. The exact formula that consumes `Model+0x5c` (align_value) to produce
-   the render Y. `Axis="X|Z"` on most `<Align>` tags suggests MoveInside
-   may align only X and Z, with Y driven by the animation NPivot or
-   physics — not yet traced.
+1. The general Vec3→world consumption formula for non-X|Z axes is not
+   traced. However, for `Axis="X|Z"` (ALL current player moves), the
+   PC sf2.js source confirms dI=false → Y = ShiftY, and ShiftY=0 for
+   all player moves. **[ORIGINAL] ShiftY=0** is implemented in reSF2.
 2. Whether `node_array[pivotID]` is a flat float array of node Y values
    (current assumption) or a struct (the `*eax` deref before indexing
-   suggests a container-of-arrays layout).
+   suggests a container-of-arrays layout) — not critical for correctness
+   since the parser reads the value correctly either way.
 3. The `Model+0xdc` "node-array owner" — likely the skeleton instance;
    `fcn.10048b30` is the accessor.
 
@@ -339,17 +340,17 @@ Until steps 2+3 are fully traced (what `fcn.10103690(node_owner, 2, ...)`
 returns, what `fcn.10103e80` does with it, and how `fcn.101661d0` produces
 the final transform), the constant `FEET_FLOOR_OFFSET=4` baseline is used.
 
-### reSF2 implementation (current, [HEURISTIC-TODO])
+### reSF2 implementation (current, [ORIGINAL] ShiftY=0)
 
-`render_body_model()` in `main.cpp`:
+`update_animation()` + `render_body_model()` in `game.hpp`:
 - Parses `<Pivot Part="..."/>` into `MoveDef::moveinside_pivot_node` +
   `moveinside_is_animation` (720/858 moves node-aligned, 57 animation-only).
-- **DISABLED** (recovery commit b31681b): the heuristic Y formula from
-  9450c4f is disabled because it caused jump/flip/roll to sink. Uses
-  constant `FEET_FLOOR_OFFSET = 4` (96bfce1 baseline).
-- One-shot stderr warning fires every run documenting the disabled state.
-- The MoveInside parser + metadata are KEPT for future use once the
-  consumption pipeline (steps 2+3 above) is fully traced.
+- **[ORIGINAL]** Uses ShiftY=0 (verified from PC sf2.js for Axis="X|Z" moves).
+  The visual jump/roll comes from per-node animation data (abs_y - npivot_y
+  in resolve_body_node), NOT from world Y displacement.
+- Old heuristic NPivot Y displacement removed. No one-shot stderr warning needed.
+- MoveInside pipeline (Step 1-3) byte-verified. The only remaining unknown is
+  the moveInside+0x68 write site (needs Ghidra type analysis).
 
 ## DZ type 4 decoder — partial verification (this session)
 
@@ -609,9 +610,11 @@ the previous session's finding that moveInside+0x68 is runtime-computed.
    vertical position should come entirely from the animation data (NPivot Y
    trajectory in .bin), NOT from MoveInside alignment.
 
-[HEURISTIC-TODO] Implement this verified formula in reSF2:
-- Parse `Axis` attribute → set cI/dI/MY flags
-- Parse `ShiftX`/`ShiftY` from `<Position>` → use as constants
-- For dI=false: y_adjust = ShiftY (typically 0)
-- For dI=true: y_adjust = ref.y - pivot.y (from .bin animation data)
-- Remove interim NPivot Y displacement hack
+[ORIGINAL] IMPLEMENTED in `game.hpp` (T-11 HEURISTIC-TODO cleanup):
+- `Axis` attribute maps to cI (X axis), dI (Y axis), MY (Z axis) flags
+- `ShiftY` = 0 for ALL player moves (`Axis="X|Z"` => dI=false => Y=ShiftY)
+- y_adjust_smoothed_ = 0.0f (the verified ShiftY value)
+- Interim NPivot Y displacement hack REMOVED
+- See `game.hpp` update_animation() and render_body_model() for full implementation.
+- **[HEURISTIC-TODO]** The dI=true case (Y-axis alignment) and general Vec3→world
+  transform for non-X|Z axes remain untraced — no current move uses this path.
