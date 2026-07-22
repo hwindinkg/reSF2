@@ -29,6 +29,7 @@
 
 namespace resf2::platform { class Platform; }
 namespace resf2::renderer { class Renderer; }
+namespace resf2::format { struct StageData; struct ListData; }
 
 namespace resf2::scene {
 
@@ -39,11 +40,12 @@ enum class SceneId : std::uint8_t {
     Loading,    // progress bar while assets warm up
     MainMenu,   // dojo with punching bag + scroll menu (current "Location")
     Map,        // act/episode/level selection
-    Shop,       // equipment store (stub)
-    Settings,   // options (stub)
+    Shop,       // equipment store
+    Settings,   // options
     Dialogue,   // pre-battle dialogue overlay
     Battle,     // combat scene (proper fight, not just bag)
     Results,    // post-battle victory/defeat screen
+    Profile,    // player stats and inventory summary
 };
 
 // Human-readable name for debugging / logging.
@@ -111,6 +113,10 @@ public:
     // Whether the location assets are currently loaded.
     [[nodiscard]] virtual bool host_location_loaded() const noexcept = 0;
 
+    // Reset menu/overlay state (called when entering MainMenu to clear
+    // any stale state left by Battle or other scenes).
+    virtual void host_reset_menu_state() = 0;
+
     // Update the dojo gameplay (movement, combat, animation, physics,
     // overlays). Called by MainMenu and Battle scenes from their on_update.
     virtual void host_update_gameplay(std::uint32_t dt_ms) = 0;
@@ -136,6 +142,9 @@ public:
     // Each entry is a (speaker_name, text) pair.
     virtual void host_set_dialogue(std::vector<std::pair<std::string, std::string>> lines) = 0;
 
+    // Get the current dialogue lines (for the Dialogue scene to render).
+    [[nodiscard]] virtual const std::vector<std::pair<std::string, std::string>>& host_get_dialogue() const = 0;
+
     // --- Battle data ---
 
     // Set the level/act to battle. Called from Map scene before transitioning
@@ -144,6 +153,103 @@ public:
 
     // Get the result of the last battle ("victory" / "defeat" / "").
     [[nodiscard]] virtual std::string host_get_battle_result() const = 0;
+
+    // --- Stage/Map data ---
+
+    // Get the parsed stage data (zones, battles, fights, rewards).
+    // Used by MapScene to render the zone map.
+    [[nodiscard]] virtual const format::StageData* host_get_stages() const = 0;
+
+    // --- Battle location ---
+
+    // Set the location name for the next battle (from stages.xml Battle.Location).
+    virtual void host_set_battle_location(std::string loc) = 0;
+
+    // Get the current battle location name.
+    [[nodiscard]] virtual std::string host_get_battle_location() const = 0;
+
+    // --- Progress ---
+
+    // Mark a level as completed and save progress.
+    virtual void host_add_completed_level(const std::string& level) = 0;
+
+    // Get the current/active level string.
+    [[nodiscard]] virtual std::string host_get_current_level() const = 0;
+
+    // Track battle outcomes (for Profile stats).
+    virtual void host_add_win() = 0;
+    virtual void host_add_loss() = 0;
+
+    // Check if a level has been completed.
+    [[nodiscard]] virtual bool host_is_level_completed(const std::string& level) const = 0;
+
+    // --- Text rendering ---
+
+    // Draw text using the HUD font system.
+    // x,y = screen position, scale = font size multiplier, color = RGBA byte color.
+    virtual void host_render_text(const std::string& text, float x, float y, float scale, std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a) const = 0;
+
+    // --- Zone background textures ---
+
+    // Render a zone background texture (1-7) as a full-screen background.
+    // Returns true if the texture was found and rendered.
+    virtual bool host_render_zone_bg(int zone_index, float x, float y, float w, float h) = 0;
+
+    // Toggle between punching bag and enemy fighter.
+    virtual void host_set_battle_mode(bool battle) = 0;
+    virtual void host_set_show_enemy(bool show) = 0;
+
+    // Load a specific battle location (not just the dojo).
+    virtual void host_load_battle_location(const std::string& location) = 0;
+
+    // --- Battle result (set by BattleScene before transitioning to Results) ---
+
+    // Set the battle result before transitioning to Results scene.
+    virtual void host_set_battle_result(std::string result) = 0;
+
+    // --- Shop / Item data (for ShopScene) ---
+
+    // Get the parsed item catalog (list.xml data). May be null if not loaded.
+    [[nodiscard]] virtual const format::ListData* host_get_list_data() const = 0;
+
+    // --- Currency (for Shop and Results) ---
+
+    // Get the player's current gold/currency.
+    [[nodiscard]] virtual int host_get_currency() const = 0;
+
+    // Spend gold. Returns true if the player had enough.
+    virtual bool host_spend_currency(int amount) = 0;
+
+    // Add gold (rewards from battle, etc.).
+    virtual void host_add_currency(int amount) = 0;
+
+    // --- Player stats (for Profile scene) ---
+
+    // Get the player's current level (computed from wins or saved).
+    [[nodiscard]] virtual int host_get_player_level() const = 0;
+
+    // Get total battle wins.
+    [[nodiscard]] virtual int host_get_wins() const = 0;
+
+    // Get total battle losses.
+    [[nodiscard]]     virtual int host_get_losses() const = 0;
+
+    // --- Audio hooks ---
+
+    // Start playing menu music (looping).
+    virtual void host_start_menu_music() = 0;
+
+    // Start playing battle music (looping).
+    virtual void host_start_battle_music() = 0;
+
+    // Stop the currently playing music.
+    virtual void host_stop_music() = 0;
+
+    // Play a UI click sound.
+    virtual void host_play_ui_click() = 0;
+
+    // Play a result sound (victory/defeat).
+    virtual void host_play_result_sound(const std::string& result) = 0;
 };
 
 // ---------- Scene factory ----------

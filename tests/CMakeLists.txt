@@ -122,6 +122,28 @@ target_link_libraries(test_xml_parsers PRIVATE
 target_compile_features(test_xml_parsers PRIVATE cxx_std_23)
 add_test(NAME test_xml_parsers COMMAND test_xml_parsers WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# T-06: Scene system tests
+add_executable(test_scene_system
+    test_scene_system.cpp
+)
+target_link_libraries(test_scene_system PRIVATE
+    resf2_scene
+    resf2_warnings
+)
+target_compile_features(test_scene_system PRIVATE cxx_std_23)
+add_test(NAME test_scene_system COMMAND test_scene_system)
+
+# T-05: Audio engine tests (WAV, MP3, playback, volume)
+add_executable(test_audio
+    test_audio.cpp
+)
+target_link_libraries(test_audio PRIVATE
+    resf2_audio
+    resf2_warnings
+)
+target_compile_features(test_audio PRIVATE cxx_std_23)
+add_test(NAME test_audio COMMAND test_audio WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # T-04: All 56 Location loading
 add_executable(test_location_parser
     test_location_parser.cpp
