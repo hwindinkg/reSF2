@@ -1,80 +1,181 @@
 #include "../engine/fight/moves.hpp"
+#include "../engine/format/xml_doc.hpp"
 #include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <fstream>
+#include <sstream>
+
+// Load entire file into string
+static std::string load_file(const std::string& path) {
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f) return {};
+    auto sz = static_cast<size_t>(f.tellg());
+    f.seekg(0);
+    std::string data(sz, '\0');
+    f.read(data.data(), static_cast<std::streamsize>(sz));
+    return data;
+}
+
+static int tests_passed = 0;
+static int tests_failed = 0;
+
+#define CHECK(cond, msg) do { \
+    if (!(cond)) { \
+        std::fprintf(stderr, "  FAIL [line %d]: %s\n", __LINE__, msg); \
+        ++tests_failed; \
+    } else { \
+        std::printf("  PASS: %s\n", msg); \
+        ++tests_passed; \
+    } \
+} while(0)
+
+// CHECK_EQ for integers only
+#define CHECK_EQ(a, b, msg) do { \
+    if ((a) != (b)) { \
+        std::fprintf(stderr, "  FAIL [line %d]: %s -- got %lld, expected %lld\n", \
+                     __LINE__, msg, (long long)(a), (long long)(b)); \
+        ++tests_failed; \
+    } else { \
+        std::printf("  PASS: %s\n", msg); \
+        ++tests_passed; \
+    } \
+} while(0)
+
+// CHECK_EQ_F for float
+#define CHECK_EQ_F(a, b, msg) do { \
+    float _va = (float)(a); float _vb = (float)(b); \
+    if (_va != _vb) { \
+        std::fprintf(stderr, "  FAIL [line %d]: %s -- got %f, expected %f\n", \
+                     __LINE__, msg, _va, _vb); \
+        ++tests_failed; \
+    } else { \
+        std::printf("  PASS: %s\n", msg); \
+        ++tests_passed; \
+    } \
+} while(0)
+
+#define CHECK_STREQ(a, b, msg) do { \
+    std::string _sa((a)), _sb((b)); \
+    if (_sa != _sb) { \
+        std::fprintf(stderr, "  FAIL [line %d]: %s -- got '%s', expected '%s'\n", \
+                     __LINE__, msg, _sa.c_str(), _sb.c_str()); \
+        ++tests_failed; \
+    } else { \
+        std::printf("  PASS: %s\n", msg); \
+        ++tests_passed; \
+    } \
+} while(0)
 
 int main(int argc, char* argv[]) {
     const char* path = argc > 1 ? argv[1] : "assets/animations/moves.xml";
-
-    resf2::fight::MoveDatabase db;
-    if (!db.load_from_file(path)) {
-        std::fprintf(stderr, "FAILED to load moves from %s\n", path);
+    std::string xml_content = load_file(path);
+    
+    if (xml_content.empty()) {
+        std::fprintf(stderr, "FAILED to read %s\n", path);
         return 1;
     }
-
-    std::printf("[moves] Loaded %zu moves\n", db.size());
-
-    // Count by type
-    int punch_count = 0, kick_count = 0, block_count = 0;
-    int jump_count = 0, step_count = 0, stance_count = 0;
-    int combo_count = 0;
-    std::string prev_move;
-
-    for (auto& [n, m] : db.all_moves()) {
-        if (m.move_type == "Punch") punch_count++;
-        else if (m.move_type == "Kick") kick_count++;
-        else if (m.move_type == "Block") block_count++;
-        else if (m.move_type == "Jump") jump_count++;
-        else if (m.move_type == "Step" || m.move_type == "DoubleStep") step_count++;
-        else if (m.move_type.find("Stance") != std::string::npos) stance_count++;
-        if (m.key_count == 3) combo_count++;
+    
+    // ===== Test 1: Parse via XmlDocument directly =====
+    std::printf("\n=== Test 1: XmlDocument direct parse ===\n");
+    {
+        resf2::format::XmlDocument doc;
+        CHECK(doc.parse(xml_content), "Parse moves.xml with XmlDocument");
+        
+        const auto* root = doc.root();
+        CHECK(root != nullptr, "Root node exists");
+        
+        const auto* movesxml = root->first_child("Movesxml");
+        CHECK(movesxml != nullptr, "Movesxml node exists");
+        
+        const auto* moves_node = movesxml->first_child("Moves");
+        CHECK(moves_node != nullptr, "Moves node exists");
+        
+        auto move_children = moves_node->find_all("Move");
+        CHECK(!move_children.empty(), "At least one Move element found");
+        std::printf("  Found %zu Move elements\n", move_children.size());
     }
-
-    std::printf("  Punches: %d, Kicks: %d, Blocks: %d\n", punch_count, kick_count, block_count);
-    std::printf("  Jumps: %d, Steps: %d, Stances: %d\n", jump_count, step_count, stance_count);
-    std::printf("  3-key combos: %d\n", combo_count);
-
-    // List some specific moves
-    auto* stance = db.find("StanceIdle");
-    if (stance) {
-        std::printf("\nStanceIdle: file=%s, templ=%s, dir=%s, type=%s, weapon=%s\n",
-                    stance->filename.c_str(), stance->template_name.c_str(),
-                    stance->direction.c_str(), stance->move_type.c_str(),
-                    stance->lock_weapon.c_str());
-    }
-
-    auto* punch = db.find("LowPunch");
-    if (punch) {
-        std::printf("LowPunch: file=%s, templ=%s, dir=%s, type=%s, kc=%d\n",
-                    punch->filename.c_str(), punch->template_name.c_str(),
-                    punch->direction.c_str(), punch->move_type.c_str(),
-                    punch->key_count);
-        std::printf("  Intervals: %zu, Uninterrupts: %zu\n",
-                    punch->attack_intervals.size(), punch->uninterrupt_intervals.size());
-        for (auto& iv : punch->attack_intervals) {
-            std::printf("  Attack [%.0f-%.0f] dmg=%d impulse=(%.0f,%.0f) hit='%s'\n",
-                        iv.start, iv.end, iv.damage, iv.impulse.x, iv.impulse.y,
-                        iv.hit_type.c_str());
+    
+    // ===== Test 2: Load via MoveDatabase =====
+    std::printf("\n=== Test 2: MoveDatabase load ===\n");
+    resf2::fight::MoveDatabase db;
+    CHECK(db.load_from_xml(xml_content), "MoveDatabase loads from XML");
+    CHECK(db.size() > 800, "More than 800 moves loaded");
+    std::printf("  Loaded %zu moves\n", db.size());
+    
+    // ===== Test 3: StanceIdle (basic move) =====
+    std::printf("\n=== Test 3: StanceIdle verification ===\n");
+    {
+        const auto* m = db.find("StanceIdle");
+        CHECK(m != nullptr, "StanceIdle found");
+        if (m) {
+            CHECK_STREQ(m->filename, "stance_idle.bin", "StanceIdle filename");
+            CHECK_STREQ(m->template_name, "IdleStance", "StanceIdle template");
+            CHECK_EQ(m->mid_frames, 2, "StanceIdle mid_frames == 2");
         }
     }
-
-    // Sample a combo
-    auto* combo = db.find("DoublePunch");
-    if (combo) {
-        std::printf("\nDoublePunch: file=%s, dir=%s, kc=%d, req_anim=%s\n",
-                    combo->filename.c_str(), combo->direction.c_str(),
-                    combo->key_count, combo->required_current_animation.c_str());
+    
+    // ===== Test 4: LowPunch (attack move with sounds) =====
+    std::printf("\n=== Test 4: LowPunch verification ===\n");
+    {
+        const auto* m = db.find("LowPunch");
+        CHECK(m != nullptr, "LowPunch found");
+        if (m) {
+            CHECK_STREQ(m->filename, "low_punch.bin", "LowPunch filename");
+            CHECK_STREQ(m->direction, "Down", "LowPunch direction == Down");
+            CHECK_STREQ(m->move_type, "Punch", "LowPunch type == Punch");
+            CHECK_EQ(m->key_count, 2, "LowPunch key_count == 2");
+            CHECK_STREQ(m->tactic_weapon, "Fists", "LowPunch tactic_weapon");
+            CHECK_EQ(m->mid_frames, 2, "LowPunch mid_frames == 2");
+            
+            // Attack intervals
+            CHECK(!m->attack_intervals.empty(), "LowPunch has attack intervals");
+            if (!m->attack_intervals.empty()) {
+                const auto& ai = m->attack_intervals[0];
+                CHECK_EQ_F(ai.start, 6.0f, "LowPunch attack start == 6");
+                CHECK_EQ_F(ai.end, 8.0f, "LowPunch attack end == 8");
+                CHECK_STREQ(ai.hit_type, "Low", "LowPunch hit type == Low");
+                CHECK_EQ_F(ai.impulse.x, 245.0f, "LowPunch impulse X == 245");
+            }
+            
+            // Sound events -- LowPunch has 3 <Sound> in <Actions>
+            CHECK_EQ((int)m->sound_events.size(), 3, "LowPunch has 3 sound events");
+            if (m->sound_events.size() >= 3) {
+                CHECK_STREQ(m->sound_events[0].sound, "m_pl_attack1", "Sound 1 name");
+                CHECK_EQ_F(m->sound_events[0].time, 3.0f, "Sound 1 frame == 3");
+                CHECK_STREQ(m->sound_events[1].sound, "f_pl_attack1", "Sound 2 name");
+                CHECK_EQ_F(m->sound_events[1].time, 3.0f, "Sound 2 frame == 3");
+                CHECK_STREQ(m->sound_events[2].sound, "swish3", "Sound 3 name");
+                CHECK_EQ_F(m->sound_events[2].time, 5.0f, "Sound 3 frame == 5");
+            }
+        }
     }
-
-    // Query: find all 1key Punch moves with direction="Central"
-    resf2::fight::MoveDatabase::MoveQuery q;
-    q.direction = "Central";
-    q.move_type = "Punch";
-    q.key_count = 1;
-    auto results = db.query(q);
-    std::printf("\nCentral 1key Punches: %zu\n", results.size());
-    for (auto* m : results) {
-        std::printf("  %s (file=%s, weapon=%s)\n",
-                    m->name.c_str(), m->filename.c_str(), m->lock_weapon.c_str());
+    
+    // ===== Test 5: ElbowStrike (has Perk lock) =====
+    std::printf("\n=== Test 5: ElbowStrike verification ===\n");
+    {
+        const auto* m = db.find("ElbowStrike");
+        CHECK(m != nullptr, "ElbowStrike found");
+        if (m) {
+            CHECK_EQ(m->mid_frames, 2, "ElbowStrike mid_frames == 2");
+            CHECK_STREQ(m->lock_perk, "PERK_ELBOW_STRIKE", "ElbowStrike requires PERK_ELBOW_STRIKE");
+            CHECK_STREQ(m->direction, "DownBack", "ElbowStrike direction == DownBack");
+        }
     }
-
-    return 0;
+    
+    // ===== Test 6: Query Central 1key Punch =====
+    std::printf("\n=== Test 6: Query Central 1key Punches ===\n");
+    {
+        resf2::fight::MoveDatabase::MoveQuery q;
+        q.direction = "Central";
+        q.move_type = "Punch";
+        q.key_count = 1;
+        auto results = db.query(q);
+        CHECK(!results.empty(), "At least one Central 1key Punch found");
+        std::printf("  Found %zu results\n", results.size());
+    }
+    
+    // ===== Summary =====
+    std::printf("\n=== Results: %d passed, %d failed ===\n", tests_passed, tests_failed);
+    return tests_failed > 0 ? 1 : 0;
 }
