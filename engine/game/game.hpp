@@ -31,6 +31,7 @@
 #include "engine/renderer/stb_image.h"
 #include "engine/format/xml_doc.hpp"
 #include "engine/format/stage_parser.hpp"
+#include "engine/format/list_parser.hpp"
 #include "engine/audio/audio.hpp"
 
 namespace plat = resf2::platform;
@@ -470,6 +471,17 @@ public:
         // Load loading screen textures (used by LoadingScene via render_loading_screen)
         if (!asset_root_.empty()) load_loading_screen();
 
+        // Initialize audio engine
+        {
+            auto& audio = aud::AudioEngine::instance();
+#if RESF2_ENABLE_AUDIO
+            auto backend = std::make_unique<aud::AlAudioBackend>();
+#else
+            auto backend = std::make_unique<aud::NullAudioBackend>();
+#endif
+            audio.init(std::move(backend));
+        }
+
         // Register all scenes with the SceneManager
         scene_manager_.register_scene(scene::SceneId::Boot,
             [] { return std::make_unique<scene::BootScene>(); });
@@ -489,6 +501,29 @@ public:
             [] { return std::make_unique<scene::BattleScene>(); });
         scene_manager_.register_scene(scene::SceneId::Results,
             [] { return std::make_unique<scene::ResultsScene>(); });
+        scene_manager_.register_scene(scene::SceneId::Profile,
+            [] { return std::make_unique<scene::ProfileScene>(); });
+
+        // Load item catalog (list.xml) for Shop
+        {
+            auto list_path = std::filesystem::path(asset_root_) / "assets" / "list.xml";
+            if (std::filesystem::exists(list_path)) {
+                fmt::ListParser lp;
+                if (lp.load_file(list_path.string(), list_data_)) {
+                    list_data_loaded_ = true;
+                    std::printf("[shop] loaded %zu items from %s\n",
+                                list_data_.items.size(), list_path.string().c_str());
+                }
+                auto alt_path = std::filesystem::path(asset_root_) / "list.xml";
+                if (!list_data_loaded_ && std::filesystem::exists(alt_path)) {
+                    if (lp.load_file(alt_path.string(), list_data_)) {
+                        list_data_loaded_ = true;
+                        std::printf("[shop] loaded %zu items from %s\n",
+                                    list_data_.items.size(), alt_path.string().c_str());
+                    }
+                }
+            }
+        }
 
         // Start the scene flow at Boot
         scene::SceneContext ctx{*this, platform, *renderer_, 0};
@@ -515,6 +550,7 @@ public:
     }
 
     void on_shutdown(plat::Platform&) override {
+        aud::AudioEngine::instance().shutdown();
         if (renderer_) renderer_->shutdown();
     }
 
@@ -574,7 +610,9 @@ public:
                 f << "    \"" << completed_levels_[i] << "\"";
             }
             f << "\n  ],\n";
-            f << "  \"currency\": " << currency_ << "\n";
+            f << "  \"currency\": " << currency_ << ",\n";
+            f << "  \"wins\": " << player_wins_ << ",\n";
+            f << "  \"losses\": " << player_losses_ << "\n";
             f << "}\n";
             return true;
         } catch (...) { return false; }
@@ -603,7 +641,35 @@ public:
                     }
                 }
             }
-            std::printf("[save] loaded %zu completed levels\n", completed_levels_.size());
+            // Parse currency
+            auto cur_pos = json.find("\"currency\"");
+            if (cur_pos != std::string::npos) {
+                auto val_start = json.find_first_of("0123456789", cur_pos);
+                if (val_start != std::string::npos) {
+                    auto val_end = json.find_first_not_of("0123456789", val_start);
+                    currency_ = std::stoi(json.substr(val_start, val_end - val_start));
+                }
+            }
+            // Parse wins
+            auto w_pos = json.find("\"wins\"");
+            if (w_pos != std::string::npos) {
+                auto val_start = json.find_first_of("0123456789", w_pos);
+                if (val_start != std::string::npos) {
+                    auto val_end = json.find_first_not_of("0123456789", val_start);
+                    player_wins_ = std::stoi(json.substr(val_start, val_end - val_start));
+                }
+            }
+            // Parse losses
+            auto l_pos = json.find("\"losses\"");
+            if (l_pos != std::string::npos) {
+                auto val_start = json.find_first_of("0123456789", l_pos);
+                if (val_start != std::string::npos) {
+                    auto val_end = json.find_first_not_of("0123456789", val_start);
+                    player_losses_ = std::stoi(json.substr(val_start, val_end - val_start));
+                }
+            }
+            std::printf("[save] loaded %zu completed levels, %d gold, %dw %dl\n",
+                        completed_levels_.size(), currency_, player_wins_, player_losses_);
             return true;
         } catch (...) { return false; }
     }
@@ -651,6 +717,114 @@ public:
 
     std::string host_get_battle_location() const override {
         return battle_location_;
+    }
+
+    void host_set_battle_result(std::string result) override {
+        battle_result_ = std::move(result);
+    }
+
+    int host_get_currency() const override {
+        return currency_;
+    }
+
+    bool host_spend_currency(int amount) override {
+        if (currency_ < amount) return false;
+        currency_ -= amount;
+        std::printf("[currency] spent %d, remaining %d\n", amount, currency_);
+        return true;
+    }
+
+    void host_add_currency(int amount) override {
+        currency_ += amount;
+        std::printf("[currency] added %d, total %d\n", amount, currency_);
+    }
+
+    int host_get_player_level() const override {
+        return 1 + player_wins_ / 5;
+    }
+
+    int host_get_wins() const override {
+        return player_wins_;
+    }
+
+    int host_get_losses() const override {
+        return player_losses_;
+    }
+
+    const resf2::format::ListData* host_get_list_data() const override {
+        return list_data_loaded_ ? &list_data_ : nullptr;
+    }
+
+    std::string host_get_current_level() const override {
+        return current_level_;
+    }
+
+    void host_add_win() override {
+        player_wins_++;
+        std::printf("[stats] win recorded, total wins: %d\n", player_wins_);
+    }
+
+    void host_add_loss() override {
+        player_losses_++;
+        std::printf("[stats] loss recorded, total losses: %d\n", player_losses_);
+    }
+
+    // ---------- Audio hooks ----------
+
+    void host_start_menu_music() override {
+        auto& audio = aud::AudioEngine::instance();
+        if (!audio.get_sound("menu_music")) {
+            auto root = std::filesystem::path(asset_root_);
+            for (const auto& base : {root/"assets"/"assets"/"music",
+                                      root/"assets"/"music",
+                                      root/"music"}) {
+                auto p = base / "menu.mp3";
+                if (std::filesystem::exists(p)) {
+                    audio.load_music_file("menu_music", p.string());
+                    break;
+                }
+            }
+        }
+        if (audio.get_sound("menu_music")) {
+            audio.play_music("menu_music", 0.5f, true);
+        }
+    }
+
+    void host_start_battle_music() override {
+        auto& audio = aud::AudioEngine::instance();
+        // Load a generic battle track — we use the first fight track
+        static bool battle_music_loaded = false;
+        if (!battle_music_loaded) {
+            auto root = std::filesystem::path(asset_root_);
+            for (const auto& base : {root/"assets"/"assets"/"music",
+                                      root/"assets"/"music",
+                                      root/"music"}) {
+                auto p = base / "fight1_samurai_spirit.mp3";
+                if (std::filesystem::exists(p)) {
+                    audio.load_music_file("battle_music", p.string());
+                    battle_music_loaded = true;
+                    break;
+                }
+            }
+        }
+        if (audio.get_sound("battle_music")) {
+            audio.play_music("battle_music", 0.5f, true);
+        }
+    }
+
+    void host_stop_music() override {
+        aud::AudioEngine::instance().stop_music();
+    }
+
+    void host_play_ui_click() override {
+        aud::AudioEngine::instance().play("buy", 0.5f);
+    }
+
+    void host_play_result_sound(const std::string& result) override {
+        if (result == "victory") {
+            // Play coin sound for victory
+            aud::AudioEngine::instance().play("coin_hit1", 0.7f);
+        }
     }
 
     void host_render_text(const std::string& text, float x, float y, float scale, std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a) const override {
@@ -1607,7 +1781,7 @@ public:
         // === HIT DETECTION ===
         // hit_anim_ countdown already done above (before special move exit).
         // Only do hit detection here if hit_anim_ is still > 0.
-        // Reset bag_hit_ at the START of each attack animation (when current_move_
+        // Reset hit_this_interval_ at the START of each attack animation (when current_move_
         // changes), not just when hit_anim_ reaches 0.
         // === HIT DETECTION (from moves.xml intervals) ===
         // Original game logic (from moves.xml + s3e disassembly):
@@ -1625,7 +1799,7 @@ public:
         //
         // 4. On collision: apply Damage, Impulse, and play Hit effect.
         //    The hit is PER-FRAME — each frame in the Attack interval can
-        //    register a separate hit. There is NO "bag_hit_" flag in the
+        //    register a separate hit. There is NO "hit_this_interval_" flag in the
         //    original. The original checks collision every frame during
         //    the attack interval.
         //
@@ -1666,7 +1840,7 @@ public:
                                 current_frame, fc, hit_anim_,
                                 move_it != moves_.end() ? move_it->second.attack_start : -1,
                                 move_it != moves_.end() ? move_it->second.attack_end : -1,
-                                (int)bag_hit_);
+                                (int)hit_this_interval_);
                 }
                 if (move_it != moves_.end() && move_it->second.attack_start > 0) {
                     int attack_start = move_it->second.attack_start;
@@ -1677,13 +1851,13 @@ public:
                     // Check if we're in the attack interval
                     bool in_attack_interval = (current_frame >= frame_start && current_frame <= frame_end);
 
-                    // Reset bag_hit_ when NOT in attack interval (allows re-hit
+                    // Reset hit_this_interval_ when NOT in attack interval (allows re-hit
                     // when entering the interval again, e.g., for multi-hit moves)
                     if (!in_attack_interval) {
-                        bag_hit_ = false;
+                        hit_this_interval_ = false;
                     }
 
-                    if (in_attack_interval && !bag_hit_) {
+                    if (in_attack_interval && !hit_this_interval_) {
                         // [ORIGINAL] Distance-based hit detection on enemy fighter.
                         // If the player's attack limb is within hit range of the
                         // enemy fighter (enemy_pos_x_), register a hit. This works
@@ -1701,7 +1875,7 @@ public:
                                 int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
                                 play_sound("f_pl_attack" + std::to_string(snd_idx), 0.7f);
                                 play_sound("armor", 0.5f);
-                                bag_hit_ = true;  // prevent multi-hit per frame
+                                hit_this_interval_ = true;  // prevent multi-hit per frame
                                 // Spawn hit sparks at enemy position
                                 spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
                                 debug_log("[HIT] f=%llu move='%s' hit enemy dist=%.1f\n",
@@ -1762,7 +1936,7 @@ public:
                                 float limb2_wy = player_pos_y_ + y_adjust_smoothed_ + (limb2_ly - pivot_ly);
 
                                 // Check against ALL collisible bag edges
-                                bool bag_hit_this_frame = false;
+                                bool hit_this_interval_this_frame = false;
                                 for (auto& be : bag_model_->edges) {
                                     if (!be.collisible) continue;
                                     float bag_r = be.radius;
@@ -1825,8 +1999,8 @@ public:
                                             apply_bag_impulse(be.end1, dir * imp_x * dist1, imp_y * dist1);
                                             apply_bag_impulse(be.end2, dir * imp_x * dist2, imp_y * dist2);
                                         }
-                                        bag_hit_ = true;
-                                        bag_hit_this_frame = true;
+                                        hit_this_interval_ = true;
+                                        hit_this_interval_this_frame = true;
                                         hit_registered = true;
                                         // [ORIGINAL] Play hit sound + apply damage to enemy fighter.
                                         // Original SF2: on hit, plays armor/body sound + damage from
@@ -1850,7 +2024,7 @@ public:
                                         break;
                                     }
                                 }
-                                if (bag_hit_this_frame) break;
+                                if (hit_this_interval_this_frame) break;
                             }
                             if (hit_registered) break;
                         }
@@ -1860,7 +2034,7 @@ public:
             if (hit_anim_ == 0 && move_state_ == 0) {
                 need_switch_to_idle_ = true;
                 current_move_.clear();
-                bag_hit_ = false;  // reset for next attack
+                hit_this_interval_ = false;  // reset for next attack
             }
 
             // IMPORTANT: DON'T reset move_state_ here — hit_anim_ expiring
@@ -1870,7 +2044,7 @@ public:
             // trigger a new move.
             if (hit_anim_ == 0 && move_state_ != 0 && !current_move_.empty()) {
                 current_move_.clear();
-                bag_hit_ = false;
+                hit_this_interval_ = false;
             }
         }
 
@@ -1882,11 +2056,11 @@ public:
         if (hit_anim_ == 0 && !current_move_.empty() && move_state_ == 0) {
             need_switch_to_idle_ = true;
             current_move_.clear();
-            bag_hit_ = false;
+            hit_this_interval_ = false;
         } else if (hit_anim_ == 0 && !current_move_.empty()) {
             // Stepping — just clear the move name, don't interrupt the step
             current_move_.clear();
-            bag_hit_ = false;
+            hit_this_interval_ = false;
         }
 
         // Update bag Verlet physics
@@ -1904,7 +2078,7 @@ public:
                         (unsigned long long)total_frame_count_, move_state_, hit_anim_,
                         current_anim_.c_str(), current_move_.c_str(),
                         player_pos_x_, player_pos_y_,
-                        (int)bag_hit_, bag_angle_, bag_verlet_.size());
+                        (int)hit_this_interval_, bag_angle_, bag_verlet_.size());
         }
     }
 
@@ -4846,7 +5020,11 @@ private:
     std::string battle_location_;
     std::string battle_result_;  // "victory" / "defeat" / ""
     std::vector<std::string> completed_levels_;
-    int currency_ = 1000;  // starting gold (stub)
+    int currency_ = 1000;  // starting gold
+    int player_wins_ = 0;
+    int player_losses_ = 0;
+    resf2::format::ListData list_data_;
+    bool list_data_loaded_ = false;
     resf2::format::StageData stage_data_;
     bool stages_loaded_ = false;
 
@@ -4987,10 +5165,10 @@ private:
     float step_start_x_ = 0;      // player X at start of step
     float step_displacement_ = 0; // total displacement for this step (+66 or -66)
     int bag_swing_ = 0;   // ms remaining (legacy, for compatibility)
-    void bag_hit_reset() {
-        bag_hit_ = false;
+    void hit_this_interval_reset() {
+        hit_this_interval_ = false;
     }
-    bool bag_hit_ = false;  // bag already hit during current attack
+    bool hit_this_interval_ = false;  // bag already hit during current attack
     float bag_swing_dir_ = 1.0f;  // +1 = swing right, -1 = swing left
     // Physics-based pendulum state for the punching bag.
     // The bag hangs from Node12 (fixed ceiling point) and swings as a pendulum.

@@ -10,13 +10,9 @@
 // This engine provides:
 //   - WavSound: loads PCM WAV files (8/16-bit, mono/stereo, any sample rate)
 //   - AudioEngine: manages sound channels, plays WavSounds, mixes output
-//   - MusicTrack: stub for MP3 playback (requires minmp3 or libmpg123)
+//   - MusicTrack: MP3 playback via minimp3 (single-header, MIT)
 //
-// [HEURISTIC-TODO] MP3 playback not implemented (requires decoder library).
-// WAV playback is sufficient for sound effects. For full audio, integrate
-// minimp3 (single-header, MIT) for music.
-//
-// Output: the AudioEngine writes mixed PCM to a backend (OpenAL on desktop,
+// Output: the AudioEngine delegates to a backend (OpenAL on desktop,
 // ALSA/AudioTrack on Android, or a null sink for headless tests). The backend
 // is abstracted via AudioBackend interface.
 
@@ -55,8 +51,7 @@ PcmData load_wav(const uint8_t* data, size_t size);
 // Load a WAV file from disk.
 PcmData load_wav_file(const std::string& path);
 
-// [HEURISTIC-TODO] MP3 loading — requires minmp3 or libmpg123.
-// Stub returns empty; integrate minmp3 for full music support.
+// Load an MP3 file from disk (uses minimp3 decoder).
 PcmData load_mp3_file(const std::string& path);
 
 // A sound effect (loaded WAV, ready to play).
@@ -81,27 +76,67 @@ struct SoundInstance {
     bool finished = false;
 };
 
-// Audio backend interface (OpenAL, ALSA, null).
+// Audio backend interface (OpenAL, null).
 class AudioBackend {
 public:
     virtual ~AudioBackend() = default;
-    // Open the backend with given output format.
-    virtual bool open(uint32_t sample_rate, uint16_t channels) = 0;
-    virtual void close() = 0;
-    // Write interleaved float32 samples to the output device.
-    virtual void write(const float* samples, uint32_t frame_count) = 0;
-    virtual bool is_open() const = 0;
+
+    // Initialize the backend (open device, create context/sources).
+    virtual bool init() = 0;
+
+    // Shut down the backend (close device, free resources).
+    virtual void shutdown() = 0;
+
+    // Play a sound effect from PCM data.
+    virtual void play_sound(const PcmData& pcm, float volume, float pan) = 0;
+
+    // Play music from PCM data.
+    virtual void play_music(const PcmData& pcm, float volume, bool loop) = 0;
+
+    // Stop the currently playing music.
+    virtual void stop_music() = 0;
+
+    // Set volume (0..1).
+    virtual void set_music_volume(float volume) = 0;
+    virtual void set_sfx_volume(float volume) = 0;
+
+    // Per-frame update (recycle finished sources, manage streams).
+    virtual void update(float dt) = 0;
 };
 
 // Null audio backend (headless / no audio device).
+// All operations are no-ops.
 class NullAudioBackend : public AudioBackend {
 public:
-    bool open(uint32_t, uint16_t) override { open_ = true; return true; }
-    void close() override { open_ = false; }
-    void write(const float*, uint32_t) override {}
-    bool is_open() const override { return open_; }
+    bool init() override { return true; }
+    void shutdown() override {}
+    void play_sound(const PcmData&, float, float) override {}
+    void play_music(const PcmData&, float, bool) override {}
+    void stop_music() override {}
+    void set_music_volume(float) override {}
+    void set_sfx_volume(float) override {}
+    void update(float) override {}
+};
+
+// OpenAL audio backend (desktop). Only available when RESF2_ENABLE_AUDIO=ON.
+// Falls back to NullAudioBackend if OpenAL is not available.
+class AlAudioBackend : public AudioBackend {
+public:
+    AlAudioBackend();
+    ~AlAudioBackend() override;
+
+    bool init() override;
+    void shutdown() override;
+    void play_sound(const PcmData& pcm, float volume, float pan) override;
+    void play_music(const PcmData& pcm, float volume, bool loop) override;
+    void stop_music() override;
+    void set_music_volume(float volume) override;
+    void set_sfx_volume(float volume) override;
+    void update(float dt) override;
+
 private:
-    bool open_ = false;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 // Audio engine: manages sounds, plays instances, mixes output.
@@ -118,31 +153,39 @@ public:
     std::shared_ptr<WavSound> load_sound_file(const std::string& name, const std::string& path);
     std::shared_ptr<WavSound> get_sound(const std::string& name) const;
 
+    // Load an MP3 music file from disk.
+    std::shared_ptr<WavSound> load_music_file(const std::string& name, const std::string& path);
+
     // Play a sound. Returns the instance id (0 on failure).
     uint32_t play(const std::string& name, float volume = 1.0f, bool looping = false);
     void stop(uint32_t instance_id);
     void stop_all();
 
-    // Set master volume (0..1).
-    void set_master_volume(float v) { master_volume_ = v; }
-    float master_volume() const { return master_volume_; }
+    // Play loaded music (by name). Only one music track at a time.
+    void play_music(const std::string& name, float volume = 1.0f, bool loop = true);
+    void stop_music();
+    void set_music_volume(float v);
+    void set_sfx_volume(float v);
 
-    // Advance the audio system by dt seconds: mix playing sounds, write to backend.
+    // Volume getters.
+    float music_volume() const { return music_volume_; }
+    float sfx_volume() const { return sfx_volume_; }
+
+    // Advance the audio system by dt seconds.
     void update(float dt);
+
+    // Access the backend directly.
+    AudioBackend* backend() const { return backend_.get(); }
 
 private:
     std::unordered_map<std::string, std::shared_ptr<WavSound>> sounds_;
     std::vector<SoundInstance> instances_;
     std::unique_ptr<AudioBackend> backend_;
     uint32_t next_instance_id_ = 1;
-    float master_volume_ = 1.0f;
-    uint32_t output_sample_rate_ = 44100;
-    uint16_t output_channels_ = 2;
+    float music_volume_ = 1.0f;
+    float sfx_volume_ = 1.0f;
     std::mutex mutex_;
     bool initialized_ = false;
-
-    // Resample a sound's PCM to the output format (simple linear interpolation).
-    void resample_mix(const SoundInstance& inst, float* out, uint32_t frames);
 };
 
 } // namespace resf2::audio
