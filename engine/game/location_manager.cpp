@@ -1,0 +1,133 @@
+// engine/game/location_manager.cpp
+//
+// LocationManager implementation — location discovery, loading, and management.
+
+#include "location_manager.hpp"
+#include "asset_manager.hpp"
+
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+
+#include "engine/format/xml_doc.hpp"
+#include "game.hpp"       // for helper functions (read_text, tof, toi)
+
+namespace resf2::game {
+
+// ---------- helpers ----------
+
+static GameLocation parse_location(const std::string& xml) {
+    fmt::XmlDocument doc;
+    if (!doc.parse(xml)) {
+        std::fprintf(stderr, "[location] xml_doc parse error: %s\n", doc.error().c_str());
+        return {};
+    }
+
+    GameLocation loc;
+    auto* root = doc.root()->first_child("Root");
+    if (!root) return loc;
+
+    loc.color = root->attr("Color");
+    loc.width = tof(root->attr("Width"));
+    loc.height = tof(root->attr("Height"));
+    loc.wall = tof(root->attr("Wall"));
+    loc.floor = tof(root->attr("Floor"));
+
+    for (const auto& child : root->children) {
+        if (child.name == "Layer") {
+            LocationLayer layer;
+            layer.type = toi(child.attr("Type"));
+            layer.factor = tof(child.attr("Factor"), 1.0f);
+            layer.atlas_name = child.attr("Atlas");
+
+            for (const auto& ic : child.children) {
+                if (ic.name == "Image" || ic.name == "SimpleEffect") {
+                    LayerImage img;
+                    img.atlas_name = layer.atlas_name;
+                    img.class_name = ic.attr("ClassName");
+                    img.x = tof(ic.attr("X"));
+                    img.y = tof(ic.attr("Y"));
+                    img.w = tof(ic.attr("Width"));
+                    img.h = tof(ic.attr("Height"));
+                    img.color = ic.attr("Color");
+                    layer.images.push_back(img);
+                }
+            }
+
+            auto* mv = child.first_child("ModelsViewer");
+            if (mv) {
+                loc.player_x = tof(mv->attr("PlayerPositionX"));
+                loc.player_y = tof(mv->attr("PlayerPositionY"));
+                loc.enemy_x = tof(mv->attr("EnemyPositionX"));
+                loc.enemy_y = tof(mv->attr("EnemyPositionY"));
+            }
+
+            loc.layers.push_back(std::move(layer));
+        }
+    }
+
+    return loc;
+}
+
+// ---------- discover_locations ----------
+
+void LocationManager::discover_locations(const std::string& asset_root) {
+    location_names_.clear();
+    auto root = std::filesystem::path(asset_root);
+    for (const auto& base : {root / "assets" / "locations",
+                              root / "locations"}) {
+        if (!std::filesystem::exists(base)) continue;
+        for (auto& entry : std::filesystem::directory_iterator(base)) {
+            if (entry.is_directory()) {
+                std::string name = entry.path().filename().string();
+                if (std::filesystem::exists(entry.path() / "params.xml")) {
+                    location_names_.push_back(name);
+                }
+            }
+        }
+        if (!location_names_.empty()) break;
+    }
+    std::printf("[LOCATIONS] Discovered %zu locations\n", location_names_.size());
+    if (!location_names_.empty()) {
+        std::printf("  First 5: ");
+        for (size_t i = 0; i < std::min(size_t{5}, location_names_.size()); ++i)
+            std::printf("%s ", location_names_[i].c_str());
+        std::printf("\n");
+    }
+}
+
+// ---------- load_location ----------
+
+void LocationManager::load_location(const std::string& name, const std::string& asset_root,
+                                    AssetManager* assets) {
+    auto root = std::filesystem::path(asset_root);
+    std::string params_path;
+    for (const auto& dir : {root/"assets"/"locations"/name,
+                             root/"locations"/name,
+                             root/"assets"/"1536"/"locations"/name}) {
+        auto p = dir/"params.xml";
+        if (std::filesystem::exists(p)) { params_path = p.string(); break; }
+    }
+    if (params_path.empty()) {
+        std::printf("Location '%s' not found!\n", name.c_str()); return;
+    }
+    std::printf("Loading location: %s\n", params_path.c_str());
+    auto xml = read_text(params_path);
+    location_ = std::make_unique<GameLocation>(parse_location(xml));
+    std::printf("  Player: (%.0f, %.0f)  Enemy: (%.0f, %.0f)\n",
+                location_->player_x, location_->player_y,
+                location_->enemy_x, location_->enemy_y);
+
+    // Load atlases for each layer (if AssetManager available)
+    if (assets) {
+        for (auto& layer : location_->layers) {
+            if (layer.atlas_name.empty()) continue;
+            if (assets->atlases().count(layer.atlas_name)) continue;
+            assets->load_atlas(layer.atlas_name, name, asset_root);
+        }
+    }
+}
+
+} // namespace resf2::game
