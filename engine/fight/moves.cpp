@@ -200,8 +200,13 @@ bool MoveDatabase::load_from_xml(const std::string& xml_content) {
             }
         }
 
+        // Parse IgnoresInvulnerable
+        auto* ignores_inv = child.first_child("IgnoresInvulnerable");
+        if (ignores_inv) {
+            move.ignores_invulnerable = ignores_inv->attr("Name");
+        }
+
         // Parse Intervals (from <Intervals> in both <Move> and <Template>)
-        // For now, parse intervals directly from <Move> children
         auto* intervals = child.first_child("Intervals");
         if (intervals) {
             for (auto& iv : intervals->children) {
@@ -247,6 +252,12 @@ bool MoveDatabase::load_from_xml(const std::string& xml_content) {
                         ui.end = parse_float(uend);
                     }
                     move.uninterrupt_intervals.push_back(ui);
+                } else if (type == "Invulnerable") {
+                    MoveDef::InvulnerableInterval invi;
+                    invi.start = start;
+                    invi.end = end;
+                    invi.name = iv.attr("Name");
+                    move.invulnerable_intervals.push_back(invi);
                 }
             }
         }
@@ -261,6 +272,12 @@ bool MoveDatabase::load_from_xml(const std::string& xml_content) {
                     ui.start = parse_float(iv.attr("Start"));
                     ui.end = parse_float(iv.attr("End"));
                     move.uninterrupt_intervals.push_back(ui);
+                } else if (type == "Invulnerable") {
+                    MoveDef::InvulnerableInterval invi;
+                    invi.start = parse_float(iv.attr("Start"));
+                    invi.end = parse_float(iv.attr("End"));
+                    invi.name = iv.attr("Name");
+                    move.invulnerable_intervals.push_back(invi);
                 }
             }
         }
@@ -308,7 +325,13 @@ std::vector<const MoveDef*> MoveDatabase::query(const MoveQuery& q) const {
         // Match current animation (for chain combos)
         if (!q.current_animation.empty() && !m.required_current_animation.empty() &&
             m.required_current_animation != q.current_animation) continue;
-        // Match weapon
+        // Match weapon by TacticWeapon attribute (primary filter)
+        // tactic_weapon can be a pipe-delimited list like "Swords|ShuangGou"
+        // Use substring match so partial matches work
+        if (!q.tactic_weapon.empty() && !m.tactic_weapon.empty()) {
+            if (m.tactic_weapon.find(q.tactic_weapon) == std::string::npos) continue;
+        }
+        // Also match weapon by lock_weapon (from <Locks> section)
         if (!q.tactic_weapon.empty() && !m.lock_weapon.empty() &&
             m.lock_weapon != "Unarmed" && m.lock_weapon != q.tactic_weapon) continue;
         // In uninterrupt: only allow 3key combos

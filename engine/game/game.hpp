@@ -1270,7 +1270,11 @@ public:
                         }
                     }
                 }
-                if (move.move_type != cur_move_type) continue;
+                // Weapon-specific moves may have empty move_type (template "1key|Central|Weapon").
+                // Allow them if they have matching tactic_weapon and no move_type set.
+                bool move_type_match = (move.move_type == cur_move_type) ||
+                    (move.move_type.empty() && is_weapon_allowed(move) && move.key_count <= 2);
+                if (!move_type_match) continue;
 
                 if (block_all_combat) {
                     continue;
@@ -1379,7 +1383,9 @@ public:
                     std::printf("[COMBAT] NO MOVE for %s dir='%s' basic=%d — candidates:\n",
                                 cur_move_type.c_str(), cur_direction.c_str(), (in_attack && !is_uninterrupt_) ? 1 : 0);
                     for (auto& [name, move] : moves_) {
-                        if (move.move_type != cur_move_type) continue;
+                        bool mt_match = (move.move_type == cur_move_type) ||
+                            (move.move_type.empty() && is_weapon_allowed(move) && move.key_count <= 2);
+                        if (!mt_match) continue;
                         if (move.direction != cur_direction) continue;
                         if (move.key_count == 3 && !(in_attack && !is_uninterrupt_)) continue;
                         std::string anim_name = move.filename;
@@ -2048,6 +2054,9 @@ public:
         // Update bag Verlet physics
         update_bag_verlet(dt / 1000.0f);
 
+        // Update projectiles (magic/ranged)
+        update_projectiles(dt / 1000.0f);
+
         // Zoom presets
         if (input.keys_just_pressed[(size_t)plat::Key::Num1]) zoom_ = 1.0f;
         if (input.keys_just_pressed[(size_t)plat::Key::Num2]) zoom_ = 0.7f;
@@ -2087,6 +2096,7 @@ public:
             render_punching_bag();
         }
         render_character();
+        render_projectiles();
         update_and_render_hit_sparks(0.016f);
         if (!is_battle_mode_) render_hud(*platform_);
         if (!is_battle_mode_ && menu_anim_progress_ > 0.01f) render_menu_expanded(*platform_);
@@ -3955,6 +3965,7 @@ private:
                     else if (p == "Stance") { move.is_stance = true; }
                     else if (p == "IdleStance") { move.is_stance = true; move.is_idle = true; }
                     else if (p == "Unarmed") { move.is_unarmed = true; move.weapon_filter = "Unarmed"; }
+                    else if (p == "Weapon") { /* weapon-specific move — type determined by tactic_weapon */ }
                     else if (p == "NotTitan") { move.is_not_titan = true; }
                 }
             }
@@ -5336,6 +5347,149 @@ private:
         load_player_weapon(equipped_weapon_);
         std::printf("[WEAPON] Switched to: %s (index %d/%zu)\n",
                     equipped_weapon_.c_str(), weapon_cycle_index_, weapon_cycle_list_.size());
+    }
+
+    // ---------- Projectile system (magic/ranged) ----------
+    struct Projectile {
+        float x, y;
+        float vx, vy;
+        float lifetime = 2.0f;      // seconds remaining
+        float age = 0;              // seconds since launch
+        float damage = 15.0f;
+        float radius = 8.0f;
+        std::string type;           // "FireBall", "Energyball", "MagicDeathRay", "Shuriken", etc.
+        bool from_player = true;
+        bool active = true;
+        uint8_t r = 255, g = 100, b = 50;  // color
+    };
+    std::vector<Projectile> projectiles_;
+
+    // Spawn a projectile from the player (or enemy) toward the target.
+    void spawn_projectile(const std::string& magic_type, float from_x, float from_y,
+                          bool facing_right, bool from_player = true) {
+        Projectile p;
+        p.x = from_x + (facing_right ? 40.0f : -40.0f);
+        p.y = from_y + 10.0f;
+        float speed = 400.0f;
+        p.vx = facing_right ? speed : -speed;
+        p.vy = 0.0f;
+        p.type = magic_type;
+        p.from_player = from_player;
+        p.lifetime = 2.0f;
+        p.age = 0;
+
+        // Color by magic type
+        if (magic_type == "FireBall") { p.r = 255; p.g = 100; p.b = 50; p.damage = 20; p.radius = 10; }
+        else if (magic_type == "Energyball") { p.r = 100; p.g = 200; p.b = 255; p.damage = 25; p.radius = 12; }
+        else if (magic_type == "LightningArrow") { p.r = 255; p.g = 255; p.b = 0; p.damage = 30; p.radius = 6; p.vy = -30; }
+        else if (magic_type == "MagicDeathRay") { p.r = 200; p.g = 50; p.b = 255; p.damage = 35; p.radius = 14; }
+        else if (magic_type == "MagicAsteroid") { p.r = 150; p.g = 80; p.b = 20; p.damage = 40; p.radius = 16; p.vy = -100; }
+        else if (magic_type == "MassBomb" || magic_type == "MagicBomb") { p.r = 255; p.g = 50; p.b = 50; p.damage = 50; p.radius = 18; }
+        else if (magic_type == "Iceball") { p.r = 150; p.g = 200; p.b = 255; p.damage = 20; p.radius = 9; }
+        else if (magic_type == "MagicFireAura") { p.r = 255; p.g = 150; p.b = 50; p.damage = 10; p.radius = 20; }
+        else if (magic_type == "RootStun") { p.r = 50; p.g = 200; p.b = 50; p.damage = 5; p.radius = 12; p.vy = -50; }
+        else if (magic_type == "Shuriken") { p.r = 200; p.g = 200; p.b = 200; p.damage = 12; p.radius = 5; }
+        else if (magic_type == "Rifle" || magic_type == "Blaster") { p.r = 255; p.g = 255; p.b = 200; p.damage = 18; p.radius = 4; speed = 600; p.vx = facing_right ? speed : -speed; }
+        else { p.r = 200; p.g = 100; p.b = 200; p.damage = 15; p.radius = 8; }
+
+        projectiles_.push_back(p);
+        std::printf("[PROJECTILE] Fired %s (%.0f,%.0f) v=(%.0f,%.0f)\n",
+                   magic_type.c_str(), p.x, p.y, p.vx, p.vy);
+    }
+
+    // Update all active projectiles (movement, lifetime, hit detection)
+    void update_projectiles(float dt_sec) {
+        // Heuristic: which projectile types to auto-fire on attack
+        static const std::vector<std::string> projectile_types = {
+            "FireBall", "Energyball", "LightningArrow", "MagicDeathRay",
+            "MagicAsteroid", "MassBomb", "MagicBomb", "Iceball",
+            "MagicFireAura", "RootStun", "Shuriken", "Rifle", "Blaster"
+        };
+
+        // Auto-spawn: if the current move's tactic_weapon indicates a projectile weapon,
+        // and we're at the attack interval start, spawn a projectile.
+        // This is a simplified heuristic — the original game uses dedicated
+        // magic/ranged move templates with projectile spawning events.
+        if (!current_move_.empty() && hit_this_interval_ == false) {
+            auto mit = moves_.find(current_move_);
+            if (mit != moves_.end() && mit->second.is_attack) {
+                // Check if equipped weapon is a projectile type
+                bool is_projectile = false;
+                for (auto& pt : projectile_types) {
+                    if (equipped_weapon_.find(pt) != std::string::npos) {
+                        is_projectile = true;
+                        break;
+                    }
+                }
+                if (is_projectile) {
+                    // Check attack interval timing from the move's Interval list
+                    for (auto& iv : mit->second.intervals) {
+                        if (iv.type != "Attack" && iv.name != "Attack") continue;
+                        float anim_progress = anim_time_ * anim_fps_;
+                        if (anim_progress >= iv.start && anim_progress <= iv.start + 1.0f) {
+                            spawn_projectile(equipped_weapon_, player_pos_x_, player_pos_y_,
+                                            facing_right_, true);
+                            hit_this_interval_ = true;  // prevent re-fire same interval
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Update existing projectiles
+        for (auto& p : projectiles_) {
+            if (!p.active) continue;
+            p.x += p.vx * dt_sec;
+            p.y += p.vy * dt_sec;
+            p.age += dt_sec;
+            p.lifetime -= dt_sec;
+            if (p.lifetime <= 0) { p.active = false; continue; }
+
+            // Hit detection against enemy (player projectiles)
+            if (p.from_player) {
+                float dist = std::sqrt(std::pow(p.x - enemy_pos_x_, 2) +
+                                       std::pow(p.y - (enemy_pos_y_ + enemy_y_adjust_), 2));
+                if (dist < 60.0f && !enemy_fighter_.is_dead) {
+                    // Hit!
+                    enemy_fighter_.health -= p.damage;
+                    if (enemy_fighter_.health < 0) enemy_fighter_.health = 0;
+                    enemy_hit_flash_ = 0.15f;
+                    p.active = false;
+                    // Add hit spark
+                    HitSpark spark;
+                    spark.x = p.x; spark.y = p.y;
+                    spark.age = 0; spark.lifetime = 0.3f;
+                    spark.scale = 1.0f + p.damage / 30.0f;
+                    hit_sparks_.push_back(spark);
+                    std::printf("[PROJECTILE] Hit! damage=%.0f enemy_hp=%.0f\n",
+                               p.damage, enemy_fighter_.health);
+                    if (enemy_fighter_.health <= 0) {
+                        enemy_fighter_.is_dead = true;
+                        std::printf("[COMBAT] Enemy defeated by %s!\n", equipped_weapon_.c_str());
+                    }
+                }
+            }
+        }
+        // Clean up inactive projectiles
+        projectiles_.erase(std::remove_if(projectiles_.begin(), projectiles_.end(),
+            [](const Projectile& p) { return !p.active; }), projectiles_.end());
+    }
+
+    // Render active projectiles as colored circles
+    void render_projectiles() {
+        for (auto& p : projectiles_) {
+            if (!p.active) continue;
+            float pulse_scale = 1.0f + 0.1f * std::sin(p.age * 15.0f);
+            float r = p.radius * pulse_scale;
+            renderer_->draw_filled_circle_world(p.x, p.y, r,
+                ren::Color4B{p.r, p.g, p.b, 200});
+            // Glow effect (larger, transparent)
+            if (r > 4.0f) {
+                renderer_->draw_filled_circle_world(p.x, p.y, r * 1.5f,
+                    ren::Color4B{p.r, p.g, p.b, 80});
+            }
+        }
     }
 
     Overlay overlay_ = Overlay::None;
