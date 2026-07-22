@@ -199,6 +199,19 @@ target_link_libraries(test_dz_range_settings PRIVATE
 target_compile_features(test_dz_range_settings PRIVATE cxx_std_23)
 add_test(NAME test_dz_range_settings COMMAND test_dz_range_settings)
 
+# T-08: Weapon content loading tests
+add_executable(test_weapon_loading
+    test_weapon_loading.cpp
+)
+target_link_libraries(test_weapon_loading PRIVATE
+    resf2_fight
+    resf2_format
+    resf2_core
+    resf2_warnings
+)
+target_compile_features(test_weapon_loading PRIVATE cxx_std_23)
+add_test(NAME test_weapon_loading COMMAND test_weapon_loading WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # DZ decoder test against real .dz block data
 add_executable(test_dz_decode
     test_dz_decode.cpp
@@ -209,6 +222,17 @@ target_link_libraries(test_dz_decode PRIVATE
 )
 target_compile_features(test_dz_decode PRIVATE cxx_std_23)
 add_test(NAME test_dz_decode COMMAND test_dz_decode WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# T-07: Save/Load System
+add_executable(test_save_system
+    test_save_system.cpp
+)
+target_link_libraries(test_save_system PRIVATE
+    resf2_game
+    resf2_warnings
+)
+target_compile_features(test_save_system PRIVATE cxx_std_23)
+add_test(NAME test_save_system COMMAND test_save_system WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # JSON Atlas parser test (for sf2_pc format)
 add_executable(test_json_atlas

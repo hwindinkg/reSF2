@@ -729,6 +729,8 @@ void ShopScene::on_update(SceneContext& ctx) {
                     if (currency >= entry.price) {
                         std::printf("[shop] purchased %s!\n", entry.name.c_str());
                         ctx.host.host_spend_currency(entry.price);
+                        // Auto-save after purchase
+                        ctx.host.host_save_progress();
                     } else {
                         std::printf("[shop] not enough gold!\n");
                     }
