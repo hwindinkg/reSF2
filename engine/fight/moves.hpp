@@ -16,6 +16,9 @@ struct MoveDef {
     std::string filename;         // .bin animation filename
     std::string template_name;    // e.g. "Punch", "Kick", "Hit", "Jump"
 
+    // MidFrames from moves.xml attribute (MidFrames="2" = each keyframe lasts 3 physics ticks)
+    int mid_frames = 2;           // 2 is the default in the XML
+
     // Key state (from Template analysis)
     int key_count = 1;            // 1key, 2key, 3key
     std::string direction;        // Central, Forward, Back, Up, Down, UpForward, etc.

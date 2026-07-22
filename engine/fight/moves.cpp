@@ -116,6 +116,9 @@ bool MoveDatabase::load_from_xml(const std::string& xml_content) {
         // Tactic weapon (from TacticWeapon attribute or lock_weapon)
         move.tactic_weapon = child.attr("TacticWeapon");
 
+        // MidFrames (default 2 in moves.xml)
+        move.mid_frames = parse_int(child.attr("MidFrames", "2"));
+
         // Parse Align / Pivot sub-elements
         auto* align = child.first_child("Align");
         if (align) {
@@ -162,6 +165,21 @@ bool MoveDatabase::load_from_xml(const std::string& xml_content) {
             auto* perk = locks->first_child("Perk");
             if (perk) {
                 move.lock_perk = perk->attr("Name");
+            }
+        }
+
+        // Parse Sound events from <Actions>
+        auto* actions = child.first_child("Actions");
+        if (actions) {
+            for (auto& snd : actions->children) {
+                if (snd.name == "Sound") {
+                    MoveDef::SoundEvent se;
+                    se.sound = snd.attr("Name");
+                    se.time = parse_float(snd.attr("Frame"));
+                    if (!se.sound.empty()) {
+                        move.sound_events.push_back(std::move(se));
+                    }
+                }
             }
         }
 
