@@ -33,6 +33,8 @@
 #include "engine/format/stage_parser.hpp"
 #include "engine/format/list_parser.hpp"
 #include "engine/audio/audio.hpp"
+#include "save.hpp"
+#include "player.hpp"
 
 namespace plat = resf2::platform;
 namespace rt = resf2::runtime;
@@ -42,6 +44,8 @@ namespace aud = resf2::audio;
 namespace plist = resf2::reverse::plist;
 namespace font = resf2::reverse::font;
 namespace scene = resf2::scene;
+namespace save = resf2::save;
+namespace player = resf2::player;
 
 // ---------- Forward declarations for helper functions ----------
 // These are defined in helpers.cpp and used by inline Game methods.
@@ -525,6 +529,14 @@ public:
             }
         }
 
+        // Load saved progress (gold, wins, levels, inventory)
+        host_load_progress();
+
+        // Sync member variables from PlayerProfile (authoritative after load)
+        currency_ = player_profile_.currency();
+        player_wins_ = player_profile_.wins();
+        player_losses_ = player_profile_.losses();
+
         // Start the scene flow at Boot
         scene::SceneContext ctx{*this, platform, *renderer_, 0};
         scene_manager_.start(scene::SceneId::Boot, ctx);
@@ -596,82 +608,34 @@ public:
     }
 
     bool host_save_progress() override {
-        try {
-            auto save_path = std::filesystem::temp_directory_path() / "resf2_save.json";
-            std::ofstream f(save_path);
-            if (!f) return false;
-            f << "{\n";
-            f << "  \"version\": 1,\n";
-            f << "  \"current_level\": \"" << current_level_ << "\",\n";
-            f << "  \"battle_result\": \"" << battle_result_ << "\",\n";
-            f << "  \"completed_levels\": [\n";
-            for (size_t i = 0; i < completed_levels_.size(); ++i) {
-                if (i) f << ",\n";
-                f << "    \"" << completed_levels_[i] << "\"";
-            }
-            f << "\n  ],\n";
-            f << "  \"currency\": " << currency_ << ",\n";
-            f << "  \"wins\": " << player_wins_ << ",\n";
-            f << "  \"losses\": " << player_losses_ << "\n";
-            f << "}\n";
-            return true;
-        } catch (...) { return false; }
+        // Sync PlayerProfile from current member state
+        save::SaveData data;
+        data.version = 1;
+        data.currency = currency_;
+        data.level = 1 + player_wins_ / 5;
+        data.wins = player_wins_;
+        data.losses = player_losses_;
+        data.current_level = current_level_;
+        data.completed_levels = completed_levels_;
+        // Keep the player_profile_ in sync too
+        player_profile_ = player::PlayerProfile::from_save_data(data);
+        return save_manager_.save(player_profile_.to_save_data());
     }
 
     bool host_load_progress() override {
-        try {
-            auto save_path = std::filesystem::temp_directory_path() / "resf2_save.json";
-            if (!std::filesystem::exists(save_path)) return false;
-            std::ifstream f(save_path);
-            std::string json((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-            // Simple JSON parsing for completed_levels array
-            completed_levels_.clear();
-            auto pos = json.find("\"completed_levels\"");
-            if (pos != std::string::npos) {
-                auto arr_start = json.find('[', pos);
-                auto arr_end = json.find(']', arr_start);
-                if (arr_start != std::string::npos && arr_end != std::string::npos) {
-                    auto arr = json.substr(arr_start + 1, arr_end - arr_start - 1);
-                    size_t q = 0;
-                    while ((q = arr.find('"', q)) != std::string::npos) {
-                        auto q2 = arr.find('"', q + 1);
-                        if (q2 == std::string::npos) break;
-                        completed_levels_.push_back(arr.substr(q + 1, q2 - q - 1));
-                        q = q2 + 1;
-                    }
-                }
-            }
-            // Parse currency
-            auto cur_pos = json.find("\"currency\"");
-            if (cur_pos != std::string::npos) {
-                auto val_start = json.find_first_of("0123456789", cur_pos);
-                if (val_start != std::string::npos) {
-                    auto val_end = json.find_first_not_of("0123456789", val_start);
-                    currency_ = std::stoi(json.substr(val_start, val_end - val_start));
-                }
-            }
-            // Parse wins
-            auto w_pos = json.find("\"wins\"");
-            if (w_pos != std::string::npos) {
-                auto val_start = json.find_first_of("0123456789", w_pos);
-                if (val_start != std::string::npos) {
-                    auto val_end = json.find_first_not_of("0123456789", val_start);
-                    player_wins_ = std::stoi(json.substr(val_start, val_end - val_start));
-                }
-            }
-            // Parse losses
-            auto l_pos = json.find("\"losses\"");
-            if (l_pos != std::string::npos) {
-                auto val_start = json.find_first_of("0123456789", l_pos);
-                if (val_start != std::string::npos) {
-                    auto val_end = json.find_first_not_of("0123456789", val_start);
-                    player_losses_ = std::stoi(json.substr(val_start, val_end - val_start));
-                }
-            }
-            std::printf("[save] loaded %zu completed levels, %d gold, %dw %dl\n",
-                        completed_levels_.size(), currency_, player_wins_, player_losses_);
-            return true;
-        } catch (...) { return false; }
+        save::SaveData data;
+        if (!save_manager_.load(data)) return false;
+        // Populate member variables from loaded data
+        currency_ = data.currency;
+        player_wins_ = data.wins;
+        player_losses_ = data.losses;
+        current_level_ = data.current_level;
+        completed_levels_ = data.completed_levels;
+        // Build PlayerProfile from save data
+        player_profile_ = player::PlayerProfile::from_save_data(data);
+        std::printf("[save] loaded %zu completed levels, %d gold, %dw %dl\n",
+                    completed_levels_.size(), currency_, player_wins_, player_losses_);
+        return true;
     }
 
     void host_set_dialogue(std::vector<std::pair<std::string, std::string>> lines) override {
@@ -684,7 +648,8 @@ public:
     }
 
     void host_set_current_level(std::string level_id) override {
-        current_level_ = std::move(level_id);
+        current_level_ = level_id;
+        player_profile_.set_current_level(level_id);
     }
 
     void host_add_completed_level(const std::string& level) {
@@ -692,6 +657,7 @@ public:
             if (l == level) return;  // already completed
         }
         completed_levels_.push_back(level);
+        player_profile_.complete_level(level);
         host_save_progress();
         std::printf("[progress] completed: %s\n", level.c_str());
     }
@@ -761,11 +727,13 @@ public:
 
     void host_add_win() override {
         player_wins_++;
+        player_profile_.add_win();
         std::printf("[stats] win recorded, total wins: %d\n", player_wins_);
     }
 
     void host_add_loss() override {
         player_losses_++;
+        player_profile_.add_loss();
         std::printf("[stats] loss recorded, total losses: %d\n", player_losses_);
     }
 
@@ -865,6 +833,11 @@ public:
     }
 
     void host_set_battle_mode(bool battle) override { is_battle_mode_ = battle; }
+
+    // Access the current PlayerProfile (for tests and new code).
+    const player::PlayerProfile& player_profile() const noexcept {
+        return player_profile_;
+    }
 
     // Called by MainMenuScene and BattleScene to update the dojo gameplay
     // (movement, combat, animation, physics, overlays).
@@ -1006,6 +979,20 @@ public:
             show_enemy_ = !show_enemy_;
             std::printf("[DOJO] Switched to %s\n", show_enemy_ ? "enemy fighter" : "punching bag");
             debug_log("[DOJO] Switched to %s\n", show_enemy_ ? "enemy" : "bag");
+        }
+
+        // Weapon cycling: J = next weapon, U = previous weapon
+        if (input.keys_just_pressed[(size_t)plat::Key::J]) {
+            cycle_weapon(1);
+            // Log available weapon-specific moves for the new weapon
+            int move_count = 0;
+            for (auto& [mn, mv] : moves_) {
+                if (is_weapon_allowed(mv)) move_count++;
+            }
+            std::printf("[WEAPON] %d available moves for %s\n", move_count, equipped_weapon_.c_str());
+        }
+        if (input.keys_just_pressed[(size_t)plat::Key::U]) {
+            cycle_weapon(-1);
         }
 
         // Esc: close overlay if open, else request quit (handled by scene)
@@ -1301,18 +1288,15 @@ public:
                 }
                 // Match direction
                 if (move.direction != cur_direction) continue;
-                // Match weapon (Unarmed or Fists or empty)
-                if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
-                    move.tactic_weapon.find("Fists") == std::string::npos) continue;
+                // Match weapon by tactic_weapon (empty = any weapon)
+                if (!is_weapon_allowed(move)) continue;
                 // Check distance condition (only from main <Conditions>, not <Tactics>)
                 // Note: <Tactics><Distance> is for AI move selection, not player.
                 // We skip distance check entirely — player can attack at any distance.
                 // (The original game uses distance only for AI tactic selection.)
-                // Check weapon subtype lock (e.g. DoublePunch requires Fists)
-                // For now, we assume player has Fists equipped, so Fists-locked moves pass.
-                // Other weapon subtypes are not yet supported.
+                // Check weapon subtype lock (from <Locks><Item SubType="...">)
                 if (!move.required_weapon_subtype.empty() &&
-                    move.required_weapon_subtype != "Fists") continue;
+                    move.required_weapon_subtype.find(equipped_weapon_) == std::string::npos) continue;
                 // [ORIGINAL] CurrentAnimation condition check.
                 // PC source: sf2.js np.isEqual() (line 42544) - 3key combos
                 // require the current animation to match a specific name.
@@ -1480,8 +1464,7 @@ public:
                     if (!move.is_jump && move.move_type != "Jump" &&
                         move.move_type != "MOVE" && !move.move_type.empty()) continue;
                     // Weapon filter
-                    if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
-                        move.tactic_weapon.find("Fists") == std::string::npos) continue;
+                    if (!is_weapon_allowed(move)) continue;
                     // Check animation
                     std::string anim_name = move.filename;
                     if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
@@ -1530,9 +1513,8 @@ public:
                     // Skip Titan moves (they require TitanGiantSword weapon)
                     if (move.template_name.find("Titan") != std::string::npos &&
                         move.template_name.find("NotTitan") == std::string::npos) continue;
-                    // Weapon filter — only allow Fists or empty
-                    if (!move.tactic_weapon.empty() && move.tactic_weapon != "Fists" &&
-                        move.tactic_weapon.find("Fists") == std::string::npos) continue;
+                    // Weapon filter — match equipped weapon
+                    if (!is_weapon_allowed(move)) continue;
                     // Require NotTitan template (player is not a Titan)
                     if (!move.is_not_titan) continue;
                     std::string anim_name = move.filename;
@@ -1597,10 +1579,10 @@ public:
                 // Skip Titan moves (player is not a Titan)
                 if (move.template_name.find("Titan") != std::string::npos) continue;
                 if (!move.is_step || move.is_double_step) continue;
-                // [ORIGINAL] Only use Unarmed steps — weapon-specific steps
-                // (composite_sword_step_forward, glaive_step_back, etc.) require
-                // that weapon equipped. Player has Fists only.
-                if (!move.is_unarmed && !move.weapon_filter.empty()) continue;
+                // Use steps matching the equipped weapon's tactic_weapon.
+                // Weapon-specific steps (composite_sword_step_forward, etc.)
+                // are filtered by their tactic_weapon attribute.
+                if (!is_weapon_allowed(move)) continue;
                 std::string anim_name = move.filename;
                 if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
                     anim_name = anim_name.substr(0, anim_name.size()-4);
@@ -2423,6 +2405,8 @@ private:
         load_moves();
         // Load enemy weapon
         load_enemy_weapon("weapon_knuckles.xml");
+        // Load player's equipped weapon model
+        load_player_weapon(equipped_weapon_);
         load_hud_textures();
         load_menu_textures();
         load_hud_font();
@@ -3266,6 +3250,31 @@ private:
                 world_cx, world_cy, facing_right_, pivot_local_y);
             renderer_->draw_filled_triangle_world(tx0, ty0, tx1, ty1, tx2, ty2, silhouette_col);
         }
+
+        // Render player's equipped weapon model (if loaded)
+        // Weapon nodes are defined in their own model space; we render a simple
+        // indicator at a fixed offset from the player's body center.
+        if (weapon_model_ && !weapon_model_->edges.empty()) {
+            ren::Color4B wcol{200, 170, 100, 255};
+            // Use NPivot position as the reference point for weapon placement
+            float dir = facing_right_ ? 1.0f : -1.0f;
+            float ox = world_cx + dir * 30.0f;
+            float oy = world_cy + 10.0f;
+            // Render weapon edges as simple lines/circles
+            for (auto& e : weapon_model_->edges) {
+                auto n1 = weapon_model_->nodes.find(e.end1);
+                auto n2 = weapon_model_->nodes.find(e.end2);
+                if (n1 == weapon_model_->nodes.end() || n2 == weapon_model_->nodes.end()) continue;
+                float scale = 0.3f;
+                float wx1 = ox + n1->second.x * scale;
+                float wy1 = oy + n1->second.y * scale;
+                float wx2 = ox + n2->second.x * scale;
+                float wy2 = oy + n2->second.y * scale;
+                float r = e.radius > 0 ? e.radius * scale : 3.0f;
+                renderer_->draw_filled_circle_world(wx1, wy1, r, wcol);
+                renderer_->draw_filled_circle_world(wx2, wy2, r * 0.7f, wcol);
+            }
+        }
     }
 
     // ---------- Character rendering ----------
@@ -3413,6 +3422,160 @@ private:
         std::printf("  Enemy weapon '%s': %zu nodes, %zu edges, %zu capsules\n",
                     weapon_name.c_str(), enemy_weapon_model_->nodes.size(),
                     enemy_weapon_model_->edges.size(), enemy_weapon_model_->capsules.size());
+    }
+
+    // Map weapon tactic name to model file path.
+    // Tactic names like "Swords", "Axes", "Claws" map to "weapon_swords.xml" etc.
+    // Returns empty string if no model file exists for this tactic.
+    std::string weapon_tactic_to_model_file(const std::string& tactic) const {
+        // Direct file name: tactic name lowercase + "s" for plurals
+        std::string lower;
+        for (char c : tactic) lower += (char)std::tolower(c);
+        // Handle special mappings
+        static const std::unordered_map<std::string, std::string> special = {
+            {"Fists", ""},         // Unarmed — no weapon model
+            {"TwoHanded", "weapon_composite_sword.xml"},
+            {"BigSwords", "weapon_big_swords.xml"},
+            {"CompositeSword", "weapon_composite_sword.xml"},
+            {"CompositeSpear", "weapon_composite_spear.xml"},
+            {"CompositeStaff", "weapon_composite_staff.xml"},
+            {"CompositeScythe", "weapon_composite_scythe.xml"},
+            {"GiantSword", "weapon_giant_sword.xml"},
+            {"PowerFists", "weapon_power_fists.xml"},
+            {"Glaivebow", "weapon_glaivebow.xml"},
+            {"SilverGlaive", "weapon_silver_glaive.xml"},
+            {"OneHandedSword", "weapon_one_handed_sword.xml"},
+            {"NinjaSword", "weapon_ninja_sword.xml"},
+            {"ShogunKatana", "weapon_katana.xml"},
+            {"WandererStaff", "weapon_staff.xml"},
+            {"TonfaGuns", "weapon_tonfa_guns.xml"},
+            {"SharpTonfa", "weapon_sharp_tonfa.xml"},
+            {"SteelClaws", "weapon_steel_claws.xml"},
+            {"ShockerClaws", "weapon_shocker_claws.xml"},
+            {"ButcherKnives", "weapon_butcher_knives.xml"},
+            {"CrescentKnives", "weapon_crescent_knives.xml"},
+            {"ElectroHammers", "weapon_electro_hammers.xml"},
+            {"FireBatons", "weapon_fire_batons.xml"},
+            {"BattleHammers", "weapon_battle_hammers.xml"},
+            {"TwoHandedBlunt", "weapon_two_handed_cudgel.xml"},
+            {"HermitSwords", "weapon_hermit_swords.xml"},
+            {"Knobsticks", "weapon_knobsticks.xml"},
+            {"MagariYari", "weapon_magari_yari.xml"},
+            {"ShuangGou", "weapon_shuang_gou.xml"},
+            {"ChineseSabers", "weapon_chinese_sabers.xml"},
+            {"IndianKatar", "weapon_indian_katar.xml"},
+            {"MonkKatars", "weapon_indian_katar.xml"},
+            {"Shuriken", "weapon_knives.xml"},
+            {"Kunai", "weapon_kunai.xml"},
+            {"FireBall", "magic_fireball.xml"},
+            {"Energyball", "magic_energy_ball.xml"},
+            {"LightningArrow", "magic_lightning.xml"},
+            {"MagicDeathRay", "magic_death_ray.xml"},
+            {"MagicAsteroid", "magic_asteroid.xml"},
+            {"MassBomb", "magic_mass_bomb.xml"},
+            {"MagicBomb", "magic_mass_bomb.xml"},
+            {"MagicFireAura", "magic_fire_aura.xml"},
+            {"MagicAcidCloud", "magic_fire_aura.xml"},
+            {"RootStun", "magic_root_stun.xml"},
+            {"FirePillar", "magic_fire_pillar.xml"},
+            {"Sawblade", "weapon_sawblade.xml"},
+            {"DoubleScythe", "weapon_sectional_scythe.xml"},
+        };
+        auto it = special.find(tactic);
+        if (it != special.end()) return it->second;
+        // Generic: "weapon_<lowercased>.xml" — try common patterns
+        // Handle s-ending (Swords → sword, Axes → axe, etc.)
+        std::string try_name = "weapon_" + lower + ".xml";
+        // Try with and without final 's'
+        if (std::filesystem::exists(asset_root_ + "/assets/models/" + try_name)) return try_name;
+        if (lower.size() > 1 && lower.back() == 's') {
+            try_name = "weapon_" + lower.substr(0, lower.size()-1) + ".xml";
+            if (std::filesystem::exists(asset_root_ + "/assets/models/" + try_name)) return try_name;
+        }
+        return try_name; // return best guess
+    }
+
+    // Load a weapon model for the player from a tactic name.
+    // The weapon model is stored in weapon_model_ for rendering.
+    void load_player_weapon(const std::string& tactic) {
+        std::string model_file = weapon_tactic_to_model_file(tactic);
+        if (model_file.empty()) {
+            weapon_model_.reset();
+            return;  // Fists — no weapon model
+        }
+        auto candidates = model_paths(asset_root_, model_file.c_str());
+        std::string fig_path;
+        for (const auto& p : candidates) {
+            if (std::filesystem::exists(p)) { fig_path = p.string(); break; }
+        }
+        if (fig_path.empty()) {
+            std::printf("  Player weapon '%s' model NOT FOUND (tried: %s)!\n",
+                       tactic.c_str(), model_file.c_str());
+            weapon_model_.reset();
+            return;
+        }
+        weapon_model_ = std::make_unique<BodyModel>();
+        fmt::XmlDocument doc;
+        if (!doc.parse(read_text(fig_path))) {
+            std::fprintf(stderr, "[weapon] parse error for %s: %s\n",
+                        model_file.c_str(), doc.error().c_str());
+            weapon_model_.reset();
+            return;
+        }
+        auto* scene = doc.root()->first_child("Scene");
+        if (!scene) { weapon_model_.reset(); return; }
+
+        // Parse MacroNodes (weapons use MacroNode type, unlike body.xml which uses Node/COM)
+        if (auto* ns = scene->first_child("Nodes")) {
+            for (const auto& child : ns->children) {
+                std::string type = child.attr("Type");
+                if (type == "MacroNode") {
+                    BodyMacroNode mn;
+                    mn.name = child.name;
+                    mn.children[0] = child.attr("ChildNode1");
+                    mn.children[1] = child.attr("ChildNode2");
+                    mn.children[2] = child.attr("ChildNode3");
+                    mn.children[3] = child.attr("ChildNode4");
+                    weapon_model_->macro_nodes[mn.name] = mn;
+                }
+                // Also store basic position info for rendering
+                BodyNode n;
+                n.name = child.name;
+                n.x = tof(child.attr("X"));
+                n.y = tof(child.attr("Y"));
+                n.mass = tof(child.attr("Mass"), 1.0f);
+                n.fixed = (toi(child.attr("Fixed")) != 0);
+                weapon_model_->nodes[n.name] = n;
+            }
+        }
+        if (auto* es = scene->first_child("Edges")) {
+            for (const auto& child : es->children) {
+                if (child.attr("Type") != "Edge") continue;
+                BodyEdge e;
+                e.name = child.name;
+                e.end1 = child.attr("End1");
+                e.end2 = child.attr("End2");
+                e.radius = tof(child.attr("Radius"));
+                weapon_model_->edges.push_back(e);
+            }
+        }
+        if (auto* fs = scene->first_child("Figures")) {
+            for (const auto& child : fs->children) {
+                if (child.attr("Type") == "Capsule") {
+                    BodyCapsule c;
+                    c.edge_name = child.attr("Edge");
+                    c.radius1 = tof(child.attr("Radius1"));
+                    c.radius2 = tof(child.attr("Radius2"));
+                    c.margin1 = tof(child.attr("Margin1"));
+                    c.margin2 = tof(child.attr("Margin2"));
+                    weapon_model_->capsules.push_back(c);
+                }
+            }
+        }
+        std::printf("  Player weapon '%s' (%s): %zu nodes, %zu edges, %zu capsules\n",
+                    tactic.c_str(), model_file.c_str(),
+                    weapon_model_->nodes.size(), weapon_model_->edges.size(),
+                    weapon_model_->capsules.size());
     }
 
     // Initialize Verlet physics state from the bag's skeleton nodes.
@@ -5025,6 +5188,12 @@ private:
     int player_losses_ = 0;
     resf2::format::ListData list_data_;
     bool list_data_loaded_ = false;
+
+    // Persistence: SaveManager writes/reads the save file on disk.
+    // PlayerProfile holds the authoritative player state (synced on save/load).
+    resf2::save::SaveManager save_manager_;
+    resf2::player::PlayerProfile player_profile_;
+
     resf2::format::StageData stage_data_;
     bool stages_loaded_ = false;
 
@@ -5132,6 +5301,43 @@ private:
     bool is_battle_mode_ = false;
     bool show_enemy_ = false;  // default to punching bag in dojo (toggle with B)
 
+    // ---------- Weapon system ----------
+    // Currently equipped weapon type. Used to filter moves by tactic_weapon.
+    // Move selection only allows moves whose tactic_weapon matches this value.
+    std::string equipped_weapon_ = "Fists";
+    // Cycle list for weapon switching (J key cycles, N key to previous)
+    std::vector<std::string> weapon_cycle_list_ = {
+        "Fists", "Swords", "Axes", "Claws", "Knuckles", "Daggers",
+        "Katana", "Spear", "Staff", "Glaive", "TwoHanded", "CompositeSword",
+        "CompositeSpear", "CompositeStaff", "CompositeScythe",
+        "BigSwords", "Sai", "Tonfa", "Fans", "Kusarigama", "Nunchaku",
+        "NinjaSword", "Sickles", "Batons", "Knobsticks",
+        "Rifle", "GiantSword", "PowerFists", "Machete",
+        "FireBall", "Energyball", "LightningArrow", "Shuriken"
+    };
+    int weapon_cycle_index_ = 0;
+
+    // Check if a move is allowed for the currently equipped weapon.
+    // Returns true if the move has no tactic_weapon requirement,
+    // or if the tactic_weapon matches the equipped weapon (substring match
+    // supports pipe-delimited lists like "Swords|ShuangGou|ChineseSabers").
+    bool is_weapon_allowed(const MoveDef& move) const {
+        if (move.tactic_weapon.empty()) return true;
+        return move.tactic_weapon.find(equipped_weapon_) != std::string::npos;
+    }
+
+    // Cycle equipped weapon forward or backward.
+    void cycle_weapon(int direction) {
+        if (weapon_cycle_list_.empty()) return;
+        weapon_cycle_index_ = (weapon_cycle_index_ + direction) % (int)weapon_cycle_list_.size();
+        if (weapon_cycle_index_ < 0) weapon_cycle_index_ += (int)weapon_cycle_list_.size();
+        equipped_weapon_ = weapon_cycle_list_[weapon_cycle_index_];
+        // Load the weapon model for the new weapon
+        load_player_weapon(equipped_weapon_);
+        std::printf("[WEAPON] Switched to: %s (index %d/%zu)\n",
+                    equipped_weapon_.c_str(), weapon_cycle_index_, weapon_cycle_list_.size());
+    }
+
     Overlay overlay_ = Overlay::None;
     float menu_anim_progress_ = 0.0f;  // 0 = collapsed, 1 = fully expanded
     bool loc_icons_logged = false;  // one-shot diagnostic for menu icon sizes
@@ -5147,6 +5353,7 @@ private:
     std::unique_ptr<BodyModel> body_model_;
     std::unique_ptr<BodyModel> bag_model_;
     std::unique_ptr<BodyModel> enemy_weapon_model_;
+    std::unique_ptr<BodyModel> weapon_model_;  // player's equipped weapon model
     std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> hud_textures_;
     std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> menu_textures_;
     std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> scroll_textures_;
