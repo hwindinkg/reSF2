@@ -1,9 +1,0 @@
-#include <appinfo.rh>
-
-UID2 KUidAppRegistrationResourceFile
-UID3 0xE1234567
-
-RESOURCE APP_REGISTRATION_INFO
-    {
-    app_file = "resf2";           // executable name (no extension)
-    }

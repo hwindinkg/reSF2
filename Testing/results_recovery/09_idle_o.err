@@ -1,4 +1,0 @@
-[INPUT_SCRIPT] loaded Testing/scenarios/09_idle_o.txt: 2 events, armed=1
-X connection to :99 broken (explicit kill or server shutdown).
-e is verified (fcn.10165c10), render-Y formula is not. Using constant FEET_FLOOR_OFFSET=4 (96bfce1 baseline). Jump/flip/roll Y will be flat until the consumption formula is traced.
-X connection to :99 broken (explicit kill or server shutdown).
