@@ -8,6 +8,7 @@
 #include "../engine/format/location_parser.hpp"
 #include "../engine/reverse/dz_reader.hpp"
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 

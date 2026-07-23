@@ -27,11 +27,17 @@ public:
     Settings settings;
 
     void set_settings(const Settings& s) { settings = s; }
+    bool has_tactic_data() const { return tactic_loaded_; }
+    int last_decision() const { return last_decision_; }
 
 private:
     float react_timer_ = 0;
     int last_decision_ = 8; // Central
     float decision_cooldown_ = 0;
+
+    // Tactic data (decompressed .atf binary records)
+    std::vector<std::byte> tactic_data_;
+    bool tactic_loaded_ = false;
 
     // Evaluate distances and pick a move
     void decide(Fighter& self, const Fighter& opponent);

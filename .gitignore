@@ -16,3 +16,15 @@ build/
 *.o
 # Local user-space prefix (extracted .deb headers/libs for sandbox builds)
 _prefix/
+*.exe
+*.obj
+*.bak
+build_test/
+resf2_debug.log
+*_err.txt
+*_out.txt
+err.txt
+out.txt
+reSF2.zip
+engine/game/_*.py
+engine/game/_*.ps1

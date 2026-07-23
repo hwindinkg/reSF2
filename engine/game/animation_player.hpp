@@ -1,0 +1,153 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <utility>
+
+#include "types.hpp"
+
+namespace resf2::game {
+
+// ---------- Animation player ----------
+//
+// Encapsulates animation playback state and interpolation logic.
+// Handles .bin keyframe loading, frame interpolation, root motion.
+
+class AnimationPlayer {
+public:
+    AnimationPlayer() = default;
+
+    // Getters
+    const std::string& current_anim() const { return current_anim_; }
+    float anim_time() const { return anim_time_; }
+    float anim_fps() const { return anim_fps_; }
+    bool anim_loop() const { return anim_loop_; }
+    int prev_frame_idx() const { return prev_frame_idx_; }
+    float prev_npivot_x() const { return prev_npivot_x_; }
+    bool prev_npivot_set() const { return prev_npivot_set_; }
+    float prev_npivot_y() const { return prev_npivot_y_; }
+    bool prev_npivot_y_set() const { return prev_npivot_y_set_; }
+    float anim_root_dx() const { return anim_root_dx_; }
+    float anim_root_dy() const { return anim_root_dy_; }
+    float anim_root_anchor_x() const { return anim_root_anchor_x_; }
+    float anim_root_anchor_y() const { return anim_root_anchor_y_; }
+    bool anim_anchor_set() const { return anim_anchor_set_; }
+    float jump_y_offset() const { return jump_y_offset_; }
+    float prev_root_offset() const { return prev_root_offset_; }
+    float step_start_player_x() const { return step_start_player_x_; }
+    bool anim_facing_right() const { return anim_facing_right_; }
+    float y_adjust_smoothed() const { return y_adjust_smoothed_; }
+    float stance_npivot_y() const { return stance_npivot_y_; }
+    float anim_npivot_bin_y() const { return anim_npivot_bin_y_; }
+    uint64_t total_frame_count() const { return total_frame_count_; }
+    const std::string& last_logged_anim() const { return last_logged_anim_; }
+    const std::unordered_map<std::string, std::pair<float, float>>& anim_node_pos() const { return anim_node_pos_; }
+
+    // Mutable accessors (for Game reference aliasing — same pattern as Combat)
+    std::string& mutable_current_anim() { return current_anim_; }
+    float& mutable_anim_time() { return anim_time_; }
+    float& mutable_anim_speed() { return anim_speed_; }
+    bool& mutable_anim_loop() { return anim_loop_; }
+    float& mutable_anim_fps() { return anim_fps_; }
+    std::unordered_map<std::string, std::pair<float, float>>& mutable_anim_node_pos() { return anim_node_pos_; }
+    float& mutable_anim_root_dx() { return anim_root_dx_; }
+    float& mutable_anim_root_dy() { return anim_root_dy_; }
+    float& mutable_anim_root_anchor_x() { return anim_root_anchor_x_; }
+    float& mutable_anim_root_anchor_y() { return anim_root_anchor_y_; }
+    bool& mutable_anim_anchor_set() { return anim_anchor_set_; }
+    float& mutable_prev_npivot_x() { return prev_npivot_x_; }
+    bool& mutable_prev_npivot_set() { return prev_npivot_set_; }
+    float& mutable_prev_npivot_y() { return prev_npivot_y_; }
+    bool& mutable_prev_npivot_y_set() { return prev_npivot_y_set_; }
+    int& mutable_prev_frame_idx() { return prev_frame_idx_; }
+    float& mutable_jump_y_offset() { return jump_y_offset_; }
+    float& mutable_prev_root_offset() { return prev_root_offset_; }
+    float& mutable_step_start_player_x() { return step_start_player_x_; }
+    bool& mutable_anim_facing_right() { return anim_facing_right_; }
+    float& mutable_y_adjust_smoothed() { return y_adjust_smoothed_; }
+    float& mutable_stance_npivot_y() { return stance_npivot_y_; }
+    float& mutable_anim_npivot_bin_y() { return anim_npivot_bin_y_; }
+    uint64_t& mutable_total_frame_count() { return total_frame_count_; }
+    std::string& mutable_last_logged_anim() { return last_logged_anim_; }
+
+    void set_current_anim(const std::string& a) { current_anim_ = a; }
+    void set_anim_time(float t) { anim_time_ = t; }
+    void set_anim_fps(float f) { anim_fps_ = f; }
+    void set_anim_loop(bool l) { anim_loop_ = l; }
+    void set_anim_root_dx(float dx) { anim_root_dx_ = dx; }
+    void set_anim_root_dy(float dy) { anim_root_dy_ = dy; }
+    void set_anim_root_anchor_x(float x) { anim_root_anchor_x_ = x; }
+    void set_anim_root_anchor_y(float y) { anim_root_anchor_y_ = y; }
+    void set_anim_anchor_set(bool s) { anim_anchor_set_ = s; }
+    void set_prev_npivot_x(float x) { prev_npivot_x_ = x; }
+    void set_prev_npivot_set(bool s) { prev_npivot_set_ = s; }
+    void set_prev_npivot_y(float y) { prev_npivot_y_ = y; }
+    void set_prev_npivot_y_set(bool s) { prev_npivot_y_set_ = s; }
+    void set_prev_frame_idx(int i) { prev_frame_idx_ = i; }
+    void set_jump_y_offset(float o) { jump_y_offset_ = o; }
+    void set_prev_root_offset(float o) { prev_root_offset_ = o; }
+    void set_step_start_player_x(float x) { step_start_player_x_ = x; }
+    void set_anim_facing_right(bool r) { anim_facing_right_ = r; }
+    void set_y_adjust_smoothed(float y) { y_adjust_smoothed_ = y; }
+    void set_stance_npivot_y(float y) { stance_npivot_y_ = y; }
+    void set_anim_npivot_bin_y(float y) { anim_npivot_bin_y_ = y; }
+
+    // Play a named animation (looked up in the animations map)
+    bool play(
+        const std::string& name,
+        const std::unordered_map<std::string, AnimationData>& animations,
+        float fps,
+        bool loop
+    );
+
+    // Play an arbitrary animation for a specific duration
+    void play_for(const AnimationData& anim, float duration, float fps);
+
+    // Main update: advance animation time by dt_ms, interpolate frames,
+    // compute root motion displacement, populate anim_node_pos_
+    void update(
+        uint32_t dt_ms,
+        const std::unordered_map<std::string, AnimationData>& animations,
+        const std::vector<std::string>& ordered_node_names
+    );
+
+    // Get node position from animation
+    bool get_node_pos(const std::string& name, float& x, float& y) const;
+    void set_node_pos(const std::string& name, float x, float y);
+    void clear_node_positions();
+
+private:
+    // Current animation state
+    std::string current_anim_;
+    float anim_time_ = 0.0f;
+    float anim_speed_ = 30.0f;
+    bool anim_loop_ = true;
+    float anim_fps_ = 20.0f;
+
+    // Interpolated node positions (name -> (x, y))
+    std::unordered_map<std::string, std::pair<float, float>> anim_node_pos_;
+
+    // Root motion
+    float anim_root_dx_ = 0.0f;
+    float anim_root_dy_ = 0.0f;
+    float anim_root_anchor_x_ = 0.0f;
+    float anim_root_anchor_y_ = 0.0f;
+    bool anim_anchor_set_ = false;
+    float prev_npivot_x_ = 0.0f;
+    bool prev_npivot_set_ = false;
+    float prev_npivot_y_ = 0.0f;
+    bool prev_npivot_y_set_ = false;
+    int prev_frame_idx_ = -1;
+    float jump_y_offset_ = 0.0f;
+    float prev_root_offset_ = 0.0f;
+    float step_start_player_x_ = 0.0f;
+    bool anim_facing_right_ = true;
+    float y_adjust_smoothed_ = 4.0f;
+    float stance_npivot_y_ = 106.0f;
+    float anim_npivot_bin_y_ = 106.0f;
+    uint64_t total_frame_count_ = 0;
+    std::string last_logged_anim_;
+};
+
+} // namespace resf2::game

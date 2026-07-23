@@ -232,3 +232,18 @@ The original game defines all quest/dialogue data in `assets/quests.xml` (confir
 | **High** | 6 | No equipment/weapon/armor system, stub scenes (Shop/Settings/Profile), dialogue not from quests.xml, battle always shows dojo, MP3/music not implemented, skeletal transitions missing |
 | **Medium** | 5 | No localization, immediate-mode UI only, root motion not data-driven, asset paths hardcoded, pre-existing test failure |
 | **Low** | 4 | Codegraph not indexed, profile system stub, no quest system, cross-platform gaps (fullscreen, KTX, GLFW) |
+
+---
+
+## 13. Renderer/HUD Extraction Deferred
+
+**Added 2026-07-22 during T-10 HIGH-fix cleanup.**
+
+The `SceneRenderer` and `HudRenderer` classes were designed as extracted rendering modules but were never wired into production code. They were removed as dead code in this session. Their API surface and internal logic were not preserved — if rendering extraction is revisited, the implementation will need to be rebuilt from scratch.
+
+**Files deleted:**
+- `engine/game/scene_renderer.hpp` / `.cpp`
+- `engine/game/hud_renderer.hpp` / `.cpp`
+- `engine/game/game_new.hpp` (orphan alternative Game header, zero references)
+
+**Status:** Closed — dead code removed.

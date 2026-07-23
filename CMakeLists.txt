@@ -126,14 +126,7 @@ endif()
 if(RESF2_BUILD_RUNTIME)
     add_executable(resf2_app main.cpp)
     target_link_libraries(resf2_app PRIVATE
-        resf2_platform
-        resf2_renderer
-        resf2_runtime
-        resf2_scene
-        resf2_reverse
-        resf2_format
-        resf2_audio
-        resf2_warnings
+        resf2_game
     )
     target_compile_features(resf2_app PRIVATE cxx_std_23)
     set_target_properties(resf2_app PROPERTIES
@@ -172,6 +165,22 @@ if(RESF2_BUILD_HEADLESS)
     target_compile_features(resf2_headless PRIVATE cxx_std_23)
     set_target_properties(resf2_headless PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${RESF2_RUNTIME_OUTPUT_DIR}"
+    )
+endif()
+
+# --- DZ archive extraction (build-time only, Windows host) -----------------
+# Extracts .dz archives to the fallback directories the engine expects.
+# On non-Windows platforms, the extracted files must already exist in the repo
+# (committed to assets/files/, assets/animations/).
+set(RESF2_DZIP_EXE "${CMAKE_SOURCE_DIR}/download/dzip.exe" CACHE FILEPATH "Path to dzip.exe for DZ extraction")
+set(RESF2_DZ_FILES "${CMAKE_SOURCE_DIR}/assets/files.dz" CACHE FILEPATH "DZ archive: files.dz")
+set(RESF2_DZ_ANIM "${CMAKE_SOURCE_DIR}/assets/animations.dz" CACHE FILEPATH "DZ archive: animations.dz")
+
+if(EXISTS "${RESF2_DZIP_EXE}")
+    add_custom_target(dz_extract
+        COMMAND "${RESF2_DZIP_EXE}" --decompress "${RESF2_DZ_FILES}"   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/assets"
+        COMMAND "${RESF2_DZIP_EXE}" --decompress "${RESF2_DZ_ANIM}"    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/assets"
+        COMMENT "Extracting .dz archives to assets/files/ and assets/animations/..."
     )
 endif()
 

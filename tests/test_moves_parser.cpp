@@ -175,6 +175,81 @@ int main(int argc, char* argv[]) {
         std::printf("  Found %zu results\n", results.size());
     }
     
+    // ===== Test 7: Invulnerable intervals =====
+    std::printf("\n=== Test 7: Invulnerable intervals ===\n");
+    {
+        // FistsHit (or similar hit animation) should have Invulnerable intervals
+        // Search for a move with invulnerable_intervals
+        bool found_invuln = false;
+        for (auto& [name, move] : db.all_moves()) {
+            if (!move.invulnerable_intervals.empty()) {
+                found_invuln = true;
+                std::printf("  Move '%s' has %zu Invulnerable interval(s):\n",
+                            name.c_str(), move.invulnerable_intervals.size());
+                for (auto& invi : move.invulnerable_intervals) {
+                    std::printf("    Name='%s' Start=%.0f End=%.0f\n",
+                                invi.name.c_str(), invi.start, invi.end);
+                }
+                CHECK(!move.invulnerable_intervals.empty(),
+                      "Found move with Invulnerable intervals");
+                // Check structure
+                const auto& first = move.invulnerable_intervals[0];
+                CHECK(first.end > 0 || first.name == "Boss",
+                      "Invulnerable interval has valid End or name 'Boss'");
+                break;
+            }
+        }
+        CHECK(found_invuln, "At least one move has Invulnerable intervals");
+    }
+    
+    // ===== Test 8: Distance conditions =====
+    std::printf("\n=== Test 8: Distance conditions ===\n");
+    {
+        bool found_distance = false;
+        for (auto& [name, move] : db.all_moves()) {
+            if (move.distance.active) {
+                found_distance = true;
+                std::printf("  Move '%s' has Distance: min=%.0f max=%.0f\n",
+                            name.c_str(), move.distance.min_dist, move.distance.max_dist);
+                CHECK(move.distance.active, "Distance condition is active");
+                CHECK(move.distance.min_dist >= 0, "Distance min >= 0");
+                CHECK(move.distance.max_dist > 0, "Distance max > 0");
+                break;
+            }
+        }
+        CHECK(found_distance, "At least one move has Distance conditions");
+    }
+    
+    // ===== Test 9: Uninterrupt intervals (existing) =====
+    std::printf("\n=== Test 9: Uninterrupt intervals ===\n");
+    {
+        bool found_uninterrupt = false;
+        for (auto& [name, move] : db.all_moves()) {
+            if (!move.uninterrupt_intervals.empty()) {
+                found_uninterrupt = true;
+                std::printf("  Move '%s' has %zu Uninterrupt interval(s)\n",
+                            name.c_str(), move.uninterrupt_intervals.size());
+                break;
+            }
+        }
+        CHECK(found_uninterrupt, "At least one move has Uninterrupt intervals");
+    }
+    
+    // ===== Test 10: TacticWeapon field =====
+    std::printf("\n=== Test 10: TacticWeapon field ===\n");
+    {
+        bool found_weapon = false;
+        for (auto& [name, move] : db.all_moves()) {
+            if (!move.tactic_weapon.empty()) {
+                found_weapon = true;
+                std::printf("  Move '%s' has tactic_weapon='%s'\n",
+                            name.c_str(), move.tactic_weapon.c_str());
+                break;
+            }
+        }
+        CHECK(found_weapon, "At least one move has tactic_weapon set");
+    }
+    
     // ===== Summary =====
     std::printf("\n=== Results: %d passed, %d failed ===\n", tests_passed, tests_failed);
     return tests_failed > 0 ? 1 : 0;
