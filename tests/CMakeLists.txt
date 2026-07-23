@@ -175,7 +175,7 @@ target_link_libraries(test_dz_first_byte PRIVATE
     resf2_warnings
 )
 target_compile_features(test_dz_first_byte PRIVATE cxx_std_23)
-add_test(NAME test_dz_first_byte COMMAND test_dz_first_byte)
+add_test(NAME test_dz_first_byte COMMAND test_dz_first_byte WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # DZ probability layout analysis
 add_executable(test_dz_prob_layout
