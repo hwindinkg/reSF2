@@ -93,8 +93,5 @@ resf2_app.exe --assets E:\reSF2
 
 ## External references
 
-- APK: https://chat.chobat.ru/Shadow+Fight+2_1.9.21.apk
-- Game data: https://chat.chobat.ru/sf2.7z
-- PC version: https://chat.chobat.ru/sf2_pc.7z
 - S3ELoader (Ghidra loader): https://github.com/knot126/S3ELoader
 - Marmalade-Modding: https://github.com/knot126/Marmalade-Modding
