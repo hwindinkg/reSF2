@@ -1,30 +1,86 @@
-skills/
-node_modules/
-sf2_apk.apk
-work/sf2_data.7z
-*.apk
-*.7z
-work/
-upload/
-tool-results/
-
-# Build artifacts and local prefixes
-.local-prefix/
+# ============================================================================
+# Build artifacts
+# ============================================================================
+build/
 build-full/
 build-scene/
-build/
-*.o
-# Local user-space prefix (extracted .deb headers/libs for sandbox builds)
-_prefix/
-*.exe
-*.obj
-*.bak
 build_test/
-resf2_debug.log
-*_err.txt
+*.o
+*.obj
+*.exe
+*.bak
+
+# ============================================================================
+# Tooling artifacts (dot-prefixed directories)
+# ============================================================================
+.*/
+!.gitignore
+.env
+
+# ============================================================================
+# Original game data (for RE work — keep local, not in git)
+# ============================================================================
+OriginalWindowsFiles/
+sf2/
+sf2_pc/
+sf2_symbian/
+download/
+
+# ============================================================================
+# Old test output, logs, temporary files, documentation
+# ============================================================================
+Testing/
+upload/
+docs/
+
+# ============================================================================
+# Archival formats and packages
+# ============================================================================
+*.apk
+*.7z
+*.zip
+*.deb
+*.tar.gz
+reSF2.zip
+
+# ============================================================================
+# Standalone test files and scripts (root-level)
+# ============================================================================
+headless_main.cpp
+main.cpp
+main_port.cpp
+test_json_atlas.cpp
+check_xml.py
+
+# ============================================================================
+# Old planning documents (not build-essential)
+# ============================================================================
+HANDOFF.md
+NEXT_SESSION.md
+PLAN_1TO1.md
+PLAN_PORT.md
+PLAN_SYMBIAN.md
+worklog.md
+
+# ============================================================================
+# Test logs and output files
+# ============================================================================
+*.log
 *_out.txt
+*_err.txt
 err.txt
 out.txt
-reSF2.zip
+resf2_debug.log
+
+# ============================================================================
+# Misc
+# ============================================================================
+skills/
+node_modules/
+.local-prefix/
+_prefix/
+sf2_apk.apk
+work/
+tool-results/
 engine/game/_*.py
 engine/game/_*.ps1
