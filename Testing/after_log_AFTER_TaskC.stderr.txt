@@ -1,1 +1,0 @@
-[HEURISTIC-TODO] y_adjust uses MoveInside pivot-node grounding (approx, binary mechanism verified at fcn.10165c10; consumption formula NOT byte-confirmed). floor_y hardcoded to dojo (-193). Falls back to FEET_FLOOR_OFFSET=4 for <Pivot Object="Animation"/> moves. See docs/s3e_reverse_engineering.md.

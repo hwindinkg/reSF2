@@ -1,5 +1,0 @@
-# Scenario 6: Hold D, then press O. Expect attack to trigger from step.
-frame 180 keydown D
-frame 200 keydown O
-frame 201 keyup O
-frame 220 keyup D

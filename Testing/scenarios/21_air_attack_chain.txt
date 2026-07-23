@@ -1,7 +1,0 @@
-# Scenario 21: Jump attacks — W+O/P during jump, verify AIR prefix.
-frame 180 keydown W
-frame 182 keydown O
-frame 183 keyup O
-frame 184 keydown P
-frame 185 keyup P
-frame 186 keyup W

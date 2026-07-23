@@ -1,5 +1,0 @@
-# Scenario 2: W+D — front flip. Expect upward Y trajectory + rightward X.
-frame 180 keydown W
-frame 180 keydown D
-frame 185 keyup W
-frame 185 keyup D

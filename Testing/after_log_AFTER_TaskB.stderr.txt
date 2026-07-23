@@ -1,1 +1,0 @@
-[HEURISTIC-TODO] y_adjust_smoothed_ = FEET_FLOOR_OFFSET (4.0f) is a global constant, not per-move MoveInside alignment. Rolls/jumps with descending NPivot will float. Replace with Model::step pivotID contact alignment (Model::step @ 0x10161ad0, playInfo @ 0x10164fa0).
