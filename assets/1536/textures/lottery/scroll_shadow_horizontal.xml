@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Images>
+ <Image File="textures/lottery/scroll_shadow_horizontal_left.png" X="-850" Y="-343" />
+ <Image File="textures/lottery/scroll_shadow_horizontal_right.png" X="0" Y="-343" />
+</Images>

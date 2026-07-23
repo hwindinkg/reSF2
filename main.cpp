@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
     // If --list-locations is specified, create a minimal Game to discover locations
     // and print them, then exit.
     if (list_locations) {
-        Game temp_game(asset_root.empty() ? "." : asset_root);
+        resf2::game::Game temp_game(asset_root.empty() ? "." : asset_root);
         auto names = temp_game.location_names();
         std::printf("\n=== Discovered %zu locations ===\n\n", names.size());
         for (const auto& name : names) {
@@ -56,7 +56,7 @@ int main(int argc, char* argv[]) {
     if (!input_script_path.empty()) {
         (void)platform->load_input_script(input_script_path);
     }
-    Game game(asset_root, replay_mode, dump_state);
+    resf2::game::Game game(asset_root, replay_mode, dump_state);
     if (!start_location.empty() && start_location != "dojo") {
         game.set_start_location(start_location);
     }

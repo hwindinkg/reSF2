@@ -39,7 +39,7 @@ public:
         bool facing_right = true;
         float health = 100;
         float max_health = 100;
-        float energy = 100;
+        float energy = 0;
         float max_energy = 100;
         float speed = 200.0f;           // walk speed px/s
         float push_distance = 40.0f;     // pushback when hit
@@ -51,7 +51,7 @@ public:
 
     void reset();
     void update(float dt);
-    void render(class core::Renderer2D& r); // debug rendering
+    // void render(class core::Renderer2D& r); // debug rendering (Renderer2D stub)
 
     // Input
     void set_direction(int dir) { input_dir_ = dir; }
@@ -74,6 +74,9 @@ public:
     void set_facing(bool r) { config_.facing_right = r; }
     float health() const { return config_.health; }
     float energy() const { return config_.energy; }
+
+    // Invulnerability check (uses current move's Invulnerable intervals)
+    bool is_invulnerable() const;
 
     // Animation
     AnimationPlayer& anim_player() { return anim_player_; }

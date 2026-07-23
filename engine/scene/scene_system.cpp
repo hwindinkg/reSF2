@@ -5,6 +5,7 @@
 #include "scene_system.hpp"
 
 #include "../platform/platform.hpp"
+#include "../renderer/renderer.hpp"
 
 #include <cstdio>
 #include <optional>
@@ -25,6 +26,7 @@ const char* scene_name(SceneId id) noexcept {
         case SceneId::Dialogue: return "Dialogue";
         case SceneId::Battle:   return "Battle";
         case SceneId::Results:  return "Results";
+        case SceneId::Profile:  return "Profile";
     }
     return "?";
 }

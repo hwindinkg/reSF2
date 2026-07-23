@@ -260,12 +260,14 @@ static void test_loop_pause_resume() {
         loop.run(p, game);
     });
 
-    // Inject pause, then resume, then quit
+    // Inject pause, then resume, then quit.
+    // Resume must fire well before the loop's 100ms pause-sleep ends,
+    // otherwise the loop may re-enter sleep and hit the quit signal first.
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     p.inject_pause();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    p.inject_resume();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));   // loop detects pause, starts 100ms sleep
+    p.inject_resume();                                            // fires ~50ms before sleep ends
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));  // loop wakes, processes resume, runs
     p.inject_quit_request();
 
     loop_thread.join();

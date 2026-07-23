@@ -1,334 +1,264 @@
-// engine/reverse/dz_decoder.cpp
-//
-// DZ (derbh) decompressor — clean-room reimplementation.
-//
-// This is a clean-room reimplementation based on algorithm analysis of
-// libs3e_android.so (Marmalade SDK). The algorithm is an LZMA-variant
-// range coder with:
-//   - 32-bit range coder (range + code registers)
-//   - Probability model with bit-tree decoding
-//   - LZ77-style match references
-//   - 5-byte context window for probability table selection
-//
-// The streaming nature (overlapping file offsets in the archive) means
-// the entire archive's data section is one continuous compressed stream.
-
 #include "dz_decoder.hpp"
+#include <cstring>
+#include <cassert>
 #include <cstdio>
-#include <algorithm>
 
 namespace resf2::dz {
 
-// CRC32 table (polynomial 0x04C11DB7, big-endian)
-const uint32_t DzDecompressor::CRC_TABLE[256] = {
-    0x00000000, 0x04C11DB7, 0x09823B6E, 0x0D4326D9, 0x130476DC, 0x17C56B6B,
-    0x1A864DB2, 0x1E475005, 0x2608ED8B, 0x22C9F00C, 0x2F8AD6D5, 0x2B4BCB62,
-    0x350C9B66, 0x31CD86D3, 0x3C8EA00A, 0x384FBDBD, 0x4C11DB70, 0x48D0C94C,
-    0x4593D401, 0x4152A95E, 0x5F15ADAC, 0x5BD4B0BB, 0x569796C2, 0x52738775,
-    0x6A51BCEA, 0x6E90950D, 0x6360D6D4, 0x67A16363, 0x79864ED6, 0x7D5B9761,
-    0x720C7E98, 0x7635CF2F, 0x84237281, 0x80E20D36, 0x8DA546EB, 0x89643C5C,
-    0x9434D73E, 0x907F1F89, 0x9D561F50, 0x9926BFE7, 0xAF581CF8, 0xAB39104F,
-    0xA6503D96, 0xA231C221, 0xB4543E94, 0xB0359323, 0xBD701FFA, 0xB9119E4D,
-    0xC8273E78, 0xCC042D6F, 0xD1095C36, 0xD5648D81, 0xE056DB58, 0xE4371FEF,
-    0xEF3636C6, 0xEB5736E5, 0xFB929498, 0xFF33532F, 0xE80C6C3E, 0xEC6D3D6F,
-    // ... (truncated — full table generated at runtime if needed)
-};
+// Probability table layout:
+// The DZ format organizes probabilities into a flat uint16 array.
+// Core tables (state-based decisions) occupy the first ~252 entries:
+//   [0..95]:     is_match[state][pos_state]      (12x8 = 96)
+//   [96..107]:   is_rep[state]                   (12)
+//   [108..119]:  is_rep0[state]                  (12)
+//   [120..131]:  is_rep1[state]                  (12)
+//   [132..143]:  is_rep2[state]                  (12)
+//   [144..179]:  match_len[pos_state][bit]       (12x3 = 36)
+//   [180..215]:  rep_match_len[pos_state][bit]   (12x3 = 36)
+//   [216..251]:  dist_slot                       (36)
+//
+// Context tables follow at higher indices, sized according to
+// RangeSettings (offset_contexts, offset_tables, ref tables).
+//
+// For the initial implementation, we use a large buffer (PROB_SIZE=8192)
+// and byte-offset-based indexing from the initial ARM analysis.
+// These offsets will be refactored once the decode loop is validated.
 
-// Actually, let's generate the CRC table at runtime for correctness.
-static uint32_t crc_table[256];
-static bool crc_table_initialized = false;
+// CRC32 lookup table (poly 0xEDB88320, reflected IEEE 802.3)
+static uint32_t g_crc32_table[256];
+static bool g_crc32_table_init = false;
 
-static void init_crc_table() {
-    if (crc_table_initialized) return;
-    for (uint32_t i = 0; i < 256; ++i) {
-        uint32_t crc = i << 24;
-        for (int j = 0; j < 8; ++j) {
-            if (crc & 0x80000000) {
-                crc = ((crc << 1) ^ 0x04C11DB7) & 0xFFFFFFFF;
-            } else {
-                crc = (crc << 1) & 0xFFFFFFFF;
-            }
+static void crc32_init_table() {
+    for (uint32_t i = 0; i < 256; i++) {
+        uint32_t crc = i;
+        for (int j = 0; j < 8; j++) {
+            if (crc & 1)
+                crc = (crc >> 1) ^ 0xEDB88320u;
+            else
+                crc >>= 1;
         }
-        crc_table[i] = crc;
+        g_crc32_table[i] = crc;
     }
-    crc_table_initialized = true;
+    g_crc32_table_init = true;
 }
 
-static uint32_t crc32_hash(const uint8_t window[5]) {
-    init_crc_table();
-    uint32_t crc = 0;
-    for (int i = 1; i < 5; ++i) {
-        crc = ((crc << 8) ^ crc_table[(crc >> 24) ^ window[i]]) & 0xFFFFFFFF;
-    }
-    return crc;
+uint32_t crc32_window(const uint8_t* window, int len) {
+    if (!window || len <= 0) return 0;
+    if (!g_crc32_table_init) crc32_init_table();
+    uint32_t crc = 0xFFFFFFFFu;
+    for (int i = 0; i < len; i++)
+        crc = g_crc32_table[(crc ^ window[i]) & 0xFF] ^ (crc >> 8);
+    return ~crc;
 }
 
-// Range coder state
-struct RangeCoder {
-    uint32_t range;
-    uint32_t code;
-    const uint8_t* data;
-    size_t size;
-    size_t pos;
+uint32_t dz_decode_bit_tree(DzContext& ctx, uint16_t* tree, uint32_t depth) {
+    uint32_t sym = 1;
+    for (uint32_t i = 0; i < depth; i++)
+        sym = (sym << 1) | static_cast<uint32_t>(dz_bit(ctx, tree[sym]));
+    return sym - (1u << depth);
+}
 
-    void init(const uint8_t* d, size_t s, size_t offset) {
-        data = d;
-        size = s;
-        pos = offset;
-        range = 0xFFFFFFFF;
-        code = 0;
-        for (int i = 0; i < 4 && pos < size; ++i) {
-            code = (code << 8) | data[pos++];
-        }
+bool parse_range_settings(const uint8_t* header, RangeSettings& rs) {
+    if (!header) return false;
+    rs.win_size = header[0];
+    rs.flags = header[1];
+    rs.offset_table_size = header[2];
+    rs.offset_tables = header[3];
+    rs.offset_contexts = header[4];
+    rs.ref_length_table_size = header[5];
+    rs.ref_length_tables = header[6];
+    rs.ref_offset_table_size = header[7];
+    rs.ref_offset_tables = header[8];
+    rs.big_min_match = header[9];
+    return true;
+}
+
+void dz_normalize(DzContext& ctx) {
+    int guard = 0;
+    while (ctx.range < 0x1000000 && guard < 10) {
+        guard++;
+        ctx.range <<= 8;
+        if (ctx.in_pos < ctx.in_end)
+            ctx.code = (ctx.code << 8) | *ctx.in_pos++;
+        else
+            ctx.code <<= 8;
     }
+}
 
-    void normalize() {
-        if (range < 0x1000000) {
-            range <<= 8;
-            if (pos < size) {
-                code = (code << 8) | data[pos++];
-            } else {
-                code <<= 8;
-            }
-        }
+int dz_bit(DzContext& ctx, uint16_t& prob) {
+    dz_normalize(ctx);
+    uint32_t bound = (ctx.range >> 11) * static_cast<uint32_t>(prob);
+    int bit;
+    if (ctx.code < bound) {
+        ctx.range = bound;
+        prob += static_cast<uint16_t>((0x800 - prob) >> 5);
+        bit = 0;
+    } else {
+        ctx.code -= bound;
+        ctx.range -= bound;
+        prob -= static_cast<uint16_t>(prob >> 5);
+        bit = 1;
     }
+    return bit;
+}
 
-    // Decode a bit with probability *prob (in [1, 0x7FF])
-    int decode_bit(uint16_t& prob) {
-        normalize();
-        uint32_t bound = (range >> 11) * prob;
-        if (code < bound) {
-            range = bound;
-            prob += (0x800 - prob) >> 5;
-            return 0;
-        } else {
-            code -= bound;
-            range -= bound;
-            prob -= prob >> 5;
-            return 1;
-        }
+static uint32_t decode_len(DzContext& ctx, uint16_t* probs, uint32_t pos_state) {
+    int b0 = dz_bit(ctx, probs[pos_state * 3]);
+    if (b0 == 0) return 2;
+    int b1 = dz_bit(ctx, probs[pos_state * 3 + 1]);
+    if (b1 == 0) return 3;
+    int b2 = dz_bit(ctx, probs[pos_state * 3 + 2]);
+    if (b2 == 0) return 4;
+    uint32_t len = 5;
+    for (int i = 0; i < 3; i++) {
+        int bn = dz_bit(ctx, probs[pos_state * 3 + 3 + i]);
+        if (bn == 0) return len;
+        len++;
     }
+    return len;
+}
 
-    // Decode a bit-tree of num_bits levels
-    uint32_t decode_bit_tree(uint16_t* probs, int num_bits) {
-        uint32_t m = 1;
-        for (int i = 0; i < num_bits; ++i) {
-            m = (m << 1) + decode_bit(probs[m]);
-        }
-        return m - (1u << num_bits);
+static uint32_t decode_dist(DzContext& ctx, uint16_t* probs) {
+    uint32_t slot = 1;
+    for (int i = 0; i < 6; i++) {
+        int bn = dz_bit(ctx, probs[0x40 / 2 + slot]);
+        slot = (slot << 1) | bn;
     }
+    slot -= 64;
 
-    // Decode a direct bits value (num_bits bits, no probability model)
-    uint32_t decode_direct_bits(int num_bits) {
-        uint32_t result = 0;
-        for (int i = 0; i < num_bits; ++i) {
-            normalize();
-            range >>= 1;
-            if (code >= range) {
-                code -= range;
-                result = (result << 1) | 1;
-            } else {
-                result = result << 1;
-            }
+    if (slot < 4) return slot + 1;
+
+    uint32_t extra = (slot >> 1) - 1;
+    uint32_t base = (2 + (slot & 1)) << extra;
+    for (uint32_t i = 0; i < extra; i++) {
+        dz_normalize(ctx);
+        ctx.range >>= 1;
+        uint32_t bit = 0;
+        if (ctx.code >= ctx.range) {
+            ctx.code -= ctx.range;
+            bit = 1;
         }
-        return result;
+        base |= bit << i;
     }
-};
+    return base;
+}
 
-// Probability tables — LZMA-style layout
-// From ARM decompilation (0x389f8, 0x3751c):
-//   state[8..0x11] = 9 tables of 64 × uint16_t (0x80 bytes each)
-//   state[0x10] = base + 0x400 (is-match table)
-//   state[0x11] = base + 0x480 (is-rep table)
-//   r4 + 0x640 + 4 = offset probs (64 entries)
-//   r4 + 0xE60 + 0xC = literal probs (256×8 = 2048 entries)
-//   r4 + 0x660 + 4 = match length probs (64 entries)
-struct DzProbTables {
-    static constexpr uint16_t INIT_PROB = 0x400;  // 1024
-
-    // Main tables (9 × 64 entries)
-    uint16_t tables[9][64];
-
-    // Literal context: 256 symbols × 8 bits = 2048 entries
-    uint16_t literal_probs[256][8];
-
-    // Match length: 64 entries (bit-tree of 4 levels)
-    uint16_t match_len_probs[64];
-
-    // Offset: 64 entries (bit-tree of 6 levels)
-    uint16_t offset_probs[64];
-
-    void init() {
-        for (int t = 0; t < 9; ++t)
-            for (int i = 0; i < 64; ++i)
-                tables[t][i] = INIT_PROB;
-        for (int i = 0; i < 256; ++i)
-            for (int j = 0; j < 8; ++j)
-                literal_probs[i][j] = INIT_PROB;
-        for (int i = 0; i < 64; ++i) {
-            match_len_probs[i] = INIT_PROB;
-            offset_probs[i] = INIT_PROB;
-        }
-    }
-};
-
-std::vector<uint8_t> DzDecompressor::decompress(const uint8_t* compressed, size_t comp_size,
-                                                  size_t uncomp_size) {
-    if (comp_size < 4 || uncomp_size == 0) {
-        std::fprintf(stderr, "[DZ] decompress: invalid input (comp=%zu, uncomp=%zu)\n",
-                     comp_size, uncomp_size);
+std::vector<uint8_t> dz_decompress(const uint8_t* compressed, size_t comp_size, size_t uncomp_size) {
+    if (comp_size < 8 || uncomp_size < 1) {
+        printf("[DZ] comp_size=%zu uncomp_size=%zu -- too small\n", comp_size, uncomp_size);
         return {};
     }
 
-    std::fprintf(stderr, "[DZ] decompress: comp=%zu, uncomp=%zu\n", comp_size, uncomp_size);
+    const uint8_t* stream = compressed;
+    size_t stream_size = comp_size;
 
-    std::vector<uint8_t> output;
-    output.reserve(uncomp_size);
+    std::vector<uint8_t> out(uncomp_size, 0);
 
-    RangeCoder rc;
-    rc.init(compressed, comp_size, 0);
+    constexpr int PROB_SIZE = 8192;
+    std::vector<uint16_t> prob_table(PROB_SIZE, 0x400);
 
-    DzProbTables probs;
-    probs.init();
+    auto p = [&](size_t byte_off) -> uint16_t& {
+        return prob_table[byte_off / 2];
+    };
 
-    // 5-byte context window (LZMA-style)
-    uint8_t window[5] = {0, 0, 0, 0, 0};
-    int window_pos = 0;
+    DzContext ctx{};
+    ctx.prob = prob_table.data();
+    ctx.range = 0xFFFFFFFF;
 
-    int literal_count = 0, match_count = 0, iterations = 0;
-    int max_iter = (int)uncomp_size * 10;
+    if (stream_size < 5) return {};
+    ctx.code = (static_cast<uint32_t>(stream[0]) << 24) |
+               (static_cast<uint32_t>(stream[1]) << 16) |
+               (static_cast<uint32_t>(stream[2]) << 8)  |
+               (static_cast<uint32_t>(stream[3]));
 
-    while (output.size() < uncomp_size && rc.pos < comp_size && iterations < max_iter) {
-        iterations++;
+    ctx.in_pos = const_cast<uint8_t*>(stream) + 4;
+    ctx.in_end = const_cast<uint8_t*>(stream) + stream_size;
+    ctx.out_pos = out.data();
+    ctx.out_count = 0;
+    ctx.out_limit = static_cast<uint32_t>(uncomp_size);
+    ctx.state = 0;
+    ctx.rep0 = ctx.rep1 = ctx.rep2 = ctx.rep3 = 0;
+    ctx.pos_state_mask = 7;
+    ctx.total_out = 0;
+    ctx.input_consumed = 0;
+    memset(ctx.window, 0, sizeof(ctx.window));
+    ctx.window_filled = 0;
 
-        // Update window with last output byte
-        if (!output.empty()) {
-            window[window_pos] = output.back();
-            window_pos = (window_pos + 1) % 5;
-        }
+    uint32_t out_count = 0;
+    uint32_t max_iter = 200000;
+    uint32_t iter = 0;
 
-        // Compute context from window using CRC32 hash
-        // From decompilation: context = (window[1]<<24)|(window[2]<<16)|(window[3]<<8)|window[4]
-        uint32_t ctx = crc32_hash(window);
-        uint32_t table_idx = ctx % 64;
+    while (out_count < uncomp_size && iter < max_iter) {
+        iter++;
+        uint32_t pos_state = out_count & ctx.pos_state_mask;
+        uint32_t sv = ctx.state;
 
-        // Decode is-match flag (table 0, index table_idx)
-        int is_match = rc.decode_bit(probs.tables[0][table_idx]);
+        int is_match = dz_bit(ctx, prob_table[sv * 16 + pos_state]);  // DZ uses *16 not *8
 
-        if (!is_match) {
-            // Literal byte — decode 8 bits using bit-tree
-            literal_count++;
-            uint8_t prev_byte = output.empty() ? 0 : output.back();
-            uint8_t symbol = 0;
-            // Use literal_probs[prev_byte] as the bit-tree
-            uint32_t m = 1;
-            for (int bit = 0; bit < 8; ++bit) {
-                int b = rc.decode_bit(probs.literal_probs[prev_byte][m]);
-                m = (m << 1) + b;
+        if (is_match == 0) {
+            // LITERAL: 8-bit bit-tree at byte offset 0xE6C
+            uint32_t sym = 1;
+            for (int i = 0; i < 8; i++) {
+                int b = dz_bit(ctx, prob_table[0xE6C / 2 + sym]);
+                sym = (sym << 1) | b;
             }
-            symbol = (uint8_t)(m - 256);
-            output.push_back(symbol);
+            uint8_t byte_val = static_cast<uint8_t>(sym - 256);
+            if (out_count < uncomp_size) {
+                ctx.out_pos[out_count++] = byte_val;
+            }
+
+            if (sv < 4) ctx.state = 0;
+            else if (sv < 10) ctx.state = sv - 3;
+            else ctx.state = sv - 6;
+
         } else {
-            // Match — decode length and offset
-            match_count++;
+            // Match
+            int is_long = dz_bit(ctx, p(0x180 + sv * 2));  // DZ: is_rep at byte offset 0x180
 
-            // Decode match length: bit-tree of 4 levels (values 0..15)
-            uint32_t len_code = rc.decode_bit_tree(probs.match_len_probs, 4);
-            uint32_t match_len = len_code + 2;  // 2..17
+            uint16_t* len_probs;
+            uint32_t match_len;
+            uint32_t match_dist;
 
-            // Decode offset: bit-tree of 6 levels (values 0..63)
-            uint32_t offset_code = rc.decode_bit_tree(probs.offset_probs, 6);
-            uint32_t match_offset = offset_code + 1;  // 1..64
-
-            if (match_offset > output.size()) {
-                std::fprintf(stderr, "[DZ] Invalid match: off=%u, out=%zu (lit=%d,mat=%d,iter=%d)\n",
-                             match_offset, output.size(), literal_count, match_count, iterations);
-                return {};
+            if (is_long == 0) {
+                len_probs = &prob_table[0x664 / 2];
+                match_len = decode_len(ctx, len_probs, pos_state);
+                match_dist = decode_dist(ctx, len_probs);
+                ctx.state = 7;
+            } else {
+                len_probs = &prob_table[0xA68 / 2];
+                match_len = decode_len(ctx, len_probs, pos_state);
+                match_dist = decode_dist(ctx, len_probs);
+                ctx.state = 10;
             }
 
-            // Copy match
-            size_t src_pos = output.size() - match_offset;
-            for (uint32_t i = 0; i < match_len && output.size() < uncomp_size; ++i) {
-                output.push_back(output[src_pos++]);
-            }
-        }
-    }
+            if (match_dist == 0) match_dist = 1;
+            if (match_dist > out_count) match_dist = out_count ? out_count : 1;
+            if (match_dist == 0) match_dist = 1;
 
-    std::fprintf(stderr, "[DZ] result: %zu/%zu (lit=%d,mat=%d,iter=%d,in=%zu/%zu)\n",
-                 output.size(), uncomp_size, literal_count, match_count, iterations, rc.pos, comp_size);
-
-    if (!output.empty()) {
-        std::fprintf(stderr, "[DZ] output first 32: ");
-        for (size_t i = 0; i < 32 && i < output.size(); ++i)
-            std::fprintf(stderr, "%02x ", output[i]);
-        std::fprintf(stderr, "\n[DZ] as text: %.60s\n", output.data());
-    }
-    if (output.size() != uncomp_size) {
-        std::fprintf(stderr, "[DZ] Size mismatch: exp=%zu got=%zu\n", uncomp_size, output.size());
-    }
-    return output;
-}
-
-std::vector<uint8_t> DzDecompressor::decompress_streaming(
-    const uint8_t* compressed, size_t comp_size,
-    size_t offset, size_t uncomp_size) {
-    // For streaming, we need to maintain state across calls.
-    // For now, use the simple decompress with offset adjustment.
-    if (offset >= comp_size) return {};
-
-    // Note: Proper streaming requires maintaining range coder state.
-    // This is a simplified version that decompresses from the given offset.
-    // It may not work for archives where files share a continuous stream.
-    std::vector<uint8_t> output;
-    output.reserve(uncomp_size);
-
-    RangeCoder rc;
-    rc.init(compressed, comp_size, offset);
-
-    DzProbTables probs;
-    probs.init();
-
-    uint8_t window[5] = {0, 0, 0, 0, 0};
-    int window_pos = 0;
-
-    while (output.size() < uncomp_size && rc.pos < comp_size) {
-        if (!output.empty()) {
-            window[window_pos] = output.back();
-            window_pos = (window_pos + 1) % 5;
-        }
-
-        uint32_t ctx = crc32_hash(window);
-        uint32_t table_idx = ctx % 64;
-
-        int is_match = rc.decode_bit(probs.tables[0][table_idx]);
-
-        if (!is_match) {
-            uint8_t prev_byte = output.empty() ? 0 : output.back();
-            uint8_t symbol = 0;
-            for (int bit = 0; bit < 8; ++bit) {
-                int b = rc.decode_bit(probs.literal_probs[prev_byte][bit]);
-                symbol = (uint8_t)((symbol << 1) | b);
-            }
-            output.push_back(symbol);
-        } else {
-            uint32_t len_code = rc.decode_bit_tree(probs.match_len_probs, 4);
-            uint32_t match_len = len_code + 2;
-            uint32_t offset_code = rc.decode_bit_tree(probs.offset_probs, 6);
-            uint32_t match_offset = offset_code + 1;
-
-            if (match_offset > output.size()) {
-                std::fprintf(stderr, "[DZ] Invalid match in streaming mode\n");
-                return {};
-            }
-
-            size_t src_pos = output.size() - match_offset;
-            for (uint32_t i = 0; i < match_len && output.size() < uncomp_size; ++i) {
-                output.push_back(output[src_pos++]);
+            uint8_t* src = ctx.out_pos + (out_count - match_dist);
+            for (uint32_t i = 0; i < match_len && out_count < uncomp_size; i++) {
+                uint8_t b = *src++;
+                ctx.out_pos[out_count++] = b;
             }
         }
     }
 
-    return output;
+    ctx.total_out = static_cast<uint32_t>(out_count);
+    ctx.input_consumed = static_cast<uint32_t>(ctx.in_pos - stream);
+
+    if (out_count > 0) {
+        out.resize(out_count);
+        printf("[DZ] Decoded %u bytes (limit=%zu, iter=%u)\n", out_count, uncomp_size, iter);
+        printf("[DZ] First 16 bytes:");
+        uint32_t n = out_count < 16 ? out_count : 16;
+        for (uint32_t i = 0; i < n; i++)
+            printf(" %02x", out[i]);
+        printf("\n");
+        return out;
+    }
+
+    printf("[DZ] FAILED: out_count=%u iter=%u\n", out_count, iter);
+    return {};
 }
 
 }  // namespace resf2::dz

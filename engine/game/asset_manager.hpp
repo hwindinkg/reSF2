@@ -86,6 +86,10 @@ public:
     std::unique_ptr<ren::Texture2D>& hud_font_tex() { return hud_font_tex_; }
     const std::unique_ptr<ren::Texture2D>& hud_font_tex() const { return hud_font_tex_; }
 
+    // NPivot Y baseline
+    float stance_npivot_y() const { return stance_npivot_y_; }
+    void set_stance_npivot_y(float y) { stance_npivot_y_ = y; }
+
     // Stage data
     fmt::StageData& stage_data() { return stage_data_; }
     const fmt::StageData& stage_data() const { return stage_data_; }
@@ -95,16 +99,21 @@ public:
     // Loading methods
     void load_atlas(const std::string& name, const std::string& location, const std::string& asset_root);
     void load_hud_textures(const std::string& asset_root);
-    void load_loading_screen(const std::string& asset_root);
+    void load_menu_textures(const std::string& asset_root);
+    void load_loading_screen(const std::string& asset_root, int window_w, int window_h);
     void load_skeleton(const std::string& asset_root, const std::string& location);
     void load_body_model(const std::string& asset_root, const std::string& location, bool is_bag = false);
+    void load_punching_bag_model(const std::string& asset_root);
+    void load_enemy_weapon(const std::string& weapon_name, const std::string& asset_root);
     void load_player_weapon(const std::string& tactic, const std::string& asset_root);
-    void load_moves(const std::string& asset_root, const std::string& location);
+    void load_animations(const std::string& asset_root);
+    void load_moves(const std::string& asset_root);
     void load_hud_font(const std::string& asset_root);
     void load_stages(const std::string& asset_root);
+    void load_sounds(const std::string& asset_root);
 
-    // Animation loading
-    void load_animation(const std::string& anim_name, const std::string& asset_root);
+    // Animation loading (single .bin file)
+    void load_animation(const std::string& anim_name, const std::string& asset_root, const std::string& search_dir = "");
 
     // Sound loading
     static void load_sound(const std::string& name, const std::string& asset_root);
@@ -115,7 +124,16 @@ public:
     // Clear atlases for location reload
     void clear_atlases() { atlases_.clear(); }
 
-private:
+    // Map weapon tactic name to model file
+    std::string weapon_tactic_to_model_file(const std::string& tactic) const;
+
+public:
+    // Parse body/head model XML into a BodyModel
+    void parse_body_model_xml(const std::string& xml, resf2::game::BodyModel* model, const std::string& tag_prefix);
+
+    // Load a single texture atlas into hud_textures_ (used by load_hud_textures)
+    void load_texture_atlas_to_hud(const std::filesystem::path& dir, const std::string& atlas_name);
+
     // Texture/atlas caches
     std::unordered_map<std::string, AtlasRef> atlases_;
     std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> hud_textures_;
@@ -150,6 +168,9 @@ private:
     // Stage data
     fmt::StageData stage_data_;
     bool stages_loaded_ = false;
+
+    // NPivot Y from skeleton rest-pose (set by load_skeleton)
+    float stance_npivot_y_ = 106.0f;
 };
 
 } // namespace resf2::game

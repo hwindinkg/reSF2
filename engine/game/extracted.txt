@@ -1,0 +1,6 @@
+public:
+    explicit Game(std::string asset_root, bool replay_mode = false, bool dump_state = false);
+    ~Game() override;
+
+    // Discover all location names by scanning the assets/locations/ directory.
+void Game::void discover_locations() {

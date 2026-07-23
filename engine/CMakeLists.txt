@@ -15,11 +15,20 @@
 #   engine/tools      -> libresf2_tools.a     (offline asset tools support)
 #   engine/reverse    -> libresf2_reverse.a   (format parsers, RE helpers)
 
-file(GLOB RESF2_ENGINE_SUBDIRS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
-    "${CMAKE_CURRENT_SOURCE_DIR}/*")
-foreach(subdir ${RESF2_ENGINE_SUBDIRS})
-    if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${subdir}"
-       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${subdir}/CMakeLists.txt")
-        add_subdirectory(${subdir})
-    endif()
-endforeach()
+# Order matters for dependency resolution
+add_subdirectory(reverse)
+add_subdirectory(platform)
+add_subdirectory(core)
+add_subdirectory(format)
+add_subdirectory(fight)
+add_subdirectory(runtime)
+add_subdirectory(scene)
+add_subdirectory(renderer)
+add_subdirectory(audio)
+add_subdirectory(game)
+# Empty/placeholder subdirectories listed last
+add_subdirectory(animation)
+add_subdirectory(physics)
+add_subdirectory(tools)
+add_subdirectory(network)
+add_subdirectory(ui)
