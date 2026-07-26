@@ -2674,6 +2674,8 @@ private:
         float magic_cx = 0, magic_cy = 0;
         // State for this frame.
         float dir_x = 0, dir_y = 0;   // stick deflection, -1..1
+        // The deflection quantised to the original's eight directions.
+        bool up = false, down = false, left = false, right = false;
         bool punch = false, kick = false;         // held
         bool punch_pressed = false, kick_pressed = false;  // this frame
     };
@@ -2775,6 +2777,50 @@ private:
         }
         c.punch_pressed = c.punch && !was_punch;
         c.kick_pressed = c.kick && !was_kick;
+
+        // [ORIGINAL] Quantise the deflection the way the original does. The two
+        // numbers come out of assets/internalSettings.xml:
+        //
+        //     <ControllerGripRelativeRadius Value="0.5" />
+        //     <ControllerPrimaryAngle       Value="55"  />
+        //
+        // The first is the dead zone as a fraction of the ring's radius: the
+        // knob has to travel HALF the ring before any direction registers.
+        // The second says the eight directions are NOT equal 45-degree
+        // sectors — each of the four primary directions owns 55 degrees, and
+        // the four diagonals share what is left, 35 degrees each. That is what
+        // makes the original feel decisive: it takes a deliberate push to get a
+        // diagonal, so "forward" does not turn into "forward+up" on the way.
+        //
+        // This used to be a per-axis threshold of 0.4, which is a SQUARE dead
+        // zone with equal 90-degree quadrants: a diagonal push fired both axes
+        // at once and every primary direction was one careless degree away from
+        // becoming a diagonal.
+        constexpr float kGripRelativeRadius = 0.5f;
+        constexpr float kPrimaryAngleDeg = 55.0f;
+        const float len = std::sqrt(c.dir_x * c.dir_x + c.dir_y * c.dir_y);
+        if (len >= kGripRelativeRadius) {
+            // Screen Y grows downwards; atan2 with -dir_y gives a maths-style
+            // angle with 0 = right, 90 = up.
+            float deg = std::atan2(-c.dir_y, c.dir_x) * 57.2957795f;
+            if (deg < 0.0f) deg += 360.0f;
+            const float half = kPrimaryAngleDeg * 0.5f;
+            auto near_axis = [&](float axis_deg) {
+                float d = std::fabs(deg - axis_deg);
+                if (d > 180.0f) d = 360.0f - d;
+                return d <= half;
+            };
+            if (near_axis(0.0f))        { c.right = true; }
+            else if (near_axis(90.0f))  { c.up = true; }
+            else if (near_axis(180.0f)) { c.left = true; }
+            else if (near_axis(270.0f)) { c.down = true; }
+            else {                        // a diagonal sector
+                c.right = (deg < 90.0f || deg > 270.0f);
+                c.left = (deg > 90.0f && deg < 270.0f);
+                c.up = (deg > 0.0f && deg < 180.0f);
+                c.down = (deg > 180.0f && deg < 360.0f);
+            }
+        }
         touch_ = c;
     }
 
