@@ -736,6 +736,12 @@ void AssetManager::load_moves(const std::string& asset_root) {
                     }
                 }
             } else if (sub.name == "Align") {
+                move.has_align = true;
+                move.align_axis = sub.attr("Axis");
+                move.align_x = move.align_axis.find('X') != std::string::npos;
+                move.align_y = move.align_axis.find('Y') != std::string::npos;
+                move.align_z = move.align_axis.find('Z') != std::string::npos;
+                move.align_shift_model_node = sub.attr("ShiftModelNode");
                 if (auto* pivot = sub.first_child("Pivot")) {
                     std::string obj = pivot->attr("Object");
                     if (obj == "Animation") {
@@ -743,6 +749,10 @@ void AssetManager::load_moves(const std::string& asset_root) {
                     } else {
                         move.moveinside_pivot_node = pivot->attr("Part");
                     }
+                }
+                if (auto* position = sub.first_child("Position")) {
+                    move.align_shift_x = tof(position->attr("ShiftX"));
+                    move.align_shift_y = tof(position->attr("ShiftY"));
                 }
             } else if (sub.name == "Conditions") {
                 for (const auto& cond : sub.children) {
