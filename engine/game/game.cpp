@@ -2017,6 +2017,10 @@ void Game::host_update_gameplay(uint32_t dt) {
                                     // Apply the impulse to the bag edge's Verlet nodes.
                                     float imp_x = move_it->second.impulse_x;
                                     float imp_y = move_it->second.impulse_y;
+                                    if (dump_state_)
+                                        std::printf("[COMBAT] impulse from move '%s': x=%.1f y=%.1f "
+                                                    "(moves.xml <Impulse>)\n",
+                                                    current_move_.c_str(), imp_x, imp_y);
                                     if (imp_x != 0 || imp_y != 0) {
                                         float dir = facing_right_ ? 1.0f : -1.0f;
                                         // Distribute impulse by hit position along edge (original Bl.strike)
