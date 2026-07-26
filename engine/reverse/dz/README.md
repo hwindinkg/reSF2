@@ -1,133 +1,190 @@
-# DZ (Marmalade derbh) decompression — RE notes
+# derbh (.dz) — reverse-engineering notes
 
-## Status: Container format fully decoded. Compression algorithm identified (arithmetic/range coding). Decompressor implementation blocked on ARM emulation setup.
+**Status: solved.** Container format and both coders used by Shadow Fight 2 are
+implemented natively in `engine/reverse/dz_reader.cpp` + `dz_coder.cpp`.
+`tools/dzip.exe` is no longer needed at runtime, and neither is pre-extraction.
 
-## Corrected container format (this session)
+Verification: `tests/test_dz_archive.cpp` decodes all 120 files of `files.dz`
+and all 557 of `animations.dz`, and byte-compares `files_list.xml`,
+`forge.xml`, `moves.xml` and `animations_list.xml` against the extracted copies
+committed under `assets/`. A Python cross-check decoded all 120 files of
+`files.dz` byte-for-byte against `dzip.exe -d` output.
 
-The previous parser (parse_dz.py) had the file table field order wrong. The correct format, verified by dumping raw bytes and checking offset/size consistency:
+## Sources
 
-### DTRZ header
-- 4 bytes: `DTRZ` magic
-- u16 LE: num_files
-- u16 LE: num_dirs
-- u8: version (0)
+| Binary | What it gave us |
+|---|---|
+| `download/dzip.exe` | Marmalade's own "Derbh commpress tool" — x86, unstripped enough to name every coder and every coder parameter. Primary source. |
+| `reverse/binaries/ShadowFight2.s86` | `DzipFile::open` @ `0x102c9778`, `Derbh::open` @ `0x102ca66b` — confirms the game parses the container identically. |
+| `reverse/binaries/libs3e_android.so` | `s3eCompression*` — a *different* subsystem, see the note at the bottom. |
 
-### Names section
-- num_files null-terminated UTF-8 strings (file names, in order)
-- num_dirs null-terminated UTF-8 strings (directory names)
+Key dzip.exe addresses (image base `0x00400000`):
 
-### File attribute table
-- num_files × 6 bytes (purpose unknown — possibly folder index + flags + CRC)
+| Address | Role |
+|---|---|
+| `0x00417aa0` | coder registration — names, masks, parameter tables |
+| `0x004010d0` | `DzipFile::DzipFile` — constructs the 4 coder objects |
+| `0x00401d20` | `DzipFile::open` |
+| `0x00401430` | `DzipFile::read` — walks a file's block chain |
+| `0x00409d90` | `DZCoder::init` — reads the 10-byte coder header |
+| `0x00409f50` | `DZCoder::openEntry` — reset models, init range decoder |
+| `0x0040a2f0` | `DZCoder` main symbol loop |
+| `0x004097e0` | offset symbol decode + LZ77 copy |
+| `0x00408810` / `0x00408e70` | range decoder init / decode |
+| `0x00408fe0` | model init; `0x004087b0` rescale; `0x004088a0` sum rebuild |
 
-### Lengths header
-- 4 bytes (two u16 LE values — possibly total comp/uncomp sizes or block counts)
+## Container layout
 
-### File table (num_files × 16 bytes)
-Each 16-byte entry is 4 fields of (u24 LE value + u8):
+```
+'DTRZ'                                  4
+u16 num_files
+u16 num_dirs                            index 0 is the implicit root
+u8  version                             must be 0
+num_files      NUL-terminated file names
+num_dirs - 1   NUL-terminated directory paths, stored full ("assets\animations")
+num_files chains of u16, each terminated by 0xFFFF:
+    chain[0]   = directory index
+    chain[1..] = block-table indices; the file is the concatenation of its blocks
+u16 num_volumes
+u16 num_blocks
+num_blocks x 16 bytes:  { u32 offset, u32 comp_size, u32 uncomp_size, u32 flags }
+num_volumes - 1 NUL-terminated volume names (multi-part archives)
+per-coder headers, in coder registration order, for every coder whose mask
+appears in the OR of all block flags
+```
 
-| Field | Bytes | u24 value    | u8 byte     |
-|-------|-------|--------------|-------------|
-| 0     | 0-3   | uncomp_size  | CRC         |
-| 1     | 4-7   | data_offset  | CRC         |
-| 2     | 8-11  | comp_size    | **type**    |
-| 3     | 12-15 | reserved (0) | CRC         |
+Notes that cost earlier sessions a lot of time:
 
-**Type values observed:**
-- `4` — all 120 files in files.dz use this type
-- `8` — all 557 files in animations.dz use this type
-- Both are DZ compression variants (the algorithm is the same; the type byte may indicate a parameter/variant)
+* `offset` is an **absolute** file offset, not relative to a data section.
+  Blocks are laid out contiguously and are **not** a single shared stream —
+  each block is independently decodable.
+* `comp_size` is only maintained by the DZ coder. For ZLib-coder blocks it
+  mirrors `uncomp_size`; the deflate stream's own end marker is authoritative.
+* The per-file table is **not** a fixed 6-byte record. It is the variable-length
+  u16 chain above. Assuming 6 bytes/file put the block table one byte out of
+  alignment, which is where the "overlapping offsets / streaming compressor"
+  theory came from.
+* `num_dirs` counts directory *slots*; only `num_dirs - 1` names are stored
+  because index 0 is the root.
 
-### Data section
-Starts immediately after the file table. All offsets in the file table are relative to the start of this section.
+## Coders
 
-**Key finding: DZ is a STREAMING compressor.** File offsets overlap:
-- files_list.xml: off=3, comp=23, uncomp=25
-- settings.xml: off=3, comp=23, uncomp=28 (same offset/comp, different uncomp!)
-- localization.xml: off=4, comp=27, uncomp=348
+Registered in `dzip.exe` `FUN_00417aa0`; the mask is the value returned by the
+coder's `getMask` vtable slot (offset `+0x0c`).
 
-This means the entire data section is one continuous compressed stream. Each file's "offset" is the position in the stream where that file's decoding STARTS, and the decompressor state carries over between files. To decompress file N, you must first decode all previous files 0..N-1.
+| Mask | Name | Used by |
+|---|---|---|
+| `0x004` | `DZ Coder` | `files.dz` |
+| `0x008` | `ZLib Coder` | `animations.dz`, `ZONE_*.dz` |
+| `0x010` | `BZip Coder` | — |
+| `0x080` | `Zero replace` | — |
+| `0x100` | `Copy Coder (no compression)` | — |
+| `0x200` | `LZMA Coder` | — |
 
-## Entropy analysis (this session)
+The coder object exposes four function pointers inline (no vtable pointer):
+`[0]` init, `[1]` readChunk, `[2]` openEntry, `[3]` getMask.
 
-Shannon entropy of DZ-compressed blocks:
-- Small files (comp < 50 bytes): 4.2–4.7 bits/byte
-- Medium files (comp 100–500 bytes): 6.8–7.6 bits/byte
-- Large files (comp > 500 bytes): 7.5–7.9 bits/byte
+### ZLib Coder (0x008)
 
-**Conclusion:** High entropy for larger blocks confirms this is real compression (arithmetic/range coding as documented), NOT XOR obfuscation. The low entropy for tiny files is expected — arithmetic coding has fixed overhead for initialization.
+A bare 10-byte gzip header followed by a raw deflate stream and **no trailer**.
+Inflate with `wbits = -15` after skipping the header.
 
-## The DZ algorithm (from ARM disassembly)
+### DZ Coder (0x004)
 
-- Located in `libs3e_android.so`:
-  - Read handler: function 0x51f60
-  - Actual decode step: function 0x389f8 (called from read handler)
-- Uses arithmetic/range coding with:
-  - 5-byte context window (last 5 decoded bytes)
-  - 32-bit hash from window: `window[1]<<24 | window[2]<<16 | window[3]<<8 | window[4]`
-  - CRC32 table (poly 0x04C11DB7, big-endian) for context hashing
-  - Probability model with reference tables (RefOffsetTables, RefLengthTables)
-  - LZ77-style match references
+The only coder that writes an archive-level header: 10 bytes, which are coder
+parameters `0x14..0x1d` verbatim. Every shipped archive uses the defaults:
 
-### Function pointer table
-.data section at 0xc3000 contains compression coder function pointers:
-- type=1 → 0x000b3358 (Copy coder)
-- type=2 → 0x000b3368 (ZLib coder)
-- type=3 → 0x000b3370 (BZip coder)
-- type=4 → 0x000b3378 (DZ coder)
-- type=5 → 0x000b3380 (LZMA coder)
+```
+10 01 08 03 03 07 01 07 03 0f
+```
 
-(Type 8 observed in animations.dz is not in this table — it may be a variant of type 4, or a different coder pointer that's set up at runtime.)
+| Byte | Parameter | Default |
+|---|---|---|
+| 0 | `WinSize` | `0x10` |
+| 1 | `Flags` | `1` |
+| 2 | `OffsetTableSize` | `8` |
+| 3 | `OffsetTables` | `3` |
+| 4 | `OffsetContexts` | `3` |
+| 5 | `RefLengthTableSize` | `7` |
+| 6 | `RefLengthTables` | `1` |
+| 7 | `RefOffsetTableSize` | `7` |
+| 8 | `RefOffsetTables` | `3` |
+| 9 | `BigMinMatch` | `0x0f` |
 
-## ARM emulation via Unicorn — blocked
+`init` rejects the archive unless `WinSize < 31`, `Flags < 4` and
+`OffsetContexts <= 8`.
 
-- libs3e_android.so loads correctly into Unicorn ARM emulator
-- ELF relocations applied (2095 relocations)
-- init_array constructors: 8 functions at 0xd830-0xdac8
-  - 5 succeed, 3 fail (need PLT stubs for __cxa_atexit etc.)
-- s3eCompressionDecompInit returns a pointer (0xc8592) instead of type index (1-4)
-  - This is because the init_array constructors don't fully set up the
-    function pointer table at 0xc8578
-- Full DZ decompression via ARM emulation requires a complete Marmalade
-  runtime environment (thread state, allocator pool, config system).
+**Algorithm.** A carry-less (Subbotin) range decoder driving adaptive frequency
+models. Each model is a complete binary tree in a flat `uint16` array: node `i`
+has children `2i+1` / `2i+2`, internal nodes hold the sum of their left subtree,
+leaves hold symbol frequencies. All frequencies start at 1 and are reset at the
+start of every block.
 
-## Recommended paths forward
+Tree layout (`FUN_00408fe0`) for `n_sym` symbols: `n = 2*n_sym - 1`,
+`n_internal = n_sym - 1`, `tree_off` = the largest `2^k - 1` that is `< n`,
+`split = n_sym - (tree_off - n_internal)`. Symbol `s` lives at node
+`tree_off + s` for `s < split`, otherwise `n_internal + (s - split)`.
 
-1. **Fallback directory approach** (IMPLEMENTED in dz_reader.cpp):
-   - The DZ registry now supports `add_fallback_dir()` to register
-     directories containing pre-extracted files.
-   - When a file can't be decompressed from .dz (e.g. type=4 DZ custom),
-     the registry searches fallback directories for the file.
-   - Search paths tried (in order):
-     - `<dir>/<name>`
-     - `<dir>/files/<name>` (files.dz extracted contents)
-     - `<dir>/animations/<name>` (animations.dz XML files)
-     - `<dir>/animations/binary/<name>` (.bin animation files)
-     - `<dir>/files/assets/<name>` (deeper nesting)
-     - `<dir>/assets/files/<name>`
-     - `<dir>/assets/animations/<name>`
-     - `<dir>/assets/animations/binary/<name>`
-   - This allows the engine to work with pre-extracted assets while
-     still supporting .dz archives for files that can be decompressed
-     (gzip type=8).
-   - For type=4 DZ custom compression, users should pre-extract files.dz
-     using `dzip.exe -d files.dz` on Windows.
+Range decoder state is `low`, `code`, `range`; init sets `low = 0`,
+`range = 0xFFFFFFFF` and reads 4 big-endian bytes into `code`. Per symbol:
 
-2. **Manual port of DZ decoder** (for in-engine .dz support):
-   - Port the ~250 ARM instructions at 0x389f8 to C++/Python
-   - The algorithm is documented above (arithmetic coding + 5-byte context + CRC32 hash + LZ77 matches)
-   - This is clean-room (re-implementing from algorithm description, not copying code)
-   - The streaming nature (overlapping offsets) must be handled: decompress the entire archive as one stream
-   - Helper functions to port:
-     - 0x3751c: bit/model decode (range coder with context lookup)
-     - 0x37adc: range coder decode (the main decode loop)
-     - 0xc94c: memcpy helper
+```
+r        = range / total
+target   = (code - low) / r
+          descend the tree, subtracting left-subtree sums, adding `inc`
+          to every internal node taken
+consumed = target - remainder
+low     += consumed * r
+range    = leaf_freq * r
+leaf    += inc ; total += inc ; halve all leaves if total > max_total
+renormalise while ((range + low) ^ low) <= 0xFFFFFF, pulling in bytes
+```
 
-3. **Alternative: Ghidra analysis** — load libs3e_android.so into Ghidra with the S3ELoader plugin, decompile the DZ decode function at 0x389f8, and port the decompiled C to Python/C++.
+Models:
 
-## Files
-- `dz_parse_correct.py` (in scripts/) — corrected container parser with entropy analysis
-- `dz_dump_format.py` (in scripts/) — raw hex dump of DTRZ header for format verification
-- `dz_entropy_analysis.py` (in scripts/) — Shannon entropy analysis of DZ blocks
-- `parse_dz.py` (in scripts/) — old parser with incorrect field order (kept for reference)
-- `dz_final.py` (in scripts/) — Unicorn ARM emulation attempt (blocked on init_array)
-- `dz_decode_v2.py` (in scripts/) — manual port attempt (incomplete, algorithm not fully correct)
+* main — `0x202` symbols, `inc = 0x10`, `max_total = 0x10000`
+* offset — `[OffsetContexts][OffsetTables]`, `1 << OffsetTableSize` symbols,
+  `inc = 0x20 + 4*k` for table index `k`
+
+Main alphabet:
+
+| Symbol | Meaning |
+|---|---|
+| `0x000..0x0FF` | literal byte |
+| `0x100..0x200` | match, `length = sym - 0xFE` (2..258) |
+| `0x201` | end of block |
+| `>= 0x202` | cross-entry reference (see below) |
+
+Offset decoding picks the model row by `min(length - 2, OffsetContexts - 1)`,
+then reads chunks of `OffsetTableSize` bits; the MSB of each chunk is a
+"more chunks follow" flag, and successive chunks use successive tables
+(clamped to `OffsetTables - 1`). The assembled value is a distance slot:
+`raw < 4` selects one of four recent distances (moving it to front),
+otherwise the distance is `raw - 3` and the recent list is shifted.
+
+**Not implemented:** symbols `>= 0x202`. They only occur when some block carries
+flag bit `0x1`, marking it as a shared-dictionary block that other blocks
+reference (`FUN_00409ba0` / `FUN_00409970` / `FUN_00409ff0` / `FUN_0040a160`,
+plus the primer model loaded by `FUN_00409630`). No Shadow Fight 2 archive uses
+this. `dz_decode_block` returns empty if it ever sees one.
+
+**Windowing.** The original decodes in windows of `max(MinBufSize, 1 << WinSize)`
+bytes and resolves back-references reaching into the previous window through
+`DZCoder+0x40`. Decoding a whole block into one contiguous buffer yields the
+identical byte stream — the windowing is a memory bound only, and that is what
+`dz_decode_block` does.
+
+## Correction to earlier notes
+
+`libs3e_android.so` `FUN_000489f8` / `FUN_00047adc` / `FUN_0004751c` are
+`LzmaDec_DecodeToDic` / `LzmaDec_DecodeReal2` / `LzmaDec_TryDummy` — plain LZMA
+from the LZMA SDK. Identifying markers: probability count
+`0x300 << (lc + lp)` plus `0x736`, `tempBuf[20]` (`LZMA_REQUIRED_INPUT_MAX`),
+`remainLen == 0x112` (`kMatchSpecLenStart`). `FUN_000620bc` reads a 13-byte
+LZMA_ALONE header and calls `LzmaDec_Allocate` with 5 props bytes.
+
+That is Marmalade's **`s3eCompression`** API, whose coder id 4 happens to be
+LZMA. It is a different enum from the derbh coder mask, where `0x004` is the DZ
+Coder. Chasing the s3e LZMA path for the derbh type-4 blocks was a dead end;
+the `RefOffsetTables` / `RefLengthTables` description in the original notes was
+the correct lead.

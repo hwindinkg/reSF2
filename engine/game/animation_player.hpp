@@ -35,6 +35,9 @@ public:
     bool anim_anchor_set() const { return anim_anchor_set_; }
     float jump_y_offset() const { return jump_y_offset_; }
     float prev_root_offset() const { return prev_root_offset_; }
+    float committed_root_x() const { return committed_root_x_; }
+    float prev_root_offset_x() const { return prev_root_offset_x_; }
+    float prev_root_offset_y() const { return prev_root_offset_y_; }
     float step_start_player_x() const { return step_start_player_x_; }
     bool anim_facing_right() const { return anim_facing_right_; }
     float y_adjust_smoothed() const { return y_adjust_smoothed_; }
@@ -63,6 +66,9 @@ public:
     int& mutable_prev_frame_idx() { return prev_frame_idx_; }
     float& mutable_jump_y_offset() { return jump_y_offset_; }
     float& mutable_prev_root_offset() { return prev_root_offset_; }
+    float& mutable_committed_root_x() { return committed_root_x_; }
+    float& mutable_prev_root_offset_x() { return prev_root_offset_x_; }
+    float& mutable_prev_root_offset_y() { return prev_root_offset_y_; }
     float& mutable_step_start_player_x() { return step_start_player_x_; }
     bool& mutable_anim_facing_right() { return anim_facing_right_; }
     float& mutable_y_adjust_smoothed() { return y_adjust_smoothed_; }
@@ -87,18 +93,27 @@ public:
     void set_prev_frame_idx(int i) { prev_frame_idx_ = i; }
     void set_jump_y_offset(float o) { jump_y_offset_ = o; }
     void set_prev_root_offset(float o) { prev_root_offset_ = o; }
+    void set_committed_root_x(float v) { committed_root_x_ = v; }
+    void set_prev_root_offset_x(float v) { prev_root_offset_x_ = v; }
+    void set_prev_root_offset_y(float v) { prev_root_offset_y_ = v; }
     void set_step_start_player_x(float x) { step_start_player_x_ = x; }
     void set_anim_facing_right(bool r) { anim_facing_right_ = r; }
     void set_y_adjust_smoothed(float y) { y_adjust_smoothed_ = y; }
     void set_stance_npivot_y(float y) { stance_npivot_y_ = y; }
     void set_anim_npivot_bin_y(float y) { anim_npivot_bin_y_ = y; }
 
+    // Priority
+    int anim_priority() const { return priority_; }
+    void set_priority(int p) { priority_ = p; }
+    int& mutable_priority() { return priority_; }
+
     // Play a named animation (looked up in the animations map)
     bool play(
         const std::string& name,
         const std::unordered_map<std::string, AnimationData>& animations,
         float fps,
-        bool loop
+        bool loop,
+        int priority = 0  // priority level; higher = more important
     );
 
     // Play an arbitrary animation for a specific duration
@@ -124,6 +139,7 @@ private:
     float anim_speed_ = 30.0f;
     bool anim_loop_ = true;
     float anim_fps_ = 20.0f;
+    int priority_ = 0;
 
     // Interpolated node positions (name -> (x, y))
     std::unordered_map<std::string, std::pair<float, float>> anim_node_pos_;
@@ -141,6 +157,9 @@ private:
     int prev_frame_idx_ = -1;
     float jump_y_offset_ = 0.0f;
     float prev_root_offset_ = 0.0f;
+    float committed_root_x_ = 0.0f;       // accumulated X displacement from completed animation cycles
+    float prev_root_offset_x_ = 0.0f;     // previous frame's absolute offset X (for delta computation)
+    float prev_root_offset_y_ = 0.0f;     // previous frame's absolute offset Y (for delta computation)
     float step_start_player_x_ = 0.0f;
     bool anim_facing_right_ = true;
     float y_adjust_smoothed_ = 4.0f;

@@ -296,7 +296,10 @@ void host_render_scene();
         if (has_anim) {
             auto& anim = anim_it->second;
             float f = enemy_anim_time_ * 20.0f;  // enemy uses fixed 20fps (no MoveDef mid_frames)
-            frame_idx = (int)f % anim.frame_count;
+            if (f < 0) f = 0;
+            int fi = (int)f;
+            if (fi < 0) fi = 0;
+            frame_idx = anim.frame_count > 0 ? fi % anim.frame_count : 0;
             next_idx = (frame_idx + 1) % anim.frame_count;
             alpha = f - (int)f;
         }
@@ -498,7 +501,7 @@ private:
 
     // ---------- Location ----------
     void load_location(const std::string& name) {
-        locations_.load_location(name, asset_root_);
+        locations_.load_location(name, asset_root_, assets_.get());
         location_ = locations_.location();
     }
 
@@ -1671,7 +1674,7 @@ private:
     }
 
     void update_animation(uint32_t dt_ms);
-    void play_animation(const std::string& name, bool loop = true);
+    void play_animation(const std::string& name, bool loop = true, int priority = 0);
 
     // Find the best matching move from moves.xml for the given input context.
     // Returns nullptr if no move matches. Sets candidate_count to the number
@@ -2396,7 +2399,8 @@ private:
     // supports pipe-delimited lists like "Swords|ShuangGou|ChineseSabers").
     bool is_weapon_allowed(const MoveDef& move) const {
         if (move.tactic_weapon.empty()) return true;
-        return move.tactic_weapon.find(equipped_weapon_) != std::string::npos;
+        std::string haystack = "|" + move.tactic_weapon + "|";
+        return haystack.find("|" + equipped_weapon_ + "|") != std::string::npos;
     }
 
     // Cycle equipped weapon forward or backward.
@@ -2607,16 +2611,21 @@ private:
     int& prev_frame_idx_ = anim_player_.mutable_prev_frame_idx();
     float& jump_y_offset_ = anim_player_.mutable_jump_y_offset();
     float& prev_root_offset_ = anim_player_.mutable_prev_root_offset();
+    float& committed_root_x_ = anim_player_.mutable_committed_root_x();
+    float& prev_root_offset_x_ = anim_player_.mutable_prev_root_offset_x();
+    float& prev_root_offset_y_ = anim_player_.mutable_prev_root_offset_y();
     float& step_start_player_x_ = anim_player_.mutable_step_start_player_x();
     bool& anim_facing_right_ = anim_player_.mutable_anim_facing_right();
     float& y_adjust_smoothed_ = anim_player_.mutable_y_adjust_smoothed();
     uint64_t& total_frame_count_ = anim_player_.mutable_total_frame_count();
+    int& priority_ = anim_player_.mutable_priority();
     // Combat state aliases (owned by combat_ member)
     std::string& current_move_ = combat_.mutable_current_move();
     int& no_key_frames_ = combat_.mutable_no_key_frames();
     int& move_state_ = combat_.mutable_move_state();
     bool& start_stance_playing_ = combat_.mutable_start_stance_playing();
     bool& need_switch_to_idle_ = combat_.mutable_need_switch_to_idle();
+    uint32_t& step_cooldown_ms_ = combat_.mutable_step_cooldown();
     bool& is_uninterrupt_ = combat_.mutable_is_uninterrupt();
     // Module instances (owned via PImpl, initialized in game.cpp)
     std::unique_ptr<AssetManager> assets_;

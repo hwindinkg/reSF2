@@ -155,6 +155,19 @@ target_link_libraries(test_location_parser PRIVATE
 target_compile_features(test_location_parser PRIVATE cxx_std_23)
 add_test(NAME test_location_parser COMMAND test_location_parser WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# derbh (.dz) archive end-to-end test: DZ Coder + ZLib Coder against the
+# shipped archives, byte-compared with the extracted references in assets/.
+add_executable(test_dz_archive
+    test_dz_archive.cpp
+)
+target_link_libraries(test_dz_archive PRIVATE
+    resf2_reverse
+    resf2_warnings
+)
+target_compile_features(test_dz_archive PRIVATE cxx_std_23)
+add_test(NAME test_dz_archive COMMAND test_dz_archive "${CMAKE_SOURCE_DIR}"
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # DZ decoder utility unit tests (bit tree, CRC32)
 add_executable(test_dz_decoder_util
     test_dz_decoder_util.cpp
@@ -258,4 +271,37 @@ target_link_libraries(test_json_atlas PRIVATE
     resf2_warnings
 )
 target_compile_features(test_json_atlas PRIVATE cxx_std_23)
+
+# NameRange / stringEqualWithRange test
+add_executable(test_name_utils
+    test_name_utils.cpp
+)
+target_link_libraries(test_name_utils PRIVATE
+    resf2_reverse
+    resf2_warnings
+)
+target_compile_features(test_name_utils PRIVATE cxx_std_23)
+add_test(NAME test_name_utils COMMAND test_name_utils WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# AnimSlot / findMatchingSlotInList test
+add_executable(test_slot_utils
+    test_slot_utils.cpp
+)
+target_link_libraries(test_slot_utils PRIVATE
+    resf2_reverse
+    resf2_warnings
+)
+target_compile_features(test_slot_utils PRIVATE cxx_std_23)
+add_test(NAME test_slot_utils COMMAND test_slot_utils WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# ConditionAnimation / CCA test
+add_executable(test_conditions
+    test_conditions.cpp
+)
+target_link_libraries(test_conditions PRIVATE
+    resf2_reverse
+    resf2_warnings
+)
+target_compile_features(test_conditions PRIVATE cxx_std_23)
+add_test(NAME test_conditions COMMAND test_conditions WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 add_test(NAME test_json_atlas COMMAND test_json_atlas WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

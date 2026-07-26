@@ -1,96 +1,140 @@
 // engine/reverse/dz_reader.hpp
 //
-// DZ (DTRZ) archive reader for Marmalade SDK derbh format.
+// DZ (DTRZ) archive reader for the Marmalade SDK "derbh" format.
 // Reads .dz archives at runtime without extracting to disk.
 //
-// Two compression types found in SF2:
-//   type=4: Marmalade DZ custom compression (files.dz — models, XML configs)
-//   type=8: GZIP compression (animations.dz — .bin animation files)
+// [ORIGINAL] Container layout recovered from DzipFile::open
+// (ShadowFight2.s86 FUN_102c9778) and Derbh::open (FUN_102ca66b), and
+// cross-checked byte-for-byte against dzip.exe (the Marmalade "Derbh
+// commpress tool"):
 //
-// Type 8 (GZIP) is fully supported using zlib's gzip decompression.
-// Type 4 (DZ custom) is not yet decompressed — we use the file table
-// to find files, and if they're not compressed (type=1 copy), we read
-// them directly. For type=4, we fall back to searching the filesystem.
+//   'DTRZ'                                   4 bytes
+//   u16 num_files
+//   u16 num_dirs                             (index 0 is the implicit root)
+//   u8  version                              (must be 0)
+//   num_files     NUL-terminated file names
+//   num_dirs - 1  NUL-terminated directory paths (stored full, e.g. "assets\anim")
+//   num_files chains of u16 terminated by 0xFFFF:
+//       chain[0]   = directory index
+//       chain[1..] = indices into the block table; a file is the
+//                    concatenation of its blocks
+//   u16 num_volumes
+//   u16 num_blocks
+//   num_blocks x 16-byte block records: {u32 offset, u32 comp_size,
+//                                        u32 uncomp_size, u32 flags}
+//   num_volumes - 1 NUL-terminated volume file names (multi-part archives)
+//   per-coder headers, in coder registration order, for every coder whose
+//   mask appears in the OR of all block flags
+//
+// Coder masks (dzip.exe FUN_00417aa0):
+//   0x004 "DZ Coder"    - Marmalade's adaptive range coder  (files.dz)
+//   0x008 "ZLib Coder"  - gzip header + raw deflate         (animations.dz, ZONE_*.dz)
+//   0x010 "BZip Coder"
+//   0x080 "Zero replace"
+//   0x100 "Copy Coder (no compression)"
+//   0x200 "LZMA Coder"
+//
+// Only the DZ coder writes a header (10 bytes, see DzCoderParams).
 
 #pragma once
 
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <string>
-#include <vector>
 #include <unordered_map>
-#include <filesystem>
-#include <fstream>
-#include <zlib.h>
+#include <vector>
+
+#include "dz_coder.hpp"
 
 namespace resf2::dz {
 
+// Coder mask bits as registered by the original (dzip.exe FUN_00417aa0).
+enum : uint32_t {
+    kCoderDz = 0x004,
+    kCoderZlib = 0x008,
+    kCoderBzip = 0x010,
+    kCoderZeroReplace = 0x080,
+    kCoderCopy = 0x100,
+    kCoderLzma = 0x200,
+};
+
+// One 16-byte record of the block table.
+struct DzBlock {
+    uint32_t offset = 0;       // absolute offset of the compressed block in the .dz
+    uint32_t comp_size = 0;    // compressed size (only meaningful for the DZ coder)
+    uint32_t uncomp_size = 0;  // decompressed size
+    uint32_t flags = 0;        // coder mask, see kCoder*
+};
+
 struct DzFileEntry {
     std::string name;
-    uint32_t offset;       // [ORIGINAL] absolute offset in .dz file where compressed block starts
-    uint32_t comp_size;    // [ORIGINAL] compressed block size (2nd u32; offset diff of adjacent files == this)
-    uint32_t uncomp_size;  // [ORIGINAL] real decompressed size (3rd u32; matches ground-truth file size on disk)
-    uint32_t comp_type;    // 1=copy, 2=zlib, 4=DZ custom, 8=gzip
-    std::string folder;    // folder path
+    std::string folder;               // "" for root, otherwise e.g. "assets/animations"
+    std::vector<uint16_t> blocks;     // block-table indices, in order
+    uint32_t uncomp_size = 0;         // sum over blocks
 };
 
 class DzArchive {
 public:
     bool open(const std::string& path);
     void close();
-    
-    // Check if a file exists in this archive
+
     bool has_file(const std::string& name) const;
-    
-    // Read a file from the archive. Returns empty vector on failure.
+
+    // Read and decompress a file. Returns an empty vector on failure.
     std::vector<std::byte> read_file(const std::string& name) const;
-    
-    // Get list of all file names
+
     const std::vector<std::string>& file_names() const { return file_names_; }
-    
+
 private:
-    std::vector<std::byte> raw_data_;
-    std::unordered_map<std::string, DzFileEntry> entries_;
-    std::vector<std::string> file_names_;
-    bool opened_ = false;
-    
-    // Parse the DTRZ container format
     bool parse();
-    
-    // Decompress GZIP data (type=8)
-    static std::vector<std::byte> decompress_gzip(const std::byte* data, size_t size);
-    
-    // Decompress zlib data (type=2)
-    static std::vector<std::byte> decompress_zlib(const std::byte* data, size_t size);
+
+    // Decode one block according to its coder mask.
+    bool decode_block(const DzBlock& b, std::vector<std::byte>& out) const;
+
+    // [ORIGINAL] ZLib Coder: gzip header, raw deflate payload, no trailer.
+    static std::vector<std::byte> decompress_gzip(const std::byte* data, size_t size,
+                                                  size_t uncomp_size);
+
+    std::vector<std::byte> raw_data_;
+    std::vector<DzBlock> blocks_;
+    std::vector<DzFileEntry> entries_;
+    std::unordered_map<std::string, size_t> index_;  // name / folder+name -> entries_ idx
+    std::vector<std::string> file_names_;
+    DzCoderParams dz_params_{};
+    bool has_dz_params_ = false;
+    bool opened_ = false;
+    std::string path_;
 };
 
-// Global registry of all open DZ archives
+// Global registry of all open DZ archives.
 class DzRegistry {
 public:
     static DzRegistry& instance();
-    
-    // Open a .dz file and register it
+
+    // Opening the same path twice is a no-op and returns true.
     bool open_archive(const std::string& path);
-    
-    // Try to read a file from any open archive
-    // Returns empty vector if not found
+
+    // Open every *.dz directly inside `dir`. Returns how many were opened.
+    size_t open_archives_in(const std::string& dir);
+
+    // Try to read a file from any open archive; falls back to the registered
+    // extracted-asset directories when the archive lookup misses.
     std::vector<std::byte> read_file(const std::string& name);
-    
-    // Check if any archive has this file
+
     bool has_file(const std::string& name);
-    
-    // Register a fallback directory for extracted files.
-    // When a file can't be decompressed from .dz (e.g. type=4 DZ custom),
-    // the registry looks for it in the fallback directory.
-    // This allows the engine to work with pre-extracted assets while
-    // still supporting .dz archives for files that can be decompressed.
+
+    // Register a directory searched for loose files. The original ships part
+    // of its asset tree outside the archives (e.g. assets/1536/locations/dojo
+    // in the APK), so this is a real lookup path, not a workaround — but it is
+    // a plain <dir>/<name> join, no path guessing.
     void add_fallback_dir(const std::string& path) { fallback_dirs_.push_back(path); }
-    
+
 private:
     std::vector<std::unique_ptr<DzArchive>> archives_;
+    std::vector<std::string> archive_paths_;
     std::vector<std::string> fallback_dirs_;
-    
-    // Try to read from fallback directories
+
     std::vector<std::byte> read_from_fallback(const std::string& name);
 };
 

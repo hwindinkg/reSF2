@@ -21,14 +21,21 @@ Game::Game(std::string asset_root, bool replay_mode, bool dump_state)
 // Destructor (required for unique_ptr members with forward-declared types)
 Game::~Game() = default;
 
-void Game::play_animation(const std::string& name, bool loop) {
+void Game::play_animation(const std::string& name, bool loop, int priority) {
     auto& animations = assets_->animations();
     auto& moves = assets_->moves();
     if (animations.count(name)) {
-        if (current_anim_ != name) {
-            std::printf("[ANIM] play_animation('%s', loop=%d) — switching from '%s'\n",
-                        name.c_str(), loop, current_anim_.c_str());
+        // Priority check: if existing animation has strictly higher priority, reject
+        if (priority < priority_ && name != current_anim_) {
+            std::printf("[ANIM] Rejected '%s' (priority %d) — '%s' has higher priority %d\n",
+                        name.c_str(), priority, current_anim_.c_str(), priority_);
+            return;
         }
+        if (current_anim_ != name) {
+            std::printf("[ANIM] play_animation('%s', loop=%d, prio=%d) — switching from '%s' (prio=%d)\n",
+                        name.c_str(), loop, priority, current_anim_.c_str(), priority_);
+        }
+        priority_ = priority;
         current_anim_ = name;
         anim_time_ = 0.0f;
         anim_loop_ = loop;
@@ -59,6 +66,9 @@ void Game::play_animation(const std::string& name, bool loop) {
         anim_root_dx_ = 0.0f;
         anim_root_dy_ = 0.0f;
         prev_root_offset_ = 0.0f;
+        committed_root_x_ = 0.0f;
+        prev_root_offset_x_ = 0.0f;
+        prev_root_offset_y_ = 0.0f;
         prev_npivot_set_ = false;
         prev_npivot_y_set_ = false;
         prev_frame_idx_ = -1;
@@ -78,6 +88,7 @@ void Game::update_animation(uint32_t dt_ms) {
 
 void Game::on_init(plat::Platform& platform) {
     platform_ = &platform;
+            assets_ = std::make_unique<AssetManager>();
             std::printf("reSF2 initialized.\n");
             std::printf("Controls (original SF2 layout):\n");
             std::printf("  W/A/S/D     - Up / Left / Down / Right (movement + attack direction)\n");
@@ -648,22 +659,22 @@ void Game::host_render_loading() {
 }
 
 void Game::init_location() {
-    // Open DZ archives (for reading files that are only in .dz)
+    // [ORIGINAL] Mount every derbh archive shipped next to the assets, the way
+            // the original does (ShadowFight2.s86 references "assets/files.dz",
+            // "ZONE_2.dz" ... at 0x1038ad68). All coders used by the game are
+            // implemented natively, so no archive needs pre-extraction.
+            // open_archive() is idempotent, so re-entering init_location() is safe.
             auto root = std::filesystem::path(asset_root_);
             auto& dz = resf2::dz::DzRegistry::instance();
             for (const auto& base : {root, root/"assets", root/"assets"/"assets"}) {
-                for (const auto& dz_name : {"files.dz", "animations.dz"}) {
-                    auto dz_path = base / dz_name;
-                    if (std::filesystem::exists(dz_path)) {
-                        dz.open_archive(dz_path.string());
-                    }
-                }
+                dz.open_archives_in(base.string());
             }
             // Load stage data for the map scene
             if (!assets_->stages_loaded()) {
-                auto stages_path = root / "assets/files/assets/stages.xml";
+                // [ORIGINAL] Try correct path first, then fallback
+                auto stages_path = root / "assets/stages.xml";
                 if (!std::filesystem::exists(stages_path)) {
-                    stages_path = root / "assets/stages.xml";
+                    stages_path = root / "assets/files/assets/stages.xml";
                 }
                 if (std::filesystem::exists(stages_path)) {
                     auto stages_text = read_text(stages_path.string());
@@ -675,12 +686,9 @@ void Game::init_location() {
                     }
                 }
             }
-            // Register fallback directories for extracted DZ contents.
-            // When a file can't be decompressed from .dz (e.g. type=4 DZ custom
-            // compression), the registry looks for the file in these directories.
-            // This allows the engine to work with pre-extracted assets while
-            // still supporting .dz archives for files that can be decompressed
-            // (gzip type=8).
+            // Directories searched for loose assets. The original ships part of
+            // its asset tree outside the archives (e.g. assets/1536/locations/dojo
+            // in the APK), so this is a genuine lookup path, not a workaround.
             for (const auto& base : {root, root/"assets", root/"assets"/"assets"}) {
                 dz.add_fallback_dir(base.string());
             }
@@ -750,7 +758,7 @@ void Game::init_location() {
             // stance_2.bin = right-facing start stance.
             // Cannot be interrupted — plays once, then transitions to stance_idle.
             if (assets_->animations().count("stance_2")) {
-                play_animation("stance_2", false);
+                play_animation("stance_2", false, 3);  // priority 3: intro stance (non-interruptible)
                 current_move_ = "StartStance";
                 int fc = assets_->animations()["stance_2"].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
@@ -758,7 +766,7 @@ void Game::init_location() {
                 start_stance_playing_ = true;
                 std::printf("[STANCE] Playing start stance (stance_2, %d frames)\n", fc);
             } else if (assets_->animations().count("stance_idle")) {
-                play_animation("stance_idle", true);
+                play_animation("stance_idle", true, 0);  // priority 0: idle (always interruptible)
             }
 }
 
@@ -1271,7 +1279,7 @@ void Game::host_update_gameplay(uint32_t dt) {
                         current_anim_.c_str(), current_move_.c_str(),
                         hit_anim_, is_uninterrupt_?1:0, (int)(in_attack && !is_uninterrupt_),
                         candidate_count, best_move->name.c_str());
-            play_animation(anim_name, false);
+            play_animation(anim_name, false, best_move->priority);
             current_move_ = best_move->name;
             int fc = assets_->animations()[anim_name].frame_count;
             hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
@@ -1409,7 +1417,7 @@ void Game::host_update_gameplay(uint32_t dt) {
                 std::printf("[MOVE] %s (anim '%s', prio=%d)\n",
                             best_move->name.c_str(), anim_name.c_str(),
                             best_move->priority);
-                play_animation(anim_name, false);
+                play_animation(anim_name, false, best_move->priority);
                 current_move_ = best_move->name;
                 int fc = assets_->animations()[anim_name].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
@@ -1459,7 +1467,7 @@ void Game::host_update_gameplay(uint32_t dt) {
                 // Only switch animation if not already ducking
                 if (move_state_ != 11 || current_anim_ != duck_anim_name) {
                     std::printf("[DUCK] found: %s (anim '%s')\n", duck_move->name.c_str(), duck_anim_name.c_str());
-                    play_animation(duck_anim_name, true);
+                    play_animation(duck_anim_name, true, 1);  // priority 1: defensive
                     current_move_ = duck_move->name;
                     move_state_ = 11;
                     input_handler_.set_duck_play_time(0);
@@ -1483,6 +1491,42 @@ void Game::host_update_gameplay(uint32_t dt) {
         }
     }
     } while(0);
+
+    // === ROLL MOVES (S+D forward roll, S+A back roll) ===
+    // Separate from the any_dir_just_pressed-gated block above because
+    // rolls should trigger even when the direction keys are already held
+    // (e.g. holding D to walk forward + pressing S to roll).
+    // These use the raw S+Forward/Back combination directly.
+    if (move_state_ == 0 && !start_stance_playing_ && hit_anim_ == 0) {
+        // Forward roll: S + forward (D when facing right)
+        if (key_down && key_forward && !key_back) {
+            if (assets_->animations().count("forward_roll") && current_anim_ != "forward_roll") {
+                std::printf("[MOVE] ForwardRoll (S+forward)\n");
+                play_animation("forward_roll", false, 1);  // priority 1: defensive
+                current_move_ = "ForwardRoll";
+                int fc = assets_->animations()["forward_roll"].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
+                move_state_ = 10;
+                goto after_combat;
+            }
+        }
+        // Back roll: S + back (A when facing right)
+        else if (key_down && key_back && !key_forward) {
+            if (assets_->animations().count("back_roll") && current_anim_ != "back_roll") {
+                std::printf("[MOVE] BackRoll (S+back)\n");
+                play_animation("back_roll", false, 1);  // priority 1: defensive
+                current_move_ = "BackRoll";
+                int fc = assets_->animations()["back_roll"].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
+                move_state_ = 10;
+                goto after_combat;
+            }
+        }
+    }
+
+    // Decrement step cooldown (set after rolls/specials to prevent
+    // immediate step when the held key resumes).
+    if (step_cooldown_ms_ > dt) step_cooldown_ms_ -= dt; else step_cooldown_ms_ = 0;
 
     // === STEP MOVEMENT (from moves.xml: StepForward/StepBack) ===
     // FIX: don't override attack animation with step when in an attack.
@@ -1539,19 +1583,20 @@ void Game::host_update_gameplay(uint32_t dt) {
                             (int)key_forward, (int)key_back, (int)key_down,
                             step_fwd_anim.c_str());
             }
-            if (key_forward && !key_back && !key_down && !step_fwd_anim.empty()) {
+            // step_cooldown_ms_ prevents immediate step after a roll/special ends
+            if (key_forward && !key_back && !key_down && !step_fwd_anim.empty() && step_cooldown_ms_ == 0) {
                 move_state_ = 2;
-                play_animation(step_fwd_anim, true);
-            } else if (key_back && !key_forward && !key_down && !step_back_anim.empty()) {
+                play_animation(step_fwd_anim, true, 0);  // priority 0: movement (interruptible)
+            } else if (key_back && !key_forward && !key_down && !step_back_anim.empty() && step_cooldown_ms_ == 0) {
                 move_state_ = 1;
-                play_animation(step_back_anim, true);
+                play_animation(step_back_anim, true, 0);  // priority 0: movement (interruptible)
             }
         } else if (move_state_ == 1) {  // MOVING_BACK
             // [ORIGINAL] Double-tap Back → BackHandflip (handstand flip retreat)
             // Original moves.xml: BackHandflip has Keys=Back Tap + Back Tap,
             // FileName=back_handflip.bin. It's a retreat move (not a dash).
             if (input_handler_.double_step_back_requested() && assets_->animations().count("back_handflip")) {
-                play_animation("back_handflip", false);
+                play_animation("back_handflip", false, 1);  // priority 1: evasive retreat
                 move_state_ = 10;
                 current_move_ = "BackHandflip";
                 int fc = assets_->animations()["back_handflip"].frame_count;
@@ -1563,12 +1608,12 @@ void Game::host_update_gameplay(uint32_t dt) {
                 move_state_ = 0; need_switch_to_idle_ = true;
             } else if (fwd_latched && !back_latched && step_min_played && !step_fwd_anim.empty()) {
                 move_state_ = 2;
-                play_animation(step_fwd_anim, true);
+                play_animation(step_fwd_anim, true, 0);  // priority 0: movement
             }
         } else if (move_state_ == 2) {  // MOVING_FORWARD
-            // [ORIGINAL] Double-tap Forward during ForwardStep → DoubleStepForward (dash)
+            // [ORIGINAL] Double-tap Forward during ForwardStep  DoubleStepForward (dash)
             if (input_handler_.double_step_fwd_requested() && assets_->animations().count("double_step_forward")) {
-                play_animation("double_step_forward", false);
+                play_animation("double_step_forward", false, 1);  // priority 1: dash (evasive)
                 move_state_ = 10;  // special (non-interruptible during dash)
                 current_move_ = "DoubleStepForward";
                 int fc = assets_->animations()["double_step_forward"].frame_count;
@@ -1580,7 +1625,7 @@ void Game::host_update_gameplay(uint32_t dt) {
                 move_state_ = 0; need_switch_to_idle_ = true;
             } else if (back_latched && !fwd_latched && step_min_played && !step_back_anim.empty()) {
                 move_state_ = 1;
-                play_animation(step_back_anim, true);
+                play_animation(step_back_anim, true, 0);  // priority 0: movement
             }
         }
     }
@@ -1603,6 +1648,9 @@ void Game::host_update_gameplay(uint32_t dt) {
         need_switch_to_idle_ = true;
         // Clear current_move_ so 3key combos don't trigger on next key press
         current_move_.clear();
+        // Set step cooldown to prevent immediate step after roll/special ends
+        // while keys are still held from the roll input.
+        step_cooldown_ms_ = 200;
     }
     // Exit duck state when Down released
     // No minimum duration — original game allows immediate release
@@ -1634,6 +1682,19 @@ void Game::host_update_gameplay(uint32_t dt) {
     // MUST run BEFORE any play_animation calls so the final frame's
     // root motion is applied before switching to idle.
     update_animation(dt);
+
+    // === ROOT MOTION APPLICATION ===
+    // Apply the per-frame NPivot delta to character world position.
+    // anim_root_dx_ is the model-space X displacement of NPivot from the
+    // previous frame. When facing left, model-forward is -world-x, so the
+    // delta is negated.
+    // This is what makes step_forward actually move the character forward,
+    // and gives forward-lunging attacks their root-motion feel.
+    // jump_y_offset_ is accumulated separately in AnimationPlayer::update().
+    player_pos_x_ += anim_root_dx_ * (facing_right_ ? 1.0f : -1.0f);
+    // Y displacement is handled by y_adjust_smoothed_ (visual Y correction)
+    // and jump_y_offset_ (accumulated in AnimationPlayer::update).
+    // No world-space Y drift from per-frame root motion.
 
     // === UNINTERRUPT CHECK (after update_animation) ===
     // [ORIGINAL] PC source: sf2.js ocb() — checks if current animation frame
@@ -1684,7 +1745,7 @@ void Game::host_update_gameplay(uint32_t dt) {
         if (start_stance_playing_) {
             start_stance_playing_ = false;
         }
-        play_animation("stance_idle", true);
+        play_animation("stance_idle", true, 0);  // priority 0: idle (always interruptible)
     }
 
     // === HIT DETECTION ===
@@ -1742,14 +1803,6 @@ void Game::host_update_gameplay(uint32_t dt) {
                         expected_anim = expected_anim.substr(0, expected_anim.size()-4);
                     anim_match = (expected_anim == current_anim_);
                 }
-                std::printf("[HIT_CHECK] f=%llu move='%s' anim='%s' exp_anim='%s' match=%d frame=%d/%d hit_anim=%u atk=%d-%d bag_hit=%d\n",
-                            (unsigned long long)total_frame_count_,
-                            current_move_.c_str(), current_anim_.c_str(),
-                            expected_anim.c_str(), (int)anim_match,
-                            current_frame, fc, hit_anim_,
-                            move_it != assets_->moves().end() ? move_it->second.attack_start : -1,
-                            move_it != assets_->moves().end() ? move_it->second.attack_end : -1,
-                            (int)hit_this_interval_);
             }
             if (move_it != assets_->moves().end() && move_it->second.attack_start > 0) {
                 int attack_start = move_it->second.attack_start;
