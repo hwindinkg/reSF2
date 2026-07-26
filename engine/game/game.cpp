@@ -1390,13 +1390,13 @@ void Game::host_update_gameplay(uint32_t dt) {
         } else if (enemy_ai_state_ == 2 && enemy_attack_cooldown_ <= 0) {  // attack
             enemy_anim_ = "high_punch";
             enemy_attacking_ = true;
+            enemy_attack_hit_done_ = false;
             enemy_attack_duration_ = 0.4f;
             enemy_attack_cooldown_ = 1.5f;
             play_sound("f_pl_attack2", 0.4f);
             // [ORIGINAL] Dojo is TRAINING — enemy attacks don't deal damage.
             // In the original, the Dojo sparring partner is a training dummy.
             // Health/damage only applies in real fights (map battles).
-            // Enemy still plays attack animation + hit spark for visual feedback.
         } else if (enemy_ai_state_ == 4) {  // block
             enemy_anim_ = "fists_block";
         } else {  // idle
@@ -1404,6 +1404,44 @@ void Game::host_update_gameplay(uint32_t dt) {
         }
         if (enemy_attacking_) {
             enemy_attack_duration_ -= dt_sec;
+            // In a real fight the swing connects at its midpoint.
+            // [HEURISTIC-TODO] The enemy is a placeholder until warrior
+            // templates land (5.3): no skeleton collision on his side, so the
+            // hit is a range test at HighPunch's tactic distance (Max=250 in
+            // moves.xml), and the damage fraction is HighPunch's
+            // <Damage Value>. A blocking player takes nothing — the block
+            // interval semantics of the original.
+            if (is_battle_mode_ && !enemy_attack_hit_done_ &&
+                enemy_attack_duration_ <= 0.2f) {
+                enemy_attack_hit_done_ = true;
+                const float dist = std::fabs(enemy_pos_x_ - player_pos_x_);
+                if (dist <= 250.0f && player_fighter_.invuln_time <= 0 &&
+                    !player_fighter_.is_dead) {
+                    if (player_fighter_.is_blocking) {
+                        play_sound("armor", 0.3f);
+                    } else {
+                        float frac = 0.11f;
+                        auto hp_it = assets_->moves().find("HighPunch");
+                        if (hp_it != assets_->moves().end() &&
+                            hp_it->second.damage > 0.0f)
+                            frac = hp_it->second.damage;
+                        player_fighter_.health -=
+                            frac * player_fighter_.max_health;
+                        player_fighter_.invuln_time = 0.4f;
+                        player_fighter_.hit_stun_time = 0.25f;
+                        player_hit_flash_ = 0.2f;
+                        enemy_fighter_.hits_landed++;
+                        spawn_hit_sparks(player_pos_x_, player_pos_y_ - 40, 8);
+                        play_sound("f_pl_hit" +
+                                       std::to_string(enemy_fighter_.hits_landed % 3 + 1),
+                                   0.6f);
+                        if (player_fighter_.health <= 0.0f) {
+                            player_fighter_.health = 0.0f;
+                            player_fighter_.is_dead = true;
+                        }
+                    }
+                }
+            }
             if (enemy_attack_duration_ <= 0) enemy_attacking_ = false;
         }
         enemy_anim_time_ += dt_sec;
@@ -2660,13 +2698,31 @@ void Game::host_update_gameplay(uint32_t dt) {
                                         player_fighter_.hits_landed++;
                                         combo_timer_ = 2.0f;
                                     } else if (enemy_fighter_.invuln_time <= 0) {
-                                        // [ORIGINAL] Dojo sparring — no health
-                                        // damage yet, just the reaction.
+                                        // [ORIGINAL] Dojo sparring deals no
+                                        // health damage; a real fight does.
                                         enemy_fighter_.invuln_time = 0.2f;
                                         enemy_hit_flash_ = 0.2f;
                                         player_fighter_.hits_landed++; combo_timer_ = 2.0f;
                                         play_sound("armor", 0.5f);
                                         spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
+                                        if (is_battle_mode_) {
+                                            // [ORIGINAL data] The fraction is the
+                                            // move's <Damage Value> from moves.xml
+                                            // (HighPunch carries 0.11).
+                                            // [HEURISTIC-TODO] The original also
+                                            // folds in the warrior's damage stats
+                                            // and defense (<Damage Type= Shift=>,
+                                            // stages.xml multipliers) — that law
+                                            // is not reversed yet.
+                                            float frac = move_it->second.damage;
+                                            if (frac <= 0.0f) frac = 0.08f;
+                                            enemy_fighter_.health -=
+                                                frac * enemy_fighter_.max_health;
+                                            if (enemy_fighter_.health <= 0.0f) {
+                                                enemy_fighter_.health = 0.0f;
+                                                enemy_fighter_.is_dead = true;
+                                            }
+                                        }
                                     }
                                     break;
                                 }

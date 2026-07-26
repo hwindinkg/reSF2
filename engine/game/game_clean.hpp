@@ -3733,6 +3733,8 @@ private:
     float& enemy_y_adjust_ = combat_.mutable_enemy_y_adjust();
     bool& enemy_attacking_ = combat_.mutable_enemy_attacking();
     float& enemy_attack_duration_ = combat_.mutable_enemy_attack_duration();
+    // Guards the placeholder enemy's one hit per swing in battle mode (D4).
+    bool enemy_attack_hit_done_ = false;
     bool& is_battle_mode_ = combat_.mutable_is_battle_mode();
     bool& show_enemy_ = combat_.mutable_show_enemy();
 
