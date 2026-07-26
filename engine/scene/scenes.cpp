@@ -190,16 +190,54 @@ void MapScene::on_enter(SceneContext& ctx) {
     auto* stages = ctx.host.host_get_stages();
     if (stages && !stages->zones.empty()) {
         zone_battles_.clear();
+        bool story_open = true;
         for (const auto& zone : stages->zones) {
+            // [ORIGINAL] Zones flagged Start="1" (the Punchbag training zone)
+            // never appear on the map: the zone-list builder @ 0x100c17d0
+            // skips any zone whose Start byte is set (Zone ctor 0x102996d0
+            // stores the flag at +0x118, FUN_10299cd0 reads it back).
+            if (zone.start > 0) continue;
+            // [ORIGINAL-mechanism] The original hides a zone when none of its
+            // battles is visible (0x100c17d0); per-battle visibility lives in
+            // the profile and is driven by quest-script ShowBattle /
+            // ToggleBattle actions (quests.xml), keyed "ZONE|Battle|fight"
+            // (FUN_10138130 -> FUN_101ec2a0). The quest engine is not ported.
+            // [HEURISTIC-TODO] Until it is: story zones open sequentially —
+            // a zone is reachable once the previous zone's boss is beaten.
+            if (!story_open) break;
             std::vector<size_t> indices;
             for (size_t bi = 0; bi < zone.battles.size(); ++bi) {
                 const auto& battle = zone.battles[bi];
+                // [ORIGINAL] Type="HIDDEN" (enum 13 in the type table @
+                // FUN_1012eb30) is skipped outright when DisplayZone builds
+                // its nodes (0x100a2910). The name-based filters approximate
+                // the quest-driven visibility of the variant nodes.
                 if (battle.type == "HIDDEN" || battle.type == "FAKE" || battle.name.find("LOCKED") != std::string::npos || battle.name.find("ECLIPSE") != std::string::npos || battle.name.find("INTERMISSION") != std::string::npos) continue;
                 indices.push_back(bi);
             }
-            if (!indices.empty()) zone_battles_.push_back({zone, indices});
+            if (indices.empty()) continue;
+            // Story gate for the NEXT zone: this zone's boss must be beaten.
+            bool boss_beaten = false;
+            for (size_t bi : indices) {
+                const auto& battle = zone.battles[bi];
+                if (battle.type == "BOSSES" || battle.type.rfind("FINAL_BATTLE", 0) == 0)
+                    if (ctx.host.host_is_level_completed(zone.name + "/" + battle.name))
+                        boss_beaten = true;
+            }
+            zone_battles_.push_back({zone, indices});
+            story_open = boss_beaten;
         }
         std::printf("[map] loaded %zu zones\n", zone_battles_.size());
+        // [ORIGINAL] The map opens on the player's current zone — the zone
+        // builder @ 0x100c17d0 selects the page whose name matches the
+        // profile's current zone, falling back to the first.
+        const std::string level = ctx.host.host_get_current_level();
+        const auto slash = level.find('/');
+        if (slash != std::string::npos) {
+            const std::string zone_name = level.substr(0, slash);
+            for (size_t i = 0; i < zone_battles_.size(); ++i)
+                if (zone_battles_[i].zone.name == zone_name) { selected_ = (int)i; break; }
+        }
         // --scene map:N opens straight onto zone N, so a specific zone can be
         // captured and compared against the reference screenshot.
         const int want = ctx.host.start_scene_arg();
