@@ -167,9 +167,10 @@ private:
 };
 
 // ---------- Battle scene ----------
-// The combat scene. Currently delegates to the same dojo rendering as
-// MainMenu (the punching bag stands in for a real opponent). In the
-// future this will load a proper enemy character and track win/loss.
+// The combat scene: an enemy fighter driven by the AI, round tracking per
+// stages.xml (<Fight Rounds= RoundTime=>), and the fight HUD drawn by the
+// host. A round ends when a fighter dies or the round timer runs out; the
+// match ends when one side has the majority of rounds.
 
 class BattleScene final : public Scene {
 public:
@@ -180,10 +181,16 @@ public:
     void on_exit(SceneContext& ctx) override;
     bool on_quit_request(SceneContext& ctx) override;
 private:
-    uint32_t battle_timer_ms_ = 0;
+    void finish_round(SceneContext& ctx, bool player_won);
+    int round_time_ms_ = 99000;     // per-round budget from BattleInfo
+    int round_left_ms_ = 99000;     // counts down within the round
+    int wins_player_ = 0;
+    int wins_enemy_ = 0;
+    int rounds_total_ = 1;
+    uint32_t between_rounds_ms_ = 0;  // pause before the next round starts
     uint32_t guard_timer_ms_ = 0;  // prevent immediate transitions after entering
-    static constexpr uint32_t kBattleMaxMs = 5 * 60 * 1000;  // 5 min timeout
     static constexpr uint32_t kGuardMs = 500;  // 500ms guard
+    static constexpr uint32_t kBetweenRoundsMs = 1500;
 };
 
 // ---------- Results scene ----------

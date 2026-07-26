@@ -267,6 +267,33 @@ public:
     // Set the battle result before transitioning to Results scene.
     virtual void host_set_battle_result(std::string result) = 0;
 
+    // --- Fight parameters and state ---
+    //
+    // [ORIGINAL] The original's Fight carries the stages.xml fight data:
+    // rounds (Fight+0xc, becomes the round-dot count fighter+0xe4 in
+    // ScreenModel @ 0x10291370) and the enemy warriors. The map hands this
+    // over when the FIGHT button is pressed.
+    struct BattleInfo {
+        std::string enemy_name;   // FirstName / Template of warriors[0]
+        int rounds = 1;           // <Fight Rounds="">
+        int round_time_s = 99;    // <Fight RoundTime="">
+    };
+    virtual void host_set_battle_info(const BattleInfo& info) = 0;
+    [[nodiscard]] virtual const BattleInfo& host_get_battle_info() const = 0;
+
+    // "" while the round is running, "victory"/"defeat" when one fighter died.
+    [[nodiscard]] virtual std::string host_round_outcome() const = 0;
+
+    // Health fractions [0..1] for the fight HUD and the timeout rule.
+    [[nodiscard]] virtual float host_player_health_frac() const = 0;
+    [[nodiscard]] virtual float host_enemy_health_frac() const = 0;
+
+    // Heal both fighters, reset positions and combat state for the next round.
+    virtual void host_reset_round() = 0;
+
+    // Wins so far, for the round dots (Round_Done vs Round_Undone).
+    virtual void host_set_round_wins(int player, int enemy) = 0;
+
     // --- Shop / Item data (for ShopScene) ---
 
     // Get the parsed item catalog (list.xml data). May be null if not loaded.

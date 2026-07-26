@@ -269,7 +269,6 @@ void Game::on_init(plat::Platform& platform) {
             std::printf("  M or click menu - Toggle menu\n");
             std::printf("  T           - Toggle dialog\n");
             std::printf("  N           - New game (go to Map)\n");
-            std::printf("  Y/L         - Declare victory/defeat (debug, in Battle)\n");
             std::printf("  1/2/3       - Zoom presets\n");
             std::printf("  Esc         - Quit / close overlay / back\n\n");
 
@@ -555,6 +554,69 @@ std::string Game::host_get_battle_location() const {
 
 void Game::host_set_battle_result(std::string result) {
     battle_result_ = std::move(result);
+}
+
+void Game::host_set_battle_info(const BattleInfo& info) {
+    battle_info_ = info;
+    round_wins_player_ = 0;
+    round_wins_enemy_ = 0;
+    hp_trail_player_ = -1.0f;
+    hp_trail_enemy_ = -1.0f;
+}
+
+const scene::SceneHost::BattleInfo& Game::host_get_battle_info() const {
+    return battle_info_;
+}
+
+std::string Game::host_round_outcome() const {
+    // The sparring partner shares the enemy fighter state, so this is only
+    // meaningful in battle mode — BattleScene is the sole caller.
+    if (player_fighter_.is_dead) return "defeat";
+    if (enemy_fighter_.is_dead) return "victory";
+    return "";
+}
+
+float Game::host_player_health_frac() const {
+    return player_fighter_.max_health > 0
+               ? player_fighter_.health / player_fighter_.max_health
+               : 0.0f;
+}
+
+float Game::host_enemy_health_frac() const {
+    return enemy_fighter_.max_health > 0
+               ? enemy_fighter_.health / enemy_fighter_.max_health
+               : 0.0f;
+}
+
+void Game::host_reset_round() {
+    // Same reset the R key performs after a knockout, plus the fighters walk
+    // back to their params.xml marks — the original restarts each round from
+    // the starting positions.
+    player_fighter_ = FighterState{};
+    enemy_fighter_ = FighterState{};
+    player_hit_flash_ = 0;
+    enemy_hit_flash_ = 0;
+    combo_timer_ = 0;
+    hit_sparks_.clear();
+    enemy_ai_timer_ = 0;
+    enemy_ai_state_ = 0;
+    enemy_attack_cooldown_ = 0;
+    enemy_attacking_ = false;
+    hp_trail_player_ = -1.0f;
+    hp_trail_enemy_ = -1.0f;
+    if (location_) {
+        const float half_world_w = location_->width * 0.5f;
+        player_pos_x_ = location_->player_x - half_world_w;
+        player_pos_y_ = location_->player_y;
+        enemy_pos_x_ = location_->enemy_x - half_world_w;
+        enemy_pos_y_ = location_->enemy_y;
+        enemy_facing_right_ = false;
+    }
+}
+
+void Game::host_set_round_wins(int player, int enemy) {
+    round_wins_player_ = player;
+    round_wins_enemy_ = enemy;
 }
 
 int Game::host_get_currency() const {
@@ -1100,7 +1162,10 @@ void Game::host_render_scene() {
             render_projectiles();
             update_and_render_hit_sparks(0.016f);
             render_debug_world(*platform_);
+            // [ORIGINAL] The dojo shows the town HUD (top panel); a real fight
+            // shows ScreenModel — bars, names, round dots — instead (D4).
             if (!is_battle_mode_) render_hud(*platform_);
+            else render_fight_hud(*platform_);
             // [ORIGINAL] The virtual stick and the attack buttons are always on
             // screen while a fight (or the dojo) is up — they are the only
             // controls the original has.
@@ -1232,6 +1297,7 @@ void Game::host_update_gameplay(uint32_t dt) {
     // scheduled for this frame BEFORE reading input. This keeps script
     // frame N aligned with gameplay frame N (Boot/Loading don't count).
     platform_->tick_input_script();
+    last_frame_dt_ms_ = dt;
     const auto& input = platform_->input();
     float dt_sec = (float)dt / 1000.0f;
 

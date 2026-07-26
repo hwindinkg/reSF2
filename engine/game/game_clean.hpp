@@ -191,6 +191,23 @@ std::string host_get_battle_location() const override;
 void host_set_battle_result(std::string result) override;
 
 
+    // ---- Fight parameters and state (D4) ----
+
+void host_set_battle_info(const BattleInfo& info) override;
+
+const BattleInfo& host_get_battle_info() const override;
+
+std::string host_round_outcome() const override;
+
+float host_player_health_frac() const override;
+
+float host_enemy_health_frac() const override;
+
+void host_reset_round() override;
+
+void host_set_round_wins(int player, int enemy) override;
+
+
 int host_get_currency() const override;
 
 
@@ -2255,6 +2272,10 @@ private:
             for (const char* n : {"Roll_left", "Roll_center", "Roll_right",
                                   "Paper_left", "Paper_right", "Shadow_roll"})
                 load_hud_png(scrolls / (std::string(n) + ".png"), n);
+            // [ORIGINAL] Round indicators are loose PNGs in textures/misc,
+            // loaded by name in ScreenModel (0x10201d90 / ctor 0x10200c10).
+            load_hud_png(base/"textures"/"misc"/"Round_Done.png", "Round_Done");
+            load_hud_png(base/"textures"/"misc"/"Round_Undone.png", "Round_Undone");
             load_hud_png(base/"image"/"users"/"image"/"character_sensei_small.png",
                          "character_sensei_small");
             // The full-size avatar used by the story dialogues
@@ -3114,6 +3135,159 @@ private:
         }
     }
 
+    // ---------- Fight HUD (battle mode) ----------
+    //
+    // [ORIGINAL] The in-fight HUD is ScreenModel (ctor @ 0x10200c10) — one
+    // instance per side, both children of a node at the TOP-CENTER of the
+    // screen at (0,0) (0x10291370), every X mirrored by the side sign and the
+    // enemy side's sprites flipped with setScaleX(-1). Coordinates are points
+    // of the 768-tall space (ui_scale.hpp); s = -1 player / +1 enemy:
+    //
+    //   health bar  @ 0x102017c0  HealthBar_Empty backdrop (564x26 px ->
+    //               282x13 pt), node x = s*53 - w/2, y = h/2 - 100; fill is
+    //               the 1-px HealthBar_Full strip stretched to 275 pt
+    //               (ProgressBarSkewed +0x150), offset -3 (+0x15c), with a
+    //               HealthBar_Hit trail draining at 25 units/s (ctor arg).
+    //   name label  @ 0x10201c30  x = s*315, y = -65, aligned toward the
+    //               center (align 1 left / 5 right), width cap 250.
+    //   round dots  @ 0x10201d90  Round_Undone sprites from s*77 stepping
+    //               s*(Round_Done.width - 1), y = -116, count = Fight rounds
+    //               (fighter+0xe4 <- Fight+0xc @ 0x10291370), mirrored.
+    //   avatar      @ 0x10201370  image/users/image/<fighter name>.png at
+    //               (s*415, -110), scaled to 200 pt. Not drawn yet: the
+    //               fighter -> avatar-file mapping is unreversed.
+    //   crazy bar   @ 0x10201f50, combo @ 0x10201690 (ComboModel), perks
+    //               @ 0x10201280 (ActivePerkModel) — magic/combo/perk systems
+    //               are not ported yet.
+    //
+    // The mirrored bar's decompiled node x (s*53 - w/2 with scaleX -1) does
+    // not read as symmetric on its own — the widget's internal anchor was not
+    // chased down — so the enemy bar is placed by symmetry with the player
+    // bar, which every other element obeys exactly.
+    void render_fight_hud(plat::Platform& platform) {
+        if (!renderer_ || !assets_) return;
+        const float win_w = static_cast<float>(platform.window_width());
+        const float win_h = static_cast<float>(platform.window_height());
+        const float pts = ui::points_scale(win_h);
+        const float cx = win_w * 0.5f;
+        auto tex_of = [&](const char* n) -> ren::Texture2D* {
+            auto it = assets_->hud_textures().find(n);
+            return it == assets_->hud_textures().end() ? nullptr : it->second.get();
+        };
+
+        auto* empty = tex_of("HealthBar_Empty");
+        auto* full = tex_of("HealthBar_Full");
+        auto* hit = tex_of("HealthBar_Hit");
+
+        // Sizes in points = atlas px / content scale; plist sizes 564x26 and
+        // 1x43 are the fallback for a missing atlas.
+        const float bar_w = (empty ? empty->width() : 564.0f) /
+                            ui::kHighTierContentScale;
+        const float bar_h = (empty ? empty->height() : 26.0f) /
+                            ui::kHighTierContentScale;
+        const float fill_h = (full ? full->height() : 43.0f) /
+                             ui::kHighTierContentScale;
+        constexpr float kInnerGapPts = 53.0f;   // 0x102017c0
+        constexpr float kFillWidthPts = 275.0f; // ProgressBarSkewed +0x150
+        constexpr float kFillInsetPts = 3.0f;   // +0x15c (sign folded)
+        constexpr float kDrainPerSec = 25.0f;   // ctor arg @ 0x102017c0
+        // Node y = empty_h/2 - 100 below the top edge (Y-up), i.e. the bar's
+        // center sits at 100 - h/2 points from the top.
+        const float bar_cy = (100.0f - bar_h * 0.5f) * pts;
+
+        // The hit trail lags the health value at 25 units/s.
+        auto trail = [&](float& t, const FighterState& f) {
+            if (t < 0.0f || t < f.health) t = f.health;
+            const float dt = last_frame_dt_ms_ * 0.001f;
+            t = std::max(f.health, t - kDrainPerSec * dt);
+            return t;
+        };
+        const float trail_p = trail(hp_trail_player_, player_fighter_);
+        const float trail_e = trail(hp_trail_enemy_, enemy_fighter_);
+
+        // One side. `dir` is the original's side sign: -1 player, +1 enemy.
+        auto draw_bar = [&](float dir, const FighterState& f, float trail_hp) {
+            const float outer = cx + dir * (kInnerGapPts + bar_w) * pts;
+            const float inner = cx + dir * kInnerGapPts * pts;
+            const float x0 = std::min(outer, inner);
+            if (empty) {
+                // Enemy backdrop mirrored like the original's setScaleX(-1).
+                renderer_->draw_textured_quad_screen(
+                    *empty, x0, bar_cy - bar_h * 0.5f * pts, bar_w * pts,
+                    bar_h * pts, dir > 0 ? 1.0f : 0.0f, 0.0f,
+                    dir > 0 ? 0.0f : 1.0f, 1.0f);
+            } else {
+                renderer_->draw_filled_rect_screen(x0, bar_cy - bar_h * 0.5f * pts,
+                                                   bar_w * pts, bar_h * pts,
+                                                   {30, 30, 30, 220});
+            }
+            // Fill grows from the widget's local origin — the OUTER edge —
+            // toward the center, so damage recedes from the inner end.
+            const float frac = f.max_health > 0 ? std::max(0.0f, f.health / f.max_health) : 0;
+            const float tfrac = f.max_health > 0 ? std::max(0.0f, trail_hp / f.max_health) : 0;
+            const float fill_x0 = outer - dir * kFillInsetPts * pts;
+            const float fy = bar_cy - fill_h * 0.5f * pts;
+            auto strip = [&](ren::Texture2D* t, float from_frac, float to_frac,
+                             ren::Color4B col) {
+                if (!t || to_frac <= from_frac) return;
+                const float a = fill_x0 - dir * kFillWidthPts * pts * from_frac;
+                const float b = fill_x0 - dir * kFillWidthPts * pts * to_frac;
+                renderer_->draw_textured_quad_screen(
+                    *t, std::min(a, b), fy, std::fabs(b - a), fill_h * pts,
+                    0, 0, 1, 1, col);
+            };
+            strip(full, 0.0f, frac, {255, 255, 255, 255});
+            strip(hit, frac, tfrac, {255, 255, 255, 255});
+        };
+        draw_bar(-1.0f, player_fighter_, trail_p);
+        draw_bar(+1.0f, enemy_fighter_, trail_e);
+
+        // Names: player is the localized "Shadow", the enemy comes from the
+        // stages.xml warrior the map handed over.
+        // [HEURISTIC-TODO] Text height: the label setup passes 80.0 and a
+        // 250-wide cap (0x10201c30); how 80 maps to glyph height in the
+        // original's font pipeline is not reversed. 40 pt reads right against
+        // the 13-pt bar.
+        const float name_h = 40.0f * pts;
+        const float name_scale = name_h / 115.0f;   // kFontLineBoxPx
+        const float name_y = 65.0f * pts - name_h * 0.5f;
+        std::string pname = localized("Shadow");
+        if (pname.empty()) pname = "Shadow";
+        std::string ename = battle_info_.enemy_name.empty()
+                                ? std::string("???")
+                                : localized(battle_info_.enemy_name);
+        if (ename.empty()) ename = battle_info_.enemy_name;
+        render_text(pname, cx - 315.0f * pts, name_y, name_scale,
+                    {255, 255, 255, 255});
+        const auto [ew, eh] = measure_text(ename, name_scale);
+        (void)eh;
+        render_text(ename, cx + 315.0f * pts - ew, name_y, name_scale,
+                    {255, 255, 255, 255});
+
+        // Round dots: Fight rounds per side, wins shown as Round_Done.
+        auto* done = tex_of("Round_Done");
+        auto* undone = tex_of("Round_Undone");
+        if (undone) {
+            const float dot_w = (done ? done->width() : undone->width()) /
+                                ui::kHighTierContentScale;
+            const float dot_h = undone->height() / ui::kHighTierContentScale;
+            const float dot_y = 116.0f * pts - dot_h * 0.5f * pts;
+            auto draw_dots = [&](float dir, int wins) {
+                float x = 77.0f * dir;
+                for (int i = 0; i < battle_info_.rounds; ++i) {
+                    auto* t = (i < wins && done) ? done : undone;
+                    renderer_->draw_textured_quad_screen(
+                        *t, cx + x * pts - dot_w * 0.5f * pts, dot_y,
+                        dot_w * pts, dot_h * pts, dir > 0 ? 1.0f : 0.0f, 0.0f,
+                        dir > 0 ? 0.0f : 1.0f, 1.0f);
+                    x += dir * (dot_w - 1.0f);
+                }
+            };
+            draw_dots(-1.0f, round_wins_player_);
+            draw_dots(+1.0f, round_wins_enemy_);
+        }
+    }
+
     // ---------- Menu expanded (vertical scroll, matching original game) ----------
     // In the original game, the menu is a VERTICAL scroll on the left side.
     // Icons are stacked top-to-bottom in a single column.
@@ -3409,6 +3583,18 @@ private:
     std::string current_level_;
     std::string battle_location_;
     std::string battle_result_;  // "victory" / "defeat" / ""
+    // Fight parameters handed over by the map (stages.xml <Fight>), plus the
+    // round-win tally shown as Round_Done dots in the fight HUD (D4).
+    BattleInfo battle_info_;
+    int round_wins_player_ = 0;
+    int round_wins_enemy_ = 0;
+    // The ProgressBarSkewed "hit" trail: a lagging copy of each health value
+    // that drains at 25 units/s (the ctor argument at 0x102017c0), drawn in
+    // HealthBar_Hit between the current fill end and itself.
+    float hp_trail_player_ = -1.0f;
+    float hp_trail_enemy_ = -1.0f;
+    // dt of the last gameplay tick, for the trail decay in render_fight_hud.
+    uint32_t last_frame_dt_ms_ = 16;
     std::vector<std::string> completed_levels_;
     int currency_ = 1000;  // starting gold
     int player_wins_ = 0;
