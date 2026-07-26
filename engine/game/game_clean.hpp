@@ -2652,6 +2652,11 @@ private:
         float stick_cx = 0, stick_cy = 0, stick_r = 0;
         float punch_cx = 0, punch_cy = 0, punch_r = 0;
         float kick_cx = 0, kick_cy = 0, kick_r = 0;
+        // Ranged and magic sit further along the same arc. They are drawn only
+        // when something is equipped in those slots, which is why the tutorial
+        // dojo shows two buttons and a later fight shows four.
+        float throw_cx = 0, throw_cy = 0;
+        float magic_cx = 0, magic_cy = 0;
         // State for this frame.
         float dir_x = 0, dir_y = 0;   // stick deflection, -1..1
         bool punch = false, kick = false;         // held
@@ -2663,21 +2668,60 @@ private:
         if (!platform_) return c;
         const float w = static_cast<float>(platform_->window_width());
         const float h = static_cast<float>(platform_->window_height());
-        // [HEURISTIC-TODO] Sizes and margins measured off the reference
-        // screenshot: the stick ring is about a third of the frame height and
-        // sits a stick-radius in from the bottom-left corner; the punch button
-        // is a little smaller and the kick button smaller again, stacked
-        // towards the bottom-right. The rule the original uses has not been
-        // reversed — this reproduces the proportions.
-        c.stick_r = h * 0.155f;
-        c.stick_cx = c.stick_r * 1.20f;
-        c.stick_cy = h - c.stick_r * 1.20f;
-        c.punch_r = h * 0.105f;
-        c.punch_cx = w - c.punch_r * 1.35f;
-        c.punch_cy = h - c.punch_r * 1.45f;
-        c.kick_r = h * 0.085f;
-        c.kick_cx = c.punch_cx - c.punch_r * 1.75f;
-        c.kick_cy = c.punch_cy - c.punch_r * 0.35f;
+        // [ORIGINAL] The attack buttons are laid out by
+        // `GameController::layoutButtons` @ 0x10046f40, against a parent
+        // anchored at the BOTTOM-RIGHT corner (X grows leftwards as negative,
+        // Y upwards):
+        //
+        //     kick ->setPosition(-140,            kick.height  * 0.5)
+        //     punch->setPosition(-punch.width*0.5, 140)
+        //     throw->setPosition(kick.x  - 35, kick.y  + 117)   // when enabled
+        //     magic->setPosition(punch.x - 35, punch.y + 117)
+        //
+        // So the punch button hugs the right edge 140 up from the bottom, and
+        // the kick button hugs the bottom 140 in from the right — an L, not the
+        // side-by-side row this used to guess at. Both frames are 206x206 in
+        // the 1536 atlas (batchButtonsFight.plist), the stick ring is 470x470
+        // and its knob 226x226.
+        //
+        // So there are FOUR buttons, not two: punch and kick at the bottom,
+        // then throw and magic stepped up-and-left from them by the same
+        // (-35, +117). It is a vertical ARC hugging the right edge, and throw
+        // and magic only appear when a ranged weapon or magic is equipped —
+        // which is why a fresh profile shows two buttons and not four.
+        //
+        // Taken literally, though, those offsets put punch and kick 52 units
+        // apart while each sprite is 206 across: at any scale the two would sit
+        // almost on top of each other in the corner. Applying them directly
+        // produced exactly that. So the parent these positions are relative to
+        // is not simply the screen corner, and THAT part is still unreversed.
+        //
+        // [HEURISTIC-TODO] Until it is, the placement below is measured off the
+        // reference screenshot: both buttons the same size (they are, 206x206
+        // — the visible disc is smaller than the frame, which is why they can
+        // touch), the fist low on the right edge and the foot up and left of
+        // it. The arc DIRECTION is the binary's; the anchor and scale are ours.
+        c.stick_r = h * 0.150f;
+        c.stick_cx = c.stick_r * 1.05f;
+        c.stick_cy = h - c.stick_r * 1.05f;
+
+        // Directions straight from the layout function, with cocos' Y-up read
+        // into screen Y-down: punch has the LARGER y (140 vs 103) and the
+        // smaller x-offset (103 vs 140), so the fist sits ABOVE the foot and
+        // closer to the right edge; the foot is down and to its left. Getting
+        // this backwards put the foot above the fist.
+        const float br = h * 0.105f;
+        c.punch_r = br;
+        c.kick_r = br;
+        c.punch_cx = w - br * 1.15f;
+        c.punch_cy = h - br * 2.05f;
+        c.kick_cx = c.punch_cx - br * 1.55f;
+        c.kick_cy = c.punch_cy + br * 0.90f;
+        // Next two slots along the same arc, for when 5.4 equips ranged/magic.
+        c.throw_cx = c.kick_cx - br * 0.45f;
+        c.throw_cy = c.kick_cy - br * 1.50f;
+        c.magic_cx = c.punch_cx - br * 0.45f;
+        c.magic_cy = c.punch_cy - br * 1.50f;
         return c;
     }
 
@@ -2693,9 +2737,10 @@ private:
             return dx * dx + dy * dy <= r * r;
         };
         for (const auto& p : input.pointers) {
-            // An unused pointer slot keeps id = -1 and coordinates (0, 0),
-            // which is inside the stick's quadrant — reading those deflected
-            // the knob to the top-left corner with nothing touching it.
+            // An unused pointer slot keeps id = -1 with coordinates (0, 0),
+            // which lands inside the stick's quadrant, so skip it. (This is a
+            // guard, not a fix for an observed defect: the deflected knob in
+            // an early capture was the user actually holding the stick.)
             if (p.id < 0) continue;
             if (!p.pressed) continue;
             // The stick reacts to a pointer anywhere in its quadrant, not just
@@ -2761,6 +2806,14 @@ private:
                c.punch_cx, c.punch_cy, c.punch_r);
         draw_c(touch_.kick ? "btn_kick_action" : "btn_kick_normal",
                c.kick_cx, c.kick_cy, c.kick_r);
+        // [ORIGINAL] The ranged and magic buttons exist only while something
+        // is equipped in those slots (GameController::layoutButtons @
+        // 0x10046f40 positions them either way, but the fight UI hides them) —
+        // so a fresh profile with bare fists shows two buttons, not four.
+        if (!equipped_ranged_.empty())
+            draw_c("btn_throw_normal", c.throw_cx, c.throw_cy, c.punch_r);
+        if (!equipped_magic_.empty())
+            draw_c("btn_magic_normal", c.magic_cx, c.magic_cy, c.punch_r);
     }
 
     // ---------- MENU scroll geometry ----------
@@ -3361,6 +3414,12 @@ private:
     // Currently equipped weapon type. Used to filter moves by tactic_weapon.
     // Move selection only allows moves whose tactic_weapon matches this value.
     std::string equipped_weapon_ = "Fists";
+    // [ORIGINAL] Ranged and magic slots. Empty means the corresponding
+    // on-screen button is not shown — the original hides them when nothing is
+    // equipped, which is what a fresh profile in the dojo looks like. Filled
+    // by 5.4 (weapons) / 7.2 (saves).
+    std::string equipped_ranged_;
+    std::string equipped_magic_;
     // Cycle list for weapon switching (J key cycles, N key to previous)
     std::vector<std::string> weapon_cycle_list_ = {
         "Fists", "Swords", "Axes", "Claws", "Knuckles", "Daggers",
