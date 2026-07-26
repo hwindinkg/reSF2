@@ -1820,6 +1820,36 @@ void Game::host_update_gameplay(uint32_t dt) {
                     hit_this_interval_ = false;
                 }
 
+                if (in_attack_interval && dump_state_) {
+                    // Where the attacking limb actually is, next to where the
+                    // bag actually is. Printed rather than drawn so it can be
+                    // read out of a scripted trace.
+                    float bx0 = 0, bx1 = 0, by0 = 0, by1 = 0;
+                    bool any = false;
+                    for (const auto& [bn, bv] : bag_verlet_) {
+                        (void)bn;
+                        if (!any) { bx0 = bx1 = bv.x; by0 = by1 = bv.y; any = true; }
+                        bx0 = std::min(bx0, bv.x); bx1 = std::max(bx1, bv.x);
+                        by0 = std::min(by0, bv.y); by1 = std::max(by1, bv.y);
+                    }
+                    auto pv = assets_->skeleton_nodes().find("NPivot");
+                    float ply = pv != assets_->skeleton_nodes().end() ? pv->second.y
+                                                                     : stance_npivot_y_;
+                    for (const auto& en : move_it->second.attack_edges) {
+                        auto se = assets_->skeleton_edges().find(en);
+                        if (se == assets_->skeleton_edges().end()) continue;
+                        if (!anim_node_pos_.count(se->second.end1)) continue;
+                        auto [lx, ly] = resolve_body_node(se->second.end1, player_pos_x_,
+                                                          player_pos_y_ + y_adjust_smoothed_,
+                                                          facing_right_, ply);
+                        std::printf("[ATK] f=%llu frame=%d edge=%s limb=(%.0f,%.0f) "
+                                    "bag=[%.0f..%.0f, %.0f..%.0f] r=%.1f\n",
+                                    (unsigned long long)total_frame_count_, current_frame,
+                                    en.c_str(), lx, ly, bx0, bx1, by0, by1,
+                                    se->second.radius);
+                        break;
+                    }
+                }
                 if (in_attack_interval && !hit_this_interval_) {
                     // [ORIGINAL] Distance-based hit detection on enemy fighter.
                     // If the player's attack limb is within hit range of the
