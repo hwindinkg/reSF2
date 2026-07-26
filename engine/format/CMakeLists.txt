@@ -4,6 +4,7 @@ add_library(resf2_format STATIC
     location_parser.cpp
     stage_parser.cpp
     json_atlas.cpp
+    effect_curve.cpp
 )
 
 target_include_directories(resf2_format PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -104,6 +104,8 @@ public:
 
     // Start with the world-geometry overlay on (also toggled at runtime with F1).
     void set_debug_world(bool on) { debug_world_ = on; }
+    // See hermetic_run_ below. main.cpp turns this on for --input-script runs.
+    void set_hermetic_run(bool on) { hermetic_run_ = on; }
 
     void set_start_location(const std::string& name) {
         if (!name.empty()) {
@@ -763,7 +765,17 @@ private:
                 auto& frame = atlas.atlas->frames[fit->second];
                 float img_off_x = (float)frame.offset_x;
                 float img_off_y = (float)frame.offset_y;
-                
+
+                // [ORIGINAL] A <SimpleEffect> carries its own alpha curve;
+                // SimpleEffect::update @ 0x1007f1f0 applies it as
+                // setOpacity((int)(value * 2.55) & 0xff). A plain <Image> has
+                // no curve and stays fully opaque. In dojo this is the light
+                // patch (layer_4), which breathes between 45% and 75% over a
+                // 9.2 s loop — it used to be drawn flat.
+                ren::Color4B tint{255, 255, 255, 255};
+                if (!img.transparency.empty())
+                    tint.a = resf2::format::transparency_to_alpha(img.transparency.value());
+
                 // For rotated frames, use pre-cropped un-rotated texture
                 std::string crop_name = img.class_name;
                 if (atlas.cropped.count(crop_name)) {
@@ -776,7 +788,8 @@ private:
                     float px = world_x - quad_w / 2.0f;
                     float py = world_y - quad_h / 2.0f;
                     renderer_->draw_textured_quad(*ctex, px, py,
-                                                  quad_w, quad_h);
+                                                  quad_w, quad_h,
+                                                  0.0f, 0.0f, 1.0f, 1.0f, tint);
                     continue;
                 }
                 
@@ -794,10 +807,37 @@ private:
                 float px = world_x - quad_w / 2.0f;
                 float py = world_y - quad_h / 2.0f;
                 renderer_->draw_textured_quad(*atlas.texture, px, py, quad_w, quad_h,
-                                              u0, v0, u1, v1);
+                                              u0, v0, u1, v1, tint);
             }
         }
         loc_logged = true;
+    }
+
+    // [ORIGINAL] Advance every <SimpleEffect> curve in the loaded location.
+    // The original runs this from SimpleEffect::update @ 0x1007f1f0 on each
+    // effect node; here the effects live on the layer images, so one sweep
+    // does them all. Only Transparency is modelled — OscillationX/Y and
+    // Rotation use the same curve type but move the node, which needs the
+    // effect to be a node in the first place (PORT_PLAN 2.2).
+    void update_location_effects(float dt_seconds) {
+        if (!location_) return;
+        for (auto& layer : location_->layers)
+            for (auto& img : layer.images)
+                if (!img.transparency.empty()) img.transparency.advance(dt_seconds);
+    }
+
+    // Alpha of the first animated <SimpleEffect> in the location, or -1 when
+    // the location has none. Reported in the [STATE] dump so a test can see
+    // that the curve is actually being ticked by the engine — the unit test
+    // proves the maths, this proves the wiring. In dojo it is the light patch,
+    // which is off-camera at the start position, so nothing on screen would
+    // reveal a curve that never advances.
+    float first_effect_alpha() const {
+        if (!location_) return -1.0f;
+        for (const auto& layer : location_->layers)
+            for (const auto& img : layer.images)
+                if (!img.transparency.empty()) return img.transparency.value();
+        return -1.0f;
     }
 
     // ---------- Skeleton ----------
@@ -3318,6 +3358,10 @@ private:
 
     bool replay_mode_ = false;  // skip menus, go directly to Battle  // true when current frame is in Uninterrupt interval
     bool dump_state_ = false;  // --dump-state: print structured state every frame
+    // A hermetic run reads no state from the machine — no saved profile, no
+    // saved inventory. Set for scripted runs so a measurement is reproducible
+    // on any machine and in any order relative to the tests that write saves.
+    bool hermetic_run_ = false;
 
     // Animation debug/TODO state
     float stance_npivot_y_ = 106.0f;     // NPivot Y from stance anim (default from params.xml)

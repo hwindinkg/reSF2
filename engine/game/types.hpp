@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "../core/math.hpp"
+#include "../format/effect_curve.hpp"
 #include "../renderer/renderer.hpp"
 #include "../reverse/plist_atlas.hpp"
 
@@ -30,6 +31,10 @@ struct LayerImage {
     std::string atlas_name, class_name;
     float x = 0, y = 0, w = 0, h = 0;
     std::string color;
+    // [ORIGINAL] <SimpleEffect> animates its own alpha through a <Transparency>
+    // curve; a plain <Image> leaves this empty and draws fully opaque. See
+    // engine/format/effect_curve.hpp for the law and the binary addresses.
+    resf2::format::EffectCurve transparency;
 };
 
 struct LocationLayer {

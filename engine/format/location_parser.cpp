@@ -61,7 +61,11 @@ bool LocationParser::parse(const std::string& xml, LocationData& out) {
                 LayerImage img;
                 img.atlas_name = layer.atlas_name;
                 parse_image(child, img);
-                layer.images.push_back(img);
+                // Same shared helper as LocationManager's parser, so the two
+                // copies of this file's logic cannot disagree about effects.
+                if (const auto* tr = child.first_child("Transparency"))
+                    parse_transparency(*tr, img.transparency);
+                layer.images.push_back(std::move(img));
             }
         }
 

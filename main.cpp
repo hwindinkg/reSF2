@@ -71,6 +71,10 @@ int main(int argc, char* argv[]) {
     resf2::game::Game game(asset_root, replay_mode, dump_state);
     if (!start_location.empty() && start_location != "dojo") game.set_start_location(start_location);
     game.set_debug_world(debug_world);
+    // A scripted run must not inherit the machine's saved profile — see the
+    // comment at the host_load_progress() call site. Same reasoning as the
+    // fixed timestep below.
+    game.set_hermetic_run(!input_script_path.empty());
     if (!platform->make_gl_current()) { std::fprintf(stderr, "Failed to make GL context current.\n"); return 1; }
     game.on_init(*platform);
     auto last_ms = platform->now_ms();
