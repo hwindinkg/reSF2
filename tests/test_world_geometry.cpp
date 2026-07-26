@@ -243,6 +243,17 @@ int main(int argc, char** argv) {
         check(half_view_w < loc.width * 0.5f,
               "viewport " + std::to_string(static_cast<int>(vw)) +
                   " is narrower than the world");
+
+        // Where the floor plane lands on screen, as a fraction of viewport
+        // height. Measured against the original's first-launch screenshot:
+        // the fighter's feet sit at ~85% of the frame there, and this engine
+        // puts the floor at 85.7% (green line at y=618 of 720 in a capture),
+        // so the vertical framing agrees within measurement error. This is
+        // aspect-independent because the camera frames the world HEIGHT.
+        const float floor_screen_fraction =
+            (loc.height * 0.5f - floor_declared) / loc.height;
+        check_near(floor_screen_fraction, 0.857, 0.02,
+                   "the floor plane sits ~86% down the frame, as in the original");
     }
 
     if (g_fail) {
