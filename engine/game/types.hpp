@@ -117,8 +117,24 @@ struct MoveDef {
     // straight from the animation — which matches the floor-space finding in
     // PORT_PLAN 3.1. The most common anchors are the heels (NHeel_2 437x,
     // NHeel_1 176x), because a fighting animation pivots on the planted foot.
+    //
+    // [ORIGINAL] `MoveInfo::parseAlign` @ 0x1017e140 stores each `Object`
+    // attribute as an enum, resolved against the string table:
+    //   1 = "Nodes"      (0x105b25f8)   a named node
+    //   2 = "Wall"       (0x105b028c)   the location's left/right wall
+    //   3 = "Animation"  (0x10379eb0)   the animation's own origin
+    //   4 = "Pivot"      (0x105b3c40)   the model's current node
+    // Anything else (including a missing <Align>) leaves the ctor default 0,
+    // which `Model::alignAnimation` treats as "no alignment at all" — see
+    // AlignObject::None below.
+    enum class AlignObject : int {
+        None = 0, Nodes = 1, Wall = 2, Animation = 3, Pivot = 4
+    };
     std::string moveinside_pivot_node;   // <Pivot Part="...">, the anchor node
     bool moveinside_is_animation = false;  // <Pivot Object="Animation">
+    AlignObject align_pivot_object = AlignObject::None;
+    AlignObject align_position_object = AlignObject::None;
+    std::string align_position_node;     // <Position Part="...">
     std::string align_axis;              // "X|Z", "X|Y|Z", ...
     bool align_x = false;
     bool align_y = false;

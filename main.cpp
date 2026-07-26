@@ -9,6 +9,11 @@ int main(int argc, char* argv[]) {
     bool dump_state = false;
     bool list_locations = false;
     bool debug_world = false;
+    // Window size is a command-line option so the resolution-dependent layout
+    // rules can actually be exercised. Everything in the HUD is scaled from the
+    // viewport height (render_hud, menu_roll_rect), and a rule that is only ever
+    // run at one size is a rule nobody has checked.
+    int win_w = 1280, win_h = 720;
     for (int i = 1; i < argc; ++i) {
         std::string_view arg = argv[i];
         if (arg == "--assets" && i + 1 < argc) asset_root = argv[++i];
@@ -19,13 +24,27 @@ int main(int argc, char* argv[]) {
         else if (arg == "--no-log") g_debug_log_enabled = false;
         else if (arg == "--list-locations") list_locations = true;
         else if (arg == "--debug-world") debug_world = true;
+        else if (arg == "--window" && i + 1 < argc) {
+            const std::string spec = argv[++i];
+            const size_t x = spec.find_first_of("xX");
+            if (x != std::string::npos) {
+                const int w = std::atoi(spec.substr(0, x).c_str());
+                const int h = std::atoi(spec.substr(x + 1).c_str());
+                if (w > 0 && h > 0) { win_w = w; win_h = h; }
+                else std::fprintf(stderr, "--window: bad size '%s', keeping %dx%d\n",
+                                  spec.c_str(), win_w, win_h);
+            } else {
+                std::fprintf(stderr, "--window: expected WxH, got '%s'\n", spec.c_str());
+            }
+        }
         else if ((arg == "--location" || arg == "-l") && i + 1 < argc) start_location = argv[++i];
         else if (arg == "--help" || arg == "-h") {
             std::printf("Usage: resf2_app [--assets <path>]\n"
                         "                 [--input-script <path>] [--max-frames N]\n"
                         "                 [--replay] [--dump-state] [--no-log]\n"
                         "                 [--list-locations] [--location <name>]\n"
-                        "                 [--debug-world]   world-geometry overlay (F1 toggles)\n");
+                        "                 [--debug-world]   world-geometry overlay (F1 toggles)\n"
+                        "                 [--window WxH]    viewport size (default 1280x720)\n");
             return 0;
         }
     }
@@ -46,7 +65,7 @@ int main(int argc, char* argv[]) {
     auto platform = std::make_unique<plat::GlfwPlatform>();
     plat::WindowConfig cfg;
     cfg.title = "reSF2 - Shadow Fight 2";
-    cfg.width = 1280; cfg.height = 720; cfg.vsync = true;
+    cfg.width = win_w; cfg.height = win_h; cfg.vsync = true;
     if (!platform->init(cfg)) { std::fprintf(stderr, "Platform init failed.\n"); return 1; }
     if (!input_script_path.empty()) (void)platform->load_input_script(input_script_path);
     resf2::game::Game game(asset_root, replay_mode, dump_state);
