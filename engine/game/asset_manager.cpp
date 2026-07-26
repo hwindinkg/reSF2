@@ -742,8 +742,22 @@ void AssetManager::load_moves(const std::string& asset_root) {
                 move.align_y = move.align_axis.find('Y') != std::string::npos;
                 move.align_z = move.align_axis.find('Z') != std::string::npos;
                 move.align_shift_model_node = sub.attr("ShiftModelNode");
+                // [ORIGINAL] MoveInfo::parseAlign @ 0x1017e140 reads Object,
+                // Part and Player from BOTH <Pivot> and <Position>. Only the
+                // pivot side was being read here, which lost the distinction
+                // between the four Position targets — and 658 of the 800
+                // <Align> blocks in moves.xml use Object="Pivot", the one that
+                // anchors the animation to the model's current node.
+                auto to_object = [](const std::string& o) {
+                    if (o == "Nodes")     return MoveDef::AlignObject::Nodes;
+                    if (o == "Wall")      return MoveDef::AlignObject::Wall;
+                    if (o == "Animation") return MoveDef::AlignObject::Animation;
+                    if (o == "Pivot")     return MoveDef::AlignObject::Pivot;
+                    return MoveDef::AlignObject::None;
+                };
                 if (auto* pivot = sub.first_child("Pivot")) {
                     std::string obj = pivot->attr("Object");
+                    move.align_pivot_object = to_object(obj);
                     if (obj == "Animation") {
                         move.moveinside_is_animation = true;
                     } else {
@@ -751,6 +765,8 @@ void AssetManager::load_moves(const std::string& asset_root) {
                     }
                 }
                 if (auto* position = sub.first_child("Position")) {
+                    move.align_position_object = to_object(position->attr("Object"));
+                    move.align_position_node = position->attr("Part");
                     move.align_shift_x = tof(position->attr("ShiftX"));
                     move.align_shift_y = tof(position->attr("ShiftY"));
                 }

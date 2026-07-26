@@ -31,6 +31,7 @@ void Game::play_animation(const std::string& name, bool loop, int priority) {
     // AnimationPlayer::play() rather than patched in afterwards.
     float fps = 20.0f;  // default: matches MidFrames=2 (60/3=20)
     int first_frame = -1;
+    const MoveDef* move_def = nullptr;
     {
         std::string name_no_bin = name;
         if (name_no_bin.size() > 4 &&
@@ -45,10 +46,24 @@ void Game::play_animation(const std::string& name, bool loop, int priority) {
             if (mfile == name_no_bin) {
                 fps = 60.0f / (1.0f + move.mid_frames);
                 first_frame = move.first_frame;
+                move_def = &move;
                 break;
             }
         }
     }
+
+    // The pose we are about to leave, captured before AnimationPlayer::play()
+    // resets it. apply_align() needs the anchor node's current world position.
+    const float prev_anchor_rel_x =
+        (move_def && !move_def->moveinside_pivot_node.empty())
+            ? [&] {
+                  auto it = anim_node_pos_.find(move_def->moveinside_pivot_node);
+                  return it == anim_node_pos_.end() ? 0.0f : it->second.first;
+              }()
+            : 0.0f;
+    const bool prev_anchor_known =
+        move_def && !move_def->moveinside_pivot_node.empty() &&
+        anim_node_pos_.count(move_def->moveinside_pivot_node) > 0;
 
     const std::string prev_anim = current_anim_;
     const int prev_priority = priority_;
@@ -67,6 +82,8 @@ void Game::play_animation(const std::string& name, bool loop, int priority) {
     if (first_frame >= 0 && anim_fps_ > 0.0f)
         anim_time_ = static_cast<float>(first_frame) / anim_fps_;
 
+    apply_align(name, move_def, first_frame, prev_anchor_rel_x, prev_anchor_known);
+
     // Game-side state that AnimationPlayer does not own.
     anim_root_dx_ = 0.0f;
     anim_root_dy_ = 0.0f;
@@ -78,6 +95,124 @@ void Game::play_animation(const std::string& name, bool loop, int priority) {
         name != "back_handflip") {
         jump_y_offset_ = 0.0f;
     }
+}
+
+// [ORIGINAL] Root placement at animation start.
+//
+// `ModelAnimation::playInfo` @ 0x10164fa0 runs, in this order:
+//     FUN_10104980(move, container, firstFrame)   load the animation frames
+//     ModelAnimation::mirrorNodes  @ 0x10164c20   swap L/R node indices when
+//                                                 the model faces the other way
+//     setCurrentNode(align.pivotID) @ 0x10165c10  model->currentNode = the node
+//                                                 named by <Pivot Part>, still
+//                                                 holding the position it has
+//                                                 in the pose being left
+//     Model::alignAnimation @ 0x101661d0          the placement itself
+//
+// alignAnimation computes, in the model's own space:
+//
+//     pivot  = <Pivot Object>    Nodes     -> the anchor node in the animation's
+//                                            first frame
+//                                Animation -> (0,0,0)
+//                                Wall      -> +-Location wall X
+//                                Pivot     -> the model's current node
+//     target = <Position Object> Pivot     -> the model's current node  (658/800)
+//                                Nodes     -> a named node on the chosen player
+//                                Animation -> the model's previous align offset
+//                                Wall      -> +-Location wall X
+//     target.x += facing * ShiftX      (0x10166403: MULSS by the +-1 facing byte)
+//     target.y += ShiftY               (no facing factor)
+//     offset  = target - pivot         (0x1028e890, vec3 subtract)
+//     offset.{x,y,z} &= <Align Axis>   (byte flags at move+0x84/85/86)
+//     translate every node by offset   (0x10166690)
+//
+// The net effect for the common case — 613 of the 800 <Align> blocks anchor a
+// heel, and 658 target Object="Pivot" — is that the anchor node keeps its world
+// position across the animation change and the body is placed around it. Once
+// placed, the model just follows the animation data, which is exactly what the
+// per-frame NPivot delta in on_update already does.
+//
+// A move with no <Align> keeps the ctor defaults (Align ctor @ 0x10101c60 sets
+// both Object enums to 0 and leaves every axis flag clear), so the offset is
+// zero and nothing is repositioned. All 91 such moves are StepForward /
+// StepBack / Shop* variants: their locomotion lives in the animation data
+// alone. That is why walking must NOT be re-anchored and attacking must be.
+//
+// In this engine a node's world X is `player_pos_x_ + facing * (node_x -
+// npivot_x)`, so pinning the anchor is a one-shot correction of player_pos_x_.
+void Game::apply_align(const std::string& anim_name, const MoveDef* move,
+                       int first_frame, float prev_anchor_rel_x,
+                       bool prev_anchor_known) {
+    if (!move || !move->has_align) return;
+    // X is the only axis this engine can place: vertical comes straight from
+    // the animation (PORT_PLAN 3.1) and Z is depth. 744 of 800 blocks declare
+    // exactly "X|Z", the other 56 "X|Y|Z" — X is always controlled.
+    if (!move->align_x) return;
+    if (move->align_pivot_object != MoveDef::AlignObject::Nodes) return;
+    if (move->moveinside_pivot_node.empty()) return;
+    // Only the Object="Pivot" target is modelled: it means "the node's own
+    // current position", which is the continuity case. Nodes/Wall/Animation
+    // targets need the enemy model and the location walls — see PORT_PLAN 4.3.
+    if (move->align_position_object != MoveDef::AlignObject::Pivot) return;
+    if (!prev_anchor_known) return;   // no previous pose: nothing to anchor to
+
+    const auto& animations = assets_->animations();
+    auto ait = animations.find(anim_name);
+    if (ait == animations.end()) return;
+    const auto& anim = ait->second;
+
+    const auto& order = assets_->ordered_node_names();
+    int anchor_idx = -1, npivot_idx = -1;
+    for (int i = 0; i < static_cast<int>(order.size()); ++i) {
+        if (order[i] == move->moveinside_pivot_node) anchor_idx = i;
+        else if (order[i] == "NPivot") npivot_idx = i;
+    }
+    if (anchor_idx < 0 || npivot_idx < 0) return;
+
+    int f0 = (first_frame > 0) ? first_frame : 0;
+    if (f0 >= anim.frame_count) f0 = 0;
+
+    float ax, ay, az, px, py, pz;
+    if (!anim.get_node_pos(f0, anchor_idx, ax, ay, az)) return;
+    if (!anim.get_node_pos(f0, npivot_idx, px, py, pz)) return;
+
+    const float sign = facing_right_ ? 1.0f : -1.0f;
+    const float anchor_world_x = player_pos_x_ + sign * prev_anchor_rel_x;
+    const float rel_new = ax - px;   // anchor relative to NPivot, model space
+    const float placed = anchor_world_x + sign * move->align_shift_x
+                       - sign * rel_new;
+
+    if (dump_state_) {
+        std::printf("[ALIGN] f=%llu anim='%s' anchor='%s' held_x=%.2f "
+                    "shift=%.1f rel_new=%.2f player %.2f -> %.2f (d=%.2f)\n",
+                    (unsigned long long)total_frame_count_, anim_name.c_str(),
+                    move->moveinside_pivot_node.c_str(), anchor_world_x,
+                    move->align_shift_x, rel_new, player_pos_x_, placed,
+                    placed - player_pos_x_);
+    }
+    player_pos_x_ = placed;
+}
+
+// The MoveDef driving the animation on screen right now, if that move carries
+// an <Align> this engine actually applies. Same predicate as apply_align().
+const MoveDef* Game::current_align_move() const {
+    std::string name_no_bin = current_anim_;
+    if (name_no_bin.size() > 4 &&
+        name_no_bin.substr(name_no_bin.size() - 4) == ".bin")
+        name_no_bin = name_no_bin.substr(0, name_no_bin.size() - 4);
+    for (const auto& [mname, move] : assets_->moves()) {
+        std::string mfile = move.filename;
+        if (mfile.size() > 4 && mfile.substr(mfile.size() - 4) == ".bin")
+            mfile = mfile.substr(0, mfile.size() - 4);
+        if (mfile != name_no_bin) continue;
+        if (move.has_align && move.align_x &&
+            move.align_pivot_object == MoveDef::AlignObject::Nodes &&
+            move.align_position_object == MoveDef::AlignObject::Pivot &&
+            !move.moveinside_pivot_node.empty())
+            return &move;
+        return nullptr;
+    }
+    return nullptr;
 }
 
 void Game::update_animation(uint32_t dt_ms) {
@@ -940,12 +1075,16 @@ void Game::host_update_gameplay(uint32_t dt) {
         overlay_ = (overlay_ == Overlay::Dialog) ? Overlay::None : Overlay::Dialog;
     }
 
-    // Click: check menu button (left side)
+    // Click: check menu button (left side). The hit box IS the drawn scroll —
+    // menu_roll_rect() is the single source for both. It used to be a fourth
+    // independent set of constants (130 px wide against a bar whose width
+    // depends on the localized label), so the click target and the graphic
+    // only lined up by accident.
+    const MenuRollRect roll = menu_roll_rect();
     for (const auto& p : input.pointers) {
         if (p.just_pressed) {
-            float btn_x = 10.0f, btn_y = 58.0f, btn_w = 130.0f, btn_h = 40.0f;
-            if (p.x >= btn_x && p.x <= btn_x + btn_w &&
-                p.y >= btn_y && p.y <= btn_y + btn_h) {
+            if (p.x >= roll.x && p.x <= roll.x + roll.w &&
+                p.y >= roll.y && p.y <= roll.y + roll.h) {
                 overlay_ = (overlay_ == Overlay::Menu) ? Overlay::None : Overlay::Menu;
             }
         }
@@ -2116,13 +2255,31 @@ void Game::host_update_gameplay(uint32_t dt) {
         // assertions need: moves.xml gives MidFrames (fps = 60/(1+MidFrames)),
         // FirstFrame (where playback starts) and the Attack interval in frame
         // numbers, so a test can check the engine honours all three.
+        // al/anchor_x make the <Align> placement observable. anchor_x is the
+        // WORLD x of the node the current animation is anchored to; while an
+        // aligned animation plays it is the quantity the original holds
+        // steady across an animation change (PORT_PLAN 4.3), so a test can
+        // assert continuity instead of trusting the diagnostic that computes
+        // it. px alone cannot show this: px is NPivot + offset, and NPivot
+        // sways within the animation by design.
+        int al = 0;
+        float anchor_x = player_pos_x_;
+        if (const MoveDef* m = current_align_move()) {
+            al = 1;
+            auto it = anim_node_pos_.find(m->moveinside_pivot_node);
+            if (it != anim_node_pos_.end())
+                anchor_x = player_pos_x_ +
+                           (facing_right_ ? it->second.first : -it->second.first);
+        }
         std::printf("[STATE] f=%llu ms=%d ha=%u anim='%s' move='%s' px=%.1f py=%.1f "
-                    "af=%.2f fps=%.2f bag_hit=%d bag_move=%.2f nv=%zu\n",
+                    "af=%.2f fps=%.2f bag_hit=%d bag_move=%.2f nv=%zu "
+                    "al=%d anchor_x=%.2f\n",
                     (unsigned long long)total_frame_count_, move_state_, hit_anim_,
                     current_anim_.c_str(), current_move_.c_str(),
                     player_pos_x_, player_pos_y_,
                     anim_time_ * anim_fps_, anim_fps_,
-                    (int)hit_this_interval_, bag_displacement(), bag_verlet_.size());
+                    (int)hit_this_interval_, bag_displacement(), bag_verlet_.size(),
+                    al, anchor_x);
     }
 }
 

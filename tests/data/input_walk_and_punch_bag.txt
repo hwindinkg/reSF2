@@ -1,9 +1,17 @@
 # Deterministic input trace used by test_input_trace (combat scenario).
 # Walk right until next to the punching bag, then punch it twice.
 # Format: frame <N> keydown|keyup <KEY>
+#
+# The walk used to stop at frame 340, which left the fingertip 4 units inside
+# a 19-unit collision radius on the closest frame. A test balanced on a 4-unit
+# margin measures the script, not the engine: any legitimate change to root
+# placement flips it between hit and miss — and one did, when <Align> landed
+# (PORT_PLAN 4.3 moved the fighter 6.6 units back). Walking ~20 frames further
+# puts the punch well inside contact range, so the test now fails only if the
+# punch genuinely stops working.
 frame 200 keydown D
-frame 340 keyup D
-frame 360 keydown Space
-frame 370 keyup Space
-frame 420 keydown Space
-frame 430 keyup Space
+frame 360 keyup D
+frame 380 keydown Space
+frame 390 keyup Space
+frame 440 keydown Space
+frame 450 keyup Space

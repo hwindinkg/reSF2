@@ -9,6 +9,8 @@
 // frame ~161) and reported green. Parsing the trace here lets the test require
 // that the run actually completed and that every expected transition happened.
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -29,6 +31,8 @@ struct Frame {
     std::string anim;
     std::string move;
     float px = 0.0f;
+    int aligned = 0;        // the move on screen carries an applied <Align>
+    float anchor_x = 0.0f;  // world X of that <Align>'s anchor node
 };
 
 }  // namespace
@@ -60,6 +64,7 @@ int main(int argc, char** argv) {
 
     const std::regex re(
         R"(\[STATE\] f=(\d+) ms=(-?\d+) ha=(\d+) anim='([^']*)' move='([^']*)' px=([-\d.]+))");
+    const std::regex re_align(R"(al=(\d+) anchor_x=([-\d.]+))");
     std::vector<Frame> frames;
     bool rejected = false;
     std::string line;
@@ -76,6 +81,11 @@ int main(int argc, char** argv) {
         fr.anim = m[4];
         fr.move = m[5];
         fr.px = std::stof(m[6]);
+        std::smatch ma;
+        if (std::regex_search(line, ma, re_align)) {
+            fr.aligned = std::stoi(ma[1]);
+            fr.anchor_x = std::stof(ma[2]);
+        }
         frames.push_back(fr);
     }
 
@@ -128,6 +138,68 @@ int main(int argc, char** argv) {
 
     const int idle3 = first_frame_with("stance_idle", punch);
     check(idle3 > punch, "the fighter returns to idle after punching");
+
+    // ------------------------------------------------------------- <Align>
+    //
+    // [ORIGINAL] Model::alignAnimation @ 0x101661d0, driven from
+    // ModelAnimation::playInfo @ 0x10164fa0, places a new animation so the node
+    // named by <Align><Pivot Part> keeps the world position it has in the pose
+    // being left (658 of the 800 <Align> blocks in moves.xml target
+    // Object="Pivot", and 613 anchor a heel). That is the invariant asserted
+    // here: across an animation change into an aligned move, the anchor node
+    // must not jump.
+    //
+    // px cannot be used for this. px is NPivot plus the align offset, and
+    // NPivot sways inside an animation by design — during the intro stance it
+    // travels 167 units and comes back. Only the anchor is held.
+    //
+    // The sample is taken one frame after the switch: one of the two places
+    // that start an animation runs after update_animation(), so on the switch
+    // frame itself the reported anim is already the new one while the node
+    // positions are still the old one's. One frame later both agree.
+    auto frame_at = [&](int f) -> const Frame* {
+        for (const auto& fr : frames)
+            if (fr.frame == f) return &fr;
+        return nullptr;
+    };
+
+    int aligned_transitions = 0;
+    for (size_t i = 1; i < frames.size(); ++i) {
+        if (frames[i].anim == frames[i - 1].anim) continue;
+        const Frame* before = frame_at(frames[i].frame - 1);
+        const Frame* after = frame_at(frames[i].frame + 1);
+        if (!before || !after) continue;
+        if (!before->aligned || !after->aligned) continue;   // not comparable
+        ++aligned_transitions;
+        const float jump = std::fabs(after->anchor_x - before->anchor_x);
+        std::printf("  align %s -> %-14s anchor %.2f -> %.2f (jump %.2f)\n",
+                    before->anim.c_str(), after->anim.c_str(),
+                    before->anchor_x, after->anchor_x, jump);
+        check(jump < 2.0,
+              "the <Align> anchor holds its world position entering '" +
+                  after->anim + "'");
+    }
+    check_ge(static_cast<double>(aligned_transitions), 2.0,
+             "at least two aligned animation changes were actually observed");
+
+    // A looping aligned stance must stay put. Before the anchor was held, an
+    // idle inherited whatever offset the previous animation left it with and
+    // the fighter crept along the floor.
+    float idle_lo = 0.0f, idle_hi = 0.0f;
+    int idle_n = 0;
+    for (const auto& fr : frames) {
+        if (fr.frame <= idle3 + 20 || fr.anim != "stance_idle" || !fr.aligned) continue;
+        if (idle_n == 0) { idle_lo = idle_hi = fr.anchor_x; }
+        idle_lo = std::min(idle_lo, fr.anchor_x);
+        idle_hi = std::max(idle_hi, fr.anchor_x);
+        ++idle_n;
+    }
+    check_ge(static_cast<double>(idle_n), 60.0,
+             "the trace contains a long stretch of looping idle to measure");
+    std::printf("  idle stretch: %d frames, anchor span %.2f\n",
+                idle_n, idle_hi - idle_lo);
+    check(idle_hi - idle_lo < 5.0,
+          "a looping idle does not walk the fighter along the floor");
 
     // Walking has to actually move the fighter.
     float px_at_walk = 0.0f, px_at_idle2 = 0.0f;

@@ -48,6 +48,7 @@ int main(int argc, char** argv) {
     int checked = 0, missing_anim = 0;
     int attack_moves = 0, attack_moves_with_interval = 0;
     int align_moves = 0, align_with_anchor = 0;
+    int align_pivot_nodes = 0, align_position_pivot = 0;
     std::vector<std::string> missing_names;
 
     // Node names available for <Align> anchors.
@@ -153,6 +154,33 @@ int main(int argc, char** argv) {
                 check(known_anchor(m.align_shift_model_node),
                       name + ": ShiftModelNode '" + m.align_shift_model_node +
                           "' is a skeleton node or an attached-model node");
+
+            // [ORIGINAL] MoveInfo::parseAlign @ 0x1017e140 resolves both
+            // `Object` attributes against exactly four strings — "Nodes"
+            // (0x105b25f8), "Wall" (0x105b028c), "Animation" (0x10379eb0) and
+            // "Pivot" (0x105b3c40) — and logs
+            //   ERROR: alignParse - wrong axis "%s" in "%s"
+            // for anything else. So an <Align> that names an Object the
+            // original would reject is a data error this parser must not
+            // silently swallow, which is what resf2::game::MoveDef::AlignObject::None means
+            // here.
+            check(m.align_pivot_object != resf2::game::MoveDef::AlignObject::None,
+                  name + ": <Pivot Object> is one of Nodes/Wall/Animation/Pivot");
+            check(m.align_position_object != resf2::game::MoveDef::AlignObject::None,
+                  name + ": <Position Object> is one of Nodes/Wall/Animation/Pivot");
+            // Object="Nodes" is the only one that reads a node name, and
+            // Model::alignAnimation @ 0x101661d0 dereferences it without a
+            // guard — an empty Part there would be a null anchor.
+            if (m.align_pivot_object == resf2::game::MoveDef::AlignObject::Nodes)
+                check(!m.moveinside_pivot_node.empty(),
+                      name + ": <Pivot Object=\"Nodes\"> names a Part");
+            if (m.align_position_object == resf2::game::MoveDef::AlignObject::Nodes)
+                check(!m.align_position_node.empty(),
+                      name + ": <Position Object=\"Nodes\"> names a Part");
+            if (m.align_pivot_object == resf2::game::MoveDef::AlignObject::Nodes)
+                ++align_pivot_nodes;
+            if (m.align_position_object == resf2::game::MoveDef::AlignObject::Pivot)
+                ++align_position_pivot;
         }
     }
 
@@ -174,6 +202,16 @@ int main(int argc, char** argv) {
                 align_moves, align_with_anchor);
     check_ge(align_moves, 700.0, "practically every move declares <Align>");
     check_ge(align_with_anchor, 600.0, "most Align blocks name an anchor node");
+    // The two shapes the engine actually implements (PORT_PLAN 4.3): a node
+    // anchor placed onto the model's own current node. If either count
+    // collapses, apply_align() has stopped seeing the data it keys on — the
+    // same failure mode as the <Intervals> block that parsed to nothing.
+    std::printf("align: %d use <Pivot Object=\"Nodes\">, %d use <Position Object=\"Pivot\">\n",
+                align_pivot_nodes, align_position_pivot);
+    check_ge(align_pivot_nodes, 600.0,
+             "most Align blocks anchor on a named node (Object=\"Nodes\")");
+    check_ge(align_position_pivot, 500.0,
+             "most Align blocks target the model's current node (Object=\"Pivot\")");
 
     check_ge(attack_moves, 200.0, "the move table contains attacking moves");
     check_ge(static_cast<double>(attack_moves_with_interval) /

@@ -2051,6 +2051,13 @@ private:
 
     void update_animation(uint32_t dt_ms);
     void play_animation(const std::string& name, bool loop = true, int priority = 0);
+    // [ORIGINAL] Model::alignAnimation @ 0x101661d0 — see game.cpp for the
+    // full derivation. Places the model so the <Align><Pivot Part> node keeps
+    // its world position across an animation change.
+    void apply_align(const std::string& anim_name, const MoveDef* move,
+                     int first_frame, float prev_anchor_rel_x,
+                     bool prev_anchor_known);
+    const MoveDef* current_align_move() const;
 
     // Find the best matching move from moves.xml for the given input context.
     // Returns nullptr if no move matches. Sets candidate_count to the number
@@ -2450,6 +2457,74 @@ private:
         }
     }
 
+    // ---------- MENU scroll geometry ----------
+    //
+    // [ORIGINAL] The MENU scroll hangs off the bottom edge of the top panel and
+    // is drawn from `assets/1536/textures/scrolls/common` (`MenuRoll_left`,
+    // `_center`, `_right`). It is therefore laid out on the same atlas scale as
+    // render_hud(): one atlas unit of the 1536 tier maps to
+    // `win_h * 0.085 / 192` screen pixels.
+    //
+    // This used to be three independent copies of `{btn_x=10, btn_y=58,
+    // roll_h=40}` — the collapsed roll, the expanded menu and the click test in
+    // Game::on_update — plus a fourth constant for the click box (130 px wide)
+    // that did not match the drawn width at all, so part of the label sat
+    // outside the clickable area and the rest of the bar was dead. Fixed pixels
+    // also meant the scroll drifted away from the panel it hangs from at any
+    // viewport other than 720p, while the panel itself scaled.
+    struct MenuRollRect {
+        float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f, cap_w = 0.0f;
+    };
+
+    MenuRollRect menu_roll_rect() {
+        MenuRollRect r;
+        if (!platform_) return r;
+        const float win_h = static_cast<float>(platform_->window_height());
+        const float s = win_h * 0.085f / 192.0f;   // atlas units -> screen px
+        r.y = win_h * 0.085f;                      // flush under the top panel
+        // [HEURISTIC-TODO] Left inset: 32 atlas units. That reproduces the 10 px
+        // gap measured on the reference screenshot at 1280x720; the rule the
+        // original uses for screen margins has not been reversed.
+        r.x = 32.0f * s;
+
+        // Roll height and cap width come from the atlas' own pixel sizes
+        // (MenuRoll_left/right 156x114, MenuRoll_center 338x114), not from
+        // eyeballed numbers.
+        float roll_src_h = 114.0f, cap_src_w = 156.0f;
+        if (assets_) {
+            auto lit = assets_->scroll_textures().find("MenuRoll_left");
+            if (lit != assets_->scroll_textures().end() && lit->second &&
+                lit->second->height() > 0) {
+                roll_src_h = static_cast<float>(lit->second->height());
+                cap_src_w = static_cast<float>(lit->second->width());
+            }
+        }
+        r.h = roll_src_h * s;
+        r.cap_w = cap_src_w * s;
+
+        // The bar is as wide as its label needs: caps + text + one cap of
+        // padding, so a longer localization widens the scroll instead of
+        // overflowing it.
+        const auto [text_w, text_h] = measure_text(menu_label(), menu_label_scale());
+        (void)text_h;
+        r.w = text_w + 2.0f * r.cap_w + 48.0f * s;
+        return r;
+    }
+
+    // The label is the localized string, not the Latin literal "MENU":
+    // assets/localizations/rus.xml has <Word Title="menu">МЕНЮ</Word>.
+    std::string menu_label() const {
+        const std::string loc = localized("menu");
+        return loc.empty() ? std::string("MENU") : loc;
+    }
+
+    // Text scale tied to the roll height so the label keeps its proportion.
+    float menu_label_scale() const {
+        if (!platform_) return 0.22f;
+        const float win_h = static_cast<float>(platform_->window_height());
+        return win_h * 0.085f / 280.0f;   // same rule as the HUD numerals
+    }
+
     // ---------- HUD ----------
     void render_hud(plat::Platform& platform) {
         // [ORIGINAL] The top panel is laid out from the atlas' own source sizes
@@ -2540,46 +2615,37 @@ private:
                 (float)platform.window_height() - 60.0f, 0.3f,
                 {220, 220, 220, hint_alpha});
         }
-        // Menu button (LEFT side, scroll/roll style)
-        float btn_x = 10.0f, btn_y = 58.0f;
-        float roll_h = 40.0f;
+        // Menu button (LEFT side, scroll/roll style) — geometry from
+        // menu_roll_rect(), shared with the expanded menu and the click test.
+        const MenuRollRect roll = menu_roll_rect();
         // Compute menu animation progress (smoothstep easing)
         float mp = menu_anim_progress_;
         float menu_eased = mp * mp * (3.0f - 2.0f * mp);
         // Show collapsed roll when menu is closed OR animating
         if (menu_eased < 0.99f) {
-            // Collapsed: scroll roll bar — sized to fit "MENU" text
             auto lit = assets_->scroll_textures().find("MenuRoll_left");
             auto cit = assets_->scroll_textures().find("MenuRoll_center");
             auto rit = assets_->scroll_textures().find("MenuRoll_right");
+            const std::string label = menu_label();
+            const float label_scale = menu_label_scale();
+            const auto [text_w, text_h] = measure_text(label, label_scale);
+            // Fade out the collapsed roll as menu expands
+            float alpha = 1.0f - menu_eased;
             if (lit != assets_->scroll_textures().end() && cit != assets_->scroll_textures().end() &&
                 rit != assets_->scroll_textures().end()) {
-                float cap_w = roll_h * lit->second->width() / lit->second->height();
-                // [ORIGINAL] The label is the localized string, not the Latin
-                // literal "MENU": assets/localizations/rus.xml has
-                // <Word Title="menu">МЕНЮ</Word>.
-                const std::string menu_label =
-                    localized("menu").empty() ? std::string("MENU") : localized("menu");
-                const auto [text_w, text_h] = measure_text(menu_label, 0.22f);
-                float roll_w = text_w + 2 * cap_w + 16.0f;  // text + caps + padding
-                float center_w = roll_w - 2 * cap_w;
-                // Fade out the collapsed roll as menu expands
-                float alpha = 1.0f - menu_eased;
+                float center_w = roll.w - 2 * roll.cap_w;
                 ren::Color4B roll_col{255, 255, 255, (uint8_t)(alpha * 255)};
-                renderer_->draw_textured_quad_screen(*lit->second, btn_x, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
-                renderer_->draw_textured_quad_screen(*cit->second, btn_x + cap_w, btn_y, center_w, roll_h, 0,0,1,1, roll_col);
-                renderer_->draw_textured_quad_screen(*rit->second, btn_x + cap_w + center_w, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
-                // Centre the label on the roll.
-                ren::Color4B text_col{255, 240, 200, (uint8_t)(alpha * 255)};
-                float text_x = btn_x + (roll_w - text_w) / 2.0f;
-                float text_y = btn_y + (roll_h - text_h) / 2.0f;
-                render_text(menu_label, text_x, text_y, 0.22f, text_col);
+                renderer_->draw_textured_quad_screen(*lit->second, roll.x, roll.y, roll.cap_w, roll.h, 0,0,1,1, roll_col);
+                renderer_->draw_textured_quad_screen(*cit->second, roll.x + roll.cap_w, roll.y, center_w, roll.h, 0,0,1,1, roll_col);
+                renderer_->draw_textured_quad_screen(*rit->second, roll.x + roll.cap_w + center_w, roll.y, roll.cap_w, roll.h, 0,0,1,1, roll_col);
             } else {
-                ren::Color4B bg{60, 40, 20, 230};
-                renderer_->draw_filled_rect_screen(btn_x, btn_y, 120, roll_h, bg);
-                render_text(localized("menu").empty() ? std::string("MENU") : localized("menu"),
-                            btn_x + 40, btn_y + 12, 0.22f, {255, 240, 200, 255});
+                ren::Color4B bg{60, 40, 20, (uint8_t)(alpha * 230)};
+                renderer_->draw_filled_rect_screen(roll.x, roll.y, roll.w, roll.h, bg);
             }
+            // Centre the label on the roll.
+            ren::Color4B text_col{255, 240, 200, (uint8_t)(alpha * 255)};
+            render_text(label, roll.x + (roll.w - text_w) / 2.0f,
+                        roll.y + (roll.h - text_h) / 2.0f, label_scale, text_col);
         }
 
         // Bottom hint
@@ -2612,35 +2678,39 @@ private:
         if (backdrop.a > 5)
             renderer_->draw_filled_rect_screen(0, 0, ww, wh, backdrop);
 
-        float btn_x = 10.0f, btn_y = 58.0f;
-        float roll_h = 40.0f;
+        // Same geometry source as the collapsed roll and the click test.
+        const MenuRollRect roll = menu_roll_rect();
+        const float btn_x = roll.x, btn_y = roll.y, roll_h = roll.h;
+        const float s = wh * 0.085f / 192.0f;   // atlas units -> screen px
 
         auto lit = assets_->scroll_textures().find("MenuRoll_left");
         auto cit = assets_->scroll_textures().find("MenuRoll_center");
         auto rit = assets_->scroll_textures().find("MenuRoll_right");
 
+        // Vertical layout: icons stacked top-to-bottom. Sizes are in atlas
+        // units of the 1536 tier, scaled by `s` like every other HUD element,
+        // instead of the fixed pixels that only happened to look right at 720p.
+        const float icon_size = 176.0f * s;
+        const float icon_spacing = 25.0f * s;
+        const int n_items = 5;
+        const float paper_padding = 44.0f * s;
+        const float paper_w = icon_size + paper_padding * 2 + 94.0f * s;
+        const float full_paper_h = n_items * (icon_size + icon_spacing) + paper_padding * 2;
+        // Animate paper height: scroll unrolls from top to bottom
+        const float paper_h = full_paper_h * menu_eased;
+
         if (lit == assets_->scroll_textures().end() || cit == assets_->scroll_textures().end() ||
             rit == assets_->scroll_textures().end()) {
             ren::Color4B bg{60, 40, 20, 230};
-            renderer_->draw_filled_rect_screen(btn_x, btn_y, 120, 400 * menu_eased, bg);
+            renderer_->draw_filled_rect_screen(btn_x, btn_y, paper_w, paper_h, bg);
             return;
         }
 
         auto& left_tex = lit->second;
         auto& center_tex = cit->second;
         auto& right_tex = rit->second;
-        float cap_w = roll_h * left_tex->width() / left_tex->height();
-
-        // Vertical layout: icons stacked top-to-bottom
-        float icon_size = 56.0f;  // larger icons to match original game
-        float icon_spacing = 8.0f;
-        int n_items = 5;
-        float paper_padding = 14.0f;
-        float paper_w = icon_size + paper_padding * 2 + 30;  // wider for text labels
-        float full_paper_h = n_items * (icon_size + icon_spacing) + paper_padding * 2;
-        // Animate paper height: scroll unrolls from top to bottom
-        float paper_h = full_paper_h * menu_eased;
-        float center_w = paper_w - 2 * cap_w;
+        const float cap_w = roll.cap_w;
+        const float center_w = paper_w - 2 * cap_w;
 
         // Roll bar (top, horizontal) — sized to fit paper width
         float roll_alpha = (menu_eased > 0.05f) ? 1.0f : menu_eased / 0.05f;
@@ -2672,7 +2742,7 @@ private:
         auto shadow_it = assets_->scroll_textures().find("Shadow_roll");
         if (shadow_it != assets_->scroll_textures().end() && menu_eased > 0.9f) {
             renderer_->draw_textured_quad_screen(*shadow_it->second,
-                btn_x, paper_y + paper_h - 8, paper_w, 15);
+                btn_x, paper_y + paper_h - 25.0f * s, paper_w, 47.0f * s);
         }
 
         // Menu icons (vertical stack) — only render icons that fit within the animated height
@@ -2692,7 +2762,7 @@ private:
             }
         }
         float uniform_scale = icon_size / (float)max_tex_dim;
-        float ix = btn_x + paper_padding + 10;
+        float ix = btn_x + paper_padding + 31.0f * s;
         float iy = paper_y + paper_padding;
         for (int idx = 0; idx < 5; ++idx) {
             float icon_y = iy + idx * (icon_size + icon_spacing);
@@ -2721,7 +2791,8 @@ private:
                                 draw_w, draw_h, uniform_scale);
                 }
             }
-            render_text(name, ix + icon_size + 5, icon_y + 10, 0.16f, {60, 40, 20, 255});
+            render_text(name, ix + icon_size + 16.0f * s, icon_y + 31.0f * s,
+                        menu_label_scale() * 0.73f, {60, 40, 20, 255});
         }
         loc_icons_logged = true;
     }
