@@ -243,6 +243,11 @@ public:
     // page (the map's zone) for capture and comparison.
     [[nodiscard]] virtual int start_scene_arg() const = 0;
 
+    // Draw a loaded UI texture by its atlas frame name (or loose-PNG name):
+    // avatars, buttons, scroll pieces. Returns false when it is not loaded.
+    virtual bool host_render_ui_texture(const std::string& name,
+                                        float x, float y, float w, float h) = 0;
+
     // Localized string for a key, or "" when the key is absent.
     [[nodiscard]] virtual std::string host_localized(const std::string& key) const = 0;
 

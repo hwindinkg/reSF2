@@ -971,6 +971,19 @@ void Game::host_render_scroll_panel(float x, float y, float w, float h) {
     }
 }
 
+bool Game::host_render_ui_texture(const std::string& name,
+                                  float x, float y, float w, float h) {
+    auto it = assets_->hud_textures().find(name);
+    if (it == assets_->hud_textures().end() || !it->second) {
+        auto it2 = assets_->scroll_textures().find(name);
+        if (it2 == assets_->scroll_textures().end() || !it2->second) return false;
+        renderer_->draw_textured_quad_screen(*it2->second, x, y, w, h);
+        return true;
+    }
+    renderer_->draw_textured_quad_screen(*it->second, x, y, w, h);
+    return true;
+}
+
 void Game::host_render_top_panel() {
     if (!platform_) return;
     render_hud(*platform_);

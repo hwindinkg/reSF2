@@ -648,7 +648,11 @@ void DialogueScene::on_update(SceneContext& ctx) {
         current_line_++;
         text_reveal_ms_ = 0;
         if (current_line_ >= total_lines) {
-            ctx.host.request_scene_transition(SceneId::Battle);
+            // The opening tutorial dialogue has no battle behind it — it just
+            // hands over to the dojo. Only a dialogue queued from the map does.
+            ctx.host.request_scene_transition(
+                ctx.host.host_get_battle_location().empty() ? SceneId::MainMenu
+                                                            : SceneId::Battle);
         }
     };
 
@@ -669,39 +673,108 @@ void DialogueScene::on_update(SceneContext& ctx) {
     }
 }
 
+// [ORIGINAL] A story dialogue is a parchment scroll across the bottom of the
+// screen with the speaker's avatar on the left, their name above the text and
+// a "ДАЛЕЕ" button on the right — quests.xml describes them as
+//   <Dialog Type="Regular" Title="characterSensei" Image="character_sensei">
+//     <Line Text="tutorial_begin_1" ButtonText="dlgStoryBtnMore"/>
+// so Title and every Line are localization keys, and Image names an avatar in
+// image/users/image. This used to be a dark blue rectangle with a hard-coded
+// "Click to continue..." in it.
 void DialogueScene::on_render(SceneContext& ctx) {
     const auto& lines = ctx.host.host_get_dialogue();
     auto& r = ctx.renderer;
-    float w = (float)ctx.platform.window_width(), h = (float)ctx.platform.window_height();
+    const float w = (float)ctx.platform.window_width();
+    const float h = (float)ctx.platform.window_height();
 
-    // Dim background
-    r.draw_filled_rect_screen(0, 0, w, h, {0, 0, 0, 160});
-
+    r.draw_filled_rect_screen(0, 0, w, h, {0, 0, 0, 150});
     if (current_line_ >= lines.size()) return;
 
-    // Dialogue box (centered bottom)
-    float box_w = w * 0.7f, box_h = 180.0f;
-    float box_x = (w - box_w) / 2.0f, box_y = h - box_h - 40.0f;
-    r.draw_filled_rect_screen(box_x, box_y, box_w, box_h, {20, 20, 40, 230});
-    r.draw_filled_rect_screen(box_x, box_y, box_w, 2, {200, 170, 100, 255});
-    r.draw_filled_rect_screen(box_x, box_y + box_h - 2, box_w, 2, {200, 170, 100, 255});
-    r.draw_filled_rect_screen(box_x, box_y, 2, box_h, {200, 170, 100, 255});
-    r.draw_filled_rect_screen(box_x + box_w - 2, box_y, 2, box_h, {200, 170, 100, 255});
+    // The scroll sits across the bottom, as wide as the frame less a margin.
+    const float box_w = w * 0.86f;
+    const float box_h = h * 0.30f;
+    const float box_x = (w - box_w) * 0.5f;
+    const float box_y = h - box_h - h * 0.10f;
+    ctx.host.host_render_scroll_panel(box_x, box_y, box_w, box_h);
 
-    // Speaker name
-    ctx.host.host_render_text(lines[current_line_].first,
-        box_x + 20, box_y + 15, 0.35f, 255, 220, 150, 255);
+    // Avatar on the left, inset so it clears the sheet's edge strip.
+    const float pad = box_h * 0.10f;
+    float text_x = box_x + box_w * 0.055f;
+    const float avatar = box_h * 0.78f;
+    const std::string& speaker_key = lines[current_line_].first;
+    if (ctx.host.host_render_ui_texture(speaker_key.empty() ? "character_sensei"
+                                                            : speaker_key,
+                                        box_x + box_w * 0.03f,
+                                        box_y + (box_h - avatar) * 0.5f,
+                                        avatar, avatar)) {
+        text_x = box_x + box_w * 0.03f + avatar + box_w * 0.025f;
+    }
 
-    // Text (with typewriter effect)
-    const std::string& full_text = lines[current_line_].second;
-    size_t chars_visible = text_reveal_ms_ / kCharRevealMs;
-    std::string visible = full_text.substr(0, std::min(chars_visible, full_text.size()));
-    ctx.host.host_render_text(visible, box_x + 20, box_y + 60, 0.30f, 220, 220, 240, 255);
+    // Speaker name, then the line. Both arrive as localization keys; the raw
+    // key is shown if it is missing so a typo is visible rather than silent.
+    const float name_scale = text_scale(h * 0.036f);
+    const float body_scale = text_scale(h * 0.040f);
+    float ty = box_y + pad;
+    {
+        std::string title = ctx.host.host_localized(speaker_key);
+        if (!title.empty()) {
+            const auto [tw, th] = ctx.host.host_measure_text(title, name_scale);
+            (void)tw;
+            ctx.host.host_render_text(title, text_x, ty, name_scale, 150, 88, 40, 255);
+            ty += th * 1.15f;
+        }
+    }
 
-    // "Click to continue" hint
-    if (chars_visible >= full_text.size()) {
-        ctx.host.host_render_text("Click to continue...",
-            box_x + box_w - 220, box_y + box_h - 35, 0.22f, 150, 150, 170, 180);
+    // Typewriter reveal over the localized text, wrapped to the sheet.
+    std::string full = ctx.host.host_localized(lines[current_line_].second);
+    if (full.empty()) full = lines[current_line_].second;
+    const size_t chars_visible = text_reveal_ms_ / kCharRevealMs;
+    // Count in CODE POINTS, not bytes: a byte-wise substr would cut a Cyrillic
+    // letter in half and print a replacement glyph.
+    size_t cut = 0, seen = 0;
+    while (cut < full.size() && seen < chars_visible) {
+        const unsigned char c = (unsigned char)full[cut];
+        cut += (c < 0x80) ? 1 : (c < 0xE0 ? 2 : (c < 0xF0 ? 3 : 4));
+        ++seen;
+    }
+    const std::string visible = full.substr(0, std::min(cut, full.size()));
+
+    const float wrap_w = box_x + box_w - box_w * 0.055f - text_x;
+    std::string line_buf;
+    size_t pos = 0;
+    while (pos <= visible.size()) {
+        const size_t sp = visible.find(' ', pos);
+        const std::string word = visible.substr(pos, sp == std::string::npos
+                                                        ? std::string::npos
+                                                        : sp - pos);
+        const std::string probe = line_buf.empty() ? word : line_buf + " " + word;
+        const auto [pw, ph] = ctx.host.host_measure_text(probe, body_scale);
+        if (pw > wrap_w && !line_buf.empty()) {
+            ctx.host.host_render_text(line_buf, text_x, ty, body_scale, 62, 42, 24, 255);
+            ty += ph * 1.12f;
+            line_buf = word;
+        } else {
+            line_buf = probe;
+        }
+        if (sp == std::string::npos) break;
+        pos = sp + 1;
+    }
+    if (!line_buf.empty())
+        ctx.host.host_render_text(line_buf, text_x, ty, body_scale, 62, 42, 24, 255);
+
+    // The advance button, on its own little scroll like every button in the
+    // original. Only once the line has finished revealing.
+    if (cut >= full.size()) {
+        std::string more = ctx.host.host_localized("dlgStoryBtnMore");
+        if (more.empty()) more = "MORE";
+        const float bw = box_w * 0.20f, bh = box_h * 0.26f;
+        const float bx = box_x + box_w - bw - box_w * 0.05f;
+        const float by = box_y + box_h - bh * 0.75f;
+        ctx.host.host_render_scroll_panel(bx, by, bw, bh);
+        const float bs = text_scale(bh * 0.44f);
+        const auto [tw, th] = ctx.host.host_measure_text(more, bs);
+        ctx.host.host_render_text(more, bx + (bw - tw) * 0.5f,
+                                  by + (bh - th) * 0.5f, bs, 92, 46, 20, 255);
     }
 }
 
