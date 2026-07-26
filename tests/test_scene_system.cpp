@@ -53,6 +53,16 @@ struct NullHost : scene::SceneHost {
     void host_set_show_enemy(bool) override {}
     void host_load_battle_location(const std::string&) override {}
     void host_set_battle_result(std::string) override {}
+    void host_set_battle_info(const BattleInfo&) override {}
+    const BattleInfo& host_get_battle_info() const override {
+        static const BattleInfo empty;
+        return empty;
+    }
+    std::string host_round_outcome() const override { return ""; }
+    float host_player_health_frac() const override { return 1.0f; }
+    float host_enemy_health_frac() const override { return 1.0f; }
+    void host_reset_round() override {}
+    void host_set_round_wins(int, int) override {}
     int host_get_currency() const override { return 0; }
     bool host_spend_currency(int) override { return false; }
     void host_add_currency(int) override {}

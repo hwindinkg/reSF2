@@ -443,6 +443,20 @@ void MapScene::on_update(SceneContext& ctx) {
         clicked_in(input, L.fight_x, L.fight_y, L.fight_w, L.fight_h)) {
         ctx.host.host_set_current_level(selected_zone_name_ + "/" + selected_battle_->name);
         ctx.host.host_set_battle_location(selected_battle_->location);
+        // [ORIGINAL] The fight parameters travel with the fight: rounds and
+        // the round clock from <Fight>, the opponent from its first warrior.
+        // [HEURISTIC-TODO] Which of the battle's fights is up should come
+        // from progression; the first one stands in until 7.3 lands.
+        const auto& fight = selected_battle_->fights.front();
+        SceneHost::BattleInfo info;
+        info.rounds = fight.rounds;
+        info.round_time_s = fight.round_time;
+        if (!fight.warriors.empty()) {
+            const auto& w0 = fight.warriors.front();
+            info.enemy_name = !w0.first_name.empty() ? w0.first_name
+                                                     : w0.template_name;
+        }
+        ctx.host.host_set_battle_info(info);
         ctx.host.host_set_dialogue({{"Sly", selected_battle_->name},
                                     {"Narrator", "Location: " + selected_battle_->location}});
         ctx.host.request_scene_transition(SceneId::Dialogue);
@@ -831,11 +845,20 @@ void DialogueScene::on_render(SceneContext& ctx) {
 
 void BattleScene::on_enter(SceneContext& ctx) {
     std::printf("[battle] enter\n");
-    battle_timer_ms_ = 0;
     guard_timer_ms_ = 0;
+    between_rounds_ms_ = 0;
+    wins_player_ = 0;
+    wins_enemy_ = 0;
     ctx.host.host_reset_menu_state();
     ctx.host.host_set_battle_mode(true);
     ctx.host.host_set_show_enemy(true);
+    // [ORIGINAL] Rounds and the per-round clock come from stages.xml
+    // (<Fight Rounds= RoundTime=>), handed over by the map.
+    const auto& info = ctx.host.host_get_battle_info();
+    rounds_total_ = std::max(1, info.rounds);
+    round_time_ms_ = std::max(1, info.round_time_s) * 1000;
+    round_left_ms_ = round_time_ms_;
+    ctx.host.host_set_round_wins(0, 0);
     // Load the actual battle location (from Map selection) instead of dojo
     std::string loc = ctx.host.host_get_battle_location();
     if (!loc.empty() && loc != "dojo") {
@@ -844,53 +867,73 @@ void BattleScene::on_enter(SceneContext& ctx) {
     } else if (!ctx.host.host_location_loaded()) {
         ctx.host.host_load_location();
     }
+    ctx.host.host_reset_round();
     // Start battle music
     ctx.host.host_start_battle_music();
 }
 
+void BattleScene::finish_round(SceneContext& ctx, bool player_won) {
+    if (player_won) ++wins_player_; else ++wins_enemy_;
+    ctx.host.host_set_round_wins(wins_player_, wins_enemy_);
+    const int need = rounds_total_ / 2 + 1;
+    if (wins_player_ >= need || wins_enemy_ >= need) {
+        ctx.host.host_set_battle_result(wins_player_ >= need ? "victory"
+                                                             : "defeat");
+        ctx.host.request_scene_transition(SceneId::Results);
+        return;
+    }
+    // Next round after a short pause; the original shows a round banner here
+    // — that widget is not reversed yet.
+    between_rounds_ms_ = kBetweenRoundsMs;
+}
+
 void BattleScene::on_update(SceneContext& ctx) {
-    battle_timer_ms_ += ctx.dt_ms;
     guard_timer_ms_ += ctx.dt_ms;
 
-    ctx.host.host_update_gameplay(ctx.dt_ms);
+    if (between_rounds_ms_ > 0) {
+        // Freeze the fight during the inter-round pause, then reset.
+        if (between_rounds_ms_ <= ctx.dt_ms) {
+            between_rounds_ms_ = 0;
+            round_left_ms_ = round_time_ms_;
+            ctx.host.host_reset_round();
+        } else {
+            between_rounds_ms_ -= ctx.dt_ms;
+        }
+        return;
+    }
 
-    const auto& input = ctx.platform.input();
+    ctx.host.host_update_gameplay(ctx.dt_ms);
 
     // Guard: prevent immediate transitions for the first 500ms.
     // This prevents accidental key carryover from the dialogue scene
     // (e.g., Space/Enter key being detected as a new press in Battle).
     if (guard_timer_ms_ < kGuardMs) return;
 
-    if (key_pressed(input, platform::Key::Y)) {
-        std::printf("[battle] victory!\n");
-        ctx.host.host_set_battle_result("victory");
-        ctx.host.request_scene_transition(SceneId::Results);
+    // A round ends when a fighter dies...
+    const std::string outcome = ctx.host.host_round_outcome();
+    if (!outcome.empty()) {
+        std::printf("[battle] round over: %s (%d:%d)\n", outcome.c_str(),
+                    wins_player_, wins_enemy_);
+        finish_round(ctx, outcome == "victory");
         return;
     }
-    if (key_pressed(input, platform::Key::L)) {
-        std::printf("[battle] defeat!\n");
-        ctx.host.host_set_battle_result("defeat");
-        ctx.host.request_scene_transition(SceneId::Results);
-        return;
-    }
-    if (battle_timer_ms_ >= kBattleMaxMs) {
-        std::printf("[battle] timeout -> results\n");
-        ctx.host.request_scene_transition(SceneId::Results);
+    // ...or when the round clock runs out. On timeout the healthier fighter
+    // takes the round. [HEURISTIC-TODO] The original's timeout/tie rule has
+    // not been reversed; equal health goes to the enemy here.
+    round_left_ms_ -= (int)ctx.dt_ms;
+    if (round_left_ms_ <= 0) {
+        const bool player_won = ctx.host.host_player_health_frac() >
+                                ctx.host.host_enemy_health_frac();
+        std::printf("[battle] round timeout (%d:%d)\n", wins_player_,
+                    wins_enemy_);
+        finish_round(ctx, player_won);
     }
 }
 
 void BattleScene::on_render(SceneContext& ctx) {
-    // Host renders the dojo + character + bag + HUD
+    // Host renders the location, the fighters and the fight HUD
+    // (ScreenModel: bars, names, round dots — see render_fight_hud).
     ctx.host.host_render_scene();
-
-    // Debug: show "BATTLE" so user knows they're in Battle scene
-    ctx.host.host_render_text("BATTLE",
-        ctx.platform.window_width() / 2.0f - 40,
-        ctx.platform.window_height() - 100.0f,
-        0.4f, 220, 60, 40, 200);
-    ctx.host.host_render_text("[Y] Win  [L] Lose  [Esc] Forfeit",
-        20, ctx.platform.window_height() - 55.0f,
-        0.22f, 180, 180, 180, 180);
 }
 
 void BattleScene::on_exit(SceneContext& ctx) {
