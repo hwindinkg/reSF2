@@ -47,8 +47,8 @@ reSF2.zip
 # Standalone test files and scripts (root-level)
 # ============================================================================
 headless_main.cpp
-main.cpp
 main_port.cpp
+# main.cpp is NOT ignored — it is the resf2_app entry point built by CMake.
 test_json_atlas.cpp
 check_xml.py
 
