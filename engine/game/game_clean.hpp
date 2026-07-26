@@ -102,6 +102,9 @@ public:
     const std::vector<std::string>& location_names() const { return locations_.location_names(); }
     size_t location_count() const { return locations_.location_names().size(); }
 
+    // Start with the world-geometry overlay on (also toggled at runtime with F1).
+    void set_debug_world(bool on) { debug_world_ = on; }
+
     void set_start_location(const std::string& name) {
         if (!name.empty()) {
             current_location_name_ = name;
@@ -950,6 +953,149 @@ private:
                 return {wx / sum_lcc, wy / sum_lcc};
         }
         return {world_cx, world_cy};
+    }
+
+    // ---------- Debug world overlay (F1 / --debug-world) ----------
+    //
+    // Draws the params.xml-derived geometry in world space so that every
+    // world<->screen claim can be read off the screen as a number instead of
+    // being eyeballed. Without this, tuning the camera or the fighter's
+    // transform is guesswork: a 20-pixel misreading of a screenshot is ~20
+    // world units, which is the same order as the discrepancies being chased.
+    //
+    // Coordinate model being asserted here (see PORT_PLAN.md 1.1):
+    //   * world origin = centre of the location box
+    //   * <Image> X is centred on the origin, Y is inverted: world_y = -Y
+    //   * <ModelsViewer> X is measured from the LEFT edge:
+    //         world_x = X - Width/2                      [ORIGINAL, verified]
+    //     and Y is used directly (Y-up), NOT inverted
+    //   * the box is Width x Height  (Location::load, .s86 FUN_10144420:
+    //     +0x38 Width, +0x3c Height, +0x34 Wall, +0x2c Floor)
+    void render_debug_world(plat::Platform& platform) {
+        if (!debug_world_ || !location_ || !renderer_) return;
+
+        const float vw = static_cast<float>(platform.window_width());
+        const float vh = static_cast<float>(platform.window_height());
+        const float hw = vw / (2.0f * zoom_);
+        const float hh = vh / (2.0f * zoom_);
+        const float left = cam_x_ - hw, bottom = cam_y_ - hh;
+        auto sx = [&](float wx) { return (wx - left) * zoom_; };
+        auto sy = [&](float wy) { return vh - (wy - bottom) * zoom_; };
+
+        const float half_w = location_->width * 0.5f;
+        const float half_h = location_->height * 0.5f;
+        const ren::Color4B c_box{0, 220, 255, 255};
+        const ren::Color4B c_axis{130, 130, 130, 255};
+        const ren::Color4B c_mask{255, 0, 220, 255};
+        const ren::Color4B c_floor{80, 255, 80, 255};
+        const ren::Color4B c_actor{255, 210, 0, 255};
+
+        // World box (Width x Height) and axes.
+        renderer_->draw_line_world(-half_w, half_h, half_w, half_h, c_box);
+        renderer_->draw_line_world(-half_w, -half_h, half_w, -half_h, c_box);
+        renderer_->draw_line_world(-half_w, -half_h, -half_w, half_h, c_box);
+        renderer_->draw_line_world(half_w, -half_h, half_w, half_h, c_box);
+        renderer_->draw_line_world(-half_w, 0.0f, half_w, 0.0f, c_axis);
+        renderer_->draw_line_world(0.0f, -half_h, 0.0f, half_h, c_axis);
+
+        // Horizontal rulers every 50 world units, labelled every 100.
+        for (int wy = -static_cast<int>(half_h); wy <= static_cast<int>(half_h); wy += 50) {
+            const float y = static_cast<float>(wy);
+            const bool major = (wy % 100) == 0;
+            renderer_->draw_line_world(left, y, left + (major ? 26.0f : 13.0f), y, c_axis);
+            if (major) {
+                char b[24];
+                std::snprintf(b, sizeof(b), "%d", wy);
+                render_text(b, 30.0f, sy(y) - 8.0f, 0.20f, {150, 150, 150, 255});
+            }
+        }
+
+        // Mask rectangles (the only images carrying a Color) — these are what
+        // the location uses to cover everything outside the intended frame.
+        float mask_top = half_h, mask_bottom = -half_h;
+        for (const auto& layer : location_->layers) {
+            for (const auto& img : layer.images) {
+                if (img.color.empty()) continue;
+                if (img.w < location_->width * 0.9f) continue;
+                const float cy = -img.y;
+                const float t = cy + img.h * 0.5f, b = cy - img.h * 0.5f;
+                if (b > 0.0f && b < mask_top) mask_top = b;
+                if (t < 0.0f && t > mask_bottom) mask_bottom = t;
+            }
+        }
+        renderer_->draw_line_world(-half_w, mask_top, half_w, mask_top, c_mask);
+        renderer_->draw_line_world(-half_w, mask_bottom, half_w, mask_bottom, c_mask);
+
+        // Floor plane candidates.
+        //   A: -Height/2 + Floor          (params Floor read as a bottom margin)
+        //   B: top edge of the layer_3 strip, i.e. the drawn floor
+        const float floor_a = -half_h + location_->floor;
+        renderer_->draw_line_world(-half_w, floor_a, half_w, floor_a, c_floor);
+        float floor_b = floor_a;
+        bool have_b = false;
+        for (const auto& layer : location_->layers) {
+            for (const auto& img : layer.images) {
+                if (img.class_name.rfind("layer_3", 0) != 0) continue;
+                const float t = -img.y + img.h * 0.5f;
+                if (!have_b || t > floor_b) { floor_b = t; have_b = true; }
+            }
+        }
+        if (have_b)
+            renderer_->draw_line_world(-half_w, floor_b, half_w, floor_b, {255, 140, 0, 255});
+
+        // Fighter markers: declared pivot vs. actually rendered lowest node.
+        auto pivot_it = assets_->skeleton_nodes().find("NPivot");
+        const float pivot_local_y = pivot_it != assets_->skeleton_nodes().end()
+                                        ? pivot_it->second.y : stance_npivot_y_;
+        const float world_cx = player_pos_x_;
+        const float world_cy = player_pos_y_ + y_adjust_smoothed_;
+        auto cross = [&](float x, float y, ren::Color4B col) {
+            renderer_->draw_line_world(x - 14.0f, y, x + 14.0f, y, col);
+            renderer_->draw_line_world(x, y - 14.0f, x, y + 14.0f, col);
+        };
+        cross(world_cx, world_cy, c_actor);
+
+        float lowest = world_cy;
+        bool have_low = false;
+        for (const char* n : {"NToe_1", "NToe_2", "NHeel_1", "NHeel_2",
+                              "NAnkle_1", "NAnkle_2"}) {
+            auto [nx, ny] = resolve_body_node(n, world_cx, world_cy,
+                                              facing_right_, pivot_local_y);
+            (void)nx;
+            if (!have_low || ny < lowest) { lowest = ny; have_low = true; }
+        }
+        if (have_low) {
+            renderer_->draw_line_world(world_cx - 60.0f, lowest,
+                                       world_cx + 60.0f, lowest, {255, 60, 60, 255});
+        }
+        cross(enemy_pos_x_, enemy_pos_y_, {255, 120, 255, 255});
+
+        // Numeric readout — the whole point of the overlay.
+        char b[256];
+        float ty = 90.0f;
+        auto line = [&](const char* fmt, auto... a) {
+            std::snprintf(b, sizeof(b), fmt, a...);
+            render_text(b, 30.0f, ty, 0.22f, {255, 255, 255, 255});
+            ty += 22.0f;
+        };
+        line("params  Width=%.0f Height=%.0f Wall=%.0f Floor=%.0f",
+             location_->width, location_->height, location_->wall, location_->floor);
+        line("view    zoom=%.4f  visible %.0f x %.0f world units",
+             zoom_, vw / zoom_, vh / zoom_);
+        line("camera  x=%.1f y=%.1f", cam_x_, cam_y_);
+        line("mask band  top=%.0f bottom=%.0f  height=%.0f",
+             mask_top, mask_bottom, mask_top - mask_bottom);
+        line("floor A (-H/2+Floor)=%.0f   B (layer_3 top)=%.0f  delta=%.0f",
+             floor_a, floor_b, floor_b - floor_a);
+        line("player  pivot=(%.0f, %.0f) y_adjust=%.1f  lowest node=%.0f",
+             world_cx, world_cy, y_adjust_smoothed_, lowest);
+        line("player  foot-vs-floorA=%.0f  foot-vs-floorB=%.0f",
+             lowest - floor_a, lowest - floor_b);
+        line("enemy   pos=(%.0f, %.0f)   params X=%.0f -> X-W/2=%.0f",
+             enemy_pos_x_, enemy_pos_y_, location_->enemy_x,
+             location_->enemy_x - half_w);
+        line("anim    %s", current_move_.c_str());
+        (void)sx;
     }
 
     // Render body model as capsule lines (GL renderer uses thin lines for now).
@@ -2627,6 +2773,8 @@ private:
 
     float player_pos_x_ = 0, player_pos_y_ = 0;
     float cam_x_ = 0, cam_y_ = 0;
+    // Debug world overlay, toggled with F1 or started with --debug-world.
+    bool debug_world_ = false;
     bool facing_right_ = true;
     uint32_t& hit_anim_ = combat_.mutable_hit_anim();  // ms remaining
     uint32_t& step_cooldown_ = combat_.mutable_step_cooldown();

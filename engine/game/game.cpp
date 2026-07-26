@@ -649,6 +649,7 @@ void Game::host_render_scene() {
             render_character();
             render_projectiles();
             update_and_render_hit_sparks(0.016f);
+            render_debug_world(*platform_);
             if (!is_battle_mode_) render_hud(*platform_);
             if (!is_battle_mode_ && menu_anim_progress_ > 0.01f) render_menu_expanded(*platform_);
             if (!is_battle_mode_ && overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
@@ -2033,6 +2034,10 @@ void Game::host_update_gameplay(uint32_t dt) {
     update_projectiles(dt / 1000.0f);
 
     // Zoom presets
+    if (input.keys_just_pressed[(size_t)plat::Key::F1]) {
+        debug_world_ = !debug_world_;
+        std::printf("[DEBUG] world overlay %s\n", debug_world_ ? "ON" : "OFF");
+    }
     if (input.keys_just_pressed[(size_t)plat::Key::Num1]) zoom_ = 1.0f;
     if (input.keys_just_pressed[(size_t)plat::Key::Num2]) zoom_ = 0.7f;
     if (input.keys_just_pressed[(size_t)plat::Key::Num3]) zoom_ = 1.5f;
