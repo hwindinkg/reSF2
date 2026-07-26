@@ -9,6 +9,7 @@
 #include "../platform/platform.hpp"
 #include "../format/stage_parser.hpp"
 #include "../format/list_parser.hpp"
+#include "../game/ui_scale.hpp"
 
 #include <algorithm>
 #include <array>
@@ -345,7 +346,10 @@ inline float text_scale(float wanted_px) { return wanted_px / kFontLineBoxPx; }
 
 MapLayout map_layout(float w, float h) {
     MapLayout L;
-    L.panel_h = h * 0.085f;               // same rule as the HUD (PORT_PLAN 6.1)
+    // [ORIGINAL] Same law as the in-game HUD: the panel is its atlas height
+    // (192 px) through the 768-point space, i.e. 12.5% of the viewport
+    // (ui_scale.hpp has the derivation and binary addresses).
+    L.panel_h = ui::top_panel_h(h);
     L.scroll_w = w * 0.235f;
     L.scroll_x = w - L.scroll_w - w * 0.012f;
     L.scroll_y = L.panel_h + h * 0.055f;
