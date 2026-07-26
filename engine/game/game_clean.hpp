@@ -3760,6 +3760,9 @@ private:
     // saved inventory. Set for scripted runs so a measurement is reproducible
     // on any machine and in any order relative to the tests that write saves.
     bool hermetic_run_ = false;
+    // Does the move currently playing leave the model with a "current node"?
+    // Only moves that declare an <Align> pivot do; see apply_align().
+    bool prev_move_had_align_ = false;
     TouchControls touch_;       // on-screen controls, updated once per frame
     std::string start_scene_;   // --scene <name>[:<arg>], empty = normal Boot flow
     int start_scene_arg_ = -1;  // the ":N" part, e.g. the map's initial zone
