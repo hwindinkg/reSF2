@@ -104,6 +104,10 @@ public:
 
     // Priority
     int anim_priority() const { return priority_; }
+    // True once a non-looping animation has run past its last frame. While it
+    // is true the animation no longer holds its priority slot.
+    bool anim_finished() const { return finished_; }
+    void clear_anim_finished() { finished_ = false; }
     void set_priority(int p) { priority_ = p; }
     int& mutable_priority() { return priority_; }
 
@@ -140,6 +144,9 @@ private:
     bool anim_loop_ = true;
     float anim_fps_ = 20.0f;
     int priority_ = 0;
+    // A non-looping animation stops holding its priority slot once it has run
+    // past its last frame. See play() / update().
+    bool finished_ = false;
 
     // Interpolated node positions (name -> (x, y))
     std::unordered_map<std::string, std::pair<float, float>> anim_node_pos_;

@@ -12,8 +12,18 @@ bool AnimationPlayer::play(
     float fps, bool loop, int priority
 ) {
     if (!animations.count(name)) return false;
-    // Priority check: if existing animation has higher priority, reject new one
-    if (priority < priority_) {
+    // Priority check: a higher-priority animation blocks a lower-priority one —
+    // but only while it is still PLAYING. A non-looping animation that has run
+    // past its last frame no longer holds the slot (finished_ is set in
+    // update()), otherwise nothing could ever follow it.
+    //
+    // Without that release the fighter froze on the final frame of whatever he
+    // last did: the intro stance_2 plays at priority 3, so the stance_idle that
+    // is queued when it ends (priority 0) was rejected forever, and the same
+    // happened after every attack. Measured with --input-script + --dump-state:
+    // anim stayed 'stance_2' from frame 1 to 300 and then 'high_punch' with no
+    // idle in between.
+    if (!finished_ && priority < priority_) {
         if (name != current_anim_) {
             std::printf("[ANIM] Rejected '%s' (priority %d) — '%s' has higher priority %d\n",
                         name.c_str(), priority, current_anim_.c_str(), priority_);
@@ -21,6 +31,7 @@ bool AnimationPlayer::play(
         return false;
     }
     priority_ = priority;
+    finished_ = false;
     current_anim_ = name;
     anim_time_ = 0.0f;
     anim_fps_ = fps;
@@ -71,8 +82,14 @@ void AnimationPlayer::update(
     anim_time_ += dt_ms / 1000.0f;
     float frame_f = anim_time_ * anim_fps_;
     int frame_idx = (int)frame_f;
-    if (anim_loop_ && anim.frame_count > 0) frame_idx %= anim.frame_count;
-    else if (frame_idx >= anim.frame_count) frame_idx = anim.frame_count - 1;
+    if (anim_loop_ && anim.frame_count > 0) {
+        frame_idx %= anim.frame_count;
+    } else if (frame_idx >= anim.frame_count) {
+        frame_idx = anim.frame_count - 1;
+        // Ran past the last frame: release the priority slot so whatever the
+        // game queues next (an idle, a follow-up move) can take over.
+        finished_ = true;
+    }
     if (frame_idx < 0) frame_idx = 0;
 
     int next_idx = (anim.frame_count > 0 && frame_idx < anim.frame_count-1) ? frame_idx+1 : frame_idx;
