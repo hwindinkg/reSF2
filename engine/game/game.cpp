@@ -1186,7 +1186,13 @@ void Game::host_update_gameplay(uint32_t dt) {
     // [ORIGINAL] Enemy AI: simple state machine.
     // States: 0=idle, 1=approach, 2=attack, 3=retreat, 4=block
     // Decisions every 0.8s: based on distance to player + randomness.
-    if (!enemy_fighter_.is_dead && !player_fighter_.is_dead) {
+    //
+    // Only when there IS an enemy. This used to run whenever the fighters were
+    // alive, so in the dojo — where the opponent is a punching bag and
+    // show_enemy_ is false — an invisible sparring partner kept stepping,
+    // blocking and swinging, and its attack sound played out of nowhere. The
+    // enemy is not drawn there and must not act there either.
+    if (show_enemy_ && !enemy_fighter_.is_dead && !player_fighter_.is_dead) {
         enemy_ai_timer_ += dt_sec;
         enemy_attack_cooldown_ = std::max(0.0f, enemy_attack_cooldown_ - dt_sec);
         if (enemy_fighter_.hit_stun_time > 0) {
@@ -1281,9 +1287,26 @@ void Game::host_update_gameplay(uint32_t dt) {
             std::printf("[COMBAT] Battle restarted\n");
         }
     }
-    // [ORIGINAL] B: toggle between punching bag and enemy fighter (Dojo training)
+    // Toggle between the punching bag and a sparring partner.
+    //
+    // [HEURISTIC-TODO] In the original this is a button on screen — the
+    // disciple button, `textures/misc/btn_disciple_small.png` — not a keyboard
+    // shortcut. Wiring it up belongs with the rest of the dojo UI (6.3/6.5).
     if (input.keys_just_pressed[(size_t)plat::Key::B]) {
         show_enemy_ = !show_enemy_;
+        // Put the partner back to a clean stance when he appears, and clear
+        // any state he was left in when he goes away. Without this a partner
+        // dismissed mid-exchange kept his hit stun, cooldown and attack flag,
+        // and resumed from them the next time he was called back.
+        enemy_fighter_ = FighterState{};
+        enemy_ai_timer_ = 0.0f;
+        enemy_ai_state_ = 0;
+        enemy_attack_cooldown_ = 0.0f;
+        enemy_attacking_ = false;
+        enemy_attack_duration_ = 0.0f;
+        enemy_hit_flash_ = 0.0f;
+        enemy_anim_ = "fists_idle";
+        if (location_) enemy_pos_x_ = location_->enemy_x - 983.0f;
         std::printf("[DOJO] Switched to %s\n", show_enemy_ ? "enemy fighter" : "punching bag");
         debug_log("[DOJO] Switched to %s\n", show_enemy_ ? "enemy" : "bag");
     }
@@ -2439,22 +2462,33 @@ void Game::host_update_gameplay(uint32_t dt) {
                                     hit_this_interval_ = true;
                                     hit_this_interval_this_frame = true;
                                     hit_registered = true;
-                                    // [ORIGINAL] Play hit sound + apply damage to enemy fighter.
-                                    // Original SF2: on hit, plays armor/body sound + damage from
-                                    // MoveDef::damage (parsed from <Damage Value=".."/>).
-                                    // Pick a random attack sound for variety.
+                                    // The swing itself.
                                     int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
                                     play_sound("f_pl_attack" + std::to_string(snd_idx), 0.8f);
-                                    play_sound("armor", 0.6f);
-                                    // Apply damage to enemy (punching bag = enemy proxy)
-                                    // [ORIGINAL] Dojo training — no health damage.
-                                    // Just visual feedback (hit flash, sparks, sound).
-                                    if (enemy_fighter_.invuln_time <= 0) {
+
+                                    // What was hit decides what is heard and what
+                                    // reacts. This branch is the PUNCHING BAG's
+                                    // collision, and it used to play `armor` — the
+                                    // sound of a blade on a fighter's armour — and
+                                    // then run the whole enemy-fighter reaction:
+                                    // invulnerability, a hit flash and sparks at
+                                    // the enemy's position, with no enemy present.
+                                    // That is why the dojo sounded like a fight
+                                    // against someone while there is only a bag
+                                    // hanging there.
+                                    if (!show_enemy_) {
+                                        // A leather bag takes a body impact, no
+                                        // metal. f_pl_hit* is the body-impact set.
+                                        const int bag_snd = (current_frame + (int)current_move_[0]) % 3 + 1;
+                                        play_sound("f_pl_hit" + std::to_string(bag_snd), 0.6f);
+                                        player_fighter_.hits_landed++;
+                                        combo_timer_ = 2.0f;
+                                    } else if (enemy_fighter_.invuln_time <= 0) {
+                                        // [ORIGINAL] Dojo sparring — no health
+                                        // damage yet, just the reaction.
                                         enemy_fighter_.invuln_time = 0.2f;
                                         enemy_hit_flash_ = 0.2f;
                                         player_fighter_.hits_landed++; combo_timer_ = 2.0f;
-                                        int hit_snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
-                                        play_sound("f_pl_attack" + std::to_string(hit_snd_idx), 0.7f);
                                         play_sound("armor", 0.5f);
                                         spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
                                     }
