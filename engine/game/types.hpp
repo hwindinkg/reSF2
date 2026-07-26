@@ -106,8 +106,27 @@ struct MoveDef {
     std::string required_perk;
     std::string required_weapon_subtype;
 
-    std::string moveinside_pivot_node;
-    bool moveinside_is_animation = false;
+    // [ORIGINAL] <Align> — how the animation is anchored to the fighter.
+    //   <Align Axis="X|Z" ShiftModelNode="NPivot">
+    //     <Pivot Object="Nodes" Part="NHeel_2"/>
+    //     <Position Player="Me" Object="Pivot" ShiftX="70"/>
+    //   </Align>
+    // The named node of the ANIMATION is placed at the fighter's position
+    // (plus the shift); the axes listed are the ones the alignment controls.
+    // 718 moves align on X|Z and 51 on X|Y|Z, i.e. the vertical usually comes
+    // straight from the animation — which matches the floor-space finding in
+    // PORT_PLAN 3.1. The most common anchors are the heels (NHeel_2 437x,
+    // NHeel_1 176x), because a fighting animation pivots on the planted foot.
+    std::string moveinside_pivot_node;   // <Pivot Part="...">, the anchor node
+    bool moveinside_is_animation = false;  // <Pivot Object="Animation">
+    std::string align_axis;              // "X|Z", "X|Y|Z", ...
+    bool align_x = false;
+    bool align_y = false;
+    bool align_z = false;
+    float align_shift_x = 0.0f;          // <Position ShiftX="...">
+    float align_shift_y = 0.0f;
+    std::string align_shift_model_node;  // <Align ShiftModelNode="...">
+    bool has_align = false;
 
     std::string required_current_animation;
 

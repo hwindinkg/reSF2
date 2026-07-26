@@ -34,6 +34,7 @@ int main(int argc, char** argv) {
     const fs::path root = (argc > 1) ? fs::path(argv[1]) : fs::path(".");
 
     resf2::game::AssetManager assets;
+    assets.load_skeleton(root.string(), "dojo");
     assets.load_moves(root.string());
     assets.load_animations(root.string());
 
@@ -46,7 +47,13 @@ int main(int argc, char** argv) {
 
     int checked = 0, missing_anim = 0;
     int attack_moves = 0, attack_moves_with_interval = 0;
+    int align_moves = 0, align_with_anchor = 0;
     std::vector<std::string> missing_names;
+
+    // Node names available for <Align> anchors.
+    std::map<std::string, bool> skeleton_nodes;
+    for (const auto& n : assets.ordered_node_names()) skeleton_nodes[n] = true;
+    check_ge(static_cast<double>(skeleton_nodes.size()), 40.0, "the skeleton loaded");
 
     for (const auto& [name, m] : moves) {
         if (m.filename.empty()) continue;
@@ -115,6 +122,38 @@ int main(int argc, char** argv) {
 
         if (m.is_attack) ++attack_moves;
         if (m.is_attack && m.attack_start >= 0) ++attack_moves_with_interval;
+
+        // --- <Align>: how the animation is anchored to the fighter ------------
+        // The original places the named ANIMATION node at the fighter's
+        // position instead of accumulating NPivot deltas, so the anchor has to
+        // be a node that exists in the skeleton and the axis mask has to be one
+        // the engine understands.
+        if (m.has_align) {
+            ++align_moves;
+            check(m.align_x || m.align_y || m.align_z,
+                  name + ": Align declares at least one axis (got '" + m.align_axis + "')");
+            check(m.align_x, name + ": Align controls X (every move in moves.xml does)");
+            // The anchor is normally a skeleton node, but it may also belong to
+            // an attached model: 51 magic moves anchor on Magic-Node2_1, 13 on
+            // Ranged-Node*_1 and 10 on MassBomb-MacroNode1. Those nodes come
+            // from the equipped magic/ranged model, not from skeleton.xml.
+            auto known_anchor = [&](const std::string& n) {
+                if (skeleton_nodes.count(n)) return true;
+                for (const char* prefix : {"Magic-", "Ranged-", "MassBomb-", "Weapon-"})
+                    if (n.rfind(prefix, 0) == 0) return true;
+                return false;
+            };
+            if (!m.moveinside_pivot_node.empty()) {
+                check(known_anchor(m.moveinside_pivot_node),
+                      name + ": Align anchor '" + m.moveinside_pivot_node +
+                          "' is a skeleton node or an attached-model node");
+                ++align_with_anchor;
+            }
+            if (!m.align_shift_model_node.empty())
+                check(known_anchor(m.align_shift_model_node),
+                      name + ": ShiftModelNode '" + m.align_shift_model_node +
+                          "' is a skeleton node or an attached-model node");
+        }
     }
 
     std::printf("checked %d moves against their animations, %d had no .bin loaded\n",
@@ -131,6 +170,11 @@ int main(int argc, char** argv) {
     // parsed — which is exactly how this was broken.
     std::printf("attack moves: %d, of which %d declare an attack interval\n",
                 attack_moves, attack_moves_with_interval);
+    std::printf("align: %d moves declare <Align>, %d name an anchor node\n",
+                align_moves, align_with_anchor);
+    check_ge(align_moves, 700.0, "practically every move declares <Align>");
+    check_ge(align_with_anchor, 600.0, "most Align blocks name an anchor node");
+
     check_ge(attack_moves, 200.0, "the move table contains attacking moves");
     check_ge(static_cast<double>(attack_moves_with_interval) /
                  (attack_moves ? attack_moves : 1),
