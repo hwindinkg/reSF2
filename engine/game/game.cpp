@@ -330,9 +330,45 @@ void Game::on_init(plat::Platform& platform) {
             player_wins_ = player_profile_.wins();
             player_losses_ = player_profile_.losses();
 
-            // Start the scene flow at Boot
+            // Start the scene flow at Boot, unless --scene asked for a
+            // specific screen. Jumping straight to a screen is what makes it
+            // possible to capture and compare it against the reference
+            // screenshots without driving the whole menu flow by hand.
             scene::SceneContext ctx{*this, platform, *renderer_, 0};
-            scene_manager_.start(scene::SceneId::Boot, ctx);
+            scene::SceneId first = scene::SceneId::Boot;
+            if (!start_scene_.empty()) {
+                static const std::pair<const char*, scene::SceneId> kNames[] = {
+                    {"boot", scene::SceneId::Boot},
+                    {"loading", scene::SceneId::Loading},
+                    {"dojo", scene::SceneId::MainMenu},
+                    {"menu", scene::SceneId::MainMenu},
+                    {"map", scene::SceneId::Map},
+                    {"shop", scene::SceneId::Shop},
+                    {"settings", scene::SceneId::Settings},
+                    {"dialogue", scene::SceneId::Dialogue},
+                    {"battle", scene::SceneId::Battle},
+                    {"results", scene::SceneId::Results},
+                    {"profile", scene::SceneId::Profile},
+                };
+                // "map:3" opens the map on zone 3 — capturing a specific
+                // zone is how the layout gets compared against the reference.
+                std::string want = start_scene_;
+                const auto colon = want.find(':');
+                if (colon != std::string::npos) {
+                    start_scene_arg_ = std::atoi(want.c_str() + colon + 1);
+                    want = want.substr(0, colon);
+                }
+                bool found = false;
+                for (const auto& [name, id] : kNames) {
+                    if (want == name) { first = id; found = true; break; }
+                }
+                if (!found)
+                    std::fprintf(stderr, "--scene: unknown screen '%s'\n",
+                                 start_scene_.c_str());
+                else if (first != scene::SceneId::Boot)
+                    host_load_location();   // screens past Boot expect assets
+            }
+            scene_manager_.start(first, ctx);
 }
 
 void Game::on_update(plat::Platform& platform, uint32_t dt) {
@@ -766,6 +802,173 @@ bool Game::host_render_zone_bg(int zone_index, float x, float y, float w, float 
             if (it == zone_tex.end()) return false;
             renderer_->draw_textured_quad_screen(*it->second, x, y, w, h);
             return true;
+}
+
+// ---------------------------------------------------------------------------
+// Map screen
+//
+// [ORIGINAL] Everything here comes out of the shipped assets instead of being
+// drawn as coloured rectangles:
+//   assets/1536/image/zones/N.jpg                the painted zone sheet
+//   assets/1536/image/battles/{base,active,locked}/batchBattles*.plist
+//                                                one frame per battle kind
+//   assets/1536/image/battles/<location>.jpg     the photo in the side scroll
+// The node coordinates are `<Battle X=".." Y="..">` in stages.xml, measured
+// from the centre of the sheet.
+// ---------------------------------------------------------------------------
+
+void Game::load_map_textures() {
+    if (!assets_->map_icon_textures().empty()) return;
+    auto root = std::filesystem::path(asset_root_);
+    for (const auto& base : {root/"assets"/"1536"/"image"/"battles",
+                             root/"1536"/"image"/"battles"}) {
+        if (!std::filesystem::exists(base)) continue;
+        // The three atlases are named batchBattlesBase / ...Active / ...Locked.
+        load_texture_atlas_to_hud(base/"base", "batchBattlesBase");
+        load_texture_atlas_to_hud(base/"active", "batchBattlesActive");
+        load_texture_atlas_to_hud(base/"locked", "batchBattlesLocked");
+        break;
+    }
+    // load_texture_atlas_to_hud drops frames into hud_textures(); move the
+    // battle ones across so they cannot collide with HUD frame names.
+    for (auto it = assets_->hud_textures().begin(); it != assets_->hud_textures().end(); ) {
+        const bool is_icon = it->first.rfind("base_", 0) == 0 ||
+                             it->first.rfind("active_", 0) == 0 ||
+                             it->first.rfind("locked_", 0) == 0;
+        if (is_icon) {
+            assets_->map_icon_textures()[it->first] = std::move(it->second);
+            it = assets_->hud_textures().erase(it);
+        } else {
+            ++it;
+        }
+    }
+    std::printf("[MAP] battle icons loaded: %zu\n", assets_->map_icon_textures().size());
+}
+
+ren::Texture2D* Game::battle_preview_texture(const std::string& location) {
+    if (location.empty()) return nullptr;
+    auto& table = assets_->battle_preview_textures();
+    auto it = table.find(location);
+    if (it != table.end()) return it->second.get();
+    auto root = std::filesystem::path(asset_root_);
+    for (const auto& base : {root/"assets"/"1536"/"image"/"battles",
+                             root/"1536"/"image"/"battles"}) {
+        auto path = base / (location + ".jpg");
+        if (!std::filesystem::exists(path)) continue;
+        auto data = read_file(path.string());
+        if (data.empty()) break;
+        auto tex = std::make_unique<ren::Texture2D>();
+        if (!tex->init_from_memory((const uint8_t*)data.data(), data.size())) break;
+        auto* raw = tex.get();
+        table[location] = std::move(tex);
+        return raw;
+    }
+    // Remember the miss so a location without a photo is not re-read every frame.
+    table[location] = nullptr;
+    return nullptr;
+}
+
+scene::SceneHost::MapView Game::host_render_zone_map(
+    int zone_index, float scroll_x, float x, float y, float w, float h)
+{
+    scene::SceneHost::MapView view;
+    // host_render_zone_bg already lazy-loads the sheets; reuse that table.
+    auto& zone_tex = assets_->zone_bg_textures();
+    if (zone_tex.empty()) host_render_zone_bg(zone_index, 0, 0, 0, 0);
+    auto it = zone_tex.find(zone_index);
+    if (it == zone_tex.end() || !it->second) return view;
+
+    const float sw = static_cast<float>(it->second->width());
+    const float sh = static_cast<float>(it->second->height());
+    if (sw <= 0.0f || sh <= 0.0f) return view;
+
+    // Cover the viewport height and pan horizontally — the sheet is wider than
+    // a 16:9 slice of it, which is what makes the map scrollable at all.
+    const float scale = h / sh;
+    const float draw_w = sw * scale;
+    view.max_scroll = std::max(0.0f, draw_w - w);
+    const float sx = std::max(0.0f, std::min(scroll_x, view.max_scroll));
+    renderer_->draw_textured_quad_screen(*it->second, x - sx, y, draw_w, h);
+
+    view.ok = true;
+    view.scale = scale;
+    view.centre_x = x - sx + draw_w * 0.5f;
+    view.centre_y = y + h * 0.5f;
+    return view;
+}
+
+bool Game::host_render_battle_icon(const std::string& icon, int state,
+                                   float cx, float cy, float size) {
+    load_map_textures();
+    static const char* kPrefix[3] = {"base_", "active_", "locked_"};
+    if (state < 0 || state > 2) state = 0;
+    auto& table = assets_->map_icon_textures();
+    // Fall back through the states: not every kind ships all three (the locked
+    // atlas has 24 frames against the base atlas' 37).
+    for (int s : {state, 0, 1}) {
+        auto it = table.find(std::string(kPrefix[s]) + icon);
+        if (it == table.end() || !it->second) continue;
+        const float aspect = static_cast<float>(it->second->width()) /
+                             static_cast<float>(std::max(1, it->second->height()));
+        const float dh = size;
+        const float dw = size * aspect;
+        renderer_->draw_textured_quad_screen(*it->second, cx - dw * 0.5f,
+                                             cy - dh * 0.5f, dw, dh);
+        return true;
+    }
+    return false;
+}
+
+bool Game::host_render_battle_preview(const std::string& location,
+                                      float x, float y, float w, float h) {
+    auto* tex = battle_preview_texture(location);
+    if (!tex) return false;
+    renderer_->draw_textured_quad_screen(*tex, x, y, w, h);
+    return true;
+}
+
+void Game::host_render_scroll_panel(float x, float y, float w, float h) {
+    auto tex_of = [&](const char* n) -> ren::Texture2D* {
+        auto it = assets_->scroll_textures().find(n);
+        if (it != assets_->scroll_textures().end()) return it->second.get();
+        auto it2 = assets_->hud_textures().find(n);
+        return it2 == assets_->hud_textures().end() ? nullptr : it2->second.get();
+    };
+    // Parchment body, then the sheet's side edges, then the rolled bar on top
+    // — the same three pieces as the dojo dialogue (PORT_PLAN 6.2), which is
+    // why Paper_left/right are drawn as narrow strips and not as halves.
+    renderer_->draw_filled_rect_screen(x, y, w, h, {226, 205, 163, 250});
+    const float edge_w = w * 0.055f;
+    if (auto* pl = tex_of("Paper_left"))
+        renderer_->draw_textured_quad_screen(*pl, x, y, edge_w, h);
+    if (auto* pr = tex_of("Paper_right"))
+        renderer_->draw_textured_quad_screen(*pr, x + w - edge_w, y, edge_w, h);
+
+    auto* roll_l = tex_of("Roll_left");
+    auto* roll_c = tex_of("Roll_center");
+    auto* roll_r = tex_of("Roll_right");
+    if (roll_l && roll_c && roll_r) {
+        const float bar_h = w * 0.13f;
+        const float end_w = bar_h * (156.0f / 74.0f);
+        const float bar_y = y - bar_h * 0.55f;
+        renderer_->draw_textured_quad_screen(*roll_l, x, bar_y, end_w, bar_h);
+        renderer_->draw_textured_quad_screen(*roll_c, x + end_w, bar_y,
+                                             w - 2.0f * end_w, bar_h);
+        renderer_->draw_textured_quad_screen(*roll_r, x + w - end_w, bar_y,
+                                             end_w, bar_h);
+        // And one at the bottom, so the sheet reads as unrolled rather than cut.
+        const float bot_y = y + h - bar_h * 0.45f;
+        renderer_->draw_textured_quad_screen(*roll_l, x, bot_y, end_w, bar_h);
+        renderer_->draw_textured_quad_screen(*roll_c, x + end_w, bot_y,
+                                             w - 2.0f * end_w, bar_h);
+        renderer_->draw_textured_quad_screen(*roll_r, x + w - end_w, bot_y,
+                                             end_w, bar_h);
+    }
+}
+
+void Game::host_render_top_panel() {
+    if (!platform_) return;
+    render_hud(*platform_);
 }
 
 void Game::host_set_show_enemy(bool show) {

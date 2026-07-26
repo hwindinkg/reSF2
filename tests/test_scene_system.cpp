@@ -38,6 +38,16 @@ struct NullHost : scene::SceneHost {
     bool host_is_level_completed(const std::string&) const override { return false; }
     void host_render_text(const std::string&, float, float, float, std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t) const override {}
     bool host_render_zone_bg(int, float, float, float, float) override { return false; }
+    MapView host_render_zone_map(int, float, float, float, float, float) override { return {}; }
+    bool host_render_battle_icon(const std::string&, int, float, float, float) override { return false; }
+    bool host_render_battle_preview(const std::string&, float, float, float, float) override { return false; }
+    void host_render_scroll_panel(float, float, float, float) override {}
+    void host_render_top_panel() override {}
+    int start_scene_arg() const override { return -1; }
+    std::string host_localized(const std::string&) const override { return {}; }
+    std::pair<float, float> host_measure_text(const std::string& t, float s) const override {
+        return {static_cast<float>(t.size()) * 8.0f * s, 16.0f * s};
+    }
     void host_set_battle_mode(bool) override {}
     void host_set_show_enemy(bool) override {}
     void host_load_battle_location(const std::string&) override {}

@@ -104,6 +104,12 @@ public:
 
     // Start with the world-geometry overlay on (also toggled at runtime with F1).
     void set_debug_world(bool on) { debug_world_ = on; }
+    // --scene <name>: open a screen directly instead of walking the Boot ->
+    // Loading -> MainMenu flow. Used to capture a screen for comparison
+    // against the reference screenshots.
+    void set_start_scene(const std::string& s) { start_scene_ = s; }
+    // Exposed so a scene can honour the ":N" argument of --scene.
+    int start_scene_arg() const override { return start_scene_arg_; }
     // See hermetic_run_ below. main.cpp turns this on for --input-script runs.
     void set_hermetic_run(bool on) { hermetic_run_ = on; }
 
@@ -254,6 +260,22 @@ std::string host_get_current_level() const override;
     void host_render_text(const std::string& text, float x, float y, float scale, std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a) const override;
 
 bool host_render_zone_bg(int zone_index, float x, float y, float w, float h) override;
+// --- Map screen (see scene_system.hpp for the contract) ---
+scene::SceneHost::MapView host_render_zone_map(int zone_index, float scroll_x,
+                                               float x, float y, float w, float h) override;
+bool host_render_battle_icon(const std::string& icon, int state,
+                             float cx, float cy, float size) override;
+bool host_render_battle_preview(const std::string& location,
+                                float x, float y, float w, float h) override;
+void host_render_scroll_panel(float x, float y, float w, float h) override;
+void host_render_top_panel() override;
+std::string host_localized(const std::string& key) const override { return localized(key); }
+std::pair<float, float> host_measure_text(const std::string& text, float scale) const override {
+    return measure_text(text, scale);
+}
+// Lazily loads the battle-icon atlases and the per-location preview photos.
+void load_map_textures();
+ren::Texture2D* battle_preview_texture(const std::string& location);
 
 
 void host_set_show_enemy(bool show) override;
@@ -2646,7 +2668,11 @@ private:
         // player practices moves against a training dummy (bag or enemy fighter).
         // The enemy fighter in Dojo is a sparring partner, not a real opponent.
         // B key toggles between punching bag and enemy fighter.
-        if (total_frame_count_ < 360) {  // ~6 seconds at 60fps
+        // Keyboard hints are ours, not the original's — the original has
+        // on-screen touch controls there instead (PORT_PLAN 6.3). Keep them
+        // behind the debug overlay so the default view matches the reference
+        // screenshot.
+        if (debug_world_ && total_frame_count_ < 360) {
             uint8_t hint_alpha = (total_frame_count_ < 300) ? 200 :
                 (uint8_t)(200 * (360 - total_frame_count_) / 60);
             std::string hint = "WASD move | O punch | P kick | S+D roll | B toggle enemy";
@@ -2688,17 +2714,19 @@ private:
                         roll.y + (roll.h - text_h) / 2.0f, label_scale, text_col);
         }
 
-        // Bottom hint
-        render_text("A/D - move    Space - hit    M - menu    T - dialog",
-                    20, (float)(platform.window_height() - 40), 0.26f,
-                    {200, 200, 200, 255});
-
-        // Position label
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "Pos: (%.0f, %.0f)",
-                      player_pos_x_, player_pos_y_);
-        render_text(buf, 20, (float)(platform.window_height() - 65), 0.26f,
-                    {180, 180, 180, 255});
+        // Control hints and the position readout are development scaffolding.
+        // They are not in the original — its bottom-left corner holds the
+        // virtual joystick — so they live behind the debug overlay (F1).
+        if (debug_world_) {
+            render_text("A/D - move    Space - hit    M - menu    T - dialog",
+                        20, (float)(platform.window_height() - 40), 0.26f,
+                        {200, 200, 200, 255});
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "Pos: (%.0f, %.0f)",
+                          player_pos_x_, player_pos_y_);
+            render_text(buf, 20, (float)(platform.window_height() - 65), 0.26f,
+                        {180, 180, 180, 255});
+        }
     }
 
     // ---------- Menu expanded (vertical scroll, matching original game) ----------
@@ -3362,6 +3390,8 @@ private:
     // saved inventory. Set for scripted runs so a measurement is reproducible
     // on any machine and in any order relative to the tests that write saves.
     bool hermetic_run_ = false;
+    std::string start_scene_;   // --scene <name>[:<arg>], empty = normal Boot flow
+    int start_scene_arg_ = -1;  // the ":N" part, e.g. the map's initial zone
 
     // Animation debug/TODO state
     float stance_npivot_y_ = 106.0f;     // NPivot Y from stance anim (default from params.xml)

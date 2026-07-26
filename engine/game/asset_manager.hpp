@@ -50,6 +50,15 @@ public:
     std::unordered_map<int, std::unique_ptr<ren::Texture2D>>& zone_bg_textures() { return zone_bg_textures_; }
     const std::unordered_map<int, std::unique_ptr<ren::Texture2D>>& zone_bg_textures() const { return zone_bg_textures_; }
 
+    // [ORIGINAL] Map-screen art. Battle nodes come from
+    // assets/1536/image/battles/{base,active,locked}/batchBattles*.plist —
+    // one frame per battle kind ("base_tournament", "active_lynx", ...). The
+    // per-location photos next to them (arena.jpg, lynx.jpg, ...) are the
+    // preview shown in the side scroll.
+    std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>>& map_icon_textures() { return map_icon_textures_; }
+    const std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>>& map_icon_textures() const { return map_icon_textures_; }
+    std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>>& battle_preview_textures() { return battle_preview_textures_; }
+
     // Animation data cache
     std::unordered_map<std::string, resf2::game::AnimationData>& animations() { return animations_; }
     const std::unordered_map<std::string, resf2::game::AnimationData>& animations() const { return animations_; }
@@ -140,6 +149,8 @@ public:
     std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> menu_textures_;
     std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> scroll_textures_;
     std::unordered_map<int, std::unique_ptr<ren::Texture2D>> zone_bg_textures_;
+    std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> map_icon_textures_;
+    std::unordered_map<std::string, std::unique_ptr<ren::Texture2D>> battle_preview_textures_;
 
     // Animation cache
     std::unordered_map<std::string, resf2::game::AnimationData> animations_;
