@@ -1434,10 +1434,20 @@ void Game::host_update_gameplay(uint32_t dt) {
     }
     // Toggle between the punching bag and a sparring partner.
     //
-    // [HEURISTIC-TODO] In the original this is a button on screen — the
-    // disciple button, `textures/misc/btn_disciple_small.png` — not a keyboard
-    // shortcut. Wiring it up belongs with the rest of the dojo UI (6.3/6.5).
-    if (input.keys_just_pressed[(size_t)plat::Key::B]) {
+    // [ORIGINAL] In the original this is an on-screen button (FUN_1014d5c0):
+    // its art flips between btn_disciple and btn_punching_bag to show what
+    // you switch TO, at (logical_width - 85, -75) points of its parent. The
+    // click below and the B key both land here; B stays as a shortcut.
+    bool toggle_partner = input.keys_just_pressed[(size_t)plat::Key::B];
+    if (!is_battle_mode_) {
+        const auto r = disciple_btn_rect();
+        for (const auto& p : input.pointers) {
+            if (p.id < 0 || !p.just_pressed) continue;
+            if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h)
+                toggle_partner = true;
+        }
+    }
+    if (toggle_partner) {
         show_enemy_ = !show_enemy_;
         // Put the partner back to a clean stance when he appears, and clear
         // any state he was left in when he goes away. Without this a partner

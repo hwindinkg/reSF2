@@ -2276,6 +2276,10 @@ private:
             // loaded by name in ScreenModel (0x10201d90 / ctor 0x10200c10).
             load_hud_png(base/"textures"/"misc"/"Round_Done.png", "Round_Done");
             load_hud_png(base/"textures"/"misc"/"Round_Undone.png", "Round_Undone");
+            // The dojo's bag/disciple toggle (FUN_1014d5c0; small variant —
+            // the full-size art is absent from this dump).
+            load_hud_png(base/"textures"/"misc"/"btn_disciple_small.png",
+                         "btn_disciple_small");
             load_hud_png(base/"image"/"users"/"image"/"character_sensei_small.png",
                          "character_sensei_small");
             // The full-size avatar used by the story dialogues
@@ -2990,6 +2994,40 @@ private:
         return ui::top_panel_h(win_h) / 280.0f;
     }
 
+    // ---------- Dojo bag/disciple toggle button ----------
+    //
+    // [ORIGINAL] The dojo screen creates the toggle button in FUN_1014d5c0:
+    // position (logical_width - 85, -75) points relative to its parent, art
+    // btn_punching_bag / btn_disciple chosen by the CURRENT mode (the button
+    // shows what you switch TO), initially hidden until the quest fires
+    // ShowDojoDisciple.
+    // [HEURISTIC-TODO] Two departures forced by our asset dump: the parent's
+    // origin was not chased down, so -75 is read as "below the top panel"
+    // (FUN_1014ca50 publishes the panel height for the layout below it); and
+    // the full-size btn_disciple/btn_punching_bag PNGs are absent from this
+    // dump, so the shipped btn_disciple_small (110 px) stands in for both.
+    // The quest gate is not ported either — the button is always shown.
+    struct BtnRect { float x = 0, y = 0, w = 0, h = 0; };
+    BtnRect disciple_btn_rect() const {
+        BtnRect r;
+        if (!platform_) return r;
+        const float win_w = static_cast<float>(platform_->window_width());
+        const float win_h = static_cast<float>(platform_->window_height());
+        const float pts = ui::points_scale(win_h);
+        float side_pts = 55.0f;   // btn_disciple_small 110 px / content scale
+        if (assets_) {
+            auto it = assets_->hud_textures().find("btn_disciple_small");
+            if (it != assets_->hud_textures().end() && it->second &&
+                it->second->height() > 0)
+                side_pts = it->second->height() / ui::kHighTierContentScale;
+        }
+        r.w = side_pts * pts;
+        r.h = side_pts * pts;
+        r.x = win_w - 85.0f * pts - r.w * 0.5f;
+        r.y = ui::top_panel_h(win_h) + 75.0f * pts - r.h * 0.5f;
+        return r;
+    }
+
     // ---------- HUD ----------
     void render_hud(plat::Platform& platform) {
         // [ORIGINAL] The top panel is laid out from the atlas' own source sizes
@@ -3068,6 +3106,20 @@ private:
         // The "+" button sits at the right edge in the original.
         draw("AddMoney", win_w - 116.0f * s - panel_h * 0.12f, cy(116.0f),
              116.0f * s, 116.0f * s);
+
+        // The dojo's bag/disciple toggle (see disciple_btn_rect for the
+        // provenance). Slightly dimmed when the click would bring the bag
+        // back, so the two states are tellable apart with one art.
+        {
+            const BtnRect r = disciple_btn_rect();
+            auto* t = tex_of("btn_disciple_small");
+            if (t) {
+                const uint8_t a = show_enemy_ ? 140 : 255;
+                renderer_->draw_textured_quad_screen(*t, r.x, r.y, r.w, r.h,
+                                                     0, 0, 1, 1,
+                                                     {255, 255, 255, a});
+            }
+        }
 
         // [ORIGINAL] Dojo is a TRAINING area — NO health bars, NO victory/defeat.
         // Health bars only appear in real fights (map battles). In Dojo, the
