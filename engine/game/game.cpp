@@ -2544,13 +2544,13 @@ void Game::host_update_gameplay(uint32_t dt) {
         }
         std::printf("[STATE] f=%llu ms=%d ha=%u anim='%s' move='%s' px=%.1f py=%.1f "
                     "af=%.2f fps=%.2f bag_hit=%d bag_move=%.2f nv=%zu "
-                    "al=%d anchor_x=%.2f fx=%.2f\n",
+                    "al=%d anchor_x=%.2f fx=%.2f cam=%.1f zoom=%.4f\n",
                     (unsigned long long)total_frame_count_, move_state_, hit_anim_,
                     current_anim_.c_str(), current_move_.c_str(),
                     player_pos_x_, player_pos_y_,
                     anim_time_ * anim_fps_, anim_fps_,
                     (int)hit_this_interval_, bag_displacement(), bag_verlet_.size(),
-                    al, anchor_x, first_effect_alpha());
+                    al, anchor_x, first_effect_alpha(), cam_x_, zoom_);
     }
 }
 
