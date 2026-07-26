@@ -1,108 +1,87 @@
-// Phase 2 test: validates the full asset pipeline
-//   - DZ archive opening
-//   - XML document parsing
-//   - Moves database loading
-//   - Location params parsing
+// tests/test_asset_pipeline.cpp
+//
+// The asset pipeline end to end: derbh archives, moves.xml, location params.
+//
+// This used to print what it found and `return 0` unconditionally, so it could
+// not fail no matter how broken the pipeline was. Every observation is now an
+// assertion, and the assets it needs are the ones committed to the repository.
+
+#include <cstdio>
+#include <filesystem>
 
 #include "../engine/fight/moves.hpp"
 #include "../engine/format/location_parser.hpp"
 #include "../engine/reverse/dz_reader.hpp"
-#include <cstdio>
-#include <cstring>
-#include <filesystem>
-#include <fstream>
+#include "check.hpp"
 
 namespace fs = std::filesystem;
+using resf2::test::check;
+using resf2::test::check_eq;
+using resf2::test::check_ge;
+using resf2::test::check_near;
 
-int main() {
-    std::printf("=== Asset Pipeline Test ===\n\n");
+int main(int argc, char** argv) {
+    const fs::path root = (argc > 1) ? fs::path(argv[1]) / "assets" : fs::path("assets");
 
-    // 1. DZ Archives
-    std::printf("--- DZ Archives ---\n");
+    // --- derbh archives ------------------------------------------------------
     auto& dz = resf2::dz::DzRegistry::instance();
-    auto root = fs::path("assets");
+    check(fs::exists(root / "files.dz"), "files.dz is present");
+    check(dz.open_archive((root / "files.dz").string()), "files.dz opens");
+    check(fs::exists(root / "animations.dz"), "animations.dz is present");
+    check(dz.open_archive((root / "animations.dz").string()), "animations.dz opens");
 
-    if (fs::exists(root / "files.dz")) {
-        if (dz.open_archive((root / "files.dz").string())) {
-            std::printf("  files.dz: OK\n");
-        }
-    }
-    if (fs::exists(root / "animations.dz")) {
-        if (dz.open_archive((root / "animations.dz").string())) {
-            std::printf("  animations.dz: OK\n");
-        }
-    }
+    // Reading through the registry must produce real, decompressed content —
+    // this is what was broken while the DZ coder was unimplemented.
+    const auto forge = dz.read_file("forge.xml");
+    check_ge(static_cast<double>(forge.size()), 100000.0,
+             "forge.xml decompresses to its full size");
+    const auto moves_blob = dz.read_file("moves.xml");
+    check_ge(static_cast<double>(moves_blob.size()), 1000000.0,
+             "moves.xml decompresses to its full size");
 
-    // 2. Moves XML parser
-    std::printf("\n--- Moves.xml Parser ---\n");
+    // --- moves.xml -----------------------------------------------------------
     resf2::fight::MoveDatabase moves;
-    auto moves_path = root / "animations" / "moves.xml";
-    if (fs::exists(moves_path)) {
-        if (moves.load_from_file(moves_path.string())) {
-            std::printf("  Moves loaded: %zu\n", moves.size());
+    const auto moves_path = root / "animations" / "moves.xml";
+    check(fs::exists(moves_path), "animations/moves.xml is present");
+    check(moves.load_from_file(moves_path.string()), "moves.xml parses");
+    check_ge(static_cast<double>(moves.size()), 100.0, "moves.xml defines many moves");
 
-            int with_intervals = 0, with_uninterrupt = 0;
-            for (auto& [n, m] : moves.all_moves()) {
-                if (!m.attack_intervals.empty()) with_intervals++;
-                if (!m.uninterrupt_intervals.empty()) with_uninterrupt++;
-            }
-            std::printf("  With attack intervals: %d\n", with_intervals);
-            std::printf("  With uninterrupt: %d\n", with_uninterrupt);
+    int with_intervals = 0, with_uninterrupt = 0;
+    for (const auto& [n, m] : moves.all_moves()) {
+        if (!m.attack_intervals.empty()) ++with_intervals;
+        if (!m.uninterrupt_intervals.empty()) ++with_uninterrupt;
+    }
+    check_ge(with_intervals, 20.0, "some moves carry attack intervals");
+    check_ge(with_uninterrupt, 1.0, "some moves carry uninterrupt intervals");
 
-            // Verify specific moves
-            auto* lp = moves.find("LowPunch");
-            if (lp) {
-                std::printf("  LowPunch: dir=%s type=%s kc=%d\n",
-                            lp->direction.c_str(), lp->move_type.c_str(), lp->key_count);
-                for (auto& iv : lp->attack_intervals) {
-                    std::printf("    Attack [%.0f-%.0f] dmg=%d impulse=(%.0f,%.0f)\n",
-                                iv.start, iv.end, iv.damage, iv.impulse.x, iv.impulse.y);
-                }
-            }
-
-            auto* stance = moves.find("StanceIdle");
-            if (stance) {
-                std::printf("  StanceIdle: file=%s\n", stance->filename.c_str());
-            }
-
-            // Query: 1key Central Punches
-            resf2::fight::MoveDatabase::MoveQuery q;
-            q.direction = "Central";
-            q.move_type = "Punch";
-            q.key_count = 1;
-            auto results = moves.query(q);
-            std::printf("  Central 1key Punches: %zu\n", results.size());
-        } else {
-            std::printf("  FAILED: %s\n", moves_path.string().c_str());
-        }
-    } else {
-        std::printf("  NOT FOUND: %s\n", moves_path.string().c_str());
+    const auto* lp = moves.find("LowPunch");
+    check(lp != nullptr, "LowPunch exists");
+    if (lp) {
+        check(!lp->direction.empty(), "LowPunch has a direction");
+        check_eq(lp->move_type, std::string("Punch"), "LowPunch is a Punch");
+        check_ge(static_cast<double>(lp->attack_intervals.size()), 1.0,
+                 "LowPunch has an attack interval");
     }
 
-    // 3. Location XML parser
-    std::printf("\n--- Location Parser ---\n");
-    auto loc_path = root / "locations" / "dojo" / "params.xml";
-    if (fs::exists(loc_path)) {
-        resf2::format::LocationParser parser;
-        resf2::format::LocationData loc;
-        if (parser.load_file(loc_path.string(), loc)) {
-            std::printf("  Color: %s\n", loc.color.c_str());
-            std::printf("  Size: %.0f x %.0f\n", loc.width, loc.height);
-            std::printf("  Player: (%.0f, %.0f)\n", loc.player_x, loc.player_y);
-            std::printf("  Enemy: (%.0f, %.0f)\n", loc.enemy_x, loc.enemy_y);
-            std::printf("  Layers: %zu\n", loc.layers.size());
-            for (size_t i = 0; i < loc.layers.size(); ++i) {
-                auto& l = loc.layers[i];
-                std::printf("    Layer %zu: type=%d atlas='%s' images=%zu\n",
-                            i, l.type, l.atlas_name.c_str(), l.images.size());
-            }
-        } else {
-            std::printf("  FAILED: %s\n", parser.error().c_str());
-        }
-    } else {
-        std::printf("  NOT FOUND: %s\n", loc_path.string().c_str());
-    }
+    resf2::fight::MoveDatabase::MoveQuery q;
+    q.direction = "Central";
+    q.move_type = "Punch";
+    q.key_count = 1;
+    check_ge(static_cast<double>(moves.query(q).size()), 1.0,
+             "a one-key central punch is reachable");
 
-    std::printf("\n=== Done ===\n");
-    return 0;
+    // --- location params -----------------------------------------------------
+    const auto loc_path = root / "locations" / "dojo" / "params.xml";
+    check(fs::exists(loc_path), "dojo/params.xml is present");
+    resf2::format::LocationParser parser;
+    resf2::format::LocationData loc;
+    check(parser.load_file(loc_path.string(), loc), "dojo/params.xml parses");
+    check_near(loc.width, 1960.0, 0.5, "dojo Width");
+    check_near(loc.height, 560.0, 0.5, "dojo Height");
+    check_ge(static_cast<double>(loc.layers.size()), 4.0, "dojo has its layers");
+    int images = 0;
+    for (const auto& l : loc.layers) images += static_cast<int>(l.images.size());
+    check_ge(images, 20.0, "dojo layers carry their images");
+
+    return resf2::test::summary();
 }

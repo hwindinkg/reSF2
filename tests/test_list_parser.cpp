@@ -1,6 +1,7 @@
 #include "../engine/format/list_parser.hpp"
 #include <cstdio>
 #include <filesystem>
+#include "check.hpp"
 
 namespace fs = std::filesystem;
 
@@ -123,6 +124,15 @@ int main() {
         }
     }
 
-    std::printf("\n=== Done ===\n");
-    return 0;
+    // Content assertions: parsing "successfully" into an empty structure used
+    // to pass silently.
+    resf2::test::check_ge(static_cast<double>(data.items.size()), 100.0,
+                          "list.xml yields a real item catalogue");
+    resf2::test::check_ge(static_cast<double>(data.upgrade_templates.size()), 1.0,
+                          "list.xml yields upgrade templates");
+    int named = 0;
+    for (const auto& it : data.items) if (!it.name.empty()) ++named;
+    resf2::test::check_eq(named, static_cast<int>(data.items.size()),
+                          "every item has a name");
+    return resf2::test::summary();
 }

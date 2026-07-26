@@ -142,16 +142,16 @@ if(RESF2_BUILD_RUNTIME)
     # that can refuse an animation print "[ANIM] Rejected", so any refusal
     # fails the test, and the fighter is required to reach the idle stance.
     if(RESF2_BUILD_TESTS)
+        add_executable(test_input_trace tests/test_input_trace.cpp)
+        target_link_libraries(test_input_trace PRIVATE resf2_warnings)
+        target_compile_features(test_input_trace PRIVATE cxx_std_23)
+        set_target_properties(test_input_trace PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${RESF2_RUNTIME_OUTPUT_DIR}")
+        add_dependencies(test_input_trace resf2_app)
         add_test(NAME test_input_trace
-                 COMMAND resf2_app
-                         --assets "${CMAKE_SOURCE_DIR}"
-                         --input-script "${CMAKE_SOURCE_DIR}/tests/data/input_idle_walk_punch.txt"
-                         --max-frames 400 --dump-state --no-log
+                 COMMAND test_input_trace "$<TARGET_FILE:resf2_app>" "${CMAKE_SOURCE_DIR}"
                  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-        set_tests_properties(test_input_trace PROPERTIES
-            FAIL_REGULAR_EXPRESSION "\\[ANIM\\] Rejected"
-            PASS_REGULAR_EXPRESSION "anim='stance_idle'"
-            TIMEOUT 120)
+        set_tests_properties(test_input_trace PROPERTIES TIMEOUT 180)
     endif()
 endif()
 

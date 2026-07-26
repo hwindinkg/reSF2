@@ -36,12 +36,15 @@ std::vector<std::byte> read_disk(const std::filesystem::path& p) {
     return d;
 }
 
+int g_archives_exercised = 0;
+
 // Decode every file in the archive and report how many came out non-empty.
 void exercise(const std::filesystem::path& archive) {
-    if (!std::filesystem::exists(archive)) {
-        std::printf("SKIP %s (not present)\n", archive.string().c_str());
-        return;
-    }
+    // A missing archive is a failure, not a skip: these ship with the repo, and
+    // silently passing when they are absent is how a broken reader hides.
+    check(std::filesystem::exists(archive), "present: " + archive.string());
+    if (!std::filesystem::exists(archive)) return;
+    ++g_archives_exercised;
     resf2::dz::DzArchive a;
     check(a.open(archive.string()), "open " + archive.string());
 
@@ -100,6 +103,8 @@ int main(int argc, char** argv) {
     compare_known(assets / "animations.dz", {
         {"animations_list.xml", (assets / "animations" / "animations_list.xml").string()},
     });
+
+    check(g_archives_exercised >= 2, "both shipped archives were exercised");
 
     if (g_failures) {
         std::fprintf(stderr, "\n%d check(s) failed\n", g_failures);
