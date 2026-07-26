@@ -629,6 +629,14 @@ bool GlfwPlatform::should_quit() const noexcept {
 }
 
 bool GlfwPlatform::is_paused() const noexcept {
+    // A scripted run must be reproducible regardless of what else has focus on
+    // the desktop. Losing focus pauses the app, and the host loop then spins on
+    // sleep_ms(100) without advancing a frame, so a run driven by
+    // --input-script produced a different number of gameplay frames every time
+    // (observed: 0, 240, 472, 540 for identical arguments) depending on how
+    // long the window happened to stay focused before the harness timed out.
+    // That is what made every combat measurement unrepeatable.
+    if (impl_->input_script.armed) return false;
     return impl_->paused;
 }
 
