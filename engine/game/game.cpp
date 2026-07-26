@@ -1875,12 +1875,22 @@ void Game::host_update_gameplay(uint32_t dt) {
                             auto ait = anim_node_pos_.find(limb_node);
                             if (ait == anim_node_pos_.end()) continue;
 
-                            float limb_lx = ait->second.first;
-                            float limb_ly = ait->second.second;
+                            // Use the SAME transform the renderer uses. This
+                            // block used to carry its own copy of it —
+                            //   limb_wy = player_pos_y + y_adjust + (ly - pivot_ly)
+                            // — which is the double subtraction of the rest
+                            // pivot fixed in PORT_PLAN 3.1. The limbs were
+                            // therefore tested ~170 world units below where
+                            // they were drawn and never reached the bag: the
+                            // fighter could stand on top of it, punch, and
+                            // bag_hit stayed 0.
                             auto pivot_it = assets_->skeleton_nodes().find("NPivot");
-                            float pivot_ly = pivot_it != assets_->skeleton_nodes().end() ? pivot_it->second.y : stance_npivot_y_;
-                            float limb_wx = player_pos_x_ + (facing_right_ ? limb_lx : -limb_lx);
-                            float limb_wy = player_pos_y_ + y_adjust_smoothed_ + (limb_ly - pivot_ly);
+                            float pivot_ly = pivot_it != assets_->skeleton_nodes().end()
+                                                 ? pivot_it->second.y : stance_npivot_y_;
+                            auto [limb_wx, limb_wy] = resolve_body_node(
+                                limb_node, player_pos_x_,
+                                player_pos_y_ + y_adjust_smoothed_,
+                                facing_right_, pivot_ly);
 
                             // Get attacking edge radius from skeleton
                             float atk_radius = 0;
@@ -1893,10 +1903,10 @@ void Game::host_update_gameplay(uint32_t dt) {
                             auto ait2 = anim_node_pos_.find(node2);
                             if (ait2 == anim_node_pos_.end()) continue;
 
-                            float limb2_lx = ait2->second.first;
-                            float limb2_ly = ait2->second.second;
-                            float limb2_wx = player_pos_x_ + (facing_right_ ? limb2_lx : -limb2_lx);
-                            float limb2_wy = player_pos_y_ + y_adjust_smoothed_ + (limb2_ly - pivot_ly);
+                            auto [limb2_wx, limb2_wy] = resolve_body_node(
+                                node2, player_pos_x_,
+                                player_pos_y_ + y_adjust_smoothed_,
+                                facing_right_, pivot_ly);
 
                             // Check against ALL collisible bag edges
                             bool hit_this_interval_this_frame = false;
