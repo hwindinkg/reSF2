@@ -306,8 +306,24 @@ void Game::on_init(plat::Platform& platform) {
                 }
             }
 
-            // Load saved progress (gold, wins, levels, inventory)
-            host_load_progress();
+            // Load saved progress (gold, wins, levels, inventory).
+            //
+            // A scripted run is a MEASUREMENT and must not depend on whatever
+            // is in the developer's %APPDATA%\reSF2\save.json — same reasoning
+            // as the fixed timestep and the ignored pause in PORT_PLAN 9.8.
+            // This was not academic: test_save_system and test_inventory write
+            // a real save to that user-global path, and it equips
+            // WEAPON_KNIVES. Every later scripted run then rejected every
+            // Fists move ("cand=0 reject=no_candidate"), so the punch simply
+            // never happened. test_input_trace is CTest #1, so on a machine
+            // that had never run the suite it passed — and then failed for
+            // good afterwards. The suite was order- and history-dependent.
+            if (!hermetic_run_) {
+                host_load_progress();
+            } else {
+                std::printf("[save] skipped (scripted run: state comes from the "
+                            "script, not from the machine)\n");
+            }
 
             // Sync member variables from PlayerProfile (authoritative after load)
             currency_ = player_profile_.currency();
@@ -2234,6 +2250,11 @@ void Game::host_update_gameplay(uint32_t dt) {
         hit_this_interval_ = false;
     }
 
+    // [ORIGINAL] SimpleEffect::update @ 0x1007f1f0 advances every effect curve
+    // once per tick, scaling the 60 Hz tick count by 1/60 first — so curve
+    // Periods are seconds and the animation is independent of frame rate.
+    update_location_effects(dt / 1000.0f);
+
     // Update bag Verlet physics
     update_bag_verlet(dt / 1000.0f);
 
@@ -2273,13 +2294,13 @@ void Game::host_update_gameplay(uint32_t dt) {
         }
         std::printf("[STATE] f=%llu ms=%d ha=%u anim='%s' move='%s' px=%.1f py=%.1f "
                     "af=%.2f fps=%.2f bag_hit=%d bag_move=%.2f nv=%zu "
-                    "al=%d anchor_x=%.2f\n",
+                    "al=%d anchor_x=%.2f fx=%.2f\n",
                     (unsigned long long)total_frame_count_, move_state_, hit_anim_,
                     current_anim_.c_str(), current_move_.c_str(),
                     player_pos_x_, player_pos_y_,
                     anim_time_ * anim_fps_, anim_fps_,
                     (int)hit_this_interval_, bag_displacement(), bag_verlet_.size(),
-                    al, anchor_x);
+                    al, anchor_x, first_effect_alpha());
     }
 }
 

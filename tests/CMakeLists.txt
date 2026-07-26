@@ -169,6 +169,20 @@ target_compile_features(test_world_geometry PRIVATE cxx_std_23)
 add_test(NAME test_world_geometry COMMAND test_world_geometry "${CMAKE_SOURCE_DIR}"
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# <SimpleEffect> animation curve: the maths the original solves in
+# Curve::recompute (0x1007f0c0) and evaluates in SimpleEffect::update
+# (0x1007f1f0), checked as properties plus the real dojo light patch.
+add_executable(test_effect_curve
+    test_effect_curve.cpp
+)
+target_link_libraries(test_effect_curve PRIVATE
+    resf2_format
+    resf2_warnings
+)
+target_compile_features(test_effect_curve PRIVATE cxx_std_23)
+add_test(NAME test_effect_curve COMMAND test_effect_curve "${CMAKE_SOURCE_DIR}"
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # derbh (.dz) archive end-to-end test: DZ Coder + ZLib Coder against the
 # shipped archives, byte-compared with the extracted references in assets/.
 add_executable(test_dz_archive

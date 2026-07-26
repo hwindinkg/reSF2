@@ -4,6 +4,8 @@
 #include <vector>
 #include <cstdint>
 
+#include "effect_curve.hpp"
+
 namespace resf2::format {
 
 struct LayerImage {
@@ -12,6 +14,8 @@ struct LayerImage {
     float x = 0, y = 0;
     float w = 0, h = 0;
     std::string color;  // hex RRGGBB
+    // [ORIGINAL] <SimpleEffect><Transparency> — empty for a plain <Image>.
+    EffectCurve transparency;
 };
 
 struct LocationLayer {

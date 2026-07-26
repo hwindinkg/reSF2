@@ -201,6 +201,39 @@ int main(int argc, char** argv) {
     check(idle_hi - idle_lo < 5.0,
           "a looping idle does not walk the fighter along the floor");
 
+    // -------------------------------------------------------- <SimpleEffect>
+    //
+    // test_effect_curve proves the curve maths. This proves the ENGINE ticks
+    // it: dojo's light patch (layer_4) breathes between 45% and 75% on a 9.2 s
+    // loop, so over a few hundred frames the alpha has to move and stay inside
+    // that band. Nothing on screen would show a curve that never advances —
+    // the patch is off-camera at the starting position.
+    {
+        float fx_lo = 0.0f, fx_hi = 0.0f;
+        int fx_n = 0;
+        std::ifstream f3(out);
+        std::string l3;
+        const std::regex re_fx(R"(fx=([-\d.]+))");
+        while (std::getline(f3, l3)) {
+            std::smatch m3;
+            if (l3.find("[STATE]") == std::string::npos) continue;
+            if (!std::regex_search(l3, m3, re_fx)) continue;
+            const float v = std::stof(m3[1]);
+            if (v < 0.0f) continue;   // location has no animated effect
+            if (fx_n == 0) { fx_lo = fx_hi = v; }
+            fx_lo = std::min(fx_lo, v);
+            fx_hi = std::max(fx_hi, v);
+            ++fx_n;
+        }
+        check_ge(static_cast<double>(fx_n), 300.0,
+                 "the location reports an animated <SimpleEffect> every frame");
+        std::printf("  effect alpha over the run: %.1f%% .. %.1f%%\n", fx_lo, fx_hi);
+        check(fx_hi - fx_lo > 10.0f,
+              "the effect curve is actually advanced by the engine, not frozen");
+        check(fx_lo >= 40.0f && fx_hi <= 80.0f,
+              "the effect stays inside the range params.xml asks for");
+    }
+
     // Walking has to actually move the fighter.
     float px_at_walk = 0.0f, px_at_idle2 = 0.0f;
     for (const auto& fr : frames) {

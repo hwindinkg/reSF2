@@ -52,7 +52,13 @@ static GameLocation parse_location(const std::string& xml) {
                     img.w = tof(ic.attr("Width"));
                     img.h = tof(ic.attr("Height"));
                     img.color = ic.attr("Color");
-                    layer.images.push_back(img);
+                    // [ORIGINAL] A <SimpleEffect> animates itself. Only the
+                    // Transparency channel is modelled so far; OscillationX/Y
+                    // and Rotation use the same curve type (see
+                    // engine/format/effect_curve.hpp).
+                    if (const auto* tr = ic.first_child("Transparency"))
+                        resf2::format::parse_transparency(*tr, img.transparency);
+                    layer.images.push_back(std::move(img));
                 }
             }
 
