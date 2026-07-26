@@ -2147,6 +2147,11 @@ private:
                                       "batchFightBars");
             load_texture_atlas_to_hud(base/"textures"/"buttons"/"fight",
                                       "batchButtonsFight");
+            // [ORIGINAL] On-screen controls: the virtual stick (a ring plus a
+            // knob plus a highlight) and the attack buttons. The original is a
+            // touch game — these are its only controls (PORT_PLAN 6.3).
+            load_texture_atlas_to_hud(base/"textures"/"joystick",
+                                      "batchJoystick");
             // [ORIGINAL] The dialogue scroll is assembled from loose PNGs in
             // textures/scrolls/common: rolled ends plus a tiled centre, with
             // the paper drawn over it. The speaker portrait comes from
@@ -2169,19 +2174,26 @@ private:
 
     void load_menu_textures() {
         auto root = std::filesystem::path(asset_root_);
-        // Search both root/assets/1536/ and root/1536/
+        // Which frames were already in the HUD table before this atlas loaded.
+        // The menu frames are then exactly the ones that appeared, and they are
+        // moved out by PROVENANCE rather than by name.
+        //
+        // This used to move every key containing "_normal" / "_active" /
+        // "_pushed", which also swallowed btn_punch_normal and btn_kick_normal
+        // from the fight-button atlas — so the on-screen attack buttons were
+        // silently missing from the HUD table while the code drawing them was
+        // already correct. A name filter standing in for provenance.
+        std::vector<std::string> before;
+        before.reserve(assets_->hud_textures().size());
+        for (const auto& [k, v] : assets_->hud_textures()) before.push_back(k);
+        std::sort(before.begin(), before.end());
+
         for (const auto& base : {root/"assets"/"1536", root/"1536"}) {
             load_texture_atlas_to_hud(base/"textures"/"buttons"/"menu"/"screens",
                                       "batchButtonsMenuScreens");
         }
-        // Move menu atlas textures into assets_->menu_textures()
         for (auto it = assets_->hud_textures().begin(); it != assets_->hud_textures().end(); ) {
-            if (it->first.find("_normal") != std::string::npos ||
-                it->first.find("_active") != std::string::npos ||
-                it->first.find("_pushed") != std::string::npos ||
-                it->first.find("_Normal") != std::string::npos ||
-                it->first.find("_Active") != std::string::npos ||
-                it->first.find("_Pushed") != std::string::npos) {
+            if (!std::binary_search(before.begin(), before.end(), it->first)) {
                 assets_->menu_textures()[it->first] = std::move(it->second);
                 it = assets_->hud_textures().erase(it);
             } else {
@@ -2216,18 +2228,34 @@ private:
     void load_texture_atlas_to_hud(
         const std::filesystem::path& dir, const std::string& atlas_name)
     {
+        // Every failure below used to be a silent `return`, so an atlas that
+        // did not load looked exactly like one that was never asked for. That
+        // is how the fight buttons stayed invisible while the code that draws
+        // them was already correct.
         auto pp = dir / (atlas_name + ".plist");
         auto pn = dir / (atlas_name + ".png");
-        if (!std::filesystem::exists(pp) || !std::filesystem::exists(pn)) return;
+        if (!std::filesystem::exists(pp) || !std::filesystem::exists(pn)) {
+            std::printf("  [atlas] %s: missing %s\n", atlas_name.c_str(),
+                        std::filesystem::exists(pp) ? pn.string().c_str()
+                                                    : pp.string().c_str());
+            return;
+        }
         auto result = plist::parse(read_text(pp.string()));
-        if (!result) return;
+        if (!result) {
+            std::printf("  [atlas] %s: plist did not parse\n", atlas_name.c_str());
+            return;
+        }
         auto png_data = read_file(pn.string());
         // Use stb_image to decode the PNG so we can crop frames on the CPU.
         int aw, ah, ach;
         auto* atlas_px = stbi_load_from_memory(
             (const stbi_uc*)png_data.data(), (int)png_data.size(),
             &aw, &ah, &ach, 4);
-        if (!atlas_px) return;
+        if (!atlas_px) {
+            std::printf("  [atlas] %s: png did not decode (%zu bytes)\n",
+                        atlas_name.c_str(), png_data.size());
+            return;
+        }
         for (auto& [name, idx] : result->name_index) {
             auto& frame = result->frames[idx];
             // Handle rotated frames:
@@ -2264,6 +2292,8 @@ private:
             if (n.ends_with(".png")) n = n.substr(0, n.size() - 4);
             assets_->hud_textures()[n] = std::move(tex);
         }
+        std::printf("  [atlas] %s: %zu frames from %dx%d\n", atlas_name.c_str(),
+                    result->name_index.size(), aw, ah);
         stbi_image_free(atlas_px);
     }
 
@@ -2517,6 +2547,131 @@ private:
             }
             cx += ch.xadvance * scale;
         }
+    }
+
+    // ---------- On-screen controls ----------
+    //
+    // [ORIGINAL] Shadow Fight 2 is a touch game: a virtual stick in the
+    // bottom-left corner and attack buttons in the bottom-right are its ONLY
+    // controls. The art is shipped —
+    //   textures/joystick/batchJoystick.plist   JoystickContainer_norm (ring),
+    //                                           Joystick_norm (knob),
+    //                                           Highlight_Stick, _action variants
+    //   textures/buttons/fight/batchButtonsFight.plist
+    //                                           btn_punch/kick/magic/throw,
+    //                                           each _normal and _action
+    // — and this draws it and feeds the same combat code the keyboard does, so
+    // there is one input path and not two.
+    struct TouchControls {
+        // Geometry, in screen pixels, derived from the viewport like the HUD.
+        float stick_cx = 0, stick_cy = 0, stick_r = 0;
+        float punch_cx = 0, punch_cy = 0, punch_r = 0;
+        float kick_cx = 0, kick_cy = 0, kick_r = 0;
+        // State for this frame.
+        float dir_x = 0, dir_y = 0;   // stick deflection, -1..1
+        bool punch = false, kick = false;         // held
+        bool punch_pressed = false, kick_pressed = false;  // this frame
+    };
+
+    TouchControls touch_layout() const {
+        TouchControls c;
+        if (!platform_) return c;
+        const float w = static_cast<float>(platform_->window_width());
+        const float h = static_cast<float>(platform_->window_height());
+        // [HEURISTIC-TODO] Sizes and margins measured off the reference
+        // screenshot: the stick ring is about a third of the frame height and
+        // sits a stick-radius in from the bottom-left corner; the punch button
+        // is a little smaller and the kick button smaller again, stacked
+        // towards the bottom-right. The rule the original uses has not been
+        // reversed — this reproduces the proportions.
+        c.stick_r = h * 0.155f;
+        c.stick_cx = c.stick_r * 1.20f;
+        c.stick_cy = h - c.stick_r * 1.20f;
+        c.punch_r = h * 0.105f;
+        c.punch_cx = w - c.punch_r * 1.35f;
+        c.punch_cy = h - c.punch_r * 1.45f;
+        c.kick_r = h * 0.085f;
+        c.kick_cx = c.punch_cx - c.punch_r * 1.75f;
+        c.kick_cy = c.punch_cy - c.punch_r * 0.35f;
+        return c;
+    }
+
+    // Reads the pointers and fills touch_. Called once per gameplay frame
+    // before the combat code looks at the keyboard.
+    void update_touch_controls(const plat::InputState& input) {
+        const TouchControls geom = touch_layout();
+        TouchControls c = geom;
+        const bool was_punch = touch_.punch, was_kick = touch_.kick;
+
+        auto inside = [](const plat::PointerState& p, float cx, float cy, float r) {
+            const float dx = p.x - cx, dy = p.y - cy;
+            return dx * dx + dy * dy <= r * r;
+        };
+        for (const auto& p : input.pointers) {
+            if (!p.pressed && !p.just_pressed) continue;
+            // The stick reacts to a pointer anywhere in its quadrant, not just
+            // on the ring — that is how the original behaves and it is what
+            // makes it usable without looking.
+            if (p.x < geom.stick_cx + geom.stick_r * 2.0f &&
+                p.y > geom.stick_cy - geom.stick_r * 2.0f) {
+                float dx = (p.x - geom.stick_cx) / geom.stick_r;
+                float dy = (p.y - geom.stick_cy) / geom.stick_r;
+                const float len = std::sqrt(dx * dx + dy * dy);
+                if (len > 1.0f) { dx /= len; dy /= len; }
+                c.dir_x = dx;
+                c.dir_y = dy;
+            }
+            if (inside(p, geom.punch_cx, geom.punch_cy, geom.punch_r)) c.punch = true;
+            if (inside(p, geom.kick_cx, geom.kick_cy, geom.kick_r)) c.kick = true;
+        }
+        c.punch_pressed = c.punch && !was_punch;
+        c.kick_pressed = c.kick && !was_kick;
+        touch_ = c;
+    }
+
+    void render_touch_controls() {
+        if (!platform_ || !renderer_ || !assets_) return;
+        const TouchControls c = touch_layout();
+        auto tex_of = [&](const char* n) -> ren::Texture2D* {
+            auto it = assets_->hud_textures().find(n);
+            return it == assets_->hud_textures().end() ? nullptr : it->second.get();
+        };
+        auto draw_c = [&](const char* n, float cx, float cy, float r) {
+            auto* t = tex_of(n);
+            if (!t) return false;
+            const float aspect = static_cast<float>(t->width()) /
+                                 static_cast<float>(std::max(1, t->height()));
+            const float dh = r * 2.0f, dw = dh * aspect;
+            renderer_->draw_textured_quad_screen(*t, cx - dw * 0.5f, cy - dh * 0.5f,
+                                                 dw, dh);
+            return true;
+        };
+
+        // Report missing art once. A control that silently fails to draw is
+        // indistinguishable from one that is not wired up at all.
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            for (const char* n : {"JoystickContainer_norm", "Joystick_norm",
+                                  "btn_punch_normal", "btn_kick_normal"})
+                if (!tex_of(n)) std::printf("[TOUCH] missing texture '%s'\n", n);
+        }
+
+        const bool active = (touch_.dir_x != 0.0f || touch_.dir_y != 0.0f);
+        if (!draw_c(active ? "JoystickContainer_action" : "JoystickContainer_norm",
+                    c.stick_cx, c.stick_cy, c.stick_r))
+            draw_c("JoystickContainer_norm", c.stick_cx, c.stick_cy, c.stick_r);
+        // The knob rides the deflection, clamped inside the ring.
+        const float knob_r = c.stick_r * 0.42f;
+        const float kx = c.stick_cx + touch_.dir_x * (c.stick_r - knob_r);
+        const float ky = c.stick_cy + touch_.dir_y * (c.stick_r - knob_r);
+        if (!draw_c(active ? "Joystick_action" : "Joystick_norm", kx, ky, knob_r))
+            draw_c("Joystick_norm", kx, ky, knob_r);
+
+        draw_c(touch_.punch ? "btn_punch_action" : "btn_punch_normal",
+               c.punch_cx, c.punch_cy, c.punch_r);
+        draw_c(touch_.kick ? "btn_kick_action" : "btn_kick_normal",
+               c.kick_cx, c.kick_cy, c.kick_r);
     }
 
     // ---------- MENU scroll geometry ----------
@@ -3390,6 +3545,7 @@ private:
     // saved inventory. Set for scripted runs so a measurement is reproducible
     // on any machine and in any order relative to the tests that write saves.
     bool hermetic_run_ = false;
+    TouchControls touch_;       // on-screen controls, updated once per frame
     std::string start_scene_;   // --scene <name>[:<arg>], empty = normal Boot flow
     int start_scene_arg_ = -1;  // the ":N" part, e.g. the map's initial zone
 

@@ -1004,6 +1004,10 @@ void Game::host_render_scene() {
             update_and_render_hit_sparks(0.016f);
             render_debug_world(*platform_);
             if (!is_battle_mode_) render_hud(*platform_);
+            // [ORIGINAL] The virtual stick and the attack buttons are always on
+            // screen while a fight (or the dojo) is up — they are the only
+            // controls the original has.
+            render_touch_controls();
             if (!is_battle_mode_ && menu_anim_progress_ > 0.01f) render_menu_expanded(*platform_);
             if (!is_battle_mode_ && overlay_ == Overlay::Dialog) render_dialog_overlay(*platform_);
 }
@@ -1356,6 +1360,18 @@ void Game::host_update_gameplay(uint32_t dt) {
     bool key_right = input.keys_down[(size_t)plat::Key::D] ||
                      input.keys_down[(size_t)plat::Key::ArrowRight];
 
+    // [ORIGINAL] The on-screen stick is the original's only direction input.
+    // It is folded into the same four booleans the keyboard produces, so the
+    // combat state machine below has ONE input path rather than two — the
+    // duplication that has hidden a bug five times in this codebase already.
+    // The 0.4 deadzone keeps a resting thumb from walking the fighter.
+    update_touch_controls(input);
+    constexpr float kStickDeadzone = 0.4f;
+    if (touch_.dir_x < -kStickDeadzone) key_left = true;
+    if (touch_.dir_x > kStickDeadzone) key_right = true;
+    if (touch_.dir_y < -kStickDeadzone) key_up = true;
+    if (touch_.dir_y > kStickDeadzone) key_down = true;
+
     // Convert absolute directions to relative (Forward/Back)
     bool key_forward = facing_right_ ? key_right : key_left;
     bool key_back = facing_right_ ? key_left : key_right;
@@ -1397,6 +1413,11 @@ void Game::host_update_gameplay(uint32_t dt) {
     // Also keep Space/K as fallback for testing
     if (input.keys_just_pressed[(size_t)plat::Key::Space]) punch_pressed = true;
     if (input.keys_just_pressed[(size_t)plat::Key::K]) kick_pressed = true;
+    // Same folding as the stick above: the on-screen buttons feed the very
+    // same booleans, so nothing downstream needs to know where a punch came
+    // from.
+    if (touch_.punch_pressed) punch_pressed = true;
+    if (touch_.kick_pressed) kick_pressed = true;
 
     // Debug: log key state and what blocks input
     if (punch_pressed || kick_pressed) {
