@@ -256,3 +256,16 @@ target_link_libraries(test_conditions PRIVATE
 )
 target_compile_features(test_conditions PRIVATE cxx_std_23)
 add_test(NAME test_conditions COMMAND test_conditions WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# moves.xml conformance: invariants the ORIGINAL engine satisfies by
+# construction, checked against the real .bin animations.
+add_executable(test_moves_semantics
+    test_moves_semantics.cpp
+)
+target_link_libraries(test_moves_semantics PRIVATE
+    resf2_game
+    resf2_warnings
+)
+target_compile_features(test_moves_semantics PRIVATE cxx_std_23)
+add_test(NAME test_moves_semantics COMMAND test_moves_semantics "${CMAKE_SOURCE_DIR}"
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
