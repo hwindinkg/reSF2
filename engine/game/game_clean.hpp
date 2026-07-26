@@ -1098,6 +1098,49 @@ private:
         }
         cross(enemy_pos_x_, enemy_pos_y_, {255, 120, 255, 255});
 
+        // Punching bag: collisible edges plus its overall extent. The bag is
+        // what an attack has to reach, so its world box has to be readable
+        // next to the fighter's.
+        float bag_x0 = 0, bag_x1 = 0, bag_y0 = 0, bag_y1 = 0;
+        bool have_bag = false;
+        int collisible_edges = 0;
+        if (assets_->bag_model()) {
+            for (const auto& [n, v] : bag_verlet_) {
+                (void)n;
+                if (!have_bag) { bag_x0 = bag_x1 = v.x; bag_y0 = bag_y1 = v.y; have_bag = true; }
+                bag_x0 = std::min(bag_x0, v.x); bag_x1 = std::max(bag_x1, v.x);
+                bag_y0 = std::min(bag_y0, v.y); bag_y1 = std::max(bag_y1, v.y);
+            }
+            for (const auto& be : assets_->bag_model()->edges) {
+                if (!be.collisible || be.radius <= 0) continue;
+                auto a = bag_verlet_.find(be.end1);
+                auto b = bag_verlet_.find(be.end2);
+                if (a == bag_verlet_.end() || b == bag_verlet_.end()) continue;
+                ++collisible_edges;
+                renderer_->draw_line_world(a->second.x, a->second.y,
+                                           b->second.x, b->second.y, {0, 255, 120, 255});
+            }
+        }
+
+        // The attacking limb of the current move, in the same transform the
+        // hit test uses.
+        float fist_x = 0, fist_y = 0;
+        bool have_fist = false;
+        auto move_it = assets_->moves().find(current_move_);
+        if (move_it != assets_->moves().end()) {
+            for (const auto& edge_name : move_it->second.attack_edges) {
+                auto se = assets_->skeleton_edges().find(edge_name);
+                if (se == assets_->skeleton_edges().end()) continue;
+                for (const std::string& nn : {se->second.end1, se->second.end2}) {
+                    if (nn.empty() || !anim_node_pos_.count(nn)) continue;
+                    auto [wx, wy] = resolve_body_node(nn, world_cx, world_cy,
+                                                      facing_right_, pivot_local_y);
+                    cross(wx, wy, {255, 255, 0, 255});
+                    fist_x = wx; fist_y = wy; have_fist = true;
+                }
+            }
+        }
+
         // Numeric readout — the whole point of the overlay.
         char b[256];
         float ty = 90.0f;
@@ -1122,6 +1165,13 @@ private:
         line("enemy   pos=(%.0f, %.0f)   params X=%.0f -> X-W/2=%.0f",
              enemy_pos_x_, enemy_pos_y_, location_->enemy_x,
              location_->enemy_x - half_w);
+        if (have_bag)
+            line("bag     x=%.0f..%.0f y=%.0f..%.0f  collisible edges=%d",
+                 bag_x0, bag_x1, bag_y0, bag_y1, collisible_edges);
+        else
+            line("bag     NOT PLACED (no verlet nodes)");
+        if (have_fist)
+            line("limb    last attacking node at (%.0f, %.0f)", fist_x, fist_y);
         line("anim    '%s' prio=%d finished=%d   move='%s' state=%d",
              current_anim_.c_str(), anim_player_.anim_priority(),
              anim_player_.anim_finished() ? 1 : 0,
@@ -1744,8 +1794,55 @@ private:
             bag_constraints_.push_back(c);
         }
         bag_verlet_init_ = true;
+        // The bag's world box, printed so it can be compared against the
+        // fighter's without a screenshot: an attack has to physically reach it.
+        float bx0 = 0, bx1 = 0, by0 = 0, by1 = 0;
+        bool any = false;
+        for (const auto& [n, v] : bag_verlet_) {
+            (void)n;
+            if (!any) { bx0 = bx1 = v.x; by0 = by1 = v.y; any = true; }
+            bx0 = std::min(bx0, v.x); bx1 = std::max(bx1, v.x);
+            by0 = std::min(by0, v.y); by1 = std::max(by1, v.y);
+        }
+        int collisible = 0;
+        for (const auto& e : assets_->bag_model()->edges)
+            if (e.collisible && e.radius > 0) ++collisible;
         std::printf("  Bag Verlet: %zu nodes, %zu constraints (Node12 fixed)\n",
                     bag_verlet_.size(), bag_constraints_.size());
+        int fixed_nodes = 0;
+        std::string fixed_names;
+        for (const auto& [n, v] : bag_verlet_)
+            if (v.fixed) { ++fixed_nodes; fixed_names += n + " "; }
+        // A node that no constraint touches is in free fall: gravity acts on it
+        // and nothing pulls it back. It never settles, and it drags anything
+        // measured from the node set (including the collision segments) with it.
+        std::string orphans;
+        for (const auto& [n, v] : bag_verlet_) {
+            if (v.fixed) continue;
+            bool referenced = false;
+            for (const auto& c : bag_constraints_)
+                if (c.n1 == n || c.n2 == n) { referenced = true; break; }
+            if (!referenced) orphans += n + " ";
+        }
+        // Such a node is not part of the rope: "COM" is the model's centre-of-
+        // mass marker. Integrating it makes it fall forever (terminal velocity
+        // ~12 world units per frame with Attenuation=0.02), which corrupts
+        // anything measured over the bag's node set. Freeze them instead.
+        if (!orphans.empty()) {
+            std::printf("[BAG] unconstrained nodes frozen (were in free fall): %s\n",
+                        orphans.c_str());
+            for (auto& [n, v] : bag_verlet_) {
+                if (v.fixed) continue;
+                bool referenced = false;
+                for (const auto& c : bag_constraints_)
+                    if (c.n1 == n || c.n2 == n) { referenced = true; break; }
+                if (!referenced) { v.fixed = true; v.inv_mass = 0.0f; }
+            }
+        }
+        std::printf("[BAG] world box x=%.0f..%.0f y=%.0f..%.0f  collisible edges=%d"
+                    "  floor=%.0f  fixed=%d [%s]\n",
+                    bx0, bx1, by0, by1, collisible, floor_world_y_,
+                    fixed_nodes, fixed_names.c_str());
     }
 
     // Apply an impulse to a bag node (called when hit).
@@ -1784,11 +1881,12 @@ private:
             n.y += vy + GRAVITY * dt * dt;
         }
         // 2. Satisfy distance constraints
+        int skipped_missing = 0, skipped_wsum = 0, applied = 0;
         for (int iter = 0; iter < CONSTRAINT_ITERATIONS; ++iter) {
             for (auto& c : bag_constraints_) {
                 auto n1 = bag_verlet_.find(c.n1);
                 auto n2 = bag_verlet_.find(c.n2);
-                if (n1 == bag_verlet_.end() || n2 == bag_verlet_.end()) continue;
+                if (n1 == bag_verlet_.end() || n2 == bag_verlet_.end()) { ++skipped_missing; continue; }
                 auto& a = n1->second;
                 auto& b = n2->second;
                 float dx = b.x - a.x;
@@ -1799,7 +1897,8 @@ private:
                 float w1 = a.inv_mass;
                 float w2 = b.inv_mass;
                 float wsum = w1 + w2;
-                if (wsum < 0.0001f) continue;
+                if (wsum < 0.0001f) { ++skipped_wsum; continue; }
+                ++applied;
                 float f = c.stiffness * diff;
                 a.x += dx * f * (w1 / wsum);
                 a.y += dy * f * (w1 / wsum);
@@ -1807,7 +1906,25 @@ private:
                 b.y -= dy * f * (w2 / wsum);
             }
         }
+        if (dump_state_ && (bag_diag_ticks_++ % 120) == 0) {
+            float worst = 0.0f;
+            std::string worst_name;
+            for (const auto& c : bag_constraints_) {
+                auto n1 = bag_verlet_.find(c.n1);
+                auto n2 = bag_verlet_.find(c.n2);
+                if (n1 == bag_verlet_.end() || n2 == bag_verlet_.end()) continue;
+                const float dx = n2->second.x - n1->second.x;
+                const float dy = n2->second.y - n1->second.y;
+                const float d = std::sqrt(dx * dx + dy * dy) - c.length;
+                if (std::abs(d) > std::abs(worst)) { worst = d; worst_name = c.n1 + "->" + c.n2; }
+            }
+            std::printf("[BAGSOLVE] constraints=%zu applied=%d skipped_missing=%d "
+                        "skipped_wsum=%d worst_violation=%.1f (%s) dt=%.4f\n",
+                        bag_constraints_.size(), applied, skipped_missing, skipped_wsum,
+                        worst, worst_name.c_str(), dt);
+        }
     }
+    int bag_diag_ticks_ = 0;
 
     void render_punching_bag() {
         if (!assets_->bag_model() || !location_) return;
