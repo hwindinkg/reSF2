@@ -71,6 +71,30 @@ worklog.md
 err.txt
 out.txt
 resf2_debug.log
+# Ad-hoc RE scratch output from decoder brute-forcing sessions
+err[0-9]*.txt
+out[0-9]*.txt
+err_*.txt
+sweep*_out.txt
+sweep*_err.txt
+htz_*.txt
+stdout.txt
+stderr.txt
+debug_out.txt
+test_out.txt
+test_output.txt
+forge_decoded.xml
+_forge_compressed.bin
+screenshots/
+screenshots_test/
+
+# ============================================================================
+# Reverse-engineering tools downloaded into the repo
+# ============================================================================
+tools/
+reverse/binaries/
+*.apks
+__pycache__/
 
 # ============================================================================
 # Misc
@@ -84,3 +108,11 @@ work/
 tool-results/
 engine/game/_*.py
 engine/game/_*.ps1
+build_headless/
+sf2_unity_native/
+RE/
+test_dz_decode.cpp
+test_scenario.txt
+assets/animations/assets/
+scripts/*.so
+test21_output.txt

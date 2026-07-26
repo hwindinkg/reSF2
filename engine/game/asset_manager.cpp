@@ -546,11 +546,10 @@ void AssetManager::load_player_weapon(const std::string& tactic, const std::stri
 
 void AssetManager::load_animations(const std::string& asset_root) {
     auto root = std::filesystem::path(asset_root);
+    // [ORIGINAL] Use correct paths — no double "assets"
     std::vector<std::filesystem::path> search_dirs = {
-        root/"assets"/"assets"/"animations"/"binary",
         root/"assets"/"animations"/"binary",
         root/"animations"/"binary",
-        root/"assets"/"assets"/"animations",
         root/"assets"/"animations",
         root/"animations",
     };
@@ -613,11 +612,10 @@ void AssetManager::load_animations(const std::string& asset_root) {
 
 void AssetManager::load_moves(const std::string& asset_root) {
     auto root = std::filesystem::path(asset_root);
+    // [ORIGINAL] Use correct paths — no double "assets"
     std::vector<std::filesystem::path> search_dirs = {
-        root/"assets"/"assets"/"animations",
         root/"assets"/"animations",
         root/"animations",
-        root/"assets"/"assets",
         root/"assets",
     };
 
@@ -986,8 +984,8 @@ void AssetManager::load_texture_atlas_to_hud(
     if (!atlas_px) return;
     for (auto& [name, idx] : result->name_index) {
         auto& frame = result->frames[idx];
-        int fw = frame.atlas_w;
-        int fh = frame.atlas_h;
+        int fw = frame.rotated ? frame.atlas_h : frame.atlas_w;
+        int fh = frame.rotated ? frame.atlas_w : frame.atlas_h;
         auto tex = std::make_unique<ren::Texture2D>();
         std::vector<std::uint8_t> px((size_t)fw * fh * 4);
         for (int y = 0; y < fh; ++y) {
@@ -1067,8 +1065,8 @@ void AssetManager::load_sounds(const std::string& asset_root) {
     auto& eng = aud::AudioEngine::instance();
     eng.init();
     auto root = std::filesystem::path(asset_root);
+    // [ORIGINAL] Use correct paths — no double "assets"
     std::vector<std::filesystem::path> sound_dirs = {
-        root/"assets"/"assets"/"sounds",
         root/"assets"/"sounds",
         root/"sounds",
     };
@@ -1097,8 +1095,8 @@ void AssetManager::load_sounds(const std::string& asset_root) {
 void AssetManager::load_sound(const std::string& name, const std::string& asset_root) {
     auto& eng = aud::AudioEngine::instance();
     auto root = std::filesystem::path(asset_root);
+    // [ORIGINAL] Use correct paths — no double "assets"
     std::vector<std::filesystem::path> search_dirs = {
-        root/"assets"/"assets"/"sounds",
         root/"assets"/"sounds",
         root/"sounds",
     };
@@ -1116,9 +1114,10 @@ void AssetManager::load_sound(const std::string& name, const std::string& asset_
 void AssetManager::load_stages(const std::string& asset_root) {
     if (stages_loaded_) return;
     auto root = std::filesystem::path(asset_root);
-    auto stages_path = root / "assets/files/assets/stages.xml";
+    // [ORIGINAL] Try correct path first, then fallback
+    auto stages_path = root / "assets/stages.xml";
     if (!std::filesystem::exists(stages_path)) {
-        stages_path = root / "assets/stages.xml";
+        stages_path = root / "assets/files/assets/stages.xml";
     }
     if (std::filesystem::exists(stages_path)) {
         auto stages_text = read_text(stages_path.string());

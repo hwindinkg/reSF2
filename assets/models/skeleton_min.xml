@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scene>
+  <Nodes>
+    <NPivot Type="Node" X="0" Y="169.48" Z="0" Mass="1.0" Fixed="0" PinFixed="0" Visible="1" />
+    <NTop Type="Node" X="0" Y="283.48" Z="0" Mass="0.77" Fixed="0" PinFixed="0" Visible="1" />
+    <NHip_1 Type="Node" X="-4.95" Y="171.1" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NHip_2 Type="Node" X="-26.71" Y="167.87" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NKnee_1 Type="Node" X="0" Y="100" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NKnee_2 Type="Node" X="0" Y="100" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NAnkle_1 Type="Node" X="0" Y="50" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NAnkle_2 Type="Node" X="0" Y="50" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NToe_1 Type="Node" X="0" Y="20" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NToe_2 Type="Node" X="0" Y="20" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NShoulder_1 Type="Node" X="0" Y="250" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NShoulder_2 Type="Node" X="0" Y="250" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NElbow_1 Type="Node" X="0" Y="210" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NElbow_2 Type="Node" X="0" Y="210" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NWrist_1 Type="Node" X="0" Y="170" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+    <NWrist_2 Type="Node" X="0" Y="170" Z="0" Mass="0.1" Fixed="0" PinFixed="0" Visible="1" />
+  </Nodes>
+  <Edges>
+    <BODY-Edge1 Type="Edge" End1="NTop" End2="NPivot" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge2 Type="Edge" End1="NPivot" End2="NHip_1" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge3 Type="Edge" End1="NHip_1" End2="NKnee_1" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge4 Type="Edge" End1="NKnee_1" End2="NAnkle_1" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge5 Type="Edge" End1="NAnkle_1" End2="NToe_1" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge6 Type="Edge" End1="NPivot" End2="NHip_2" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge7 Type="Edge" End1="NHip_2" End2="NKnee_2" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge8 Type="Edge" End1="NKnee_2" End2="NAnkle_2" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge9 Type="Edge" End1="NAnkle_2" End2="NToe_2" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge10 Type="Edge" End1="NPivot" End2="NShoulder_1" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge11 Type="Edge" End1="NShoulder_1" End2="NElbow_1" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge12 Type="Edge" End1="NElbow_1" End2="NWrist_1" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge13 Type="Edge" End1="NPivot" End2="NShoulder_2" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge14 Type="Edge" End1="NShoulder_2" End2="NElbow_2" Radius="2" Margin1="0" Margin2="0" />
+    <BODY-Edge15 Type="Edge" End1="NElbow_2" End2="NWrist_2" Radius="2" Margin1="0" Margin2="0" />
+  </Edges>
+</Scene>

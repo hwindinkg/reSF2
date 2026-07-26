@@ -16,7 +16,7 @@ bool g_debug_log_enabled = true;
 
 void debug_log_init(const std::string& path) {
     if (!g_debug_log_enabled) return;
-    fopen_s(&g_debug_log, path.c_str(), "w");
+    g_debug_log = std::fopen(path.c_str(), "w");
     if (g_debug_log) std::fprintf(g_debug_log, "=== reSF2 debug log ===\n");
 }
 
@@ -34,25 +34,70 @@ void debug_log_close() {
 }
 
 std::vector<std::byte> read_file(const std::string& path) {
-    // Try filesystem first
+    // [ORIGINAL] FUN_140308130 — DZ path resolution
+    // Filesystem first
     std::ifstream f(path, std::ios::binary | std::ios::ate);
     if (f) {
         auto sz = (size_t)f.tellg(); if (!sz) return {};
         f.seekg(0); std::vector<std::byte> d(sz);
         f.read((char*)d.data(), (std::streamsize)sz); return d;
     }
+
+    debug_log("[DZ-LOOKUP] Path: %s\n", path.c_str());
+
     // Try DZ archive
     auto& dz = resf2::dz::DzRegistry::instance();
-    std::string rel = path;
-    // Strip asset_root if present
-    auto pos = rel.find("assets/");
-    if (pos != std::string::npos) rel = rel.substr(pos);
-    if (dz.has_file(rel)) return dz.read_file(rel);
+
+    // [ORIGINAL] Original binary: normalize path, extract bare filename after last '\\',
+    // and look up by bare name in the archive's file table.
+    std::string bare_name;
+    auto sep = path.find_last_of("/\\");
+    if (sep != std::string::npos)
+        bare_name = path.substr(sep + 1);
+    else
+        bare_name = path;
+
+    debug_log("[DZ-LOOKUP] Bare name: %s\n", bare_name.c_str());
+
+    // Try bare filename first (matches original binary behavior)
+    if (bare_name != path && dz.has_file(bare_name)) {
+        debug_log("[DZ-LOOKUP] Found by bare name: %s\n", bare_name.c_str());
+        return dz.read_file(bare_name);
+    }
+
+    // Fall back to relative path logic
+    namespace fs = std::filesystem;
+    fs::path p(path);
+    std::string rel;
+    for (auto it = p.begin(); it != p.end(); ++it) {
+        if (it->string() == "assets") {
+            fs::path sub;
+            for (auto it2 = it; it2 != p.end(); ++it2)
+                sub /= *it2;
+            rel = sub.string();
+            break;
+        }
+    }
+    if (rel.empty())
+        rel = path;
+
+    debug_log("[DZ-LOOKUP] Relative path: %s\n", rel.c_str());
+
+    if (dz.has_file(rel)) {
+        debug_log("[DZ-LOOKUP] Found by relative path: %s\n", rel.c_str());
+        return dz.read_file(rel);
+    }
     // Try with "assets/" prefix
     if (rel.substr(0, 7) != "assets/") {
         rel = "assets/" + rel;
-        if (dz.has_file(rel)) return dz.read_file(rel);
+        debug_log("[DZ-LOOKUP] Trying with assets prefix: %s\n", rel.c_str());
+        if (dz.has_file(rel)) {
+            debug_log("[DZ-LOOKUP] Found with assets prefix: %s\n", rel.c_str());
+            return dz.read_file(rel);
+        }
     }
+
+    debug_log("[DZ-LOOKUP] NOT FOUND: %s\n", path.c_str());
     return {};
 }
 
@@ -92,14 +137,11 @@ std::vector<std::filesystem::path> model_paths(const std::string& asset_root, co
     namespace fs = std::filesystem;
     fs::path root(asset_root);
     std::vector<fs::path> paths;
-    // Try all known asset locations from the original game
-    for (const auto& dir : {root/"assets"/"1536"/"models"/"player",
-                            root/"assets"/"models"/"player",
-                            root/"assets"/"1536"/"models",
-                            root/"assets"/"models",
-                            root/"models"}) {
-        auto p = dir / filename;
-        if (fs::exists(p)) paths.push_back(p);
+    // Try known model locations from the original game.
+    // The original game uses assets/models/ directly.
+    for (const auto& dir : {root/"assets"/"models"/filename,
+                            root/"models"/filename}) {
+        if (fs::exists(dir)) paths.push_back(dir);
     }
     return paths;
 }

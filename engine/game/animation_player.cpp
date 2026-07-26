@@ -9,9 +9,18 @@ namespace resf2::game {
 bool AnimationPlayer::play(
     const std::string& name,
     const std::unordered_map<std::string, AnimationData>& animations,
-    float fps, bool loop
+    float fps, bool loop, int priority
 ) {
     if (!animations.count(name)) return false;
+    // Priority check: if existing animation has higher priority, reject new one
+    if (priority < priority_) {
+        if (name != current_anim_) {
+            std::printf("[ANIM] Rejected '%s' (priority %d) — '%s' has higher priority %d\n",
+                        name.c_str(), priority, current_anim_.c_str(), priority_);
+        }
+        return false;
+    }
+    priority_ = priority;
     current_anim_ = name;
     anim_time_ = 0.0f;
     anim_fps_ = fps;
@@ -19,6 +28,9 @@ bool AnimationPlayer::play(
     anim_anchor_set_ = false;
     prev_npivot_set_ = false;
     prev_frame_idx_ = -1;
+    committed_root_x_ = 0.0f;
+    prev_root_offset_x_ = 0.0f;
+    prev_root_offset_y_ = 0.0f;
     return true;
 }
 
@@ -64,7 +76,9 @@ void AnimationPlayer::update(
     if (frame_idx < 0) frame_idx = 0;
 
     int next_idx = (anim.frame_count > 0 && frame_idx < anim.frame_count-1) ? frame_idx+1 : frame_idx;
-    if (anim_loop_ && frame_idx == anim.frame_count-1) next_idx = 0;
+    // [FIX] Don't interpolate last frame with frame 0 — prevents NPivot pull-back
+    // toward start position during loop wrap. Committed root motion below handles
+    // the displacement commit at the wrap point instead.
     float alpha = (next_idx != frame_idx) ? (frame_f - (int)frame_f) : 0.0f;
     if (alpha < 0) alpha = 0; if (alpha > 1) alpha = 1;
 
@@ -75,16 +89,38 @@ void AnimationPlayer::update(
     float npivot_y = npy0 + (npy1-npy0)*alpha;
     anim_npivot_bin_y_ = npivot_y;
 
-    // Root offset
-    float root_offset_x = npivot_x - anim_root_anchor_x_;
-    float root_offset_y = npivot_y - anim_root_anchor_y_;
-    (void)root_offset_x;
-    (void)root_offset_y;
+    // === ROOT MOTION (committed displacement pattern) ===
+    // Absolute NPivot offset from the animation's start anchor.
+    float absolute_offset_x = npivot_x - anim_root_anchor_x_;
+    float absolute_offset_y = npivot_y - anim_root_anchor_y_;
 
-    if (prev_frame_idx_ >= 0 && frame_idx < prev_frame_idx_ && frame_idx == 0)
-        prev_npivot_set_ = false;
+    // Wrap detection: the animation looped from the last frame back to frame 0.
+    // Commit the completed cycle's total displacement so accumulated root motion
+    // doesn't snap back when the animation restarts.
+    if (prev_frame_idx_ >= 0 && frame_idx == 0 && prev_frame_idx_ > frame_idx) {
+        committed_root_x_ += absolute_offset_x;
+
+        // Re-anchor so absolute_offset restarts from 0 for the new cycle.
+        anim_root_anchor_x_ = npivot_x;
+        anim_root_anchor_y_ = npivot_y;
+        absolute_offset_x = 0.0f;
+        absolute_offset_y = 0.0f;
+        prev_root_offset_x_ = 0.0f;
+        prev_root_offset_y_ = 0.0f;
+    }
     prev_frame_idx_ = frame_idx;
 
+    // Per-frame root motion delta = CHANGE in absolute offset since last frame.
+    // This gives smooth per-frame displacement without snap-back at wrap.
+    anim_root_dx_ = absolute_offset_x - prev_root_offset_x_;
+    anim_root_dy_ = absolute_offset_y - prev_root_offset_y_;
+    prev_root_offset_x_ = absolute_offset_x;
+    prev_root_offset_y_ = absolute_offset_y;
+
+    // Accumulate Y root motion for jump/vertical displacement.
+    jump_y_offset_ += anim_root_dy_;
+
+    // Y visual adjustment (smoothed NPivot Y offset for rendering foot placement)
     float target_y_adjust = stance_npivot_y_ - npivot_y;
     if (target_y_adjust < -50) target_y_adjust = -50;
     if (target_y_adjust > 50) target_y_adjust = 50;
@@ -99,15 +135,6 @@ void AnimationPlayer::update(
             anim_node_pos_[ordered_node_names[ni]] = {ix-npivot_x, iy-npivot_y};
         }
     }
-
-    if (prev_npivot_set_) {
-        anim_root_dx_ = npivot_x - prev_npivot_x_;
-        anim_root_dy_ = npivot_y - prev_npivot_y_;
-    }
-    prev_npivot_x_ = npivot_x;
-    prev_npivot_set_ = true;
-    jump_y_offset_ += anim_root_dy_;
-    prev_root_offset_ = root_offset_y;
 }
 
 bool AnimationPlayer::get_node_pos(const std::string& name, float& x, float& y) const {

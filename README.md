@@ -13,7 +13,11 @@ built from analysis of the original ARM (Android) and x86 (PC) binaries.
 
 ### ✅ Завершено
 - **Phase 1** — input handler refactor: 14 accessors добавлены, 12 дублирующих полей удалены, 30+ ссылок заменены, 4 мёртвых HUD/renderer файла удалены
-- **Формат парсеры**: S3E container, plist atlas, ATF tactics, bitmap font, DZ (type 1/2/8)
+- **Формат парсеры**: S3E container, plist atlas, ATF tactics, bitmap font
+- **derbh (.dz) полностью решён** — контейнер + оба кодера (`DZ Coder` 0x004,
+  `ZLib Coder` 0x008) читаются нативно, без `dzip.exe` и без пред-распаковки.
+  Проверено: 120/120 файлов `files.dz` и 557/557 `animations.dz`, байт-в-байт
+  против эталонов (`tests/test_dz_archive`). Разбор — `engine/reverse/dz/README.md`
 - **Verlet physics**: punching bag
 - **Scene manager**: 9 сцен (Boot → Loading → MainMenu → Battle → Results → Shop → Map → Settings → Dialogue)
 - **Компиляция**: MSVC C++23, 24/24 executables (22 test + 2 app), 0 errors, 21/22 tests pass
@@ -22,7 +26,6 @@ built from analysis of the original ARM (Android) and x86 (PC) binaries.
 - **Phase 2** — Binary-Level RE Verification: Ghidra-based верификация функций против бинарника
   - Target A (FUN_101661d0 — ModelAnimation::playInfo): кандидат готов, VERDICT GREEN ✅
   - Targets B/C: ConditionInterval / ConditionCurrentAnimation pipeline — очередь
-- **DZ type-4 decoder**: Известно что сломан (декомпрессия даёт 0x3B вместо 0x3C). Ожидает исследования алгоритма.
 
 ### ❌ Ещё не сделано
 - AI противника (только punching bag)
