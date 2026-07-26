@@ -288,5 +288,46 @@ int main(int argc, char** argv) {
     std::printf("combat: %d frames, %d hit(s), bag rest=%.2f peak=%.2f, last frame %d\n",
                 combat_frames, combat_hits, bag_before, bag_max, last_frame);
 
+    // -------------------------------------------------- tapping walks forward
+    //
+    // Press and release forward every three frames, forty times. This is what
+    // a player does, and it used to walk the fighter BACKWARDS: an interrupted
+    // step gained 11.6 units and the <Align> snap on the following idle took
+    // 19.5 away, because step_forward leaves its heel 49.8 units behind NPivot
+    // while stance_idle wants it 30.3 behind. Net 7.9 backwards per tap, so
+    // spamming the key returned the fighter to where he started.
+    //
+    // A move with no <Align> leaves the model with no current node
+    // (setCurrentNode @ 0x10165c10), so there is nothing to anchor the next
+    // move to — and the steps are exactly the 91 moves with no <Align>.
+    {
+        const std::string script3 = root + "/tests/data/input_spam_forward.txt";
+        const std::string out3 = root + "/build/input_trace_spam.out";
+        const std::string cmd3 = "\"\"" + app + "\" --assets \"" + root +
+                                 "\" --input-script \"" + script3 +
+                                 "\" --max-frames 800 --dump-state --no-log > \"" +
+                                 out3 + "\" 2>&1\"";
+        check(std::system(cmd3.c_str()) == 0, "tap-walk run exited cleanly");
+
+        std::ifstream f4(out3);
+        check(f4.good(), "tap-walk trace was produced");
+        const std::regex re_px(R"(\[STATE\] f=(\d+) .* px=([-\d.]+))");
+        float px_before = 0.0f, px_after = 0.0f;
+        bool have_before = false;
+        std::string l4;
+        while (std::getline(f4, l4)) {
+            std::smatch m4;
+            if (!std::regex_search(l4, m4, re_px)) continue;
+            const int fr = std::stoi(m4[1]);
+            if (fr == 215) { px_before = std::stof(m4[2]); have_before = true; }
+            if (fr >= 215) px_after = std::stof(m4[2]);
+        }
+        check(have_before, "the tap-walk trace reaches the start of the spam");
+        std::printf("  tap-walk: px %.1f -> %.1f (advance %.1f)\n",
+                    px_before, px_after, px_after - px_before);
+        check_ge(px_after - px_before, 150.0,
+                 "tapping forward walks the fighter forward, not back to the start");
+    }
+
     return resf2::test::summary();
 }

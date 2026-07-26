@@ -83,6 +83,11 @@ void Game::play_animation(const std::string& name, bool loop, int priority) {
         anim_time_ = static_cast<float>(first_frame) / anim_fps_;
 
     apply_align(name, move_def, first_frame, prev_anchor_rel_x, prev_anchor_known);
+    // Remember whether the move now playing leaves the model with a current
+    // node, i.e. whether it declares an <Align> pivot. See apply_align().
+    prev_move_had_align_ = move_def && move_def->has_align &&
+                           move_def->align_pivot_object == MoveDef::AlignObject::Nodes &&
+                           !move_def->moveinside_pivot_node.empty();
 
     // Game-side state that AnimationPlayer does not own.
     anim_root_dx_ = 0.0f;
@@ -155,6 +160,25 @@ void Game::apply_align(const std::string& anim_name, const MoveDef* move,
     // targets need the enemy model and the location walls — see PORT_PLAN 4.3.
     if (move->align_position_object != MoveDef::AlignObject::Pivot) return;
     if (!prev_anchor_known) return;   // no previous pose: nothing to anchor to
+
+    // `Position Object="Pivot"` means "where the model's CURRENT NODE is", and
+    // the current node is set by setCurrentNode @ 0x10165c10 from the align
+    // pivot of the move being started — but only when that move HAS one:
+    //
+    //     if (moveInfo->align.pivotID >= 0) { currentNode = nodes[pivotID]; }
+    //     else { currentNode = 0; warn("align.pivotID == -1"); }
+    //
+    // A move with no <Align> therefore leaves the model with NO current node,
+    // and the next move has nothing to anchor to. All 91 such moves are the
+    // steps, so this is exactly the "walk was interrupted" case.
+    //
+    // Anchoring across it anyway is wrong and measurably so: step_forward
+    // leaves its heel 49.8 units behind NPivot while stance_idle wants it 30.3
+    // behind, so every interrupted step yanked the body 19.5 units backwards.
+    // Tapping forward gained 11.6 from the step and lost 19.5 to the snap —
+    // a net 7.9 BACKWARDS per tap, which is why spamming the key walked the
+    // fighter back to where he started.
+    if (!prev_move_had_align_) return;
 
     const auto& animations = assets_->animations();
     auto ait = animations.find(anim_name);
@@ -701,7 +725,31 @@ void Game::host_add_loss() {
 }
 
 void Game::sync_equipped_weapon() {
+    // [ORIGINAL] moves.xml identifies a weapon by its SUBTYPE, and
+    // `TacticWeapon` is a '|'-separated set of them:
+    //     TacticWeapon="Knives|Keris"
+    //     TacticWeapon="Katana|NinjaSword|ShogunKatana"
+    // list.xml gives each item both an id and that subtype:
+    //     <Item Name="WEAPON_KNIVES" Type="Weapon" SubType="Knives" .../>
+    //
+    // The inventory stores the ID, and this used to hand the ID straight to
+    // the move filter — so with a real weapon equipped, `equipped_weapon_` was
+    // "WEAPON_KNIVES", which is in no TacticWeapon set anywhere, and EVERY
+    // move was rejected. The player could not attack at all: the log showed
+    // "cand=0 reject=no_candidate" on every press while the fighter stood
+    // there with his fists, because the weapon MODEL had failed to load too
+    // and left him looking unarmed.
     std::string inv_weapon = inventory_.equipped_weapon();
+            if (!inv_weapon.empty()) {
+                if (const auto* list = host_get_list_data()) {
+                    for (const auto& item : list->items) {
+                        if (item.name == inv_weapon && !item.subtype.empty()) {
+                            inv_weapon = item.subtype;
+                            break;
+                        }
+                    }
+                }
+            }
             if (!inv_weapon.empty() && inv_weapon != equipped_weapon_) {
                 equipped_weapon_ = inv_weapon;
                 // Try to load the weapon model if location is loaded
@@ -716,6 +764,27 @@ void Game::sync_equipped_weapon() {
                     load_player_weapon(equipped_weapon_);
                 }
                 std::printf("[equip] combat weapon reset to Fists\n");
+            }
+
+            // A weapon that matches no move at all leaves the player unable to
+            // attack, which is never a legitimate game state — it means the
+            // subtype mapping above failed for this item. Say so and fall back
+            // to fists rather than handing the player a silent brick.
+            if (assets_ && !assets_->moves().empty()) {
+                int usable = 0;
+                for (const auto& [n, mv] : assets_->moves()) {
+                    (void)n;
+                    if (mv.is_attack && is_weapon_allowed(mv)) ++usable;
+                }
+                if (usable == 0) {
+                    std::fprintf(stderr,
+                        "[equip] '%s' matches no move in moves.xml — falling back to "
+                        "Fists. The inventory item's SubType is missing from "
+                        "list.xml, or its name is not in any TacticWeapon set.\n",
+                        equipped_weapon_.c_str());
+                    equipped_weapon_ = "Fists";
+                    if (location_loaded_) load_player_weapon(equipped_weapon_);
+                }
             }
 }
 
@@ -1624,14 +1693,22 @@ void Game::host_update_gameplay(uint32_t dt) {
         bool block_all_combat = in_attack && !is_uninterrupt_ && !past_attack_interval;
         const MoveDef* best_move = nullptr;
         int candidate_count = 0;
+        // [DIAGNOSTIC] Why a move was rejected, per filter. "cand=0" on its own
+        // says nothing: the whole table can be emptied by any one of a dozen
+        // conditions and the log looked identical every time. With these
+        // counters the reason is on the same line as the symptom.
+        struct Reject {
+            int no_file = 0, titan = 0, move_type = 0, blocked = 0, key_count = 0;
+            int direction = 0, weapon = 0, subtype = 0, cur_anim = 0, self = 0, no_anim = 0;
+        } rej;
         for (auto& [name, move] : assets_->moves()) {
-            if (move.filename.empty() || move.template_name.empty()) continue;
+            if (move.filename.empty() || move.template_name.empty()) { ++rej.no_file; continue; }
             // Skip Titan moves
             {
                 size_t titan_pos = move.template_name.find("Titan");
                 if (titan_pos != std::string::npos) {
                     if (titan_pos < 3 || move.template_name.substr(titan_pos - 3, 3) != "Not") {
-                        continue;
+                        ++rej.titan; continue;
                     }
                 }
             }
@@ -1639,50 +1716,50 @@ void Game::host_update_gameplay(uint32_t dt) {
             // Allow them if they have matching tactic_weapon and no move_type set.
             bool move_type_match = (move.move_type == cur_move_type) ||
                 (move.move_type.empty() && is_weapon_allowed(move) && move.key_count <= 2);
-            if (!move_type_match) continue;
+            if (!move_type_match) { ++rej.move_type; continue; }
 
             if (block_all_combat) {
-                continue;
+                ++rej.blocked; continue;
             } else if (in_attack && is_uninterrupt_) {
                 // In Uninterrupt: only 3key chain combos
-                if (move.key_count != 3) continue;
+                if (move.key_count != 3) { ++rej.key_count; continue; }
                 if (!move.required_current_animation.empty()) {
-                    if (current_move_ != move.required_current_animation) continue;
+                    if (current_move_ != move.required_current_animation) { ++rej.cur_anim; continue; }
                 }
             } else if (in_attack && past_attack_interval) {
                 // Past attack interval: allow 1key/2key to interrupt recovery
-                if (move.key_count == 3) continue;
+                if (move.key_count == 3) { ++rej.key_count; continue; }
             } else {
-                if (move.key_count == 3) continue;
+                if (move.key_count == 3) { ++rej.key_count; continue; }
             }
             // Match direction
-            if (move.direction != cur_direction) continue;
+            if (move.direction != cur_direction) { ++rej.direction; continue; }
             // Match weapon by tactic_weapon (empty = any weapon)
-            if (!is_weapon_allowed(move)) continue;
+            if (!is_weapon_allowed(move)) { ++rej.weapon; continue; }
             // Check distance condition (only from main <Conditions>, not <Tactics>)
             // Note: <Tactics><Distance> is for AI move selection, not player.
             // We skip distance check entirely — player can attack at any distance.
             // (The original game uses distance only for AI tactic selection.)
             // Check weapon subtype lock (from <Locks><Item SubType="...">)
             if (!move.required_weapon_subtype.empty() &&
-                move.required_weapon_subtype.find(equipped_weapon_) == std::string::npos) continue;
+                move.required_weapon_subtype.find(equipped_weapon_) == std::string::npos) { ++rej.subtype; continue; }
             // [ORIGINAL] CurrentAnimation condition check.
             // PC source: sf2.js np.isEqual() (line 42544) - 3key combos
             // require the current animation to match a specific name.
             // e.g., DoublePunch requires CurrentAnimation="HeavyPunch".
             // The Name in moves.xml matches the Move Name (not filename).
             if (!move.required_current_animation.empty()) {
-                if (current_move_ != move.required_current_animation) continue;
+                if (current_move_ != move.required_current_animation) { ++rej.cur_anim; continue; }
             }
             // Prevent a move from chaining into itself (same move can't restart).
             // Without this, moves with empty required_current_animation can
             // be re-triggered during their own uninterrupt window.
-            if (move.name == current_move_) continue;
+            if (move.name == current_move_) { ++rej.self; continue; }
             // Check if animation exists
             std::string anim_name = move.filename;
             if (anim_name.size() > 4 && anim_name.substr(anim_name.size()-4) == ".bin")
                 anim_name = anim_name.substr(0, anim_name.size()-4);
-            if (!assets_->animations().count(anim_name)) continue;
+            if (!assets_->animations().count(anim_name)) { ++rej.no_anim; continue; }
             // [DIAGNOSTIC] This move passed all filters — count it.
             ++candidate_count;
             // Select by highest priority
@@ -1730,7 +1807,10 @@ void Game::host_update_gameplay(uint32_t dt) {
             // [DIAGNOSTIC] No candidate found — log structured reject.
             std::printf("[INPUT_DECISION] f=%llu btn=%s keys_down=%s%s%s%s just=%s%s "
                         "face=%d dir=%s ms=%d anim='%s' move='%s' hit=%u unint=%d "
-                        "basic=%d cand=%d sel='' reject=no_candidate\n",
+                        "basic=%d cand=%d sel='' reject=no_candidate "
+                        "| rejected by: file=%d titan=%d type=%d blocked=%d keys=%d "
+                        "dir=%d weapon=%d subtype=%d curanim=%d self=%d noanim=%d "
+                        "(weapon='%s')\n",
                         (unsigned long long)total_frame_count_,
                         punch_pressed ? "O" : "P",
                         key_up?"W":"", key_down?"S":"", key_left?"A":"", key_right?"D":"",
@@ -1738,7 +1818,11 @@ void Game::host_update_gameplay(uint32_t dt) {
                         (int)facing_right_, cur_direction.c_str(), move_state_,
                         current_anim_.c_str(), current_move_.c_str(),
                         hit_anim_, is_uninterrupt_?1:0, (int)(in_attack && !is_uninterrupt_),
-                        candidate_count);
+                        candidate_count,
+                        rej.no_file, rej.titan, rej.move_type, rej.blocked,
+                        rej.key_count, rej.direction, rej.weapon, rej.subtype,
+                        rej.cur_anim, rej.self, rej.no_anim,
+                        equipped_weapon_.c_str());
             debug_log("[MOVE] f=%llu %s dir=%s -> NO CANDIDATE (cand=%d ms=%d hit=%u unint=%d)\n",
                 (unsigned long long)total_frame_count_, cur_move_type.c_str(),
                 cur_direction.c_str(), candidate_count, move_state_, hit_anim_, is_uninterrupt_?1:0);
