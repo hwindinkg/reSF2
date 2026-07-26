@@ -126,7 +126,9 @@ struct MoveDef {
         std::string name;
         float start = 0;
         float end = 0;
-        int damage = 0;
+        int damage = 0;         // flat Damage="" attribute form
+        float damage_value = 0; // nested <Damage Value=""/> form, which is what
+                                // moves.xml uses
         float impulse_x = 0;
         float impulse_y = 0;
         std::string hit_type;

@@ -2043,11 +2043,16 @@ void Game::host_update_gameplay(uint32_t dt) {
 
     // [DIAGNOSTIC] Structured frame state dump (--dump-state)
     if (dump_state_) {
+        // af/fps make the animation clock observable, which is what timing
+        // assertions need: moves.xml gives MidFrames (fps = 60/(1+MidFrames)),
+        // FirstFrame (where playback starts) and the Attack interval in frame
+        // numbers, so a test can check the engine honours all three.
         std::printf("[STATE] f=%llu ms=%d ha=%u anim='%s' move='%s' px=%.1f py=%.1f "
-                    "bag_hit=%d bag_angle=%.3f nv=%zu\n",
+                    "af=%.2f fps=%.2f bag_hit=%d bag_angle=%.3f nv=%zu\n",
                     (unsigned long long)total_frame_count_, move_state_, hit_anim_,
                     current_anim_.c_str(), current_move_.c_str(),
                     player_pos_x_, player_pos_y_,
+                    anim_time_ * anim_fps_, anim_fps_,
                     (int)hit_this_interval_, bag_angle_, bag_verlet_.size());
     }
 }

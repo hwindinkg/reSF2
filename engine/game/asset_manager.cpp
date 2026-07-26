@@ -750,30 +750,83 @@ void AssetManager::load_moves(const std::string& asset_root) {
                         move.required_current_animation = cond.attr("Name");
                     }
                 }
-            } else if (sub.name == "Interval") {
-                // Full interval parsing for the vector
-                MoveDef::Interval iv;
-                iv.type = sub.attr("Type");
-                iv.name = sub.attr("Name");
-                iv.start = tof(sub.attr("Start"));
-                iv.end = tof(sub.attr("End"));
-                iv.damage = (int)tof(sub.attr("Damage"));
-                iv.impulse_x = tof(sub.attr("ImpulseX"));
-                iv.impulse_y = tof(sub.attr("ImpulseY"));
-                iv.hit_type = sub.attr("HitType");
+            } else if (sub.name == "Intervals" || sub.name == "Interval") {
+                // [ORIGINAL] moves.xml nests the intervals:
+                //   <Intervals>
+                //     <Interval Name="Uninterrupt" End="9"/>
+                //     <Interval Type="Block" Start="10"/>
+                //     <Interval Type="Attack" Start="4" End="5">
+                //       <AttackingParts><Edge Name="EForearm_2"/>...</AttackingParts>
+                //       <Damage Value="0.11"><Damage Type="UnarmedDamage" Shift="-10"/></Damage>
+                //       <Impulse X="245" Y="0" Z="0"/>
+                //       <Hit Name="High"/>
+                //     </Interval>
+                //   </Intervals>
+                //
+                // The loop this branch lives in walks the direct children of
+                // <Move>, so it only ever saw <Intervals> — and there was no
+                // case for it. Every attack, block and uninterrupt window in
+                // the game was therefore parsed as "absent": 359 moves in
+                // moves.xml declare an attack interval and none of them
+                // reached MoveDef.
+                const auto& interval_nodes = (sub.name == "Intervals")
+                                                 ? sub.children
+                                                 : std::vector<fmt::XmlNode>{};
+                auto parse_interval = [&](const fmt::XmlNode& node) {
+                    MoveDef::Interval iv;
+                    iv.type = node.attr("Type");
+                    iv.name = node.attr("Name");
+                    iv.start = tof(node.attr("Start"));
+                    // [ORIGINAL] A missing End means "to the end of the
+                    // animation" — e.g. <Interval Type="Block" Start="10"/>
+                    // and 44 of the Attack intervals in moves.xml. Reading it
+                    // as 0 turns those into an empty window that can never
+                    // fire, so absence is recorded as -1.
+                    const std::string end_s = node.attr("End");
+                    iv.end = end_s.empty() ? -1.0f : tof(end_s);
+                    // Flat form kept for any file that uses it.
+                    iv.damage = (int)tof(node.attr("Damage"));
+                    iv.impulse_x = tof(node.attr("ImpulseX"));
+                    iv.impulse_y = tof(node.attr("ImpulseY"));
+                    iv.hit_type = node.attr("HitType");
 
-                std::string edges_str = sub.attr("Edges");
-                size_t epos2 = 0;
-                while (epos2 < edges_str.size()) {
-                    auto comma = edges_str.find(',', epos2);
-                    if (comma == std::string::npos) { iv.edges.push_back(edges_str.substr(epos2)); break; }
-                    iv.edges.push_back(edges_str.substr(epos2, comma - epos2));
-                    epos2 = comma + 1;
+                    std::string edges_str = node.attr("Edges");
+                    size_t epos2 = 0;
+                    while (epos2 < edges_str.size()) {
+                        auto comma = edges_str.find(',', epos2);
+                        if (comma == std::string::npos) {
+                            iv.edges.push_back(edges_str.substr(epos2));
+                            break;
+                        }
+                        iv.edges.push_back(edges_str.substr(epos2, comma - epos2));
+                        epos2 = comma + 1;
+                    }
+                    // Nested form, which is what moves.xml actually uses.
+                    for (const auto& kid : node.children) {
+                        if (kid.name == "AttackingParts") {
+                            for (const auto& e : kid.children)
+                                if (e.name == "Edge") iv.edges.push_back(e.attr("Name"));
+                        } else if (kid.name == "Damage") {
+                            iv.damage_value = tof(kid.attr("Value"));
+                        } else if (kid.name == "Impulse") {
+                            iv.impulse_x = tof(kid.attr("X"));
+                            iv.impulse_y = tof(kid.attr("Y"));
+                        } else if (kid.name == "Hit") {
+                            iv.hit_type = kid.attr("Name");
+                        } else if (kid.name == "ComplexInterval") {
+                            iv.condition_anim = kid.attr("CurrentAnimation");
+                        }
+                    }
+                    if (auto* ci = node.first_child("ComplexInterval"))
+                        iv.condition_anim = ci->attr("CurrentAnimation");
+                    move.intervals.push_back(iv);
+                };
+                if (sub.name == "Interval") {
+                    parse_interval(sub);
+                } else {
+                    for (const auto& node : interval_nodes)
+                        if (node.name == "Interval") parse_interval(node);
                 }
-                if (auto* ci = sub.first_child("ComplexInterval")) {
-                    iv.condition_anim = ci->attr("CurrentAnimation");
-                }
-                move.intervals.push_back(iv);
             } else if (sub.name == "IgnoresInvulnerable") {
                 move.ignores_invulnerable = sub.attr("Name");
             } else if (sub.name == "Actions") {
@@ -789,15 +842,26 @@ void AssetManager::load_moves(const std::string& asset_root) {
         }
 
         // Populate backward-compat fields from first interval of each type
+        // [ORIGINAL] moves.xml keys Attack and Block off Type= and the rest off
+        // Name=. The previous predicate demanded Type="Attack" AND
+        // Name="Attack" at the same time, which no interval in the file
+        // satisfies, so it never fired even for the moves whose <Intervals>
+        // block did get read.
         for (auto& iv : move.intervals) {
-            if (iv.type == "Attack" && iv.name == "Attack") {
-                if (move.attack_start < 0) move.attack_start = (int)iv.start;
-                if (move.attack_end <= 0) move.attack_end = (int)iv.end;
+            if (iv.type == "Attack") {
+                if (move.attack_start < 0) {
+                    move.attack_start = (int)iv.start;
+                    move.attack_end = (int)iv.end;
+                    if (move.attack_edges.empty()) move.attack_edges = iv.edges;
+                    if (move.damage == 0.0f) move.damage = iv.damage_value;
+                    if (move.impulse_x == 0.0f) move.impulse_x = iv.impulse_x;
+                    if (move.impulse_y == 0.0f) move.impulse_y = iv.impulse_y;
+                }
+            } else if (iv.type == "Block" || iv.name == "Block") {
+                if (move.block_start < 0) move.block_start = (int)iv.start;
             } else if (iv.name == "Uninterrupt") {
                 if (move.uninterrupt_start < 0) move.uninterrupt_start = (int)iv.start;
                 if (move.uninterrupt_end < 0) move.uninterrupt_end = (int)iv.end;
-            } else if (iv.name == "Block") {
-                if (move.block_start < 0) move.block_start = (int)iv.start;
             }
         }
 
