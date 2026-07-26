@@ -132,6 +132,27 @@ if(RESF2_BUILD_RUNTIME)
     set_target_properties(resf2_app PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${RESF2_RUNTIME_OUTPUT_DIR}"
     )
+
+    # Integration trace: drive the real app with a scripted input sequence and
+    # assert on the animation state machine it produces. Registered here rather
+    # than in tests/ because resf2_app does not exist yet at that point.
+    #
+    # This is the check that was missing while the fighter froze on the last
+    # frame of the intro stance and walking was refused outright. Both gates
+    # that can refuse an animation print "[ANIM] Rejected", so any refusal
+    # fails the test, and the fighter is required to reach the idle stance.
+    if(RESF2_BUILD_TESTS)
+        add_test(NAME test_input_trace
+                 COMMAND resf2_app
+                         --assets "${CMAKE_SOURCE_DIR}"
+                         --input-script "${CMAKE_SOURCE_DIR}/tests/data/input_idle_walk_punch.txt"
+                         --max-frames 400 --dump-state --no-log
+                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        set_tests_properties(test_input_trace PROPERTIES
+            FAIL_REGULAR_EXPRESSION "\\[ANIM\\] Rejected"
+            PASS_REGULAR_EXPRESSION "anim='stance_idle'"
+            TIMEOUT 120)
+    endif()
 endif()
 
 # Port removed

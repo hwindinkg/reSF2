@@ -1122,7 +1122,10 @@ private:
         line("enemy   pos=(%.0f, %.0f)   params X=%.0f -> X-W/2=%.0f",
              enemy_pos_x_, enemy_pos_y_, location_->enemy_x,
              location_->enemy_x - half_w);
-        line("anim    %s", current_move_.c_str());
+        line("anim    '%s' prio=%d finished=%d   move='%s' state=%d",
+             current_anim_.c_str(), anim_player_.anim_priority(),
+             anim_player_.anim_finished() ? 1 : 0,
+             current_move_.c_str(), move_state_);
         (void)sx;
     }
 
