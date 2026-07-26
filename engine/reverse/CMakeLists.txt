@@ -19,7 +19,6 @@ add_library(resf2_reverse STATIC
     bitmap_font.cpp
     dz_reader.cpp
     dz_coder.cpp
-    dz_decoder.cpp
     name_utils.cpp
     conditions.cpp
 )

@@ -595,6 +595,8 @@ private:
     // 560 — everything came out 1.27x too small and vertically off-centre.
     void update_camera() {
         cam_y_ = 0.0f;
+        if (location_)
+            floor_world_y_ = -location_->height * 0.5f + location_->floor;
         if (!location_ || location_->height <= 0.0f || !platform_) {
             zoom_ = 1.0f;
             cam_x_ = player_pos_x_;
@@ -918,9 +920,35 @@ private:
         // Check if this node has an animated position (from .bin animation)
         auto ait = anim_node_pos_.find(name);
         if (ait != anim_node_pos_.end()) {
+            // [ORIGINAL] .bin animations are authored in the location's own
+            // vertical space, with the floor at y = 0. Vertical placement is
+            // therefore taken straight from the animation and NOT from
+            // player_pos_y / y_adjust:
+            //
+            //     world_y = floor_world_y + absolute_animation_y
+            //
+            // AnimationPlayer stores {ix - npivot_x, iy - npivot_y}, so the
+            // absolute Y is recovered as ly + anim_npivot_bin_y(). X stays
+            // pivot-relative so the fighter follows player_pos_x.
+            //
+            // Verified over every frame of four animations (floor_world_y_ =
+            // -Height/2 + Floor = -200 on dojo), lowest foot node:
+            //     fists1_stance_idle  -201.3 .. -201.2   (flat, 38 frames)
+            //     stance_idle         -199.2 .. -199.1   (flat, 79 frames)
+            //     stance_2            -200.6 .. -194.0   (lunge)
+            //     jump                -202.5 ..   -4.0   (leaves the ground)
+            // The jump arc falls out for free — it is in the animation data.
+            //
+            // The previous code did `world_cy + (ly - pivot_local_y)`, i.e. it
+            // subtracted the rest pivot (169.48) from an already pivot-relative
+            // value, and then tried to patch it with y_adjust (clamped to +-50).
+            // That is what put the fighter under the floor. For the same four
+            // animations it produced -102.8, -134.3, -208.7 and -218.7 — the
+            // idle poses floated 66-100 units above the floor and every
+            // animation landed at a different height.
             float lx = ait->second.first, ly = ait->second.second;
             float sx = (face_right ? lx : -lx) * 1.0f;
-            float sy = world_cy + (ly - pivot_local_y) * 1.0f;
+            float sy = floor_world_y_ + (ly + anim_player_.anim_npivot_bin_y());
             return {world_cx + sx, sy};
         }
 
@@ -2775,6 +2803,11 @@ private:
     float cam_x_ = 0, cam_y_ = 0;
     // Debug world overlay, toggled with F1 or started with --debug-world.
     bool debug_world_ = false;
+    // [ORIGINAL] Floor plane of the current location: -Height/2 + Floor
+    // (Location::load, ShadowFight2.s86 FUN_10144420: +0x3c Height, +0x2c Floor).
+    // Animations are authored with their floor at y = 0, so this is the datum
+    // every animated node's Y is measured from.
+    float floor_world_y_ = 0.0f;
     bool facing_right_ = true;
     uint32_t& hit_anim_ = combat_.mutable_hit_anim();  // ms remaining
     uint32_t& step_cooldown_ = combat_.mutable_step_cooldown();

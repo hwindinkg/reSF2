@@ -155,6 +155,20 @@ target_link_libraries(test_location_parser PRIVATE
 target_compile_features(test_location_parser PRIVATE cxx_std_23)
 add_test(NAME test_location_parser COMMAND test_location_parser WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# World/model placement invariants against the real shipped assets.
+# This is the check that was missing while the fighter rendered 138 world
+# units below the floor and the suite still reported all green.
+add_executable(test_world_geometry
+    test_world_geometry.cpp
+)
+target_link_libraries(test_world_geometry PRIVATE
+    resf2_format
+    resf2_warnings
+)
+target_compile_features(test_world_geometry PRIVATE cxx_std_23)
+add_test(NAME test_world_geometry COMMAND test_world_geometry "${CMAKE_SOURCE_DIR}"
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # derbh (.dz) archive end-to-end test: DZ Coder + ZLib Coder against the
 # shipped archives, byte-compared with the extracted references in assets/.
 add_executable(test_dz_archive
@@ -168,49 +182,9 @@ target_compile_features(test_dz_archive PRIVATE cxx_std_23)
 add_test(NAME test_dz_archive COMMAND test_dz_archive "${CMAKE_SOURCE_DIR}"
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-# DZ decoder utility unit tests (bit tree, CRC32)
-add_executable(test_dz_decoder_util
-    test_dz_decoder_util.cpp
-)
-target_link_libraries(test_dz_decoder_util PRIVATE
-    resf2_reverse
-    resf2_warnings
-)
-target_compile_features(test_dz_decoder_util PRIVATE cxx_std_23)
-add_test(NAME test_dz_decoder_util COMMAND test_dz_decoder_util)
 
-# DZ first-byte debug tracer
-add_executable(test_dz_first_byte
-    test_dz_first_byte.cpp
-)
-target_link_libraries(test_dz_first_byte PRIVATE
-    resf2_reverse
-    resf2_warnings
-)
-target_compile_features(test_dz_first_byte PRIVATE cxx_std_23)
-add_test(NAME test_dz_first_byte COMMAND test_dz_first_byte WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-# DZ probability layout analysis
-add_executable(test_dz_prob_layout
-    test_dz_prob_layout.cpp
-)
-target_link_libraries(test_dz_prob_layout PRIVATE
-    resf2_reverse
-    resf2_warnings
-)
-target_compile_features(test_dz_prob_layout PRIVATE cxx_std_23)
-add_test(NAME test_dz_prob_layout COMMAND test_dz_prob_layout)
 
-# DZ RangeSettings parser unit test
-add_executable(test_dz_range_settings
-    test_dz_range_settings.cpp
-)
-target_link_libraries(test_dz_range_settings PRIVATE
-    resf2_reverse
-    resf2_warnings
-)
-target_compile_features(test_dz_range_settings PRIVATE cxx_std_23)
-add_test(NAME test_dz_range_settings COMMAND test_dz_range_settings)
 
 # T-08: Weapon content loading tests
 add_executable(test_weapon_loading
@@ -225,16 +199,6 @@ target_link_libraries(test_weapon_loading PRIVATE
 target_compile_features(test_weapon_loading PRIVATE cxx_std_23)
 add_test(NAME test_weapon_loading COMMAND test_weapon_loading WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-# DZ decoder test against real .dz block data
-add_executable(test_dz_decode
-    test_dz_decode.cpp
-)
-target_link_libraries(test_dz_decode PRIVATE
-    resf2_reverse
-    resf2_warnings
-)
-target_compile_features(test_dz_decode PRIVATE cxx_std_23)
-add_test(NAME test_dz_decode COMMAND test_dz_decode WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # T-07: Save/Load System
 add_executable(test_save_system
