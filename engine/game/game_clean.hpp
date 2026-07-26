@@ -2342,6 +2342,55 @@ private:
         aud::AudioEngine::instance().play(name, volume, false);
     }
 
+    // Decode one UTF-8 code point at `i`, advancing it. Falls back to CP1251
+    // for a lead byte with no continuation, matching render_text.
+    std::int32_t next_codepoint(const std::string& text, size_t& i) const {
+        const auto b0 = static_cast<std::uint8_t>(text[i]);
+        auto cont = [&](size_t k) {
+            return i + k < text.size() &&
+                   (static_cast<std::uint8_t>(text[i + k]) & 0xC0) == 0x80;
+        };
+        std::int32_t cp = b0;
+        size_t adv = 1;
+        if (b0 >= 0xF0 && cont(1) && cont(2) && cont(3)) {
+            cp = ((b0 & 0x07) << 18) |
+                 ((static_cast<std::uint8_t>(text[i + 1]) & 0x3F) << 12) |
+                 ((static_cast<std::uint8_t>(text[i + 2]) & 0x3F) << 6) |
+                 (static_cast<std::uint8_t>(text[i + 3]) & 0x3F);
+            adv = 4;
+        } else if (b0 >= 0xE0 && cont(1) && cont(2)) {
+            cp = ((b0 & 0x0F) << 12) |
+                 ((static_cast<std::uint8_t>(text[i + 1]) & 0x3F) << 6) |
+                 (static_cast<std::uint8_t>(text[i + 2]) & 0x3F);
+            adv = 3;
+        } else if (b0 >= 0xC0 && cont(1)) {
+            cp = ((b0 & 0x1F) << 6) |
+                 (static_cast<std::uint8_t>(text[i + 1]) & 0x3F);
+            adv = 2;
+        } else if (b0 >= 0xC0) {
+            cp = 0x0410 + (b0 - 0xC0);
+        }
+        i += adv;
+        return cp;
+    }
+
+    // Advance width and tallest glyph of `text`. Callers used to measure by
+    // iterating bytes, which double-counts every Cyrillic letter in UTF-8 and
+    // made anything centred on a localized string come out wrong.
+    std::pair<float, float> measure_text(const std::string& text, float scale) const {
+        if (!assets_->hud_font()) return {0.0f, 0.0f};
+        float w = 0.0f, h = 0.0f;
+        for (size_t i = 0; i < text.size(); ) {
+            const std::int32_t cp = next_codepoint(text, i);
+            auto it = assets_->hud_font()->char_index.find(cp);
+            if (it == assets_->hud_font()->char_index.end()) continue;
+            const auto& ch = assets_->hud_font()->chars[it->second];
+            w += ch.xadvance * scale;
+            h = std::max(h, static_cast<float>(ch.height) * scale);
+        }
+        return {w, h};
+    }
+
     void render_text(const std::string& text, float x, float y,
                      float scale, ren::Color4B color) {
         if (!assets_->hud_font() || !assets_->hud_font_tex()) return;
@@ -2506,17 +2555,12 @@ private:
             if (lit != assets_->scroll_textures().end() && cit != assets_->scroll_textures().end() &&
                 rit != assets_->scroll_textures().end()) {
                 float cap_w = roll_h * lit->second->width() / lit->second->height();
-                // Measure "MENU" text width at scale 0.22
-                float text_w = 0.0f;
-                if (assets_->hud_font()) {
-                    for (char c : std::string("MENU")) {
-                        std::int32_t cp = (std::uint8_t)c;
-                        auto it = assets_->hud_font()->char_index.find(cp);
-                        if (it != assets_->hud_font()->char_index.end()) {
-                            text_w += assets_->hud_font()->chars[it->second].xadvance * 0.22f;
-                        }
-                    }
-                }
+                // [ORIGINAL] The label is the localized string, not the Latin
+                // literal "MENU": assets/localizations/rus.xml has
+                // <Word Title="menu">МЕНЮ</Word>.
+                const std::string menu_label =
+                    localized("menu").empty() ? std::string("MENU") : localized("menu");
+                const auto [text_w, text_h] = measure_text(menu_label, 0.22f);
                 float roll_w = text_w + 2 * cap_w + 16.0f;  // text + caps + padding
                 float center_w = roll_w - 2 * cap_w;
                 // Fade out the collapsed roll as menu expands
@@ -2525,26 +2569,16 @@ private:
                 renderer_->draw_textured_quad_screen(*lit->second, btn_x, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
                 renderer_->draw_textured_quad_screen(*cit->second, btn_x + cap_w, btn_y, center_w, roll_h, 0,0,1,1, roll_col);
                 renderer_->draw_textured_quad_screen(*rit->second, btn_x + cap_w + center_w, btn_y, cap_w, roll_h, 0,0,1,1, roll_col);
-                // Center "MENU" text on the roll
+                // Centre the label on the roll.
                 ren::Color4B text_col{255, 240, 200, (uint8_t)(alpha * 255)};
                 float text_x = btn_x + (roll_w - text_w) / 2.0f;
-                // Measure actual text height for vertical centering
-                float text_h = 0.0f;
-                if (assets_->hud_font()) {
-                    for (char c : std::string("MENU")) {
-                        std::int32_t cp = (std::uint8_t)c;
-                        auto it = assets_->hud_font()->char_index.find(cp);
-                        if (it != assets_->hud_font()->char_index.end()) {
-                            text_h = std::max(text_h, (float)assets_->hud_font()->chars[it->second].height * 0.22f);
-                        }
-                    }
-                }
                 float text_y = btn_y + (roll_h - text_h) / 2.0f;
-                render_text("MENU", text_x, text_y, 0.22f, text_col);
+                render_text(menu_label, text_x, text_y, 0.22f, text_col);
             } else {
                 ren::Color4B bg{60, 40, 20, 230};
                 renderer_->draw_filled_rect_screen(btn_x, btn_y, 120, roll_h, bg);
-                render_text("MENU", btn_x + 40, btn_y + 12, 0.22f, {255, 240, 200, 255});
+                render_text(localized("menu").empty() ? std::string("MENU") : localized("menu"),
+                            btn_x + 40, btn_y + 12, 0.22f, {255, 240, 200, 255});
             }
         }
 
