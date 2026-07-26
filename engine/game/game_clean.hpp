@@ -268,6 +268,8 @@ bool host_render_battle_icon(const std::string& icon, int state,
 bool host_render_battle_preview(const std::string& location,
                                 float x, float y, float w, float h) override;
 void host_render_scroll_panel(float x, float y, float w, float h) override;
+bool host_render_ui_texture(const std::string& name,
+                            float x, float y, float w, float h) override;
 void host_render_top_panel() override;
 std::string host_localized(const std::string& key) const override { return localized(key); }
 std::pair<float, float> host_measure_text(const std::string& text, float scale) const override {
@@ -687,9 +689,22 @@ private:
             // Implementation: shift the layer's X by -cam_x_ * (1 - factor).
             // When the camera moves right (cam_x_ increases), the layer shifts left
             // by (1-factor)*cam_x_, creating the parallax effect.
+            // A layer at depth `factor` must appear to move at `factor` times
+            // the camera's rate. Its screen position is
+            //     (draw_world_x - cam_x) * zoom
+            // and for that to change by -factor * dcam the layer has to be
+            // drawn at
+            //     draw_world_x = img.x + (1 - factor) * cam_x
+            //
+            // The sign used to be the other way round, which moved background
+            // layers AWAY from the camera at (1-factor) times its speed
+            // instead of towards it. On dojo that put the two 512-wide
+            // background plates at world 88 and 599 while the camera was
+            // looking at [-878, 118] — the background simply was not on
+            // screen, which is why the location looked like it had no sky.
             float parallax_factor = layer.factor;
             if (parallax_factor <= 0.0f) parallax_factor = 1.0f;
-            float parallax_shift = (1.0f - parallax_factor) * cam_x_;
+            float parallax_shift = -(1.0f - parallax_factor) * cam_x_;
 
                         if (!loc_logged) {
                 std::printf("[LOC] layer: type=%d factor=%.2f atlas=%s images=%zu\n",
@@ -699,9 +714,10 @@ private:
 
             for (auto& img : layer.images) {
                 if (!loc_logged) {
-                    std::printf("[LOC]   img: cls='%s' x=%.0f y=%.0f w=%.0f h=%.0f color='%s'\n",
+                    std::printf("[LOC]   img: cls='%s' x=%.0f y=%.0f w=%.0f h=%.0f "
+                                "parallax=%.1f color='%s'\n",
                                 img.class_name.c_str(), img.x, img.y, img.w, img.h,
-                                img.color.c_str());
+                                parallax_shift, img.color.c_str());
                 }
                 if (img.class_name == "pixel_1" && !img.color.empty()) {
                     unsigned long col = std::stoul(img.color, nullptr, 16);
@@ -788,6 +804,37 @@ private:
                 float img_off_x = (float)frame.offset_x;
                 float img_off_y = (float)frame.offset_y;
 
+                // [ORIGINAL] Atlas frames are TRIMMED. The plist records the
+                // untrimmed size (`sourceSize`), the trimmed rectangle that is
+                // actually stored (`frame`), and `offset` — how far the trimmed
+                // rectangle's centre sits from the untrimmed centre, in
+                // untrimmed pixels with Y pointing up. params.xml's
+                // Width/Height are the size of the UNTRIMMED sprite.
+                //
+                //   dojo layer_3_1 (the floor):  sourceSize 256x64,
+                //                                frame 256x60, offset {0,-2}
+                //   dojo left:                   sourceSize  80x512,
+                //                                frame  70x512, offset {-5,0}
+                //
+                // Drawing the trimmed pixels stretched over the untrimmed box
+                // — which is what this did — makes every trimmed sprite both
+                // the wrong size and in the wrong place: the floor planks came
+                // out 4/64 too tall and the side walls 10/80 too wide.
+                const float src_w = frame.source_size_w > 0
+                                        ? (float)frame.source_size_w : img.w;
+                const float src_h = frame.source_size_h > 0
+                                        ? (float)frame.source_size_h : img.h;
+                const float frame_scale_x = (src_w > 0.0f) ? img.w / src_w : 1.0f;
+                const float frame_scale_y = (src_h > 0.0f) ? img.h / src_h : 1.0f;
+                // pixel_1 is a 1x1 dot deliberately stretched to a big filler
+                // rectangle by params.xml; leave that case alone.
+                const bool stretch_dot = (frame.source_size_w <= 1 &&
+                                          frame.source_size_h <= 1);
+                const float quad_w_trim = stretch_dot
+                        ? img.w : (float)frame.atlas_w * frame_scale_x;
+                const float quad_h_trim = stretch_dot
+                        ? img.h : (float)frame.atlas_h * frame_scale_y;
+
                 // [ORIGINAL] A <SimpleEffect> carries its own alpha curve;
                 // SimpleEffect::update @ 0x1007f1f0 applies it as
                 // setOpacity((int)(value * 2.55) & 0xff). A plain <Image> has
@@ -803,10 +850,12 @@ private:
                 if (atlas.cropped.count(crop_name)) {
                     // Use pre-cropped texture (already un-rotated)
                     auto& ctex = atlas.cropped[crop_name];
-                    float world_y = -img.y - img_off_y;
-                    float world_x = img.x + img_off_x - parallax_shift;
-                    float quad_w = img.w;
-                    float quad_h = img.h;
+                    // params Y points down and the world is Y-up, hence -img.y;
+                    // the plist offset is already Y-up, so it adds directly.
+                    float world_y = -img.y + img_off_y * frame_scale_y;
+                    float world_x = img.x + img_off_x * frame_scale_x - parallax_shift;
+                    float quad_w = quad_w_trim;
+                    float quad_h = quad_h_trim;
                     float px = world_x - quad_w / 2.0f;
                     float py = world_y - quad_h / 2.0f;
                     renderer_->draw_textured_quad(*ctex, px, py,
@@ -822,12 +871,22 @@ private:
                 float v0 = frame.atlas_y / th;
                 float u1 = (frame.atlas_x + frame.atlas_w) / tw;
                 float v1 = (frame.atlas_y + frame.atlas_h) / th;
-                float world_y = -img.y;
-                float world_x = img.x + img_off_x - parallax_shift;
-                float quad_w = img.w;
-                float quad_h = img.h;
+                // Same trimmed-frame placement as the rotated path above. The
+                // non-rotated path used to ignore the Y offset entirely, so
+                // the two paths disagreed about where a trimmed sprite goes.
+                float world_y = -img.y + img_off_y * frame_scale_y;
+                float world_x = img.x + img_off_x * frame_scale_x - parallax_shift;
+                float quad_w = quad_w_trim;
+                float quad_h = quad_h_trim;
                 float px = world_x - quad_w / 2.0f;
                 float py = world_y - quad_h / 2.0f;
+                if (!loc_logged && debug_world_)
+                    std::printf("[LOC]     -> world x %.0f..%.0f  y %.0f..%.0f  "
+                                "(src %dx%d frame %dx%d off %d,%d)\n",
+                                px, px + quad_w, py, py + quad_h,
+                                frame.source_size_w, frame.source_size_h,
+                                frame.atlas_w, frame.atlas_h,
+                                frame.offset_x, frame.offset_y);
                 renderer_->draw_textured_quad(*atlas.texture, px, py, quad_w, quad_h,
                                               u0, v0, u1, v1, tint);
             }
@@ -2162,6 +2221,10 @@ private:
                 load_hud_png(scrolls / (std::string(n) + ".png"), n);
             load_hud_png(base/"image"/"users"/"image"/"character_sensei_small.png",
                          "character_sensei_small");
+            // The full-size avatar used by the story dialogues
+            // (<Dialog Image="character_sensei"> in quests.xml).
+            load_hud_png(base/"image"/"users"/"image"/"character_sensei.png",
+                         "character_sensei");
             // [ORIGINAL] Load hit effect textures: hit_blade (18-frame spark
             // animation), hit labels (Aggressive, Brutal, Critical, etc.)
             load_texture_atlas_to_hud(base/"textures"/"effects"/"fight",

@@ -43,6 +43,7 @@ struct NullHost : scene::SceneHost {
     bool host_render_battle_preview(const std::string&, float, float, float, float) override { return false; }
     void host_render_scroll_panel(float, float, float, float) override {}
     void host_render_top_panel() override {}
+    bool host_render_ui_texture(const std::string&, float, float, float, float) override { return false; }
     int start_scene_arg() const override { return -1; }
     std::string host_localized(const std::string&) const override { return {}; }
     std::pair<float, float> host_measure_text(const std::string& t, float s) const override {
