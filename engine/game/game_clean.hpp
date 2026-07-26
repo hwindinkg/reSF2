@@ -659,11 +659,23 @@ private:
         const float half_view_w = vw / (2.0f * zoom_);
         const float half_world_w = location_->width * 0.5f;
         float cx = (player_pos_x_ + enemy_pos_x_) * 0.5f;
-        if (half_view_w >= half_world_w) {
+        // [ORIGINAL] `Wall` is how far the location's side walls stand in from
+        // the world edge. On dojo Wall=305 against a half-width of 980, which
+        // puts the limit at +-675 — and the wall sprites `left`/`right` are
+        // drawn at X=+-680, spanning +-(648..723). So the camera must be
+        // clamped to the WALL, not to the world edge: clamping to +-980 let
+        // the view run past the wall into the empty strip between it and the
+        // building, where nothing is drawn and the sky showed through. That is
+        // the "location has no walls, you can see its edges" on screen.
+        const float half_playable_w =
+            (location_->wall > 0.0f && location_->wall < half_world_w)
+                ? half_world_w - location_->wall
+                : half_world_w;
+        if (half_view_w >= half_playable_w) {
             cx = 0.0f;
         } else {
-            const float lo = -half_world_w + half_view_w;
-            const float hi = half_world_w - half_view_w;
+            const float lo = -half_playable_w + half_view_w;
+            const float hi = half_playable_w - half_view_w;
             cx = (cx < lo) ? lo : ((cx > hi) ? hi : cx);
         }
         cam_x_ = cx;
@@ -858,6 +870,14 @@ private:
                     float quad_h = quad_h_trim;
                     float px = world_x - quad_w / 2.0f;
                     float py = world_y - quad_h / 2.0f;
+                    if (!loc_logged)
+                        std::printf("[LOC]     -> ROTATED world x %.0f..%.0f y %.0f..%.0f "
+                                    "(src %dx%d frame %dx%d tex %dx%d off %d,%d)\n",
+                                    px, px + quad_w, py, py + quad_h,
+                                    frame.source_size_w, frame.source_size_h,
+                                    frame.atlas_w, frame.atlas_h,
+                                    ctex->width(), ctex->height(),
+                                    frame.offset_x, frame.offset_y);
                     renderer_->draw_textured_quad(*ctex, px, py,
                                                   quad_w, quad_h,
                                                   0.0f, 0.0f, 1.0f, 1.0f, tint);
@@ -2321,10 +2341,12 @@ private:
         }
         for (auto& [name, idx] : result->name_index) {
             auto& frame = result->frames[idx];
-            // Handle rotated frames:
-            // For rotated frames, do NOT swap dimensions (atlas_w/atlas_h are original).
-            // The atlas region has swapped dimensions, but we create the texture
-            // at original dimensions.
+            // Rotated frames: the plist's `frame` rect is the UNROTATED size
+            // and the atlas holds it transposed. Same un-rotation as
+            // AssetManager::load_atlas — see the derivation there. (This is
+            // the sixth place in this codebase where the same formula lives in
+            // two copies; they had already drifted, the location loader being
+            // the wrong one.)
             int fw = frame.atlas_w;
             int fh = frame.atlas_h;
             auto tex = std::make_unique<ren::Texture2D>();
@@ -2671,7 +2693,11 @@ private:
             return dx * dx + dy * dy <= r * r;
         };
         for (const auto& p : input.pointers) {
-            if (!p.pressed && !p.just_pressed) continue;
+            // An unused pointer slot keeps id = -1 and coordinates (0, 0),
+            // which is inside the stick's quadrant — reading those deflected
+            // the knob to the top-left corner with nothing touching it.
+            if (p.id < 0) continue;
+            if (!p.pressed) continue;
             // The stick reacts to a pointer anywhere in its quadrant, not just
             // on the ring — that is how the original behaves and it is what
             // makes it usable without looking.

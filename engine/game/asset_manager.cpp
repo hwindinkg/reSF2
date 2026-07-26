@@ -55,8 +55,25 @@ void AssetManager::load_atlas(const std::string& name, const std::string& loc,
                 for (auto& [fname, idx] : a.atlas->name_index) {
                     auto& frame = a.atlas->frames[idx];
                     if (!frame.rotated) continue;
-                    int fw = frame.atlas_h;
-                    int fh = frame.atlas_w;
+                    // [ORIGINAL] For a rotated frame the plist's `frame` rect
+                    // carries the sprite's UNROTATED size, while the region
+                    // stored in the atlas is that rect transposed — cocos2d-x
+                    // passes both to CCSpriteFrame::initWithTexture(rect,
+                    // rotated, ...) and swaps when it builds the texture
+                    // coordinates. TexturePacker rotates 90 degrees clockwise
+                    // going in, so coming out:
+                    //     source(x, y) = atlas(ax + (fh - 1 - y), ay + x)
+                    // with fw x fh the UNROTATED size.
+                    //
+                    // This used to build the output as atlas_h x atlas_w and
+                    // walk `fh` across the atlas' X — so it read the wrong
+                    // region AND produced a transposed texture. dojo's
+                    // layer_3_2 (a 256x60 floor plank) came out 60x256 and was
+                    // then squeezed into a 256x60 quad: three of the six floor
+                    // planks rendered as garbage slivers, which is exactly the
+                    // "floor is three segments with holes" on screen.
+                    int fw = frame.atlas_w;
+                    int fh = frame.atlas_h;
                     auto ctex = std::make_unique<ren::Texture2D>();
                     std::vector<std::uint8_t> px((size_t)fw * fh * 4);
                     for (int y = 0; y < fh; ++y) {
