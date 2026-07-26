@@ -25,6 +25,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace resf2::platform { class Platform; }
@@ -194,6 +195,60 @@ public:
     // Render a zone background texture (1-7) as a full-screen background.
     // Returns true if the texture was found and rendered.
     virtual bool host_render_zone_bg(int zone_index, float x, float y, float w, float h) = 0;
+
+    // --- Map screen ---
+    //
+    // [ORIGINAL] The world map is one painted sheet per zone
+    // (assets/1536/image/zones/N.jpg, 1365x649). It is taller than it is wide
+    // relative to a 16:9 viewport, so the original scales it to cover the
+    // height and pans horizontally. Battle nodes carry map coordinates in
+    // stages.xml (`<Battle X=".." Y="..">`, range -440..158 by -220..145),
+    // measured from the CENTRE of that sheet.
+    //
+    // MapView is the transform the map was drawn with, so the caller can put
+    // the nodes on it without duplicating the fitting arithmetic.
+    struct MapView {
+        bool ok = false;
+        float scale = 1.0f;      // sheet pixels -> screen pixels
+        float centre_x = 0.0f;   // screen position of the sheet's centre
+        float centre_y = 0.0f;
+        float max_scroll = 0.0f; // how far the sheet can pan, in screen pixels
+    };
+
+    // Draws the zone sheet, panned by `scroll_x` screen pixels, into the given
+    // screen rect. Returns the transform used.
+    virtual MapView host_render_zone_map(int zone_index, float scroll_x,
+                                         float x, float y, float w, float h) = 0;
+
+    // One battle node. `icon` is the kind ("tournament", "lynx", "training"),
+    // `state` is 0 = base, 1 = active (selected), 2 = locked — the three
+    // atlases the original ships. Returns false if that frame is missing.
+    virtual bool host_render_battle_icon(const std::string& icon, int state,
+                                         float cx, float cy, float size) = 0;
+
+    // The per-location photo shown in the side scroll (image/battles/<loc>.jpg).
+    virtual bool host_render_battle_preview(const std::string& location,
+                                            float x, float y, float w, float h) = 0;
+
+    // A vertical parchment scroll: rolled bar on top, sheet below, side edges.
+    // Same assets as the dojo dialogue, so every screen that needs a panel
+    // gets the same one instead of its own coloured rectangle.
+    virtual void host_render_scroll_panel(float x, float y, float w, float h) = 0;
+
+    // The top HUD strip (level, energy, money, gems) and the MENU scroll, as
+    // drawn in the dojo. Every screen in the original carries them.
+    virtual void host_render_top_panel() = 0;
+
+    // The ":N" argument of --scene, or -1. Lets a screen open on a specific
+    // page (the map's zone) for capture and comparison.
+    [[nodiscard]] virtual int start_scene_arg() const = 0;
+
+    // Localized string for a key, or "" when the key is absent.
+    [[nodiscard]] virtual std::string host_localized(const std::string& key) const = 0;
+
+    // Width and height of `text` at `scale`, for centring.
+    [[nodiscard]] virtual std::pair<float, float> host_measure_text(
+        const std::string& text, float scale) const = 0;
 
     // Toggle between punching bag and enemy fighter.
     virtual void host_set_battle_mode(bool battle) = 0;

@@ -10,7 +10,11 @@
 #include "../format/stage_parser.hpp"
 #include "../format/list_parser.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -178,7 +182,10 @@ bool MainMenuScene::on_quit_request(SceneContext&) {
 
 void MapScene::on_enter(SceneContext& ctx) {
     std::printf("[map] enter\n"); selected_ = 0; scroll_x_ = 0; scroll_target_x_ = 0; selected_battle_ = nullptr;
-    ctx.renderer.set_clear_color(0.03f, 0.03f, 0.08f, 1.0f);
+    nodes_.clear(); selected_node_ = 0;
+    // The map is a painted sheet edge to edge; the clear colour only shows if
+    // the sheet is missing, so keep it parchment brown rather than navy.
+    ctx.renderer.set_clear_color(0.14f, 0.10f, 0.06f, 1.0f);
     auto* stages = ctx.host.host_get_stages();
     if (stages && !stages->zones.empty()) {
         zone_battles_.clear();
@@ -192,148 +199,430 @@ void MapScene::on_enter(SceneContext& ctx) {
             if (!indices.empty()) zone_battles_.push_back({zone, indices});
         }
         std::printf("[map] loaded %zu zones\n", zone_battles_.size());
+        // --scene map:N opens straight onto zone N, so a specific zone can be
+        // captured and compared against the reference screenshot.
+        const int want = ctx.host.start_scene_arg();
+        if (want >= 0 && want < (int)zone_battles_.size()) selected_ = want;
+    }
+}
+
+// [ORIGINAL] The zone sheet a zone is painted on. stages.xml names the story
+// zones ZONE_1..ZONE_7 and the tutorial zone "Punchbag"; the sheets are
+// assets/1536/image/zones/1.jpg..7.jpg. The tutorial shares sheet 1 — it is
+// the same corner of the world, which is why the original shows the dojo and
+// the first bosses on the same parchment.
+int MapScene::zone_sheet_index() const {
+    if (selected_ < 0 || (size_t)selected_ >= zone_battles_.size()) return 1;
+    const std::string& n = zone_battles_[selected_].zone.name;
+    const auto pos = n.find("ZONE_");
+    if (pos != std::string::npos) {
+        const int idx = std::atoi(n.c_str() + pos + 5);
+        if (idx >= 1 && idx <= 7) return idx;
+    }
+    return 1;
+}
+
+// [ORIGINAL] Which frame of the battle atlases a node uses. The atlases ship
+// one frame per battle KIND, not per battle: base_tournament, base_survival,
+// base_duel, base_training, base_challenge, base_final_battle, plus one per
+// boss (base_lynx, base_samurai, base_hermit, ...). Boss battles are named
+// BOSS_<NAME> in stages.xml and carry INTERMISSION / ECLIPSEMODE / REPLAYABLE
+// variants of the same node, so the icon is the name with that decoration
+// stripped and lower-cased.
+static std::string battle_icon_name(const resf2::format::StageBattle& b) {
+    std::string n = b.name;
+    if (n.rfind("BOSS_", 0) == 0) n = n.substr(5);
+    for (const char* suffix : {"_INTERMISSION", "_ECLIPSEMODE", "_REPLAYABLE"}) {
+        const auto p = n.find(suffix);
+        if (p != std::string::npos) n = n.substr(0, p);
+    }
+    for (auto& c : n) c = static_cast<char>(std::tolower((unsigned char)c));
+    return n;
+}
+
+// Not every battle name has a frame of its own — the tutorial zone's "Bosses"
+// is one. Fall back on the Type, which the atlas does cover.
+static std::string battle_icon_fallback(const resf2::format::StageBattle& b) {
+    const std::string& t = b.type;
+    if (t == "DUMMY" || t == "TUTORIAL") return "training";
+    if (t == "TOURNAMENT") return "tournament";
+    if (t == "SURVIVAL") return "survival";
+    if (t == "PERIODIC") return "duel";
+    if (t == "CHALLENGE") return "challenge";
+    if (t == "ASCENSION") return "ascension";
+    if (t.rfind("FINAL_BATTLE", 0) == 0) return "final_battle";
+    return "duel";
+}
+
+// The label under a node. The original localizes them: Tournament / Survival /
+// Duel are keys in their own right, bosses use character<Name>. Falling back
+// to the raw stages.xml name keeps an unlocalized zone readable rather than
+// blank.
+static std::string battle_label(SceneContext& ctx, const resf2::format::StageBattle& b) {
+    std::string bare = b.name;
+    if (bare.rfind("BOSS_", 0) == 0) bare = bare.substr(5);
+    for (const char* suffix : {"_INTERMISSION", "_ECLIPSEMODE", "_REPLAYABLE"}) {
+        const auto p = bare.find(suffix);
+        if (p != std::string::npos) bare = bare.substr(0, p);
+    }
+    std::string pretty = bare;
+    for (size_t i = 1; i < pretty.size(); ++i)
+        pretty[i] = static_cast<char>(std::tolower((unsigned char)pretty[i]));
+
+    for (const std::string& key : {bare, pretty, "character" + pretty}) {
+        std::string s = ctx.host.host_localized(key);
+        if (!s.empty()) return s;
+    }
+    return bare;
+}
+
+void MapScene::rebuild_nodes(SceneContext& ctx) {
+    nodes_.clear();
+    if (selected_ < 0 || (size_t)selected_ >= zone_battles_.size()) return;
+    const auto& z = zone_battles_[selected_];
+    for (size_t bi : z.battle_indices) {
+        const auto& battle = z.zone.battles[bi];
+        // A battle without map coordinates is not a node — the HIDDEN ambushes
+        // and the FAKE placeholders have none.
+        if (battle.x == 0.0f && battle.y == 0.0f && battle.type != "DUMMY") continue;
+        Node n;
+        n.battle = &battle;
+        n.icon = battle_icon_name(battle);
+        n.icon_fallback = battle_icon_fallback(battle);
+        n.label = battle_label(ctx, battle);
+        n.x = battle.x;
+        n.y = battle.y;
+        n.completed = ctx.host.host_is_level_completed(z.zone.name + "/" + battle.name);
+        nodes_.push_back(n);
+    }
+    if (selected_node_ >= (int)nodes_.size()) selected_node_ = 0;
+    select_node((size_t)selected_node_);
+}
+
+void MapScene::select_node(size_t i) {
+    selected_battle_ = nullptr;
+    reward_money_ = reward_exp_ = fight_power_ = 0;
+    if (i >= nodes_.size()) return;
+    selected_node_ = (int)i;
+    selected_battle_ = nodes_[i].battle;
+    if (selected_ >= 0 && (size_t)selected_ < zone_battles_.size())
+        selected_zone_name_ = zone_battles_[selected_].zone.name;
+    if (selected_battle_ && !selected_battle_->fights.empty()) {
+        reward_money_ = selected_battle_->fights[0].reward.money;
+        reward_exp_ = selected_battle_->fights[0].reward.exp;
+        fight_power_ = selected_battle_->fights[0].power;
     }
 }
 
 void MapScene::update_selected_battle() {
-    selected_battle_ = nullptr; reward_money_ = 0; reward_exp_ = 0; fight_power_ = 0;
-    if (selected_ >= 0 && (size_t)selected_ < zone_battles_.size()) {
-        auto& z = zone_battles_[selected_];
-        selected_zone_name_ = z.zone.name;
-        if (!z.battle_indices.empty()) {
-            size_t bi = z.battle_indices[0];  // first visible battle
-            selected_battle_ = &z.zone.battles[bi];
-            if (!selected_battle_->fights.empty()) {
-                reward_money_ = selected_battle_->fights[0].reward.money;
-                reward_exp_ = selected_battle_->fights[0].reward.exp;
-                fight_power_ = selected_battle_->fights[0].power;
-            }
-        }
-    }
+    if (selected_ >= 0 && (size_t)selected_ < zone_battles_.size())
+        selected_zone_name_ = zone_battles_[selected_].zone.name;
+    selected_node_ = 0;
+    nodes_.clear();          // rebuilt on the next render, which has ctx
+    selected_battle_ = nullptr;
+    reward_money_ = reward_exp_ = fight_power_ = 0;
 }
 
+// ---------------------------------------------------------------------------
+// Layout. The side scroll takes the right edge, the map fills the rest under
+// the top panel — the arrangement in the original's map screen.
+// ---------------------------------------------------------------------------
+namespace {
+struct MapLayout {
+    float panel_h = 0;     // top HUD strip
+    float map_x = 0, map_y = 0, map_w = 0, map_h = 0;
+    float scroll_x = 0, scroll_y = 0, scroll_w = 0, scroll_h = 0;
+    float fight_x = 0, fight_y = 0, fight_w = 0, fight_h = 0;
+};
+
+// [ORIGINAL] Text on this screen is sized the same way the HUD numerals are
+// (PORT_PLAN 6.1): from the viewport height, not from constants. The bitmap
+// font's line box is ~115 px at scale 1, so `text_scale(px)` asks for a height
+// in pixels and gets the scale back. Sizing by hand is how the FIGHT caption
+// first came out four times too big and ran off the panel.
+constexpr float kFontLineBoxPx = 115.0f;
+inline float text_scale(float wanted_px) { return wanted_px / kFontLineBoxPx; }
+
+MapLayout map_layout(float w, float h) {
+    MapLayout L;
+    L.panel_h = h * 0.085f;               // same rule as the HUD (PORT_PLAN 6.1)
+    L.scroll_w = w * 0.235f;
+    L.scroll_x = w - L.scroll_w - w * 0.012f;
+    L.scroll_y = L.panel_h + h * 0.055f;
+    L.scroll_h = h - L.scroll_y - h * 0.105f;
+    L.map_x = 0;
+    L.map_y = L.panel_h;
+    L.map_w = w;
+    L.map_h = h - L.panel_h;
+    L.fight_w = L.scroll_w * 0.86f;
+    L.fight_h = L.scroll_h * 0.13f;
+    L.fight_x = L.scroll_x + (L.scroll_w - L.fight_w) * 0.5f;
+    L.fight_y = L.scroll_y + L.scroll_h - L.fight_h - L.scroll_h * 0.11f;
+    return L;
+}
+}  // namespace
 
 void MapScene::on_update(SceneContext& ctx) {
-    const auto& input = ctx.platform.input(); if (zone_battles_.empty()) return;
-    // Horizontal scroll: Right/D = next zone, Left/A = previous zone
-    float max_scroll_x = std::max(0.0f, (float)zone_battles_.size() * 240.0f - ctx.platform.window_width() + 280.0f);
+    const auto& input = ctx.platform.input();
+    if (zone_battles_.empty()) return;
+    const float w = (float)ctx.platform.window_width();
+    const float h = (float)ctx.platform.window_height();
+    const MapLayout L = map_layout(w, h);
+
+    if (key_pressed(input, platform::Key::Escape)) {
+        ctx.host.request_scene_transition(SceneId::MainMenu);
+        return;
+    }
+
+    // Left/Right step through the nodes of the zone; the map pans to keep the
+    // selection on screen.
     bool changed = false;
-    if (key_pressed(input, platform::Key::ArrowRight) || key_pressed(input, platform::Key::D)) { selected_++; changed = true; if (selected_ >= (int)zone_battles_.size()) selected_ = (int)zone_battles_.size() - 1; }
-    if (key_pressed(input, platform::Key::ArrowLeft) || key_pressed(input, platform::Key::A)) { selected_--; changed = true; if (selected_ < 0) selected_ = 0; }
-    if (changed) {
-        float sel_x = selected_ * 240.0f;
-        if (sel_x > scroll_target_x_ + ctx.platform.window_width() - 400.0f) scroll_target_x_ = sel_x - ctx.platform.window_width() + 420.0f;
-        if (sel_x < scroll_target_x_ + 60.0f) scroll_target_x_ = std::max(0.0f, sel_x - 60.0f);
-        scroll_target_x_ = std::max(0.0f, std::min(scroll_target_x_, max_scroll_x));
-        update_selected_battle();
+    if (!nodes_.empty()) {
+        if (key_pressed(input, platform::Key::ArrowRight) || key_pressed(input, platform::Key::D)) {
+            select_node(((size_t)selected_node_ + 1) % nodes_.size());
+            changed = true;
+        }
+        if (key_pressed(input, platform::Key::ArrowLeft) || key_pressed(input, platform::Key::A)) {
+            select_node(((size_t)selected_node_ + nodes_.size() - 1) % nodes_.size());
+            changed = true;
+        }
     }
+    // Up/Down change zone.
+    if (key_pressed(input, platform::Key::ArrowDown) || key_pressed(input, platform::Key::S)) {
+        if (selected_ + 1 < (int)zone_battles_.size()) { selected_++; update_selected_battle(); }
+    }
+    if (key_pressed(input, platform::Key::ArrowUp) || key_pressed(input, platform::Key::W)) {
+        if (selected_ > 0) { selected_--; update_selected_battle(); }
+    }
+
+    // Panning the sheet to keep the selection visible needs the map transform,
+    // which only on_render has. Raise a flag; on_render solves for the scroll.
+    if (changed) want_centre_ = true;
     scroll_x_ += (scroll_target_x_ - scroll_x_) * std::min(1.0f, ctx.dt_ms * 0.008f);
-    if (key_pressed(input, platform::Key::Escape)) { ctx.host.request_scene_transition(SceneId::MainMenu); return; }
-    if (clicked_in(input, 10, 10, 60, 40)) { ctx.host.request_scene_transition(SceneId::MainMenu); return; }
-    // FIGHT button
-    if (selected_battle_ && !selected_battle_->fights.empty()) {
-        float bar_h = 60.0f;
-        float px = ctx.platform.window_width() * 0.72f, py = bar_h + 40.0f, pw = ctx.platform.window_width() * 0.26f;
-        float panel_h = ctx.platform.window_height() - bar_h - 100.0f;
-        float fbx = px + 8, fby = py + panel_h - 65.0f, fbw = pw - 16, fbh = 60.0f;
-        if (clicked_in(input, fbx, fby, fbw, fbh)) {
-            ctx.host.host_set_current_level(selected_zone_name_ + "/" + selected_battle_->name);
-            ctx.host.host_set_battle_location(selected_battle_->location);
-            ctx.host.host_set_dialogue({{"Sly", selected_battle_->name},{"Narrator","Location: "+selected_battle_->location}});
-            ctx.host.request_scene_transition(SceneId::Dialogue); return;
-        }
+
+    // FIGHT
+    if (selected_battle_ && !selected_battle_->fights.empty() &&
+        clicked_in(input, L.fight_x, L.fight_y, L.fight_w, L.fight_h)) {
+        ctx.host.host_set_current_level(selected_zone_name_ + "/" + selected_battle_->name);
+        ctx.host.host_set_battle_location(selected_battle_->location);
+        ctx.host.host_set_dialogue({{"Sly", selected_battle_->name},
+                                    {"Narrator", "Location: " + selected_battle_->location}});
+        ctx.host.request_scene_transition(SceneId::Dialogue);
+        return;
     }
-    // Click on zone panels (horizontal layout)
-    float x0 = 50.0f, zone_w = 220.0f;
-    for (size_t zi = 0; zi < zone_battles_.size(); ++zi) {
-        float zx = x0 + zi * 240.0f - scroll_x_;
-        if (zx < -220.0f || zx > ctx.platform.window_width() + 20.0f) continue;
-        if (clicked_in(input, zx, 100, zone_w, 40)) { selected_ = (int)zi; update_selected_battle(); }
-        auto& z = zone_battles_[zi];
-        for (size_t bi = 0; bi < z.battle_indices.size(); ++bi) {
-            float by = 160.0f + bi * 50.0f;
-            if (clicked_in(input, zx + 10, by, zone_w - 20, 45)) {
-                selected_ = (int)zi;
-                selected_battle_ = &z.zone.battles[z.battle_indices[bi]];
-                selected_zone_name_ = z.zone.name;
-                if (!selected_battle_->fights.empty()) { reward_money_ = selected_battle_->fights[0].reward.money; reward_exp_ = selected_battle_->fights[0].reward.exp; fight_power_ = selected_battle_->fights[0].power; }
-            }
-        }
+    // MENU scroll, top left — same box the dojo uses.
+    if (clicked_in(input, w * 0.012f, L.panel_h, w * 0.14f, L.panel_h * 0.62f)) {
+        ctx.host.request_scene_transition(SceneId::MainMenu);
+        return;
+    }
+    // Clicking a node selects it. Hit boxes are computed in on_render and
+    // cached here, so a click on the frame after the first render is accurate.
+    for (size_t i = 0; i < node_hit_.size() && i < nodes_.size(); ++i) {
+        const auto& hb = node_hit_[i];
+        if (clicked_in(input, hb[0], hb[1], hb[2], hb[3])) { select_node(i); break; }
     }
 }
 
 void MapScene::on_render(SceneContext& ctx) {
-    auto& r = ctx.renderer; float w = (float)ctx.platform.window_width(), h = (float)ctx.platform.window_height();
-    float bar_h = 60.0f;
-    r.draw_filled_rect_screen(0, 0, w, bar_h, {20, 20, 40, 230});
-    r.draw_filled_rect_screen(10, 10, 60, bar_h - 20, {50, 50, 70, 200});
-    ctx.host.host_render_text("< BACK", 20, 18, 0.35f, 220, 220, 240, 255);
-    r.draw_filled_rect_screen(80, 10, w - 160, bar_h - 20, {30, 30, 50, 180});
-    ctx.host.host_render_text("MAP", w / 2 - 40, 15, 0.45f, 200, 200, 220, 255);
-    if (zone_battles_.empty()) return;
-    size_t zi = (size_t)std::max(0, std::min(selected_, (int)zone_battles_.size() - 1));
-    auto& z = zone_battles_[zi];
-    int zone_num = 0;
-    if (z.zone.name.find("ZONE_") != std::string::npos)
-        zone_num = std::atoi(z.zone.name.c_str() + z.zone.name.find("ZONE_") + 5);
-    bool textured = false;
-    if (zone_num >= 1 && zone_num <= 7)
-        textured = ctx.host.host_render_zone_bg(zone_num, 0, bar_h, w, h - bar_h);
-    if (!textured) {
-        r.draw_filled_rect_screen(0, bar_h, w, h - bar_h, {10, 10, 25, 255});
-        ctx.host.host_render_text(z.zone.name, w/2 - 60, h/2 - 20, 0.4f, 180, 180, 200, 255);
+    auto& r = ctx.renderer;
+    const float w = (float)ctx.platform.window_width();
+    const float h = (float)ctx.platform.window_height();
+    const MapLayout L = map_layout(w, h);
+
+    if (zone_battles_.empty()) {
+        r.draw_filled_rect_screen(0, 0, w, h, {24, 18, 12, 255});
+        ctx.host.host_render_text("no stages.xml", w * 0.4f, h * 0.5f, 0.3f,
+                                  200, 200, 200, 255);
+        return;
     }
-    for (size_t bi = 0; bi < z.battle_indices.size(); ++bi) {
-        size_t idx = z.battle_indices[bi];
-        const auto& battle = z.zone.battles[idx];
-        bool completed = ctx.host.host_is_level_completed(z.zone.name + "/" + battle.name);
-        float nx = (battle.x + 500.0f) / 1000.0f;
-        float ny = (battle.y + 300.0f) / 600.0f;
-        nx = std::max(0.05f, std::min(0.95f, nx));
-        ny = std::max(0.05f, std::min(0.95f, ny));
-        float bx = 80 + nx * (w - 160);
-        float by = bar_h + 40 + ny * (h - bar_h - 100);
-        resf2::renderer::Color4B col = {180, 180, 180, 200};
-        if (battle.type == "BOSSES" || battle.type == "FINAL_BATTLE" || battle.type == "FINAL_BATTLE_TITAN") col = {220, 30, 30, 230};
-        else if (battle.type == "TOURNAMENT") col = {50, 100, 220, 210};
-        else if (battle.type == "CHALLENGE") col = {50, 200, 70, 210};
-        else if (battle.type == "SURVIVAL") col = {210, 170, 30, 210};
-        if (completed) col = {50, 210, 50, 220};
-        float radius = (battle.type == "BOSSES" || battle.type == "FINAL_BATTLE" || battle.type == "FINAL_BATTLE_TITAN") ? 16.0f : 11.0f;
-        if (selected_battle_ == &battle) radius += 3;
-        r.draw_filled_circle_screen(bx + 2, by + 2, radius, {0, 0, 0, 100});
-        r.draw_filled_circle_screen(bx, by, radius, col);
-        ctx.host.host_render_text(battle.name, bx + radius + 5, by - 7, 0.24f, 200, 200, 220, 220);
+    if (nodes_.empty()) rebuild_nodes(ctx);
+
+    // --- the painted zone sheet -------------------------------------------
+    const auto view = ctx.host.host_render_zone_map(zone_sheet_index(), scroll_x_,
+                                                    L.map_x, L.map_y, L.map_w, L.map_h);
+    max_scroll_ = view.max_scroll;
+    if (!view.ok) {
+        r.draw_filled_rect_screen(L.map_x, L.map_y, L.map_w, L.map_h, {40, 32, 22, 255});
     }
+
+    // Centre the selection when it changed. The sheet's centre sits at
+    // `map_x - scroll + draw_w/2`, so a node at map x lands on screen at
+    // `centre_x + x*scale`; solving for the scroll that puts it in the middle
+    // of the visible map area (left of the side scroll) gives:
+    if (want_centre_ && view.ok && selected_node_ < (int)nodes_.size()) {
+        const float sheet_centre_no_scroll = view.centre_x + scroll_x_;
+        const float node_no_scroll = sheet_centre_no_scroll +
+                                     nodes_[(size_t)selected_node_].x * view.scale;
+        scroll_target_x_ = std::max(0.0f, std::min(view.max_scroll,
+                                                   node_no_scroll - L.scroll_x * 0.5f));
+        want_centre_ = false;
+    }
+
+    // --- battle nodes ------------------------------------------------------
+    //
+    // stages.xml coordinates are measured from the centre of the sheet, with Y
+    // pointing UP: in ZONE_1 the tournament (Y=+10) sits above the Lynx node
+    // (Y=-45), which is the arrangement on the reference screenshot. Reading Y
+    // the other way mirrors the whole map vertically.
+    const float icon_size = L.map_h * 0.16f;
+    node_hit_.assign(nodes_.size(), {0.0f, 0.0f, 0.0f, 0.0f});
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+        const auto& n = nodes_[i];
+        const float cx = view.ok ? view.centre_x + n.x * view.scale
+                                 : L.map_x + L.map_w * 0.5f + n.x;
+        const float cy = view.ok ? view.centre_y - n.y * view.scale
+                                 : L.map_y + L.map_h * 0.5f - n.y;
+        if (cx < L.map_x - icon_size || cx > L.scroll_x + icon_size) continue;
+
+        const bool sel = ((int)i == selected_node_);
+        const int state = sel ? 1 : 0;
+        if (!ctx.host.host_render_battle_icon(n.icon, state, cx, cy, icon_size) &&
+            !ctx.host.host_render_battle_icon(n.icon_fallback, state, cx, cy, icon_size)) {
+            // No frame for this kind: a plain marker beats an invisible node.
+            r.draw_filled_circle_screen(cx, cy, icon_size * 0.3f,
+                                        sel ? resf2::renderer::Color4B{235, 195, 110, 235}
+                                            : resf2::renderer::Color4B{150, 120, 80, 210});
+        }
+        node_hit_[i] = {cx - icon_size * 0.5f, cy - icon_size * 0.5f, icon_size, icon_size};
+
+        // Label under the node, centred, in the map's ink colour.
+        const float ls = text_scale(h * 0.030f);
+        const auto [tw, th] = ctx.host.host_measure_text(n.label, ls);
+        (void)th;
+        ctx.host.host_render_text(n.label, cx - tw * 0.5f, cy + icon_size * 0.46f,
+                                  ls, 60, 42, 26, 255);
+    }
+
+    // --- side scroll -------------------------------------------------------
     if (selected_battle_) {
-        float px = w * 0.74f, py = bar_h + 20.0f, pw = w * 0.24f, panel_h = h - bar_h - 80.0f;
-        r.draw_filled_rect_screen(px - 4, py - 4, pw + 8, panel_h + 8, {0, 0, 0, 80});
-        r.draw_filled_rect_screen(px, py, pw, 2, {200, 170, 100, 200});
-        r.draw_filled_rect_screen(px + 4, py + 10, pw - 8, 35, {50, 50, 70, 220});
-        ctx.host.host_render_text(selected_battle_->name, px + 10, py + 18, 0.28f, 220, 220, 240, 255);
-        float ry = py + 55.0f;
-        r.draw_filled_rect_screen(px + 4, ry, pw - 8, 80, {25, 25, 40, 220});
-        ctx.host.host_render_text("+" + std::to_string(reward_money_), px + 60, ry + 10, 0.28f, 255, 220, 100, 255);
-        ctx.host.host_render_text("+" + std::to_string(reward_exp_), px + 60, ry + 45, 0.28f, 140, 190, 255, 255);
-        float pow_y = ry + 95.0f;
-        r.draw_filled_rect_screen(px + 4, pow_y, pw - 8, 35, (fight_power_ > 0) ? resf2::renderer::Color4B{160, 50, 20, 220} : resf2::renderer::Color4B{40, 40, 45, 200});
-        if (fight_power_ > 0) ctx.host.host_render_text("POWER " + std::to_string(fight_power_), px + 10, pow_y + 8, 0.25f, 255, 200, 140, 255);
-        float fbx = px + 4, fby = py + panel_h - 60.0f, fbw = pw - 8, fbh = 55.0f;
-        r.draw_filled_rect_screen(fbx, fby, fbw, fbh, {160, 30, 20, 240});
-        r.draw_filled_rect_screen(fbx + 3, fby + 3, fbw - 6, fbh - 6, {200, 50, 30, 210});
-        ctx.host.host_render_text("FIGHT", fbx + fbw/2 - 25, fby + 18, 0.32f, 255, 255, 255, 255);
+        ctx.host.host_render_scroll_panel(L.scroll_x, L.scroll_y, L.scroll_w, L.scroll_h);
+        const float pad = L.scroll_w * 0.085f;
+        const float inner_x = L.scroll_x + pad;
+        const float inner_w = L.scroll_w - 2 * pad;
+        float y = L.scroll_y + L.scroll_h * 0.045f;
+
+        // Title
+        const float title_scale = text_scale(h * 0.040f);
+        const std::string title = nodes_.empty() ? selected_battle_->name
+                                                 : nodes_[(size_t)selected_node_].label;
+        const auto [tw, th] = ctx.host.host_measure_text(title, title_scale);
+        ctx.host.host_render_text(title, L.scroll_x + (L.scroll_w - tw) * 0.5f, y,
+                                  title_scale, 92, 46, 20, 255);
+        y += th * 1.5f;
+
+        // Location photo
+        const float shot_h = inner_w * (274.0f / 484.0f);   // the jpgs are 484x274
+        // The photo is named after the opponent where there is one
+        // (lynx.jpg for the moon fight) and after the location otherwise.
+        const std::string& icon_key = nodes_.empty() ? selected_battle_->location
+                                                     : nodes_[(size_t)selected_node_].icon;
+        if (ctx.host.host_render_battle_preview(icon_key, inner_x, y, inner_w, shot_h) ||
+            ctx.host.host_render_battle_preview(selected_battle_->location,
+                                                inner_x, y, inner_w, shot_h)) {
+            y += shot_h + L.scroll_h * 0.035f;
+        }
+
+        const float info_scale = text_scale(h * 0.032f);
+        char buf[128];
+        auto centred = [&](const std::string& t, float scale, int r8, int g8, int b8) {
+            const auto [tw2, th2] = ctx.host.host_measure_text(t, scale);
+            ctx.host.host_render_text(t, L.scroll_x + (L.scroll_w - tw2) * 0.5f, y,
+                                      scale, (std::uint8_t)r8, (std::uint8_t)g8,
+                                      (std::uint8_t)b8, 255);
+            y += th2 * 1.35f;
+        };
+
+        // [ORIGINAL] "Stage n/N" over a row of round markers, one per fight of
+        // this battle. localization key `stage` is "Стадия {0}/{1}".
+        {
+            const int total = (int)selected_battle_->fights.size();
+            const int done = std::min(total, 1);   // 7.3 will drive this from progress
+            std::string tpl = ctx.host.host_localized("stage");
+            if (tpl.empty()) tpl = "Stage {0}/{1}";
+            const std::string a = std::to_string(done), b2 = std::to_string(total);
+            for (auto& [tok, val] : {std::pair<std::string, std::string>{"{0}", a},
+                                     std::pair<std::string, std::string>{"{1}", b2}}) {
+                const auto p2 = tpl.find(tok);
+                if (p2 != std::string::npos) tpl.replace(p2, tok.size(), val);
+            }
+            centred(tpl, info_scale, 92, 46, 20);
+
+            // Round markers. Round_Done / Round_Undone are shipped in
+            // textures/misc; a filled square stands in until they are loaded.
+            const int per_row = 8;
+            const float m = inner_w / (float)per_row * 0.8f;
+            const float gap = inner_w / (float)per_row * 0.2f;
+            const int rows = (total + per_row - 1) / per_row;
+            for (int rI = 0; rI < rows; ++rI) {
+                const int in_row = std::min(per_row, total - rI * per_row);
+                const float row_w = in_row * m + (in_row - 1) * gap;
+                float mx = L.scroll_x + (L.scroll_w - row_w) * 0.5f;
+                for (int c = 0; c < in_row; ++c) {
+                    const bool filled = (rI * per_row + c) < done;
+                    r.draw_filled_rect_screen(mx, y, m, m,
+                        filled ? resf2::renderer::Color4B{214, 106, 34, 255}
+                               : resf2::renderer::Color4B{74, 54, 36, 255});
+                    mx += m + gap;
+                }
+                y += m + gap;
+            }
+            y += L.scroll_h * 0.02f;
+        }
+
+        // Entry cost / reward.
+        if (reward_money_ > 0) {
+            std::snprintf(buf, sizeof(buf), "%d", reward_money_);
+            centred(buf, info_scale, 92, 46, 20);
+        }
+        if (fight_power_ > 0) {
+            std::snprintf(buf, sizeof(buf), "%d", fight_power_);
+            centred(buf, info_scale, 140, 60, 30);
+        }
+
+        // FIGHT button, on its own little scroll.
+        ctx.host.host_render_scroll_panel(L.fight_x, L.fight_y, L.fight_w, L.fight_h);
+        std::string fight = ctx.host.host_localized("startFight");
+        if (fight.empty()) fight = "FIGHT!";
+        const float fs = text_scale(L.fight_h * 0.42f);
+        const auto [fw2, fh2] = ctx.host.host_measure_text(fight, fs);
+        ctx.host.host_render_text(fight,
+                                  L.fight_x + (L.fight_w - fw2) * 0.5f,
+                                  L.fight_y + (L.fight_h - fh2) * 0.5f,
+                                  fs, 92, 46, 20, 255);
     }
-    if (zi > 0) {
-        float ax = 80.0f, ay = h / 2.0f - 15.0f;
-        r.draw_filled_rect_screen(ax, ay, 30, 30, {50, 50, 70, 180});
-        ctx.host.host_render_text("<", ax + 8, ay + 5, 0.30f, 220, 220, 200, 255);
+
+    // --- top panel and MENU scroll, exactly as in the dojo ------------------
+    ctx.host.host_render_top_panel();
+
+    // --- zone caption along the bottom -------------------------------------
+    {
+        const std::string zone_key = zone_battles_[(size_t)std::max(0, selected_)].zone.name;
+        std::string caption = ctx.host.host_localized(zone_key);
+        if (caption.empty()) caption = zone_key;
+        const float cs = text_scale(h * 0.042f);
+        const auto [cw, ch] = ctx.host.host_measure_text(caption, cs);
+        const float band_h = h * 0.135f;
+        r.draw_filled_rect_screen(0, h - band_h, L.scroll_x, band_h, {26, 16, 8, 225});
+        ctx.host.host_render_text(caption, (L.scroll_x - cw) * 0.5f,
+                                  h - band_h + band_h * 0.12f, cs,
+                                  222, 198, 150, 255);
+        // [ORIGINAL] A dot per zone under the title — the map's page indicator,
+        // and the only thing on screen that says how many zones there are.
+        const int zones = (int)zone_battles_.size();
+        const float dot = h * 0.016f;
+        const float dgap = dot * 1.4f;
+        const float total_w = zones * dot + (zones - 1) * dgap;
+        float dx = (L.scroll_x - total_w) * 0.5f;
+        const float dy = h - band_h * 0.30f;
+        for (int i = 0; i < zones; ++i) {
+            const bool cur = (i == selected_);
+            r.draw_filled_circle_screen(dx + dot * 0.5f, dy, dot * 0.5f,
+                cur ? resf2::renderer::Color4B{214, 106, 34, 255}
+                    : resf2::renderer::Color4B{92, 68, 44, 255});
+            dx += dot + dgap;
+        }
+        (void)ch;
     }
-    if (zi + 1 < zone_battles_.size()) {
-        float ax = w - 110.0f, ay = h / 2.0f - 15.0f;
-        r.draw_filled_rect_screen(ax, ay, 30, 30, {50, 50, 70, 180});
-        ctx.host.host_render_text(">", ax + 8, ay + 5, 0.30f, 220, 220, 200, 255);
-    }
-    ctx.host.host_render_text(z.zone.name, w/2 - 60, bar_h + 8, 0.30f, 200, 200, 220, 200);
 }
 
 // ============================================================

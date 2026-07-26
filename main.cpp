@@ -14,6 +14,7 @@ int main(int argc, char* argv[]) {
     // viewport height (render_hud, menu_roll_rect), and a rule that is only ever
     // run at one size is a rule nobody has checked.
     int win_w = 1280, win_h = 720;
+    std::string start_scene;
     for (int i = 1; i < argc; ++i) {
         std::string_view arg = argv[i];
         if (arg == "--assets" && i + 1 < argc) asset_root = argv[++i];
@@ -24,6 +25,7 @@ int main(int argc, char* argv[]) {
         else if (arg == "--no-log") g_debug_log_enabled = false;
         else if (arg == "--list-locations") list_locations = true;
         else if (arg == "--debug-world") debug_world = true;
+        else if (arg == "--scene" && i + 1 < argc) start_scene = argv[++i];
         else if (arg == "--window" && i + 1 < argc) {
             const std::string spec = argv[++i];
             const size_t x = spec.find_first_of("xX");
@@ -44,7 +46,9 @@ int main(int argc, char* argv[]) {
                         "                 [--replay] [--dump-state] [--no-log]\n"
                         "                 [--list-locations] [--location <name>]\n"
                         "                 [--debug-world]   world-geometry overlay (F1 toggles)\n"
-                        "                 [--window WxH]    viewport size (default 1280x720)\n");
+                        "                 [--window WxH]    viewport size (default 1280x720)\n"
+                        "                 [--scene <name>]  open a screen directly:\n"
+                        "                   dojo map shop settings dialogue battle results profile\n");
             return 0;
         }
     }
@@ -75,6 +79,7 @@ int main(int argc, char* argv[]) {
     // comment at the host_load_progress() call site. Same reasoning as the
     // fixed timestep below.
     game.set_hermetic_run(!input_script_path.empty());
+    game.set_start_scene(start_scene);
     if (!platform->make_gl_current()) { std::fprintf(stderr, "Failed to make GL context current.\n"); return 1; }
     game.on_init(*platform);
     auto last_ms = platform->now_ms();

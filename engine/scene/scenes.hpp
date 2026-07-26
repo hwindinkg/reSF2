@@ -14,6 +14,9 @@
 
 #pragma once
 
+#include <array>
+#include <vector>
+
 #include "scene_system.hpp"
 #include "../format/stage_parser.hpp"
 
@@ -86,15 +89,36 @@ private:
         resf2::format::StageZone zone;
         std::vector<size_t> battle_indices;
     };
+    // One drawable node: a battle that has map coordinates.
+    struct Node {
+        const resf2::format::StageBattle* battle = nullptr;
+        std::string icon;          // "tournament", "lynx", ...
+        std::string icon_fallback; // by Type, for names the atlas has no frame for
+        std::string label;         // localized, upper case
+        float x = 0, y = 0;  // map coordinates from stages.xml
+        bool completed = false;
+    };
     std::vector<ZoneEntry> zone_battles_;
-    int selected_ = 0;
-    float scroll_x_ = 0;       // horizontal scroll position
+    std::vector<Node> nodes_;      // nodes of the zone currently on screen
+    int selected_ = 0;             // zone index
+    int selected_node_ = 0;        // index into nodes_
+    float scroll_x_ = 0;           // horizontal pan of the map sheet, in pixels
     float scroll_target_x_ = 0;
+    float max_scroll_ = 0;
     const resf2::format::StageBattle* selected_battle_ = nullptr;
     std::string selected_zone_name_;
     int reward_money_ = 0;
     int reward_exp_ = 0;
     int fight_power_ = 0;
+
+    bool want_centre_ = false;   // pan the sheet onto the selection next render
+    // Hit boxes {x, y, w, h} of the nodes as last drawn. Computed in
+    // on_render, where the map transform is known, and read by on_update.
+    std::vector<std::array<float, 4>> node_hit_;
+
+    void rebuild_nodes(SceneContext& ctx);
+    void select_node(size_t i);
+    int zone_sheet_index() const;
 };
 
 // ---------- Shop scene ----------
