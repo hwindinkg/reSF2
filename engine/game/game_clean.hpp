@@ -2310,47 +2310,79 @@ private:
 
     // ---------- HUD ----------
     void render_hud(plat::Platform& platform) {
-        // Top panel background (real texture, tiled horizontally)
-        auto panel_it = assets_->hud_textures().find("Top_Panel");
-        if (panel_it != assets_->hud_textures().end()) {
-            auto& tex = panel_it->second;
-            float panel_h = 50.0f;
-            float tile_w = panel_h * tex->width() / tex->height();
-            float x = 0;
-            float win_w = (float)platform.window_width();
-            while (x < win_w) {
-                float draw_w = std::min(tile_w, win_w - x);
-                float u1 = draw_w / tile_w;
-                renderer_->draw_textured_quad_screen(*tex, x, 0, draw_w, panel_h,
-                                                     0, 0, u1, 1.0f);
-                x += draw_w;
+        // [ORIGINAL] The top panel is laid out from the atlas' own source sizes
+        // (assets/1536/textures/panels/top/batchPanelsTop.plist), not from magic
+        // pixel offsets:
+        //   Top_Panel   1 x 192   a one-pixel strip tiled across the screen
+        //   gold       95 x 95    ruby       88 x 87    energy   103 x 103
+        //   Energy_Bar 230 x 32   Level_bar 380 x 38    AddMoney 116 x 116
+        //
+        // [HEURISTIC-TODO] The scale is pinned so the panel takes 8.5% of the
+        // viewport height, which is what the original's first-launch screenshot
+        // shows (~30 px of a 354 px frame). The rule the original actually uses
+        // — a design resolution, or the devices.xml tier — has not been reversed
+        // yet, so this reproduces the proportion without claiming the mechanism.
+        const float win_w = static_cast<float>(platform.window_width());
+        const float win_h = static_cast<float>(platform.window_height());
+        const float panel_h = win_h * 0.085f;
+        const float s = panel_h / 192.0f;   // atlas units -> screen pixels
+        auto tex_of = [&](const char* n) -> ren::Texture2D* {
+            auto it = assets_->hud_textures().find(n);
+            return it == assets_->hud_textures().end() ? nullptr : it->second.get();
+        };
+        auto draw = [&](const char* n, float dx, float dy, float dw, float dh) {
+            if (auto* t = tex_of(n))
+                renderer_->draw_textured_quad_screen(*t, dx, dy, dw, dh);
+        };
+        // Vertically centre an element of atlas height `ah` inside the panel.
+        auto cy = [&](float ah) { return (panel_h - ah * s) * 0.5f; };
+
+        if (auto* panel = tex_of("Top_Panel")) {
+            const float tile_w = std::max(1.0f, panel_h * panel->width() / panel->height());
+            for (float px = 0; px < win_w; px += tile_w) {
+                const float draw_w = std::min(tile_w, win_w - px);
+                renderer_->draw_textured_quad_screen(*panel, px, 0, draw_w, panel_h,
+                                                     0, 0, draw_w / tile_w, 1.0f);
             }
         } else {
-            ren::Color4B bar_bg{0, 0, 0, 180};
-            renderer_->draw_filled_rect_screen(0, 0,
-                (float)platform.window_width(), 50, bar_bg);
+            renderer_->draw_filled_rect_screen(0, 0, win_w, panel_h, {0, 0, 0, 180});
         }
 
-        // Gold icon + amount
-        auto gold_it = assets_->hud_textures().find("gold");
-        if (gold_it != assets_->hud_textures().end()) {
-            renderer_->draw_textured_quad_screen(*gold_it->second, 10, 9, 32, 32);
-        }
-        render_text("72 450", 50, 15, 0.32f, {255, 240, 200, 255});
+        // Text sized to the panel rather than to a constant: at 720p the panel
+        // is 61 px, and the digits used to be drawn at scale 0.32, which came
+        // out ~40 px tall and ran straight over the icons beside them.
+        const float text_scale = panel_h / 280.0f;
+        const float text_y = panel_h * 0.30f;
+        float hx = panel_h * 0.12f;
 
-        // Energy icon + value
-        auto energy_it = assets_->hud_textures().find("energy");
-        if (energy_it != assets_->hud_textures().end()) {
-            renderer_->draw_textured_quad_screen(*energy_it->second, 180, 9, 32, 32);
-        }
-        render_text("5 / 5", 220, 15, 0.32f, {200, 230, 255, 255});
+        draw("level", hx, cy(111.0f), 111.0f * s, 111.0f * s);
+        hx += 111.0f * s + panel_h * 0.06f;
+        render_text(std::to_string(hud_level_), hx, text_y, text_scale,
+                    {255, 255, 255, 255});
+        hx += panel_h * 0.55f;
 
-        // Level bar + level badge
-        auto lvlbar_it = assets_->hud_textures().find("Level_bar");
-        if (lvlbar_it != assets_->hud_textures().end()) {
-            renderer_->draw_textured_quad_screen(*lvlbar_it->second, 330, 15, 120, 20);
-        }
-        render_text("LVL 7", 460, 15, 0.30f, {255, 255, 255, 255});
+        draw("Level_bar", hx, cy(38.0f), 380.0f * s, 38.0f * s);
+        hx += 380.0f * s + panel_h * 0.22f;
+
+        draw("energy", hx, cy(103.0f), 103.0f * s, 103.0f * s);
+        hx += 103.0f * s + panel_h * 0.06f;
+        draw("Energy_Bar", hx, cy(32.0f), 230.0f * s, 32.0f * s);
+        hx += 230.0f * s + panel_h * 0.22f;
+
+        draw("gold", hx, cy(95.0f), 95.0f * s, 95.0f * s);
+        hx += 95.0f * s + panel_h * 0.06f;
+        render_text(std::to_string(hud_gold_), hx, text_y, text_scale,
+                    {255, 240, 200, 255});
+        hx += panel_h * 1.7f;
+
+        draw("ruby", hx, cy(87.0f), 88.0f * s, 87.0f * s);
+        hx += 88.0f * s + panel_h * 0.06f;
+        render_text(std::to_string(hud_gems_), hx, text_y, text_scale,
+                    {255, 210, 210, 255});
+
+        // The "+" button sits at the right edge in the original.
+        draw("AddMoney", win_w - 116.0f * s - panel_h * 0.12f, cy(116.0f),
+             116.0f * s, 116.0f * s);
 
         // [ORIGINAL] Dojo is a TRAINING area — NO health bars, NO victory/defeat.
         // Health bars only appear in real fights (map battles). In Dojo, the
@@ -2944,6 +2976,14 @@ private:
     float cam_x_ = 0, cam_y_ = 0;
     // Debug world overlay, toggled with F1 or started with --debug-world.
     bool debug_world_ = false;
+    // [HEURISTIC-TODO] Placeholder player stats shown in the top panel. The
+    // original reads these from the save (usersDefault.xml / userSettings.xml,
+    // plan item 7.2); until that is wired they are constants rather than the
+    // string literals "72 450" / "5 / 5" / "LVL 7" that used to be baked into
+    // the draw calls.
+    int hud_level_ = 7;
+    int hud_gold_ = 72450;
+    int hud_gems_ = 9;
     // [ORIGINAL] Floor plane of the current location: -Height/2 + Floor
     // (Location::load, ShadowFight2.s86 FUN_10144420: +0x3c Height, +0x2c Floor).
     // Animations are authored with their floor at y = 0, so this is the datum
