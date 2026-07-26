@@ -115,6 +115,12 @@ private:
     // Hit boxes {x, y, w, h} of the nodes as last drawn. Computed in
     // on_render, where the map transform is known, and read by on_update.
     std::vector<std::array<float, 4>> node_hit_;
+    // Hit boxes of the page dots along the bottom, same idea.
+    std::vector<std::array<float, 4>> dot_hit_;
+    // Dragging the sheet. drag_moved_ separates a pan from a tap on a node.
+    bool drag_active_ = false;
+    float drag_last_x_ = 0.0f;
+    float drag_moved_ = 0.0f;
 
     void rebuild_nodes(SceneContext& ctx);
     void select_node(size_t i);

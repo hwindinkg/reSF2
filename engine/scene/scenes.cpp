@@ -374,30 +374,64 @@ void MapScene::on_update(SceneContext& ctx) {
         return;
     }
 
-    // Left/Right step through the nodes of the zone; the map pans to keep the
-    // selection on screen.
-    bool changed = false;
-    if (!nodes_.empty()) {
-        if (key_pressed(input, platform::Key::ArrowRight) || key_pressed(input, platform::Key::D)) {
-            select_node(((size_t)selected_node_ + 1) % nodes_.size());
-            changed = true;
-        }
-        if (key_pressed(input, platform::Key::ArrowLeft) || key_pressed(input, platform::Key::A)) {
-            select_node(((size_t)selected_node_ + nodes_.size() - 1) % nodes_.size());
-            changed = true;
-        }
+    // --- zone paging -------------------------------------------------------
+    // Left/Right (and A/D) move between ZONES, which is what the row of page
+    // dots along the bottom stands for. They used to step between the battle
+    // nodes of one zone while zone paging sat on Up/Down, so none of the three
+    // obvious ways to change zone — arrows, the dots, dragging — did anything.
+    auto go_zone = [&](int idx) {
+        if (idx < 0 || idx >= (int)zone_battles_.size() || idx == selected_) return;
+        selected_ = idx;
+        update_selected_battle();
+        scroll_x_ = scroll_target_x_ = 0.0f;   // each sheet starts unscrolled
+        want_centre_ = true;
+    };
+    if (key_pressed(input, platform::Key::ArrowRight) || key_pressed(input, platform::Key::D))
+        go_zone(selected_ + 1);
+    if (key_pressed(input, platform::Key::ArrowLeft) || key_pressed(input, platform::Key::A))
+        go_zone(selected_ - 1);
+    // Tab cycles the battle nodes inside the current zone.
+    if (!nodes_.empty() && key_pressed(input, platform::Key::Tab)) {
+        select_node(((size_t)selected_node_ + 1) % nodes_.size());
+        want_centre_ = true;
     }
-    // Up/Down change zone.
-    if (key_pressed(input, platform::Key::ArrowDown) || key_pressed(input, platform::Key::S)) {
-        if (selected_ + 1 < (int)zone_battles_.size()) { selected_++; update_selected_battle(); }
+
+    // Clicking a page dot jumps straight to that zone.
+    for (size_t i = 0; i < dot_hit_.size(); ++i) {
+        const auto& d = dot_hit_[i];
+        if (clicked_in(input, d[0], d[1], d[2], d[3])) { go_zone((int)i); break; }
     }
-    if (key_pressed(input, platform::Key::ArrowUp) || key_pressed(input, platform::Key::W)) {
-        if (selected_ > 0) { selected_--; update_selected_battle(); }
+    // On-screen paging arrows at the edges of the map.
+    if (clicked_in(input, L.map_x, L.map_y + L.map_h * 0.40f,
+                   L.map_w * 0.06f, L.map_h * 0.20f))
+        go_zone(selected_ - 1);
+    if (clicked_in(input, L.scroll_x - L.map_w * 0.06f, L.map_y + L.map_h * 0.40f,
+                   L.map_w * 0.06f, L.map_h * 0.20f))
+        go_zone(selected_ + 1);
+
+    // --- dragging the sheet ------------------------------------------------
+    // Press anywhere on the map and drag to pan it. A drag that never moves
+    // more than a few pixels is a tap and is left to the node hit test below.
+    for (const auto& p : input.pointers) {
+        if (p.id < 0) continue;
+        const bool on_map = p.x < L.scroll_x && p.y > L.map_y;
+        if (p.just_pressed && on_map) {
+            drag_active_ = true;
+            drag_moved_ = 0.0f;
+            drag_last_x_ = p.x;
+        } else if (p.pressed && drag_active_) {
+            const float dx = p.x - drag_last_x_;
+            drag_last_x_ = p.x;
+            drag_moved_ += std::fabs(dx);
+            scroll_target_x_ = std::max(0.0f, std::min(max_scroll_, scroll_target_x_ - dx));
+            scroll_x_ = scroll_target_x_;
+        } else if (p.just_released) {
+            drag_active_ = false;
+        }
     }
 
     // Panning the sheet to keep the selection visible needs the map transform,
     // which only on_render has. Raise a flag; on_render solves for the scroll.
-    if (changed) want_centre_ = true;
     scroll_x_ += (scroll_target_x_ - scroll_x_) * std::min(1.0f, ctx.dt_ms * 0.008f);
 
     // FIGHT
@@ -417,9 +451,11 @@ void MapScene::on_update(SceneContext& ctx) {
     }
     // Clicking a node selects it. Hit boxes are computed in on_render and
     // cached here, so a click on the frame after the first render is accurate.
-    for (size_t i = 0; i < node_hit_.size() && i < nodes_.size(); ++i) {
-        const auto& hb = node_hit_[i];
-        if (clicked_in(input, hb[0], hb[1], hb[2], hb[3])) { select_node(i); break; }
+    if (drag_moved_ < 6.0f) {
+        for (size_t i = 0; i < node_hit_.size() && i < nodes_.size(); ++i) {
+            const auto& hb = node_hit_[i];
+            if (clicked_in(input, hb[0], hb[1], hb[2], hb[3])) { select_node(i); break; }
+        }
     }
 }
 
@@ -614,11 +650,18 @@ void MapScene::on_render(SceneContext& ctx) {
         const float total_w = zones * dot + (zones - 1) * dgap;
         float dx = (L.scroll_x - total_w) * 0.5f;
         const float dy = h - band_h * 0.30f;
+        // Hit boxes are padded well past the dot itself — a 12 px disc is not
+        // something anyone can hit reliably, and the dots are the map's only
+        // visible way to jump between zones.
+        dot_hit_.assign((size_t)zones, {0.0f, 0.0f, 0.0f, 0.0f});
+        const float pad = dot * 1.6f;
         for (int i = 0; i < zones; ++i) {
             const bool cur = (i == selected_);
             r.draw_filled_circle_screen(dx + dot * 0.5f, dy, dot * 0.5f,
                 cur ? resf2::renderer::Color4B{214, 106, 34, 255}
                     : resf2::renderer::Color4B{92, 68, 44, 255});
+            dot_hit_[(size_t)i] = {dx - pad * 0.5f, dy - dot * 0.5f - pad * 0.5f,
+                                   dot + pad, dot + pad};
             dx += dot + dgap;
         }
         (void)ch;
