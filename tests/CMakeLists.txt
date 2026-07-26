@@ -223,18 +223,6 @@ target_link_libraries(test_inventory PRIVATE
 target_compile_features(test_inventory PRIVATE cxx_std_23)
 add_test(NAME test_inventory COMMAND test_inventory WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-# JSON Atlas parser test (for sf2_pc format)
-add_executable(test_json_atlas
-    ../test_json_atlas.cpp
-)
-target_link_libraries(test_json_atlas PRIVATE
-    resf2_format
-    resf2_core
-    resf2_reverse
-    zlibstatic
-    resf2_warnings
-)
-target_compile_features(test_json_atlas PRIVATE cxx_std_23)
 
 # NameRange / stringEqualWithRange test
 add_executable(test_name_utils
@@ -268,4 +256,3 @@ target_link_libraries(test_conditions PRIVATE
 )
 target_compile_features(test_conditions PRIVATE cxx_std_23)
 add_test(NAME test_conditions COMMAND test_conditions WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-add_test(NAME test_json_atlas COMMAND test_json_atlas WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

@@ -24,37 +24,14 @@ Game::~Game() = default;
 void Game::play_animation(const std::string& name, bool loop, int priority) {
     auto& animations = assets_->animations();
     auto& moves = assets_->moves();
-    if (animations.count(name)) {
-        // Priority check: a higher-priority animation blocks a lower-priority
-        // one only while it is still PLAYING. Once a non-looping animation has
-        // run past its last frame it releases the slot, otherwise nothing can
-        // ever follow it.
-        //
-        // This gate duplicates the one in AnimationPlayer::play(); both have to
-        // agree. Measured before the fix with --input-script + --dump-state:
-        //   [ANIM] Rejected 'stance_idle' (prio 0) — 'stance_2' has prio 3
-        //   [ANIM] Rejected 'step_forward' (prio 0) — 'stance_2' has prio 3
-        //   [ANIM] Rejected 'stance_idle' (prio 0) — 'high_punch' has prio 110
-        // The fighter froze on the last frame of the intro stance and of every
-        // attack, and walking was refused outright — that was the "ploho
-        // upravlyaetsya" report.
-        if (!anim_player_.anim_finished() && priority < priority_ && name != current_anim_) {
-            std::printf("[ANIM] Rejected '%s' (priority %d) — '%s' has higher priority %d\n",
-                        name.c_str(), priority, current_anim_.c_str(), priority_);
-            return;
-        }
-        anim_player_.clear_anim_finished();
-        if (current_anim_ != name) {
-            std::printf("[ANIM] play_animation('%s', loop=%d, prio=%d) — switching from '%s' (prio=%d)\n",
-                        name.c_str(), loop, priority, current_anim_.c_str(), priority_);
-        }
-        priority_ = priority;
-        current_anim_ = name;
-        anim_time_ = 0.0f;
-        anim_loop_ = loop;
-        anim_fps_ = 20.0f;  // default: matches MidFrames=2 (60/3=20)
+    if (!animations.count(name)) return;
 
-        // Look up MoveDef by filename to get mid_frames and first_frame
+    // Playback rate and start frame come from the MoveDef whose filename
+    // matches this animation. Resolve them first so they can be handed to
+    // AnimationPlayer::play() rather than patched in afterwards.
+    float fps = 20.0f;  // default: matches MidFrames=2 (60/3=20)
+    int first_frame = -1;
+    {
         std::string name_no_bin = name;
         if (name_no_bin.size() > 4 &&
             name_no_bin.substr(name_no_bin.size() - 4) == ".bin")
@@ -65,32 +42,41 @@ void Game::play_animation(const std::string& name, bool loop, int priority) {
             if (mfile.size() > 4 &&
                 mfile.substr(mfile.size() - 4) == ".bin")
                 mfile = mfile.substr(0, mfile.size() - 4);
-
             if (mfile == name_no_bin) {
-                anim_fps_ = 60.0f / (1.0f + move.mid_frames);
-                if (move.first_frame >= 0 && anim_fps_ > 0.0f) {
-                    anim_time_ = (float)move.first_frame / anim_fps_;
-                }
+                fps = 60.0f / (1.0f + move.mid_frames);
+                first_frame = move.first_frame;
                 break;
             }
         }
+    }
 
-        anim_anchor_set_ = false;
-        anim_root_dx_ = 0.0f;
-        anim_root_dy_ = 0.0f;
-        prev_root_offset_ = 0.0f;
-        committed_root_x_ = 0.0f;
-        prev_root_offset_x_ = 0.0f;
-        prev_root_offset_y_ = 0.0f;
-        prev_npivot_set_ = false;
-        prev_npivot_y_set_ = false;
-        prev_frame_idx_ = -1;
-        anim_facing_right_ = facing_right_;
-        if (name != "jump" && name != "jump_away" &&
-            name != "front_flip" && name != "back_flip" &&
-            name != "back_handflip") {
-            jump_y_offset_ = 0.0f;
-        }
+    const std::string prev_anim = current_anim_;
+    const int prev_priority = priority_;
+
+    // The priority gate and the core playback reset live in AnimationPlayer.
+    // This used to be a second, independent copy of that logic here; the two
+    // drifted apart and a fix applied to the player alone had no effect,
+    // because this copy rejected the animation first.
+    if (!anim_player_.play(name, animations, fps, loop, priority)) return;
+
+    if (prev_anim != name) {
+        std::printf("[ANIM] play_animation('%s', loop=%d, prio=%d) — switching from '%s' (prio=%d)\n",
+                    name.c_str(), loop, priority, prev_anim.c_str(), prev_priority);
+    }
+
+    if (first_frame >= 0 && anim_fps_ > 0.0f)
+        anim_time_ = static_cast<float>(first_frame) / anim_fps_;
+
+    // Game-side state that AnimationPlayer does not own.
+    anim_root_dx_ = 0.0f;
+    anim_root_dy_ = 0.0f;
+    prev_root_offset_ = 0.0f;
+    prev_npivot_y_set_ = false;
+    anim_facing_right_ = facing_right_;
+    if (name != "jump" && name != "jump_away" &&
+        name != "front_flip" && name != "back_flip" &&
+        name != "back_handflip") {
+        jump_y_offset_ = 0.0f;
     }
 }
 

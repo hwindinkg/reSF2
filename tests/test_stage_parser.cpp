@@ -3,6 +3,7 @@
 #include "../engine/format/stage_parser.hpp"
 #include <cstdio>
 #include <filesystem>
+#include "check.hpp"
 
 namespace fs = std::filesystem;
 
@@ -64,6 +65,13 @@ int main() {
         }
     }
 
-    std::printf("\n=== Done ===\n");
-    return 0;
+    resf2::test::check_ge(static_cast<double>(data.zones.size()), 5.0,
+                          "stages.xml yields the zone list");
+    resf2::test::check_ge(total_battles, 20.0, "zones contain battles");
+    resf2::test::check_ge(total_fights, 20.0, "battles contain fights");
+    int named = 0;
+    for (const auto& z : data.zones) if (!z.name.empty()) ++named;
+    resf2::test::check_eq(named, static_cast<int>(data.zones.size()),
+                          "every zone has a name");
+    return resf2::test::summary();
 }
