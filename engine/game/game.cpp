@@ -85,6 +85,12 @@ void Game::play_animation(const std::string& name, bool loop, int priority) {
     apply_align(name, move_def, first_frame, prev_anchor_rel_x, prev_anchor_known);
     // Remember whether the move now playing leaves the model with a current
     // node, i.e. whether it declares an <Align> pivot. See apply_align().
+    // Tell the player which node this move pins, so its per-frame root motion
+    // holds that node instead of following NPivot. Empty for the steps.
+    anim_player_.set_align_anchor(
+        (move_def && move_def->has_align && move_def->align_x &&
+         move_def->align_pivot_object == MoveDef::AlignObject::Nodes)
+            ? move_def->moveinside_pivot_node : std::string());
     prev_move_had_align_ = move_def && move_def->has_align &&
                            move_def->align_pivot_object == MoveDef::AlignObject::Nodes &&
                            !move_def->moveinside_pivot_node.empty();
@@ -203,6 +209,10 @@ void Game::apply_align(const std::string& anim_name, const MoveDef* move,
     const float sign = facing_right_ ? 1.0f : -1.0f;
     const float anchor_world_x = player_pos_x_ + sign * prev_anchor_rel_x;
     const float rel_new = ax - px;   // anchor relative to NPivot, model space
+    // The per-frame pinning must continue from exactly this pose, or its first
+    // delta is measured against nothing and the anchor slips by one frame of
+    // animation right after being placed.
+    anim_player_.seed_align_rel(rel_new);
     const float placed = anchor_world_x + sign * move->align_shift_x
                        - sign * rel_new;
 

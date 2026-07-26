@@ -42,6 +42,7 @@ bool AnimationPlayer::play(
     committed_root_x_ = 0.0f;
     prev_root_offset_x_ = 0.0f;
     prev_root_offset_y_ = 0.0f;
+    prev_align_rel_set_ = false;
     return true;
 }
 
@@ -130,6 +131,42 @@ void AnimationPlayer::update(
     // Per-frame root motion delta = CHANGE in absolute offset since last frame.
     // This gives smooth per-frame displacement without snap-back at wrap.
     anim_root_dx_ = absolute_offset_x - prev_root_offset_x_;
+
+    // [ORIGINAL] A move with an <Align> keeps its anchor node planted.
+    //
+    // Model::alignAnimation @ 0x101661d0 places the animation so the anchor
+    // sits on the model's current node; the fighter's position then has to
+    // hold it there, not drift out from under it. Measured in the .bin data,
+    // the drift over one playthrough is:
+    //
+    //     high_punch    NPivot +35.00   NHeel_2 +35.00   (whole body offset)
+    //     front_kick    NPivot +156.00  NHeel_2 +51.54
+    //     step_forward  NPivot +66.00   NHeel_2 +66.00   (no <Align>)
+    //     stance_idle   NPivot   0.00   NHeel_2   0.00
+    //
+    // Following NPivot blindly handed the fighter the anchor's drift as free
+    // travel: every punch moved him 35 units and kept them, so twelve punches
+    // crossed the room — measured, -442.6 to -20.5. Pinning the anchor makes
+    // the body move around the planted foot instead, which is what an attack
+    // looks like. Steps declare no <Align> and are untouched.
+    if (!align_anchor_.empty()) {
+        int anchor_idx = -1;
+        for (int i = 0; i < (int)ordered_node_names.size(); ++i)
+            if (ordered_node_names[i] == align_anchor_) { anchor_idx = i; break; }
+        float ax0, ay0, az0, ax1, ay1, az1;
+        if (anchor_idx >= 0 && anim.get_node_pos(frame_idx, anchor_idx, ax0, ay0, az0)) {
+            if (!anim.get_node_pos(next_idx, anchor_idx, ax1, ay1, az1)) {
+                ax1 = ax0;
+            }
+            // The anchor's X relative to NPivot: world X of the node is
+            // player_pos_x + facing * rel_x, so holding the node still means
+            // moving player_pos_x by -d(rel_x).
+            const float rel_x = (ax0 + (ax1 - ax0) * alpha) - npivot_x;
+            anim_root_dx_ = prev_align_rel_set_ ? -(rel_x - prev_align_rel_x_) : 0.0f;
+            prev_align_rel_x_ = rel_x;
+            prev_align_rel_set_ = true;
+        }
+    }
     anim_root_dy_ = absolute_offset_y - prev_root_offset_y_;
     prev_root_offset_x_ = absolute_offset_x;
     prev_root_offset_y_ = absolute_offset_y;
