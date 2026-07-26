@@ -659,18 +659,23 @@ private:
         const float half_view_w = vw / (2.0f * zoom_);
         const float half_world_w = location_->width * 0.5f;
         float cx = (player_pos_x_ + enemy_pos_x_) * 0.5f;
-        // [ORIGINAL] `Wall` is how far the location's side walls stand in from
-        // the world edge. On dojo Wall=305 against a half-width of 980, which
-        // puts the limit at +-675 — and the wall sprites `left`/`right` are
-        // drawn at X=+-680, spanning +-(648..723). So the camera must be
-        // clamped to the WALL, not to the world edge: clamping to +-980 let
-        // the view run past the wall into the empty strip between it and the
-        // building, where nothing is drawn and the sky showed through. That is
-        // the "location has no walls, you can see its edges" on screen.
-        const float half_playable_w =
-            (location_->wall > 0.0f && location_->wall < half_world_w)
-                ? half_world_w - location_->wall
-                : half_world_w;
+        // The camera clamps to the WORLD edge, not to `Wall`.
+        //
+        // `Wall` (305 on dojo, against a half-width of 980) is where the side
+        // walls stand — the sprites `left`/`right` are drawn at X=+-680. I
+        // briefly clamped the camera to that, because the view was running
+        // into an empty strip where the sky showed through. That was treating
+        // a symptom of a different defect: `bg` and `atlas_layer1` are stored
+        // ROTATED, and the un-rotation was transposing them, so those layers
+        // were painted sideways and left the edges bare. With that fixed the
+        // strip is covered, and the wall clamp only did harm: it narrowed the
+        // camera's travel to +-177 while the midpoint between the fighters
+        // ranges over +-228, so the camera sat against its limit and looked
+        // like it had stopped following the player.
+        //
+        // What `Wall` actually bounds is still open (1.2) — most likely the
+        // FIGHTERS, not the view.
+        const float half_playable_w = half_world_w;
         if (half_view_w >= half_playable_w) {
             cx = 0.0f;
         } else {
@@ -731,33 +736,43 @@ private:
                                 img.class_name.c_str(), img.x, img.y, img.w, img.h,
                                 parallax_shift, img.color.c_str());
                 }
+                // [ORIGINAL] `pixel_1` is a single white texel that params.xml
+                // stretches into a solid box and tints with `Color` — the
+                // location's masking boxes. dojo has four of them, all in the
+                // location colour 0x281409:
+                //     X=-890 W=350 H=860   left of the set
+                //     X= 890 W=350 H=860   right of it
+                //     Y=-426 W=1960 H=400  above it
+                //     Y= 470 W=1960 H=500  below it
+                // They are what hides everything past the edge of the built
+                // scenery, which is why the original never shows sky beyond
+                // the walls.
+                //
+                // This drew them ONLY when the atlas was missing, and then
+                // `continue`d unconditionally — so with the atlas present, i.e.
+                // whenever the location loaded correctly, all four masks were
+                // silently skipped. That is the "you can still see past the
+                // edges of the location" on screen.
                 if (img.class_name == "pixel_1" && !img.color.empty()) {
                     unsigned long col = std::stoul(img.color, nullptr, 16);
                     ren::Color4B c{
                         (std::uint8_t)((col>>16)&0xFF),
                         (std::uint8_t)((col>>8)&0xFF),
                         (std::uint8_t)(col&0xFF), 255};
-                    auto it = assets_->atlases().find(img.atlas_name);
-                    if (it == assets_->atlases().end()) {
-                        // No atlas: render as a solid world-space rect.
-                        float hw = (float)platform_->window_width()  / (2.0f * zoom_);
-                        float hh = (float)platform_->window_height() / (2.0f * zoom_);
-                        float left = cam_x_ - hw, right = cam_x_ + hw;
-                        float bottom = cam_y_ - hh, top = cam_y_ + hh;
-                        // params.xml uses Y-DOWN (Y=0 at top, positive Y = down).
-                        // Our world is Y-UP (positive Y = up). Invert: world_y = -img.y
-                        // Player at y=-93 in params → world y=+93 (above center). Correct.
-                        // Floor at y=225 in params → world y=-225 (below center). Correct.
-                        float world_x = img.x - parallax_shift;
-                        float world_y = -img.y;
-                        float sx = (world_x - img.w/2.0f - left) / (right - left) * platform_->window_width();
-                        float sy = (1.0f - (world_y - img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
-                        float ex = (world_x + img.w/2.0f - left) / (right - left) * platform_->window_width();
-                        float ey = (1.0f - (world_y + img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
-                        float x = std::min(sx, ex), y = std::min(sy, ey);
-                        float w = std::abs(ex - sx), h = std::abs(ey - sy);
-                        renderer_->draw_filled_rect_screen(x, y, w, h, c);
-                    }
+                    const float hw = (float)platform_->window_width()  / (2.0f * zoom_);
+                    const float hh = (float)platform_->window_height() / (2.0f * zoom_);
+                    const float left = cam_x_ - hw, right = cam_x_ + hw;
+                    const float bottom = cam_y_ - hh, top = cam_y_ + hh;
+                    // params.xml uses Y-DOWN, the world is Y-UP: world_y = -img.y.
+                    const float world_x = img.x - parallax_shift;
+                    const float world_y = -img.y;
+                    const float sx = (world_x - img.w/2.0f - left) / (right - left) * platform_->window_width();
+                    const float sy = (1.0f - (world_y - img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
+                    const float ex = (world_x + img.w/2.0f - left) / (right - left) * platform_->window_width();
+                    const float ey = (1.0f - (world_y + img.h/2.0f - bottom) / (top - bottom)) * platform_->window_height();
+                    const float x = std::min(sx, ex), y = std::min(sy, ey);
+                    const float bw = std::abs(ex - sx), bh = std::abs(ey - sy);
+                    renderer_->draw_filled_rect_screen(x, y, bw, bh, c);
                     continue;
                 }
                 auto it = assets_->atlases().find(img.atlas_name);
