@@ -734,24 +734,25 @@ void Game::init_location() {
                 // Offset from enemy_y: -24 - (-105) = 81.
                 // bag_cy = enemy_y + 81.
                 //
-                // X offset: align bag with holder (layer_5 at x=-10).
-                // bag_cx = enemy_x - offset = -10 → offset = enemy_x + 10 = 983.
-                const float X_OFFSET = 983.0f;  // aligns bag with ceiling holder
-                player_pos_x_ = location_->player_x - X_OFFSET;
+                // [ORIGINAL] Location::load (ShadowFight2.s86 FUN_10144420) reads
+                //   +0x2c Floor, +0x34 Wall, +0x38 Width, +0x3c Height,
+                //   +0x40 MinWidth (defaults to Width), +0x44 MinWidth/Width.
+                // Layer <Image> X is centred on the world origin, but ModelsViewer
+                // positions are measured from the LEFT edge, so world_x = X - Width/2.
+                // Check on dojo: enemy 973 - 1960/2 = -7, and the ceiling hook the
+                // bag hangs from is drawn at layer_3 X=-10 — they agree to 3 units.
+                // (The previous X_OFFSET = 983 was this same value hand-fitted.)
+                const float half_world_w = location_->width * 0.5f;
+                player_pos_x_ = location_->player_x - half_world_w;
                 player_pos_y_ = location_->player_y;  // no invert (matches location rendering)
                 // [ORIGINAL] Enemy fighter position: same as the punching bag/enemy
-                // spawn point from params.xml (enemy_x - X_OFFSET). The enemy
-                // skeleton stands here and AI controls its behavior.
-                enemy_pos_x_ = location_->enemy_x - 983.0f;
+                // spawn point from params.xml. The enemy skeleton stands here and
+                // AI controls its behavior.
+                enemy_pos_x_ = location_->enemy_x - half_world_w;
                 enemy_pos_y_ = location_->enemy_y;  // use enemy Y from params.xml (not player Y)
                 enemy_facing_right_ = false;  // faces left toward player
             }
-            // Camera: follow player but keep a proper Y that shows the floor.
-            // The dojo floor (layer_3) is at world Y ≈ -193. Player at Y ≈ -93.
-            // Camera Y should be around -50 to show player + floor + ceiling.
-            cam_x_ = player_pos_x_ + 200.0f;
-            cam_y_ = -50.0f;  // shows floor and character properly
-            zoom_ = 1.0f;
+            update_camera();
 
             // Play start stance animation (from moves.xml: FistsStartStance-Right)
             // This is the intro animation before the fight begins.
@@ -1666,7 +1667,7 @@ void Game::host_update_gameplay(uint32_t dt) {
     // Camera follows player (always update, even after attack)
     // [ORIGINAL] Screen shake on hit: offset camera by a decaying random
     // amount when player_hit_flash_ or enemy_hit_flash_ is active.
-    cam_x_ = player_pos_x_ + 200.0f;
+    update_camera();
     float shake = 0.0f;
     if (player_hit_flash_ > 0) shake = std::max(shake, player_hit_flash_ * 12.0f);
     if (enemy_hit_flash_ > 0) shake = std::max(shake, enemy_hit_flash_ * 8.0f);

@@ -577,6 +577,67 @@ private:
         std::printf("  Atlas '%s' NOT FOUND\n", name.c_str());
     }
 
+    // Recompute the world→viewport transform for the current location.
+    //
+    // [ORIGINAL] Location::load (ShadowFight2.s86 FUN_10144420) stores the
+    // location box as +0x38 Width ("whole world width") and +0x3c Height
+    // ("whole world height"). World units are location-atlas texels: every
+    // <Image> in params.xml carries its source size in the same units. The
+    // viewport therefore has to show exactly `Height` world units vertically —
+    // the location's top layer draws mask rectangles (ClassName="pixel_1")
+    // over everything outside that box so wider or taller screens stay clean.
+    //
+    // The previous code left zoom at 1.0, i.e. one world unit per screen
+    // pixel, so on a 712 px tall window it showed 712 world units instead of
+    // 560 — everything came out 1.27x too small and vertically off-centre.
+    void update_camera() {
+        cam_y_ = 0.0f;
+        if (!location_ || location_->height <= 0.0f || !platform_) {
+            zoom_ = 1.0f;
+            cam_x_ = player_pos_x_;
+            return;
+        }
+        const float vw = static_cast<float>(platform_->window_width());
+        const float vh = static_cast<float>(platform_->window_height());
+
+        // Vertical framing: show the full world height, centred on the origin.
+        //
+        // [HEURISTIC-TODO] This is the right order of magnitude but not yet the
+        // original's exact frame. Two things are still unresolved and have to
+        // be reversed out of Fight (ShadowFight2.s86 FUN_100b3860 — Location*
+        // at +0x24c, embedded Camera at +0x250):
+        //   1. the visible band may be narrower than Height — the location
+        //      draws full-width mask rectangles (ClassName="pixel_1") at world
+        //      y >= +226 and y <= -220, leaving 446 of the 560 units. Framing
+        //      to that gap alone overshoots, so the rule involves Wall (305)
+        //      and/or Floor (80) too.
+        //   2. the fighter's model-space -> world-space mapping puts its feet
+        //      at world ~-276 while player_pos_y - 96 says -189, so the sprite
+        //      transform is off by ~87 units independently of the camera. That
+        //      has to be fixed before the frame can be judged.
+        zoom_ = vh / location_->height;
+
+        // [HEURISTIC-TODO] Framing rule not yet confirmed against the binary.
+        // The original drives its Camera object (ShadowFight2.s86 ctor
+        // FUN_10070270, owned by Fight FUN_100b3860) through the animation
+        // system — it has "Camera"/"Position" slots — so the exact follow law
+        // still has to be reversed. Centring on the midpoint of the two
+        // fighters reproduces the reference framing: with dojo's player at
+        // world -290 and enemy at -7 it puts them at ~36% / ~64% of the
+        // screen width, matching the original's first-launch screenshot.
+        const float half_view_w = vw / (2.0f * zoom_);
+        const float half_world_w = location_->width * 0.5f;
+        float cx = (player_pos_x_ + enemy_pos_x_) * 0.5f;
+        if (half_view_w >= half_world_w) {
+            cx = 0.0f;
+        } else {
+            const float lo = -half_world_w + half_view_w;
+            const float hi = half_world_w - half_view_w;
+            cx = (cx < lo) ? lo : ((cx > hi) ? hi : cx);
+        }
+        cam_x_ = cx;
+    }
+
     void render_location() {
         if (!location_) return;
         // Render ALL layers with parallax support.
