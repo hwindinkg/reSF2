@@ -2761,23 +2761,37 @@ private:
         const float box_x = win_w - box_w - win_w * 0.03f;
         const float box_y = win_h * 0.11f;
 
-        auto* paper_l = tex_of("Paper_left");
-        auto* paper_r = tex_of("Paper_right");
-        if (paper_l && paper_r) {
-            const float half = box_w * 0.5f;
-            renderer_->draw_textured_quad_screen(*paper_l, box_x, box_y, half, box_h);
-            renderer_->draw_textured_quad_screen(*paper_r, box_x + half, box_y, half, box_h);
-        } else {
-            renderer_->draw_filled_rect_screen(box_x, box_y, box_w, box_h,
-                                               {232, 214, 176, 245});
+        // Sheet. Paper_left / Paper_right are narrow vertical strips
+        // (116 x 1524) — the sheet's side edges, not two halves of it. Drawing
+        // them as halves stretched a 1:13 strip into a 4:1 box and produced a
+        // dark smear. They are drawn at the edges and the middle is filled with
+        // parchment.
+        renderer_->draw_filled_rect_screen(box_x, box_y, box_w, box_h,
+                                           {226, 205, 163, 250});
+        if (auto* paper_l = tex_of("Paper_left")) {
+            const float ew = box_h * (116.0f / 1524.0f) * 6.0f;
+            renderer_->draw_textured_quad_screen(*paper_l, box_x, box_y, ew, box_h);
+        }
+        if (auto* paper_r = tex_of("Paper_right")) {
+            const float ew = box_h * (116.0f / 1524.0f) * 6.0f;
+            renderer_->draw_textured_quad_screen(*paper_r, box_x + box_w - ew, box_y,
+                                                 ew, box_h);
         }
 
-        // Rolled bar along the left edge of the sheet.
+        // Rolled bar across the top: a 3-slice with fixed ends (156 x 74) and a
+        // tileable centre (688 x 74).
+        auto* roll_l = tex_of("Roll_left");
         auto* roll_c = tex_of("Roll_center");
-        if (roll_c) {
-            const float rw = box_h * 0.16f;
-            renderer_->draw_textured_quad_screen(*roll_c, box_x - rw * 0.4f, box_y,
-                                                 rw, box_h);
+        auto* roll_r = tex_of("Roll_right");
+        if (roll_l && roll_c && roll_r) {
+            const float bar_h = box_h * 0.30f;
+            const float end_w = bar_h * (156.0f / 74.0f);
+            const float bar_y = box_y - bar_h * 0.55f;
+            renderer_->draw_textured_quad_screen(*roll_l, box_x, bar_y, end_w, bar_h);
+            renderer_->draw_textured_quad_screen(*roll_c, box_x + end_w, bar_y,
+                                                 box_w - 2.0f * end_w, bar_h);
+            renderer_->draw_textured_quad_screen(*roll_r, box_x + box_w - end_w, bar_y,
+                                                 end_w, bar_h);
         }
 
         // Speaker portrait on the left of the sheet.
