@@ -111,6 +111,18 @@ public:
     void set_priority(int p) { priority_ = p; }
     int& mutable_priority() { return priority_; }
 
+    // [ORIGINAL] The <Align> anchor of the move being played, or "" when the
+    // move declares none. An aligned move keeps that node pinned; an
+    // unaligned one (the steps) carries its motion in the animation data.
+    void set_align_anchor(const std::string& node) { align_anchor_ = node; }
+    const std::string& align_anchor() const { return align_anchor_; }
+    // Seed the pinning with the pose the one-shot placement was computed for,
+    // so the first frame's delta is measured against it rather than skipped.
+    void seed_align_rel(float rel_x) {
+        prev_align_rel_x_ = rel_x;
+        prev_align_rel_set_ = true;
+    }
+
     // Play a named animation (looked up in the animations map)
     bool play(
         const std::string& name,
@@ -172,6 +184,9 @@ private:
     float y_adjust_smoothed_ = 4.0f;
     float stance_npivot_y_ = 106.0f;
     float anim_npivot_bin_y_ = 106.0f;
+    std::string align_anchor_;        // node the current move pins, or empty
+    float prev_align_rel_x_ = 0.0f;   // its X relative to NPivot, last frame
+    bool prev_align_rel_set_ = false;
     uint64_t total_frame_count_ = 0;
     std::string last_logged_anim_;
 };

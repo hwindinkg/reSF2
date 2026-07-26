@@ -10,8 +10,8 @@
 # puts the punch well inside contact range, so the test now fails only if the
 # punch genuinely stops working.
 frame 200 keydown D
-frame 400 keyup D
-frame 420 keydown Space
-frame 430 keyup Space
-frame 480 keydown Space
-frame 490 keyup Space
+frame 470 keyup D
+frame 490 keydown Space
+frame 500 keyup Space
+frame 550 keydown Space
+frame 560 keyup Space
