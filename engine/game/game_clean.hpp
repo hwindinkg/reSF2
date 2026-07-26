@@ -3449,7 +3449,13 @@ private:
         }
     }
 
-    Overlay overlay_ = Overlay::None;
+    // [ORIGINAL] The very first visit to the dojo opens with the sensei's
+    // scroll — "Сначала покажи, как ты двигаешься!" — which is what the
+    // reference screenshot of a first launch shows. It stays up until the
+    // player moves, and never comes back once they have. Progress-driven
+    // tutorial steps beyond this one are 7.3.
+    Overlay overlay_ = Overlay::Dialog;
+    bool intro_hint_dismissed_ = false;
     float menu_anim_progress_ = 0.0f;  // 0 = collapsed, 1 = fully expanded
     bool loc_icons_logged = false;  // one-shot diagnostic for menu icon sizes
     float load_scale_ = 1.0f, zoom_ = 1.0f;

@@ -411,7 +411,12 @@ void Game::host_load_location() {
 }
 
 void Game::host_reset_menu_state() {
-    overlay_ = Overlay::None;
+    // [ORIGINAL] Entering the dojo clears whatever overlay a previous scene
+    // left open — except the very first time, when the dojo opens ON the
+    // sensei's scroll. Resetting unconditionally is why the intro scroll never
+    // appeared: it was raised at construction and cleared before the first
+    // frame was ever drawn.
+    overlay_ = intro_hint_dismissed_ ? Overlay::None : Overlay::Dialog;
             menu_anim_progress_ = 0.0f;
 }
 
@@ -1371,6 +1376,14 @@ void Game::host_update_gameplay(uint32_t dt) {
     if (touch_.dir_x > kStickDeadzone) key_right = true;
     if (touch_.dir_y < -kStickDeadzone) key_up = true;
     if (touch_.dir_y > kStickDeadzone) key_down = true;
+
+    // [ORIGINAL] The intro scroll asks the player to move; it goes away the
+    // moment they do, and does not come back. Keyed on movement rather than on
+    // a timer so it reads as an instruction that was followed.
+    if (!intro_hint_dismissed_ && (key_left || key_right || key_up || key_down)) {
+        intro_hint_dismissed_ = true;
+        if (overlay_ == Overlay::Dialog) overlay_ = Overlay::None;
+    }
 
     // Convert absolute directions to relative (Forward/Back)
     bool key_forward = facing_right_ ? key_right : key_left;
