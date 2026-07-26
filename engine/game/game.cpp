@@ -1405,13 +1405,13 @@ void Game::host_update_gameplay(uint32_t dt) {
     // It is folded into the same four booleans the keyboard produces, so the
     // combat state machine below has ONE input path rather than two — the
     // duplication that has hidden a bug five times in this codebase already.
-    // The 0.4 deadzone keeps a resting thumb from walking the fighter.
+    // The quantisation (dead zone and sector widths) is the original's, read
+    // out of internalSettings.xml — see update_touch_controls.
     update_touch_controls(input);
-    constexpr float kStickDeadzone = 0.4f;
-    if (touch_.dir_x < -kStickDeadzone) key_left = true;
-    if (touch_.dir_x > kStickDeadzone) key_right = true;
-    if (touch_.dir_y < -kStickDeadzone) key_up = true;
-    if (touch_.dir_y > kStickDeadzone) key_down = true;
+    if (touch_.left) key_left = true;
+    if (touch_.right) key_right = true;
+    if (touch_.up) key_up = true;
+    if (touch_.down) key_down = true;
 
     // [ORIGINAL] The intro scroll asks the player to move; it goes away the
     // moment they do, and does not come back. Keyed on movement rather than on
@@ -1482,30 +1482,36 @@ void Game::host_update_gameplay(uint32_t dt) {
     // Note: Removed sticky key buffer — it caused unwanted repeat attacks.
     // GetAsyncKeyState is reliable; the original issue was elsewhere.
 
-    // [HEURISTIC-TODO] step_min_played: invented 400ms threshold to prevent
-    // tap-to-cancel of step animations. The original engine gates move
-    // transitions via the Uninterrupt interval in moves.xml (each Move's
-    // <Interval Name="Uninterrupt" Start=".." End=".."/>). Once combat
-    // logic migrates to use MoveDef::intervals (the full interval vector
-    // populated by the xml_doc pass), this 400ms heuristic should be
-    // replaced by: `is_in_uninterrupt(current_move_, anim_time_)`.
-    if (move_state_ == 1 || move_state_ == 2) {
-        input_handler_.set_step_play_time(input_handler_.step_play_time() + dt);
-    } else {
-        input_handler_.set_step_play_time(0);
-    }
-    bool step_min_played = input_handler_.step_play_time() >= 400;
+    // [ORIGINAL] A step is interruptible the moment the key is released.
+    //
+    // moves.xml decides this per move, and `StepForward` / `StepBack` declare
+    // NO intervals at all — no Uninterrupt, no SemiUninterrupt, nothing. Only
+    // `DoubleStepForward` (the dash) locks itself down:
+    //     <Interval Name="SemiUninterrupt" End="2"/>
+    //     <Interval Name="Uninterrupt" Start="3" End="9"/>
+    //     <Interval Name="SelfUninterrupt" Start="10" End="12"/>
+    //
+    // There used to be an invented 400 ms minimum here, so a plain step kept
+    // walking for up to four tenths of a second after the key came up and
+    // could not be reversed inside that window. That is the largest single
+    // reason the controls felt sticky. The dash is still protected, by
+    // move_state_ 10 plus is_uninterrupt_, which read the real intervals.
+    input_handler_.set_step_play_time(
+        (move_state_ == 1 || move_state_ == 2)
+            ? input_handler_.step_play_time() + dt : 0);
+    const bool step_min_played = true;
 
-    // [HEURISTIC-TODO] fwd_held_ms_/back_held_ms_: invented 200ms latch
-    // for direction keys. The original engine reads key state per-frame
-    // via the Marmalade keypad (dz_keypad_update_decompiled.c) with no
-    // latch — combos are gated by CurrentAnimation conditions, not key
-    // history. Remove this latch once combo logic uses MoveQuery with
-    // required_current_animation from moves.xml <Conditions>.
-    if (key_forward) input_handler_.set_fwd_held_ms(200);
-    else if (input_handler_.fwd_held_ms() > 0) input_handler_.set_fwd_held_ms(input_handler_.fwd_held_ms() - (int)dt);
-    if (key_back) input_handler_.set_back_held_ms(200);
-    else if (input_handler_.back_held_ms() > 0) input_handler_.set_back_held_ms(input_handler_.back_held_ms() - (int)dt);
+    // [ORIGINAL] Direction is read per frame, with no latch.
+    //
+    // There used to be a 200 ms latch here: releasing forward left
+    // `fwd_held_ms_` counting down, so the step state machine still saw the
+    // key held for a fifth of a second. Combined with the 400 ms step minimum
+    // removed above, a step ran on for up to 13 frames after the key came up —
+    // measured on the scripted trace, key up at frame 230 and the walk ending
+    // at 243. The original gates combos on CurrentAnimation conditions from
+    // moves.xml, not on key history, so nothing needs the latch.
+    input_handler_.set_fwd_held_ms(key_forward ? 1 : 0);
+    input_handler_.set_back_held_ms(key_back ? 1 : 0);
 
     // === DYNAMIC MOVE SELECTION (from moves.xml) ===
     // The engine reads ALL moves from moves.xml at load time, including

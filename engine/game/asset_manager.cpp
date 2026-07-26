@@ -36,7 +36,11 @@ void AssetManager::load_atlas(const std::string& name, const std::string& loc,
         auto pp = dir/(name+".plist"), pn = dir/(name+".png");
         if (std::filesystem::exists(pp) && std::filesystem::exists(pn)) {
             auto result = plist::parse(read_text(pp.string()));
-            if (!result) continue;
+            if (!result) {
+                std::fprintf(stderr, "[atlas] '%s': %s did not parse\n",
+                             name.c_str(), pp.string().c_str());
+                continue;
+            }
             auto png_data = read_file(pn.string());
             int aw, ah, ach;
             auto* atlas_px = stbi_load_from_memory(
@@ -1154,13 +1158,35 @@ void AssetManager::load_hud_font(const std::string& asset_root) {
             }
         }
     }
-    if (fnt_path.empty()) return;
+    // Every failure here used to be a bare `return`. If the font does not load,
+    // EVERY string in the game silently disappears — the HUD numerals, the
+    // scroll captions, the map labels — and nothing says why. That is the same
+    // class of defect as the masking boxes and the fight-button atlas.
+    if (fnt_path.empty()) {
+        std::fprintf(stderr, "[font] no .fnt found; tried %zu paths under %s\n",
+                     candidates.size(), asset_root.c_str());
+        for (const auto& p : candidates)
+            std::fprintf(stderr, "[font]   %s\n", p.string().c_str());
+        return;
+    }
+    if (png_path.empty()) {
+        std::fprintf(stderr, "[font] '%s' has no page texture next to it\n",
+                     fnt_path.c_str());
+        return;
+    }
     auto result = font::parse(read_text(fnt_path));
-    if (!result) return;
+    if (!result) {
+        std::fprintf(stderr, "[font] '%s' did not parse\n", fnt_path.c_str());
+        return;
+    }
     hud_font_ = std::make_shared<font::ParsedFont>(std::move(*result));
     auto png_data = read_file(png_path);
     auto tex = std::make_unique<ren::Texture2D>();
-    if (!tex->init_from_png((const uint8_t*)png_data.data(), png_data.size())) return;
+    if (!tex->init_from_png((const uint8_t*)png_data.data(), png_data.size())) {
+        std::fprintf(stderr, "[font] page '%s' did not decode (%zu bytes)\n",
+                     png_path.c_str(), png_data.size());
+        return;
+    }
     hud_font_tex_ = std::move(tex);
     std::printf("  HUD font loaded: %s (%zu glyphs)\n",
                 fnt_path.c_str(), hud_font_->chars.size());
