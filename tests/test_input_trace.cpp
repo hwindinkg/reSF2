@@ -137,5 +137,51 @@ int main(int argc, char** argv) {
     }
     check_ge(px_at_idle2 - px_at_walk, 30.0, "walking forward moves the fighter to the right");
 
+    // ------------------------------------------------------------- combat run
+    // Walk up to the punching bag and hit it. With a scripted run the timestep
+    // is fixed, so this is reproducible: the same frame count, the same hit and
+    // the same bag displacement to three decimals on every run. Before that was
+    // true, a marginal collision landed in some runs and not others, and the
+    // bag looked as if it never reacted.
+    const std::string script2 = root + "/tests/data/input_walk_and_punch_bag.txt";
+    const std::string out2 = root + "/build/input_trace_combat.out";
+    const std::string cmd2 = "\"\"" + app + "\" --assets \"" + root +
+                             "\" --input-script \"" + script2 +
+                             "\" --max-frames 900 --dump-state --no-log > \"" +
+                             out2 + "\" 2>&1\"";
+    check(std::system(cmd2.c_str()) == 0, "combat run exited cleanly");
+
+    std::ifstream f2(out2);
+    check(f2.good(), "combat trace was produced");
+    if (!f2.good()) return resf2::test::summary();
+
+    const std::regex re_bag(R"(\[STATE\] f=(\d+) .* bag_move=([-\d.]+))");
+    int combat_frames = 0, combat_hits = 0;
+    float bag_before = -1.0f, bag_max = 0.0f;
+    int first_hit_frame = -1, last_frame = 0;
+    while (std::getline(f2, line)) {
+        if (line.find("[COMBAT] HIT") != std::string::npos) ++combat_hits;
+        std::smatch m;
+        if (!std::regex_search(line, m, re_bag)) continue;
+        ++combat_frames;
+        const int fr = std::stoi(m[1]);
+        const float mv = std::stof(m[2]);
+        last_frame = fr;
+        // Settled displacement before any punch can land.
+        if (fr == 300) bag_before = mv;
+        if (mv > bag_max) bag_max = mv;
+        if (combat_hits > 0 && first_hit_frame < 0) first_hit_frame = fr;
+    }
+
+    check_ge(static_cast<double>(combat_frames), 550.0,
+             "the combat run reached the end of its script");
+    check(combat_hits >= 1, "the punch registers a collision with the bag");
+    check(bag_before >= 0.0f && bag_before < 5.0f,
+          "the bag hangs still before the punch (settled displacement < 5)");
+    check_ge(bag_max, 50.0,
+             "the punch visibly swings the bag (peak displacement from rest)");
+    std::printf("combat: %d frames, %d hit(s), bag rest=%.2f peak=%.2f, last frame %d\n",
+                combat_frames, combat_hits, bag_before, bag_max, last_frame);
+
     return resf2::test::summary();
 }

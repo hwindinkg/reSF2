@@ -68,6 +68,12 @@ int main(int argc, char* argv[]) {
         auto now = platform->now_ms();
         auto dt = (std::min)(now > last_ms ? (uint32_t)(now - last_ms) : 0u, 200u);
         last_ms = now;
+        // A scripted run is a measurement, so it must not depend on how fast
+        // this machine happens to render. With the wall clock the physics
+        // stepped differently every time and a marginal collision landed in
+        // some runs and not others — which is how "the bag never reacts" was
+        // measured from a run where the punch simply missed.
+        if (!input_script_path.empty()) dt = 16;
         game.on_update(*platform, dt);
         game.on_render(*platform);
         platform->swap_buffers();
