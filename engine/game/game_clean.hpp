@@ -1794,6 +1794,8 @@ private:
             bag_constraints_.push_back(c);
         }
         bag_verlet_init_ = true;
+        bag_rest_.clear();
+        for (const auto& [n, v] : bag_verlet_) bag_rest_[n] = {v.x, v.y};
         // The bag's world box, printed so it can be compared against the
         // fighter's without a screenshot: an attack has to physically reach it.
         float bx0 = 0, bx1 = 0, by0 = 0, by1 = 0;
@@ -1925,6 +1927,25 @@ private:
         }
     }
     int bag_diag_ticks_ = 0;
+    // Rest positions captured at init, so displacement from rest is measurable.
+    // bag_angle_ belongs to an older pendulum model that the Verlet path never
+    // writes — it stays 0.0 no matter how hard the bag is hit, which made it
+    // look for two sessions as though the bag was never touched.
+    std::unordered_map<std::string, std::pair<float, float>> bag_rest_;
+
+    // Largest distance any bag node has moved from its rest position.
+    float bag_displacement() const {
+        float worst = 0.0f;
+        for (const auto& [n, v] : bag_verlet_) {
+            auto it = bag_rest_.find(n);
+            if (it == bag_rest_.end()) continue;
+            const float dx = v.x - it->second.first;
+            const float dy = v.y - it->second.second;
+            const float d = std::sqrt(dx * dx + dy * dy);
+            if (d > worst) worst = d;
+        }
+        return worst;
+    }
 
     void render_punching_bag() {
         if (!assets_->bag_model() || !location_) return;

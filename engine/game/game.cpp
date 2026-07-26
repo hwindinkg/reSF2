@@ -1835,19 +1835,34 @@ void Game::host_update_gameplay(uint32_t dt) {
                     auto pv = assets_->skeleton_nodes().find("NPivot");
                     float ply = pv != assets_->skeleton_nodes().end() ? pv->second.y
                                                                      : stance_npivot_y_;
+                    // Furthest reach across ALL attacking edges and both of
+                    // their endpoints — printing only the first edge's End1
+                    // (the elbow) understates the reach by the whole forearm.
+                    float best_x = 0.0f, best_y = 0.0f, best_r = 0.0f;
+                    std::string best_node;
+                    bool have = false;
                     for (const auto& en : move_it->second.attack_edges) {
                         auto se = assets_->skeleton_edges().find(en);
                         if (se == assets_->skeleton_edges().end()) continue;
-                        if (!anim_node_pos_.count(se->second.end1)) continue;
-                        auto [lx, ly] = resolve_body_node(se->second.end1, player_pos_x_,
-                                                          player_pos_y_ + y_adjust_smoothed_,
-                                                          facing_right_, ply);
-                        std::printf("[ATK] f=%llu frame=%d edge=%s limb=(%.0f,%.0f) "
-                                    "bag=[%.0f..%.0f, %.0f..%.0f] r=%.1f\n",
+                        for (const std::string& nn : {se->second.end1, se->second.end2}) {
+                            if (nn.empty() || !anim_node_pos_.count(nn)) continue;
+                            auto [lx, ly] = resolve_body_node(nn, player_pos_x_,
+                                                              player_pos_y_ + y_adjust_smoothed_,
+                                                              facing_right_, ply);
+                            const bool further = facing_right_ ? (lx > best_x) : (lx < best_x);
+                            if (!have || further) {
+                                best_x = lx; best_y = ly; best_r = se->second.radius;
+                                best_node = nn; have = true;
+                            }
+                        }
+                    }
+                    if (have) {
+                        const float gap = facing_right_ ? (bx0 - best_x) : (best_x - bx1);
+                        std::printf("[ATK] f=%llu frame=%d reach=%s at (%.0f,%.0f) r=%.1f "
+                                    "bag=[%.0f..%.0f, %.0f..%.0f] gapX=%.0f px=%.0f\n",
                                     (unsigned long long)total_frame_count_, current_frame,
-                                    en.c_str(), lx, ly, bx0, bx1, by0, by1,
-                                    se->second.radius);
-                        break;
+                                    best_node.c_str(), best_x, best_y, best_r,
+                                    bx0, bx1, by0, by1, gap, player_pos_x_);
                     }
                 }
                 if (in_attack_interval && !hit_this_interval_) {
@@ -1868,7 +1883,16 @@ void Game::host_update_gameplay(uint32_t dt) {
                             int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
                             play_sound("f_pl_attack" + std::to_string(snd_idx), 0.7f);
                             play_sound("armor", 0.5f);
-                            hit_this_interval_ = true;  // prevent multi-hit per frame
+                            // Do NOT set hit_this_interval_ here. That flag gates
+                            // the whole block, so a distance hit on the enemy used
+                            // to close the window before the bag's own collision
+                            // test ever ran. In the dojo the enemy and the bag sit
+                            // at the same spot (world x = -7), so the enemy check
+                            // fired first every time and the bag never moved.
+                            // Measured: the enemy hit landed on frame 369, and the
+                            // fingertips came within 19 units of the bag on frame
+                            // 370 — a frame that was never evaluated.
+                            // The enemy has its own re-hit guard (invuln_time).
                             // Spawn hit sparks at enemy position
                             spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
                             debug_log("[HIT] f=%llu move='%s' hit enemy dist=%.1f\n",
@@ -2088,12 +2112,12 @@ void Game::host_update_gameplay(uint32_t dt) {
         // FirstFrame (where playback starts) and the Attack interval in frame
         // numbers, so a test can check the engine honours all three.
         std::printf("[STATE] f=%llu ms=%d ha=%u anim='%s' move='%s' px=%.1f py=%.1f "
-                    "af=%.2f fps=%.2f bag_hit=%d bag_angle=%.3f nv=%zu\n",
+                    "af=%.2f fps=%.2f bag_hit=%d bag_move=%.2f nv=%zu\n",
                     (unsigned long long)total_frame_count_, move_state_, hit_anim_,
                     current_anim_.c_str(), current_move_.c_str(),
                     player_pos_x_, player_pos_y_,
                     anim_time_ * anim_fps_, anim_fps_,
-                    (int)hit_this_interval_, bag_angle_, bag_verlet_.size());
+                    (int)hit_this_interval_, bag_displacement(), bag_verlet_.size());
     }
 }
 
