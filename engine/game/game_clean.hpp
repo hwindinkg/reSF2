@@ -34,6 +34,7 @@
 #include "engine/format/list_parser.hpp"
 #include "engine/audio/audio.hpp"
 #include "save.hpp"
+#include "ui_scale.hpp"
 #include "player.hpp"
 #include "inventory.hpp"
 #include "shop.hpp"
@@ -2685,60 +2686,70 @@ private:
         if (!platform_) return c;
         const float w = static_cast<float>(platform_->window_width());
         const float h = static_cast<float>(platform_->window_height());
-        // [ORIGINAL] The attack buttons are laid out by
-        // `GameController::layoutButtons` @ 0x10046f40, against a parent
-        // anchored at the BOTTOM-RIGHT corner (X grows leftwards as negative,
-        // Y upwards):
+        // [ORIGINAL] ActionButtons::layout @ 0x10046f40 positions the buttons
+        // against a parent at the BOTTOM-RIGHT screen corner, in POINTS of the
+        // 768-tall layout space (ui_scale.hpp), sprites anchored at center:
         //
-        //     kick ->setPosition(-140,            kick.height  * 0.5)
+        //     kick ->setPosition(-140,             kick.height * 0.5)
         //     punch->setPosition(-punch.width*0.5, 140)
-        //     throw->setPosition(kick.x  - 35, kick.y  + 117)   // when enabled
+        //     throw->setPosition(kick.x  - 35, kick.y  + 117)
         //     magic->setPosition(punch.x - 35, punch.y + 117)
         //
-        // So the punch button hugs the right edge 140 up from the bottom, and
-        // the kick button hugs the bottom 140 in from the right — an L, not the
-        // side-by-side row this used to guess at. Both frames are 206x206 in
-        // the 1536 atlas (batchButtonsFight.plist), the stick ring is 470x470
-        // and its knob 226x226.
+        // So the kick button RESTS on the bottom edge 140 points in from the
+        // right, the punch button is FLUSH against the right edge 140 points
+        // up, and throw/magic step up-and-left from each by (-35, +117).
+        // Sprite sizes are in points too: a 206x206 frame of the 1536 atlas
+        // (batchButtonsFight.plist) is 103 points across, so punch and kick
+        // centers end up ~125 points apart with a clean gap — the earlier
+        // "offsets put them on top of each other" reading treated the numbers
+        // as 1536-atlas pixels, which is the wrong unit, and the placement
+        // measured off screenshots that replaced it is gone too.
         //
-        // So there are FOUR buttons, not two: punch and kick at the bottom,
-        // then throw and magic stepped up-and-left from them by the same
-        // (-35, +117). It is a vertical ARC hugging the right edge, and throw
-        // and magic only appear when a ranged weapon or magic is equipped —
-        // which is why a fresh profile shows two buttons and not four.
-        //
-        // Taken literally, though, those offsets put punch and kick 52 units
-        // apart while each sprite is 206 across: at any scale the two would sit
-        // almost on top of each other in the corner. Applying them directly
-        // produced exactly that. So the parent these positions are relative to
-        // is not simply the screen corner, and THAT part is still unreversed.
-        //
-        // [HEURISTIC-TODO] Until it is, the placement below is measured off the
-        // reference screenshot: both buttons the same size (they are, 206x206
-        // — the visible disc is smaller than the frame, which is why they can
-        // touch), the fist low on the right edge and the foot up and left of
-        // it. The arc DIRECTION is the binary's; the anchor and scale are ours.
-        c.stick_r = h * 0.150f;
+        // Slot->button mapping in the ctor 0x10046840: +0x118 kick (tag 10),
+        // +0x11c punch (tag 9), +0x120 throw, +0x124 magic. Throw and magic
+        // are positioned either way but shown only when the matching slot is
+        // equipped, which is why a fresh profile sees two buttons, not four.
+        const float pts = ui::points_scale(h);   // screen px per point
+
+        // Sprite sizes come from the textures themselves (atlas px / content
+        // scale = points), like the original's getContentSize(); the plist
+        // sizes are only the fallback for a missing atlas.
+        auto side_pts = [&](const char* n, float fallback_px) {
+            float px = fallback_px;
+            if (assets_) {
+                auto it = assets_->hud_textures().find(n);
+                if (it != assets_->hud_textures().end() && it->second &&
+                    it->second->height() > 0)
+                    px = static_cast<float>(it->second->height());
+            }
+            return px / ui::kHighTierContentScale;
+        };
+        const float punch_pts = side_pts("btn_punch_normal", 206.0f);
+        const float kick_pts = side_pts("btn_kick_normal", 206.0f);
+
+        // Screen Y grows downward, the original's Y up: y_screen = h - y_pts.
+        c.punch_r = punch_pts * 0.5f * pts;
+        c.kick_r = kick_pts * 0.5f * pts;
+        c.punch_cx = w - punch_pts * 0.5f * pts;
+        c.punch_cy = h - 140.0f * pts;
+        c.kick_cx = w - 140.0f * pts;
+        c.kick_cy = h - kick_pts * 0.5f * pts;
+        c.throw_cx = c.kick_cx - 35.0f * pts;
+        c.throw_cy = c.kick_cy - 117.0f * pts;
+        c.magic_cx = c.punch_cx - 35.0f * pts;
+        c.magic_cy = c.punch_cy - 117.0f * pts;
+
+        // [ORIGINAL] The stick ring's radius is the texture's own half-width
+        // in points: Stick::updateGeometry @ 0x10232910 takes
+        // JoystickContainer_norm.getContentSize().width * 0.5 (470 atlas px ->
+        // 235 points -> radius 117.5). The knob clamp and grab radii all
+        // derive from it there too.
+        // [HEURISTIC-TODO] The ring's POSITION is not reversed yet — the Stick
+        // node is placed by its parent, which this pass did not chase down.
+        // Bottom-left with a small margin matches the reference screenshots.
+        c.stick_r = side_pts("JoystickContainer_norm", 470.0f) * 0.5f * pts;
         c.stick_cx = c.stick_r * 1.05f;
         c.stick_cy = h - c.stick_r * 1.05f;
-
-        // Directions straight from the layout function, with cocos' Y-up read
-        // into screen Y-down: punch has the LARGER y (140 vs 103) and the
-        // smaller x-offset (103 vs 140), so the fist sits ABOVE the foot and
-        // closer to the right edge; the foot is down and to its left. Getting
-        // this backwards put the foot above the fist.
-        const float br = h * 0.105f;
-        c.punch_r = br;
-        c.kick_r = br;
-        c.punch_cx = w - br * 1.15f;
-        c.punch_cy = h - br * 2.05f;
-        c.kick_cx = c.punch_cx - br * 1.55f;
-        c.kick_cy = c.punch_cy + br * 0.90f;
-        // Next two slots along the same arc, for when 5.4 equips ranged/magic.
-        c.throw_cx = c.kick_cx - br * 0.45f;
-        c.throw_cy = c.kick_cy - br * 1.50f;
-        c.magic_cx = c.punch_cx - br * 0.45f;
-        c.magic_cy = c.punch_cy - br * 1.50f;
         return c;
     }
 
@@ -2772,8 +2783,14 @@ private:
                 c.dir_x = dx;
                 c.dir_y = dy;
             }
-            if (inside(p, geom.punch_cx, geom.punch_cy, geom.punch_r)) c.punch = true;
-            if (inside(p, geom.kick_cx, geom.kick_cy, geom.kick_r)) c.kick = true;
+            // [ORIGINAL] The clickable radius is 1.25x the sprite's half-width:
+            // every fight button registers width * 0.5 * 1.25 as its touch
+            // radius (FUN_1006be90, called from the button ctor 0x10046620).
+            constexpr float kHitRadiusFactor = 1.25f;
+            if (inside(p, geom.punch_cx, geom.punch_cy, geom.punch_r * kHitRadiusFactor))
+                c.punch = true;
+            if (inside(p, geom.kick_cx, geom.kick_cy, geom.kick_r * kHitRadiusFactor))
+                c.kick = true;
         }
         c.punch_pressed = c.punch && !was_punch;
         c.kick_pressed = c.kick && !was_kick;
@@ -2796,6 +2813,11 @@ private:
         // zone with equal 90-degree quadrants: a diagonal push fired both axes
         // at once and every primary direction was one careless degree away from
         // becoming a diagonal.
+        //
+        // Binary confirmation: Stick::updateGeometry @ 0x10232910 computes the
+        // grab radius as ring_radius * grip (grip read via FUN_1005ae90), and
+        // the Stick ctor @ 0x102320e0 clamps the primary angle to [0, 90] and
+        // precomputes cos/sin of its half — the same quantisation as below.
         constexpr float kGripRelativeRadius = 0.5f;
         constexpr float kPrimaryAngleDeg = 55.0f;
         const float len = std::sqrt(c.dir_x * c.dir_x + c.dir_y * c.dir_y);
@@ -2882,8 +2904,9 @@ private:
     // [ORIGINAL] The MENU scroll hangs off the bottom edge of the top panel and
     // is drawn from `assets/1536/textures/scrolls/common` (`MenuRoll_left`,
     // `_center`, `_right`). It is therefore laid out on the same atlas scale as
-    // render_hud(): one atlas unit of the 1536 tier maps to
-    // `win_h * 0.085 / 192` screen pixels.
+    // render_hud(): one atlas pixel of the 1536 tier maps to
+    // `ui::atlas_scale(win_h)` screen pixels (see ui_scale.hpp for the law and
+    // its binary addresses).
     //
     // This used to be three independent copies of `{btn_x=10, btn_y=58,
     // roll_h=40}` — the collapsed roll, the expanded menu and the click test in
@@ -2900,8 +2923,8 @@ private:
         MenuRollRect r;
         if (!platform_) return r;
         const float win_h = static_cast<float>(platform_->window_height());
-        const float s = win_h * 0.085f / 192.0f;   // atlas units -> screen px
-        r.y = win_h * 0.085f;                      // flush under the top panel
+        const float s = ui::atlas_scale(win_h);    // atlas px -> screen px
+        r.y = ui::top_panel_h(win_h);              // flush under the top panel
         // [HEURISTIC-TODO] Left inset: 32 atlas units. That reproduces the 10 px
         // gap measured on the reference screenshot at 1280x720; the rule the
         // original uses for screen margins has not been reversed.
@@ -2942,7 +2965,8 @@ private:
     float menu_label_scale() const {
         if (!platform_) return 0.22f;
         const float win_h = static_cast<float>(platform_->window_height());
-        return win_h * 0.085f / 280.0f;   // same rule as the HUD numerals
+        // Same rule as the HUD numerals: proportional to the panel height.
+        return ui::top_panel_h(win_h) / 280.0f;
     }
 
     // ---------- HUD ----------
@@ -2954,15 +2978,18 @@ private:
         //   gold       95 x 95    ruby       88 x 87    energy   103 x 103
         //   Energy_Bar 230 x 32   Level_bar 380 x 38    AddMoney 116 x 116
         //
-        // [HEURISTIC-TODO] The scale is pinned so the panel takes 8.5% of the
-        // viewport height, which is what the original's first-launch screenshot
-        // shows (~30 px of a 354 px frame). The rule the original actually uses
-        // — a design resolution, or the devices.xml tier — has not been reversed
-        // yet, so this reproduces the proportion without claiming the mechanism.
+        // [ORIGINAL] The panel's height is its atlas height (192 px) mapped
+        // through the 768-point layout law: FUN_1014ca50 takes the sprite's
+        // getContentSize().height verbatim (192 atlas px / content scale 2 =
+        // 96 points) and only stretches X across the screen. So the panel is
+        // 96/768 = 12.5% of the viewport height at every window size. The
+        // 8.5% this used to pin was an eyeballed read of a screenshot and made
+        // the whole HUD ~1.5x smaller than the original. Law + addresses in
+        // ui_scale.hpp.
         const float win_w = static_cast<float>(platform.window_width());
         const float win_h = static_cast<float>(platform.window_height());
-        const float panel_h = win_h * 0.085f;
-        const float s = panel_h / 192.0f;   // atlas units -> screen pixels
+        const float s = ui::atlas_scale(win_h);       // atlas px -> screen px
+        const float panel_h = ui::top_panel_h(win_h);
         auto tex_of = [&](const char* n) -> ren::Texture2D* {
             auto it = assets_->hud_textures().find(n);
             return it == assets_->hud_textures().end() ? nullptr : it->second.get();
@@ -3107,7 +3134,7 @@ private:
         // Same geometry source as the collapsed roll and the click test.
         const MenuRollRect roll = menu_roll_rect();
         const float btn_x = roll.x, btn_y = roll.y, roll_h = roll.h;
-        const float s = wh * 0.085f / 192.0f;   // atlas units -> screen px
+        const float s = ui::atlas_scale(wh);    // atlas px -> screen px
 
         auto lit = assets_->scroll_textures().find("MenuRoll_left");
         auto cit = assets_->scroll_textures().find("MenuRoll_center");
