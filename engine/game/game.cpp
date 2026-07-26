@@ -711,6 +711,7 @@ void Game::init_location() {
             load_enemy_weapon("weapon_knuckles.xml");
             // Load player's equipped weapon model
             load_player_weapon(equipped_weapon_);
+            load_localization();
             load_hud_textures();
             load_menu_textures();
             load_hud_font();

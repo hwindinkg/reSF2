@@ -2078,6 +2078,16 @@ private:
                                       "batchFightBars");
             load_texture_atlas_to_hud(base/"textures"/"buttons"/"fight",
                                       "batchButtonsFight");
+            // [ORIGINAL] The dialogue scroll is assembled from loose PNGs in
+            // textures/scrolls/common: rolled ends plus a tiled centre, with
+            // the paper drawn over it. The speaker portrait comes from
+            // image/users/image.
+            const auto scrolls = base/"textures"/"scrolls"/"common";
+            for (const char* n : {"Roll_left", "Roll_center", "Roll_right",
+                                  "Paper_left", "Paper_right", "Shadow_roll"})
+                load_hud_png(scrolls / (std::string(n) + ".png"), n);
+            load_hud_png(base/"image"/"users"/"image"/"character_sensei_small.png",
+                         "character_sensei_small");
             // [ORIGINAL] Load hit effect textures: hit_blade (18-frame spark
             // animation), hit labels (Aggressive, Brutal, Critical, etc.)
             load_texture_atlas_to_hud(base/"textures"/"effects"/"fight",
@@ -2188,6 +2198,59 @@ private:
         stbi_image_free(atlas_px);
     }
 
+    // Load a standalone PNG into the HUD texture table. The scroll pieces and
+    // the character portraits are loose files, not atlas frames.
+    void load_hud_png(const std::filesystem::path& path, const std::string& name) {
+        if (assets_->hud_textures().count(name)) return;
+        if (!std::filesystem::exists(path)) return;
+        // stbi_load (the file-based entry point) is not compiled into this
+        // build; everything goes through stbi_load_from_memory.
+        auto bytes = read_file(path.string());
+        if (bytes.empty()) return;
+        int w = 0, h = 0, comp = 0;
+        unsigned char* px = stbi_load_from_memory(
+            reinterpret_cast<const unsigned char*>(bytes.data()),
+            static_cast<int>(bytes.size()), &w, &h, &comp, 4);
+        if (!px) return;
+        auto tex = std::make_unique<ren::Texture2D>();
+        tex->init_rgba(w, h, px);
+        stbi_image_free(px);
+        assets_->hud_textures()[name] = std::move(tex);
+    }
+
+    // [ORIGINAL] Dialogue text comes from assets/localizations/<lang>.xml as
+    // <Word Title="KEY">text</Word>. The dojo intro line the original shows on
+    // first launch is tutorial_move.
+    std::string localized(const std::string& key) const {
+        auto it = localization_.find(key);
+        return it == localization_.end() ? std::string() : it->second;
+    }
+
+    void load_localization(const std::string& lang = "rus") {
+        auto root = std::filesystem::path(asset_root_);
+        for (const auto& base : {root/"assets"/"localizations", root/"localizations"}) {
+            auto p = base / (lang + ".xml");
+            if (!std::filesystem::exists(p)) continue;
+            const std::string xml = read_text(p.string());
+            size_t pos = 0;
+            while ((pos = xml.find("<Word Title=\"", pos)) != std::string::npos) {
+                const size_t key_beg = pos + 13;
+                const size_t key_end = xml.find('"', key_beg);
+                if (key_end == std::string::npos) break;
+                const size_t val_beg = xml.find('>', key_end);
+                const size_t val_end = xml.find("</Word>", val_beg);
+                if (val_beg == std::string::npos || val_end == std::string::npos) break;
+                localization_[xml.substr(key_beg, key_end - key_beg)] =
+                    xml.substr(val_beg + 1, val_end - val_beg - 1);
+                pos = val_end;
+            }
+            std::printf("  Localization '%s': %zu strings\n", lang.c_str(),
+                        localization_.size());
+            return;
+        }
+        std::printf("  Localization '%s' NOT FOUND\n", lang.c_str());
+    }
+
     // ---------- HUD font ----------
     void load_hud_font() {
         auto root = std::filesystem::path(asset_root_);
@@ -2283,9 +2346,39 @@ private:
                      float scale, ren::Color4B color) {
         if (!assets_->hud_font() || !assets_->hud_font_tex()) return;
         float cx = x;
-        for (char c : text) {
-            std::int32_t cp = (std::uint8_t)c;
-            if (cp >= 0xC0 && cp <= 0xFF) cp = 0x0410 + (cp - 0xC0);
+        // Decode UTF-8 to code points. The previous loop treated every byte as
+        // a character and mapped 0xC0..0xFF as CP1251 Cyrillic, so a UTF-8
+        // string — which is what assets/localizations/*.xml contains — came out
+        // as two wrong letters per real letter ("Сначала покажи" rendered as
+        // "PePPoCPoP..."). CP1251 input is still handled: a lead byte that is
+        // not followed by a continuation byte falls back to the old mapping.
+        for (size_t i = 0; i < text.size(); ) {
+            const auto b0 = static_cast<std::uint8_t>(text[i]);
+            std::int32_t cp = b0;
+            size_t adv = 1;
+            auto cont = [&](size_t k) {
+                return i + k < text.size() &&
+                       (static_cast<std::uint8_t>(text[i + k]) & 0xC0) == 0x80;
+            };
+            if (b0 >= 0xF0 && cont(1) && cont(2) && cont(3)) {
+                cp = ((b0 & 0x07) << 18) |
+                     ((static_cast<std::uint8_t>(text[i + 1]) & 0x3F) << 12) |
+                     ((static_cast<std::uint8_t>(text[i + 2]) & 0x3F) << 6) |
+                     (static_cast<std::uint8_t>(text[i + 3]) & 0x3F);
+                adv = 4;
+            } else if (b0 >= 0xE0 && cont(1) && cont(2)) {
+                cp = ((b0 & 0x0F) << 12) |
+                     ((static_cast<std::uint8_t>(text[i + 1]) & 0x3F) << 6) |
+                     (static_cast<std::uint8_t>(text[i + 2]) & 0x3F);
+                adv = 3;
+            } else if (b0 >= 0xC0 && cont(1)) {
+                cp = ((b0 & 0x1F) << 6) |
+                     (static_cast<std::uint8_t>(text[i + 1]) & 0x3F);
+                adv = 2;
+            } else if (b0 >= 0xC0) {
+                cp = 0x0410 + (b0 - 0xC0);  // CP1251 fallback
+            }
+            i += adv;
             auto it = assets_->hud_font()->char_index.find(cp);
             if (it == assets_->hud_font()->char_index.end()) {
                 it = assets_->hud_font()->char_index.find(32);
@@ -2644,29 +2737,77 @@ private:
     }
 
     // ---------- Dialog overlay ----------
+    // [ORIGINAL] The dojo dialogue is a paper scroll in the upper right with the
+    // speaker's portrait on its left edge. It is built from
+    // textures/scrolls/common — Roll_left / Roll_center (tiled) / Roll_right for
+    // the rolled bar, Paper_left / Paper_right for the sheet — and the text is
+    // the localized string, not English placeholder copy: the original's first
+    // launch shows tutorial_move, "Сначала покажи, / как ты двигаешься!".
+    //
+    // [HEURISTIC-TODO] Placement and proportions are matched to the original's
+    // screenshot. The layout rule itself (which anchor, which margins) has not
+    // been reversed.
     void render_dialog_overlay(plat::Platform& platform) {
-        float panel_w = (float)platform.window_width() - 100, panel_h = 140;
-        float px = 50, py = platform.window_height() - panel_h - 60;
-        ren::Color4B panel_bg{15, 15, 20, 230};
-        renderer_->draw_filled_rect_screen(px, py, panel_w, panel_h, panel_bg);
-        ren::Color4B border{140, 100, 50, 255};
-        renderer_->draw_filled_rect_screen(px, py, panel_w, 3, border);
-        renderer_->draw_filled_rect_screen(px, py + panel_h - 3, panel_w, 3, border);
+        const float win_w = static_cast<float>(platform.window_width());
+        const float win_h = static_cast<float>(platform.window_height());
+        auto tex_of = [&](const char* n) -> ren::Texture2D* {
+            auto it = assets_->hud_textures().find(n);
+            return it == assets_->hud_textures().end() ? nullptr : it->second.get();
+        };
 
-        render_text("SENSEI", px + 30, py + 15, 0.40f,
-                    {255, 220, 120, 255});
-        render_text("Welcome back, student.", px + 30, py + 55, 0.32f,
-                    {230, 230, 230, 255});
-        render_text("Train on the bag, then we will",
-                    px + 30, py + 80, 0.32f, {230, 230, 230, 255});
-        render_text("talk about your journey.",
-                    px + 30, py + 105, 0.32f, {230, 230, 230, 255});
+        // Scroll box: right half of the screen, just under the top panel.
+        const float box_h = win_h * 0.20f;
+        const float box_w = win_w * 0.46f;
+        const float box_x = win_w - box_w - win_w * 0.03f;
+        const float box_y = win_h * 0.11f;
 
-        ren::Color4B arrow{255, 220, 120, 255};
-        float ax = px + panel_w - 30, ay = py + panel_h - 25;
-        renderer_->draw_filled_rect_screen(ax, ay - 12, 12, 2, arrow);
-        renderer_->draw_filled_rect_screen(ax, ay - 12, 2, 12, arrow);
-        renderer_->draw_filled_rect_screen(ax + 10, ay - 12, 2, 12, arrow);
+        auto* paper_l = tex_of("Paper_left");
+        auto* paper_r = tex_of("Paper_right");
+        if (paper_l && paper_r) {
+            const float half = box_w * 0.5f;
+            renderer_->draw_textured_quad_screen(*paper_l, box_x, box_y, half, box_h);
+            renderer_->draw_textured_quad_screen(*paper_r, box_x + half, box_y, half, box_h);
+        } else {
+            renderer_->draw_filled_rect_screen(box_x, box_y, box_w, box_h,
+                                               {232, 214, 176, 245});
+        }
+
+        // Rolled bar along the left edge of the sheet.
+        auto* roll_c = tex_of("Roll_center");
+        if (roll_c) {
+            const float rw = box_h * 0.16f;
+            renderer_->draw_textured_quad_screen(*roll_c, box_x - rw * 0.4f, box_y,
+                                                 rw, box_h);
+        }
+
+        // Speaker portrait on the left of the sheet.
+        float text_x = box_x + box_w * 0.06f;
+        if (auto* portrait = tex_of("character_sensei_small")) {
+            const float ps = box_h * 0.80f;
+            renderer_->draw_textured_quad_screen(*portrait, box_x + box_w * 0.03f,
+                                                 box_y + (box_h - ps) * 0.5f, ps, ps);
+            text_x = box_x + box_w * 0.03f + ps + box_w * 0.04f;
+        }
+
+        std::string line = localized("tutorial_move");
+        if (line.empty()) line = "tutorial_move";
+        const float text_scale = box_h / 620.0f;
+        float ty = box_y + box_h * 0.26f;
+        size_t start = 0;
+        while (start <= line.size()) {
+            size_t nl = line.find('\n', start);
+            std::string part = line.substr(start, nl == std::string::npos
+                                                      ? std::string::npos
+                                                      : nl - start);
+            while (!part.empty() && (part.back() == '\r' || part.back() == ' '))
+                part.pop_back();
+            if (!part.empty()) {
+                render_text(part, text_x, ty, text_scale, {60, 40, 20, 255});
+                ty += box_h * 0.24f;
+            }
+            if (nl == std::string::npos) break;
+            start = nl + 1;
+        }
     }
 
 private:
@@ -2984,6 +3125,8 @@ private:
     int hud_level_ = 7;
     int hud_gold_ = 72450;
     int hud_gems_ = 9;
+    // <Word Title="KEY">text</Word> pairs from assets/localizations/<lang>.xml.
+    std::unordered_map<std::string, std::string> localization_;
     // [ORIGINAL] Floor plane of the current location: -Height/2 + Floor
     // (Location::load, ShadowFight2.s86 FUN_10144420: +0x3c Height, +0x2c Floor).
     // Animations are authored with their floor at y = 0, so this is the datum
