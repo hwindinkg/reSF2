@@ -387,6 +387,41 @@ Cocos2d-x 2.x). Приоритет источников: Marmalade (`ShadowFight
   (`<Damage Type= Shift=>` + множители воина из stages.xml + защита) не
   отреверсен; у противника нет скелетной коллизии — это заглушка до 5.3.
 
+  **ИИ врага — рулетка весов из `tacticSettings.xml` (не пороги дистанции).**
+  Оригинал НЕ выбирает ход по расстоянию/конечному автомату: у каждого
+  кандидата-анимации есть **вес**, а выбор — это розыгрыш колеса рулетки по
+  этим весам (класс `cc`, `sf2_beautified.js`). Вес — не константа, а кривая,
+  вычисляемая каждое решение против состояния боя (дистанция, здоровье, урон,
+  счётчики кадров...):
+
+  ```
+  Gb(ctx)  score = counter*CounterFactor + damage*DamageFactor
+                 + (1-health)*HealthFactor + (1-enemy_health)*EnemyHealthFactor
+                 + anim_frames*AnimationFramesFactor + magic*MagicBulletFactor
+                 + missile*MissileBulletFactor + hits*HitFactor
+                 + child_frames*ChildFramesFactor + distance*DistanceFactor
+                 + Shift                                          (:20096)
+  QYa(a)   Linear (по умолчанию):  a>=0 -> Base + (Limit-Base)*min(1,a)
+                                   a<0  -> Base + (AntiLimit-Base)*min(1,-a)  (:20117)
+  NYa(a)   Exponential:           a>=0 -> Limit + (Base-Limit)*2^-a
+                                   a<0  -> AntiLimit + (Base-AntiLimit)*2^a    (:20113)
+  iCa      первое совпадение <Animation Name="...">, пустой Name = catch-all  (:19930)
+  jL       сумма весов, бросок [0,sum), вычитание до отрицательного          (:19910)
+  ```
+
+  **Сделано:** `engine/game/tactic_settings.{hpp,cpp}` — загрузка
+  `tacticSettings.xml` (12 тактик), модель веса/кривой `cc` и рулетка `jL`;
+  `resolve_templates()` разворачивает `Template=` (`Standard` наследует
+  `UseTables`). Тест `tests/test_tactic_weights.cpp` (17 проверок) пиннит
+  математику кривых к рассчитанным вручную значениям JS. В `game.cpp` выдуманный
+  автомат порогов заменён на розыгрыш по категориям, которые умеет заглушка на
+  кулаках (`ForwardStep/ShortAttack/BackStep/Retreat/Duck`), с обратным
+  маппингом на 5 состояний. Трасса весов и выбора добавлена в отладку F1.
+  **[HEURISTIC-TODO]**: слагаемое `ConditionalDesigionFactor` и проба
+  `AnimationFactors` опущены — зависят от таблиц `.atf` (stride 858, разбор
+  отложен на 4.x); маппинг «категория -> конкретная анимация» — заглушка до
+  шаблонов воинов (5.3).
+
   **Осталось:** аватары (маппинг боец→картинка не отреверсен), CrazyBar/
   комбо/перки (нет систем), баннер раунда и правило таймаута/ничьей
   (`[HEURISTIC-TODO]`: сейчас при таймауте побеждает более здоровый, ничья —
