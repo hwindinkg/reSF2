@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -44,6 +44,7 @@
 #include "animation_player.hpp"
 #include "combat.hpp"
 #include "input_handler.hpp"
+#include "quest_engine.hpp"
 
 // Import commonly-used namespaces at file scope
 // (helpers.cpp also uses these at file scope, so they must be here)
@@ -59,6 +60,7 @@ namespace save = resf2::save;
 namespace player = resf2::player;
 namespace inventory = resf2::inventory;
 namespace shop = resf2::shop;
+namespace quest = resf2::quest;
 
 // ---------- Forward declarations for helper functions ----------
 // These are defined in helpers.cpp and used by inline Game methods.
@@ -150,6 +152,12 @@ void host_load_location() override;
 void host_reset_menu_state() override;
 
 
+void host_toggle_menu_overlay() override;
+
+
+void host_render_menu_overlay() override;
+
+
 void host_load_battle_location(const std::string& location) override;
 
 
@@ -168,13 +176,27 @@ void host_set_dialogue(std::vector<std::pair<std::string, std::string>> lines) o
 const std::vector<std::pair<std::string, std::string>>& host_get_dialogue() const override;
 
 
+// [ORIGINAL] QuestActionDialog choices at +0xa4..+0xb0 (FUN_101c7d20).
+std::vector<std::string> host_get_dialogue_choices() const override;
+void host_set_dialogue_choices(std::vector<std::string> choices) override;
+
+
 void host_set_current_level(std::string level_id) override;
 
 
 void host_add_completed_level(const std::string& level);
 
 
-bool host_is_level_completed(const std::string& level) const;
+    bool host_is_level_completed(const std::string& level) const;
+
+    // [ORIGINAL] Zone/battle lock state from usersDefault.xml
+    bool host_is_zone_unlocked(const std::string& zone) const override;
+    bool host_is_battle_locked(const std::string& zone, const std::string& battle) const override;
+    std::string host_get_tutorial_state() const override;
+
+    // Tutorial: check if the initial Sensei tutorial should fire.
+    // Called after loading progress. [ORIGINAL] Driven by Tutorial attribute.
+    void check_tutorial();
 
 
 std::string host_get_battle_result() const override;
@@ -190,6 +212,9 @@ std::string host_get_battle_location() const override;
 
 
 void host_set_battle_result(std::string result) override;
+
+    // Quest event trigger (called from scenes to drive quest progression)
+    void host_trigger_quest_event(const std::string& event, const std::string& arg = "") override;
 
 
     // ---- Fight parameters and state (D4) ----
@@ -1381,6 +1406,217 @@ private:
         (void)sx;
     }
 
+    // ---------------------------------------------------------------------------
+    // F1 Debug Overlay — comprehensive game state panels rendered on screen.
+    // Called from host_render_scene() when debug_world_ is true.
+    // ---------------------------------------------------------------------------
+    void render_debug_overlay(plat::Platform& platform) {
+        if (!debug_world_ || !renderer_) return;
+
+        const float vw = static_cast<float>(platform.window_width());
+        const float vh = static_cast<float>(platform.window_height());
+        const float col_w = vw * 0.24f;
+        const float panel_h = 110.0f;
+        const float top_bar_h = panel_h + 28.0f;
+        const float bottom_bar_h = 50.0f;
+        const float line_h = 15.0f;
+        const float pad = 6.0f;
+        const float header_scale = 0.24f;
+        const float body_scale = 0.20f;
+
+        // Semi-transparent background panels
+        const ren::Color4B bg{0, 0, 0, 180};
+        const ren::Color4B border{80, 80, 80, 200};
+        renderer_->draw_filled_rect_screen(0, 0, vw, top_bar_h, bg);
+        renderer_->draw_filled_rect_screen(0, vh - bottom_bar_h, vw, bottom_bar_h, bg);
+        // Column dividers
+        for (int i = 1; i < 4; ++i) {
+            float dx = col_w * i;
+            renderer_->draw_line_screen(dx, 0, dx, top_bar_h, border);
+        }
+        // Separator between top and bottom bars
+        renderer_->draw_line_screen(0, top_bar_h, vw, top_bar_h, border);
+        renderer_->draw_line_screen(0, vh - bottom_bar_h, vw, vh - bottom_bar_h, border);
+
+        // Title bar
+        render_text("F1 DEBUG OVERLAY", pad, pad, header_scale,
+                    {255, 220, 100, 255});
+        // Version tag (top-right)
+        {
+            const char* ver = "reSF2 v0.0.3";
+            float tw = ver_length(ver, header_scale);
+            render_text(ver, vw - tw - pad, pad, header_scale,
+                        {180, 180, 180, 255});
+        }
+
+        // --- Panel 1: Input (top-left) ---
+        {
+            float x = pad, y = pad + line_h + 4;
+            render_text("INPUT", x, y, header_scale, {100, 200, 255, 255});
+            y += line_h + 2;
+            char b[128];
+            std::snprintf(b, sizeof(b), "fwd:%d back:%d up:%d down:%d",
+                          dbg_key_forward_ ? 1 : 0, dbg_key_back_ ? 1 : 0,
+                          dbg_key_up_ ? 1 : 0, dbg_key_down_ ? 1 : 0);
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "punch:%d kick:%d",
+                          dbg_punch_pressed_ ? 1 : 0, dbg_kick_pressed_ ? 1 : 0);
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "move_st:%d facing:%s",
+                          move_state_, facing_right_ ? "R" : "L");
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "step_f:%u/%u",
+                          input_handler_.step_frames(),
+                          InputHandler::kMinStepFrames);
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+        }
+
+        // --- Panel 2: Movement (top-center-left) ---
+        {
+            float x = col_w + pad, y = pad + line_h + 4;
+            render_text("MOVEMENT", x, y, header_scale, {100, 255, 150, 255});
+            y += line_h + 2;
+            char b[128];
+            std::snprintf(b, sizeof(b), "pos: %.0f, %.0f",
+                          player_pos_x_, player_pos_y_);
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "anim: '%s'", current_anim_.c_str());
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "root_dx: %.2f  y_adj: %.1f",
+                          anim_root_dx_, y_adjust_smoothed_);
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "speed: 150  prio: %d",
+                          anim_player_.anim_priority());
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+        }
+
+        // --- Panel 3: Combat (top-center-right) ---
+        {
+            float x = col_w * 2 + pad, y = pad + line_h + 4;
+            render_text("COMBAT", x, y, header_scale, {255, 100, 100, 255});
+            y += line_h + 2;
+            char b[128];
+            static const char* kStateName[] = {
+                "idle", "approach", "attack", "retreat", "block"};
+            const int st = enemy_ai_state_;
+            const char* st_name = (st >= 0 && st <= 4) ? kStateName[st] : "?";
+            std::snprintf(b, sizeof(b), "AI: %s (d:%.0f)", st_name, ai_last_distance_);
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "HP: %.0f/%.0f  eHP: %.0f/%.0f",
+                          player_fighter_.health, player_fighter_.max_health,
+                          enemy_fighter_.health, enemy_fighter_.max_health);
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "combo: %d (t:%.2f) pick: %s",
+                          player_fighter_.hits_landed, combo_timer_,
+                          ai_last_pick_.c_str());
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "weapon: %s", equipped_weapon_.c_str());
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            // Damage formula breakdown (binary: Model::getTotalDamage @ 0x10159a6c)
+            // rawDmg = base × attr × block × attack × crit × 2.0
+            // finalDmg = factorSet × rawDmg
+            std::snprintf(b, sizeof(b), "DMG[%s]: base=%.2f",
+                          dbg_last_move_name_.empty() ? "-" : dbg_last_move_name_.c_str(),
+                          dbg_last_base_damage_);
+            render_text(b, x, y, body_scale, {255, 220, 150, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "  attr=%.2f blk=%.2f atk=%.2f crit=%.2f",
+                          dbg_last_attr_mult_, dbg_last_block_factor_,
+                          dbg_last_attack_factor_, dbg_last_crit_factor_);
+            render_text(b, x, y, body_scale, {255, 220, 150, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "  fset=%.2f => final=%.2f",
+                          dbg_last_factor_set_, dbg_last_final_damage_);
+            render_text(b, x, y, body_scale, {255, 180, 100, 255});
+        }
+
+        // --- Panel 4: Game State (top-right) ---
+        {
+            float x = col_w * 3 + pad, y = pad + line_h + 4;
+            render_text("STATE", x, y, header_scale, {150, 255, 100, 255});
+            y += line_h + 2;
+            char b[128];
+            std::snprintf(b, sizeof(b), "scene: %s",
+                          scene::scene_name(scene_manager_.current_id()));
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "level: %s",
+                          current_level_.empty() ? "(none)" : current_level_.c_str());
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "gold: %d  lvl: %d  gems: %d",
+                          hud_gold_, hud_level_, hud_gems_);
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            std::snprintf(b, sizeof(b), "completed: %zu  battle: %s",
+                          completed_levels_.size(),
+                          is_battle_mode_ ? "yes" : "no");
+            render_text(b, x, y, body_scale, {255, 255, 255, 255});
+            y += line_h;
+            // Tutorial state (binary: 0x1027d6c0 state machine)
+            std::snprintf(b, sizeof(b), "tutorial: %s",
+                          tutorial_state_.c_str());
+            render_text(b, x, y, body_scale, {255, 200, 100, 255});
+            y += line_h;
+            // Zone/battle unlock state (binary: DisplayZone 0x100a1c00)
+            int zones_unlocked = 0, battles_unlocked = 0;
+            for (const auto& [k, v] : zone_unlocked_) if (v) zones_unlocked++;
+            for (const auto& [k, v] : battle_unlocked_) if (v) battles_unlocked++;
+            std::snprintf(b, sizeof(b), "zones: %zu/%d  battles: %zu/%d",
+                          zone_unlocked_.size(), zones_unlocked,
+                          battle_unlocked_.size(), battles_unlocked);
+            render_text(b, x, y, body_scale, {200, 200, 255, 255});
+        }
+
+        // --- Bottom bar: Animation & Move info ---
+        {
+            float x = pad, y = vh - bottom_bar_h + pad;
+            char b[256];
+            std::snprintf(b, sizeof(b),
+                "ANIM: '%s' finished=%d prio=%d fps=%.0f time=%.2f root_dx=%.2f",
+                current_anim_.c_str(),
+                anim_player_.anim_finished() ? 1 : 0,
+                anim_player_.anim_priority(),
+                anim_fps_, anim_time_, anim_root_dx_);
+            render_text(b, x, y, body_scale, {200, 200, 255, 200});
+            y += line_h;
+            std::snprintf(b, sizeof(b),
+                "MOVE: '%s' state=%d hit_anim=%u step_cd=%u",
+                current_move_.c_str(), move_state_, hit_anim_, step_cooldown_);
+            render_text(b, x, y, body_scale, {200, 255, 200, 200});
+            y += line_h;
+            // Tactic weights summary
+            if (!ai_last_candidates_.empty()) {
+                std::string ts = "TACTICS: ";
+                for (size_t i = 0; i < ai_last_candidates_.size() && i < 5; ++i) {
+                    if (i > 0) ts += "  ";
+                    const bool chosen = (ai_last_candidates_[i] == ai_last_pick_);
+                    char wbuf[64];
+                    std::snprintf(wbuf, sizeof(wbuf), "%s%.1f",
+                                  chosen ? ">" : "",
+                                  (i < ai_last_weights_.size()) ? ai_last_weights_[i] : 0.0f);
+                    ts += ai_last_candidates_[i] + "(" + wbuf + ")";
+                }
+                render_text(ts, x, y, body_scale, {255, 240, 150, 180});
+            }
+        }
+    }
+
+    // Estimate text width for right-aligned text using existing measure_text
+    float ver_length(const char* text, float scale) {
+        return measure_text(std::string(text), scale).first;
+    }
+
     // Render body model as capsule lines (GL renderer uses thin lines for now).
     void render_body_model() {
         if (!assets_->body_model()) return;
@@ -2252,9 +2488,11 @@ private:
     }
 
     // ---------- Enemy AI weights (from tacticSettings.xml) ----------
-    // [ORIGINAL] The roulette-wheel weight model — see tactic_settings.hpp.
+    // [ORIGINAL] The roulette-wheel weight model - see tactic_settings.hpp.
     void load_tactics() {
         tactics_.load(asset_root_);
+        // Wire tactic settings to combat system for AI decision making
+        combat_.set_tactic_settings(&tactics_);
     }
 
     void update_animation(uint32_t dt_ms);
@@ -3573,10 +3811,19 @@ private:
             return it == assets_->hud_textures().end() ? nullptr : it->second.get();
         };
 
+        // [ORIGINAL] The hint scroll unrolls right-to-left like a paper scroll.
+        // dialog_overlay_anim_ goes 0→1; the visible width grows from the right
+        // edge leftward, revealing the content progressively.
+        float anim = dialog_overlay_anim_;
+        // Smoothstep easing for a natural unroll feel
+        float eased = anim * anim * (3.0f - 2.0f * anim);
+        if (eased < 0.01f) return;  // nothing visible yet
+
         // Scroll box: right half of the screen, just under the top panel.
+        const float full_box_w = win_w * 0.46f;
         const float box_h = win_h * 0.20f;
-        const float box_w = win_w * 0.46f;
-        const float box_x = win_w - box_w - win_w * 0.03f;
+        const float box_w = full_box_w * eased;  // animated width (unrolls)
+        const float box_x = win_w - full_box_w - win_w * 0.03f + (full_box_w - box_w);  // anchored right
         const float box_y = win_h * 0.11f;
 
         // Sheet. Paper_left / Paper_right are narrow vertical strips
@@ -3613,6 +3860,8 @@ private:
         }
 
         // Speaker portrait on the left of the sheet.
+        // Only render content once the scroll is mostly unrolled.
+        if (eased < 0.80f) return;
         float text_x = box_x + box_w * 0.06f;
         if (auto* portrait = tex_of("character_sensei_small")) {
             const float ps = box_h * 0.80f;
@@ -3664,6 +3913,10 @@ private:
     // --- Dialogue / story state ---
     std::vector<std::pair<std::string, std::string>> dialogue_lines_;
     size_t dialogue_index_ = 0;
+    // [ORIGINAL] QuestActionDialog @ FUN_101c7d20 stores choices at +0xa4..+0xb0
+    // (confirmed in assembly at 0x101c7e89: LEA EAX,[ESI+0xa4], vector init).
+    // Each choice is a localization key whose text is shown on the button.
+    std::vector<std::string> dialogue_choices_;
 
     // --- Level / progress state ---
     std::string current_level_;
@@ -3685,6 +3938,15 @@ private:
     int currency_ = 1000;  // starting gold
     int player_wins_ = 0;
     int player_losses_ = 0;
+
+    // [ORIGINAL] Tutorial state from usersDefault.xml Tutorial attribute.
+    // Values: "MOVE" (initial), "BAG" (punching bag), "FIRST_FIGHT", "COMPLETE".
+    std::string tutorial_state_ = "MOVE";
+
+    // [ORIGINAL] Zone/battle lock state from <Battles> in usersDefault.xml.
+    // Key: "ZONE_N" → true if unlocked. Key: "ZONE_N|BOSS_NAME" → true if unlocked.
+    std::map<std::string, bool> zone_unlocked_;
+    std::map<std::string, bool> battle_unlocked_;
     resf2::format::ListData list_data_;
     bool list_data_loaded_ = false;
 
@@ -3696,6 +3958,10 @@ private:
     // Inventory and Shop
     resf2::inventory::Inventory inventory_;
     resf2::shop::ShopManager shop_manager_;
+
+    // Quest engine: drives zone unlocks, battle unlocks, dialogs from quests.xml
+    // [ORIGINAL] QuestManager @ 0x101c7d20 processes quest actions on events.
+    quest::QuestEngine quest_engine_;
 
     // stage_data_ and stages_loaded_ live in AssetManager (assets_)
 
@@ -3966,6 +4232,24 @@ private:
     // tutorial steps beyond this one are 7.3.
     Overlay overlay_ = Overlay::Dialog;
     bool intro_hint_dismissed_ = false;
+    // [ORIGINAL] Tutorial flow: the Sensei dialog plays FIRST (full-screen
+    // Dialogue scene), then the hint scroll appears in the upper-right.
+    // tutorial_dialog_pending_ = true means the dialog should auto-trigger
+    // on the first MainMenu update. tutorial_dialog_shown_ = true means the
+    // dialog has already played and the hint scroll should now appear.
+    bool tutorial_dialog_pending_ = false;
+    bool tutorial_dialog_shown_ = false;
+    // Scroll unroll animation for the tutorial hint overlay (0..1 progress).
+    // The hint unrolls right-to-left like a scroll when it first appears.
+    float dialog_overlay_anim_ = 0.0f;
+    // Grace period: frames since overlay appeared. Prevents accidental
+    // dismissal from keys held during the preceding dialog scene.
+    uint32_t overlay_show_frames_ = 0;
+    // Tutorial bag hit counter: advances tutorial after N bag hits.
+    int tutorial_bag_hits_ = 0;
+    // Player X position when the hint scroll appeared. Used to verify the
+    // player ACTUALLY moved (position changed) before dismissing the hint.
+    float hint_start_player_x_ = 0.0f;
     float menu_anim_progress_ = 0.0f;  // 0 = collapsed, 1 = fully expanded
     bool loc_icons_logged = false;  // one-shot diagnostic for menu icon sizes
     float load_scale_ = 1.0f, zoom_ = 1.0f;
@@ -4063,6 +4347,25 @@ private:
     std::vector<float> ai_last_weights_;              // evaluated weights
     float ai_last_distance_ = 0;                      // ctx.distance used
     InputHandler input_handler_;
+
+    // Debug overlay input cache — updated every frame in host_update_gameplay(),
+    // read by render_debug_overlay() to show live key state.
+    bool dbg_key_forward_ = false;
+    bool dbg_key_back_ = false;
+    bool dbg_key_up_ = false;
+    bool dbg_key_down_ = false;
+    bool dbg_punch_pressed_ = false;
+    bool dbg_kick_pressed_ = false;
+
+    // Debug overlay: last damage calculation breakdown (for F1 COMBAT panel)
+    float dbg_last_base_damage_ = 0;
+    float dbg_last_attr_mult_ = 1.0f;
+    float dbg_last_block_factor_ = 1.0f;
+    float dbg_last_attack_factor_ = 1.0f;
+    float dbg_last_crit_factor_ = 1.0f;
+    float dbg_last_factor_set_ = 1.0f;
+    float dbg_last_final_damage_ = 0;
+    std::string dbg_last_move_name_;
 
     bool replay_mode_ = false;  // skip menus, go directly to Battle  // true when current frame is in Uninterrupt interval
     bool dump_state_ = false;  // --dump-state: print structured state every frame

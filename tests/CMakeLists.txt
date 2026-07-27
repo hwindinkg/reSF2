@@ -296,3 +296,36 @@ target_link_libraries(test_tactic_weights PRIVATE
 target_compile_features(test_tactic_weights PRIVATE cxx_std_23)
 add_test(NAME test_tactic_weights COMMAND test_tactic_weights
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# InputHandler unit tests — double-tap detection from idle and walking.
+# These tests would FAIL on the old code that required move_state_ == 2
+# for double-tap detection.
+add_executable(test_input_handler
+    test_input_handler.cpp
+)
+target_link_libraries(test_input_handler PRIVATE
+    resf2_game
+    resf2_platform
+    resf2_warnings
+)
+target_compile_features(test_input_handler PRIVATE cxx_std_23)
+add_test(NAME test_input_handler COMMAND test_input_handler
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# Step cooldown integration test — proves that rapid A/D taps are gated
+# by the 200 ms step cooldown, preventing the "tap-spam walks backward"
+# regression. Runs the real resf2_app with a fast-tap input script and
+# asserts the fighter actually moved forward.
+add_executable(test_step_cooldown
+    test_step_cooldown.cpp
+)
+target_link_libraries(test_step_cooldown PRIVATE resf2_warnings)
+target_compile_features(test_step_cooldown PRIVATE cxx_std_23)
+set_target_properties(test_step_cooldown PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+)
+add_dependencies(test_step_cooldown resf2_app)
+add_test(NAME test_step_cooldown
+         COMMAND test_step_cooldown "$<TARGET_FILE:resf2_app>" "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(test_step_cooldown PROPERTIES TIMEOUT 180)

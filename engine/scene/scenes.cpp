@@ -10,6 +10,7 @@
 #include "../format/stage_parser.hpp"
 #include "../format/list_parser.hpp"
 #include "../game/ui_scale.hpp"
+#include "../game/shop.hpp"
 
 #include <algorithm>
 #include <array>
@@ -123,35 +124,35 @@ void MainMenuScene::on_update(SceneContext& ctx) {
     // that trigger scene transitions. These are scene-specific.
     const auto& input = ctx.platform.input();
 
-    // Menu items are positioned BELOW the menu button (which is at y=58,
-    // h=40, so ends at y=98). Items start at y=103 to avoid overlap.
-    // Each item is 45px tall.
     // Menu items — positioned to match the scroll menu (render_menu_expanded)
-    // which draws icons at: btn_x=10, paper_y=95, icon_y = 109 + idx*64
-    struct MenuItem { const char* name; SceneId target; float y; };
+    // which draws icons using the same ui::atlas_scale layout law.
+    // Rendered order: Dojo, Map, Shop, Profile, Settings (5 items).
+    const float win_h = (float)ctx.platform.window_height();
+    const float s = resf2::ui::atlas_scale(win_h);
+    const float roll_y = resf2::ui::top_panel_h(win_h);
+    const float roll_h = 114.0f * s;
+    const float paper_y = roll_y + roll_h - 3.0f;
+    const float paper_padding = 44.0f * s;
+    const float icon_size = 176.0f * s;
+    const float icon_spacing = 25.0f * s;
+    const float ix = 32.0f * s + paper_padding + 31.0f * s;
+    const float iy = paper_y + paper_padding;
+
+    struct MenuItem { const char* name; SceneId target; };
     MenuItem items[] = {
-        {"Dojo",     SceneId::MainMenu, 109.0f + 0 * 64.0f},
-        {"Map",      SceneId::Map,      109.0f + 1 * 64.0f},
-        {"Shop",     SceneId::Shop,     109.0f + 2 * 64.0f},
-        {"Dialogue", SceneId::Dialogue, 109.0f + 3 * 64.0f},
-        {"Settings", SceneId::Settings, 109.0f + 4 * 64.0f},
-        {"Profile",  SceneId::Profile,  109.0f + 5 * 64.0f},
+        {"Dojo",     SceneId::MainMenu},
+        {"Map",      SceneId::Map},
+        {"Shop",     SceneId::Shop},
+        {"Profile",  SceneId::Profile},
+        {"Settings", SceneId::Settings},
     };
-    for (const auto& item : items) {
-        if (clicked_in(input, 10.0f, item.y, 130.0f, 40.0f)) {
+    for (int idx = 0; idx < 5; ++idx) {
+        const float icon_y = iy + idx * (icon_size + icon_spacing);
+        if (clicked_in(input, ix, icon_y, icon_size, icon_size)) {
             ctx.host.host_play_ui_click();
             std::printf("[mainmenu] clicked '%s' -> %s\n",
-                        item.name, scene_name(item.target));
-            // Set up dialogue if going to Dialogue
-            if (item.target == SceneId::Dialogue) {
-                ctx.host.host_set_dialogue({
-                    {"Sly", "Welcome back, fighter."},
-                    {"Sly", "The tournament awaits. Are you ready?"},
-                    {"Narrator", "Round 1 - Fight!"},
-                });
-                ctx.host.host_set_current_level("test_battle");
-            }
-            ctx.host.request_scene_transition(item.target);
+                        items[idx].name, scene_name(items[idx].target));
+            ctx.host.request_scene_transition(items[idx].target);
             return;
         }
     }
@@ -190,21 +191,15 @@ void MapScene::on_enter(SceneContext& ctx) {
     auto* stages = ctx.host.host_get_stages();
     if (stages && !stages->zones.empty()) {
         zone_battles_.clear();
-        bool story_open = true;
+        // [ORIGINAL] Show ALL zones from stages.xml. Zone lock state comes
+        // from the save data (usersDefault.xml <Battles>), not sequential
+        // progression. Zone 1 is unlocked, zones 2-6 are locked on first start.
         for (const auto& zone : stages->zones) {
             // [ORIGINAL] Zones flagged Start="1" (the Punchbag training zone)
             // never appear on the map: the zone-list builder @ 0x100c17d0
             // skips any zone whose Start byte is set (Zone ctor 0x102996d0
             // stores the flag at +0x118, FUN_10299cd0 reads it back).
             if (zone.start > 0) continue;
-            // [ORIGINAL-mechanism] The original hides a zone when none of its
-            // battles is visible (0x100c17d0); per-battle visibility lives in
-            // the profile and is driven by quest-script ShowBattle /
-            // ToggleBattle actions (quests.xml), keyed "ZONE|Battle|fight"
-            // (FUN_10138130 -> FUN_101ec2a0). The quest engine is not ported.
-            // [HEURISTIC-TODO] Until it is: story zones open sequentially —
-            // a zone is reachable once the previous zone's boss is beaten.
-            if (!story_open) break;
             std::vector<size_t> indices;
             for (size_t bi = 0; bi < zone.battles.size(); ++bi) {
                 const auto& battle = zone.battles[bi];
@@ -216,18 +211,16 @@ void MapScene::on_enter(SceneContext& ctx) {
                 indices.push_back(bi);
             }
             if (indices.empty()) continue;
-            // Story gate for the NEXT zone: this zone's boss must be beaten.
-            bool boss_beaten = false;
-            for (size_t bi : indices) {
-                const auto& battle = zone.battles[bi];
-                if (battle.type == "BOSSES" || battle.type.rfind("FINAL_BATTLE", 0) == 0)
-                    if (ctx.host.host_is_level_completed(zone.name + "/" + battle.name))
-                        boss_beaten = true;
-            }
             zone_battles_.push_back({zone, indices});
-            story_open = boss_beaten;
         }
         std::printf("[map] loaded %zu zones\n", zone_battles_.size());
+        for (const auto& zb : zone_battles_) {
+            bool unlocked = ctx.host.host_is_zone_unlocked(zb.zone.name);
+            std::printf("[MAP] zone='%s' battles=%zu bg='%s' scroll_x=%.1f selected=%d %s\n",
+                        zb.zone.name.c_str(), zb.battle_indices.size(),
+                        zb.zone.filename.c_str(), scroll_x_, selected_,
+                        unlocked ? "UNLOCKED" : "LOCKED");
+        }
         // [ORIGINAL] The map opens on the player's current zone — the zone
         // builder @ 0x100c17d0 selects the page whose name matches the
         // profile's current zone, falling back to the first.
@@ -374,6 +367,33 @@ struct MapLayout {
     float fight_x = 0, fight_y = 0, fight_w = 0, fight_h = 0;
 };
 
+// [ORIGINAL] Zone background textures. The original loads per-zone images
+// from image/locations/ based on the zone's thematic name (FUN_100c17d0
+// passes the zone name to the texture loader). The shipped zone sheets are
+// numeric (1.jpg..7.jpg), but the original also has themed map backgrounds.
+// This table maps zone names to fallback tint colours when neither the
+// numeric sheet nor a themed texture is available.
+struct ZoneBackground {
+    const char* zone_name;
+    const char* texture_path;  // image/locations/<name>, may not exist
+    ren::Color4B fallback_tint;
+};
+static const ZoneBackground kZoneBackgrounds[] = {
+    {"ZONE_1", "image/locations/mapTutorial",  {180, 160, 120, 255}},  // parchment
+    {"ZONE_2", "image/locations/mapEgypt",     {210, 185, 120, 255}},  // sandy
+    {"ZONE_3", "image/locations/mapJapan",     {160, 180, 160, 255}},  // green-grey
+    {"ZONE_4", "image/locations/mapMedieval",  {170, 150, 130, 255}},  // stone
+    {"ZONE_5", "image/locations/mapFantasy",   {150, 140, 180, 255}},  // purple
+    {"ZONE_6", "image/locations/mapShadow",    {100,  90, 100, 255}},  // dark
+    {"ZONE_7", "image/locations/mapFinal",     {180, 140, 100, 255}},  // golden
+    {"Punchbag", "image/locations/mapTutorial", {180, 160, 120, 255}}, // tutorial
+};
+static ren::Color4B zone_fallback_tint(const std::string& zone_name) {
+    for (const auto& zb : kZoneBackgrounds)
+        if (zone_name == zb.zone_name) return zb.fallback_tint;
+    return {40, 32, 22, 255};  // default parchment brown
+}
+
 // [ORIGINAL] Text on this screen is sized the same way the HUD numerals are
 // (PORT_PLAN 6.1): from the viewport height, not from constants. The bitmap
 // font's line box is ~115 px at scale 1, so `text_scale(px)` asks for a height
@@ -414,6 +434,15 @@ void MapScene::on_update(SceneContext& ctx) {
     if (key_pressed(input, platform::Key::Escape)) {
         ctx.host.request_scene_transition(SceneId::MainMenu);
         return;
+    }
+
+    // [FIX] Menu scroll toggle. The original map has a MENU button in the top
+    // panel (same roll button the dojo uses). Pressing M opens the same
+    // vertical scroll menu with Dojo/Map/Shop/Profile/Settings entries.
+    // Previously this scene had no M handler, so the menu was unreachable
+    // from the map even though the scroll button was rendered on the HUD.
+    if (key_pressed(input, platform::Key::M)) {
+        ctx.host.host_toggle_menu_overlay();
     }
 
     // --- zone paging -------------------------------------------------------
@@ -501,9 +530,11 @@ void MapScene::on_update(SceneContext& ctx) {
         return;
     }
     // MENU scroll, top left — same box the dojo uses.
+    // [FIX] Toggling the menu overlay instead of navigating to MainMenu.
+    // The dojo click handler (game.cpp ~1814) toggles the overlay, so the
+    // map should do the same for consistent behaviour.
     if (clicked_in(input, w * 0.012f, L.panel_h, w * 0.14f, L.panel_h * 0.62f)) {
-        ctx.host.request_scene_transition(SceneId::MainMenu);
-        return;
+        ctx.host.host_toggle_menu_overlay();
     }
     // Clicking a node selects it. Hit boxes are computed in on_render and
     // cached here, so a click on the frame after the first render is accurate.
@@ -534,7 +565,13 @@ void MapScene::on_render(SceneContext& ctx) {
                                                     L.map_x, L.map_y, L.map_w, L.map_h);
     max_scroll_ = view.max_scroll;
     if (!view.ok) {
-        r.draw_filled_rect_screen(L.map_x, L.map_y, L.map_w, L.map_h, {40, 32, 22, 255});
+        // [ORIGINAL] Fall back to a zone-themed tint when the sheet texture
+        // is missing. The original uses the same image/locations/ textures
+        // as the fight backgrounds; those are not yet extracted.
+        const std::string& zn = zone_battles_[(size_t)std::max(0, selected_)].zone.name;
+        const auto tint = zone_fallback_tint(zn);
+        r.draw_filled_rect_screen(L.map_x, L.map_y, L.map_w, L.map_h, tint);
+        std::printf("[MAP] zone_bg missing for '%s', using fallback tint\n", zn.c_str());
     }
 
     // Centre the selection when it changed. The sheet's centre sits at
@@ -567,13 +604,37 @@ void MapScene::on_render(SceneContext& ctx) {
         if (cx < L.map_x - icon_size || cx > L.scroll_x + icon_size) continue;
 
         const bool sel = ((int)i == selected_node_);
-        const int state = sel ? 1 : 0;
+        // [ORIGINAL] The original uses 5 textures per node (DisplayZone @
+        // 0x100a1c00): active_batch (bright, selected), base_batch (normal),
+        // locked_batch (grey), locked_active_batch (grey+selected),
+        // pressed_batch (clicked). We map these to states 0/1/2:
+        //   1 = active  — selected or just completed (bright)
+        //   0 = base    — unlocked, not selected
+        //   2 = locked  — not yet reachable (grey)
+        // A node is reachable if it or any prior node in this zone has been
+        // completed, matching the sequential progression the quest engine
+        // will eventually drive via ShowBattle/HideBattle actions.
+        int state = 0;  // base — unlocked
+        if (sel) {
+            state = 1;  // active — selected
+        } else if (!n.completed) {
+            bool reachable = false;
+            for (size_t j = 0; j <= i; ++j) {
+                if (nodes_[j].completed) { reachable = true; break; }
+            }
+            // First node is always reachable (zone gate is in on_enter).
+            if (i == 0) reachable = true;
+            if (!reachable) state = 2;  // locked
+        }
         if (!ctx.host.host_render_battle_icon(n.icon, state, cx, cy, icon_size) &&
             !ctx.host.host_render_battle_icon(n.icon_fallback, state, cx, cy, icon_size)) {
             // No frame for this kind: a plain marker beats an invisible node.
-            r.draw_filled_circle_screen(cx, cy, icon_size * 0.3f,
-                                        sel ? resf2::renderer::Color4B{235, 195, 110, 235}
-                                            : resf2::renderer::Color4B{150, 120, 80, 210});
+            // Colour matches the state: gold=active, brown=base, grey=locked.
+            ren::Color4B marker_col = n.completed ? ren::Color4B{140, 180, 100, 210}
+                                      : (state == 2) ? ren::Color4B{90, 80, 70, 180}
+                                      : sel ? ren::Color4B{235, 195, 110, 235}
+                                            : ren::Color4B{150, 120, 80, 210};
+            r.draw_filled_circle_screen(cx, cy, icon_size * 0.3f, marker_col);
         }
         node_hit_[i] = {cx - icon_size * 0.5f, cy - icon_size * 0.5f, icon_size, icon_size};
 
@@ -628,7 +689,21 @@ void MapScene::on_render(SceneContext& ctx) {
         // this battle. localization key `stage` is "Стадия {0}/{1}".
         {
             const int total = (int)selected_battle_->fights.size();
-            const int done = std::min(total, 1);   // 7.3 will drive this from progress
+            // [ORIGINAL] Each fight in a battle has its own level path
+            // "zone/battle/fight" — the original checks completion per fight
+            // to fill the round markers (FUN_100a3e50 iterates fights and
+            // queries the profile's completed set via FUN_10138130).
+            int done = 0;
+            for (size_t fi = 0; fi < selected_battle_->fights.size(); ++fi) {
+                const auto& fight = selected_battle_->fights[fi];
+                std::string fight_level = selected_zone_name_ + "/" +
+                                          selected_battle_->name + "/" +
+                                          fight.name;
+                if (ctx.host.host_is_level_completed(fight_level)) ++done;
+            }
+            std::printf("[MAP] round_progress: zone='%s' battle='%s' done=%d total=%d\n",
+                        selected_zone_name_.c_str(), selected_battle_->name.c_str(),
+                        done, total);
             std::string tpl = ctx.host.host_localized("stage");
             if (tpl.empty()) tpl = "Stage {0}/{1}";
             const std::string a = std::to_string(done), b2 = std::to_string(total);
@@ -722,6 +797,12 @@ void MapScene::on_render(SceneContext& ctx) {
         }
         (void)ch;
     }
+
+    // [FIX] Render the menu overlay (scroll with Dojo/Map/Shop/Profile/Settings)
+    // on top of the map. Previously host_render_menu_overlay was only reachable
+    // from host_render_scene (dojo path), so pressing M on the map produced no
+    // visible result even though the overlay state was set correctly.
+    ctx.host.host_render_menu_overlay();
 }
 
 // ============================================================
@@ -733,6 +814,9 @@ void DialogueScene::on_enter(SceneContext& ctx) {
     ctx.host.host_reset_menu_state();
     current_line_ = 0;
     text_reveal_ms_ = 0;
+    const auto& lines = ctx.host.host_get_dialogue();
+    std::printf("[DIALOG] lines=%zu speaker='%s'\n",
+                lines.size(), lines.empty() ? "" : lines[0].first.c_str());
 }
 
 void DialogueScene::on_update(SceneContext& ctx) {
@@ -786,36 +870,68 @@ void DialogueScene::on_render(SceneContext& ctx) {
     const float w = (float)ctx.platform.window_width();
     const float h = (float)ctx.platform.window_height();
 
-    r.draw_filled_rect_screen(0, 0, w, h, {0, 0, 0, 150});
+    r.draw_filled_rect_screen(0, 0, w, h, {0, 0, 0, 70});
     if (current_line_ >= lines.size()) return;
 
-    // The scroll sits across the bottom, as wide as the frame less a margin.
-    const float box_w = w * 0.86f;
-    const float box_h = h * 0.30f;
-    const float box_x = (w - box_w) * 0.5f;
-    const float box_y = h - box_h - h * 0.10f;
+    // ---- Scroll panel geometry ----
+    // [ORIGINAL] The Regular dialog (QuestActionDialog @ FUN_101c7d20,
+    // render vtable[4] = FUN_101ca500) positions the parchment background at
+    // x = -450 with scale 1.8 (JS: Od.ala → b.C(-450), b.la(1.8*i)), giving
+    // a visible parchment span of -450 … +450 in centered coordinates.
+    // Button layout in JS: moreBtn.C(850 - w/2) → right edge at 850+w/2.
+    // Screen edges in the JS coordinate system: ±850 (total 1700 units).
+    // Proportional fractions of screen width/height:
+    //   parchment width  = 900 / 1700 ≈ 0.529   (was 0.86 — far too wide)
+    //   bottom margin    = 60  / 960  ≈ 0.063   (was 0.10)
+    //   left edge        = 400 / 1700 ≈ 0.235
+    // Text area (from JS qbb): Fa(900,800) → 900 pt wide × 800 pt tall,
+    //   left padding inside parchment ≈ 50/900 ≈ 0.056 of parchment width.
+    // The design space is 768-pt tall, width floats with aspect ratio;
+    // 1365.25×768 for 16:9 (ui_scale.hpp).  The JS 1700×960 is a separate
+    // dialog-local coordinate frame; the proportions below are screen-relative.
+    const float box_w = w * 0.53f;                       // 900/1700
+    const float box_h = h * 0.20f;                       // text area fills ~80% of scroll height
+    const float box_x = w * 0.235f;                      // (1700-900)/2/1700
+    const float box_y = h - box_h - h * 0.063f;          // 60/960 bottom margin
     ctx.host.host_render_scroll_panel(box_x, box_y, box_w, box_h);
 
-    // Avatar on the left, inset so it clears the sheet's edge strip.
-    const float pad = box_h * 0.10f;
+    // ---- Avatar ----
+    // [ORIGINAL] In the JS (Od.$A → Zg.C(-450+OB)) the avatar sits at the
+    // left edge of the parchment inset by ~15 pt.  Avatar size is derived
+    // from text area height (700 pt from JS kb.Fa(900,800) → kb.rd(true) →
+    // kb.Kc(.9) → scaled by 700 pt).  Proportional to parchment height:
+    //   avatar = 700/800 ≈ 0.875 of parchment height  (was 0.78)
+    //   left inset = 15/900 ≈ 0.017 of parchment width
+    const float pad = box_h * 0.08f;
     float text_x = box_x + box_w * 0.055f;
-    const float avatar = box_h * 0.78f;
+    const float avatar = box_h * 0.875f;
     const std::string& speaker_key = lines[current_line_].first;
-    if (ctx.host.host_render_ui_texture(speaker_key.empty() ? "character_sensei"
-                                                            : speaker_key,
-                                        box_x + box_w * 0.03f,
-                                        box_y + (box_h - avatar) * 0.5f,
-                                        avatar, avatar)) {
-        text_x = box_x + box_w * 0.03f + avatar + box_w * 0.025f;
+    std::string avatar_name = "character_sensei";  // default fallback
+    if (!speaker_key.empty()) {
+        avatar_name = "character_";
+        for (char c : speaker_key)
+            avatar_name += (char)std::tolower((unsigned char)c);
+    }
+    if (ctx.host.host_render_ui_texture(avatar_name,
+                                         box_x + box_w * 0.017f,
+                                         box_y + (box_h - avatar) * 0.5f,
+                                         avatar, avatar)) {
+        // [ORIGINAL] Text starts right after the avatar + small gap.
+        // avatar occupies `avatar` px; gap ≈ 2% of parchment width.
+        text_x = box_x + box_w * 0.017f + avatar + box_w * 0.02f;
     }
 
-    // Speaker name, then the line. Both arrive as localization keys; the raw
-    // key is shown if it is missing so a typo is visible rather than silent.
+    // Speaker name, then the line. The speaker key stored in dialogue lines is
+    // a Latin identifier (e.g. "Sensei"); the localization key is formed by
+    // prepending "character" (matching quests.xml Title="characterSensei").
+    // The raw key is shown if localization is missing so a typo is visible.
     const float name_scale = text_scale(h * 0.036f);
     const float body_scale = text_scale(h * 0.040f);
     float ty = box_y + pad;
     {
-        std::string title = ctx.host.host_localized(speaker_key);
+        std::string title = ctx.host.host_localized("character" + speaker_key);
+        if (title.empty()) title = ctx.host.host_localized(speaker_key);
+        if (title.empty()) title = speaker_key;
         if (!title.empty()) {
             const auto [tw, th] = ctx.host.host_measure_text(title, name_scale);
             (void)tw;
@@ -864,10 +980,58 @@ void DialogueScene::on_render(SceneContext& ctx) {
     // The advance button, on its own little scroll like every button in the
     // original. Only once the line has finished revealing.
     if (cut >= full.size()) {
+        // [DIALOG] Log typewriter completion
+        std::printf("[DIALOG] typewriter=100%% line=%zu/%zu\n",
+                    current_line_ + 1, lines.size());
+
+        // [ORIGINAL] QuestActionDialog @ FUN_101c7d20 carries a choice vector
+        // at +0xa4..+0xb0 (param_1+0x29 in assembly, confirmed at 0x101c7e89).
+        // When choices are present, render them as clickable buttons below
+        // the text instead of the generic MORE button.
+        // Choice layout: centered horizontally within the parchment, sized
+        // proportionally to the scroll dimensions.
+        const auto& choices = ctx.host.host_get_dialogue_choices();
+        if (!choices.empty()) {
+            const float cbw = box_w * 0.30f, cbh = box_h * 0.25f;
+            const float cbgap = box_w * 0.04f;
+            const float total_cw = choices.size() * cbw + (choices.size() - 1) * cbgap;
+            float cbx = box_x + (box_w - total_cw) * 0.5f;
+            const float cby = box_y + box_h - cbh * 0.75f;
+            for (size_t ci = 0; ci < choices.size(); ++ci) {
+                ctx.host.host_render_scroll_panel(cbx, cby, cbw, cbh);
+                const float cs = text_scale(cbh * 0.40f);
+                const std::string label = ctx.host.host_localized(choices[ci]);
+                const std::string display = label.empty() ? choices[ci] : label;
+                const auto [ctw, cth] = ctx.host.host_measure_text(display, cs);
+                ctx.host.host_render_text(display, cbx + (cbw - ctw) * 0.5f,
+                                          cby + (cbh - cth) * 0.5f, cs,
+                                          92, 46, 20, 255);
+                // Choice click → advance dialogue
+                if (clicked_in(ctx.platform.input(), cbx, cby, cbw, cbh)) {
+                    std::printf("[DIALOG] choice=%zu '%s'\n", ci, choices[ci].c_str());
+                    current_line_++;
+                    text_reveal_ms_ = 0;
+                    if (current_line_ >= lines.size()) {
+                        ctx.host.request_scene_transition(
+                            ctx.host.host_get_battle_location().empty()
+                                ? SceneId::MainMenu : SceneId::Battle);
+                    }
+                    return;
+                }
+                cbx += cbw + cbgap;
+            }
+            return;  // choices replace the MORE button
+        }
+
         std::string more = ctx.host.host_localized("dlgStoryBtnMore");
         if (more.empty()) more = "MORE";
-        const float bw = box_w * 0.20f, bh = box_h * 0.26f;
-        const float bx = box_x + box_w - bw - box_w * 0.05f;
+        // [ORIGINAL] JS: moreBtn.C(850 - w/2), moreBtn.xc(600), moreBtn.Pb(125).
+        // Button is 125 units wide, centered at x=850 in a ±850 frame.
+        // Proportional: width = 125/1700 ≈ 0.074, right edge at (850+62.5)/1700 ≈ 0.537.
+        // Height proportional to scroll height: 125/800 ≈ 0.156.
+        const float bw = w * 0.074f;
+        const float bh = box_h * 0.50f;
+        const float bx = box_x + box_w - bw - box_w * 0.03f;
         const float by = box_y + box_h - bh * 0.75f;
         ctx.host.host_render_scroll_panel(bx, by, bw, bh);
         const float bs = text_scale(bh * 0.44f);
@@ -1011,6 +1175,8 @@ void ResultsScene::on_enter(SceneContext& ctx) {
         std::string level = ctx.host.host_get_current_level();
         if (!level.empty()) {
             ctx.host.host_add_completed_level(level);
+            // [ORIGINAL] QuestManager processes FightEnd event to unlock zones/battles.
+            ctx.host.host_trigger_quest_event("FightEnd", level);
         }
         // Track win
         ctx.host.host_add_win();
@@ -1027,6 +1193,11 @@ void ResultsScene::on_update(SceneContext& ctx) {
     if (guard_ms_ < kGuardMs) return;
 
     const auto& input = ctx.platform.input();
+
+    // [FIX] Menu scroll toggle on results screen — consistent with Map and dojo.
+    if (key_pressed(input, platform::Key::M)) {
+        ctx.host.host_toggle_menu_overlay();
+    }
 
     // Continue button area (bottom center)
     float w = (float)ctx.platform.window_width();
@@ -1094,6 +1265,10 @@ void ResultsScene::on_render(SceneContext& ctx) {
     r.draw_filled_rect_screen(btn_x + 3, btn_y + 3, btn_w - 6, btn_h - 6, {90, 70, 50, 210});
     ctx.host.host_render_text(is_victory_ ? "CONTINUE" : "BACK TO MENU",
         btn_x + btn_w * 0.5f - 60, btn_y + 17, 0.28f, 255, 255, 255, 255);
+
+    // [FIX] Render the menu overlay on top of the results screen, so M key
+    // opens the same vertical scroll menu as on the dojo and map.
+    ctx.host.host_render_menu_overlay();
 }
 
 // ============================================================
@@ -1197,227 +1372,19 @@ void ProfileScene::on_render(SceneContext& ctx) {
 // ShopScene helpers
 // ============================================================
 
-// Forward declarations for helper functions used by ShopScene.
-// (Defined after ShopScene to keep category logic close to rendering.)
+// [ORIGINAL] ShopScreen @ 0x1021f170 — 8 category tabs with stride 0x10 at
+// this+0x124..0x194. We expose the 5 primary categories that match the
+// original's first five tabs (Weapon=1, Armor=2, Helm=3, Ranged=4, Magic=5).
+// Categories 6-8 in the original (enchantments/specials/upgrades) are not yet
+// reversed and are omitted.
+
+// Shop-local text scale: wanted-px → font-scale, same law as MapScene.
+// The bitmap font's line box is ~115 px at scale 1.
+static float shop_text_scale(float wanted_px) { return wanted_px / 115.0f; }
 
 // Get items for a category from list_data.
-static std::vector<resf2::format::ListItem> get_items_for_category(SceneContext& ctx, const std::string& category);
-
-// Map item type (from list.xml) to equipment slot name.
-static std::string slot_for_category(const std::string& type);
-
-// ============================================================
-// ShopScene
-// ============================================================
-
-void ShopScene::on_enter(SceneContext& ctx) {
-    std::printf("[shop] enter\n");
-    ctx.renderer.set_clear_color(0.04f, 0.04f, 0.07f, 1.0f);
-    scroll_y_ = 0.0f;
-}
-
-void ShopScene::on_update(SceneContext& ctx) {
-    const auto& input = ctx.platform.input();
-    // Back button (top-left) or Esc
-    if (clicked_in(input, 10, 10, 80, 40) ||
-        key_pressed(input, platform::Key::Escape) ||
-        key_pressed(input, platform::Key::M)) {
-        ctx.host.request_scene_transition(SceneId::MainMenu);
-        return;
-    }
-
-    float w = (float)ctx.platform.window_width();
-    float bar_h = 60.0f;
-
-    // Click on items
-    float cy = bar_h + 20.0f - scroll_y_;
-    std::string categories[] = {"Weapon", "Armor", "Helm", "Ranged", "Magic"};
-
-    for (auto& cat : categories) {
-        auto items = get_items_for_category(ctx, cat);
-        if (items.empty()) continue;
-
-        // Category header (clickable for scroll-to)
-        // Skip header rendering as it's just decoration
-        cy += 35.0f;
-
-        for (size_t idx = 0; idx < items.size(); ++idx) {
-            const auto& entry = items[idx];
-            float iy = cy + idx * 44.0f;
-
-            // Skip if off-screen
-            if (iy + 44 < 0 || iy > ctx.platform.window_height()) continue;
-
-            // Buy button
-            float bx = w - 165.0f;
-            bool owned = ctx.host.host_has_item(entry.name);
-            bool equipped = ctx.host.host_get_equipped(
-                slot_for_category(entry.type)) == entry.name;
-
-            if (!owned && !entry.is_paid) {
-                // BUY button
-                if (clicked_in(input, bx, iy + 4, 70, 34)) {
-                    if (ctx.host.host_buy_item(entry.name)) {
-                        ctx.host.host_play_ui_click();
-                    }
-                }
-            } else if (owned && !equipped) {
-                // EQUIP button
-                if (clicked_in(input, bx, iy + 4, 70, 34)) {
-                    if (ctx.host.host_equip_item(entry.name)) {
-                        ctx.host.host_play_ui_click();
-                    }
-                }
-            } else if (equipped) {
-                // UNEQUIP button
-                if (clicked_in(input, bx, iy + 4, 70, 34)) {
-                    std::string slot = slot_for_category(entry.type);
-                    if (ctx.host.host_unequip_item(slot)) {
-                        ctx.host.host_play_ui_click();
-                    }
-                }
-            }
-
-            // Sell button (only for owned, non-equipped items)
-            if (owned && !equipped) {
-                float sell_bx = w - 90.0f;
-                if (clicked_in(input, sell_bx, iy + 4, 70, 34)) {
-                    if (ctx.host.host_sell_item(entry.name)) {
-                        ctx.host.host_play_ui_click();
-                    }
-                }
-            }
-        }
-        cy += items.size() * 44.0f + 10.0f;
-    }
-}
-
-void ShopScene::on_render(SceneContext& ctx) {
-    auto& r = ctx.renderer;
-    float w = (float)ctx.platform.window_width();
-    float h = (float)ctx.platform.window_height();
-    float bar_h = 60.0f;
-
-    // Top bar
-    r.draw_filled_rect_screen(0, 0, w, bar_h, {20, 20, 40, 230});
-    r.draw_filled_rect_screen(10, 10, 80, bar_h - 20, {50, 50, 70, 200});
-    ctx.host.host_render_text("< BACK", 20, 18, 0.32f, 220, 220, 240, 255);
-    r.draw_filled_rect_screen(100, 10, w - 200, bar_h - 20, {30, 30, 50, 180});
-    ctx.host.host_render_text("SHOP", w * 0.5f - 30, 15, 0.40f, 200, 200, 220, 255);
-
-    // Gold display
-    int currency = ctx.host.host_get_currency();
-    std::string gold_str = "Gold: " + std::to_string(currency);
-    ctx.host.host_render_text(gold_str, w - 160, 18, 0.28f, 255, 220, 100, 255);
-
-    // Check if we have any catalog data
-    auto* list_data = ctx.host.host_get_list_data();
-    if (!list_data || list_data->items.empty()) {
-        ctx.host.host_render_text("No items available", w * 0.5f - 80, h * 0.5f, 0.30f, 150, 150, 170, 200);
-        return;
-    }
-
-    int player_level = ctx.host.host_get_player_level();
-    float cy = bar_h + 20.0f - scroll_y_;
-    std::string categories[] = {"Weapon", "Armor", "Helm", "Ranged", "Magic"};
-
-    for (auto& cat : categories) {
-        auto items = get_items_for_category(ctx, cat);
-        if (items.empty()) continue;
-
-        // Category header
-        r.draw_filled_rect_screen(20, cy, w - 40, 30, {40, 40, 55, 220});
-        ctx.host.host_render_text(cat, 30, cy + 5, 0.28f, 200, 170, 100, 255);
-        cy += 35.0f;
-
-        for (size_t idx = 0; idx < items.size(); ++idx) {
-            const auto& entry = items[idx];
-            float iy = cy + idx * 44.0f;
-
-            // Skip if off-screen
-            if (iy + 44 < 0 || iy > h) continue;
-
-            // Item row background (alternating)
-            r.draw_filled_rect_screen(25, iy, w - 50, 40, (idx % 2 == 0) ?
-                ren::Color4B{30, 30, 45, 200} : ren::Color4B{25, 25, 40, 200});
-
-            // Item name
-            ctx.host.host_render_text(entry.name, 35, iy + 10, 0.24f, 200, 200, 220, 255);
-
-            // Stats
-            std::string stats;
-            if (entry.weapon_damage > 0)
-                stats += "DMG:" + std::to_string((int)entry.weapon_damage) + " ";
-            if (entry.body_defense > 0)
-                stats += "DEF:" + std::to_string((int)entry.body_defense) + " ";
-            if (entry.head_defense > 0)
-                stats += "HDEF:" + std::to_string((int)entry.head_defense) + " ";
-            if (entry.ranged_damage > 0)
-                stats += "RDMG:" + std::to_string((int)entry.ranged_damage) + " ";
-            if (entry.magic_damage > 0)
-                stats += "MDMG:" + std::to_string((int)entry.magic_damage) + " ";
-            ctx.host.host_render_text(stats, 210, iy + 2, 0.20f, 150, 150, 170, 200);
-
-            // Level requirement
-            if (entry.level > 1) {
-                ctx.host.host_render_text("Lv." + std::to_string(entry.level),
-                    210, iy + 22, 0.20f, 150, 150, 170, 200);
-            }
-
-            // IAP label
-            if (entry.is_paid) {
-                ctx.host.host_render_text("REAL $", w - 220, iy + 10, 0.22f, 255, 220, 100, 200);
-                continue;
-            }
-
-            bool owned = ctx.host.host_has_item(entry.name);
-            bool equipped = ctx.host.host_get_equipped(
-                slot_for_category(entry.type)) == entry.name;
-
-            // Price / Owned label
-            if (owned) {
-                ctx.host.host_render_text("OWNED", w - 230, iy + 2, 0.20f, 100, 200, 100, 200);
-                if (equipped) {
-                    ctx.host.host_render_text("EQUIPPED", w - 230, iy + 22, 0.20f, 100, 200, 255, 200);
-                }
-            } else {
-                std::string price_str = std::to_string(entry.price) + "g";
-                ctx.host.host_render_text(price_str, w - 230, iy + 2, 0.22f, 255, 220, 100, 255);
-                if (entry.level > player_level) {
-                    ctx.host.host_render_text("LVL REQ", w - 230, iy + 22, 0.18f, 255, 100, 100, 200);
-                }
-            }
-
-            // Action buttons: BUY / EQUIP / UNEQUIP / SELL
-            float buy_bx = w - 165.0f;
-            float sell_bx = w - 90.0f;
-
-            if (!owned && !entry.is_paid) {
-                // BUY button
-                bool can_afford = currency >= entry.price && player_level >= entry.level;
-                bool can_buy = can_afford && entry.price > 0;
-                r.draw_filled_rect_screen(buy_bx, iy + 4, 70, 32, can_buy ?
-                    ren::Color4B{50, 120, 50, 220} : ren::Color4B{60, 60, 60, 200});
-                ctx.host.host_render_text("BUY", buy_bx + 12, iy + 9, 0.22f, 255, 255, 255, 255);
-            } else if (owned && !equipped) {
-                // EQUIP button
-                r.draw_filled_rect_screen(buy_bx, iy + 4, 70, 32, {50, 80, 140, 220});
-                ctx.host.host_render_text("EQUIP", buy_bx + 6, iy + 9, 0.20f, 255, 255, 255, 255);
-                // SELL button
-                r.draw_filled_rect_screen(sell_bx, iy + 4, 70, 32, {140, 80, 40, 220});
-                ctx.host.host_render_text("SELL", sell_bx + 10, iy + 9, 0.22f, 255, 255, 255, 255);
-            } else if (equipped) {
-                // UNEQUIP button
-                r.draw_filled_rect_screen(buy_bx, iy + 4, 70, 32, {100, 60, 60, 220});
-                ctx.host.host_render_text("UNEQUIP", buy_bx + 1, iy + 9, 0.18f, 255, 255, 255, 255);
-            }
-        }
-        cy += items.size() * 44.0f + 10.0f;
-    }
-}
-
-// Helper: get items for a category from ShopManager via list_data
-static std::vector<resf2::format::ListItem> get_items_for_category(SceneContext& ctx, const std::string& category) {
+static std::vector<resf2::format::ListItem> shop_items_for_category(
+    SceneContext& ctx, const std::string& category) {
     std::vector<resf2::format::ListItem> result;
     auto* list_data = ctx.host.host_get_list_data();
     if (!list_data) return result;
@@ -1429,8 +1396,8 @@ static std::vector<resf2::format::ListItem> get_items_for_category(SceneContext&
     return result;
 }
 
-// Helper: map item type (from list.xml) to equipment slot name
-static std::string slot_for_category(const std::string& type) {
+// Map item type (from list.xml) to equipment slot name.
+static std::string shop_slot_for_type(const std::string& type) {
     if (type == "Weapon") return "weapon";
     if (type == "Armor")  return "armor";
     if (type == "Helm")   return "helmet";
@@ -1438,6 +1405,655 @@ static std::string slot_for_category(const std::string& type) {
     if (type == "Magic")  return "magic";
     return {};
 }
+
+// [REWORK] Shop layout matching the reference screenshot proportions.
+// [ORIGINAL] Derived from ShopScreen @ 0x1021f170. The reference shows:
+//   - MENU scroll roll at the very top (same as dojo)
+//   - Three vertical columns below: fighter silhouette (left), equipped-items
+//     scroll (centre), item detail/buy panel (right)
+//   - Bottom bar with currency readouts on the left and category icons on the
+//     right.
+namespace {
+struct ShopLayout {
+    float s;                // points -> screen pixels
+    float win_w, win_h;     // cached window size in screen pixels
+    float logical_w;        // logical width in points (win_w / s)
+
+    // --- vertical bands ---
+    float menu_roll_y;      // top of the MENU scroll roll bar
+    float menu_roll_h;      // height of the roll bar
+    float body_y;           // top of the body (below roll bar)
+    float body_h;           // total body height
+    float bottom_y;         // top of the bottom category/currency bar
+    float bottom_h;         // bottom bar height
+
+    // --- body columns (horizontal thirds) ---
+    float fighter_x, fighter_w;   // left column: fighter silhouette + TRY ON
+    float scroll_x,  scroll_w;    // centre column: equipped-items parchment
+    float detail_x,  detail_w;    // right column: item name + stats + BUY
+
+    // --- fighter column internals ---
+    float try_on_y, try_on_h;     // TRY ON button inside fighter area
+    float arrow_l_x, arrow_r_x;   // left/right navigation arrows
+    float arrow_y, arrow_w, arrow_h;
+
+    // --- bottom bar internals ---
+    float currency_x;             // left edge of currency display
+    float cat_icon_y, cat_icon_w; // category icon row
+    float cat_icons_start_x;      // first icon x
+
+    // --- detail panel internals ---
+    float detail_pad;             // padding inside detail panel
+    float stat_bar_x, stat_bar_w, stat_bar_h;  // damage bar position
+    float buy_btn_x, buy_btn_y, buy_btn_w, buy_btn_h;  // BUY button
+};
+
+ShopLayout shop_layout(float w, float h) {
+    ShopLayout L;
+    L.s = resf2::ui::points_scale(h);
+    L.win_w = w;
+    L.win_h = h;
+    L.logical_w = w / L.s;
+
+    // Vertical bands — reference uses the dojo's top HUD + a MENU scroll roll
+    // above the body, and a category/currency bar at the bottom.
+    L.menu_roll_h = 56.0f * L.s;
+    L.menu_roll_y = 192.0f * L.s;   // below the top panel (same as dojo)
+    L.bottom_h    = 80.0f * L.s;
+    L.bottom_y    = h - L.bottom_h;
+    L.body_y      = L.menu_roll_y + L.menu_roll_h;
+    L.body_h      = L.bottom_y - L.body_y;
+
+    // Three body columns: 28% / 40% / 32% of logical width, in screen pixels.
+    L.fighter_w = L.logical_w * 0.28f * L.s;
+    L.scroll_w  = L.logical_w * 0.40f * L.s;
+    L.detail_w  = L.logical_w * 0.32f * L.s;
+    L.fighter_x = 0.0f;
+    L.scroll_x  = L.fighter_w;
+    L.detail_x  = L.fighter_w + L.scroll_w;
+
+    // Fighter column: silhouette in the upper 60%, TRY ON button + arrows
+    // below. Arrows are small chevrons at the left/right edges.
+    L.try_on_h = 36.0f * L.s;
+    L.try_on_y = L.body_y + L.body_h * 0.62f;
+    L.arrow_w  = 28.0f * L.s;
+    L.arrow_h  = 40.0f * L.s;
+    L.arrow_y  = L.try_on_y + L.try_on_h + 12.0f * L.s;
+    L.arrow_l_x = L.fighter_x + 6.0f * L.s;
+    L.arrow_r_x = L.fighter_x + L.fighter_w - L.arrow_w - 6.0f * L.s;
+
+    // Bottom bar: currency on the left, category icons centred.
+    L.currency_x = 16.0f * L.s;
+    L.cat_icon_w = 52.0f * L.s;
+    L.cat_icon_y = L.bottom_y + (L.bottom_h - L.cat_icon_w) * 0.5f;
+    const int n_cats = 5;
+    const float total_cat_w = n_cats * L.cat_icon_w + (n_cats - 1) * 12.0f * L.s;
+    L.cat_icons_start_x = (w - total_cat_w) * 0.5f;
+
+    // Detail panel: padding, stat bar, buy button near the bottom.
+    L.detail_pad = L.detail_w * 0.07f;
+    L.stat_bar_x = L.detail_x + L.detail_pad;
+    L.stat_bar_w = L.detail_w - 2.0f * L.detail_pad;
+    L.stat_bar_h = 24.0f * L.s;
+    L.buy_btn_w  = L.detail_w * 0.72f;
+    L.buy_btn_h  = 44.0f * L.s;
+    L.buy_btn_x  = L.detail_x + (L.detail_w - L.buy_btn_w) * 0.5f;
+    L.buy_btn_y  = L.bottom_y - L.buy_btn_h - 14.0f * L.s;
+
+    return L;
+}
+}  // namespace
+
+// ============================================================
+// ShopScene
+// ============================================================
+
+void ShopScene::on_enter(SceneContext& ctx) {
+    std::printf("[shop] enter\n");
+    ctx.renderer.set_clear_color(0.05f, 0.03f, 0.01f, 1.0f);
+
+    // Reset state
+    selected_category_ = 0;   // 0 = Weapon
+    selected_item_idx_ = 0;
+    scroll_offset_ = 0.0f;
+
+    // [SHOP] Log initial state
+    auto items = shop_items_for_category(ctx, categories_[0]);
+    int gold = ctx.host.host_get_currency();
+    int level = ctx.host.host_get_player_level();
+    std::printf("[SHOP] category='%s' items=%zu selected=%d gold=%d level=%d\n",
+                categories_[0].c_str(), items.size(), selected_item_idx_,
+                gold, level);
+}
+
+void ShopScene::on_update(SceneContext& ctx) {
+    const auto& input = ctx.platform.input();
+    const float w = (float)ctx.platform.window_width();
+    const float h = (float)ctx.platform.window_height();
+    const ShopLayout L = shop_layout(w, h);
+
+    // --- Back / Esc ---
+    if (key_pressed(input, platform::Key::Escape)) {
+        ctx.host.request_scene_transition(SceneId::MainMenu);
+        return;
+    }
+    // [FIX] M key toggles the menu overlay instead of going back to main menu.
+    // The shop has its own MENU scroll roll now; pressing M opens the same
+    // vertical scroll menu as on the dojo/map.
+    if (key_pressed(input, platform::Key::M)) {
+        ctx.host.host_toggle_menu_overlay();
+    }
+
+    // Back click on the MENU roll bar (leftmost 20%) — goes back to main menu
+    if (clicked_in(input, 0, L.menu_roll_y, 80.0f * L.s, L.menu_roll_h)) {
+        ctx.host.host_play_ui_click();
+        ctx.host.request_scene_transition(SceneId::MainMenu);
+        return;
+    }
+    // Back button click (top-left corner placeholder for older flows)
+    if (clicked_in(input, 10, 10, 80, 40)) {
+        ctx.host.host_play_ui_click();
+        ctx.host.request_scene_transition(SceneId::MainMenu);
+        return;
+    }
+
+    // --- Category icon clicks (bottom bar) ---------------------------------
+    const float icon_gap = 12.0f * L.s;
+    for (size_t i = 0; i < categories_.size(); ++i) {
+        float ix = L.cat_icons_start_x + static_cast<float>(i) * (L.cat_icon_w + icon_gap);
+        if (clicked_in(input, ix, L.cat_icon_y, L.cat_icon_w, L.cat_icon_w)) {
+            if (static_cast<int>(i) != selected_category_) {
+                selected_category_ = static_cast<int>(i);
+                selected_item_idx_ = 0;
+                scroll_offset_ = 0.0f;
+                ctx.host.host_play_ui_click();
+                std::printf("[SHOP] category switch -> '%s'\n",
+                            categories_[selected_category_].c_str());
+            }
+            break;
+        }
+    }
+
+    // --- Left/right navigation arrows in fighter column --------------------
+    if (clicked_in(input, L.arrow_l_x, L.arrow_y, L.arrow_w, L.arrow_h)) {
+        int nc = static_cast<int>(categories_.size());
+        selected_category_ = (selected_category_ - 1 + nc) % nc;
+        selected_item_idx_ = 0;
+        scroll_offset_ = 0.0f;
+        ctx.host.host_play_ui_click();
+    }
+    if (clicked_in(input, L.arrow_r_x, L.arrow_y, L.arrow_w, L.arrow_h)) {
+        int nc = static_cast<int>(categories_.size());
+        selected_category_ = (selected_category_ + 1) % nc;
+        selected_item_idx_ = 0;
+        scroll_offset_ = 0.0f;
+        ctx.host.host_play_ui_click();
+    }
+
+    // --- Equipped-item slot clicks (centre scroll) --------------------------
+    auto items = shop_items_for_category(ctx, categories_[selected_category_]);
+    int item_count = static_cast<int>(items.size());
+    {
+        const float pad = L.scroll_w * 0.08f;
+        const float inner_x = L.scroll_x + pad;
+        const float inner_w = L.scroll_w - 2.0f * pad;
+        float y = L.body_y + L.body_h * 0.06f;
+        // Skip header (approx 26pt * scale * 1.4)
+        y += 26.0f * L.s * 1.4f;
+        const float row_h = L.body_h * 0.22f;
+        // Up to kVisibleRows rows
+        for (int i = 0; i < kVisibleRows; ++i) {
+            if (clicked_in(input, inner_x, y, inner_w, row_h - 6.0f * L.s)) {
+                int new_sel = static_cast<int>(scroll_offset_) + i;
+                if (new_sel >= 0 && new_sel < item_count && new_sel != selected_item_idx_) {
+                    selected_item_idx_ = new_sel;
+                    ctx.host.host_play_ui_click();
+                }
+                break;
+            }
+            y += row_h;
+        }
+    }
+
+    // --- BUY / EQUIP / UNEQUIP buttons --------------------------------------
+    if (selected_item_idx_ >= 0 && selected_item_idx_ < item_count) {
+        const auto& item = items[selected_item_idx_];
+        bool owned = ctx.host.host_has_item(item.name);
+        bool equipped = ctx.host.host_get_equipped(
+            shop_slot_for_type(item.type)) == item.name;
+        int gold = ctx.host.host_get_currency();
+        int level = ctx.host.host_get_player_level();
+
+        if (!owned && !item.is_paid) {
+            if (clicked_in(input, L.buy_btn_x, L.buy_btn_y, L.buy_btn_w, L.buy_btn_h)) {
+                bool can_buy = (gold >= item.price && level >= item.level && item.price > 0);
+                if (can_buy) {
+                    if (ctx.host.host_buy_item(item.name)) {
+                        ctx.host.host_play_ui_click();
+                        std::printf("[SHOP] buy item='%s' price=%d -> success\n",
+                                    item.name.c_str(), item.price);
+                    }
+                }
+            }
+        } else if (owned && !equipped) {
+            if (clicked_in(input, L.buy_btn_x, L.buy_btn_y, L.buy_btn_w, L.buy_btn_h)) {
+                if (ctx.host.host_equip_item(item.name)) {
+                    ctx.host.host_play_ui_click();
+                }
+            }
+        } else if (equipped) {
+            if (clicked_in(input, L.buy_btn_x, L.buy_btn_y, L.buy_btn_w, L.buy_btn_h)) {
+                std::string slot = shop_slot_for_type(item.type);
+                if (ctx.host.host_unequip_item(slot)) {
+                    ctx.host.host_play_ui_click();
+                }
+            }
+        }
+    }
+
+    // --- Scroll with W/S keys in the scroll area ----------------------------
+    if (key_pressed(input, platform::Key::W) && scroll_offset_ > 0.0f) {
+        scroll_offset_ -= 1.0f;
+    }
+    if (key_pressed(input, platform::Key::S)) {
+        float max_scroll = std::max(0.0f,
+            static_cast<float>(item_count) - static_cast<float>(kVisibleRows));
+        if (scroll_offset_ < max_scroll) {
+            scroll_offset_ += 1.0f;
+        }
+    }
+}
+
+void ShopScene::on_render(SceneContext& ctx) {
+    auto& r = ctx.renderer;
+    const float w = (float)ctx.platform.window_width();
+    const float h = (float)ctx.platform.window_height();
+    const ShopLayout L = shop_layout(w, h);
+
+    // --- Background: dark brown base (matches reference screenshot base) ----
+    r.draw_filled_rect_screen(0, 0, w, h, {18, 12, 6, 255});
+
+    // --- Top HUD panel (gold/level) — same as dojo/menu --------------------
+    ctx.host.host_render_top_panel();
+
+    // --- MENU scroll roll at the top of the body ----------------------------
+    // [ORIGINAL] Same roll texture the dojo uses; its label is the localized
+    // "MENU" string. The click target toggles the menu overlay (see on_update).
+    {
+        const float ry = L.menu_roll_y, rh = L.menu_roll_h;
+        r.draw_filled_rect_screen(0, ry, w, rh, {42, 28, 14, 230});
+        // Left and right caps (slightly darker to fake a rolled edge)
+        r.draw_filled_rect_screen(0, ry, 20.0f * L.s, rh, {60, 40, 20, 255});
+        r.draw_filled_rect_screen(w - 20.0f * L.s, ry, 20.0f * L.s, rh,
+                                  {60, 40, 20, 255});
+        std::string menu_label = ctx.host.host_localized("menu");
+        if (menu_label.empty()) menu_label = "MENU";
+        const float ts = shop_text_scale(rh * 0.55f);
+        const auto [tw, th] = ctx.host.host_measure_text(menu_label, ts);
+        ctx.host.host_render_text(menu_label, (w - tw) * 0.5f, ry + (rh - th) * 0.5f,
+                                  ts, 255, 230, 170, 255);
+    }
+
+    // --- Left column: fighter silhouette + TRY ON + arrows ------------------
+    {
+        const float fx = L.fighter_x, fw = L.fighter_w, fy = L.body_y, fh = L.body_h;
+        // Dark silhouette backdrop — a placeholder for the real 3D model. The
+        // original renders the fighter using the same body_model as gameplay,
+        // but that needs the full model pipeline (not available in the shop
+        // scene yet). A dark gradient stands in so the proportions are visible.
+        ren::Color4B sil_bg{12, 8, 4, 255};
+        r.draw_filled_rect_screen(fx, fy, fw, fh, sil_bg);
+        // Silhouette "fighter" rectangle (dark brown) with a subtle highlight
+        const float sil_pad = fw * 0.10f;
+        const float sil_x = fx + sil_pad;
+        const float sil_w = fw - 2.0f * sil_pad;
+        const float sil_h = fh * 0.55f;
+        const float sil_y = fy + fh * 0.04f;
+        r.draw_filled_rect_screen(sil_x, sil_y, sil_w, sil_h, {26, 18, 10, 240});
+        // Simple body shape inside the silhouette (two triangles for torso+legs)
+        const float cx = sil_x + sil_w * 0.5f;
+        const float top_y = sil_y + sil_h * 0.05f;
+        const float bot_y = sil_y + sil_h * 0.95f;
+        const float shoulder_w = sil_w * 0.38f;
+        const float hip_w = sil_w * 0.22f;
+        // Torso triangle (pointing up)
+        r.draw_filled_rect_screen(cx - shoulder_w, top_y, shoulder_w * 2.0f,
+                                  sil_h * 0.45f, {52, 36, 20, 200});
+        // Legs rectangle
+        r.draw_filled_rect_screen(cx - hip_w, top_y + sil_h * 0.45f,
+                                  hip_w * 2.0f, sil_h * 0.50f, {44, 30, 16, 200});
+        // Label
+        ctx.host.host_render_text("FIGHTER", cx - 36.0f * L.s,
+                                  sil_y + sil_h + 6.0f * L.s,
+                                  shop_text_scale(18.0f * L.s),
+                                  120, 90, 60, 200);
+
+        // TRY ON button below the silhouette
+        const float try_x = fx + (fw - L.try_on_h * 3.5f) * 0.5f;
+        const float try_w = L.try_on_h * 3.5f;
+        r.draw_filled_rect_screen(try_x, L.try_on_y, try_w, L.try_on_h,
+                                  {90, 70, 40, 230});
+        std::string try_label = ctx.host.host_localized("tryOn");
+        if (try_label.empty()) try_label = "TRY ON";
+        const float try_ts = shop_text_scale(L.try_on_h * 0.55f);
+        const auto [ttw, tth] = ctx.host.host_measure_text(try_label, try_ts);
+        ctx.host.host_render_text(try_label, try_x + (try_w - ttw) * 0.5f,
+                                  L.try_on_y + (L.try_on_h - tth) * 0.5f,
+                                  try_ts, 255, 230, 170, 255);
+
+        // Navigation arrows (< >) at the edges of the fighter area
+        const float arr_ts = shop_text_scale(L.arrow_h * 0.9f);
+        ctx.host.host_render_text("<", L.arrow_l_x, L.arrow_y, arr_ts,
+                                  220, 180, 120, 255);
+        ctx.host.host_render_text(">", L.arrow_r_x, L.arrow_y, arr_ts,
+                                  220, 180, 120, 255);
+    }
+
+    // --- Centre column: equipped-items scroll (parchment) -------------------
+    {
+        // Parchment background (same tint as the dojo's scroll panels).
+        const float sx = L.scroll_x, sw = L.scroll_w, sy = L.body_y, sh = L.body_h;
+        ctx.host.host_render_scroll_panel(sx, sy, sw, sh);
+
+        const float pad = sw * 0.08f;
+        const float inner_x = sx + pad;
+        const float inner_w = sw - 2.0f * pad;
+        float y = sy + sh * 0.06f;
+
+        // Header: "EQUIPPED" centred
+        std::string header = ctx.host.host_localized("equipped");
+        if (header.empty()) header = "EQUIPPED";
+        const float hdr_scale = shop_text_scale(26.0f * L.s);
+        const auto [htw, hth] = ctx.host.host_measure_text(header, hdr_scale);
+        ctx.host.host_render_text(header, sx + (sw - htw) * 0.5f, y,
+                                  hdr_scale, 92, 46, 20, 255);
+        y += hth * 1.4f;
+
+        // Three equipped-item slots: weapon (top), consumable (middle),
+        // secondary weapon (bottom). Each row shows the item's image, name,
+        // and a star rating. Missing slots render an empty placeholder.
+        struct Slot { const char* label; std::string slot_key; };
+        Slot slots[] = {{"Weapon",    "weapon"},
+                        {"Consumable","consumable"},
+                        {"Ranged",    "ranged"}};
+        const float row_h = sh * 0.22f;
+        const float icon_sz = row_h * 0.75f;
+        for (const auto& slot : slots) {
+            std::string equipped = ctx.host.host_get_equipped(slot.slot_key);
+            // Row background (subtle lighter stripe for readability)
+            r.draw_filled_rect_screen(inner_x, y, inner_w, row_h - 6.0f * L.s,
+                                      {180, 150, 100, 60});
+            const float icon_x = inner_x + 6.0f * L.s;
+            const float icon_y = y + (row_h - 6.0f * L.s - icon_sz) * 0.5f;
+            if (!equipped.empty()) {
+                // Try to render the equipped item's texture.
+                if (!ctx.host.host_render_ui_texture(equipped,
+                        icon_x, icon_y, icon_sz, icon_sz)) {
+                    // Fallback tinted square
+                    r.draw_filled_rect_screen(icon_x, icon_y, icon_sz, icon_sz,
+                                              {110, 80, 40, 200});
+                }
+                // Item name
+                std::string name = ctx.host.host_localized(equipped);
+                if (name.empty()) name = equipped;
+                const float name_ts = shop_text_scale(22.0f * L.s);
+                ctx.host.host_render_text(name, icon_x + icon_sz + 10.0f * L.s,
+                                          y + 8.0f * L.s, name_ts,
+                                          70, 40, 20, 255);
+                // Star rating placeholder (always ★ 4 for now; the original
+                // reads rarity from the item's stats block).
+                ctx.host.host_render_text("\xe2\x98\x85 4",
+                                          icon_x + icon_sz + 10.0f * L.s,
+                                          y + 28.0f * L.s,
+                                          shop_text_scale(18.0f * L.s),
+                                          200, 170, 60, 255);
+            } else {
+                // Empty slot placeholder
+                r.draw_filled_rect_screen(icon_x, icon_y, icon_sz, icon_sz,
+                                          {80, 60, 40, 140});
+                const float lbl_ts = shop_text_scale(18.0f * L.s);
+                ctx.host.host_render_text(slot.label,
+                                          icon_x + icon_sz + 10.0f * L.s,
+                                          y + (row_h - 6.0f * L.s) * 0.5f - 8.0f * L.s,
+                                          lbl_ts, 130, 100, 70, 200);
+                ctx.host.host_render_text("(empty)",
+                                          icon_x + icon_sz + 10.0f * L.s,
+                                          y + (row_h - 6.0f * L.s) * 0.5f + 10.0f * L.s,
+                                          shop_text_scale(14.0f * L.s),
+                                          130, 100, 70, 160);
+            }
+            y += row_h;
+        }
+    }
+
+    // --- Right column: item detail panel ------------------------------------
+    {
+        const float dx = L.detail_x, dw = L.detail_w, dy = L.body_y, dh = L.body_h;
+        ctx.host.host_render_scroll_panel(dx, dy, dw, dh);
+        const float pad = L.detail_pad;
+        const float stat_x = dx + pad;
+        float info_y = dy + 14.0f * L.s;
+
+        auto items = shop_items_for_category(ctx, categories_[selected_category_]);
+        int item_count = static_cast<int>(items.size());
+        if (selected_item_idx_ < 0 || selected_item_idx_ >= item_count) {
+            ctx.host.host_render_text("No item selected",
+                                      stat_x, info_y, shop_text_scale(20.0f * L.s),
+                                      150, 120, 80, 200);
+        } else {
+            const auto& item = items[selected_item_idx_];
+
+            // Large item icon preview (centre of the top of the panel)
+            const float big_icon = dw * 0.20f;
+            const float big_icon_x = dx + (dw - big_icon) * 0.5f;
+            if (!ctx.host.host_render_ui_texture(item.image,
+                    big_icon_x, info_y, big_icon, big_icon)) {
+                r.draw_filled_rect_screen(big_icon_x, info_y, big_icon, big_icon,
+                                          {80, 60, 30, 200});
+            }
+            info_y += big_icon + 10.0f * L.s;
+
+            // Item name (centred)
+            std::string display_name = ctx.host.host_localized(item.name);
+            if (display_name.empty()) display_name = item.name;
+            const float title_scale = shop_text_scale(28.0f * L.s);
+            const auto [tw, th] = ctx.host.host_measure_text(display_name, title_scale);
+            ctx.host.host_render_text(display_name,
+                                      dx + (dw - tw) * 0.5f, info_y,
+                                      title_scale, 255, 230, 180, 255);
+            info_y += th * 1.4f;
+
+            // Damage bar (sword icon + orange bar)
+            const float bar_y = info_y;
+            // Sword icon placeholder (text "â")
+            ctx.host.host_render_text("\xe2\x9a\x94", stat_x, bar_y,
+                                      shop_text_scale(22.0f * L.s),
+                                      230, 77, 77, 255);
+            const float bar_x = stat_x + 28.0f * L.s;
+            const float bar_w = L.stat_bar_w - 28.0f * L.s;
+            const float bar_h = L.stat_bar_h;
+            // Bar background
+            r.draw_filled_rect_screen(bar_x, bar_y, bar_w, bar_h, {40, 28, 16, 200});
+            // Bar fill — width proportional to damage (max reference 100)
+            const float dmg_frac = std::min(1.0f, item.weapon_damage / 100.0f);
+            r.draw_filled_rect_screen(bar_x, bar_y, bar_w * dmg_frac, bar_h,
+                                      {220, 120, 40, 240});
+            // Damage number
+            char dmg_buf[32];
+            std::snprintf(dmg_buf, sizeof(dmg_buf), "%d",
+                          static_cast<int>(item.weapon_damage));
+            ctx.host.host_render_text(dmg_buf, bar_x + bar_w + 6.0f * L.s, bar_y,
+                                      shop_text_scale(20.0f * L.s),
+                                      230, 200, 140, 255);
+            info_y += bar_h + 10.0f * L.s;
+
+            // Other stats (defense, ranged, magic) — compact text list
+            auto render_stat = [&](const std::string& label, float value,
+                                   uint8_t sr, uint8_t sg, uint8_t sb) {
+                if (value <= 0) return;
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "%s: +%d", label.c_str(),
+                              static_cast<int>(value));
+                ctx.host.host_render_text(buf, stat_x, info_y,
+                                          shop_text_scale(18.0f * L.s),
+                                          sr, sg, sb, 255);
+                info_y += 20.0f * L.s;
+            };
+            render_stat("Defense",  item.body_defense,   77, 128, 230);
+            render_stat("Head Def", item.head_defense,   77, 128, 230);
+            render_stat("Ranged",   item.ranged_damage, 180, 130,  60);
+            render_stat("Magic",    item.magic_damage,  180,  80, 220);
+            info_y += 4.0f * L.s;
+
+            // Level requirement
+            ctx.host.host_render_text(
+                "Lv. " + std::to_string(item.level),
+                stat_x, info_y, shop_text_scale(18.0f * L.s),
+                180, 180, 180, 255);
+            info_y += 22.0f * L.s;
+
+            // Owned / equipped status
+            bool owned = ctx.host.host_has_item(item.name);
+            bool equipped = ctx.host.host_get_equipped(
+                shop_slot_for_type(item.type)) == item.name;
+            if (equipped) {
+                ctx.host.host_render_text("EQUIPPED", stat_x, info_y,
+                    shop_text_scale(18.0f * L.s), 100, 200, 255, 255);
+            } else if (owned) {
+                ctx.host.host_render_text("OWNED", stat_x, info_y,
+                    shop_text_scale(18.0f * L.s), 100, 200, 100, 255);
+            }
+        }
+    }
+
+    // --- BUY button (inside right column, above the bottom bar) -------------
+    {
+        auto items = shop_items_for_category(ctx, categories_[selected_category_]);
+        int item_count = static_cast<int>(items.size());
+        if (selected_item_idx_ >= 0 && selected_item_idx_ < item_count) {
+            const auto& item = items[selected_item_idx_];
+            int gold = ctx.host.host_get_currency();
+            int level = ctx.host.host_get_player_level();
+            bool owned = ctx.host.host_has_item(item.name);
+            bool equipped = ctx.host.host_get_equipped(
+                shop_slot_for_type(item.type)) == item.name;
+            bool can_buy = (gold >= item.price && level >= item.level && item.price > 0);
+
+            if (!owned && !item.is_paid) {
+                // Green BUY button with price and gem icon
+                r.draw_filled_rect_screen(L.buy_btn_x, L.buy_btn_y,
+                    L.buy_btn_w, L.buy_btn_h,
+                    can_buy ? ren::Color4B{51, 120, 26, 255}
+                            : ren::Color4B{36, 36, 36, 220});
+                const float btn_ts = shop_text_scale(L.buy_btn_h * 0.55f);
+                std::string buy_label = ctx.host.host_localized("buy");
+                if (buy_label.empty()) buy_label = "BUY";
+                std::string price_str = std::to_string(item.price);
+                // gem icon (placeholder)
+                ctx.host.host_render_text("\xe2\x97\x86",
+                    L.buy_btn_x + 14.0f * L.s,
+                    L.buy_btn_y + (L.buy_btn_h - L.buy_btn_h * 0.55f) * 0.5f,
+                    btn_ts, 200, 230, 255, 255);
+                // "BUY <price>" text
+                ctx.host.host_render_text(buy_label + " " + price_str,
+                    L.buy_btn_x + L.buy_btn_w * 0.5f - 20.0f * L.s,
+                    L.buy_btn_y + (L.buy_btn_h - L.buy_btn_h * 0.55f) * 0.5f,
+                    btn_ts, can_buy ? (uint8_t)255 : (uint8_t)102, 255, 180, 255);
+            } else if (owned && !equipped) {
+                // EQUIP button
+                r.draw_filled_rect_screen(L.buy_btn_x, L.buy_btn_y,
+                    L.buy_btn_w, L.buy_btn_h, {51, 80, 140, 255});
+                const float btn_ts = shop_text_scale(L.buy_btn_h * 0.55f);
+                std::string equip_label = ctx.host.host_localized("equip");
+                if (equip_label.empty()) equip_label = "EQUIP";
+                const auto [ewt, eht] = ctx.host.host_measure_text(equip_label, btn_ts);
+                ctx.host.host_render_text(equip_label,
+                    L.buy_btn_x + (L.buy_btn_w - ewt) * 0.5f,
+                    L.buy_btn_y + (L.buy_btn_h - eht) * 0.5f,
+                    btn_ts, 255, 255, 255, 255);
+            } else if (equipped) {
+                // UNEQUIP button
+                r.draw_filled_rect_screen(L.buy_btn_x, L.buy_btn_y,
+                    L.buy_btn_w, L.buy_btn_h, {102, 60, 60, 255});
+                const float btn_ts = shop_text_scale(L.buy_btn_h * 0.55f);
+                std::string unequip_label = ctx.host.host_localized("unequip");
+                if (unequip_label.empty()) unequip_label = "UNEQUIP";
+                const auto [uwt, uht] = ctx.host.host_measure_text(unequip_label, btn_ts);
+                ctx.host.host_render_text(unequip_label,
+                    L.buy_btn_x + (L.buy_btn_w - uwt) * 0.5f,
+                    L.buy_btn_y + (L.buy_btn_h - uht) * 0.5f,
+                    btn_ts, 255, 255, 255, 255);
+            }
+        }
+    }
+
+    // --- Bottom bar: currency (left) + category icons (centred) ------------
+    {
+        r.draw_filled_rect_screen(0, L.bottom_y, w, L.bottom_h, {20, 13, 5, 240});
+        r.draw_filled_rect_screen(0, L.bottom_y, w, 2.0f * L.s, {200, 170, 100, 150});
+
+        int gold = ctx.host.host_get_currency();
+        int level = ctx.host.host_get_player_level();
+        const float curr_ts = shop_text_scale(22.0f * L.s);
+        // Diamond icon (gem) placeholder + gold amount
+        ctx.host.host_render_text("\xe2\x97\x86", L.currency_x,
+            L.bottom_y + 10.0f * L.s, curr_ts, 200, 230, 255, 255);
+        ctx.host.host_render_text(std::to_string(gold),
+            L.currency_x + 28.0f * L.s, L.bottom_y + 10.0f * L.s,
+            curr_ts, 255, 217, 0, 255);
+        // Bag icon + level
+        ctx.host.host_render_text("\xe2\x96\xb2", L.currency_x,
+            L.bottom_y + 38.0f * L.s, curr_ts * 0.9f, 180, 140, 80, 255);
+        ctx.host.host_render_text("Lv." + std::to_string(level),
+            L.currency_x + 28.0f * L.s, L.bottom_y + 38.0f * L.s,
+            curr_ts * 0.9f, 180, 230, 180, 255);
+
+        // Category icons (one per category, centred). Selected = bright.
+        const float icon_gap = 12.0f * L.s;
+        float ix = L.cat_icons_start_x;
+        const char* cat_glyphs[] = {"\xe2\x9a\x94", "\xe2\x9b\xa8",
+                                    "\xe2\x9b\x91", "\xe2\x9e\xb6",
+                                    "\xe2\x9c\xa8"};
+        for (size_t i = 0; i < categories_.size(); ++i) {
+            bool sel = (static_cast<int>(i) == selected_category_);
+            // Icon background
+            r.draw_filled_rect_screen(ix, L.cat_icon_y, L.cat_icon_w, L.cat_icon_w,
+                sel ? ren::Color4B{90, 60, 25, 240}
+                    : ren::Color4B{40, 28, 14, 200});
+            // Border on selected
+            if (sel) {
+                r.draw_filled_rect_screen(ix, L.cat_icon_y, L.cat_icon_w, 3.0f * L.s,
+                                          {220, 180, 100, 255});
+                r.draw_filled_rect_screen(ix, L.cat_icon_y + L.cat_icon_w - 3.0f * L.s,
+                                          L.cat_icon_w, 3.0f * L.s,
+                                          {220, 180, 100, 255});
+            }
+            // Category glyph
+            const float glyph_ts = shop_text_scale(L.cat_icon_w * 0.55f);
+            ctx.host.host_render_text(cat_glyphs[i],
+                ix + (L.cat_icon_w - glyph_ts * 30.0f) * 0.5f,
+                L.cat_icon_y + (L.cat_icon_w - glyph_ts * 30.0f) * 0.5f,
+                glyph_ts,
+                sel ? (uint8_t)255 : (uint8_t)140,
+                sel ? (uint8_t)220 : (uint8_t)110,
+                sel ? (uint8_t)120 : (uint8_t)80,
+                255);
+            ix += L.cat_icon_w + icon_gap;
+        }
+    }
+
+    // --- Menu overlay (toggled by M key) rendered on top --------------------
+    ctx.host.host_render_menu_overlay();
+}
+
+// [ORIGINAL] ShopScreen @ 0x1021f170 textures:
+//   "textures/screens/shop/buttons/shopButtons" — button atlas (this+0x29c)
+//   "image/enchantments/batchEnchantments" — enchantment atlas (this+0x2a0)
+//   Base shop texture DAT_10658f70 (this+0x298)
+//   Background: "textures/fullscreen/dojo_full_bg_light" (this+0x70) and
+//               "textures/fullscreen/dojo_full_bg" (this+0x71)
+// These are loaded by the constructor; the UI above uses scroll panels +
+// bitmap font as fallbacks until the shop-specific atlases are wired.
 
 // ============================================================
 // SettingsScene

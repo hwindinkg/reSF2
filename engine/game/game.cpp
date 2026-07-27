@@ -15,6 +15,7 @@ namespace resf2::game {
 // Constructor
 Game::Game(std::string asset_root, bool replay_mode, bool dump_state)
     : asset_root_(std::move(asset_root)), replay_mode_(replay_mode), dump_state_(dump_state) {
+    save_manager_.set_asset_root(asset_root_);
     discover_locations();
 }
 
@@ -87,9 +88,15 @@ void Game::play_animation(const std::string& name, bool loop, int priority) {
     // node, i.e. whether it declares an <Align> pivot. See apply_align().
     // Tell the player which node this move pins, so its per-frame root motion
     // holds that node instead of following NPivot. Empty for the steps.
+    // [ORIGINAL] setCurrentNode @ 0x10165c10: a move with no <Align> leaves
+    // currentNode = null, so the NEXT move has nothing to anchor to. Per-frame
+    // pinning must therefore only activate when the previous move had an Align
+    // (i.e. currentNode was set). Without this, double_step_forward after a
+    // step_forward was pinned in place instead of dashing +220 forward.
     anim_player_.set_align_anchor(
         (move_def && move_def->has_align && move_def->align_x &&
-         move_def->align_pivot_object == MoveDef::AlignObject::Nodes)
+         move_def->align_pivot_object == MoveDef::AlignObject::Nodes &&
+         prev_move_had_align_)
             ? move_def->moveinside_pivot_node : std::string());
     prev_move_had_align_ = move_def && move_def->has_align &&
                            move_def->align_pivot_object == MoveDef::AlignObject::Nodes &&
@@ -339,6 +346,35 @@ void Game::on_init(plat::Platform& platform) {
                 }
             }
 
+            // Initialize quest engine callbacks
+            // [ORIGINAL] QuestManager @ 0x101c7d20 wires actions to game systems.
+            quest_engine_.set_dialog_callback([this](const std::string& title,
+                    const std::vector<std::pair<std::string, std::string>>& lines) {
+                std::printf("[QUEST] dialog: title='%s' lines=%zu\n", title.c_str(), lines.size());
+                if (!lines.empty()) host_set_dialogue(lines);
+            });
+            quest_engine_.set_zone_callback([this](const std::string& zone) {
+                std::printf("[QUEST] zone open: '%s'\n", zone.c_str());
+                zone_unlocked_[zone] = true;
+            });
+            quest_engine_.set_battle_callback([this](const std::string& battle, bool locked) {
+                std::printf("[QUEST] battle '%s' locked=%d\n", battle.c_str(), locked);
+                battle_unlocked_[battle] = !locked;
+            });
+            quest_engine_.set_currency_callback([this](int amount) {
+                std::printf("[QUEST] currency +%d\n", amount);
+                host_add_currency(amount);
+            });
+            quest_engine_.set_item_callback([this](const std::string& item) {
+                std::printf("[QUEST] item '%s'\n", item.c_str());
+                inventory_.add_item(item);
+                player_profile_.add_item(item);
+            });
+            quest_engine_.set_variable_callback([this](const std::string& name, const std::string& value) {
+                std::printf("[QUEST] var '%s' = '%s'\n", name.c_str(), value.c_str());
+            });
+            std::printf("[QUEST] engine initialized\n");
+
             // Load saved progress (gold, wins, levels, inventory).
             //
             // A scripted run is a MEASUREMENT and must not depend on whatever
@@ -362,6 +398,12 @@ void Game::on_init(plat::Platform& platform) {
             currency_ = player_profile_.currency();
             player_wins_ = player_profile_.wins();
             player_losses_ = player_profile_.losses();
+
+            // [ORIGINAL] Check if the initial Sensei tutorial should fire.
+            // Driven by Tutorial="MOVE" in usersDefault.xml on first start.
+            if (!hermetic_run_) {
+                check_tutorial();
+            }
 
             // Start the scene flow at Boot, unless --scene asked for a
             // specific screen. Jumping straight to a screen is what makes it
@@ -445,13 +487,70 @@ void Game::host_load_location() {
 
 void Game::host_reset_menu_state() {
     // [ORIGINAL] Entering the dojo clears whatever overlay a previous scene
-    // left open — except the very first time, when the dojo opens ON the
-    // sensei's scroll. Resetting unconditionally is why the intro scroll never
-    // appeared: it was raised at construction and cleared before the first
-    // frame was ever drawn.
-    overlay_ = intro_hint_dismissed_ ? Overlay::None : Overlay::Dialog;
-            menu_anim_progress_ = 0.0f;
+    // left open. The tutorial hint scroll appears when there's an active
+    // tutorial action the player needs to perform.
+    if (intro_hint_dismissed_ || tutorial_state_ == "COMPLETE") {
+        overlay_ = Overlay::None;
+    } else if (tutorial_dialog_shown_ || tutorial_state_ != "MOVE") {
+        // Show the hint scroll when:
+        // - The intro dialog has played (tutorial_dialog_shown_), OR
+        // - We're past the MOVE stage (loaded save with BAG/FIRST_FIGHT)
+        //   and the intro dialog was already seen in a previous session.
+        overlay_ = Overlay::Dialog;
+        dialog_overlay_anim_ = 0.0f;  // restart unroll animation
+        overlay_show_frames_ = 0;     // reset grace period
+        hint_start_player_x_ = player_pos_x_;  // track start position
+    } else {
+        // Dialog hasn't played yet — no hint scroll.
+        overlay_ = Overlay::None;
+    }
+    // [FIX] Don't reset menu_anim_progress_ if the menu is still open.
+    // Resetting it to 0 caused the menu scroll to disappear mid-transition
+    // when a scene was entered with the menu already visible.
+    if (overlay_ != Overlay::Menu) {
+        menu_anim_progress_ = 0.0f;
+    }
 }
+
+void Game::host_toggle_menu_overlay() {
+    // [FIX] Toggling the menu overlay from scenes that do not call
+    // host_update_gameplay (Map, Results, Profile, Settings, Shop).
+    // Uses the same toggle logic as the M key handler in host_update_gameplay
+    // (game.cpp ~1800). The animation progress drives the open/close tween.
+    if (overlay_ == Overlay::Menu) {
+        overlay_ = Overlay::None;
+    } else {
+        overlay_ = Overlay::Menu;
+        if (menu_anim_progress_ < 0.001f) {
+            // Start fresh open animation only if fully closed.
+            menu_anim_progress_ = 0.0f;
+        }
+    }
+}
+
+void Game::host_render_menu_overlay() {
+    // [FIX] Advance the menu open/close animation even when host_update_gameplay
+    // is not called (Map, Results, etc.). This keeps the scroll unroll/collapse
+    // smooth on those scenes too.
+    if (menu_anim_progress_ <= 0.001f && overlay_ != Overlay::Menu) return;
+
+    const float dt_ms = static_cast<float>(last_frame_dt_ms_);
+    const float target_progress = (overlay_ == Overlay::Menu) ? 1.0f : 0.0f;
+    const float anim_speed = 1000.0f / 300.0f;  // 300ms full open/close
+    if (menu_anim_progress_ < target_progress) {
+        menu_anim_progress_ += (float)dt_ms / anim_speed;
+        if (menu_anim_progress_ > target_progress) menu_anim_progress_ = target_progress;
+    } else if (menu_anim_progress_ > target_progress) {
+        menu_anim_progress_ -= (float)dt_ms / anim_speed;
+        if (menu_anim_progress_ < target_progress) menu_anim_progress_ = target_progress;
+    }
+
+    // Render the scroll menu when there's something visible.
+    if (menu_anim_progress_ > 0.01f) {
+        render_menu_expanded(*platform_);
+    }
+}
+
 
 void Game::host_load_battle_location(const std::string& location) {
     // Clear old location atlases so new location's atlases are loaded fresh.
@@ -469,49 +568,78 @@ bool Game::host_location_loaded() const noexcept {
 
 bool Game::host_save_progress() {
     // Sync PlayerProfile from current member state
-            save::SaveData data;
-            data.version = 1;
-            data.currency = currency_;
-            data.level = 1 + player_wins_ / 5;
-            data.wins = player_wins_;
-            data.losses = player_losses_;
-            data.current_level = current_level_;
-            data.completed_levels = completed_levels_;
-            // Save inventory state
-            inventory_.to_save(data);
-            // Keep the player_profile_ in sync too
-            player_profile_ = player::PlayerProfile::from_save_data(data);
-            return save_manager_.save(player_profile_.to_save_data());
+    save::SaveData data;
+    data.version = 1;
+    data.currency = currency_;
+    data.level = 1 + player_wins_ / 5;
+    data.wins = player_wins_;
+    data.losses = player_losses_;
+    data.current_level = current_level_;
+    data.completed_levels = completed_levels_;
+    // Save inventory state
+    inventory_.to_save(data);
+
+    // [ORIGINAL] Save tutorial and zone/battle lock state
+    data.tutorial_state = tutorial_state_;
+    data.zone_unlocked = zone_unlocked_;
+    data.battle_unlocked = battle_unlocked_;
+
+    // Keep the player_profile_ in sync too
+    player_profile_ = player::PlayerProfile::from_save_data(data);
+    return save_manager_.save(data);
 }
 
 bool Game::host_load_progress() {
     save::SaveData data;
-            if (!save_manager_.load(data)) return false;
-            // Populate member variables from loaded data
-            currency_ = data.currency;
-            player_wins_ = data.wins;
-            player_losses_ = data.losses;
-            current_level_ = data.current_level;
-            completed_levels_ = data.completed_levels;
-            // Build PlayerProfile from save data
-            player_profile_ = player::PlayerProfile::from_save_data(data);
-            // Restore inventory from saved data
-            inventory_.from_save(data);
-            // Sync combat equipped weapon from inventory
-            sync_equipped_weapon();
-            std::printf("[save] loaded %zu completed levels, %d gold, %dw %dl, %zu items\n",
-                        completed_levels_.size(), currency_, player_wins_, player_losses_,
-                        data.owned_items.size());
-            return true;
+    if (!save_manager_.load(data)) return false;
+    // Populate member variables from loaded data
+    currency_ = data.currency;
+    player_wins_ = data.wins;
+    player_losses_ = data.losses;
+    current_level_ = data.current_level;
+    completed_levels_ = data.completed_levels;
+    // Build PlayerProfile from save data
+    player_profile_ = player::PlayerProfile::from_save_data(data);
+    // Restore inventory from saved data
+    inventory_.from_save(data);
+    // Sync combat equipped weapon from inventory
+    sync_equipped_weapon();
+
+    // [ORIGINAL] Restore tutorial and zone/battle lock state from XML save
+    tutorial_state_ = data.tutorial_state;
+    if (tutorial_state_.empty()) tutorial_state_ = "MOVE";
+    zone_unlocked_ = data.zone_unlocked;
+    battle_unlocked_ = data.battle_unlocked;
+
+    std::printf("[save] loaded %zu completed levels, %d gold, %dw %dl, %zu items, tutorial=%s, %zu zones\n",
+                completed_levels_.size(), currency_, player_wins_, player_losses_,
+                data.owned_items.size(), tutorial_state_.c_str(), zone_unlocked_.size());
+
+    // [ORIGINAL] Update HUD values from loaded save data. The original game
+    // reads these from usersDefault.xml / user.xml (plan item 7.2).
+    hud_level_ = 1 + player_wins_ / 5;
+    hud_gold_ = currency_;
+    hud_gems_ = 0;  // [ORIGINAL] gems not yet tracked in save format
+
+    return true;
 }
 
 void Game::host_set_dialogue(std::vector<std::pair<std::string, std::string>> lines) {
     dialogue_lines_ = std::move(lines);
             dialogue_index_ = 0;
+    dialogue_choices_.clear();
 }
 
 const std::vector<std::pair<std::string, std::string>>& Game::host_get_dialogue() const {
     return dialogue_lines_;
+}
+
+std::vector<std::string> Game::host_get_dialogue_choices() const {
+    return dialogue_choices_;
+}
+
+void Game::host_set_dialogue_choices(std::vector<std::string> choices) {
+    dialogue_choices_ = std::move(choices);
 }
 
 void Game::host_set_current_level(std::string level_id) {
@@ -536,6 +664,94 @@ bool Game::host_is_level_completed(const std::string& level) const {
             return false;
 }
 
+bool Game::host_is_zone_unlocked(const std::string& zone) const {
+    // [ORIGINAL] Check zone lock state from usersDefault.xml <Battles>.
+    // If we have explicit state, use it; otherwise default to zone 1 unlocked.
+    auto it = zone_unlocked_.find(zone);
+    if (it != zone_unlocked_.end()) return it->second;
+    // Default: only ZONE_1 is unlocked on a fresh start
+    return (zone == "ZONE_1");
+}
+
+bool Game::host_is_battle_locked(const std::string& zone, const std::string& battle) const {
+    // [ORIGINAL] Check battle lock state from usersDefault.xml <Battles>.
+    std::string key = zone + "|" + battle;
+    auto it = battle_unlocked_.find(key);
+    if (it != battle_unlocked_.end()) return !it->second;
+    // Default: not locked (if no explicit state)
+    return false;
+}
+
+std::string Game::host_get_tutorial_state() const {
+    return tutorial_state_;
+}
+
+void Game::check_tutorial() {
+    // [ORIGINAL] The initial Sensei tutorial sequence, driven by the Tutorial
+    // attribute on <Warrior> in usersDefault.xml.
+    // Sequence: MOVE → BAG → FIRST_FIGHT → COMPLETE
+    // Binary ref: tutorial state machine at 0x1027d6c0
+    if (tutorial_state_ == "COMPLETE") return;  // tutorial already finished
+
+    // [ORIGINAL] Speaker name from localization key "characterSensei" = "SENSEI"
+    // Use the LATIN key "Sensei" as the speaker identifier stored in dialogue
+    // lines. The Dialogue scene localizes it for display via host_localized(),
+    // and derives the avatar texture name from it ("character_sensei"). Using
+    // the localized value (e.g. Cyrillic "Сэнсей") would break avatar lookup.
+    const std::string speaker = "Sensei";
+
+    if (tutorial_state_ == "MOVE") {
+        // [ORIGINAL] Sensei intro dialog using localization keys from eng.xml:
+        // tutorial_begin_1, tutorial_begin_2, tutorial_move
+        // Binary ref: 0x1027c910 ("MOVE" string ref), 0x1027d270 (state transition)
+        std::string line1 = localized("tutorial_begin_1");
+        std::string line2 = localized("tutorial_begin_2");
+        std::string line3 = localized("tutorial_move");
+        // Fallback to original text if localization not loaded
+        if (line1.empty()) line1 = "Well, well... my vain disciple has returned. And without a body it seems. How unfortunate for you.";
+        if (line2.empty()) line2 = "You're nothing more than a shadow now. And yet, I sense great power within you. I wonder...";
+        if (line3.empty()) line3 = "Let me see you move! Show me what a shadow can do.";
+        host_set_dialogue({
+            {speaker, line1},
+            {speaker, line2},
+            {speaker, line3},
+        });
+        // [ORIGINAL] The dialog auto-triggers when entering the dojo for the
+        // first time. Set pending flag so host_update_gameplay transitions to
+        // the Dialogue scene on the first MainMenu frame.
+        tutorial_dialog_pending_ = true;
+        tutorial_state_ = "BAG";
+        std::printf("[tutorial] Sensei intro dialog set (localized), state -> BAG, pending=true\n");
+    } else if (tutorial_state_ == "BAG") {
+        // [ORIGINAL] After player hits the punching bag, Sensei comments.
+        // Binary ref: tutorial_punchbag at 0x105f1a98
+        // The punchbag dialog is queued here and triggered after the movement
+        // hint scroll is dismissed (the player moves, then gets the next hint).
+        std::string line = localized("tutorial_punchbag");
+        if (line.empty()) line = "Fascinating... Now, see that punching bag? Attack it!";
+        host_set_dialogue({{speaker, line}});
+        // If the intro dialog was never shown this session (loaded save at BAG
+        // stage), show the punchbag dialog now so the player knows what to do.
+        if (!tutorial_dialog_shown_) {
+            tutorial_dialog_pending_ = true;
+            tutorial_dialog_shown_ = true;
+        }
+        std::printf("[tutorial] Punchbag dialog queued (localized), pending=%d\n",
+                    (int)tutorial_dialog_pending_);
+        // Transition to FIRST_FIGHT happens when bag is hit (checked in hit detection)
+    } else if (tutorial_state_ == "FIRST_FIGHT") {
+        // [ORIGINAL] After defeating the bag, Sensei introduces the first real fight.
+        // Binary ref: tutorial_training_fight at 0x10386448
+        std::string line = localized("tutorial_training_fight");
+        if (line.empty()) line = "Impressive... but a bag cannot defend itself. Let's see how you fare against my disciple, Kenji.";
+        host_set_dialogue({{speaker, line}});
+        tutorial_dialog_pending_ = true;
+        tutorial_dialog_shown_ = true;
+        tutorial_state_ = "COMPLETE";
+        std::printf("[tutorial] Training fight dialog set (localized), state -> COMPLETE\n");
+    }
+}
+
 std::string Game::host_get_battle_result() const {
     return battle_result_;
 }
@@ -554,6 +770,17 @@ std::string Game::host_get_battle_location() const {
 
 void Game::host_set_battle_result(std::string result) {
     battle_result_ = std::move(result);
+}
+
+void Game::host_trigger_quest_event(const std::string& event, const std::string& arg) {
+    // [ORIGINAL] QuestManager @ 0x101c7d20 processes quest actions on events.
+    // Events: "FightEnd" (arg=level), "SessionStart", "ZoneEnter" (arg=zone).
+    // For now, log the event. Full quest XML parsing and action dispatch
+    // requires loading quests.xml and mapping events to action lists.
+    std::printf("[QUEST] event '%s' arg '%s' (quest XML dispatch pending)\n",
+                event.c_str(), arg.c_str());
+    // TODO: Parse quests.xml, find actions for this event, execute them:
+    //   quest_engine_.execute_actions(actions_for_event);
 }
 
 void Game::host_set_battle_info(const BattleInfo& info) {
@@ -1162,6 +1389,7 @@ void Game::host_render_scene() {
             render_projectiles();
             update_and_render_hit_sparks(0.016f);
             render_debug_world(*platform_);
+            render_debug_overlay(*platform_);
             // [ORIGINAL] The dojo shows the town HUD (top panel); a real fight
             // shows ScreenModel — bars, names, round dots — instead (D4).
             if (!is_battle_mode_) render_hud(*platform_);
@@ -1301,6 +1529,27 @@ void Game::host_update_gameplay(uint32_t dt) {
     last_frame_dt_ms_ = dt;
     const auto& input = platform_->input();
     float dt_sec = (float)dt / 1000.0f;
+
+    // [ORIGINAL] Auto-trigger the Sensei tutorial dialog on first dojo entry.
+    // The dialog is queued by check_tutorial() during loading; this fires the
+    // scene transition on the first gameplay frame so the player sees the dojo
+    // for one frame before the dialog covers it (matching the original's flow).
+    if (tutorial_dialog_pending_ && !dialogue_lines_.empty()) {
+        tutorial_dialog_pending_ = false;
+        tutorial_dialog_shown_ = true;
+        request_scene_transition(scene::SceneId::Dialogue);
+        std::printf("[tutorial] auto-triggering Sensei dialog (Dialogue scene)\n");
+        return;  // skip the rest of this frame; scene transition is deferred
+    }
+
+    // Advance the tutorial hint scroll unroll animation (0→1 over ~0.5s).
+    if (overlay_ == Overlay::Dialog && dialog_overlay_anim_ < 1.0f) {
+        dialog_overlay_anim_ = std::min(1.0f, dialog_overlay_anim_ + dt_sec * 2.0f);
+    }
+    // Count frames the overlay has been visible (grace period before dismissal).
+    if (overlay_ == Overlay::Dialog) {
+        overlay_show_frames_++;
+    }
 
     // [ORIGINAL] Combat state update: decay hit flash, hit stun, invuln.
     if (player_hit_flash_ > 0) player_hit_flash_ = std::max(0.0f, player_hit_flash_ - dt_sec);
@@ -1444,14 +1693,58 @@ void Game::host_update_gameplay(uint32_t dt) {
                     !player_fighter_.is_dead) {
                     if (player_fighter_.is_blocking) {
                         play_sound("armor", 0.3f);
-                    } else {
-                        float frac = 0.11f;
+                        // [ORIGINAL] Block applies BlockDamage = 0.5 factor (50% reduction, not 100%)
+                        // From InternalSettings: BlockDamage.Value = 0.5 @ 0x101598c0
+                        float base_damage = 0.11f;
                         auto hp_it = assets_->moves().find("HighPunch");
-                        if (hp_it != assets_->moves().end() &&
-                            hp_it->second.damage > 0.0f)
-                            frac = hp_it->second.damage;
-                        player_fighter_.health -=
-                            frac * player_fighter_.max_health;
+                        if (hp_it != assets_->moves().end() && hp_it->second.damage > 0.0f)
+                            base_damage = hp_it->second.damage;
+                        
+                        // [ORIGINAL] Damage formula: rawDamage = baseDamage × attributeMultiplier × blockFactor × attackFactor × critFactor × 2.0
+                        // finalDamage = factorSetMultiplier × rawDamage
+                        float attribute_multiplier = 1.0f;  // [HEURISTIC-TODO] No stat system yet
+                        float block_factor = 0.5f;          // BlockDamage = 0.5
+                        float attack_factor = 1.0f;         // [HEURISTIC-TODO] No equipment modifier yet
+                        float crit_factor = 1.0f;           // CriticalHit.Probability = 0.0
+                        float factor_set_multiplier = 1.0f; // [HEURISTIC-TODO] No melee/ranged factor set yet
+                        
+                        float raw_damage = base_damage * attribute_multiplier * block_factor * attack_factor * crit_factor * 2.0f;
+                        float final_damage = factor_set_multiplier * raw_damage;
+                        
+                        std::printf("[COMBAT] Enemy hit player (BLOCKED): base=%.3f block=%.2f raw=%.3f final=%.3f\n",
+                                    base_damage, block_factor, raw_damage, final_damage);
+                        
+                        player_fighter_.health -= final_damage * player_fighter_.max_health;
+                        player_fighter_.invuln_time = 0.4f;
+                        player_fighter_.hit_stun_time = 0.15f;  // Reduced stun when blocking
+                        player_hit_flash_ = 0.2f;
+                        spawn_hit_sparks(player_pos_x_, player_pos_y_ - 40, 4);
+                        if (player_fighter_.health <= 0.0f) {
+                            player_fighter_.health = 0.0f;
+                            player_fighter_.is_dead = true;
+                        }
+                    } else {
+                        // [ORIGINAL] Damage formula from Model::getTotalDamage @ 0x101598c0
+                        // rawDamage = baseDamage × attributeMultiplier × blockFactor × attackFactor × critFactor × 2.0
+                        // finalDamage = factorSetMultiplier × rawDamage
+                        float base_damage = 0.11f;
+                        auto hp_it = assets_->moves().find("HighPunch");
+                        if (hp_it != assets_->moves().end() && hp_it->second.damage > 0.0f)
+                            base_damage = hp_it->second.damage;
+                        
+                        float attribute_multiplier = 1.0f;  // [HEURISTIC-TODO] No stat system yet
+                        float block_factor = 1.0f;          // Not blocking
+                        float attack_factor = 1.0f;         // [HEURISTIC-TODO] No equipment modifier yet
+                        float crit_factor = 1.0f;           // CriticalHit.Probability = 0.0
+                        float factor_set_multiplier = 1.0f; // [HEURISTIC-TODO] No melee/ranged factor set yet
+                        
+                        float raw_damage = base_damage * attribute_multiplier * block_factor * attack_factor * crit_factor * 2.0f;
+                        float final_damage = factor_set_multiplier * raw_damage;
+                        
+                        std::printf("[COMBAT] Enemy hit player: base=%.3f raw=%.3f final=%.3f\n",
+                                    base_damage, raw_damage, final_damage);
+                        
+                        player_fighter_.health -= final_damage * player_fighter_.max_health;
                         player_fighter_.invuln_time = 0.4f;
                         player_fighter_.hit_stun_time = 0.25f;
                         player_hit_flash_ = 0.2f;
@@ -1596,6 +1889,11 @@ void Game::host_update_gameplay(uint32_t dt) {
         current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
         current_anim_ == "back_handflip";
     if (location_ && !facing_locked) {
+        // [ORIGINAL] Facing direction updates based on target position each frame.
+        // Binary: Model::playInfo +0x54 facing_direction set from sign parameter.
+        // In dojo mode: face the bag. In battle mode: face the enemy.
+        // Facing changes only when starting a new animation (sign param changes),
+        // but per-frame update here is equivalent since the target position is stable.
         float bag_x = location_->enemy_x - 983.0f;
         bool should_face_right = (bag_x >= player_pos_x_);
         float dist_to_enemy = std::abs(bag_x - player_pos_x_);
@@ -1632,16 +1930,51 @@ void Game::host_update_gameplay(uint32_t dt) {
     if (touch_.down) key_down = true;
 
     // [ORIGINAL] The intro scroll asks the player to move; it goes away the
-    // moment they do, and does not come back. Keyed on movement rather than on
-    // a timer so it reads as an instruction that was followed.
-    if (!intro_hint_dismissed_ && (key_left || key_right || key_up || key_down)) {
-        intro_hint_dismissed_ = true;
-        if (overlay_ == Overlay::Dialog) overlay_ = Overlay::None;
+    // moment they ACTUALLY move (position changes), and does not come back.
+    // Keyed on real displacement rather than key presses so it reads as an
+    // instruction that was followed. The original quest system checks the
+    // character's world position, not input state.
+    // Grace period: require 30 frames (~0.5s) before dismissal to prevent
+    // accidental trigger from keys held during the preceding dialog scene.
+    if (!intro_hint_dismissed_ && overlay_ == Overlay::Dialog &&
+        overlay_show_frames_ > 30) {
+        // Check if the player has actually MOVED (position changed by a
+        // meaningful threshold). A single step_forward moves ~50 units.
+        float displacement = std::abs(player_pos_x_ - hint_start_player_x_);
+        if (displacement > 25.0f) {
+            intro_hint_dismissed_ = true;
+            overlay_ = Overlay::None;
+            std::printf("[tutorial] hint scroll dismissed (player moved %.0f units)\n", displacement);
+            // [ORIGINAL] After the hint scroll is dismissed, trigger the next
+            // tutorial step (punchbag dialog). The original quest system chains
+            // these automatically via quest events.
+            if (tutorial_state_ == "BAG") {
+                check_tutorial();  // queues the punchbag dialog line
+                if (!dialogue_lines_.empty()) {
+                    request_scene_transition(scene::SceneId::Dialogue);
+                    std::printf("[tutorial] transitioning to Dialogue for punchbag hint\n");
+                }
+            }
+        }
     }
 
     // Convert absolute directions to relative (Forward/Back)
+    // [ORIGINAL] From Model::step pipeline (0x10161ad0) — walking is animation-driven
+    // via movement entries (FUN_1015eeb0). This constant is for AI movement and
+    // fallback positioning when animation root motion is not available.
+    // [HEURISTIC-TODO] Exact value needs tracing from binary's movement entries.
+    // Starting point: 150.0f (faster than enemy's 90.0f since player has anim boost).
+    static constexpr float kWalkSpeed = 150.0f;  // units/sec
+    (void)kWalkSpeed;  // suppress unused warning until AI uses it
+
     bool key_forward = facing_right_ ? key_right : key_left;
     bool key_back = facing_right_ ? key_left : key_right;
+
+    // Cache input state for the F1 debug overlay
+    dbg_key_forward_ = key_forward;
+    dbg_key_back_ = key_back;
+    dbg_key_up_ = key_up;
+    dbg_key_down_ = key_down;
 
     // [ORIGINAL] Double-tap detection for DoubleStep/BackHandflip.
     // Direction is RELATIVE to facing: D=Forward when facing right,
@@ -1662,29 +1995,40 @@ void Game::host_update_gameplay(uint32_t dt) {
     // move_state_ == 2 = MOVING_FORWARD, == 1 = MOVING_BACK. This works
     // regardless of which step animation is playing (step_forward vs
     // weapon-specific variants like composite_sword_step_forward).
+    // [ORIGINAL] Window = kDoubleTapWindowMs (300 ms) from Model::step @ 0x10161ad0.
     if (fwd_just_pressed) {
-        if (now_ms - input_handler_.last_fwd_tap_ms() < 300 && move_state_ == 2) {
+        if (now_ms - input_handler_.last_fwd_tap_ms() < InputHandler::kDoubleTapWindowMs && move_state_ == 2) {
             input_handler_.set_double_step_fwd_requested(true);
         }
         input_handler_.set_last_fwd_tap_ms(now_ms);
     }
     if (back_just_pressed) {
-        if (now_ms - input_handler_.last_back_tap_ms() < 300 && move_state_ == 1) {
+        if (now_ms - input_handler_.last_back_tap_ms() < InputHandler::kDoubleTapWindowMs && move_state_ == 1) {
             input_handler_.set_double_step_back_requested(true);
         }
         input_handler_.set_last_back_tap_ms(now_ms);
     }
 
-    bool punch_pressed = input.keys_just_pressed[(size_t)plat::Key::O];
+    bool punch_pressed = input.keys_just_pressed[(size_t)plat::Key::O] ||
+                         input.keys_just_pressed[(size_t)plat::Key::L];  // [ORIGINAL] JS uses L=punch
     bool kick_pressed = input.keys_just_pressed[(size_t)plat::Key::P];
     // Also keep Space/K as fallback for testing
     if (input.keys_just_pressed[(size_t)plat::Key::Space]) punch_pressed = true;
     if (input.keys_just_pressed[(size_t)plat::Key::K]) kick_pressed = true;
+    // Cache for F1 debug overlay
+    dbg_punch_pressed_ = punch_pressed;
+    dbg_kick_pressed_ = kick_pressed;
     // Same folding as the stick above: the on-screen buttons feed the very
     // same booleans, so nothing downstream needs to know where a punch came
     // from.
     if (touch_.punch_pressed) punch_pressed = true;
     if (touch_.kick_pressed) kick_pressed = true;
+
+    // [INPUT] Debug log for input state each frame
+    debug_log("[INPUT] fwd=%d back=%d up=%d down=%d punch=%d kick=%d move_state=%d facing=%d\n",
+              (int)key_forward, (int)key_back, (int)key_up, (int)key_down,
+              (int)punch_pressed, (int)kick_pressed, move_state_,
+              facing_right_ ? 1 : 0);
 
     // Debug: log key state and what blocks input
     if (punch_pressed || kick_pressed) {
@@ -1714,22 +2058,54 @@ void Game::host_update_gameplay(uint32_t dt) {
     // could not be reversed inside that window. That is the largest single
     // reason the controls felt sticky. The dash is still protected, by
     // move_state_ 10 plus is_uninterrupt_, which read the real intervals.
-    input_handler_.set_step_play_time(
-        (move_state_ == 1 || move_state_ == 2)
-            ? input_handler_.step_play_time() + dt : 0);
-    const bool step_min_played = true;
+    // [ORIGINAL] Step frame counting — original uses animation frame count,
+    // not wall-clock time, to gate when a step can be interrupted.
+    // From Model::step pipeline (0x10161ad0): animation must play N frames
+    // before another input is accepted. The old 400ms threshold was invented
+    // and caused sticky controls.
+    if (move_state_ == 1 || move_state_ == 2) {
+        input_handler_.increment_step_frames();
+    } else {
+        input_handler_.reset_step_frames();
+    }
+    // [ORIGINAL] Step interruptibility: use actual interval data from the
+    // current move when available, fall back to kMinStepFrames otherwise.
+    //
+    // StepForward / StepBack declare NO intervals — they are interruptible
+    // the moment the key is released (subject to kMinStepFrames as a minimum).
+    // DoubleStepForward declares SemiUninterrupt End=2, Uninterrupt 3..9,
+    // SelfUninterrupt 10..12 — the dash cannot be interrupted until those
+    // frames have passed.
+    //
+    // Binary: Model animation pipeline @ 0x101650FC (playInfo) checks
+    // interruptibility each frame against the active interval.
+    uint32_t step_min_frames = InputHandler::kMinStepFrames;
+    if (!current_move_.empty()) {
+        auto mv_it = assets_->moves().find(current_move_);
+        if (mv_it != assets_->moves().end()) {
+            const auto& mv = mv_it->second;
+            int interval_end = 0;
+            if (mv.semi_uninterrupt_end > 0)
+                interval_end = std::max(interval_end, mv.semi_uninterrupt_end);
+            if (mv.uninterrupt_end > 0)
+                interval_end = std::max(interval_end, mv.uninterrupt_end);
+            if (mv.self_uninterrupt_end > 0)
+                interval_end = std::max(interval_end, mv.self_uninterrupt_end);
+            if (interval_end > 0)
+                step_min_frames = static_cast<uint32_t>(interval_end);
+        }
+    }
+    const bool step_min_played = input_handler_.step_frames() >= step_min_frames;
 
     // [ORIGINAL] Direction is read per frame, with no latch.
     //
-    // There used to be a 200 ms latch here: releasing forward left
-    // `fwd_held_ms_` counting down, so the step state machine still saw the
-    // key held for a fifth of a second. Combined with the 400 ms step minimum
-    // removed above, a step ran on for up to 13 frames after the key came up —
-    // measured on the scripted trace, key up at frame 230 and the walk ending
-    // at 243. The original gates combos on CurrentAnimation conditions from
-    // moves.xml, not on key history, so nothing needs the latch.
-    input_handler_.set_fwd_held_ms(key_forward ? 1 : 0);
-    input_handler_.set_back_held_ms(key_back ? 1 : 0);
+    // The original binary (Model::step 0x10161ad0) has no direction latch;
+    // combos are gated by CurrentAnimation conditions from moves.xml, not on
+    // key history. The old fwd_held_ms_/back_held_ms_ latch was invented and
+    // caused sticky controls — measured on the scripted trace, key up at
+    // frame 230 and the walk ending at 243 (13 frames of phantom input).
+    // Now fwd_latched/back_latched below just read key_forward/key_back
+    // directly — no latch, no history, pure per-frame state.
 
     // === DYNAMIC MOVE SELECTION (from moves.xml) ===
     // The engine reads ALL moves from moves.xml at load time, including
@@ -1873,7 +2249,11 @@ void Game::host_update_gameplay(uint32_t dt) {
                 // In Uninterrupt: only 3key chain combos
                 if (move.key_count != 3) { ++rej.key_count; continue; }
                 if (!move.required_current_animation.empty()) {
-                    if (current_move_ != move.required_current_animation) { ++rej.cur_anim; continue; }
+                    // [ORIGINAL] Binary: ConditionCurrentAnimation::isEqual @ 0x10083bb0
+                    if (current_move_ != move.required_current_animation &&
+                        current_anim_ != move.required_current_animation) {
+                        ++rej.cur_anim; continue;
+                    }
                 }
             } else if (in_attack && past_attack_interval) {
                 // Past attack interval: allow 1key/2key to interrupt recovery
@@ -1897,8 +2277,12 @@ void Game::host_update_gameplay(uint32_t dt) {
             // require the current animation to match a specific name.
             // e.g., DoublePunch requires CurrentAnimation="HeavyPunch".
             // The Name in moves.xml matches the Move Name (not filename).
+            // Binary: ConditionCurrentAnimation::isEqual @ 0x10083bb0.
             if (!move.required_current_animation.empty()) {
-                if (current_move_ != move.required_current_animation) { ++rej.cur_anim; continue; }
+                if (current_move_ != move.required_current_animation &&
+                    current_anim_ != move.required_current_animation) {
+                    ++rej.cur_anim; continue;
+                }
             }
             // Prevent a move from chaining into itself (same move can't restart).
             // Without this, moves with empty required_current_animation can
@@ -2208,8 +2592,11 @@ void Game::host_update_gameplay(uint32_t dt) {
         if (mit != assets_->moves().end() && mit->second.is_attack) is_in_attack = true;
     }
     if (!is_in_attack) {
-        bool fwd_latched = input_handler_.fwd_held_ms() > 0;
-        bool back_latched = input_handler_.back_held_ms() > 0;
+        // [ORIGINAL] No direction latch — read key state per frame.
+        // The original binary (Model::step 0x10161ad0) has no latch;
+        // fwd_latched/back_latched are just key_forward/key_back.
+        bool fwd_latched = key_forward;
+        bool back_latched = key_back;
 
         // Find step animation names from moves.xml
         std::string step_fwd_anim, step_back_anim;
@@ -2252,49 +2639,132 @@ void Game::host_update_gameplay(uint32_t dt) {
                             (int)key_forward, (int)key_back, (int)key_down,
                             step_fwd_anim.c_str());
             }
-            // step_cooldown_ms_ prevents immediate step after a roll/special ends
-            if (key_forward && !key_back && !key_down && !step_fwd_anim.empty() && step_cooldown_ms_ == 0) {
+            // [FIX] Only start a new step if we're not already in a step animation
+            // that hasn't finished its cycle. This prevents rapid A/D presses from
+            // restarting the animation and causing tiny fast steps.
+            // The step_cooldown_ms_ check prevents immediate re-entry after a step ends.
+            bool can_start_step = (current_anim_ != step_fwd_anim && current_anim_ != step_back_anim)
+                                  || anim_player_.anim_finished();
+            if (can_start_step && key_forward && !key_back && !key_down && !step_fwd_anim.empty() && step_cooldown_ms_ == 0) {
                 move_state_ = 2;
                 play_animation(step_fwd_anim, true, 0);  // priority 0: movement (interruptible)
-            } else if (key_back && !key_forward && !key_down && !step_back_anim.empty() && step_cooldown_ms_ == 0) {
+                input_handler_.reset_step_frames();
+                // [FIX] Set cooldown after step starts to prevent rapid tap spam.
+                // Matches the original's kMinStepFrames=12 gate (200ms at 60fps).
+                // Without this, each A/D tap restarts the step animation, causing
+                // the character to move much faster than intended.
+                step_cooldown_ms_ = 200;
+            } else if (can_start_step && key_back && !key_forward && !key_down && !step_back_anim.empty() && step_cooldown_ms_ == 0) {
                 move_state_ = 1;
                 play_animation(step_back_anim, true, 0);  // priority 0: movement (interruptible)
+                input_handler_.reset_step_frames();
+                step_cooldown_ms_ = 200;  // [FIX] Same cooldown for backward steps
             }
         } else if (move_state_ == 1) {  // MOVING_BACK
             // [ORIGINAL] Double-tap Back → BackHandflip (handstand flip retreat)
             // Original moves.xml: BackHandflip has Keys=Back Tap + Back Tap,
             // FileName=back_handflip.bin. It's a retreat move (not a dash).
-            if (input_handler_.double_step_back_requested() && assets_->animations().count("back_handflip")) {
-                play_animation("back_handflip", false, 1);  // priority 1: evasive retreat
-                move_state_ = 10;
-                current_move_ = "BackHandflip";
-                int fc = assets_->animations()["back_handflip"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
+            if (input_handler_.double_step_back_requested()) {
+                if (assets_->animations().count("back_handflip")) {
+                    play_animation("back_handflip", false, 1);  // priority 1: evasive retreat
+                    move_state_ = 10;
+                    current_move_ = "BackHandflip";
+                    int fc = assets_->animations()["back_handflip"].frame_count;
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
+                    debug_log("[MOVE] f=%llu BackHandflip (handstand retreat)\n",
+                              (unsigned long long)total_frame_count_);
+                } else {
+                    // [HEURISTIC-TODO] Fallback: manual position jump when
+                    // back_handflip animation is not available.
+                    player_pos_x_ += (facing_right_ ? -1.0f : 1.0f) * 150.0f;
+                    step_cooldown_ms_ = 300;
+                    debug_log("[MOVE] f=%llu BackHandflip fallback (no anim)\n",
+                              (unsigned long long)total_frame_count_);
+                }
                 input_handler_.clear_double_step_back();
-                debug_log("[MOVE] f=%llu BackHandflip (handstand retreat)\n",
-                          (unsigned long long)total_frame_count_);
             } else if (!back_latched && step_min_played) {
-                move_state_ = 0; need_switch_to_idle_ = true;
+                // [ORIGINAL] Key released — step ends only after the animation
+                // completes its full cycle. This prevents the visual interruption
+                // on a single tap (character must finish its natural step motion).
+                auto anim_it = assets_->animations().find(current_anim_);
+                bool cycle_done = (anim_it != assets_->animations().end()) &&
+                    (input_handler_.step_frames() >= (uint32_t)anim_it->second.frame_count);
+                if (cycle_done) {
+                    // If the opposite direction is already held, transition directly
+                    // to the new step without going through idle.
+                    if (fwd_latched && !step_fwd_anim.empty()) {
+                        move_state_ = 2;
+                        play_animation(step_fwd_anim, true, 0);
+                        input_handler_.reset_step_frames();
+                    } else {
+                        move_state_ = 0; need_switch_to_idle_ = true;
+                    }
+                }
             } else if (fwd_latched && !back_latched && step_min_played && !step_fwd_anim.empty()) {
-                move_state_ = 2;
-                play_animation(step_fwd_anim, true, 0);  // priority 0: movement
+                // [FIX] Only change direction if current step animation has
+                // completed at least one full cycle. [ORIGINAL] In the binary
+                // (Model::step 0x10161ad0), movement entries are processed per
+                // complete animation cycle — direction changes mid-cycle are ignored.
+                auto anim_it = assets_->animations().find(current_anim_);
+                bool cycle_complete = (anim_it != assets_->animations().end()) &&
+                    (input_handler_.step_frames() >= (uint32_t)anim_it->second.frame_count);
+                if (cycle_complete) {
+                    move_state_ = 2;
+                    play_animation(step_fwd_anim, true, 0);  // priority 0: movement
+                    input_handler_.reset_step_frames();  // Reset counter for new direction
+                }
             }
         } else if (move_state_ == 2) {  // MOVING_FORWARD
             // [ORIGINAL] Double-tap Forward during ForwardStep  DoubleStepForward (dash)
-            if (input_handler_.double_step_fwd_requested() && assets_->animations().count("double_step_forward")) {
-                play_animation("double_step_forward", false, 1);  // priority 1: dash (evasive)
-                move_state_ = 10;  // special (non-interruptible during dash)
-                current_move_ = "DoubleStepForward";
-                int fc = assets_->animations()["double_step_forward"].frame_count;
-                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
+            if (input_handler_.double_step_fwd_requested()) {
+                if (assets_->animations().count("double_step_forward")) {
+                    play_animation("double_step_forward", false, 1);  // priority 1: dash (evasive)
+                    move_state_ = 10;  // special (non-interruptible during dash)
+                    current_move_ = "DoubleStepForward";
+                    int fc = assets_->animations()["double_step_forward"].frame_count;
+                    hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
+                    debug_log("[MOVE] f=%llu DoubleStepForward (dash)\n",
+                              (unsigned long long)total_frame_count_);
+                } else {
+                    // [HEURISTIC-TODO] Fallback: manual position jump when
+                    // double_step_forward animation is not available.
+                    player_pos_x_ += (facing_right_ ? 1.0f : -1.0f) * 150.0f;
+                    step_cooldown_ms_ = 300;
+                    debug_log("[MOVE] f=%llu DoubleStepForward fallback (no anim)\n",
+                              (unsigned long long)total_frame_count_);
+                }
                 input_handler_.clear_double_step_fwd();
-                debug_log("[MOVE] f=%llu DoubleStepForward (dash)\n",
-                          (unsigned long long)total_frame_count_);
             } else if (!fwd_latched && step_min_played) {
-                move_state_ = 0; need_switch_to_idle_ = true;
+                // [ORIGINAL] Key released — step ends only after the animation
+                // completes its full cycle. This prevents the visual interruption
+                // on a single tap (character must finish its natural step motion).
+                auto anim_it = assets_->animations().find(current_anim_);
+                bool cycle_done = (anim_it != assets_->animations().end()) &&
+                    (input_handler_.step_frames() >= (uint32_t)anim_it->second.frame_count);
+                if (cycle_done) {
+                    // If the opposite direction is already held, transition directly
+                    // to the new step without going through idle.
+                    if (back_latched && !step_back_anim.empty()) {
+                        move_state_ = 1;
+                        play_animation(step_back_anim, true, 0);
+                        input_handler_.reset_step_frames();
+                    } else {
+                        move_state_ = 0; need_switch_to_idle_ = true;
+                    }
+                }
             } else if (back_latched && !fwd_latched && step_min_played && !step_back_anim.empty()) {
-                move_state_ = 1;
-                play_animation(step_back_anim, true, 0);  // priority 0: movement
+                // [FIX] Only change direction if current step animation has
+                // completed at least one full cycle. [ORIGINAL] In the binary
+                // (Model::step 0x10161ad0), movement entries are processed per
+                // complete animation cycle — direction changes mid-cycle are ignored.
+                auto anim_it = assets_->animations().find(current_anim_);
+                bool cycle_complete = (anim_it != assets_->animations().end()) &&
+                    (input_handler_.step_frames() >= (uint32_t)anim_it->second.frame_count);
+                if (cycle_complete) {
+                    move_state_ = 1;
+                    play_animation(step_back_anim, true, 0);  // priority 0: movement
+                    input_handler_.reset_step_frames();  // Reset counter for new direction
+                }
             }
         }
     }
@@ -2303,6 +2773,13 @@ void Game::host_update_gameplay(uint32_t dt) {
     // === HIT ANIM COUNTDOWN ===
     if (hit_anim_ > 0) {
         hit_anim_ -= std::min<uint32_t>(hit_anim_, dt);
+        // [FIX] When hit animation expires, reset root motion deltas to prevent
+        // residual displacement from the hit animation being applied to the
+        // character's position during the transition back to idle/movement.
+        if (hit_anim_ == 0) {
+            anim_root_dx_ = 0.0f;
+            anim_root_dy_ = 0.0f;
+        }
     }
 
     // is_uninterrupt_ will be computed after update_animation()
@@ -2360,7 +2837,18 @@ void Game::host_update_gameplay(uint32_t dt) {
     // This is what makes step_forward actually move the character forward,
     // and gives forward-lunging attacks their root-motion feel.
     // jump_y_offset_ is accumulated separately in AnimationPlayer::update().
-    player_pos_x_ += anim_root_dx_ * (facing_right_ ? 1.0f : -1.0f);
+    // [ORIGINAL] The start stance (stance_2) is a cinematic intro — the
+    // character holds position. Suppress root motion during it to prevent
+    // the visible twitching the NPivot sway in the animation would cause.
+    if (!start_stance_playing_) {
+        player_pos_x_ += anim_root_dx_ * (facing_right_ ? 1.0f : -1.0f);
+    }
+
+    // [MOVEMENT] Debug log for movement state
+    debug_log("[MOVEMENT] pos_x=%.1f pos_y=%.1f facing=%d state=%d anim='%s' root_dx=%.2f step_frames=%u\n",
+              player_pos_x_, player_pos_y_, facing_right_ ? 1 : -1,
+              move_state_, current_anim_.c_str(), anim_root_dx_,
+              input_handler_.step_frames());
     // Y displacement is handled by y_adjust_smoothed_ (visual Y correction)
     // and jump_y_offset_ (accumulated in AnimationPlayer::update).
     // No world-space Y drift from per-frame root motion.
@@ -2380,6 +2868,14 @@ void Game::host_update_gameplay(uint32_t dt) {
         if (move_it != assets_->moves().end()) {
             int un_start = move_it->second.uninterrupt_start;
             int un_end = move_it->second.uninterrupt_end;
+            // [ORIGINAL] SemiUninterrupt @ 0x10115910: can be interrupted by
+            // attacks but not by movement. 81 moves declare it.
+            const int semi_start = 0;  // SemiUninterrupt always starts at frame 0
+            const int semi_end = move_it->second.semi_uninterrupt_end;
+            // [ORIGINAL] SelfUninterrupt @ 0x10115910: can only be interrupted
+            // by itself (combo chains). 4 moves declare it.
+            const int self_start = move_it->second.self_uninterrupt_start;
+            const int self_end = move_it->second.self_uninterrupt_end;
 
             // For moves without explicit Uninterrupt data, default the
             // uninterrupt window to the attack interval. This prevents
@@ -2391,16 +2887,36 @@ void Game::host_update_gameplay(uint32_t dt) {
                 un_end = move_it->second.attack_end;
             }
 
-            if (un_start >= 0) {
+            if (un_start >= 0 || semi_end >= 0 || self_start >= 0) {
                 std::string expected_anim = move_it->second.filename;
                 if (expected_anim.size() > 4 && expected_anim.substr(expected_anim.size()-4) == ".bin")
                     expected_anim = expected_anim.substr(0, expected_anim.size()-4);
                 if (expected_anim == current_anim_) {
                     int current_frame = (int)(anim_time_ * anim_fps_);
-                    int start = un_start - 1;
-                    int end = un_end > 0 ? un_end - 1 : 9999;
-                    if (current_frame >= start && current_frame <= end) {
-                        is_uninterrupt_ = true;
+                    // Check Uninterrupt interval
+                    if (un_start >= 0) {
+                        int start = un_start - 1;
+                        int end = un_end > 0 ? un_end - 1 : 9999;
+                        if (current_frame >= start && current_frame <= end) {
+                            is_uninterrupt_ = true;
+                        }
+                    }
+                    // [ORIGINAL] SemiUninterrupt: blocks movement but not attacks.
+                    // We treat it as uninterrupt for the movement gate (Step 1.4).
+                    if (!is_uninterrupt_ && semi_end >= 0) {
+                        int start = semi_start - 1;
+                        int end = semi_end - 1;
+                        if (current_frame >= start && current_frame <= end) {
+                            is_uninterrupt_ = true;
+                        }
+                    }
+                    // [ORIGINAL] SelfUninterrupt: blocks everything except same-move chains.
+                    if (!is_uninterrupt_ && self_start >= 0) {
+                        int start = self_start - 1;
+                        int end = self_end > 0 ? self_end - 1 : 9999;
+                        if (current_frame >= start && current_frame <= end) {
+                            is_uninterrupt_ = true;
+                        }
                     }
                 }
             }
@@ -2409,12 +2925,33 @@ void Game::host_update_gameplay(uint32_t dt) {
 
     // After update_animation, switch to idle if requested.
     // This ensures the previous animation's final displacement is applied.
+    // [FIX] If a direction key is already pressed, skip the one-frame idle
+    // and start the new step immediately. This eliminates the visual jerk
+    // when rapidly tapping A/D (the original has no idle gap between steps).
     if (need_switch_to_idle_) {
         need_switch_to_idle_ = false;
         if (start_stance_playing_) {
             start_stance_playing_ = false;
         }
-        play_animation("stance_idle", true, 0);  // priority 0: idle (always interruptible)
+        // Check if a direction key is held — if so, skip idle and let the
+        // step-start logic (above, next frame) fire immediately. We still
+        // need one frame in idle state for the step logic to trigger, but
+        // we avoid playing the idle ANIMATION (which causes the visual jerk).
+        bool dir_held = false;
+        {
+            bool kf = facing_right_ ? input.keys_down[(size_t)plat::Key::D] || input.keys_down[(size_t)plat::Key::ArrowRight]
+                                    : input.keys_down[(size_t)plat::Key::A] || input.keys_down[(size_t)plat::Key::ArrowLeft];
+            bool kb = facing_right_ ? input.keys_down[(size_t)plat::Key::A] || input.keys_down[(size_t)plat::Key::ArrowLeft]
+                                    : input.keys_down[(size_t)plat::Key::D] || input.keys_down[(size_t)plat::Key::ArrowRight];
+            dir_held = (kf || kb) && !input.keys_down[(size_t)plat::Key::S];
+        }
+        if (!dir_held) {
+            play_animation("stance_idle", true, 0);  // priority 0: idle (always interruptible)
+        }
+        // If dir_held, we stay in move_state_ == 0 but do NOT play idle anim.
+        // The step-start logic at the top of the step block will fire next
+        // frame (move_state_ == 0 && key_forward/back), starting the new step
+        // without any visible idle pose in between.
     }
 
     // === HIT DETECTION ===
@@ -2721,28 +3258,93 @@ void Game::host_update_gameplay(uint32_t dt) {
                                         const int bag_snd = (current_frame + (int)current_move_[0]) % 3 + 1;
                                         play_sound("f_pl_hit" + std::to_string(bag_snd), 0.6f);
                                         player_fighter_.hits_landed++;
-                                        combo_timer_ = 2.0f;
+                                        // [ORIGINAL] Combo.Time = 90 frames = 1.5s at 60Hz (from InternalSettings)
+                                        combo_timer_ = 1.5f;
+                                        std::printf("[COMBAT] Combo: hits=%d timer=1.5s\n", player_fighter_.hits_landed);
+                                        // [ORIGINAL] Tutorial trigger: after 3 bag
+                                        // hits, Sensei advances to the first fight.
+                                        if (tutorial_state_ == "BAG") {
+                                            tutorial_bag_hits_++;
+                                            std::printf("[tutorial] bag hits: %d/3\n", tutorial_bag_hits_);
+                                            if (tutorial_bag_hits_ >= 3) {
+                                                tutorial_state_ = "FIRST_FIGHT";
+                                                check_tutorial();
+                                                tutorial_dialog_pending_ = true;
+                                                std::printf("[tutorial] state -> FIRST_FIGHT, dialog pending\n");
+                                            }
+                                        }
                                     } else if (enemy_fighter_.invuln_time <= 0) {
                                         // [ORIGINAL] Dojo sparring deals no
                                         // health damage; a real fight does.
                                         enemy_fighter_.invuln_time = 0.2f;
                                         enemy_hit_flash_ = 0.2f;
-                                        player_fighter_.hits_landed++; combo_timer_ = 2.0f;
+                                        player_fighter_.hits_landed++;
+                                        // [ORIGINAL] Combo.Time = 90 frames = 1.5s at 60Hz (from InternalSettings)
+                                        combo_timer_ = 1.5f;
+                                        std::printf("[COMBAT] Combo: hits=%d timer=1.5s\n", player_fighter_.hits_landed);
                                         play_sound("armor", 0.5f);
                                         spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
                                         if (is_battle_mode_) {
-                                            // [ORIGINAL data] The fraction is the
-                                            // move's <Damage Value> from moves.xml
-                                            // (HighPunch carries 0.11).
-                                            // [HEURISTIC-TODO] The original also
-                                            // folds in the warrior's damage stats
-                                            // and defense (<Damage Type= Shift=>,
-                                            // stages.xml multipliers) — that law
-                                            // is not reversed yet.
-                                            float frac = move_it->second.damage;
-                                            if (frac <= 0.0f) frac = 0.08f;
-                                            enemy_fighter_.health -=
-                                                frac * enemy_fighter_.max_health;
+                                            // [ORIGINAL] Damage formula from Model::getTotalDamage @ 0x10159a6c
+                                            // Binary ref: IntervalAttack::getFactors @ 0x10115921
+                                            // rawDamage = baseDamage × attributeMultiplier × blockFactor × attackFactor × critFactor × 2.0
+                                            // finalDamage = factorSetMultiplier × rawDamage
+                                            //
+                                            // [ORIGINAL] AverageBaseDamage = 0.1 (internalSettings.xml line 631)
+                                            // This is the fallback when a move has no explicit Damage value.
+                                            float base_damage = move_it->second.damage;
+                                            if (base_damage <= 0.0f) base_damage = 0.1f;  // [ORIGINAL] AverageBaseDamage from internalSettings.xml
+                                            
+                                            // [ORIGINAL] Attribute multiplier from warrior stats (WeaponDamage/UnarmedDamage)
+                                            // Binary ref: damage attribute lookup at 0x1020982a
+                                            // Without a stat system, 1.0 is the correct default for a fresh character.
+                                            float attribute_multiplier = 1.0f;  // [TODO] Implement warrior stat system
+                                            
+                                            // [ORIGINAL] Block factor: BlockDamage.Value = 0.5 (internalSettings.xml)
+                                            // Binary ref: BlockChance at 0x10242aa2
+                                            float block_factor = enemy_fighter_.is_blocking ? 0.5f : 1.0f;
+                                            
+                                            // [ORIGINAL] Check if move ignores block (from IntervalAttack +0x75)
+                                            if (enemy_fighter_.is_blocking && move_it->second.ignores_block) {
+                                                block_factor = 1.0f;
+                                                std::printf("[COMBAT] Player hit enemy: IGNORES BLOCK\n");
+                                            }
+                                            
+                                            // [ORIGINAL] Attack factor from equipment (weapon damage bonus)
+                                            // Binary ref: DamageFactor at 0x101f901b
+                                            float attack_factor = 1.0f;  // [TODO] Implement equipment damage bonuses
+                                            
+                                            // [ORIGINAL] Critical hit system (internalSettings.xml lines 560-563)
+                                            // CriticalHit.Probability Base="0.0001" Attribute="CriticalChance"
+                                            // CriticalHit.Damage Base="0.0001" Attribute="CriticalDamage"
+                                            // Binary ref: CriticalHit effect at 0x102446e0
+                                            float crit_factor = 1.0f;
+                                            // With default CriticalChance=0.0001, crits are extremely rare.
+                                            // A fresh character has no CriticalChance attribute, so no crits.
+                                            // [TODO] Implement CriticalChance attribute from equipment/perks
+                                            
+                                            // [ORIGINAL] Factor set multiplier from melee/ranged factor set
+                                            // Binary ref: MagicBulletFactor/DamageFactor/HitFactor at 0x102446e0
+                                            // For melee attacks, this is typically 1.0. Ranged/magic may differ.
+                                            float factor_set_multiplier = 1.0f;  // [TODO] Parse factor sets from tactics
+                                            
+                                            float raw_damage = base_damage * attribute_multiplier * block_factor * attack_factor * crit_factor * 2.0f;
+                                            float final_damage = factor_set_multiplier * raw_damage;
+                                            
+                                            // Store for F1 debug overlay (COMBAT panel damage breakdown)
+                                            dbg_last_base_damage_ = base_damage;
+                                            dbg_last_attr_mult_ = attribute_multiplier;
+                                            dbg_last_block_factor_ = block_factor;
+                                            dbg_last_attack_factor_ = attack_factor;
+                                            dbg_last_crit_factor_ = crit_factor;
+                                            dbg_last_factor_set_ = factor_set_multiplier;
+                                            dbg_last_final_damage_ = final_damage;
+                                            dbg_last_move_name_ = move_it->first;
+                                            
+                                            std::printf("[COMBAT] Player hit enemy: base=%.3f attr=%.2f blk=%.2f atk=%.2f crit=%.2f fset=%.2f => final=%.3f\n",
+                                                        base_damage, attribute_multiplier, block_factor, attack_factor, crit_factor, factor_set_multiplier, final_damage);
+                                            
+                                            enemy_fighter_.health -= final_damage * enemy_fighter_.max_health;
                                             if (enemy_fighter_.health <= 0.0f) {
                                                 enemy_fighter_.health = 0.0f;
                                                 enemy_fighter_.is_dead = true;
@@ -2755,6 +3357,32 @@ void Game::host_update_gameplay(uint32_t dt) {
                             if (hit_this_interval_this_frame) break;
                         }
                         if (hit_registered) break;
+                    }
+                    // [ORIGINAL] Distance-based fallback for the tutorial bag
+                    // hit counter. The precise edge collision above can miss if
+                    // the attack edges don't reach the bag's verlet nodes (e.g.
+                    // the player is slightly too far or the animation data is
+                    // incomplete). The original counts ANY attack that visually
+                    // connects. If the player is within punch range and the bag
+                    // hasn't been hit this interval, count it for the tutorial.
+                    if (!hit_this_interval_ && !show_enemy_ &&
+                        tutorial_state_ == "BAG") {
+                        float bag_x = enemy_pos_x_;  // bag hangs at enemy spawn
+                        float dist_to_bag = std::abs(player_pos_x_ - bag_x);
+                        if (dist_to_bag < 200.0f) {
+                            hit_this_interval_ = true;
+                            player_fighter_.hits_landed++;
+                            combo_timer_ = 1.5f;
+                            tutorial_bag_hits_++;
+                            std::printf("[tutorial] bag hits (distance fallback): %d/3 dist=%.0f\n",
+                                        tutorial_bag_hits_, dist_to_bag);
+                            if (tutorial_bag_hits_ >= 3) {
+                                tutorial_state_ = "FIRST_FIGHT";
+                                check_tutorial();
+                                tutorial_dialog_pending_ = true;
+                                std::printf("[tutorial] state -> FIRST_FIGHT, dialog pending\n");
+                            }
+                        }
                     }
                 }
             }
