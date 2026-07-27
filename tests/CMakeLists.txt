@@ -283,3 +283,16 @@ target_link_libraries(test_moves_semantics PRIVATE
 target_compile_features(test_moves_semantics PRIVATE cxx_std_23)
 add_test(NAME test_moves_semantics COMMAND test_moves_semantics "${CMAKE_SOURCE_DIR}"
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+# Enemy AI weight curves: pins tactic_settings (Gb/QYa/NYa/iCa/jL) to the
+# values the PC build produces from tacticSettings.xml.
+add_executable(test_tactic_weights
+    test_tactic_weights.cpp
+)
+target_link_libraries(test_tactic_weights PRIVATE
+    resf2_game
+    resf2_warnings
+)
+target_compile_features(test_tactic_weights PRIVATE cxx_std_23)
+add_test(NAME test_tactic_weights COMMAND test_tactic_weights
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

@@ -1227,6 +1227,7 @@ void Game::init_location() {
             load_punching_bag_model();
             load_animations();
             load_moves();
+            load_tactics();
             // Load enemy weapon
             load_enemy_weapon("weapon_knuckles.xml");
             // Load player's equipped weapon model
@@ -1345,34 +1346,58 @@ void Game::host_update_gameplay(uint32_t dt) {
             enemy_anim_ = "fists_hit";
         } else if (enemy_ai_timer_ >= enemy_ai_decision_interval_) {
             enemy_ai_timer_ = 0;
+            // [ORIGINAL] Replaces the invented distance-threshold state machine
+            // with tacticSettings.xml's roulette-wheel pick (class `cc`, jL/iCa
+            // in sf2_beautified.js). Every candidate *category* carries a curve
+            // weight evaluated against the live fight state; the winner is a
+            // weighted-random draw. See tactic_settings.hpp.
+            //
+            // The candidates are the abstract categories a bare-fists enemy can
+            // perform. The original maps each category to a concrete animation
+            // from the warrior's tables; until warrior templates land (5.3) we
+            // map back onto the placeholder's five states:
+            //   ForwardStep -> approach   BackStep/Retreat -> retreat
+            //   ShortAttack -> attack     Duck -> block   (default) -> idle
+            const TacticDef* td = tactics_.tactic("Standard");
+            if (!td) td = tactics_.tactic("NoTables");
             float dist = std::abs(enemy_pos_x_ - player_pos_x_);
-            int r = std::rand() % 100;
-            // [ORIGINAL] AI behavior tuned for engaging combat:
-            // - Far (>250px): approach
-            // - Mid (120-250px): attack range — prefer attack
-            // - Close (<120px): mix of attack/retreat/block to avoid clumping
-            if (dist > 250) {
-                enemy_ai_state_ = 1;  // approach
-            } else if (dist > 120) {
-                // Mid range: attack often, sometimes approach
-                if (r < 50) enemy_ai_state_ = 2;  // attack
-                else if (r < 70) enemy_ai_state_ = 1;  // approach
-                else if (r < 80) enemy_ai_state_ = 4;  // block
-                else enemy_ai_state_ = 0;  // idle
+            if (td) {
+                TacticContext ctx;
+                ctx.distance = dist;                       // world points
+                ctx.health = (player_fighter_.max_health > 0)
+                    ? enemy_fighter_.health / player_fighter_.max_health : 1.0f;
+                ctx.enemy_health = (player_fighter_.max_health > 0)
+                    ? player_fighter_.health / player_fighter_.max_health : 1.0f;
+                ctx.hits = (float)enemy_fighter_.hits_landed;
+
+                static const std::vector<std::string> kCandidates = {
+                    "ForwardStep", "ShortAttack", "BackStep", "Retreat", "Duck"
+                };
+                std::vector<float> weights;
+                int pick = tactics_.choose_debug(*td, kCandidates, ctx, weights);
+
+                // Stash for the F1 overlay.
+                ai_last_candidates_ = kCandidates;
+                ai_last_weights_ = weights;
+                ai_last_distance_ = dist;
+                ai_last_pick_ = (pick >= 0) ? kCandidates[(size_t)pick] : "(none)";
+
+                if (pick < 0) {
+                    enemy_ai_state_ = 0;  // idle
+                } else {
+                    const std::string& cat = kCandidates[(size_t)pick];
+                    if (cat == "ForwardStep")      enemy_ai_state_ = 1;  // approach
+                    else if (cat == "ShortAttack") enemy_ai_state_ = 2;  // attack
+                    else if (cat == "BackStep" ||
+                             cat == "Retreat")     enemy_ai_state_ = 3;  // retreat
+                    else if (cat == "Duck")        enemy_ai_state_ = 4;  // block
+                    else                           enemy_ai_state_ = 0;  // idle
+                }
             } else {
-                // Close range: mix it up
-                if (r < 35) enemy_ai_state_ = 2;  // attack
-                else if (r < 55) enemy_ai_state_ = 3;  // retreat
-                else if (r < 75) enemy_ai_state_ = 4;  // block
-                else enemy_ai_state_ = 0;  // idle
-            }
-            // Aggression: if player is low health, attack more
-            if (player_fighter_.health < 30 && r < 50) {
-                enemy_ai_state_ = 2;  // press the advantage
-            }
-            // Self-preservation: if enemy low health, retreat/block more
-            if (enemy_fighter_.health < 30 && r < 60) {
-                enemy_ai_state_ = (r < 30) ? 4 : 3;  // block or retreat
+                // [HEURISTIC-TODO] tacticSettings.xml missing — fall back to a
+                // neutral approach so the enemy is not frozen.
+                enemy_ai_state_ = (dist > 200) ? 1 : 2;
+                ai_last_pick_ = "(no tactics)";
             }
         }
         // Execute current AI state

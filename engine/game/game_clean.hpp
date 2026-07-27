@@ -40,6 +40,7 @@
 #include "shop.hpp"
 #include "location_manager.hpp"
 #include "asset_manager.hpp"
+#include "tactic_settings.hpp"
 #include "animation_player.hpp"
 #include "combat.hpp"
 #include "input_handler.hpp"
@@ -1350,6 +1351,33 @@ private:
              current_anim_.c_str(), anim_player_.anim_priority(),
              anim_player_.anim_finished() ? 1 : 0,
              current_move_.c_str(), move_state_);
+
+        // [ORIGINAL] Enemy AI roulette trace — the tacticSettings.xml weights
+        // that drove the last decision (tactic_settings.hpp / jL / iCa). Shows
+        // the evaluated weight per candidate and which one the wheel picked, so
+        // the pick can be read as numbers instead of guessed from behaviour.
+        if (tactics_.loaded()) {
+            static const char* kStateName[] = {
+                "idle", "approach", "attack", "retreat", "block"};
+            const int st = enemy_ai_state_;
+            line("AI      tactic=Standard  dist=%.0f  state=%d(%s)  pick=%s",
+                 ai_last_distance_, st,
+                 (st >= 0 && st <= 4) ? kStateName[st] : "?",
+                 ai_last_pick_.c_str());
+            for (size_t i = 0; i < ai_last_candidates_.size(); ++i) {
+                const bool chosen = (ai_last_candidates_[i] == ai_last_pick_);
+                std::snprintf(b, sizeof(b), "  %c %-12s w=%.1f",
+                              chosen ? '>' : ' ',
+                              ai_last_candidates_[i].c_str(),
+                              (i < ai_last_weights_.size()) ? ai_last_weights_[i] : 0.0f);
+                render_text(b, 30.0f, ty, 0.20f,
+                            chosen ? ren::Color4B{120, 255, 120, 255}
+                                   : ren::Color4B{200, 200, 200, 255});
+                ty += 20.0f;
+            }
+        } else {
+            line("AI      tacticSettings.xml NOT loaded");
+        }
         (void)sx;
     }
 
@@ -2221,6 +2249,12 @@ private:
     // ---------- Move definitions (from moves.xml) ----------
     void load_moves() {
         assets_->load_moves(asset_root_);
+    }
+
+    // ---------- Enemy AI weights (from tacticSettings.xml) ----------
+    // [ORIGINAL] The roulette-wheel weight model — see tactic_settings.hpp.
+    void load_tactics() {
+        tactics_.load(asset_root_);
     }
 
     void update_animation(uint32_t dt_ms);
@@ -4019,6 +4053,15 @@ private:
     bool& is_uninterrupt_ = combat_.mutable_is_uninterrupt();
     // Module instances (owned via PImpl, initialized in game.cpp)
     std::unique_ptr<AssetManager> assets_;
+
+    // [ORIGINAL] Enemy AI weight tables (tacticSettings.xml). Drives the
+    // roulette-wheel animation pick that replaced the invented state machine.
+    TacticSettings tactics_;
+    // Last roulette decision, kept for the F1 debug overlay.
+    std::string ai_last_pick_;                        // chosen category
+    std::vector<std::string> ai_last_candidates_;     // parallel to weights
+    std::vector<float> ai_last_weights_;              // evaluated weights
+    float ai_last_distance_ = 0;                      // ctx.distance used
     InputHandler input_handler_;
 
     bool replay_mode_ = false;  // skip menus, go directly to Battle  // true when current frame is in Uninterrupt interval

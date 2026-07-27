@@ -6,7 +6,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
-#include <byte>
+#include <cstddef>
 #include <filesystem>
 
 namespace resf2::game {
