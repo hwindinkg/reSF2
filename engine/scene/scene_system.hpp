@@ -118,6 +118,15 @@ public:
     // any stale state left by Battle or other scenes).
     virtual void host_reset_menu_state() = 0;
 
+    // Toggle the menu overlay (scroll panel with Dojo/Map/Shop/Profile/Settings
+    // icons). Used by scenes that do NOT delegate to host_update_gameplay (Map,
+    // Results) so they can open the menu the same way the dojo does.
+    virtual void host_toggle_menu_overlay() {}
+
+    // Render the menu overlay on top of the current scene content, advancing
+    // the open/close animation. Safe to call every frame from any scene.
+    virtual void host_render_menu_overlay() {}
+
     // Update the dojo gameplay (movement, combat, animation, physics,
     // overlays). Called by MainMenu and Battle scenes from their on_update.
     virtual void host_update_gameplay(std::uint32_t dt_ms) = 0;
@@ -145,6 +154,14 @@ public:
 
     // Get the current dialogue lines (for the Dialogue scene to render).
     [[nodiscard]] virtual const std::vector<std::pair<std::string, std::string>>& host_get_dialogue() const = 0;
+
+    // Get the current dialogue choices (for choice-based dialogs like
+    // QuestActionDialog). Returns empty vector when there are no choices.
+    // [ORIGINAL] QuestActionDialog @ FUN_101c7d20 stores choices at +0xa4..+0xb0.
+    [[nodiscard]] virtual std::vector<std::string> host_get_dialogue_choices() const { return {}; }
+
+    // Set dialogue choices (empty to clear).
+    virtual void host_set_dialogue_choices(std::vector<std::string>) {}
 
     // --- Battle data ---
 
@@ -183,6 +200,19 @@ public:
 
     // Check if a level has been completed.
     [[nodiscard]] virtual bool host_is_level_completed(const std::string& level) const = 0;
+
+    // --- Zone/Battle lock state [ORIGINAL] from usersDefault.xml ---
+
+    // Check if a zone is unlocked. A zone is unlocked if the corresponding
+    // <Battle> entry in the save does NOT have a _LOCKED suffix.
+    [[nodiscard]] virtual bool host_is_zone_unlocked(const std::string& zone) const { (void)zone; return true; }
+
+    // Check if a specific battle within a zone is locked.
+    [[nodiscard]] virtual bool host_is_battle_locked(const std::string& zone, const std::string& battle) const { (void)zone; (void)battle; return false; }
+
+    // Get the current tutorial state. Values: "MOVE", "BAG", "FIRST_FIGHT", "COMPLETE".
+    // [ORIGINAL] The Tutorial attribute on <Warrior> in usersDefault.xml.
+    [[nodiscard]] virtual std::string host_get_tutorial_state() const { return "COMPLETE"; }
 
     // --- Text rendering ---
 
@@ -266,6 +296,12 @@ public:
 
     // Set the battle result before transitioning to Results scene.
     virtual void host_set_battle_result(std::string result) = 0;
+
+    // --- Quest events ---
+    // [ORIGINAL] QuestManager @ 0x101c7d20 processes quest actions on events.
+    // Trigger a quest event (e.g. "FightEnd", "SessionStart", "ZoneEnter").
+    // The quest engine processes matching quest actions (OpenZone, UnlockBattle, Dialog, etc.).
+    virtual void host_trigger_quest_event(const std::string& event, const std::string& arg = "") {}
 
     // --- Fight parameters and state ---
     //

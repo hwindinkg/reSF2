@@ -128,6 +128,13 @@ private:
 };
 
 // ---------- Shop scene ----------
+// [ORIGINAL] Matches ShopScreen @ 0x1021f170. Layout from the reference
+// screenshot: a MENU scroll roll across the top; on the body, from left to
+// right: a fighter silhouette panel with a "TRY ON" button and navigation
+// arrows, a central parchment scroll showing the currently equipped items
+// with star ratings, and a right-hand detail panel with the selected item's
+// name, stat bars, and a green BUY button. A bottom bar carries the currency
+// readouts on the left and the category icons on the right.
 
 class ShopScene final : public Scene {
 public:
@@ -136,7 +143,31 @@ public:
     void on_update(SceneContext& ctx) override;
     void on_render(SceneContext& ctx) override;
 private:
-    float scroll_y_ = 0.0f;  // vertical scroll offset for the item list
+    // Category tab state
+    int selected_category_ = 0;        // index into categories_
+    std::vector<std::string> categories_ = {"Weapon", "Armor", "Helm", "Ranged", "Magic"};
+
+    // Item list state
+    int selected_item_idx_ = 0;        // index within the current category's items
+    float scroll_offset_ = 0.0f;       // scroll offset for item list
+
+    // [ORIGINAL] Reference-derived proportions (768-pt design space).
+    // Top panel: 192 pt (kTopPanelAtlasH, same as dojo/menu).
+    // MENU scroll roll: 56 pt.
+    // Bottom bar (currency + category icons): 80 pt.
+    // Body is split horizontally into three columns:
+    //   left fighter column  ~ 28 % of logical width
+    //   centre scroll column ~ 40 %
+    //   right detail column  ~ 32 %
+    static constexpr float kTopPanelH    = 192.0f;
+    static constexpr float kMenuRollH    =  56.0f;
+    static constexpr float kBottomBarH   =  80.0f;
+    static constexpr float kDesignH      = 768.0f;
+    static constexpr float kFighterFrac  =   0.28f;
+    static constexpr float kScrollFrac   =   0.40f;
+    static constexpr float kDetailFrac   =   0.32f;
+    static constexpr int   kVisibleRows  =   3;   // equipped-rows in the central scroll
+    static constexpr float kCatIconSize  =  52.0f;
 };
 
 // ---------- Settings scene (stub) ----------
@@ -163,7 +194,13 @@ public:
 private:
     size_t current_line_ = 0;
     uint32_t text_reveal_ms_ = 0;  // for typewriter effect
-    static constexpr uint32_t kCharRevealMs = 30;  // 30ms per char
+    // [HEURISTIC-TODO] 30 ms/code-point is a perceptual guess.  The binary's
+    // QuestActionDialog render path (FUN_101dcc40, vtable[4]) delegates text
+    // display to the engine's label animation system; no per-character delay
+    // constant was found near FUN_101c7d20 or in sf2_beautified.js (searched
+    // for "typewriter", "charDelay", "textSpeed" — none).  30 ms ≈ 33 chars/s
+    // reads comfortably at 60 fps.  Adjust after video-capturing the original.
+    static constexpr uint32_t kCharRevealMs = 30;
 };
 
 // ---------- Battle scene ----------
