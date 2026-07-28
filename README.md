@@ -1,100 +1,124 @@
-# reSF2 — Clean-room reimplementation of Shadow Fight 2
+﻿# reSF2 — Ренерация движка Shadow Fight 2
 
-A reverse-engineered recreation of the Shadow Fight 2 game engine,
-built from analysis of the original ARM (Android) and x86 (PC) binaries.
+Чистая реинженерия движка Shadow Fight 2 по результатам реверс-инжиниринга
+бинарников (Windows PE32 `ShadowFight2.s86`, Android ARM `ShadowFight2_android.bin`)
+и обфусцированного JS оригинальной Unity-версии (`sf2_pc/www/sf2_beautified.js`, 80205 строк).
+
+Цель — **1:1 воспроизведение геймплея, логики и загрузки ассетов** оригинальной
+мобильной версии (APK v1.9.21, Marmalade SDK + Cocos2d-x 2.x).
 
 **⚠️ ОЧЕНЬ СЫРОЙ ДВИЖОК. НЕ ИГРА, А ТЕХНИЧЕСКОЕ ДЕМО.**
 
-Текущая кодовая база — proof-of-concept с множеством известных и неизвестных дефектов.
-Цель проекта — **1:1 повторение ВСЕГО геймплея, логики и загрузки ассетов оригинальной
-мобильной версии** (APK v1.9.21, Marmalade SDK + Cocos2d-x 2.x).
+Полный план с адресами бинарника и открытыми вопросами — в `PORT_PLAN.md` (1266 строк).
 
-## Статус
+## Статус (июль 2026)
 
-### ✅ Завершено
-- **Phase 1** — input handler refactor: 14 accessors добавлены, 12 дублирующих полей удалены, 30+ ссылок заменены, 4 мёртвых HUD/renderer файла удалены
-- **Формат парсеры**: S3E container, plist atlas, ATF tactics, bitmap font
-- **derbh (.dz) полностью решён** — контейнер + оба кодера (`DZ Coder` 0x004,
-  `ZLib Coder` 0x008) читаются нативно, без `dzip.exe` и без пред-распаковки.
-  Проверено: 120/120 файлов `files.dz` и 557/557 `animations.dz`, байт-в-байт
-  против эталонов (`tests/test_dz_archive`). Разбор — `engine/reverse/dz/README.md`
-- **Verlet physics**: punching bag
-- **Scene manager**: 9 сцен (Boot → Loading → MainMenu → Battle → Results → Shop → Map → Settings → Dialogue)
-- **Компиляция**: MSVC C++23, 24/24 executables (22 test + 2 app), 0 errors, 21/22 tests pass
+### Завершено
 
-### 🟡 В работе
-- **Phase 2** — Binary-Level RE Verification: Ghidra-based верификация функций против бинарника
-  - Target A (FUN_101661d0 — ModelAnimation::playInfo): кандидат готов, VERDICT GREEN ✅
-  - Targets B/C: ConditionInterval / ConditionCurrentAnimation pipeline — очередь
+| Фаза | Что сделано | Проверка |
+|------|-------------|----------|
+| Phase 0 | DZ-контейнер + оба кодера (0x004, 0x008) | 120/120 files.dz, 557/557 animations.dz — байт-в-байт |
+| Phase 1 | Мировая геометрия (F1), камера, debug world | 41 чек в test_world_geometry |
+| Phase 2 | Бойцы на полу (убрано проседание 131-138 ед.), приоритеты анимаций, `<Align>` pivot, SimpleEffect/Transparency кривые, слой локации (parallax sign, кроп атласа, rotated frame unrolling, masking boxes) | 49 чек в test_effect_curve, 4316+ в test_moves_semantics |
+| Phase 3 | Double-tap (300 мс из idle), SemiUninterrupt/SelfUninterrupt, condition system (CurrentAnimation, Interval), step cooldown (200 мс), dialog scroll (Roll_/Paper_/портрет), typewriter text, UTF-8, карта (zone sheets, battle nodes), shop (силуэт/пергамент/детали/категории), scroll overlay (M key), Fight HUD (HP bar + trail, round dots), rounds (best-of-N + timer), enemy AI (tactic roulette из tacticSettings.xml), attack intervals (265/316 moves), hit detection (shared transform), bag collision (3 причины) | 27 тестов проходят |
 
-### ❌ Ещё не сделано
-- AI противника (только punching bag)
-- Audio (engine/audio/ — заглушки)
-- Magic/ranged оружие (только Fists)
-- 55 из 56 локаций (только dojo)
-- Move transitions / MidFrames / FirstFrame
-- Touch/тачскрин управление
+### В работе / Открыто
 
-## Структура репозитория (только исходники — всё для сборки)
+| Категория | Что осталось |
+|-----------|--------------|
+| Бои | DamageFactor / BlockDamageFactor, skeleton hitbox, block mechanics, .atf парсер, полный tactic-driven AI, vertical gameplay (knockback/knockdown), magic/ranged снаряды |
+| Аудио | MP3-декодер, ActionSound / ActionRandomSound — заглушки |
+| Локации | Реализована только `dojo` из 56 |
+| Тач-управление | Виртуальный джойстик + кнопки атаки — вёрстка готова, не подключено |
+| Прогрессия | Quest engine — заглушка, save system — базовый |
+| Экраны | Results / Settings — заглушки |
+| Скриншоты | Harness сравнения с оригиналом не реализован |
+
+## Структура проекта
 
 ```
-reSF2/                         # корень репозитория
-├── engine/                    # C++23 реконструкция движка
-│   ├── game/                  # Game logic, input handler, scene host
-│   ├── scene/                 # Scene manager, 9 сцен
-│   ├── format/                # Парсеры (.s3e, .plist, .atf, .fnt)
-│   ├── reverse/               # RE-форматы (DZ decoder, asset readers)
-│   ├── core/                  # Math, utils, memory
-│   ├── fight/                 # Combat/move system
-│   ├── animation/             # Animation player
-│   ├── platform/              # Platform abstraction (GLFW, Win32)
-│   ├── renderer/              # OpenGL 2.1 / GLES2 + backend
-│   ├── runtime/               # Runtime helpers
-│   ├── audio/                 # Audio (заглушки)
-│   ├── ui/                    # UI helpers
-│   ├── network/               # Network (пусто)
-│   ├── physics/               # Verlet physics
-│   └── tools/                 # Debug tools
-├── tests/                     # Юнит-тесты (22 теста, 21 проходит)
-├── assets/                    # Игровые ассеты (pre-extracted из .dz)
-│   ├── models/                # 72 model XML
-│   ├── animations/            # moves.xml + 556 .bin
-│   └── locations/             # 56 location директорий
-├── scripts/                   # Build/debug скрипты
-├── reverse/                   # Внешние RE-инструменты
-├── tools/                     # Вспомогательные утилиты
-├── CMakeLists.txt             # CMake build system
-├── build.bat                  # Windows сборка
-├── BUILD.md                   # Инструкция по сборке
-└── README.md                  # Этот файл
+reSF2/
+├── engine/
+│   ├── game/
+│   │   ├── clean.hpp              # Типы + объявление Game
+│   │   ├── combat.hpp/cpp         # Hit detection, AI, таймеры
+│   │   ├── input_handler.hpp/cpp  # Ввод, double-tap, step frames
+│   │   ├── condition_system.hpp/cpp  # Gate-условия для moves
+│   │   ├── shop.hpp/cpp           # Каталог предметов, транзакции
+│   │   ├── player.hpp/cpp         # Профиль, валюта, инвентарь
+│   │   ├── inventory.hpp/cpp      # Экипировка, предметы
+│   │   ├── animation_player.hpp/cpp  # Воспроизведение, приоритеты
+│   │   ├── location_manager.hpp/cpp  # Загрузка локаций
+│   │   ├── asset_manager.hpp/cpp  # Текстурные атласы, анимации
+│   │   ├── tactic_settings.hpp/cpp  # AI весовые кривые, рулетка
+│   │   ├── quest_engine.hpp       # Обработка квест-действий
+│   │   └── save.hpp/cpp           # JSON-персистентность
+│   ├── scene/                     # Scene manager, 9 сцен
+│   ├── format/                    # Парсеры (.s3e, .plist, .atf, .fnt)
+│   ├── reverse/                   # RE-форматы (DZ decoder)
+│   ├── renderer/                  # OpenGL 2.1 / GLES2
+│   ├── physics/                   # Verlet
+│   ├── platform/                  # GLFW, Win32
+│   ├── audio/                     # Заглушки
+│   ├── core/                      # Math, utils
+│   └── tools/                     # Debug
+├── tests/                         # 27 тестов, 27 проходят
+├── assets/                        # Извлечённые из .dz ассеты
+├── reverse/binaries/              # ShadowFight2.s86 (30630 функций), .android.bin
+├── sf2_pc/www/                    # sf2_beautified.js (80205 строк)
+├── PORT_PLAN.md                   # Мастер-план (1266 строк)
+├── CMakeLists.txt
+└── build.bat
 ```
 
-## Сборка (Desktop)
+## Сборка
 
-### Windows
 ```
 build.bat
 ```
-Требуется: CMake ≥ 3.24, MSVC, C++23, Windows SDK
 
-### Linux (compile check only)
-```
-bash scripts/verify_main_compile.sh
-```
+Требования: CMake >= 3.24, MSVC, C++23, Windows SDK.
+
+Linux — только compile check: `bash scripts/verify_main_compile.sh`.
 
 ## Запуск
+
 ```
 resf2_app.exe --assets E:\reSF2
 ```
 
-## Инварианты разработки (НЕ нарушать)
+| Флаг | Назначение |
+|------|------------|
+| `--assets <path>` | Корень ассетов |
+| `--scene <name>[:N]` | Перейти к конкретному экрану |
+| `--debug-world` | World geometry overlay (F1) |
+| `--input-script <file>` | Детерминированный прогон (вместе с `--max-frames`) |
+| `--dump-state` | Трассировка состояния в stdout |
 
-1. **Не смешивать** Win32 `GetAsyncKeyState` с GLFW-колбэками для игрового ввода.
-2. **Никаких тихих фоллбэков** без TODO-комментария и warning-лога в коде.
-3. **Каждое изменение** помечать `[ORIGINAL]` (с адресом/символом бинарника) или `[HEURISTIC-TODO]`.
-4. **Коммитить компилирующимися шагами** — не оставлять репо сломанным.
+## Тесты
 
-## External references
+27 тестов, все проходят. Ключевые:
+
+| Тест | Проверки |
+|------|----------|
+| test_world_geometry | 41 чек — координатная система |
+| test_moves_semantics | 4316+ чек — семантика moves.xml |
+| test_effect_curve | 49 чек — SimpleEffect/Transparency |
+| test_input_trace | Интеграционный — трассировка ввода |
+| test_input_handler | 8 double-tap кейсов |
+| test_step_cooldown | Интеграционный — 200 мс gate |
+| test_dz_archive | 120 + 557 файлов байт-в-байт |
+
+Детерминированный прогон: `resf2_test.exe --input-script replay.txt --max-frames 1000`.
+
+## Соглашения
+
+- Все константы помечены `[ORIGINAL]` (адрес бинарника) или `[HEURISTIC-TODO]`.
+- Стиль: `trailing_underscore_` для members, `kPascalCase` для констант, `camelCase` для функций.
+- Язык: C++23, CMake, GLFW + OpenGL 2.1 / GLES2.
+- Коммиты — компилирующимися шагами, без тихих фоллбэков без `TODO` + warning-лога.
+
+## Внешние ссылки
 
 - S3ELoader (Ghidra loader): https://github.com/knot126/S3ELoader
 - Marmalade-Modding: https://github.com/knot126/Marmalade-Modding
