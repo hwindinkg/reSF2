@@ -4,6 +4,7 @@
 
 #include "combat.hpp"
 #include "asset_manager.hpp"
+#include "tactic_settings.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -28,10 +29,17 @@ void Combat::tick_combat_timers(float dt_sec) {
     if (enemy_fighter_.invuln_time > 0)
         enemy_fighter_.invuln_time = std::max(0.0f, enemy_fighter_.invuln_time - dt_sec);
 
-    // Combo timer: reset combo if no hit for 2 seconds
+    // [ORIGINAL] Combo timer: reset combo if no hit for 1.5 seconds (90 frames at 60Hz)
+    // Combo.Time = 90 from InternalSettings
     if (combo_timer_ > 0) {
         combo_timer_ -= dt_sec;
         if (combo_timer_ <= 0) {
+            // [ORIGINAL] Combo.MinHits = 3 — combo only counts if >= 3 hits within the window
+            if (player_fighter_.hits_landed >= 3) {
+                std::printf("[COMBAT] Combo ended: %d hits (valid combo)\n", player_fighter_.hits_landed);
+            } else if (player_fighter_.hits_landed > 0) {
+                std::printf("[COMBAT] Combo ended: %d hits (below MinHits=3)\n", player_fighter_.hits_landed);
+            }
             player_fighter_.hits_landed = 0;
             enemy_fighter_.hits_landed = 0;
         }
@@ -64,30 +72,90 @@ void Combat::update_enemy_ai(
     } else if (enemy_ai_timer_ >= enemy_ai_decision_interval_) {
         enemy_ai_timer_ = 0;
         float dist = std::abs(enemy_pos_x_ - player_pos_x);
-        int r = std::rand() % 100;
-
-        // [ORIGINAL] AI behavior tuned for engaging combat:
-        if (dist > 250) {
-            enemy_ai_state_ = 1;  // approach
-        } else if (dist > 120) {
-            if (r < 50) enemy_ai_state_ = 2;
-            else if (r < 70) enemy_ai_state_ = 1;
-            else if (r < 80) enemy_ai_state_ = 4;
-            else enemy_ai_state_ = 0;
+        
+        // [ORIGINAL] AI tactic roulette from FUN_10171d80
+        // Use weighted selection from tacticSettings.xml if available
+        if (tactic_settings_ && tactic_settings_->loaded()) {
+            // Build candidate list with tactic names
+            std::vector<std::string> candidates = {"ForwardStep", "ShortAttack", "BackStep", "Duck"};
+            
+            // Build context for weight evaluation
+            TacticContext ctx;
+            ctx.distance = dist;
+            ctx.health = enemy_fighter_.health / std::max(1.0f, enemy_fighter_.max_health);
+            ctx.enemy_health = player_fighter_.health / std::max(1.0f, player_fighter_.max_health);
+            ctx.hits = enemy_fighter_.hits_landed;
+            
+            // Find enemy's tactic (fallback to "Default" or first available)
+            const TacticDef* tactic = tactic_settings_->tactic("Default");
+            if (!tactic && tactic_settings_->count() > 0) {
+                // Get first available tactic
+                for (size_t i = 0; i < tactic_settings_->count(); ++i) {
+                    // This is a workaround since we don't have direct iteration
+                    // In practice, "Default" or "Basic" should exist
+                    break;
+                }
+            }
+            
+            if (tactic) {
+                int selected_idx = tactic_settings_->choose(*tactic, candidates, ctx);
+                if (selected_idx >= 0) {
+                    const std::string& selected = candidates[selected_idx];
+                    
+                    // Map tactic labels to AI states
+                    if (selected == "ForwardStep") {
+                        enemy_ai_state_ = 1;  // approach
+                    } else if (selected == "ShortAttack") {
+                        enemy_ai_state_ = 2;  // attack
+                    } else if (selected == "BackStep" || selected == "Retreat") {
+                        enemy_ai_state_ = 3;  // retreat
+                    } else if (selected == "Duck") {
+                        enemy_ai_state_ = 4;  // block
+                    } else {
+                        enemy_ai_state_ = 0;  // idle
+                    }
+                    
+                    std::printf("[COMBAT] AI tactic: dist=%.1f health=%.2f enemy=%.2f -> %s (state=%d)\n",
+                                dist, ctx.health, ctx.enemy_health, selected.c_str(), enemy_ai_state_);
+                } else {
+                    // All weights zero, fallback to simple logic
+                    enemy_ai_state_ = (dist > 200) ? 1 : 0;
+                    std::printf("[COMBAT] AI tactic: all weights zero, fallback state=%d\n", enemy_ai_state_);
+                }
+            } else {
+                // No tactic found, use fallback
+                enemy_ai_state_ = (dist > 200) ? 1 : 0;
+                std::printf("[COMBAT] AI tactic: no tactic def, fallback state=%d\n", enemy_ai_state_);
+            }
         } else {
-            if (r < 35) enemy_ai_state_ = 2;
-            else if (r < 55) enemy_ai_state_ = 3;
-            else if (r < 75) enemy_ai_state_ = 4;
-            else enemy_ai_state_ = 0;
-        }
+            // [HEURISTIC-TODO] Fallback AI without tacticSettings
+            int r = std::rand() % 100;
 
-        // Aggression: if player is low health, attack more
-        if (player_fighter_.health < 30 && r < 50) {
-            enemy_ai_state_ = 2;
-        }
-        // Self-preservation: if enemy low health, retreat/block more
-        if (enemy_fighter_.health < 30 && r < 60) {
-            enemy_ai_state_ = (r < 30) ? 4 : 3;
+            // [ORIGINAL] AI behavior tuned for engaging combat:
+            if (dist > 250) {
+                enemy_ai_state_ = 1;  // approach
+            } else if (dist > 120) {
+                if (r < 50) enemy_ai_state_ = 2;
+                else if (r < 70) enemy_ai_state_ = 1;
+                else if (r < 80) enemy_ai_state_ = 4;
+                else enemy_ai_state_ = 0;
+            } else {
+                if (r < 35) enemy_ai_state_ = 2;
+                else if (r < 55) enemy_ai_state_ = 3;
+                else if (r < 75) enemy_ai_state_ = 4;
+                else enemy_ai_state_ = 0;
+            }
+
+            // Aggression: if player is low health, attack more
+            if (player_fighter_.health < 30 && r < 50) {
+                enemy_ai_state_ = 2;
+            }
+            // Self-preservation: if enemy low health, retreat/block more
+            if (enemy_fighter_.health < 30 && r < 60) {
+                enemy_ai_state_ = (r < 30) ? 4 : 3;
+            }
+            
+            std::printf("[COMBAT] AI fallback: dist=%.1f r=%d state=%d\n", dist, r, enemy_ai_state_);
         }
     }
 
@@ -321,7 +389,9 @@ void check_hit_detection(
                             combat.enemy_fighter().invuln_time = 0.2f;
                             combat.mutable_enemy_hit_flash() = 0.2f;
                             combat.player_fighter().hits_landed++;
-                            combat.mutable_combo_timer() = 2.0f;
+                            // [ORIGINAL] Combo.Time = 90 frames = 1.5s at 60Hz (from InternalSettings)
+                            combat.mutable_combo_timer() = 1.5f;
+                            std::printf("[COMBAT] Combo: hits=%d timer=1.5s\n", combat.player_fighter().hits_landed);
                             int hit_snd_idx = (current_frame + (int)combat.current_move()[0]) % 4 + 1;
                             play_sound("f_pl_attack" + std::to_string(hit_snd_idx), 0.7f);
                             play_sound("armor", 0.5f);

@@ -124,6 +124,15 @@ public:
     // Tick combat timers (hit flash, stun, invuln, combo)
     void tick_combat_timers(float dt_sec);
 
+    // [ORIGINAL] Combo.MinHits = 3 (from InternalSettings)
+    // Returns true if the current hit count qualifies as a combo (>= 3 hits)
+    [[nodiscard]] bool has_valid_combo() const {
+        return player_fighter_.hits_landed >= 3 && combo_timer_ > 0;
+    }
+
+    // Set tactic settings for AI decision making
+    void set_tactic_settings(const class TacticSettings* settings) { tactic_settings_ = settings; }
+
     // Enemy AI update
     void update_enemy_ai(
         float dt_sec,
@@ -185,6 +194,9 @@ private:
     float enemy_attack_duration_ = 0.0f;
     bool show_enemy_ = false;
     bool is_battle_mode_ = false;
+    
+    // [ORIGINAL] AI tactic system from tacticSettings.xml
+    const class TacticSettings* tactic_settings_ = nullptr;
 };
 
 } // namespace resf2::game

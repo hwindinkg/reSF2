@@ -26,16 +26,31 @@ public:
     bool double_step_back_requested() const { return double_step_back_requested_; }
     void set_double_step_back_requested(bool v) { double_step_back_requested_ = v; }
     void clear_double_step_back() { double_step_back_requested_ = false; }
-    uint32_t step_play_time() const { return step_play_time_; }
-    void set_step_play_time(uint32_t t) { step_play_time_ = t; }
+    // [ORIGINAL] Double-tap window: 300 ms.
+    // From Model::step @ 0x10161ad0 — the model stores a timestamp at +0x84/0x88
+    // and compares (now_ms - last_tap_ms) against 300. PORT_PLAN D8 confirms
+    // the constant; JS does not expose it by name (obfuscated), but the binary
+    // comparison at 0x1015c0a0 (step timing) uses 300 as the threshold.
+    static constexpr uint32_t kDoubleTapWindowMs = 300;
+    // [ORIGINAL] Step frame counting — original uses animation frame count,
+    // not wall-clock time, to gate when a step can be interrupted.
+    // From Model::step pipeline (0x10161ad0): animation must play N frames
+    // before another input is accepted.
+    uint32_t step_frames() const { return step_frames_; }
+    void set_step_frames(uint32_t v) { step_frames_ = v; }
+    void increment_step_frames() { ++step_frames_; }
+    void reset_step_frames() { step_frames_ = 0; }
+    // [HEURISTIC-TODO] 12 frames = 200ms at 60fps. Exact threshold unknown;
+    // needs tracing from binary's movement entries or moves.xml animation data.
+    static constexpr uint32_t kMinStepFrames = 12;
     uint32_t duck_play_time() const { return duck_play_time_; }
     void set_duck_play_time(uint32_t t) { duck_play_time_ = t; }
 
-    // Key latch state
-    int fwd_held_ms() const { return fwd_held_ms_; }
-    void set_fwd_held_ms(int v) { fwd_held_ms_ = v; }
-    int back_held_ms() const { return back_held_ms_; }
-    void set_back_held_ms(int v) { back_held_ms_ = v; }
+    // [ORIGINAL] Direction key latch removed.
+    // The original binary (Model::step 0x10161ad0) has no direction latch;
+    // combos are gated by CurrentAnimation conditions in moves.xml, not by
+    // key history. fwd_held_ms_/back_held_ms_ were invented and caused
+    // incorrect combo behavior (sticky controls for ~13 frames after key up).
 
     // Double-tap timing
     uint32_t last_fwd_tap_ms() const { return last_fwd_tap_ms_; }
@@ -75,12 +90,8 @@ private:
     int move_state_ = 0;
 
     // Timing state
-    uint32_t step_play_time_ = 0;
+    uint32_t step_frames_ = 0;
     uint32_t duck_play_time_ = 0;
-
-    // Key latch state
-    int fwd_held_ms_ = 0;
-    int back_held_ms_ = 0;
 
     // [ORIGINAL] Double-tap detection
     uint32_t last_fwd_tap_ms_ = 0;

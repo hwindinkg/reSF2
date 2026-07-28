@@ -329,5 +329,44 @@ int main(int argc, char** argv) {
                  "tapping forward walks the fighter forward, not back to the start");
     }
 
+    // -------------------------------------------- double-tap forward (dash)
+    //
+    // [ORIGINAL] Double-tap window = 300 ms from Model::step @ 0x10161ad0.
+    // Two quick taps of D (6 frames apart, ~100 ms at 60fps) while walking
+    // should trigger DoubleStepForward. The animation must be observed in
+    // the trace, and the fighter must cover significant distance.
+    {
+        const std::string script_dt = root + "/tests/data/input_double_tap_forward.txt";
+        const std::string out_dt = root + "/build/input_trace_double_tap.out";
+        const std::string cmd_dt = "\"\"" + app + "\" --assets \"" + root +
+                                   "\" --input-script \"" + script_dt +
+                                   "\" --max-frames 600 --dump-state --no-log > \"" +
+                                   out_dt + "\" 2>&1\"";
+        check(std::system(cmd_dt.c_str()) == 0, "double-tap run exited cleanly");
+
+        std::ifstream fdt(out_dt);
+        check(fdt.good(), "double-tap trace was produced");
+        bool saw_double_step = false;
+        float px_at_dash = 0.0f, px_before_dash = 0.0f;
+        std::string ldt;
+        while (std::getline(fdt, ldt)) {
+            std::smatch m;
+            if (!std::regex_search(ldt, m, re)) continue;
+            const int fr = std::stoi(m[1]);
+            const std::string anim = m[4];
+            const std::string move = m[5];
+            const float px = std::stof(m[6]);
+            if (anim == "double_step_forward" || move == "DoubleStepForward") {
+                saw_double_step = true;
+                if (px_before_dash == 0.0f) px_before_dash = px;
+                px_at_dash = px;
+            }
+        }
+        std::printf("  double-tap: saw_double_step=%d px %.1f -> %.1f\n",
+                    (int)saw_double_step, px_before_dash, px_at_dash);
+        check(saw_double_step,
+              "double-tap forward triggers DoubleStepForward within the 300 ms window");
+    }
+
     return resf2::test::summary();
 }

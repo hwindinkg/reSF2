@@ -86,6 +86,15 @@ struct MoveDef {
     int block_start = -1;
     int uninterrupt_start = -1;
     int uninterrupt_end = -1;
+    // [ORIGINAL] SemiUninterrupt: animation can be interrupted by attacks
+    // but not by movement. From IntervalAttack::getFactors @ 0x10115910.
+    // moves.xml: 81 moves declare it (e.g. DoubleStepForward End=2).
+    int semi_uninterrupt_start = 0;
+    int semi_uninterrupt_end = -1;
+    // [ORIGINAL] SelfUninterrupt: animation can only be interrupted by itself
+    // (combo chains). moves.xml: 4 moves declare it (e.g. DoubleStepForward 10..12).
+    int self_uninterrupt_start = -1;
+    int self_uninterrupt_end = -1;
     std::vector<std::string> key_types;
 
     int key_count = 0;
@@ -187,6 +196,11 @@ struct MoveDef {
 
     // IgnoresInvulnerable — this attack can pierce target invulnerability
     std::string ignores_invulnerable;
+    
+    // [ORIGINAL] IntervalAttack flags from 0x10115d80
+    bool ignores_block = false;        // +0x75: IgnoresBlock attribute
+    bool no_effect = false;            // +0x74: NoEffect attribute
+    std::vector<std::string> attacking_parts;  // +0xac: AttackingParts vector (skeleton edge names)
 };
 
 // ---------- Animation ----------
