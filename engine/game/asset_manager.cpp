@@ -837,6 +837,15 @@ void AssetManager::load_moves(const std::string& asset_root) {
                     iv.impulse_y = tof(node.attr("ImpulseY"));
                     iv.hit_type = node.attr("HitType");
 
+                    // [ORIGINAL] IntervalAttack flags from 0x10115d80
+                    // Apply to MoveDef if this is an Attack interval
+                    if (iv.type == "Attack") {
+                        if (node.attr("IgnoresBlock") == "true" || node.attr("IgnoresBlock") == "1")
+                            move.ignores_block = true;
+                        if (node.attr("NoEffect") == "true" || node.attr("NoEffect") == "1")
+                            move.no_effect = true;
+                    }
+
                     std::string edges_str = node.attr("Edges");
                     size_t epos2 = 0;
                     while (epos2 < edges_str.size()) {
@@ -852,7 +861,12 @@ void AssetManager::load_moves(const std::string& asset_root) {
                     for (const auto& kid : node.children) {
                         if (kid.name == "AttackingParts") {
                             for (const auto& e : kid.children)
-                                if (e.name == "Edge") iv.edges.push_back(e.attr("Name"));
+                                if (e.name == "Edge") {
+                                    iv.edges.push_back(e.attr("Name"));
+                                    // Also add to move's attacking_parts if this is an Attack
+                                    if (iv.type == "Attack")
+                                        move.attacking_parts.push_back(e.attr("Name"));
+                                }
                         } else if (kid.name == "Damage") {
                             iv.damage_value = tof(kid.attr("Value"));
                         } else if (kid.name == "Impulse") {
@@ -876,6 +890,20 @@ void AssetManager::load_moves(const std::string& asset_root) {
                 }
             } else if (sub.name == "IgnoresInvulnerable") {
                 move.ignores_invulnerable = sub.attr("Name");
+            } else if (sub.name == "IntervalAttack") {
+                // [ORIGINAL] IntervalAttack flags from 0x10115d80
+                move.ignores_block = (sub.attr("IgnoresBlock") == "true" || sub.attr("IgnoresBlock") == "1");
+                move.no_effect = (sub.attr("NoEffect") == "true" || sub.attr("NoEffect") == "1");
+                // Parse attacking parts (skeleton edge names)
+                for (const auto& part : sub.children) {
+                    if (part.name == "AttackingParts") {
+                        for (const auto& edge : part.children) {
+                            if (edge.name == "Edge") {
+                                move.attacking_parts.push_back(edge.attr("Name"));
+                            }
+                        }
+                    }
+                }
             } else if (sub.name == "Actions") {
                 for (const auto& action : sub.children) {
                     if (action.name == "Sound") {
@@ -909,6 +937,21 @@ void AssetManager::load_moves(const std::string& asset_root) {
             } else if (iv.name == "Uninterrupt") {
                 if (move.uninterrupt_start < 0) move.uninterrupt_start = (int)iv.start;
                 if (move.uninterrupt_end < 0) move.uninterrupt_end = (int)iv.end;
+            } else if (iv.name == "SemiUninterrupt") {
+                // [ORIGINAL] SemiUninterrupt: can be interrupted by attacks
+                // but not by movement. From IntervalAttack::getFactors @ 0x10115910.
+                // moves.xml: 81 moves declare it (e.g. DoubleStepForward End=2).
+                if (move.semi_uninterrupt_end < 0) {
+                    move.semi_uninterrupt_start = (int)iv.start;
+                    move.semi_uninterrupt_end = (int)iv.end;
+                }
+            } else if (iv.name == "SelfUninterrupt") {
+                // [ORIGINAL] SelfUninterrupt: can only be interrupted by itself
+                // (combo chains). moves.xml: 4 moves declare it.
+                if (move.self_uninterrupt_start < 0) {
+                    move.self_uninterrupt_start = (int)iv.start;
+                    move.self_uninterrupt_end = (int)iv.end;
+                }
             }
         }
 
@@ -1028,6 +1071,27 @@ void AssetManager::load_hud_textures(const std::string& asset_root) {
                                   "hit_blade");
         load_texture_atlas_to_hud(base/"textures"/"fight"/"hits",
                                   "hitBatch");
+    }
+    // [ORIGINAL] Character avatars are loose PNGs in image/users/image/
+    // (quests.xml references them via Image="character_sensei" etc.).
+    for (const auto& base : {root/"assets"/"1536", root/"1536"}) {
+        auto users_dir = base/"image"/"users"/"image";
+        if (!std::filesystem::exists(users_dir)) continue;
+        for (auto& entry : std::filesystem::directory_iterator(users_dir)) {
+            if (entry.path().extension() != ".png") continue;
+            auto name = entry.path().stem().string();
+            if (hud_textures_.count(name)) continue;  // already loaded
+            auto data = read_file(entry.path().string());
+            int w, h, ch;
+            auto* px = stbi_load_from_memory(
+                (const stbi_uc*)data.data(), (int)data.size(), &w, &h, &ch, 4);
+            if (px) {
+                auto tex = std::make_unique<ren::Texture2D>();
+                tex->init_rgba(w, h, px);
+                stbi_image_free(px);
+                hud_textures_[name] = std::move(tex);
+            }
+        }
     }
     std::printf("  HUD textures loaded: %zu\n", hud_textures_.size());
 }

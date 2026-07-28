@@ -249,5 +249,54 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --- SemiUninterrupt / SelfUninterrupt parsing -------------------------
+    // [ORIGINAL] IntervalAttack::getFactors @ 0x10115910 distinguishes three
+    // interval types: Uninterrupt, SemiUninterrupt, SelfUninterrupt. All are
+    // stored in MoveDef.intervals by name. DoubleStepForward is the canonical
+    // example: it declares all three.
+    {
+        const auto it = moves.find("DoubleStepForward");
+        check(it != moves.end(), "DoubleStepForward is present in moves.xml");
+        if (it != moves.end()) {
+            const auto& m = it->second;
+            // [ORIGINAL] <Interval Name="SemiUninterrupt" End="2"/>
+            check(m.semi_uninterrupt_end == 2,
+                  "DoubleStepForward: SemiUninterrupt End == 2 (got " +
+                  std::to_string(m.semi_uninterrupt_end) + ")");
+            // [ORIGINAL] <Interval Name="Uninterrupt" Start="3" End="9"/>
+            check(m.uninterrupt_start == 3,
+                  "DoubleStepForward: Uninterrupt Start == 3");
+            check(m.uninterrupt_end == 9,
+                  "DoubleStepForward: Uninterrupt End == 9");
+            // [ORIGINAL] <Interval Name="SelfUninterrupt" Start="10" End="12"/>
+            check(m.self_uninterrupt_start == 10,
+                  "DoubleStepForward: SelfUninterrupt Start == 10");
+            check(m.self_uninterrupt_end == 12,
+                  "DoubleStepForward: SelfUninterrupt End == 12");
+
+            // Count how many intervals were parsed total
+            int named_intervals = 0;
+            for (const auto& iv : m.intervals) {
+                if (!iv.name.empty()) ++named_intervals;
+            }
+            std::printf("DoubleStepForward: %d named intervals parsed\n", named_intervals);
+            check_ge(static_cast<double>(named_intervals), 3.0,
+                     "DoubleStepForward has at least 3 named intervals "
+                     "(SemiUninterrupt, Uninterrupt, SelfUninterrupt)");
+        }
+    }
+    // Count total moves with SemiUninterrupt / SelfUninterrupt
+    int semi_count = 0, self_count = 0;
+    for (const auto& [name, m] : moves) {
+        if (m.semi_uninterrupt_end >= 0) ++semi_count;
+        if (m.self_uninterrupt_start >= 0) ++self_count;
+    }
+    std::printf("moves with SemiUninterrupt: %d, SelfUninterrupt: %d\n",
+                semi_count, self_count);
+    check_ge(static_cast<double>(semi_count), 50.0,
+             "many moves declare SemiUninterrupt (moves.xml has ~81)");
+    check_ge(static_cast<double>(self_count), 2.0,
+             "some moves declare SelfUninterrupt (moves.xml has ~4)");
+
     return resf2::test::summary();
 }
