@@ -99,6 +99,10 @@ public:
     float stance_npivot_y() const { return stance_npivot_y_; }
     void set_stance_npivot_y(float y) { stance_npivot_y_ = y; }
 
+    // Damage settings (from internalSettings.xml)
+    DamageSettings& damage_settings() { return damage_settings_; }
+    const DamageSettings& damage_settings() const { return damage_settings_; }
+
     // Stage data
     fmt::StageData& stage_data() { return stage_data_; }
     const fmt::StageData& stage_data() const { return stage_data_; }
@@ -120,6 +124,7 @@ public:
     void load_hud_font(const std::string& asset_root);
     void load_stages(const std::string& asset_root);
     void load_sounds(const std::string& asset_root);
+    void load_internal_settings(const std::string& asset_root);
 
     // Animation loading (single .bin file)
     void load_animation(const std::string& anim_name, const std::string& asset_root, const std::string& search_dir = "");
@@ -182,6 +187,9 @@ public:
 
     // NPivot Y from skeleton rest-pose (set by load_skeleton)
     float stance_npivot_y_ = 106.0f;
+
+    // Damage settings from internalSettings.xml
+    DamageSettings damage_settings_;
 };
 
 } // namespace resf2::game

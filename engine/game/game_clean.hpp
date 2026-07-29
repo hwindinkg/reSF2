@@ -23,6 +23,7 @@
 #include "engine/platform/glfw_platform.hpp"
 #include "engine/runtime/loop.hpp"
 #include "engine/renderer/renderer.hpp"
+#include "engine/renderer/irenderer.hpp"
 #include "engine/reverse/plist_atlas.hpp"
 #include "engine/reverse/bitmap_font.hpp"
 #include "engine/reverse/dz_reader.hpp"
@@ -43,6 +44,7 @@
 #include "tactic_settings.hpp"
 #include "animation_player.hpp"
 #include "combat.hpp"
+#include "condition_system.hpp"
 #include "input_handler.hpp"
 #include "quest_engine.hpp"
 
@@ -123,6 +125,12 @@ public:
             locations_.set_current_location_name(name);
             std::printf("[GAME] Start location set to: %s\n", name.c_str());
         }
+    }
+
+    // Inject a custom renderer (e.g., software renderer for headless testing).
+    // If not called, Game creates a GL renderer in on_init.
+    void set_renderer(std::unique_ptr<ren::IRenderer> renderer) {
+        renderer_ = std::move(renderer);
     }
 
     void on_init(plat::Platform& platform) override;
@@ -338,6 +346,11 @@ void host_set_battle_mode(bool battle) override;
     // Called by MainMenuScene and BattleScene to update the dojo gameplay
     // (movement, combat, animation, physics, overlays).
     void host_update_gameplay(uint32_t dt);
+
+    // [STEP 4.7] Trigger knockback/knockdown on the player fighter.
+    // Sets vertical velocity (launch upward) and knockdown state.
+    // The physics update in host_update_gameplay handles the rest.
+    void trigger_knockback(float launch_velocity, bool knockdown);
 
     // Called by MainMenuScene and BattleScene to render the dojo scene
     // (background, character, bag, HUD, menu/dialog overlays).
@@ -1148,7 +1161,10 @@ private:
             // animation landed at a different height.
             float lx = ait->second.first, ly = ait->second.second;
             float sx = (face_right ? lx : -lx) * 1.0f;
-            float sy = floor_world_y_ + (ly + anim_player_.anim_npivot_bin_y());
+            // [STEP 4.7] Apply gameplay Y offset on top of animation data.
+            // The animation sets the base pose; gameplay_y_offset_ adds an
+            // additional world-Y shift for knockback/knockdown effects.
+            float sy = floor_world_y_ + (ly + anim_player_.anim_npivot_bin_y()) + gameplay_y_offset_;
             return {world_cx + sx, sy};
         }
 
@@ -1464,8 +1480,9 @@ private:
                           dbg_punch_pressed_ ? 1 : 0, dbg_kick_pressed_ ? 1 : 0);
             render_text(b, x, y, body_scale, {255, 255, 255, 255});
             y += line_h;
-            std::snprintf(b, sizeof(b), "move_st:%d facing:%s",
-                          move_state_, facing_right_ ? "R" : "L");
+            std::snprintf(b, sizeof(b), "move_st:%d facing:%s blk:%d",
+                           move_state_, facing_right_ ? "R" : "L",
+                           player_fighter_.is_blocking ? 1 : 0);
             render_text(b, x, y, body_scale, {255, 255, 255, 255});
             y += line_h;
             std::snprintf(b, sizeof(b), "step_f:%u/%u",
@@ -1729,7 +1746,10 @@ private:
         // Render character as unified dark silhouette.
         // Render ALL capsules (including duplicates — they overlap to fill gaps
         // at joints). Apply Margin1/Margin2 to trim ends properly.
-        ren::Color4B silhouette_col{20, 20, 25, 255};
+        // [ORIGINAL] Player block: blue tint when blocking, matching enemy block color.
+        ren::Color4B silhouette_col = player_fighter_.is_blocking
+            ? ren::Color4B{40, 40, 80, 255}    // block: dark blue (matches enemy block)
+            : ren::Color4B{20, 20, 25, 255};   // normal: dark silhouette
 
         for (auto& c : assets_->body_model()->capsules) {
             auto eit = edge_map.find(c.edge_name);
@@ -2485,6 +2505,14 @@ private:
     // ---------- Move definitions (from moves.xml) ----------
     void load_moves() {
         assets_->load_moves(asset_root_);
+    }
+
+    // ---------- Internal settings (internalSettings.xml) ----------
+    //
+    // [ORIGINAL] Parses damage-related settings from internalSettings.xml.
+    // Binary ref: internalSettings parsing at 0x10291370
+    void load_internal_settings() {
+        assets_->load_internal_settings(asset_root_);
     }
 
     // ---------- Enemy AI weights (from tacticSettings.xml) ----------
@@ -3894,7 +3922,7 @@ private:
 private:
     plat::Platform* platform_ = nullptr;
     std::string asset_root_;
-    std::unique_ptr<ren::Renderer> renderer_;
+    std::unique_ptr<ren::IRenderer> renderer_;
 
     // --- Module instances ---
     // Combat system: owns all combat/fighter/AI state.
@@ -4256,6 +4284,15 @@ private:
     resf2::game::GameLocation* location_ = nullptr;
 
     float player_pos_x_ = 0, player_pos_y_ = 0;
+    // [STEP 4.7] Gameplay Y offset layer for knockback/knockdown effects.
+    // Applied ON TOP of animation data — shifts the entire fighter vertically
+    // in world space. The animation still controls the pose; this adds an
+    // additional world-Y shift for launch/knockback physics.
+    float gameplay_y_offset_ = 0.0f;
+    float y_velocity_ = 0.0f;         // vertical velocity for knockback
+    bool is_knocked_down_ = false;    // knockdown state flag
+    int knockdown_timer_ = 0;         // recovery timer (frames)
+    static constexpr float kKnockbackGravity = 800.0f;  // world units/sec^2
     float cam_x_ = 0, cam_y_ = 0;
     // Debug world overlay, toggled with F1 or started with --debug-world.
     bool debug_world_ = false;

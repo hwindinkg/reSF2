@@ -4,6 +4,7 @@
 # stb_image implementation unit.
 set(RESF2_RENDERER_SOURCES
     software_renderer.cpp
+    software_renderer_adapter.cpp
     stb_image_impl.cpp
 )
 

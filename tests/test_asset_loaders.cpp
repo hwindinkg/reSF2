@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -193,11 +194,15 @@ static void test_atf_synthetic_too_small() {
 }
 
 static void test_atf_real_file() {
+    // .atf files live in assets/tactics/.  Two naming patterns:
+    //   single-weapon:  fists.atf, axes.atf  (version 2)
+    //   weapon-pair:    axes_katars.atf       (version 1)
     fs::path candidates[] = {
-        "assets/assets/tactics/_fists.atf",
-        "assets/assets/tactics/_batons.atf",
-        "assets/assets/tactics/batons_claws.atf",
-        "assets/assets/tactics/kusarigama_nunchaku.atf",
+        "assets/tactics/fists.atf",
+        "assets/tactics/axes.atf",
+        "assets/tactics/knobsticks.atf",
+        "assets/tactics/axes_katars.atf",
+        "assets/tactics/knobsticks_machete.atf",
     };
     bool any_found = false;
     for (const auto& path : candidates) {
@@ -207,15 +212,38 @@ static void test_atf_real_file() {
         CHECK(r.has_value());
         if (!r) continue;
         auto& t = *r;
-        CHECK_EQ(t.header.version, 1u);
-        CHECK(!t.header.weapon_b_name.empty());
-        CHECK(t.binary_prefix.stride == 858 || t.binary_prefix.stride == 0);
-        CHECK(t.binary_records.size() > 0);
-        std::printf("  [atf] %s: v=%u A='%s' B='%s' stride=%u records=%zu bytes\n",
+        // Accept both version 1 (pair) and version 2 (single weapon).
+        CHECK(t.header.version == 1 || t.header.version == 2);
+        CHECK(!t.header.weapon_a_name.empty());
+        // v=1 pairs have a weapon_b; v=2 singles leave it empty.
+        if (t.header.version == 1) {
+            // weapon_b may be empty for same-weapon pairs (e.g. fist_fist).
+        }
+        CHECK_EQ(t.binary_prefix.stride, static_cast<std::uint16_t>(858));
+        // The 858-byte record should have non-zero indices.
+        bool any_nonzero = false;
+        for (auto idx : t.animation_indices) {
+            if (idx != 0) { any_nonzero = true; break; }
+        }
+        CHECK(any_nonzero);
+        // String pool should be non-empty and yield parsed names.
+        CHECK(!t.string_pool.empty());
+        CHECK(t.animation_names.size() > 0);
+        // Every index in the record should be within the parsed names
+        // range (or we tolerate out-of-range as unreversed data).
+        std::printf("  [atf] %s: v=%u A='%s' B='%s' stride=%u "
+                    "pool=%zu names=%zu unique_indices=%zu\n",
                     path.string().c_str(), t.header.version,
                     t.header.weapon_a_name.c_str(),
                     t.header.weapon_b_name.c_str(),
-                    t.binary_prefix.stride, t.binary_records.size());
+                    t.binary_prefix.stride,
+                    t.string_pool.size(),
+                    t.animation_names.size(),
+                    [&]{
+                        std::set<uint8_t> u;
+                        for (auto v : t.animation_indices) u.insert(v);
+                        return u.size();
+                    }());
     }
     if (!any_found) {
         std::printf("SKIP test_atf_real_file (no .atf fixtures found)\n");

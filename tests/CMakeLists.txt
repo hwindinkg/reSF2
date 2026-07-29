@@ -329,3 +329,53 @@ add_test(NAME test_step_cooldown
          COMMAND test_step_cooldown "$<TARGET_FILE:resf2_app>" "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties(test_step_cooldown PROPERTIES TIMEOUT 180)
+
+# ============================================================================
+# Phase 2: Headless integration test harness
+# ============================================================================
+
+# Helper function for integration tests that use the HeadlessTestRunner.
+# Each integration test links against the full game + renderer + platform stack
+# and runs headlessly via the software renderer (no GPU/GL required).
+function(add_integration_test test_name)
+    add_executable(${test_name}
+        integration/${test_name}.cpp
+        headless_test_runner.cpp
+        test_platform.cpp
+    )
+    target_link_libraries(${test_name} PRIVATE
+        resf2_game
+        resf2_renderer
+        resf2_platform
+        resf2_scene
+        resf2_format
+        resf2_reverse
+        resf2_warnings
+        Threads::Threads
+    )
+    target_compile_features(${test_name} PRIVATE cxx_std_23)
+    add_test(NAME ${test_name}
+             COMMAND ${test_name}
+             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
+endfunction()
+
+# Smoke test: verifies HeadlessTestRunner can instantiate and run frames
+# without crashing. This is the canary that the harness itself works.
+add_integration_test(test_headless_runner)
+
+# Phase 3 integration tests
+add_integration_test(test_battle_integration)
+add_integration_test(test_shop_integration)
+add_integration_test(test_menu_integration)
+add_integration_test(test_crash_stability)
+# Crash stability runs 1004 frames through the software renderer; needs more time
+set_tests_properties(test_crash_stability PROPERTIES TIMEOUT 300)
+
+# Phase 5: Full battle E2E test — complete fight flow from start to Results
+add_integration_test(test_full_battle)
+set_tests_properties(test_full_battle PROPERTIES TIMEOUT 300)
+
+# Phase 5: Screenshot comparison — renders headlessly, compares against
+# reference PNGs using MSE, and saves diff images on failure.
+add_integration_test(test_screenshot_compare)

@@ -14,4 +14,5 @@ target_link_libraries(resf2_fight PUBLIC
 
 target_link_libraries(resf2_fight PRIVATE
     resf2_reverse
+    resf2_game
 )

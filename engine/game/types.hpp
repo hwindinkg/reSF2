@@ -324,6 +324,41 @@ struct LoadingImg {
 
 enum class Overlay { None, Menu, Dialog };
 
+// ---------- Damage settings (from internalSettings.xml) ----------
+//
+// [ORIGINAL] Parsed from internalSettings.xml at load time.
+// Binary ref: internalSettings parsing at 0x10291370
+// These are character-attribute scaling factors. For a fresh character
+// with 0 attribute points, the effective value equals the Base.
+struct DamageSettings {
+    // <DamageFactor Base="0.0001" Attribute="DamageFactor"/>
+    // Per-point multiplier for the character's DamageFactor attribute.
+    // attribute_multiplier = 1.0 + damage_factor_base * character_damage_factor_attr
+    float damage_factor_base = 0.0001f;
+
+    // <BlockDamageFactor Base="0.0001" Attribute="BlockDamageFactor" />
+    // Per-point multiplier for the character's BlockDamageFactor attribute.
+    // Reduces chip damage when blocking.
+    float block_damage_factor_base = 0.0001f;
+
+    // <AverageBaseDamage Value="0.1" />
+    // Fallback base damage when a move has no explicit <Damage Value>.
+    float average_base_damage = 0.1f;
+
+    // <CriticalHit><Probability Base="0.0001" Attribute="CriticalChance" />
+    // Per-point crit chance multiplier.
+    float crit_probability_base = 0.0001f;
+
+    // <CriticalHit><Damage Base="0.0001" Attribute="CriticalDamage" />
+    // Per-point crit damage multiplier.
+    float crit_damage_base = 0.0001f;
+
+    // Base block factor (damage fraction that gets through when blocking).
+    // [ORIGINAL] BlockDamage.Value = 0.5 from binary @ 0x101598c0
+    // Not from XML — hardcoded in the binary.
+    float base_block_factor = 0.5f;
+};
+
 // ---------- Fighter state ----------
 
 struct FighterState {
