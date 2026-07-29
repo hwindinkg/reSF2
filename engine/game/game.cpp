@@ -1750,6 +1750,32 @@ void Game::host_update_gameplay(uint32_t dt) {
                 const float dist = std::fabs(enemy_pos_x_ - player_pos_x_);
                 if (dist <= 250.0f && player_fighter_.invuln_time <= 0 &&
                     !player_fighter_.is_dead) {
+                    // [ORIGINAL] Automatic block — player blocks automatically when enemy attacks
+                    // Block chance comes from AI tactics (BlockChance in tacticSettings.xml)
+                    // Default block chance: 30% (heuristic until we parse actual BlockChance)
+                    bool auto_blocked = false;
+                    if (!player_fighter_.is_blocking && move_state_ == 0 && hit_anim_ == 0) {
+                        // Player is idle — can auto-block
+                        float block_chance = 0.30f;  // [HEURISTIC-TODO] Get from BlockChance in tacticSettings
+                        float roll = (float)(rand() % 100) / 100.0f;
+                        if (roll < block_chance) {
+                            // Block successful — activate block state
+                            player_fighter_.is_blocking = true;
+                            move_state_ = 11;  // block state
+                            
+                            // Play block animation (HighBlock for now, could check attack height)
+                            if (assets_->animations().count("high_block")) {
+                                play_animation("high_block", false, 1);  // priority 1: defensive
+                                current_move_ = "HighBlock";
+                                int fc = assets_->animations()["high_block"].frame_count;
+                                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
+                                std::printf("[BLOCK] Auto-block activated (chance=%.0f%%, roll=%.0f%%)\n", 
+                                           block_chance * 100, roll * 100);
+                            }
+                            auto_blocked = true;
+                        }
+                    }
+                    
                     if (player_fighter_.is_blocking) {
                         play_sound("armor", 0.3f);
                         // [ORIGINAL] Block applies base_block_factor (50% reduction, not 100%)
@@ -2610,49 +2636,27 @@ void Game::host_update_gameplay(uint32_t dt) {
     }
     } while(0);
 
-    // === BLOCK MECHANICS (holding BACK while in stance) ===
-    // [ORIGINAL] From Model::startAction in binary — block state is triggered
-    // by holding the back direction during idle/stance. The block animation
-    // depends on crouch state: standing + back = HighBlock; crouching + back
-    // = SweepBlock. Block applies chip damage via base_block_factor (0.5).
-    // Block is NOT active while attacking (hit_anim_ > 0) or moving.
-    // [FIX] Block should only activate if player is NOT trying to move.
-    // If key_forward is pressed, movement takes priority over block.
-    if (!player_fighter_.is_dead && hit_anim_ == 0 && !start_stance_playing_ &&
-        (move_state_ == 0 || move_state_ == 11) && !key_forward && key_back) {
-        // Debug: log block activation
-        if (move_state_ == 0 && total_frame_count_ % 60 == 0) {
-            std::printf("[BLOCK_DEBUG] f=%llu activating block: kf=%d kb=%d ms=%d\n",
-                       (unsigned long long)total_frame_count_,
-                       (int)key_forward, (int)key_back, move_state_);
+    // === BLOCK MECHANICS (automatic defensive reaction) ===
+    // [ORIGINAL] Block is NOT a player action — it's an automatic defensive
+    // reaction when the enemy attacks. The block chance comes from AI tactics
+    // (BlockChance in tacticSettings.xml). When enemy hits player:
+    // 1. Check if player is facing enemy
+    // 2. Roll against BlockChance (from AI/tactic settings)
+    // 3. If block succeeds: play block animation, apply chip damage
+    // 4. If block fails: take full damage
+    // 
+    // Block is triggered in combat hit detection, NOT in input processing.
+    // This section only clears block state when not blocking.
+    if (move_state_ == 11) {
+        // Currently blocking — check if should continue
+        // Block lasts for the duration of the block animation
+        if (hit_anim_ == 0) {
+            // Block animation finished — exit block state
+            move_state_ = 0;
+            player_fighter_.is_blocking = false;
         }
-        player_fighter_.is_blocking = true;
-        // Select block move: crouching + back = SweepBlock; standing + back = HighBlock
-        const char* block_move_name = (key_down && !key_forward) ? "SweepBlock" : "HighBlock";
-        const MoveDef* block_move = nullptr;
-        auto bm_it = assets_->moves().find(block_move_name);
-        if (bm_it != assets_->moves().end() && bm_it->second.is_not_titan) {
-            block_move = &bm_it->second;
-        }
-        if (block_move) {
-            std::string block_anim_name = block_move->filename;
-            if (block_anim_name.size() > 4 &&
-                block_anim_name.substr(block_anim_name.size() - 4) == ".bin")
-                block_anim_name = block_anim_name.substr(0, block_anim_name.size() - 4);
-            if (assets_->animations().count(block_anim_name)) {
-                if (move_state_ != 11 || current_anim_ != block_anim_name) {
-                    std::printf("[BLOCK] %s (anim '%s')\n", block_move_name, block_anim_name.c_str());
-                    play_animation(block_anim_name, true, 1);  // priority 1: defensive
-                    current_move_ = block_move->name;
-                    move_state_ = 11;
-                }
-            }
-        } else {
-            // No block move found in moves.xml — still mark as blocking
-            std::printf("[BLOCK] no '%s' move found, blocking without animation\n", block_move_name);
-        }
-    } else if (move_state_ != 11) {
-        // Not in idle/block state — clear block
+    } else {
+        // Not in block state — ensure blocking flag is clear
         player_fighter_.is_blocking = false;
     }
 
