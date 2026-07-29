@@ -1428,18 +1428,23 @@ void Game::init_location() {
             }
             // Load stage data for the map scene
             if (!assets_->stages_loaded()) {
-                // [ORIGINAL] Try correct path first, then fallback
-                auto stages_path = root / "assets/stages.xml";
-                if (!std::filesystem::exists(stages_path)) {
-                    stages_path = root / "assets/files/assets/stages.xml";
-                }
-                if (std::filesystem::exists(stages_path)) {
-                    auto stages_text = read_text(stages_path.string());
-                    resf2::format::StageParser parser;
-                    auto& sd = assets_->stage_data();
-                    if (parser.parse(stages_text, sd)) {
-                        assets_->set_stages_loaded(true);
-                        std::printf("[STAGE] Loaded %zu zones\n", sd.zones.size());
+                // [ORIGINAL] Try multiple paths: root, root/assets, root/assets/files/assets
+                std::vector<std::filesystem::path> candidates = {
+                    root / "stages.xml",
+                    root / "assets/stages.xml",
+                    root / "assets/files/assets/stages.xml",
+                };
+                for (const auto& stages_path : candidates) {
+                    if (std::filesystem::exists(stages_path)) {
+                        auto stages_text = read_text(stages_path.string());
+                        resf2::format::StageParser parser;
+                        auto& sd = assets_->stage_data();
+                        if (parser.parse(stages_text, sd)) {
+                            assets_->set_stages_loaded(true);
+                            std::printf("[STAGE] Loaded %zu zones from %s\n", 
+                                       sd.zones.size(), stages_path.string().c_str());
+                            break;
+                        }
                     }
                 }
             }
@@ -2614,37 +2619,37 @@ void Game::host_update_gameplay(uint32_t dt) {
     // [FIX] Block should only activate if player is NOT trying to move.
     // If key_forward is pressed, movement takes priority over block.
     if (!player_fighter_.is_dead && hit_anim_ == 0 && !start_stance_playing_ &&
-        (move_state_ == 0 || move_state_ == 11) && !key_forward) {
-        bool holding_back = key_back;
-        if (holding_back) {
-            player_fighter_.is_blocking = true;
-            // Select block move: crouching + back = SweepBlock; standing + back = HighBlock
-            const char* block_move_name = (key_down && !key_forward) ? "SweepBlock" : "HighBlock";
-            const MoveDef* block_move = nullptr;
-            auto bm_it = assets_->moves().find(block_move_name);
-            if (bm_it != assets_->moves().end() && bm_it->second.is_not_titan) {
-                block_move = &bm_it->second;
-            }
-            if (block_move) {
-                std::string block_anim_name = block_move->filename;
-                if (block_anim_name.size() > 4 &&
-                    block_anim_name.substr(block_anim_name.size() - 4) == ".bin")
-                    block_anim_name = block_anim_name.substr(0, block_anim_name.size() - 4);
-                if (assets_->animations().count(block_anim_name)) {
-                    if (move_state_ != 11 || current_anim_ != block_anim_name) {
-                        std::printf("[BLOCK] %s (anim '%s')\n", block_move_name, block_anim_name.c_str());
-                        play_animation(block_anim_name, true, 1);  // priority 1: defensive
-                        current_move_ = block_move->name;
-                        move_state_ = 11;
-                    }
+        (move_state_ == 0 || move_state_ == 11) && !key_forward && key_back) {
+        // Debug: log block activation
+        if (move_state_ == 0 && total_frame_count_ % 60 == 0) {
+            std::printf("[BLOCK_DEBUG] f=%llu activating block: kf=%d kb=%d ms=%d\n",
+                       (unsigned long long)total_frame_count_,
+                       (int)key_forward, (int)key_back, move_state_);
+        }
+        player_fighter_.is_blocking = true;
+        // Select block move: crouching + back = SweepBlock; standing + back = HighBlock
+        const char* block_move_name = (key_down && !key_forward) ? "SweepBlock" : "HighBlock";
+        const MoveDef* block_move = nullptr;
+        auto bm_it = assets_->moves().find(block_move_name);
+        if (bm_it != assets_->moves().end() && bm_it->second.is_not_titan) {
+            block_move = &bm_it->second;
+        }
+        if (block_move) {
+            std::string block_anim_name = block_move->filename;
+            if (block_anim_name.size() > 4 &&
+                block_anim_name.substr(block_anim_name.size() - 4) == ".bin")
+                block_anim_name = block_anim_name.substr(0, block_anim_name.size() - 4);
+            if (assets_->animations().count(block_anim_name)) {
+                if (move_state_ != 11 || current_anim_ != block_anim_name) {
+                    std::printf("[BLOCK] %s (anim '%s')\n", block_move_name, block_anim_name.c_str());
+                    play_animation(block_anim_name, true, 1);  // priority 1: defensive
+                    current_move_ = block_move->name;
+                    move_state_ = 11;
                 }
-            } else {
-                // No block move found in moves.xml — still mark as blocking
-                std::printf("[BLOCK] no '%s' move found, blocking without animation\n", block_move_name);
             }
         } else {
-            // Not holding back — clear block state
-            player_fighter_.is_blocking = false;
+            // No block move found in moves.xml — still mark as blocking
+            std::printf("[BLOCK] no '%s' move found, blocking without animation\n", block_move_name);
         }
     } else if (move_state_ != 11) {
         // Not in idle/block state — clear block
