@@ -2611,8 +2611,10 @@ void Game::host_update_gameplay(uint32_t dt) {
     // depends on crouch state: standing + back = HighBlock; crouching + back
     // = SweepBlock. Block applies chip damage via base_block_factor (0.5).
     // Block is NOT active while attacking (hit_anim_ > 0) or moving.
+    // [FIX] Block should only activate if player is NOT trying to move.
+    // If key_forward is pressed, movement takes priority over block.
     if (!player_fighter_.is_dead && hit_anim_ == 0 && !start_stance_playing_ &&
-        (move_state_ == 0 || move_state_ == 11)) {
+        (move_state_ == 0 || move_state_ == 11) && !key_forward) {
         bool holding_back = key_back;
         if (holding_back) {
             player_fighter_.is_blocking = true;
