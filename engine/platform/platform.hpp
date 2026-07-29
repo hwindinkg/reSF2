@@ -237,7 +237,7 @@ public:
 
 // A platform that does nothing — no window, no GL, no input. Useful for
 // testing the runtime / asset manager / scene graph without a display.
-class NullPlatform final : public Platform {
+class NullPlatform : public Platform {
 public:
     NullPlatform();
     ~NullPlatform() override;

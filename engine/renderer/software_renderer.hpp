@@ -13,6 +13,9 @@
 
 #pragma once
 
+#include "renderer/itexture.hpp"
+#include "renderer/renderer.hpp"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -21,24 +24,27 @@
 
 namespace resf2::soft {
 
-// ---- Color ----
-struct Color4B {
-    std::uint8_t r = 255, g = 255, b = 255, a = 255;
-};
+// Use the same Color4B as the GL renderer
+using Color4B = renderer::Color4B;
 
 // ---- CPU-side texture (RGBA8) ----
 // Mirrors resf2::renderer::Texture2D but stores pixels in main memory.
-struct Texture {
-    int width = 0;
-    int height = 0;
-    std::vector<std::uint8_t> pixels;  // RGBA8, tightly packed, row-major top->bottom
-
+struct Texture : public renderer::ITexture {
     bool init_rgba(int w, int h, const std::uint8_t* px);
     bool init_from_png(const std::uint8_t* data, std::size_t size);
 
     // Sample with nearest-neighbour, return RGBA8. Out-of-range -> (0,0,0,0).
     void sample(float u, float v, std::uint8_t& r, std::uint8_t& g,
                 std::uint8_t& b, std::uint8_t& a) const noexcept;
+
+    [[nodiscard]] int width() const noexcept override { return width_; }
+    [[nodiscard]] int height() const noexcept override { return height_; }
+    [[nodiscard]] std::span<const std::uint8_t> pixels() const noexcept override { return pixels_; }
+
+private:
+    int width_ = 0;
+    int height_ = 0;
+    std::vector<std::uint8_t> pixels_;  // RGBA8, tightly packed, row-major top->bottom
 };
 
 // ---- Camera2D (mirrors renderer::Camera2D) ----

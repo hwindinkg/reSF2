@@ -25,10 +25,10 @@ namespace resf2::soft {
 // ---- Texture ----
 
 bool Texture::init_rgba(int w, int h, const std::uint8_t* px) {
-    width = w; height = h;
-    pixels.resize((size_t)w * h * 4);
-    if (px) std::memcpy(pixels.data(), px, pixels.size());
-    else    std::memset(pixels.data(), 0, pixels.size());
+    width_ = w; height_ = h;
+    pixels_.resize((size_t)w * h * 4);
+    if (px) std::memcpy(pixels_.data(), px, pixels_.size());
+    else    std::memset(pixels_.data(), 0, pixels_.size());
     return true;
 }
 
@@ -36,8 +36,8 @@ bool Texture::init_from_png(const std::uint8_t* data, std::size_t size) {
     int w, h, ch;
     auto* px = stbi_load_from_memory(data, (int)size, &w, &h, &ch, 4);
     if (!px) return false;
-    width = w; height = h;
-    pixels.assign(px, px + (size_t)w * h * 4);
+    width_ = w; height_ = h;
+    pixels_.assign(px, px + (size_t)w * h * 4);
     stbi_image_free(px);
     return true;
 }
@@ -47,9 +47,9 @@ void Texture::sample(float u, float v, std::uint8_t& r, std::uint8_t& g,
     // Clamp u,v to [0,1]
     u = std::clamp(u, 0.0f, 1.0f);
     v = std::clamp(v, 0.0f, 1.0f);
-    int x = (int)(u * (width  - 1) + 0.5f);
-    int y = (int)(v * (height - 1) + 0.5f);
-    const std::uint8_t* p = &pixels[((size_t)y * width + x) * 4];
+    int x = (int)(u * (width_  - 1) + 0.5f);
+    int y = (int)(v * (height_ - 1) + 0.5f);
+    const std::uint8_t* p = &pixels_[((size_t)y * width_ + x) * 4];
     r = p[0]; g = p[1]; b = p[2]; a = p[3];
 }
 

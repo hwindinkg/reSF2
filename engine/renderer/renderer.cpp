@@ -38,6 +38,8 @@ void Texture2D::init_rgba(int width, int height, const std::uint8_t* pixels) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     width_ = width; height_ = height;
+    // Store CPU-side copy for headless testing
+    pixels_.assign(pixels, pixels + width * height * 4);
 }
 
 bool Texture2D::init_from_png(const std::uint8_t* data, std::size_t size) {
@@ -311,14 +313,19 @@ void Renderer::resize(int w, int h) {
 void Renderer::begin_frame() { glClear(GL_COLOR_BUFFER_BIT); camera_.update(16); }
 void Renderer::end_frame() {}
 
-void Renderer::draw_textured_quad(const Texture2D& tex, float x, float y, float w, float h, float u0, float v0, float u1, float v1, Color4B color) {
+void Renderer::draw_textured_quad(const ITexture& tex, float x, float y, float w, float h, float u0, float v0, float u1, float v1, Color4B color) {
+    const auto& gl_tex = static_cast<const Texture2D&>(tex);
     Mat4 mvp = camera_.view_projection();
-    batch_->begin(tex, *default_shader_, mvp);
+    batch_->begin(gl_tex, *default_shader_, mvp);
     batch_->draw_quad(x, y, w, h, u0, v0, u1, v1, color);
     batch_->end();
 }
 
 void Renderer::set_clear_color(float r, float g, float b, float a) { glClearColor(r, g, b, a); }
+
+void Renderer::camera_set_target(float x, float y) { camera_.set_target(x, y); }
+
+void Renderer::camera_set_zoom(float zoom) { camera_.set_zoom(zoom); }
 
 // ---- Screen-space & primitive rendering ----
 // Screen-space uses Y-DOWN (origin top-left, like raster displays).
@@ -330,11 +337,12 @@ static Mat4 screen_proj(int w, int h) {
 }
 
 void Renderer::draw_textured_quad_screen(
-    const Texture2D& tex, float x, float y, float w, float h,
+    const ITexture& tex, float x, float y, float w, float h,
     float u0, float v0, float u1, float v1, Color4B color)
 {
+    const auto& gl_tex = static_cast<const Texture2D&>(tex);
     Mat4 mvp = screen_proj(width_, height_);
-    batch_->begin(tex, *default_shader_, mvp);
+    batch_->begin(gl_tex, *default_shader_, mvp);
     batch_->draw_quad_screen(x, y, w, h, u0, v0, u1, v1, color);
     batch_->end();
 }

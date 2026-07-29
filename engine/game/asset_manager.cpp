@@ -1326,4 +1326,70 @@ void AssetManager::load_stages(const std::string& asset_root) {
     }
 }
 
+// ---------- load_internal_settings ----------
+//
+// [ORIGINAL] Parses damage-related settings from internalSettings.xml.
+// Binary ref: internalSettings parsing at 0x10291370
+// Extracts DamageFactor, BlockDamageFactor, AverageBaseDamage, CriticalHit
+// parameters used in the damage formula.
+
+void AssetManager::load_internal_settings(const std::string& asset_root) {
+    auto root = std::filesystem::path(asset_root);
+    auto settings_path = root / "internalSettings.xml";
+    if (!std::filesystem::exists(settings_path)) {
+        settings_path = root / "files/assets/internalSettings.xml";
+    }
+    if (!std::filesystem::exists(settings_path)) {
+        std::printf("[SETTINGS] internalSettings.xml not found, using defaults\n");
+        return;
+    }
+
+    auto text = read_text(settings_path.string());
+    fmt::XmlDocument doc;
+    if (!doc.parse(text)) {
+        std::fprintf(stderr, "[SETTINGS] Failed to parse internalSettings.xml: %s\n", doc.error().c_str());
+        return;
+    }
+    auto* root_node = doc.root();
+    if (!root_node) {
+        std::printf("[SETTINGS] internalSettings.xml has no root node\n");
+        return;
+    }
+
+    auto tof = [](const std::string& s) -> float {
+        if (s.empty()) return 0.0f;
+        try { return std::stof(s); } catch (...) { return 0.0f; }
+    };
+
+    // [ORIGINAL] <DamageFactor Base="0.0001" Attribute="DamageFactor"/>
+    for (const auto& child : root_node->children) {
+        if (child.name == "DamageFactor") {
+            damage_settings_.damage_factor_base = tof(child.attr("Base"));
+            std::printf("[SETTINGS] DamageFactor.Base = %f\n", damage_settings_.damage_factor_base);
+        }
+        else if (child.name == "BlockDamageFactor") {
+            // [ORIGINAL] <BlockDamageFactor Base="0.0001" Attribute="BlockDamageFactor" />
+            damage_settings_.block_damage_factor_base = tof(child.attr("Base"));
+            std::printf("[SETTINGS] BlockDamageFactor.Base = %f\n", damage_settings_.block_damage_factor_base);
+        }
+        else if (child.name == "AverageBaseDamage") {
+            // [ORIGINAL] <AverageBaseDamage Value="0.1" />
+            damage_settings_.average_base_damage = tof(child.attr("Value"));
+            std::printf("[SETTINGS] AverageBaseDamage = %f\n", damage_settings_.average_base_damage);
+        }
+        else if (child.name == "CriticalHit") {
+            for (const auto& crit_child : child.children) {
+                if (crit_child.name == "Probability") {
+                    damage_settings_.crit_probability_base = tof(crit_child.attr("Base"));
+                }
+                else if (crit_child.name == "Damage") {
+                    damage_settings_.crit_damage_base = tof(crit_child.attr("Base"));
+                }
+            }
+            std::printf("[SETTINGS] CriticalHit: prob_base=%f dmg_base=%f\n",
+                        damage_settings_.crit_probability_base, damage_settings_.crit_damage_base);
+        }
+    }
+}
+
 } // namespace resf2::game

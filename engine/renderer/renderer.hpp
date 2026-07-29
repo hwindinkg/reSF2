@@ -12,6 +12,10 @@
 
 #pragma once
 
+#include "itexture.hpp"
+#include "irenderer.hpp"
+#include "renderer_types.hpp"
+
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -22,37 +26,9 @@
 
 namespace resf2::renderer {
 
-// ---- Color ----
-struct Color4B {
-    std::uint8_t r = 255, g = 255, b = 255, a = 255;
-};
-
-struct Color4F {
-    float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
-};
-
-// ---- Rect ----
-struct Rect {
-    float x = 0, y = 0, w = 0, h = 0;
-};
-
-// ---- Mat4 (4x4 float matrix, column-major) ----
-struct Mat4 {
-    float m[16] = {
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1,
-    };
-
-    static Mat4 ortho(float left, float right, float bottom, float top,
-                      float nearZ = -1.0f, float farZ = 1.0f);
-    static Mat4 identity();
-};
-
 // ---- Texture2D ----
 // Wraps an OpenGL texture. Loaded from PNG/WebP/KTX via stb_image.
-class Texture2D {
+class Texture2D : public ITexture {
 public:
     Texture2D();
     ~Texture2D();
@@ -78,14 +54,16 @@ public:
     // Bind to a texture unit
     void bind(std::uint32_t unit = 0) const;
 
-    int width() const noexcept { return width_; }
-    int height() const noexcept { return height_; }
+    [[nodiscard]] int width() const noexcept override { return width_; }
+    [[nodiscard]] int height() const noexcept override { return height_; }
+    [[nodiscard]] std::span<const std::uint8_t> pixels() const noexcept override { return pixels_; }
     std::uint32_t gl_id() const noexcept { return gl_id_; }
 
 private:
     std::uint32_t gl_id_ = 0;
     int width_ = 0;
     int height_ = 0;
+    std::vector<std::uint8_t> pixels_;  // CPU-side copy for headless testing
 };
 
 // ---- ShaderProgram ----
@@ -219,83 +197,87 @@ private:
 // ---- Renderer ----
 // Main renderer entry point. Owns the shader cache, texture cache,
 // sprite batch, and camera.
-class Renderer {
+class Renderer : public IRenderer {
 public:
     Renderer();
     ~Renderer();
 
-    bool init(int width, int height);
-    void shutdown();
+    bool init(int width, int height) override;
+    void shutdown() override;
 
     void resize(int width, int height);
 
     // Frame lifecycle
-    void begin_frame();
-    void end_frame();
+    void begin_frame() override;
+    void end_frame() override;
 
     // Draw a textured quad (the most common operation)
     void draw_textured_quad(
-        const Texture2D& texture,
+        const ITexture& texture,
         float x, float y, float w, float h,
         float u0 = 0.0f, float v0 = 0.0f, float u1 = 1.0f, float v1 = 1.0f,
         Color4B color = {255, 255, 255, 255}
-    );
+    ) override;
 
     // Draw a textured quad in screen space (top-left origin, Y down).
     // Bypasses the camera transform — used for HUD / UI overlays.
     void draw_textured_quad_screen(
-        const Texture2D& texture,
+        const ITexture& texture,
         float x, float y, float w, float h,
         float u0 = 0.0f, float v0 = 0.0f, float u1 = 1.0f, float v1 = 1.0f,
         Color4B color = {255, 255, 255, 255}
-    );
+    ) override;
 
     // Solid-color rectangle in screen space.
     void draw_filled_rect_screen(
         float x, float y, float w, float h,
         Color4B color
-    );
+    ) override;
 
     // Filled triangle in screen space (Y-DOWN, top-left origin).
     void draw_filled_triangle_screen(
         float x0, float y0, float x1, float y1, float x2, float y2,
         Color4B color
-    );
+    ) override;
 
     // Filled triangle in world space (Y-UP, uses camera projection).
     void draw_filled_triangle_world(
         float x0, float y0, float x1, float y1, float x2, float y2,
         Color4B color
-    );
+    ) override;
 
     // Filled circle in screen space (triangle fan).
     void draw_filled_circle_screen(
         float cx, float cy, float radius,
         Color4B color
-    );
+    ) override;
 
     // Filled circle in world space (for capsule caps).
     void draw_filled_circle_world(
         float cx, float cy, float radius,
         Color4B color
-    );
+    ) override;
 
     // Line in screen space (1px wide via GL_LINES).
     void draw_line_screen(
         float x0, float y0, float x1, float y1,
         Color4B color
-    );
+    ) override;
 
     // Line in world space (1px wide).
     void draw_line_world(
         float x0, float y0, float x1, float y1,
         Color4B color
-    );
+    ) override;
 
     // Clear color
-    void set_clear_color(float r, float g, float b, float a = 1.0f);
+    void set_clear_color(float r, float g, float b, float a = 1.0f) override;
 
-    // Camera
+    // Camera (flat methods for IRenderer interface)
+    void camera_set_target(float x, float y) override;
+    void camera_set_zoom(float zoom) override;
+
+    // Camera (direct accessor for internal use)
     Camera2D& camera() { return camera_; }
 
     // Shader cache

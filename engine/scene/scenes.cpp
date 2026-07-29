@@ -518,6 +518,8 @@ void MapScene::on_update(SceneContext& ctx) {
         SceneHost::BattleInfo info;
         info.rounds = fight.rounds;
         info.round_time_s = fight.round_time;
+        info.reward_gold = fight.reward.money;
+        info.reward_xp = fight.reward.exp;
         if (!fight.warriors.empty()) {
             const auto& w0 = fight.warriors.front();
             info.enemy_name = !w0.first_name.empty() ? w0.first_name
@@ -1164,13 +1166,18 @@ void ResultsScene::on_enter(SceneContext& ctx) {
     auto result = ctx.host.host_get_battle_result();
     ctx.host.host_play_result_sound(result);
     is_victory_ = (result == "victory");
-    reward_gold_ = is_victory_ ? 50 : 10;
-    reward_xp_ = is_victory_ ? 100 : 20;
+
+    // [ORIGINAL] Rewards come from stages.xml <Fight Reward=><Reward Money= Exp=>,
+    // handed over by the map via BattleInfo. Victory awards the full amount;
+    // defeat awards nothing (the original does not give consolation rewards).
+    const auto& info = ctx.host.host_get_battle_info();
+    reward_gold_ = is_victory_ ? info.reward_gold : 0;
+    reward_xp_ = is_victory_ ? info.reward_xp : 0;
 
     if (is_victory_) {
         std::printf("[results] victory! rewards: %d gold, %d XP\n", reward_gold_, reward_xp_);
         // Add currency reward
-        ctx.host.host_add_currency(reward_gold_);
+        if (reward_gold_ > 0) ctx.host.host_add_currency(reward_gold_);
         // Mark level as completed
         std::string level = ctx.host.host_get_current_level();
         if (!level.empty()) {
@@ -1194,22 +1201,24 @@ void ResultsScene::on_update(SceneContext& ctx) {
 
     const auto& input = ctx.platform.input();
 
-    // [FIX] Menu scroll toggle on results screen — consistent with Map and dojo.
+    // Menu scroll toggle — consistent with Map, Shop, and dojo.
     if (key_pressed(input, platform::Key::M)) {
         ctx.host.host_toggle_menu_overlay();
     }
 
-    // Continue button area (bottom center)
-    float w = (float)ctx.platform.window_width();
-    float h = (float)ctx.platform.window_height();
-    float btn_w = 220.0f, btn_h = 55.0f;
-    float btn_x = (w - btn_w) * 0.5f;
-    float btn_y = h * 0.78f;
+    // Continue button area — same proportions as on_render.
+    const float w = (float)ctx.platform.window_width();
+    const float h = (float)ctx.platform.window_height();
+    const float btn_w = w * 0.22f;
+    const float btn_h = h * 0.072f;
+    const float btn_x = (w - btn_w) * 0.5f;
+    const float btn_y = h * 0.74f;
 
     if (clicked_in(input, btn_x, btn_y, btn_w, btn_h) ||
         key_pressed(input, platform::Key::Space) ||
         key_pressed(input, platform::Key::Enter)) {
-        // Victory: go to Map to continue, defeat: back to MainMenu
+        ctx.host.host_play_ui_click();
+        // Victory: go to Map to continue, defeat: back to MainMenu.
         if (is_victory_) {
             ctx.host.request_scene_transition(SceneId::Map);
         } else {
@@ -1224,50 +1233,118 @@ void ResultsScene::on_update(SceneContext& ctx) {
 
 void ResultsScene::on_render(SceneContext& ctx) {
     auto& r = ctx.renderer;
-    float w = (float)ctx.platform.window_width();
-    float h = (float)ctx.platform.window_height();
+    const float w = (float)ctx.platform.window_width();
+    const float h = (float)ctx.platform.window_height();
 
-    // Background
+    // Background tint — victory = dark green, defeat = dark red.
+    // Same approach as the dojo's clear-colour pattern: a subtle tinted wash
+    // over the renderer's base clear, not a flat opaque fill.
     if (is_victory_) {
-        r.draw_filled_rect_screen(0, 0, w, h, {20, 50, 20, 255});
+        r.draw_filled_rect_screen(0, 0, w, h, {12, 32, 12, 255});
     } else {
-        r.draw_filled_rect_screen(0, 0, w, h, {50, 20, 20, 255});
+        r.draw_filled_rect_screen(0, 0, w, h, {36, 12, 10, 255});
     }
 
-    // Header text
-    const char* title = is_victory_ ? "VICTORY" : "DEFEAT";
-    uint8_t title_r = is_victory_ ? 100 : 255;
-    uint8_t title_g = is_victory_ ? 255 : 60;
-    uint8_t title_b = is_victory_ ? 60 : 40;
-    ctx.host.host_render_text(title, w * 0.5f - 80, h * 0.12f, 0.7f, title_r, title_g, title_b, 255);
+    // Text sizing: same law as MapScene (bitmap font line box ~115 px at 1.0).
+    // Scale = desired_pixel_height / 115.0f.
+    auto centre_text = [&](const std::string& text, float y, float scale,
+                           uint8_t cr, uint8_t cg, uint8_t cb, uint8_t ca) {
+        const auto [tw, th] = ctx.host.host_measure_text(text, scale);
+        ctx.host.host_render_text(text, (w - tw) * 0.5f, y, scale, cr, cg, cb, ca);
+        return th;
+    };
 
-    // Rewards panel
-    float panel_w = 360.0f, panel_h = 200.0f;
-    float px = (w - panel_w) * 0.5f, py = h * 0.28f;
-    r.draw_filled_rect_screen(px, py, panel_w, panel_h, {25, 25, 40, 230});
-    r.draw_filled_rect_screen(px, py, panel_w, 2, {200, 170, 100, 200});
-    r.draw_filled_rect_screen(px, py + panel_h - 2, panel_w, 2, {200, 170, 100, 200});
+    // ---- Victory / Defeat banner ----
+    // Large centred title. Colour matches the background tint: gold for
+    // victory, crimson for defeat.
+    const std::string title_key = is_victory_ ? "victory" : "defeat";
+    std::string title = ctx.host.host_localized(title_key);
+    if (title.empty()) title = is_victory_ ? "VICTORY" : "DEFEAT";
+    const float title_scale = h * 0.085f / 115.0f;
+    const uint8_t title_r = is_victory_ ? 255 : 255;
+    const uint8_t title_g = is_victory_ ? 215 : 60;
+    const uint8_t title_b = is_victory_ ? 60 : 40;
+    centre_text(title, h * 0.10f, title_scale, title_r, title_g, title_b, 255);
 
-    ctx.host.host_render_text("Rewards", px + 120, py + 15, 0.35f, 220, 220, 240, 255);
+    // ---- Rewards scroll panel ----
+    // Parchment scroll panel (same asset as Dialogue and Shop) centred on screen.
+    const float panel_w = w * 0.42f;
+    const float panel_h = h * 0.38f;
+    const float px = (w - panel_w) * 0.5f;
+    const float py = h * 0.26f;
+    ctx.host.host_render_scroll_panel(px, py, panel_w, panel_h);
 
-    // Gold reward
-    ctx.host.host_render_text("Gold:", px + 40, py + 70, 0.28f, 200, 200, 220, 255);
-    ctx.host.host_render_text("+" + std::to_string(reward_gold_), px + 180, py + 70, 0.28f, 255, 220, 100, 255);
+    const float pad = panel_w * 0.08f;
+    float y = py + panel_h * 0.08f;
 
-    // XP reward
-    ctx.host.host_render_text("XP:", px + 40, py + 115, 0.28f, 200, 200, 220, 255);
-    ctx.host.host_render_text("+" + std::to_string(reward_xp_), px + 180, py + 115, 0.28f, 140, 190, 255, 255);
+    // Panel header: "Rewards" centred
+    std::string rewards_label = ctx.host.host_localized("rewards");
+    if (rewards_label.empty()) rewards_label = "Rewards";
+    const float hdr_scale = h * 0.036f / 115.0f;
+    const auto [hdr_tw, hdr_th] = ctx.host.host_measure_text(rewards_label, hdr_scale);
+    ctx.host.host_render_text(rewards_label, px + (panel_w - hdr_tw) * 0.5f, y,
+                              hdr_scale, 92, 46, 20, 255);
+    y += hdr_th * 1.5f;
 
-    // Continue button
-    float btn_w = 220.0f, btn_h = 55.0f;
-    float btn_x = (w - btn_w) * 0.5f, btn_y = h * 0.78f;
-    r.draw_filled_rect_screen(btn_x, btn_y, btn_w, btn_h, {60, 50, 40, 240});
-    r.draw_filled_rect_screen(btn_x + 3, btn_y + 3, btn_w - 6, btn_h - 6, {90, 70, 50, 210});
-    ctx.host.host_render_text(is_victory_ ? "CONTINUE" : "BACK TO MENU",
-        btn_x + btn_w * 0.5f - 60, btn_y + 17, 0.28f, 255, 255, 255, 255);
+    // Reward rows — only shown on victory (defeat has no rewards).
+    const float info_scale = h * 0.032f / 115.0f;
+    const float row_h = panel_h * 0.18f;
+    if (is_victory_) {
+        // Gold row
+        {
+            const float lx = px + pad;
+            std::string gold_label = ctx.host.host_localized("gold");
+            if (gold_label.empty()) gold_label = "Gold";
+            ctx.host.host_render_text(gold_label, lx, y, info_scale, 92, 62, 30, 255);
+            char val_buf[32];
+            std::snprintf(val_buf, sizeof(val_buf), "+%d", reward_gold_);
+            const auto [vw, vh] = ctx.host.host_measure_text(val_buf, info_scale);
+            ctx.host.host_render_text(val_buf, px + panel_w - pad - vw, y,
+                                      info_scale, 220, 180, 40, 255);
+            (void)vh;
+            y += row_h;
+        }
+        // XP row
+        {
+            const float lx = px + pad;
+            std::string xp_label = ctx.host.host_localized("experience");
+            if (xp_label.empty()) xp_label = "XP";
+            ctx.host.host_render_text(xp_label, lx, y, info_scale, 92, 62, 30, 255);
+            char val_buf[32];
+            std::snprintf(val_buf, sizeof(val_buf), "+%d", reward_xp_);
+            const auto [vw, vh] = ctx.host.host_measure_text(val_buf, info_scale);
+            ctx.host.host_render_text(val_buf, px + panel_w - pad - vw, y,
+                                      info_scale, 80, 160, 255, 255);
+            (void)vh;
+            y += row_h;
+        }
+    } else {
+        // Defeat message
+        std::string no_reward = ctx.host.host_localized("noRewards");
+        if (no_reward.empty()) no_reward = "No rewards";
+        centre_text(no_reward, y + row_h * 0.3f, info_scale, 140, 60, 50, 255);
+    }
 
-    // [FIX] Render the menu overlay on top of the results screen, so M key
-    // opens the same vertical scroll menu as on the dojo and map.
+    // ---- Continue button ----
+    // Scroll panel button, matching the FIGHT button style in MapScene.
+    const float btn_w = w * 0.22f;
+    const float btn_h = h * 0.072f;
+    const float btn_x = (w - btn_w) * 0.5f;
+    const float btn_y = h * 0.74f;
+    ctx.host.host_render_scroll_panel(btn_x, btn_y, btn_w, btn_h);
+
+    std::string btn_label = ctx.host.host_localized(is_victory_ ? "continue" : "backToMenu");
+    if (btn_label.empty()) btn_label = is_victory_ ? "CONTINUE" : "BACK TO MENU";
+    const float btn_scale = h * 0.034f / 115.0f;
+    const auto [btw, bth] = ctx.host.host_measure_text(btn_label, btn_scale);
+    ctx.host.host_render_text(btn_label, btn_x + (btn_w - btw) * 0.5f,
+                              btn_y + (btn_h - bth) * 0.5f, btn_scale,
+                              92, 46, 20, 255);
+
+    // ---- Top HUD panel (matches dojo/map/shop) ----
+    ctx.host.host_render_top_panel();
+
+    // Menu overlay (toggled by M key)
     ctx.host.host_render_menu_overlay();
 }
 
@@ -2066,26 +2143,36 @@ void SettingsScene::on_enter(SceneContext& ctx) {
 
 void SettingsScene::on_update(SceneContext& ctx) {
     const auto& input = ctx.platform.input();
-    float w = (float)ctx.platform.window_width();
-    float h = (float)ctx.platform.window_height();
 
-    // Back button (top-left) or Esc
-    if (clicked_in(input, 10, 10, 80, 40) ||
-        key_pressed(input, platform::Key::Escape) ||
-        key_pressed(input, platform::Key::M)) {
+    // --- Back / Esc ---
+    if (key_pressed(input, platform::Key::Escape)) {
+        ctx.host.request_scene_transition(SceneId::MainMenu);
+        return;
+    }
+    // [FIX] M key toggles the menu overlay instead of going back to main menu.
+    // Consistent with Shop, Map, and Results scenes.
+    if (key_pressed(input, platform::Key::M)) {
+        ctx.host.host_toggle_menu_overlay();
+    }
+
+    // Back button click (top-left corner)
+    if (clicked_in(input, 10, 10, 80, 40)) {
+        ctx.host.host_play_ui_click();
         ctx.host.request_scene_transition(SceneId::MainMenu);
         return;
     }
 
     // Volume sliders (click-drag simulation)
+    // In a real implementation, these would adjust audio engine volume.
+    // For now, just detect clicks on the slider track.
+    float w = (float)ctx.platform.window_width();
+    float h = (float)ctx.platform.window_height();
     float panel_x = w * 0.15f, panel_w = w * 0.7f;
     float sy = h * 0.15f;
 
     // Master volume slider track
     float slider_x = panel_x + 120.0f, slider_w = panel_w - 140.0f;
     float slider_y = sy + 20.0f, slider_h = 30.0f;
-    // In a real implementation, these would adjust audio engine volume.
-    // For now, just detect clicks on the slider track.
     if (clicked_in(input, slider_x, slider_y, slider_w, slider_h)) {
         std::printf("[settings] master volume adjusted (stub)\n");
     }
@@ -2114,59 +2201,69 @@ void SettingsScene::on_render(SceneContext& ctx) {
     float h = (float)ctx.platform.window_height();
     float bar_h = 60.0f;
 
-    // Top bar
+    // --- Background ---
+    r.draw_filled_rect_screen(0, 0, w, h, {8, 8, 16, 255});
+
+    // --- Top bar ---
     r.draw_filled_rect_screen(0, 0, w, bar_h, {20, 20, 40, 230});
     r.draw_filled_rect_screen(10, 10, 80, bar_h - 20, {50, 50, 70, 200});
     ctx.host.host_render_text("< BACK", 20, 18, 0.32f, 220, 220, 240, 255);
     r.draw_filled_rect_screen(100, 10, w - 160, bar_h - 20, {30, 30, 50, 180});
     ctx.host.host_render_text("SETTINGS", w * 0.5f - 50, 15, 0.40f, 200, 200, 220, 255);
 
+    // --- Top HUD panel (gold/level) — same as dojo/menu ---
+    ctx.host.host_render_top_panel();
+
     float panel_x = w * 0.15f, panel_w = w * 0.7f;
     float panel_h = h * 0.7f, panel_y = bar_h + 30.0f;
 
     // Settings panel background
     r.draw_filled_rect_screen(panel_x, panel_y, panel_w, panel_h, {25, 25, 40, 220});
+    // Gold border top and bottom
     r.draw_filled_rect_screen(panel_x, panel_y, panel_w, 2, {200, 170, 100, 200});
     r.draw_filled_rect_screen(panel_x, panel_y + panel_h - 2, panel_w, 2, {200, 170, 100, 200});
 
-    float sy = panel_y + 30.0f;
+    // Section header
+    ctx.host.host_render_text("Audio", panel_x + panel_w * 0.5f - 30, panel_y + 15, 0.35f, 220, 220, 240, 255);
+
+    float sy = panel_y + 60.0f;
+    float line_h = 35.0f;
+    float slider_x = panel_x + 120.0f, slider_w = panel_w - 140.0f;
 
     // Master volume
-    ctx.host.host_render_text("Master Volume", panel_x + 20, sy, 0.28f, 200, 200, 220, 255);
-    float slider_x = panel_x + 140.0f, slider_w = panel_w - 160.0f;
-    r.draw_filled_rect_screen(slider_x, sy + 20, slider_w, 30, {50, 50, 60, 200});
-    // Volume bar fill (75% default)
-    r.draw_filled_rect_screen(slider_x + 2, sy + 22, slider_w * 0.75f - 4.0f, 26, {100, 180, 100, 200});
-
-    sy += 80.0f;
+    ctx.host.host_render_text("Master Volume", panel_x + 40, sy, 0.28f, 200, 200, 220, 255);
+    // Slider track
+    r.draw_filled_rect_screen(slider_x, sy + 20.0f, slider_w, 30.0f, {40, 40, 60, 200});
+    // Slider fill (stub: 70%)
+    r.draw_filled_rect_screen(slider_x, sy + 20.0f, slider_w * 0.7f, 30.0f, {100, 180, 255, 200});
+    // Slider knob
+    r.draw_filled_rect_screen(slider_x + slider_w * 0.7f - 4.0f, sy + 16.0f, 8.0f, 38.0f, {220, 220, 240, 255});
+    sy += line_h + 20.0f;
 
     // Music volume
-    ctx.host.host_render_text("Music Volume", panel_x + 20, sy, 0.28f, 200, 200, 220, 255);
-    r.draw_filled_rect_screen(slider_x, sy + 20, slider_w, 30, {50, 50, 60, 200});
-    // Volume bar fill (50% default)
-    r.draw_filled_rect_screen(slider_x + 2, sy + 22, slider_w * 0.5f - 4.0f, 26, {100, 150, 180, 200});
+    ctx.host.host_render_text("Music Volume", panel_x + 40, sy, 0.28f, 200, 200, 220, 255);
+    r.draw_filled_rect_screen(slider_x, sy + 20.0f, slider_w, 30.0f, {40, 40, 60, 200});
+    r.draw_filled_rect_screen(slider_x, sy + 20.0f, slider_w * 0.5f, 30.0f, {100, 255, 100, 200});
+    r.draw_filled_rect_screen(slider_x + slider_w * 0.5f - 4.0f, sy + 16.0f, 8.0f, 38.0f, {220, 220, 240, 255});
+    sy += line_h + 30.0f;
 
-    sy += 80.0f;
+    // Language section
+    r.draw_filled_rect_screen(panel_x, sy, panel_w, 2, {200, 170, 100, 150});
+    sy += 12.0f;
+    ctx.host.host_render_text("Language", panel_x + panel_w * 0.5f - 45, sy, 0.30f, 200, 170, 100, 255);
+    sy += 35.0f;
 
-    // Language
-    ctx.host.host_render_text("Language", panel_x + 20, sy, 0.28f, 200, 200, 220, 255);
-    sy += 30.0f;
+    float lang_btn_w = 100.0f, lang_btn_h = 36.0f;
+    float lang_x = panel_x + 40.0f;
     // English button
-    r.draw_filled_rect_screen(panel_x + 20, sy, 100, 36, {60, 60, 80, 220});
-    ctx.host.host_render_text("English", panel_x + 30, sy + 7, 0.24f, 220, 220, 240, 255);
+    r.draw_filled_rect_screen(lang_x, sy, lang_btn_w, lang_btn_h, {60, 60, 80, 200});
+    ctx.host.host_render_text("English", lang_x + 15, sy + 8, 0.24f, 220, 220, 240, 255);
     // Russian button
-    r.draw_filled_rect_screen(panel_x + 140, sy, 100, 36, {40, 40, 55, 200});
-    ctx.host.host_render_text("Russian", panel_x + 152, sy + 7, 0.24f, 180, 180, 200, 200);
+    r.draw_filled_rect_screen(lang_x + 120, sy, lang_btn_w, lang_btn_h, {60, 60, 80, 200});
+    ctx.host.host_render_text("Russian", lang_x + 135, sy + 8, 0.24f, 220, 220, 240, 255);
 
-    sy += 70.0f;
-
-    // Controls info
-    r.draw_filled_rect_screen(panel_x, panel_y + panel_h - 170.0f, panel_w, 170.0f, {20, 20, 35, 220});
-    ctx.host.host_render_text("Controls", panel_x + 20, panel_y + panel_h - 158, 0.28f, 200, 170, 100, 255);
-    ctx.host.host_render_text("W/A/S/D - Move", panel_x + 20, panel_y + panel_h - 125, 0.22f, 180, 180, 200, 200);
-    ctx.host.host_render_text("O - Punch    P - Kick", panel_x + 20, panel_y + panel_h - 100, 0.22f, 180, 180, 200, 200);
-    ctx.host.host_render_text("M - Menu     Esc - Back", panel_x + 20, panel_y + panel_h - 75, 0.22f, 180, 180, 200, 200);
-    ctx.host.host_render_text("B - Toggle enemy/bag  N - Map", panel_x + 20, panel_y + panel_h - 50, 0.22f, 180, 180, 200, 200);
+    // --- Menu overlay (toggled by M key) rendered on top ---
+    ctx.host.host_render_menu_overlay();
 }
 
 }  // namespace resf2::scene

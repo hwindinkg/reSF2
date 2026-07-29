@@ -279,9 +279,13 @@ void Game::on_init(plat::Platform& platform) {
             std::printf("  1/2/3       - Zoom presets\n");
             std::printf("  Esc         - Quit / close overlay / back\n\n");
 
-            renderer_ = std::make_unique<ren::Renderer>();
-            if (!renderer_->init(platform.window_width(), platform.window_height())) {
-                renderer_.reset(); return;
+            // Only create a GL renderer if no custom renderer was injected
+            // via set_renderer() (e.g., software renderer for headless testing).
+            if (!renderer_) {
+                renderer_ = std::make_unique<ren::Renderer>();
+                if (!renderer_->init(platform.window_width(), platform.window_height())) {
+                    renderer_.reset(); return;
+                }
             }
             renderer_->set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -831,6 +835,11 @@ void Game::host_reset_round() {
     enemy_attacking_ = false;
     hp_trail_player_ = -1.0f;
     hp_trail_enemy_ = -1.0f;
+    // [STEP 4.7] Reset knockback/knockdown state
+    gameplay_y_offset_ = 0.0f;
+    y_velocity_ = 0.0f;
+    is_knocked_down_ = false;
+    knockdown_timer_ = 0;
     if (location_) {
         const float half_world_w = location_->width * 0.5f;
         player_pos_x_ = location_->player_x - half_world_w;
@@ -1455,6 +1464,7 @@ void Game::init_location() {
             load_punching_bag_model();
             load_animations();
             load_moves();
+            load_internal_settings();
             load_tactics();
             // Load enemy weapon
             load_enemy_weapon("weapon_knuckles.xml");
@@ -1521,6 +1531,21 @@ void Game::init_location() {
             }
 }
 
+// [STEP 4.7] Trigger knockback/knockdown on the player fighter.
+// Sets vertical velocity for launch and marks knockdown state.
+// Physics integration happens in host_update_gameplay().
+void Game::trigger_knockback(float launch_velocity, bool knockdown) {
+    if (player_fighter_.is_dead) return;
+    y_velocity_ = launch_velocity;
+    gameplay_y_offset_ = 0.01f;  // small initial offset to start physics
+    is_knocked_down_ = knockdown;
+    if (knockdown) {
+        knockdown_timer_ = 0;  // timer starts on landing
+        player_fighter_.invuln_time = 1.0f;  // brief invulnerability
+    }
+    std::printf("[KNOCKBACK] launch_vel=%.1f knockdown=%d\n", launch_velocity, knockdown ? 1 : 0);
+}
+
 void Game::host_update_gameplay(uint32_t dt) {
     // [DIAGNOSTIC] Advance input-script frame counter and apply events
     // scheduled for this frame BEFORE reading input. This keeps script
@@ -1566,16 +1591,45 @@ void Game::host_update_gameplay(uint32_t dt) {
             enemy_fighter_.hits_landed = 0;
         }
     }
+
+    // [STEP 4.7] Knockback/knockdown physics update.
+    // When launched: positive Y velocity lifts fighter, gravity pulls back down.
+    // On landing: reset offset, start knockdown recovery timer.
+    // During knockdown: wait for timer, then return to stance.
+    if (gameplay_y_offset_ > 0.0f || y_velocity_ > 0.0f) {
+        gameplay_y_offset_ += y_velocity_ * dt_sec;
+        y_velocity_ -= kKnockbackGravity * dt_sec;
+        if (gameplay_y_offset_ <= 0.0f) {
+            gameplay_y_offset_ = 0.0f;
+            y_velocity_ = 0.0f;
+            if (is_knocked_down_) {
+                knockdown_timer_ = 60;  // ~1 second at 60fps
+            }
+        }
+    }
+    if (is_knocked_down_ && gameplay_y_offset_ <= 0.0f) {
+        if (knockdown_timer_ > 0) {
+            knockdown_timer_--;
+        } else {
+            is_knocked_down_ = false;
+        }
+    }
+
     // Update audio engine (mix + write to backend)
     aud::AudioEngine::instance().update(dt_sec);
 
-    // [ORIGINAL] Player block: automatic when idle (not attacking, not moving).
-    // Original SF2: block is automatic when standing still and not attacking.
-    // key_down (S) = duck (low block); standing = high block.
-    if (!player_fighter_.is_dead) {
-        bool player_idle = (hit_anim_ == 0 && move_state_ == 0 &&
-                            !start_stance_playing_);
-        player_fighter_.is_blocking = player_idle;
+    // [ORIGINAL] Player block: triggered by holding BACK direction while in stance.
+    // From Model::startAction area in binary — block state is detected when the
+    // player holds the back direction during idle/stance. The specific block
+    // animation (HighBlock/SweepBlock) is selected based on crouch state.
+    // is_blocking_ is updated in the input processing section below.
+    if (!player_fighter_.is_dead && hit_anim_ == 0 && move_state_ == 0 &&
+        !start_stance_playing_) {
+        // Default: not blocking unless back is held (set in input section below)
+        // Keep current state until input processing overrides it
+    } else if (!player_fighter_.is_dead && move_state_ != 11) {
+        // Not in idle/block state — clear block
+        player_fighter_.is_blocking = false;
     }
 
     // [ORIGINAL] Enemy AI: simple state machine.
@@ -1693,17 +1747,19 @@ void Game::host_update_gameplay(uint32_t dt) {
                     !player_fighter_.is_dead) {
                     if (player_fighter_.is_blocking) {
                         play_sound("armor", 0.3f);
-                        // [ORIGINAL] Block applies BlockDamage = 0.5 factor (50% reduction, not 100%)
-                        // From InternalSettings: BlockDamage.Value = 0.5 @ 0x101598c0
-                        float base_damage = 0.11f;
+                        // [ORIGINAL] Block applies base_block_factor (50% reduction, not 100%)
+                        // From binary @ 0x101598c0, parsed from internalSettings.xml
+                        const auto& dmg_settings = assets_->damage_settings();
+                        float base_damage = dmg_settings.average_base_damage;
                         auto hp_it = assets_->moves().find("HighPunch");
                         if (hp_it != assets_->moves().end() && hp_it->second.damage > 0.0f)
                             base_damage = hp_it->second.damage;
                         
                         // [ORIGINAL] Damage formula: rawDamage = baseDamage × attributeMultiplier × blockFactor × attackFactor × critFactor × 2.0
                         // finalDamage = factorSetMultiplier × rawDamage
-                        float attribute_multiplier = 1.0f;  // [HEURISTIC-TODO] No stat system yet
-                        float block_factor = 0.5f;          // BlockDamage = 0.5
+                        // Formula: 1.0 + DamageFactor_Base * character_attribute (character attribute = 0 for now)
+                        float attribute_multiplier = 1.0f + dmg_settings.damage_factor_base * 0.0f;  // [HEURISTIC-TODO] No stat system yet
+                        float block_factor = dmg_settings.base_block_factor;  // base_block_factor = 0.5
                         float attack_factor = 1.0f;         // [HEURISTIC-TODO] No equipment modifier yet
                         float crit_factor = 1.0f;           // CriticalHit.Probability = 0.0
                         float factor_set_multiplier = 1.0f; // [HEURISTIC-TODO] No melee/ranged factor set yet
@@ -1727,12 +1783,14 @@ void Game::host_update_gameplay(uint32_t dt) {
                         // [ORIGINAL] Damage formula from Model::getTotalDamage @ 0x101598c0
                         // rawDamage = baseDamage × attributeMultiplier × blockFactor × attackFactor × critFactor × 2.0
                         // finalDamage = factorSetMultiplier × rawDamage
-                        float base_damage = 0.11f;
+                        const auto& dmg_settings = assets_->damage_settings();
+                        float base_damage = dmg_settings.average_base_damage;
                         auto hp_it = assets_->moves().find("HighPunch");
                         if (hp_it != assets_->moves().end() && hp_it->second.damage > 0.0f)
                             base_damage = hp_it->second.damage;
                         
-                        float attribute_multiplier = 1.0f;  // [HEURISTIC-TODO] No stat system yet
+                        // Formula: 1.0 + DamageFactor_Base * character_attribute (character attribute = 0 for now)
+                        float attribute_multiplier = 1.0f + dmg_settings.damage_factor_base * 0.0f;  // [HEURISTIC-TODO] No stat system yet
                         float block_factor = 1.0f;          // Not blocking
                         float attack_factor = 1.0f;         // [HEURISTIC-TODO] No equipment modifier yet
                         float crit_factor = 1.0f;           // CriticalHit.Probability = 0.0
@@ -1753,6 +1811,10 @@ void Game::host_update_gameplay(uint32_t dt) {
                         play_sound("f_pl_hit" +
                                        std::to_string(enemy_fighter_.hits_landed % 3 + 1),
                                    0.6f);
+                        // [STEP 4.7] Trigger knockback on heavy hits (damage > 30% max health)
+                        if (final_damage > 0.3f) {
+                            trigger_knockback(400.0f, true);  // launch up + knockdown
+                        }
                         if (player_fighter_.health <= 0.0f) {
                             player_fighter_.health = 0.0f;
                             player_fighter_.is_dead = true;
@@ -2248,12 +2310,13 @@ void Game::host_update_gameplay(uint32_t dt) {
             } else if (in_attack && is_uninterrupt_) {
                 // In Uninterrupt: only 3key chain combos
                 if (move.key_count != 3) { ++rej.key_count; continue; }
-                if (!move.required_current_animation.empty()) {
-                    // [ORIGINAL] Binary: ConditionCurrentAnimation::isEqual @ 0x10083bb0
-                    if (current_move_ != move.required_current_animation &&
-                        current_anim_ != move.required_current_animation) {
-                        ++rej.cur_anim; continue;
-                    }
+                // [ORIGINAL] Binary: ConditionCurrentAnimation::isEqual @ 0x10083bb0
+                // Evaluate all conditions via condition_system (centralized API).
+                int current_frame = (int)(anim_time_ * anim_fps_);
+                {
+                    ConditionResult cond = evaluate_conditions(
+                        move, current_anim_, current_move_, current_frame);
+                    if (!cond.satisfied) { ++rej.cur_anim; continue; }
                 }
             } else if (in_attack && past_attack_interval) {
                 // Past attack interval: allow 1key/2key to interrupt recovery
@@ -2272,17 +2335,14 @@ void Game::host_update_gameplay(uint32_t dt) {
             // Check weapon subtype lock (from <Locks><Item SubType="...">)
             if (!move.required_weapon_subtype.empty() &&
                 move.required_weapon_subtype.find(equipped_weapon_) == std::string::npos) { ++rej.subtype; continue; }
-            // [ORIGINAL] CurrentAnimation condition check.
-            // PC source: sf2.js np.isEqual() (line 42544) - 3key combos
-            // require the current animation to match a specific name.
-            // e.g., DoublePunch requires CurrentAnimation="HeavyPunch".
-            // The Name in moves.xml matches the Move Name (not filename).
-            // Binary: ConditionCurrentAnimation::isEqual @ 0x10083bb0.
-            if (!move.required_current_animation.empty()) {
-                if (current_move_ != move.required_current_animation &&
-                    current_anim_ != move.required_current_animation) {
-                    ++rej.cur_anim; continue;
-                }
+            // [ORIGINAL] CurrentAnimation condition check via condition_system.
+            // Binary: ConditionCurrentAnimation::isEqual @ 0x10083bb0,
+            // findMatchingSlotInList @ 0x10083ca0.
+            {
+                int current_frame = (int)(anim_time_ * anim_fps_);
+                ConditionResult cond = evaluate_conditions(
+                    move, current_anim_, current_move_, current_frame);
+                if (!cond.satisfied) { ++rej.cur_anim; continue; }
             }
             // Prevent a move from chaining into itself (same move can't restart).
             // Without this, moves with empty required_current_animation can
@@ -2545,6 +2605,50 @@ void Game::host_update_gameplay(uint32_t dt) {
     }
     } while(0);
 
+    // === BLOCK MECHANICS (holding BACK while in stance) ===
+    // [ORIGINAL] From Model::startAction in binary — block state is triggered
+    // by holding the back direction during idle/stance. The block animation
+    // depends on crouch state: standing + back = HighBlock; crouching + back
+    // = SweepBlock. Block applies chip damage via base_block_factor (0.5).
+    // Block is NOT active while attacking (hit_anim_ > 0) or moving.
+    if (!player_fighter_.is_dead && hit_anim_ == 0 && !start_stance_playing_ &&
+        (move_state_ == 0 || move_state_ == 11)) {
+        bool holding_back = key_back;
+        if (holding_back) {
+            player_fighter_.is_blocking = true;
+            // Select block move: crouching + back = SweepBlock; standing + back = HighBlock
+            const char* block_move_name = (key_down && !key_forward) ? "SweepBlock" : "HighBlock";
+            const MoveDef* block_move = nullptr;
+            auto bm_it = assets_->moves().find(block_move_name);
+            if (bm_it != assets_->moves().end() && bm_it->second.is_not_titan) {
+                block_move = &bm_it->second;
+            }
+            if (block_move) {
+                std::string block_anim_name = block_move->filename;
+                if (block_anim_name.size() > 4 &&
+                    block_anim_name.substr(block_anim_name.size() - 4) == ".bin")
+                    block_anim_name = block_anim_name.substr(0, block_anim_name.size() - 4);
+                if (assets_->animations().count(block_anim_name)) {
+                    if (move_state_ != 11 || current_anim_ != block_anim_name) {
+                        std::printf("[BLOCK] %s (anim '%s')\n", block_move_name, block_anim_name.c_str());
+                        play_animation(block_anim_name, true, 1);  // priority 1: defensive
+                        current_move_ = block_move->name;
+                        move_state_ = 11;
+                    }
+                }
+            } else {
+                // No block move found in moves.xml — still mark as blocking
+                std::printf("[BLOCK] no '%s' move found, blocking without animation\n", block_move_name);
+            }
+        } else {
+            // Not holding back — clear block state
+            player_fighter_.is_blocking = false;
+        }
+    } else if (move_state_ != 11) {
+        // Not in idle/block state — clear block
+        player_fighter_.is_blocking = false;
+    }
+
     // === ROLL MOVES (S+D forward roll, S+A back roll) ===
     // Separate from the any_dir_just_pressed-gated block above because
     // rolls should trigger even when the direction keys are already held
@@ -2798,13 +2902,19 @@ void Game::host_update_gameplay(uint32_t dt) {
         // while keys are still held from the roll input.
         step_cooldown_ms_ = 200;
     }
-    // Exit duck state when Down released
-    // No minimum duration — original game allows immediate release
+    // Exit duck/block state when input released.
+    // move_state_ 11 is shared between duck (key_down) and block (key_back).
+    // Exit when neither defensive input is held.
+    // [ORIGINAL] No minimum duration for duck; block follows the same pattern.
     if (move_state_ == 11) {
         input_handler_.set_duck_play_time(input_handler_.duck_play_time() + dt);
-        if (!key_down && input_handler_.duck_play_time() >= 100) {
+        bool still_ducking = key_down && !key_forward && !key_back;
+        bool still_blocking = key_back && (move_state_ == 0 || move_state_ == 11) &&
+                              hit_anim_ == 0 && !start_stance_playing_;
+        if (!still_ducking && !still_blocking && input_handler_.duck_play_time() >= 100) {
             move_state_ = 0;
             need_switch_to_idle_ = true;
+            player_fighter_.is_blocking = false;
         }
     }
 
@@ -2821,8 +2931,8 @@ void Game::host_update_gameplay(uint32_t dt) {
         shake_x = ((float)(std::rand() % 200) - 100.0f) / 100.0f * shake;
         shake_y = ((float)(std::rand() % 200) - 100.0f) / 100.0f * shake;
     }
-    renderer_->camera().set_target(cam_x_ + shake_x, cam_y_ + shake_y);
-    renderer_->camera().set_zoom(zoom_);
+    renderer_->camera_set_target(cam_x_ + shake_x, cam_y_ + shake_y);
+    renderer_->camera_set_zoom(zoom_);
 
     // === UPDATE ANIMATION ===
     // MUST run BEFORE any play_animation calls so the final frame's
@@ -3071,37 +3181,203 @@ void Game::host_update_gameplay(uint32_t dt) {
                     }
                 }
                 if (in_attack_interval && !hit_this_interval_) {
-                    // [ORIGINAL] Distance-based hit detection on enemy fighter.
-                    // If the player's attack limb is within hit range of the
-                    // enemy fighter (enemy_pos_x_), register a hit. This works
-                    // alongside the bag-collision detection (bag stays at the
-                    // original spawn point as a visual punching bag; the enemy
-                    // fighter moves via AI and is hit by distance check).
-                    if (show_enemy_ && enemy_fighter_.invuln_time <= 0) {
-                        float dist_to_enemy = std::abs(enemy_pos_x_ - player_pos_x_);
-                        // Hit range: 180px (covers punch/kick reach)
-                        if (dist_to_enemy < 180.0f) {
-                            // [ORIGINAL] Dojo training — no health damage, just
-                            // visual feedback (hit flash, sparks, sound, knockback).
-                            enemy_fighter_.invuln_time = 0.4f;
-                            enemy_hit_flash_ = 0.25f;
-                            int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
-                            play_sound("f_pl_attack" + std::to_string(snd_idx), 0.7f);
-                            play_sound("armor", 0.5f);
-                            // Do NOT set hit_this_interval_ here. That flag gates
-                            // the whole block, so a distance hit on the enemy used
-                            // to close the window before the bag's own collision
-                            // test ever ran. In the dojo the enemy and the bag sit
-                            // at the same spot (world x = -7), so the enemy check
-                            // fired first every time and the bag never moved.
-                            // Measured: the enemy hit landed on frame 369, and the
-                            // fingertips came within 19 units of the bag on frame
-                            // 370 — a frame that was never evaluated.
-                            // The enemy has its own re-hit guard (invuln_time).
-                            // Spawn hit sparks at enemy position
-                            spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
-                            debug_log("[HIT] f=%llu move='%s' hit enemy dist=%.1f\n",
-                                (unsigned long long)total_frame_count_, current_move_.c_str(), dist_to_enemy);
+                    // [REPLACED] Skeleton-based hit detection on enemy fighter.
+                    // Uses attacking part nodes (from moves.xml AttackingParts)
+                    // vs enemy body collision capsules (from body.xml).
+                    // The attacking edge endpoints' world positions are checked
+                    // against the enemy's body capsule segments using segment-
+                    // segment closest distance, same algorithm as bag collision.
+                    if (show_enemy_ && enemy_fighter_.invuln_time <= 0 && assets_->body_model()) {
+                        auto pivot_it = assets_->skeleton_nodes().find("NPivot");
+                        float pivot_ly = pivot_it != assets_->skeleton_nodes().end()
+                                             ? pivot_it->second.y : stance_npivot_y_;
+
+                        // Build enemy skeleton node positions from enemy animation
+                        // (same approach as render_enemy_fighter)
+                        std::string enemy_anim_name = enemy_anim_;
+                        if (enemy_anim_name.size() > 4 &&
+                            enemy_anim_name.substr(enemy_anim_name.size() - 4) == ".bin")
+                            enemy_anim_name = enemy_anim_name.substr(0, enemy_anim_name.size() - 4);
+                        auto enemy_anim_it = assets_->animations().find(enemy_anim_name);
+                        int enemy_frame = 0, enemy_next = 0;
+                        float enemy_alpha = 0;
+                        bool has_enemy_anim = (enemy_anim_it != assets_->animations().end() &&
+                                               enemy_anim_it->second.frame_count > 0);
+                        if (has_enemy_anim) {
+                            auto& anim = enemy_anim_it->second;
+                            float f = enemy_anim_time_ * 20.0f;
+                            if (f < 0) f = 0;
+                            int fi = (int)f;
+                            if (fi < 0) fi = 0;
+                            enemy_frame = anim.frame_count > 0 ? fi % anim.frame_count : 0;
+                            enemy_next = (enemy_frame + 1) % anim.frame_count;
+                            enemy_alpha = f - (int)f;
+                        }
+
+                        // Build enemy node position map (local coords, relative to NPivot)
+                        std::unordered_map<std::string, std::pair<float, float>> enemy_node_pos;
+                        if (has_enemy_anim) {
+                            auto& anim = enemy_anim_it->second;
+                            auto& names = assets_->ordered_node_names();
+                            for (int i = 0; i < (int)names.size() && i < 67; ++i) {
+                                float x0, y0, z0, x1, y1, z1;
+                                if (anim.get_node_pos(enemy_frame, i, x0, y0, z0) &&
+                                    anim.get_node_pos(enemy_next, i, x1, y1, z1)) {
+                                    enemy_node_pos[names[i]] = {
+                                        x0 + (x1 - x0) * enemy_alpha,
+                                        y0 + (y1 - y0) * enemy_alpha};
+                                }
+                            }
+                        }
+
+                        // Resolve enemy node to world coordinates
+                        auto resolve_enemy_node = [&](const std::string& name)
+                            -> std::pair<float, float> {
+                            float lx = 0, ly = 0;
+                            bool found = false;
+
+                            // Try animated position from enemy's animation
+                            auto eit = enemy_node_pos.find(name);
+                            if (eit != enemy_node_pos.end()) {
+                                lx = eit->second.first;
+                                ly = eit->second.second;
+                                found = true;
+                            }
+
+                            // Fallback to skeleton rest position
+                            if (!found) {
+                                auto skel_it = assets_->skeleton_nodes().find(name);
+                                if (skel_it != assets_->skeleton_nodes().end()) {
+                                    lx = skel_it->second.x;
+                                    ly = skel_it->second.y;
+                                    found = true;
+                                }
+                            }
+
+                            // Fallback to body model rest position
+                            if (!found && assets_->body_model()) {
+                                auto bit = assets_->body_model()->nodes.find(name);
+                                if (bit != assets_->body_model()->nodes.end()) {
+                                    lx = bit->second.x;
+                                    ly = bit->second.y;
+                                    found = true;
+                                }
+                            }
+
+                            if (!found) return {enemy_pos_x_, enemy_pos_y_};
+
+                            // Apply enemy world transform
+                            float wx = enemy_pos_x_ + (enemy_facing_right_ ? lx : -lx);
+                            float wy = (enemy_pos_y_ + enemy_y_adjust_) +
+                                       (ly - pivot_ly);
+                            return {wx, wy};
+                        };
+
+                        // Build edge lookup (body_model edges + skeleton edges)
+                        std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
+                        for (auto& e : assets_->body_model()->edges)
+                            edge_map[e.name] = {e.end1, e.end2};
+                        for (auto& [name, e] : assets_->skeleton_edges())
+                            edge_map[name] = {e.end1, e.end2};
+
+                        // For each attacking edge, check collision vs enemy body capsules
+                        bool enemy_hit = false;
+                        for (auto& edge_name : move_it->second.attack_edges) {
+                            if (edge_name.empty() || enemy_hit) break;
+
+                            // Get attacking edge endpoints in world space (player)
+                            auto skel_edge = assets_->skeleton_edges().find(edge_name);
+                            std::string atk_n1, atk_n2;
+                            if (skel_edge != assets_->skeleton_edges().end()) {
+                                atk_n1 = skel_edge->second.end1;
+                                atk_n2 = skel_edge->second.end2;
+                            } else {
+                                if (edge_name.find("Foot") != std::string::npos ||
+                                    edge_name.find("Calf") != std::string::npos ||
+                                    edge_name.find("Leg") != std::string::npos) {
+                                    atk_n1 = "NToe_1"; atk_n2 = "NAnkle_1";
+                                } else {
+                                    atk_n1 = "NWrist_1"; atk_n2 = "NKnuckles_1";
+                                }
+                            }
+
+                            auto [atk1_wx, atk1_wy] = resolve_body_node(
+                                atk_n1, player_pos_x_,
+                                player_pos_y_ + y_adjust_smoothed_,
+                                facing_right_, pivot_ly);
+                            auto [atk2_wx, atk2_wy] = resolve_body_node(
+                                atk_n2, player_pos_x_,
+                                player_pos_y_ + y_adjust_smoothed_,
+                                facing_right_, pivot_ly);
+
+                            float atk_radius = 0;
+                            if (skel_edge != assets_->skeleton_edges().end())
+                                atk_radius = skel_edge->second.radius;
+
+                            // Check against each enemy body capsule
+                            for (auto& capsule : assets_->body_model()->capsules) {
+                                auto cap_edge_it = edge_map.find(capsule.edge_name);
+                                if (cap_edge_it == edge_map.end()) continue;
+
+                                auto [en1_wx, en1_wy] = resolve_enemy_node(cap_edge_it->second.first);
+                                auto [en2_wx, en2_wy] = resolve_enemy_node(cap_edge_it->second.second);
+
+                                float body_r = (capsule.radius1 + capsule.radius2) * 0.5f;
+                                if (body_r <= 0) body_r = 4.0f;  // default capsule radius
+
+                                // Segment-segment closest distance
+                                // Attacking segment: (atk1) -> (atk2)
+                                // Body capsule segment: (en1) -> (en2)
+                                float ex = atk2_wx - atk1_wx, ey = atk2_wy - atk1_wy;
+                                float fx = en2_wx - en1_wx, fy = en2_wy - en1_wy;
+                                float gx = atk1_wx - en1_wx, gy = atk1_wy - en1_wy;
+                                float a = ex * ex + ey * ey;
+                                float b = ex * fx + ey * fy;
+                                float c = fx * fx + fy * fy;
+                                float d = ex * gx + ey * gy;
+                                float e = fx * gx + fy * gy;
+                                float det = a * c - b * b;
+                                float s, t;
+                                if (det < 1e-12f) {
+                                    s = 0.0f;
+                                    t = (b > c) ? d / b : e / c;
+                                    t = std::max(0.0f, std::min(1.0f, t));
+                                } else {
+                                    s = (b * e - c * d) / det;
+                                    t = (a * e - b * d) / det;
+                                    if (s < 0) { s = 0; t = e / c; t = std::max(0.0f, std::min(1.0f, t)); }
+                                    else if (s > 1) { s = 1; t = (b + e) / c; t = std::max(0.0f, std::min(1.0f, t)); }
+                                    else if (t < 0) { t = 0; s = -d / a; s = std::max(0.0f, std::min(1.0f, s)); }
+                                    else if (t > 1) { t = 1; s = (b - d) / a; s = std::max(0.0f, std::min(1.0f, s)); }
+                                }
+
+                                float px = atk1_wx + s * ex, py = atk1_wy + s * ey;
+                                float qx = en1_wx + t * fx, qy = en1_wy + t * fy;
+                                float rx = px - qx, ry = py - qy;
+                                float sq_dist = rx * rx + ry * ry;
+                                float threshold = atk_radius + body_r;
+
+                                if (sq_dist < threshold * threshold) {
+                                    // [ORIGINAL] Skeleton-based hit confirmed.
+                                    // Dojo training - no health damage, just visual feedback.
+                                    enemy_fighter_.invuln_time = 0.4f;
+                                    enemy_hit_flash_ = 0.25f;
+                                    int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
+                                    play_sound("f_pl_attack" + std::to_string(snd_idx), 0.7f);
+                                    play_sound("armor", 0.5f);
+                                    // Do NOT set hit_this_interval_ here (see comment below).
+                                    // Spawn hit sparks at collision point
+                                    float hit_x = (px + qx) * 0.5f;
+                                    float hit_y = (py + qy) * 0.5f;
+                                    spawn_hit_sparks(hit_x, hit_y, 10);
+                                    debug_log("[HIT] f=%llu move='%s' hit enemy capsule=%s sq_dist=%.1f thresh=%.1f atk_edge=%s\n",
+                                        (unsigned long long)total_frame_count_, current_move_.c_str(),
+                                        capsule.edge_name.c_str(), sq_dist, threshold * threshold,
+                                        edge_name.c_str());
+                                    enemy_hit = true;
+                                    break;
+                                }
+                            }
                         }
                     }
                     // Determine attacking limb from AttackingParts in moves.xml
@@ -3290,19 +3566,23 @@ void Game::host_update_gameplay(uint32_t dt) {
                                             // rawDamage = baseDamage × attributeMultiplier × blockFactor × attackFactor × critFactor × 2.0
                                             // finalDamage = factorSetMultiplier × rawDamage
                                             //
-                                            // [ORIGINAL] AverageBaseDamage = 0.1 (internalSettings.xml line 631)
+                                            // [ORIGINAL] AverageBaseDamage from internalSettings.xml (parsed at load time)
                                             // This is the fallback when a move has no explicit Damage value.
+                                            const auto& dmg_settings = assets_->damage_settings();
                                             float base_damage = move_it->second.damage;
-                                            if (base_damage <= 0.0f) base_damage = 0.1f;  // [ORIGINAL] AverageBaseDamage from internalSettings.xml
+                                            if (base_damage <= 0.0f) base_damage = dmg_settings.average_base_damage;
                                             
                                             // [ORIGINAL] Attribute multiplier from warrior stats (WeaponDamage/UnarmedDamage)
                                             // Binary ref: damage attribute lookup at 0x1020982a
-                                            // Without a stat system, 1.0 is the correct default for a fresh character.
-                                            float attribute_multiplier = 1.0f;  // [TODO] Implement warrior stat system
+                                            // Formula: 1.0 + DamageFactor_Base * character_DamageFactor_attribute
+                                            // Without a stat system, character attribute = 0, so multiplier = 1.0.
+                                            float attribute_multiplier = 1.0f + dmg_settings.damage_factor_base * 0.0f;  // [TODO] Implement warrior stat system
                                             
-                                            // [ORIGINAL] Block factor: BlockDamage.Value = 0.5 (internalSettings.xml)
+                                            // [ORIGINAL] Block factor: base_block_factor from binary @ 0x101598c0
                                             // Binary ref: BlockChance at 0x10242aa2
-                                            float block_factor = enemy_fighter_.is_blocking ? 0.5f : 1.0f;
+                                            // When blocking, damage is reduced by base_block_factor (default 0.5 = 50% reduction).
+                                            // BlockDamageFactor attribute can further reduce chip damage.
+                                            float block_factor = enemy_fighter_.is_blocking ? dmg_settings.base_block_factor : 1.0f;
                                             
                                             // [ORIGINAL] Check if move ignores block (from IntervalAttack +0x75)
                                             if (enemy_fighter_.is_blocking && move_it->second.ignores_block) {
@@ -3318,9 +3598,10 @@ void Game::host_update_gameplay(uint32_t dt) {
                                             // CriticalHit.Probability Base="0.0001" Attribute="CriticalChance"
                                             // CriticalHit.Damage Base="0.0001" Attribute="CriticalDamage"
                                             // Binary ref: CriticalHit effect at 0x102446e0
+                                            // Formula: crit_chance = crit_probability_base * character_CriticalChance_attribute
+                                            //          crit_damage = 1.0 + crit_damage_base * character_CriticalDamage_attribute
+                                            // With default Base=0.0001 and character attribute=0, crits never happen.
                                             float crit_factor = 1.0f;
-                                            // With default CriticalChance=0.0001, crits are extremely rare.
-                                            // A fresh character has no CriticalChance attribute, so no crits.
                                             // [TODO] Implement CriticalChance attribute from equipment/perks
                                             
                                             // [ORIGINAL] Factor set multiplier from melee/ranged factor set

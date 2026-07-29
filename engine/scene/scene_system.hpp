@@ -29,7 +29,7 @@
 #include <vector>
 
 namespace resf2::platform { class Platform; }
-namespace resf2::renderer { class Renderer; }
+namespace resf2::renderer { class IRenderer; }
 namespace resf2::format { struct StageData; struct ListData; }
 
 namespace resf2::scene {
@@ -62,7 +62,7 @@ class SceneHost;
 struct SceneContext {
     SceneHost& host;
     platform::Platform& platform;
-    renderer::Renderer& renderer;
+    renderer::IRenderer& renderer;
     std::uint32_t dt_ms = 0;  // delta time for the current frame (update only)
 };
 
@@ -313,6 +313,8 @@ public:
         std::string enemy_name;   // FirstName / Template of warriors[0]
         int rounds = 1;           // <Fight Rounds="">
         int round_time_s = 99;    // <Fight RoundTime="">
+        int reward_gold = 0;      // <Reward Money=""> from stages.xml
+        int reward_xp = 0;        // <Reward Exp=""> from stages.xml
     };
     virtual void host_set_battle_info(const BattleInfo& info) = 0;
     [[nodiscard]] virtual const BattleInfo& host_get_battle_info() const = 0;
