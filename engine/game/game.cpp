@@ -1750,29 +1750,23 @@ void Game::host_update_gameplay(uint32_t dt) {
                 const float dist = std::fabs(enemy_pos_x_ - player_pos_x_);
                 if (dist <= 250.0f && player_fighter_.invuln_time <= 0 &&
                     !player_fighter_.is_dead) {
-                    // [ORIGINAL] Automatic block — player blocks automatically when enemy attacks
-                    // Block chance comes from AI tactics (BlockChance in tacticSettings.xml)
-                    // Default block chance: 30% (heuristic until we parse actual BlockChance)
-                    bool auto_blocked = false;
-                    if (!player_fighter_.is_blocking && move_state_ == 0 && hit_anim_ == 0) {
-                        // Player is idle — can auto-block
-                        float block_chance = 0.30f;  // [HEURISTIC-TODO] Get from BlockChance in tacticSettings
-                        float roll = (float)(rand() % 100) / 100.0f;
-                        if (roll < block_chance) {
-                            // Block successful — activate block state
-                            player_fighter_.is_blocking = true;
-                            move_state_ = 11;  // block state
-                            
-                            // Play block animation (HighBlock for now, could check attack height)
-                            if (assets_->animations().count("high_block")) {
-                                play_animation("high_block", false, 1);  // priority 1: defensive
-                                current_move_ = "HighBlock";
-                                int fc = assets_->animations()["high_block"].frame_count;
-                                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
-                                std::printf("[BLOCK] Auto-block activated (chance=%.0f%%, roll=%.0f%%)\n", 
-                                           block_chance * 100, roll * 100);
-                            }
-                            auto_blocked = true;
+                    // [ORIGINAL] Automatic block — player ALWAYS blocks when idle and enemy attacks
+                    // No chance, no randomness — 100% block if player is not doing anything
+                    // Block is a defensive reaction, not a player action or probabilistic event
+                    bool can_block = (move_state_ == 0 && hit_anim_ == 0 && 
+                                     !start_stance_playing_ && !player_fighter_.is_blocking);
+                    if (can_block) {
+                        // Activate block state
+                        player_fighter_.is_blocking = true;
+                        move_state_ = 11;  // block state
+                        
+                        // Play block animation
+                        if (assets_->animations().count("high_block")) {
+                            play_animation("high_block", false, 1);  // priority 1: defensive
+                            current_move_ = "HighBlock";
+                            int fc = assets_->animations()["high_block"].frame_count;
+                            hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
+                            std::printf("[BLOCK] Auto-block (player was idle)\n");
                         }
                     }
                     
