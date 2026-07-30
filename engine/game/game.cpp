@@ -3,6 +3,7 @@
 // Game class implementation — extracted from game.hpp inline bodies.
 
 #include "game.hpp"
+#include "settings_loader.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -1480,7 +1481,9 @@ void Game::init_location() {
             load_enemy_weapon("weapon_knuckles.xml");
             // Load player's equipped weapon model
             load_player_weapon(equipped_weapon_);
-            load_localization();
+            auto lang = load_user_settings_language(asset_root_);
+            std::string loc = lang.value.empty() ? std::string("eng") : normalize_localization_path(lang.value);
+            load_localization(loc);
             load_hud_textures();
             load_menu_textures();
             load_hud_font();
