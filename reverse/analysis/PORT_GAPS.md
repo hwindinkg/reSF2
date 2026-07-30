@@ -275,3 +275,81 @@ Cross-check: Ghidra's decompilation of the main loop (`FUN_8f0bb400`)
 independently reproduces the hand-reconstructed control flow in section 5 of
 RUNTIME_MAP.md, including the inverted `interval <= elapsed` comparison and the
 inner spin loop — so the reconstruction method itself is validated.
+
+## The "wtf so strong" assert, and what it revealed
+
+`"Model::getTotalDamage - wtf so strong"` at `0x8F79A2A0` is a developer sanity
+warning left in the shipped binary by Nekki. It sits among a cluster of similar
+informal asserts (`"Both is player! Wat!?"`, `"attacker is null"`,
+`"Wrong magic count %d"`, `"Model::setNearestEnemy - enemy is weapon, fix code
+bug"`), so this is their normal debug-logging style, not dead code.
+
+It fires at the very end of `getTotalDamage`:
+
+```
+vcmpe.f32 s16, #0            ; dmg < 0 ?
+bmi   -> warn                ; negative goes to the warning
+vldr  s15, [pc, #0x68]       ; 100000.0
+vcmpe.f32 s16, s15
+ble   -> normal return       ; 0 <= dmg <= 100000 : fine
+                             ; otherwise fall through to the warning
+ldr   r0, [pc, #0x5c]        ; "wtf so strong"
+add   r0, pc, r0
+bl    game+0x1CFA58          ; the log sink
+vmov  s15, s16               ; RETURNS THE VALUE ANYWAY
+```
+
+Three things follow, all of which matter for a 1:1 port:
+
+1. **It only warns — it does not clamp.** The out-of-range value is returned
+   unchanged (`vmov s15, s16` after the log call). An implementation that
+   clamps to 100000 would silently diverge on very strong builds. The log sink
+   `game+0x1CFA58` itself checks a global flag first and returns early when
+   logging is disabled, which is why nothing appeared in logcat on this
+   release build.
+
+2. **It is direct evidence the curve is exponential.** A linear
+   `1 + 0.0001 * attr` model cannot reach 100000 from any sane attribute value
+   (it stays near 1.0), so a developer would never have needed this guard.
+   With `2 ^ (delta / 10)` a delta of 200 already yields `2^20 = 1048576`.
+   The assert only makes sense for an unbounded curve.
+
+3. **It named the function.** With a single xref, the string identified
+   `getTotalDamage` immediately — far faster than following the call graph
+   from the damage tracer, which turned out to be a separate 650-line logging
+   routine at `game+0x438530`.
+
+### The doubling-range mechanic
+
+The `f3` term (`game+0x60E794`) is:
+
+```
+powf(2.0, difference / divisor)
+```
+
+`divisor` is read from a global settings struct at `+0x18`, verified live as
+**10.0f**, which is `<DamageDoublingRange Value="10"/>` from
+`internalSettings.xml`. So the design is literally: **every 10 points of
+attribute advantage doubles your damage**; 10 points behind halves it. The
+sibling `<ResistanceDoublingRange Value="500"/>` applies the same curve shape
+to enchantment resistance.
+
+Note on reading these globals: the pointer is formed as `LDR Rn,[PC,#x]` then
+`ADD Rn,PC,Rn`, and the PC used is that of the **ADD**, not the LDR. Using the
+LDR's address gives a plausible-looking but wrong pointer (`0x8F8780A4` instead
+of `0x8F8780A8`), which yields garbage (`-1.8e-35`) instead of `10.0`. This is
+the same PC+8 pitfall that produced the earlier return-address-vs-call-site
+mistake.
+
+### Ported
+
+`engine/game/damage_formula.hpp` implements the recovered formula, preserving
+the emitted multiplication order (`base * f2 * f1 * f3 * add`, note f2 before
+f1) because float multiplication is not associative. Covered by
+`tests/test_damage_formula_golden.cpp` (24 checks, passing) against
+`tests/golden/damage_formula.golden.json`.
+
+Still required before it can replace the model in `game.cpp`: the attribute
+system itself, whose baseline values are in `<AlignTargetAttributes>`
+(WeaponDamage 12, BodyDefense 12, HeadDefense 5, RangedDamage 12,
+MagicDamage 12, EnchantmentResistance 12, UnarmedDamage 0).
