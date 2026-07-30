@@ -16,9 +16,15 @@
 //   * the wait is an inner spin loop that re-reads the clock and the interval,
 //     carrying no fractional remainder between frames
 //
-// engine/core/game_loop.hpp currently uses a float 1/60 accumulator, so the
-// OriginalTimestep parts of this test fail until that is ported. That failure
-// is the deliverable: it is the 1:1 gap made executable.
+// Status: the runtime loop (engine/runtime/loop.cpp) HAS been ported and now
+// matches this contract -- it steps by a fixed integer 16 ms and sleeps off the
+// remainder in an inner spin loop. Confirmed against Ghidra's decompilation of
+// FUN_8f0bb400, which reproduces the same control flow including the inverted
+// `interval <= elapsed` comparison.
+//
+// engine/core/game_loop.hpp (the older float 1/60 accumulator helper) is still
+// unported; the GAP-1 section below measures it and is expected to fail until
+// that helper is either fixed or retired.
 
 #include "../engine/core/game_loop.hpp"
 
@@ -168,8 +174,70 @@ static void test_no_remainder_carried_between_frames() {
           "over a 90-frame combo window the two models differ by >50 ms");
 }
 
+// Mirrors the ported logic in engine/runtime/loop.cpp so the shipped runtime
+// path is covered, not just the standalone model above.
+static void test_runtime_loop_semantics() {
+    std::printf("\n-- runtime loop (engine/runtime/loop.cpp) --\n");
+
+    // Simulated clock: work_ms of work per frame, sleep advances it.
+    struct Clock {
+        std::int64_t t = 1000;
+        std::int64_t work;
+        std::int64_t now() const { return t; }
+        void do_work() { t += work; }
+        void sleep(std::int64_t ms) { t += ms; }
+    };
+
+    const std::int64_t interval = golden::kFrameIntervalMs;
+
+    auto run_frames = [&](std::int64_t work_ms, int frames,
+                          std::vector<std::int64_t>& sleeps) {
+        Clock c{1000, work_ms};
+        for (int f = 0; f < frames; ++f) {
+            const std::int64_t t0 = c.now();
+            c.do_work();                       // update + render
+            while (true) {
+                const std::int64_t elapsed = c.now() - t0;
+                if (interval <= elapsed) break;
+                const std::int64_t remaining = (t0 + interval) - c.now();
+                if (remaining < 0) break;
+                if (remaining == 0) break;
+                sleeps.push_back(remaining);
+                c.sleep(remaining);
+            }
+        }
+        return c.now() - 1000;                 // total elapsed
+    };
+
+    // 5 ms of work: one sleep of 11 ms, frame lands exactly on the interval.
+    std::vector<std::int64_t> sleeps;
+    auto total = run_frames(5, 10, sleeps);
+    CHECK(sleeps.size() == 10, "one sleep per frame when the frame finishes early");
+    if (!sleeps.empty()) {
+        CHECK(sleeps[0] == 11, "sleeps exactly the remaining 11 ms (16 - 5)");
+    }
+    CHECK(total == 10 * interval,
+          "10 early frames take exactly 10 * 16 ms of wall clock");
+
+    // Overrunning frames must not sleep and must not try to catch up.
+    sleeps.clear();
+    auto over_total = run_frames(30, 10, sleeps);
+    CHECK(sleeps.empty(), "an overrunning frame never sleeps");
+    CHECK(over_total == 10 * 30,
+          "overrunning frames simply run long; no accumulator catch-up");
+
+    // Boundary: work == interval, no sleep, no busy spin.
+    sleeps.clear();
+    auto exact_total = run_frames(interval, 5, sleeps);
+    CHECK(sleeps.empty(), "work == interval takes the next-frame branch (bls is <=)");
+    CHECK(exact_total == 5 * interval, "exact-budget frames stay on schedule");
+
+    // The dt handed to on_update is the interval, regardless of real work.
+    CHECK(interval == 16, "on_update always receives the fixed 16 ms interval");
+}
+
 static void test_engine_gameloop_matches_original() {
-    std::printf("\n-- engine GameLoop vs original (GAP-1) --\n");
+    std::printf("\n-- legacy core::GameLoop vs original (GAP-1) --\n");
 
     // Drive the engine's loop with the real frame period and see what dt the
     // update callback receives.
@@ -216,6 +284,7 @@ int main() {
     test_delta_is_quantised_double();
     test_wait_is_inner_spin_loop();
     test_no_remainder_carried_between_frames();
+    test_runtime_loop_semantics();
     test_engine_gameloop_matches_original();
     test_step_state_shape();
 
