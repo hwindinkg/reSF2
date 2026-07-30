@@ -276,6 +276,67 @@ void Renderer::draw_filled_circle_screen(float cx, float cy, float radius,
     }
 }
 
+void Renderer::draw_filled_circle_world(float cx, float cy, float radius,
+                                        Color4B color) {
+    float sx, sy;
+    if (!camera_.world_to_screen(cx, cy, sx, sy)) return;
+    // A world-space radius has to be scaled by the camera zoom, otherwise the
+    // silhouettes come out the wrong size at any zoom other than 1.
+    draw_filled_circle_screen(sx, sy, radius * camera_.zoom, color);
+}
+
+void Renderer::draw_filled_triangle_screen(float x0, float y0,
+                                           float x1, float y1,
+                                           float x2, float y2,
+                                           Color4B color) {
+    // Half-space rasteriser with a top-left fill rule.
+    //
+    // This was previously a no-op stub, which is why the fighter and the
+    // punching bag rendered as strings of disconnected circles: a capsule is
+    // two triangles (the shaft) plus a circle at each end, and only the
+    // circles were being drawn.
+    const int min_x = std::max(0, (int)std::floor(std::min({x0, x1, x2})));
+    const int max_x = std::min(width_ - 1, (int)std::ceil(std::max({x0, x1, x2})));
+    const int min_y = std::max(0, (int)std::floor(std::min({y0, y1, y2})));
+    const int max_y = std::min(height_ - 1, (int)std::ceil(std::max({y0, y1, y2})));
+    if (min_x > max_x || min_y > max_y) return;
+
+    // Signed area; bail on degenerate triangles and normalise the winding so
+    // the inside test is a single sign comparison.
+    const float area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+    if (std::fabs(area) < 1e-6f) return;
+    const float inv = 1.0f / area;
+
+    for (int py = min_y; py <= max_y; ++py) {
+        const float sy = py + 0.5f;
+        for (int px = min_x; px <= max_x; ++px) {
+            const float sx = px + 0.5f;
+            // Barycentric coordinates; inside when all three are >= 0.
+            const float w0 = ((x1 - sx) * (y2 - sy) - (x2 - sx) * (y1 - sy)) * inv;
+            if (w0 < 0.0f) continue;
+            const float w1 = ((x2 - sx) * (y0 - sy) - (x0 - sx) * (y2 - sy)) * inv;
+            if (w1 < 0.0f) continue;
+            const float w2 = 1.0f - w0 - w1;
+            if (w2 < 0.0f) continue;
+            plot_blend(px, py, color.r, color.g, color.b, color.a);
+        }
+    }
+}
+
+void Renderer::draw_filled_triangle_world(float x0, float y0,
+                                          float x1, float y1,
+                                          float x2, float y2,
+                                          Color4B color) {
+    float sx0, sy0, sx1, sy1, sx2, sy2;
+    // Transform all three corners even if some fall outside the view: the
+    // rasteriser clips per-pixel, and rejecting a triangle because one vertex
+    // is off-screen would make limbs vanish at the frame edge.
+    camera_.world_to_screen(x0, y0, sx0, sy0);
+    camera_.world_to_screen(x1, y1, sx1, sy1);
+    camera_.world_to_screen(x2, y2, sx2, sy2);
+    draw_filled_triangle_screen(sx0, sy0, sx1, sy1, sx2, sy2, color);
+}
+
 void Renderer::draw_line_screen(float x0, float y0, float x1, float y1,
                                 Color4B color) {
     draw_line_screen_thick(x0, y0, x1, y1, color, 1.0f);

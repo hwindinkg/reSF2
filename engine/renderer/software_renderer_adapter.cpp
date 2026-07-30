@@ -62,20 +62,18 @@ void SoftwareRendererAdapter::draw_filled_triangle_screen(
     float x0, float y0, float x1, float y1, float x2, float y2,
     Color4B color)
 {
-    // Software renderer doesn't have triangle methods, so we approximate
-    // with a filled rectangle for now. This is a simplification.
-    // For proper triangle rendering, we'd need to implement triangle rasterization.
-    // For now, we'll skip this (it's mainly used for debug visualization).
-    (void)x0; (void)y0; (void)x1; (void)y1; (void)x2; (void)y2; (void)color;
+    renderer_.draw_filled_triangle_screen(x0, y0, x1, y1, x2, y2, color);
 }
 
 void SoftwareRendererAdapter::draw_filled_triangle_world(
     float x0, float y0, float x1, float y1, float x2, float y2,
     Color4B color)
 {
-    // Software renderer doesn't have triangle methods, so we approximate
-    // with a filled rectangle for now. This is a simplification.
-    (void)x0; (void)y0; (void)x1; (void)y1; (void)x2; (void)y2; (void)color;
+    // These two were no-op stubs. Capsule silhouettes are two triangles (the
+    // shaft) plus a circle at each end, so with triangles missing every
+    // fighter and the punching bag rendered as a string of disconnected
+    // circles -- the most visible defect in the engine's output.
+    renderer_.draw_filled_triangle_world(x0, y0, x1, y1, x2, y2, color);
 }
 
 void SoftwareRendererAdapter::draw_filled_circle_screen(
@@ -89,12 +87,7 @@ void SoftwareRendererAdapter::draw_filled_circle_world(
     float cx, float cy, float radius,
     Color4B color)
 {
-    // Software renderer doesn't have world-space circle, so we need to
-    // convert to screen space first
-    float sx, sy;
-    if (renderer_.camera().world_to_screen(cx, cy, sx, sy)) {
-        renderer_.draw_filled_circle_screen(sx, sy, radius * renderer_.camera().zoom, color);
-    }
+    renderer_.draw_filled_circle_world(cx, cy, radius, color);
 }
 
 void SoftwareRendererAdapter::draw_line_screen(

@@ -439,3 +439,30 @@ add_test(NAME test_damage_formula_golden
          COMMAND test_damage_formula_golden
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 set_tests_properties(test_damage_formula_golden PROPERTIES TIMEOUT 60)
+
+# ---------------------------------------------------------------------------
+# tool_visual_audit — not a test, a diagnostic. Renders the dojo headlessly and
+# prints every geometric quantity the on-screen composition depends on (camera
+# framing, fighter transform, bag model), plus a PNG capture. Used to turn
+# "the picture looks wrong" into measurable divergences from the original's
+# reference screenshot.
+#
+#   cmake --build build --config Release --target tool_visual_audit
+#   build/bin/Release/tool_visual_audit assets screenshots_audit
+# ---------------------------------------------------------------------------
+add_executable(tool_visual_audit
+    tool_visual_audit.cpp
+    headless_test_runner.cpp
+    test_platform.cpp
+)
+target_link_libraries(tool_visual_audit PRIVATE
+    resf2_game
+    resf2_renderer
+    resf2_platform
+    resf2_scene
+    resf2_format
+    resf2_reverse
+    resf2_warnings
+    Threads::Threads
+)
+target_compile_features(tool_visual_audit PRIVATE cxx_std_23)

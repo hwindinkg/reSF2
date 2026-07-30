@@ -45,8 +45,18 @@ public:
     }
 
     // Input injection (delegate to TestPlatform)
+    //
+    // NOTE on ordering: run_frames() calls poll_events() at the top of each
+    // frame, and poll_events() clears keys_just_pressed. A key injected
+    // *between* run_frames() calls therefore has its "just pressed" edge wiped
+    // before any scene observes it, so scenes that use key_pressed() (an edge
+    // test) never see it. Use tap_key() for anything driven by a key press.
     void inject_key_down(platform::Key key);
     void inject_key_up(platform::Key key);
+
+    // Press and release a key so the press edge survives into on_update().
+    // Runs `hold_frames` frames with the key down, then releases it.
+    void tap_key(platform::Key key, int hold_frames = 1);
     void inject_pointer_down(float x, float y, std::int32_t id = 0);
     void inject_pointer_up(std::int32_t id = 0);
 

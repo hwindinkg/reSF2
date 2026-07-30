@@ -120,6 +120,29 @@ public:
         Color4B color
     );
 
+    // Filled circle in world coordinates (subject to the camera transform).
+    void draw_filled_circle_world(
+        float cx, float cy, float radius,
+        Color4B color
+    );
+
+    // Filled triangle in screen coordinates.
+    //
+    // Needed for the fighter and punching-bag silhouettes: those are drawn as
+    // capsules, i.e. two triangles forming the shaft plus a circle at each
+    // end. Without triangle support only the end circles appeared, so every
+    // body rendered as a string of disconnected beads.
+    void draw_filled_triangle_screen(
+        float x0, float y0, float x1, float y1, float x2, float y2,
+        Color4B color
+    );
+
+    // Filled triangle in world coordinates (subject to the camera transform).
+    void draw_filled_triangle_world(
+        float x0, float y0, float x1, float y1, float x2, float y2,
+        Color4B color
+    );
+
     // 1-pixel-wide line in screen coordinates.
     void draw_line_screen(
         float x0, float y0, float x1, float y1,
