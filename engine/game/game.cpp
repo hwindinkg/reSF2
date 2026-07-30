@@ -4,6 +4,7 @@
 
 #include "game.hpp"
 #include "settings_loader.hpp"
+#include "settings_loader.hpp"
 
 #include <algorithm>
 #include <cstring>
