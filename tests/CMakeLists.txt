@@ -497,13 +497,11 @@ endfunction()
 add_spec_test(test_quest_spec)
 
 # Settings / localization: userSettings.xml is read at startup by the original,
-# but reSF2 still hardcodes rus and does not yet drive the language screen from
-# the shipped config.
+# and reSF2 now reads the shipped localization file instead of hardcoding rus.
 add_spec_test(test_settings_spec)
 
-# Campaign data: StageParser drops opponent equipment (2200 <Item>), perks,
-# <AttributesAlign> and per-fight <Rules>, plus 11 warrior attributes that the
-# recovered damage formula needs.
+# Save system: usersDefault.xml / user.xml are parsed, but the XML loader still
+# needs more 1:1 coverage for edge cases from the shipped save format.
 add_spec_test(test_stage_spec)
 
 # Control scheme: moves.xml drives every binding. PressType (Tap vs Hold) was
