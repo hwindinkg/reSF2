@@ -405,3 +405,25 @@ set_tests_properties(test_full_battle PROPERTIES TIMEOUT 300)
 # Phase 5: Screenshot comparison — renders headlessly, compares against
 # reference PNGs using MSE, and saves diff images on failure.
 add_integration_test(test_screenshot_compare)
+
+# ---------------------------------------------------------------------------
+# Golden tests — behaviour captured from the ORIGINAL binary via Frida.
+#
+# These encode measured facts about the real game, not assumptions, so a
+# failure means the engine diverges from the original (a 1:1 gap), not that
+# the test is stale. Reference data lives in tests/golden/, provenance in
+# reverse/analysis/PORT_GAPS.md and reverse/analysis/RUNTIME_MAP.md.
+#
+# test_frame_timing_golden is EXPECTED TO FAIL until GAP-1/GAP-2 are ported:
+# the original uses an integer 16 ms timestep (62.5 fps) with dt = ms/1000.0
+# as double, while engine/core/game_loop.hpp uses a float 1/60 accumulator.
+# ---------------------------------------------------------------------------
+add_executable(test_frame_timing_golden test_frame_timing_golden.cpp)
+target_link_libraries(test_frame_timing_golden PRIVATE resf2_warnings)
+target_compile_features(test_frame_timing_golden PRIVATE cxx_std_23)
+add_test(NAME test_frame_timing_golden
+         COMMAND test_frame_timing_golden
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_frame_timing_golden PROPERTIES TIMEOUT 60)
+# Documents a known divergence; flip to FALSE once the timestep is ported.
+set_tests_properties(test_frame_timing_golden PROPERTIES WILL_FAIL TRUE)
