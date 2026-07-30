@@ -21,6 +21,7 @@ struct HeadlessTestConfig {
     int height = 720;
     std::uint32_t fixed_dt_ms = 16;  // ~60 FPS
     std::string start_scene;  // Optional: "battle", "shop", "map", etc.
+    std::string start_location;  // Optional: "dojo", "waterfall_small", ...
 };
 
 class HeadlessTestRunner {

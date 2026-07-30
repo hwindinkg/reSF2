@@ -49,6 +49,10 @@ bool LocationParser::parse(const std::string& xml, LocationData& out) {
         layer.type = (int)to_float(layer_node.attr("Type"));
         layer.factor = to_float(layer_node.attr("Factor"), 1.0f);
         layer.atlas_name = layer_node.attr("Atlas");
+        // [ORIGINAL] Both read by the original's layer parser (game+0x3E40D0).
+        // Path redirects the atlas lookup to another location's directory.
+        layer.path = layer_node.attr("Path");
+        layer.scaling = (layer_node.attr("Scaling") == "1");
 
         // Parse <Image> sub-elements
         for (auto& child : layer_node.children) {

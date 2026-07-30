@@ -353,3 +353,61 @@ Still required before it can replace the model in `game.cpp`: the attribute
 system itself, whose baseline values are in `<AlignTargetAttributes>`
 (WeaponDamage 12, BodyDefense 12, HeadDefense 5, RangedDamage 12,
 MagicDamage 12, EnchantmentResistance 12, UnarmedDamage 0).
+
+---
+
+# Attribute lookup (game+0x60DF98) — resolved 2026-07-30
+
+This is `f3`'s inner helper: it resolves an attribute by NAME and returns the
+attacker-vs-defender difference that `game+0x60E794` then feeds into
+`powf(2.0, difference / DamageDoublingRange)`.
+
+## Storage layout, verified
+
+The attribute table is a `std::vector` of 16-byte records held in the global
+settings struct at `0x8F8780A8` (the same struct whose `+0x18` is
+`DamageDoublingRange` = 10.0):
+
+```
+[globals+0x534]  vector.begin = 0x85BF4C08
+[globals+0x538]  vector.end   = 0x85BF4C78
+```
+
+`end - begin = 112` bytes = **7 records of 16 bytes**, which matches
+`<AlignTargetAttributes>` in `internalSettings.xml` exactly — 7 entries:
+
+| attribute | value |
+|---|---|
+| WeaponDamage | 12 |
+| UnarmedDamage | 0 |
+| BodyDefense | 12 |
+| HeadDefense | 5 |
+| RangedDamage | 12 |
+| MagicDamage | 12 |
+| EnchantmentResistance | 12 |
+
+The count agreeing exactly is what confirms the identification; the buffer
+itself is on the heap and so is not present in the code-region dump.
+
+Record shape from the search loop (`0x8F664FE0` onward):
+```
++0x00  const char* name_begin
++0x04  const char* name_end      ; length = end - begin
++0x08  (unused / padding)
++0x0C  int value                 ; read as `(float)piVar13[3]`
+```
+The loop compares the name length first (`piVar13[1] - *piVar13 == len`) and
+only then does a `memcmp` (`game+0x6E1F00`), which is a cheap-reject pattern —
+worth reproducing only for fidelity of behaviour, not for correctness.
+
+On a miss the value defaults to `0.0f` (`DAT_8f66539c`, verified as 0.0), and
+the helper returns `0.0 - value` for the defender side. So an unknown attribute
+name is neutral, never an error.
+
+## Consequence for the port
+
+With the table, the doubling-range curve and `getTotalDamage` all recovered,
+the only thing still missing to wire `engine/game/damage_formula.hpp` into
+`game.cpp` is the per-character attribute *state* (equipment + perks
+contributing to WeaponDamage, BodyDefense, ...). The baseline values above are
+the alignment targets, not the character's own stats.

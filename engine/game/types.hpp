@@ -41,6 +41,18 @@ struct LocationLayer {
     int type = 0;
     float factor = 1.0f;
     std::string atlas_name;
+
+    // [ORIGINAL] <Layer Path="locations/spaceship/"> — the atlas lives in
+    // ANOTHER location's directory. 26 layers in the shipped params.xml files
+    // use this (flying_rocks, waterfall, ruins_village, spaceship). Without it
+    // the atlas is looked up under the current location and the layer renders
+    // nothing at all. Read by the original at game+0x3E40D0.
+    std::string path;
+
+    // [ORIGINAL] <Layer Scaling="1">, set on 62 foreground layers; the original
+    // keeps it as a flag on the layer object (+0x154/+0x155).
+    bool scaling = false;
+
     std::vector<LayerImage> images;
 };
 

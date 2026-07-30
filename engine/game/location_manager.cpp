@@ -41,6 +41,11 @@ static GameLocation parse_location(const std::string& xml) {
             layer.type = toi(child.attr("Type"));
             layer.factor = tof(child.attr("Factor"), 1.0f);
             layer.atlas_name = child.attr("Atlas");
+            // [ORIGINAL] Both read by the original's layer parser
+            // (game+0x3E40D0). Path redirects the atlas lookup to another
+            // location's directory; without it the layer renders nothing.
+            layer.path = child.attr("Path");
+            layer.scaling = (child.attr("Scaling") == "1");
 
             for (const auto& ic : child.children) {
                 if (ic.name == "Image" || ic.name == "SimpleEffect") {
@@ -131,7 +136,25 @@ void LocationManager::load_location(const std::string& name, const std::string& 
         for (auto& layer : location_->layers) {
             if (layer.atlas_name.empty()) continue;
             if (assets->atlases().count(layer.atlas_name)) continue;
-            assets->load_atlas(layer.atlas_name, name, asset_root);
+            // [ORIGINAL] <Layer Path="locations/other/"> borrows the atlas from
+            // another location, so the search directory comes from Path rather
+            // than from this location's name. Path is stored with a trailing
+            // slash and a "locations/" prefix, e.g. "locations/spaceship/".
+            std::string owner = name;
+            if (!layer.path.empty()) {
+                std::string p = layer.path;
+                while (!p.empty() && (p.back() == '/' || p.back() == '\\'))
+                    p.pop_back();
+                const auto slash = p.find_last_of("/\\");
+                owner = (slash == std::string::npos) ? p : p.substr(slash + 1);
+                if (!owner.empty() && owner != name) {
+                    std::printf("  [atlas] '%s' borrowed from location '%s'"
+                                " (Path=\"%s\")\n",
+                                layer.atlas_name.c_str(), owner.c_str(),
+                                layer.path.c_str());
+                }
+            }
+            assets->load_atlas(layer.atlas_name, owner, asset_root);
         }
     }
 }
