@@ -501,6 +501,25 @@ add_spec_test(test_quest_spec)
 # recovered damage formula needs.
 add_spec_test(test_stage_spec)
 
+# Control scheme: moves.xml drives every binding. PressType (Tap vs Hold) was
+# being dropped, collapsing 212 held-key moves onto their tap variants.
+# Needs resf2_game for the move loader.
+add_executable(test_input_spec test_input_spec.cpp)
+target_link_libraries(test_input_spec PRIVATE
+    resf2_game resf2_renderer resf2_platform resf2_scene
+    resf2_format resf2_reverse resf2_warnings Threads::Threads)
+target_compile_features(test_input_spec PRIVATE cxx_std_23)
+add_test(NAME test_input_spec COMMAND test_input_spec
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_input_spec PROPERTIES TIMEOUT 120)
+
+# Diagnostic: print the parsed key bindings of specific moves.
+add_executable(tool_move_probe tool_move_probe.cpp)
+target_link_libraries(tool_move_probe PRIVATE
+    resf2_game resf2_renderer resf2_platform resf2_scene
+    resf2_format resf2_reverse resf2_warnings Threads::Threads)
+target_compile_features(tool_move_probe PRIVATE cxx_std_23)
+
 # Diagnostic: dump what the XML reader actually produced for a given file.
 add_executable(tool_xml_probe tool_xml_probe.cpp)
 target_link_libraries(tool_xml_probe PRIVATE resf2_format resf2_warnings)
