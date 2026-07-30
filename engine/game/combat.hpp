@@ -104,6 +104,14 @@ public:
     bool& mutable_show_enemy() { return show_enemy_; }
     bool& mutable_is_battle_mode() { return is_battle_mode_; }
 
+    // --- Block decision state (player AI) ---
+    // [ORIGINAL] FUN_10171d80 runs every 0.6-1.0s, roulette over tactic weights.
+    // "Duck" in the animation weights maps to block action.
+    float& mutable_block_decision_cooldown() { return block_decision_cooldown_; }
+    bool& mutable_block_decision_pending() { return block_decision_pending_; }
+    float& mutable_recent_damage_taken() { return recent_damage_taken_; }
+    int& mutable_enemy_hits_on_player() { return enemy_hits_on_player_; }
+
     // --- Const accessors (for read-only access) ---
     const std::string& current_move() const { return current_move_; }
     bool hit_this_interval() const { return hit_this_interval_; }
@@ -197,6 +205,15 @@ private:
     
     // [ORIGINAL] AI tactic system from tacticSettings.xml
     const class TacticSettings* tactic_settings_ = nullptr;
+
+    // --- Player block decision state (FUN_10171d80) ---
+    // [ORIGINAL] Block is NOT automatic — it's a weighted roulette decision
+    // every 0.6-1.0s. BlockChance factors from tacticSettings.xml determine
+    // the weight of "Duck" (block) candidate.
+    float block_decision_cooldown_ = 0.0f;   // seconds until next decision
+    bool block_decision_pending_ = false;     // true when decision needs evaluation
+    float recent_damage_taken_ = 0.0f;        // damage recently taken (decays)
+    int enemy_hits_on_player_ = 0;            // enemy hits landed on player
 };
 
 } // namespace resf2::game

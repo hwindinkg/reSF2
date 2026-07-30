@@ -4006,6 +4006,14 @@ private:
     float& enemy_hit_flash_ = combat_.mutable_enemy_hit_flash();
     float& combo_timer_ = combat_.mutable_combo_timer();
 
+    // --- Player block decision state (FUN_10171d80) ---
+    // [ORIGINAL] Block is NOT automatic — it's a weighted roulette decision
+    // every 0.6-1.0s via TacticSettings::choose() with "Duck" candidate.
+    float& block_decision_cooldown_ = combat_.mutable_block_decision_cooldown();
+    bool& block_decision_pending_ = combat_.mutable_block_decision_pending();
+    float& recent_damage_taken_ = combat_.mutable_recent_damage_taken();
+    int& enemy_hits_on_player_ = combat_.mutable_enemy_hits_on_player();
+
     // [ORIGINAL] Hit effect: uses original hit_blade texture (18-frame spark
     // animation from assets/1536/textures/effects/fight/hit_blade.plist).
     // The original SF2 renders this sprite at the hit point, cycling through
