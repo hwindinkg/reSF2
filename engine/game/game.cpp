@@ -833,6 +833,11 @@ void Game::host_reset_round() {
     enemy_ai_state_ = 0;
     enemy_attack_cooldown_ = 0;
     enemy_attacking_ = false;
+    // Reset block decision state for new round (FUN_10171d80 cooldown)
+    block_decision_cooldown_ = 0.0f;
+    block_decision_pending_ = false;
+    recent_damage_taken_ = 0.0f;
+    enemy_hits_on_player_ = 0;
     hp_trail_player_ = -1.0f;
     hp_trail_enemy_ = -1.0f;
     // [STEP 4.7] Reset knockback/knockdown state
@@ -1637,6 +1642,18 @@ void Game::host_update_gameplay(uint32_t dt) {
         player_fighter_.is_blocking = false;
     }
 
+    // [ORIGINAL] Tick block decision cooldown (FUN_10171d80 loop interval).
+    // The AI decision loop runs every 0.6-1.0s; when it fires, a block
+    // decision becomes pending and is evaluated when an enemy attack lands.
+    if (block_decision_cooldown_ > 0) {
+        block_decision_cooldown_ -= dt_sec;
+        if (block_decision_cooldown_ <= 0) {
+            block_decision_pending_ = true;
+        }
+    }
+    // Decay recent damage tracking (used by BlockChance DamageFactor)
+    recent_damage_taken_ = std::max(0.0f, recent_damage_taken_ - dt_sec * 10.0f);
+
     // [ORIGINAL] Enemy AI: simple state machine.
     // States: 0=idle, 1=approach, 2=attack, 3=retreat, 4=block
     // Decisions every 0.8s: based on distance to player + randomness.
@@ -1750,24 +1767,61 @@ void Game::host_update_gameplay(uint32_t dt) {
                 const float dist = std::fabs(enemy_pos_x_ - player_pos_x_);
                 if (dist <= 250.0f && player_fighter_.invuln_time <= 0 &&
                     !player_fighter_.is_dead) {
-                    // [ORIGINAL] Automatic block — player ALWAYS blocks when idle and enemy attacks
-                    // No chance, no randomness — 100% block if player is not doing anything
-                    // Block is a defensive reaction, not a player action or probabilistic event
-                    bool can_block = (move_state_ == 0 && hit_anim_ == 0 && 
-                                     !start_stance_playing_ && !player_fighter_.is_blocking);
-                    if (can_block) {
-                        // Activate block state
-                        player_fighter_.is_blocking = true;
-                        move_state_ = 11;  // block state
-                        
-                        // Play block animation
-                        if (assets_->animations().count("high_block")) {
-                            play_animation("high_block", false, 1);  // priority 1: defensive
-                            current_move_ = "HighBlock";
-                            int fc = assets_->animations()["high_block"].frame_count;
-                            hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
-                            std::printf("[BLOCK] Auto-block (player was idle)\n");
+                    // [ORIGINAL] Block is NOT automatic — it's a weighted roulette decision
+                    // (FUN_10171d80). When block_decision_pending_ is true, evaluate
+                    // TacticContext and call TacticSettings::choose() with candidates
+                    // including "Duck" (block). If "Duck" wins, activate block state.
+                    // BlockChance factors from tacticSettings.xml:
+                    //   Base=0 CounterFactor=0.05 HitFactor=0.15
+                    //   DamageFactor=0.5 AnimationFramesFactor=0.005 Limit=1
+                    if (block_decision_pending_) {
+                        block_decision_pending_ = false;
+                        bool can_block = (move_state_ == 0 && hit_anim_ == 0 &&
+                                          !start_stance_playing_ && !player_fighter_.is_blocking);
+                        if (can_block) {
+                            const TacticDef* td = tactics_.tactic("Standard");
+                            if (!td) td = tactics_.tactic("NoTables");
+                            if (td) {
+                                // Build TacticContext from current fight state
+                                float dist = std::fabs(enemy_pos_x_ - player_pos_x_);
+                                float player_max_hp = player_fighter_.max_health;
+                                TacticContext ctx;
+                                ctx.distance = dist;
+                                ctx.health = (player_max_hp > 0)
+                                    ? player_fighter_.health / player_max_hp : 1.0f;
+                                ctx.enemy_health = (player_max_hp > 0)
+                                    ? enemy_fighter_.health / player_max_hp : 1.0f;
+                                ctx.damage = recent_damage_taken_;
+                                ctx.hits = (float)enemy_hits_on_player_;
+                                // anim_frames: frames remaining in current animation
+                                ctx.anim_frames = (anim_fps_ > 0)
+                                    ? (hit_anim_ * anim_fps_ / 1000.0f) : 0.0f;
+
+                                // Roulette: include "Duck" (block) as a candidate
+                                static const std::vector<std::string> kBlockCandidates = {
+                                    "Duck", "ShortAttack", "ForwardStep"
+                                };
+                                int pick = tactics_.choose(*td, kBlockCandidates, ctx);
+                                // pick == 0 means "Duck" won the roulette
+                                if (pick == 0) {
+                                    // Activate block state
+                                    player_fighter_.is_blocking = true;
+                                    move_state_ = 11;  // block state
+                                    if (assets_->animations().count("high_block")) {
+                                        play_animation("high_block", false, 1);
+                                        current_move_ = "HighBlock";
+                                        int fc = assets_->animations()["high_block"].frame_count;
+                                        hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
+                                    }
+                                    std::printf("[BLOCK] Roulette chose Duck — block activated (dist=%.0f dmg=%.2f hits=%d)\n",
+                                                dist, recent_damage_taken_, enemy_hits_on_player_);
+                                } else {
+                                    std::printf("[BLOCK] Roulette did NOT choose Duck (pick=%d)\n", pick);
+                                }
+                            }
                         }
+                        // Reset timer: 0.6-1.0s random cooldown
+                        block_decision_cooldown_ = 0.6f + (float)(std::rand() % 400) / 1000.0f;
                     }
                     
                     if (player_fighter_.is_blocking) {
@@ -1831,6 +1885,9 @@ void Game::host_update_gameplay(uint32_t dt) {
                         player_fighter_.invuln_time = 0.4f;
                         player_fighter_.hit_stun_time = 0.25f;
                         player_hit_flash_ = 0.2f;
+                        // Track recent damage and hits for block decision context
+                        recent_damage_taken_ += final_damage;
+                        enemy_hits_on_player_++;
                         enemy_fighter_.hits_landed++;
                         spawn_hit_sparks(player_pos_x_, player_pos_y_ - 40, 8);
                         play_sound("f_pl_hit" +

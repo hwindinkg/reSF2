@@ -1,0 +1,173 @@
+================================================================================
+  Shadow Fight 2 — Frida Hook Analysis Report
+  Date: 2026-07-30
+  Device: Redmi 6A (id=684006127d29)
+  Process: Shadow Fight 2 (PID 7821, com.nekki.shadowfight)
+  Binary: ARM (Android), loaded at runtime from OBB via libs3e_android.so
+================================================================================
+
+1. BINARY LAYOUT
+================================================================================
+  Game binary: Loaded at runtime from OBB expansion file
+    Base address: 0x8f35f000
+    Size:         8,572,928 bytes (~8.2MB)
+    Architecture: ARM (32-bit), loaded as anonymous memory (/dev/zero)
+    Engine:       S3E (Igor3D/Marmalade SDK) via libs3e_android.so
+
+  Key modules:
+    libs3e_android.so    @ 0x91207000 (size 966656) — S3E engine loader
+    libsmartfox.so       @ 0x9131d000 (size 2179072) — SmartFox networking (multiplayer)
+    gralloc.mt6765.so    @ 0x90ad9000 (size 1318912) — GPU memory allocator (MT6765)
+
+  Binary identification:
+    - First bytes: ARM exception vectors (0xe59fc000 = ldr r12, [pc])
+    - Contains strings: "Model", "ShadowScale", "TACTICS", "attack", "block"
+    - 1564 ARM function prologues found (push {r4-r8,lr})
+    - Only 2 Thumb prologues in first 1MB → code is primarily ARM mode
+
+
+2. HOOKING RESULTS — PROFILING (20 second capture)
+================================================================================
+  Method: 51 function prologues sampled across the binary (50 in first 2MB + 1 target)
+
+  HOTTEST FUNCTION — Game Loop / Entity Processor:
+    Offset:    0x2f0e0 (absolute: 0x8f38e0e0)
+    Call rate: 14,340 calls / 20 sec = 717 calls/sec
+    Likely:    Main game tick / entity list traversal / scene update
+    Pattern:   push {r4-r8,lr}; mov r5,r0; ldr r0,[r0,#0xa4]
+               → reads object at r0+0xa4, does comparisons and branches
+
+  INPUT_DISPATCHER:
+    Offset:    0x692464 (absolute: 0x8f9f1464)
+    Call rate: ~3,688 calls / 15 sec = 246 calls/sec (first run)
+    Caller:    game+0x692fc8 (inside function at offset 0x69251c)
+    Arguments cycle through 4 fixed patterns:
+      Pattern A: r0=0x000  r1=0x289(649)  r2=0x12c(300)  r3=0x000
+      Pattern B: r0=0x147(327) r1=0x2a4(676) r2=0x000   r3=0x010(16)
+      Pattern C: r0=0x21a(538) r1=0x2a4(676) r2=0x06d(109) r3=0x010(16)
+      Pattern D: r0=0x570(1392) r1=0x170(368) r2=0x000  r3=0x12c(300)
+    Interpretation: These are screen coordinates (device: 720x1440):
+      - Pattern A: (649, 300) — upper right area → could be attack button
+      - Pattern B: (327, 676) — lower left area → could be movement/joystick
+      - Pattern C: (538, 676) — lower center → could be block button
+      - Pattern D: (1392, 368) — far right (y < screen width?) → could be special/input flag
+
+  Entity/Model Processor (hot_region_4):
+    Offset:    0x691ef0 (absolute: 0x8f9f0ef0)
+    Caller:    game+0x11f720 (inside function at offset 0x11f0a0)
+    Fixed args: r0=0x8892, r1=0x0, r2=0x60, r3=<varying heap ptr>
+    r3 alternates between: 0x867a5400, 0x86797eb0, 0x86799320
+    These are heap objects — likely model/entity instances being processed.
+
+  Functions NEVER called during idle/menu gameplay:
+    - hot_region_1 (offset 0x68f194)
+    - hot_region_2 (offset 0x690e44)
+    - hot_region_3 (offset 0x691e8c)
+    - hot_region_6 (offset 0x69251c) — the parent of INPUT_DISPATCHER!
+    - hot_region_7 (offset 0x693480)
+    - hot_region_8 (offset 0x694f18)
+    - 20 out of 21 broad-scan functions in first 2MB
+
+
+3. KEY FUNCTION MAP (ARM offsets from base 0x8f35f000)
+================================================================================
+  Offset       | Calls/sec | Description
+  -------------|-----------|----------------------------------------------
+  0x2f0e0      | 717/s     | Game loop / entity processor (MAIN TICK)
+  0x692464     | 246/s     | Input dispatcher (screen coord polling)
+  0x691ef0     | ~200/s    | Entity/model processor (heap object iteration)
+  0x69251c     | parent    | Parent function of input dispatcher
+  0x11f0a0     | parent    | Parent function of entity processor (large func)
+
+  Note: original hook_block.js targets x86 addresses (0x10xxxxxx).
+  ARM equivalents NOT yet mapped — requires Ghidra analysis of ARM binary.
+
+  String locations (for xref analysis):
+    0x8faa1422 — "attack interval (%i-%i) - %s"
+    0x8fa9f7e2 — "attack:"
+    0x8fa9f81c — "attack = %s/%s *empty*"
+    0x8fa6ba90 — "ShadowScale"
+    0x8fa96a34 — "TACTICS" (AI system?)
+
+
+4. CALL GRAPH (discovered)
+================================================================================
+  game_loop (0x2f0e0) — 717/s
+    └── calls sub-functions for entity updates
+
+  input_poll_loop (offset unknown, calls 0x692464)
+    └── bl INPUT_DISPATCHER @ game+0x692fc8
+        └── Called with 4 coordinate patterns per cycle
+        └── Returns 0x0 always (void-like)
+
+  entity_processor (0x11f0a0)
+    └── bl hot_region_4 @ game+0x11f720
+        └── Processes heap objects (r3 = entity pointer)
+        └── r0=0x8892 might be entity type ID
+
+
+5. OBSERVATIONS ABOUT BLOCK/MOVEMENT/AI
+================================================================================
+  - No touch events were captured during this session (game was in menu/idle)
+  - The INPUT_DISPATCHER patterns suggest the game polls 4 screen regions 
+    per frame — these likely correspond to:
+    * Movement joystick (lower-left)
+    * Attack button (right side)
+    * Block button (lower-center)
+    * Special/jump button
+
+  - The game loop at 0x2f0e0 runs at 717/s which is ~12x the expected 60fps.
+    This suggests it's called per-entity (717/60 ≈ 12 entities) or does 
+    multiple passes per frame.
+
+  - The entity processor at 0x11f0a0 processes heap objects with r0=0x8892,
+    which might be a fixed entity class/type identifier.
+
+  - AI system: "TACTICS" string found at 0x8fa96a34 but no AI-specific 
+    functions were detected in the hot path during idle gameplay.
+    AI functions likely activate only during active combat.
+
+  - Block mechanics: "block" strings found at 0x8fa56bc8 and 0x8fa6d7c7 
+    but these are from regex/TIFF library code, NOT game logic.
+    The actual game block logic would need to be found via:
+    1. Loading ARM binary into Ghidra
+    2. Cross-referencing with x86 binary (ShadowFight2.s86)
+
+
+6. RECOMMENDATIONS FOR NEXT STEPS
+================================================================================
+  1. Load ARM binary into Ghidra:
+     - Extract from OBB: /sdcard/Android/obb/com.nekki.shadowfight/
+     - Or dump from memory: frida -U 7821 -e "Memory.readByteArray(ptr('0x8f35f000'), 8572928)"
+
+  2. Key addresses to analyze in Ghidra:
+     - 0x2f0e0: Game loop (start here — find what entities it processes)
+     - 0x692464: Input dispatcher (what does it return? where do coords go?)
+     - 0x11f0a0: Entity processor (understand model struct layout)
+     - 0x691ef0: Per-entity callback (what does r0=0x8892 mean?)
+
+  3. For block-specific analysis:
+     - Run new profiling during ACTIVE COMBAT (not menu)
+     - Hook 0x2f0e0 with model pointer inspection
+     - Search for "defend", "guard", "shield" strings in ARM binary
+     - Compare with x86 binary to find equivalent block functions
+
+  4. Map x86 → ARM function correspondence:
+     x86 AI_DECISION_LOOP (0x10171d80) → ARM ???
+     x86 MODEL_STEP (0x10161ad0) → ARM ???
+     x86 MODEL_START_ACTION (0x1015C540) → ARM ???
+     Need string-based matching or function signature comparison.
+
+
+7. RAW DATA FILES
+================================================================================
+  - frida_raw_output.txt        — First profiling run (15s)
+  - frida_comprehensive_stdout.txt — Full 20s capture (26,627 lines)
+  - frida_device_logs.txt       — Logs saved on device (275KB, 5000 lines)
+  - profile_game.js             — First profiling script
+  - hook_comprehensive.js       — Comprehensive hook script v2
+  - hook_block.js               — Original x86-targeted hook (needs ARM port)
+
+================================================================================
+  END OF REPORT
+================================================================================

@@ -1,0 +1,26 @@
+     ____
+    / _  |   Frida 16.2.1 - A world-class dynamic instrumentation toolkit
+   | (_| |
+    > _  |   Commands:
+   /_/ |_|       help      -> Displays the help system
+   . . . .       object?   -> Display information about 'object'
+   . . . .       exit/quit -> Exit
+   . . . .
+   . . . .   More info at https://frida.re/docs/home/
+   . . . .
+   . . . .   Connected to Redmi 6A (id=684006127d29)
+Attaching...
+=== SF2 ARM Profiling ===
+Game base: 0x8f35f000
+Scanning for function prologues...
+Found 1564 function prologues
+Hooked 51 functions
+
+=== Profiling for 15 seconds... ===
+Play the game now! Attack, block, move...
+
+[Redmi 6A::PID::7821 ]-> console.log('keeping alive...'); var _keepAlive = setInterval(function(){}, 1000);
+keeping alive...
+[Redmi 6A::PID::7821 ]-> 
+[Redmi 6A::PID::7821 ]-> 
+Thank you for using Frida!

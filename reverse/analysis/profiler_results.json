@@ -1,0 +1,33 @@
+{
+  "highFreq": [
+    {
+      "offset": "0x2f0e0",
+      "count": 13815,
+      "name": "GAME_LOOP",
+      "known": true
+    },
+    {
+      "offset": "0x2f0e0",
+      "count": 13815,
+      "name": null,
+      "known": false
+    },
+    {
+      "offset": "0x692464",
+      "count": 3684,
+      "name": "INPUT_DISPATCHER",
+      "known": true
+    },
+    {
+      "offset": "0x691ef0",
+      "count": 2763,
+      "name": "ENTITY_PROC",
+      "known": true
+    }
+  ],
+  "medFreq": [],
+  "lowFreq": [],
+  "totalHooked": 82,
+  "totalWithCalls": 11,
+  "duration": 15
+}
