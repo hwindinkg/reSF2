@@ -62,18 +62,51 @@ int Loop::run(plat::Platform& platform, IGame& game) {
             continue;
         }
 
-        // Frame timing: variable-step, clamped to 200 ms
-        const auto now = platform.now_ms();
-        const auto raw_dt = now > last_ms ? static_cast<std::uint32_t>(now - last_ms) : 0u;
-        const auto dt = std::min<std::uint32_t>(raw_dt, 200u);
-        last_ms = now;
+        // ---- Frame timing ----
+        // [ORIGINAL] game+0x64400. Verified against the live ARM binary and
+        // confirmed by Ghidra decompilation; see reverse/analysis/RUNTIME_MAP.md
+        // section 5 and PORT_GAPS.md GAP-1.
+        //
+        // This was previously a variable-step loop (dt = now - last_ms, clamped
+        // to 200 ms) with no frame limiter at all. The original is a FIXED
+        // timestep:
+        //
+        //   * the interval is an integer number of milliseconds, read from the
+        //     loop object at this+0x08 as int64. Captured live: 16. Note that
+        //     1000/60 truncates to 16, so the real cap is 62.5 fps -- the
+        //     <FrameRate Value="60"/> in internalSettings.xml is nominal only.
+        //   * every frame receives exactly that interval, never the measured
+        //     wall-clock delta, so behaviour is deterministic under load.
+        //   * the leftover time is slept off in an inner spin loop that
+        //     re-reads the clock each pass and carries no remainder into the
+        //     next frame.
+        const auto t0 = platform.now_ms();
 
-        // Update
-        game.on_update(platform, dt);
+        // Update with the fixed interval (never the measured delta).
+        game.on_update(platform, static_cast<std::uint32_t>(frame_interval_ms_));
 
         // Render
         game.on_render(platform);
         platform.swap_buffers();
+
+        // ---- inner wait loop (game+0x644C0) ----
+        // Break when interval <= elapsed. The original's encoding is
+        // `cmp/cmpeq/bls`, i.e. the next frame is entered as soon as the budget
+        // is spent, including the exact-boundary case.
+        while (true) {
+            const auto elapsed = platform.now_ms() - t0;
+            if (static_cast<std::int64_t>(frame_interval_ms_) <=
+                static_cast<std::int64_t>(elapsed)) {
+                break;
+            }
+            const auto remaining = static_cast<std::int64_t>(t0 + frame_interval_ms_) -
+                                   static_cast<std::int64_t>(platform.now_ms());
+            if (remaining < 0) break;   // bmi -> frame top
+            if (remaining == 0) break;
+            platform.sleep_ms(static_cast<std::uint32_t>(remaining));
+        }
+
+        last_ms = t0;
     }
 
     game.on_shutdown(platform);

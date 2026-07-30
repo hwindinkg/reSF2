@@ -6,9 +6,18 @@ Frida capture, not by inference from the JS port. Addresses are `game+off`
 
 ---
 
-## GAP-1 — Frame timing is integer milliseconds, not float 1/60  [CONFIRMED]
+## GAP-1 — Frame timing is integer milliseconds, not float 1/60  [PORTED 2026-07-30]
 
-**reSF2 now:** `engine/core/game_loop.hpp`
+**Fixed in `engine/runtime/loop.cpp`.** The real runtime loop was worse than
+first described: it was *variable-step* (`dt = now - last_ms`, clamped to
+200 ms) with no frame limiter at all, so gameplay speed tracked the host frame
+rate. It now steps by a fixed integer 16 ms and sleeps the remainder in the
+inner spin loop. Verified by `tests/test_frame_timing_golden.cpp` (23 checks)
+and by Ghidra's decompilation of `FUN_8f0bb400`.
+
+The legacy helper below is still unported; it is a separate, less-used class.
+
+**reSF2 legacy helper:** `engine/core/game_loop.hpp`
 ```cpp
 GameLoop(float fixed_dt = 1.0f / 60.0f)   // 0.016666667
 accumulator_ += real_dt;                  // float accumulator
@@ -188,9 +197,81 @@ and margins are the missing piece.
 
 ## Priority for a 1:1 port
 
-1. **GAP-1 + GAP-2** — timing. Everything downstream is frame-quantised, so
-   fixing damage or AI before the timestep is pointless.
-2. **GAP-3** — damage attribute + style stages.
+1. ~~**GAP-1**~~ — **DONE**: `engine/runtime/loop.cpp` now uses the original's
+   fixed integer timestep. `engine/core/game_loop.hpp` (legacy) still differs.
+2. **GAP-2** — pass the four per-frame doubles instead of one float.
+3. **GAP-3** — **formula now fully recovered**, see the section at the end of
+   this file. Implementing it needs the attribute system.
 3. **GAP-4** — replace the FSM with the weight/roulette model and load the
    `.tbs`/`.stb`/`.sts`/`.atf` tables.
 4. **GAP-5** — capsule/edge collision geometry.
+
+---
+
+# GAP-3 RESOLVED — the real damage formula (Ghidra, 2026-07-30)
+
+`Model::getTotalDamage` = **`game+0x4527B4`**, found via the single xref to
+`"Model::getTotalDamage - wtf so strong"` (`0x8F79A2A0`) and decompiled with
+Ghidra against the relocated dump loaded at base `0x8F057000`.
+
+## Verified formula
+
+```
+getTotalDamage(self, hit, is_ranged, weapon, ctx) -> float
+    enemy = self[0x1E4]
+
+    base = powf(2.0, baseAttr * baseWeight)      # weight from game+0x60674C
+    f1   = powf(2.0, attr1 * w1)                 # game+0x4A94F0(self, is_ranged)
+    f2   = powf(2.0, attr2 * w2)                 # game+0x4A95A8(enemy, weapon)
+    f3   = game+0x60E794(...)                    # defense / attribute difference
+    add  = hit[0x48] + enemy[0x774]
+
+    dmg  = base * f2 * f1 * f3 * add
+    dmg  = max(dmg, 0.0)
+
+    crit = game+0x42A8A8(hit)[1]
+    dmg  = dmg * crit * enemy[0x678] * enemy[0x6AC]
+
+    assert 0.0 <= dmg <= 100000.0                # DAT clamps, verified
+    return dmg
+```
+
+## What reSF2 gets wrong
+
+`engine/game/game.cpp` (~1840, ~3641) computes:
+```cpp
+attribute_multiplier = 1.0f + damage_factor_base * attr;   // LINEAR
+raw = base * attribute_multiplier * block * attack * crit * 2.0f;
+```
+
+Three concrete errors:
+
+1. **The attribute curve is exponential, not linear.** Both factor helpers
+   (`game+0x4A94F0`, `game+0x4A95A8`) return
+   `powf(2.0, weight * attribute)`, and `1.0f` (`0x3F800000`) when their
+   selector argument is null. The engine's `1 + factor*attr` is a different
+   function; they agree only at `attr == 0`, which is exactly the degenerate
+   case the engine currently hardcodes — so the bug is invisible today and will
+   appear the moment attributes are implemented.
+2. **The `× 2.0` is not a separate term.** `0x40000000` is the *base* of the
+   `powf`, i.e. `2.0` is the curve base, not a trailing multiplier. Keeping
+   both double-counts it.
+3. **Two multipliers and an additive pair are missing entirely:**
+   `hit[0x48] + enemy[0x774]` (additive, applied before the clamp) and
+   `enemy[0x678] * enemy[0x6AC]` (applied after). The clamp itself
+   (`0.0 .. 100000.0`) is also absent.
+
+Note `f1` takes `self`/`is_ranged` while `f2` takes `enemy`/`weapon` — the
+attacker and defender contribute through *different* helpers, which is the
+"DamageAttribute vs DefenseAttribute" split the tracer prints.
+
+## Provenance
+
+Ghidra MCP at `127.0.0.1:8089`, program `game_region_runtime.bin` imported as
+`ARM:LE:32:v7` with image base `0x8F057000` (~9800 functions auto-analysed).
+With that base, every `game+off` address in these notes is directly usable.
+
+Cross-check: Ghidra's decompilation of the main loop (`FUN_8f0bb400`)
+independently reproduces the hand-reconstructed control flow in section 5 of
+RUNTIME_MAP.md, including the inverted `interval <= elapsed` comparison and the
+inner spin loop — so the reconstruction method itself is validated.
