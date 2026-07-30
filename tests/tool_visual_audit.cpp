@@ -14,7 +14,11 @@
 // frame height and the two dojo fighters at ~36% / ~64% of the width.
 //
 // Usage:
-//   tool_visual_audit [asset_root] [out_dir]
+//   tool_visual_audit [asset_root] [out_dir] [location]
+//
+// The optional location name is useful for checking layers that borrow their
+// atlas from another location via <Layer Path="locations/other/">, e.g.
+// waterfall_small, flying_rocks_small, spaceship_thorny.
 
 #include "headless_test_runner.hpp"
 
@@ -47,6 +51,7 @@ void print_section(const char* title) {
 int main(int argc, char** argv) {
     const std::string asset_root = argc > 1 ? argv[1] : "assets";
     const std::string out_dir = argc > 2 ? argv[2] : "screenshots_audit";
+    const std::string location = argc > 3 ? argv[3] : "";
 
     test::HeadlessTestConfig cfg;
     cfg.asset_root = asset_root;
@@ -57,6 +62,7 @@ int main(int argc, char** argv) {
     // scene over it, and Dialogue does not call host_update_gameplay, so the
     // fighter would never animate and the audit would measure a frozen pose.
     cfg.start_scene = "dojo";
+    cfg.start_location = location;
 
     test::HeadlessTestRunner runner(cfg);
     if (!runner.init()) {
@@ -100,7 +106,8 @@ int main(int argc, char** argv) {
         if (!pixels.empty() && w > 0 && h > 0) {
             std::error_code ec;
             std::filesystem::create_directories(out_dir, ec);
-            const std::string path = out_dir + "/audit_dojo.png";
+            const std::string path =
+                out_dir + "/audit_" + (location.empty() ? "dojo" : location) + ".png";
             if (stbi_write_png(path.c_str(), w, h, 4, pixels.data(), w * 4)) {
                 std::printf("\nwrote %s (%dx%d)\n", path.c_str(), w, h);
             } else {

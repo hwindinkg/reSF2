@@ -47,6 +47,11 @@ bool HeadlessTestRunner::init() {
     if (!config_.start_scene.empty()) {
         game_->set_start_scene(config_.start_scene);
     }
+    // Same ordering constraint: on_init loads the location, so the override has
+    // to be in place first.
+    if (!config_.start_location.empty()) {
+        game_->set_start_location(config_.start_location);
+    }
 
     // Initialise game (loads assets, registers scenes, etc.)
     game_->on_init(*platform_);

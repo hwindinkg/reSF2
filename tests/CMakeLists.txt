@@ -155,6 +155,20 @@ target_link_libraries(test_location_parser PRIVATE
 target_compile_features(test_location_parser PRIVATE cxx_std_23)
 add_test(NAME test_location_parser COMMAND test_location_parser WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# <Layer Path="locations/other/"> borrows an atlas from another location (26
+# layers do). The attribute was dropped by the parser, so those atlases were
+# searched under the wrong directory and the layers rendered nothing.
+add_executable(test_location_layer_path
+    test_location_layer_path.cpp
+)
+target_link_libraries(test_location_layer_path PRIVATE
+    resf2_format
+    resf2_warnings
+)
+target_compile_features(test_location_layer_path PRIVATE cxx_std_23)
+add_test(NAME test_location_layer_path COMMAND test_location_layer_path
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # World/model placement invariants against the real shipped assets.
 # This is the check that was missing while the fighter rendered 138 world
 # units below the floor and the suite still reported all green.
