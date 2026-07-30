@@ -20,6 +20,24 @@ namespace resf2::game {
 namespace plist = resf2::reverse::plist;
 namespace fmt = resf2::format;
 
+// [ORIGINAL] Gather <Key Type="." PressType="."/> bindings from a condition
+// subtree. <Keys> can sit inside nested <Operator> elements for composite
+// conditions (22 of the 325 blocks do), so this recurses instead of looking a
+// fixed depth down.
+static void collect_move_keys(const fmt::XmlNode& node, MoveDef& move) {
+    if (node.name == "Key") {
+        move.key_types.push_back(node.attr("Type"));
+        // Absent PressType means Tap. Two moves can share a key and differ only
+        // here, so dropping it makes every hold resolve to its tap variant.
+        auto press = node.attr("PressType");
+        if (press.empty()) press = "Tap";
+        if (press == "Hold") move.needs_hold = true;
+        move.key_press_types.push_back(std::move(press));
+        return;
+    }
+    for (const auto& child : node.children) collect_move_keys(child, move);
+}
+
 // ---------- load_atlas ----------
 
 void AssetManager::load_atlas(const std::string& name, const std::string& loc,
@@ -745,6 +763,14 @@ void AssetManager::load_moves(const std::string& asset_root) {
                 for (const auto& key : sub.children) {
                     if (key.name == "Key") {
                         move.key_types.push_back(key.attr("Type"));
+                        // [ORIGINAL] PressType distinguishes a tap from a hold.
+                        // Absent means Tap. Two moves can share a key and
+                        // differ only here, so dropping it made every hold
+                        // resolve to the tap variant.
+                        auto press = key.attr("PressType");
+                        if (press.empty()) press = "Tap";
+                        if (press == "Hold") move.needs_hold = true;
+                        move.key_press_types.push_back(std::move(press));
                     }
                 }
             } else if (sub.name == "Locks") {
@@ -795,6 +821,17 @@ void AssetManager::load_moves(const std::string& asset_root) {
                 for (const auto& cond : sub.children) {
                     if (cond.name == "CurrentAnimation") {
                         move.required_current_animation = cond.attr("Name");
+                    } else {
+                        // [ORIGINAL] The key bindings live at
+                        //   <Move><Conditions><Keys><Key Type=.. PressType=../>
+                        // NOT directly under <Move>, and 22 of the 325 <Keys>
+                        // blocks sit inside nested <Operator Type="Or">
+                        // elements expressing ALTERNATIVE chords for the same
+                        // move. Because only the <Move><Keys> path was handled,
+                        // key_types came back empty for every bound move -- no
+                        // move was reachable from input at all, which is why the
+                        // controls did not respond.
+                        collect_move_keys(cond, move);
                     }
                 }
             } else if (sub.name == "Intervals" || sub.name == "Interval") {

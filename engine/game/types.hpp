@@ -108,6 +108,13 @@ struct MoveDef {
     int self_uninterrupt_start = -1;
     int self_uninterrupt_end = -1;
     std::vector<std::string> key_types;
+    // [ORIGINAL] <Key Type="Punch" PressType="Tap|Hold"/>
+    // Parallel to key_types. 419 bindings are Tap and 212 are Hold, and the two
+    // select DIFFERENT moves from the same key -- dropping it made every hold
+    // behave like a tap, so charged/held attacks were unreachable.
+    std::vector<std::string> key_press_types;
+    // True when any binding of this move requires a held key.
+    bool needs_hold = false;
 
     int key_count = 0;
     std::string direction;
