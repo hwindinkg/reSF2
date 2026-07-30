@@ -1,0 +1,99 @@
+{
+  "_comment": [
+    "Golden reference for the ORIGINAL Shadow Fight 2 frame timing.",
+    "Captured live from the ARM binary on Redmi 6A / Android 9 via",
+    "reverse/frida_hooks/validate_main_loop.js and record_golden_trace.js.",
+    "Loop: game+0x64400. See reverse/analysis/RUNTIME_MAP.md section 5 and",
+    "reverse/analysis/PORT_GAPS.md GAP-1 / GAP-2.",
+    "",
+    "Every value here was read out of the live process or decoded from the",
+    "relocated image -- none of it is inferred from the JS port."
+  ],
+
+  "source": {
+    "device": "Redmi 6A, Android 9, MT6765, arm32",
+    "apk": "com.nekki.shadowfight",
+    "loop_function": "game+0x64400",
+    "step_function": "game+0x64230",
+    "captured": "2026-07-30"
+  },
+
+  "frame_interval": {
+    "_how": "read live from the loop object at this+0x08 (LDRD r4,r5,[r8,#8])",
+    "field_offset": 8,
+    "type": "int64_ms",
+    "value_ms": 16,
+    "hi_word": 0,
+    "_note": "1000/60 = 16.666 truncated to 16, so the real cap is 62.5 fps",
+    "implied_fps": 62.5,
+    "nominal_framerate_xml": 60,
+    "_xml_note": "internalSettings.xml says <FrameRate Value=\"60\"/>; that is nominal, the loop period is 16ms"
+  },
+
+  "delta_conversion": {
+    "_how": "vcvt.f64.f32 then vdiv.f64 by a literal at 0x8F0BB2B0",
+    "divisor": 1000.0,
+    "divisor_bits_hi": "0x408F4000",
+    "divisor_bits_lo": "0x00000000",
+    "precision": "double",
+    "_note": "delta is integer milliseconds / 1000.0 as double, so dt is quantised to 1ms",
+    "expected_dt_for_16ms": 0.016,
+    "forbidden_dt_examples": [0.0166666667, 0.01666666753590107],
+    "_forbidden_note": "a float 1/60 accumulator produces values the original can never emit"
+  },
+
+  "step_state_object": {
+    "_how": "vstr targets in game+0x64230",
+    "_note": "four doubles are written per frame, all in seconds",
+    "doubles_at": [8, 16, 24, 32],
+    "count": 4,
+    "current_engine_passes": 1,
+    "_gap": "reSF2 passes a single float dt; three values are dropped (GAP-2)"
+  },
+
+  "wait_loop": {
+    "_how": "disassembly of game+0x644C0..game+0x644F0",
+    "kind": "inner_spin",
+    "reenters_at_offset": "0x644C0",
+    "does_not_fall_through_to_frame_top": true,
+    "interval_reread_every_spin": true,
+    "next_frame_condition": "interval <= elapsed",
+    "branch": "cmp r5,r1 / cmpeq r4,r0 / bls",
+    "_note": "no fractional remainder is carried between frames -- not an accumulator",
+    "yield_calls_per_frame": {
+      "pump": { "site": "BL @0x64430", "argument_ms": 0 },
+      "sleep": { "site": "BL @0x644EC", "argument_ms": "remaining = (t0 + interval) - now" }
+    },
+    "negative_remaining_skips_yield": true,
+    "negative_remaining_branch": "bmi -> 0x64420"
+  },
+
+  "per_frame_api_order": [
+    "s3eTimerGetMs",
+    "s3eDeviceYield(0)",
+    "s3eKeyboardUpdate",
+    "s3ePointerUpdate",
+    "s3eAccelerometerGetX",
+    "s3eAccelerometerGetY",
+    "s3eAccelerometerGetZ",
+    "step(game+0x64230)",
+    "s3eDeviceCheckQuitRequest",
+    "render(vtable+0x2C)",
+    "s3eTimerGetMs",
+    "s3eDeviceYield(remaining)"
+  ],
+
+  "exit_conditions": {
+    "startup_gate": {
+      "_how": "beq +0x64504 at entry",
+      "condition": "this->vtable[0x08]() == 0",
+      "returns": 0
+    },
+    "quit_requested": {
+      "_how": "0x6450C path",
+      "condition": "s3eDeviceCheckQuitRequest() != 0 && ctx->[0x34] == 0",
+      "returns": -1,
+      "_note": "if ctx->[0x34] != 0 the quit is deferred: calls game+0x14870 and resumes at +0x644B0"
+    }
+  }
+}
