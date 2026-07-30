@@ -496,6 +496,12 @@ endfunction()
 # only logs (game.cpp:779), so no story event is ever dispatched.
 add_spec_test(test_quest_spec)
 
+# Settings / localization: userSettings.xml is read at startup by the original,
+# but reSF2 still hardcodes rus and does not yet drive the language screen from
+# the shipped config.
+add_spec_test(test_settings_spec)
+set_tests_properties(test_settings_spec PROPERTIES WILL_FAIL FALSE)
+
 # Campaign data: StageParser drops opponent equipment (2200 <Item>), perks,
 # <AttributesAlign> and per-fight <Rules>, plus 11 warrior attributes that the
 # recovered damage formula needs.
