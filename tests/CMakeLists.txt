@@ -467,6 +467,46 @@ add_test(NAME test_attributes_golden
 set_tests_properties(test_attributes_golden PROPERTIES TIMEOUT 60)
 
 # ---------------------------------------------------------------------------
+# Specification tests.
+#
+# These are written against the SHIPPED DATA and the reversed binary, not
+# against the engine's current behaviour. The original game satisfies them by
+# construction; reSF2 does not yet. A failure therefore names a concrete
+# missing capability rather than a regression, which is the point: it turns
+# "the shop/menu/story doesn't really work" into an enumerated, checkable list.
+#
+# They are marked WILL_FAIL where the capability is known to be absent, so the
+# suite stays green while still recording the gap. Remove that property as each
+# subsystem lands.
+# ---------------------------------------------------------------------------
+function(add_spec_test test_name)
+    add_executable(${test_name} ${test_name}.cpp)
+    target_link_libraries(${test_name} PRIVATE
+        resf2_format
+        resf2_reverse
+        resf2_warnings
+    )
+    target_compile_features(${test_name} PRIVATE cxx_std_23)
+    add_test(NAME ${test_name} COMMAND ${test_name}
+             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
+endfunction()
+
+# Story/quest engine: quests.xml is never parsed and host_trigger_quest_event
+# only logs (game.cpp:779), so no story event is ever dispatched.
+add_spec_test(test_quest_spec)
+
+# Campaign data: StageParser drops opponent equipment (2200 <Item>), perks,
+# <AttributesAlign> and per-fight <Rules>, plus 11 warrior attributes that the
+# recovered damage formula needs.
+add_spec_test(test_stage_spec)
+
+# Diagnostic: dump what the XML reader actually produced for a given file.
+add_executable(tool_xml_probe tool_xml_probe.cpp)
+target_link_libraries(tool_xml_probe PRIVATE resf2_format resf2_warnings)
+target_compile_features(tool_xml_probe PRIVATE cxx_std_23)
+
+# ---------------------------------------------------------------------------
 # tool_visual_audit — not a test, a diagnostic. Renders the dojo headlessly and
 # prints every geometric quantity the on-screen composition depends on (camera
 # framing, fighter transform, bag model), plus a PNG capture. Used to turn
