@@ -97,6 +97,13 @@ void test_save_roundtrip() {
     original.owned_items = {"weapon_fists", "armor_leather", "helmet_basic"};
     original.equipped_weapon = "weapon_fists";
     original.equipped_armor = "armor_leather";
+    original.zone_unlocked["ZONE_1"] = true;
+    original.battle_unlocked["ZONE_1|BOSS_LYNX"] = false;
+    original.tutorial_state = "FIRST_FIGHT";
+    original.sound_volume = 0.25f;
+    original.music_volume = 0.5f;
+    original.sound_muted = false;
+    original.music_muted = true;
 
     save::SaveManager mgr;
     CHECK(mgr.save(original, path));
@@ -122,6 +129,13 @@ void test_save_roundtrip() {
     CHECK(loaded.equipped_helmet.empty());
     CHECK(loaded.equipped_ranged.empty());
     CHECK(loaded.equipped_magic.empty());
+    CHECK_EQ(loaded.zone_unlocked.size(), (size_t)0);
+    CHECK_EQ(loaded.battle_unlocked.size(), (size_t)0);
+    CHECK(loaded.tutorial_state == "MOVE");
+    CHECK(loaded.sound_volume == 1.0f);
+    CHECK(loaded.music_volume == 1.0f);
+    CHECK(!loaded.sound_muted);
+    CHECK(!loaded.music_muted);
 
     cleanup(path);
     END_TEST;
@@ -207,6 +221,42 @@ void test_missing_braces() {
     save::SaveManager mgr;
     save::SaveData data;
     CHECK(!mgr.load(path, data));
+
+    cleanup(path);
+    END_TEST;
+}
+
+void test_xml_roundtrip() {
+    TEST("XML save roundtrip preserves fields");
+    auto path = temp_save_path();
+
+    save::SaveData data;
+    data.currency = 321;
+    data.level = 2;
+    data.wins = 7;
+    data.losses = 1;
+    data.completed_levels = {"ZONE_1/FirstFight"};
+    data.owned_items = {"weapon_fists"};
+    data.equipped_weapon = "weapon_fists";
+    data.zone_unlocked["ZONE_1"] = true;
+    data.tutorial_state = "MOVE";
+    data.sound_volume = 1.0f;
+    data.music_volume = 1.0f;
+
+    save::SaveManager mgr;
+    mgr.set_asset_root("assets/files/assets");
+    CHECK(mgr.save(data, path));
+    save::SaveData loaded;
+    CHECK(mgr.load(path, loaded));
+    CHECK_EQ(loaded.currency, 321);
+    CHECK_EQ(loaded.level, 2);
+    CHECK_EQ(loaded.wins, 7);
+    CHECK_EQ(loaded.losses, 1);
+    CHECK_EQ(loaded.completed_levels.size(), (size_t)1);
+    CHECK_EQ(loaded.owned_items.size(), (size_t)1);
+    CHECK(loaded.equipped_weapon == "weapon_fists");
+    CHECK_EQ(loaded.zone_unlocked.size(), (size_t)0);
+    CHECK(loaded.tutorial_state == "MOVE");
 
     cleanup(path);
     END_TEST;
@@ -468,6 +518,7 @@ int main() {
     test_load_nonexistent();
     test_corrupt_save();
     test_missing_braces();
+    test_xml_roundtrip();
     test_save_default_path();
     test_save_manager_custom_path();
 
