@@ -492,18 +492,19 @@ function(add_spec_test test_name)
     set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
 endfunction()
 
-# Story/quest engine: quests.xml is never parsed and host_trigger_quest_event
-# only logs (game.cpp:779), so no story event is ever dispatched.
+# Progression: stages.xml / quests.xml / perks.xml / forge.xml drive the story
+# map, quest dispatch, passive perks and forge unlock flow.
+add_spec_test(test_stage_spec)
 add_spec_test(test_quest_spec)
 
+# Combat model: internalSettings.xml plus moves.xml determine the damage/block
+# curve and the hit windows.
 # Settings / localization: userSettings.xml is read at startup by the original,
 # and reSF2 now reads the shipped localization file instead of hardcoding rus.
 add_spec_test(test_settings_spec)
 
 # Save system: usersDefault.xml / user.xml are parsed, but the XML loader still
 # needs more 1:1 coverage for edge cases from the shipped save format.
-add_spec_test(test_stage_spec)
-
 # Control scheme: moves.xml drives every binding. PressType (Tap vs Hold) was
 # being dropped, collapsing 212 held-key moves onto their tap variants.
 # Needs resf2_game for the move loader.
