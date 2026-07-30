@@ -2751,6 +2751,14 @@ private:
                                       "hit_blade");
             load_texture_atlas_to_hud(base/"textures"/"fight"/"hits",
                                       "hitBatch");
+            // [ORIGINAL] Loose icons in textures/misc used by the shop and the
+            // item panels. These were being drawn as Unicode glyphs (a sword
+            // "\u2694", a diamond "\u25c6", a star "\u2605") standing in for the
+            // real art, which is present in the dump.
+            const auto misc = base/"textures"/"misc";
+            for (const char* n : {"Damage", "Shield", "ruby", "credit",
+                                  "energy", "Arrow", "VS"})
+                load_hud_png(misc / (std::string(n) + ".png"), n);
         }
         std::printf("  HUD textures loaded: %zu\n", assets_->hud_textures().size());
     }

@@ -1,0 +1,2 @@
+TypeError: cannot read property 'base' of null
+    at <eval> (E:\reSF2\reverse\frida_hooks\find_game_code.js:7)

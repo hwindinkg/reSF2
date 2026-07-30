@@ -1473,6 +1473,19 @@ static std::vector<resf2::format::ListItem> shop_items_for_category(
     return result;
 }
 
+// [ORIGINAL] Look up a single item by its list.xml Name.
+// Used for the equipped-item rows, which need the item's own data (notably
+// UpgradeLevel) and not just its id.
+static const resf2::format::ListItem* shop_find_item(
+    SceneContext& ctx, const std::string& name) {
+    auto* list_data = ctx.host.host_get_list_data();
+    if (!list_data || name.empty()) return nullptr;
+    for (const auto& item : list_data->items) {
+        if (item.name == name) return &item;
+    }
+    return nullptr;
+}
+
 // Map item type (from list.xml) to equipment slot name.
 static std::string shop_slot_for_type(const std::string& type) {
     if (type == "Weapon") return "weapon";
@@ -1877,13 +1890,21 @@ void ShopScene::on_render(SceneContext& ctx) {
                 ctx.host.host_render_text(name, icon_x + icon_sz + 10.0f * L.s,
                                           y + 8.0f * L.s, name_ts,
                                           70, 40, 20, 255);
-                // Star rating placeholder (always ★ 4 for now; the original
-                // reads rarity from the item's stats block).
-                ctx.host.host_render_text("\xe2\x98\x85 4",
-                                          icon_x + icon_sz + 10.0f * L.s,
-                                          y + 28.0f * L.s,
-                                          shop_text_scale(18.0f * L.s),
-                                          200, 170, 60, 255);
+                // [ORIGINAL] The stars are the item's UpgradeLevel from
+                // list.xml, not a rarity: the binary has no "Rarity" or "Rank"
+                // string anywhere, only UpgradeLevel / UpgradeNumber /
+                // UpgradeList. This was hardcoded to "4" for every item.
+                if (const auto* def = shop_find_item(ctx, equipped)) {
+                    const int stars = def->upgrade_level;
+                    std::string rating;
+                    for (int i = 0; i < stars; ++i) rating += "\xe2\x98\x85";
+                    if (rating.empty()) rating = "\xe2\x98\x86";  // unupgraded
+                    ctx.host.host_render_text(rating,
+                                              icon_x + icon_sz + 10.0f * L.s,
+                                              y + 28.0f * L.s,
+                                              shop_text_scale(18.0f * L.s),
+                                              200, 170, 60, 255);
+                }
             } else {
                 // Empty slot placeholder
                 r.draw_filled_rect_screen(icon_x, icon_y, icon_sz, icon_sz,
@@ -1943,9 +1964,18 @@ void ShopScene::on_render(SceneContext& ctx) {
             // Damage bar (sword icon + orange bar)
             const float bar_y = info_y;
             // Sword icon placeholder (text "â")
-            ctx.host.host_render_text("\xe2\x9a\x94", stat_x, bar_y,
-                                      shop_text_scale(22.0f * L.s),
-                                      230, 77, 77, 255);
+            // [ORIGINAL] textures/misc/Damage.png. This drew a Unicode sword
+            // glyph as a stand-in even though the real art ships in the dump;
+            // the glyph is now only a fallback if the texture is absent.
+            {
+                const float icon = 22.0f * L.s;
+                if (!ctx.host.host_render_ui_texture("Damage", stat_x, bar_y,
+                                                     icon, icon)) {
+                    ctx.host.host_render_text("\xe2\x9a\x94", stat_x, bar_y,
+                                              shop_text_scale(22.0f * L.s),
+                                              230, 77, 77, 255);
+                }
+            }
             const float bar_x = stat_x + 28.0f * L.s;
             const float bar_w = L.stat_bar_w - 28.0f * L.s;
             const float bar_h = L.stat_bar_h;
@@ -2027,10 +2057,19 @@ void ShopScene::on_render(SceneContext& ctx) {
                 if (buy_label.empty()) buy_label = "BUY";
                 std::string price_str = std::to_string(item.price);
                 // gem icon (placeholder)
-                ctx.host.host_render_text("\xe2\x97\x86",
-                    L.buy_btn_x + 14.0f * L.s,
-                    L.buy_btn_y + (L.buy_btn_h - L.buy_btn_h * 0.55f) * 0.5f,
-                    btn_ts, 200, 230, 255, 255);
+                // [ORIGINAL] textures/misc/ruby.png is the gem currency icon;
+                // the Unicode diamond is now only a fallback.
+                {
+                    const float gy =
+                        L.buy_btn_y + (L.buy_btn_h - L.buy_btn_h * 0.55f) * 0.5f;
+                    const float gsz = L.buy_btn_h * 0.55f;
+                    if (!ctx.host.host_render_ui_texture(
+                            "ruby", L.buy_btn_x + 14.0f * L.s, gy, gsz, gsz)) {
+                        ctx.host.host_render_text("\xe2\x97\x86",
+                            L.buy_btn_x + 14.0f * L.s, gy,
+                            btn_ts, 200, 230, 255, 255);
+                    }
+                }
                 // "BUY <price>" text
                 ctx.host.host_render_text(buy_label + " " + price_str,
                     L.buy_btn_x + L.buy_btn_w * 0.5f - 20.0f * L.s,

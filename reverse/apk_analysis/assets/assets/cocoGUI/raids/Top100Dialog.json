@@ -1,0 +1,1095 @@
+{
+  "ID": "e5202e35-475f-4157-9c58-fb7693dc430c",
+  "Version": "3.10.0.0",
+  "Name": "Top100Dialog",
+  "Content": {
+    "Content": {
+      "Animation": {
+        "Duration": 0,
+        "Speed": 1.0,
+        "Timelines": [],
+        "ctype": "TimelineActionData"
+      },
+      "AnimationList": [],
+      "ObjectData": {
+        "Tag": 106,
+        "Children": [
+          {
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/scrolls/common/Roll_MAP.jpg",
+              "Plist": ""
+            },
+            "Scale9OriginX": 126,
+            "Scale9OriginY": 251,
+            "Scale9Width": 132,
+            "Scale9Height": 260,
+            "AnchorPoint": {
+              "ScaleX": 0.5,
+              "ScaleY": 0.5
+            },
+            "Position": {
+              "X": 512.0,
+              "Y": 384.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentXEnabled": true,
+            "PositionPercentYEnabled": true,
+            "PrePosition": {
+              "X": 0.5,
+              "Y": 0.5
+            },
+            "PercentHeightEnable": true,
+            "PercentHeightEnabled": true,
+            "PreSize": {
+              "X": 0.6836,
+              "Y": 1.0
+            },
+            "LeftMargin": 162.0,
+            "RightMargin": 162.0,
+            "Tag": 118,
+            "ActionTag": 91723565,
+            "Size": {
+              "X": 700.0,
+              "Y": 768.0
+            },
+            "Name": "Roll_center",
+            "ctype": "ImageViewObjectData"
+          },
+          {
+            "ClipAble": false,
+            "BackColorAlpha": 102,
+            "ComboBoxIndex": 1,
+            "SingleColor": {
+              "R": 150,
+              "G": 200
+            },
+            "FirstColor": {
+              "R": 150,
+              "G": 200
+            },
+            "EndColor": {},
+            "ColorVector": {
+              "ScaleY": 1.0
+            },
+            "Scale9Width": 1,
+            "Scale9Height": 1,
+            "TouchEnable": true,
+            "AnchorPoint": {
+              "ScaleX": 0.5
+            },
+            "Position": {
+              "X": 512.6144,
+              "Y": 86.55
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentXEnabled": true,
+            "PrePosition": {
+              "X": 0.5006,
+              "Y": 0.1127
+            },
+            "PreSize": {
+              "X": 0.6348,
+              "Y": 0.7682
+            },
+            "LeftMargin": 187.6144,
+            "RightMargin": 186.3856,
+            "TopMargin": 91.45,
+            "BottomMargin": 86.55,
+            "Tag": 101,
+            "ActionTag": 2132277812,
+            "Size": {
+              "X": 650.0,
+              "Y": 590.0
+            },
+            "Name": "Table_Container",
+            "ctype": "PanelObjectData"
+          },
+          {
+            "FlipY": true,
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/scrolls/common/roll_fade_2.png",
+              "Plist": ""
+            },
+            "Scale9OriginX": 126,
+            "Scale9OriginY": 55,
+            "Scale9Width": 132,
+            "Scale9Height": 58,
+            "AnchorPoint": {
+              "ScaleX": 0.5
+            },
+            "Position": {
+              "X": 512.0,
+              "Y": 793.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentXEnabled": true,
+            "PrePosition": {
+              "X": 0.5,
+              "Y": 1.0326
+            },
+            "PreSize": {
+              "X": 0.6836,
+              "Y": 0.2188
+            },
+            "LeftMargin": 162.0,
+            "RightMargin": 162.0,
+            "TopMargin": -193.0,
+            "BottomMargin": 793.0,
+            "Tag": 102,
+            "ActionTag": 476343930,
+            "Size": {
+              "X": 700.0,
+              "Y": 168.0
+            },
+            "Name": "Top_Gradient",
+            "ctype": "ImageViewObjectData"
+          },
+          {
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/scrolls/common/roll_fade_2.png",
+              "Plist": ""
+            },
+            "Scale9OriginX": 126,
+            "Scale9OriginY": 55,
+            "Scale9Width": 132,
+            "Scale9Height": 58,
+            "AnchorPoint": {
+              "ScaleX": 0.5
+            },
+            "Position": {
+              "X": 512.0,
+              "Y": -10.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentXEnabled": true,
+            "PrePosition": {
+              "X": 0.5,
+              "Y": -0.013
+            },
+            "PreSize": {
+              "X": 0.6836,
+              "Y": 0.2188
+            },
+            "LeftMargin": 162.0,
+            "RightMargin": 162.0,
+            "TopMargin": 610.0,
+            "BottomMargin": -10.0,
+            "Tag": 103,
+            "ActionTag": 272529719,
+            "Size": {
+              "X": 700.0,
+              "Y": 168.0
+            },
+            "Name": "Bottom_Gradient",
+            "ctype": "ImageViewObjectData"
+          },
+          {
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/raids/Top100Dialog/roll_border_dark.png",
+              "Plist": ""
+            },
+            "Scale9OriginX": 15,
+            "Scale9OriginY": 329,
+            "Scale9Width": 14,
+            "Scale9Height": 110,
+            "AnchorPoint": {
+              "ScaleX": 1.0,
+              "ScaleY": 0.5
+            },
+            "Position": {
+              "X": 162.6112,
+              "Y": 384.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentXEnabled": true,
+            "PositionPercentYEnabled": true,
+            "PrePosition": {
+              "X": 0.1588,
+              "Y": 0.5
+            },
+            "PercentHeightEnable": true,
+            "PercentHeightEnabled": true,
+            "PreSize": {
+              "X": 0.0322,
+              "Y": 1.0
+            },
+            "LeftMargin": 129.6112,
+            "RightMargin": 861.3888,
+            "Tag": 18,
+            "ActionTag": 470275281,
+            "Size": {
+              "X": 33.0,
+              "Y": 768.0
+            },
+            "Name": "roll_left_border_dark",
+            "ctype": "ImageViewObjectData"
+          },
+          {
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/raids/Top100Dialog/roll_border_light.png",
+              "Plist": ""
+            },
+            "Scale9OriginX": 7,
+            "Scale9OriginY": 15,
+            "Scale9Width": 8,
+            "Scale9Height": 738,
+            "AnchorPoint": {
+              "ScaleY": 0.5
+            },
+            "Position": {
+              "X": 164.3,
+              "Y": 384.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentYEnabled": true,
+            "PrePosition": {
+              "X": 0.1604,
+              "Y": 0.5
+            },
+            "PercentHeightEnable": true,
+            "PercentHeightEnabled": true,
+            "PreSize": {
+              "X": 0.0171,
+              "Y": 1.0
+            },
+            "LeftMargin": 164.3,
+            "RightMargin": 842.2,
+            "Tag": 17,
+            "ActionTag": 2080610495,
+            "Size": {
+              "X": 17.5,
+              "Y": 768.0
+            },
+            "Name": "roll_left_border_light",
+            "ctype": "ImageViewObjectData"
+          },
+          {
+            "FlipX": true,
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/raids/Top100Dialog/roll_border_dark.png",
+              "Plist": ""
+            },
+            "Scale9OriginX": 15,
+            "Scale9OriginY": 329,
+            "Scale9Width": 14,
+            "Scale9Height": 110,
+            "AnchorPoint": {
+              "ScaleX": 1.0,
+              "ScaleY": 0.5
+            },
+            "Position": {
+              "X": 860.5,
+              "Y": 384.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentYEnabled": true,
+            "PrePosition": {
+              "X": 0.8403,
+              "Y": 0.5
+            },
+            "PercentHeightEnable": true,
+            "PercentHeightEnabled": true,
+            "PreSize": {
+              "X": 0.0322,
+              "Y": 1.0
+            },
+            "LeftMargin": 827.5,
+            "RightMargin": 163.5,
+            "Tag": 20,
+            "ActionTag": 541328618,
+            "Size": {
+              "X": 33.0,
+              "Y": 768.0
+            },
+            "Name": "roll_right_border_dark",
+            "ctype": "ImageViewObjectData"
+          },
+          {
+            "FlipX": true,
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/raids/Top100Dialog/roll_border_light.png",
+              "Plist": ""
+            },
+            "Scale9OriginX": 7,
+            "Scale9OriginY": 15,
+            "Scale9Width": 8,
+            "Scale9Height": 738,
+            "AnchorPoint": {
+              "ScaleY": 0.5
+            },
+            "Position": {
+              "X": 859.7,
+              "Y": 384.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentYEnabled": true,
+            "PrePosition": {
+              "X": 0.8396,
+              "Y": 0.5
+            },
+            "PercentHeightEnable": true,
+            "PercentHeightEnabled": true,
+            "PreSize": {
+              "X": 0.0171,
+              "Y": 1.0
+            },
+            "LeftMargin": 859.7,
+            "RightMargin": 146.8,
+            "Tag": 19,
+            "ActionTag": 1379299602,
+            "Size": {
+              "X": 17.5,
+              "Y": 768.0
+            },
+            "Name": "roll_right_border_light",
+            "ctype": "ImageViewObjectData"
+          },
+          {
+            "ClipAble": false,
+            "BackColorAlpha": 102,
+            "ComboBoxIndex": 1,
+            "SingleColor": {
+              "R": 150,
+              "G": 200
+            },
+            "FirstColor": {
+              "R": 150,
+              "G": 200
+            },
+            "EndColor": {},
+            "ColorVector": {
+              "ScaleY": 1.0
+            },
+            "Scale9Width": 1,
+            "Scale9Height": 1,
+            "TouchEnable": true,
+            "AnchorPoint": {
+              "ScaleX": 0.5,
+              "ScaleY": 1.0
+            },
+            "Position": {
+              "X": 512.0,
+              "Y": 768.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PositionPercentXEnabled": true,
+            "PositionPercentYEnabled": true,
+            "PrePosition": {
+              "X": 0.5,
+              "Y": 1.0
+            },
+            "PercentWidthEnable": true,
+            "PercentWidthEnabled": true,
+            "PreSize": {
+              "X": 1.0,
+              "Y": 0.1016
+            },
+            "BottomMargin": 690.0,
+            "Tag": 175,
+            "Children": [
+              {
+                "FileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/roll_top_left.png",
+                  "Plist": ""
+                },
+                "Scale9OriginX": 104,
+                "Scale9OriginY": 48,
+                "Scale9Width": 109,
+                "Scale9Height": 50,
+                "AnchorPoint": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 0.5
+                },
+                "Position": {
+                  "X": 130.048,
+                  "Y": 39.0
+                },
+                "Scale": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "CColor": {},
+                "IconVisible": false,
+                "PositionPercentXEnabled": true,
+                "PositionPercentYEnabled": true,
+                "PrePosition": {
+                  "X": 0.127,
+                  "Y": 0.5
+                },
+                "PreSize": {
+                  "X": 0.1172,
+                  "Y": 0.7051
+                },
+                "LeftMargin": 10.048,
+                "RightMargin": 893.952,
+                "TopMargin": 11.5,
+                "BottomMargin": 11.5,
+                "Tag": 40,
+                "ActionTag": 399237235,
+                "Size": {
+                  "X": 120.0,
+                  "Y": 55.0
+                },
+                "Name": "roll_top_left",
+                "ctype": "ImageViewObjectData"
+              },
+              {
+                "FlipX": true,
+                "FileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/roll_top_left.png",
+                  "Plist": ""
+                },
+                "Scale9OriginX": 104,
+                "Scale9OriginY": 48,
+                "Scale9Width": 109,
+                "Scale9Height": 50,
+                "AnchorPoint": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 0.5
+                },
+                "Position": {
+                  "X": 893.0,
+                  "Y": 39.0
+                },
+                "Scale": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "CColor": {},
+                "IconVisible": false,
+                "PositionPercentYEnabled": true,
+                "PrePosition": {
+                  "X": 0.8721,
+                  "Y": 0.5
+                },
+                "PreSize": {
+                  "X": 0.1172,
+                  "Y": 0.7051
+                },
+                "LeftMargin": 773.0,
+                "RightMargin": 131.0,
+                "TopMargin": 11.5,
+                "BottomMargin": 11.5,
+                "Tag": 41,
+                "ActionTag": 896739270,
+                "Size": {
+                  "X": 120.0,
+                  "Y": 55.0
+                },
+                "Name": "roll_top_right",
+                "ctype": "ImageViewObjectData"
+              },
+              {
+                "FileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/roll_top_center.png",
+                  "Plist": ""
+                },
+                "Scale9OriginX": 578,
+                "Scale9OriginY": 67,
+                "Scale9Width": 596,
+                "Scale9Height": 70,
+                "AnchorPoint": {
+                  "ScaleX": 0.5,
+                  "ScaleY": 1.0
+                },
+                "Position": {
+                  "X": 512.0,
+                  "Y": 78.0
+                },
+                "Scale": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "CColor": {},
+                "IconVisible": false,
+                "PositionPercentXEnabled": true,
+                "PositionPercentYEnabled": true,
+                "PrePosition": {
+                  "X": 0.5,
+                  "Y": 1.0
+                },
+                "PercentHeightEnable": true,
+                "PercentHeightEnabled": true,
+                "PreSize": {
+                  "X": 0.6836,
+                  "Y": 1.0
+                },
+                "LeftMargin": 162.0,
+                "RightMargin": 162.0,
+                "Tag": 32,
+                "ActionTag": 1958839250,
+                "Size": {
+                  "X": 700.0,
+                  "Y": 78.0
+                },
+                "Name": "roll_top_center",
+                "ctype": "ImageViewObjectData"
+              },
+              {
+                "FileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/roll_top_part_dark.png",
+                  "Plist": ""
+                },
+                "Scale9OriginX": 29,
+                "Scale9OriginY": 66,
+                "Scale9Width": 30,
+                "Scale9Height": 71,
+                "AnchorPoint": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "Position": {
+                  "X": 162.6112,
+                  "Y": 78.0
+                },
+                "Scale": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "CColor": {},
+                "IconVisible": false,
+                "PositionPercentXEnabled": true,
+                "PositionPercentYEnabled": true,
+                "PrePosition": {
+                  "X": 0.1588,
+                  "Y": 1.0
+                },
+                "PercentHeightEnable": true,
+                "PercentHeightEnabled": true,
+                "PreSize": {
+                  "X": 0.0322,
+                  "Y": 1.0
+                },
+                "LeftMargin": 129.6112,
+                "RightMargin": 861.3888,
+                "Tag": 34,
+                "ActionTag": -365574233,
+                "Size": {
+                  "X": 33.0,
+                  "Y": 78.0
+                },
+                "Name": "roll_top_left_dark",
+                "ctype": "ImageViewObjectData"
+              },
+              {
+                "FileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/roll_top_part_light.png",
+                  "Plist": ""
+                },
+                "Scale9OriginX": 14,
+                "Scale9OriginY": 67,
+                "Scale9Width": 16,
+                "Scale9Height": 70,
+                "AnchorPoint": {
+                  "ScaleY": 1.0
+                },
+                "Position": {
+                  "X": 164.3,
+                  "Y": 78.0
+                },
+                "Scale": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "CColor": {},
+                "IconVisible": false,
+                "PositionPercentYEnabled": true,
+                "PrePosition": {
+                  "X": 0.1604,
+                  "Y": 1.0
+                },
+                "PercentHeightEnable": true,
+                "PercentHeightEnabled": true,
+                "PreSize": {
+                  "X": 0.0171,
+                  "Y": 1.0
+                },
+                "LeftMargin": 164.3,
+                "RightMargin": 842.2,
+                "Tag": 36,
+                "ActionTag": 1334579233,
+                "Size": {
+                  "X": 17.5,
+                  "Y": 78.0
+                },
+                "Name": "roll_top_left_light",
+                "ctype": "ImageViewObjectData"
+              },
+              {
+                "FlipX": true,
+                "FileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/roll_top_part_light.png",
+                  "Plist": ""
+                },
+                "Scale9OriginX": 14,
+                "Scale9OriginY": 67,
+                "Scale9Width": 16,
+                "Scale9Height": 70,
+                "AnchorPoint": {
+                  "ScaleY": 1.0
+                },
+                "Position": {
+                  "X": 859.7,
+                  "Y": 78.0
+                },
+                "Scale": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "CColor": {},
+                "IconVisible": false,
+                "PositionPercentYEnabled": true,
+                "PrePosition": {
+                  "X": 0.8396,
+                  "Y": 1.0
+                },
+                "PercentHeightEnable": true,
+                "PercentHeightEnabled": true,
+                "PreSize": {
+                  "X": 0.0171,
+                  "Y": 1.0
+                },
+                "LeftMargin": 859.7,
+                "RightMargin": 146.8,
+                "Tag": 39,
+                "ActionTag": -924991632,
+                "Size": {
+                  "X": 17.5,
+                  "Y": 78.0
+                },
+                "Name": "roll_top_right_light",
+                "ctype": "ImageViewObjectData"
+              },
+              {
+                "FlipX": true,
+                "FileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/roll_top_part_dark.png",
+                  "Plist": ""
+                },
+                "Scale9OriginX": 29,
+                "Scale9OriginY": 66,
+                "Scale9Width": 30,
+                "Scale9Height": 71,
+                "AnchorPoint": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "Position": {
+                  "X": 860.47,
+                  "Y": 78.0
+                },
+                "Scale": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "CColor": {},
+                "IconVisible": false,
+                "PositionPercentYEnabled": true,
+                "PrePosition": {
+                  "X": 0.8403,
+                  "Y": 1.0
+                },
+                "PercentHeightEnable": true,
+                "PercentHeightEnabled": true,
+                "PreSize": {
+                  "X": 0.0322,
+                  "Y": 1.0
+                },
+                "LeftMargin": 827.47,
+                "RightMargin": 163.53,
+                "Tag": 38,
+                "ActionTag": 1620223095,
+                "Size": {
+                  "X": 33.0,
+                  "Y": 78.0
+                },
+                "Name": "roll_top_right_dark",
+                "ctype": "ImageViewObjectData"
+              },
+              {
+                "FlipX": true,
+                "FontSize": 14,
+                "ButtonText": "",
+                "TextColor": {
+                  "R": 65,
+                  "G": 65,
+                  "B": 70
+                },
+                "DisabledFileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/arrow_inactive.png",
+                  "Plist": ""
+                },
+                "PressedFileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/arrow_pressed.png",
+                  "Plist": ""
+                },
+                "NormalFileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/arrow_active.png",
+                  "Plist": ""
+                },
+                "Scale9Width": 100,
+                "Scale9Height": 87,
+                "OutlineColor": {
+                  "G": 0,
+                  "B": 0
+                },
+                "ShadowColor": {
+                  "R": 110,
+                  "G": 110,
+                  "B": 110
+                },
+                "ShadowOffsetX": 2.0,
+                "ShadowOffsetY": -2.0,
+                "TouchEnable": true,
+                "AnchorPoint": {
+                  "ScaleX": 0.5,
+                  "ScaleY": 0.5
+                },
+                "Position": {
+                  "X": 210.7392,
+                  "Y": 39.0
+                },
+                "Scale": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "CColor": {},
+                "IconVisible": false,
+                "PositionPercentXEnabled": true,
+                "PrePosition": {
+                  "X": 0.2058,
+                  "Y": 0.5
+                },
+                "PreSize": {
+                  "X": 0.0366,
+                  "Y": 0.4167
+                },
+                "LeftMargin": 191.9892,
+                "RightMargin": 794.5108,
+                "TopMargin": 22.75,
+                "BottomMargin": 22.75,
+                "Tag": 42,
+                "ActionTag": 1317437159,
+                "Size": {
+                  "X": 37.5,
+                  "Y": 32.5
+                },
+                "Name": "Button_prev_season",
+                "ctype": "ButtonObjectData"
+              },
+              {
+                "FontSize": 14,
+                "ButtonText": "",
+                "TextColor": {
+                  "R": 65,
+                  "G": 65,
+                  "B": 70
+                },
+                "DisabledFileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/arrow_inactive.png",
+                  "Plist": ""
+                },
+                "PressedFileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/arrow_pressed.png",
+                  "Plist": ""
+                },
+                "NormalFileData": {
+                  "Type": "Normal",
+                  "Path": "data/assets/768/textures/raids/Top100Dialog/arrow_active.png",
+                  "Plist": ""
+                },
+                "Scale9Enable": true,
+                "Scale9Width": 100,
+                "Scale9Height": 87,
+                "OutlineColor": {
+                  "G": 0,
+                  "B": 0
+                },
+                "ShadowColor": {
+                  "R": 110,
+                  "G": 110,
+                  "B": 110
+                },
+                "ShadowOffsetX": 2.0,
+                "ShadowOffsetY": -2.0,
+                "TouchEnable": true,
+                "AnchorPoint": {
+                  "ScaleX": 0.5,
+                  "ScaleY": 0.5
+                },
+                "Position": {
+                  "X": 811.2128,
+                  "Y": 39.0
+                },
+                "Scale": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "CColor": {},
+                "IconVisible": false,
+                "PositionPercentXEnabled": true,
+                "PositionPercentYEnabled": true,
+                "PrePosition": {
+                  "X": 0.7922,
+                  "Y": 0.5
+                },
+                "PreSize": {
+                  "X": 0.0366,
+                  "Y": 0.4167
+                },
+                "LeftMargin": 792.4628,
+                "RightMargin": 194.0372,
+                "TopMargin": 22.75,
+                "BottomMargin": 22.75,
+                "Tag": 43,
+                "ActionTag": -496102576,
+                "Size": {
+                  "X": 37.5,
+                  "Y": 32.5
+                },
+                "Name": "Button_current_season",
+                "ctype": "ButtonObjectData"
+              },
+              {
+                "FontSize": 28,
+                "LabelText": "До конца сезона: 2д 18ч",
+                "OutlineColor": {
+                  "G": 0,
+                  "B": 0
+                },
+                "ShadowColor": {
+                  "R": 110,
+                  "G": 110,
+                  "B": 110
+                },
+                "ShadowOffsetX": 2.0,
+                "ShadowOffsetY": -2.0,
+                "AnchorPoint": {
+                  "ScaleY": 0.5
+                },
+                "Position": {
+                  "X": 256.0,
+                  "Y": 39.0
+                },
+                "Scale": {
+                  "ScaleX": 1.0,
+                  "ScaleY": 1.0
+                },
+                "CColor": {
+                  "R": 0,
+                  "G": 0,
+                  "B": 0
+                },
+                "IconVisible": false,
+                "PositionPercentXEnabled": true,
+                "PositionPercentYEnabled": true,
+                "PrePosition": {
+                  "X": 0.25,
+                  "Y": 0.5
+                },
+                "PreSize": {
+                  "X": 0.3076,
+                  "Y": 0.4103
+                },
+                "LeftMargin": 256.0,
+                "RightMargin": 453.0,
+                "TopMargin": 23.0,
+                "BottomMargin": 23.0,
+                "Tag": 130,
+                "ActionTag": 1254678139,
+                "Size": {
+                  "X": 315.0,
+                  "Y": 32.0
+                },
+                "Name": "lbl_title",
+                "ctype": "TextObjectData"
+              }
+            ],
+            "ActionTag": -1942975405,
+            "Size": {
+              "X": 1024.0,
+              "Y": 78.0
+            },
+            "Name": "Top_Container",
+            "ctype": "PanelObjectData"
+          },
+          {
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/raids/Top100Dialog/roll_tracery_left.png",
+              "Plist": ""
+            },
+            "Scale9Enable": true,
+            "Scale9OriginX": 49,
+            "Scale9Width": 9,
+            "Scale9Height": 50,
+            "AnchorPoint": {
+              "ScaleY": 0.5
+            },
+            "Position": {
+              "X": 186.5,
+              "Y": 41.0
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PrePosition": {
+              "X": 0.1821,
+              "Y": 0.0534
+            },
+            "PreSize": {
+              "X": 0.1953,
+              "Y": 0.0651
+            },
+            "LeftMargin": 186.5,
+            "RightMargin": 637.5,
+            "TopMargin": 702.0,
+            "BottomMargin": 16.0,
+            "Tag": 155,
+            "ActionTag": -482633176,
+            "Size": {
+              "X": 200.0,
+              "Y": 50.0
+            },
+            "Name": "bottom_tracery_left",
+            "ctype": "ImageViewObjectData"
+          },
+          {
+            "FileData": {
+              "Type": "Normal",
+              "Path": "data/assets/768/textures/raids/Top100Dialog/roll_tracery_right.png",
+              "Plist": ""
+            },
+            "Scale9Enable": true,
+            "Scale9Width": 9,
+            "Scale9Height": 50,
+            "AnchorPoint": {
+              "ScaleX": 1.0,
+              "ScaleY": 0.5
+            },
+            "Position": {
+              "X": 836.5,
+              "Y": 40.9999
+            },
+            "Scale": {
+              "ScaleX": 1.0,
+              "ScaleY": 1.0
+            },
+            "CColor": {},
+            "IconVisible": false,
+            "PrePosition": {
+              "X": 0.8169,
+              "Y": 0.0534
+            },
+            "PreSize": {
+              "X": 0.1953,
+              "Y": 0.0651
+            },
+            "LeftMargin": 636.5,
+            "RightMargin": 187.5,
+            "TopMargin": 702.0001,
+            "BottomMargin": 15.9999,
+            "Tag": 156,
+            "ActionTag": -2074581582,
+            "Size": {
+              "X": 200.0,
+              "Y": 50.0
+            },
+            "Name": "bottom_tracery_right",
+            "ctype": "ImageViewObjectData"
+          }
+        ],
+        "Size": {
+          "X": 1024.0,
+          "Y": 768.0
+        },
+        "Name": "Layer",
+        "ctype": "LayerObjectData"
+      },
+      "UsedResources": [
+        "../../data/assets/768/textures/raids/Top100Dialog/arrow_active.png",
+        "../../data/assets/768/textures/raids/Top100Dialog/arrow_inactive.png",
+        "../../data/assets/768/textures/raids/Top100Dialog/arrow_pressed.png",
+        "../../data/assets/768/textures/raids/Top100Dialog/roll_border_dark.png",
+        "../../data/assets/768/textures/raids/Top100Dialog/roll_border_light.png",
+        "../../data/assets/768/textures/raids/Top100Dialog/roll_top_center.png",
+        "../../data/assets/768/textures/raids/Top100Dialog/roll_top_left.png",
+        "../../data/assets/768/textures/raids/Top100Dialog/roll_top_part_dark.png",
+        "../../data/assets/768/textures/raids/Top100Dialog/roll_top_part_light.png",
+        "../../data/assets/768/textures/raids/Top100Dialog/roll_tracery_left.png",
+        "../../data/assets/768/textures/raids/Top100Dialog/roll_tracery_right.png",
+        "../../data/assets/768/textures/scrolls/common/roll_fade_2.png",
+        "../../data/assets/768/textures/scrolls/common/Roll_MAP.jpg"
+      ],
+      "ctype": "GameFileData"
+    }
+  },
+  "Type": "Layer"
+}

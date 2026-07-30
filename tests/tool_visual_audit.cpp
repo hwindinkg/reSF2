@@ -52,6 +52,7 @@ int main(int argc, char** argv) {
     const std::string asset_root = argc > 1 ? argv[1] : "assets";
     const std::string out_dir = argc > 2 ? argv[2] : "screenshots_audit";
     const std::string location = argc > 3 ? argv[3] : "";
+    const std::string scene = argc > 4 ? argv[4] : "dojo";
 
     test::HeadlessTestConfig cfg;
     cfg.asset_root = asset_root;
@@ -61,7 +62,7 @@ int main(int argc, char** argv) {
     // Open the dojo directly. On a fresh save the tutorial pushes a Dialogue
     // scene over it, and Dialogue does not call host_update_gameplay, so the
     // fighter would never animate and the audit would measure a frozen pose.
-    cfg.start_scene = "dojo";
+    cfg.start_scene = scene;
     cfg.start_location = location;
 
     test::HeadlessTestRunner runner(cfg);
@@ -77,9 +78,14 @@ int main(int argc, char** argv) {
     // Dismiss the tutorial dialog if it still appears, then let the dojo run
     // long enough for the stance animation to advance past its first frame.
     runner.run_frames(30);
-    for (int attempt = 0; attempt < 12; ++attempt) {
-        runner.tap_key(platform::Key::Escape);
-        runner.run_frames(6);
+    if (scene == "dojo" || scene == "menu") {
+        // Only the dojo gets the tutorial dialog pushed over it; pressing
+        // Escape in any other scene would navigate away from what we want to
+        // audit.
+        for (int attempt = 0; attempt < 12; ++attempt) {
+            runner.tap_key(platform::Key::Escape);
+            runner.run_frames(6);
+        }
     }
     runner.run_frames(180);
 
@@ -107,7 +113,8 @@ int main(int argc, char** argv) {
             std::error_code ec;
             std::filesystem::create_directories(out_dir, ec);
             const std::string path =
-                out_dir + "/audit_" + (location.empty() ? "dojo" : location) + ".png";
+                out_dir + "/audit_" + scene +
+                (location.empty() ? "" : "_" + location) + ".png";
             if (stbi_write_png(path.c_str(), w, h, 4, pixels.data(), w * 4)) {
                 std::printf("\nwrote %s (%dx%d)\n", path.c_str(), w, h);
             } else {

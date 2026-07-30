@@ -31,6 +31,7 @@ void ShopManager::load_catalog(const format::ListData& list_data) {
         si.category = item.type;  // "Weapon", "Armor", "Helm", "Ranged", "Magic"
         si.price = item.price;
         si.level_req = item.level;
+        si.upgrade_level = item.upgrade_level;
         si.weapon_damage = item.weapon_damage;
         si.body_defense = item.body_defense;
         si.head_defense = item.head_defense;
