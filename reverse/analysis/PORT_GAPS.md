@@ -411,3 +411,67 @@ the only thing still missing to wire `engine/game/damage_formula.hpp` into
 `game.cpp` is the per-character attribute *state* (equipment + perks
 contributing to WeaponDamage, BodyDefense, ...). The baseline values above are
 the alignment targets, not the character's own stats.
+
+---
+
+# Character attributes (game+0x6275F4) — resolved 2026-07-30
+
+The per-character attribute *state* — the piece that was blocking the recovered
+damage formula.
+
+## The getter
+
+`game+0x6275F4` is `Model::getParameter(name) -> float`:
+
+```c
+float getParameter(Model* self, const std::string* name) {
+    int value = 0;
+    if (map_lookup(self + 0x1C4, name, &value, 1, 0))   // game+0x24EF5C
+        return (float)value;                             // int -> float
+    warn("Parameter \"%s\" not found!");                 // game+0x1CFA58
+    return -1e35f;                                       // sentinel, NOT 0
+}
+```
+
+Three facts that matter for the port:
+
+1. **Attributes live in a map at `model+0x1C4`, keyed by name.** Not a fixed
+   struct — an associative container, so unknown names are possible at runtime
+   and the game tolerates them.
+2. **Values are stored as INTEGERS** and converted to float on read
+   (`vcvt.f32.s32`). So attributes are whole numbers; the `%3.3f` in the tracer
+   is formatting, not precision.
+3. **A miss returns `-1e35f`, not `0`.** That is a sentinel meaning "absent",
+   and it also logs `Parameter "%s" not found!`. This differs from the
+   *alignment table* lookup at `game+0x60DF98`, which defaults to `0.0`. Two
+   different lookups with two different miss behaviours — do not unify them.
+
+## The attribute set
+
+The tracer at `game+0x628788` prints exactly seven, one call to the getter each:
+
+```
+- WeaponDamage:   %3.3f      - UnarmedDamage:  %3.3f
+- BodyDefense:    %3.3f      - HeadDefense:    %3.3f
+- RangedDamage:   %3.3f      - MagicDamage:    %3.3f
+- RangedQuantity: %3.3f
+```
+
+matching `<AlignTargetAttributes>` (which lists the same six plus
+`EnchantmentResistance`, and omits `RangedQuantity`).
+
+A second tracer at `0x8F7A6F28` covers raid models and adds
+`RaidChargeDamage` — eight in that case.
+
+## Related expression vocabulary
+
+Nearby strings show attributes are also reachable from the perk/quest
+expression evaluator: `PlayerAttribute`, `EnemyAttribute`, `PlayerParameter`,
+`RoundParameter`, `PerkAspectParameter`, `DefenseAttribute`, `BaseDamage`,
+`Multiplier`, plus `Count of DefenseAttribute != 1` (an assert: exactly one
+DefenseAttribute is expected per hit) and helpers `ceil`, `trunc`, `Abs`,
+`Compare`, `UniformFloatRandom`, `StringInArray`, `RoundingError`.
+
+`Count of DefenseAttribute != 1` is a useful constraint: the `f2` term in
+`getTotalDamage` resolves a *single* defense attribute, so the head/body choice
+is made before the formula runs, not inside it.
