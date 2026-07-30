@@ -133,6 +133,165 @@ public:
         renderer_ = std::move(renderer);
     }
 
+    // ---------- Visual audit (tests/tool_visual_audit.cpp) ----------
+    // Read-only dumps of the geometric quantities the on-screen composition
+    // depends on. These exist because the camera framing and the fighter's
+    // model->world mapping were tuned by eye (see the [HEURISTIC-TODO] notes in
+    // update_camera); printing the numbers turns "looks wrong" into a
+    // measurable divergence from the original's reference screenshot.
+
+    void audit_dump_location() const {
+        if (!location_) { std::printf("  (no location loaded)\n"); return; }
+        std::printf("  name          %s\n", current_location_name_.c_str());
+        std::printf("  Width         %.0f  (half %.0f)\n",
+                    location_->width, location_->width * 0.5f);
+        std::printf("  Height        %.0f  (half %.0f)\n",
+                    location_->height, location_->height * 0.5f);
+        std::printf("  Wall          %.0f\n", location_->wall);
+        std::printf("  Floor         %.0f\n", location_->floor);
+        std::printf("  ModelsViewer  player=(%.0f, %.0f)  enemy=(%.0f, %.0f)\n",
+                    location_->player_x, location_->player_y,
+                    location_->enemy_x, location_->enemy_y);
+        std::printf("  layers        %zu\n", location_->layers.size());
+        for (const auto& l : location_->layers) {
+            std::printf("    type=%d factor=%.2f atlas=%-14s images=%zu\n",
+                        l.type, l.factor, l.atlas_name.c_str(), l.images.size());
+            for (const auto& im : l.images) {
+                std::printf("        %-16s X=%7.1f Y=%7.1f W=%6.1f H=%6.1f\n",
+                            im.class_name.c_str(), im.x, im.y, im.w, im.h);
+            }
+        }
+    }
+
+    void audit_dump_camera() const {
+        if (!platform_ || !location_) { std::printf("  (not ready)\n"); return; }
+        const float vw = static_cast<float>(platform_->window_width());
+        const float vh = static_cast<float>(platform_->window_height());
+        std::printf("  viewport      %.0f x %.0f\n", vw, vh);
+        std::printf("  zoom          %.4f  (vh / Height)\n", zoom_);
+        std::printf("  visible world %.1f x %.1f units\n",
+                    zoom_ > 0 ? vw / zoom_ : 0.0f, zoom_ > 0 ? vh / zoom_ : 0.0f);
+        std::printf("  camera        x=%.1f y=%.1f\n", cam_x_, cam_y_);
+        const float floor_a = -location_->height * 0.5f + location_->floor;
+        const float floor_screen = vh * 0.5f - (floor_a - cam_y_) * zoom_;
+        std::printf("  floor world y %.1f  (-Height/2 + Floor)\n", floor_a);
+        std::printf("  floor screen  y=%.1f  (%.1f%% of frame)\n",
+                    floor_screen, vh > 0 ? 100.0f * floor_screen / vh : 0.0f);
+        std::printf("  ORIGINAL ref  floor at ~87.5%% of frame height\n");
+    }
+
+    void audit_dump_fighter() const {
+        if (!platform_) { std::printf("  (not ready)\n"); return; }
+        const float vw = static_cast<float>(platform_->window_width());
+        std::printf("  player world  x=%.1f y=%.1f  facing=%s\n",
+                    player_pos_x_, player_pos_y_, facing_right_ ? "right" : "left");
+        std::printf("  enemy world   x=%.1f y=%.1f\n", enemy_pos_x_, enemy_pos_y_);
+        std::printf("  y_adjust      %.2f  (animation-driven pivot correction)\n",
+                    y_adjust_smoothed_);
+        auto pit = assets_->skeleton_nodes().find("NPivot");
+        const float pivot_ly = pit != assets_->skeleton_nodes().end()
+                                   ? pit->second.y : stance_npivot_y_;
+        std::printf("  NPivot local  y=%.2f\n", pivot_ly);
+        std::printf("  current anim  '%s'  move='%s'\n",
+                    anim_player_.current_anim().c_str(), current_move_.c_str());
+        std::printf("  skeleton      %zu nodes, %zu edges\n",
+                    assets_->skeleton_nodes().size(),
+                    assets_->skeleton_edges().size());
+        std::printf("  anim nodes    %zu posed this frame\n", anim_node_pos_.size());
+        // If nothing is posed the fighter renders as a static rest-pose blob,
+        // which is exactly the visual defect being chased. Walk the same
+        // preconditions AnimationPlayer::update() checks, so the break is
+        // identified instead of guessed.
+        if (anim_node_pos_.empty()) {
+            const auto& order = assets_->ordered_node_names();
+            const auto& anims = assets_->animations();
+            std::printf("  [!] nothing posed - diagnosing:\n");
+            std::printf("      ordered_node_names  %zu%s\n", order.size(),
+                        order.empty() ? "   <-- EMPTY, update() bails" : "");
+            std::printf("      animations loaded   %zu\n", anims.size());
+            bool has_npivot = false;
+            for (const auto& n : order) if (n == "NPivot") { has_npivot = true; break; }
+            std::printf("      NPivot in order     %s%s\n",
+                        has_npivot ? "yes" : "NO",
+                        has_npivot ? "" : "   <-- update() bails without it");
+            auto it = anims.find(anim_player_.current_anim());
+            if (it == anims.end()) {
+                std::printf("      current anim '%s' NOT in the animation map\n",
+                            anim_player_.current_anim().c_str());
+            } else {
+                std::printf("      current anim frames %d\n", it->second.frame_count);
+                if (it->second.frame_count == 0)
+                    std::printf("      <-- zero frames, update() bails\n");
+            }
+        }
+        if (zoom_ > 0.0f && vw > 0.0f) {
+            const float px = vw * 0.5f + (player_pos_x_ - cam_x_) * zoom_;
+            const float ex = vw * 0.5f + (enemy_pos_x_ - cam_x_) * zoom_;
+            std::printf("  screen x      player %.1f (%.1f%%)  enemy %.1f (%.1f%%)\n",
+                        px, 100.0f * px / vw, ex, 100.0f * ex / vw);
+            std::printf("  ORIGINAL ref  player ~36%%  enemy ~64%%\n");
+        }
+    }
+
+    void audit_dump_bag() const {
+        if (!assets_->bag_model()) { std::printf("  (no bag model)\n"); return; }
+        const auto& m = *assets_->bag_model();
+        std::printf("  model         %zu nodes, %zu edges, %zu capsules\n",
+                    m.nodes.size(), m.edges.size(), m.capsules.size());
+        std::printf("  verlet        %s (%zu nodes)\n",
+                    bag_verlet_init_ ? "active" : "inactive", bag_verlet_.size());
+        for (const auto& c : m.capsules) {
+            std::printf("      edge=%-12s r1=%.1f r2=%.1f m1=%.1f m2=%.1f\n",
+                        c.edge_name.c_str(), c.radius1, c.radius2,
+                        c.margin1, c.margin2);
+        }
+        if (bag_verlet_init_ && !bag_verlet_.empty()) {
+            float x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+            bool first = true;
+            for (const auto& kv : bag_verlet_) {
+                const auto& v = kv.second;
+                if (first) { x0 = x1 = v.x; y0 = y1 = v.y; first = false; }
+                x0 = std::min(x0, v.x); x1 = std::max(x1, v.x);
+                y0 = std::min(y0, v.y); y1 = std::max(y1, v.y);
+            }
+            std::printf("  world box     x=%.1f..%.1f  y=%.1f..%.1f\n",
+                        x0, x1, y0, y1);
+
+            // The bag body is Edge16/Edge17 (radius 25) spanning
+            // NBottom -> NPivot -> NNeck. If the simulated node spacing has
+            // collapsed, those capsules degenerate and the bag renders as
+            // separate blobs instead of one cylinder -- print rest length vs
+            // simulated length so that is visible rather than inferred.
+            std::printf("  body chain (rest vs simulated):\n");
+            const char* chain[] = {"NBottom", "NPivot", "NNeck", "Node12"};
+            for (int i = 0; i + 1 < 4; ++i) {
+                auto rn1 = m.nodes.find(chain[i]);
+                auto rn2 = m.nodes.find(chain[i + 1]);
+                auto vn1 = bag_verlet_.find(chain[i]);
+                auto vn2 = bag_verlet_.find(chain[i + 1]);
+                if (rn1 == m.nodes.end() || rn2 == m.nodes.end()) {
+                    std::printf("      %-8s -> %-8s   MODEL NODE MISSING\n",
+                                chain[i], chain[i + 1]);
+                    continue;
+                }
+                const float rdx = rn2->second.x - rn1->second.x;
+                const float rdy = rn2->second.y - rn1->second.y;
+                const float rest = std::sqrt(rdx * rdx + rdy * rdy);
+                if (vn1 == bag_verlet_.end() || vn2 == bag_verlet_.end()) {
+                    std::printf("      %-8s -> %-8s   rest=%.1f  NOT SIMULATED\n",
+                                chain[i], chain[i + 1], rest);
+                    continue;
+                }
+                const float sdx = vn2->second.x - vn1->second.x;
+                const float sdy = vn2->second.y - vn1->second.y;
+                const float sim = std::sqrt(sdx * sdx + sdy * sdy);
+                std::printf("      %-8s -> %-8s   rest=%6.1f  sim=%6.1f%s\n",
+                            chain[i], chain[i + 1], rest, sim,
+                            (rest > 1.0f && sim < rest * 0.5f) ? "   <-- COLLAPSED" : "");
+            }
+        }
+    }
+
     void on_init(plat::Platform& platform) override;
 
 void on_update(plat::Platform& platform, uint32_t dt) override;

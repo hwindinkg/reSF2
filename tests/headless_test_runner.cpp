@@ -74,6 +74,28 @@ void HeadlessTestRunner::inject_key_up(platform::Key key) {
     platform_->inject_key_up(key);
 }
 
+void HeadlessTestRunner::tap_key(platform::Key key, int hold_frames) {
+    // poll_events() clears the just-pressed edge, so the injection has to land
+    // AFTER it and before on_update() -- which means driving the frame by hand
+    // instead of going through run_frames().
+    if (hold_frames < 1) hold_frames = 1;
+    (void)platform_->poll_events();
+    platform_->inject_key_down(key);
+    game_->on_update(*platform_, config_.fixed_dt_ms);
+    game_->on_render(*platform_);
+    platform_->advance_time_ms(config_.fixed_dt_ms);
+    frame_count_++;
+
+    for (int i = 1; i < hold_frames; ++i) run_frames(1);
+
+    (void)platform_->poll_events();
+    platform_->inject_key_up(key);
+    game_->on_update(*platform_, config_.fixed_dt_ms);
+    game_->on_render(*platform_);
+    platform_->advance_time_ms(config_.fixed_dt_ms);
+    frame_count_++;
+}
+
 void HeadlessTestRunner::inject_pointer_down(float x, float y, std::int32_t id) {
     platform_->inject_pointer_down(id, x, y);
 }
