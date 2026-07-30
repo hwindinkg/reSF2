@@ -1,0 +1,114 @@
+{
+  "_comment": [
+    "Golden reference for the ORIGINAL Shadow Fight 2 damage formula.",
+    "Recovered from Model::getTotalDamage @ game+0x4527B4 by decompiling the",
+    "relocated runtime dump in Ghidra (image base 0x8F057000).",
+    "See reverse/analysis/PORT_GAPS.md, section 'GAP-3 RESOLVED'.",
+    "",
+    "The function was found via the sole cross-reference to its assert string",
+    "'Model::getTotalDamage - wtf so strong' at 0x8F79A2A0 -- a developer",
+    "sanity warning that fires when damage escapes [0, 100000]."
+  ],
+
+  "source": {
+    "function": "game+0x4527B4",
+    "found_via": "xref to assert string 0x8F79A2A0",
+    "sub_factors": {
+      "attacker": "game+0x4A94F0",
+      "defender": "game+0x4A95A8",
+      "attribute_difference": "game+0x60E794",
+      "difference_inner": "game+0x60DF98",
+      "crit": "game+0x42A8A8",
+      "powf": "game+0x6D7D40"
+    },
+    "tool": "Ghidra MCP, ARM:LE:32:v7 @ base 0x8F057000",
+    "captured": "2026-07-30"
+  },
+
+  "power_base": {
+    "_how": "mov r0, #0x40000000 at every powf call site",
+    "value": 2.0,
+    "raw": "0x40000000",
+    "_note": "2.0 is the BASE of the power, not a trailing x2 multiplier. reSF2 had it as a separate '* 2.0f' term, which double-counts once the curve is correct."
+  },
+
+  "doubling_range": {
+    "_how": "global settings struct +0x18, read as 10.0f; matches <DamageDoublingRange Value=\"10\"/> in internalSettings.xml",
+    "value": 10.0,
+    "raw": "0x41200000",
+    "_semantics": "factor = 2 ^ (attribute_delta / 10), so every 10 points of attribute advantage DOUBLES the damage",
+    "resistance_doubling_range": 500.0,
+    "_resistance_note": "<ResistanceDoublingRange Value=\"500\"/> -- same curve shape, used for enchantment resistance"
+  },
+
+  "sanity_check": {
+    "_how": "DAT_8f4a9a5c = 0.0f, DAT_8f4a9a60 = 100000.0f",
+    "min": 0.0,
+    "max": 100000.0,
+    "clamps_result": false,
+    "warns_only": true,
+    "message": "Model::getTotalDamage - wtf so strong",
+    "_note": "The range check only logs; the out-of-range value is returned unchanged. A clamping implementation would diverge on very strong builds."
+  },
+
+  "evaluation_order": [
+    "base = powf(2.0, base_attribute * base_weight)",
+    "f1   = attacker factor  (game+0x4A94F0, self + is_ranged)",
+    "f2   = defender factor  (game+0x4A95A8, enemy + weapon)",
+    "f3   = powf(2.0, attribute_difference / 10.0)",
+    "add  = hit[0x48] + enemy[0x774]",
+    "dmg  = base * f2 * f1 * f3 * add",
+    "dmg  = max(dmg, 0.0)",
+    "dmg  = dmg * crit * enemy[0x678] * enemy[0x6AC]"
+  ],
+  "_order_note": "float multiplication is not associative; the emitted order is base * f2 * f1 * f3 * add (f2 before f1)",
+
+  "disabled_term_value": {
+    "_how": "moveq r4, #0x3f800000 in both factor helpers",
+    "value": 1.0,
+    "_note": "A disabled attribute term returns 1.0 (multiplicatively neutral), never 0 and never skipped"
+  },
+
+  "attacker_defender_split": {
+    "_note": "f1 receives the ATTACKER (self, is_ranged); f2 receives the DEFENDER (enemy, weapon). This asymmetry is the DamageAttribute / DefenseAttribute split printed by the game's built-in tracer."
+  },
+
+  "expected_values": {
+    "_comment": "Independently computed from the recovered formula; used as regression anchors.",
+    "difference_factor": [
+      { "delta": 0, "expected": 1.0 },
+      { "delta": 10, "expected": 2.0, "_note": "one doubling range" },
+      { "delta": 20, "expected": 4.0, "_note": "two doubling ranges" },
+      { "delta": 30, "expected": 8.0 },
+      { "delta": -10, "expected": 0.5, "_note": "disadvantage halves" }
+    ],
+    "linear_vs_exponential": {
+      "_note": "reSF2 used 1 + factor*attr. The two forms agree ONLY at attr == 0, which is the value reSF2 hardcoded -- so the bug was invisible.",
+      "weight": 0.0001,
+      "samples": [
+        { "attr": 0, "linear": 1.0, "exponential": 1.0, "agree": true },
+        { "attr": 1, "linear": 1.0001, "exponential": 1.00006932, "agree": false },
+        { "attr": 12, "linear": 1.0012, "exponential": 1.00083212, "agree": false }
+      ]
+    },
+    "assert_trigger": {
+      "_note": "why the developers added the warning: the curve is unbounded",
+      "samples": [
+        { "delta": 100, "factor": 1024.0, "triggers": false },
+        { "delta": 200, "factor": 1048576.0, "triggers": true }
+      ]
+    }
+  },
+
+  "align_target_attributes": {
+    "_how": "assets/internalSettings.xml <AlignTargetAttributes>",
+    "_note": "the attribute baseline the engine still lacks; needed to feed this formula",
+    "WeaponDamage": 12,
+    "UnarmedDamage": 0,
+    "BodyDefense": 12,
+    "HeadDefense": 5,
+    "RangedDamage": 12,
+    "MagicDamage": 12,
+    "EnchantmentResistance": 12
+  }
+}

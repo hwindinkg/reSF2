@@ -427,3 +427,15 @@ add_test(NAME test_frame_timing_golden
 set_tests_properties(test_frame_timing_golden PROPERTIES TIMEOUT 60)
 # Documents a known divergence; flip to FALSE once the timestep is ported.
 set_tests_properties(test_frame_timing_golden PROPERTIES WILL_FAIL TRUE)
+
+# Damage formula (GAP-3): Model::getTotalDamage @ game+0x4527B4, recovered by
+# decompiling the relocated dump in Ghidra. Unlike the timing test this one is
+# expected to PASS -- it exercises engine/game/damage_formula.hpp, the ported
+# implementation, rather than the old linear model still in game.cpp.
+add_executable(test_damage_formula_golden test_damage_formula_golden.cpp)
+target_link_libraries(test_damage_formula_golden PRIVATE resf2_warnings)
+target_compile_features(test_damage_formula_golden PRIVATE cxx_std_23)
+add_test(NAME test_damage_formula_golden
+         COMMAND test_damage_formula_golden
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_damage_formula_golden PROPERTIES TIMEOUT 60)
