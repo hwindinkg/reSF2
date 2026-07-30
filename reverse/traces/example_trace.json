@@ -1,0 +1,111 @@
+{
+  "$schema": "trace/1",
+  "scenario": "idle_walk_forward_punch",
+  "version": "1.0.0",
+  "source": "resf2_engine_headless",
+  "description": "Hand-crafted example trace based on actual engine output. Replace with a real captured trace from the original game for true behavioural comparison.",
+  "fps": 60,
+  "dt_ms": 16,
+  "duration_ms": 5600,
+  "seed": 0,
+
+  "tolerances": {
+    "pos_x_eps": 5.0,
+    "pos_y_eps": 2.0,
+    "hp_frac_eps": 0.02,
+    "move_state_eps": 0
+  },
+
+  "inputs": [
+    { "t": 3200, "type": "key_down", "key": "D" },
+    { "t": 3680, "type": "key_up",   "key": "D" },
+    { "t": 4800, "type": "key_down", "key": "Space" },
+    { "t": 4960, "type": "key_up",   "key": "Space" }
+  ],
+
+  "expected_states": [
+    {
+      "t": 0,
+      "side": "player",
+      "move_state": 10,
+      "is_blocking": false,
+      "pos_x": -290.0,
+      "pos_y": -93.0,
+      "facing_right": true,
+      "hp_frac": 1.0,
+      "anim": "stance_2"
+    },
+    {
+      "t": 3200,
+      "side": "player",
+      "move_state": 0,
+      "is_blocking": false,
+      "pos_x": -273.7,
+      "pos_y": -93.0,
+      "facing_right": true,
+      "hp_frac": 1.0,
+      "anim": "stance_idle"
+    },
+    {
+      "t": 3216,
+      "side": "player",
+      "move_state": 2,
+      "is_blocking": false,
+      "pos_x": -262.3,
+      "pos_y": -93.0,
+      "facing_right": true,
+      "hp_frac": 1.0,
+      "anim": "step_forward"
+    },
+    {
+      "t": 3696,
+      "side": "player",
+      "move_state": 0,
+      "is_blocking": false,
+      "pos_x": -207.8,
+      "pos_y": -93.0,
+      "facing_right": true,
+      "hp_frac": 1.0,
+      "anim": "stance_idle"
+    },
+    {
+      "t": 4816,
+      "side": "player",
+      "move_state": 10,
+      "is_blocking": false,
+      "pos_x": -203.0,
+      "pos_y": -93.0,
+      "facing_right": true,
+      "hp_frac": 1.0,
+      "anim": "high_punch"
+    },
+    {
+      "t": 5600,
+      "side": "player",
+      "move_state": 0,
+      "is_blocking": false,
+      "pos_x": -204.4,
+      "pos_y": -93.0,
+      "facing_right": true,
+      "hp_frac": 1.0,
+      "anim": "stance_idle"
+    }
+  ],
+
+  "function_calls": [
+    {
+      "t": 3200,
+      "function": "input_handler.process",
+      "side": "player",
+      "result": "walk_forward_start",
+      "context": { "move_state_in": 0, "key": "D" }
+    },
+    {
+      "t": 4800,
+      "function": "input_handler.process",
+      "side": "player",
+      "result": "attack_light",
+      "context": { "move_state_in": 0, "key": "Space" }
+    }
+  ]
+}
