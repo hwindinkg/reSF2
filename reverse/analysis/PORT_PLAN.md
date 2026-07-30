@@ -7,7 +7,7 @@ Addresses are `game+off` against the relocated runtime dump
 (`reverse/binaries/game_region_runtime.bin`, image base `0x8F057000` — load it
 in Ghidra at that base and every address here resolves directly).
 
-Last updated: 2026-07-30. Tests: 37/37 pass.
+Last updated: 2026-07-30. Tests: 39/39 pass.
 
 ---
 
@@ -22,8 +22,8 @@ Last updated: 2026-07-30. Tests: 37/37 pass.
 | 5 | Collision geometry | open | capsule/edge radii |
 | 6 | Triangle rasteriser | **FIXED** | was a no-op stub |
 | 7 | Headless input edges | **FIXED** | `poll_events` wiped press edges |
-| 8 | Attribute system | schema recovered | `game+0x60DF98` |
-| 9 | Location parser coverage | partial | 6 attributes unparsed |
+| 8 | Attribute system | **IMPLEMENTED** | `game+0x6275F4` |
+| 9 | Location parser `Path`/`Scaling` | **FIXED** | `game+0x3E40D0` |
 | 10 | Scene visuals | partial | placeholders in `scenes.cpp` |
 
 ---
@@ -323,3 +323,40 @@ remaining item and is small enough that it needs the original measured properly
   it). `cmake --build build --config Release --target <t>` for a single target.
 - **Diagnose visuals with numbers.** `tool_visual_audit` found both fixed bugs
   in one run; eyeballing screenshots had not.
+
+---
+
+## Session log — 2026-07-30 (visual + attributes)
+
+Four defects fixed, two subsystems recovered, all measured rather than guessed.
+
+**Fixed**
+1. `software_renderer` had no triangle rasteriser (§6) — the single largest
+   visual defect. Fighters and the bag rendered as strings of circles.
+2. `HeadlessTestRunner` wiped injected key presses (§7), so all scripted input
+   silently did nothing. This in turn hid the tutorial Dialogue scene freezing
+   the fighter.
+3. `<Layer Path>` was ignored (§9) — 26 layers across 5 locations rendered
+   nothing because their atlas was searched in the wrong directory.
+4. UI placeholders: damage/gem icons drawn as Unicode glyphs despite the real
+   PNGs shipping; shop star rating hardcoded to 4 instead of reading
+   `UpgradeLevel`.
+
+**Recovered**
+- `Model::getParameter` @ `game+0x6275F4` and the whole attribute model (§8),
+  now implemented in `engine/game/attributes.hpp`.
+- The `Root`/`Layer` params.xml schemas with field offsets (§9).
+
+**Tooling**
+- `tests/tool_visual_audit.cpp` + `Game::audit_dump_*`: prints the location box,
+  camera framing, fighter transform and bag state, and writes a PNG. It found
+  both of the first two bugs in a single run.
+- `reverse/analysis/resolve_dats.py`: turns Ghidra's `DAT_x + -0yyy` noise into
+  readable string constants, which is what made the params.xml and attribute
+  schemas readable at all.
+
+**Next**
+Wire `damage_formula.hpp` + `attributes.hpp` into `game.cpp`, replacing the
+linear model at `game.cpp:3641` and deleting the stray `* 2.0f`. Everything it
+needs now exists; what remains is populating a character's AttributeSet from
+equipped items (`ShopItem` already carries the per-item values) and from perks.
