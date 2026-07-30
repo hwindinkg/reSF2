@@ -331,6 +331,32 @@ add_test(NAME test_step_cooldown
 set_tests_properties(test_step_cooldown PROPERTIES TIMEOUT 180)
 
 # ============================================================================
+# Trace replay — replay captured Frida traces against the engine.
+#
+# Unlike the in-tree integration tests above, this one spawns resf2_app as a
+# subprocess (same pattern as test_step_cooldown / test_input_trace). The
+# trace JSON lives under reverse/traces/; the test converts it to an input
+# script, runs the app, parses [STATE] lines, and compares to expected_states.
+# ============================================================================
+
+add_executable(test_trace_replay
+    integration/test_trace_replay.cpp
+)
+target_link_libraries(test_trace_replay PRIVATE resf2_warnings)
+target_compile_features(test_trace_replay PRIVATE cxx_std_23)
+set_target_properties(test_trace_replay PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+)
+add_dependencies(test_trace_replay resf2_app)
+add_test(NAME test_trace_replay
+         COMMAND test_trace_replay
+                 "$<TARGET_FILE:resf2_app>"
+                 "${CMAKE_SOURCE_DIR}"
+                 "${CMAKE_SOURCE_DIR}/reverse/traces/example_trace.json"
+)
+set_tests_properties(test_trace_replay PROPERTIES TIMEOUT 180)
+
+# ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
 
