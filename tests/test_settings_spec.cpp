@@ -86,6 +86,8 @@ int main() {
                   "Sound has a Value (a 0..1 level, not a boolean)");
             CHECK(!snd->attr("Mute").empty(),
                   "Sound has a separate Mute flag -- level and mute are independent, so muting must not lose the level");
+            CHECK(snd->attr("Mute") == "false" || snd->attr("Mute") == "0",
+                  "Sound starts unmuted in shipped settings");
         }
     }
 
@@ -103,6 +105,8 @@ int main() {
               "the shipped default language is ENGLISH -- the engine hardcodes \"rus\" and so ignores this setting");
         CHECK(!lang->attr("Number").empty(),
               "Language carries a Number, the index a settings screen cycles");
+        CHECK(lang->attr("Number") == "0",
+              "Shipped default language index is 0");
     }
 
     // ---- the language files that must all be selectable ----
