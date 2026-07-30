@@ -24,6 +24,11 @@ struct ShopItem {
     std::string category;    // "Weapon", "Armor", "Helm", "Ranged", "Magic"
     int price = 0;
     int level_req = 1;
+    // [ORIGINAL] list.xml UpgradeLevel — the item's enhancement level, which is
+    // what the shop rows render as stars. The rating used to be hardcoded to 4.
+    // Note this is an upgrade level, not a rarity: the binary has no "Rarity"
+    // or "Rank" string at all, only UpgradeLevel / UpgradeNumber / UpgradeList.
+    int upgrade_level = 0;
     float weapon_damage = 0;
     float body_defense = 0;
     float head_defense = 0;
