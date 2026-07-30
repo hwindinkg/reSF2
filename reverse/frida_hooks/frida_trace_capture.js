@@ -27,7 +27,7 @@
 // Configuration
 // ---------------------------------------------------------------------------
 
-var GAME_SO      = "libgame.so";
+var GAME_SO      = "libgame.so";  // Not used in Marmalade — game is loaded from OBB
 var S3E_SO       = "libs3e_android.so";
 var FRAME_MS     = 16;   // ~60 Hz gameplay tick
 var MAX_TRACES   = 8192; // ring-buffer cap; prevents unbounded growth
@@ -38,9 +38,13 @@ var MAX_TRACES   = 8192; // ring-buffer cap; prevents unbounded growth
 
 var traces        = [];
 var sessionStart  = Date.now();
-var gameBase      = null;
+var gameBase      = null;  // Will be set to main game memory region
 var gameSize      = 0;
 var s3eBase       = null;
+
+// [MARMALADE] Game binary is not loaded as .so — it's mapped from OBB by S3E engine.
+// From previous Frida profiling, main game region is ~8.2MB at runtime address.
+// We'll detect it by scanning for large executable memory regions.
 
 // Known offsets (ARM, APK 1.9.21 / 2.46). Update when porting to another
 // build. Values were established during the RE sessions captured in
@@ -89,25 +93,53 @@ function pushTrace(evt) {
 }
 
 function resolveModules() {
-    try {
-        var m = Module.findBaseAddress(GAME_SO);
-        if (m) {
-            gameBase = m;
-            gameSize = Module.getBaseSize(GAME_SO);
-            console.log("[trace] " + GAME_SO + " @ " + hex(gameBase) +
-                        " size=" + gameSize);
-        } else {
-            console.log("[trace] " + GAME_SO + " not loaded yet");
+    // [MARMALADE] Game binary is not loaded as .so — it's mapped from OBB by S3E engine.
+    // We need to find the main game memory region by scanning for large executable ranges.
+    if (!gameBase) {
+        try {
+            // Scan for large executable memory regions (>5MB) that are not system libraries
+            var ranges = Process.enumerateRanges('r-x');
+            for (var i = 0; i < ranges.length; i++) {
+                var r = ranges[i];
+                // Game region is typically 8-9MB, not a named module
+                if (r.size > 5 * 1024 * 1024 && r.size < 10 * 1024 * 1024) {
+                    // Check if it's not a known system library
+                    var isSystem = false;
+                    try {
+                        var mod = Process.findModuleByAddress(r.base);
+                        if (mod && (mod.name.includes("libandroid") || mod.name.includes("libc.") || 
+                                    mod.name.includes("libart") || mod.name.includes("boot."))) {
+                            isSystem = true;
+                        }
+                    } catch (e) {}
+                    
+                    if (!isSystem) {
+                        gameBase = r.base;
+                        gameSize = r.size;
+                        console.log("[trace] Found game region @ " + hex(gameBase) + 
+                                    " size=" + (gameSize / 1024 / 1024).toFixed(1) + "MB");
+                        break;
+                    }
+                }
+            }
+            if (!gameBase) {
+                console.log("[trace] Game region not found yet (scanning...)");
+            }
+        } catch (e) { 
+            console.log("[trace] resolve game region: " + e); 
         }
-    } catch (e) { console.log("[trace] resolve game: " + e); }
+    }
 
-    try {
-        var s = Module.findBaseAddress(S3E_SO);
-        if (s) {
-            s3eBase = s;
-            console.log("[trace] " + S3E_SO + " @ " + hex(s3eBase));
-        }
-    } catch (e) { console.log("[trace] resolve s3e: " + e); }
+    // Also find libs3e_android.so for input hooks
+    if (!s3eBase) {
+        try {
+            var s = Module.findBaseAddress(S3E_SO);
+            if (s) {
+                s3eBase = s;
+                console.log("[trace] " + S3E_SO + " @ " + hex(s3eBase));
+            }
+        } catch (e) { console.log("[trace] resolve s3e: " + e); }
+    }
 }
 
 // ---------------------------------------------------------------------------
