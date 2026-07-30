@@ -194,11 +194,15 @@ function hookFighterTick() {
     var mainTick = gameBase.add(0x0002f0e0); // Model::tick (see analysis/)
     try {
         Interceptor.attach(mainTick, {
+            onEnter: function (args) {
+                // ARM: args[0] = r0 = this pointer (first arg = this for C++ methods)
+                // Save it for onLeave — r0 gets clobbered with return value
+                this.selfPtr = args[0];
+            },
             onLeave: function (retval) {
                 try {
-                    // `this` pointer is in R0 on ARM. The Model instance has
-                    // player_ at +0x08 and enemy_ at +0x0C (see frida_dump_and_trace).
-                    var self = this.context.r0;
+                    var self = this.selfPtr;
+                    if (!self) return;
                     var player = self.add(0x08).readPointer();
                     var enemy  = self.add(0x0C).readPointer();
 
@@ -244,9 +248,14 @@ function hookBlockDecision() {
     var decide = gameBase.add(0x0005c740);
     try {
         Interceptor.attach(decide, {
+            onEnter: function (args) {
+                // Save this pointer — r0 gets clobbered by return value in onLeave
+                this.selfPtr = args[0];
+            },
             onLeave: function (retval) {
                 try {
-                    var self = this.context.r0;
+                    var self = this.selfPtr;
+                    if (!self) return;
                     pushTrace({
                         type: "ai_decision",
                         data: {
