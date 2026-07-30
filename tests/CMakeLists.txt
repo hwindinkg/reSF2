@@ -454,6 +454,18 @@ add_test(NAME test_damage_formula_golden
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 set_tests_properties(test_damage_formula_golden PROPERTIES TIMEOUT 60)
 
+# Character attributes (Model::getParameter @ game+0x6275F4) — the state the
+# damage formula reads. Pins the integer storage, the -1e35 "absent" sentinel
+# (which is NOT 0), and the fact that the alignment-table lookup at
+# game+0x60DF98 is a separate lookup defaulting to 0.0.
+add_executable(test_attributes_golden test_attributes_golden.cpp)
+target_link_libraries(test_attributes_golden PRIVATE resf2_warnings)
+target_compile_features(test_attributes_golden PRIVATE cxx_std_23)
+add_test(NAME test_attributes_golden
+         COMMAND test_attributes_golden
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_attributes_golden PROPERTIES TIMEOUT 60)
+
 # ---------------------------------------------------------------------------
 # tool_visual_audit — not a test, a diagnostic. Renders the dojo headlessly and
 # prints every geometric quantity the on-screen composition depends on (camera
