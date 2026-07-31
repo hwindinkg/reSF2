@@ -311,6 +311,21 @@ target_compile_features(test_tactic_weights PRIVATE cxx_std_23)
 add_test(NAME test_tactic_weights COMMAND test_tactic_weights
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# TacticMemory state model (ADR-005 D8, R5-verified): unbounded per-animation
+# decayed records (no ring depth), action logs, frame countdowns, round-end
+# scaling — semantics per reverse/analysis/MEMORY_INDEXING_R56.md.
+add_executable(test_tactic_memory
+    test_tactic_memory.cpp
+)
+target_link_libraries(test_tactic_memory PRIVATE
+    resf2_game
+    resf2_warnings
+)
+target_compile_features(test_tactic_memory PRIVATE cxx_std_23)
+add_test(NAME test_tactic_memory COMMAND test_tactic_memory
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_tactic_memory PROPERTIES TIMEOUT 60)
+
 # TacticTableSet family registry (ADR-005 D3): real .atf dump load, family
 # presence bits, Header-name keyed lookup, stub families, neutral probe.
 add_executable(test_tactic_tables
