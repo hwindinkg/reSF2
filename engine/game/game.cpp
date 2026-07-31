@@ -3683,10 +3683,10 @@ void Game::host_update_gameplay(uint32_t dt) {
                                         play_sound("armor", 0.5f);
                                         spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
                                         if (is_battle_mode_) {
-                                            // [ORIGINAL] Damage formula from Model::getTotalDamage @ 0x10159a6c
-                                            // Binary ref: IntervalAttack::getFactors @ 0x10115921
-                                            // rawDamage = baseDamage × attributeMultiplier × blockFactor × attackFactor × critFactor × 2.0
-                                            // finalDamage = factorSetMultiplier × rawDamage
+                                            // [ORIGINAL] Damage via Model::getTotalDamage @ game+0x4527B4
+                                            // (engine/game/damage_formula.hpp — the multiplication order
+                                            // base*f2*f1*f3*add is preserved there; called, never
+                                            // reimplemented). Caller side of IntervalAttack::getFactors.
                                             //
                                             // [ORIGINAL] AverageBaseDamage from internalSettings.xml (parsed at load time)
                                             // This is the fallback when a move has no explicit Damage value.
@@ -3694,11 +3694,29 @@ void Game::host_update_gameplay(uint32_t dt) {
                                             float base_damage = move_it->second.damage;
                                             if (base_damage <= 0.0f) base_damage = dmg_settings.average_base_damage;
                                             
-                                            // [ORIGINAL] Attribute multiplier from warrior stats (WeaponDamage/UnarmedDamage)
-                                            // Binary ref: damage attribute lookup at 0x1020982a
-                                            // Formula: 1.0 + DamageFactor_Base * character_DamageFactor_attribute
-                                            // Without a stat system, character attribute = 0, so multiplier = 1.0.
-                                            float attribute_multiplier = 1.0f + dmg_settings.damage_factor_base * 0.0f;  // [TODO] Implement warrior stat system
+                                            // [ORIGINAL] Attribute pairing per the game+0x60DF98 helper:
+                                            // melee damage attribute vs the defender's BodyDefense — weapon
+                                            // hits read WeaponDamage, fists read UnarmedDamage.
+                                            // [HEURISTIC-TODO] HeadDefense by hit zone when move data carries
+                                            // it (no hit-zone field on MoveDef today).
+                                            const char* dmg_attr =
+                                                (equipped_weapon_ != "Fists") ? "WeaponDamage" : "UnarmedDamage";
+                                            
+                                            DamageInputs din;
+                                            // base = 2^(attr*w): DamageFactor absent in MVP -> get_or 0 ->
+                                            // base 1.0f. get_or, NEVER raw get(): the -1e35f getParameter
+                                            // sentinel must never reach powf (game+0x60DF98 defaults 0.0).
+                                            din.base_attribute = player_fighter_.attributes.get_or("DamageFactor", 0.0f);
+                                            din.base_weight = dmg_settings.damage_factor_base;
+                                            // [HEURISTIC-TODO] f1/f2 selector terms (game+0x4A94F0 /
+                                            // game+0x4A95A8) stay disabled-neutral (1.0f) — factor-set data
+                                            // not yet ported. crit stays 1.0f (CriticalChance/CriticalDamage
+                                            // system, internalSettings.xml L560-563, not yet ported).
+                                            din.attribute_difference =
+                                                attribute_difference(player_fighter_.attributes, dmg_attr,
+                                                                     enemy_fighter_.attributes, "BodyDefense");
+                                            din.hit_damage = base_damage;      // original's hit[0x48]
+                                            din.enemy_damage_bonus = 0.0f;     // original's enemy[0x774] — not ported
                                             
                                             // [ORIGINAL] Block factor: base_block_factor from binary @ 0x101598c0
                                             // Binary ref: BlockChance at 0x10242aa2
@@ -3712,40 +3730,27 @@ void Game::host_update_gameplay(uint32_t dt) {
                                                 std::printf("[COMBAT] Player hit enemy: IGNORES BLOCK\n");
                                             }
                                             
-                                            // [ORIGINAL] Attack factor from equipment (weapon damage bonus)
-                                            // Binary ref: DamageFactor at 0x101f901b
-                                            float attack_factor = 1.0f;  // [TODO] Implement equipment damage bonuses
-                                            
-                                            // [ORIGINAL] Critical hit system (internalSettings.xml lines 560-563)
-                                            // CriticalHit.Probability Base="0.0001" Attribute="CriticalChance"
-                                            // CriticalHit.Damage Base="0.0001" Attribute="CriticalDamage"
-                                            // Binary ref: CriticalHit effect at 0x102446e0
-                                            // Formula: crit_chance = crit_probability_base * character_CriticalChance_attribute
-                                            //          crit_damage = 1.0 + crit_damage_base * character_CriticalDamage_attribute
-                                            // With default Base=0.0001 and character attribute=0, crits never happen.
-                                            float crit_factor = 1.0f;
-                                            // [TODO] Implement CriticalChance attribute from equipment/perks
-                                            
-                                            // [ORIGINAL] Factor set multiplier from melee/ranged factor set
-                                            // Binary ref: MagicBulletFactor/DamageFactor/HitFactor at 0x102446e0
-                                            // For melee attacks, this is typically 1.0. Ranged/magic may differ.
-                                            float factor_set_multiplier = 1.0f;  // [TODO] Parse factor sets from tactics
-                                            
-                                            float raw_damage = base_damage * attribute_multiplier * block_factor * attack_factor * crit_factor * 2.0f;
-                                            float final_damage = factor_set_multiplier * raw_damage;
+                                            // [ORIGINAL] EXPLICIT DELETION (phase 4 step 9): the old
+                                            // raw_damage line ended with a trailing `* 2.0f` — the
+                                            // double-counted power base. 2.0 is the powf base INSIDE
+                                            // get_total_damage, not a trailing multiplier; keeping both
+                                            // doubled all damage at neutral attributes. Do NOT re-add it —
+                                            // the halved damage below is the intended fidelity correction.
+                                            const float final_damage = get_total_damage(din) * block_factor;
                                             
                                             // Store for F1 debug overlay (COMBAT panel damage breakdown)
                                             dbg_last_base_damage_ = base_damage;
-                                            dbg_last_attr_mult_ = attribute_multiplier;
+                                            dbg_last_attr_mult_ = attribute_difference_factor(din.attribute_difference);  // the f3 term (game+0x60E794)
                                             dbg_last_block_factor_ = block_factor;
-                                            dbg_last_attack_factor_ = attack_factor;
-                                            dbg_last_crit_factor_ = crit_factor;
-                                            dbg_last_factor_set_ = factor_set_multiplier;
+                                            dbg_last_attack_factor_ = 1.0f;   // f1 term disabled-neutral (not ported)
+                                            dbg_last_crit_factor_ = 1.0f;     // crit system not yet ported
+                                            dbg_last_factor_set_ = 1.0f;      // f2 term disabled-neutral (not ported)
                                             dbg_last_final_damage_ = final_damage;
                                             dbg_last_move_name_ = move_it->first;
                                             
-                                            std::printf("[COMBAT] Player hit enemy: base=%.3f attr=%.2f blk=%.2f atk=%.2f crit=%.2f fset=%.2f => final=%.3f\n",
-                                                        base_damage, attribute_multiplier, block_factor, attack_factor, crit_factor, factor_set_multiplier, final_damage);
+                                            std::printf("[COMBAT] Player hit enemy: base=%.3f attrdiff=%.1f f3=%.3f blk=%.2f => final=%.3f\n",
+                                                        base_damage, din.attribute_difference,
+                                                        dbg_last_attr_mult_, block_factor, final_damage);
                                             
                                             enemy_fighter_.health -= final_damage * enemy_fighter_.max_health;
                                             if (enemy_fighter_.health <= 0.0f) {
