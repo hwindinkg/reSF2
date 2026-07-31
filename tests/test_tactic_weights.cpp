@@ -470,6 +470,60 @@ int main() {
         CHECK(nt && nt->strikes == 3, "NoTables Memory Strikes=3");
     }
 
+    // ---- Step A3 (ADR-005 D4): RngSource injection into the roulette.
+
+    std::printf("\n=== RngSource injection (ADR-005 D4) ===\n");
+    {
+        TacticSettings s;
+        TacticDef def;
+        def.name = "T";
+        TacticWeight wa; wa.base = 500; wa.curve = TacticWeight::Curve::kLinear;
+        TacticWeight wb; wb.base = 500; wb.curve = TacticWeight::Curve::kLinear;
+        def.animation_weights.emplace_back("A", wa);
+        def.animation_weights.emplace_back("B", wb);
+        const std::vector<std::string> cands = {"A", "B"};
+        TacticContext c;
+
+        // Seeded LCG honoring the RngSource contract: values in [0, RAND_MAX],
+        // the same range as std::rand, so the draw formula is unchanged.
+        auto make_lcg = [](unsigned seed) {
+            return [seed]() mutable -> unsigned {
+                seed = seed * 1103515245u + 12345u;
+                return (seed >> 16) % ((unsigned)RAND_MAX + 1u);
+            };
+        };
+        auto sequence = [&](unsigned seed, int draws) {
+            std::vector<int> picks;
+            auto lcg = make_lcg(seed);
+            // std::ref: the generator state must be shared, not copied per call.
+            resf2::game::RngSource rng = std::ref(lcg);
+            for (int i = 0; i < draws; ++i)
+                picks.push_back(s.choose(def, cands, c, rng));
+            return picks;
+        };
+
+        const std::vector<int> run1 = sequence(42, 24);
+        const std::vector<int> run2 = sequence(42, 24);
+        CHECK(run1 == run2, "same seed -> identical pick sequence (24 draws)");
+        const std::vector<int> run3 = sequence(7, 24);
+        CHECK(run1 != run3, "different seeds -> different pick sequence");
+
+        // All-zero weights still return -1 with an injected source.
+        const std::vector<std::string> zc = {"Z"};  // no weight entry -> 0
+        auto z_lcg = make_lcg(1);
+        resf2::game::RngSource rng = std::ref(z_lcg);
+        CHECK(s.choose(def, zc, c, rng) == -1,
+              "all-zero weights -> -1 with injected rng");
+
+        // choose_debug reports the same weights via the injected source.
+        std::vector<float> w1, w2;
+        auto l1 = make_lcg(99), l2 = make_lcg(99);
+        resf2::game::RngSource r1 = std::ref(l1), r2 = std::ref(l2);
+        int p1 = s.choose_debug(def, cands, c, w1, r1);
+        int p2 = s.choose_debug(def, cands, c, w2, r2);
+        CHECK(p1 == p2 && w1 == w2, "choose_debug deterministic with same seed");
+    }
+
     std::printf("\n=== Summary: %d passed, %d failed ===\n", tests_passed, tests_failed);
     return tests_failed == 0 ? 0 : 1;
 }

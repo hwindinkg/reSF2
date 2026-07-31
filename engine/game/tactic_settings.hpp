@@ -53,11 +53,19 @@
 
 #pragma once
 
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace resf2::game {
+
+// ADR-005 D4 — injectable RNG for the roulette draw. Contract: returns a
+// value in [0, RAND_MAX], the same range as std::rand, so the draw formula
+// (rng()/RAND_MAX * sum) is identical to the existing jL behavior.
+// Production binds std::rand (RNG-sequence determinism parity with the
+// baseline); tests bind a seeded LCG.
+using RngSource = std::function<unsigned()>;
 
 // The fight state a weight curve is evaluated against.
 // Field order mirrors the terms of Gb() so the two can be read side by side.
@@ -232,15 +240,26 @@ public:
     // jL() — roulette-wheel pick over `candidates`. Returns the index of the
     // chosen candidate, or -1 when every weight is zero (the original
     // returns -1 too, and the caller then does nothing this decision).
+    // The 3/4-arg forms bind std::rand (production parity); the RngSource
+    // overloads take an injected draw source (ADR-005 D4).
     [[nodiscard]] int choose(const TacticDef& tactic,
                              const std::vector<std::string>& candidates,
                              const TacticContext& ctx) const;
+    [[nodiscard]] int choose(const TacticDef& tactic,
+                             const std::vector<std::string>& candidates,
+                             const TacticContext& ctx,
+                             RngSource rng) const;
 
     // Same draw, but reports the weights it used. For the F1 overlay.
     [[nodiscard]] int choose_debug(const TacticDef& tactic,
                                    const std::vector<std::string>& candidates,
                                    const TacticContext& ctx,
                                    std::vector<float>& out_weights) const;
+    [[nodiscard]] int choose_debug(const TacticDef& tactic,
+                                   const std::vector<std::string>& candidates,
+                                   const TacticContext& ctx,
+                                   std::vector<float>& out_weights,
+                                   RngSource rng) const;
 
 private:
     std::unordered_map<std::string, TacticDef> tactics_;
