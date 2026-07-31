@@ -56,14 +56,18 @@ inline AttributeSet aggregate_equipment_attributes(
         // through add() separately.
         attrs.add("UnarmedDamage", static_cast<int>(item->unarmed_damage));
 
-        // --- Perk plug point (phase 4 steps 3-6 workstream) ------------------
-        // ListItem::perks (ListPerk{name, params}, list_parser.hpp L29-33)
-        // plug in HERE, per equipped item, after the direct contribution.
-        // The Step 5 fork verdict (PERK_SURVEY.md) decides what lands here:
-        // Case A (persistent write into the model+0x1C4 map) -> verified
-        // contribution code called at this point; Case B (trigger/timed
-        // effect) -> a single [ORIGINAL] TODO with binary refs. Until the
-        // verdict lands, perks contribute nothing.
+        // [ORIGINAL] perks: trigger-system effects not ported (5.1) — see
+        // reverse/analysis/PERK_SURVEY.md + PERK_BINARY_SURVEY.md.
+        // Step 5 fork verdict: ZERO Case A mechanisms. Every perk attribute
+        // write is a transient ModAttributes action — added on trigger fire
+        // (executor FUN_8f6a6c70, game+0x64FC70, via the central action switch
+        // FUN_8f6a9164 game+0x642164 case 3; PerkActionSetAttributes vtable
+        // 0x8F85B170) into the model+0x1C4 map's secondary/mod slot, and
+        // SUBTRACTED back when the mod is reaped (FUN_8f6aac7c,
+        // game+0x643C7C — Frames countdown / ClearMods / EndStanceClear).
+        // No persistent equip-time contribution exists, so equipped perks
+        // correctly contribute NOTHING here. The Condition/trigger/timed-mod
+        // system is PORT_PLAN open item 5.1 scope.
     }
     return attrs;
 }

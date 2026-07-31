@@ -475,3 +475,38 @@ DefenseAttribute is expected per hit) and helpers `ceil`, `trunc`, `Abs`,
 `Count of DefenseAttribute != 1` is a useful constraint: the `f2` term in
 `getTotalDamage` resolves a *single* defense attribute, so the head/body choice
 is made before the formula runs, not inside it.
+
+# Perk trigger system (5.1 scope) - anchored 2026-07-31 (phase 4 step 5)
+
+The perk system's attribute effects are ALL Case B (triggered/timed, transient):
+the phase-4 binary survey found ZERO persistent (Case A) perk->attribute
+contributions, so nothing was wired into the AttributeSet aggregation. Full
+evidence, decompiled shapes, and reproduction queries:
+`reverse/analysis/PERK_SURVEY.md` (data) + `reverse/analysis/PERK_BINARY_SURVEY.md`
+(binary). Anchors for the 5.1 (Condition/trigger/timed-effect) workstream:
+
+- Parser chain: `FUN_8f653fb0` (game+0x5FCFB0, load driver) -> `FUN_8f6a434c`
+  (game+0x64D34C, template/ID pass) -> `FUN_8f6679dc` (game+0x6109DC, registrar;
+  registry @ `0x8F868C54`) -> `PerkObject::parse` `FUN_8f68b280` (game+0x634280;
+  Set params -> perk+0xBC param map) -> trigger parse `FUN_8f6a33f8`
+  (game+0x64C3F8) -> factories: events `FUN_8f699be0` (game+0x642BE0),
+  conditions `FUN_8f695758` (game+0x63E758), actions `FUN_8f68e9fc`
+  (game+0x6379FC).
+- Attach/instance factory: `FUN_8f68ba34` (game+0x634A34) — Set overrides merge
+  at RUNTIME (re-parse), template inheritance at LOAD.
+- Event dispatch: `FUN_8f6a9a38` (game+0x642A38) + 2 siblings; central action
+  executor `FUN_8f6a9164` (game+0x642164), `ModAttributes` = case 3.
+- ModAttributes apply: `FUN_8f6a6c70` (game+0x64FC70; PerkActionSetAttributes
+  vtable `0x8F85B170`) — writes the model+0x1C4 map's SECONDARY (mod) key,
+  add-on-apply; reaper `FUN_8f6aac7c` (game+0x643C7C) subtracts at expiry
+  (Frames / ClearMods / EndStanceClear). `DamageFactor` additionally pokes the
+  in-flight hit (the `Frames="1"` mechanic) and reaches `getTotalDamage`
+  (game+0x4527B4) via the mod-aware map read at game+0x452808 — the
+  `2^(DamageFactor*w)` base term.
+- Mod bookkeeping: active-mod vector fight+0x10; frames-list registration
+  `FUN_8f6a8a88`; global mod manager `FUN_8f41c58c` (store manager+0x1C8/+0x1E8).
+- Expression evaluator: `FUN_8f265af0` family; rating curve `FUN_8f62a354`
+  (game+0x5E3354, same 2^x family); moddable-attribute registry vector
+  `0x8F8780A8+0x274` (empty in the idle dump).
+- Attribute maps: model+0x1B4 (base/template) -> +0x1C4 (runtime) copy at
+  warrior init `FUN_8f576960` (game+0x51F960).
