@@ -90,3 +90,52 @@ end-of-vector asymmetry is modeled correctly; weight default 0.0f verified.
   (no names/comments/plate in the Ghidra DB) — it did not influence any verdict.
 - NEEDS_HUMAN = false: the ASM is unambiguous at every disputed point; both
   FAIL items are mechanical fixes within the reverser's reach.
+
+---
+
+# Round 2 (final adjudication, fix commit b6c352d)
+
+Re-verified 2026-08-01 against a fresh decompile + fresh disassembly of
+FUN_8f446cb4. Both round-1 FAIL items were re-checked byte-by-byte at the
+exact addresses named in the fix guidance; all round-1 semantic claims
+re-confirmed against fresh decompiles (FUN_8f459b44, FUN_8f47cbe0 usage).
+
+| FAIL item (round 1) | round-2 verdict | evidence |
+|---|---|---|
+| control_flow — zero-slot handling | **GREEN** | ASM 0x8F446D24..38 (pass 1) / 0x8F446E30..44 (pass 2): `cmp r9,#0 / movne r3,#0 / andeq r3,r6,#1 / cmp r3,#0 / beq skip / ldr r9,[sp,#8]` — id≠0 → weight(id); id==0 && filter≠0 → **weight(filter), exactly ONE slot** (advance at 0x8F446DB4 after the vadd, no read-ahead); id==0 && filter==0 → advance one (`ldr r9,[r7,#4]!` @ 0x8F446D18/0x8F446E20) + end check. Candidate now implements exactly this (`if (id==0){ if(filter==0){++it;continue;} anim=filter; } else anim=id;` in both passes). r6 (filter≠0 flag) is never clobbered between passes — reused at 0x8F446E38 ✓. Branch-count delta 22 (graph) vs 13 (candidate): all 22 mapped 1:1 to candidate constructs — 4 entry checks (8F446CEC/CF8/E00/E0C), 2 skip-end checks (D1C/E2C), 2 loop-tail continues (DBC/EE0) and 2 record-scan continues (DAC/EB8) collapse into while/for conditions; counter-edge 8F446F2C is the bpl of the same vcmpe as 8F446ECC. **Zero unmapped branches/loops** — no missed logic. |
+| fp_consistency — pass-1 int truncation | **GREEN** | 0x8F446F04..08: `vcvt.s32.f32 s15,s14 / vcvt.f32.s32 s15,s15` → sum accumulates `(float)(int)w`; 0x8F446F1C..20: `vmov s15,r0 / vsub.f32 s16,s16,s15` → pass-2 subtracts the **raw** float. Candidate: `sum += (float)(int)candidateWeight(...)` / `point -= candidateWeight(...)`. Op order preserved: `point = FUN_8f26447c(rng, sum)` = sum·roll01 (`vmov r1,s16` @ 8F446DD8, `bl 8F26447C` @ 8F446DE0); `point<0 → return idx` (bmi → `cpy r0,r10` @ 8F446F30); equality continues (bpl @ 8F446F2C) as candidate's `< 0.0f`. |
+
+Full round-2 re-check (all PASS):
+
+| check | verdict | evidence |
+|---|---|---|
+| call_count | PASS | decompile_calls = 5 (47cf1c×2, 44ac78×2, 26447c×1); candidate_calls = 18 (full file, incl. modeled helpers: roll01 6, animMatchesName 3, candidateWeight 1) → 5−18 < 3, no under-count. |
+| control_flow | PASS | See FAIL-item row above: all 22 graph branches mapped 1:1, zero missed. |
+| fp_consistency | PASS | See FAIL-item row above. Additionally: `sum>0` gate = `vcmpe.f32 s16,#0 / ble → mvn r0,#0` @ 0x8F446DC4..CC ⇔ candidate `if (sum > 0.0f)` (sum==0 → −1 both); `return −1` fallthrough `mvn r0,#0` @ 0x8F446EE4 ✓. |
+| stub_detect | PASS | Full roulette logic in both passes, no TODO/approximate/placeholder. |
+| body_proportion | PASS | 133-line candidate vs 652-byte / 163-instruction function (basic_blocks 33, loops 8); completeness_score=0% (справочно — annotation metadata only). |
+| side_effects | PASS | Read-only w.r.t. globals (DAT_8f446f40/f44/f48 read only); returns idx (r10) or −1 (mvn r0,#0); no missed writes. |
+
+Address-level confirmations requested in the round-2 brief:
+- idx accounting `add r10,r10,#1` @ 0x8F446ED4 — present; executed only on the
+  point≥0 continue path, after `ldr r9,[r7,#4]!`; candidate `++it; ++idx;` after
+  the `point < 0` return. Skips do not bump r10 in either pass ✓.
+- End-of-vector, pass 1 (0x8F446DB4..C0): after last slot → fall into sum gate
+  (not −1) ✓ candidate loop exit → `if (sum > 0.0f)`.
+- End-of-vector, pass 2 (0x8F446ED0..E0): loop tail → `mvn r0,#0`; skip-path
+  end (0x8F446E24..2C) → `mvn r0,#0`; entry empty/end (0x8F446E00/0C) →
+  `mvn r0,#0` ✓ candidate: all funnel to `return -1`.
+- Round-1 semantic claims re-confirmed GREEN on fresh decompiles: gate
+  `w = FUN_8f446b98(…); if (1.0 <= w) P = 1.0 − 1.0/w; attack iff P < roll`
+  (FUN_8f459b44 verbatim, `*(param_1+0x14)=1`); wait frames from duration
+  arithmetic (`iVar15 = FUN_8f47cbe0(id)` pushed as {id, value} pairs; weights
+  consumed only as gate + roulette).
+
+**Round-2 result**
+
+| item | verdict |
+|---|---|
+| FAIL-1 (zero-slot handling / control_flow) | **GREEN** |
+| FAIL-2 (pass-1 int truncation / fp_consistency) | **GREEN** |
+| **OVERALL** | **GREEN** |
+| NEEDS_HUMAN | **false** — ASM unambiguous at every point; both fixes verified byte-level; no indirect calls in this function (all callees resolved statically). |
