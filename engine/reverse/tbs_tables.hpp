@@ -9,6 +9,8 @@
 // records instead. No .tbs assets exist in this dump. Until R1 lands,
 // parse/parse_file return kFamilyUnavailable and no table of this family
 // can load — a missing family is a normal condition (ADR-005 D3).
+//
+// R1 verdict (TABLE_FORMATS.md): DEAD format — dir/ext strings 0x8F7978A8/0x8F7978C0 have zero code refs; attack tables ship inside .atf.
 
 #pragma once
 

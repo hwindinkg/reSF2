@@ -12,6 +12,8 @@
 //
 // Note: `heel %s not found in shift table for %s` (PORT_GAPS.md:189-190)
 // shows shift tables are keyed by heel node per animation frame.
+//
+// R1 verdict (TABLE_FORMATS.md): DEAD format — strings 0x8F7979B0/0x8F7979AC unreferenced.
 
 #pragma once
 
