@@ -67,6 +67,21 @@ namespace resf2::game {
 // baseline); tests bind a seeded LCG.
 using RngSource = std::function<unsigned()>;
 
+// GAP-4 step B4 (R2 GREEN) — per-animation memory sums backing the
+// <AnimationFactors> probe. [ORIGINAL] FUN_8f44ac78 @ 0x8F44AC78 scores each
+// child inline: a += child.DamageFactor*D(A) + child.CounterFactor*C(A) +
+// child.HitFactor*H(A), where D(A)/C(A)/H(A) are the exponentially-decayed
+// damage/counter/hit sums over animation A's record-id set
+// (reverse/analysis/VERIFY_FUN_8f44ac78.md, ATF_RECORD_858.md §3). These
+// maps are the engine-side feed for those sums; an absent animation reads as
+// 0.0f, so all-empty is exactly the no-probe baseline (neutral-by-zero,
+// ADR-005 R3) until Phase C feeds them from TacticMemory.
+struct AnimationMemorySums {
+    std::unordered_map<std::string, float> damage;   // D(A)
+    std::unordered_map<std::string, float> counter;  // C(A)
+    std::unordered_map<std::string, float> hits;     // H(A)
+};
+
 // The fight state a weight curve is evaluated against.
 // Field order mirrors the terms of Gb() so the two can be read side by side.
 struct TacticContext {
@@ -91,6 +106,11 @@ struct TacticContext {
     float self_interval = 0;      // frames since own last action (Intervals)
     float enemy_interval = 0;     // frames since enemy's last action (EnemyIntervals)
     std::string current_animation; // CurrentAnimation key — the probe's target
+
+    // GAP-4 B4 (R2 GREEN): per-animation (D,C,H) memory sums consumed by the
+    // per-child <AnimationFactors> probe in TacticWeight::score(). Default
+    // empty -> every lookup 0.0f (neutral) until Phase C wires TacticMemory.
+    AnimationMemorySums anim_memory;
 };
 
 // One weight curve: a `<Animation>` / `<...Chance>` element.
@@ -113,9 +133,10 @@ public:
     float hit_factor = 0;
     float distance_factor = 0;
     float shift = 0;
-    // ADR-005 D5 — the `AnimationFactors` attribute: coefficient of the
-    // per-target probe term (a.a6.S5a) in score(). 0 = neutral.
-    float animation_factors = 0;
+    // R2 (GAP-4 B4): there is NO scalar `AnimationFactors` attribute in the
+    // native parse — parse_weight (FUN_8f44c474) reads 15 attributes and the
+    // name appears only as a child *element* (ATF_RECORD_858.md §2). The A1
+    // coefficient was removed; the probe is the per-child sum below.
     Curve curve = Curve::kLinear;
 
     // Per-target probe entries: `<AnimationFactors Animation="..." .../>`

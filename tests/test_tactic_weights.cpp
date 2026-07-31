@@ -25,6 +25,14 @@ using resf2::game::TacticWeight;
 static int tests_passed = 0;
 static int tests_failed = 0;
 
+// GAP-4 B4 (R2): compile-time pin — the A1 scalar `animation_factors`
+// coefficient must stay removed from TacticWeight (the native parse reads 15
+// attributes; "AnimationFactors" exists only as a child *element*).
+template <typename T>
+concept HasScalarAnimationFactors = requires(T t) { t.animation_factors; };
+static_assert(!HasScalarAnimationFactors<TacticWeight>,
+              "A1 scalar coefficient must stay removed");
+
 #define CHECK(cond, msg) do { \
     if (!(cond)) { std::fprintf(stderr, "  FAIL [line %d]: %s\n", __LINE__, msg); ++tests_failed; } \
     else { std::printf("  PASS: %s\n", msg); ++tests_passed; } \
@@ -214,23 +222,132 @@ int main() {
         CHECK(saw_a && saw_b, "roulette reaches both nonzero candidates");
     }
 
-    // ---- Step A1 (ADR-005 D5/D6): AnimationFactors probe term + extended
-    // ---- TacticContext. Neutral-by-zero: no behavior change when unset.
+    // ---- GAP-4 step B4 (ADR-005 D5, R2 GREEN): the verified probe is a
+    // ---- per-child inline sum, NOT a scalar attribute coefficient.
+    // ---- Reference: FUN_8f44ac78 @ 0x8F44AC78,
+    // ---- reverse/analysis/VERIFY_FUN_8f44ac78.md + ATF_RECORD_858.md §3.
 
-    std::printf("\n=== AnimationFactors probe term (ADR-005 D5, a.a6.S5a) ===\n");
+    std::printf("\n=== AnimationFactors probe: per-child sum (R2 GREEN) ===\n");
     {
         TacticWeight w;
         w.base = 0; w.curve = TacticWeight::Curve::kLinear;
         w.shift = 1.0f;
-        w.animation_factors = 3.0f;
+        TacticWeight::AnimationFactorEntry e;
+        e.animation = "Throw";
+        e.factors.damage_factor = 4.0f;
+        e.factors.counter_factor = 0.5f;
+        e.factors.hit_factor = 2.0f;
+        w.animation_factor_entries.push_back(e);
+
+        // Empty memory maps -> D=C=H=0 for every animation -> the probe term
+        // is exactly the no-children baseline (neutral-by-zero, ADR-005 R3).
+        TacticWeight bare;
+        bare.base = 0; bare.curve = TacticWeight::Curve::kLinear;
+        bare.shift = 1.0f;
+        TacticContext c;
+        CHECK(w.score(c) == bare.score(c),
+              "empty memory maps -> identical to no-children baseline");
+
+        // Injected (D,C,H) for the child's animation: the native term is
+        // child.DamageFactor*D + child.CounterFactor*C + child.HitFactor*H.
+        c.anim_memory.damage["Throw"] = 2.0f;    // 4   * 2   = 8
+        c.anim_memory.counter["Throw"] = 6.0f;   // 0.5 * 6   = 3
+        c.anim_memory.hits["Throw"] = 1.5f;      // 2   * 1.5 = 3
+        // score = shift(1) + (8 + 3 + 3) = 15
+        CHECK_NEAR(w.score(c), 15.0,
+                   "probe adds damage*D + counter*C + hit*H per child");
+
+        // Sums keyed to a DIFFERENT animation are not probed by this child.
+        TacticContext c2;
+        c2.anim_memory.damage["Kick"] = 100.0f;
+        CHECK_NEAR(w.score(c2), 1.0, "unrelated animation sums stay neutral");
+
+        // Multiple children accumulate, each against its own animation.
+        TacticWeight::AnimationFactorEntry e2;
+        e2.animation = "Kick";
+        e2.factors.damage_factor = 1.0f;
+        w.animation_factor_entries.push_back(e2);
+        TacticContext c3;
+        c3.anim_memory.damage["Throw"] = 2.0f;  // 4*2 = 8
+        c3.anim_memory.damage["Kick"] = 5.0f;   // 1*5 = 5
+        // score = 1 + (8+0+0) + (5+0+0) = 14
+        CHECK_NEAR(w.score(c3), 14.0, "probe sums over all children");
+    }
+
+    std::printf("\n=== Probe term order: damage, counter, hit ===\n");
+    {
+        // Verified byte-exact (VERIFY_FUN_8f44ac78.md §3):
+        // a += *(entry+0x14)*D + *(entry+0x10)*C + *(entry+0x2c)*H — damage
+        // first, left-associated. Huge opposing damage/counter products make
+        // a re-associated (e.g. hit-first) term round differently.
+        TacticWeight w;
+        w.base = 0; w.curve = TacticWeight::Curve::kLinear;
+        TacticWeight::AnimationFactorEntry e;
+        e.animation = "A";
+        e.factors.damage_factor = 1.0f;
+        e.factors.counter_factor = 1.0f;
+        e.factors.hit_factor = 1.0f;
+        w.animation_factor_entries.push_back(e);
 
         TacticContext c;
-        // animation_factor == 0 -> the probe term contributes nothing.
-        CHECK_NEAR(w.score(c), 1.0, "probe term neutral when animation_factor == 0");
+        c.anim_memory.damage["A"] = 1e20f;
+        c.anim_memory.counter["A"] = -1e20f;
+        c.anim_memory.hits["A"] = 1.0f;
+        // verified: (1e20 + -1e20) + 1 = 1; hit-first: 1e20 + (-1e20 + 1) = 0
+        CHECK(w.score(c) == 1.0f,
+              "child term is (damage*D + counter*C) + hit*H, in that order");
+    }
 
-        // animation_factor=2 * animation_factors=3 -> score rises by exactly 6.
-        c.animation_factor = 2.0f;
-        CHECK_NEAR(w.score(c), 7.0, "probe adds animation_factor * animation_factors");
+    std::printf("\n=== Gb dot product: damage first, then counter ===\n");
+    {
+        // Verified against FUN_8f44ac78: damage*DamageFactor precedes
+        // counter*CounterFactor (the pre-R2 engine had counter first). FP
+        // addition is commutative, so the two-term swap itself is
+        // bit-invisible — what this pins is the field/factor pairing:
+        // ctx.damage multiplies DamageFactor, ctx.counter CounterFactor.
+        TacticWeight w;
+        w.base = 0; w.curve = TacticWeight::Curve::kLinear;
+        w.damage_factor = 2.0f;
+        w.counter_factor = 7.0f;
+        TacticContext c;
+        c.damage = 3.0f;   // pairs with damage_factor  -> 6
+        c.counter = 5.0f;  // pairs with counter_factor -> 35
+        CHECK_NEAR(w.score(c), 41.0,
+                   "damage pairs with DamageFactor, counter with CounterFactor");
+    }
+
+    std::printf("\n=== Scalar AnimationFactors attribute removed (R2) ===\n");
+    {
+        // The native parse_weight (FUN_8f44c474) reads 15 attributes; there
+        // is NO scalar "AnimationFactors" attribute — the name exists only as
+        // a child *element* (ATF_RECORD_858.md §2). The A1 coefficient and
+        // its parse are gone: the attribute is inert, children still parse.
+        // (The member itself is pinned gone at compile time, file scope.)
+        const std::string xml =
+            "<TacticsSettings><Tactics>"
+            "<Tactic Name=\"T\"><AnimationWeights>"
+            "<Animation Name=\"RangedPlayer\" Base=\"400\" AnimationFactors=\"3\">"
+            "<AnimationFactors Animation=\"Throw\" DamageFactor=\"4\" CounterFactor=\"0.5\"/>"
+            "</Animation>"
+            "<Animation Base=\"100\"/>"
+            "</AnimationWeights></Tactic>"
+            "</Tactics></TacticsSettings>";
+        TacticSettings s;
+        CHECK(load_xml_string(s, xml, "resf2_tw_b4"), "XML with scalar attr loads");
+        const TacticDef* td = s.tactic("T");
+        CHECK(td != nullptr, "tactic T present");
+        if (td) {
+            const TacticWeight* w = td->weight_for("RangedPlayer");
+            CHECK(w && w->animation_factor_entries.size() == 1,
+                  "<AnimationFactors> child element still parsed");
+            // The scalar attribute is no coefficient: even with the
+            // (vestigial) ctx.animation_factor set and the attribute present,
+            // the probe term stays the per-child sum (empty memory -> 0).
+            TacticContext c;
+            c.animation_factor = 2.0f;
+            CHECK(w && w->score(c) == 0.0f,
+                  "scalar attribute is inert in score()");
+        }
     }
 
     std::printf("\n=== Extended TacticContext defaults (ADR-005 D2) ===\n");
