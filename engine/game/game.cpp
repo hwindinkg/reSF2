@@ -5,6 +5,7 @@
 #include "game.hpp"
 #include "settings_loader.hpp"
 #include "attribute_aggregation.hpp"
+#include "damage_formula.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -1587,6 +1588,42 @@ void Game::trigger_knockback(float launch_velocity, bool knockdown) {
     std::printf("[KNOCKBACK] launch_vel=%.1f knockdown=%d\n", launch_velocity, knockdown ? 1 : 0);
 }
 
+// [ORIGINAL] Enemy -> player melee damage, ported from Model::getTotalDamage
+// @ game+0x4527B4 (engine/game/damage_formula.hpp — the multiplication order
+// base*f2*f1*f3*add is preserved there; call it, never reimplement it).
+//
+// Both strike paths in host_update_gameplay (blocked / unblocked) share this
+// computation so the two near-duplicate sites cannot diverge. Attribute
+// pairing follows the original's helper @ game+0x60DF98: enemy strikes are
+// unarmed hits, so attacker UnarmedDamage vs defender BodyDefense
+// (f3 = 2^(delta/10)).
+//
+// Block stays at the CALL SITE as a post-multiplier (base_block_factor = 0.5):
+// getTotalDamage has no block term — the original's tracer @ game+0x438530
+// prints BlockDamageFactor/Block in the hit processor that CALLS the formula.
+//
+// [HEURISTIC-TODO] f1/f2 selector terms (game+0x4A94F0 / game+0x4A95A8) are
+// disabled-neutral (1.0f) — the factor-set data is not yet ported; crit stays
+// 1.0f (CriticalChance/CriticalDamage system not yet ported).
+static float enemy_damage_to_player(float base_damage, bool blocked,
+                                    const AttributeSet& enemy_attrs,
+                                    const AttributeSet& player_attrs,
+                                    const DamageSettings& dmg_settings) {
+    DamageInputs din;
+    // base = 2^(attr*w): DamageFactor is absent in MVP -> get_or 0 -> base 1.0f.
+    // get_or, NEVER raw get(): the -1e35f getParameter sentinel must never
+    // reach powf (the game+0x60DF98 alignment helper defaults a miss to 0.0).
+    din.base_attribute = enemy_attrs.get_or("DamageFactor", 0.0f);
+    din.base_weight = dmg_settings.damage_factor_base;
+    din.attribute_difference =
+        attribute_difference(enemy_attrs, "UnarmedDamage",
+                             player_attrs, "BodyDefense");
+    din.hit_damage = base_damage;      // original's hit[0x48]
+    din.enemy_damage_bonus = 0.0f;     // original's enemy[0x774] — not ported
+    const float block_factor = blocked ? dmg_settings.base_block_factor : 1.0f;
+    return get_total_damage(din) * block_factor;
+}
+
 void Game::host_update_gameplay(uint32_t dt) {
     // [DIAGNOSTIC] Advance input-script frame counter and apply events
     // scheduled for this frame BEFORE reading input. This keeps script
@@ -1865,20 +1902,18 @@ void Game::host_update_gameplay(uint32_t dt) {
                         if (hp_it != assets_->moves().end() && hp_it->second.damage > 0.0f)
                             base_damage = hp_it->second.damage;
                         
-                        // [ORIGINAL] Damage formula: rawDamage = baseDamage × attributeMultiplier × blockFactor × attackFactor × critFactor × 2.0
-                        // finalDamage = factorSetMultiplier × rawDamage
-                        // Formula: 1.0 + DamageFactor_Base * character_attribute (character attribute = 0 for now)
-                        float attribute_multiplier = 1.0f + dmg_settings.damage_factor_base * 0.0f;  // [HEURISTIC-TODO] No stat system yet
-                        float block_factor = dmg_settings.base_block_factor;  // base_block_factor = 0.5
-                        float attack_factor = 1.0f;         // [HEURISTIC-TODO] No equipment modifier yet
-                        float crit_factor = 1.0f;           // CriticalHit.Probability = 0.0
-                        float factor_set_multiplier = 1.0f; // [HEURISTIC-TODO] No melee/ranged factor set yet
+                        // [ORIGINAL] Damage via Model::getTotalDamage @ game+0x4527B4
+                        // (shared helper above); block is a call-site post-multiplier
+                        // (base_block_factor = 0.5) — the formula has no block term
+                        // (tracer @ game+0x438530 prints Block in the hit processor).
+                        const float block_factor = dmg_settings.base_block_factor;
+                        const float final_damage = enemy_damage_to_player(
+                            base_damage, /*blocked=*/true,
+                            enemy_fighter_.attributes, player_fighter_.attributes,
+                            dmg_settings);
                         
-                        float raw_damage = base_damage * attribute_multiplier * block_factor * attack_factor * crit_factor * 2.0f;
-                        float final_damage = factor_set_multiplier * raw_damage;
-                        
-                        std::printf("[COMBAT] Enemy hit player (BLOCKED): base=%.3f block=%.2f raw=%.3f final=%.3f\n",
-                                    base_damage, block_factor, raw_damage, final_damage);
+                        std::printf("[COMBAT] Enemy hit player (BLOCKED): base=%.3f block=%.2f final=%.3f\n",
+                                    base_damage, block_factor, final_damage);
                         
                         player_fighter_.health -= final_damage * player_fighter_.max_health;
                         player_fighter_.invuln_time = 0.4f;
@@ -1890,27 +1925,21 @@ void Game::host_update_gameplay(uint32_t dt) {
                             player_fighter_.is_dead = true;
                         }
                     } else {
-                        // [ORIGINAL] Damage formula from Model::getTotalDamage @ 0x101598c0
-                        // rawDamage = baseDamage × attributeMultiplier × blockFactor × attackFactor × critFactor × 2.0
-                        // finalDamage = factorSetMultiplier × rawDamage
+                        // [ORIGINAL] Damage via Model::getTotalDamage @ game+0x4527B4
+                        // (shared helper above); not blocking -> no post-multiplier.
                         const auto& dmg_settings = assets_->damage_settings();
                         float base_damage = dmg_settings.average_base_damage;
                         auto hp_it = assets_->moves().find("HighPunch");
                         if (hp_it != assets_->moves().end() && hp_it->second.damage > 0.0f)
                             base_damage = hp_it->second.damage;
                         
-                        // Formula: 1.0 + DamageFactor_Base * character_attribute (character attribute = 0 for now)
-                        float attribute_multiplier = 1.0f + dmg_settings.damage_factor_base * 0.0f;  // [HEURISTIC-TODO] No stat system yet
-                        float block_factor = 1.0f;          // Not blocking
-                        float attack_factor = 1.0f;         // [HEURISTIC-TODO] No equipment modifier yet
-                        float crit_factor = 1.0f;           // CriticalHit.Probability = 0.0
-                        float factor_set_multiplier = 1.0f; // [HEURISTIC-TODO] No melee/ranged factor set yet
+                        const float final_damage = enemy_damage_to_player(
+                            base_damage, /*blocked=*/false,
+                            enemy_fighter_.attributes, player_fighter_.attributes,
+                            dmg_settings);
                         
-                        float raw_damage = base_damage * attribute_multiplier * block_factor * attack_factor * crit_factor * 2.0f;
-                        float final_damage = factor_set_multiplier * raw_damage;
-                        
-                        std::printf("[COMBAT] Enemy hit player: base=%.3f raw=%.3f final=%.3f\n",
-                                    base_damage, raw_damage, final_damage);
+                        std::printf("[COMBAT] Enemy hit player: base=%.3f final=%.3f\n",
+                                    base_damage, final_damage);
                         
                         player_fighter_.health -= final_damage * player_fighter_.max_health;
                         player_fighter_.invuln_time = 0.4f;
