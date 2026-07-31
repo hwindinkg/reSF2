@@ -12,6 +12,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -36,6 +38,23 @@ static int tests_failed = 0;
                      __LINE__, msg, _va, _vb); ++tests_failed; \
     } else { std::printf("  PASS: %s\n", msg); ++tests_passed; } \
 } while (0)
+
+// Writes `xml` as tacticSettings.xml into a fresh temp dir and loads it.
+static bool load_xml_string(TacticSettings& out, const std::string& xml,
+                            const char* dirname) {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / dirname;
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    {
+        std::ofstream f(dir / "tacticSettings.xml", std::ios::binary);
+        f << xml;
+    }
+    bool ok = out.load(dir.string());
+    fs::remove_all(dir, ec);
+    return ok;
+}
 
 int main() {
     std::printf("\n=== Linear curve (QYa) ===\n");
@@ -193,6 +212,68 @@ int main() {
             if (idx == 1) saw_b = true;
         }
         CHECK(saw_a && saw_b, "roulette reaches both nonzero candidates");
+    }
+
+    // ---- Step A1 (ADR-005 D5/D6): AnimationFactors probe term + extended
+    // ---- TacticContext. Neutral-by-zero: no behavior change when unset.
+
+    std::printf("\n=== AnimationFactors probe term (ADR-005 D5, a.a6.S5a) ===\n");
+    {
+        TacticWeight w;
+        w.base = 0; w.curve = TacticWeight::Curve::kLinear;
+        w.shift = 1.0f;
+        w.animation_factors = 3.0f;
+
+        TacticContext c;
+        // animation_factor == 0 -> the probe term contributes nothing.
+        CHECK_NEAR(w.score(c), 1.0, "probe term neutral when animation_factor == 0");
+
+        // animation_factor=2 * animation_factors=3 -> score rises by exactly 6.
+        c.animation_factor = 2.0f;
+        CHECK_NEAR(w.score(c), 7.0, "probe adds animation_factor * animation_factors");
+    }
+
+    std::printf("\n=== Extended TacticContext defaults (ADR-005 D2) ===\n");
+    {
+        TacticContext c;
+        CHECK(c.animation_factor == 0 && c.strikes == 0 && c.round_factor == 0 &&
+              c.self_interval == 0 && c.enemy_interval == 0,
+              "extended context floats default to 0");
+        CHECK(c.current_animation.empty(), "current_animation defaults to empty");
+    }
+
+    std::printf("\n=== <AnimationFactors> child parsing ===\n");
+    {
+        // Real XML shape (assets/tacticSettings.xml): <AnimationFactors> is a
+        // child of an <Animation>/<...Chance> element, per target animation.
+        const std::string xml =
+            "<TacticsSettings><Tactics>"
+            "<Tactic Name=\"T\"><AnimationWeights>"
+            "<Animation Name=\"RangedPlayer\" Base=\"400\">"
+            "<AnimationFactors Animation=\"Throw\" DamageFactor=\"4\" CounterFactor=\"0.5\"/>"
+            "</Animation>"
+            "<Animation Base=\"100\"/>"
+            "</AnimationWeights></Tactic>"
+            "</Tactics></TacticsSettings>";
+        TacticSettings s;
+        CHECK(load_xml_string(s, xml, "resf2_tw_a1"), "synthetic XML loads");
+        const TacticDef* td = s.tactic("T");
+        CHECK(td != nullptr, "tactic T present");
+        if (td) {
+            const TacticWeight* w = td->weight_for("RangedPlayer");
+            CHECK(w && w->animation_factor_entries.size() == 1,
+                  "one per-target AnimationFactors entry parsed");
+            if (w && w->animation_factor_entries.size() == 1) {
+                const auto& e = w->animation_factor_entries[0];
+                CHECK(e.animation == "Throw", "entry targets Animation=\"Throw\"");
+                CHECK_NEAR(e.factors.damage_factor, 4.0, "entry DamageFactor=4");
+                CHECK_NEAR(e.factors.counter_factor, 0.5, "entry CounterFactor=0.5");
+            }
+            // The plain <Animation Base="100"/> carries no entries.
+            const TacticWeight* plain = td->weight_for("Unlisted");
+            CHECK(plain && plain->animation_factor_entries.empty(),
+                  "weight without children has no probe entries");
+        }
     }
 
     std::printf("\n=== Summary: %d passed, %d failed ===\n", tests_passed, tests_failed);

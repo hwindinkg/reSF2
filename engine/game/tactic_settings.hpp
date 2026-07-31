@@ -72,6 +72,17 @@ struct TacticContext {
     float hits = 0;             // a.tf      — hits landed
     float child_frames = 0;     // a.pZ
     float distance = 0;         // a.Lya     — distance to the enemy, points
+
+    // --- ADR-005 D2/D5 extension (decision pipeline context) ---------------
+    // [ORIGINAL] key schema 0x8F797574..0x8F797C58 includes AnimationFactors
+    // and CurrentAnimation. Populated by the caller from TacticMemory + fight
+    // state; all default-neutral until the pipeline wires them (Phase C/D).
+    float animation_factor = 0;   // per-target probe result (a.a6.S5a) — D5
+    float strikes = 0;            // from TacticMemory — D8
+    float round_factor = 0;       // tactic's RoundFactor, mirrored for scoring
+    float self_interval = 0;      // frames since own last action (Intervals)
+    float enemy_interval = 0;     // frames since enemy's last action (EnemyIntervals)
+    std::string current_animation; // CurrentAnimation key — the probe's target
 };
 
 // One weight curve: a `<Animation>` / `<...Chance>` element.
@@ -94,7 +105,18 @@ public:
     float hit_factor = 0;
     float distance_factor = 0;
     float shift = 0;
+    // ADR-005 D5 — the `AnimationFactors` attribute: coefficient of the
+    // per-target probe term (a.a6.S5a) in score(). 0 = neutral.
+    float animation_factors = 0;
     Curve curve = Curve::kLinear;
+
+    // Per-target probe entries: `<AnimationFactors Animation="..." .../>`
+    // children (real XML shape — confirmed in this dump inside <Animation>,
+    // <QuickAttackChance>, <EvadeChance>). Defined out-of-line below because
+    // the entry embeds a TacticWeight by value. Absent probe data is
+    // neutral-by-zero, never an error (ADR-005 R3).
+    struct AnimationFactorEntry;
+    std::vector<AnimationFactorEntry> animation_factor_entries;
 
     // Gb() — score the context, then map through the curve.
     [[nodiscard]] float evaluate(const TacticContext& ctx) const;
@@ -105,6 +127,13 @@ public:
 
 private:
     [[nodiscard]] float apply_curve(float a) const;
+};
+
+// One `<AnimationFactors Animation="..." .../>` child: the weight curve that
+// scores the probe against a specific target animation.
+struct TacticWeight::AnimationFactorEntry {
+    std::string animation;
+    TacticWeight factors;
 };
 
 // One `<Tactic>`: a named set of animation weights, resolved through the
