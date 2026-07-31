@@ -124,6 +124,99 @@ TacticWeight parse_weight(const fmt::XmlNode& n) {
     return w;
 }
 
+// <DistanceError>/<FrameError>/<ResponseDelay>/<EnemyResponseDelay> are
+// <Min Base/><Max Base/> ranges in this dump.
+TacticDef::MinMax parse_minmax(const fmt::XmlNode& n) {
+    TacticDef::MinMax r;
+    // [HEURISTIC-TODO] Min/Max could in principle be full curves; this dump
+    // only ever uses a bare Base — read that until evidence differs.
+    if (const auto* mn = n.first_child("Min")) r.min = tof(mn->attr("Base"));
+    if (const auto* mx = n.first_child("Max")) r.max = tof(mx->attr("Base"));
+    return r;
+}
+
+// The 20 decision-level keys (ADR-005 D2): sibling elements of
+// <AnimationWeights> per the confirmed assets/tacticSettings.xml schema.
+void parse_decision_keys(const fmt::XmlNode& t, TacticDef& def) {
+    // <UseDefense> — presence = stage-1 gate, 3 sub-chance curves.
+    if (const auto* ud = t.first_child("UseDefense")) {
+        def.use_defense = true;
+        if (const auto* c = ud->first_child("CounterAttackChance"))
+            def.counter_attack_chance = parse_weight(*c);
+        if (const auto* c = ud->first_child("DodgeChance"))
+            def.dodge_chance = parse_weight(*c);
+        if (const auto* c = ud->first_child("BlockChance"))
+            def.block_chance = parse_weight(*c);
+        def.declared_keys |= TacticDef::kUseDefenseKey;
+    }
+
+    // Standalone chance curves.
+    const struct { const char* name; TacticWeight TacticDef::* slot; unsigned key; } kChances[] = {
+        {"UseSafeAttackChance",     &TacticDef::use_safe_attack_chance,     TacticDef::kUseSafeAttackKey},
+        {"TableAttackChance",       &TacticDef::table_attack_chance,        TacticDef::kTableAttackKey},
+        {"CautiousMovementsChance", &TacticDef::cautious_movements_chance,  TacticDef::kCautiousMovementsKey},
+        {"DodgeMissilesChance",     &TacticDef::dodge_missiles_chance,      TacticDef::kDodgeMissilesKey},
+        {"DodgeMagicChance",        &TacticDef::dodge_magic_chance,         TacticDef::kDodgeMagicKey},
+    };
+    for (const auto& ch : kChances) {
+        if (const auto* c = t.first_child(ch.name)) {
+            def.*(ch.slot) = parse_weight(*c);
+            def.declared_keys |= ch.key;
+        }
+    }
+
+    // <QuickAttacks>/<Evades> — per-animation chance entries, order kept.
+    if (const auto* qa = t.first_child("QuickAttacks")) {
+        for (const auto& child : qa->children) {
+            if (child.name != "QuickAttackChance") continue;
+            def.quick_attack_chances.emplace_back(child.attr("Animation"),
+                                                  parse_weight(child));
+        }
+        def.declared_keys |= TacticDef::kQuickAttacksKey;
+    }
+    if (const auto* ev = t.first_child("Evades")) {
+        for (const auto& child : ev->children) {
+            if (child.name != "EvadeChance") continue;
+            def.evade_chances.emplace_back(child.attr("Animation"),
+                                           parse_weight(child));
+        }
+        def.declared_keys |= TacticDef::kEvadesKey;
+    }
+
+    // Min/Max ranges.
+    const struct { const char* name; TacticDef::MinMax TacticDef::* slot; unsigned key; } kRanges[] = {
+        {"DistanceError",      &TacticDef::distance_error,       TacticDef::kDistanceErrorKey},
+        {"FrameError",         &TacticDef::frame_error,          TacticDef::kFrameErrorKey},
+        {"ResponseDelay",      &TacticDef::response_delay,       TacticDef::kResponseDelayKey},
+        {"EnemyResponseDelay", &TacticDef::enemy_response_delay, TacticDef::kEnemyResponseDelayKey},
+    };
+    for (const auto& rg : kRanges) {
+        if (const auto* c = t.first_child(rg.name)) {
+            def.*(rg.slot) = parse_minmax(*c);
+            def.declared_keys |= rg.key;
+        }
+    }
+
+    // <ExpectedWait> — animation-weight list, same shape as AnimationWeights.
+    if (const auto* ew = t.first_child("ExpectedWait")) {
+        for (const auto& child : ew->children) {
+            if (child.name != "Animation") continue;
+            def.expected_wait.emplace_back(child.attr("Name"),
+                                           parse_weight(child));
+        }
+        def.declared_keys |= TacticDef::kExpectedWaitKey;
+    }
+
+    // <Memory Strikes=".." RoundFactor=".."/>; a `Memory` depth attribute is
+    // absent in this dump -> 0 (ring-depth source flagged R5).
+    if (const auto* mem = t.first_child("Memory")) {
+        def.strikes = std::atoi(mem->attr("Strikes").c_str());
+        def.round_factor = tof(mem->attr("RoundFactor"));
+        def.memory = std::atoi(mem->attr("Memory").c_str());
+        def.declared_keys |= TacticDef::kMemoryKey;
+    }
+}
+
 }  // namespace
 
 bool TacticSettings::load(const std::string& asset_root) {
@@ -175,6 +268,17 @@ bool TacticSettings::load(const std::string& asset_root) {
         def.type = t->attr("Type");
         if (def.name.empty()) continue;
 
+        // [ORIGINAL] decision types: Tabular (default, incl. absent Type)
+        // and ExpectedWait; the binary rejects everything else with
+        // "Strange tactic type: %s" (PORT_GAPS.md:168-169). Real-data
+        // consequence (grep-verified 2026-07-31): Beginner (Type="Random")
+        // is skipped — 13 <Tactic> elements -> 12 unique names -> 11 loaded.
+        if (!def.type.empty() && def.type != "Tabular" &&
+            def.type != "ExpectedWait") {
+            std::printf("Strange tactic type: %s\n", def.type.c_str());
+            continue;
+        }
+
         if (const auto* weights = t->first_child("AnimationWeights")) {
             for (const auto& child : weights->children) {
                 if (child.name != "Animation") continue;
@@ -182,6 +286,7 @@ bool TacticSettings::load(const std::string& asset_root) {
                                                    parse_weight(child));
             }
         }
+        parse_decision_keys(*t, def);
         tactics_[def.name] = std::move(def);
     }
 
@@ -217,6 +322,64 @@ void TacticSettings::resolve_templates() {
                 }
                 if (!have) def.animation_weights.push_back(entry);
             }
+            // Decision-level keys inherit by the same rule: a key declared
+            // locally wins; otherwise the base's value (if it declared the
+            // key) is copied. Presence-based keys (UseDefense) inherit only
+            // when not locally present.
+            const auto inherit = [&](unsigned key, const auto& copy) {
+                if ((def.declared_keys & key) == 0 &&
+                    (base.declared_keys & key) != 0) {
+                    copy();
+                    def.declared_keys |= key;
+                }
+            };
+            inherit(TacticDef::kUseDefenseKey, [&] {
+                def.use_defense = base.use_defense;
+                def.counter_attack_chance = base.counter_attack_chance;
+                def.dodge_chance = base.dodge_chance;
+                def.block_chance = base.block_chance;
+            });
+            inherit(TacticDef::kUseSafeAttackKey, [&] {
+                def.use_safe_attack_chance = base.use_safe_attack_chance;
+            });
+            inherit(TacticDef::kTableAttackKey, [&] {
+                def.table_attack_chance = base.table_attack_chance;
+            });
+            inherit(TacticDef::kCautiousMovementsKey, [&] {
+                def.cautious_movements_chance = base.cautious_movements_chance;
+            });
+            inherit(TacticDef::kDodgeMissilesKey, [&] {
+                def.dodge_missiles_chance = base.dodge_missiles_chance;
+            });
+            inherit(TacticDef::kDodgeMagicKey, [&] {
+                def.dodge_magic_chance = base.dodge_magic_chance;
+            });
+            inherit(TacticDef::kQuickAttacksKey, [&] {
+                def.quick_attack_chances = base.quick_attack_chances;
+            });
+            inherit(TacticDef::kEvadesKey, [&] {
+                def.evade_chances = base.evade_chances;
+            });
+            inherit(TacticDef::kDistanceErrorKey, [&] {
+                def.distance_error = base.distance_error;
+            });
+            inherit(TacticDef::kFrameErrorKey, [&] {
+                def.frame_error = base.frame_error;
+            });
+            inherit(TacticDef::kResponseDelayKey, [&] {
+                def.response_delay = base.response_delay;
+            });
+            inherit(TacticDef::kEnemyResponseDelayKey, [&] {
+                def.enemy_response_delay = base.enemy_response_delay;
+            });
+            inherit(TacticDef::kExpectedWaitKey, [&] {
+                def.expected_wait = base.expected_wait;
+            });
+            inherit(TacticDef::kMemoryKey, [&] {
+                def.strikes = base.strikes;
+                def.round_factor = base.round_factor;
+                def.memory = base.memory;
+            });
             def.template_name.clear();  // resolved
             changed = true;
         }

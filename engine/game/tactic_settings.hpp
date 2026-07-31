@@ -141,11 +141,79 @@ struct TacticWeight::AnimationFactorEntry {
 struct TacticDef {
     std::string name;
     std::string template_name;
-    std::string type;  // "Tabular" / "Random" / ""
+    std::string type;  // "Tabular" / "ExpectedWait" / "" (default = Tabular)
 
     // Ordered, because resolution is first-match and the unnamed catch-all
     // must stay last. `first` is the animation name; empty means default.
     std::vector<std::pair<std::string, TacticWeight>> animation_weights;
+
+    // --- ADR-005 D2: the 20 decision-level keys ----------------------------
+    // [ORIGINAL] key list 0x8F797574..0x8F797C58 / PORT_GAPS.md:152-157,
+    // shaped exactly like the real assets/tacticSettings.xml schema.
+    // All inert until the Phase C/D pipeline wires them.
+
+    // <UseDefense> is a container of 3 chance curves; its mere presence is
+    // the stage-1 gate.
+    bool use_defense = false;
+    TacticWeight counter_attack_chance;   //   <CounterAttackChance>
+    TacticWeight dodge_chance;            //   <DodgeChance>
+    TacticWeight block_chance;            //   <BlockChance>
+
+    // Standalone chance curves.
+    TacticWeight use_safe_attack_chance;  // <UseSafeAttackChance>
+    TacticWeight table_attack_chance;     // <TableAttackChance>
+    TacticWeight cautious_movements_chance;  // <CautiousMovementsChance>
+    TacticWeight dodge_missiles_chance;   // <DodgeMissilesChance>
+    TacticWeight dodge_magic_chance;      // <DodgeMagicChance>
+
+    // <QuickAttacks>/<Evades> are containers of per-animation
+    // <QuickAttackChance Animation="...">/<EvadeChance Animation="...">
+    // entries; order preserved, entry count = the stage repeat count (R6).
+    std::vector<std::pair<std::string, TacticWeight>> quick_attack_chances;
+    std::vector<std::pair<std::string, TacticWeight>> evade_chances;
+
+    // <DistanceError>/<FrameError>/<ResponseDelay>/<EnemyResponseDelay> are
+    // <Min Base/><Max Base/> ranges, not scalars.
+    struct MinMax {
+        float min = 0;
+        float max = 0;
+    };
+    MinMax distance_error;
+    MinMax frame_error;
+    MinMax response_delay;
+    MinMax enemy_response_delay;
+
+    // <ExpectedWait> is an animation-weight list (same shape as
+    // animation_weights), not a single curve.
+    std::vector<std::pair<std::string, TacticWeight>> expected_wait;
+
+    // <Memory Strikes=".." RoundFactor=".."/> carries Strikes/RoundFactor as
+    // attributes; a `Memory` depth attribute is absent in this dump -> 0
+    // (ring-depth source flagged R5).
+    int strikes = 0;
+    float round_factor = 0;
+    int memory = 0;
+
+    // Presence flags for the decision-level keys, recorded at parse time so
+    // template inheritance can tell "declared with all-zero attributes" from
+    // "not declared" (the same local-wins rule as animation_weights).
+    enum DecisionKey : unsigned {
+        kUseDefenseKey         = 1u << 0,
+        kUseSafeAttackKey      = 1u << 1,
+        kTableAttackKey        = 1u << 2,
+        kCautiousMovementsKey  = 1u << 3,
+        kDodgeMissilesKey      = 1u << 4,
+        kDodgeMagicKey         = 1u << 5,
+        kQuickAttacksKey       = 1u << 6,
+        kEvadesKey             = 1u << 7,
+        kDistanceErrorKey      = 1u << 8,
+        kFrameErrorKey         = 1u << 9,
+        kResponseDelayKey      = 1u << 10,
+        kEnemyResponseDelayKey = 1u << 11,
+        kExpectedWaitKey       = 1u << 12,
+        kMemoryKey             = 1u << 13,
+    };
+    unsigned declared_keys = 0;
 
     // iCa() — the weight that applies to `animation`, or nullptr if the
     // tactic declares no weights at all.
