@@ -311,6 +311,22 @@ target_compile_features(test_tactic_weights PRIVATE cxx_std_23)
 add_test(NAME test_tactic_weights COMMAND test_tactic_weights
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# TacticTableSet family registry (ADR-005 D3): real .atf dump load, family
+# presence bits, Header-name keyed lookup, stub families, neutral probe.
+add_executable(test_tactic_tables
+    test_tactic_tables.cpp
+)
+target_link_libraries(test_tactic_tables PRIVATE
+    resf2_game
+    resf2_reverse
+    resf2_warnings
+    zlibstatic
+)
+target_compile_features(test_tactic_tables PRIVATE cxx_std_23)
+add_test(NAME test_tactic_tables COMMAND test_tactic_tables
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_tactic_tables PROPERTIES TIMEOUT 60)
+
 # InputHandler unit tests — double-tap detection from idle and walking.
 # These tests would FAIL on the old code that required move_state_ == 2
 # for double-tap detection.
