@@ -397,7 +397,8 @@ const TacticDef* TacticSettings::tactic(const std::string& name) const {
 int TacticSettings::choose_debug(const TacticDef& tactic,
                                  const std::vector<std::string>& candidates,
                                  const TacticContext& ctx,
-                                 std::vector<float>& out_weights) const {
+                                 std::vector<float>& out_weights,
+                                 RngSource rng) const {
     // jL(): accumulate weights, draw in [0,sum), walk until negative.
     // [ORIGINAL] sf2_beautified.js:19910
     out_weights.clear();
@@ -412,8 +413,9 @@ int TacticSettings::choose_debug(const TacticDef& tactic,
     }
     if (sum <= 0) return -1;
 
-    // Da.pg.s4(d): uniform in [0, sum).
-    float g = (float)std::rand() / (float)RAND_MAX * sum;
+    // Da.pg.s4(d): uniform in [0, sum). rng() honors the std::rand range
+    // contract ([0, RAND_MAX]) so the draw formula is unchanged (ADR-005 D4).
+    float g = (float)rng() / (float)RAND_MAX * sum;
     for (size_t i = 0; i < candidates.size(); ++i) {
         g -= out_weights[i];
         if (g < 0) return (int)i;
@@ -421,11 +423,29 @@ int TacticSettings::choose_debug(const TacticDef& tactic,
     return (int)candidates.size() - 1;  // guard against fp rounding
 }
 
+int TacticSettings::choose_debug(const TacticDef& tactic,
+                                 const std::vector<std::string>& candidates,
+                                 const TacticContext& ctx,
+                                 std::vector<float>& out_weights) const {
+    // Production binding: std::rand preserves the baseline RNG sequence.
+    return choose_debug(tactic, candidates, ctx, out_weights,
+                        RngSource(std::rand));
+}
+
+int TacticSettings::choose(const TacticDef& tactic,
+                           const std::vector<std::string>& candidates,
+                           const TacticContext& ctx,
+                           RngSource rng) const {
+    std::vector<float> scratch;
+    return choose_debug(tactic, candidates, ctx, scratch, std::move(rng));
+}
+
 int TacticSettings::choose(const TacticDef& tactic,
                            const std::vector<std::string>& candidates,
                            const TacticContext& ctx) const {
     std::vector<float> scratch;
-    return choose_debug(tactic, candidates, ctx, scratch);
+    return choose_debug(tactic, candidates, ctx, scratch,
+                        RngSource(std::rand));
 }
 
 }  // namespace resf2::game
