@@ -16,12 +16,14 @@
 #include "../engine/game/tactic_pipeline.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -152,6 +154,20 @@ static const char* kTacticXml =
     "<FrameError><Min Base=\"30\"/><Max Base=\"40\"/></FrameError>"
     "</Tactic>"
 
+    // Golden fight-state scenario: chance curves driven by the scripted
+    // distance / health / bullet state (GATE G1). Extreme values on purpose:
+    // every curve reads >= 1.0 (fires for ANY roll) or 0 (never), so an R3
+    // comparator re-pin changes scores, never which stages fire.
+    "<Tactic Name=\"StateGated\" Type=\"Tabular\">"
+    "<QuickAttacks>"
+    "<QuickAttackChance Animation=\"Punch\" Base=\"0\" Limit=\"3\" DistanceFactor=\"1\"/>"
+    "<QuickAttackChance Animation=\"Kick\" Base=\"0\" Limit=\"3\" HealthFactor=\"1\"/>"
+    "</QuickAttacks>"
+    "<DodgeMissilesChance Base=\"0\" Limit=\"2\" MagicBulletFactor=\"1\" MissileBulletFactor=\"1\"/>"
+    "<DistanceError><Min Base=\"0\"/><Max Base=\"0\"/></DistanceError>"
+    "<FrameError><Min Base=\"0\"/><Max Base=\"0\"/></FrameError>"
+    "</Tactic>"
+
     // ExpectedWait type -> the wait pick over <ExpectedWait>.
     "<Tactic Name=\"Waiter\" Type=\"ExpectedWait\">"
     "<ExpectedWait><Animation Name=\"Step\" Base=\"1000\" Limit=\"1000\"/></ExpectedWait>"
@@ -177,6 +193,94 @@ static bool starts_with(const std::string& s, const char* prefix) {
 }
 
 static TacticContext default_ctx() { return TacticContext{}; }
+
+// ===========================================================================
+// GATE G1 (ADR C4): the decision-trace golden contract.
+//
+// Pins each scripted scenario's DecisionTrace output to
+// tests/golden/tactic_decision_trace.golden.txt, line-group-by-line-group in
+// tracer order — any stage reorder/merge/skip or value drift fails the byte
+// comparison. Golden provenance: the ARM tracer's format strings at
+// 0x8F798090..0x8F79834C (PORT_GAPS.md:171-178, MEMORY_INDEXING_R56.md §3.1,
+// GOLDEN_TESTS.md §2). `*` in a golden line means "any digits" (format-only
+// pin — the R4-unpinned Wait value).
+// ===========================================================================
+
+static const char* kEpilogueOrder[] = {
+    "DistanceError:", "FrameError:", "Intervals:", "EnemyIntervals:",
+    "DecisionType:", "Decision {Wait=",
+};
+
+using GoldenSections = std::map<std::string, std::vector<std::string>>;
+
+// Parses the golden file: `#` lines are comments, `=== key ===` starts a
+// section, everything else is an expected trace line. Tolerates CRLF (the
+// repo checks out with core.autocrlf).
+static bool load_golden(const std::string& path, GoldenSections& out) {
+    std::ifstream f(path);
+    if (!f.is_open()) return false;
+    std::string line, cur;
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line[0] == '#') continue;
+        if (line.rfind("=== ", 0) == 0 && line.size() >= 8 &&
+            line.compare(line.size() - 4, 4, " ===") == 0) {
+            cur = line.substr(4, line.size() - 8);
+            out[cur] = {};
+        } else if (!cur.empty()) {
+            out[cur].push_back(line);
+        }
+    }
+    return !out.empty();
+}
+
+// Exact match, except `*` in the golden line = "any run of digits" (used
+// only for the R4-unpinned Wait value).
+static bool golden_line_matches(const std::string& actual,
+                                const std::string& golden) {
+    const std::size_t star = golden.find('*');
+    if (star == std::string::npos) return actual == golden;
+    if (actual.size() < golden.size() - 1) return false;
+    if (actual.compare(0, star, golden, 0, star) != 0) return false;
+    std::size_t i = star;
+    while (i < actual.size() &&
+           std::isdigit(static_cast<unsigned char>(actual[i]))) {
+        ++i;
+    }
+    return actual.compare(i, std::string::npos, golden, star + 1,
+                          std::string::npos) == 0;
+}
+
+struct GoldenScenario {
+    const char* name;    // golden section key
+    const char* tactic;  // tactic name in kTacticXml
+    unsigned seed;       // make_lcg seed
+    void (*setup_ctx)(TacticContext&);  // optional scripted fight state
+    void (*setup_mem)(TacticMemory&);   // optional memory state
+};
+
+static void no_ctx(TacticContext&) {}
+static void no_mem(TacticMemory&) {}
+
+// Runs one scripted golden scenario: fresh LCG/memory/context, decide(),
+// returns the trace lines. No scenario reaches the .atf table path (every
+// TableAttackChance here is zero), so an empty TacticTableSet suffices.
+static bool run_golden(const GoldenScenario& sc, const TacticSettings& s,
+                       TacticDecision& out, std::vector<std::string>& lines) {
+    const TacticDef* def = s.tactic(sc.tactic);
+    if (!def) return false;
+    TacticTableSet tables;
+    auto lcg = make_lcg(sc.seed);
+    RngSource rng = std::ref(lcg);
+    TacticMemory mem;
+    sc.setup_mem(mem);
+    TacticContext ctx;
+    sc.setup_ctx(ctx);
+    DecisionTrace trace;
+    out = decide(*def, ctx, mem, tables, rng, trace);
+    lines = trace.lines();
+    return true;
+}
 
 int main() {
     TacticSettings s;
@@ -470,6 +574,166 @@ int main() {
         const TacticDecision d2 = decide(*z, default_ctx(), mem2, tables,
                                          RngSource(kRollZero), t2);
         CHECK(d2.wait_frames == 0, "all-zero expected_wait list -> wait stays 0");
+    }
+
+    std::printf("\n=== GATE G1 golden: decision-trace contract ===\n");
+    {
+        const char* kGoldenPath = "tests/golden/tactic_decision_trace.golden.txt";
+        GoldenSections golden;
+        CHECK(load_golden(kGoldenPath, golden), "golden file loads (tests/golden/)");
+        CHECK(golden.size() == 6, "golden file has all 6 scenario sections");
+        if (!golden.empty()) {
+            CHECK(golden.count("all_stages_idle") && golden.count("first_hit_wins") &&
+                  golden.count("state_far") && golden.count("state_close") &&
+                  golden.count("epilogue_memory") && golden.count("expected_wait"),
+                  "golden section names match the scenarios");
+        }
+
+        const GoldenScenario scenarios[] = {
+            {"all_stages_idle", "Nothing", 42, no_ctx, no_mem},
+            {"first_hit_wins", "Aggressive", 7, no_ctx, no_mem},
+            {"state_far", "StateGated", 42,
+             [](TacticContext& c) {
+                 c.distance = 0.75f;   // far
+                 c.health = 1.0f;      // healthy
+                 c.magic_bullets = 0;  // no bullets inbound
+                 c.missile_bullets = 0;
+             },
+             no_mem},
+            {"state_close", "StateGated", 42,
+             [](TacticContext& c) {
+                 c.distance = 0.0f;    // close
+                 c.health = 0.5f;      // wounded
+                 c.magic_bullets = 1;  // bullets inbound
+                 c.missile_bullets = 1;
+             },
+             no_mem},
+            {"epilogue_memory", "Ranged", 99, no_ctx,
+             [](TacticMemory& m) { m.tick(); m.tick(); m.tick(); }},
+            {"expected_wait", "Waiter", 1, no_ctx, no_mem},
+        };
+
+        // Byte-compare each scenario's trace to its golden section.
+        for (const GoldenScenario& sc : scenarios) {
+            TacticDecision d;
+            std::vector<std::string> lines;
+            const bool ran = run_golden(sc, s, d, lines);
+            const auto it = golden.find(sc.name);
+            bool ok = ran && it != golden.end() && lines.size() == it->second.size();
+            if (ok) {
+                for (std::size_t i = 0; i < lines.size(); ++i) {
+                    if (!golden_line_matches(lines[i], it->second[i])) {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            char msg[160];
+            std::snprintf(msg, sizeof(msg),
+                          "golden '%s': trace == golden, line-group by line-group",
+                          sc.name);
+            CHECK(ok, msg);
+            if (!ok && ran && it != golden.end()) {
+                const std::size_t n = std::max(lines.size(), it->second.size());
+                for (std::size_t i = 0; i < n; ++i) {
+                    std::fprintf(stderr, "    [%zu] trace:  %s\n"
+                                         "    [%zu] golden: %s\n",
+                                 i, i < lines.size() ? lines[i].c_str() : "<missing>",
+                                 i, i < it->second.size() ? it->second[i].c_str()
+                                                          : "<missing>");
+                }
+            }
+        }
+
+        // Two QuickAttack entries -> the [1] and [2] line-groups in order.
+        {
+            TacticDecision d;
+            std::vector<std::string> lines;
+            const bool ran = run_golden(scenarios[0], s, d, lines);
+            CHECK(ran && lines.size() >= 6 && starts_with(lines[4], "QuickAttack[1]:") &&
+                  starts_with(lines[5], "QuickAttack[2]:"),
+                  "two QuickAttack entries -> QuickAttack[1] and QuickAttack[2] groups");
+        }
+
+        // Every scenario: the last 6 lines are the epilogue block in order.
+        {
+            bool epilogue_ok = true;
+            for (const GoldenScenario& sc : scenarios) {
+                TacticDecision d;
+                std::vector<std::string> lines;
+                if (!run_golden(sc, s, d, lines) || lines.size() < 6) {
+                    epilogue_ok = false;
+                    break;
+                }
+                const std::size_t base = lines.size() - 6;
+                for (int i = 0; i < 6; ++i) {
+                    if (!starts_with(lines[base + i], kEpilogueOrder[i])) {
+                        epilogue_ok = false;
+                    }
+                }
+            }
+            CHECK(epilogue_ok, "every scenario: 6 epilogue lines in tracer order");
+        }
+
+        // Scripted fight state gates the decision (distance / health / bullets).
+        {
+            TacticDecision far, close;
+            std::vector<std::string> lf, lc;
+            CHECK(run_golden(scenarios[2], s, far, lf) &&
+                      far.stage == DecisionStage::kQuickAttack &&
+                      far.animation == "Punch",
+                  "state_far: distance-gated QuickAttack[1] fires");
+            CHECK(run_golden(scenarios[3], s, close, lc) &&
+                      close.stage == DecisionStage::kDodgeMissiles,
+                  "state_close: bullet-gated DodgeMissiles fires first (stage 4 < stage 5)");
+        }
+
+        // Jitter inside [Min,Max] and the memory deltas on the epilogue lines.
+        {
+            TacticDecision d;
+            std::vector<std::string> lines;
+            const bool ran = run_golden(scenarios[4], s, d, lines);
+            CHECK(ran && d.distance_error >= 10.0f && d.distance_error <= 20.0f &&
+                      d.frame_error >= 30 && d.frame_error <= 40,
+                  "Ranged jitter inside [10,20] / [30,40]");
+            CHECK(ran && lines.size() == 11 && lines[7] == "Intervals: 3" &&
+                      lines[8] == "EnemyIntervals: 3",
+                  "Intervals/EnemyIntervals trace the TacticMemory deltas (3 ticks)");
+        }
+
+        // ExpectedWait: the Decision {Wait=…} line is present; its VALUE is
+        // unpinned ([HEURISTIC-TODO R4] — the golden pins format only).
+        {
+            TacticDecision d;
+            std::vector<std::string> lines;
+            const bool ran = run_golden(scenarios[5], s, d, lines);
+            const bool wait_format = ran && !lines.empty() &&
+                                     starts_with(lines.back(), "Decision {Wait=");
+            bool wait_ok = false;
+            if (wait_format) {
+                const std::string v = lines.back().substr(15);  // after "Decision {Wait="
+                wait_ok = v.size() >= 2 && v.back() == '}';
+                for (std::size_t i = 0; wait_ok && i + 1 < v.size(); ++i) {
+                    wait_ok = std::isdigit(static_cast<unsigned char>(v[i]));
+                }
+            }
+            CHECK(wait_format && wait_ok,
+                  "expected_wait: 'Decision {Wait=<digits>}' line present (R4 value unpinned)");
+            CHECK(ran && d.type == "ExpectedWait", "expected_wait: decision type ExpectedWait");
+        }
+
+        // Same seed twice -> byte-identical traces (whole trace, not fields).
+        {
+            TacticDecision a, b;
+            std::vector<std::string> la, lb;
+            CHECK(run_golden(scenarios[2], s, a, la) &&
+                      run_golden(scenarios[2], s, b, lb) && la == lb &&
+                      a.stage == b.stage && a.animation == b.animation &&
+                      a.wait_frames == b.wait_frames &&
+                      a.distance_error == b.distance_error &&
+                      a.frame_error == b.frame_error,
+                  "same seed -> byte-identical DecisionTrace (and decision)");
+        }
     }
 
     std::printf("\n=== Summary: %d passed, %d failed ===\n", tests_passed, tests_failed);
