@@ -40,10 +40,12 @@ float TacticWeight::score(const TacticContext& ctx) const {
     a += ctx.child_frames * child_frames_factor;       // a.pZ*Epa
     a += ctx.distance * distance_factor;               // a.Lya*kqa
     a += shift;                                         // + Fk
-    // [HEURISTIC-TODO] The per-target AnimationFactors probe (a.a6.S5a) and
-    // the ConditionalDesigionFactor term depend on the .atf tactic tables,
-    // whose record layout is still unreversed (stride 858, deferred to Stage
-    // 4.x). They are omitted here; a first pass runs on the base terms only.
+    a += ctx.animation_factor * animation_factors;   // a.a6.S5a probe * AnimationFactors
+    // [EXTENSION POINT] ConditionalDesigionFactor — BLOCKED pending binary
+    // evidence (0 matches in ARM string table, PORT_GAPS.md:145-148). If a
+    // future @reverser pass finds the real key name, add its term HERE, after
+    // `shift`, and document the string-table address. Do NOT add it from the
+    // JS-port name alone.
     return a;
 }
 
@@ -108,6 +110,16 @@ TacticWeight parse_weight(const fmt::XmlNode& n) {
     w.hit_factor = tof(n.attr("HitFactor"));
     w.distance_factor = tof(n.attr("DistanceFactor"));
     w.shift = tof(n.attr("Shift"));
+    // ADR-005 D5 — the AnimationFactors attribute is the probe coefficient;
+    // same-named child elements are the per-target probe entries.
+    w.animation_factors = tof(n.attr("AnimationFactors"));
+    for (const auto& child : n.children) {
+        if (child.name != "AnimationFactors") continue;
+        TacticWeight::AnimationFactorEntry entry;
+        entry.animation = child.attr("Animation");
+        entry.factors = parse_weight(child);
+        w.animation_factor_entries.push_back(std::move(entry));
+    }
     w.curve = parse_curve(n.attr("FactorType"));
     return w;
 }
