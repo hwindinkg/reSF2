@@ -26,11 +26,27 @@ namespace fmt = resf2::format;
 
 // ---------- TacticWeight ----------
 
-// Gb(), the pre-curve score. [ORIGINAL] sf2_beautified.js:20096
+namespace {
+
+// D(A)/C(A)/H(A) lookup for the probe: an animation absent from the memory
+// sums reads as 0.0f — neutral-by-zero (ADR-005 R3), matching the binary's
+// zero-initialized records (ATF_RECORD_858.md §3).
+float memory_sum(const std::unordered_map<std::string, float>& sums,
+                 const std::string& animation) {
+    const auto it = sums.find(animation);
+    return it == sums.end() ? 0.0f : it->second;
+}
+
+}  // namespace
+
+// Gb(), the pre-curve score. [ORIGINAL] sf2_beautified.js:20096; term order
+// verified against FUN_8f44ac78 @ 0x8F44AC78 (R2 GREEN,
+// reverse/analysis/VERIFY_FUN_8f44ac78.md §3): damage*DamageFactor FIRST,
+// then counter*CounterFactor — the JS port lists counter first.
 float TacticWeight::score(const TacticContext& ctx) const {
     float a = 0;
-    a += ctx.counter * counter_factor;                 // a.counter*b8
-    a += ctx.damage * damage_factor;                   // a.Xb*l8
+    a += ctx.damage * damage_factor;                   // [ORIGINAL] 0x8F44AC78: damage first
+    a += ctx.counter * counter_factor;                 // ... then counter
     a += (1.0f - ctx.health) * health_factor;          // (1-a.o1)*Uqa
     a += (1.0f - ctx.enemy_health) * enemy_health_factor;  // (1-a.q1)*wqa
     a += ctx.anim_frames * animation_frames_factor;    // a.xY*Toa
@@ -40,7 +56,22 @@ float TacticWeight::score(const TacticContext& ctx) const {
     a += ctx.child_frames * child_frames_factor;       // a.pZ*Epa
     a += ctx.distance * distance_factor;               // a.Lya*kqa
     a += shift;                                         // + Fk
-    a += ctx.animation_factor * animation_factors;   // a.a6.S5a probe * AnimationFactors
+    // [ORIGINAL] FUN_8f44ac78 @ 0x8F44AC78 (R2 GREEN,
+    // reverse/analysis/VERIFY_FUN_8f44ac78.md §3): the a.a6.S5a probe is
+    // INLINE, one term per <AnimationFactors> child:
+    //   a += child.DamageFactor*D(A) + child.CounterFactor*C(A)
+    //      + child.HitFactor*H(A)                          (damage first)
+    // D(A)/C(A)/H(A) are the decayed per-animation memory sums (TacticMemory,
+    // Phase C); absent sums read as 0.0f -> neutral-by-zero (ADR-005 R3).
+    // There is NO scalar AnimationFactors coefficient in the native parse.
+    for (const AnimationFactorEntry& child : animation_factor_entries) {
+        const float d = memory_sum(ctx.anim_memory.damage, child.animation);
+        const float c = memory_sum(ctx.anim_memory.counter, child.animation);
+        const float h = memory_sum(ctx.anim_memory.hits, child.animation);
+        a += child.factors.damage_factor * d
+           + child.factors.counter_factor * c
+           + child.factors.hit_factor * h;
+    }
     // [EXTENSION POINT] ConditionalDesigionFactor — BLOCKED pending binary
     // evidence (0 matches in ARM string table, PORT_GAPS.md:145-148). If a
     // future @reverser pass finds the real key name, add its term HERE, after
@@ -110,9 +141,10 @@ TacticWeight parse_weight(const fmt::XmlNode& n) {
     w.hit_factor = tof(n.attr("HitFactor"));
     w.distance_factor = tof(n.attr("DistanceFactor"));
     w.shift = tof(n.attr("Shift"));
-    // ADR-005 D5 — the AnimationFactors attribute is the probe coefficient;
-    // same-named child elements are the per-target probe entries.
-    w.animation_factors = tof(n.attr("AnimationFactors"));
+    // R2 (GAP-4 B4): the native parser reads 15 scalar attributes — there is
+    // NO scalar "AnimationFactors" attribute (FUN_8f44c474); the name exists
+    // only as a child *element*. Those children are the per-target probe
+    // entries consumed inline by score().
     for (const auto& child : n.children) {
         if (child.name != "AnimationFactors") continue;
         TacticWeight::AnimationFactorEntry entry;

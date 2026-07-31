@@ -194,9 +194,15 @@ bool TacticTableSet::has_family(TacticFamily f) const {
 
 float TacticTableSet::animation_factor(std::string_view /*animation*/,
                                        std::string_view /*target*/) const {
-    // [HEURISTIC-TODO] neutral 0.0f until @reverser R2 lands the stride-858
-    // row semantics (phase-5 PLAN B4). A miss is neutral, never an error
-    // (ADR-005 D5).
+    // [HEURISTIC-TODO] R2 verdict GREEN (reverse/analysis/
+    // VERIFY_FUN_8f44ac78.md, ATF_RECORD_858.md §3): the probe is
+    // weight-side and inline — TacticWeight::score() sums
+    // child.DamageFactor*D + child.CounterFactor*C + child.HitFactor*H per
+    // <AnimationFactors> child; there is NO (anim,target)->float table.
+    // Table-side, the D/C/H sums come from the v=7 per-animation record-id
+    // sets, which need the corrected .atf group framing (ATF_RECORD_858
+    // §1-2) — planned for Phase C (TacticMemory). Neutral 0.0f until then;
+    // a miss is neutral, never an error (ADR-005 D5/R3).
     return 0.0f;
 }
 
