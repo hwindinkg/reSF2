@@ -728,5 +728,43 @@ for the binary):
 
 ---
 
+## 8. Binary anchors (Step 4 — Ghidra, relocated dump)
+
+Full details, decompiled shapes, and reproduction queries:
+**`reverse/analysis/PERK_BINARY_SURVEY.md`**. Program
+`game_region_runtime.bin` @ base `0x8F057000` (16420 functions, saved in the
+Ghidra project). `game+X = 0x8F057000 + X`.
+
+**Parser chain**: boot asset registrar `FUN_8f653448` (game+0x5FC448,
+'assets/perks.xml' @ game+0x5F9A54) → load driver `FUN_8f653fb0`
+(game+0x5FCFB0, "ERROR: loadPerks - wrong file") → template/ID pass
+`FUN_8f6a434c` (game+0x64D34C; Perks/Perk/Template/ID) → registrar
+`FUN_8f6679dc` (game+0x6109DC; registry @ `0x8F868C54`) → `PerkObject::parse`
+`FUN_8f68b280` (game+0x634280; Set params → perk+0xBC map) → trigger parse
+`FUN_8f6a33f8` (game+0x64C3F8) → factories: events `FUN_8f699be0`
+(game+0x642BE0), conditions `FUN_8f695758` (game+0x63E758), actions
+`FUN_8f68e9fc` (game+0x6379FC). Attach/instance factory `FUN_8f68ba34`
+(game+0x634A34) — Set overrides merge at RUNTIME (re-parse), template
+inheritance at LOAD.
+
+**Apply path**: event dispatch `FUN_8f6a9a38` (game+0x642A38, +2 siblings) →
+action switch `FUN_8f6a9164` (game+0x642164) case 3 →
+`PerkActionSetAttributes` executor `FUN_8f6a6c70` (game+0x64FC70): evaluates
+the (name, expression) entries and writes **model+0x1C4's secondary (mod)
+key** as `model = modVal*sign + model` (sign +1 apply / −1 unapply);
+'DamageFactor' additionally pokes the in-flight hit. Reaper `FUN_8f6aac7c`
+(game+0x643C7C) subtracts at expiry (Frames/ClearMods/EndStanceClear).
+`getTotalDamage` (FUN_8f4a97b4, game+0x4527B4) consumes DamageFactor via the
+mod-aware map read at game+0x452808 → the `2^(DF*w)` base term.
+
+**Fork verdict: ZERO Case A. All mechanisms Case B** (transient, trigger-
+gated, subtract-on-reap). Perk-level `<Set>` = instance param storage, not
+attribute writes. 13 XML-unreferenced perks have no binary name refs (only
+`PERK_DOUBLE_SWEEP` @ 0x8F79CBCC is hardcoded, a move-gate check). No
+candidate C++; no re-verifier round; Step 5 = anchor + single `[ORIGINAL]`
+TODO; Step 6 = documented N/A.
+
+---
+
 *Survey produced from shipped assets only. Step 4 appends the binary anchors
 (parser + apply path addresses, decompiled shapes) to this file.*
