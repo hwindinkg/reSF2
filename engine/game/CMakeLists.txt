@@ -12,6 +12,7 @@ add_library(resf2_game STATIC
     location_manager.cpp
     tactic_settings.cpp
     condition_system.cpp
+    settings_loader.cpp
 )
 
 target_include_directories(resf2_game PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
