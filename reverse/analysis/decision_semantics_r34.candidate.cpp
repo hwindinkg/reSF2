@@ -82,51 +82,48 @@ int pickIndexByWeight(const void* table, const int* cand,
     const int* end = *(const int**)((const char*)cand + 4);
     const int* it  = *(const int**)cand;
 
-    // pass 1: sum of weights over filter-eligible candidates
+    // pass 1: sum of weights over filter-eligible candidates. Slot test as
+    // compiled (ASM 0x8F446D24..38): id != 0 -> weight(id); id == 0 && filter
+    // != 0 -> weight(filter), ONE slot (no read-ahead, no pairing with the
+    // next slot); id == 0 && filter == 0 -> skip slot (advance one, continue).
+    // Each accumulated weight is int-truncated before the add, as compiled:
+    // vcvt.s32.f32 / vcvt.f32.s32 @ 0x8F446F04..08.
     float sum = 0.0f;
     while (it < end) {
         const void* anim;
         int id = *it;
-        if (id != 0) {
-            anim = (const void*)id;
-        } else {
-            ++it;
-            if (it >= end) break;
-            id = *it;
-            if (id != 0) {
-                anim = (const void*)id;
-            } else if (filter != 0) {
-                anim = filter;                // zero slot = current animation
-            } else {
-                continue;                     // skip zero slot, no filter
+        if (id == 0) {
+            if (filter == 0) {                // zero slot, no filter -> skip
+                ++it;
+                continue;
             }
+            anim = filter;                    // zero slot = current animation
+        } else {
+            anim = (const void*)id;
         }
-        sum += candidateWeight(table, anim, ctx);
+        sum += (float)(int)candidateWeight(table, anim, ctx);
         ++it;
     }
 
     if (sum > 0.0f) {
         float point = sum * roll01();         // FUN_8f26447c(rng, sum)
         it  = *(const int**)cand;
-        int idx = 0;                          // counts processed slots
+        int idx = 0;                          // counts processed slots; equals
+                                              // the physical slot index when
+                                              // filter is set (r10 @ 0x8F446ED4)
         while (it < end) {
             const void* anim;
             int id = *it;
-            if (id != 0) {
-                anim = (const void*)id;
-            } else {
-                ++it;
-                if (it >= end) return -1;
-                id = *it;
-                if (id != 0) {
-                    anim = (const void*)id;
-                } else if (filter != 0) {
-                    anim = filter;
-                } else {
-                    continue;
+            if (id == 0) {
+                if (filter == 0) {            // zero slot, no filter -> skip
+                    ++it;                     // (binary pass 2 returns -1 at
+                    continue;                 //  vector end, incl. after skip)
                 }
+                anim = filter;
+            } else {
+                anim = (const void*)id;
             }
-            point -= candidateWeight(table, anim, ctx);
+            point -= candidateWeight(table, anim, ctx);   // raw float (no vcvt)
             if (point < 0.0f) return idx;
             ++it;
             ++idx;
