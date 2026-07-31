@@ -22,6 +22,10 @@ struct HeadlessTestConfig {
     std::uint32_t fixed_dt_ms = 16;  // ~60 FPS
     std::string start_scene;  // Optional: "battle", "shop", "map", etc.
     std::string start_location;  // Optional: "dojo", "waterfall_small", ...
+    // Hermetic run: read no machine state (no saved profile/inventory) and
+    // skip the tutorial check. Set for scripted measurements that must be
+    // reproducible on any machine (Game::set_hermetic_run).
+    bool hermetic = false;
 };
 
 class HeadlessTestRunner {

@@ -396,6 +396,14 @@ float host_player_health_frac() const override;
 
 float host_enemy_health_frac() const override;
 
+    // Read-only access to the F1 COMBAT panel's last player->enemy damage
+    // breakdown, for the battle-level wiring test (phase 4 step 10).
+    float dbg_last_base_damage() const { return dbg_last_base_damage_; }
+    float dbg_last_attr_mult() const { return dbg_last_attr_mult_; }
+    float dbg_last_block_factor() const { return dbg_last_block_factor_; }
+    float dbg_last_final_damage() const { return dbg_last_final_damage_; }
+    const std::string& dbg_last_move_name() const { return dbg_last_move_name_; }
+
 void host_reset_round() override;
 
 void host_set_round_wins(int player, int enemy) override;

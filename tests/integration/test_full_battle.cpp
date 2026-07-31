@@ -20,10 +20,18 @@
 // - No crashes over repeated battle runs
 
 #include "../headless_test_runner.hpp"
+#include "../engine/game/attribute_aggregation.hpp"
+#include "../engine/game/damage_formula.hpp"
+#include "../engine/game/inventory.hpp"
 
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <string>
+
+static bool near_eqf(float a, float b, float eps) {
+    return std::fabs(a - b) <= eps * (1.0f + std::fabs(b));
+}
 
 // Suppress noisy stdout from the game's internal logging so the test
 // doesn't time out from I/O overhead.
@@ -229,6 +237,145 @@ int main() {
             ++failures;
         } else {
             std::fprintf(stderr, "OK: Frame count correct (%d)\n", frames_run);
+        }
+    }
+
+    // ---- Damage wiring check (phase 4 step 10) ----
+    // A landed player hit must reduce enemy health by
+    // get_total_damage(predicted_inputs) * block within float epsilon, where
+    // predicted_inputs are derived from the same aggregated AttributeSets the
+    // battle used. This asserts the WIRING (equipment -> AttributeSet -> f3
+    // -> formula -> block post-multiplier -> health application) — the formula
+    // itself is already golden-pinned (test_damage_formula_golden).
+    //
+    // NOTE on values: at neutral attribute delta the wired model produces
+    // roughly HALF the damage the old placeholder did — the old line's
+    // trailing * 2.0f was the double-counted power base (2.0 is the powf base
+    // INSIDE getTotalDamage, not a trailing multiplier). Expected values here
+    // are computed from the verified formula, never by re-adding a x2.
+    {
+        resf2::test::HeadlessTestConfig config;
+        config.asset_root = "assets";
+        config.width = 1280;
+        config.height = 720;
+        config.fixed_dt_ms = 16;
+        config.start_scene = "battle";
+        // Hermetic: no machine save (deterministic empty inventory -> fists)
+        // and no Sensei tutorial dialog hijacking the battle scene.
+        config.hermetic = true;
+
+        resf2::test::HeadlessTestRunner runner(config);
+        if (!runner.init()) {
+            std::fprintf(stderr, "FAIL: wiring-check init() returned false\n");
+            return 1;
+        }
+        configure_battle(runner);
+
+        // Expected AttributeSets from the game's PUBLIC equipment state:
+        // mirror the equipped slots into a local inventory and run the same
+        // aggregation the game's rebuild_fighter_attributes() uses. This is
+        // machine-independent — it holds whether or not the machine save has
+        // items equipped.
+        const resf2::format::ListData* list = runner.game().host_get_list_data();
+        resf2::inventory::Inventory mirror;
+        if (list) {
+            for (const char* slot : resf2::inventory::kAllSlots) {
+                const std::string id = runner.game().host_get_equipped(slot);
+                if (!id.empty()) { mirror.add_item(id); mirror.equip(slot, id); }
+            }
+        }
+        const resf2::game::AttributeSet expected_player =
+            list ? resf2::game::aggregate_equipment_attributes(*list, mirror)
+                 : resf2::game::AttributeSet{};
+        const resf2::game::AttributeSet expected_enemy =
+            resf2::game::seed_enemy_baseline_attributes();
+
+        // game.cpp site 3 pairing: weapon equipped -> WeaponDamage, fists ->
+        // UnarmedDamage, always vs the enemy's BodyDefense (game+0x60DF98).
+        const bool armed =
+            !runner.game().host_get_equipped(resf2::inventory::kSlotWeapon).empty();
+        const char* dmg_attr = armed ? "WeaponDamage" : "UnarmedDamage";
+        const float expected_diff = resf2::game::attribute_difference(
+            expected_player, dmg_attr, expected_enemy, "BodyDefense");
+        const float expected_f3 =
+            resf2::game::attribute_difference_factor(expected_diff);
+
+        bool hit_checked = false;
+        float prev_ehp = runner.enemy_health_frac();
+        const int kMaxWiringFrames = 1200;
+        for (int i = 0; i < kMaxWiringFrames && !hit_checked; ++i) {
+            inject_movement(runner, i);
+            if (i % 25 == 20) {
+                // tap_key drives the frame with the key held, so the
+                // just-pressed edge survives poll_events() into on_update().
+                // Attacks are O=punch / P=kick (game.cpp L2111 controls
+                // comment; punch_pressed/kick_pressed read keys_just_pressed).
+                runner.tap_key((i % 50 == 20) ? resf2::platform::Key::O
+                                              : resf2::platform::Key::P);
+            } else {
+                runner.run_frames(1);
+            }
+
+            const float ehp = runner.enemy_health_frac();
+            // Skip the killing blow: health clamps at 0, so the drop would be
+            // smaller than final_damage.
+            if (ehp > 0.0f && ehp < prev_ehp - 1e-7f) {
+                const float drop = prev_ehp - ehp;  // frac delta == final_damage
+                const auto& g = runner.game();
+
+                // Predicted inputs from the same aggregated sets the battle
+                // used; hit_damage/block read back from the dbg breakdown
+                // (the move that landed and the enemy's block state are
+                // AI/timing-dependent, so they are observed, not guessed).
+                resf2::game::DamageInputs din;
+                din.base_attribute = expected_player.get_or("DamageFactor", 0.0f);
+                din.base_weight = 0.0001f;  // <DamageFactor Base="0.0001">
+                din.attribute_difference = expected_diff;
+                din.hit_damage = g.dbg_last_base_damage();
+                const float predicted =
+                    resf2::game::get_total_damage(din) * g.dbg_last_block_factor();
+
+                if (!near_eqf(predicted, g.dbg_last_final_damage(), 1e-4f)) {
+                    std::fprintf(stderr,
+                        "FAIL: wiring — get_total_damage(predicted)*block=%.6f != "
+                        "game final=%.6f (move=%s)\n",
+                        predicted, g.dbg_last_final_damage(),
+                        g.dbg_last_move_name().c_str());
+                    ++failures;
+                }
+                if (!near_eqf(g.dbg_last_attr_mult(), expected_f3, 1e-4f)) {
+                    std::fprintf(stderr,
+                        "FAIL: aggregation — game f3=%.6f != expected "
+                        "2^((%s-BodyDefense)/10)=%.6f (diff=%.2f)\n",
+                        g.dbg_last_attr_mult(), expected_f3, dmg_attr, expected_diff);
+                    ++failures;
+                }
+                if (!near_eqf(drop, g.dbg_last_final_damage(), 1e-3f)) {
+                    std::fprintf(stderr,
+                        "FAIL: health application — enemy hp drop=%.6f != "
+                        "final_damage=%.6f\n",
+                        drop, g.dbg_last_final_damage());
+                    ++failures;
+                }
+
+                if (failures == 0) {
+                    std::fprintf(stderr,
+                        "OK: damage wiring — move=%s base=%.3f diff(%s vs BodyDef)=%.1f "
+                        "f3=%.4f blk=%.2f final=%.6f matches prediction\n",
+                        g.dbg_last_move_name().c_str(), g.dbg_last_base_damage(),
+                        dmg_attr, expected_diff, expected_f3,
+                        g.dbg_last_block_factor(), g.dbg_last_final_damage());
+                }
+                hit_checked = true;
+            }
+            prev_ehp = ehp;
+        }
+        if (!hit_checked) {
+            // Same tolerance as the main flow: headless combat engagement is
+            // timing-dependent; the stability checks above are the hard gate.
+            std::fprintf(stderr,
+                "WARNING: no player hit landed in %d frames — wiring check skipped\n",
+                kMaxWiringFrames);
         }
     }
 
