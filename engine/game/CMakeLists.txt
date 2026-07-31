@@ -12,6 +12,7 @@ add_library(resf2_game STATIC
     location_manager.cpp
     tactic_settings.cpp
     tactic_tables.cpp
+    tactic_pipeline.cpp
     condition_system.cpp
     settings_loader.cpp
 )

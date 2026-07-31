@@ -311,6 +311,20 @@ target_compile_features(test_tactic_weights PRIVATE cxx_std_23)
 add_test(NAME test_tactic_weights COMMAND test_tactic_weights
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# TacticDecisionPipeline (ADR-005 D1): the seven-stage AI decision in the
+# tracer's fixed order (UseDefense..UseCautiousMovements + epilogue),
+# DecisionTrace line order, first-hit-wins, R3/R4/R6 defaults.
+add_executable(test_tactic_decision_trace
+    test_tactic_decision_trace.cpp
+)
+target_link_libraries(test_tactic_decision_trace PRIVATE
+    resf2_game
+    resf2_warnings
+)
+target_compile_features(test_tactic_decision_trace PRIVATE cxx_std_23)
+add_test(NAME test_tactic_decision_trace COMMAND test_tactic_decision_trace
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # TacticMemory state model (ADR-005 D8, R5-verified): unbounded per-animation
 # decayed records (no ring depth), action logs, frame countdowns, round-end
 # scaling — semantics per reverse/analysis/MEMORY_INDEXING_R56.md.
