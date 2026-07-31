@@ -267,3 +267,14 @@ zlib wrapper (compression happens once at the `.atf` whole-file level).
 5. Archive-reader family (`FUN_8f2065e4` etc.) not identified to library
    level; "zip error"/"file %s not unzip" strings suggest minizip lineage,
    and the engine's zlib `78 DA` parse already fixes the outer compression.
+
+---
+
+## 8. Companion: .atf record internals (R2)
+
+R2's byte-level follow-up lives in `ATF_RECORD_858.md` (+ `atf_record_858.candidate.cpp`).
+Corrections to this document: the stride-858 model of the first record was a misread
+(of `u32 blob_size` + `u16 pool-A count`) - the real framing is repeated
+`{version, names, blob_size, blob}` groups; and the probe is an inline per-child
+sum in `FUN_8f44ac78` with damage-first order, not a table walk. Verification
+status: candidate pending @re-verifier.

@@ -10,6 +10,8 @@
 // records instead. No .sts assets exist in this dump. Until R1 lands,
 // parse/parse_file return kFamilyUnavailable and no table of this family
 // can load — a missing family is a normal condition (ADR-005 D3).
+//
+// R1 verdict (TABLE_FORMATS.md): no .sts files; shift tables live as binary node-table sub-records inside .atf (header value 7, parser FUN_8f446528).
 
 #pragma once
 
