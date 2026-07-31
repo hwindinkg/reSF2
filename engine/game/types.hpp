@@ -14,6 +14,8 @@
 #include "../renderer/renderer.hpp"
 #include "../reverse/plist_atlas.hpp"
 
+#include "attributes.hpp"
+
 namespace resf2::game {
 
 namespace ren = resf2::renderer;
@@ -392,6 +394,12 @@ struct FighterState {
     int hits_landed = 0;
     int hits_taken = 0;
     bool is_dead = false;
+
+    // [ORIGINAL] The fighter's attribute map — the name-keyed int container at
+    // model+0x1C4 that Model::getParameter (game+0x6275F4) reads. Runtime-only:
+    // rebuilt from equipped items / the AlignTargetAttributes baseline, never
+    // serialised.
+    AttributeSet attributes;
 };
 
 struct HitSpark {
