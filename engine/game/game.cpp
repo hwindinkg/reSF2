@@ -4,6 +4,7 @@
 
 #include "game.hpp"
 #include "settings_loader.hpp"
+#include "attribute_aggregation.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -609,6 +610,8 @@ bool Game::host_load_progress() {
     inventory_.from_save(data);
     // Sync combat equipped weapon from inventory
     sync_equipped_weapon();
+    // Rebuild fighter attributes from the restored equipment
+    rebuild_fighter_attributes();
 
     // [ORIGINAL] Restore tutorial and zone/battle lock state from XML save
     tutorial_state_ = data.tutorial_state;
@@ -965,6 +968,7 @@ bool Game::host_equip_item(const std::string& item_id) {
                         }
                         inventory_.equip(slot, item_id);
                         player_profile_.equip_item(slot, item_id);
+                        rebuild_fighter_attributes();
                         std::printf("[equip] equipped %s in %s\n", item_id.c_str(), slot);
                         host_save_progress();
                         return true;
@@ -985,6 +989,7 @@ bool Game::host_equip_item(const std::string& item_id) {
             if (slot == inventory::kSlotWeapon) {
                 sync_equipped_weapon();
             }
+            rebuild_fighter_attributes();
             std::printf("[equip] equipped %s in %s\n", item_id.c_str(), slot);
             host_save_progress();
             return true;
@@ -999,6 +1004,7 @@ bool Game::host_unequip_item(const std::string& slot) {
                 if (slot == inventory::kSlotWeapon) {
                     sync_equipped_weapon();
                 }
+                rebuild_fighter_attributes();
                 std::printf("[equip] unequipped %s from %s\n", item_id.c_str(), slot.c_str());
                 host_save_progress();
                 return true;
@@ -1100,6 +1106,28 @@ void Game::sync_equipped_weapon() {
                     if (location_loaded_) load_player_weapon(equipped_weapon_);
                 }
             }
+}
+
+void Game::rebuild_fighter_attributes() {
+    // [ORIGINAL] Every fighter's attributes live in the name-keyed int map at
+    // model+0x1C4 that Model::getParameter (game+0x6275F4) reads and that
+    // Model::getTotalDamage (game+0x4527B4) consumes. The player's map is
+    // aggregated from equipped items; the placeholder enemy gets the
+    // <AlignTargetAttributes> baseline ("normalise an opponent's attributes")
+    // until stage warriors land (5.3). Perks contribute nothing here — the
+    // phase-4 fork verdict is ZERO Case A (PERK_SURVEY.md /
+    // PERK_BINARY_SURVEY.md); trigger-system effects are 5.1 scope.
+    player_fighter_.attributes = aggregate_equipment_attributes(list_data_, inventory_);
+    enemy_fighter_.attributes = seed_enemy_baseline_attributes();
+    std::printf("[equip] attributes: player WeaponDamage=%d UnarmedDamage=%d "
+                "BodyDefense=%d HeadDefense=%d | enemy baseline WeaponDamage=%d "
+                "BodyDefense=%d\n",
+                player_fighter_.attributes.raw("WeaponDamage"),
+                player_fighter_.attributes.raw("UnarmedDamage"),
+                player_fighter_.attributes.raw("BodyDefense"),
+                player_fighter_.attributes.raw("HeadDefense"),
+                enemy_fighter_.attributes.raw("WeaponDamage"),
+                enemy_fighter_.attributes.raw("BodyDefense"));
 }
 
 void Game::host_start_menu_music() {

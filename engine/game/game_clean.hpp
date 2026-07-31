@@ -456,6 +456,12 @@ std::string host_get_current_level() const override;
     // Called after loading save data and after equipping a weapon.
     void sync_equipped_weapon();
 
+    // Rebuild both fighters' AttributeSets (the model+0x1C4 map the recovered
+    // damage formula reads): the player's from equipped items, the enemy's
+    // from the <AlignTargetAttributes> baseline. Idempotent; called after
+    // save load and on every equip/unequip.
+    void rebuild_fighter_attributes();
+
     // ---------- Audio hooks ----------
 
     void host_start_menu_music() override;
