@@ -170,6 +170,44 @@ static void test_difference_feeds_curve_without_sentinel() {
           "difference factor never collapses to 0 (sentinel would do that)");
 }
 
+// Step 6 (perk wiring verification) is a DOCUMENTED NO-OP.
+//
+// The Step 5 classification fork (reverse/analysis/PERK_SURVEY.md verdict
+// table + PERK_BINARY_SURVEY.md §3) found ZERO Case A perk mechanisms: every
+// perk attribute write is a transient ModAttributes action — added into the
+// model+0x1C4 map's secondary/mod slot on trigger fire (executor
+// FUN_8f6a6c70, game+0x64FC70, via action switch FUN_8f6a9164 case 3) and
+// subtracted back on reap (FUN_8f6a6c70 via reaper FUN_8f6aac7c,
+// game+0x643C7C — Frames countdown / ClearMods / EndStanceClear). No
+// persistent equip-time perk->attribute contribution exists, so there is no
+// perk-bearing equipment case to pin here: equipped perks correctly
+// contribute NOTHING to the aggregated AttributeSet, which is exactly what
+// test_equipped_items_sum_into_attributes already proves (perk-less items
+// contribute exactly their listed sums, nothing more).
+//
+// The phase-4 perk Success Criterion is therefore N/A-WITH-EVIDENCE (the
+// verdict table above), not silently dropped. When the 5.1 trigger system
+// lands, this file gains the real perk case.
+
+static void test_perk_wiring_documented_noop() {
+    std::printf("\n-- step 6: perk wiring N/A (zero Case A verdict) --\n");
+    // Evidence pin: an item carrying a ListPerk contributes exactly its
+    // direct attributes — the perk plug point adds nothing (Case B).
+    fmt::ListData catalog;
+    inventory::Inventory inv;
+    fmt::ListItem item = make_item("PerkedSword", 22, 0, 0, 0, 0, 0);
+    fmt::ListPerk perk;
+    perk.name = "PERK_ITEM_SPECIAL_LIFESTEAL_WEAPON";  // Case B: trigger/timed
+    item.perks.push_back(perk);
+    equip(catalog, inv, item, inventory::kSlotWeapon);
+
+    const AttributeSet attrs = aggregate_equipment_attributes(catalog, inv);
+    CHECK(attrs.raw("WeaponDamage") == 22,
+          "perk-bearing item contributes its listed WeaponDamage only");
+    CHECK(attrs.size() == attribute_names().size(),
+          "perk plug point adds no phantom attributes (zero Case A verdict)");
+}
+
 int main() {
     std::printf("=== damage wiring test (equipment -> AttributeSet -> getTotalDamage) ===\n");
     test_empty_inventory_is_all_zero();
@@ -177,6 +215,7 @@ int main() {
     test_same_attribute_stacks_across_slots();
     test_enemy_baseline_matches_align_targets();
     test_difference_feeds_curve_without_sentinel();
+    test_perk_wiring_documented_noop();
     std::printf("\n=== %d passed, %d failed ===\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }
