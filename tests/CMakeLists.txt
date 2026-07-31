@@ -466,6 +466,22 @@ add_test(NAME test_attributes_golden
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 set_tests_properties(test_attributes_golden PROPERTIES TIMEOUT 60)
 
+# Damage wiring (GAP-3): equipment -> AttributeSet aggregation feeding
+# get_total_damage. Exercises engine/game/attribute_aggregation.hpp against
+# the real inventory/list-parser types, so it links resf2_game + resf2_format
+# like test_inventory does.
+add_executable(test_damage_wiring test_damage_wiring.cpp)
+target_link_libraries(test_damage_wiring PRIVATE
+    resf2_game
+    resf2_format
+    resf2_warnings
+)
+target_compile_features(test_damage_wiring PRIVATE cxx_std_23)
+add_test(NAME test_damage_wiring
+         COMMAND test_damage_wiring
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_damage_wiring PROPERTIES TIMEOUT 60)
+
 # ---------------------------------------------------------------------------
 # Specification tests.
 #
