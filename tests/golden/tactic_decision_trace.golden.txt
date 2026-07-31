@@ -1,0 +1,133 @@
+# tests/golden/tactic_decision_trace.golden.txt
+#
+# GATE G1 golden for the TacticDecisionPipeline decision trace
+# (engine/game/tactic_pipeline, ADR-005 D1).
+#
+# [ORIGINAL] provenance: the decision order and line formats are the ARM
+# binary's AI debug tracer strings at 0x8F798090..0x8F79834C
+# (reverse/analysis/PORT_GAPS.md:171-178, MEMORY_INDEXING_R56.md §3.1,
+# GOLDEN_TESTS.md §2 "AI decisions (GAP-4)"):
+#
+#   UseDefense -> UseSafeAttack -> TableAttack -> DodgeMissiles ->
+#   QuickAttack[i] -> Evade[i] -> UseCautiousMovements
+#   then DistanceError / FrameError / Intervals / EnemyIntervals /
+#   DecisionType / Decision {Wait=%d}
+#
+# Methodology: each section is one decide() run over the synthetic tactic set
+# in tests/test_tactic_decision_trace.cpp (kTacticXml) with a scripted
+# TacticContext/TacticMemory and the seeded LCG (make_lcg). Expected values
+# are computed from the documented score/curve formulas (tactic_settings.cpp
+# Gb/QYa) and the LCG draws, not copied from engine output. A failing byte
+# comparison = a real gap: stage reorder/merge/skip, value drift, or a
+# memory/context wiring break.
+#
+# Re-pinning rule (R3/R4/R6 promotions): scenarios use extreme chance gates
+# (always/never) and extreme fight states, so a comparator or wait-mapping
+# change alters VALUES ONLY — never which stages fire or how many lines a
+# stage prints. Re-baseline values, not line structure.
+#
+# `*` in a golden line matches "any digits" (format-only pin).
+#   [HEURISTIC-TODO R4] the Wait value in section `expected_wait` is
+#   unpinned pending the R4 promotion — assert presence/format only.
+
+=== all_stages_idle ===
+# Nothing (seed 42, default state): every stage declared with zero chances ->
+# idle decision; all 8 stage line-groups + 6 epilogue lines trace in order.
+# QuickAttack prints both entries (1-based tracer index).
+UseDefense:  / 0.0000 / 0.0000 / 0.0000
+UseSafeAttack:  / 0.0000
+TableAttack:  / 0.0000
+DodgeMissiles:  / 0.0000
+QuickAttack[1]: Throw / 0.0000
+QuickAttack[2]: ShortAttack / 0.0000
+Evade[1]: Throw / 0.0000
+UseCautiousMovements:  / 0.0000
+DistanceError: 1.809
+FrameError: 4
+Intervals: 0
+EnemyIntervals: 0
+DecisionType: Tabular
+Decision {Wait=0}
+
+=== first_hit_wins ===
+# Aggressive (seed 7): BlockChance=2 fires in stage 1 -> the decision wins at
+# UseDefense; the later stages still trace their line-groups.
+UseDefense: Block / 0.0000 / 0.0000 / 2.0000
+UseSafeAttack:  / 0.0000
+TableAttack:  / 0.0000
+DodgeMissiles:  / 0.0000
+QuickAttack[1]: Throw / 2.0000
+UseCautiousMovements:  / 0.0000
+DistanceError: 0.000
+FrameError: 0
+Intervals: 0
+EnemyIntervals: 0
+DecisionType: Tabular
+Decision {Wait=0}
+
+=== state_far ===
+# StateGated (seed 42), far + healthy, no bullets: the DistanceFactor curve
+# (Punch) fires on distance alone; health/bullet curves read zero.
+UseDefense:  / 0.0000 / 0.0000 / 0.0000
+UseSafeAttack:  / 0.0000
+TableAttack:  / 0.0000
+DodgeMissiles:  / 0.0000
+QuickAttack[1]: Punch / 2.2500
+QuickAttack[2]: Kick / 0.0000
+UseCautiousMovements:  / 0.0000
+DistanceError: 0.000
+FrameError: 0
+Intervals: 0
+EnemyIntervals: 0
+DecisionType: Tabular
+Decision {Wait=0}
+
+=== state_close ===
+# StateGated (seed 42), close + wounded, bullets inbound: the bullet curve
+# (DodgeMissiles) fires first (stage 4 < stage 5); Kick's HealthFactor curve
+# also fires but the decision already won. Same line structure as state_far —
+# only values change.
+UseDefense:  / 0.0000 / 0.0000 / 0.0000
+UseSafeAttack:  / 0.0000
+TableAttack:  / 0.0000
+DodgeMissiles: Dodge / 2.0000
+QuickAttack[1]: Punch / 0.0000
+QuickAttack[2]: Kick / 1.5000
+UseCautiousMovements:  / 0.0000
+DistanceError: 0.000
+FrameError: 0
+Intervals: 0
+EnemyIntervals: 0
+DecisionType: Tabular
+Decision {Wait=0}
+
+=== epilogue_memory ===
+# Ranged (seed 99) + TacticMemory 3 ticks: Intervals/EnemyIntervals read the
+# memory frame counters; jitter drawn inside [Min,Max] = [10,20] / [30,40].
+UseDefense:  / 0.0000 / 0.0000 / 0.0000
+UseSafeAttack:  / 0.0000
+TableAttack:  / 0.0000
+DodgeMissiles:  / 0.0000
+UseCautiousMovements:  / 0.0000
+DistanceError: 13.518
+FrameError: 34
+Intervals: 3
+EnemyIntervals: 3
+DecisionType: Tabular
+Decision {Wait=0}
+
+=== expected_wait ===
+# Waiter (seed 1, Type=ExpectedWait): no chance stages; the epilogue picks the
+# wait over <ExpectedWait>. [HEURISTIC-TODO R4] the Wait VALUE is unpinned —
+# this section pins the line format only (`*` = any digits).
+UseDefense:  / 0.0000 / 0.0000 / 0.0000
+UseSafeAttack:  / 0.0000
+TableAttack:  / 0.0000
+DodgeMissiles:  / 0.0000
+UseCautiousMovements:  / 0.0000
+DistanceError: 0.000
+FrameError: 0
+Intervals: 0
+EnemyIntervals: 0
+DecisionType: ExpectedWait
+Decision {Wait=*}
