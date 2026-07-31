@@ -53,6 +53,11 @@ bool HeadlessTestRunner::init() {
         game_->set_start_location(config_.start_location);
     }
 
+    // Hermetic before on_init: it gates the save load AND the tutorial check.
+    if (config_.hermetic) {
+        game_->set_hermetic_run(true);
+    }
+
     // Initialise game (loads assets, registers scenes, etc.)
     game_->on_init(*platform_);
 

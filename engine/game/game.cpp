@@ -830,6 +830,10 @@ void Game::host_reset_round() {
     // the starting positions.
     player_fighter_ = FighterState{};
     enemy_fighter_ = FighterState{};
+    // FighterState{} wipes the AttributeSets — rebuild them (player from
+    // equipment, enemy from the AlignTargetAttributes baseline) so every
+    // round starts with the model+0x1C4 maps populated. Idempotent.
+    rebuild_fighter_attributes();
     player_hit_flash_ = 0;
     enemy_hit_flash_ = 0;
     combo_timer_ = 0;
@@ -1976,6 +1980,7 @@ void Game::host_update_gameplay(uint32_t dt) {
         if (player_fighter_.is_dead || enemy_fighter_.is_dead) {
             player_fighter_ = FighterState{};
             enemy_fighter_ = FighterState{};
+            rebuild_fighter_attributes();  // FighterState{} wipes the maps
             battle_result_.clear();
             player_hit_flash_ = 0;
             enemy_hit_flash_ = 0;
@@ -2014,6 +2019,7 @@ void Game::host_update_gameplay(uint32_t dt) {
         // dismissed mid-exchange kept his hit stun, cooldown and attack flag,
         // and resumed from them the next time he was called back.
         enemy_fighter_ = FighterState{};
+        rebuild_fighter_attributes();  // FighterState{} wipes the maps
         enemy_ai_timer_ = 0.0f;
         enemy_ai_state_ = 0;
         enemy_attack_cooldown_ = 0.0f;
