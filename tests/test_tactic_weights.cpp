@@ -276,6 +276,200 @@ int main() {
         }
     }
 
+    // ---- Step A2 (ADR-005 D2): the 20 decision-level keys on TacticDef,
+    // ---- shaped exactly like the real assets/tacticSettings.xml schema.
+
+    std::printf("\n=== Decision-level keys: full parse ===\n");
+    {
+        const std::string xml =
+            "<TacticsSettings><Tactics>"
+            "<Tactic Name=\"Full\" Type=\"ExpectedWait\">"
+            "<AnimationWeights><Animation Base=\"100\"/></AnimationWeights>"
+            "<UseDefense>"
+            "<CounterAttackChance Base=\"0.1\" Limit=\"1\"/>"
+            "<DodgeChance         Base=\"0.2\" Limit=\"1\"/>"
+            "<BlockChance         Base=\"0.3\" Limit=\"1\"/>"
+            "</UseDefense>"
+            "<UseSafeAttackChance     Base=\"0.4\" Limit=\"1\"/>"
+            "<TableAttackChance       Base=\"0.5\" Limit=\"1\"/>"
+            "<CautiousMovementsChance Base=\"0.6\" Limit=\"1\"/>"
+            "<DodgeMissilesChance     Base=\"0.7\" Limit=\"1\"/>"
+            "<DodgeMagicChance        Base=\"0.8\" Limit=\"1\"/>"
+            "<QuickAttacks>"
+            "<QuickAttackChance Animation=\"Throw\" Base=\"0.05\" Limit=\"0.3\">"
+            "<AnimationFactors Animation=\"Throw\" DamageFactor=\"4\"/>"
+            "</QuickAttackChance>"
+            "<QuickAttackChance Animation=\"ShortAttack\" Base=\"0.2\"/>"
+            "</QuickAttacks>"
+            "<Evades>"
+            "<EvadeChance Animation=\"Throw\" Base=\"0.02\" Limit=\"1\"/>"
+            "</Evades>"
+            "<DistanceError><Min Base=\"1\"/><Max Base=\"2\"/></DistanceError>"
+            "<FrameError><Min Base=\"3\"/><Max Base=\"4\"/></FrameError>"
+            "<ResponseDelay><Min Base=\"5\"/><Max Base=\"6\"/></ResponseDelay>"
+            "<EnemyResponseDelay><Min Base=\"30\"/><Max Base=\"60\"/></EnemyResponseDelay>"
+            "<ExpectedWait>"
+            "<Animation Name=\"Step\" Base=\"1000\" Limit=\"1000\"/>"
+            "<Animation Base=\"3\" HealthFactor=\"3\" Limit=\"15\"/>"
+            "</ExpectedWait>"
+            "<Memory Strikes=\"3\" RoundFactor=\"1\"/>"
+            "</Tactic>"
+            "</Tactics></TacticsSettings>";
+        TacticSettings s;
+        CHECK(load_xml_string(s, xml, "resf2_tw_a2_full"), "full-key XML loads");
+        const TacticDef* d = s.tactic("Full");
+        CHECK(d != nullptr, "tactic Full present");
+        if (d) {
+            // <UseDefense> is a presence-gate container of 3 chance curves.
+            CHECK(d->use_defense, "UseDefense presence gate set");
+            CHECK_NEAR(d->counter_attack_chance.base, 0.1, "CounterAttackChance");
+            CHECK_NEAR(d->dodge_chance.base, 0.2, "DodgeChance");
+            CHECK_NEAR(d->block_chance.base, 0.3, "BlockChance");
+            // Standalone chance curves.
+            CHECK_NEAR(d->use_safe_attack_chance.base, 0.4, "UseSafeAttackChance");
+            CHECK_NEAR(d->table_attack_chance.base, 0.5, "TableAttackChance");
+            CHECK_NEAR(d->cautious_movements_chance.base, 0.6, "CautiousMovementsChance");
+            CHECK_NEAR(d->dodge_missiles_chance.base, 0.7, "DodgeMissilesChance");
+            CHECK_NEAR(d->dodge_magic_chance.base, 0.8, "DodgeMagicChance");
+            // <QuickAttacks>/<Evades>: per-animation entries, order preserved;
+            // entry count == the stage repeat count (ADR R6).
+            CHECK(d->quick_attack_chances.size() == 2, "two QuickAttackChance entries");
+            if (d->quick_attack_chances.size() == 2) {
+                CHECK(d->quick_attack_chances[0].first == "Throw",
+                      "QuickAttackChance[0] Animation=Throw (order preserved)");
+                CHECK_NEAR(d->quick_attack_chances[0].second.base, 0.05,
+                           "QuickAttackChance[0] Base");
+                CHECK(d->quick_attack_chances[0].second.animation_factor_entries.size() == 1,
+                      "QuickAttackChance[0] carries its AnimationFactors child");
+                CHECK(d->quick_attack_chances[1].first == "ShortAttack",
+                      "QuickAttackChance[1] Animation=ShortAttack");
+            }
+            CHECK(d->evade_chances.size() == 1 &&
+                  d->evade_chances[0].first == "Throw",
+                  "one EvadeChance entry for Throw");
+            // DistanceError/FrameError/ResponseDelay/EnemyResponseDelay are
+            // <Min Base/><Max Base/> ranges, not scalars.
+            CHECK(d->distance_error.min == 1 && d->distance_error.max == 2,
+                  "DistanceError range 1..2");
+            CHECK(d->frame_error.min == 3 && d->frame_error.max == 4,
+                  "FrameError range 3..4");
+            CHECK(d->response_delay.min == 5 && d->response_delay.max == 6,
+                  "ResponseDelay range 5..6");
+            CHECK(d->enemy_response_delay.min == 30 && d->enemy_response_delay.max == 60,
+                  "EnemyResponseDelay range 30..60");
+            // <ExpectedWait> is an animation-weight list (same shape as
+            // animation_weights), not a single curve.
+            CHECK(d->expected_wait.size() == 2, "ExpectedWait list of 2");
+            if (d->expected_wait.size() == 2) {
+                CHECK(d->expected_wait[0].first == "Step", "ExpectedWait[0]=Step");
+                CHECK_NEAR(d->expected_wait[0].second.base, 1000.0, "ExpectedWait[0] Base");
+                CHECK(d->expected_wait[1].first.empty(), "ExpectedWait[1] is the catch-all");
+                CHECK_NEAR(d->expected_wait[1].second.health_factor, 3.0,
+                           "ExpectedWait[1] HealthFactor");
+            }
+            // <Memory Strikes RoundFactor/>; a Memory depth attribute is
+            // absent in this dump -> 0 (ring-depth source flagged R5).
+            CHECK(d->strikes == 3, "Memory Strikes=3");
+            CHECK_NEAR(d->round_factor, 1.0, "Memory RoundFactor=1");
+            CHECK(d->memory == 0, "Memory depth attr absent -> 0");
+        }
+    }
+
+    std::printf("\n=== Decision-level keys: template inheritance ===\n");
+    {
+        // Same rule as animation_weights: locally-declared key wins, else
+        // inherit from the Template chain. Presence-based keys (UseDefense)
+        // inherit only when not locally present.
+        const std::string xml =
+            "<TacticsSettings><Tactics>"
+            "<Tactic Name=\"Base\" Type=\"Tabular\">"
+            "<UseDefense><BlockChance Base=\"0.3\"/></UseDefense>"
+            "<UseSafeAttackChance Base=\"0.4\"/>"
+            "<DodgeMissilesChance Base=\"0.7\"/>"
+            "<QuickAttacks><QuickAttackChance Animation=\"Throw\" Base=\"0.05\"/></QuickAttacks>"
+            "<ResponseDelay><Min Base=\"5\"/><Max Base=\"6\"/></ResponseDelay>"
+            "<ExpectedWait><Animation Name=\"Step\" Base=\"10\"/></ExpectedWait>"
+            "<Memory Strikes=\"3\" RoundFactor=\"1\"/>"
+            "</Tactic>"
+            "<Tactic Name=\"Child\" Template=\"Base\" Type=\"Tabular\">"
+            "<UseSafeAttackChance Base=\"0.9\"/>"
+            "</Tactic>"
+            "</Tactics></TacticsSettings>";
+        TacticSettings s;
+        CHECK(load_xml_string(s, xml, "resf2_tw_a2_inherit"), "inheritance XML loads");
+        const TacticDef* d = s.tactic("Child");
+        CHECK(d != nullptr, "tactic Child present");
+        if (d) {
+            CHECK_NEAR(d->use_safe_attack_chance.base, 0.9,
+                       "locally-declared chance wins over template");
+            CHECK_NEAR(d->dodge_missiles_chance.base, 0.7,
+                       "undeclared chance inherited from template");
+            CHECK(d->use_defense && d->block_chance.base > 0.29f,
+                  "UseDefense container inherited when not locally present");
+            CHECK(d->quick_attack_chances.size() == 1,
+                  "QuickAttacks entries inherited");
+            CHECK(d->response_delay.min == 5 && d->response_delay.max == 6,
+                  "ResponseDelay range inherited");
+            CHECK(d->expected_wait.size() == 1, "ExpectedWait list inherited");
+            CHECK(d->strikes == 3 && d->round_factor > 0.99f,
+                  "Memory Strikes/RoundFactor inherited");
+        }
+    }
+
+    std::printf("\n=== Decision-type validation (Strange tactic type) ===\n");
+    {
+        // [ORIGINAL] decision types: Tabular (default, incl. absent Type) and
+        // ExpectedWait; the binary rejects everything else with
+        // "Strange tactic type: %s" (PORT_GAPS.md:168-169).
+        const std::string xml =
+            "<TacticsSettings><Tactics>"
+            "<Tactic Name=\"OkTabular\" Type=\"Tabular\"><AnimationWeights><Animation Base=\"1\"/></AnimationWeights></Tactic>"
+            "<Tactic Name=\"OkDefault\"><AnimationWeights><Animation Base=\"1\"/></AnimationWeights></Tactic>"
+            "<Tactic Name=\"OkWait\" Type=\"ExpectedWait\"><AnimationWeights><Animation Base=\"1\"/></AnimationWeights></Tactic>"
+            "<Tactic Name=\"BadBogus\" Type=\"Bogus\"><AnimationWeights><Animation Base=\"1\"/></AnimationWeights></Tactic>"
+            "<Tactic Name=\"BadRandom\" Type=\"Random\"><AnimationWeights><Animation Base=\"1\"/></AnimationWeights></Tactic>"
+            "</Tactics></TacticsSettings>";
+        TacticSettings s;
+        CHECK(load_xml_string(s, xml, "resf2_tw_a2_types"), "type-validation XML loads");
+        CHECK(s.tactic("OkTabular") != nullptr, "Type=Tabular accepted");
+        CHECK(s.tactic("OkDefault") != nullptr, "absent Type accepted (Tabular default)");
+        CHECK(s.tactic("OkWait") != nullptr, "Type=ExpectedWait accepted");
+        CHECK(s.tactic("BadBogus") == nullptr, "Type=Bogus rejected (Strange tactic type)");
+        CHECK(s.tactic("BadRandom") == nullptr, "Type=Random rejected (Strange tactic type)");
+        CHECK(s.count() == 3, "only the 3 valid tactics loaded");
+    }
+
+    std::printf("\n=== Real assets: assets/tacticSettings.xml ===\n");
+    {
+        // Real-data consequence of the 2-type accept list (grep-verified
+        // 2026-07-31): 13 <Tactic> elements -> 12 unique names (duplicate
+        // Titan_Aggressive) -> 11 loaded, because Beginner (Type="Random")
+        // is rejected with the [ORIGINAL] "Strange tactic type: %s" print.
+        // If binary evidence later shows Random accepted, the accept-list
+        // change is one line + this count bumps to 12.
+        TacticSettings s;
+        CHECK(s.load("assets"), "real tacticSettings.xml loads");
+        CHECK(s.tactic("Standard") != nullptr, "Standard present");
+        CHECK(s.tactic("NoTables") != nullptr, "NoTables present");
+        CHECK(s.tactic("UseTables") != nullptr, "UseTables present");
+        CHECK(s.tactic("Beginner") == nullptr,
+              "Beginner (Type=Random) skipped per the 2-type accept list");
+        CHECK(s.count() == 11, "13 elements - 1 duplicate - 1 skipped = 11 tactics");
+        // Schema spot-pins against the real data: Standard has Template=
+        // UseTables and declares only AnimationWeights, so every decision key
+        // is inherited; NoTables declares its own EnemyResponseDelay range.
+        const TacticDef* std_t = s.tactic("Standard");
+        CHECK(std_t && std_t->use_defense &&
+              std_t->quick_attack_chances.size() == 2 &&
+              std_t->expected_wait.size() == 2,
+              "Standard inherits decision keys from UseTables");
+        const TacticDef* nt = s.tactic("NoTables");
+        CHECK(nt && nt->enemy_response_delay.min == 30 &&
+              nt->enemy_response_delay.max == 60,
+              "NoTables EnemyResponseDelay 30..60");
+        CHECK(nt && nt->strikes == 3, "NoTables Memory Strikes=3");
+    }
+
     std::printf("\n=== Summary: %d passed, %d failed ===\n", tests_passed, tests_failed);
     return tests_failed == 0 ? 0 : 1;
 }
