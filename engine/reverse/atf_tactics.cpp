@@ -5,6 +5,8 @@
 
 #include "atf_tactics.hpp"
 
+#include "zlib_blob.hpp"
+
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -13,40 +15,6 @@
 namespace resf2::reverse::atf {
 
 namespace {
-
-// Decompress a zlib stream. Returns the decompressed bytes.
-// Returns an empty vector on failure.
-[[nodiscard]] std::vector<std::byte> zlib_decompress(std::span<const std::byte> src) {
-    z_stream zs{};
-    zs.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(src.data()));
-    zs.avail_in = static_cast<uInt>(src.size());
-
-    if (inflateInit(&zs) != Z_OK) return {};
-
-    std::vector<std::byte> out;
-    out.resize(64 * 1024);
-    zs.next_out = reinterpret_cast<Bytef*>(out.data());
-    zs.avail_out = static_cast<uInt>(out.size());
-
-    int ret = Z_OK;
-    while (true) {
-        ret = inflate(&zs, Z_NO_FLUSH);
-        if (ret == Z_STREAM_END) break;
-        if (ret != Z_OK) {
-            inflateEnd(&zs);
-            return {};
-        }
-        if (zs.avail_out == 0) {
-            std::size_t old_size = out.size();
-            out.resize(old_size * 2);
-            zs.next_out = reinterpret_cast<Bytef*>(out.data() + old_size);
-            zs.avail_out = static_cast<uInt>(out.size() - old_size);
-        }
-    }
-    out.resize(out.size() - zs.avail_out);
-    inflateEnd(&zs);
-    return out;
-}
 
 // Read a null-terminated ASCII string from `data` starting at `offset`.
 // Updates `offset` to point past the null terminator.
@@ -142,7 +110,7 @@ auto parse(std::span<const std::byte> compressed)
         return std::unexpected(ParseError::kInputEmpty);
     }
 
-    auto decompressed = zlib_decompress(compressed);
+    auto decompressed = zlib_inflate(compressed);
     if (decompressed.empty()) {
         return std::unexpected(ParseError::kZlibDecompressFailed);
     }
