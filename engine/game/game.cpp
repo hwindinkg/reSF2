@@ -1570,6 +1570,15 @@ void Game::init_location() {
                 move_state_ = 10;  // special move state (non-interruptible)
                 start_stance_playing_ = true;
                 std::printf("[STANCE] Playing start stance (stance_2, %d frames)\n", fc);
+                // [A2] Enemy start stance (SOAK_TRIAGE.md A2): both fighters
+                // play the intro stance — the soak showed only the player in
+                // stance_2 while the enemy stood in fists_idle. The enemy
+                // renders this animation mirrored (enemy_facing_right_ is
+                // false, facing the player), and the AI block is gated during
+                // the intro (A1), so nothing overwrites the pose until the
+                // fight begins. The anim clock advances in the AI block.
+                enemy_anim_ = "stance_2";
+                enemy_anim_time_ = 0.0f;
             } else if (assets_->animations().count("stance_idle")) {
                 play_animation("stance_idle", true, 0);  // priority 0: idle (always interruptible)
             }
@@ -1745,9 +1754,12 @@ void Game::host_update_gameplay(uint32_t dt) {
         // start-stance phase the enemy takes no decisions and performs no
         // actions — no attack, step, block or hit before the intro phase
         // completes (the soak showed "[COMBAT] Enemy hit player" twice right
-        // after "[scene] enter Battle", before StartStance ended). The anim
-        // clock below still advances so the enemy's start-stance pose plays
-        // (A2), and the facing update keeps the stance mirrored correctly.
+        // after "[scene] enter Battle", before StartStance ended). The gate
+        // wraps the WHOLE stun/decide/execute chain — the executor consumes
+        // the stored decision every frame and would otherwise force the
+        // enemy into fists_idle during the intro. The anim clock below
+        // still advances so the enemy's start-stance pose plays (A2), and
+        // the facing update keeps the stance mirrored correctly.
         if (start_stance_playing_) {
             // Intro hold: the enemy stays in the start-stance pose set at
             // battle start (enemy_anim_ = "stance_2").
@@ -1846,7 +1858,6 @@ void Game::host_update_gameplay(uint32_t dt) {
                     ai_last_pick_ = "(no tactics)";
                 }
             }
-        }
         // Execute the stored decision (E2, ADR-005 Phase B): the decision's
         // animation name drives the enemy — attack animations open the
         // attack window (cooldown as before), steps move the enemy,
@@ -2031,6 +2042,7 @@ void Game::host_update_gameplay(uint32_t dt) {
             }
             if (enemy_attack_duration_ <= 0) enemy_attacking_ = false;
         }
+        }  // [A1] end of intro gate — the stun/decide/execute chain
         enemy_anim_time_ += dt_sec;
         // Face the player
         enemy_facing_right_ = (player_pos_x_ > enemy_pos_x_);

@@ -115,6 +115,55 @@ int main() {
         CHECK(ai_active, "A1: enemy AI active after the intro ends");
     }
 
+    // ---- A2: the enemy plays its start-stance animation during the intro ----
+    // The soak showed the player in stance_2 but the enemy standing in its
+    // idle pose ('anim='stance_2'' appears only in player MOVEMENT lines).
+    // Both fighters play the start stance in the original: during the battle
+    // intro the enemy's animation must be the start stance, not fists_idle.
+    {
+        resf2::test::HeadlessTestConfig config;
+        config.asset_root = "assets";
+        config.width = 1280;
+        config.height = 720;
+        config.fixed_dt_ms = 16;
+        config.start_scene = "battle";
+        config.hermetic = true;
+
+        resf2::test::HeadlessTestRunner runner(config);
+        if (!runner.init()) {
+            std::fprintf(stderr, "FAIL: A2 init() returned false\n");
+            return 1;
+        }
+        configure_battle(runner);
+
+        // Inside the intro window (stance_2, 52 frames at 20fps ~ 156
+        // engine frames) the enemy must be in its start-stance animation.
+        runner.run_frames(60);
+        CHECK(runner.game().host_get_start_stance(),
+              "A2: start-stance phase in progress at frame 60");
+        CHECK(runner.game().host_get_enemy_anim() == "stance_2",
+              "A2: enemy plays the start stance during the battle intro");
+
+        // Let the intro run to completion and hold (A6); the enemy must
+        // keep the stance pose until the fight begins.
+        runner.run_frames(150);
+        if (runner.game().host_get_start_stance()) {
+            CHECK(runner.game().host_get_enemy_anim() == "stance_2",
+                  "A2: enemy holds the start stance while the intro holds");
+        }
+
+        // Once the fight begins (first input) the AI drives the enemy away
+        // from the stance animation.
+        runner.tap_key(resf2::platform::Key::D, 2);
+        bool ai_driven = false;
+        for (int i = 0; i < 240 && !ai_driven; ++i) {
+            runner.run_frames(1);
+            ai_driven = !runner.game().host_get_ai_last_candidates().empty() &&
+                        runner.game().host_get_enemy_anim() != "stance_2";
+        }
+        CHECK(ai_driven, "A2: enemy leaves the stance once the AI runs");
+    }
+
     // ---- Final verdict ----
     if (tests_failed > 0 || failures > 0) {
         std::fprintf(stderr, "\n=== SOAK AI DEFECTS TEST FAILED (%d failures) ===\n",
