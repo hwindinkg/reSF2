@@ -4005,6 +4005,29 @@ void Game::host_update_gameplay(uint32_t dt) {
                             player_fighter_.hits_landed++;
                             combo_timer_ = 1.5f;
                             tutorial_bag_hits_++;
+                            // [Q2] A progress-counting hit must swing the bag.
+                            // This fallback counted the hit without touching
+                            // the Verlet nodes, so the bag hung motionless
+                            // while the tutorial advanced (SOAK_TRIAGE.md Q2:
+                            // "hits don't register visually, yet progress
+                            // counted"). Apply the move's impulse to every
+                            // collisible body edge, split 50/50 — the
+                            // fallback does not know which edge the attack
+                            // would have hit.
+                            const float imp_x = move_it->second.impulse_x;
+                            const float imp_y = move_it->second.impulse_y;
+                            if ((imp_x != 0.0f || imp_y != 0.0f) &&
+                                assets_->bag_model()) {
+                                const float dir = facing_right_ ? 1.0f : -1.0f;
+                                for (const auto& be : assets_->bag_model()->edges) {
+                                    if (!be.collisible) continue;
+                                    if (be.end1.empty() || be.end2.empty()) continue;
+                                    apply_bag_impulse(be.end1, dir * imp_x * 0.5f,
+                                                      imp_y * 0.5f);
+                                    apply_bag_impulse(be.end2, dir * imp_x * 0.5f,
+                                                      imp_y * 0.5f);
+                                }
+                            }
                             std::printf("[tutorial] bag hits (distance fallback): %d/3 dist=%.0f\n",
                                         tutorial_bag_hits_, dist_to_bag);
                             if (tutorial_bag_hits_ >= 3) {
