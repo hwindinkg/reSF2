@@ -465,7 +465,9 @@ set_tests_properties(test_full_battle PROPERTIES TIMEOUT 720)
 # TacticDecisionPipeline + adapter — asserts the F1 overlay stash is fed from
 # the DecisionTrace stage rows and enemy_ai_state_ is the adapter's state int.
 add_integration_test(test_enemy_ai_pipeline)
-set_tests_properties(test_enemy_ai_pipeline PROPERTIES TIMEOUT 120)
+# Soak A6: every section pre-rolls the 156-frame intro stance before tapping
+# input to break the hold — raise the ceiling for the longer scan windows.
+set_tests_properties(test_enemy_ai_pipeline PROPERTIES TIMEOUT 240)
 
 # Soak-fix Wave 1: behavioral battle tests for the SOAK_TRIAGE.md §1 AI/combat
 # defects (A1 intro gate, A2 enemy start stance, A6 stance hold).

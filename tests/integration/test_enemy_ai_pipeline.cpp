@@ -64,6 +64,18 @@ static void configure_battle(resf2::test::HeadlessTestRunner& runner) {
     runner.game().host_set_show_enemy(true);
 }
 
+// [Soak A6] End the battle intro: the start-stance phase (intro animation
+// plus the held stance) blocks the enemy AI until the player's first input.
+// The pipeline only starts deciding after the stance breaks, so every
+// "wait for the stash to fill" section must kick the intro first — the
+// input only breaks the HOLD, so the 52-frame stance animation (~156
+// engine frames at 16 ms) must complete before the tap lands.
+static void start_fight(resf2::test::HeadlessTestRunner& runner) {
+    runner.run_frames(170);  // intro animation (stance_2) to completion
+    runner.tap_key(resf2::platform::Key::D, 2);
+    runner.run_frames(10);
+}
+
 int main() {
     std::printf("=== Enemy AI Pipeline Wiring Test ===\n");
     std::fflush(stdout);
@@ -87,6 +99,7 @@ int main() {
             return 1;
         }
         configure_battle(runner);
+        start_fight(runner);
 
         // Run until the pipeline has fed the stash one full decision (the
         // seven stage rows), or give up. Decisions fire every
@@ -170,6 +183,7 @@ int main() {
             return 1;
         }
         configure_battle(runner);
+        start_fight(runner);
 
         // Wait for the first pipeline decision (the stash fills on frame 1).
         const int kMaxFrames = 300;
@@ -225,6 +239,7 @@ int main() {
         }
         configure_battle(runner);
         runner.game().host_unload_tactics();
+        start_fight(runner);
 
         const float x0 = runner.game().host_get_enemy_pos_x();
         bool saw_move = false;
@@ -275,6 +290,7 @@ int main() {
             return 1;
         }
         configure_battle(runner);
+        start_fight(runner);
 
         bool decided = false;
         const int kMaxFrames = 400;  // ~6.4 s

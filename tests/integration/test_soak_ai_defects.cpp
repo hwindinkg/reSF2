@@ -164,6 +164,55 @@ int main() {
         CHECK(ai_driven, "A2: enemy leaves the stance once the AI runs");
     }
 
+    // ---- A6: the player start stance persists until the first input ----
+    // The soak showed state=10 anim='stance_2' -> state=0 anim='stance_2' ->
+    // stance_idle right after the stance animation ended. The original
+    // holds the stance pose until the player interacts (round stage
+    // Je=1 StartStance -> Je=2 Fight): stance_idle must not start by
+    // itself, and the stance must break on the first input.
+    {
+        resf2::test::HeadlessTestConfig config;
+        config.asset_root = "assets";
+        config.width = 1280;
+        config.height = 720;
+        config.fixed_dt_ms = 16;
+        config.start_scene = "battle";
+        config.hermetic = true;
+
+        resf2::test::HeadlessTestRunner runner(config);
+        if (!runner.init()) {
+            std::fprintf(stderr, "FAIL: A6 init() returned false\n");
+            return 1;
+        }
+        configure_battle(runner);
+
+        // Let the 52-frame stance animation (~156 engine frames at 16ms)
+        // complete, then verify the stance HOLDS instead of dropping to
+        // stance_idle.
+        runner.run_frames(200);
+        CHECK(runner.game().host_get_start_stance(),
+              "A6: start stance still held after the stance animation ends");
+        CHECK(runner.game().host_get_player_anim() == "stance_2",
+              "A6: player still in the stance_2 pose (not stance_idle)");
+        const float x0 = runner.game().host_get_player_pos_x();
+
+        // No input — the stance must keep holding.
+        runner.run_frames(60);
+        CHECK(runner.game().host_get_start_stance(),
+              "A6: stance persists with no input");
+
+        // First input (hold forward) ends the stance and the fight begins.
+        runner.tap_key(resf2::platform::Key::D, 40);
+        CHECK(!runner.game().host_get_start_stance(),
+              "A6: first input ends the start stance");
+        bool moved = false;
+        for (int i = 0; i < 90 && !moved; ++i) {
+            runner.run_frames(1);
+            moved = std::fabs(runner.game().host_get_player_pos_x() - x0) > 1.0f;
+        }
+        CHECK(moved, "A6: player moves after the stance ends");
+    }
+
     // ---- Final verdict ----
     if (tests_failed > 0 || failures > 0) {
         std::fprintf(stderr, "\n=== SOAK AI DEFECTS TEST FAILED (%d failures) ===\n",
