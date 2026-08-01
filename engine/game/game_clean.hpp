@@ -1368,9 +1368,15 @@ private:
     }
 
     // Resolve a node name to world coordinates (handles BodyNode, SkelNode, MacroNode).
+    // Resolve a node name to world coordinates (handles BodyNode, SkelNode, MacroNode).
+    // [M5] The X mirror uses player_turn_blend_ (which eases toward the
+    // facing sign over ~8 frames) instead of the raw face_right sign, so a
+    // turn renders as a short rotation through edge-on instead of a one-frame
+    // snap. Outside a turn the blend sits at exactly ±1, so nothing changes.
     std::pair<float, float> resolve_body_node(const std::string& name,
                                               float world_cx, float world_cy,
                                               bool face_right, float pivot_local_y) {
+        (void)face_right;
         if (!assets_->body_model()) return {world_cx, world_cy};
 
         // Check if this node has an animated position (from .bin animation)
@@ -1403,7 +1409,7 @@ private:
             // idle poses floated 66-100 units above the floor and every
             // animation landed at a different height.
             float lx = ait->second.first, ly = ait->second.second;
-            float sx = (face_right ? lx : -lx) * 1.0f;
+            float sx = lx * player_turn_blend_;
             // [STEP 4.7] Apply gameplay Y offset on top of animation data.
             // The animation sets the base pose; gameplay_y_offset_ adds an
             // additional world-Y shift for knockback/knockdown effects.
@@ -1414,14 +1420,14 @@ private:
         auto bit = assets_->body_model()->nodes.find(name);
         if (bit != assets_->body_model()->nodes.end()) {
             float lx = bit->second.x, ly = bit->second.y;
-            float sx = (face_right ? lx : -lx) * 1.0f;
+            float sx = lx * player_turn_blend_;
             float sy = world_cy + (ly - pivot_local_y) * 1.0f;
             return {world_cx + sx, sy};
         }
         auto sit = assets_->skeleton_nodes().find(name);
         if (sit != assets_->skeleton_nodes().end()) {
             float lx = sit->second.x, ly = sit->second.y;
-            float sx = (face_right ? lx : -lx) * 1.0f;
+            float sx = lx * player_turn_blend_;
             float sy = world_cy + (ly - pivot_local_y) * 1.0f;
             return {world_cx + sx, sy};
         }
@@ -4569,6 +4575,11 @@ private:
     // every animated node's Y is measured from.
     float floor_world_y_ = 0.0f;
     bool facing_right_ = true;
+    // [M5] Deferred-turn state: the desired (opponent-facing) direction
+    // tracked per frame but applied only on a fresh movement input, and the
+    // previous frame's direction-input latch that detects the fresh press.
+    bool desired_facing_right_ = true;
+    bool prev_dir_input_ = false;
     // [M5] Visual turn blend for the player's render mirror: eases toward
     // the facing sign over a few frames so a turn reads as a short rotation
     // instead of a one-frame snap. ±1 = fully facing right/left.
