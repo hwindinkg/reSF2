@@ -149,7 +149,12 @@ void AnimationPlayer::update(
     // crossed the room — measured, -442.6 to -20.5. Pinning the anchor makes
     // the body move around the planted foot instead, which is what an attack
     // looks like. Steps declare no <Align> and are untouched.
-    if (!align_anchor_.empty()) {
+    // [M2] Whole-body-translate moves (rolls, dash, flips) must play their
+    // authored NPivot root motion RAW: their anchor travels with the body, so
+    // per-frame pinning would cancel the locomotion (back_roll measured at
+    // 13 px of its authored -350). is_root_motion_travel_anim — see
+    // animation_player.hpp.
+    if (!align_anchor_.empty() && !is_root_motion_travel_anim(current_anim_)) {
         int anchor_idx = -1;
         for (int i = 0; i < (int)ordered_node_names.size(); ++i)
             if (ordered_node_names[i] == align_anchor_) { anchor_idx = i; break; }

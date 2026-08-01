@@ -9,6 +9,24 @@
 
 namespace resf2::game {
 
+// [M2] Whole-body-translate moves (rolls, dash, flips): the authored NPivot
+// trajectory IS the locomotion — measured from the .bin data:
+//     forward_roll +404 (26f), back_roll -350 (31f), back_handflip -346 (34f),
+//     double_step_forward +220 (17f), front_flip +366 (35f), back_flip -335 (28f).
+// Their <Align> anchor travels WITH the body (anchor-relative offset stays
+// constant), so per-frame anchor pinning would cancel the motion entirely
+// (measured: back_roll pinned to 13 px — the soak's "~10 px" crawl) and the
+// one-shot placement would snap the fighter at roll start (forward_roll
+// snapped -38 px from idle). The original plants the anchor once at the
+// transition and then follows the animation data. These moves must play RAW.
+// jump is NOT here: it is a vertical hop whose X wobble is noise (zeroed in
+// game.cpp, M3); jump_away is authored mirrored, needing its pinning.
+inline bool is_root_motion_travel_anim(const std::string& name) {
+    return name == "forward_roll" || name == "back_roll" ||
+           name == "back_handflip" || name == "double_step_forward" ||
+           name == "front_flip" || name == "back_flip";
+}
+
 // ---------- Animation player ----------
 //
 // Encapsulates animation playback state and interpolation logic.
