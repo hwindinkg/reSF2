@@ -2751,7 +2751,13 @@ void Game::host_update_gameplay(uint32_t dt) {
     // movement specials (jump, duck, roll) are NEVER available during attack.
     // Exclude StartStance -- player should act immediately after intro.
     do {
-    if (!in_attack) {
+    // [M1] The duck must not gate the movement selector: it plays as a
+    // special (move_state 10, hit_anim_ > 0), so S held (duck) then A would
+    // otherwise never fire the back roll. The original allows movement
+    // specials out of the duck. Combat gating (the in_attack flag below)
+    // is untouched — this only opens jump/roll selection while ducking.
+    const bool ducking = (current_move_ == "Duck");
+    if (!in_attack || ducking) {
         // Trigger when ANY direction key is just pressed; use HELD keys for full direction.
         // This correctly handles W+left (A just pressed while W held) → "UpBack"
         bool any_dir_just_pressed =
@@ -2789,10 +2795,20 @@ void Game::host_update_gameplay(uint32_t dt) {
                 // Skip Titan moves (player is not a Titan)
                 if (move.template_name.find("Titan") != std::string::npos &&
                     move.template_name.find("NotTitan") == std::string::npos) continue;
-                // Match Jump moves or MOVE type (not Wall, not Punch/Kick)
                 if (move.template_name.find("Wall") != std::string::npos) continue;
-                if (!move.is_jump && move.move_type != "Jump" &&
-                    move.move_type != "MOVE" && !move.move_type.empty()) continue;
+                // Match Jump moves or MOVE type (not Wall, not Punch/Kick).
+                // [M1] The old whitelist (move_type in {Jump, MOVE, ""})
+                // rejected any move whose 4th template token is a modifier
+                // rather than a move type — BackRoll's Template
+                // "1key|DownBack|Retreat|NotTitan" parsed move_type="Retreat",
+                // so S+A could never fire from this selector: A-then-S (A
+                // held, then S) never rolled, and S-then-A only worked when
+                // both keys landed in the same frame from idle (the hardcoded
+                // roll block below). Type="ATTACK" is the real discriminator
+                // that keeps 1key attacks (HighPunch, HighKneeUp, ...) out of
+                // the movement selector — Retreat/Arms/etc. modifier moves
+                // are locomotion and must pass.
+                if (move.is_attack) continue;
                 // Weapon filter
                 if (!is_weapon_allowed(move)) continue;
                 // Check animation
