@@ -838,8 +838,6 @@ void Game::host_reset_round() {
     enemy_hit_flash_ = 0;
     combo_timer_ = 0;
     hit_sparks_.clear();
-    enemy_ai_timer_ = 0;
-    enemy_ai_state_ = 0;
     enemy_attack_cooldown_ = 0;
     enemy_attacking_ = false;
     // Reset block decision state for new round (FUN_10171d80 cooldown)
@@ -1726,40 +1724,39 @@ void Game::host_update_gameplay(uint32_t dt) {
     // Decay recent damage tracking (used by BlockChance DamageFactor)
     recent_damage_taken_ = std::max(0.0f, recent_damage_taken_ - dt_sec * 10.0f);
 
-    // [ORIGINAL] Enemy AI: simple state machine.
-    // States: 0=idle, 1=approach, 2=attack, 3=retreat, 4=block
-    // Decisions every 0.8s: based on distance to player + randomness.
+    // [ORIGINAL] Enemy AI decision loop, now fully pipeline-driven
+    // (ADR-005): the TacticDecisionPipeline decides on the ResponseDelay
+    // frame countdown and the executor below consumes the stored decision
+    // directly (Phase E deleted the legacy 0..4 state machine, the adapter
+    // and the invented decision interval).
     //
     // Only when there IS an enemy. This used to run whenever the fighters were
-    // alive, so in the dojo — where the opponent is a punching bag and
-    // show_enemy_ is false — an invisible sparring partner kept stepping,
+    // alive, so in the dojo - where the opponent is a punching bag and
+    // show_enemy_ is false - an invisible sparring partner kept stepping,
     // blocking and swinging, and its attack sound played out of nowhere. The
     // enemy is not drawn there and must not act there either.
     if (show_enemy_ && !enemy_fighter_.is_dead && !player_fighter_.is_dead) {
-        enemy_ai_timer_ += dt_sec;
         // [D3] One tick per AI frame: advances the TacticMemory interval
         // counters and the decay clock (frames stand in for the binary's
-        // fighter+0x71c hits-taken counter, MEMORY_INDEXING_R56.md §2).
+        // fighter+0x71c hits-taken counter, MEMORY_INDEXING_R56.md 2).
         combat_.mutable_enemy_tactic_memory().tick();
         enemy_attack_cooldown_ = std::max(0.0f, enemy_attack_cooldown_ - dt_sec);
         if (enemy_fighter_.hit_stun_time > 0) {
-            // Stunned — can't act
+            // Stunned - can't act
             enemy_anim_ = "fists_hit";
         } else {
             const TacticDef* td = tactics_.tactic("Standard");
             if (!td) td = tactics_.tactic("NoTables");
             float dist = std::abs(enemy_pos_x_ - player_pos_x_);
             const bool pipeline_ready = td && tactic_tables_.table_count() > 0;
-            // [D4] Re-entry gate split (ADR-005 D8): on the loaded path the
-            // pipeline re-enters only when the ResponseDelay frame countdown
-            // has elapsed (ticked per AI frame above; 0 = unblocked). The
-            // invented enemy_ai_decision_interval_ gate remains for the
-            // fallback paths only (deleted in Phase E).
-            const bool decision_due = pipeline_ready
-                ? combat_.enemy_tactic_memory().frames_until_next_decision == 0
-                : enemy_ai_timer_ >= enemy_ai_decision_interval_;
+            // [D4/E3] Re-entry gate (ADR-005 D8): the pipeline re-enters
+            // only when the ResponseDelay frame countdown has elapsed
+            // (ticked per AI frame above; 0 = unblocked). Phase E deleted
+            // the invented enemy_ai_decision_interval_ gate with the
+            // fallback branches.
+            const bool decision_due =
+                combat_.enemy_tactic_memory().frames_until_next_decision == 0;
             if (decision_due) {
-                enemy_ai_timer_ = 0;
                 if (pipeline_ready) {
                     // [D3] LIVE enemy AI runs through the TacticDecisionPipeline
                     // (ADR-005 D1/D7): the seven stages in the tracer's fixed
@@ -1825,60 +1822,17 @@ void Game::host_update_gameplay(uint32_t dt) {
                     // re-entry until it reaches 0.
                     combat_.mutable_enemy_tactic_memory().start_response_delay(
                         td->response_delay.min, td->response_delay.max, std::rand);
-                } else if (td) {
-                    // [HEURISTIC-TODO] tactics loaded but no table families
-                    // (assets/tactics missing) — keep the legacy roulette until
-                    // Phase E deletes this path.
-                    //
-                    // [ORIGINAL] Replaces the invented distance-threshold state
-                    // machine with tacticSettings.xml's roulette-wheel pick
-                    // (class `cc`, jL/iCa in sf2_beautified.js). Every candidate
-                    // *category* carries a curve weight evaluated against the
-                    // live fight state; the winner is a weighted-random draw.
-                    // See tactic_settings.hpp.
-                    //
-                    // The candidates are the abstract categories a bare-fists
-                    // enemy can perform. The original maps each category to a
-                    // concrete animation from the warrior's tables; until
-                    // warrior templates land (5.3) we map back onto the
-                    // placeholder's five states:
-                    //   ForwardStep -> approach   BackStep/Retreat -> retreat
-                    //   ShortAttack -> attack     Duck -> block   (default) -> idle
-                    TacticContext ctx;
-                    ctx.distance = dist;                       // world points
-                    ctx.health = (player_fighter_.max_health > 0)
-                        ? enemy_fighter_.health / player_fighter_.max_health : 1.0f;
-                    ctx.enemy_health = (player_fighter_.max_health > 0)
-                        ? player_fighter_.health / player_fighter_.max_health : 1.0f;
-                    ctx.hits = (float)enemy_fighter_.hits_landed;
-
-                    static const std::vector<std::string> kCandidates = {
-                        "ForwardStep", "ShortAttack", "BackStep", "Retreat", "Duck"
-                    };
-                    std::vector<float> weights;
-                    int pick = tactics_.choose_debug(*td, kCandidates, ctx, weights);
-
-                    // Stash for the F1 overlay.
-                    ai_last_candidates_ = kCandidates;
-                    ai_last_weights_ = weights;
-                    ai_last_distance_ = dist;
-                    ai_last_pick_ = (pick >= 0) ? kCandidates[(size_t)pick] : "(none)";
-
-                    if (pick < 0) {
-                        enemy_ai_state_ = 0;  // idle
-                    } else {
-                        const std::string& cat = kCandidates[(size_t)pick];
-                        if (cat == "ForwardStep")      enemy_ai_state_ = 1;  // approach
-                        else if (cat == "ShortAttack") enemy_ai_state_ = 2;  // attack
-                        else if (cat == "BackStep" ||
-                                 cat == "Retreat")     enemy_ai_state_ = 3;  // retreat
-                        else if (cat == "Duck")        enemy_ai_state_ = 4;  // block
-                        else                           enemy_ai_state_ = 0;  // idle
-                    }
                 } else {
-                    // [HEURISTIC-TODO] tacticSettings.xml missing — fall back
-                    // to a neutral approach so the enemy is not frozen.
-                    enemy_ai_state_ = (dist > 200) ? 1 : 2;
+                    // [E3] No settings (or no table families): a traced
+                    // idle/wait decision - the enemy stays neutral (no
+                    // movement/attack/block) until settings load (ADR P4,
+                    // GATE GE: the legacy roulette and the random-roll
+                    // fallback branches were deleted here). The stash keeps
+                    // the F1 overlay truthful: one "Idle" row, no weights.
+                    ai_last_decision_ = TacticDecision{};
+                    ai_last_candidates_.assign({"Idle"});
+                    ai_last_weights_.assign({0.0f});
+                    ai_last_distance_ = dist;
                     ai_last_pick_ = "(no tactics)";
                 }
             }
@@ -2083,8 +2037,6 @@ void Game::host_update_gameplay(uint32_t dt) {
             enemy_hit_flash_ = 0;
             combo_timer_ = 0;
             hit_sparks_.clear();
-            enemy_ai_timer_ = 0;
-            enemy_ai_state_ = 0;
             enemy_attack_cooldown_ = 0;
             enemy_attacking_ = false;
             // Reset positions
@@ -2117,8 +2069,6 @@ void Game::host_update_gameplay(uint32_t dt) {
         // and resumed from them the next time he was called back.
         enemy_fighter_ = FighterState{};
         rebuild_fighter_attributes();  // FighterState{} wipes the maps
-        enemy_ai_timer_ = 0.0f;
-        enemy_ai_state_ = 0;
         enemy_attack_cooldown_ = 0.0f;
         enemy_attacking_ = false;
         enemy_attack_duration_ = 0.0f;
