@@ -42,6 +42,7 @@
 #include "location_manager.hpp"
 #include "asset_manager.hpp"
 #include "tactic_settings.hpp"
+#include "tactic_tables.hpp"
 #include "animation_player.hpp"
 #include "combat.hpp"
 #include "condition_system.hpp"
@@ -403,6 +404,19 @@ float host_enemy_health_frac() const override;
     float dbg_last_block_factor() const { return dbg_last_block_factor_; }
     float dbg_last_final_damage() const { return dbg_last_final_damage_; }
     const std::string& dbg_last_move_name() const { return dbg_last_move_name_; }
+
+    // ---- D3 probes: the last enemy-AI pipeline decision ----
+    // Read-only view of the F1 overlay stash + the legacy state the executor
+    // consumed, for the battle-level wiring test (test_enemy_ai_pipeline).
+    int host_get_enemy_ai_state() const { return enemy_ai_state_; }
+    const std::string& host_get_ai_last_pick() const { return ai_last_pick_; }
+    const std::vector<std::string>& host_get_ai_last_candidates() const {
+        return ai_last_candidates_;
+    }
+    const std::vector<float>& host_get_ai_last_weights() const {
+        return ai_last_weights_;
+    }
+    float host_get_ai_last_distance() const { return ai_last_distance_; }
 
 void host_reset_round() override;
 
@@ -2692,6 +2706,10 @@ private:
     // [ORIGINAL] The roulette-wheel weight model - see tactic_settings.hpp.
     void load_tactics() {
         tactics_.load(asset_root_);
+        // [D3] Table families (assets/tactics/*.atf, ...) for the
+        // TacticDecisionPipeline's stage tables + adapter classification.
+        // A missing directory is NOT an error — the set stays partial.
+        tactic_tables_.load(asset_root_);
         // Wire tactic settings to combat system for AI decision making
         combat_.set_tactic_settings(&tactics_);
     }
@@ -4567,6 +4585,10 @@ private:
     // [ORIGINAL] Enemy AI weight tables (tacticSettings.xml). Drives the
     // roulette-wheel animation pick that replaced the invented state machine.
     TacticSettings tactics_;
+    // [D3] Table families (assets/tactics) for the TacticDecisionPipeline
+    // (ADR-005 D1/D7): stage tables + the adapter's candidate classification.
+    // Loaded beside tactics_ in load_tactics(); empty set = no tables.
+    TacticTableSet tactic_tables_;
     // Last roulette decision, kept for the F1 debug overlay.
     std::string ai_last_pick_;                        // chosen category
     std::vector<std::string> ai_last_candidates_;     // parallel to weights
