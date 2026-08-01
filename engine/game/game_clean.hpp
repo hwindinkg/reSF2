@@ -447,6 +447,21 @@ float host_enemy_health_frac() const override;
     int host_get_player_move_state() const { return move_state_; }
     float host_get_player_pos_y() const { return player_pos_y_; }
     float host_get_player_turn_blend() const { return player_turn_blend_; }
+    // ---- Soak-fix Wave 3 probes (SOAK_TRIAGE.md §3, §7) ----
+    // Q1/Q2/Q3 tutorial-state + punching-bag probes and the L1 map-log gate
+    // for the dojo/quest defect tests (test_soak_quest_defects). Read-only
+    // where possible; host_set_tutorial_state is a test seam that restores
+    // a mid-tutorial save (the machine save sits at COMPLETE).
+    bool host_get_movement_hint_visible() const {
+        return !intro_hint_dismissed_ && overlay_ == Overlay::Dialog;
+    }
+    void host_set_tutorial_state(std::string s) { tutorial_state_ = std::move(s); }
+    int host_get_tutorial_bag_hits() const { return tutorial_bag_hits_; }
+    float host_get_bag_displacement() const { return bag_displacement(); }
+    float host_get_y_adjust() const { return y_adjust_smoothed_; }
+    resf2::scene::SceneId host_get_current_scene() const {
+        return scene_manager_.current_id();
+    }
     // [E3] Test hook: drop the tactic settings + table families so the
     // battle runs the no-settings path (ADR P4: settings absent -> neutral
     // enemy, traced idle/wait decision — the Phase E pin test).
