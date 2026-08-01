@@ -151,6 +151,83 @@ int main() {
             g.host_get_ai_last_distance());
     }
 
+    // ---- E2: the executor consumes the stored TacticDecision directly ----
+    // (ADR-005 Phase B) The loaded path no longer writes the legacy
+    // enemy_ai_state_ int — the execute block switches on the stored
+    // decision instead (the adapter is bypassed; Phase E deletes both).
+    // Strangler pin: while decisions with a classifiable animation fire
+    // (attack/step/defense names, the D7 mapping rows), the legacy state
+    // probe must stay at its reset value 0. RED on the D3-era code (the
+    // adapter wrote the mapped state here), GREEN once the executor
+    // consumes the decision directly.
+    {
+        resf2::test::HeadlessTestConfig config;
+        config.asset_root = "assets";
+        config.width = 1280;
+        config.height = 720;
+        config.fixed_dt_ms = 16;
+        config.start_scene = "battle";
+        config.hermetic = true;
+
+        resf2::test::HeadlessTestRunner runner(config);
+        if (!runner.init()) {
+            std::fprintf(stderr, "FAIL: E2 init() returned false\n");
+            return 1;
+        }
+        configure_battle(runner);
+
+        // Wait for the first pipeline decision (the stash fills on frame 1).
+        const int kMaxFrames = 300;
+        for (int i = 0; i < kMaxFrames; ++i) {
+            runner.run_frames(1);
+            if (runner.game().host_get_ai_last_candidates().size() >= 7) break;
+        }
+
+        int state_when_decided = -1;
+        bool saw_acting_decision = false;
+        const int kScanFrames = 600;
+        for (int i = 0; i < kScanFrames; ++i) {
+            runner.run_frames(1);
+            const std::string& p = runner.game().host_get_ai_last_pick();
+            if (p == "Idle" || p == "(no tactics)") continue;
+            // pick = "<Stage>/<animation>"; classify the animation with the
+            // D7 mapping names (attack/step/defense rows).
+            const std::size_t slash = p.rfind('/');
+            const std::string anim = (slash == std::string::npos)
+                ? p : p.substr(slash + 1);
+            if (anim == "ShortAttack" || anim == "ForwardStep" ||
+                anim == "BackStep" || anim == "Retreat" ||
+                anim == "Duck" || anim == "Block" ||
+                anim == "CounterAttack" || anim == "Dodge") {
+                saw_acting_decision = true;
+                state_when_decided = runner.game().host_get_enemy_ai_state();
+                break;
+            }
+        }
+        CHECK(saw_acting_decision,
+              "a decision with a classifiable animation fires within the horizon");
+        CHECK(state_when_decided == 0,
+              "loaded path leaves enemy_ai_state_ untouched (executor consumes the decision)");
+
+        // An attack decision drives the attack window exactly as the legacy
+        // state-2 path did: high_punch + the attacking flag (cooldown gate
+        // preserved). The pipeline re-decides every frame (shipped
+        // ResponseDelay 0/0), so an attack lands within the horizon with
+        // overwhelming probability.
+        bool saw_attack_execution = false;
+        const int kAttackScanFrames = 600;
+        for (int i = 0; i < kAttackScanFrames; ++i) {
+            runner.run_frames(1);
+            if (runner.game().host_get_enemy_attacking() &&
+                runner.game().host_get_enemy_anim() == "high_punch") {
+                saw_attack_execution = true;
+                break;
+            }
+        }
+        CHECK(saw_attack_execution,
+              "attack decision -> high_punch + attacking flag (direct consumption)");
+    }
+
     // ---- D4: ResponseDelay countdown gates loaded-path re-entry ----
     {
         resf2::test::HeadlessTestConfig config;
