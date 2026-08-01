@@ -106,18 +106,19 @@ static void run_until_idle_settled(resf2::test::HeadlessTestRunner& r) {
 static resf2::test::HeadlessTestRunner make_dojo_runner() {
     resf2::test::HeadlessTestConfig config;
     config.asset_root = "assets";
-    config.width = 1280;
-    config.height = 720;
+    config.width = 320;
+    config.height = 180;
     config.fixed_dt_ms = 16;
     config.hermetic = true;  // no save load, no tutorial dialogue
     return resf2::test::HeadlessTestRunner(config);
 }
 
-// Every scenario starts with the battle intro: the 52-frame start-stance
-// animation (stance_2, 156 engine frames at 16 ms) must finish before the
-// A6 hold can be broken, and the break-input's own step must play out.
+// Every scenario starts with the battle intro: the start-stance animation
+// must run to completion before the A6 hold can be broken. In the dojo the
+// stance plays after a 10 fps animation, so its hit_anim_ countdown runs to
+// ~325 engine frames; the break-input's own step then plays out.
 static void warm_up(resf2::test::HeadlessTestRunner& r) {
-    r.run_frames(210);              // intro stance animation runs to completion
+    r.run_frames(330);              // intro stance animation runs to completion
     r.tap_key(plat::Key::D, 2);     // first input ends the A6 hold
     run_until_idle_settled(r);
 }
