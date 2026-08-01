@@ -467,6 +467,11 @@ set_tests_properties(test_full_battle PROPERTIES TIMEOUT 720)
 add_integration_test(test_enemy_ai_pipeline)
 set_tests_properties(test_enemy_ai_pipeline PROPERTIES TIMEOUT 120)
 
+# Soak-fix Wave 1: behavioral battle tests for the SOAK_TRIAGE.md §1 AI/combat
+# defects (A1 intro gate, A2 enemy start stance, A6 stance hold).
+add_integration_test(test_soak_ai_defects)
+set_tests_properties(test_soak_ai_defects PROPERTIES TIMEOUT 120)
+
 # Phase 5: Screenshot comparison — renders headlessly, compares against
 # reference PNGs using MSE, and saves diff images on failure.
 add_integration_test(test_screenshot_compare)

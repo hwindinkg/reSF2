@@ -432,6 +432,14 @@ float host_enemy_health_frac() const override;
     const TacticDecision& host_get_enemy_last_decision() const {
         return ai_last_decision_;
     }
+    // ---- Soak-fix Wave 1 probes (SOAK_TRIAGE.md §1) ----
+    // Read-only player/intro state for the behavioral battle tests
+    // (test_soak_ai_defects): the start-stance phase flag, the player's
+    // animation name and world X — the A1 intro gate, A2 enemy stance and
+    // A6 stance-hold assertions read these.
+    bool host_get_start_stance() const { return start_stance_playing_; }
+    const std::string& host_get_player_anim() const { return current_anim_; }
+    float host_get_player_pos_x() const { return player_pos_x_; }
     // [E3] Test hook: drop the tactic settings + table families so the
     // battle runs the no-settings path (ADR P4: settings absent -> neutral
     // enemy, traced idle/wait decision — the Phase E pin test).
