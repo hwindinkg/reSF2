@@ -515,6 +515,7 @@ void Game::host_reset_menu_state() {
         dialog_overlay_anim_ = 0.0f;  // restart unroll animation
         overlay_show_frames_ = 0;     // reset grace period
         hint_start_player_x_ = player_pos_x_;  // track start position
+        tutorial_move_steps_ = 0;     // [Q1] count steps from hint appearance
     } else {
         // Dialog hasn't played yet — no hint scroll.
         overlay_ = Overlay::None;
@@ -1652,6 +1653,17 @@ void Game::host_update_gameplay(uint32_t dt) {
     const auto& input = platform_->input();
     float dt_sec = (float)dt / 1000.0f;
 
+    // [Q1] Quest movement stage: count step events — a step begins when the
+    // movement state ENTERS a moving state (1 = back, 2 = forward). The
+    // counter is reset when the hint scroll appears (host_reset_menu_state).
+    // [HEURISTIC-TODO] The original requires "a few steps (forward/back)";
+    // kTutorialMoveSteps = 4 is the behavioural reading, not binary-verified.
+    if (move_state_ == 1 || move_state_ == 2) {
+        if (last_step_state_ != 1 && last_step_state_ != 2)
+            ++tutorial_move_steps_;
+    }
+    last_step_state_ = move_state_;
+
     // [ORIGINAL] Auto-trigger the Sensei tutorial dialog on first dojo entry.
     // The dialog is queued by check_tutorial() during loading; this fires the
     // scene transition on the first gameplay frame so the player sees the dojo
@@ -2282,21 +2294,24 @@ void Game::host_update_gameplay(uint32_t dt) {
     }
 
     // [ORIGINAL] The intro scroll asks the player to move; it goes away the
-    // moment they ACTUALLY move (position changes), and does not come back.
-    // Keyed on real displacement rather than key presses so it reads as an
-    // instruction that was followed. The original quest system checks the
-    // character's world position, not input state.
+    // moment they have taken a few steps, and does not come back.
+    // [Q1] The quest movement stage must NOT complete on a single press:
+    // one step is ~50 units, and the old displacement>25 check dismissed
+    // the hint mid-stride on the FIRST d press. The original requires a
+    // few steps (forward/back); the stage completes after
+    // kTutorialMoveSteps step events (each press that starts a step counts,
+    // including direction changes mid-walk).
+    // [HEURISTIC-TODO] The original's exact step count is not
+    // binary-verified; 4 steps is the behavioural reading.
     // Grace period: require 30 frames (~0.5s) before dismissal to prevent
     // accidental trigger from keys held during the preceding dialog scene.
     if (!intro_hint_dismissed_ && overlay_ == Overlay::Dialog &&
         overlay_show_frames_ > 30) {
-        // Check if the player has actually MOVED (position changed by a
-        // meaningful threshold). A single step_forward moves ~50 units.
-        float displacement = std::abs(player_pos_x_ - hint_start_player_x_);
-        if (displacement > 25.0f) {
+        if (tutorial_move_steps_ >= kTutorialMoveSteps) {
             intro_hint_dismissed_ = true;
             overlay_ = Overlay::None;
-            std::printf("[tutorial] hint scroll dismissed (player moved %.0f units)\n", displacement);
+            std::printf("[tutorial] hint scroll dismissed after %d step events\n",
+                        tutorial_move_steps_);
             // [ORIGINAL] After the hint scroll is dismissed, trigger the next
             // tutorial step (punchbag dialog). The original quest system chains
             // these automatically via quest events.

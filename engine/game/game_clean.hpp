@@ -4553,6 +4553,12 @@ private:
     uint32_t overlay_show_frames_ = 0;
     // Tutorial bag hit counter: advances tutorial after N bag hits.
     int tutorial_bag_hits_ = 0;
+    // [Q1] Steps taken since the movement hint appeared. The quest movement
+    // stage completes after kTutorialMoveSteps step events (a step begins
+    // when the movement state enters MOVING), not on the first press.
+    static constexpr int kTutorialMoveSteps = 4;
+    int tutorial_move_steps_ = 0;
+    int last_step_state_ = 0;
     // Player X position when the hint scroll appeared. Used to verify the
     // player ACTUALLY moved (position changed) before dismissing the hint.
     float hint_start_player_x_ = 0.0f;
