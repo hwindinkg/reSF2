@@ -112,6 +112,9 @@ private:
     int fight_power_ = 0;
 
     bool want_centre_ = false;   // pan the sheet onto the selection next render
+    // [L1] Last "[MAP] round_progress" line printed, so the per-frame
+    // progress log only emits when the state actually changed.
+    std::string last_round_progress_log_;
     // Hit boxes {x, y, w, h} of the nodes as last drawn. Computed in
     // on_render, where the map transform is known, and read by on_update.
     std::vector<std::array<float, 4>> node_hit_;
