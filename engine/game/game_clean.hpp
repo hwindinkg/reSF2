@@ -407,9 +407,10 @@ float host_enemy_health_frac() const override;
     const std::string& dbg_last_move_name() const { return dbg_last_move_name_; }
 
     // ---- D3 probes: the last enemy-AI pipeline decision ----
-    // Read-only view of the F1 overlay stash + the legacy state the executor
-    // consumed, for the battle-level wiring test (test_enemy_ai_pipeline).
-    int host_get_enemy_ai_state() const { return enemy_ai_state_; }
+    // Read-only view of the F1 overlay stash + the stored decision the
+    // executor consumed, for the battle-level wiring test
+    // (test_enemy_ai_pipeline). Phase E deleted the legacy enemy_ai_state_
+    // int probe with the FSM.
     const std::string& host_get_ai_last_pick() const { return ai_last_pick_; }
     const std::vector<std::string>& host_get_ai_last_candidates() const {
         return ai_last_candidates_;
@@ -426,8 +427,17 @@ float host_enemy_health_frac() const override;
     // with the legacy FSM).
     const std::string& host_get_enemy_anim() const { return enemy_anim_; }
     bool host_get_enemy_attacking() const { return enemy_attacking_; }
+    bool host_get_enemy_blocking() const { return enemy_fighter_.is_blocking; }
+    float host_get_enemy_pos_x() const { return enemy_pos_x_; }
     const TacticDecision& host_get_enemy_last_decision() const {
         return ai_last_decision_;
+    }
+    // [E3] Test hook: drop the tactic settings + table families so the
+    // battle runs the no-settings path (ADR P4: settings absent -> neutral
+    // enemy, traced idle/wait decision — the Phase E pin test).
+    void host_unload_tactics() {
+        tactics_ = TacticSettings{};
+        tactic_tables_ = TacticTableSet{};
     }
 
     // ---- D4 probes: the ResponseDelay gate + fallback interval ----
@@ -441,12 +451,6 @@ float host_enemy_health_frac() const override;
     }
     int host_get_enemy_reaction_countdown() const {
         return combat_.enemy_tactic_memory().enemy_reaction_frames;
-    }
-    float host_get_enemy_ai_decision_interval() const {
-        return enemy_ai_decision_interval_;
-    }
-    void host_set_enemy_ai_decision_interval(float v) {
-        enemy_ai_decision_interval_ = v;
     }
 
 void host_reset_round() override;
@@ -4225,9 +4229,6 @@ private:
     // Reference aliases below make existing code work without changes.
     FighterState& player_fighter_ = combat_.player_fighter();
     FighterState& enemy_fighter_ = combat_.enemy_fighter();
-    float& enemy_ai_timer_ = combat_.mutable_enemy_ai_timer();
-    float& enemy_ai_decision_interval_ = combat_.mutable_enemy_ai_decision_interval();
-    int& enemy_ai_state_ = combat_.mutable_enemy_ai_state();
     float& enemy_attack_cooldown_ = combat_.mutable_enemy_attack_cooldown();
     float& player_hit_flash_ = combat_.mutable_player_hit_flash();
     float& enemy_hit_flash_ = combat_.mutable_enemy_hit_flash();

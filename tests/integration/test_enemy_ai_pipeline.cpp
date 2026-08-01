@@ -1,29 +1,29 @@
 // tests/integration/test_enemy_ai_pipeline.cpp
 //
-// GAP-4 Phase D steps D3+D4 — the LIVE enemy-AI decision branch runs through
-// the TacticDecisionPipeline + TacticDecisionAdapter (ADR-005 D1/D7), and
-// re-entry on the loaded path is gated by the ResponseDelay frame countdown
-// (ADR-005 D8), NOT the invented enemy_ai_decision_interval_ (strangler:
-// the interval remains the fallback-paths gate until Phase E).
+// GAP-4 Phase D+E — the LIVE enemy-AI decision branch runs through the
+// TacticDecisionPipeline (ADR-005 D1/D7): re-entry on the loaded path is
+// gated by the ResponseDelay frame countdown (ADR-005 D8), and Phase E
+// deleted the TacticDecisionAdapter, the legacy enemy_ai_state_ int and the
+// invented enemy_ai_decision_interval_ (the countdown is the ONLY gate).
 //
 // With the pipeline wired, the F1 overlay stash (ai_last_candidates_ /
 // ai_last_weights_ / ai_last_distance_ / ai_last_pick_, ADR C5) is fed from
-// the DecisionTrace + adapter result: the candidate rows are the SEVEN stage
-// line-groups in the tracer's fixed order (UseDefense .. UseCautiousMovements)
-// instead of the legacy roulette categories ("ForwardStep", "ShortAttack",
-// ...), and enemy_ai_state_ is the adapter's legacy state int the executor
-// reads (0..4).
+// the DecisionTrace: the candidate rows are the SEVEN stage line-groups in
+// the tracer's fixed order (UseDefense .. UseCautiousMovements) instead of
+// the legacy roulette categories ("ForwardStep", "ShortAttack", ...), and
+// the execute block consumes the stored TacticDecision directly (E2).
 //
 // This test is the wiring canary: it FAILS on the D2-era code (roulette
 // stash) and passes once the live block routes through decide().
 //
-// The D4 section is the gate canary: with the decision interval sabotaged to
-// 1000 s the loaded path MUST still decide (its gate is the countdown, which
-// starts at 0 = unblocked). On the D3 gate (interval on every path) no
-// decision ever happens inside the horizon — RED. The countdown window
+// The D4 section is the gate canary: the loaded path decides through the
+// ResponseDelay countdown (starts at 0 = unblocked). The countdown window
 // contract (roll within [Min,Max], tick to exactly 0, no re-entry before 0)
 // is pinned both against the SHIPPED tactic data (ResponseDelay 0/0,
 // EnemyResponseDelay 30/60) and at the TacticMemory mechanism level.
+// The E3 section pins the no-settings path (ADR P4 / GATE GE): settings
+// absent -> traced idle/wait decision, neutral enemy, no rand()%100
+// roulette anywhere.
 
 #include "../headless_test_runner.hpp"
 
@@ -104,7 +104,6 @@ int main() {
         const auto& g = runner.game();
         const std::vector<std::string>& cand = g.host_get_ai_last_candidates();
         const std::vector<float>& weights = g.host_get_ai_last_weights();
-        const int st = g.host_get_enemy_ai_state();
         const std::string& pick = g.host_get_ai_last_pick();
 
         if (!decided) {
@@ -135,10 +134,7 @@ int main() {
             // must stay parallel (ADR C5).
             CHECK(cand.size() == weights.size(), "candidates/weights parallel");
 
-            // The adapter result is the legacy state int the executor reads.
-            CHECK(st >= 0 && st <= 4, "enemy_ai_state_ in legacy range 0..4");
-
-            // The pick is the winning stage (+ adapter animation).
+            // The pick is the winning stage (+ animation).
             CHECK(!pick.empty(), "ai_last_pick_ non-empty");
 
             // The overlay shows the ctx.distance that drove the decision.
@@ -146,20 +142,19 @@ int main() {
         }
 
         std::fprintf(stderr,
-            "Decided=%d candidates=%zu state=%d pick='%s' dist=%.0f\n",
-            decided ? 1 : 0, cand.size(), st, pick.c_str(),
+            "Decided=%d candidates=%zu pick='%s' dist=%.0f\n",
+            decided ? 1 : 0, cand.size(), pick.c_str(),
             g.host_get_ai_last_distance());
     }
 
     // ---- E2: the executor consumes the stored TacticDecision directly ----
-    // (ADR-005 Phase B) The loaded path no longer writes the legacy
-    // enemy_ai_state_ int — the execute block switches on the stored
-    // decision instead (the adapter is bypassed; Phase E deletes both).
-    // Strangler pin: while decisions with a classifiable animation fire
-    // (attack/step/defense names, the D7 mapping rows), the legacy state
-    // probe must stay at its reset value 0. RED on the D3-era code (the
-    // adapter wrote the mapped state here), GREEN once the executor
-    // consumes the decision directly.
+    // (ADR-005 Phase B) The execute block switches on the stored decision
+    // (E3 deleted the legacy enemy_ai_state_ int, the adapter and the
+    // fallback branches). An attack decision drives the attack window
+    // exactly as the legacy state-2 path did: high_punch + the attacking
+    // flag (cooldown gate preserved). The pipeline re-decides every frame
+    // (shipped ResponseDelay 0/0), so an attack lands within the horizon
+    // with overwhelming probability.
     {
         resf2::test::HeadlessTestConfig config;
         config.asset_root = "assets";
@@ -183,32 +178,11 @@ int main() {
             if (runner.game().host_get_ai_last_candidates().size() >= 7) break;
         }
 
-        int state_when_decided = -1;
-        bool saw_acting_decision = false;
-        const int kScanFrames = 600;
-        for (int i = 0; i < kScanFrames; ++i) {
-            runner.run_frames(1);
-            const std::string& p = runner.game().host_get_ai_last_pick();
-            if (p == "Idle" || p == "(no tactics)") continue;
-            // pick = "<Stage>/<animation>"; classify the animation with the
-            // D7 mapping names (attack/step/defense rows).
-            const std::size_t slash = p.rfind('/');
-            const std::string anim = (slash == std::string::npos)
-                ? p : p.substr(slash + 1);
-            if (anim == "ShortAttack" || anim == "ForwardStep" ||
-                anim == "BackStep" || anim == "Retreat" ||
-                anim == "Duck" || anim == "Block" ||
-                anim == "CounterAttack" || anim == "Dodge") {
-                saw_acting_decision = true;
-                state_when_decided = runner.game().host_get_enemy_ai_state();
-                break;
-            }
-        }
-        CHECK(saw_acting_decision,
-              "a decision with a classifiable animation fires within the horizon");
-        CHECK(state_when_decided == 0,
-              "loaded path leaves enemy_ai_state_ untouched (executor consumes the decision)");
-
+        // An attack decision drives the attack window exactly as the legacy
+        // state-2 path did: high_punch + the attacking flag (cooldown gate
+        // preserved). The pipeline re-decides every frame (shipped
+        // ResponseDelay 0/0), so an attack lands within the horizon with
+        // overwhelming probability.
         // An attack decision drives the attack window exactly as the legacy
         // state-2 path did: high_punch + the attacking flag (cooldown gate
         // preserved). The pipeline re-decides every frame (shipped
@@ -228,7 +202,64 @@ int main() {
               "attack decision -> high_punch + attacking flag (direct consumption)");
     }
 
+    // ---- E3: settings absent -> traced idle/wait decision, neutral enemy ----
+    // (ADR P4 / GATE GE, supervisor requiredChange) With no tacticSettings
+    // (and no table families) the enemy must not move, attack or block: the
+    // stored decision is the idle wait, the stash shows "(no tactics)", and
+    // no rand()%100 roulette remains (GATE GE grep). RED on the pre-E3
+    // fallback (the enemy approached or attacked), GREEN once the fallback
+    // branch is deleted.
+    {
+        resf2::test::HeadlessTestConfig config;
+        config.asset_root = "assets";
+        config.width = 1280;
+        config.height = 720;
+        config.fixed_dt_ms = 16;
+        config.start_scene = "battle";
+        config.hermetic = true;
+
+        resf2::test::HeadlessTestRunner runner(config);
+        if (!runner.init()) {
+            std::fprintf(stderr, "FAIL: E3 init() returned false\n");
+            return 1;
+        }
+        configure_battle(runner);
+        runner.game().host_unload_tactics();
+
+        const float x0 = runner.game().host_get_enemy_pos_x();
+        bool saw_move = false;
+        bool saw_attack = false;
+        bool saw_block = false;
+        bool saw_non_idle_anim = false;
+        const int kObserveFrames = 300;  // 5 s — several 0.8 s fallback windows
+        for (int i = 0; i < kObserveFrames; ++i) {
+            runner.run_frames(1);
+            if (runner.game().host_get_enemy_pos_x() != x0) saw_move = true;
+            if (runner.game().host_get_enemy_attacking()) saw_attack = true;
+            if (runner.game().host_get_enemy_blocking()) saw_block = true;
+            if (runner.game().host_get_enemy_anim() != "fists_idle") {
+                saw_non_idle_anim = true;
+            }
+        }
+
+        const resf2::game::TacticDecision& d =
+            runner.game().host_get_enemy_last_decision();
+        CHECK(d.stage == resf2::game::DecisionStage::kIdle &&
+                  d.animation.empty(),
+              "settings absent -> traced idle/wait decision");
+        CHECK(runner.game().host_get_ai_last_pick() == "(no tactics)",
+              "settings absent -> stash pick '(no tactics)'");
+        CHECK(!saw_attack, "settings absent -> enemy never attacks");
+        CHECK(!saw_block, "settings absent -> enemy never blocks");
+        CHECK(!saw_move, "settings absent -> enemy never moves");
+        CHECK(!saw_non_idle_anim,
+              "settings absent -> enemy stays in the idle animation");
+    }
+
     // ---- D4: ResponseDelay countdown gates loaded-path re-entry ----
+    // (E3: the invented enemy_ai_decision_interval_ gate + its probes are
+    // gone — the countdown is the ONLY re-entry gate; Phase E retired the
+    // interval-sabotage canary with them.)
     {
         resf2::test::HeadlessTestConfig config;
         config.asset_root = "assets";
@@ -245,21 +276,8 @@ int main() {
         }
         configure_battle(runner);
 
-        // Strangler baseline: the fallback interval still exists and reads
-        // its 0.8 s default (deleted only in Phase E).
-        CHECK(runner.game().host_get_enemy_ai_decision_interval() == 0.8f,
-              "fallback enemy_ai_decision_interval_ default intact (strangler)");
-
-        // Sabotage the interval: on the D3 gate (interval on EVERY path) the
-        // loaded path would never decide inside the horizon. D4 must decide
-        // regardless — the loaded path reads only the ResponseDelay
-        // countdown, which starts at 0 = unblocked.
-        runner.game().host_set_enemy_ai_decision_interval(1000.0f);
-        CHECK(runner.game().host_get_enemy_ai_decision_interval() == 1000.0f,
-              "interval sabotage took effect");
-
         bool decided = false;
-        const int kMaxFrames = 400;  // ~6.4 s — far below the sabotaged 1000 s
+        const int kMaxFrames = 400;  // ~6.4 s
         for (int i = 0; i < kMaxFrames; ++i) {
             runner.run_frames(1);
             if (runner.game().host_get_ai_last_candidates().size() >= 7) {
@@ -268,7 +286,7 @@ int main() {
             }
         }
         CHECK(decided,
-              "loaded path decides with the interval sabotaged (countdown gate)");
+              "loaded path decides via the ResponseDelay countdown gate");
 
         if (decided) {
             // Window contract against the SHIPPED Standard tactic, which

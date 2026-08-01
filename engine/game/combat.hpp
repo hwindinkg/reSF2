@@ -90,9 +90,6 @@ public:
     float& mutable_bag_swing_dir() { return bag_swing_dir_; }
     float& mutable_bag_angle() { return bag_angle_; }
     float& mutable_bag_angle_vel() { return bag_angle_vel_; }
-    float& mutable_enemy_ai_timer() { return enemy_ai_timer_; }
-    float& mutable_enemy_ai_decision_interval() { return enemy_ai_decision_interval_; }
-    int& mutable_enemy_ai_state() { return enemy_ai_state_; }
     float& mutable_enemy_attack_cooldown() { return enemy_attack_cooldown_; }
     float& mutable_enemy_pos_x() { return enemy_pos_x_; }
     float& mutable_enemy_pos_y() { return enemy_pos_y_; }
@@ -180,9 +177,6 @@ private:
     float bag_angle_vel_ = 0.0f;
 
     // AI state
-    float enemy_ai_timer_ = 0.0f;
-    float enemy_ai_decision_interval_ = 0.8f;
-    int enemy_ai_state_ = 0;
     float enemy_attack_cooldown_ = 0.0f;
 
     // Enemy state (used by AI and rendering)
