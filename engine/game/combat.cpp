@@ -48,6 +48,7 @@ void Combat::tick_combat_timers(float dt_sec) {
 
 // ---------- Enemy AI ----------
 
+// dead code — scheduled for deletion in Phase E (R7-verified zero callers).
 void Combat::update_enemy_ai(
     float dt_sec,
     float player_pos_x,

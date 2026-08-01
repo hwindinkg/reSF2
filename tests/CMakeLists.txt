@@ -475,6 +475,12 @@ set_tests_properties(test_crash_stability PROPERTIES TIMEOUT 300)
 add_integration_test(test_full_battle)
 set_tests_properties(test_full_battle PROPERTIES TIMEOUT 300)
 
+# GAP-4 D3: the LIVE enemy-AI decision branch routes through the
+# TacticDecisionPipeline + adapter — asserts the F1 overlay stash is fed from
+# the DecisionTrace stage rows and enemy_ai_state_ is the adapter's state int.
+add_integration_test(test_enemy_ai_pipeline)
+set_tests_properties(test_enemy_ai_pipeline PROPERTIES TIMEOUT 120)
+
 # Phase 5: Screenshot comparison — renders headlessly, compares against
 # reference PNGs using MSE, and saves diff images on failure.
 add_integration_test(test_screenshot_compare)

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "types.hpp"
+#include "tactic_memory.hpp"
 
 namespace resf2::game {
 
@@ -103,6 +104,9 @@ public:
     float& mutable_enemy_attack_duration() { return enemy_attack_duration_; }
     bool& mutable_show_enemy() { return show_enemy_; }
     bool& mutable_is_battle_mode() { return is_battle_mode_; }
+    // [D3] The enemy-AI fight memory the TacticDecisionPipeline reads and
+    // decays (ADR-005 D8); Game ticks it per AI frame.
+    TacticMemory& mutable_enemy_tactic_memory() { return enemy_tactic_memory_; }
 
     // --- Block decision state (player AI) ---
     // [ORIGINAL] FUN_10171d80 runs every 0.6-1.0s, roulette over tactic weights.
@@ -200,6 +204,9 @@ private:
     float enemy_y_adjust_ = 0.0f;
     bool enemy_attacking_ = false;
     float enemy_attack_duration_ = 0.0f;
+    // [D3] Enemy-AI fight memory (ADR-005 D8): per-animation decayed records
+    // consumed by the TacticDecisionPipeline; ticked once per AI frame.
+    TacticMemory enemy_tactic_memory_;
     bool show_enemy_ = false;
     bool is_battle_mode_ = false;
     
