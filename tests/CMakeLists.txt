@@ -484,6 +484,14 @@ add_integration_test(test_soak_ai_pacing)
 set_tests_properties(test_soak_ai_pacing PROPERTIES TIMEOUT 240)
 
 
+# Soak-fix Wave 2: behavioral movement/input tests for the SOAK_TRIAGE.md §2
+# defects (M1 back-roll key order, M2 roll displacement, M3 jump drift, M4
+# dash/step pacing, M5 deferred turn). Five dojo scenarios; 120 like the
+# wave-1 suites so a parallel full-suite run does not starve them.
+add_integration_test(test_soak_movement_defects)
+set_tests_properties(test_soak_movement_defects PROPERTIES TIMEOUT 180)
+
+
 # Phase 5: Screenshot comparison — renders headlessly, compares against
 # reference PNGs using MSE, and saves diff images on failure.
 add_integration_test(test_screenshot_compare)
@@ -639,3 +647,12 @@ target_link_libraries(tool_visual_audit PRIVATE
     Threads::Threads
 )
 target_compile_features(tool_visual_audit PRIVATE cxx_std_23)
+
+# Diagnostic: dump authored root-motion (NPivot / Align-anchor) trajectories of movement anims.
+add_executable(tool_root_motion_probe tool_root_motion_probe.cpp)
+target_link_libraries(tool_root_motion_probe PRIVATE
+    resf2_game
+    resf2_warnings
+)
+target_compile_features(tool_root_motion_probe PRIVATE cxx_std_23)
+
