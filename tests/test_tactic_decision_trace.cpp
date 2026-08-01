@@ -10,8 +10,10 @@
 //   DecisionType / Decision {Wait=%d}
 //
 // The first stage that fires wins; none firing yields the idle decision.
-// Stage internals (chance comparator R3, index mapping R6, wait mapping R4)
-// are JS-port defaults pending the P3 golden.
+// Stage internals are binary-verified: R3 comparator (fire iff score >
+// threshold), R3 UseDefense 4-way draw, R4 ExpectedWait gate + duration
+// wait, R6 index mapping ([ORIGINAL], VERIFY_R34.md / VERIFY_R56.md).
+// Remaining unpinned choices carry [HEURISTIC-TODO].
 
 #include "../engine/game/tactic_pipeline.hpp"
 
@@ -68,9 +70,10 @@ static bool load_xml_string(TacticSettings& out, const std::string& xml,
     return ok;
 }
 
-// Deterministic RngSource values for the R3 comparator pins:
-// roll == 0.0 (fires for any curve > 0) and roll == 1.0 (fires only for
-// curve > 1.0).
+// Deterministic RngSource values for the R3 comparator pins (R3 GREEN: fire
+// iff score > threshold, threshold = the rng roll):
+// threshold == 0.0 (fires for any score > 0) and threshold == 1.0 (fires
+// only for score > 1.0).
 static const RngSource kRollZero = [] { return 0u; };
 static const RngSource kRollOne = [] { return (unsigned)RAND_MAX; };
 
@@ -310,20 +313,25 @@ int main() {
         w.curve = TacticWeight::Curve::kLinear;
         TacticContext c = default_ctx();
 
+        // R3 GREEN: fire iff score > threshold (threshold = the roll; strict
+        // GT, ASM vcmpe/movgt — VERIFY_R34.md).
         w.base = 0.5f;
-        CHECK(chance_fires(w, c, kRollZero), "roll 0.0 vs 0.5 -> fires");
-        CHECK(!chance_fires(w, c, kRollOne), "roll 1.0 vs 0.5 -> no");
+        CHECK(chance_fires(w, c, kRollZero), "threshold 0.0 vs score 0.5 -> fires");
+        CHECK(!chance_fires(w, c, kRollOne), "threshold 1.0 vs score 0.5 -> no");
 
         w.base = 0;
-        CHECK(!chance_fires(w, c, kRollZero), "zero curve never fires (0 < 0 false)");
+        CHECK(!chance_fires(w, c, kRollZero), "score 0 vs threshold 0 -> strict, no fire (0 > 0 false)");
 
         w.base = 1.0f;
-        CHECK(chance_fires(w, c, kRollZero), "roll 0.0 vs 1.0 -> fires");
-        CHECK(!chance_fires(w, c, kRollOne), "roll 1.0 vs 1.0 -> strict <, no fire");
+        CHECK(chance_fires(w, c, kRollZero), "threshold 0.0 vs score 1.0 -> fires");
+        CHECK(!chance_fires(w, c, kRollOne), "threshold 1.0 vs score 1.0 -> strict >, no fire");
     }
 
     std::printf("\n=== R6 index mapping (document order) ===\n");
     {
+        // [ORIGINAL] R6 GREEN: index i -> the i-th entry's animation in XML
+        // document order (FUN_8f45456c scores entry[i] at table+0x1f8/+0x204;
+        // VERIFY_R56.md §4).
         const TacticDef* q = s.tactic("Quick");
         const TacticDef* e = s.tactic("EvadeT");
         CHECK(q && quick_attack_animation(*q, 0) == "Throw" &&
@@ -550,30 +558,83 @@ int main() {
 
     std::printf("\n=== ExpectedWait epilogue (R4) ===\n");
     {
+        // R4 GREEN: the <ExpectedWait> weight is a PROBABILITY, never frames.
+        // w = the record matching the current animation (empty-name record =
+        // default; no record -> w = 1.0f, FUN_8f446b98). gate = w>=1 ? 1-1/w
+        // : 0; attack fires iff gate < roll (P ~ 1/w). Wait frames come from
+        // duration arithmetic, signed internally, printed via abs().
         const TacticDef* w = s.tactic("Waiter");
         TacticTableSet tables;
         TacticMemory mem;
+
+        // Waiter: Step Base=Limit=1000 -> w = 1000, gate = 1 - 1/1000 = 0.999.
+        // roll 0.0 -> gate < roll false -> keep waiting -> wait stays 0.
+        TacticContext ctx = default_ctx();
+        ctx.current_animation = "Step";
         DecisionTrace trace;
-        const TacticDecision d = decide(*w, default_ctx(), mem, tables,
+        const TacticDecision d = decide(*w, ctx, mem, tables,
                                         RngSource(kRollZero), trace);
         CHECK(d.stage == DecisionStage::kIdle, "ExpectedWait with no stages -> idle");
-        CHECK(d.wait_frames == 1000, "wait pick over <ExpectedWait> -> Step weight as frames");
+        CHECK(d.wait_frames == 0, "gate 0.999 < roll 0.0 false -> keep waiting, wait 0");
         CHECK(d.type == "ExpectedWait", "decision type normalized");
         // No QuickAttack/Evade entries -> 5 stage lines + 6 epilogue lines.
         if (trace.lines().size() == 11) {
             CHECK(starts_with(trace.lines()[9], "DecisionType: ExpectedWait") &&
-                  trace.lines()[10] == "Decision {Wait=1000}",
-                  "epilogue prints the wait decision");
+                  trace.lines()[10] == "Decision {Wait=0}",
+                  "epilogue prints the keep-waiting decision");
         } else {
             CHECK(false, "ExpectedWait trace complete");
         }
 
+        // roll 1.0 > gate 0.999 -> attack fires -> wait = duration arithmetic
+        //   max(animFrames, min(animRange, speedVal - damage + 1)) - 1
+        //   speedVal = (speed+1)*(maxAttr - X + 2) = 2
+        // with the [HEURISTIC-TODO] zero-fallback inputs (animRange = speed =
+        // maxAttr = X = 0) and animFrames = ctx.anim_frames = 0:
+        //   max(0, min(0, 2 - 0 + 1)) - 1 = -1   (SIGNED, as stored).
+        TacticContext ctx2 = default_ctx();
+        ctx2.current_animation = "Step";
+        DecisionTrace t2;
+        const TacticDecision d2 = decide(*w, ctx2, mem, tables,
+                                         RngSource(kRollOne), t2);
+        CHECK(d2.wait_frames == -1,
+              "attack fires: signed duration wait -1 (anim_frames 0 - 1)");
+        CHECK(t2.lines().back() == "Decision {Wait=1}",
+              "trace prints |wait| = 1 (abs, bic r2,r3,r3,asr #0x1f)");
+
+        // anim_frames 10 -> max(10, ...) - 1 = 9.
+        TacticContext ctx3 = default_ctx();
+        ctx3.current_animation = "Step";
+        ctx3.anim_frames = 10;
+        DecisionTrace t3;
+        const TacticDecision d3 = decide(*w, ctx3, mem, tables,
+                                         RngSource(kRollOne), t3);
+        CHECK(d3.wait_frames == 9 && t3.lines().back() == "Decision {Wait=9}",
+              "anim_frames 10 -> signed wait 9, trace 9");
+
+        // damage caps the inner min: speedVal - damage + 1 = 2 - 5 + 1 = -2
+        // -> min(0, -2) = -2 -> max(anim_frames 0, -2) = 0 -> wait -1.
+        TacticContext ctx4 = default_ctx();
+        ctx4.current_animation = "Step";
+        ctx4.damage = 5;
+        DecisionTrace t4;
+        const TacticDecision d4 = decide(*w, ctx4, mem, tables,
+                                         RngSource(kRollOne), t4);
+        CHECK(d4.wait_frames == -1, "damage 5 with anim_frames 0 -> wait still -1");
+
+        // WaiterZero: unnamed entry = default record -> matches any animation;
+        // Base=-5 -> w = -5 < 1 -> gate 0 -> attack iff 0 < roll.
         const TacticDef* z = s.tactic("WaiterZero");
         TacticMemory mem2;
-        DecisionTrace t2;
-        const TacticDecision d2 = decide(*z, default_ctx(), mem2, tables,
-                                         RngSource(kRollZero), t2);
-        CHECK(d2.wait_frames == 0, "all-zero expected_wait list -> wait stays 0");
+        DecisionTrace t5;
+        const TacticDecision d5 = decide(*z, default_ctx(), mem2, tables,
+                                         RngSource(kRollZero), t5);
+        CHECK(d5.wait_frames == 0, "negative w -> gate 0; roll 0 -> 0 < 0 false -> wait 0");
+        TacticMemory mem3;
+        DecisionTrace t6;
+        const TacticDecision d6 = decide(*z, default_ctx(), mem3, tables,
+                                         RngSource(kRollOne), t6);
+        CHECK(d6.wait_frames == -1, "gate 0 < roll 1 -> attack fires -> signed wait -1");
     }
 
     std::printf("\n=== GATE G1 golden: decision-trace contract ===\n");
@@ -701,8 +762,10 @@ int main() {
                   "Intervals/EnemyIntervals trace the TacticMemory deltas (3 ticks)");
         }
 
-        // ExpectedWait: the Decision {Wait=…} line is present; its VALUE is
-        // unpinned ([HEURISTIC-TODO R4] — the golden pins format only).
+        // ExpectedWait: the Decision {Wait=…} line is present; its VALUE stays
+        // wildcard in the golden by design — the R4 formula input (current
+        // animation's duration data) is not scripted in this scenario, so the
+        // gate outcome depends on the LCG draw (golden pins format only).
         {
             TacticDecision d;
             std::vector<std::string> lines;
