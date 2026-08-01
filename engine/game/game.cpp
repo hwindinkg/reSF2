@@ -774,6 +774,50 @@ std::string Game::host_get_battle_result() const {
     return battle_result_;
 }
 
+void Game::queue_tutorial_battle() {
+    // [Q3] The training-fight dialog ("...against my disciple, Kenji") must
+    // hand over to the disciple fight instead of dropping back to the dojo:
+    // stages.xml Zone=Punchbag Battle=Training Fight=2 (warrior
+    // Template=Dojo_Disciple, Location=dojo). Setting the battle location
+    // makes the Dialogue scene's advance transition to Battle.
+    // [HEURISTIC-TODO] The enemy fighter uses the placeholder enemy model —
+    // BattleInfo.enemy_name is not yet wired into the enemy fighter setup —
+    // and the fight data defaults below stand in when stages.xml is absent.
+    scene::SceneHost::BattleInfo info;
+    info.rounds = 1;
+    info.round_time_s = 99;
+    info.enemy_name = "Dojo_Disciple";
+    if (assets_->stages_loaded()) {
+        const auto& sd = assets_->stage_data();
+        for (const auto& z : sd.zones) {
+            if (z.name != "Punchbag") continue;
+            for (const auto& b : z.battles) {
+                if (b.name != "Training") continue;
+                if (b.fights.size() >= 2) {
+                    const auto& f = b.fights[1];  // Fight 2: the disciple
+                    info.rounds = std::max(1, f.rounds);
+                    info.round_time_s = std::max(1, f.round_time);
+                    info.reward_gold = f.reward.money;
+                    info.reward_xp = f.reward.exp;
+                    if (!f.warriors.empty()) {
+                        const auto& w0 = f.warriors.front();
+                        info.enemy_name = !w0.first_name.empty()
+                                              ? w0.first_name
+                                              : w0.template_name;
+                    }
+                }
+                break;
+            }
+            break;
+        }
+    }
+    host_set_battle_info(info);
+    host_set_battle_location("dojo");
+    std::printf("[tutorial] Kenji fight queued (enemy='%s' rounds=%d) "
+                "-> Battle after dialog\n",
+                info.enemy_name.c_str(), info.rounds);
+}
+
 const resf2::format::StageData* Game::host_get_stages() const {
     return assets_->stages_loaded() ? &assets_->stage_data() : nullptr;
 }
@@ -3891,6 +3935,10 @@ void Game::host_update_gameplay(uint32_t dt) {
                                                 tutorial_state_ = "FIRST_FIGHT";
                                                 check_tutorial();
                                                 tutorial_dialog_pending_ = true;
+                                                // [Q3] Queue the Kenji fight so
+                                                // the training dialog hands
+                                                // over to Battle.
+                                                queue_tutorial_battle();
                                                 std::printf("[tutorial] state -> FIRST_FIGHT, dialog pending\n");
                                             }
                                         }
@@ -4034,6 +4082,9 @@ void Game::host_update_gameplay(uint32_t dt) {
                                 tutorial_state_ = "FIRST_FIGHT";
                                 check_tutorial();
                                 tutorial_dialog_pending_ = true;
+                                // [Q3] Queue the Kenji fight so the training
+                                // dialog hands over to Battle.
+                                queue_tutorial_battle();
                                 std::printf("[tutorial] state -> FIRST_FIGHT, dialog pending\n");
                             }
                         }
