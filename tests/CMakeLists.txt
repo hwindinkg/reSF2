@@ -325,6 +325,20 @@ target_compile_features(test_tactic_decision_trace PRIVATE cxx_std_23)
 add_test(NAME test_tactic_decision_trace COMMAND test_tactic_decision_trace
          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# TacticDecisionAdapter (ADR-005 D7): maps a TacticDecision onto the legacy
+# enemy_ai_state_ int (attack->2, step/movement->1/3 by sign, UseDefense->4,
+# wait/no-stage->0) so the existing execution code runs unchanged.
+add_executable(test_tactic_decision_adapter
+    test_tactic_decision_adapter.cpp
+)
+target_link_libraries(test_tactic_decision_adapter PRIVATE
+    resf2_game
+    resf2_warnings
+)
+target_compile_features(test_tactic_decision_adapter PRIVATE cxx_std_23)
+add_test(NAME test_tactic_decision_adapter COMMAND test_tactic_decision_adapter
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # TacticMemory state model (ADR-005 D8, R5-verified): unbounded per-animation
 # decayed records (no ring depth), action logs, frame countdowns, round-end
 # scaling — semantics per reverse/analysis/MEMORY_INDEXING_R56.md.

@@ -79,6 +79,13 @@ public:
 
     [[nodiscard]] std::size_t table_count() const { return tables_.size(); }
 
+    // Read-only enumeration of every loaded table — the ADR-005 D7
+    // adapter's candidate classification ("attack_table candidates =
+    // attacks; movements family = steps").
+    [[nodiscard]] const std::vector<TacticTable>& tables() const {
+        return tables_;
+    }
+
 private:
     std::vector<TacticTable> tables_;   // family-tagged, name-indexed
     std::bitset<kTacticFamilyCount> families_loaded_;
