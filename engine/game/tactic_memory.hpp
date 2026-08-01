@@ -124,6 +124,12 @@ struct TacticMemory {
     //   pending @re-verifier GREEN on the decision-loop wiring.
     void record_decision();
 
+    // [Soak-fix A4] Hold the current decision for its R4 Wait countdown
+    // (DECISION_SEMANTICS.md R4 §3.4: decision+0x12, decremented per tick,
+    // re-decision when it expires). wait <= 0 -> immediate re-entry (binary
+    // fallback): the countdown stays 0 and the decision gate stays open.
+    void start_decision_wait(int frames);
+
     // [ORIGINAL] FUN_8f4a84e8: round-end scale of ALL FIVE accumulator
     // floats of every record by round_factor (the tactic's RoundFactor);
     // stamps (frames/last_frame) are NOT scaled.
@@ -155,6 +161,10 @@ struct TacticMemory {
     int frames_since_enemy = 0;       // EnemyIntervals
     int frames_until_next_decision = 0;  // ResponseDelay countdown
     int enemy_reaction_frames = 0;       // EnemyResponseDelay countdown
+    // [Soak-fix A4] per-decision Wait countdown (R4 decision+0x12): the
+    // binary re-decides only when the current decision's wait expires; the
+    // executor holds the decision while this counter runs. 0 = unblocked.
+    int wait_frames_remaining = 0;
     float strikes = 10.0f;  // decay rate ([ORIGINAL] tactic+0x00, default
                             // 10.0f from the tactic ctor 0x41200000)
 
@@ -181,6 +191,7 @@ inline void TacticMemory::tick() {
     ++frames_since_enemy;
     if (frames_until_next_decision > 0) --frames_until_next_decision;
     if (enemy_reaction_frames > 0) --enemy_reaction_frames;
+    if (wait_frames_remaining > 0) --wait_frames_remaining;
 }
 
 inline void TacticMemory::record_self(const std::string& name) {
@@ -245,6 +256,13 @@ inline void TacticMemory::record_decision() {
     frames_until_next_decision = 0;
 }
 
+inline void TacticMemory::start_decision_wait(int frames) {
+    // [Soak-fix A4] R4 countdown: hold the decision for `frames` AI frames;
+    // wait <= 0 (e.g. the signed duration-arithmetic result underflows) is
+    // the binary's immediate-re-entry fallback.
+    wait_frames_remaining = frames > 0 ? frames : 0;
+}
+
 inline void TacticMemory::round_end(float round_factor) {
     for (MemoryRecord& r : records) {
         r.damage *= round_factor;        // FUN_8f4a84e8: all five floats
@@ -263,6 +281,7 @@ inline void TacticMemory::reset() {
     frames_since_enemy = 0;
     frames_until_next_decision = 0;
     enemy_reaction_frames = 0;
+    wait_frames_remaining = 0;
     frame_ = 0;
 }
 

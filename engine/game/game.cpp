@@ -1771,13 +1771,18 @@ void Game::host_update_gameplay(uint32_t dt) {
             if (!td) td = tactics_.tactic("NoTables");
             float dist = std::abs(enemy_pos_x_ - player_pos_x_);
             const bool pipeline_ready = td && tactic_tables_.table_count() > 0;
-            // [D4/E3] Re-entry gate (ADR-005 D8): the pipeline re-enters
-            // only when the ResponseDelay frame countdown has elapsed
-            // (ticked per AI frame above; 0 = unblocked). Phase E deleted
-            // the invented enemy_ai_decision_interval_ gate with the
+            // [D4/E3/A4] Re-entry gate (ADR-005 D8 + soak-fix A4): the
+            // pipeline re-enters only when the ResponseDelay frame countdown
+            // has elapsed (ticked per AI frame above; 0 = unblocked) AND the
+            // current decision's R4 Wait countdown has expired
+            // (wait_frames_remaining, DECISION_SEMANTICS.md R4 §3.4 — the
+            // binary re-decides only when decision+0x12 runs out). Phase E
+            // deleted the invented enemy_ai_decision_interval_ gate with the
             // fallback branches.
+            const TacticMemory& tmem = combat_.enemy_tactic_memory();
             const bool decision_due =
-                combat_.enemy_tactic_memory().frames_until_next_decision == 0;
+                tmem.frames_until_next_decision == 0 &&
+                tmem.wait_frames_remaining == 0;
             if (decision_due) {
                 if (pipeline_ready) {
                     // [D3] LIVE enemy AI runs through the TacticDecisionPipeline
@@ -1800,6 +1805,45 @@ void Game::host_update_gameplay(uint32_t dt) {
                         ? player_fighter_.health / player_fighter_.max_health : 1.0f;
                     ctx.hits = (float)enemy_fighter_.hits_landed;
                     ctx.current_animation = enemy_anim_;       // probe target
+                    // [Soak-fix A4] R4 wait-mapping inputs with REAL engine
+                    // data (DECISION_SEMANTICS.md R4 §3.1; VERIFY_R34.md
+                    // GREEN). ctx.anim_frames = the current animation's
+                    // R4-modeled duration (FUN_8f47cbe0:
+                    // (frames+1)*(maxAttr - X + 2) + 1) — the frame count is
+                    // the animation's real duration from the asset table;
+                    // maxAttr/X are [UNCERTAIN] runtime records ->
+                    // zero-fallback, leaving the verified +2/+1 constants:
+                    // 2*frames+3.
+                    //   damage = the matching move's <Damage Value> from
+                    //     moves.xml (via FileName == <anim>.bin).
+                    //   speed -> WeaponDamage ([HEURISTIC-TODO R4]: the
+                    //     binary's attribute-name lists behind
+                    //     FUN_8f43f0b8/FUN_8f43f0cc are runtime-populated,
+                    //     names [UNCERTAIN]; WeaponDamage is the best
+                    //     available fighter attribute).
+                    //   animRange/animX stay 0 (no engine source).
+                    float anim_frames = 0.0f;
+                    if (const auto ait = assets_->animations().find(enemy_anim_);
+                        ait != assets_->animations().end()) {
+                        anim_frames = static_cast<float>(ait->second.frame_count);
+                    }
+                    ctx.anim_frames =
+                        (anim_frames + 1.0f) * (0.0f - 0.0f + 2.0f) + 1.0f;
+                    {
+                        const std::string bin = enemy_anim_ + ".bin";
+                        for (const auto& [mname, mv] : assets_->moves()) {
+                            (void)mname;
+                            if (mv.filename == bin) {
+                                ctx.damage = mv.damage;
+                                break;
+                            }
+                        }
+                    }
+                    ctx.anim_range = 0.0f;
+                    ctx.speed_attr =
+                        enemy_fighter_.attributes.get_or("WeaponDamage", 0.0f);
+                    ctx.max_attr = 0.0f;
+                    ctx.anim_x = 0.0f;
 
                     DecisionTrace trace;
                     const TacticDecision decision = decide(
@@ -1844,6 +1888,14 @@ void Game::host_update_gameplay(uint32_t dt) {
                     // re-entry until it reaches 0.
                     combat_.mutable_enemy_tactic_memory().start_response_delay(
                         td->response_delay.min, td->response_delay.max, std::rand);
+
+                    // [Soak-fix A4] Hold the decision for its R4 wait: the
+                    // per-decision Wait countdown (decision+0x12) now paces
+                    // re-entry — the executor below keeps executing the
+                    // stored decision (idle anim for a wait) while it runs.
+                    // wait <= 0 -> immediate re-entry (binary fallback).
+                    combat_.mutable_enemy_tactic_memory().start_decision_wait(
+                        decision.wait_frames);
                 } else {
                     // [E3] No settings (or no table families): a traced
                     // idle/wait decision - the enemy stays neutral (no

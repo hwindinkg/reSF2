@@ -53,6 +53,11 @@ Decision {Wait=0}
 === first_hit_wins ===
 # Aggressive (seed 7): BlockChance=2 fires in stage 1 -> the decision wins at
 # UseDefense; the later stages still trace their line-groups.
+# [Soak-fix A4 re-baseline] Wait=3: the wait mapping now applies to EVERY
+# decision (compute_wait_frames, tactic_pipeline.cpp) — use-defense path
+# (c660 - damage) + 1 = speedVal - 0 + 1 = ((0+1)*(0-0+2)) + 1 = 3 with
+# zero-fallback attributes (R4 §3.1, VERIFY_R34.md). Value-only change per
+# the re-pinning rule; line structure untouched.
 UseDefense: Block / 0.0000 / 0.0000 / 2.0000
 UseSafeAttack:  / 0.0000
 TableAttack:  / 0.0000
@@ -64,11 +69,16 @@ FrameError: 0
 Intervals: 0
 EnemyIntervals: 0
 DecisionType: Tabular
-Decision {Wait=0}
+Decision {Wait=3}
 
 === state_far ===
 # StateGated (seed 42), far + healthy, no bullets: the DistanceFactor curve
 # (Punch) fires on distance alone; health/bullet curves read zero.
+# [Soak-fix A4 re-baseline] Wait=1: the attack-path wait
+# max(animFrames, min(animRange, speedVal-damage+1)) - 1 with zero-fallback
+# inputs (anim_frames=0, anim_range=0, speedVal=(0+1)*(0-0+2)=2) =
+# max(0, min(0, 3)) - 1 = -1 -> the trace prints |wait| = 1 (R4 §3.1,
+# VERIFY_R34.md). Value-only change per the re-pinning rule.
 UseDefense:  / 0.0000 / 0.0000 / 0.0000
 UseSafeAttack:  / 0.0000
 TableAttack:  / 0.0000
@@ -81,7 +91,7 @@ FrameError: 0
 Intervals: 0
 EnemyIntervals: 0
 DecisionType: Tabular
-Decision {Wait=0}
+Decision {Wait=1}
 
 === state_close ===
 # StateGated (seed 42), close + wounded, bullets inbound: the bullet curve

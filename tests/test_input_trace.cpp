@@ -119,15 +119,23 @@ int main(int argc, char** argv) {
         return -1;
     };
 
-    // The scripted sequence is: intro stance -> idle -> walk (D held 200..230)
-    // -> idle -> punch (Space at 300) -> idle.
+    // The scripted sequence is: intro stance -> [A6] stance holds until the
+    // first input -> walk (D held 200..230) -> idle -> punch (Space at 300)
+    // -> idle.
     const int intro = first_frame_with("stance_2", 0);
     check(intro == 1, "the intro stance starts on frame 1");
 
+    // [Soak-fix A6] the start stance now HOLDS until the first input (round
+    // stage Je=1 StartStance -> Je=2 Fight on interaction, commit e4621b4);
+    // stance_idle must not appear before the input at frame 200 — the first
+    // idle in the trace is the post-walk return (~frame 230). Pre-A6 the
+    // stance auto-dropped to stance_idle (~frame 158) — this pin flipped
+    // with the fix (the A6 commit updated the battle tests but missed the
+    // dojo replay).
     const int idle1 = first_frame_with("stance_idle", intro);
-    check(idle1 > 0 && idle1 < 200, "the fighter reaches the idle stance before the first input");
+    check(idle1 >= 200, "the start stance holds until the first input (idle only after it)");
 
-    const int walk = first_frame_with("step_forward", idle1);
+    const int walk = first_frame_with("step_forward", 199);
     check(walk >= 200 && walk <= 210, "walking starts within ~10 frames of the key press");
 
     const int idle2 = first_frame_with("stance_idle", walk);

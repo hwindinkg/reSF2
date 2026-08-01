@@ -79,6 +79,31 @@ std::vector<std::string> weight_candidates(const TacticDef& def) {
     return out;
 }
 
+// [Soak-fix A4] The CautiousMovements candidate pool: MOVEMENT animations
+// only. SOAK_TRIAGE.md A3's suspected subsystem is the pipeline approach
+// logic — the stage previously rouletted over the FULL animation_weights
+// pool (attacks/specials like BossAbility=3000 dominate), so the enemy
+// almost never picked ForwardStep and stood still. A cautious-movement
+// decision must pick a movement; the pool is the tactic's named weights the
+// executor can move with (step/retreat moves; BackHandflip is the back-
+// handflip retreat per SOAK_TRIAGE M2). [HEURISTIC-TODO] the original's
+// movement candidate list is unpinned (no movements/ table assets exist);
+// empty filter falls back to the full weights so tactics without movement
+// anims keep rouletting over their declared set.
+std::vector<std::string> movement_candidates(const TacticDef& def) {
+    std::vector<std::string> out;
+    for (const auto& [name, w] : def.animation_weights) {
+        (void)w;
+        if (name.empty()) continue;
+        if (name == "ForwardStep" || name == "BackStep" ||
+            name == "BackHandflip" || name == "Retreat") {
+            out.push_back(name);
+        }
+    }
+    if (out.empty()) return weight_candidates(def);
+    return out;
+}
+
 // Stage-3 target pick: the .atf attack table keyed by the current animation
 // when present, else the tactic's animation_weights.
 std::optional<std::string> pick_attack_target(const TacticDef& def,
@@ -114,6 +139,47 @@ float expected_wait_weight(const TacticDef& def, const TacticContext& ctx) {
         }
     }
     return 1.0f;
+}
+
+// [Soak-fix A4] [ORIGINAL] R4 wait mapping — the {Wait=%d} frames are
+// duration arithmetic on the picked animation / enemy, per decision path
+// (DECISION_SEMANTICS.md R4 §3.1; VERIFY_R34.md GREEN:
+//   param_1[0x12] = max(animFrames, min(animRange, (speedVal-damage)+1)) - 1
+//   (paths 1/2), cbe0-1 (path 3); the use-defense push loop FUN_8f457fb8
+//   stores (c660(enemy,1) - damage) + 1):
+//   attack path:      max(animFrames, min(animRange, (speedVal-damage)+1)) - 1
+//   ready path:       animFrames
+//   use-defense path: (c660(enemy,1) - damage) + 1
+//   speedVal = (speed+1) * (maxAttr - X + 2)   (FUN_8f47d294 / FUN_8f47c660)
+//   animFrames = (frames+1) * (maxAttr - X + 2) + 1   (FUN_8f47cbe0) — the
+//     live path feeds ctx.anim_frames ALREADY in this R4-modeled shape
+//     (the verified formula applied to the current animation's real frame
+//     count with zero-fallback for the [UNCERTAIN] maxAttr/X terms, leaving
+//     the +2/+1 constants: 2*frames+3); scripted tests feed raw values.
+// Inputs are engine-fed via TacticContext (see tactic_settings.hpp):
+// ctx.anim_frames (R4-modeled duration), ctx.damage (picked move's damage),
+// and the fighter-attribute mapping ctx.speed_attr/max_attr/anim_x
+// ([HEURISTIC-TODO R4]: the binary's attribute-name lists behind
+// FUN_8f43f0b8/FUN_8f43f0cc are runtime-populated, names [UNCERTAIN]).
+// Missing/unknown stays zero-fallback per plan; no fabricated constants.
+// The signed result is stored as the binary stores it (decision+0x12); the
+// trace prints |wait|.
+int compute_wait_frames(DecisionStage stage, const TacticContext& ctx) {
+    const float speed_val = (ctx.speed_attr + 1.0f) *
+                            (ctx.max_attr - ctx.anim_x + 2.0f);
+    switch (stage) {
+        case DecisionStage::kUseDefense:
+            return static_cast<int>(speed_val - ctx.damage + 1.0f);
+        case DecisionStage::kUseSafeAttack:
+        case DecisionStage::kTableAttack:
+        case DecisionStage::kQuickAttack:
+            return static_cast<int>(std::max(
+                ctx.anim_frames,
+                std::min(ctx.anim_range, speed_val - ctx.damage + 1.0f)) -
+                1.0f);
+        default:  // ready path — idle / dodge / evade / movement
+            return static_cast<int>(ctx.anim_frames);
+    }
 }
 
 }  // namespace
@@ -394,8 +460,8 @@ std::optional<TacticDecision> stage_evade(const TacticDef& def,
 
 // [ORIGINAL] "UseCautiousMovements: %s / %.4f" @ 0x8F798199 — the standalone
 // CautiousMovementsChance rolls; on fire the cautious movement is picked.
-// [HEURISTIC-TODO] the cautious-movement animation selection is unpinned;
-// default = the tactic's own roulette over animation_weights.
+// [Soak-fix A4] the pick draws from the MOVEMENT candidate pool
+// (movement_candidates — steps/retreats only, see its [HEURISTIC-TODO]).
 std::optional<TacticDecision> stage_use_cautious_movements(const TacticDef& def,
                                                            const TacticContext& ctx,
                                                            TacticMemory& mem,
@@ -407,7 +473,7 @@ std::optional<TacticDecision> stage_use_cautious_movements(const TacticDef& def,
         trace.stage(DecisionStage::kUseCautiousMovements, "", {score});
         return std::nullopt;
     }
-    const auto picked = pick(def, weight_candidates(def), ctx, mem, tables, rng);
+    const auto picked = pick(def, movement_candidates(def), ctx, mem, tables, rng);
     trace.stage(DecisionStage::kUseCautiousMovements, picked.value_or(""), {score});
     if (!picked) return std::nullopt;
     return TacticDecision{DecisionStage::kUseCautiousMovements, *picked};
@@ -460,35 +526,29 @@ TacticDecision decide(const TacticDef& def, const TacticContext& ctx,
     // gate = w >= 1 ? 1 - 1/w : 0 (FUN_8f459b44; DAT_8f459f60 = 0.0f
     // verified) -> P(attack) ~ 1/w; w < 1 -> gate 0 -> practically always
     // attacks. The Wait frames come from animation duration arithmetic, NOT
-    // the weight: max(animFrames, min(animRange, speedVal - damage + 1)) - 1
-    // with speedVal = (speed+1) * (maxAttr - X + 2) (attack path of
-    // FUN_8f459b44 "5"; FUN_8f47cbe0/cbfc shape).
-    // [HEURISTIC-TODO R4] animRange/speed/maxAttr/X are per-animation record
-    // data not yet in TacticContext (Phase D) -> zero-fallback per the
-    // promotion plan; only animFrames (ctx.anim_frames) and damage
-    // (ctx.damage) are live. With all-zero inputs the formula reads
-    // anim_frames - 1. The signed result is stored as the binary stores it
-    // (decision+0x12); the trace prints |wait|.
+    // the weight (see compute_wait_frames below).
+    bool gate_attack = false;
     if (result.type == "ExpectedWait") {
         const float w = expected_wait_weight(def, wired);
         const float gate = w >= 1.0f ? 1.0f - 1.0f / w : 0.0f;
         const float roll = static_cast<float>(rng()) / static_cast<float>(RAND_MAX);
-        if (gate < roll) {  // attack fires
-            const float anim_frames = wired.anim_frames;  // ctx present
-            const float damage = wired.damage;            // ctx present
-            const float anim_range = 0.0f;  // [HEURISTIC-TODO R4] not in ctx
-            const float speed = 0.0f;       // [HEURISTIC-TODO R4] not in ctx
-            const float max_attr = 0.0f;    // [HEURISTIC-TODO R4] not in ctx
-            const float x = 0.0f;           // anim+0x74, not in ctx
-            const float speed_val = (speed + 1.0f) * (max_attr - x + 2.0f);
-            const float wait = std::max(anim_frames, std::min(anim_range,
-                                        speed_val - damage + 1.0f)) - 1.0f;
-            result.wait_frames = static_cast<int>(wait);  // SIGNED, as stored
-        }
-        // else: gate >= roll -> keep waiting (FUN_8f459b44 early return). The
-        // binary keeps the running countdown of the previous decision; the
-        // engine has no persistent countdown yet, so wait stays 0 (idle).
+        gate_attack = gate < roll;  // attack fires
+        // else: keep waiting (FUN_8f459b44 early return) — the ready-path
+        // wait below holds the current state for the current animation's
+        // duration, standing in for the binary's running countdown.
     }
+
+    // [Soak-fix A4] The wait mapping applies to EVERY decision (not just the
+    // ExpectedWait attack branch): the executor holds the decision for
+    // wait_frames (the binary's decision+0x12 per-tick countdown), so the
+    // enemy does not re-roll every frame. Path = the fired stage; an
+    // ExpectedWait gate attack on an otherwise-idle decision takes the
+    // attack path (the gate IS that path's draw).
+    DecisionStage wait_stage = result.stage;
+    if (gate_attack && wait_stage == DecisionStage::kIdle) {
+        wait_stage = DecisionStage::kUseSafeAttack;
+    }
+    result.wait_frames = compute_wait_frames(wait_stage, wired);
     trace.decision(result.wait_frames);
     return result;
 }

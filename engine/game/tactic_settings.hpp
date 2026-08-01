@@ -111,6 +111,24 @@ struct TacticContext {
     // per-child <AnimationFactors> probe in TacticWeight::score(). Default
     // empty -> every lookup 0.0f (neutral) until Phase C wires TacticMemory.
     AnimationMemorySums anim_memory;
+
+    // --- Soak-fix A4: R4 wait-mapping inputs (DECISION_SEMANTICS.md R4 §3.1,
+    //     VERIFY_R34.md GREEN) ----------------------------------------------
+    // The {Wait=%d} frames are duration arithmetic on the picked animation /
+    // enemy; these inputs feed the per-path formulas. Populated by the LIVE
+    // path with real engine data; absent = zero-fallback per plan (never a
+    // fabricated constant). [HEURISTIC-TODO R4] the binary's attribute-name
+    // lists behind FUN_8f43f0b8/FUN_8f43f0cc are runtime-populated — names
+    // [UNCERTAIN], so the exact speed/maxAttr mapping is unpinned.
+    float anim_range = 0;   // animRange — per-animation range record
+                            // (FUN_8f47cbfc); no engine source -> zero-fallback
+    float speed_attr = 0;   // (speed+1) term of speedVal (FUN_8f47d294);
+                            // [HEURISTIC-TODO R4] mapped to the best available
+                            // fighter attribute by the live path
+    float max_attr = 0;     // maxAttr term of animFrames/speedVal (the
+                            // [UNCERTAIN]-named attribute set); zero-fallback
+    float anim_x = 0;       // X = anim+0x74 per-animation record; no engine
+                            // source -> zero-fallback
 };
 
 // One weight curve: a `<Animation>` / `<...Chance>` element.
