@@ -148,19 +148,6 @@ public:
     // Set tactic settings for AI decision making
     void set_tactic_settings(const class TacticSettings* settings) { tactic_settings_ = settings; }
 
-    // Enemy AI update
-    void update_enemy_ai(
-        float dt_sec,
-        float player_pos_x,
-        const std::string& player_anim,
-        float anim_time,
-        float anim_fps,
-        const std::string& current_move,
-        bool& play_sound_out,
-        std::string& sound_name_out,
-        float& sound_vol_out
-    );
-
 private:
     // Fighter states
     FighterState player_fighter_;
