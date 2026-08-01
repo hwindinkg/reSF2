@@ -418,6 +418,25 @@ float host_enemy_health_frac() const override;
     }
     float host_get_ai_last_distance() const { return ai_last_distance_; }
 
+    // ---- D4 probes: the ResponseDelay gate + fallback interval ----
+    // Read-only view of the loaded-path gate state (the per-AI-frame
+    // countdown the live block reads, ADR-005 D8) and the fallback-path
+    // interval, plus the interval setter — for test_enemy_ai_pipeline's
+    // re-entry-window and strangler checks. Phase E deletes the interval
+    // probes with the member.
+    int host_get_enemy_decision_countdown() const {
+        return combat_.enemy_tactic_memory().frames_until_next_decision;
+    }
+    int host_get_enemy_reaction_countdown() const {
+        return combat_.enemy_tactic_memory().enemy_reaction_frames;
+    }
+    float host_get_enemy_ai_decision_interval() const {
+        return enemy_ai_decision_interval_;
+    }
+    void host_set_enemy_ai_decision_interval(float v) {
+        enemy_ai_decision_interval_ = v;
+    }
+
 void host_reset_round() override;
 
 void host_set_round_wins(int player, int enemy) override;

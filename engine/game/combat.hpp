@@ -107,6 +107,9 @@ public:
     // [D3] The enemy-AI fight memory the TacticDecisionPipeline reads and
     // decays (ADR-005 D8); Game ticks it per AI frame.
     TacticMemory& mutable_enemy_tactic_memory() { return enemy_tactic_memory_; }
+    // [D4] Const view of the same memory (countdown reads from Game's const
+    // host probes).
+    const TacticMemory& enemy_tactic_memory() const { return enemy_tactic_memory_; }
 
     // --- Block decision state (player AI) ---
     // [ORIGINAL] FUN_10171d80 runs every 0.6-1.0s, roulette over tactic weights.
