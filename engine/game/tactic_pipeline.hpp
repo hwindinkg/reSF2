@@ -54,7 +54,9 @@ enum class DecisionStage {
 struct TacticDecision {
     DecisionStage stage = DecisionStage::kIdle;
     std::string animation;      // chosen animation; empty = idle/wait
-    int wait_frames = 0;        // the {Wait=%d} value (ExpectedWait epilogue)
+    int wait_frames = 0;        // the {Wait=%d} value (ExpectedWait epilogue);
+                               // SIGNED duration-arithmetic result (R4 GREEN),
+                               // printed via abs() by the DecisionTrace
     std::string type;           // "Tabular" / "ExpectedWait" (normalized)
     float distance_error = 0;   // DistanceError jitter
     int frame_error = 0;        // FrameError jitter
@@ -87,18 +89,22 @@ private:
 };
 
 // ---- R3 — the ONE place a chance curve is compared to a roll. ----
-// [HEURISTIC-TODO R3] the binary's roll-vs-value comparison site is not
-// pinned; default = fire iff rng()/RAND_MAX < curve value (rng honors the
-// ADR-005 D4 [0, RAND_MAX] contract). A zero curve never fires; a curve
-// >= 1.0 always does (roll < 1 holds for every rng() except RAND_MAX).
+// [ORIGINAL] R3 GREEN (reverse/analysis/VERIFY_R34.md): fire iff score >
+// threshold — strict GT at every threshold stage (ASM vcmpe.f32 + movgt, 7
+// comparator sites in FUN_8f45ab38 @ 0x8F45ACB4, FUN_8f45456c, the Evade
+// loop). Threshold = the rng roll, rolled at the stage's evaluation point
+// (per-slot cadence per R6). UseDefense is the one divergence (4-way
+// cumulative draw — see stage_use_defense).
 [[nodiscard]] bool chance_fires(const TacticWeight& curve,
                                 const TacticContext& ctx,
                                 RngSource rng);
 
 // ---- R6 — QuickAttack/Evade index mapping, ONE function per family. ----
-// [HEURISTIC-TODO R6] entry -> animation: default = document order (the
-// i-th <QuickAttackChance>/<EvadeChance> entry, which the tracer numbers
-// 1-based).
+// [ORIGINAL] R6 GREEN (reverse/analysis/VERIFY_R56.md §4): entry -> animation
+// by XML document order — the i-th <QuickAttackChance>/<EvadeChance> entry
+// (FUN_8f45456c @ 0x8F45456C scores entry[i] at table+0x1f8/+0x204, stride
+// 0x6c), which the tracer numbers 1-based ("QuickAttack[%d]" @ 0x8F798161 /
+// "Evade[%d]" @ 0x8F798184).
 [[nodiscard]] const std::string& quick_attack_animation(const TacticDef& def,
                                                         std::size_t index);
 [[nodiscard]] const std::string& evade_animation(const TacticDef& def,
@@ -134,9 +140,9 @@ std::optional<TacticDecision> stage_use_cautious_movements(const TacticDef& def,
 
 // decide() — the full pipeline. Runs the seven stages in tracer order (all
 // seven trace their line-groups; the first hit wins), then the epilogue
-// (jitter ranges, intervals, decision type, ExpectedWait pick) in tracer
-// order. Returns the winning decision, or the idle decision when nothing
-// fires.
+// (jitter ranges, intervals, decision type, ExpectedWait gate + wait
+// mapping) in tracer order. Returns the winning decision, or the idle
+// decision when nothing fires.
 [[nodiscard]] TacticDecision decide(const TacticDef& def, const TacticContext& ctx,
                                     TacticMemory& mem, const TacticTableSet& tables,
                                     RngSource rng, DecisionTrace& trace);

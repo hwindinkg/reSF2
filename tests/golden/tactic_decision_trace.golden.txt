@@ -27,8 +27,9 @@
 # stage prints. Re-baseline values, not line structure.
 #
 # `*` in a golden line matches "any digits" (format-only pin).
-#   [HEURISTIC-TODO R4] the Wait value in section `expected_wait` is
-#   unpinned pending the R4 promotion — assert presence/format only.
+#   R4-promoted: the Wait value is formula-pinned (gate + duration arithmetic,
+#   VERIFY_R34.md) but this scenario's inputs are not scripted, so section
+#   `expected_wait` pins the line format only.
 
 === all_stages_idle ===
 # Nothing (seed 42, default state): every stage declared with zero chances ->
