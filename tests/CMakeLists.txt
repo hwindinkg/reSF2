@@ -494,6 +494,13 @@ add_integration_test(test_soak_movement_defects)
 set_tests_properties(test_soak_movement_defects PROPERTIES TIMEOUT 300)
 
 
+# Soak-fix Wave 3: behavioral dojo/quest tests for the SOAK_TRIAGE.md §3
+# defects (Q1 movement stage step count, Q2 bag visual reaction, Q3 Kenji
+# fight after the bag phase) + §7 L1 map-log spam gate. Three dojo scenarios
+# plus a 300-frame map log capture; 300 like the wave-2 suite.
+add_integration_test(test_soak_quest_defects)
+set_tests_properties(test_soak_quest_defects PROPERTIES TIMEOUT 300)
+
 # Phase 5: Screenshot comparison — renders headlessly, compares against
 # reference PNGs using MSE, and saves diff images on failure.
 add_integration_test(test_screenshot_compare)
