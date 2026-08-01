@@ -477,9 +477,11 @@ set_tests_properties(test_soak_ai_defects PROPERTIES TIMEOUT 120)
 # Soak-fix Wave 1 (A3/A4/A5): the per-decision Wait-pacing probes — the
 # displayed decision holds (A4), the enemy closes ground via held steps (A3),
 # and approach damage is bounded by paced attacks (A5). RED on HEAD
-# (escalation A3A4A5_RED_OUTPUT.txt), GREEN after the executor hold.
+# (escalation A3A4A5_RED_OUTPUT.txt), GREEN after the executor hold. Three
+# battle scenarios (~1500 frames each); 240 like test_enemy_ai_pipeline so a
+# parallel full-suite run (test_full_battle ~350 s) does not starve it.
 add_integration_test(test_soak_ai_pacing)
-set_tests_properties(test_soak_ai_pacing PROPERTIES TIMEOUT 120)
+set_tests_properties(test_soak_ai_pacing PROPERTIES TIMEOUT 240)
 
 
 # Phase 5: Screenshot comparison — renders headlessly, compares against

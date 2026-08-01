@@ -460,6 +460,12 @@ float host_enemy_health_frac() const override;
     int host_get_enemy_reaction_countdown() const {
         return combat_.enemy_tactic_memory().enemy_reaction_frames;
     }
+    // [Soak-fix A4] The per-decision Wait countdown (R4 decision+0x12) — the
+    // current decision is held while > 0; the pipeline re-enters only when
+    // this AND the ResponseDelay countdown are 0.
+    int host_get_enemy_wait_countdown() const {
+        return combat_.enemy_tactic_memory().wait_frames_remaining;
+    }
 
 void host_reset_round() override;
 
