@@ -43,6 +43,7 @@
 #include "asset_manager.hpp"
 #include "tactic_settings.hpp"
 #include "tactic_tables.hpp"
+#include "tactic_pipeline.hpp"
 #include "animation_player.hpp"
 #include "combat.hpp"
 #include "condition_system.hpp"
@@ -417,6 +418,17 @@ float host_enemy_health_frac() const override;
         return ai_last_weights_;
     }
     float host_get_ai_last_distance() const { return ai_last_distance_; }
+
+    // ---- E2 probes: direct-consumption executor (ADR-005 Phase B) ----
+    // Read-only view of the stored decision the execute block switches on
+    // and the enemy motion state it drives — for test_enemy_ai_pipeline's
+    // direct-consumption pins (Phase E deletes host_get_enemy_ai_state
+    // with the legacy FSM).
+    const std::string& host_get_enemy_anim() const { return enemy_anim_; }
+    bool host_get_enemy_attacking() const { return enemy_attacking_; }
+    const TacticDecision& host_get_enemy_last_decision() const {
+        return ai_last_decision_;
+    }
 
     // ---- D4 probes: the ResponseDelay gate + fallback interval ----
     // Read-only view of the loaded-path gate state (the per-AI-frame
@@ -1604,13 +1616,11 @@ private:
         // the evaluated weight per candidate and which one the wheel picked, so
         // the pick can be read as numbers instead of guessed from behaviour.
         if (tactics_.loaded()) {
-            static const char* kStateName[] = {
-                "idle", "approach", "attack", "retreat", "block"};
-            const int st = enemy_ai_state_;
-            line("AI      tactic=Standard  dist=%.0f  state=%d(%s)  pick=%s",
-                 ai_last_distance_, st,
-                 (st >= 0 && st <= 4) ? kStateName[st] : "?",
-                 ai_last_pick_.c_str());
+            // [E2] The state name comes from the stored decision (ADR-005
+            // Phase B): the legacy enemy_ai_state_ int no longer drives
+            // execution or this overlay (deleted in Phase E).
+            line("AI      tactic=Standard  dist=%.0f  state=%s  pick=%s",
+                 ai_last_distance_, ai_display_state(), ai_last_pick_.c_str());
             for (size_t i = 0; i < ai_last_candidates_.size(); ++i) {
                 const bool chosen = (ai_last_candidates_[i] == ai_last_pick_);
                 std::snprintf(b, sizeof(b), "  %c %-12s w=%.1f",
@@ -1725,11 +1735,10 @@ private:
             render_text("COMBAT", x, y, header_scale, {255, 100, 100, 255});
             y += line_h + 2;
             char b[128];
-            static const char* kStateName[] = {
-                "idle", "approach", "attack", "retreat", "block"};
-            const int st = enemy_ai_state_;
-            const char* st_name = (st >= 0 && st <= 4) ? kStateName[st] : "?";
-            std::snprintf(b, sizeof(b), "AI: %s (d:%.0f)", st_name, ai_last_distance_);
+            // [E2] State name derived from the stored decision (ADR-005
+            // Phase B) — the legacy enemy_ai_state_ int is bypassed.
+            std::snprintf(b, sizeof(b), "AI: %s (d:%.0f)",
+                          ai_display_state(), ai_last_distance_);
             render_text(b, x, y, body_scale, {255, 255, 255, 255});
             y += line_h;
             std::snprintf(b, sizeof(b), "HP: %.0f/%.0f  eHP: %.0f/%.0f",
@@ -4613,6 +4622,59 @@ private:
     std::vector<std::string> ai_last_candidates_;     // parallel to weights
     std::vector<float> ai_last_weights_;              // evaluated weights
     float ai_last_distance_ = 0;                      // ctx.distance used
+    // [E2] The stored decision the execute block consumes directly (ADR-005
+    // Phase B): the executor switches on this, not the legacy enemy_ai_state_
+    // int (bypassed; deleted with the fallback branches in Phase E).
+    TacticDecision ai_last_decision_;
+
+    // [E2] Attack/step/block classification of a decision animation — the
+    // D7 mapping rows inlined for direct consumption (the adapter is
+    // bypassed from Phase B and deleted in Phase E). Table-candidate lookup
+    // first, then the [HEURISTIC-TODO] name-list fallback carrying the
+    // category names tacticSettings.xml actually ships.
+    bool ai_anim_in_candidates(const std::string& anim,
+                               TacticTableType type) const {
+        if (anim.empty()) return false;
+        for (const TacticTable& t : tactic_tables_.tables()) {
+            if (t.type != type) continue;
+            for (const std::string& c : t.candidates) {
+                if (c == anim) return true;
+            }
+        }
+        return false;
+    }
+    bool ai_anim_is_attack(const std::string& anim) const {
+        return ai_anim_in_candidates(anim, TacticTableType::kAttackTable) ||
+               anim == "ShortAttack";
+    }
+    bool ai_anim_is_step(const std::string& anim) const {
+        return ai_anim_in_candidates(anim, TacticTableType::kMovementsTable) ||
+               anim == "ForwardStep" || anim == "BackStep" || anim == "Retreat";
+    }
+    bool ai_anim_is_retreat(const std::string& anim) const {
+        return anim == "BackStep" || anim == "Retreat";
+    }
+    bool ai_anim_is_block(const std::string& anim) const {
+        return anim == "Duck" || anim == "Block";
+    }
+    // [E2] F1 overlay state name, derived from the stored decision — the
+    // legacy enemy_ai_state_ int is no longer the executor's source of
+    // truth (same rows the D7 adapter mapped: attack > step > defense >
+    // block > idle).
+    const char* ai_display_state() const {
+        const TacticDecision& d = ai_last_decision_;
+        if (d.stage != DecisionStage::kIdle) {
+            if (ai_anim_is_attack(d.animation)) return "attack";
+            if (ai_anim_is_step(d.animation)) {
+                return ai_anim_is_retreat(d.animation) ? "retreat" : "approach";
+            }
+            if (d.stage == DecisionStage::kUseDefense ||
+                ai_anim_is_block(d.animation)) {
+                return "block";
+            }
+        }
+        return "idle";
+    }
     InputHandler input_handler_;
 
     // Debug overlay input cache — updated every frame in host_update_gameplay(),

@@ -7,8 +7,6 @@
 #include "attribute_aggregation.hpp"
 #include "damage_formula.hpp"
 #include "tactic_pipeline.hpp"
-#include "tactic_decision_adapter.hpp"
-
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -1767,13 +1765,14 @@ void Game::host_update_gameplay(uint32_t dt) {
                     // (ADR-005 D1/D7): the seven stages in the tracer's fixed
                     // order (UseDefense .. UseCautiousMovements) evaluate
                     // against the live fight state; the first stage that fires
-                    // wins, and the adapter maps the decision onto the legacy
-                    // state int the executor below reads. decide() feeds the
-                    // <AnimationFactors> probe from enemy_tactic_memory_ itself
-                    // (D5, per-memory decayed sums); bullets/anim_frames stay 0
-                    // = neutral — the legacy fight state has no per-frame
-                    // bullet or enemy animation-frame source (R3: a miss is
-                    // never an error).
+                    // wins and becomes the stored decision the executor below
+                    // consumes directly (E2, ADR-005 Phase B — the adapter is
+                    // bypassed, kept one commit for bisectability, deleted in
+                    // Phase E). decide() feeds the <AnimationFactors> probe
+                    // from enemy_tactic_memory_ itself (D5, per-memory decayed
+                    // sums); bullets/anim_frames stay 0 = neutral — the legacy
+                    // fight state has no per-frame bullet or enemy
+                    // animation-frame source (R3: a miss is never an error).
                     TacticContext ctx;
                     ctx.distance = dist;                       // world points
                     ctx.health = (player_fighter_.max_health > 0)
@@ -1787,16 +1786,18 @@ void Game::host_update_gameplay(uint32_t dt) {
                     const TacticDecision decision = decide(
                         *td, ctx, combat_.mutable_enemy_tactic_memory(),
                         tactic_tables_, std::rand, trace);
-                    enemy_ai_state_ = TacticDecisionAdapter::to_legacy_state(
-                        decision, tactic_tables_);
-                    const std::string anim =
-                        TacticDecisionAdapter::animation_for(decision);
+                    // [E2] Store the decision for the executor: it switches
+                    // on the TacticDecision directly (ADR-005 Phase B) — the
+                    // adapter is bypassed and enemy_ai_state_ is no longer
+                    // written on the loaded path (Phase E deletes it with
+                    // the fallback branches).
+                    ai_last_decision_ = decision;
 
                     // Stash for the F1 overlay (ADR C5): the DecisionTrace
                     // stage line-groups as candidate/weight rows (weight = the
                     // stage's first printed score; every stage is evaluated,
-                    // the first to fire wins), plus the adapter result as the
-                    // pick.
+                    // the first to fire wins), plus the decision's stage and
+                    // animation as the pick.
                     ai_last_candidates_.clear();
                     ai_last_weights_.clear();
                     for (const std::string& l : trace.lines()) {
@@ -1815,7 +1816,8 @@ void Game::host_update_gameplay(uint32_t dt) {
                     }
                     ai_last_distance_ = dist;
                     ai_last_pick_ = std::string(stage_label(decision.stage));
-                    if (!anim.empty()) ai_last_pick_ += "/" + anim;
+                    if (!decision.animation.empty())
+                        ai_last_pick_ += "/" + decision.animation;
 
                     // [D4] Each decision opens a fresh ResponseDelay window:
                     // the countdown rolls within the tactic's [Min,Max]
@@ -1881,19 +1883,30 @@ void Game::host_update_gameplay(uint32_t dt) {
                 }
             }
         }
-        // Execute current AI state
-        enemy_fighter_.is_blocking = (enemy_ai_state_ == 4);
+        // Execute the stored decision (E2, ADR-005 Phase B): the decision's
+        // animation name drives the enemy — attack animations open the
+        // attack window (cooldown as before), steps move the enemy,
+        // UseDefense/block animations set the block state, and a wait (or
+        // unclassified animation) idles for the decision's wait_frames.
+        // The legacy enemy_ai_state_ int is bypassed — it stays at its
+        // reset value and Phase E deletes it with the fallback branches.
+        const TacticDecision& decision = ai_last_decision_;
+        const bool decision_is_step = ai_anim_is_step(decision.animation);
+        enemy_fighter_.is_blocking =
+            (decision.stage == DecisionStage::kUseDefense) ||
+            ai_anim_is_block(decision.animation);
         float enemy_speed = 90.0f;
-        if (enemy_ai_state_ == 1) {  // approach
+        if (decision_is_step && !ai_anim_is_retreat(decision.animation)) {  // approach
             if (enemy_pos_x_ > player_pos_x_) enemy_pos_x_ -= enemy_speed * dt_sec;
             else enemy_pos_x_ += enemy_speed * dt_sec;
             enemy_anim_ = "step_forward";
             enemy_facing_right_ = (player_pos_x_ > enemy_pos_x_);
-        } else if (enemy_ai_state_ == 3) {  // retreat
+        } else if (decision_is_step) {  // retreat
             if (enemy_pos_x_ < player_pos_x_) enemy_pos_x_ -= enemy_speed * dt_sec;
             else enemy_pos_x_ += enemy_speed * dt_sec;
             enemy_anim_ = "step_back";
-        } else if (enemy_ai_state_ == 2 && enemy_attack_cooldown_ <= 0) {  // attack
+        } else if (ai_anim_is_attack(decision.animation) &&
+                   enemy_attack_cooldown_ <= 0) {  // attack
             enemy_anim_ = "high_punch";
             enemy_attacking_ = true;
             enemy_attack_hit_done_ = false;
@@ -1903,9 +1916,9 @@ void Game::host_update_gameplay(uint32_t dt) {
             // [ORIGINAL] Dojo is TRAINING — enemy attacks don't deal damage.
             // In the original, the Dojo sparring partner is a training dummy.
             // Health/damage only applies in real fights (map battles).
-        } else if (enemy_ai_state_ == 4) {  // block
+        } else if (enemy_fighter_.is_blocking) {  // block
             enemy_anim_ = "fists_block";
-        } else {  // idle
+        } else {  // idle — the decision's wait
             enemy_anim_ = "fists_idle";
         }
         if (enemy_attacking_) {
