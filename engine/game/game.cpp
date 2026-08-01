@@ -2215,32 +2215,6 @@ void Game::host_update_gameplay(uint32_t dt) {
         if (menu_anim_progress_ < target_progress) menu_anim_progress_ = target_progress;
     }
 
-    // === DYNAMIC FACING ===
-    // Character faces the enemy. Update facing DYNAMICALLY during step
-    // [ORIGINAL] PC source: sf2.js — facing is locked during root-motion
-    // moves (roll, jump, flip, attack). The original game only updates
-    // facing during idle/step states, not during special moves.
-    // Our root-motion whitelist (is_root_motion_anim) determines which
-    // animations lock facing. This prevents instant flip during roll.
-    bool facing_locked = hit_anim_ > 0 ||
-        current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
-        current_anim_ == "jump" || current_anim_ == "jump_away" ||
-        current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
-        current_anim_ == "back_handflip";
-    if (location_ && !facing_locked) {
-        // [ORIGINAL] Facing direction updates based on target position each frame.
-        // Binary: Model::playInfo +0x54 facing_direction set from sign parameter.
-        // In dojo mode: face the bag. In battle mode: face the enemy.
-        // Facing changes only when starting a new animation (sign param changes),
-        // but per-frame update here is equivalent since the target position is stable.
-        float bag_x = location_->enemy_x - 983.0f;
-        bool should_face_right = (bag_x >= player_pos_x_);
-        float dist_to_enemy = std::abs(bag_x - player_pos_x_);
-        if (dist_to_enemy > 30.0f) {
-            facing_right_ = should_face_right;
-        }
-    }
-
     // === INPUT: original SF2 controls ===
     // W=up, A=left, S=down, D=right (absolute directions)
     // O=punch, P=kick
@@ -2267,6 +2241,45 @@ void Game::host_update_gameplay(uint32_t dt) {
     if (touch_.right) key_right = true;
     if (touch_.up) key_up = true;
     if (touch_.down) key_down = true;
+
+    // === DYNAMIC FACING (deferred turn) ===
+    // [M5] The original captures facing when a NEW animation starts
+    // (ModelAnimation::playInfo sign param, Model+0x54) and holds it for the
+    // move; it does not re-evaluate every frame. Per-frame re-evaluation made
+    // the fighter snap around the instant a move ended behind the opponent
+    // (SOAK_TRIAGE.md M5). The desired (opponent-facing) direction is still
+    // tracked every frame, but it is APPLIED only at a fresh movement input,
+    // so the turn happens when the player asks for it. Facing stays locked
+    // during root-motion moves so their locomotion direction is stable; the
+    // render mirror sweeps (player_turn_blend_) instead of snapping.
+    // Runs after the touch fold so keyboard and stick count alike.
+    bool facing_locked = hit_anim_ > 0 ||
+        current_anim_ == "forward_roll" || current_anim_ == "back_roll" ||
+        current_anim_ == "jump" || current_anim_ == "jump_away" ||
+        current_anim_ == "front_flip" || current_anim_ == "back_flip" ||
+        current_anim_ == "back_handflip";
+    const bool any_dir_input = key_left || key_right || key_up || key_down;
+    if (location_ && !facing_locked) {
+        // In dojo mode: face the bag. In battle mode: face the enemy.
+        float bag_x = location_->enemy_x - 983.0f;
+        const bool should_face_right = (bag_x >= player_pos_x_);
+        const float dist_to_enemy = std::abs(bag_x - player_pos_x_);
+        if (dist_to_enemy > 30.0f) {
+            desired_facing_right_ = should_face_right;
+        }
+    }
+    if (!facing_locked && any_dir_input && !prev_dir_input_) {
+        facing_right_ = desired_facing_right_;
+    }
+    prev_dir_input_ = any_dir_input;
+    // [M5] Smooth turn: ease the render mirror toward the facing sign so a
+    // turn reads as a short rotation (~8 frames), not a one-frame snap.
+    {
+        const float blend_target = facing_right_ ? 1.0f : -1.0f;
+        player_turn_blend_ += (blend_target - player_turn_blend_) * 0.25f;
+        if (std::fabs(player_turn_blend_ - blend_target) < 0.02f)
+            player_turn_blend_ = blend_target;
+    }
 
     // [ORIGINAL] The intro scroll asks the player to move; it goes away the
     // moment they ACTUALLY move (position changes), and does not come back.
@@ -3077,8 +3090,16 @@ void Game::host_update_gameplay(uint32_t dt) {
                 // completes its full cycle. This prevents the visual interruption
                 // on a single tap (character must finish its natural step motion).
                 auto anim_it = assets_->animations().find(current_anim_);
+                // [M4] Cycle completion measured in ANIMATION frames
+                // (anim_time_ x anim_fps_), not engine frames: step_frames_
+                // counts 16 ms engine frames, so comparing it against the
+                // animation's frame_count cut a step at ~5 of its 16 frames
+                // — a third of a stride — losing ~20 of the authored 66
+                // units and snapping the fighter to idle mid-step (the
+                // soak's "small steps without waiting for walk animation
+                // end").
                 bool cycle_done = (anim_it != assets_->animations().end()) &&
-                    (input_handler_.step_frames() >= (uint32_t)anim_it->second.frame_count);
+                    (anim_time_ * anim_fps_) >= (float)anim_it->second.frame_count;
                 if (cycle_done) {
                     // If the opposite direction is already held, transition directly
                     // to the new step without going through idle.
@@ -3096,8 +3117,9 @@ void Game::host_update_gameplay(uint32_t dt) {
                 // (Model::step 0x10161ad0), movement entries are processed per
                 // complete animation cycle — direction changes mid-cycle are ignored.
                 auto anim_it = assets_->animations().find(current_anim_);
+                // [M4] Same animation-frame cycle measure as cycle_done above.
                 bool cycle_complete = (anim_it != assets_->animations().end()) &&
-                    (input_handler_.step_frames() >= (uint32_t)anim_it->second.frame_count);
+                    (anim_time_ * anim_fps_) >= (float)anim_it->second.frame_count;
                 if (cycle_complete) {
                     move_state_ = 2;
                     play_animation(step_fwd_anim, true, 0);  // priority 0: movement
@@ -3129,8 +3151,16 @@ void Game::host_update_gameplay(uint32_t dt) {
                 // completes its full cycle. This prevents the visual interruption
                 // on a single tap (character must finish its natural step motion).
                 auto anim_it = assets_->animations().find(current_anim_);
+                // [M4] Cycle completion measured in ANIMATION frames
+                // (anim_time_ x anim_fps_), not engine frames: step_frames_
+                // counts 16 ms engine frames, so comparing it against the
+                // animation's frame_count cut a step at ~5 of its 16 frames
+                // — a third of a stride — losing ~20 of the authored 66
+                // units and snapping the fighter to idle mid-step (the
+                // soak's "small steps without waiting for walk animation
+                // end").
                 bool cycle_done = (anim_it != assets_->animations().end()) &&
-                    (input_handler_.step_frames() >= (uint32_t)anim_it->second.frame_count);
+                    (anim_time_ * anim_fps_) >= (float)anim_it->second.frame_count;
                 if (cycle_done) {
                     // If the opposite direction is already held, transition directly
                     // to the new step without going through idle.
@@ -3148,8 +3178,9 @@ void Game::host_update_gameplay(uint32_t dt) {
                 // (Model::step 0x10161ad0), movement entries are processed per
                 // complete animation cycle — direction changes mid-cycle are ignored.
                 auto anim_it = assets_->animations().find(current_anim_);
+                // [M4] Same animation-frame cycle measure as cycle_done above.
                 bool cycle_complete = (anim_it != assets_->animations().end()) &&
-                    (input_handler_.step_frames() >= (uint32_t)anim_it->second.frame_count);
+                    (anim_time_ * anim_fps_) >= (float)anim_it->second.frame_count;
                 if (cycle_complete) {
                     move_state_ = 1;
                     play_animation(step_back_anim, true, 0);  // priority 0: movement
