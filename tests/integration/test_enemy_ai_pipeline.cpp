@@ -17,10 +17,15 @@
 // stash) and passes once the live block routes through decide().
 //
 // The D4 section is the gate canary: the loaded path decides through the
-// ResponseDelay countdown (starts at 0 = unblocked). The countdown window
-// contract (roll within [Min,Max], tick to exactly 0, no re-entry before 0)
-// is pinned both against the SHIPPED tactic data (ResponseDelay 0/0,
-// EnemyResponseDelay 30/60) and at the TacticMemory mechanism level.
+// re-entry gate. [Soak-fix A4 contract update] pacing comes from the
+// per-decision Wait countdown (R4 decision+0x12 — the binary re-decides
+// only when the current decision's wait expires; VERIFY_R34.md GREEN),
+// with the ResponseDelay window (roll within [Min,Max], tick to exactly 0,
+// no re-entry before 0) ADDING ON TOP — shipped ResponseDelay is 0/0, so
+// the wait countdown is the real gate (asserted behaviorally by
+// test_soak_ai_pacing A4). Both countdown mechanisms are pinned here,
+// against the SHIPPED tactic data (ResponseDelay 0/0, EnemyResponseDelay
+// 30/60) and at the TacticMemory mechanism level.
 // The E3 section pins the no-settings path (ADR P4 / GATE GE): settings
 // absent -> traced idle/wait decision, neutral enemy, no rand()%100
 // roulette anywhere.
@@ -271,10 +276,19 @@ int main() {
               "settings absent -> enemy stays in the idle animation");
     }
 
-    // ---- D4: ResponseDelay countdown gates loaded-path re-entry ----
+    // ---- D4: the re-entry gates — per-decision Wait + ResponseDelay ----
     // (E3: the invented enemy_ai_decision_interval_ gate + its probes are
-    // gone — the countdown is the ONLY re-entry gate; Phase E retired the
-    // interval-sabotage canary with them.)
+    // gone; Phase E retired the interval-sabotage canary with them.)
+    //
+    // [Soak-fix A4 contract update] Pacing comes from the PER-DECISION WAIT
+    // countdown (R4 decision+0x12, DECISION_SEMANTICS.md R4 §3.4 +
+    // VERIFY_R34.md GREEN): the binary re-decides only when the picked
+    // decision's wait expires, and the executor holds the decision while it
+    // runs (test_soak_ai_pacing A4 asserts the hold behaviorally). The
+    // ResponseDelay countdown ADDS ON TOP (shipped 0/0 -> always 0, so it
+    // does not pace alone). The window contract below therefore pins BOTH:
+    // the decision countdown reads 0 (shipped [0,0]) and the wait countdown
+    // stays >= 0, floors at 0, and is the positive gate after a decision.
     {
         resf2::test::HeadlessTestConfig config;
         config.asset_root = "assets";
@@ -302,30 +316,40 @@ int main() {
             }
         }
         CHECK(decided,
-              "loaded path decides via the ResponseDelay countdown gate");
+              "loaded path decides via the re-entry gate (Wait + ResponseDelay)");
 
         if (decided) {
             // Window contract against the SHIPPED Standard tactic, which
-            // declares ResponseDelay 0/0: the countdown reads 0 (0 lies in
-            // [Min,Max]) on every observed frame and the tick never drives
-            // it negative. EnemyResponseDelay (shipped 30/60) bounds the
-            // reaction countdown; it only moves when a stage-1/4 reaction
-            // fires (random in the live battle), so the pin is the bound.
+            // declares ResponseDelay 0/0: the decision countdown reads 0 (0
+            // lies in [Min,Max]) on every observed frame and the tick never
+            // drives it negative. EnemyResponseDelay (shipped 30/60) bounds
+            // the reaction countdown; it only moves when a stage-1/4
+            // reaction fires (random in the live battle), so the pin is the
+            // bound. The per-decision Wait countdown (R4, soak-fix A4) is
+            // the real pacing gate: it never goes negative, and it must be
+            // observed > 0 at least once (every live decision carries a
+            // positive wait — the duration arithmetic of the current
+            // animation, VERIFY_R34.md).
             bool window_ok = true;
+            bool saw_wait_gate = false;
             for (int i = 0; i < 120; ++i) {
                 runner.run_frames(1);
                 const int cd = runner.game().host_get_enemy_decision_countdown();
                 const int rc = runner.game().host_get_enemy_reaction_countdown();
-                if (cd != 0 || rc < 0 || rc > 60) {
+                const int wc = runner.game().host_get_enemy_wait_countdown();
+                if (wc > 0) saw_wait_gate = true;
+                if (cd != 0 || rc < 0 || rc > 60 || wc < 0) {
                     std::fprintf(stderr,
-                        "  window violation: cd=%d rc=%d at frame %d\n",
-                        cd, rc, i);
+                        "  window violation: cd=%d rc=%d wc=%d at frame %d\n",
+                        cd, rc, wc, i);
                     window_ok = false;
                     break;
                 }
             }
             CHECK(window_ok,
-                  "decision countdown 0 (shipped [0,0]) + reaction countdown within [0,60]");
+                  "decision countdown 0 (shipped [0,0]) + reaction [0,60] + wait floor 0");
+            CHECK(saw_wait_gate,
+                  "per-decision Wait countdown observed > 0 (the pacing gate)");
         }
     }
 
@@ -353,11 +377,29 @@ int main() {
         CHECK(ticks == rolled && mem.frames_until_next_decision == 0,
               "countdown ticks down to exactly 0 -> gate re-opens");
 
-        // Shipped Standard data is 0/0: the roll is 0, so the loaded path
-        // re-enters immediately (the live battle observes countdown == 0).
+        // Shipped Standard data is 0/0: the roll is 0, so the ResponseDelay
+        // window is never the pacing gate on the loaded path.
+        // [Soak-fix A4 contract update] Pacing comes from the per-decision
+        // Wait countdown (R4 decision+0x12, VERIFY_R34.md): start_decision_wait
+        // holds the decision for the R4 duration-arithmetic frames, ticks to
+        // exactly 0, floors, and a wait <= 0 means immediate re-entry (the
+        // binary's fallback — the engine then relies on ResponseDelay alone).
         mem.start_response_delay(0.0f, 0.0f, lcg);
         CHECK(mem.frames_until_next_decision == 0,
-              "shipped ResponseDelay [0,0] -> countdown 0 (immediate re-entry)");
+              "shipped ResponseDelay [0,0] -> decision countdown 0 (no delay)");
+        mem.start_decision_wait(12);
+        CHECK(mem.wait_frames_remaining == 12,
+              "start_decision_wait holds the decision for its R4 wait");
+        int wticks = 0;
+        while (mem.wait_frames_remaining > 0 && wticks < 32) {
+            mem.tick();
+            ++wticks;
+        }
+        CHECK(wticks == 12 && mem.wait_frames_remaining == 0,
+              "wait countdown ticks to exactly 0 -> re-entry gate re-opens");
+        mem.start_decision_wait(-3);
+        CHECK(mem.wait_frames_remaining == 0,
+              "wait <= 0 -> immediate re-entry (binary fallback)");
 
         // EnemyResponseDelay: same roll/decrement contract, floor at 0.
         mem.start_enemy_reaction(30.0f, 60.0f, lcg);
