@@ -3237,7 +3237,13 @@ void Game::host_update_gameplay(uint32_t dt) {
     // character holds position. Suppress root motion during it to prevent
     // the visible twitching the NPivot sway in the animation would cause.
     if (!start_stance_playing_) {
-        player_pos_x_ += anim_root_dx_ * (facing_right_ ? 1.0f : -1.0f);
+        // [M3] "jump" (W alone, JumpUp) is a pure vertical hop: its authored
+        // NPivot X wobbles ±6 units (net 0) around the start, which the soak
+        // rendered as a visible left/right drift (~0.10 units/frame) whenever
+        // the jump followed a non-aligned move (e.g. a step) and the raw
+        // deltas were applied. The hop must not travel horizontally at all.
+        const float root_dx = (current_anim_ == "jump") ? 0.0f : anim_root_dx_;
+        player_pos_x_ += root_dx * (facing_right_ ? 1.0f : -1.0f);
     }
 
     // [MOVEMENT] Debug log for movement state
