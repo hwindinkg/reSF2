@@ -2442,6 +2442,19 @@ void Game::host_update_gameplay(uint32_t dt) {
     // We set start_stance_playing_ = true when the stance starts, and clear it
     // when the animation finishes. While true, ALL combat/movement input is
     // skipped (the player can't punch/kick/move during the intro).
+    // [A6] Start-stance hold exit (SOAK_TRIAGE.md A6): once the intro
+    // animation has completed (hit_anim_ == 0) the held stance pose ends on
+    // the player's first input — any direction key or punch/kick — and the
+    // fight begins (round stage Je=1 StartStance -> Je=2 Fight). The
+    // original holds the stance until the player interacts; a hit would
+    // break it too, but the enemy AI is gated during the stance (A1), so
+    // only input is reachable today. Runs before the in_attack gate so the
+    // same frame's input is processed normally.
+    if (start_stance_playing_ && hit_anim_ == 0 &&
+        (key_forward || key_back || key_up || key_down ||
+         punch_pressed || kick_pressed)) {
+        start_stance_playing_ = false;
+    }
     bool in_attack = (move_state_ == 10 && current_move_ != "StartStance" && hit_anim_ > 0);
     if (start_stance_playing_) {
         // Block all input during StartStance intro (original behavior)
@@ -3238,8 +3251,14 @@ void Game::host_update_gameplay(uint32_t dt) {
     if (need_switch_to_idle_) {
         need_switch_to_idle_ = false;
         if (start_stance_playing_) {
-            start_stance_playing_ = false;
-        }
+            // [A6] Start-stance hold (SOAK_TRIAGE.md A6): the original
+            // holds the stance pose until the player's first input (round
+            // stage Je=1 StartStance -> Je=2 Fight — the soak showed the
+            // stance dropping to stance_idle right after the animation).
+            // The finished non-looping stance clamps to its final frame and
+            // the render keeps the pose; the exit check in the input
+            // section below breaks the hold on the first input.
+        } else {
         // Check if a direction key is held — if so, skip idle and let the
         // step-start logic (above, next frame) fire immediately. We still
         // need one frame in idle state for the step logic to trigger, but
@@ -3259,6 +3278,7 @@ void Game::host_update_gameplay(uint32_t dt) {
         // The step-start logic at the top of the step block will fire next
         // frame (move_state_ == 0 && key_forward/back), starting the new step
         // without any visible idle pose in between.
+        }
     }
 
     // === HIT DETECTION ===
