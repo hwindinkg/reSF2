@@ -124,7 +124,14 @@ Real values from `assets/internalSettings.xml`:
 
 ---
 
-## GAP-4 — AI tactic model: two terms omitted  [SCHEMA CONFIRMED]
+## GAP-4 — AI tactic model: two terms omitted  [PORTED 2026-08-01]
+
+**DONE 2026-08-01** — ADR-005 implemented end to end, gates G1/G2 passed,
+48/48 tests green. Commit trail: pipeline `63a5897` → order-golden gate G1
+`b142fd7` → adapter wiring `1661f69` → Phase-B removal of the
+FSM/adapter/decision interval `f7a7c72`. Close-out inventory at the end of
+this section; soak pending (human battle soak — Dojo + map battle with the F1
+overlay, notes to follow).
 
 `engine/game/tactic_settings.cpp` says:
 ```
@@ -179,6 +186,25 @@ DecisionType / Decision {Wait=%d}
 reSF2's `AIEngine` FSM (Idle->Approach->Attack->Retreat->Block) is not this
 model at all.
 
+### GAP-4 close-out inventory (2026-08-01)
+
+Surviving `[HEURISTIC-TODO]`s and open RE items, with status. R-numbers are
+the ADR-005 risk table / `@reverser` queue items; verification reports live in
+`reverse/analysis/VERIFY_*.md`.
+
+| item | status | evidence |
+|---|---|---|
+| R1 — `.tbs`/`.stb`/`.sts` format & missing-family packing | **done** — families absent from this dump; per-family stubs shipped as designed (ADR-005 D3) | ATF_RECORD_858.md |
+| R2 — `.atf` stride-858 row semantics (AnimationFactors probe source) | **GREEN** — probe stays neutral-by-zero (ADR-005 D5) | ATF_RECORD_858.md |
+| R3 — stage chance comparator/normalisation | **GREEN** — binary-verified comparator | VERIFY_R34.md, commit `d3050c1` |
+| R4 — ExpectedWait curve→frames mapping | **GREEN** — gate/wait mapping binary-verified | VERIFY_R34.md, commit `d3050c1` |
+| R5 — Memory/Strikes/Intervals update & reset points | **GREEN** — no ring in the binary; `<Memory>` carries only Strikes/RoundFactor | VERIFY_R56.md, MEMORY_INDEXING_R56.md |
+| R6 — QuickAttack[i]/Evade[i] table indexing | **GREEN** — index = XML document order → animation name | VERIFY_R56.md |
+| R7 — `game.cpp:1756-1822` live vs legacy duplicate | **resolved** — zero callers verified; dead copy deleted | commit `d75dcad` |
+| v=7 claim (c) — `{name → ids}` map @ `0x8F86F258` | **OPEN, NEEDS_HUMAN** — dump shows a populated map (983 entries) with no statically discoverable writer; non-blocking (engine D/H channels stay neutral); live-debugger trace of `0x8F86F258` writes suggested | VERIFY_R56.md:204-226 |
+| `ConditionalDesigionFactor` | extension-point comment only — never implemented (0 ARM string-table matches) | PORT_GAPS.md:145-148, ADR-005 D6 |
+| FSM / adapter / decision interval | removed by design (ADR-005 Phase B) | commit `f7a7c72` |
+
 ---
 
 ## GAP-5 — Skeleton/geometry nodes  [CONFIRMED]
@@ -202,8 +228,9 @@ and margins are the missing piece.
 2. **GAP-2** — pass the four per-frame doubles instead of one float.
 3. **GAP-3** — **formula now fully recovered**, see the section at the end of
    this file. Implementing it needs the attribute system.
-3. **GAP-4** — replace the FSM with the weight/roulette model and load the
-   `.tbs`/`.stb`/`.sts`/`.atf` tables.
+3. ~~**GAP-4**~~ — **DONE** (2026-08-01): weight/roulette pipeline ported,
+   FSM and adapter removed (`f7a7c72`). Loaders: only `.atf` is present in the
+   dump; `.tbs`/`.stb`/`.sts` stay stubbed by design (ADR-005 D3, R1).
 4. **GAP-5** — capsule/edge collision geometry.
 
 ---

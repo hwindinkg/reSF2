@@ -67,7 +67,7 @@ object layout, and gives a directly comparable text golden.
 
 A real fight (not the dojo bag) is likely required.
 
-### 2. AI decisions (GAP-4)
+### 2. AI decisions (GAP-4)  [GAP-4 PORTED 2026-08-01 — order golden landed]
 
 The tactics tracer prints, per decision:
 `UseDefense / UseSafeAttack / TableAttack / DodgeMissiles / QuickAttack[i] /
@@ -78,6 +78,15 @@ Decision {Wait=%d}`, plus the `MyAnim/MyHeel_1` distance matrix.
 Capturing a few hundred of those lines with the RNG state gives a golden that
 pins the roulette model exactly, including the `Wait` frame counts. This is far
 stronger than unit-testing the weight curve in isolation.
+
+**Status (2026-08-01):** GAP-4 is ported (ADR-005 implemented; FSM/adapter
+removed, commit `f7a7c72`). The tracer-**order** contract is now pinned by
+`tests/golden/tactic_decision_trace.golden.txt` (gate G1, commit `b142fd7`):
+a byte-exact golden of the pipeline's `DecisionTrace` output in tracer order,
+built from the tracer strings at `0x8F798090`..`0x8F79834C` (see the file's
+`[ORIGINAL]` provenance header). The live-capture **value** golden described
+above remains the follow-up — it is the suggested way to close the open v=7
+claim (c) (see the GAP-4 close-out inventory in PORT_GAPS.md).
 
 ### 3. Animation root motion (GAP-5)
 
