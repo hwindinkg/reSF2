@@ -86,7 +86,15 @@ void Game::play_animation(const std::string& name, bool loop, int priority) {
     if (first_frame >= 0 && anim_fps_ > 0.0f)
         anim_time_ = static_cast<float>(first_frame) / anim_fps_;
 
-    apply_align(name, move_def, first_frame, prev_anchor_rel_x, prev_anchor_known);
+    // [M2] Whole-body-translate moves (rolls, dash, flips) play their
+    // authored NPivot root motion RAW: the one-shot align placement would
+    // snap the fighter onto the roll's (far-travelling) anchor — measured:
+    // forward_roll from idle started 38 px BACKWARD — and the per-frame
+    // pinning (guarded in AnimationPlayer::update) would cancel the motion.
+    // prev_move_had_align_ is still recorded below so the move AFTER a roll
+    // keeps its normal alignment continuity.
+    if (!is_root_motion_travel_anim(name))
+        apply_align(name, move_def, first_frame, prev_anchor_rel_x, prev_anchor_known);
     // Remember whether the move now playing leaves the model with a current
     // node, i.e. whether it declares an <Align> pivot. See apply_align().
     // Tell the player which node this move pins, so its per-frame root motion

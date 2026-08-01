@@ -212,8 +212,14 @@ int main() {
         std::fprintf(stderr, "  [M2a] forward_roll displacement = %.1f (authored +404)\n", dx_fwd);
         CHECK(dx_fwd >= 150.0f, "M2a: forward roll travels >= 150 units");
 
-        // Back roll (S+A): authored NPivot net -350 over 31 frames.
-        run_until_idle_settled(runner);
+        // Back roll (S+A): authored NPivot net -350 over 31 frames. Run in a
+        // FRESH runner: the forward roll above crosses the bag, which flips
+        // the facing — S+A would then read as S+forward. The back-roll
+        // scenario needs the pre-crossing orientation (bag to the right).
+        {
+        resf2::test::HeadlessTestRunner runner = make_dojo_runner();
+        if (!runner.init()) { std::fprintf(stderr, "FAIL: M2b init() returned false\n"); return 1; }
+        warm_up(runner);
         press_combo(runner, {plat::Key::S, plat::Key::A}, 6);
         float back_x0 = 0.0f;
         bool back_started = false;
@@ -234,6 +240,7 @@ int main() {
         CHECK(-dx_back >= 150.0f, "M2b: back roll travels >= 150 units");
         CHECK(dx_fwd >= 1.0f && (-dx_back) / dx_fwd >= 0.5f,
               "M2c: back roll travels at least half the forward roll's distance");
+        }
     }
 
     // ---- M3: jump does not drift horizontally ----
