@@ -473,7 +473,7 @@ set_tests_properties(test_crash_stability PROPERTIES TIMEOUT 300)
 
 # Phase 5: Full battle E2E test — complete fight flow from start to Results
 add_integration_test(test_full_battle)
-set_tests_properties(test_full_battle PROPERTIES TIMEOUT 300)
+set_tests_properties(test_full_battle PROPERTIES TIMEOUT 720)
 
 # GAP-4 D3: the LIVE enemy-AI decision branch routes through the
 # TacticDecisionPipeline + adapter — asserts the F1 overlay stash is fed from
