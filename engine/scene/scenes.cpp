@@ -703,9 +703,17 @@ void MapScene::on_render(SceneContext& ctx) {
                                           fight.name;
                 if (ctx.host.host_is_level_completed(fight_level)) ++done;
             }
-            std::printf("[MAP] round_progress: zone='%s' battle='%s' done=%d total=%d\n",
-                        selected_zone_name_.c_str(), selected_battle_->name.c_str(),
-                        done, total);
+            // [L1] Log the round progress ONCE per state change, not every
+            // frame: the soak log showed ~150 identical lines per second.
+            char progress_buf[160];
+            std::snprintf(progress_buf, sizeof(progress_buf),
+                          "[MAP] round_progress: zone='%s' battle='%s' done=%d total=%d",
+                          selected_zone_name_.c_str(), selected_battle_->name.c_str(),
+                          done, total);
+            if (progress_buf != last_round_progress_log_) {
+                std::printf("%s\n", progress_buf);
+                last_round_progress_log_ = progress_buf;
+            }
             std::string tpl = ctx.host.host_localized("stage");
             if (tpl.empty()) tpl = "Stage {0}/{1}";
             const std::string a = std::to_string(done), b2 = std::to_string(total);
