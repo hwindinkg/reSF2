@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     if (npi < 0) { std::fprintf(stderr, "no NPivot in skeleton\n"); return 1; }
 
     const char* names[] = {
-        "step_forward", "step_back", "forward_roll", "back_roll",
+        "step_forward", "step_back", "stance_idle", "forward_roll", "back_roll",
         "back_handflip", "double_step_forward", "jump", "jump_away",
         "front_flip", "back_flip",
     };
