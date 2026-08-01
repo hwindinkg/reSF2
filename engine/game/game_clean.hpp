@@ -366,6 +366,9 @@ void host_add_completed_level(const std::string& level);
     // Tutorial: check if the initial Sensei tutorial should fire.
     // Called after loading progress. [ORIGINAL] Driven by Tutorial attribute.
     void check_tutorial();
+    // [Q3] Queue the Kenji (Dojo_Disciple) fight after the bag phase so the
+    // training dialog hands over to Battle instead of the dojo.
+    void queue_tutorial_battle();
 
 
 std::string host_get_battle_result() const override;
