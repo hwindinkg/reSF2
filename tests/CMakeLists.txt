@@ -489,7 +489,9 @@ set_tests_properties(test_soak_ai_pacing PROPERTIES TIMEOUT 240)
 # dash/step pacing, M5 deferred turn). Five dojo scenarios; 120 like the
 # wave-1 suites so a parallel full-suite run does not starve them.
 add_integration_test(test_soak_movement_defects)
-set_tests_properties(test_soak_movement_defects PROPERTIES TIMEOUT 180)
+# Five dojo scenarios with full stance intros and roll/dash playouts (~12k
+# frames of headless game time); 300 like test_full_battle's tolerance.
+set_tests_properties(test_soak_movement_defects PROPERTIES TIMEOUT 300)
 
 
 # Phase 5: Screenshot comparison — renders headlessly, compares against
