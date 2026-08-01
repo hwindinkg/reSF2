@@ -317,11 +317,37 @@ int main() {
 
         // (b) spaced single taps (outside the dash window) must each complete
         //     a full forward step and never walk the fighter backward (the
-        //     old align-snap regression was a net -7.9 per tap).
-        run_until_idle_settled(runner);
+        //     old align-snap regression was a net -7.9 per tap). Fresh runner:
+        //     the M4a dash crosses the bag, which flips the facing — D would
+        //     then read as "back" and the taps would walk toward the bag.
+        {
+        resf2::test::HeadlessTestRunner runner = make_dojo_runner();
+        if (!runner.init()) { std::fprintf(stderr, "FAIL: M4b init() returned false\n"); return 1; }
+        warm_up(runner);
+
+        // One tap, then wait for the step to end on its own: the walk must
+        // play out its authored cycle (step_forward: 16 frames at 20 fps =
+        // 800 ms, NPivot +66 units) instead of being cut at 16 ENGINE frames
+        // (~5 animation frames, ~25 units — the soak's "small steps without
+        // waiting for walk animation end").
         const float x0 = runner.game().host_get_player_pos_x();
+        edge_down(runner, plat::Key::D);
+        runner.run_frames(2);
+        edge_up(runner, plat::Key::D);
+        for (int i = 0; i < 60; ++i) {
+            runner.run_frames(1);
+            if (runner.game().host_get_player_move_state() == 0 &&
+                runner.game().host_get_player_anim() == "stance_idle")
+                break;
+        }
+        const float dx_tap = runner.game().host_get_player_pos_x() - x0;
+        std::fprintf(stderr, "  [M4b] single tap walked %.1f of the authored %.0f-unit cycle\n", dx_tap, 66.0);
+        CHECK(dx_tap >= 50.0f, "M4b: a single tap walks the full step cycle (>= 50 units)");
+
+        // 4 spaced taps (outside the dash window) must keep advancing and
+        // never walk the fighter backward.
+        float prev_x = runner.game().host_get_player_pos_x();
         float min_advance = 1e9f;
-        float prev_x = x0;
         for (int t = 0; t < 4; ++t) {
             edge_down(runner, plat::Key::D);
             runner.run_frames(2);
@@ -335,6 +361,7 @@ int main() {
                      prev_x - x0, min_advance);
         CHECK(min_advance >= 10.0f, "M4b: every single tap completes a forward step (no cancel/back-walk)");
         CHECK(prev_x - x0 >= 80.0f, "M4b: 4 spaced taps advance >= 80 units total");
+        }
     }
 
     // ---- M5: deferred turn + smooth mirror sweep ----
