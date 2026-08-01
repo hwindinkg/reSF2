@@ -1738,10 +1738,20 @@ void Game::host_update_gameplay(uint32_t dt) {
     if (show_enemy_ && !enemy_fighter_.is_dead && !player_fighter_.is_dead) {
         // [D3] One tick per AI frame: advances the TacticMemory interval
         // counters and the decay clock (frames stand in for the binary's
-        // fighter+0x71c hits-taken counter, MEMORY_INDEXING_R56.md 2).
+        // fighter+0x71c hits-taken counter, MEMORY_INDEXING_R56.md §2).
         combat_.mutable_enemy_tactic_memory().tick();
         enemy_attack_cooldown_ = std::max(0.0f, enemy_attack_cooldown_ - dt_sec);
-        if (enemy_fighter_.hit_stun_time > 0) {
+        // [A1] Battle-intro gate (SOAK_TRIAGE.md A1): during the
+        // start-stance phase the enemy takes no decisions and performs no
+        // actions — no attack, step, block or hit before the intro phase
+        // completes (the soak showed "[COMBAT] Enemy hit player" twice right
+        // after "[scene] enter Battle", before StartStance ended). The anim
+        // clock below still advances so the enemy's start-stance pose plays
+        // (A2), and the facing update keeps the stance mirrored correctly.
+        if (start_stance_playing_) {
+            // Intro hold: the enemy stays in the start-stance pose set at
+            // battle start (enemy_anim_ = "stance_2").
+        } else if (enemy_fighter_.hit_stun_time > 0) {
             // Stunned - can't act
             enemy_anim_ = "fists_hit";
         } else {
