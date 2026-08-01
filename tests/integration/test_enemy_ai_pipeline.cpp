@@ -1,7 +1,10 @@
 // tests/integration/test_enemy_ai_pipeline.cpp
 //
-// GAP-4 Phase D step D3 — the LIVE enemy-AI decision branch runs through the
-// TacticDecisionPipeline + TacticDecisionAdapter (ADR-005 D1/D7).
+// GAP-4 Phase D steps D3+D4 — the LIVE enemy-AI decision branch runs through
+// the TacticDecisionPipeline + TacticDecisionAdapter (ADR-005 D1/D7), and
+// re-entry on the loaded path is gated by the ResponseDelay frame countdown
+// (ADR-005 D8), NOT the invented enemy_ai_decision_interval_ (strangler:
+// the interval remains the fallback-paths gate until Phase E).
 //
 // With the pipeline wired, the F1 overlay stash (ai_last_candidates_ /
 // ai_last_weights_ / ai_last_distance_ / ai_last_pick_, ADR C5) is fed from
@@ -13,12 +16,23 @@
 //
 // This test is the wiring canary: it FAILS on the D2-era code (roulette
 // stash) and passes once the live block routes through decide().
+//
+// The D4 section is the gate canary: with the decision interval sabotaged to
+// 1000 s the loaded path MUST still decide (its gate is the countdown, which
+// starts at 0 = unblocked). On the D3 gate (interval on every path) no
+// decision ever happens inside the horizon — RED. The countdown window
+// contract (roll within [Min,Max], tick to exactly 0, no re-entry before 0)
+// is pinned both against the SHIPPED tactic data (ResponseDelay 0/0,
+// EnemyResponseDelay 30/60) and at the TacticMemory mechanism level.
 
 #include "../headless_test_runner.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
+
+#include "engine/game/tactic_memory.hpp"
 
 static int tests_passed = 0;
 static int tests_failed = 0;
@@ -135,6 +149,113 @@ int main() {
             "Decided=%d candidates=%zu state=%d pick='%s' dist=%.0f\n",
             decided ? 1 : 0, cand.size(), st, pick.c_str(),
             g.host_get_ai_last_distance());
+    }
+
+    // ---- D4: ResponseDelay countdown gates loaded-path re-entry ----
+    {
+        resf2::test::HeadlessTestConfig config;
+        config.asset_root = "assets";
+        config.width = 1280;
+        config.height = 720;
+        config.fixed_dt_ms = 16;
+        config.start_scene = "battle";
+        config.hermetic = true;
+
+        resf2::test::HeadlessTestRunner runner(config);
+        if (!runner.init()) {
+            std::fprintf(stderr, "FAIL: D4 init() returned false\n");
+            return 1;
+        }
+        configure_battle(runner);
+
+        // Strangler baseline: the fallback interval still exists and reads
+        // its 0.8 s default (deleted only in Phase E).
+        CHECK(runner.game().host_get_enemy_ai_decision_interval() == 0.8f,
+              "fallback enemy_ai_decision_interval_ default intact (strangler)");
+
+        // Sabotage the interval: on the D3 gate (interval on EVERY path) the
+        // loaded path would never decide inside the horizon. D4 must decide
+        // regardless — the loaded path reads only the ResponseDelay
+        // countdown, which starts at 0 = unblocked.
+        runner.game().host_set_enemy_ai_decision_interval(1000.0f);
+        CHECK(runner.game().host_get_enemy_ai_decision_interval() == 1000.0f,
+              "interval sabotage took effect");
+
+        bool decided = false;
+        const int kMaxFrames = 400;  // ~6.4 s — far below the sabotaged 1000 s
+        for (int i = 0; i < kMaxFrames; ++i) {
+            runner.run_frames(1);
+            if (runner.game().host_get_ai_last_candidates().size() >= 7) {
+                decided = true;
+                break;
+            }
+        }
+        CHECK(decided,
+              "loaded path decides with the interval sabotaged (countdown gate)");
+
+        if (decided) {
+            // Window contract against the SHIPPED Standard tactic, which
+            // declares ResponseDelay 0/0: the countdown reads 0 (0 lies in
+            // [Min,Max]) on every observed frame and the tick never drives
+            // it negative. EnemyResponseDelay (shipped 30/60) bounds the
+            // reaction countdown; it only moves when a stage-1/4 reaction
+            // fires (random in the live battle), so the pin is the bound.
+            bool window_ok = true;
+            for (int i = 0; i < 120; ++i) {
+                runner.run_frames(1);
+                const int cd = runner.game().host_get_enemy_decision_countdown();
+                const int rc = runner.game().host_get_enemy_reaction_countdown();
+                if (cd != 0 || rc < 0 || rc > 60) {
+                    std::fprintf(stderr,
+                        "  window violation: cd=%d rc=%d at frame %d\n",
+                        cd, rc, i);
+                    window_ok = false;
+                    break;
+                }
+            }
+            CHECK(window_ok,
+                  "decision countdown 0 (shipped [0,0]) + reaction countdown within [0,60]");
+        }
+    }
+
+    // ---- D4 mechanism: the countdown window contract (TacticMemory) ----
+    {
+        resf2::game::TacticMemory mem;
+        auto lcg = [seed = 7u]() mutable -> unsigned {
+            seed = seed * 1103515245u + 12345u;
+            return (seed >> 16) % ((unsigned)RAND_MAX + 1u);
+        };
+
+        // ResponseDelay: the roll lands in [Min,Max] inclusive and the
+        // per-frame tick reaches exactly 0 at the rolled frame — the gate
+        // (countdown == 0) stays closed until then ("no pipeline re-entry
+        // before frames_until_next_decision == 0").
+        mem.start_response_delay(10.0f, 20.0f, lcg);
+        const int rolled = mem.frames_until_next_decision;
+        CHECK(rolled >= 10 && rolled <= 20,
+              "start_response_delay rolls within [Min,Max]");
+        int ticks = 0;
+        while (mem.frames_until_next_decision > 0 && ticks < 32) {
+            mem.tick();
+            ++ticks;
+        }
+        CHECK(ticks == rolled && mem.frames_until_next_decision == 0,
+              "countdown ticks down to exactly 0 -> gate re-opens");
+
+        // Shipped Standard data is 0/0: the roll is 0, so the loaded path
+        // re-enters immediately (the live battle observes countdown == 0).
+        mem.start_response_delay(0.0f, 0.0f, lcg);
+        CHECK(mem.frames_until_next_decision == 0,
+              "shipped ResponseDelay [0,0] -> countdown 0 (immediate re-entry)");
+
+        // EnemyResponseDelay: same roll/decrement contract, floor at 0.
+        mem.start_enemy_reaction(30.0f, 60.0f, lcg);
+        const int eroll = mem.enemy_reaction_frames;
+        CHECK(eroll >= 30 && eroll <= 60,
+              "start_enemy_reaction rolls within [Min,Max]");
+        for (int i = 0; i < 128; ++i) mem.tick();
+        CHECK(mem.enemy_reaction_frames == 0,
+              "reaction countdown ticks to 0 and floors (never negative)");
     }
 
     // ---- Final verdict ----

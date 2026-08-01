@@ -1747,118 +1747,138 @@ void Game::host_update_gameplay(uint32_t dt) {
         if (enemy_fighter_.hit_stun_time > 0) {
             // Stunned — can't act
             enemy_anim_ = "fists_hit";
-        } else if (enemy_ai_timer_ >= enemy_ai_decision_interval_) {
-            enemy_ai_timer_ = 0;
+        } else {
             const TacticDef* td = tactics_.tactic("Standard");
             if (!td) td = tactics_.tactic("NoTables");
             float dist = std::abs(enemy_pos_x_ - player_pos_x_);
-            if (td && tactic_tables_.table_count() > 0) {
-                // [D3] LIVE enemy AI runs through the TacticDecisionPipeline
-                // (ADR-005 D1/D7): the seven stages in the tracer's fixed
-                // order (UseDefense .. UseCautiousMovements) evaluate against
-                // the live fight state; the first stage that fires wins, and
-                // the adapter maps the decision onto the legacy state int the
-                // executor below reads. decide() feeds the <AnimationFactors>
-                // probe from enemy_tactic_memory_ itself (D5, per-memory
-                // decayed sums); bullets/anim_frames stay 0 = neutral — the
-                // legacy fight state has no per-frame bullet or enemy
-                // animation-frame source (R3: a miss is never an error).
-                TacticContext ctx;
-                ctx.distance = dist;                       // world points
-                ctx.health = (player_fighter_.max_health > 0)
-                    ? enemy_fighter_.health / player_fighter_.max_health : 1.0f;
-                ctx.enemy_health = (player_fighter_.max_health > 0)
-                    ? player_fighter_.health / player_fighter_.max_health : 1.0f;
-                ctx.hits = (float)enemy_fighter_.hits_landed;
-                ctx.current_animation = enemy_anim_;       // probe target
+            const bool pipeline_ready = td && tactic_tables_.table_count() > 0;
+            // [D4] Re-entry gate split (ADR-005 D8): on the loaded path the
+            // pipeline re-enters only when the ResponseDelay frame countdown
+            // has elapsed (ticked per AI frame above; 0 = unblocked). The
+            // invented enemy_ai_decision_interval_ gate remains for the
+            // fallback paths only (deleted in Phase E).
+            const bool decision_due = pipeline_ready
+                ? combat_.enemy_tactic_memory().frames_until_next_decision == 0
+                : enemy_ai_timer_ >= enemy_ai_decision_interval_;
+            if (decision_due) {
+                enemy_ai_timer_ = 0;
+                if (pipeline_ready) {
+                    // [D3] LIVE enemy AI runs through the TacticDecisionPipeline
+                    // (ADR-005 D1/D7): the seven stages in the tracer's fixed
+                    // order (UseDefense .. UseCautiousMovements) evaluate
+                    // against the live fight state; the first stage that fires
+                    // wins, and the adapter maps the decision onto the legacy
+                    // state int the executor below reads. decide() feeds the
+                    // <AnimationFactors> probe from enemy_tactic_memory_ itself
+                    // (D5, per-memory decayed sums); bullets/anim_frames stay 0
+                    // = neutral — the legacy fight state has no per-frame
+                    // bullet or enemy animation-frame source (R3: a miss is
+                    // never an error).
+                    TacticContext ctx;
+                    ctx.distance = dist;                       // world points
+                    ctx.health = (player_fighter_.max_health > 0)
+                        ? enemy_fighter_.health / player_fighter_.max_health : 1.0f;
+                    ctx.enemy_health = (player_fighter_.max_health > 0)
+                        ? player_fighter_.health / player_fighter_.max_health : 1.0f;
+                    ctx.hits = (float)enemy_fighter_.hits_landed;
+                    ctx.current_animation = enemy_anim_;       // probe target
 
-                DecisionTrace trace;
-                const TacticDecision decision = decide(
-                    *td, ctx, combat_.mutable_enemy_tactic_memory(),
-                    tactic_tables_, std::rand, trace);
-                enemy_ai_state_ = TacticDecisionAdapter::to_legacy_state(
-                    decision, tactic_tables_);
-                const std::string anim =
-                    TacticDecisionAdapter::animation_for(decision);
+                    DecisionTrace trace;
+                    const TacticDecision decision = decide(
+                        *td, ctx, combat_.mutable_enemy_tactic_memory(),
+                        tactic_tables_, std::rand, trace);
+                    enemy_ai_state_ = TacticDecisionAdapter::to_legacy_state(
+                        decision, tactic_tables_);
+                    const std::string anim =
+                        TacticDecisionAdapter::animation_for(decision);
 
-                // Stash for the F1 overlay (ADR C5): the DecisionTrace stage
-                // line-groups as candidate/weight rows (weight = the stage's
-                // first printed score; every stage is evaluated, the first to
-                // fire wins), plus the adapter result as the pick.
-                ai_last_candidates_.clear();
-                ai_last_weights_.clear();
-                for (const std::string& l : trace.lines()) {
-                    // Stages end where the epilogue begins (DistanceError..).
-                    if (l.rfind("DistanceError", 0) == 0) break;
-                    const std::size_t colon = l.find(':');
-                    ai_last_candidates_.push_back(
-                        (colon == std::string::npos) ? l : l.substr(0, colon));
-                    float w = 0.0f;
-                    const std::size_t sep = l.find(" / ");
-                    if (sep != std::string::npos) {
-                        char* end = nullptr;
-                        w = std::strtof(l.c_str() + sep + 3, &end);
+                    // Stash for the F1 overlay (ADR C5): the DecisionTrace
+                    // stage line-groups as candidate/weight rows (weight = the
+                    // stage's first printed score; every stage is evaluated,
+                    // the first to fire wins), plus the adapter result as the
+                    // pick.
+                    ai_last_candidates_.clear();
+                    ai_last_weights_.clear();
+                    for (const std::string& l : trace.lines()) {
+                        // Stages end where the epilogue begins (DistanceError..).
+                        if (l.rfind("DistanceError", 0) == 0) break;
+                        const std::size_t colon = l.find(':');
+                        ai_last_candidates_.push_back(
+                            (colon == std::string::npos) ? l : l.substr(0, colon));
+                        float w = 0.0f;
+                        const std::size_t sep = l.find(" / ");
+                        if (sep != std::string::npos) {
+                            char* end = nullptr;
+                            w = std::strtof(l.c_str() + sep + 3, &end);
+                        }
+                        ai_last_weights_.push_back(w);
                     }
-                    ai_last_weights_.push_back(w);
-                }
-                ai_last_distance_ = dist;
-                ai_last_pick_ = std::string(stage_label(decision.stage));
-                if (!anim.empty()) ai_last_pick_ += "/" + anim;
-            } else if (td) {
-                // [HEURISTIC-TODO] tactics loaded but no table families
-                // (assets/tactics missing) — keep the legacy roulette until
-                // Phase E deletes this path.
-                //
-                // [ORIGINAL] Replaces the invented distance-threshold state
-                // machine with tacticSettings.xml's roulette-wheel pick
-                // (class `cc`, jL/iCa in sf2_beautified.js). Every candidate
-                // *category* carries a curve weight evaluated against the
-                // live fight state; the winner is a weighted-random draw. See
-                // tactic_settings.hpp.
-                //
-                // The candidates are the abstract categories a bare-fists
-                // enemy can perform. The original maps each category to a
-                // concrete animation from the warrior's tables; until warrior
-                // templates land (5.3) we map back onto the placeholder's
-                // five states:
-                //   ForwardStep -> approach   BackStep/Retreat -> retreat
-                //   ShortAttack -> attack     Duck -> block   (default) -> idle
-                TacticContext ctx;
-                ctx.distance = dist;                       // world points
-                ctx.health = (player_fighter_.max_health > 0)
-                    ? enemy_fighter_.health / player_fighter_.max_health : 1.0f;
-                ctx.enemy_health = (player_fighter_.max_health > 0)
-                    ? player_fighter_.health / player_fighter_.max_health : 1.0f;
-                ctx.hits = (float)enemy_fighter_.hits_landed;
+                    ai_last_distance_ = dist;
+                    ai_last_pick_ = std::string(stage_label(decision.stage));
+                    if (!anim.empty()) ai_last_pick_ += "/" + anim;
 
-                static const std::vector<std::string> kCandidates = {
-                    "ForwardStep", "ShortAttack", "BackStep", "Retreat", "Duck"
-                };
-                std::vector<float> weights;
-                int pick = tactics_.choose_debug(*td, kCandidates, ctx, weights);
+                    // [D4] Each decision opens a fresh ResponseDelay window:
+                    // the countdown rolls within the tactic's [Min,Max]
+                    // (inclusive) and ticks down one per AI frame, blocking
+                    // re-entry until it reaches 0.
+                    combat_.mutable_enemy_tactic_memory().start_response_delay(
+                        td->response_delay.min, td->response_delay.max, std::rand);
+                } else if (td) {
+                    // [HEURISTIC-TODO] tactics loaded but no table families
+                    // (assets/tactics missing) — keep the legacy roulette until
+                    // Phase E deletes this path.
+                    //
+                    // [ORIGINAL] Replaces the invented distance-threshold state
+                    // machine with tacticSettings.xml's roulette-wheel pick
+                    // (class `cc`, jL/iCa in sf2_beautified.js). Every candidate
+                    // *category* carries a curve weight evaluated against the
+                    // live fight state; the winner is a weighted-random draw.
+                    // See tactic_settings.hpp.
+                    //
+                    // The candidates are the abstract categories a bare-fists
+                    // enemy can perform. The original maps each category to a
+                    // concrete animation from the warrior's tables; until
+                    // warrior templates land (5.3) we map back onto the
+                    // placeholder's five states:
+                    //   ForwardStep -> approach   BackStep/Retreat -> retreat
+                    //   ShortAttack -> attack     Duck -> block   (default) -> idle
+                    TacticContext ctx;
+                    ctx.distance = dist;                       // world points
+                    ctx.health = (player_fighter_.max_health > 0)
+                        ? enemy_fighter_.health / player_fighter_.max_health : 1.0f;
+                    ctx.enemy_health = (player_fighter_.max_health > 0)
+                        ? player_fighter_.health / player_fighter_.max_health : 1.0f;
+                    ctx.hits = (float)enemy_fighter_.hits_landed;
 
-                // Stash for the F1 overlay.
-                ai_last_candidates_ = kCandidates;
-                ai_last_weights_ = weights;
-                ai_last_distance_ = dist;
-                ai_last_pick_ = (pick >= 0) ? kCandidates[(size_t)pick] : "(none)";
+                    static const std::vector<std::string> kCandidates = {
+                        "ForwardStep", "ShortAttack", "BackStep", "Retreat", "Duck"
+                    };
+                    std::vector<float> weights;
+                    int pick = tactics_.choose_debug(*td, kCandidates, ctx, weights);
 
-                if (pick < 0) {
-                    enemy_ai_state_ = 0;  // idle
+                    // Stash for the F1 overlay.
+                    ai_last_candidates_ = kCandidates;
+                    ai_last_weights_ = weights;
+                    ai_last_distance_ = dist;
+                    ai_last_pick_ = (pick >= 0) ? kCandidates[(size_t)pick] : "(none)";
+
+                    if (pick < 0) {
+                        enemy_ai_state_ = 0;  // idle
+                    } else {
+                        const std::string& cat = kCandidates[(size_t)pick];
+                        if (cat == "ForwardStep")      enemy_ai_state_ = 1;  // approach
+                        else if (cat == "ShortAttack") enemy_ai_state_ = 2;  // attack
+                        else if (cat == "BackStep" ||
+                                 cat == "Retreat")     enemy_ai_state_ = 3;  // retreat
+                        else if (cat == "Duck")        enemy_ai_state_ = 4;  // block
+                        else                           enemy_ai_state_ = 0;  // idle
+                    }
                 } else {
-                    const std::string& cat = kCandidates[(size_t)pick];
-                    if (cat == "ForwardStep")      enemy_ai_state_ = 1;  // approach
-                    else if (cat == "ShortAttack") enemy_ai_state_ = 2;  // attack
-                    else if (cat == "BackStep" ||
-                             cat == "Retreat")     enemy_ai_state_ = 3;  // retreat
-                    else if (cat == "Duck")        enemy_ai_state_ = 4;  // block
-                    else                           enemy_ai_state_ = 0;  // idle
+                    // [HEURISTIC-TODO] tacticSettings.xml missing — fall back
+                    // to a neutral approach so the enemy is not frozen.
+                    enemy_ai_state_ = (dist > 200) ? 1 : 2;
+                    ai_last_pick_ = "(no tactics)";
                 }
-            } else {
-                // [HEURISTIC-TODO] tacticSettings.xml missing — fall back to a
-                // neutral approach so the enemy is not frozen.
-                enemy_ai_state_ = (dist > 200) ? 1 : 2;
-                ai_last_pick_ = "(no tactics)";
             }
         }
         // Execute current AI state

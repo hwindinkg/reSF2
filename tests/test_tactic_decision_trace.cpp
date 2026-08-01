@@ -131,6 +131,22 @@ static const char* kTacticXml =
     "<AnimationWeights><Animation Name=\"Step\" Base=\"100\"/></AnimationWeights>"
     "</Tactic>"
 
+    // D4: EnemyResponseDelay gates the stage-1/4 reaction rolls mid-window
+    // (ADR-005 D8) — a reaction that fires opens the window; while the
+    // countdown is open the reaction draws are blocked.
+    "<Tactic Name=\"Reactive\" Type=\"Tabular\">"
+    "<UseDefense>"
+    "<CounterAttackChance Base=\"0\"/>"
+    "<DodgeChance Base=\"0\"/>"
+    "<BlockChance Base=\"2\"/>"
+    "</UseDefense>"
+    "<EnemyResponseDelay><Min Base=\"30\"/><Max Base=\"60\"/></EnemyResponseDelay>"
+    "</Tactic>"
+    "<Tactic Name=\"Dodger\" Type=\"Tabular\">"
+    "<DodgeMissilesChance Base=\"2\"/>"
+    "<EnemyResponseDelay><Min Base=\"30\"/><Max Base=\"60\"/></EnemyResponseDelay>"
+    "</Tactic>"
+
     // Looped stages: per-entry lines and the R6 document-order animation.
     "<Tactic Name=\"Quick\" Type=\"Tabular\">"
     "<QuickAttacks>"
@@ -797,6 +813,61 @@ int main() {
                       a.frame_error == b.frame_error,
                   "same seed -> byte-identical DecisionTrace (and decision)");
         }
+    }
+
+    std::printf("\n=== EnemyResponseDelay gates stage-1/4 reactions mid-window (D4) ===\n");
+    {
+        // [HEURISTIC-TODO] granularity pending @re-verifier R5: which stages
+        // the native binary gates and where the window starts are unpinned;
+        // this pins what the API allows — the window blocks the stage-1
+        // (UseDefense) and stage-4 (DodgeMissiles) reaction draws, and a
+        // reaction that fires opens a fresh [Min,Max] window.
+        TacticTableSet tables;
+
+        const TacticDef* re = s.tactic("Reactive");
+        TacticMemory m1;
+        DecisionTrace t1;
+        const TacticDecision d1 = decide(*re, default_ctx(), m1, tables,
+                                         RngSource(kRollZero), t1);
+        CHECK(d1.stage == DecisionStage::kUseDefense && d1.animation == "Block",
+              "fresh window: stage-1 reaction fires");
+        CHECK(m1.enemy_reaction_frames >= 30 && m1.enemy_reaction_frames <= 60,
+              "reaction opens the EnemyResponseDelay window (roll in [30,60])");
+
+        // Mid-window: the stage-1 draw is blocked, the stage still traces its
+        // score line (empty name), and no new window is started.
+        TacticMemory m2;
+        m2.start_enemy_reaction(25.0f, 25.0f, RngSource(kRollZero));
+        DecisionTrace t2;
+        const TacticDecision d2 = decide(*re, default_ctx(), m2, tables,
+                                         RngSource(kRollZero), t2);
+        CHECK(d2.stage != DecisionStage::kUseDefense && d2.animation.empty(),
+              "mid-window: stage-1 reaction blocked");
+        CHECK(m2.enemy_reaction_frames == 25,
+              "mid-window block leaves the countdown untouched");
+        CHECK(!t2.lines().empty() &&
+                  starts_with(t2.lines()[0],
+                              "UseDefense:  / 0.0000 / 0.0000 / 2.0000"),
+              "blocked stage still traces its score line (empty name)");
+
+        // The same gate on the stage-4 dodge roll.
+        const TacticDef* dod = s.tactic("Dodger");
+        TacticMemory m3;
+        DecisionTrace t3;
+        const TacticDecision d3 = decide(*dod, default_ctx(), m3, tables,
+                                         RngSource(kRollZero), t3);
+        CHECK(d3.stage == DecisionStage::kDodgeMissiles && d3.animation == "Dodge",
+              "fresh window: stage-4 dodge fires");
+        CHECK(m3.enemy_reaction_frames >= 30 && m3.enemy_reaction_frames <= 60,
+              "dodge opens the EnemyResponseDelay window");
+
+        TacticMemory m4;
+        m4.start_enemy_reaction(25.0f, 25.0f, RngSource(kRollZero));
+        DecisionTrace t4;
+        const TacticDecision d4 = decide(*dod, default_ctx(), m4, tables,
+                                         RngSource(kRollZero), t4);
+        CHECK(d4.stage != DecisionStage::kDodgeMissiles,
+              "mid-window: stage-4 dodge blocked");
     }
 
     std::printf("\n=== Summary: %d passed, %d failed ===\n", tests_passed, tests_failed);

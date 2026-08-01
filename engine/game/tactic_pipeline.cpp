@@ -230,14 +230,22 @@ const std::string& evade_animation(const TacticDef& def, std::size_t index) {
 // and unpinned — the engine maps it to no-fire (trace with empty name).
 std::optional<TacticDecision> stage_use_defense(const TacticDef& def,
                                                 const TacticContext& ctx,
-                                                TacticMemory&, const TacticTableSet&,
+                                                TacticMemory& mem,
+                                                const TacticTableSet&,
                                                 RngSource rng, DecisionTrace& trace) {
     const float a = def.counter_attack_chance.evaluate(ctx);
     const float b = def.dodge_chance.evaluate(ctx);
     const float c = def.block_chance.evaluate(ctx);
     const std::vector<float> scores = {a, b, c};
     int choice = 1;  // no defense
-    if (def.use_defense) {
+    // [D4] EnemyResponseDelay gate (ADR-005 D8): while the reaction
+    // countdown window is open (enemy_reaction_frames > 0, ticked per AI
+    // frame), the stage-1 reaction draw is blocked — no reaction to fresh
+    // player actions mid-window. A reaction that fires opens the window.
+    //   [HEURISTIC-TODO] granularity pending @re-verifier R5: which stages
+    //   the native binary gates and where the window starts are unpinned;
+    //   what is wired is exactly the API the memory exposes.
+    if (def.use_defense && mem.enemy_reaction_frames == 0) {
         const float r = static_cast<float>(rng()) / static_cast<float>(RAND_MAX);
         if (a > r) {
             choice = 2;
@@ -248,6 +256,9 @@ std::optional<TacticDecision> stage_use_defense(const TacticDef& def,
         }
     }
     if (choice >= 2) {
+        // A reaction fired: open the EnemyResponseDelay window.
+        mem.start_enemy_reaction(def.enemy_response_delay.min,
+                                 def.enemy_response_delay.max, rng);
         const std::string name = kDefenseAnimations[choice - 2];
         trace.stage(DecisionStage::kUseDefense, name, scores);
         return TacticDecision{DecisionStage::kUseDefense, name};
@@ -303,17 +314,25 @@ std::optional<TacticDecision> stage_table_attack(const TacticDef& def,
 // action label (no such moves.xml animation name) until the P3 golden pins it.
 std::optional<TacticDecision> stage_dodge_missiles(const TacticDef& def,
                                                    const TacticContext& ctx,
-                                                   TacticMemory&,
+                                                   TacticMemory& mem,
                                                    const TacticTableSet&,
                                                    RngSource rng,
                                                    DecisionTrace& trace) {
     const float score = def.dodge_missiles_chance.evaluate(ctx);
-    if (!chance_fires(def.dodge_missiles_chance, ctx, rng)) {
-        trace.stage(DecisionStage::kDodgeMissiles, "", {score});
-        return std::nullopt;
+    // [D4] EnemyResponseDelay gate (ADR-005 D8): the stage-4 reaction roll
+    // is blocked mid-window, same contract as stage 1; a dodge that fires
+    // opens the window.
+    //   [HEURISTIC-TODO] granularity pending @re-verifier R5 (see
+    //   stage_use_defense).
+    if (mem.enemy_reaction_frames == 0 &&
+        chance_fires(def.dodge_missiles_chance, ctx, rng)) {
+        mem.start_enemy_reaction(def.enemy_response_delay.min,
+                                 def.enemy_response_delay.max, rng);
+        trace.stage(DecisionStage::kDodgeMissiles, kDefenseAnimations[1], {score});
+        return TacticDecision{DecisionStage::kDodgeMissiles, kDefenseAnimations[1]};
     }
-    trace.stage(DecisionStage::kDodgeMissiles, kDefenseAnimations[1], {score});
-    return TacticDecision{DecisionStage::kDodgeMissiles, kDefenseAnimations[1]};
+    trace.stage(DecisionStage::kDodgeMissiles, "", {score});
+    return std::nullopt;
 }
 
 // [ORIGINAL] "QuickAttack[%d]: %s / %.4f" @ 0x8F798161 — the loop over the
