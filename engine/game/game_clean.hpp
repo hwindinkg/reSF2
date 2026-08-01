@@ -440,6 +440,13 @@ float host_enemy_health_frac() const override;
     bool host_get_start_stance() const { return start_stance_playing_; }
     const std::string& host_get_player_anim() const { return current_anim_; }
     float host_get_player_pos_x() const { return player_pos_x_; }
+    // ---- Soak-fix Wave 2 probes (SOAK_TRIAGE.md §2) ----
+    // Read-only player movement/facing state for the behavioral movement
+    // tests (test_soak_movement_defects): M1..M5 assertions read these.
+    bool host_get_player_facing() const { return facing_right_; }
+    int host_get_player_move_state() const { return move_state_; }
+    float host_get_player_pos_y() const { return player_pos_y_; }
+    float host_get_player_turn_blend() const { return player_turn_blend_; }
     // [E3] Test hook: drop the tactic settings + table families so the
     // battle runs the no-settings path (ADR P4: settings absent -> neutral
     // enemy, traced idle/wait decision — the Phase E pin test).
@@ -4562,6 +4569,10 @@ private:
     // every animated node's Y is measured from.
     float floor_world_y_ = 0.0f;
     bool facing_right_ = true;
+    // [M5] Visual turn blend for the player's render mirror: eases toward
+    // the facing sign over a few frames so a turn reads as a short rotation
+    // instead of a one-frame snap. ±1 = fully facing right/left.
+    float player_turn_blend_ = 1.0f;
     uint32_t& hit_anim_ = combat_.mutable_hit_anim();  // ms remaining
     uint32_t& step_cooldown_ = combat_.mutable_step_cooldown();
     bool& step_active_ = combat_.mutable_step_active();
