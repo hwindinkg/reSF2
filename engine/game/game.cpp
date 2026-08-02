@@ -552,7 +552,11 @@ void Game::host_render_menu_overlay() {
 
     const float dt_ms = static_cast<float>(last_frame_dt_ms_);
     const float target_progress = (overlay_ == Overlay::Menu) ? 1.0f : 0.0f;
-    const float anim_speed = 1000.0f / 300.0f;  // 300ms full open/close
+    // [U6] The unfold must take kMenuAnimMs of real time. This used to divide
+    // by (1000/300) = 3.33 — i.e. 16ms/3.33 = 4.8 progress per frame — so the
+    // menu snapped open in ONE frame and the scroll unfold was never seen.
+    // Progress advances by dt_ms / 300: 1.0 after 300ms.
+    const float anim_speed = 300.0f;  // ms for a full open/close
     if (menu_anim_progress_ < target_progress) {
         menu_anim_progress_ += (float)dt_ms / anim_speed;
         if (menu_anim_progress_ > target_progress) menu_anim_progress_ = target_progress;
@@ -2274,7 +2278,10 @@ void Game::host_update_gameplay(uint32_t dt) {
 
     // Animate menu expand/collapse (300ms transition)
     float target_progress = (overlay_ == Overlay::Menu) ? 1.0f : 0.0f;
-    float anim_speed = 1000.0f / 300.0f;
+    // [U6] Same law as host_render_menu_overlay: dt_ms / 300 per frame. The
+    // old divisor (1000/300 = 3.33) made the progress jump 4.8 per frame and
+    // the menu appear without any unfold.
+    float anim_speed = 300.0f;
     if (menu_anim_progress_ < target_progress) {
         menu_anim_progress_ += (float)dt / anim_speed;
         if (menu_anim_progress_ > target_progress) menu_anim_progress_ = target_progress;
