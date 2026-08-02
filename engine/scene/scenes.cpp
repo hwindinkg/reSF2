@@ -2209,10 +2209,53 @@ void ShopScene::on_render(SceneContext& ctx) {
 // ============================================================
 // SettingsScene
 // ============================================================
+//
+// [U3] The settings screen mirrors the shop's structure (top panel, MENU
+// scroll roll, body) and renders the REAL shipped atlases: the row icons and
+// language buttons from batchSettings.plist, the slider track/fill/knob from
+// batchSlidersSettings.plist. The old scene drew a flat navy placeholder
+// panel with rectangles — "looks wrong".
+//
+// [HEURISTIC-TODO] The original layout of the settings rows (which rows,
+// their order, the slider proportions) is not binary-reversed; the row set
+// follows the batchSettings atlas itself (sound/music/graphics/controller/
+// location) and the proportions follow the shop's layout law.
+
+namespace {
+struct SettingsLayout {
+    float s;
+    float roll_y, roll_h;        // MENU scroll roll
+    float body_y;                // first row top
+    float row_h;                 // one settings row
+    float icon_x, icon_sz;       // row icon
+    float slider_x, slider_w, slider_h;  // slider track
+    float lang_y, lang_sz;       // language buttons row
+    float lang_x1, lang_x2;
+};
+
+SettingsLayout settings_layout(float w, float h) {
+    SettingsLayout L;
+    L.s = resf2::ui::points_scale(h);
+    L.roll_y = 192.0f * L.s;
+    L.roll_h = 56.0f * L.s;
+    L.body_y = L.roll_y + L.roll_h + 10.0f * L.s;
+    L.row_h = 54.0f * L.s;
+    L.icon_x = 24.0f * L.s;
+    L.icon_sz = 44.0f * L.s;
+    L.slider_x = w * 0.52f;
+    L.slider_w = w * 0.34f;
+    L.slider_h = 20.0f * L.s;
+    L.lang_y = h - 64.0f * L.s;
+    L.lang_sz = 52.0f * L.s;
+    L.lang_x1 = w * 0.5f - L.lang_sz - 16.0f * L.s;
+    L.lang_x2 = w * 0.5f + 16.0f * L.s;
+    return L;
+}
+}  // namespace
 
 void SettingsScene::on_enter(SceneContext& ctx) {
     std::printf("[settings] enter\n");
-    ctx.renderer.set_clear_color(0.03f, 0.03f, 0.06f, 1.0f);
+    ctx.renderer.set_clear_color(0.05f, 0.03f, 0.01f, 1.0f);
 }
 
 void SettingsScene::on_update(SceneContext& ctx) {
@@ -2223,118 +2266,102 @@ void SettingsScene::on_update(SceneContext& ctx) {
         ctx.host.request_scene_transition(SceneId::MainMenu);
         return;
     }
-    // [FIX] M key toggles the menu overlay instead of going back to main menu.
-    // Consistent with Shop, Map, and Results scenes.
+    // M key toggles the menu overlay (same as Shop/Map/Results).
     if (key_pressed(input, platform::Key::M)) {
         ctx.host.host_toggle_menu_overlay();
     }
 
-    // Back button click (top-left corner)
-    if (clicked_in(input, 10, 10, 80, 40)) {
+    const float w = (float)ctx.platform.window_width();
+    const float h = (float)ctx.platform.window_height();
+    const SettingsLayout L = settings_layout(w, h);
+
+    // Back click on the MENU roll bar (leftmost 20%) — goes back to main menu.
+    if (clicked_in(input, 0, L.roll_y, 80.0f * L.s, L.roll_h)) {
         ctx.host.host_play_ui_click();
         ctx.host.request_scene_transition(SceneId::MainMenu);
         return;
     }
 
-    // Volume sliders (click-drag simulation)
-    // In a real implementation, these would adjust audio engine volume.
-    // For now, just detect clicks on the slider track.
-    float w = (float)ctx.platform.window_width();
-    float h = (float)ctx.platform.window_height();
-    float panel_x = w * 0.15f, panel_w = w * 0.7f;
-    float sy = h * 0.15f;
-
-    // Master volume slider track
-    float slider_x = panel_x + 120.0f, slider_w = panel_w - 140.0f;
-    float slider_y = sy + 20.0f, slider_h = 30.0f;
-    if (clicked_in(input, slider_x, slider_y, slider_w, slider_h)) {
-        std::printf("[settings] master volume adjusted (stub)\n");
+    // [HEURISTIC-TODO] Language buttons are visual for now: switching the
+    // session language requires reloading the localization + font tables,
+    // which is a separate flow. The clicks are detected so the buttons are
+    // not dead UI.
+    if (clicked_in(input, L.lang_x1, L.lang_y, L.lang_sz, L.lang_sz)) {
+        ctx.host.host_play_ui_click();
+        std::printf("[settings] language: English selected (visual only)\n");
     }
-
-    sy += 80.0f;
-    float music_slider_y = sy + 20.0f;
-    if (clicked_in(input, slider_x, music_slider_y, slider_w, slider_h)) {
-        std::printf("[settings] music volume adjusted (stub)\n");
-    }
-
-    // Language selector
-    sy += 80.0f;
-    float lang_btn_w = 100.0f, lang_btn_h = 36.0f;
-    float lang_x = panel_x;
-    if (clicked_in(input, lang_x, sy, lang_btn_w, lang_btn_h)) {
-        std::printf("[settings] language: English selected (stub)\n");
-    }
-    if (clicked_in(input, lang_x + 120, sy, lang_btn_w, lang_btn_h)) {
-        std::printf("[settings] language: Russian selected (stub)\n");
+    if (clicked_in(input, L.lang_x2, L.lang_y, L.lang_sz, L.lang_sz)) {
+        ctx.host.host_play_ui_click();
+        std::printf("[settings] language: Russian selected (visual only)\n");
     }
 }
 
 void SettingsScene::on_render(SceneContext& ctx) {
     auto& r = ctx.renderer;
-    float w = (float)ctx.platform.window_width();
-    float h = (float)ctx.platform.window_height();
-    float bar_h = 60.0f;
+    const float w = (float)ctx.platform.window_width();
+    const float h = (float)ctx.platform.window_height();
+    const SettingsLayout L = settings_layout(w, h);
 
-    // --- Background ---
-    r.draw_filled_rect_screen(0, 0, w, h, {8, 8, 16, 255});
-
-    // --- Top bar ---
-    r.draw_filled_rect_screen(0, 0, w, bar_h, {20, 20, 40, 230});
-    r.draw_filled_rect_screen(10, 10, 80, bar_h - 20, {50, 50, 70, 200});
-    ctx.host.host_render_text("< BACK", 20, 18, 0.32f, 220, 220, 240, 255);
-    r.draw_filled_rect_screen(100, 10, w - 160, bar_h - 20, {30, 30, 50, 180});
-    ctx.host.host_render_text("SETTINGS", w * 0.5f - 50, 15, 0.40f, 200, 200, 220, 255);
+    // --- Background: same dark brown as the shop ---
+    r.draw_filled_rect_screen(0, 0, w, h, {18, 12, 6, 255});
 
     // --- Top HUD panel (gold/level) — same as dojo/menu ---
     ctx.host.host_render_top_panel();
 
-    float panel_x = w * 0.15f, panel_w = w * 0.7f;
-    float panel_h = h * 0.7f, panel_y = bar_h + 30.0f;
+    // --- MENU scroll roll at the top of the body (same as shop) ---
+    {
+        const float ry = L.roll_y, rh = L.roll_h;
+        r.draw_filled_rect_screen(0, ry, w, rh, {42, 28, 14, 230});
+        r.draw_filled_rect_screen(0, ry, 20.0f * L.s, rh, {60, 40, 20, 255});
+        r.draw_filled_rect_screen(w - 20.0f * L.s, ry, 20.0f * L.s, rh,
+                                  {60, 40, 20, 255});
+        std::string menu_label = ctx.host.host_localized("menu");
+        if (menu_label.empty()) menu_label = "MENU";
+        const float ts = shop_text_scale(rh * 0.55f);
+        const auto [tw, th] = ctx.host.host_measure_text(menu_label, ts);
+        ctx.host.host_render_text(menu_label, (w - tw) * 0.5f, ry + (rh - th) * 0.5f,
+                                  ts, 255, 230, 170, 255);
+    }
 
-    // Settings panel background
-    r.draw_filled_rect_screen(panel_x, panel_y, panel_w, panel_h, {25, 25, 40, 220});
-    // Gold border top and bottom
-    r.draw_filled_rect_screen(panel_x, panel_y, panel_w, 2, {200, 170, 100, 200});
-    r.draw_filled_rect_screen(panel_x, panel_y + panel_h - 2, panel_w, 2, {200, 170, 100, 200});
+    // --- Setting rows: icon + slider (real atlas pieces) ---
+    static const char* kRows[] = {"sound", "music", "graphics",
+                                  "controller", "location"};
+    for (size_t i = 0; i < 5; ++i) {
+        const float row_y = L.body_y + static_cast<float>(i) * L.row_h;
+        const float icon_y = row_y + (L.row_h - L.icon_sz) * 0.5f;
+        // Row icon from batchSettings.plist
+        if (!ctx.host.host_render_ui_texture(kRows[i],
+                L.icon_x, icon_y, L.icon_sz, L.icon_sz)) {
+            r.draw_filled_rect_screen(L.icon_x, icon_y, L.icon_sz, L.icon_sz,
+                                      {90, 70, 40, 230});
+        }
+        // Slider: track (SettingsEmpty), fill (full), knob (slider)
+        const float slider_y = row_y + (L.row_h - L.slider_h) * 0.5f;
+        if (!ctx.host.host_render_ui_texture("SettingsEmpty",
+                L.slider_x, slider_y, L.slider_w, L.slider_h)) {
+            r.draw_filled_rect_screen(L.slider_x, slider_y, L.slider_w, L.slider_h,
+                                      {40, 40, 60, 200});
+        }
+        const float fill_frac = 0.6f - 0.1f * static_cast<float>(i);
+        if (!ctx.host.host_render_ui_texture("full",
+                L.slider_x, slider_y, L.slider_w * fill_frac, L.slider_h)) {
+            r.draw_filled_rect_screen(L.slider_x, slider_y,
+                                      L.slider_w * fill_frac, L.slider_h,
+                                      {100, 180, 255, 200});
+        }
+        const float knob_w = L.slider_h * 1.4f;
+        if (!ctx.host.host_render_ui_texture("slider",
+                L.slider_x + L.slider_w * fill_frac - knob_w * 0.5f,
+                slider_y - 3.0f * L.s, knob_w, L.slider_h + 6.0f * L.s)) {
+            r.draw_filled_rect_screen(L.slider_x + L.slider_w * fill_frac - knob_w * 0.5f,
+                                      slider_y - 3.0f * L.s, knob_w, L.slider_h + 6.0f * L.s,
+                                      {220, 220, 240, 255});
+        }
+    }
 
-    // Section header
-    ctx.host.host_render_text("Audio", panel_x + panel_w * 0.5f - 30, panel_y + 15, 0.35f, 220, 220, 240, 255);
-
-    float sy = panel_y + 60.0f;
-    float line_h = 35.0f;
-    float slider_x = panel_x + 120.0f, slider_w = panel_w - 140.0f;
-
-    // Master volume
-    ctx.host.host_render_text("Master Volume", panel_x + 40, sy, 0.28f, 200, 200, 220, 255);
-    // Slider track
-    r.draw_filled_rect_screen(slider_x, sy + 20.0f, slider_w, 30.0f, {40, 40, 60, 200});
-    // Slider fill (stub: 70%)
-    r.draw_filled_rect_screen(slider_x, sy + 20.0f, slider_w * 0.7f, 30.0f, {100, 180, 255, 200});
-    // Slider knob
-    r.draw_filled_rect_screen(slider_x + slider_w * 0.7f - 4.0f, sy + 16.0f, 8.0f, 38.0f, {220, 220, 240, 255});
-    sy += line_h + 20.0f;
-
-    // Music volume
-    ctx.host.host_render_text("Music Volume", panel_x + 40, sy, 0.28f, 200, 200, 220, 255);
-    r.draw_filled_rect_screen(slider_x, sy + 20.0f, slider_w, 30.0f, {40, 40, 60, 200});
-    r.draw_filled_rect_screen(slider_x, sy + 20.0f, slider_w * 0.5f, 30.0f, {100, 255, 100, 200});
-    r.draw_filled_rect_screen(slider_x + slider_w * 0.5f - 4.0f, sy + 16.0f, 8.0f, 38.0f, {220, 220, 240, 255});
-    sy += line_h + 30.0f;
-
-    // Language section
-    r.draw_filled_rect_screen(panel_x, sy, panel_w, 2, {200, 170, 100, 150});
-    sy += 12.0f;
-    ctx.host.host_render_text("Language", panel_x + panel_w * 0.5f - 45, sy, 0.30f, 200, 170, 100, 255);
-    sy += 35.0f;
-
-    float lang_btn_w = 100.0f, lang_btn_h = 36.0f;
-    float lang_x = panel_x + 40.0f;
-    // English button
-    r.draw_filled_rect_screen(lang_x, sy, lang_btn_w, lang_btn_h, {60, 60, 80, 200});
-    ctx.host.host_render_text("English", lang_x + 15, sy + 8, 0.24f, 220, 220, 240, 255);
-    // Russian button
-    r.draw_filled_rect_screen(lang_x + 120, sy, lang_btn_w, lang_btn_h, {60, 60, 80, 200});
-    ctx.host.host_render_text("Russian", lang_x + 135, sy + 8, 0.24f, 220, 220, 240, 255);
+    // --- Language buttons (English usbr / Russian rus) ---
+    ctx.host.host_render_ui_texture("usbr", L.lang_x1, L.lang_y, L.lang_sz, L.lang_sz);
+    ctx.host.host_render_ui_texture("rus", L.lang_x2, L.lang_y, L.lang_sz, L.lang_sz);
 
     // --- Menu overlay (toggled by M key) rendered on top ---
     ctx.host.host_render_menu_overlay();
