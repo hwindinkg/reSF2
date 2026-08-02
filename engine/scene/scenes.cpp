@@ -849,21 +849,28 @@ void DialogueScene::on_update(SceneContext& ctx) {
         }
     };
 
-    // Click / Space / Enter: advance to next line
-    if (key_pressed(input, platform::Key::Space) ||
-        key_pressed(input, platform::Key::Enter)) {
-        advance();
-    }
-
     // Esc: skip dialogue -> back to MainMenu
     if (key_pressed(input, platform::Key::Escape)) {
         ctx.host.request_scene_transition(SceneId::MainMenu);
+        return;
     }
 
-    // Click anywhere to advance
-    for (const auto& p : input.pointers) {
-        if (p.just_pressed) { advance(); break; }
+    // [D4] Advance on ANY input — a key press or a click — not just
+    // Space/Enter. The original is a mobile game where tapping anywhere
+    // advances the dialogue; on the PC port the player's own action keys
+    // (P punch / O kick) must do the same. The soak showed the dialogue
+    // "stuck" on line 1 because only Space/Enter/click were listened for
+    // while the player pressed P/O — the only keys in the whole session.
+    bool any_input = false;
+    for (const bool just : input.keys_just_pressed) {
+        if (just) { any_input = true; break; }
     }
+    if (!any_input) {
+        for (const auto& p : input.pointers) {
+            if (p.just_pressed) { any_input = true; break; }
+        }
+    }
+    if (any_input) advance();
 }
 
 // [ORIGINAL] A story dialogue is a parchment scroll across the bottom of the
