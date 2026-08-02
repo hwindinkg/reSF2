@@ -957,10 +957,14 @@ void DialogueScene::on_render(SceneContext& ctx) {
         }
     }
 
-    // Typewriter reveal over the localized text, wrapped to the sheet.
+    // Wrap the localized text to the sheet. The whole line is revealed at
+    // once — [D3] the soak showed a letter-by-letter typewriter (30 ms/char)
+    // that left long lines half-read; the original shows the full line
+    // immediately. chars_visible is capped at the full length so the reveal
+    // loop below always completes on the first frame.
     std::string full = ctx.host.host_localized(lines[current_line_].second);
     if (full.empty()) full = lines[current_line_].second;
-    const size_t chars_visible = text_reveal_ms_ / kCharRevealMs;
+    const size_t chars_visible = full.size();
     // Count in CODE POINTS, not bytes: a byte-wise substr would cut a Cyrillic
     // letter in half and print a replacement glyph.
     size_t cut = 0, seen = 0;
