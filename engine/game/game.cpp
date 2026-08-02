@@ -3642,9 +3642,98 @@ void Game::host_update_gameplay(uint32_t dt) {
                     // Uses attacking part nodes (from moves.xml AttackingParts)
                     // vs enemy body collision capsules (from body.xml).
                     // The attacking edge endpoints' world positions are checked
-                    // against the enemy's body capsule segments using segment-
-                    // segment closest distance, same algorithm as bag collision.
-                    if (show_enemy_ && enemy_fighter_.invuln_time <= 0 && assets_->body_model()) {
+// against the enemy's body capsule segments using segment-
+// segment closest distance, same algorithm as bag collision.
+// [P2] Battle damage path: a real hit is a collision between the attacker's
+// attack edges and the ENEMY FIGHTER's model edges (body.xml + head.xml
+// capsules — LIVE_GAME_EVIDENCE Q2-C). The old code applied damage as a
+// side-effect of the PUNCHING BAG collision (the bag hangs at the enemy
+// spawn, so "hitting the enemy" meant hitting the bag — every battle HIT!
+// line logged bag_edge= and battle damage only connected at point-blank).
+// The whole computation below moved here from the bag branch; the bag branch
+// now runs only in the dojo (!show_enemy_).
+auto apply_player_damage_to_enemy = [&]() {
+    player_fighter_.hits_landed++;
+    // [ORIGINAL] Combo.Time = 90 frames = 1.5s at 60Hz (from InternalSettings)
+    combo_timer_ = 1.5f;
+    std::printf("[COMBAT] Combo: hits=%d timer=1.5s\n", player_fighter_.hits_landed);
+    if (!is_battle_mode_) return;  // dojo sparring deals no health damage
+    // [ORIGINAL] Damage via Model::getTotalDamage @ game+0x4527B4
+    // (engine/game/damage_formula.hpp — the multiplication order
+    // base*f2*f1*f3*add is preserved there; called, never
+    // reimplemented). Caller side of IntervalAttack::getFactors.
+    //
+    // [ORIGINAL] AverageBaseDamage from internalSettings.xml (parsed at load time)
+    // This is the fallback when a move has no explicit Damage value.
+    const auto& dmg_settings = assets_->damage_settings();
+    float base_damage = move_it->second.damage;
+    if (base_damage <= 0.0f) base_damage = dmg_settings.average_base_damage;
+
+    // [ORIGINAL] Attribute pairing per the game+0x60DF98 helper:
+    // melee damage attribute vs the defender's BodyDefense — weapon
+    // hits read WeaponDamage, fists read UnarmedDamage.
+    // [HEURISTIC-TODO] HeadDefense by hit zone when move data carries
+    // it (no hit-zone field on MoveDef today).
+    const char* dmg_attr =
+        (equipped_weapon_ != "Fists") ? "WeaponDamage" : "UnarmedDamage";
+
+    DamageInputs din;
+    // base = 2^(attr*w): DamageFactor absent in MVP -> get_or 0 ->
+    // base 1.0f. get_or, NEVER raw get(): the -1e35f getParameter
+    // sentinel must never reach powf (game+0x60DF98 defaults 0.0).
+    din.base_attribute = player_fighter_.attributes.get_or("DamageFactor", 0.0f);
+    din.base_weight = dmg_settings.damage_factor_base;
+    // [HEURISTIC-TODO] f1/f2 selector terms (game+0x4A94F0 /
+    // game+0x4A95A8) stay disabled-neutral (1.0f) — factor-set data
+    // not yet ported. crit stays 1.0f (CriticalChance/CriticalDamage
+    // system, internalSettings.xml L560-563, not yet ported).
+    din.attribute_difference =
+        attribute_difference(player_fighter_.attributes, dmg_attr,
+                             enemy_fighter_.attributes, "BodyDefense");
+    din.hit_damage = base_damage;      // original's hit[0x48]
+    din.enemy_damage_bonus = 0.0f;     // original's enemy[0x774] — not ported
+
+    // [ORIGINAL] Block factor: base_block_factor from binary @ 0x101598c0
+    // Binary ref: BlockChance at 0x10242aa2
+    // When blocking, damage is reduced by base_block_factor (default 0.5 = 50% reduction).
+    // BlockDamageFactor attribute can further reduce chip damage.
+    float block_factor = enemy_fighter_.is_blocking ? dmg_settings.base_block_factor : 1.0f;
+
+    // [ORIGINAL] Check if move ignores block (from IntervalAttack +0x75)
+    if (enemy_fighter_.is_blocking && move_it->second.ignores_block) {
+        block_factor = 1.0f;
+        std::printf("[COMBAT] Player hit enemy: IGNORES BLOCK\n");
+    }
+
+    // [ORIGINAL] EXPLICIT DELETION (phase 4 step 9): the old
+    // raw_damage line ended with a trailing `* 2.0f` — the
+    // double-counted power base. 2.0 is the powf base INSIDE
+    // get_total_damage, not a trailing multiplier; keeping both
+    // doubled all damage at neutral attributes. Do NOT re-add it —
+    // the halved damage below is the intended fidelity correction.
+    const float final_damage = get_total_damage(din) * block_factor;
+
+    // Store for F1 debug overlay (COMBAT panel damage breakdown)
+    dbg_last_base_damage_ = base_damage;
+    dbg_last_attr_mult_ = attribute_difference_factor(din.attribute_difference);  // the f3 term (game+0x60E794)
+    dbg_last_block_factor_ = block_factor;
+    dbg_last_attack_factor_ = 1.0f;   // f1 term disabled-neutral (not ported)
+    dbg_last_crit_factor_ = 1.0f;     // crit system not yet ported
+    dbg_last_factor_set_ = 1.0f;      // f2 term disabled-neutral (not ported)
+    dbg_last_final_damage_ = final_damage;
+    dbg_last_move_name_ = move_it->first;
+
+    std::printf("[COMBAT] Player hit enemy: base=%.3f attrdiff=%.1f f3=%.3f blk=%.2f => final=%.3f\n",
+                base_damage, din.attribute_difference,
+                dbg_last_attr_mult_, block_factor, final_damage);
+
+    enemy_fighter_.health -= final_damage * enemy_fighter_.max_health;
+    if (enemy_fighter_.health <= 0.0f) {
+        enemy_fighter_.health = 0.0f;
+        enemy_fighter_.is_dead = true;
+    }
+};
+if (show_enemy_ && enemy_fighter_.invuln_time <= 0 && assets_->body_model()) {
                         auto pivot_it = assets_->skeleton_nodes().find("NPivot");
                         float pivot_ly = pivot_it != assets_->skeleton_nodes().end()
                                              ? pivot_it->second.y : stance_npivot_y_;
@@ -3815,14 +3904,22 @@ void Game::host_update_gameplay(uint32_t dt) {
                                 float threshold = atk_radius + body_r;
 
                                 if (sq_dist < threshold * threshold) {
-                                    // [ORIGINAL] Skeleton-based hit confirmed.
-                                    // Dojo training - no health damage, just visual feedback.
+                                    // [ORIGINAL] Skeleton-based hit confirmed:
+                                    // the attacker's attack edge connects with
+                                    // the ENEMY FIGHTER's model edge (body.xml /
+                                    // head.xml capsule — LIVE_GAME_EVIDENCE Q2-C:
+                                    // EChest/EHead/EArm_1/ECalf_1...). This is a
+                                    // real fight hit, so the interval is consumed
+                                    // here (hit_this_interval_) and the damage is
+                                    // applied HERE — not as a side-effect of the
+                                    // punching-bag collision (the P2 defect: the
+                                    // bag hangs at the enemy spawn, so battle
+                                    // damage was gated on hitting the bag).
                                     enemy_fighter_.invuln_time = 0.4f;
                                     enemy_hit_flash_ = 0.25f;
                                     int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
                                     play_sound(player_attack_sound(snd_idx), 0.7f);
                                     play_sound("armor", 0.5f);
-                                    // Do NOT set hit_this_interval_ here (see comment below).
                                     // Spawn hit sparks at collision point
                                     float hit_x = (px + qx) * 0.5f;
                                     float hit_y = (py + qy) * 0.5f;
@@ -3831,6 +3928,8 @@ void Game::host_update_gameplay(uint32_t dt) {
                                         (unsigned long long)total_frame_count_, current_move_.c_str(),
                                         capsule.edge_name.c_str(), sq_dist, threshold * threshold,
                                         edge_name.c_str());
+                                    hit_this_interval_ = true;
+                                    apply_player_damage_to_enemy();
                                     enemy_hit = true;
                                     break;
                                 }
@@ -3900,8 +3999,17 @@ void Game::host_update_gameplay(uint32_t dt) {
                                 player_pos_y_ + y_adjust_smoothed_,
                                 facing_right_, pivot_ly);
 
+                            // [P2] The punching bag is the DOJO's collision
+                            // target only (LIVE_GAME_EVIDENCE Q2-D: the bag
+                            // exists solely for training). In a battle vs the
+                            // enemy fighter the hit test is the enemy-capsule
+                            // block above; this bag loop must not run there —
+                            // the soak's battle HIT! lines logged bag_edge=
+                            // because the bag (hung at the enemy spawn) was
+                            // the collision target.
                             // Check against ALL collisible bag edges
                             bool hit_this_interval_this_frame = false;
+                            if (!show_enemy_) {
                             for (auto& be : assets_->bag_model()->edges) {
                                 if (!be.collisible) continue;
                                 float bag_r = be.radius;
@@ -4014,97 +4122,21 @@ void Game::host_update_gameplay(uint32_t dt) {
                                                 std::printf("[tutorial] state -> FIRST_FIGHT, dialog pending\n");
                                             }
                                         }
-                                    } else if (enemy_fighter_.invuln_time <= 0) {
-                                        // [ORIGINAL] Dojo sparring deals no
-                                        // health damage; a real fight does.
-                                        enemy_fighter_.invuln_time = 0.2f;
-                                        enemy_hit_flash_ = 0.2f;
-                                        player_fighter_.hits_landed++;
-                                        // [ORIGINAL] Combo.Time = 90 frames = 1.5s at 60Hz (from InternalSettings)
-                                        combo_timer_ = 1.5f;
-                                        std::printf("[COMBAT] Combo: hits=%d timer=1.5s\n", player_fighter_.hits_landed);
-                                        play_sound("armor", 0.5f);
-                                        spawn_hit_sparks(enemy_pos_x_, enemy_pos_y_ - 40, 10);
-                                        if (is_battle_mode_) {
-                                            // [ORIGINAL] Damage via Model::getTotalDamage @ game+0x4527B4
-                                            // (engine/game/damage_formula.hpp — the multiplication order
-                                            // base*f2*f1*f3*add is preserved there; called, never
-                                            // reimplemented). Caller side of IntervalAttack::getFactors.
-                                            //
-                                            // [ORIGINAL] AverageBaseDamage from internalSettings.xml (parsed at load time)
-                                            // This is the fallback when a move has no explicit Damage value.
-                                            const auto& dmg_settings = assets_->damage_settings();
-                                            float base_damage = move_it->second.damage;
-                                            if (base_damage <= 0.0f) base_damage = dmg_settings.average_base_damage;
-                                            
-                                            // [ORIGINAL] Attribute pairing per the game+0x60DF98 helper:
-                                            // melee damage attribute vs the defender's BodyDefense — weapon
-                                            // hits read WeaponDamage, fists read UnarmedDamage.
-                                            // [HEURISTIC-TODO] HeadDefense by hit zone when move data carries
-                                            // it (no hit-zone field on MoveDef today).
-                                            const char* dmg_attr =
-                                                (equipped_weapon_ != "Fists") ? "WeaponDamage" : "UnarmedDamage";
-                                            
-                                            DamageInputs din;
-                                            // base = 2^(attr*w): DamageFactor absent in MVP -> get_or 0 ->
-                                            // base 1.0f. get_or, NEVER raw get(): the -1e35f getParameter
-                                            // sentinel must never reach powf (game+0x60DF98 defaults 0.0).
-                                            din.base_attribute = player_fighter_.attributes.get_or("DamageFactor", 0.0f);
-                                            din.base_weight = dmg_settings.damage_factor_base;
-                                            // [HEURISTIC-TODO] f1/f2 selector terms (game+0x4A94F0 /
-                                            // game+0x4A95A8) stay disabled-neutral (1.0f) — factor-set data
-                                            // not yet ported. crit stays 1.0f (CriticalChance/CriticalDamage
-                                            // system, internalSettings.xml L560-563, not yet ported).
-                                            din.attribute_difference =
-                                                attribute_difference(player_fighter_.attributes, dmg_attr,
-                                                                     enemy_fighter_.attributes, "BodyDefense");
-                                            din.hit_damage = base_damage;      // original's hit[0x48]
-                                            din.enemy_damage_bonus = 0.0f;     // original's enemy[0x774] — not ported
-                                            
-                                            // [ORIGINAL] Block factor: base_block_factor from binary @ 0x101598c0
-                                            // Binary ref: BlockChance at 0x10242aa2
-                                            // When blocking, damage is reduced by base_block_factor (default 0.5 = 50% reduction).
-                                            // BlockDamageFactor attribute can further reduce chip damage.
-                                            float block_factor = enemy_fighter_.is_blocking ? dmg_settings.base_block_factor : 1.0f;
-                                            
-                                            // [ORIGINAL] Check if move ignores block (from IntervalAttack +0x75)
-                                            if (enemy_fighter_.is_blocking && move_it->second.ignores_block) {
-                                                block_factor = 1.0f;
-                                                std::printf("[COMBAT] Player hit enemy: IGNORES BLOCK\n");
-                                            }
-                                            
-                                            // [ORIGINAL] EXPLICIT DELETION (phase 4 step 9): the old
-                                            // raw_damage line ended with a trailing `* 2.0f` — the
-                                            // double-counted power base. 2.0 is the powf base INSIDE
-                                            // get_total_damage, not a trailing multiplier; keeping both
-                                            // doubled all damage at neutral attributes. Do NOT re-add it —
-                                            // the halved damage below is the intended fidelity correction.
-                                            const float final_damage = get_total_damage(din) * block_factor;
-                                            
-                                            // Store for F1 debug overlay (COMBAT panel damage breakdown)
-                                            dbg_last_base_damage_ = base_damage;
-                                            dbg_last_attr_mult_ = attribute_difference_factor(din.attribute_difference);  // the f3 term (game+0x60E794)
-                                            dbg_last_block_factor_ = block_factor;
-                                            dbg_last_attack_factor_ = 1.0f;   // f1 term disabled-neutral (not ported)
-                                            dbg_last_crit_factor_ = 1.0f;     // crit system not yet ported
-                                            dbg_last_factor_set_ = 1.0f;      // f2 term disabled-neutral (not ported)
-                                            dbg_last_final_damage_ = final_damage;
-                                            dbg_last_move_name_ = move_it->first;
-                                            
-                                            std::printf("[COMBAT] Player hit enemy: base=%.3f attrdiff=%.1f f3=%.3f blk=%.2f => final=%.3f\n",
-                                                        base_damage, din.attribute_difference,
-                                                        dbg_last_attr_mult_, block_factor, final_damage);
-                                            
-                                            enemy_fighter_.health -= final_damage * enemy_fighter_.max_health;
-                                            if (enemy_fighter_.health <= 0.0f) {
-                                                enemy_fighter_.health = 0.0f;
-                                                enemy_fighter_.is_dead = true;
-                                            }
-                                        }
-                                    }
+                                    }  // closes the dojo bag-reaction branch
+                                    // [P2] The enemy-fighter damage branch used
+                                    // to live HERE — battle damage was applied
+                                    // as a side-effect of hitting the BAG (the
+                                    // bag hangs at the enemy spawn, so the bag
+                                    // collision stood in for the fighter). The
+                                    // whole computation moved to
+                                    // apply_player_damage_to_enemy() in the
+                                    // enemy-capsule hit path above; this bag
+                                    // branch is dojo-only (show_enemy_ == false)
+                                    // and never deals fighter damage.
                                     break;
                                 }
                             }
+                            }  // !show_enemy_ — bag collision is dojo-only [P2]
                             if (hit_this_interval_this_frame) break;
                         }
                         if (hit_registered) break;
