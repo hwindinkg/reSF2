@@ -1170,6 +1170,11 @@ void AssetManager::load_menu_textures(const std::string& asset_root) {
     for (const auto& base : {root/"assets"/"1536", root/"1536"}) {
         load_texture_atlas_to_hud(base/"textures"/"buttons"/"menu"/"screens",
                                   "batchButtonsMenuScreens");
+        // [U2] The shop's category tabs (Weapon/Armor/Helmet/Ranged_weapon/
+        // Magic + _active/_pushed states) and the Wear/Bag buttons. Without
+        // this atlas the shop rendered text glyphs for the tabs.
+        load_texture_atlas_to_hud(base/"textures"/"screens"/"shop"/"buttons",
+                                  "shopButtons");
     }
     for (auto it = hud_textures_.begin(); it != hud_textures_.end(); ) {
         if (it->first.find("_normal") != std::string::npos ||
