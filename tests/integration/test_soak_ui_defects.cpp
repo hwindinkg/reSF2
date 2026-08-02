@@ -216,7 +216,11 @@ static void test_u2_shop() {
           "U2: the MENU scroll roll is rendered below the top panel");
 
     int r2 = 0, g2 = 0, b2 = 0;
-    if (pixel(runner, (int)(scroll_x + scroll_w * 0.5f), (int)(body_y + 30.0f * s), r2, g2, b2))
+    // [P8] Sample the parchment BELOW the roll bar: the bar is drawn at its
+    // native 37-pt height (Roll_center 74 px / content scale 2), so 30*s
+    // below body_y used to land on the bar's old w*0.13 overhang. 75*s is
+    // the first EQUIPPED row (parchment-tinted), clear of bar and header.
+    if (pixel(runner, (int)(scroll_x + scroll_w * 0.5f), (int)(body_y + 75.0f * s), r2, g2, b2))
         std::fprintf(stderr, "  [U2] parchment pixel: rgb(%d,%d,%d)\n", r2, g2, b2);
     CHECK(r2 > 170 && g2 > 150,
           "U2: the centre parchment column is rendered (light parchment)");
