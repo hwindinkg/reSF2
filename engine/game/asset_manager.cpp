@@ -401,7 +401,18 @@ void AssetManager::load_enemy_weapon(const std::string& weapon_name, const std::
     if (auto* ns = scene->first_child("Nodes")) {
         for (const auto& child : ns->children) {
             std::string type = child.attr("Type");
-            if (type != "Node" && type != "CenterOfMass") continue;
+            // [U1] Weapon models ship ONLY MacroNodes; the old
+            // Type="Node"/"CenterOfMass" filter parsed ZERO nodes. Parse
+            // them like load_player_weapon does.
+            if (type == "MacroNode") {
+                BodyMacroNode mn;
+                mn.name = child.name;
+                mn.children[0] = child.attr("ChildNode1");
+                mn.children[1] = child.attr("ChildNode2");
+                mn.children[2] = child.attr("ChildNode3");
+                mn.children[3] = child.attr("ChildNode4");
+                enemy_weapon_model_->macro_nodes[mn.name] = mn;
+            }
             BodyNode n;
             n.name = child.name;
             n.x = tof(child.attr("X"));
@@ -425,19 +436,31 @@ void AssetManager::load_enemy_weapon(const std::string& weapon_name, const std::
     }
     if (auto* fs = scene->first_child("Figures")) {
         for (const auto& child : fs->children) {
-            if (child.attr("Type") != "Capsule") continue;
-            BodyCapsule c;
-            c.edge_name = child.attr("Edge");
-            c.radius1 = tof(child.attr("Radius1"));
-            c.radius2 = tof(child.attr("Radius2"));
-            c.margin1 = tof(child.attr("Margin1"));
-            c.margin2 = tof(child.attr("Margin2"));
-            enemy_weapon_model_->capsules.push_back(c);
+            std::string type = child.attr("Type");
+            if (type == "Capsule") {
+                BodyCapsule c;
+                c.edge_name = child.attr("Edge");
+                c.radius1 = tof(child.attr("Radius1"));
+                c.radius2 = tof(child.attr("Radius2"));
+                c.margin1 = tof(child.attr("Margin1"));
+                c.margin2 = tof(child.attr("Margin2"));
+                enemy_weapon_model_->capsules.push_back(c);
+            } else if (type == "Triangle") {
+                // [U1] Weapon figures are Triangles; the Capsule-only filter
+                // parsed none.
+                BodyTriangle t;
+                t.n1 = child.attr("Node1");
+                t.n2 = child.attr("Node2");
+                t.n3 = child.attr("Node3");
+                enemy_weapon_model_->triangles.push_back(t);
+            }
         }
     }
-    std::printf("  Enemy weapon '%s': %zu nodes, %zu edges, %zu capsules\n",
+    std::printf("  Enemy weapon '%s': %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
                 weapon_name.c_str(), enemy_weapon_model_->nodes.size(),
-                enemy_weapon_model_->edges.size(), enemy_weapon_model_->capsules.size());
+                enemy_weapon_model_->edges.size(),
+                enemy_weapon_model_->capsules.size(),
+                enemy_weapon_model_->triangles.size());
 }
 
 // ---------- weapon_tactic_to_model_file ----------
@@ -572,13 +595,20 @@ void AssetManager::load_player_weapon(const std::string& tactic, const std::stri
                 c.margin1 = tof(child.attr("Margin1"));
                 c.margin2 = tof(child.attr("Margin2"));
                 weapon_model_->capsules.push_back(c);
+            } else if (child.attr("Type") == "Triangle") {
+                // [U1] Weapon figures are Triangles; render needs them.
+                BodyTriangle t;
+                t.n1 = child.attr("Node1");
+                t.n2 = child.attr("Node2");
+                t.n3 = child.attr("Node3");
+                weapon_model_->triangles.push_back(t);
             }
         }
     }
-    std::printf("  Player weapon '%s' (%s): %zu nodes, %zu edges, %zu capsules\n",
+    std::printf("  Player weapon '%s' (%s): %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
                 tactic.c_str(), model_file.c_str(),
                 weapon_model_->nodes.size(), weapon_model_->edges.size(),
-                weapon_model_->capsules.size());
+                weapon_model_->capsules.size(), weapon_model_->triangles.size());
 }
 
 // ---------- load_animations ----------

@@ -767,26 +767,37 @@ void host_render_scene();
             renderer_->draw_filled_circle_world(mx2, my2, ht, enemy_col);
         }
 
-        // Render weapon capsule at hand if weapon model loaded
-        if (assets_->enemy_weapon_model()) {
+        // Render the enemy's weapon at the hand. [U1] The model now carries
+        // real geometry (MacroNodes + Triangles); the old code drew a fixed
+        // yellow capsule whenever the model pointer existed — with 0 parsed
+        // nodes that was the "yellow placeholder" the soak saw. When the
+        // model has geometry, render the mesh; when it has none, draw
+        // NOTHING (an empty model must not fake a weapon).
+        if (assets_->enemy_weapon_model() &&
+            !assets_->enemy_weapon_model()->triangles.empty()) {
             ren::Color4B wcol{180, 155, 90, 255};
             if (enemy_hit_flash_ > 0) wcol = ren::Color4B{255, 255, 220, 255};
             float hx = 0, hy = 0;
             if (resolve("NHand_1", hx, hy) || resolve("NWrist_2", hx, hy) || resolve("NKnuckles_2", hx, hy)) {
-                float dir = enemy_facing_right_ ? 1.0f : -1.0f;
-                float ex = hx + dir * 30, ey = hy - 10;
-                float ht = 6.0f;
-                float dx = ex - hx, dy = ey - hy;
-                float len = std::sqrt(dx*dx + dy*dy);
-                if (len > 1.0f) {
-                    float ux = dx / len, uy = dy / len;
-                    float px = -uy, py = ux;
-                    renderer_->draw_filled_triangle_world(hx+px*ht, hy+py*ht, ex+px*ht, ey+py*ht,
-                        ex-px*ht, ey-py*ht, wcol);
-                    renderer_->draw_filled_triangle_world(hx+px*ht, hy+py*ht, ex-px*ht, ey-py*ht,
-                        hx-px*ht, hy-py*ht, wcol);
-                    renderer_->draw_filled_circle_world(hx, hy, ht, wcol);
-                    renderer_->draw_filled_circle_world(ex, ey, ht * 0.7f, wcol);
+                const float dir = enemy_facing_right_ ? 1.0f : -1.0f;
+                const float ox = hx + dir * 30.0f, oy = hy - 10.0f;
+                // [HEURISTIC-TODO] Weapon model units map 1:1 to world px.
+                // The original's weapon placement relative to the hand is not
+                // reversed; 1:1 keeps the knuckles (span ~20 units) sized
+                // like the old placeholder capsule.
+                const float scale = 1.0f;
+                auto& wm = *assets_->enemy_weapon_model();
+                for (const auto& t : wm.triangles) {
+                    auto i1 = wm.nodes.find(t.n1);
+                    auto i2 = wm.nodes.find(t.n2);
+                    auto i3 = wm.nodes.find(t.n3);
+                    if (i1 == wm.nodes.end() || i2 == wm.nodes.end() || i3 == wm.nodes.end())
+                        continue;
+                    renderer_->draw_filled_triangle_world(
+                        ox + dir * i1->second.x * scale, oy + i1->second.y * scale,
+                        ox + dir * i2->second.x * scale, oy + i2->second.y * scale,
+                        ox + dir * i3->second.x * scale, oy + i3->second.y * scale,
+                        wcol);
                 }
             }
         }
@@ -2164,27 +2175,29 @@ private:
         }
 
         // Render player's equipped weapon model (if loaded)
-        // Weapon nodes are defined in their own model space; we render a simple
-        // indicator at a fixed offset from the player's body center.
-        if (assets_->weapon_model() && !assets_->weapon_model()->edges.empty()) {
+        // Weapon nodes are defined in their own model space; we render the
+        // mesh at a fixed offset from the player's body center.
+        // [U1] Weapons have NO edges — their figures are Triangles, so the
+        // old edges-only render never drew anything.
+        if (assets_->weapon_model() && !assets_->weapon_model()->triangles.empty()) {
             ren::Color4B wcol{200, 170, 100, 255};
             // Use NPivot position as the reference point for weapon placement
             float dir = facing_right_ ? 1.0f : -1.0f;
             float ox = world_cx + dir * 30.0f;
             float oy = world_cy + 10.0f;
-            // Render weapon edges as simple lines/circles
-            for (auto& e : assets_->weapon_model()->edges) {
-                auto n1 = assets_->weapon_model()->nodes.find(e.end1);
-                auto n2 = assets_->weapon_model()->nodes.find(e.end2);
-                if (n1 == assets_->weapon_model()->nodes.end() || n2 == assets_->weapon_model()->nodes.end()) continue;
-                float scale = 0.3f;
-                float wx1 = ox + n1->second.x * scale;
-                float wy1 = oy + n1->second.y * scale;
-                float wx2 = ox + n2->second.x * scale;
-                float wy2 = oy + n2->second.y * scale;
-                float r = e.radius > 0 ? e.radius * scale : 3.0f;
-                renderer_->draw_filled_circle_world(wx1, wy1, r, wcol);
-                renderer_->draw_filled_circle_world(wx2, wy2, r * 0.7f, wcol);
+            const float scale = 0.3f;
+            auto& wm = *assets_->weapon_model();
+            for (const auto& t : wm.triangles) {
+                auto i1 = wm.nodes.find(t.n1);
+                auto i2 = wm.nodes.find(t.n2);
+                auto i3 = wm.nodes.find(t.n3);
+                if (i1 == wm.nodes.end() || i2 == wm.nodes.end() || i3 == wm.nodes.end())
+                    continue;
+                renderer_->draw_filled_triangle_world(
+                    ox + dir * i1->second.x * scale, oy + i1->second.y * scale,
+                    ox + dir * i2->second.x * scale, oy + i2->second.y * scale,
+                    ox + dir * i3->second.x * scale, oy + i3->second.y * scale,
+                    wcol);
             }
         }
     }
@@ -2297,7 +2310,20 @@ private:
         if (auto* ns = scene->first_child("Nodes")) {
             for (const auto& child : ns->children) {
                 std::string type = child.attr("Type");
-                if (type != "Node" && type != "CenterOfMass") continue;
+                // [U1] Weapon models ship ONLY MacroNodes (weapon_knuckles.xml:
+                // 138 of them, two hands) — the old filter for Type="Node"/
+                // "CenterOfMass" parsed ZERO nodes. Parse them the same way
+                // load_player_weapon does: macro map + plain node map
+                // (MacroNodes carry X/Y/Mass too).
+                if (type == "MacroNode") {
+                    BodyMacroNode mn;
+                    mn.name = child.name;
+                    mn.children[0] = child.attr("ChildNode1");
+                    mn.children[1] = child.attr("ChildNode2");
+                    mn.children[2] = child.attr("ChildNode3");
+                    mn.children[3] = child.attr("ChildNode4");
+                    assets_->enemy_weapon_model()->macro_nodes[mn.name] = mn;
+                }
                 BodyNode n;
                 n.name = child.name;
                 n.x = tof(child.attr("X"));
@@ -2321,19 +2347,31 @@ private:
         }
         if (auto* fs = scene->first_child("Figures")) {
             for (const auto& child : fs->children) {
-                if (child.attr("Type") != "Capsule") continue;
-                BodyCapsule c;
-                c.edge_name = child.attr("Edge");
-                c.radius1 = tof(child.attr("Radius1"));
-                c.radius2 = tof(child.attr("Radius2"));
-                c.margin1 = tof(child.attr("Margin1"));
-                c.margin2 = tof(child.attr("Margin2"));
-                assets_->enemy_weapon_model()->capsules.push_back(c);
+                std::string type = child.attr("Type");
+                if (type == "Capsule") {
+                    BodyCapsule c;
+                    c.edge_name = child.attr("Edge");
+                    c.radius1 = tof(child.attr("Radius1"));
+                    c.radius2 = tof(child.attr("Radius2"));
+                    c.margin1 = tof(child.attr("Margin1"));
+                    c.margin2 = tof(child.attr("Margin2"));
+                    assets_->enemy_weapon_model()->capsules.push_back(c);
+                } else if (type == "Triangle") {
+                    // [U1] Weapon figures are Triangles (weapon_knuckles.xml:
+                    // 276 of them); the Capsule-only filter parsed none.
+                    BodyTriangle t;
+                    t.n1 = child.attr("Node1");
+                    t.n2 = child.attr("Node2");
+                    t.n3 = child.attr("Node3");
+                    assets_->enemy_weapon_model()->triangles.push_back(t);
+                }
             }
         }
-        std::printf("  Enemy weapon '%s': %zu nodes, %zu edges, %zu capsules\n",
+        std::printf("  Enemy weapon '%s': %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
                     weapon_name.c_str(), assets_->enemy_weapon_model()->nodes.size(),
-                    assets_->enemy_weapon_model()->edges.size(), assets_->enemy_weapon_model()->capsules.size());
+                    assets_->enemy_weapon_model()->edges.size(),
+                    assets_->enemy_weapon_model()->capsules.size(),
+                    assets_->enemy_weapon_model()->triangles.size());
     }
 
     // Map weapon tactic name to model file path.
@@ -2481,13 +2519,22 @@ private:
                     c.margin1 = tof(child.attr("Margin1"));
                     c.margin2 = tof(child.attr("Margin2"));
                     assets_->weapon_model()->capsules.push_back(c);
+                } else if (child.attr("Type") == "Triangle") {
+                    // [U1] Weapon figures are Triangles (no capsules, no
+                    // edges); without them nothing could be rendered.
+                    BodyTriangle t;
+                    t.n1 = child.attr("Node1");
+                    t.n2 = child.attr("Node2");
+                    t.n3 = child.attr("Node3");
+                    assets_->weapon_model()->triangles.push_back(t);
                 }
             }
         }
-        std::printf("  Player weapon '%s' (%s): %zu nodes, %zu edges, %zu capsules\n",
+        std::printf("  Player weapon '%s' (%s): %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
                     tactic.c_str(), model_file.c_str(),
                     assets_->weapon_model()->nodes.size(), assets_->weapon_model()->edges.size(),
-                    assets_->weapon_model()->capsules.size());
+                    assets_->weapon_model()->capsules.size(),
+                    assets_->weapon_model()->triangles.size());
     }
 
     // Initialize Verlet physics state from the bag's skeleton nodes.
