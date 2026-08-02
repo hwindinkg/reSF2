@@ -322,6 +322,7 @@ uint32_t AudioEngine::play(const std::string& name, float volume, bool looping) 
 
     backend_->play_sound(snd->pcm(), volume * sfx_volume_, 0.0f);
     last_played_name_ = name;
+    ++play_count_;
     return next_instance_id_++;
 }
 

@@ -142,12 +142,18 @@ static void walk_to_bag(resf2::test::HeadlessTestRunner& r) {
     }
 }
 
-// One kick (P): fires a kick move, plays through the attack interval, recovers.
+// One kick (P): fires a kick move, plays through the attack interval and the
+// FULL recovery (move_state back to idle) so repeated kicks fire reliably.
 static void kick(resf2::test::HeadlessTestRunner& r) {
     edge_down(r, plat::Key::P);
     r.run_frames(2);
     edge_up(r, plat::Key::P);
-    r.run_frames(60);
+    for (int i = 0; i < 160; ++i) {
+        r.run_frames(1);
+        if (r.game().host_get_player_move_state() == 0 &&
+            r.game().host_get_player_anim() == "stance_idle")
+            break;
+    }
 }
 
 // ---------- S3: hit sounds resolve and play on a registered hit ----------
@@ -157,6 +163,9 @@ static void test_s3_hit_sounds_resolve() {
     resf2::test::HeadlessTestRunner runner = make_dojo_runner();
     if (!runner.init()) { std::fprintf(stderr, "FAIL: S3 init() returned false\n"); ++tests_failed; return; }
     suppress_stdout();
+    // The Loading scene triggers init_location(), which loads the sound
+    // bank — a few frames in, not during init().
+    runner.run_frames(40);
 
     // The whole original bank ships in assets/sounds/ — including both hit
     // sets. The soak's "Sound not found or invalid: f_pl_hit1/2/3" must be
@@ -189,7 +198,8 @@ static void test_s3_hit_sounds_resolve() {
 
     const std::string& last = aud::AudioEngine::instance().last_played_name();
     std::fprintf(stderr, "  [S3] last played sound: '%s'\n", last.c_str());
-    const bool is_hit = last.size() > 6 && last.compare(last.size() - 6, 6, "_pl_hit") == 0;
+    // "X_pl_hitN": the 7-char "_pl_hit" sits at offset size-8 (m_pl_hit3).
+    const bool is_hit = last.size() > 8 && last.compare(last.size() - 8, 7, "_pl_hit") == 0;
     CHECK(is_hit, "S3: the registered hit plays a _pl_hit body-impact sound");
     CHECK(is_hit && aud::AudioEngine::instance().get_sound(last) != nullptr,
           "S3: the played hit sound resolves (non-zero play, no 'not found')");
@@ -296,15 +306,10 @@ static void test_s2_enemy_attack_voice() {
     info.enemy_name = "Dojo_Disciple";  // stages.xml Voice=\"Male\"
     runner.game().host_set_battle_info(info);
 
-    // The audio engine is a process-wide singleton, so last_played_name()
-    // carries state from earlier tests. Only consider a sound played AFTER
-    // this point a product of this scenario.
-    const std::string before = aud::AudioEngine::instance().last_played_name();
-
     // The A6 intro hold (start stance) ends on the player's first input;
     // the enemy AI is gated until then (A1). Break the stance like a real
-    // player would, then wait for the enemy's first attack — when the
-    // attack state flips, its swing sound was played this very frame.
+    // player would, then wait for the enemy's first attack SWING — the
+    // behavioral contract is the sound the enemy's attack plays.
     runner.run_frames(330);
     runner.tap_key(plat::Key::D, 2);
     for (int i = 0; i < 80; ++i) {  // settle into stance_idle
@@ -314,28 +319,69 @@ static void test_s2_enemy_attack_voice() {
             break;
     }
 
-    bool attacked = false;
-    int first_attack_frame = -1;
-    for (int i = 0; i < 3600 && !attacked; ++i) {
+    // The engine is a process-wide singleton, so a play must be counted
+    // AFTER the snapshot to belong to this scenario (replays of the same
+    // name would otherwise look like silence).
+    const uint64_t count0 = aud::AudioEngine::instance().play_count();
+    const std::string& last = aud::AudioEngine::instance().last_played_name();
+    bool heard_attack = false;
+    int heard_at_frame = -1;
+    for (int i = 0; i < 3600 && !heard_attack; ++i) {
         runner.run_frames(1);
-        attacked = runner.game().host_get_enemy_attacking();
-        if (attacked) first_attack_frame = i;
+        const std::string& cur = aud::AudioEngine::instance().last_played_name();
+        if (aud::AudioEngine::instance().play_count() > count0 &&
+            cur.rfind("m_pl_attack", 0) == 0) {
+            heard_attack = true;
+            heard_at_frame = i;
+        }
     }
-    std::fprintf(stderr, "  [S2] enemy attack at frame %d (anim='%s' pick='%s')\n",
-                 first_attack_frame,
+    std::fprintf(stderr, "  [S2] enemy m_pl_attack* heard at poll frame %d (anim='%s' pick='%s')\n",
+                 heard_at_frame,
                  runner.game().host_get_enemy_anim().c_str(),
                  runner.game().host_get_ai_last_pick().c_str());
-    CHECK(attacked, "S2: the enemy launches an attack within the window");
-
-    const std::string& last = aud::AudioEngine::instance().last_played_name();
-    std::fprintf(stderr, "  [S2] enemy attack played: '%s' (enemy voice '%s', before='%s')\n",
-                 last.c_str(), runner.game().host_get_enemy_voice().c_str(),
-                 before.c_str());
-    CHECK(attacked && last != before && last.rfind("m_pl_attack", 0) == 0,
+    CHECK(heard_attack,
           "S2: the Male enemy's attack plays m_pl_attack* (stages.xml voice)");
-    CHECK(attacked && last != before &&
-          aud::AudioEngine::instance().get_sound(last) != nullptr,
+    CHECK(heard_attack && aud::AudioEngine::instance().get_sound(last) != nullptr,
           "S2: the enemy attack sound resolves");
+}
+
+static void test_s2_female_enemy_attack_voice() {
+    std::printf("\n=== S2: a female enemy attack plays f_pl_attack* ===\n");
+    resf2::test::HeadlessTestRunner runner = make_battle_runner();
+    if (!runner.init()) { std::fprintf(stderr, "FAIL: S2 init() returned false\n"); ++tests_failed; return; }
+    suppress_stdout();
+
+    scn::SceneHost::BattleInfo info;
+    info.enemy_name = "Girl_Sai";  // stages.xml Voice=\"Female\"
+    runner.game().host_set_battle_info(info);
+    std::fprintf(stderr, "  [S2] enemy voice: '%s'\n",
+                 runner.game().host_get_enemy_voice().c_str());
+    CHECK(runner.game().host_get_enemy_voice() == "Female",
+          "S2: the female enemy resolves from stages.xml");
+
+    runner.run_frames(330);
+    runner.tap_key(plat::Key::D, 2);
+    for (int i = 0; i < 80; ++i) {  // settle into stance_idle
+        runner.run_frames(1);
+        if (!runner.game().host_get_start_stance() &&
+            runner.game().host_get_player_move_state() == 0)
+            break;
+    }
+
+    const uint64_t count0 = aud::AudioEngine::instance().play_count();
+    bool heard_attack = false;
+    for (int i = 0; i < 3600 && !heard_attack; ++i) {
+        runner.run_frames(1);
+        const std::string& cur = aud::AudioEngine::instance().last_played_name();
+        if (aud::AudioEngine::instance().play_count() > count0 &&
+            cur.rfind("f_pl_attack", 0) == 0) {
+            heard_attack = true;
+        }
+    }
+    std::fprintf(stderr, "  [S2] enemy f_pl_attack* heard: %s\n",
+                 heard_attack ? "yes" : "no");
+    CHECK(heard_attack,
+          "S2: the Female enemy's attack plays f_pl_attack* (stages.xml voice)");
 }
 
 int main() {
@@ -347,6 +393,7 @@ int main() {
     test_s1_save_voice_parsed();
     test_s2_enemy_voice_from_stages();
     test_s2_enemy_attack_voice();
+    test_s2_female_enemy_attack_voice();
 
     std::printf("\n%d passed, %d failed\n", tests_passed, tests_failed);
     return tests_failed == 0 ? 0 : 1;
