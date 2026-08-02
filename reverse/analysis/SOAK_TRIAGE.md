@@ -79,3 +79,32 @@ Evidence source markers:
 | ID | Symptom (user words) | Log/evidence | Suspected subsystem | Proposed behavioral test |
 |---|---|---|---|---|
 | L1 | `round_progress` logged EVERY frame (~150 lines) | `[report]` `[MAP] round_progress: zone='ZONE_1' battle='BOSS_LYNX' done=0 total=6` every frame; `[log]` per-frame logging pattern visible in trace (`[INPUT]`/`[MOVEMENT]` pairs every frame) | Logging rate (MAP logger) | Assert round_progress logged once per state change, not per frame |
+
+---
+
+# SOAK_TRIAGE — Wave 7: parser-level defects (re-soak 2, 2026-08-02)
+
+| | |
+|---|---|
+| **Date** | 2026-08-02 |
+| **Soak scope** | Re-soak 2: parser-level defects — equipment model resolution, battle collision target, armor/helm attach, HUD localization/layout, post-defeat quest flow, input auto-repeat, dialogue textures, shop preview (manual play, debug build) |
+| **NEW RESOURCE** | **Frida available** — socket device (remote frida-server, **no USB**) for live-game evidence; the game may be reachable via the socket device |
+| **Evidence source markers** | `[log]` — verbatim in `resf2_debug.log` (re-soak 2 trace); `[report]` — quoted from the re-soak-2 report (user words); `[directive]` — explicit user directive, verify (not a symptom report) |
+| **Defect count** | 12 rows (P1–P12) |
+
+## 8. Wave 7 — parser-level defects (re-soak 2, 2026-08-02)
+
+| ID | Symptom | Evidence | Suspected subsystem | Proposed test |
+|---|---|---|---|---|
+| P1 | Weapon model NOT FOUND on equip — equipped weapon invisible, only animations play | `[log]` `Player weapon 'Knives' model NOT FOUND (tried: weapon_knive.xml)!` — item 'Knives' maps to wrong model filename (`weapon_knive.xml` vs expected `weapon_knives.xml`) | Weapon model loader / item→model filename mapping (weapon*) | Assert item 'Knives' resolves to `weapon_knives.xml` and the weapon model loads with >0 nodes/edges |
+| P2 | Battle hit detection uses the PUNCHING BAG — battle locations load the bag and HIT! lines log `bag_edge=` in fights vs the enemy; player damage only connects at point-blank | `[log]` battle location loads `Punching bag: 15 nodes...`; HIT! lines log `bag_edge=Edge17` in FIGHTS vs the enemy (moon location); player damage to enemy only connects at `sq_dist≈0-5` | Battle location setup / collision-target selection (hit detection) | Assert the enemy fighter is the collision target in battle locations; the bag exists only in the dojo |
+| P3 | Armor and helms don't render — only the standard body/head models show | `[report]` equipped armor/helm items from `users.xml` never attach to the fighter model | Equipment attach / model composition (users.xml equipment parsing) | Assert equipped armor/helm attach to the fighter model |
+| P4 | Fighter names in the battle HUD don't come from the language pack | `[report]` localized fighter names required — eng/rus xml not applied to HUD | HUD i18n / name lookup | Assert HUD fighter names come from the active locale pack (eng/rus xml) |
+| P5 | HUD badly laid out | `[report]` "плохо настроен худ" | HUD layout | Assert HUD element positions match design |
+| P6 | Story breaks after losing the first battle — no progression | `[log]` `[DOJO] Switched to punching bag / enemy fighter` toggling repeatedly with no progression; quest parser/state after defeat broken (expected: retry or advance, not a bag/fighter toggle loop) | Quest parser / post-defeat story state | Assert defeat leads to retry or advance — never a bag/fighter toggle loop |
+| P7 | `[MOVE] Duck` fires ×16 in a row with NO key events | `[log]` `[MOVE] Duck (anim 'duck', prio=10)` ×16 consecutive with no intervening KEY lines — held-key auto-repeat bug (move re-triggered every frame) | Input auto-repeat / move trigger cadence (input pipeline) | Assert a move fires once per key-down, not every frame while the key is held |
+| P8 | Dialogue textures and placement still wrong (deeper than D1–D6) | `[report]` check the dialogue texture parsers / atlas frames | Dialogue texture parser / atlas frame mapping | Assert dialogue box texture region maps to the correct atlas frame and placement matches design |
+| P9 | Shop shows no character preview on the left; equipped weapon invisible there too | `[report]` links P1 (weapon model resolution) | Shop preview rendering / weapon model resolution (weapon*) | Assert the shop renders the character preview with the equipped weapon |
+| P10 | Moves parse but attributes/effects misapplied — only animations apply, and incorrectly | `[directive]` user directive: verify the moves.xml parser — "применяются только анимации и то неправильно" | moves.xml parser (attribute/effect application) | Assert each move applies its authored attributes/effects, not just an animation |
+| P11 | Story flow after defeat (quest parser) | `[directive]` user directive: verify the quest parser (story flow after defeat) | Quest parser / story state machine | Assert the quest state machine advances per authored flow after defeat |
+| P12 | Dialogue texture parsers/positions | `[directive]` user directive: verify dialogue texture parsers/positions | Dialogue texture parser / positioning | Assert dialogue texture frames/positions match authored layout |
