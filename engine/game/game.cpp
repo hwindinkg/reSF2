@@ -1429,14 +1429,19 @@ void Game::host_render_scroll_panel(float x, float y, float w, float h) {
     if (roll_l && roll_c && roll_r) {
         const float bar_h = w * 0.13f;
         const float end_w = bar_h * (156.0f / 74.0f);
-        const float bar_y = y - bar_h * 0.55f;
+        // [D6] The roll bars sit flush with the panel's top and bottom edges,
+        // INSIDE the sheet: the soak showed the bottom texture (подложка)
+        // stretched far beyond the parchment. The bars used to overhang the
+        // panel by ~0.55 bar heights on each side, inflating the drawn
+        // height of the whole dialogue box.
+        const float bar_y = y;
         renderer_->draw_textured_quad_screen(*roll_l, x, bar_y, end_w, bar_h);
         renderer_->draw_textured_quad_screen(*roll_c, x + end_w, bar_y,
                                              w - 2.0f * end_w, bar_h);
         renderer_->draw_textured_quad_screen(*roll_r, x + w - end_w, bar_y,
                                              end_w, bar_h);
         // And one at the bottom, so the sheet reads as unrolled rather than cut.
-        const float bot_y = y + h - bar_h * 0.45f;
+        const float bot_y = y + h - bar_h;
         renderer_->draw_textured_quad_screen(*roll_l, x, bot_y, end_w, bar_h);
         renderer_->draw_textured_quad_screen(*roll_c, x + end_w, bot_y,
                                              w - 2.0f * end_w, bar_h);
