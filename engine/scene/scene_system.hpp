@@ -220,6 +220,14 @@ public:
     // [ORIGINAL] The Tutorial attribute on <Warrior> in usersDefault.xml.
     [[nodiscard]] virtual std::string host_get_tutorial_state() const { return "COMPLETE"; }
 
+    // Set the tutorial state (ResultsScene advances it on victory, keeps it
+    // on defeat so the fight stays retryable).
+    virtual void host_set_tutorial_state(std::string s) { (void)s; }
+
+    // The label of the Results scene's continue button. On a DEFEAT of a
+    // retryable fight it is the rematch prompt, not "BACK TO MENU".
+    [[nodiscard]] virtual std::string host_get_results_button_label() const { return {}; }
+
     // --- Text rendering ---
 
     // Draw text using the HUD font system.
