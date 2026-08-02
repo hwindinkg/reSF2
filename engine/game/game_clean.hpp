@@ -3053,9 +3053,17 @@ private:
     }
 
     // ---------- HUD font ----------
-    void load_hud_font() {
+    // [D5] The font follows the session language: an English session must
+    // render with the English font (eng/sakkal.fnt), not the Russian one —
+    // the soak showed Russian glyphs in an English game. The generic fonts
+    // and rus/optima.fnt remain as fallbacks so a missing language font
+    // never leaves the game without a font.
+    void load_hud_font(const std::string& lang = "eng") {
         auto root = std::filesystem::path(asset_root_);
+        const std::string font_lang = lang.empty() ? std::string("eng") : lang;
         std::vector<std::filesystem::path> candidates = {
+            root/"assets"/"1536"/"fonts"/font_lang/"sakkal.fnt",
+            root/"1536"/"fonts"/font_lang/"sakkal.fnt",
             root/"assets"/"1536"/"fonts"/"rus"/"optima.fnt",
             root/"assets"/"1536"/"fonts"/"obelix.fnt",
             root/"1536"/"fonts"/"rus"/"optima.fnt",
