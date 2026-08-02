@@ -41,6 +41,11 @@ struct SaveData {
     // Sensei tutorial sequence. Values: "MOVE", "BAG", "FIRST_FIGHT", "COMPLETE".
     std::string tutorial_state = "MOVE";
 
+    // [ORIGINAL] From <Warrior Voice=> in usersDefault.xml / user.xml: the
+    // player's voice gender. "Male" (usersDefault.xml default) selects the
+    // m_pl_* sound set, "Female" the f_pl_* set.
+    std::string voice = "Male";
+
     // [ORIGINAL] From usersDefault.xml <Battles>: each entry is "ZONE_N|BOSS_NAME|"
     // (unlocked) or "ZONE_N|BOSS_NAME_LOCKED|" (locked). Parsed into a map for
     // quick lookup by zone/battle name.

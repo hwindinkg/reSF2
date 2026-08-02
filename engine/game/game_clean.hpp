@@ -461,6 +461,15 @@ float host_enemy_health_frac() const override;
     }
     void host_set_tutorial_state(std::string s) { tutorial_state_ = std::move(s); }
     int host_get_tutorial_bag_hits() const { return tutorial_bag_hits_; }
+    int host_get_player_hits_landed() const { return player_fighter_.hits_landed; }
+
+    // [S1/S2] Voice-gender state for the m_pl_*/f_pl_* sound sets. The player
+    // voice comes from <Warrior Voice=> in usersDefault.xml / user.xml
+    // (default "Male"); the enemy voice is resolved from the stages.xml
+    // warrior template when the map hands a fight over.
+    void host_set_player_voice(std::string voice) { player_voice_ = std::move(voice); }
+    const std::string& host_get_player_voice() const { return player_voice_; }
+    const std::string& host_get_enemy_voice() const { return enemy_voice_; }
     float host_get_bag_displacement() const { return bag_displacement(); }
     float host_get_y_adjust() const { return y_adjust_smoothed_; }
     resf2::scene::SceneId host_get_current_scene() const {
@@ -4344,6 +4353,12 @@ private:
     // Key: "ZONE_N" → true if unlocked. Key: "ZONE_N|BOSS_NAME" → true if unlocked.
     std::map<std::string, bool> zone_unlocked_;
     std::map<std::string, bool> battle_unlocked_;
+
+    // [S1/S2] Voice gender of the player / current enemy ("Male"/"Female").
+    // Selects the m_pl_* vs f_pl_* sound set. Player default "Male" matches
+    // usersDefault.xml; the enemy voice is resolved in host_set_battle_info.
+    std::string player_voice_ = "Male";
+    std::string enemy_voice_ = "Male";
     resf2::format::ListData list_data_;
     bool list_data_loaded_ = false;
 
