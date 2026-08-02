@@ -463,6 +463,112 @@ void AssetManager::load_enemy_weapon(const std::string& weapon_name, const std::
                 enemy_weapon_model_->triangles.size());
 }
 
+// ---------- Equipment models (armor / helm) ----------
+//
+// [P3] Equipped armor/helm model files come from the list.xml Model
+// attribute (users.xml Armor="ARMOR_ROBE" -> armor_robe.xml, Helm="Head" ->
+// head.xml — LIVE_GAME_EVIDENCE Q4). The files ship the same MacroNode /
+// Edge / Capsule structure as weapons; armor capsules reference the
+// fighter's E* skeleton edges (EArm_1, EChest...), so the render pass draws
+// them over the animated body.
+
+static void parse_macro_model_xml(const std::string& xml, BodyModel* model) {
+    fmt::XmlDocument doc;
+    if (!doc.parse(xml)) {
+        std::fprintf(stderr, "[equipment] xml parse error: %s\n", doc.error().c_str());
+        return;
+    }
+    auto* scene = doc.root()->first_child("Scene");
+    if (!scene) return;
+    if (auto* ns = scene->first_child("Nodes")) {
+        for (const auto& child : ns->children) {
+            std::string type = child.attr("Type");
+            if (type == "MacroNode") {
+                BodyMacroNode mn;
+                mn.name = child.name;
+                mn.children[0] = child.attr("ChildNode1");
+                mn.children[1] = child.attr("ChildNode2");
+                mn.children[2] = child.attr("ChildNode3");
+                mn.children[3] = child.attr("ChildNode4");
+                model->macro_nodes[mn.name] = mn;
+            }
+            BodyNode n;
+            n.name = child.name;
+            n.x = tof(child.attr("X"));
+            n.y = tof(child.attr("Y"));
+            n.mass = tof(child.attr("Mass"), 1.0f);
+            n.fixed = (toi(child.attr("Fixed")) != 0);
+            n.attenuation = tof(child.attr("Attenuation"), 0.02f);
+            model->nodes[n.name] = n;
+        }
+    }
+    if (auto* es = scene->first_child("Edges")) {
+        for (const auto& child : es->children) {
+            if (child.attr("Type") != "Edge") continue;
+            BodyEdge e;
+            e.name = child.name;
+            e.end1 = child.attr("End1");
+            e.end2 = child.attr("End2");
+            e.radius = tof(child.attr("Radius"));
+            model->edges.push_back(e);
+        }
+    }
+    if (auto* fs = scene->first_child("Figures")) {
+        for (const auto& child : fs->children) {
+            std::string type = child.attr("Type");
+            if (type == "Capsule") {
+                BodyCapsule c;
+                c.edge_name = child.attr("Edge");
+                c.radius1 = tof(child.attr("Radius1"));
+                c.radius2 = tof(child.attr("Radius2"));
+                c.margin1 = tof(child.attr("Margin1"));
+                c.margin2 = tof(child.attr("Margin2"));
+                model->capsules.push_back(c);
+            } else if (type == "Triangle") {
+                BodyTriangle t;
+                t.n1 = child.attr("Node1");
+                t.n2 = child.attr("Node2");
+                t.n3 = child.attr("Node3");
+                model->triangles.push_back(t);
+            }
+        }
+    }
+}
+
+void AssetManager::load_armor_model(const std::string& model_file, const std::string& asset_root) {
+    armor_model_.reset();
+    auto candidates = model_paths(asset_root, model_file.c_str());
+    std::string fig_path;
+    for (const auto& p : candidates)
+        if (std::filesystem::exists(p)) { fig_path = p.string(); break; }
+    if (fig_path.empty()) {
+        std::printf("  Armor model '%s' NOT FOUND!\n", model_file.c_str());
+        return;
+    }
+    armor_model_ = std::make_unique<BodyModel>();
+    parse_macro_model_xml(read_text(fig_path), armor_model_.get());
+    std::printf("  Armor model '%s': %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
+                model_file.c_str(), armor_model_->nodes.size(), armor_model_->edges.size(),
+                armor_model_->capsules.size(), armor_model_->triangles.size());
+}
+
+void AssetManager::load_helm_model(const std::string& model_file, const std::string& asset_root) {
+    helm_model_.reset();
+    auto candidates = model_paths(asset_root, model_file.c_str());
+    std::string fig_path;
+    for (const auto& p : candidates)
+        if (std::filesystem::exists(p)) { fig_path = p.string(); break; }
+    if (fig_path.empty()) {
+        std::printf("  Helm model '%s' NOT FOUND!\n", model_file.c_str());
+        return;
+    }
+    helm_model_ = std::make_unique<BodyModel>();
+    parse_macro_model_xml(read_text(fig_path), helm_model_.get());
+    std::printf("  Helm model '%s': %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
+                model_file.c_str(), helm_model_->nodes.size(), helm_model_->edges.size(),
+                helm_model_->capsules.size(), helm_model_->triangles.size());
+}
+
 // ---------- weapon_tactic_to_model_file ----------
 
 std::string AssetManager::weapon_tactic_to_model_file(const std::string& tactic) const {
