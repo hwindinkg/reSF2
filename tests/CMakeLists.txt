@@ -516,6 +516,11 @@ set_tests_properties(test_soak_dialogue_defects PROPERTIES TIMEOUT 300)
 add_integration_test(test_soak_ui_defects)
 set_tests_properties(test_soak_ui_defects PROPERTIES TIMEOUT 300)
 
+# Soak S1-S3: audio voice/hit-sound selection (wave 6). The battle-scene
+# half waits for a real enemy attack, which can take tens of seconds.
+add_integration_test(test_soak_audio_defects)
+set_tests_properties(test_soak_audio_defects PROPERTIES TIMEOUT 300)
+
 # Phase 5: Screenshot comparison — renders headlessly, compares against
 # reference PNGs using MSE, and saves diff images on failure.
 add_integration_test(test_screenshot_compare)

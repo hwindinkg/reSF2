@@ -177,6 +177,11 @@ public:
     // Access the backend directly.
     AudioBackend* backend() const { return backend_.get(); }
 
+    // Name of the last sound successfully played (empty if none yet).
+    // Observability seam for behavioral tests: after a gameplay action the
+    // caller can assert WHICH sound the engine actually played.
+    const std::string& last_played_name() const { return last_played_name_; }
+
 private:
     std::unordered_map<std::string, std::shared_ptr<WavSound>> sounds_;
     std::vector<SoundInstance> instances_;
@@ -186,6 +191,7 @@ private:
     float sfx_volume_ = 1.0f;
     std::mutex mutex_;
     bool initialized_ = false;
+    std::string last_played_name_;
 };
 
 } // namespace resf2::audio
