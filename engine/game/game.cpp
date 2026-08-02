@@ -997,6 +997,17 @@ std::string Game::host_get_equipped(const std::string& slot) const {
     return inventory_.equipped(slot);
 }
 
+void Game::host_add_item(const std::string& item_id) {
+    // [P3] Test seam: put an item into the inventory without the shop gates
+    // (gold, level, ShopHide). Mirrors host_buy_item's inventory/profile
+    // writes. The wave-7a tests equip real items (ARMOR_ROBE, HEAD_KENJI)
+    // that a hermetic dojo cannot buy — ARMOR_ROBE is level-gated and every
+    // helm in list.xml is ShopHide.
+    if (inventory_.has_item(item_id)) return;
+    inventory_.add_item(item_id);
+    player_profile_.add_item(item_id);
+}
+
 bool Game::host_buy_item(const std::string& item_id) {
     auto* item = shop_manager_.find_item(item_id);
             if (!item) {

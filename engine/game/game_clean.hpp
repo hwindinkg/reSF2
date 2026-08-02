@@ -518,6 +518,20 @@ float host_enemy_health_frac() const override;
         return assets_ && assets_->weapon_model()
             ? assets_->weapon_model()->nodes.size() : 0;
     }
+    // ---- Soak-fix Wave 7a probes (P1-P10): equipment model + duck probes ----
+    std::size_t host_get_armor_model_node_count() const {
+        return assets_ && assets_->armor_model()
+            ? assets_->armor_model()->nodes.size() : 0;
+    }
+    std::size_t host_get_armor_model_capsule_count() const {
+        return assets_ && assets_->armor_model()
+            ? assets_->armor_model()->capsules.size() : 0;
+    }
+    std::size_t host_get_helm_model_node_count() const {
+        return assets_ && assets_->helm_model()
+            ? assets_->helm_model()->nodes.size() : 0;
+    }
+    int host_get_armor_capsules_drawn() const { return armor_capsules_drawn_; }
     bool host_ui_texture_loaded(const std::string& name) const {
         auto it = assets_->hud_textures().find(name);
         return it != assets_->hud_textures().end() && it->second != nullptr;
@@ -540,6 +554,9 @@ void host_add_currency(int amount) override;
     // ---- Inventory / Shop ----
 
 bool host_has_item(const std::string& item_id) const override;
+
+// Test seam: put an item into the inventory without shop gates.
+void host_add_item(const std::string& item_id);
 
 
 std::vector<std::string> host_get_owned_items() const override;
@@ -4467,11 +4484,14 @@ private:
     bool& is_battle_mode_ = combat_.mutable_is_battle_mode();
     bool& show_enemy_ = combat_.mutable_show_enemy();
 
+    // [P3] Armor capsules drawn by the player body render pass (test probe:
+    // "the render path consumes the equipped armor model").
+    int armor_capsules_drawn_ = 0;
+
     // ---------- Weapon system ----------
     // Currently equipped weapon type. Used to filter moves by tactic_weapon.
     // Move selection only allows moves whose tactic_weapon matches this value.
-    std::string equipped_weapon_ = "Fists";
-    // [ORIGINAL] Ranged and magic slots. Empty means the corresponding
+    std::string equipped_weapon_ = "Fists";    // [ORIGINAL] Ranged and magic slots. Empty means the corresponding
     // on-screen button is not shown — the original hides them when nothing is
     // equipped, which is what a fresh profile in the dojo looks like. Filled
     // by 5.4 (weapons) / 7.2 (saves).

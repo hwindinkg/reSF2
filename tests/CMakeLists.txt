@@ -521,6 +521,27 @@ set_tests_properties(test_soak_ui_defects PROPERTIES TIMEOUT 300)
 add_integration_test(test_soak_audio_defects)
 set_tests_properties(test_soak_audio_defects PROPERTIES TIMEOUT 300)
 
+# Soak-fix Wave 7a: behavioral parser/combat tests for the SOAK_TRIAGE.md §8
+# defects (P1 weapon model filename, P2 battle hit target = enemy fighter,
+# P3 armor/helm model attach, P7 held-key duck auto-repeat). Four scenes;
+# 300 like the wave-5 suite.
+add_integration_test(test_soak_parser_defects)
+set_tests_properties(test_soak_parser_defects PROPERTIES TIMEOUT 300)
+
+# Soak-fix Wave 7a (P10): moves.xml parser fidelity — the REAL device file
+# (reverse/data/animations/moves.xml, LIVE_GAME_EVIDENCE Q3) parsed by the
+# engine's own loader, field-by-field vs the verbatim reference values.
+add_executable(test_moves_parser_fidelity test_moves_parser_fidelity.cpp)
+target_link_libraries(test_moves_parser_fidelity PRIVATE
+    resf2_game
+    resf2_format
+    resf2_warnings
+)
+target_compile_features(test_moves_parser_fidelity PRIVATE cxx_std_23)
+add_test(NAME test_moves_parser_fidelity COMMAND test_moves_parser_fidelity
+         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(test_moves_parser_fidelity PROPERTIES TIMEOUT 60)
+
 # Phase 5: Screenshot comparison — renders headlessly, compares against
 # reference PNGs using MSE, and saves diff images on failure.
 add_integration_test(test_screenshot_compare)

@@ -698,7 +698,10 @@ void AssetManager::load_moves(const std::string& asset_root) {
         return;
     }
 
-    auto xml = read_text(moves_path);
+    parse_moves_xml(read_text(moves_path));
+}
+
+void AssetManager::parse_moves_xml(const std::string& xml) {
     fmt::XmlDocument doc;
     if (!doc.parse(xml)) {
         std::fprintf(stderr, "[moves] xml_doc parse error: %s\n", doc.error().c_str());

@@ -84,6 +84,10 @@ public:
     const std::unique_ptr<resf2::game::BodyModel>& weapon_model() const { return weapon_model_; }
     std::unique_ptr<resf2::game::BodyModel>& enemy_weapon_model() { return enemy_weapon_model_; }
     const std::unique_ptr<resf2::game::BodyModel>& enemy_weapon_model() const { return enemy_weapon_model_; }
+    std::unique_ptr<resf2::game::BodyModel>& armor_model() { return armor_model_; }
+    const std::unique_ptr<resf2::game::BodyModel>& armor_model() const { return armor_model_; }
+    std::unique_ptr<resf2::game::BodyModel>& helm_model() { return helm_model_; }
+    const std::unique_ptr<resf2::game::BodyModel>& helm_model() const { return helm_model_; }
 
     // Loading screen images
     std::vector<resf2::game::LoadingImg>& loading_images() { return loading_images_; }
@@ -119,6 +123,8 @@ public:
     void load_punching_bag_model(const std::string& asset_root);
     void load_enemy_weapon(const std::string& weapon_name, const std::string& asset_root);
     void load_player_weapon(const std::string& tactic, const std::string& asset_root);
+    void load_armor_model(const std::string& model_file, const std::string& asset_root);
+    void load_helm_model(const std::string& model_file, const std::string& asset_root);
     void load_animations(const std::string& asset_root);
     void load_moves(const std::string& asset_root);
     void load_hud_font(const std::string& asset_root);
@@ -140,6 +146,10 @@ public:
 
     // Map weapon tactic name to model file
     std::string weapon_tactic_to_model_file(const std::string& tactic) const;
+
+    // Parse one moves.xml document into moves_ (load_moves reads the file
+    // and delegates; the tests feed the device reference file directly).
+    void parse_moves_xml(const std::string& xml);
 
 public:
     // Parse body/head model XML into a BodyModel
@@ -173,6 +183,8 @@ public:
     std::unique_ptr<resf2::game::BodyModel> bag_model_;
     std::unique_ptr<resf2::game::BodyModel> weapon_model_;
     std::unique_ptr<resf2::game::BodyModel> enemy_weapon_model_;
+    std::unique_ptr<resf2::game::BodyModel> armor_model_;
+    std::unique_ptr<resf2::game::BodyModel> helm_model_;
 
     // Loading screen images
     std::vector<resf2::game::LoadingImg> loading_images_;
