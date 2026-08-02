@@ -1582,7 +1582,7 @@ void Game::init_location() {
             load_localization(loc);
             load_hud_textures();
             load_menu_textures();
-            load_hud_font();
+            load_hud_font(loc);
             load_sounds();
             if (location_) {
                 // Player/enemy positions in params.xml use Y-DOWN, same as image
