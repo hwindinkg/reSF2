@@ -253,6 +253,13 @@ public:
         return D;
     }
 
+    // [P9] Render the shop's fighter preview (body + equipped weapon) into
+    // the given screen rect. How much was drawn is exposed via the game
+    // host's shop-preview geometry accessor.
+    virtual void host_render_shop_preview(float x, float y, float w, float h) {
+        (void)x; (void)y; (void)w; (void)h;
+    }
+
     // --- Text rendering ---
 
     // Draw text using the HUD font system.
