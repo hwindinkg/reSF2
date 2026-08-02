@@ -694,8 +694,134 @@ float host_enemy_health_frac() const override;
         std::size_t body_triangles = 0;
         std::size_t weapon_triangles = 0;
     };
-    void host_render_shop_preview(float, float, float, float) {
+    // [P9] The shop's left column shows the REAL fighter: the body model at
+    // its rest pose plus the equipped weapon (the P1 weapon model), instead
+    // of the flat "FIGHTER" placeholder silhouette. Model frame is Y-up with
+    // the NPivot at the origin (feet ~-96, head top ~+110) — the same local
+    // frame render_body_model resolves in the dojo — mapped onto the panel
+    // rect (x, y, w, h) in screen space.
+    void host_render_shop_preview(float x, float y, float w, float h) {
         shop_preview_geom_ = ShopPreviewGeometry{};
+        if (!renderer_ || !assets_ || !assets_->body_model()) return;
+        auto pivot_it = assets_->skeleton_nodes().find("NPivot");
+        const float pivot_local_y = pivot_it != assets_->skeleton_nodes().end()
+                                        ? pivot_it->second.y : stance_npivot_y_;
+        const float scale = std::min(w, h) / 240.0f;   // fighter ~210 units tall
+        const float cxs = x + w * 0.5f;
+        const float cys = y + h * 0.55f;               // feet near the bottom
+        auto to_s = [&](float wx, float wy) {
+            return std::pair<float, float>{cxs + wx * scale, cys - wy * scale};
+        };
+        const ren::Color4B sil{20, 20, 25, 255};
+
+        std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
+        for (auto& e : assets_->body_model()->edges)
+            edge_map[e.name] = {e.end1, e.end2};
+        for (auto& [ename, e] : assets_->skeleton_edges())
+            edge_map[ename] = {e.end1, e.end2};
+
+        // Capsules — same trim/margin math as render_body_model.
+        for (auto& c : assets_->body_model()->capsules) {
+            auto eit = edge_map.find(c.edge_name);
+            if (eit == edge_map.end()) continue;
+            auto [x1, y1] = resolve_body_node(eit->second.first, 0, 0, true,
+                                              pivot_local_y);
+            auto [x2, y2] = resolve_body_node(eit->second.second, 0, 0, true,
+                                              pivot_local_y);
+            const float m1 = c.margin1, m2 = c.margin2;
+            const float mx1 = x1 + (x2 - x1) * m1, my1 = y1 + (y2 - y1) * m1;
+            const float mx2 = x2 - (x2 - x1) * m2, my2 = y2 - (y2 - y1) * m2;
+            const float r = (c.radius1 + c.radius2) * 0.5f;
+            const float dx = mx2 - mx1, dy = my2 - my1;
+            const float len = std::sqrt(dx * dx + dy * dy);
+            if (len < 0.5f) continue;
+            const float ux = dx / len, uy = dy / len;
+            const float px = -uy, py = ux;
+            const float ht = std::max(r, 1.0f);
+            auto [ax, ay] = to_s(mx1 + px * ht, my1 + py * ht);
+            auto [bx, by] = to_s(mx2 + px * ht, my2 + py * ht);
+            auto [cx, cy_] = to_s(mx2 - px * ht, my2 - py * ht);
+            auto [dx_, dy_] = to_s(mx1 - px * ht, my1 - py * ht);
+            renderer_->draw_filled_triangle_screen(ax, ay, bx, by, cx, cy_, sil);
+            renderer_->draw_filled_triangle_screen(ax, ay, cx, cy_, dx_, dy_, sil);
+            auto [c1x, c1y] = to_s(mx1, my1);
+            auto [c2x, c2y] = to_s(mx2, my2);
+            renderer_->draw_filled_circle_screen(c1x, c1y, ht * scale, sil);
+            renderer_->draw_filled_circle_screen(c2x, c2y, ht * scale, sil);
+            ++shop_preview_geom_.body_capsules;
+        }
+        // Skeleton edges with a Radius but no body capsule (EHead/ENeck) —
+        // without them the preview has no head.
+        for (auto& [ename, sedge] : assets_->skeleton_edges()) {
+            if (sedge.radius <= 0) continue;
+            bool has_capsule = false;
+            for (auto& c : assets_->body_model()->capsules)
+                if (c.edge_name == ename) { has_capsule = true; break; }
+            if (has_capsule) continue;
+            auto [x1, y1] = resolve_body_node(sedge.end1, 0, 0, true, pivot_local_y);
+            auto [x2, y2] = resolve_body_node(sedge.end2, 0, 0, true, pivot_local_y);
+            const float m1 = sedge.margin1, m2 = sedge.margin2;
+            const float mx1 = x1 + (x2 - x1) * m1, my1 = y1 + (y2 - y1) * m1;
+            const float mx2 = x2 - (x2 - x1) * m2, my2 = y2 - (y2 - y1) * m2;
+            const float dx = mx2 - mx1, dy = my2 - my1;
+            const float len = std::sqrt(dx * dx + dy * dy);
+            if (len < 0.5f) continue;
+            const float ux = dx / len, uy = dy / len;
+            const float px = -uy, py = ux;
+            const float ht = std::max(sedge.radius, 1.0f);
+            auto [ax, ay] = to_s(mx1 + px * ht, my1 + py * ht);
+            auto [bx, by] = to_s(mx2 + px * ht, my2 + py * ht);
+            auto [cx, cy_] = to_s(mx2 - px * ht, my2 - py * ht);
+            auto [dx_, dy_] = to_s(mx1 - px * ht, my1 - py * ht);
+            renderer_->draw_filled_triangle_screen(ax, ay, bx, by, cx, cy_, sil);
+            renderer_->draw_filled_triangle_screen(ax, ay, cx, cy_, dx_, dy_, sil);
+            auto [c1x, c1y] = to_s(mx1, my1);
+            auto [c2x, c2y] = to_s(mx2, my2);
+            renderer_->draw_filled_circle_screen(c1x, c1y, ht * scale, sil);
+            renderer_->draw_filled_circle_screen(c2x, c2y, ht * scale, sil);
+        }
+        // Triangles — only pure skeletal ones (same filter as the dojo body
+        // render, so cloth nodes do not stretch the rest pose).
+        for (auto& t : assets_->body_model()->triangles) {
+            auto is_non_skel = [&](const std::string& n) {
+                return assets_->body_model()->nodes.count(n) > 0 ||
+                       assets_->body_model()->macro_nodes.count(n) > 0;
+            };
+            if (is_non_skel(t.n1) || is_non_skel(t.n2) || is_non_skel(t.n3)) continue;
+            auto can_resolve = [&](const std::string& n) {
+                return anim_node_pos_.count(n) || assets_->skeleton_nodes().count(n);
+            };
+            if (!can_resolve(t.n1) || !can_resolve(t.n2) || !can_resolve(t.n3)) continue;
+            auto [tx0, ty0] = resolve_body_node(t.n1, 0, 0, true, pivot_local_y);
+            auto [tx1, ty1] = resolve_body_node(t.n2, 0, 0, true, pivot_local_y);
+            auto [tx2, ty2] = resolve_body_node(t.n3, 0, 0, true, pivot_local_y);
+            auto [sx0, sy0] = to_s(tx0, ty0);
+            auto [sx1, sy1] = to_s(tx1, ty1);
+            auto [sx2, sy2] = to_s(tx2, ty2);
+            renderer_->draw_filled_triangle_screen(sx0, sy0, sx1, sy1, sx2, sy2, sil);
+            ++shop_preview_geom_.body_triangles;
+        }
+        // The equipped weapon (P1 model) at the hand, same placement law as
+        // the dojo render: nodes are hand-local, offset from the body centre.
+        if (assets_->weapon_model() && !assets_->weapon_model()->triangles.empty()) {
+            const ren::Color4B wcol{200, 170, 100, 255};
+            auto& wm = *assets_->weapon_model();
+            for (const auto& t : wm.triangles) {
+                auto i1 = wm.nodes.find(t.n1);
+                auto i2 = wm.nodes.find(t.n2);
+                auto i3 = wm.nodes.find(t.n3);
+                if (i1 == wm.nodes.end() || i2 == wm.nodes.end() ||
+                    i3 == wm.nodes.end()) continue;
+                auto [ax, ay] = to_s(30.0f + i1->second.x * 0.3f,
+                                     10.0f + i1->second.y * 0.3f);
+                auto [bx, by] = to_s(30.0f + i2->second.x * 0.3f,
+                                     10.0f + i2->second.y * 0.3f);
+                auto [cx, cy_] = to_s(30.0f + i3->second.x * 0.3f,
+                                      10.0f + i3->second.y * 0.3f);
+                renderer_->draw_filled_triangle_screen(ax, ay, bx, by, cx, cy_, wcol);
+                ++shop_preview_geom_.weapon_triangles;
+            }
+        }
     }
     ShopPreviewGeometry host_get_shop_preview_geometry() const {
         return shop_preview_geom_;

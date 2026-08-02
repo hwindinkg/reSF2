@@ -1836,37 +1836,17 @@ void ShopScene::on_render(SceneContext& ctx) {
                                   ts, 255, 230, 170, 255);
     }
 
-    // --- Left column: fighter silhouette + TRY ON + arrows ------------------
+    // --- Left column: fighter preview + TRY ON + arrows --------------------
+    // [P9] The real fighter (body model at rest pose) with the equipped
+    // weapon renders here — the placeholder silhouette is gone.
     {
         const float fx = L.fighter_x, fw = L.fighter_w, fy = L.body_y, fh = L.body_h;
-        // Dark silhouette backdrop — a placeholder for the real 3D model. The
-        // original renders the fighter using the same body_model as gameplay,
-        // but that needs the full model pipeline (not available in the shop
-        // scene yet). A dark gradient stands in so the proportions are visible.
         ren::Color4B sil_bg{12, 8, 4, 255};
         r.draw_filled_rect_screen(fx, fy, fw, fh, sil_bg);
-        // Silhouette "fighter" rectangle (dark brown) with a subtle highlight
-        const float sil_pad = fw * 0.10f;
-        const float sil_x = fx + sil_pad;
-        const float sil_w = fw - 2.0f * sil_pad;
-        const float sil_h = fh * 0.55f;
-        const float sil_y = fy + fh * 0.04f;
-        r.draw_filled_rect_screen(sil_x, sil_y, sil_w, sil_h, {26, 18, 10, 240});
-        // Simple body shape inside the silhouette (two triangles for torso+legs)
-        const float cx = sil_x + sil_w * 0.5f;
-        const float top_y = sil_y + sil_h * 0.05f;
-        const float bot_y = sil_y + sil_h * 0.95f;
-        const float shoulder_w = sil_w * 0.38f;
-        const float hip_w = sil_w * 0.22f;
-        // Torso triangle (pointing up)
-        r.draw_filled_rect_screen(cx - shoulder_w, top_y, shoulder_w * 2.0f,
-                                  sil_h * 0.45f, {52, 36, 20, 200});
-        // Legs rectangle
-        r.draw_filled_rect_screen(cx - hip_w, top_y + sil_h * 0.45f,
-                                  hip_w * 2.0f, sil_h * 0.50f, {44, 30, 16, 200});
-        // Label
-        ctx.host.host_render_text("FIGHTER", cx - 36.0f * L.s,
-                                  sil_y + sil_h + 6.0f * L.s,
+        ctx.host.host_render_shop_preview(fx, fy, fw, fh);
+        // Label under the model
+        ctx.host.host_render_text("FIGHTER", fx + (fw - 72.0f * L.s) * 0.5f,
+                                  fy + fh - 26.0f * L.s,
                                   shop_text_scale(18.0f * L.s),
                                   120, 90, 60, 200);
 

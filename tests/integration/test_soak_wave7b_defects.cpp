@@ -514,7 +514,7 @@ int main() {
     test_p8_dialogue_textures_and_p12_placement();
     test_p9_shop_preview();
 
-    std::printf("\n=== Results: %d passed, %d failed ===\n",
-                tests_passed, tests_failed);
+    std::fprintf(stderr, "\n=== Results: %d passed, %d failed ===\n",
+                 tests_passed, tests_failed);
     return tests_failed > 0 ? 1 : 0;
 }
