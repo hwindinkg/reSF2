@@ -290,15 +290,14 @@ int main() {
         const resf2::game::AttributeSet expected_enemy =
             resf2::game::seed_enemy_baseline_attributes();
 
-        // game.cpp site 3 pairing: weapon equipped -> WeaponDamage, fists ->
-        // UnarmedDamage, always vs the enemy's BodyDefense (game+0x60DF98).
+        // game.cpp site 3 pairing: the move's authored damage attribute wins
+        // when moves.xml declares it (HighPunch: UnarmedDamage Shift=-10,
+        // wave-7a P10); weapon equipped -> WeaponDamage, fists ->
+        // UnarmedDamage is the fallback. The landed move is only known once
+        // a hit is observed, so the prediction inputs are computed inside
+        // the loop below, not here.
         const bool armed =
             !runner.game().host_get_equipped(resf2::inventory::kSlotWeapon).empty();
-        const char* dmg_attr = armed ? "WeaponDamage" : "UnarmedDamage";
-        const float expected_diff = resf2::game::attribute_difference(
-            expected_player, dmg_attr, expected_enemy, "BodyDefense");
-        const float expected_f3 =
-            resf2::game::attribute_difference_factor(expected_diff);
 
         bool hit_checked = false;
         float prev_ehp = runner.enemy_health_frac();
@@ -322,6 +321,17 @@ int main() {
             if (ehp > 0.0f && ehp < prev_ehp - 1e-7f) {
                 const float drop = prev_ehp - ehp;  // frac delta == final_damage
                 const auto& g = runner.game();
+
+                // [P10] DamageAttribute(+Shift) -> DefenseAttribute: the
+                // landed move's authored attribute/shift, observed after the
+                // hit (moves.xml HighPunch: UnarmedDamage Shift=-10).
+                std::string dmg_attr = g.host_get_last_move_damage_attr();
+                if (dmg_attr.empty()) dmg_attr = armed ? "WeaponDamage" : "UnarmedDamage";
+                const float expected_diff = resf2::game::attribute_difference(
+                    expected_player, dmg_attr, expected_enemy, "BodyDefense")
+                    + static_cast<float>(g.host_get_last_move_damage_shift());
+                const float expected_f3 =
+                    resf2::game::attribute_difference_factor(expected_diff);
 
                 // Predicted inputs from the same aggregated sets the battle
                 // used; hit_damage/block read back from the dbg breakdown
@@ -347,7 +357,7 @@ int main() {
                     std::fprintf(stderr,
                         "FAIL: aggregation — game f3=%.6f != expected "
                         "2^((%s-BodyDefense)/10)=%.6f (diff=%.2f)\n",
-                        g.dbg_last_attr_mult(), expected_f3, dmg_attr, expected_diff);
+                        g.dbg_last_attr_mult(), expected_f3, dmg_attr.c_str(), expected_diff);
                     ++failures;
                 }
                 if (!near_eqf(drop, g.dbg_last_final_damage(), 1e-3f)) {
@@ -363,7 +373,7 @@ int main() {
                         "OK: damage wiring — move=%s base=%.3f diff(%s vs BodyDef)=%.1f "
                         "f3=%.4f blk=%.2f final=%.6f matches prediction\n",
                         g.dbg_last_move_name().c_str(), g.dbg_last_base_damage(),
-                        dmg_attr, expected_diff, expected_f3,
+                        dmg_attr.c_str(), expected_diff, expected_f3,
                         g.dbg_last_block_factor(), g.dbg_last_final_damage());
                 }
                 hit_checked = true;

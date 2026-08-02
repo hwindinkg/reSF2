@@ -409,6 +409,19 @@ float host_enemy_health_frac() const override;
     float dbg_last_block_factor() const { return dbg_last_block_factor_; }
     float dbg_last_final_damage() const { return dbg_last_final_damage_; }
     const std::string& dbg_last_move_name() const { return dbg_last_move_name_; }
+    // [P10] The last landed move's authored damage attribute and shift
+    // (moves.xml <Damage Type=.. Shift=../>) — the wiring test's prediction
+    // must apply DamageAttribute(+Shift) like the game does.
+    std::string host_get_last_move_damage_attr() const {
+        const auto& mv = assets_->moves();
+        auto it = mv.find(dbg_last_move_name_);
+        return it == mv.end() ? std::string() : it->second.damage_attr;
+    }
+    int host_get_last_move_damage_shift() const {
+        const auto& mv = assets_->moves();
+        auto it = mv.find(dbg_last_move_name_);
+        return it == mv.end() ? 0 : it->second.damage_attr_shift;
+    }
 
     // ---- D3 probes: the last enemy-AI pipeline decision ----
     // Read-only view of the F1 overlay stash + the stored decision the
