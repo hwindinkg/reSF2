@@ -150,6 +150,10 @@ void MainMenuScene::on_update(SceneContext& ctx) {
         const float icon_y = iy + idx * (icon_size + icon_spacing);
         if (clicked_in(input, ix, icon_y, icon_size, icon_size)) {
             ctx.host.host_play_ui_click();
+            // [U5] Navigating from the menu must CLOSE the overlay — the
+            // soak showed Shop/Map opening with the expanded menu panel
+            // still drawn on top of the submenu.
+            ctx.host.host_close_menu_overlay();
             std::printf("[mainmenu] clicked '%s' -> %s\n",
                         items[idx].name, scene_name(items[idx].target));
             ctx.host.request_scene_transition(items[idx].target);

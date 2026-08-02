@@ -547,6 +547,13 @@ void Game::host_toggle_menu_overlay() {
     }
 }
 
+void Game::host_close_menu_overlay() {
+    // [U5] Called when the dojo's menu navigates to a submenu: the overlay
+    // must close so the menu panel collapses instead of staying on top of
+    // Shop/Map/Profile/Settings.
+    if (overlay_ == Overlay::Menu) overlay_ = Overlay::None;
+}
+
 void Game::host_render_menu_overlay() {
     // [FIX] Advance the menu open/close animation even when host_update_gameplay
     // is not called (Map, Results, etc.). This keeps the scroll unroll/collapse

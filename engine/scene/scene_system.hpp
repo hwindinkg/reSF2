@@ -123,6 +123,12 @@ public:
     // Results) so they can open the menu the same way the dojo does.
     virtual void host_toggle_menu_overlay() {}
 
+    // [U5] Close the menu overlay deterministically (no toggle). The expanded
+    // menu must not stay visible over a submenu after the player navigates
+    // away from the dojo — the soak showed Shop/Map opening with the menu
+    // panel still on top.
+    virtual void host_close_menu_overlay() {}
+
     // Render the menu overlay on top of the current scene content, advancing
     // the open/close animation. Safe to call every frame from any scene.
     virtual void host_render_menu_overlay() {}

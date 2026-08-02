@@ -321,7 +321,8 @@ void host_load_location() override;
 void host_reset_menu_state() override;
 
 
-void host_toggle_menu_overlay() override;
+    void host_toggle_menu_overlay() override;
+    void host_close_menu_overlay() override;
 
 
 void host_render_menu_overlay() override;
