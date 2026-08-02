@@ -1202,6 +1202,15 @@ void ResultsScene::on_enter(SceneContext& ctx) {
 
     if (is_victory_) {
         std::printf("[results] victory! rewards: %d gold, %d XP\n", reward_gold_, reward_xp_);
+        // [P6] The training fight (tutorial FIRST_FIGHT) only completes when
+        // it is WON — the tutorial state advances here, not when the dialog
+        // was queued (that pre-fight COMPLETE is what broke the story after
+        // a loss: nothing left to advance to, the player stuck toggling the
+        // dojo's bag/fighter).
+        if (ctx.host.host_get_tutorial_state() == "FIRST_FIGHT") {
+            ctx.host.host_set_tutorial_state("COMPLETE");
+            std::printf("[results] tutorial FIRST_FIGHT won -> COMPLETE\n");
+        }
         // Add currency reward
         if (reward_gold_ > 0) ctx.host.host_add_currency(reward_gold_);
         // Mark level as completed
@@ -1244,9 +1253,13 @@ void ResultsScene::on_update(SceneContext& ctx) {
         key_pressed(input, platform::Key::Space) ||
         key_pressed(input, platform::Key::Enter)) {
         ctx.host.host_play_ui_click();
-        // Victory: go to Map to continue, defeat: back to MainMenu.
+        // Victory: go to Map to continue. Defeat: rematch a retryable fight
+        // (the tutorial's FIRST_FIGHT) — the original offers a rematch after
+        // a loss; only a fight with no retry context goes back to the menu.
         if (is_victory_) {
             ctx.host.request_scene_transition(SceneId::Map);
+        } else if (ctx.host.host_get_tutorial_state() == "FIRST_FIGHT") {
+            ctx.host.request_scene_transition(SceneId::Battle);
         } else {
             ctx.host.request_scene_transition(SceneId::MainMenu);
         }
@@ -1353,13 +1366,15 @@ void ResultsScene::on_render(SceneContext& ctx) {
 
     // ---- Continue button ----
     // Scroll panel button, matching the FIGHT button style in MapScene.
+    // [P6] The label comes from the host: on a retryable defeat it is the
+    // localized rematch prompt ("REMATCH"), not "BACK TO MENU".
     const float btn_w = w * 0.22f;
     const float btn_h = h * 0.072f;
     const float btn_x = (w - btn_w) * 0.5f;
     const float btn_y = h * 0.74f;
     ctx.host.host_render_scroll_panel(btn_x, btn_y, btn_w, btn_h);
 
-    std::string btn_label = ctx.host.host_localized(is_victory_ ? "continue" : "backToMenu");
+    std::string btn_label = ctx.host.host_get_results_button_label();
     if (btn_label.empty()) btn_label = is_victory_ ? "CONTINUE" : "BACK TO MENU";
     const float btn_scale = h * 0.034f / 115.0f;
     const auto [btw, bth] = ctx.host.host_measure_text(btn_label, btn_scale);

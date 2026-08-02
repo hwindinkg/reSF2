@@ -244,8 +244,12 @@ int main() {
                      runner.game().host_get_tutorial_state().c_str());
         CHECK(runner.game().host_get_tutorial_bag_hits() >= 3,
               "Q3: three hits land on the bag");
-        CHECK(runner.game().host_get_tutorial_state() == "COMPLETE",
-              "Q3: the bag phase advances the tutorial state");
+        // [P6] The bag phase hands over to FIRST_FIGHT — the Kenji fight is
+        // NOT yet won, so the tutorial is NOT complete. COMPLETE only after
+        // winning the training fight (the old assertion pinned the pre-fight
+        // COMPLETE that broke the story after a defeat).
+        CHECK(runner.game().host_get_tutorial_state() == "FIRST_FIGHT",
+              "Q3: the bag phase hands over to the Kenji fight (FIRST_FIGHT)");
 
         // The FIRST_FIGHT dialog auto-triggers -> Dialogue scene.
         bool in_dialogue = false;
