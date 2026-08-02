@@ -501,6 +501,14 @@ set_tests_properties(test_soak_movement_defects PROPERTIES TIMEOUT 300)
 add_integration_test(test_soak_quest_defects)
 set_tests_properties(test_soak_quest_defects PROPERTIES TIMEOUT 300)
 
+# Soak-fix Wave 4: behavioral dialogue tests for the SOAK_TRIAGE.md §4
+# defects (D1 centered panel/no dim, D2 no location reload after dialogue,
+# D3 instant full-line reveal, D4 line advance + completion, D5 eng.xml
+# strings + eng font in an English session, D6 panel height not stretched).
+# Six dialogue scenarios; 300 like the wave-3 suite.
+add_integration_test(test_soak_dialogue_defects)
+set_tests_properties(test_soak_dialogue_defects PROPERTIES TIMEOUT 300)
+
 # Phase 5: Screenshot comparison — renders headlessly, compares against
 # reference PNGs using MSE, and saves diff images on failure.
 add_integration_test(test_screenshot_compare)
@@ -665,3 +673,21 @@ target_link_libraries(tool_root_motion_probe PRIVATE
 )
 target_compile_features(tool_root_motion_probe PRIVATE cxx_std_23)
 
+
+# Diagnostic: reproduce the soak D4 map-FIGHT dialogue flow.
+add_executable(tool_d4_probe
+    tool_d4_probe.cpp
+    headless_test_runner.cpp
+    test_platform.cpp
+)
+target_link_libraries(tool_d4_probe PRIVATE
+    resf2_game
+    resf2_renderer
+    resf2_platform
+    resf2_scene
+    resf2_format
+    resf2_reverse
+    resf2_warnings
+    Threads::Threads
+)
+target_compile_features(tool_d4_probe PRIVATE cxx_std_23)
