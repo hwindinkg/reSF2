@@ -182,6 +182,10 @@ public:
     // caller can assert WHICH sound the engine actually played.
     const std::string& last_played_name() const { return last_played_name_; }
 
+    // Total number of successful play() calls. With last_played_name() this
+    // lets a test distinguish a replay of the same name from no play at all.
+    uint64_t play_count() const { return play_count_; }
+
 private:
     std::unordered_map<std::string, std::shared_ptr<WavSound>> sounds_;
     std::vector<SoundInstance> instances_;
@@ -192,6 +196,7 @@ private:
     std::mutex mutex_;
     bool initialized_ = false;
     std::string last_played_name_;
+    uint64_t play_count_ = 0;
 };
 
 } // namespace resf2::audio
