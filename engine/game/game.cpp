@@ -2747,8 +2747,14 @@ void Game::host_update_gameplay(uint32_t dt) {
             }
             // Weapon-specific moves may have empty move_type (template "1key|Central|Weapon").
             // Allow them if they have matching tactic_weapon and no move_type set.
+            // [P7] The allowance must ALSO require Type="ATTACK": movement/defensive
+            // moves (Duck, ForwardRoll — Type="MOVE", templates like
+            // "1key|Down|NotTitan") carry an empty move_type too, and the
+            // attack selector was handing a PUNCH press to Duck whenever the
+            // real down-punch was unavailable (self-chain or weapon lock) —
+            // the soak's "[MOVE] Punch dir=Down -> Duck" input theft.
             bool move_type_match = (move.move_type == cur_move_type) ||
-                (move.move_type.empty() && is_weapon_allowed(move) && move.key_count <= 2);
+                (move.is_attack && move.move_type.empty() && is_weapon_allowed(move) && move.key_count <= 2);
             if (!move_type_match) { ++rej.move_type; continue; }
 
             if (block_all_combat) {
@@ -2935,10 +2941,17 @@ void Game::host_update_gameplay(uint32_t dt) {
             input.keys_just_pressed[(size_t)plat::Key::D] ||
             input.keys_just_pressed[(size_t)plat::Key::ArrowRight];
 
-        if (!any_dir_just_pressed) break;
-
-        // Determine direction from HELD key state
-        std::string cur_direction;
+        if (!any_dir_just_pressed) {
+            // [P7] No direction edge this frame — but the duck block below
+            // must still run: the held-key duck continuation ("attack ends
+            // while S is held -> duck again") is a held-state transition,
+            // and skipping it here was half of the auto-repeat cycle (the
+            // state-11 exit re-triggered the animation every hit_anim_
+            // expiry). The duck block's own guard prevents re-firing an
+            // active duck.
+        } else {
+            // Determine direction from HELD key state
+            std::string cur_direction;
         bool up_held = input.keys_down[(size_t)plat::Key::W] ||
                        input.keys_down[(size_t)plat::Key::ArrowUp];
         bool down_held = input.keys_down[(size_t)plat::Key::S] ||
@@ -3001,6 +3014,7 @@ void Game::host_update_gameplay(uint32_t dt) {
                 goto after_combat;
             }
         }
+        }  // any_dir_just_pressed [P7]
 
         // Duck: S held (or just pressed) with no direction
         // Original game: holding S keeps you ducking. If you were attacking
@@ -3081,8 +3095,16 @@ void Game::host_update_gameplay(uint32_t dt) {
     // This section only clears block state when not blocking.
     if (move_state_ == 11) {
         // Currently blocking — check if should continue
-        // Block lasts for the duration of the block animation
-        if (hit_anim_ == 0) {
+        // [P7] Block lasts for the duration of the block animation — but the
+        // DUCK (which shares move_state_ 11) must NOT end when its hit_anim_
+        // countdown expires while S is still held: that dropped the state to
+        // 0 and the held-key duck block re-triggered the animation every
+        // cycle (the soak's Duck auto-repeat: "[MOVE] Duck" ×16 with no key
+        // events). While the duck key is held the state stays 11 and the
+        // looping duck animation plays; release ends it (the exit block
+        // below).
+        bool still_ducking = key_down && !key_forward && !key_back;
+        if (hit_anim_ == 0 && !still_ducking) {
             // Block animation finished — exit block state
             move_state_ = 0;
             player_fighter_.is_blocking = false;
@@ -3689,10 +3711,15 @@ auto apply_player_damage_to_enemy = [&]() {
     // [ORIGINAL] Attribute pairing per the game+0x60DF98 helper:
     // melee damage attribute vs the defender's BodyDefense — weapon
     // hits read WeaponDamage, fists read UnarmedDamage.
+    // [P10] The move's own <Damage Type=".."> wins when authored (moves.xml
+    // declares UnarmedDamage for the fists moves), and its Shift is added to
+    // the attribute before the difference ("DamageAttribute(+Shift) ->
+    // DefenseAttribute" — GOLDEN_TESTS.md GAP-3 capture plan).
     // [HEURISTIC-TODO] HeadDefense by hit zone when move data carries
     // it (no hit-zone field on MoveDef today).
-    const char* dmg_attr =
-        (equipped_weapon_ != "Fists") ? "WeaponDamage" : "UnarmedDamage";
+    std::string dmg_attr = move_it->second.damage_attr.empty()
+        ? ((equipped_weapon_ != "Fists") ? "WeaponDamage" : "UnarmedDamage")
+        : move_it->second.damage_attr;
 
     DamageInputs din;
     // base = 2^(attr*w): DamageFactor absent in MVP -> get_or 0 ->
@@ -3706,7 +3733,8 @@ auto apply_player_damage_to_enemy = [&]() {
     // system, internalSettings.xml L560-563, not yet ported).
     din.attribute_difference =
         attribute_difference(player_fighter_.attributes, dmg_attr,
-                             enemy_fighter_.attributes, "BodyDefense");
+                             enemy_fighter_.attributes, "BodyDefense")
+        + static_cast<float>(move_it->second.damage_attr_shift);  // [P10] DamageAttribute(+Shift)
     din.hit_damage = base_damage;      // original's hit[0x48]
     din.enemy_damage_bonus = 0.0f;     // original's enemy[0x774] — not ported
 
