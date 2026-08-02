@@ -492,6 +492,27 @@ float host_enemy_health_frac() const override;
         return combat_.enemy_tactic_memory().wait_frames_remaining;
     }
 
+    // ---- Soak-fix Wave 5 probes (U1-U6): read-only menu/weapon/asset
+    // access for the scripted UI tests in test_soak_ui_defects.cpp ----
+    bool host_get_menu_open() const { return overlay_ == Overlay::Menu; }
+    float host_get_menu_anim_progress() const { return menu_anim_progress_; }
+    std::size_t host_get_enemy_weapon_node_count() const {
+        return assets_ && assets_->enemy_weapon_model()
+            ? assets_->enemy_weapon_model()->nodes.size() : 0;
+    }
+    std::size_t host_get_enemy_weapon_triangle_count() const {
+        return assets_ && assets_->enemy_weapon_model()
+            ? assets_->enemy_weapon_model()->triangles.size() : 0;
+    }
+    std::size_t host_get_player_weapon_node_count() const {
+        return assets_ && assets_->weapon_model()
+            ? assets_->weapon_model()->nodes.size() : 0;
+    }
+    bool host_ui_texture_loaded(const std::string& name) const {
+        auto it = assets_->hud_textures().find(name);
+        return it != assets_->hud_textures().end() && it->second != nullptr;
+    }
+
 void host_reset_round() override;
 
 void host_set_round_wins(int player, int enemy) override;
