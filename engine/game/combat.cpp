@@ -167,6 +167,11 @@ void check_hit_detection(
                 float limb2_wy = input.player_pos_y + input.y_adjust_smoothed + (limb2_ly - pivot_ly);
 
                 bool hit_this_interval_this_frame = false;
+                // [P2] The punching bag is the DOJO's collision target only
+                // (LIVE_GAME_EVIDENCE Q2-D); in a battle the enemy fighter is
+                // the target (the enemy-capsule path in game.cpp). This loop
+                // must not run against the enemy.
+                if (!combat.show_enemy()) {
                 for (auto& be : assets.bag_model()->edges) {
                     if (!be.collisible) continue;
                     float bag_r = be.radius;
@@ -252,6 +257,7 @@ void check_hit_detection(
                         break;
                     }
                 }
+                }  // !show_enemy_ — bag collision is dojo-only [P2]
                 if (hit_this_interval_this_frame) break;
             }
             if (hit_registered) break;
