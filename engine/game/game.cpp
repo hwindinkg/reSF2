@@ -876,6 +876,24 @@ void Game::host_set_battle_info(const BattleInfo& info) {
     round_wins_enemy_ = 0;
     hp_trail_player_ = -1.0f;
     hp_trail_enemy_ = -1.0f;
+
+    // [S2] The enemy's voice comes from stages.xml: the fight's warrior
+    // resolves to a <Template> (by Name or FirstName), whose Voice attribute
+    // ("Male"/"Female") selects the m_pl_*/f_pl_* sound set the enemy's
+    // attack sounds come from. Default "Male" when unknown.
+    enemy_voice_ = "Male";
+    if (assets_ && assets_->stages_loaded()) {
+        const auto& templates = assets_->stage_data().templates;
+        const std::string& name = info.enemy_name;
+        for (const auto& t : templates) {
+            if (t.name == name || t.first_name == name) {
+                if (!t.voice.empty()) enemy_voice_ = t.voice;
+                break;
+            }
+        }
+    }
+    std::printf("[battle] enemy voice '%s' (enemy='%s')\n",
+                enemy_voice_.c_str(), info.enemy_name.c_str());
 }
 
 const scene::SceneHost::BattleInfo& Game::host_get_battle_info() const {
@@ -2033,7 +2051,9 @@ void Game::host_update_gameplay(uint32_t dt) {
             enemy_attack_hit_done_ = false;
             enemy_attack_duration_ = 0.4f;
             enemy_attack_cooldown_ = 1.5f;
-            play_sound("f_pl_attack2", 0.4f);
+            // [S2] The swing sound comes from the ENEMY's voice set
+            // (stages.xml <Template Voice=>), not the player's female set.
+            play_sound(enemy_attack_sound(2), 0.4f);
             // [ORIGINAL] Dojo is TRAINING — enemy attacks don't deal damage.
             // In the original, the Dojo sparring partner is a training dummy.
             // Health/damage only applies in real fights (map battles).
