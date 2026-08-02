@@ -569,11 +569,18 @@ void Game::host_render_menu_overlay() {
 
 
 void Game::host_load_battle_location(const std::string& location) {
+    // [D2] Do not reload a location that is already loaded and current: the
+    // soak showed the dojo fully reloading after every dialogue exit (the
+    // reload even re-printed the whole localization table). Only a location
+    // SWAP — a battle swapping the dojo out for a real stage — must force a
+    // fresh load. Re-entering the same location keeps its state intact.
+    const std::string target = location.empty() ? "dojo" : location;
+    if (location_loaded_ && current_location_name_ == target) return;
     // Clear old location atlases so new location's atlases are loaded fresh.
             // Without this, atlases with the same name (e.g. "bg", "atlas_layer1")
             // from the dojo would be reused, showing the wrong background images.
             assets_->atlases().clear();
-            current_location_name_ = location.empty() ? "dojo" : location;
+            current_location_name_ = target;
             location_loaded_ = false;
             init_location();
 }
