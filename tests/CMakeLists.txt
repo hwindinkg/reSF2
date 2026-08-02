@@ -528,6 +528,14 @@ set_tests_properties(test_soak_audio_defects PROPERTIES TIMEOUT 300)
 add_integration_test(test_soak_parser_defects)
 set_tests_properties(test_soak_parser_defects PROPERTIES TIMEOUT 300)
 
+# Soak-fix Wave 7b: behavioral UI/quest tests for the SOAK_TRIAGE.md §8
+# defects (P4 HUD names i18n, P5 fight HUD layout, P6 defeat retry flow,
+# P8/P12 dialogue textures + placement, P9 shop fighter preview, P11 quest
+# state chain MOVE->BAG->FIRST_FIGHT->win|loss). Two battle/dojo chains
+# (~10k frames total); 300 like the wave-5 suite.
+add_integration_test(test_soak_wave7b_defects)
+set_tests_properties(test_soak_wave7b_defects PROPERTIES TIMEOUT 300)
+
 # Soak-fix Wave 7a (P10): moves.xml parser fidelity — the REAL device file
 # (reverse/data/animations/moves.xml, LIVE_GAME_EVIDENCE Q3) parsed by the
 # engine's own loader, field-by-field vs the verbatim reference values.

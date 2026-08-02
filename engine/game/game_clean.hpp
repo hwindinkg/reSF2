@@ -550,6 +550,175 @@ float host_enemy_health_frac() const override;
         return it != assets_->hud_textures().end() && it->second != nullptr;
     }
 
+    // ---- Soak-fix Wave 7b probes (P4-P6, P8, P9, P11, P12) ----
+    // HUD/quest/dialogue/shop access for test_soak_wave7b_defects.cpp.
+    // Layout accessors are the single source the renderers refactor onto,
+    // so the tests pin the same numbers the screen draws.
+
+    // [P4] The localized display names the fight HUD draws.
+    struct HudFighterNames {
+        std::string player;
+        std::string enemy;
+    };
+    HudFighterNames host_get_hud_fighter_names() const {
+        HudFighterNames n;
+        // Player: the Default warrior template's FirstName is the localization
+        // key (NAME_SHADOW -> "SHADOW"); "Shadow" falls back.
+        std::string pkey = "NAME_SHADOW";
+        if (assets_ && assets_->stages_loaded()) {
+            for (const auto& t : assets_->stage_data().templates) {
+                if (t.name == "Default" && !t.first_name.empty()) {
+                    pkey = t.first_name;
+                    break;
+                }
+            }
+        }
+        n.player = localized(pkey);
+        if (n.player.empty()) n.player = "Shadow";
+        // Enemy: battle_info_.enemy_name is the localization key once
+        // host_set_battle_info has resolved the stages.xml template.
+        const std::string& ekey = battle_info_.enemy_name;
+        n.enemy = ekey.empty() ? std::string("???") : localized(ekey);
+        if (n.enemy.empty()) n.enemy = ekey;
+        return n;
+    }
+
+    // [P5] The fight HUD geometry, computed from the atlas frames
+    // (batchFightBars.plist: HealthBar_Empty 564x26, HealthBar_Full/Hit 1x43)
+    // and the reversed binary constants (inner gap 53 pt, fill 275 pt wide,
+    // bar centre 100 - h/2 pt from the top).
+    struct FightHudLayout {
+        float bar_w = 0, bar_h = 0;        // screen px, from the Empty frame
+        float fill_w = 0, fill_h = 0;      // screen px, from the Full strip
+        float bar_cy = 0;                  // screen px, bar centre y
+        float bar_top_y = 0;
+        float player_bar_x = 0;            // screen px, left edge
+        float enemy_bar_x = 0;             // screen px, left edge
+        float player_name_x = 0;           // screen px, name left edge
+        float enemy_name_right = 0;        // screen px, name right edge
+        float name_y = 0;                  // screen px, name top
+        float dot_y = 0;                   // screen px, dot top
+        float player_dot_x = 0;            // screen px, first dot left edge
+    };
+    FightHudLayout host_get_fight_hud_layout() const {
+        FightHudLayout L{};
+        if (!platform_) return L;
+        const float win_w = static_cast<float>(platform_->window_width());
+        const float win_h = static_cast<float>(platform_->window_height());
+        const float pts = ui::points_scale(win_h);
+        const float cx = win_w * 0.5f;
+        auto tex_of = [&](const char* n) -> ren::Texture2D* {
+            if (!assets_) return nullptr;
+            auto it = assets_->hud_textures().find(n);
+            return it == assets_->hud_textures().end() ? nullptr : it->second.get();
+        };
+        auto* empty = tex_of("HealthBar_Empty");
+        auto* full = tex_of("HealthBar_Full");
+        auto* undone = tex_of("Round_Undone");
+        const float bar_w = (empty ? empty->width() : 564.0f) / ui::kHighTierContentScale;
+        const float bar_h = (empty ? empty->height() : 26.0f) / ui::kHighTierContentScale;
+        const float fill_h = (full ? full->height() : 43.0f) / ui::kHighTierContentScale;
+        constexpr float kInnerGapPts = 53.0f;    // 0x102017c0
+        constexpr float kFillWidthPts = 275.0f;  // ProgressBarSkewed +0x150
+        L.bar_w = bar_w * pts;
+        L.bar_h = bar_h * pts;
+        L.fill_w = kFillWidthPts * pts;
+        L.fill_h = fill_h * pts;
+        L.bar_cy = (100.0f - bar_h * 0.5f) * pts;
+        L.bar_top_y = (100.0f - bar_h) * pts;
+        L.player_bar_x = cx - (kInnerGapPts + bar_w) * pts;
+        L.enemy_bar_x = cx + kInnerGapPts * pts;
+        L.player_name_x = cx - 315.0f * pts;
+        L.enemy_name_right = cx + 315.0f * pts;
+        L.name_y = (65.0f - 20.0f) * pts;
+        const float dot_w = (undone ? undone->width() : 66.0f) / ui::kHighTierContentScale;
+        const float dot_h = (undone ? undone->height() : 48.0f) / ui::kHighTierContentScale;
+        L.dot_y = (116.0f - dot_h * 0.5f) * pts;
+        L.player_dot_x = cx - (77.0f + dot_w * 0.5f) * pts;
+        return L;
+    }
+
+    // [P8] The scroll panel's texture sizes from their SOURCE frames:
+    // Roll_* 74 px tall -> 37 pt bar, end caps 156x74, Paper_* 116x1524
+    // edge strips at their own aspect.
+    struct ScrollPanelLayout {
+        float bar_h = 0, end_w = 0, edge_w = 0;
+    };
+    ScrollPanelLayout host_get_scroll_panel_layout(float w, float h) const {
+        ScrollPanelLayout L;
+        L.bar_h = w * 0.13f;
+        L.end_w = L.bar_h * (156.0f / 74.0f);
+        L.edge_w = w * 0.055f;
+        (void)h;
+        return L;
+    }
+
+    // [P12] The story-dialogue panel geometry (JS-authored proportions).
+    struct DialogueLayout {
+        float box_x = 0, box_y = 0, box_w = 0, box_h = 0;
+        float portrait_x = 0, portrait_y = 0, portrait_size = 0;
+        float text_x = 0, pad = 0;
+    };
+    DialogueLayout host_dialogue_layout(float w, float h) const {
+        DialogueLayout D;
+        D.box_w = w * 0.53f;                    // 900/1700
+        D.box_h = h * 0.20f;
+        D.box_x = w * 0.235f;                   // (1700-900)/2/1700
+        D.box_y = (h - D.box_h) * 0.5f;         // centred vertically
+        D.pad = D.box_h * 0.08f;
+        D.portrait_size = D.box_h * 0.875f;     // 700/800
+        D.portrait_x = D.box_x + D.box_w * 0.017f;
+        D.portrait_y = D.box_y + (D.box_h - D.portrait_size) * 0.5f;
+        D.text_x = D.portrait_x + D.portrait_size + D.box_w * 0.02f;
+        return D;
+    }
+
+    // [P9] The shop preview renderer + what it drew last frame.
+    struct ShopPreviewGeometry {
+        std::size_t body_capsules = 0;
+        std::size_t body_triangles = 0;
+        std::size_t weapon_triangles = 0;
+    };
+    void host_render_shop_preview(float, float, float, float) {
+        shop_preview_geom_ = ShopPreviewGeometry{};
+    }
+    ShopPreviewGeometry host_get_shop_preview_geometry() const {
+        return shop_preview_geom_;
+    }
+
+    // [P6] The Results scene's continue-button label (rematch on a
+    // retryable defeat, else continue/back-to-menu).
+    std::string host_get_results_button_label() const override {
+        const std::string key = (battle_result_ == "victory") ? "continue"
+                                : (battle_result_ == "defeat" &&
+                                   tutorial_state_ == "FIRST_FIGHT")
+                                    ? "dlgStoryBtnRematch"
+                                    : "backToMenu";
+        std::string label = localized(key);
+        if (label.empty())
+            label = (battle_result_ == "victory") ? "CONTINUE" : "BACK TO MENU";
+        // dlgStoryBtnRematch carries "{image0} {1}" placeholders; strip them.
+        const auto brace = label.find(" {");
+        if (brace != std::string::npos) label = label.substr(0, brace);
+        return label;
+    }
+
+    // [P6] Test seams: deterministically kill a fighter (drive the battle to
+    // a known outcome) and re-run the tutorial state check.
+    void host_damage_player(float amount) {
+        auto& f = combat_.player_fighter();
+        f.health -= amount;
+        if (f.health <= 0.0f) { f.health = 0.0f; f.is_dead = true; }
+    }
+    void host_damage_enemy(float amount) {
+        auto& f = combat_.enemy_fighter();
+        f.health -= amount;
+        if (f.health <= 0.0f) { f.health = 0.0f; f.is_dead = true; }
+    }
+    void host_run_tutorial_check() { check_tutorial(); }
+    bool host_get_show_enemy() const { return show_enemy_; }
+    ShopPreviewGeometry shop_preview_geom_;
+
 void host_reset_round() override;
 
 void host_set_round_wins(int player, int enemy) override;
