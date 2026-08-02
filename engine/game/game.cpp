@@ -338,21 +338,24 @@ void Game::on_init(plat::Platform& platform) {
 
             // Load item catalog (list.xml) for Shop
             {
-                auto list_path = std::filesystem::path(asset_root_) / "assets" / "list.xml";
-                if (std::filesystem::exists(list_path)) {
-                    fmt::ListParser lp;
-                    if (lp.load_file(list_path.string(), list_data_)) {
+                // [U2] The fallback path used to sit INSIDE the primary
+                // path's existence check, so when "assets/assets/list.xml"
+                // was absent (this repo ships only "assets/list.xml") the
+                // fallback never ran and the shop got an EMPTY catalog:
+                // no items, no BUY button — "shop doesn't work". Try each
+                // candidate independently.
+                fmt::ListParser lp;
+                std::vector<std::filesystem::path> list_candidates = {
+                    std::filesystem::path(asset_root_) / "assets" / "list.xml",
+                    std::filesystem::path(asset_root_) / "list.xml",
+                    std::filesystem::path(asset_root_) / "assets" / "files" / "assets" / "list.xml",
+                };
+                for (const auto& candidate : list_candidates) {
+                    if (list_data_loaded_ || !std::filesystem::exists(candidate)) continue;
+                    if (lp.load_file(candidate.string(), list_data_)) {
                         list_data_loaded_ = true;
                         std::printf("[shop] loaded %zu items from %s\n",
-                                    list_data_.items.size(), list_path.string().c_str());
-                    }
-                    auto alt_path = std::filesystem::path(asset_root_) / "list.xml";
-                    if (!list_data_loaded_ && std::filesystem::exists(alt_path)) {
-                        if (lp.load_file(alt_path.string(), list_data_)) {
-                            list_data_loaded_ = true;
-                            std::printf("[shop] loaded %zu items from %s\n",
-                                        list_data_.items.size(), alt_path.string().c_str());
-                        }
+                                    list_data_.items.size(), candidate.string().c_str());
                     }
                 }
                 // Initialize shop manager from loaded catalog

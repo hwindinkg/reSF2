@@ -2147,11 +2147,13 @@ void ShopScene::on_render(SceneContext& ctx) {
             curr_ts * 0.9f, 180, 230, 180, 255);
 
         // Category icons (one per category, centred). Selected = bright.
+        // [U2] Real atlas frames from shopButtons.plist (Weapon/Armor/
+        // Helmet/Ranged_weapon/Magic, <name>_active when selected); the
+        // Unicode glyphs were the no-asset fallback.
         const float icon_gap = 12.0f * L.s;
         float ix = L.cat_icons_start_x;
-        const char* cat_glyphs[] = {"\xe2\x9a\x94", "\xe2\x9b\xa8",
-                                    "\xe2\x9b\x91", "\xe2\x9e\xb6",
-                                    "\xe2\x9c\xa8"};
+        static const char* kCatFrames[] = {"Weapon", "Armor", "Helmet",
+                                           "Ranged_weapon", "Magic"};
         for (size_t i = 0; i < categories_.size(); ++i) {
             bool sel = (static_cast<int>(i) == selected_category_);
             // Icon background
@@ -2166,16 +2168,27 @@ void ShopScene::on_render(SceneContext& ctx) {
                                           L.cat_icon_w, 3.0f * L.s,
                                           {220, 180, 100, 255});
             }
-            // Category glyph
-            const float glyph_ts = shop_text_scale(L.cat_icon_w * 0.55f);
-            ctx.host.host_render_text(cat_glyphs[i],
-                ix + (L.cat_icon_w - glyph_ts * 30.0f) * 0.5f,
-                L.cat_icon_y + (L.cat_icon_w - glyph_ts * 30.0f) * 0.5f,
-                glyph_ts,
-                sel ? (uint8_t)255 : (uint8_t)140,
-                sel ? (uint8_t)220 : (uint8_t)110,
-                sel ? (uint8_t)120 : (uint8_t)80,
-                255);
+            // Category icon from the shop atlas
+            const std::string frame = std::string(kCatFrames[i]) +
+                                      (sel ? "_active" : "");
+            const float pad = L.cat_icon_w * 0.10f;
+            if (!ctx.host.host_render_ui_texture(frame,
+                    ix + pad, L.cat_icon_y + pad,
+                    L.cat_icon_w - 2.0f * pad, L.cat_icon_w - 2.0f * pad)) {
+                // No atlas: keep the old glyph fallback.
+                static const char* cat_glyphs[] = {"\xe2\x9a\x94", "\xe2\x9b\xa8",
+                                                   "\xe2\x9b\x91", "\xe2\x9e\xb6",
+                                                   "\xe2\x9c\xa8"};
+                const float glyph_ts = shop_text_scale(L.cat_icon_w * 0.55f);
+                ctx.host.host_render_text(cat_glyphs[i],
+                    ix + (L.cat_icon_w - glyph_ts * 30.0f) * 0.5f,
+                    L.cat_icon_y + (L.cat_icon_w - glyph_ts * 30.0f) * 0.5f,
+                    glyph_ts,
+                    sel ? (uint8_t)255 : (uint8_t)140,
+                    sel ? (uint8_t)220 : (uint8_t)110,
+                    sel ? (uint8_t)120 : (uint8_t)80,
+                    255);
+            }
             ix += L.cat_icon_w + icon_gap;
         }
     }
