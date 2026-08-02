@@ -628,8 +628,16 @@ float host_enemy_health_frac() const override;
         L.bar_top_y = (100.0f - bar_h) * pts;
         L.player_bar_x = cx - (kInnerGapPts + bar_w) * pts;
         L.enemy_bar_x = cx + kInnerGapPts * pts;
-        L.player_name_x = cx - 315.0f * pts;
-        L.enemy_name_right = cx + 315.0f * pts;
+        // [P5] Names sit ABOVE the bar's OUTER edge, mirrored with the bars:
+        // the player name left-aligned with the bar's left edge, the enemy
+        // name right-aligned with the bar's right edge. They used to be
+        // anchored at cx±315 pt — 20 pt inside the track, floating over it.
+        // [HEURISTIC] Observed original layout: the name labels are set up
+        // with a 250 pt width cap (0x10201c30) at the bar corner; the exact
+        // anchor was not reversed, the bar-outer-edge read matches the
+        // original's screen.
+        L.player_name_x = cx - (kInnerGapPts + bar_w) * pts;
+        L.enemy_name_right = cx + (kInnerGapPts + bar_w) * pts;
         L.name_y = (65.0f - 20.0f) * pts;
         const float dot_w = (undone ? undone->width() : 66.0f) / ui::kHighTierContentScale;
         const float dot_h = (undone ? undone->height() : 48.0f) / ui::kHighTierContentScale;
@@ -4285,15 +4293,14 @@ private:
         // 250-wide cap (0x10201c30); how 80 maps to glyph height in the
         // original's font pipeline is not reversed. 40 pt reads right against
         // the 13-pt bar.
-        const float name_h = 40.0f * pts;
-        const float name_scale = name_h / 115.0f;   // kFontLineBoxPx
-        const float name_y = 65.0f * pts - name_h * 0.5f;
+        const FightHudLayout L = host_get_fight_hud_layout();
+        const float name_scale = 40.0f / 115.0f;   // kFontLineBoxPx
         const auto names = host_get_hud_fighter_names();
-        render_text(names.player, cx - 315.0f * pts, name_y, name_scale,
+        render_text(names.player, L.player_name_x, L.name_y, name_scale,
                     {255, 255, 255, 255});
         const auto [ew, eh] = measure_text(names.enemy, name_scale);
         (void)eh;
-        render_text(names.enemy, cx + 315.0f * pts - ew, name_y, name_scale,
+        render_text(names.enemy, L.enemy_name_right - ew, L.name_y, name_scale,
                     {255, 255, 255, 255});
 
         // Round dots: Fight rounds per side, wins shown as Round_Done.
