@@ -2936,6 +2936,22 @@ private:
             for (const char* n : {"Damage", "Shield", "ruby", "credit",
                                   "energy", "Arrow", "VS"})
                 load_hud_png(misc / (std::string(n) + ".png"), n);
+            // [U2] The shop's category tabs (Weapon/Armor/Helmet/
+            // Ranged_weapon/Magic + _active/_pushed states) and the
+            // Wear/Bag buttons. Without this atlas the shop rendered text
+            // glyphs for the tabs.
+            load_texture_atlas_to_hud(base/"textures"/"screens"/"shop"/"buttons",
+                                      "shopButtons");
+            // [U3] The settings screen's row icons + language buttons
+            // (batchSettings.plist: sound/music/graphics/controller/location,
+            // usbr/rus/... language flags) and the slider pieces
+            // (batchSlidersSettings.plist: SettingsEmpty/full/slider).
+            // Without them the settings scene rendered a flat navy
+            // placeholder panel.
+            load_texture_atlas_to_hud(base/"textures"/"buttons"/"menu"/"settings",
+                                      "batchSettings");
+            load_texture_atlas_to_hud(base/"textures"/"sliders"/"settings",
+                                      "batchSlidersSettings");
         }
         std::printf("  HUD textures loaded: %zu\n", assets_->hud_textures().size());
     }
