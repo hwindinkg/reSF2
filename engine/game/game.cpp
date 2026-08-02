@@ -1078,6 +1078,13 @@ bool Game::host_equip_item(const std::string& item_id) {
                         }
                         inventory_.equip(slot, item_id);
                         player_profile_.equip_item(slot, item_id);
+                        // [P3] Armor/helm equip must be visible immediately
+                        // (hidden items take this fallback path).
+                        if (location_loaded_ &&
+                            (std::string(slot) == inventory::kSlotArmor ||
+                             std::string(slot) == inventory::kSlotHelmet)) {
+                            load_equipment_models();
+                        }
                         rebuild_fighter_attributes();
                         std::printf("[equip] equipped %s in %s\n", item_id.c_str(), slot);
                         host_save_progress();
@@ -1098,6 +1105,13 @@ bool Game::host_equip_item(const std::string& item_id) {
             // Sync combat weapon if equipping a weapon slot
             if (slot == inventory::kSlotWeapon) {
                 sync_equipped_weapon();
+            }
+            // [P3] Armor/helm equip must be visible immediately (the model
+            // attach reloads when the location loads; this covers the
+            // equip-in-menu case).
+            if (location_loaded_ && (slot == inventory::kSlotArmor ||
+                                     slot == inventory::kSlotHelmet)) {
+                load_equipment_models();
             }
             rebuild_fighter_attributes();
             std::printf("[equip] equipped %s in %s\n", item_id.c_str(), slot);
@@ -1615,6 +1629,9 @@ void Game::init_location() {
             }
             load_skeleton();
             load_body_model();
+            // [P3] Equipped armor/helm models (list.xml Model attr) attach to
+            // the fighter — users.xml Armor="ARMOR_ROBE" Helm="Head" (Q4).
+            load_equipment_models();
             load_punching_bag_model();
             load_animations();
             load_moves();

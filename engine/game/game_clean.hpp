@@ -2201,6 +2201,39 @@ private:
             renderer_->draw_filled_triangle_world(tx0, ty0, tx1, ty1, tx2, ty2, silhouette_col);
         }
 
+        // [P3] Render the equipped ARMOR over the body: its capsules
+        // reference the fighter's E* skeleton edges (EArm_1, EChest, ... —
+        // see armor_robe.xml), the same edge_map the body capsules use, so
+        // the armor tracks the animated body. The cloth node/edge mesh is
+        // not simulated (no cloth physics), so only the capsules are drawn.
+        if (assets_->armor_model()) {
+            // Warm leather/brown tint, distinct from the body silhouette.
+            ren::Color4B armor_col{128, 96, 62, 255};
+            if (player_hit_flash_ > 0) armor_col = ren::Color4B{255, 220, 190, 255};
+            for (auto& c : assets_->armor_model()->capsules) {
+                auto eit = edge_map.find(c.edge_name);
+                if (eit == edge_map.end()) continue;
+                auto [ax1, ay1] = resolve_body_node(eit->second.first,
+                    world_cx, world_cy, facing_right_, pivot_local_y);
+                auto [ax2, ay2] = resolve_body_node(eit->second.second,
+                    world_cx, world_cy, facing_right_, pivot_local_y);
+                float r = (c.radius1 + c.radius2) * 0.5f;
+                if (r <= 0) r = 4.0f;
+                float dx = ax2 - ax1, dy = ay2 - ay1;
+                float len = std::sqrt(dx * dx + dy * dy);
+                if (len < 0.5f) continue;
+                float ux = dx / len, uy = dy / len;
+                float px = -uy, py = ux;
+                renderer_->draw_filled_triangle_world(ax1 + px * r, ay1 + py * r,
+                    ax2 + px * r, ay2 + py * r, ax2 - px * r, ay2 - py * r, armor_col);
+                renderer_->draw_filled_triangle_world(ax1 + px * r, ay1 + py * r,
+                    ax2 - px * r, ay2 - py * r, ax1 - px * r, ay1 - py * r, armor_col);
+                renderer_->draw_filled_circle_world(ax1, ay1, r, armor_col);
+                renderer_->draw_filled_circle_world(ax2, ay2, r, armor_col);
+                ++armor_capsules_drawn_;
+            }
+        }
+
         // Render player's equipped weapon model (if loaded)
         // Weapon nodes are defined in their own model space; we render the
         // mesh at a fixed offset from the player's body center.
@@ -2504,6 +2537,36 @@ private:
             }
         }
         return weapon_tactic_to_model_file(tactic);
+    }
+
+    // [P3] Equipped armor/helm model files from the list.xml Model attribute
+    // (users.xml Armor="ARMOR_ROBE" -> <Item Model="armor_robe"> ->
+    // armor_robe.xml; Helm="Head" -> Model="head" -> head.xml; Q4). Empty
+    // string = nothing equipped to load.
+    std::string equipped_armor_model_file() const {
+        if (!list_data_loaded_) return {};
+        const std::string id = inventory_.equipped_armor();
+        if (id.empty()) return {};
+        for (const auto& item : list_data_.items)
+            if (item.name == id && !item.model.empty()) return item.model + ".xml";
+        return {};
+    }
+    std::string equipped_helm_model_file() const {
+        if (!list_data_loaded_) return {};
+        const std::string id = inventory_.equipped_helmet();
+        if (id.empty()) return {};
+        for (const auto& item : list_data_.items)
+            if (item.name == id && !item.model.empty()) return item.model + ".xml";
+        return {};
+    }
+    void load_equipment_models() {
+        if (!assets_) return;
+        const std::string armor = equipped_armor_model_file();
+        if (armor.empty()) assets_->armor_model().reset();
+        else assets_->load_armor_model(armor, asset_root_);
+        const std::string helm = equipped_helm_model_file();
+        if (helm.empty()) assets_->helm_model().reset();
+        else assets_->load_helm_model(helm, asset_root_);
     }
     // Load a weapon model for the player from a tactic name.
     // The weapon model is stored in assets_->weapon_model() for rendering.
