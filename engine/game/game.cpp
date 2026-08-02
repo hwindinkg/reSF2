@@ -1498,10 +1498,13 @@ void Game::host_render_scroll_panel(float x, float y, float w, float h) {
         return it2 == assets_->hud_textures().end() ? nullptr : it2->second.get();
     };
     // Parchment body, then the sheet's side edges, then the rolled bar on top
-    // — the same three pieces as the dojo dialogue (PORT_PLAN 6.2), which is
+    // �?" the same three pieces as the dojo dialogue (PORT_PLAN 6.2), which is
     // why Paper_left/right are drawn as narrow strips and not as halves.
+    // [P8] Piece sizes come from host_get_scroll_panel_layout: the roll bar
+    // is a fixed 37-pt 3-slice and the paper edges keep the 116x1524 aspect.
     renderer_->draw_filled_rect_screen(x, y, w, h, {226, 205, 163, 250});
-    const float edge_w = w * 0.055f;
+    const ScrollPanelLayout L = host_get_scroll_panel_layout(w, h);
+    const float edge_w = L.edge_w;
     if (auto* pl = tex_of("Paper_left"))
         renderer_->draw_textured_quad_screen(*pl, x, y, edge_w, h);
     if (auto* pr = tex_of("Paper_right"))
@@ -1511,8 +1514,8 @@ void Game::host_render_scroll_panel(float x, float y, float w, float h) {
     auto* roll_c = tex_of("Roll_center");
     auto* roll_r = tex_of("Roll_right");
     if (roll_l && roll_c && roll_r) {
-        const float bar_h = w * 0.13f;
-        const float end_w = bar_h * (156.0f / 74.0f);
+        const float bar_h = L.bar_h;
+        const float end_w = L.end_w;
         // [D6] The roll bars sit flush with the panel's top and bottom edges,
         // INSIDE the sheet: the soak showed the bottom texture (подложка)
         // stretched far beyond the parchment. The bars used to overhang the

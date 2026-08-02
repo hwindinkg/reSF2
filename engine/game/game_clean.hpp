@@ -654,21 +654,28 @@ float host_enemy_health_frac() const override;
     };
     ScrollPanelLayout host_get_scroll_panel_layout(float w, float h) const {
         ScrollPanelLayout L;
-        L.bar_h = w * 0.13f;
+        // [P8] Roll bar: the Roll_left/center/right PNGs are 74 atlas px
+        // tall -> 37 pt; the bar is a fixed-height 3-slice whose CENTER
+        // tiles horizontally. The old w*0.13 made the bar grow with the
+        // panel (~2.5x too tall on the story dialogue) and stretched the
+        // 156x74 end caps along with it. Paper edges are the 116x1524 side
+        // strips drawn at their own 1:13.1 aspect (the old w*0.055 squashed
+        // them ~3.4x and, in the dojo hint overlay, a *6 fudge smeared
+        // them). Panel width/height stay inputs for the tiled centre.
+        const float pts = ui::points_scale(
+            platform_ ? static_cast<float>(platform_->window_height()) : 720.0f);
+        L.bar_h = (74.0f / ui::kHighTierContentScale) * pts;
         L.end_w = L.bar_h * (156.0f / 74.0f);
-        L.edge_w = w * 0.055f;
-        (void)h;
+        L.edge_w = h * (116.0f / 1524.0f);
+        (void)w;
         return L;
     }
 
     // [P12] The story-dialogue panel geometry (JS-authored proportions).
-    struct DialogueLayout {
-        float box_x = 0, box_y = 0, box_w = 0, box_h = 0;
-        float portrait_x = 0, portrait_y = 0, portrait_size = 0;
-        float text_x = 0, pad = 0;
-    };
-    DialogueLayout host_dialogue_layout(float w, float h) const {
-        DialogueLayout D;
+    // The shared scene::DialogueLayout is the single source for the
+    // DialogueScene render and the placement tests.
+    scene::DialogueLayout host_dialogue_layout(float w, float h) const override {
+        scene::DialogueLayout D;
         D.box_w = w * 0.53f;                    // 900/1700
         D.box_h = h * 0.20f;
         D.box_x = w * 0.235f;                   // (1700-900)/2/1700
@@ -4548,23 +4555,25 @@ private:
         // parchment.
         renderer_->draw_filled_rect_screen(box_x, box_y, box_w, box_h,
                                            {226, 205, 163, 250});
+        // [P8] Paper edges: the 116x1524 side strips at their own aspect.
+        // The old *6 fudge smeared them into a dark band.
+        const float pts2 = ui::points_scale(win_h);
+        const float edge_w = box_h * (116.0f / 1524.0f);
         if (auto* paper_l = tex_of("Paper_left")) {
-            const float ew = box_h * (116.0f / 1524.0f) * 6.0f;
-            renderer_->draw_textured_quad_screen(*paper_l, box_x, box_y, ew, box_h);
+            renderer_->draw_textured_quad_screen(*paper_l, box_x, box_y, edge_w, box_h);
         }
         if (auto* paper_r = tex_of("Paper_right")) {
-            const float ew = box_h * (116.0f / 1524.0f) * 6.0f;
-            renderer_->draw_textured_quad_screen(*paper_r, box_x + box_w - ew, box_y,
-                                                 ew, box_h);
+            renderer_->draw_textured_quad_screen(*paper_r, box_x + box_w - edge_w, box_y,
+                                                 edge_w, box_h);
         }
 
         // Rolled bar across the top: a 3-slice with fixed ends (156 x 74) and a
-        // tileable centre (688 x 74).
+        // tileable centre (688 x 74), drawn at the native 37-pt height.
         auto* roll_l = tex_of("Roll_left");
         auto* roll_c = tex_of("Roll_center");
         auto* roll_r = tex_of("Roll_right");
         if (roll_l && roll_c && roll_r) {
-            const float bar_h = box_h * 0.30f;
+            const float bar_h = (74.0f / ui::kHighTierContentScale) * pts2;
             const float end_w = bar_h * (156.0f / 74.0f);
             const float bar_y = box_y - bar_h * 0.55f;
             renderer_->draw_textured_quad_screen(*roll_l, box_x, bar_y, end_w, bar_h);
