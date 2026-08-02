@@ -891,6 +891,22 @@ void Game::host_set_battle_info(const BattleInfo& info) {
                 break;
             }
         }
+        // [P4] The HUD enemy name must come from the language pack: the
+        // stages.xml <Template FirstName="NAME_X"> attribute is the
+        // LOCALIZATION KEY for the fighter's display name (NAME_KENJI ->
+        // "KENJI" in eng.xml / "КЕНДЗИ" in rus.xml). A fight handed over
+        // with a raw warrior template ("Dojo_Disciple", "Lynx_Claws") must
+        // resolve to that key, or the HUD shows the raw string. A warrior
+        // FirstName of its own (e.g. "Punchbag") is kept as-is.
+        if (!battle_info_.enemy_name.empty()) {
+            const std::string& raw = battle_info_.enemy_name;
+            for (const auto& t : templates) {
+                if (t.name == raw && !t.first_name.empty()) {
+                    battle_info_.enemy_name = t.first_name;
+                    break;
+                }
+            }
+        }
     }
     std::printf("[battle] enemy voice '%s' (enemy='%s')\n",
                 enemy_voice_.c_str(), info.enemy_name.c_str());

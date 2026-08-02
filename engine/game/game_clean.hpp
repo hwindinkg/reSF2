@@ -4288,17 +4288,12 @@ private:
         const float name_h = 40.0f * pts;
         const float name_scale = name_h / 115.0f;   // kFontLineBoxPx
         const float name_y = 65.0f * pts - name_h * 0.5f;
-        std::string pname = localized("Shadow");
-        if (pname.empty()) pname = "Shadow";
-        std::string ename = battle_info_.enemy_name.empty()
-                                ? std::string("???")
-                                : localized(battle_info_.enemy_name);
-        if (ename.empty()) ename = battle_info_.enemy_name;
-        render_text(pname, cx - 315.0f * pts, name_y, name_scale,
+        const auto names = host_get_hud_fighter_names();
+        render_text(names.player, cx - 315.0f * pts, name_y, name_scale,
                     {255, 255, 255, 255});
-        const auto [ew, eh] = measure_text(ename, name_scale);
+        const auto [ew, eh] = measure_text(names.enemy, name_scale);
         (void)eh;
-        render_text(ename, cx + 315.0f * pts - ew, name_y, name_scale,
+        render_text(names.enemy, cx + 315.0f * pts - ew, name_y, name_scale,
                     {255, 255, 255, 255});
 
         // Round dots: Fight rounds per side, wins shown as Round_Done.
