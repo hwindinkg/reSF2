@@ -222,7 +222,8 @@ static void test_u2_shop() {
           "U2: the centre parchment column is rendered (light parchment)");
 
     int r3 = 0, g3 = 0, b3 = 0;
-    if (pixel(runner, (int)(w * 0.5f), (int)(bottom_y + bottom_h * 0.5f), r3, g3, b3))
+    // Sample right of the centred category icons (which now draw on the bar).
+    if (pixel(runner, (int)(w * 0.95f), (int)(bottom_y + bottom_h * 0.5f), r3, g3, b3))
         std::fprintf(stderr, "  [U2] bottom bar pixel: rgb(%d,%d,%d)\n", r3, g3, b3);
     CHECK(r3 < 60 && g3 < 45,
           "U2: the bottom currency/category bar is rendered (dark brown)");
@@ -270,15 +271,23 @@ static void test_u3_settings() {
 
     // The settings body must not be the flat placeholder (clear colour
     // {8,8,16} or the navy stub panel {25,25,40}): a real row (icon +
-    // slider) has to be drawn there.
+    // slider) has to be drawn there. Sample the first row's slider fill —
+    // the layout law the scene uses (roll at 192pt, rows below, slider at
+    // 52% width, 34% of the window).
     const float h = (float)runner.platform().window_height();
+    const float w = (float)runner.platform().window_width();
     const float s = ui::points_scale(h);
     const float roll_y = 192.0f * s;
-    const float row_y = roll_y + 56.0f * s + 30.0f * s;
+    const float body_y = roll_y + 56.0f * s + 10.0f * s;
+    const float row_h = 54.0f * s;
+    const float slider_x = w * 0.52f, slider_w = w * 0.34f;
+    const float slider_h = 20.0f * s;
+    const float sample_x = slider_x + slider_w * 0.30f;
+    const float sample_y = body_y + (row_h - slider_h) * 0.5f + slider_h * 0.5f;
     int pr = 0, pg = 0, pb = 0;
-    if (pixel(runner, 60, (int)row_y, pr, pg, pb))
-        std::fprintf(stderr, "  [U3] first settings row pixel at (60,%.0f): rgb(%d,%d,%d)\n",
-                     row_y, pr, pg, pb);
+    if (pixel(runner, (int)sample_x, (int)sample_y, pr, pg, pb))
+        std::fprintf(stderr, "  [U3] first slider pixel at (%.0f,%.0f): rgb(%d,%d,%d)\n",
+                     sample_x, sample_y, pr, pg, pb);
     const bool flat_placeholder =
         (std::abs(pr - 8) <= 10 && std::abs(pg - 8) <= 10 && std::abs(pb - 16) <= 10) ||
         (std::abs(pr - 23) <= 12 && std::abs(pg - 23) <= 12 && std::abs(pb - 37) <= 12);
