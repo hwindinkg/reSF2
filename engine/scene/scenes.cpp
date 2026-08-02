@@ -913,28 +913,39 @@ void DialogueScene::on_render(SceneContext& ctx) {
     // dialog-local coordinate frame; the proportions below are screen-relative.
     // [D1] Vertically CENTERED: the soak showed the panel stuck to the bottom
     // of the screen; the original centers the parchment on the display.
-    const float box_w = w * 0.53f;                       // 900/1700
-    const float box_h = h * 0.20f;                       // text area fills ~80% of scroll height
-    const float box_x = w * 0.235f;                      // (1700-900)/2/1700
-    const float box_y = (h - box_h) * 0.5f;              // centered vertically
+    // [P12] The geometry comes from the host's shared layout helper so the
+    // placement tests pin the same numbers the screen draws.
+    const scene::DialogueLayout DL = ctx.host.host_dialogue_layout(w, h);
+    const float box_w = DL.box_w;
+    const float box_h = DL.box_h;
+    const float box_x = DL.box_x;
+    const float box_y = DL.box_y;
     ctx.host.host_render_scroll_panel(box_x, box_y, box_w, box_h);
 
     // ---- Avatar ----
-    // [ORIGINAL] In the JS (Od.$A → Zg.C(-450+OB)) the avatar sits at the
+    // [ORIGINAL] In the JS (Od.$A ��' Zg.C(-450+OB)) the avatar sits at the
     // left edge of the parchment inset by ~15 pt.  Avatar size is derived
-    // from text area height (700 pt from JS kb.Fa(900,800) → kb.rd(true) →
-    // kb.Kc(.9) → scaled by 700 pt).  Proportional to parchment height:
-    //   avatar = 700/800 ≈ 0.875 of parchment height  (was 0.78)
-    //   left inset = 15/900 ≈ 0.017 of parchment width
-    const float pad = box_h * 0.08f;
+    // from text area height (700 pt from JS kb.Fa(900,800) ��' kb.rd(true) ��'
+    // kb.Kc(.9) ��' scaled by 700 pt).  Proportional to parchment height:
+    //   avatar = 700/800 �%? 0.875 of parchment height  (was 0.78)
+    //   left inset = 15/900 �%? 0.017 of parchment width
+    const float pad = DL.pad;
     float text_x = box_x + box_w * 0.055f;
-    const float avatar = box_h * 0.875f;
+    const float avatar = DL.portrait_size;
     const std::string& speaker_key = lines[current_line_].first;
     std::string avatar_name = "character_sensei";  // default fallback
     if (!speaker_key.empty()) {
         avatar_name = "character_";
         for (char c : speaker_key)
             avatar_name += (char)std::tolower((unsigned char)c);
+    }
+    if (ctx.host.host_render_ui_texture(avatar_name,
+                                         DL.portrait_x,
+                                         DL.portrait_y,
+                                         avatar, avatar)) {
+        // [ORIGINAL] Text starts right after the avatar + small gap.
+        // avatar occupies `avatar` px; gap �%? 2% of parchment width.
+        text_x = DL.text_x;
     }
     if (ctx.host.host_render_ui_texture(avatar_name,
                                          box_x + box_w * 0.017f,

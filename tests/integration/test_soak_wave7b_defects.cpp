@@ -455,7 +455,7 @@ static void test_p8_dialogue_textures_and_p12_placement() {
                "P8: paper edges keep the 116x1524 source aspect");
 
     // P12: the story dialogue panel geometry (JS-authored proportions).
-    const game::Game::DialogueLayout D = runner.game().host_dialogue_layout(1280.0f, 720.0f);
+    const scn::DialogueLayout D = runner.game().host_dialogue_layout(1280.0f, 720.0f);
     CHECK_NEAR(D.box_x, 1280.0f * 0.235f, 0.5f, "P12: parchment left edge at 0.235w");
     CHECK_NEAR(D.box_w, 1280.0f * 0.53f, 0.5f, "P12: parchment width 0.53w (900/1700)");
     CHECK_NEAR(D.box_h, 720.0f * 0.20f, 0.5f, "P12: parchment height 0.20h");

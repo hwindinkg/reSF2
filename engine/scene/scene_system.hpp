@@ -34,6 +34,16 @@ namespace resf2::format { struct StageData; struct ListData; }
 
 namespace resf2::scene {
 
+// [P12] Story-dialogue panel geometry — the JS-authored proportions
+// (parchment 900/1700 wide at 400/1700, avatar 0.875 of the sheet height
+// at the left 0.017 inset, text after the avatar). One source for the
+// DialogueScene render and the placement tests.
+struct DialogueLayout {
+    float box_x = 0, box_y = 0, box_w = 0, box_h = 0;
+    float portrait_x = 0, portrait_y = 0, portrait_size = 0;
+    float text_x = 0, pad = 0;
+};
+
 // ---------- Scene identifiers ----------
 
 enum class SceneId : std::uint8_t {
@@ -227,6 +237,21 @@ public:
     // The label of the Results scene's continue button. On a DEFEAT of a
     // retryable fight it is the rematch prompt, not "BACK TO MENU".
     [[nodiscard]] virtual std::string host_get_results_button_label() const { return {}; }
+
+    // [P12] The story-dialogue panel geometry at the given viewport.
+    [[nodiscard]] virtual DialogueLayout host_dialogue_layout(float w, float h) const {
+        DialogueLayout D;
+        D.box_w = w * 0.53f;
+        D.box_h = h * 0.20f;
+        D.box_x = w * 0.235f;
+        D.box_y = (h - D.box_h) * 0.5f;
+        D.pad = D.box_h * 0.08f;
+        D.portrait_size = D.box_h * 0.875f;
+        D.portrait_x = D.box_x + D.box_w * 0.017f;
+        D.portrait_y = D.box_y + (D.box_h - D.portrait_size) * 0.5f;
+        D.text_x = D.portrait_x + D.portrait_size + D.box_w * 0.02f;
+        return D;
+    }
 
     // --- Text rendering ---
 
