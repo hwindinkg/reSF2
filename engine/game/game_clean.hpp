@@ -3199,7 +3199,12 @@ private:
 
     // [ORIGINAL] Load sound effects from the original mobile assets.
     // SF2 sounds are in assets/sounds/*.wav (16-bit PCM, Marmalade s3eAudio).
-    // We load key combat sounds: punches, kicks, hits, bodyfalls, blocks.
+    // [S3] Load the WHOLE bank, not a hand-picked subset: the old hardcoded
+    // 12-name list omitted the hit sets, so every hit request logged
+    // "[audio] Sound not found or invalid: f_pl_hit1/2/3" during the soak.
+    // assets/sounds/ carries the full original bank (both m_pl_* and f_pl_*
+    // voice sets, hit/attack/jump/death/cough included), matching the APK
+    // manifest exactly.
     void load_sounds() {
         auto& eng = aud::AudioEngine::instance();
         eng.init();  // defaults to NullAudioBackend (no OpenAL yet)
@@ -3218,26 +3223,15 @@ private:
             std::printf("[audio] sounds dir not found\n");
             return;
         }
-        // [ORIGINAL] Key SF2 sound files (from assets/sounds/):
-        // f_pl_attack1-4.wav — player punch/kick attack swings
-        // bodyfall1/3.wav — body hit ground
-        // armor.wav — armor hit
-        // coin_hit1-4.wav — coin pickup
-        // disk.wav, energy_flask5.wav — pickups
-        std::vector<std::string> needed = {
-            "f_pl_attack1", "f_pl_attack2", "f_pl_attack3", "f_pl_attack4",
-            "bodyfall1", "bodyfall3", "armor", "coin_hit1", "disk", "energy_flask5",
-            "buy", "f_cough"
-        };
-        int loaded = 0;
-        for (const auto& name : needed) {
-            auto path = sound_dir / (name + ".wav");
-            if (std::filesystem::exists(path)) {
-                if (eng.load_sound_file(name, path.string())) loaded++;
-            }
+        size_t present = 0, loaded = 0;
+        for (auto& entry : std::filesystem::directory_iterator(sound_dir)) {
+            if (entry.path().extension() != ".wav") continue;
+            ++present;
+            const std::string name = entry.path().stem().string();
+            if (eng.load_sound_file(name, entry.path().string())) ++loaded;
         }
-        std::printf("[audio] Loaded %d/%zu sounds from %s\n",
-                    loaded, needed.size(), sound_dir.string().c_str());
+        std::printf("[audio] Loaded %zu/%zu sounds from %s\n",
+                    loaded, present, sound_dir.string().c_str());
     }
 
     // Play a sound by name (no-op if not loaded or backend is null)
