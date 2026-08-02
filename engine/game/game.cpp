@@ -650,6 +650,10 @@ bool Game::host_load_progress() {
     zone_unlocked_ = data.zone_unlocked;
     battle_unlocked_ = data.battle_unlocked;
 
+    // [S1] <Warrior Voice=> from user.xml / usersDefault.xml selects the
+    // player's m_pl_*/f_pl_* sound set ("Male" is the shipped default).
+    if (!data.voice.empty()) player_voice_ = data.voice;
+
     std::printf("[save] loaded %zu completed levels, %d gold, %dw %dl, %zu items, tutorial=%s, %zu zones\n",
                 completed_levels_.size(), currency_, player_wins_, player_losses_,
                 data.owned_items.size(), tutorial_state_.c_str(), zone_unlocked_.size());
@@ -2168,8 +2172,11 @@ void Game::host_update_gameplay(uint32_t dt) {
                         enemy_hits_on_player_++;
                         enemy_fighter_.hits_landed++;
                         spawn_hit_sparks(player_pos_x_, player_pos_y_ - 40, 8);
-                        play_sound("f_pl_hit" +
-                                       std::to_string(enemy_fighter_.hits_landed % 3 + 1),
+                        // [S1] The hurt player's voice set: m_pl_hit* for a
+                        // male player (usersDefault.xml default), f_pl_hit*
+                        // for a female one.
+                        play_sound(player_hit_sound(
+                                       enemy_fighter_.hits_landed % 3 + 1),
                                    0.6f);
                         // [STEP 4.7] Trigger knockback on heavy hits (damage > 30% max health)
                         if (final_damage > 0.3f) {
@@ -2783,9 +2790,10 @@ void Game::host_update_gameplay(uint32_t dt) {
             move_state_ = 10;
             need_switch_to_idle_ = false;
             // [ORIGINAL] Play attack swing sound at attack start.
-            // Original SF2 plays f_pl_attack*.wav on the first attack frame.
+            // Original SF2 plays f_pl_attack*.wav on the first attack frame;
+            // [S1] the m_/f_ prefix follows <Warrior Voice=> in the saves.
             int snd = (best_move->name.length() % 4) + 1;
-            play_sound("f_pl_attack" + std::to_string(snd), 0.5f);
+            play_sound(player_attack_sound(snd), 0.5f);
             goto after_combat;
         } else if (punch_pressed || kick_pressed) {
             // [DIAGNOSTIC] No candidate found — log structured reject.
@@ -3781,7 +3789,7 @@ void Game::host_update_gameplay(uint32_t dt) {
                                     enemy_fighter_.invuln_time = 0.4f;
                                     enemy_hit_flash_ = 0.25f;
                                     int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
-                                    play_sound("f_pl_attack" + std::to_string(snd_idx), 0.7f);
+                                    play_sound(player_attack_sound(snd_idx), 0.7f);
                                     play_sound("armor", 0.5f);
                                     // Do NOT set hit_this_interval_ here (see comment below).
                                     // Spawn hit sparks at collision point
@@ -3934,7 +3942,7 @@ void Game::host_update_gameplay(uint32_t dt) {
                                     hit_registered = true;
                                     // The swing itself.
                                     int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
-                                    play_sound("f_pl_attack" + std::to_string(snd_idx), 0.8f);
+                                    play_sound(player_attack_sound(snd_idx), 0.8f);
 
                                     // What was hit decides what is heard and what
                                     // reacts. This branch is the PUNCHING BAG's
@@ -3948,9 +3956,13 @@ void Game::host_update_gameplay(uint32_t dt) {
                                     // hanging there.
                                     if (!show_enemy_) {
                                         // A leather bag takes a body impact, no
-                                        // metal. f_pl_hit* is the body-impact set.
+                                        // metal. *_pl_hit* is the body-impact
+                                        // set; [S1] it follows the player's
+                                        // voice. [HEURISTIC-TODO] The bag has
+                                        // no Voice of its own; the original's
+                                        // exact bag-impact set is unverified.
                                         const int bag_snd = (current_frame + (int)current_move_[0]) % 3 + 1;
-                                        play_sound("f_pl_hit" + std::to_string(bag_snd), 0.6f);
+                                        play_sound(player_hit_sound(bag_snd), 0.6f);
                                         player_fighter_.hits_landed++;
                                         // [ORIGINAL] Combo.Time = 90 frames = 1.5s at 60Hz (from InternalSettings)
                                         combo_timer_ = 1.5f;

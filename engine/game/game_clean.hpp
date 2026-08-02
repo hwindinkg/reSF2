@@ -3239,6 +3239,24 @@ private:
         aud::AudioEngine::instance().play(name, volume, false);
     }
 
+    // [S1/S2] Voice-gender sound names. The original's voice sets are
+    // m_pl_* (male player) and f_pl_* (female player); <Warrior Voice=>
+    // in usersDefault.xml / user.xml / stages.xml selects between them.
+    // Anything that is not "Female" resolves to the male set — the
+    // shipped saves default to Voice="Male".
+    static std::string voice_prefix(const std::string& voice) {
+        return (voice == "Female" || voice == "female") ? "f" : "m";
+    }
+    std::string player_attack_sound(int idx) const {
+        return voice_prefix(player_voice_) + "_pl_attack" + std::to_string(idx);
+    }
+    std::string player_hit_sound(int idx) const {
+        return voice_prefix(player_voice_) + "_pl_hit" + std::to_string(idx);
+    }
+    std::string enemy_attack_sound(int idx) const {
+        return voice_prefix(enemy_voice_) + "_pl_attack" + std::to_string(idx);
+    }
+
     // Decode one UTF-8 code point at `i`, advancing it. Falls back to CP1251
     // for a lead byte with no continuation, matching render_text.
     std::int32_t next_codepoint(const std::string& text, size_t& i) const {

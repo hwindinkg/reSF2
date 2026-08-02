@@ -438,7 +438,7 @@ void SaveManager::write_xml(std::ostream& os, const SaveData& data) {
     os << "  <Warrior ID=\"1\"\n";
     os << "  FirstName=\"NAME_SHADOW\"\n";
     os << "  Avatar=\"avatar_hero\"\n";
-    os << "  Voice=\"Male\"\n";
+    os << "  Voice=\"" << data.voice << "\"\n";
     os << "  Money=\"" << data.currency << "\"\n";
     os << "  Bonus=\"9\"\n";
     os << "  Strength=\"3\"\n";
@@ -569,6 +569,11 @@ bool SaveManager::parse_xml(const std::string& xml, SaveData& data) {
     data.current_level = get_attr(warrior_tag, "CurrentZone");
     data.tutorial_state = get_attr(warrior_tag, "Tutorial");
     if (data.tutorial_state.empty()) data.tutorial_state = "MOVE";
+
+    // [S1] <Warrior Voice=> picks the player's m_pl_*/f_pl_* sound set.
+    // usersDefault.xml defaults to "Male"; keep that when absent.
+    data.voice = get_attr(warrior_tag, "Voice");
+    if (data.voice.empty()) data.voice = "Male";
 
     data.equipped_weapon = get_attr(warrior_tag, "Weapon");
     data.equipped_armor = get_attr(warrior_tag, "Armor");
