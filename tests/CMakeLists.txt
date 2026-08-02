@@ -509,6 +509,13 @@ set_tests_properties(test_soak_quest_defects PROPERTIES TIMEOUT 300)
 add_integration_test(test_soak_dialogue_defects)
 set_tests_properties(test_soak_dialogue_defects PROPERTIES TIMEOUT 300)
 
+# Soak-fix Wave 5: behavioral UI tests for the SOAK_TRIAGE.md §5 defects
+# (U1 enemy weapon geometry, U2 shop purchase flow + layout, U3 settings
+# layout, U4 Profile click, U5 menu hides after navigation, U6 unfold
+# animation). Six scenes; 300 like the wave-4 suite.
+add_integration_test(test_soak_ui_defects)
+set_tests_properties(test_soak_ui_defects PROPERTIES TIMEOUT 300)
+
 # Phase 5: Screenshot comparison — renders headlessly, compares against
 # reference PNGs using MSE, and saves diff images on failure.
 add_integration_test(test_screenshot_compare)
