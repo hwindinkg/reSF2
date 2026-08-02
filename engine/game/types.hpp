@@ -96,6 +96,14 @@ struct MoveDef {
     float damage = 0.0f;
     float impulse_x = 0.0f;
     float impulse_y = 0.0f;
+    // [ORIGINAL] The nested <Damage Type="UnarmedDamage" Shift="-10"/> inside
+    // <Damage Value=".."> — the attribute this attack reads (DamageAttribute)
+    // and the shift added to it before the f3 difference (game+0x60DF98,
+    // "DamageAttribute(+Shift) -> DefenseAttribute"). LIVE_GAME_EVIDENCE Q3:
+    // real HighPunch ships UnarmedDamage Shift=-10. Empty attr = default
+    // (WeaponDamage for weapon hits, UnarmedDamage for fists).
+    std::string damage_attr;
+    int damage_attr_shift = 0;
 
     int block_start = -1;
     int uninterrupt_start = -1;
@@ -199,6 +207,8 @@ struct MoveDef {
         int damage = 0;         // flat Damage="" attribute form
         float damage_value = 0; // nested <Damage Value=""/> form, which is what
                                 // moves.xml uses
+        std::string damage_attr;   // nested <Damage Type=".."/> (e.g. UnarmedDamage)
+        int damage_attr_shift = 0; // nested <Damage Shift=".."/>
         float impulse_x = 0;
         float impulse_y = 0;
         std::string hit_type;
