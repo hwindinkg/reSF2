@@ -790,8 +790,15 @@ void Game::check_tutorial() {
         host_set_dialogue({{speaker, line}});
         tutorial_dialog_pending_ = true;
         tutorial_dialog_shown_ = true;
-        tutorial_state_ = "COMPLETE";
-        std::printf("[tutorial] Training fight dialog set (localized), state -> COMPLETE\n");
+        // [P6] The state stays FIRST_FIGHT until the training fight is WON:
+        // the original only advances the tutorial after the victory. Marking
+        // COMPLETE here — before the fight even started — is what broke the
+        // story after a loss: the player returned to the dojo with the
+        // tutorial finished and nothing left to advance to (the soak log
+        // showed the bag/fighter toggle cycling with no progression). The
+        // Results scene advances FIRST_FIGHT -> COMPLETE on victory and
+        // keeps it on defeat so the fight stays retryable.
+        std::printf("[tutorial] Training fight dialog set (localized), state stays FIRST_FIGHT until won\n");
     }
 }
 
