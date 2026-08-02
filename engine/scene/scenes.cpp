@@ -873,7 +873,7 @@ void DialogueScene::on_update(SceneContext& ctx) {
     if (any_input) advance();
 }
 
-// [ORIGINAL] A story dialogue is a parchment scroll across the bottom of the
+// [ORIGINAL] A story dialogue is a parchment scroll in the center of the
 // screen with the speaker's avatar on the left, their name above the text and
 // a "ДАЛЕЕ" button on the right — quests.xml describes them as
 //   <Dialog Type="Regular" Title="characterSensei" Image="character_sensei">
@@ -887,7 +887,9 @@ void DialogueScene::on_render(SceneContext& ctx) {
     const float w = (float)ctx.platform.window_width();
     const float h = (float)ctx.platform.window_height();
 
-    r.draw_filled_rect_screen(0, 0, w, h, {0, 0, 0, 70});
+    // [D1] No full-screen dim behind the dialogue: the soak showed the whole
+    // background blackened while the original keeps the location visible.
+    // The parchment panel below is the only thing the dialogue draws.
     if (current_line_ >= lines.size()) return;
 
     // ---- Scroll panel geometry ----
@@ -899,17 +901,18 @@ void DialogueScene::on_render(SceneContext& ctx) {
     // Screen edges in the JS coordinate system: ±850 (total 1700 units).
     // Proportional fractions of screen width/height:
     //   parchment width  = 900 / 1700 ≈ 0.529   (was 0.86 — far too wide)
-    //   bottom margin    = 60  / 960  ≈ 0.063   (was 0.10)
     //   left edge        = 400 / 1700 ≈ 0.235
     // Text area (from JS qbb): Fa(900,800) → 900 pt wide × 800 pt tall,
     //   left padding inside parchment ≈ 50/900 ≈ 0.056 of parchment width.
     // The design space is 768-pt tall, width floats with aspect ratio;
     // 1365.25×768 for 16:9 (ui_scale.hpp).  The JS 1700×960 is a separate
     // dialog-local coordinate frame; the proportions below are screen-relative.
+    // [D1] Vertically CENTERED: the soak showed the panel stuck to the bottom
+    // of the screen; the original centers the parchment on the display.
     const float box_w = w * 0.53f;                       // 900/1700
     const float box_h = h * 0.20f;                       // text area fills ~80% of scroll height
     const float box_x = w * 0.235f;                      // (1700-900)/2/1700
-    const float box_y = h - box_h - h * 0.063f;          // 60/960 bottom margin
+    const float box_y = (h - box_h) * 0.5f;              // centered vertically
     ctx.host.host_render_scroll_panel(box_x, box_y, box_w, box_h);
 
     // ---- Avatar ----
