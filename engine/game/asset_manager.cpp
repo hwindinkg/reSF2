@@ -1050,6 +1050,19 @@ void AssetManager::parse_moves_xml(const std::string& xml) {
                                 }
                         } else if (kid.name == "Damage") {
                             iv.damage_value = tof(kid.attr("Value"));
+                            // [ORIGINAL] The nested
+                            //   <Damage Value="0.11"><Damage Type="UnarmedDamage" Shift="-10"/></Damage>
+                            // names the ATTRIBUTE this attack reads and the
+                            // shift added to it before the f3 difference
+                            // ("DamageAttribute(+Shift)" — LIVE_GAME_EVIDENCE
+                            // Q3: real HighPunch ships UnarmedDamage Shift=-10).
+                            // It was dropped entirely, so the unarmed-damage
+                            // shift never reached the damage formula (P10).
+                            for (const auto& inner : kid.children)
+                                if (inner.name == "Damage") {
+                                    iv.damage_attr = inner.attr("Type");
+                                    iv.damage_attr_shift = (int)tof(inner.attr("Shift"));
+                                }
                         } else if (kid.name == "Impulse") {
                             iv.impulse_x = tof(kid.attr("X"));
                             iv.impulse_y = tof(kid.attr("Y"));
@@ -1112,6 +1125,9 @@ void AssetManager::parse_moves_xml(const std::string& xml) {
                     if (move.damage == 0.0f) move.damage = iv.damage_value;
                     if (move.impulse_x == 0.0f) move.impulse_x = iv.impulse_x;
                     if (move.impulse_y == 0.0f) move.impulse_y = iv.impulse_y;
+                    // [P10] The damage attribute + shift (nested <Damage>).
+                    if (move.damage_attr.empty()) move.damage_attr = iv.damage_attr;
+                    if (move.damage_attr_shift == 0) move.damage_attr_shift = iv.damage_attr_shift;
                 }
             } else if (iv.type == "Block" || iv.name == "Block") {
                 if (move.block_start < 0) move.block_start = (int)iv.start;
