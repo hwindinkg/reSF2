@@ -2462,20 +2462,53 @@ private:
         if (it != special.end()) return it->second;
         // Generic: "weapon_<lowercased>.xml" — try common patterns
         // Handle s-ending (Swords → sword, Axes → axe, etc.)
+        // [P1] The exists-probe used to hardcode asset_root_ + "/assets/models/"
+        // (wrong when asset_root_ is the repo root, so the plural file
+        // weapon_knives.xml never matched and the guess fell through to the
+        // singular "weapon_knive.xml" — the soak's NOT FOUND line). Probe the
+        // same search paths the loader itself uses.
+        auto exists_anywhere = [&](const std::string& f) {
+            for (const auto& p : model_paths(asset_root_, f.c_str()))
+                if (std::filesystem::exists(p)) return true;
+            return false;
+        };
         std::string try_name = "weapon_" + lower + ".xml";
         // Try with and without final 's'
-        if (std::filesystem::exists(asset_root_ + "/assets/models/" + try_name)) return try_name;
+        if (exists_anywhere(try_name)) return try_name;
         if (lower.size() > 1 && lower.back() == 's') {
             try_name = "weapon_" + lower.substr(0, lower.size()-1) + ".xml";
-            if (std::filesystem::exists(asset_root_ + "/assets/models/" + try_name)) return try_name;
+            if (exists_anywhere(try_name)) return try_name;
         }
         return try_name; // return best guess
     }
 
+    // [ORIGINAL] The weapon MODEL FILE is the equipped item's `Model`
+    // attribute from list.xml — the device ships
+    //   <Item Name="WEAPON_KNIVES" SubType="Knives" Model="weapon_knives" .../>
+    // and the file on disk is exactly `Model + ".xml"` (LIVE_GAME_EVIDENCE
+    // Q1: weapon_knives.xml exists, weapon_knive.xml does not). The old
+    // loader guessed the filename from the SUBTYPE and produced
+    // "weapon_knive.xml" — the soak's "Player weapon 'Knives' model NOT
+    // FOUND" — so the equipped weapon was invisible. Falls back to the
+    // legacy guess for items without a Model attr and for the J/U
+    // weapon-cycle path (tactic names that match no inventory item).
+    std::string equipped_weapon_model_file(const std::string& tactic) const {
+        if (list_data_loaded_) {
+            const std::string inv = inventory_.equipped_weapon();
+            if (!inv.empty()) {
+                for (const auto& item : list_data_.items) {
+                    if (item.name == inv && !item.model.empty() &&
+                        (tactic.empty() || item.subtype == tactic))
+                        return item.model + ".xml";
+                }
+            }
+        }
+        return weapon_tactic_to_model_file(tactic);
+    }
     // Load a weapon model for the player from a tactic name.
     // The weapon model is stored in assets_->weapon_model() for rendering.
     void load_player_weapon(const std::string& tactic) {
-        std::string model_file = weapon_tactic_to_model_file(tactic);
+        std::string model_file = equipped_weapon_model_file(tactic);
         if (model_file.empty()) {
             assets_->weapon_model().reset();
             return;  // Fists — no weapon model

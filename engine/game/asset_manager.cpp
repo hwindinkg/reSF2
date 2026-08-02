@@ -519,6 +519,11 @@ std::string AssetManager::weapon_tactic_to_model_file(const std::string& tactic)
     };
     auto it = special.find(tactic);
     if (it != special.end()) return it->second;
+    // Generic: "weapon_<lowercased>.xml" — try common patterns.
+    // [P1] Note: this copy is legacy/dead (the Game's own inline loader in
+    // game_clean.hpp is what runs); its item->Model resolution lives there,
+    // where the list data is available. No filesystem probe here — there is
+    // no asset_root in scope.
     std::string try_name = "weapon_" + lower + ".xml";
     return try_name;
 }
