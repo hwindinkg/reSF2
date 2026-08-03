@@ -22,6 +22,35 @@ namespace resf2::save {
 // for player stats, <Battles> for zone/battle lock state, and <Items> for
 // inventory. We preserve compatibility with both formats.
 
+// One <Item> slot exactly as the original writes it (Wave 8 fidelity:
+// reverse/data/users.xml — every slot carries all five attributes).
+struct ItemEntry {
+    std::string name;
+    int equipped = 0;              // Equipped="0"/"1"
+    int count = 1;                 // Count
+    int upgrade_level = 0;         // UpgradeLevel
+    long long delivery_time = 0;   // DeliveryTime (may be -1 = delivered)
+    int delivery_upgrade_level = -1;  // DeliveryUpgradeLevel
+    std::string acquire_type = "Item";  // AcquireType
+};
+
+// One <Battle> entry as the original writes it. Locked-ness is ALSO encoded
+// in the name suffix (_LOCKED) — the attribute is captured verbatim too.
+struct BattleEntry {
+    std::string name;   // "ZONE_1|BOSS_LYNX|" or "ZONE_1|Tournament|"
+    int locked = 0;     // Locked attribute (verbatim)
+    int hidden = 0;     // Hidden attribute (verbatim, tournament rows)
+    int replay_count = 0;  // ReplayCount attribute (verbatim)
+};
+
+// <Currencies> attributes of the original save.
+struct Currencies {
+    int forge_material1 = 0;
+    int forge_material2 = 0;
+    int forge_material3 = 0;
+    int ascension_ticket = 0;
+};
+
 struct SaveData {
     int version = 1;                        // schema version for forward compat
     int currency = 0;                       // player gold [ORIGINAL] default 0 from usersDefault.xml
@@ -59,6 +88,21 @@ struct SaveData {
     float music_volume = 1.0f;
     bool sound_muted = false;
     bool music_muted = false;
+
+    // ---- Wave 8 fidelity: the original's full XML model ----
+    // Item slots with all original attributes, in file order.
+    std::vector<ItemEntry> items;
+    // Battle rows with Locked/Hidden/ReplayCount, in file order.
+    std::vector<BattleEntry> battles;
+    // <Currencies> forge materials + ascension ticket.
+    Currencies currencies;
+    // <Versions> footer.
+    std::string xml_version = "1.9.21";
+    std::string data_version = "1.9.21.0";
+    // The FULL <Warrior> attribute set, verbatim (name, value), in file
+    // order. A 1:1 round-trip preserves all 66 attributes of the device
+    // users.xml — including the ones the typed fields don't model yet.
+    std::vector<std::pair<std::string, std::string>> warrior_attrs;
 
     // Track which source file was loaded ("xml" or "json") for save format selection.
     std::string source_format;
@@ -131,6 +175,10 @@ private:
 
     // Resolve the XML save path (user.xml in assets directory).
     std::string xml_save_path() const;
+
+    // Resolve the XML backup path (users_backup.xml in assets directory).
+    // [ORIGINAL] The previous save is copied here before each overwrite.
+    std::string xml_backup_path() const;
 
     // Resolve the default XML path (usersDefault.xml in assets directory).
     std::string xml_default_path() const;

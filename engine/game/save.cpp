@@ -163,6 +163,20 @@ bool SaveManager::save(const SaveData& data, const std::string& path) {
             use_xml = false;
         }
 
+        // [Wave 8] Original save convention (LIVE_BOOT_TRACE 15.46/21.38):
+        // before overwriting users.xml the previous save is copied to
+        // users_backup.xml, so a corrupt write never loses the last good
+        // state. The original also writes *.hash files; the hash algorithm
+        // is not yet recovered (device offline) — HEURISTIC-TODO.
+        // NOTE: must run BEFORE ofstream truncates the target.
+        if (use_xml) {
+            const std::string backup_path = xml_backup_path();
+            if (!backup_path.empty() && fs::exists(out_path)) {
+                std::error_code ec;
+                fs::copy_file(out_path, backup_path, fs::copy_options::overwrite_existing, ec);
+            }
+        }
+
         std::ofstream f(out_path);
         if (!f) {
             std::printf("[save] ERROR: could not open %s for writing\n", out_path.c_str());
@@ -416,6 +430,13 @@ std::string SaveManager::xml_save_path() const {
     return p.string();
 }
 
+std::string SaveManager::xml_backup_path() const {
+    if (asset_root_.empty()) return "";
+    // [ORIGINAL] users_backup.xml holds the previous save (same folder).
+    auto p = fs::path(asset_root_) / "users_backup.xml";
+    return p.string();
+}
+
 std::string SaveManager::xml_default_path() const {
     if (asset_root_.empty()) return "";
     // [ORIGINAL] usersDefault.xml is the initial save shipped with the game.
@@ -431,68 +452,151 @@ std::string SaveManager::xml_default_path() const {
 // XML serialization [ORIGINAL]
 // ============================================================
 
+namespace {
+
+// Scan a tag region for every name="value" pair, in file order. The region
+// must START AFTER the tag name (e.g. `ID="1" IsFake="True" ...`), so the tag
+// name itself is never captured as an attribute.
+void parse_attrs_into(const std::string& region,
+                      std::vector<std::pair<std::string, std::string>>& out) {
+    size_t pos = 0;
+    while (pos < region.size()) {
+        size_t start = std::string::npos;
+        for (size_t i = pos; i < region.size(); ++i) {
+            const char c = region[i];
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') {
+                start = i;
+                break;
+            }
+        }
+        if (start == std::string::npos) break;
+        size_t name_end = start;
+        while (name_end < region.size()) {
+            const char c = region[name_end];
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                (c >= '0' && c <= '9') || c == '_')
+                ++name_end;
+            else
+                break;
+        }
+        const std::string name = region.substr(start, name_end - start);
+        const size_t eq = region.find('=', name_end);
+        if (eq == std::string::npos || eq > name_end + 8) { pos = name_end; continue; }
+        const size_t q = region.find('"', eq);
+        if (q == std::string::npos) { pos = name_end; continue; }
+        const size_t q2 = region.find('"', q + 1);
+        if (q2 == std::string::npos) { pos = name_end; continue; }
+        out.emplace_back(name, region.substr(q + 1, q2 - q - 1));
+        pos = q2 + 1;
+    }
+}
+
+}  // namespace
+
 void SaveManager::write_xml(std::ostream& os, const SaveData& data) {
     os << "<?xml version=\"1.0\"?>\n";
     os << "<CurrentUser ID=\"1\" Token=\"1\" UseNewHash=\"1\" />\n";
     os << "<Warriors>\n";
     os << "  <Warrior ID=\"1\"\n";
-    os << "  FirstName=\"NAME_SHADOW\"\n";
-    os << "  Avatar=\"avatar_hero\"\n";
-    os << "  Voice=\"" << data.voice << "\"\n";
-    os << "  Money=\"" << data.currency << "\"\n";
-    os << "  Bonus=\"9\"\n";
-    os << "  Strength=\"3\"\n";
-    os << "  Stamina=\"3\"\n";
-    os << "  Level=\"" << data.level << "\"\n";
-    os << "  Experience=\"0\"\n";
-    os << "  Power=\"5\"\n";
-    os << "  PowerSyncTime=\"0\"\n";
-    os << "  Difficulty=\"50\"\n";
-    os << "  LastLotteryEnterTime=\"0\"\n";
-    os << "  LastLotteryPlayTime=\"0\"\n";
-    os << "  LotteryDaysMax=\"6\"\n";
-    os << "  LotteryDays=\"0\"\n";
-    os << "  RateTime=\"0\"\n";
-    os << "  Skeleton=\"Skeleton\"\n";
-    os << "  Armor=\"" << (data.equipped_armor.empty() ? "Body" : data.equipped_armor) << "\"\n";
-    os << "  Helm=\"" << (data.equipped_helmet.empty() ? "Head" : data.equipped_helmet) << "\"\n";
-    os << "  Weapon=\"" << (data.equipped_weapon.empty() ? "Fists" : data.equipped_weapon) << "\"\n";
-    os << "  Ranged=\"" << (data.equipped_ranged.empty() ? "NoRanged" : data.equipped_ranged) << "\"\n";
-    os << "  Magic=\"" << (data.equipped_magic.empty() ? "NoMagic" : data.equipped_magic) << "\"\n";
-    os << "  ShowUpgrades=\"0\"\n";
-    os << "  ArenaRating=\"0\"\n";
-    os << "  ArenaRank=\"0\"\n";
-    os << "  Tutorial=\"" << data.tutorial_state << "\"\n";
-    os << "  Tactic=\"Player\"\n";
-    os << "  CurrentZone=\"" << data.current_level << "\">\n";
 
-    // Items
-    os << "    <Items>\n";
-    for (const auto& item : data.owned_items) {
-        bool equipped = (item == data.equipped_weapon || item == data.equipped_armor ||
-                         item == data.equipped_helmet || item == data.equipped_ranged ||
-                         item == data.equipped_magic);
-        os << "      <Item Name=\"" << item << "\" Equipped=\"" << (equipped ? "1" : "0") << "\" Count=\"1\" />\n";
+    // [Wave 8] The <Warrior> attribute set. The captured device attribute set
+    // is emitted in file order with the LIVE typed fields overriding the core
+    // attributes; a fresh save (no capture) gets the usersDefault.xml default
+    // set. Either way the core attributes are guaranteed present.
+    auto emit_attr = [&](const char* name, const std::string& value) {
+        os << "  " << name << "=\"" << value << "\"\n";
+    };
+    std::vector<std::pair<std::string, std::string>> attrs = data.warrior_attrs;
+    if (attrs.empty()) {
+        attrs = {
+            {"FirstName", "NAME_SHADOW"}, {"Avatar", "avatar_hero"},
+            {"Voice", data.voice}, {"Money", std::to_string(data.currency)},
+            {"Bonus", "9"}, {"Strength", "3"}, {"Stamina", "3"},
+            {"Level", std::to_string(data.level)}, {"Experience", "0"},
+            {"Power", "5"}, {"PowerSyncTime", "0"}, {"Difficulty", "50"},
+            {"LastLotteryEnterTime", "0"}, {"LastLotteryPlayTime", "0"},
+            {"LotteryDaysMax", "6"}, {"LotteryDays", "0"}, {"RateTime", "0"},
+            {"Skeleton", "Skeleton"},
+            {"Armor", data.equipped_armor.empty() ? "Body" : data.equipped_armor},
+            {"Helm", data.equipped_helmet.empty() ? "Head" : data.equipped_helmet},
+            {"Weapon", data.equipped_weapon.empty() ? "Fists" : data.equipped_weapon},
+            {"Ranged", data.equipped_ranged.empty() ? "NoRanged" : data.equipped_ranged},
+            {"Magic", data.equipped_magic.empty() ? "NoMagic" : data.equipped_magic},
+            {"ShowUpgrades", "0"}, {"ArenaRating", "0"}, {"ArenaRank", "0"},
+            {"Tutorial", data.tutorial_state}, {"Tactic", "Player"},
+            {"CurrentZone", data.current_level},
+        };
     }
-    // Always include default items if not already present
-    if (data.owned_items.empty()) {
-        os << "      <Item Name=\"Body\" Equipped=\"1\" Count=\"1\" />\n";
-        os << "      <Item Name=\"Head\" Equipped=\"1\" Count=\"1\" />\n";
-        os << "      <Item Name=\"Fists\" Equipped=\"1\" Count=\"1\" />\n";
-        os << "      <Item Name=\"NoRanged\" Equipped=\"1\" Count=\"1\" />\n";
-        os << "      <Item Name=\"NoMagic\" Equipped=\"1\" Count=\"1\" />\n";
+    // The core attributes always reflect live state: override if captured,
+    // append if the capture lacked them.
+    {
+        auto set_core = [&](const char* name, const std::string& value) {
+            for (auto& [key, val] : attrs)
+                if (key == name) { val = value; return; }
+            attrs.emplace_back(name, value);
+        };
+        set_core("Voice", data.voice);
+        set_core("Money", std::to_string(data.currency));
+        set_core("Level", std::to_string(data.level));
+        set_core("Tutorial", data.tutorial_state);
+        set_core("CurrentZone", data.current_level);
+        set_core("Armor", data.equipped_armor.empty() ? "Body" : data.equipped_armor);
+        set_core("Helm", data.equipped_helmet.empty() ? "Head" : data.equipped_helmet);
+        set_core("Weapon", data.equipped_weapon.empty() ? "Fists" : data.equipped_weapon);
+        set_core("Ranged", data.equipped_ranged.empty() ? "NoRanged" : data.equipped_ranged);
+        set_core("Magic", data.equipped_magic.empty() ? "NoMagic" : data.equipped_magic);
+    }
+    for (const auto& [name, value] : attrs) {
+        // The tag literal already carries ID="1"; a captured ID attribute
+        // must not duplicate it.
+        if (name == "ID") continue;
+        emit_attr(name.c_str(), value);
+    }
+    os << ">\n";
+
+    // Items — full slots when captured, name-only form otherwise.
+    os << "    <Items>\n";
+    if (!data.items.empty()) {
+        for (const auto& it : data.items) {
+            os << "      <Item Name=\"" << it.name << "\" Equipped=\"" << it.equipped
+               << "\" Count=\"" << it.count << "\" UpgradeLevel=\"" << it.upgrade_level
+               << "\" DeliveryTime=\"" << it.delivery_time << "\" DeliveryUpgradeLevel=\""
+               << it.delivery_upgrade_level << "\" AcquireType=\"" << it.acquire_type
+               << "\" />\n";
+        }
+    } else {
+        for (const auto& item : data.owned_items) {
+            bool equipped = (item == data.equipped_weapon || item == data.equipped_armor ||
+                             item == data.equipped_helmet || item == data.equipped_ranged ||
+                             item == data.equipped_magic);
+            os << "      <Item Name=\"" << item << "\" Equipped=\"" << (equipped ? "1" : "0")
+               << "\" Count=\"1\" />\n";
+        }
+        if (data.owned_items.empty()) {
+            os << "      <Item Name=\"Body\" Equipped=\"1\" Count=\"1\" />\n";
+            os << "      <Item Name=\"Head\" Equipped=\"1\" Count=\"1\" />\n";
+            os << "      <Item Name=\"Fists\" Equipped=\"1\" Count=\"1\" />\n";
+            os << "      <Item Name=\"NoRanged\" Equipped=\"1\" Count=\"1\" />\n";
+            os << "      <Item Name=\"NoMagic\" Equipped=\"1\" Count=\"1\" />\n";
+        }
     }
     os << "    </Items>\n";
 
-    // Battles [ORIGINAL] zone/battle lock state
+    // Battles — verbatim rows when captured (Locked/Hidden/ReplayCount),
+    // zone/battle lock maps otherwise.
     os << "    <Battles>\n";
-    if (!data.battle_unlocked.empty()) {
+    if (!data.battles.empty()) {
+        for (const auto& b : data.battles) {
+            os << "      <Battle Name=\"" << b.name << "\" Locked=\"" << b.locked
+               << "\" Hidden=\"" << b.hidden << "\" ReplayCount=\"" << b.replay_count
+               << "\" />\n";
+        }
+    } else if (!data.battle_unlocked.empty()) {
         for (const auto& [key, unlocked] : data.battle_unlocked) {
             std::string suffix = unlocked ? "" : "_LOCKED";
             os << "      <Battle Name=\"" << key << "|" << suffix << "|\" />\n";
         }
     } else {
-        // Default: zone 1 unlocked, zones 2-6 locked
         os << "      <Battle Name=\"ZONE_1|BOSS_LYNX|\" />\n";
         os << "      <Battle Name=\"ZONE_2|BOSS_HERMIT_LOCKED|\" />\n";
         os << "      <Battle Name=\"ZONE_3|BOSS_BUTCHER_LOCKED|\" />\n";
@@ -508,13 +612,16 @@ void SaveManager::write_xml(std::ostream& os, const SaveData& data) {
     os << "      <Music Value=\"" << data.music_volume << "\" Mute=\"" << (data.music_muted ? "1" : "0") << "\" />\n";
     os << "    </Sounds>\n";
 
-    os << "    <Currencies ForgeMaterial1=\"0\" ForgeMaterial2=\"0\" ForgeMaterial3=\"0\" AscensionTicket=\"0\"/>\n";
+    os << "    <Currencies ForgeMaterial1=\"" << data.currencies.forge_material1
+       << "\" ForgeMaterial2=\"" << data.currencies.forge_material2
+       << "\" ForgeMaterial3=\"" << data.currencies.forge_material3
+       << "\" AscensionTicket=\"" << data.currencies.ascension_ticket << "\"/>\n";
     os << "    <Resistances Resistance_2=\"0\"/>\n";
     os << "  </Warrior>\n";
     os << "</Warriors>\n";
     os << "<Versions>\n";
-    os << "  <Version Value=\"1.9.21\"/>\n";
-    os << "  <DataVersion Value=\"1.9.21.0\"/>\n";
+    os << "  <Version Value=\"" << data.xml_version << "\"/>\n";
+    os << "  <DataVersion Value=\"" << data.data_version << "\"/>\n";
     os << "</Versions>\n";
 }
 
@@ -539,8 +646,20 @@ bool SaveManager::parse_xml(const std::string& xml, SaveData& data) {
     // (The XmlDocument parser wraps everything under a single root, but our
     // XML has multiple root-level elements. We parse it manually.)
 
-    // Parse Warrior attributes from the first <Warrior ...> tag
-    auto warrior_pos = xml.find("<Warrior ");
+    // Parse Warrior attributes from the LAST <Warrior ...> tag. The device
+    // users.xml carries a stub <Warrior ID="1" IsFake="True" /> FIRST and the
+    // real user (FirstName/Money/...) second; the original resolves the real
+    // one. Picking the first match would read ID/IsFake only and drop the
+    // whole save (latent until the device file was captured).
+    size_t warrior_pos = std::string::npos;
+    {
+        size_t scan = 0;
+        size_t found;
+        while ((found = xml.find("<Warrior ", scan)) != std::string::npos) {
+            warrior_pos = found;
+            scan = found + 1;
+        }
+    }
     if (warrior_pos == std::string::npos) {
         std::printf("[save] no <Warrior> element found in XML\n");
         return false;
@@ -562,6 +681,19 @@ bool SaveManager::parse_xml(const std::string& xml, SaveData& data) {
     if (tag_end == std::string::npos) return false;
     std::string warrior_tag = xml.substr(warrior_pos, tag_end - warrior_pos + 1);
 
+    // [Wave 8] Capture the FULL <Warrior> attribute set verbatim, in file
+    // order (all 66 attributes of the device users.xml real Warrior). The
+    // tag name itself is skipped by scanning from the first space AFTER the
+    // '<' (the tag may carry leading whitespace, e.g. the engine's own
+    // two-space-indented writes).
+    data.warrior_attrs.clear();
+    {
+        const size_t lt = warrior_tag.find('<');
+        const size_t first_space = warrior_tag.find(' ', lt);
+        if (first_space != std::string::npos)
+            parse_attrs_into(warrior_tag.substr(first_space + 1), data.warrior_attrs);
+    }
+
     // Player stats [ORIGINAL] from <Warrior> attributes
     data.currency = std::atoi(get_attr(warrior_tag, "Money").c_str());
     data.level = std::atoi(get_attr(warrior_tag, "Level").c_str());
@@ -581,8 +713,9 @@ bool SaveManager::parse_xml(const std::string& xml, SaveData& data) {
     data.equipped_ranged = get_attr(warrior_tag, "Ranged");
     data.equipped_magic = get_attr(warrior_tag, "Magic");
 
-    // Parse <Items> for inventory
+    // Parse <Items> for inventory — full slots, in file order.
     data.owned_items.clear();
+    data.items.clear();
     auto items_start = xml.find("<Items>", warrior_pos);
     if (items_start != std::string::npos) {
         auto items_end = xml.find("</Items>", items_start);
@@ -596,15 +729,27 @@ bool SaveManager::parse_xml(const std::string& xml, SaveData& data) {
                 std::string name = get_attr(item_tag, "Name");
                 if (!name.empty()) {
                     data.owned_items.push_back(name);
+                    ItemEntry e;
+                    e.name = name;
+                    e.equipped = std::atoi(get_attr(item_tag, "Equipped").c_str());
+                    e.count = std::atoi(get_attr(item_tag, "Count").c_str());
+                    e.upgrade_level = std::atoi(get_attr(item_tag, "UpgradeLevel").c_str());
+                    e.delivery_time = std::atoll(get_attr(item_tag, "DeliveryTime").c_str());
+                    e.delivery_upgrade_level =
+                        std::atoi(get_attr(item_tag, "DeliveryUpgradeLevel").c_str());
+                    e.acquire_type = get_attr(item_tag, "AcquireType");
+                    if (e.acquire_type.empty()) e.acquire_type = "Item";
+                    data.items.push_back(std::move(e));
                 }
                 search_pos = item_end + 2;
             }
         }
     }
 
-    // Parse <Battles> for zone/battle lock state
+    // Parse <Battles> for zone/battle lock state — verbatim rows too.
     data.battle_unlocked.clear();
     data.zone_unlocked.clear();
+    data.battles.clear();
     auto battles_start = xml.find("<Battles>", warrior_pos);
     if (battles_start != std::string::npos) {
         auto battles_end = xml.find("</Battles>", battles_start);
@@ -617,6 +762,14 @@ bool SaveManager::parse_xml(const std::string& xml, SaveData& data) {
                 std::string battle_tag = battles_region.substr(search_pos, battle_end - search_pos);
                 std::string name = get_attr(battle_tag, "Name");
                 if (!name.empty()) {
+                    // [Wave 8] Verbatim row (Locked/Hidden/ReplayCount).
+                    BattleEntry b;
+                    b.name = name;
+                    b.locked = std::atoi(get_attr(battle_tag, "Locked").c_str());
+                    b.hidden = std::atoi(get_attr(battle_tag, "Hidden").c_str());
+                    b.replay_count = std::atoi(get_attr(battle_tag, "ReplayCount").c_str());
+                    data.battles.push_back(std::move(b));
+
                     // [ORIGINAL] Format: "ZONE_N|BOSS_NAME|" or "ZONE_N|BOSS_NAME_LOCKED|"
                     // Parse zone and battle from the name
                     auto pipe1 = name.find('|');
@@ -639,6 +792,48 @@ bool SaveManager::parse_xml(const std::string& xml, SaveData& data) {
                     }
                 }
                 search_pos = battle_end + 2;
+            }
+        }
+    }
+
+    // [Wave 8] <Currencies> forge materials + ascension ticket.
+    data.currencies = Currencies{};
+    {
+        auto cur_start = xml.find("<Currencies", warrior_pos);
+        if (cur_start != std::string::npos) {
+            auto cur_end = xml.find('>', cur_start);
+            if (cur_end != std::string::npos) {
+                std::string cur_tag = xml.substr(cur_start, cur_end - cur_start + 1);
+                data.currencies.forge_material1 =
+                    std::atoi(get_attr(cur_tag, "ForgeMaterial1").c_str());
+                data.currencies.forge_material2 =
+                    std::atoi(get_attr(cur_tag, "ForgeMaterial2").c_str());
+                data.currencies.forge_material3 =
+                    std::atoi(get_attr(cur_tag, "ForgeMaterial3").c_str());
+                data.currencies.ascension_ticket =
+                    std::atoi(get_attr(cur_tag, "AscensionTicket").c_str());
+            }
+        }
+    }
+
+    // [Wave 8] <Versions> footer.
+    {
+        auto ver_pos = xml.find("<Version ");
+        if (ver_pos != std::string::npos) {
+            auto ver_end = xml.find('>', ver_pos);
+            if (ver_end != std::string::npos) {
+                std::string ver_tag = xml.substr(ver_pos, ver_end - ver_pos + 1);
+                std::string v = get_attr(ver_tag, "Value");
+                if (!v.empty()) data.xml_version = v;
+            }
+        }
+        auto dver_pos = xml.find("<DataVersion ");
+        if (dver_pos != std::string::npos) {
+            auto dver_end = xml.find('>', dver_pos);
+            if (dver_end != std::string::npos) {
+                std::string dver_tag = xml.substr(dver_pos, dver_end - dver_pos + 1);
+                std::string v = get_attr(dver_tag, "Value");
+                if (!v.empty()) data.data_version = v;
             }
         }
     }
