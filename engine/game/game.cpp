@@ -675,11 +675,15 @@ bool Game::host_load_progress() {
                 completed_levels_.size(), currency_, player_wins_, player_losses_,
                 data.owned_items.size(), tutorial_state_.c_str(), zone_unlocked_.size());
 
-    // [ORIGINAL] Update HUD values from loaded save data. The original game
-    // reads these from usersDefault.xml / user.xml (plan item 7.2).
-    hud_level_ = 1 + player_wins_ / 5;
+    // [H09] HUD values come from the LOADED SAVE (users.xml Level= / Money=)
+    // — the old 1 + wins/5 heuristic and the constants 7/72450/9 were
+    // invented (HARDCODE_AUDIT H09). Gems: users.xml ships no ruby
+    // attribute (Money/PaidMoney/Bonus only, verified in
+    // reverse/data/users.xml) — [HEURISTIC-TODO] stays 0 until a device
+    // pull pins the original ruby source.
+    hud_level_ = data.level;
     hud_gold_ = currency_;
-    hud_gems_ = 0;  // [ORIGINAL] gems not yet tracked in save format
+    hud_gems_ = 0;
 
     return true;
 }

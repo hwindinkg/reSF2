@@ -149,6 +149,49 @@ static void test_h02_weapon_model_from_list() {
                        "H02: the cycled owned weapon loads a real model");
 }
 
+// H09: the top-panel HUD stats must come from the LOADED SAVE (users.xml
+// Level= / Money=), not the invented constants 7 / 72450 / 9
+// (HARDCODE_AUDIT H09, game_clean.hpp:5455). The device users.xml ships
+// Level="2" Money="129"; the engine's save path is assets/user.xml
+// (gitignored, engine-written). RED on HEAD: the HUD showed 7 / 72450.
+static void test_h09_hud_from_save() {
+    std::printf("\n=== H09: HUD stats from the loaded save ===\n");
+    const std::string save_dst = "assets/user.xml";
+    std::ifstream src("reverse/data/users.xml", std::ios::binary);
+    if (!src) {
+        resf2::test::check(false, "H09: device users.xml readable");
+        return;
+    }
+    {
+        std::ofstream dst(save_dst, std::ios::binary | std::ios::trunc);
+        dst << src.rdbuf();
+    }
+
+    resf2::test::HeadlessTestConfig config;
+    config.asset_root = "assets";
+    config.width = 1280;
+    config.height = 720;
+    config.fixed_dt_ms = 16;
+    config.start_scene = "dojo";
+    config.hermetic = false;  // on_init loads the save (assets/user.xml)
+
+    resf2::test::HeadlessTestRunner runner(config);
+    const bool ok = runner.init();
+    std::remove(save_dst.c_str());  // leave no trace in the repo
+    if (!ok) {
+        resf2::test::check(false, "H09: runner init");
+        return;
+    }
+    const int lvl = runner.game().host_get_hud_level();
+    const int gold = runner.game().host_get_hud_gold();
+    std::fprintf(stderr, "  [H09] hud level=%d gold=%d (device save: Level=2 Money=129)\n",
+                 lvl, gold);
+    resf2::test::check_eq(lvl, 2, "H09: HUD level equals the loaded save Level (2)");
+    resf2::test::check_eq(gold, 129, "H09: HUD gold equals the loaded save Money (129)");
+    resf2::test::check(lvl != 7 && gold != 72450,
+                       "H09: HUD no longer shows the invented constants 7/72450");
+}
+
 // H05: the enemy's animations come from his weapon/model — a sword loadout
 // attacks with the sword's moves.xml 1key move (SwordsSlash ->
 // swords_slash.bin), not the hardcoded fists "high_punch"
@@ -260,6 +303,9 @@ int main() {
 
     // ---- H06 ----
     test_h06_enemy_weapon_from_loadout();
+
+    // ---- H09 ----
+    test_h09_hud_from_save();
 
     // ---- H07 ----
     {
