@@ -543,6 +543,12 @@ set_tests_properties(test_soak_wave7b_defects PROPERTIES TIMEOUT 300)
 add_integration_test(test_soak_re3_defects)
 set_tests_properties(test_soak_re3_defects PROPERTIES TIMEOUT 300)
 
+# Soak re-soak-4 (R4a render: the default Armor="Body"/Helm="Head" save must
+# not double-draw the fighter). Probes for R4b (weapon edges + cycle) and
+# R4c (authored battle reach) grow in the follow-up commits.
+add_integration_test(test_soak_re4_defects)
+set_tests_properties(test_soak_re4_defects PROPERTIES TIMEOUT 300)
+
 
 # Soak-fix Wave 7a (P10): moves.xml parser fidelity — the REAL device file
 # (reverse/data/animations/moves.xml, LIVE_GAME_EVIDENCE Q3) parsed by the

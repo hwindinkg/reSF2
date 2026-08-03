@@ -546,6 +546,9 @@ float host_enemy_health_frac() const override;
             ? assets_->helm_model()->nodes.size() : 0;
     }
     int host_get_armor_capsules_drawn() const { return armor_capsules_drawn_; }
+    // [R4] The helm overlay drawn last frame (head.xml re-draw as "helm" is
+    // the naked fighter, not armor — see load_equipment_models).
+    int host_get_helm_capsules_drawn() const { return helm_capsules_drawn_; }
     bool host_ui_texture_loaded(const std::string& name) const {
         auto it = assets_->hud_textures().find(name);
         return it != assets_->hud_textures().end() && it->second != nullptr;
@@ -968,6 +971,9 @@ float host_enemy_health_frac() const override;
     // probe samples exactly the robe's painted area).
     float armor_world_minx_ = 0, armor_world_miny_ = 0;
     float armor_world_maxx_ = 0, armor_world_maxy_ = 0;
+    // [R4] Helm capsules drawn last frame (0 for the default save — the
+    // base head model is the naked fighter, not a helm overlay).
+    int helm_capsules_drawn_ = 0;
 
 void host_reset_round() override;
 
@@ -2809,6 +2815,7 @@ private:
                         ax2 - px * r, ay2 - py * r, ax1 - px * r, ay1 - py * r, helm_col);
                     renderer_->draw_filled_circle_world(ax1, ay1, r, helm_col);
                     renderer_->draw_filled_circle_world(ax2, ay2, r, helm_col);
+                    ++helm_capsules_drawn_;
                 }
             }
         }
@@ -3140,11 +3147,22 @@ private:
     }
     void load_equipment_models() {
         if (!assets_) return;
+        // [R4] The default save equips Armor="Body" Helm="Head" — and those
+        // list.xml items (ShopHide=1, Hidden=1) ARE the naked fighter's own
+        // models (Model="body" -> body.xml, Model="head" -> head.xml). The
+        // armor/helm overlay pass must not re-draw them: the base body/head
+        // already render in render_body_model, so overlaying the same
+        // geometry in the armor tone drew the whole fighter twice — "тело
+        // непойми как, голова вытянута" (re-soak-4) while the enemy (no
+        // armor pass) looked right. Only REAL armor/helm items (e.g.
+        // ARMOR_ROBE -> armor_robe.xml) draw an overlay.
         const std::string armor = equipped_armor_model_file();
-        if (armor.empty()) assets_->armor_model().reset();
+        if (armor.empty() || armor == "body.xml")
+            assets_->armor_model().reset();
         else assets_->load_armor_model(armor, asset_root_);
         const std::string helm = equipped_helm_model_file();
-        if (helm.empty()) assets_->helm_model().reset();
+        if (helm.empty() || helm == "head.xml")
+            assets_->helm_model().reset();
         else assets_->load_helm_model(helm, asset_root_);
     }
 
