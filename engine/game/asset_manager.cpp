@@ -842,9 +842,9 @@ void AssetManager::load_animations(const std::string& asset_root) {
         }
     }
 
-    if (animations_.count("fists1_stance_idle") && !animations_.count("fists_idle")) {
-        animations_["fists_idle"] = animations_["fists1_stance_idle"];
-    }
+    // [H07] No invented aliases: "fists_idle" is NOT a moves.xml name
+    // (HARDCODE_AUDIT I03/H07) — the enemy idle resolves the real
+    // fists1_stance_idle through Game::enemy_idle_anim() instead.
 
     std::printf("  Animations loaded: %zu (from %s)\n", animations_.size(), anim_dir.string().c_str());
 }

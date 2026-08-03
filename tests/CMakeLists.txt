@@ -570,6 +570,16 @@ set_tests_properties(test_soak_re3_defects PROPERTIES TIMEOUT 300)
 add_integration_test(test_soak_re4_defects)
 set_tests_properties(test_soak_re4_defects PROPERTIES TIMEOUT 300)
 
+# ---------------------------------------------------------------------------
+# Hardcode-fidelity wave (HARDCODE_AUDIT.md, commit 2cf966e): the engine must
+# read ASSET FILES, not invent substitutes (weapon model map, enemy anims,
+# HUD stats, projectile data, defense labels). Each HIGH item is a RED-first
+# probe against the REAL device data (reverse/data/list.xml, stages.xml,
+# moves.xml, users.xml, models/*).
+# ---------------------------------------------------------------------------
+add_integration_test(test_hardcode_fidelity)
+set_tests_properties(test_hardcode_fidelity PROPERTIES TIMEOUT 300)
+
 
 # Soak-fix Wave 7a (P10): moves.xml parser fidelity — the REAL device file
 # (reverse/data/animations/moves.xml, LIVE_GAME_EVIDENCE Q3) parsed by the
