@@ -35,6 +35,7 @@
 #include "engine/format/list_parser.hpp"
 #include "engine/audio/audio.hpp"
 #include "save.hpp"
+#include "boot_configs.hpp"
 #include "ui_scale.hpp"
 #include "player.hpp"
 #include "inventory.hpp"
@@ -1021,6 +1022,13 @@ const resf2::format::ListData* host_get_list_data() const override;
 
 
 std::string host_get_current_level() const override;
+
+
+    // [Wave 8] Boot-order probe: loader events in the order they ran
+    // (fidelity test item 3).
+    const std::vector<std::string>& boot_events() const { return boot_events_; }
+
+    const resf2::game::BootConfigs& boot_configs() const { return boot_configs_; }
 
 
     void host_add_win() override;
@@ -3580,6 +3588,9 @@ private:
 
     // ---------- Move definitions (from moves.xml) ----------
     void load_moves() {
+        if (moves_loaded_) return;
+        moves_loaded_ = true;
+        boot_events_.push_back("moves.xml");
         assets_->load_moves(asset_root_);
     }
 
@@ -5616,6 +5627,20 @@ private:
     // saved inventory. Set for scripted runs so a measurement is reproducible
     // on any machine and in any order relative to the tests that write saves.
     bool hermetic_run_ = false;
+    // [Wave 8] Boot-order probe: every loader records its event here in load
+    // order; the fidelity test compares the sequence to the LIVE_BOOT_TRACE
+    // chronology (moves.xml 12.56 -> save 15.82 -> list.xml 15.84 -> stages
+    // 16.8 -> quests 17.67 -> packs 18.36 -> config_cdn 18.37).
+    std::vector<std::string> boot_events_;
+    // Boot-time configs (perks/forge/CharacterProgress/Achievements +
+    // quests/config_cdn) parsed before/after the save, per the original.
+    resf2::game::BootConfigs boot_configs_;
+    // One-shot guards so init_location (runs per location change) records
+    // and re-loads each config exactly once.
+    bool moves_loaded_ = false;
+    bool quests_config_loaded_ = false;
+    bool packs_config_loaded_ = false;
+    bool cdn_config_loaded_ = false;
     // Does the move currently playing leave the model with a "current node"?
     // Only moves that declare an <Align> pivot do; see apply_align().
     bool prev_move_had_align_ = false;
