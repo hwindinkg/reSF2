@@ -563,6 +563,16 @@ set_tests_properties(test_moves_parser_fidelity PROPERTIES TIMEOUT 60)
 add_integration_test(test_screenshot_compare)
 
 # ---------------------------------------------------------------------------
+# Wave 8: golden parser-fidelity suite (tests/integration/test_parser_fidelity.cpp).
+# Every assertion is a value the ORIGINAL engine produces from the REAL device
+# files (reverse/data/users.xml, reverse/data/packs.xml, assets/* authentic
+# tree) per reverse/analysis/LIVE_BOOT_TRACE.md (commit 2d5c955). Runs the
+# headless harness for the boot-order probe, so it links the full stack.
+# ---------------------------------------------------------------------------
+add_integration_test(test_parser_fidelity)
+set_tests_properties(test_parser_fidelity PROPERTIES TIMEOUT 300)
+
+# ---------------------------------------------------------------------------
 # Golden tests — behaviour captured from the ORIGINAL binary via Frida.
 #
 # These encode measured facts about the real game, not assumptions, so a
