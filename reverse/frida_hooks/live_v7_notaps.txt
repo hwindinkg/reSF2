@@ -1,0 +1,31 @@
+[SPAWN] pid=6204
+[   0.34] INIT         instrument loaded
+[   0.52] JAVA         java hooks installed
+[   0.67] JAVA         Activity.onResume: com.nekki.shadowfight.Main
+[   3.50] HOOK         attach phase begin
+[   3.51] HOOK         hooked libc.so!open @ 0xb11df31d
+[   3.51] HOOK         hooked libc.so!openat @ 0xb11df3cd
+[   3.52] HOOK         hooked libc.so!fopen @ 0xb1211209
+[   3.52] HOOK         hooked libc.so!fopen64 @ 0xb1211209
+[   3.52] HOOK         hooked libs3e_android.so!s3eFileOpen @ 0x8fca6934
+[   3.52] HOOK         hooked libs3e_android.so!s3eVideoPlay @ 0x8fcc7e48
+[   3.52] HOOK         hooked libs3e_android.so!s3eVideoIsPlaying @ 0x8fcc7754
+[   3.53] HOOK         hooked libs3e_android.so!s3eVideoStop @ 0x8fcc7770
+[   3.53] HOOK         hooked libs3e_android.so!s3eAudioPlay @ 0x8fc8ad58
+[   3.53] HOOK         hooked libs3e_android.so!s3eAudioStop @ 0x8fc8a52c
+[   3.53] HOOK         hooked libs3e_android.so!s3eSoundChannelPlay @ 0x8fcbb01c
+[   3.53] HOOK         hooked libs3e_android.so!s3eDebugPrint @ 0x8fc9af30
+[   3.53] HOOK         attach phase done
+[   4.56] VFS          assets/localization.xml�gGame.pn(���1������`x����������`����������������������� 5S 1���assets/768/textures/logos/loadingGame.png�oc1���assets/768/textures/logos/loadingGame.png�/>
+[   4.56] FILE         /data/user/0/com.nekki.shadowfight/files/assets/localization.xml��������������������������������������������������������������������������������������������������������������������
+[   4.56] VIDEO        PLAY assets/video/intro.mp4��assets/video/intro.mp3��9DeckStand��right.png���brick1.png��brick2.png��brick3.png��8HitGauge���left_bar_up.png�left_bar_down.png���left_bar_middle.png
+[   4.57] VFS          assets/video/intro.mp4��assets/video/intro.mp3��9DeckStand��right.png���brick1.png��brick2.png��brick3.png��8HitGauge���left_bar_up.png�left_bar_down.png���left_bar_middle.png�line
+[   4.57] AUDIO        STOP
+[   4.57] VIDEO        STOP
+[   4.57] VFS          assets/video/intro.mp4��assets/video/intro.mp3��9DeckStand��right.png���brick1.png��brick2.png��brick3.png��8HitGauge���left_bar_up.png�left_bar_down.png���left_bar_middle.png�line
+[   4.62] FILE         data/app/com.nekki.shadowfight-QVbKIGixV_zuhATNLJ-oBg==/base.apk��������������������@�������������������������������������������������������������������������������@���������������
+[   4.63] FILE         /proc/6204/cmdline��������:�d���������������������������������������������~��~�⟡�⟡tK��[�d��⟡�����⟡�⟡8cg7�d�`$;��K��8cg�(�`�o`����⟡��~���`�ozo���r8�p�S�����(�o������?
+[   4.63] FILE         /proc/6204/cmdline��������:�d���������������������������������������������~��~�⟡�⟡tK��[�d��⟡�����⟡�⟡8cg7�d�`$;��K��8cg�(�`�o`����⟡��~���`�ozo���r8�p�S�����(�o������?
+[   4.63] FILE         /proc/6204/cmdline��������:�d���������������������������������������������~��~�⟡�⟡tK��[�d��⟡�����⟡�⟡8cg7�d�`$;��K��8cg�(�`�o`����⟡��~���`�ozo���r8�p�S�����(�o������?
+[END] window over
+[END] pidof: '6204'

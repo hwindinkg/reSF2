@@ -1,0 +1,48 @@
+[   1.06] [UI] spawned pid=4524
+[   0.37] INIT         instrument loaded
+[   1.72] [UI] resumed
+[   0.54] JAVA         java hooks installed
+[   0.69] JAVA         Activity.onResume: com.nekki.shadowfight.Main
+[   2.52] [UI] shot runnet_t00.0.png saved
+[   3.50] HOOK         attach phase begin
+[   3.51] HOOK         hooked libc.so!open @ 0xb11df31d
+[   3.51] HOOK         hooked libc.so!openat @ 0xb11df3cd
+[   3.51] HOOK         hooked libc.so!fopen @ 0xb1211209
+[   3.52] HOOK         hooked libc.so!fopen64 @ 0xb1211209
+[   3.52] HOOK         hooked libs3e_android.so!s3eFileOpen @ 0x8fca4934
+[   3.52] HOOK         hooked libs3e_android.so!s3eVideoPlay @ 0x8fcc5e48
+[   3.52] HOOK         hooked libs3e_android.so!s3eVideoIsPlaying @ 0x8fcc5754
+[   3.52] HOOK         hooked libs3e_android.so!s3eVideoStop @ 0x8fcc5770
+[   3.53] HOOK         hooked libs3e_android.so!s3eAudioPlay @ 0x8fc88d58
+[   3.53] HOOK         hooked libs3e_android.so!s3eAudioStop @ 0x8fc8852c
+[   3.53] HOOK         hooked libs3e_android.so!s3eSoundChannelPlay @ 0x8fcb901c
+[   3.53] HOOK         hooked libs3e_android.so!s3eDebugPrint @ 0x8fc98f30
+[   3.53] HOOK         attach phase done
+[   4.50] VFS          assets/localization.xml�gGame.pn(���1������`x����������`����������������������� 5S 1���assets/768/textures/logos/loadingGame.png�oc1���assets/768/textures/logos/loadingGame.png�/>)������ures/logos/loadingGame.png��"01��assets/768/textures/logos/loadin access=-1914801000
+[   4.51] FILE         /data/user/0/com.nekki.shadowfight/files/assets/localization.xml������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������
+[   4.51] VIDEO        PLAY assets/video/intro.mp4��assets/video/intro.mp3��9DeckStand��right.png���brick1.png��brick2.png��brick3.png��8HitGauge���left_bar_up.png�left_bar_down.png���left_bar_middle.png�line.png����red_pixel.png���/%�Ӷ������13LotteryScreen�lotteryBtnHit���textures
+[   4.51] VFS          assets/video/intro.mp4��assets/video/intro.mp3��9DeckStand��right.png���brick1.png��brick2.png��brick3.png��8HitGauge���left_bar_up.png�left_bar_down.png���left_bar_middle.png�line.png����red_pixel.png���/%�Ӷ������13LotteryScreen�lotteryBtnHit���textures access=-1882253432
+[   4.51] AUDIO        STOP
+[   4.51] VIDEO        STOP
+[   4.51] VFS          assets/video/intro.mp4��assets/video/intro.mp3��9DeckStand��right.png���brick1.png��brick2.png��brick3.png��8HitGauge���left_bar_up.png�left_bar_down.png���left_bar_middle.png�line.png����red_pixel.png���/%�Ӷ������13LotteryScreen�lotteryBtnHit���textures access=-1882208200
+[   4.54] FILE         data/app/com.nekki.shadowfight-QVbKIGixV_zuhATNLJ-oBg==/base.apk��������������������@�������������������������������������������������������������������������������@�������������������������������������������������������������������������������@�����������
+[   4.55] FILE         /proc/4524/cmdline��������:�d���������������������������������������������~��~�♡�♡tK��[�d��♡�����♡�♡@��7�d�`$;��K��@���(��2�`ͮ��♡��~����2�h�����r8�p�S������(�������?���?���������������������������������������������������������2�
+[   4.55] FILE         /proc/4524/cmdline��������:�d���������������������������������������������~��~�♡�♡tK��[�d��♡�����♡�♡@��7�d�`$;��K��@���(��2�`ͮ��♡��~����2�h�����r8�p�S������(�������?���?���������������������������������������������������������2�
+[   4.55] FILE         /proc/4524/cmdline��������:�d���������������������������������������������~��~�♡�♡tK��[�d��♡�����♡�♡@��7�d�`$;��K��@���(��2�`ͮ��♡��~����2�h�����r8�p�S������(�������?���?���������������������������������������������������������2�
+[   6.59] [UI] shot runnet_t04.0.png saved
+[   6.99] [UI] tap(720,360) skip intro video
+[  11.62] [UI] shot runnet_t08.2.png saved
+[  16.34] [UI] shot runnet_t12.3.png saved
+[  19.98] [UI] shot runnet_t16.6.png saved
+[  23.40] [UI] shot runnet_t20.7.png saved
+[  28.49] [UI] shot runnet_t24.9.png saved
+[  32.91] [UI] shot runnet_t29.2.png saved
+[  36.77] [UI] shot runnet_t33.2.png saved
+[  40.30] [UI] shot runnet_t37.5.png saved
+[  45.42] [UI] shot runnet_t41.8.png saved
+[  49.30] [UI] shot runnet_t46.1.png saved
+[  53.50] [UI] shot runnet_t50.4.png saved
+[  57.84] [UI] shot runnet_t54.6.png saved
+[  62.50] [UI] shot runnet_t58.9.png saved
+[  62.90] [UI] capture window ended
+[  63.05] [UI] pidof: '4524'
