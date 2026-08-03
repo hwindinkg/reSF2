@@ -122,10 +122,18 @@ std::optional<std::string> pick_attack_target(const TacticDef& def,
     return pick(def, candidates, ctx, mem, tables, rng);
 }
 
-// [HEURISTIC-TODO] UseDefense sub-action -> animation: default = action-name
-// placeholders; "Block" is a real moves.xml animation name, "CounterAttack"
-// and "Dodge" are unpinned labels until the P3 golden pins them.
-const char* kDefenseAnimations[3] = {"CounterAttack", "Dodge", "Block"};
+// [H07] UseDefense sub-action -> animation: REAL moves.xml names only
+// (HARDCODE_AUDIT A01: "CounterAttack"/"Dodge" were unpinned labels with no
+// moves.xml entry behind them — verified: zero Counter* moves, only the two
+// DodgeKick ATTACK moves, in the whole dump). "Block" is a real moves.xml
+// template name (Template Name="Block" Template="Hit") and stays the block
+// bin. The dodge reaction resolves the real DodgeKick MOVE (dodge_kick.bin,
+// the only dodge-named animation the catalog ships — [HEURISTIC-TODO] the
+// exact original dodge anim stays unpinned). The counter reaction has NO
+// real move, so it falls back to the real block-reaction HighBlock MOVE
+// (high_block.bin) — [HEURISTIC-TODO] until a golden trace pins the
+// original counter animation.
+const char* kDefenseAnimations[3] = {"HighBlock", "DodgeKick", "Block"};
 
 // [ORIGINAL] R4 (GREEN, VERIFY_R34.md): the ExpectedWait gate weight w comes
 // from the first <ExpectedWait> record with an empty name (default record) or
@@ -376,8 +384,10 @@ std::optional<TacticDecision> stage_table_attack(const TacticDef& def,
 
 // [ORIGINAL] "DodgeMissiles: %s / %.4f" @ 0x8F798144 — the standalone
 // DodgeMissilesChance rolls; on fire the fighter dodges.
-// [HEURISTIC-TODO] the dodge animation is unpinned; default = the "Dodge"
-// action label (no such moves.xml animation name) until the P3 golden pins it.
+// [HEURISTIC-TODO] the exact dodge animation is unpinned; the engine emits
+// the REAL DodgeKick move name (dodge_kick.bin, the only dodge-named
+// animation in the catalog) instead of the old "Dodge" label that matches
+// no moves.xml entry (HARDCODE_AUDIT A01).
 std::optional<TacticDecision> stage_dodge_missiles(const TacticDef& def,
                                                    const TacticContext& ctx,
                                                    TacticMemory& mem,

@@ -438,8 +438,8 @@ int main() {
         DecisionTrace t2;
         const TacticDecision d2 = decide(*mis, default_ctx(), mem2, tables,
                                          RngSource(kRollZero), t2);
-        CHECK(d2.stage == DecisionStage::kDodgeMissiles && d2.animation == "Dodge",
-              "DodgeMissilesChance fires -> dodge action");
+        CHECK(d2.stage == DecisionStage::kDodgeMissiles && d2.animation == "DodgeKick",
+              "DodgeMissilesChance fires -> dodge action (real DodgeKick move)");
 
         const TacticDef* cau = s.tactic("CautiousOnly");
         TacticMemory mem3;
@@ -856,8 +856,8 @@ int main() {
         DecisionTrace t3;
         const TacticDecision d3 = decide(*dod, default_ctx(), m3, tables,
                                          RngSource(kRollZero), t3);
-        CHECK(d3.stage == DecisionStage::kDodgeMissiles && d3.animation == "Dodge",
-              "fresh window: stage-4 dodge fires");
+        CHECK(d3.stage == DecisionStage::kDodgeMissiles && d3.animation == "DodgeKick",
+              "fresh window: stage-4 dodge fires (real DodgeKick move)");
         CHECK(m3.enemy_reaction_frames >= 30 && m3.enemy_reaction_frames <= 60,
               "dodge opens the EnemyResponseDelay window");
 
