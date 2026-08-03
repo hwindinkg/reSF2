@@ -311,9 +311,11 @@ struct GlfwPlatform::Impl {
     static void cursor_pos_callback(GLFWwindow* w, double x, double y) {
         Impl* self = static_cast<Impl*>(glfwGetWindowUserPointer(w));
         if (!self) return;
-        // Update the first pressed pointer
+        // Update the first pressed pointer — ANY button id. The old
+        // `p.id == 0` filter froze right/middle-button drags at the press
+        // position, while TestPlatform's inject_pointer_move tracks any id.
         for (auto& p : self->input.pointers) {
-            if (p.id == 0 && p.pressed) {
+            if (p.pressed) {
                 p.x = static_cast<float>(x);
                 p.y = static_cast<float>(y);
                 return;
