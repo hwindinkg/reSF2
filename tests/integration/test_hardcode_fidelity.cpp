@@ -103,6 +103,83 @@ static void test_h06_enemy_weapon_from_loadout() {
     }
 }
 
+// H05: the enemy's animations come from his weapon/model — a sword loadout
+// attacks with the sword's moves.xml 1key move (SwordsSlash ->
+// swords_slash.bin), not the hardcoded fists "high_punch"
+// (HARDCODE_AUDIT H05, game.cpp:1980/2154/2166). RED on HEAD: the attack
+// resolver did not exist and the executor played high_punch for every
+// enemy.
+static void test_h05_enemy_anims_from_weapon() {
+    std::printf("\n=== H05: enemy anims from the loadout weapon ===\n");
+    resf2::test::HeadlessTestConfig config;
+    config.asset_root = "assets";
+    config.width = 1280;
+    config.height = 720;
+    config.fixed_dt_ms = 16;
+    config.start_scene = "battle";
+    config.hermetic = true;
+
+    // Sword loadout: the resolver must produce the sword's attack anim.
+    {
+        resf2::test::HeadlessTestRunner runner(config);
+        if (!init_battle_runner(runner, "Man_Swords")) {
+            resf2::test::check(false, "H05: sword runner init");
+            return;
+        }
+        const std::string attack = runner.game().host_get_enemy_attack_anim();
+        const std::string idle = runner.game().host_get_enemy_idle_anim();
+        std::fprintf(stderr, "  [H05] sword enemy: attack='%s' idle='%s'\n",
+                     attack.c_str(), idle.c_str());
+        resf2::test::check_eq(attack, std::string("swords_slash"),
+                              "H05: the sword loadout's attack anim is swords_slash");
+        resf2::test::check(idle.find("fists") == std::string::npos,
+                           "H05: the sword loadout's idle is NOT a fists anim");
+        resf2::test::check_eq(idle, std::string("swords_stance_idle"),
+                              "H05: the sword loadout's idle is swords_stance_idle");
+
+        // End-to-end: once the enemy attacks, his animation must be the
+        // sword move, never the hardcoded fists "high_punch".
+        runner.run_frames(170);  // battle intro (stance_2)
+        runner.tap_key(resf2::platform::Key::D, 2);
+        runner.run_frames(10);
+        std::string attack_anim_seen;
+        const int kMaxFrames = 1200;  // 20 s — the AI attacks periodically
+        for (int i = 0; i < kMaxFrames; ++i) {
+            runner.run_frames(1);
+            if (runner.game().host_get_enemy_attacking()) {
+                attack_anim_seen = runner.game().host_get_enemy_anim();
+                break;
+            }
+        }
+        std::fprintf(stderr, "  [H05] sword enemy attack anim played: '%s'\n",
+                     attack_anim_seen.c_str());
+        resf2::test::check(!attack_anim_seen.empty(),
+                           "H05: the sword enemy attacked within the window");
+        resf2::test::check(attack_anim_seen != "high_punch" &&
+                               attack_anim_seen.find("fists") == std::string::npos,
+                           "H05: the sword enemy plays a sword anim, not fists anims");
+        resf2::test::check_eq(attack_anim_seen, std::string("swords_slash"),
+                              "H05: the played attack anim is the real swords_slash");
+    }
+
+    // Fists loadout: the resolver keeps the real fist attack (high_punch).
+    {
+        resf2::test::HeadlessTestRunner runner(config);
+        if (!init_battle_runner(runner, "Dojo_Disciple")) {
+            resf2::test::check(false, "H05: fists runner init");
+            return;
+        }
+        const std::string attack = runner.game().host_get_enemy_attack_anim();
+        const std::string idle = runner.game().host_get_enemy_idle_anim();
+        std::fprintf(stderr, "  [H05] fists enemy: attack='%s' idle='%s'\n",
+                     attack.c_str(), idle.c_str());
+        resf2::test::check_eq(attack, std::string("high_punch"),
+                              "H05: the fists loadout keeps high_punch (real)");
+        resf2::test::check_eq(idle, std::string("fists1_stance_idle"),
+                              "H05: the fists loadout idles on fists1_stance_idle");
+    }
+}
+
 // H07: the invented "fists_idle" alias (HARDCODE_AUDIT I03/H07,
 // asset_manager.cpp:845) is gone from the catalog, and the enemy idle
 // resolves the REAL catalog stance idle (fists1_stance_idle.bin is real;
@@ -128,6 +205,9 @@ static void test_h07_idle_alias(const resf2::test::HeadlessTestRunner& runner) {
 int main() {
     std::printf("=== Hardcode-Fidelity Wave (HARDCODE_AUDIT HIGH items) ===\n");
     std::fflush(stdout);
+
+    // ---- H05 ----
+    test_h05_enemy_anims_from_weapon();
 
     // ---- H06 ----
     test_h06_enemy_weapon_from_loadout();
