@@ -466,22 +466,26 @@ set_tests_properties(test_full_battle PROPERTIES TIMEOUT 720)
 # the DecisionTrace stage rows and enemy_ai_state_ is the adapter's state int.
 add_integration_test(test_enemy_ai_pipeline)
 # Soak A6: every section pre-rolls the 156-frame intro stance before tapping
-# input to break the hold — raise the ceiling for the longer scan windows.
-set_tests_properties(test_enemy_ai_pipeline PROPERTIES TIMEOUT 240)
+# input to break the hold �?" raise the ceiling for the longer scan windows.
+# [R4b] 240 was marginal under parallel ctest load (measured ~130-200 s
+# direct on 2026-08-03; timed out at 240 under -j8).
+set_tests_properties(test_enemy_ai_pipeline PROPERTIES TIMEOUT 480)
 
 # Soak-fix Wave 1: behavioral battle tests for the SOAK_TRIAGE.md §1 AI/combat
 # defects (A1 intro gate, A2 enemy start stance, A6 stance hold).
 add_integration_test(test_soak_ai_defects)
-set_tests_properties(test_soak_ai_defects PROPERTIES TIMEOUT 120)
+set_tests_properties(test_soak_ai_defects PROPERTIES TIMEOUT 240)
 
 # Soak-fix Wave 1 (A3/A4/A5): the per-decision Wait-pacing probes — the
 # displayed decision holds (A4), the enemy closes ground via held steps (A3),
 # and approach damage is bounded by paced attacks (A5). RED on HEAD
 # (escalation A3A4A5_RED_OUTPUT.txt), GREEN after the executor hold. Three
-# battle scenarios (~1500 frames each); 240 like test_enemy_ai_pipeline so a
+# battle scenarios (~1500 frames each); 480 like test_enemy_ai_pipeline so a
 # parallel full-suite run (test_full_battle ~350 s) does not starve it.
+# [R4b] 240 was marginal: the pacing suite measures ~300 s on this machine
+# (measured 2026-08-03), timing out under ctest's overhead.
 add_integration_test(test_soak_ai_pacing)
-set_tests_properties(test_soak_ai_pacing PROPERTIES TIMEOUT 240)
+set_tests_properties(test_soak_ai_pacing PROPERTIES TIMEOUT 480)
 
 
 # Soak-fix Wave 2: behavioral movement/input tests for the SOAK_TRIAGE.md §2
@@ -524,9 +528,10 @@ set_tests_properties(test_soak_audio_defects PROPERTIES TIMEOUT 300)
 # Soak-fix Wave 7a: behavioral parser/combat tests for the SOAK_TRIAGE.md §8
 # defects (P1 weapon model filename, P2 battle hit target = enemy fighter,
 # P3 armor/helm model attach, P7 held-key duck auto-repeat). Four scenes;
-# 300 like the wave-5 suite.
+# 300 like the wave-5 suite. [R4b] 300 was marginal under parallel ctest
+# load (measured ~160-270 s direct on 2026-08-03).
 add_integration_test(test_soak_parser_defects)
-set_tests_properties(test_soak_parser_defects PROPERTIES TIMEOUT 300)
+set_tests_properties(test_soak_parser_defects PROPERTIES TIMEOUT 600)
 
 # Soak-fix Wave 7b: behavioral UI/quest tests for the SOAK_TRIAGE.md §8
 # defects (P4 HUD names i18n, P5 fight HUD layout, P6 defeat retry flow,
