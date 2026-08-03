@@ -466,6 +466,11 @@ float host_enemy_health_frac() const override;
     std::string host_get_weapon_tactic_model_file(const std::string& subtype) const {
         return weapon_tactic_to_model_file(subtype);
     }
+    // H09: the top-panel HUD values the engine actually renders (synced
+    // from the loaded save in host_load_progress).
+    int host_get_hud_level() const { return hud_level_; }
+    int host_get_hud_gold() const { return hud_gold_; }
+    int host_get_hud_gems() const { return hud_gems_; }
     // H06: the enemy weapon model file resolved from the stages.xml loadout
     // (list.xml Model + ".xml"); empty = unarmed loadout.
     const std::string& host_get_enemy_weapon_file() const {
@@ -5741,14 +5746,15 @@ private:
     float cam_x_ = 0, cam_y_ = 0;
     // Debug world overlay, toggled with F1 or started with --debug-world.
     bool debug_world_ = false;
-    // [HEURISTIC-TODO] Placeholder player stats shown in the top panel. The
-    // original reads these from the save (usersDefault.xml / userSettings.xml,
-    // plan item 7.2); until that is wired they are constants rather than the
-    // string literals "72 450" / "5 / 5" / "LVL 7" that used to be baked into
-    // the draw calls.
-    int hud_level_ = 7;
-    int hud_gold_ = 72450;
-    int hud_gems_ = 9;
+    // [H09] HUD stats come from the LOADED SAVE (users.xml Level= / Money=,
+    // synced in host_load_progress); the old constants 7 / 72450 / 9 were
+    // invented (HARDCODE_AUDIT H09). Gems: the users.xml schema ships NO
+    // ruby attribute (Money/PaidMoney/Bonus only, verified in
+    // reverse/data/users.xml) — [HEURISTIC-TODO] stays 0 until a device
+    // pull pins the original ruby source.
+    int hud_level_ = 1;
+    int hud_gold_ = 0;
+    int hud_gems_ = 0;
     // <Word Title="KEY">text</Word> pairs from assets/localizations/<lang>.xml.
     std::unordered_map<std::string, std::string> localization_;
     // [ORIGINAL] Floor plane of the current location: -Height/2 + Floor
