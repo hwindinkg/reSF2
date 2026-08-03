@@ -14,6 +14,8 @@
 
 #include "glfw_platform.hpp"
 
+#include "input_edges.hpp"
+
 #include <GLFW/glfw3.h>
 #include <array>
 #include <chrono>
@@ -248,7 +250,6 @@ struct GlfwPlatform::Impl {
     // just_released) we need the previous frame's down-state per key.
     std::array<bool, kMaxKeys> prev_keys_down_{};
 #endif
-    std::array<bool, kMaxKeys> glfw_key_consumed_{};  // prevents spurious GLFW_PRESS re-trigger
 
     static void key_callback(GLFWwindow* w, int key, int scancode, int action, int mods) {
         Impl* self = static_cast<Impl*>(glfwGetWindowUserPointer(w));
@@ -451,41 +452,33 @@ bool GlfwPlatform::poll_events() {
     // is immune to GLFW's event-queue glitches.
     //
     // We iterate over every key index in our Key enum (0..AltRight), map
-    // it to a GLFW code, then to a Win32 VK code, and poll the OS. Edge
-    // transitions are computed against prev_keys_down_ so that
-    // keys_just_pressed / keys_just_released remain accurate.
+    // it to a GLFW code, then to a Win32 VK code, and poll the OS. The
+    // per-key edge transitions (keys_just_pressed / keys_just_released)
+    // are computed by the shared poll_key_frame() contract against
+    // prev_keys_down_ — the same function the input-contract test
+    // (tests/test_input_contract.cpp) drives, so the real input path and
+    // the TestPlatform injection path share one edge-decision function.
+    //
+    // LIMITATION (pinned by the contract test, INPUT_PATH_AUDIT.md DIV-1):
+    // a tap whose press+release both land between two polls produces NO
+    // edges — the OS state is sampled once per frame, and the GLFW key
+    // callbacks (which could catch fast taps) are the spurious-event
+    // source this bypass exists to ignore, so they are disabled below.
+    // There is deliberately NO event-based fallback: re-enabling GLFW
+    // PRESS events would re-introduce the flicker's spurious just_pressed
+    // edges (P7 held-duck would re-fire, dialogue would advance on held
+    // keys, J/U would cycle on held keys).
+    std::array<bool, kMaxKeys> os_down{};
     const int kMaxKeyIdx = static_cast<int>(Key::AltRight) + 1;
     for (int i = 0; i < kMaxKeyIdx; ++i) {
         int glfw_key = key_index_to_glfw(i);
-        if (glfw_key < 0) {
-            impl_->input.keys_down[i] = false;
-            impl_->prev_keys_down_[i] = false;
-            continue;
-        }
+        if (glfw_key < 0) continue;  // not in the Key enum — stays false
         int vk = glfw_key_to_vk(glfw_key);
-        if (vk < 0) {
-            // Key is in our enum but has no Win32 VK mapping — leave
-            // its state untouched (treated as not down).
-            impl_->input.keys_down[i] = false;
-            impl_->prev_keys_down_[i] = false;
-            continue;
-        }
+        if (vk < 0) continue;        // no Win32 VK mapping — stays false
         SHORT state = GetAsyncKeyState(vk);
-        bool down = (state & 0x8000) != 0;
-        bool was_down = impl_->prev_keys_down_[i];
-
-        // Only set keys_just_pressed if GLFW callback didn't already set it.
-        // GetAsyncKeyState can miss fast taps, but GLFW callback catches them.
-        if (down && !was_down && !impl_->input.keys_just_pressed[i]) {
-            impl_->input.keys_just_pressed[i] = true;
-            impl_->glfw_key_consumed_[i] = true;  // prevent GLFW re-trigger
-        } else if (!down && was_down) {
-            impl_->input.keys_just_released[i] = true;
-            impl_->glfw_key_consumed_[i] = false;  // reset for next press
-        }
-        impl_->input.keys_down[i] = down;
-        impl_->prev_keys_down_[i] = down;
+        os_down[i] = (state & 0x8000) != 0;
     }
+    poll_key_frame(impl_->input, impl_->prev_keys_down_, os_down);
 #else
     // Non-Windows path: rely on the GLFW key callback (registered in
     // init()) for keys_down / keys_just_pressed / keys_just_released.
