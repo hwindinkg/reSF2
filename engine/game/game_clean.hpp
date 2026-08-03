@@ -550,6 +550,90 @@ float host_enemy_health_frac() const override;
         return it != assets_->hud_textures().end() && it->second != nullptr;
     }
 
+    // ---- Soak re-soak-3 probes (R1 render, R2 combat) ----
+    // Camera framing + player hand/weapon geometry for the R1 probes; the
+    // weapon resolver below is the SAME code path the render uses, so the
+    // tests measure exactly what the screen draws.
+    float host_get_zoom() const { return zoom_; }
+    float host_get_camera_x() const { return cam_x_; }
+    float host_get_camera_y() const { return cam_y_; }
+    float host_get_floor_world_y() const { return floor_world_y_; }
+    // [R1] The armor render color the body pass paints with (updated each
+    // frame in render_body_model). Must be silhouette-dark — the re-soak-3
+    // "тело жёлтого цвета" was the khaki robe fill.
+    void host_get_armor_render_color(std::uint8_t& r, std::uint8_t& g,
+                                     std::uint8_t& b) const {
+        r = armor_render_color_.r;
+        g = armor_render_color_.g;
+        b = armor_render_color_.b;
+    }
+    // [R1] World-space bbox the armor capsules painted last frame.
+    void host_get_armor_world_extents(float& minx, float& miny,
+                                      float& maxx, float& maxy) const {
+        minx = armor_world_minx_; miny = armor_world_miny_;
+        maxx = armor_world_maxx_; maxy = armor_world_maxy_;
+    }
+    std::size_t host_get_player_weapon_triangle_count() const {
+        return assets_ && assets_->weapon_model()
+            ? assets_->weapon_model()->triangles.size() : 0;
+    }
+    // World position of the hand the weapon attaches to: the skeleton's
+    // Weapon-Node2_1 node (pinned to NWrist_1 by the zero-length Edge129 in
+    // skeleton.xml — the dojo placement law), resolved like the render.
+    void host_get_player_hand_world(float& x, float& y) const {
+        const auto pit = assets_->skeleton_nodes().find("NPivot");
+        const float pivot_local_y = pit != assets_->skeleton_nodes().end()
+                                        ? pit->second.y : stance_npivot_y_;
+        const float world_cx = player_pos_x_;
+        const float world_cy = player_pos_y_ + y_adjust_smoothed_;
+        if (assets_->weapon_model() &&
+            resolve_player_weapon_vertex(
+                *assets_->weapon_model(), "Weapon-Node2_1", world_cx, world_cy,
+                facing_right_ ? 1.0f : -1.0f, pivot_local_y, true, x, y))
+            return;
+        // Fallback: the wrist node resolved like the render (animated
+        // first, then skeleton rest).
+        auto ait = anim_node_pos_.find("NWrist_1");
+        if (ait != anim_node_pos_.end()) {
+            x = world_cx + ait->second.first * (facing_right_ ? 1.0f : -1.0f);
+            y = floor_world_y_ + (ait->second.second +
+                anim_player_.anim_npivot_bin_y()) + gameplay_y_offset_;
+            return;
+        }
+        auto sit = assets_->skeleton_nodes().find("NWrist_1");
+        if (sit != assets_->skeleton_nodes().end()) {
+            x = world_cx + (facing_right_ ? sit->second.x : -sit->second.x);
+            y = world_cy + (sit->second.y - pivot_local_y);
+            return;
+        }
+        x = world_cx; y = world_cy;
+    }
+    // World-space centroid of weapon triangle `idx` — exactly how the
+    // render draws it.
+    bool host_get_player_weapon_triangle_world(int idx, float& cx, float& cy) const {
+        if (!assets_ || !assets_->weapon_model() ||
+            idx < 0 || idx >= (int)assets_->weapon_model()->triangles.size())
+            return false;
+        const auto& wm = *assets_->weapon_model();
+        const auto& t = wm.triangles[idx];
+        const auto pit = assets_->skeleton_nodes().find("NPivot");
+        const float pivot_local_y = pit != assets_->skeleton_nodes().end()
+                                        ? pit->second.y : stance_npivot_y_;
+        const float world_cx = player_pos_x_;
+        const float world_cy = player_pos_y_ + y_adjust_smoothed_;
+        const float dir = facing_right_ ? 1.0f : -1.0f;
+        float ax, ay, bx, by, dx, dy;
+        if (!resolve_player_weapon_vertex(wm, t.n1, world_cx, world_cy, dir,
+                                          pivot_local_y, true, ax, ay) ||
+            !resolve_player_weapon_vertex(wm, t.n2, world_cx, world_cy, dir,
+                                          pivot_local_y, true, bx, by) ||
+            !resolve_player_weapon_vertex(wm, t.n3, world_cx, world_cy, dir,
+                                          pivot_local_y, true, dx, dy))
+            return false;
+        cx = (ax + bx + dx) / 3.0f;
+        cy = (ay + by + dy) / 3.0f;
+        return true;
+    }
     // ---- Soak-fix Wave 7b probes (P4-P6, P8, P9, P11, P12) ----
     // HUD/quest/dialogue/shop access for test_soak_wave7b_defects.cpp.
     // Layout accessors are the single source the renderers refactor onto,
@@ -802,23 +886,26 @@ float host_enemy_health_frac() const override;
             ++shop_preview_geom_.body_triangles;
         }
         // The equipped weapon (P1 model) at the hand, same placement law as
-        // the dojo render: nodes are hand-local, offset from the body centre.
+        // the dojo render: the MacroNode LCC resolver over the skeleton's
+        // Weapon-Node* pins (rest pose here — the preview has no anim).
+        // [R1] The old draw used the authored rest coords at a fixed
+        // +30/+10 offset at 0.3x — the knife floated above the head.
         if (assets_->weapon_model() && !assets_->weapon_model()->triangles.empty()) {
-            const ren::Color4B wcol{200, 170, 100, 255};
+            const ren::Color4B wcol{150, 154, 162, 255};
             auto& wm = *assets_->weapon_model();
             for (const auto& t : wm.triangles) {
-                auto i1 = wm.nodes.find(t.n1);
-                auto i2 = wm.nodes.find(t.n2);
-                auto i3 = wm.nodes.find(t.n3);
-                if (i1 == wm.nodes.end() || i2 == wm.nodes.end() ||
-                    i3 == wm.nodes.end()) continue;
-                auto [ax, ay] = to_s(30.0f + i1->second.x * 0.3f,
-                                     10.0f + i1->second.y * 0.3f);
-                auto [bx, by] = to_s(30.0f + i2->second.x * 0.3f,
-                                     10.0f + i2->second.y * 0.3f);
-                auto [cx, cy_] = to_s(30.0f + i3->second.x * 0.3f,
-                                      10.0f + i3->second.y * 0.3f);
-                renderer_->draw_filled_triangle_screen(ax, ay, bx, by, cx, cy_, wcol);
+                float ax, ay, bx, by, cx, cy;
+                if (!resolve_player_weapon_vertex(wm, t.n1, 0.0f, 0.0f,
+                        1.0f, pivot_local_y, false, ax, ay) ||
+                    !resolve_player_weapon_vertex(wm, t.n2, 0.0f, 0.0f,
+                        1.0f, pivot_local_y, false, bx, by) ||
+                    !resolve_player_weapon_vertex(wm, t.n3, 0.0f, 0.0f,
+                        1.0f, pivot_local_y, false, cx, cy))
+                    continue;
+                auto [sx0, sy0] = to_s(ax, ay);
+                auto [sx1, sy1] = to_s(bx, by);
+                auto [sx2, sy2] = to_s(cx, cy);
+                renderer_->draw_filled_triangle_screen(sx0, sy0, sx1, sy1, sx2, sy2, wcol);
                 ++shop_preview_geom_.weapon_triangles;
             }
         }
@@ -859,6 +946,12 @@ float host_enemy_health_frac() const override;
     void host_run_tutorial_check() { check_tutorial(); }
     bool host_get_show_enemy() const { return show_enemy_; }
     ShopPreviewGeometry shop_preview_geom_;
+    // [R1] Last armor render color (probe seam for the body-color test).
+    ren::Color4B armor_render_color_{0, 0, 0, 255};
+    // [R1] World extents of the armor capsules as rendered last frame (the
+    // probe samples exactly the robe's painted area).
+    float armor_world_minx_ = 0, armor_world_miny_ = 0;
+    float armor_world_maxx_ = 0, armor_world_maxy_ = 0;
 
 void host_reset_round() override;
 
@@ -1119,36 +1212,57 @@ void host_render_scene();
 
         // Render the enemy's weapon at the hand. [U1] The model now carries
         // real geometry (MacroNodes + Triangles); the old code drew a fixed
-        // yellow capsule whenever the model pointer existed — with 0 parsed
+        // yellow capsule whenever the model pointer existed -- with 0 parsed
         // nodes that was the "yellow placeholder" the soak saw. When the
         // model has geometry, render the mesh; when it has none, draw
         // NOTHING (an empty model must not fake a weapon).
+        // [R1] Same vertex law as the player's weapon: the triangles
+        // reference the model's own MacroNodes, which compute their
+        // position from the skeleton's Weapon-Node* pins at the hand
+        // (Edge130 pins Weapon-Node2_2 to NWrist_2). The old code looked
+        // the vertices up in the plain node map (empty) and drew the
+        // authored rest coords at a hand+30/-10 offset -- the weapon
+        // floated far from the fighter. Steel tone, not yellow.
         if (assets_->enemy_weapon_model() &&
             !assets_->enemy_weapon_model()->triangles.empty()) {
-            ren::Color4B wcol{180, 155, 90, 255};
+            ren::Color4B wcol{150, 154, 162, 255};
             if (enemy_hit_flash_ > 0) wcol = ren::Color4B{255, 255, 220, 255};
-            float hx = 0, hy = 0;
-            if (resolve("NHand_1", hx, hy) || resolve("NWrist_2", hx, hy) || resolve("NKnuckles_2", hx, hy)) {
-                const float dir = enemy_facing_right_ ? 1.0f : -1.0f;
-                const float ox = hx + dir * 30.0f, oy = hy - 10.0f;
-                // [HEURISTIC-TODO] Weapon model units map 1:1 to world px.
-                // The original's weapon placement relative to the hand is not
-                // reversed; 1:1 keeps the knuckles (span ~20 units) sized
-                // like the old placeholder capsule.
-                const float scale = 1.0f;
-                auto& wm = *assets_->enemy_weapon_model();
-                for (const auto& t : wm.triangles) {
-                    auto i1 = wm.nodes.find(t.n1);
-                    auto i2 = wm.nodes.find(t.n2);
-                    auto i3 = wm.nodes.find(t.n3);
-                    if (i1 == wm.nodes.end() || i2 == wm.nodes.end() || i3 == wm.nodes.end())
-                        continue;
-                    renderer_->draw_filled_triangle_world(
-                        ox + dir * i1->second.x * scale, oy + i1->second.y * scale,
-                        ox + dir * i2->second.x * scale, oy + i2->second.y * scale,
-                        ox + dir * i3->second.x * scale, oy + i3->second.y * scale,
-                        wcol);
+            const float dir = enemy_facing_right_ ? 1.0f : -1.0f;
+            auto& wm = *assets_->enemy_weapon_model();
+            // World-space resolver for the ENEMY's weapon: MacroNode LCC
+            // over children, authored node fallback (enemy rest transform),
+            // else the enemy node resolver (animated/skeleton) above.
+            std::function<bool(const std::string&, float&, float&)> wresolve =
+                [&](const std::string& name, float& wx, float& wy) -> bool {
+                auto mit = wm.macro_nodes.find(name);
+                if (mit != wm.macro_nodes.end()) {
+                    float sum = 0.0f, ax = 0.0f, ay = 0.0f;
+                    for (int i = 0; i < 4; ++i) {
+                        if (mit->second.children[i].empty()) continue;
+                        float cx, cy;
+                        if (!wresolve(mit->second.children[i], cx, cy)) continue;
+                        ax += cx * mit->second.lcc[i];
+                        ay += cy * mit->second.lcc[i];
+                        sum += mit->second.lcc[i];
+                    }
+                    if (std::fabs(sum) > 1e-6f) { wx = ax / sum; wy = ay / sum; return true; }
+                    return false;
                 }
+                auto nit = wm.nodes.find(name);
+                if (nit != wm.nodes.end()) {
+                    wx = enemy_pos_x_ + dir * nit->second.x;
+                    wy = (enemy_pos_y_ + enemy_y_adjust_) +
+                         (nit->second.y - npivot_rest_y);
+                    return true;
+                }
+                return resolve(name, wx, wy);
+            };
+            for (const auto& t : wm.triangles) {
+                float ax, ay, bx, by, cx, cy;
+                if (!wresolve(t.n1, ax, ay) || !wresolve(t.n2, bx, by) ||
+                    !wresolve(t.n3, cx, cy))
+                    continue;
+                renderer_->draw_filled_triangle_world(ax, ay, bx, by, cx, cy, wcol);
             }
         }
         // Render skeleton edges with Radius (EHead, ENeck)
@@ -1848,6 +1962,67 @@ private:
         return {world_cx, world_cy};
     }
 
+    // [R1] Resolve a weapon-model triangle vertex to world space. Weapon
+    // figures reference the model's OWN MacroNodes (weapon_knives.xml ships
+    // ZERO plain nodes); a MacroNode's position is the LCC-weighted sum of
+    // its Weapon-Node* children, which live in the SKELETON — skeleton.xml
+    // pins Weapon-Node2_1 to NWrist_1 with the zero-length Edge129 (the
+    // dojo placement law, LIVE_GAME_EVIDENCE Q1/Q2: the weapon rides the
+    // skeleton's weapon nodes at the hand). The old render looked the
+    // vertices up in the plain node map (always empty for knives) and drew
+    // the authored rest coords at a hand-fitted offset — the re-soak-3
+    // "оружие не отображается / далеко от персонажа" report.
+    // `use_anim` selects the animated world transform (dojo/battle render —
+    // the .bin animations animate the Weapon-Node* pins, so the knife
+    // tracks the hand); the shop preview (rest pose) passes false.
+    bool resolve_player_weapon_vertex(const resf2::game::BodyModel& wm,
+                                      const std::string& name,
+                                      float world_cx, float world_cy, float dir,
+                                      float pivot_local_y, bool use_anim,
+                                      float& wx, float& wy) const {
+        auto mit = wm.macro_nodes.find(name);
+        if (mit != wm.macro_nodes.end()) {
+            float sum = 0.0f, ax = 0.0f, ay = 0.0f;
+            for (int i = 0; i < 4; ++i) {
+                if (mit->second.children[i].empty()) continue;
+                float cx, cy;
+                if (!resolve_player_weapon_vertex(wm, mit->second.children[i],
+                        world_cx, world_cy, dir, pivot_local_y, use_anim,
+                        cx, cy))
+                    continue;
+                ax += cx * mit->second.lcc[i];
+                ay += cy * mit->second.lcc[i];
+                sum += mit->second.lcc[i];
+            }
+            if (std::fabs(sum) > 1e-6f) { wx = ax / sum; wy = ay / sum; return true; }
+            return false;
+        }
+        auto nit = wm.nodes.find(name);
+        if (nit != wm.nodes.end()) {
+            // Authored model-space vertex (plain nodes only — macro names
+            // never reach here): weapon-local, rest-pose transform.
+            wx = world_cx + dir * nit->second.x;
+            wy = world_cy + nit->second.y - pivot_local_y;
+            return true;
+        }
+        if (use_anim) {
+            auto ait = anim_node_pos_.find(name);
+            if (ait != anim_node_pos_.end()) {
+                wx = world_cx + ait->second.first * dir;
+                wy = floor_world_y_ + (ait->second.second +
+                     anim_player_.anim_npivot_bin_y()) + gameplay_y_offset_;
+                return true;
+            }
+        }
+        auto sit = assets_->skeleton_nodes().find(name);
+        if (sit != assets_->skeleton_nodes().end()) {
+            wx = world_cx + dir * sit->second.x;
+            wy = world_cy + (sit->second.y - pivot_local_y);
+            return true;
+        }
+        return false;
+    }
+
     // ---------- Debug world overlay (F1 / --debug-world) ----------
     //
     // Draws the params.xml-derived geometry in world space so that every
@@ -2530,9 +2705,40 @@ private:
         // the armor tracks the animated body. The cloth node/edge mesh is
         // not simulated (no cloth physics), so only the capsules are drawn.
         if (assets_->armor_model()) {
-            // Warm leather/brown tint, distinct from the body silhouette.
-            ren::Color4B armor_col{128, 96, 62, 255};
+            // [R1] The armor is part of the fighter's unified DARK
+            // silhouette (the render law above). The robe (ARMOR_ROBE, the
+            // shipped default) covers the whole fighter, and the old khaki
+            // fill {128,96,62} over every capsule read as "тело жёлтого
+            // цвета". Dark leather tone: silhouette-consistent, slightly
+            // lighter than the body {20,20,25} so the armor stays visible.
+            ren::Color4B armor_col{34, 31, 27, 255};
             if (player_hit_flash_ > 0) armor_col = ren::Color4B{255, 220, 190, 255};
+            armor_render_color_ = armor_col;  // [R1] probe seam
+            {
+                // [R1] Track the armor's rendered world extents each frame so
+                // the probe samples exactly where the robe paints.
+                float minx = 1e9f, miny = 1e9f, maxx = -1e9f, maxy = -1e9f;
+                int drawn = 0;
+                for (auto& c : assets_->armor_model()->capsules) {
+                    auto eit = edge_map.find(c.edge_name);
+                    if (eit == edge_map.end()) continue;
+                    auto [ax1, ay1] = resolve_body_node(eit->second.first,
+                        world_cx, world_cy, facing_right_, pivot_local_y);
+                    auto [ax2, ay2] = resolve_body_node(eit->second.second,
+                        world_cx, world_cy, facing_right_, pivot_local_y);
+                    minx = std::min(minx, std::min(ax1, ax2));
+                    maxx = std::max(maxx, std::max(ax1, ax2));
+                    miny = std::min(miny, std::min(ay1, ay2));
+                    maxy = std::max(maxy, std::max(ay1, ay2));
+                    ++drawn;
+                }
+                if (drawn > 0) {
+                    armor_world_minx_ = minx;
+                    armor_world_miny_ = miny;
+                    armor_world_maxx_ = maxx;
+                    armor_world_maxy_ = maxy;
+                }
+            }
             for (auto& c : assets_->armor_model()->capsules) {
                 auto eit = edge_map.find(c.edge_name);
                 if (eit == edge_map.end()) continue;
@@ -2555,32 +2761,59 @@ private:
                 renderer_->draw_filled_circle_world(ax2, ay2, r, armor_col);
                 ++armor_capsules_drawn_;
             }
+            // [R1] The equipped HELM (helm slot -> head.xml, EHead/ENeck
+            // capsules) is part of the same armored silhouette; P3 loaded
+            // the model but never drew it. Same dark tone as the armor.
+            if (assets_->helm_model()) {
+                ren::Color4B helm_col = armor_col;
+                for (auto& c : assets_->helm_model()->capsules) {
+                    auto eit = edge_map.find(c.edge_name);
+                    if (eit == edge_map.end()) continue;
+                    auto [ax1, ay1] = resolve_body_node(eit->second.first,
+                        world_cx, world_cy, facing_right_, pivot_local_y);
+                    auto [ax2, ay2] = resolve_body_node(eit->second.second,
+                        world_cx, world_cy, facing_right_, pivot_local_y);
+                    float r = (c.radius1 + c.radius2) * 0.5f;
+                    if (r <= 0) r = 4.0f;
+                    float dx = ax2 - ax1, dy = ay2 - ay1;
+                    float len = std::sqrt(dx * dx + dy * dy);
+                    if (len < 0.5f) continue;
+                    float ux = dx / len, uy = dy / len;
+                    float px = -uy, py = ux;
+                    renderer_->draw_filled_triangle_world(ax1 + px * r, ay1 + py * r,
+                        ax2 + px * r, ay2 + py * r, ax2 - px * r, ay2 - py * r, helm_col);
+                    renderer_->draw_filled_triangle_world(ax1 + px * r, ay1 + py * r,
+                        ax2 - px * r, ay2 - py * r, ax1 - px * r, ay1 - py * r, helm_col);
+                    renderer_->draw_filled_circle_world(ax1, ay1, r, helm_col);
+                    renderer_->draw_filled_circle_world(ax2, ay2, r, helm_col);
+                }
+            }
         }
 
         // Render player's equipped weapon model (if loaded)
-        // Weapon nodes are defined in their own model space; we render the
-        // mesh at a fixed offset from the player's body center.
-        // [U1] Weapons have NO edges — their figures are Triangles, so the
-        // old edges-only render never drew anything.
+        // [U1] Weapons have NO edges -- their figures are Triangles.
+        // [R1] The vertices resolve through the weapon model's MacroNodes
+        // (LCC weights over the skeleton's Weapon-Node*_1 pins -- Edge129
+        // pins Weapon-Node2_1 to NWrist_1, the dojo placement law), so the
+        // mesh lands AT the hand and tracks it. The old code looked the
+        // vertices up in the plain node map (knives ship ZERO plain nodes)
+        // and drew the authored rest coords at a fixed body-center offset
+        // at 0.3x -- invisible or "далеко от персонажа". Steel tone, not
+        // the yellow placeholder.
         if (assets_->weapon_model() && !assets_->weapon_model()->triangles.empty()) {
-            ren::Color4B wcol{200, 170, 100, 255};
-            // Use NPivot position as the reference point for weapon placement
-            float dir = facing_right_ ? 1.0f : -1.0f;
-            float ox = world_cx + dir * 30.0f;
-            float oy = world_cy + 10.0f;
-            const float scale = 0.3f;
+            ren::Color4B wcol{150, 154, 162, 255};
+            const float dir = facing_right_ ? 1.0f : -1.0f;
             auto& wm = *assets_->weapon_model();
             for (const auto& t : wm.triangles) {
-                auto i1 = wm.nodes.find(t.n1);
-                auto i2 = wm.nodes.find(t.n2);
-                auto i3 = wm.nodes.find(t.n3);
-                if (i1 == wm.nodes.end() || i2 == wm.nodes.end() || i3 == wm.nodes.end())
+                float ax, ay, bx, by, cx, cy;
+                if (!resolve_player_weapon_vertex(wm, t.n1, world_cx, world_cy,
+                        dir, pivot_local_y, true, ax, ay) ||
+                    !resolve_player_weapon_vertex(wm, t.n2, world_cx, world_cy,
+                        dir, pivot_local_y, true, bx, by) ||
+                    !resolve_player_weapon_vertex(wm, t.n3, world_cx, world_cy,
+                        dir, pivot_local_y, true, cx, cy))
                     continue;
-                renderer_->draw_filled_triangle_world(
-                    ox + dir * i1->second.x * scale, oy + i1->second.y * scale,
-                    ox + dir * i2->second.x * scale, oy + i2->second.y * scale,
-                    ox + dir * i3->second.x * scale, oy + i3->second.y * scale,
-                    wcol);
+                renderer_->draw_filled_triangle_world(ax, ay, bx, by, cx, cy, wcol);
             }
         }
     }
@@ -2932,6 +3165,14 @@ private:
                     mn.children[1] = child.attr("ChildNode2");
                     mn.children[2] = child.attr("ChildNode3");
                     mn.children[3] = child.attr("ChildNode4");
+                    // [R1] The LCC weights are what turn the Weapon-Node*
+                    // children into the rendered mesh position; without them
+                    // every MacroNode resolves to (0,0) and the weapon never
+                    // draws (the re-soak-3 "weapon invisible" report).
+                    mn.lcc[0] = tof(child.attr("LCC1"));
+                    mn.lcc[1] = tof(child.attr("LCC2"));
+                    mn.lcc[2] = tof(child.attr("LCC3"));
+                    mn.lcc[3] = tof(child.attr("LCC4"));
                     assets_->weapon_model()->macro_nodes[mn.name] = mn;
                 }
                 // Also store basic position info for rendering

@@ -411,6 +411,14 @@ void AssetManager::load_enemy_weapon(const std::string& weapon_name, const std::
                 mn.children[1] = child.attr("ChildNode2");
                 mn.children[2] = child.attr("ChildNode3");
                 mn.children[3] = child.attr("ChildNode4");
+                // [R1] LCC weights turn the Weapon-Node* children into the
+                // rendered mesh position (weapon figures reference the
+                // MacroNodes; zeroed LCC made them all resolve to the
+                // origin - the invisible weapon).
+                mn.lcc[0] = tof(child.attr("LCC1"));
+                mn.lcc[1] = tof(child.attr("LCC2"));
+                mn.lcc[2] = tof(child.attr("LCC3"));
+                mn.lcc[3] = tof(child.attr("LCC4"));
                 enemy_weapon_model_->macro_nodes[mn.name] = mn;
             }
             BodyNode n;
@@ -674,6 +682,13 @@ void AssetManager::load_player_weapon(const std::string& tactic, const std::stri
                 mn.children[1] = child.attr("ChildNode2");
                 mn.children[2] = child.attr("ChildNode3");
                 mn.children[3] = child.attr("ChildNode4");
+                // [R1] LCC weights turn the Weapon-Node* children into the
+                // rendered mesh position; zeroed LCC collapsed the mesh to
+                // the origin.
+                mn.lcc[0] = tof(child.attr("LCC1"));
+                mn.lcc[1] = tof(child.attr("LCC2"));
+                mn.lcc[2] = tof(child.attr("LCC3"));
+                mn.lcc[3] = tof(child.attr("LCC4"));
                 weapon_model_->macro_nodes[mn.name] = mn;
             }
             BodyNode n;
