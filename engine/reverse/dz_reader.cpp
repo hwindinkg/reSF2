@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <sstream>
 
 #include <zlib.h>
 
@@ -315,6 +317,79 @@ size_t DzRegistry::open_archives_in(const std::string& dir) {
     for (const auto& p : found)
         if (open_archive(p.string())) ++n;
     return n;
+}
+
+bool DzRegistry::load_packs_xml(const std::string& asset_root) {
+    // [ORIGINAL] packs.xml is the pack discovery source (Name/Url/Version).
+    // The device ships the tree UNPACKED — packs.xml still declares the
+    // packs, but their .dz may be absent; the pack LIST is authoritative.
+    std::vector<std::filesystem::path> candidates = {
+        std::filesystem::path(asset_root) / "packs.xml",
+        std::filesystem::path(asset_root) / "assets" / "packs.xml",
+        std::filesystem::path(asset_root) / "assets" / "assets" / "packs.xml",
+    };
+    std::string text;
+    for (const auto& c : candidates) {
+        std::error_code ec;
+        if (!std::filesystem::exists(c, ec)) continue;
+        std::ifstream f(c);
+        if (f) {
+            text.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+            break;
+        }
+    }
+    if (text.empty()) return false;
+
+    // packs.xml is a tiny flat file:
+    //   <Packs><Pack Name="files" Url="assets/files.dz" Version="1.9.21" /></Packs>
+    // Parsed with a minimal tag scanner (resf2_reverse is dependency-free by
+    // design — no XmlDocument here).
+    auto get_attr = [](const std::string& region, const std::string& name) -> std::string {
+        const std::string key = name + "=\"";
+        const auto pos = region.find(key);
+        if (pos == std::string::npos) return "";
+        const auto start = pos + key.size();
+        const auto end = region.find('"', start);
+        if (end == std::string::npos) return "";
+        return region.substr(start, end - start);
+    };
+
+    std::vector<PackInfo> packs;
+    size_t pos = 0;
+    while ((pos = text.find("<Pack ", pos)) != std::string::npos) {
+        const auto tag_end = text.find('>', pos);
+        if (tag_end == std::string::npos) break;
+        const std::string tag = text.substr(pos, tag_end - pos);
+        PackInfo p;
+        p.name = get_attr(tag, "Name");
+        p.url = get_attr(tag, "Url");
+        p.version = get_attr(tag, "Version");
+        packs.push_back(std::move(p));
+        pos = tag_end + 1;
+    }
+    if (packs.empty()) return false;
+
+    packs_ = std::move(packs);
+    packs_loaded_ = true;
+
+    // Mount each pack in order; a missing archive is fine (unpacked tree /
+    // fallback dirs resolve those paths).
+    for (const auto& p : packs_) {
+        std::error_code ec2;
+        std::filesystem::path url(p.url);
+        std::vector<std::filesystem::path> mounts = {
+            std::filesystem::path(asset_root) / url,
+            std::filesystem::path(asset_root) / "assets" / url,
+            std::filesystem::path(asset_root) / "assets" / "assets" / url,
+        };
+        for (const auto& mc : mounts) {
+            if (std::filesystem::exists(mc, ec2)) {
+                open_archive(mc.string());
+                break;
+            }
+        }
+    }
+    return true;
 }
 
 std::vector<std::byte> DzRegistry::read_file(const std::string& name) {

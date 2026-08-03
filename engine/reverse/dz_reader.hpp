@@ -107,6 +107,17 @@ private:
     std::string path_;
 };
 
+// One <Pack> entry of packs.xml, exactly as the original reads it.
+// [ORIGINAL] Pack discovery source (LIVE_BOOT_TRACE §4 #2): the original
+// reads packs.xml (Name/Url/Version) — the RE dir-scan for *.dz was the
+// divergence. The device ships unpacked, so a pack's Url may not exist as a
+// file; the pack list itself is still authoritative.
+struct PackInfo {
+    std::string name;
+    std::string url;
+    std::string version;
+};
+
 // Global registry of all open DZ archives.
 class DzRegistry {
 public:
@@ -117,6 +128,18 @@ public:
 
     // Open every *.dz directly inside `dir`. Returns how many were opened.
     size_t open_archives_in(const std::string& dir);
+
+    // [ORIGINAL] Discover packs from packs.xml (searched at <root>/packs.xml,
+    // <root>/assets/packs.xml, <root>/assets/assets/packs.xml), record the
+    // pack list in file order and mount each pack's archive (missing archives
+    // tolerated — the device ships the tree unpacked). Returns true when
+    // packs.xml was found and parsed.
+    bool load_packs_xml(const std::string& asset_root);
+
+    // The pack list from the last successful packs.xml read, in file order.
+    const std::vector<PackInfo>& pack_list() const { return packs_; }
+
+    bool packs_loaded() const { return packs_loaded_; }
 
     // Try to read a file from any open archive; falls back to the registered
     // extracted-asset directories when the archive lookup misses.
@@ -134,6 +157,9 @@ private:
     std::vector<std::unique_ptr<DzArchive>> archives_;
     std::vector<std::string> archive_paths_;
     std::vector<std::string> fallback_dirs_;
+
+    std::vector<PackInfo> packs_;
+    bool packs_loaded_ = false;
 
     std::vector<std::byte> read_from_fallback(const std::string& name);
 };
