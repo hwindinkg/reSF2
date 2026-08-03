@@ -553,6 +553,13 @@ float host_enemy_health_frac() const override;
     std::vector<std::string> host_get_weapon_cycle() const {
         return weapon_cycle_list_;
     }
+    // [R4] The authored tactic reach of a move (moves.xml <Tactics><Conditions>
+    // <Distance Max=>) — the R2 battle fallback law. 0 = not parsed.
+    float host_get_move_distance_max(const std::string& name) {
+        if (!assets_) return 0.0f;
+        auto it = assets_->moves().find(name);
+        return it != assets_->moves().end() ? it->second.distance_max : 0.0f;
+    }
     // [R4] Resolve an attack edge (moves.xml AttackingParts) to its world
     // endpoints + radius with the SAME law the battle hit test uses: the
     // skeleton edge when the name is a body edge, else the equipped WEAPON

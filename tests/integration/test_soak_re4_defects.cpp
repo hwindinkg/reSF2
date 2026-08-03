@@ -47,6 +47,17 @@ static resf2::test::HeadlessTestRunner make_dojo_runner(bool hermetic) {
     return resf2::test::HeadlessTestRunner(config);
 }
 
+static resf2::test::HeadlessTestRunner make_battle_runner() {
+    resf2::test::HeadlessTestConfig config;
+    config.asset_root = "assets";
+    config.width = 1280;
+    config.height = 720;
+    config.fixed_dt_ms = 16;
+    config.hermetic = true;  // deterministic empty inventory
+    config.start_scene = "battle";
+    return resf2::test::HeadlessTestRunner(config);
+}
+
 static void frame(resf2::test::HeadlessTestRunner& r) {
     r.game().on_update(r.platform(), 16);
     r.game().on_render(r.platform());
@@ -63,6 +74,11 @@ static void edge_up(resf2::test::HeadlessTestRunner& r, plat::Key k) {
     r.platform().poll_events();
     r.platform().inject_key_up(k);
     frame(r);
+}
+
+static float enemy_dist(resf2::test::HeadlessTestRunner& r) {
+    return std::fabs(r.game().host_get_enemy_pos_x() -
+                     r.game().host_get_player_pos_x());
 }
 
 // Same warm-up as the re-soak-3 suite: loading + location init, intro
@@ -209,8 +225,72 @@ static void test_r4_weapon_cycle_owned_only() {
           "R4b: no magic/ranged names in the melee weapon cycle");
 }
 
+// ---------- R4b/R4c: the machete deals damage at its authored reach ----------
+//
+// SwordsSlash (the machete's 1key punch) declares <Distance Max="350">;
+// the R2 fallback was meant to use it but the nested <Tactics><Conditions>
+// <Distance> never parsed — reach hardcoded 250, so a punch thrown during
+// the approach (enemy at 250-350 units) missed while the headless fists
+// test (reach 250) passed. The parse pins below are the deterministic RED;
+// the battle probe pins the end-to-end weapon damage path (equip machete
+// -> punch -> fallback/weapon-edge hit -> HP drop).
+static void test_r4_machete_midrange_damage() {
+    std::printf("\n=== R4b/R4c: the machete hits at its authored reach ===\n");
+    resf2::test::HeadlessTestRunner runner = make_battle_runner();
+    if (!runner.init()) { std::fprintf(stderr, "FAIL: R4c init() failed\n"); ++tests_failed; return; }
+
+    scn::SceneHost::BattleInfo info;
+    info.enemy_name = "Dojo_Disciple";
+    info.rounds = 1;
+    info.round_time_s = 99;
+    runner.game().host_set_battle_info(info);
+    runner.game().host_set_battle_mode(true);
+    runner.game().host_set_show_enemy(true);
+    runner.game().host_add_item("WEAPON_MACHETE");
+    runner.game().host_equip_item("WEAPON_MACHETE");
+    runner.run_frames(190);  // battle intro: stance_2 plays (~162 frames at
+                             // 20fps), then the A6 hold waits for input
+
+    // R4c — the authored tactic reach must be parsed (RED on HEAD: 0).
+    const float swords_reach = runner.game().host_get_move_distance_max("SwordsSlash");
+    const float knives_reach = runner.game().host_get_move_distance_max("KnivesSlash");
+    std::fprintf(stderr, "  [R4c] SwordsSlash distance_max=%.0f KnivesSlash=%.0f\n",
+                 swords_reach, knives_reach);
+    CHECK(swords_reach >= 349.0f,
+          "R4c: SwordsSlash parses its authored tactic reach (350)");
+    CHECK(knives_reach >= 299.0f,
+          "R4c: KnivesSlash parses its authored tactic reach (300)");
+
+    // The first A/D press ends the A6 stance hold; keep the fight in the
+    // machete's mid-range band (the enemy closes to ~250 on its own).
+    for (int i = 0; i < 6; ++i) {
+        if (enemy_dist(runner) <= 330.0f) break;
+        edge_down(runner, plat::Key::D);
+        runner.run_frames(40);
+        edge_up(runner, plat::Key::D);
+    }
+    const float d0 = enemy_dist(runner);
+    const float hp0 = runner.enemy_health_frac();
+    std::fprintf(stderr, "  [R4c] punching from dist=%.0f enemy_hp=%.3f\n", d0, hp0);
+
+    // Punch: the machete swing (weapon move) must drop the enemy's HP.
+    edge_down(runner, plat::Key::O);
+    runner.run_frames(40);
+    edge_up(runner, plat::Key::O);
+    runner.run_frames(20);
+    const float hp1 = runner.enemy_health_frac();
+    const std::string anim = runner.game().host_get_player_anim();
+    std::fprintf(stderr, "  [R4c] first punch: anim='%s' hp %.3f -> %.3f (dist=%.0f)\n",
+                 anim.c_str(), hp0, hp1, enemy_dist(runner));
+    CHECK(hp1 < hp0 - 0.005f,
+          "R4c: the machete swing deals damage in battle (weapon move path)");
+    CHECK(anim == "swords_slash" || anim == "swords_double_slash" ||
+          anim == "swords_heavy_slash" || anim == "swords_spinning_slash",
+          "R4c: the punch resolves to a WEAPON move (machete subtype)");
+}
+
 int main() {
-    std::printf("=== Soak re-soak-4 regression probes (R4a render, R4b weapon) ===\n");
+    std::printf("=== Soak re-soak-4 regression probes (R4a render, R4b weapon, R4c reach) ===\n");
     std::fflush(stdout);
 
     suppress_stdout();
@@ -218,6 +298,7 @@ int main() {
     test_r4_default_save_no_double_draw();
     test_r4_weapon_edge_resolution();
     test_r4_weapon_cycle_owned_only();
+    test_r4_machete_midrange_damage();
 
     std::printf("\n=== re-soak-4 probes: %d passed, %d failed ===\n",
                 tests_passed, tests_failed);
