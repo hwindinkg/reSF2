@@ -944,6 +944,26 @@ void AssetManager::parse_moves_xml(const std::string& xml) {
                 move.distance_min = tof(sub.attr("Min"));
                 move.distance_max = tof(sub.attr("Max"));
                 move.has_distance_cond = true;
+            } else if (sub.name == "Tactics") {
+                // [R4] The authored tactic reach lives NESTED inside the
+                // move:
+                //   <Tactics><Conditions><Distance Min="50" Max="350"
+                //   Axis="X">...</Distance></Conditions></Tactics>
+                // (moves.xml ships it for every attack; the direct-child
+                // <Distance> case above matches nothing in the real file).
+                // The R2 battle fallback reads this range — the enemy's own
+                // attack applies the same law against the player. Without
+                // it the fallback hardcoded 250 for every move and weapon
+                // attacks (SwordsSlash Max=350) missed mid-range.
+                for (const auto& tac : sub.children) {
+                    if (tac.name != "Conditions") continue;
+                    for (const auto& cond : tac.children) {
+                        if (cond.name != "Distance") continue;
+                        move.distance_min = tof(cond.attr("Min"));
+                        move.distance_max = tof(cond.attr("Max"));
+                        move.has_distance_cond = true;
+                    }
+                }
             } else if (sub.name == "Attack") {
                 // Backward compat: first Attack sets attack_start/end/edges/damage/impulse
                 move.attack_start = (int)tof(sub.attr("Start"));
