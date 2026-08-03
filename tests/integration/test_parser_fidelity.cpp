@@ -98,12 +98,14 @@ static bool file_exists(const std::string& path) {
 }
 
 // ---------------------------------------------------------------------------
-// The 66 <Warrior> attributes of the device users.xml, verbatim (attribute
-// names, not values). A 1:1 parser must read them all and a save writer must
+// The 66 <Warrior> attributes of the device users.xml REAL Warrior element
+// (line 5; the stub <Warrior ID="1" IsFake="True" /> on line 4 carries only
+// ID+IsFake and is skipped — the original resolves the real user). Verbatim
+// attribute names; a 1:1 parser must read them all and a save writer must
 // emit them all.
 // ---------------------------------------------------------------------------
 static const char* const kDeviceWarriorAttrs[] = {
-    "ID", "IsFake", "FirstName", "Avatar", "Voice", "Money", "Bonus",
+    "ID", "FirstName", "Avatar", "Voice", "Money", "Bonus",
     "Strength", "Stamina", "Level", "Experience", "Power", "PowerSyncTime",
     "Difficulty", "LastLotteryEnterTime", "LastLotteryPlayTime",
     "LotteryDaysMax", "LotteryDays", "RateTime", "Skeleton", "Armor", "Helm",
@@ -196,7 +198,7 @@ static int test_save_format(const std::string& repo_root) {
     CHECK_EQ(d.currencies.forge_material2, 0, "1: Currencies ForgeMaterial2=\"0\"");
     CHECK_EQ(d.currencies.forge_material3, 0, "1: Currencies ForgeMaterial3=\"0\"");
     CHECK_EQ(d.currencies.ascension_ticket, 0, "1: Currencies AscensionTicket=\"0\"");
-    CHECK_STREQ(d.version, "1.9.21", "1: <Version Value=\"1.9.21\">");
+    CHECK_STREQ(d.xml_version, "1.9.21", "1: <Version Value=\"1.9.21\">");
     CHECK_STREQ(d.data_version, "1.9.21.0", "1: <DataVersion Value=\"1.9.21.0\">");
 
     // Full attribute set: every device attribute name must be captured.
@@ -255,7 +257,7 @@ static int test_save_format(const std::string& repo_root) {
                      "1: round-trip tournament ReplayCount identical");
         CHECK_EQ(d2.currencies.forge_material1, d.currencies.forge_material1,
                  "1: round-trip currencies identical");
-        CHECK_STREQ(d2.version, d.version, "1: round-trip version identical");
+        CHECK_STREQ(d2.xml_version, d.xml_version, "1: round-trip version identical");
         CHECK_STREQ(d2.data_version, d.data_version, "1: round-trip data version identical");
         CHECK_EQ((long long)d2.warrior_attrs.size(), (long long)d.warrior_attrs.size(),
                  "1: round-trip full attribute set preserved");
@@ -360,26 +362,32 @@ static int test_boot_configs(const std::string& repo_root) {
     CHECK_EQ((long long)cfg.forge.aspects, 52LL, "4: forge.xml has 52 <Aspect> entries");
     CHECK_EQ(cfg.forge.first_aspect_value, 55, "4: forge first <Aspect Value=\"55\">");
 
-    CHECK_EQ((long long)cfg.perks.perks, 143LL, "4: perks.xml has 143 <Perk> entries");
+    CHECK_EQ((long long)cfg.perks.perks, 142LL, "4: perks.xml has 142 <Perk> entries (1 of 143 is inside a comment)");
     CHECK(cfg.perks.has_double_sweep, "4: PERK_DOUBLE_SWEEP present (users.xml <Perks> references it)");
 
-    CHECK_EQ((long long)cfg.achievements.counters, 89LL, "4: Achievements.xml has 89 <Counter> groups");
-    CHECK_EQ((long long)cfg.achievements.achievements, 130LL,
-             "4: Achievements.xml has 130 <Achievement> entries");
+    CHECK_EQ((long long)cfg.achievements.counters, 88LL, "4: Achievements.xml has 88 <Counter> groups (1 is commented out)");
+    CHECK_EQ((long long)cfg.achievements.achievements, 124LL,
+             "4: Achievements.xml has 124 <Achievement> entries (6 commented out)");
     CHECK_STREQ(cfg.achievements.first_counter, "PerfectRound",
                 "4: first achievement counter is PerfectRound");
 
     CHECK_EQ((long long)cfg.progress.thresholds, 52LL, "4: CharacterProgress.xml has 52 <Threshold> entries");
     CHECK_EQ(cfg.progress.first_exp, 150, "4: Level 1 threshold Exp=\"150\"");
 
-    CHECK_EQ((long long)cfg.quests.quests, 504LL, "4: quests.xml has 504 <Quest> entries");
-    CHECK_STREQ(cfg.quests.first_quest, "SetBackVersionCheck",
+    // quests.xml (17.67 s) and config_cdn.xml (18.37 s) load AFTER the save
+    // in the engine; the fidelity test pins them through their own loaders.
+    resf2::game::QuestConfig quests;
+    CHECK(resf2::game::load_quests_config(repo_root, quests), "4: quests.xml parses");
+    CHECK_EQ((long long)quests.quests, 498LL, "4: quests.xml has 498 <Quest> entries (6 of the 504 raw tags are commented out)");
+    CHECK_STREQ(quests.first_quest, "SetBackVersionCheck",
                 "4: first quest is SetBackVersionCheck (Priority=99998)");
-    CHECK_STREQ(cfg.quests.first_priority, "99998", "4: first quest Priority=\"99998\"");
+    CHECK_STREQ(quests.first_priority, "99998", "4: first quest Priority=\"99998\"");
 
-    CHECK_EQ((long long)cfg.cdn.platform_items, 5LL, "4: config_cdn.xml has 5 platform entries");
-    CHECK_STREQ(cfg.cdn.android_name, "Android", "4: PlatformID=2 is Android");
-    CHECK_EQ((long long)cfg.cdn.total_items, 519LL, "4: config_cdn.xml has 519 <item> total");
+    resf2::game::CdnConfig cdn;
+    CHECK(resf2::game::load_cdn_config(repo_root, cdn), "4: config_cdn.xml parses");
+    CHECK_EQ((long long)cdn.platform_items, 5LL, "4: config_cdn.xml has 5 platform entries");
+    CHECK_STREQ(cdn.android_name, "Android", "4: PlatformID=2 is Android");
+    CHECK_EQ((long long)cdn.total_items, 519LL, "4: config_cdn.xml has 519 <item> total");
 
     // purchased.xml is runtime-generated (not shipped, absent from the pull);
     // the loader must tolerate its absence — HEURISTIC-TODO until the file
