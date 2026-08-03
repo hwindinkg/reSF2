@@ -577,6 +577,52 @@ void AssetManager::load_helm_model(const std::string& model_file, const std::str
                 helm_model_->capsules.size(), helm_model_->triangles.size());
 }
 
+// ---------- Enemy fighter body/head models (R2) ----------
+//
+// The battle hit test targets the ENEMY's own model, not the player's
+// body.xml: stages.xml <Template> <Items> carry the enemy's equipment names
+// (Dojo_Disciple: BODY_KENJI, HEAD_DISCIPLE), list.xml maps them to model
+// files (body_kenji.xml, head_disciple.xml - LIVE_GAME_EVIDENCE Q2-C: the
+// defender side is the enemy fighter's own model edges). The files ship the
+// same MacroNode/Edge/Capsule structure as the player's models; the capsule
+// Edge attributes reference the shared skeleton E* edges.
+
+void AssetManager::load_enemy_body_model(const std::string& model_file, const std::string& asset_root) {
+    enemy_body_model_.reset();
+    auto candidates = model_paths(asset_root, model_file.c_str());
+    std::string fig_path;
+    for (const auto& p : candidates)
+        if (std::filesystem::exists(p)) { fig_path = p.string(); break; }
+    if (fig_path.empty()) {
+        std::printf("  Enemy body model '%s' NOT FOUND!\n", model_file.c_str());
+        return;
+    }
+    enemy_body_model_ = std::make_unique<BodyModel>();
+    parse_macro_model_xml(read_text(fig_path), enemy_body_model_.get());
+    std::printf("  Enemy body model '%s': %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
+                model_file.c_str(), enemy_body_model_->nodes.size(),
+                enemy_body_model_->edges.size(), enemy_body_model_->capsules.size(),
+                enemy_body_model_->triangles.size());
+}
+
+void AssetManager::load_enemy_head_model(const std::string& model_file, const std::string& asset_root) {
+    enemy_head_model_.reset();
+    auto candidates = model_paths(asset_root, model_file.c_str());
+    std::string fig_path;
+    for (const auto& p : candidates)
+        if (std::filesystem::exists(p)) { fig_path = p.string(); break; }
+    if (fig_path.empty()) {
+        std::printf("  Enemy head model '%s' NOT FOUND!\n", model_file.c_str());
+        return;
+    }
+    enemy_head_model_ = std::make_unique<BodyModel>();
+    parse_macro_model_xml(read_text(fig_path), enemy_head_model_.get());
+    std::printf("  Enemy head model '%s': %zu nodes, %zu edges, %zu capsules, %zu triangles\n",
+                model_file.c_str(), enemy_head_model_->nodes.size(),
+                enemy_head_model_->edges.size(), enemy_head_model_->capsules.size(),
+                enemy_head_model_->triangles.size());
+}
+
 // ---------- weapon_tactic_to_model_file ----------
 
 std::string AssetManager::weapon_tactic_to_model_file(const std::string& tactic) const {

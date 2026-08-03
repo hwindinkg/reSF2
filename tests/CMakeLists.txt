@@ -536,6 +536,14 @@ set_tests_properties(test_soak_parser_defects PROPERTIES TIMEOUT 300)
 add_integration_test(test_soak_wave7b_defects)
 set_tests_properties(test_soak_wave7b_defects PROPERTIES TIMEOUT 300)
 
+# Soak re-soak-3 regression probes: R1 the fighter body/weapon render path
+# (dark silhouette + weapon at the hand, vs the yellow robe/offset-weapon
+# reports) and R2 the battle hit test (enemy's own model loads and is the
+# hit target; mid-range punches connect). Short: one dojo + one battle.
+add_integration_test(test_soak_re3_defects)
+set_tests_properties(test_soak_re3_defects PROPERTIES TIMEOUT 300)
+
+
 # Soak-fix Wave 7a (P10): moves.xml parser fidelity — the REAL device file
 # (reverse/data/animations/moves.xml, LIVE_GAME_EVIDENCE Q3) parsed by the
 # engine's own loader, field-by-field vs the verbatim reference values.
