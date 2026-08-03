@@ -336,34 +336,6 @@ void Game::on_init(plat::Platform& platform) {
             scene_manager_.register_scene(scene::SceneId::Profile,
                 [] { return std::make_unique<scene::ProfileScene>(); });
 
-            // Load item catalog (list.xml) for Shop
-            {
-                // [U2] The fallback path used to sit INSIDE the primary
-                // path's existence check, so when "assets/assets/list.xml"
-                // was absent (this repo ships only "assets/list.xml") the
-                // fallback never ran and the shop got an EMPTY catalog:
-                // no items, no BUY button — "shop doesn't work". Try each
-                // candidate independently.
-                fmt::ListParser lp;
-                std::vector<std::filesystem::path> list_candidates = {
-                    std::filesystem::path(asset_root_) / "assets" / "list.xml",
-                    std::filesystem::path(asset_root_) / "list.xml",
-                    std::filesystem::path(asset_root_) / "assets" / "files" / "assets" / "list.xml",
-                };
-                for (const auto& candidate : list_candidates) {
-                    if (list_data_loaded_ || !std::filesystem::exists(candidate)) continue;
-                    if (lp.load_file(candidate.string(), list_data_)) {
-                        list_data_loaded_ = true;
-                        std::printf("[shop] loaded %zu items from %s\n",
-                                    list_data_.items.size(), candidate.string().c_str());
-                    }
-                }
-                // Initialize shop manager from loaded catalog
-                if (list_data_loaded_) {
-                    shop_manager_.load_catalog(list_data_);
-                }
-            }
-
             // Initialize quest engine callbacks
             // [ORIGINAL] QuestManager @ 0x101c7d20 wires actions to game systems.
             quest_engine_.set_dialog_callback([this](const std::string& title,
@@ -393,6 +365,20 @@ void Game::on_init(plat::Platform& platform) {
             });
             std::printf("[QUEST] engine initialized\n");
 
+            // [Wave 8] Boot config set — perks/forge/CharacterProgress/
+            // Achievements parse BEFORE the save, matching the original
+            // (LIVE_BOOT_TRACE 11.26-12.55 s). They are not consumed by the
+            // game logic yet, but must parse without error and be available.
+            if (resf2::game::load_boot_configs(asset_root_, boot_configs_)) {
+                std::printf("[boot] configs loaded: %zu files\n", boot_configs_.events.size());
+            }
+            for (const auto& ev : boot_configs_.events) boot_events_.push_back(ev);
+
+            // [Wave 8] moves.xml parses BEFORE the save load, matching the
+            // original (12.56 s vs 15.82 s). load_moves() is one-shot; the
+            // init_location() call later becomes a no-op.
+            load_moves();
+
             // Load saved progress (gold, wins, levels, inventory).
             //
             // A scripted run is a MEASUREMENT and must not depend on whatever
@@ -410,6 +396,36 @@ void Game::on_init(plat::Platform& platform) {
             } else {
                 std::printf("[save] skipped (scripted run: state comes from the "
                             "script, not from the machine)\n");
+            }
+
+            // [Wave 8] list.xml loads AFTER the save, matching the original
+            // (15.84 s vs save 15.82 s). The item catalog feeds the Shop.
+            {
+                // [U2] The fallback path used to sit INSIDE the primary
+                // path's existence check, so when "assets/assets/list.xml"
+                // was absent (this repo ships only "assets/list.xml") the
+                // fallback never ran and the shop got an EMPTY catalog:
+                // no items, no BUY button — "shop doesn't work". Try each
+                // candidate independently.
+                fmt::ListParser lp;
+                std::vector<std::filesystem::path> list_candidates = {
+                    std::filesystem::path(asset_root_) / "assets" / "list.xml",
+                    std::filesystem::path(asset_root_) / "list.xml",
+                    std::filesystem::path(asset_root_) / "assets" / "files" / "assets" / "list.xml",
+                };
+                for (const auto& candidate : list_candidates) {
+                    if (list_data_loaded_ || !std::filesystem::exists(candidate)) continue;
+                    if (lp.load_file(candidate.string(), list_data_)) {
+                        list_data_loaded_ = true;
+                        std::printf("[shop] loaded %zu items from %s\n",
+                                    list_data_.items.size(), candidate.string().c_str());
+                    }
+                }
+                // Initialize shop manager from loaded catalog
+                if (list_data_loaded_) {
+                    shop_manager_.load_catalog(list_data_);
+                }
+                boot_events_.push_back("list.xml");
             }
 
             // Sync member variables from PlayerProfile (authoritative after load)
@@ -627,6 +643,7 @@ bool Game::host_save_progress() {
 }
 
 bool Game::host_load_progress() {
+    boot_events_.push_back("save");  // [Wave 8] boot-order probe
     save::SaveData data;
     if (!save_manager_.load(data)) return false;
     // Populate member variables from loaded data
@@ -1636,10 +1653,29 @@ void Game::init_location() {
                             assets_->set_stages_loaded(true);
                             std::printf("[STAGE] Loaded %zu zones from %s\n", 
                                        sd.zones.size(), stages_path.string().c_str());
+                            boot_events_.push_back("stages.xml");  // [Wave 8] probe
                             break;
                         }
                     }
                 }
+            }
+            // [Wave 8] quests.xml (17.67 s), packs.xml (18.36 s) and
+            // config_cdn.xml (18.37 s) load AFTER stages, matching the
+            // original chronology (LIVE_BOOT_TRACE §2). One-shot: init_location
+            // runs per location change.
+            if (!quests_config_loaded_) {
+                quests_config_loaded_ = true;
+                if (resf2::game::load_quests_config(asset_root_, boot_configs_.quests))
+                    boot_events_.push_back("quests.xml");
+            }
+            if (!packs_config_loaded_) {
+                packs_config_loaded_ = true;
+                if (dz.load_packs_xml(asset_root_)) boot_events_.push_back("packs.xml");
+            }
+            if (!cdn_config_loaded_) {
+                cdn_config_loaded_ = true;
+                if (resf2::game::load_cdn_config(asset_root_, boot_configs_.cdn))
+                    boot_events_.push_back("config_cdn.xml");
             }
             // Directories searched for loose assets. The original ships part of
             // its asset tree outside the archives (e.g. assets/1536/locations/dojo
