@@ -1994,7 +1994,9 @@ void Game::host_update_gameplay(uint32_t dt) {
             // battle start (enemy_anim_ = "stance_2").
         } else if (enemy_fighter_.hit_stun_time > 0) {
             // Stunned - can't act
-            enemy_anim_ = "fists_hit";
+            // [H05] Real catalog hit reaction (high_hit.bin); "fists_hit"
+            // is not a moves.xml name.
+            enemy_anim_ = enemy_hit_anim();
         } else {
             const TacticDef* td = tactics_.tactic("Standard");
             if (!td) td = tactics_.tactic("NoTables");
@@ -2163,7 +2165,11 @@ void Game::host_update_gameplay(uint32_t dt) {
             enemy_anim_ = "step_back";
         } else if (ai_anim_is_attack(decision.animation) &&
                    enemy_attack_cooldown_ <= 0) {  // attack
-            enemy_anim_ = "high_punch";
+            // [H05] The attack animation comes from the enemy's WEAPON
+            // (moves.xml 1key attack of the loadout's family); the old
+            // hardcoded "high_punch" made a sword loadout swing with fists
+            // anims (HARDCODE_AUDIT H05).
+            enemy_anim_ = enemy_attack_anim();
             enemy_attacking_ = true;
             enemy_attack_hit_done_ = false;
             enemy_attack_duration_ = 0.4f;
@@ -2175,7 +2181,9 @@ void Game::host_update_gameplay(uint32_t dt) {
             // In the original, the Dojo sparring partner is a training dummy.
             // Health/damage only applies in real fights (map battles).
         } else if (enemy_fighter_.is_blocking) {  // block
-            enemy_anim_ = "fists_block";
+            // [H05] Real block animation (high_block.bin / duck.bin);
+            // "fists_block" is not a moves.xml name.
+            enemy_anim_ = enemy_block_anim();
         } else {  // idle — the decision's wait
             // [H07] Real catalog stance idle (fists1_stance_idle for fists;
             // the weapon's own stance idle once the loadout resolves it).

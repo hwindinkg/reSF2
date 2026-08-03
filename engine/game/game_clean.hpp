@@ -457,6 +457,10 @@ float host_enemy_health_frac() const override;
     // H07/H05: the enemy idle animation resolves a REAL catalog stance idle
     // (weapon-aware; Fists -> fists1_stance_idle).
     std::string host_get_enemy_idle_anim() const { return enemy_idle_anim(); }
+    // H05: the enemy attack animation resolves the weapon family's real
+    // 1key attack move (swords_slash for a sword loadout, high_punch for
+    // fists).
+    std::string host_get_enemy_attack_anim() const { return enemy_attack_anim(); }
     // H06: the enemy weapon model file resolved from the stages.xml loadout
     // (list.xml Model + ".xml"); empty = unarmed loadout.
     const std::string& host_get_enemy_weapon_file() const {
@@ -3111,31 +3115,79 @@ private:
     }
     std::string stance_idle_anim_for(const std::string& subtype) const {
         const std::string needle = subtype.empty() ? "Fists" : subtype;
-        const MoveDef* best = nullptr;
+        const MoveDef* best_tagged = nullptr;
+        const MoveDef* best_untagged = nullptr;
         if (assets_) {
             for (const auto& [name, mv] : assets_->moves()) {
                 (void)name;
                 if (mv.template_name.find("StartIdleStance") == std::string::npos)
                     continue;
-                if (!mv.tactic_weapon.empty() &&
-                    !tactic_weapon_matches(mv.tactic_weapon, needle))
+                if (mv.tactic_weapon.empty()) {
+                    if (!best_untagged || mv.priority < best_untagged->priority)
+                        best_untagged = &mv;
                     continue;
-                // Default build (no TacticWeapon) wins ties over the
-                // weapon-tagged variant (FistsStartStanceIdle-Left vs -Right).
-                const int tagged = mv.tactic_weapon.empty() ? 0 : 1;
-                if (!best || tagged < (best->tactic_weapon.empty() ? 0 : 1) ||
-                    (tagged == (best->tactic_weapon.empty() ? 0 : 1) &&
-                     mv.priority < best->priority))
-                    best = &mv;
+                }
+                if (!tactic_weapon_matches(mv.tactic_weapon, needle)) continue;
+                if (!best_tagged || mv.priority < best_tagged->priority)
+                    best_tagged = &mv;
             }
         }
-        if (best && !best->filename.empty())
-            return strip_bin_suffix(best->filename);
+        // [H07] Fists uses the DEFAULT build (FistsStartStanceIdle-Left ->
+        // fists1_stance_idle.bin, the real fists idle; the -Right variant is
+        // a weapon-tagged variant). Any other weapon uses its TacticWeapon
+        // stance (SwordsStartStanceIdle -> swords_stance_idle.bin); the
+        // default build remains the generic fallback.
+        const MoveDef* pick = (needle == "Fists") ? best_untagged : best_tagged;
+        if (!pick) pick = best_untagged ? best_untagged : best_tagged;
+        if (pick && !pick->filename.empty())
+            return strip_bin_suffix(pick->filename);
         return "stance_idle";  // real catalog name (stance_idle.bin)
     }
     std::string enemy_idle_anim() const {
         return stance_idle_anim_for(enemy_weapon_subtype_);
     }
+
+    // [H05] The enemy's attack animation resolves the weapon family's base
+    // 1key attack move from moves.xml (TacticWeapon covers the subtype,
+    // Template carries "1key" — the base attack binding). The old executor
+    // hardcoded "high_punch", so a sword loadout swung with fists anims
+    // (HARDCODE_AUDIT H05). Fists -> HighPunch -> high_punch (real).
+    std::string enemy_attack_anim() const {
+        const std::string needle = enemy_weapon_subtype_.empty()
+                                       ? "Fists" : enemy_weapon_subtype_;
+        // A move whose TacticWeapon EXPLICITLY covers the subtype wins over
+        // an unfiltered move of equal priority (HighKick has no
+        // TacticWeapon and would otherwise shadow HighPunch for fists and
+        // SwordsSlash for swords via unordered_map iteration order).
+        const MoveDef* best = nullptr;
+        const MoveDef* best_unfiltered = nullptr;
+        if (assets_) {
+            for (const auto& [name, mv] : assets_->moves()) {
+                (void)name;
+                if (!mv.is_attack) continue;
+                if (mv.template_name.find("1key") == std::string::npos) continue;
+                if (mv.tactic_weapon.empty()) {
+                    if (!best_unfiltered || mv.priority < best_unfiltered->priority)
+                        best_unfiltered = &mv;
+                    continue;
+                }
+                if (!tactic_weapon_matches(mv.tactic_weapon, needle)) continue;
+                if (!best || mv.priority < best->priority) best = &mv;
+            }
+        }
+        if (!best) best = best_unfiltered;
+        if (best && !best->filename.empty())
+            return strip_bin_suffix(best->filename);
+        return "high_punch";  // real fists attack (high_punch.bin)
+    }
+    // [H05] Block/hit animations are REAL catalog names: "fists_block" /
+    // "fists_hit" are not moves.xml names and have no .bin. The player
+    // block path plays high_block.bin; the Duck move (moves.xml Type=MOVE,
+    // the block action) plays duck.bin; the hit reaction is high_hit.bin.
+    std::string enemy_block_anim() const {
+        return (ai_last_decision_.animation == "Duck") ? "duck" : "high_block";
+    }
+    std::string enemy_hit_anim() const { return "high_hit"; }
 
     // Map weapon tactic name to model file path.
     // Tactic names like "Swords", "Axes", "Claws" map to "weapon_swords.xml" etc.
