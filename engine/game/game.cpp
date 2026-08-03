@@ -2208,8 +2208,16 @@ void Game::host_update_gameplay(uint32_t dt) {
             if (is_battle_mode_ && !enemy_attack_hit_done_ &&
                 enemy_attack_duration_ <= 0.2f) {
                 enemy_attack_hit_done_ = true;
-                const float dist = std::fabs(enemy_pos_x_ - player_pos_x_);
-                if (dist <= 250.0f && player_fighter_.invuln_time <= 0 &&
+                // [H08] The swing connects via MODEL-EDGE COLLISION: the
+                // enemy's attacking edges (his weapon's/skeleton's) against
+                // the player's body capsules — the R2 hit-test path mirrored.
+                // The old `dist <= 250` range test stood in for the enemy's
+                // skeleton collision (HARDCODE_AUDIT H08) and made every
+                // mid-range swing connect regardless of geometry; it remains
+                // only as the documented fallback inside
+                // enemy_attack_connects() when no collision path is loaded.
+                const bool connected = enemy_attack_connects();
+                if (connected && player_fighter_.invuln_time <= 0 &&
                     !player_fighter_.is_dead) {
                     // [ORIGINAL] Block is NOT automatic — it's a weighted roulette decision
                     // (FUN_10171d80). When block_decision_pending_ is true, evaluate
@@ -3914,25 +3922,43 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                         }
 
                         // Build enemy node position map (local coords, relative to NPivot)
+                        // [H08] The .bin animations store ABSOLUTE coordinates; the
+                        // AnimationPlayer law converts to pivot-relative by subtracting
+                        // the frame's NPivot (ix - npivot_x, iy - npivot_y). The old
+                        // copy used them raw, which put the animated enemy body ~330
+                        // units off and silently broke the hit test in real fights.
                         std::unordered_map<std::string, std::pair<float, float>> enemy_node_pos;
                         if (has_enemy_anim) {
                             auto& anim = enemy_anim_it->second;
                             auto& names = assets_->ordered_node_names();
+                            int npivot_idx = -1;
+                            for (int i = 0; i < (int)names.size(); ++i)
+                                if (names[i] == "NPivot") { npivot_idx = i; break; }
+                            float npx = 0, npy = 0;
+                            if (npivot_idx >= 0) {
+                                float z0 = 0;
+                                anim.get_node_pos(enemy_frame, npivot_idx, npx, npy, z0);
+                            }
                             for (int i = 0; i < (int)names.size() && i < 67; ++i) {
                                 float x0, y0, z0, x1, y1, z1;
                                 if (anim.get_node_pos(enemy_frame, i, x0, y0, z0) &&
                                     anim.get_node_pos(enemy_next, i, x1, y1, z1)) {
                                     enemy_node_pos[names[i]] = {
-                                        x0 + (x1 - x0) * enemy_alpha,
-                                        y0 + (y1 - y0) * enemy_alpha};
+                                        x0 + (x1 - x0) * enemy_alpha - npx,
+                                        y0 + (y1 - y0) * enemy_alpha - npy};
                                 }
                             }
                         }
 
                         // Resolve enemy node to world coordinates
+                        // [H08] Two coordinate laws: ANIMATION positions are
+                        // pivot-relative (ix - npivot, iy - npivot) so the
+                        // world pivot sits AT enemy_y; SKELETON/body rest
+                        // positions are rest-relative (y - pivot_ly).
                         auto resolve_enemy_node = [&](const std::string& name)
                             -> std::pair<float, float> {
                             float lx = 0, ly = 0;
+                            bool from_anim = false;
                             bool found = false;
 
                             // Try animated position from enemy's animation
@@ -3940,6 +3966,7 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                             if (eit != enemy_node_pos.end()) {
                                 lx = eit->second.first;
                                 ly = eit->second.second;
+                                from_anim = true;
                                 found = true;
                             }
 
@@ -3968,7 +3995,7 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                             // Apply enemy world transform
                             float wx = enemy_pos_x_ + (enemy_facing_right_ ? lx : -lx);
                             float wy = (enemy_pos_y_ + enemy_y_adjust_) +
-                                       (ly - pivot_ly);
+                                       (from_anim ? ly : ly - pivot_ly);
                             return {wx, wy};
                         };
 

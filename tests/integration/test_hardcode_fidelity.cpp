@@ -327,6 +327,89 @@ static void test_a01_defense_anims_real() {
     }
 }
 
+// H08: the enemy's swing connects via MODEL-EDGE COLLISION (the R2 hit-test
+// path), not the distance stand-in `dist <= 250` (HARDCODE_AUDIT H08,
+// game.cpp:2168). Deterministic probe: a fists enemy at 180 units — the old
+// distance test connected (180 <= 250), the fist edge cannot. Live battle:
+// the player closes in, enemy punches land at close range (collision path
+// works) but NEVER at mid-range (>= 170).
+static void test_h08_enemy_collision_hit() {
+    std::printf("\n=== H08: enemy swing connects via model-edge collision ===\n");
+    resf2::test::HeadlessTestConfig config;
+    config.asset_root = "assets";
+    config.width = 1280;
+    config.height = 720;
+    config.fixed_dt_ms = 16;
+    config.start_scene = "battle";
+    config.hermetic = true;
+
+    // Deterministic probe: the distance stand-in must be gone.
+    {
+        resf2::test::HeadlessTestRunner runner(config);
+        if (!init_battle_runner(runner, "Dojo_Disciple")) {
+            resf2::test::check(false, "H08: probe runner init");
+            return;
+        }
+        runner.game().host_set_player_pos_x(0.0f);
+        runner.game().host_set_enemy_pos_x(180.0f);
+        const bool far_connects = runner.game().host_enemy_attack_connects();
+        std::fprintf(stderr, "  [H08] connects at 180u=%d (old distance test: 1)\n",
+                     (int)far_connects);
+        resf2::test::check(!far_connects,
+                           "H08: at 180 units the fist edge does NOT connect (no distance stand-in)");
+    }
+
+    // Live battle: the player chases the enemy into close range; punches
+    // must land there, and never at mid-range (>= 170).
+    {
+        resf2::test::HeadlessTestRunner runner(config);
+        if (!init_battle_runner(runner, "Dojo_Disciple")) {
+            resf2::test::check(false, "H08: battle runner init");
+            return;
+        }
+        runner.run_frames(170);  // battle intro (stance_2)
+        runner.tap_key(resf2::platform::Key::D, 2);
+        runner.run_frames(10);
+        // Close the gap with forward presses (same choreography as R4c);
+        // the punch edge reaches ~60-80 units, so chase to < 70.
+        for (int i = 0; i < 14; ++i) {
+            const float dist = std::fabs(
+                runner.game().host_get_enemy_pos_x() -
+                runner.game().host_get_player_pos_x());
+            if (dist <= 70.0f) break;
+            runner.tap_key(resf2::platform::Key::D, 3);
+            runner.run_frames(30);
+        }
+        float min_dist = 1e9f;
+        float prev_hp = runner.player_health_frac();
+        int far_hits = 0;
+        int total_hits = 0;
+        const int kMaxFrames = 2400;  // 38 s — several attack windows
+        for (int i = 0; i < kMaxFrames; ++i) {
+            runner.run_frames(1);
+            const float dist = std::fabs(
+                runner.game().host_get_enemy_pos_x() -
+                runner.game().host_get_player_pos_x());
+            if (dist < min_dist) min_dist = dist;
+            // Stay glued: re-close if the enemy retreats.
+            if (dist > 90.0f && i % 40 == 0)
+                runner.tap_key(resf2::platform::Key::D, 3);
+            const float hp = runner.player_health_frac();
+            if (hp < prev_hp - 1e-5f) {
+                ++total_hits;
+                if (dist >= 170.0f) ++far_hits;
+                prev_hp = hp;
+            }
+        }
+        std::fprintf(stderr, "  [H08] live: min_dist=%.0f total_hits=%d far_hits(>=170)=%d\n",
+                     min_dist, total_hits, far_hits);
+        resf2::test::check_eq(far_hits, 0,
+                              "H08: no player damage at mid-range (>= 170) in a live battle");
+        resf2::test::check(total_hits >= 1,
+                           "H08: close-range enemy punches connect via the collision path");
+    }
+}
+
 // H05: the enemy's animations come from his weapon/model — a sword loadout
 // attacks with the sword's moves.xml 1key move (SwordsSlash ->
 // swords_slash.bin), not the hardcoded fists "high_punch"
@@ -441,6 +524,9 @@ int main() {
 
     // ---- H06 ----
     test_h06_enemy_weapon_from_loadout();
+
+    // ---- H08 ----
+    test_h08_enemy_collision_hit();
 
     // ---- H09 ----
     test_h09_hud_from_save();
