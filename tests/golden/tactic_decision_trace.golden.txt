@@ -101,7 +101,7 @@ Decision {Wait=1}
 UseDefense:  / 0.0000 / 0.0000 / 0.0000
 UseSafeAttack:  / 0.0000
 TableAttack:  / 0.0000
-DodgeMissiles: Dodge / 2.0000
+DodgeMissiles: DodgeKick / 2.0000
 QuickAttack[1]: Punch / 0.0000
 QuickAttack[2]: Kick / 1.5000
 UseCautiousMovements:  / 0.0000

@@ -246,6 +246,87 @@ static void test_h10_projectile_from_list() {
                        "H10: no invented per-type damage values (20/25/30)");
 }
 
+// A01: the defense-stage animations the pipeline emits must be REAL
+// moves.xml move names (HARDCODE_AUDIT A01: "CounterAttack"/"Dodge" were
+// unpinned labels — verified absent from moves.xml; only the Block family
+// and DodgeKick exist). RED on HEAD: the UseDefense decision carried
+// "CounterAttack"/"Dodge", which are not moves.xml moves.
+static void test_a01_defense_anims_real() {
+    std::printf("\n=== A01: defense animations are real moves.xml names ===\n");
+    resf2::test::HeadlessTestConfig config;
+    config.asset_root = "assets";
+    config.width = 1280;
+    config.height = 720;
+    config.fixed_dt_ms = 16;
+    config.start_scene = "dojo";
+    config.hermetic = true;
+
+    resf2::test::HeadlessTestRunner runner(config);
+    if (!runner.init()) {
+        resf2::test::check(false, "A01: runner init");
+        return;
+    }
+    const resf2::game::AssetManager& assets = runner.game().host_assets();
+    // A real moves.xml name: a MoveDef key, or a moves.xml Template name a
+    // move inherits from ("Block" is Template Name="Block" Template="Hit";
+    // HighBlock's template chain is "Block|NotTitan").
+    const auto is_real_move = [&](const std::string& name) {
+        if (assets.moves().count(name) > 0) return true;
+        for (const auto& [mn, mv] : assets.moves()) {
+            (void)mn;
+            const std::string& t = mv.template_name;
+            if (t == name || t.rfind(name + "|", 0) == 0) return true;
+        }
+        return false;
+    };
+
+    // Force each UseDefense bin (2/3/4) and read the emitted animation.
+    struct BinCase { int bin; float ca; float dg; float bl; };
+    const BinCase cases[3] = {{2, 1.0f, 0.0f, 0.0f},
+                              {3, 0.0f, 1.0f, 0.0f},
+                              {4, 0.0f, 0.0f, 1.0f}};
+    const char* expect[3] = {"HighBlock", "DodgeKick", "Block"};
+    for (int i = 0; i < 3; ++i) {
+        resf2::game::TacticDef def;
+        def.use_defense = true;
+        def.counter_attack_chance.base = cases[i].ca;
+        def.dodge_chance.base = cases[i].dg;
+        def.block_chance.base = cases[i].bl;
+        resf2::game::TacticContext ctx;
+        resf2::game::TacticMemory mem;
+        resf2::game::TacticTableSet tables;
+        resf2::game::DecisionTrace trace;
+        resf2::game::RngSource rng = []() { return RAND_MAX / 2; };  // r = 0.5
+        const resf2::game::TacticDecision d =
+            resf2::game::decide(def, ctx, mem, tables, rng, trace);
+        std::fprintf(stderr, "  [A01] bin %d -> stage=%d anim='%s'\n",
+                     cases[i].bin, (int)d.stage, d.animation.c_str());
+        resf2::test::check(d.stage == resf2::game::DecisionStage::kUseDefense,
+                           "A01: the forced chance fires the UseDefense stage");
+        resf2::test::check(is_real_move(d.animation),
+                           "A01: the emitted defense animation is a real moves.xml name");
+        resf2::test::check_eq(d.animation, std::string(expect[i]),
+                              "A01: the defense bin resolves its pinned real move");
+    }
+    // DodgeMissiles (stage 4) emits the same real dodge name.
+    {
+        resf2::game::TacticDef def;
+        def.dodge_missiles_chance.base = 1.0f;
+        resf2::game::TacticContext ctx;
+        resf2::game::TacticMemory mem;
+        resf2::game::TacticTableSet tables;
+        resf2::game::DecisionTrace trace;
+        resf2::game::RngSource rng = []() { return RAND_MAX / 2; };
+        const resf2::game::TacticDecision d =
+            resf2::game::decide(def, ctx, mem, tables, rng, trace);
+        std::fprintf(stderr, "  [A01] dodge-missiles anim='%s'\n", d.animation.c_str());
+        resf2::test::check(is_real_move(d.animation),
+                           "A01: the dodge-missiles animation is a real moves.xml name");
+        resf2::test::check_eq(d.animation, std::string("DodgeKick"),
+                              "A01: dodge-missiles resolves DodgeKick");
+    }
+}
+
 // H05: the enemy's animations come from his weapon/model — a sword loadout
 // attacks with the sword's moves.xml 1key move (SwordsSlash ->
 // swords_slash.bin), not the hardcoded fists "high_punch"
@@ -348,6 +429,9 @@ static void test_h07_idle_alias(const resf2::test::HeadlessTestRunner& runner) {
 int main() {
     std::printf("=== Hardcode-Fidelity Wave (HARDCODE_AUDIT HIGH items) ===\n");
     std::fflush(stdout);
+
+    // ---- A01 ----
+    test_a01_defense_anims_real();
 
     // ---- H02 ----
     test_h02_weapon_model_from_list();

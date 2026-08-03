@@ -490,6 +490,8 @@ float host_enemy_health_frac() const override;
         }
         return out;
     }
+    // A01: the loaded asset catalog (moves map etc.) for the fidelity tests.
+    const AssetManager& host_assets() const { return *assets_; }
     // H06: the enemy weapon model file resolved from the stages.xml loadout
     // (list.xml Model + ".xml"); empty = unarmed loadout.
     const std::string& host_get_enemy_weapon_file() const {
