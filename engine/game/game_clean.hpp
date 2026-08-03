@@ -447,6 +447,16 @@ float host_enemy_health_frac() const override;
     bool host_get_enemy_attacking() const { return enemy_attacking_; }
     bool host_get_enemy_blocking() const { return enemy_fighter_.is_blocking; }
     float host_get_enemy_pos_x() const { return enemy_pos_x_; }
+    // ---- Hardcode-fidelity probes (HARDCODE_AUDIT.md HIGH items) ----
+    // H07: true when the named animation is in the loaded catalog — the
+    // engine must not invent names the original never shipped ("fists_idle"
+    // aliased onto fists1_stance_idle).
+    bool host_has_animation(const std::string& name) const {
+        return assets_ && assets_->animations().count(name) > 0;
+    }
+    // H07/H05: the enemy idle animation resolves a REAL catalog stance idle
+    // (weapon-aware; Fists -> fists1_stance_idle).
+    std::string host_get_enemy_idle_anim() const { return enemy_idle_anim(); }
     const TacticDecision& host_get_enemy_last_decision() const {
         return ai_last_decision_;
     }
@@ -3074,11 +3084,58 @@ private:
                     assets_->enemy_weapon_model()->triangles.size());
     }
 
+    // [H07/H05] REAL enemy animation names from the animation catalog.
+    // The engine must play names moves.xml/animations actually ship, never
+    // invented labels ("fists_idle", "fists_hit", "fists_block" are NOT
+    // moves.xml names — HARDCODE_AUDIT H07/I03). The weapon stance idle
+    // resolves through moves.xml: the "StartIdleStance" template move whose
+    // TacticWeapon covers the weapon subtype carries the real FileName
+    // (SwordsStartStanceIdle -> swords_stance_idle.bin). The default build
+    // (no TacticWeapon) wins ties — FistsStartStanceIdle-Left ->
+    // fists1_stance_idle.bin, the real fists idle.
+    static bool tactic_weapon_matches(const std::string& haystack,
+                                      const std::string& subtype) {
+        if (haystack.empty()) return false;
+        const std::string h = "|" + haystack + "|";
+        return h.find("|" + subtype + "|") != std::string::npos;
+    }
+    static std::string strip_bin_suffix(const std::string& f) {
+        if (f.size() > 4 && f.substr(f.size() - 4) == ".bin")
+            return f.substr(0, f.size() - 4);
+        return f;
+    }
+    std::string stance_idle_anim_for(const std::string& subtype) const {
+        const std::string needle = subtype.empty() ? "Fists" : subtype;
+        const MoveDef* best = nullptr;
+        if (assets_) {
+            for (const auto& [name, mv] : assets_->moves()) {
+                (void)name;
+                if (mv.template_name.find("StartIdleStance") == std::string::npos)
+                    continue;
+                if (!mv.tactic_weapon.empty() &&
+                    !tactic_weapon_matches(mv.tactic_weapon, needle))
+                    continue;
+                // Default build (no TacticWeapon) wins ties over the
+                // weapon-tagged variant (FistsStartStanceIdle-Left vs -Right).
+                const int tagged = mv.tactic_weapon.empty() ? 0 : 1;
+                if (!best || tagged < (best->tactic_weapon.empty() ? 0 : 1) ||
+                    (tagged == (best->tactic_weapon.empty() ? 0 : 1) &&
+                     mv.priority < best->priority))
+                    best = &mv;
+            }
+        }
+        if (best && !best->filename.empty())
+            return strip_bin_suffix(best->filename);
+        return "stance_idle";  // real catalog name (stance_idle.bin)
+    }
+    std::string enemy_idle_anim() const {
+        return stance_idle_anim_for(enemy_weapon_subtype_);
+    }
+
     // Map weapon tactic name to model file path.
     // Tactic names like "Swords", "Axes", "Claws" map to "weapon_swords.xml" etc.
     // Returns empty string if no model file exists for this tactic.
-    std::string weapon_tactic_to_model_file(const std::string& tactic) const {
-        // Direct file name: tactic name lowercase + "s" for plurals
+    std::string weapon_tactic_to_model_file(const std::string& tactic) const {        // Direct file name: tactic name lowercase + "s" for plurals
         std::string lower;
         for (char c : tactic) lower += (char)std::tolower(c);
         // Handle special mappings
@@ -5279,6 +5336,11 @@ private:
     bool enemy_attack_hit_done_ = false;
     bool& is_battle_mode_ = combat_.mutable_is_battle_mode();
     bool& show_enemy_ = combat_.mutable_show_enemy();
+    // [H05/H06] The enemy's weapon subtype from the stages.xml warrior
+    // template (<Item Name="WEAPON_SWORDS"> -> list.xml SubType="Swords").
+    // Drives the enemy's REAL animation names (stance idle, attack). Fists
+    // when no template weapon resolves (dojo disciple, generic test enemy).
+    std::string enemy_weapon_subtype_ = "Fists";
 
     // [P3] Armor capsules drawn by the player body render pass (test probe:
     // "the render path consumes the equipped armor model").

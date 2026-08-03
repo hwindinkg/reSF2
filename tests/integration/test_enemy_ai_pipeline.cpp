@@ -251,13 +251,16 @@ int main() {
         bool saw_attack = false;
         bool saw_block = false;
         bool saw_non_idle_anim = false;
+        // [H07] The real idle animation name (fists1_stance_idle for fists):
+        // the invented "fists_idle" alias is gone (HARDCODE_AUDIT I03/H07).
+        const std::string kEnemyIdle = runner.game().host_get_enemy_idle_anim();
         const int kObserveFrames = 300;  // 5 s — several 0.8 s fallback windows
         for (int i = 0; i < kObserveFrames; ++i) {
             runner.run_frames(1);
             if (runner.game().host_get_enemy_pos_x() != x0) saw_move = true;
             if (runner.game().host_get_enemy_attacking()) saw_attack = true;
             if (runner.game().host_get_enemy_blocking()) saw_block = true;
-            if (runner.game().host_get_enemy_anim() != "fists_idle") {
+            if (runner.game().host_get_enemy_anim() != kEnemyIdle) {
                 saw_non_idle_anim = true;
             }
         }

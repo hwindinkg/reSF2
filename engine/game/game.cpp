@@ -2165,7 +2165,9 @@ void Game::host_update_gameplay(uint32_t dt) {
         } else if (enemy_fighter_.is_blocking) {  // block
             enemy_anim_ = "fists_block";
         } else {  // idle — the decision's wait
-            enemy_anim_ = "fists_idle";
+            // [H07] Real catalog stance idle (fists1_stance_idle for fists;
+            // the weapon's own stance idle once the loadout resolves it).
+            enemy_anim_ = enemy_idle_anim();
         }
         if (enemy_attacking_) {
             enemy_attack_duration_ -= dt_sec;
@@ -2369,7 +2371,8 @@ void Game::host_update_gameplay(uint32_t dt) {
         enemy_attacking_ = false;
         enemy_attack_duration_ = 0.0f;
         enemy_hit_flash_ = 0.0f;
-        enemy_anim_ = "fists_idle";
+        // [H07] Real catalog stance idle (not the invented fists_idle).
+        enemy_anim_ = enemy_idle_anim();
         if (location_) enemy_pos_x_ = location_->enemy_x - 983.0f;
         std::printf("[DOJO] Switched to %s\n", show_enemy_ ? "enemy fighter" : "punching bag");
         debug_log("[DOJO] Switched to %s\n", show_enemy_ ? "enemy" : "bag");
