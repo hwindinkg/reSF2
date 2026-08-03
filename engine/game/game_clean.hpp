@@ -461,6 +461,11 @@ float host_enemy_health_frac() const override;
     // 1key attack move (swords_slash for a sword loadout, high_punch for
     // fists).
     std::string host_get_enemy_attack_anim() const { return enemy_attack_anim(); }
+    // H02: the tactic->model-file fallback resolver (list.xml Model attr
+    // first, static map last).
+    std::string host_get_weapon_tactic_model_file(const std::string& subtype) const {
+        return weapon_tactic_to_model_file(subtype);
+    }
     // H06: the enemy weapon model file resolved from the stages.xml loadout
     // (list.xml Model + ".xml"); empty = unarmed loadout.
     const std::string& host_get_enemy_weapon_file() const {
@@ -3192,7 +3197,36 @@ private:
     // Map weapon tactic name to model file path.
     // Tactic names like "Swords", "Axes", "Claws" map to "weapon_swords.xml" etc.
     // Returns empty string if no model file exists for this tactic.
-    std::string weapon_tactic_to_model_file(const std::string& tactic) const {        // Direct file name: tactic name lowercase + "s" for plurals
+    std::string weapon_tactic_to_model_file(const std::string& tactic) const {
+        // [H02] The list.xml Model attr is the ONLY legitimate file-name
+        // source (LIVE_GAME_EVIDENCE Q1: "Model attribute is lowercase item
+        // id, file name matches Model + '.xml'"). The static map below
+        // invented 47 names (HARDCODE_AUDIT H02: WandererStaff->
+        // weapon_staff.xml, Shuriken->weapon_knives.xml, ...). Resolve the
+        // subtype through list.xml FIRST:
+        //   pass 1: an OWNED item of this subtype (the J/U cycle is built
+        //           from owned items, R4b) — its Model is authoritative;
+        //   pass 2: any subtype item whose model file actually ships.
+        // The static map stays only for subtypes with no list entry.
+        if (list_data_loaded_) {
+            const std::vector<std::string> owned = inventory_.all_items();
+            auto file_exists = [&](const std::string& f) {
+                for (const auto& p : model_paths(asset_root_, f.c_str()))
+                    if (std::filesystem::exists(p)) return true;
+                return false;
+            };
+            for (const auto& li : list_data_.items) {
+                if (li.subtype != tactic || li.model.empty()) continue;
+                if (std::find(owned.begin(), owned.end(), li.name) != owned.end())
+                    return li.model + ".xml";
+            }
+            for (const auto& li : list_data_.items) {
+                if (li.subtype != tactic || li.model.empty()) continue;
+                if (file_exists(li.model + ".xml"))
+                    return li.model + ".xml";
+            }
+        }
+        // Direct file name: tactic name lowercase + "s" for plurals
         std::string lower;
         for (char c : tactic) lower += (char)std::tolower(c);
         // Handle special mappings

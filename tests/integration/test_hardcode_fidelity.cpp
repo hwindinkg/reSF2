@@ -103,6 +103,52 @@ static void test_h06_enemy_weapon_from_loadout() {
     }
 }
 
+// H02: the tactic->model file map must not invent file names — the list.xml
+// Model attr is the ONLY legitimate source (LIVE_GAME_EVIDENCE Q1). The
+// 47-entry hardcoded map (HARDCODE_AUDIT H02) says
+// WandererStaff->weapon_staff.xml and Shuriken->weapon_knives.xml, but the
+// real items ship Model="weapon_wanderer_staff" / "ranged_shurikens". RED
+// on HEAD: the fallback resolver returns the invented map names.
+static void test_h02_weapon_model_from_list() {
+    std::printf("\n=== H02: weapon model file from list.xml Model, not the map ===\n");
+    resf2::test::HeadlessTestConfig config;
+    config.asset_root = "assets";
+    config.width = 1280;
+    config.height = 720;
+    config.fixed_dt_ms = 16;
+    config.start_scene = "dojo";
+    config.hermetic = true;
+
+    resf2::test::HeadlessTestRunner runner(config);
+    if (!runner.init()) {
+        resf2::test::check(false, "H02: runner init");
+        return;
+    }
+
+    // Own the sample weapons (list.xml Model attrs ship on disk). The J/U
+    // cycle starts at Fists (index 0), so J lands on the owned staff.
+    runner.game().host_add_item("WEAPON_WANDERER_STAFF");
+    runner.game().host_add_item("RANGED_SHURIKENS");
+
+    const std::string staff = runner.game().host_get_weapon_tactic_model_file("WandererStaff");
+    const std::string shuri = runner.game().host_get_weapon_tactic_model_file("Shuriken");
+    std::fprintf(stderr, "  [H02] WandererStaff->'%s' Shuriken->'%s'\n",
+                 staff.c_str(), shuri.c_str());
+    resf2::test::check_eq(staff, std::string("weapon_wanderer_staff.xml"),
+                          "H02: WandererStaff resolves list.xml Model (not map weapon_staff.xml)");
+    resf2::test::check_eq(shuri, std::string("ranged_shurikens.xml"),
+                          "H02: Shuriken resolves list.xml Model (not map weapon_knives.xml)");
+
+    // End-to-end: cycling to the owned staff loads a real weapon model.
+    runner.run_frames(20);
+    runner.tap_key(resf2::platform::Key::J, 2);  // cycle forward
+    runner.run_frames(10);
+    std::fprintf(stderr, "  [H02] after J cycle: weapon nodes=%zu\n",
+                 runner.game().host_get_player_weapon_node_count());
+    resf2::test::check(runner.game().host_get_player_weapon_node_count() > 0,
+                       "H02: the cycled owned weapon loads a real model");
+}
+
 // H05: the enemy's animations come from his weapon/model — a sword loadout
 // attacks with the sword's moves.xml 1key move (SwordsSlash ->
 // swords_slash.bin), not the hardcoded fists "high_punch"
@@ -205,6 +251,9 @@ static void test_h07_idle_alias(const resf2::test::HeadlessTestRunner& runner) {
 int main() {
     std::printf("=== Hardcode-Fidelity Wave (HARDCODE_AUDIT HIGH items) ===\n");
     std::fflush(stdout);
+
+    // ---- H02 ----
+    test_h02_weapon_model_from_list();
 
     // ---- H05 ----
     test_h05_enemy_anims_from_weapon();
