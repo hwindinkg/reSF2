@@ -471,6 +471,25 @@ float host_enemy_health_frac() const override;
     int host_get_hud_level() const { return hud_level_; }
     int host_get_hud_gold() const { return hud_gold_; }
     int host_get_hud_gems() const { return hud_gems_; }
+    // H10: fire a projectile through the real spawn path and read back what
+    // the engine resolved from list.xml (MagicDamage / Model).
+    struct HostProjectileInfo {
+        float damage = 0.0f;
+        float radius = 0.0f;
+        std::string model_file;
+    };
+    HostProjectileInfo host_fire_projectile(const std::string& magic_type) {
+        spawn_projectile(magic_type, player_pos_x_, player_pos_y_,
+                         facing_right_, true);
+        HostProjectileInfo out;
+        if (!projectiles_.empty()) {
+            const Projectile& p = projectiles_.back();
+            out.damage = p.damage;
+            out.radius = p.radius;
+            out.model_file = p.model_file;
+        }
+        return out;
+    }
     // H06: the enemy weapon model file resolved from the stages.xml loadout
     // (list.xml Model + ".xml"); empty = unarmed loadout.
     const std::string& host_get_enemy_weapon_file() const {
@@ -5566,8 +5585,30 @@ private:
         bool from_player = true;
         bool active = true;
         uint8_t r = 255, g = 100, b = 50;  // color
+        // [H10] The magic item's list.xml Model (magic_fireball.xml etc.) —
+        // the real visual source the original renders (magic_* effect
+        // sequences per moves.xml); colored circles are the fallback.
+        std::string model_file;
     };
     std::vector<Projectile> projectiles_;
+
+    // [H10] Resolve the REAL magic data from list.xml: the magic item's
+    // MagicDamage attr is the projectile's damage (MAGIC_FIRE_BALL
+    // MagicDamage="322", MAGIC_ENERGY_BALL "372", MAGIC_LIGHTNING_ARROW
+    // "609" — verified reverse/data/list.xml) and Model attr is the visual
+    // model. The old palette {255,100,50} dmg 20 etc. was invented
+    // (HARDCODE_AUDIT H10).
+    void resolve_magic_item_data(const std::string& magic_type,
+                                 float& out_damage,
+                                 std::string& out_model) const {
+        if (!list_data_loaded_) return;
+        for (const auto& li : list_data_.items) {
+            if (li.type != "Magic" || li.subtype != magic_type) continue;
+            if (li.magic_damage > 0.0f) out_damage = li.magic_damage;
+            if (!li.model.empty()) out_model = li.model + ".xml";
+            return;  // first match = the canonical item of the subtype
+        }
+    }
 
     // Spawn a projectile from the player (or enemy) toward the target.
     void spawn_projectile(const std::string& magic_type, float from_x, float from_y,
@@ -5583,19 +5624,34 @@ private:
         p.lifetime = 2.0f;
         p.age = 0;
 
-        // Color by magic type
-        if (magic_type == "FireBall") { p.r = 255; p.g = 100; p.b = 50; p.damage = 20; p.radius = 10; }
-        else if (magic_type == "Energyball") { p.r = 100; p.g = 200; p.b = 255; p.damage = 25; p.radius = 12; }
-        else if (magic_type == "LightningArrow") { p.r = 255; p.g = 255; p.b = 0; p.damage = 30; p.radius = 6; p.vy = -30; }
-        else if (magic_type == "MagicDeathRay") { p.r = 200; p.g = 50; p.b = 255; p.damage = 35; p.radius = 14; }
-        else if (magic_type == "MagicAsteroid") { p.r = 150; p.g = 80; p.b = 20; p.damage = 40; p.radius = 16; p.vy = -100; }
-        else if (magic_type == "MassBomb" || magic_type == "MagicBomb") { p.r = 255; p.g = 50; p.b = 50; p.damage = 50; p.radius = 18; }
-        else if (magic_type == "Iceball") { p.r = 150; p.g = 200; p.b = 255; p.damage = 20; p.radius = 9; }
-        else if (magic_type == "MagicFireAura") { p.r = 255; p.g = 150; p.b = 50; p.damage = 10; p.radius = 20; }
-        else if (magic_type == "RootStun") { p.r = 50; p.g = 200; p.b = 50; p.damage = 5; p.radius = 12; p.vy = -50; }
-        else if (magic_type == "Shuriken") { p.r = 200; p.g = 200; p.b = 200; p.damage = 12; p.radius = 5; }
-        else if (magic_type == "Rifle" || magic_type == "Blaster") { p.r = 255; p.g = 255; p.b = 200; p.damage = 18; p.radius = 4; speed = 600; p.vx = facing_right ? speed : -speed; }
-        else { p.r = 200; p.g = 100; p.b = 200; p.damage = 15; p.radius = 8; }
+        // [H10] Damage and visual model come from list.xml (the magic
+        // item's MagicDamage / Model attrs); the per-type palette below is
+        // the COLOR fallback only — the original renders the magic effect
+        // sequences moves.xml names (magic_fireball_start / _middle), which
+        // the dump ships but the engine does not render for projectiles yet
+        // ([HEURISTIC-TODO]: colors are the engine's stand-in).
+        float dmg = 15.0f;
+        std::string model;
+        resolve_magic_item_data(magic_type, dmg, model);
+        p.damage = dmg;
+        p.model_file = std::move(model);
+
+        // Color by magic type — FALLBACK palette only (damage comes from
+        // list.xml MagicDamage above; the invented per-type damage values
+        // are gone, HARDCODE_AUDIT H10). Spellings are the list.xml
+        // SubType values the engine spawns with.
+        if (magic_type == "FireBall" || magic_type == "Fireball") { p.r = 255; p.g = 100; p.b = 50; p.radius = 10; }
+        else if (magic_type == "Energyball" || magic_type == "EnergyBall") { p.r = 100; p.g = 200; p.b = 255; p.radius = 12; }
+        else if (magic_type == "LightningArrow") { p.r = 255; p.g = 255; p.b = 0; p.radius = 6; p.vy = -30; }
+        else if (magic_type == "MagicDeathRay") { p.r = 200; p.g = 50; p.b = 255; p.radius = 14; }
+        else if (magic_type == "MagicAsteroid") { p.r = 150; p.g = 80; p.b = 20; p.radius = 16; p.vy = -100; }
+        else if (magic_type == "MassBomb" || magic_type == "MagicBomb") { p.r = 255; p.g = 50; p.b = 50; p.radius = 18; }
+        else if (magic_type == "Iceball" || magic_type == "IceBall") { p.r = 150; p.g = 200; p.b = 255; p.radius = 9; }
+        else if (magic_type == "MagicFireAura") { p.r = 255; p.g = 150; p.b = 50; p.radius = 20; }
+        else if (magic_type == "RootStun") { p.r = 50; p.g = 200; p.b = 50; p.radius = 12; p.vy = -50; }
+        else if (magic_type == "Shuriken") { p.r = 200; p.g = 200; p.b = 200; p.radius = 5; }
+        else if (magic_type == "Rifle" || magic_type == "Blaster") { p.r = 255; p.g = 255; p.b = 200; p.radius = 4; speed = 600; p.vx = facing_right ? speed : -speed; }
+        else { p.r = 200; p.g = 100; p.b = 200; p.radius = 8; }
 
         projectiles_.push_back(p);
         std::printf("[PROJECTILE] Fired %s (%.0f,%.0f) v=(%.0f,%.0f)\n",

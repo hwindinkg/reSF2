@@ -192,6 +192,60 @@ static void test_h09_hud_from_save() {
                        "H09: HUD no longer shows the invented constants 7/72450");
 }
 
+// H10: projectile damage/visuals come from the real magic item data
+// (list.xml MagicDamage / Model attrs), not the invented palette
+// (HARDCODE_AUDIT H10: {255,100,50} dmg 20 ...). Real device values:
+// MAGIC_FIRE_BALL MagicDamage="322" Model="magic_fireball";
+// MAGIC_ENERGY_BALL "372"; MAGIC_LIGHTNING_ARROW "609" (Model magic_fireball).
+// The magic model files (magic_fireball.xml etc.) ship in the dump; colors
+// are only a clearly-logged fallback (the original renders magic_* effect
+// sequences per moves.xml — [HEURISTIC-TODO]).
+static void test_h10_projectile_from_list() {
+    std::printf("\n=== H10: projectile damage from list.xml MagicDamage ===\n");
+    resf2::test::HeadlessTestConfig config;
+    config.asset_root = "assets";
+    config.width = 1280;
+    config.height = 720;
+    config.fixed_dt_ms = 16;
+    config.start_scene = "dojo";
+    config.hermetic = true;
+
+    resf2::test::HeadlessTestRunner runner(config);
+    if (!runner.init()) {
+        resf2::test::check(false, "H10: runner init");
+        return;
+    }
+
+    runner.game().host_add_item("MAGIC_FIRE_BALL");
+    runner.game().host_add_item("MAGIC_ENERGY_BALL");
+    runner.game().host_equip_item("MAGIC_FIRE_BALL");
+
+    // Subtype spellings are the LIST.XML ones (SubType="EnergyBall",
+    // SubType="IceBall") — the engine spawns with the equipped item's
+    // subtype (sync_equipped_weapon), so list spelling is authoritative.
+    const auto fb = runner.game().host_fire_projectile("FireBall");
+    const auto eb = runner.game().host_fire_projectile("EnergyBall");
+    const auto la = runner.game().host_fire_projectile("LightningArrow");
+    std::fprintf(stderr, "  [H10] FireBall dmg=%.0f model='%s' | Energyball dmg=%.0f model='%s' | LightningArrow dmg=%.0f model='%s'\n",
+                 fb.damage, fb.model_file.c_str(),
+                 eb.damage, eb.model_file.c_str(),
+                 la.damage, la.model_file.c_str());
+    resf2::test::check_near(fb.damage, 322.0, 0.5,
+                            "H10: FireBall damage = list.xml MagicDamage (322)");
+    resf2::test::check_eq(fb.model_file, std::string("magic_fireball.xml"),
+                          "H10: FireBall model = list.xml Model (magic_fireball.xml)");
+    resf2::test::check_near(eb.damage, 372.0, 0.5,
+                            "H10: Energyball damage = list.xml MagicDamage (372)");
+    resf2::test::check_eq(eb.model_file, std::string("magic_energy_ball.xml"),
+                          "H10: Energyball model = list.xml Model (magic_energy_ball.xml)");
+    resf2::test::check_near(la.damage, 609.0, 0.5,
+                            "H10: LightningArrow damage = list.xml MagicDamage (609)");
+    resf2::test::check_eq(la.model_file, std::string("magic_fireball.xml"),
+                          "H10: LightningArrow model = list.xml Model (magic_fireball.xml)");
+    resf2::test::check(fb.damage != 20.0 && eb.damage != 25.0 && la.damage != 30.0,
+                       "H10: no invented per-type damage values (20/25/30)");
+}
+
 // H05: the enemy's animations come from his weapon/model — a sword loadout
 // attacks with the sword's moves.xml 1key move (SwordsSlash ->
 // swords_slash.bin), not the hardcoded fists "high_punch"
@@ -306,6 +360,9 @@ int main() {
 
     // ---- H09 ----
     test_h09_hud_from_save();
+
+    // ---- H10 ----
+    test_h10_projectile_from_list();
 
     // ---- H07 ----
     {
