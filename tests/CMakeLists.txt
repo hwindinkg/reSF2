@@ -48,6 +48,22 @@ target_link_libraries(test_platform_loop PRIVATE
 target_compile_features(test_platform_loop PRIVATE cxx_std_23)
 add_test(NAME test_platform_loop COMMAND test_platform_loop)
 
+# Input-path contract: pins that the Win32 GetAsyncKeyState poll path
+# (poll_key_frame, called by glfw_platform.cpp poll_events) produces the
+# same InputState timeline as TestPlatform injection for the M1 roll
+# orders / P7 held duck / D4 dialogue advance / J-U weapon cycle scenarios,
+# and pins the one documented divergence (sub-frame taps). Pure platform
+# layer, no assets — see reverse/analysis/INPUT_PATH_AUDIT.md.
+add_executable(test_input_contract
+    test_input_contract.cpp
+)
+target_link_libraries(test_input_contract PRIVATE
+    resf2_platform
+    resf2_warnings
+)
+target_compile_features(test_input_contract PRIVATE cxx_std_23)
+add_test(NAME test_input_contract COMMAND test_input_contract)
+
 # Phase 2: moves.xml parser
 add_executable(test_moves_parser
     test_moves_parser.cpp
