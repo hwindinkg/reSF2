@@ -634,6 +634,21 @@ float host_enemy_health_frac() const override;
         cy = (ay + by + dy) / 3.0f;
         return true;
     }
+    // R2: the enemy fighter's own model (stages.xml template items ->
+    // list.xml Model attrs) — the battle hit-test target.
+    std::size_t host_get_enemy_model_edge_count() const {
+        return assets_ && assets_->enemy_body_model()
+            ? assets_->enemy_body_model()->edges.size() : 0;
+    }
+    std::size_t host_get_enemy_model_capsule_count() const {
+        std::size_t n = 0;
+        if (assets_ && assets_->enemy_body_model())
+            n += assets_->enemy_body_model()->capsules.size();
+        if (assets_ && assets_->enemy_head_model())
+            n += assets_->enemy_head_model()->capsules.size();
+        return n;
+    }
+
     // ---- Soak-fix Wave 7b probes (P4-P6, P8, P9, P11, P12) ----
     // HUD/quest/dialogue/shop access for test_soak_wave7b_defects.cpp.
     // Layout accessors are the single source the renderers refactor onto,
@@ -3123,6 +3138,48 @@ private:
         const std::string helm = equipped_helm_model_file();
         if (helm.empty()) assets_->helm_model().reset();
         else assets_->load_helm_model(helm, asset_root_);
+    }
+
+    // [R2] Load the ENEMY fighter's own body/head models per the battle
+    // setup. battle_info_.enemy_name resolves to a stages.xml <Template>
+    // (by Name or FirstName); the template's <Items> are equipment names
+    // (BODY_KENJI, HEAD_DISCIPLE, ...); list.xml maps each to a model file
+    // (body_kenji.xml, head_disciple.xml — LIVE_GAME_EVIDENCE Q2-C: the
+    // defender side is the enemy fighter's own model edges). The battle hit
+    // test runs the attacker's attack edges against THIS model's capsules.
+    // Idempotent: resets both slots, then loads what the template names.
+    // No template match (generic "enemy" in tests, dojo sparring) leaves
+    // the slots empty and the hit test falls back to the player's body
+    // model — the pre-R2 behavior.
+    void load_enemy_fighter_models() {
+        if (!assets_) return;
+        assets_->enemy_body_model().reset();
+        assets_->enemy_head_model().reset();
+        if (!assets_->stages_loaded() || !list_data_loaded_) return;
+        const auto& templates = assets_->stage_data().templates;
+        const std::string& name = battle_info_.enemy_name;
+        const fmt::StageTemplate* tmpl = nullptr;
+        for (const auto& t : templates) {
+            if (t.name == name || t.first_name == name) { tmpl = &t; break; }
+        }
+        if (!tmpl) return;
+        for (const auto& item : tmpl->items) {
+            std::string model_file;
+            for (const auto& li : list_data_.items) {
+                if (li.name == item && !li.model.empty()) {
+                    model_file = li.model + ".xml";
+                    break;
+                }
+            }
+            if (model_file.empty()) continue;
+            // Body/head model files by name prefix (reverse/data ships
+            // body_*.xml / head_*.xml per fighter; the skeleton item and
+            // armor items are not hit-test targets).
+            if (model_file.rfind("body_", 0) == 0)
+                assets_->load_enemy_body_model(model_file, asset_root_);
+            else if (model_file.rfind("head_", 0) == 0)
+                assets_->load_enemy_head_model(model_file, asset_root_);
+        }
     }
     // Load a weapon model for the player from a tactic name.
     // The weapon model is stored in assets_->weapon_model() for rendering.

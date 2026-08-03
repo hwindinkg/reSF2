@@ -88,6 +88,15 @@ public:
     const std::unique_ptr<resf2::game::BodyModel>& armor_model() const { return armor_model_; }
     std::unique_ptr<resf2::game::BodyModel>& helm_model() { return helm_model_; }
     const std::unique_ptr<resf2::game::BodyModel>& helm_model() const { return helm_model_; }
+    // [R2] The ENEMY fighter's own body/head models (stages.xml warrior
+    // template items -> list.xml Model attrs, e.g. Dojo_Disciple ->
+    // BODY_KENJI -> body_kenji.xml + HEAD_DISCIPLE -> head_disciple.xml).
+    // The battle hit test runs the attacker's edges against THESE capsules
+    // (Q2-C: the defender side is the enemy fighter's own model edges).
+    std::unique_ptr<resf2::game::BodyModel>& enemy_body_model() { return enemy_body_model_; }
+    const std::unique_ptr<resf2::game::BodyModel>& enemy_body_model() const { return enemy_body_model_; }
+    std::unique_ptr<resf2::game::BodyModel>& enemy_head_model() { return enemy_head_model_; }
+    const std::unique_ptr<resf2::game::BodyModel>& enemy_head_model() const { return enemy_head_model_; }
 
     // Loading screen images
     std::vector<resf2::game::LoadingImg>& loading_images() { return loading_images_; }
@@ -125,6 +134,8 @@ public:
     void load_player_weapon(const std::string& tactic, const std::string& asset_root);
     void load_armor_model(const std::string& model_file, const std::string& asset_root);
     void load_helm_model(const std::string& model_file, const std::string& asset_root);
+    void load_enemy_body_model(const std::string& model_file, const std::string& asset_root);
+    void load_enemy_head_model(const std::string& model_file, const std::string& asset_root);
     void load_animations(const std::string& asset_root);
     void load_moves(const std::string& asset_root);
     void load_hud_font(const std::string& asset_root);
@@ -185,6 +196,8 @@ public:
     std::unique_ptr<resf2::game::BodyModel> enemy_weapon_model_;
     std::unique_ptr<resf2::game::BodyModel> armor_model_;
     std::unique_ptr<resf2::game::BodyModel> helm_model_;
+    std::unique_ptr<resf2::game::BodyModel> enemy_body_model_;
+    std::unique_ptr<resf2::game::BodyModel> enemy_head_model_;
 
     // Loading screen images
     std::vector<resf2::game::LoadingImg> loading_images_;

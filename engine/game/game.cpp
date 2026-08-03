@@ -915,6 +915,10 @@ void Game::host_set_battle_info(const BattleInfo& info) {
             }
         }
     }
+    // [R2] Load the enemy fighter's OWN body/head model per the battle
+    // setup (stages.xml template items -> list.xml Model attrs) — the
+    // battle hit test targets its capsules, not the player's body model.
+    load_enemy_fighter_models();
     std::printf("[battle] enemy voice '%s' (enemy='%s')\n",
                 enemy_voice_.c_str(), info.enemy_name.c_str());
 }
@@ -1658,6 +1662,12 @@ void Game::init_location() {
             // [P3] Equipped armor/helm models (list.xml Model attr) attach to
             // the fighter — users.xml Armor="ARMOR_ROBE" Helm="Head" (Q4).
             load_equipment_models();
+            // [R2] The enemy fighter's own model per the current battle
+            // setup (stages.xml template items -> list.xml Model attrs).
+            // Idempotent; no-op when no battle is queued (empty enemy name)
+            // or the name matches no template. Re-runs here so the Battle
+            // scene's location load picks up a battle queued mid-session.
+            load_enemy_fighter_models();
             load_punching_bag_model();
             load_animations();
             load_moves();
@@ -3804,7 +3814,8 @@ auto apply_player_damage_to_enemy = [&]() {
         enemy_fighter_.is_dead = true;
     }
 };
-if (show_enemy_ && enemy_fighter_.invuln_time <= 0 && assets_->body_model()) {
+if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
+    (assets_->enemy_body_model() || assets_->body_model())) {
                         auto pivot_it = assets_->skeleton_nodes().find("NPivot");
                         float pivot_ly = pivot_it != assets_->skeleton_nodes().end()
                                              ? pivot_it->second.y : stance_npivot_y_;
@@ -3891,8 +3902,18 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 && assets_->body_model()) {
                         };
 
                         // Build edge lookup (body_model edges + skeleton edges)
+                        // [R2] The defender is the ENEMY fighter's own model
+                        // (stages.xml template -> list.xml Model, loaded by
+                        // load_enemy_fighter_models): its capsules are the
+                        // hit target (Q2-C). Falls back to the player's body
+                        // model when the enemy has none (generic test enemy,
+                        // dojo sparring) — the pre-R2 behavior.
                         std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
-                        for (auto& e : assets_->body_model()->edges)
+                        const resf2::game::BodyModel* enemy_body =
+                            assets_->enemy_body_model()
+                                ? assets_->enemy_body_model().get()
+                                : assets_->body_model().get();
+                        for (auto& e : enemy_body->edges)
                             edge_map[e.name] = {e.end1, e.end2};
                         for (auto& [name, e] : assets_->skeleton_edges())
                             edge_map[name] = {e.end1, e.end2};
@@ -3931,15 +3952,24 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 && assets_->body_model()) {
                             if (skel_edge != assets_->skeleton_edges().end())
                                 atk_radius = skel_edge->second.radius;
 
-                            // Check against each enemy body capsule
-                            for (auto& capsule : assets_->body_model()->capsules) {
-                                auto cap_edge_it = edge_map.find(capsule.edge_name);
+                            // Check against each enemy body capsule (the
+                            // ENEMY's own model, plus its head model when
+                            // the template names one - e.g. HEAD_DISCIPLE).
+                            std::vector<const resf2::game::BodyCapsule*> enemy_capsules;
+                            for (const auto& c : enemy_body->capsules)
+                                enemy_capsules.push_back(&c);
+                            if (assets_->enemy_head_model()) {
+                                for (const auto& c : assets_->enemy_head_model()->capsules)
+                                    enemy_capsules.push_back(&c);
+                            }
+                            for (auto* capsule : enemy_capsules) {
+                                auto cap_edge_it = edge_map.find(capsule->edge_name);
                                 if (cap_edge_it == edge_map.end()) continue;
 
                                 auto [en1_wx, en1_wy] = resolve_enemy_node(cap_edge_it->second.first);
                                 auto [en2_wx, en2_wy] = resolve_enemy_node(cap_edge_it->second.second);
 
-                                float body_r = (capsule.radius1 + capsule.radius2) * 0.5f;
+                                float body_r = (capsule->radius1 + capsule->radius2) * 0.5f;
                                 if (body_r <= 0) body_r = 4.0f;  // default capsule radius
 
                                 // Segment-segment closest distance
@@ -3997,7 +4027,7 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 && assets_->body_model()) {
                                     spawn_hit_sparks(hit_x, hit_y, 10);
                                     debug_log("[HIT] f=%llu move='%s' hit enemy capsule=%s sq_dist=%.1f thresh=%.1f atk_edge=%s\n",
                                         (unsigned long long)total_frame_count_, current_move_.c_str(),
-                                        capsule.edge_name.c_str(), sq_dist, threshold * threshold,
+                                        capsule->edge_name.c_str(), sq_dist, threshold * threshold,
                                         edge_name.c_str());
                                     hit_this_interval_ = true;
                                     apply_player_damage_to_enemy();
@@ -4005,6 +4035,39 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 && assets_->body_model()) {
                                     break;
                                 }
                             }
+                        }
+                    }
+                    // [R2] Distance-based fallback for the ENEMY fighter
+                    // (mirrors the dojo bag fallback below): the precise
+                    // edge test needs the fist nearly touching the enemy
+                    // model — the attack interval (HighPunch frames 4-5)
+                    // fires early in the swing, so the hand is rarely at
+                    // full reach when it runs, and hits only landed at
+                    // point-blank (the re-soak-3 "не могу наносить урон
+                    // противнику" report — the enemy's own attack range
+                    // test uses the same move-tactic law and hit the
+                    // player from mid-range). The reach is the move's
+                    // authored tactic distance (moves.xml <Distance Max=>,
+                    // HighPunch Max=250 — the same range the enemy's
+                    // attack applies against the player).
+                    if (show_enemy_ && !hit_this_interval_ &&
+                        enemy_fighter_.invuln_time <= 0) {
+                        const float reach = move_it->second.has_distance_cond
+                            ? move_it->second.distance_max : 250.0f;
+                        const float dist = std::fabs(player_pos_x_ - enemy_pos_x_);
+                        if (dist <= reach) {
+                            enemy_fighter_.invuln_time = 0.4f;
+                            enemy_hit_flash_ = 0.25f;
+                            int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
+                            play_sound(player_attack_sound(snd_idx), 0.7f);
+                            play_sound("armor", 0.5f);
+                            const float mid_x = (player_pos_x_ + enemy_pos_x_) * 0.5f;
+                            spawn_hit_sparks(mid_x, enemy_pos_y_ + 30.0f, 10);
+                            debug_log("[HIT] f=%llu move='%s' enemy DISTANCE fallback dist=%.0f reach=%.0f\n",
+                                (unsigned long long)total_frame_count_, current_move_.c_str(),
+                                dist, reach);
+                            hit_this_interval_ = true;
+                            apply_player_damage_to_enemy();
                         }
                     }
                     // Determine attacking limb from AttackingParts in moves.xml
