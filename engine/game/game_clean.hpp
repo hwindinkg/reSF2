@@ -457,6 +457,11 @@ float host_enemy_health_frac() const override;
     // H07/H05: the enemy idle animation resolves a REAL catalog stance idle
     // (weapon-aware; Fists -> fists1_stance_idle).
     std::string host_get_enemy_idle_anim() const { return enemy_idle_anim(); }
+    // H06: the enemy weapon model file resolved from the stages.xml loadout
+    // (list.xml Model + ".xml"); empty = unarmed loadout.
+    const std::string& host_get_enemy_weapon_file() const {
+        return enemy_weapon_file_;
+    }
     const TacticDecision& host_get_enemy_last_decision() const {
         return ai_last_decision_;
     }
@@ -3292,6 +3297,15 @@ private:
         if (!assets_) return;
         assets_->enemy_body_model().reset();
         assets_->enemy_head_model().reset();
+        // [H06] The enemy WEAPON is part of the same template resolution —
+        // the stages.xml <Items> name the loadout (WEAPON_SWORDS, Fists...)
+        // and list.xml maps it to a Model file. The old
+        // load_enemy_weapon("weapon_knuckles.xml") loaded the SAME weapon
+        // for every battle (HARDCODE_AUDIT H06).
+        assets_->enemy_weapon_model().reset();
+        enemy_weapon_file_.clear();
+        enemy_weapon_subtype_ = "Fists";
+        enemy_template_resolved_ = false;
         if (!assets_->stages_loaded() || !list_data_loaded_) return;
         const auto& templates = assets_->stage_data().templates;
         const std::string& name = battle_info_.enemy_name;
@@ -3300,11 +3314,16 @@ private:
             if (t.name == name || t.first_name == name) { tmpl = &t; break; }
         }
         if (!tmpl) return;
+        enemy_template_resolved_ = true;
         for (const auto& item : tmpl->items) {
             std::string model_file;
+            std::string item_type;
+            std::string item_subtype;
             for (const auto& li : list_data_.items) {
                 if (li.name == item && !li.model.empty()) {
                     model_file = li.model + ".xml";
+                    item_type = li.type;
+                    item_subtype = li.subtype;
                     break;
                 }
             }
@@ -3316,6 +3335,18 @@ private:
                 assets_->load_enemy_body_model(model_file, asset_root_);
             else if (model_file.rfind("head_", 0) == 0)
                 assets_->load_enemy_head_model(model_file, asset_root_);
+            // [H06] The weapon slot: the template's weapon/magic/ranged
+            // item (list.xml Type) maps through its Model attr. "Fists"
+            // (Type=Weapon, no Model) resolves to NO weapon — the disciple
+            // is unarmed, exactly like the original.
+            else if (item_type == "Weapon" || item_type == "Magic" ||
+                     item_type == "Ranged") {
+                enemy_weapon_file_ = model_file;
+                enemy_weapon_subtype_ = item_subtype.empty()
+                                           ? "Fists" : item_subtype;
+                load_enemy_weapon(enemy_weapon_file_);
+                break;
+            }
         }
     }
     // Load a weapon model for the player from a tactic name.
@@ -5341,6 +5372,13 @@ private:
     // Drives the enemy's REAL animation names (stance idle, attack). Fists
     // when no template weapon resolves (dojo disciple, generic test enemy).
     std::string enemy_weapon_subtype_ = "Fists";
+    // [H06] The enemy weapon model FILE resolved from the template loadout
+    // (list.xml Model + ".xml"); empty = unarmed (Fists loadout) or no
+    // template matched.
+    std::string enemy_weapon_file_;
+    // [H06] True once a stages.xml <Template> matched battle_info_.enemy_name
+    // — distinguishes "the loadout says Fists" from "no battle queued".
+    bool enemy_template_resolved_ = false;
 
     // [P3] Armor capsules drawn by the player body render pass (test probe:
     // "the render path consumes the equipped armor model").

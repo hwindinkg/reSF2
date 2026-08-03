@@ -20,9 +20,88 @@
 #include "../check.hpp"
 
 #include <cstdio>
+#include <fstream>
 #include <string>
 
 namespace {
+
+static void suppress_stdout() {
+    // Re-point stdout at NUL so load-path printf noise stays out of ctest
+    // logs; the tests that need stdout capture reopen it around init().
+    std::freopen("NUL", "w", stdout);
+}
+
+// Battle harness shared by the combat probes: queue a battle against a
+// stages.xml warrior template (runner must already be constructed).
+static void configure_battle(resf2::test::HeadlessTestRunner& runner,
+                             const std::string& enemy_name) {
+    scene::SceneHost::BattleInfo info;
+    info.enemy_name = enemy_name;
+    info.rounds = 1;
+    info.round_time_s = 99;
+    runner.game().host_set_battle_info(info);
+    runner.game().host_set_battle_mode(true);
+    runner.game().host_set_show_enemy(true);
+}
+
+// Construct + init a battle-scene runner and queue the given enemy.
+static resf2::test::HeadlessTestRunner* init_battle_runner(
+    resf2::test::HeadlessTestRunner& runner, const std::string& enemy_name) {
+    if (!runner.init()) {
+        std::fprintf(stderr, "FAIL: battle runner init() returned false\n");
+        return nullptr;
+    }
+    configure_battle(runner, enemy_name);
+    return &runner;
+}
+
+// H06: the enemy weapon comes from the battle setup — the stages.xml
+// warrior template's <Items> (WEAPON_SWORDS) -> list.xml Model attr
+// (weapon_swords.xml). HARDCODE_AUDIT H06: game.cpp loaded
+// "weapon_knuckles.xml" for EVERY battle; a sword loadout must load the
+// sword's model. RED on HEAD: the load log names weapon_knuckles.xml even
+// for Man_Swords.
+static void test_h06_enemy_weapon_from_loadout() {
+    std::printf("\n=== H06: enemy weapon from the stages.xml loadout ===\n");
+    resf2::test::HeadlessTestConfig config;
+    config.asset_root = "assets";
+    config.width = 1280;
+    config.height = 720;
+    config.fixed_dt_ms = 16;
+    config.start_scene = "battle";
+    config.hermetic = true;
+    resf2::test::HeadlessTestRunner runner(config);
+    if (!init_battle_runner(runner, "Man_Swords")) {
+        std::fprintf(stderr, "FAIL: H06 runner unusable\n");
+        return;
+    }
+
+    const std::string file = runner.game().host_get_enemy_weapon_file();
+    std::fprintf(stderr, "  [H06] enemy weapon file='%s' nodes=%zu\n",
+                 file.c_str(), runner.game().host_get_enemy_weapon_node_count());
+    resf2::test::check_eq(file, std::string("weapon_swords.xml"),
+                          "H06: the sword loadout resolves ITS weapon model file");
+    resf2::test::check(runner.game().host_get_enemy_weapon_node_count() > 0,
+                       "H06: the sword weapon model loads with >0 nodes");
+
+    // A FISTS loadout (Dojo_Disciple: <Item Name=\"Fists\"/>) carries NO
+    // weapon — the disciple is unarmed; loading knuckles for him would be
+    // the old every-battle substitute.
+    resf2::test::HeadlessTestConfig fists_cfg = config;
+    resf2::test::HeadlessTestRunner fists(fists_cfg);
+    if (init_battle_runner(fists, "Dojo_Disciple")) {
+        std::fprintf(stderr, "  [H06] fists enemy: file='%s' nodes=%zu\n",
+                     fists.game().host_get_enemy_weapon_file().c_str(),
+                     fists.game().host_get_enemy_weapon_node_count());
+        resf2::test::check(fists.game().host_get_enemy_weapon_file().empty(),
+                           "H06: the fists loadout resolves NO weapon model file");
+        resf2::test::check_eq(fists.game().host_get_enemy_weapon_node_count(),
+                              std::size_t(0),
+                              "H06: the unarmed disciple loads no weapon model");
+    } else {
+        resf2::test::check(false, "H06: fists runner init");
+    }
+}
 
 // H07: the invented "fists_idle" alias (HARDCODE_AUDIT I03/H07,
 // asset_manager.cpp:845) is gone from the catalog, and the enemy idle
@@ -49,6 +128,9 @@ static void test_h07_idle_alias(const resf2::test::HeadlessTestRunner& runner) {
 int main() {
     std::printf("=== Hardcode-Fidelity Wave (HARDCODE_AUDIT HIGH items) ===\n");
     std::fflush(stdout);
+
+    // ---- H06 ----
+    test_h06_enemy_weapon_from_loadout();
 
     // ---- H07 ----
     {

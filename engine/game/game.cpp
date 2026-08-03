@@ -1714,8 +1714,20 @@ void Game::init_location() {
             load_moves();
             load_internal_settings();
             load_tactics();
-            // Load enemy weapon
-            load_enemy_weapon("weapon_knuckles.xml");
+            // [H06] Load enemy weapon — resolved from the battle setup
+            // (stages.xml template <Items> -> list.xml Model) by
+            // load_enemy_fighter_models(). The old hardcoded
+            // "weapon_knuckles.xml" loaded the SAME weapon for every battle
+            // (HARDCODE_AUDIT H06). Fallback: no template matched (dojo
+            // sparring, generic test enemy) keeps the real weapon_knuckles.xml
+            // as the visual default (U1 render pin); a template that resolved
+            // to Fists loads NO weapon (the disciple is unarmed).
+            if (enemy_template_resolved_) {
+                if (!enemy_weapon_file_.empty())
+                    load_enemy_weapon(enemy_weapon_file_);
+            } else {
+                load_enemy_weapon("weapon_knuckles.xml");
+            }
             // Load player's equipped weapon model
             load_player_weapon(equipped_weapon_);
             auto lang = load_user_settings_language(asset_root_);
