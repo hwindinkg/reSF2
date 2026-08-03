@@ -1274,6 +1274,11 @@ void Game::sync_equipped_weapon() {
                     if (location_loaded_) load_player_weapon(equipped_weapon_);
                 }
             }
+            // [H01/R4] The J/U cycle follows the save's OWNED weapons
+            // (HARDCODE_AUDIT H01: the hardcoded tactic list cycled weapons
+            // the player doesn't own — U handed out Machete on a knives
+            // save). Runs on every equip/unequip/save-load sync.
+            rebuild_weapon_cycle();
 }
 
 void Game::rebuild_fighter_attributes() {
@@ -3960,11 +3965,46 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                             if (edge_name.empty() || enemy_hit) break;
 
                             // Get attacking edge endpoints in world space (player)
+                            // [R4] The attacker side resolves against the
+                            // ATTACKER's model (LIVE_GAME_EVIDENCE Q2-A/B):
+                            // unarmed moves name the fighter BODY's skeleton
+                            // edges (EForearm_2 ...), weapon moves name the
+                            // WEAPON model's edges (WEAPON_SWORDS-Blade_2,
+                            // WEAPON_KNIVES-Edge17_1 ...). The old lookup
+                            // only checked skeleton_edges, so EVERY weapon
+                            // edge fell into the wrist guess with radius 0
+                            // — machete/sword attacks could not connect
+                            // except at point-blank (re-soak-4: "удары
+                            // мачете не наносят урон").
                             auto skel_edge = assets_->skeleton_edges().find(edge_name);
                             std::string atk_n1, atk_n2;
+                            bool weapon_edge = false;
+                            float weapon_edge_radius = 0.0f;
                             if (skel_edge != assets_->skeleton_edges().end()) {
                                 atk_n1 = skel_edge->second.end1;
                                 atk_n2 = skel_edge->second.end2;
+                            } else if (assets_->weapon_model()) {
+                                // Weapon-model edge (Q2-B): endpoints are
+                                // the weapon's own MacroNodes — resolved
+                                // with the same LCC vertex law the render
+                                // uses, radius from the weapon edge.
+                                for (const auto& we : assets_->weapon_model()->edges) {
+                                    if (we.name != edge_name) continue;
+                                    atk_n1 = we.end1;
+                                    atk_n2 = we.end2;
+                                    weapon_edge = true;
+                                    weapon_edge_radius = we.radius;
+                                    break;
+                                }
+                                if (atk_n1.empty()) {
+                                    if (edge_name.find("Foot") != std::string::npos ||
+                                        edge_name.find("Calf") != std::string::npos ||
+                                        edge_name.find("Leg") != std::string::npos) {
+                                        atk_n1 = "NToe_1"; atk_n2 = "NAnkle_1";
+                                    } else {
+                                        atk_n1 = "NWrist_1"; atk_n2 = "NKnuckles_1";
+                                    }
+                                }
                             } else {
                                 if (edge_name.find("Foot") != std::string::npos ||
                                     edge_name.find("Calf") != std::string::npos ||
@@ -3975,18 +4015,38 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                                 }
                             }
 
-                            auto [atk1_wx, atk1_wy] = resolve_body_node(
-                                atk_n1, player_pos_x_,
-                                player_pos_y_ + y_adjust_smoothed_,
-                                facing_right_, pivot_ly);
-                            auto [atk2_wx, atk2_wy] = resolve_body_node(
-                                atk_n2, player_pos_x_,
-                                player_pos_y_ + y_adjust_smoothed_,
-                                facing_right_, pivot_ly);
+                            float atk1_wx, atk1_wy, atk2_wx, atk2_wy;
+                            if (weapon_edge && assets_->weapon_model()) {
+                                const float wdir = facing_right_ ? 1.0f : -1.0f;
+                                if (!resolve_player_weapon_vertex(
+                                        *assets_->weapon_model(), atk_n1,
+                                        player_pos_x_,
+                                        player_pos_y_ + y_adjust_smoothed_,
+                                        wdir, pivot_ly, true, atk1_wx, atk1_wy) ||
+                                    !resolve_player_weapon_vertex(
+                                        *assets_->weapon_model(), atk_n2,
+                                        player_pos_x_,
+                                        player_pos_y_ + y_adjust_smoothed_,
+                                        wdir, pivot_ly, true, atk2_wx, atk2_wy))
+                                    continue;  // unresolvable weapon anchor
+                            } else {
+                                auto [ax, ay] = resolve_body_node(
+                                    atk_n1, player_pos_x_,
+                                    player_pos_y_ + y_adjust_smoothed_,
+                                    facing_right_, pivot_ly);
+                                auto [bx, by] = resolve_body_node(
+                                    atk_n2, player_pos_x_,
+                                    player_pos_y_ + y_adjust_smoothed_,
+                                    facing_right_, pivot_ly);
+                                atk1_wx = ax; atk1_wy = ay;
+                                atk2_wx = bx; atk2_wy = by;
+                            }
 
                             float atk_radius = 0;
                             if (skel_edge != assets_->skeleton_edges().end())
                                 atk_radius = skel_edge->second.radius;
+                            else if (weapon_edge)
+                                atk_radius = weapon_edge_radius;
 
                             // Check against each enemy body capsule (the
                             // ENEMY's own model, plus its head model when

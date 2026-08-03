@@ -131,13 +131,93 @@ static void test_r4_default_save_no_double_draw() {
           "R4a: equipping a REAL armor (ARMOR_ROBE) still draws its overlay");
 }
 
+// ---------- R4b: weapon attack edges resolve against the WEAPON model ----------
+//
+// Q2-B: weapon moves reference the WEAPON model's edges (WEAPON_SWORDS-
+// Blade_2 ...). The probe resolves an attack edge with the SAME law the
+// battle hit test uses: skeleton edge first, then the equipped weapon
+// model's edge (MacroNode LCC law, radius from the weapon edge).
+static void test_r4_weapon_edge_resolution() {
+    std::printf("\n=== R4b: weapon attack edges resolve on the weapon model ===\n");
+    resf2::test::HeadlessTestRunner runner = make_dojo_runner(true);
+    if (!runner.init()) { std::fprintf(stderr, "FAIL: R4b init() failed\n"); ++tests_failed; return; }
+
+    runner.game().host_add_item("WEAPON_MACHETE");
+    const bool equipped = runner.game().host_equip_item("WEAPON_MACHETE");
+    CHECK(equipped, "R4b: the machete equips (WEAPON_MACHETE -> SubType Machete)");
+    warm_up(runner);
+
+    // A body edge still resolves through the skeleton.
+    float x1 = 0, y1 = 0, x2 = 0, y2 = 0, r = -1;
+    const bool body_edge = runner.game().host_resolve_attack_edge(
+        "EHand_2", x1, y1, x2, y2, r);
+    std::fprintf(stderr, "  [R4b] EHand_2 resolved=%d r=%.1f span=%.1f\n",
+                 (int)body_edge, r, std::hypot(x2 - x1, y2 - y1));
+    CHECK(body_edge, "R4b: a skeleton attack edge resolves (EHand_2)");
+
+    // The machete model's blade edge (SwordsSlash AttackingParts).
+    float bx1 = 0, by1 = 0, bx2 = 0, by2 = 0, br = -1;
+    const bool blade_edge = runner.game().host_resolve_attack_edge(
+        "WEAPON_SWORDS-Blade_2", bx1, by1, bx2, by2, br);
+    const float bspan = std::hypot(bx2 - bx1, by2 - by1);
+    std::fprintf(stderr, "  [R4b] WEAPON_SWORDS-Blade_2 resolved=%d r=%.1f span=%.1f\n",
+                 (int)blade_edge, br, bspan);
+    CHECK(blade_edge, "R4b: a weapon attack edge resolves on the weapon model");
+    CHECK(br > 3.0f, "R4b: the blade edge carries its authored radius (>3)");
+    CHECK(bspan > 30.0f,
+          "R4b: the blade segment is the full blade (not the wrist guess)");
+
+    // Unmatched names (e.g. another weapon's edge) resolve to false.
+    float ux1 = 0, uy1 = 0, ux2 = 0, uy2 = 0, ur = -1;
+    const bool unknown = runner.game().host_resolve_attack_edge(
+        "WEAPON_KNIVES-Edge17_1", ux1, uy1, ux2, uy2, ur);
+    CHECK(!unknown, "R4b: a foreign weapon's edge does not resolve");
+}
+
+// ---------- R4b: the J/U cycle follows the OWNED weapons ----------
+//
+// HARDCODE_AUDIT H01: the hardcoded tactic cycle handed out weapons the
+// save doesn't own — pressing U on a knives-only save produced Machete.
+// The cycle must be Fists + the owned list.xml Type="Weapon" subtypes (in
+// list.xml order), with NO magic/ranged names.
+static void test_r4_weapon_cycle_owned_only() {
+    std::printf("\n=== R4b: the J/U weapon cycle = owned weapons ===\n");
+    resf2::test::HeadlessTestRunner runner = make_dojo_runner(true);
+    if (!runner.init()) { std::fprintf(stderr, "FAIL: R4b cycle init() failed\n"); ++tests_failed; return; }
+
+    runner.game().host_add_item("WEAPON_KNIVES");
+    runner.game().host_add_item("WEAPON_MACHETE");
+    const bool equipped = runner.game().host_equip_item("WEAPON_KNIVES");
+    CHECK(equipped, "R4b: the knives equip (sync rebuilds the cycle)");
+
+    const std::vector<std::string> cycle = runner.game().host_get_weapon_cycle();
+    std::string joined;
+    for (const auto& w : cycle) joined += (joined.empty() ? "" : ",") + w;
+    std::fprintf(stderr, "  [R4b] cycle = [%s]\n", joined.c_str());
+    bool has_fists = false, has_knives = false, has_machete = false, has_magic = false;
+    for (const auto& w : cycle) {
+        if (w == "Fists") has_fists = true;
+        if (w == "Knives") has_knives = true;
+        if (w == "Machete") has_machete = true;
+        if (w == "FireBall" || w == "Energyball" || w == "Shuriken" ||
+            w == "LightningArrow" || w == "Rifle")
+            has_magic = true;
+    }
+    CHECK(has_fists && has_knives && has_machete,
+          "R4b: the cycle lists Fists + the two OWNED weapons");
+    CHECK(!has_magic,
+          "R4b: no magic/ranged names in the melee weapon cycle");
+}
+
 int main() {
-    std::printf("=== Soak re-soak-4 regression probes (R4a render) ===\n");
+    std::printf("=== Soak re-soak-4 regression probes (R4a render, R4b weapon) ===\n");
     std::fflush(stdout);
 
     suppress_stdout();
 
     test_r4_default_save_no_double_draw();
+    test_r4_weapon_edge_resolution();
+    test_r4_weapon_cycle_owned_only();
 
     std::printf("\n=== re-soak-4 probes: %d passed, %d failed ===\n",
                 tests_passed, tests_failed);

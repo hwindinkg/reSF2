@@ -549,6 +549,53 @@ float host_enemy_health_frac() const override;
     // [R4] The helm overlay drawn last frame (head.xml re-draw as "helm" is
     // the naked fighter, not armor — see load_equipment_models).
     int host_get_helm_capsules_drawn() const { return helm_capsules_drawn_; }
+    // [R4] The J/U weapon cycle (HARDCODE_AUDIT H01: owned weapons only).
+    std::vector<std::string> host_get_weapon_cycle() const {
+        return weapon_cycle_list_;
+    }
+    // [R4] Resolve an attack edge (moves.xml AttackingParts) to its world
+    // endpoints + radius with the SAME law the battle hit test uses: the
+    // skeleton edge when the name is a body edge, else the equipped WEAPON
+    // model's edge (Q2-B: weapon moves reference WEAPON_<NAME>-Edge*_1 /
+    // WEAPON_SWORDS-Blade_* on the weapon model — the weapon vertex law,
+    // animated). Returns false when neither resolves (unarmed, unknown name).
+    bool host_resolve_attack_edge(const std::string& edge_name,
+                                  float& x1, float& y1, float& x2, float& y2,
+                                  float& radius) {
+        const auto pit = assets_->skeleton_nodes().find("NPivot");
+        const float pivot_ly = pit != assets_->skeleton_nodes().end()
+                                   ? pit->second.y : stance_npivot_y_;
+        const float world_cx = player_pos_x_;
+        const float world_cy = player_pos_y_ + y_adjust_smoothed_;
+        const float dir = facing_right_ ? 1.0f : -1.0f;
+        auto skel_edge = assets_->skeleton_edges().find(edge_name);
+        if (skel_edge != assets_->skeleton_edges().end()) {
+            radius = skel_edge->second.radius;
+            auto [ax, ay] = resolve_body_node(skel_edge->second.end1,
+                world_cx, world_cy, facing_right_, pivot_ly);
+            auto [bx, by] = resolve_body_node(skel_edge->second.end2,
+                world_cx, world_cy, facing_right_, pivot_ly);
+            x1 = ax; y1 = ay; x2 = bx; y2 = by;
+            return true;
+        }
+        // Weapon-model edge (Q2-B): the endpoints are MacroNodes on the
+        // weapon model — resolve via the weapon LCC vertex law (the render
+        // law), radius from the weapon edge.
+        if (assets_->weapon_model()) {
+            auto& wm = *assets_->weapon_model();
+            for (const auto& we : wm.edges) {
+                if (we.name != edge_name) continue;
+                if (!resolve_player_weapon_vertex(wm, we.end1, world_cx,
+                        world_cy, dir, pivot_ly, true, x1, y1) ||
+                    !resolve_player_weapon_vertex(wm, we.end2, world_cx,
+                        world_cy, dir, pivot_ly, true, x2, y2))
+                    return false;
+                radius = we.radius;
+                return true;
+            }
+        }
+        return false;
+    }
     bool host_ui_texture_loaded(const std::string& name) const {
         auto it = assets_->hud_textures().find(name);
         return it != assets_->hud_textures().end() && it->second != nullptr;
@@ -5239,17 +5286,53 @@ private:
     // by 5.4 (weapons) / 7.2 (saves).
     std::string equipped_ranged_;
     std::string equipped_magic_;
-    // Cycle list for weapon switching (J key cycles, N key to previous)
-    std::vector<std::string> weapon_cycle_list_ = {
-        "Fists", "Swords", "Axes", "Claws", "Knuckles", "Daggers",
-        "Katana", "Spear", "Staff", "Glaive", "TwoHanded", "CompositeSword",
-        "CompositeSpear", "CompositeStaff", "CompositeScythe",
-        "BigSwords", "Sai", "Tonfa", "Fans", "Kusarigama", "Nunchaku",
-        "NinjaSword", "Sickles", "Batons", "Knobsticks",
-        "Rifle", "GiantSword", "PowerFists", "Machete",
-        "FireBall", "Energyball", "LightningArrow", "Shuriken"
-    };
+    // Cycle list for weapon switching (J key cycles, U key to previous).
+    // [H01/R4] Built from the SAVE's OWNED weapons — the original has no
+    // keyboard weapon cycle (J/U is a dev key; the game equips via the
+    // inventory/shop). The old hardcoded tactic list handed the player
+    // weapons they don't own (U -> Machete on a knives-only save —
+    // HARDCODE_AUDIT H01) and included magic/ranged names that are not
+    // melee cycles. Rebuilt by rebuild_weapon_cycle() whenever the
+    // inventory/equipment changes (sync_equipped_weapon).
+    std::vector<std::string> weapon_cycle_list_ = {"Fists"};
     int weapon_cycle_index_ = 0;
+
+    // [H01/R4] Rebuild the J/U cycle from the owned list.xml Type="Weapon"
+    // items (in list.xml order, deduped by SubType; Fists always first).
+    void rebuild_weapon_cycle() {
+        std::vector<std::string> next = {"Fists"};
+        if (list_data_loaded_) {
+            // Owned = inventory items + the equipped slots (the equipped
+            // weapon leaves items_ — same union host_get_owned_items uses).
+            std::vector<std::string> owned = inventory_.all_items();
+            for (const auto& slot : inventory::kAllSlots) {
+                const std::string eq = inventory_.equipped(slot);
+                if (!eq.empty()) owned.push_back(eq);
+            }
+            for (const auto& li : list_data_.items) {
+                if (li.type != "Weapon") continue;
+                bool has = false;
+                for (const auto& id : owned)
+                    if (id == li.name) { has = true; break; }
+                if (!has) continue;
+                const std::string sub =
+                    li.subtype.empty() ? li.name : li.subtype;
+                bool dup = false;
+                for (const auto& w : next)
+                    if (w == sub) { dup = true; break; }
+                if (!dup) next.push_back(sub);
+            }
+        }
+        weapon_cycle_list_ = std::move(next);
+        // Anchor the index on the currently equipped weapon.
+        weapon_cycle_index_ = 0;
+        for (std::size_t i = 0; i < weapon_cycle_list_.size(); ++i) {
+            if (weapon_cycle_list_[i] == equipped_weapon_) {
+                weapon_cycle_index_ = (int)i;
+                break;
+            }
+        }
+    }
 
     // Check if a move is allowed for the currently equipped weapon.
     // Returns true if the move has no tactic_weapon requirement,
