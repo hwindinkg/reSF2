@@ -1050,6 +1050,9 @@ void Game::host_add_item(const std::string& item_id) {
     if (inventory_.has_item(item_id)) return;
     inventory_.add_item(item_id);
     player_profile_.add_item(item_id);
+    // [H02] The J/U cycle follows OWNED weapons (R4b) — the seam mirrors
+    // host_buy_item's writes, which sync the cycle on every inventory change.
+    sync_equipped_weapon();
 }
 
 bool Game::host_buy_item(const std::string& item_id) {
