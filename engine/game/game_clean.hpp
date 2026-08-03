@@ -492,6 +492,13 @@ float host_enemy_health_frac() const override;
     }
     // A01: the loaded asset catalog (moves map etc.) for the fidelity tests.
     const AssetManager& host_assets() const { return *assets_; }
+    // H08: does the enemy's current swing connect via the model-edge
+    // collision path (mirror of the R2 hit test)?
+    bool host_enemy_attack_connects() { return enemy_attack_connects(); }
+    // H08: place the enemy for the collision probe (read-only getter
+    // exists; tests position the pair at controlled distances).
+    void host_set_enemy_pos_x(float x) { enemy_pos_x_ = x; }
+    void host_set_player_pos_x(float x) { player_pos_x_ = x; }
     // H06: the enemy weapon model file resolved from the stages.xml loadout
     // (list.xml Model + ".xml"); empty = unarmed loadout.
     const std::string& host_get_enemy_weapon_file() const {
@@ -3219,6 +3226,251 @@ private:
         return (ai_last_decision_.animation == "Duck") ? "duck" : "high_block";
     }
     std::string enemy_hit_anim() const { return "high_hit"; }
+
+    // [H08] The enemy's swing connects via MODEL-EDGE COLLISION — the R2
+    // hit-test path mirrored: the enemy's attacking edges (the attack
+    // move's AttackingParts: skeleton edges for fists, the ENEMY WEAPON
+    // model's edges for a loadout weapon) run against the PLAYER's body
+    // capsules (body.xml + helm). The old `dist <= 250` test was a
+    // placeholder (HARDCODE_AUDIT H08); it stays ONLY as a documented
+    // fallback when the collision path cannot run (no player body model,
+    // no resolvable move/edges — placeholder mode).
+    bool enemy_attack_connects() {
+        if (!assets_ || !assets_->body_model()) return enemy_distance_hit_ok();
+        // The enemy's attack move: the move whose FileName matches the
+        // resolved attack animation (e.g. SwordsSlash -> swords_slash.bin).
+        const std::string anim = enemy_attack_anim();
+        const MoveDef* move = nullptr;
+        for (const auto& [mn, mv] : assets_->moves()) {
+            (void)mn;
+            if (mv.filename == anim + ".bin") { move = &mv; break; }
+        }
+        if (!move || move->attack_edges.empty()) return enemy_distance_hit_ok();
+        // Enemy-side node positions from the ENEMY's current animation
+        // (mirror of the R2 player->enemy path).
+        std::unordered_map<std::string, std::pair<float, float>> enemy_node_pos;
+        auto enemy_anim_it = assets_->animations().find(enemy_anim_);
+        int frame = 0, next = 0;
+        float alpha = 0.0f;
+        bool has_anim = false;
+        if (enemy_anim_it != assets_->animations().end() &&
+            enemy_anim_it->second.frame_count > 0) {
+            has_anim = true;
+            const auto& anim_data = enemy_anim_it->second;
+            float f = enemy_anim_time_ * 20.0f;  // enemy fixed 20fps
+            if (f < 0) f = 0;
+            int fi = (int)f;
+            frame = anim_data.frame_count > 0 ? fi % anim_data.frame_count : 0;
+            next = (frame + 1) % anim_data.frame_count;
+            alpha = f - (int)f;
+            const auto& names = assets_->ordered_node_names();
+            // [H08] The .bin animations store ABSOLUTE node coordinates; the
+            // AnimationPlayer law converts to pivot-relative by subtracting
+            // the frame's NPivot (ix - npivot_x, iy - npivot_y). The R2
+            // copy used them raw, which put the enemy body ~330 units off
+            // whenever an animation was playing (the hit test silently
+            // missed in real fights).
+            int npivot_idx = -1;
+            for (int i = 0; i < (int)names.size(); ++i)
+                if (names[i] == "NPivot") { npivot_idx = i; break; }
+            float npx = 0.0f, npy = 0.0f;
+            if (npivot_idx >= 0) {
+                float z0 = 0.0f;
+                anim_data.get_node_pos(frame, npivot_idx, npx, npy, z0);
+            }
+            for (int i = 0; i < (int)names.size() && i < 67; ++i) {
+                float x0, y0, z0, x1, y1, z1;
+                if (anim_data.get_node_pos(frame, i, x0, y0, z0) &&
+                    anim_data.get_node_pos(next, i, x1, y1, z1)) {
+                    enemy_node_pos[names[i]] = {
+                        x0 + (x1 - x0) * alpha - npx,
+                        y0 + (y1 - y0) * alpha - npy};
+                }
+            }
+        }
+        auto pivot_it = assets_->skeleton_nodes().find("NPivot");
+        const float pivot_ly = pivot_it != assets_->skeleton_nodes().end()
+                                   ? pivot_it->second.y : stance_npivot_y_;
+
+        // Enemy node -> world (mirror of the R2 resolve_enemy_node).
+        // [H08] Two coordinate laws: ANIMATION positions are pivot-relative
+        // (ix - npivot, iy - npivot), so the world pivot sits AT enemy_y;
+        // SKELETON rest positions are rest-relative (rest_y - pivot_ly).
+        auto resolve_enemy_node = [&](const std::string& name)
+            -> std::pair<float, float> {
+            float lx = 0, ly = 0;
+            bool from_anim = false;
+            bool found = false;
+            auto eit = enemy_node_pos.find(name);
+            if (eit != enemy_node_pos.end()) { lx = eit->second.first;
+                                               ly = eit->second.second;
+                                               from_anim = true;
+                                               found = true; }
+            if (!found) {
+                auto sit = assets_->skeleton_nodes().find(name);
+                if (sit != assets_->skeleton_nodes().end()) {
+                    lx = sit->second.x; ly = sit->second.y; found = true;
+                }
+            }
+            if (!found) return {enemy_pos_x_, enemy_pos_y_};
+            const float wy = from_anim
+                ? (enemy_pos_y_ + enemy_y_adjust_) + ly
+                : (enemy_pos_y_ + enemy_y_adjust_) + (ly - pivot_ly);
+            return {enemy_pos_x_ + (enemy_facing_right_ ? lx : -lx), wy};
+        };
+        // Enemy weapon vertex -> world (macro LCC law over the ENEMY's
+        // skeleton/anim positions; mirror of resolve_player_weapon_vertex).
+        std::function<bool(const resf2::game::BodyModel&, const std::string&,
+                           float&, float&)> resolve_enemy_weapon_vertex;
+        resolve_enemy_weapon_vertex =
+            [&](const resf2::game::BodyModel& wm, const std::string& name,
+                float& wx, float& wy) -> bool {
+            auto mit = wm.macro_nodes.find(name);
+            if (mit != wm.macro_nodes.end()) {
+                float sum = 0.0f, ax = 0.0f, ay = 0.0f;
+                for (int i = 0; i < 4; ++i) {
+                    if (mit->second.children[i].empty()) continue;
+                    float cx, cy;
+                    if (!resolve_enemy_weapon_vertex(
+                            wm, mit->second.children[i], cx, cy))
+                        continue;
+                    ax += cx * mit->second.lcc[i];
+                    ay += cy * mit->second.lcc[i];
+                    sum += mit->second.lcc[i];
+                }
+                if (std::fabs(sum) > 1e-6f) { wx = ax / sum; wy = ay / sum;
+                                              return true; }
+                return false;
+            }
+            auto nit = wm.nodes.find(name);
+            if (nit != wm.nodes.end()) {
+                wx = enemy_pos_x_ + (enemy_facing_right_ ? nit->second.x
+                                                         : -nit->second.x);
+                wy = (enemy_pos_y_ + enemy_y_adjust_) +
+                     (nit->second.y - pivot_ly);
+                return true;
+            }
+            auto pit = enemy_node_pos.find(name);
+            if (pit != enemy_node_pos.end()) {
+                wx = enemy_pos_x_ + (enemy_facing_right_ ? pit->second.first
+                                                         : -pit->second.first);
+                wy = (enemy_pos_y_ + enemy_y_adjust_) + pit->second.second;
+                return true;
+            }
+            auto sit = assets_->skeleton_nodes().find(name);
+            if (sit != assets_->skeleton_nodes().end()) {
+                wx = enemy_pos_x_ + (enemy_facing_right_ ? sit->second.x
+                                                         : -sit->second.x);
+                wy = (enemy_pos_y_ + enemy_y_adjust_) +
+                     (sit->second.y - pivot_ly);
+                return true;
+            }
+            return false;
+        };
+
+        // Edge lookup: skeleton edges + the ENEMY weapon model edges (the
+        // attacker side, Q2-A/B: unarmed moves name skeleton edges, weapon
+        // moves name the WEAPON model's edges).
+        std::unordered_map<std::string, std::pair<std::string, std::string>> edge_map;
+        for (const auto& [name, e] : assets_->skeleton_edges())
+            edge_map[name] = {e.end1, e.end2};
+        const resf2::game::BodyModel* ewm = assets_->enemy_weapon_model().get();
+        if (ewm)
+            for (const auto& e : ewm->edges)
+                edge_map[e.name] = {e.end1, e.end2};
+
+        // Player-side capsule edge map: the player's body model edges +
+        // skeleton edges (mirror of the R2 defender side).
+        std::unordered_map<std::string, std::pair<std::string, std::string>> player_edge_map;
+        for (const auto& e : assets_->body_model()->edges)
+            player_edge_map[e.name] = {e.end1, e.end2};
+        for (const auto& [name, e] : assets_->skeleton_edges())
+            player_edge_map[name] = {e.end1, e.end2};
+
+        // Player-side capsules: body model (+ helm/head when present).
+        std::vector<const resf2::game::BodyCapsule*> player_capsules;
+        for (const auto& c : assets_->body_model()->capsules)
+            player_capsules.push_back(&c);
+        if (assets_->helm_model())
+            for (const auto& c : assets_->helm_model()->capsules)
+                player_capsules.push_back(&c);
+        if (player_capsules.empty()) return enemy_distance_hit_ok();
+        const float pcx = player_pos_x_;
+        const float pcy = player_pos_y_ + y_adjust_smoothed_;
+
+        for (const auto& edge_name : move->attack_edges) {
+            if (edge_name.empty()) continue;
+            const auto eit = edge_map.find(edge_name);
+            if (eit == edge_map.end()) continue;
+            float atk_radius = 0.0f;
+            if (const auto se = assets_->skeleton_edges().find(edge_name);
+                se != assets_->skeleton_edges().end())
+                atk_radius = se->second.radius;
+            else if (ewm)
+                for (const auto& we : ewm->edges)
+                    if (we.name == edge_name) { atk_radius = we.radius; break; }
+
+            float atk1_wx, atk1_wy, atk2_wx, atk2_wy;
+            if (ewm && ewm->macro_nodes.count(eit->second.first)) {
+                if (!resolve_enemy_weapon_vertex(
+                        *ewm, eit->second.first, atk1_wx, atk1_wy) ||
+                    !resolve_enemy_weapon_vertex(
+                        *ewm, eit->second.second, atk2_wx, atk2_wy))
+                    continue;
+            } else {
+                auto [ax, ay] = resolve_enemy_node(eit->second.first);
+                auto [bx, by] = resolve_enemy_node(eit->second.second);
+                atk1_wx = ax; atk1_wy = ay;
+                atk2_wx = bx; atk2_wy = by;
+            }
+            for (const auto* capsule : player_capsules) {
+                const auto cap_it = player_edge_map.find(capsule->edge_name);
+                if (cap_it == player_edge_map.end()) continue;
+                auto [p1_wx, p1_wy] = resolve_body_node(
+                    cap_it->second.first, pcx, pcy, facing_right_, pivot_ly);
+                auto [p2_wx, p2_wy] = resolve_body_node(
+                    cap_it->second.second, pcx, pcy, facing_right_, pivot_ly);
+                float body_r = (capsule->radius1 + capsule->radius2) * 0.5f;
+                if (body_r <= 0) body_r = 4.0f;
+                // Segment-segment closest distance (same law as R2).
+                float ex = atk2_wx - atk1_wx, ey = atk2_wy - atk1_wy;
+                float fx = p2_wx - p1_wx, fy = p2_wy - p1_wy;
+                float gx = atk1_wx - p1_wx, gy = atk1_wy - p1_wy;
+                float a = ex * ex + ey * ey;
+                float b = ex * fx + ey * fy;
+                float c = fx * fx + fy * fy;
+                float d = ex * gx + ey * gy;
+                float e = fx * gx + fy * gy;
+                float det = a * c - b * b;
+                float s, t;
+                if (det < 1e-12f) {
+                    s = 0.0f;
+                    t = (b > c) ? d / b : e / c;
+                    t = std::max(0.0f, std::min(1.0f, t));
+                } else {
+                    s = (b * e - c * d) / det;
+                    t = (a * e - b * d) / det;
+                    if (s < 0) { s = 0; t = e / c; t = std::max(0.0f, std::min(1.0f, t)); }
+                    else if (s > 1) { s = 1; t = (b + e) / c; t = std::max(0.0f, std::min(1.0f, t)); }
+                    else if (t < 0) { t = 0; s = -d / a; s = std::max(0.0f, std::min(1.0f, s)); }
+                    else if (t > 1) { t = 1; s = (b - d) / a; s = std::max(0.0f, std::min(1.0f, s)); }
+                }
+                float px = atk1_wx + s * ex, py = atk1_wy + s * ey;
+                float qx = p1_wx + t * fx, qy = p1_wy + t * fy;
+                float rx = px - qx, ry = py - qy;
+                float threshold = atk_radius + body_r;
+                if (rx * rx + ry * ry < threshold * threshold) return true;
+            }
+        }
+        return false;
+    }
+    // [H08] The documented distance fallback (the move's authored tactic
+    // reach, Max=250 for HighPunch — partially asset-backed per K06; the
+    // original is model-edge based, HARDCODE_AUDIT H08).
+    bool enemy_distance_hit_ok() const {
+        const float dist = std::fabs(enemy_pos_x_ - player_pos_x_);
+        return dist <= 250.0f;
+    }
 
     // Map weapon tactic name to model file path.
     // Tactic names like "Swords", "Axes", "Claws" map to "weapon_swords.xml" etc.
