@@ -293,6 +293,9 @@ static void test_a01_defense_anims_real() {
         def.dodge_chance.base = cases[i].dg;
         def.block_chance.base = cases[i].bl;
         resf2::game::TacticContext ctx;
+        // [Soak-fix Wave 9A] F2: the defense draw is a REACTION to an
+        // incoming attack (ctx.threat_frames > 0); model an open window.
+        ctx.threat_frames = 1.0f;
         resf2::game::TacticMemory mem;
         resf2::game::TacticTableSet tables;
         resf2::game::DecisionTrace trace;
