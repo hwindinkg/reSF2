@@ -570,6 +570,23 @@ set_tests_properties(test_soak_re3_defects PROPERTIES TIMEOUT 300)
 add_integration_test(test_soak_re4_defects)
 set_tests_properties(test_soak_re4_defects PROPERTIES TIMEOUT 300)
 
+# Soak-fix Wave 9B (re-soak-5): SHOP + STORY regressions. S1 item icons
+# resolve from image/ut_items/icon, S2 the shop's centre column renders the
+# category item list (filter/scroll/row-click), S3 the BUY hit-test at the
+# desktop resolution + loud failed-buy diagnostics, S4 the preview weapon at
+# the hand, S5 the story continues after the first win (Sensei dialogue ->
+# knives beat -> FirstGuardBeaten: Lynx/May + tournament unlock). Shop/quest/
+# scene files only; combat (Track A) untouched.
+add_integration_test(test_soak_shop_story_defects)
+set_tests_properties(test_soak_shop_story_defects PROPERTIES TIMEOUT 300)
+
+# Soak-fix Wave 9A (re-soak-5): COMBAT FEEL regressions — F1 hit feedback
+# (reaction anim + impact sound + hit_blade effect + authored knockback),
+# F2 enemy block spam (duty cycle bound + reactive gating), F3 root-motion
+# tail (no drift after the animation ends). One battle + one dojo scenario.
+add_integration_test(test_soak_wave9a_defects)
+set_tests_properties(test_soak_wave9a_defects PROPERTIES TIMEOUT 600)
+
 # ---------------------------------------------------------------------------
 # Hardcode-fidelity wave (HARDCODE_AUDIT.md, commit 2cf966e): the engine must
 # read ASSET FILES, not invent substitutes (weapon model map, enemy anims,

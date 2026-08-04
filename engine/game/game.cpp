@@ -706,6 +706,49 @@ void Game::host_set_dialogue_choices(std::vector<std::string> choices) {
     dialogue_choices_ = std::move(choices);
 }
 
+// [Wave 9B] Story-dialogue queue (quests.xml <Dialog> sets). Unlike the
+// pre-battle dialogue, a queued story dialogue has an explicit return scene
+// and is NOT followed by a battle — the stale battle_location_ (set for the
+// fight that just ended) must not redirect its last-line transition.
+void Game::host_queue_story_dialogue(
+    std::vector<std::pair<std::string, std::string>> lines,
+    scene::SceneId return_to) {
+    dialogue_lines_ = std::move(lines);
+    dialogue_index_ = 0;
+    dialogue_choices_.clear();
+    dialogue_return_ = return_to;
+    battle_location_.clear();
+    story_dialogue_pending_ = true;
+    std::printf("[QUEST] story dialogue queued (%zu lines, return to %s)\n",
+                dialogue_lines_.size(), scene::scene_name(return_to));
+}
+
+bool Game::host_consume_story_dialogue() {
+    const bool p = story_dialogue_pending_;
+    story_dialogue_pending_ = false;
+    return p;
+}
+
+scene::SceneId Game::host_get_dialogue_return() const {
+    return dialogue_return_;
+}
+
+// [Wave 9B] Shop probes (re-soak-5). Returns what the shop's centre column
+// renders right now — the scene owns the list state.
+std::vector<std::string> Game::host_shop_visible_rows() {
+    auto* shop = dynamic_cast<scene::ShopScene*>(scene_manager_.current());
+    if (!shop) return {};
+    scene::SceneContext ctx{*this, *platform_, *renderer_};
+    return shop->visible_row_names(ctx);
+}
+
+std::string Game::host_shop_selected_item() {
+    auto* shop = dynamic_cast<scene::ShopScene*>(scene_manager_.current());
+    if (!shop) return {};
+    scene::SceneContext ctx{*this, *platform_, *renderer_};
+    return shop->selected_item_name(ctx);
+}
+
 void Game::host_set_current_level(std::string level_id) {
     current_level_ = level_id;
             player_profile_.set_current_level(level_id);
@@ -2003,7 +2046,12 @@ void Game::host_update_gameplay(uint32_t dt) {
             // Stunned - can't act
             // [H05] Real catalog hit reaction (high_hit.bin); "fists_hit"
             // is not a moves.xml name.
+            // [Soak-fix Wave 9A] F1: the zone-resolved reaction anim keeps
+            // playing (apply_player_hit_feedback) and the reversed-impulse
+            // knockback is spread over the reaction duration.
             enemy_anim_ = enemy_hit_anim();
+            if (enemy_knockback_vx_ != 0.0f)
+                enemy_pos_x_ += enemy_knockback_vx_ * dt_sec;
         } else {
             const TacticDef* td = tactics_.tactic("Standard");
             if (!td) td = tactics_.tactic("NoTables");
@@ -2041,8 +2089,36 @@ void Game::host_update_gameplay(uint32_t dt) {
                         ? enemy_fighter_.health / player_fighter_.max_health : 1.0f;
                     ctx.enemy_health = (player_fighter_.max_health > 0)
                         ? player_fighter_.health / player_fighter_.max_health : 1.0f;
-                    ctx.hits = (float)enemy_fighter_.hits_landed;
+                    // [Soak-fix Wave 9A] F2: the defense draw (and every
+                    // curve with Damage/Hit/Counter factors) reads the
+                    // DEFENDER's memory of the ATTACKER's actions
+                    // (BLOCK_LOGIC.md §1.2: DamageFactor = "damage recently
+                    // taken", HitFactor = "when the bot has been hit") —
+                    // never the defender's own offense stats. The old feeds
+                    // (the enemy's own animation damage + his own hits
+                    // landed) plus the standing anim-frames term scored the
+                    // UseDefense block ~0.4 on EVERY decision vs a passive
+                    // player — the soak's standing block loop. The memory
+                    // is fed on player hits (record_hit_taken).
+                    float taken_damage = 0.0f, taken_hits = 0.0f,
+                          taken_counter = 0.0f;
+                    TacticMemory& enemy_mem = combat_.mutable_enemy_tactic_memory();
+                    for (const auto& rec : enemy_mem.records) {
+                        taken_damage += enemy_mem.decayed_damage(rec.name);
+                        taken_hits += enemy_mem.decayed_hits(rec.name);
+                        taken_counter += enemy_mem.decayed_counter(rec.name);
+                    }
+                    ctx.damage = taken_damage;
+                    ctx.hits = taken_hits;
+                    ctx.counter = taken_counter;
                     ctx.current_animation = enemy_anim_;       // probe target
+                    // [Soak-fix Wave 9A] F2: the opponent's attack window —
+                    // the stage-1 (UseDefense) gate fires only in reaction
+                    // to it (the player's remaining attack frames; 0 while
+                    // passive).
+                    ctx.threat_frames =
+                        (!current_move_.empty() && hit_anim_ > 0)
+                            ? hit_anim_ * anim_fps_ / 1000.0f : 0.0f;
                     // [Soak-fix A4] R4 wait-mapping inputs with REAL engine
                     // data (DECISION_SEMANTICS.md R4 §3.1; VERIFY_R34.md
                     // GREEN). ctx.anim_frames = the current animation's
@@ -2067,16 +2143,12 @@ void Game::host_update_gameplay(uint32_t dt) {
                     }
                     ctx.anim_frames =
                         (anim_frames + 1.0f) * (0.0f - 0.0f + 2.0f) + 1.0f;
-                    {
-                        const std::string bin = enemy_anim_ + ".bin";
-                        for (const auto& [mname, mv] : assets_->moves()) {
-                            (void)mname;
-                            if (mv.filename == bin) {
-                                ctx.damage = mv.damage;
-                                break;
-                            }
-                        }
-                    }
+                    // [Soak-fix Wave 9A] F2: the old feed put the ENEMY'S
+                    // OWN animation's move damage into ctx.damage — the
+                    // wrong input for every curve (the defense draw needs
+                    // the damage the enemy has TAKEN; see the memory-fed
+                    // ctx.damage/hits/counter above). Deleted here so the
+                    // memory sums are not overwritten.
                     ctx.anim_range = 0.0f;
                     ctx.speed_attr =
                         enemy_fighter_.attributes.get_or("WeaponDamage", 0.0f);
@@ -3554,9 +3626,46 @@ void Game::host_update_gameplay(uint32_t dt) {
         // rendered as a visible left/right drift (~0.10 units/frame) whenever
         // the jump followed a non-aligned move (e.g. a step) and the raw
         // deltas were applied. The hop must not travel horizontally at all.
-        const float root_dx = (current_anim_ == "jump") ? 0.0f : anim_root_dx_;
+        // [Soak-fix Wave 9A] F3: the stance idle is a PLANTED stance — its
+        // authored NPivot/heel-rel wander (measured: stance_idle heel-rel
+        // rocks ~±3 over its cycle) fed player_pos_x_ through the M2 anchor
+        // pinning, carrying the fighter a few units AFTER the previous
+        // animation finished ("некоторые анимации после завершения
+        // переносят персонажа чуть вперёд" — measured tail -3.7 after a
+        // punch, -3.5 after a step). The idle does not translate the
+        // fighter; the heel-continuity snap at the transition (apply_align)
+        // is unaffected.
+        const bool no_translate =
+            (current_anim_ == "jump") || (current_anim_ == "stance_idle");
+        const float root_dx = no_translate ? 0.0f : anim_root_dx_;
         player_pos_x_ += root_dx * (facing_right_ ? 1.0f : -1.0f);
     }
+
+    // [Soak-fix Wave 9A] F3: the stance idle holds its planted heel. The
+    // root no longer absorbs the idle's authored heel-rel wander (the
+    // no-translate above), so the NODE MAP is compensated instead: every
+    // node's pivot-relative X is shifted so NHeel_2 stays at the pose it
+    // had when the idle started (the pose the transition's apply_align
+    // snap placed). The body then leans around the planted feet — exactly
+    // the original's alignAnimation model ("the anchor node keeps its
+    // world position") — with no arena-position drift and no foot-slide.
+    if (current_anim_ == "stance_idle") {
+        auto& node_map = anim_player_.mutable_anim_node_pos();
+        auto heel_it = node_map.find("NHeel_2");
+        if (heel_it != node_map.end()) {
+            const float heel_rel = heel_it->second.first;
+            if (prev_update_anim_ != "stance_idle")
+                idle_heel_anchor_rel_ = heel_rel;  // entry pose (the snapped one)
+            const float fix = heel_rel - idle_heel_anchor_rel_;
+            if (std::fabs(fix) > 0.0001f) {
+                for (auto& [nname, pos] : node_map) {
+                    (void)nname;
+                    pos.first -= fix;
+                }
+            }
+        }
+    }
+    prev_update_anim_ = current_anim_;
 
     // [MOVEMENT] Debug log for movement state
     debug_log("[MOVEMENT] pos_x=%.1f pos_y=%.1f facing=%d state=%d anim='%s' root_dx=%.2f step_frames=%u\n",
@@ -3806,12 +3915,12 @@ void Game::host_update_gameplay(uint32_t dt) {
 // line logged bag_edge= and battle damage only connected at point-blank).
 // The whole computation below moved here from the bag branch; the bag branch
 // now runs only in the dojo (!show_enemy_).
-auto apply_player_damage_to_enemy = [&]() {
+auto apply_player_damage_to_enemy = [&](float hit_x, float hit_y,
+                                        int hit_frame) -> float {
     player_fighter_.hits_landed++;
     // [ORIGINAL] Combo.Time = 90 frames = 1.5s at 60Hz (from InternalSettings)
     combo_timer_ = 1.5f;
     std::printf("[COMBAT] Combo: hits=%d timer=1.5s\n", player_fighter_.hits_landed);
-    if (!is_battle_mode_) return;  // dojo sparring deals no health damage
     // [ORIGINAL] Damage via Model::getTotalDamage @ game+0x4527B4
     // (engine/game/damage_formula.hpp — the multiplication order
     // base*f2*f1*f3*add is preserved there; called, never
@@ -3887,11 +3996,23 @@ auto apply_player_damage_to_enemy = [&]() {
                 base_damage, din.attribute_difference,
                 dbg_last_attr_mult_, block_factor, final_damage);
 
-    enemy_fighter_.health -= final_damage * enemy_fighter_.max_health;
-    if (enemy_fighter_.health <= 0.0f) {
-        enemy_fighter_.health = 0.0f;
-        enemy_fighter_.is_dead = true;
+    if (is_battle_mode_) {
+        enemy_fighter_.health -= final_damage * enemy_fighter_.max_health;
+        if (enemy_fighter_.health <= 0.0f) {
+            enemy_fighter_.health = 0.0f;
+            enemy_fighter_.is_dead = true;
+        }
     }
+
+    // [Soak-fix Wave 9A] F1/F2: the full hit feedback — the enemy's
+    // hit-reaction animation (moves.xml Recoil by the attack's <Hit Name>
+    // zone), the real impact sound (hit1-6/super_hit1-5), the reversed
+    // authored <Impulse X> knockback over the reaction, and the defender's
+    // fight-memory damage-event feed. The dojo sparring partner reacts too
+    // (only health is battle-only).
+    apply_player_hit_feedback(hit_x, hit_y, hit_frame, current_move_,
+                              final_damage, enemy_fighter_.is_blocking);
+    return final_damage;
 };
 if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
     (assets_->enemy_body_model() || assets_->body_model())) {
@@ -4171,9 +4292,6 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                                     // damage was gated on hitting the bag).
                                     enemy_fighter_.invuln_time = 0.4f;
                                     enemy_hit_flash_ = 0.25f;
-                                    int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
-                                    play_sound(player_attack_sound(snd_idx), 0.7f);
-                                    play_sound("armor", 0.5f);
                                     // Spawn hit sparks at collision point
                                     float hit_x = (px + qx) * 0.5f;
                                     float hit_y = (py + qy) * 0.5f;
@@ -4183,7 +4301,13 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                                         capsule->edge_name.c_str(), sq_dist, threshold * threshold,
                                         edge_name.c_str());
                                     hit_this_interval_ = true;
-                                    apply_player_damage_to_enemy();
+                                    // [Soak-fix Wave 9A] F1: the old inline
+                                    // swing-voice + "armor" plays moved into
+                                    // apply_player_damage_to_enemy ->
+                                    // apply_player_hit_feedback (the real
+                                    // impact sound plays there; the swing
+                                    // voice already plays at attack start).
+                                    apply_player_damage_to_enemy(hit_x, hit_y, current_frame);
                                     enemy_hit = true;
                                     break;
                                 }
@@ -4211,16 +4335,15 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                         if (dist <= reach) {
                             enemy_fighter_.invuln_time = 0.4f;
                             enemy_hit_flash_ = 0.25f;
-                            int snd_idx = (current_frame + (int)current_move_[0]) % 4 + 1;
-                            play_sound(player_attack_sound(snd_idx), 0.7f);
-                            play_sound("armor", 0.5f);
                             const float mid_x = (player_pos_x_ + enemy_pos_x_) * 0.5f;
                             spawn_hit_sparks(mid_x, enemy_pos_y_ + 30.0f, 10);
                             debug_log("[HIT] f=%llu move='%s' enemy DISTANCE fallback dist=%.0f reach=%.0f\n",
                                 (unsigned long long)total_frame_count_, current_move_.c_str(),
                                 dist, reach);
                             hit_this_interval_ = true;
-                            apply_player_damage_to_enemy();
+                            // [Soak-fix Wave 9A] F1: impact sound moved into
+                            // the feedback path (see the capsule branch).
+                            apply_player_damage_to_enemy(mid_x, enemy_pos_y_ + 30.0f, current_frame);
                         }
                     }
                     // Determine attacking limb from AttackingParts in moves.xml
@@ -4567,6 +4690,122 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                     (int)hit_this_interval_, bag_displacement(), bag_verlet_.size(),
                     al, anchor_x, first_effect_alpha(), cam_x_, zoom_);
     }
+}
+
+// [Soak-fix Wave 9A] F1: full hit feedback for a registered player->enemy
+// hit. The ORIGINAL plays, on impact: (a) the enemy's hit-reaction
+// animation — the moves.xml Recoil move selected by the attack's <Hit Name>
+// zone (High -> HighHit -> high_hit.bin, HighHeavy -> HighHitHeavy -> ...),
+// (b) the real impact sound (hit1-6.wav; super_hit1-5.wav for heavy hits —
+// the soak showed only the swing voice + "armor" in battle), (c) the
+// hit_blade effect (spawned by the caller at the impact point), (d) the
+// knockback — the attack's authored <Impulse X> applied REVERSED (Hit
+// template SetDirection Impulse Reverse=1) spread over the reaction
+// duration. Also (F2) feeds the defender's fight memory (FUN_8f4b173c /
+// FUN_8f4aa998 damage-event model).
+void Game::apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
+                                     const std::string& move_name,
+                                     float final_damage, bool blocked) {
+    // (a) Resolve the reaction animation from moves.xml: the attack's
+    // <Hit Name> zone (parsed into the Attack interval's hit_type) names
+    // the Recoil move — "High" -> move "HighHit" (high_hit.bin);
+    // modifier zones ("HighHeavy" -> "HighHitHeavy", "MiddleShortPlus" ->
+    // "MiddleHitShortPlus", ...) split the suffix. Fallback: the catalog
+    // default high_hit (the pre-Wave-9A behavior). [HEURISTIC-TODO] zones
+    // without a matching Recoil move (Titan*, boss zones) keep the fallback
+    // until their reaction anims are pinned.
+    std::string reaction_anim = "high_hit";
+    std::string zone;
+    bool heavy = false;
+    const auto move_it = assets_->moves().find(move_name);
+    if (move_it != assets_->moves().end()) {
+        for (const auto& iv : move_it->second.intervals) {
+            if (iv.type == "Attack" && !iv.hit_type.empty()) {
+                zone = iv.hit_type;
+                break;
+            }
+        }
+        if (!zone.empty()) {
+            heavy = zone.find("Heavy") != std::string::npos;
+            const std::string base = zone + "Hit";  // "High" -> "HighHit"
+            auto hit_it = assets_->moves().find(base);
+            if (hit_it != assets_->moves().end() &&
+                !hit_it->second.filename.empty()) {
+                reaction_anim = strip_bin_suffix(hit_it->second.filename);
+            } else {
+                // Zone with a modifier suffix: strip it, re-append after
+                // "Hit" ("HighHeavy" -> "High" + "Hit" + "Heavy").
+                static const char* kMods[] = {"Heavy", "ShortPlus", "Plus",
+                                              "Short", "Long", "Pull", "Deflect"};
+                for (const char* mod : kMods) {
+                    const std::string ms(mod);
+                    if (zone.size() > ms.size() &&
+                        zone.compare(zone.size() - ms.size(), ms.size(), ms) == 0) {
+                        const std::string cand =
+                            zone.substr(0, zone.size() - ms.size()) + "Hit" + ms;
+                        auto cit = assets_->moves().find(cand);
+                        if (cit != assets_->moves().end() &&
+                            !cit->second.filename.empty()) {
+                            reaction_anim = strip_bin_suffix(cit->second.filename);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // The reaction plays for the full animation duration (the enemy renders
+    // at a fixed 20fps), during which the enemy takes no decisions.
+    float stun_sec = 0.6f;
+    if (const auto ait = assets_->animations().find(reaction_anim);
+        ait != assets_->animations().end() && ait->second.frame_count > 0) {
+        stun_sec = static_cast<float>(ait->second.frame_count) / 20.0f;
+    }
+    enemy_reaction_anim_ = reaction_anim;
+    enemy_fighter_.hit_stun_time = stun_sec;
+    enemy_anim_ = reaction_anim;
+    enemy_anim_time_ = 0.0f;
+
+    // (d) Knockback: the attack's <Impulse X> (from its Attack interval),
+    // reversed — the Hit template's SetDirection Impulse Reverse=1 pushes
+    // the defender AWAY from the attacker — spread over the reaction so the
+    // displacement reads as a shove, not a teleport.
+    float imp_x = 0.0f;
+    if (move_it != assets_->moves().end()) imp_x = move_it->second.impulse_x;
+    const float away_dir = (player_pos_x_ < enemy_pos_x_) ? 1.0f : -1.0f;
+    enemy_knockback_vx_ =
+        (stun_sec > 0.0f) ? (away_dir * imp_x / stun_sec) : 0.0f;
+    std::printf("[HIT-FEEDBACK] f=%llu move='%s' zone='%s' reaction='%s' "
+                "stun=%.2fs imp=%.1f knockback_vx=%.1f dmg=%.3f blocked=%d\n",
+                (unsigned long long)total_frame_count_, move_name.c_str(),
+                zone.c_str(), reaction_anim.c_str(), stun_sec, imp_x,
+                enemy_knockback_vx_, final_damage, (int)blocked);
+
+    // (b) Impact sound: a blocked hit plays the block sound (armor.wav —
+    // the pre-Wave-9A behavior for every hit); an unblocked hit plays the
+    // real impact assets hit1-6.wav / super_hit1-5.wav (heavy reactions).
+    // [HEURISTIC-TODO] the exact original hit-sound index rule stays
+    // unpinned; the deterministic index mirrors the swing-sound scheme.
+    if (blocked) {
+        play_sound("armor", 0.5f);
+    } else if (heavy) {
+        int idx = (hit_frame + (int)move_name[0]) % 5 + 1;
+        play_sound("super_hit" + std::to_string(idx), 0.8f);
+    } else {
+        int idx = (hit_frame + (int)move_name[0]) % 6 + 1;
+        play_sound("hit" + std::to_string(idx), 0.8f);
+    }
+
+    // (F2) The defender's fight memory: the damage-event feed keyed by the
+    // ATTACKER's animation (the player's current attack anim), in the
+    // enemy's (victim) memory — the probe channels the UseDefense draw
+    // reads (BLOCK_LOGIC.md §1.2).
+    std::string atk_anim = strip_bin_suffix(
+        move_it != assets_->moves().end() ? move_it->second.filename
+                                          : (move_name + ".bin"));
+    combat_.mutable_enemy_tactic_memory().record_hit_taken(atk_anim,
+                                                           final_damage);
 }
 
 } // namespace resf2::game

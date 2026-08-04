@@ -352,6 +352,27 @@ std::vector<std::string> host_get_dialogue_choices() const override;
 void host_set_dialogue_choices(std::vector<std::string> choices) override;
 
 
+// [Wave 9B] Story-dialogue queue (quests.xml <Dialog> sets): queues lines
+// plus the scene to return to after the dialogue finishes. The Map shows
+// the queued dialogue on its next entry (host_consume_story_dialogue).
+void host_queue_story_dialogue(std::vector<std::pair<std::string, std::string>> lines,
+                               scene::SceneId return_to) override;
+bool host_consume_story_dialogue() override;
+scene::SceneId host_get_dialogue_return() const override;
+
+// [Wave 9B] Shop probes (re-soak-5): the centre list's visible rows and the
+// selected item, as the scene renders them.
+std::vector<std::string> host_shop_visible_rows();
+std::string host_shop_selected_item();
+
+// [Wave 9B] Story probe: is a story dialogue queued right now?
+bool host_has_pending_story_dialogue() const { return story_dialogue_pending_; }
+// [Wave 9B] Quest-engine probe: was a battle shown by a quest action?
+bool host_quest_battle_unlocked(const std::string& battle) const {
+    return quest_engine_.is_battle_unlocked(battle);
+}
+
+
 void host_set_current_level(std::string level_id) override;
 
 
@@ -447,6 +468,12 @@ float host_enemy_health_frac() const override;
     bool host_get_enemy_attacking() const { return enemy_attacking_; }
     bool host_get_enemy_blocking() const { return enemy_fighter_.is_blocking; }
     float host_get_enemy_pos_x() const { return enemy_pos_x_; }
+    // [Soak-fix Wave 9A] F1 test seam: the hit_blade effect count (the
+    // battle path must spawn the effect at the impact point).
+    std::size_t host_get_hit_spark_count() const { return hit_sparks_.size(); }
+    // [Soak-fix Wave 9A] F1 test seam: real impact sounds played so far.
+    int host_get_hit_sound_count() const { return hit_sound_count_; }
+    const std::string& host_get_last_hit_sound() const { return last_hit_sound_; }
     // ---- Hardcode-fidelity probes (HARDCODE_AUDIT.md HIGH items) ----
     // H07: true when the named animation is in the loaded catalog — the
     // engine must not invent names the original never shipped ("fists_idle"
@@ -1017,20 +1044,23 @@ float host_enemy_health_frac() const override;
         }
         // The equipped weapon (P1 model) at the hand, same placement law as
         // the dojo render: the MacroNode LCC resolver over the skeleton's
-        // Weapon-Node* pins (rest pose here — the preview has no anim).
+        // Weapon-Node* pins. [Wave 9B] The pose source must MATCH the body
+        // render above (anim-first): with use_anim=false the knife resolved
+        // against the skeleton REST pins while the body used the (stale)
+        // dojo pose, so the knife hung above the hands (re-soak-5).
         // [R1] The old draw used the authored rest coords at a fixed
-        // +30/+10 offset at 0.3x — the knife floated above the head.
+        // +30/+10 offset at 0.3x �?" the knife floated above the head.
         if (assets_->weapon_model() && !assets_->weapon_model()->triangles.empty()) {
             const ren::Color4B wcol{150, 154, 162, 255};
             auto& wm = *assets_->weapon_model();
             for (const auto& t : wm.triangles) {
                 float ax, ay, bx, by, cx, cy;
                 if (!resolve_player_weapon_vertex(wm, t.n1, 0.0f, 0.0f,
-                        1.0f, pivot_local_y, false, ax, ay) ||
+                        1.0f, pivot_local_y, kShopPreviewUseAnim, ax, ay) ||
                     !resolve_player_weapon_vertex(wm, t.n2, 0.0f, 0.0f,
-                        1.0f, pivot_local_y, false, bx, by) ||
+                        1.0f, pivot_local_y, kShopPreviewUseAnim, bx, by) ||
                     !resolve_player_weapon_vertex(wm, t.n3, 0.0f, 0.0f,
-                        1.0f, pivot_local_y, false, cx, cy))
+                        1.0f, pivot_local_y, kShopPreviewUseAnim, cx, cy))
                     continue;
                 auto [sx0, sy0] = to_s(ax, ay);
                 auto [sx1, sy1] = to_s(bx, by);
@@ -1039,10 +1069,26 @@ float host_enemy_health_frac() const override;
                 ++shop_preview_geom_.weapon_triangles;
             }
         }
+        // [Wave 9B] Preview-space gap between the body's hand and the weapon
+        // anchor, under the SAME resolve law the draw uses (probe for S4).
+        {
+            auto [hx, hy] = resolve_body_node("NWrist_1", 0, 0, true, pivot_local_y);
+            float wx = 0, wy = 0;
+            const bool wok = assets_->weapon_model() &&
+                resolve_player_weapon_vertex(*assets_->weapon_model(),
+                    "Weapon-Node2_1", 0.0f, 0.0f, 1.0f, pivot_local_y,
+                    kShopPreviewUseAnim, wx, wy);
+            const float dx = hx - wx, dy = hy - wy;
+            shop_preview_hand_gap_ = wok ? std::sqrt(dx * dx + dy * dy) : 1e9f;
+        }
     }
     ShopPreviewGeometry host_get_shop_preview_geometry() const {
         return shop_preview_geom_;
     }
+    // [Wave 9B] Preview-space distance between the body hand (NWrist_1) and
+    // the weapon anchor (Weapon-Node2_1), recorded by the preview render
+    // under its own resolve law. ~0 when the knife rides the hand.
+    float host_get_shop_preview_hand_gap() const { return shop_preview_hand_gap_; }
 
     // [P6] The Results scene's continue-button label (rematch on a
     // retryable defeat, else continue/back-to-menu).
@@ -1075,7 +1121,12 @@ float host_enemy_health_frac() const override;
     }
     void host_run_tutorial_check() { check_tutorial(); }
     bool host_get_show_enemy() const { return show_enemy_; }
+    // [Wave 9B] Which pose source the shop preview's weapon draw resolves
+    // with. Must match the body pass (anim-first) so the knife rides the
+    // hand even with a stale dojo pose in anim_node_pos_ (re-soak-5).
+    static constexpr bool kShopPreviewUseAnim = false;  // RED on HEAD; flipped by S4
     ShopPreviewGeometry shop_preview_geom_;
+    float shop_preview_hand_gap_ = 1e9f;
     // [R1] Last armor render color (probe seam for the body-color test).
     ren::Color4B armor_render_color_{0, 0, 0, 255};
     // [R1] World extents of the armor capsules as rendered last frame (the
@@ -3225,7 +3276,24 @@ private:
     std::string enemy_block_anim() const {
         return (ai_last_decision_.animation == "Duck") ? "duck" : "high_block";
     }
-    std::string enemy_hit_anim() const { return "high_hit"; }
+    // [Soak-fix Wave 9A] F1: the enemy's hit-reaction animation is the
+    // moves.xml Recoil move resolved from the attack's <Hit Name> zone
+    // (High -> HighHit -> high_hit.bin, HighHeavy -> HighHitHeavy, ...),
+    // stored on the Combat state by apply_player_hit_feedback(); falls back
+    // to the catalog default high_hit (the pre-Wave-9A behavior).
+    std::string enemy_hit_anim() const {
+        return enemy_reaction_anim_.empty() ? "high_hit" : enemy_reaction_anim_;
+    }
+
+    // [Soak-fix Wave 9A] F1: full hit feedback for a registered player->
+    // enemy hit (battle/dojo sparring path): the enemy's hit-reaction
+    // animation (moves.xml Recoil move by the attack's <Hit Name> zone),
+    // the real impact sound (hit1-6.wav / super_hit1-5.wav), the reversed
+    // authored <Impulse X> knockback over the reaction, and the defender's
+    // fight-memory damage-event feed (F2). Defined in game.cpp.
+    void apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
+                                   const std::string& move_name,
+                                   float final_damage, bool blocked);
 
     // [H08] The enemy's swing connects via MODEL-EDGE COLLISION — the R2
     // hit-test path mirrored: the enemy's attacking edges (the attack
@@ -4505,6 +4573,13 @@ private:
 
     // Play a sound by name (no-op if not loaded or backend is null)
     void play_sound(const std::string& name, float volume = 1.0f) {
+        // [Soak-fix Wave 9A] F1 test seam: count the real impact sounds
+        // (hit1-6.wav / super_hit1-5.wav) as they resolve and play — the
+        // soak showed hits landing with NO impact sound in battle.
+        if (name.rfind("hit", 0) == 0 || name.rfind("super_hit", 0) == 0) {
+            ++hit_sound_count_;
+            last_hit_sound_ = name;
+        }
         aud::AudioEngine::instance().play(name, volume, false);
     }
 
@@ -5625,6 +5700,14 @@ private:
     // [ORIGINAL] Tutorial state from usersDefault.xml Tutorial attribute.
     // Values: "MOVE" (initial), "BAG" (punching bag), "FIRST_FIGHT", "COMPLETE".
     std::string tutorial_state_ = "MOVE";
+    // [Wave 9B] Story-dialogue queue state (quests.xml <Dialog> sets).
+    bool story_dialogue_pending_ = false;
+    scene::SceneId dialogue_return_ = scene::SceneId::MainMenu;
+    // One-shot story beats: the knives-buy prompt and the FirstGuardBeaten
+    // (Lynx/May) set. [HEURISTIC-TODO] In-memory only — the original saves
+    // quest state in users.xml variables.
+    bool tutorial_knives_beat_ = false;
+    bool first_guard_beaten_ = false;
 
     // [ORIGINAL] Zone/battle lock state from <Battles> in usersDefault.xml.
     // Key: "ZONE_N" → true if unlocked. Key: "ZONE_N|BOSS_NAME" → true if unlocked.
@@ -5690,6 +5773,19 @@ private:
         s.scale = 0.8f + (float)(std::rand() % 40) / 100.0f;
         hit_sparks_.push_back(s);
     }
+    // [Soak-fix Wave 9A] F1 test seam: impact sound counter state (the
+    // hit1-6.wav / super_hit1-5.wav plays counted by play_sound).
+    int hit_sound_count_ = 0;
+    std::string last_hit_sound_;
+
+    // [Soak-fix Wave 9A] F3: stance-idle heel-anchor compensation state —
+    // the idle's node map is re-anchored on its planted heel (NHeel_2) so
+    // the feet do not slide while the authored pivot lean plays around
+    // them (the original's alignAnimation model). See the compensation in
+    // game.cpp after the root-motion application.
+    float idle_heel_anchor_rel_ = 0.0f;
+    std::string prev_update_anim_;
+
     void update_and_render_hit_sparks(float dt_sec) {
         for (auto& s : hit_sparks_) s.age += dt_sec;
         hit_sparks_.erase(std::remove_if(hit_sparks_.begin(), hit_sparks_.end(),
@@ -5723,6 +5819,10 @@ private:
     float& enemy_pos_y_ = combat_.mutable_enemy_pos_y();
     float& enemy_anim_time_ = combat_.mutable_enemy_anim_time();
     std::string& enemy_anim_ = combat_.mutable_enemy_anim();
+    // [Soak-fix Wave 9A] F1: the resolved enemy hit-reaction anim + the
+    // knockback velocity applied over the reaction (see apply_player_hit_feedback).
+    std::string& enemy_reaction_anim_ = combat_.mutable_enemy_reaction_anim();
+    float& enemy_knockback_vx_ = combat_.mutable_enemy_knockback_vx();
     bool& enemy_facing_right_ = combat_.mutable_enemy_facing_right();
     float& enemy_y_adjust_ = combat_.mutable_enemy_y_adjust();
     bool& enemy_attacking_ = combat_.mutable_enemy_attacking();

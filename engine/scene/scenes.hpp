@@ -145,6 +145,13 @@ public:
     void on_enter(SceneContext& ctx) override;
     void on_update(SceneContext& ctx) override;
     void on_render(SceneContext& ctx) override;
+
+    // [Wave 9B] Test probes (re-soak-5): what the centre column is rendering
+    // and which item is selected. Mirrors the render, so the tests measure
+    // exactly what the screen draws.
+    std::vector<std::string> visible_row_names(SceneContext& ctx) const;
+    std::string selected_item_name(SceneContext& ctx) const;
+
 private:
     // Category tab state
     int selected_category_ = 0;        // index into categories_
