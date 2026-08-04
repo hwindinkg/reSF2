@@ -474,6 +474,9 @@ float host_enemy_health_frac() const override;
     // [Soak-fix Wave 9A] F1 test seam: real impact sounds played so far.
     int host_get_hit_sound_count() const { return hit_sound_count_; }
     const std::string& host_get_last_hit_sound() const { return last_hit_sound_; }
+    // [Soak-fix Wave 9A] F1: the most recent sound any path played
+    // (swish/bodyfall/wall3/armor pins).
+    const std::string& host_get_last_sound() const { return last_played_sound_; }
     // ---- Hardcode-fidelity probes (HARDCODE_AUDIT.md HIGH items) ----
     // H07: true when the named animation is in the loaded catalog — the
     // engine must not invent names the original never shipped ("fists_idle"
@@ -4585,13 +4588,19 @@ private:
 
     // Play a sound by name (no-op if not loaded or backend is null)
     void play_sound(const std::string& name, float volume = 1.0f) {
-        // [Soak-fix Wave 9A] F1 test seam: count the real impact sounds
-        // (hit1-6.wav / super_hit1-5.wav) as they resolve and play — the
-        // soak showed hits landing with NO impact sound in battle.
-        if (name.rfind("hit", 0) == 0 || name.rfind("super_hit", 0) == 0) {
+        // [Soak-fix Wave 9A] F1 test seam: count the real impact sounds as
+        // they resolve and play — the contact-hit family m_/f_pl_hitN (the
+        // LIVE_INTERACTION_TRACE §4.3 pin: hit sound = m_pl_hit2) plus the
+        // older hit1-6.wav / super_hit1-5.wav names. The soak showed hits
+        // landing with only the swing voice + "armor".
+        if (name.rfind("hit", 0) == 0 || name.rfind("super_hit", 0) == 0 ||
+            name.find("_pl_hit") != std::string::npos) {
             ++hit_sound_count_;
             last_hit_sound_ = name;
         }
+        // [Soak-fix Wave 9A] F1 test seam: the most recent sound ANY path
+        // played (swish/bodyfall/wall3/armor pins).
+        last_played_sound_ = name;
         aud::AudioEngine::instance().play(name, volume, false);
     }
 
@@ -4611,6 +4620,12 @@ private:
     }
     std::string enemy_attack_sound(int idx) const {
         return voice_prefix(enemy_voice_) + "_pl_attack" + std::to_string(idx);
+    }
+    // [Soak-fix Wave 9A] F1: the enemy's HURT voice — the contact-hit sound
+    // pin (LIVE_INTERACTION_TRACE §4.3: hit sound = m_pl_hit2.wav, the
+    // gender-appropriate _pl_hit2 of the DEFENDER's voice set).
+    std::string enemy_hit_sound(int idx) const {
+        return voice_prefix(enemy_voice_) + "_pl_hit" + std::to_string(idx);
     }
 
     // Decode one UTF-8 code point at `i`, advancing it. Falls back to CP1251
@@ -5789,6 +5804,9 @@ private:
     // hit1-6.wav / super_hit1-5.wav plays counted by play_sound).
     int hit_sound_count_ = 0;
     std::string last_hit_sound_;
+    // [Soak-fix Wave 9A] F1: last sound played by ANY path (swish/bodyfall
+    // /armor/wall3 pins); see play_sound.
+    std::string last_played_sound_;
 
     // [Soak-fix Wave 9A] F3: stance-idle heel-anchor compensation state —
     // the idle's node map is re-anchored on its planted heel (NHeel_2) so
