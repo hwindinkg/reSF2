@@ -176,7 +176,7 @@ private:
     static constexpr float kFighterFrac  =   0.28f;
     static constexpr float kScrollFrac   =   0.40f;
     static constexpr float kDetailFrac   =   0.32f;
-    static constexpr int   kVisibleRows  =   3;   // equipped-rows in the central scroll
+    static constexpr int   kVisibleRows  =   3;   // item rows in the central scroll window
     static constexpr float kCatIconSize  =  52.0f;
 };
 
