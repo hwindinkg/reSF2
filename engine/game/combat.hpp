@@ -95,6 +95,12 @@ public:
     float& mutable_enemy_pos_y() { return enemy_pos_y_; }
     std::string& mutable_enemy_anim() { return enemy_anim_; }
     float& mutable_enemy_anim_time() { return enemy_anim_time_; }
+    // [Soak-fix Wave 9A] F1: the zone-resolved hit-reaction animation and
+    // the reversed-impulse knockback velocity, written by
+    // Game::apply_player_hit_feedback and read by the enemy executor
+    // (game.cpp) while the reaction stun runs.
+    std::string& mutable_enemy_reaction_anim() { return enemy_reaction_anim_; }
+    float& mutable_enemy_knockback_vx() { return enemy_knockback_vx_; }
     bool& mutable_enemy_facing_right() { return enemy_facing_right_; }
     float& mutable_enemy_y_adjust() { return enemy_y_adjust_; }
     bool& mutable_enemy_attacking() { return enemy_attacking_; }
@@ -184,6 +190,11 @@ private:
     float enemy_anim_time_ = 0.0f;
     float enemy_pos_x_ = 0.0f;
     float enemy_pos_y_ = 0.0f;
+    // [Soak-fix Wave 9A] F1: the moves.xml Recoil animation resolved from
+    // the attack's <Hit Name> zone (apply_player_hit_feedback) + the
+    // reversed <Impulse X> knockback velocity spread over the reaction.
+    std::string enemy_reaction_anim_;
+    float enemy_knockback_vx_ = 0.0f;
     bool enemy_facing_right_ = false;
     float enemy_y_adjust_ = 0.0f;
     bool enemy_attacking_ = false;

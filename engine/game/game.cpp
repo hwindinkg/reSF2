@@ -3035,6 +3035,15 @@ void Game::host_update_gameplay(uint32_t dt) {
             // [S1] the m_/f_ prefix follows <Warrior Voice=> in the saves.
             int snd = (best_move->name.length() % 4) + 1;
             play_sound(player_attack_sound(snd), 0.5f);
+            // [Soak-fix Wave 9A] F1: the weapon swish — LIVE_INTERACTION_TRACE
+            // §4.7 pins melee swings to swish2..swish7 and a sword loadout to
+            // swish_sword1 (the soak: swings played no swish at all).
+            // [HEURISTIC-TODO] the per-move swish index stays unpinned; the
+            // deterministic index mirrors the voice scheme.
+            play_sound(equipped_weapon_ != "Fists"
+                           ? "swish_sword1"
+                           : "swish" + std::to_string((best_move->name.length() % 6) + 2),
+                       0.4f);
             goto after_combat;
         } else if (punch_pressed || kick_pressed) {
             // [DIAGNOSTIC] No candidate found — log structured reject.
@@ -4696,12 +4705,13 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
 // hit. The ORIGINAL plays, on impact: (a) the enemy's hit-reaction
 // animation — the moves.xml Recoil move selected by the attack's <Hit Name>
 // zone (High -> HighHit -> high_hit.bin, HighHeavy -> HighHitHeavy -> ...),
-// (b) the real impact sound (hit1-6.wav; super_hit1-5.wav for heavy hits —
-// the soak showed only the swing voice + "armor" in battle), (c) the
+// (b) the pinned contact-hit sound m_/f_pl_hit2 (LIVE_INTERACTION_TRACE
+// §4.3 — the soak showed only the swing voice + "armor" in battle), (c) the
 // hit_blade effect (spawned by the caller at the impact point), (d) the
 // knockback — the attack's authored <Impulse X> applied REVERSED (Hit
 // template SetDirection Impulse Reverse=1) spread over the reaction
-// duration. Also (F2) feeds the defender's fight memory (FUN_8f4b173c /
+// duration, (e) the KO fall sound bodyfallN (§4.5) on the enemy's death.
+// Also (F2) feeds the defender's fight memory (FUN_8f4b173c /
 // FUN_8f4aa998 damage-event model).
 void Game::apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
                                      const std::string& move_name,
@@ -4716,7 +4726,6 @@ void Game::apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
     // until their reaction anims are pinned.
     std::string reaction_anim = "high_hit";
     std::string zone;
-    bool heavy = false;
     const auto move_it = assets_->moves().find(move_name);
     if (move_it != assets_->moves().end()) {
         for (const auto& iv : move_it->second.intervals) {
@@ -4726,7 +4735,6 @@ void Game::apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
             }
         }
         if (!zone.empty()) {
-            heavy = zone.find("Heavy") != std::string::npos;
             const std::string base = zone + "Hit";  // "High" -> "HighHit"
             auto hit_it = assets_->moves().find(base);
             if (hit_it != assets_->moves().end() &&
@@ -4782,19 +4790,28 @@ void Game::apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
                 zone.c_str(), reaction_anim.c_str(), stun_sec, imp_x,
                 enemy_knockback_vx_, final_damage, (int)blocked);
 
-    // (b) Impact sound: a blocked hit plays the block sound (armor.wav —
-    // the pre-Wave-9A behavior for every hit); an unblocked hit plays the
-    // real impact assets hit1-6.wav / super_hit1-5.wav (heavy reactions).
-    // [HEURISTIC-TODO] the exact original hit-sound index rule stays
-    // unpinned; the deterministic index mirrors the swing-sound scheme.
+    // (b) Impact sound: a blocked hit plays the block sound (armor.wav);
+    // an unblocked hit plays the pinned contact-hit sample
+    // m_pl_hit2.wav — gender-appropriate via the DEFENDER's voice set
+    // (LIVE_INTERACTION_TRACE §4.3: "on a landed hit the original plays
+    // the hit sample m_pl_hit2.wav (preloaded)"). The old hit1-6 /
+    // super_hit1-5 heuristic was unpinned ([HEURISTIC-TODO] those samples
+    // stay catalog-loaded but are not the battle contact sound).
     if (blocked) {
         play_sound("armor", 0.5f);
-    } else if (heavy) {
-        int idx = (hit_frame + (int)move_name[0]) % 5 + 1;
-        play_sound("super_hit" + std::to_string(idx), 0.8f);
     } else {
-        int idx = (hit_frame + (int)move_name[0]) % 6 + 1;
-        play_sound("hit" + std::to_string(idx), 0.8f);
+        play_sound(enemy_hit_sound(2), 0.8f);
+    }
+
+    // (e) KO fall: a dead enemy plays the fall sound (LIVE_INTERACTION_TRACE
+    // §4.5: "enemy KO uses bodyfallN.wav") and drops to the real catalog
+    // KO pose. [HEURISTIC-TODO] bodyfall1-vs-bodyfall3 and the exact KO
+    // pose stay unpinned — bodyfall1 + lose_fall.bin are the defaults; the
+    // stage wall (wall3 pin, §4.4) does not exist in the engine arena.
+    if (enemy_fighter_.is_dead) {
+        play_sound("bodyfall1", 0.7f);
+        enemy_knockback_vx_ = 0.0f;
+        enemy_anim_ = "lose_fall";
     }
 
     // (F2) The defender's fight memory: the damage-event feed keyed by the
