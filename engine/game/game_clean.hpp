@@ -4283,6 +4283,18 @@ private:
             for (const char* n : {"Damage", "Shield", "ruby", "credit",
                                   "energy", "Arrow", "VS"})
                 load_hud_png(misc / (std::string(n) + ".png"), n);
+            // [Wave 9B] Item icons are loose PNGs in image/ut_items/icon,
+            // named by list.xml Image= (weapon_knives, armor_robe, ...).
+            // Without them the shop rendered names only, with tinted
+            // squares standing in for the art (re-soak-5: "отображает
+            // только названия предметов, но не их иконки").
+            const auto ut_items = base/"image"/"ut_items"/"icon";
+            if (std::filesystem::exists(ut_items)) {
+                for (auto& entry : std::filesystem::directory_iterator(ut_items)) {
+                    if (entry.path().extension() != ".png") continue;
+                    load_hud_png(entry.path(), entry.path().stem().string());
+                }
+            }
             // [U2] The shop's category tabs (Weapon/Armor/Helmet/
             // Ranged_weapon/Magic + _active/_pushed states) and the
             // Wear/Bag buttons. Without this atlas the shop rendered text
