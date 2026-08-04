@@ -179,6 +179,25 @@ public:
     // Set dialogue choices (empty to clear).
     virtual void host_set_dialogue_choices(std::vector<std::string>) {}
 
+    // --- [Wave 9B] Story-dialogue queue (quest flow) ---
+
+    // Queue a story dialogue (quests.xml <Dialog> sets) to play over the Map
+    // on its next entry, returning to `return_to` when finished. Queued lines
+    // are NOT a pre-battle dialogue: battle_location is irrelevant for them.
+    virtual void host_queue_story_dialogue(
+        std::vector<std::pair<std::string, std::string>> lines, SceneId return_to) {
+        (void)lines; (void)return_to;
+    }
+
+    // True if a story dialogue is waiting to play; consumes the flag so each
+    // queued dialogue plays exactly once.
+    virtual bool host_consume_story_dialogue() { return false; }
+
+    // The scene a non-battle dialogue returns to after its last line.
+    [[nodiscard]] virtual SceneId host_get_dialogue_return() const {
+        return SceneId::MainMenu;
+    }
+
     // --- Battle data ---
 
     // Set the level/act to battle. Called from Map scene before transitioning
@@ -494,6 +513,10 @@ public:
 
     [[nodiscard]] SceneId current_id() const noexcept { return current_id_; }
     [[nodiscard]] bool has_pending_transition() const noexcept { return pending_.has_value(); }
+
+    // [Wave 9B] The live scene object (for tests / host probes).
+    [[nodiscard]] Scene* current() noexcept { return current_.get(); }
+    [[nodiscard]] const Scene* current() const noexcept { return current_.get(); }
 
 private:
     void apply_transition(SceneContext& ctx);

@@ -1548,6 +1548,34 @@ static std::string shop_slot_for_type(const std::string& type) {
     return {};
 }
 
+// [Wave 9B] Test probe: what the centre column is rendering right now.
+// Mirrors the render so the soak test measures the screen, not a dream.
+// RED (HEAD): the column shows three equipped-item slots labelled
+// Weapon/Consumable/Ranged (the re-soak-5 "всего первое оружие + Consumable
+// и Ranged" report) — the category item list is reworked in the fix commit.
+std::vector<std::string> ShopScene::visible_row_names(SceneContext& ctx) const {
+    std::vector<std::string> out;
+    struct Slot { const char* label; std::string slot_key; };
+    static const Slot slots[] = {{"Weapon", "weapon"},
+                                 {"Consumable", "consumable"},
+                                 {"Ranged", "ranged"}};
+    for (const auto& slot : slots) {
+        std::string equipped = ctx.host.host_get_equipped(slot.slot_key);
+        out.push_back(equipped.empty() ? std::string(slot.label) : equipped);
+    }
+    return out;
+}
+
+// [Wave 9B] Test probe: the name of the currently selected item (empty when
+// nothing is selected). The selection logic (category filter + click rows)
+// was already correct on HEAD — this locks it in.
+std::string ShopScene::selected_item_name(SceneContext& ctx) const {
+    auto items = shop_items_for_category(ctx, categories_[selected_category_]);
+    if (selected_item_idx_ < 0 || selected_item_idx_ >= (int)items.size())
+        return {};
+    return items[selected_item_idx_].name;
+}
+
 // [REWORK] Shop layout matching the reference screenshot proportions.
 // [ORIGINAL] Derived from ShopScreen @ 0x1021f170. The reference shows:
 //   - MENU scroll roll at the very top (same as dojo)
