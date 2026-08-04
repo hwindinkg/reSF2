@@ -1800,6 +1800,21 @@ void ShopScene::on_update(SceneContext& ctx) {
                         std::printf("[SHOP] buy item='%s' price=%d -> success\n",
                                     item.name.c_str(), item.price);
                     }
+                } else {
+                    // [Wave 9B] A blocked purchase must not be silent: the
+                    // re-soak-5 "при нажатии купить ничего не происходит"
+                    // report was this gate swallowing the click. Say which
+                    // gate failed so the player (and the log) knows why.
+                    if (item.price <= 0) {
+                        std::printf("[SHOP] cannot buy '%s': price=%d (unsellable)\n",
+                                    item.name.c_str(), item.price);
+                    } else if (gold < item.price) {
+                        std::printf("[SHOP] cannot buy '%s': gold=%d need=%d\n",
+                                    item.name.c_str(), gold, item.price);
+                    } else {
+                        std::printf("[SHOP] cannot buy '%s': level=%d need=%d\n",
+                                    item.name.c_str(), level, item.level);
+                    }
                 }
             }
         } else if (owned && !equipped) {
