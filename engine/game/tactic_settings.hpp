@@ -129,6 +129,15 @@ struct TacticContext {
                             // [UNCERTAIN]-named attribute set); zero-fallback
     float anim_x = 0;       // X = anim+0x74 per-animation record; no engine
                             // source -> zero-fallback
+
+    // --- Soak-fix Wave 9A F2: the opponent's attack window ---------------
+    // Remaining attack frames of the opponent's CURRENT attack (0 while
+    // passive). The stage-1 (UseDefense) reaction gate fires only inside
+    // this window — block is a REACTION to an incoming attack, never a
+    // standing loop (re-soak-5: "постоянно воспроизводит анимацию блока
+    // (сам)"). Fed by the live path from the player's hit_anim_ countdown;
+    // scripted tests feed 0 = no incoming attack.
+    float threat_frames = 0;
 };
 
 // One weight curve: a `<Animation>` / `<...Chance>` element.

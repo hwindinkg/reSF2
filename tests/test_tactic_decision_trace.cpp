@@ -211,7 +211,16 @@ static bool starts_with(const std::string& s, const char* prefix) {
     return s.rfind(prefix, 0) == 0;
 }
 
-static TacticContext default_ctx() { return TacticContext{}; }
+// [Soak-fix Wave 9A] F2: the pipeline's decision contexts model a fight
+// state. The defense draw now REQUIRES an incoming attack window
+// (ctx.threat_frames > 0) — block is a reaction, never a standing loop —
+// so the scripted scenarios that must exercise the draw feed an open
+// window by default.
+static TacticContext default_ctx() {
+    TacticContext c;
+    c.threat_frames = 1.0f;  // opponent mid-attack: the F2 gate is open
+    return c;
+}
 
 // ===========================================================================
 // GATE G1 (ADR C4): the decision-trace golden contract.
@@ -295,6 +304,11 @@ static bool run_golden(const GoldenScenario& sc, const TacticSettings& s,
     sc.setup_mem(mem);
     TacticContext ctx;
     sc.setup_ctx(ctx);
+    // [Soak-fix Wave 9A] F2: the UseDefense draw is gated on the opponent's
+    // attack window (ctx.threat_frames > 0). The golden scenarios pin the
+    // ORIGINAL's draw outcomes, so they model an incoming attack; the gate
+    // itself is pinned by the dedicated F2 scenario below.
+    ctx.threat_frames = 1.0f;
     DecisionTrace trace;
     out = decide(*def, ctx, mem, tables, rng, trace);
     lines = trace.lines();
@@ -419,6 +433,30 @@ int main() {
                   starts_with(trace.lines()[1], "UseSafeAttack:") &&
                   starts_with(trace.lines()[11], "Decision {Wait="),
               "stages after the win still trace their lines");
+    }
+
+    std::printf("\n=== F2 gate: no defense draw while the opponent is passive ===\n");
+    {
+        // [Soak-fix Wave 9A] F2: block is a REACTION to an incoming attack.
+        // With threat_frames = 0 (passive opponent) the UseDefense draw is
+        // gated even though BlockChance Base=2 would fire for any roll — the
+        // decision falls through to QuickAttack (Throw, Base=2).
+        const TacticDef* agg = s.tactic("Aggressive");
+        TacticMemory mem;
+        TacticTableSet tables;
+        auto lcg = make_lcg(7);
+        RngSource rng = std::ref(lcg);
+        DecisionTrace trace;
+        TacticContext ctx = default_ctx();
+        ctx.threat_frames = 0.0f;  // no incoming attack
+        const TacticDecision d = decide(*agg, ctx, mem, tables, rng, trace);
+        CHECK(d.stage != DecisionStage::kUseDefense,
+              "F2 gate: passive opponent -> no defense draw");
+        CHECK(!trace.lines().empty() &&
+              starts_with(trace.lines()[0], "UseDefense:  / 0.0000 / 0.0000 / 2.0000"),
+              "F2 gate: UseDefense traces its no-fire row (scores still shown)");
+        CHECK(d.stage == DecisionStage::kQuickAttack && d.animation == "Throw",
+              "F2 gate: the decision falls through to the next firing stage");
     }
 
     std::printf("\n=== standalone chance stages fire ===\n");

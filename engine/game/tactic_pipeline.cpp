@@ -314,12 +314,22 @@ std::optional<TacticDecision> stage_use_defense(const TacticDef& def,
     int choice = 1;  // no defense
     // [D4] EnemyResponseDelay gate (ADR-005 D8): while the reaction
     // countdown window is open (enemy_reaction_frames > 0, ticked per AI
-    // frame), the stage-1 reaction draw is blocked — no reaction to fresh
+    // frame), the stage-1 reaction draw is blocked �?" no reaction to fresh
     // player actions mid-window. A reaction that fires opens the window.
     //   [HEURISTIC-TODO] granularity pending @re-verifier R5: which stages
     //   the native binary gates and where the window starts are unpinned;
     //   what is wired is exactly the API the memory exposes.
-    if (def.use_defense && mem.enemy_reaction_frames == 0) {
+    // [Soak-fix Wave 9A] F2: the defense draw fires only as a REACTION to
+    // the opponent's attack window (ctx.threat_frames > 0; 0 while the
+    // player is passive). The pre-Wave-9A draw ran on every decision
+    // cadence, and the BlockChance AnimationFramesFactor term — fed the
+    // DEFENDER's own animation frame count, which is always > 0 — scored
+    // block ~0.45 vs a passive player (UseTables; 1.0 with NoTables), the
+    // soak's standing block loop. The reaction semantics match
+    // BLOCK_LOGIC.md §1.2 (DamageFactor = "damage recently taken",
+    // HitFactor = "when the bot has been hit").
+    if (def.use_defense && mem.enemy_reaction_frames == 0 &&
+        ctx.threat_frames > 0) {
         const float r = static_cast<float>(rng()) / static_cast<float>(RAND_MAX);
         if (a > r) {
             choice = 2;

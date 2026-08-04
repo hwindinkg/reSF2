@@ -1124,10 +1124,13 @@ float host_enemy_health_frac() const override;
     }
     void host_run_tutorial_check() { check_tutorial(); }
     bool host_get_show_enemy() const { return show_enemy_; }
-    // [Wave 9B] Which pose source the shop preview's weapon draw resolves
-    // with. Must match the body pass (anim-first) so the knife rides the
-    // hand even with a stale dojo pose in anim_node_pos_ (re-soak-5).
-    static constexpr bool kShopPreviewUseAnim = false;  // RED on HEAD; flipped by S4
+    // [Wave 9B] S4: the shop preview's weapon draw resolves with the SAME
+    // pose source as the body pass (anim-first) so the knife rides the hand
+    // even with a stale dojo pose in anim_node_pos_ (re-soak-5: the knife
+    // hung above the hands — body drew the stale pose, weapon drew
+    // skeleton-rest pins). With the anim empty both fall back to the same
+    // skeleton rest pose, so a fresh shop is consistent too.
+    static constexpr bool kShopPreviewUseAnim = true;
     ShopPreviewGeometry shop_preview_geom_;
     float shop_preview_hand_gap_ = 1e9f;
     // [R1] Last armor render color (probe seam for the body-color test).
@@ -2204,6 +2207,29 @@ private:
             if (ait != anim_node_pos_.end()) {
                 wx = world_cx + ait->second.first * dir;
                 wy = floor_world_y_ + (ait->second.second +
+                     anim_player_.anim_npivot_bin_y()) + gameplay_y_offset_;
+                return true;
+            }
+            // [Wave 9B] S4: the walk/stance animations do NOT animate the
+            // Weapon-Node* pins (step_forward.bin ships no Weapon-Node
+            // entries), so an un-animated pin used to fall back to the
+            // skeleton REST pose while the body drew the animated pose —
+            // the shop preview showed the knife hanging above the hands on
+            // a frozen step pose (re-soak-5). The skeleton PINS the weapon
+            // nodes to the wrists (Edge129: Weapon-Node2_1 <-> NWrist_1,
+            // Edge130: Weapon-Node2_2 <-> NWrist_2, zero length — the dojo
+            // placement law), so an un-animated pin anchors to its ANIMATED
+            // body node instead of rest.
+            for (const auto& [edge_name, e] : assets_->skeleton_edges()) {
+                (void)edge_name;
+                const bool pin_is_end1 = (e.end1 == name);
+                if (!pin_is_end1 && e.end2 != name) continue;
+                const std::string& other = pin_is_end1 ? e.end2 : e.end1;
+                if (other.rfind("Weapon-", 0) == 0) continue;  // weapon-to-weapon edges are not pins
+                auto oit = anim_node_pos_.find(other);
+                if (oit == anim_node_pos_.end()) continue;      // body node not animated either
+                wx = world_cx + oit->second.first * dir;
+                wy = floor_world_y_ + (oit->second.second +
                      anim_player_.anim_npivot_bin_y()) + gameplay_y_offset_;
                 return true;
             }
