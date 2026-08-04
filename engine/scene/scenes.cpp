@@ -1550,18 +1550,15 @@ static std::string shop_slot_for_type(const std::string& type) {
 
 // [Wave 9B] Test probe: what the centre column is rendering right now.
 // Mirrors the render so the soak test measures the screen, not a dream.
-// RED (HEAD): the column shows three equipped-item slots labelled
-// Weapon/Consumable/Ranged (the re-soak-5 "всего первое оружие + Consumable
-// и Ranged" report) — the category item list is reworked in the fix commit.
+// The centre column is the category item list (scroll window applied);
+// empty strings mark rows past the end of the list.
 std::vector<std::string> ShopScene::visible_row_names(SceneContext& ctx) const {
     std::vector<std::string> out;
-    struct Slot { const char* label; std::string slot_key; };
-    static const Slot slots[] = {{"Weapon", "weapon"},
-                                 {"Consumable", "consumable"},
-                                 {"Ranged", "ranged"}};
-    for (const auto& slot : slots) {
-        std::string equipped = ctx.host.host_get_equipped(slot.slot_key);
-        out.push_back(equipped.empty() ? std::string(slot.label) : equipped);
+    auto items = shop_items_for_category(ctx, categories_[selected_category_]);
+    for (int i = 0; i < kVisibleRows; ++i) {
+        const int idx = static_cast<int>(scroll_offset_) + i;
+        if (idx >= 0 && idx < (int)items.size()) out.push_back(items[idx].name);
+        else out.push_back({});
     }
     return out;
 }
@@ -1821,7 +1818,7 @@ void ShopScene::on_update(SceneContext& ctx) {
         }
     }
 
-    // --- Scroll with W/S keys in the scroll area ----------------------------
+    // --- Scroll the item list: S key, mouse wheel --------------------------
     if (key_pressed(input, platform::Key::W) && scroll_offset_ > 0.0f) {
         scroll_offset_ -= 1.0f;
     }
@@ -1831,6 +1828,14 @@ void ShopScene::on_update(SceneContext& ctx) {
         if (scroll_offset_ < max_scroll) {
             scroll_offset_ += 1.0f;
         }
+    }
+    // [Wave 9B] Mouse-wheel scroll (desktop; the original is touch-drag).
+    if (input.mouse_wheel != 0.0f) {
+        float max_scroll = std::max(0.0f,
+            static_cast<float>(item_count) - static_cast<float>(kVisibleRows));
+        const int step = input.mouse_wheel > 0.0f ? -1 : 1;
+        scroll_offset_ = std::min(std::max(scroll_offset_ + step, 0.0f),
+                                  max_scroll);
     }
 }
 
@@ -1899,7 +1904,13 @@ void ShopScene::on_render(SceneContext& ctx) {
                                   220, 180, 120, 255);
     }
 
-    // --- Centre column: equipped-items scroll (parchment) -------------------
+    // --- Centre column: the selected category's item list (parchment) ------
+    // [Wave 9B] This used to render three EQUIPPED-slot rows ("Weapon"/
+    // "Consumable"/"Ranged") — the re-soak-5 "во всех вкладках только первое
+    // оружие + Consumable и Ranged" report: the list never showed the
+    // category items and could not scroll. Now each row is one catalog item
+    // (icon + name + stars) from the scroll window, and the click hit-test
+    // (scroll_offset_ + i) finally matches what the screen draws.
     {
         // Parchment background (same tint as the dojo's scroll panels).
         const float sx = L.scroll_x, sw = L.scroll_w, sy = L.body_y, sh = L.body_h;
@@ -1910,75 +1921,59 @@ void ShopScene::on_render(SceneContext& ctx) {
         const float inner_w = sw - 2.0f * pad;
         float y = sy + sh * 0.06f;
 
-        // Header: "EQUIPPED" centred
-        std::string header = ctx.host.host_localized("equipped");
-        if (header.empty()) header = "EQUIPPED";
+        // Header: the category name centred
+        std::string header = ctx.host.host_localized(
+            categories_[selected_category_]);
+        if (header.empty()) header = categories_[selected_category_];
         const float hdr_scale = shop_text_scale(26.0f * L.s);
         const auto [htw, hth] = ctx.host.host_measure_text(header, hdr_scale);
         ctx.host.host_render_text(header, sx + (sw - htw) * 0.5f, y,
                                   hdr_scale, 92, 46, 20, 255);
         y += hth * 1.4f;
 
-        // Three equipped-item slots: weapon (top), consumable (middle),
-        // secondary weapon (bottom). Each row shows the item's image, name,
-        // and a star rating. Missing slots render an empty placeholder.
-        struct Slot { const char* label; std::string slot_key; };
-        Slot slots[] = {{"Weapon",    "weapon"},
-                        {"Consumable","consumable"},
-                        {"Ranged",    "ranged"}};
+        auto items = shop_items_for_category(ctx, categories_[selected_category_]);
+        const int item_count = static_cast<int>(items.size());
         const float row_h = sh * 0.22f;
         const float icon_sz = row_h * 0.75f;
-        for (const auto& slot : slots) {
-            std::string equipped = ctx.host.host_get_equipped(slot.slot_key);
-            // Row background (subtle lighter stripe for readability)
+        for (int i = 0; i < kVisibleRows; ++i) {
+            const int idx = static_cast<int>(scroll_offset_) + i;
+            if (idx < 0 || idx >= item_count) break;  // window beyond the list
+            const auto& item = items[idx];
+            const bool selected = (idx == selected_item_idx_);
+            // Row background — subtle lighter stripe, brighter when selected
             r.draw_filled_rect_screen(inner_x, y, inner_w, row_h - 6.0f * L.s,
-                                      {180, 150, 100, 60});
+                                      selected ? ren::Color4B{220, 180, 110, 90}
+                                               : ren::Color4B{180, 150, 100, 60});
             const float icon_x = inner_x + 6.0f * L.s;
             const float icon_y = y + (row_h - 6.0f * L.s - icon_sz) * 0.5f;
-            if (!equipped.empty()) {
-                // Try to render the equipped item's texture.
-                if (!ctx.host.host_render_ui_texture(equipped,
-                        icon_x, icon_y, icon_sz, icon_sz)) {
-                    // Fallback tinted square
-                    r.draw_filled_rect_screen(icon_x, icon_y, icon_sz, icon_sz,
-                                              {110, 80, 40, 200});
-                }
-                // Item name
-                std::string name = ctx.host.host_localized(equipped);
-                if (name.empty()) name = equipped;
-                const float name_ts = shop_text_scale(22.0f * L.s);
-                ctx.host.host_render_text(name, icon_x + icon_sz + 10.0f * L.s,
-                                          y + 8.0f * L.s, name_ts,
-                                          70, 40, 20, 255);
-                // [ORIGINAL] The stars are the item's UpgradeLevel from
-                // list.xml, not a rarity: the binary has no "Rarity" or "Rank"
-                // string anywhere, only UpgradeLevel / UpgradeNumber /
-                // UpgradeList. This was hardcoded to "4" for every item.
-                if (const auto* def = shop_find_item(ctx, equipped)) {
-                    const int stars = def->upgrade_level;
-                    std::string rating;
-                    for (int i = 0; i < stars; ++i) rating += "\xe2\x98\x85";
-                    if (rating.empty()) rating = "\xe2\x98\x86";  // unupgraded
-                    ctx.host.host_render_text(rating,
-                                              icon_x + icon_sz + 10.0f * L.s,
-                                              y + 28.0f * L.s,
-                                              shop_text_scale(18.0f * L.s),
-                                              200, 170, 60, 255);
-                }
-            } else {
-                // Empty slot placeholder
+            // Item icon (list.xml Image= -> image/ut_items/icon)
+            if (!ctx.host.host_render_ui_texture(item.image,
+                    icon_x, icon_y, icon_sz, icon_sz)) {
+                // Fallback tinted square
                 r.draw_filled_rect_screen(icon_x, icon_y, icon_sz, icon_sz,
-                                          {80, 60, 40, 140});
-                const float lbl_ts = shop_text_scale(18.0f * L.s);
-                ctx.host.host_render_text(slot.label,
+                                          {110, 80, 40, 200});
+            }
+            // Item name
+            std::string name = ctx.host.host_localized(item.name);
+            if (name.empty()) name = item.name;
+            const float name_ts = shop_text_scale(22.0f * L.s);
+            ctx.host.host_render_text(name, icon_x + icon_sz + 10.0f * L.s,
+                                      y + 8.0f * L.s, name_ts,
+                                      70, 40, 20, 255);
+            // [ORIGINAL] The stars are the item's UpgradeLevel from
+            // list.xml, not a rarity: the binary has no "Rarity" or "Rank"
+            // string anywhere, only UpgradeLevel / UpgradeNumber /
+            // UpgradeList. This was hardcoded to "4" for every item.
+            {
+                const int stars = item.upgrade_level;
+                std::string rating;
+                for (int i = 0; i < stars; ++i) rating += "\xe2\x98\x85";
+                if (rating.empty()) rating = "\xe2\x98\x86";  // unupgraded
+                ctx.host.host_render_text(rating,
                                           icon_x + icon_sz + 10.0f * L.s,
-                                          y + (row_h - 6.0f * L.s) * 0.5f - 8.0f * L.s,
-                                          lbl_ts, 130, 100, 70, 200);
-                ctx.host.host_render_text("(empty)",
-                                          icon_x + icon_sz + 10.0f * L.s,
-                                          y + (row_h - 6.0f * L.s) * 0.5f + 10.0f * L.s,
-                                          shop_text_scale(14.0f * L.s),
-                                          130, 100, 70, 160);
+                                          y + 28.0f * L.s,
+                                          shop_text_scale(18.0f * L.s),
+                                          200, 170, 60, 255);
             }
             y += row_h;
         }
