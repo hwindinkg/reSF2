@@ -55,6 +55,9 @@ struct QuestAction {
     int type = 0;                                    // ActionType value
     std::string target;                              // zone/battle/fight path or name
     std::map<std::string, std::string> attributes;   // all XML attributes
+    // [Wave 9B] <Dialog> nested <Line Text=..> localization keys, in order.
+    // Empty for non-dialog actions and for the legacy single-attribute form.
+    std::vector<std::string> dialog_lines;
 };
 
 // Callback types for actions that need external side effects.
@@ -138,14 +141,19 @@ public:
         case static_cast<int>(ActionType::Dialog):         // FUN_101c7d20
         {
             // [ORIGINAL] Dialog actions carry Title (speaker key) and Line
-            // entries in attributes; the full parsing is deferred to the
-            // quest XML loader. For now, fire the callback with the target
-            // as the title key and no lines (the dialogue scene handles it).
+            // entries; the quest XML loader (quest_loader.cpp) fills
+            // dialog_lines from the nested <Line Text=..> keys. The Dialogue
+            // scene localizes each key on render.
             if (on_dialog_) {
                 std::vector<std::pair<std::string, std::string>> lines;
-                auto lit = action.attributes.find("Line");
-                if (lit != action.attributes.end())
-                    lines.emplace_back(action.target, lit->second);
+                if (!action.dialog_lines.empty()) {
+                    for (const auto& key : action.dialog_lines)
+                        lines.emplace_back(action.target, key);
+                } else {
+                    auto lit = action.attributes.find("Line");
+                    if (lit != action.attributes.end())
+                        lines.emplace_back(action.target, lit->second);
+                }
                 on_dialog_(action.target, lines);
             }
             break;

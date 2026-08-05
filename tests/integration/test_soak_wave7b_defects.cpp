@@ -411,9 +411,15 @@ static void test_p6_defeat_retry_and_p11_chain() {
         CHECK(runner.game().host_get_tutorial_state() == "COMPLETE",
               "P11: a WIN advances FIRST_FIGHT -> COMPLETE");
 
-        // Continue -> the story continues (Map).
+        // Continue -> the story continues: the tutorial COMPLETE queues the
+        // Sensei "find yourself a weapon" dialogue, which opens over the Map
+        // (Wave 9B S5) and returns to it. Advance it, then land on the Map.
         runner.run_frames(40);
         runner.tap_key(plat::Key::Space, 1);
+        CHECK(wait_scene(runner, scn::SceneId::Dialogue, 120),
+              "P6: the won training fight queues the Sensei story dialogue");
+        runner.run_frames(10);
+        runner.tap_key(plat::Key::Space, 1);  // advance the (single) line
         CHECK(wait_scene(runner, scn::SceneId::Map, 120),
               "P6: after the won training fight the story continues to the Map");
 
