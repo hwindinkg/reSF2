@@ -109,6 +109,17 @@ struct TacticMemory {
     void record_strike(const std::string& name, float amount);
     void record_counter(const std::string& name);
 
+    // [Soak-fix Wave 9A] F2: the full DEFENDER-side damage event — the
+    // strike feed (FUN_8f4b173c: strike_damage += amount, strike_count += 1)
+    // PLUS the probe channels the defense draw reads (BLOCK_LOGIC.md §1.2:
+    // BlockChance DamageFactor = "damage recently taken", HitFactor = "when
+    // the bot has been hit"): damage += amount (D probe, +0x08) and
+    // hits += 1 (H probe, +0x14). Keyed by the ATTACKER's animation, in the
+    // DEFENDER's (victim slot 1) memory. The R5 gap note — "the probe's D
+    // and H channels are never fed" — is what made the UseDefense draw
+    // blind to the player's attacks; this feed closes it.
+    void record_hit_taken(const std::string& name, float amount);
+
     // [ORIGINAL] <ResponseDelay>/<EnemyResponseDelay> <Min Base/><Max Base/>
     // ranges: roll frames_until_next_decision / enemy_reaction_frames
     // uniformly within [min, max] INCLUSIVE (RngSource contract: [0,
@@ -238,6 +249,17 @@ inline void TacticMemory::record_counter(const std::string& name) {
     MemoryRecord* rec = find_or_create(name);
     decay(*rec);
     rec->counter += 1.0f;  // FUN_8f4b1830: += 1 on decayed base
+}
+
+// [Soak-fix Wave 9A] F2 — see the declaration comment: the strike feed plus
+// the D/H probe channels the UseDefense draw consumes.
+inline void TacticMemory::record_hit_taken(const std::string& name, float amount) {
+    MemoryRecord* rec = find_or_create(name);
+    decay(*rec);
+    rec->damage += amount;         // +0x08 (D probe — "damage recently taken")
+    rec->hits += 1.0f;             // +0x14 (H probe — "when the bot has been hit")
+    rec->strike_damage += amount;  // +0x04 (FUN_8f4b173c strike feed)
+    rec->strike_count += 1.0f;     // +0x10
 }
 
 inline void TacticMemory::start_response_delay(float min, float max, RngSource rng) {
