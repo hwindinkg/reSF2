@@ -3778,8 +3778,15 @@ private:
         const auto& templates = assets_->stage_data().templates;
         const std::string& name = battle_info_.enemy_name;
         const fmt::StageTemplate* tmpl = nullptr;
-        for (const auto& t : templates) {
-            if (t.name == name || t.first_name == name) { tmpl = &t; break; }
+        // [U1] The dojo's own <Warrior> rows parse as templates with an EMPTY
+        // name/first_name; matching an empty battle name against them resolved
+        // a phantom template (resolved=1, weapon file "") and starved the
+        // weapon_knuckles.xml fallback the dojo render needs (the enemy
+        // weapon model never loaded — U1 soak: 0 nodes).
+        if (!name.empty()) {
+            for (const auto& t : templates) {
+                if (t.name == name || t.first_name == name) { tmpl = &t; break; }
+            }
         }
         if (!tmpl) return;
         enemy_template_resolved_ = true;
