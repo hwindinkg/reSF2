@@ -432,6 +432,39 @@ add_test(NAME test_trace_replay
 set_tests_properties(test_trace_replay PROPERTIES TIMEOUT 180)
 
 # ============================================================================
+# Wave 10A: real-binary E2E harness (tests/e2e/).
+#
+# The soak-6 defects live in real-play behavior that hermetic injection cannot
+# see. These tests boot the REAL resf2_app with an --input-script and assert
+# through the app's own diagnostics ([STATE] dump, resf2_debug.log) — the same
+# pattern as test_step_cooldown / test_input_trace. The runner library is
+# shared by every Wave-10A defect test.
+# ============================================================================
+add_library(resf2_e2e STATIC
+    e2e/e2e_runner.cpp
+)
+target_include_directories(resf2_e2e PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(resf2_e2e PRIVATE resf2_warnings)
+target_compile_features(resf2_e2e PRIVATE cxx_std_23)
+
+function(add_e2e_test test_name)
+    add_executable(${test_name} e2e/${test_name}.cpp)
+    target_link_libraries(${test_name} PRIVATE resf2_e2e resf2_warnings)
+    target_compile_features(${test_name} PRIVATE cxx_std_23)
+    set_target_properties(${test_name} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+    )
+    add_dependencies(${test_name} resf2_app)
+    add_test(NAME ${test_name}
+             COMMAND ${test_name} "$<TARGET_FILE:resf2_app>" "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(${test_name} PROPERTIES TIMEOUT 180)
+endfunction()
+
+# Canary: the harness itself (spawn + script + dump + parse + debug log) works
+# against the real binary before any defect probes are built on top of it.
+add_e2e_test(test_e2e_smoke)
+
+# ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
 
