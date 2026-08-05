@@ -3143,16 +3143,21 @@ void Game::host_update_gameplay(uint32_t dt) {
             // Original SF2 plays f_pl_attack*.wav on the first attack frame;
             // [S1] the m_/f_ prefix follows <Warrior Voice=> in the saves.
             int snd = (best_move->name.length() % 4) + 1;
-            play_sound(player_attack_sound(snd), 0.5f);
             // [Soak-fix Wave 9A] F1: the weapon swish — LIVE_INTERACTION_TRACE
             // §4.7 pins melee swings to swish2..swish7 and a sword loadout to
             // swish_sword1 (the soak: swings played no swish at all).
             // [HEURISTIC-TODO] the per-move swish index stays unpinned; the
             // deterministic index mirrors the voice scheme.
+            // The swish plays BEFORE the attack voice: the S1 audio soak
+            // asserts the swing's LAST sound is the gender voice
+            // (m_/f_pl_attack*); the trace's hit chain (§4.3) also orders the
+            // swish first.
             play_sound(equipped_weapon_ != "Fists"
                            ? "swish_sword1"
                            : "swish" + std::to_string((best_move->name.length() % 6) + 2),
                        0.4f);
+            ++swish_play_count_;  // [Wave 9A] F1f probe: observable even when the voice follows
+            play_sound(player_attack_sound(snd), 0.5f);
             goto after_combat;
         } else if (punch_pressed || kick_pressed) {
             // [DIAGNOSTIC] No candidate found — log structured reject.
