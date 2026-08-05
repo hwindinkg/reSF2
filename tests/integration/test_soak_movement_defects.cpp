@@ -359,7 +359,14 @@ int main() {
         }
         std::fprintf(stderr, "  [M4b] 4 spaced taps advanced %.1f total, min step %.1f\n",
                      prev_x - x0, min_advance);
-        CHECK(min_advance >= 10.0f, "M4b: every single tap completes a forward step (no cancel/back-walk)");
+        // [Soak-fix Wave 9A] F3: the stance idle is a PLANTED stance (the
+        // idle's authored NPivot wander no longer translates the fighter).
+        // A sampling window that spans a step boundary (step tail + idle +
+        // next step head) therefore advances ~10 units — the old 10.0 floor
+        // was only reachable because the idle wander padded it to ~10.7.
+        // 8.0 keeps a margin over the actual regression this check guards
+        // (the pre-M4 cancel/back-walk net was NEGATIVE, -7.9 per tap).
+        CHECK(min_advance >= 8.0f, "M4b: every single tap completes a forward step (no cancel/back-walk)");
         CHECK(prev_x - x0 >= 80.0f, "M4b: 4 spaced taps advance >= 80 units total");
         }
     }
@@ -390,7 +397,13 @@ int main() {
                 runner.run_frames(1);
             for (int i = 0; i < 10; ++i) runner.run_frames(1);
             const float px = runner.game().host_get_player_pos_x();
-            crossed = bag_right ? (px > bag_x + 30.0f) : (px < bag_x - 30.0f);
+            // [Soak-fix Wave 9A] F3: the idle is planted, so the dash must
+            // cross on its own root motion — it lands at ~bag_x+30 (measured
+            // +22.9 vs the bag at -7). The old +30 threshold was only
+            // reachable because the idle's authored wander added ~3 free
+            // units during the approach (the drift F3 removes). +20 = past
+            // the bag's body with margin, still "behind the bag".
+            crossed = bag_right ? (px > bag_x + 20.0f) : (px < bag_x - 20.0f);
         }
         CHECK(crossed, "M5: the fighter crosses behind the bag via a dash");
         if (crossed) {
