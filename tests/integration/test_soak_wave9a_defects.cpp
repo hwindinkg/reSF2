@@ -319,7 +319,15 @@ int main() {
         std::fprintf(stderr, "  [F3a] punch: x0=%.2f x_end=%.2f x_settled=%.2f tail=%.3f\n",
                      x0, x_punch_end, x_punch_settled, tail_punch);
         CHECK(saw_punch, "F3a: the punch played");
-        CHECK(std::fabs(tail_punch) < 1.5f,
+        // [Soak-fix Wave 9A] F3: the tail is measured from the last frame the
+        // animation is STILL current to the settled idle. The stance idle no
+        // longer translates the fighter (its authored NPivot wander used to
+        // carry him -3.7 after the punch ended). What remains is the idle
+        // entry ALIGN snap (apply_align: the idle's heel is placed at the
+        // punch's final heel world position тАФ [ORIGINAL] alignAnimation
+        // continuity). The heel is planted; only the render anchor (NPivot)
+        // adjusts, measured 0.466. Contract tolerance: ~0.5 units.
+        CHECK(std::fabs(tail_punch) < 0.5f,
               "F3a: no extra drift after the punch ends + idle transition");
 
         // (b) one forward step: same contract.
@@ -345,7 +353,10 @@ int main() {
         std::fprintf(stderr, "  [F3b] step: x0=%.2f x_end=%.2f x_settled=%.2f tail=%.3f\n",
                      s0, x_step_end, x_step_settled, tail_step);
         CHECK(saw_step, "F3b: the step played");
-        CHECK(std::fabs(tail_step) < 1.5f,
+        // [Soak-fix Wave 9A] F3: the step is a travel anim (no <Align>), so
+        // its transition to idle has no align snap тАФ the step's last-frame
+        // root delta lands, then the planted idle holds. Measured tail 0.000.
+        CHECK(std::fabs(tail_step) < 0.5f,
               "F3b: no extra drift after the step ends + idle transition");
     }
 
