@@ -2362,6 +2362,14 @@ void Game::host_update_gameplay(uint32_t dt) {
             enemy_attack_hit_done_ = false;
             enemy_attack_duration_ = 0.4f;
             enemy_attack_cooldown_ = 1.5f;
+            // [H08] The swing plays from its FIRST frame: the mid-swing hit
+            // check (enemy_attack_duration_ <= 0.2 -> 0.208 s, frame ~4 at
+            // 20 fps) must sample the move's authored <Attack> interval
+            // (HighPunch: Start=4 End=5) — the extended punch pose. Without
+            // the reset the accumulated anim clock lands the check on an
+            // arbitrary phase (wind-up/recovery ~80% of the time) and the
+            // fist edge misses at close range.
+            enemy_anim_time_ = 0.0f;
             // [S2] The swing sound comes from the ENEMY's voice set
             // (stages.xml <Template Voice=>), not the player's female set.
             play_sound(enemy_attack_sound(2), 0.4f);
@@ -2372,7 +2380,11 @@ void Game::host_update_gameplay(uint32_t dt) {
             // [H05] Real block animation (high_block.bin / duck.bin);
             // "fists_block" is not a moves.xml name.
             enemy_anim_ = enemy_block_anim();
-        } else {  // idle — the decision's wait
+        } else if (!enemy_attacking_) {  // idle — the decision's wait
+            // [H08] While the swing is in flight (enemy_attack_duration_ >
+            // 0) the attack pose must NOT be overwritten: the mid-swing hit
+            // check samples enemy_anim_ and would otherwise test the rest
+            // pose (hands at the sides) and never connect at close range.
             // [H07] Real catalog stance idle (fists1_stance_idle for fists;
             // the weapon's own stance idle once the loadout resolves it).
             enemy_anim_ = enemy_idle_anim();
