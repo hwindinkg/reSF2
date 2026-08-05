@@ -595,7 +595,10 @@ set_tests_properties(test_soak_wave9a_defects PROPERTIES TIMEOUT 600)
 # moves.xml, users.xml, models/*).
 # ---------------------------------------------------------------------------
 add_integration_test(test_hardcode_fidelity)
-set_tests_properties(test_hardcode_fidelity PROPERTIES TIMEOUT 300)
+# Seven battle/dojo scene inits (H02/H05/H06/H07/H08/H09/H10) at ~25-30 s of
+# asset/audio load each plus the H05/H08 live-battle windows; measured
+# ~300 s direct (2026-08-05) — 600 like the wave-9a battle-heavy soak.
+set_tests_properties(test_hardcode_fidelity PROPERTIES TIMEOUT 600)
 
 
 # Soak-fix Wave 7a (P10): moves.xml parser fidelity — the REAL device file

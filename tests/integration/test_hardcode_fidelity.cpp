@@ -363,7 +363,12 @@ static void test_h08_enemy_collision_hit() {
     }
 
     // Live battle: the player chases the enemy into close range; punches
-    // must land there, and never at mid-range (>= 170).
+    // must land there — the FIRST HIT must arrive within a sane window
+    // (the escalated H08: the enemy NEVER landed a hit in 38 s even at
+    // min_dist=0, total_hits=0) — and never at mid-range (>= 170). The
+    // main loop stops at the first hit: the collision path pins the
+    // no-mid-range behavior at the probe above, so the live window only
+    // needs to prove the close-range connect.
     {
         resf2::test::HeadlessTestRunner runner(config);
         if (!init_battle_runner(runner, "Dojo_Disciple")) {
@@ -374,12 +379,12 @@ static void test_h08_enemy_collision_hit() {
         runner.tap_key(resf2::platform::Key::D, 2);
         runner.run_frames(10);
         // Close the gap with forward presses (same choreography as R4c);
-        // the punch edge reaches ~60-80 units, so chase to < 70.
-        for (int i = 0; i < 14; ++i) {
+        // the extended punch pose reaches ~85-100 units, so chase to < 90.
+        for (int i = 0; i < 12; ++i) {
             const float dist = std::fabs(
                 runner.game().host_get_enemy_pos_x() -
                 runner.game().host_get_player_pos_x());
-            if (dist <= 70.0f) break;
+            if (dist <= 90.0f) break;
             runner.tap_key(resf2::platform::Key::D, 3);
             runner.run_frames(30);
         }
@@ -387,29 +392,35 @@ static void test_h08_enemy_collision_hit() {
         float prev_hp = runner.player_health_frac();
         int far_hits = 0;
         int total_hits = 0;
-        const int kMaxFrames = 2400;  // 38 s — several attack windows
-        for (int i = 0; i < kMaxFrames; ++i) {
+        int first_hit_frame = -1;
+        const int kMaxFrames = 2400;  // 38 s — the failure window
+        for (int i = 0; i < kMaxFrames && total_hits == 0; ++i) {
             runner.run_frames(1);
             const float dist = std::fabs(
                 runner.game().host_get_enemy_pos_x() -
                 runner.game().host_get_player_pos_x());
             if (dist < min_dist) min_dist = dist;
-            // Stay glued: re-close if the enemy retreats.
-            if (dist > 90.0f && i % 40 == 0)
+            // Stay glued: the enemy's CautiousMovements retreats walk him
+            // out of fist reach (~100 u) unless the player tracks him — a
+            // step every 20 frames matches the retreat pace.
+            if (dist > 95.0f && i % 20 == 0)
                 runner.tap_key(resf2::platform::Key::D, 3);
             const float hp = runner.player_health_frac();
             if (hp < prev_hp - 1e-5f) {
                 ++total_hits;
+                if (first_hit_frame < 0) first_hit_frame = i;
                 if (dist >= 170.0f) ++far_hits;
                 prev_hp = hp;
             }
         }
-        std::fprintf(stderr, "  [H08] live: min_dist=%.0f total_hits=%d far_hits(>=170)=%d\n",
-                     min_dist, total_hits, far_hits);
+        std::fprintf(stderr, "  [H08] live: min_dist=%.0f total_hits=%d first_hit=f%d far_hits(>=170)=%d\n",
+                     min_dist, total_hits, first_hit_frame, far_hits);
         resf2::test::check_eq(far_hits, 0,
                               "H08: no player damage at mid-range (>= 170) in a live battle");
         resf2::test::check(total_hits >= 1,
                            "H08: close-range enemy punches connect via the collision path");
+        resf2::test::check(first_hit_frame >= 0 && first_hit_frame < 900,
+                           "H08: the first hit lands within 900 frames (~14 s) at melee");
     }
 }
 
