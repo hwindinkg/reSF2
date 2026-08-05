@@ -480,6 +480,10 @@ float host_enemy_health_frac() const override;
     // [Soak-fix Wave 9A] F1: the most recent sound any path played
     // (swish/bodyfall/wall3/armor pins).
     const std::string& host_get_last_sound() const { return last_played_sound_; }
+    // [Soak-fix Wave 9A] F1f probe: swish plays counted, so the swing swish
+    // stays observable even when the attack voice follows it in the same
+    // frame (last-sound probes can only see one of the two).
+    int host_get_swish_play_count() const { return swish_play_count_; }
     // ---- Hardcode-fidelity probes (HARDCODE_AUDIT.md HIGH items) ----
     // H07: true when the named animation is in the loaded catalog — the
     // engine must not invent names the original never shipped ("fists_idle"
@@ -5840,6 +5844,9 @@ private:
     // [Soak-fix Wave 9A] F1 test seam: impact sound counter state (the
     // hit1-6.wav / super_hit1-5.wav plays counted by play_sound).
     int hit_sound_count_ = 0;
+    // [Soak-fix Wave 9A] F1f probe state: swing-swish plays (the F1 swish
+    // block increments it; see host_get_swish_play_count).
+    int swish_play_count_ = 0;
     std::string last_hit_sound_;
     // [Soak-fix Wave 9A] F1: last sound played by ANY path (swish/bodyfall
     // /armor/wall3 pins); see play_sound.

@@ -153,6 +153,7 @@ int main() {
         const float ex0 = runner.game().host_get_enemy_pos_x();
         const int sparks0 = (int)runner.game().host_get_hit_spark_count();
         const int snd0 = runner.game().host_get_hit_sound_count();
+        const int swish0 = runner.game().host_get_swish_play_count();
 
         runner.tap_key(plat::Key::O, 2);   // punch (HighPunch -> Hit Name="High")
 
@@ -160,18 +161,11 @@ int main() {
         bool hit_landed = false;
         std::string reaction_anim;
         std::string hit_sound_at_land;
-        bool saw_swish = false;
         int reaction_frames = 0;
         int sparks_at_hit = 0;
         float ex_at_hit = ex0;
         for (int i = 0; i < 130; ++i) {
             runner.run_frames(1);
-            // [Wave 9A] F1f: the swing swish (swish2..swish7 / sword ->
-            // swish_sword1) plays at the attack start — the LIVE trace §4.7
-            // pin (the soak: swings played no swish).
-            if (!saw_swish &&
-                runner.game().host_get_last_sound().rfind("swish", 0) == 0)
-                saw_swish = true;
             if (!hit_landed && runner.enemy_health_frac() < hp0 - 1e-4f) {
                 hit_landed = true;
                 reaction_anim = runner.game().host_get_enemy_anim();
@@ -183,6 +177,13 @@ int main() {
                 ++reaction_frames;
         }
         const float ex1 = runner.game().host_get_enemy_pos_x();
+        // [Wave 9A] F1f: the swing swish (swish2..swish7 / sword ->
+        // swish_sword1) plays at the attack start — the LIVE trace §4.7
+        // pin (the soak: swings played no swish). Counted (not last-sound):
+        // the gender voice legitimately follows the swish in the same
+        // frame, so a last-sound probe can only see one of the two.
+        const bool saw_swish =
+            runner.game().host_get_swish_play_count() > swish0;
         std::fprintf(stderr, "  [F1] hit=%d reaction='%s' reaction_frames=%d sparks=%d snd=%d last='%s' swish=%d knockback=%.1f\n",
                      (int)hit_landed, reaction_anim.c_str(), reaction_frames,
                      sparks_at_hit,
