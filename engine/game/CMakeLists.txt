@@ -16,6 +16,7 @@ add_library(resf2_game STATIC
     condition_system.cpp
     settings_loader.cpp
     boot_configs.cpp
+    quest_loader.cpp
 )
 
 target_include_directories(resf2_game PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

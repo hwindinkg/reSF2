@@ -50,6 +50,7 @@
 #include "condition_system.hpp"
 #include "input_handler.hpp"
 #include "quest_engine.hpp"
+#include "quest_loader.hpp"
 
 // Import commonly-used namespaces at file scope
 // (helpers.cpp also uses these at file scope, so they must be here)
@@ -371,6 +372,8 @@ bool host_has_pending_story_dialogue() const { return story_dialogue_pending_; }
 bool host_quest_battle_unlocked(const std::string& battle) const {
     return quest_engine_.is_battle_unlocked(battle);
 }
+// [Wave 9B] S5: FIRST_FIGHT won -> tutorial COMPLETE + Sensei shop dialogue.
+void host_finish_tutorial_fight() override;
 
 
 void host_set_current_level(std::string level_id) override;
@@ -5755,7 +5758,7 @@ private:
     std::string tutorial_state_ = "MOVE";
     // [Wave 9B] Story-dialogue queue state (quests.xml <Dialog> sets).
     bool story_dialogue_pending_ = false;
-    scene::SceneId dialogue_return_ = scene::SceneId::MainMenu;
+    scene::SceneId dialogue_return_ = scene::SceneId::None;
     // One-shot story beats: the knives-buy prompt and the FirstGuardBeaten
     // (Lynx/May) set. [HEURISTIC-TODO] In-memory only — the original saves
     // quest state in users.xml variables.
@@ -5787,6 +5790,14 @@ private:
     // Quest engine: drives zone unlocks, battle unlocks, dialogs from quests.xml
     // [ORIGINAL] QuestManager @ 0x101c7d20 processes quest actions on events.
     quest::QuestEngine quest_engine_;
+
+    // [Wave 9B] S5: the 498 quests of quests.xml parsed at boot
+    // (quest_loader.cpp), dispatched by host_trigger_quest_event. Empty when
+    // the file is absent — the game then runs without quest dispatch.
+    std::vector<resf2::game::QuestDef> quest_defs_;
+    bool quest_defs_loaded_ = false;
+    // [Wave 9B] S5: the knives-bought Lynx challenge fires once per save.
+    bool tutorial_lynx_hint_shown_ = false;
 
     // stage_data_ and stages_loaded_ live in AssetManager (assets_)
 

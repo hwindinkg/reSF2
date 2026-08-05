@@ -340,8 +340,15 @@ void Game::on_init(plat::Platform& platform) {
             // [ORIGINAL] QuestManager @ 0x101c7d20 wires actions to game systems.
             quest_engine_.set_dialog_callback([this](const std::string& title,
                     const std::vector<std::pair<std::string, std::string>>& lines) {
+                // [Wave 9B] S5: quest <Dialog> actions are STORY dialogues —
+                // quests.xml places them on the Map (Place="Map"), so they
+                // play over the Map on its next entry and return to it. The
+                // line text is a localization KEY (tutorial_girl_hello,
+                // tutorial_bodyguard_win_1, ...); the Dialogue scene
+                // localizes it on render.
                 std::printf("[QUEST] dialog: title='%s' lines=%zu\n", title.c_str(), lines.size());
-                if (!lines.empty()) host_set_dialogue(lines);
+                if (!lines.empty())
+                    host_queue_story_dialogue(lines, scene::SceneId::Map);
             });
             quest_engine_.set_zone_callback([this](const std::string& zone) {
                 std::printf("[QUEST] zone open: '%s'\n", zone.c_str());
@@ -692,6 +699,12 @@ void Game::host_set_dialogue(std::vector<std::pair<std::string, std::string>> li
     dialogue_lines_ = std::move(lines);
             dialogue_index_ = 0;
     dialogue_choices_.clear();
+    // [Wave 9B] S5: a plain (non-story) dialogue has no queued return scene —
+    // its advance falls back to the battle-location rule. The reset keeps a
+    // story dialogue's return (the Map) from leaking into a later pre-battle
+    // dialogue (e.g. the Map's Sly intro would return to the Map instead of
+    // starting the fight).
+    dialogue_return_ = scene::SceneId::None;
 }
 
 const std::vector<std::pair<std::string, std::string>>& Game::host_get_dialogue() const {
@@ -870,6 +883,47 @@ std::string Game::host_get_battle_result() const {
     return battle_result_;
 }
 
+void Game::host_finish_tutorial_fight() {
+    // [ORIGINAL] Winning the Kenji (FIRST_FIGHT) training fight completes the
+    // tutorial (Tutorial attribute on <Warrior> in usersDefault.xml) and
+    // queues the Sensei "find yourself a weapon" dialogue. That dialogue is
+    // part of the tutorial state machine (0x1027d6c0) — its key
+    // (tutorial_shop) is absent from all 498 quests of quests.xml, so it is
+    // queued here, not by the quest engine. It plays over the Map and
+    // returns to the Map.
+    tutorial_state_ = "COMPLETE";
+    std::string line = localized("tutorial_shop");
+    if (line.empty())
+        line = "I knew you could do it. Now you need to find yourself a weapon.";
+    host_queue_story_dialogue({{"Sensei", line}}, scene::SceneId::Map);
+    std::printf("[tutorial] FIRST_FIGHT won -> COMPLETE, tutorial_shop dialogue queued\n");
+}
+
+namespace {
+
+// [Wave 9B] Evaluate one quest condition with the FightEnd event binding.
+// Literal Equal tests (with Not="1") evaluate; anything else — operators
+// we do not implement, or operands that are quest-query expressions
+// ("?Fight(...).WinCount", "?Item(...).Quantity", ...) — FAILS CLOSED so a
+// half-understood quest never fires user-visible actions spuriously.
+bool quest_condition_holds(const resf2::game::QuestCondition& c,
+                           const std::string& fight,
+                           const std::string& fight_result) {
+    if (c.op != "Equal") return false;  // unsupported operator -> fail closed
+    auto resolve = [&](const std::string& v) -> std::string {
+        if (v == "_$Fight") return fight;
+        if (v == "_$FightResult") return fight_result;
+        return v;
+    };
+    const std::string a = resolve(c.v1);
+    const std::string b = resolve(c.v2);
+    if (a.rfind('?', 0) == 0 || b.rfind('?', 0) == 0) return false;  // quest query -> fail closed
+    const bool eq = (a == b);
+    return c.negate ? !eq : eq;
+}
+
+}  // namespace
+
 void Game::queue_tutorial_battle() {
     // [Q3] The training-fight dialog ("...against my disciple, Kenji") must
     // hand over to the disciple fight instead of dropping back to the dojo:
@@ -933,12 +987,42 @@ void Game::host_set_battle_result(std::string result) {
 void Game::host_trigger_quest_event(const std::string& event, const std::string& arg) {
     // [ORIGINAL] QuestManager @ 0x101c7d20 processes quest actions on events.
     // Events: "FightEnd" (arg=level), "SessionStart", "ZoneEnter" (arg=zone).
-    // For now, log the event. Full quest XML parsing and action dispatch
-    // requires loading quests.xml and mapping events to action lists.
-    std::printf("[QUEST] event '%s' arg '%s' (quest XML dispatch pending)\n",
-                event.c_str(), arg.c_str());
-    // TODO: Parse quests.xml, find actions for this event, execute them:
-    //   quest_engine_.execute_actions(actions_for_event);
+    // Every quest of quests.xml that lists the event and whose conditions
+    // all hold fires its actions (quest_loader.cpp / quest_engine.hpp).
+    // [HEURISTIC-TODO] Condition support covers literal Equal tests only;
+    // quest-query conditions fail closed (see quest_condition_holds).
+    // Lazy load: init_location loads the defs in the normal boot flow, but a
+    // scripted session that jumps straight to a mid-game scene (or a fight
+    // that ends before the loading screen) must still dispatch.
+    if (!quest_defs_loaded_) {
+        quest_defs_loaded_ = true;
+        resf2::game::load_quest_defs(asset_root_, quest_defs_);
+    }
+    if (quest_defs_.empty()) return;
+    const std::string fight_result = (battle_result_ == "victory") ? "Win" : "Loss";
+    std::printf("[QUEST] event '%s' arg '%s' result='%s' (%zu quests loaded)\n",
+                event.c_str(), arg.c_str(), fight_result.c_str(), quest_defs_.size());
+    for (auto& quest : quest_defs_) {
+        if (quest.fired) continue;
+        bool has_event = false;
+        for (const auto& ev : quest.events)
+            if (ev == event) { has_event = true; break; }
+        if (!has_event) continue;
+        bool hold = true;
+        for (const auto& c : quest.conditions)
+            if (!quest_condition_holds(c, arg, fight_result)) { hold = false; break; }
+        if (!hold) {
+            std::printf("[QUEST] quest '%s' conditions not met (skipped)\n",
+                        quest.name.c_str());
+            continue;
+        }
+        // [ORIGINAL] Quests fire once per match; the engine re-arms them on
+        // the next battle session start.
+        quest.fired = true;
+        std::printf("[QUEST] quest '%s' FIRES (actions=%zu)\n",
+                    quest.name.c_str(), quest.actions.size());
+        quest_engine_.execute_actions(quest.actions);
+    }
 }
 
 void Game::host_set_battle_info(const BattleInfo& info) {
@@ -1126,6 +1210,24 @@ bool Game::host_buy_item(const std::string& item_id) {
             inventory_.add_item(item_id);
             // Sync PlayerProfile
             player_profile_.add_item(item_id);
+            // [Wave 9B] S5: buying the knives during the tutorial queues the
+            // Lynx challenge (tutorial_buy_knives + tutorial_map). Those keys
+            // are hardcoded tutorial state machine lines (0x1027d6c0),
+            // absent from quests.xml; the dialogue plays over the Map on its
+            // next entry, once per save.
+            if (item_id == "WEAPON_KNIVES" && tutorial_state_ == "COMPLETE" &&
+                !tutorial_lynx_hint_shown_) {
+                tutorial_lynx_hint_shown_ = true;
+                std::string l1 = localized("tutorial_buy_knives");
+                std::string l2 = localized("tutorial_map");
+                if (l1.empty())
+                    l1 = "In this form you can't die. Thus I suggest you challenge one of the demons now: Lynx!";
+                if (l2.empty())
+                    l2 = "I know where you can find him. Open your map.";
+                host_queue_story_dialogue({{"Sensei", l1}, {"Sensei", l2}},
+                                          scene::SceneId::Map);
+                std::printf("[tutorial] knives bought -> Lynx challenge dialogue queued\n");
+            }
             // Auto-save
             host_save_progress();
             return true;
@@ -1722,6 +1824,13 @@ void Game::init_location() {
                 quests_config_loaded_ = true;
                 if (resf2::game::load_quests_config(asset_root_, boot_configs_.quests))
                     boot_events_.push_back("quests.xml");
+                // [Wave 9B] S5: parse the full quest set for event dispatch
+                // (host_trigger_quest_event). One-shot, same load point as
+                // the config count above.
+                if (!quest_defs_loaded_) {
+                    quest_defs_loaded_ = true;
+                    resf2::game::load_quest_defs(asset_root_, quest_defs_);
+                }
             }
             if (!packs_config_loaded_) {
                 packs_config_loaded_ = true;

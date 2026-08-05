@@ -57,6 +57,7 @@ enum class SceneId : std::uint8_t {
     Battle,     // combat scene (proper fight, not just bag)
     Results,    // post-battle victory/defeat screen
     Profile,    // player stats and inventory summary
+    None,       // sentinel: no scene / unset return target
 };
 
 // Human-readable name for debugging / logging.
@@ -197,6 +198,13 @@ public:
     [[nodiscard]] virtual SceneId host_get_dialogue_return() const {
         return SceneId::MainMenu;
     }
+
+    // [Wave 9B] S5: the tutorial's training fight (FIRST_FIGHT) was WON —
+    // the tutorial completes (Tutorial attribute on <Warrior> in
+    // usersDefault.xml) and the Sensei "find yourself a weapon" story
+    // dialogue is queued for the Map. Only the Results scene calls this on
+    // a FIRST_FIGHT victory.
+    virtual void host_finish_tutorial_fight() {}
 
     // --- Battle data ---
 

@@ -27,6 +27,7 @@ const char* scene_name(SceneId id) noexcept {
         case SceneId::Battle:   return "Battle";
         case SceneId::Results:  return "Results";
         case SceneId::Profile:  return "Profile";
+        case SceneId::None:     return "None";
     }
     return "?";
 }

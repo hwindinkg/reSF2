@@ -240,6 +240,14 @@ void MapScene::on_enter(SceneContext& ctx) {
         const int want = ctx.host.start_scene_arg();
         if (want >= 0 && want < (int)zone_battles_.size()) selected_ = want;
     }
+
+    // [Wave 9B] S5: a queued story dialogue (tutorial continuation / quest
+    // <Dialog> set) opens over the Map on entry and returns to the Map when
+    // finished. The consume is one-shot — each queued dialogue plays once.
+    if (ctx.host.host_consume_story_dialogue()) {
+        std::printf("[map] story dialogue pending -> Dialogue\n");
+        ctx.host.request_scene_transition(SceneId::Dialogue);
+    }
 }
 
 // [ORIGINAL] The zone sheet a zone is painted on. stages.xml names the story
@@ -845,11 +853,21 @@ void DialogueScene::on_update(SceneContext& ctx) {
         current_line_++;
         text_reveal_ms_ = 0;
         if (current_line_ >= total_lines) {
-            // The opening tutorial dialogue has no battle behind it — it just
-            // hands over to the dojo. Only a dialogue queued from the map does.
-            ctx.host.request_scene_transition(
-                ctx.host.host_get_battle_location().empty() ? SceneId::MainMenu
-                                                            : SceneId::Battle);
+            // [Wave 9B] S5: a STORY dialogue (queued by the quest engine or
+            // the tutorial continuation) returns to its recorded scene — the
+            // Map. Only a plain pre-battle dialogue hands over to the dojo
+            // or the battle behind it.
+            const SceneId ret = ctx.host.host_get_dialogue_return();
+            if (ret != SceneId::None) {
+                ctx.host.request_scene_transition(ret);
+            } else {
+                // The opening tutorial dialogue has no battle behind it — it
+                // just hands over to the dojo. Only a dialogue queued from
+                // the map does.
+                ctx.host.request_scene_transition(
+                    ctx.host.host_get_battle_location().empty() ? SceneId::MainMenu
+                                                                : SceneId::Battle);
+            }
         }
     };
 
@@ -1218,9 +1236,10 @@ void ResultsScene::on_enter(SceneContext& ctx) {
         // was queued (that pre-fight COMPLETE is what broke the story after
         // a loss: nothing left to advance to, the player stuck toggling the
         // dojo's bag/fighter).
+        // [Wave 9B] S5: host_finish_tutorial_fight also queues the Sensei
+        // "find yourself a weapon" story dialogue (plays over the Map).
         if (ctx.host.host_get_tutorial_state() == "FIRST_FIGHT") {
-            ctx.host.host_set_tutorial_state("COMPLETE");
-            std::printf("[results] tutorial FIRST_FIGHT won -> COMPLETE\n");
+            ctx.host.host_finish_tutorial_fight();
         }
         // Add currency reward
         if (reward_gold_ > 0) ctx.host.host_add_currency(reward_gold_);
