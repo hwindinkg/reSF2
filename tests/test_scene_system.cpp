@@ -63,6 +63,7 @@ struct NullHost : scene::SceneHost {
     float host_enemy_health_frac() const override { return 1.0f; }
     void host_reset_round() override {}
     void host_set_round_wins(int, int) override {}
+    void host_set_round_left_ms(int) override {}
     int host_get_currency() const override { return 0; }
     bool host_spend_currency(int) override { return false; }
     void host_add_currency(int) override {}
