@@ -529,6 +529,12 @@ add_e2e_test(test_e2e_facing)
 # anti-restart). Boots a battle and taps S once per frame six times.
 add_e2e_test(test_e2e_duck_repeat)
 
+# Wave 11A M4 (CRITS + KNOCKDOWN): the crit roll (attr * 0.0001) fires on
+# unblocked hits, crits multiply damage by 2^(0.0001*attr) and knock the
+# enemy down into the fall family + bodyfall sound. Battle runs with the
+# --crit-attr hook (deterministic) and without (seeded Default attr 1000).
+add_e2e_test(test_e2e_crit_knockdown)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================

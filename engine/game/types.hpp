@@ -241,6 +241,13 @@ struct MoveDef {
     // <Move NoMagicRecharge="1"> attribute (and the <Template> inheritance
     // chain).
     bool no_magic_recharge = false;
+
+    // [ORIGINAL] MoveDef+0x4C: the NoCritical flag. The hit-application
+    // function FUN_8f4aa998 skips the crit ROLL when the attacking move
+    // carries it (moves.xml <Damage NoCritical="1"> — e.g. the energy
+    // pillar's tick damage). Folds the Move-level and Interval-level
+    // <Damage NoCritical> attributes.
+    bool no_critical = false;
 };
 
 // ---------- Animation ----------

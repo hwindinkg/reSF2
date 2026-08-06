@@ -131,6 +131,12 @@ public:
     // the fight HUD's magic button.
     void set_equip_magic(const std::string& id) { equip_magic_hook_ = id; }
     void set_equip_weapon(const std::string& id) { equip_weapon_hook_ = id; }
+    // [Wave 11A M4] E2E hook: --crit-attr <chance> <damage> overrides the
+    // player's crit attributes (mirrors --equip-magic).
+    void set_crit_attr_hook(int chance, int damage) {
+        crit_attr_hook_chance_ = chance;
+        crit_attr_hook_damage_ = damage;
+    }
 
     void set_start_location(const std::string& name) {
         if (!name.empty()) {
@@ -3338,9 +3344,12 @@ private:
     // the real impact sound (hit1-6.wav / super_hit1-5.wav), the reversed
     // authored <Impulse X> knockback over the reaction, and the defender's
     // fight-memory damage-event feed (F2). Defined in game.cpp.
+    // [Wave 11A M4] `critical` selects the FALL family reaction (knockdown)
+    // with its bodyfall sound instead of the plain Recoil.
     void apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
                                    const std::string& move_name,
-                                   float final_damage, bool blocked);
+                                   float final_damage, bool blocked,
+                                   bool critical);
 
     // [H08] The enemy's swing connects via MODEL-EDGE COLLISION — the R2
     // hit-test path mirrored: the enemy's attacking edges (the attack
@@ -6485,6 +6494,9 @@ private:
     int round_left_ms_probe_ = 0;   // pushed by BattleScene each frame
     std::string equip_magic_hook_;  // --equip-magic <item id>
     std::string equip_weapon_hook_; // --equip-weapon <item id>
+    // [Wave 11A M4] --crit-attr <chance> <damage> (-1 = not set).
+    int crit_attr_hook_chance_ = -1;
+    int crit_attr_hook_damage_ = -1;
     // Animation debug/TODO state
     float stance_npivot_y_ = 106.0f;     // NPivot Y from stance anim (default from params.xml)
     float anim_npivot_bin_y_ = 0.0f;     // NPivot Y from current .bin animation frame
