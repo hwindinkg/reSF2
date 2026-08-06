@@ -468,6 +468,10 @@ add_e2e_test(test_e2e_smoke)
 # scripted punches; his world x must stay inside the location's world box.
 add_e2e_test(test_e2e_knockback_bounds)
 
+# Wave 10A defect 2 (LOCATION BOUNDS): a long forward walk (root motion) and
+# the back walk must clamp the PLAYER at the location world box, both walls.
+add_e2e_test(test_e2e_location_bounds)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
