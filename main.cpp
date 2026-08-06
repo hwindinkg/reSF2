@@ -15,6 +15,7 @@ int main(int argc, char* argv[]) {
     int round_time_override_s = 0;
     bool tutorial_start = false;
     std::string equip_magic;
+    std::string equip_weapon;
     // Window size is a command-line option so the resolution-dependent layout
     // rules can actually be exercised. Everything in the HUD is scaled from the
     // viewport height (render_hud, menu_roll_rect), and a rule that is only ever
@@ -35,6 +36,7 @@ int main(int argc, char* argv[]) {
         else if (arg == "--round-time" && i + 1 < argc) round_time_override_s = std::atoi(argv[++i]);
         else if (arg == "--tutorial-start") tutorial_start = true;
         else if (arg == "--equip-magic" && i + 1 < argc) equip_magic = argv[++i];
+        else if (arg == "--equip-weapon" && i + 1 < argc) equip_weapon = argv[++i];
         else if (arg == "--window" && i + 1 < argc) {
             const std::string spec = argv[++i];
             const size_t x = spec.find_first_of("xX");
@@ -92,6 +94,7 @@ int main(int argc, char* argv[]) {
     game.set_round_time_override(round_time_override_s);
     game.set_tutorial_start(tutorial_start);
     game.set_equip_magic(equip_magic);
+    game.set_equip_weapon(equip_weapon);
     if (!platform->make_gl_current()) { std::fprintf(stderr, "Failed to make GL context current.\n"); return 1; }
     game.on_init(*platform);
     auto last_ms = platform->now_ms();

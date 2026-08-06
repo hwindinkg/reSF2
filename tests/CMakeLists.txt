@@ -506,6 +506,12 @@ add_e2e_test(test_e2e_shop_scroll_currency)
 # atlas). Boots a battle with --equip-magic MAGIC_FIRE_BALL.
 add_e2e_test(test_e2e_magic_button)
 
+# Wave 10B soak D7 (KNIVES + P WRONG MOVE): with knives equipped, ONE kick
+# press must play the unarmed kick (HighKick — moves.xml has no knives kick
+# templates), never knives_double_slash (a 2key|Central|Weapon PUNCH move).
+# Boots a battle with --equip-weapon WEAPON_KNIVES and a single P tap.
+add_e2e_test(test_e2e_knives_kick)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
