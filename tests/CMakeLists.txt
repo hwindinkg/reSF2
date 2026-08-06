@@ -483,6 +483,11 @@ add_e2e_test(test_e2e_fight_timer)
 # asserts the background corner stays lit while a dialog is open.
 add_e2e_test(test_e2e_dialogue_background)
 
+# Wave 10A defect 5 (SHOP SCROLL-DOWN + CURRENCY): scripted S presses must
+# scroll the category list (visible-window probe) and the price row must
+# show the coin icon, not the ruby gem.
+add_e2e_test(test_e2e_shop_scroll_currency)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
