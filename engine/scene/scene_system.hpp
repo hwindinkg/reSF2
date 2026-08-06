@@ -405,6 +405,10 @@ public:
     // Wins so far, for the round dots (Round_Done vs Round_Undone).
     virtual void host_set_round_wins(int player, int enemy) = 0;
 
+    // Remaining ms in the current round, pushed by BattleScene each frame so
+    // the fight HUD can render the countdown timer (Wave 10A defect 3).
+    virtual void host_set_round_left_ms(int ms) = 0;
+
     // --- Shop / Item data (for ShopScene) ---
 
     // Get the parsed item catalog (list.xml data). May be null if not loaded.

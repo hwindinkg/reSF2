@@ -445,6 +445,10 @@ void Game::on_init(plat::Platform& platform) {
             if (!hermetic_run_) {
                 check_tutorial();
             }
+            // [Wave 10A defect 3] E2E hook: --tutorial-start also starts the
+            // Sensei flow in a scripted run, so the script can walk the
+            // dialog -> bag -> Kenji fight chain deterministically.
+            if (tutorial_start_flag_) check_tutorial();
 
             // Start the scene flow at Boot, unless --scene asked for a
             // specific screen. Jumping straight to a screen is what makes it
@@ -1027,6 +1031,11 @@ void Game::host_trigger_quest_event(const std::string& event, const std::string&
 
 void Game::host_set_battle_info(const BattleInfo& info) {
     battle_info_ = info;
+    // [Wave 10A defect 3] E2E hook: --round-time forces the round clock
+    // (stages.xml ships RoundTime=99 everywhere; a scripted run cannot wait
+    // out a 99 s round). Applied here so every entry path (map, tutorial)
+    // honours it.
+    if (round_time_override_s_ > 0) battle_info_.round_time_s = round_time_override_s_;
     round_wins_player_ = 0;
     round_wins_enemy_ = 0;
     hp_trail_player_ = -1.0f;
@@ -1136,6 +1145,10 @@ void Game::host_reset_round() {
 void Game::host_set_round_wins(int player, int enemy) {
     round_wins_player_ = player;
     round_wins_enemy_ = enemy;
+}
+
+void Game::host_set_round_left_ms(int ms) {
+    round_left_ms_probe_ = ms;
 }
 
 int Game::host_get_currency() const {

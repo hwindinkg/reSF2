@@ -122,6 +122,10 @@ public:
     int start_scene_arg() const override { return start_scene_arg_; }
     // See hermetic_run_ below. main.cpp turns this on for --input-script runs.
     void set_hermetic_run(bool on) { hermetic_run_ = on; }
+    // [Wave 10A defect 3] E2E hooks (main.cpp): force a round clock and/or
+    // start the Sensei tutorial flow in a scripted run.
+    void set_round_time_override(int s) { round_time_override_s_ = s; }
+    void set_tutorial_start(bool on) { tutorial_start_flag_ = on; }
 
     void set_start_location(const std::string& name) {
         if (!name.empty()) {
@@ -1153,6 +1157,8 @@ float host_enemy_health_frac() const override;
 void host_reset_round() override;
 
 void host_set_round_wins(int player, int enemy) override;
+
+void host_set_round_left_ms(int ms) override;
 
 
 int host_get_currency() const override;
@@ -5433,6 +5439,25 @@ private:
             draw_dots(-1.0f, round_wins_player_);
             draw_dots(+1.0f, round_wins_enemy_);
         }
+
+        // [Wave 10A defect 3] FIGHT TIMER: the round clock (BattleScene's
+        // round_left_ms_, pushed via host_set_round_left_ms) was never drawn
+        // — the original shows the seconds countdown at the top-center of
+        // the fight screen. Rendered as text beside the round dots, same
+        // glyph scale as the fighter names.
+        const int secs = std::max(0, (round_left_ms_probe_ + 999) / 1000);
+        std::string secs_str = std::to_string(secs);
+        const float timer_scale = name_scale;
+        const auto [tw2, th2] = measure_text(secs_str, timer_scale);
+        render_text(secs_str, cx - tw2 * 0.5f,
+                    L.name_y - (name_scale > 0 ? 2.0f : 0.0f), timer_scale,
+                    {255, 255, 255, 255});
+        (void)th2;
+        // [Wave 10A defect 3] E2E probe: makes the countdown observable in a
+        // scripted run (stdout, same gate as [STATE]).
+        if (dump_state_)
+            std::printf("[HUD-TIMER] secs=%d left_ms=%d\n", secs,
+                        round_left_ms_probe_);
     }
 
     // ---------- Menu expanded (vertical scroll, matching original game) ----------
@@ -6438,6 +6463,14 @@ private:
     TouchControls touch_;       // on-screen controls, updated once per frame
     std::string start_scene_;   // --scene <name>[:<arg>], empty = normal Boot flow
     int start_scene_arg_ = -1;  // the ":N" part, e.g. the map's initial zone
+    // [Wave 10A defect 3] E2E hooks: --round-time overrides every battle's
+    // round clock (stages.xml RoundTime is 99 s everywhere, too slow to
+    // drive a timeout in a scripted run); --tutorial-start runs check_tutorial
+    // at boot even in hermetic (--input-script) runs so the script can walk
+    // the Sensei -> bag -> Kenji fight flow deterministically.
+    int round_time_override_s_ = 0;
+    bool tutorial_start_flag_ = false;
+    int round_left_ms_probe_ = 0;   // pushed by BattleScene each frame
 
     // Animation debug/TODO state
     float stance_npivot_y_ = 106.0f;     // NPivot Y from stance anim (default from params.xml)

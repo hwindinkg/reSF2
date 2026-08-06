@@ -472,6 +472,12 @@ add_e2e_test(test_e2e_knockback_bounds)
 # the back walk must clamp the PLAYER at the location world box, both walls.
 add_e2e_test(test_e2e_location_bounds)
 
+# Wave 10A defect 3 (FIGHT TIMER): the round countdown renders in the fight
+# HUD and a timeout win continues the story (tutorial COMPLETE + follow-up
+# dialogue). Boots the real binary into the Sensei tutorial flow with a
+# short round clock and walks through both round timeouts.
+add_e2e_test(test_e2e_fight_timer)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
