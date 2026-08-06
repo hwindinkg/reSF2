@@ -4792,6 +4792,18 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
     // Update bag Verlet physics
     update_bag_verlet(dt / 1000.0f);
 
+    // [Wave 10A defect 2] LOCATION BOUNDS: the fighter's world x is driven
+    // by unbounded root motion (step_forward NPivot deltas), the step
+    // fallbacks and the <Align> pinning — holding Forward walks the player
+    // out of the location's world box (params.xml Width/2; probe: px
+    // reached -1818/+1691 vs the +-980 dojo box). The wall is the location
+    // boundary: the fighter may slide INTO it but never past it. (The
+    // enemy side is clamped in its own update; see defect 1.)
+    if (location_) {
+        const float half_w = location_->width * 0.5f;
+        player_pos_x_ = std::clamp(player_pos_x_, -half_w, half_w);
+    }
+
     // Update projectiles (magic/ranged)
     update_projectiles(dt / 1000.0f);
 
