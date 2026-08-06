@@ -1738,6 +1738,12 @@ void ShopScene::on_enter(SceneContext& ctx) {
 }
 
 void ShopScene::on_update(SceneContext& ctx) {
+    // [Wave 10A defect 5] Scripted runs: host_update_gameplay (the only
+    // tick_input_script caller) does NOT run in this scene, so a script's
+    // keys (S/W scroll, Esc, ...) never reached the shop — "the list won't
+    // scroll down" in a driven run. Tick here so script frame N ==
+    // interactive frame N holds across the Shop scene too.
+    ctx.platform.tick_input_script();
     const auto& input = ctx.platform.input();
     const float w = (float)ctx.platform.window_width();
     const float h = (float)ctx.platform.window_height();
@@ -1878,6 +1884,9 @@ void ShopScene::on_update(SceneContext& ctx) {
     }
 
     // --- Scroll the item list: S key, mouse wheel --------------------------
+    // [Wave 10A defect 5] The visible window probe: each actual offset
+    // change is logged so a scripted run can assert the list scrolled.
+    const float prev_offset = scroll_offset_;
     if (key_pressed(input, platform::Key::W) && scroll_offset_ > 0.0f) {
         scroll_offset_ -= 1.0f;
     }
@@ -1895,6 +1904,13 @@ void ShopScene::on_update(SceneContext& ctx) {
         const int step = input.mouse_wheel > 0.0f ? -1 : 1;
         scroll_offset_ = std::min(std::max(scroll_offset_ + step, 0.0f),
                                   max_scroll);
+    }
+    if (scroll_offset_ != prev_offset) {
+        std::printf("[SHOP-SCROLL] offset=%.0f max=%.0f count=%d\n",
+                    scroll_offset_,
+                    std::max(0.0f, static_cast<float>(item_count) -
+                                       static_cast<float>(kVisibleRows)),
+                    item_count);
     }
 }
 
@@ -2161,7 +2177,11 @@ void ShopScene::on_render(SceneContext& ctx) {
             bool can_buy = (gold >= item.price && level >= item.level && item.price > 0);
 
             if (!owned && !item.is_paid) {
-                // Green BUY button with price and gem icon
+                // Green BUY button with price and COIN icon. [Wave 10A
+                // defect 5] The price used to carry the RUBY (gem) icon —
+                // the premium currency — while shop prices are coins
+                // (textures/misc/credit.png is the coin; ruby.png is the
+                // gem). The bottom bar shows the same two currencies.
                 r.draw_filled_rect_screen(L.buy_btn_x, L.buy_btn_y,
                     L.buy_btn_w, L.buy_btn_h,
                     can_buy ? ren::Color4B{51, 120, 26, 255}
@@ -2170,18 +2190,24 @@ void ShopScene::on_render(SceneContext& ctx) {
                 std::string buy_label = ctx.host.host_localized("buy");
                 if (buy_label.empty()) buy_label = "BUY";
                 std::string price_str = std::to_string(item.price);
-                // gem icon (placeholder)
-                // [ORIGINAL] textures/misc/ruby.png is the gem currency icon;
-                // the Unicode diamond is now only a fallback.
                 {
                     const float gy =
                         L.buy_btn_y + (L.buy_btn_h - L.buy_btn_h * 0.55f) * 0.5f;
                     const float gsz = L.buy_btn_h * 0.55f;
+                    const char* coin_icon = "credit";   // the coin currency
                     if (!ctx.host.host_render_ui_texture(
-                            "ruby", L.buy_btn_x + 14.0f * L.s, gy, gsz, gsz)) {
-                        ctx.host.host_render_text("\xe2\x97\x86",
+                            coin_icon, L.buy_btn_x + 14.0f * L.s, gy, gsz, gsz)) {
+                        ctx.host.host_render_text("\xe2\x97\x8f",
                             L.buy_btn_x + 14.0f * L.s, gy,
-                            btn_ts, 200, 230, 255, 255);
+                            btn_ts, 255, 217, 0, 255);
+                    }
+                    // [Wave 10A defect 5] price-icon probe: which icon the
+                    // price row actually drew, once per item.
+                    static std::string s_price_probe_item;
+                    if (s_price_probe_item != item.name) {
+                        s_price_probe_item = item.name;
+                        std::printf("[SHOP-PRICE] item='%s' price=%d icon='%s'\n",
+                                    item.name.c_str(), item.price, coin_icon);
                     }
                 }
                 // "BUY <price>" text
@@ -2225,9 +2251,18 @@ void ShopScene::on_render(SceneContext& ctx) {
         int gold = ctx.host.host_get_currency();
         int level = ctx.host.host_get_player_level();
         const float curr_ts = shop_text_scale(22.0f * L.s);
-        // Diamond icon (gem) placeholder + gold amount
-        ctx.host.host_render_text("\xe2\x97\x86", L.currency_x,
-            L.bottom_y + 10.0f * L.s, curr_ts, 200, 230, 255, 255);
+        // [Wave 10A defect 5] Currency icon: the COIN (credit.png) next to
+        // the gold amount, not the gem glyph. The gem row is not drawn
+        // (gems are not a spendable currency in this engine yet).
+        {
+            const float gsz = 22.0f * L.s;
+            if (!ctx.host.host_render_ui_texture(
+                    "credit", L.currency_x, L.bottom_y + 10.0f * L.s,
+                    gsz, gsz)) {
+                ctx.host.host_render_text("\xe2\x97\x8f", L.currency_x,
+                    L.bottom_y + 10.0f * L.s, curr_ts, 255, 217, 0, 255);
+            }
+        }
         ctx.host.host_render_text(std::to_string(gold),
             L.currency_x + 28.0f * L.s, L.bottom_y + 10.0f * L.s,
             curr_ts, 255, 217, 0, 255);
