@@ -524,6 +524,11 @@ add_e2e_test(test_e2e_magic_charge)
 # back-walk, hit reaction).
 add_e2e_test(test_e2e_facing)
 
+# Wave 11A M3 (DUCK REPEAT): spamming S inside the duck's SemiUninterrupt
+# window must not restart the duck animation (fresh-tap edge + Controlled
+# anti-restart). Boots a battle and taps S once per frame six times.
+add_e2e_test(test_e2e_duck_repeat)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
