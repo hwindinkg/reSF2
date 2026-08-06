@@ -277,6 +277,9 @@ public:
     void camera_set_target(float x, float y) override;
     void camera_set_zoom(float zoom) override;
 
+    // [Wave 10A defect 4] glReadPixels backread in screen coords (Y-down).
+    bool read_pixel(int x, int y, std::uint8_t rgb[3]) override;
+
     // Camera (direct accessor for internal use)
     Camera2D& camera() { return camera_; }
 

@@ -917,6 +917,14 @@ void DialogueScene::on_render(SceneContext& ctx) {
 
     // [D1] No full-screen dim behind the dialogue: the soak showed the whole
     // background blackened while the original keeps the location visible.
+    // [Wave 10A defect 4] The parchment panel is the only overlay — the
+    // LOCATION must actually render behind it. This scene is a separate
+    // screen (the scene manager draws only the active scene), so without
+    // this call the frame was just the flat clear colour — the dojo's
+    // painted background vanished the moment a dialog opened ("dialogue
+    // fully darkens the background again"). Render the scene below first,
+    // then the parchment on top.
+    ctx.host.host_render_scene();
     // The parchment panel below is the only thing the dialogue draws.
     if (current_line_ >= lines.size()) return;
 
