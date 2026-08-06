@@ -5174,58 +5174,20 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                         }
                         if (hit_registered) break;
                     }
-                    // [ORIGINAL] Distance-based fallback for the tutorial bag
-                    // hit counter. The precise edge collision above can miss if
-                    // the attack edges don't reach the bag's verlet nodes (e.g.
-                    // the player is slightly too far or the animation data is
-                    // incomplete). The original counts ANY attack that visually
-                    // connects. If the player is within punch range and the bag
-                    // hasn't been hit this interval, count it for the tutorial.
-                    if (!hit_this_interval_ && !show_enemy_ &&
-                        tutorial_state_ == "BAG") {
-                        float bag_x = enemy_pos_x_;  // bag hangs at enemy spawn
-                        float dist_to_bag = std::abs(player_pos_x_ - bag_x);
-                        if (dist_to_bag < 200.0f) {
-                            hit_this_interval_ = true;
-                            player_fighter_.hits_landed++;
-                            combo_timer_ = 1.5f;
-                            tutorial_bag_hits_++;
-                            // [Q2] A progress-counting hit must swing the bag.
-                            // This fallback counted the hit without touching
-                            // the Verlet nodes, so the bag hung motionless
-                            // while the tutorial advanced (SOAK_TRIAGE.md Q2:
-                            // "hits don't register visually, yet progress
-                            // counted"). Apply the move's impulse to every
-                            // collisible body edge, split 50/50 — the
-                            // fallback does not know which edge the attack
-                            // would have hit.
-                            const float imp_x = move_it->second.impulse_x;
-                            const float imp_y = move_it->second.impulse_y;
-                            if ((imp_x != 0.0f || imp_y != 0.0f) &&
-                                assets_->bag_model()) {
-                                const float dir = facing_right_ ? 1.0f : -1.0f;
-                                for (const auto& be : assets_->bag_model()->edges) {
-                                    if (!be.collisible) continue;
-                                    if (be.end1.empty() || be.end2.empty()) continue;
-                                    apply_bag_impulse(be.end1, dir * imp_x * 0.5f,
-                                                      imp_y * 0.5f);
-                                    apply_bag_impulse(be.end2, dir * imp_x * 0.5f,
-                                                      imp_y * 0.5f);
-                                }
-                            }
-                            std::printf("[tutorial] bag hits (distance fallback): %d/3 dist=%.0f\n",
-                                        tutorial_bag_hits_, dist_to_bag);
-                            if (tutorial_bag_hits_ >= 3) {
-                                tutorial_state_ = "FIRST_FIGHT";
-                                check_tutorial();
-                                tutorial_dialog_pending_ = true;
-                                // [Q3] Queue the Kenji fight so the training
-                                // dialog hands over to Battle.
-                                queue_tutorial_battle();
-                                std::printf("[tutorial] state -> FIRST_FIGHT, dialog pending\n");
-                            }
-                        }
-                    }
+                    // [Wave 11B W1] DELETED: the distance-based fallback for
+                    // the tutorial bag hit counter that used to live here
+                    // (game.cpp:5177-5228, mislabeled [ORIGINAL]). VERIFY_W11
+                    // 2 adjudicates it an invention: the original binary has
+                    // NO branch keyed on |player_x - bag_x| < 200 - no string,
+                    // no constant, no distance test anywhere in the image.
+                    // The original registers a bag hit ONLY on a real capsule
+                    // collision (the generic hit path above) and only then
+                    // applies the move's <Impulse X/Y/Z> (moves.xml) over the
+                    // hit edge. The fallback counted "hits" the fist never
+                    // landed ("Груша слишком сильно отталкивается, даже когда
+                    // я её почти и не касаюсь") and advanced the tutorial
+                    // without touching the bag. The tutorial counter now
+                    // increments exclusively in the real-hit branch above.
                 }
             }
         }

@@ -535,6 +535,13 @@ add_e2e_test(test_e2e_duck_repeat)
 # --crit-attr hook (deterministic) and without (seeded Default attr 1000).
 add_e2e_test(test_e2e_crit_knockdown)
 
+# Wave 11B W1 (BAG PHYSICS): the bag swings ONLY on a real capsule
+# collision; the engine's distance fallback (|player_x - bag_x| < 200,
+# game.cpp:5177-5228) is an invention to delete. Three runs: far punch (no
+# swing), real punch (swing proportional to moves.xml <Impulse>), tutorial
+# counter (advances only on real hits, FIRST_FIGHT still reached).
+add_e2e_test(test_e2e_bag_physics)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
