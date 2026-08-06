@@ -94,6 +94,7 @@ std::vector<StateFrame> parse_state_frames(const RunResult& run) {
     std::vector<StateFrame> out;
     static const std::regex re(
         R"(\[STATE\] f=(\d+) ms=(-?\d+) ha=(\d+) anim='([^']*)' move='([^']*)' px=([-\d.]+) py=([-\d.]+))");
+    static const std::regex re_enemy(R"(ex=([-\d.]+) ey=([-\d.]+))");
     for (const auto& line : run.stdout_lines) {
         std::smatch m;
         if (!std::regex_search(line, m, re)) continue;
@@ -105,6 +106,11 @@ std::vector<StateFrame> parse_state_frames(const RunResult& run) {
         fr.move = m[5];
         fr.px = std::stof(m[6]);
         fr.py = std::stof(m[7]);
+        std::smatch me;
+        if (std::regex_search(line, me, re_enemy)) {
+            fr.ex = std::stof(me[1]);
+            fr.ey = std::stof(me[2]);
+        }
         std::smatch ma;
         static const std::regex re_anchor(R"(anchor_x=([-\d.]+))");
         if (std::regex_search(line, ma, re_anchor))

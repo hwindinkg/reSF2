@@ -464,6 +464,10 @@ endfunction()
 # against the real binary before any defect probes are built on top of it.
 add_e2e_test(test_e2e_smoke)
 
+# Wave 10A defect 1 (KNOCKBACK OVERFLOW): the sparring partner is knocked by
+# scripted punches; his world x must stay inside the location's world box.
+add_e2e_test(test_e2e_knockback_bounds)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
