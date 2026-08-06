@@ -842,6 +842,12 @@ void DialogueScene::on_enter(SceneContext& ctx) {
 }
 
 void DialogueScene::on_update(SceneContext& ctx) {
+    // [Wave 10A defect 3] Scripted runs: host_update_gameplay (the only
+    // tick_input_script caller) does NOT run in this scene, so a script's
+    // keys never advanced the dialogue — a --input-script run deadlocked on
+    // the tutorial dialog. Tick here so script frame N == interactive frame N
+    // holds across the Dialogue scene too.
+    ctx.platform.tick_input_script();
     const auto& input = ctx.platform.input();
     const auto& lines = ctx.host.host_get_dialogue();
     size_t total_lines = lines.size();
@@ -1180,6 +1186,9 @@ void BattleScene::on_update(SceneContext& ctx) {
     // takes the round. [HEURISTIC-TODO] The original's timeout/tie rule has
     // not been reversed; equal health goes to the enemy here.
     round_left_ms_ -= (int)ctx.dt_ms;
+    // [Wave 10A defect 3] Push the live countdown to the host so the fight
+    // HUD can render it (round dots already flow the same way).
+    ctx.host.host_set_round_left_ms(round_left_ms_);
     if (round_left_ms_ <= 0) {
         const bool player_won = ctx.host.host_player_health_frac() >
                                 ctx.host.host_enemy_health_frac();
@@ -1198,6 +1207,14 @@ void BattleScene::on_render(SceneContext& ctx) {
 void BattleScene::on_exit(SceneContext& ctx) {
     std::printf("[battle] exit\n");
     ctx.host.host_stop_music();
+    // [Wave 10A defect 3] Leaving the battle scene restores the dojo
+    // default: the punching bag, not the sparring partner. on_enter flips
+    // it on for every real fight, but a battle entered and then diverted
+    // (e.g. --scene battle while the Sensei tutorial dialog is pending)
+    // used to leave show_enemy_ set, so the dojo after the dialog showed
+    // the ENEMY fighter — the bag never appeared and the tutorial's
+    // "attack the bag" step could never advance.
+    ctx.host.host_set_show_enemy(false);
 }
 
 bool BattleScene::on_quit_request(SceneContext& ctx) {
