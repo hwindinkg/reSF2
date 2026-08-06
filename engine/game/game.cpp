@@ -2548,6 +2548,17 @@ void Game::host_update_gameplay(uint32_t dt) {
         }
         }  // [A1] end of intro gate — the stun/decide/execute chain
         enemy_anim_time_ += dt_sec;
+        // [Wave 10A defect 1] KNOCKBACK OVERFLOW: the enemy's world x is
+        // moved by two unbounded paths — the reversed <Impulse X> integrated
+        // over the whole reaction duration (knockback) and the AI step
+        // executor's approach/retreat — so a chased, repeatedly-hit enemy
+        // can fly out of the location's world box (params.xml Width/2; the
+        // bag had the same box from the location data). The location wall
+        // is a hard boundary: the enemy may slide INTO it but never past it.
+        if (location_) {
+            const float half_w = location_->width * 0.5f;
+            enemy_pos_x_ = std::clamp(enemy_pos_x_, -half_w, half_w);
+        }
         // Face the player
         enemy_facing_right_ = (player_pos_x_ > enemy_pos_x_);
     }
@@ -4816,11 +4827,13 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                            (facing_right_ ? it->second.first : -it->second.first);
         }
         std::printf("[STATE] f=%llu ms=%d ha=%u anim='%s' move='%s' px=%.1f py=%.1f "
+                    "ex=%.1f ey=%.1f "
                     "af=%.2f fps=%.2f bag_hit=%d bag_move=%.2f nv=%zu "
                     "al=%d anchor_x=%.2f fx=%.2f cam=%.1f zoom=%.4f\n",
                     (unsigned long long)total_frame_count_, move_state_, hit_anim_,
                     current_anim_.c_str(), current_move_.c_str(),
                     player_pos_x_, player_pos_y_,
+                    enemy_pos_x_, enemy_pos_y_,
                     anim_time_ * anim_fps_, anim_fps_,
                     (int)hit_this_interval_, bag_displacement(), bag_verlet_.size(),
                     al, anchor_x, first_effect_alpha(), cam_x_, zoom_);

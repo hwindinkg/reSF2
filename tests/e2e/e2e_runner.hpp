@@ -43,6 +43,8 @@ struct StateFrame {
     std::string move;
     float px = 0.0f;         // player world x
     float py = 0.0f;         // player world y
+    float ex = 0.0f;         // enemy world x
+    float ey = 0.0f;         // enemy world y
     float anchor_x = 0.0f;   // <Align> anchor world x (0 if none)
     std::string raw;         // the full line, for extra fields
 };
