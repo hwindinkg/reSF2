@@ -126,6 +126,10 @@ public:
     // start the Sensei tutorial flow in a scripted run.
     void set_round_time_override(int s) { round_time_override_s_ = s; }
     void set_tutorial_start(bool on) { tutorial_start_flag_ = on; }
+    // [Wave 10A defect 6] E2E hook: --equip-magic forces a magic item into
+    // the inventory and equips it at boot, so a scripted run can exercise
+    // the fight HUD's magic button.
+    void set_equip_magic(const std::string& id) { equip_magic_hook_ = id; }
 
     void set_start_location(const std::string& name) {
         if (!name.empty()) {
@@ -5027,8 +5031,16 @@ private:
         // so a fresh profile with bare fists shows two buttons, not four.
         if (!equipped_ranged_.empty())
             draw_c("btn_throw_normal", c.throw_cx, c.throw_cy, c.punch_r);
-        if (!equipped_magic_.empty())
+        if (!equipped_magic_.empty()) {
             draw_c("btn_magic_normal", c.magic_cx, c.magic_cy, c.punch_r);
+            // [Wave 10A defect 6] probe: the magic fight button was never
+            // drawn because equipped_magic_ was never synced from the
+            // inventory. The probe makes the button's presence observable
+            // in a scripted run (same dump-state gate as [STATE]).
+            if (dump_state_)
+                std::printf("[MAGIC-BTN] equipped='%s' frame='btn_magic_normal'\n",
+                            equipped_magic_.c_str());
+        }
     }
 
     // ---------- MENU scroll geometry ----------
@@ -6471,6 +6483,7 @@ private:
     int round_time_override_s_ = 0;
     bool tutorial_start_flag_ = false;
     int round_left_ms_probe_ = 0;   // pushed by BattleScene each frame
+    std::string equip_magic_hook_;  // --equip-magic <item id>
 
     // Animation debug/TODO state
     float stance_npivot_y_ = 106.0f;     // NPivot Y from stance anim (default from params.xml)

@@ -450,6 +450,18 @@ void Game::on_init(plat::Platform& platform) {
             // dialog -> bag -> Kenji fight chain deterministically.
             if (tutorial_start_flag_) check_tutorial();
 
+            // [Wave 10A defect 6] E2E hook: --equip-magic forces a magic
+            // item into the hermetic inventory and equips it, so the fight
+            // HUD's magic button path is exercisable. Runs after the
+            // catalog load so the item resolves against list.xml.
+            if (!equip_magic_hook_.empty()) {
+                inventory_.add_item(equip_magic_hook_);
+                inventory_.equip(inventory::kSlotMagic, equip_magic_hook_);
+                sync_equipped_weapon();
+                std::printf("[equip] E2E hook: magic '%s' equipped\n",
+                            equip_magic_hook_.c_str());
+            }
+
             // Start the scene flow at Boot, unless --scene asked for a
             // specific screen. Jumping straight to a screen is what makes it
             // possible to capture and compare it against the reference
@@ -1442,6 +1454,15 @@ void Game::sync_equipped_weapon() {
                 }
                 std::printf("[equip] combat weapon reset to Fists\n");
             }
+
+            // [Wave 10A defect 6] The ranged/magic fight BUTTONS were never
+            // wired: the Game's equipped_ranged_/equipped_magic_ fields were
+            // only READ by the touch-controls renderer and nothing ever
+            // synced them from the inventory, so the magic button could not
+            // appear even with a magic item equipped. Sync both slots here,
+            // the same place the weapon comes from.
+            equipped_ranged_ = inventory_.equipped_ranged();
+            equipped_magic_ = inventory_.equipped_magic();
 
             // A weapon that matches no move at all leaves the player unable to
             // attack, which is never a legitimate game state — it means the
