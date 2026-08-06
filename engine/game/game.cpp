@@ -15,6 +15,29 @@
 
 namespace resf2::game {
 
+namespace {
+
+// [Wave 11B W2] Arena x-bounds, original semantics (SPEC_WORLD_FEEL 3b,
+// VERIFY_W11 3): the fighters stop AT the WALL OBJECTS - the world X of
+// the <Image ClassName="left"/"right"> sprites in the location's
+// params.xml (dojo +-680) - NOT at +-width/2 (+-980, an engine
+// invention: the binary feeds Wall (+0x34) and Width-Wall to the physics
+// globals and the wall geometry comes from the left/right anchors; no
+// width/2 clamp exists in the image). Falls back to +-width/2 only for
+// locations that author no wall sprites.
+void location_wall_bounds(const GameLocation* loc, float& lo, float& hi) {
+    if (loc && loc->wall_left_x != 0.0f && loc->wall_right_x != 0.0f) {
+        lo = loc->wall_left_x;
+        hi = loc->wall_right_x;
+        return;
+    }
+    const float half = loc ? loc->width * 0.5f : 0.0f;
+    lo = -half;
+    hi = half;
+}
+
+}  // namespace
+
 // Constructor
 Game::Game(std::string asset_root, bool replay_mode, bool dump_state)
     : asset_root_(std::move(asset_root)), replay_mode_(replay_mode), dump_state_(dump_state) {
@@ -2811,9 +2834,16 @@ void Game::host_update_gameplay(uint32_t dt) {
     // outside the show_enemy_ gate so the dojo bag anchor and the battle
     // enemy are covered alike ("locations have no bounds you cannot
     // cross").
+    // [Wave 11B W2] The bounds are the location's WALL OBJECTS
+    // (params.xml <Image ClassName="left"/"right"> X - the original's
+    // physics walls, dojo +-680), applied equally to both fighters -
+    // not the width/2 clamp the engine invented (VERIFY_W11 3: the
+    // binary has no width/2 boundary; the wall geometry comes from the
+    // left/right anchors + Wall attribute).
     if (location_) {
-        const float half_w = location_->width * 0.5f;
-        enemy_pos_x_ = std::clamp(enemy_pos_x_, -half_w, half_w);
+        float wall_lo = 0.0f, wall_hi = 0.0f;
+        location_wall_bounds(location_, wall_lo, wall_hi);
+        enemy_pos_x_ = std::clamp(enemy_pos_x_, wall_lo, wall_hi);
     }
 
     // R: restart battle (after victory/defeat)
@@ -5239,9 +5269,13 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
     // boundary: the fighter may slide INTO it but never past it. (The
     // enemy side is clamped in its own update above; this is the player
     // half of the same per-frame pair.)
+    // [Wave 11B W2] Same bounds source as the enemy side: the location's
+    // WALL OBJECTS (params.xml left/right anchors, dojo +-680), NOT
+    // +-width/2 (VERIFY_W11 3 - the width/2 clamp is an invention).
     if (location_) {
-        const float half_w = location_->width * 0.5f;
-        player_pos_x_ = std::clamp(player_pos_x_, -half_w, half_w);
+        float wall_lo = 0.0f, wall_hi = 0.0f;
+        location_wall_bounds(location_, wall_lo, wall_hi);
+        player_pos_x_ = std::clamp(player_pos_x_, wall_lo, wall_hi);
     }
 
     // Update projectiles (magic/ranged)
@@ -5416,13 +5450,15 @@ void Game::apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
     // enemy standing near the wall is pushed INTO the clamp every frame
     // for the whole stun ("the enemy is knocked back very far and can fly
     // out of the location"). Same bounds source as the fighter clamps
-    // (params.xml Width -> world x in [-width/2, +width/2]): the total
-    // slide is clamped so the enemy's post-hit x stays inside the box.
+    // ([Wave 11B W2] the location's WALL OBJECTS - params.xml left/right
+    // anchors, dojo +-680, not +-width/2): the total slide is clamped so
+    // the enemy's post-hit x stays inside the walls.
     if (location_ && stun_sec > 0.0f) {
-        const float half_w = location_->width * 0.5f;
+        float wall_lo = 0.0f, wall_hi = 0.0f;
+        location_wall_bounds(location_, wall_lo, wall_hi);
         const float slide = away_dir * imp_x;             // signed total slide
-        const float lo = -half_w - enemy_pos_x_;          // max leftward slide
-        const float hi = half_w - enemy_pos_x_;           // max rightward slide
+        const float lo = wall_lo - enemy_pos_x_;          // max leftward slide
+        const float hi = wall_hi - enemy_pos_x_;          // max rightward slide
         const float bounded = std::clamp(slide, lo, hi);
         if (std::fabs(bounded - slide) > 1e-3f) {
             std::printf("[HIT-FEEDBACK] knockback bounded by arena: "

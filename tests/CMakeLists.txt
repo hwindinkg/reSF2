@@ -542,6 +542,12 @@ add_e2e_test(test_e2e_crit_knockdown)
 # counter (advances only on real hits, FIRST_FIGHT still reached).
 add_e2e_test(test_e2e_bag_physics)
 
+# Wave 11B W2 (ENEMY Y + BOUNDS): enemy world Y = <ModelsViewer
+# EnemyPositionY> (dojo -105); fighters stop AT the wall objects
+# (<Image ClassName="left|right"> anchors, dojo +-680), not at
+# +-width/2 (+-980) - both the walk clamp and the knockback clamp.
+add_e2e_test(test_e2e_enemy_y_bounds)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================

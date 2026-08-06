@@ -6,13 +6,15 @@
 // the BATTLE path on the REAL binary: boot straight into Battle and hold
 // A (back) long enough to overshoot the LEFT wall, then D (forward) long
 // enough to overshoot the RIGHT wall. The fighter's world x is driven by
-// root motion and must clamp at the location's world box (params.xml
-// Width -> world x in [-width/2, +width/2]) at EVERY frame — the fight
+// root motion and must stop at the location's WALL OBJECTS — the
+// <Image ClassName="left|right"> anchors of params.xml (dojo X=+-680),
+// not at +-width/2 (+-980, an engine invention replaced by the wall
+// semantics in Wave 11B W2, VERIFY_W11 3) — at EVERY frame: the fight
 // arena has walls you cannot walk out of.
 //
-// Assert: both walls were actually reached (px_min <= -900, px_max >=
-// +900 — a walk that never meets a wall cannot prove a clamp), and the
-// player never leaves the box.
+// Assert: both walls were actually reached (px_min <= -670, px_max >=
+// +670 — a walk that never meets a wall cannot prove a clamp), and the
+// player never leaves the walls.
 
 #include <cstdio>
 #include <cstdlib>
@@ -26,9 +28,11 @@ using resf2::test::check;
 
 namespace {
 
-// dojo params.xml: <Root Width="1960">; world x = params x - width/2.
-constexpr float kHalfWorldW = 980.0f;
-constexpr float kBoundSlack = 1.0f;   // float noise allowance
+// dojo params.xml: the wall sprites <Image ClassName="left|right">
+// stand at X=+-680 (world coords) — the wall boundary the fighters must
+// stop at (Wave 11B W2).
+constexpr float kWallX = 680.0f;
+constexpr float kBoundSlack = 10.0f;  // float/walk noise allowance
 
 }  // namespace
 
@@ -83,19 +87,19 @@ int main(int argc, char** argv) {
         if (fr.px > px_max) { px_max = fr.px; f_max = fr.frame; }
     }
     std::printf("battle-bounds: %zu frames, player x range [%.1f @ f%lld .. "
-                "%.1f @ f%lld] (bounds +-%.0f)\n",
-                frames.size(), px_min, f_min, px_max, f_max, kHalfWorldW);
+                "%.1f @ f%lld] (walls +-%.0f)\n",
+                frames.size(), px_min, f_min, px_max, f_max, kWallX);
 
     // The walk must have been long enough to actually meet both walls — a
     // player that never reached a boundary cannot prove a clamp.
-    check(px_min <= -900.0f,
-          "the back walk reached the left wall (px <= -900)");
-    check(px_max >= 900.0f,
-          "the forward walk reached the right wall (px >= +900)");
-    check(px_min >= -(kHalfWorldW + kBoundSlack) &&
-              px_max <= (kHalfWorldW + kBoundSlack),
-          "the player never leaves the location world box (fight arena "
-          "walk clamped)");
+    check(px_min <= -(kWallX - kBoundSlack),
+          "the back walk reached the left wall (px <= -670)");
+    check(px_max >= (kWallX - kBoundSlack),
+          "the forward walk reached the right wall (px >= +670)");
+    check(px_min >= -(kWallX + kBoundSlack) &&
+              px_max <= (kWallX + kBoundSlack),
+          "the player stops AT the walls (+-680), never past them "
+          "(the width/2 clamp +-980 is an invention, Wave 11B W2)");
 
     return resf2::test::summary();
 }

@@ -57,6 +57,17 @@ static GameLocation parse_location(const std::string& xml) {
                     img.w = tof(ic.attr("Width"));
                     img.h = tof(ic.attr("Height"));
                     img.color = ic.attr("Color");
+                    // [Wave 11B W2] The arena WALLS: the original creates
+                    // the wall collision objects from the
+                    // <Image ClassName="left"/"right"> anchors (their X is
+                    // the wall's world position - dojo +-680); both
+                    // fighters stop AT these walls (SPEC_WORLD_FEEL 3b,
+                    // VERIFY_W11 3: wall collision objects, not width/2).
+                    if (ic.name == "Image" &&
+                        (img.class_name == "left" || img.class_name == "right")) {
+                        if (img.class_name == "left") loc.wall_left_x = img.x;
+                        else loc.wall_right_x = img.x;
+                    }
                     // [ORIGINAL] A <SimpleEffect> animates itself. Only the
                     // Transparency channel is modelled so far; OscillationX/Y
                     // and Rotation use the same curve type (see
@@ -130,6 +141,9 @@ void LocationManager::load_location(const std::string& name, const std::string& 
     std::printf("  Player: (%.0f, %.0f)  Enemy: (%.0f, %.0f)\n",
                 location_->player_x, location_->player_y,
                 location_->enemy_x, location_->enemy_y);
+    std::printf("  Walls: left=%.0f right=%.0f (params.xml <Image "
+                "ClassName=left/right>)\n",
+                location_->wall_left_x, location_->wall_right_x);
 
     // Load atlases for each layer (if AssetManager available)
     if (assets) {
