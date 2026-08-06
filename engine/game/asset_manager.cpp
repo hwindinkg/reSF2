@@ -987,6 +987,9 @@ void AssetManager::parse_moves_xml(const std::string& xml) {
         for (const auto& sub : child.children) {
             if (sub.name == "Damage") {
                 move.damage = tof(sub.attr("Value"));
+                // [ORIGINAL] <Damage NoCritical="1"> — MoveDef+0x4C
+                // (the crit roll gate in FUN_8f4aa998).
+                if (sub.attr("NoCritical") == "1") move.no_critical = true;
             } else if (sub.name == "Distance") {
                 move.distance_min = tof(sub.attr("Min"));
                 move.distance_max = tof(sub.attr("Max"));
@@ -1178,6 +1181,12 @@ void AssetManager::parse_moves_xml(const std::string& xml) {
                                 }
                         } else if (kid.name == "Damage") {
                             iv.damage_value = tof(kid.attr("Value"));
+                            // [ORIGINAL] <Damage NoCritical="1"> on the
+                            // interval (e.g. the energy pillar's tick
+                            // damage) folds into the move's MoveDef+0x4C
+                            // crit-roll gate.
+                            if (kid.attr("NoCritical") == "1")
+                                move.no_critical = true;
                             // [ORIGINAL] The nested
                             //   <Damage Value="0.11"><Damage Type="UnarmedDamage" Shift="-10"/></Damage>
                             // names the ATTRIBUTE this attack reads and the

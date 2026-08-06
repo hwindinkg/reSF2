@@ -16,6 +16,10 @@ int main(int argc, char* argv[]) {
     bool tutorial_start = false;
     std::string equip_magic;
     std::string equip_weapon;
+    // [Wave 11A M4] E2E hook: --crit-attr <chance> <damage> overrides the
+    // player's crit attributes in battle (real Default template value for
+    // chance is 1000 -> 10%; damage 0 -> 1.0x multiplier).
+    int crit_attr_chance = -1, crit_attr_damage = -1;
     // Window size is a command-line option so the resolution-dependent layout
     // rules can actually be exercised. Everything in the HUD is scaled from the
     // viewport height (render_hud, menu_roll_rect), and a rule that is only ever
@@ -37,6 +41,10 @@ int main(int argc, char* argv[]) {
         else if (arg == "--tutorial-start") tutorial_start = true;
         else if (arg == "--equip-magic" && i + 1 < argc) equip_magic = argv[++i];
         else if (arg == "--equip-weapon" && i + 1 < argc) equip_weapon = argv[++i];
+        else if (arg == "--crit-attr" && i + 2 < argc) {
+            crit_attr_chance = std::atoi(argv[++i]);
+            crit_attr_damage = std::atoi(argv[++i]);
+        }
         else if (arg == "--window" && i + 1 < argc) {
             const std::string spec = argv[++i];
             const size_t x = spec.find_first_of("xX");
@@ -95,6 +103,8 @@ int main(int argc, char* argv[]) {
     game.set_tutorial_start(tutorial_start);
     game.set_equip_magic(equip_magic);
     game.set_equip_weapon(equip_weapon);
+    if (crit_attr_chance >= 0 || crit_attr_damage >= 0)
+        game.set_crit_attr_hook(crit_attr_chance, crit_attr_damage);
     if (!platform->make_gl_current()) { std::fprintf(stderr, "Failed to make GL context current.\n"); return 1; }
     game.on_init(*platform);
     auto last_ms = platform->now_ms();

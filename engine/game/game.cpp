@@ -1527,6 +1527,32 @@ void Game::rebuild_fighter_attributes() {
     // PERK_BINARY_SURVEY.md); trigger-system effects are 5.1 scope.
     player_fighter_.attributes = aggregate_equipment_attributes(list_data_, inventory_);
     enemy_fighter_.attributes = seed_enemy_baseline_attributes();
+    // [ORIGINAL] The hero's CRIT attributes come from the stages.xml hero
+    // template (Template Name="Default" CriticalChance="1000" — the binary's
+    // crit_chance getter @ 0x8F4A610C reads them from model+0x1C4, seeded
+    // from the template attrs). Equipment contributes nothing for these
+    // names, so seed the map here; CriticalDamage absent -> 0 (the crit
+    // multiplier 2^(base*attr) is 1.0).
+    const auto& sd = assets_->stage_data();
+    for (const auto& t : sd.templates) {
+        if (t.name != "Default") continue;
+        player_fighter_.attributes.set("CriticalChance", t.critical_chance);
+        player_fighter_.attributes.set("CriticalDamage", t.critical_damage);
+        break;
+    }
+    // [Wave 11A M4] E2E hook: --crit-attr <chance> <damage> overrides the
+    // player's crit attributes (mirrors --equip-magic; lets the real-binary
+    // E2E pin the crit roll/multiplier deterministically).
+    if (crit_attr_hook_chance_ >= 0) {
+        player_fighter_.attributes.set("CriticalChance", crit_attr_hook_chance_);
+        std::printf("[equip] E2E hook: player CriticalChance=%d\n",
+                    crit_attr_hook_chance_);
+    }
+    if (crit_attr_hook_damage_ >= 0) {
+        player_fighter_.attributes.set("CriticalDamage", crit_attr_hook_damage_);
+        std::printf("[equip] E2E hook: player CriticalDamage=%d\n",
+                    crit_attr_hook_damage_);
+    }
     std::printf("[equip] attributes: player WeaponDamage=%d UnarmedDamage=%d "
                 "BodyDefense=%d HeadDefense=%d | enemy baseline WeaponDamage=%d "
                 "BodyDefense=%d\n",
@@ -2681,13 +2707,37 @@ void Game::host_update_gameplay(uint32_t dt) {
                         if (hp_it != assets_->moves().end() && hp_it->second.damage > 0.0f)
                             base_damage = hp_it->second.damage;
                         
+                        // [Wave 11A M4] CRIT roll for the ENEMY's strike —
+                        // same law as the player side (FUN_8f4aa998): skipped
+                        // when blocked or the enemy's move carries
+                        // NoCritical. The disciple's CriticalChance=0, so
+                        // crits never fire against the player in the MVP.
+                        const MoveDef* enemy_atk_move =
+                            move_def_by_anim(assets_->moves(), enemy_anim_);
+                        bool enemy_crit = false;
+                        if (!(enemy_atk_move && enemy_atk_move->no_critical)) {
+                            const float chance =
+                                enemy_fighter_.attributes.get_or("CriticalChance", 0.0f) *
+                                dmg_settings.crit_probability_base;
+                            const float roll =
+                                (float)(std::rand() % 10000) / 10000.0f;
+                            enemy_crit = roll < chance;
+                        }
+                        const float enemy_crit_mult = enemy_crit
+                            ? std::pow(2.0f,
+                                       dmg_settings.crit_damage_base *
+                                           enemy_fighter_.attributes.get_or(
+                                               "CriticalDamage", 0.0f))
+                            : 1.0f;
+                        
                         const float final_damage = enemy_damage_to_player(
                             base_damage, /*blocked=*/false,
                             enemy_fighter_.attributes, player_fighter_.attributes,
-                            dmg_settings);
+                            dmg_settings) * enemy_crit_mult;
                         
-                        std::printf("[COMBAT] Enemy hit player: base=%.3f final=%.3f\n",
-                                    base_damage, final_damage);
+                        std::printf("[COMBAT] Enemy hit player: base=%.3f crit=%d mult=%.4f final=%.3f\n",
+                                    base_damage, (int)enemy_crit,
+                                    enemy_crit_mult, final_damage);
 
                         // [ORIGINAL] Magic charge on every landed hit
                         // (Fight::applyHit @ 0x8F420F9C): BOTH fighters
@@ -4442,10 +4492,6 @@ auto apply_player_damage_to_enemy = [&](float hit_x, float hit_y,
     player_fighter_.hits_landed++;
     // [ORIGINAL] Combo.Time = 90 frames = 1.5s at 60Hz (from InternalSettings)
     combo_timer_ = 1.5f;
-    // [Wave 11A M4] The critical-hit roll result for THIS hit (0 until the
-    // crit system lands; M4 rolls it here and passes it to the damage
-    // multiplier, the charge factors and the knockdown selection).
-    bool is_critical = false;
     std::printf("[COMBAT] Combo: hits=%d timer=1.5s\n", player_fighter_.hits_landed);
     // [ORIGINAL] Damage via Model::getTotalDamage @ game+0x4527B4
     // (engine/game/damage_formula.hpp — the multiplication order
@@ -4457,6 +4503,35 @@ auto apply_player_damage_to_enemy = [&](float hit_x, float hit_y,
     const auto& dmg_settings = assets_->damage_settings();
     float base_damage = move_it->second.damage;
     if (base_damage <= 0.0f) base_damage = dmg_settings.average_base_damage;
+
+    // [Wave 11A M4] CRITICAL-HIT ROLL (FUN_8f4aa998 @ game+0x3F3998):
+    // rolled per landed hit when NOT blocked (hit+0x1C2 == 0) and the
+    // attacking move carries no NoCritical flag (move+0x4C). chance = attr
+    // (CriticalChance) * crit_probability_base (internalSettings.xml
+    // <CriticalHit><Probability Base="0.0001">; the stages.xml Default
+    // template seeds CriticalChance=1000 -> 10%). [HEURISTIC-TODO] the
+    // binary's 5-PRNG-draw distribution (K*(r1/r2 + (r3/r4)/r5) <
+    // chance*K @ FUN_8f264674) is approximated with a single uniform draw.
+    bool is_critical = false;
+    if (!enemy_fighter_.is_blocking &&
+        !(move_it != assets_->moves().end() && move_it->second.no_critical)) {
+        const float chance =
+            player_fighter_.attributes.get_or("CriticalChance", 0.0f) *
+            dmg_settings.crit_probability_base;
+        const float roll = (float)(std::rand() % 10000) / 10000.0f;
+        is_critical = roll < chance;
+        std::printf("[CRIT] f=%llu attacker=player chance=%.4f roll=%.4f crit=%d\n",
+                    (unsigned long long)total_frame_count_, chance, roll,
+                    (int)is_critical);
+    }
+    // [Wave 11A M4] CRIT DAMAGE MULTIPLIER (FUN_8f4a95a8 @ game+0x3F25A8):
+    // 2^(crit_damage_base * attr(CriticalDamage)) — CriticalDamage=0 -> 1.0.
+    const float crit_mult = is_critical
+        ? std::pow(2.0f,
+                   dmg_settings.crit_damage_base *
+                       player_fighter_.attributes.get_or("CriticalDamage", 0.0f))
+        : 1.0f;
+    dbg_last_crit_factor_ = crit_mult;
 
     // [ORIGINAL] Attribute pairing per the game+0x60DF98 helper:
     // melee damage attribute vs the defender's BodyDefense — weapon
@@ -4506,28 +4581,29 @@ auto apply_player_damage_to_enemy = [&](float hit_x, float hit_y,
     // get_total_damage, not a trailing multiplier; keeping both
     // doubled all damage at neutral attributes. Do NOT re-add it —
     // the halved damage below is the intended fidelity correction.
-    const float final_damage = get_total_damage(din) * block_factor;
+    const float final_damage = get_total_damage(din) * block_factor * crit_mult;
 
     // Store for F1 debug overlay (COMBAT panel damage breakdown)
     dbg_last_base_damage_ = base_damage;
     dbg_last_attr_mult_ = attribute_difference_factor(din.attribute_difference);  // the f3 term (game+0x60E794)
     dbg_last_block_factor_ = block_factor;
     dbg_last_attack_factor_ = 1.0f;   // f1 term disabled-neutral (not ported)
-    dbg_last_crit_factor_ = 1.0f;     // crit system not yet ported
+    // dbg_last_crit_factor_ set above (the crit multiplier)
     dbg_last_factor_set_ = 1.0f;      // f2 term disabled-neutral (not ported)
     dbg_last_final_damage_ = final_damage;
     dbg_last_move_name_ = move_it->first;
 
-    std::printf("[COMBAT] Player hit enemy: base=%.3f attrdiff=%.1f f3=%.3f blk=%.2f => final=%.3f\n",
+    std::printf("[COMBAT] Player hit enemy: base=%.3f attrdiff=%.1f f3=%.3f blk=%.2f crit=%d mult=%.4f => final=%.3f\n",
                 base_damage, din.attribute_difference,
-                dbg_last_attr_mult_, block_factor, final_damage);
+                dbg_last_attr_mult_, block_factor, (int)is_critical,
+                crit_mult, final_damage);
 
     // [ORIGINAL] Magic charge on every landed hit (Fight::applyHit @
     // 0x8F420F9C): BOTH fighters charge, gated by the ATTACKING move's
     // NoMagicRecharge flag (MoveDef+0x148 via FUN_8f47d378; moves.xml
     // RangedMissile/MagicMissile/RaidMissile/MagicAcidCloud suppress it).
-    // [HEURISTIC-TODO] is_critical is wired by Wave 11A M4 (crit roll);
-    // until then the crit pow2 factor is 1.0 either way.
+    // [Wave 11A M4] is_critical comes from the crit roll above; the crit
+    // pow2 factor (FUN_8f4a95a8) is 2^0=1.0 with zero-fallback attrs.
     {
         const auto atk_it = assets_->moves().find(current_move_);
         const bool no_magic_recharge =
@@ -4542,7 +4618,6 @@ auto apply_player_damage_to_enemy = [&](float hit_x, float hit_y,
                              1, total_frame_count_, "enemy");
         }
     }
-
     if (is_battle_mode_) {
         enemy_fighter_.health -= final_damage * enemy_fighter_.max_health;
         if (enemy_fighter_.health <= 0.0f) {
@@ -4558,7 +4633,8 @@ auto apply_player_damage_to_enemy = [&](float hit_x, float hit_y,
     // fight-memory damage-event feed. The dojo sparring partner reacts too
     // (only health is battle-only).
     apply_player_hit_feedback(hit_x, hit_y, hit_frame, current_move_,
-                              final_damage, enemy_fighter_.is_blocking);
+                              final_damage, enemy_fighter_.is_blocking,
+                              is_critical);
     return final_damage;
 };
 if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
@@ -5241,14 +5317,14 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
                            (facing_right_ ? it->second.first : -it->second.first);
         }
         std::printf("[STATE] f=%llu ms=%d ha=%u anim='%s' move='%s' px=%.1f py=%.1f "
-                    "ex=%.1f ey=%.1f "
+                    "ex=%.1f ey=%.1f eanim='%s' "
                     "af=%.2f fps=%.2f bag_hit=%d bag_move=%.2f nv=%zu "
                     "al=%d anchor_x=%.2f fx=%.2f cam=%.1f zoom=%.4f "
                     "fr=%d ef=%d\n",
                     (unsigned long long)total_frame_count_, move_state_, hit_anim_,
                     current_anim_.c_str(), current_move_.c_str(),
                     player_pos_x_, player_pos_y_,
-                    enemy_pos_x_, enemy_pos_y_,
+                    enemy_pos_x_, enemy_pos_y_, enemy_anim_.c_str(),
                     anim_time_ * anim_fps_, anim_fps_,
                     (int)hit_this_interval_, bag_displacement(), bag_verlet_.size(),
                     al, anchor_x, first_effect_alpha(), cam_x_, zoom_,
@@ -5270,7 +5346,8 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
 // FUN_8f4aa998 damage-event model).
 void Game::apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
                                      const std::string& move_name,
-                                     float final_damage, bool blocked) {
+                                     float final_damage, bool blocked,
+                                     bool critical) {
     // (a) Resolve the reaction animation from moves.xml: the attack's
     // <Hit Name> zone (parsed into the Attack interval's hit_type) names
     // the Recoil move — "High" -> move "HighHit" (high_hit.bin);
@@ -5316,6 +5393,37 @@ void Game::apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
                 }
             }
         }
+    }
+
+    // [Wave 11A M4] KNOCKDOWN: a received hit of Type=Critical (or Type=
+    // Shock — the shock accumulator FUN_8f4a92bc @ game+0x3F22BC is not
+    // ported, [HEURISTIC-TODO]) selects the FALL family reaction instead of
+    // the plain Recoil: moves.xml HighHitFall @6375 / MiddleHitFall @6425 /
+    // SweepHitFall @6470 / SpinningHitFall @6516 / OverheadHitFall @6549
+    // (Template Fall = Hit|NotTitan; RockOn blocks them — no mod system in
+    // the MVP, [HEURISTIC-TODO]). The fall move plays + its bodyfall sound
+    // (High/Middle/Sweep -> bodyfall3, Spinning/Overhead -> bodyfall1; the
+    // fall moves carry the CanWallHitFall window for the wall-bounce chain
+    // into WallHitFall — wall bounce not ported, [HEURISTIC-TODO]).
+    // Recovery is the StandupAfterThrowFall template (AnimationEnd
+    // ThrowFall) — the fighter returns to stance when the anim ends.
+    std::string fall_sound;
+    if (critical && !blocked) {
+        const std::string fall_name = zone + "HitFall";
+        const auto fit = assets_->moves().find(fall_name);
+        if (fit != assets_->moves().end() &&
+            !fit->second.filename.empty()) {
+            reaction_anim = strip_bin_suffix(fit->second.filename);
+        } else {
+            reaction_anim = "high_hit_fall";   // catalog default fall
+        }
+        fall_sound = (zone == "Spinning" || zone == "Overhead")
+                         ? "bodyfall1" : "bodyfall3";
+        std::printf("[KNOCKDOWN] f=%llu move='%s' zone='%s' fall='%s' "
+                    "sound='%s'\n",
+                    (unsigned long long)total_frame_count_,
+                    move_name.c_str(), zone.c_str(), reaction_anim.c_str(),
+                    fall_sound.c_str());
     }
 
     // The reaction plays for the full animation duration (the enemy renders
@@ -5375,7 +5483,11 @@ void Game::apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
     // the hit sample m_pl_hit2.wav (preloaded)"). The old hit1-6 /
     // super_hit1-5 heuristic was unpinned ([HEURISTIC-TODO] those samples
     // stay catalog-loaded but are not the battle contact sound).
-    if (blocked) {
+    // [Wave 11A M4] A critical knockdown plays the fall move's OWN sound
+    // (bodyfall3/bodyfall1 per the fall family) instead of the hit sound.
+    if (critical && !blocked) {
+        play_sound(fall_sound, 0.8f);
+    } else if (blocked) {
         play_sound("armor", 0.5f);
     } else {
         play_sound(enemy_hit_sound(2), 0.8f);

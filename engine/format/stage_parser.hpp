@@ -119,6 +119,12 @@ struct StageTemplate {
     std::string first_name;  // localization key for the displayed name
     std::string avatar;      // avatar texture name
     std::string voice;       // "Male" / "Female" / ...
+    // [ORIGINAL] The hero template's combat attributes (stages.xml
+    // <Template Name="Default" CriticalChance="1000" ...>): the crit
+    // getter FUN_8f4a610c reads CriticalChance/CriticalDamage from the
+    // fighter's model+0x1C4 attribute map, which the template attrs seed.
+    int critical_chance = 0;
+    int critical_damage = 0;
     std::vector<std::string> items;
     std::vector<std::string> perks;
 };

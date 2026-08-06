@@ -230,6 +230,12 @@ bool StageParser::parse(const std::string& xml, StageData& out) {
                 t.first_name = tn.attr("FirstName");
                 t.avatar = tn.attr("Avatar");
                 t.voice = tn.attr("Voice");
+                // [ORIGINAL] <Template CriticalChance=.. CriticalDamage=..>
+                // — the hero's crit attributes (stages.xml Default:
+                // CriticalChance="1000"); absent -> 0 (CriticalDamage=0
+                // means the 2^(base*attr) crit multiplier is 1.0).
+                t.critical_chance = (int)to_float(tn.attr("CriticalChance"));
+                t.critical_damage = (int)to_float(tn.attr("CriticalDamage"));
                 if (auto* items = tn.first_child("Items")) {
                     for (auto& in : items->children) {
                         if (in.name != "Item") continue;
