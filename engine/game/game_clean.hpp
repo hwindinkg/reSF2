@@ -130,6 +130,7 @@ public:
     // the inventory and equips it at boot, so a scripted run can exercise
     // the fight HUD's magic button.
     void set_equip_magic(const std::string& id) { equip_magic_hook_ = id; }
+    void set_equip_weapon(const std::string& id) { equip_weapon_hook_ = id; }
 
     void set_start_location(const std::string& name) {
         if (!name.empty()) {
@@ -6484,7 +6485,7 @@ private:
     bool tutorial_start_flag_ = false;
     int round_left_ms_probe_ = 0;   // pushed by BattleScene each frame
     std::string equip_magic_hook_;  // --equip-magic <item id>
-
+    std::string equip_weapon_hook_; // --equip-weapon <item id>
     // Animation debug/TODO state
     float stance_npivot_y_ = 106.0f;     // NPivot Y from stance anim (default from params.xml)
     float anim_npivot_bin_y_ = 0.0f;     // NPivot Y from current .bin animation frame

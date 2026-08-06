@@ -462,6 +462,20 @@ void Game::on_init(plat::Platform& platform) {
                             equip_magic_hook_.c_str());
             }
 
+            // [Wave 10B soak D7] E2E hook: --equip-weapon forces a weapon
+            // into the hermetic inventory and equips it, so the weapon-move
+            // mapping is exercisable against the real binary (same pattern
+            // as --equip-magic). sync_equipped_weapon resolves the item id
+            // to its list.xml SubType (WEAPON_KNIVES -> Knives), which is
+            // what the moves.xml TacticWeapon sets are keyed on.
+            if (!equip_weapon_hook_.empty()) {
+                inventory_.add_item(equip_weapon_hook_);
+                inventory_.equip(inventory::kSlotWeapon, equip_weapon_hook_);
+                sync_equipped_weapon();
+                std::printf("[equip] E2E hook: weapon '%s' equipped\n",
+                            equip_weapon_hook_.c_str());
+            }
+
             // Start the scene flow at Boot, unless --scene asked for a
             // specific screen. Jumping straight to a screen is what makes it
             // possible to capture and compare it against the reference
@@ -3143,8 +3157,19 @@ void Game::host_update_gameplay(uint32_t dt) {
             // attack selector was handing a PUNCH press to Duck whenever the
             // real down-punch was unavailable (self-chain or weapon lock) —
             // the soak's "[MOVE] Punch dir=Down -> Duck" input theft.
+            // [Wave 10B soak D7] And it must require the press to be a PUNCH:
+            // weapon moves are punch-template attacks (template
+            // "2key|Central|Weapon"), and moves.xml has no weapon KICK
+            // templates at all — a kick press must fall back to the unarmed
+            // kicks (HighKick/FrontKick/BackKick per direction, all
+            // move_type="Kick", no TacticWeapon). Before this gate, ONE P
+            // with knives selected KnivesDoubleSlash (2key|Central|Weapon,
+            // prio 115) over HighKick (prio 110): "когда нажал p один раз,
+            // ножи атакуют атакой, как на два нажатия o".
             bool move_type_match = (move.move_type == cur_move_type) ||
-                (move.is_attack && move.move_type.empty() && is_weapon_allowed(move) && move.key_count <= 2);
+                (cur_move_type == "Punch" && move.is_attack &&
+                 move.move_type.empty() && is_weapon_allowed(move) &&
+                 move.key_count <= 2);
             if (!move_type_match) { ++rej.move_type; continue; }
 
             if (block_all_combat) {
@@ -3283,7 +3308,7 @@ void Game::host_update_gameplay(uint32_t dt) {
                             cur_move_type.c_str(), cur_direction.c_str(), (in_attack && !is_uninterrupt_) ? 1 : 0);
                 for (auto& [name, move] : assets_->moves()) {
                     bool mt_match = (move.move_type == cur_move_type) ||
-                        (move.move_type.empty() && is_weapon_allowed(move) && move.key_count <= 2);
+                        (cur_move_type == "Punch" && move.move_type.empty() && is_weapon_allowed(move) && move.key_count <= 2);
                     if (!mt_match) continue;
                     if (move.direction != cur_direction) continue;
                     if (move.key_count == 3 && !(in_attack && !is_uninterrupt_)) continue;
