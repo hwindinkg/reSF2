@@ -327,6 +327,16 @@ void Renderer::camera_set_target(float x, float y) { camera_.set_target(x, y); }
 
 void Renderer::camera_set_zoom(float zoom) { camera_.set_zoom(zoom); }
 
+// [Wave 10A defect 4] Backread one pixel. Screen coords are Y-DOWN
+// (top-left origin, the engine's screen convention); the GL framebuffer is
+// Y-UP, so the row is flipped. Reads the currently bound (back) buffer —
+// call between begin_frame and swap_buffers.
+bool Renderer::read_pixel(int x, int y, std::uint8_t rgb[3]) {
+    if (x < 0 || y < 0 || x >= width_ || y >= height_) return false;
+    glReadPixels(x, height_ - 1 - y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, rgb);
+    return true;
+}
+
 // ---- Screen-space & primitive rendering ----
 // Screen-space uses Y-DOWN (origin top-left, like raster displays).
 // This is separate from world-space (Y-UP, origin center).

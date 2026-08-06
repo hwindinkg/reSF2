@@ -79,6 +79,15 @@ public:
     // Camera (flat methods, not Camera2D& accessor)
     virtual void camera_set_target(float x, float y) = 0;
     virtual void camera_set_zoom(float zoom) = 0;
+
+    // [Wave 10A defect 4] Read one rendered pixel in SCREEN coordinates
+    // (x, y = top-left, as drawn). Used by the [PIXEL] dump-state probe to
+    // verify what a scene actually drew (e.g. the dialogue keeps the
+    // location visible behind the parchment). Default: unsupported.
+    virtual bool read_pixel(int x, int y, std::uint8_t rgb[3]) {
+        (void)x; (void)y; (void)rgb;
+        return false;
+    }
 };
 
 }  // namespace resf2::renderer

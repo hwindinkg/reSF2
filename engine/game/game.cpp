@@ -507,6 +507,30 @@ void Game::on_render(plat::Platform& platform) {
             renderer_->begin_frame();
             scene::SceneContext ctx{*this, platform, *renderer_, 0};
             scene_manager_.render(ctx);
+            // [Wave 10A defect 4] [PIXEL] probe: the top-left corner pixel as
+            // actually drawn this frame (screen coords, Y-down). Lets a
+            // scripted run assert what a scene really painted — e.g. the
+            // dialogue must keep the location visible behind the parchment
+            // (corner pixel ≈ the dojo's pre-dialogue corner), instead of
+            // regressing to a flat dark fill.
+            // [Wave 10A defect 4] [PIXEL] probe: two readbacks in screen
+            // coords (Y-down) — p00 = the top-left corner (must stay the
+            // location's pixel when a dialogue opens, not regress to the
+            // flat clear), p11 = the screen centre (the dialogue parchment
+            // paint 226,205,163 identifies dialogue frames).
+            if (dump_state_) {
+                std::uint8_t rgb[3] = {0, 0, 0};
+                if (renderer_->read_pixel(2, 2, rgb)) {
+                    std::printf("[PIXEL] f=%llu p00=%d,%d,%d\n",
+                                (unsigned long long)total_frame_count_,
+                                (int)rgb[0], (int)rgb[1], (int)rgb[2]);
+                }
+                if (renderer_->read_pixel(640, 360, rgb)) {
+                    std::printf("[PIXEL] f=%llu p11=%d,%d,%d\n",
+                                (unsigned long long)total_frame_count_,
+                                (int)rgb[0], (int)rgb[1], (int)rgb[2]);
+                }
+            }
             renderer_->end_frame();
 }
 

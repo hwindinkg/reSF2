@@ -478,6 +478,11 @@ add_e2e_test(test_e2e_location_bounds)
 # short round clock and walks through both round timeouts.
 add_e2e_test(test_e2e_fight_timer)
 
+# Wave 10A defect 4 (DIALOGUE DIM): the dialogue must keep the location
+# visible behind the parchment. Reads rendered pixels ([PIXEL] probe) and
+# asserts the background corner stays lit while a dialog is open.
+add_e2e_test(test_e2e_dialogue_background)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
