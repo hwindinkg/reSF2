@@ -479,6 +479,12 @@ add_e2e_test(test_e2e_location_bounds)
 # улететь за локацию").
 add_e2e_test(test_e2e_battle_knockback_bounds)
 
+# Wave 10B soak D2 (LOCATION BOUNDS IN BATTLE): the SAME long-walk recipe
+# as test_e2e_location_bounds, but in the fight arena — the player must
+# clamp at the location world box, both walls (the soak reported "у локаций
+# нет границ, за которые нельзя выйти").
+add_e2e_test(test_e2e_battle_location_bounds)
+
 # Wave 10A defect 3 (FIGHT TIMER): the round countdown renders in the fight
 # HUD and a timeout win continues the story (tutorial COMPLETE + follow-up
 # dialogue). Boots the real binary into the Sensei tutorial flow with a

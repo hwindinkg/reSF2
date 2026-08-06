@@ -2612,13 +2612,26 @@ void Game::host_update_gameplay(uint32_t dt) {
         // executor's approach/retreat — so a chased, repeatedly-hit enemy
         // can fly out of the location's world box (params.xml Width/2; the
         // bag had the same box from the location data). The location wall
-        // is a hard boundary: the enemy may slide INTO it but never past it.
-        if (location_) {
-            const float half_w = location_->width * 0.5f;
-            enemy_pos_x_ = std::clamp(enemy_pos_x_, -half_w, half_w);
-        }
+        //         is a hard boundary: the enemy may slide INTO it but never past it.
         // Face the player
         enemy_facing_right_ = (player_pos_x_ > enemy_pos_x_);
+    }
+
+    // [Wave 10A defect 1 / Wave 10B D2] LOCATION BOUNDS FOR BOTH FIGHTERS:
+    // the enemy's world x is moved by two unbounded paths - the reversed
+    // <Impulse X> integrated over the whole reaction duration (knockback)
+    // and the AI step executor's approach/retreat - so a chased,
+    // repeatedly-hit enemy can fly out of the location's world box
+    // (params.xml Width/2; the bag had the same box from the location
+    // data). The location wall is a hard boundary: the fighter may slide
+    // INTO it but never past it. The clamp runs on EVERY gameplay frame
+    // for BOTH fighters (the player side sits in its own update below),
+    // outside the show_enemy_ gate so the dojo bag anchor and the battle
+    // enemy are covered alike ("locations have no bounds you cannot
+    // cross").
+    if (location_) {
+        const float half_w = location_->width * 0.5f;
+        enemy_pos_x_ = std::clamp(enemy_pos_x_, -half_w, half_w);
     }
 
     // R: restart battle (after victory/defeat)
@@ -4856,7 +4869,8 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
     // out of the location's world box (params.xml Width/2; probe: px
     // reached -1818/+1691 vs the +-980 dojo box). The wall is the location
     // boundary: the fighter may slide INTO it but never past it. (The
-    // enemy side is clamped in its own update; see defect 1.)
+    // enemy side is clamped in its own update above; this is the player
+    // half of the same per-frame pair.)
     if (location_) {
         const float half_w = location_->width * 0.5f;
         player_pos_x_ = std::clamp(player_pos_x_, -half_w, half_w);
