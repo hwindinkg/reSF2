@@ -359,29 +359,45 @@ int main() {
                 size_t i = ((size_t)y * w + x) * 4;
                 return std::make_tuple(fb[i], fb[i+1], fb[i+2]);
             };
-            // The roll bars sit at the top and bottom edges of the panel.
-            // Find the vertical extent of ALL panel pixels (parchment fill
-            // {226,205,163} plus the roll textures drawn around it).
+            // The parchment fill {226,205,163} is the panel's identity: it is
+            // the only flat paint with that color on screen. A loose warm
+            // filter (r>120&&g>100&&b>60) ALSO matches the dojo's wood tones,
+            // and since Wave 10A D4 the location renders BEHIND the dialogue
+            // (the intended "no full-screen dim" behavior), the old probe
+            // measured the whole background as "panel" (drawn 150 px vs the
+            // 36 px box). Measure the fill band at the CENTER column (inside
+            // the panel, clear of the avatar and the side edges) and assert
+            // it sits where the box does: the band must reach the box's
+            // bottom edge (a sheet drawn/stretched past it fails) and start
+            // at least halfway up (a panel dropped to the bottom fails).
+            auto is_fill = [&](int x, int y) {
+                auto [r, g, b] = px(x, y);
+                return std::abs(r - 226) <= 35 && std::abs(g - 205) <= 35 &&
+                       std::abs(b - 163) <= 35;
+            };
+            const int cx = w / 2;
             int top = -1, bottom = -1;
             for (int y = 0; y < h; ++y) {
-                for (int x = w / 4; x < 3 * w / 4; ++x) {
-                    auto [r, g, b] = px(x, y);
-                    // panel-ish: parchment or the darker roll textures
-                    if (r > 120 && g > 100 && b > 60) {
-                        if (top < 0) top = y;
-                        bottom = y;
-                    }
-                }
+                if (!is_fill(cx, y)) continue;
+                if (top < 0) top = y;
+                bottom = y;
             }
+            const int box_top = (int)((h - h * 0.20f) * 0.5f);
+            const int box_bottom = box_top + (int)(h * 0.20f);
+            const int slack = (int)(h * 0.05f);
+            std::fprintf(stderr,
+                         "  [D6] parchment band=[%d..%d] (box %d..%d, H=%d)\n",
+                         top, bottom, box_top, box_bottom, h);
             if (top >= 0) {
-                const int drawn_h = bottom - top + 1;
-                const int expect_h = (int)(h * 0.20f);
-                std::fprintf(stderr,
-                             "  [D6] panel drawn height=%d px, expected ~%d px (box_h=0.20H)\n",
-                             drawn_h, expect_h);
-                CHECK(drawn_h <= expect_h + (int)(h * 0.05f),
-                      "D6: the dialogue panel's drawn height stays near the "
-                      "intended box height (bottom texture not stretched)");
+                const int band_h = bottom - top + 1;
+                CHECK(band_h >= (int)(h * 0.10f),
+                      "D6: the parchment band is drawn (>= 0.10H of fill)");
+                CHECK(top >= box_top - slack,
+                      "D6: the panel starts at the box's top edge (not dropped "
+                      "to the bottom)");
+                CHECK(bottom <= box_bottom + slack,
+                      "D6: the panel's drawn height stays near the intended "
+                      "box height (bottom texture not stretched)");
             } else {
                 CHECK(false, "D6: dialogue panel pixels found in the frame");
             }
