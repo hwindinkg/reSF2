@@ -283,6 +283,7 @@ void Game::on_init(plat::Platform& platform) {
             std::printf("  W           - Jump (W+D=front flip, W+A=back flip)\n");
             std::printf("  S+D / S+A   - Forward roll / Back roll\n");
             std::printf("  S (hold)    - Duck (crouch)\n");
+            std::printf("  X           - Magic (cast when the magic bar is full)\n");
             std::printf("  Block       - AUTOMATIC (when idle, not attacking)\n");
             std::printf("  M or click menu - Toggle menu\n");
             std::printf("  T           - Toggle dialog\n");
@@ -1164,6 +1165,16 @@ void Game::host_reset_round() {
     // equipment, enemy from the AlignTargetAttributes baseline) so every
     // round starts with the model+0x1C4 maps populated. Idempotent.
     rebuild_fighter_attributes();
+    // [ORIGINAL] Magic charge round start (Fight::init @ 0x8F41C8E4,
+    // SPEC_COMBAT_CORE Q1.5): count=0, charge=clamp(InitialCharge,0,1).
+    // InitialCharge is zero-fallback ([HEURISTIC-TODO] the 13-char name
+    // lookup FUN_8f65eff8 has no engine attribute source yet), so the bar
+    // always opens empty and fills from landed hits.
+    player_fighter_.magic_charge = std::clamp(
+        player_fighter_.attributes.get_or("InitialCharge", 0.0f), 0.0f, 1.0f);
+    player_fighter_.magic_count = 0;
+    enemy_fighter_.magic_charge = 0.0f;
+    enemy_fighter_.magic_count = 0;
     player_hit_flash_ = 0;
     enemy_hit_flash_ = 0;
     combo_timer_ = 0;
@@ -2084,6 +2095,75 @@ static float enemy_damage_to_player(float base_damage, bool blocked,
     return get_total_damage(din) * block_factor;
 }
 
+// [ORIGINAL] MAGIC CHARGE — SPEC_COMBAT_CORE.md Q1 / VERIFY_W11.md Q1 GREEN.
+//
+// addMagicCharge @ game+0x3F2660 (0x8F4A9660) + the threshold recompute @
+// game+0x3F10D8 (0x8F4A80D8). Every landed attack-interval hit charges BOTH
+// fighters, in two calls inside Fight::applyHit @ game+0x3E9F9C (0x8F420F9C):
+//
+//   (attacker, dmg, victim, blocked, critical, role=0)   charges the attacker
+//   (victim,   dmg, attacker, blocked, critical, role=1) charges the victim
+//
+//   charge += pow2Factor(attacker, blocked)      // 0x8F4A94F0 (flag -> 2^attr else 1.0)
+//             * powf(2.0f, rechargeAttr(recipient))  // role 0: PainRecharge,
+//                                                  //   role 1: DamageRecharge
+//             * pow2Factor(victim, critical)      // 0x8F4A95A8
+//             * damage,                           // interval Damage Value (+0x48)
+//   clamped to [0,1]; skipped when the recipient's count is already 1
+//   (full bar never overcharges); suppressed when the ATTACKING move carries
+//   NoMagicRecharge (MoveDef+0x148 via 0x8F47D378). Crossing 1.0 sets
+//   count=1 (MagicCharged) and resets the bar. Round start (0x8F41C8E4):
+//   count=0, charge=clamp(InitialCharge,0,1).
+//
+// [HEURISTIC-TODO] The pow2 factors and the PainRecharge/DamageRecharge
+// attributes are zero-fallback (the spec's [UNCERTAIN] attr source: the
+// stages.xml Magic*Recharge names are 17/19 chars, the binary's lookups are
+// 12/13-char names, and the factor-set records FUN_8f65fc28/FUN_8f65fcc0 are
+// not ported), so f2=f3=1.0 and 2^0=1.0 — a landed punch (HighPunch
+// <Damage Value=0.11>) adds 0.11 and the bar fills after ~10 landed hits.
+static void add_magic_charge(FighterState& recipient, float damage,
+                             bool blocked, bool critical, int role,
+                             uint64_t frame, const char* tag) {
+    if (recipient.magic_count != 0) return;   // full bar: no overcharge
+    const float f2 = 1.0f;                    // pow2Factor(attacker, blocked)
+    const float f3 = 1.0f;                    // pow2Factor(victim, critical)
+    const float f1 = (role == 0)
+        ? recipient.attributes.get_or("PainRecharge", 0.0f)
+        : recipient.attributes.get_or("DamageRecharge", 0.0f);
+    const float c = recipient.magic_charge +
+                    f2 * std::pow(2.0f, f1) * f3 * damage;
+    recipient.magic_charge = std::clamp(c, 0.0f, 1.0f);
+    // Threshold crossing (0x8F4A80D8): charge >= 1.0 -> count=1, bar reset.
+    // count > 1 is impossible here (we skipped when count != 0), so the
+    // "Wrong magic count" branch never fires in this port.
+    if (recipient.magic_charge >= 1.0f) {
+        recipient.magic_count = 1;
+        recipient.magic_charge = 0.0f;
+    }
+    std::printf("[MAGIC-CHG] f=%llu %s role=%d chg=%.3f cnt=%d\n",
+                (unsigned long long)frame, tag, role,
+                recipient.magic_charge, recipient.magic_count);
+}
+
+// Resolve the MoveDef whose animation filename matches the playing anim
+// (used for the enemy's current attack move — enemy_anim_ is a stripped
+// filename). Returns nullptr when no move owns the anim.
+static const MoveDef* move_def_by_anim(
+    const std::unordered_map<std::string, MoveDef>& moves,
+    const std::string& anim) {
+    std::string want = anim;
+    if (want.size() > 4 && want.compare(want.size() - 4, 4, ".bin") == 0)
+        want = want.substr(0, want.size() - 4);
+    for (const auto& [name, m] : moves) {
+        (void)name;
+        std::string fn = m.filename;
+        if (fn.size() > 4 && fn.compare(fn.size() - 4, 4, ".bin") == 0)
+            fn = fn.substr(0, fn.size() - 4);
+        if (fn == want) return &m;
+    }
+    return nullptr;
+}
+
 void Game::host_update_gameplay(uint32_t dt) {
     // [DIAGNOSTIC] Advance input-script frame counter and apply events
     // scheduled for this frame BEFORE reading input. This keeps script
@@ -2563,6 +2643,25 @@ void Game::host_update_gameplay(uint32_t dt) {
                         
                         std::printf("[COMBAT] Enemy hit player (BLOCKED): base=%.3f block=%.2f final=%.3f\n",
                                     base_damage, block_factor, final_damage);
+
+                        // [ORIGINAL] Magic charge on every landed hit
+                        // (Fight::applyHit @ 0x8F420F9C): BOTH fighters
+                        // charge; the gate is the ENEMY's attacking move
+                        // NoMagicRecharge flag (MoveDef+0x148).
+                        {
+                            const MoveDef* enemy_atk =
+                                move_def_by_anim(assets_->moves(), enemy_anim_);
+                            const bool no_magic_recharge =
+                                enemy_atk && enemy_atk->no_magic_recharge;
+                            if (!no_magic_recharge) {
+                                add_magic_charge(enemy_fighter_, base_damage,
+                                                 /*blocked=*/true, false,
+                                                 0, total_frame_count_, "enemy");
+                                add_magic_charge(player_fighter_, base_damage,
+                                                 /*blocked=*/true, false,
+                                                 1, total_frame_count_, "player");
+                            }
+                        }
                         
                         player_fighter_.health -= final_damage * player_fighter_.max_health;
                         player_fighter_.invuln_time = 0.4f;
@@ -2589,6 +2688,25 @@ void Game::host_update_gameplay(uint32_t dt) {
                         
                         std::printf("[COMBAT] Enemy hit player: base=%.3f final=%.3f\n",
                                     base_damage, final_damage);
+
+                        // [ORIGINAL] Magic charge on every landed hit
+                        // (Fight::applyHit @ 0x8F420F9C): BOTH fighters
+                        // charge; the gate is the ENEMY's attacking move
+                        // NoMagicRecharge flag (MoveDef+0x148).
+                        {
+                            const MoveDef* enemy_atk =
+                                move_def_by_anim(assets_->moves(), enemy_anim_);
+                            const bool no_magic_recharge =
+                                enemy_atk && enemy_atk->no_magic_recharge;
+                            if (!no_magic_recharge) {
+                                add_magic_charge(enemy_fighter_, base_damage,
+                                                 /*blocked=*/false, false,
+                                                 0, total_frame_count_, "enemy");
+                                add_magic_charge(player_fighter_, base_damage,
+                                                 /*blocked=*/false, false,
+                                                 1, total_frame_count_, "player");
+                            }
+                        }
                         
                         player_fighter_.health -= final_damage * player_fighter_.max_health;
                         player_fighter_.invuln_time = 0.4f;
@@ -3575,6 +3693,69 @@ void Game::host_update_gameplay(uint32_t dt) {
         }
     }
 
+    // === MAGIC CAST (SPEC_COMBAT_CORE Q1.6, VERIFY_W11 Q1 GREEN) ===
+    // The magic button is a move key of Type="Magic" PressType="Tap" (the
+    // MagicXXXPlayer moves: Template="1key|MagicPlayer", Type="ATTACK",
+    // Priority=110). Keyboard binding: X. The cast is selectable only with
+    // a full bar (count==1) and an equipped magic item; the move is the
+    // MagicXXXPlayer of the equipped item's SubType (list.xml MAGIC_FIRE_
+    // BALL -> SubType FireBall -> FireballPlayer TacticWeapon="FireBall").
+    // Casting consumes the charge (Fighter::applyCommand @ 0x8F4A83B8,
+    // command type 0, delta -1) and fires the magic projectile.
+    // [HEURISTIC-TODO] The touch magic button only renders today; it does
+    // not route into magic_pressed (touch_.magic_pressed does not exist).
+    if (input.keys_just_pressed[(size_t)plat::Key::X] &&
+        player_fighter_.magic_count == 1 && !equipped_magic_.empty() &&
+        !start_stance_playing_ && move_state_ != 10 && hit_anim_ == 0) {
+        std::string subtype;
+        if (list_data_loaded_) {
+            for (const auto& li : list_data_.items) {
+                if (li.type == "Magic" && li.name == equipped_magic_) {
+                    subtype = li.subtype;
+                    break;
+                }
+            }
+        }
+        const MoveDef* cast_move = nullptr;
+        if (!subtype.empty()) {
+            for (auto& [name, m] : assets_->moves()) {
+                (void)name;
+                if (m.filename.empty()) continue;
+                if (m.tactic_weapon != subtype) continue;
+                if (m.template_name.find("MagicPlayer") == std::string::npos)
+                    continue;
+                if (!cast_move || m.priority > cast_move->priority)
+                    cast_move = &m;
+            }
+        }
+        if (cast_move) {
+            std::string cast_anim = strip_bin_suffix(cast_move->filename);
+            if (assets_->animations().count(cast_anim)) {
+                play_animation(cast_anim, false, 1);
+                current_move_ = cast_move->name;
+                int fc = assets_->animations()[cast_anim].frame_count;
+                hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
+                move_state_ = 10;
+                player_fighter_.magic_count = 0;   // the cast consumes
+                // [ORIGINAL] The cast fires the equipped magic: the
+                // missile is spawned at the caster's hand travelling in
+                // the facing direction (moves.xml <Bullets Type=
+                // "MagicBullet">; the missile itself is a MagicMissile
+                // family player — NoMagicRecharge, so it never re-charges).
+                spawn_projectile(subtype, player_pos_x_, player_pos_y_,
+                                 facing_right_, true);
+                std::printf("[MAGIC-CAST] f=%llu move='%s' subtype='%s' cnt=%d\n",
+                            (unsigned long long)total_frame_count_,
+                            cast_move->name.c_str(), subtype.c_str(),
+                            player_fighter_.magic_count);
+                goto after_combat;
+            }
+        } else {
+            std::printf("[MAGIC-CAST] no cast move for subtype '%s' (item '%s')\n",
+                        subtype.c_str(), equipped_magic_.c_str());
+        }
+    }
+
     // Decrement step cooldown (set after rolls/specials to prevent
     // immediate step when the held key resumes).
     if (step_cooldown_ms_ > dt) step_cooldown_ms_ -= dt; else step_cooldown_ms_ = 0;
@@ -4162,6 +4343,10 @@ auto apply_player_damage_to_enemy = [&](float hit_x, float hit_y,
     player_fighter_.hits_landed++;
     // [ORIGINAL] Combo.Time = 90 frames = 1.5s at 60Hz (from InternalSettings)
     combo_timer_ = 1.5f;
+    // [Wave 11A M4] The critical-hit roll result for THIS hit (0 until the
+    // crit system lands; M4 rolls it here and passes it to the damage
+    // multiplier, the charge factors and the knockdown selection).
+    bool is_critical = false;
     std::printf("[COMBAT] Combo: hits=%d timer=1.5s\n", player_fighter_.hits_landed);
     // [ORIGINAL] Damage via Model::getTotalDamage @ game+0x4527B4
     // (engine/game/damage_formula.hpp — the multiplication order
@@ -4237,6 +4422,27 @@ auto apply_player_damage_to_enemy = [&](float hit_x, float hit_y,
     std::printf("[COMBAT] Player hit enemy: base=%.3f attrdiff=%.1f f3=%.3f blk=%.2f => final=%.3f\n",
                 base_damage, din.attribute_difference,
                 dbg_last_attr_mult_, block_factor, final_damage);
+
+    // [ORIGINAL] Magic charge on every landed hit (Fight::applyHit @
+    // 0x8F420F9C): BOTH fighters charge, gated by the ATTACKING move's
+    // NoMagicRecharge flag (MoveDef+0x148 via FUN_8f47d378; moves.xml
+    // RangedMissile/MagicMissile/RaidMissile/MagicAcidCloud suppress it).
+    // [HEURISTIC-TODO] is_critical is wired by Wave 11A M4 (crit roll);
+    // until then the crit pow2 factor is 1.0 either way.
+    {
+        const auto atk_it = assets_->moves().find(current_move_);
+        const bool no_magic_recharge =
+            (atk_it != assets_->moves().end()) &&
+            atk_it->second.no_magic_recharge;
+        if (!no_magic_recharge) {
+            add_magic_charge(player_fighter_, base_damage,
+                             enemy_fighter_.is_blocking, is_critical,
+                             0, total_frame_count_, "player");
+            add_magic_charge(enemy_fighter_, base_damage,
+                             enemy_fighter_.is_blocking, is_critical,
+                             1, total_frame_count_, "enemy");
+        }
+    }
 
     if (is_battle_mode_) {
         enemy_fighter_.health -= final_damage * enemy_fighter_.max_health;

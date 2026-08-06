@@ -232,6 +232,15 @@ struct MoveDef {
     bool ignores_block = false;        // +0x75: IgnoresBlock attribute
     bool no_effect = false;            // +0x74: NoEffect attribute
     std::vector<std::string> attacking_parts;  // +0xac: AttackingParts vector (skeleton edge names)
+
+    // [ORIGINAL] MoveDef+0x148: the NoMagicRecharge flag. The attacking
+    // move's flag suppresses magic charging entirely (moves.xml:
+    // RangedMissile/MagicMissile/RaidMissile/MagicAcidCloud and their
+    // derived families — magic projectile/weapon bodies do not charge the
+    // caster). Read by the applyHit gate FUN_8f47d378; parsed from the
+    // <Move NoMagicRecharge="1"> attribute (and the <Template> inheritance
+    // chain).
+    bool no_magic_recharge = false;
 };
 
 // ---------- Animation ----------
@@ -404,6 +413,14 @@ struct FighterState {
     int hits_landed = 0;
     int hits_taken = 0;
     bool is_dead = false;
+
+    // [ORIGINAL] MAGIC CHARGE (SPEC_COMBAT_CORE.md Q1, VERIFY_W11 Q1 GREEN):
+    // Fighter+0x6EC = charge accumulator (float, normalised 0..1),
+    // Fighter+0x6F0 = magic availability count (0/1). Every landed
+    // attack-interval hit charges BOTH fighters; crossing 1.0 sets count=1
+    // (MagicCharged) and resets the bar; the magic cast consumes the count.
+    float magic_charge = 0.0f;
+    int magic_count = 0;
 
     // [ORIGINAL] The fighter's attribute map — the name-keyed int container at
     // model+0x1C4 that Model::getParameter (game+0x6275F4) reads. Runtime-only:
