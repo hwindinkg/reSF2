@@ -90,49 +90,74 @@ the ARM `add rN,pc,rN` pattern and were resolved from the disassembly).
 
 ### Verified semantics
 
-1. **Battle music is data-driven from `stages.xml`**: every `<Battle>` node
-   carries `Music="<track-name>"` (e.g. the tutorial battle line 48:
+1. **Battle music is data-driven from the *location*'s `params.xml`**, not
+   from `stages.xml` (corrected per VERIFY_W11): every
+   `locations/<name>/params.xml` carries `<Root Music="id|id" ...>` (numeric
+   IDs, e.g. `"6|7"` in bamboo_grove, moon, dojo). The fight-screen play site
+   picks the **Location** track (see 3-4) and resolves the numeric ID through
+   the music registry (`FUN_8F64B174`) to `assets/music/<name>.mp3`.
+   Locations share the same Music IDs — that is why the user hears the same
+   track everywhere; it is a data property, not a code fallback.
+   stages.xml `<Battle Music>` (tutorial battle line 48:
    `Music="fight1_samurai_spirit"`; `BOSS_LYNX` → `fight10_black_warrior`;
    `BOSS_HERMIT` → `fight13_old_sensei`; Duel/Survival/Stranger/… →
-   `fight1_samurai_spirit`). **Most battles literally share
-   `fight1_samurai_spirit` — this is why the user hears the same track
-   everywhere; it is a data property, not a code fallback.**
+   `fight1_samurai_spirit`) is a **separate alternate/ambient path with its
+   own caller** — parsed by `Battle::parse`, but NOT consumed at the
+   fight-screen play site.
 
-2. Parsing chain:
-   `BattleList::parse` `FUN_8F2C3ABC` (per-battle: `FUN_8F2C2E84` **Battle::parse**,
-   reads attr `"Music"` @ `0x8F78F36C` at `0x8F2C31C4`; appends to a
-   vector<string> at battle+0x18). Battle object type from
-   `FUN_8F2F38D0` (battle+0x13C).
+2. Parsing chain — the `"Music"` attr string (@ `0x8F78F36C`) has five xrefs;
+   only one feeds the fight screen:
+   - `FUN_8F2C2E84` **Battle::parse** (attr read @ `0x8F2C31C4`) → appends
+     `<Battle Music>` to a vector<string> at **battle+0x18** (stages.xml
+     path — alternate/ambient, own caller; not the play site).
+   - `FUN_8F43C6F8` **Location::parse** (params.xml; attr read @ `0x8F43CB54`)
+     → appends `<Root Music="id|id">` to a vector<string> at
+     **Location+0x18** — **this is the object the play site uses**.
+   - `FUN_8F2C10C4` **Stage::parse** (attr read @ `0x8F2C1280`, stored via
+     `FUN_8F2F32DC`) — stage-side reader.
+   - `FUN_8F2D8124` (Roster::parseSounds) and `FUN_8F633EA0` (global).
+   Battle object type from `FUN_8F2F38D0` (battle+0x13C);
+   `BattleList::parse` = `FUN_8F2C3ABC`.
 
-3. Selection: `Battle::getMusic` `FUN_8F43BC98` — picks a **random** element
-   of battle+0x18 (count/3 via 0xAAAAAAAB mul → `FUN_8F264564` = random
-   index from 3 RNG calls, returns [0,n)). So a battle may define several
-   tracks (attr list) and the engine randomizes.
+3. Selection: `FUN_8F43BC98` — picks a **random** element of the passed
+   object's vector<string> at +0x18 (count/3 via 0xAAAAAAAB mul →
+   `FUN_8F264564` = random index, returns [0,n)). **Its only caller is the
+   play site `0x8F426524`, which passes the Location object** — so the
+   randomization applies to the location's params.xml Music ID list
+   (Location+0x18), NOT battle+0x18. A location may define several Music
+   IDs (`"6|7"`) and the engine randomizes between them.
 
-4. Play site: `ScreenFight` ctor `FUN_8F426524` (end of ctor):
+4. Play site: `ScreenFight` ctor `FUN_8F426524` (end of ctor) — passes the
+   **Location** object (built by `FUN_8F43D3D4`, parsed by `FUN_8F43C6F8`):
    ```c
    if (FUN_8F2F38D0(battle) == 0)  FUN_8F633E78(defaultTrack, 1);   // guarded play
    else { FUN_8F2F5188(battle,1);
-          FUN_8F43BC98(&name, battle);      // random music name
+          FUN_8F43BC98(&name, Location);   // random music ID (Location+0x18)
           FUN_8F282EF8(name, 1);            // PLAY, loop=1
           ... }
    ```
    `FUN_8F282EF8` = music play: resolves `assets/music/<name>`, checks the
    sound manager (singleton `FUN_8F060288`), on failure logs
    `"Music: \"%s\" doesn't exist"` @ `0x8F78C124` (ref `0x8F2835BC`).
+   The picked name is a **numeric ID from the location's params.xml Music
+   list**; it is mapped to a file name via the music registry (`FUN_8F64B174`,
+   see 6; the exact ID→file lookup split is not fully pinned — see Global
+   notes).
 
 5. Files verified on disk (APK `assets/assets/music/`): `fight1_samurai_spirit.mp3`,
    `fight5_ninja_in_the_night.mp3`, `fight10_black_warrior.mp3`, `menu.mp3`,
    `act.mp3` → the played name is the **base name; the sound system appends
    `.mp3`** (the loader appends `'.'`+3 chars, `.mp3`, in `FUN_8F64B174`).
 
-6. **Location params.xml music (numeric IDs)**: `locations/<name>/params.xml`
-   has `<Root Music="6|7" ...>` (verified in APK: bamboo_grove, moon, dojo …).
-   Parsed by `Stage::parse` `FUN_8F2C10C4` (attr `"Music"` @ `0x8F2C1280`,
-   stored via `FUN_8F2F32DC`). Battle → location path:
-   `Battle::getLocationPath` `FUN_8F43BDF8` builds
-   `locations/<loc>/params.xml` (`"locations/"` @ `0x8F79724C`,
-   `"params.xml"` @ `0x8F797258`).
+6. **Location params.xml music (numeric IDs) — IS the battle track**
+   (corrected per VERIFY_W11): `locations/<name>/params.xml` has
+   `<Root Music="6|7" ...>` (verified in APK: bamboo_grove, moon, dojo …) and
+   the fight-screen play site (4) random-picks from it. Attr readers:
+   `FUN_8F2C10C4` **Stage::parse** (@ `0x8F2C1280`, stored via
+   `FUN_8F2F32DC`) and `FUN_8F43C6F8` **Location::parse** (music list
+   @ `0x8F43CB54`); the params.xml path is built by
+   `Battle::getLocationPath` `FUN_8F43BDF8`
+   (`"locations/"` @ `0x8F79724C`, `"params.xml"` @ `0x8F797258`).
    The numeric IDs index a **music registry** loaded at boot:
    `FUN_8F64B174` (boot state machine `FUN_8F619944`, case 5) parses
    ID+filename entries, builds `assets/music/<name>.mp3`, logs
@@ -156,10 +181,12 @@ the ARM `add rN,pc,rN` pattern and were resolved from the disassembly).
    `FUN_8F2D6950` reads `Sounds`→`Music`(volume double)+`Mute`(bool).
 
 ### Rule to reproduce
-`battle_music = random(battle.MusicList from stages.xml Battle@Music)`,
-played as `assets/music/<name>.mp3`, looped, through the fader; missing file
-→ error string, silent. Location `params.xml Music="id|id"` is a separate
-ID registry (used for location/story scenes), **not** the battle track.
+`battle_music = random(Location.MusicList from params.xml <Root Music="id|id">)`,
+numeric ID → music registry (`FUN_8F64B174`) → `assets/music/<name>.mp3`,
+looped, through the fader; missing file → error string, silent. stages.xml
+`<Battle Music>` (vector at battle+0x18) is a **separate alternate/ambient
+path with its own caller** — it is NOT the fight-screen battle track
+(corrected per VERIFY_W11).
 
 ### Key addresses
 | item | address |
@@ -171,6 +198,7 @@ ID registry (used for location/story scenes), **not** the battle track.
 | music play / error str | `FUN_8F282EF8` / `0x8F78C124` |
 | MusicFader update / typeinfo | `FUN_8F28183C` / `0x8F82DD78`; host `FUN_8F361BA0` (this+0x134) |
 | Stage::parse / Battle::getLocationPath | `FUN_8F2C10C4` / `FUN_8F43BDF8` |
+| Location::parse (params.xml Music list @ +0x18) | `FUN_8F43C6F8` (attr read @ `0x8F43CB54`) |
 | music registry load / boot | `FUN_8F64B174` / `FUN_8F619944` (case 5) |
 | map / zone tracks | `FUN_8F3A21DC` / `FUN_8F3A3B9C` |
 | APK tracks | `assets/assets/music/fight1_samurai_spirit.mp3` (+fight5, fight10, menu, act) |
@@ -307,3 +335,20 @@ arrow); after the Kenji (TutorialBoss) win the story continues with dialogs
 - quests.xml first-quest chain: the file is CDN-only (`assets/quests_cdn.xml`,
   not in this APK) — the tutorial sequence above is reconstructed from the
   in-binary state machine + keys, not from the XML itself.
+
+---
+
+## VERIFY_W11 corrections applied
+
+(Verification report `VERIFY_W11.md`, commit e8e202a — Q2 source attribution.)
+
+- The fight-screen play site (`0x8F426524`) passes the **Location** object:
+  battle track = random pick (`FUN_8F43BC98`, its only caller) of the
+  location's params.xml `<Root Music="id|id">` list (Location+0x18, parsed
+  by `FUN_8F43C6F8`) → numeric ID → music registry (`FUN_8F64B174`) →
+  `assets/music/<name>.mp3`, looped, via fader.
+- stages.xml `<Battle Music>` (battle+0x18, parsed by `Battle::parse`
+  `FUN_8F2C2E84`) is a separate alternate/ambient path with its own caller —
+  it is NOT consumed at the fight-screen play site.
+- Q2.6's "not the battle track" clause corrected: the location params.xml
+  Music registry path **is** the battle track.
