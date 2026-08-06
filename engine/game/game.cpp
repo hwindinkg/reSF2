@@ -2922,18 +2922,34 @@ void Game::host_update_gameplay(uint32_t dt) {
         current_anim_ == "back_handflip";
     const bool any_dir_input = key_left || key_right || key_up || key_down;
     if (location_ && !facing_locked) {
-        // In dojo mode: face the bag. In battle mode: face the enemy.
-        float bag_x = location_->enemy_x - 983.0f;
-        const bool should_face_right = (bag_x >= player_pos_x_);
-        const float dist_to_enemy = std::abs(bag_x - player_pos_x_);
+        // [Wave 11A M2] FACING TARGET: in dojo mode the target is the
+        // (static) bag; in battle mode it is the LIVING enemy. The old code
+        // aimed at the constant bag spawn even in battle, so after the enemy
+        // was knocked or walked away the fighter turned to face the empty
+        // spawn point instead of the enemy ("turns away from the enemy when
+        // it should not").
+        const float target_x = is_battle_mode_
+            ? enemy_pos_x_
+            : (location_->enemy_x - 983.0f);
+        const bool should_face_right = (target_x >= player_pos_x_);
+        const float dist_to_enemy = std::fabs(target_x - player_pos_x_);
         if (dist_to_enemy > 30.0f) {
             desired_facing_right_ = should_face_right;
         }
     }
-    if (!facing_locked && any_dir_input && !prev_dir_input_) {
-        facing_right_ = desired_facing_right_;
-    }
-    prev_dir_input_ = any_dir_input;
+    // [Wave 11A M2] FACING LAW (SPEC_COMBAT_CORE Q2, VERIFY_W11 Q2 GREEN):
+    // the mirror changes ONLY via SetDirection at MOVE START — the
+    // Controlled template (all 1key/2key/3key attacks, jumps, rolls, duck,
+    // magic cast) turns the fighter to face the enemy; StepForward/StepBack
+    // carry NO SetDirection (walking, forward or back, keeps facing); Hit
+    // reactions (Impulse Reverse=1) and GetUp never flip the mirror. The
+    // desired direction above is APPLIED at the controlled move starts in
+    // the selection blocks below, NEVER on direction input — the old
+    // apply-on-fresh-input turned the fighter on a back-walk press, which is
+    // exactly the reported "turns away from the enemy when it should not".
+    // [HEURISTIC-TODO] the idle-stance re-face (SetDirectionIdleStance /
+    // SetDirectionTransition templates) is not applied here — the next
+    // controlled move start re-faces; a hit reaction never does.
     // [M5] Smooth turn: ease the render mirror toward the facing sign so a
     // turn reads as a short rotation (~8 frames), not a one-frame snap.
     {
@@ -3376,6 +3392,10 @@ void Game::host_update_gameplay(uint32_t dt) {
             hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
             move_state_ = 10;
             need_switch_to_idle_ = false;
+            // [Wave 11A M2] Controlled move start = SetDirection: every
+            // attack turns the fighter to face the enemy (moves.xml
+            // Controlled template, VERIFY_W11 Q2).
+            facing_right_ = desired_facing_right_;
             // [ORIGINAL] Play attack swing sound at attack start.
             // Original SF2 plays f_pl_attack*.wav on the first attack frame;
             // [S1] the m_/f_ prefix follows <Warrior Voice=> in the saves.
@@ -3558,6 +3578,9 @@ void Game::host_update_gameplay(uint32_t dt) {
                 int fc = assets_->animations()[anim_name].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
                 move_state_ = 10;
+                // [Wave 11A M2] Movement specials (jump/roll family) are
+                // Controlled moves: SetDirection at move start.
+                facing_right_ = desired_facing_right_;
                 goto after_combat;
             }
         }
@@ -3604,6 +3627,9 @@ void Game::host_update_gameplay(uint32_t dt) {
                 // Only switch animation if not already ducking
                 if (move_state_ != 11 || current_anim_ != duck_anim_name) {
                     std::printf("[DUCK] found: %s (anim '%s')\n", duck_move->name.c_str(), duck_anim_name.c_str());
+                    // [Wave 11A M2] Duck is a 1key Controlled move:
+                    // SetDirection at move start (face the enemy).
+                    facing_right_ = desired_facing_right_;
                     play_animation(duck_anim_name, true, 1);  // priority 1: defensive
                     current_move_ = duck_move->name;
                     move_state_ = 11;
@@ -3671,6 +3697,9 @@ void Game::host_update_gameplay(uint32_t dt) {
         if (key_down && key_forward && !key_back) {
             if (assets_->animations().count("forward_roll") && current_anim_ != "forward_roll") {
                 std::printf("[MOVE] ForwardRoll (S+forward)\n");
+                // [Wave 11A M2] Movement specials (jump/roll family) are
+                // Controlled moves: SetDirection at move start.
+                facing_right_ = desired_facing_right_;
                 play_animation("forward_roll", false, 1);  // priority 1: defensive
                 current_move_ = "ForwardRoll";
                 int fc = assets_->animations()["forward_roll"].frame_count;
@@ -3683,6 +3712,9 @@ void Game::host_update_gameplay(uint32_t dt) {
         else if (key_down && key_back && !key_forward) {
             if (assets_->animations().count("back_roll") && current_anim_ != "back_roll") {
                 std::printf("[MOVE] BackRoll (S+back)\n");
+                // [Wave 11A M2] Movement specials (jump/roll family) are
+                // Controlled moves: SetDirection at move start.
+                facing_right_ = desired_facing_right_;
                 play_animation("back_roll", false, 1);  // priority 1: defensive
                 current_move_ = "BackRoll";
                 int fc = assets_->animations()["back_roll"].frame_count;
@@ -3736,6 +3768,9 @@ void Game::host_update_gameplay(uint32_t dt) {
                 int fc = assets_->animations()[cast_anim].frame_count;
                 hit_anim_ = (uint32_t)(fc * 1000.0f / anim_fps_);
                 move_state_ = 10;
+                // [Wave 11A M2] Movement specials (jump/roll family) are
+                // Controlled moves: SetDirection at move start.
+                facing_right_ = desired_facing_right_;
                 player_fighter_.magic_count = 0;   // the cast consumes
                 // [ORIGINAL] The cast fires the equipped magic: the
                 // missile is spawned at the caster's hand travelling in
@@ -5144,14 +5179,16 @@ if (show_enemy_ && enemy_fighter_.invuln_time <= 0 &&
         std::printf("[STATE] f=%llu ms=%d ha=%u anim='%s' move='%s' px=%.1f py=%.1f "
                     "ex=%.1f ey=%.1f "
                     "af=%.2f fps=%.2f bag_hit=%d bag_move=%.2f nv=%zu "
-                    "al=%d anchor_x=%.2f fx=%.2f cam=%.1f zoom=%.4f\n",
+                    "al=%d anchor_x=%.2f fx=%.2f cam=%.1f zoom=%.4f "
+                    "fr=%d ef=%d\n",
                     (unsigned long long)total_frame_count_, move_state_, hit_anim_,
                     current_anim_.c_str(), current_move_.c_str(),
                     player_pos_x_, player_pos_y_,
                     enemy_pos_x_, enemy_pos_y_,
                     anim_time_ * anim_fps_, anim_fps_,
                     (int)hit_this_interval_, bag_displacement(), bag_verlet_.size(),
-                    al, anchor_x, first_effect_alpha(), cam_x_, zoom_);
+                    al, anchor_x, first_effect_alpha(), cam_x_, zoom_,
+                    (int)facing_right_, (int)enemy_facing_right_);
     }
 }
 

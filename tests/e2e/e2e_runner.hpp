@@ -46,6 +46,8 @@ struct StateFrame {
     float ex = 0.0f;         // enemy world x
     float ey = 0.0f;         // enemy world y
     float anchor_x = 0.0f;   // <Align> anchor world x (0 if none)
+    int fr = -1;             // player facing right (1) / left (0), from [STATE] fr=
+    int ef = -1;             // enemy facing right (1) / left (0), from [STATE] ef=
     std::string raw;         // the full line, for extra fields
 };
 
