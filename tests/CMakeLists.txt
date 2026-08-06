@@ -488,6 +488,11 @@ add_e2e_test(test_e2e_dialogue_background)
 # show the coin icon, not the ruby gem.
 add_e2e_test(test_e2e_shop_scroll_currency)
 
+# Wave 10A defect 6 (MAGIC BUTTON): with a magic item equipped the fight
+# HUD must render the magic button (btn_magic_normal from the fight buttons
+# atlas). Boots a battle with --equip-magic MAGIC_FIRE_BALL.
+add_e2e_test(test_e2e_magic_button)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
