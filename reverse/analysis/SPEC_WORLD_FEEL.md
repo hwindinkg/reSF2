@@ -228,7 +228,10 @@ bool bag_hit(BagScene& bag, const AttackEdge& atk, Vec2 atk_p, float atk_radius,
 ### params.xml path & parse
 - Path builder `FUN_8f43bdf8` (game+0x3E4DF8): `"assets/" + "locations/" + <location> + "/params.xml"`
   (strings @0x8f7898e4, @0x8f79724c, @0x8f797258). Single caller `FUN_8f43c6f8`.
-- Parser `FUN_8f43c6f8` (game+0x3E56F8) — all fields are **attributes of `<Root>`**:
+- Parser `FUN_8f43c6f8` (game+0x3E56F8) — all fields are **attributes of `<Root>`**;
+  the attribute parse blocks are at `0x8F43CC1C+` (game+0x3E5C1C+) — the earlier
+  `0x3E4E80..0x3E50A0` range is the path-builder's string-append code inside
+  `FUN_8f43bdf8`, NOT the parse (VERIFY_W11):
 
 ```xml
 <Root Music=".." Color="0x281409" Wall="305" Floor="80" PositionY=".." FrictionForce=".."
@@ -242,11 +245,11 @@ bool bag_hit(BagScene& bag, const AttackEdge& atk, Vec2 atk_p, float atk_radius,
 
 | attr | Location offset | parse | notes |
 |---|---|---|---|
-| Music | — (global `FUN_8f633e64`) | float | music id string → global volume setting |
-| FrictionForce | +0x34 | float dflt 0 | world friction |
-| Wall | +0x2c | float dflt 0 | wall (height) |
-| Floor | +0x30 | float dflt 0 | floor level |
-| PositionY | +0x30 | float dflt 0 | [UNCERTAIN] exact offset vs Floor (see NOTES) |
+| Music | +0x18 | vector\<string\> | music id list (`"6|7"`) → registry (SPEC_PRESENTATION Q2) |
+| FrictionForce | — (global `FUN_8f633e64`) | float dflt 0 | world friction — NOT a struct field (VERIFY_W11) |
+| Wall | +0x34 | float dflt 0 | wall (height) |
+| Floor | +0x2c | float dflt 0 | floor level |
+| PositionY | +0x30 | float dflt 0 | world Y offset (resolved by VERIFY_W11; distinct from Floor) |
 | Color | +0x60..0x62 | hex string → 3 bytes | e.g. "0x281409" → R,G,B (`FUN_8f65aee0`) |
 | Width | +0x38 | float dflt 0 | whole world width (XML comment) |
 | Height | +0x3c | float dflt 0 | whole world height |
@@ -271,7 +274,7 @@ come from this attribute, not from a floor constant.
 
 ### 3b/3c. Bounds fields & clamp condition
 Fields read by the binary: Width/Height (+0x38/+0x3c) define the *world box* (XML comment:
-Width = whole world width), Wall (+0x2c) and Floor (+0x30) define the *fighting walls and
+Width = whole world width), Wall (+0x34) and Floor (+0x2c) define the *fighting walls and
 floor* used by the scene physics (wall repulsion: moves.xml `NoWallRepulsion`,
 `CanWallHitFall`, `<Distance>` conditions with `Object="Wall" Part="Back|Front"` /
 `Object="Floor"`). The fighters are moved by the animation/physics pipeline; bounds are
@@ -291,16 +294,18 @@ arena-width computation was not fully resolved.
 Candidate C++ (bounds, original semantics):
 
 ```cpp
-// binary refs: params.xml parser FUN_8f43c6f8 (game+0x3E56F8) — Wall +0x2c,
-//   Floor +0x30, Width +0x38, Height +0x3c, GridSize +0x28; spawns Location+0x48/+0x54
+// binary refs: params.xml parser FUN_8f43c6f8 (game+0x3E56F8) — Wall +0x34,
+//   Floor +0x2c, PositionY +0x30, Width +0x38, Height +0x3c, GridSize +0x28;
+//   friction_force → global FUN_8f633e64 (game+0x5DCE64), NOT a field;
+//   spawns Location+0x48/+0x54
 //   (ModelsViewer Player/EnemyPositionX/Y) → fighter+0xa0 via FUN_8f426524
 //   (game+0x3FF524); data: assets/locations/dojo/params.xml (Wall=305 Floor=80
 //   Width=1960 Height=560)
 struct LocationParams {                       // parse offsets from FUN_8f43c6f8
     int   grid_size;                          // +0x28
-    float wall;                               // +0x2c  (arena wall height)
-    float floor;                              // +0x30  (floor level)
-    float friction_force;                     // +0x34
+    float floor;                              // +0x2c  (floor level)
+    float position_y;                         // +0x30  (world Y offset)
+    float wall;                               // +0x34  (arena wall height)
     float width;                              // +0x38  (whole world width, not arena)
     float height;                             // +0x3c
     float min_width;                          // +0x40  (default: width)
@@ -309,6 +314,8 @@ struct LocationParams {                       // parse offsets from FUN_8f43c6f8
     Vec2  player_spawn;                       // +0x48  (PlayerPositionX/Y)
     Vec2  enemy_spawn;                        // +0x54  (EnemyPositionX/Y)
 };
+// friction_force is NOT a field — parsed into the global via FUN_8f633e64.
+// Music ID list (vector<string>) lives at +0x18 (see SPEC_PRESENTATION Q2).
 // fighters spawn at player_spawn/enemy_spawn (fighter+0xa0), then are bound by
 // wall/floor collision physics — NOT by clamp(x, ±width/2).
 ```
@@ -321,11 +328,13 @@ struct LocationParams {                       // parse offsets from FUN_8f43c6f8
    `K*(r1/r2+(r3/r4)/r5) < chance*K` with 3 PRNG draws (`FUN_8f264a34/8f264a64`); the
    effective distribution is not pinned (PRNG internals unexamined). Linear-in-attribute
    probability (attr×0.0001) is certain from `FUN_8f4a610c`.
-2. **Wall/Floor/PossitionY offset mapping** [UNCERTAIN]: decompile order says
-   FrictionForce→+0x34, Wall→+0x2c, Floor→+0x30; disassembly order of the parse blocks
-   suggests Wall/Floor may be swapped (+0x2c/+0x30). Values are floats either way; a
-   disasm-level block-to-offset re-check of game+0x3E4E80..3E50A0 is advised before
-   consuming these two offsets.
+2. **Wall/Floor/PositionY offsets — RESOLVED by VERIFY_W11**: Wall→+0x34,
+   Floor→+0x2c, PositionY→+0x30; FrictionForce is **not a struct field** — it
+   is parsed into the global via `FUN_8f633e64`. The earlier [UNCERTAIN]
+   (decompile order FrictionForce→+0x34 / Wall→+0x2c / Floor→+0x30) was wrong
+   on all three; the adjudication used the parse blocks at game+0x3E5C1C+
+   (0x8F43CC1C+) — the previously suspected game+0x3E4E80..3E50A0 range is
+   the path-builder's string-append code inside `FUN_8f43bdf8`, not the parse.
 3. **Reaction selection** (which binary function evaluates `<Hit Type="Critical"/>`
    conditions inside the moves engine) not fully resolved — hit record carries the type
    flags (crit +0x1c3, shock +0x1c4/0x1c5); moves-engine entry is the moves.xml loader
@@ -373,3 +382,18 @@ Key strings: `params.xml` 0x8f797258, `moves.xml` 0x8f7a3d54, `internalSettings.
 0x8f7a4008, `CriticalHit` 0x8f7966a8, `CriticalHitChance` 0x8f7a4e94, `PhysicalFall`
 0x8f796604, `Capsule` 0x8f799f78, `punching_bag.xml` 0x8f7a5ac4,
 `skeleton_punching_bag.xml` 0x8f7a5c0c.
+
+---
+
+## VERIFY_W11 corrections applied
+
+(Verification report `VERIFY_W11.md`, commit e8e202a — §3 offsets adjudicated.)
+
+- `Wall` → **+0x34**, `Floor` → **+0x2c**, `PositionY` → **+0x30** (spec had
+  +0x2c / +0x30 / [UNCERTAIN] — all three corrected).
+- `FrictionForce` is **not a `LocationParams` field** — parsed into the global
+  via `FUN_8f633e64` (game+0x5DCE64).
+- `Music` → vector\<string\> list at **+0x18** (was wrongly "global float").
+- Attribute parse blocks live at **0x8F43CC1C+** (game+0x3E5C1C+); the
+  game+0x3E4E80..0x3E50A0 range is the path-builder string append inside
+  `FUN_8f43bdf8`, not the parse.
