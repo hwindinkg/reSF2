@@ -518,6 +518,12 @@ add_e2e_test(test_e2e_knives_kick)
 # --equip-magic MAGIC_FIRE_BALL, walks in, spams O, then presses X.
 add_e2e_test(test_e2e_magic_charge)
 
+# Wave 11A M2 (FACING): an attack press must ALWAYS turn the fighter to
+# face the enemy (SetDirection at Controlled move start); back-walk and hit
+# reactions must NEVER change the mirror. Three battle runs (attack behind,
+# back-walk, hit reaction).
+add_e2e_test(test_e2e_facing)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================

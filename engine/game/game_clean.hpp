@@ -6293,10 +6293,9 @@ private:
     float floor_world_y_ = 0.0f;
     bool facing_right_ = true;
     // [M5] Deferred-turn state: the desired (opponent-facing) direction
-    // tracked per frame but applied only on a fresh movement input, and the
-    // previous frame's direction-input latch that detects the fresh press.
+    // tracked per frame but applied at the controlled move starts (Wave 11A
+    // M2 facing law — SetDirection at move start only, never on input).
     bool desired_facing_right_ = true;
-    bool prev_dir_input_ = false;
     // [M5] Visual turn blend for the player's render mirror: eases toward
     // the facing sign over a few frames so a turn reads as a short rotation
     // instead of a one-frame snap. ±1 = fully facing right/left.

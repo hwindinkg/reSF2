@@ -115,6 +115,12 @@ std::vector<StateFrame> parse_state_frames(const RunResult& run) {
         static const std::regex re_anchor(R"(anchor_x=([-\d.]+))");
         if (std::regex_search(line, ma, re_anchor))
             fr.anchor_x = std::stof(ma[1]);
+        std::smatch mf;
+        static const std::regex re_facing(R"(fr=(\d) ef=(\d))");
+        if (std::regex_search(line, mf, re_facing)) {
+            fr.fr = std::stoi(mf[1]);
+            fr.ef = std::stoi(mf[2]);
+        }
         fr.raw = line;
         out.push_back(fr);
     }
