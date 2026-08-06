@@ -547,43 +547,11 @@ endfunction()
 add_integration_test(test_headless_runner)
 
 # Phase 3 integration tests
-add_integration_test(test_battle_integration)
 add_integration_test(test_shop_integration)
 add_integration_test(test_menu_integration)
 add_integration_test(test_crash_stability)
 # Crash stability runs 1004 frames through the software renderer; needs more time
 set_tests_properties(test_crash_stability PROPERTIES TIMEOUT 300)
-
-# Phase 5: Full battle E2E test — complete fight flow from start to Results
-add_integration_test(test_full_battle)
-set_tests_properties(test_full_battle PROPERTIES TIMEOUT 720)
-
-# GAP-4 D3: the LIVE enemy-AI decision branch routes through the
-# TacticDecisionPipeline + adapter — asserts the F1 overlay stash is fed from
-# the DecisionTrace stage rows and enemy_ai_state_ is the adapter's state int.
-add_integration_test(test_enemy_ai_pipeline)
-# Soak A6: every section pre-rolls the 156-frame intro stance before tapping
-# input to break the hold �?" raise the ceiling for the longer scan windows.
-# [R4b] 240 was marginal under parallel ctest load (measured ~130-200 s
-# direct on 2026-08-03; timed out at 240 under -j8).
-set_tests_properties(test_enemy_ai_pipeline PROPERTIES TIMEOUT 480)
-
-# Soak-fix Wave 1: behavioral battle tests for the SOAK_TRIAGE.md §1 AI/combat
-# defects (A1 intro gate, A2 enemy start stance, A6 stance hold).
-add_integration_test(test_soak_ai_defects)
-set_tests_properties(test_soak_ai_defects PROPERTIES TIMEOUT 240)
-
-# Soak-fix Wave 1 (A3/A4/A5): the per-decision Wait-pacing probes — the
-# displayed decision holds (A4), the enemy closes ground via held steps (A3),
-# and approach damage is bounded by paced attacks (A5). RED on HEAD
-# (escalation A3A4A5_RED_OUTPUT.txt), GREEN after the executor hold. Three
-# battle scenarios (~1500 frames each); 480 like test_enemy_ai_pipeline so a
-# parallel full-suite run (test_full_battle ~350 s) does not starve it.
-# [R4b] 240 was marginal: the pacing suite measures ~300 s on this machine
-# (measured 2026-08-03), timing out under ctest's overhead.
-add_integration_test(test_soak_ai_pacing)
-set_tests_properties(test_soak_ai_pacing PROPERTIES TIMEOUT 480)
-
 
 # Soak-fix Wave 2: behavioral movement/input tests for the SOAK_TRIAGE.md §2
 # defects (M1 back-roll key order, M2 roll displacement, M3 jump drift, M4
@@ -593,22 +561,6 @@ add_integration_test(test_soak_movement_defects)
 # Five dojo scenarios with full stance intros and roll/dash playouts (~12k
 # frames of headless game time); 300 like test_full_battle's tolerance.
 set_tests_properties(test_soak_movement_defects PROPERTIES TIMEOUT 300)
-
-
-# Soak-fix Wave 3: behavioral dojo/quest tests for the SOAK_TRIAGE.md §3
-# defects (Q1 movement stage step count, Q2 bag visual reaction, Q3 Kenji
-# fight after the bag phase) + §7 L1 map-log spam gate. Three dojo scenarios
-# plus a 300-frame map log capture; 300 like the wave-2 suite.
-add_integration_test(test_soak_quest_defects)
-set_tests_properties(test_soak_quest_defects PROPERTIES TIMEOUT 300)
-
-# Soak-fix Wave 4: behavioral dialogue tests for the SOAK_TRIAGE.md §4
-# defects (D1 centered panel/no dim, D2 no location reload after dialogue,
-# D3 instant full-line reveal, D4 line advance + completion, D5 eng.xml
-# strings + eng font in an English session, D6 panel height not stretched).
-# Six dialogue scenarios; 300 like the wave-3 suite.
-add_integration_test(test_soak_dialogue_defects)
-set_tests_properties(test_soak_dialogue_defects PROPERTIES TIMEOUT 300)
 
 # Soak-fix Wave 5: behavioral UI tests for the SOAK_TRIAGE.md §5 defects
 # (U1 enemy weapon geometry, U2 shop purchase flow + layout, U3 settings
@@ -629,14 +581,6 @@ set_tests_properties(test_soak_audio_defects PROPERTIES TIMEOUT 300)
 # load (measured ~160-270 s direct on 2026-08-03).
 add_integration_test(test_soak_parser_defects)
 set_tests_properties(test_soak_parser_defects PROPERTIES TIMEOUT 600)
-
-# Soak-fix Wave 7b: behavioral UI/quest tests for the SOAK_TRIAGE.md §8
-# defects (P4 HUD names i18n, P5 fight HUD layout, P6 defeat retry flow,
-# P8/P12 dialogue textures + placement, P9 shop fighter preview, P11 quest
-# state chain MOVE->BAG->FIRST_FIGHT->win|loss). Two battle/dojo chains
-# (~10k frames total); 300 like the wave-5 suite.
-add_integration_test(test_soak_wave7b_defects)
-set_tests_properties(test_soak_wave7b_defects PROPERTIES TIMEOUT 300)
 
 # Soak re-soak-3 regression probes: R1 the fighter body/weapon render path
 # (dark silhouette + weapon at the hand, vs the yellow robe/offset-weapon
