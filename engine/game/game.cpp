@@ -3537,6 +3537,24 @@ void Game::host_update_gameplay(uint32_t dt) {
                 if (move.filename.empty() || move.template_name.empty()) continue;
                 if (move.key_count != 1) continue;
                 if (move.direction != cur_direction) continue;
+                // [Wave 11A M3] Anti-restart (Controlled template guard):
+                // NOT(CurrentAnimation == $Move AND SemiUninterrupt) — a
+                // move currently playing inside its OWN SemiUninterrupt
+                // window (Duck: <Interval Name="SemiUninterrupt" End="4"/>,
+                // frames 0..4) cannot re-select itself, so spamming S cannot
+                // restart the duck animation. A re-tap AFTER the window
+                // legitimately restarts (original behavior).
+                {
+                    std::string cand_anim = move.filename;
+                    if (cand_anim.size() > 4 &&
+                        cand_anim.substr(cand_anim.size() - 4) == ".bin")
+                        cand_anim = cand_anim.substr(0, cand_anim.size() - 4);
+                    if (cand_anim == current_anim_ &&
+                        move.semi_uninterrupt_end >= 0 &&
+                        (int)(anim_time_ * anim_fps_) <=
+                            move.semi_uninterrupt_end)
+                        continue;
+                }
                 // Skip Titan moves (player is not a Titan)
                 if (move.template_name.find("Titan") != std::string::npos &&
                     move.template_name.find("NotTitan") == std::string::npos) continue;
@@ -3573,6 +3591,15 @@ void Game::host_update_gameplay(uint32_t dt) {
                 std::printf("[MOVE] %s (anim '%s', prio=%d)\n",
                             best_move->name.c_str(), anim_name.c_str(),
                             best_move->priority);
+                // [Wave 11A M3] probe: every Duck move START emits a row —
+                // a re-tap that restarts the animation is a second row (the
+                // spam-S defect is restarts, and this is the counter).
+                if (anim_name == "duck") {
+                    std::printf("[DUCK-PLAY] f=%llu anim='%s' move='%s' frame=%.1f\n",
+                                (unsigned long long)total_frame_count_,
+                                anim_name.c_str(), best_move->name.c_str(),
+                                anim_time_ * anim_fps_);
+                }
                 play_animation(anim_name, false, best_move->priority);
                 current_move_ = best_move->name;
                 int fc = assets_->animations()[anim_name].frame_count;
@@ -3586,10 +3613,25 @@ void Game::host_update_gameplay(uint32_t dt) {
         }
         }  // any_dir_just_pressed [P7]
 
-        // Duck: S held (or just pressed) with no direction
-        // Original game: holding S keeps you ducking. If you were attacking
-        // and the attack ends while S is held, you immediately duck again.
-        bool duck_input = key_down && !key_forward && !key_back;
+        // Duck: S just pressed (fresh edge) with no direction.
+        // [Wave 11A M3] Duck requires Key Type="Down" PressType="Tap" —
+        // a FRESH EDGE only (moves.xml Duck <Key Type="Down"
+        // PressType="Tap"/>). The old held-key entry re-triggered the
+        // duck every frame the key was down ("при спаме s анимация
+        // приседания начинается сначала").
+        // [P7] Held-key continuation (the soak's P7 pin): when the one-shot
+        // duck special ends while S is STILL held, re-enter the duck so the
+        // crouch holds while the key is down — this is a state-0 transition
+        // (the fighter is NOT currently ducking), never an auto-repeat of a
+        // playing duck.
+        const bool duck_edge =
+            (input.keys_just_pressed[(size_t)plat::Key::S] ||
+             input.keys_just_pressed[(size_t)plat::Key::ArrowDown]) &&
+            !key_forward && !key_back;
+        const bool duck_held_reenter =
+            key_down && !key_forward && !key_back &&
+            move_state_ == 0 && current_anim_ != "duck";
+        const bool duck_input = duck_edge || duck_held_reenter;
         if (duck_input && (move_state_ == 0 || move_state_ == 11)) {
             // Debug: log duck attempt
             static int duck_log_count = 0;
@@ -3624,9 +3666,31 @@ void Game::host_update_gameplay(uint32_t dt) {
                 std::string duck_anim_name = duck_move->filename;
                 if (duck_anim_name.size() > 4 && duck_anim_name.substr(duck_anim_name.size()-4) == ".bin")
                     duck_anim_name = duck_anim_name.substr(0, duck_anim_name.size()-4);
+                // [Wave 11A M3] Anti-restart: while the Duck move is inside
+                // its SemiUninterrupt window (frames 0..semi_uninterrupt_end,
+                // moves.xml Duck End=4), a re-selection is REJECTED
+                // (Controlled guard: NOT(CurrentAnimation == $Move AND
+                // SemiUninterrupt)). The selection engine defers the move
+                // switch to the next frame (Fighter+0x218), so same-frame
+                // re-selections collapse into one switch anyway.
+                // [HEURISTIC-TODO] the deferred switch (0x8F4AC4B4) is not
+                // ported; the immediate switch + this guard give the same
+                // user-visible result.
+                const bool in_duck_semi =
+                    duck_move->semi_uninterrupt_end >= 0 &&
+                    current_anim_ == duck_anim_name &&
+                    (int)(anim_time_ * anim_fps_) <= duck_move->semi_uninterrupt_end;
                 // Only switch animation if not already ducking
-                if (move_state_ != 11 || current_anim_ != duck_anim_name) {
+                if (!in_duck_semi &&
+                    (move_state_ != 11 || current_anim_ != duck_anim_name)) {
                     std::printf("[DUCK] found: %s (anim '%s')\n", duck_move->name.c_str(), duck_anim_name.c_str());
+                    // [Wave 11A M3] probe: every Duck move START (a re-tap
+                    // that restarts the animation emits another row; the
+                    // spam-S defect is restarts, and this is the counter).
+                    std::printf("[DUCK-PLAY] f=%llu anim='%s' move='%s' frame=%.1f\n",
+                                (unsigned long long)total_frame_count_,
+                                duck_anim_name.c_str(), duck_move->name.c_str(),
+                                anim_time_ * anim_fps_);
                     // [Wave 11A M2] Duck is a 1key Controlled move:
                     // SetDirection at move start (face the enemy).
                     facing_right_ = desired_facing_right_;
