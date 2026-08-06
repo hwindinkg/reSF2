@@ -2,17 +2,20 @@
 //
 // Wave 10A defect 2 — LOCATION BOUNDS: fighters walk out of the arena. The
 // player's world x is driven by root motion (step_forward NPivot deltas)
-// and the step/align paths with NO clamp against the location's world box
-// (params.xml Width -> world x in [-width/2, +width/2]; the dojo Width is
-// 1960, so the box is +-980). The enemy side was clamped in defect 1; the
-// player still walks past +-980 forever.
+// and the step/align paths with NO clamp against the arena walls. The
+// original bounds are the WALL OBJECTS — the <Image ClassName="left|right">
+// anchors of the location's params.xml (dojo X=+-680); the old
+// width/2 clamp (+-980, from params.xml Width=1960) is an engine invention
+// replaced by the wall semantics in Wave 11B W2 (VERIFY_W11 3,
+// SPEC_WORLD_FEEL 3b).
 //
 // E2E on the REAL binary: hold D (forward) from f=200 to f=2600 — a 2400
 // frame walk at ~2.7 u/frame would carry the player ~+6200 without a wall —
 // then hold A (back) to f=4000 so the left wall is also exercised. Assert:
-// player world x stays inside +-981 at every frame, AND the walk was long
-// enough that both walls were actually reached (px_max >= +900, px_min
-// <= -900) — a test that never reaches the wall proves nothing.
+// player world x stays inside the walls (+-680) at every frame, AND the
+// walk was long enough that both walls were actually reached (px_max >=
+// +670, px_min <= -670) — a test that never reaches the wall proves
+// nothing.
 
 #include <cmath>
 #include <cstdio>
@@ -28,9 +31,11 @@ using resf2::test::check_ge;
 
 namespace {
 
-// dojo params.xml: <Root Width="1960">; world x = params x - width/2.
-constexpr float kHalfWorldW = 980.0f;
-constexpr float kBoundSlack = 1.0f;   // float noise allowance
+// dojo params.xml: <Root Width="1960" Wall="305">; the wall sprites
+// <Image ClassName="left|right"> stand at X=+-680 (world coords) — the
+// wall boundary the fighters must stop at (Wave 11B W2).
+constexpr float kWallX = 680.0f;
+constexpr float kBoundSlack = 10.0f;  // float/walk noise allowance
 
 }  // namespace
 
@@ -84,18 +89,19 @@ int main(int argc, char** argv) {
         if (fr.px > px_max) { px_max = fr.px; f_max = fr.frame; }
     }
     std::printf("bounds: %zu frames, player x range [%.1f @ f%lld .. "
-                "%.1f @ f%lld] (bounds +-%.0f)\n",
-                frames.size(), px_min, f_min, px_max, f_max, kHalfWorldW);
+                "%.1f @ f%lld] (walls +-%.0f)\n",
+                frames.size(), px_min, f_min, px_max, f_max, kWallX);
 
     // The walk must have been long enough to actually meet both walls — a
     // player that never reached the boundary cannot prove a clamp.
-    check_ge(static_cast<double>(px_max), 900.0,
-             "the forward walk reached the right wall (px >= +900)");
-    check(px_min <= -900.0,
-          "the back walk reached the left wall (px <= -900)");
-    check(px_min >= -(kHalfWorldW + kBoundSlack) &&
-              px_max <= (kHalfWorldW + kBoundSlack),
-          "the player never leaves the location world box (walk clamped)");
+    check_ge(static_cast<double>(px_max), kWallX - kBoundSlack,
+             "the forward walk reached the right wall (px >= +670)");
+    check(px_min <= -(kWallX - kBoundSlack),
+          "the back walk reached the left wall (px <= -670)");
+    check(px_min >= -(kWallX + kBoundSlack) &&
+              px_max <= (kWallX + kBoundSlack),
+          "the player stops AT the walls (+-680), never past them "
+          "(the width/2 clamp +-980 is an invention, Wave 11B W2)");
 
     return resf2::test::summary();
 }

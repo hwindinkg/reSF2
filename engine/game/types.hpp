@@ -65,6 +65,14 @@ struct GameLocation {
     float floor = 0;
     float player_x = 0, player_y = 0;
     float enemy_x = 0, enemy_y = 0;
+    // [Wave 11B W2] The arena wall boundaries: the WORLD X of the
+    // <Image ClassName="left"> / <Image ClassName="right"> wall sprites
+    // in the location's params.xml (the original's wall objects; the
+    // fighters stop AT these walls - SPEC_WORLD_FEEL 3b: "wall geometry
+    // from <Image ClassName="left/right"> anchors + Wall attribute").
+    // 0.0 = not authored; the caller falls back to +-width/2 then.
+    float wall_left_x = 0;
+    float wall_right_x = 0;
     std::vector<LocationLayer> layers;
 };
 

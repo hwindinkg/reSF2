@@ -7,12 +7,14 @@
 // Battle, walk after the disciple and punch — every unblocked hit knocks
 // him away by the authored <Impulse X> (moves.xml), and a chasing player
 // ratchets the hit positions toward the wall. The enemy's world x must
-// stay inside the location's world box (params.xml Width -> world x in
-// [-width/2, +width/2]) at EVERY frame.
+// stop at the location's WALL OBJECTS — the <Image ClassName="left|right">
+// anchors of params.xml (dojo X=+-680), not at +-width/2 (+-980, an engine
+// invention replaced by the wall semantics in Wave 11B W2, VERIFY_W11 3) —
+// at EVERY frame.
 //
 // Assert: >= 4 unblocked hits landed (the enemy was actually driven), the
-// herd carried him INTO the right wall (ex_max >= +900 — a test that never
-// reaches the wall proves nothing), and the enemy never leaves the box.
+// herd carried him INTO the right wall (ex_max >= +660 — a test that never
+// reaches the wall proves nothing), and the enemy never leaves the walls.
 
 #include <cstdio>
 #include <cstdlib>
@@ -27,9 +29,11 @@ using resf2::test::check_ge;
 
 namespace {
 
-// dojo params.xml: <Root Width="1960">; world x = params x - width/2.
-constexpr float kHalfWorldW = 980.0f;
-constexpr float kBoundSlack = 1.0f;   // float noise allowance
+// dojo params.xml: the wall sprites <Image ClassName="left|right">
+// stand at X=+-680 (world coords) — the wall boundary the fighters must
+// stop at (Wave 11B W2).
+constexpr float kWallX = 680.0f;
+constexpr float kBoundSlack = 10.0f;  // float/walk noise allowance
 
 }  // namespace
 
@@ -104,20 +108,20 @@ int main(int argc, char** argv) {
         if (fr.ex > ex_max) { ex_max = fr.ex; f_max = fr.frame; }
     }
     std::printf("battle-knockback: enemy x range [%.1f @ f%lld .. %.1f @ "
-                "f%lld] (bounds +-%.0f)\n",
-                ex_min, f_min, ex_max, f_max, kHalfWorldW);
+                "f%lld] (walls +-%.0f)\n",
+                ex_min, f_min, ex_max, f_max, kWallX);
 
     // The script must actually have driven the enemy in the BATTLE — a test
     // that lands no hits proves nothing. A chase ratchet needs several hits.
     check_ge(static_cast<double>(unblocked), 4.0,
              "at least 4 unblocked hits landed in the battle (the enemy was "
              "driven)");
-    check(ex_max >= 900.0f,
-          "the herd carried the enemy INTO the right wall (ex >= +900)");
-    check(ex_min >= -(kHalfWorldW + kBoundSlack) &&
-              ex_max <= (kHalfWorldW + kBoundSlack),
-          "the enemy never leaves the location world box (knockback "
-          "clamped by the arena bounds)");
+    check(ex_max >= (kWallX - 2.0f * kBoundSlack),
+          "the herd carried the enemy INTO the right wall (ex >= +660)");
+    check(ex_min >= -(kWallX + kBoundSlack) &&
+              ex_max <= (kWallX + kBoundSlack),
+          "the enemy stops AT the walls (+-680), never past them "
+          "(the width/2 clamp +-980 is an invention, Wave 11B W2)");
 
     return resf2::test::summary();
 }
