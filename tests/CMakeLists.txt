@@ -472,6 +472,13 @@ add_e2e_test(test_e2e_knockback_bounds)
 # the back walk must clamp the PLAYER at the location world box, both walls.
 add_e2e_test(test_e2e_location_bounds)
 
+# Wave 10B soak D1 (KNOCKBACK OVERFLOW IN BATTLE): the SAME herd recipe as
+# test_e2e_knockback_bounds, but booted straight into Battle — the enemy's
+# world x must stay inside the location world box at every frame of a real
+# fight (the soak reported "враг отбрасывается очень далеко, может и
+# улететь за локацию").
+add_e2e_test(test_e2e_battle_knockback_bounds)
+
 # Wave 10A defect 3 (FIGHT TIMER): the round countdown renders in the fight
 # HUD and a timeout win continues the story (tutorial COMPLETE + follow-up
 # dialogue). Boots the real binary into the Sensei tutorial flow with a

@@ -4993,6 +4993,29 @@ void Game::apply_player_hit_feedback(float hit_x, float hit_y, int hit_frame,
     const float away_dir = (player_pos_x_ < enemy_pos_x_) ? 1.0f : -1.0f;
     enemy_knockback_vx_ =
         (stun_sec > 0.0f) ? (away_dir * imp_x / stun_sec) : 0.0f;
+    // [Wave 10B D1] KNOCKBACK BOUNDED BY THE ARENA BOUNDS: the wall is a
+    // hard boundary - the shove may carry the enemy TO it but never past
+    // it. Without this bound the whole authored <Impulse X> integrates
+    // over the reaction duration even when the wall is in the way, so an
+    // enemy standing near the wall is pushed INTO the clamp every frame
+    // for the whole stun ("the enemy is knocked back very far and can fly
+    // out of the location"). Same bounds source as the fighter clamps
+    // (params.xml Width -> world x in [-width/2, +width/2]): the total
+    // slide is clamped so the enemy's post-hit x stays inside the box.
+    if (location_ && stun_sec > 0.0f) {
+        const float half_w = location_->width * 0.5f;
+        const float slide = away_dir * imp_x;             // signed total slide
+        const float lo = -half_w - enemy_pos_x_;          // max leftward slide
+        const float hi = half_w - enemy_pos_x_;           // max rightward slide
+        const float bounded = std::clamp(slide, lo, hi);
+        if (std::fabs(bounded - slide) > 1e-3f) {
+            std::printf("[HIT-FEEDBACK] knockback bounded by arena: "
+                        "slide=%.1f lo=%.1f hi=%.1f vx=%.1f -> %.1f\n",
+                        slide, lo, hi, enemy_knockback_vx_,
+                        bounded / stun_sec);
+            enemy_knockback_vx_ = bounded / stun_sec;
+        }
+    }
     std::printf("[HIT-FEEDBACK] f=%llu move='%s' zone='%s' reaction='%s' "
                 "stun=%.2fs imp=%.1f knockback_vx=%.1f dmg=%.3f blocked=%d\n",
                 (unsigned long long)total_frame_count_, move_name.c_str(),
