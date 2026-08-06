@@ -893,6 +893,39 @@ void AssetManager::parse_moves_xml(const std::string& xml) {
         return;
     }
 
+    // [ORIGINAL] <Template Name=".." NoMagicRecharge="1"/> definitions —
+    // the MoveDef+0x148 flag is authored on TEMPLATES (moves.xml:
+    // RangedMissile/MagicMissile/RaidMissile line 703/742/756 and their
+    // derived families) and inherited through the Template="A|B" chain
+    // (MagicMissileFly -> MagicMissile). First pass: collect the flag.
+    std::unordered_map<std::string, bool> tmpl_no_magic_recharge;
+    for (const auto& child : moves_node->children) {
+        if (child.name != "Template") continue;
+        const std::string name = child.attr("Name");
+        bool nmr = (child.attr("NoMagicRecharge") == "1");
+        if (!nmr) {
+            // Inherit from the Template="A|B" parts (recursive depth is
+            // small; a two-pass fixpoint would be exact, one level covers
+            // every real case: MagicMissileFly -> MagicMissile).
+            const std::string parent = child.attr("Template");
+            size_t start = 0;
+            while (start < parent.size()) {
+                auto sep = parent.find('|', start);
+                const std::string part =
+                    (sep == std::string::npos) ? parent.substr(start)
+                                               : parent.substr(start, sep - start);
+                auto it = tmpl_no_magic_recharge.find(part);
+                if (it != tmpl_no_magic_recharge.end() && it->second) {
+                    nmr = true;
+                    break;
+                }
+                if (sep == std::string::npos) break;
+                start = sep + 1;
+            }
+        }
+        tmpl_no_magic_recharge[name] = nmr;
+    }
+
     for (const auto& child : moves_node->children) {
         if (child.name != "Move") continue;
 
@@ -900,6 +933,7 @@ void AssetManager::parse_moves_xml(const std::string& xml) {
         move.name = child.attr("Name");
         move.filename = child.attr("FileName");
         move.template_name = child.attr("Template");
+        move.no_magic_recharge = (child.attr("NoMagicRecharge") == "1");
         move.first_frame = (int)tof(child.attr("FirstFrame", "-1"));
         move.end_frame = (int)tof(child.attr("EndFrame"));
         move.priority = (int)tof(child.attr("Priority"));
@@ -934,6 +968,19 @@ void AssetManager::parse_moves_xml(const std::string& xml) {
             move.is_stance = (move.template_name.find("Stance") != std::string::npos);
             move.is_idle = (move.template_name.find("Idle") != std::string::npos);
             move.is_not_titan = (move.template_name.find("NotTitan") != std::string::npos);
+            // [ORIGINAL] The NoMagicRecharge flag inherits from the move's
+            // Template parts (Template="1key|MagicPlayer" or
+            // "SoundStrike|RangedMissile" — the missile families suppress
+            // magic charging; the CAST moves like MagicBombPlayer do not).
+            if (!move.no_magic_recharge) {
+                for (const auto& part : parts) {
+                    auto it = tmpl_no_magic_recharge.find(part);
+                    if (it != tmpl_no_magic_recharge.end() && it->second) {
+                        move.no_magic_recharge = true;
+                        break;
+                    }
+                }
+            }
         }
 
         // Parse sub-elements

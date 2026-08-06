@@ -512,6 +512,12 @@ add_e2e_test(test_e2e_magic_button)
 # Boots a battle with --equip-weapon WEAPON_KNIVES and a single P tap.
 add_e2e_test(test_e2e_knives_kick)
 
+# Wave 11A M1 (MAGIC CHARGE): landed punches must fill the magic bar; at
+# full the magic button (X) must select the equipped magic's player move
+# (FireballPlayer) and cast it, consuming the charge. Boots a battle with
+# --equip-magic MAGIC_FIRE_BALL, walks in, spams O, then presses X.
+add_e2e_test(test_e2e_magic_charge)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================
