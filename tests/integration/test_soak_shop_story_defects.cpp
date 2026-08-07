@@ -23,13 +23,18 @@
 //       WEAPON with the skeleton rest pose (use_anim=false) — mixed pose
 //       sources. The probe below measures the hand-anchor gap under the
 //       preview's own resolve law.
-//   S5: the story continues after the first win: FIRST_FIGHT -> COMPLETE
-//       queues the Sensei tutorial_shop dialogue (shown on the Map, returns
-//       to the Map); buying WEAPON_KNIVES queues tutorial_buy_knives +
-//       tutorial_map; winning ZONE_1|BOSS_LYNX|1 fires the quests.xml
-//       "FirstGuardBeaten" set (Lynx taunt + May intro + ShowBattle
-//       ZONE_1|Tournament). "после битвы ничего не произошло, меня просто
-//       кинуло на карту" — host_trigger_quest_event was a logging stub.
+//   S5: the story continues after the first win: FIRST_FIGHT -> SHOP_TRIP
+//       (Wave 11C P3, SPEC_PRESENTATION Q3.6: the Kenji win sends the
+//       player to the shop — "после победы над кенжи сенсей должен был
+//       отправить меня в магазин") queues the Sensei tutorial_shop
+//       dialogue (shown over the Shop, returns into the Shop); buying
+//       WEAPON_KNIVES during the trip advances SHOP_TRIP -> RETURN_MAP and
+//       queues tutorial_return_map; after the tutorial is COMPLETE the same
+//       purchase queues tutorial_buy_knives + tutorial_map; winning
+//       ZONE_1|BOSS_LYNX|1 fires the quests.xml "FirstGuardBeaten" set
+//       (Lynx taunt + May intro + ShowBattle ZONE_1|Tournament). "после
+//       битвы ничего не произошло, меня просто кинуло на карту" —
+//       host_trigger_quest_event was a logging stub.
 //
 // RED on HEAD (2026-08-04): S1 (no weapon_knives texture), S2 (rows are
 // slot labels, not catalog items), S3-fail (no cannot-buy diagnostic), S4
@@ -348,29 +353,45 @@ static void test_s5_story_continuation() {
     if (!run_until_scene(runner, scn::SceneId::Results)) {
         std::fprintf(stderr, "FAIL: S5 never reached the Results scene\n"); ++tests_failed; return;
     }
-    CHECK(runner.game().host_get_tutorial_state() == "COMPLETE",
-          "S5: FIRST_FIGHT victory advances the tutorial to COMPLETE");
+    // [Wave 11C P3] The Kenji win advances the tutorial to the SHOP TRIP
+    // (state 0xB, SPEC_PRESENTATION Q3.6) - the player is sent to the shop
+    // to buy the knives, not straight to COMPLETE.
+    CHECK(runner.game().host_get_tutorial_state() == "SHOP_TRIP",
+          "S5: FIRST_FIGHT victory advances the tutorial to the SHOP TRIP");
     CHECK(!runner.game().host_get_dialogue().empty(),
           "S5: a follow-up dialogue is queued after the Kenji win");
     CHECK(runner.game().host_has_pending_story_dialogue(),
           "S5: the queued story dialogue is pending");
 
-    // --- (b) the queued dialogue plays over the Map and returns to it ---
-    runner.game().request_scene_transition(scn::SceneId::Map);
-    if (!run_until_scene(runner, scn::SceneId::Map)) {
-        std::fprintf(stderr, "FAIL: S5 never reached the Map\n"); ++tests_failed; return;
+    // --- (b) the queued dialogue plays over the SHOP and returns to it ---
+    // (P3: the trip's destination is the Shop - the Results victory hands
+    // the player there and the tutorial_shop dialogue returns INTO it.)
+    runner.game().request_scene_transition(scn::SceneId::Shop);
+    if (!run_until_scene(runner, scn::SceneId::Shop)) {
+        std::fprintf(stderr, "FAIL: S5 never reached the Shop\n"); ++tests_failed; return;
     }
     CHECK(run_until_scene(runner, scn::SceneId::Dialogue, 60),
-          "S5: the pending story dialogue opens over the Map");
+          "S5: the pending story dialogue opens over the Shop");
     runner.tap_key(plat::Key::Space);  // advance through the (single) line
     runner.run_frames(3);
-    CHECK(run_until_scene(runner, scn::SceneId::Map, 60),
-          "S5: the story dialogue returns to the Map when finished");
+    CHECK(run_until_scene(runner, scn::SceneId::Shop, 60),
+          "S5: the story dialogue returns into the Shop when finished");
 
     // --- (c) buying the knives advances the tutorial chain ---
+    // [Wave 11C P3] During the SHOP TRIP buying the knives finishes the
+    // trip: state SHOP_TRIP -> RETURN_MAP, tutorial_return_map queued.
+    runner.game().host_set_tutorial_state("SHOP_TRIP");
+    CHECK(runner.game().host_buy_item("WEAPON_KNIVES"),
+          "S5: the knives are buyable during the shop trip");
+    CHECK(runner.game().host_get_tutorial_state() == "RETURN_MAP",
+          "S5: buying the knives during the SHOP TRIP advances to RETURN_MAP");
+    CHECK(runner.game().host_has_pending_story_dialogue(),
+          "S5: buying the knives queues the tutorial_return_map dialogue");
+    // After the tutorial is COMPLETE the same purchase queues the
+    // Lynx-challenge dialogue (the pre-P3 beat stays).
     runner.game().host_set_tutorial_state("COMPLETE");
     CHECK(runner.game().host_buy_item("WEAPON_KNIVES"),
-          "S5: the knives are buyable");
+          "S5: the knives are buyable after the tutorial");
     CHECK(runner.game().host_has_pending_story_dialogue(),
           "S5: buying the knives queues the Lynx-challenge dialogue");
 

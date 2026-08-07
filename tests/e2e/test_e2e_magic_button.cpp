@@ -10,8 +10,10 @@
 // E2E on the REAL binary: boot --scene battle with --equip-magic
 // MAGIC_FIRE_BALL (forces the item into the hermetic inventory), let the
 // fight HUD render, and assert the [MAGIC-BTN] probe fires with the
-// equipped item and the magic button frame. RED on HEAD: no [MAGIC-BTN]
-// rows at all (equipped_magic_ never populated).
+// equipped item and the magic button frame. [Wave 11C P1] The PreFight
+// (VS) screen opens the battle - the HUD (and the probe) renders once the
+// ~96-frame VS phase ends, so the run needs ~140 frames, not 60.
+// RED on HEAD: no [MAGIC-BTN] rows at all (equipped_magic_ never populated).
 
 #include <cstdio>
 #include <cstdlib>
@@ -32,7 +34,8 @@ int main(int argc, char** argv) {
     const std::string app = argv[1];
     const std::string root = argv[2];
 
-    // No input needed — the battle HUD renders from frame 1.
+    // No input needed — the fight HUD renders once the PreFight (VS) phase
+    // (~96 frames) ends.
     std::vector<e2e::InputEvent> events;
 
     e2e::RunSpec spec;
@@ -40,7 +43,7 @@ int main(int argc, char** argv) {
     spec.root = root;
     spec.script = root + "/build/e2e_magic_input.txt";
     spec.out_name = "e2e_magic";
-    spec.max_frames = 60;
+    spec.max_frames = 140;
     spec.extra_args = {"--scene", "battle", "--equip-magic",
                        "MAGIC_FIRE_BALL"};
     spec.no_log = true;       // stdout [MAGIC-BTN] is the probe
