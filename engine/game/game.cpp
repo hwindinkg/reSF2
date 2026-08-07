@@ -1612,24 +1612,72 @@ void Game::host_start_menu_music() {
 
 void Game::host_start_battle_music() {
     auto& audio = aud::AudioEngine::instance();
-            // Load a generic battle track — we use the first fight track
-            static bool battle_music_loaded = false;
-            if (!battle_music_loaded) {
-                auto root = std::filesystem::path(asset_root_);
-                for (const auto& base : {root/"assets"/"assets"/"music",
-                                          root/"assets"/"music",
-                                          root/"music"}) {
-                    auto p = base / "fight1_samurai_spirit.mp3";
-                    if (std::filesystem::exists(p)) {
-                        audio.load_music_file("battle_music", p.string());
-                        battle_music_loaded = true;
-                        break;
-                    }
+    auto root = std::filesystem::path(asset_root_);
+    // [Wave 11C P2] The battle track is data-driven from the LOCATION's
+    // params.xml <Root Music="id|id"> list - NOT a hardcoded track and NOT
+    // stages.xml <Battle Music> (that is a separate alternate path with its
+    // own caller). The original: ScreenFight ctor 0x8F426524 random-picks
+    // one numeric ID from Location+0x18 (FUN_8F43BC98, its only caller) and
+    // plays assets/music/<name>.mp3 via the music registry (FUN_8F64B174;
+    // the registry files ARE the on-disk assets/music/fight<ID>_*.mp3)
+    // - SPEC_PRESENTATION Q2, corrected per VERIFY_W11 (Q2 source
+    // attribution: play site passes the Location object).
+    const std::string loc = host_get_battle_location().empty()
+                                ? current_location_name_
+                                : host_get_battle_location();
+    const auto ids = locations_.music_list_for(loc, asset_root_);
+    std::string track_file;
+    std::string picked_id;
+    if (ids.empty()) {
+        std::printf("[MUSIC] location='%s' has no <Root Music> list - "
+                    "no battle track\n", loc.c_str());
+    } else {
+        // Random pick, like FUN_8F43BC98 (random index into the list).
+        picked_id = ids[std::rand() % ids.size()];
+        // Numeric ID -> registry: assets/music/fight<ID>_*.mp3.
+        for (const auto& base : {root/"assets"/"music",
+                                 root/"assets"/"assets"/"music",
+                                 root/"music"}) {
+            if (!std::filesystem::exists(base)) continue;
+            for (auto& entry : std::filesystem::directory_iterator(base)) {
+                const std::string fn = entry.path().filename().string();
+                if (fn.rfind("fight" + picked_id + "_", 0) == 0 &&
+                    fn.ends_with(".mp3")) {
+                    track_file = entry.path().string();
+                    break;
                 }
             }
-            if (audio.get_sound("battle_music")) {
-                audio.play_music("battle_music", 0.5f, true);
-            }
+            if (!track_file.empty()) break;
+        }
+        if (track_file.empty()) {
+            std::printf("[MUSIC] location='%s' music id '%s' has no "
+                        "assets/music/fight%s_*.mp3 - no battle track "
+                        "(graceful fallback)\n",
+                        loc.c_str(), picked_id.c_str(), picked_id.c_str());
+        } else {
+            // path::c_str() is wchar_t* on Windows - copy to std::string
+            // before printf("%s") or the track name truncates at the first
+            // wide-character NUL byte.
+            const std::string track_name =
+                std::filesystem::path(track_file).filename().string();
+            std::printf("[MUSIC] location='%s' music ids=%zu picked id='%s' "
+                        "track='%s'\n",
+                        loc.c_str(), ids.size(), picked_id.c_str(),
+                        track_name.c_str());
+        }
+    }
+    if (track_file.empty()) {
+        // Graceful fallback: no track, no crash (the original logs
+        // "Music: ... doesn't exist" and stays silent).
+        audio.stop_music();
+        return;
+    }
+    // Load under the fixed "battle_music" name each battle entry: a different
+    // location's track replaces the previous one (load_music_file overwrites
+    // the named slot).
+    if (audio.load_music_file("battle_music", track_file)) {
+        audio.play_music("battle_music", 0.5f, true);
+    }
 }
 
 void Game::host_stop_music() {

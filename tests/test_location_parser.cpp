@@ -54,6 +54,12 @@ static void test_all_locations_parse() {
     int with_floor = 0;
     int with_wall = 0;
     int parse_failed = 0;
+    // [Wave 11C P2] Battle-music data invariants: every location carries a
+    // <Root Music> ID list and every ID resolves to a real
+    // assets/music/fight<ID>_*.mp3 (the music registry, FUN_8F64B174).
+    int with_music = 0;
+    int unresolved_music_ids = 0;
+    std::string unresolved_sample;
 
     for (auto& entry : fs::directory_iterator(loc_dir)) {
         if (!entry.is_directory()) continue;
@@ -86,6 +92,30 @@ static void test_all_locations_parse() {
         else {
             std::fprintf(stderr, "  %s: 0 layers!\n", name.c_str());
             ++g_failures;
+        }
+
+        // [Wave 11C P2] The battle-music ID list must be present and every
+        // ID must resolve through the registry (assets/music/fight<ID>_*.mp3
+        // - the registry files ARE the shipped tracks).
+        if (!loc.music.empty()) ++with_music;
+        else {
+            std::fprintf(stderr, "  %s: no <Root Music> list\n", name.c_str());
+            ++g_failures;
+        }
+        for (const auto& id : loc.music) {
+            bool found = false;
+            for (auto& m : fs::directory_iterator(fs::path("assets") / "music")) {
+                if (m.path().extension() != ".mp3") continue;
+                if (m.path().filename().string().rfind("fight" + id + "_", 0) == 0) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                ++unresolved_music_ids;
+                if (unresolved_sample.empty())
+                    unresolved_sample = name + ":" + id;
+            }
         }
 
         // Most locations have floor > 0
@@ -122,10 +152,19 @@ static void test_all_locations_parse() {
     std::printf("  Parsed OK: %d / 56\n", parsed_ok);
     std::printf("  With layers: %d  With floor: %d  With wall: %d\n",
                 with_layers, with_floor, with_wall);
+    std::printf("  With music list: %d  Unresolved music ids: %d%s%s\n",
+                with_music, unresolved_music_ids,
+                unresolved_sample.empty() ? "" : "  (e.g. ",
+                unresolved_sample.empty() ? ""
+                                          : (unresolved_sample + ")").c_str());
     std::printf("  Parse failures: %d\n", parse_failed);
 
     CHECK_MSG(parsed_ok == 56, "All 56 locations must parse successfully");
     CHECK_MSG(with_layers == 56, "All 56 locations have layers");
+    // [Wave 11C P2] Battle-music invariants (SPEC_PRESENTATION Q2).
+    CHECK_MSG(with_music == 56, "All 56 locations carry a <Root Music> list");
+    CHECK_MSG(unresolved_music_ids == 0,
+              "Every Music id resolves to an assets/music/fight<ID>_*.mp3");
 }
 
 // Verify specific well-known locations have expected properties
@@ -157,6 +196,12 @@ static void test_specific_locations() {
         std::printf("  dojo: %zu layers, player=(%.0f,%.0f) enemy=(%.0f,%.0f)\n",
                     loc.layers.size(), loc.player_x, loc.player_y,
                     loc.enemy_x, loc.enemy_y);
+        // [Wave 11C P2] The dojo's battle-music list is "6|7" ->
+        // {fight6_sparring, fight7_fat_boss} (SPEC_PRESENTATION Q2: the
+        // location's params.xml <Root Music> feeds the fight screen).
+        CHECK_MSG(loc.music.size() == 2 && loc.music[0] == "6" &&
+                      loc.music[1] == "7",
+                  "dojo <Root Music> parses as {\"6\",\"7\"}");
     }
     // cave (no atlas, color-only fallback expected)
     {
