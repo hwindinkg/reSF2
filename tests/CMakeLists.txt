@@ -555,6 +555,14 @@ add_e2e_test(test_e2e_enemy_y_bounds)
 # asserts the [VS]/[HUD-AVATAR] probes on the real binary.
 add_e2e_test(test_e2e_vs_screen)
 
+# Wave 11C P2 (BATTLE MUSIC): the fight-screen track is the random pick of
+# the LOCATION's params.xml <Root Music="id|id"> list, resolved to
+# assets/music/fight<ID>_*.mp3 (SPEC_PRESENTATION Q2, VERIFY_W11 Q2 source
+# attribution) - not the hardcoded fight1_samurai_spirit. Three runs: dojo
+# (pick from the dojo's own list), arena (location-driven pick), and a
+# fixture location with an unresolvable ID (graceful fallback + clear log).
+add_e2e_test(test_e2e_battle_music)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================

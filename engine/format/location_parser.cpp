@@ -40,6 +40,23 @@ bool LocationParser::parse(const std::string& xml, LocationData& out) {
     out.height = to_float(root->attr("Height"));
     out.wall = to_float(root->attr("Wall"));
     out.floor = to_float(root->attr("Floor"));
+    // [Wave 11C P2] <Root Music="id|id"> -> vector<string> (same split the
+    // runtime parser in LocationManager applies; Location+0x18 in the
+    // original, SPEC_PRESENTATION Q2).
+    out.music.clear();
+    {
+        const std::string music = root->attr("Music");
+        size_t start = 0;
+        while (start <= music.size()) {
+            const size_t sep = music.find('|', start);
+            const std::string tok = music.substr(
+                start, sep == std::string::npos ? std::string::npos
+                                                : sep - start);
+            if (!tok.empty()) out.music.push_back(tok);
+            if (sep == std::string::npos) break;
+            start = sep + 1;
+        }
+    }
 
     // Parse <Layer> elements
     for (auto& layer_node : root->children) {

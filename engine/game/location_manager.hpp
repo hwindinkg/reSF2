@@ -29,6 +29,14 @@ public:
     const std::string& current_location_name() const { return current_location_name_; }
     void set_current_location_name(const std::string& n) { current_location_name_ = n; }
 
+    // [Wave 11C P2] The battle-music ID list of `name` (params.xml
+    // <Root Music="id|id">), read directly from disk so the fight screen can
+    // random-pick the battle track without loading the whole location
+    // (SPEC_PRESENTATION Q2: the play site passes the Location object).
+    // Empty when the location or the Music attr is absent.
+    std::vector<std::string> music_list_for(const std::string& name,
+                                            const std::string& asset_root) const;
+
 private:
     std::vector<std::string> location_names_;
     std::unique_ptr<GameLocation> location_;

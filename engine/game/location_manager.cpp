@@ -34,6 +34,23 @@ static GameLocation parse_location(const std::string& xml) {
     loc.height = tof(root->attr("Height"));
     loc.wall = tof(root->attr("Wall"));
     loc.floor = tof(root->attr("Floor"));
+    // [Wave 11C P2] <Root Music="id|id"> - the battle-music ID list
+    // (Location::parse FUN_8F43C6F8, attr read @ 0x8F43CB54; the string is
+    // split into a vector<string> at Location+0x18). Every shipped location
+    // carries "6|7".
+    {
+        const std::string music = root->attr("Music");
+        size_t start = 0;
+        while (start <= music.size()) {
+            const size_t sep = music.find('|', start);
+            const std::string tok = music.substr(
+                start, sep == std::string::npos ? std::string::npos
+                                                : sep - start);
+            if (!tok.empty()) loc.music.push_back(tok);
+            if (sep == std::string::npos) break;
+            start = sep + 1;
+        }
+    }
 
     for (const auto& child : root->children) {
         if (child.name == "Layer") {
@@ -118,6 +135,27 @@ void LocationManager::discover_locations(const std::string& asset_root) {
             std::printf("%s ", location_names_[i].c_str());
         std::printf("\n");
     }
+}
+
+// ---------- music_list_for ----------
+
+std::vector<std::string> LocationManager::music_list_for(
+    const std::string& name, const std::string& asset_root) const {
+    // [Wave 11C P2] Same candidate search as load_location; the battle track
+    // must resolve from the LOCATION's own params.xml even when that location
+    // was never loaded into the scene (SPEC_PRESENTATION Q2, play site
+    // 0x8F426524 passing the Location object).
+    auto root = std::filesystem::path(asset_root);
+    for (const auto& dir : {root/"assets"/"locations"/name,
+                             root/"locations"/name,
+                             root/"assets"/"1536"/"locations"/name}) {
+        auto p = dir/"params.xml";
+        if (!std::filesystem::exists(p)) continue;
+        auto xml = read_text(p.string());
+        auto loc = parse_location(xml);
+        return loc.music;
+    }
+    return {};
 }
 
 // ---------- load_location ----------

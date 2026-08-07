@@ -73,6 +73,15 @@ struct GameLocation {
     // 0.0 = not authored; the caller falls back to +-width/2 then.
     float wall_left_x = 0;
     float wall_right_x = 0;
+    // [Wave 11C P2] The battle-music ID list from <Root Music="id|id"> in
+    // params.xml (Location+0x18 in the original, parsed by Location::parse
+    // FUN_8F43C6F8 @ 0x8F43CB54). The fight screen random-picks one numeric
+    // ID (FUN_8F43BC98, its only caller = ScreenFight ctor 0x8F426524) and
+    // resolves it through the music registry (FUN_8F64B174) to
+    // assets/music/fight<ID>_*.mp3 - SPEC_PRESENTATION Q2 (corrected per
+    // VERIFY_W11: the battle track is the LOCATION's list, not stages.xml
+    // <Battle Music>).
+    std::vector<std::string> music;
     std::vector<LocationLayer> layers;
 };
 

@@ -48,6 +48,12 @@ struct LocationData {
     float floor = 0;
     float player_x = 0, player_y = 0;
     float enemy_x = 0, enemy_y = 0;
+    // [Wave 11C P2] <Root Music="id|id"> - the battle-music ID list
+    // (Location::parse FUN_8F43C6F8, attr read @ 0x8F43CB54 -> vector<string>
+    // at Location+0x18). The fight screen random-picks one ID from it
+    // (SPEC_PRESENTATION Q2; VERIFY_W11 Q2: the battle track = this list,
+    // not stages.xml <Battle Music>).
+    std::vector<std::string> music;
     std::vector<LocationLayer> layers;
 };
 
