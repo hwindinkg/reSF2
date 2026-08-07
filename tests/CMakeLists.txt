@@ -535,6 +535,11 @@ add_e2e_test(test_e2e_duck_repeat)
 # --crit-attr hook (deterministic) and without (seeded Default attr 1000).
 add_e2e_test(test_e2e_crit_knockdown)
 
+# Wave 11A M4 (CRITS + KNOCKDOWN) runs TWO long battles (3800 frames each:
+# chase + punch loop); measured ~171 s wall at just 2-way contention on
+# 2026-08-07 - the shared 180 s e2e budget times out under full-suite load.
+set_tests_properties(test_e2e_crit_knockdown PROPERTIES TIMEOUT 300)
+
 # Wave 11B W1 (BAG PHYSICS): the bag swings ONLY on a real capsule
 # collision; the engine's distance fallback (|player_x - bag_x| < 200,
 # game.cpp:5177-5228) is an invention to delete. Three runs: far punch (no
@@ -547,6 +552,11 @@ add_e2e_test(test_e2e_bag_physics)
 # (<Image ClassName="left|right"> anchors, dojo +-680), not at
 # +-width/2 (+-980) - both the walk clamp and the knockback clamp.
 add_e2e_test(test_e2e_enemy_y_bounds)
+
+# Wave 11B W2 (ENEMY Y + BOUNDS) runs TWO long battles (2100 + 3800 frames);
+# like test_e2e_crit_knockdown it measures ~170 s wall at low contention and
+# times out on the shared 180 s budget under full-suite load.
+set_tests_properties(test_e2e_enemy_y_bounds PROPERTIES TIMEOUT 300)
 
 # Wave 11C P1 (VS SCREEN + PORTRAITS): entering a battle renders the
 # PreFight (VS) screen first (VS_Fon halves + VS label + both avatars) and
