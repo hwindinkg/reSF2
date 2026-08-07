@@ -1537,6 +1537,10 @@ void host_render_scene();
     // Called by LoadingScene to render the loading screen.
     void host_render_loading();
 
+    // [Wave 11C P1] Render the PreFight (VS) screen (BattleScene opening
+    // phase) — VS_Fon halves, VS label, stripes and both avatars.
+    void host_render_prefight();
+
 private:
     // ---------- Loading screen ----------
     void load_loading_screen() {
@@ -1561,6 +1565,113 @@ private:
             float y = oy + (img.y + 512.0f) * load_scale_;
             renderer_->draw_textured_quad_screen(*img.texture, x, y, w, h);
         }
+    }
+
+    // [Wave 11C P1] Resolve a fighter's avatar key the way the original's
+    // avatar sprite builder does (SPEC_PRESENTATION Q1.2, FUN_8F411EDC):
+    // image/users/image/<key>.png. The player's key is the profile Avatar
+    // default "avatar_hero"; the enemy's is character_<name> (last name
+    // token, lower-cased — "Dojo_Disciple" -> character_disciple) with the
+    // _small variant and "UnkownEnemyAvatar" fallbacks. `found` reports
+    // whether the key actually exists in the loaded asset tree.
+    std::string resolve_avatar_key(const std::string& who, bool& found) const {
+        std::string key;
+        if (who == "player") {
+            // [HEURISTIC-TODO] The profile parser (FUN_8F6567E8) stores the
+            // Avatar attr and the port's PlayerProfile does not keep it;
+            // usersDefault.xml defaults it to avatar_hero (save.cpp).
+            key = "avatar_hero";
+        } else {
+            std::string name = battle_info_.enemy_name;
+            const auto pos = name.find_last_of("_");
+            if (pos != std::string::npos && pos + 1 < name.size())
+                name = name.substr(pos + 1);
+            if (name.empty()) name = "disciple";  // dojo sparring partner
+            key = "character_";
+            for (const char c : name)
+                key += (char)std::tolower((unsigned char)c);
+        }
+        auto has = [&](const std::string& k) {
+            auto it = assets_->hud_textures().find(k);
+            return it != assets_->hud_textures().end() && it->second;
+        };
+        if (has(key)) { found = true; return key; }
+        // [ORIGINAL] _small variant (tutorial HUD overlay style) then the
+        // profile parser's fallback "UnkownEnemyAvatar" (0x8F7A4740).
+        if (who != "player" && has(key + "_small")) { found = true; return key + "_small"; }
+        const std::string fb = "UnkownEnemyAvatar";
+        if (who != "player" && has(fb)) { found = true; return fb; }
+        found = false;
+        return key;
+    }
+
+    // [Wave 11C P1] Render the PreFight (VS) screen — SPEC_PRESENTATION Q1.1
+    // (PreFight ctor 0x8F416444): the VS_Fon.xml halves, the VS.png label,
+    // the Stripe_* accents, and both fighter avatars (avatar builder
+    // FUN_8F411EDC: player left, enemy right). Shown by BattleScene during
+    // its opening PreFight phase, before the fight is controllable.
+    void render_prefight(plat::Platform& platform) {
+        if (!renderer_ || !assets_) return;
+        renderer_->set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+        const float win_w = static_cast<float>(platform.window_width());
+        const float win_h = static_cast<float>(platform.window_height());
+        float tw = 1820.0f * load_scale_, th = 1024.0f * load_scale_;
+        float ox = (win_w - tw) * 0.5f;
+        float oy = (win_h - th) * 0.5f;
+        std::size_t fon = 0;
+        for (auto& img : assets_->vs_images()) {
+            if (!img.texture) continue;
+            float w = img.texture->width() * load_scale_;
+            float h = img.texture->height() * load_scale_;
+            float x = ox + (img.x + 910.0f) * load_scale_;
+            float y = oy + (img.y + 512.0f) * load_scale_;
+            renderer_->draw_textured_quad_screen(*img.texture, x, y, w, h);
+            ++fon;
+        }
+        auto tex_of = [&](const char* n) -> ren::Texture2D* {
+            auto it = assets_->hud_textures().find(n);
+            return it == assets_->hud_textures().end() ? nullptr : it->second.get();
+        };
+        // The VS label, centered on the canvas.
+        if (auto* vs = tex_of("VS")) {
+            const float vs_w = th * 0.42f;
+            const float vs_h = vs_w * vs->height() / vs->width();
+            renderer_->draw_textured_quad_screen(
+                *vs, (win_w - vs_w) * 0.5f, (win_h - vs_h) * 0.5f, vs_w, vs_h);
+        }
+        // Stripe accents flanking the label.
+        if (auto* sl = tex_of("Stripe_left")) {
+            const float sw = th * 0.030f;
+            const float sh = sw * sl->height() / sl->width();
+            renderer_->draw_textured_quad_screen(*sl, win_w * 0.5f - th * 0.30f,
+                                                 (win_h - sh) * 0.5f, sw, sh);
+        }
+        if (auto* sr = tex_of("Stripe_right")) {
+            const float sw = th * 0.030f;
+            const float sh = sw * sr->height() / sr->width();
+            renderer_->draw_textured_quad_screen(*sr, win_w * 0.5f + th * 0.30f - sw,
+                                                 (win_h - sh) * 0.5f, sw, sh);
+        }
+        // Both avatars: player left third, enemy right third, vertically
+        // centered (the original's builder places the player at x=-110).
+        const float av = th * 0.34f;
+        bool p_found = false, e_found = false;
+        const std::string p_key = resolve_avatar_key("player", p_found);
+        const std::string e_key = resolve_avatar_key("enemy", e_found);
+        if (auto* p = tex_of(p_key.c_str())) {
+            renderer_->draw_textured_quad_screen(*p, win_w * 0.5f - th * 0.62f,
+                                                 (win_h - av) * 0.5f, av, av);
+        }
+        if (auto* e = tex_of(e_key.c_str())) {
+            renderer_->draw_textured_quad_screen(*e, win_w * 0.5f + th * 0.28f,
+                                                 (win_h - av) * 0.5f, av, av);
+        }
+        if (dump_state_)
+            std::printf("[VS] f=%llu vs_label=%d fon=%zu player='%s' "
+                        "player_found=%d enemy='%s' enemy_found=%d\n",
+                        total_frame_count_, tex_of("VS") ? 1 : 0, fon,
+                        p_key.c_str(), (int)p_found, e_key.c_str(),
+                        (int)e_found);
     }
 
     // ---------- Location ----------
@@ -4332,6 +4443,21 @@ private:
             // (<Dialog Image="character_sensei"> in quests.xml).
             load_hud_png(base/"image"/"users"/"image"/"character_sensei.png",
                          "character_sensei");
+            // [Wave 11C P1] Avatar portraits: bulk-load every loose PNG in
+            // image/users/image/ (avatar_hero, character_disciple,
+            // character_may_1, ...). SPEC_PRESENTATION Q1.2: the avatar
+            // sprite builder FUN_8F411EDC resolves image/users/image/<key>.png
+            // for the PreFight screen and the fight HUD portraits. (The old
+            // AssetManager::load_hud_textures avatar loop was dead code — no
+            // caller — so no avatar but character_sensei ever reached the
+            // runtime texture table.)
+            const auto users_dir = base/"image"/"users"/"image";
+            if (std::filesystem::exists(users_dir)) {
+                for (auto& entry : std::filesystem::directory_iterator(users_dir)) {
+                    if (entry.path().extension() != ".png") continue;
+                    load_hud_png(entry.path(), entry.path().stem().string());
+                }
+            }
             // [ORIGINAL] Load hit effect textures: hit_blade (18-frame spark
             // animation), hit labels (Aggressive, Brutal, Critical, etc.)
             load_texture_atlas_to_hud(base/"textures"/"effects"/"fight",
@@ -5480,6 +5606,33 @@ private:
         if (dump_state_)
             std::printf("[HUD-TIMER] secs=%d left_ms=%d\n", secs,
                         round_left_ms_probe_);
+
+        // [Wave 11C P1] Avatar portraits next to the bars — SPEC_PRESENTATION
+        // Q1.2: the battle HUD builds avatar sprites (FUN_8F411EDC,
+        // image/users/image/<key>.png, x=-110) in the fight screen's HUD
+        // init (FUN_8F414174). Player portrait on the player bar's outer
+        // edge, enemy portrait on the enemy side (mirrored), sized like the
+        // bar height.
+        const float av_size = 84.0f * pts;
+        const float av_y = bar_cy - av_size * 0.5f;
+        bool p_found = false, e_found = false;
+        const std::string p_key = resolve_avatar_key("player", p_found);
+        const std::string e_key = resolve_avatar_key("enemy", e_found);
+        const float outer_px = cx - (kInnerGapPts + bar_w) * pts;
+        if (auto* p = tex_of(p_key.c_str())) {
+            renderer_->draw_textured_quad_screen(*p, outer_px - av_size, av_y,
+                                                 av_size, av_size);
+        }
+        const float outer_ex = cx + (kInnerGapPts + bar_w) * pts;
+        if (auto* e = tex_of(e_key.c_str())) {
+            renderer_->draw_textured_quad_screen(*e, outer_ex, av_y, av_size,
+                                                 av_size, 1.0f, 0.0f, 0.0f, 1.0f);
+        }
+        if (dump_state_)
+            std::printf("[HUD-AVATAR] player='%s' player_found=%d "
+                        "enemy='%s' enemy_found=%d\n",
+                        p_key.c_str(), (int)p_found, e_key.c_str(),
+                        (int)e_found);
     }
 
     // ---------- Menu expanded (vertical scroll, matching original game) ----------

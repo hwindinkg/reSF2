@@ -1122,6 +1122,10 @@ void BattleScene::on_enter(SceneContext& ctx) {
     between_rounds_ms_ = 0;
     wins_player_ = 0;
     wins_enemy_ = 0;
+    // [Wave 11C P1] The PreFight (VS) screen opens the battle — the
+    // original runs PreFight (ctor 0x8F416444) before ScreenFight
+    // (SPEC_PRESENTATION Q1.5).
+    prefight_frames_ = kPrefightFrames;
     ctx.host.host_reset_menu_state();
     ctx.host.host_set_battle_mode(true);
     ctx.host.host_set_show_enemy(true);
@@ -1162,6 +1166,11 @@ void BattleScene::finish_round(SceneContext& ctx, bool player_won) {
 
 void BattleScene::on_update(SceneContext& ctx) {
     guard_timer_ms_ += ctx.dt_ms;
+
+    // [Wave 11C P1] The PreFight (VS) phase counts down over the battle
+    // opening; gameplay keeps ticking underneath (the intro stance plays),
+    // so the fight begins the moment the phase ends.
+    if (prefight_frames_ > 0) --prefight_frames_;
 
     if (between_rounds_ms_ > 0) {
         // Freeze the fight during the inter-round pause, then reset.
@@ -1207,6 +1216,13 @@ void BattleScene::on_update(SceneContext& ctx) {
 }
 
 void BattleScene::on_render(SceneContext& ctx) {
+    // [Wave 11C P1] The PreFight (VS) screen renders during the battle
+    // opening; the arena (location, fighters, HUD) appears once the phase
+    // ends — PreFight before ScreenFight.
+    if (prefight_frames_ > 0) {
+        ctx.host.host_render_prefight();
+        return;
+    }
     // Host renders the location, the fighters and the fight HUD
     // (ScreenModel: bars, names, round dots — see render_fight_hud).
     ctx.host.host_render_scene();
