@@ -178,6 +178,20 @@ private:
     static constexpr float kDetailFrac   =   0.32f;
     static constexpr int   kVisibleRows  =   3;   // item rows in the central scroll window
     static constexpr float kCatIconSize  =  52.0f;
+
+    // [Wave 11C P3] Tutorial shop-trip hint state (SPEC_PRESENTATION Q3):
+    // while the tutorial state machine sits at SHOP_TRIP (state 0xB) the
+    // item-card hint with the tutorial_buy_knives key renders; after the
+    // knives purchase (RETURN_MAP) the tutorial_return_map hint points at
+    // the MENU roll (the way back to the map). hint_frames_ counts the
+    // frames the current hint has been on screen (HintTimeout in the
+    // original; kept unbounded here so a scripted run can assert it).
+    int hint_frames_ = 0;
+    std::string hint_key_;
+    // One-shot guard: the tutorial_return_map dialogue (Shop -> Dialogue ->
+    // Map) is requested exactly once per shop entry, on the frame the state
+    // becomes RETURN_MAP.
+    bool return_map_dialog_fired_ = false;
 };
 
 // ---------- Settings scene (stub) ----------

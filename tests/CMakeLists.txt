@@ -563,6 +563,14 @@ add_e2e_test(test_e2e_vs_screen)
 # fixture location with an unresolvable ID (graceful fallback + clear log).
 add_e2e_test(test_e2e_battle_music)
 
+# Wave 11C P3 (TUTORIAL SHOP TRIP): after the Kenji (FIRST_FIGHT) win the
+# tutorial sends the player to the shop (state 0xB) with a HintBox on the
+# knives card (tutorial_buy_knives); buying the knives advances to RETURN_MAP
+# (tutorial_return_map dialogue) and the Map closes the tutorial (COMPLETE).
+# Boots --scene shop --tutorial-state SHOP_TRIP --add-gold 100 and walks the
+# whole chain on the real binary.
+add_e2e_test(test_e2e_tutorial_shop_trip)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================

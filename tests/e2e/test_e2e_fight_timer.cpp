@@ -4,7 +4,7 @@
 // fight HUD (bars, names and round dots render; the countdown does not),
 // and the timer-win path (round clock runs out, healthier fighter takes the
 // round) was never exercised end to end — a timeout win must keep the story
-// moving exactly like a KO win (tutorial FIRST_FIGHT -> COMPLETE, Sensei
+// moving exactly like a KO win (tutorial FIRST_FIGHT -> SHOP_TRIP, Sensei
 // follow-up dialogue queued, quest chain advanced).
 //
 // E2E on the REAL binary: boot straight into Battle with --tutorial-start
@@ -14,12 +14,12 @@
 //   intro dialog (3 lines) -> dojo -> 4 steps (dismiss the hint scroll) ->
 //   punchbag dialog -> 3 bag punches (FIRST_FIGHT) -> training dialog ->
 //   BATTLE -> land hits (player must be healthier at the buzzer) -> round
-//   clock runs out -> victory -> Results -> tutorial COMPLETE + follow-up
+//   clock runs out -> victory -> Results -> tutorial SHOP_TRIP + follow-up
 //   dialogue queued.
 //
 // Assertions: the HUD renders the countdown ([HUD-TIMER] probe), the round
 // timed out ([battle] round timeout — the timer-win path), the result is a
-// victory, and the story advanced (tutorial COMPLETE + story dialogue
+// victory, and the story advanced (tutorial SHOP_TRIP + story dialogue
 // queued). RED on HEAD: no [HUD-TIMER] row exists (timer never rendered).
 
 #include <cstdio>
@@ -121,14 +121,17 @@ int main(int argc, char** argv) {
     // --------------------------------------------------- story continues
     const auto victories = e2e::filter_lines(run.stdout_lines, "[results] victory");
     check(!victories.empty(), "the timeout win is a recorded victory");
+    // [Wave 11C P3] The tutorial now advances to the SHOP TRIP after the
+    // first win (state 0xB, SPEC_PRESENTATION Q3.6) - the Sensei follow-up
+    // dialogue is queued to return INTO the shop, not straight to COMPLETE.
     const auto done = e2e::filter_lines(
-        run.stdout_lines, "FIRST_FIGHT won -> COMPLETE");
+        run.stdout_lines, "FIRST_FIGHT won -> SHOP_TRIP");
     const auto queued =
         e2e::filter_lines(run.stdout_lines, "[QUEST] story dialogue queued");
     std::printf("fight-timer: victory=%zu complete=%zu story_queued=%zu\n",
                 victories.size(), done.size(), queued.size());
     check(!done.empty() || !queued.empty(),
-          "the timer-win continued the story (tutorial COMPLETE + "
+          "the timer-win continued the story (tutorial SHOP_TRIP + "
           "follow-up dialogue queued)");
 
     return resf2::test::summary();

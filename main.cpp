@@ -20,6 +20,12 @@ int main(int argc, char* argv[]) {
     // player's crit attributes in battle (real Default template value for
     // chance is 1000 -> 10%; damage 0 -> 1.0x multiplier).
     int crit_attr_chance = -1, crit_attr_damage = -1;
+    // [Wave 11C P3] E2E hooks: --tutorial-state <state> parks the tutorial
+    // state machine (SHOP_TRIP / RETURN_MAP for the post-Kenji shop trip);
+    // --add-gold <N> tops up the hermetic wallet (usersDefault.xml Money=0,
+    // the shop trip must be able to afford the knives).
+    std::string tutorial_state_hook;
+    int add_gold_hook = 0;
     // Window size is a command-line option so the resolution-dependent layout
     // rules can actually be exercised. Everything in the HUD is scaled from the
     // viewport height (render_hud, menu_roll_rect), and a rule that is only ever
@@ -45,6 +51,8 @@ int main(int argc, char* argv[]) {
             crit_attr_chance = std::atoi(argv[++i]);
             crit_attr_damage = std::atoi(argv[++i]);
         }
+        else if (arg == "--tutorial-state" && i + 1 < argc) tutorial_state_hook = argv[++i];
+        else if (arg == "--add-gold" && i + 1 < argc) add_gold_hook = std::atoi(argv[++i]);
         else if (arg == "--window" && i + 1 < argc) {
             const std::string spec = argv[++i];
             const size_t x = spec.find_first_of("xX");
@@ -105,6 +113,8 @@ int main(int argc, char* argv[]) {
     game.set_equip_weapon(equip_weapon);
     if (crit_attr_chance >= 0 || crit_attr_damage >= 0)
         game.set_crit_attr_hook(crit_attr_chance, crit_attr_damage);
+    if (!tutorial_state_hook.empty()) game.set_tutorial_state_hook(tutorial_state_hook);
+    if (add_gold_hook > 0) game.set_add_gold_hook(add_gold_hook);
     if (!platform->make_gl_current()) { std::fprintf(stderr, "Failed to make GL context current.\n"); return 1; }
     game.on_init(*platform);
     auto last_ms = platform->now_ms();
