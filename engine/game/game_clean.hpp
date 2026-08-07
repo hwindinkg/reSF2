@@ -137,6 +137,11 @@ public:
         crit_attr_hook_chance_ = chance;
         crit_attr_hook_damage_ = damage;
     }
+    // [Wave 11C P3] E2E hooks: park the tutorial state machine at a given
+    // step (SHOP_TRIP / RETURN_MAP) and top up the hermetic wallet, so a
+    // scripted run can walk the post-Kenji shop trip deterministically.
+    void set_tutorial_state_hook(const std::string& s) { tutorial_state_hook_ = s; }
+    void set_add_gold_hook(int g) { add_gold_hook_ = g; }
 
     void set_start_location(const std::string& name) {
         if (!name.empty()) {
@@ -4414,6 +4419,12 @@ private:
             // [ORIGINAL] Load fight HUD textures: health bars, energy, timers.
             load_texture_atlas_to_hud(base/"textures"/"fight"/"bars",
                                       "batchFightBars");
+            // [Wave 11C P3] HintBox textures: textures/hints/batchHints
+            // (box: hintsCorner/hintsSide/hintsPixel/hintsStroke; arrow:
+            // hintsArrow) - SPEC_PRESENTATION Q3.1 ("Init hintbox textures"
+            // @ 0x8F7A3EE4). Rendered by the tutorial shop-trip hints.
+            load_texture_atlas_to_hud(base/"textures"/"hints",
+                                      "batchHints");
             load_texture_atlas_to_hud(base/"textures"/"buttons"/"fight",
                                       "batchButtonsFight");
             // [ORIGINAL] On-screen controls: the virtual stick (a ring plus a
@@ -6647,6 +6658,9 @@ private:
     int round_left_ms_probe_ = 0;   // pushed by BattleScene each frame
     std::string equip_magic_hook_;  // --equip-magic <item id>
     std::string equip_weapon_hook_; // --equip-weapon <item id>
+    // [Wave 11C P3] --tutorial-state <state> / --add-gold <N> hooks.
+    std::string tutorial_state_hook_;
+    int add_gold_hook_ = 0;
     // [Wave 11A M4] --crit-attr <chance> <damage> (-1 = not set).
     int crit_attr_hook_chance_ = -1;
     int crit_attr_hook_damage_ = -1;

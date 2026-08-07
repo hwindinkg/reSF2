@@ -243,10 +243,19 @@ void MapScene::on_enter(SceneContext& ctx) {
 
     // [Wave 9B] S5: a queued story dialogue (tutorial continuation / quest
     // <Dialog> set) opens over the Map on entry and returns to the Map when
-    // finished. The consume is one-shot — each queued dialogue plays once.
+    // finished. The consume is one-shot �?" each queued dialogue plays once.
     if (ctx.host.host_consume_story_dialogue()) {
         std::printf("[map] story dialogue pending -> Dialogue\n");
         ctx.host.request_scene_transition(SceneId::Dialogue);
+    }
+
+    // [Wave 11C P3] RETURN_MAP: the tutorial_return_map dialogue hands the
+    // player back to the map - landing here closes the tutorial loop (the
+    // post-Kenji chain SHOP_TRIP -> RETURN_MAP -> COMPLETE, SPEC_PRESENTATION
+    // Q3.6: state 0xC finishes the tutorial).
+    if (ctx.host.host_get_tutorial_state() == "RETURN_MAP") {
+        ctx.host.host_set_tutorial_state("COMPLETE");
+        std::printf("[tutorial] returned to map -> COMPLETE\n");
     }
 }
 
@@ -1324,11 +1333,19 @@ void ResultsScene::on_update(SceneContext& ctx) {
         key_pressed(input, platform::Key::Space) ||
         key_pressed(input, platform::Key::Enter)) {
         ctx.host.host_play_ui_click();
-        // Victory: go to Map to continue. Defeat: rematch a retryable fight
-        // (the tutorial's FIRST_FIGHT) — the original offers a rematch after
-        // a loss; only a fight with no retry context goes back to the menu.
+        // Victory: go to Map to continue - or, during the tutorial's SHOP
+        // TRIP (state 0xB), go to the Shop: "после победы над кенжи сенсей
+        // должен был отправить меня в магазин". Defeat: rematch a retryable
+        // fight (the tutorial's FIRST_FIGHT) - the original offers a rematch
+        // after a loss; only a fight with no retry context goes back to the
+        // menu.
         if (is_victory_) {
-            ctx.host.request_scene_transition(SceneId::Map);
+            if (ctx.host.host_get_tutorial_state() == "SHOP_TRIP") {
+                std::printf("[results] victory -> SHOP TRIP (shop)\n");
+                ctx.host.request_scene_transition(SceneId::Shop);
+            } else {
+                ctx.host.request_scene_transition(SceneId::Map);
+            }
         } else if (ctx.host.host_get_tutorial_state() == "FIRST_FIGHT") {
             ctx.host.request_scene_transition(SceneId::Battle);
         } else {
@@ -1743,6 +1760,38 @@ void ShopScene::on_enter(SceneContext& ctx) {
     selected_category_ = 0;   // 0 = Weapon
     selected_item_idx_ = 0;
     scroll_offset_ = 0.0f;
+    hint_frames_ = 0;
+    hint_key_.clear();
+    return_map_dialog_fired_ = false;
+
+    // [Wave 9B] S5: a queued story dialogue (tutorial continuation / quest
+    // <Dialog> set) opens over the Shop on entry and returns to the Shop
+    // when finished - the same consume the Map performs on its entry. The
+    // tutorial_shop dialogue after the Kenji win returns INTO the shop (the
+    // shop trip), so it must be able to fire from here.
+    if (ctx.host.host_consume_story_dialogue()) {
+        std::printf("[shop] story dialogue pending -> Dialogue\n");
+        ctx.host.request_scene_transition(SceneId::Dialogue);
+    }
+
+    // [Wave 11C P3] SHOP TRIP (tutorial state 0xB): the trip targets the
+    // knives - auto-select WEAPON_KNIVES in the Weapon category so the
+    // item-card hint (tutorial_buy_knives) anchors on the right card and a
+    // scripted run can buy it with one key.
+    if (ctx.host.host_get_tutorial_state() == "SHOP_TRIP") {
+        auto items = shop_items_for_category(ctx, categories_[0]);
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (items[i].name == "WEAPON_KNIVES") {
+                selected_item_idx_ = static_cast<int>(i);
+                const float max_scroll = std::max(
+                    0.0f, static_cast<float>(items.size()) -
+                              static_cast<float>(kVisibleRows));
+                scroll_offset_ = std::min(static_cast<float>(i), max_scroll);
+                std::printf("[SHOP-TRIP] knives auto-selected (row %zu)\n", i);
+                break;
+            }
+        }
+    }
 
     // [SHOP] Log initial state
     auto items = shop_items_for_category(ctx, categories_[0]);
@@ -1927,6 +1976,63 @@ void ShopScene::on_update(SceneContext& ctx) {
                     std::max(0.0f, static_cast<float>(item_count) -
                                        static_cast<float>(kVisibleRows)),
                     item_count);
+    }
+
+    // [Wave 11C P3] Keyboard BUY / equip / unequip (Space or Enter on the
+    // selected item) - desktop affordance mirroring the BUY button click;
+    // this is also what a scripted E2E run uses to buy the tutorial knives.
+    {
+        auto kb_items = shop_items_for_category(ctx, categories_[selected_category_]);
+        const int kb_count = static_cast<int>(kb_items.size());
+        if ((key_pressed(input, platform::Key::Space) ||
+             key_pressed(input, platform::Key::Enter)) &&
+            selected_item_idx_ >= 0 && selected_item_idx_ < kb_count) {
+            const auto& item = kb_items[selected_item_idx_];
+            const bool owned = ctx.host.host_has_item(item.name);
+            const bool equipped = ctx.host.host_get_equipped(
+                shop_slot_for_type(item.type)) == item.name;
+            if (!owned && !item.is_paid) {
+                const int gold = ctx.host.host_get_currency();
+                const int level = ctx.host.host_get_player_level();
+                if (gold >= item.price && level >= item.level &&
+                    item.price > 0) {
+                    if (ctx.host.host_buy_item(item.name)) {
+                        ctx.host.host_play_ui_click();
+                        std::printf("[SHOP] buy item='%s' (keyboard) -> "
+                                    "success\n", item.name.c_str());
+                    }
+                } else {
+                    std::printf("[SHOP] cannot buy '%s' (keyboard): "
+                                "gold=%d need=%d level=%d need=%d\n",
+                                item.name.c_str(), gold, item.price,
+                                level, item.level);
+                }
+            } else if (owned && !equipped) {
+                if (ctx.host.host_equip_item(item.name)) {
+                    ctx.host.host_play_ui_click();
+                    std::printf("[SHOP] equip item='%s' (keyboard)\n",
+                                item.name.c_str());
+                }
+            } else if (equipped) {
+                if (ctx.host.host_unequip_item(shop_slot_for_type(item.type))) {
+                    ctx.host.host_play_ui_click();
+                    std::printf("[SHOP] unequip '%s' (keyboard)\n",
+                                item.name.c_str());
+                }
+            }
+        }
+        // [Wave 11C P3] The knives purchase finishes the SHOP TRIP: the
+        // tutorial_return_map dialogue (queued by host_buy_item, return to
+        // Map) plays now and hands the player back to the map. One-shot per
+        // shop entry (the transition is deferred a frame, so a bare state
+        // check would re-fire every frame).
+        if (ctx.host.host_get_tutorial_state() == "RETURN_MAP" &&
+            !return_map_dialog_fired_) {
+            return_map_dialog_fired_ = true;
+            std::printf("[shop] SHOP_TRIP finished -> tutorial_return_map "
+                        "dialogue\n");
+            ctx.host.request_scene_transition(SceneId::Dialogue);
+        }
     }
 }
 
@@ -2333,6 +2439,119 @@ void ShopScene::on_render(SceneContext& ctx) {
                     255);
             }
             ix += L.cat_icon_w + icon_gap;
+        }
+    }
+
+    // --- [Wave 11C P3] Tutorial shop-trip hints -----------------------------
+    // SPEC_PRESENTATION Q3: HintBox = batchHints atlas (box: corner/side/
+    // pixel pieces + arrow hintsArrow.png) anchored at a target; the dojo
+    // tutorial state machine shows the item-card hint with the
+    // tutorial_buy_knives key during the SHOP TRIP (state 0xB, FUN_8F529114)
+    // and the tutorial_return_map hint after the trip. Box above the anchor,
+    // arrow below pointing at it; up to 3 localized lines (the factory
+    // FUN_8F640328 skips empty lines).
+    {
+        const std::string tstate = ctx.host.host_get_tutorial_state();
+        bool trip = false, ret = false;
+        if (tstate == "SHOP_TRIP") trip = true;
+        else if (tstate == "RETURN_MAP") ret = true;
+        if (!trip && !ret) { hint_frames_ = 0; hint_key_.clear(); }
+        if (trip || ret) {
+            const char* key = trip ? "tutorial_buy_knives"
+                                   : "tutorial_return_map";
+            const char* anchor = trip ? "card" : "menu_roll";
+            if (hint_key_ != key) {
+                hint_key_ = key;
+                hint_frames_ = 0;
+            }
+            ++hint_frames_;
+
+            // Anchor: the selected item card (centre column, first row) for
+            // the shop trip; the MENU roll (the way back to the map) for the
+            // return hint. Same geometry law as the render loops above.
+            float ax, ay;
+            if (trip) {
+                const float pad = L.scroll_w * 0.08f;
+                const float inner_x = L.scroll_x + pad;
+                float y = L.body_y + L.body_h * 0.06f;
+                const float hdr_scale = shop_text_scale(26.0f * L.s);
+                const auto [htw, hth] = ctx.host.host_measure_text(
+                    ctx.host.host_localized(categories_[selected_category_]),
+                    hdr_scale);
+                y += hth * 1.4f;
+                ax = inner_x + L.scroll_w * 0.5f;
+                ay = y + L.body_h * 0.11f;  // first item row centre
+            } else {
+                ax = w * 0.5f;
+                ay = L.menu_roll_y + L.menu_roll_h * 0.5f;
+            }
+
+            // The box: hintsPixel fill + hintsCorner corners + hintsSide
+            // edges (textures/hints/batchHints, "Init hintbox textures"
+            // @ 0x8F7A3EE4). Draw above the anchor, arrow below pointing
+            // at it.
+            const float bw = 300.0f * L.s;
+            const float bh = 64.0f * L.s;
+            const float bx = ax - bw * 0.5f;
+            const float by = ay - bh - 34.0f * L.s;  // above the anchor
+            const float cs = 16.0f * L.s;            // corner size
+            bool box_tex = true, arrow_tex = true;
+            if (ctx.host.host_render_ui_texture("hintsPixel", bx, by, bw, bh))
+                r.draw_filled_rect_screen(bx, by, bw, bh, {30, 20, 10, 215});
+            else box_tex = false;
+            // Corners + edges (9-slice).
+            const char* corners[] = {"hintsCorner", "hintsCorner",
+                                     "hintsCorner", "hintsCorner"};
+            const float corner_x[] = {bx, bx + bw - cs, bx, bx + bw - cs};
+            const float corner_y[] = {by, by, by + bh - cs, by + bh - cs};
+            for (int i = 0; i < 4; ++i) {
+                if (!ctx.host.host_render_ui_texture(corners[i], corner_x[i],
+                                                     corner_y[i], cs, cs))
+                    box_tex = false;
+            }
+            // Top/bottom edges (stretch the side piece horizontally) and
+            // left/right edges (stretch vertically).
+            const float side_t = cs * 0.6f;
+            if (!ctx.host.host_render_ui_texture("hintsSide", bx + cs, by,
+                                                 bw - 2.0f * cs, side_t))
+                box_tex = false;
+            if (!ctx.host.host_render_ui_texture("hintsSide", bx + cs,
+                                                 by + bh - side_t,
+                                                 bw - 2.0f * cs, side_t))
+                box_tex = false;
+            if (!ctx.host.host_render_ui_texture("hintsSide", bx, by + cs,
+                                                 side_t, bh - 2.0f * cs))
+                box_tex = false;
+            if (!ctx.host.host_render_ui_texture("hintsSide", bx + bw - side_t,
+                                                 by + cs, side_t,
+                                                 bh - 2.0f * cs))
+                box_tex = false;
+            // The arrow (hintsArrow.png, 115x67 in the atlas) below the box,
+            // pointing at the anchor.
+            const float aw = 46.0f * L.s;
+            const float ah = aw * 67.0f / 115.0f;
+            if (!ctx.host.host_render_ui_texture("hintsArrow",
+                                                 ax - aw * 0.5f,
+                                                 by + bh - 4.0f * L.s,
+                                                 aw, ah))
+                arrow_tex = false;
+
+            // Up to 3 localized lines inside the box.
+            std::string line = ctx.host.host_localized(key);
+            if (line.empty())
+                line = trip ? "Buy the knives from the shop!"
+                            : "Return to the map!";
+            const float ts = shop_text_scale(20.0f * L.s);
+            const auto [tw, th] = ctx.host.host_measure_text(line, ts);
+            ctx.host.host_render_text(line,
+                                      bx + (bw - tw) * 0.5f,
+                                      by + (bh - th) * 0.5f,
+                                      ts, 255, 235, 170, 255);
+
+            std::printf("[SHOP-HINT] key='%s' box=%d arrow=%d anchor='%s' "
+                        "frames=%d\n",
+                        key, (int)box_tex, (int)arrow_tex, anchor,
+                        hint_frames_);
         }
     }
 

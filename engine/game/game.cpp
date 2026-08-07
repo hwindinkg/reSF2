@@ -504,6 +504,22 @@ void Game::on_init(plat::Platform& platform) {
                             equip_weapon_hook_.c_str());
             }
 
+            // [Wave 11C P3] E2E hooks: --tutorial-state <state> parks the
+            // tutorial state machine at a given step (SHOP_TRIP etc. - the
+            // hermetic profile always saves COMPLETE), and --add-gold <N>
+            // tops up the hermetic wallet (the tutorial shop trip must be
+            // able to afford the knives; usersDefault.xml ships Money=0).
+            if (!tutorial_state_hook_.empty()) {
+                tutorial_state_ = tutorial_state_hook_;
+                std::printf("[tutorial] E2E hook: state -> %s\n",
+                            tutorial_state_.c_str());
+            }
+            if (add_gold_hook_ > 0) {
+                currency_ += add_gold_hook_;
+                std::printf("[gold] E2E hook: +%d (total %d)\n",
+                            add_gold_hook_, currency_);
+            }
+
             // Start the scene flow at Boot, unless --scene asked for a
             // specific screen. Jumping straight to a screen is what makes it
             // possible to capture and compare it against the reference
@@ -966,19 +982,22 @@ std::string Game::host_get_battle_result() const {
 }
 
 void Game::host_finish_tutorial_fight() {
-    // [ORIGINAL] Winning the Kenji (FIRST_FIGHT) training fight completes the
-    // tutorial (Tutorial attribute on <Warrior> in usersDefault.xml) and
-    // queues the Sensei "find yourself a weapon" dialogue. That dialogue is
-    // part of the tutorial state machine (0x1027d6c0) — its key
-    // (tutorial_shop) is absent from all 498 quests of quests.xml, so it is
-    // queued here, not by the quest engine. It plays over the Map and
-    // returns to the Map.
-    tutorial_state_ = "COMPLETE";
+    // [ORIGINAL] Winning the Kenji (FIRST_FIGHT) training fight advances the
+    // tutorial to the SHOP TRIP (SPEC_PRESENTATION Q3.6: post-boss states
+    // 0xA-0xE; state 0xB = shop trip with hints on the shop item cards,
+    // key tutorial_buy_knives; tutorial_return_map hint after the trip).
+    // The Sensei "find yourself a weapon" dialogue (key tutorial_shop, absent
+    // from quests.xml - queued here, not by the quest engine) plays over the
+    // shop and returns INTO the shop: the player is sent to the shop to buy
+    // the knives. The old code jumped straight to COMPLETE - the "send me to
+    // the shop" step never happened.
+    tutorial_state_ = "SHOP_TRIP";
     std::string line = localized("tutorial_shop");
     if (line.empty())
         line = "I knew you could do it. Now you need to find yourself a weapon.";
-    host_queue_story_dialogue({{"Sensei", line}}, scene::SceneId::Map);
-    std::printf("[tutorial] FIRST_FIGHT won -> COMPLETE, tutorial_shop dialogue queued\n");
+    host_queue_story_dialogue({{"Sensei", line}}, scene::SceneId::Shop);
+    std::printf("[tutorial] FIRST_FIGHT won -> SHOP_TRIP, tutorial_shop "
+                "dialogue queued (shop trip)\n");
 }
 
 namespace {
@@ -1328,6 +1347,20 @@ bool Game::host_buy_item(const std::string& item_id) {
                 host_queue_story_dialogue({{"Sensei", l1}, {"Sensei", l2}},
                                           scene::SceneId::Map);
                 std::printf("[tutorial] knives bought -> Lynx challenge dialogue queued\n");
+            }
+            // [Wave 11C P3] Buying the knives during the SHOP TRIP finishes
+            // the trip: the tutorial state machine moves past state 0xB and
+            // shows the tutorial_return_map hint leading back to the map
+            // (SPEC_PRESENTATION Q3.6; the key set @ 0x8F79C468..C750).
+            if (item_id == "WEAPON_KNIVES" && tutorial_state_ == "SHOP_TRIP") {
+                tutorial_state_ = "RETURN_MAP";
+                std::string l1 = localized("tutorial_return_map");
+                if (l1.empty())
+                    l1 = "Well done. Now return to the map - there is much to do.";
+                host_queue_story_dialogue({{"Sensei", l1}},
+                                          scene::SceneId::Map);
+                std::printf("[tutorial] knives bought during SHOP_TRIP -> "
+                            "RETURN_MAP, tutorial_return_map queued\n");
             }
             // Auto-save
             host_save_progress();
