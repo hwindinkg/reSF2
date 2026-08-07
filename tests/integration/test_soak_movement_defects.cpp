@@ -21,9 +21,11 @@
 //       complete a full step and never walk the fighter backward (the old
 //       align-snap bug gained 11.6 and lost 19.5 per tap).
 //   M5: when a move ends BEHIND the opponent, facing does NOT snap around
-//       at move end — it turns only on the next movement input, and the turn
-//       renders as a short rotation (the mirror blend sweeps, it does not
-//       jump ±1 in one frame).
+//       at move end — and it does NOT turn on a movement input either
+//       (VERIFY_W11 Q2 GREEN: StepForward/StepBack carry no SetDirection, a
+//       back-walk keeps facing). The mirror changes ONLY at a Controlled
+//       move start (an attack), rendered as a short rotation (the blend
+//       sweeps, it does not jump ±1 in one frame).
 
 #include "../headless_test_runner.hpp"
 
@@ -417,18 +419,50 @@ int main() {
             CHECK(stale_facing == bag_right,
                   "M5a: facing still points the pre-crossing direction (no snap)");
 
-            // Next movement input turns the fighter toward the opponent:
-            // any fresh direction press applies the enemy-facing turn. The
-            // toward-key is the OPPOSITE absolute key now (the bag sits on
-            // the other side), and it must walk the fighter back to it.
+            // Next movement input: the toward-key is the OPPOSITE absolute
+            // key now (the bag sits on the other side), and the fighter
+            // faces AWAY from it — so this press is a BACK-WALK. Back-walks
+            // NEVER turn (VERIFY_W11 Q2 GREEN: StepForward/StepBack carry
+            // no SetDirection — walking keeps facing; the old
+            // turn-on-fresh-input turned the fighter on a back-walk press,
+            // exactly the reported "turns away from the enemy" bug). The
+            // step must still cover ground toward the bag.
             const plat::Key toward_key = bag_right ? plat::Key::A : plat::Key::D;
             edge_down(runner, toward_key);
-            bool turned = false;
+            bool back_walk_turned = false;
             for (int i = 0; i < 6; ++i) {
                 runner.run_frames(1);
-                if (runner.game().host_get_player_facing() != bag_right) { turned = true; break; }
+                if (runner.game().host_get_player_facing() != bag_right) { back_walk_turned = true; break; }
             }
-            CHECK(turned, "M5b: the turn happens on the next movement input");
+            CHECK(!back_walk_turned,
+                  "M5b: the back-walk NEVER turns the fighter (facing only at "
+                  "Controlled move start)");
+
+            const float x_walk = runner.game().host_get_player_pos_x();
+            bool walked_back = false;
+            for (int i = 0; i < 40; ++i) {
+                runner.run_frames(1);
+                const float px = runner.game().host_get_player_pos_x();
+                const bool toward = bag_right ? (px < x_walk - 10.0f) : (px > x_walk + 10.0f);
+                if (toward) { walked_back = true; break; }
+            }
+            CHECK(walked_back,
+                  "M5b: the back-walk still steps toward the opponent (no turn, "
+                  "but the ground is covered)");
+            edge_up(runner, toward_key);
+
+            // Attack start = SetDirection: the next CONTROLLED move (an O
+            // punch) turns the fighter to face the enemy at its start — the
+            // ONE place the mirror may change (VERIFY_W11 Q2 GREEN).
+            edge_down(runner, plat::Key::O);
+            bool attack_turned = false;
+            for (int i = 0; i < 6; ++i) {
+                runner.run_frames(1);
+                if (runner.game().host_get_player_facing() != bag_right) { attack_turned = true; break; }
+            }
+            CHECK(attack_turned,
+                  "M5c: the attack (Controlled move start) turns the fighter "
+                  "to face the enemy");
 
             // The turn renders as a short rotation: the mirror blend must be
             // mid-sweep a few frames in, not a one-frame ±1 jump.
@@ -438,18 +472,7 @@ int main() {
             std::fprintf(stderr, "  [M5c] turn blend at +1/+3 frames: %.2f / %.2f\n", blend3, blend5);
             CHECK(std::fabs(blend3) < 0.99f || std::fabs(blend5) < 0.99f,
                   "M5c: the turn sweeps through intermediate mirror positions");
-            edge_up(runner, toward_key);
-
-            // And the fighter walks back toward the bag.
-            const float x_turn = runner.game().host_get_player_pos_x();
-            bool walked_back = false;
-            for (int i = 0; i < 40; ++i) {
-                runner.run_frames(1);
-                const float px = runner.game().host_get_player_pos_x();
-                const bool toward = bag_right ? (px < x_turn - 10.0f) : (px > x_turn + 10.0f);
-                if (toward) { walked_back = true; break; }
-            }
-            CHECK(walked_back, "M5b: after the turn the fighter steps back toward the opponent");
+            edge_up(runner, plat::Key::O);
         }
     }
 
