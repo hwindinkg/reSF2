@@ -327,6 +327,10 @@ void Game::on_init(plat::Platform& platform) {
             // Load loading screen textures (used by LoadingScene via render_loading_screen)
             if (!asset_root_.empty()) load_loading_screen();
 
+            // [Wave 11C P1] PreFight (VS) screen assets (VS_Fon halves, VS
+            // label, stripes) — shown by BattleScene before the fight.
+            if (!asset_root_.empty()) assets_->load_vs_screen(asset_root_);
+
             // Initialize audio engine
             {
                 auto& audio = aud::AudioEngine::instance();
@@ -1912,6 +1916,10 @@ void Game::host_render_scene() {
 
 void Game::host_render_loading() {
     render_loading_screen(*platform_);
+}
+
+void Game::host_render_prefight() {
+    render_prefight(*platform_);
 }
 
 void Game::init_location() {

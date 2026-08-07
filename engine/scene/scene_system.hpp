@@ -155,6 +155,12 @@ public:
     // Render the loading screen. Called by LoadingScene from its on_render.
     virtual void host_render_loading() = 0;
 
+    // [Wave 11C P1] Render the PreFight (VS) screen: the VS_Fon halves, the
+    // VS label, the stripe accents and both fighter avatars (SPEC_PRESENTATION
+    // Q1.1-2, PreFight ctor 0x8F416444 / avatar builder 0x8F411EDC). Called
+    // by BattleScene during its opening PreFight phase, before the fight.
+    virtual void host_render_prefight() {};
+
     // --- Persistence ---
 
     // Save game progress to disk. Returns true on success.

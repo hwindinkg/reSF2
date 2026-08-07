@@ -548,6 +548,13 @@ add_e2e_test(test_e2e_bag_physics)
 # +-width/2 (+-980) - both the walk clamp and the knockback clamp.
 add_e2e_test(test_e2e_enemy_y_bounds)
 
+# Wave 11C P1 (VS SCREEN + PORTRAITS): entering a battle renders the
+# PreFight (VS) screen first (VS_Fon halves + VS label + both avatars) and
+# the fight HUD shows the two avatar portraits (image/users/image/<key>.png,
+# player avatar_hero, enemy character_<name>). Boots --scene battle and
+# asserts the [VS]/[HUD-AVATAR] probes on the real binary.
+add_e2e_test(test_e2e_vs_screen)
+
 # ============================================================================
 # Phase 2: Headless integration test harness
 # ============================================================================

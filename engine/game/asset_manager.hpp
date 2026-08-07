@@ -102,6 +102,12 @@ public:
     std::vector<resf2::game::LoadingImg>& loading_images() { return loading_images_; }
     const std::vector<resf2::game::LoadingImg>& loading_images() const { return loading_images_; }
 
+    // [Wave 11C P1] PreFight (VS) screen images: the two halves of
+    // textures/fullscreen/VS_Fon.xml (VS_Fon_left/right.jpg), positioned
+    // exactly like the loading-screen halves (SPEC_PRESENTATION Q1.1).
+    std::vector<resf2::game::LoadingImg>& vs_images() { return vs_images_; }
+    const std::vector<resf2::game::LoadingImg>& vs_images() const { return vs_images_; }
+
     // HUD font
     std::shared_ptr<font::ParsedFont>& hud_font() { return hud_font_; }
     const std::shared_ptr<font::ParsedFont>& hud_font() const { return hud_font_; }
@@ -127,6 +133,7 @@ public:
     void load_hud_textures(const std::string& asset_root);
     void load_menu_textures(const std::string& asset_root);
     void load_loading_screen(const std::string& asset_root, int window_w, int window_h);
+    void load_vs_screen(const std::string& asset_root);
     void load_skeleton(const std::string& asset_root, const std::string& location);
     void load_body_model(const std::string& asset_root, const std::string& location, bool is_bag = false);
     void load_punching_bag_model(const std::string& asset_root);
@@ -201,6 +208,9 @@ public:
 
     // Loading screen images
     std::vector<resf2::game::LoadingImg> loading_images_;
+
+    // [Wave 11C P1] VS (PreFight) screen images (VS_Fon.xml halves).
+    std::vector<resf2::game::LoadingImg> vs_images_;
 
     // HUD font
     std::shared_ptr<font::ParsedFont> hud_font_;

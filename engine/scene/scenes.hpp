@@ -236,6 +236,14 @@ private:
     int rounds_total_ = 1;
     uint32_t between_rounds_ms_ = 0;  // pause before the next round starts
     uint32_t guard_timer_ms_ = 0;  // prevent immediate transitions after entering
+    // [Wave 11C P1] PreFight (VS) phase at battle entry: the opening frames
+    // render the VS screen (host_render_prefight) instead of the arena, the
+    // way the original runs PreFight before ScreenFight (SPEC_PRESENTATION
+    // Q1.5, "startFight" trigger). Gameplay still ticks underneath so input
+    // scripts keep frame alignment; the overlay just hides the arena until
+    // the fight is controllable.
+    int prefight_frames_ = 0;
+    static constexpr int kPrefightFrames = 96;  // ~1.5 s at 16 ms/frame
     static constexpr uint32_t kGuardMs = 500;  // 500ms guard
     static constexpr uint32_t kBetweenRoundsMs = 1500;
 };

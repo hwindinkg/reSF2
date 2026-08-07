@@ -1343,7 +1343,11 @@ void AssetManager::load_loading_screen(const std::string& asset_root, int window
         return;
     }
     auto* root_node = doc.root();
-    if (!root_node || root_node->name != "Images") return;
+    // [Wave 11C P1] root() is the synthetic "#document" node; the top
+    // element (<Images>) is its first child.
+    if (!root_node) return;
+    root_node = root_node->first_child("Images");
+    if (!root_node) return;
     for (const auto& child : root_node->children) {
         if (child.name != "Image") continue;
         auto file = child.attr("File");
@@ -1369,6 +1373,99 @@ void AssetManager::load_loading_screen(const std::string& asset_root, int window
     }
     if (loading_images_.empty()) {
         std::printf("  No loading images found, loading screen will be blank\n");
+    }
+}
+
+// ---------- load_fullscreen_images_xml ----------
+
+// [Wave 11C P1] Shared loader for fullscreen <Images> XML sheets
+// (startLoading.xml, VS_Fon.xml, ...). Each <Image File= X= Y=> is decoded
+// from the 1536-tier texture tree and stored with its sheet-relative
+// position; renderers place them with the same 1820x1024 canvas law.
+static void load_fullscreen_images_xml(const std::filesystem::path& root,
+                                       const std::string& xml_file,
+                                       std::vector<resf2::game::LoadingImg>& out) {
+    std::string xml_path;
+    for (const auto& dir : {root/"assets"/"1536"/"textures"/"fullscreen",
+                             root/"1536"/"textures"/"fullscreen",
+                             root/"assets"/"1536"/"fullscreen",
+                             root/"1536"/"fullscreen"}) {
+        auto p = dir/xml_file;
+        if (std::filesystem::exists(p)) { xml_path = p.string(); break; }
+    }
+    if (xml_path.empty()) {
+        std::printf("  %s not found, screen will be blank\n", xml_file.c_str());
+        return;
+    }
+    fmt::XmlDocument doc;
+    if (!doc.parse(read_text(xml_path))) {
+        std::fprintf(stderr, "[fullscreen] xml parse error (%s): %s\n",
+                     xml_file.c_str(), doc.error().c_str());
+        return;
+    }
+    auto* root_node = doc.root();
+    // [Wave 11C P1] XmlDocument::root() is the synthetic "#document" node;
+    // the top element (<Images>) is its first child. The old
+    // `root_node->name != "Images"` test never matched, so the sheet
+    // silently loaded nothing.
+    if (!root_node) return;
+    root_node = root_node->first_child("Images");
+    if (!root_node) return;
+    for (const auto& child : root_node->children) {
+        if (child.name != "Image") continue;
+        auto file = child.attr("File");
+        auto x = tof(child.attr("X"));
+        auto y = tof(child.attr("Y"));
+        std::filesystem::path img_path;
+        for (const auto& base : {root/"assets"/"1536", root/"1536",
+                                 root/"assets", root}) {
+            auto p = base / file;
+            if (std::filesystem::exists(p)) { img_path = p; break; }
+        }
+        if (img_path.empty()) continue;
+        auto data = read_file(img_path.string());
+        int w, h, ch;
+        auto* px = stbi_load_from_memory(
+            (const stbi_uc*)data.data(), (int)data.size(), &w, &h, &ch, 4);
+        if (px) {
+            auto tex = std::make_unique<ren::Texture2D>();
+            tex->init_rgba(w, h, px);
+            stbi_image_free(px);
+            out.push_back({std::move(tex), x, y});
+        }
+    }
+    std::printf("  %s: %zu image(s)\n", xml_file.c_str(), out.size());
+}
+
+// ---------- load_vs_screen ----------
+
+// [Wave 11C P1] PreFight (VS) screen assets — SPEC_PRESENTATION Q1.1:
+// PreFight ctor 0x8F416444 loads textures/fullscreen/VS_Fon.xml (two JPEG
+// halves), textures/fullscreen/Stripe_left/right.png and
+// textures/misc/VS.png (the "VS" label).
+void AssetManager::load_vs_screen(const std::string& asset_root) {
+    auto root = std::filesystem::path(asset_root);
+    load_fullscreen_images_xml(root, "VS_Fon.xml", vs_images_);
+    // The label and stripe accents are loose PNGs; keep them in hud_textures_
+    // under their frame names so renderers can look them up uniformly.
+    for (const auto& base : {root/"assets"/"1536", root/"1536"}) {
+        auto load_png = [&](const std::string& rel, const std::string& name) {
+            auto p = base / rel;
+            if (!std::filesystem::exists(p) || hud_textures_.count(name)) return;
+            auto data = read_file(p.string());
+            int w, h, ch;
+            auto* px = stbi_load_from_memory(
+                (const stbi_uc*)data.data(), (int)data.size(), &w, &h, &ch, 4);
+            if (px) {
+                auto tex = std::make_unique<ren::Texture2D>();
+                tex->init_rgba(w, h, px);
+                stbi_image_free(px);
+                hud_textures_[name] = std::move(tex);
+            }
+        };
+        load_png("textures/misc/VS.png", "VS");
+        load_png("textures/fullscreen/Stripe_left.png", "Stripe_left");
+        load_png("textures/fullscreen/Stripe_right.png", "Stripe_right");
     }
 }
 
