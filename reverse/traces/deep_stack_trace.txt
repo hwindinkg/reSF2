@@ -1,4 +1,0 @@
-s3eDeviceYield at 0x961db974 (s3e+5a974)
-Hooked s3eDeviceYield. Enter a battle to capture yields.
-
-=== s3eDeviceYield #1 ===

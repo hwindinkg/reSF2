@@ -1,9 +1,0 @@
-# Deterministic input trace used by test_input_trace (see tests/CMakeLists.txt).
-# Format: frame <N> keydown|keyup <KEY>
-#
-# The intro stance (stance_2, 52 frames @20fps) runs for ~160 game frames, so
-# every action here happens after it has finished.
-frame 200 keydown D
-frame 230 keyup D
-frame 300 keydown Space
-frame 310 keyup Space

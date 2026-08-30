@@ -1,3 +1,0 @@
-libs3e_android loaded at 0x96181000
-s3eDeviceYield at 0x961db974
-Hooked. Writing to yield_trace.txt. Enter a battle!

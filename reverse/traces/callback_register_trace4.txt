@@ -1,9 +1,0 @@
-[libs3e_android.so] loaded at 0x96181000 (size 0xec000)
-s3eDeviceRegister at 0x961daed8
-s3eDeviceYield at 0x961db974
-Game region: 0x8eb76000 size=0x82d000 prot=rwx /dev/zero (deleted)
-Found 1 game region(s)
-s3eDeviceRegister hooked
-s3eDeviceYield hooked
-
-=== Starting trace (enter a battle to see calls) ===
