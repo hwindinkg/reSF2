@@ -1,6 +1,0 @@
-[libs3e_android.so] loaded at 0x96181000 (size 0xec000)
-s3eDeviceRegister at 0x961daed8
-s3eDeviceYield at 0x961db974
-Detected game region: 0x8f99e000 (/data/app/com.nekki.shadowfight-QVbKIGixV_zuhATNLJ-oBg==/lib/arm/libs3eTapjoy.so)
-s3eDeviceRegister hooked
-s3eDeviceYield hooked

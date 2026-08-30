@@ -1,8 +1,0 @@
-[libs3e_android.so] loaded at 0x96181000 (size 0xec000)
-s3eDeviceRegister at 0x961daed8
-s3eDeviceYield at 0x961db974
-s3eDeviceRegister hooked (max 30 calls)
-s3eDeviceYield hooked (max 30 calls)
-TypeError: cannot read property 'indexOf' of undefined
-    at setGameRegion (E:\reSF2\reverse\frida_hooks\register_and_yield.js:87)
-    at onEnter (E:\reSF2\reverse\frida_hooks\register_and_yield.js:165)
