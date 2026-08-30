@@ -13,12 +13,26 @@ internal static class Program
     private const string RepoMarker = "reference";
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         string repoRoot = FindRepoRoot();
         string wwwRoot = Path.Combine(repoRoot, "reference", "www");
         string runnerDir = Path.Combine(repoRoot, "reference", "runner");
         string tracesDir = Path.Combine(repoRoot, "reference", "traces");
+
+        string? inputScript = ParseInputScriptArg(args);
+        if (inputScript is not null)
+        {
+            if (!Path.IsPathRooted(inputScript))
+            {
+                inputScript = Path.Combine(repoRoot, inputScript);
+            }
+
+            if (!File.Exists(inputScript))
+            {
+                throw new FileNotFoundException($"Input script not found: {inputScript}");
+            }
+        }
 
         // Swap the WinUI bridge for the browser GameInterface (idempotent, overwrite).
         CopyRunnerFile(Path.Combine(runnerDir, "index.html"), Path.Combine(wwwRoot, "index.html"));
@@ -33,9 +47,22 @@ internal static class Program
         Console.WriteLine($"[shell] serving {wwwRoot} at {url}");
 
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm(url, tracesDir));
+        Application.Run(new MainForm(url, tracesDir, inputScript));
 
         Console.WriteLine("[shell] form closed, stopping server");
+    }
+
+    private static string? ParseInputScriptArg(string[] args)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--input-script", StringComparison.OrdinalIgnoreCase))
+            {
+                return args[i + 1];
+            }
+        }
+
+        return null;
     }
 
     private static void CopyRunnerFile(string source, string destination)

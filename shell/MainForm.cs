@@ -19,16 +19,24 @@ public sealed class MainForm : Form
 {
     private const int FirstScreenshotDelayMs = 8000;
     private const int SecondScreenshotDelayMs = 20000;
+    private const int DefaultInputTickMs = 50;
+    private const int TapHoldMs = 120;
 
     private readonly WebView2 _webView = new();
     private readonly string _tracesDir;
     private readonly string _consoleLogPath;
     private readonly object _consoleLock = new();
+    private readonly string? _inputScriptPath;
+    private readonly System.Windows.Forms.Timer _inputTimer = new();
+    private List<InputCommand>? _inputCommands;
+    private int _inputCommandIndex;
 
-    public MainForm(string url, string tracesDir)
+    public MainForm(string url, string tracesDir, string? inputScriptPath)
     {
         _tracesDir = tracesDir;
         _consoleLogPath = Path.Combine(tracesDir, "console.log");
+        _inputScriptPath = inputScriptPath;
+        _inputTimer.Tick += OnInputTimerTick;
 
         Text = "reSF2 Oracle";
         ClientSize = new Size(1280, 720);
@@ -148,6 +156,11 @@ public sealed class MainForm : Form
 
         AppendConsoleLine($"[shell] navigation completed: {_webView.CoreWebView2.Source}");
 
+        if (_inputScriptPath is not null)
+        {
+            StartInputScript(_inputScriptPath);
+        }
+
         // Screenshot 1 at ~8s after navigation, screenshot 2 at ~20s.
         await Task.Delay(FirstScreenshotDelayMs);
         await CaptureScreenshotAsync("boot.png");
@@ -177,5 +190,133 @@ public sealed class MainForm : Form
         {
             File.AppendAllText(_consoleLogPath, line + Environment.NewLine);
         }
+    }
+
+    private void StartInputScript(string path)
+    {
+        try
+        {
+            _inputCommands = InputScriptParser.Parse(path);
+        }
+        catch (Exception ex)
+        {
+            AppendConsoleLine($"[shell] input script load failed: {ex.Message}");
+            return;
+        }
+
+        _inputCommandIndex = 0;
+        AppendConsoleLine($"[shell] input script loaded: {path} ({_inputCommands.Count} commands)");
+        _inputTimer.Interval = DefaultInputTickMs;
+        _inputTimer.Start();
+    }
+
+    private void OnInputTimerTick(object? sender, EventArgs e)
+    {
+        _inputTimer.Interval = DefaultInputTickMs;
+
+        if (_inputCommands is null || _inputCommandIndex >= _inputCommands.Count)
+        {
+            _inputTimer.Stop();
+            AppendConsoleLine("[shell] input script finished");
+            return;
+        }
+
+        InputCommand command = _inputCommands[_inputCommandIndex++];
+        switch (command.Kind)
+        {
+            case InputCommandKind.Wait:
+                _inputTimer.Interval = Math.Max(command.Milliseconds, 1);
+                break;
+            case InputCommandKind.Tap:
+                _ = DispatchTapAsync(command.X, command.Y);
+                break;
+            case InputCommandKind.Move:
+                _ = DispatchMoveAsync(command.X, command.Y);
+                break;
+            case InputCommandKind.Key:
+                _ = DispatchKeyAsync(command.KeyCode);
+                break;
+        }
+    }
+
+    private async Task DispatchTapAsync(int x, int y)
+    {
+        AppendConsoleLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INPUT] tap {x} {y}");
+        await ExecuteInputScriptAsync(BuildPointerEventScript(x, y, "pointerdown"));
+        await ExecuteInputScriptAsync(BuildTouchEventScript(x, y, "touchstart"));
+        // The game's button state (dy) reports a press as "down" for exactly one
+        // frame poll; a synchronous down+up is never observed. Hold the press
+        // across a few frames so the fight screen sees Db(0) and moves/attacks.
+        await Task.Delay(TapHoldMs);
+        await ExecuteInputScriptAsync(BuildPointerEventScript(x, y, "pointerup"));
+        await ExecuteInputScriptAsync(BuildTouchEventScript(x, y, "touchend"));
+    }
+
+    private async Task DispatchMoveAsync(int x, int y)
+    {
+        AppendConsoleLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INPUT] move {x} {y}");
+        await ExecuteInputScriptAsync(BuildPointerEventScript(x, y, "pointermove"));
+    }
+
+    private async Task DispatchKeyAsync(int keyCode)
+    {
+        AppendConsoleLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INPUT] key {keyCode}");
+        await ExecuteInputScriptAsync(BuildKeyEventScript(keyCode, "keydown"));
+        // Same press-hold requirement as taps: the game's button state only
+        // reports a press as "down" for one frame poll, so hold across a few.
+        await Task.Delay(TapHoldMs);
+        await ExecuteInputScriptAsync(BuildKeyEventScript(keyCode, "keyup"));
+    }
+
+    private async Task ExecuteInputScriptAsync(string script)
+    {
+        try
+        {
+            await _webView.CoreWebView2.ExecuteScriptAsync(script);
+        }
+        catch (Exception ex)
+        {
+            AppendConsoleLine($"[shell] input dispatch failed: {ex.Message}");
+        }
+    }
+
+    private static string BuildPointerEventScript(int x, int y, string type)
+    {
+        // The game attaches its pointer/touch listeners to the main canvas
+        // (#gfx, created by the runtime), not to window/document. Dispatching
+        // on the canvas reaches those listeners and bubbles up to document and
+        // window, so window/document listeners fire too.
+        return $@"
+(function() {{
+    var target = document.getElementById('gfx') || document;
+    var opts = {{ bubbles: true, cancelable: true, clientX: {x}, clientY: {y}, pointerId: 1, pointerType: 'touch', isPrimary: true }};
+    var evt = new PointerEvent('{type}', opts);
+    target.dispatchEvent(evt);
+}})();";
+    }
+
+    private static string BuildTouchEventScript(int x, int y, string type)
+    {
+        // TouchEventInit requires real Touch instances (plain objects are
+        // rejected by the constructor), so build one via new Touch(...).
+        return $@"
+(function() {{
+    var target = document.getElementById('gfx') || document;
+    var touch = new Touch({{ identifier: 1, target: target, clientX: {x}, clientY: {y} }});
+    var opts = {{ bubbles: true, cancelable: true, touches: [touch], targetTouches: [touch], changedTouches: [touch] }};
+    var evt = new TouchEvent('{type}', opts);
+    target.dispatchEvent(evt);
+}})();";
+    }
+
+    private static string BuildKeyEventScript(int keyCode, string type)
+    {
+        return $@"
+(function() {{
+    var target = document.getElementById('gfx') || document;
+    var opts = {{ bubbles: true, cancelable: true, keyCode: {keyCode}, which: {keyCode} }};
+    var evt = new KeyboardEvent('{type}', opts);
+    target.dispatchEvent(evt);
+}})();";
     }
 }
