@@ -30,6 +30,7 @@ add_library(sf2_data STATIC
     zstd_stream.cpp
     xml_doc.cpp
     xml_archive.cpp
+    anim_archive.cpp
 )
 target_include_directories(sf2_data PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(sf2_data PUBLIC libzstd_static pugixml::pugixml)
