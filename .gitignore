@@ -173,3 +173,10 @@ err35c.txt
 user_backup.xml
 users_backup.xml
 
+# Legacy cleanup: backup archives, tool state, reference assets
+backup/
+.repowise/
+reference/www/
+reference/runner/
+reference/traces/
+
