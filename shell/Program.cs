@@ -23,6 +23,7 @@ internal static class Program
         // Swap the WinUI bridge for the browser GameInterface (idempotent, overwrite).
         CopyRunnerFile(Path.Combine(runnerDir, "index.html"), Path.Combine(wwwRoot, "index.html"));
         CopyRunnerFile(Path.Combine(runnerDir, "microsite-game-interface.js"), Path.Combine(wwwRoot, "microsite-game-interface.js"));
+        CopyRunnerFile(Path.Combine(runnerDir, "trace.js"), Path.Combine(wwwRoot, "trace.js"));
 
         int port = PickFreePort();
         using var server = new HttpServer(wwwRoot, port);
