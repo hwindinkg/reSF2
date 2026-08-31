@@ -1,5 +1,8 @@
 // Fighter: clip sampling (Te.eda, MODEL_FORMAT §2.2) + macro-node
 // computation (Fl.seb, L797) + 2D triangle vertex build (dv.ia, L840).
+//
+// Phase 3.2b: move execution — input -> move selection -> clip playback,
+// intervals, facing/mirror (JS study cited inline in fighter.hpp).
 
 #include "scene/fighter.hpp"
 
@@ -7,14 +10,230 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <set>
 
 #include "anim_archive.hpp"
+#include "scene/conditions.hpp"
+#include "scene/move_def.hpp"
 
 namespace sf2::scene {
 
 void Fighter::set_model(const Model& model) {
     model_ = model;
     pos_.assign(model_.bones.size() * 2, 0.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Move execution (Phase 3.2b) — JS `wd`/`Te`/`de` semantics
+// ---------------------------------------------------------------------------
+
+// JS `ra.Hza` (L684-685): the fighter's move set `me` is built by testing
+// every parsed move's Locks against the fighter's items. Task contract:
+// the equipped weapon (Fists) contributes all moves tagged
+// `TacticWeapon == weapon_subtype` (JS `Fa.Ueb` L711 reads TacticWeapon
+// into `QX`). Sorted by Priority desc so `hb[0]` = the highest-priority
+// candidate (`Ci` L800, `Zka` L502).
+void Fighter::build_move_list(const std::map<std::string, MoveDef>& all_moves,
+                              const std::string& weapon_subtype,
+                              bool include_universal) {
+    hb_.clear();
+    for (const auto& kv : all_moves) {
+        const MoveDef& m = kv.second;
+        if (!m.tactic_weapon.empty()) {
+            // Weapon-locked move: only the matching weapon contributes it.
+            if (m.tactic_weapon != weapon_subtype) {
+                continue;
+            }
+        } else if (!include_universal) {
+            continue;
+        }
+        // No TacticWeapon -> universal (Skeleton lock passes for all).
+        hb_.push_back(&m);
+    }
+    std::sort(hb_.begin(), hb_.end(),
+              [](const MoveDef* a, const MoveDef* b) { return a->priority > b->priority; });
+}
+
+void Fighter::age_keys() {
+    // JS `zl.ia` (L798): after 30 frames the tap buffer is cleared.
+    if (tap_age_ > 0) {
+        ++tap_age_;
+        if (tap_age_ > 30) {
+            tap_age_ = 0;
+            for (auto it = keys_.begin(); it != keys_.end();) {
+                if (it->press == press_type::tap) it = keys_.erase(it);
+                else ++it;
+            }
+        }
+    }
+}
+
+// JS `Kl.Sgb` (L798): press buffers the key as a Tap and marks Hold.
+// `Xgb` (L799) removes it from Hold on release.
+void Fighter::input(sf2::scene::key_type key, sf2::scene::press_type press) {
+    key_input ki{key, press};
+    // Replace an existing entry for the same key (Tap replaces Tap).
+    for (auto& k : keys_) {
+        if (k.key == key && k.press == press) {
+            k = ki;
+            return;
+        }
+    }
+    keys_.push_back(ki);
+    // Tap also implies Hold is active (JS `zl.yLa` L799 builds Hold from
+    // the pressed keys).
+    if (press == press_type::tap) {
+        tap_age_ = 1;
+        bool held = false;
+        for (const auto& k : keys_) {
+            if (k.key == key && k.press == press_type::hold) held = true;
+        }
+        if (!held) keys_.push_back({key, press_type::hold});
+    }
+    if (press == press_type::release) {
+        // Remove the hold.
+        for (auto it = keys_.begin(); it != keys_.end();) {
+            if (it->key == key && it->press == press_type::hold) it = keys_.erase(it);
+            else ++it;
+        }
+    }
+}
+
+// JS `jc.c7a` (L691): an interval is active when
+//   max(start, qx) <= frame <= min(finish, Lj).
+std::vector<std::string> Fighter::intervals_at(int frame) const {
+    std::vector<std::string> out;
+    if (current_move_ == nullptr) return out;
+    for (const Interval& iv : current_move_->intervals) {
+        const int s = std::max(iv.start, current_move_->first_frame);
+        const int e = iv.end;  // parse already applied EndFrame+2 default
+        if (s <= frame && frame <= e) {
+            out.push_back(iv.name.empty() ? "type" + std::to_string(iv.type) : iv.name);
+        }
+    }
+    return out;
+}
+
+// JS `wd.NS` (L506) -> `Te.Skb` (L550): start the move's clip.
+//   - conditions tested by the caller (try_select_move)
+//   - `Mq = a.qx` (FirstFrame) — native: move_frame = FirstFrame
+//   - facing `b` = ±1 toward the enemy (JS `b6a`, L603: sign of enemyX - meX)
+//   - `Peb()` (L560) auto-mirrors when the MirrorNode flips — the native
+//     pose mirror is the render `facing` (x flip in Fighter::sample).
+//
+// Keys gating: the fighter's OWN context keeps `gm` true (only the AI
+// move-finder `de.V1` clears it: `f.gm=!1` L601). With gm=true the Keys
+// condition matches the buffered keys (`vm.he` L749:
+// `(a.keys.S1||a.Wl>0?this.xn:this.TDa).$ga(a.keys)` — the move's required
+// keys must be a subset of the buffered keys). So `keys_gm` is set TRUE
+// here and the caller must have buffered the required keys.
+bool Fighter::try_start_move(const MoveDef& move, FightContext& ctx) {
+    // Condition test (JS `de.V1` L601-602): candidate in `me`, then
+    // `a.Yz(...)` runs the Conditions tree. The native evaluator mirrors
+    // `Ha.Sea`/`he` with the buffered keys + current state.
+    ctx.candidate_moves = {move.name};
+    ctx.keys.clear();
+    for (const auto& k : keys_) {
+        ctx.keys.push_back({k.key, k.press});
+    }
+    ctx.keys_gm = true;  // the fighter's own context stays input-gated
+    std::string trace;
+    if (!eval_move_conditions(move.conditions, ctx, &trace)) {
+        return false;
+    }
+
+    current_move_ = &move;
+    move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
+    active_intervals_.clear();
+
+    // Consume the buffered tap (JS `Okb` L506: `Kl.reset()` + `Kl.Ptb(a)`
+    // sets the current key as the move's trigger).
+    tap_age_ = 0;
+    for (auto it = keys_.begin(); it != keys_.end();) {
+        if (it->press == press_type::tap) it = keys_.erase(it);
+        else ++it;
+    }
+
+    // Clip lookup: FileName -> anim_archive entry (JS `jc.uja` L693 loads
+    // the clip by `Eza` = FileName minus ".bytes").
+    if (clip_lookup_) {
+        std::string clip_name = move.file_name;
+        const std::string suffix = ".bytes";
+        if (clip_name.size() > suffix.size() &&
+            clip_name.compare(clip_name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            clip_name = clip_name.substr(0, clip_name.size() - suffix.size());
+        }
+        current_clip_ = clip_lookup_(clip_name);
+    }
+
+    // Facing toward the enemy (JS `b6a` L603: `enemy.x - my.x >= 0 ? 1 : -1`).
+    facing_ = (enemy_x_ - world_x_) >= 0.0f ? 1 : -1;
+    sample_current();
+    return true;
+}
+
+// JS `wd.Lea` (L512) snapshots the buffered keys into `Fc.keys`; the move
+// selection tests each `hb` candidate in priority order (JS `Zka` L502 +
+// `de.V1` L601). The FIRST passing move starts. The `1key` template means
+// one buffered Tap of a single key.
+std::string Fighter::try_select_move(FightContext& ctx) {
+    // A move can only start when no clip is playing (JS: `tKa` L499 guards
+    // `da.Ua==null` for strike checks; the KeyPressed event handler only
+    // acts when the fighter is not busy).
+    if (current_move_ != nullptr) {
+        return "";
+    }
+    for (const MoveDef* m : hb_) {
+        if (m == nullptr) continue;
+        // Input-selectable moves are those whose Events contain
+        // "KeyPressed" (JS `Gc.Vkb` L671 -> `Gc.EZa` L676: the KeyPressed
+        // event walks `d.Su.dea(2)` = the KeyPressed-indexed move list).
+        if (!m->has_event("KeyPressed")) {
+            continue;
+        }
+        if (try_start_move(*m, ctx)) {
+            return m->name;
+        }
+    }
+    return "";
+}
+
+// JS `Te.ia` (L547-548): each 60 Hz update advances `Xh` (playback frame)
+// and `fG` (physics frame); when `Xh+2 >= clipLen` the clip ends (`KNa()`
+// + lS -> EStopAnimationEvent) and the fighter returns to idle.
+// JS `vp` (L562-563) -> `rrb` (L552) -> `jc.c7a` (L691) recomputes the
+// active intervals each frame.
+void Fighter::advance(float dt) {
+    (void)dt;  // fixed 60 Hz — one frame per call (JS 1/60 step)
+    if (current_move_ == nullptr || current_clip_ == nullptr) {
+        return;
+    }
+
+    // Interval update: active when max(start,qx) <= frame <= min(finish,Lj).
+    active_intervals_.clear();
+    for (const std::string& n : intervals_at(move_frame_)) {
+        active_intervals_.insert(n);
+    }
+
+    // Clip end (JS `Te.ia` L547-548: `Xh+2 >= len` -> KNa + lS + Sca).
+    const int clip_len = static_cast<int>(current_clip_->frames.size());
+    if (move_frame_ + 2 >= clip_len) {
+        // Transition back to idle (JS: EStopAnimationEvent -> the fight
+        // controller re-enters stance idle).
+        current_move_ = nullptr;
+        current_clip_ = nullptr;
+        active_intervals_.clear();
+        return;
+    }
+
+    ++move_frame_;  // JS `Xh++`
+    sample_current();
+}
+
+void Fighter::sample_current() {
+    if (current_clip_ != nullptr) {
+        sample(*current_clip_, move_frame_, world_x_, world_y_, facing_);
+    }
 }
 
 void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,

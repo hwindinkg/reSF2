@@ -223,7 +223,9 @@ bool eval_keys(const Cond& c, const FightContext& ctx) {
     };
 
     // JS `$ga`: every required key of every required press-type must be
-    // present in the fighter's buffer.
+    // present in the fighter's buffer. An unknown key type maps to code 0
+    // (JS `sa.HQ` returns 0 for unregistered names, and the buffered codes
+    // are 1..14), so it can never match — the condition fails.
     bool ok = true;
     for (const std::string& w : wanted) {
         const std::size_t colon = w.find(':');
@@ -231,7 +233,10 @@ bool eval_keys(const Cond& c, const FightContext& ctx) {
         const std::string press_s = colon == std::string::npos ? "Tap" : w.substr(colon + 1);
         const int k = key_id(type_s);
         const press_type p = press_id(press_s);
-        if (k == 0) continue;
+        if (k == 0) {
+            ok = false;
+            break;
+        }
         if (!ctx.key_pressed(static_cast<key_type>(k), p)) {
             ok = false;
             break;
