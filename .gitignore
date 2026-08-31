@@ -182,3 +182,6 @@ reference/traces/
 
 # Native port: extracted asset output
 reference/extracted/
+
+# Native port: runtime save files
+reference/saves/

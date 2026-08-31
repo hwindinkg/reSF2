@@ -426,3 +426,111 @@ gap).
 - The native `FightCamera::framing` mirrors the fight-start view
   (center on the fighters' midpoint, zoom = min(1, viewW/span)); the JS
   intro curve (`Sya`'s smoothed zoom/pan) is simplified.
+
+
+---
+
+## 9. App shell — screen manager, save/load, main menu, map (Phase 3.6a)
+
+Ported from `reference/www/sf2.502f0946.js`. All line numbers are 1-based
+against the current build (matching JS_MAP.md).
+
+### 9.1 The main loop -> screen manager chain
+
+The game's frame driver (`Pg`, L47-60) runs a fixed 60 Hz update decoupled
+from the rAF render rate (`Us`, L135: `Gy` accumulator, `Bm` = 1/60):
+
+```
+requestAnimationFrame (Qg.start, L135)
+ └─ Pg.xeb(dt) (L56)
+     ├─ Kk.update() window
+     ├─ Ts.aa(dt) task scheduler
+     ├─ input screens Y3() per-frame poll (Ik/Hk/lf/Jk/rf)
+     └─ fixed 60 Hz: Pg.aa(1/60) (L57)
+         ├─ input states update
+         ├─ root.oja(dt)  (Db scene graph, L29)
+         │   └─ mc.aa(dt) (L124) → $d.aa(dt) (L121) → elements.oja
+         └─ Pg.Ea(alpha) (L57): root.nja → mc.Ea (L125) → $d.Ea → elements.nja
+```
+
+The screen manager `mc` (L122-127): `mc.K` singleton, `stack[]` of `$d`
+screen states, `Taa(cls, caller, info)` pushes a screen (L126), `aa(a)`
+(L124) runs the transition state machine (`pu` 1..3) then updates every
+active state (`d.active && d.aa(a)`, the JS L125 gate), `Ea(a)` (L125)
+renders. `B()` (L124) tears down.
+
+The screen-state base `$d` (L119-122): `elements` (a `Db` "Elements"
+node), `content`/`node` render nodes, `time`, `active`, `state` (the
+`Te(n)` state machine, L121: 2/3/5 = active, else inactive), `Mr`
+(manager), `caller`, `info`. `jI(cls, info)` (L120) = `Mr.Taa(cls, this,
+info)` — the push helper every screen uses.
+
+The native port (`core/app/screen_manager.{hpp,cpp}`) keeps the stack +
+the active-gate + update/render passes; the JS `ae` fade transitions are
+replaced by an instantaneous switch (flagged: the exact fade is out of
+scope — the screen flow is what matters this phase).
+
+### 9.2 The save/load — users.xml (JS `Aa`/`SF2User`)
+
+- Storage keys (JS L2462): `Aa.WU = "SF2User"`, `Aa.Y6 = "SF2Packs"`,
+  `cg.P6 = "SF2Flags"`.
+- `Aa.load()` (L70-71): reads `SF2User` (a `Ck` storage handle), zstd+
+  base64 decodes (`ri.decode`), `Rb.parse` → the users XML document.
+  `Aa.save(a)` (L71): `a.stringify("\t", !0)` → `ri.encode` → store.
+- There is no literal "users.xml" in the JS — the SF2User save IS the
+  serialized users.xml document (JS_MAP §6.2).
+- The template: asset id 9 = `users_default.b7da2019.xml` (G.rq L2490);
+  extracted copy `reference/extracted/xml/res/users_default.xml`. The
+  Warrior: Money=0, Strength=3, Level=1, Power=5, Tutorial=MOVE,
+  Weapon=Fists, Armor=Body, Helm=Head, Ranged=NoRanged, Magic=NoMagic,
+  Skeleton=Skeleton, CurrentZone=ZONE_1, plus the equipped `<Items>`.
+- First run: `L.aia` (L65): `this.BJ = !Aa.Ue() && Aa.init()` — when no
+  save exists the game re-initializes from the default.
+
+The native `SaveSystem` (`core/app/save_system.{hpp,cpp}`) mirrors this:
+`load()` returns the template when no save file exists, `save()` rewrites
+the Warrior progression into the document (preserving the whole
+users.xml) and writes the file.
+
+### 9.3 The GeneralMenu screen (screen 8)
+
+- Enum: `xn` L1167-1168 (`GeneralMenu` = 8).
+- The main-menu UI: the `za` top bar (L1972-1977: `topPanel` frame from
+  the misc atlas, money/energy counters) over the dojo background. The
+  four tab buttons are the `cs` class (L2188-2189):
+  `a(0, y.WRa, y.YRa, y.XRa)` = Progress, `a(1, y.bSa, ...)` = Strikes,
+  `a(2, y.TRa, ...)` = Achiev, `a(3, y.ZRa, ...)` = Seal — the
+  `buttons/Progress[_active|_pushed]` etc. frames from the profile atlas.
+- The entry buttons (Fight/Shop/Profile) are the menu atlas frames
+  (`menu.aaef83fb.json`): `Dojo_normal/_active/_pushed`, `Map_*`,
+  `Shop_*`, `Profile_*` — the Fight entry is the Dojo button.
+- Clicking Fight → `wa.F().mp(5)` → the Map screen (the JS `qxa` L1213:
+  `a.type != "FightPVP" && wa.F().mp(5)` after a battle result; the menu
+  itself navigates via `wa.F().mp`).
+
+### 9.4 The Map screen (screen 5)
+
+- `Ya` (L2124-2132, `dJ(){return 5}`): the battle-node screen. The
+  backgrounds are `map/part0..6` (asset ids 336..324, G.rq L2490); the
+  `map0` frame is 2046x854.
+- The battle nodes come from stages.xml `<Zone>/<Battle>` with `X`/`Y`
+  positions (the JS `Ch`/`qb` parsers, L1224/L1404). Node placement
+  (`qe.X0a`, L2144): `node_x = X*uM + bg.w/2`, `node_y = -Y*uM + bg.h/2`
+  (uM ≈ 1; the node button art `BattleBtnBase/base_<name>` +
+  `BattleBtnActive/active_<name>` from map/buttons.json).
+- Clicking a node → `wa.F().mp(6, battle)` → the Fight screen (the JS
+  `Ya` battle-start path L2131-2132 + `v.kD` L1217).
+
+### 9.5 The screen-transition flow
+
+```
+Preloader(0) → Loader(2) → Dojo(3) → GeneralMenu(8)
+  (boot: L66-67 `lbb(Rg)` → the Preloader; `ad.load` L1969 pushes the
+   target screen via `Zd.load(a)` L1837)
+GeneralMenu(8) --Fight--> Map(5) --node--> Fight(6) --result--> Map(5)
+  (the results flow `v.kD(new Fh, ...)` L1217 + `qxa` L1213 pops back)
+```
+
+The native shell boots straight to GeneralMenu (skipping the web
+loading screens) and wires Menu → Map → placeholder Fight result → back
+to Map.
