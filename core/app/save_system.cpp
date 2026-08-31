@@ -98,6 +98,16 @@ WarriorSave SaveSystem::load() {
     if (warrior.attribute("Tutorial")) out.tutorial = warrior.attribute("Tutorial").value();
     if (warrior.attribute("Tactic")) out.tactic = warrior.attribute("Tactic").value();
     if (warrior.attribute("CurrentZone")) out.current_zone = warrior.attribute("CurrentZone").value();
+
+    // The owned items (JS `$g.parse` reads the Warrior <Items> children).
+    out.items.clear();
+    for (pugi::xml_node item : warrior.child("Items").children("Item")) {
+        WarriorSave::OwnedItem oi;
+        if (item.attribute("Name")) oi.name = item.attribute("Name").value();
+        oi.count = sf2::data::xml_attr_int(item, "Count", 1);
+        oi.equipped = sf2::data::xml_attr_bool(item, "Equipped", false);
+        out.items.push_back(std::move(oi));
+    }
     return out;
 }
 
@@ -114,7 +124,7 @@ void SaveSystem::save(const WarriorSave& w) {
     if (root == nullptr || std::string(root.name()) != "Root") {
         throw std::runtime_error("SaveSystem: cannot save — root element missing");
     }
-    const pugi::xml_node warrior = find_warrior(root);
+    pugi::xml_node warrior = find_warrior(root);
     if (!warrior) {
         throw std::runtime_error("SaveSystem: cannot save — no <Warrior>");
     }
@@ -134,6 +144,31 @@ void SaveSystem::save(const WarriorSave& w) {
     warrior.attribute("Tutorial").set_value(w.tutorial.c_str());
     warrior.attribute("Tactic").set_value(w.tactic.c_str());
     warrior.attribute("CurrentZone").set_value(w.current_zone.c_str());
+
+    // The owned items (JS `$g` + `Aa.save`): replace the <Items> children.
+    // The template always has an <Items> element (the Warrior's equipped
+    // Body/Head/Fists/NoRanged/NoMagic); append missing items, patch
+    // Count/Equipped on the ones already present. Collect the children into
+    // a stable vector first — pugixml's range iterator skips every other
+    // node when remove_child is called mid-iteration, so a live loop leaks
+    // items across saves (accumulating duplicates).
+    pugi::xml_node items = warrior.child("Items");
+    if (!items) {
+        items = warrior.append_child("Items");
+    }
+    std::vector<pugi::xml_node> old_items;
+    for (pugi::xml_node existing : items.children("Item")) {
+        old_items.push_back(existing);
+    }
+    for (const pugi::xml_node& existing : old_items) {
+        items.remove_child(existing);
+    }
+    for (const WarriorSave::OwnedItem& oi : w.items) {
+        pugi::xml_node item = items.append_child("Item");
+        item.append_attribute("Name").set_value(oi.name.c_str());
+        item.append_attribute("Equipped").set_value(oi.equipped ? "1" : "0");
+        item.append_attribute("Count").set_value(oi.count);
+    }
 
     std::ostringstream oss;
     doc.save(oss, "\t", pugi::format_default, pugi::encoding_auto);

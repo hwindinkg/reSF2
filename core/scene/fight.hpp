@@ -277,6 +277,26 @@ public:
               int player_max_hp, int enemy_max_hp,
               std::function<float()> roll01);
 
+    // Variant that builds the PLAYER's move list from its OWNED items via
+    // the Locks test (JS `ra.Hza` L684-685 — `f.nw(d,b)` against the
+    // fighter's items) instead of the TacticWeapon string. `owned` is the
+    // player's (type, subtype) item list. The enemy stays TacticWeapon-
+    // based ("Fists"). Used by the shop/equipment flow: equipping a weapon
+    // adds the weapon's Locks-matching moves to the player's move list.
+    void init_locks(const BattleParams& battle,
+                    const sf2::scene::Model& model,
+                    const std::map<std::string, sf2::scene::MoveDef>& moves,
+                    const std::map<std::string, sf2::data::anim_clip>& clips,
+                    const std::vector<sf2::scene::TacticsFile>& tactics,
+                    const sf2::scene::TacticDef* tactic,
+                    const std::string& player_name,
+                    const std::string& enemy_name,
+                    float player_x, float player_y,
+                    float enemy_x, float enemy_y,
+                    int player_max_hp, int enemy_max_hp,
+                    std::function<float()> roll01,
+                    const std::vector<std::pair<std::string, std::string>>& player_owned);
+
     // The arena bounds (wall / width-wall / floor) — set by the caller
     // (JS `ca.ggb` L383: v.tFa = location.NU, v.NKa = location.width - NU).
     void set_bounds(float wall, float wall_max, float floor_y);
@@ -372,6 +392,12 @@ private:
     const FightFighter& round_winner_by_hp() const;
     // The per-fighter update (AI / input + move execution + physics).
     void update_fighter(FightFighter& me, FightFighter& foe, float dt);
+    // Builds one fighter (shared init helper). `weapon_subtype` selects the
+    // TacticWeapon-based move list; `owned` (when non-empty) selects the
+    // Locks-based list (JS `ra.Hza`).
+    FightFighter make_fighter(const std::string& nm, bool is_player, float x, float y,
+                              int max_hp, const std::string& weapon_subtype,
+                              const std::vector<std::pair<std::string, std::string>>& owned);
     // The hit test (JS `ca.Enb` -> `wd.tKa` -> `Fu.ia`).
     bool hit_test(FightFighter& atk, FightFighter& def, const sf2::scene::MoveDef& move,
                   int frame, sf2::scene::HitCapsule& hit_cap,

@@ -534,3 +534,103 @@ GeneralMenu(8) --Fight--> Map(5) --node--> Fight(6) --result--> Map(5)
 The native shell boots straight to GeneralMenu (skipping the web
 loading screens) and wires Menu → Map → placeholder Fight result → back
 to Map.
+
+## 10. Items / Shop / Equipment / Results — the playable loop (Phase 3.6b)
+
+The full JS study behind the shop/equipment/results flow (the previous
+agent's notes, verified against sf2.502f0946.js):
+
+- **Item catalog** — `it.parse` (L86475) reads every `<Item>` from
+  list.xml into `Xm` and buckets by Type (`I.vg="Weapon"`, `I.Ai="Armor"`,
+  `I.Bi="Helm"`, `I.Vh="Ranged"`, `I.Cf="Magic"`): Weapon→`Au`, Armor→`Cva`,
+  Helm→`sDa`, Ranged→`WFa`, Magic→`SJa` (the shop-tab lists). Each item
+  carries Name/Type/SubType/Price/BonusPrice/Model/Image/Level/
+  WeaponDamage/BodyDefense/HeadDefense/UnarmedDamage/ShopHide/Hidden/
+  PaidItem. The native port keeps the same fields (item_catalog.hpp/cpp).
+- **Shop buy** — `Pa.iwa` (L629626): the money check `p.o.Tb >= a.jp()`,
+  deduct `p.o.Fr(b)`, add `Pa.gI` (L628934) → `p.o.xa.Oo` → save. The
+  native ShopScreen mirrors this (screens.cpp): check `w.money >=
+  it.price`, deduct, push the owned item, save. `WEAPON_KNIVES` is the
+  first shop card (Price=50).
+- **Results / rewards** — `tt.bm` (L116924) reads the battle's first
+  non-zero `<Reward>`; the results flow applies Money→`Pa.Fwa` (Tb +=
+  money) and Exp→`Pa.Iab`→`p.o.Jab` (XP), then `Aa.save` (L70-71) writes
+  the whole SF2User document. `Bosses` (the tutorial-zone TUTORIAL battle)
+  pays Money=70/Exp=10 — the money source for buying the knives.
+- **Equip** — `$g.$o` (L152184): `p.o.Ca.hk(a.type, a)` sets the slot,
+  `setItem` marks the item Equipped, `save()`. The native EquipmentScreen
+  (screens.cpp) sets the Warrior's weapon/armor/helm + the item's
+  Equipped flag and saves.
+- **Move list from items** — `ra.Hza` (L684-685): the fighter's move set
+  is built by testing each move's `<Locks>` against the owned items
+  (`f.nw(d,b)`), NOT the TacticWeapon string. `WEAPON_KNIVES`
+  (SubType="Knives") unlocks the Knives moves: KnivesSlash,
+  KnivesDoubleSlash, KnivesHeavySlash, KnivesSpinningSlash,
+  KnivesUpperSlash, KnivesLowSlash, KnivesSuperSlash + the
+  KnivesStartStance-Left/Right/Idle + Win_Knives (all
+  `TacticWeapon="Knives|Keris"` with `<Locks>Or{Weapon/Knives,
+  Weapon/Keris}</Locks>`). Every locked move also carries the Skeleton
+  lock — the fighter always owns the Skeleton item (users_default
+  `Skeleton="Skeleton"`), which the native `owned_items()` adds.
+
+### 10.1 The headless-loop driver (`game --headless-loop`)
+
+`app/game/main.cpp` drives the full playable progression end-to-end via
+injected clicks (the App `inject_click` hook):
+
+```
+menu(8) --FIGHT--> Map(5) --Bosses--> Fight(6) --KO--> Results(10)
+  --click--> Map(5) --BACK--> menu(8)
+menu(8) --SHOP--> Shop(4) --buy WEAPON_KNIVES (50)--> Shop(4)
+  --BACK--> menu(8)
+menu(8) --PROFILE--> Equipment(7) --equip knives--> Equipment(7)
+  --BACK--> menu(8)
+menu(8) --FIGHT--> Map(5) --Training--> Fight(6) --KO--> Results(10)
+  --click--> Map(5)
+```
+
+Each step waits for its target screen, clicks, then waits for the next
+screen (the fight duration is variable — the driver waits on the Results
+screen, not a frame count). Captures go to
+`reference/extracted/scene/loop_*.png` (menu/map/fight_fists/results/
+shop/equip/fight). The move list grows 170 (Fists) → 182 (Knives) when
+the knives are equipped — the +12 Knives moves.
+
+### 10.2 Bugs fixed this phase
+
+- **Arg parsing** (`app/game/main.cpp`): the positional args (res_root,
+  save_path) were assigned by VALUE (`res_root == default`), so passing
+  the default res_root explicitly made the second positional overwrite
+  res_root. Fixed by counting positionals by slot.
+- **Save item duplication** (`core/app/save_system.cpp`): the clear loop
+  `for (node : items.children("Item")) items.remove_child(node)` skipped
+  every other node (pugixml iterator invalidation), leaking items across
+  saves. Fixed by collecting the children into a stable vector first.
+- **Equipment grid** (`core/app/screens.cpp`): the base items
+  (Body/Head/Fists) are ShopHide/Hidden and absent from the shop-visible
+  catalog, so the owned-item grid mis-placed every card; the base items
+  also consumed grid slots via the shared idx. Fixed with a full catalog
+  lookup (`load_full_catalog`) + a separate card counter (NoRanged/
+  NoMagic don't occupy a slot).
+- **Missing Skeleton lock** (`core/app/screens.cpp` `owned_items()`):
+  every locked move carries the Skeleton lock; the fighter always owns
+  the Skeleton item, so `owned_items()` now adds `("Skeleton",
+  "Skeleton")` — otherwise no weapon move ever passed the Locks test.
+- **Injected-click edge** (`core/app/app.cpp` `poll_input`): the injected
+  click armed `pressed=true` on EVERY pending step (3 steps), so a buy/
+  equip click fired 3×. Only the first pending step is now a pressed edge.
+- **Stale captures** (`core/render/gl.cpp` + `App::capture_png`): the
+  render path swaps buffers, so glReadPixels on GL_BACK read the previous
+  frame (identical captures). `capture_png` now reads GL_FRONT (the
+  just-presented frame).
+- **Results pop** (`core/app/screens.cpp`): the Results screen sits on the
+  dead Fight screen it replaced; the results→map click pops both (JS
+  `qxa` L1213), so the map (not the dead fight) is the returned-to screen.
+- **BACK navigation** (Map/Shop/Equipment): the three sub-screens had no
+  way back to the menu; added a top-left BACK button (the JS map has a
+  back/exit control in the top bar).
+- **Auto-attack wiring** (`core/app/screens.cpp` FightScreen): the fight
+  controller's `set_auto_attack(true)` was never called by the shell; the
+  FightScreen now wires it from the App's `auto_attack` flag (set by the
+  headless-loop driver), so a fight runs to KO without input.
+

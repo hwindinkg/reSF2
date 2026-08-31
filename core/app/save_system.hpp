@@ -23,6 +23,7 @@
 // the current document back.
 
 #include <string>
+#include <vector>
 
 namespace sf2::app {
 
@@ -47,6 +48,22 @@ struct WarriorSave {
     std::string tutorial = "MOVE";
     std::string tactic = "Player";
     std::string current_zone = "ZONE_1";
+
+    // The owned items (JS `$g.items`, the users.xml `<Items><Item Name=..>`).
+    // `equipped` mirrors the JS `Ru` flag (the item's `Equipped="1"` attr).
+    struct OwnedItem {
+        std::string name;      // the list.xml Item Name ("WEAPON_KNIVES", "Body", ...)
+        int count = 1;
+        bool equipped = false; // Equipped="1"
+    };
+    std::vector<OwnedItem> items;
+
+    bool has_item(const std::string& name) const {
+        for (const OwnedItem& it : items) {
+            if (it.name == name && it.count > 0) return true;
+        }
+        return false;
+    }
 };
 
 // Loads/saves the users.xml document. Portable C++17 — the path is passed
@@ -61,12 +78,15 @@ public:
     // Returns true if a save file already exists on disk.
     bool has_save() const;
 
-    // Loads the Warrior. When no save exists, the template is parsed and
-    // returned (nothing is written yet — the game only writes on first
-    // real save). Throws std::runtime_error on malformed XML.
+    // Loads the Warrior (incl. the owned items). When no save exists, the
+    // template is parsed and returned (nothing is written yet — the game
+    // only writes on first real save). Throws std::runtime_error on
+    // malformed XML.
     WarriorSave load();
 
-    // Writes `warrior` back into the users.xml document and saves it.
+    // Writes `warrior` back into the users.xml document and saves it. The
+    // Warrior attributes + the <Items> list are patched (mirroring the JS
+    // `Aa.save` re-serializing the whole document).
     void save(const WarriorSave& warrior);
 
     // Path of the save file (for logging/tests).

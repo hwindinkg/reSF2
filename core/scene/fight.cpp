@@ -110,6 +110,21 @@ void FightController::init(const BattleParams& battle,
                            float enemy_x, float enemy_y,
                            int player_max_hp, int enemy_max_hp,
                            std::function<float()> roll01) {
+    init_locks(battle, model, moves, clips, tactics, tactic, player_name, enemy_name,
+               player_x, player_y, enemy_x, enemy_y, player_max_hp, enemy_max_hp,
+               std::move(roll01), {});
+}
+
+void FightController::init_locks(
+    const BattleParams& battle, const sf2::scene::Model& model,
+    const std::map<std::string, sf2::scene::MoveDef>& moves,
+    const std::map<std::string, sf2::data::anim_clip>& clips,
+    const std::vector<sf2::scene::TacticsFile>& tactics,
+    const sf2::scene::TacticDef* tactic, const std::string& player_name,
+    const std::string& enemy_name, float player_x, float player_y,
+    float enemy_x, float enemy_y, int player_max_hp, int enemy_max_hp,
+    std::function<float()> roll01,
+    const std::vector<std::pair<std::string, std::string>>& player_owned) {
     battle_ = battle;
     model_ = model;
     moves_ = &moves;
@@ -118,47 +133,9 @@ void FightController::init(const BattleParams& battle,
     tactic_ = tactic;
     roll01_ = std::move(roll01);
 
-    auto make_fighter = [&](const std::string& nm, bool is_player, float x, float y,
-                            int max_hp) {
-        FightFighter f;
-        f.name = nm;
-        f.is_player = is_player;
-        f.fighter.set_model(model_);
-        f.fighter.set_color(is_player ? 0xFF2020u : 0x4040FFu);
-        f.fighter.set_clip_lookup(
-            [this](const std::string& name) -> const sf2::data::anim_clip* {
-                const auto it = clips_->find(name);
-                return it != clips_->end() ? &it->second : nullptr;
-            });
-        f.fighter.build_move_list(*moves_, "Fists");
-        f.fighter.set_world_pos(x, y);
-        f.fighter.set_enemy_x(x);  // patched each frame
-        f.params.is_player = is_player;
-        f.params.level = 1.0f;
-        f.params.uz = 1.0f;
-        f.params.m_ = 1.0f;
-        f.params.xb = 0.0f;
-        f.params.dta = 1.0f;
-        f.params.so = 1.0f;
-        f.params.attributes["UnarmedDamage"] =
-            is_player ? battle_.player_unarmed_damage : 0.0f;
-        f.params.attributes["BodyDefense"] = 0.0f;
-        f.params.attributes["HeadDefense"] = 0.0f;
-        f.params.attributes["CriticalChance"] = 0.0f;
-        f.params.attributes["CriticalDamage"] = 0.0f;
-        f.params.attributes["BlockDamageFactor"] = 0.0f;
-        f.params.attributes["DamageFactor"] = 0.0f;
-        f.max_hp = static_cast<float>(max_hp);
-        f.hp = f.max_hp;
-        if (!is_player && tactic_ != nullptr) {
-            f.ai = std::make_unique<sf2::scene::AiController>();
-            f.ai->init("Fists", tactics_, tactic_, moves_);
-        }
-        return f;
-    };
-
-    player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp);
-    enemy_ = make_fighter(enemy_name, false, enemy_x, enemy_y, enemy_max_hp);
+    player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp,
+                           "Fists", player_owned);
+    enemy_ = make_fighter(enemy_name, false, enemy_x, enemy_y, enemy_max_hp, "Fists", {});
     // The player can be AI-driven too (the demo auto-attacks via the AI);
     // the controller gives the player an AI controller as well.
     if (tactic_ != nullptr) {
@@ -180,6 +157,55 @@ void FightController::init(const BattleParams& battle,
     round_.number = 0;
     round_init();
     enter_start_stance();
+}
+
+// JS `o1a` (L403) + `Gf` (L403-404): build one fighter. The move list is
+// the TacticWeapon-based list (`weapon_subtype`) or, when `owned` is
+// non-empty, the Locks-based list against the fighter's items (JS `ra.Hza`
+// L684-685 — the equipment flow adds the weapon's moves).
+FightFighter FightController::make_fighter(
+    const std::string& nm, bool is_player, float x, float y, int max_hp,
+    const std::string& weapon_subtype,
+    const std::vector<std::pair<std::string, std::string>>& owned) {
+    FightFighter f;
+    f.name = nm;
+    f.is_player = is_player;
+    f.fighter.set_model(model_);
+    f.fighter.set_color(is_player ? 0xFF2020u : 0x4040FFu);
+    f.fighter.set_clip_lookup(
+        [this](const std::string& name) -> const sf2::data::anim_clip* {
+            const auto it = clips_->find(name);
+            return it != clips_->end() ? &it->second : nullptr;
+        });
+    if (owned.empty()) {
+        f.fighter.build_move_list(*moves_, weapon_subtype);
+    } else {
+        f.fighter.build_move_list_locks(*moves_, owned);
+    }
+    f.fighter.set_world_pos(x, y);
+    f.fighter.set_enemy_x(x);  // patched each frame
+    f.params.is_player = is_player;
+    f.params.level = 1.0f;
+    f.params.uz = 1.0f;
+    f.params.m_ = 1.0f;
+    f.params.xb = 0.0f;
+    f.params.dta = 1.0f;
+    f.params.so = 1.0f;
+    f.params.attributes["UnarmedDamage"] =
+        is_player ? battle_.player_unarmed_damage : 0.0f;
+    f.params.attributes["BodyDefense"] = 0.0f;
+    f.params.attributes["HeadDefense"] = 0.0f;
+    f.params.attributes["CriticalChance"] = 0.0f;
+    f.params.attributes["CriticalDamage"] = 0.0f;
+    f.params.attributes["BlockDamageFactor"] = 0.0f;
+    f.params.attributes["DamageFactor"] = 0.0f;
+    f.max_hp = static_cast<float>(max_hp);
+    f.hp = f.max_hp;
+    if (!is_player && tactic_ != nullptr) {
+        f.ai = std::make_unique<sf2::scene::AiController>();
+        f.ai->init("Fists", tactics_, tactic_, moves_);
+    }
+    return f;
 }
 
 void FightController::set_bounds(float wall, float wall_max, float floor_y) {

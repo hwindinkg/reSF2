@@ -3,6 +3,7 @@
 # window lives in core/render via the Renderer).
 add_library(sf2_app STATIC
     app.cpp
+    item_catalog.cpp
     save_system.cpp
     screen_manager.cpp
     screens.cpp

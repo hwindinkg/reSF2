@@ -1,4 +1,5 @@
-// The shell screens implementation — MainMenu, Map, BattleResult.
+// The shell screens implementation — MainMenu, Map, Fight, Results, Shop,
+// Equipment.
 //
 // Layout math (JS-derived):
 //   - MainMenu buttons: the game's za top bar + the 4 tab buttons are the
@@ -12,19 +13,32 @@
 //     x = X*1.0 + view_w/2, y = view_h/2 - Y*1.0 (qe.X0a's
 //     bg.w/2 / bg.h/2 with uM≈1 for the 2046-wide map0 frame scaled to the
 //     view). The Training battle (X=158, Y=145) lands lower-right.
+//
+// The menu/map/shop atlases ship as ASTC ktx / crunch dds (not CPU-decodable
+// by the current pipeline — see core/data/README.md), so this phase renders
+// a functional menu/map/shop: the dojo webp background + flat labeled
+// buttons at the JS-derived positions. The exact atlas-art layout is
+// flagged as a gap.
 
 #include "app/screens.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <random>
 
+#include "anim_archive.hpp"
 #include "app/app.hpp"
 #include "app/save_system.hpp"
 #include "atlas.hpp"
+#include "scene/fight.hpp"
+#include "scene/location_scene.hpp"
 #include "scene/renderer.hpp"
 #include "scene/sprite.hpp"
+#include "texture.hpp"
 #include "xml_doc.hpp"
 
 namespace sf2::app {
@@ -34,9 +48,9 @@ namespace {
 constexpr float kViewW = 1280.0f;
 constexpr float kViewH = 720.0f;
 
-// Draws a flat (untextured) rounded-ish button + its label as a solid
-// quad. The exact menu atlas art (ASTC) is unavailable to the CPU pipeline
-// this phase — flagged as the exact-layout gap.
+// Draws a flat (untextured) button + its label as a solid quad. The exact
+// menu atlas art (ASTC) is unavailable to the CPU pipeline this phase —
+// flagged as the exact-layout gap.
 void draw_flat_button(App& app, const std::string& label, float cx, float cy, float w, float h,
                       float r, float g, float b, bool hovered) {
     sf2::render::Renderer& ren = app.renderer();
@@ -44,7 +58,6 @@ void draw_flat_button(App& app, const std::string& label, float cx, float cy, fl
     const float y0 = cy - h / 2.0f;
     const float x1 = cx + w / 2.0f;
     const float y1 = cy + h / 2.0f;
-    // Border + fill (two quads: the border is a darker solid behind).
     const float border = hovered ? 3.0f : 2.0f;
     const float verts_border[] = {
         x0 - border, y0 - border, x1 + border, y0 - border, x1 + border, y1 + border,
@@ -53,47 +66,24 @@ void draw_flat_button(App& app, const std::string& label, float cx, float cy, fl
     ren.draw_triangles(verts_border, 6, 0.1f, 0.1f, 0.12f, 0.9f);
     const float verts_fill[] = {x0, y0, x1, y0, x1, y1, x0, y0, x1, y1, x0, y1};
     ren.draw_triangles(verts_fill, 6, r, g, b, 0.92f);
-
-    // Label: a crude two-line-free text approximation — the BMFont glyph
-    // path is deferred, so labels are drawn as centered white text via
-    // small solid quads per character is overkill; this phase draws the
-    // label text through the renderer's flat path only when a font exists.
-    // For now the label is emitted as a caption on the button (see the
-    // screen's own draw below) — here we keep the button art.
     (void)label;
 }
 
-// Loads the map battle nodes from stages.xml (the same XML the JS `Ch`
-// parser + `qb` battles read, JS L1224/1404). Returns the nodes with their
-// screen positions.
-std::vector<MapScreen::Node> load_battle_nodes(const std::string& res_root, float view_w,
-                                               float view_h) {
+// Loads the map battle nodes from stages.xml (the JS `Ch` parser L1224).
+std::vector<MapScreen::Node> load_battle_nodes(float view_w, float view_h) {
     std::vector<MapScreen::Node> out;
     try {
         sf2::data::xml_doc doc;
         const std::string path = "reference/extracted/xml/res/stages.xml";
         std::ifstream in(path, std::ios::binary);
-        if (!in) {
-            // Fall back to the packaged xml.dat? The extracted copy is the
-            // canonical source (the game loads stages.xml from xml.dat).
-            return out;
-        }
+        if (!in) return out;
         std::vector<char> data((std::istreambuf_iterator<char>(in)),
                                std::istreambuf_iterator<char>());
         doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
         const pugi::xml_node root = doc.root().first_child();
-        if (!root || std::string(root.name()) != "Stages") {
-            return out;
-        }
-        // The map shows the CURRENT zone's battles. The game's map screen
-        // (Ya) iterates `p.YBa()` (the zones) and the player's
-        // CurrentZone (users_default = ZONE_1); the tutorial zone
-        // (Punchbag) is the first and the only unlocked one at game start.
-        // For the shell, zone 0 = the tutorial zone (Training + Bosses).
+        if (!root || std::string(root.name()) != "Stages") return out;
         const pugi::xml_node zones = root.child("Zones");
-        if (!zones) {
-            return out;
-        }
+        if (!zones) return out;
         for (const pugi::xml_node zone : zones.children("Zone")) {
             for (const pugi::xml_node battle : zone.children("Battle")) {
                 MapScreen::Node n;
@@ -101,15 +91,13 @@ std::vector<MapScreen::Node> load_battle_nodes(const std::string& res_root, floa
                 n.type = battle.attribute("Type").value();
                 const float x = sf2::data::xml_attr_float(battle, "X", 0.0f);
                 const float y = sf2::data::xml_attr_float(battle, "Y", 0.0f);
-                // qe.X0a: node_x = X*uM + bg.w/2, node_y = -Y*uM + bg.h/2
-                // with uM≈1 and the map bg scaled to the view center.
                 n.x = x * 1.0f + view_w / 2.0f;
                 n.y = view_h / 2.0f - y * 1.0f;
                 n.active = !battle.attribute("Type").empty() ||
                            n.type == "DUMMY" || n.type == "TUTORIAL";
                 out.push_back(std::move(n));
             }
-            break;  // tutorial zone only (the playable start)
+            break;  // the tutorial zone (the playable start)
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "map: stages.xml load failed: %s\n", e.what());
@@ -117,18 +105,142 @@ std::vector<MapScreen::Node> load_battle_nodes(const std::string& res_root, floa
     return out;
 }
 
+// The reward of a battle's first non-zero <Reward> (JS `tt.bm` L116924).
+void battle_rewards(const std::string& battle_name, int& out_money, int& out_exp) {
+    out_money = 0;
+    out_exp = 0;
+    try {
+        sf2::data::xml_doc doc;
+        const std::string path = "reference/extracted/xml/res/stages.xml";
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return;
+        for (const pugi::xml_node zone : root.child("Zones").children("Zone")) {
+            for (const pugi::xml_node battle : zone.children("Battle")) {
+                if (std::string(battle.attribute("Name").value()) != battle_name) continue;
+                const pugi::xml_node fight = battle.child("Fight");
+                if (!fight) return;
+                const pugi::xml_node rewards = fight.child("Rewards");
+                if (!rewards) return;
+                for (const pugi::xml_node reward : rewards.children("Reward")) {
+                    const int m = sf2::data::xml_attr_int(reward, "Money", 0);
+                    const int e = sf2::data::xml_attr_int(reward, "Exp", 0);
+                    if (m > 0 || e > 0) {
+                        out_money = m;
+                        out_exp = e;
+                        return;
+                    }
+                }
+                return;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+}
+
+// The player's (type, subtype) items for the Locks move list: the equipped
+// slots (JS `xc.hk`) + the owned inventory (JS `p.o.xa`).
+std::vector<std::pair<std::string, std::string>> owned_items(App& app) {
+    std::vector<std::pair<std::string, std::string>> out;
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return out;
+    }
+    const std::vector<CatalogItem> catalog = load_full_catalog(app);
+    const auto subtype_of = [&catalog](const std::string& name) {
+        for (const CatalogItem& ci : catalog) {
+            if (ci.name == name) return ci.subtype;
+        }
+        return std::string();
+    };
+    for (const std::string& slot : {w.weapon, w.armor, w.helm}) {
+        const std::string st = subtype_of(slot);
+        if (!st.empty()) {
+            for (const CatalogItem& ci : catalog) {
+                if (ci.name == slot) {
+                    out.emplace_back(ci.type, st);
+                    break;
+                }
+            }
+        }
+    }
+    for (const auto& oi : w.items) {
+        if (oi.count <= 0) continue;
+        for (const CatalogItem& ci : catalog) {
+            if (ci.name == oi.name && !ci.subtype.empty()) {
+                out.emplace_back(ci.type, ci.subtype);
+                break;
+            }
+        }
+    }
+    // The fighter's Skeleton (the Skeleton lock passes for every move — the
+    // JS fighter always owns the Skeleton item, `users_default` has
+    // Skeleton="Skeleton").
+    out.emplace_back("Skeleton", "Skeleton");
+    // The default Fists (the unarmed weapon subtype).
+    out.emplace_back("Weapon", "Fists");
+    return out;
+}
+
 } // namespace
+
+// The shared catalog (loaded once, cached).
+std::vector<CatalogItem> load_catalog(App& app) {
+    static std::vector<CatalogItem> cached;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        try {
+            const std::string path = "reference/extracted/xml/res/list.xml";
+            std::ifstream in(path, std::ios::binary);
+            if (in) {
+                std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                       std::istreambuf_iterator<char>());
+                const std::vector<CatalogItem> all =
+                    parse_item_catalog(std::string(data.begin(), data.end()));
+                cached = shop_items(all);
+            }
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "item catalog load failed: %s\n", e.what());
+        }
+    }
+    (void)app;
+    return cached;
+}
+
+// The FULL catalog (all items incl. the ShopHide/Hidden base items).
+std::vector<CatalogItem> load_full_catalog(App& app) {
+    static std::vector<CatalogItem> cached;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        try {
+            const std::string path = "reference/extracted/xml/res/list.xml";
+            std::ifstream in(path, std::ios::binary);
+            if (in) {
+                std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                       std::istreambuf_iterator<char>());
+                cached = parse_item_catalog(std::string(data.begin(), data.end()));
+            }
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "full item catalog load failed: %s\n", e.what());
+        }
+    }
+    (void)app;
+    return cached;
+}
 
 // ---------------------------------------------------------------------------
 // MainMenuScreen
 // ---------------------------------------------------------------------------
 
 MainMenuScreen::MainMenuScreen(ScreenManager& mgr) : Screen(mgr, "GeneralMenu") {
-    // The four entry buttons: Dojo (Fight), Map, Shop, Profile — mirroring
-    // the menu atlas frames (Dojo_normal etc.) and the game's button strip
-    // (the za/scroll layout, JS L1976-1977, is a vertical strip on the
-    // left; the port places them horizontally for a usable windowed menu).
-    // The Fight entry (the Dojo button) is the primary -> Map.
     const float bw = 240.0f;
     const float bh = 120.0f;
     const float y = kViewH * 0.72f;
@@ -158,8 +270,9 @@ void MainMenuScreen::update_impl(float dt) {
         money_logged_ = true;
         try {
             const WarriorSave w = app().save().load();
-            std::fprintf(stdout, "[menu] MONEY %d   LV %d   POWER %d\n", w.money, w.level,
-                         w.power);
+            std::fprintf(stdout, "[menu] MONEY %d   LV %d   POWER %d   WEAPON %s   ARMOR %s   HELM %s\n",
+                         w.money, w.level, w.power, w.weapon.c_str(), w.armor.c_str(),
+                         w.helm.c_str());
             std::fflush(stdout);
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[menu] save read failed: %s\n", e.what());
@@ -175,13 +288,7 @@ void MainMenuScreen::update_impl(float dt) {
             if (p.pressed) {
                 std::fprintf(stdout, "[menu] click %s -> screen %d\n", b.label.c_str(), b.target);
                 std::fflush(stdout);
-                // The game's GeneralMenu "Fight" goes to the map; the Shop
-                // and Profile are placeholders this phase (3.6b).
-                if (b.target == kScreenMap) {
-                    push(static_cast<ScreenId>(b.target));
-                } else {
-                    std::fprintf(stdout, "[menu] %s is a placeholder (3.6b)\n", b.label.c_str());
-                }
+                push(static_cast<ScreenId>(b.target));
             }
         }
     }
@@ -196,31 +303,20 @@ void MainMenuScreen::update_impl(float dt) {
 
 void MainMenuScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-
-    // Dojo backdrop (the game's GeneralMenu shows the dojo behind the menu).
     sf2::scene::Sprite* dojo = app.dojo_sprite();
     if (dojo != nullptr) {
         ren.draw_sprite(*dojo, ren.current_camera());
     } else {
-        // Flat fallback: dark gradient-ish backdrop.
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
     }
-
-    // Buttons.
     for (std::size_t i = 0; i < buttons_.size(); ++i) {
         const Button& b = buttons_[i];
         const bool hovered = static_cast<int>(i) == hover_;
-        // Fight = gold-ish highlight, others neutral (the game's
-        // EButtonGold / EButtonWhite styles).
         const float r = hovered ? 0.85f : (b.target == kScreenMap ? 0.72f : 0.45f);
         const float g = hovered ? 0.72f : (b.target == kScreenMap ? 0.62f : 0.48f);
         const float bl = hovered ? 0.35f : (b.target == kScreenMap ? 0.2f : 0.42f);
         draw_flat_button(app, b.label, b.x, b.y, b.w, b.h, r, g, bl, hovered);
-        // The label — no BMFont glyph path this phase; draw a simple
-        // centered text via the renderer's solid path is skipped, so the
-        // button label is printed in the log on hover/click (the visible
-        // text is the next-phase nicety).
         (void)app.draw_text(b.x, b.y, b.label, 1.0f, 1.0f, 1.0f, 1.0f);
     }
 }
@@ -230,7 +326,7 @@ void MainMenuScreen::render_impl(App& app) {
 // ---------------------------------------------------------------------------
 
 MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
-    nodes_ = load_battle_nodes(mgr.app().res_root(), kViewW, kViewH);
+    nodes_ = load_battle_nodes(kViewW, kViewH);
     std::fprintf(stdout, "[map] %zu battle nodes loaded\n", nodes_.size());
     for (const auto& n : nodes_) {
         std::fprintf(stdout, "[map] node %s (type=%s) at (%.0f, %.0f)%s\n", n.name.c_str(),
@@ -241,17 +337,37 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
 void MapScreen::update_impl(float dt) {
     (void)dt;
     const App::PointerState& p = app().pointer();
+    // BACK (top-left) -> the main menu (the loop's map -> shop / map ->
+    // equipment legs; the JS map has a back/exit control in the top bar).
+    if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
+        if (p.pressed) {
+            std::fprintf(stdout, "[map] BACK -> GeneralMenu\n");
+            std::fflush(stdout);
+            manager().pop();
+            return;
+        }
+    }
     hover_ = -1;
     for (std::size_t i = 0; i < nodes_.size(); ++i) {
         const Node& n = nodes_[i];
         if (p.x >= n.x - 60 && p.x <= n.x + 60 && p.y >= n.y - 60 && p.y <= n.y + 60) {
             hover_ = static_cast<int>(i);
             if (p.pressed && n.active) {
-                std::fprintf(stdout, "[map] click %s -> placeholder Fight (3.6b)\n",
-                             n.name.c_str());
+                // JS `Ya` battle-start (L2131-2132): `wa.F().mp(6, battle)`.
+                // Carry the battle into the pending flow: name/location +
+                // the reward (the first non-zero <Reward>).
+                PendingBattle& pb = app().pending_battle();
+                pb.battle_name = n.name;
+                pb.location = "dojo";
+                pb.has_result = false;
+                // The node's fight -> reward. The Training fight has
+                // Money=0; use the battle's own reward lookup.
+                battle_rewards(n.name, pb.reward_money, pb.reward_exp);
+                // The owned items (JS `ra.Hza` move list input).
+                pb.owned = owned_items(app());
+                std::fprintf(stdout, "[map] click %s -> Fight (reward money=%d exp=%d)\n",
+                             n.name.c_str(), pb.reward_money, pb.reward_exp);
                 std::fflush(stdout);
-                // 3.6b wires the real Fight screen; for now show the
-                // result placeholder.
                 push(kScreenFight);
             }
         }
@@ -260,7 +376,6 @@ void MapScreen::update_impl(float dt) {
 
 void MapScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    // Map backdrop: the dojo (the tutorial zone is the dojo location).
     sf2::scene::Sprite* dojo = app.dojo_sprite();
     if (dojo != nullptr) {
         ren.draw_sprite(*dojo, ren.current_camera());
@@ -268,12 +383,9 @@ void MapScreen::render_impl(App& app) {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.08f, 0.1f, 0.14f, 1.0f);
     }
-
     for (std::size_t i = 0; i < nodes_.size(); ++i) {
         const Node& n = nodes_[i];
         const bool hovered = static_cast<int>(i) == hover_;
-        // Node button: the game's base_training/active_training frames are
-        // ASTC — this phase draws a flat circle-ish node marker.
         const float r = hovered ? 0.9f : (n.active ? 0.6f : 0.3f);
         const float g = hovered ? 0.5f : (n.active ? 0.4f : 0.3f);
         const float b = hovered ? 0.3f : (n.active ? 0.25f : 0.3f);
@@ -282,34 +394,580 @@ void MapScreen::render_impl(App& app) {
         const float verts[] = {x0, y0, x0 + d, y0, x0 + d, y0 + d, x0, y0, x0 + d, y0 + d, x0, y0 + d};
         ren.draw_triangles(verts, 6, r, g, b, n.active ? 0.95f : 0.5f);
     }
+    // The BACK button (top-left).
+    draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
 }
 
 // ---------------------------------------------------------------------------
-// BattleResultScreen
+// FightScreen
 // ---------------------------------------------------------------------------
 
-BattleResultScreen::BattleResultScreen(ScreenManager& mgr, std::string winner_text)
-    : Screen(mgr, "FightResult"), winner_text_(std::move(winner_text)) {}
+FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
+                         const std::string& location, int reward_money, int reward_exp,
+                         const std::vector<std::pair<std::string, std::string>>& owned)
+    : Screen(mgr, "Fight"),
+      battle_name_(battle_name),
+      location_(location),
+      reward_money_(reward_money),
+      reward_exp_(reward_exp) {
+    FightAssets& assets = app().fight_assets();
+    std::fprintf(stdout, "[fight] battle=%s location=%s reward money=%d exp=%d\n",
+                 battle_name_.c_str(), location_.c_str(), reward_money_, reward_exp_);
+    std::fflush(stdout);
 
-void BattleResultScreen::update_impl(float dt) {
+    // The dojo location (the tutorial-zone backdrop). Load once; the
+    // FightAssets keeps it.
+    if (assets.dojo.layers().empty()) {
+        const std::string loc_dir = app().res_root() + "/locations/" + location_;
+        std::string params_xml, atlas_json;
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind(location_ + "_params.", 0) == 0 &&
+                    name.size() > 4 && name.substr(name.size() - 4) == ".xml") {
+                    params_xml = entry.path().string();
+                } else if (name.rfind(location_ + ".", 0) == 0 &&
+                           name.size() > 5 && name.substr(name.size() - 5) == ".json") {
+                    atlas_json = entry.path().string();
+                }
+            }
+            assets.dojo.load(params_xml, {atlas_json}, app().res_root());
+            for (const std::string& an : assets.dojo.atlas_names()) {
+                const std::string base = loc_dir + "/" + an;
+                for (const std::string& ext : {".webp", ".png"}) {
+                    const std::string tex_path = base + ext;
+                    if (std::filesystem::exists(tex_path)) {
+                        sf2::data::Texture tex;
+                        if (sf2::data::decode_texture(tex_path, tex)) {
+                            const GLuint gl =
+                                app().renderer().texture_for("dojo_atlas_" + an, tex);
+                            if (gl != 0) {
+                                std::ifstream in(atlas_json, std::ios::binary);
+                                std::vector<std::uint8_t> jb(
+                                    (std::istreambuf_iterator<char>(in)),
+                                    std::istreambuf_iterator<char>());
+                                const sf2::data::atlas a =
+                                    sf2::data::atlas_parse(jb.data(), jb.size());
+                                for (const auto& fr : a.frames) {
+                                    app().renderer().texture_alias(fr.name, gl);
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            std::fprintf(stdout, "[fight] dojo scene: %zu layers, arena %.0fx%.0f\n",
+                         assets.dojo.layers().size(), assets.dojo.arena_width(),
+                         assets.dojo.arena_height());
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[fight] dojo scene load failed: %s\n", e.what());
+        }
+    }
+
+    const float arena_w = assets.dojo.arena_width() > 0.0f ? assets.dojo.arena_width() : 1960.0f;
+    const float wall = 80.0f;
+    const float wall_max = arena_w - wall;
+
+    sf2::scene::BattleParams battle;
+    battle.name = battle_name_;
+    battle.type = "FightNone";
+    battle.location = location_;
+    battle.rounds = 2;
+    battle.round_time = 99;
+    battle.health_recovery = 1.0f;
+    battle.player_spawn_x = 690.0f;
+    battle.player_spawn_y = -93.0f;
+    battle.enemy_spawn_x = 973.0f;
+    battle.enemy_spawn_y = -110.0f;
+    battle.max_hp = 1;  // the game's HP fallback (Zn = aB>0 ? aB : 1)
+    battle.player_unarmed_damage = 80.0f;
+
+    const sf2::scene::TacticDef* tactic = nullptr;
+    const auto it = assets.tactic_defs.find("Standard");
+    if (it != assets.tactic_defs.end()) tactic = &it->second;
+
+    static std::mt19937 s_rng(0x5F2);
+    std::mt19937& rng = s_rng;
+    auto roll01 = [&rng]() {
+        return static_cast<float>(rng()) / static_cast<float>(rng.max());
+    };
+
+    fight_ = std::make_unique<sf2::scene::FightController>();
+    fight_->init_locks(battle, assets.merged, assets.moves, assets.clips,
+                       assets.tactics_sets, tactic, "Player", "Enemy",
+                       battle.player_spawn_x, battle.player_spawn_y,
+                       battle.enemy_spawn_x, battle.enemy_spawn_y,
+                       battle.max_hp, battle.max_hp, roll01, owned);
+    fight_->set_bounds(wall, wall_max, 0.0f);
+
+    // Log the player's move list (the equipment-change evidence).
+    std::fprintf(stdout, "[fight] player move list (%zu moves):\n",
+                 fight_->player().fighter.hb().size());
+    for (const auto* m : fight_->player().fighter.hb()) {
+        std::fprintf(stdout, "  %s\n", m->name.c_str());
+    }
+    std::fflush(stdout);
+}
+
+void FightScreen::on_key(int glfw_key, bool down) {
+    // GLFW key codes -> the game's key_type (JS `Ik` keyboard events ->
+    // the fight input; the move Keys conditions read Punch/Forward/Back).
+    sf2::scene::key_type kt = static_cast<sf2::scene::key_type>(0);
+    switch (glfw_key) {
+        case 65: case 263: kt = sf2::scene::key_type::back; break;   // A / Left
+        case 68: case 262: kt = sf2::scene::key_type::forward; break; // D / Right
+        case 87: case 265: kt = sf2::scene::key_type::up; break;      // W / Up
+        case 83: case 264: kt = sf2::scene::key_type::down; break;    // S / Down
+        case 32: kt = sf2::scene::key_type::punch; break;             // Space
+        default: return;
+    }
+    const int idx = static_cast<int>(kt);
+    if (idx < 0 || idx >= 16) return;
+    key_state_[idx] = down;
+    if (fight_) {
+        fight_->player_input(kt, down ? sf2::scene::press_type::tap
+                                      : sf2::scene::press_type::release);
+    }
+}
+
+std::size_t FightScreen::move_list_size() const {
+    return fight_ != nullptr ? fight_->player().fighter.hb().size() : 0;
+}
+
+void FightScreen::update_impl(float dt) {
+    if (fight_ == nullptr) return;
+    if (!auto_attack_wired_) {
+        auto_attack_wired_ = true;
+        if (app().auto_attack()) {
+            fight_->set_auto_attack(true);
+            std::fprintf(stdout, "[fight] auto-attack ON\n");
+        }
+    }
+    fight_->update(dt);
+
+    // Per-second log.
+    if (fight_->frame() / 60 != last_log_frame_) {
+        last_log_frame_ = fight_->frame() / 60;
+        const int timer = fight_->round().gma -
+                          static_cast<int>(std::ceil(fight_->round().time));
+        std::fprintf(stdout, "[fight] F%d phase=%d round=%d timer=%d P:%.0f (%s) E:%.0f (%s)\n",
+                     fight_->frame(), fight_->phase(), fight_->round().number,
+                     std::max(0, timer), fight_->player().hp,
+                     fight_->player().last_move.empty() ? "idle" : fight_->player().last_move.c_str(),
+                     fight_->enemy().hp,
+                     fight_->enemy().last_move.empty() ? "idle" : fight_->enemy().last_move.c_str());
+        std::fflush(stdout);
+    }
+
+    // Battle end -> Results (JS `bea` L413 -> `v.kD` L622187 -> the
+    // results; `qxa` L1213 pops back to the map).
+    if (fight_->battle_over() && !results_pushed_) {
+        results_pushed_ = true;
+        const bool player_won = fight_->winner() != nullptr && fight_->winner()->is_player;
+        PendingBattle& pb = app().pending_battle();
+        pb.has_result = true;
+        pb.player_won = player_won;
+        std::fprintf(stdout, "[fight] BATTLE END winner=%s player_won=%d\n",
+                     fight_->winner() ? fight_->winner()->name.c_str() : "(none)", player_won);
+        std::fprintf(stdout,
+                     "[fight] summary: P hp=%.0f rounds=%d hits=%d | E hp=%.0f rounds=%d hits=%d\n",
+                     fight_->player().hp, fight_->player().rounds_won,
+                     fight_->player().hits_landed, fight_->enemy().hp,
+                     fight_->enemy().rounds_won, fight_->enemy().hits_landed);
+        std::fflush(stdout);
+        push(kScreenResults);
+    }
+}
+
+void FightScreen::render_impl(App& app) {
+    sf2::render::Renderer& ren = app.renderer();
+    if (fight_ == nullptr) return;
+    FightAssets& assets = app.fight_assets();
+
+    const sf2::scene::FightCamera& cam = fight_->camera();
+    sf2::render::Camera camera;
+    camera.center_x = cam.center_x;
+    camera.center_y = cam.center_y;
+    camera.zoom = cam.zoom;
+    camera.view_w = kViewW;
+    camera.view_h = kViewH;
+    camera.arena_h = assets.dojo.arena_height() > 0.0f ? assets.dojo.arena_height() : 560.0f;
+    camera.arena_floor = assets.dojo.arena_floor();
+    camera.arena_center_x = 0.0f;
+    ren.begin_frame(camera);
+    for (const auto& layer : assets.dojo.layers()) {
+        assets.dojo.render_layer(ren, *layer, camera);
+    }
+
+    auto project = [&camera](const std::vector<float>& v) {
+        std::vector<float> out(v.size());
+        for (std::size_t i = 0; i < v.size(); i += 2) {
+            out[i] = camera.world_to_screen_x(v[i], 0.0f);
+            out[i + 1] = camera.world_to_screen_y(v[i + 1]);
+        }
+        return out;
+    };
+    std::vector<float> verts, pv, ev;
+    fight_->player().fighter.build_vertices(verts);
+    pv = project(verts);
+    fight_->enemy().fighter.build_vertices(verts);
+    ev = project(verts);
+    ren.draw_triangles(pv.data(), pv.size() / 2, fight_->player().fighter.color_r(),
+                       fight_->player().fighter.color_g(), fight_->player().fighter.color_b());
+    ren.draw_triangles(ev.data(), ev.size() / 2, fight_->enemy().fighter.color_r(),
+                       fight_->enemy().fighter.color_g(), fight_->enemy().fighter.color_b());
+
+    // The fight HUD (flat bars).
+    auto draw_bar = [&](float x, float y, float w, float h, float ratio,
+                        std::uint32_t color) {
+        float verts[12] = {x, y, x + w * ratio, y, x, y + h,
+                           x + w * ratio, y, x + w * ratio, y + h, x, y + h};
+        ren.draw_triangles(verts, 6, ((color >> 16) & 0xFF) / 255.0f,
+                           ((color >> 8) & 0xFF) / 255.0f, (color & 0xFF) / 255.0f, 0.95f);
+    };
+    const float bar_w = 440.0f, bar_h = 16.0f, bar_y = 60.0f;
+    const float p_ratio =
+        fight_->player().max_hp > 0.0f ? fight_->player().hp / fight_->player().max_hp : 0.0f;
+    const float e_ratio =
+        fight_->enemy().max_hp > 0.0f ? fight_->enemy().hp / fight_->enemy().max_hp : 0.0f;
+    draw_bar(60.0f, bar_y, bar_w, bar_h, p_ratio, 0x20D020);
+    draw_bar(kViewW - 60.0f - bar_w, bar_y, bar_w, bar_h, e_ratio, 0x4020E0);
+
+    const int timer =
+        fight_->round().gma - static_cast<int>(std::ceil(fight_->round().time));
+    const std::string tstr = std::to_string(std::max(0, timer));
+    float tx = kViewW * 0.5f - tstr.size() * 20.0f;
+    for (char ch : tstr) {
+        float verts[12] = {tx, 30.0f, tx + 18.0f, 30.0f, tx, 58.0f,
+                           tx + 18.0f, 30.0f, tx + 18.0f, 58.0f, tx, 58.0f};
+        ren.draw_triangles(verts, 6, 1.0f, 1.0f, 1.0f, 0.95f);
+        tx += 22.0f;
+        (void)ch;
+    }
+
+    const int rounds_total = fight_->round().length;
+    for (int i = 0; i < rounds_total; ++i) {
+        const bool p_done = i < fight_->player().rounds_won;
+        const float px = 90.0f + static_cast<float>(i) * 26.0f;
+        float dv[12] = {px, 86.0f, px + 16.0f, 86.0f, px, 102.0f,
+                        px + 16.0f, 86.0f, px + 16.0f, 102.0f, px, 102.0f};
+        ren.draw_triangles(dv, 6, p_done ? 0.2f : 0.35f, p_done ? 0.8f : 0.35f,
+                           p_done ? 0.2f : 0.35f, 1.0f);
+        const float ex = kViewW - 90.0f - static_cast<float>(rounds_total - 1 - i) * 26.0f;
+        float ev2[12] = {ex, 86.0f, ex + 16.0f, 86.0f, ex, 102.0f,
+                         ex + 16.0f, 86.0f, ex + 16.0f, 102.0f, ex, 102.0f};
+        ren.draw_triangles(ev2, 6, 0.35f, 0.8f, 0.35f, 1.0f);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ResultsScreen
+// ---------------------------------------------------------------------------
+
+ResultsScreen::ResultsScreen(ScreenManager& mgr, bool player_won, int money_reward,
+                             int exp_reward)
+    : Screen(mgr, "Results"), player_won_(player_won), money_reward_(money_reward),
+      exp_reward_(exp_reward) {}
+
+void ResultsScreen::update_impl(float dt) {
     (void)dt;
+    if (!applied_) {
+        applied_ = true;
+        WarriorSave w;
+        try {
+            w = app().save().load();
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[result] save load failed: %s\n", e.what());
+            return;
+        }
+        if (player_won_) {
+            // JS `dmb` -> `emb` (L93552): Money -> `Pa.Fwa` (Tb += money),
+            // Exp -> `Pa.Iab` -> `p.o.Jab` (XP).
+            const int before = w.money;
+            w.money += money_reward_;
+            w.experience += exp_reward_;
+            std::fprintf(stdout, "[result] WIN reward money=%d exp=%d (money %d -> %d)\n",
+                         money_reward_, exp_reward_, before, w.money);
+            while (w.experience >= 100 && w.level < 50) {
+                w.experience -= 100;
+                w.level++;
+                w.power += 2;
+                std::fprintf(stdout, "[result] LEVEL UP -> %d (power %d)\n", w.level, w.power);
+            }
+        } else {
+            std::fprintf(stdout, "[result] LOSS (no reward)\n");
+        }
+        try {
+            app().save().save(w);
+            std::fprintf(stdout, "[result] save: money=%d exp=%d level=%d weapon=%s\n", w.money,
+                         w.experience, w.level, w.weapon.c_str());
+            std::fflush(stdout);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[result] save failed: %s\n", e.what());
+        }
+    }
     const App::PointerState& p = app().pointer();
     if (p.pressed) {
-        // The game's results screen returns to the map ("Fight" results ->
-        // `wa.F().mp(5)` after the reward flow, JS L1213 `qxa`). Pop back
-        // to the map beneath (the results screen was pushed on top of it).
         std::fprintf(stdout, "[result] click -> back to Map\n");
         std::fflush(stdout);
+        // JS `qxa` (L1213) pops back to the map: the Results screen sits on
+        // top of the Fight screen it replaced, so both pop (the fight is
+        // done; the map is the caller the flow returns to).
+        manager().pop();
         manager().pop();
     }
 }
 
-void BattleResultScreen::render_impl(App& app) {
+void ResultsScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    // Dim the backdrop + the winner text (flat placeholder).
     const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(verts, 6, 0.0f, 0.0f, 0.0f, 0.6f);
-    std::fprintf(stdout, "[result] %s\n", winner_text_.c_str());
+    std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
+}
+
+// ---------------------------------------------------------------------------
+// ShopScreen
+// ---------------------------------------------------------------------------
+
+ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
+    items_ = load_catalog(app());
+    std::fprintf(stdout, "[shop] %zu shop items\n", items_.size());
+    for (const auto& it : items_) {
+        std::fprintf(stdout, "[shop] item %s (%s) price=%d model=%s\n", it.name.c_str(),
+                     it.subtype.empty() ? it.type.c_str() : it.subtype.c_str(), it.price,
+                     it.model.c_str());
+    }
+    std::fflush(stdout);
+}
+
+void ShopScreen::update_impl(float dt) {
+    (void)dt;
+    const App::PointerState& p = app().pointer();
+    try {
+        const WarriorSave w = app().save().load();
+        if (w.money != money_logged_) {
+            money_logged_ = w.money;
+            std::fprintf(stdout, "[shop] MONEY %d\n", w.money);
+            std::fflush(stdout);
+        }
+    } catch (const std::exception&) {
+    }
+    hover_ = -1;
+    // BACK (top-left) -> the main menu (the loop's shop -> menu leg).
+    if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
+        if (p.pressed) {
+            std::fprintf(stdout, "[shop] BACK -> GeneralMenu\n");
+            std::fflush(stdout);
+            manager().pop();
+            return;
+        }
+    }
+    const float card_w = 300.0f, card_h = 150.0f;
+    const float x0 = kViewW * 0.25f, y0 = 200.0f;
+    const float dx = 330.0f, dy = 170.0f;
+    for (std::size_t i = 0; i < items_.size(); ++i) {
+        const int col = static_cast<int>(i % 2);
+        const int row = static_cast<int>(i / 2);
+        const float cx = x0 + col * dx;
+        const float cy = y0 + row * dy;
+        if (p.x >= cx - card_w / 2 && p.x <= cx + card_w / 2 && p.y >= cy - card_h / 2 &&
+            p.y <= cy + card_h / 2) {
+            hover_ = static_cast<int>(i);
+            if (p.pressed) {
+                const CatalogItem& it = items_[i];
+                WarriorSave w;
+                try {
+                    w = app().save().load();
+                } catch (const std::exception&) {
+                    break;
+                }
+                // JS `Pa.iwa` (L629626): money check `p.o.Tb >= a.jp()`,
+                // deduct `p.o.Fr(b)`, add `Pa.gI` (L628934) -> inventory.
+                if (w.has_item(it.name)) {
+                    std::fprintf(stdout, "[shop] %s already owned\n", it.name.c_str());
+                    std::fflush(stdout);
+                } else if (w.money >= it.price) {
+                    w.money -= it.price;
+                    WarriorSave::OwnedItem oi;
+                    oi.name = it.name;
+                    oi.count = 1;
+                    w.items.push_back(oi);
+                    app().save().save(w);
+                    std::fprintf(stdout,
+                                 "[shop] BOUGHT %s (%s) price=%d -> money %d, item added\n",
+                                 it.name.c_str(), it.subtype.c_str(), it.price, w.money);
+                    std::fflush(stdout);
+                } else {
+                    std::fprintf(stdout, "[shop] NOT ENOUGH MONEY for %s (need %d, have %d)\n",
+                                 it.name.c_str(), it.price, w.money);
+                    std::fflush(stdout);
+                }
+            }
+        }
+    }
+}
+
+void ShopScreen::render_impl(App& app) {
+    sf2::render::Renderer& ren = app.renderer();
+    sf2::scene::Sprite* dojo = app.dojo_sprite();
+    if (dojo != nullptr) {
+        ren.draw_sprite(*dojo, ren.current_camera());
+    }
+    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
+
+    const float card_w = 300.0f, card_h = 150.0f;
+    const float x0 = kViewW * 0.25f, y0 = 200.0f;
+    const float dx = 330.0f, dy = 170.0f;
+    for (std::size_t i = 0; i < items_.size(); ++i) {
+        const int col = static_cast<int>(i % 2);
+        const int row = static_cast<int>(i / 2);
+        const float cx = x0 + col * dx;
+        const float cy = y0 + row * dy;
+        const bool hovered = static_cast<int>(i) == hover_;
+        const float r = hovered ? 0.75f : 0.45f;
+        const float g = hovered ? 0.6f : 0.35f;
+        const float b = hovered ? 0.3f : 0.2f;
+        draw_flat_button(app, items_[i].name, cx, cy, card_w, card_h, r, g, b, hovered);
+    }
+    // The BACK button (top-left).
+    draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+}
+
+// ---------------------------------------------------------------------------
+// EquipmentScreen
+// ---------------------------------------------------------------------------
+
+EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") {
+    // The FULL catalog — the owned base items (Body/Head/Fists) are
+    // ShopHide/Hidden and absent from the shop-visible list; the grid
+    // must resolve their type/subtype to place the cards.
+    catalog_ = load_full_catalog(app());
+}
+
+void EquipmentScreen::update_impl(float dt) {
+    (void)dt;
+    const App::PointerState& p = app().pointer();
+    WarriorSave w;
+    try {
+        w = app().save().load();
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[equip] save load failed: %s\n", e.what());
+        return;
+    }
+    hover_ = -1;
+    // BACK (top-left) -> the main menu (the loop's equipment -> menu leg).
+    if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
+        if (p.pressed) {
+            std::fprintf(stdout, "[equip] BACK -> GeneralMenu\n");
+            std::fflush(stdout);
+            manager().pop();
+            return;
+        }
+    }
+    // The owned items grid: click to equip into its type's slot. `card`
+    // counts only the Weapon/Armor/Helm cards (NoRanged/NoMagic etc. are
+    // filtered out and must NOT consume a grid slot — the JS profile grid
+    // shows only the equippable item types).
+    const float grid_x = kViewW * 0.55f, grid_y0 = 220.0f, grid_dx = 240.0f, grid_dy = 110.0f;
+    int idx = 0;
+    int card = 0;
+    for (const auto& oi : w.items) {
+        std::string type, subtype;
+        for (const CatalogItem& ci : catalog_) {
+            if (ci.name == oi.name) {
+                type = ci.type;
+                subtype = ci.subtype;
+                break;
+            }
+        }
+        if (type != "Weapon" && type != "Armor" && type != "Helm") {
+            ++idx;
+            continue;
+        }
+        const int col = card % 2;
+        const int row = card / 2;
+        const float cx = grid_x + col * grid_dx;
+        const float cy = grid_y0 + row * grid_dy;
+        if (p.x >= cx - 110 && p.x <= cx + 110 && p.y >= cy - 40 && p.y <= cy + 40) {
+            hover_ = idx;
+            if (p.pressed) {
+                // JS `$g.$o` (L152184): `p.o.Ca.hk(a.type, a)` sets the
+                // slot, `setItem`, `save()`.
+                WarriorSave w2 = app().save().load();
+                std::string* slot_val = nullptr;
+                if (type == "Weapon") slot_val = &w2.weapon;
+                else if (type == "Armor") slot_val = &w2.armor;
+                else slot_val = &w2.helm;
+                *slot_val = oi.name;
+                for (auto& oi2 : w2.items) {
+                    if (oi2.name == oi.name) oi2.equipped = true;
+                }
+                app().save().save(w2);
+                std::fprintf(stdout,
+                             "[equip] EQUIPPED %s (%s) -> %s slot (weapon=%s armor=%s helm=%s); move list rebuilt on next fight\n",
+                             oi.name.c_str(), subtype.c_str(), type.c_str(), w2.weapon.c_str(),
+                             w2.armor.c_str(), w2.helm.c_str());
+                std::fflush(stdout);
+            }
+        }
+        ++idx;
+        ++card;
+    }
+}
+
+void EquipmentScreen::render_impl(App& app) {
+    sf2::render::Renderer& ren = app.renderer();
+    sf2::scene::Sprite* dojo = app.dojo_sprite();
+    if (dojo != nullptr) {
+        ren.draw_sprite(*dojo, ren.current_camera());
+    }
+    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
+
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return;
+    }
+    const float slot_x = kViewW * 0.2f, slot_y0 = 220.0f, slot_dy = 110.0f;
+    const char* slot_names[3] = {"Weapon", "Armor", "Helm"};
+    const std::string current[3] = {w.weapon, w.armor, w.helm};
+    for (int s = 0; s < 3; ++s) {
+        const float sy = slot_y0 + s * slot_dy;
+        draw_flat_button(app, std::string(slot_names[s]) + ": " + current[s], slot_x, sy, 400.0f,
+                         80.0f, 0.35f, 0.3f, 0.45f, hover_ == s);
+    }
+    const float grid_x = kViewW * 0.55f, grid_y0 = 220.0f, grid_dx = 240.0f, grid_dy = 110.0f;
+    int idx = 0;
+    int card = 0;
+    for (const auto& oi : w.items) {
+        std::string type;
+        for (const CatalogItem& ci : catalog_) {
+            if (ci.name == oi.name) {
+                type = ci.type;
+                break;
+            }
+        }
+        if (type != "Weapon" && type != "Armor" && type != "Helm") {
+            ++idx;
+            continue;
+        }
+        const int col = card % 2;
+        const int row = card / 2;
+        const float cx = grid_x + col * grid_dx;
+        const float cy = grid_y0 + row * grid_dy;
+        const bool equipped = oi.equipped;
+        draw_flat_button(app, oi.name + (equipped ? " [EQ]" : ""), cx, cy, 220.0f, 80.0f,
+                         equipped ? 0.5f : 0.3f, equipped ? 0.6f : 0.3f,
+                         equipped ? 0.3f : 0.35f, hover_ == idx);
+        ++idx;
+        ++card;
+    }
+    // The BACK button (top-left).
+    draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -322,8 +980,21 @@ std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id) {
             return std::make_unique<MainMenuScreen>(mgr);
         case kScreenMap:
             return std::make_unique<MapScreen>(mgr);
-        case kScreenFight:
-            return std::make_unique<BattleResultScreen>(mgr, "PLACEHOLDER: Fight wired in 3.6b");
+        case kScreenFight: {
+            // The Map node click carried the battle into pending_battle.
+            const PendingBattle& pb = mgr.app().pending_battle();
+            return std::make_unique<FightScreen>(mgr, pb.battle_name, pb.location,
+                                                 pb.reward_money, pb.reward_exp, pb.owned);
+        }
+        case kScreenResults: {
+            const PendingBattle& pb = mgr.app().pending_battle();
+            return std::make_unique<ResultsScreen>(mgr, pb.player_won, pb.reward_money,
+                                                   pb.reward_exp);
+        }
+        case kScreenShop:
+            return std::make_unique<ShopScreen>(mgr);
+        case kScreenProfile:
+            return std::make_unique<EquipmentScreen>(mgr);
         default:
             return nullptr;
     }
