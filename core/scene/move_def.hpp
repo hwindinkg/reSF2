@@ -133,6 +133,15 @@ struct MoveDef {
     std::vector<Interval> intervals;   // <Intervals><Interval> (own + template)
     std::vector<Lock> locks;           // <Locks>
     Align align;                       // <Align>
+    // Event names (JS `kz.create` L771-772 + `tb.D6a` L763): "KeyPressed"
+    // (type 2), "AnimationEnd" (10), "IntervalEnd" (13), ... The fighter's
+    // input path (JS `Gc.Vkb` L671 -> `Gc.EZa` L676) only considers moves
+    // whose Events contain "KeyPressed".
+    std::set<std::string> events;
+
+    bool has_event(const std::string& name) const {
+        return events.find(name) != events.end();
+    }
 };
 
 // Parse res/moves.xml (already-extracted XML text) into name -> MoveDef.

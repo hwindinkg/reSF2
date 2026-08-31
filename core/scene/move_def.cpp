@@ -418,6 +418,20 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         // Conditions (own + inherited).
         merge_conds(templates, move.child("Conditions"), def.conditions);
 
+        // Events (JS `Fa.GIa` L715 + `kz.create` L771): the event names are
+        // the <Events> child element names ("KeyPressed", "AnimationEnd",
+        // "IntervalEnd", ...).
+        auto merge_events = [&](pugi::xml_node list) {
+            if (!list) return;
+            for (pugi::xml_node ev : list.children()) {
+                def.events.insert(ev.name());
+            }
+        };
+        merge_events(move.child("Events"));
+        for (pugi::xml_node tpl_node : templates) {
+            merge_events(tpl_node.child("Events"));
+        }
+
         // Tactics conditions (JS `Fa.djb` — Tactics/Conditions).
         if (pugi::xml_node tactics = move.child("Tactics")) {
             if (pugi::xml_node tc = tactics.child("Conditions")) {
