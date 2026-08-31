@@ -101,6 +101,17 @@ public:
     // enemy, arms the move's intervals (JS `Te.Skb` L550 + `jc.c7a` L691).
     bool try_start_move(const MoveDef& move, sf2::scene::FightContext& ctx);
 
+    // AI variant of try_start_move: starts `move` bypassing the Keys
+    // conditions (JS `de.V1` L601-602 sets `Fc.gm=!1` so `vm.he` L749
+    // returns true for every Keys condition — the AI "simulates" the move's
+    // key press via `Kl.Ptb` in `Okb` L506). The other conditions (Distance,
+    // CurrentAnimation, CurrentInterval, ...) are still evaluated exactly.
+    bool ai_start_move(const MoveDef& move, sf2::scene::FightContext& ctx);
+
+    // Shared implementation of try_start_move / ai_start_move.
+    bool start_move_impl(const MoveDef& move, sf2::scene::FightContext& ctx,
+                         bool ai);
+
     // Advances the current clip one frame (60 Hz). Updates active intervals
     // (Start/End), transitions to idle when the clip ends (JS `Te.ia`
     // L547-548: `Xh+2 >= len` -> stop). Samples the pose at move_frame.

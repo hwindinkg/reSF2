@@ -195,3 +195,134 @@ Cgb(a){
 - The Default enemy template carries `BlockDamageFactor="-23219"` ->
   `2^(-2.3219) ≈ 0.2003` (an 80% reduction). With BlockDamageFactor=0 the
   block has NO effect (the demo's punchbag case).
+
+
+## 7. AI — tactics parsing + decision loop (Phase 3.4)
+
+Ported from `reference/www/sf2.502f0946.js`. The AI drives a fighter the
+same way the game's `de` class (g="E2", L589-621) does. This section
+documents the tactics file format (from the actual bytes + the JS parser),
+the tactic settings XML, and the decision loop — with line refs.
+
+### 7.1 The tactics .dat files
+
+`reference/www/res/tactics/*.dat` (1710 files) are **zstd-compressed**
+(magic `28 B5 2F FD`) multi-group archives. After decompression the payload
+is a sequence of groups (JS `Si.cxb` L653-654):
+
+```
+per group:
+  u32  version        (0/1 = weapon-pair tables, 2 = single-weapon, 7 = per-anim)
+  cstr weapon_a       (e.g. "Fists"; "" = unarmed)
+  cstr weapon_b       (only for version 0/1)
+  u32  blob_size
+  u8[blob_size] blob
+```
+
+The blob (JS `sb.load` L649 + `Wlb`/`bmb` L652-653 + `tab` L649-652) is a
+**binary decision table**, NOT Haxe serialization:
+
+```
+u16 countA            (858 for the fists tables — the animation-name pool)
+u8  lensA[countA]     (length table)
+char stringsA[...]    (concatenated pool-A animation names — REAL MOVE names
+                       like "HighPunch", "StepBack", "FistsStartStanceIdle-Right")
+u16 countB            (weapon-name pool, 57 for fists)
+u8  lensB[countB], char stringsB[...]
+u32 fm_count          (Ku "table records")
+u32 il_count          (Il "container records")
+u32 ju_count          (Ju "condition rows")
+u32 hu_count          (Hu "frame rows")
+u32 gu_count          (Gu "outcome" count)
+u32 float_pool_size
+u32 u32_pool_size
+u16 fm_anim_idx[fm_count]        (record -> pool-A index)
+i16 scale, i16 fdata[float_pool_size]   (float pool, scaled: v * scale)
+u32 udata[u32_pool_size]                (u32 pool)
+u16 id_idx[gu_count]                    (Gu -> pool-A index)
+nested, per FM record:
+  u16 cntG (vec24 count)
+  per vec24: u16 weaponIdx (pool B), u16 cntH (row count)
+    per row (vec28B): cstr label, u16 cntJ (frame count)
+      per frame: (cntJ>0) i16 Rda, then cntJ x:
+        u16 cntK (outcome count)
+        per outcome (Gu): u16 id-pool offset (shared, sequential),
+                          u16 pa (float count), u16 da (u32 count)
+        then the outcome's float windows + u32 outcomes read from the
+        shared pools in order (JS L652: `t`/`z` offsets advance per record)
+```
+
+Semantics: a record is keyed by the **enemy's current animation**
+(pool-A name); its rows are per-condition groups; each outcome is
+`{anim, float window-edges[], u32 window-outcomes[]}` — at decision time
+the AI compares the (adjusted) distance against the edges, picks the
+window, and takes the u32 outcome id (>0 -> the outcome anim joins the
+candidate list). The `_.2ae51655.dat` unarmed file is 102304 compressed /
+169100 decompressed; `fists_fists.0c5a246d.dat` is 18863 / 169100 with 2
+groups (v1 + v0) of 7 records each.
+
+Native parser: `core/scene/ai.cpp` (`tactics_parse_file` + the `sb` blob
+reader) — widths match the JS `cd` reader (`ea`=u8, `ie`=u16, `Zd`=i16,
+`ti`=u32).
+
+### 7.2 tactic_settings.xml (JS `P` g="E5" + `Md` g="EB", L623-643)
+
+The `<Tactics>` section lists named tactics; each `<Tactic>` carries:
+- `AnimationWeights` — `<Animation Name Base CounterFactor DamageFactor
+  HealthFactor EnemyHealthFactor AnimationFramesFactor ChildFramesFactor
+  MagicBulletFactor MissileBulletFactor HitFactor DistanceFactor Limit
+  AntiLimit Shift ConditionalDesigionFactor FactorType>` weight curves
+  (the JS `cc` class, L644-648).
+- `UseDefense` — `CounterAttackChance`/`DodgeChance`/`BlockChance` curves.
+- `UseSafeAttackChance`, `TableAttackChance`, `DodgeMissilesChance`,
+  `DodgeMagicChance`, `CautiousMovementsChance` curves.
+- `QuickAttacks`/`Evades` — `QuickAttackChance`/`EvadeChance` slots
+  (`Animation` names + the chance curve + optional Conditions).
+- `ExpectedWait` — per-anim wait curves.
+- `DistanceError`/`FrameError`/`ResponseDelay`/`EnemyResponseDelay` —
+  `<Min>/<Max>` curve pairs.
+- `Memory Strikes RoundFactor`.
+
+Template inheritance: `<Tactic Template="UseTables">` copies the template's
+missing attributes + child elements (JS `kh.z0a` L655-657) — the native
+`resolve_template` mirrors `kh.Feb`/`H2`/`Cha` (L656-657).
+
+### 7.3 The decision loop (JS `de` L589-621)
+
+Per fight frame the game calls `ca.Ea` (L385) -> `nzb` (facing lock) ->
+`ia` -> `Hnb` -> each fighter `wd.ia` (L498) -> `Anb` (L499) -> `Ykb`
+(L500) -> `de.ia(opponent, ...)`:
+
+- `de.ia` (L592-594): snapshots the fight state into `Ue` (`mQ` L620),
+  manages the wait counter `eh`, gates on `hcb` (L598-599 — no NoDecision
+  interval/move active), evaluates the distance category `dqb` (L600 —
+  CounterAttack/Dodge/Block ranges from the UseDefense cumulative draw),
+  then `Pqb` (L604-608) makes the core decision.
+- `Pqb`: facing lock (`b6a` L603 x enemy facing), dodge missiles/magic
+  (`fCa` L599), the safe-attack/attack-table branch (when the enemy is in
+  its move start and the AI is uninterruptible), the distance-based
+  response (CounterAttack range -> safe attack / throw; Dodge range ->
+  throw; Block range -> block), then the QuickAttack/Evade slots (`Nwa`
+  L603).
+- The safe-attack table lookup `YAa`/`Q6a` (L608-610) + attack table `XAa`
+  (L611-612) read the tactics blob records by the enemy's current animation
+  and pick the distance-windowed outcomes; `Gea` (L613-616) is the throw
+  table.
+- The candidate list (`wb`/`ld`) is filtered by `V1` (L601-602 — the move's
+  TACTICS conditions only, `Fc.gm=!1` so Keys pass) and picked by the
+  weighted roulette `jL`/`Md.jL` (L640) over the tactic's AnimationWeights.
+- The chosen move's wait becomes `eh`; `Ykb` (L500) starts it via
+  `Okb` -> `NS` (L505) -> `da.Skb` — the native `Fighter::ai_start_move`.
+
+The native `AiController` (`core/scene/ai.hpp`/`ai_controller.cpp`) ports
+this structure 1:1. **Documented native approximations:**
+- the fighter's body-part animation frames (`vd`) are reduced to the single
+  current animation + frame (the native fighter has one merged body);
+- the strike-memory accumulators (JS `cc.Gb`'s per-anim damage/counter/
+  hits, fed by combat events) are 0 — the AnimationFactors probe term
+  contributes nothing yet;
+- the QuickAttack slot tag `ShortAttack` (from the old game) resolves to
+  the `Punch`-tagged Fists moves in this build;
+- the tactic's `Conditions` sub-trees on QuickAttack/Evade slots are parsed
+  but not evaluated (the shipped tactic_settings uses condition-free
+  slots).
