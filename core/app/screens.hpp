@@ -29,7 +29,14 @@
 #include <string>
 #include <vector>
 
+#include "app/fight_assets.hpp"
+#include "app/item_catalog.hpp"
 #include "app/screen_manager.hpp"
+
+namespace sf2::scene {
+class FightController;
+class LocationScene;
+} // namespace sf2::scene
 
 namespace sf2::app {
 
@@ -81,20 +88,115 @@ private:
     int hover_ = -1;
 };
 
-// The battle-result placeholder — native placeholder for the results flow
-// (full version in 3.6b).
-class BattleResultScreen : public Screen {
+// The fight — native Fight screen (screen 6, JS `ai`/`ma` L2004-2010).
+// Drives a real FightController (rounds/phases/timer/win-lose) with the
+// player's keyboard input (Punch/Block/Forward/Back per the key_type enum)
+// and the enemy AI. When the battle ends it pushes the Results screen with
+// the winner + the reward.
+class FightScreen : public Screen {
 public:
-    explicit BattleResultScreen(ScreenManager& mgr, std::string winner_text);
+    // `battle_name`/`location` = the stages.xml battle; `reward_money`/
+    // `reward_exp` = the fight's reward (from the pending battle). `owned`
+    // = the player's (type, subtype) items for the Locks move list.
+    FightScreen(ScreenManager& mgr, const std::string& battle_name,
+                const std::string& location, int reward_money, int reward_exp,
+                const std::vector<std::pair<std::string, std::string>>& owned);
 
     ScreenId id() const override { return kScreenFight; }
 
     void update_impl(float dt) override;
     void render_impl(App& app) override;
 
+    // Keyboard -> game key types (JS `Ik` key events -> the fight input).
+    void on_key(int glfw_key, bool down);
+
+    // The player's move-list size (the equipment-change evidence: the
+    // headless-loop driver logs it before/after equipping a weapon).
+    // Defined in screens.cpp (needs the full FightController type).
+    std::size_t move_list_size() const;
+
 private:
-    std::string winner_text_;
+    std::string battle_name_;
+    std::string location_;
+    int reward_money_ = 0;
+    int reward_exp_ = 0;
+    std::unique_ptr<sf2::scene::FightController> fight_;
+    bool results_pushed_ = false;
+    bool key_state_[16] = {};
+    int last_log_frame_ = 0;
+    bool auto_attack_wired_ = false;
 };
+
+// The battle results — native results flow (JS `v.kD` L622187 -> the
+// `Fh` results screen + `qxa` L1213 back to the map). Shows win/lose,
+// applies the money/XP reward (JS `Pa.Fwa`/`Pa.Iab` -> `p.o.Fr`/`Jab`),
+// updates + saves the Warrior, and returns to the map on click.
+class ResultsScreen : public Screen {
+public:
+    ResultsScreen(ScreenManager& mgr, bool player_won, int money_reward,
+                  int exp_reward);
+
+    ScreenId id() const override { return kScreenResults; }
+
+    void update_impl(float dt) override;
+    void render_impl(App& app) override;
+
+private:
+    bool player_won_ = false;
+    int money_reward_ = 0;
+    int exp_reward_ = 0;
+    bool applied_ = false;
+};
+
+// The shop — native Shop screen (screen 4, JS `Oa` g="468").
+// Lists the priced Weapon/Armor/Helm items from list.xml as flat cards
+// (the shop atlas is ASTC — not CPU-decodable, so the cards are flat with
+// labels + the item's price). Click an item to buy: check money (JS
+// `Pa.iwa` L629626: `p.o.Tb >= a.jp()`), deduct, add to the inventory
+// (JS `Pa.gI` L628934 -> `p.o.xa.Oo`), save.
+class ShopScreen : public Screen {
+public:
+    explicit ShopScreen(ScreenManager& mgr);
+
+    ScreenId id() const override { return kScreenShop; }
+
+    void update_impl(float dt) override;
+    void render_impl(App& app) override;
+
+private:
+    std::vector<CatalogItem> items_;
+    int hover_ = -1;
+    int money_logged_ = 0;
+};
+
+// The equipment — native Profile/equipment screen (JS `Oa.f5` case 5 +
+// `$g.$o` L152184 the equip flow). Shows the slots (Weapon/Armor/Helm) +
+// the owned items; click an owned item to equip it: set the Warrior's
+// slot + the item's Equipped flag (JS `xc.hk` L412433 + `setItem`),
+// rebuild the fighter (merged model + move list), save.
+class EquipmentScreen : public Screen {
+public:
+    explicit EquipmentScreen(ScreenManager& mgr);
+
+    ScreenId id() const override { return kScreenProfile; }
+
+    void update_impl(float dt) override;
+    void render_impl(App& app) override;
+
+private:
+    std::vector<CatalogItem> catalog_;
+    int hover_ = -1;
+};
+
+// The shared item catalog (the shop list + the equipment item lookup).
+// Loaded once from list.xml and cached.
+std::vector<CatalogItem> load_catalog(App& app);
+
+// The FULL item catalog (all items incl. the ShopHide/Hidden base items
+// Body/Head/Fists/NoRanged/NoMagic). The EquipmentScreen needs the type/
+// subtype of every owned item, not just the shop-visible ones. Loaded once
+// and cached.
+std::vector<CatalogItem> load_full_catalog(App& app);
 
 // Factory: creates a screen by id (used by Screen::push).
 std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id);

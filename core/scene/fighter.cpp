@@ -54,6 +54,58 @@ void Fighter::build_move_list(const std::map<std::string, MoveDef>& all_moves,
               [](const MoveDef* a, const MoveDef* b) { return a->priority > b->priority; });
 }
 
+// JS `ra.Hza` (L684-685): the move set `me` is built by testing every move's
+// Locks against the fighter's items (`f.nw(d,b)`). A lock group passes when:
+//   - a plain <Item Type SubType> matches an owned (type, subtype) item;
+//   - an <Operator Type="Or"> group passes when ANY member item matches;
+// moves with no locks are universal (every fighter has the Skeleton).
+// This mirrors the game exactly: a WEAPON_KNIVES (SubType="Knives") owner
+// gets KnivesSlash (Locks: Or{Weapon Knives, Weapon Keris}).
+void Fighter::build_move_list_locks(
+    const std::map<std::string, MoveDef>& all_moves,
+    const std::vector<std::pair<std::string, std::string>>& owned,
+    bool include_universal) {
+    auto owned_item = [&owned](const Lock& l) {
+        for (const auto& o : owned) {
+            // Lock Type/SubType both match (JS `nw`: `b.type==a.type &&
+            // b.Yb==a.Yb`; an empty lock SubType matches any owned subtype).
+            if (o.first != l.type) continue;
+            if (!l.subtype.empty() && o.second != l.subtype) continue;
+            return true;
+        }
+        return false;
+    };
+    hb_.clear();
+    for (const auto& kv : all_moves) {
+        const MoveDef& m = kv.second;
+        if (m.locks.empty()) {
+            // No locks -> universal (JS: every move's Skeleton lock passes).
+            if (include_universal) hb_.push_back(&m);
+            continue;
+        }
+        // Evaluate the lock list: every top-level lock must pass.
+        // Or-group locks (l.or_) pass when ANY member passes — the parser
+        // flattens the Or group into one lock per member item with or_=true.
+        bool all_pass = true;
+        bool or_group = false;
+        bool any_or = false;
+        for (const Lock& l : m.locks) {
+            if (l.or_) {
+                or_group = true;
+                if (owned_item(l)) any_or = true;
+            } else if (!owned_item(l)) {
+                all_pass = false;
+                break;
+            }
+        }
+        if (!all_pass) continue;
+        if (or_group && !any_or) continue;
+        hb_.push_back(&m);
+    }
+    std::sort(hb_.begin(), hb_.end(),
+              [](const MoveDef* a, const MoveDef* b) { return a->priority > b->priority; });
+}
+
 void Fighter::age_keys() {
     // JS `zl.ia` (L798): after 30 frames the tap buffer is cleared.
     if (tap_age_ > 0) {

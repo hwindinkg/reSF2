@@ -33,7 +33,9 @@ class ScreenManager;
 
 // Screen ids — mirror of `xn` (JS L1167-1168). Only the ids the shell
 // uses are exposed; the JS enum is 0=Preloader, 2=Loader, 3=Dojo, 4=Shop,
-// 5=Map, 6=Fight, 7=Profile, 8=GeneralMenu, 9=Pvp.
+// 5=Map, 6=Fight, 7=Profile, 8=GeneralMenu, 9=Pvp. `kScreenResults` is a
+// native-only id (the JS shows the results inside the Fight screen; the
+// native shell gives it a dedicated screen for the clean flow).
 enum ScreenId : int {
     kScreenPreloader = 0,
     kScreenDojo = 3,
@@ -42,6 +44,7 @@ enum ScreenId : int {
     kScreenFight = 6,
     kScreenProfile = 7,
     kScreenGeneralMenu = 8,
+    kScreenResults = 10,
 };
 
 // Screen-state values ($d.Te, JS L121: 2/3/5 active, else inactive).
@@ -94,6 +97,10 @@ public:
     // Hook for rendering (JS subclasses override `Ea`). Default draws
     // nothing.
     virtual void render_impl(App& app) { (void)app; }
+    // Hook for keyboard events (the JS `Ik` keyboard input screen; the
+    // FightScreen maps GLFW keys -> the game's key types). Default does
+    // nothing.
+    virtual void on_key(int glfw_key, bool down) { (void)glfw_key; (void)down; }
 
     ScreenManager& manager() const { return mgr_; }
     App& app() const;

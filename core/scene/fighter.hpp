@@ -83,6 +83,20 @@ public:
                          const std::string& weapon_subtype,
                          bool include_universal = true);
 
+    // Locks-aware variant (JS `ra.Hza` L684-685 — `f.nw(d,b)` tests the
+    // move's <Locks> against the fighter's ITEMS, not the TacticWeapon
+    // string). `owned` is the fighter's item list as (type, subtype) pairs
+    // (the Warrior's <Items> + equipment slots). A move passes when every
+    // Lock group resolves against the owned items: a plain <Item> lock
+    // passes when an owned item matches Type AND SubType; an Or-group
+    // passes when ANY item in the group matches. Moves with no locks are
+    // universal (the Skeleton lock passes for every fighter). This is what
+    // lets TacticWeapon="Knives|Keris" moves join the list when the fighter
+    // equips WEAPON_KNIVES (SubType="Knives"). Sorted by Priority desc.
+    void build_move_list_locks(const std::map<std::string, MoveDef>& all_moves,
+                               const std::vector<std::pair<std::string, std::string>>& owned,
+                               bool include_universal = true);
+
     // Buffers one key press (JS `Kl.Sgb`, L798): Tap (and Hold if
     // `held`). Clears on `release` (JS `Xgb`, L799).
     void input(sf2::scene::key_type key, sf2::scene::press_type press);

@@ -49,6 +49,22 @@ namespace sf2::app {
 class ScreenManager;
 class SaveSystem;
 struct WarriorSave;
+struct FightAssets;
+struct CatalogItem;
+
+// The pending battle the Map -> Fight -> Results flow carries (JS `Da` +
+// the `v.kD` results data: the battle, the reward, the winner).
+struct PendingBattle {
+    std::string battle_name = "Training";
+    std::string location = "dojo";
+    int reward_money = 0;  // the first non-zero <Reward> of the fight
+    int reward_exp = 0;
+    // The fight outcome (set by the FightScreen at battle end).
+    bool has_result = false;
+    bool player_won = false;
+    // The owned items the player's move list was built from.
+    std::vector<std::pair<std::string, std::string>> owned;
+};
 
 // A text glyph run: screen-space position + the glyph quads. The shell
 // renders text by cutting glyph rects from the font page texture (the
@@ -78,12 +94,23 @@ public:
     // that many frames (the verify path clicks the Fight button).
     void run(int headless_frames = 0, bool auto_click = false);
 
+    // Runs exactly one present frame (poll input + fixed-step updates +
+    // render). Used by the headless-loop driver in app/game/main.cpp.
+    void run_one_frame();
+
     void shutdown();
 
     // --- shared resources (screens draw through these) --------------------
     sf2::render::Renderer& renderer() { return *renderer_; }
     ScreenManager& screens() { return *screens_; }
     SaveSystem& save() { return *save_; }
+
+    // The shared fight assets (models/moves/clips/tactics/location) —
+    // loaded once at init, used by Fight/Shop/Equipment.
+    FightAssets& fight_assets() { return *fight_assets_; }
+
+    // The pending battle flow data (the Map -> Fight -> Results hand-off).
+    PendingBattle& pending_battle() { return pending_battle_; }
 
     // The dojo background sprite (the main menu / map backdrop). Loaded at
     // init from the dojo location webp + atlas. Null when the asset is
@@ -121,6 +148,20 @@ public:
         injected_click_steps_ = steps;
     }
 
+    // Test hook: inject a key press/release (GLFW key code). Routes to the
+    // top screen's `on_key` (the FightScreen's input path). Defined in
+    // app.cpp (needs the full ScreenManager type).
+    void inject_key(int glfw_key, bool down);
+
+    // The player's fight auto-attack (drives the FightController; the
+    // FightScreen wires it at battle start when set).
+    void set_auto_attack(bool on) { auto_attack_ = on; }
+    bool auto_attack() const { return auto_attack_; }
+
+    // Forces the headless stepping (one fixed step per frame) even with
+    // headless_frames_ == 0 — the headless-loop driver runs uncapped.
+    void set_headless_frames(int n) { headless_frames_ = n; }
+
     // --- text ---------------------------------------------------------------
     // Draws `text` at (x,y) top-left using the menu font. Returns false
     // when no font is loaded.
@@ -148,6 +189,8 @@ private:
     std::unique_ptr<sf2::render::Renderer> renderer_;
     std::unique_ptr<ScreenManager> screens_;
     std::unique_ptr<SaveSystem> save_;
+    std::unique_ptr<FightAssets> fight_assets_;
+    PendingBattle pending_battle_;
 
     // Shared assets.
     std::unique_ptr<sf2::scene::Sprite> dojo_sprite_;
@@ -162,6 +205,7 @@ private:
 
     PointerState pointer_;
     std::set<int> keys_pressed_;
+    bool keys_held_[5] = {};  // the fight keys' held state (for edges)
     bool injected_click_pending_ = false;
     int injected_click_steps_ = 0;  // remaining fixed steps the click stays pressed
     double injected_x_ = 0.0;
@@ -170,6 +214,7 @@ private:
     // Headless/auto-click verify hooks.
     int headless_frames_ = 0;
     bool auto_click_ = false;
+    bool auto_attack_ = false;
     int frame_count_ = 0;
     int auto_click_stage_ = 0;
 };

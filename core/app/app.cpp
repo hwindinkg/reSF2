@@ -9,6 +9,7 @@
 #include <fstream>
 #include <vector>
 
+#include "app/fight_assets.hpp"
 #include "app/save_system.hpp"
 #include "app/screen_manager.hpp"
 #include "app/screens.hpp"
@@ -18,7 +19,9 @@
 #include "scene/renderer.hpp"
 #include "scene/sprite.hpp"
 #include "texture.hpp"
+#include "xml_archive.hpp"
 #include "xml_doc.hpp"
+#include "zstd_stream.hpp"
 
 namespace sf2::app {
 
@@ -37,6 +40,37 @@ std::vector<std::uint8_t> read_file_bytes(const std::string& path) {
         throw std::runtime_error("cannot read " + path);
     }
     return data;
+}
+
+std::string read_file_text(const std::string& path) {
+    const std::vector<std::uint8_t> bytes = read_file_bytes(path);
+    return std::string(bytes.begin(), bytes.end());
+}
+
+// Decompresses + parses a zstd xml archive (models/animations .dat).
+std::vector<sf2::data::archive_entry> load_archive(const std::string& path) {
+    const std::vector<std::uint8_t> compressed = read_file_bytes(path);
+    const std::vector<std::uint8_t> decompressed =
+        sf2::data::zstd_decompress(compressed);
+    return sf2::data::xml_archive_parse(decompressed.data(), decompressed.size());
+}
+
+const sf2::data::archive_entry* find_entry(
+    const std::vector<sf2::data::archive_entry>& entries, const std::string& name) {
+    for (const sf2::data::archive_entry& entry : entries) {
+        if (entry.name == name) return &entry;
+    }
+    return nullptr;
+}
+
+// The extracted moves.xml / tactic_settings.xml (the game loads them from
+// xml.dat; the extracted copies are the canonical source).
+std::string extracted_xml(const std::string& name) {
+    const std::string path = "reference/extracted/xml/res/" + name;
+    if (std::filesystem::exists(path)) {
+        return read_file_text(path);
+    }
+    throw std::runtime_error("extracted xml missing: " + path);
 }
 
 // Decodes an atlas texture by trying the decodable formats (webp first).
@@ -161,6 +195,78 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
     }
 
     screens_ = std::make_unique<ScreenManager>(*this);
+
+    // The shared fight assets (models/moves/clips/tactics/location). Built
+    // once; the Shop/Equipment screens rebuild the merged model on equip.
+    try {
+        fight_assets_ = std::make_unique<FightAssets>();
+        const std::string res = res_root_;
+        const std::vector<sf2::data::archive_entry> models =
+            load_archive(res + "/models.473fd74f.dat");
+        const auto load_model = [&](const std::string& name) {
+            const sf2::data::archive_entry* e = find_entry(models, name);
+            if (e == nullptr) throw std::runtime_error("model '" + name + "' not found");
+            return sf2::scene::model_parse(e->data.data(), e->data.size());
+        };
+        fight_assets_->skeleton = load_model("mdl_skeleton");
+        fight_assets_->body = load_model("mdl_body");
+        fight_assets_->head = load_model("mdl_head");
+        // The default Fists = no weapon model (JS: Fists has no Model).
+        fight_assets_->weapon = sf2::scene::Model{};
+        fight_assets_->armor = sf2::scene::Model{};  // Body default
+        fight_assets_->helm = sf2::scene::Model{};   // Head default
+        fight_assets_->rebuild_merged();
+
+        const std::vector<sf2::data::archive_entry> anim =
+            load_archive(res + "/animations.b22c72ff.dat");
+        const std::vector<sf2::data::archive_entry> anim_dojo =
+            load_archive(res + "/animations_dojo.3314a7de.dat");
+        for (const auto& e : anim) {
+            fight_assets_->clips.emplace(
+                e.name, sf2::data::anim_clip_parse(e.name, e.data.data(), e.data.size()));
+        }
+        for (const auto& e : anim_dojo) {
+            fight_assets_->clips.emplace(
+                e.name, sf2::data::anim_clip_parse(e.name, e.data.data(), e.data.size()));
+        }
+
+        const std::string moves_xml = extracted_xml("moves.xml");
+        if (!sf2::scene::parse_moves(moves_xml, fight_assets_->moves)) {
+            throw std::runtime_error("parse_moves failed");
+        }
+
+        const std::string t_settings = extracted_xml("tactic_settings.xml");
+        sf2::scene::parse_tactic_settings(t_settings, fight_assets_->tactic_defs);
+
+        // The fists tactics file (the AI's decision tables).
+        {
+            const std::string dir = res + "/tactics";
+            std::string t_file;
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("fists_fists.", 0) == 0 && name.substr(name.size() - 4) == ".dat") {
+                    t_file = entry.path().string();
+                    break;
+                }
+            }
+            if (!t_file.empty()) {
+                const std::vector<std::uint8_t> t_bytes = read_file_bytes(t_file);
+                fight_assets_->tactics_sets =
+                    sf2::scene::tactics_parse_file(t_bytes.data(), t_bytes.size());
+            }
+        }
+
+        std::fprintf(stdout, "[assets] merged fighter bones=%zu tris=%zu, moves=%zu, clips=%zu, tactics=%zu groups\n",
+                     fight_assets_->merged.bones.size(),
+                     fight_assets_->merged.resolved_tris.size(),
+                     fight_assets_->moves.size(), fight_assets_->clips.size(),
+                     fight_assets_->tactics_sets.size());
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "app: fight assets load failed: %s\n", e.what());
+        fight_assets_.reset();
+    }
+
     boot();
     return true;
 }
@@ -181,7 +287,10 @@ void App::poll_input() {
         pointer_.x = injected_x_;
         pointer_.y = injected_y_;
         pointer_.down = true;
-        pointer_.pressed = true;
+        // Only the FIRST pending step is a pressed edge (the subsequent
+        // steps are the held button). Without this, every pending step
+        // re-triggers pressed consumers (a buy/equip click fired 3x).
+        pointer_.pressed = injected_click_steps_ == 3;
         std::fprintf(stdout, "[input] injected click at (%.0f, %.0f) steps left=%d\n", pointer_.x,
                      pointer_.y, injected_click_steps_);
         std::fflush(stdout);
@@ -199,6 +308,33 @@ void App::poll_input() {
     glfwGetCursorPos(renderer_->window(), &x, &y);
     pointer_.x = x;
     pointer_.y = y;
+
+    // Keyboard: poll the fight keys and route edge transitions to the top
+    // screen (JS `Ik` keydown/keyup -> the fight input path). Only the keys
+    // the fight uses (WASD/arrows/space).
+    struct KeyMap {
+        int glfw;
+        int idx;
+    };
+    static const KeyMap kFightKeys[] = {
+        {GLFW_KEY_A, 0}, {GLFW_KEY_LEFT, 0}, {GLFW_KEY_D, 1},
+        {GLFW_KEY_RIGHT, 1}, {GLFW_KEY_W, 2}, {GLFW_KEY_UP, 2},
+        {GLFW_KEY_S, 3}, {GLFW_KEY_DOWN, 3}, {GLFW_KEY_SPACE, 4},
+    };
+    for (const KeyMap& km : kFightKeys) {
+        const bool now_down = glfwGetKey(renderer_->window(), km.glfw) == GLFW_PRESS;
+        if (now_down && !keys_held_[km.idx]) {
+            keys_held_[km.idx] = true;
+            if (screens_ != nullptr && screens_->top() != nullptr) {
+                screens_->top()->on_key(km.glfw, true);
+            }
+        } else if (!now_down && keys_held_[km.idx]) {
+            keys_held_[km.idx] = false;
+            if (screens_ != nullptr && screens_->top() != nullptr) {
+                screens_->top()->on_key(km.glfw, false);
+            }
+        }
+    }
 }
 
 void App::update_fixed(float dt) {
@@ -214,54 +350,58 @@ void App::render_frame() {
     renderer_->end_frame();
 }
 
+void App::run_one_frame() {
+    glfwPollEvents();
+    poll_input();
+
+    // Auto-click before the fixed-step update so the screen sees the
+    // pressed edge this frame. Stage 0: click the Fight button (menu).
+    // Stage 1 (after the map is up): click the Training node.
+    if (auto_click_) {
+        if (auto_click_stage_ == 0 && frame_count_ == 30) {
+            inject_click(view_w_ * 0.28, view_h_ * 0.72);
+            auto_click_stage_ = 1;
+        } else if (auto_click_stage_ == 1 && frame_count_ == 60 &&
+                   screens_->current_id() == kScreenMap) {
+            // Training node at (view_w/2 + 158, view_h/2 - 145).
+            inject_click(view_w_ / 2.0 + 158.0, view_h_ / 2.0 - 145.0);
+            auto_click_stage_ = 2;
+        }
+    }
+
+    const double now = glfwGetTime();
+    double dt = now - last_time_;
+    last_time_ = now;
+    if (dt > 0.25) dt = 0.25;
+    if (headless_frames_ > 0) {
+        // Headless runs uncapped: force one fixed step per frame so the
+        // screen flow (menu -> map -> node) advances deterministically.
+        acc_ = kFixedDt;
+    } else {
+        acc_ += dt;
+    }
+
+    while (acc_ >= kFixedDt) {
+        update_fixed(static_cast<float>(kFixedDt));
+        if (injected_click_pending_ && --injected_click_steps_ <= 0) {
+            injected_click_pending_ = false;
+            std::fprintf(stdout, "[input] click consumed after %d steps\n",
+                         injected_click_steps_ + 1);
+        }
+        acc_ -= kFixedDt;
+        ++fixed_steps_;
+    }
+    render_frame();
+    ++frame_count_;
+}
+
 void App::run(int headless_frames, bool auto_click) {
     headless_frames_ = headless_frames;
     auto_click_ = auto_click;
     last_time_ = glfwGetTime();
 
     while (!glfwWindowShouldClose(renderer_->window())) {
-        glfwPollEvents();
-        poll_input();
-
-        // Auto-click before the fixed-step update so the screen sees the
-        // pressed edge this frame. Stage 0: click the Fight button (menu).
-        // Stage 1 (after the map is up): click the Training node.
-        if (auto_click_) {
-            if (auto_click_stage_ == 0 && frame_count_ == 30) {
-                inject_click(view_w_ * 0.28, view_h_ * 0.72);
-                auto_click_stage_ = 1;
-            } else if (auto_click_stage_ == 1 && frame_count_ == 60 &&
-                       screens_->current_id() == kScreenMap) {
-                // Training node at (view_w/2 + 158, view_h/2 - 145).
-                inject_click(view_w_ / 2.0 + 158.0, view_h_ / 2.0 - 145.0);
-                auto_click_stage_ = 2;
-            }
-        }
-
-        const double now = glfwGetTime();
-        double dt = now - last_time_;
-        last_time_ = now;
-        if (dt > 0.25) dt = 0.25;
-        if (headless_frames_ > 0) {
-            // Headless runs uncapped: force one fixed step per frame so the
-            // screen flow (menu -> map -> node) advances deterministically.
-            acc_ = kFixedDt;
-        } else {
-            acc_ += dt;
-        }
-
-        while (acc_ >= kFixedDt) {
-            update_fixed(static_cast<float>(kFixedDt));
-            if (injected_click_pending_ && --injected_click_steps_ <= 0) {
-                injected_click_pending_ = false;
-                std::fprintf(stdout, "[input] click consumed after %d steps\n",
-                             injected_click_steps_ + 1);
-            }
-            acc_ -= kFixedDt;
-            ++fixed_steps_;
-        }
-        render_frame();
-        ++frame_count_;
+        run_one_frame();
 
         if (headless_frames_ > 0 && frame_count_ >= headless_frames_) {
             break;
@@ -271,6 +411,7 @@ void App::run(int headless_frames, bool auto_click) {
 
 void App::shutdown() {
     screens_.reset();
+    fight_assets_.reset();
     save_.reset();
     dojo_sprite_.reset();
     menu_font_.reset();
@@ -281,7 +422,19 @@ void App::shutdown() {
 }
 
 bool App::capture_png(const std::string& path) {
-    return sf2::render::gl_capture_png(renderer_->window(), path);
+    // The render path swaps buffers (end_frame); the just-presented frame
+    // lives in GL_FRONT. gl_capture_png reads GL_BACK by default (the
+    // previous frame), so flip the read buffer first.
+    sf2::render::gl_read_buffer_front(renderer_->window());
+    const bool ok = sf2::render::gl_capture_png(renderer_->window(), path);
+    sf2::render::gl_read_buffer_back(renderer_->window());
+    return ok;
+}
+
+void App::inject_key(int glfw_key, bool down) {
+    if (screens_ != nullptr && screens_->top() != nullptr) {
+        screens_->top()->on_key(glfw_key, down);
+    }
 }
 
 bool App::draw_text(float x, float y, const std::string& text, float scale, float r, float g,

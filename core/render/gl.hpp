@@ -49,4 +49,11 @@ bool gl_read_pixels_rgba(GLFWwindow* window, std::vector<std::uint8_t>& out_rgba
 // glReadPixels + stb_image_write PNG. `path` must end in ".png".
 bool gl_capture_png(GLFWwindow* window, const std::string& path);
 
+// Switches the glReadPixels read buffer to GL_FRONT / GL_BACK. The render
+// path swaps buffers (the just-presented frame lives in GL_FRONT); the
+// capture path uses these to snapshot the current frame instead of the
+// stale back buffer.
+void gl_read_buffer_front(GLFWwindow* window);
+void gl_read_buffer_back(GLFWwindow* window);
+
 } // namespace sf2::render

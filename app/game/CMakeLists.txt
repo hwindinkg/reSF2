@@ -3,6 +3,7 @@
 #   game [res_root] [save_path] [--headless N] [--autoclick]
 add_executable(game main.cpp)
 target_link_libraries(game PRIVATE sf2_app sf2_scene sf2_render sf2_data glfw)
+target_include_directories(game PRIVATE ${CMAKE_SOURCE_DIR}/core)
 
 if(MSVC)
     target_compile_options(game PRIVATE /W4)

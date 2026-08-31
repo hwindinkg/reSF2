@@ -101,7 +101,8 @@ bool gl_read_pixels_rgba(GLFWwindow* window, std::vector<std::uint8_t>& out_rgba
     }
     std::vector<std::uint8_t> rgba(static_cast<std::size_t>(w) * h * 4);
     gl::glPixelStorei(0x0D05 /* GL_UNPACK_ALIGNMENT */, 1);
-    gl::glReadBuffer(0x0C0D /* GL_BACK */);
+    // The read buffer is set by the caller (gl_read_buffer_front/back); the
+    // capture path reads GL_FRONT (the just-presented frame after a swap).
     gl::glReadPixels(0, 0, w, h, 0x1908 /* GL_RGBA */, 0x1401 /* GL_UNSIGNED_BYTE */, rgba.data());
 
     // glReadPixels yields bottom-up rows; flip to top-left origin.
@@ -131,6 +132,16 @@ bool gl_capture_png(GLFWwindow* window, const std::string& path) {
     }
     const int ok = stbi_write_png(path.c_str(), w, h, 4, rgba.data(), w * 4);
     return ok != 0;
+}
+
+void gl_read_buffer_front(GLFWwindow* window) {
+    if (window == nullptr) return;
+    gl::glReadBuffer(0x0404 /* GL_FRONT */);
+}
+
+void gl_read_buffer_back(GLFWwindow* window) {
+    if (window == nullptr) return;
+    gl::glReadBuffer(0x0405 /* GL_BACK */);
 }
 
 } // namespace sf2::render
