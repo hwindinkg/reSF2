@@ -326,3 +326,103 @@ this structure 1:1. **Documented native approximations:**
 - the tactic's `Conditions` sub-trees on QuickAttack/Evade slots are parsed
   but not evaluated (the shipped tactic_settings uses condition-free
   slots).
+
+## 8. Fight controller — rounds, phases, timer, win/lose, HUD (Phase 3.5)
+
+Ported from `ca` (sf2.502f0946.js L379-433). The controller turns the
+fighter/moves/physics/AI pieces into a complete fight.
+
+### 8.1 The fight phases (`eu` 0-3, JS `xF` L388)
+
+| `eu` | Phase | JS entry | Native |
+|---|---|---|---|
+| 1 | StartStance | `FNa` (L409) → `xF(1)` | `enter_start_stance()` |
+| 2 | Fight | `Rkb` (L410) → `xF(2)` + HUD `play()` (L2037 sets `round.Vt=!0`) | `enter_fight()` |
+| 3 | EndStance | `E3a` (L412) → `i4a` (L409) → `xF(3)` | `enter_end_stance()` |
+| 0 | idle | `bob` (L401) → `xF(0)` before `tx()` | — |
+
+`xF` propagates `Je` (the fighter stance) to every fighter so the move
+conditions' `RoundStage` (conditions.hpp `round_stage`) matches the phase.
+The **StartStance → Fight transition** is the animation-stop handler
+(`kg` L387): when the StartStance clip ends (`OCa()`), `eu==1` → `Am()`
+(and the HUD shows the FIGHT! label) or `xF(2)` directly for FightNone.
+The native port holds phase 1 for the clip length (the tutorial trace
+shows 134 frames / ~2.2s — `reference/traces/console.log`).
+
+### 8.2 The round flow (`tx` L407, `Z2` L408-409)
+
+- `tx()`: `round.Vt=!1; round.eL=Da.pT; round.time=0; round.gma=Da.R4`.
+  `eL` = the Rounds attribute (the ROUNDS-TO-WIN threshold), `gma` = the
+  RoundTime attribute (the HUD countdown seconds).
+- `Z2()`: `round.round++`, snapshot HP/moves, `MHa()` → each fighter
+  `c.Z2(round.round)` + `parameters.nob()` (round flags reset), then phase 1.
+- Between rounds the fighters are **healed by `Da.qDa`** (`NA` L414:
+  `c.jT(this.Da.qDa)` — HealthRecovery, default 1) — NOT a full reset.
+
+### 8.3 The round-end check (`Onb` L411)
+
+```
+Onb(){ if(this.h9){ a = wo.nB.ng >= round.eL;   // ROUNDS-TO-WIN
+        if(!cY&&!TG){ h9=false;
+          b = wo.nB.qb && Rk < pf.length-1;      // player has a next enemy
+          c = Da.sR();                           // multi-fight battle
+          !a&&c||a&&b ? (next fight / next opponent)
+          : a ? bea(wo.nB)                       // BATTLE END
+          : (NA(); Z2()) } } }                   // next round
+```
+
+- **KO**: a fighter `gd<=0` (`xc.Jfa` L817). The round winner is the
+  HIGHER-HP fighter (`vfa` L413 — with both alive a PVP rule compares HP).
+- **Timeout**: only with the `ERuleTimeoutWin` fight rule (JS `BT` L392
+  sets `ey=2`). The shipped stages.xml has no timeout rule; the demo
+  forces it for the timeout test. The timeout winner is the ENEMY
+  (`E3a` c==3: `a.ng++` on `Zb`).
+- **Ringout**: the `ERuleRingout` rule (`BT` L392 sets `ey=4`), applied
+  by the rules system — not in the shipped stages.
+
+`E3a` (L412): the winner's `ng` (rounds won) increments; when
+`ng >= round.eL` (Rounds) → `bea` (L413) = the battle end (`xJ=!0`,
+the results flow, `Da.PU=Rk`). Otherwise `NA()` (recover) + `Z2()`
+(next round).
+
+### 8.4 The timer
+
+`round.time` starts at 0 (`tx`) and the HUD countdown runs from
+`round.gma` (RoundTime): `Sf.iPa` (L2035) `NF = xU/60` where
+`xU = gma*60+1` decrements 1/sec while `round.Vt` (phase 2). The native
+port advances `round.time` during phase 2 and the HUD shows
+`gma - ceil(time)`.
+
+### 8.5 The HUD (`Ar` L2016-2019 + `Sf` L2032-2040)
+
+- HP bars: `Br` (L2021-2026) — three 1px-wide atlas frames stretched to
+  the bar width: `HealthBar_Empty` (bg), `HealthBar_Full` (current),
+  `HealthBar_Hit` (trailing damage). The layout (Sf.layout L2036-2037):
+  the bars sit at `(viewW*.5 ± 520*c)` with a scale `c` that shrinks with
+  the view; the timer `Kp` centered between them.
+- The timer digits: `Sf.Kp/OA` (L2033-2035) — the `ea` text renders the
+  countdown with the digits font. The fonts are BMFv3: `fight/digits.fnt`
+  (page `digits_0.png` = `fight/digits.png`, 256x256) and
+  `fight/round.fnt` (page `round_0.png` = `fight/round.png`, 544x256).
+  Decoded glyph rects (this port parses the BMF blocks):
+  - digits.fnt: '0' (0,119,84,79), '1' (0,207,0,34), ... advance ~1-3 px.
+- The round indicators: `Er` (L2020-2021) — `Round_Done` / `Round_Undone`
+  dots (ui.png frames).
+- The FIGHT!/Round labels: `Cr` (L2021-2026) — the `fight` / `round` /
+  `label_win` / `label_lose` / `timesup` images (the fight/ui atlas +
+  the round.png sheet).
+
+The demo renders a functional first-pass HUD (flat HP bars, the digit
+glyph quads for the timer, round dots) at the JS bar positions; the exact
+per-pixel `Sf.layout` scale curve is approximated (flag: the exact-layout
+gap).
+
+### 8.6 The fight screen (`ai`/`ma`) and the camera
+
+- The fight screen (`ma` L1837 / `ai` L2004-2010) drives the fight:
+  `case 5: Za.F().update(); ma.YL(Ig, dt)` (L2006-2008) → `ca.Ea` (L385)
+  → `ca.ia` (L388) = the per-frame fight update. The camera (`ma.Sya`
+  L1833) centers on the fight midpoint and zoom-fits the arena.
+- The native `FightCamera::framing` mirrors the fight-start view
+  (center on the fighters' midpoint, zoom = min(1, viewW/span)); the JS
+  intro curve (`Sya`'s smoothed zoom/pan) is simplified.
