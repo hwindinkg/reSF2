@@ -128,18 +128,44 @@ std::vector<std::string> Fighter::intervals_at(int frame) const {
 // keys must be a subset of the buffered keys). So `keys_gm` is set TRUE
 // here and the caller must have buffered the required keys.
 bool Fighter::try_start_move(const MoveDef& move, FightContext& ctx) {
-    // Condition test (JS `de.V1` L601-602): candidate in `me`, then
-    // `a.Yz(...)` runs the Conditions tree. The native evaluator mirrors
-    // `Ha.Sea`/`he` with the buffered keys + current state.
-    ctx.candidate_moves = {move.name};
-    ctx.keys.clear();
-    for (const auto& k : keys_) {
-        ctx.keys.push_back({k.key, k.press});
-    }
-    ctx.keys_gm = true;  // the fighter's own context stays input-gated
-    std::string trace;
-    if (!eval_move_conditions(move.conditions, ctx, &trace)) {
-        return false;
+    return start_move_impl(move, ctx, /*ai=*/false);
+}
+
+// JS `de.V1` (L601-602): the AI tests a candidate with `Fc.gm=!1`, which
+// makes every Keys condition pass (`vm.he` L749 returns true). The native
+// port mirrors this with `keys_gm=false`.
+bool Fighter::ai_start_move(const MoveDef& move, FightContext& ctx) {
+    return start_move_impl(move, ctx, /*ai=*/true);
+}
+
+bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
+    if (ai) {
+        // JS `de.V1` (L601-602): the AI's candidate test evaluates ONLY the
+        // move's TACTICS conditions (`a.Yz(this.model,null,a.FQ(2))` = the
+        // `Ts` list). The main Conditions tree (Keys/CurrentAnimation/etc)
+        // is NOT re-checked when the move starts — `Ykb` (L500) goes
+        // straight to `Okb` -> `NS` -> `Skb`. The native AI path therefore
+        // evaluates the tactics conditions here (the same ones `de.V1`
+        // ran) and skips the input-gated main conditions.
+        ctx.candidate_moves = {move.name};
+        ctx.keys_gm = false;  // gm=false: every Keys condition passes
+        if (!eval_move_conditions(move.tactics, ctx)) {
+            return false;
+        }
+    } else {
+        // Input path (JS `wd.NS` L506): the caller (try_select_move) has
+        // already tested the main Conditions; here they are re-checked with
+        // the buffered keys (gm=true).
+        ctx.candidate_moves = {move.name};
+        ctx.keys.clear();
+        for (const auto& k : keys_) {
+            ctx.keys.push_back({k.key, k.press});
+        }
+        ctx.keys_gm = true;
+        std::string trace;
+        if (!eval_move_conditions(move.conditions, ctx, &trace)) {
+            return false;
+        }
     }
 
     current_move_ = &move;
@@ -213,6 +239,26 @@ void Fighter::advance(float dt) {
     active_intervals_.clear();
     for (const std::string& n : intervals_at(move_frame_)) {
         active_intervals_.insert(n);
+    }
+
+    // Root motion (JS `Al.ia` L582): the fighter's world position follows
+    // the animation's COM displacement. The JS physics body `oa.Fe().ma.x`
+    // is moved by the root-bone delta each frame; the native port applies
+    // the COM delta of the clip (scaled by facing) to world_x.
+    if (move_frame_ >= 0 && static_cast<std::size_t>(move_frame_) < current_clip_->frames.size()) {
+        const float com_now = current_clip_->frames[static_cast<std::size_t>(move_frame_)].bones.empty()
+                                  ? 0.0f
+                                  : current_clip_->frames[static_cast<std::size_t>(move_frame_)]
+                                        .bones[0]
+                                        .x;
+        if (move_frame_ > 0 && static_cast<std::size_t>(move_frame_ - 1) <
+                                   current_clip_->frames.size()) {
+            const float com_prev =
+                current_clip_->frames[static_cast<std::size_t>(move_frame_ - 1)].bones.empty()
+                    ? 0.0f
+                    : current_clip_->frames[static_cast<std::size_t>(move_frame_ - 1)].bones[0].x;
+            world_x_ += (com_now - com_prev) * (facing_ < 0 ? -1.0f : 1.0f);
+        }
     }
 
     // Clip end (JS `Te.ia` L547-548: `Xh+2 >= len` -> KNa + lS + Sca).
