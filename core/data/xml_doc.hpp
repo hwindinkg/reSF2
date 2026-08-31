@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <sstream>
 #include <string>
 
 #include <pugixml.hpp>
@@ -19,6 +20,13 @@ public:
 
     // Parses XML from raw bytes (treated as UTF-8 text).
     void parse(const std::uint8_t* data, std::size_t size);
+
+    // Serializes the document back to XML text (the JS `Vk` printer). The
+    // save system uses this to persist the users.xml document.
+    void save(std::ostringstream& out, const char* indent, unsigned int flags,
+              pugi::xml_encoding encoding) const {
+        doc_.save(out, indent, flags, encoding);
+    }
 
     pugi::xml_node root() const { return doc_.root(); }
 
