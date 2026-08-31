@@ -5,6 +5,7 @@ add_library(sf2_scene STATIC
     ai_controller.cpp
     conditions.cpp
     damage.cpp
+    fight.cpp
     fighter.cpp
     location_scene.cpp
     model.cpp
