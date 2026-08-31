@@ -130,3 +130,142 @@ layer** on these files:
 preserving the archive-relative path, e.g. `res/moves.xml` →
 `<out_dir>/res/moves.xml`. The asset_explorer tool extracts to
 `reference/extracted/xml/` (gitignored).
+
+## The move system (moves.xml → MoveDef → condition evaluator)
+
+The fight engine's action system lives in `res/moves.xml` (1048 `<Move>`
+elements) and is parsed/evaluated by the game JS
+(`reference/www/sf2.502f0946.js`). Native port: `core/scene/move_def.*`
+(parser) + `core/scene/conditions.*` (evaluator), probed by `app/move_probe`.
+
+### How the game parses moves.xml (JS study)
+
+Entry point is `Fa.parse` (static) → `Fa.Ueb` (the `<Moves>` list) and
+`Fa.xbb` (per-move sub-objects). JS refs: class `Fa` g="13C" (`Fa.Ueb`,
+`Fa.dMa`, `Fa.xbb`, `Fa.H3`, `Fa.LIa`, `Fa.Hib`, `Fa.hjb`, `Fa.djb`,
+`Fa.CIa`, `Fa.HIa`).
+
+- **Move attributes** (`Fa.Ueb`): `Name`, `ID`, `FileName` (with `.bytes`
+  stripped → `Eza`), `MidFrames`→`XJ`, `FirstFrame`→`qx`, `EndFrame`→`Lj`,
+  `Priority`, `NoMagicRecharge`, `NoWallRepulsion`, `WallRepulsion`,
+  `StyleFactor`→`RNa`, `Physics`→`MS`, `EndsStage`→`yda`, `Looped`,
+  `NoInterpolationFrames`, `NoAnimation`, `AlignOnParentWallCollision`,
+  `MirrorNode`→`J2` (Grb), `CameraCOMAlignStage`, `TacticWeapon`→`Gsb`,
+  `TacticEquivalent` (registered into a list, resolved later to the target
+  move's animation name), `Type` ("MOVE"→`EAnimationMove`,
+  "ATTACK"→`EAnimationAttack`), `Profile` (→ `Ru`, the shop/menu icon list).
+- **Template inheritance** (`Fa.dMa`): the `Template="A|B|C"` string is
+  split on `|`; each tag resolves against the `<Templates><Template Name=..>`
+  table (`Fa.kxb`). The template's **Conditions / Locks / Intervals / Align /
+  SetDirection** are merged into the move (templates may inherit other
+  templates, `Fa.dMa` recurses). Native: `collect_templates` + merge.
+- **Conditions** (`Fa.H3` → `Tl.create`): each child of `<Conditions>` is
+  dispatched by name (JS `sa.oe`):
+  RoundStage=1, Keys=4, Distance=2, Direction=21, Weapon=5, Player=6,
+  Health=7, Operator=8, CurrentInterval=9, CurrentAnimation=10,
+  PhysicsFrameNumber=11, RoundResult=12, Item=13, Perk=15, Bullets=14,
+  Birth=16, Name=17, Screen=18, ModelMirrored=19, ModExists=20,
+  BattleType=22, BossAbilityState=23, Hit=24, ModelExists=25.
+  `Operator` (And/Or) recurses via `Tl.J3`.
+- **Intervals** (`Fa.LIa`): each `<Interval>` maps via `fe.G0`
+  (0=other, 2=Uninterrupt, 3=SelfUninterrupt, 4=Attack, 5=Block,
+  6=Invulnerable, 7=Invisible). Attack (`Ul`) additionally parses
+  AttackingParts (`<Edge Name>`), Hit, Impulse (X/Y/Z), Damage
+  (`<Damage Value=..><Damage Type=.. Shift=..>`), Combo Time.
+- **Locks** (`Fa.HS`): `<Locks><Item Type SubType/>` (or `Operator Type="Or"`
+  wrapping items).
+- **Align** (`Fa.Hib`→`Fa.jva`), **SetDirection** (`Fa.hjb`→`Fa.Zca`),
+  **Actions** (`Fa.CIa`), **Events** (`Fa.HIa`), **Transitions**
+  (`Fa.Cxb`), **Shop** (`Fa.Mub`).
+
+### Condition types + evaluation semantics (JS `Ha` g="125" + subclasses)
+
+Base `Ha`: `Player` attr (Me=1, Enemy=2, ... via `Nd.ol`) and `Not="1"`
+(`cb`); `Nba` flips the result. All conditions are **And-ed** at the move
+level (`jc.nw`); `Operator` nodes provide Or/And nesting.
+
+| Type (class) | JS | Semantics |
+|---|---|---|
+| Keys (`vm`) | g="131" | Buffered keys match the `<Key Type PressType/>` list. Tap/Hold/Release. If `Ae.gm` (hold mode) only held keys match; else all three sets. |
+| Distance (`qm`) | g="12C" | Axis X (signed `to.x-from.x`, scaled by `Wl`), Y, or 3D (`sqrt(dx²+dy²)`); `Min <= v <= Max`. From/To are `ee` object refs (Player/Object/Part). |
+| Weapon (`Hm`) / Player (`Hm`) | g="13D" | My (or Enemy, via Player attr) items have Type+SubType+Name. |
+| Health (`rm`) | g="12D" | `current/max` ratio in [Min,Max]. |
+| Operator (`wm`) | g="132" | And (all) / Or (any); `Not` flips the whole group. |
+| CurrentInterval (`tm`) | g="12F" | An active interval on the fighter matches by Name and/or Type (Attack/Block/Invulnerable). |
+| CurrentAnimation (`lg`) | g="12A" | The animation name is in the fighter's current animation set (`Ae.XH`/`z_`/`G3`/`oZ`/`A_` per Player). `$Move` = the candidate move's name; `$NoAnimation$` = empty set; no Name = physics flag. |
+| PhysicsFrameNumber (`Cm`) | g="138" | `Nd.frameCount` in [Min,Max] (unset = -1). |
+| RoundResult (`Fm`) | g="13B" | Victory/Defeat + Timeout/Ringout. |
+| Item (`um`) | g="130" | My items match Type+SubType+Name. |
+| Bullets (`lp`) | g="2C1" | Bullet count (MagicBullet/RaidChargeBullet) in [Min,Max]. |
+| Perk (`Bm`) | g="137" | Perk by Name in my/enemy perk lists. |
+| MagicCharge (`sp`) | g="2C2" | Magic charge in [Min,Max]. |
+| ModExists (`tp`) | g="2C3" | Mod name in the fighter's mod set (+ optional Namespace). |
+| Pain (`vp`) | g="2BE" | Pain value in [Min,Max]. |
+| Round (`yp`) | g="2C0" | Round number == Number. |
+| InTheArea (`qp`) | g="2C4" | Fighter is in the arena. |
+| Random (`xp`) | g="2B6" | `(Chance/100) < random()`. |
+| PerkStart (`wp`) | g="2C5" | Always true. |
+| Name (`Am`) | g="136" | Fighter model name == Value. |
+| Screen (`Gm`) | g="13C" | Screen enum == Name (Fight/Profile/Shop*). |
+| ModelMirrored (`zm`) | g="135" | Fighter is mirrored. |
+| BattleType (`lm`) | g="126" | Battle type == Value. |
+| BossAbilityState (`nm`) | g="128" | Value flag. |
+| Hit (`sm`) | g="12E" | Last-hit Type/Name match. |
+| ModelExists (`ym`) | g="134" | Model by name exists. |
+| Combo (`mp`) | g="2B9" | Combo counter in [Min,Max]. |
+| Style (`Ap`) | g="2B8" | Style enum (Turtle..Crazy) in [Min,Max]. |
+| Direction (`pm`) | g="12B" | Facing sign matches From/To direction. |
+| Birth (`mm`) | g="127" | Fighter's birth name == Name. |
+
+Elements actually used in moves.xml (verified by scan): CurrentAnimation
+(2636), CurrentInterval (1865), Operator (1403), Key (780), Distance (507),
+RoundStage (477), Keys (450), ModExists (343), Item (178), Player (76),
+Hit (64), RoundResult (52), Bullets (29), BattleType (22), Health (18),
+Perk (12), BossAbilityState (9), Direction (7), PhysicsFrameNumber (7),
+Birth (6).
+
+### Interval system (JS `fe` g="150", `Ul` g="151")
+
+`<Interval Name=.. Type=.. Start=.. End=..>` — Start/End are 1-based
+animation frames. `fe.init`: `start = Start` (default 0);
+`finish = End` if present else `pva+2` (pva = the move's `EndFrame`).
+The name overrides the type: `Name=="Unstable"`→1, `"Uninterrupt"`→2,
+`"SelfUninterrupt"`→3, else `fe.G0(Type)` (Attack=4, Block=5, Invisible=7,
+Invulnerable=6, 0=other). `Ul` (Attack) adds: AttackingParts (edge names),
+Hit (name + Start/End), Impulse (X/Y/Z), Damage (Value, NoCritical, sub
+Damage Type/Shift), Combo (Time). At runtime the fighter tracks active
+intervals (`Ae.xb`), and `CurrentInterval` conditions test membership.
+
+### Move selection (JS `wd` g="?" fighter, `de` move-finder, `Gc` fight)
+
+- The fighter's move list `HB` is built from the equipped items: each
+  equipped item contributes its `<Item>`/`Weapon` moves (the `me` set), and
+  `Naa` pushes an opponent's moves onto the list. `Zka` sets `jb = HB[0]`.
+- `wd.V1(a)` (test one move `a`): the fighter's current-move set must
+  contain `a` (`me`), the candidate's animation list goes into `Ae.xK`,
+  then `a.Yz(...)` runs the move's **conditions** (`jc.Yz` → `Ha.Sea` →
+  `he`). `de.ia` iterates the moves and `jL` returns the chosen one.
+- Input (keys) is buffered by `wd.Kl` (`zl` class): `Sgb` (press) fills
+  `zg.sh` (Tap), `Xgb` (release) fills `zg.released` and updates `Fh`
+  (Hold); `Lea` snapshots it into `Ae.keys`. A move's `Keys` condition
+  matches against that buffer (`vm.he` via `zd.$ga`).
+- Priority: `Fa.Ueb` reads `Priority` into `jc.priority`; the move set is
+  kept sorted by priority (highest first) and `Zka` picks `HB[0]`. The
+  "1key/2key/3key" templates encode input complexity (one/two/three key
+  presses) and the `Central/Forward/Back/Up/Down` tags encode direction.
+
+### Native port status
+
+`core/scene/move_def.*` + `core/scene/conditions.*` implement the parser
+and the evaluator with the JS semantics above (per-type comments cite the
+JS class + g-id). `FightContext` carries the state the conditions read
+(current animation set, active intervals, round stage, buffered keys, mods,
+items, distance, health, ...). `app/move_probe` loads moves.xml, verifies
+the HighPunch contract, and evaluates HighPunch's conditions against two
+contexts. Types implemented: Keys, Distance, Weapon, Player, Health,
+Operator, CurrentInterval, CurrentAnimation, PhysicsFrameNumber,
+RoundResult, Item, Bullets, Perk, MagicCharge, ModExists, Pain, Round,
+InTheArea, Random, PerkStart, Name, Screen, ModelMirrored, BattleType,
+BossAbilityState, Hit, ModelExists, Combo, Style, Direction, Birth —
+all 25 `Tl`/`sa.oe` types (some as unconstrained stubs where the native
+fight state does not exist yet; noted in conditions.cpp).
