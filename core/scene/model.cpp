@@ -25,6 +25,7 @@ Bone parse_bone(const pugi::xml_node& node) {
     if (b.is_macro) {
         b.x = -b.x;
     }
+    b.mass = sf2::data::xml_attr_float(node, "Mass", 1.0f);
     return b;
 }
 
@@ -104,6 +105,34 @@ Model model_parse(const std::uint8_t* xml, std::size_t size) {
         }
     }
 
+    // <Edges> - fight-physics collision capsules (JS `Yc.jjb` L572: each
+    // edge becomes a `yu` capsule spanning its two endpoint bones). Only
+    // `Collisible="1"` edges enter the hit-test list `Dl.Nl.oI`; the
+    // others are structural (cloth/visual). The `Defense` attribute
+    // ("BodyDefense"/"HeadDefense") selects the damage multiplier and
+    // `BodyPart` is the hit region.
+    if (const pugi::xml_node edges = scene.child("Edges")) {
+        for (const pugi::xml_node edge : edges.children()) {
+            EdgeDef ed;
+            ed.name = edge.name();
+            ed.end1 = edge.attribute("End1").value();
+            ed.end2 = edge.attribute("End2").value();
+            ed.length = sf2::data::xml_attr_float(edge, "Length");
+            ed.radius = sf2::data::xml_attr_float(edge, "Radius");
+            ed.margin1 = sf2::data::xml_attr_float(edge, "Margin1");
+            ed.margin2 = sf2::data::xml_attr_float(edge, "Margin2");
+            ed.collisible = sf2::data::xml_attr_bool(edge, "Collisible", false);
+            ed.body_part = edge.attribute("BodyPart").value();
+            ed.defense = edge.attribute("Defense").value();
+            ed.blood = sf2::data::xml_attr_bool(edge, "Blood", false);
+            ed.shock = sf2::data::xml_attr_bool(edge, "Shock", false);
+            if (ed.name.empty() || ed.end1.empty() || ed.end2.empty()) {
+                continue;
+            }
+            model.edges.push_back(std::move(ed));
+        }
+    }
+
     return model;
 }
 
@@ -136,6 +165,8 @@ Model build_fighter_model(const std::vector<Model>& parts) {
         }
         merged.capsules.insert(merged.capsules.end(), part.capsules.begin(),
                                part.capsules.end());
+        merged.edges.insert(merged.edges.end(), part.edges.begin(),
+                            part.edges.end());
     }
     return merged;
 }

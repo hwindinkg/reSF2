@@ -27,6 +27,7 @@ struct Bone {
     float y = 0.0f;
     float z = 0.0f;
     bool is_macro = false;
+    float mass = 1.0f;  // `<Nodes>` Mass attr (JS `Vc.weight` / `HPa`)
 };
 
 // One mesh triangle: the three referenced bone NAMES. The game resolves
@@ -57,6 +58,26 @@ struct Capsule {
     float margin2 = 0.0f;
 };
 
+// One <Edges><Edge> entry — the fight-physics collision capsule (JS `yu`,
+// built by `Yc.jjb` L572). End1/End2 are bone names; the capsule is the
+// swept sphere between their current positions. `Collisible="1"` edges go
+// into the hit-test list (`Dl.Nl.oI`); `Defense` picks the damage multiplier
+// (BodyDefense/HeadDefense), `BodyPart` is the hit region (Head/Body/Legs).
+struct EdgeDef {
+    std::string name;
+    std::string end1;          // bone name (JS `yu.sx`)
+    std::string end2;          // bone name (JS `yu.Zs`)
+    float length = 0.0f;       // rest length
+    float radius = 0.0f;       // capsule radius (`yu.gb`)
+    float margin1 = 0.0f;      // `yu.$Fa`
+    float margin2 = 0.0f;      // `yu.aGa`
+    bool collisible = false;   // `yu.vZ` — participates in hit tests
+    std::string body_part;     // `yu.HC` ("Head"/"Body"/"Legs"/...)
+    std::string defense;       // `yu.Xi` ("BodyDefense"/"HeadDefense")
+    bool blood = false;        // `yu.Obb`
+    bool shock = false;        // `yu.vc`
+};
+
 // A MacroNode's weighted child list (the game's `Fl.children`, Yc.FIa +
 // Yc.dGa): the macro's position is the weighted average of its child bones'
 // CURRENT positions (Fl.seb). Only needed for macros not driven by the
@@ -72,6 +93,8 @@ struct Model {
     std::vector<Tri> tris;    // unresolved names (part models)
     std::vector<TriResolved> resolved_tris;  // merged: indices into `bones`
     std::vector<Capsule> capsules;
+    // <Edges> collision capsules (fight-physics hit shapes).
+    std::vector<EdgeDef> edges;
     // MacroNode name -> child list (weighted), for non-clip macro posing.
     std::unordered_map<std::string, MacroChildren> macro_children;
     // Name -> bone index (first definition wins across merged parts).

@@ -2,10 +2,12 @@
 # loader (params XML + atlas JSON + atlas texture -> sprite layers).
 add_library(sf2_scene STATIC
     conditions.cpp
+    damage.cpp
     fighter.cpp
     location_scene.cpp
     model.cpp
     move_def.cpp
+    physics.cpp
     renderer.cpp
     sprite.cpp
 )
