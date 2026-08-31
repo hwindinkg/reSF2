@@ -50,6 +50,11 @@ public:
     // Callers must have uploaded `texture` via the renderer's upload API.
     void add_quad(const SpriteQuad& quad, unsigned int texture);
 
+    // Adds a flat-color triangle list (screen-space x,y pairs, z dropped) as
+    // one solid-color draw (texture 0). `verts` = 2 floats per vertex.
+    void add_triangles(const float* verts, std::size_t vertex_count, float r,
+                       float g, float b, float a = 1.0f);
+
     // Draws everything currently batched and empties the buffer.
     void flush();
 
@@ -59,6 +64,7 @@ private:
     unsigned int program_ = 0;
     unsigned int vao_ = 0;
     unsigned int vbo_ = 0;
+    unsigned int white_tex_ = 0;  // 1x1 white texture for the solid-color path
     int uniform_proj_ = -1;
     int uniform_tex_ = -1;
 

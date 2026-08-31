@@ -1,7 +1,9 @@
 # core/scene/ — scene graph (node/sprite), camera + parallax, location scene
 # loader (params XML + atlas JSON + atlas texture -> sprite layers).
 add_library(sf2_scene STATIC
+    fighter.cpp
     location_scene.cpp
+    model.cpp
     renderer.cpp
     sprite.cpp
 )

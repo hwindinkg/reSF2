@@ -98,6 +98,12 @@ public:
     void draw_sprite(const sf2::scene::Sprite& sprite, const Camera& camera,
                      float factor = 1.0f);
 
+    // Draws a flat-color triangle list in screen space (already projected).
+    // `verts` = 2 floats per vertex (x,y); color is RGBA 0..1. One draw call
+    // (the game's Path2D flat fill — MODEL_FORMAT §2.3).
+    void draw_triangles(const float* verts, std::size_t vertex_count, float r,
+                        float g, float b, float a = 1.0f);
+
     // Render pass: renders `node` (and its children) through `camera`.
     void render_node(sf2::scene::Node& node, const Camera& camera);
 

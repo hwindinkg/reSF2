@@ -128,6 +128,11 @@ void Renderer::draw_sprite(const sf2::scene::Sprite& sprite, const Camera& camer
     }
     batch_.add_quad(quad, texture);
 }
+
+void Renderer::draw_triangles(const float* verts, std::size_t vertex_count,
+                              float r, float g, float b, float a) {
+    batch_.add_triangles(verts, vertex_count, r, g, b, a);
+}
 void Renderer::render_node(sf2::scene::Node& node, const Camera& camera) {
     node.render(*this);
     for (const auto& child : node.children()) {

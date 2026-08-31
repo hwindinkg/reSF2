@@ -103,10 +103,26 @@ bool SpriteBatch::init(int view_w, int view_h) {
     gl::glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(SpriteVertex),
                               reinterpret_cast<const void*>(offsetof(SpriteVertex, r)));
     gl::glBindVertexArray(0);
+
+    // 1x1 white texture: the solid-color path binds it so the fragment
+    // shader's texture() sample is complete (sampling texture 0 in a core
+    // profile returns black).
+    const std::uint8_t white[4] = {255, 255, 255, 255};
+    gl::glGenTextures(1, &white_tex_);
+    gl::glBindTexture(GL_TEXTURE_2D, white_tex_);
+    gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA,
+                     GL_UNSIGNED_BYTE, white);
+    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, 0x2600 /*GL_NEAREST*/);
+    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, 0x2600 /*GL_NEAREST*/);
+    gl::glBindTexture(GL_TEXTURE_2D, 0);
     return true;
 }
 
 void SpriteBatch::shutdown() {
+    if (white_tex_ != 0) {
+        gl::glDeleteTextures(1, &white_tex_);
+        white_tex_ = 0;
+    }
     if (vbo_ != 0) {
         gl::glDeleteBuffers(1, &vbo_);
         vbo_ = 0;
@@ -134,6 +150,28 @@ void SpriteBatch::add_quad(const SpriteQuad& quad, unsigned int texture) {
     current_texture_ = texture;
     for (int i = 0; i < 6; ++i) {
         vertices_.push_back(quad.v[i]);
+    }
+}
+
+void SpriteBatch::add_triangles(const float* verts, std::size_t vertex_count,
+                                float r, float g, float b, float a) {
+    if (vertex_count == 0 || verts == nullptr) {
+        return;
+    }
+    if (!vertices_.empty() && current_texture_ != 0) {
+        draw_batch();  // flush textured quads first (solid path binds no texture)
+    }
+    current_texture_ = 0;
+    for (std::size_t i = 0; i < vertex_count; ++i) {
+        SpriteVertex v;
+        v.x = verts[i * 2];
+        v.y = verts[i * 2 + 1];
+        v.u = v.v = 0.0f;
+        v.r = r;
+        v.g = g;
+        v.b = b;
+        v.a = a;
+        vertices_.push_back(v);
     }
 }
 
@@ -168,10 +206,9 @@ void SpriteBatch::draw_batch() {
         gl::glBindTexture(GL_TEXTURE_2D, current_texture_);
         gl::glUniform1i(uniform_tex_, 0);
     } else {
-        // Solid-color path: bind nothing, fragment samples the default
-        // texture (white) — color * white = color.
+        // Solid-color path: bind the 1x1 white texture — color * white = color.
         gl::glActiveTexture(GL_TEXTURE0);
-        gl::glBindTexture(GL_TEXTURE_2D, 0);
+        gl::glBindTexture(GL_TEXTURE_2D, white_tex_);
         gl::glUniform1i(uniform_tex_, 0);
     }
 
