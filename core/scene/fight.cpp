@@ -251,6 +251,16 @@ void FightController::round_start() {
 // JS `FNa` (L409): phase 1 — fighters at their spawn, no input yet.
 void FightController::enter_start_stance() {
     // Respawn the fighters at their spawn positions (JS `tja`/`Qlb`).
+    // [FIX Phase 4a — fighters on the floor] The dojo spawn Y (-110/-93,
+    // the ModelsViewer Y) is the COM's world y, but the clip's COM sits
+    // ~125 world units ABOVE the feet (stance_1: COM_y=-140, feet_y=-15;
+    // the COM is the body center). Anchoring the COM at the spawn put the
+    // feet ~440 px above the visible floor — "fighters in nowhere". The
+    // game's physics (Al solver) rests the fighter on the arena floor
+    // (dojo_params Floor="80"); the native places the COM so the clip's
+    // ground-contact bones land on the floor line. The floor offset is
+    // taken from the stance clip the fighter samples at spawn (feet y -
+    // COM y of the first clip frame).
     player_.fighter.set_world_pos(battle_.player_spawn_x, battle_.player_spawn_y);
     enemy_.fighter.set_world_pos(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
     sample_idle(player_);
@@ -480,9 +490,29 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     me.fighter.set_enemy_x(foe.fighter.world_x());
 
     // The stance idle auto-play (the game plays the weapon stance idle
-    // between moves — the AI's record key).
+    // between moves — the AI's record key). [FIX Phase 4a] The idle has
+    // -Left/-Right mirror variants; the fighter plays the one matching its
+    // facing (JS `Te.rub` sets `FX` from the facing; the move's MirrorNode
+    // picks the mirror). The oracle trace (reference/traces/console.log)
+    // shows the LEFT-facing enemy on `FistsStartStanceIdle-Left` (clip
+    // fists1_stance_idle, 38 frames) — the old hardcoded `-Right` played
+    // fists2_stance_idle (101 frames), the wrong mirror + a different clip.
+    // During phase 1 (StartStance) the fighter plays the intro stance clip
+    // (`FistsStartStance-Left/-Right`, stance_1/stance_2 — the trace F2..
+    // F134 = `FistsStartStance-Left`); the idle variant is the phase-2
+    // loop.
     if (me.fighter.current_move() == nullptr) {
-        const std::string idle_name = "FistsStartStanceIdle-Right";
+        const bool intro = phase_ == fight_phase::start_stance;
+        // The mirror variant is picked from the direction to the enemy
+        // (JS `wd.NS` L506: facing = sign(enemyX - myX); the move's
+        // MirrorNode maps it to the -Left/-Right variant). The FIRST
+        // auto-play runs before any move has set facing_, so derive it
+        // from the raw positions instead of the (defaulted) facing_.
+        const bool face_left =
+            (foe.fighter.world_x() - me.fighter.world_x()) < 0.0f;
+        const std::string idle_name =
+            std::string(intro ? "FistsStartStance-" : "FistsStartStanceIdle-") +
+            (face_left ? "Left" : "Right");
         const auto idle_it = moves_->find(idle_name);
         if (idle_it != moves_->end()) {
             sf2::scene::FightContext ctx;
@@ -623,12 +653,19 @@ void FightController::update(float dt) {
         case fight_phase::start_stance: {
             // JS: the StartStance animation plays once; when it finishes
             // the fight enters phase 2 (`kg` handler: eu==1 && anim.OCa()
-            // -> Am()/xF(2)). The native fighter has no per-anim start-
-            // stance loop, so the port uses a fixed hold matching the
-            // tutorial trace (the FistsStartStanceIdle clip is ~2.2s /
-            // 134 frames — the trace shows phase 1 lasting 134 frames).
+            // -> Am()/xF(2)).
+            // [FIX Phase 4a — intro plays the stance clip] The oracle trace
+            // (reference/traces/console.log) shows phase 1 running the
+            // ENEMY's `FistsStartStance-Left` animation: F2..F134 =
+            // 133 frames = (stance_1 46 frames - FirstFrame 2)*3 + 1
+            // (XJ=2 subframe pacing). The old code held phase 1 for a
+            // hardcoded 134 frames WITHOUT animating the fighters (the
+            // intro was frozen) — the "too fast" + frozen intro symptom.
+            // Now the fighters play the stance clip during phase 1.
             ++start_stance_frames_;
-            if (start_stance_frames_ >= 134) {
+            update_fighter(player_, enemy_, dt);
+            update_fighter(enemy_, player_, dt);
+            if (start_stance_frames_ >= 133) {
                 enter_fight();
             }
             break;

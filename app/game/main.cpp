@@ -250,6 +250,8 @@ int main(int argc, char** argv) {
     int headless = 0;
     bool auto_click = false;
     bool headless_loop = false;
+    bool capture_fight = false;
+    int capture_fight_frame = 300;  // fight frames after the Fight screen appears
     std::string capture_dir;  // when set, capture screens to this dir
 
     // Positional args (res_root, save_path) are assigned by slot, not by
@@ -267,6 +269,11 @@ int main(int argc, char** argv) {
             headless_loop = true;
         } else if (arg == "--capture" && i + 1 < argc) {
             capture_dir = argv[++i];
+        } else if (arg == "--capture-fight") {
+            capture_fight = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                capture_fight_frame = std::atoi(argv[++i]);
+            }
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -395,6 +402,48 @@ int main(int argc, char** argv) {
         if (!driver.finished) {
             return 1;
         }
+    } else if (capture_fight) {
+        // [FIX Phase 4a verification] Navigate menu -> map -> Training fight
+        // and capture the fight at a fixed fight frame (the intro + a few
+        // phase-2 frames). The auto-click drives the menu/map; then the
+        // capture waits until the Fight screen is up and `capture_fight_frame`
+        // frames have elapsed.
+        app.set_auto_attack(true);
+        app.set_headless_frames(1);  // uncapped deterministic stepping
+        int guard = 0;
+        bool fight_seen = false;
+        int fight_frames = 0;
+        while (guard < 20000) {
+            glfwPollEvents();
+            if (!fight_seen) {
+                // Auto-click: menu FIGHT at frame 30, Training node at 60.
+                if (guard == 30) {
+                    app.inject_click(app.view_w() * 0.28, app.view_h() * 0.72);
+                } else if (guard == 60 && app.screens().current_id() == kScreenMap) {
+                    app.inject_click(app.view_w() / 2.0 + 158.0, app.view_h() / 2.0 - 145.0);
+                }
+            }
+            app.run_one_frame();
+            ++guard;
+            if (!fight_seen && app.screens().current_id() == kScreenFight) {
+                fight_seen = true;
+                fight_frames = 0;
+            } else if (fight_seen) {
+                ++fight_frames;
+                if (fight_frames >= capture_fight_frame) {
+                    break;
+                }
+            }
+        }
+        std::filesystem::create_directories(capture_dir);
+        const std::string path = capture_dir + "/fix_dojo.png";
+        app.capture_png(path);
+        std::fprintf(stdout, "[game] captured %s (fight frame ~%d, guard %d)\n", path.c_str(),
+                     fight_frames, guard);
+        // [FIX Phase 4a verification] The bone-sample + bbox dump.
+        if (app.screens().top() != nullptr) {
+            static_cast<sf2::app::FightScreen*>(app.screens().top())->verify_fight();
+        }
     } else if (!capture_dir.empty()) {
         std::filesystem::create_directories(capture_dir);
         // Run long enough for the auto-click flow (menu -> map), then
@@ -403,7 +452,7 @@ int main(int argc, char** argv) {
         app.run(headless > 0 ? headless : 90, auto_click);
         app.capture_png(capture_dir + "/screen.png");
         std::fprintf(stdout, "[game] captured %s/screen.png\n", capture_dir.c_str());
-    } else {
+        } else {
         app.run(headless, auto_click);
     }
     app.shutdown();

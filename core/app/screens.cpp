@@ -36,6 +36,7 @@
 #include "atlas.hpp"
 #include "scene/fight.hpp"
 #include "scene/location_scene.hpp"
+#include "scene/model.hpp"
 #include "scene/renderer.hpp"
 #include "scene/sprite.hpp"
 #include "texture.hpp"
@@ -432,29 +433,46 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                 }
             }
             assets.dojo.load(params_xml, {atlas_json}, app().res_root());
+            // [FIX Phase 4a — black dojo] The atlas texture for the
+            // location is the IMAGE beside the JSON (`dojo.b920e18e.webp`),
+            // not the JSON path itself. `LocationScene::atlas_names()`
+            // returns the atlas JSON paths, so building the texture path
+            // from it produced `dojo.d31b1e71.json.webp` (does not exist)
+            // -> no texture uploaded -> every location sprite rendered as
+            // a black solid -> "всё чёрное". Resolve the image by its stem
+            // like the scene_probe (decode_atlas: scan `loc_dir/dojo.*` for
+            // a decodable webp/png).
             for (const std::string& an : assets.dojo.atlas_names()) {
-                const std::string base = loc_dir + "/" + an;
-                for (const std::string& ext : {".webp", ".png"}) {
-                    const std::string tex_path = base + ext;
-                    if (std::filesystem::exists(tex_path)) {
-                        sf2::data::Texture tex;
-                        if (sf2::data::decode_texture(tex_path, tex)) {
-                            const GLuint gl =
-                                app().renderer().texture_for("dojo_atlas_" + an, tex);
-                            if (gl != 0) {
-                                std::ifstream in(atlas_json, std::ios::binary);
-                                std::vector<std::uint8_t> jb(
-                                    (std::istreambuf_iterator<char>(in)),
-                                    std::istreambuf_iterator<char>());
-                                const sf2::data::atlas a =
-                                    sf2::data::atlas_parse(jb.data(), jb.size());
-                                for (const auto& fr : a.frames) {
-                                    app().renderer().texture_alias(fr.name, gl);
-                                }
+                const std::string stem = std::filesystem::path(an).stem().string();
+                const std::string base = loc_dir + "/" + stem;
+                for (const std::string& ext : {".webp", ".png", ".jpg"}) {
+                    std::string tex_path;
+                    for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
+                        const std::string name = entry.path().filename().string();
+                        if (name.rfind(stem + ".", 0) == 0 &&
+                            entry.path().extension().string() == ext) {
+                            tex_path = entry.path().string();
+                            break;
+                        }
+                    }
+                    if (tex_path.empty()) continue;
+                    sf2::data::Texture tex;
+                    if (sf2::data::decode_texture(tex_path, tex)) {
+                        const GLuint gl =
+                            app().renderer().texture_for("dojo_atlas_" + stem, tex);
+                        if (gl != 0) {
+                            std::ifstream in(atlas_json, std::ios::binary);
+                            std::vector<std::uint8_t> jb(
+                                (std::istreambuf_iterator<char>(in)),
+                                std::istreambuf_iterator<char>());
+                            const sf2::data::atlas a =
+                                sf2::data::atlas_parse(jb.data(), jb.size());
+                            for (const auto& fr : a.frames) {
+                                app().renderer().texture_alias(fr.name, gl);
                             }
                         }
-                        break;
                     }
+                    break;
                 }
             }
             std::fprintf(stdout, "[fight] dojo scene: %zu layers, arena %.0fx%.0f\n",
@@ -476,10 +494,27 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     battle.rounds = 2;
     battle.round_time = 99;
     battle.health_recovery = 1.0f;
-    battle.player_spawn_x = 690.0f;
-    battle.player_spawn_y = -93.0f;
-    battle.enemy_spawn_x = 973.0f;
-    battle.enemy_spawn_y = -110.0f;
+    // [FIX Phase 4a — spawn sides] The dojo_params ModelsViewer places
+    // PlayerPositionX=690 (left) / EnemyPositionX=973 (right) — but the
+    // ORACLE trace (reference/traces/console.log) shows the PLAYER at the
+    // RIGHT (P:972.954) and the ENEMY (Punchbag) at the LEFT (E:690.000):
+    //   F0|1|0|0|P:972.954,-108.114,1,,1,NAME_SHADOW|E:690.000,-93.000,1,,1,Punchbag
+    // The ModelsViewer "Player"/"Enemy" labels are reversed relative to
+    // the fight roles (the viewer's "Player" = the left Punchbag = the
+    // fight ENEMY). The old code spawned the player LEFT — the fighters
+    // appeared on the wrong sides ("in nowhere" + mirrored).
+    // [FIX Phase 4a — fighters on the floor] The spawn Y is the ModelsViewer
+    // COM y; the native anchors the fighter by its clip ground-contact (see
+    // Fighter::sample) so the feet land at the given world y. The dojo's
+    // VISIBLE floor is the dojo_floor sprite line (world Y=223.5) — the
+    // fighters stand on it (feet at 223.5 -> the floor sprite row). The
+    // params Floor attr (80) is the arena's physics line, NOT the visible
+    // wooden floor.
+    const float floor_y = 223.5f;
+    battle.player_spawn_x = 973.0f;
+    battle.player_spawn_y = floor_y;   // the ground line (visible dojo floor)
+    battle.enemy_spawn_x = 690.0f;
+    battle.enemy_spawn_y = floor_y;
     battle.max_hp = 1;  // the game's HP fallback (Zn = aB>0 ? aB : 1)
     battle.player_unarmed_damage = 80.0f;
 
@@ -535,6 +570,57 @@ std::size_t FightScreen::move_list_size() const {
     return fight_ != nullptr ? fight_->player().fighter.hb().size() : 0;
 }
 
+// [FIX Phase 4a verification] Bone-sample check: the sampled bone positions
+// (the Fighter::positions() after sample) for a few skeleton bones vs the
+// clip data, plus the triangle bbox (humanoid shape + on-screen check).
+void FightScreen::verify_fight() const {
+    if (fight_ == nullptr) return;
+    auto report = [](const char* who, const sf2::scene::Fighter& f) {
+        const sf2::scene::Model& m = f.model();
+        const std::vector<float>& pos = f.positions();
+        const char* bones[4] = {"COM", "NTop", "NAnkle_2", "NHeadF"};
+        std::fprintf(stdout, "[verify] %s bone sample (world):\n", who);
+        for (int b = 0; b < 4; ++b) {
+            const int idx = m.bone_by_name(bones[b]);
+            if (idx < 0 || static_cast<std::size_t>(idx) * 2 + 1 >= pos.size()) continue;
+            std::fprintf(stdout, "  %s = (%.1f, %.1f)\n", bones[b],
+                         pos[static_cast<std::size_t>(idx) * 2],
+                         pos[static_cast<std::size_t>(idx) * 2 + 1]);
+        }
+        float min_x, min_y, max_x, max_y;
+        f.triangle_bbox(min_x, min_y, max_x, max_y);
+        const float bw = max_x - min_x, bh = max_y - min_y;
+        std::fprintf(stdout, "[verify] %s tri-bbox: (%.1f, %.1f)-(%.1f, %.1f) "
+                             "w=%.1f h=%.1f ratio=%.2f\n",
+                     who, min_x, min_y, max_x, max_y, bw, bh,
+                     bh > 0.0f ? bw / bh : 0.0f);
+        // The widest triangle span (the stretched-mesh check).
+        float widest = 0.0f;
+        for (const sf2::scene::TriResolved& tri : m.resolved_tris) {
+            const float x1 = pos[static_cast<std::size_t>(tri.i1) * 2];
+            const float y1 = pos[static_cast<std::size_t>(tri.i1) * 2 + 1];
+            const float x2 = pos[static_cast<std::size_t>(tri.i2) * 2];
+            const float y2 = pos[static_cast<std::size_t>(tri.i2) * 2 + 1];
+            const float x3 = pos[static_cast<std::size_t>(tri.i3) * 2];
+            const float y3 = pos[static_cast<std::size_t>(tri.i3) * 2 + 1];
+            float sx = std::fabs(x1 - x2);
+            if (std::fabs(x2 - x3) > sx) sx = std::fabs(x2 - x3);
+            if (std::fabs(x3 - x1) > sx) sx = std::fabs(x3 - x1);
+            float sy = std::fabs(y1 - y2);
+            if (std::fabs(y2 - y3) > sy) sy = std::fabs(y2 - y3);
+            if (std::fabs(y3 - y1) > sy) sy = std::fabs(y3 - y1);
+            if (sx + sy > widest) widest = sx + sy;
+        }
+        std::fprintf(stdout, "[verify] %s widest-tri-span=%.1f\n", who, widest);
+        // On-screen check: the bbox center within the 1280x720 view.
+        const float cx = (min_x + max_x) * 0.5f, cy = (min_y + max_y) * 0.5f;
+        std::fprintf(stdout, "[verify] %s on-screen: center=(%.0f, %.0f) %s\n", who, cx, cy,
+                     (cx >= 0 && cx <= 1280 && cy >= 0 && cy <= 720) ? "OK" : "OFF-SCREEN");
+    };
+    report("player", fight_->player().fighter);
+    report("enemy", fight_->enemy().fighter);
+    std::fflush(stdout);
+}
 void FightScreen::update_impl(float dt) {
     if (fight_ == nullptr) return;
     if (!auto_attack_wired_) {
@@ -594,7 +680,15 @@ void FightScreen::render_impl(App& app) {
     camera.view_h = kViewH;
     camera.arena_h = assets.dojo.arena_height() > 0.0f ? assets.dojo.arena_height() : 560.0f;
     camera.arena_floor = assets.dojo.arena_floor();
-    camera.arena_center_x = 0.0f;
+    // [FIX Phase 4a — dojo behind the fighters] The arena center (the
+    // parallax Io reference) is the LOCATION's center = Width/2 (the
+    // dojo_params Width=1960 -> 980), NOT 0. With arena_center_x=0 the
+    // camera at the fighters (center 831) gave Io = -831 and every
+    // background layer shifted 831*Factor px LEFT — the mountains/temple/
+    // bridge/tree layers landed entirely off-screen and only the sky
+    // (factor 0.4) + the walls (factor 1) were visible. With the arena
+    // center at 980, Io = +149 -> the parallax is a small, correct shift.
+    camera.arena_center_x = assets.dojo.arena_width() * 0.5f;
     ren.begin_frame(camera);
     for (const auto& layer : assets.dojo.layers()) {
         assets.dojo.render_layer(ren, *layer, camera);
