@@ -32,11 +32,14 @@ using namespace sf2::app;  // kScreen* ids + the App/SaveSystem types
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
                  "usage: %s [res_root] [save_path] [--headless N] [--autoclick] [--headless-loop]\n"
+                 "                  [--fight]\n"
                  "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
                  "  --headless-loop  run the scripted playable loop, then exit\n"
                  "                   (menu -> map -> Bosses fight -> results -> shop buy\n"
-                 "                    WEAPON_KNIVES -> equip -> map -> Training fight -> results)\n",
+                 "                    WEAPON_KNIVES -> equip -> map -> Training fight -> results)\n"
+                 "  --fight          boot DIRECTLY into the dojo fight (skip menu/map):\n"
+                 "                   dojo, player Fists (keyboard) vs enemy Fists (AI)\n",
                  argv0);
 }
 
@@ -252,6 +255,7 @@ int main(int argc, char** argv) {
     bool headless_loop = false;
     bool capture_fight = false;
     bool auto_attack = false;
+    bool fight_mode = false;  // --fight: boot DIRECTLY into the dojo fight
     int capture_fight_frame = 300;  // fight frames after the Fight screen appears
     std::string capture_dir;  // when set, capture screens to this dir
 
@@ -277,6 +281,8 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--auto-attack") {
             auto_attack = true;
+        } else if (arg == "--fight") {
+            fight_mode = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -404,6 +410,85 @@ int main(int argc, char** argv) {
         }
         if (!driver.finished) {
             return 1;
+        }
+    } else if (fight_mode) {
+        // [Phase 4c] --fight: boot DIRECTLY into the dojo fight, bypassing
+        // the menu/map (which are flat-rectangle placeholders). The user is
+        // in the dojo with the player keyboard-controllable (manual input
+        // path: on_key -> player_input -> try_select_move) and the enemy on
+        // AI. The battle is the default Training fight (dojo, player Fists
+        // vs enemy Fists/AI) — the same one the map's Training node starts.
+        //   game --fight                 windowed, keyboard-controlled
+        //   game --fight --headless N    run N frames then exit (verify)
+        // The fight push mirrors the MapScreen node click: carry the battle
+        // (name/location/reward) into pending_battle, then push
+        // kScreenFight. The player's owned list is EMPTY on purpose: the
+        // Fists fallback in FightController::make_fighter builds the player
+        // move list from the "Fists" TacticWeapon, so the direct boot is
+        // ALWAYS the fists fight (player Fists vs enemy Fists/AI) regardless
+        // of the user's save state (a save with WEAPON_KNIVES equipped would
+        // otherwise pull the knives moves into the player's list).
+        if (auto_attack) {
+            app.set_auto_attack(true);
+        }
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name = "Training";
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned.clear();
+            std::fprintf(stdout, "[fight] direct boot: battle=%s location=%s owned=%zu\n",
+                         pb.battle_name.c_str(), pb.location.c_str(), pb.owned.size());
+            std::fflush(stdout);
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        if (headless > 0) {
+            // Deterministic headless verification: force one fixed step per
+            // frame (like the other drivers) so the fight advances frame-
+            // for-frame. The fight starts in phase 1 (the start-stance
+            // intro, 133 fight frames); phase 2 (live fighting) begins at
+            // fight frame 133+. Inject a Punch (Space) at fight frame 170
+            // so the player's manual input path starts a punch and the log
+            // proves the keyboard control; capture at fight frame 400 (the
+            // task's mid-fight snapshot).
+            app.set_headless_frames(1);
+            int guard = 0;
+            bool fight_seen = false;
+            int fight_frames = 0;
+            bool punch_sent = false;
+            while (guard < headless) {
+                glfwPollEvents();
+                if (fight_seen && !punch_sent && fight_frames >= 170) {
+                    app.inject_key(32, true);
+                    app.inject_key(32, false);
+                    punch_sent = true;
+                    std::fprintf(stdout, "[fight] injected Punch at fight frame %d\n",
+                                 fight_frames);
+                    std::fflush(stdout);
+                }
+                app.run_one_frame();
+                ++guard;
+                if (!fight_seen && app.screens().current_id() == kScreenFight) {
+                    fight_seen = true;
+                    fight_frames = 0;
+                } else if (fight_seen) {
+                    ++fight_frames;
+                }
+            }
+            std::filesystem::create_directories("reference/extracted/scene");
+            app.capture_png("reference/extracted/scene/direct_fight.png");
+            std::fprintf(stdout,
+                         "[fight] captured reference/extracted/scene/direct_fight.png "
+                         "(fight frame ~%d, guard %d)\n",
+                         fight_frames, guard);
+            if (app.screens().top() != nullptr) {
+                static_cast<sf2::app::FightScreen*>(app.screens().top())->verify_fight();
+            }
+        } else {
+            // Windowed: run until the window closes (the user plays).
+            app.run(0, false);
         }
     } else if (capture_fight) {
         // [FIX Phase 4a/4b verification] Navigate menu -> map -> Training
