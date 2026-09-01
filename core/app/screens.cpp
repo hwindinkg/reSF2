@@ -645,6 +645,31 @@ void FightScreen::verify_fight() const {
                          pos[static_cast<std::size_t>(idx) * 2],
                          pos[static_cast<std::size_t>(idx) * 2 + 1]);
         }
+        // [Phase 4d debug] The key skeleton bones for the capsule strip.
+        static const char* kCaps[14] = {"NHead", "NTop", "NNeck", "NChest", "NStomach",
+                                        "NHip_1", "NHip_2", "NKnee_1", "NKnee_2",
+                                        "NAnkle_1", "NAnkle_2", "NToe_1", "NToe_2", "NHeel_1"};
+        std::fprintf(stdout, "[verify] %s capsule bones (world):\n", who);
+        for (int b = 0; b < 14; ++b) {
+            const int idx = m.bone_by_name(kCaps[b]);
+            if (idx < 0 || static_cast<std::size_t>(idx) * 2 + 1 >= pos.size()) continue;
+            std::fprintf(stdout, "  %-10s = (%.1f, %.1f)\n", kCaps[b],
+                         pos[static_cast<std::size_t>(idx) * 2],
+                         pos[static_cast<std::size_t>(idx) * 2 + 1]);
+        }
+        // [Phase 4d debug] The BODY-Node* cloth nodes' world positions (the
+        // body-mesh leg coverage check).
+        static const char* kCloth[8] = {"BODY-Node16", "BODY-Node11", "BODY-Node15",
+                                        "BODY-Node12", "BODY-Node17", "BODY-Node18",
+                                        "BODY-Node20", "BODY-Node19"};
+        std::fprintf(stdout, "[verify] %s BODY-Node cloth (world):\n", who);
+        for (int b = 0; b < 8; ++b) {
+            const int idx = m.bone_by_name(kCloth[b]);
+            if (idx < 0 || static_cast<std::size_t>(idx) * 2 + 1 >= pos.size()) continue;
+            std::fprintf(stdout, "  %s = (%.1f, %.1f)\n", kCloth[b],
+                         pos[static_cast<std::size_t>(idx) * 2],
+                         pos[static_cast<std::size_t>(idx) * 2 + 1]);
+        }
         float min_x, min_y, max_x, max_y;
         f.triangle_bbox(min_x, min_y, max_x, max_y);
         const float bw = max_x - min_x, bh = max_y - min_y;
@@ -765,6 +790,63 @@ void FightScreen::render_impl(App& app) {
     pv = project(verts);
     fight_->enemy().fighter.build_vertices(verts);
     ev = project(verts);
+    // [Phase 4d] The oracle renders the fighter as the ragdoll capsule
+    // STRIP: every collidable edge is a stroked line (JS `Dk` node:
+    // `add(b,e,c,a,stroke/2)` with `stroke = Radius1*2`, drawn by the
+    // `zu` class — see sf2.502f0946.js `class zu` + `class Dk`). The
+    // triangle mesh alone (mdl_body = legs/feet only) leaves the torso
+    // (EChest/EStomach) EMPTY — the user's "no armor/torso" report. Draw
+    // the collidable capsule edges as thick quads over the mesh so the
+    // fighter is a solid humanoid silhouette (head/neck/chest/stomach/
+    // arms/legs) matching the oracle.
+    auto draw_capsules = [&camera, &ren](const sf2::scene::FightFighter& f) {
+        const float r = f.fighter.color_r(), g = f.fighter.color_g(), b = f.fighter.color_b();
+        // [Phase 4d — capsule-figure render] The oracle draws the fighter's
+        // body from the merged model's CAPSULE FIGURES (JS `Yc.Tib`: every
+        // `<Capsule_* Type="Capsule" Radius1=".." Edge="..">` becomes a `zu`
+        // visual node -> a `Dk` stroked line, stroke = Radius1*2). The
+        // capsule figures live in the armor/body/helm models (mdl_body has
+        // EChest/EStomach/EThigh/ECalf/EArm..., mdl_head has EHead/ENeck).
+        // Each capsule's Edge resolves to the edge's two endpoint bones;
+        // the stroke width comes from Radius1 (NOT the edge's collidable
+        // radius, which is the physics radius).
+        const sf2::scene::Model& model = f.fighter.model();
+        for (const sf2::scene::Capsule& cap : model.capsules) {
+            // Find the edge by name.
+            const sf2::scene::EdgeDef* edge = nullptr;
+            for (const sf2::scene::EdgeDef& ed : model.edges) {
+                if (ed.name == cap.edge) { edge = &ed; break; }
+            }
+            if (edge == nullptr) continue;
+            const int i1 = model.bone_by_name(edge->end1);
+            const int i2 = model.bone_by_name(edge->end2);
+            if (i1 < 0 || i2 < 0) continue;
+            const std::vector<float>& pos = f.fighter.positions();
+            const std::size_t u1 = static_cast<std::size_t>(i1) * 2;
+            const std::size_t u2 = static_cast<std::size_t>(i2) * 2;
+            if (u1 + 1 >= pos.size() || u2 + 1 >= pos.size()) continue;
+            const float stroke = cap.radius1 * 2.0f * camera.zoom;
+            if (stroke <= 0.0f) continue;
+            const float sx1 = camera.world_to_screen_x(pos[u1], 0.0f);
+            const float sy1 = camera.world_to_screen_y(pos[u1 + 1]);
+            const float sx2 = camera.world_to_screen_x(pos[u2], 0.0f);
+            const float sy2 = camera.world_to_screen_y(pos[u2 + 1]);
+            float dx = sx2 - sx1, dy = sy2 - sy1;
+            const float len = std::sqrt(dx * dx + dy * dy);
+            if (len < 1e-4f) continue;
+            dx /= len; dy /= len;
+            const float px = -dy * stroke * 0.5f;
+            const float py = dx * stroke * 0.5f;
+            float quad[12] = {
+                sx1 + px, sy1 + py, sx2 + px, sy2 + py,
+                sx1 - px, sy1 - py, sx2 + px, sy2 + py,
+                sx2 - px, sy2 - py, sx1 - px, sy1 - py,
+            };
+            ren.draw_triangles(quad, 6, r, g, b, 1.0f);
+        }
+    };
+    draw_capsules(fight_->player());
+    draw_capsules(fight_->enemy());
     ren.draw_triangles(pv.data(), pv.size() / 2, fight_->player().fighter.color_r(),
                        fight_->player().fighter.color_g(), fight_->player().fighter.color_b());
     ren.draw_triangles(ev.data(), ev.size() / 2, fight_->enemy().fighter.color_r(),
