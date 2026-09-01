@@ -67,6 +67,11 @@ public:
     float arena_width() const { return arena_w_; }
     float arena_height() const { return arena_h_; }
     float arena_floor() const { return arena_floor_; }
+    // The location Root Color (the `Root` element's Color attr, e.g.
+    // "0x000000" for the dojo). The game's fighters are silhouettes filled
+    // with this flat color (JS `Na.cd`); the fight screen sets the fighter
+    // mesh color from it.
+    std::uint32_t root_color() const { return root_color_; }
 
 private:
     std::vector<std::shared_ptr<Layer>> layers_;
@@ -74,6 +79,7 @@ private:
     float arena_w_ = 0.0f;
     float arena_h_ = 0.0f;
     float arena_floor_ = 0.0f;
+    std::uint32_t root_color_ = 0x000000u;  // default black (the dojo's Color)
 };
 
 } // namespace sf2::scene

@@ -136,12 +136,13 @@ void FightController::init_locks(
     player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp,
                            "Fists", player_owned);
     enemy_ = make_fighter(enemy_name, false, enemy_x, enemy_y, enemy_max_hp, "Fists", {});
-    // The player can be AI-driven too (the demo auto-attacks via the AI);
-    // the controller gives the player an AI controller as well.
-    if (tactic_ != nullptr) {
-        player_.ai = std::make_unique<sf2::scene::AiController>();
-        player_.ai->init("Fists", tactics_, tactic_, moves_);
-    }
+    // [FIX Phase 4b — manual control] The player is MANUAL: no AiController,
+    // no auto-attack. The input path (player_input -> Fighter::input ->
+    // try_select_move) drives the player's moves; the enemy keeps the AI.
+    // The demo callers that want an AI player (app/ai_demo) attach their own
+    // controller. (The old code attached the player AI unconditionally, which
+    // overrode the user's key input — "no input" + the player
+    // animating randomly.)
 
     // Sample the initial stance idle (JS: the weapon's stance idle clip).
     sample_idle(player_);
@@ -171,7 +172,14 @@ FightFighter FightController::make_fighter(
     f.name = nm;
     f.is_player = is_player;
     f.fighter.set_model(model_);
-    f.fighter.set_color(is_player ? 0xFF2020u : 0x4040FFu);
+    // [FIX Phase 4b — black silhouettes] The fighters' fill color is the
+    // LOCATION's Root Color (the dojo_params `<Root Color="0x000000">`),
+    // not a hardcoded team color — the oracle's fighters are black
+    // silhouettes (JS `Na.cd` fills the Path2D mesh with the location
+    // color). set_fighter_color (the location-scene root color) is applied
+    // by the fight screen after init_locks; the default here is black so
+    // the standalone demos (which have no location) also draw black.
+    f.fighter.set_color(fighter_color_);
     f.fighter.set_clip_lookup(
         [this](const std::string& name) -> const sf2::data::anim_clip* {
             const auto it = clips_->find(name);
@@ -213,7 +221,8 @@ void FightController::set_bounds(float wall, float wall_max, float floor_y) {
     wall_max_ = wall_max;
     floor_y_ = floor_y;
     camera_.wall = wall;
-    camera_.arena_w = wall_max_ - wall;
+    camera_.floor = floor_y;  // the visible floor line (the camera anchor)
+    camera_.arena_w = wall_max_ - wall_min_;
 }
 
 // JS `xF` (L388): set the fight phase and sync the fighters' `Je` stance
@@ -488,6 +497,38 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
 // `de.ia` path (see core/scene/README.md).
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
     me.fighter.set_enemy_x(foe.fighter.world_x());
+    // [FIX Phase 4b — fighters stay in the arena] The root-motion walk
+    // (Fighter::advance) moves world_x freely; clamp it to the arena walls
+    // (the params walls at ±(Width/2 - Wall)) so a fighter can't walk out of
+    // the dojo into the void (the enemy AI previously wandered to x=1244,
+    // past the right wall at 900, and stood on the black background).
+    me.fighter.clamp_x(wall_min_, wall_max_);
+
+    // [FIX Phase 4b — manual control] The PLAYER's key input FIRST: when
+    // the fighter is a manual (non-AI, non-auto-attack) fighter, the
+    // buffered keys (Fighter::input via the fight screen's on_key) are
+    // consumed here by the move selection (JS: the KeyPressed event handler
+    // calls `wd.Lea`/`try_select_move` when a key is pressed). This must
+    // run BEFORE the stance-idle auto-play below, so a key press interrupts
+    // the idle (otherwise the idle would re-start a clip every frame and
+    // the input could never win — "no input").
+    if (me.ai == nullptr && !auto_attack_ && phase_ == fight_phase::fight) {
+        sf2::scene::FightContext ctx;
+        ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
+        ctx.anims_me = {};
+        ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
+        ctx.dist_x = foe.fighter.world_x() - me.fighter.world_x();
+        ctx.dist_3d = std::fabs(ctx.dist_x);
+        ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+        const std::string chosen = me.fighter.try_select_move(ctx);
+        if (!chosen.empty()) {
+            ++me.moves_started;
+            me.last_decision = "input:" + chosen;
+            std::fprintf(stdout, "[fight] player input -> %s (F%d)\n", chosen.c_str(),
+                         frame_);
+            std::fflush(stdout);
+        }
+    }
 
     // The stance idle auto-play (the game plays the weapon stance idle
     // between moves — the AI's record key). [FIX Phase 4a] The idle has

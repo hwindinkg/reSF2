@@ -149,6 +149,12 @@ public:
     }
     float world_x() const { return world_x_; }
     float world_y() const { return world_y_; }
+    // Clamps the fighter's world x to [min_x, max_x] (the arena walls).
+    // Called each frame by the fight controller after the root-motion walk.
+    void clamp_x(float min_x, float max_x) {
+        if (world_x_ < min_x) world_x_ = min_x;
+        if (world_x_ > max_x) world_x_ = max_x;
+    }
     // Clip lookup callback — the demo supplies the archive.
     void set_clip_lookup(const std::function<const sf2::data::anim_clip*(const std::string&)>& fn) {
         clip_lookup_ = fn;
