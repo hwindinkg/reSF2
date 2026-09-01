@@ -254,6 +254,7 @@ int main(int argc, char** argv) {
     bool auto_click = false;
     bool headless_loop = false;
     bool capture_fight = false;
+    bool capture_idle_fight = false;  // --capture-idle-fight-at N: boot direct + no input, capture at fight frame N
     bool auto_attack = false;
     bool fight_mode = false;  // --fight: boot DIRECTLY into the dojo fight
     int capture_fight_frame = 300;  // fight frames after the Fight screen appears
@@ -279,6 +280,9 @@ int main(int argc, char** argv) {
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 capture_fight_frame = std::atoi(argv[++i]);
             }
+        } else if (arg == "--capture-idle-fight-at" && i + 1 < argc) {
+            capture_idle_fight = true;
+            capture_fight_frame = std::atoi(argv[++i]);
         } else if (arg == "--auto-attack") {
             auto_attack = true;
         } else if (arg == "--fight") {
@@ -489,6 +493,48 @@ int main(int argc, char** argv) {
         } else {
             // Windowed: run until the window closes (the user plays).
             app.run(0, false);
+        }
+    } else if (capture_idle_fight) {
+        // [Phase 4d] Boot DIRECTLY into the dojo fight with NO input and NO
+        // auto-attack, run to fight frame `capture_fight_frame`, then capture
+        // a PNG. The enemy AI still runs, but the deterministic seed makes
+        // the run reproducible; the player stays in its stance idle (no key
+        // injected). Used for the pixel-diff vs the oracle.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name = "Training";
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned.clear();
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);  // uncapped deterministic stepping
+        int guard = 0;
+        bool fight_seen = false;
+        int fight_frames = 0;
+        while (guard < 20000) {
+            glfwPollEvents();
+            app.run_one_frame();
+            ++guard;
+            if (!fight_seen && app.screens().current_id() == kScreenFight) {
+                fight_seen = true;
+                fight_frames = 0;
+            } else if (fight_seen) {
+                ++fight_frames;
+                if (fight_frames >= capture_fight_frame) {
+                    break;
+                }
+            }
+        }
+        std::filesystem::create_directories("reference/extracted/scene");
+        const std::string path = "reference/extracted/scene/diff_native.png";
+        app.capture_png(path);
+        std::fprintf(stdout, "[game] captured %s (fight frame ~%d, guard %d)\n", path.c_str(),
+                     fight_frames, guard);
+        if (app.screens().top() != nullptr) {
+            static_cast<sf2::app::FightScreen*>(app.screens().top())->verify_fight();
         }
     } else if (capture_fight) {
         // [FIX Phase 4a/4b verification] Navigate menu -> map -> Training

@@ -551,6 +551,17 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // the body mesh exploded ~360 world units. Anchor each cloth node at
     // its bind offset from the nearest clip-driven bone (precomputed in
     // set_model): the cloth follows the skeleton's motion.
+    // [FIX Phase 4d — cloth side under mirror] The bind offset
+    // (bones[i].x - bones[r].x) is in the AUTHORED (right-facing) space.
+    // The clip pose is authored once and mirrored by facing at the final
+    // projection (below, `* f`). If the cloth offset is added UNMIRRORED
+    // to the clip anchor and then the whole pose is mirrored, the cloth
+    // nodes CROSS sides: the left-leg cloth (BODY-Node16) lands on the
+    // fighter's right and the right-leg cloth (BODY-Node12) on the left,
+    // so the body-mesh legs overlap into a thin column (the oracle's
+    // ragdoll solver keeps each cloth node on its own side). Mirror the
+    // offset by the facing here so the two mirror operations cancel and
+    // the cloth node stays on the correct side of its anchor.
     for (std::size_t i = nclip; i < n; ++i) {
         if (bones[i].is_macro) {
             continue;  // macros are computed from the (anchored) children
@@ -560,7 +571,8 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             continue;
         }
         const std::size_t r = static_cast<std::size_t>(ref);
-        px[i] = bones[i].x - bones[r].x + px[r];
+        const float f_cloth = facing < 0 ? -1.0f : 1.0f;
+        px[i] = (bones[i].x - bones[r].x) * f_cloth + px[r];
         py[i] = bones[i].y - bones[r].y + py[r];
         pz[i] = bones[i].z - bones[r].z + pz[r];
     }
