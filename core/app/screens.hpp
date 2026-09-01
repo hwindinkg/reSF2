@@ -115,6 +115,11 @@ public:
     // Defined in screens.cpp (needs the full FightController type).
     std::size_t move_list_size() const;
 
+    // [FIX Phase 4a verification] Prints the sampled bone positions of the
+    // player/enemy (a clip-frame bone-sample check) + their triangle bbox
+    // (the stretched/on-screen check). Defined in screens.cpp.
+    void verify_fight() const;
+
 private:
     std::string battle_name_;
     std::string location_;

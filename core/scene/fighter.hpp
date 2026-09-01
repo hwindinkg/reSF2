@@ -194,7 +194,20 @@ private:
     const MoveDef* current_move_ = nullptr; // playing move (JS `da.Ua`)
     const sf2::data::anim_clip* current_clip_ = nullptr; // clip for `current_move_`
     int move_frame_ = 0;                    // playback frame (JS `Te.Xh`)
-    int facing_ = 1;                        // ±1 (JS `Te.FX` / `hd()`)
+    // [FIX Phase 4a — pacing] The subframe phase within the current
+    // clip-frame (JS `Te.mo`). `sub_` = (MidFrames+1) subframes per
+    // clip-frame (JS `eda`: `mo += Tx`, `Tx=(XJ+1)*HD`). The sample()
+    // interpolates between clip frame `move_frame_` and `move_frame_+1`
+    // at `subframe_/sub_`.
+    int sub_ = 1;
+    int subframe_ = 0;
+    // [FIX Phase 4a — stretched cloth] For each merged-model bone >= the
+    // clip bone count (the body/head cloth nodes), the index of its
+    // bind-space nearest clip-driven skeleton bone. The cloth node is
+    // rendered at that bone's clip position + the bind offset (the ragdoll
+    // keeps the cloth attached to the skeleton in the real game).
+    std::vector<int> nearest_clip_;
+    int facing_ = 1;                        // +1 (JS `Te.FX` / `hd()`)
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (COM world pos)
     std::set<std::string> active_intervals_; // active interval names (JS `Te.xj`)
     float enemy_x_ = 0.0f;                  // enemy world X (for facing)

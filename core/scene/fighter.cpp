@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <set>
 
 #include "anim_archive.hpp"
@@ -21,6 +22,88 @@ namespace sf2::scene {
 void Fighter::set_model(const Model& model) {
     model_ = model;
     pos_.assign(model_.bones.size() * 2, 0.0f);
+
+    // [FIX Phase 4a — stretched cloth] The merged model appends the body
+    // cloth nodes (BODY-Node*) and the head nodes AFTER the skeleton; the
+    // animation clips drive ONLY the 67 skeleton bones (clip bone i =
+    // merged bone i). The remaining bones keep their model-space bind
+    // position (x≈0, y≈-90..-160) while the clip pose sits at x≈-360 —
+    // the cloth mesh (body tris mixing cloth + skeleton) exploded ~360
+    // world units. The game's ragdoll solver (Al) keeps the cloth attached
+    // to the skeleton; without it the native anchors each non-clip bone to
+    // its NEAREST clip-driven bone (bind-space) and carries the bind
+    // offset along with that bone's clip position.
+    nearest_clip_.assign(model_.bones.size(), 0);
+    for (std::size_t i = 0; i < model_.bones.size(); ++i) {
+        if (i < 67) {  // the skeleton bones (clip-driven; see anim clip bone count)
+            nearest_clip_[i] = static_cast<int>(i);
+            continue;
+        }
+        // [FIX Phase 4a — stretched cloth] Anchor each non-clip bone to its
+        // ragdoll-connected skeleton bone (the model's <Edges> End1/End2 —
+        // the game's Al solver keeps the cloth at the edge endpoints). This
+        // is correct where the bind-nearest fails: the HEAD-Node* cloth
+        // nodes' bind positions sit at the FIST height (the weapon
+        // placeholder rig), so the bind-nearest picked the hand/weapon bones
+        // and the head mesh exploded. The edges connect the head nodes to
+        // the head macros (which follow the skeleton head bones).
+        int ref = -1;
+        for (const EdgeDef& e : model_.edges) {
+            const int ei = model_.bone_by_name(e.end1);
+            const int ej = model_.bone_by_name(e.end2);
+            const int other = (ei == static_cast<int>(i)) ? ej : (ej == static_cast<int>(i) ? ei : -1);
+            if (other < 0) continue;
+            if (other < 67) {  // the clip-driven skeleton bone
+                ref = other;
+                break;
+            }
+        }
+        if (ref < 0) {
+            // [FIX Phase 4a] The HEAD-Node* cloth nodes' edges connect only
+            // to each other + the head macros (no direct skeleton edge), so
+            // the edge lookup above fails and the bind-nearest picks the
+            // fist/weapon bones (the head nodes' bind positions sit at the
+            // fist height). Anchor the head nodes to the skeleton HEAD bone
+            // cluster (the head macros' children) instead.
+            const std::string& nm = model_.bones[i].name;
+            if (nm.rfind("HEAD-Node", 0) == 0) {
+                static const char* kHeadBones[4] = {"NTop", "NHeadF", "NHeadS_1", "NHeadS_2"};
+                int hbest = 0;
+                float hd = std::numeric_limits<float>::max();
+                for (int hb = 0; hb < 4; ++hb) {
+                    const int hj = model_.bone_by_name(kHeadBones[hb]);
+                    if (hj < 0 || hj >= 67) continue;
+                    const float dx = model_.bones[i].x - model_.bones[static_cast<std::size_t>(hj)].x;
+                    const float dy = model_.bones[i].y - model_.bones[static_cast<std::size_t>(hj)].y;
+                    const float dz = model_.bones[i].z - model_.bones[static_cast<std::size_t>(hj)].z;
+                    const float d = dx * dx + dy * dy + dz * dz;
+                    if (d < hd) {
+                        hd = d;
+                        hbest = hj;
+                    }
+                }
+                ref = hbest;
+            }
+        }
+        if (ref < 0) {
+            // Fallback: the bind-space nearest non-weapon clip-driven bone.
+            int best = 0;
+            float best_d = std::numeric_limits<float>::max();
+            for (std::size_t j = 0; j < 67; ++j) {
+                if (j >= 19 && j <= 26) continue;  // the weapon placeholder rig
+                const float dx = model_.bones[i].x - model_.bones[j].x;
+                const float dy = model_.bones[i].y - model_.bones[j].y;
+                const float dz = model_.bones[i].z - model_.bones[j].z;
+                const float d = dx * dx + dy * dy + dz * dz;
+                if (d < best_d) {
+                    best_d = d;
+                    best = static_cast<int>(j);
+                }
+            }
+            ref = best;
+        }
+        nearest_clip_[i] = ref;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +306,11 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     current_move_ = &move;
     move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
     active_intervals_.clear();
+    // [FIX Phase 4a — pacing] Subframes per clip-frame (JS `Te.Gka`:
+    // `Tx = model.model.HD()`, `rpa.initialize((Ua.XJ+1)*Tx)`; `eda`
+    // advances `mo` by `Tx` per step with HD()==1). MidFrames=2 -> 3.
+    sub_ = std::max(1, (move.mid_frames + 1) * 1);
+    subframe_ = 0;
 
     // Consume the buffered tap (JS `Okb` L506: `Kl.reset()` + `Kl.Ptb(a)`
     // sets the current key as the move's trigger).
@@ -281,13 +369,39 @@ std::string Fighter::try_select_move(FightContext& ctx) {
 // + lS -> EStopAnimationEvent) and the fighter returns to idle.
 // JS `vp` (L562-563) -> `rrb` (L552) -> `jc.c7a` (L691) recomputes the
 // active intervals each frame.
+//
+// [FIX Phase 4a — pacing] The game does NOT play 1 clip-frame per 60 Hz
+// step. `Te.Gka` (L285802) sets `Tx = model.model.HD()` (=1) and the
+// interpolator `rpa` is initialized with `(Ua.XJ+1)*Tx` subframes per
+// clip-frame; `Te.eda` (L282908) advances the subframe index `mo` by
+// `Tx` per step. With `MidFrames=XJ=2` (moves.xml: `MidFrames="2"` on the
+// fists/stance moves) that is (XJ+1)=3 subframes per clip-frame, i.e. the
+// anim lasts (clipLen - FirstFrame)*3 + 1 fight-frames. Evidence (oracle
+// reference/traces/console.log, real game at 60 Hz):
+//   FistsStartStance-Left: clip stance_1 = 46 frames, FirstFrame=2
+//     -> trace F2..F134 = 133 frames = (46-2)*3+1            [exact]
+//   HighKick: clip high_kick = 21 frames, FirstFrame=3
+//     -> trace F336..F390 = 55 frames = (21-3)*3+1           [exact]
+// The old code advanced move_frame_ 1 per step => 3x TOO FAST. The native
+// now advances a subframe counter and samples the interpolated pose.
 void Fighter::advance(float dt) {
     (void)dt;  // fixed 60 Hz — one frame per call (JS 1/60 step)
     if (current_move_ == nullptr || current_clip_ == nullptr) {
         return;
     }
 
+    const int clip_len = static_cast<int>(current_clip_->frames.size());
+    if (clip_len <= 0) {
+        return;
+    }
+
+    // Subframes per clip-frame: (XJ+1)*HD with HD=1 (JS `Gka` +
+    // `eda`: `mo += Tx`, `Tx = (Ua.XJ+1)`). MidFrames=2 -> 3.
+    const int sub = std::max(1, (current_move_->mid_frames + 1) * 1);
+
     // Interval update: active when max(start,qx) <= frame <= min(finish,Lj).
+    // The intervals use the CLIP frame (Xh = move_frame_) — the subframe
+    // phase is a render detail.
     active_intervals_.clear();
     for (const std::string& n : intervals_at(move_frame_)) {
         active_intervals_.insert(n);
@@ -296,7 +410,8 @@ void Fighter::advance(float dt) {
     // Root motion (JS `Al.ia` L582): the fighter's world position follows
     // the animation's COM displacement. The JS physics body `oa.Fe().ma.x`
     // is moved by the root-bone delta each frame; the native port applies
-    // the COM delta of the clip (scaled by facing) to world_x.
+    // the COM delta of the clip (scaled by facing) to world_x. The delta is
+    // taken per CLIP frame (the game integrates the root on Xh advance).
     if (move_frame_ >= 0 && static_cast<std::size_t>(move_frame_) < current_clip_->frames.size()) {
         const float com_now = current_clip_->frames[static_cast<std::size_t>(move_frame_)].bones.empty()
                                   ? 0.0f
@@ -314,17 +429,25 @@ void Fighter::advance(float dt) {
     }
 
     // Clip end (JS `Te.ia` L547-548: `Xh+2 >= len` -> KNa + lS + Sca).
-    const int clip_len = static_cast<int>(current_clip_->frames.size());
-    if (move_frame_ + 2 >= clip_len) {
-        // Transition back to idle (JS: EStopAnimationEvent -> the fight
-        // controller re-enters stance idle).
+    // With the subframe pacing the anim plays the playable range
+    // [FirstFrame..len-1] at `sub` subframes each + the extra hold frame
+    // (the Pka `CT` duplicates the last key, JS `vu.Pka` L340694). The
+    // observed duration = (len - FirstFrame)*sub + 1 fight-frames; the
+    // clip-frame (Xh) counter advances once every `sub` steps.
+    if (move_frame_ >= clip_len - 2 && subframe_ >= sub - 1) {
+        // The clip has fully played (the last playable frame's subframes).
         current_move_ = nullptr;
         current_clip_ = nullptr;
         active_intervals_.clear();
+        subframe_ = 0;
         return;
     }
 
-    ++move_frame_;  // JS `Xh++`
+    ++subframe_;
+    if (subframe_ >= sub) {
+        subframe_ = 0;
+        ++move_frame_;  // JS `Xh++` (once per `sub` steps)
+    }
     sample_current();
 }
 
@@ -348,15 +471,28 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     const auto& frame_bones = clip.frames[static_cast<std::size_t>(frame)].bones;
     const std::size_t nclip = std::min(frame_bones.size(), n);
 
-    // 1. Per-bone positions: clip absolute world positions for bones 0..nclip-1,
-    //    bind position for the rest (the game's eda leaves those at their
-    //    current — here initial bind — position).
+    // [FIX Phase 4a — pacing] The subframe phase (this->subframe_ / sub)
+    // interpolates between clip frame `frame` and `frame+1` (the game's
+    // `wu` interpolator over f, f+1, f+2 with `mo` subframe; linear
+    // between adjacent keys reproduces the keyframe motion at 3x).
+    const float t = static_cast<float>(subframe_) / static_cast<float>(std::max(1, sub_));
+    const auto& next_bones = clip.frames[std::min(frame + 1, static_cast<int>(clip.frames.size()) - 1)].bones;
+    const std::size_t nnext = std::min(next_bones.size(), n);
+
+    // 1. Per-bone positions: interpolated clip absolute world positions for
+    //    bones 0..nclip-1, bind position for the rest (the game's eda leaves
+    //    those at their current — here initial bind — position).
     std::vector<float> px(n), py(n), pz(n);
     for (std::size_t i = 0; i < n; ++i) {
         if (i < nclip) {
             px[i] = frame_bones[i].x;
             py[i] = frame_bones[i].y;
             pz[i] = frame_bones[i].z;
+            if (i < nnext) {
+                px[i] += (next_bones[i].x - frame_bones[i].x) * t;
+                py[i] += (next_bones[i].y - frame_bones[i].y) * t;
+                pz[i] += (next_bones[i].z - frame_bones[i].z) * t;
+            }
         } else {
             px[i] = bones[i].x;
             py[i] = bones[i].y;
@@ -409,18 +545,55 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         }
     }
 
-    // 3. World placement: the COM bone anchors the fighter at (x, y)
-    //    (wd.oL offsets all bones relative to the COM). Facing mirrors X.
+    // [FIX Phase 4a — stretched cloth] Non-macro bones not driven by the
+    // clip (the body/head cloth nodes) keep their BIND position in the
+    // model space (x≈0), while the clip-driven skeleton sits at x≈-360 —
+    // the body mesh exploded ~360 world units. Anchor each cloth node at
+    // its bind offset from the nearest clip-driven bone (precomputed in
+    // set_model): the cloth follows the skeleton's motion.
+    for (std::size_t i = nclip; i < n; ++i) {
+        if (bones[i].is_macro) {
+            continue;  // macros are computed from the (anchored) children
+        }
+        const int ref = nearest_clip_[i];
+        if (ref < 0 || static_cast<std::size_t>(ref) >= nclip) {
+            continue;
+        }
+        const std::size_t r = static_cast<std::size_t>(ref);
+        px[i] = bones[i].x - bones[r].x + px[r];
+        py[i] = bones[i].y - bones[r].y + py[r];
+        pz[i] = bones[i].z - bones[r].z + pz[r];
+    }
+
+    // 3. World placement: the fighter's (x, y) anchors the model's GROUND at
+//    (x, y). [FIX Phase 4a — fighters in nowhere] The game's physics body
+//    rests on the arena floor: the dojo_params Floor attr (world y) is the
+//    ground line and the clip is authored with the feet AT that line
+//    (stance_1 feet_y=-15 ≈ -Floor/5 + COM offset). The OLD code anchored
+//    the COM at the spawn y, which left the feet ~440 px above the visible
+//    floor. The native anchors the CLIP's ground-contact bones (the lowest
+//    of the clip-driven skeleton bones — the feet) at (x, y): the spawn y
+//    is the fighter's ground line (the dojo ModelsViewer Y is the ground
+//    the fighter stands on; the fight camera then frames the floor).
+//    Facing mirrors X (Te.Qeb).
     int com = model_.bone_by_name("COM");
     if (com < 0) {
         com = 0;
     }
     const std::size_t com_u = static_cast<std::size_t>(com);
-    const float dx = x - px[com_u];
-    const float dy = y - py[com_u];
+    float ground = py[com_u];
+    for (std::size_t i = 0; i < nclip; ++i) {
+        ground = std::max(ground, py[i]);  // LOWEST clip-driven bone (the feet = the LARGEST y in the y-up space)
+    }
+    const float dy = y - ground;
     const float f = facing < 0 ? -1.0f : 1.0f;
     for (std::size_t i = 0; i < n; ++i) {
-        pos_[i * 2] = (px[i] + dx) * f;
+        // [FIX Phase 4a] The facing mirror (JS `Te.Qeb` L550: `jc.Neb()`
+        // flips the CLIP BUFFER x) applies to the LOCAL pose only: the
+        // clip x is offset by the COM, mirrored, then the world x is added.
+        // The old `(px+dx)*f` (or `px*f+dx`) misplaced the fighter when
+        // facing -1 (the world x was mirrored off-screen / doubled).
+        pos_[i * 2] = (px[i] - px[com_u]) * f + x;
         pos_[i * 2 + 1] = py[i] + dy;
     }
 }
