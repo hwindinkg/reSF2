@@ -251,6 +251,7 @@ int main(int argc, char** argv) {
     bool auto_click = false;
     bool headless_loop = false;
     bool capture_fight = false;
+    bool auto_attack = false;
     int capture_fight_frame = 300;  // fight frames after the Fight screen appears
     std::string capture_dir;  // when set, capture screens to this dir
 
@@ -274,6 +275,8 @@ int main(int argc, char** argv) {
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 capture_fight_frame = std::atoi(argv[++i]);
             }
+        } else if (arg == "--auto-attack") {
+            auto_attack = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -403,16 +406,23 @@ int main(int argc, char** argv) {
             return 1;
         }
     } else if (capture_fight) {
-        // [FIX Phase 4a verification] Navigate menu -> map -> Training fight
-        // and capture the fight at a fixed fight frame (the intro + a few
-        // phase-2 frames). The auto-click drives the menu/map; then the
-        // capture waits until the Fight screen is up and `capture_fight_frame`
-        // frames have elapsed.
-        app.set_auto_attack(true);
+        // [FIX Phase 4a/4b verification] Navigate menu -> map -> Training
+        // fight and capture the fight at a fixed fight frame (the intro + a
+        // few phase-2 frames). The auto-click drives the menu/map; then the
+        // capture waits until the Fight screen is up and
+        // `capture_fight_frame` frames have elapsed.
+        // [FIX Phase 4b] The capture runs the MANUAL (playable) path: no
+        // auto-attack, so the fighters stay at their spawn stances (the
+        // oracle's silhouettes). `--auto-attack` re-enables the demo
+        // auto-attack for the old style captures.
+        if (auto_attack) {
+            app.set_auto_attack(true);
+        }
         app.set_headless_frames(1);  // uncapped deterministic stepping
         int guard = 0;
         bool fight_seen = false;
         int fight_frames = 0;
+        bool punch_sent = false;
         while (guard < 20000) {
             glfwPollEvents();
             if (!fight_seen) {
@@ -422,6 +432,16 @@ int main(int argc, char** argv) {
                 } else if (guard == 60 && app.screens().current_id() == kScreenMap) {
                     app.inject_click(app.view_w() / 2.0 + 158.0, app.view_h() / 2.0 - 145.0);
                 }
+            } else if (!punch_sent && fight_frames >= 170) {
+                // [FIX Phase 4b control verification] Phase 2 is live at
+                // fight frame 133+; inject a Punch (Space) so the player's
+                // manual input path (on_key -> player_input -> try_select_move)
+                // starts a punch and the log proves it.
+                app.inject_key(32, true);
+                app.inject_key(32, false);
+                punch_sent = true;
+                std::fprintf(stdout, "[game] injected Punch at fight frame %d\n", fight_frames);
+                std::fflush(stdout);
             }
             app.run_one_frame();
             ++guard;

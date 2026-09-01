@@ -173,16 +173,28 @@ struct FightCamera {
     float arena_w = 1960.0f;
     float arena_h = 560.0f;
     float wall = 80.0f;
+    float floor = 80.0f;  // the visible arena floor line (world y)
 
     // Recomputes center/zoom from the two fighters' world x. Mirrors the
     // fight-start view (JS Sya: `f = min(viewW / (span + 100), 1)` — the
     // whole fight in view, zoomed out enough that the 100-px margin fits).
+    // [FIX Phase 4b — dojo visible] center_y is chosen so the arena FLOOR
+    // lands at ~0.61 of the view height, matching the oracle's fight view.
+    // The old center_y=0 put the bright bg layers below the floor line and
+    // the black mattes over the visible band ("dojo is black").
     void framing(float ax, float bx, float view_w, float view_h) {
         const float mid = (ax + bx) * 0.5f;
         const float span = std::fabs(bx - ax) + 500.0f;  // the demo margin
         center_x = mid;
-        center_y = 0.0f;
         zoom = std::min(1.0f, view_w / span);
+        // [FIX Phase 4b — fighters on the floor like the oracle] The
+        // vertical center places the fighters' feet (the spawn floor line)
+        // at ~0.78 of the view height — the oracle's boot2 shows the
+        // fighters' feet at screen y≈559 (of 720). The old anchor (0.61)
+        // put the feet too high and the fighters floated over the floor.
+        const float floor_screen_y = view_h * 0.78f;
+        const float vshift = ((arena_h / 2.0f - floor) / 2.0f) * (1.0f - zoom);
+        center_y = floor + vshift - (floor_screen_y - view_h / 2.0f) / zoom;
     }
 };
 
@@ -317,6 +329,18 @@ public:
     // Uses the same move-start path as the AI (bypasses the key buffer).
     void set_auto_attack(bool on) { auto_attack_ = on; }
 
+    // [FIX Phase 4b — fighter color from the location] Sets the fill color
+    // BOTH fighters' meshes are drawn with. The game's fighters are
+    // silhouettes filled with the LOCATION's Root Color (dojo_params
+    // `<Root Color="0x000000">`, JS `Na.cd`) — not a per-fighter team
+    // color. The fight screen calls this with the loaded location's
+    // root_color() after init_locks; the default is black.
+    void set_fighter_color(std::uint32_t rgb) {
+        fighter_color_ = rgb;
+        player_.fighter.set_color(rgb);
+        enemy_.fighter.set_color(rgb);
+    }
+
     // --- fight state accessors -------------------------------------------
     const FightFighter& player() const { return player_; }
     const FightFighter& enemy() const { return enemy_; }
@@ -350,6 +374,8 @@ private:
 
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)
+    // The fighter mesh fill color (the location Root Color; default black).
+    std::uint32_t fighter_color_ = 0x000000u;
     RoundState round_;             // JS `round` ($t L1239)
     fight_phase phase_ = fight_phase::idle;  // JS `eu`
     int frame_ = 0;                // JS `ca.frame`

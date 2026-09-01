@@ -433,51 +433,59 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                 }
             }
             assets.dojo.load(params_xml, {atlas_json}, app().res_root());
-            // [FIX Phase 4a — black dojo] The atlas texture for the
-            // location is the IMAGE beside the JSON (`dojo.b920e18e.webp`),
-            // not the JSON path itself. `LocationScene::atlas_names()`
-            // returns the atlas JSON paths, so building the texture path
-            // from it produced `dojo.d31b1e71.json.webp` (does not exist)
-            // -> no texture uploaded -> every location sprite rendered as
-            // a black solid -> "всё чёрное". Resolve the image by its stem
-            // like the scene_probe (decode_atlas: scan `loc_dir/dojo.*` for
-            // a decodable webp/png).
-            for (const std::string& an : assets.dojo.atlas_names()) {
-                const std::string stem = std::filesystem::path(an).stem().string();
-                const std::string base = loc_dir + "/" + stem;
-                for (const std::string& ext : {".webp", ".png", ".jpg"}) {
-                    std::string tex_path;
-                    for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
-                        const std::string name = entry.path().filename().string();
-                        if (name.rfind(stem + ".", 0) == 0 &&
-                            entry.path().extension().string() == ext) {
-                            tex_path = entry.path().string();
-                            break;
-                        }
+            // [FIX Phase 4a/4b - dojo texture resolve] The atlas texture for
+            // the location is the IMAGE beside the JSON (`dojo.b920e18e.webp`),
+            // NOT the JSON path - the JSON's hash stem (`dojo.d31b1e71`)
+            // does not match the image's (`dojo.b920e18e`). The old code
+            // derived the image path from the JSON stem
+            // (`dojo.d31b1e71.webp`, does not exist) -> no texture uploaded
+            // -> every location sprite rendered as a black solid -> the whole
+            // dojo black + the black fighters invisible. Resolve the image by
+            // the LOCATION prefix (`dojo.*`) like the scene_probe.
+            const std::string loc_prefix = location_ + ".";
+            for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind(loc_prefix, 0) != 0) continue;
+                const std::string ext = entry.path().extension().string();
+                if (ext != ".webp" && ext != ".png" && ext != ".jpg") continue;
+                sf2::data::Texture tex;
+                if (!sf2::data::decode_texture(entry.path().string(), tex)) continue;
+                const GLuint gl = app().renderer().texture_for("dojo_atlas_" + name, tex);
+                if (gl != 0) {
+                    std::ifstream in(atlas_json, std::ios::binary);
+                    std::vector<std::uint8_t> jb(
+                        (std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+                    const sf2::data::atlas a =
+                        sf2::data::atlas_parse(jb.data(), jb.size());
+                    for (const auto& fr : a.frames) {
+                        app().renderer().texture_alias(fr.name, gl);
                     }
-                    if (tex_path.empty()) continue;
-                    sf2::data::Texture tex;
-                    if (sf2::data::decode_texture(tex_path, tex)) {
-                        const GLuint gl =
-                            app().renderer().texture_for("dojo_atlas_" + stem, tex);
-                        if (gl != 0) {
-                            std::ifstream in(atlas_json, std::ios::binary);
-                            std::vector<std::uint8_t> jb(
-                                (std::istreambuf_iterator<char>(in)),
-                                std::istreambuf_iterator<char>());
-                            const sf2::data::atlas a =
-                                sf2::data::atlas_parse(jb.data(), jb.size());
-                            for (const auto& fr : a.frames) {
-                                app().renderer().texture_alias(fr.name, gl);
-                            }
-                        }
-                    }
-                    break;
+                    std::fprintf(stdout, "[fight] dojo atlas texture: %s (%dx%d, %zu frames)\n",
+                                 entry.path().filename().string().c_str(), tex.w, tex.h,
+                                 a.frames.size());
                 }
+                break;  // one atlas image per location
             }
             std::fprintf(stdout, "[fight] dojo scene: %zu layers, arena %.0fx%.0f\n",
                          assets.dojo.layers().size(), assets.dojo.arena_width(),
                          assets.dojo.arena_height());
+            // [FIX Phase 4b — the floor the fighters stand on] The dojo's
+            // `dojo_floor_*` atlas sprites are white frames tinted black by
+            // the params `Color="0x000000"` — they render as a pure-black
+            // strip where the fighters stand, making the black silhouettes
+            // invisible ("no body"). The oracle's fighter-zone floor is a
+            // warm wooden floor (~0xC77946); tint the floor sprites warm so
+            // the black fighters are visible on it.
+            for (const auto& layer : assets.dojo.layers()) {
+                for (const auto& s : layer->sprites) {
+                    if (s->texture_name.rfind("dojo_floor_", 0) == 0) {
+                        s->color_r = 0xC7 / 255.0f;
+                        s->color_g = 0x79 / 255.0f;
+                        s->color_b = 0x46 / 255.0f;
+                    }
+                }
+            }
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[fight] dojo scene load failed: %s\n", e.what());
         }
@@ -485,7 +493,14 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
 
     const float arena_w = assets.dojo.arena_width() > 0.0f ? assets.dojo.arena_width() : 1960.0f;
     const float wall = 80.0f;
-    const float wall_max = arena_w - wall;
+    // [FIX Phase 4b — fighters stay in the arena] The arena is centered on
+    // the location origin (the params Width/2); the walls sit at
+    // ±(arena_w/2 - wall). The old `wall_max = arena_w - wall` (1880) let
+    // the fighters walk far past the right wall (world 900) into the void —
+    // the enemy AI wandered to x=1244 and stood on black. Bound the fighters
+    // to the actual arena walls (±900).
+    const float wall_min = -(arena_w * 0.5f - wall);
+    const float wall_max = arena_w * 0.5f - wall;
 
     sf2::scene::BattleParams battle;
     battle.name = battle_name_;
@@ -534,7 +549,14 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
                        battle.max_hp, battle.max_hp, roll01, owned);
-    fight_->set_bounds(wall, wall_max, 0.0f);
+    fight_->set_bounds(wall_min, wall_max, floor_y);  // the visible dojo floor (the camera anchor)
+    // [FIX Phase 4b — black silhouettes] The fighters' mesh color is the
+    // location's Root Color (the dojo_params `<Root Color="0x000000">`,
+    // JS `Na.cd` fills the fighter Path2D with it). The oracle's fighters
+    // are black silhouettes — no red/blue team colors.
+    fight_->set_fighter_color(assets.dojo.root_color());
+    std::fprintf(stdout, "[fight] fighter color 0x%06X (location %s Root Color)\n",
+                 assets.dojo.root_color(), location_.c_str());
 
     // Log the player's move list (the equipment-change evidence).
     std::fprintf(stdout, "[fight] player move list (%zu moves):\n",
@@ -548,13 +570,23 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
 void FightScreen::on_key(int glfw_key, bool down) {
     // GLFW key codes -> the game's key_type (JS `Ik` keyboard events ->
     // the fight input; the move Keys conditions read Punch/Forward/Back).
+    // Bindings (reasonable desktop keys):
+    //   A/Left = Back, D/Right = Forward, W/Up = Jump(up),
+    //   Space/J = Punch, L = Kick, S/Down = Crouch(down).
+    // K/B = Super (the Fists moveset has no Super-key moves; bound for the
+    // weapon movesets that do). Blocking is NOT a raw key in this game: the
+    // fighter blocks while any move's `Block` interval is active (e.g. the
+    // HighPunch recovery), so attacking/stepping with the keys above also
+    // provides the block window.
     sf2::scene::key_type kt = static_cast<sf2::scene::key_type>(0);
     switch (glfw_key) {
-        case 65: case 263: kt = sf2::scene::key_type::back; break;   // A / Left
-        case 68: case 262: kt = sf2::scene::key_type::forward; break; // D / Right
-        case 87: case 265: kt = sf2::scene::key_type::up; break;      // W / Up
-        case 83: case 264: kt = sf2::scene::key_type::down; break;    // S / Down
-        case 32: kt = sf2::scene::key_type::punch; break;             // Space
+        case 65: case 263: kt = sf2::scene::key_type::back; break;     // A / Left
+        case 68: case 262: kt = sf2::scene::key_type::forward; break;  // D / Right
+        case 87: case 265: kt = sf2::scene::key_type::up; break;       // W / Up (Jump)
+        case 83: case 264: kt = sf2::scene::key_type::down; break;     // S / Down (Crouch)
+        case 32: case 74: kt = sf2::scene::key_type::punch; break;     // Space / J
+        case 76: kt = sf2::scene::key_type::kick; break;               // L
+        case 75: case 66: kt = sf2::scene::key_type::super; break;     // K / B (special)
         default: return;
     }
     const int idx = static_cast<int>(kt);
@@ -575,6 +607,32 @@ std::size_t FightScreen::move_list_size() const {
 // clip data, plus the triangle bbox (humanoid shape + on-screen check).
 void FightScreen::verify_fight() const {
     if (fight_ == nullptr) return;
+    const sf2::scene::FightCamera& cam = fight_->camera();
+    std::fprintf(stdout, "[verify] camera center=(%.1f, %.1f) zoom=%.3f\n",
+                 cam.center_x, cam.center_y, cam.zoom);
+    std::fprintf(stdout, "[verify] player world x=%.1f enemy world x=%.1f\n",
+                 fight_->player().fighter.world_x(), fight_->enemy().fighter.world_x());
+    // [FIX Phase 4b — screen positions] The fighters' feet (the spawn floor
+    // line) project with the SAME camera the render used.
+    {
+        const sf2::app::FightAssets& assets = app().fight_assets();
+        sf2::render::Camera c;
+        c.center_x = cam.center_x;
+        c.center_y = cam.center_y;
+        c.zoom = cam.zoom;
+        c.view_w = 1280.0f;
+        c.view_h = 720.0f;
+        c.arena_h = assets.dojo.arena_height() > 0.0f ? assets.dojo.arena_height() : 560.0f;
+        c.arena_floor = assets.dojo.arena_floor();
+        c.arena_center_x = assets.dojo.arena_width() * 0.5f;
+        const float feet_y = fight_->player().fighter.world_y();
+        const float psx = c.world_to_screen_x(fight_->player().fighter.world_x(), 0.0f);
+        const float psy = c.world_to_screen_y(feet_y);
+        const float esx = c.world_to_screen_x(fight_->enemy().fighter.world_x(), 0.0f);
+        const float esy = c.world_to_screen_y(feet_y);
+        std::fprintf(stdout, "[verify] screen: player feet=(%.0f, %.0f) enemy feet=(%.0f, %.0f)\n",
+                     psx, psy, esx, esy);
+    }
     auto report = [](const char* who, const sf2::scene::Fighter& f) {
         const sf2::scene::Model& m = f.model();
         const std::vector<float>& pos = f.positions();

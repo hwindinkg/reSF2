@@ -148,6 +148,15 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
     arena_w_ = sf2::data::xml_attr_float(root, "Width", 0.0f);
     arena_h_ = sf2::data::xml_attr_float(root, "Height", 0.0f);
     arena_floor_ = sf2::data::xml_attr_float(root, "Floor", 0.0f);
+    // The Root Color (the fighters' silhouette fill, JS `Na.cd`). Default
+    // black when the attr is absent.
+    if (root.attribute("Color")) {
+        float r = 0.0f, g = 0.0f, b = 0.0f;
+        parse_color(root.attribute("Color").value(), r, g, b);
+        root_color_ = (static_cast<std::uint32_t>(r * 255.0f) << 16) |
+                      (static_cast<std::uint32_t>(g * 255.0f) << 8) |
+                      static_cast<std::uint32_t>(b * 255.0f);
+    }
 
     // Parse all atlases into one ClassName -> frame map (later packs win on
     // collision; each frame remembers its owning atlas pixel size).
@@ -208,14 +217,32 @@ void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
     camera.arena_floor = arena_floor_;
     camera.arena_center_x = 0.0f;
     camera.center_x = camera.arena_center_x;  // camera locked to arena center
-    camera.center_y = 0.0f;                   // world origin is the arena's vertical center
     // Fit the arena width in the view (fight-start zoom from `ma.Sya`).
     camera.zoom = arena_w_ > 0.0f ? view_w / arena_w_ : 1.0f;
+    // [FIX Phase 4b — dojo visible] The vertical center. The arena content
+    // (bg sky at world y=20, floor at y=223.5) spans ~y -430..520; centering
+    // on world y=0 compressed the bright sky/wall layers below the floor line
+    // and left the black off-arena mattes covering the visible band — the
+    // "dojo is black" symptom. Center so the FLOOR (the visible arena floor)
+    // sits at ~0.61 of the view height, matching the oracle's fight view.
+    const float floor_screen_y = view_h * 0.61f;
+    const float vshift = ((arena_h_ / 2.0f - arena_floor_) / 2.0f) * (1.0f - camera.zoom);
+    camera.center_y = arena_floor_ + vshift - (floor_screen_y - view_h / 2.0f) / camera.zoom;
 }
 
 void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& layer,
                                  const sf2::render::Camera& camera) const {
     for (const auto& sprite : layer.sprites) {
+        // [FIX Phase 4b — mattes smother the arena] The params' `pixel_1`
+        // solid fills are the arena-BOUNDS blackout (the area outside the
+        // arena). At the fight camera's vertical scale they cover the whole
+        // visible band (world Y=320..520 maps over the fighter zone) and the
+        // black fighters disappear into them — "no body". The oracle's
+        // equivalent blackout is a thin border drawn by the arena system,
+        // not these full-size fills; skip them in the fight view.
+        if (sprite->solid) {
+            continue;
+        }
         renderer.draw_sprite(*sprite, camera, layer.factor);
     }
 }
