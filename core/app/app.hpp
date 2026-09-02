@@ -28,7 +28,10 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#include "atlas.hpp"
 
 struct GLFWwindow;
 
@@ -172,6 +175,12 @@ public:
     // by the SaveSystem.
     const std::string& res_root() const { return res_root_; }
 
+    // Atlas frame cache for UI (menu/map/shop etc.) — populated at init.
+    void register_atlas_frame(const sf2::data::atlas_frame& fr, int tex_w, int tex_h, unsigned int gl_tex);
+    bool get_atlas_frame(const std::string& name, sf2::data::atlas_frame* out, int* tex_w, int* tex_h, unsigned int* gl_tex) const;
+    // Draws an atlas frame centered at (cx,cy) with optional scale. Returns false if frame missing.
+    bool draw_atlas_frame(const std::string& name, float cx, float cy, float scale, float alpha = 1.0f);
+
 private:
     void poll_input();
     void update_fixed(float dt);
@@ -196,6 +205,14 @@ private:
     std::unique_ptr<sf2::scene::Sprite> dojo_sprite_;
     std::unique_ptr<sf2::data::font> menu_font_;
     unsigned int font_tex_ = 0;
+    // UI atlas cache: frame name -> frame rect + tex size + GL tex.
+    struct AtlasEntry {
+        sf2::data::atlas_frame frame;
+        int tex_w = 0;
+        int tex_h = 0;
+        unsigned int gl_tex = 0;
+    };
+    std::unordered_map<std::string, AtlasEntry> atlas_cache_;
 
     // Fixed-timestep accumulator (the JS `Us`, L135).
     double acc_ = 0.0;

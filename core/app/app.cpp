@@ -73,13 +73,11 @@ std::string extracted_xml(const std::string& name) {
     throw std::runtime_error("extracted xml missing: " + path);
 }
 
-// Decodes an atlas texture by trying the decodable formats (webp first).
-// The UI atlases ship as ASTC ktx / crunch dds which the CPU pipeline
-// cannot decode — the caller falls back to a flat background in that case.
+// Decodes an atlas texture by trying all decodable formats (ktx ASTC, dds BCn, webp, png).
 bool decode_atlas_any(const std::string& base, sf2::data::Texture& out) {
     const std::string dir = std::filesystem::path(base).parent_path().string();
     const std::string stem = std::filesystem::path(base).filename().string();
-    for (const std::string& ext : {".webp", ".png", ".jpg"}) {
+    for (const std::string& ext : {".ktx", ".dds", ".webp", ".png", ".jpg"}) {
         for (const auto& entry : std::filesystem::directory_iterator(dir)) {
             const std::string name = entry.path().filename().string();
             if (name.rfind(stem + ".", 0) == 0 && entry.path().extension().string() == ext) {
@@ -90,6 +88,39 @@ bool decode_atlas_any(const std::string& base, sf2::data::Texture& out) {
         }
     }
     return false;
+}
+
+// Helper to load a TexturePacker atlas (json + sibling texture) under dir/prefix.
+static GLuint load_ui_atlas_bundle_impl(sf2::app::App& app, const std::string& dir, const std::string& prefix) {
+    std::string json_path;
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind(prefix + ".", 0) == 0 && entry.path().extension().string() == ".json") {
+            json_path = entry.path().string();
+            break;
+        }
+    }
+    if (json_path.empty()) return 0;
+    sf2::data::Texture tex;
+    if (!decode_atlas_any(dir + "/" + prefix, tex)) {
+        std::fprintf(stderr, "app: atlas texture missing for %s/%s\n", dir.c_str(), prefix.c_str());
+        return 0;
+    }
+    const GLuint gl = app.renderer().texture_for(prefix + "_atlas", tex);
+    if (gl == 0) return 0;
+    try {
+        const std::vector<std::uint8_t> jb = read_file_bytes(json_path);
+        const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+        for (const auto& fr : a.frames) {
+            app.register_atlas_frame(fr, a.w, a.h, gl);
+        }
+        std::fprintf(stdout, "[app] atlas %s/%s: %dx%d tex %dx%d %zu frames (tex %u)\n",
+                     dir.c_str(), prefix.c_str(), a.w, a.h, tex.w, tex.h, a.frames.size(), gl);
+        return gl;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "app: atlas parse failed %s: %s\n", json_path.c_str(), e.what());
+        return 0;
+    }
 }
 
 } // namespace
@@ -192,6 +223,20 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
     } catch (const std::exception& e) {
         std::fprintf(stderr, "app: font load failed: %s\n", e.what());
         menu_font_.reset();
+    }
+
+    // UI atlases (menu/map/shop/profile/etc.) — KTX ASTC decoded to RGBA.
+    try {
+        const std::string ui = res_root + "/ui";
+        const std::string mp = res_root + "/map";
+        load_ui_atlas_bundle_impl(*this, ui, "menu");
+        load_ui_atlas_bundle_impl(*this, ui, "shop");
+        load_ui_atlas_bundle_impl(*this, ui, "profile");
+        load_ui_atlas_bundle_impl(*this, ui, "misc");
+        load_ui_atlas_bundle_impl(*this, ui, "skills");
+        load_ui_atlas_bundle_impl(*this, mp, "buttons");
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "app: ui atlas load failed: %s\n", e.what());
     }
 
     screens_ = std::make_unique<ScreenManager>(*this);
@@ -435,6 +480,60 @@ void App::inject_key(int glfw_key, bool down) {
     if (screens_ != nullptr && screens_->top() != nullptr) {
         screens_->top()->on_key(glfw_key, down);
     }
+}
+
+void App::register_atlas_frame(const sf2::data::atlas_frame& fr, int tex_w, int tex_h, unsigned int gl_tex) {
+    AtlasEntry e;
+    e.frame = fr;
+    e.tex_w = tex_w;
+    e.tex_h = tex_h;
+    e.gl_tex = gl_tex;
+    atlas_cache_[fr.name] = std::move(e);
+    renderer_->texture_alias(fr.name, gl_tex);
+}
+
+bool App::get_atlas_frame(const std::string& name, sf2::data::atlas_frame* out, int* tex_w, int* tex_h, unsigned int* gl_tex) const {
+    auto it = atlas_cache_.find(name);
+    if (it == atlas_cache_.end()) return false;
+    if (out) *out = it->second.frame;
+    if (tex_w) *tex_w = it->second.tex_w;
+    if (tex_h) *tex_h = it->second.tex_h;
+    if (gl_tex) *gl_tex = it->second.gl_tex;
+    return true;
+}
+
+bool App::draw_atlas_frame(const std::string& name, float cx, float cy, float scale, float alpha) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!get_atlas_frame(name, &fr, &tw, &th, &gl)) return false;
+    sf2::scene::Sprite s;
+    s.texture_name = name;
+    s.frame_x = static_cast<float>(fr.x);
+    s.frame_y = static_cast<float>(fr.y);
+    s.frame_w = static_cast<float>(fr.w);
+    s.frame_h = static_cast<float>(fr.h);
+    s.tex_w = static_cast<float>(tw);
+    s.tex_h = static_cast<float>(th);
+    s.solid = false;
+    s.color_a = alpha;
+    if (fr.rotated) {
+        std::swap(s.frame_w, s.frame_h);
+    }
+    s.transform.set_pos(cx, cy);
+    s.transform.set_scale(scale, scale);
+    // UI is screen-space: use an identity camera (world == screen)
+    sf2::render::Camera ui_cam;
+    ui_cam.center_x = view_w_ * 0.5f;
+    ui_cam.center_y = view_h_ * 0.5f;
+    ui_cam.zoom = 1.0f;
+    ui_cam.view_w = static_cast<float>(view_w_);
+    ui_cam.view_h = static_cast<float>(view_h_);
+    ui_cam.arena_h = ui_cam.view_h;
+    ui_cam.arena_floor = 0.0f;
+    ui_cam.arena_center_x = ui_cam.center_x;
+    renderer_->draw_sprite(s, ui_cam);
+    return true;
 }
 
 bool App::draw_text(float x, float y, const std::string& text, float scale, float r, float g,

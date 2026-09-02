@@ -135,7 +135,14 @@ void decode_bc3_block(const std::uint8_t* src, std::uint8_t* dst) {
 } // namespace
 
 bool decode_dds(const std::uint8_t* data, std::size_t size, Texture& out) {
-    if (data == nullptr || size < 128 || rd32(data, 0) != kMagicDds) {
+    if (data == nullptr || size < 2) {
+        return false;
+    }
+    // Crunch CRN (Hx) — not BCn, return false so caller can try KTX.
+    if (data[0] == 0x48 && data[1] == 0x78) {
+        return false;
+    }
+    if (size < 128 || rd32(data, 0) != kMagicDds) {
         return false;
     }
     const std::uint32_t header_size = rd32(data, 4);

@@ -3,9 +3,9 @@
 // Texture decoding for the SF2 web-game assets.
 //
 // Decodes PNG/JPEG (stb_image), WebP (libwebp), DDS (BC1/BC2/BC3, CPU) and
-// KTX (ETC1/ETC2 RGB/RGBA, CPU) into 8-bit RGBA. AVIF and ASTC are NOT
-// CPU-decoded here: the game uploads those to the GPU compressed, and the
-// game always ships .webp fallbacks (see core/data/README.md, "Textures").
+// KTX (ETC1/ETC2 RGB/RGBA + ASTC 4x4..12x12, CPU) into 8-bit RGBA.
+// DDS CRN (Hx) is not CPU-decoded — the KTX ASTC sibling is used instead.
+// AVIF is not decoded (the game ships .webp where needed).
 //
 // All code in this module is portable C++17.
 
@@ -47,9 +47,8 @@ bool decode_webp(const std::uint8_t* data, std::size_t size, Texture& out);
 // completeness. See core/data/dds.cpp for the block format.
 bool decode_dds(const std::uint8_t* data, std::size_t size, Texture& out);
 
-// KTX (KTX1 container): ETC1 + ETC2 RGB/RGBA. The game's actual .ktx files
-// are ASTC (glInternalFormat 0x93B1/0x93B6/0x93B7/0x93BD); ASTC is not CPU
-// decoded here (deferred — see README). ETC decoders cover non-ASTC sources.
+// KTX (KTX1 container): ETC1 + ETC2 RGB/RGBA + ASTC (4x4..12x12, via astc_dec).
+// The game's .ktx files are ASTC (glInternalFormat 0x93B0..0x93BD).
 bool decode_ktx(const std::uint8_t* data, std::size_t size, Texture& out);
 
 } // namespace sf2::data

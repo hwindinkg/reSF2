@@ -71,6 +71,44 @@ void draw_flat_button(App& app, const std::string& label, float cx, float cy, fl
     (void)label;
 }
 
+// Tries to draw an atlas frame centered at (cx,cy) sized to (w,h). Returns true if drawn.
+bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy, float w, float h,
+                           float alpha = 1.0f) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl)) return false;
+    sf2::scene::Sprite s;
+    s.texture_name = frame_name;
+    s.frame_x = static_cast<float>(fr.x);
+    s.frame_y = static_cast<float>(fr.y);
+    s.frame_w = static_cast<float>(fr.w);
+    s.frame_h = static_cast<float>(fr.h);
+    s.tex_w = static_cast<float>(tw);
+    s.tex_h = static_cast<float>(th);
+    s.solid = false;
+    s.color_a = alpha;
+    if (fr.rotated) {
+        std::swap(s.frame_w, s.frame_h);
+    }
+    s.transform.set_pos(cx, cy);
+    if (fr.w > 0 && fr.h > 0) {
+        s.transform.set_scale(w / static_cast<float>(fr.w), h / static_cast<float>(fr.h));
+    }
+    // UI is screen-space: identity camera (world == screen)
+    sf2::render::Camera ui_cam;
+    ui_cam.center_x = 640.0f;
+    ui_cam.center_y = 360.0f;
+    ui_cam.zoom = 1.0f;
+    ui_cam.view_w = 1280.0f;
+    ui_cam.view_h = 720.0f;
+    ui_cam.arena_h = 720.0f;
+    ui_cam.arena_floor = 0.0f;
+    ui_cam.arena_center_x = 640.0f;
+    app.renderer().draw_sprite(s, ui_cam);
+    return true;
+}
+
 // Loads the map battle nodes from stages.xml (the JS `Ch` parser L1224).
 std::vector<MapScreen::Node> load_battle_nodes(float view_w, float view_h) {
     std::vector<MapScreen::Node> out;
@@ -307,18 +345,33 @@ void MainMenuScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     sf2::scene::Sprite* dojo = app.dojo_sprite();
     if (dojo != nullptr) {
-        ren.draw_sprite(*dojo, ren.current_camera());
+        sf2::render::Camera ui_cam;
+        ui_cam.center_x = kViewW * 0.5f;
+        ui_cam.center_y = kViewH * 0.5f;
+        ui_cam.zoom = 1.0f;
+        ui_cam.view_w = kViewW;
+        ui_cam.view_h = kViewH;
+        ui_cam.arena_h = kViewH;
+        ui_cam.arena_floor = 0.0f;
+        ui_cam.arena_center_x = kViewW * 0.5f;
+        ren.draw_sprite(*dojo, ui_cam);
     } else {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
     }
+    // Frame names for the 4 menu buttons (TexturePacker menu atlas)
+    const char* frame_names[4] = {"Dojo_normal", "Map_normal", "Shop_normal", "Profile_normal"};
+    const char* frame_hover[4] = {"Dojo_active", "Map_active", "Shop_active", "Profile_active"};
     for (std::size_t i = 0; i < buttons_.size(); ++i) {
         const Button& b = buttons_[i];
         const bool hovered = static_cast<int>(i) == hover_;
-        const float r = hovered ? 0.85f : (b.target == kScreenMap ? 0.72f : 0.45f);
-        const float g = hovered ? 0.72f : (b.target == kScreenMap ? 0.62f : 0.48f);
-        const float bl = hovered ? 0.35f : (b.target == kScreenMap ? 0.2f : 0.42f);
-        draw_flat_button(app, b.label, b.x, b.y, b.w, b.h, r, g, bl, hovered);
+        const char* fn = hovered ? frame_hover[i] : frame_names[i];
+        if (!try_draw_atlas_button(app, fn, b.x, b.y, b.w, b.h, 1.0f)) {
+            const float r = hovered ? 0.85f : (b.target == kScreenMap ? 0.72f : 0.45f);
+            const float g = hovered ? 0.72f : (b.target == kScreenMap ? 0.62f : 0.48f);
+            const float bl = hovered ? 0.35f : (b.target == kScreenMap ? 0.2f : 0.42f);
+            draw_flat_button(app, b.label, b.x, b.y, b.w, b.h, r, g, bl, hovered);
+        }
         (void)app.draw_text(b.x, b.y, b.label, 1.0f, 1.0f, 1.0f, 1.0f);
     }
 }
@@ -380,7 +433,16 @@ void MapScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     sf2::scene::Sprite* dojo = app.dojo_sprite();
     if (dojo != nullptr) {
-        ren.draw_sprite(*dojo, ren.current_camera());
+        sf2::render::Camera ui_cam;
+        ui_cam.center_x = kViewW * 0.5f;
+        ui_cam.center_y = kViewH * 0.5f;
+        ui_cam.zoom = 1.0f;
+        ui_cam.view_w = kViewW;
+        ui_cam.view_h = kViewH;
+        ui_cam.arena_h = kViewH;
+        ui_cam.arena_floor = 0.0f;
+        ui_cam.arena_center_x = kViewW * 0.5f;
+        ren.draw_sprite(*dojo, ui_cam);
     } else {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.08f, 0.1f, 0.14f, 1.0f);
@@ -388,16 +450,30 @@ void MapScreen::render_impl(App& app) {
     for (std::size_t i = 0; i < nodes_.size(); ++i) {
         const Node& n = nodes_[i];
         const bool hovered = static_cast<int>(i) == hover_;
-        const float r = hovered ? 0.9f : (n.active ? 0.6f : 0.3f);
-        const float g = hovered ? 0.5f : (n.active ? 0.4f : 0.3f);
-        const float b = hovered ? 0.3f : (n.active ? 0.25f : 0.3f);
         const float d = hovered ? 66.0f : 60.0f;
-        const float x0 = n.x - d / 2, y0 = n.y - d / 2;
-        const float verts[] = {x0, y0, x0 + d, y0, x0 + d, y0 + d, x0, y0, x0 + d, y0 + d, x0, y0 + d};
-        ren.draw_triangles(verts, 6, r, g, b, n.active ? 0.95f : 0.5f);
+        // Try textured BattleBtn frames (buttons atlas). Use a generic frame that exists for all nodes.
+        const char* tex_frame = hovered ? "BattleBtnActive/active_lynx" : "BattleBtnBase/base_lynx";
+        bool drawn = try_draw_atlas_button(app, tex_frame, n.x, n.y, d, d, n.active ? 1.0f : 0.6f);
+        if (!drawn) {
+            // Fallback: try any BattleBtn frame present
+            const char* fallbacks[] = {"BattleBtnBase/base_lynx", "BattleBtnActive/active_lynx", "BattleBtnBase/base_hermit"};
+            for (const char* fb : fallbacks) {
+                if (try_draw_atlas_button(app, fb, n.x, n.y, d, d, n.active ? 1.0f : 0.6f)) { drawn = true; break; }
+            }
+        }
+        if (!drawn) {
+            const float r = hovered ? 0.9f : (n.active ? 0.6f : 0.3f);
+            const float g = hovered ? 0.5f : (n.active ? 0.4f : 0.3f);
+            const float b = hovered ? 0.3f : (n.active ? 0.25f : 0.3f);
+            const float x0 = n.x - d / 2, y0 = n.y - d / 2;
+            const float verts[] = {x0, y0, x0 + d, y0, x0 + d, y0 + d, x0, y0, x0 + d, y0 + d, x0, y0 + d};
+            ren.draw_triangles(verts, 6, r, g, b, n.active ? 0.95f : 0.5f);
+        }
     }
-    // The BACK button (top-left).
-    draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    // The BACK button (top-left) — try textured misc frame, else flat.
+    if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1106,7 +1182,16 @@ void ShopScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     sf2::scene::Sprite* dojo = app.dojo_sprite();
     if (dojo != nullptr) {
-        ren.draw_sprite(*dojo, ren.current_camera());
+        sf2::render::Camera ui_cam;
+        ui_cam.center_x = kViewW * 0.5f;
+        ui_cam.center_y = kViewH * 0.5f;
+        ui_cam.zoom = 1.0f;
+        ui_cam.view_w = kViewW;
+        ui_cam.view_h = kViewH;
+        ui_cam.arena_h = kViewH;
+        ui_cam.arena_floor = 0.0f;
+        ui_cam.arena_center_x = kViewW * 0.5f;
+        ren.draw_sprite(*dojo, ui_cam);
     }
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
@@ -1120,13 +1205,28 @@ void ShopScreen::render_impl(App& app) {
         const float cx = x0 + col * dx;
         const float cy = y0 + row * dy;
         const bool hovered = static_cast<int>(i) == hover_;
-        const float r = hovered ? 0.75f : 0.45f;
-        const float g = hovered ? 0.6f : 0.35f;
-        const float b = hovered ? 0.3f : 0.2f;
-        draw_flat_button(app, items_[i].name, cx, cy, card_w, card_h, r, g, b, hovered);
+        // Try to draw a shop atlas icon as card background
+        bool drawn = false;
+        const char* shop_frames[] = {"attributes/body_armor", "attributes/head_armor", "attributes/critical_chance"};
+        for (const char* sf : shop_frames) {
+            if (try_draw_atlas_button(app, sf, cx, cy, card_w, card_h, 0.9f)) { drawn = true; break; }
+        }
+        if (!drawn) {
+            const float r = hovered ? 0.75f : 0.45f;
+            const float g = hovered ? 0.6f : 0.35f;
+            const float b = hovered ? 0.3f : 0.2f;
+            draw_flat_button(app, items_[i].name, cx, cy, card_w, card_h, r, g, b, hovered);
+        } else {
+            // Overlay label as flat small indicator (keep text)
+            const float lbl_w = 120.0f, lbl_h = 24.0f;
+            const float lx0 = cx - lbl_w/2, ly0 = cy + card_h/2 - 20;
+            const float lbl[] = {lx0, ly0, lx0+lbl_w, ly0, lx0+lbl_w, ly0+lbl_h, lx0, ly0, lx0+lbl_w, ly0+lbl_h, lx0, ly0+lbl_h};
+            ren.draw_triangles(lbl, 6, 0.0f, 0.0f, 0.0f, 0.6f);
+        }
     }
-    // The BACK button (top-left).
-    draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1215,7 +1315,16 @@ void EquipmentScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     sf2::scene::Sprite* dojo = app.dojo_sprite();
     if (dojo != nullptr) {
-        ren.draw_sprite(*dojo, ren.current_camera());
+        sf2::render::Camera ui_cam;
+        ui_cam.center_x = kViewW * 0.5f;
+        ui_cam.center_y = kViewH * 0.5f;
+        ui_cam.zoom = 1.0f;
+        ui_cam.view_w = kViewW;
+        ui_cam.view_h = kViewH;
+        ui_cam.arena_h = kViewH;
+        ui_cam.arena_floor = 0.0f;
+        ui_cam.arena_center_x = kViewW * 0.5f;
+        ren.draw_sprite(*dojo, ui_cam);
     }
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
