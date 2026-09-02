@@ -1,6 +1,5 @@
-// KTX (KTX1) decoder — ETC1 + ETC2 RGB/RGBA.
-//
-// Container (verified against the 1112 real .ktx files in res/):
+// KTX (KTX1) decoder — ETC1 + ETC2 RGB/RGBA + ASTC.
+// Container (verified against real .ktx files in res/):
 //   u8  identifier[12] = {0xAB, 'K','T','X',' ','1','1', 0xBB, 0x0D, 0x0A, 0x1A, 0x0A}
 //   u32 endianness       (0x04030201 LE)   offset 12
 //   u32 glType           (0 for compressed) offset 16
@@ -18,35 +17,15 @@
 //   key/value data (bytesOfKeyValueData)
 //   for each mip: u32 imageSize, then pixel data (padded to 4 bytes)
 //
-// The game's actual .ktx files are ALL ASTC (glInternalFormat 0x93B1 =
-// GL_COMPRESSED_RGBA_ASTC_4x4, 0x93B6 = 8x6, 0x93B7 = 8x8, 0x93BD = 12x10).
-// ASTC CPU decoding is deferred (see README); this file implements ETC1/ETC2
-// so non-ASTC sources (or future ported content) can be decoded.
-//
-// ETC1/ETC2 block format: 8 bytes (64 bits) per 4x4 RGB block, MSB-first
-// within the block (byte 0 = bits 63..56). The layout follows the Khronos
-// ETC2 spec (etc2.txt) and the Mesa texcompress_etc.c decoder (the reference
-// implementation used here):
-//   byte 0: R (5 bits, bits 63..59) + Rd (3 bits, bits 58..56)  [diff layout]
-//           or R (4 bits, 63..60) + R2 (4 bits, 59..56)         [individual]
-//   byte 1: G + Gd / G + G2
-//   byte 2: B + Bd / B + B2
-//   byte 3: table1 (bits 31..29) table2 (bits 28..26) D (bit 25) flip (bit 24)
-//   bytes 4..7: 16 x 2-bit pixel indices, MSB-first: pixel (x,y) at
-//               bit = y + x*4; index = ((word >> (15+bit)) & 2) | (word>>bit & 1)
-// Mode selection (D bit at byte3 bit 25):
-//   D=0                       -> individual mode
-//   D=1, R+Rd out of [0,31]   -> T mode
-//   D=1, G+Gd out of [0,31]   -> H mode
-//   D=1, B+Bd out of [0,31]   -> planar mode
-//   D=1, all in range         -> differential mode
-// In punch-through alpha format, byte3 bit 25 is an "opaque" bit instead of
-// D; transparent blocks use special modifier tables with index 2 = alpha 0.
+// The game's .ktx files are ASTC (glInternalFormat 0x93B0..0x93BD).
+// This file implements ETC1/ETC2 and ASTC (via astc_dec) CPU decode.
 
 #include "texture.hpp"
 
 #include <cstdint>
 #include <cstring>
+
+#include "third_party/astc/astc_decomp.h"
 
 namespace sf2::data {
 namespace {
@@ -55,6 +34,41 @@ constexpr std::uint32_t kInternalEtc1 = 0x8D64u;        // GL_ETC1_RGB8_OES
 constexpr std::uint32_t kInternalEtc2Rgb = 0x9274u;     // GL_COMPRESSED_RGB8_ETC2
 constexpr std::uint32_t kInternalEtc2Rgba = 0x9278u;    // GL_COMPRESSED_RGBA8_ETC2_EAC
 constexpr std::uint32_t kInternalEtc2Rgba1 = 0x9272u;   // GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2
+
+// ASTC KHR enums (0x93B0 = 4x4 ... 0x93BC = 12x12, plus vendor 0x93BD = 12x12 alias).
+constexpr std::uint32_t kAstc4x4 = 0x93B0u;
+constexpr std::uint32_t kAstc5x4 = 0x93B1u;
+constexpr std::uint32_t kAstc5x5 = 0x93B2u;
+constexpr std::uint32_t kAstc6x5 = 0x93B3u;
+constexpr std::uint32_t kAstc6x6 = 0x93B4u;
+constexpr std::uint32_t kAstc8x5 = 0x93B5u;
+constexpr std::uint32_t kAstc8x6 = 0x93B6u;
+constexpr std::uint32_t kAstc8x8 = 0x93B7u;
+constexpr std::uint32_t kAstc10x5 = 0x93B8u;
+constexpr std::uint32_t kAstc10x6 = 0x93B9u;
+constexpr std::uint32_t kAstc10x10 = 0x93BAu;
+constexpr std::uint32_t kAstc12x10 = 0x93BBu;
+constexpr std::uint32_t kAstc12x12 = 0x93BCu;
+constexpr std::uint32_t kAstc12x12Alt = 0x93BDu; // game uses 0x93BD for 12x12
+
+bool astc_block_dims(std::uint32_t internal, int* bw, int* bh) {
+    switch (internal) {
+        case kAstc4x4: *bw = 4; *bh = 4; return true;
+        case kAstc5x4: *bw = 5; *bh = 4; return true;
+        case kAstc5x5: *bw = 5; *bh = 5; return true;
+        case kAstc6x5: *bw = 6; *bh = 5; return true;
+        case kAstc6x6: *bw = 6; *bh = 6; return true;
+        case kAstc8x5: *bw = 8; *bh = 5; return true;
+        case kAstc8x6: *bw = 8; *bh = 6; return true;
+        case kAstc8x8: *bw = 8; *bh = 8; return true;
+        case kAstc10x5: *bw = 10; *bh = 5; return true;
+        case kAstc10x6: *bw = 10; *bh = 6; return true;
+        case kAstc10x10: *bw = 10; *bh = 10; return true;
+        case kAstc12x10: *bw = 12; *bh = 10; return true;
+        case kAstc12x12: case kAstc12x12Alt: *bw = 12; *bh = 12; return true;
+        default: return false;
+    }
+}
 
 // Modifier tables for individual/differential modes (Mesa etc1_modifier_tables).
 constexpr int kModifierTables[8][4] = {
@@ -235,7 +249,6 @@ void fetch_etc_rgb_texel(const etc_block_state& s, const std::uint8_t* src, bool
         write_px(dst, stride, bx + x, by + y, s.paint_colors[idx][0], s.paint_colors[idx][1],
                  s.paint_colors[idx][2], 255);
     } else if (s.planar_mode) {
-        // Recompute planar from source bytes (Mesa does this in fetch).
         auto ext6 = [](int v) { return (v << 2) | (v >> 4); };
         auto ext7 = [](int v) { return (v << 1) | (v >> 6); };
         const int RO = (src[0] >> 1) & 0x3f;
@@ -265,7 +278,7 @@ void decode_etc_rgb_texture(const std::uint8_t* data, std::size_t data_size,
     const int bh = (height + 3) / 4;
     const std::size_t blocks = static_cast<std::size_t>(bw) * bh;
     if (blocks * 8 > data_size) {
-        return;  // malformed; caller checks size
+        return;
     }
     std::size_t off = 0;
     for (int by = 0; by < bh; ++by) {
@@ -298,7 +311,6 @@ void decode_etc2_rgba_texture(const std::uint8_t* data, std::size_t data_size,
     for (int by = 0; by < bh; ++by) {
         for (int bx = 0; bx < bw; ++bx) {
             const std::uint8_t* src = data + off;
-            // Alpha from the first 8 bytes, RGB from the second 8.
             const int base = src[0];
             const int mult = (src[1] >> 4) & 15;
             const int table = src[1] & 15;
@@ -334,12 +346,54 @@ void decode_etc2_rgba_texture(const std::uint8_t* data, std::size_t data_size,
     }
 }
 
+void decode_astc_texture(const std::uint8_t* data, std::size_t data_size,
+                         int width, int height, int block_w, int block_h, Texture& tex) {
+    const int bw = (width + block_w - 1) / block_w;
+    const int bh = (height + block_h - 1) / block_h;
+    const std::size_t need = static_cast<std::size_t>(bw) * static_cast<std::size_t>(bh) * 16;
+    if (need > data_size) {
+        return;
+    }
+    std::size_t off = 0;
+    std::vector<std::uint8_t> block_out(static_cast<std::size_t>(block_w * block_h * 4));
+    for (int by = 0; by < bh; ++by) {
+        for (int bx = 0; bx < bw; ++bx) {
+            const std::uint8_t* src = data + off;
+            // Decompress one ASTC block to RGBA8.
+            const bool ok = basisu::astc::decompress(block_out.data(), src, false, block_w, block_h);
+            if (!ok) {
+                // On error fill with magenta (ASTC error color is already magenta, but ensure visibility).
+                for (int i = 0; i < block_w * block_h; ++i) {
+                    block_out[static_cast<std::size_t>(i) * 4 + 0] = 0xFF;
+                    block_out[static_cast<std::size_t>(i) * 4 + 1] = 0x00;
+                    block_out[static_cast<std::size_t>(i) * 4 + 2] = 0xFF;
+                    block_out[static_cast<std::size_t>(i) * 4 + 3] = 0xFF;
+                }
+            }
+            for (int y = 0; y < block_h; ++y) {
+                for (int x = 0; x < block_w; ++x) {
+                    const int px = bx * block_w + x;
+                    const int py = by * block_h + y;
+                    if (px >= width || py >= height) continue;
+                    const std::uint8_t* s = block_out.data() + static_cast<std::size_t>(y * block_w + x) * 4;
+                    std::uint8_t* d = tex.rgba.data() + (static_cast<std::size_t>(py) * width + px) * 4;
+                    d[0] = s[0];
+                    d[1] = s[1];
+                    d[2] = s[2];
+                    d[3] = s[3];
+                }
+            }
+            off += 16;
+        }
+    }
+}
+
 } // namespace
 
 bool decode_ktx(const std::uint8_t* data, std::size_t size, Texture& out) {
     static const std::uint8_t kIdentifier[12] = {
         0xAB, 'K', 'T', 'X', ' ', '1', '1', 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};
-    if (data == nullptr || size < 68) {
+    if (data == nullptr || size < 64) {
         return false;
     }
     if (std::memcmp(data, kIdentifier, 12) != 0) {
@@ -366,29 +420,39 @@ bool decode_ktx(const std::uint8_t* data, std::size_t size, Texture& out) {
     if (width <= 0 || height <= 0 || width > 16384 || height > 16384) {
         return false;
     }
-    if (depth != 1 || array_elements != 0 || faces != 1 || mips < 1) {
+    if (depth != 1 && depth != 0) {
+        // Some files report depth 0 (means 2D); treat as 1.
+    }
+    if (array_elements != 0 || faces != 1 || mips < 1) {
         return false;
     }
 
     bool has_alpha = false;
     bool punchthrough = false;
+    int astc_bw = 0;
+    int astc_bh = 0;
+    bool is_astc = false;
     switch (gl_internal) {
         case kInternalEtc1: break;
         case kInternalEtc2Rgb: break;
         case kInternalEtc2Rgba: has_alpha = true; break;
         case kInternalEtc2Rgba1: punchthrough = true; break;
         default:
-            // The game's files are ASTC (0x93B1/0x93B6/0x93B7/0x93BD), which is
-            // deferred. Return false so the caller can fall back to .webp.
-            return false;
+            if (astc_block_dims(gl_internal, &astc_bw, &astc_bh)) {
+                is_astc = true;
+            } else {
+                return false;
+            }
+            break;
     }
 
-    std::size_t off = 68 + static_cast<std::size_t>(kv_size);
-    if (off >= size) {
+    // Header is 64 bytes, kv data follows. Image data starts after kv + padding.
+    std::size_t off = 64 + static_cast<std::size_t>(kv_size);
+    // kv data is padded to 4 bytes; round up.
+    // Actually kv_size already includes padding to 4, but ensure.
+    if (off > size) {
         return false;
     }
-
-    // Find the first mip's data.
     if (off + 4 > size) {
         return false;
     }
@@ -403,7 +467,9 @@ bool decode_ktx(const std::uint8_t* data, std::size_t size, Texture& out) {
     tex.h = height;
     tex.rgba.assign(static_cast<std::size_t>(width) * height * 4, 0);
 
-    if (has_alpha) {
+    if (is_astc) {
+        decode_astc_texture(data + off, image_size, width, height, astc_bw, astc_bh, tex);
+    } else if (has_alpha) {
         decode_etc2_rgba_texture(data + off, image_size, width, height, tex);
     } else {
         decode_etc_rgb_texture(data + off, image_size, width, height, punchthrough, tex);

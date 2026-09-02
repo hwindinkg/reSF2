@@ -52,6 +52,10 @@ bool decode_texture_bytes(const std::uint8_t* data, std::size_t size,
         std::memcmp(data + 8, kWebp, 4) == 0) {
         return decode_webp(data, size, out);
     }
+    // Crunch CRN (Hx) — not directly decodable; caller should try KTX fallback.
+    if (size >= 2 && data[0] == kCrn[0] && data[1] == kCrn[1]) {
+        return false;
+    }
     if (std::memcmp(data, kDds, 4) == 0) {
         return decode_dds(data, size, out);
     }
@@ -59,7 +63,6 @@ bool decode_texture_bytes(const std::uint8_t* data, std::size_t size,
         return decode_ktx(data, size, out);
     }
     // AVIF is deferred: the game ships .webp fallbacks for avif-only content.
-    (void)kCrn;
     return false;
 }
 

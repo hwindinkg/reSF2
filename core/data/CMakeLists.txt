@@ -66,6 +66,7 @@ add_library(sf2_data STATIC
     ktx.cpp
     atlas.cpp
     font.cpp
+    third_party/astc/astc_decomp.cpp
 )
 target_include_directories(sf2_data PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # libwebp's public headers live in src/webp/; webpdecoder is the target.
