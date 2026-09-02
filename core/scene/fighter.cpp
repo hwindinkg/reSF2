@@ -407,11 +407,10 @@ void Fighter::advance(float dt) {
         active_intervals_.insert(n);
     }
 
-    // Root motion (JS `Al.ia` L582): the fighter's world position follows
-    // the animation's COM displacement. The JS physics body `oa.Fe().ma.x`
-    // is moved by the root-bone delta each frame; the native port applies
-    // the COM delta of the clip (scaled by facing) to world_x. The delta is
-    // taken per CLIP frame (the game integrates the root on Xh advance).
+    // Root motion (JS `Al.ia` L582 + Te.eda j8): the old native added the
+    // full clip-frame COM delta every 60 Hz tick — for sub=3 that counted
+    // the delta 3x per clip frame (2.4x/3.6x over-application). Fix: distribute
+    // the delta over subframes (single-application per clip frame).
     if (move_frame_ >= 0 && static_cast<std::size_t>(move_frame_) < current_clip_->frames.size()) {
         const float com_now = current_clip_->frames[static_cast<std::size_t>(move_frame_)].bones.empty()
                                   ? 0.0f
@@ -424,7 +423,8 @@ void Fighter::advance(float dt) {
                 current_clip_->frames[static_cast<std::size_t>(move_frame_ - 1)].bones.empty()
                     ? 0.0f
                     : current_clip_->frames[static_cast<std::size_t>(move_frame_ - 1)].bones[0].x;
-            world_x_ += (com_now - com_prev) * (facing_ < 0 ? -1.0f : 1.0f);
+            world_x_ += (com_now - com_prev) * (facing_ < 0 ? -1.0f : 1.0f) /
+                        static_cast<float>(sub);
         }
     }
 
@@ -478,33 +478,39 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     const auto& frame_bones = clip.frames[static_cast<std::size_t>(frame)].bones;
     const std::size_t nclip = std::min(frame_bones.size(), n);
 
-    // [FIX Phase 4a — pacing] The subframe phase (this->subframe_ / sub)
-    // interpolates between clip frame `frame` and `frame+1` (the game's
-    // `wu` interpolator over f, f+1, f+2 with `mo` subframe; linear
-    // between adjacent keys reproduces the keyframe motion at 3x).
-    const float t = static_cast<float>(subframe_) / static_cast<float>(std::max(1, sub_));
+    // [FIX root-motion] JS `wu` Bezier (Te.Gka/wu.f6a L1284-1286):
+    // P0=mid(a,b), P1=b, P2=mid(b,c) at t=(mo+1)/UM. Linear over-scales.
+    const int sub_i = std::max(1, sub_);
+    const float t_bez = (static_cast<float>(subframe_) + 1.0f) / static_cast<float>(sub_i);
+    const float omt = 1.0f - t_bez;
+    const float w0 = omt * omt;
+    const float w1 = 2.0f * omt * t_bez;
+    const float w2 = t_bez * t_bez;
     const auto& next_bones = clip.frames[std::min(frame + 1, static_cast<int>(clip.frames.size()) - 1)].bones;
     const std::size_t nnext = std::min(next_bones.size(), n);
-
-    // 1. Per-bone positions: interpolated clip absolute world positions for
-    //    bones 0..nclip-1, bind position for the rest (the game's eda leaves
-    //    those at their current — here initial bind — position).
+    const auto& next2_bones = clip.frames[std::min(frame + 2, static_cast<int>(clip.frames.size()) - 1)].bones;
+    const std::size_t nnext2 = std::min(next2_bones.size(), n);
     std::vector<float> px(n), py(n), pz(n);
     for (std::size_t i = 0; i < n; ++i) {
         if (i < nclip) {
-            px[i] = frame_bones[i].x;
-            py[i] = frame_bones[i].y;
-            pz[i] = frame_bones[i].z;
-            if (i < nnext) {
-                px[i] += (next_bones[i].x - frame_bones[i].x) * t;
-                py[i] += (next_bones[i].y - frame_bones[i].y) * t;
-                pz[i] += (next_bones[i].z - frame_bones[i].z) * t;
+            if (i < nnext && i < nnext2 && sub_i > 1) {
+                const float ax = frame_bones[i].x, ay = frame_bones[i].y, az = frame_bones[i].z;
+                const float bx = next_bones[i].x, by = next_bones[i].y, bz = next_bones[i].z;
+                const float cx = next2_bones[i].x, cy = next2_bones[i].y, cz = next2_bones[i].z;
+                const float p0x = (ax + bx) * 0.5f, p0y = (ay + by) * 0.5f, p0z = (az + bz) * 0.5f;
+                const float p2x = (bx + cx) * 0.5f, p2y = (by + cy) * 0.5f, p2z = (bz + cz) * 0.5f;
+                px[i] = w0 * p0x + w1 * bx + w2 * p2x;
+                py[i] = w0 * p0y + w1 * by + w2 * p2y;
+                pz[i] = w0 * p0z + w1 * bz + w2 * p2z;
+            } else if (i < nnext) {
+                const float t_lin = static_cast<float>(subframe_) / static_cast<float>(sub_i);
+                px[i] = frame_bones[i].x + (next_bones[i].x - frame_bones[i].x) * t_lin;
+                py[i] = frame_bones[i].y + (next_bones[i].y - frame_bones[i].y) * t_lin;
+                pz[i] = frame_bones[i].z + (next_bones[i].z - frame_bones[i].z) * t_lin;
+            } else {
+                px[i] = frame_bones[i].x; py[i] = frame_bones[i].y; pz[i] = frame_bones[i].z;
             }
-        } else {
-            px[i] = bones[i].x;
-            py[i] = bones[i].y;
-            pz[i] = bones[i].z;
-        }
+        } else { px[i] = bones[i].x; py[i] = bones[i].y; pz[i] = bones[i].z; }
     }
 
     // 2. MacroNodes not driven by the clip (index >= clip bone count) are the
