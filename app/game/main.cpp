@@ -142,6 +142,7 @@ struct HeadlessLoopDriver {
     int step_frame = 0;
     int last_seen = -1;
     bool clicked = false;       // the current step's click has been sent
+    bool next_clicked = false;  // the between-rounds NEXT click has been sent
     bool captured_menu = false;
     int guard = 0;
     bool finished = false;
@@ -160,6 +161,26 @@ struct HeadlessLoopDriver {
             std::fprintf(stdout, "[loop] screen %d (step %d/%d)\n", cur, step + 1,
                          kLoopStepCount);
             std::fflush(stdout);
+        }
+
+        // Between-rounds NEXT: while the top screen is the FightScreen
+        // waiting for the player (round_wait — a round ended; the next one
+        // only starts on the HUD Next button), click the button center so
+        // the fight can finish and reach the Results steps. Without this
+        // the fight holds in EndStance forever and the loop stalls.
+        sf2::app::Screen* top = app.screens().top();
+        const bool fight_waiting =
+            cur == kScreenFight && top != nullptr &&
+            static_cast<sf2::app::FightScreen*>(top)->round_wait();
+        if (fight_waiting && !next_clicked) {
+            float cx = 0.0f, cy = 0.0f;
+            static_cast<sf2::app::FightScreen*>(top)->next_button_center(cx, cy);
+            app.inject_click(cx, cy);
+            next_clicked = true;
+            std::fprintf(stdout, "[loop] round_wait -> NEXT click (%.0f, %.0f)\n", cx, cy);
+            std::fflush(stdout);
+        } else if (!fight_waiting) {
+            next_clicked = false;  // re-arm once the fight leaves round_wait
         }
 
         // Phase A: wait for the target screen, then click.

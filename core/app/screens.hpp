@@ -157,6 +157,15 @@ public:
     // (the stretched/on-screen check). Defined in screens.cpp.
     void verify_fight() const;
 
+    // The between-rounds HUD "Next" button (JS `vhb` L410 case 1): the
+    // fight holds in EndStance until the player confirms the next round.
+    // `round_wait()` mirrors FightController::round_wait(); the button is
+    // drawn + clickable only while it is true. `next_button_center` returns
+    // the button's screen center (the position render_impl draws it at) —
+    // the headless-loop driver injects its click there.
+    bool round_wait() const;
+    void next_button_center(float& cx, float& cy) const;
+
     // [trace, Phase 0] Arms the FightController's per-frame pose dump
     // (the first `frames` fight frames -> `path` JSONL). Defined in
     // screens.cpp (needs the full FightController type).

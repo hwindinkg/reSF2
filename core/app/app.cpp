@@ -453,10 +453,12 @@ void App::render_frame() {
 
 void App::run_one_frame() {
     glfwPollEvents();
-    poll_input();
 
-    // Auto-click before the fixed-step update so the screen sees the
-    // pressed edge this frame. Stage 0: click the FIGHT button on the
+    // Auto-click BEFORE poll_input: inject_click arms a pending click whose
+    // pressed edge fires on the FIRST poll (steps == 3). Injection after
+    // poll_input missed that edge — the first poll saw steps already
+    // decremented to 2, so `pressed` never became true and the injected
+    // click was a silent no-op. Stage 0: click the FIGHT button on the
     // boot screen (the Dojo home — its FIGHT button starts the training
     // fight). Stage 1 (after the map is up): click the Training node.
     if (auto_click_) {
@@ -470,6 +472,8 @@ void App::run_one_frame() {
             auto_click_stage_ = 2;
         }
     }
+
+    poll_input();
 
     const double now = glfwGetTime();
     double dt = now - last_time_;
