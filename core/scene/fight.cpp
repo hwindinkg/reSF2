@@ -418,6 +418,7 @@ void FightController::enter_start_stance() {
     round_live_ = false;
     start_stance_done_ = false;
     start_stance_frames_ = 0;   // reset so every round re-plays the intro
+    start_buffer_filled_ = false;  // fresh round, empty round-start buffer
 }
 
 // JS `Rkb` (L410): phase 2 — the round goes live (HUD play() sets
@@ -440,6 +441,16 @@ void FightController::enter_fight() {
     sample_idle(enemy_);
     rebuild_body(player_);
     rebuild_body(enemy_);
+
+    // JS `llb` (L429): replay the StartStance input buffer as if the player
+    // pressed NOW — `WC != -1 && (c.yJa(c.WC), c.WC = -1)`. The buffered tap
+    // joins the player's key buffer; the next update_fighter picks it up via
+    // try_select_move (the manual input path), so the press made before the
+    // round is not lost.
+    if (start_buffer_filled_) {
+        player_.fighter.input(start_buffer_key_, press_type::tap);
+        start_buffer_filled_ = false;
+    }
 }
 
 // JS `i4a` (L409): phase 3 — the round's EndStance (results shown).
@@ -520,9 +531,22 @@ void FightController::apply_round_result(round_result result, const FightFighter
     const bool battle_end = w.rounds_won >= round_.length;    if (battle_end) {
         end_battle(w);
     } else {
-        between_rounds_recover();
-        round_start();
+        // JS `Onb` (L411-412): the next round does NOT start automatically —
+        // the round ends into EndStance and the HOST waits for the player's
+        // "Next" (JS: the HUD button -> `vhb` case 1 -> `Z2()`). The
+        // recovery + round start happen in next_round_requested().
+        round_wait_ = true;
     }
+}
+
+// JS `vhb` (L410) case 1 -> `Z2()` (L408): the HUD "Next" button pressed —
+// when the host is waiting between rounds, run the recovery and start the
+// next round. No-op while a round is live.
+void FightController::next_round_requested() {
+    if (!round_wait_) return;
+    round_wait_ = false;
+    between_rounds_recover();
+    round_start();
 }
 
 // JS `bea` (L413): the battle end — the winner is fixed, the fight stops.
@@ -567,7 +591,18 @@ void FightController::rebuild_body(FightFighter& f) {
 }
 
 void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_type press) {
-    if (phase_ != fight_phase::fight) return;  // JS: input only in phase 2
+    // JS `ca.N0a` (L426): in phase 1 (StartStance) a PRESS goes into the
+    // round's single-slot input buffer `WC` (the last press wins; it is
+    // replayed by `llb` when the fight starts). In phase 2 the press is
+    // buffered into the fighter directly (`eu==2 && b.yJa(a)`).
+    if (phase_ == fight_phase::start_stance) {
+        if (press == press_type::tap) {
+            start_buffer_key_ = key;
+            start_buffer_filled_ = true;
+        }
+        return;  // holds/releases during the intro are not moves — ignore
+    }
+    if (phase_ != fight_phase::fight) return;  // JS: input only in phases 1/2
     player_.fighter.input(key, press);
 }
 

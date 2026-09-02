@@ -384,6 +384,13 @@ public:
     int phase() const { return static_cast<int>(phase_); }
     const RoundState& round() const { return round_; }
     bool battle_over() const { return battle_over_; }
+    // JS `vhb` (L410) case 1 -> `Z2()`: the HUD "Next" button. When a round
+    // has ended and the host is waiting between rounds (round_wait_), runs
+    // the recovery and starts the next round. No-op while a round is live.
+    void next_round_requested();
+    // JS: the between-round wait gate — true after a round ends until the
+    // player requests the next round (the HUD Next button / `vhb` L410).
+    bool round_wait() const { return round_wait_; }
     // The battle winner (null until the battle ends).
     const FightFighter* winner() const { return winner_; }
     const std::vector<RoundOutcome>& round_history() const { return history_; }
@@ -420,6 +427,13 @@ private:
     const FightFighter* winner_ = nullptr;
     bool auto_attack_ = false;     // the demo's simple auto-attack driver
     bool round_live_ = false;      // JS `h9` — a round is in progress
+    bool round_wait_ = false;      // JS: the host waits for the player's
+                                   // Next between rounds (vhb L410 -> Z2)
+    // The StartStance input buffer (JS `wd.WC` L426 + `llb` L429): ONE slot
+    // — the LAST press during phase 1 (StartStance) wins; it is replayed
+    // when the fight starts (enter_fight) as if the player pressed now.
+    sf2::scene::key_type start_buffer_key_ = sf2::scene::key_type::up;
+    bool start_buffer_filled_ = false;
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
     int start_stance_frames_ = 0;  // phase 1 hold counter
     int end_stance_frames_ = 0;    // phase 3 hold (the FIGHT!/KO banner)
