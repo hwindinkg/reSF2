@@ -373,8 +373,9 @@ int main(int argc, char** argv) {
         // [trace, Phase 0] Clip dump: find the named clip in the loaded anim
         // archive and write it as 1/16 fixed-point ints (the source i16/16
         // format — multiplying the parsed floats back by 16 recovers the
-        // exact ints) to reference/traces/native_clip_<name>.json. No fight
-        // runs; exit 0 after the file is written.
+        // exact ints) to reference/traces/native_clip_<name>.json.
+        // The ints use JS Math.round parity (floor(x*16+0.5): half toward
+        // +inf). No fight runs; exit 0 after the file is written.
         const auto& clips = app.fight_assets().clips;
         const auto it = clips.find(dump_clip);
         if (it == clips.end()) {
@@ -400,9 +401,9 @@ int main(int argc, char** argv) {
             for (std::size_t bi = 0; bi < bones.size(); ++bi) {
                 const sf2::data::anim_keyframe& k = bones[bi];
                 std::fprintf(out, "%s[%d,%d,%d]", bi == 0 ? "" : ",",
-                             static_cast<int>(std::lround(k.x * 16.0f)),
-                             static_cast<int>(std::lround(k.y * 16.0f)),
-                             static_cast<int>(std::lround(k.z * 16.0f)));
+                             static_cast<int>(std::floor(k.x * 16.0f + 0.5f)),
+                             static_cast<int>(std::floor(k.y * 16.0f + 0.5f)),
+                             static_cast<int>(std::floor(k.z * 16.0f + 0.5f)));
             }
             std::fprintf(out, "]");
         }

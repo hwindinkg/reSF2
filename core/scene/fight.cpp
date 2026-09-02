@@ -802,8 +802,10 @@ void FightController::set_pose_dump(const std::string& path, int frames) {
 
 // One JSONL line per frame (reference/traces/native_pose.jsonl contract):
 // {"t":"frame","f":..,"phase":..,"round":..,"timer":..,"cam":{..},
-//  "fighters":[Me, Enemy]} — Me first, then the enemy. Read-only over the
-// simulation: nothing here mutates the fight state.
+//  "fighters":[Me, Enemy]} — Me first, then the enemy. `timer` = the elapsed
+// round seconds (int(round_.time)) — the JS `frameJson` basis (round.time),
+// NOT the HUD countdown (gma - time). Read-only over the simulation:
+// nothing here mutates the fight state.
 void FightController::dump_pose_frame() {
     if (pose_dump_frames_ <= 0) return;
     if (pose_dump_file_ == nullptr) {
@@ -820,17 +822,33 @@ void FightController::dump_pose_frame() {
     std::fprintf(pose_dump_file_,
                  "{\"t\":\"frame\",\"f\":%d,\"phase\":%d,\"round\":%d,\"timer\":%d,"
                  "\"cam\":{\"cx\":%.6f,\"cy\":%.6f,\"zoom\":%.6f},\"fighters\":[",
-                 frame_, phase(), round_.number, hud_timer(),
+                 frame_, phase(), round_.number, static_cast<int>(round_.time),
                  camera_.center_x, camera_.center_y, camera_.zoom);
     for (int i = 0; i < 2; ++i) {
         const Fighter& f = fighters[i]->fighter;
         const std::vector<float>& pos = f.positions();
+        // The clip identifier (JS `da.Ua.name`): the ARCHIVE clip name —
+        // MoveDef::file_name (the XML FileName) minus any ".bytes" suffix
+        // (fighter.cpp strips the same suffix before the archive lookup),
+        // falling back to the move label when no file is attached. The
+        // mirror variant (if any) is reflected in `fx`; the clip is the
+        // archive name of the clip actually playing.
+        std::string clip_name;
+        if (const sf2::scene::MoveDef* m = f.current_move()) {
+            clip_name = m->file_name;
+            const std::string suffix = ".bytes";
+            if (clip_name.size() > suffix.size() &&
+                clip_name.compare(clip_name.size() - suffix.size(), suffix.size(),
+                                  suffix) == 0) {
+                clip_name = clip_name.substr(0, clip_name.size() - suffix.size());
+            }
+            if (clip_name.empty()) clip_name = m->name;
+        }
         std::fprintf(pose_dump_file_,
                      "%s{\"id\":\"%s\",\"x\":%.3f,\"y\":%.3f,\"fx\":%d,\"clip\":\"%s\","
                      "\"cf\":%d,\"sub\":%d,\"subn\":%d,\"bones\":[",
                      i == 0 ? "" : ",", i == 0 ? "Me" : "Enemy",
-                     f.world_x(), f.world_y(), f.facing(),
-                     f.current_move() != nullptr ? f.current_move()->name.c_str() : "",
+                     f.world_x(), f.world_y(), f.facing(), clip_name.c_str(),
                      f.move_frame(), f.subframe(), f.sub());
         for (std::size_t b = 0; b + 1 < pos.size(); b += 2) {
             std::fprintf(pose_dump_file_, "%s[%.3f,%.3f]", b == 0 ? "" : ",", pos[b],
