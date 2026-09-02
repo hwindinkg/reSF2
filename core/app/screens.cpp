@@ -871,51 +871,20 @@ void FightScreen::render_impl(App& app) {
     // center at 980, Io = +149 -> the parallax is a small, correct shift.
     camera.arena_center_x = assets.dojo.arena_width() * 0.5f;
     ren.begin_frame(camera);
-    for (const auto& layer : assets.dojo.layers()) {
-        assets.dojo.render_layer(ren, *layer, camera);
-    }
+    // [fix(render): arena layer order] The original game draws the fighters
+    // INSIDE the ModelsViewer (Type=2) layer — background layers first, then
+    // the fighters, then every layer AFTER the ModelsViewer (the floor /
+    // arena sides / dust / glow / pixel_1 vignette) ON TOP of the fighters
+    // (JS_RENDER §7, "Что у нас не так" #1). The old code drew ALL layers
+    // before the fighters, so the floor rendered UNDER their feet — the
+    // broken "arena behind the fighters" look.
+    const std::size_t fighter_layer = assets.dojo.fighter_layer();
+    assets.dojo.render_layers(ren, camera, 0, fighter_layer);  // background (parallax)
 
-    // [Phase A4 — fighter shadow] The dojo oracle draws a dark semi-
-    // transparent ellipse under each fighter (the standing shadow). It is a
-    // WORLD object: positioned at the figure's feet world line and projected
-    // through the fight camera, so it follows the fighter (not the camera).
-    // Drawn right after the floor, BEFORE the fighter body (capsules +
-    // mesh), so the black silhouette sits on top of its shadow.
-    auto draw_fighter_shadow = [&camera, &ren](const sf2::scene::FightFighter& f) {
-        const sf2::scene::Fighter& fighter = f.fighter;
-        float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
-        fighter.triangle_bbox(min_x, min_y, max_x, max_y);
-        const float bw = max_x - min_x;
-        // Ellipse half-width = half the figure's width (the shadow is the
-        // figure's spread on the floor); flattened ~5:1 vertically so it
-        // reads as a ground contact, not a disc.
-        const float rx = std::max(8.0f, bw * 0.5f);
-        const float ry = std::max(2.5f, rx * 0.22f);
-        const float cx = (min_x + max_x) * 0.5f;
-        const float cy = max_y;  // the feet line (world)
-        const float sx = camera.world_to_screen_x(cx, 1.0f);
-        const float sy = camera.world_to_screen_y(cy);
-        const float rxs = rx * camera.zoom;
-        const float rys = ry * camera.zoom;
-        constexpr int kShadowSegments = 16;
-        constexpr float kPi = 3.14159265358979323846f;
-        std::vector<float> disc;
-        disc.reserve(static_cast<std::size_t>(kShadowSegments) * 6);
-        const float step = 2.0f * kPi / static_cast<float>(kShadowSegments);
-        for (int s = 0; s < kShadowSegments; ++s) {
-            const float a0 = static_cast<float>(s) * step;
-            const float a1 = static_cast<float>(s + 1) * step;
-            disc.push_back(sx);
-            disc.push_back(sy);
-            disc.push_back(sx + std::cos(a0) * rxs);
-            disc.push_back(sy + std::sin(a0) * rys);
-            disc.push_back(sx + std::cos(a1) * rxs);
-            disc.push_back(sy + std::sin(a1) * rys);
-        }
-        ren.draw_triangles(disc.data(), disc.size() / 2, 0.0f, 0.0f, 0.0f, 0.35f);
-    };
-    draw_fighter_shadow(fight_->player());
-    draw_fighter_shadow(fight_->enemy());
+    // [fix(render): remove fake shadow] The oracle JS draws NO per-fighter
+    // shadow (JS_RENDER §3.2: "в JS НЕТ пер-бойцовской тени"). The old
+    // procedural black ellipse (the A4 commit 84269826) was a native
+    // invention — the silhouettes stand straight on the floor line.
 
     auto project = [&camera](const std::vector<float>& v) {
         std::vector<float> out(v.size());
@@ -1033,6 +1002,18 @@ void FightScreen::render_impl(App& app) {
                        fight_->player().fighter.color_g(), fight_->player().fighter.color_b());
     ren.draw_triangles(ev.data(), ev.size() / 2, fight_->enemy().fighter.color_r(),
                        fight_->enemy().fighter.color_g(), fight_->enemy().fighter.color_b());
+
+    // [fix(render): arena layer order] The foreground layers — the ones the
+    // params XML places AFTER the ModelsViewer (Type=2) fighter layer: the
+    // dojo floor (`dojo_floor_1/2`), the arena side walls, the punch-bag
+    // holder and the pixel_1 vignette — draw ON TOP of the fighters, exactly
+    // like the original's `_0007_arena` / dust / glow (JS_RENDER §7).
+    // Fall back to rendering nothing extra when the location has no
+    // fighter layer (fighter_layer == npos already drew every layer above).
+    const std::size_t n_layers = assets.dojo.layers().size();
+    if (fighter_layer != sf2::scene::LocationScene::npos) {
+        assets.dojo.render_layers(ren, camera, fighter_layer + 1, n_layers);
+    }
 
     // --- HUD Phase A2: HealthBar frames + bitmap-font timer/rounds (1:1 original) ---
     // Frames: fight/ui.json -> HealthBar_Empty (bg), HealthBar_Full (player fill),
