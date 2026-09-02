@@ -988,46 +988,108 @@ void FightScreen::render_impl(App& app) {
     ren.draw_triangles(ev.data(), ev.size() / 2, fight_->enemy().fighter.color_r(),
                        fight_->enemy().fighter.color_g(), fight_->enemy().fighter.color_b());
 
-    // The fight HUD (flat bars).
-    auto draw_bar = [&](float x, float y, float w, float h, float ratio,
-                        std::uint32_t color) {
-        float verts[12] = {x, y, x + w * ratio, y, x, y + h,
-                           x + w * ratio, y, x + w * ratio, y + h, x, y + h};
-        ren.draw_triangles(verts, 6, ((color >> 16) & 0xFF) / 255.0f,
-                           ((color >> 8) & 0xFF) / 255.0f, (color & 0xFF) / 255.0f, 0.95f);
-    };
-    const float bar_w = 440.0f, bar_h = 16.0f, bar_y = 60.0f;
-    const float p_ratio =
-        fight_->player().max_hp > 0.0f ? fight_->player().hp / fight_->player().max_hp : 0.0f;
-    const float e_ratio =
-        fight_->enemy().max_hp > 0.0f ? fight_->enemy().hp / fight_->enemy().max_hp : 0.0f;
-    draw_bar(60.0f, bar_y, bar_w, bar_h, p_ratio, 0x20D020);
-    draw_bar(kViewW - 60.0f - bar_w, bar_y, bar_w, bar_h, e_ratio, 0x4020E0);
+    // --- HUD Phase A2: HealthBar frames + bitmap-font timer/rounds (1:1 original) ---
+    // Frames: fight/ui.json -> HealthBar_Empty (bg), HealthBar_Full (player fill),
+    //          HealthBarBlue_Full (enemy fill), HealthBar_Hit/Blue_Hit (damage), Round_Done/Undone.
+    // JS Sf.layout (L2036) for 1280x720: d=1.5, e=1.1, c=min(W,H)/2/675*g,
+    // g=1+(d-1)/0.5*0.1=1.1, f=c0*0.07 -> c=0.5867, bar centers =
+    // W*0.5 +/- 520*c*e, bar y = P + 150*c + f*g. Bar frame h = 43 (atlas),
+    // on-screen h = 43*c.
+    const float bar_w = 440.0f, bar_h = 25.0f, bar_y = 115.7f;
+    const float bar_cx_player = kViewW * 0.5f - 520.0f * 0.5867f * 1.1f;
+    const float bar_cx_enemy = kViewW * 0.5f + 520.0f * 0.5867f * 1.1f;
+    const float p_ratio = fight_->player().max_hp > 0.0f
+                              ? std::clamp(fight_->player().hp / fight_->player().max_hp, 0.0f, 1.0f)
+                              : 0.0f;
+    const float e_ratio = fight_->enemy().max_hp > 0.0f
+                              ? std::clamp(fight_->enemy().hp / fight_->enemy().max_hp, 0.0f, 1.0f)
+                              : 0.0f;
 
+    auto draw_hp_bar = [&](float x, float y, float w, float h, float ratio,
+                           const char* fill_frame) {
+        // Background: HealthBar_Empty stretched to full width
+        if (!app.draw_atlas_rect("HealthBar_Empty", x, y, w, h, 1.0f)) {
+            // Fallback flat dark bg
+            const float bg[] = {x, y, x + w, y, x, y + h, x + w, y, x + w, y + h, x, y + h};
+            ren.draw_triangles(bg, 6, 0.12f, 0.12f, 0.12f, 0.92f);
+        }
+        if (ratio > 0.001f) {
+            const float fw = w * ratio;
+            if (!app.draw_atlas_rect(fill_frame, x, y, fw, h, 1.0f)) {
+                const bool is_blue = std::string(fill_frame).find("Blue") != std::string::npos;
+                const float r = is_blue ? 0.25f : 0.16f;
+                const float g = is_blue ? 0.45f : 0.82f;
+                const float b = is_blue ? 0.92f : 0.16f;
+                const float fg[] = {x, y, x + fw, y, x, y + h, x + fw, y, x + fw, y + h, x, y + h};
+                ren.draw_triangles(fg, 6, r, g, b, 0.96f);
+            }
+        }
+        // thin border over bar for readability
+        const float br = 1.0f;
+        const float top[] = {x - br, y - br, x + w + br, y - br, x - br, y,
+                             x + w + br, y - br, x + w + br, y, x - br, y};
+        const float bot[] = {x - br, y + h, x + w + br, y + h, x - br, y + h + br,
+                             x + w + br, y + h, x + w + br, y + h + br, x - br, y + h + br};
+        ren.draw_triangles(top, 6, 0.0f, 0.0f, 0.0f, 0.85f);
+        ren.draw_triangles(bot, 6, 0.0f, 0.0f, 0.0f, 0.85f);
+    };
+
+    draw_hp_bar(bar_cx_player - bar_w * 0.5f, bar_y, bar_w, bar_h, p_ratio, "HealthBar_Full");
+    draw_hp_bar(bar_cx_enemy - bar_w * 0.5f, bar_y, bar_w, bar_h, e_ratio,
+                "HealthBarBlue_Full");
+
+    // Timer — bitmap-font centered (Sf.layout: top-center). Uses fight/digits.fnt
+    // (fallback to ui/font-en). Scale tuned so ~80px glyph -> ~30px on HUD.
     const int timer =
         fight_->round().gma - static_cast<int>(std::ceil(fight_->round().time));
     const std::string tstr = std::to_string(std::max(0, timer));
-    float tx = kViewW * 0.5f - tstr.size() * 20.0f;
-    for (char ch : tstr) {
-        float verts[12] = {tx, 30.0f, tx + 18.0f, 30.0f, tx, 58.0f,
-                           tx + 18.0f, 30.0f, tx + 18.0f, 58.0f, tx, 58.0f};
-        ren.draw_triangles(verts, 6, 1.0f, 1.0f, 1.0f, 0.95f);
-        tx += 22.0f;
-        (void)ch;
+    {
+        const sf2::data::font* fnt = app.digits_font() ? app.digits_font() : app.menu_font();
+        unsigned int tex = app.digits_font() ? app.digits_texture() : app.font_texture();
+        if (fnt != nullptr && tex != 0) {
+            // digits.fnt glyphs are ~80px tall; JS fontSize = 120*c = 70px
+            // (Sf.layout: Kp.D = Id.node.ra - 120*c), so ~0.75 scale.
+            const float scale = (fnt == app.digits_font()) ? 0.75f : 0.9f;
+            // shadow (black) slightly offset, then white foreground
+            const float ty = 44.0f;
+            app.draw_text_centered(*fnt, tex, kViewW * 0.5f + 1.8f, ty + 1.8f, tstr, scale, 0.0f, 0.0f,
+                                   0.0f);
+            app.draw_text_centered(*fnt, tex, kViewW * 0.5f, ty, tstr, scale, 1.0f, 0.95f, 0.75f);
+        } else {
+            // fallback quads (should not happen)
+            float tx = kViewW * 0.5f - tstr.size() * 20.0f;
+            for (char ch : tstr) {
+                float verts[12] = {tx, 18.0f, tx + 18.0f, 18.0f, tx, 46.0f,
+                                   tx + 18.0f, 18.0f, tx + 18.0f, 46.0f, tx, 46.0f};
+                ren.draw_triangles(verts, 6, 1.0f, 1.0f, 1.0f, 0.95f);
+                tx += 22.0f;
+                (void)ch;
+            }
+        }
     }
 
+    // Rounds — Round_Done / Round_Undone atlas pips (Er layout), fallback to font digits
     const int rounds_total = fight_->round().length;
     for (int i = 0; i < rounds_total; ++i) {
         const bool p_done = i < fight_->player().rounds_won;
-        const float px = 90.0f + static_cast<float>(i) * 26.0f;
-        float dv[12] = {px, 86.0f, px + 16.0f, 86.0f, px, 102.0f,
-                        px + 16.0f, 86.0f, px + 16.0f, 102.0f, px, 102.0f};
-        ren.draw_triangles(dv, 6, p_done ? 0.2f : 0.35f, p_done ? 0.8f : 0.35f,
-                           p_done ? 0.2f : 0.35f, 1.0f);
-        const float ex = kViewW - 90.0f - static_cast<float>(rounds_total - 1 - i) * 26.0f;
-        float ev2[12] = {ex, 86.0f, ex + 16.0f, 86.0f, ex, 102.0f,
-                         ex + 16.0f, 86.0f, ex + 16.0f, 102.0f, ex, 102.0f};
-        ren.draw_triangles(ev2, 6, 0.35f, 0.8f, 0.35f, 1.0f);
+        const bool e_done = i < fight_->enemy().rounds_won;
+        const char* p_frame = p_done ? "Round_Done" : "Round_Undone";
+        const char* e_frame = e_done ? "Round_Done" : "Round_Undone";
+        const float round_y = bar_y + bar_h + 12.0f;
+        const float px = 78.0f + static_cast<float>(i) * 22.0f;
+        const float ex = kViewW - 78.0f - 18.0f - static_cast<float>(i) * 22.0f;
+        if (!app.draw_atlas_rect(p_frame, px, round_y, 18.0f, 18.0f, 1.0f)) {
+            float dv[12] = {px, round_y, px + 16.0f, round_y, px, round_y + 18.0f,
+                            px + 16.0f, round_y, px + 16.0f, round_y + 18.0f, px, round_y + 18.0f};
+            ren.draw_triangles(dv, 6, p_done ? 0.18f : 0.32f, p_done ? 0.92f : 0.32f,
+                               p_done ? 0.18f : 0.32f, 1.0f);
+        }
+        if (!app.draw_atlas_rect(e_frame, ex, round_y, 18.0f, 18.0f, 1.0f)) {
+            float ev2[12] = {ex, round_y, ex + 16.0f, round_y, ex, round_y + 18.0f,
+                             ex + 16.0f, round_y, ex + 16.0f, round_y + 18.0f, ex, round_y + 18.0f};
+            ren.draw_triangles(ev2, 6, e_done ? 0.18f : 0.32f, e_done ? 0.92f : 0.32f,
+                               e_done ? 0.18f : 0.32f, 1.0f);
+        }
     }
 }
 

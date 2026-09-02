@@ -220,9 +220,50 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
         } else {
             std::fprintf(stderr, "app: font page png unavailable\n");
         }
+        std::fprintf(stdout, "[app] menu font: %zu chars %dx%d tex %u\n",
+                     menu_font_->chars.size(), menu_font_->scale_w, menu_font_->scale_h,
+                     font_tex_);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "app: font load failed: %s\n", e.what());
         menu_font_.reset();
+    }
+
+    // Fight HUD fonts: digits (timer) + round (round label). The .fnt page
+    // name is e.g. "digits_0.png" — the real file is digits.<hash>.png.
+    try {
+        const std::string fight = res_root + "/fight";
+        for (const auto& entry : std::filesystem::directory_iterator(fight)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("digits.", 0) == 0 && entry.path().extension() == ".fnt") {
+                const std::vector<std::uint8_t> b = read_file_bytes(entry.path().string());
+                digits_font_ = std::make_unique<sf2::data::font>(sf2::data::font_parse(b.data(), b.size()));
+                sf2::data::Texture tex;
+                if (decode_atlas_any(fight + "/digits", tex)) {
+                    digits_tex_ = renderer_->texture_for("digits_font", tex);
+                    std::fprintf(stdout, "[app] digits font: %zu chars %dx%d tex %u (%s)\n",
+                                 digits_font_->chars.size(), digits_font_->scale_w,
+                                 digits_font_->scale_h, digits_tex_, name.c_str());
+                }
+                break;
+            }
+        }
+        for (const auto& entry : std::filesystem::directory_iterator(fight)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("round.", 0) == 0 && entry.path().extension() == ".fnt") {
+                const std::vector<std::uint8_t> b = read_file_bytes(entry.path().string());
+                round_font_ = std::make_unique<sf2::data::font>(sf2::data::font_parse(b.data(), b.size()));
+                sf2::data::Texture tex;
+                if (decode_atlas_any(fight + "/round", tex)) {
+                    round_tex_ = renderer_->texture_for("round_font", tex);
+                    std::fprintf(stdout, "[app] round font: %zu chars %dx%d tex %u (%s)\n",
+                                 round_font_->chars.size(), round_font_->scale_w,
+                                 round_font_->scale_h, round_tex_, name.c_str());
+                }
+                break;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "app: fight font load failed: %s\n", e.what());
     }
 
     // UI atlases (menu/map/shop/profile/etc.) — KTX ASTC decoded to RGBA.
@@ -235,6 +276,9 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
         load_ui_atlas_bundle_impl(*this, ui, "misc");
         load_ui_atlas_bundle_impl(*this, ui, "skills");
         load_ui_atlas_bundle_impl(*this, mp, "buttons");
+        // Fight HUD atlas (HealthBar_*, Round_*, FightPause) — 1px slices
+        // stretched to the bar rects (see screens.cpp FightScreen HUD).
+        load_ui_atlas_bundle_impl(*this, res_root + "/fight", "ui");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "app: ui atlas load failed: %s\n", e.what());
     }
@@ -460,6 +504,8 @@ void App::shutdown() {
     save_.reset();
     dojo_sprite_.reset();
     menu_font_.reset();
+    digits_font_.reset();
+    round_font_.reset();
     if (renderer_) {
         renderer_->shutdown();
         renderer_.reset();
@@ -536,22 +582,141 @@ bool App::draw_atlas_frame(const std::string& name, float cx, float cy, float sc
     return true;
 }
 
+bool App::draw_atlas_rect(const std::string& name, float x, float y, float w, float h,
+                          float alpha) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!get_atlas_frame(name, &fr, &tw, &th, &gl)) return false;
+    sf2::scene::Sprite s;
+    s.texture_name = name;
+    s.frame_x = static_cast<float>(fr.x);
+    s.frame_y = static_cast<float>(fr.y);
+    s.frame_w = static_cast<float>(fr.w);
+    s.frame_h = static_cast<float>(fr.h);
+    s.tex_w = static_cast<float>(tw);
+    s.tex_h = static_cast<float>(th);
+    s.solid = false;
+    s.color_a = alpha;
+    if (fr.rotated) std::swap(s.frame_w, s.frame_h);
+    // x,y is top-left in view space; Sprite pos is center.
+    s.transform.set_pos(x + w * 0.5f, y + h * 0.5f);
+    if (fr.w > 0 && fr.h > 0) {
+        s.transform.set_scale(w / static_cast<float>(fr.w),
+                              h / static_cast<float>(fr.h));
+    }
+    sf2::render::Camera ui_cam;
+    ui_cam.center_x = static_cast<float>(view_w_) * 0.5f;
+    ui_cam.center_y = static_cast<float>(view_h_) * 0.5f;
+    ui_cam.zoom = 1.0f;
+    ui_cam.view_w = static_cast<float>(view_w_);
+    ui_cam.view_h = static_cast<float>(view_h_);
+    ui_cam.arena_h = ui_cam.view_h;
+    ui_cam.arena_floor = 0.0f;
+    ui_cam.arena_center_x = ui_cam.center_x;
+    renderer_->draw_sprite(s, ui_cam);
+    return true;
+}
+
+float App::measure_text(const sf2::data::font& font, const std::string& text,
+                        float scale) const {
+    float w = 0.0f;
+    for (unsigned char ch : text) {
+        const std::uint32_t id = static_cast<std::uint32_t>(ch);
+        const sf2::data::font_char* g = nullptr;
+        for (const auto& c : font.chars) {
+            if (c.id == id) { g = &c; break; }
+        }
+        if (g == nullptr) continue;
+        w += static_cast<float>(g->xadvance) * scale;
+    }
+    return w;
+}
+
+bool App::draw_text_with_font(const sf2::data::font& font, unsigned int tex, float x,
+                              float y, const std::string& text, float scale, float r,
+                              float g, float b) {
+    if (tex == 0) return false;
+    // Map font page -> texture name used for lookup: we uploaded as
+    // "font-en"/"digits_font"/"round_font"; the sprite system resolves
+    // by texture_name alias. Register the page alias on demand.
+    std::string tex_name;
+    if (tex == font_tex_) tex_name = "font-en";
+    else if (tex == digits_tex_) tex_name = "digits_font";
+    else if (tex == round_tex_) tex_name = "round_font";
+    else tex_name = "font-en";
+    // Ensure renderer knows the alias for the font's page name if it
+    // differs (the .fnt page string is e.g. "digits_0.png" vs "digits_font").
+    if (!font.page.empty() && font.page != "-") {
+        renderer_->texture_alias(font.page, tex);
+        // digits_0.png sibling without hash is not in cache; also alias the
+        // generic page key.
+    }
+    // Include hash PNG alias too (digits_0.png etc.)
+    float cursor_x = x;
+    float cursor_y = y;
+    bool any = false;
+    for (unsigned char ch : text) {
+        const std::uint32_t id = static_cast<std::uint32_t>(ch);
+        const sf2::data::font_char* glyph = nullptr;
+        for (const auto& c : font.chars) {
+            if (c.id == id) { glyph = &c; break; }
+        }
+        if (glyph == nullptr) continue;
+        if (glyph->w == 0 || glyph->h == 0) {
+            cursor_x += static_cast<float>(glyph->xadvance) * scale;
+            continue;
+        }
+        sf2::scene::Sprite s;
+        s.texture_name = tex_name;
+        // Also ensure alias resolution for tex_name
+        if (renderer_->texture_lookup(tex_name) == 0) {
+            renderer_->texture_alias(tex_name, tex);
+        }
+        s.frame_x = static_cast<float>(glyph->x);
+        s.frame_y = static_cast<float>(glyph->y);
+        s.frame_w = static_cast<float>(glyph->w);
+        s.frame_h = static_cast<float>(glyph->h);
+        s.tex_w = static_cast<float>(font.scale_w);
+        s.tex_h = static_cast<float>(font.scale_h);
+        s.solid = false;
+        s.color_r = r;
+        s.color_g = g;
+        s.color_b = b;
+        s.color_a = 1.0f;
+        // Glyph quad centered at (cursor + offset + half size)
+        s.transform.set_pos(cursor_x + (static_cast<float>(glyph->xoffset) + glyph->w * 0.5f) * scale,
+                            cursor_y + (static_cast<float>(glyph->yoffset) + glyph->h * 0.5f) * scale);
+        s.transform.set_scale(scale, scale);
+        sf2::render::Camera ui_cam;
+        ui_cam.center_x = static_cast<float>(view_w_) * 0.5f;
+        ui_cam.center_y = static_cast<float>(view_h_) * 0.5f;
+        ui_cam.zoom = 1.0f;
+        ui_cam.view_w = static_cast<float>(view_w_);
+        ui_cam.view_h = static_cast<float>(view_h_);
+        ui_cam.arena_h = ui_cam.view_h;
+        ui_cam.arena_floor = 0.0f;
+        ui_cam.arena_center_x = ui_cam.center_x;
+        renderer_->draw_sprite(s, ui_cam);
+        cursor_x += static_cast<float>(glyph->xadvance) * scale;
+        any = true;
+    }
+    return any;
+}
+
+bool App::draw_text_centered(const sf2::data::font& font, unsigned int tex, float cx,
+                             float y, const std::string& text, float scale, float r,
+                             float g, float b) {
+    const float w = measure_text(font, text, scale);
+    return draw_text_with_font(font, tex, cx - w * 0.5f, y, text, scale, r, g, b);
+}
+
 bool App::draw_text(float x, float y, const std::string& text, float scale, float r, float g,
                     float b) {
     if (menu_font_ == nullptr || font_tex_ == 0) {
         return false;
     }
-    (void)x;
-    (void)y;
-    (void)text;
-    (void)scale;
-    (void)r;
-    (void)g;
-    (void)b;
-    // Text rendering is implemented by the screens through the renderer;
-    // this helper is a stub for now (the BMFont glyph-quad path is a
-    // later-phase nicety). The shell's screens draw labeled flat buttons.
-    return false;
+    return draw_text_with_font(*menu_font_, font_tex_, x, y, text, scale, r, g, b);
 }
 
 } // namespace sf2::app
