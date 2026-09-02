@@ -646,12 +646,55 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         pos_[i * 2] = (px[i] - px[com_u]) * f + x;
         pos_[i * 2 + 1] = py[i] + dy;
     }
+
+    // [Phase A4 — figure z-sort] Keep the per-bone depth the projection
+    // drops (JS `dv.ia`: `Xg[a++]=d.x; Xg[a++]=d.y` — z is dropped at skin
+    // time). The clip z is the absolute world depth (`ma.z`), untouched by
+    // the facing x-mirror (`Te.Qeb` negates x only). In the authored space
+    // the near side carries the LARGER z (e.g. NAnkle_1 z=38.1 vs
+    // NAnkle_2 z=24.8), so build_vertices sorts the triangles far-to-near
+    // by mean vertex z. Sample is the pose source for the frame — z is
+    // captured here alongside the x/y in `pos_`.
+    posz_.assign(n, 0.0f);
+    for (std::size_t i = 0; i < n; ++i) {
+        posz_[i] = pz[i];
+    }
 }
 
 std::size_t Fighter::build_vertices(std::vector<float>& out) const {
     out.clear();
-    out.reserve(model_.resolved_tris.size() * 6);
-    for (const TriResolved& tri : model_.resolved_tris) {
+    const std::size_t ntri = model_.resolved_tris.size();
+    out.reserve(ntri * 6);
+
+    // [Phase A4 — figure z-sort] Triangle draw order = painter's algorithm:
+    // far-to-near by the triangle's mean vertex z (the per-bone `posz_`
+    // captured in sample()). The shipped XML document order is z-scattered
+    // (mdl_head's 218 triangles: z increases on 109 consecutive pairs,
+    // decreases on 108), so near limbs/head can draw under far ones and the
+    // overlapping silhouette shows squared edges. Sorting by the pose z
+    // keeps near parts (larger z — the _1 side in author space, NAnkle_1
+    // z=38.1 vs NAnkle_2 z=24.8) on top. Stable: equal-z triangles keep
+    // the document order (the game's draw order), so coplanar quads/cloth
+    // tris stay unperturbed. Without a sampled pose the identity order
+    // falls back to the document order.
+    std::vector<std::uint32_t> order(ntri);
+    for (std::size_t t = 0; t < ntri; ++t) {
+        order[t] = static_cast<std::uint32_t>(t);
+    }
+    if (posz_.size() >= model_.bones.size() && ntri > 1) {
+        auto tri_z_sum = [this](std::uint32_t t) {
+            const TriResolved& tri = model_.resolved_tris[static_cast<std::size_t>(t)];
+            return posz_[static_cast<std::size_t>(tri.i1)] +
+                   posz_[static_cast<std::size_t>(tri.i2)] +
+                   posz_[static_cast<std::size_t>(tri.i3)];
+        };
+        std::stable_sort(order.begin(), order.end(),
+                         [&tri_z_sum](std::uint32_t a, std::uint32_t b) {
+                             return tri_z_sum(a) < tri_z_sum(b);
+                         });
+    }
+    for (const std::uint32_t t : order) {
+        const TriResolved& tri = model_.resolved_tris[static_cast<std::size_t>(t)];
         out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2]);
         out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2 + 1]);
         out.push_back(pos_[static_cast<std::size_t>(tri.i2) * 2]);

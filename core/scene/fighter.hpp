@@ -202,6 +202,12 @@ public:
 private:
     Model model_;
     std::vector<float> pos_;  // per-bone [x, y] after sampling (world space)
+    // [Phase A4 — figure z-sort] Per-bone world-space z after sampling
+    // (parallel to `pos_`). The projection drops z (JS `dv.ia` copies only
+    // x,y), but the pose keeps the depth, so build_vertices can draw the
+    // triangles far-to-near (painter's order) instead of the XML document
+    // order (which is z-scattered in the shipped models).
+    std::vector<float> posz_;
     float color_r_ = 1.0f;
     float color_g_ = 1.0f;
     float color_b_ = 1.0f;
