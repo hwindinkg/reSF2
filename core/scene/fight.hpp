@@ -33,6 +33,7 @@
 //     Round labels (fight/ui atlas).
 
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <map>
 #include <memory>
@@ -273,6 +274,8 @@ private:
 // The fight controller (JS `ca` L379-433).
 class FightController {
 public:
+    ~FightController();  // closes the pose dump file if the dump is cut short
+
     // Loads the fight: builds the two fighters, their move lists, the AI
     // controllers, and sets the spawn positions (JS `o1a` L403 + `ggb`
     // L383).
@@ -328,6 +331,11 @@ public:
     // player steps toward the enemy when far and punches when in reach.
     // Uses the same move-start path as the AI (bypasses the key buffer).
     void set_auto_attack(bool on) { auto_attack_ = on; }
+
+    // [trace, Phase 0] Arms the per-frame pose dump: for the first `frames`
+    // fight frames, update() appends one JSONL line to `path` (reference/
+    // traces/native_pose.jsonl). Pure trace — the simulation is untouched.
+    void set_pose_dump(const std::string& path, int frames);
 
     // [FIX Phase 4b — fighter color from the location] Sets the fill color
     // BOTH fighters' meshes are drawn with. The game's fighters are
@@ -392,6 +400,16 @@ private:
     FightCamera camera_;
     FightHud hud_;
     float time_since_log_ = 0.0f;
+
+    // --- pose dump (trace infrastructure, no behavior change) --------------
+    std::string pose_dump_path_;
+    int pose_dump_frames_ = 0;      // frames left to dump (0 = off)
+    int pose_dump_written_ = 0;     // lines written so far
+    std::FILE* pose_dump_file_ = nullptr;
+
+    // Appends one JSONL line for the current frame to the dump file
+    // (lazily opened on the first dumped frame; closed after the last).
+    void dump_pose_frame();
 
     // --- fight helpers (JS ca methods) ------------------------------------
     // JS `xF` (L388): set the fight phase + sync the fighters' stance.

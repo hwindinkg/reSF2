@@ -120,6 +120,11 @@ public:
     // (the stretched/on-screen check). Defined in screens.cpp.
     void verify_fight() const;
 
+    // [trace, Phase 0] Arms the FightController's per-frame pose dump
+    // (the first `frames` fight frames -> `path` JSONL). Defined in
+    // screens.cpp (needs the full FightController type).
+    void enable_pose_dump(const std::string& path, int frames);
+
 private:
     std::string battle_name_;
     std::string location_;

@@ -134,6 +134,11 @@ public:
     // --- state accessors (Phase 3.2b) -------------------------------------
     const MoveDef* current_move() const { return current_move_; }
     int move_frame() const { return move_frame_; }
+    // Subframe state (JS `Te.mo`): `subframe()` is the current subframe
+    // index within the clip-frame, `sub()` the subframes per clip-frame.
+    // Pose-trace accessors only — no behavior change.
+    int subframe() const { return subframe_; }
+    int sub() const { return sub_; }
     int facing() const { return facing_; }
     const std::vector<const MoveDef*>& hb() const { return hb_; }
     const std::set<std::string>& active_intervals() const { return active_intervals_; }

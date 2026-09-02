@@ -781,6 +781,73 @@ void FightController::update(float dt) {
         l.p_hp = player_.hp;
         l.e_hp = enemy_.hp;
     }
+
+    // [trace] The per-frame pose dump (a no-op unless --dump-pose armed it).
+    dump_pose_frame();
+}
+
+// --- pose dump (trace infrastructure, Phase 0) -------------------------------
+
+FightController::~FightController() {
+    if (pose_dump_file_ != nullptr) {
+        std::fclose(pose_dump_file_);
+        pose_dump_file_ = nullptr;
+    }
+}
+
+void FightController::set_pose_dump(const std::string& path, int frames) {
+    pose_dump_path_ = path;
+    pose_dump_frames_ = frames;
+}
+
+// One JSONL line per frame (reference/traces/native_pose.jsonl contract):
+// {"t":"frame","f":..,"phase":..,"round":..,"timer":..,"cam":{..},
+//  "fighters":[Me, Enemy]} — Me first, then the enemy. Read-only over the
+// simulation: nothing here mutates the fight state.
+void FightController::dump_pose_frame() {
+    if (pose_dump_frames_ <= 0) return;
+    if (pose_dump_file_ == nullptr) {
+        if (fopen_s(&pose_dump_file_, pose_dump_path_.c_str(), "wb") != 0 ||
+            pose_dump_file_ == nullptr) {
+            std::fprintf(stderr, "[dump] cannot open %s — pose dump disabled\n",
+                         pose_dump_path_.c_str());
+            pose_dump_frames_ = 0;
+            return;
+        }
+    }
+
+    const FightFighter* fighters[2] = {&player_, &enemy_};
+    std::fprintf(pose_dump_file_,
+                 "{\"t\":\"frame\",\"f\":%d,\"phase\":%d,\"round\":%d,\"timer\":%d,"
+                 "\"cam\":{\"cx\":%.6f,\"cy\":%.6f,\"zoom\":%.6f},\"fighters\":[",
+                 frame_, phase(), round_.number, hud_timer(),
+                 camera_.center_x, camera_.center_y, camera_.zoom);
+    for (int i = 0; i < 2; ++i) {
+        const Fighter& f = fighters[i]->fighter;
+        const std::vector<float>& pos = f.positions();
+        std::fprintf(pose_dump_file_,
+                     "%s{\"id\":\"%s\",\"x\":%.3f,\"y\":%.3f,\"fx\":%d,\"clip\":\"%s\","
+                     "\"cf\":%d,\"sub\":%d,\"subn\":%d,\"bones\":[",
+                     i == 0 ? "" : ",", i == 0 ? "Me" : "Enemy",
+                     f.world_x(), f.world_y(), f.facing(),
+                     f.current_move() != nullptr ? f.current_move()->name.c_str() : "",
+                     f.move_frame(), f.subframe(), f.sub());
+        for (std::size_t b = 0; b + 1 < pos.size(); b += 2) {
+            std::fprintf(pose_dump_file_, "%s[%.3f,%.3f]", b == 0 ? "" : ",", pos[b],
+                         pos[b + 1]);
+        }
+        std::fprintf(pose_dump_file_, "]}");
+    }
+    std::fprintf(pose_dump_file_, "]}\n");
+
+    if (++pose_dump_written_ >= pose_dump_frames_) {
+        std::fclose(pose_dump_file_);
+        pose_dump_file_ = nullptr;
+        pose_dump_frames_ = 0;
+        std::fprintf(stdout, "[dump] pose trace complete: %d frames -> %s\n",
+                     pose_dump_written_, pose_dump_path_.c_str());
+        std::fflush(stdout);
+    }
 }
 
 } // namespace sf2::scene
