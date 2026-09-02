@@ -69,15 +69,16 @@ struct LoopStep {
 // via HeadlessLoopDriver (below). Screen ids: 3=Dojo, 4=Shop, 5=Map,
 // 6=Fight, 7=Profile(Equipment), 8=GeneralMenu, 10=Results.
 //
-// The navigation hub is the main menu (the game's GeneralMenu): the menu
-// buttons are FIGHT/MAP/SHOP/PROFILE. The loop is:
-//   menu -> Map -> Bosses fight -> Results -> Map -> BACK to menu
-//   menu -> Shop -> buy knives -> BACK to menu
-//   menu -> Equipment -> equip knives -> BACK to menu
-//   menu -> Map -> Training fight -> Results -> Map
+// The navigation hub is the DOJO home screen (screen 3 — the screen the
+// game boots into; the original starts in the Dojo, not the GeneralMenu).
+// The Dojo buttons are FIGHT(training)/MAP/SHOP/PROFILE. The loop is:
+//   dojo -> Map -> Bosses fight -> Results -> Map -> BACK to dojo
+//   dojo -> Shop -> buy knives -> BACK to dojo
+//   dojo -> Equipment -> equip knives -> BACK to dojo
+//   dojo -> Map -> Training fight -> Results -> Map
 //
 // Layout math (matches the screen implementations in core/app/screens.cpp):
-//   - menu buttons: y = 0.72*720 = 518, x = 0.28/0.46/0.64/0.82*1280
+//   - dojo/menu buttons: y = 0.72*720 = 518, x = 0.28/0.46/0.64/0.82*1280
 //     (FIGHT, MAP, SHOP, PROFILE).
 //   - map nodes: x = X + 640, y = 360 - Y (stages.xml <Zone> coords):
 //       Training (X=158,Y=145) -> (798, 215)
@@ -85,12 +86,13 @@ struct LoopStep {
 //     (the first zone = the tutorial zone the map shows).
 //   - shop card grid: first card center (0.25*1280+150, 200+75).
 //   - equipment owned-item grid: first card (0.55*1280+110, 220+40).
-//   - BACK buttons: top-left (64, 40) on Map/Shop/Equipment.
+//   - BACK buttons: top-left (64, 40) on Map/Shop/Equipment (pops back to
+//     the Dojo hub).
 static const LoopStep kLoopSteps[] = {
-    // 0: menu -> Map (the FIGHT button). Capture loop_map.png on arrival.
-    {1280 * 0.28f, 720 * 0.72f, "menu->map (FIGHT)", kScreenGeneralMenu, 0, kScreenMap, 0,
+    // 0: Dojo -> Map (the MAP button). Capture loop_map.png on arrival.
+    {1280 * 0.46f, 720 * 0.72f, "dojo->map (MAP)", kScreenDojo, 0, kScreenMap, 0,
      "loop_map.png"},
-    // 1: Map -> Bosses fight (540, 400) — the first money-bearing fight
+    // 1: Map -> Bosses fight (540, 400) - the first money-bearing fight
     //    (Reward Money=70 Exp=10). The fight runs to KO (auto-attack) and
     //    pushes Results. Capture the fists fight (before-equip evidence).
     {540.0f, 400.0f, "map->Bosses fight", kScreenMap, 0, kScreenFight, 0,
@@ -98,31 +100,31 @@ static const LoopStep kLoopSteps[] = {
     // 2: Results -> Map (click anywhere pops; the results->map flow pops
     //    the dead Fight screen too). Capture loop_results.png on arrival.
     {1280 * 0.5f, 360.0f, "results->map", kScreenResults, 0, kScreenMap, 0, "loop_results.png"},
-    // 3: Map -> BACK to the menu (top-left).
-    {64.0f, 40.0f, "map->menu (BACK)", kScreenMap, 0, kScreenGeneralMenu, 0, nullptr},
-    // 4: Menu -> Shop (the SHOP button). Capture loop_shop.png on arrival.
-    {1280 * 0.64f, 720 * 0.72f, "menu->shop", kScreenGeneralMenu, 0, kScreenShop, 0,
+    // 3: Map -> BACK to the Dojo hub (top-left).
+    {64.0f, 40.0f, "map->dojo (BACK)", kScreenMap, 0, kScreenDojo, 0, nullptr},
+    // 4: Dojo -> Shop (the SHOP button). Capture loop_shop.png on arrival.
+    {1280 * 0.64f, 720 * 0.72f, "dojo->shop", kScreenDojo, 0, kScreenShop, 0,
      "loop_shop.png"},
     // 5: Shop -> buy WEAPON_KNIVES (first card, price 50).
     {1280 * 0.25f + 150.0f, 200.0f + 75.0f, "shop->buy WEAPON_KNIVES", kScreenShop, 0, -1, 12,
      nullptr},
-    // 6: Shop -> BACK to the menu.
-    {64.0f, 40.0f, "shop->menu (BACK)", kScreenShop, 0, kScreenGeneralMenu, 0, nullptr},
-    // 7: Menu -> Equipment (the PROFILE button). Capture loop_equip.png on
+    // 6: Shop -> BACK to the Dojo hub.
+    {64.0f, 40.0f, "shop->dojo (BACK)", kScreenShop, 0, kScreenDojo, 0, nullptr},
+    // 7: Dojo -> Equipment (the PROFILE button). Capture loop_equip.png on
     //    arrival.
-    {1280 * 0.82f, 720 * 0.72f, "menu->equipment (PROFILE)", kScreenGeneralMenu, 0,
+    {1280 * 0.82f, 720 * 0.72f, "dojo->equipment (PROFILE)", kScreenDojo, 0,
      kScreenProfile, 0, "loop_equip.png"},
     // 8: Equipment -> equip WEAPON_KNIVES. With the 5 base items
     //    (Body/Head/Fists/NoRanged/NoMagic) + the bought knives, the grid
     //    (only Weapon/Armor/Helm cards count) is: Body(0) (704,220),
     //    Head(1) (944,220), Fists(2) (704,330), WEAPON_KNIVES(3) (944,330)
-    //    — grid_x = 0.55*1280 = 704, card 3 = row 1 col 1.
+    //    - grid_x = 0.55*1280 = 704, card 3 = row 1 col 1.
     {1280 * 0.55f + 240.0f, 220.0f + 110.0f, "equip WEAPON_KNIVES", kScreenProfile, 0, -1, 12,
      nullptr},
-    // 9: Equipment -> BACK to the menu.
-    {64.0f, 40.0f, "equipment->menu (BACK)", kScreenProfile, 0, kScreenGeneralMenu, 0, nullptr},
-    // 10: Menu -> Map again (FIGHT).
-    {1280 * 0.28f, 720 * 0.72f, "menu->map (FIGHT)", kScreenGeneralMenu, 0, kScreenMap, 0,
+    // 9: Equipment -> BACK to the Dojo hub.
+    {64.0f, 40.0f, "equipment->dojo (BACK)", kScreenProfile, 0, kScreenDojo, 0, nullptr},
+    // 10: Dojo -> Map again (MAP).
+    {1280 * 0.46f, 720 * 0.72f, "dojo->map (MAP)", kScreenDojo, 0, kScreenMap, 0,
      nullptr},
     // 11: Map -> Training fight (798, 215) with the knives equipped.
     //     Capture loop_fight.png on arrival (the after-equip fight).

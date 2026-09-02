@@ -372,13 +372,14 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
 }
 
 void App::boot() {
-    // Boot straight to the GeneralMenu (screen 8) — the game boots through
-    // Preloader(0) -> Loader(2) -> Dojo(3) -> the menu; the shell skips the
-    // loading screens and starts at the playable menu (the fight demo runs
-    // separately). Logged as the JS screen flow would trace it.
-    std::fprintf(stdout, "[screen] boot: Preloader(0) -> Loader(2) -> Dojo(3) -> GeneralMenu(8)\n");
+    // Boot to the Dojo home screen (screen 3) — the ORIGINAL starts in the
+    // Dojo (the JS flow: Preloader(0) -> Loader(2) -> Dojo(3)), NOT in the
+    // GeneralMenu (screen 8; the native GeneralMenu is kept for the menu
+    // flow but the game boots through Preloader -> Loader -> Dojo -> the
+    // home hub; the shell skips the loading screens and starts at the dojo).
+    std::fprintf(stdout, "[screen] boot: Preloader(0) -> Loader(2) -> Dojo(3)\n");
     std::fflush(stdout);
-    screens_->push(make_screen(*screens_, kScreenGeneralMenu));
+    screens_->push(make_screen(*screens_, kScreenDojo));
 }
 
 void App::poll_input() {
@@ -455,8 +456,9 @@ void App::run_one_frame() {
     poll_input();
 
     // Auto-click before the fixed-step update so the screen sees the
-    // pressed edge this frame. Stage 0: click the Fight button (menu).
-    // Stage 1 (after the map is up): click the Training node.
+    // pressed edge this frame. Stage 0: click the FIGHT button on the
+    // boot screen (the Dojo home — its FIGHT button starts the training
+    // fight). Stage 1 (after the map is up): click the Training node.
     if (auto_click_) {
         if (auto_click_stage_ == 0 && frame_count_ == 30) {
             inject_click(view_w_ * 0.28, view_h_ * 0.72);

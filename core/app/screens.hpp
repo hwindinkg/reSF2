@@ -1,8 +1,15 @@
 #pragma once
 
-// The shell screens — MainMenu, Map, BattleResult.
+// The shell screens — Dojo, MainMenu, Map, BattleResult.
 //
 // JS study (Task 1 documentation lives in core/scene/README.md):
+//   - Dojo (screen 3, `Tf`): the HOME base — the screen the ORIGINAL boots
+//     into (the JS trace: Preloader -> Loader -> Dojo). It shows the dojo
+//     backdrop with the Map/Shop/Profile entry buttons, the gem chest and
+//     the training fight vs the Punchbag dummy (the stages.xml Punchbag
+//     zone Start=1). The native DojoScreen is that home hub: its FIGHT
+//     button starts the Training battle of the Punchbag zone (which the
+//     MapScreen's Training node also runs).
 //   - GeneralMenu (screen 8, xn L1167): the game's main menu. The four
 //     top-tab buttons are `cs` (JS L2188): Progress/Strikes/Achiev/Seal
 //     from the profile atlas; the map/dojo/shop/profile entry buttons are
@@ -39,6 +46,36 @@ class LocationScene;
 } // namespace sf2::scene
 
 namespace sf2::app {
+
+// The dojo — the home screen (native Dojo screen 3, JS `Tf`). The screen
+// the game boots into (the original starts here, not in the GeneralMenu):
+// the dojo backdrop + the Map/Shop/Profile entry buttons + the FIGHT
+// button that starts the training fight vs the Punchbag dummy (the
+// stages.xml Punchbag zone Training battle; the fight itself runs the
+// shared FightScreen/FightController).
+class DojoScreen : public Screen {
+public:
+    explicit DojoScreen(ScreenManager& mgr);
+
+    ScreenId id() const override { return kScreenDojo; }
+
+    void update_impl(float dt) override;
+    void render_impl(App& app) override;
+
+private:
+    struct Button {
+        std::string label;
+        float x = 0.0f;  // center
+        float y = 0.0f;
+        float w = 0.0f;
+        float h = 0.0f;
+        int target = -1;  // ScreenId to push when clicked
+    };
+    std::vector<Button> buttons_;
+    int hover_ = -1;
+    int last_hover_ = -1;
+    bool money_logged_ = false;
+};
 
 // The main menu — native GeneralMenu (screen 8).
 class MainMenuScreen : public Screen {
