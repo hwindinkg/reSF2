@@ -7,6 +7,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
+#include <string>
+
+#include "audio/audio.hpp"
 
 namespace sf2::scene {
 
@@ -500,6 +504,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
                                   wall_min_, wall_max_, imp);
     def.fighter.set_world_pos(new_x, def.fighter.world_y());
 
+    // [Phase A3] SFX: a landed hit (the game plays the impact sample —
+    // JS ca.Cgb's `ta.ak` after the strike lands).
+    sf2::audio::AudioEngine::instance().play("hit");
+
     ++atk.hits_landed;
     ++def.hits_taken;
     (void)move;
@@ -590,6 +598,31 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
 
     me.fighter.advance(dt);
     me.last_move = me.fighter.current_move() ? me.fighter.current_move()->name : "";
+
+    // [Phase A3] SFX: when a movement move STARTS (the fighter transitions
+    // into a new move), play the jump/step sample — the game's movement
+    // whooshes (f_pl_jump* for jumping moves, swish* for steps/dashes).
+    // A move "starts" when its name differs from the fighter's previous
+    // move (the idle loops keep the same name, so they don't re-trigger).
+    {
+        static std::map<std::string, std::string> s_prev_move;
+        const std::string& prev = s_prev_move[me.name];
+        const std::string& cur = me.last_move;
+        if (cur != prev && !cur.empty()) {
+            // Jumping: JumpUp / FrontJumpKick / ShortJumpKick /
+            // DoubleJumpKick / ReverseJumpKick / WallJump* / BackFlip.
+            // Stepping: *StepForward / *StepBack / DoubleStepForward /
+            // ForwardRoll / BackRoll / DashBackwards / WallDashForward*.
+            if (cur.find("Jump") != std::string::npos || cur == "BackFlip") {
+                sf2::audio::AudioEngine::instance().play("jump");
+            } else if (cur.find("Step") != std::string::npos ||
+                       cur.find("Roll") != std::string::npos ||
+                       cur.find("Dash") != std::string::npos) {
+                sf2::audio::AudioEngine::instance().play("step");
+            }
+        }
+        s_prev_move[me.name] = cur;
+    }
 
     // The demo's simple auto-attack (the game's FightAuto): when idle,
     // step toward the enemy when beyond reach, punch when in reach.

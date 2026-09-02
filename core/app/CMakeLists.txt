@@ -9,7 +9,7 @@ add_library(sf2_app STATIC
     screens.cpp
 )
 target_include_directories(sf2_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(sf2_app PUBLIC sf2_scene sf2_render sf2_data glfw)
+target_link_libraries(sf2_app PUBLIC sf2_scene sf2_render sf2_data sf2_audio glfw)
 
 if(MSVC)
     target_compile_options(sf2_app PRIVATE /W4)
