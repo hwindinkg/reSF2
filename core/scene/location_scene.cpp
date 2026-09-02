@@ -176,6 +176,7 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
     }
 
     layers_.clear();
+    fighter_layer_ = npos;
     int layer_index = 0;
     for (const pugi::xml_node layer_node : root.children()) {
         if (std::strcmp(layer_node.name(), "Layer") != 0) {
@@ -185,6 +186,14 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
         layer->name = "layer_" + std::to_string(layer_index);
         layer->factor = sf2::data::xml_attr_float(layer_node, "Factor", 1.0f);
         layer->type = sf2::data::xml_attr_int(layer_node, "Type", 1);
+        // The ModelsViewer (Type=2) layer is where the ORIGINAL game draws
+        // the fighters (JS_RENDER §2.5 / §7). Its index splits the draw
+        // order: layers before it are the background, layers after it
+        // (floor / dust / glow / pixel_1 vignette) draw ON TOP of the
+        // fighters.
+        if (layer->type == 2 && fighter_layer_ == npos) {
+            fighter_layer_ = static_cast<std::size_t>(layer_index);
+        }
         ++layer_index;
 
         for (const pugi::xml_node child : layer_node.children()) {
@@ -231,6 +240,15 @@ void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
     const float floor_screen_y = view_h * 0.61f;
     const float vshift = ((arena_h_ / 2.0f - arena_floor_) / 2.0f) * (1.0f - camera.zoom);
     camera.center_y = arena_floor_ + vshift - (floor_screen_y - view_h / 2.0f) / camera.zoom;
+}
+
+void LocationScene::render_layers(sf2::render::Renderer& renderer,
+                                  const sf2::render::Camera& camera, std::size_t begin,
+                                  std::size_t end) const {
+    const std::size_t stop = std::min(end, layers_.size());
+    for (std::size_t i = begin; i < stop; ++i) {
+        render_layer(renderer, *layers_[i], camera);
+    }
 }
 
 void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& layer,

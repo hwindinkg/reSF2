@@ -64,6 +64,22 @@ public:
     void render_layer(sf2::render::Renderer& renderer, const Layer& layer,
                       const sf2::render::Camera& camera) const;
 
+    // Draws the layer range [begin, end) back-to-front (used by the fight
+    // screen's split draw order: background layers -> fighters -> foreground
+    // layers). The index of the ModelsViewer (Type=2) fighter layer splits
+    // the range; see `fighter_layer()`.
+    void render_layers(sf2::render::Renderer& renderer, const sf2::render::Camera& camera,
+                       std::size_t begin, std::size_t end) const;
+
+    // The index of the fighter layer (Type=2, ModelsViewer) in `layers()`,
+    // or `npos` when the location has none. The original game draws the
+    // FIGHTERS inside this layer: every layer before it is the background,
+    // every layer after it (floor / dust / glow / pixel_1 vignette) is drawn
+    // ON TOP of the fighters (JS_RENDER §7, "Что у нас не так" #1).
+    std::size_t fighter_layer() const { return fighter_layer_; }
+
+    static constexpr std::size_t npos = static_cast<std::size_t>(-1);
+
     float arena_width() const { return arena_w_; }
     float arena_height() const { return arena_h_; }
     float arena_floor() const { return arena_floor_; }
@@ -76,6 +92,7 @@ public:
 private:
     std::vector<std::shared_ptr<Layer>> layers_;
     std::vector<std::string> atlas_names_;
+    std::size_t fighter_layer_ = npos;
     float arena_w_ = 0.0f;
     float arena_h_ = 0.0f;
     float arena_floor_ = 0.0f;
