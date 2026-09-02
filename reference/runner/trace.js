@@ -1,44 +1,63 @@
 /*
- * trace.js — per-frame state tracer for the SF2 web build.
+ * trace.js v2 — JSONL pose/clip tracer for the SF2 web build (oracle side of
+ * the 1:1 port). Loaded by the runner AFTER sf2.502f0946.js (index.html
+ * GameInterface.init). Hooks the game's fixed 60 Hz update pass and, while a
+ * fight is active, logs ONE JSON object per frame to the console (captured by
+ * OracleShell.exe into reference/traces/console.log):
  *
- * Loaded by the runner AFTER sf2.502f0946.js (see index.html GameInterface.init).
- * Hooks the game's fixed 60 Hz update pass and after each tick logs:
- *   - screen transitions: [TRACE] screen <id> <name>
- *   - fight frames:       [TRACE] F<frame>|<phase>|<round>|<timer>|P:<x>,<y>,<hp>,<anim>,<face>,<move>|E:<...>
+ *   {"t":"frame","f":123,"phase":2,"round":1,"timer":45,
+ *    "cam":{"cx":..,"cy":..,"zoom":..},
+ *    "fighters":[{"id":"Me","x":..,"y":..,"fx":1,"clip":"..","cf":..,
+ *                  "sub":..,"subn":..,"bones":[[x,y],...]},
+ *                {"id":"Enemy", ...}]}
  *
- * Exposes window.__sf2Trace.state() returning a JSON snapshot of the same data
- * for the shell to poll. Dependency-free.
+ * Plus one {"t":"clip",...} dump per played clip (raw i16/16 source data,
+ * capped at MAX_CLIPS per run).
  *
- * Hook strategy: the game script is wrapped in a UMD IIFE, so Pg/ca/mc/xn are
- * module-scoped and never appear on window (the only export is SF2.main).
- * We therefore try Pg.prototype.aa first (direct), and if Pg is unreachable we
- * hook Function.prototype.bind: the game binds every app method through its
- * w() helper (w(this, this.xeb) etc.), so the first bind with the app instance
- * (identifiable by aa+root+Sc) lets us hook the instance's own `aa` method —
- * functionally identical to hooking Pg.prototype.aa — and its `lbb` method,
- * which creates the screen manager (mc.K) and lets us read screen/fight state.
+ * Hook strategy (same as v1): the game script is a UMD IIFE, so the engine
+ * classes (Te/wd/Ut/ca/...) are module-scoped and unreachable by name. We
+ * detect the app instance via Function.prototype.bind (w() binds every app
+ * method), hook its `aa` update pass, and capture the screen manager from its
+ * `lbb`. Fight classes are discovered at runtime from the fight controller
+ * instance (top screen's Ig) and patched once on their prototype:
+ *   - Ut.prototype.Al (camera framing, L826) -> records focus + zoom.
+ * Frame data itself is read directly from live instances at the end of `aa`
+ * (gameplay-authoritative: oa.Va.all[i].ma = final posed world bones; the
+ * counter fight.frame is the ca.prototype.ia counter; camera via Ut hook).
+ * Every read is try/catch-guarded so a wrong field can never break the game.
  */
 (function () {
   "use strict";
 
-  var state = {
+  var MAX_FRAMES = 350; /* stop emitting after this many frame lines */
+  var MAX_CLIPS = 5; /* at most this many clip dumps per run */
+
+  var tr = {
     enabled: true,
     hooked: false,
     lastScreen: -1,
-    hookPath: null,
-    errored: false,
-    mc: null /* screen manager (mc.K), captured from the app's lbb() */
+    mc: null, /* screen manager (mc.K), captured from the app's lbb() */
+    done: false,
+    frameCount: 0,
+    clips: 0,
+    cam: null, /* {cx,cy,zoom} set by the Ut.Al hook */
+    seenClips: {}, /* clip label -> true (dump once per clip per run) */
+    lastClip: new WeakMap() /* fighter -> clip label seen last tick */
   };
 
   window.__sf2Trace = {
     enabled: true,
     hooked: false,
     lastScreen: -1,
-    hookPath: null,
-    state: function () { return buildSnapshot(); }
+    state: function () { return snapshot(); }
   };
 
-  /* Screen id -> name (replica of xn.iOa, JS_MAP §5.1 — xn is module-scoped). */
+  /* ---------- helpers ---------- */
+
+  function r3(v) {
+    return typeof v === "number" && isFinite(v) ? Math.round(v * 1000) / 1000 : 0;
+  }
+
   function screenName(id) {
     switch (id) {
       case 0: return "Preloader";
@@ -54,10 +73,8 @@
     }
   }
 
-  /* Current screen id from the top of mc.K.stack (DQ on input screens, dJ on
-   * screen states — JS_MAP §5.2 conflates the two; accept either). */
   function screenId() {
-    var mgr = state.mc;
+    var mgr = tr.mc;
     if (mgr && mgr.stack && mgr.stack.length > 0) {
       var top = mgr.stack[mgr.stack.length - 1];
       if (top) {
@@ -68,138 +85,245 @@
     return -1;
   }
 
-  /* Move id: f.jb is a fighter-like object (the current move script / target —
-   wd.Naa pushes the opponent into HB and Zka defaults jb to HB[0]; wd.wI sets
-   jb=a.jb when a move is active). Extract a readable identifier. */
-  function moveId(v) {
-    if (v == null) return null;
-    if (typeof v === "object") {
-      if (v.parameters && v.parameters.$s != null) return v.parameters.$s;
-      if (v.name != null) return v.name;
-      if (v.zP != null) return v.zP;
-      return "[move]";
-    }
-    return v;
-  }
-
-  /* Animation name: f.zP is the JS_MAP-documented field, but in this build it is
-   only updated by HUD-button animation events (ca.z3) and stays "" without
-   input — the real fighter animation is f.da.Ua.name. Prefer zP, fall back. */
-  function animName(f) {
-    if (f.zP != null && f.zP !== "") return f.zP;
-    try {
-      if (f.da && f.da.Ua && f.da.Ua.name != null && f.da.Ua.name !== "") return f.da.Ua.name;
-    } catch (e) { /* ignore */ }
-    return f.zP != null ? f.zP : null;
-  }
-
-  /* Per-fighter fields: x/y = f.oa.Fe().ma, hp = f.parameters.gd,
-   * anim = f.zP (fallback f.da.Ua.name), face = f.da.hd(), move = f.jb. */
-  function fighterFields(f) {
-    if (!f) return null;
-    var x = null, y = null;
-    try {
-      if (f.oa && typeof f.oa.Fe === "function") {
-        var fe = f.oa.Fe();
-        if (fe && fe.ma) { x = fe.ma.x; y = fe.ma.y; }
-      }
-    } catch (e) { /* body not built yet */ }
-    var params = f.parameters || null;
-    var da = f.da || null;
-    return {
-      x: x,
-      y: y,
-      hp: params ? params.gd : null,
-      anim: animName(f),
-      face: da && typeof da.hd === "function" ? da.hd() : null,
-      move: moveId(f.jb)
-    };
-  }
-
-  /* Fight snapshot: the top screen's Ig field is the ca fight controller
-   * (Tf/ai store it there; ca.h8 is set in the ca constructor). */
-  function fightSnapshot() {
-    var mgr = state.mc;
+  /* The ca fight controller: top screen's Ig field (set by the fight screen). */
+  function fightObj() {
+    var mgr = tr.mc;
     if (!mgr || !mgr.stack || mgr.stack.length === 0) return null;
     var top = mgr.stack[mgr.stack.length - 1];
     if (!top || !top.Ig) return null;
     var fight = top.Ig;
-    if (!fight || !fight.pb || !fight.yb || typeof fight.frame !== "number") return null;
+    if (!fight || typeof fight.frame !== "number") return null;
+    return fight;
+  }
+
+  /* ---------- prototype patches (discovered classes, patched once) ---------- */
+
+  /* Ut.prototype.Al — camera framing. args[0] = world focus point (Ut.Al is
+   * called with `focus, fighterA_COM, fighterB_COM, scale, zoom`), this.Bj =
+   * current zoom. Records the camera AFTER the fight tick computed it. */
+  function ensureHooks(fight) {
+    try {
+      var ql = fight.Ta;
+      if (ql && ql.ia) {
+        var Ut = ql.ia.constructor;
+        var P = Ut && Ut.prototype;
+        if (P && !P.__sf2trAl && typeof P.Al === "function") {
+          P.__sf2trAl = true;
+          var origAl = P.Al;
+          P.Al = function (focus) {
+            var r = origAl.apply(this, arguments);
+            try {
+              if (focus && focus.x != null) {
+                tr.cam = {
+                  cx: r3(focus.x),
+                  cy: r3(focus.y),
+                  zoom: typeof this.Bj === "number" ? r3(this.Bj) : 1
+                };
+              }
+            } catch (e) { /* ignore */ }
+            return r;
+          };
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  /* Fallback camera read (if the Ut.Al hook never fires): ql.Go.ma is the
+   * smoothed focus point, ql.ia.Bj the zoom. */
+  function camFallback(fight) {
+    var cx = 0, cy = 0, zoom = 1;
+    try {
+      if (fight.Ta && fight.Ta.Go && fight.Ta.Go.ma) {
+        cx = r3(fight.Ta.Go.ma.x);
+        cy = r3(fight.Ta.Go.ma.y);
+      }
+    } catch (e) { /* ignore */ }
+    try {
+      if (fight.Ta && fight.Ta.ia && typeof fight.Ta.ia.Bj === "number") {
+        zoom = r3(fight.Ta.ia.Bj);
+      }
+    } catch (e) { /* ignore */ }
+    return { cx: cx, cy: cy, zoom: zoom };
+  }
+
+  /* ---------- frame data ---------- */
+
+  /* Final per-bone positions in oa.Va.all order (the bone order the model /
+   * native port use), as [x,y] pairs with z dropped, 3 decimals. */
+  function bones2d(f) {
+    var out = [];
+    try {
+      var all = f.oa && f.oa.Va && f.oa.Va.all;
+      if (all && all.length) {
+        for (var i = 0; i < all.length; i++) {
+          var m = all[i] && all[i].ma;
+          out.push([m ? r3(m.x) : 0, m ? r3(m.y) : 0]);
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return out;
+  }
+
+  function fighterJson(f, id) {
+    var out = { id: id, x: 0, y: 0, fx: 1, clip: null, cf: 0, sub: 0, subn: null, bones: [] };
+    if (!f) return out;
+    try {
+      var fe = f.oa && typeof f.oa.Fe === "function" ? f.oa.Fe() : null;
+      if (fe && fe.ma) { out.x = r3(fe.ma.x); out.y = r3(fe.ma.y); }
+    } catch (e) { /* body not posed yet */ }
+    var da = f.da;
+    if (da) {
+      out.fx = typeof da.hd === "function" ? (da.hd() < 0 ? -1 : 1) : 1;
+      if (da.Ua) {
+        out.clip = da.Ua.name != null ? String(da.Ua.name) : null;
+        out.cf = typeof da.Xh === "number" ? da.Xh : 0;
+      }
+      out.sub = r3(da.mo);
+      try {
+        if (da.fq && da.fq[0]) out.subn = da.fq[0].length;
+      } catch (e) { /* ignore */ }
+    }
+    out.bones = bones2d(f);
+    return out;
+  }
+
+  function frameJson(fight) {
     var round = fight.round || null;
     return {
-      frame: fight.frame,
-      phase: fight.eu,
+      t: "frame",
+      f: typeof fight.frame === "number" ? fight.frame : 0,
+      phase: typeof fight.eu === "number" ? fight.eu : 0,
       round: round ? round.round : null,
       timer: round ? round.time : null,
-      player: fighterFields(fight.pb),
-      enemy: fighterFields(fight.yb)
+      cam: tr.cam || camFallback(fight),
+      fighters: [fighterJson(fight.pb, "Me"), fighterJson(fight.yb, "Enemy")]
     };
   }
 
-  function buildSnapshot() {
-    var id = screenId();
+  /* ---------- clip dump ---------- */
+
+  /* Once per played clip (throttled: first occurrence of each label per run,
+   * capped at MAX_CLIPS). Reads the clip ASSET (Te.Ua.Kk — raw parsed frames,
+   * never mirrored; mirroring happens on the per-Te playback buffer, Te.jc).
+   * Each frame = flat array of [x16,y16,z16] per bone, recovered from the
+   * i16/16 fixed point. JS stores H(x16/16, -y16/16, z16/16), and the native
+   * dump stores y already source-signed (verified against
+   * native_clip_fists1_stance_idle.json: native y16 == Math.round(H.y*16)),
+   * so y is NOT re-negated here. */
+  function dumpClipAsset(Ua) {
+    if (!Ua || tr.clips >= MAX_CLIPS) return;
+    var name = Ua.name != null ? String(Ua.name) : "";
+    if (!name || tr.seenClips[name]) return;
+    var frames = [];
+    try {
+      var Kk = Ua.Kk;
+      if (Kk && Kk.length) {
+        for (var i = 0; i < Kk.length; i++) {
+          var fr = Kk[i];
+          var flat = [];
+          if (fr && fr.length) {
+            for (var b = 0; b < fr.length; b++) {
+              var h = fr[b];
+              flat.push(h && h.x != null
+                ? [Math.round(h.x * 16), Math.round(h.y * 16), Math.round(h.z * 16)]
+                : [0, 0, 0]);
+            }
+          }
+          frames.push(flat);
+        }
+      }
+    } catch (e) { return; }
+    if (!frames.length || !frames[0].length) return;
+    tr.seenClips[name] = true;
+    tr.clips++;
+    console.log(JSON.stringify({
+      t: "clip",
+      name: name,
+      frames: frames.length,
+      bones: frames[0].length,
+      data: frames
+    }));
+  }
+
+  function captureClips(fight) {
+    var fighters = [fight.pb, fight.yb];
+    for (var i = 0; i < fighters.length; i++) {
+      var f = fighters[i];
+      try {
+        if (!f || !f.da || !f.da.Ua) continue;
+        var name = f.da.Ua.name != null ? String(f.da.Ua.name) : "";
+        if (!name) continue;
+        var prev = tr.lastClip.get(f);
+        if (prev === name) continue; /* same clip as last tick */
+        tr.lastClip.set(f, name);
+        dumpClipAsset(f.da.Ua); /* first sight OR clip change */
+        if (tr.clips >= MAX_CLIPS) return;
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  /* ---------- per-tick driver ---------- */
+
+  function afterFrame() {
+    if (tr.done || !tr.enabled) return;
+    var fight = fightObj();
+    if (!fight) return;
+    ensureHooks(fight);
+    console.log(JSON.stringify(frameJson(fight)));
+    tr.frameCount++;
+    captureClips(fight);
+    if (tr.frameCount >= MAX_FRAMES) finish();
+  }
+
+  function finish() {
+    tr.done = true;
+    console.log("[TRACE] done " + tr.frameCount + " frames, " + tr.clips + " clips");
+    /* Best effort: request the browser to close the tab/runtime. WebView2
+     * ignores window.close() for host-embedded pages, so the shell process is
+     * expected to be terminated externally; the console.log stream is flushed
+     * line-by-line (File.AppendAllText), so no data is lost. */
+    try { window.close(); } catch (e) { /* ignore */ }
+    tr.enabled = false;
+  }
+
+  function snapshot() {
+    var fight = fightObj();
     var snap = {
-      enabled: state.enabled,
-      hooked: state.hooked,
-      hookPath: state.hookPath,
-      screen: { id: id, name: screenName(id) }
+      enabled: tr.enabled,
+      hooked: tr.hooked,
+      done: tr.done,
+      frames: tr.frameCount,
+      clips: tr.clips,
+      screen: { id: screenId(), name: screenName(screenId()) }
     };
-    var fight = fightSnapshot();
-    if (fight) snap.fight = fight;
+    if (fight) {
+      snap.fight = {
+        frame: fight.frame,
+        phase: fight.eu,
+        round: fight.round ? fight.round.round : null,
+        timer: fight.round ? fight.round.time : null,
+        cam: tr.cam || camFallback(fight),
+        player: fighterJson(fight.pb, "Me"),
+        enemy: fighterJson(fight.yb, "Enemy")
+      };
+    }
     return snap;
   }
 
-  function fmt3(v) {
-    return typeof v === "number" && isFinite(v) ? v.toFixed(3) : "?";
-  }
-
-  function fmt(v) {
-    return v != null ? String(v) : "?";
-  }
-
-  function fighterLine(f) {
-    if (!f) return "?,?,?,?,?,?";
-    return fmt3(f.x) + "," + fmt3(f.y) + "," + fmt(f.hp) + "," +
-      fmt(f.anim) + "," + fmt(f.face) + "," + fmt(f.move);
-  }
-
-  function afterFrame() {
-    if (!state.enabled) return;
-
-    var id = screenId();
-    if (id !== state.lastScreen) {
-      state.lastScreen = id;
-      window.__sf2Trace.lastScreen = id;
-      console.log("[TRACE] screen " + id + " " + screenName(id));
-    }
-
-    var fight = fightSnapshot();
-    if (fight) {
-      console.log(
-        "[TRACE] F" + fmt(fight.frame) + "|" + fmt(fight.phase) + "|" +
-        fmt(fight.round) + "|" + fmt(fight.timer) + "|P:" +
-        fighterLine(fight.player) + "|E:" + fighterLine(fight.enemy)
-      );
-    }
-  }
+  /* ---------- hook scaffolding (v1, unchanged) ---------- */
 
   function fail(err) {
-    if (state.errored) return;
-    state.errored = true;
-    state.enabled = false;
-    window.__sf2Trace.enabled = false;
+    if (!tr.enabled) return;
+    tr.enabled = false;
     console.log("[TRACE] ERR " + (err && err.message ? err.message : String(err)));
   }
 
   function markHooked(path) {
-    state.hooked = true;
-    state.hookPath = path;
+    tr.hooked = true;
     window.__sf2Trace.hooked = true;
-    window.__sf2Trace.hookPath = path;
     console.log("[TRACE] hooked " + path);
   }
 
-  /* Wrap a per-frame method (the app's aa) so afterFrame runs after each tick. */
   function wrapFrameMethod(fn) {
     return function (a) {
       var result = fn.apply(this, arguments);
@@ -212,8 +336,6 @@
     };
   }
 
-  /* Hook the app instance: own `aa` shadows Pg.prototype.aa; own `lbb` lets us
-   * capture the screen manager (mc.K) it creates. */
   function hookApp(app) {
     if (!app || app.__sf2Hooked) return false;
     if (typeof app.aa !== "function" || !app.root || !app.Sc) return false;
@@ -228,7 +350,7 @@
         try {
           var node = this.root && this.root.af;
           while (node) {
-            if (node.Mr && node.Mr.stack) { state.mc = node.Mr; break; }
+            if (node.Mr && node.Mr.stack) { tr.mc = node.Mr; break; }
             node = node.Ma;
           }
         } catch (e) { /* ignore */ }
@@ -238,7 +360,6 @@
     return true;
   }
 
-  /* Preferred path: wrap Pg.prototype.aa (the fixed 60 Hz update pass). */
   function tryDirect() {
     var Pg = null;
     if (typeof window !== "undefined" && window.Pg != null) {
@@ -259,8 +380,6 @@
     return false;
   }
 
-  /* Fallback path: the game binds every app method via w() -> Function.prototype.bind,
-   * so detect the app instance (aa+root+Sc) on the first bind and hook it. */
   function tryFallback() {
     console.log("[TRACE] Pg not accessible (module-scoped), hooking Function.prototype.bind to detect the app instance");
     if (typeof Function.prototype.bind !== "function") {
