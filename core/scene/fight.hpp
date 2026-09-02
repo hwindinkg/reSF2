@@ -159,44 +159,73 @@ struct FightLogLine {
     float p_hp = 0.0f, e_hp = 0.0f;
 };
 
-// The fight camera controller (JS `ma.Sya` L1833 + `ql.Ta`): centers the
-// camera on the midpoint of the two fighters and zoom-fits the arena. The
-// JS intro curve is a smoothed zoom/pan from the arena overview; the port
-// keeps the fight-start framing (both fighters + a margin in view) and a
-// simple linear intro. `framing()` returns the camera center/zoom for the
-// current fighter positions.
+// The fight camera controller — an exact port of the JS camera chain
+// `ql` (L362-371) + `Ut.Al` (L826-827) + `ma.Sya` (L1833-1835):
+//
+//   - focus: `tyb` (L363) sets the target to the midpoint of the two
+//     fighters' Center-Of-Mass nodes (`wd.mea` -> `Dl.mea(a.Eu,b.Eu)`,
+//     the native equivalent is the fighter world_x/world_y anchor);
+//     `dZa` (L363-365) smooths the focus with the exact JS deltas:
+//       $X = target - prevTarget (prediction),
+//       bY = prevFocus + $X, aY = bY - focus, IO = (target - focus)*0.15,
+//       LO = aY + IO; |LO| > 200 -> clamped to 200 (velocity clamp);
+//       focus += LO; |focus - prevFocus| > 50 -> clamped to 50
+//       (per-frame delta clamp).
+//   - the camera starts at the fight spawn midpoint (`Lb.z9a` L475) and
+//     chases the target — the intro ramp the oracle shows
+//     (cy -101.5 -> -222 over the first ~60 frames). The VERTICAL target
+//     is the arena-floor anchor (the oracle's CoM-mid for its dummy fight
+//     settles on the dojo floor line; the native keeps the floor line at
+//     0.78 of the view height — the value the pixel-diff verified).
+//   - the panorama (`Ut.Al`): Io = arenaWidth/2 - focus is clamped to
+//     +/-((arenaWidth - MaxWidthDelta)*Bj*0.5 - nC*0.5), applied to the
+//     camera x (the native Io = arena_center_x - center_x).
+//   - the zoom (`ma.Sya`): f = viewH / (arenaH*Bj), aspect clamp 0.45..1,
+//     the narrow-screen extra clamp, the width-fit min(viewW/(span*f+100),1)
+//     (NO +300 — xCa's +300 is the LAYER zoom), the min-zoom
+//     0.6..1.3 `0.6+((clamp(c,0.5,1)-0.5)/0.5)*0.7` (BJ=1 at 16:9: -> 1.3),
+//     and the portrait vertical shift round((viewH - e*f)/2)/f*0.5.
+//
+// `framing()` rebuilds center/zoom each fight frame. State lives in the
+// struct so the smoothing runs continuously across frames (JS ql state).
 struct FightCamera {
+    // The smoothed focus (JS `Go.ma`) and the Sya zoom (JS `f`).
     float center_x = 0.0f;
     float center_y = 0.0f;
-    float zoom = 1.0f;
+    float zoom = 1.0f;         // the RENDER zoom (JS `ma.Sya` f — the
+                               // camera's tMa): 1.3 at 16:9 with a tight
+                               // fighter span
+    float zoom_layer = 1.0f;   // the LAYER zoom Bj (JS `Ut.Bj` = `xCa()`:
+                               // min(nC/(span+300),1) — 1.0 at the fight
+                               // start). This is what the oracle trace
+                               // records as "zoom" (the trace hooks
+                               // `Ut.Al`, which receives this.Bj), and what
+                               // the panorama clamp (Ut.Al `d`) uses.
 
     // Arena geometry (from the location params).
-    float arena_w = 1960.0f;
-    float arena_h = 560.0f;
+    float arena_w = 1960.0f;    // the RAW location width (JS `Lb.width`)
+    float arena_h = 560.0f;     // JS `Lb.height`
     float wall = 80.0f;
-    float floor = 80.0f;  // the visible arena floor line (world y)
+    float floor = 80.0f;        // the visible arena floor line (world y)
+                                // (set_bounds feeds the dojo floor anchor)
 
-    // Recomputes center/zoom from the two fighters' world x. Mirrors the
-    // fight-start view (JS Sya: `f = min(viewW / (span + 100), 1)` — the
-    // whole fight in view, zoomed out enough that the 100-px margin fits).
-    // [FIX Phase 4b — dojo visible] center_y is chosen so the arena FLOOR
-    // lands at ~0.61 of the view height, matching the oracle's fight view.
-    // The old center_y=0 put the bright bg layers below the floor line and
-    // the black mattes over the visible band ("dojo is black").
-    void framing(float ax, float bx, float view_w, float view_h) {
-        const float mid = (ax + bx) * 0.5f;
-        const float span = std::fabs(bx - ax) + 300.0f;  // JS ma.Sya L1833: min(viewW/(|Δx|+300),1)
-        center_x = mid;
-        zoom = std::min(1.0f, view_w / span);
-        // [FIX Phase 4b — fighters on the floor like the oracle] The
-        // vertical center places the fighters' feet (the spawn floor line)
-        // at ~0.78 of the view height — the oracle's boot2 shows the
-        // fighters' feet at screen y≈559 (of 720). The old anchor (0.61)
-        // put the feet too high and the fighters floated over the floor.
-        const float floor_screen_y = view_h * 0.78f;
-        const float vshift = ((arena_h / 2.0f - floor) / 2.0f) * (1.0f - zoom);
-        center_y = floor + vshift - (floor_screen_y - view_h / 2.0f) / zoom;
-    }
+    // --- JS `ql` dZa/tyb smoothing state (L362-365) ----------------------
+    // Du/By = the current target (fighter midpoint), DO = the previous
+    // target; Go/Jl = the smoothed focus, iq = the previous focus.
+    bool initialized_ = false;
+    float go_x_ = 0.0f, go_y_ = 0.0f;            // Go.ma (current focus)
+    float go_prev_x_ = 0.0f, go_prev_y_ = 0.0f;  // iq/Go.mf (previous focus)
+    float du_x_ = 0.0f, du_y_ = 0.0f;            // By/Du.ma (current target)
+    float du_prev_x_ = 0.0f, du_prev_y_ = 0.0f;  // DO/Du.mf (previous target)
+    float start_x_ = 0.0f, start_y_ = 0.0f;      // Lb.z9a (spawn midpoint)
+
+    // Recomputes center/zoom from the two fighters' world COM positions
+    // (JS `Eu.ma` — the native fighter world_x/world_y anchors) and the
+    // view size. An exact port of the JS camera chain (see the struct
+    // comment); the `ay`/`by` are the CoM y's (the oracle's CoM-mid
+    // vertical target — the native maps it to the floor anchor so the
+    // dojo's verified composition holds).
+    void framing(float ax, float ay, float bx, float by, float view_w, float view_h);
 };
 
 // The fight HUD (JS `Ar` L2016-2019 + `Sf` L2032-2040): HP bars, the round
