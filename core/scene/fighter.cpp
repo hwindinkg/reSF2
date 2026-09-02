@@ -104,6 +104,21 @@ void Fighter::set_model(const Model& model) {
         }
         nearest_clip_[i] = ref;
     }
+
+    // Build mirror swap pairs for _1 ↔ _2 (JS Te.Peb L560 → Ua.Oeb L692).
+    // When facing -1 the buffered clip frames are negated (vu.Neb L668) and
+    // left/right paired bones are swapped so the skeleton's left stays left.
+    mirror_pairs_.clear();
+    for (std::size_t i = 0; i < model_.bones.size(); ++i) {
+        const std::string& nm = model_.bones[i].name;
+        if (nm.size() < 3) continue;
+        if (nm.compare(nm.size() - 2, 2, "_1") != 0) continue;
+        std::string other = nm.substr(0, nm.size() - 2) + "_2";
+        int j = model_.bone_by_name(other);
+        if (j < 0) continue;
+        if (static_cast<std::size_t>(j) <= i) continue;  // avoid double
+        mirror_pairs_.emplace_back(static_cast<int>(i), j);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -588,6 +603,23 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         px[i] = (bones[i].x - bones[r].x) * f_cloth + px[r];
         py[i] = bones[i].y - bones[r].y + py[r];
         pz[i] = bones[i].z - bones[r].z + pz[r];
+    }
+
+    // JS mirror swap (Te.Peb L560 -> Ua.Oeb L692): when facing -1 the
+    // buffered clip frames have x negated (Qeb/Neb) and paired _1/_2 bones
+    // swapped. Native mirrors at projection, but also swaps paired bones so
+    // left stays left (otherwise shoulder/leg crossing ~100px, bone mean 140+).
+    if (facing < 0) {
+        for (auto& pr : mirror_pairs_) {
+            int a = pr.first, b = pr.second;
+            if (a < 0 || b < 0) continue;
+            std::size_t ua = static_cast<std::size_t>(a);
+            std::size_t ub = static_cast<std::size_t>(b);
+            if (ua >= n || ub >= n) continue;
+            std::swap(px[ua], px[ub]);
+            std::swap(py[ua], py[ub]);
+            std::swap(pz[ua], pz[ub]);
+        }
     }
 
     // 3. World placement: the fighter's (x, y) anchors the model's COM at
