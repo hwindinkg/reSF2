@@ -1,0 +1,106 @@
+Pose gap report - native port vs web oracle
+============================================================
+native:  E:\reSF2\reference\traces\native_pose.jsonl
+oracle:  E:\reSF2\reference\traces\oracle_pose.jsonl
+tolerance: 5.0 (world units)
+clip map: enabled (stance_1->FistsStartStance-Left etc, .bytes stripped, case-insensitive)
+role map: native Me <-> oracle Enemy (auto detected ragdoll dummy)
+coord transform: none
+
+[inputs]
+  native frames:  300  (malformed lines skipped: 0)
+  oracle frames:  350  (malformed lines skipped: 0)
+  oracle clip lines: 2
+
+[alignment]
+  frames matched:      232
+  native frames:       300
+  oracle frames:       350
+  coverage (matched/native):  77.3%
+  coverage (matched/oracle):  66.3%
+  unaligned native frames: 68
+  unaligned oracle frames: 118
+  alignment key: (phase, normalized clip, cf) with Me<->Enemy swap
+
+[clip-name mismatch]
+  native-only normalized clip names (never seen in oracle after map):
+    fistsstartstance-right (35 native frames) <- raw: 'stance_2'
+    high_punch (29 native frames) <- raw: 'high_punch'
+  note: raw mismatch differs from normalized (alias map collapsed some names)
+
+[camera]
+  |dcx|   mean 79.324  max 327.730
+  |dcy|   mean 243.653  max 253.569
+  |dzoom| mean 0.000  max 0.000
+
+[world position]  (per fighter, over matched frames)
+  Me    |dx| mean 174.463 max 295.103 | |dy| mean 318.743 max 357.899 | facing mismatches: 128
+  Enemy |dx| mean 148.861 max 418.621 | |dy| mean 335.102 max 338.606 | facing mismatches: 155
+
+[bone deviation]  (per fighter, over matched frames; per-bone delta = max(|dx|,|dy|))
+  Me    mean 242.855  max 483.537  | frames with any bone over tolerance: 232/232
+  Enemy skipped: 205 vs 15 (ragdoll dummy) - only 232 comparable frames, 232 mismatched shape
+         skipped: Me 205 vs 15 (ragdoll dummy)
+         (native Enemy 205 bones vs oracle Me 15 bones; cross-mapped pair)
+
+[worst 10 frames by max bone deviation]  (max over both fighters)
+   1. f=237 phase=2 clip=fists1_stance_idle (norm:fistsstartstanceidle-left) cf=36 fighter=Enemy max=11129.091
+      Me    worst-10 bones: [67, 91, 89, 93, 87, 80, 79, 81, 73, 90]
+      Enemy worst-10 bones: [14, 4, 13, 0, 8, 2, 6, 1, 11, 7]
+   2. f=236 phase=2 clip=fists1_stance_idle (norm:fistsstartstanceidle-left) cf=36 fighter=Enemy max=11032.691
+      Me    worst-10 bones: [67, 91, 89, 93, 87, 80, 79, 81, 73, 90]
+      Enemy worst-10 bones: [14, 4, 13, 8, 0, 6, 2, 1, 7, 9]
+   3. f=235 phase=2 clip=fists1_stance_idle (norm:fistsstartstanceidle-left) cf=36 fighter=Enemy max=10934.899
+      Me    worst-10 bones: [67, 91, 89, 93, 87, 80, 79, 81, 73, 90]
+      Enemy worst-10 bones: [14, 4, 13, 8, 6, 0, 12, 2, 1, 5]
+   4. f=234 phase=2 clip=fists1_stance_idle (norm:fistsstartstanceidle-left) cf=35 fighter=Enemy max=10837.507
+      Me    worst-10 bones: [67, 91, 89, 93, 87, 80, 79, 81, 73, 90]
+      Enemy worst-10 bones: [14, 12, 13, 5, 4, 8, 6, 0, 2, 11]
+   5. f=233 phase=2 clip=fists1_stance_idle (norm:fistsstartstanceidle-left) cf=35 fighter=Enemy max=10740.515
+      Me    worst-10 bones: [67, 91, 89, 93, 87, 80, 79, 81, 73, 90]
+      Enemy worst-10 bones: [14, 12, 13, 5, 6, 4, 11, 8, 10, 0]
+   6. f=232 phase=2 clip=fists1_stance_idle (norm:fistsstartstanceidle-left) cf=35 fighter=Enemy max=10643.507
+      Me    worst-10 bones: [67, 91, 89, 93, 87, 80, 79, 73, 81, 90]
+      Enemy worst-10 bones: [14, 12, 5, 13, 6, 4, 11, 10, 8, 3]
+   7. f=231 phase=2 clip=fists1_stance_idle (norm:fistsstartstanceidle-left) cf=34 fighter=Enemy max=10546.899
+      Me    worst-10 bones: [67, 91, 89, 93, 87, 80, 79, 73, 90, 81]
+      Enemy worst-10 bones: [14, 12, 6, 5, 13, 4, 11, 10, 3, 9]
+   8. f=230 phase=2 clip=fists1_stance_idle (norm:fistsstartstanceidle-left) cf=34 fighter=Enemy max=10451.315
+      Me    worst-10 bones: [67, 91, 89, 93, 87, 80, 79, 73, 90, 81]
+      Enemy worst-10 bones: [14, 6, 5, 12, 13, 4, 11, 10, 3, 9]
+   9. f=229 phase=2 clip=fists1_stance_idle (norm:fistsstartstanceidle-left) cf=34 fighter=Enemy max=10357.674
+      Me    worst-10 bones: [67, 91, 89, 93, 87, 80, 79, 73, 90, 81]
+      Enemy worst-10 bones: [14, 6, 5, 12, 13, 4, 11, 10, 3, 9]
+  10. f=228 phase=2 clip=fists1_stance_idle (norm:fistsstartstanceidle-left) cf=33 fighter=Enemy max=10264.495
+      Me    worst-10 bones: [67, 91, 89, 93, 87, 80, 79, 73, 90, 81]
+      Enemy worst-10 bones: [14, 6, 5, 12, 13, 4, 11, 10, 3, 9]
+
+[bones consistently over tolerance]  (% of matched frames with |delta| > tolerance, top 20 per fighter)
+  Me:
+    bone   0: 100.0%  (232/232 frames)
+    bone   1: 100.0%  (232/232 frames)
+    bone   2: 100.0%  (232/232 frames)
+    bone   3: 100.0%  (232/232 frames)
+    bone   4: 100.0%  (232/232 frames)
+    bone   5: 100.0%  (232/232 frames)
+    bone   6: 100.0%  (232/232 frames)
+    bone   7: 100.0%  (232/232 frames)
+    bone   8: 100.0%  (232/232 frames)
+    bone   9: 100.0%  (232/232 frames)
+    bone  10: 100.0%  (232/232 frames)
+    bone  11: 100.0%  (232/232 frames)
+    bone  12: 100.0%  (232/232 frames)
+    bone  13: 100.0%  (232/232 frames)
+    bone  14: 100.0%  (232/232 frames)
+    bone  15: 100.0%  (232/232 frames)
+    bone  16: 100.0%  (232/232 frames)
+    bone  17: 100.0%  (232/232 frames)
+    bone  18: 100.0%  (232/232 frames)
+    bone  19: 100.0%  (232/232 frames)
+  Enemy: skipped (bone count mismatch 205 vs 15)
+
+[bone-count shape]
+  frames with native/oracle bone-count mismatch: Me 0, Enemy 232
+    Me: native Me 205 vs oracle Enemy 205
+    Enemy: native Enemy 205 vs oracle Me 15
+
