@@ -14,6 +14,7 @@
 //
 // Defaults: res_root = reference/www/res, save = reference/saves/save.xml.
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -32,14 +33,18 @@ using namespace sf2::app;  // kScreen* ids + the App/SaveSystem types
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
                  "usage: %s [res_root] [save_path] [--headless N] [--autoclick] [--headless-loop]\n"
-                 "                  [--fight]\n"
+                 "                  [--fight] [--dump-pose N] [--dump-clip <name>]\n"
                  "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
                  "  --headless-loop  run the scripted playable loop, then exit\n"
                  "                   (menu -> map -> Bosses fight -> results -> shop buy\n"
                  "                    WEAPON_KNIVES -> equip -> map -> Training fight -> results)\n"
                  "  --fight          boot DIRECTLY into the dojo fight (skip menu/map):\n"
-                 "                   dojo, player Fists (keyboard) vs enemy Fists (AI)\n",
+                 "                   dojo, player Fists (keyboard) vs enemy Fists (AI)\n"
+                 "  --dump-pose N    (with --fight) dump the first N fight frames as JSONL to\n"
+                 "                   reference/traces/native_pose.jsonl (trace, no sim change)\n"
+                 "  --dump-clip N    dump the anim archive clip <name> as 1/16 fixed-point\n"
+                 "                   JSON to reference/traces/native_clip_<name>.json, exit 0\n",
                  argv0);
 }
 
@@ -259,6 +264,8 @@ int main(int argc, char** argv) {
     bool fight_mode = false;  // --fight: boot DIRECTLY into the dojo fight
     int capture_fight_frame = 300;  // fight frames after the Fight screen appears
     std::string capture_dir;  // when set, capture screens to this dir
+    std::string dump_clip;    // --dump-clip <name>: dump one anim clip as JSON, exit
+    int dump_pose_frames = 0;  // --dump-pose N: dump the first N fight frames (0 = off)
 
     // Positional args (res_root, save_path) are assigned by slot, not by
     // value: a user passing the default res_root explicitly used to collide
@@ -285,6 +292,18 @@ int main(int argc, char** argv) {
             capture_fight_frame = std::atoi(argv[++i]);
         } else if (arg == "--auto-attack") {
             auto_attack = true;
+        } else if (arg == "--dump-clip" && i + 1 < argc) {
+            dump_clip = argv[++i];
+        } else if (arg == "--dump-pose") {
+            if (i + 1 >= argc || argv[i + 1][0] == '-') {
+                std::fprintf(stderr, "game: --dump-pose requires an explicit frame count N\n");
+                return 1;
+            }
+            dump_pose_frames = std::atoi(argv[++i]);
+            if (dump_pose_frames <= 0) {
+                std::fprintf(stderr, "game: --dump-pose needs a positive frame count N\n");
+                return 1;
+            }
         } else if (arg == "--fight") {
             fight_mode = true;
         } else if (arg == "--help" || arg == "-h") {
@@ -349,6 +368,51 @@ int main(int argc, char** argv) {
     }
     std::fprintf(stdout, "[game] booted: window %dx%d, save '%s'\n", app.view_w(), app.view_h(),
                  save_path.c_str());
+
+    if (!dump_clip.empty()) {
+        // [trace, Phase 0] Clip dump: find the named clip in the loaded anim
+        // archive and write it as 1/16 fixed-point ints (the source i16/16
+        // format — multiplying the parsed floats back by 16 recovers the
+        // exact ints) to reference/traces/native_clip_<name>.json. No fight
+        // runs; exit 0 after the file is written.
+        const auto& clips = app.fight_assets().clips;
+        const auto it = clips.find(dump_clip);
+        if (it == clips.end()) {
+            std::fprintf(stderr, "game: clip '%s' not found in the anim archive (%zu clips)\n",
+                         dump_clip.c_str(), clips.size());
+            app.shutdown();
+            return 1;
+        }
+        const sf2::data::anim_clip& clip = it->second;
+        std::filesystem::create_directories("reference/traces");
+        const std::string path = "reference/traces/native_clip_" + dump_clip + ".json";
+        std::FILE* out = nullptr;
+        if (fopen_s(&out, path.c_str(), "wb") != 0 || out == nullptr) {
+            std::fprintf(stderr, "game: cannot open %s for writing\n", path.c_str());
+            app.shutdown();
+            return 1;
+        }
+        std::fprintf(out, "{\"t\":\"clip\",\"name\":\"%s\",\"frames\":%zu,\"bones\":%zu,\"data\":[",
+                     clip.name.c_str(), clip.frames.size(), clip.bone_count());
+        for (std::size_t fi = 0; fi < clip.frames.size(); ++fi) {
+            std::fprintf(out, "%s[", fi == 0 ? "" : ",");
+            const std::vector<sf2::data::anim_keyframe>& bones = clip.frames[fi].bones;
+            for (std::size_t bi = 0; bi < bones.size(); ++bi) {
+                const sf2::data::anim_keyframe& k = bones[bi];
+                std::fprintf(out, "%s[%d,%d,%d]", bi == 0 ? "" : ",",
+                             static_cast<int>(std::lround(k.x * 16.0f)),
+                             static_cast<int>(std::lround(k.y * 16.0f)),
+                             static_cast<int>(std::lround(k.z * 16.0f)));
+            }
+            std::fprintf(out, "]");
+        }
+        std::fprintf(out, "]}\n");
+        std::fclose(out);
+        std::fprintf(stdout, "[dump] clip '%s' (%zu frames, %zu bones) -> %s\n",
+                     dump_clip.c_str(), clip.frames.size(), clip.bone_count(), path.c_str());
+        app.shutdown();
+        return 0;
+    }
 
     if (headless_loop) {
         // The scripted playable loop: run the driver until all steps land
@@ -448,6 +512,21 @@ int main(int argc, char** argv) {
             std::fflush(stdout);
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
+        if (dump_pose_frames > 0) {
+            // [trace, Phase 0] Arm the FightController's per-frame pose dump
+            // (reference/traces/native_pose.jsonl). Pure trace — the fight
+            // simulation is unaffected.
+            std::filesystem::create_directories("reference/traces");
+            if (app.screens().top() != nullptr) {
+                static_cast<sf2::app::FightScreen*>(app.screens().top())
+                    ->enable_pose_dump("reference/traces/native_pose.jsonl", dump_pose_frames);
+            }
+            std::fprintf(stdout,
+                         "[dump] pose trace armed: first %d fight frames -> "
+                         "reference/traces/native_pose.jsonl\n",
+                         dump_pose_frames);
+            std::fflush(stdout);
+        }
         if (headless > 0) {
             // Deterministic headless verification: force one fixed step per
             // frame (like the other drivers) so the fight advances frame-

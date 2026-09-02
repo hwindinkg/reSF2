@@ -602,6 +602,14 @@ std::size_t FightScreen::move_list_size() const {
     return fight_ != nullptr ? fight_->player().fighter.hb().size() : 0;
 }
 
+// [trace, Phase 0] Arms the FightController's per-frame pose dump (the
+// pose/camera trace the JS-side oracle dump is diffed against).
+void FightScreen::enable_pose_dump(const std::string& path, int frames) {
+    if (fight_ != nullptr) {
+        fight_->set_pose_dump(path, frames);
+    }
+}
+
 // [FIX Phase 4a verification] Bone-sample check: the sampled bone positions
 // (the Fighter::positions() after sample) for a few skeleton bones vs the
 // clip data, plus the triangle bbox (humanoid shape + on-screen check).
