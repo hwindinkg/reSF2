@@ -14,6 +14,7 @@
 #include "app/screen_manager.hpp"
 #include "app/screens.hpp"
 #include "atlas.hpp"
+#include "audio/audio.hpp"
 #include "font.hpp"
 #include "render/gl.hpp"
 #include "scene/renderer.hpp"
@@ -356,6 +357,16 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
         fight_assets_.reset();
     }
 
+    // [Phase A3] The SFX engine: preloads the game's wav samples and
+    // starts the audio device (its own thread — the game loop never
+    // blocks). Falls back to a beep generator when no samples resolve.
+    {
+        sf2::audio::AudioEngine& sfx = sf2::audio::AudioEngine::instance();
+        const bool ok = sfx.init(res_root_);
+        std::fprintf(stdout, "[audio] engine %s\n", ok ? "OK" : "NO DEVICE (silent)");
+        std::fflush(stdout);
+    }
+
     boot();
     return true;
 }
@@ -499,6 +510,9 @@ void App::run(int headless_frames, bool auto_click) {
 }
 
 void App::shutdown() {
+    // [Phase A3] Stop the SFX engine (logs the played counters — the
+    // headless verification proof).
+    sf2::audio::AudioEngine::instance().shutdown();
     screens_.reset();
     fight_assets_.reset();
     save_.reset();

@@ -35,6 +35,7 @@
 #include "app/app.hpp"
 #include "app/save_system.hpp"
 #include "atlas.hpp"
+#include "audio/audio.hpp"
 #include "scene/fight.hpp"
 #include "scene/location_scene.hpp"
 #include "scene/model.hpp"
@@ -326,6 +327,9 @@ void MainMenuScreen::update_impl(float dt) {
             p.y <= b.y + b.h / 2) {
             hover_ = static_cast<int>(i);
             if (p.pressed) {
+                // [Phase A3] SFX: the menu button click (the game's
+                // snd_click_1 — `ta.ak("snd_click_1")` on UI taps).
+                sf2::audio::AudioEngine::instance().play("click");
                 std::fprintf(stdout, "[menu] click %s -> screen %d\n", b.label.c_str(), b.target);
                 std::fflush(stdout);
                 push(static_cast<ScreenId>(b.target));
@@ -870,6 +874,48 @@ void FightScreen::render_impl(App& app) {
     for (const auto& layer : assets.dojo.layers()) {
         assets.dojo.render_layer(ren, *layer, camera);
     }
+
+    // [Phase A4 — fighter shadow] The dojo oracle draws a dark semi-
+    // transparent ellipse under each fighter (the standing shadow). It is a
+    // WORLD object: positioned at the figure's feet world line and projected
+    // through the fight camera, so it follows the fighter (not the camera).
+    // Drawn right after the floor, BEFORE the fighter body (capsules +
+    // mesh), so the black silhouette sits on top of its shadow.
+    auto draw_fighter_shadow = [&camera, &ren](const sf2::scene::FightFighter& f) {
+        const sf2::scene::Fighter& fighter = f.fighter;
+        float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
+        fighter.triangle_bbox(min_x, min_y, max_x, max_y);
+        const float bw = max_x - min_x;
+        // Ellipse half-width = half the figure's width (the shadow is the
+        // figure's spread on the floor); flattened ~5:1 vertically so it
+        // reads as a ground contact, not a disc.
+        const float rx = std::max(8.0f, bw * 0.5f);
+        const float ry = std::max(2.5f, rx * 0.22f);
+        const float cx = (min_x + max_x) * 0.5f;
+        const float cy = max_y;  // the feet line (world)
+        const float sx = camera.world_to_screen_x(cx, 1.0f);
+        const float sy = camera.world_to_screen_y(cy);
+        const float rxs = rx * camera.zoom;
+        const float rys = ry * camera.zoom;
+        constexpr int kShadowSegments = 16;
+        constexpr float kPi = 3.14159265358979323846f;
+        std::vector<float> disc;
+        disc.reserve(static_cast<std::size_t>(kShadowSegments) * 6);
+        const float step = 2.0f * kPi / static_cast<float>(kShadowSegments);
+        for (int s = 0; s < kShadowSegments; ++s) {
+            const float a0 = static_cast<float>(s) * step;
+            const float a1 = static_cast<float>(s + 1) * step;
+            disc.push_back(sx);
+            disc.push_back(sy);
+            disc.push_back(sx + std::cos(a0) * rxs);
+            disc.push_back(sy + std::sin(a0) * rys);
+            disc.push_back(sx + std::cos(a1) * rxs);
+            disc.push_back(sy + std::sin(a1) * rys);
+        }
+        ren.draw_triangles(disc.data(), disc.size() / 2, 0.0f, 0.0f, 0.0f, 0.35f);
+    };
+    draw_fighter_shadow(fight_->player());
+    draw_fighter_shadow(fight_->enemy());
 
     auto project = [&camera](const std::vector<float>& v) {
         std::vector<float> out(v.size());
