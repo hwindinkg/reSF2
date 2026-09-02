@@ -493,14 +493,11 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
 
     const float arena_w = assets.dojo.arena_width() > 0.0f ? assets.dojo.arena_width() : 1960.0f;
     const float wall = 80.0f;
-    // [FIX Phase 4b — fighters stay in the arena] The arena is centered on
-    // the location origin (the params Width/2); the walls sit at
-    // ±(arena_w/2 - wall). The old `wall_max = arena_w - wall` (1880) let
-    // the fighters walk far past the right wall (world 900) into the void —
-    // the enemy AI wandered to x=1244 and stood on black. Bound the fighters
-    // to the actual arena walls (±900).
-    const float wall_min = -(arena_w * 0.5f - wall);
-    const float wall_max = arena_w * 0.5f - wall;
+    // Arena bounds are [wall, arena_w-wall] = [80,1880] (0-based, JS Bf NU/width).
+    // The centered ±900 calculation placed spawn 973 outside the arena (clamped to 900,
+    // causing |dx| ~211 vs oracle). Reverted to JS-accurate bounds.
+    const float wall_min = wall;
+    const float wall_max = arena_w - wall;
 
     sf2::scene::BattleParams battle;
     battle.name = battle_name_;

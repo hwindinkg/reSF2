@@ -224,6 +224,8 @@ private:
     // rendered at that bone's clip position + the bind offset (the ragdoll
     // keeps the cloth attached to the skeleton in the real game).
     std::vector<int> nearest_clip_;
+    // Paired bones _1 ↔ _2 for mirror swap (JS Te.Peb L560 → Ua.Oeb L692). Built in set_model.
+    std::vector<std::pair<int, int>> mirror_pairs_;
     int facing_ = 1;                        // +1 (JS `Te.FX` / `hd()`)
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (COM world pos)
     std::set<std::string> active_intervals_; // active interval names (JS `Te.xj`)

@@ -185,7 +185,7 @@ struct FightCamera {
     // the black mattes over the visible band ("dojo is black").
     void framing(float ax, float bx, float view_w, float view_h) {
         const float mid = (ax + bx) * 0.5f;
-        const float span = std::fabs(bx - ax) + 500.0f;  // the demo margin
+        const float span = std::fabs(bx - ax) + 300.0f;  // JS ma.Sya L1833: min(viewW/(|Δx|+300),1)
         center_x = mid;
         zoom = std::min(1.0f, view_w / span);
         // [FIX Phase 4b — fighters on the floor like the oracle] The
