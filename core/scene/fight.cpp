@@ -289,6 +289,19 @@ void FightController::enter_fight() {
     round_live_ = true;
     round_.running = true;   // the timer counts down (JS Sf.play L2037)
     start_stance_done_ = true;
+    // [FIX idle-slide] Cut the intro stance clip (stance_1/stance_2,
+    // root-moving) so the fighters don't keep sliding 853 units into the
+    // idle phase. The intro clip was re-triggered at f130 because its
+    // 129-frame duration is 4 short of the 133-frame StartStance, so a
+    // right-facing fighter entered Fight still on stance_2 (delta -148.6).
+    // Clearing forces the next update_fighter to pick the static
+    // FistsStartStanceIdle-Left (fists1_stance_idle, 38f, delta 0).
+    player_.fighter.clear_move();
+    enemy_.fighter.clear_move();
+    sample_idle(player_);
+    sample_idle(enemy_);
+    rebuild_body(player_);
+    rebuild_body(enemy_);
 }
 
 // JS `i4a` (L409): phase 3 — the round's EndStance (results shown).
@@ -551,9 +564,16 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // from the raw positions instead of the (defaulted) facing_.
         const bool face_left =
             (foe.fighter.world_x() - me.fighter.world_x()) < 0.0f;
+        // [FIX idle-clip — surgical] Phase 2 (Fight) idle must use the
+        // NON-moving clip (fists1_stance_idle, 38f, delta 0) — the oracle's
+        // FistsStartStanceIdle-Left. The old code picked Left/Right by
+        // facing, so a right-facing fighter used FistsStartStanceIdle-Right
+        // (fists2_stance_idle, 101f) or, during the early re-trigger at the
+        // end of phase 1, stance_2 (52f, delta -148.6) which slid 853 units.
+        // Mirror is via fx (facing), not a distinct clip.
         const std::string idle_name =
-            std::string(intro ? "FistsStartStance-" : "FistsStartStanceIdle-") +
-            (face_left ? "Left" : "Right");
+            intro ? std::string("FistsStartStance-") + (face_left ? "Left" : "Right")
+                  : std::string("FistsStartStanceIdle-Left");
         const auto idle_it = moves_->find(idle_name);
         if (idle_it != moves_->end()) {
             sf2::scene::FightContext ctx;
