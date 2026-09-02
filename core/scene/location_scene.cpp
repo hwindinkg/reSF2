@@ -191,6 +191,8 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
             if (std::strcmp(child.name(), "Image") == 0) {
                 std::shared_ptr<Sprite> sprite = make_image(child, frames);
                 if (sprite != nullptr) {
+                    // [FIX R2 vertical] Minimal: offset by arena_h/2 (280) as per diagnosis.
+                    sprite->transform.y -= arena_h_ * 0.5f;
                     layer->sprites.push_back(std::move(sprite));
                 }
             } else if (std::strcmp(child.name(), "SimpleEffect") == 0) {
@@ -199,6 +201,7 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
                 // for the background probe.
                 std::shared_ptr<Sprite> sprite = make_image(child, frames);
                 if (sprite != nullptr) {
+                    sprite->transform.y -= arena_h_ * 0.5f;
                     layer->sprites.push_back(std::move(sprite));
                 }
             }
