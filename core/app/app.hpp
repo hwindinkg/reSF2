@@ -60,6 +60,10 @@ struct CatalogItem;
 struct PendingBattle {
     std::string battle_name = "Training";
     std::string location = "dojo";
+    // The enemy's display name. The Dojo's training fight names its
+    // "Punchbag" dummy (JS stages.xml Fight 1 Warrior FirstName="Punchbag");
+    // the map flow keeps the default "Enemy".
+    std::string enemy_name = "Enemy";
     int reward_money = 0;  // the first non-zero <Reward> of the fight
     int reward_exp = 0;
     // The fight outcome (set by the FightScreen at battle end).

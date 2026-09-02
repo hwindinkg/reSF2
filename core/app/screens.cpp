@@ -1,7 +1,12 @@
-// The shell screens implementation — MainMenu, Map, Fight, Results, Shop,
-// Equipment.
+// The shell screens implementation — Dojo (home), MainMenu, Map, Fight,
+// Results, Shop, Equipment.
 //
 // Layout math (JS-derived):
+//   - Dojo/home buttons: the same menu-atlas entry buttons + positions as
+//     the GeneralMenu (the four entry buttons sit in the lower half of the
+//     dojo backdrop, horizontally spaced by ~0.26 of the view width,
+//     centered). The Dojo FIGHT button starts the training fight vs the
+//     Punchbag dummy; Map/Shop/Profile push their screens.
 //   - MainMenu buttons: the game's za top bar + the 4 tab buttons are the
 //     exact JS layout; this phase uses the menu atlas frame proportions
 //     (Dojo_normal 226x193, Map_normal 191x194, Shop_normal 246x238,
@@ -381,6 +386,130 @@ void MainMenuScreen::render_impl(App& app) {
 }
 
 // ---------------------------------------------------------------------------
+// DojoScreen
+// ---------------------------------------------------------------------------
+
+DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
+    const float bw = 240.0f;
+    const float bh = 120.0f;
+    const float y = kViewH * 0.72f;
+    const float xs[] = {kViewW * 0.28f, kViewW * 0.46f, kViewW * 0.64f, kViewW * 0.82f};
+    struct Def {
+        const char* label;
+        int target;
+    };
+    // The home hub: FIGHT starts the training battle vs the Punchbag dummy
+    // (the stages.xml Punchbag zone "Training"), Map/Shop/Profile are the
+    // entry buttons (JS menu atlas Dojo_normal/Map_normal/Shop_normal/
+    // Profile_normal — the original home screen's buttons).
+    const Def defs[] = {
+        {"FIGHT", kScreenFight}, {"MAP", kScreenMap}, {"SHOP", kScreenShop}, {"PROFILE", kScreenProfile},
+    };
+    for (int i = 0; i < 4; ++i) {
+        Button b;
+        b.label = defs[i].label;
+        b.x = xs[i];
+        b.y = y;
+        b.w = bw;
+        b.h = bh;
+        b.target = defs[i].target;
+        buttons_.push_back(b);
+    }
+}
+
+void DojoScreen::update_impl(float dt) {
+    (void)dt;
+    if (!money_logged_) {
+        money_logged_ = true;
+        try {
+            const WarriorSave w = app().save().load();
+            std::fprintf(stdout, "[dojo] MONEY %d   LV %d   POWER %d   WEAPON %s   ARMOR %s   HELM %s\n",
+                         w.money, w.level, w.power, w.weapon.c_str(), w.armor.c_str(),
+                         w.helm.c_str());
+            std::fflush(stdout);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[dojo] save read failed: %s\n", e.what());
+        }
+    }
+    const App::PointerState& p = app().pointer();
+    hover_ = -1;
+    for (std::size_t i = 0; i < buttons_.size(); ++i) {
+        const Button& b = buttons_[i];
+        if (p.x >= b.x - b.w / 2 && p.x <= b.x + b.w / 2 && p.y >= b.y - b.h / 2 &&
+            p.y <= b.y + b.h / 2) {
+            hover_ = static_cast<int>(i);
+            if (p.pressed) {
+                sf2::audio::AudioEngine::instance().play("click");
+                std::fprintf(stdout, "[dojo] click %s -> screen %d\n", b.label.c_str(), b.target);
+                std::fflush(stdout);
+                if (b.target == kScreenFight) {
+                    // The training fight vs the Punchbag dummy — the same
+                    // pending-battle hand-off the MapScreen uses (JS `Ya`
+                    // battle-start); the "Training" battle of the stages.xml
+                    // Punchbag zone (Start=1, Money=0/Exp=0).
+                    PendingBattle& pb = app().pending_battle();
+                    pb.battle_name = "Training";
+                    pb.location = "dojo";
+                    pb.enemy_name = "Punchbag";
+                    pb.has_result = false;
+                    battle_rewards("Training", pb.reward_money, pb.reward_exp);
+                    pb.owned = owned_items(app());
+                    std::fprintf(stdout,
+                                 "[dojo] FIGHT -> Training fight vs %s (reward money=%d exp=%d)\n",
+                                 pb.enemy_name.c_str(), pb.reward_money, pb.reward_exp);
+                    std::fflush(stdout);
+                }
+                push(static_cast<ScreenId>(b.target));
+            }
+        }
+    }
+    if (hover_ != last_hover_) {
+        last_hover_ = hover_;
+        if (hover_ >= 0) {
+            std::fprintf(stdout, "[dojo] hover %s\n", buttons_[hover_].label.c_str());
+            std::fflush(stdout);
+        }
+    }
+}
+
+void DojoScreen::render_impl(App& app) {
+    sf2::render::Renderer& ren = app.renderer();
+    sf2::scene::Sprite* dojo = app.dojo_sprite();
+    if (dojo != nullptr) {
+        sf2::render::Camera ui_cam;
+        ui_cam.center_x = kViewW * 0.5f;
+        ui_cam.center_y = kViewH * 0.5f;
+        ui_cam.zoom = 1.0f;
+        ui_cam.view_w = kViewW;
+        ui_cam.view_h = kViewH;
+        ui_cam.arena_h = kViewH;
+        ui_cam.arena_floor = 0.0f;
+        ui_cam.arena_center_x = kViewW * 0.5f;
+        ren.draw_sprite(*dojo, ui_cam);
+    } else {
+        const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+        ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
+    }
+    // The menu-atlas entry buttons (Dojo/Map/Shop/Profile) — the same
+    // frames the GeneralMenu renders; the Dojo button is the home hub's
+    // training-Fight entry.
+    const char* frame_names[4] = {"Dojo_normal", "Map_normal", "Shop_normal", "Profile_normal"};
+    const char* frame_hover[4] = {"Dojo_active", "Map_active", "Shop_active", "Profile_active"};
+    for (std::size_t i = 0; i < buttons_.size(); ++i) {
+        const Button& b = buttons_[i];
+        const bool hovered = static_cast<int>(i) == hover_;
+        const char* fn = hovered ? frame_hover[i] : frame_names[i];
+        if (!try_draw_atlas_button(app, fn, b.x, b.y, b.w, b.h, 1.0f)) {
+            const float r = hovered ? 0.85f : (b.target == kScreenFight ? 0.72f : 0.45f);
+            const float g = hovered ? 0.72f : (b.target == kScreenFight ? 0.62f : 0.48f);
+            const float bl = hovered ? 0.35f : (b.target == kScreenFight ? 0.2f : 0.42f);
+            draw_flat_button(app, b.label, b.x, b.y, b.w, b.h, r, g, bl, hovered);
+        }
+        (void)app.draw_text(b.x, b.y, b.label, 1.0f, 1.0f, 1.0f, 1.0f);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // MapScreen
 // ---------------------------------------------------------------------------
 
@@ -396,11 +525,12 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
 void MapScreen::update_impl(float dt) {
     (void)dt;
     const App::PointerState& p = app().pointer();
-    // BACK (top-left) -> the main menu (the loop's map -> shop / map ->
-    // equipment legs; the JS map has a back/exit control in the top bar).
+    // BACK (top-left) -> the previous screen (the Dojo home hub — the
+    // loop's map -> dojo / map -> equipment legs; the JS map has a
+    // back/exit control in the top bar).
     if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
         if (p.pressed) {
-            std::fprintf(stdout, "[map] BACK -> GeneralMenu\n");
+            std::fprintf(stdout, "[map] BACK -> previous screen\n");
             std::fflush(stdout);
             manager().pop();
             return;
@@ -622,8 +752,12 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     };
 
     fight_ = std::make_unique<sf2::scene::FightController>();
+    // The enemy's display name: the Dojo training fight names its Punchbag
+    // dummy (JS stages.xml Fight 1 Warrior FirstName="Punchbag"); the map
+    // flow keeps the pending-battle default "Enemy".
+    const std::string& enemy_name = app().pending_battle().enemy_name;
     fight_->init_locks(battle, assets.merged, assets.moves, assets.clips,
-                       assets.tactics_sets, tactic, "Player", "Enemy",
+                       assets.tactics_sets, tactic, "Player", enemy_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
                        battle.max_hp, battle.max_hp, roll01, owned);
@@ -1213,10 +1347,10 @@ void ShopScreen::update_impl(float dt) {
     } catch (const std::exception&) {
     }
     hover_ = -1;
-    // BACK (top-left) -> the main menu (the loop's shop -> menu leg).
+    // BACK (top-left) -> the previous screen (the loop's shop -> dojo leg).
     if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
         if (p.pressed) {
-            std::fprintf(stdout, "[shop] BACK -> GeneralMenu\n");
+            std::fprintf(stdout, "[shop] BACK -> previous screen\n");
             std::fflush(stdout);
             manager().pop();
             return;
@@ -1340,10 +1474,11 @@ void EquipmentScreen::update_impl(float dt) {
         return;
     }
     hover_ = -1;
-    // BACK (top-left) -> the main menu (the loop's equipment -> menu leg).
+    // BACK (top-left) -> the previous screen (the loop's equipment -> dojo
+    // leg).
     if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
         if (p.pressed) {
-            std::fprintf(stdout, "[equip] BACK -> GeneralMenu\n");
+            std::fprintf(stdout, "[equip] BACK -> previous screen\n");
             std::fflush(stdout);
             manager().pop();
             return;
@@ -1468,6 +1603,8 @@ void EquipmentScreen::render_impl(App& app) {
 
 std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id) {
     switch (id) {
+        case kScreenDojo:
+            return std::make_unique<DojoScreen>(mgr);
         case kScreenGeneralMenu:
             return std::make_unique<MainMenuScreen>(mgr);
         case kScreenMap:
