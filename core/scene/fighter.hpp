@@ -131,6 +131,12 @@ public:
     // L547-548: `Xh+2 >= len` -> stop). Samples the pose at move_frame.
     void advance(float dt);
 
+    // [FIX idle-slide — Phase 1] Clears the current move (JS `KNa`): the
+    // fighter returns to idle. Used by the fight controller when the
+    // StartStance -> Fight transition cuts the intro clip so the fighters
+    // don't keep sliding on stance_1/stance_2 into the idle phase.
+    void clear_move();
+
     // --- state accessors (Phase 3.2b) -------------------------------------
     const MoveDef* current_move() const { return current_move_; }
     int move_frame() const { return move_frame_; }

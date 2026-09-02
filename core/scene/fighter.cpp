@@ -457,6 +457,13 @@ void Fighter::sample_current() {
     }
 }
 
+void Fighter::clear_move() {
+    current_move_ = nullptr;
+    current_clip_ = nullptr;
+    active_intervals_.clear();
+    subframe_ = 0;
+}
+
 void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                      float y, int facing) {
     if (clip.frames.empty()) {
