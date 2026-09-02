@@ -123,6 +123,10 @@ public:
     // The menu font (ui/font-en.fnt + png). Null when unavailable.
     const sf2::data::font* menu_font() const { return menu_font_.get(); }
     unsigned int font_texture() const { return font_tex_; }
+    const sf2::data::font* digits_font() const { return digits_font_.get(); }
+    unsigned int digits_texture() const { return digits_tex_; }
+    const sf2::data::font* round_font() const { return round_font_.get(); }
+    unsigned int round_texture() const { return round_tex_; }
 
     // View size (window pixels).
     int view_w() const { return view_w_; }
@@ -170,6 +174,17 @@ public:
     // when no font is loaded.
     bool draw_text(float x, float y, const std::string& text, float scale,
                    float r, float g, float b);
+    // Atlas rect (x,y = top-left, w,h = size).
+    bool draw_atlas_rect(const std::string& name, float x, float y, float w, float h,
+                         float alpha = 1.0f);
+    float measure_text(const sf2::data::font& font, const std::string& text,
+                       float scale) const;
+    bool draw_text_with_font(const sf2::data::font& font, unsigned int tex, float x,
+                             float y, const std::string& text, float scale, float r,
+                             float g, float b);
+    bool draw_text_centered(const sf2::data::font& font, unsigned int tex, float cx,
+                            float y, const std::string& text, float scale, float r,
+                            float g, float b);
 
     // The users_default template path (res_root/users_default.xml) — used
     // by the SaveSystem.
@@ -205,6 +220,10 @@ private:
     std::unique_ptr<sf2::scene::Sprite> dojo_sprite_;
     std::unique_ptr<sf2::data::font> menu_font_;
     unsigned int font_tex_ = 0;
+    std::unique_ptr<sf2::data::font> digits_font_;
+    unsigned int digits_tex_ = 0;
+    std::unique_ptr<sf2::data::font> round_font_;
+    unsigned int round_tex_ = 0;
     // UI atlas cache: frame name -> frame rect + tex size + GL tex.
     struct AtlasEntry {
         sf2::data::atlas_frame frame;
