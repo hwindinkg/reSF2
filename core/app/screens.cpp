@@ -56,6 +56,15 @@ namespace {
 constexpr float kViewW = 1280.0f;
 constexpr float kViewH = 720.0f;
 
+// The between-rounds HUD "Next" button (JS `vhb` L410 case 1 -> `Z2()`):
+// center + size in screen coords. Drawn only while
+// FightController::round_wait(); a click (or Space/Enter, see on_key)
+// runs next_round_requested() (recovery + the next round).
+constexpr float kNextBtnCX = kViewW * 0.5f;
+constexpr float kNextBtnCY = kViewH * 0.6f;
+constexpr float kNextBtnW = 240.0f;
+constexpr float kNextBtnH = 80.0f;
+
 // Draws a flat (untextured) button + its label as a solid quad. The exact
 // menu atlas art (ASTC) is unavailable to the CPU pipeline this phase —
 // flagged as the exact-layout gap.
@@ -780,6 +789,17 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
 }
 
 void FightScreen::on_key(int glfw_key, bool down) {
+    // Between rounds: Space (32) / Enter (257) = the HUD "Next" button (JS
+    // `vhb` L410 case 1) — confirm the next round instead of feeding the
+    // punch/attack mapping below.
+    if (fight_ != nullptr && down && fight_->round_wait() &&
+        (glfw_key == 32 || glfw_key == 257)) {
+        sf2::audio::AudioEngine::instance().play("click");
+        std::fprintf(stdout, "[fight] NEXT round requested (Space/Enter)\n");
+        std::fflush(stdout);
+        fight_->next_round_requested();
+        return;
+    }
     // GLFW key codes -> the game's key_type (JS `Ik` keyboard events ->
     // the fight input; the move Keys conditions read Punch/Forward/Back).
     // Bindings (reasonable desktop keys):
@@ -812,6 +832,15 @@ void FightScreen::on_key(int glfw_key, bool down) {
 
 std::size_t FightScreen::move_list_size() const {
     return fight_ != nullptr ? fight_->player().fighter.hb().size() : 0;
+}
+
+bool FightScreen::round_wait() const {
+    return fight_ != nullptr && fight_->round_wait();
+}
+
+void FightScreen::next_button_center(float& cx, float& cy) const {
+    cx = kNextBtnCX;
+    cy = kNextBtnCY;
 }
 
 // [trace, Phase 0] Arms the FightController's per-frame pose dump (the
@@ -959,6 +988,23 @@ void FightScreen::update_impl(float dt) {
                      fight_->enemy().hp,
                      fight_->enemy().last_move.empty() ? "idle" : fight_->enemy().last_move.c_str());
         std::fflush(stdout);
+    }
+
+    // Between-rounds HUD "Next" button (JS `vhb` L410 case 1 -> `Z2()`): a
+    // click on the button while the host waits between rounds runs the
+    // recovery and starts the next round (no button while the round is
+    // live; Space/Enter handled in on_key).
+    if (fight_->round_wait()) {
+        const App::PointerState& p = app().pointer();
+        if (p.pressed && p.x >= kNextBtnCX - kNextBtnW * 0.5f &&
+            p.x <= kNextBtnCX + kNextBtnW * 0.5f && p.y >= kNextBtnCY - kNextBtnH * 0.5f &&
+            p.y <= kNextBtnCY + kNextBtnH * 0.5f) {
+            sf2::audio::AudioEngine::instance().play("click");
+            std::fprintf(stdout, "[fight] NEXT round requested (round %d done)\n",
+                         fight_->round().number);
+            std::fflush(stdout);
+            fight_->next_round_requested();
+        }
     }
 
     // Battle end -> Results (JS `bea` L413 -> `v.kD` L622187 -> the
@@ -1251,6 +1297,29 @@ void FightScreen::render_impl(App& app) {
             ren.draw_triangles(ev2, 6, e_done ? 0.18f : 0.32f, e_done ? 0.92f : 0.32f,
                                e_done ? 0.18f : 0.32f, 1.0f);
         }
+    }
+
+    // Between-rounds HUD "Next" button (JS `vhb` L410 case 1): the fight
+    // holds in EndStance until the player confirms the next round — drawn
+    // only while round_wait(). Atlas frame: the fight/ui atlas "FightPause"
+    // icon (the same atlas the HUD bars come from); flat fallback when the
+    // frame is missing.
+    if (fight_->round_wait()) {
+        const char* next_frames[] = {"FightPause", "Next", "ok"};
+        bool drawn = false;
+        for (const char* fn : next_frames) {
+            if (try_draw_atlas_button(app, fn, kNextBtnCX, kNextBtnCY, kNextBtnW, kNextBtnH,
+                                      1.0f)) {
+                drawn = true;
+                break;
+            }
+        }
+        if (!drawn) {
+            draw_flat_button(app, "NEXT", kNextBtnCX, kNextBtnCY, kNextBtnW, kNextBtnH, 0.2f,
+                             0.5f, 0.8f, false);
+        }
+        (void)app.draw_text(kNextBtnCX - 26.0f, kNextBtnCY - 14.0f, "NEXT", 1.0f, 1.0f, 1.0f,
+                            1.0f);
     }
 }
 
