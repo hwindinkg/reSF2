@@ -82,26 +82,45 @@ Model model_parse(const std::uint8_t* xml, std::size_t size) {
     if (const pugi::xml_node figures = scene.child("Figures")) {
         for (const pugi::xml_node fig : figures.children()) {
             const char* type = fig.attribute("Type").value();
-            if (std::strcmp(type, "Triangle") != 0) {
-                if (std::strcmp(type, "Capsule") == 0) {
-                    Capsule cap;
-                    cap.edge = fig.attribute("Edge").value();
-                    cap.radius1 = sf2::data::xml_attr_float(fig, "Radius1");
-                    cap.radius2 = sf2::data::xml_attr_float(fig, "Radius2");
-                    cap.margin1 = sf2::data::xml_attr_float(fig, "Margin1");
-                    cap.margin2 = sf2::data::xml_attr_float(fig, "Margin2");
-                    model.capsules.push_back(std::move(cap));
+            if (std::strcmp(type, "Triangle") == 0) {
+                Tri tri;
+                tri.n1 = fig.attribute("Node1").value();
+                tri.n2 = fig.attribute("Node2").value();
+                tri.n3 = fig.attribute("Node3").value();
+                if (tri.n1.empty() || tri.n2.empty() || tri.n3.empty()) {
+                    continue;
                 }
-                continue;
+                model.tris.push_back(std::move(tri));
+            } else if (std::strcmp(type, "Quad") == 0) {
+                // JS has no Quad in the shipped models (all Triangle), but
+                // some tools export quads. Split into two triangles (1,2,3)
+                // and (1,3,4) preserving winding (JS dv.ia order).
+                const std::string n1 = fig.attribute("Node1").value();
+                const std::string n2 = fig.attribute("Node2").value();
+                const std::string n3 = fig.attribute("Node3").value();
+                const std::string n4 = fig.attribute("Node4").value();
+                if (n1.empty() || n2.empty() || n3.empty() || n4.empty()) {
+                    continue;
+                }
+                Tri t1;
+                t1.n1 = n1;
+                t1.n2 = n2;
+                t1.n3 = n3;
+                model.tris.push_back(std::move(t1));
+                Tri t2;
+                t2.n1 = n1;
+                t2.n2 = n3;
+                t2.n3 = n4;
+                model.tris.push_back(std::move(t2));
+            } else if (std::strcmp(type, "Capsule") == 0) {
+                Capsule cap;
+                cap.edge = fig.attribute("Edge").value();
+                cap.radius1 = sf2::data::xml_attr_float(fig, "Radius1");
+                cap.radius2 = sf2::data::xml_attr_float(fig, "Radius2");
+                cap.margin1 = sf2::data::xml_attr_float(fig, "Margin1");
+                cap.margin2 = sf2::data::xml_attr_float(fig, "Margin2");
+                model.capsules.push_back(std::move(cap));
             }
-            Tri tri;
-            tri.n1 = fig.attribute("Node1").value();
-            tri.n2 = fig.attribute("Node2").value();
-            tri.n3 = fig.attribute("Node3").value();
-            if (tri.n1.empty() || tri.n2.empty() || tri.n3.empty()) {
-                continue;
-            }
-            model.tris.push_back(std::move(tri));
         }
     }
 
