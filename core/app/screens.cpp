@@ -29,6 +29,7 @@
 #include <fstream>
 #include <iterator>
 #include <random>
+#include <unordered_map>
 
 #include "anim_archive.hpp"
 #include "app/app.hpp"
@@ -631,14 +632,14 @@ void FightScreen::verify_fight() const {
         c.arena_floor = assets.dojo.arena_floor();
         c.arena_center_x = assets.dojo.arena_width() * 0.5f;
         const float feet_y = fight_->player().fighter.world_y();
-        const float psx = c.world_to_screen_x(fight_->player().fighter.world_x(), 0.0f);
+        const float psx = c.world_to_screen_x(fight_->player().fighter.world_x(), 1.0f);
         const float psy = c.world_to_screen_y(feet_y);
-        const float esx = c.world_to_screen_x(fight_->enemy().fighter.world_x(), 0.0f);
+        const float esx = c.world_to_screen_x(fight_->enemy().fighter.world_x(), 1.0f);
         const float esy = c.world_to_screen_y(feet_y);
         std::fprintf(stdout, "[verify] screen: player feet=(%.0f, %.0f) enemy feet=(%.0f, %.0f)\n",
                      psx, psy, esx, esy);
     }
-    auto report = [](const char* who, const sf2::scene::Fighter& f) {
+    auto report = [&](const char* who, const sf2::scene::Fighter& f) {
         const sf2::scene::Model& m = f.model();
         const std::vector<float>& pos = f.positions();
         const char* bones[4] = {"COM", "NTop", "NAnkle_2", "NHeadF"};
@@ -700,10 +701,22 @@ void FightScreen::verify_fight() const {
             if (sx + sy > widest) widest = sx + sy;
         }
         std::fprintf(stdout, "[verify] %s widest-tri-span=%.1f\n", who, widest);
-        // On-screen check: the bbox center within the 1280x720 view.
-        const float cx = (min_x + max_x) * 0.5f, cy = (min_y + max_y) * 0.5f;
-        std::fprintf(stdout, "[verify] %s on-screen: center=(%.0f, %.0f) %s\n", who, cx, cy,
-                     (cx >= 0 && cx <= 1280 && cy >= 0 && cy <= 720) ? "OK" : "OFF-SCREEN");
+        // On-screen check: the bbox center within the 1280x720 view (projected).
+        const float world_cx = (min_x + max_x) * 0.5f;
+        const float world_cy = (min_y + max_y) * 0.5f;
+        sf2::render::Camera vcam;
+        vcam.center_x = cam.center_x;
+        vcam.center_y = cam.center_y;
+        vcam.zoom = cam.zoom;
+        vcam.view_w = 1280.0f;
+        vcam.view_h = 720.0f;
+        vcam.arena_h = 560.0f;
+        vcam.arena_floor = 80.0f;
+        vcam.arena_center_x = 980.0f;
+        const float scx = vcam.world_to_screen_x(world_cx, 1.0f);
+        const float scy = vcam.world_to_screen_y(world_cy);
+        std::fprintf(stdout, "[verify] %s on-screen: center=(%.0f, %.0f) %s\n", who, scx, scy,
+                     (scx >= 0 && scx <= 1280 && scy >= 0 && scy <= 720) ? "OK" : "OFF-SCREEN");
     };
     report("player", fight_->player().fighter);
     report("enemy", fight_->enemy().fighter);
@@ -785,7 +798,7 @@ void FightScreen::render_impl(App& app) {
     auto project = [&camera](const std::vector<float>& v) {
         std::vector<float> out(v.size());
         for (std::size_t i = 0; i < v.size(); i += 2) {
-            out[i] = camera.world_to_screen_x(v[i], 0.0f);
+            out[i] = camera.world_to_screen_x(v[i], 1.0f);
             out[i + 1] = camera.world_to_screen_y(v[i + 1]);
         }
         return out;
@@ -809,45 +822,87 @@ void FightScreen::render_impl(App& app) {
         // [Phase 4d — capsule-figure render] The oracle draws the fighter's
         // body from the merged model's CAPSULE FIGURES (JS `Yc.Tib`: every
         // `<Capsule_* Type="Capsule" Radius1=".." Edge="..">` becomes a `zu`
-        // visual node -> a `Dk` stroked line, stroke = Radius1*2). The
-        // capsule figures live in the armor/body/helm models (mdl_body has
-        // EChest/EStomach/EThigh/ECalf/EArm..., mdl_head has EHead/ENeck).
-        // Each capsule's Edge resolves to the edge's two endpoint bones;
-        // the stroke width comes from Radius1 (NOT the edge's collidable
-        // radius, which is the physics radius).
+        // visual node -> a `Dk` stroked line, stroke = Radius1*2). Dedup by
+        // edge keeps max Radius to avoid double squares (EThigh 12+15).
         const sf2::scene::Model& model = f.fighter.model();
+        std::unordered_map<std::string, float> edge_max;
+        edge_max.reserve(model.capsules.size() * 2u);
         for (const sf2::scene::Capsule& cap : model.capsules) {
-            // Find the edge by name.
+            auto it = edge_max.find(cap.edge);
+            if (it == edge_max.end() || cap.radius1 > it->second) {
+                edge_max[cap.edge] = cap.radius1;
+            }
+        }
+        constexpr float kPi = 3.14159265358979323846f;
+        constexpr int kDiscSegments = 12;
+        for (const auto& kv : edge_max) {
+            const std::string& edge_name = kv.first;
+            const float rad = kv.second;
             const sf2::scene::EdgeDef* edge = nullptr;
             for (const sf2::scene::EdgeDef& ed : model.edges) {
-                if (ed.name == cap.edge) { edge = &ed; break; }
+                if (ed.name == edge_name) {
+                    edge = &ed;
+                    break;
+                }
             }
-            if (edge == nullptr) continue;
+            if (edge == nullptr) {
+                continue;
+            }
             const int i1 = model.bone_by_name(edge->end1);
             const int i2 = model.bone_by_name(edge->end2);
-            if (i1 < 0 || i2 < 0) continue;
+            if (i1 < 0 || i2 < 0) {
+                continue;
+            }
             const std::vector<float>& pos = f.fighter.positions();
             const std::size_t u1 = static_cast<std::size_t>(i1) * 2;
             const std::size_t u2 = static_cast<std::size_t>(i2) * 2;
-            if (u1 + 1 >= pos.size() || u2 + 1 >= pos.size()) continue;
-            const float stroke = cap.radius1 * 2.0f * camera.zoom;
-            if (stroke <= 0.0f) continue;
-            const float sx1 = camera.world_to_screen_x(pos[u1], 0.0f);
+            if (u1 + 1 >= pos.size() || u2 + 1 >= pos.size()) {
+                continue;
+            }
+            const float stroke = rad * 2.0f * camera.zoom;
+            if (stroke <= 0.0f) {
+                continue;
+            }
+            const float sx1 = camera.world_to_screen_x(pos[u1], 1.0f);
             const float sy1 = camera.world_to_screen_y(pos[u1 + 1]);
-            const float sx2 = camera.world_to_screen_x(pos[u2], 0.0f);
+            const float sx2 = camera.world_to_screen_x(pos[u2], 1.0f);
             const float sy2 = camera.world_to_screen_y(pos[u2 + 1]);
-            float dx = sx2 - sx1, dy = sy2 - sy1;
+            float dx = sx2 - sx1;
+            float dy = sy2 - sy1;
             const float len = std::sqrt(dx * dx + dy * dy);
-            if (len < 1e-4f) continue;
-            dx /= len; dy /= len;
-            const float px = -dy * stroke * 0.5f;
-            const float py = dx * stroke * 0.5f;
+            const float cr = stroke * 0.5f;
+            auto draw_disc = [&](float cx, float cy) {
+                const float step = 2.0f * kPi / static_cast<float>(kDiscSegments);
+                for (int s = 0; s < kDiscSegments; ++s) {
+                    const float a0 = static_cast<float>(s) * step;
+                    const float a1 = static_cast<float>(s + 1) * step;
+                    float tri[6] = {
+                        cx,
+                        cy,
+                        cx + std::cos(a0) * cr,
+                        cy + std::sin(a0) * cr,
+                        cx + std::cos(a1) * cr,
+                        cy + std::sin(a1) * cr,
+                    };
+                    ren.draw_triangles(tri, 3, r, g, b, 1.0f);
+                }
+            };
+            if (len < 1e-4f) {
+                draw_disc(sx1, sy1);
+                continue;
+            }
+            dx /= len;
+            dy /= len;
+            const float px = -dy * cr;
+            const float py = dx * cr;
             float quad[12] = {
                 sx1 + px, sy1 + py, sx2 + px, sy2 + py,
                 sx1 - px, sy1 - py, sx2 + px, sy2 + py,
                 sx2 - px, sy2 - py, sx1 - px, sy1 - py,
             };
             ren.draw_triangles(quad, 6, r, g, b, 1.0f);
+            draw_disc(sx1, sy1);
+            draw_disc(sx2, sy2);
         }
     };
     draw_capsules(fight_->player());
