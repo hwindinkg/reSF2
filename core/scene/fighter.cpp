@@ -590,27 +590,20 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         pz[i] = bones[i].z - bones[r].z + pz[r];
     }
 
-    // 3. World placement: the fighter's (x, y) anchors the model's GROUND at
-//    (x, y). [FIX Phase 4a — fighters in nowhere] The game's physics body
-//    rests on the arena floor: the dojo_params Floor attr (world y) is the
-//    ground line and the clip is authored with the feet AT that line
-//    (stance_1 feet_y=-15 ≈ -Floor/5 + COM offset). The OLD code anchored
-//    the COM at the spawn y, which left the feet ~440 px above the visible
-//    floor. The native anchors the CLIP's ground-contact bones (the lowest
-//    of the clip-driven skeleton bones — the feet) at (x, y): the spawn y
-//    is the fighter's ground line (the dojo ModelsViewer Y is the ground
-//    the fighter stands on; the fight camera then frames the floor).
-//    Facing mirrors X (Te.Qeb).
+    // 3. World placement: the fighter's (x, y) anchors the model's COM at
+//    (x, y) — matching the JS oracle where world_y is the COM (Dl.mea),
+//    not the feet. The oracle trace shows world_y -93 while feet are at
+//    ~5 (delta ~98): the COM is ~98 below the feet. The old native anchored
+//    the feet at (x, y) (dy = y - ground, ground = max py), which placed
+//    the COM ~98 above the oracle and left the world_y gap ~310. Facing
+//    mirrors X (Te.Qeb).
     int com = model_.bone_by_name("COM");
     if (com < 0) {
         com = 0;
     }
     const std::size_t com_u = static_cast<std::size_t>(com);
-    float ground = py[com_u];
-    for (std::size_t i = 0; i < nclip; ++i) {
-        ground = std::max(ground, py[i]);  // LOWEST clip-driven bone (the feet = the LARGEST y in the y-up space)
-    }
-    const float dy = y - ground;
+    const float com_y = py[com_u];
+    const float dy = y - com_y;
     const float f = facing < 0 ? -1.0f : 1.0f;
     for (std::size_t i = 0; i < n; ++i) {
         // [FIX Phase 4a] The facing mirror (JS `Te.Qeb` L550: `jc.Neb()`

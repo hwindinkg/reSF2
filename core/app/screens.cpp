@@ -525,11 +525,11 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // fighters stand on it (feet at 223.5 -> the floor sprite row). The
     // params Floor attr (80) is the arena's physics line, NOT the visible
     // wooden floor.
-    const float floor_y = 223.5f;
+    const float floor_y = -20.0f;  // camera anchor -> cam ~ -219 -> floor at 559, fighters COM -93/-110 -> feet ~ -3/ -? on floor
     battle.player_spawn_x = 973.0f;
-    battle.player_spawn_y = floor_y;   // the ground line (visible dojo floor)
+    battle.player_spawn_y = -110.0f;  // COM Y (oracle Me -108, Enemy -93) — ModelsViewer split
     battle.enemy_spawn_x = 690.0f;
-    battle.enemy_spawn_y = floor_y;
+    battle.enemy_spawn_y = -93.0f;
     battle.max_hp = 1;  // the game's HP fallback (Zn = aB>0 ? aB : 1)
     battle.player_unarmed_damage = 80.0f;
 
