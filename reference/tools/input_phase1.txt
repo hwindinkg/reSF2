@@ -1,11 +1,51 @@
-# Phase 1 determinism gate — fixed input script (zero-input variant).
+# Phase 1 gate — fixed input script (debug-round-3 movement drench).
 #
-# Fresh browser profile + frozen clock + seeded Math.random (see
-# reference/tools/trace_oracle.js harness) make the boot auto-run a
-# tutorial/dojo fight with no taps needed: phase 1 -> phase 2, enemy AI
-# active, player idle (PhysicalDummy).
-#
-# Records are keyed by fight.frame, so wall-clock only shifts the boot
-# offset, never frame content. The shell exits automatically when the oracle
-# trace signals done (window.__oracleDone) or after its safety timeout.
+# Boot auto-runs the dojo tutorial fight (Sensei: "show me how you move").
+# Lesson inputs are joystick drags from the stick center (~175,545); punch
+# fist button (~1135,540), kick foot button (~1000,625) at 1280x720.
+# 8-step cycle every 12 fight.frames from f=100 (phase-1 WC gets exercised).
+# Frame-anchored stimulus fires page-side at exact fight.frames (see
+# trace_oracle.js stimulus driver): landing frames are identical across runs.
 wait 90000
+atframe 100 drag 175 545 270 545
+atframe 112 tap 1135 540
+atframe 124 drag 175 545 90 545
+atframe 136 tap 1000 625
+atframe 148 drag 175 545 175 450
+atframe 160 tap 1135 540
+atframe 172 drag 175 545 175 630
+atframe 184 tap 1000 625
+atframe 196 drag 175 545 270 545
+atframe 208 tap 1135 540
+atframe 220 drag 175 545 90 545
+atframe 232 tap 1000 625
+atframe 244 drag 175 545 175 450
+atframe 256 tap 1135 540
+atframe 268 drag 175 545 175 630
+atframe 280 tap 1000 625
+atframe 292 drag 175 545 270 545
+atframe 304 tap 1135 540
+atframe 316 drag 175 545 90 545
+atframe 328 tap 1000 625
+atframe 340 drag 175 545 175 450
+atframe 352 tap 1135 540
+atframe 364 drag 175 545 175 630
+atframe 376 tap 1000 625
+atframe 388 drag 175 545 270 545
+atframe 400 tap 1135 540
+atframe 412 drag 175 545 90 545
+atframe 424 tap 1000 625
+atframe 436 drag 175 545 175 450
+atframe 448 tap 1135 540
+atframe 460 drag 175 545 175 630
+atframe 472 tap 1000 625
+atframe 484 drag 175 545 270 545
+atframe 496 tap 1135 540
+atframe 508 drag 175 545 90 545
+atframe 520 tap 1000 625
+atframe 532 drag 175 545 175 450
+atframe 544 tap 1135 540
+atframe 556 drag 175 545 175 630
+atframe 568 tap 1000 625
+atframe 580 drag 175 545 270 545
+wait 120000

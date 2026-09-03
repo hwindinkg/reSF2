@@ -182,6 +182,7 @@ public sealed class MainForm : Form
         if (_inputScriptPath is not null)
         {
             StartInputScript(_inputScriptPath);
+            ForwardStimulus();
         }
 
         // Screenshot 1 at ~8s after navigation, screenshot 2 at ~20s.
@@ -249,6 +250,10 @@ public sealed class MainForm : Form
         {
             case InputCommandKind.Wait:
                 _inputTimer.Interval = Math.Max(command.Milliseconds, 1);
+                break;
+            case InputCommandKind.AtFrame:
+                // Already forwarded to the page (window.__oracleStimulus);
+                // the wall-clock timer skips these.
                 break;
             case InputCommandKind.Tap:
                 _ = DispatchTapAsync(command.X, command.Y);
@@ -363,9 +368,48 @@ public sealed class MainForm : Form
         }
     }
 
+    /// <summary>
+    /// Forwards the input script's frame-anchored (atframe) commands to the
+    /// page, where trace_oracle.js fires them in-tick at exact fight.frames.
+    /// </summary>
+    private void ForwardStimulus()
+    {
+        if (_inputCommands is null)
+        {
+            return;
+        }
+
+        var items = new List<string>();
+        foreach (InputCommand command in _inputCommands)
+        {
+            if (command.Kind != InputCommandKind.AtFrame)
+            {
+                continue;
+            }
+
+            items.Add(command.InnerKind == InputCommandKind.Key
+                ? $"{{f:{command.Milliseconds},t:'key',c:{command.KeyCode}}}"
+                : command.InnerKind == InputCommandKind.Drag
+                ? $"{{f:{command.Milliseconds},t:'drag',x1:{command.X},y1:{command.Y},x2:{command.X2},y2:{command.Y2}}}"
+                : $"{{f:{command.Milliseconds},t:'tap',x:{command.X},y:{command.Y}}}");
+        }
+
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        string script = $"window.__oracleStimulus=[{string.Join(",", items)}];";
+        _ = ExecuteInputScriptAsync(script);
+        AppendConsoleLine($"[shell] stimulus forwarded: {items.Count} items");
+    }
+
     private async Task<bool> QueryOracleDoneAsync()
     {
-        const string script = "(function(){try{return window.__oracleDone===true||(window.__sf2Trace&&window.__sf2Trace.state().done===true)}catch(e){return false}})()";
+        // Phase 1 gate runs are governed by OUR trace finish (fight.frame
+        // budget). The v2 pose tracer's earlier done flag must NOT close the
+        // run, or the oracle records stop at ~350 app ticks.
+        const string script = "(function(){try{return window.__oracleDone===true}catch(e){return false}})()";
         try
         {
             string result = await _webView.CoreWebView2.ExecuteScriptAsync(script);

@@ -88,15 +88,24 @@
   var or = {
     mc: null,
     fight: null,
+    screenTop: null,
+    timerHostObj: null,
+    timerHostPath: null,
+    stimulus: null,
     headerDone: false,
     lastFrame: -1,
     records: 0,
     hookedFight: null,
     hookedPaths: { iPa: [], N0a: [] },
-    wrappedDe: [null, null], /* per side index: {obj} */
+    wrappedDe: [null, null], /* legacy: superseded by deList scan */
+    deScanFight: null,
+    deList: null, /* [{obj, label}] every de in the fight graph */
+    deCount: 0,
+    lastDecider: null, /* label of the de with the latest Pqb/ia event */
     lastMove: { Me: null, Enemy: null },
     lastPqb: { Me: null, Enemy: null },
     n0aRecent: [],
+    cPqb: 0, cIa: 0, cN0a: 0, ciPa: 0, /* wrapper fire counters (trace_stats) */
     errLogged: false
   };
 
@@ -222,6 +231,8 @@
     de.Pqb = function (a) {
       var r = orig.apply(this, arguments);
       try {
+        or.cPqb++;
+        or.lastDecider = side;
         var entry = {
           m: "Pqb", side: side, f: frameNo(),
           fk: num(this.fk), aqa: num(this.aqa),
@@ -243,6 +254,8 @@
       var fk0 = num(this.fk);
       var r = orig.apply(this, arguments);
       try {
+        or.cIa++;
+        or.lastDecider = side;
         pushTrace({
           m: "de.ia", side: side, f: frameNo(),
           fk0: fk0, fk1: num(this.fk), aqa: num(this.aqa),
@@ -256,8 +269,8 @@
     return true;
   }
 
-  function wrapFightMethod(fight, name) {
-    var found = findMethodDeep(fight, name);
+  function wrapFightMethod(target, rootName, name) {
+    var found = findMethodDeep(target, name);
     if (!found) return null;
     var host = found.host;
     try {
@@ -279,6 +292,7 @@
       host[name] = function (a) {
         var r = orig.apply(this, arguments);
         try {
+          or.cN0a++;
           var ctl = (a && typeof a.control !== "undefined") ? a.control : null;
           pushTrace({ m: "N0a", f: frameNo(), control: ctl, eu: num(this.eu) });
           or.n0aRecent.push({ f: frameNo(), control: ctl });
@@ -293,54 +307,144 @@
       host.__orWrapped = host.__orWrapped || {};
       host.__orWrapped[name] = true;
     } catch (e) { /* ignore */ }
-    return found.path;
+    return rootName + "." + found.path;
   }
 
   function ensureFightHooks(fight) {
-    if (or.hookedFight === fight) return;
-    or.hookedFight = fight;
-    or.hookedPaths = { iPa: [], N0a: [] };
-    ["iPa", "N0a"].forEach(function (name) {
-      try {
-        var p = wrapFightMethod(fight, name);
-        if (p) or.hookedPaths[name].push(p);
-      } catch (e) { /* ignore */ }
-    });
+    /* Retry the timer-host search while iPa is still unhooked (the screen
+     * graph may complete a few ticks after the fight object appears). */
+    if (or.hookedFight === fight && or.hookedPaths.iPa.length) return;
+    if (or.hookedFight !== fight) {
+      or.hookedFight = fight;
+      or.hookedPaths = { iPa: [], N0a: [] };
+    }
+    /* N0a lives on the fight controller (ca, top screen's Ig). iPa/xU live
+     * on the BFS-found timer host (fight screen Sf). */
+    try {
+      var p = wrapFightMethod(fight, "fight", "N0a");
+      if (p && or.hookedPaths.N0a.indexOf(p) < 0) or.hookedPaths.N0a.push(p);
+    } catch (e) { /* ignore */ }
+    try {
+      var host = timerHost(fight);
+      if (host) {
+        var hit = findMethod(host, "iPa");
+        if (hit && !(hit.host.__orWrapped && hit.host.__orWrapped.iPa)) {
+          var orig = hit.fn;
+          var h2 = hit.host;
+          h2.iPa = function () {
+            var x0 = num(this.xU);
+            var r = orig.apply(this, arguments);
+            try {
+              or.ciPa++;
+              pushTrace({ m: "iPa", f: frameNo(), xU0: x0, xU1: num(this.xU) });
+            } catch (e2) { /* ignore */ }
+            return r;
+          };
+          try {
+            h2.__orWrapped = h2.__orWrapped || {};
+            h2.__orWrapped.iPa = true;
+          } catch (e2) { /* ignore */ }
+        }
+        if (or.timerHostPath &&
+            or.hookedPaths.iPa.indexOf(or.timerHostPath) < 0) {
+          or.hookedPaths.iPa.push(or.timerHostPath);
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function deLabel(fight, de) {
+    try {
+      if (fight.pb && de === fight.pb.nf) return "Me";
+      if (fight.yb && de === fight.yb.nf) return "Enemy";
+    } catch (e) { /* ignore */ }
+    return null;
   }
 
   function ensureDeHooks(fight) {
-    ["Me", "Enemy"].forEach(function (side, idx) {
+    /* Wrap EVERY de instance in the fight graph (fighters, sub-fighters),
+     * not just fight.pb/yb .nf — the tutorial may drive bodies whose de
+     * lives elsewhere. Cached per fight identity; re-scanned on change. */
+    if (or.deScanFight === fight && or.deList) {
+      var stillThere = true;
       try {
-        var f = fighterAt(fight, side);
-        var de = null;
+        for (var s = 0; s < or.deList.length; s++) {
+          if (!isDe(or.deList[s].obj)) { stillThere = false; break; }
+        }
+      } catch (e) { stillThere = false; }
+      if (stillThere) return;
+    }
+    or.deScanFight = fight;
+    or.deList = [];
+    var found = [];
+    try {
+      var queue = [{ o: fight, d: 0 }];
+      var seen = [fight];
+      var visited = 0;
+      while (queue.length && visited < 600) {
+        var cur = queue.shift();
+        if (cur.d > 0 && isDe(cur.o)) {
+          var dup = false;
+          for (var k = 0; k < found.length; k++) {
+            if (found[k] === cur.o) { dup = true; break; }
+          }
+          if (!dup) found.push(cur.o);
+        }
+        if (cur.d >= 5) continue;
+        var keys = null;
         try {
-          if (f && isDe(f.nf)) de = f.nf;
-        } catch (e) { /* ignore */ }
-        if (!de && f) {
-          try {
-            var keys = Object.keys(f);
-            for (var i = 0; i < keys.length; i++) {
-              var v = null;
-              try { v = f[keys[i]]; } catch (e2) { continue; }
-              if (isDe(v)) { de = v; break; }
+          if (cur.o && (typeof cur.o === "object" || typeof cur.o === "function")) {
+            keys = Object.keys(cur.o);
+          }
+        } catch (e) { continue; }
+        if (!keys) continue;
+        for (var i = 0; i < keys.length; i++) {
+          var v = null;
+          try { v = cur.o[keys[i]]; } catch (e2) { continue; }
+          if (v && (typeof v === "object" || typeof v === "function")) {
+            var known = false;
+            for (var m = 0; m < seen.length; m++) {
+              if (seen[m] === v) { known = true; break; }
             }
-          } catch (e) { /* ignore */ }
+            if (!known) {
+              seen.push(v);
+              visited++;
+              queue.push({ o: v, d: cur.d + 1 });
+            }
+          }
         }
-        if (de && (!or.wrappedDe[idx] || or.wrappedDe[idx].obj !== de)) {
-          try {
-            if (!de.__orPqb) {
-              de.__orPqb = true;
-              wrapPqb(de, side);
-            }
-            if (!de.__orIa) {
-              de.__orIa = true;
-              if (!wrapDeIa(de, side)) de.__orIa = false;
-            }
-            or.wrappedDe[idx] = { obj: de };
-          } catch (e) { /* ignore */ }
+      }
+    } catch (e) { /* ignore */ }
+    var xCount = 0;
+    for (var n = 0; n < found.length; n++) {
+      try {
+        var de = found[n];
+        var label = deLabel(fight, de);
+        if (!label) { xCount++; label = "X" + xCount; }
+        if (!de.__orPqb) {
+          de.__orPqb = true;
+          wrapPqb(de, label);
         }
+        if (!de.__orIa && typeof de.ia === "function") {
+          de.__orIa = true;
+          if (!wrapDeIa(de, label)) de.__orIa = false;
+        }
+        or.deList.push({ obj: de, label: label });
       } catch (e) { /* ignore */ }
-    });
+    }
+    or.deCount = found.length;
+  }
+
+  function deOfLabel(fight, label) {
+    try {
+      if (label === "Me" || label === "Enemy") return deOf(fight, label);
+      if (or.deList) {
+        for (var i = 0; i < or.deList.length; i++) {
+          if (or.deList[i].label === label) return or.deList[i].obj;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
   }
 
   /* ================= 5. State readers ================= */
@@ -427,17 +531,18 @@
   /* ================= 6. Records ================= */
 
   function emitHeader(fight) {
-    var pqb = { Me: false, Enemy: false };
-    var ia = { Me: false, Enemy: false };
-    ["Me", "Enemy"].forEach(function (side) {
-      try {
-        var de = deOf(fight, side);
-        if (de) {
-          pqb[side] = !!de.__orPqb;
-          ia[side] = !!de.__orIa;
+    var pqb = {};
+    var ia = {};
+    try {
+      if (or.deList) {
+        for (var i = 0; i < or.deList.length; i++) {
+          var lb = or.deList[i].label;
+          var dd = or.deList[i].obj;
+          pqb[lb] = !!dd.__orPqb;
+          ia[lb] = !!dd.__orIa;
         }
-      } catch (e) { /* ignore */ }
-    });
+      }
+    } catch (e) { /* ignore */ }
     emit({
       t: "oracle_header",
       js: "sf2.502f0946.js",
@@ -453,8 +558,8 @@
   }
 
   function oracleRecord(fight) {
-    var side = aiSide(fight);
-    var de = deOf(fight, side);
+    var side = or.lastDecider || aiSide(fight);
+    var de = deOfLabel(fight, side);
     var me = fighterAt(fight, "Me");
     var en = fighterAt(fight, "Enemy");
     var wMe = wcState(me);
@@ -462,6 +567,7 @@
     var bMe = blockInfo(me);
     var bEn = blockInfo(en);
     var pqb = or.lastPqb[side] || null;
+    var tmr = timerOf(fight);
     return {
       t: "oracle",
       f: num(fight.frame),
@@ -484,12 +590,134 @@
         enemy_control: wEn.control,
         recent: or.n0aRecent.slice()
       },
-      round_timer_xU: num(fight.xU),
-      round_timer_NF: num(fight.NF),
+      round_timer_xU: tmr.xU,
+      round_timer_NF: tmr.NF,
+      trace_stats: { Pqb: or.cPqb, ia: or.cIa, N0a: or.cN0a, iPa: or.ciPa,
+        deCount: or.deCount, decider: or.lastDecider },
       block_state: { me: bMe.a, enemy: bEn.a },
       block_info: { me: bMe.n, enemy: bEn.n },
       camera: camOf(fight)
     };
+  }
+
+  /* ================= 7b. Frame-exact stimulus (page side) ================= */
+  /* The shell forwards the fixed input script's `atframe` commands once via
+   * window.__oracleStimulus. Items fire IN-TICK (before the tick simulates),
+   * so landing frames are exact and identical across runs. Tap/key hold =
+   * down at tick F, up at tick F+7 (~117ms, mirrors shell TapHoldMs). Drag =
+   * down at (x1,y1) F, moves through F+3/F+5, up at (x2,y2) F+8. */
+  var STIM_HOLD_FRAMES = 7;
+  var STIM_DRAG_UP = 8;
+
+  function pollStimulus() {
+    try {
+      if (!or.stimulus && window.__oracleStimulus &&
+          window.__oracleStimulus.length) {
+        or.stimulus = window.__oracleStimulus;
+        console.log("[ORACLE] stimulus armed: " +
+          window.__oracleStimulus.length + " items");
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function stimTarget() {
+    try {
+      return document.getElementById("gfx") || document;
+    } catch (e) { return document; }
+  }
+
+  function firePointer(target, type, x, y, touchType) {
+    try {
+      var po = {
+        bubbles: true, cancelable: true,
+        clientX: x, clientY: y,
+        pointerId: 1, pointerType: "touch", isPrimary: true
+      };
+      target.dispatchEvent(new PointerEvent(type, po));
+      var touch = new Touch(
+        { identifier: 1, target: target, clientX: x, clientY: y });
+      var to = {
+        bubbles: true, cancelable: true,
+        touches: touchType === "touchend" ? [] : [touch],
+        targetTouches: touchType === "touchend" ? [] : [touch],
+        changedTouches: [touch]
+      };
+      target.dispatchEvent(new TouchEvent(touchType, to));
+    } catch (e) { /* ignore */ }
+  }
+
+  function fireMove(it, x, y) {
+    firePointer(stimTarget(), "pointermove", x, y, "touchmove");
+  }
+
+  function fireDown(it) {
+    var target = stimTarget();
+    try {
+      if (it.t === "key") {
+        var kd = new KeyboardEvent("keydown",
+          { bubbles: true, cancelable: true, keyCode: it.c, which: it.c });
+        target.dispatchEvent(kd);
+      } else if (it.t === "drag") {
+        firePointer(target, "pointerdown", it.x1, it.y1, "touchstart");
+      } else {
+        firePointer(target, "pointerdown", it.x, it.y, "touchstart");
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function fireUp(it) {
+    var target = stimTarget();
+    try {
+      if (it.t === "key") {
+        var ku = new KeyboardEvent("keyup",
+          { bubbles: true, cancelable: true, keyCode: it.c, which: it.c });
+        target.dispatchEvent(ku);
+      } else if (it.t === "drag") {
+        firePointer(target, "pointerup", it.x2, it.y2, "touchend");
+      } else {
+        firePointer(target, "pointerup", it.x, it.y, "touchend");
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function stimTickPre() {
+    pollStimulus();
+    if (!or.stimulus || !or.stimulus.length) return;
+    var fight = fightObj();
+    if (!fight) return;
+    var fr = num(fight.frame);
+    if (fr == null) return;
+    var i, it;
+    for (i = 0; i < or.stimulus.length; i++) {
+      it = or.stimulus[i];
+      if (it.done || it.down) continue;
+      if (fr >= it.f) {
+        fireDown(it);
+        it.down = true;
+        it.upAt = fr + (it.t === "drag" ? STIM_DRAG_UP : STIM_HOLD_FRAMES);
+        if (it.t === "drag") {
+          it.mx1 = it.f + 3;
+          it.mx2 = it.f + 5;
+        }
+      }
+    }
+    for (i = 0; i < or.stimulus.length; i++) {
+      it = or.stimulus[i];
+      if (it.down && !it.up && fr >= it.upAt) {
+        fireUp(it);
+        it.up = true;
+        it.done = true;
+      } else if (it.t === "drag" && it.down && !it.done) {
+        /* joystick waypoints: mid then 3/4 toward the end */
+        if (!it.m1 && fr >= it.mx1) {
+          it.m1 = true;
+          fireMove(it, (it.x1 + it.x2) / 2, (it.y1 + it.y2) / 2);
+        } else if (it.m1 && !it.m2 && fr >= it.mx2) {
+          it.m2 = true;
+          fireMove(it, (it.x1 + 3 * it.x2) / 4, (it.y1 + 3 * it.y2) / 4);
+        }
+      }
+    }
   }
 
   /* ================= 7. Per-tick driver ================= */
@@ -502,11 +730,102 @@
       if (!top || !top.Ig) return null;
       var fight = top.Ig;
       if (!fight || typeof fight.frame !== "number") return null;
+      or.screenTop = top; /* fight screen (Sf): owns iPa + xU/NF timer */
       return fight;
     } catch (e) { return null; }
   }
 
+  /* Round timer state: xU/NF live with iPa (fight screen Sf), NOT on the
+   * fight controller. Found by BFS over the screen graph (cached per
+   * screen identity); the header reports the path. */
+  function bfsFind(root, pred, maxDepth, maxVisit) {
+    var seen = [root];
+    function seenHas(o) {
+      for (var i = 0; i < seen.length; i++) {
+        if (seen[i] === o) return true;
+      }
+      return false;
+    }
+    var queue = [{ o: root, p: "root", d: 0 }];
+    var visited = 0;
+    while (queue.length) {
+      var cur = queue.shift();
+      if (cur.d > 0) {
+        var ok = false;
+        try { ok = !!pred(cur.o); } catch (e) { /* ignore */ }
+        if (ok) return { obj: cur.o, path: cur.p };
+      }
+      if (cur.d >= maxDepth) continue;
+      var keys = null;
+      try {
+        if (cur.o && (typeof cur.o === "object" || typeof cur.o === "function")) {
+          keys = Object.keys(cur.o);
+        }
+      } catch (e) { continue; }
+      if (!keys) continue;
+      for (var i = 0; i < keys.length; i++) {
+        if (visited >= maxVisit) return null;
+        var v = null;
+        try { v = cur.o[keys[i]]; } catch (e) { continue; }
+        if (v && (typeof v === "object" || typeof v === "function") &&
+            !seenHas(v)) {
+          seen.push(v);
+          visited++;
+          queue.push({ o: v, p: cur.p + "." + keys[i], d: cur.d + 1 });
+        }
+      }
+    }
+    return null;
+  }
+
+  function timerHost(fight) {
+    /* Fast path: previously found host still valid. */
+    try {
+      if (or.timerHostObj && typeof or.timerHostObj.iPa === "function" &&
+          typeof or.timerHostObj.xU === "number") {
+        return or.timerHostObj;
+      }
+    } catch (e) { /* ignore */ }
+    or.timerHostObj = null;
+    or.timerHostPath = null;
+    var roots = [];
+    try { if (or.screenTop) roots.push(or.screenTop); } catch (e) { /* ignore */ }
+    roots.push(fight);
+    for (var i = 0; i < roots.length; i++) {
+      var hit = null;
+      try {
+        hit = bfsFind(roots[i], function (o) {
+          try {
+            return typeof o.iPa === "function" &&
+              typeof o.xU === "number" && typeof o.NF === "number";
+          } catch (e2) { return false; }
+        }, 4, 400);
+      } catch (e) { /* ignore */ }
+      if (hit) {
+        or.timerHostObj = hit.obj;
+        or.timerHostPath = (i === 0 ? "screen" : "fight") + "." + hit.path;
+        return hit.obj;
+      }
+    }
+    return null;
+  }
+
+  function timerOf(fight) {
+    var host = null;
+    try { host = timerHost(fight); } catch (e) { /* ignore */ }
+    try {
+      if (host && typeof host.xU === "number" &&
+          typeof host.NF === "number") {
+        return { xU: host.xU, NF: host.NF };
+      }
+    } catch (e) { /* ignore */ }
+    return { xU: null, NF: null };
+  }
+
   function oracleTick() {
+    /* After finish: stay silent so the tail (frames past the done boundary,
+     * whose count depends on poll timing) cannot pollute the trace. */
+    if (window.__oracleDone) return;
     var fight = fightObj();
     if (!fight) return;
     or.fight = fight;
@@ -551,6 +870,11 @@
       app.__oracleHooked = true;
       var origAa = app.aa;
       app.aa = function (a) {
+        try {
+          stimTickPre(); /* frame-exact stimulus BEFORE the tick simulates */
+        } catch (err) {
+          orFail(err);
+        }
         var r = origAa.apply(this, arguments);
         try {
           oracleTick();

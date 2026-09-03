@@ -40,7 +40,31 @@
   - Wave 1 (2026-09-04): `trace_oracle.js` + `input_phase1.txt` написаны; shell:
     инъекция через AddScriptToExecuteOnDocumentCreated, fresh profile/ран,
     auto-close по __oracleDone/150s timeout. Runs → Wave 2.
+  - Wave 2 (2026-09-04): infra PASS (0 tracer ERRs; `extract_oracle.py` работает;
+    page-side `atframe`-стимул кадр-в-кадр; хук-отчёт в header честный).
+    Gate: FAIL — см. BLOCKED ниже. Коммит wave-2 (infra + evidence, без gate).
 - [ ] Детерминизм подтверждён (2 прогона одного `--input-script` идентичны побитово)
+  - PARTIAL 2026-09-04: два прогона drench-скрипта идентичны побитово на строках
+    0..366 (367 записей: фазы, cf, camera-floats, chances, block states).
+    Первое расхождение на строке 367 (`f≈366`): лишний button-tap `N0a`
+    (control 6) в одном прогоне. Стик-drags регистрируются 1:1; button-taps
+    gated/flaky (зависит от wall-clock/tutorial-gating, не от кадров).
+  - run3 `75348487f8f139fc8b93c7353e21ba4f6e7ba9cafdd022b8c9ebf97037b52ec`
+  - run4 `a7a11c1b165fae2ee6d731b2209fb224085dad823781e83259a98043ae356e95`
+- BLOCKED 2026-09-04 (gate Phase 1 не закрыт, критерии не занижены):
+  причина — автодостигаемый dojo-tutorial бой НЕ СОДЕРЖИТ AI-решений вообще:
+  `trace_stats {ia:0, Pqb:0}` на ~1600 суммарных fight-кадрах, `deCount:1`
+  (BFS всего fight-графа — скрытых de нет), `chosen_move` null в 601/601,
+  `ai_branch`/`ai_zone` заморожены на init (-1/1), `iPa` не найден даже
+  BFS-depth-4 (в tutorial-HUD нет таймера раунда — `round_timer_xU` null
+  в 601/601), игрок — `PhysicalDummy` (неподвижен под 41 стимулом:
+  N0a-события доходят, эффекта нет; урок-1 «движения» не завершается —
+  вероятно нужен длинный hold, а не 7-8-кадровые blips).
+  Следующий путь (не в Phase 1): (a) long-hold стимул (`hold X Y LEN`) для
+  завершения lesson-1; (b) навигация меню→настоящий бой с AI (flow неизвестен);
+  (c) drag-only скрипт для чистого детерминизм-прогона без flaky taps.
+  Evidence: `reference/traces/oracle_run3.jsonl` / `oracle_run4.jsonl`
+  (ignored, на диске) + `console.run*.log`; формат: `reference/traces/README.md`.
 - Gate (фиксирован заранее): два прогона одного скрипта дают идентичный JSONL;
   в трейсе реально присутствуют все поля
   (`frame, phase, cf, ai_branch, ai_zone, chosen_move, chances{...},

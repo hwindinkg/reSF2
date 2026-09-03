@@ -8,8 +8,8 @@ design_approved: false
 design_override: true
 steps_complete: [0, 1, 2, 3, 4, 5, 6, 7, 8]
 steps_pending: [9]
-last_action: "Phase 0 complete (3bb38081, pushed)"
-next_action: "Phase 1 oracle instrumentation (resumed session)"
+last_action: "Phase 1 wave 1 done (36d0fb74, pushed)"
+next_action: "Phase 1 wave 2: determinism runs + gate"
 blockers: []
 freshnessStatus: "fresh"
 lastUpdatedAt: 2026-07-22T01:55:39.834+03:00

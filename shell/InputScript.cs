@@ -9,6 +9,15 @@ internal enum InputCommandKind
     Move,
     Key,
     Wait,
+    /// <summary>
+    /// Frame-anchored command, executed page-side at an exact fight.frame
+    /// (see trace_oracle.js stimulus driver). InnerKind says Tap, Key or
+    /// Drag; Milliseconds carries the frame number; X/Y carry tap coords,
+    /// key code (KeyCode), or drag start (X2/Y2 carry the drag end).
+    /// </summary>
+    AtFrame,
+    /// <summary>Drag inner kind for AtFrame (X/Y start, X2/Y2 end).</summary>
+    Drag,
 }
 
 /// <summary>
@@ -19,7 +28,10 @@ internal sealed record InputCommand(
     int X = 0,
     int Y = 0,
     int KeyCode = 0,
-    int Milliseconds = 0);
+    int Milliseconds = 0,
+    InputCommandKind InnerKind = InputCommandKind.Tap,
+    int X2 = 0,
+    int Y2 = 0);
 
 /// <summary>
 /// Parses an input script file. One command per line:
@@ -27,7 +39,12 @@ internal sealed record InputCommand(
 ///   move &lt;x&gt; &lt;y&gt;  — pointermove at (x, y)
 ///   key &lt;code&gt;    — keydown+keyup with the given numeric keyCode
 ///   wait &lt;ms&gt;     — pause for the given number of milliseconds
+///   atframe &lt;f&gt; tap &lt;x&gt; &lt;y&gt; — page-side tap at exact fight.frame f
+///   atframe &lt;f&gt; key &lt;code&gt;        — page-side key at exact fight.frame f
+///   atframe &lt;f&gt; drag &lt;x1&gt; &lt;y1&gt; &lt;x2&gt; &lt;y2&gt; — page-side joystick drag
 ///   # comment     — ignored (blank lines too)
+/// atframe items are forwarded to the page once (window.__oracleStimulus)
+/// and skipped by the wall-clock timer: landing frames are exact.
 /// </summary>
 internal static class InputScriptParser
 {
@@ -58,6 +75,26 @@ internal static class InputScriptParser
                     break;
                 case "wait" when parts.Length >= 2 && int.TryParse(parts[1], out int waitMs):
                     commands.Add(new InputCommand(InputCommandKind.Wait, Milliseconds: waitMs));
+                    break;
+                case "atframe" when parts.Length >= 5 && int.TryParse(parts[1], out int frame)
+                    && string.Equals(parts[2], "tap", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(parts[3], out int afTapX) && int.TryParse(parts[4], out int afTapY):
+                    commands.Add(new InputCommand(InputCommandKind.AtFrame, X: afTapX, Y: afTapY,
+                        Milliseconds: frame, InnerKind: InputCommandKind.Tap));
+                    break;
+                case "atframe" when parts.Length >= 4 && int.TryParse(parts[1], out int keyFrame)
+                    && string.Equals(parts[2], "key", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(parts[3], out int afKeyCode):
+                    commands.Add(new InputCommand(InputCommandKind.AtFrame, KeyCode: afKeyCode,
+                        Milliseconds: keyFrame, InnerKind: InputCommandKind.Key));
+                    break;
+                case "atframe" when parts.Length >= 7 && int.TryParse(parts[1], out int dragFrame)
+                    && string.Equals(parts[2], "drag", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(parts[3], out int dragX1) && int.TryParse(parts[4], out int dragY1)
+                    && int.TryParse(parts[5], out int dragX2) && int.TryParse(parts[6], out int dragY2):
+                    commands.Add(new InputCommand(InputCommandKind.AtFrame, X: dragX1, Y: dragY1,
+                        Milliseconds: dragFrame, InnerKind: InputCommandKind.Drag,
+                        X2: dragX2, Y2: dragY2));
                     break;
                 default:
                     throw new FormatException($"Invalid input script line: '{rawLine}'");
