@@ -185,10 +185,10 @@ public:
                        float scale) const;
     bool draw_text_with_font(const sf2::data::font& font, unsigned int tex, float x,
                              float y, const std::string& text, float scale, float r,
-                             float g, float b);
+                             float g, float b, float a = 1.0f);
     bool draw_text_centered(const sf2::data::font& font, unsigned int tex, float cx,
                             float y, const std::string& text, float scale, float r,
-                            float g, float b);
+                            float g, float b, float a = 1.0f);
 
     // The users_default template path (res_root/users_default.xml) — used
     // by the SaveSystem.

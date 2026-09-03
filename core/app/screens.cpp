@@ -41,6 +41,7 @@
 #include "app/save_system.hpp"
 #include "atlas.hpp"
 #include "audio/audio.hpp"
+#include "font.hpp"
 #include "scene/fight.hpp"
 #include "scene/location_scene.hpp"
 #include "scene/model.hpp"
@@ -316,6 +317,150 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
     ui_cam.arena_center_x = 640.0f;
     app.renderer().draw_sprite(s, ui_cam);
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Fight banner + hit sparks (JS `Cr` L2021-2026 / `Hyb`+`ryb`+`av`).
+//
+// The original's ROUND/FIGHT!/VICTORY/DEFEAT labels are pre-rendered sprites
+// in the `image` atlas (id 1310, JS_GAMEPLAY §"ai" L373-375: `y.BQa/uQa/
+// zQa/wQa`) + the round NUMBER drawn with fight/round.fnt. That atlas ships
+// as ASTC ktx / crunch dds — not CPU-decodable by this pipeline (see the
+// file header) — so the native banner renders the text with the menu font
+// (ui/font-en.fnt, full A-Z coverage; round.fnt carries ONLY digits/":"/"/"
+// glyphs, no letters). The banner is a pure presentation layer over the
+// fight: it reads FightController::banner()/banner_text()/banner_progress()
+// and never touches the simulation.
+// ---------------------------------------------------------------------------
+
+// The banner's animation envelope over `progress` (0..1): scale-in 0.5 -> 1.0
+// over the first 15%, hold at 1.0, fade out over the last 20%. The
+// victory/defeat banners hold forever (banner_len_ = 1e9 -> the controller's
+// progress stays ~0), so they pop in from the screen-tracked age and hold.
+float banner_scale_at(float progress) {
+    constexpr float kInEnd = 0.15f;  // scale-in window (first 15%)
+    if (progress <= 0.0f) return 0.5f;
+    if (progress < kInEnd) {
+        const float t = progress / kInEnd;              // 0..1
+        const float rise = t * t * (3.0f - 2.0f * t);   // smoothstep 0..1
+        return 0.5f + 0.5f * rise;                      // 0.5 -> 1.0
+    }
+    return 1.0f;
+}
+
+float banner_alpha_at(float progress) {
+    constexpr float kFadeStart = 0.8f;  // fade-out window (last 20%)
+    if (progress >= kFadeStart) {
+        const float t = (progress - kFadeStart) / (1.0f - kFadeStart);
+        return 1.0f - t;  // linear 1 -> 0
+    }
+    return 1.0f;
+}
+
+// Draws the current fight banner (ROUND N / FIGHT! / K.O. / VICTORY /
+// DEFEAT) centered at ~35% of the view height. White with a black drop
+// shadow (ROUND/FIGHT), red (K.O., larger), gold (VICTORY), red (DEFEAT).
+// Screen-space (the UI camera), drawn over the fight but under the gamepad
+// and the Next button (the caller's draw order).
+//
+// `banner_age` = fight frames since the banner was raised (tracked by the
+// FightScreen — the controller's banner_progress() divides by banner_len_,
+// which is 1e9 for the hold-forever VICTORY/DEFEAT banners, so their
+// controller progress stays ~0; the screen-side age drives their pop-in).
+void draw_fight_banner(App& app, const sf2::scene::FightController& fight, int banner_age) {
+    const sf2::scene::banner_kind kind = fight.banner();
+    if (kind == sf2::scene::banner_kind::none) return;
+    const char* text = fight.banner_text();
+    if (text == nullptr || text[0] == '\0') return;
+
+    const sf2::data::font* fnt = app.menu_font();
+    const unsigned int tex = app.font_texture();
+    if (fnt == nullptr || tex == 0) return;  // no font -> no banner
+
+    float progress = fight.banner_progress();
+    if (kind == sf2::scene::banner_kind::victory ||
+        kind == sf2::scene::banner_kind::defeat) {
+        // Hold-forever banner: pop in over ~0.75 s from the screen-tracked
+        // age, then HOLD (no fade — the results screen takes over). The
+        // envelope's fade window starts at 0.8, so clamp the pop-in
+        // progress at 0.8: alpha stays 1.0 forever.
+        constexpr float kHoldBannerInFrames = 45.0f;
+        constexpr float kHoldProgressCap = 0.8f;
+        progress = std::min(kHoldProgressCap,
+                           static_cast<float>(banner_age) / kHoldBannerInFrames);
+    }
+    const float scale_anim = banner_scale_at(progress);
+    const float alpha = banner_alpha_at(progress);
+    if (alpha <= 0.01f) return;
+
+    // The base glyph scale: font-en caps are ~53px tall; the banner reads
+    // big at ~1.6x, K.O. bigger still.
+    float r = 1.0f, g = 1.0f, b = 1.0f;
+    float size = 1.6f;
+    if (kind == sf2::scene::banner_kind::ko) {
+        r = 0.95f;
+        g = 0.12f;
+        b = 0.10f;
+        size = 2.2f;
+    } else if (kind == sf2::scene::banner_kind::victory) {
+        r = 1.0f;
+        g = 0.82f;
+        b = 0.25f;
+        size = 1.9f;
+    } else if (kind == sf2::scene::banner_kind::defeat) {
+        r = 0.90f;
+        g = 0.15f;
+        b = 0.12f;
+        size = 1.9f;
+    }
+    const float scale = size * scale_anim;
+
+    // Centered at ~35% of the view height. draw_text_* anchors a line at
+    // its top y, so center the font's line box on the target point (the
+    // caps sit in the line's upper half — slightly above center, right for
+    // a banner).
+    const float cx = kViewW * 0.5f;
+    const float cy = kViewH * 0.35f;
+    const float y = cy - static_cast<float>(fnt->line_height) * scale * 0.5f;
+
+    // The black drop shadow (offset ~2px per scale unit), then the text.
+    const float shadow_off = 2.0f + scale * 0.8f;
+    app.draw_text_centered(*fnt, tex, cx + shadow_off, y + shadow_off, text, scale,
+                           0.0f, 0.0f, 0.0f, 0.75f * alpha);
+    app.draw_text_centered(*fnt, tex, cx, y, text, scale, r, g, b, alpha);
+}
+
+// Draws the live hit-spark particles (world space -> screen through the SAME
+// camera the fighters use, factor 1.0 — the shake/framing is already baked
+// into the camera the caller passes). Each spark is a small screen-space
+// quad of the particle's world `size` scaled by the camera zoom, tinted
+// `color` (0xRRGGBB), fading by age/life. Draw order: AFTER the fighters,
+// BEFORE the fg floor layers (bg -> fighters -> SPARKS -> fg floor — the
+// b615a1bf layer order).
+void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
+                     const sf2::scene::EffectSystem& fx) {
+    const std::vector<sf2::scene::particle>& parts = fx.particles();
+    for (const sf2::scene::particle& p : parts) {
+        if (p.life <= 0.0f || p.age >= p.life) continue;
+        const float t = p.age / p.life;          // 0..1 lived
+        const float alpha = 1.0f - t;            // fade out by age/life
+        if (alpha <= 0.02f) continue;
+        const float r = static_cast<float>((p.color >> 16) & 0xFFu) * (1.0f / 255.0f);
+        const float g = static_cast<float>((p.color >> 8) & 0xFFu) * (1.0f / 255.0f);
+        const float b = static_cast<float>(p.color & 0xFFu) * (1.0f / 255.0f);
+        // World -> screen (factor 1.0: the sparks live in the fight plane).
+        const float sx = camera.world_to_screen_x(p.x, 1.0f);
+        const float sy = camera.world_to_screen_y(p.y);
+        // The spark's world size -> screen px (the same zoom the capsule
+        // strokes use); shrink slightly as it fades.
+        const float half = p.size * camera.zoom * 0.5f * (0.4f + 0.6f * alpha);
+        if (half < 0.5f) continue;
+        const float verts[] = {
+            sx - half, sy - half, sx + half, sy - half, sx - half, sy + half,
+            sx + half, sy - half, sx + half, sy + half, sx - half, sy + half,
+        };
+        ren.draw_triangles(verts, 6, r, g, b, alpha);
+    }
 }
 
 // Loads the map battle nodes from stages.xml (the JS `Ch` parser L1224).
@@ -1601,6 +1746,13 @@ void FightScreen::render_impl(App& app) {
     ren.draw_triangles(ev.data(), ev.size() / 2, fight_->enemy().fighter.color_r(),
                        fight_->enemy().fighter.color_g(), fight_->enemy().fighter.color_b());
 
+    // The hit sparks (JS `Hyb`/`ryb`/`av`): world-space particles projected
+    // through the SAME camera the fighters used (factor 1.0 — the shake is
+    // baked into the camera framing). Drawn AFTER the fighters, BEFORE the
+    // fg floor layers (bg -> fighters -> SPARKS -> fg floor — the b615a1bf
+    // layer order; the batch preserves submission order).
+    draw_hit_sparks(ren, camera, fight_->fx());
+
     // [fix(render): arena layer order] The foreground layers — the ones the
     // params XML places AFTER the ModelsViewer (Type=2) fighter layer: the
     // dojo floor (`dojo_floor_1/2`), the arena side walls, the punch-bag
@@ -1715,6 +1867,20 @@ void FightScreen::render_impl(App& app) {
             ren.draw_triangles(ev2, 6, e_done ? 0.18f : 0.32f, e_done ? 0.92f : 0.32f,
                                e_done ? 0.18f : 0.32f, 1.0f);
         }
+    }
+
+    // The round banner (ROUND N / FIGHT! / K.O. / VICTORY / DEFEAT — JS
+    // `Cr` L2021-2026): over the fight + HUD, UNDER the gamepad and the
+    // Next button (the draw order below). The screen tracks the banner's
+    // age for the hold-forever VICTORY/DEFEAT pop-in (see draw_fight_banner).
+    {
+        const int kind_now = static_cast<int>(fight_->banner());
+        if (kind_now != banner_kind_seen_) {
+            banner_kind_seen_ = kind_now;
+            banner_start_frame_ = fight_->frame();
+        }
+        const int banner_age = fight_->frame() - banner_start_frame_;
+        draw_fight_banner(app, *fight_, banner_age);
     }
 
     // The on-screen gamepad (JS `Za` virtual controls): the joystick
