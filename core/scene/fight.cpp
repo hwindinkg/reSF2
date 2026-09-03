@@ -141,6 +141,25 @@ void FightCamera::framing(float ax, float ay, float bx, float by, float view_w,
     }
 }
 
+// The hit-shake kick (JS `d3a` + `DL` — see the FightCamera comment). The
+// RNG is a PRIVATE LCG (same shape as EffectSystem's): std::rand would be
+// fine for a visual-only roll, but a private LCG keeps the shake fully
+// deterministic AND independent of the fight's shared roll01 (which must
+// never be consumed by presentation code — it would perturb the AI
+// decisions and diverge the pose dump from the oracle).
+namespace {
+std::uint32_t g_shake_lcg = 0x9E3779B9u;  // private, fixed seed
+float shake_next01() {
+    g_shake_lcg = 1664525u * g_shake_lcg + 1013904223u;
+    return static_cast<float>(g_shake_lcg >> 8) * (1.0f / 16777216.0f);
+}
+}  // namespace
+
+void FightCamera::shake(float intensity) {
+    shake_x_ = intensity * (shake_next01() - 0.5f) * 2.0f;
+    shake_y_ = intensity * (shake_next01() - 0.5f) * 2.0f;
+}
+
 // ---------------------------------------------------------------------------
 // FightHud
 // ---------------------------------------------------------------------------
@@ -296,6 +315,17 @@ void FightController::init_locks(
     round_.number = 0;
     round_init();
     enter_start_stance();
+    // The FIRST round's ROUND 1 banner. round_start() — which raises it for
+    // rounds 2+ — is NOT called for the first round (init enters
+    // start_stance directly with round_.number = 0), so raise it here.
+    // Presentation only; round_.number stays 0 (the pose dump's "round"
+    // field is byte-identical).
+    cur_banner_ = banner_kind::round;
+    banner_round_ = round_.number;   // 0 -> "ROUND 1"
+    banner_start_ = frame_;
+    banner_len_ = 60;
+    std::fprintf(stdout, "[fight] banner: ROUND %d\n", banner_round_ + 1);
+    std::fflush(stdout);
 }
 
 // JS `o1a` (L403) + `Gf` (L403-404): build one fighter. The move list is
@@ -389,6 +419,13 @@ void FightController::round_start() {
     // between_rounds_recover() when the previous round ends.
     round_.number++;
     round_init();
+    // The ROUND N banner (presentation only — see banner_kind).
+    cur_banner_ = banner_kind::round;
+    banner_round_ = round_.number;
+    banner_start_ = frame_;
+    banner_len_ = 60;
+    std::fprintf(stdout, "[fight] banner: ROUND %d\n", banner_round_ + 1);
+    std::fflush(stdout);
     // Reset the round flags on the fighters (JS `c.parameters.nob()`).
     player_.fighter.set_enemy_x(enemy_.fighter.world_x());
     enemy_.fighter.set_enemy_x(player_.fighter.world_x());
@@ -523,6 +560,15 @@ void FightController::apply_round_result(round_result result, const FightFighter
     w.is_winner = true;
     l.is_winner = false;
 
+    // The K.O. banner on a knockout round end (presentation only).
+    if (result == round_result::ko) {
+        cur_banner_ = banner_kind::ko;
+        banner_start_ = frame_;
+        banner_len_ = 90;
+        std::fprintf(stdout, "[fight] banner: K.O.\n");
+        std::fflush(stdout);
+    }
+
     enter_end_stance();
     history_.push_back(oc);
 
@@ -555,6 +601,15 @@ void FightController::end_battle(const FightFighter& winner) {
     winner_ = &winner;
     round_.running = false;
     round_live_ = false;
+    // The final banner: VICTORY for the player's win, DEFEAT for the loss
+    // (presentation only; effectively forever — the results screen takes
+    // over).
+    cur_banner_ = winner.is_player ? banner_kind::victory : banner_kind::defeat;
+    banner_start_ = frame_;
+    banner_len_ = 1000000000;
+    std::fprintf(stdout, "[fight] banner: %s\n",
+                 winner.is_player ? "VICTORY" : "DEFEAT");
+    std::fflush(stdout);
 }
 
 // JS `NA` (L414): the between-round recovery. The game heals BOTH fighters
@@ -676,6 +731,17 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // [Phase A3] SFX: a landed hit (the game plays the impact sample —
     // JS ca.Cgb's `ta.ak` after the strike lands).
     sf2::audio::AudioEngine::instance().play("hit");
+
+    // [fx] The hit sparks + the camera kick (presentation only — the
+    // sparks' RNG is EffectSystem's private LCG, the shake's a private
+    // LCG too; neither touches the fight's shared roll01, so the pose
+    // dump stays byte-identical). The burst origin is the contact point
+    // (CapsuleHit::point — the attacker capsule's closest point, the JS
+    // `strike.n$`), fanned AWAY from the attacker's facing.
+    fx_.spawn_hit_sparks(ch.point.x, ch.point.y, atk.fighter.facing());
+    camera_.shake(6.0f);
+    std::fprintf(stdout, "[fx] sparks at %.0f,%.0f\n", ch.point.x, ch.point.y);
+    std::fflush(stdout);
 
     ++atk.hits_landed;
     ++def.hits_taken;
@@ -902,10 +968,53 @@ int FightController::hud_timer() const {
     return std::max(0, t);
 }
 
+// The banner's display text ("" when no banner). banner_round_ is the
+// 0-based round number (round_.number), so the label is +1. The ROUND
+// text is formatted into a function-local static buffer (single-threaded
+// game loop; the caller reads it before the next call).
+const char* FightController::banner_text() const {
+    static char round_buf[32];
+    switch (cur_banner_) {
+        case banner_kind::round:
+            std::snprintf(round_buf, sizeof(round_buf), "ROUND %d",
+                         banner_round_ + 1);
+            return round_buf;
+        case banner_kind::fight:  return "FIGHT!";
+        case banner_kind::ko:     return "K.O.";
+        case banner_kind::victory: return "VICTORY";
+        case banner_kind::defeat: return "DEFEAT";
+        default:                  return "";
+    }
+}
+
+// The banner's progress through its hold, clamped to 0..1 (for the
+// fade/scale-in; the victory/defeat banner holds at 1.0 forever).
+float FightController::banner_progress() const {
+    if (banner_len_ <= 0) return 1.0f;
+    const float p = static_cast<float>(frame_ - banner_start_) /
+                    static_cast<float>(banner_len_);
+    return std::max(0.0f, std::min(1.0f, p));
+}
+
 // JS `ca.Ea` (L385) + `ia` (L388): the per-frame fight update.
 void FightController::update(float dt) {
     ++frame_;
+    // [fx] The particle pool + the shake decay (presentation only — runs
+    // even after the battle ends so the KO burst finishes and the camera
+    // kick settles back to 0; neither touches the simulation).
+    fx_.update();
+    camera_.shake_x_ *= 0.85f;
+    camera_.shake_y_ *= 0.85f;
     if (battle_over_) return;
+
+    // The K.O. slow-mo beat (JS: the KO freeze): the first 30 frames of
+    // the K.O. banner run the simulation at half speed. Presentation-
+    // driven, but it only scales `dt` — by the time the ko banner is up
+    // the fight is already in end_stance, so the pose stream is
+    // unaffected.
+    if (cur_banner_ == banner_kind::ko && frame_ - banner_start_ < 30) {
+        dt *= 0.5f;
+    }
 
     // The phase machine.
     switch (phase_) {
@@ -934,6 +1043,21 @@ void FightController::update(float dt) {
             break;
         }
         case fight_phase::fight: {
+            // The banner machine (presentation only): ROUND N (60f) ->
+            // FIGHT! (40f) -> none. The round banner is raised in
+            // round_start(); the FIGHT! banner fires when it expires.
+            if (cur_banner_ == banner_kind::round &&
+                frame_ - banner_start_ >= banner_len_) {
+                cur_banner_ = banner_kind::fight;
+                banner_start_ = frame_;
+                banner_len_ = 40;
+                std::fprintf(stdout, "[fight] banner: FIGHT!\n");
+                std::fflush(stdout);
+            } else if (cur_banner_ == banner_kind::fight &&
+                       frame_ - banner_start_ >= banner_len_) {
+                cur_banner_ = banner_kind::none;
+                banner_len_ = 0;
+            }
             // The round timer (JS `round.time` — the port advances it
             // during phase 2; the HUD counts down).
             if (round_.running) {

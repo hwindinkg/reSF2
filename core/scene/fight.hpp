@@ -45,6 +45,7 @@
 #include "render/gl_types.hpp"
 #include "scene/ai.hpp"
 #include "scene/damage.hpp"
+#include "scene/effects.hpp"
 #include "scene/fighter.hpp"
 #include "scene/move_def.hpp"
 #include "scene/physics.hpp"
@@ -100,6 +101,19 @@ enum class fight_phase : int {
     start_stance = 1,  // `eu` 1 — StartStance (fighters at spawn, no input)
     fight = 2,         // `eu` 2 — the round is live
     end_stance = 3,    // `eu` 3 — EndStance (results)
+};
+
+// The big center-screen banner (the game's FIGHT!/ROUND N/K.O. overlays —
+// JS `Sf`'s round.png labels + the KO slow-mo). A pure PRESENTATION state:
+// the banner machine never touches the fight simulation (the pose dump is
+// byte-identical with or without it).
+enum class banner_kind : int {
+    none = 0,   // no banner
+    round,      // "ROUND N" — the round-start intro
+    fight,      // "FIGHT!" — the round goes live
+    ko,         // "K.O." — a fighter was KO'd (with the slow-mo)
+    victory,    // "VICTORY" — the player won the battle
+    defeat,     // "DEFEAT" — the player lost the battle
 };
 
 // How a round ended (JS `ey` 0-6; the demo fight uses KO=0 and
@@ -218,6 +232,18 @@ struct FightCamera {
     float du_x_ = 0.0f, du_y_ = 0.0f;            // By/Du.ma (current target)
     float du_prev_x_ = 0.0f, du_prev_y_ = 0.0f;  // DO/Du.mf (previous target)
     float start_x_ = 0.0f, start_y_ = 0.0f;      // Lb.z9a (spawn midpoint)
+
+    // --- the hit shake (JS `d3a` + `DL`) ----------------------------------
+    // The camera kick on a landed hit. The JS shake needs the per-effect
+    // `em` trajectory configs (not in the specs); the port uses a decaying
+    // random offset: shake() rolls ±intensity on both axes, update()
+    // multiplies it by 0.85 per frame (→ ~0 after ~25 frames). The RNG is
+    // a PRIVATE LCG (see shake's impl) — never the fight's shared roll01
+    // (that would perturb the AI decisions and diverge the pose dump).
+    float shake_x_ = 0.0f;
+    float shake_y_ = 0.0f;
+    // Rolls a ±intensity kick on both axes (called on a landed hit).
+    void shake(float intensity);
 
     // Recomputes center/zoom from the two fighters' world COM positions
     // (JS `Eu.ma` — the native fighter world_x/world_y anchors) and the
@@ -406,6 +432,16 @@ public:
     int frame() const { return frame_; }
     // The last frame's per-second log line (frame % 60 == 0).
     const FightLogLine& last_log_line() const { return last_log_; }
+    // The visual effects layer (hit sparks) — presentation only, never
+    // touches the simulation (its RNG is a private LCG, not roll01).
+    const EffectSystem& fx() const { return fx_; }
+    // The current center-screen banner (ROUND N / FIGHT! / K.O. /
+    // VICTORY / DEFEAT) — presentation only.
+    banner_kind banner() const { return cur_banner_; }
+    // The banner's display text ("" for none).
+    const char* banner_text() const;
+    // The banner's progress through its hold, 0..1 (for the fade/scale).
+    float banner_progress() const;
 
 private:
     BattleParams battle_;
@@ -437,6 +473,13 @@ private:
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
     int start_stance_frames_ = 0;  // phase 1 hold counter
     int end_stance_frames_ = 0;    // phase 3 hold (the FIGHT!/KO banner)
+    // --- the banner machine (presentation only — see banner_kind) ---------
+    banner_kind cur_banner_ = banner_kind::none;
+    int banner_start_ = 0;        // frame_ when the banner was raised
+    int banner_len_ = 0;          // hold length in frames (0 = not timed)
+    int banner_round_ = 0;       // the ROUND N number (banner_round_+1 shown)
+    // The visual effects layer (hit sparks) — presentation only.
+    EffectSystem fx_;
     std::vector<RoundOutcome> history_;
     FightLogLine last_log_;
     float wall_min_ = 80.0f, wall_max_ = 1880.0f, floor_y_ = 0.0f;
