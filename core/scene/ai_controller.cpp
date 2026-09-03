@@ -27,14 +27,15 @@
 //   - jL (L598 + Md.jL L640): the weighted roulette over the tactic's
 //     AnimationWeights; the chosen candidate's wait becomes `eh`.
 //
-// Native approximations (documented honestly):
-//   - the fight-state fields the JS reads that the native fighter does not
+// Approximations pending oracle-trace verification (Phase 6):
+//   - the fight-state fields the JS reads that the ported fighter does not
 //     expose yet (body-part anims `vd`, sub-fighter `ih`, the Al physics
 //     controller's frame count) are derived from the fields it DOES expose
 //     (current anim name, move frame, intervals, positions, HP).
 //   - the per-frame `Da.jf()` random draws are re-rolled every decision
-//     pass (the ARM binary did the same; the JS rolls them when the enemy
-//     plays a RandomizingEnemyAnimation).
+//     pass as a placeholder; the exact roll timing (the JS rolls them when
+//     the enemy plays a RandomizingEnemyAnimation) is to be confirmed from
+//     the oracle trace before the Phase 6 gate.
 
 #include "scene/ai.hpp"
 

@@ -1,3 +1,7 @@
+> ⚠️ УСТАРЕЛО. Этот документ описывает реверс нативного/Unity билда SF2,
+> НЕ веб-версии. Не использовать как источник истины для порта.
+> Валидный оракул: reference/www/sf2.502f0946.js + shell/OracleShell.
+
 # Plan: GAP-4 — AI Tactic Model (ADR-005): Decision Pipeline, Table Families, FSM Replacement
 
 ## Overview

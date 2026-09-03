@@ -1,3 +1,7 @@
+> ⚠️ УСТАРЕЛО. Этот документ описывает реверс нативного/Unity билда SF2,
+> НЕ веб-версии. Не использовать как источник истины для порта.
+> Валидный оракул: reference/www/sf2.502f0946.js + shell/OracleShell.
+
 # ADR-004: Headless Integration Test Architecture
 
 **Status**: Proposed  

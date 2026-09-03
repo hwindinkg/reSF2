@@ -8,8 +8,8 @@ design_approved: false
 design_override: true
 steps_complete: [0, 1, 2, 3, 4, 5, 6, 7, 8]
 steps_pending: [9]
-last_action: "Phase 0 done, gap report: idle clip + root motion cause sliding; starting Phase 1 to playable"
-next_action: "Wave 4: idle clip fix + comparator upgrade + root/mirror research (parallel)"
+last_action: "Task classified: web-only methodology program (Phases 0-8)"
+next_action: "dispatch session agent with user brief, starting Phase 0"
 blockers: []
 freshnessStatus: "fresh"
 lastUpdatedAt: 2026-07-22T01:55:39.834+03:00
@@ -23,10 +23,9 @@ summaryVersion: 1
 Initialized at 2026-07-22T01:55:39.834+03:00
 
 ## Session History
-- 2026-07-30T21:15:00.000+03:00 — GAP-3 PORTED. Decoded the "wtf so strong" assert (0x8F79A2A0): a Nekki debug warning that WARNS but does not clamp, and whose existence proves the damage curve is exponential (a linear model could never reach 100000). Decoded f3 = powf(2.0, delta/10.0) where 10.0 = <DamageDoublingRange> read live from a global struct +0x18 — every 10 attribute points DOUBLE damage. Recorded the LDR+ADD PC pitfall (ADD address, not LDR: 0x8F8780A8 not 0x8F8780A4). Added engine/game/damage_formula.hpp (preserves emitted mul order base*f2*f1*f3*add) + test_damage_formula_golden.cpp (24 checks). Tests 37/37 pass.
-- 2026-07-30T20:30:00.000+03:00 — GAP-1 PORTED + GAP-3 formula recovered. Found compiler (build.bat/MSVC works): 36/36 tests pass. Real runtime loop (engine/runtime/loop.cpp) was VARIABLE-step with no frame limiter — now fixed 16ms + inner spin loop; golden test grew to 23 checks. Ghidra MCP working: imported game_region_runtime.bin as ARM:LE:32:v7 at base 0x8F057000 (~9800 funcs), which makes game+off addresses directly usable. FUN_8f0bb400 decompilation independently confirms the main-loop reconstruction. Found Model::getTotalDamage @ game+0x4527B4: attribute curve is powf(2.0, w*attr) NOT linear, 0x40000000 is the powf base not a x2 term, plus a missing additive pair and two multipliers and a 0..100000 clamp.
-- 2026-07-30T19:45:00.000+03:00 — Extracted config schemas from the dump (tacticSettings/internalSettings keys, AI decision order, damage tracer format strings). Found damage routine game+0x438530 via PC-relative string xrefs. Documented 5 measured 1:1 gaps in reverse/analysis/PORT_GAPS.md. PORTED GAP-1/GAP-2: engine/core/game_loop_original.hpp (integer 16ms timestep, dt=ms/1000.0 double, inner spin loop, 4 doubles/frame) replacing the float 1/60 accumulator. Added golden test infra (tests/golden/, GOLDEN_TESTS.md); test_frame_timing_golden marked WILL_FAIL to document the unported divergence in game_loop.hpp. NOTE: no C++ compiler on this machine (MSVC gone) — tests not compiled; all arithmetic validated independently in Python.
-- 2026-07-30T18:55:00.000+03:00 — RE blocker resolved. Game code found at runtime: 8.18MB *shared* /dev/zero rwxs mapping (invisible to Process.enumerateRanges, plain in /proc/pid/maps). Derived file<->runtime slide 0x3E6F1 (5/5 samples). Dumped relocated image. PLT = 1718x16B at region+0 (not 1395x12 @0x4A0000C8). Real main loop = game+0x64400 (old 0x4A679F54 was bitstream code). Frame interval 16ms/62.5fps from this+0x08. Loop runs on Thread-2, not main thread.
+<!-- 2026-09-03 (Phase 0 hygiene): removed 2026-07-30 native/Unity-RE history entries
+     (ARM dump 0x8F057000, Ghidra FUN_8f*, game+0x* damage work on engine/). They
+     described a different SF2 build, not the web oracle. Git history preserves them. -->
 - 2026-07-29T20:12:59.619Z — Phase 3 COMPLETE. All waves done: 1-3 (controls/dialogs/shop), headless tests (4 phases), Wave 4 (battles, 8 steps), Wave 5 (integration, 4 steps). 34/34 tests pass.
 - 2026-07-29T19:11:32.012Z — Wave 4 (Battles) COMPLETE. All 8 steps done: conditions, damage model, hitbox collision, block mechanics, .atf parser, AI roulette, knockback, projectiles. 32/32 tests pass.
 - 2026-07-28T22:54:23.887Z — Phase 4 validation complete. Bug injected (enemy damage commented out), test_battle_integration caught it, bug reverted, 32/32 pass. Headless integration tests proven effective.

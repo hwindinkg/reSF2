@@ -161,11 +161,6 @@ test_v3_21_air_attack_chain.txt.log
 test_v3_22_op_block_during_attack.txt.log
 test_v3_23_walk_punch_walk.txt.log
 tests/test_output.txt
-tools/Marmalade-Modding/
-tools/S3ELoader/
-tools/dzip.exe
-tools/extract_dz.dcl
-tools/il2cpp/
 upload/
 worklog.md
 Shadow.Fight.2.2.46.0.30000121.armeabi-v7a.apks
@@ -205,7 +200,6 @@ reference/saves/
 *.ico
 *.sf2
 *.jsonl
-*.dz
 
 # Legacy asset dump (superseded by code-only snapshot; binaries live in 'old' history)
 /assets/

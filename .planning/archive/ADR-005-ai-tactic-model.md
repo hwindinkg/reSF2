@@ -1,3 +1,7 @@
+> ⚠️ УСТАРЕЛО. Этот документ описывает реверс нативного/Unity билда SF2,
+> НЕ веб-версии. Не использовать как источник истины для порта.
+> Валидный оракул: reference/www/sf2.502f0946.js + shell/OracleShell.
+
 # ADR-005: AI Tactic Model (GAP-4) — Decision Pipeline, Table Families, FSM Replacement
 
 **Status**: Implemented (2026-08-01 — gates G1/G2 passed; FSM/adapter removed in `f7a7c72`)
