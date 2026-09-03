@@ -39,6 +39,14 @@ internal static class Program
         CopyRunnerFile(Path.Combine(runnerDir, "microsite-game-interface.js"), Path.Combine(wwwRoot, "microsite-game-interface.js"));
         CopyRunnerFile(Path.Combine(runnerDir, "trace.js"), Path.Combine(wwwRoot, "trace.js"));
 
+        // Phase 1 oracle instrumentation (reference/tools/trace_oracle.js),
+        // injected by MainForm before any page script (required file).
+        string instrumentScript = Path.Combine(repoRoot, "reference", "tools", "trace_oracle.js");
+        if (!File.Exists(instrumentScript))
+        {
+            throw new FileNotFoundException($"Instrument script missing: {instrumentScript}");
+        }
+
         int port = PickFreePort();
         using var server = new HttpServer(wwwRoot, port);
         server.Start();
@@ -47,7 +55,7 @@ internal static class Program
         Console.WriteLine($"[shell] serving {wwwRoot} at {url}");
 
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm(url, tracesDir, inputScript));
+        Application.Run(new MainForm(url, tracesDir, inputScript, instrumentScript));
 
         Console.WriteLine("[shell] form closed, stopping server");
     }

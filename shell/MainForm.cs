@@ -27,16 +27,24 @@ public sealed class MainForm : Form
     private readonly string _consoleLogPath;
     private readonly object _consoleLock = new();
     private readonly string? _inputScriptPath;
+    private readonly string _instrumentScriptPath;
     private readonly System.Windows.Forms.Timer _inputTimer = new();
+    private readonly System.Windows.Forms.Timer _completionTimer = new();
     private List<InputCommand>? _inputCommands;
     private int _inputCommandIndex;
+    private DateTime _navigationTime;
+    private const int CompletionPollMs = 2000;
+    private const int CompletionTimeoutMs = 150000;
 
-    public MainForm(string url, string tracesDir, string? inputScriptPath)
+    public MainForm(string url, string tracesDir, string? inputScriptPath, string instrumentScriptPath)
     {
         _tracesDir = tracesDir;
         _consoleLogPath = Path.Combine(tracesDir, "console.log");
         _inputScriptPath = inputScriptPath;
+        _instrumentScriptPath = instrumentScriptPath;
         _inputTimer.Tick += OnInputTimerTick;
+        _completionTimer.Interval = CompletionPollMs;
+        _completionTimer.Tick += OnCompletionTimerTick;
 
         Text = "reSF2 Oracle";
         ClientSize = new Size(1280, 720);
@@ -56,7 +64,20 @@ public sealed class MainForm : Form
 
         try
         {
-            await _webView.EnsureCoreWebView2Async();
+            // Fresh browser profile per run: clean localStorage/saves every
+            // time, so repeated runs start from identical game state
+            // (deterministic oracle traces, Phase 1 gate).
+            string profileDir = Path.Combine(Path.GetTempPath(), "reSF2-oracle-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(profileDir);
+            var env = await CoreWebView2Environment.CreateAsync(null, profileDir);
+            AppendConsoleLine($"[shell] webview profile: {profileDir}");
+            await _webView.EnsureCoreWebView2Async(env);
+
+            // Phase 1 oracle instrumentation (reference/tools/trace_oracle.js):
+            // runs BEFORE any page script, i.e. before the game boots.
+            string instrumentScript = File.ReadAllText(_instrumentScriptPath);
+            await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(instrumentScript);
+            AppendConsoleLine($"[shell] instrument script injected: {_instrumentScriptPath} ({instrumentScript.Length} chars)");
 
             _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             _webView.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
@@ -155,6 +176,8 @@ public sealed class MainForm : Form
         }
 
         AppendConsoleLine($"[shell] navigation completed: {_webView.CoreWebView2.Source}");
+        _navigationTime = DateTime.UtcNow;
+        _completionTimer.Start();
 
         if (_inputScriptPath is not null)
         {
@@ -318,5 +341,40 @@ public sealed class MainForm : Form
     var evt = new KeyboardEvent('{type}', opts);
     target.dispatchEvent(evt);
 }})();";
+    }
+
+    private async void OnCompletionTimerTick(object? sender, EventArgs e)
+    {
+        // Safety timeout: close anyway so automated runs always terminate.
+        if ((DateTime.UtcNow - _navigationTime).TotalMilliseconds >= CompletionTimeoutMs)
+        {
+            _completionTimer.Stop();
+            AppendConsoleLine("[shell] TIMEOUT waiting for oracle done, closing");
+            Close();
+            return;
+        }
+
+        bool done = await QueryOracleDoneAsync();
+        if (done)
+        {
+            _completionTimer.Stop();
+            AppendConsoleLine("[shell] oracle trace done, closing");
+            Close();
+        }
+    }
+
+    private async Task<bool> QueryOracleDoneAsync()
+    {
+        const string script = "(function(){try{return window.__oracleDone===true||(window.__sf2Trace&&window.__sf2Trace.state().done===true)}catch(e){return false}})()";
+        try
+        {
+            string result = await _webView.CoreWebView2.ExecuteScriptAsync(script);
+            return string.Equals(result.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            AppendConsoleLine($"[shell] completion query failed: {ex.Message}");
+            return false;
+        }
     }
 }

@@ -1,0 +1,11 @@
+# Phase 1 determinism gate — fixed input script (zero-input variant).
+#
+# Fresh browser profile + frozen clock + seeded Math.random (see
+# reference/tools/trace_oracle.js harness) make the boot auto-run a
+# tutorial/dojo fight with no taps needed: phase 1 -> phase 2, enemy AI
+# active, player idle (PhysicalDummy).
+#
+# Records are keyed by fight.frame, so wall-clock only shifts the boot
+# offset, never frame content. The shell exits automatically when the oracle
+# trace signals done (window.__oracleDone) or after its safety timeout.
+wait 90000

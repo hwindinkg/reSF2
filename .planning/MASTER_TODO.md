@@ -37,6 +37,9 @@
 ## Phase 1 — Oracle instrumentation
 - [ ] AI/timer/input/camera трейсинг добавлен в OracleShell
   (`reference/tools/trace_oracle.*`, формат в `reference/traces/README.md`)
+  - Wave 1 (2026-09-04): `trace_oracle.js` + `input_phase1.txt` написаны; shell:
+    инъекция через AddScriptToExecuteOnDocumentCreated, fresh profile/ран,
+    auto-close по __oracleDone/150s timeout. Runs → Wave 2.
 - [ ] Детерминизм подтверждён (2 прогона одного `--input-script` идентичны побитово)
 - Gate (фиксирован заранее): два прогона одного скрипта дают идентичный JSONL;
   в трейсе реально присутствуют все поля
