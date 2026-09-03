@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "ghidra": {
+      "command": "python",
+      "args": [
+        "E:/ghidra_12.1.2_PUBLIC/bridge_mcp_ghidra.py",
+        "--transport",
+        "stdio",
+        "--no-lazy"
+      ],
+      "env": {
+        "GHIDRA_BASE_URL": "http://127.0.0.1:8089"
+      }
+    },
+    "ida-pro-mcp": {
+      "command": "uv",
+      "args": ["tool", "run", "mcp-server-ida"]
+    },
+    "cpp-metrics": {
+      "command": "python",
+      "args": ["E:/ghidra_12.1.2_PUBLIC/re_agent/cpp_metrics_mcp.py"]
+    }
+  }
+}
