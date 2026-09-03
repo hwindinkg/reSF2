@@ -65,6 +65,200 @@ constexpr float kNextBtnCY = kViewH * 0.6f;
 constexpr float kNextBtnW = 240.0f;
 constexpr float kNextBtnH = 80.0f;
 
+// ---------------------------------------------------------------------------
+// On-screen gamepad geometry — [ORIGINAL] JS `Za.update()` (sf2.js L454-456)
+// lays the virtual controls out on the 960x540 design rect (N.rect) scaled to
+// the view. Screen mode (no touch device, `L.K.un == false`):
+//   c = Eha*0.05, d = Eha*0.03, e = max(150, Eha*0.2)   (Eha = design height)
+//   joystick: scale f = e / sNa (sNa = the base frame width), center =
+//     (e/2 + c, view_bottom - e/2 - d)
+//   buttons node: scale e/440, center = (view_right - 220*e/440 - c,
+//     view_bottom - 298*e/440 - d); the buttons sit INSIDE the node at the
+//     JS `fu` offsets: punch Si(120,28), kick fh(-50,198) — the node's
+//     local Y grows DOWN (Ea screen space), so +198 is the LOWER button.
+// The knob drag maps to a movement sector via `ze.GBa` (the 8-way split
+// with the 55-degree sector half-angle, jz=55): 1=up 2=up-forward
+// 3=forward 4=down-forward 5=down 6=down-back 7=back 8=up-back — the same
+// key_type 1-8 the keyboard path feeds.
+// ---------------------------------------------------------------------------
+constexpr float kPadMarginC = kViewH * 0.05f;  // c — side margin
+constexpr float kPadMarginD = kViewH * 0.03f;  // d — bottom margin
+constexpr float kPadSizeE = 150.0f;            // e — max(150, H*0.2) at 720
+// The joystick base frame (JoystickContainer_norm) is 466 atlas px wide.
+constexpr float kJoyBaseFrame = 466.0f;
+// The buttons node is 440x596 local px (JS `fu` layout), scaled by e/440.
+constexpr float kPadNodeW = 440.0f;
+constexpr float kPadNodeH = 596.0f;
+// The JS button hit radius: `uab` tests x*x+y*y < 13225 (= 115^2) in the
+// node's local space.
+constexpr float kPadBtnHitR = 115.0f;
+// The knob travel: the JS `ze` grab zone is Ho*1.5 (Kz=1.5) where Ho is
+// the knob's max offset; the dead zone is Ho*0.5 (Lz=0.5). Ho itself is
+// srb(EH.za()/2) = half the ACTION container frame (466) — but the knob
+// offset fed to e5() is normalized (GBa works on the unit vector), so the
+// native uses the on-screen base radius directly.
+constexpr float kJoyGrabScale = 1.5f;   // Kz — grab zone = base_r * this
+constexpr float kJoyDeadZone = 0.5f;    // Lz — dead zone = base_r * this
+// The JS sector math: aO = 55 deg (jz), r8 = 35 deg (90-jz). A diagonal
+// counts only when its off-axis component exceeds tan(r8) of the main one.
+constexpr float kJoySectorTan = 0.7002f;  // tan(35 deg)
+
+// The on-screen gamepad layout (view coords, computed once per use).
+struct GamepadLayout {
+    float joy_cx = 0.0f, joy_cy = 0.0f;  // the base center
+    float joy_r = 0.0f;                  // the base radius (on screen)
+    float knob_r = 0.0f;                 // the knob radius (on screen)
+    float node_cx = 0.0f, node_cy = 0.0f;  // the buttons node center
+    float node_scale = 1.0f;            // e/440
+    float punch_cx = 0.0f, punch_cy = 0.0f;  // button centers (view coords)
+    float kick_cx = 0.0f, kick_cy = 0.0f;
+    float btn_r = 0.0f;  // the button hit radius (view coords)
+
+    GamepadLayout() {
+        // Joystick (JS: f = e/sNa; center = (f*sNa/2 + c, bottom - f*sNa/2 - d)
+        // -> with f*sNa == e: (e/2 + c, bottom - e/2 - d)).
+        joy_r = kPadSizeE * 0.5f;
+        joy_cx = kPadSizeE * 0.5f + kPadMarginC;
+        joy_cy = kViewH - kPadSizeE * 0.5f - kPadMarginD;
+        // The knob frame (Joystick_norm, 212 px) renders at the same scale
+        // as the base (the JS `ze` builds both from E.get(268) at the
+        // node's scale; the knob is 212/466 of the base).
+        knob_r = kPadSizeE * (212.0f / kJoyBaseFrame) * 0.5f;
+        // Buttons node (JS: scale e/440; center = (right - 220*scale - c,
+        // bottom - 298*scale - d)).
+        node_scale = kPadSizeE / kPadNodeW;
+        node_cx = kViewW - kPadNodeW * 0.5f * node_scale - kPadMarginC;
+        node_cy = kViewH - kPadNodeH * 0.5f * node_scale - kPadMarginD;
+        // The buttons inside the node (JS `fu` ctor: Si(120,28) punch,
+        // fh(-50,198) kick; local Y grows down).
+        punch_cx = node_cx + 120.0f * node_scale;
+        punch_cy = node_cy + 28.0f * node_scale;
+        kick_cx = node_cx - 50.0f * node_scale;
+        kick_cy = node_cy + 198.0f * node_scale;
+        btn_r = kPadBtnHitR * node_scale;
+    }
+};
+
+// [ORIGINAL] JS `ze.GBa` — the knob vector -> the movement key 1-8 (0 =
+// neutral/dead). Screen Y grows down, so the JS flips y (`d = a.y*-1`)
+// before the sector test; the native works in the same screen space.
+int joy_sector_of(float dx, float dy, float base_r) {
+    const float len2 = dx * dx + dy * dy;
+    if (len2 <= base_r * base_r * kJoyDeadZone * kJoyDeadZone) return 0;
+    // Flip to the JS's up-positive space.
+    const float x = dx;
+    const float y = -dy;
+    // Rotate by the sector half-angle (aO=55deg): e = x*cos+x*sin... the
+    // JS rotates (x,y) by aO/2 into (e,c) — the exact matrix:
+    //   e = x*cos(aO/2) + y*sin(aO/2)
+    //   c = y*cos(aO/2) - x*sin(aO/2)
+    constexpr float kHalf = 55.0f * 3.14159265358979323846f / 180.0f * 0.5f;
+    const float e = x * std::cos(kHalf) + y * std::sin(kHalf);
+    const float c = y * std::cos(kHalf) - x * std::sin(kHalf);
+    const bool e_pos = e >= 0.0f;
+    const bool c_pos = c >= 0.0f;
+    int sector;      // the JS quadrant id (1..4)
+    float main_v;    // the axis-aligned component
+    float off_v;     // the diagonal component
+    if (e_pos && c_pos) {
+        sector = 1;  // up .. up-forward
+        main_v = std::fabs(e);
+        off_v = std::fabs(c);
+    } else if (e_pos && !c_pos) {
+        sector = 2;  // forward .. down-forward
+        main_v = std::fabs(c);
+        off_v = std::fabs(e);
+    } else if (!e_pos && c_pos) {
+        sector = 4;  // back .. up-back
+        main_v = std::fabs(c);
+        off_v = std::fabs(e);
+    } else {
+        sector = 3;  // down .. down-back
+        main_v = std::fabs(e);
+        off_v = std::fabs(c);
+    }
+    // A diagonal counts when the off-axis component is SMALL relative to
+    // the main one (JS `d<=a*this.EVa&&(e=!0)` — e=true = the diagonal
+    // branch of the switch; the pure directions are the e-axis edges).
+    const bool diagonal = off_v <= main_v * kJoySectorTan;
+    switch (sector) {
+        case 1: return diagonal ? 2 : 1;  // up | up-forward
+        case 2: return diagonal ? 4 : 3;  // forward | down-forward
+        case 3: return diagonal ? 6 : 5;  // down | down-back
+        case 4: return diagonal ? 8 : 7;  // back | up-back
+        default: return 0;
+    }
+}
+
+// Loads the ui/controller atlas (the virtual gamepad art: Joystick*,
+// btn_punch_*, btn_kick_*) into the app's atlas cache. Returns true when
+// the frames are registered (logged once). The atlas ships as ASTC ktx —
+// the same decode path the other UI atlases use.
+bool load_controller_atlas(App& app) {
+    static bool done = false;
+    static bool ok = false;
+    if (done) return ok;
+    done = true;
+    try {
+        const std::string ui_dir = app.res_root() + "/ui";
+        // Find the controller json (controller.<hash>.json).
+        std::string json_path;
+        for (const auto& entry : std::filesystem::directory_iterator(ui_dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("controller.", 0) == 0 &&
+                entry.path().extension().string() == ".json") {
+                json_path = entry.path().string();
+                break;
+            }
+        }
+        if (json_path.empty()) {
+            std::fprintf(stderr, "[fight] controller atlas json not found in %s\n",
+                         ui_dir.c_str());
+            return false;
+        }
+        // The texture: try ktx then dds beside the json (the hashed stem).
+        const std::string stem = std::filesystem::path(json_path)
+                                     .filename()
+                                     .string()
+                                     .substr(0, std::string("controller").size());
+        sf2::data::Texture tex;
+        bool decoded = false;
+        for (const std::string& ext : {".ktx", ".dds", ".webp", ".png"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(ui_dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind(stem + ".", 0) == 0 &&
+                    entry.path().extension().string() == ext) {
+                    if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                        decoded = true;
+                        break;
+                    }
+                }
+            }
+            if (decoded) break;
+        }
+        if (!decoded) {
+            std::fprintf(stderr, "[fight] controller atlas texture not decodable\n");
+            return false;
+        }
+        const GLuint gl = app.renderer().texture_for("controller_atlas", tex);
+        if (gl == 0) return false;
+        std::ifstream in(json_path, std::ios::binary);
+        std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+        const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+        for (const auto& fr : a.frames) {
+            app.register_atlas_frame(fr, a.w, a.h, gl);
+        }
+        std::fprintf(stdout, "[fight] controller atlas: %dx%d tex %dx%d %zu frames\n",
+                     a.w, a.h, tex.w, tex.h, a.frames.size());
+        std::fflush(stdout);
+        ok = true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[fight] controller atlas load failed: %s\n", e.what());
+    }
+    return ok;
+}
+
 // Draws a flat (untextured) button + its label as a solid quad. The exact
 // menu atlas art (ASTC) is unavailable to the CPU pipeline this phase —
 // flagged as the exact-layout gap.
@@ -636,6 +830,11 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                  battle_name_.c_str(), location_.c_str(), reward_money_, reward_exp_);
     std::fflush(stdout);
 
+    // The on-screen gamepad art (JS `Za`): the ui/controller atlas
+    // (Joystick*, btn_punch_*, btn_kick_*). Loaded once per process; the
+    // frames register into the app's atlas cache for draw_gamepad.
+    (void)load_controller_atlas(app());
+
     // The dojo location (the tutorial-zone backdrop). Load once; the
     // FightAssets keeps it.
     if (assets.dojo.layers().empty()) {
@@ -851,6 +1050,221 @@ void FightScreen::enable_pose_dump(const std::string& path, int frames) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// On-screen gamepad (JS `Za` virtual controls) — the original's touch pad.
+// ---------------------------------------------------------------------------
+
+bool FightScreen::pad_visible() const {
+    // The pad shows only while the round is live (JS `Za.isVisible` is set
+    // by the fight HUD; between rounds the Next button replaces it).
+    return fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over();
+}
+
+// The pointer -> gamepad events (JS `ze.nia/Qgb/oia` for the joystick,
+// `fu.nia/oia` for the buttons). Runs in update_impl BEFORE the fight
+// update so the buffered keys land the same frame (like on_key).
+void FightScreen::update_gamepad_input() {
+    if (fight_ == nullptr || !pad_visible()) {
+        // Round ended mid-drag: release everything so no key stays held.
+        if (joy_grabbed_ || joy_sector_ != 0 || btn_punch_down_ || btn_kick_down_) {
+            joy_grabbed_ = false;
+            joy_knob_x_ = joy_knob_y_ = 0.0f;
+            joy_sector_ = 0;
+            btn_punch_down_ = btn_kick_down_ = false;
+        }
+        return;
+    }
+    const App::PointerState& p = app().pointer();
+    const GamepadLayout pad;
+
+    // --- Joystick (JS `ze`): grab inside the base's 1.5x zone, drag the
+    // knob, map the offset to the movement sector 1-8. The knob follows
+    // the pointer clamped to the base radius (JS `e5` + `Mz.G_a`).
+    if (p.pressed && !joy_grabbed_) {
+        const float dx = static_cast<float>(p.x) - pad.joy_cx;
+        const float dy = static_cast<float>(p.y) - pad.joy_cy;
+        const float grab_r = pad.joy_r * kJoyGrabScale;
+        if (dx * dx + dy * dy <= grab_r * grab_r) {
+            joy_grabbed_ = true;
+        }
+    }
+    if (joy_grabbed_) {
+        if (!p.down) {
+            // Released (JS `oia`): neutral + the key release event.
+            joy_grabbed_ = false;
+            joy_knob_x_ = joy_knob_y_ = 0.0f;
+            if (joy_sector_ != 0) {
+                fight_->player_input(static_cast<sf2::scene::key_type>(joy_sector_),
+                                     sf2::scene::press_type::release);
+                std::fprintf(stdout, "[fight] player input -> joy release %d\n",
+                             joy_sector_);
+                joy_sector_ = 0;
+            }
+        } else {
+            // Drag (JS `Qgb`): clamp the knob to the base, recompute the
+            // sector, and emit the key change (release the old sector's
+            // key, tap the new one — the same edges the keyboard path
+            // produces via on_key).
+            float dx = static_cast<float>(p.x) - pad.joy_cx;
+            float dy = static_cast<float>(p.y) - pad.joy_cy;
+            const float len = std::sqrt(dx * dx + dy * dy);
+            const float max_off = pad.joy_r;
+            if (len > max_off) {
+                dx *= max_off / len;
+                dy *= max_off / len;
+            }
+            joy_knob_x_ = dx;
+            joy_knob_y_ = dy;
+            const int sector = joy_sector_of(dx, dy, pad.joy_r);
+            if (sector != joy_sector_) {
+                if (joy_sector_ != 0) {
+                    fight_->player_input(static_cast<sf2::scene::key_type>(joy_sector_),
+                                         sf2::scene::press_type::release);
+                }
+                if (sector != 0) {
+                    fight_->player_input(static_cast<sf2::scene::key_type>(sector),
+                                         sf2::scene::press_type::tap);
+                }
+                std::fprintf(stdout, "[fight] player input -> joy sector %d -> %d\n",
+                             joy_sector_, sector);
+                std::fflush(stdout);
+                joy_sector_ = sector;
+            }
+        }
+    }
+
+    // --- Attack buttons (JS `fu.nia/oia`): a press inside a button's
+    // circle taps the attack key; the release ends it. The JS hit test is
+    // the node-local x*x+y*y < 115^2 — the native tests the view-space
+    // circle around each button center.
+    const float px = static_cast<float>(p.x);
+    const float py = static_cast<float>(p.y);
+    if (p.pressed && !joy_grabbed_) {
+        const float pdx = px - pad.punch_cx;
+        const float pdy = py - pad.punch_cy;
+        if (pdx * pdx + pdy * pdy <= pad.btn_r * pad.btn_r) {
+            btn_punch_down_ = true;
+            fight_->player_input(sf2::scene::key_type::punch, sf2::scene::press_type::tap);
+            std::fprintf(stdout, "[fight] player input -> punch (pad)\n");
+            std::fflush(stdout);
+        } else {
+            const float kdx = px - pad.kick_cx;
+            const float kdy = py - pad.kick_cy;
+            if (kdx * kdx + kdy * kdy <= pad.btn_r * pad.btn_r) {
+                btn_kick_down_ = true;
+                fight_->player_input(sf2::scene::key_type::kick, sf2::scene::press_type::tap);
+                std::fprintf(stdout, "[fight] player input -> kick (pad)\n");
+                std::fflush(stdout);
+            }
+        }
+    }
+    if (btn_punch_down_ && !p.down) {
+        btn_punch_down_ = false;
+        fight_->player_input(sf2::scene::key_type::punch, sf2::scene::press_type::release);
+    }
+    if (btn_kick_down_ && !p.down) {
+        btn_kick_down_ = false;
+        fight_->player_input(sf2::scene::key_type::kick, sf2::scene::press_type::release);
+    }
+}
+
+// The gamepad render (JS `Za.Ea` -> `ze.Ea` + `fu.Ea`): the atlas frames
+// from ui/controller — JoystickContainer_norm/action (base), Joystick_
+// norm/action (knob), btn_punch_normal/action, btn_kick_normal/action.
+// Flat procedural circles when the atlas is unavailable.
+void FightScreen::draw_gamepad(App& app) const {
+    if (fight_ == nullptr || !pad_visible()) return;
+    const GamepadLayout pad;
+    sf2::render::Renderer& ren = app.renderer();
+
+    // --- Joystick: base + knob. The JS swaps the base frame to _action
+    // while grabbed (`RT(a)` toggles aX/EH/$W/DX) — the native mirrors it.
+    const bool grabbed = joy_grabbed_;
+    const char* base_frame = grabbed ? "JoystickContainer_action" : "JoystickContainer_norm";
+    const char* knob_frame = grabbed ? "Joystick_action" : "Joystick_norm";
+    const float base_size = pad.joy_r * 2.0f;
+    const float knob_size = pad.knob_r * 2.0f;
+    if (!try_draw_atlas_button(app, base_frame, pad.joy_cx, pad.joy_cy, base_size,
+                               base_size, 1.0f)) {
+        // Fallback: a dark translucent circle (12-segment disc).
+        constexpr float kPi = 3.14159265358979323846f;
+        constexpr int kSegs = 20;
+        const float step = 2.0f * kPi / static_cast<float>(kSegs);
+        for (int s = 0; s < kSegs; ++s) {
+            const float a0 = static_cast<float>(s) * step;
+            const float a1 = static_cast<float>(s + 1) * step;
+            float tri[6] = {pad.joy_cx,
+                           pad.joy_cy,
+                           pad.joy_cx + std::cos(a0) * pad.joy_r,
+                           pad.joy_cy + std::sin(a0) * pad.joy_r,
+                           pad.joy_cx + std::cos(a1) * pad.joy_r,
+                           pad.joy_cy + std::sin(a1) * pad.joy_r};
+            ren.draw_triangles(tri, 3, 0.08f, 0.08f, 0.1f, 0.55f);
+        }
+    }
+    const float knob_cx = pad.joy_cx + joy_knob_x_;
+    const float knob_cy = pad.joy_cy + joy_knob_y_;
+    if (!try_draw_atlas_button(app, knob_frame, knob_cx, knob_cy, knob_size, knob_size,
+                               1.0f)) {
+        constexpr float kPi = 3.14159265358979323846f;
+        constexpr int kSegs = 14;
+        const float step = 2.0f * kPi / static_cast<float>(kSegs);
+        for (int s = 0; s < kSegs; ++s) {
+            const float a0 = static_cast<float>(s) * step;
+            const float a1 = static_cast<float>(s + 1) * step;
+            float tri[6] = {knob_cx,
+                           knob_cy,
+                           knob_cx + std::cos(a0) * pad.knob_r,
+                           knob_cy + std::sin(a0) * pad.knob_r,
+                           knob_cx + std::cos(a1) * pad.knob_r,
+                           knob_cy + std::sin(a1) * pad.knob_r};
+            ren.draw_triangles(tri, 3, 0.22f, 0.24f, 0.28f, 0.85f);
+        }
+    }
+
+    // --- Attack buttons: punch + kick circles (the JS `ig` swaps the
+    // frame to _action while pressed).
+    const float btn_size = pad.btn_r * 2.0f;
+    const bool punch_drawn =
+        try_draw_atlas_button(app, btn_punch_down_ ? "btn_punch_action" : "btn_punch_normal",
+                              pad.punch_cx, pad.punch_cy, btn_size, btn_size, 1.0f);
+    const bool kick_drawn =
+        try_draw_atlas_button(app, btn_kick_down_ ? "btn_kick_action" : "btn_kick_normal",
+                              pad.kick_cx, pad.kick_cy, btn_size, btn_size, 1.0f);
+    if (!punch_drawn) {
+        constexpr float kPi = 3.14159265358979323846f;
+        constexpr int kSegs = 14;
+        const float step = 2.0f * kPi / static_cast<float>(kSegs);
+        for (int s = 0; s < kSegs; ++s) {
+            const float a0 = static_cast<float>(s) * step;
+            const float a1 = static_cast<float>(s + 1) * step;
+            float tri[6] = {pad.punch_cx,
+                           pad.punch_cy,
+                           pad.punch_cx + std::cos(a0) * pad.btn_r,
+                           pad.punch_cy + std::sin(a0) * pad.btn_r,
+                            pad.punch_cx + std::cos(a1) * pad.btn_r,
+                           pad.punch_cy + std::sin(a1) * pad.btn_r};
+            ren.draw_triangles(tri, 3, btn_punch_down_ ? 0.9f : 0.3f, 0.55f, 0.15f, 0.85f);
+        }
+    }
+    if (!kick_drawn) {
+        constexpr float kPi = 3.14159265358979323846f;
+        constexpr int kSegs = 14;
+        const float step = 2.0f * kPi / static_cast<float>(kSegs);
+        for (int s = 0; s < kSegs; ++s) {
+            const float a0 = static_cast<float>(s) * step;
+            const float a1 = static_cast<float>(s + 1) * step;
+            float tri[6] = {pad.kick_cx,
+                           pad.kick_cy,
+                           pad.kick_cx + std::cos(a0) * pad.btn_r,
+                           pad.kick_cy + std::sin(a0) * pad.btn_r,
+                           pad.kick_cx + std::cos(a1) * pad.btn_r,
+                           pad.kick_cy + std::sin(a1) * pad.btn_r};
+            ren.draw_triangles(tri, 3, btn_kick_down_ ? 0.9f : 0.3f, 0.55f, 0.15f, 0.85f);
+        }
+    }
+}
+
 // [FIX Phase 4a verification] Bone-sample check: the sampled bone positions
 // (the Fighter::positions() after sample) for a few skeleton bones vs the
 // clip data, plus the triangle bbox (humanoid shape + on-screen check).
@@ -974,6 +1388,10 @@ void FightScreen::update_impl(float dt) {
             std::fprintf(stdout, "[fight] auto-attack ON\n");
         }
     }
+    // The on-screen gamepad (JS `Za`): the pointer events feed the same
+    // player_input path the keyboard uses — BEFORE the fight update so
+    // the buffered keys land this frame (the same ordering as on_key).
+    update_gamepad_input();
     fight_->update(dt);
 
     // Per-second log.
@@ -1298,6 +1716,12 @@ void FightScreen::render_impl(App& app) {
                                e_done ? 0.18f : 0.32f, 1.0f);
         }
     }
+
+    // The on-screen gamepad (JS `Za` virtual controls): the joystick
+    // bottom-left + the punch/kick buttons bottom-right, drawn from the
+    // ui/controller atlas. Only while the round is live — the Next button
+    // replaces it between rounds (see the round_wait block below).
+    draw_gamepad(app);
 
     // Between-rounds HUD "Next" button (JS `vhb` L410 case 1): the fight
     // holds in EndStance until the player confirms the next round — drawn

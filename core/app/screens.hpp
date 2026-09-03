@@ -181,6 +181,26 @@ private:
     bool key_state_[16] = {};
     int last_log_frame_ = 0;
     bool auto_attack_wired_ = false;
+
+    // --- on-screen gamepad (JS `Za` virtual controls, JS_GAMEPLAY §2) ----
+    // The original's touch gamepad: the joystick `ze` (base + knob, the
+    // pointer drags the knob -> a movement sector 1-8) bottom-left and the
+    // attack buttons `fu` (punch/kick circles) bottom-right. The native
+    // renders them from the ui/controller atlas (JoystickContainer_norm/
+    // action, Joystick_norm/action, btn_punch_normal/action, btn_kick_
+    // normal/action) and feeds the same fight_->player_input() path the
+    // keyboard uses. Hidden while round_wait() (the Next button shows).
+    bool pad_visible() const;          // false while round_wait()
+    void update_gamepad_input();       // pointer -> joystick/button events
+    void draw_gamepad(App& app) const; // the atlas-frame render
+    // Joystick state: the knob drag (JS `ze.nia/Qgb/oia`).
+    bool joy_grabbed_ = false;   // a pointer owns the joystick
+    float joy_knob_x_ = 0.0f;     // knob offset from center (view px)
+    float joy_knob_y_ = 0.0f;
+    int joy_sector_ = 0;          // the active movement key 1-8 (0 = neutral)
+    // Attack buttons: pressed state (JS `ig.nia/oia` -> frame swap).
+    bool btn_punch_down_ = false;
+    bool btn_kick_down_ = false;
 };
 
 // The battle results — native results flow (JS `v.kD` L622187 -> the
