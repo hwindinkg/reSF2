@@ -655,7 +655,7 @@ float App::measure_text(const sf2::data::font& font, const std::string& text,
 
 bool App::draw_text_with_font(const sf2::data::font& font, unsigned int tex, float x,
                               float y, const std::string& text, float scale, float r,
-                              float g, float b) {
+                              float g, float b, float a) {
     if (tex == 0) return false;
     // Map font page -> texture name used for lookup: we uploaded as
     // "font-en"/"digits_font"/"round_font"; the sprite system resolves
@@ -703,7 +703,7 @@ bool App::draw_text_with_font(const sf2::data::font& font, unsigned int tex, flo
         s.color_r = r;
         s.color_g = g;
         s.color_b = b;
-        s.color_a = 1.0f;
+        s.color_a = a;
         // Glyph quad centered at (cursor + offset + half size)
         s.transform.set_pos(cursor_x + (static_cast<float>(glyph->xoffset) + glyph->w * 0.5f) * scale,
                             cursor_y + (static_cast<float>(glyph->yoffset) + glyph->h * 0.5f) * scale);
@@ -726,9 +726,9 @@ bool App::draw_text_with_font(const sf2::data::font& font, unsigned int tex, flo
 
 bool App::draw_text_centered(const sf2::data::font& font, unsigned int tex, float cx,
                              float y, const std::string& text, float scale, float r,
-                             float g, float b) {
+                             float g, float b, float a) {
     const float w = measure_text(font, text, scale);
-    return draw_text_with_font(font, tex, cx - w * 0.5f, y, text, scale, r, g, b);
+    return draw_text_with_font(font, tex, cx - w * 0.5f, y, text, scale, r, g, b, a);
 }
 
 bool App::draw_text(float x, float y, const std::string& text, float scale, float r, float g,

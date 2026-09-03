@@ -201,6 +201,14 @@ private:
     // Attack buttons: pressed state (JS `ig.nia/oia` -> frame swap).
     bool btn_punch_down_ = false;
     bool btn_kick_down_ = false;
+
+    // --- round banner (JS `Cr` L2021-2026 — presentation only) -----------
+    // The current banner's kind + the fight frame it was raised at (the
+    // screen-side age drives the hold-forever VICTORY/DEFEAT pop-in — the
+    // controller's banner_progress() divides by banner_len_, which is 1e9
+    // for those, so their controller progress stays ~0).
+    int banner_kind_seen_ = 0;      // banner_kind as int (0 = none)
+    int banner_start_frame_ = 0;    // fight_->frame() when the banner changed
 };
 
 // The battle results — native results flow (JS `v.kD` L622187 -> the
