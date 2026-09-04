@@ -2,152 +2,96 @@
 
 Единственный оракул: reference/www/sf2.502f0946.js + shell/OracleShell.
 Всё из .planning/archive/ — недействительно как референс.
+Политика пуша: только локальные коммиты до слова пользователя (2026-09-04).
 
-## Phase 0 — Hygiene
-- [x] grep-очистка старых референсов (2026-09-03; gate ниже)
-- [x] .planning/archive/ создан, баннеры добавлены (2026-09-03)
-- [x] PROJECT.md переписан (2026-09-03)
-- [x] MASTER_TODO.md создан (этот файл, 2026-09-03)
-- Gate: `git grep -E 'Marmalade|ShadowFight2\.s86|libil2cpp|IL2CPP|\.dz\b|DZ archive|ARM:LE|GHIDRA_MCP' -- .`
-  пуст вне `.planning/archive/` и самого оракула `reference/www/*.js` (там `.dz`
-  — имя минифицированного поля). PASS 2026-09-03.
-- Notes 2026-09-03:
-  - `core/scene/ai_controller.cpp`: убран комментарий со ссылкой на ARM-бинарник
-    (заменён на пометку "pending oracle-trace verification, Phase 6").
-  - `core/scene/fight.cpp`: обрывков старого подхода нет (ARM-адреса/DZ/engine/
-    инклюды отсутствуют); слово "native" там = "наш C++ порт" (vs oracle),
-    не Marmalade-билд. Терминологическая чистка — опционально, не блокер.
-  - `.gitignore`: удалены stale-записи `tools/Marmalade-Modding/`,
-    `tools/S3ELoader/`, `tools/dzip.exe`, `tools/extract_dz.dcl`, `tools/il2cpp/`
-    (каталога `tools/` в репо нет).
-  - `.planning/STATE.md`: вычищены 4 записи native/Unity-RE истории 2026-07-30
-    (сохранены в git-истории).
-  - Проверенные ложные срабатывания (не требуют действий): `MA_ARM`/`__arm__`
-    в `core/data/third_party/miniaudio.h`, `stb_image.h` (архитектурные макросы
-    вендорной аудиобиблиотеки); `ARMOR` в `core/app/screens.cpp` (игровой термин
-    "броня"); `0x1000`-подобные hex-константы third-party кода.
-  - `.planning/headless-integration-test-*.md` оставлены на месте (вне скоупа
-    брифа; содержат ссылки на удалённый `engine/`, но ни одного совпадения
-    gate-паттерна). Перепроверить/архивировать при первой зацепке.
-  - Игнорируемые (untracked) каталоги `.codebase/`, `.codegraph/`, `.qoder/`,
-    `backup/`, `assets/`, `reference/www/res/` содержат артефакты старой эпохи,
-    но не входят в коммитимый `main` (code-only, 152 файла) — gate проверен
-    через `git grep` по трекаемым файлам.
+## DONE
 
-## Phase 1 — Oracle instrumentation
-- [ ] AI/timer/input/camera трейсинг добавлен в OracleShell
-  (`reference/tools/trace_oracle.*`, формат в `reference/traces/README.md`)
-  - Wave 1 (2026-09-04): `trace_oracle.js` + `input_phase1.txt` написаны; shell:
-    инъекция через AddScriptToExecuteOnDocumentCreated, fresh profile/ран,
-    auto-close по __oracleDone/150s timeout. Runs → Wave 2.
-  - Wave 2 (2026-09-04): infra PASS (0 tracer ERRs; `extract_oracle.py` работает;
-    page-side `atframe`-стимул кадр-в-кадр; хук-отчёт в header честный).
-    Gate: FAIL — см. BLOCKED ниже. Коммит wave-2 (infra + evidence, без gate).
-- [ ] Детерминизм подтверждён (2 прогона одного `--input-script` идентичны побитово)
-  - PARTIAL 2026-09-04: два прогона drench-скрипта идентичны побитово на строках
-    0..366 (367 записей: фазы, cf, camera-floats, chances, block states).
-    Первое расхождение на строке 367 (`f≈366`): лишний button-tap `N0a`
-    (control 6) в одном прогоне. Стик-drags регистрируются 1:1; button-taps
-    gated/flaky (зависит от wall-clock/tutorial-gating, не от кадров).
-  - run3 `75348487f8f139fc8b93c7353e21ba4f6e7ba9cafdd022b8c9ebf97037b52ec`
-  - run4 `a7a11c1b165fae2ee6d731b2209fb224085dad823781e83259a98043ae356e95`
-- BLOCKED 2026-09-04 (gate Phase 1 не закрыт, критерии не занижены):
-  причина — автодостигаемый dojo-tutorial бой НЕ СОДЕРЖИТ AI-решений вообще:
-  `trace_stats {ia:0, Pqb:0}` на ~1600 суммарных fight-кадрах, `deCount:1`
-  (BFS всего fight-графа — скрытых de нет), `chosen_move` null в 601/601,
-  `ai_branch`/`ai_zone` заморожены на init (-1/1), `iPa` не найден даже
-  BFS-depth-4 (в tutorial-HUD нет таймера раунда — `round_timer_xU` null
-  в 601/601), игрок — `PhysicalDummy` (неподвижен под 41 стимулом:
-  N0a-события доходят, эффекта нет; урок-1 «движения» не завершается —
-  вероятно нужен длинный hold, а не 7-8-кадровые blips).
-  Следующий путь (не в Phase 1): (a) long-hold стимул (`hold X Y LEN`) для
-  завершения lesson-1; (b) навигация меню→настоящий бой с AI (flow неизвестен);
-  (c) drag-only скрипт для чистого детерминизм-прогона без flaky taps.
-  Evidence: `reference/traces/oracle_run3.jsonl` / `oracle_run4.jsonl`
-  (ignored, на диске) + `console.run*.log`; формат: `reference/traces/README.md`.
-- Prep wave (2026-09-04, перед ручным прохождением tutorial пользователем):
-  - Track A (replay-readiness): PASS (механика). Резолв input-пути по JS:
-    `Df{control,index}` + `Gfa()`-тип (L453), `Za` гейты `DEa` (L459),
-    `Nc.Lh` роутинг (L461), стик-сектора `ze.GBa` 1-8 (L463-471) — координат
-    после мэппинга нет, записи (control,index,type) достаточно для точного
-    реплея. Добавлены: `O0a`-враппер, `[INPUT-REC]`-запись эффективных
-    вводов, `atframe press/release` + page-side прямой реплей через
-    `fight.N0a/O0a` (минуя DOM и `DEa`, детерминированно),
-    `record_inputs.py`, `input_smoke.txt`. Smoke PASS: 4/4 press/release
-    в точных кадрах (150/160/200/210), 0 ERRs, round-trip побайтово точен.
-    Статика input-пути: `reference/AI_STATIC.md` §6.
-  - Track B (static AI): `reference/AI_STATIC.md` написан — полное дерево
-    `de.Pqb` (зоны/fk/шансы), `Md`/`cc.Gb`-формула, PRNG `Da/Xx` + все точки
-    сидирования, файлы значений (`res/tactic_settings.xml` +
-    `tactics/*.dat`), input/tick/таймер линии. OPEN-пункты помечены
-    (нужен runtime trace): fk=3/4/7/8, ResponseDelay-консумер, часть
-    `RJa`-контекстов, id→file для `Ja.ki(272/1314)`.
-  - READY FOR USER PLAYTHROUGH: инструкция в `reference/traces/README.md`
-    (запуск exe → играть → `[INPUT-REC]` в console.log →
-    `record_inputs.py` → replay дважды → сравнение sha).
-- Takeover fix (2026-09-04): запуск С `--input-script` инжектил 41 стимул
-  из `input_phase1.txt` («играла сама») + auto-close на f=600 — для ручной
-  игры непригоден. Manual record mode: запуск БЕЗ `--input-script` —
-  ничего не инжектит, auto-close отключён (окно закрывает только пользователь),
-  физическая клавиатура/мышь идут в игру 1:1 (WebView2 форвардит нативно,
-  shell не ставит DOM-перехватчиков), трейсинг + `[INPUT-REC]` активны.
-  Проверено: 35с headless-запуск без скрипта → 601 oracle-запись (f 0..600),
-  0 инжектов, 0 INPUT-REC, процесс жив до kill. Команда пользователю:
-  `& ./shell/bin/Release/net9.0-windows/OracleShell.exe` (кликнуть по окну
-  игры для фокуса). Невоспроизведённые нажатия ранее — гейты уроков `Za.DEa`,
-  не перехват с нашей стороны.
-- Gate (фиксирован заранее): два прогона одного скрипта дают идентичный JSONL;
-  в трейсе реально присутствуют все поля
-  (`frame, phase, cf, ai_branch, ai_zone, chosen_move, chances{...},
-  input_buffer_state, round_timer_xU, block_state, camera{cx,cy,zoom}`) — не заглушки.
+- Phase 0 — Hygiene (2026-09-03, `3bb38081`): архив stale-доков с баннерами,
+  PROJECT.md, grep-gate PASS, `ai_controller.cpp`/`.gitignore`/STATE чистка.
+- Phase 1 / Wave 1 (2026-09-04, `36d0fb74`): `trace_oracle.js` (инъекция до
+  старта игры, энтропия методы `de.Pqb`/`de.ia`/`iPa`/`N0a`,
+  покадровый JSONL), shell (fresh profile/ран, auto-close), `input_phase1.txt`.
+  Build green, `node --check` clean.
+- Phase 1 / Wave 2 (2026-09-04, `bde69b2f`): `extract_oracle.py` (canonical
+  JSONL + sha256 + валидация полей), page-side `atframe`-стимул (drag/tap/key),
+  `traces/README.md`. Baseline: tutorial без вводов доходит до phase 2 сам.
+- Phase 1 / Prep (2026-09-04, `2efd3354`): input-путь резолвнут
+  (`Df{control,index}`+`Gfa()` L453, `Za.DEa` гейты L459, `Nc.Lh` L461,
+  стик-сектора L463-471 — координат после мэппинга нет); `O0a`-враппер,
+  `[INPUT-REC]`, `atframe press/release` + прямой реплей через
+  `fight.N0a/O0a`; `record_inputs.py`; smoke PASS (4/4 в точных кадрах,
+  round-trip побайтово); `reference/AI_STATIC.md` (дерево `de.Pqb`,
+  `Md`/`cc.Gb`, PRNG+сиды, файлы значений, OPEN-пункты).
+- Manual record mode (2026-09-04, `a0d72ede`): запуск без `--input-script` =
+  ноль инъекций + ноль auto-close; физический ввод 1:1; проверено headless
+  (601 запись, 0 инжектов, процесс жив до kill).
+- Gate re-run на записи пользователя (2026-09-04, локальный коммит — см. ниже):
+  `recorded_inputs.txt` (1268 событий, f 153..939, один бой, монотонно);
+  replay ×2 → **оба `a433d7561820ccad066185160c298f37174c2e7a30ad44656f75c8c4d229ba
+    — детерминизм PASS** (602 строки каждый, вкл. `traceEvents=280`);
+  fidelity реплея **PASS** (281/281 событие f≤600 побайтово: кадр, press/release,
+  control, index, type).
 
-## Phase 2 — Gap inventory
-- [ ] §9-таблица `reference/JS_GAMEPLAY.md` разбита на задачи с acceptance-критериями
-  (acceptance = какое поле oracle-трейса из Фазы 1 должно совпасть)
-- [ ] Ссылки на строки JS в `core/` перепроверены против текущего `sf2.502f0946.js`
-- [ ] AI-таблицы в web-ассетах: найдены/не найдены — explicit вывод
-  (старый вывод "0 файлов" был по нативным ассетам и неприменим; веб грузит
-  через `xml.dat`/`animations.*.dat`, см. `core/data/README.md`)
-- Gate: issue-лист с acceptance-критерием на каждую строку + explicit ответ по AI-таблицам.
+## Gate Phase 1 — по критериям (честно)
 
-## Phase 3 — Core loop & timing
-- [ ] 3.1 fixed-tick 1/60 (`Us`: `Gy=.0166667`; не путать со старым "16ms integer step" из ARM)
-- [ ] 3.2 целочисленный таймер раунда (`xU`, `xU/60|0`, гейт `Ar.PEа`/`NF<=0`)
-- [ ] 3.3 input buffer фазы 1 (`Wc/llb`-аналог)
-- [ ] 3.4 баннер/пауза между раундами (`EndStance` → баннер → кнопка Next, `vbh` case 1/2/3/5)
-- Gate: полный раунд (500+ кадров) под `--input-script`; `round_timer_xU` и переходы
-  фаз совпадают с oracle-трейсом кадр-в-кадр (0 расхождений на этих полях).
+| Критерий | Статус |
+|---|---|
+| Два прогона → побитово идентичный JSONL | PASS (`a433d756` == `a433d756`) |
+| `frame, phase, cf, chances, input_buffer_state, block_state, camera` — real | PASS (601/601, 0 ERRs) |
+| `ai_branch, ai_zone, chosen_move` — real | FAIL (null/-1, 601/601 + 1202 записи пользователя: `ia:0, Pqb:0`) |
+| `round_timer_xU` — real | FAIL (null; `iPa` не найден даже BFS-depth-4, в tutorial-HUD нет таймера) |
 
-## Phase 4 — Spatial
-- [ ] 4.1 spawn X (из oracle-трейса на `phase=1, cf=0`)
-- [ ] 4.2 per-bone mirror (`x = -x` по кости для `fx=-1` перед мировым смещением)
-- [ ] 4.3 camera zoom-by-distance (`xCa() = min(nC/(ECa+300), 1)` + интро-панорама/виньетка если есть в JS)
-- Gate: `compare_pose.py --coord-transform center` на полном 500-кадровом раунде:
-  bone mean < 10 юнитов, facing mismatch = 0%, `|dcx|`/`|dcy|` mean < 5.
+- BLOCKED (подтверждено данными пользователя 2026-09-04): tutorial-бой не
+  содержит AI-решений вообще (`deCount:1`, скриптованный противник,
+  `PhysicalDummy`-игрок, таймера нет). Критерии не занижены.
+- Evidence (ignored, на диске): `console.user-play.log` (4.5MB, 2 прогона:
+  played + idle), `recorded_inputs.txt` (`fd2f5b12…`), `console.replay1/2.log`,
+  `oracle_replay1/2.jsonl` (`a433d756…`), `oracle_run3/4.jsonl`, `console.run*.log`.
 
-## Phase 5 — Combat
-- [ ] 5.1 block/parry (`yD(5)`, `wd.LAa`, разрывы интервалов блока, `hT(5)` → `Gc.DK`)
-- [ ] 5.2 combos (`HZa/tKa`, `yD(4)`, `yD(6)`, `jga/iga`, `SZa`)
-- [ ] 5.3 crit/shock/disarm (`R8a`/`v.Ub.threshold`, `sr`, `Wqb` + `kwb/Wx`)
-- Gate per wave: заскриптованная последовательность вводов даёт идентичные события
-  (`hit/block/crit/disarm`) в трейсах порта и оракула (сравнение флагов событий, не поз).
+## TODO
 
-## Phase 6 — AI 1:1
-- [ ] дерево решений `de.Pqb`: зоны `dqb/aqa` (1-4), ветки `fk` (0-11),
-  `ResponseDelay/EnemyResponseDelay`, шансы, `Memory/Strikes`
-- [ ] реальные AI-таблицы подключены (по результату Фазы 2.3); убрать рандомные веса
-  (`ai_controller.cpp` — приближения помечены "pending oracle-trace verification")
-- [ ] PRNG `Da.jf()` сверен (или задокументирован фиксированный сид + ассерт на распределение)
-- Gate: при одинаковом фиксированном сиде `ai_branch`/`chosen_move` совпадают
-  кадр-в-кадр на прогоне из Фазы 1.
+- Phase 2 — Gap inventory (UNBLOCKED, можно делать сейчас):
+  - [x] AI-таблицы в web-ассетах — explicit вывод: ЕСТЬ (`AI_STATIC.md` §1:
+    `res/tactic_settings.xml` в `xml.dat` + `tactics/<name>.dat`,
+    `tactics/<a>_<b>.dat`; тактики `Sensei`/`Beginner`/…; лоадер `Si`,
+    парсер `P.Bmb`/`Md`, таблицы `sb`). Старый вывод «0 файлов» был по
+    нативным ассетам и неприменим.
+  - [ ] §9-таблица `JS_GAMEPLAY.md` → задачи с acceptance-критериями
+    (acceptance = поле oracle-трейса; AI/timer-поля — после разблокировки
+    gate: помечать `pending-real-fight`).
+  - [~] Ссылки на строки JS в `core/` перепроверены против текущего JS
+    (старт 2026-09-04, механо-скан `lineref_check.py`, temp/вне репо):
+    424 цитаты; ДВЕ конвенции — номера строк (core/scene AI/fight, валидны)
+    и СМЕЩЕНИЯ В СИМВОЛАХ (core/app + часть scene/README, напр. `Pa.iwa`
+    @629626 сходится; часть нет — перепроверить): 23 offset-цитаты
+    стандартизировать на строки по ходу Phase 3-6 (не чёрнить сейчас).
+    8 in-range подозрений на ревью: `v1`@L601-602 (вероятно опечатка `V1`),
+    `bn`@L436, `v.gya.p8a`@L605, `v.Lcb`@L604 (настоящий `Lcb` на L1204 —
+    похоже STALE), `yu`/`Lnb`@L803 (×2: hpp + README), + `physics.*`
+    дубликаты. Чинить по мере работы с файлами, не отдельным churn-коммитом.
+- Phase 3 — Core loop & timing: 3.1 fixed-tick 1/60 (`Us`, L135 ✓ статика);
+  3.2 целочисленный таймер (`Sf.iPa`, L2036); 3.3 `WC`/`llb` буфер фазы 1
+  (L426-429); 3.4 баннер между раундами. Gate: раунд 500+ кадров,
+  `round_timer_xU` + фазы кадр-в-кадр (нужен real-fight трейс).
+- Phase 4 — Spatial: 4.1 spawn X (phase=1,cf=0: Me x≈972.95, Enemy x≈690 —
+  из oracle_pose); 4.2 per-bone mirror; 4.3 camera zoom. Gate: bone mean<10,
+  facing 0%, dc<5.
+- Phase 5 — Combat: 5.1 блок (`yD(5)`, L514); 5.2 комбо (`HZa`, L500-501);
+  5.3 крит/шок/дизарм. Gate: event-trace match.
+- Phase 6 — AI 1:1: дерево `de.Pqb` (наблюдаемые `fk`: -2,-1,0,1,2,5,6,9,10,11;
+  3,4,7,8 OPEN), таблицы из Phase 2, PRNG `Xx` (L2366, glibc-LCG, портируем) +
+  harness-пины (`mulberry32`, frozen `Date`). Gate: branch/decision match.
+  Разблокируется real-fight трейсом с `ia>0`.
+- Phase 7 — Secondary: HUD/sound/effects/`MOa`. Gate: чек-лист.
+- Phase 8 — Final regression: 500+ кадров, pixel-diff ≥ PRE-FIXED %%, suite 3-7.
 
-## Phase 7 — Secondary systems
-- [ ] HUD-полосы статов (с утечкой/decay как в JS), таблицы звуков,
-  effect-контейнеры (`cv`, `magic/*.json`), реген спецприёмов (`MOa`)
-- Gate: чек-лист присутствия/поведения каждой системы, сверенный с оракулом.
+## FINAL — 1:1 playable build matching the oracle
 
-## Phase 8 — Final regression
-- [ ] 500+ кадров полного раунда (реального, не idle/интро)
-- [ ] pixel-diff против скриншотов оракула на фиксированном разрешении ≥ __% (порог
-  зафиксировать ДО прогона, не подгонять постфактум)
-- [ ] regression-suite Фаз 3-7 разом
+Последний пункт всего плана. Acceptance (фиксировано заранее):
+1. Детерминированный полный раунд (настоящий бой с AI, 500+ кадров):
+   `round_timer_xU`, переходы фаз и event-флаги (`hit/block/crit/disarm`)
+   порта совпадают с oracle-трейсом кадр-в-кадр, 0 расхождений.
+2. Pixel-diff скриншотов порта vs оракула на фиксированном разрешении ≥ 90%
+   (порог зафиксирован здесь, не подгоняется постфактум).
+3. Полный цикл Dojo→Fight→Results проходим в порту (playable, без заглушек
+   на happy path).
