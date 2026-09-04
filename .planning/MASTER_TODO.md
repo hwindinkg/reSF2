@@ -46,6 +46,8 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
 
 
 
+
+- Modes/export wave (2026-09-04): stages parse + tournament/survival resolve (Number/z6a, Groups random+NoDoubles, rewards, series advance) + apply_mode_setup (rounds/time/recovery, DamageFactor rules, NoBullets flag, enemy rebuild); export Ug envelope aligned (ke-LE + yna frames + SF2/base64, Dpb string-length noted); S20 goldens + ElementTree checks. Node 99 GREEN, diffs 0, loop pending.
 - Ranged/magic wave (2026-09-04): bh/dO/my state + Ka/yKa init + per-round reset; hZ/Hwa/LA + slot-8 publish; lp/sp conditions live; AddBullets/AddMagicCharge real; Jma recharge from dealt damage; JNa 27 log-only (no magic state), 28 SlowModel timescale real, 29 ChangeModelColor tint real; TurnOffCollision fighter gate + revert; ModAttributes aP expression eval; SetModFrames ns loop; NoBulletsReplenishment default-off hook (Stream 2: no refill path found); S19 goldens. Node 96 GREEN expected, loop 13/13 pending verify.
 - Review-fix wave (2026-09-04, REVIEW_PHYS_TRIG): HIGH ModFlag installs named persistent mod; kp numeric comparisons (?PlayerParameter/?Hit/?Variable/?Abs + arithmetic, 86 shipped uses); MED margins raw-gb + Ula/Pda insets at build (telemetry fired: EHead margin2 0.5, old code inflated), verbatim Bz roles + n$/o$ split + Cz-collinear target-start + kd_null no-knockback, Yka re-register at round_start, Health absolute gd; LOW collinear (in Bz), dmg_add routed-doc, YZa namespace action-name match, Round gate verified 1-based aligned; NOTEs fixed (XY-plane comment); mass-absent guard + s2a/bFa documented OPEN. Node 94 GREEN, combat/ai/spatial diff 0, loop 13/13 + save/load PASS.
 - Wea/TriggerBus/equip wave (2026-09-04): Bl.strike map (rest-length b, full-vector impulse, per-bone kb offsets + decay, wBa foe fallback, MG/NG OPEN); TriggerBus slots/fire/t0a/Axa/UKa-lY/Qh/ia-JNa/ModExpires-14/Provoke + perks.xml loader (_Var subst, Template merge) + equip mapping (list.xml Perks/Enchantments, ZOa at init, empty for Fists/Body/Head); SetHit-ppb bypass, Ly/jg state ordering, Lifesteal so-ratio, ChangeImpulse u.H=0 + set-semantics; qpb tactic switch; S17/S18/S18c goldens + ElementTree loader check; node 90 GREEN, combat/ai/spatial diff 0, loop 13/13 + save/load PASS.
@@ -366,6 +368,44 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
   - Regression this wave: loop 13/13 PASS + save/load PASS (post-change
     tree was already green; no repo files touched this wave except this
     file).
+
+
+## FINAL CONSOLIDATION (2026-09-04, Stream 1 scene/data duty)
+
+Wave hashes (all local, main branch):
+- `926652e5` Gr-style meter + Ma perk actions + S15/S16
+- `57408389` Bl.strike physics + TriggerBus + equip + S17/S18
+- `418b4af1` REVIEW_PHYS_TRIG (docs)
+- `43964804` review HIGH/MED/LOW fixes + S17b/S18 (kp, ModFlag, Bz)
+- `0c5e6fb6` ranged/magic + perk leftovers + S19
+- `74a48cdd` modes/export + S20 (amended from df288814)
+
+Regression table (final tree, Release):
+| Check | Verdict | Numbers |
+|---|---|---|
+| clean Release build (all targets) | PASS, 0 errors | warnings only (pre-existing demo-TU notes) |
+| Node combat_golden | GREEN | 99 asserts, 0 fail |
+| combat_diff (Node==C++) | PASS | 0 divergences (S5-S20 incl. loader ElementTree checks) |
+| Node ai_golden + ai diff | PASS | 0 divergences |
+| Node spatial_golden | GREEN | 17 asserts |
+| --headless-loop | PASS | 13/13 + save/load (money 425, items 7, WEAPON_KNIVES) |
+| --fight --headless 700 --dump-pose 600 | healthy | 600 frames, phase 1->2, timer 99->91, clean shutdown |
+| pose compare | recorded-mismatch class, deterministic | 232 matched, 38.7%/66.3%, dx 384.790 (identical to baseline) |
+
+FINAL acceptance (pre-fixed criteria) — honest marks:
+1. 500+ frame AI-fight trace frame-to-frame, 0 divergences — NOT MET (unpaired scenarios by construction; oracle tutorial vs port Training; intro aligns 232 frames, behavior diverges after; recorded in MASTER_TODO Phase 4 gate as PARTIAL PASS with directional numbers 5.02/5.95).
+2. Pixel-diff fighters vs oracle >=90% — NOT MEASURED (no pixel harness exists; R8 resolved Wins/Count absents only).
+3. Dojo->Fight->Results playable happy path — PASS (loop 13/13 covers it end to end + save/load).
+
+Remaining OPENs (with reasons):
+- Vc.sk ragdoll integrator (gravity/friction/MG/NG/cA/bFa/s2a) — needs runtime trace; knockback approximated via offsets+decay.
+- Magic visuals/projectile flight, yd/yp event plumbing, U4 pulse, buttons (wKa/b5), darkness overlay, MoveModel lerp, StealMagicMod (no magic/bullet systems beyond bh/dO/my).
+- Qa full engine (only kp comparisons + constants implemented); expression Frames/Value fall back.
+- Enemy Template ur stat-merge, AttributesAlign application, Eclipse Cea setter.
+- Map/UI side: entry energy (qZa), repeat caps, intros (hCa), PF lists (vJa), quest counters (Fsb), stages rule plumbing beyond Fight.
+- Dpb string-length vs ke(compressed) latent game inconsistency (ours uses compressed).
+- Mass-absent weight divergence (JS inf vs 1.0 guard) — shipped .dat presence unverified.
+- Phase-6 AI leads (enemy phase-2 march, phase-1 attacks gated by Je==2 in JS).
 
 ## FINAL — 1:1 playable build matching the oracle
 
