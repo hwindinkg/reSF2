@@ -287,6 +287,26 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
   - Debt Wave A also done: `eval_random` threaded
     (`FightContext::roll01`, 5 fight sites + AI v1/nwa owned stream).
 
+- Phase 7d - Win-recording live + quest feeds scoped (DONE 2026-09-04):
+  - Battles/iF win recording VERIFIED LIVE: loop Training win
+    (winner=Player, prize combo=1 bonus=1) -> `[result] battle record:
+    Training` -> save.xml shows `<Battle Name="Training" />` +
+    `<Fight Name="Training" Wins="3" />`, money 422->423. WDa stub can go
+    live on `has_battle` (Stream 3 map side).
+  - Quest feeds: scene/data scope has NONE (verified by grep — only
+    false-positive `requested`). Feeds live in app scope: quest_panel.hpp
+    structures them (`story_step` passed through; `boss_focus`/
+    `block_lesson` fields exist), Dojo feeds `story_step` (screens.cpp).
+    EXACT missing piece (Stream 3): extend `quest_state_for()` with
+    `(map_focus, battles, variables)` and set `boss_focus` (MapFocus
+    contains BOSS_LYNX) / `block_lesson` (quest-var name for the
+    SHOW_BLOCK beat still UNCONFIRMED — needs quest research, do NOT
+    guess); update the 2 screens.cpp call sites. All save fields they
+    need already land (`map_focus`, `battles`, `variables`).
+  - Regression this wave: loop 13/13 PASS + save/load PASS (post-change
+    tree was already green; no repo files touched this wave except this
+    file).
+
 ## FINAL — 1:1 playable build matching the oracle
 
 Последний пункт всего плана. Acceptance (фиксировано заранее):
