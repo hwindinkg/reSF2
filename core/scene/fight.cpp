@@ -886,7 +886,32 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
 
     ++atk.hits_landed;
     ++def.hits_taken;
+    // Prize stats (JS `v.kD`/`bzb` factors): the attacker's consecutive run
+    // grows, the target's resets; shocks dealt accumulate; the battle's
+    // first striker is latched once.
+    ++atk.combo_run;
+    if (atk.combo_run > atk.max_combo) atk.max_combo = atk.combo_run;
+    def.combo_run = 0;
+    if (rec.shock) ++atk.shocks_dealt;
+    if (!battle_first_hit_) {
+        battle_first_hit_ = true;
+        battle_first_by_player_ = atk.is_player;
+    }
     (void)move;
+}
+
+// JS `v.kD`/`bzb` prize factors (FLOW_STATIC section 4.3;
+// internal_settings `<RewardsPrize>` values verified 2026-09-04).
+FightController::BattlePrize FightController::prize() const {
+    BattlePrize p;
+    p.perfect = player_.hits_taken == 0;
+    p.first_strike = battle_first_hit_ && battle_first_by_player_;
+    p.max_combo = player_.max_combo;
+    p.shocks = player_.shocks_dealt;
+    p.style_value = 0;  // style untracked -> Turtle 0 (OPEN)
+    p.coins_bonus = (p.perfect ? 5 : 0) + (p.first_strike ? 2 : 0) +
+                    p.max_combo * 1 + p.shocks * 3 + p.style_value;
+    return p;
 }
 
 // The per-fighter update: the AI (or input) picks a move, the fighter

@@ -26,6 +26,7 @@
 // flagged as a gap.
 
 #include "app/screens.hpp"
+#include "app/lang_table.hpp"
 #include "app/quest_panel.hpp"
 
 #include <algorithm>
@@ -613,6 +614,13 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
             }
             out.push_back(std::move(z));
         }
+        // Backdrop index: non-start zones in file order map to res/map
+        // part0..6 (ZONE_1→part0 … ZONE_7→part6 — assumed order, see the
+        // MapScreen render comment); the Start zone keeps the dojo backdrop.
+        int part = 0;
+        for (auto& z : out) {
+            if (!z.is_start) z.part = part++;
+        }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "map: stages.xml load failed: %s\n", e.what());
     }
@@ -853,6 +861,90 @@ void MainMenuScreen::render_impl(App& app) {
     }
 }
 
+// Resolves + loads the hashed `en.<hash>.xml` lang file once (the
+// controller-atlas prefix-scan pattern). Silent when absent — callers fall
+// back to embedded EN (headless-safe).
+void ensure_lang(App& app) {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/lang";
+        std::string path;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.size() > 7 && name.rfind("en.", 0) == 0 &&
+                entry.path().extension().string() == ".xml") {
+                path = entry.path().string();
+                break;
+            }
+        }
+        if (path.empty()) return;
+        lang_table_load(app.res_root(), path);
+        std::fprintf(stdout, "[lang] loaded %s\n", path.c_str());
+        std::fflush(stdout);
+    } catch (const std::exception&) {
+    }
+}
+
+// Registers the map zone backdrops (res/map/part0..6 + buttons frames) into
+// the app atlas cache — the controller-atlas decode path. The part textures
+// ship as ASTC ktx / crunch dds (not CPU-decodable), so this usually
+// registers only the frame rects that decode and the map falls back to
+// per-zone tints (flagged in the render path).
+void load_map_backdrops(App& app) {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/map";
+        const char* kPrefixes[] = {"part0", "part1", "part2", "part3",
+                                   "part4", "part5", "part6", "buttons"};
+        for (const char* prefix : kPrefixes) {
+            const std::string pre(prefix);
+            std::string json_path;
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind(pre + ".", 0) == 0 &&
+                    entry.path().extension().string() == ".json") {
+                    json_path = entry.path().string();
+                    break;
+                }
+            }
+            if (json_path.empty()) continue;
+            sf2::data::Texture tex;
+            bool decoded = false;
+            for (const std::string& ext : {".ktx", ".dds", ".webp", ".png"}) {
+                for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                    const std::string name = entry.path().filename().string();
+                    if (name.rfind(pre + ".", 0) == 0 &&
+                        entry.path().extension().string() == ext) {
+                        if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                            decoded = true;
+                            break;
+                        }
+                    }
+                }
+                if (decoded) break;
+            }
+            if (!decoded) continue;
+            const GLuint gl = app.renderer().texture_for("map_" + pre, tex);
+            if (gl == 0) continue;
+            std::ifstream in(json_path, std::ios::binary);
+            std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                         std::istreambuf_iterator<char>());
+            const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+            for (const auto& fr : a.frames) {
+                app.register_atlas_frame(fr, a.w, a.h, gl);
+            }
+            std::fprintf(stdout, "[map] backdrop %s: %zu frames\n", pre, a.frames.size());
+        }
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[map] backdrop load failed: %s\n", e.what());
+    }
+}
+
 // ---------------------------------------------------------------------------
 // DojoScreen
 // ---------------------------------------------------------------------------
@@ -1015,6 +1107,7 @@ DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
 void DojoScreen::update_impl(float dt) {
     (void)dt;
     idle_frame_++;  // drives the idle-stance frame cycle (display only)
+    ensure_lang(app());  // runtime Sensei lines (once; silent if absent)
     if (!money_logged_) {
         money_logged_ = true;
         try {
@@ -1036,15 +1129,28 @@ void DojoScreen::update_impl(float dt) {
         if (pb.has_result && pb.player_won && pb.battle_name == "Training") {
             training_won_ = true;
         }
-        const QuestStep qs = quest_step_for(tutorial_, training_won_);
+        const QuestStep qs = quest_step_for(app().res_root(), tutorial_, training_won_);
         if (qs.id != quest_logged_) {
             quest_logged_ = qs.id;
-            std::fprintf(stdout, "[quest] step %d (%s) -> %s\n", qs.id, qs.speaker,
-                         qs.target);
+            std::fprintf(stdout, "[quest] step %d (%s) -> %s\n", qs.id, qs.speaker.c_str(),
+                         qs.target.c_str());
             std::fflush(stdout);
         }
     }
     const App::PointerState& p = app().pointer();
+    // Disciple sparring toggle (JS `Nfb` — flips `p.o.Y0()` via `oub()` and
+    // reopens Dojo `mp(3)`): STUB — the save has no Disciple/Y0 field, so
+    // this flips session-local display state only (no fight setup change).
+    // Geometry mirrors the render toggle below.
+    if (p.x >= kViewW - 250.0 && p.x <= kViewW - 30.0 && p.y >= 18.0 && p.y <= 62.0) {
+        if (p.pressed) {
+            disciple_ = !disciple_;
+            sf2::audio::AudioEngine::instance().play("click");
+            std::fprintf(stdout, "[dojo] Disciple toggle %s (stub — needs save Y0)\n",
+                         disciple_ ? "ON" : "OFF");
+            std::fflush(stdout);
+        }
+    }
     hover_ = -1;
     for (std::size_t i = 0; i < buttons_.size(); ++i) {
         const Button& b = buttons_[i];
@@ -1156,7 +1262,7 @@ void DojoScreen::render_impl(App& app) {
             draw_punchbag(ren, fig_cam, 850.0f, kFeetY);
         }
         // Sensei hint panel (quest_panel.hpp — the tutorial quest banner).
-        const QuestStep qs = quest_step_for(tutorial_, training_won_);
+        const QuestStep qs = quest_step_for(app.res_root(), tutorial_, training_won_);
         const float pw = 780.0f, ph = 64.0f, px = kViewW * 0.5f - pw * 0.5f;
         const float py = 84.0f;
         const float panel[] = {px, py, px + pw, py, px, py + ph,
@@ -1182,6 +1288,15 @@ void DojoScreen::render_impl(App& app) {
             draw_flat_button(app, b.label, b.x, b.y, b.w, b.h, r, g, bl, hovered);
         }
         (void)app.draw_text(b.x, b.y, b.label, 1.0f, 1.0f, 1.0f, 1.0f);
+    }
+    // Disciple sparring toggle (JS `Nfb` STUB — session-local only, see the
+    // update handler; needs save Disciple/Y0 to switch the training setup).
+    {
+        const float cx = kViewW - 140.0f, cy = 40.0f, w = 220.0f, h = 44.0f;
+        const std::string label = disciple_ ? "DISCIPLE: ON" : "DISCIPLE: OFF";
+        draw_flat_button(app, label, cx, cy, w, h, disciple_ ? 0.6f : 0.35f, 0.4f, 0.3f,
+                         false);
+        (void)app.draw_text(cx - 78.0f, cy - 8.0f, label, 0.7f, 1.0f, 1.0f, 1.0f);
     }
 }
 
@@ -1210,6 +1325,21 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
         zones_[i].locked =
             !zones_[i].is_start && static_cast<int>(i) > zone_sel_;
         for (auto& n : zones_[i].nodes) n.active = !zones_[i].locked;
+    }
+    // MapFocus STUB (JS `Ya.bKa` L2129 focuses the save's MapFocus `p.o.ys`
+    // via `m5` — NOT in WarriorSave, see report): pre-highlight the first
+    // BOSSES node of the current zone, else the first node (hover highlight
+    // only, no selection change).
+    hover_ = -1;
+    if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size()) {
+        const auto& focus_nodes = zones_[zone_sel_].nodes;
+        for (std::size_t i = 0; i < focus_nodes.size(); ++i) {
+            if (focus_nodes[i].type == "BOSSES") {
+                hover_ = static_cast<int>(i);
+                break;
+            }
+        }
+        if (hover_ < 0 && !focus_nodes.empty()) hover_ = 0;
     }
     std::fprintf(stdout, "[map] %zu zones loaded (current %s)\n", zones_.size(), cur.c_str());
     for (const auto& z : zones_) {
@@ -1285,6 +1415,23 @@ void MapScreen::update_impl(float dt) {
 
 void MapScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
+    load_map_backdrops(app);  // once; silent unless frames decode
+    // Per-zone backdrop (res/map/part0..6 — FLOW_STATIC.md §2.1): the
+    // selected zone's "map<N>" art full-bleed when its texture decoded,
+    // else the dojo sprite, else flat. Zone→part assumes file order
+    // (ZONE_1→part0 … ZONE_7→part6); the Start zone keeps the dojo art.
+    // NOTE: part textures ship as ASTC ktx / crunch dds (not CPU-decodable),
+    // so the fallback path is the live one until the pipeline decodes them.
+    bool bg_done = false;
+    if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size() &&
+        zones_[zone_sel_].part >= 0) {
+        bg_done = app.draw_atlas_rect(
+            "map" + std::to_string(zones_[zone_sel_].part), 0.0f, 0.0f, kViewW, kViewH,
+            1.0f);
+    }
+    if (bg_done) {
+        // Backdrop art already covers the view (nodes/tabs/BACK below).
+    } else {
     sf2::scene::Sprite* dojo = app.dojo_sprite();
     if (dojo != nullptr) {
         sf2::render::Camera ui_cam;
@@ -1301,6 +1448,7 @@ void MapScreen::render_impl(App& app) {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.08f, 0.1f, 0.14f, 1.0f);
     }
+    }  // else (!bg_done): dojo sprite / flat fallback above
     // Zone tab strip (JS `Ya.HXa` L2123): one tab per zone, locked tabs dim.
     {
         const float tab_w = 140.0f, tab_h = 44.0f, tab_y = 38.0f, tab_x0 = 130.0f;
@@ -2003,6 +2151,16 @@ void FightScreen::update_impl(float dt) {
                      fight_->player().hp, fight_->player().rounds_won,
                      fight_->player().hits_landed, fight_->enemy().hp,
                      fight_->enemy().rounds_won, fight_->enemy().hits_landed);
+        // JS `v.kD`/`bzb` prize factors (FLOW_STATIC section 4.3): performance
+        // bonus on top of the battle's base reward.
+        {
+            const auto prize = fight_->prize();
+            std::fprintf(stdout,
+                         "[fight] prize: perfect=%d first=%d combo=%d shocks=%d bonus=%d\n",
+                         prize.perfect ? 1 : 0, prize.first_strike ? 1 : 0,
+                         prize.max_combo, prize.shocks, prize.coins_bonus);
+            if (player_won) pb.reward_money += prize.coins_bonus;
+        }
         std::fflush(stdout);
         push(kScreenResults);
     }
@@ -2378,6 +2536,23 @@ void ResultsScreen::update_impl(float dt) {
             w.experience += exp_reward_;
             std::fprintf(stdout, "[result] WIN reward money=%d exp=%d (money %d -> %d)\n",
                          money_reward_, exp_reward_, before, w.money);
+            // JS battle record (`iF` via `hl`/`lWa`, FLOW_STATIC section 3.2):
+            // a win records the battle for the `WDa` unlock rule; the fight
+            // win count (`yc`/`no`) bumps too.
+            {
+                const PendingBattle& pb = app().pending_battle();
+                w.record_battle_win(pb.battle_name);
+                bool found = false;
+                for (auto& f : w.fights) {
+                    if (f.name == pb.battle_name) {
+                        ++f.wins;
+                        found = true;
+                    }
+                }
+                if (!found) w.fights.push_back({pb.battle_name, 1});
+                std::fprintf(stdout, "[result] battle record: %s\n",
+                             pb.battle_name.c_str());
+            }
             while (w.experience >= 100 && w.level < 50) {
                 w.experience -= 100;
                 w.level++;

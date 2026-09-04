@@ -95,6 +95,9 @@ private:
     std::string tutorial_ = "MOVE";
     int quest_logged_ = -1;
     bool training_won_ = false;
+    // Disciple sparring toggle (JS `Nfb`): session-local STUB until the save
+    // carries Disciple/Y0 (see report) — flips display state only.
+    bool disciple_ = false;
 };
 
 // The main menu — native GeneralMenu (screen 8).
@@ -150,6 +153,7 @@ public:
         std::string file;   // FileName ("Map0.1" ..) — the zone backdrop id
         bool is_start = false;  // the `Start="1"` zone (JS `st.yR`)
         bool locked = false;
+        int part = -1;  // res/map backdrop index (ZONE_1→part0 …; -1 = none)
         std::vector<Node> nodes;
     };
 

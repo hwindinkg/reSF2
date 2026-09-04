@@ -152,6 +152,9 @@ struct FightFighter {
     sf2::scene::ShockState shock;  // pain/shock/disarm (`sr/vc/sn/Wx/ws`, L490)
     int hits_landed = 0;
     int hits_taken = 0;
+    int combo_run = 0;        // consecutive landed hits (resets when taken)
+    int max_combo = 0;        // battle-best run (prize ComboCount factor)
+    int shocks_dealt = 0;     // shock hits landed (prize Shock factor)
     int moves_started = 0;
     std::string last_move;    // current move name (for the log/HUD)
     std::string last_decision;  // the AI's last decision (log)
@@ -416,6 +419,20 @@ public:
     // --- fight state accessors -------------------------------------------
     const FightFighter& player() const { return player_; }
     const FightFighter& enemy() const { return enemy_; }
+    // Battle prize breakdown (JS `v.kD`/`bzb` factors, FLOW_STATIC 4.3).
+    // Factors from internal_settings `<RewardsPrize>` (verified values):
+    // Perfect $Ia=5, FirstStrike ep=2, ComboCount Ui=1, Shock Ub=3,
+    // Styles pk (Turtle 0 .. Fantastic 15; port: style untracked -> 0).
+    // The exact combination arithmetic inside `bzb` is OPEN; additive.
+    struct BattlePrize {
+        bool perfect = false;      // player took no hits
+        bool first_strike = false;  // player landed the battle's first hit
+        int max_combo = 0;         // player's best consecutive run
+        int shocks = 0;            // player's shock hits
+        int style_value = 0;       // style factor (untracked -> Turtle 0)
+        int coins_bonus = 0;       // perfect*5 + first*2 + combo*1 + shocks*3
+    };
+    BattlePrize prize() const;
     int phase() const { return static_cast<int>(phase_); }
     const RoundState& round() const { return round_; }
     bool battle_over() const { return battle_over_; }
@@ -474,6 +491,10 @@ private:
     bool round_live_ = false;      // JS `h9` — a round is in progress
     bool dga_ = false;             // JS `Dga` — a hit landed this round
                                    // (`ep` = !Dga, L394; init false L380)
+    // Battle prize stats (JS `v.kD`/`bzb` factors, FLOW_STATIC section 4.3):
+    // first-strike side, set on the battle's first landed hit (else none).
+    bool battle_first_hit_ = false;  // any hit landed yet this battle
+    bool battle_first_by_player_ = false;
     bool round_wait_ = false;      // JS: the host waits for the player's
                                    // Next between rounds (vhb L410 -> Z2)
     // The StartStance input buffer (JS `wd.WC` L426 + `llb` L429): ONE slot

@@ -22,6 +22,7 @@
 // `load()` returns the template when no save file exists, `save()` writes
 // the current document back.
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,59 @@ struct WarriorSave {
         }
         return false;
     }
+
+    // Battle records (JS `iF`, `<Battles><Battle Name="ZONE_1|BOSS_LYNX|">`).
+    // Presence = node progress record for the `WDa` unlock rule.
+    std::vector<std::string> battles;
+
+    bool has_battle(const std::string& name) const {
+        for (const std::string& b : battles) {
+            if (b == name) return true;
+        }
+        return false;
+    }
+
+    void record_battle_win(const std::string& name) {
+        if (!has_battle(name)) battles.push_back(name);
+    }
+
+    // Fight win counts (JS `yc`, `<Fights>/<Fight>`; the `no` win count).
+    // The count attr name is OPEN (no <Fights> in the seed) — "Wins" used.
+    struct FightWins {
+        std::string name;
+        int wins = 0;
+    };
+    std::vector<FightWins> fights;
+
+    // Quest states + story variables (JS `kF`/`rv`:
+    // `<Quests>/<Quest Name State>` + `<Quests>/<Variables>/<Variable>`).
+    // Nesting follows FLOW_STATIC section 3.2; attr names flagged OPEN
+    // (no <Quests> in the seed).
+    struct QuestState {
+        std::string name;
+        std::string state;
+    };
+    std::vector<QuestState> quests;
+    std::map<std::string, std::string> variables;  // quest vars (`rv`)
+
+    // Story tutorial step (JS `_$StoryTutorialStep`, `p.L3`/`ha.WO`).
+    // Stored as a quest variable; empty = not started.
+    std::string story_step() const {
+        const auto it = variables.find("_$StoryTutorialStep");
+        return it != variables.end() ? it->second : std::string();
+    }
+
+    void set_story_step(const std::string& step) {
+        variables["_$StoryTutorialStep"] = step;
+    }
+
+    std::string map_focus;  // `ys` (MapFocus attr; absent in seed)
+
+    // Currencies (JS `pG`: `<Currencies>/<Currency Name Count>`; the Count
+    // attr name is OPEN) and Resistances (JS `Pw`: `<Resistances>` ATTRS,
+    // e.g. `Resistance_2="0"` — certain, in the seed).
+    std::map<std::string, int> currencies;
+    std::map<std::string, int> resistances;
 };
 
 // Loads/saves the users.xml document. Portable C++17 — the path is passed
@@ -88,6 +142,17 @@ public:
     // Warrior attributes + the <Items> list are patched (mirroring the JS
     // `Aa.save` re-serializing the whole document).
     void save(const WarriorSave& warrior);
+
+    // The SF2User envelope (FLOW_STATIC section 3.1, JS L70-73):
+    // decode: base64 -> un-zstd -> XML text (`Aa.load`); the `.sf2` export
+    // is `"SF2" + base64(users + packs + flags)` (`Aa.Ddb/Dpb`).
+    // `load()` below accepts BOTH plain XML (current disk format, first
+    // char `<`) and envelope text (transparent dual-read); `save()` keeps
+    // writing plain XML (existing saves keep working).
+    static std::string envelope_decode(const std::string& envelope_text);
+    static std::string export_sf2(const std::string& users_xml,
+                                  const std::string& packs_xml,
+                                  const std::string& flags_json);
 
     // Path of the save file (for logging/tests).
     const std::string& save_path() const { return save_path_; }

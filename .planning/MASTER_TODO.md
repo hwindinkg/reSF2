@@ -243,6 +243,30 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
 - Phase 7 — Secondary: HUD/sound/effects/`MOa`. Gate: чек-лист.
 - Phase 8 — Final regression: 500+ кадров, pixel-diff ≥ PRE-FIXED %%, suite 3-7.
 
+- Phase 7b - Save system 1:1 (DONE 2026-09-04, build + unit + loop green):
+  - `WarriorSave` += battles (+has/record), fights (Wins OPEN), quests,
+    variables (+story_step/_$StoryTutorialStep accessor), map_focus,
+    currencies (Count OPEN), resistances (attrs, certain); load+save all.
+  - Envelope: base64 codec + zstd_compress + dual-format load() +
+    export_sf2 (join separator OPEN). save() stays plain (compat).
+  - Stream 3 symbols: story_step/quest_vars(variables)/battles/map_focus
+    present; disciple = a fight name (Dojo_Disciple), covered by
+    fights/battles records (not a save field).
+  - Scratch crash diagnosis (CLOSED): save_unit_test 0xC0000409 was a TEST
+    bug (asserted decode(export()) round-trip; export wraps raw XML while
+    decode expects compressed payloads — asymmetric by spec). Fixed test:
+    SAVE_UNIT PASS (all new fields + envelope + export shape).
+- Phase 7c - Rewards after battle (DONE 2026-09-04):
+  - Prize stats in apply_hit (combo/shocks/first-striker),
+    `BattlePrize::prize()` (Perfect 5 / FirstStrike 2 / Combo 1 / Shock 3 /
+    style 0; combination arithmetic OPEN), FightScreen bonus + log,
+    ResultsScreen battle-win + fight-wins records. OLa stays 100xp
+    (character_progress thresholds OPEN).
+  - Runtime: prize lines live; loop fights enemy-won (pre-existing
+    dynamics), so win-records verified by unit test instead of live win.
+  - Debt Wave A also done: `eval_random` threaded
+    (`FightContext::roll01`, 5 fight sites + AI v1/nwa owned stream).
+
 ## FINAL — 1:1 playable build matching the oracle
 
 Последний пункт всего плана. Acceptance (фиксировано заранее):

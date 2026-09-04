@@ -13,7 +13,9 @@
 #include <stdexcept>
 #include <vector>
 
+#include "codec.hpp"
 #include "xml_doc.hpp"
+#include "zstd_stream.hpp"
 
 namespace sf2::app {
 
@@ -67,8 +69,15 @@ bool SaveSystem::has_save() const {
 
 WarriorSave SaveSystem::load() {
     const std::string path = has_save() ? save_path_ : default_path_;
+    std::string text = read_file_text(path);
+    // Dual-format boot read: plain XML starts with `<` (after whitespace);
+    // otherwise it is an SF2User envelope (base64+zstd).
+    std::size_t first = text.find_first_not_of(" \t\r\n");
+    if (first != std::string::npos && text[first] != '<') {
+        text = envelope_decode(text);
+    }
     sf2::data::xml_doc doc;
-    doc.parse(read_file_text(path));
+    doc.parse(text);
 
     const pugi::xml_node root = doc.root().first_child();
     if (root == nullptr || std::string(root.name()) != "Root") {
@@ -107,6 +116,66 @@ WarriorSave SaveSystem::load() {
         oi.count = sf2::data::xml_attr_int(item, "Count", 1);
         oi.equipped = sf2::data::xml_attr_bool(item, "Equipped", false);
         out.items.push_back(std::move(oi));
+    }
+
+    // Battle records (JS `iF`): `<Battles><Battle Name="...">` presence.
+    out.battles.clear();
+    for (pugi::xml_node b : warrior.child("Battles").children("Battle")) {
+        if (b.attribute("Name")) out.battles.push_back(b.attribute("Name").value());
+    }
+
+    // Fight win counts (JS `yc`): `<Fights>/<Fight Name Wins>` (`Wins`
+    // attr name OPEN — no <Fights> in the seed).
+    out.fights.clear();
+    for (pugi::xml_node f : warrior.child("Fights").children("Fight")) {
+        WarriorSave::FightWins fw;
+        if (f.attribute("Name")) fw.name = f.attribute("Name").value();
+        fw.wins = sf2::data::xml_attr_int(f, "Wins", 0);
+        out.fights.push_back(std::move(fw));
+    }
+
+    // Quests + variables (JS `kF`/`rv`). Absent in the seed -> empty.
+    out.quests.clear();
+    out.variables.clear();
+    if (pugi::xml_node quests = warrior.child("Quests")) {
+        for (pugi::xml_node q : quests.children("Quest")) {
+            WarriorSave::QuestState qs;
+            if (q.attribute("Name")) qs.name = q.attribute("Name").value();
+            if (q.attribute("State")) qs.state = q.attribute("State").value();
+            out.quests.push_back(std::move(qs));
+        }
+        if (pugi::xml_node vars = quests.child("Variables")) {
+            for (pugi::xml_node v : vars.children("Variable")) {
+                if (v.attribute("Name")) {
+                    out.variables[v.attribute("Name").value()] =
+                        v.attribute("Value") ? v.attribute("Value").value() : "";
+                }
+            }
+        }
+    }
+
+    // MapFocus (`ys` attr; absent in seed -> "").
+    out.map_focus.clear();
+    if (warrior.attribute("MapFocus")) out.map_focus = warrior.attribute("MapFocus").value();
+
+    // Currencies (`pG`: `<Currencies>/<Currency Name Count>`; Count OPEN).
+    out.currencies.clear();
+    for (pugi::xml_node c : warrior.child("Currencies").children("Currency")) {
+        if (c.attribute("Name")) {
+            out.currencies[c.attribute("Name").value()] =
+                sf2::data::xml_attr_int(c, "Count", 0);
+        }
+    }
+
+    // Resistances (`Pw`): ATTRS on <Resistances> (`Resistance_2="0"`).
+    out.resistances.clear();
+    if (pugi::xml_node res = warrior.child("Resistances")) {
+        for (pugi::xml_attribute a : res.attributes()) {
+            try {
+                out.resistances[a.name()] = std::stoi(a.value());
+            } catch (const std::exception&) {
+            }
+        }
     }
     return out;
 }
@@ -170,9 +239,115 @@ void SaveSystem::save(const WarriorSave& w) {
         item.append_attribute("Count").set_value(oi.count);
     }
 
+    // MapFocus (`ys`): get-or-append (absent in the seed).
+    {
+        pugi::xml_attribute mf = warrior.attribute("MapFocus");
+        if (!mf) mf = warrior.append_attribute("MapFocus");
+        mf.set_value(w.map_focus.c_str());
+    }
+
+    // Battles (`iF`): replace the <Battle Name> children.
+    {
+        pugi::xml_node battles = warrior.child("Battles");
+        if (!battles) battles = warrior.append_child("Battles");
+        std::vector<pugi::xml_node> old;
+        for (pugi::xml_node b : battles.children("Battle")) old.push_back(b);
+        for (const pugi::xml_node& b : old) battles.remove_child(b);
+        for (const std::string& name : w.battles) {
+            battles.append_child("Battle").append_attribute("Name").set_value(name.c_str());
+        }
+    }
+
+    // Fights (`yc`): replace the <Fight> children.
+    {
+        pugi::xml_node fights = warrior.child("Fights");
+        if (!fights) fights = warrior.append_child("Fights");
+        std::vector<pugi::xml_node> old;
+        for (pugi::xml_node f : fights.children("Fight")) old.push_back(f);
+        for (const pugi::xml_node& f : old) fights.remove_child(f);
+        for (const WarriorSave::FightWins& fw : w.fights) {
+            pugi::xml_node f = fights.append_child("Fight");
+            f.append_attribute("Name").set_value(fw.name.c_str());
+            f.append_attribute("Wins").set_value(fw.wins);
+        }
+    }
+
+    // Quests + variables (`kF`/`rv`).
+    {
+        pugi::xml_node quests = warrior.child("Quests");
+        if (!quests) quests = warrior.append_child("Quests");
+        std::vector<pugi::xml_node> old;
+        for (pugi::xml_node q : quests.children("Quest")) old.push_back(q);
+        for (const pugi::xml_node& q : old) quests.remove_child(q);
+        for (const WarriorSave::QuestState& qs : w.quests) {
+            pugi::xml_node q = quests.append_child("Quest");
+            q.append_attribute("Name").set_value(qs.name.c_str());
+            q.append_attribute("State").set_value(qs.state.c_str());
+        }
+        pugi::xml_node vars = quests.child("Variables");
+        if (!vars) vars = quests.append_child("Variables");
+        std::vector<pugi::xml_node> old_vars;
+        for (pugi::xml_node v : vars.children("Variable")) old_vars.push_back(v);
+        for (const pugi::xml_node& v : old_vars) vars.remove_child(v);
+        for (const auto& kv : w.variables) {
+            pugi::xml_node v = vars.append_child("Variable");
+            v.append_attribute("Name").set_value(kv.first.c_str());
+            v.append_attribute("Value").set_value(kv.second.c_str());
+        }
+    }
+
+    // Currencies (`pG`).
+    {
+        pugi::xml_node cur = warrior.child("Currencies");
+        if (!cur) cur = warrior.append_child("Currencies");
+        std::vector<pugi::xml_node> old;
+        for (pugi::xml_node c : cur.children("Currency")) old.push_back(c);
+        for (const pugi::xml_node& c : old) cur.remove_child(c);
+        for (const auto& kv : w.currencies) {
+            pugi::xml_node c = cur.append_child("Currency");
+            c.append_attribute("Name").set_value(kv.first.c_str());
+            c.append_attribute("Count").set_value(kv.second);
+        }
+    }
+
+    // Resistances (`Pw`): attributes on <Resistances>.
+    {
+        pugi::xml_node res = warrior.child("Resistances");
+        if (!res) res = warrior.append_child("Resistances");
+        for (const auto& kv : w.resistances) {
+            pugi::xml_attribute a = res.attribute(kv.first.c_str());
+            if (!a) a = res.append_attribute(kv.first.c_str());
+            a.set_value(kv.second);
+        }
+    }
+
     std::ostringstream oss;
     doc.save(oss, "\t", pugi::format_default, pugi::encoding_auto);
     write_file_text(save_path_, oss.str());
+}
+
+std::string SaveSystem::envelope_decode(const std::string& envelope_text) {
+    // `Aa.load` (L70-71): base64 -> un-zstd (`kb.f3`) -> XML text.
+    // Leading/trailing whitespace is tolerated (shells add newlines).
+    std::string b64;
+    for (char c : envelope_text) {
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') b64.push_back(c);
+    }
+    const std::vector<std::uint8_t> compressed = sf2::data::base64_decode(b64);
+    const std::vector<std::uint8_t> xml =
+        sf2::data::zstd_decompress(compressed.data(), compressed.size());
+    return std::string(xml.begin(), xml.end());
+}
+
+std::string SaveSystem::export_sf2(const std::string& users_xml,
+                                   const std::string& packs_xml,
+                                   const std::string& flags_json) {
+    // `Aa.Ddb/Dpb` (L71-73): `.sf2` = `"SF2" + base64(users+packs+flags)`.
+    // The exact concatenation separator is OPEN (no captured .sf2 sample);
+    // plain concatenation is used.
+    const std::string payload = users_xml + packs_xml + flags_json;
+    const std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
+    return "SF2" + sf2::data::base64_encode(bytes);
 }
 
 } // namespace sf2::app

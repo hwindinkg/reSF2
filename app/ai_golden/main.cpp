@@ -22,6 +22,8 @@
 #include "scene/ai.hpp"
 #include "scene/damage.hpp"
 #include "scene/move_def.hpp"
+#include "codec.hpp"
+#include "zstd_stream.hpp"
 
 namespace {
 
@@ -164,8 +166,7 @@ int main() {
     ai.init("", tactics, &tactic, &moves);
     ai.set_seed(7u);
     const MoveDef* idle = &moves["Idle"];
-    std::printf("  \"updates\": [");
-    for (int i = 0; i < 12; ++i) {
+    std::printf("  \"updates\": [");    for (int i = 0; i < 12; ++i) {
         AiFightState st;
         st.current_move = idle;
         st.move_frame = 10;
@@ -185,6 +186,30 @@ int main() {
                     i ? ", " : "", i, mv.c_str(), ai.last_stage());
     }
     std::printf("],\n");
+
+    // ---- envelope codec vectors (FLOW_STATIC 3.1: base64 + zstd) ----
+    {
+        const std::string man_b64 =
+            sf2::data::base64_encode(reinterpret_cast<const std::uint8_t*>("Man"), 3);
+        const std::vector<std::uint8_t> man_back =
+            sf2::data::base64_decode(man_b64);
+        const std::string man_str(man_back.begin(), man_back.end());
+        std::printf("  \"b64_man\": \"%s\",\n", man_b64.c_str());
+        std::printf("  \"b64_roundtrip\": \"%s\",\n", man_str.c_str());
+        const std::string xml = "<Root><Warrior ID=\"1\"/></Root>";
+        const std::vector<std::uint8_t> xml_bytes(xml.begin(), xml.end());
+        const std::vector<std::uint8_t> zc = sf2::data::zstd_compress(
+            xml_bytes.data(), xml_bytes.size(), 3);
+        const std::string env = sf2::data::base64_encode(zc);
+        const std::vector<std::uint8_t> zc_back = sf2::data::base64_decode(env);
+        const std::vector<std::uint8_t> xml_back = sf2::data::zstd_decompress(
+            zc_back.data(), zc_back.size());
+        const std::string xml_rt(xml_back.begin(), xml_back.end());
+        std::printf("  \"envelope_roundtrip\": %s,\n",
+                    xml_rt == xml ? "true" : "false");
+        std::printf("  \"sf2_prefix\": \"%.3s\",\n",
+                    ("SF2" + env).c_str());
+    }
 
     // ---- combat vectors (mirror combat_golden.js S5/S6 via the SAME free
     // functions the fight uses: orb_hit / shock_tick / r8a_decide) ----

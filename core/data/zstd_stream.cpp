@@ -58,4 +58,21 @@ std::vector<std::uint8_t> zstd_decompress(const std::uint8_t* data, std::size_t 
     return out;
 }
 
+std::vector<std::uint8_t> zstd_compress(const std::uint8_t* data, std::size_t size, int level) {
+    if (data == nullptr || size == 0) {
+        throw std::runtime_error("zstd_compress: empty input");
+    }
+    if (level < 1) level = 1;
+    if (level > 22) level = 22;
+    const std::size_t bound = ZSTD_compressBound(size);
+    std::vector<std::uint8_t> out(bound);
+    const std::size_t ret = ZSTD_compress(out.data(), bound, data, size, level);
+    if (ZSTD_isError(ret)) {
+        throw std::runtime_error(std::string("zstd_compress: ") +
+                                 ZSTD_getErrorName(ret));
+    }
+    out.resize(ret);
+    return out;
+}
+
 } // namespace sf2::data
