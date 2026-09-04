@@ -438,11 +438,28 @@ Dojo verdict: PASS (structural) — hint rows non-overlapping + readable,
 buttons/disciple/setup fitted+centered, modal fitted, atlas telemetry
 (`btn_back` the only miss; Dojo/Map/Shop/Profile frames resolve).
 Pushed per-screen per user order.
-Dojo fidelity wave (2026-09-04 Stream 1 Waves 0-6): PASS structural - tour 13-13 loop 13-13 golden 0. Miss btn_back only. HUD uses level+Level_bar not star. Pixel gate PENDING user oracle_dojo.png.
+Dojo fidelity wave (2026-09-04 Stream 1 Waves 0-6): PASS structural - tour 13-13 loop 13-13 golden 0. Miss btn_back only. HUD uses level+Level_bar not star. Pixel gate FIRST MEASURED Wave 6 2026-09-04 (numbers below; 25% fight-design-close bar NOT MET on first measurement — recorded, not fitted).
 - Results/Pause/Settings PASS + PUSHED: fitted titles/labels/buttons; pause menu labeled (was flat-only); settings BACK debounce (push-frame held-click race); modal/title/quest-toast fitted.
 - Map PASS + PUSHED: tabs/series/nodes/badges/BRACKET/BACK fitted via draw_ui_label; act-overlay/modal exclusive (modal wins); BOSS overlay fitted. - Shop PASS + PUSHED: tabs/cards/markers/wallet/delivery/wielding/BACK fitted; Dojo chrome top-gated (disciple/SETUP no longer leak onto Shop); modal top-gated (single instance on layered stack).
 Dense-node label collisions remain (nodes ~60px apart, data-driven; needs leader-line layout, follow-up).
 - Profile PASS + PUSHED: header/slots/cards/dline/MOVES/BACK fitted; slot+card labels added (were flat-only). Hint-bar-under-profile is the allowed global overlay (dimmed).
+- Wave 6 dojo pixel gate FIRST MEASURED (2026-09-04): oracle_dojo.png present
+  (1285x733 dirty screen-skim). Normalized read-only to oracle_dojo_norm.png
+  (crop L4/T5/R1/B7 -> 1280x721, LANCZOS to 1280x720; original untouched).
+  Fresh --ui-tour port capture (tour 13/13, exit 0, rebuilt HEAD df1e073b).
+  ui_diff thr12: dojo = 84.90% over-threshold (pct>40: 69.68, pct>80: 54.04).
+  Grid (8x4 pct>12): top half matches closely (y0 means O~76-114 vs P~77-112,
+  oracle bright bands x240-720/x1120-1280 reproduced within ~10-15 units);
+  residual = port lower half dark (port dark-frac y3-y5 0.80-0.87 vs oracle
+  0.11-0.60; oracle full-height interior mean ~95-155 rows 300-570, port ~0-40
+  below y~384 — dojo fit framing floor band lands y~295-333, layers below are
+  portrait-aspect and never cover the lower half; port_fight.png shows the same
+  dark-floor shape, so it is structural, not a dojo-only regression).
+  Verdict: 25% fight-design-close bar NOT MET on first measurement; dojo
+  STRUCTURAL gate (Waves 0-5) still PASS and unchanged; no fix churn this round
+  (fix rounds 0/3 used). Follow-up OPEN (not gate-blocking): full-height dojo
+  interior framing (portrait-aspect layer projection below floor band) +
+  fight-floor fill; needs layer-projection work in screens.cpp, queued.
 
 ## FINAL — 1:1 playable build matching the oracle
 
