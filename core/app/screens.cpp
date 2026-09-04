@@ -1765,6 +1765,23 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
 }
 
 void FightScreen::on_key(int glfw_key, bool down) {
+    // Pause toggle (JS `Jn` pause button → `Ar.Qg(0)` → `Aia()` L425; the
+    // P/Esc desktop equivalents — app-layer only). Esc (256) / P (80) on the
+    // down edge toggle while the round is live. Headless-safe: the headless
+    // driver injects pointer clicks, never keys, so this cannot trigger
+    // there (no code gate needed — noted for the record).
+    if (down && (glfw_key == 256 || glfw_key == 80)) {
+        if (fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over()) {
+            paused_ = !paused_;
+            sf2::audio::AudioEngine::instance().play("click");
+            std::fprintf(stdout, "[fight] pause %s (Esc/P)\n", paused_ ? "ON" : "OFF");
+            std::fflush(stdout);
+        }
+        return;
+    }
+    // While paused, swallow every fight key (no sim input leak — the update
+    // is frozen too, so buffered keys would otherwise fire on resume).
+    if (paused_) return;
     // Between rounds: Space (32) / Enter (257) = the HUD "Next" button (JS
     // `vhb` L410 case 1) — confirm the next round instead of feeding the
     // punch/attack mapping below.
@@ -2163,6 +2180,59 @@ void FightScreen::update_impl(float dt) {
         if (app().auto_attack()) {
             fight_->set_auto_attack(true);
             std::fprintf(stdout, "[fight] auto-attack ON\n");
+        }
+    }
+    // Pause menu geometry (mirrors render_impl; the `Jn` HUD button slot).
+    const float kPauseIx = 1216.0f, kPauseIy = 40.0f, kPauseIw = 64.0f, kPauseIh = 48.0f;
+    const float kPauseBtnW = 320.0f, kPauseBtnH = 64.0f, kPauseBtnCx = kViewW * 0.5f;
+    const float kPauseResumeY = 280.0f, kPauseRestartY = 370.0f, kPauseQuitY = 460.0f;
+    auto pause_hit = [&](float cx, float cy, float w, float h) {
+        const App::PointerState& pp = app().pointer();
+        return pp.x >= cx - w / 2 && pp.x <= cx + w / 2 && pp.y >= cy - h / 2 &&
+               pp.y <= cy + h / 2;
+    };
+    const bool live =
+        fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over();
+    if (paused_) {
+        // Frozen sim (UI-layer pause): menu clicks only; everything below
+        // (log, Next, results) is skipped by the early return.
+        const App::PointerState& p = app().pointer();
+        if (p.pressed) {
+            if (pause_hit(kPauseBtnCx, kPauseResumeY, kPauseBtnW, kPauseBtnH)) {
+                paused_ = false;
+                sf2::audio::AudioEngine::instance().play("click");
+                std::fprintf(stdout, "[fight] pause OFF (resume)\n");
+                std::fflush(stdout);
+            } else if (pause_hit(kPauseBtnCx, kPauseRestartY, kPauseBtnW, kPauseBtnH)) {
+                sf2::audio::AudioEngine::instance().play("click");
+                std::fprintf(stdout, "[fight] pause RESTART (fresh fight)\n");
+                std::fflush(stdout);
+                // Fresh fight through the existing factory (pending_battle
+                // still carries the battle — full re-init, no scene hooks).
+                app().pending_battle().has_result = false;
+                manager().pop();
+                push(kScreenFight);
+                return;
+            } else if (pause_hit(kPauseBtnCx, kPauseQuitY, kPauseBtnW, kPauseBtnH)) {
+                sf2::audio::AudioEngine::instance().play("click");
+                std::fprintf(stdout, "[fight] pause QUIT (back to caller)\n");
+                std::fflush(stdout);
+                paused_ = false;
+                manager().pop();
+                return;
+            }
+        }
+        return;
+    }
+    // The HUD pause icon (`Jn`, top-right) while the round is live.
+    if (live) {
+        const App::PointerState& p = app().pointer();
+        if (p.pressed && pause_hit(kPauseIx, kPauseIy, kPauseIw, kPauseIh)) {
+            paused_ = true;
+            sf2::audio::AudioEngine::instance().play("click");
+            std::fprintf(stdout, "[fight] pause ON (HUD icon)\n");
+            std::fflush(stdout);
+            return;
         }
     }
     // The on-screen gamepad (JS `Za`): the pointer events feed the same
@@ -2604,6 +2674,32 @@ void FightScreen::render_impl(App& app) {
         }
         (void)app.draw_text(kNextBtnCX - 26.0f, kNextBtnCY - 14.0f, "NEXT", 1.0f, 1.0f, 1.0f,
                             1.0f);
+    }
+    // Pause menu render (JS `Jn` button + `Ar.Qrb` overlay — display only).
+    // Geometry mirrors update_impl.
+    const bool live =
+        fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over();
+    if (live && !paused_) {
+        // The HUD pause icon (`Jn`, top-right; `E.get(1294)` frame slot).
+        if (!try_draw_atlas_button(app, "FightPause", 1216.0f, 40.0f, 64.0f, 48.0f,
+                                   1.0f)) {
+            draw_flat_button(app, "II", 1216.0f, 40.0f, 64.0f, 48.0f, 0.3f, 0.3f, 0.4f,
+                             false);
+            (void)app.draw_text(1208.0f, 32.0f, "II", 0.8f, 1.0f, 1.0f, 1.0f);
+        }
+    }
+    if (paused_) {
+        const float dim[] = {0, 0,         kViewW, 0,         kViewW, kViewH,
+                             0, 0,         kViewW, kViewH,    0,      kViewH};
+        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.65f);
+        (void)app.draw_text(kViewW * 0.5f - 70.0f, 200.0f, "PAUSED", 1.4f, 1.0f, 1.0f,
+                            1.0f);
+        draw_flat_button(app, "RESUME", kViewW * 0.5f, 280.0f, 320.0f, 64.0f, 0.25f, 0.5f,
+                         0.3f, false);
+        draw_flat_button(app, "RESTART", kViewW * 0.5f, 370.0f, 320.0f, 64.0f, 0.5f,
+                         0.45f, 0.25f, false);
+        draw_flat_button(app, "QUIT TO MAP", kViewW * 0.5f, 460.0f, 320.0f, 64.0f, 0.5f,
+                         0.3f, 0.3f, false);
     }
 }
 
@@ -3289,6 +3385,17 @@ void EquipmentScreen::render_impl(App& app) {
         (void)app.draw_text(130.0f, 138.0f, mbuf, 0.8f, 1.0f, 1.0f, 1.0f);
     }
     // --- 5 equipment slots (JS `xc.hk` slots; Ranged/Magic included) -------
+    // Slot glow follows the HOVERED ITEM's type (the old `hover_ == s`
+    // compared an item index against a slot index — coincidental flashes).
+    std::string hover_type;
+    if (hover_ >= 0 && static_cast<std::size_t>(hover_) < w.items.size()) {
+        for (const CatalogItem& ci : catalog_) {
+            if (ci.name == w.items[static_cast<std::size_t>(hover_)].name) {
+                hover_type = ci.type;
+                break;
+            }
+        }
+    }
     const float slot_x = kViewW * 0.2f, slot_y0 = 220.0f, slot_dy = 100.0f;
     const char* slot_names[5] = {"Weapon", "Armor", "Helm", "Ranged", "Magic"};
     const std::string current[5] = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
@@ -3307,7 +3414,7 @@ void EquipmentScreen::render_impl(App& app) {
         const std::string label = std::string(slot_names[s]) + ": " + current[s] +
                                   (stat.empty() ? "" : " (" + stat + ")");
         draw_flat_button(app, label, slot_x, sy, 400.0f, 80.0f, 0.35f, 0.3f, 0.45f,
-                         hover_ == s);
+                         hover_type == slot_names[s]);
     }
     const float grid_x = kViewW * 0.55f, grid_y0 = 220.0f, grid_dx = 240.0f, grid_dy = 110.0f;
     int idx = 0;

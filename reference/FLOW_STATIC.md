@@ -424,3 +424,60 @@ other attrs, cite the exact file — no further static candidate exists.
   `zXa` hit points to close.
 - `Gb.update` live driver + slot-switch UI (R4); modal-stack dynamics (R2);
   replayable win/loss sequencing (R3).
+
+---
+
+## §Modes — tournament / survival (/challenge/bosses structure)
+
+Node `Type` → fight-type map (`p.Wab`, L181-183): `DUMMY→FightNone`,
+`TUTORIAL→FightTutorial`, `CHALLENGE→FightChallenge`,
+`BOSSES→FightBosses`, `TOURNAMENT→FightTournament`, `STORY→FightStory`,
+`SURVIVAL→FightSurvival`, `TACTICS→FightFriendly`, `AUTO→FightAuto`,
+`AI→FightAi`, `HIDDEN→FightUnregister`, `FAKE→FightFake`, `PVP→FightPVP`,
+`PERIODIC→FightPeriodic`, `FINAL_BATTLE→FightFinal`,
+`FINAL_BATTLE_REPLAYABLE→FightFinalReplayable`,
+`BOSSES_INTERMISSION→FightBossesIntermission`,
+`REPLAYABLE→FightReplayable`, `BOSSES_REPLAYABLE→FightBossesReplayable`,
+`FINAL_BATTLE_TITAN→FightFinalTitan`, `RAID→FightRaid`.
+No bracket tree anywhere — tournaments are linear series.
+
+### Tournament (linear series)
+
+- ZONE_1 `Tournament`: **24 fights**, each 1 warrior, `Rounds=2`,
+  `RoundTime=99`, `Replays=1`, 2 rewards; ZONE_7 `Tournament`: 24,
+  `Tournament2`: 8, `C3_Tournament`: 24 (same shape).
+- Progression = node fight order via `pf`/`Rk` rotation: `ng` wins per
+  fight, `eL` rounds (`Onb`, L411); next fighter `Rk++, Zb=pf[Rk]`
+  (L405); multi-def fights `sR()` (`Xs.length>1 && pT>1`, L1423).
+- Difficulty = `<Rules><Attributes DamageFactor=±N>` ladders per fight
+  (e.g. ZONE_1: +4000/-4000 → ±1000; ZONE_7: -1000/+1000 + Eclipse
+  `WarriorPower=5` for Bot).
+- Rewards: 2 rows per fight (base + win), standard `pwa/emb` (§4).
+
+### Survival (single-def waves)
+
+- One `<Fight>`, 1 warrior, `Rounds=1`, `RoundTime=99`, **`Replays=0`**,
+  `NoBulletsReplenishment` (Player) + Eclipse `DamageFactor` ±4000 rules.
+- Rewards: **escalating 11-tier table** (ZONE_1; ZONE_7 has 7):
+  base `{Money 0, Exp 0, PrizeBase 1}`, then per-step
+  `{Exp 2, Money 40→640, Bonus 2→20}` in tens
+  (40/90/140/190/250/320/390/470/560/640).
+- Between waves: `NA()` heals `jT(qDa)` (`HealthRecovery`, default 1;
+  `jT: gd=min(gd+a,Zn)`, L414/L817); `Fsb` achievement counters
+  (`SurvivalRounds`, L373/L422).
+- OPEN-KEPT: wave-respawn driver (`Rk` overflow vs same-foe repeat,
+  L405/L411) and streak→reward-row select (`Yg.number`, `eg.bm` L230-231).
+
+---
+
+## §Act cutscene (`Rd`, L2095-2098)
+
+- Quest action `EActScreen→zn` (L1022-1023): `Text` + `(Text,Frames)`
+  lines → `v.Zub` (single) / `v.$ub` (multi) → `Rd.create().$i/fm`
+  (L1218); then `Ya.pzb()`.
+- `Rd` 8-step player: 0 fade-in + `GMa` + `Zla` + `Ut()` (act music);
+  1 node fade; 2 lines select; 3 per-line timed display
+  (`lines[u2].value/60`); 4 5s hold; 5 fade-out; 6 `ge()` callback;
+  7 `end()` → `lb.OS()` menu. `tza()` true while any `Rd` lives —
+  blocks asset release in loader screens (L1849/L1868).
+- Act music: `Rd.Ut` = `GMa(1)` + `Zla` + `OS("act",!1)` (MUSIC_STATIC §3).

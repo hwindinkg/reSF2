@@ -276,6 +276,16 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
     bug (asserted decode(export()) round-trip; export wraps raw XML while
     decode expects compressed payloads — asymmetric by spec). Fixed test:
     SAVE_UNIT PASS (all new fields + envelope + export shape).
+- Phase 7f - ta.Ut loop param + Ju-horizon (DONE 2026-09-04, build +
+  goldens + 13/13 green):
+  - `play_music(track, loop=true)` honors the flag (was hardcoded looping).
+  - Ju-horizon WIRED (was OPEN): Hu-frame-indexed outcomes — `TacticRow`
+    gains `rda`/`hu_frames` (Rda was parsed-then-discarded), `TacticOutcome`
+    gains `hu_index`; `xaa` picks `k=ju_frame_index(Fl,rda,count)` per row
+    and drops waits beyond `Fl+Aea` (`r<=b`, L611). Aea draw position
+    verified (for-init, pre-record-search — matches JS order).
+  - Golden: ai_golden Ju vectors (k=3/0/-1/-1/-1, horizon T/F/edge) Node==C++
+    0 divs. Wea-per-label target still OPEN (needs enemy bone feed).
 - Phase 7e - Exact bzb/lXa + SHOW_BLOCK note (DONE 2026-09-04, build +
   goldens + 13/13 green):
   - Replaced the disproven additive model with verbatim `Fh.lXa`

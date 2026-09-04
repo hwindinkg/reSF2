@@ -318,6 +318,17 @@ int main() {
         std::printf("  \"dk12_ukb\": [[\"%s\"]],\n", rec12.ukb[0].c_str());
         std::printf("  \"dk12_zy\": [\"%s\", %d],\n",
                     rec12.zy.c_str(), rec12.jza);
+        // Ju frame pick + horizon filter (mirrors ai_golden.js juFrame).
+        std::printf("  \"ju\": [{\"k\": %d}, {\"k\": %d}, {\"k\": %d}, {\"k\": %d}, {\"k\": %d},\n",
+                    sf2::scene::ju_frame_index(7, 4, 5),
+                    sf2::scene::ju_frame_index(4, 4, 5),
+                    sf2::scene::ju_frame_index(3, 4, 5),
+                    sf2::scene::ju_frame_index(9, 4, 5),
+                    sf2::scene::ju_frame_index(4, 4, 0));
+        std::printf("   {\"pass\": %s}, {\"pass\": %s}, {\"pass\": %s}],\n",
+                    (12 <= 15) ? "true" : "false",
+                    (16 <= 15) ? "true" : "false",
+                    (15 <= 15) ? "true" : "false");
         // S14 exact Fh.lXa (mirrors combat_golden.js fhLxa; pk EAa order).
         {
             const double pk[6] = {0.0, 3.0, 6.0, 9.0, 12.0, 15.0};

@@ -298,14 +298,15 @@ std::uint64_t AudioEngine::played(const std::string& event) const {
     return impl_->played[static_cast<std::size_t>(e)];
 }
 
-void AudioEngine::play_music(const std::string& track) {
+void AudioEngine::play_music(const std::string& track, bool loop) {
     if (impl_ == nullptr || track.empty()) return;
     ++impl_->music_plays;
     if (impl_->music_ok && impl_->music_current == track &&
         ma_sound_is_playing(&impl_->music)) {
         return;  // same track already playing
     }
-    std::fprintf(stdout, "[music] play '%s'\n", track.c_str());
+    std::fprintf(stdout, "[music] play '%s'%s\n", track.c_str(),
+                 loop ? "" : " (once)");
     std::fflush(stdout);
     if (!impl_->engine_ok) return;  // counted + logged, silent headless
     if (impl_->music_ok) {
@@ -327,7 +328,7 @@ void AudioEngine::play_music(const std::string& track) {
     impl_->music_ok = true;
     impl_->music_current = track;
     ma_sound_set_volume(&impl_->music, 0.7f);
-    ma_sound_set_looping(&impl_->music, MA_TRUE);
+    ma_sound_set_looping(&impl_->music, loop ? MA_TRUE : MA_FALSE);
     ma_sound_start(&impl_->music);
 }
 

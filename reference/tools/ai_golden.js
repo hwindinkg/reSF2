@@ -55,7 +55,13 @@ function mdI0(pg, a, b) { return pg.dT(a, b); }
 function deGfa(pg, lo, hi) { return (mdI0(pg, lo, hi) | 0) + 1; }
 function deAea(pg, lo, hi) { return mdI0(pg, lo, hi) | 0; }
 
-// ---- dqb (L600): b=jf; CZ=U5a; bda=t6a; tba=u5a; cumulative 2/3/4 else 1 ----
+// ---- Ju.$_ frame pick (L648-649) + XAa horizon (L611) ----
+function juFrame(fl, rda, count) {
+  const k = fl - rda;
+  if (k < 0 || k >= count) return -1;
+  return k;
+}
+function horizonPass(wait, horizon) { return wait <= horizon; }
 function dqb(pg, CZ, bda, tba) {
   let b = pg.jf();
   let a = CZ;
@@ -143,5 +149,16 @@ out.qja.push(Object.assign({ seed: 4242 }, qjaDraws(new Rk(4242), 0, 10, 0, 5, 1
   const pg2 = new Rk(6);
   out.gfa_aea.push({ seed: 6, gfa: deGfa(pg2, -2, 2), aea: deAea(pg2, -2, 2) });
 }
+// Ju frame pick + horizon filter vectors.
+out.ju = [
+  { fl: 7, rda: 4, count: 5, k: juFrame(7, 4, 5) },
+  { fl: 4, rda: 4, count: 5, k: juFrame(4, 4, 5) },
+  { fl: 3, rda: 4, count: 5, k: juFrame(3, 4, 5) },
+  { fl: 9, rda: 4, count: 5, k: juFrame(9, 4, 5) },
+  { fl: 4, rda: 4, count: 0, k: juFrame(4, 4, 0) },
+  { wait: 12, horizon: 15, pass: horizonPass(12, 15) },
+  { wait: 16, horizon: 15, pass: horizonPass(16, 15) },
+  { wait: 15, horizon: 15, pass: horizonPass(15, 15) },
+];
 
 console.log(JSON.stringify(out));

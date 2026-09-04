@@ -183,8 +183,8 @@ TacticsSet parse_sb_blob(BinReader& r, const std::vector<std::string>& anim_pool
                 TacticRow row;
                 row.label = r.cstr();
                 const std::uint16_t cnt_j = r.u16();  // Hu frame count
-                const std::int16_t rda = cnt_j > 0 ? r.i16() : 0;
-                (void)rda;
+                row.hu_frames = cnt_j;
+                row.rda = cnt_j > 0 ? r.i16() : 0;  // JS `Ju.Rda` (was discarded)
                 for (std::uint16_t j = 0; j < cnt_j; ++j) {
                     const std::uint16_t cnt_k = r.u16();  // Gu outcome count
                     if (cnt_k == 0) continue;
@@ -195,6 +195,7 @@ TacticsSet parse_sb_blob(BinReader& r, const std::vector<std::string>& anim_pool
                     std::vector<TacticOutcome> gus(cnt_k);
                     for (std::uint16_t k = 0; k < cnt_k; ++k) {
                         gus[k].anim = anim_at(x_id);
+                        gus[k].hu_index = j;  // JS `Ju.frames[j]` grouping
                         ++x_id;
                     }
                     std::vector<std::uint16_t> pas(cnt_k), das(cnt_k);

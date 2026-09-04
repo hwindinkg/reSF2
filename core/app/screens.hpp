@@ -227,6 +227,11 @@ private:
     bool key_state_[16] = {};
     int last_log_frame_ = 0;
     bool auto_attack_wired_ = false;
+    // Pause menu (JS `Jn`/`Ar.Qrb` — UI-layer only): Esc/P or the HUD pause
+    // icon freezes the sim (update skipped); Resume/Restart/Quit-To-Map.
+    // Never engages headless (key/pointer driven; the loop injects neither
+    // here — see the stream report).
+    bool paused_ = false;
 
     // --- on-screen gamepad (JS `Za` virtual controls, JS_GAMEPLAY §2) ----
     // The original's touch gamepad: the joystick `ze` (base + knob, the

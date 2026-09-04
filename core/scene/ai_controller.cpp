@@ -357,10 +357,14 @@ int AiController::pick(const std::vector<AiCandidate>& cands) const {
 // The per-row outcome lookup (JS `PBa` L617 + `Gu.n0` L634): for a table
 // row, find the outcome case whose distance window contains `dist` and
 // append kd(animation, outcome_id) to `out`. Returns the count added.
+// `hu_pick >= 0` restricts to one Hu frame's outcomes (JS `Ju.frames[k]`,
+// L611); `horizon >= 0` drops waits beyond it (JS `r<=b`, `b=Fl+Aea`).
 namespace {
-int pba_append(const TacticRow& row, float dist, std::vector<AiCandidate>& out) {
+int pba_append(const TacticRow& row, float dist, std::vector<AiCandidate>& out,
+               int hu_pick = -1, int horizon = -1) {
     int added = 0;
     for (const TacticOutcome& oc : row.outcomes) {
+        if (hu_pick >= 0 && oc.hu_index != hu_pick) continue;
         // Gu.n0 (L634): JI = the sorted float edges, NDa = the u32
         // outcomes. `n0(d)` returns the u32 whose window contains d:
         //   JI[0] <= d < JI[last] -> NDa[first index with JI[i] > d]
@@ -378,10 +382,11 @@ int pba_append(const TacticRow& row, float dist, std::vector<AiCandidate>& out) 
             continue;
         }
         const std::uint32_t outcome = oc.window_outcomes[static_cast<std::size_t>(idx)];
-        if (outcome > 0) {
-            out.push_back({oc.anim, static_cast<int>(outcome)});
-            ++added;
-        }
+        if (outcome == 0) continue;
+        // JS `r<=b` (L611): the outcome wait must fit the Ju horizon.
+        if (horizon >= 0 && static_cast<int>(outcome) > horizon) continue;
+        out.push_back({oc.anim, static_cast<int>(outcome)});
+        ++added;
     }
     return added;
 }
@@ -458,14 +463,18 @@ int AiController::xaa(const AiFightState& st) {
     const TacticRecord* rec = find_record(st.enemy_anim);
     if (rec == nullptr) return 0;
 
-    // JS L611-612: for each row, the frame `k = $_(Uea(c))` (the row's
-    // frame at the rounded enemy frame) and the target x; each outcome's
-    // `n0(n)` (the distance window) picks the anim. The native port uses
-    // the enemy frame directly and the enemy x as the target.
+    // JS L611-612: per Ju row, the Hu frame `k = $_(Fl)` (row frame at
+    // the enemy frame) selects that frame's outcomes; each outcome's
+    // `n0(n)` (distance window) picks the anim, and waits beyond the
+    // horizon `b = Fl + Aea` are dropped (`r<=b`). The Wea-per-label
+    // target needs enemy bone data (OPEN) — the port keeps enemy x.
     (void)Fl_; (void)feat_.pz;
     const float target = st.my_facing * st.enemy_x + static_cast<float>(Mu_);
+    const int horizon = Fl_ + aea_;
     for (const TacticRow& row : rec->rows) {
-        pba_append(row, target, wb_);
+        const int k = ju_frame_index(Fl_, row.rda, row.hu_frames);
+        if (k < 0) continue;
+        pba_append(row, target, wb_, k, horizon);
     }
     return static_cast<int>(wb_.size());
 }

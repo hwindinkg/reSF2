@@ -94,14 +94,28 @@ struct TacticOutcome {
     std::string anim;                // pool0 anim id (record/outcome animation)
     std::vector<float> window_edges; // distance-window boundaries (float pool)
     std::vector<std::uint32_t> window_outcomes;  // u32 pool (outcome ids)
+    int hu_index = 0;  // which Hu frame of the Ju row this outcome came from
+                       // (JS `Ju.frames[k]`; needed for the `$_` frame pick)
 };
 
 // One condition row inside a table record (JS vec28B + vec12 groups).
 struct TacticRow {
     std::string label;     // vec28B cstr label (JS `Ju.label`, g="EF")
+    int rda = 0;           // JS `Ju.Rda`: the row's base frame for `$_`
+    int hu_frames = 0;     // JS `Ju.frames.length` (Hu frame count)
     // The outcome cases (JS `Ju.frames` -> Hu -> Gu outcome rows).
     std::vector<TacticOutcome> outcomes;
 };
+
+// JS `Ju.$_` frame pick (L648-649): `$_ (a){a-=Rda; return a<frames.length
+// ? a : -1}` — the Hu frame active at enemy frame Fl, or -1. (Negative
+// Fl-Rda would index undefined in JS — crash, so Fl>=Rda is assumed and
+// the port guards k>=0 all the same.)
+inline int ju_frame_index(int fl, int rda, int hu_frames) {
+    const int k = fl - rda;
+    if (k < 0 || k >= hu_frames) return -1;
+    return k;
+}
 
 // One table record (JS Il = "TacticRecord"): the animation context +
 // per-weapon-type branch + rows.
