@@ -105,17 +105,27 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
   facing 0%, dc<5.
 - Phase 5 — Combat: 5.1 блок (`yD(5)`, L514); 5.2 комбо (`HZa`, L500-501);
   5.3 крит/шок/дизарм. Gate: event-trace match.
-- Phase 6 — AI 1:1: дерево `de.Pqb` (наблюдаемые `fk`: -2,-1,0,1,2,5,6,9,10,11;
-  3,4,7,8 OPEN), таблицы из Phase 2, PRNG `Xx` (L2366, glibc-LCG, портируем) +
-  harness-пины (`mulberry32`, frozen `Date`). Gate: branch/decision match.
-  Разблокируется real-fight трейсом с `ia>0`.
-  STATIC-FIRST UPDATE 2026-09-04: выяснено статически — `$x` (ResponseDelay)
-  кэшируется в `jwb` (L596-597: `$x=gfa(Ol)`, на смену мува противника;
-  `gfa=Gc.gfa+1`, `G` — `Md.I0(z$)` L597/640-643); `mwb` (wd, точное место —
-  OPEN, вызов из смены оппонента) роутит `jwb`/`iwb`/`LLa`; `Aea`
-  (EnemyResponseDelay) реально консумится в `XAa` (L611: `b=Aea(Eqa)`,
-  `b=Fl+b`), НЕ orphan. Порт чинить: `DaPrng` (Xx+Rk, L2352/2366) +
-  QJa-кэш 5 роллов + `$x`-кэш + `Aea` в `xaa`; gate = Node-golden 0 divergence.
+- Phase 6 — AI 1:1 (IN PROGRESS 2026-09-04, static-first):
+  - [x] `DaPrng` exact port (`Xx`+`Rk`, L2352/2366; anchor `B0(1)=1103527590`
+    hand-verified; Node↔Python independent transcriptions 0 diffs).
+  - [x] QJa 5-roll cache + discarded lead draw + `Mu`/`lN` + `$x=gfa+1` cache
+    on enemy-anim change (`jwb` L596-597); `rua/caa/nG/pqa/mqa` cached-vs-fresh
+    (L593-594); `Aea` draw consumed per `XAa` (L611; Ju-horizon OPEN).
+  - [x] Node harness `reference/tools/ai_golden.js` (pure fns, L-cited) +
+    Python cross-check 0 diffs (PRNG bit-exact, Gb 1e-12, zones 1-4 covered,
+    roulette spread, QJa order, gfa/Aea trunc+1).
+  - [x] C++ mirror `app/ai_golden` written (DaPrng+Gb vectors, scripted
+    update() trace) — NOT COMPILED (no toolchain on this machine).
+  - [ ] Phase 6 gate OPEN: build+run `ai_golden`, diff vs Node (PRNG exact,
+    Gb ≤1e-5), full-tree branch coverage. BLOCKED: no msbuild/cl here.
+  - KNOWN stream divergences (documented, not silent): `eval_random`
+    (conditions.cpp) uses private mt19937, not `Da.pg` (+ missing `a>b`
+    shortcut) — thread DaPrng through FightContext later; `xaa` Ju-horizon
+    (`b=Fl+b`) OPEN; `iwb` `eh=1` reset OPEN; demo/demos injecting mt19937
+    keep override path (their outputs WILL shift vs old baselines — re-run
+    13/13 + pose dump when toolchain exists).
+  - (старое: наблюдаемые `fk`: -2,-1,0,1,2,5,6,9,10,11; 3,4,7,8 OPEN;
+    harness-пины `mulberry32`/frozen `Date`; real-fight trace = Phase 8.)
 - Phase 7 — Secondary: HUD/sound/effects/`MOa`. Gate: чек-лист.
 - Phase 8 — Final regression: 500+ кадров, pixel-diff ≥ PRE-FIXED %%, suite 3-7.
 

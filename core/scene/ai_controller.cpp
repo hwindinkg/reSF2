@@ -27,15 +27,22 @@
 //   - jL (L598 + Md.jL L640): the weighted roulette over the tactic's
 //     AnimationWeights; the chosen candidate's wait becomes `eh`.
 //
-// Approximations pending oracle-trace verification (Phase 6):
+// Approximations remaining (static-first; see MASTER_TODO methodology):
 //   - the fight-state fields the JS reads that the ported fighter does not
 //     expose yet (body-part anims `vd`, sub-fighter `ih`, the Al physics
 //     controller's frame count) are derived from the fields it DOES expose
 //     (current anim name, move frame, intervals, positions, HP).
-//   - the per-frame `Da.jf()` random draws are re-rolled every decision
-//     pass as a placeholder; the exact roll timing (the JS rolls them when
-//     the enemy plays a RandomizingEnemyAnimation) is to be confirmed from
-//     the oracle trace before the Phase 6 gate.
+//   - enemy-move-change detection uses the enemy ANIM NAME as a proxy for
+//     the JS move-object change (`mwb`->`jwb`); `iwb`'s `eh=1` reset on my
+//     move change is not ported (OPEN — needs a live trace to confirm the
+//     `mwb` call context).
+//   - `xaa` consumes the `Aea` draw for stream position; the Ju-frame-horizon
+//     application (`b=Fl+b` windowing over `Ju.frames`, L611) is OPEN — the
+//     port keys outcomes off distance windows only.
+// Exact since this wave (no oracle needed — pure JS math):
+//   - `Da.jf()` stream: owned `DaPrng` (Xx+Rk, L2352/2366); QJa 5-roll cache,
+//     `$x` ResponseDelay cache, per-pass dqb/jL/XW/slot draws all on it in
+//     JS call order when no roll01 override is injected.
 
 #include "scene/ai.hpp"
 
@@ -121,6 +128,14 @@ void AiController::init(const std::string& weapon,
     fk_ = -1;
     eh_ = 1;
     oC_ = 0;
+    tua_ = dua_ = bpa_ = rqa_ = oqa_ = 0.0;
+    Mu_ = 0.0;
+    lN_ = 0;
+    x_ = 0;
+    aea_ = 0;
+    last_enemy_anim_.clear();
+    qja_done_ = false;
+    prng_.seed(0);
     pH_ = F8_ = mW_ = XW_ = IB_ = false;
 }
 
@@ -220,7 +235,7 @@ bool AiController::fca(const AiFightState& st, int variant) const {
     return is_magic;
 }
 
-// JS `v1` (L601-602): a candidate move must be in `me` (the fighter's move
+// JS `V1` (L601-602): a candidate move must be in `me` (the fighter's move
 // list) and its tactics conditions (`FQ(2)` = the `Ts` list) must pass.
 bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
     if (moves_ == nullptr || moves_->find(m.name) == moves_->end()) return false;
@@ -420,6 +435,12 @@ int AiController::xaa(const AiFightState& st) {
     Ao_ = false;
     if (st.enemy_anim.empty()) return 0;
 
+    // JS `XAa` (L611): `b=this.Aea(this.Eqa)` — the EnemyResponseDelay draw,
+    // then `b=this.Fl+b` (the Ju-frame horizon). The draw is consumed here
+    // so the stream position matches; the horizon windowing over Ju.frames
+    // is OPEN (the port keys outcomes off distance windows only).
+    aea_ = aea_draw();
+
     const TacticRecord* rec = find_record(st.enemy_anim);
     if (rec == nullptr) return 0;
 
@@ -505,6 +526,50 @@ int AiController::nwa(const std::vector<AiAnimSlot>& slots, const std::string& a
     }
     return added;
 }
+// JS `de.gfa` (L597) = `Gc.gfa(a)+1` where `G` = `Md.I0(z$)` (L640-643):
+// `I0(a,b) = Da.pg.dT(a,b)` truncated. `+1` is the de-level addition.
+int AiController::gfa_draw() const {
+    if (tactic_ == nullptr) return 1;
+    const double lo = weight_curve_eval(tactic_->response_delay_min, feat_);
+    const double hi = weight_curve_eval(tactic_->response_delay_max, feat_);
+    return static_cast<int>(prng_.dT(lo, hi)) + 1;
+}
+
+// JS `de.Aea` (L597) = `Gc.Aea(a)`, `Md.I0(v8)` (L640-643), truncated,
+// NO +1. Consumed per `XAa` call (L611: `b=Aea(Eqa)`, then `b=Fl+b`).
+int AiController::aea_draw() const {
+    if (tactic_ == nullptr) return 0;
+    const double lo = weight_curve_eval(tactic_->enemy_response_delay_min, feat_);
+    const double hi = weight_curve_eval(tactic_->enemy_response_delay_max, feat_);
+    return static_cast<int>(prng_.dT(lo, hi));
+}
+
+// JS `QJa` (L594-595): rebuild the enemy-relative context (the port's
+// `feat_` was already built by `mq`), draw the five `Da.jf()` rolls,
+// `Mu`/`lN` (yea/j0, L640-641) and cache `$x` (gfa). The JS additionally
+// snapshots strike-memory counters (`Cn.d0`) — the port has no
+// strike-memory yet, accumulators stay 0 (same as `mq`).
+void AiController::qja(const AiFightState& st) {
+    (void)st;
+    // NOTE the leading discarded draw (JS `QJa` L594-595 opens with a bare
+    // `Da.jf();` before the five assignments) — load-bearing for stream
+    // position: 6 jf() calls = 12 B0 draws, then Mu (2), lN (2), $x (2).
+    prng_.jf();  // discarded
+    tua_ = prng_.jf();
+    dua_ = prng_.jf();
+    bpa_ = prng_.jf();
+    rqa_ = prng_.jf();
+    oqa_ = prng_.jf();
+    // yea (L640-641, untruncated) / j0 (truncated).
+    if (tactic_ != nullptr) {
+        Mu_ = prng_.dT(weight_curve_eval(tactic_->distance_error_min, feat_),
+                       weight_curve_eval(tactic_->distance_error_max, feat_));
+        lN_ = static_cast<int>(prng_.dT(weight_curve_eval(tactic_->frame_error_min, feat_),
+                                       weight_curve_eval(tactic_->frame_error_max, feat_)));
+    }
+    x_ = gfa_draw();  // JS `jwb` (L596-597): `this.$x=this.gfa(this.Ol)`
+}
+
 // JS `Pqb` (L604-608): the core decision. Returns the candidate count.
 int AiController::pqb(const AiFightState& st) {
     wb_.clear();
@@ -528,20 +593,21 @@ int AiController::pqb(const AiFightState& st) {
         return 0;
     }
 
-    // Dodge missiles / magic (JS L604): `fCa(a,0)&&pqa` / `mqa&&fCa(a,1)`.
-    // `pqa`/`mqa` are the DodgeMissiles/DodgeMagic chance draws (set in
-    // update()). The native port evaluates them here.
-    float roll_missile = roll01(), roll_magic = roll01();
+    // Dodge missiles / magic (JS L604: `fCa(a,0)&&pqa`, `mqa&&fCa(a,1)`
+    // where `pqa=rqa<pua`, `mqa=oqa<oua` were drawn in `ia` L593-594:
+    // CACHED QJa rolls vs freshly evaluated curves).
     bool dodge_fired = false;
     if (tactic_ != nullptr) {
         const float dms = weight_curve_eval(tactic_->dodge_missiles_chance, feat_);
         const float dmg = weight_curve_eval(tactic_->dodge_magic_chance, feat_);
-        if (fca(st, 0) && roll_missile < dms) {
+        const bool pqa = rqa_ < dms;
+        const bool mqa = oqa_ < dmg;
+        if (fca(st, 0) && pqa) {
             vaa(st, 0);
             fk_ = 2;
             dodge_fired = true;
         }
-        if (roll_magic < dmg && fca(st, 1)) {
+        if (mqa && fca(st, 1)) {
             vaa(st, 1);
             fk_ = 2;
             dodge_fired = true;
@@ -549,24 +615,32 @@ int AiController::pqb(const AiFightState& st) {
     }
     if (dodge_fired) return static_cast<int>(wb_.size());
 
+    // Per-pass evaluated chances vs the CACHED QJa rolls (JS `ia` L593-594):
+    //   qPa=k9a (UseSafeAttack), vO=a9a (TableAttack), Awa=A5a (Cautious);
+    //   rua=tua<qPa, caa=dua<vO, nG=Bpa<Awa.
+    float usa = 0.0f, ta = 0.0f, cm = 0.0f;
+    bool rua = false, caa = false, nG = false;
+    if (tactic_ != nullptr) {
+        usa = weight_curve_eval(tactic_->use_safe_attack_chance, feat_);
+        ta = weight_curve_eval(tactic_->table_attack_chance, feat_);
+        cm = weight_curve_eval(tactic_->cautious_movements_chance, feat_);
+        rua = static_cast<double>(tua_) < usa;
+        caa = static_cast<double>(dua_) < ta;
+        nG = static_cast<double>(bpa_) < cm;
+    }
+
     // The response-delay + uninterruptible gate (JS L604-605):
     //   $x < enemy_frame && !Ycb(enemy)   (enemy in its move start)
     //   && my move is uninterruptible at Fl (ds.pcb(Fl))
+    // `$x` is the CACHED ResponseDelay from `jwb` (NOT re-rolled per pass).
     // `ycb`/`lbb` test the ENEMY's current move (JS `de.Ycb(b)` where b =
     // the passed-in enemy's da controller).
     const int enemy_frame = st.enemy_move_frame;
-    const float resp_delay = tactic_ != nullptr
-                                 ? weight_curve_eval(tactic_->response_delay_min, feat_) + 1.0f
-                                 : 0.0f;
-    if (static_cast<float>(enemy_frame) > resp_delay && !ycb(st)) {
+    if (enemy_frame > x_ && !ycb(st)) {
         if (st.current_move == nullptr || pcb(*st.current_move, Fl_)) {
             if (lbb(st)) {
                 // Safe attack / attack table (JS L605).
                 if (tactic_ != nullptr) {
-                    const float usa = weight_curve_eval(tactic_->use_safe_attack_chance, feat_);
-                    const float ta = weight_curve_eval(tactic_->table_attack_chance, feat_);
-                    const bool rua = roll01() < usa;
-                    const bool caa = roll01() < ta;
                     if (rua) {
                         const int b = yaa(st);
                         if (b > 0) fk_ = 1;
@@ -579,8 +653,7 @@ int AiController::pqb(const AiFightState& st) {
                     }
                     // Cautious movements (JS L605): the P.nCa list — the
                     // native port pushes the CautiousMovements animations.
-                    const float cm = weight_curve_eval(tactic_->cautious_movements_chance, feat_);
-                    if (roll01() < cm) {
+                    if (nG) {
                         wb_.push_back({"StepForward", 0});
                         wb_.push_back({"StepBack", 0});
                         fk_ = 5;
@@ -654,9 +727,9 @@ int AiController::pqb(const AiFightState& st) {
 
     if (XW_ || IB_) {
         int b = 0;
+        // JS L607 reuses the CACHED `caa` here (not a fresh draw).
         if (tactic_ != nullptr) {
-            const float ta = weight_curve_eval(tactic_->table_attack_chance, feat_);
-            if (roll01() < ta) {
+            if (caa) {
                 b = xaa(st);
                 if (b > 0) fk_ = 0;
                 if (Ao_ && !IB_) return static_cast<int>(wb_.size());
@@ -669,8 +742,8 @@ int AiController::pqb(const AiFightState& st) {
             b = static_cast<int>(wb_.size());
             if (b > 0) fk_ = 9;
         } else if (tactic_ != nullptr) {
-            const float cm = weight_curve_eval(tactic_->cautious_movements_chance, feat_);
-            if (roll01() < cm) {
+            // JS L607-608 reuses the CACHED `nG` here.
+            if (nG) {
                 wb_.push_back({"StepForward", 0});
                 wb_.push_back({"StepBack", 0});
                 b = static_cast<int>(wb_.size());
@@ -708,8 +781,9 @@ void AiController::vaa(const AiFightState& st, int variant) {
 // JS `de.ia` (L592-594): the per-frame decision.
 std::string AiController::update(const AiFightState& st) {
     if (tactic_ == nullptr || moves_ == nullptr) return "";
+    // An injected source overrides the owned DaPrng stream (ai_demo uses
+    // mt19937); otherwise ALL draws come from `prng_` in JS call order.
     roll01_fn_ = st.roll01;
-    if (roll01_fn_ == nullptr) return "";
 
     // Snapshot the features (JS mQ L620).
     mq(st);
@@ -718,6 +792,15 @@ std::string AiController::update(const AiFightState& st) {
     // animation frame.
     Fl_ = st.enemy_move_frame;
     q7_ = st.move_frame;
+
+    // Enemy move change -> refresh the QJa roll cache (JS `mwb`->`jwb`
+    // L596-597; the port detects the change by enemy anim name — the
+    // observable proxy for the move-object swap).
+    if (!qja_done_ || st.enemy_anim != last_enemy_anim_) {
+        qja(st);
+        last_enemy_anim_ = st.enemy_anim;
+        qja_done_ = true;
+    }
 
     // The wait counter (JS L592): `if(this.eh>1) return --this.eh, null`.
     if (eh_ > 1) {

@@ -380,6 +380,11 @@ bool eval_in_the_area(const Cond& c, const FightContext& ctx) {
 }
 
 // JS `xp.he`: Random — (Chance/100) < random().
+// OPEN stream divergence (2026-09-04): the JS goes through `Pl.compare` →
+// `Da.cT` → the SHARED `Da.pg` stream (with the `a>b ? true` no-draw
+// shortcut, sf2.502f0946.js L2352); this uses a private mt19937, so any
+// fight with Random move-conditions drifts from the JS draw order.
+// Fix: thread DaPrng through FightContext (see MASTER_TODO Phase 6).
 bool eval_random(const Cond& c, const FightContext& ctx) {
     (void)ctx;
     static std::mt19937 rng(0x5F2);

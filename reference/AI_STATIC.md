@@ -95,20 +95,32 @@ the per-frame AI path.
 - Observed `fk` writes: `-2,-1,0,1,2,5,6,9,10,11`. `fk=3,4,7,8` have NO
   static assignment — OPEN (unused or runtime-only).
 - Helpers: `YAa` safe-attack (L608-611), `XAa` attack table (L611-612,
-  uses `Aea`/EnemyResponseDelay), `Gea` dodge (L613-616, uses `yD(2)`),
+  uses `Aea`/EnemyResponseDelay: `b=Aea(Eqa)`, `b=Fl+b` — Ju-frame horizon),
+  `Gea` dodge (L613-616, uses `yD(2)`),
   `VAa` missile/magic dodge (L617), `fCa` facing/range (L599),
   `b6a` facing sign (L603), `k_a`/`Nwa` safe-attack tables (L603),
   `csb`/`bsb` quick-attack rolls (L618-619), `Zqb`/`Yqb` evade rolls
   (L619), `mQ` feature snapshot (L620), `h2a` candidate/waits split
-  (L608), `iwb`/`jwb`/`twb`/`LLa`/`mcb` event hooks (L596-597),
-  `de.gfa` (ResponseDelay+1, L597) — **no static caller: OPEN**.
+  (L608), `de.gfa` (ResponseDelay+1, L597) — consumed ONLY via the `$x`
+  cache (see below, no direct caller — that is correct, not OPEN).
+- Event routing (CORRECTED 2026-09-04 — `mwb` found, `wd` level):
+  `mwb(a)` calls `this.nf.jwb(b)` (own de, b=`jb` opponent) /
+  `b.nf.iwb(a)` (enemy de) when bot, else `LLa(b)` (sets `ds`).
+  `jwb(a)` (L596-597): on enemy move change → `QJa(a)` (5 rolls + Mu/lN)
+  → unless `mcb(c)` → build `Ol` → **`$x=gfa(Ol)`** — ResponseDelay is
+  CACHED per enemy-move, never re-rolled per pass. `iwb(a)`: `cs` update +
+  `icb(cs)&&(eh=1)`. Port detects the move change by enemy anim name
+  (documented proxy); `iwb`'s `eh=1` reset is OPEN (mwb call context
+  unconfirmed — needs a live trace).
 - Move validity `V1` (L601-602): in `me` + tactics conditions `FQ(2)`.
   Hit reaction `Gc.DK` (L673-676) picks via `uf.sja` (**Math.random**).
 
 ## 5. PRNG + all seeding points
 
-- `Da` (L2352): `jf→pg.jf`, `cT(a,b)` (percent roll), `rL` (reseed from
-  `ed.getDate().getTime()` = wall clock), `IT(a)` (seed set).
+- `Da` (L2352): `jf→pg.jf`, `cT(a,b)` (percent roll — NOTE the shortcut:
+  `a>b ? true : pg.cT(a,b)`, i.e. NO stream draw when `a>b`),
+  `rL` (reseed from `ed.getDate().getTime()` = wall clock),
+  `IT(a)` (seed set).
 - `Rk`: `jf()=B0()/2^31 + B0()/2^31/2^31` (**two** LCG draws combined),
   `s4/dT/cT` range helpers. `Xx` (L2366): `mf=(mf*1103515245+12345) mod
   2^31` (glibc `rand` constants — portable to C++).
