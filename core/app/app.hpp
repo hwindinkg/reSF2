@@ -193,6 +193,10 @@ public:
     // Forces the headless stepping (one fixed step per frame) even with
     // headless_frames_ == 0 — the headless-loop driver runs uncapped.
     void set_headless_frames(int n) { headless_frames_ = n; }
+    // Headless probe (existing pattern: app.cpp checks headless_frames_ > 0;
+    // the loop driver sets it via set_headless_frames(1)). Quest modals use
+    // this to auto-advance instead of modal-blocking.
+    bool headless() const { return headless_frames_ > 0; }
 
     // --- text ---------------------------------------------------------------
     // Draws `text` at (x,y) top-left using the menu font. Returns false

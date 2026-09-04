@@ -172,3 +172,101 @@ L1378), then by `action.type`; `ia` ticks `Uf/Iv` frames and calls
 No `Ma` action carries `type=2`. `Ma` base has no `S()` — only types
 30/31 route to class `S()`; all others route to `fw` methods above.
 `JNa` revert covers types 1,3,15,20,21,22,27,28,29,30 (L1298-1299).
+
+### 5.3 Trigger routing exact flow (round 9)
+
+**Publishers** (`tb.Gj(model, stage, …)` calls): anim events
+`Pf/kg/kK/nr` (L386-388), hit `Sba` (L393), magic `Cgb→8` (L396),
+counter `z3→Gj(f,3)` (L423), battle end `TYa→Gj(a,4)` (L424), ring-out
+`Xwa→Gj(a,15/16)` (L406), mod-expiry `JNa→Gj(d,14)` (L1299).
+
+**Bus `bc`** (L1362-1363): `ej[]` = one `Kw` per fighter model
+(`Gf` registers + `FWa` per `Oa` perk; `vm` removes; `cKa` clears;
+`reset` flushes); `mg` = namespace map (`ModExpires/ParentPerk/
+Namespace` stamped in `JNa`, L1299); `xG` = scratch event (`Hw`).
+
+**Per-event dispatch `bc.Gj`** (L1364): `XYa` + namespace → per `ej`
+entry → `h8a(type)` slot list → scratch `xG{type,info,BI,qk,Jd}` →
+`v_a` per trigger → `Qh()`. Fully **synchronous** in call order.
+
+**`v_a`** (L1364): `c8a(Wa)` perk must exist and be `enabled` →
+`bBa` (model's `Fw` entry, L1366-1367) → event gate `t0a(info)`
+→ `Axa(model)` (all `rb` conditions, L1359).
+
+**Queue shape**: `Kw.Oa` (trigger defs `Iw`), `Kw.actions` (`Fw`
+entries); `Fw{yGa,UO,actions,lY,St}` (L1289); `jp` wrapper
+`{model,qk,action,Uf,Iv,qw,…}` (L1370). `lF` fires **immediately**;
+`lY` defers to `Qh()` (L1290); `ia` ticks `Uf/Iv` frame counters.
+
+**Re-entrancy (all static)**: `Pob→UKa→lF` nests a full fire inside a
+fire (L1366-1367); `jpb` re-fires via `Pob` (L1296); `JNa` expiry
+publishes `Gj(…,14)` mid-tick (L1299); `dpb` retimes *other* mods'
+`Uf/Iv` (L1295); `Z_a` clears `yGa` (L1300-1301); `pP` flushes
+`qw`-armed (L1300); `bc.dWa` namespace assist (L1292).
+
+### 5.4 Perk-equip mapping (budget item — item `Oa` → live set)
+
+- Equip writes save (`$o/Qxb`, L299-300); fight setup `Pma` (L417) →
+  `ca.Pma` (L398): `tb.cKa()` + `ZOa(yb/pb)` + `jPa/IOa` each side.
+- `ZOa` (L398-399): `parameters.Pma()` (rebuild `Oa` from `Wk`, L812) +
+  `M8a(qb)` extras (`qb?ud.mX:ud.HV`) + `ud.BY` + **`tb.Gf(a)` bus
+  register** (→ `Kw` + `FWa` per `Oa` perk, L1363). Bulk variant
+  `tb.Yka(Ra)` (L389/L401).
+- `jPa` (L524): `nga` + `JB.vob/u5(Mo)`; `IOa` (L524): `lga` + `QF` +
+  `Su.xKa/FT` + `x6`.
+- OPEN-KEPT: owned-vs-catalog race timing (PERKS OPEN #3).
+
+### 5.5 `ec` condition classes (full transcription, L1302-1316)
+
+Base `Jf` (L1302): `Ob` Me=1/Enemy=2 (`$ea`), `cb` Not flag. `ec` adds
+`Lh` (side select) ; `ec.create` factory (L1303-1304): `Qa.tD≠0`→`kp`
+expression, else name map below (unknown → null/dropped). `Ze` (L1304):
+expression `ih` (`Ty/Ps` bind, `target=this`).
+
+| XML tag | Class.t | Fields | `isEqual` semantics (lines) |
+|---|---|---|---|
+| expression (`Qa.tD`) | `kp`.17 | Value1/Value2/op in `ih` | `ih.Wb().Wn()>0` (L1305) |
+| `Random` | `xp`.1 | Chance expr | `Da.cT(ou()*100)` — 0-100 roll (L1306) |
+| `Style` | `Ap`.2 | Min/Max style names→0..5 (`ZBa`: Turtle 0/Hard 1/Brutal 2/Aggressive 3/Crazy 4/Fantastic 5) | `xE(dz)` range check (L1306-1307) |
+| `Combo` | `mp`.3 | `Ag` range | `xE(aw())` (L1308) |
+| `RoundStage` | `zp`.4 | Name→1/2/3 (`OBa`: StartStance/Fight/EndStance) | match `Je` (L1308) |
+| `CurrentAnimation` | `np`.5 | Name + `Ag` | `$k(name)` and `xE(ip())` (L1309) |
+| `CurrentInterval` | `op`.6 | Name/Type(`G0`) | name-present AND type-present (either empty = wildcard) (L1310) |
+| `Health` | `pp`.7 | `Ag` | `xE(gd)` (L1310-1311) |
+| `Item` | `rp`.8 | Name/Type/Subtype | any `Kea()` entry matches all non-empty (L1311-1312) |
+| `Round` | `yp`.9 | Number expr | `round==Ty(result)` (L1312-1313) |
+| `Bullets` | `lp`.10 | Type MagicBullet/RaidChargeBullet + `Ag` | `xE(bh)` / `xE(dO)` (L1313) |
+| `MagicCharge` | `sp`.11 | `Ag` | `xE(my)` (L1314) |
+| `ModExists` | `tp`.12 | Name/Namespace | namespace-hit via `bc.YZa`, else name ∈ live list (L1314-1315) |
+| `Pain` | `vp`.13 | `Ag` | `xE(sr)` (L1311) |
+| `Operator` | `up`.14 | Type Or/And + nested `rb=ec.create` | short-circuit Or/And, `cb`-aware; empty And=true (L1316) |
+| `InTheArea` | `qp`.15 | — | `rR` flag (L1315) |
+| `PerkStart` | `wp`.16 | — | always true (L1315-1316) |
+
+`Oc` (L1306): `Ag` Min/Max range (`Gw`, L1301); `xE(a)` = within bounds
+(open ends pass). `Iw.t0a` (L1359): any `Hc` event `isEqual` (cb-aware).
+
+### 5.6 `FWa` / `Iw.parse` / `Pob` / `FE` hardening (Stream 1 summaries + cites)
+
+- `Iw.parse` (L1359): `Name`; `Hc=Ac.create(Events)`; `rb=ec.create
+  (Conditions)`; `actions=Ma.create(Actions)`.
+- `FWa(kw, beDef)` (L1367-1368): routes def's `Dm` triggers into the 16
+  `Kw` event slots via `Ej(slot, eventType)` —
+  mza←4, oz←2, oza←5, nza←6, qza←7, pza←8, rza←1, sza←3, nz←9, qz←12,
+  pz←13, mz←10, fQ←11, rz←14, kza←15, lza←16 — then `Oa.push(Bp(be))`.
+- `Pob(model, trigger)` (L1366-1367): find model's `Kw` → `UKa` builds
+  `jp` per action (`e6a` model map, `Uf` from `frames`) → immediate `lF`
+  (or `lY` when delayed).
+- `FE` (L1366): re-fire owned actions via `Srb` (L1350: scan `Oa`).
+- `c8a(Wa)` (L1349-1350) linear perk lookup; `h8a(type)` (L1350) slot
+  select (0 → null); `Gf` (L1363) registers model + `FWa` per `Oa`.
+
+### 5.7 Equip→live timing completion (§5.4 picture closed)
+
+- `Wk()` (L811-812): `Oa = AK + TE + jt().Oa(with SP flags) + BD-owned
+  (Wh==0 needs `Xz`)`; `Pma()` rebuilds + `Mja` merge.
+- Fight setup order (L417): `…Tlb/Slb/Fm…/Pma()` — perks materialize
+  once per fight; mid-fight equip (`p.bo`, L214) does **not** rebuild
+  (no `Pma` call on that path) → changes apply next setup.
+- Bus registration `tb.Gf` happens inside `ZOa` during `Pma` (L398-399);
+  bulk `tb.Yka(Ra)` (L389/L401); teardown `tb.cKa/vm/reset` (L1363).

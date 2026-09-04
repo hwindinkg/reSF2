@@ -169,6 +169,9 @@ private:
     int zone_sel_ = 0;
     int hover_ = -1;
     int tab_hover_ = -1;
+    // Tournament-series progress (save Fights/yc win counts, cached at
+    // construction; the Map remounts every visit so it stays fresh).
+    std::vector<WarriorSave::FightWins> fight_wins_;
 };
 
 // The fight — native Fight screen (screen 6, JS `ai`/`ma` L2004-2010).

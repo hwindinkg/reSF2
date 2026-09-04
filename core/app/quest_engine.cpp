@@ -12,6 +12,7 @@
 #include <iterator>
 
 #include "app/app.hpp"
+#include "app/lang_table.hpp"
 #include "app/save_system.hpp"
 #include "xml_doc.hpp"
 
@@ -267,7 +268,8 @@ bool QuestEngine::conditions_hold(const QuestCond& cond, const QuestJournal& jou
 
 void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
                               const QuestJournal& journal, QuestSideEffects& fx,
-                              int depth) {
+                              std::map<std::string, std::string>& locals,
+                              const std::string& quest, int depth) {
     if (depth > kMaxActionDepth) return;
     (void)app;
     for (const QuestAction& a : acts) {
@@ -283,7 +285,8 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
             } catch (const std::exception&) {
             }
             const bool take = conditions_hold(a.if_cond, journal, step, level);
-            run_actions(app, take ? a.if_then : a.if_else, journal, fx, depth + 1);
+            run_actions(app, take ? a.if_then : a.if_else, journal, fx, locals, quest,
+                        depth + 1);
         } else if (t == "ChangeScene") {
             std::string dst = attr_or(a.attrs, "Destination");
             if (dst == "_$SceneTo") dst = journal.scene_to;
@@ -306,9 +309,41 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
             }
             fx.dialogs.push_back(attr_or(a.attrs, "Type") + ":" +
                                  attr_or(a.attrs, "Title") + ": " + lines);
+            // Structured record for the Sensei modal (screens.cpp displays).
+            // Line refs: `_Local` resolves via the run's locals (If/Else set
+            // NotificationTextMove/PunchBag just above); bare lang keys go
+            // through the runtime table with raw fallback.
+            {
+                EngineDialog dlg;
+                dlg.type = attr_or(a.attrs, "Type");
+                dlg.title = attr_or(a.attrs, "Title");
+                dlg.image = attr_or(a.attrs, "Image");
+                dlg.quest = quest;
+                for (const QuestAction& c : a.children) {
+                    if (c.tag != "Line") continue;
+                    std::string text = attr_or(c.attrs, "Text");
+                    if (!text.empty() && text[0] == '_') {
+                        const auto it = locals.find(text.substr(1));
+                        text = it != locals.end() ? it->second : text.substr(1);
+                    }
+                    if (text.find(' ') == std::string::npos && text.find('_') == std::string::npos) {
+                        text = lang_text(app.res_root(), text, text);
+                    }
+                    if (!text.empty()) dlg.lines.push_back(text);
+                }
+                if (!dlg.lines.empty()) {
+                    if (dialogs_.size() >= 8) {
+                        std::fprintf(stdout, "[quest] dialog queue full, dropping oldest\n");
+                        dialogs_.erase(dialogs_.begin());
+                    }
+                    std::fprintf(stdout, "[quest] dialog queued (%s): %zu lines\n",
+                                 dlg.title.c_str(), dlg.lines.size());
+                    dialogs_.push_back(std::move(dlg));
+                }
+            }
             // Nested Button/Line/If actions (SetStoryTutorialStep + Fight
             // live inside Welcome's dialog Button) — same allowlist.
-            run_actions(app, a.children, journal, fx, depth + 1);
+            run_actions(app, a.children, journal, fx, locals, quest, depth + 1);
         } else if (t == "SetStoryTutorialStep") {
             fx.has_story_step = true;
             fx.story_step = attr_or(a.attrs, "Value");
@@ -322,9 +357,15 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
         } else if (t == "SetVariable") {
             if (attr_or(a.attrs, "Scope") == "Global") {
                 fx.set_vars[attr_or(a.attrs, "Name")] = attr_or(a.attrs, "Value");
+            } else {
+                // Local run vars (NotificationTextMove/PunchBag) feed Dialog
+                // line refs below; `?`-expressions stay unresolved (noted).
+                const std::string v = attr_or(a.attrs, "Value");
+                if (!attr_or(a.attrs, "Name").empty() &&
+                    v.find('?') == std::string::npos) {
+                    locals[attr_or(a.attrs, "Name")] = v;
+                }
             }
-            // Local/NotificationText vars feed Dialog lines only — recorded
-            // via the Dialog summary above.
         } else if (t == "ClickButton") {
             fx.clicks.push_back(attr_or(a.attrs, "Target"));
         } else if (t == "ClearQuestQueue") {
@@ -341,7 +382,7 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
             fx.minigames.push_back(t + " (needs fight hooks)");
         } else if (t == "Line" || t == "Button" || t == "Then" || t == "Else" ||
                    t == "Conditions") {
-            run_actions(app, a.children, journal, fx, depth + 1);
+            run_actions(app, a.children, journal, fx, locals, quest, depth + 1);
         } else {
             fx.unknown.push_back(t);
         }
@@ -420,7 +461,8 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         }
         if (!conditions_hold(q.root, journal, step, level)) continue;
         QuestSideEffects fx;
-        run_actions(app, q.actions, journal, fx, 0);
+        std::map<std::string, std::string> locals;  // run-local vars
+        run_actions(app, q.actions, journal, fx, locals, q.name, 0);
         apply_effects(app, fx);
         if (q.unresumable) fired_.push_back(q.name);
         fired.push_back(q.name);

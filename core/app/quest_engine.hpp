@@ -74,6 +74,15 @@ struct QuestDef {
     std::vector<QuestAction> actions;
 };
 
+// Structured dialog record for the Sensei modal (He display lives in
+// screens.cpp; the engine only queues).
+struct EngineDialog {
+    std::string type;   // Notification / Regular
+    std::string title;  // characterSensei / boss_lynx / ...
+    std::string image;
+    std::vector<std::string> lines;  // resolved Line texts (lang-applied)
+    std::string quest;               // firing quest name
+};
 // Side effects of one run: save writes (applied) + records (logged only).
 struct QuestSideEffects {
     bool has_story_step = false;
@@ -108,6 +117,13 @@ public:
     // ChangeTab/SceneLoaded journals leave fight empty and inherit this.
     void note_fight(const std::string& name, const std::string& result);
 
+    // Sensei-modal queue (He records): display + advance live in screens.
+    bool has_dialog() const { return !dialogs_.empty(); }
+    const EngineDialog& dialog() const { return dialogs_.front(); }
+    void pop_dialog() {
+        if (!dialogs_.empty()) dialogs_.erase(dialogs_.begin());
+    }
+
     // For logs/tests.
     std::size_t quest_count() const { return quests_.size(); }
     bool loaded() const { return loaded_; }
@@ -121,7 +137,9 @@ private:
     std::string resolve_token(const std::string& token, const QuestJournal& journal,
                               const std::string& story_step, int level) const;
     void run_actions(App& app, const std::vector<QuestAction>& acts,
-                     const QuestJournal& journal, QuestSideEffects& fx, int depth);
+                     const QuestJournal& journal, QuestSideEffects& fx,
+                     std::map<std::string, std::string>& locals,
+                     const std::string& quest, int depth);
     void apply_effects(App& app, const QuestSideEffects& fx);
     std::string battle_zone(const std::string& battle) const;
 
@@ -131,6 +149,7 @@ private:
     std::map<std::string, std::string> battle_zone_;  // battle -> zone index
     std::string last_fight_;
     std::string last_result_;
+    std::vector<EngineDialog> dialogs_;  // Sensei-modal queue (cap below)
 };
 
 } // namespace sf2::app

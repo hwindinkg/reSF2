@@ -64,6 +64,61 @@ namespace {
 constexpr float kViewW = 1280.0f;
 constexpr float kViewH = 720.0f;
 
+// --- Sensei dialog modal (quest engine He records) -------------------------
+// The engine queues structured dialogs on fire; Dojo/Map show the head as a
+// tap-to-advance modal and gate their own buttons behind it (dialog modal
+// gating). Headless drains the queue silently instead (auto-advance — the
+// scripted loop never modal-blocks; detected via App::headless(), i.e. the
+// headless_frames_ > 0 pattern the driver sets).
+const EngineDialog* quest_modal_top(App& app) {
+    if (app.headless()) {
+        while (app.quest_engine().has_dialog()) {
+            std::fprintf(stdout, "[quest] dialog skipped (headless): %s\n",
+                         app.quest_engine().dialog().title.c_str());
+            std::fflush(stdout);
+            app.quest_engine().pop_dialog();
+        }
+        return nullptr;
+    }
+    if (!app.quest_engine().has_dialog()) return nullptr;
+    return &app.quest_engine().dialog();
+}
+
+// Returns true while a modal is up (caller skips its own buttons/keys that
+// frame); advances the queue on press.
+bool quest_modal_consume(App& app) {
+    const EngineDialog* d = quest_modal_top(app);
+    if (d == nullptr) return false;
+    if (app.pointer().pressed) {
+        std::fprintf(stdout, "[quest] dialog advanced: %s\n", d->title.c_str());
+        std::fflush(stdout);
+        app.quest_engine().pop_dialog();
+    }
+    return true;
+}
+
+// Draws the modal panel (title + up to 3 lines, truncated + dim backdrop).
+void draw_quest_modal(App& app, sf2::render::Renderer& ren) {
+    const EngineDialog* d = quest_modal_top(app);
+    if (d == nullptr) return;
+    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.6f);
+    const float pw = 900.0f, ph = 220.0f, px = kViewW * 0.5f - pw * 0.5f;
+    const float py = kViewH * 0.5f - ph * 0.5f;
+    const float panel[] = {px, py, px + pw, py, px, py + ph,
+                           px + pw, py, px + pw, py + ph, px, py + ph};
+    ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.95f);
+    (void)app.draw_text(px + 24.0f, py + 12.0f, d->title, 0.9f, 1.0f, 0.85f, 0.4f);
+    for (std::size_t i = 0; i < d->lines.size() && i < 3; ++i) {
+        std::string line = d->lines[i];
+        if (line.size() > 90) line = line.substr(0, 87) + "...";
+        (void)app.draw_text(px + 24.0f, py + 44.0f + static_cast<float>(i) * 30.0f, line,
+                            0.75f, 1.0f, 1.0f, 1.0f);
+    }
+    (void)app.draw_text(px + pw - 260.0f, py + ph - 28.0f, "TAP TO CONTINUE", 0.7f, 0.7f,
+                        0.9f, 0.5f);
+}
+
 // --- HUD HP-bar leak/decay (JS `Br` L2010-2015, Phase 7.3) ---
 // JS `Qyb()` (L2012-2013): damage -> `v5(a, 10)` (instant fill over 10
 // frames) + `g5(a, 30)` (trailing "leak" over 30 frames); heal/new-round ->
@@ -1182,6 +1237,9 @@ void DojoScreen::update_impl(float dt) {
             std::fflush(stdout);
         }
     }
+    // Sensei modal gate (quest He records): while a dialog is up, taps
+    // advance it instead of the Dojo buttons (headless auto-drains).
+    if (quest_modal_consume(app())) return;
     const App::PointerState& p = app().pointer();
     // Disciple sparring toggle (JS `Nfb` — flips `p.o.Y0()` via `oub()` and
     // reopens Dojo `mp(3)`): STUB — the save has no Disciple/Y0 field, so
@@ -1346,6 +1404,8 @@ void DojoScreen::render_impl(App& app) {
                          false);
         (void)app.draw_text(cx - 78.0f, cy - 8.0f, label, 0.7f, 1.0f, 1.0f, 1.0f);
     }
+    // Sensei dialog modal on top of everything Dojo.
+    draw_quest_modal(app, ren);
 }
 
 // ---------------------------------------------------------------------------
@@ -1363,6 +1423,7 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
         map_save = app().save().load();
         if (!map_save.current_zone.empty()) cur = map_save.current_zone;
         focus = map_save.map_focus;
+        fight_wins_ = map_save.fights;
     } catch (const std::exception&) {
     }
     zone_sel_ = 0;
@@ -1423,6 +1484,9 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
 
 void MapScreen::update_impl(float dt) {
     (void)dt;
+    // Sensei modal gate (quest He records): while up, taps advance the
+    // dialog instead of tabs/nodes/BACK (headless auto-drains).
+    if (quest_modal_consume(app())) return;
     const App::PointerState& p = app().pointer();
     // Zone tabs (JS `Ya.HXa` L2123 zone strips; the `Vr` scroller is a
     // plain tab row here): geometry mirrors render_impl exactly.
@@ -1563,11 +1627,25 @@ void MapScreen::render_impl(App& app) {
             ren.draw_triangles(verts, 6, r, g, b, n.active ? 0.95f : 0.5f);
         }
         (void)app.draw_text(n.x - 44.0f, n.y + d / 2 + 4.0f, n.name, 0.7f, 1.0f, 1.0f, 1.0f);
+        // Mode badge (battle Type census: TOURNAMENT/SURVIVAL/PERIODIC/
+        // CHALLENGE/BOSSES/…) + series progress from the save Fights/yc
+        // win counts (read-only; snapshot cached at construction).
+        std::string badge = n.type;
+        for (const auto& fw : fight_wins_) {
+            if (fw.name == n.name && fw.wins > 0) {
+                badge += " W" + std::to_string(fw.wins);
+                break;
+            }
+        }
+        (void)app.draw_text(n.x - 44.0f, n.y + d / 2 + 22.0f, badge, 0.6f, 0.8f, 0.8f,
+                            0.8f);
     }
     // The BACK button (top-left) — try textured misc frame, else flat.
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
     }
+    // Sensei dialog modal on top of the map.
+    draw_quest_modal(app, ren);
 }
 
 // ---------------------------------------------------------------------------
