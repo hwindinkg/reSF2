@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "app/fight_assets.hpp"
+#include "app/quest_engine.hpp"
 #include "app/save_system.hpp"
 #include "app/screen_manager.hpp"
 #include "app/screens.hpp"
@@ -380,6 +381,18 @@ void App::boot() {
     std::fprintf(stdout, "[screen] boot: Preloader(0) -> Loader(2) -> Dojo(3)\n");
     std::fflush(stdout);
     screens_->push(make_screen(*screens_, kScreenDojo));
+    // Session start for the quest engine (JS `v.uwb` -> QUEST_EVENT_SESSION,
+    // fired from the loader; the Dojo push above already fired ChangeTab +
+    // SceneLoaded for the boot edge).
+    try {
+        QuestJournal j;
+        try {
+            j.player_level = save_->load().level;
+        } catch (const std::exception&) {
+        }
+        quest_engine().fire(*this, "SessionStart", j);
+    } catch (const std::exception&) {
+    }
 }
 
 void App::poll_input() {

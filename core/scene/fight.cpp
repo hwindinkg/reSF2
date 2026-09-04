@@ -277,6 +277,8 @@ void FightController::init_locks(
     const std::vector<std::pair<std::string, std::string>>& player_owned) {
     battle_ = battle;
     prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
+    player_.style = StyleMeter();  // style meters reset per battle
+    enemy_.style = StyleMeter();
     model_ = model;
     moves_ = &moves;
     clips_ = &clips;
@@ -859,16 +861,79 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     if (!blocked) {
         dga_ = true;
     }
+    // Perk hit-actions (PERKS_STATIC 5.2, JS `Ma` L1290-1300): the
+    // ATTACKER's equipped actions decide over the landed record. SetHit
+    // overrides Bb.* AFTER the R8a/disarm rolls above (trigger-bus order
+    // is OPEN — the rolls consumed the pre-override crit; documented in
+    // PERKS_STATIC). SetHit Damage REPLACES raw, ChangeAdditionalDamage
+    // ADDS to it; Lifesteal heals the attacker; ChangeImpulse scales the
+    // knockback below; ModAttributes adds to the TARGET's attrs;
+    // DisableInterval clears the target's intervals; ModHealthChange
+    // installs a DoT/HoT on the target; no-op actions log a line.
+    bool hit_blocked = blocked;
+    bool hit_critical = critical;
+    double perk_ix = 1.0, perk_iy = 1.0, perk_iz = 1.0;
+    if (!atk.perks.empty()) {
+        const sf2::scene::PerkHitOutcome po =
+            sf2::scene::decide_hit_perks(atk.perks, rec);
+        if (po.has_critical) {
+            hit_critical = po.f_critical;
+            rec.critical = po.f_critical;
+        }
+        if (po.has_block) {
+            hit_blocked = po.f_block;
+            rec.blocked = po.f_block;
+        }
+        if (po.has_shock) rec.shock = po.f_shock;
+        if (po.has_disarm) rec.disarm = po.f_disarm;
+        if (po.has_damage) rec.raw_damage = po.f_damage;
+        rec.raw_damage += po.dmg_add;
+        if (po.heal != 0.0f) {
+            atk.hp += po.heal;
+            if (atk.hp > atk.max_hp) atk.hp = atk.max_hp;
+            if (atk.hp < 0.0f) atk.hp = 0.0f;
+        }
+        for (const auto& kv : po.attr_adds) {
+            def.params.attributes[kv.first] += static_cast<float>(kv.second);
+        }
+        for (const auto& cl : po.clears) {
+            def.fighter.clear_intervals(cl.first, cl.second);
+        }
+        if (po.collision_off) {
+            std::fprintf(stdout, "[perk] %s collision off (OPEN: needs body flags)\n",
+                         def.name.c_str());
+            std::fflush(stdout);
+        }
+        for (const auto& d : po.install_dots) def.dots.push_back(d);
+        for (const auto& line : po.log) {
+            std::fprintf(stdout, "[perk] %s\n", line.c_str());
+            std::fflush(stdout);
+        }
+        perk_ix = po.imp_x;
+        perk_iy = po.imp_y;
+        perk_iz = po.imp_z;
+    }
     sf2::scene::apply_damage(rec, def.hp, false);
     def.hp = rec.hp_after;
 
+    // HUD style credit (JS `Sh.Vma` <- `Sf.strike`, L2040; `Jh.Gua` feeds
+    // prize b6): every landed hit credits the ATTACKER's meter with the
+    // attack move's RNa (blocked or not — `ha.Gzb` runs unconditionally).
+    {
+        static const StyleTable kStyle;
+        const double credit =
+            style_credit(kStyle, atk.style, move.name, move.style_factor);
+        style_vma(atk.style, credit, 6);
+        if (atk.style.best > prize_fh_.b6) prize_fh_.b6 = atk.style.best;
+    }
+
     // Event flags for the golden trace (JS `Sba` L393: Defense/Animation/
     // Critical/Shock/Block/Damage) — one line per landed hit.
-    if (critical || rec.shock || blocked || rec.first_hit) {
+    if (hit_critical || rec.shock || hit_blocked || rec.first_hit) {
         std::fprintf(stdout, "[hit] F%d %s->%s dmg=%.2f%s%s%s%s\n", frame,
                      atk.name.c_str(), def.name.c_str(), rec.final_damage,
-                     critical ? " CRIT" : "", rec.shock ? " SHOCK" : "",
-                     blocked ? " BLOCK" : "", rec.first_hit ? " FIRST" : "");
+                     hit_critical ? " CRIT" : "", rec.shock ? " SHOCK" : "",
+                     hit_blocked ? " BLOCK" : "", rec.first_hit ? " FIRST" : "");
         std::fflush(stdout);
     }
 
@@ -879,7 +944,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // Strike-flag counters for the prize Fh (JS `Sf.strike` flags d/e/h:
     // first-hit -> `cvb`/`p1a` (c6++), shock -> `yvb`/`P1a` (e6++); blocked
     // hits take the `UYa` path and count nothing).
-    if (!blocked) {
+    if (!hit_blocked) {
         def.fighter.clear_block();
         if (rec.first_hit) ++prize_fh_.c6;
         if (rec.shock) ++prize_fh_.e6;
@@ -891,7 +956,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         rctx.dist_x = atk.fighter.world_x() - def.fighter.world_x();
         rctx.dist_3d = std::fabs(rctx.dist_x);
         rctx.health_ratio = def.max_hp > 0.0f ? def.hp / def.max_hp : 0.0f;
-        rctx.last_hit_type = critical ? "Critical" : (rec.shock ? "Shock" : "");
+        rctx.last_hit_type = hit_critical ? "Critical" : (rec.shock ? "Shock" : "");
         rctx.candidate_moves = {};
         const std::string reaction = def.fighter.try_react(rctx, rec.shock);
         if (!reaction.empty()) {
@@ -901,9 +966,11 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         }
     }
 
-    // Knockback (JS `Bl.strike` + bounds).
+    // Knockback (JS `Bl.strike` + bounds), scaled by perk ChangeImpulse.
     sf2::scene::Vec3 impulse{iv.impulse_x, iv.impulse_y, iv.impulse_z};
-    impulse.x *= static_cast<float>(atk.fighter.facing());
+    impulse.x *= static_cast<float>(atk.fighter.facing() * perk_ix);
+    impulse.y *= static_cast<float>(perk_iy);
+    impulse.z *= static_cast<float>(perk_iz);
     sf2::scene::ImpulseResult imp;
     const float new_x =
         sf2::scene::apply_impulse(hit_cap, ch, impulse, def.fighter.world_x(),
@@ -968,6 +1035,9 @@ FightController::BattlePrize FightController::prize(int base_coins) const {
 // executes it, the physics body is rebuilt. Mirrors the JS `wd.ia` +
 // `de.ia` path (see core/scene/README.md).
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
+    // Perk DoTs/HoTs (JS `znb`/`Inb`, L1290/L1298): tick installed mods
+    // once per frame (signed per-frame value, clamped, expired dropped).
+    if (!me.dots.empty()) sf2::scene::tick_active_mods(me.dots, me.hp, me.max_hp);
     me.fighter.set_enemy_x(foe.fighter.world_x());
     // JS `wd.x3` -> `Fu.hob()` (dW=null): every new move start resets the
     // Cl one-shot, so a repeat swing of the same move re-tests instead of
@@ -1069,7 +1139,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         if (sf2::scene::shock_tick(me.shock, gfp.shock_frame_reduction)) {
             // JS `Wqb` (L527-528): swap to the `Au` item, `EPa`/`FPa` attr
             // set (`WeaponDamage=0`, internal_settings, verified), `vc`
-            // latch. Fling/`Wsb`/drop-event are presentation (OPEN).
+            // latch. Fling/`Wsb`/drop-event bodies are presentation (OPEN).
             me.weapon = "Fists";
             me.shock.shocked_vc = true;
             me.params.attributes["WeaponDamage"] = 0.0f;
@@ -1077,6 +1147,9 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          frame_, me.name.c_str());
             std::fflush(stdout);
         }
+        // HUD style decay `ia()` (L2092): bar-only drain, levels never drop.
+        static const StyleTable kStyleDecay;
+        style_decay(me.style, kStyleDecay.tya);
     }
 
     me.fighter.advance(dt);

@@ -35,6 +35,7 @@
 //     the digits.fnt timer, Round_Done/Undone indicators, the FIGHT!/
 //     Round labels (fight/ui atlas).
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -52,6 +53,7 @@
 #include "scene/effects.hpp"
 #include "scene/fighter.hpp"
 #include "scene/move_def.hpp"
+#include "scene/perks.hpp"
 #include "scene/physics.hpp"
 #include "scene/sprite.hpp"
 #include "texture.hpp"
@@ -137,6 +139,70 @@ enum class round_result : int {
     pvp = 6,         // `ey` 6 — PVP HP comparison
 };
 
+// HUD style meter (JS `Gr`/`Fr` L2090-2092, `lw`/`v.hu` parse L1159).
+// Values verified from internal_settings `<StyleLevels>` 2026-09-04:
+// TNa=0.5, tya=0.08, ZIa=2, SNa=1 x6 levels (Start/Hard/Brutal/
+// Aggressive/Crazy/Fantastic). Presentation (bars/announce) stays in HUD;
+// this is the score state that feeds `Gua` (b6) for the prize DZ term.
+// `Y8a(a)`: null->0; per-anim use counts `VS` (first call b=0);
+// credit = TNa*SNa[level]*ZIa^(-uses)*RNa. `Vma`: `KDa(bar+credit)`.
+// `KDa`: level += trunc, frac carry, clamp to levels-1. Decay `ia()`:
+// bar = max(0, bar - tya/60/on()) — bar-only, levels never drop
+// (timescale on()=1.0 in the port — no slow-mo).
+struct StyleTable {
+    double tna = 0.5;
+    double tya = 0.08;
+    double zia = 2.0;
+    std::vector<double> sna{1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+};
+struct StyleMeter {
+    int level = 0;   // `bn`
+    double frac = 0.0;  // bar value `Qp.Gb(bn)`
+    std::map<std::string, int> vs_counts;  // `VS` per-anim uses
+    int best = 0;    // max level seen (`Gua` b6 feed)
+};
+// `Y8a` credit for one landed hit with the attack move's RNa.
+inline double style_credit(const StyleTable& t, StyleMeter& st,
+                           const std::string& anim, double rna) {
+    int b = 0;
+    auto it = st.vs_counts.find(anim);
+    if (it != st.vs_counts.end()) {
+        b = it->second + 1;
+        it->second = b;
+    } else {
+        st.vs_counts[anim] = 0;
+    }
+    const double sna =
+        !t.sna.empty() ? t.sna[std::min<std::size_t>(
+                              static_cast<std::size_t>(std::max(0, st.level)),
+                              t.sna.size() - 1)]
+                       : 1.0;
+    double pow = 1.0;
+    for (int i = 0; i < b; ++i) pow /= t.zia;
+    return t.tna * sna * pow * rna;
+}
+// `Vma`/`KDa`: add credit to the bar, carry level-ups (clamped).
+inline void style_vma(StyleMeter& st, double credit, int levels) {
+    const double total = st.frac + credit;
+    int b = st.level + static_cast<int>(total);
+    double frac = total - std::floor(total);
+    if (b >= levels) {
+        b = levels - 1;
+        frac = 1.0;
+    }
+    if (b < 0) {
+        b = 0;
+        frac = 0.0;
+    }
+    st.level = b;
+    st.frac = frac;
+    if (st.level > st.best) st.best = st.level;
+}
+// Decay `ia()`: bar-only drain, levels never drop.
+inline void style_decay(StyleMeter& st, double tya) {
+    st.frac = std::max(0.0, st.frac - tya / 60.0);
+}
+
 // The per-fighter live state the fight controller owns (JS: the `wd`
 // fighter + its `parameters` + the AiController).
 struct FightFighter {
@@ -151,6 +217,11 @@ struct FightFighter {
     int rounds_won = 0;       // `parameters.ng` — rounds won
     bool is_winner = false;   // `zd` — the round/battle winner flag
     sf2::scene::ShockState shock;  // pain/shock/disarm (`sr/vc/sn/Wx/ws`, L490)
+    StyleMeter style;  // HUD style meter (`Gr`, feeds prize b6 via best)
+    std::vector<sf2::scene::PerkAction> perks;  // equipped perk actions
+                                                // (empty until perk-equip
+                                                // mapping lands)
+    std::vector<sf2::scene::ActiveMod> dots;  // ticking DoTs/HoTs
     std::string weapon = "Fists";  // wielded weapon (disarm identity)
     int hits_landed = 0;
     int hits_taken = 0;

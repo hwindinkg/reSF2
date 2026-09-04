@@ -24,6 +24,7 @@
 #include "scene/damage.hpp"
 #include "scene/fight.hpp"
 #include "scene/move_def.hpp"
+#include "scene/perks.hpp"
 #include "codec.hpp"
 #include "zstd_stream.hpp"
 
@@ -318,6 +319,91 @@ int main() {
         std::printf("  \"dk12_ukb\": [[\"%s\"]],\n", rec12.ukb[0].c_str());
         std::printf("  \"dk12_zy\": [\"%s\", %d],\n",
                     rec12.zy.c_str(), rec12.jza);
+        // S16 perks (mirrors combat_golden.js S16).
+        {
+            using sf2::scene::PerkAction;
+            std::vector<PerkAction> perks;
+            PerkAction s;
+            s.type = "SetHit";
+            s.num["Critical"] = 1.0;
+            s.num["Damage"] = 25.0;
+            perks.push_back(s);
+            PerkAction l;
+            l.type = "Lifesteal";
+            l.num["DamagePart"] = 0.5;
+            perks.push_back(l);
+            PerkAction v;
+            v.type = "ChangeAdditionalDamageValue";
+            v.num["Value"] = 3.0;
+            perks.push_back(v);
+            PerkAction im;
+            im.type = "ChangeImpulse";
+            im.num["MultiplierX"] = 2.0;
+            im.num["MultiplierZ"] = 0.5;
+            perks.push_back(im);
+            PerkAction ma;
+            ma.type = "ModAttributes";
+            ma.num["ShockCriticalHitChance"] = 0.1;
+            perks.push_back(ma);
+            PerkAction di;
+            di.type = "DisableInterval";
+            di.str["IntervalType"] = "Block";
+            perks.push_back(di);
+            PerkAction mh;
+            mh.type = "ModHealthChange";
+            mh.num["Frames"] = 3.0;
+            mh.num["PerFrameValue"] = -2.0;
+            mh.str["Name"] = "burn";
+            perks.push_back(mh);
+            PerkAction sw;
+            sw.type = "Switch";
+            perks.push_back(sw);
+            PerkAction ab;
+            ab.type = "AddBullets";
+            perks.push_back(ab);
+            sf2::scene::HitRecord rec;
+            rec.final_damage = 10.0f;
+            const sf2::scene::PerkHitOutcome o =
+                sf2::scene::decide_hit_perks(perks, rec);
+            std::vector<sf2::scene::ActiveMod> dots = o.install_dots;
+            float hp = 50.0f;
+            sf2::scene::tick_active_mods(dots, hp, 100.0f);
+            std::vector<sf2::scene::ActiveMod> dots2 = o.install_dots;
+            float h2 = 50.0f;
+            sf2::scene::tick_active_mods(dots2, h2, 100.0f);
+            sf2::scene::tick_active_mods(dots2, h2, 100.0f);
+            sf2::scene::tick_active_mods(dots2, h2, 100.0f);
+            std::printf("  \"perks\": {\"sethit\": [%d, %d, %.17g, %d], "
+                        "\"heal\": %.17g, \"add\": %.17g, "
+                        "\"impulse\": [%.17g, %.17g, %.17g], "
+                        "\"attrs\": [[\"%s\", %.17g]], \"clears\": [[%d, \"%s\"]], "
+                        "\"dot\": [\"%s\", %d, %.17g], "
+                        "\"noop\": [\"%s\", \"%s\"], "
+                        "\"tick\": [%.17g, %d, %d], \"expiry\": [%.17g, %d]},\n",
+                        (int)o.f_critical, (int)o.has_critical, (double)o.f_damage,
+                        (int)o.has_damage, (double)o.heal, (double)o.dmg_add,
+                        o.imp_x, o.imp_y, o.imp_z,
+                        o.attr_adds[0].first.c_str(), o.attr_adds[0].second,
+                        o.clears[0].first, o.clears[0].second.c_str(),
+                        o.install_dots[0].name.c_str(), o.install_dots[0].frames_left,
+                        o.install_dots[0].per_frame,
+                        o.log[0].c_str(), o.log[1].c_str(),
+                        (double)hp, (int)dots.size(), dots[0].frames_left,
+                        (double)h2, (int)dots2.size());
+        }
+        // S15 style meter (mirrors combat_golden.js S15).
+        {
+            const sf2::scene::StyleTable st;
+            sf2::scene::StyleMeter m;
+            const double c0 = sf2::scene::style_credit(st, m, "HighPunch", 1.1);
+            sf2::scene::style_vma(m, c0, 6);
+            const double c1 = sf2::scene::style_credit(st, m, "HighPunch", 1.1);
+            sf2::scene::style_vma(m, c1, 6);
+            sf2::scene::style_decay(m, 0.08);
+            sf2::scene::style_vma(m, 2.5, 6);
+            std::printf("  \"style\": {\"credit\": [%.17g, %.17g], \"level\": %d, \"best\": %d, \"frac\": %.17g},\n",
+                        c0, c1, m.level, m.best, m.frac);
+        }
         // Ju frame pick + horizon filter (mirrors ai_golden.js juFrame).
         std::printf("  \"ju\": [{\"k\": %d}, {\"k\": %d}, {\"k\": %d}, {\"k\": %d}, {\"k\": %d},\n",
                     sf2::scene::ju_frame_index(7, 4, 5),

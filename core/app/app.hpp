@@ -54,6 +54,7 @@ class SaveSystem;
 struct WarriorSave;
 struct FightAssets;
 struct CatalogItem;
+class QuestEngine;
 
 // The pending battle the Map -> Fight -> Results flow carries (JS `Da` +
 // the `v.kD` results data: the battle, the reward, the winner).
@@ -133,6 +134,11 @@ public:
 
     // The pending battle flow data (the Map -> Fight -> Results hand-off).
     PendingBattle& pending_battle() { return pending_battle_; }
+
+    // The tutorial quest engine (FLOW_STATIC §1 machine; screens fire
+    // ChangeTab/SceneLoaded/FightEnd/SessionStart into it). Lazy-init;
+    // passive unless quest events fire (headless-safe).
+    QuestEngine& quest_engine();
 
     // The dojo background sprite (the main menu / map backdrop). Loaded at
     // init from the dojo location webp + atlas. Null when the asset is
@@ -233,6 +239,7 @@ private:
     std::unique_ptr<ScreenManager> screens_;
     std::unique_ptr<SaveSystem> save_;
     std::unique_ptr<FightAssets> fight_assets_;
+    std::unique_ptr<QuestEngine> quest_engine_;
     PendingBattle pending_battle_;
 
     // Shared assets.

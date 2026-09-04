@@ -415,6 +415,129 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
   const lxa3 = fhLxa({ d6: 0, c6: 0, jU: 0, e6: 0, b6: 0 }, 70, 70, 5, 5, 2, 1, 3, PK, 1);
   eq("S14 kq m6", lxa3.m6, 7);
   out.scenarios.push({ id: "S14-lxa", m6: [lxa0.m6, lxa1.m6, lxa2.m6, lxa3.m6] });
+  // S15: HUD style meter (L2090-2092; TNa=0.5/tya=0.08/ZIa=2/SNa=1).
+  // Verbatim C++ twin: style_credit/style_vma/style_decay (fight.hpp).
+  function styleCredit(t, st, anim, rna) {
+    let b = 0;
+    if (anim in st.vs) { b = st.vs[anim] + 1; st.vs[anim] = b; }
+    else st.vs[anim] = 0;
+    const sna = t.sna[Math.min(Math.max(0, st.level), t.sna.length - 1)];
+    let pow = 1;
+    for (let i = 0; i < b; i++) pow /= t.zia;
+    return t.tna * sna * pow * rna;
+  }
+  function styleVma(st, credit, levels) {
+    const total = st.frac + credit;
+    let b = st.level + Math.trunc(total), frac = total - Math.floor(total);
+    if (b >= levels) { b = levels - 1; frac = 1.0; }
+    if (b < 0) { b = 0; frac = 0.0; }
+    st.level = b; st.frac = frac;
+    if (st.level > st.best) st.best = st.level;
+  }
+  function styleDecay(st, tya) { st.frac = Math.max(0, st.frac - tya / 60); }
+  const ST = { tna: 0.5, tya: 0.08, zia: 2, sna: [1, 1, 1, 1, 1, 1] };
+  const stm = { level: 0, frac: 0, vs: {}, best: 0 };
+  const c15a = styleCredit(ST, stm, "HighPunch", 1.1);
+  styleVma(stm, c15a, 6);
+  const c15b = styleCredit(ST, stm, "HighPunch", 1.1);
+  styleVma(stm, c15b, 6);
+  styleDecay(stm, 0.08);
+  eq("S15 credit1", c15a, 0.55);
+  eq("S15 credit2", c15b, 0.275);
+  eq("S15 level", [stm.level, stm.best], [0, 0]);
+  eq("S15 frac", stm.frac, 0.55 + 0.275 - 0.08 / 60);
+  styleVma(stm, 2.5, 6);
+  eq("S15 levelup", [stm.level, stm.best], [3, 3]);
+  out.scenarios.push({ id: "S15-style", credit: [c15a, c15b],
+    level: stm.level, best: stm.best, frac: stm.frac });
+  // S16: perk hit-action decider (PERKS_STATIC 5.2, L1290-1300).
+  // Verbatim C++ twin: decide_hit_perks/tick_active_mods (perks.hpp).
+  function decideHitPerks(perks, rec) {
+    const o = { fc: false, hc: false, fb: false, hb: false, fs: false, hs: false,
+      fd: false, hd: false, dmg: 0, add: 0, heal: 0, ix: 1, iy: 1, iz: 1,
+      attrs: [], clears: [], collOff: false, dots: [], log: [] };
+    const num = (a, k, d) => (k in a.num ? a.num[k] : d);
+    for (const a of perks) {
+      const t = a.type;
+      if (t === "SetHit") {
+        if ("Critical" in a.num) { o.fc = a.num.Critical !== 0; o.hc = true; }
+        if ("Block" in a.num) { o.fb = a.num.Block !== 0; o.hb = true; }
+        if ("Shock" in a.num) { o.fs = a.num.Shock !== 0; o.hs = true; }
+        if ("Disarm" in a.num) { o.fd = a.num.Disarm !== 0; o.hd = true; }
+        if ("Damage" in a.num) { o.dmg = a.num.Damage; o.hdmg = true; }
+      } else if (t === "Lifesteal") {
+        o.heal += num(a, "DamagePart", 0) * rec.final_damage;
+      } else if (t === "ChangeAdditionalDamageValue") {
+        o.add += num(a, "Value", 0);
+      } else if (t === "ChangeImpulse") {
+        o.ix *= num(a, "MultiplierX", 1); o.iy *= num(a, "MultiplierY", 1);
+        o.iz *= num(a, "MultiplierZ", 1);
+      } else if (t === "ModAttributes") {
+        for (const k of Object.keys(a.num)) o.attrs.push([k, a.num[k]]);
+      } else if (t === "DisableInterval") {
+        let ty = -1;
+        if (a.str.IntervalType === "Attack") ty = 4;
+        else if (a.str.IntervalType === "Block") ty = 5;
+        else if (a.str.IntervalType === "Invulnerable") ty = 6;
+        else if (a.str.IntervalType === "Invisible") ty = 7;
+        o.clears.push([ty, a.str.IntervalName || ""]);
+      } else if (t === "TurnOffCollision") {
+        o.collOff = num(a, "Off", 1) !== 0;
+      } else if (t === "ModHealthChange") {
+        o.dots.push({ name: a.str.Name || "dot",
+          frames: num(a, "Frames", 60) | 0, per: num(a, "PerFrameValue", 0) });
+      } else {
+        o.log.push("perknoop " + t);
+      }
+    }
+    return o;
+  }
+  function tickDots(dots, hp, maxHp) {
+    for (let i = 0; i < dots.length;) {
+      hp += dots[i].per;
+      if (hp < 0) hp = 0;
+      if (hp > maxHp) hp = maxHp;
+      if (--dots[i].frames <= 0) { dots[i] = dots[dots.length - 1]; dots.pop(); }
+      else i++;
+    }
+    return hp;
+  }
+  const rec16 = { final_damage: 10 };
+  const perks16 = [
+    { type: "SetHit", num: { Critical: 1, Damage: 25 }, str: {} },
+    { type: "Lifesteal", num: { DamagePart: 0.5 }, str: {} },
+    { type: "ChangeAdditionalDamageValue", num: { Value: 3 }, str: {} },
+    { type: "ChangeImpulse", num: { MultiplierX: 2, MultiplierZ: 0.5 }, str: {} },
+    { type: "ModAttributes", num: { ShockCriticalHitChance: 0.1 }, str: {} },
+    { type: "DisableInterval", num: {}, str: { IntervalType: "Block" } },
+    { type: "ModHealthChange", num: { Frames: 3, PerFrameValue: -2 }, str: { Name: "burn" } },
+    { type: "Switch", num: {}, str: {} },
+    { type: "AddBullets", num: {}, str: {} },
+  ];
+  const o16 = decideHitPerks(perks16, rec16);
+  eq("S16 sethit", [o16.fc, o16.hc, o16.dmg, o16.hdmg], [true, true, 25, true]);
+  eq("S16 lifesteal", o16.heal, 5);
+  eq("S16 add", o16.add, 3);
+  eq("S16 impulse", [o16.ix, o16.iy, o16.iz], [2, 1, 0.5]);
+  eq("S16 attrs", o16.attrs, [["ShockCriticalHitChance", 0.1]]);
+  eq("S16 clears", o16.clears, [[5, ""]]);
+  eq("S16 dot", [o16.dots[0].name, o16.dots[0].frames, o16.dots[0].per],
+    ["burn", 3, -2]);
+  eq("S16 noop", o16.log, ["perknoop Switch", "perknoop AddBullets"]);
+  const dots16a = o16.dots.map(d => ({ ...d }));
+  let hp16 = 50;
+  hp16 = tickDots(dots16a, hp16, 100);
+  eq("S16 tick1", [hp16, dots16a.length, dots16a[0].frames], [48, 1, 2]);
+  const dots16b = [{ name: "burn", frames: 3, per: -2 }];
+  let h = 50;
+  h = tickDots(dots16b, h, 100); h = tickDots(dots16b, h, 100);
+  h = tickDots(dots16b, h, 100);
+  eq("S16 expiry", [h, dots16b.length], [44, 0]);
+  out.scenarios.push({ id: "S16-perks",
+    sethit: [o16.fc, o16.hc, o16.dmg, o16.hdmg], heal: o16.heal, add: o16.add,
+    impulse: [o16.ix, o16.iy, o16.iz], attrs: o16.attrs, clears: o16.clears,
+    dot: [o16.dots[0].name, o16.dots[0].frames, o16.dots[0].per],
+    noop: o16.log, tickHp: hp16, expiry: [h, dots16b.length] });
   out.scenarios.push({ id: "S11-misc", ok: true });
 
   out.selftest = { pass, fail, failures };

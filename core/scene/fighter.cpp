@@ -287,13 +287,19 @@ bool Fighter::has_invuln() const {
 }
 
 // JS `Te.hT(5)` (L554, reverse loop): drop every active Block interval.
-void Fighter::clear_block() {
+void Fighter::clear_block() { clear_intervals(5, ""); }
+
+// JS `Te.hT(type)` / `F4(name)` (L554) + scripted `Yob` (L1294): drop every
+// active interval matching TYPE (-1 = any) or NAME ("" = any). Interval
+// identity is the active-set key (name, or "type<N>" for nameless).
+void Fighter::clear_intervals(int type, const std::string& name) {
     if (current_move_ == nullptr) {
         active_intervals_.clear();
         return;
     }
     for (const Interval& iv : current_move_->intervals) {
-        if (iv.type != 5) continue;
+        if (type >= 0 && iv.type != type) continue;
+        if (!name.empty() && iv.name != name) continue;
         const int s = std::max(iv.start, current_move_->first_frame);
         if (s <= move_frame_ && move_frame_ <= iv.end) {
             active_intervals_.erase(iv.name.empty() ? "type" + std::to_string(iv.type) : iv.name);

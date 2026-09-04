@@ -132,6 +132,7 @@ struct MoveDef {
     int first_frame = 0;
     int end_frame = 0;   // EndFrame attr, else 0 (JS `jc.Lj`)
     int priority = 0;
+    float style_factor = 1.0f;  // `RNa` (StyleFactor attr, default 1.0)
     std::string tactic_weapon;     // TacticWeapon
     std::string tactic_equivalent; // TacticEquivalent
     std::string mirror_node;       // MirrorNode

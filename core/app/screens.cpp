@@ -27,6 +27,7 @@
 
 #include "app/screens.hpp"
 #include "app/lang_table.hpp"
+#include "app/quest_engine.hpp"
 #include "app/quest_panel.hpp"
 
 #include <algorithm>
@@ -2305,6 +2306,21 @@ void FightScreen::update_impl(float dt) {
         PendingBattle& pb = app().pending_battle();
         pb.has_result = true;
         pb.player_won = player_won;
+        // Quest FightEnd (JS `ha.RA("FightEnd")`): records the triple for
+        // later ChangeTab evaluations and fires quests listening for it
+        // (tutorial chain: none — ChangeTab rows read the triple instead).
+        // The subsequent push(Results) fires ChangeTab(From=Fight).
+        {
+            QuestJournal j;
+            j.fight = pb.battle_name;
+            j.fight_result = player_won ? "Win" : "Loss";
+            try {
+                j.player_level = app().save().load().level;
+            } catch (const std::exception&) {
+            }
+            app().quest_engine().note_fight(j.fight, j.fight_result);
+            app().quest_engine().fire(app(), "FightEnd", j);
+        }
         std::fprintf(stdout, "[fight] BATTLE END winner=%s player_won=%d\n",
                      fight_->winner() ? fight_->winner()->name.c_str() : "(none)", player_won);
         std::fprintf(stdout,

@@ -468,6 +468,48 @@ No bracket tree anywhere — tournaments are linear series.
 - OPEN-KEPT: wave-respawn driver (`Rk` overflow vs same-foe repeat,
   L405/L411) and streak→reward-row select (`Yg.number`, `eg.bm` L230-231).
 
+### §Modes setup (round 8 — Stream 1 implementation)
+
+**Node-Type census on disk** (`stages.xml`, 108 battles; 14 of 22 map
+types occur — `TACTICS/AUTO/AI/RAID/PVP` (+3 engine-only) never do):
+`TOURNAMENT` 15, `SURVIVAL` 15, `PERIODIC` 14, `CHALLENGE` 13, `BOSSES` 12,
+`HIDDEN` 10, `BOSSES_INTERMISSION` 7, `BOSSES_REPLAYABLE` 6, `FAKE` 6,
+`STORY` 6, `DUMMY`/`TUTORIAL`/`FINAL_BATTLE`/`FINAL_BATTLE_TITAN` 1 each.
+
+**`dl` setup fields** (`IIa`, L195-196): `repeat`=Replays,
+`Nn`=ReplayInterval, `d4`=Power (default 1), **`pT`=Rounds (default 2)**,
+`R4`=RoundTime (default 60), `qDa`=HealthRecovery (default 1),
+`ph`=PrizeBase (default -1). Census: all 248 Tournament fights
+`Rounds=2/Replays=1/1 warrior/2 rewards`; all 15 Survival fights
+`Rounds=1/Replays=0/1 warrior/7-or-11 rewards`; `Power=1` throughout
+(sampled).
+
+**Entry conditions** (all static): `WDa` battle-record unlock (L256);
+`qZa(-d4)` power gate in `v.Am` (L1216-1217); repeat cap `p.YL` (L220:
+`repeat>0 && no>=repeat` → done — Tournament one-shot, Survival
+`repeat=0` → never done); periodic `Gb` timers; boss `WEa` gates.
+
+**Tournament setup differences** (`hCa`, L431-432; `sl` defaults L434):
+`eE=!sR||both-ng-0`, `xR=eE`; Bosses(+Replayable/FinalTitan) get
+`lD=K6a` multi-intro + `Y1`, `uP=index`; Survival/Raid force
+`xR=eE=false` (skip intro in `ai.aa`, L2007); PVP sets `Pga`;
+`Vga=!Raid`. `vJa` builds PF damage lists (PVP/Periodic timer-seeded
+variants, L1208). Reward scaling: win-row Money scales across the series
+(ZONE_1 fight 1 `{Exp 50, Money 70}` → fight 24 `{Exp 50, Money 1240}`;
+Exp flat 50; base row constant).
+`Xs` = warrior defs (`MJa` per Warrior, L1424); `EQ(Xs)` expands
+`×number` into `pf` kits (`efa`, L178-179/L1206); `sR()` needs
+`Xs.length>1 && pT>1` (single-warrior nodes: false).
+
+**Survival waves — RESOLVED (bounded, not endless)**: the single Warrior
+carries **`Number=10` (×6 nodes) or `6` (×9)** (vs Tournament `Number`
+absent → default 1, L806) → `pf` holds 6/10 kits → `Rk` rotates that
+many waves (`Rk++, Zb=pf[Rk]`, L405; intro count `lGa=pT×z6a()`,
+L2023; `z6a=Σnumber`, L1421). `NoBulletsReplenishment` = marker rule
+`cj` (L869; no refill path exists to suppress — `replenish` 0 JS hits).
+OPEN-KEPT: streak→reward-row select (candidates `Yg.number`,
+`eg.bm`); post-last-wave behavior (`Rk` past `pf` end, L405/L411).
+
 ---
 
 ## §Act cutscene (`Rd`, L2095-2098)

@@ -43,6 +43,17 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
   fidelity реплея **PASS** (281/281 событие f≤600 побайтово: кадр, press/release,
   control, index, type).
 
+- Gr-style + perks wave (2026-09-04): MoveDef::style_factor (RNa) parsed;
+  StyleTable/StyleMeter + style_credit/style_vma/style_decay
+  (TNa=0.5/tya=0.08/ZIa=2/SNa=1, JS L2090-2092), per-hit credit + b6 feed,
+  bar-only decay in update_fighter (fixed an extra-brace build break in the
+  decay hunk); core/scene/perks.hpp (31 Ma actions: 8 real + 23 no-op+log),
+  decide_hit_perks pure + fight.cpp apply (SetHit/impulse/attrs/clears/
+  lifesteal/dots), Fighter::clear_intervals, update_fighter DoT tick;
+  S15+S16 goldens (node 81 asserts GREEN, combat diff 0); ai diff 0;
+  loop 13/13 + save/load PASS; pose-vs-oracle still recorded-mismatch class
+  (unpaired scenario, role-swap artifacts).
+
 ## Gate Phase 1 — по критериям (честно)
 
 | Критерий | Статус |

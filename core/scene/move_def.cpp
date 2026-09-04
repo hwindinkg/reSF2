@@ -441,6 +441,7 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         def.first_frame = data::xml_attr_int(move, "FirstFrame", 0);
         def.end_frame = data::xml_attr_int(move, "EndFrame", 0);
         def.priority = data::xml_attr_int(move, "Priority", 0);
+        def.style_factor = data::xml_attr_float(move, "StyleFactor", 1.0f);  // `RNa`
         if (pugi::xml_attribute w = move.attribute("TacticWeapon")) def.tactic_weapon = w.value();
         if (pugi::xml_attribute e = move.attribute("TacticEquivalent")) def.tactic_equivalent = e.value();
         if (pugi::xml_attribute m = move.attribute("MirrorNode")) def.mirror_node = m.value();

@@ -165,6 +165,10 @@ public:
     // JS `Te.hT(5)` (L554): remove ALL active Block intervals (strike()
     // pre-break when `g.DDa`, L509; `Cgb` post-hit when !block, L394-397).
     void clear_block();
+    // JS `Te.hT(type)` / `F4(name)` (L554) + scripted `Yob` (L1294):
+    // remove active intervals by TYPE (`G0` id, -1 = any) or NAME
+    // ("" = any). Powers perk DisableInterval.
+    void clear_intervals(int type, const std::string& name);
     // JS `Te.yD(6)` presence (L553): an Invulnerable interval active now —
     // the `HZa` chain gate (L500-501) consults it on the TARGET.
     bool has_invuln() const;
