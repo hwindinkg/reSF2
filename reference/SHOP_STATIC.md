@@ -381,6 +381,26 @@ Rule (`zz`, L337): candidates = inline `eB` + template (`D6`) rows with
 2. `Body` (Armor, no `Upgrades` child, no `UpgradeLevel`): no `D6`, empty
    `eB` → `zz` empty → **not upgradeable** (also ShopHide/Hidden).
 3. `MAGIC_AE21_SPIRIT_PILLAR` (Tg=600, `D6=Paid_Magic_Bonus`): first row
-   Tc>600 → Tc=620 → **200 coins / 3 gems** (`Paid_Magic_Bonus[1]`;
+   Tc>600 → Tc=620 → **200 coins / 3 gems**   (`Paid_Magic_Bonus[1]`;
    row 0 Tc=600 excluded by strict `>`). Enchanted
    (`PERK_ITEM_SPECIAL_BLOODRAGE_MAGIC`), Paid/ShopHide/CLANS.
+
+---
+
+## RESOLVED (round 5 research sweep)
+
+- **`re.*` gates (L2285)**: `XDa` (owned && `Ec>0`), `xcb` (`Bh>Dc`
+  timed), `Zcb` (`RB && !zN` upgrade available), `rga` (pair gates),
+  `Rcb` (pass-through), `sEa` (owned / count>0). All pure predicates.
+- **QV tab refs**: `case 7` (L2288) fed by `jAa` from `S_` Free items
+  (L2297); `oab` hides it when empty (L2298). Live offer contents stay
+  OPEN-KEPT.
+- **Delivery formulas**: `Ec/Bh/zF` fields + `Owa/W0` (L326/L341/L343),
+  `y2a/z2a/Cba` instant-vs-timed (L1227-1228), `Bma/Oda` maturation +
+  `QUEST_EVENT_DELIVERY` (L301), `Vxa` notify (L1219). Live countdown
+  stays OPEN-KEPT.
+- **Offer/IAP refs**: `og` sku + `Hp/TK` display (L324/L342-343),
+  `Ht/Lt` bundles (L329/L349-350), `Pa.Gbb` event (L1234), `Pb/L.K.Wt`
+  price lookup (L2298). Live purchase stays OPEN-KEPT.
+- **Enchant budget (static part)**: resolved in PERKS_STATIC §4
+  (`sOa`/2-row table/`Kia`); live `c0a/R_a` flows stay OPEN there.
