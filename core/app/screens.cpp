@@ -39,6 +39,7 @@
 #include <iterator>
 #include <map>
 #include <random>
+#include <set>
 #include <string>
 #include <unordered_map>
 
@@ -99,6 +100,39 @@ bool quest_modal_consume(App& app) {
 }
 
 // Draws the modal panel (title + up to 3 lines, truncated + dim backdrop).
+// Common UI label (Dojo UI-diff wave): single-line text fitted into a
+// rect with alignment. Measures at scale 1.0 via the menu font, then
+// shrinks (never grows past `base_scale`) so width AND line height fit.
+// This replaces every constant-scale draw_text that overflowed its rect
+// (Dojo buttons at 1.0f, hint/modal lines, NEXT/confirm prompts).
+// `halign`: 0 = left, 1 = center, 2 = right. y is the rect TOP.
+enum class UiAlign { Left = 0, Center = 1, Right = 2 };
+
+void draw_ui_label(App& app, float x, float y, float w, float h,
+                   const std::string& text, float base_scale, UiAlign align,
+                   float r, float g, float b, float a = 1.0f) {
+    if (text.empty() || w <= 0.0f || h <= 0.0f) return;
+    const sf2::data::font* font = app.menu_font();
+    if (font == nullptr) return;
+    const float tw = app.measure_text(*font, text, 1.0f);
+    const float th =
+        static_cast<float>(font->line_height > 0 ? font->line_height : 40);
+    float scale = base_scale;
+    if (tw > 0.0f && tw * scale > w) scale = w / tw;
+    if (th > 0.0f && th * scale > h) scale = h / th;
+    if (scale <= 0.0f) return;
+    const float draw_w = tw * scale;
+    float dx = x;
+    if (align == UiAlign::Center) {
+        dx = x + (w - draw_w) * 0.5f;
+    } else if (align == UiAlign::Right) {
+        dx = x + w - draw_w;
+    }
+    // NOTE: menu draw_text has no alpha channel (opaque labels).
+    (void)a;
+    (void)app.draw_text(dx, y, text, scale, r, g, b);
+}
+
 void draw_quest_modal(App& app, sf2::render::Renderer& ren) {
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return;
@@ -109,15 +143,16 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren) {
     const float panel[] = {px, py, px + pw, py, px, py + ph,
                            px + pw, py, px + pw, py + ph, px, py + ph};
     ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.95f);
-    (void)app.draw_text(px + 24.0f, py + 12.0f, d->title, 0.9f, 1.0f, 0.85f, 0.4f);
+    draw_ui_label(app, px + 24.0f, py + 12.0f, pw - 48.0f, 30.0f, d->title, 0.9f,
+                      UiAlign::Left, 1.0f, 0.85f, 0.4f);
     for (std::size_t i = 0; i < d->lines.size() && i < 3; ++i) {
-        std::string line = d->lines[i];
-        if (line.size() > 90) line = line.substr(0, 87) + "...";
-        (void)app.draw_text(px + 24.0f, py + 44.0f + static_cast<float>(i) * 30.0f, line,
-                            0.75f, 1.0f, 1.0f, 1.0f);
+        draw_ui_label(app, px + 24.0f, py + 44.0f + static_cast<float>(i) * 30.0f,
+                          pw - 48.0f, 26.0f, d->lines[i], 0.75f, UiAlign::Left,
+                          1.0f, 1.0f, 1.0f);
     }
-    (void)app.draw_text(px + pw - 260.0f, py + ph - 28.0f, "TAP TO CONTINUE", 0.7f, 0.7f,
-                        0.9f, 0.5f);
+
+    draw_ui_label(app, px + pw - 260.0f, py + ph - 28.0f, 236.0f, 24.0f,
+                      "TAP TO CONTINUE", 0.7f, UiAlign::Center, 0.7f, 0.9f, 0.5f);
 }
 
 // --- HUD HP-bar leak/decay (JS `Br` L2010-2015, Phase 7.3) ---
@@ -427,7 +462,14 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
     sf2::data::atlas_frame fr;
     int tw = 0, th = 0;
     unsigned int gl = 0;
-    if (!app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl)) return false;
+    if (!app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl)) {
+        static std::set<std::string> logged;
+        if (logged.insert(frame_name).second) {
+            std::fprintf(stdout, "[ui] atlas frame missing: %s\n", frame_name.c_str());
+            std::fflush(stdout);
+        }
+        return false;
+    }
     sf2::scene::Sprite s;
     s.texture_name = frame_name;
     s.frame_x = static_cast<float>(fr.x);
@@ -998,8 +1040,11 @@ void MainMenuScreen::render_impl(App& app) {
             const float g = hovered ? 0.72f : (b.target == kScreenMap ? 0.62f : 0.48f);
             const float bl = hovered ? 0.35f : (b.target == kScreenMap ? 0.2f : 0.42f);
             draw_flat_button(app, b.label, b.x, b.y, b.w, b.h, r, g, bl, hovered);
+            // No baked text on art (UI_EXCLUSIVITY 2) and JS draws none:
+            // label only on the flat fallback, fitted + centered.
+            draw_ui_label(app, b.x - b.w * 0.5f + 8.0f, b.y - 14.0f, b.w - 16.0f, 28.0f,
+                          b.label, 1.0f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
-        (void)app.draw_text(b.x, b.y, b.label, 1.0f, 1.0f, 1.0f, 1.0f);
     }
 }
 
@@ -1433,6 +1478,12 @@ void DojoScreen::render_impl(App& app) {
             draw_punchbag(ren, fig_cam, 850.0f, kFeetY);
         }
         // Sensei hint panel (quest_panel.hpp — the tutorial quest banner).
+        // EXCLUSIVITY (single source of truth): the quest modal dims the
+        // screen and blocks input (TAP TO CONTINUE); the ambient hint and
+        // the modal never co-draw (same-step mutual exclusivity). When a
+        // modal is up, the hint panel is skipped entirely.
+        const bool modal_up = quest_modal_top(app) != nullptr;
+        if (!modal_up) {
         const QuestStep qs = quest_step_for_state(
             app.res_root(),
             quest_state_for(tutorial_, story_step_, training_won_, level_, map_focus_,
@@ -1442,9 +1493,13 @@ void DojoScreen::render_impl(App& app) {
         const float panel[] = {px, py, px + pw, py, px, py + ph,
                                px + pw, py, px + pw, py + ph, px, py + ph};
         ren.draw_triangles(panel, 6, 0.05f, 0.05f, 0.08f, 0.78f);
-        (void)app.draw_text(px + 16.0f, py + 8.0f, qs.speaker, 0.9f, 1.0f, 0.85f, 0.4f);
-        (void)app.draw_text(px + 16.0f, py + 26.0f, qs.line1, 0.75f, 1.0f, 1.0f, 1.0f);
-        (void)app.draw_text(px + 16.0f, py + 43.0f, qs.line2, 0.7f, 0.85f, 0.9f, 0.6f);
+        draw_ui_label(app, px + 16.0f, py + 4.0f, pw - 32.0f, 20.0f, qs.speaker, 0.9f,
+                      UiAlign::Left, 1.0f, 0.85f, 0.4f);
+        draw_ui_label(app, px + 16.0f, py + 24.0f, pw - 32.0f, 20.0f, qs.line1, 0.75f,
+                      UiAlign::Left, 1.0f, 1.0f, 1.0f);
+        draw_ui_label(app, px + 16.0f, py + 44.0f, pw - 32.0f, 18.0f, qs.line2, 0.7f,
+                      UiAlign::Left, 0.85f, 0.9f, 0.6f);
+        }
     }
     // The menu-atlas entry buttons (Dojo/Map/Shop/Profile) — the same
     // frames the GeneralMenu renders; the Dojo button is the home hub's
@@ -1460,8 +1515,11 @@ void DojoScreen::render_impl(App& app) {
             const float g = hovered ? 0.72f : (b.target == kScreenFight ? 0.62f : 0.48f);
             const float bl = hovered ? 0.35f : (b.target == kScreenFight ? 0.2f : 0.42f);
             draw_flat_button(app, b.label, b.x, b.y, b.w, b.h, r, g, bl, hovered);
+            // No baked text on art (UI_EXCLUSIVITY 2) and JS draws none:
+            // label only on the flat fallback, fitted + centered.
+            draw_ui_label(app, b.x - b.w * 0.5f + 8.0f, b.y - 14.0f, b.w - 16.0f, 28.0f,
+                          b.label, 1.0f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
-        (void)app.draw_text(b.x, b.y, b.label, 1.0f, 1.0f, 1.0f, 1.0f);
     }
     // Disciple sparring toggle (JS `Nfb` STUB — session-local only, see the
     // update handler; needs save Disciple/Y0 to switch the training setup).
@@ -1470,12 +1528,14 @@ void DojoScreen::render_impl(App& app) {
         const std::string label = disciple_ ? "DISCIPLE: ON" : "DISCIPLE: OFF";
         draw_flat_button(app, label, cx, cy, w, h, disciple_ ? 0.6f : 0.35f, 0.4f, 0.3f,
                          false);
-        (void)app.draw_text(cx - 78.0f, cy - 8.0f, label, 0.7f, 1.0f, 1.0f, 1.0f);
+        draw_ui_label(app, cx - w * 0.5f + 8.0f, cy - 14.0f, w - 16.0f, 28.0f,
+                          label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
     // Settings entry (mirrors the update rect above).
     draw_flat_button(app, "SETUP", 85.0f, 34.0f, 130.0f, 44.0f, 0.3f, 0.32f, 0.4f,
                      false);
-    (void)app.draw_text(45.0f, 26.0f, "SETUP", 0.7f, 1.0f, 1.0f, 1.0f);
+    draw_ui_label(app, 85.0f - 65.0f + 8.0f, 34.0f - 14.0f, 130.0f - 16.0f, 28.0f,
+                      "SETUP", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     // Sensei dialog modal on top of everything Dojo.
     draw_quest_modal(app, ren);
 }
@@ -2961,9 +3021,9 @@ void FightScreen::render_impl(App& app) {
         if (!drawn) {
             draw_flat_button(app, "NEXT", kNextBtnCX, kNextBtnCY, kNextBtnW, kNextBtnH, 0.2f,
                              0.5f, 0.8f, false);
+            draw_ui_label(app, kNextBtnCX - kNextBtnW * 0.5f, kNextBtnCY - 14.0f,
+                              kNextBtnW, 28.0f, "NEXT", 1.0f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
-        (void)app.draw_text(kNextBtnCX - 26.0f, kNextBtnCY - 14.0f, "NEXT", 1.0f, 1.0f, 1.0f,
-                            1.0f);
     }
     // Pause menu render (JS `Jn` button + `Ar.Qrb` overlay — display only).
     // Geometry mirrors update_impl.
@@ -2975,7 +3035,8 @@ void FightScreen::render_impl(App& app) {
                                    1.0f)) {
             draw_flat_button(app, "II", 1216.0f, 40.0f, 64.0f, 48.0f, 0.3f, 0.3f, 0.4f,
                              false);
-            (void)app.draw_text(1208.0f, 32.0f, "II", 0.8f, 1.0f, 1.0f, 1.0f);
+            draw_ui_label(app, 1216.0f - 32.0f + 4.0f, 40.0f - 12.0f, 64.0f - 8.0f, 24.0f,
+                              "II", 0.8f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
     }
     if (paused_) {
@@ -3611,8 +3672,8 @@ void ShopScreen::render_impl(App& app) {
     }
     (void)app.draw_text(24.0f, 648.0f, wielding_line(app, seen_), 0.7f, 0.9f, 0.9f, 0.9f);
     if (!confirm_.empty() && time() <= confirm_until_) {
-        (void)app.draw_text(kViewW * 0.5f - 110.0f, 678.0f, confirm_, 1.0f, 0.4f, 1.0f,
-                            0.4f);
+        draw_ui_label(app, kViewW * 0.5f - 220.0f, 678.0f, 440.0f, 26.0f,
+                          confirm_, 1.0f, UiAlign::Center, 0.4f, 1.0f, 0.4f);
     }
 }
 

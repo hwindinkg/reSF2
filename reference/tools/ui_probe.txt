@@ -1,0 +1,4 @@
+# Probe: boot, wait for load, one screenshot, exit.
+wait 25000
+shot probe_boot
+wait 5000

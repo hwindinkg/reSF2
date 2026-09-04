@@ -1,0 +1,26 @@
+# UI tour probe v1 (oracle): boot to tutorial fight, screenshot, then probe
+# hub-button spots to discover reachable states. Generous load waits
+# (asset loader is slow; boot2 showed Loading 43% at ~20s).
+wait 60000
+shot tut_fight
+# Joystick drag right (tutorial step 1 = MOVE): press-drag-release via taps.
+tap 150 590
+wait 1500
+tap 250 590
+wait 1500
+shot tut_move
+# Punch button (fist icon lower-right ~1150,490 in boot.png).
+tap 1150 490
+wait 2500
+shot tut_punch
+# Kick button (~1070,590).
+tap 1070 590
+wait 2500
+shot tut_kick
+# Probe hub spots (likely dead in fight, screenshots tell).
+tap 589 518
+wait 3000
+shot probe_map_spot
+tap 819 518
+wait 3000
+shot probe_shop_spot

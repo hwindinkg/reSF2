@@ -9,6 +9,9 @@ internal enum InputCommandKind
     Move,
     Key,
     Wait,
+    /// <summary>Screenshot verb for the UI-diff harness
+    /// (<c>shot &lt;name&gt;</c> — captures ui/oracle_&lt;name&gt;.png).</summary>
+    Shot,
     /// <summary>
     /// Frame-anchored command, executed page-side at an exact fight.frame
     /// (see trace_oracle.js stimulus driver). InnerKind says Tap, Key or
@@ -35,7 +38,8 @@ internal sealed record InputCommand(
     int Milliseconds = 0,
     InputCommandKind InnerKind = InputCommandKind.Tap,
     int X2 = 0,
-    int Y2 = 0);
+    int Y2 = 0,
+    string ShotName = "");
 
 /// <summary>
 /// Parses an input script file. One command per line:
@@ -43,6 +47,7 @@ internal sealed record InputCommand(
 ///   move &lt;x&gt; &lt;y&gt;  — pointermove at (x, y)
 ///   key &lt;code&gt;    — keydown+keyup with the given numeric keyCode
 ///   wait &lt;ms&gt;     — pause for the given number of milliseconds
+///   shot &lt;name&gt;   — screenshot to ui/oracle_&lt;name&gt;.png (UI harness)
 ///   atframe &lt;f&gt; tap &lt;x&gt; &lt;y&gt; — page-side tap at exact fight.frame f
 ///   atframe &lt;f&gt; key &lt;code&gt;        — page-side key at exact fight.frame f
 ///   atframe &lt;f&gt; drag &lt;x1&gt; &lt;y1&gt; &lt;x2&gt; &lt;y2&gt; — page-side joystick drag
@@ -81,6 +86,10 @@ internal static class InputScriptParser
                     break;
                 case "wait" when parts.Length >= 2 && int.TryParse(parts[1], out int waitMs):
                     commands.Add(new InputCommand(InputCommandKind.Wait, Milliseconds: waitMs));
+                    break;
+                case "shot" when parts.Length >= 2 && parts[1].Length > 0:
+                    commands.Add(new InputCommand(InputCommandKind.Shot,
+                        ShotName: parts[1]));
                     break;
                 case "atframe" when parts.Length >= 5 && int.TryParse(parts[1], out int frame)
                     && string.Equals(parts[2], "tap", StringComparison.OrdinalIgnoreCase)

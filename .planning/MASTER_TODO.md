@@ -407,6 +407,38 @@ Remaining OPENs (with reasons):
 - Mass-absent weight divergence (JS inf vs 1.0 guard) — shipped .dat presence unverified.
 - Phase-6 AI leads (enemy phase-2 march, phase-1 attacks gated by Je==2 in JS).
 
+
+## UI-GATE (Dojo wave, 2026-09-04)
+
+Harness: `reference/tools/ui_diff.py` (% pixels over thr 12 + red overlay +
+side-by-side into `reference/traces/ui/`); port `--ui-tour` (9 states,
+`reference/traces/ui/port_<name>.png`); oracle `shot` verb + tour scripts
+(`reference/tools/ui_tour_oracle.txt`) — ORACLE UNRUNNABLE HERE (WinForms
+form closes instantly, zero output; no interactive desktop/WebView2).
+Only pre-existing oracle pixels available: `boot.png` (tutorial fight).
+
+Baselines (% over thr12; port post-Dojo-fix, fresh save):
+| Screen | Oracle counterpart | Baseline | Note |
+|---|---|---|---|
+| dojo | NONE (oracle boots to tutorial fight, not a hub) | n/a (structural gate) | pre-fix viewed: 3 hint rows mutually overlapped, labels full-width |
+| tut_fight (oracle boot) vs port fight | different mode, informative only | 90.07 | phase-1 tutorial vs phase-2 training; joystick vs key bar |
+| map/shop/profile/results/pause/settings | none captured | n/a | need interactive oracle session |
+
+Thresholds (proposed BEFORE remaining fixes; no post-fitting):
+- Dojo: STRUCTURAL 100% — every label through `draw_ui_label` with its
+  visible rect (grep: zero `draw_text(...,1.0f-scale)` left in hub paths);
+  hint/modal exclusive (modal wins); verified by capture read. Pixel gate
+  PENDING oracle hub (no counterpart exists at boot).
+- Fight/map/shop/profile/results/pause/settings: pixel threshold proposed
+  AFTER first oracle run, BEFORE fixes: 25% for design-close screens
+  (fight HUD), 40% elsewhere; no screen may regress its own baseline.
+- Quest-step matrix: open (fresh-profile states only this wave).
+
+Dojo verdict: PASS (structural) — hint rows non-overlapping + readable,
+buttons/disciple/setup fitted+centered, modal fitted, atlas telemetry
+(`btn_back` the only miss; Dojo/Map/Shop/Profile frames resolve).
+Pushed per-screen per user order.
+
 ## FINAL — 1:1 playable build matching the oracle
 
 Последний пункт всего плана. Acceptance (фиксировано заранее):

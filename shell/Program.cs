@@ -21,6 +21,7 @@ internal static class Program
         string tracesDir = Path.Combine(repoRoot, "reference", "traces");
 
         string? inputScript = ParseInputScriptArg(args);
+        int timeoutMs = ParseTimeoutArg(args);
         if (inputScript is not null)
         {
             if (!Path.IsPathRooted(inputScript))
@@ -55,9 +56,23 @@ internal static class Program
         Console.WriteLine($"[shell] serving {wwwRoot} at {url}");
 
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm(url, tracesDir, inputScript, instrumentScript));
+        Application.Run(new MainForm(url, tracesDir, inputScript, instrumentScript, timeoutMs));
 
         Console.WriteLine("[shell] form closed, stopping server");
+    }
+
+    private static int ParseTimeoutArg(string[] args)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--timeout-ms", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(args[i + 1], out int ms) && ms > 0)
+            {
+                return ms;
+            }
+        }
+
+        return 150000;
     }
 
     private static string? ParseInputScriptArg(string[] args)

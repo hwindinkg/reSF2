@@ -34,10 +34,12 @@ public sealed class MainForm : Form
     private int _inputCommandIndex;
     private DateTime _navigationTime;
     private const int CompletionPollMs = 2000;
-    private const int CompletionTimeoutMs = 150000;
+    private readonly int _completionTimeoutMs;
 
-    public MainForm(string url, string tracesDir, string? inputScriptPath, string instrumentScriptPath)
+    public MainForm(string url, string tracesDir, string? inputScriptPath, string instrumentScriptPath,
+        int completionTimeoutMs = 150000)
     {
+        _completionTimeoutMs = completionTimeoutMs;
         _tracesDir = tracesDir;
         _consoleLogPath = Path.Combine(tracesDir, "console.log");
         _inputScriptPath = inputScriptPath;
@@ -209,6 +211,8 @@ public sealed class MainForm : Form
         string path = Path.Combine(_tracesDir, fileName);
         try
         {
+            string? dir = Path.GetDirectoryName(path);
+            if (dir is not null) Directory.CreateDirectory(dir);
             await using var stream = File.Create(path);
             await _webView.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
             AppendConsoleLine($"[shell] screenshot saved: {path} ({new FileInfo(path).Length} bytes)");
@@ -274,6 +278,9 @@ public sealed class MainForm : Form
                 break;
             case InputCommandKind.Key:
                 _ = DispatchKeyAsync(command.KeyCode);
+                break;
+            case InputCommandKind.Shot:
+                _ = CaptureScreenshotAsync(Path.Combine("ui", "oracle_" + command.ShotName + ".png"));
                 break;
         }
     }
@@ -362,7 +369,7 @@ public sealed class MainForm : Form
     private async void OnCompletionTimerTick(object? sender, EventArgs e)
     {
         // Safety timeout: close anyway so automated runs always terminate.
-        if ((DateTime.UtcNow - _navigationTime).TotalMilliseconds >= CompletionTimeoutMs)
+        if ((DateTime.UtcNow - _navigationTime).TotalMilliseconds >= _completionTimeoutMs)
         {
             _completionTimer.Stop();
             AppendConsoleLine("[shell] TIMEOUT waiting for oracle done, closing");

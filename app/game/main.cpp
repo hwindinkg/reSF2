@@ -33,7 +33,8 @@ using namespace sf2::app;  // kScreen* ids + the App/SaveSystem types
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
                  "usage: %s [res_root] [save_path] [--headless N] [--autoclick] [--headless-loop]\n"
-                 "                  [--fight] [--dump-pose N] [--dump-clip <name>]\n"
+                  "                  [--fight] [--dump-pose N] [--dump-clip <name>]\n"
+                  "                  [--ui-tour]\n"
                  "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
                  "  --headless-loop  run the scripted playable loop, then exit\n"
@@ -293,6 +294,162 @@ struct HeadlessLoopDriver {
     }
 };
 
+// UI tour driver (Dojo UI-diff wave): visits each screen and captures
+// reference/traces/ui/port_<name>.png via App::capture_png. Key steps
+// mirror the loop's proven coordinates (1280x720). `key` injects a
+// GLFW key down/up instead of clicking (80 = P pause toggle).
+// `no_click` = settle+capture only. Round_wait NEXT clicks reuse the
+// loop's logic so tour fights run to Results.
+struct UiTourStep {
+    float x = 0.0f;
+    float y = 0.0f;
+    const char* label = "";
+    int wait_screen = -1;
+    int min_delay = 0;
+    int expect_screen = -1;
+    int hold_frames = 0;
+    const char* capture = nullptr;
+    int key = 0;
+    bool no_click = false;
+};
+
+static const UiTourStep kUiTourSteps[] = {
+    // 0: Dojo hub at boot (fresh save) - settle then capture.
+    {0.0f, 0.0f, "dojo hub", 3, 150, -1, 60, "port_dojo.png", 0, true},
+    // 1: Dojo -> Map.
+    {589.0f, 518.0f, "dojo->map", 3, 10, 5, 60, "port_map.png"},
+    // 2: Map -> Dojo (BACK).
+    {64.0f, 40.0f, "map->dojo", 5, 10, 3, 0, nullptr},
+    // 3: Dojo -> Shop.
+    {819.0f, 518.0f, "dojo->shop", 3, 10, 4, 60, "port_shop.png"},
+    // 4: Shop tab 2 (same screen).
+    {640.0f, 100.0f, "shop tab 2", 4, 10, -1, 40, "port_shop_tab2.png"},
+    // 5: Shop -> Dojo (BACK).
+    {64.0f, 40.0f, "shop->dojo", 4, 10, 3, 0, nullptr},
+    // 6: Dojo -> Equipment (PROFILE).
+    {1050.0f, 518.0f, "dojo->profile", 3, 10, 7, 60, "port_profile.png"},
+    // 7: Equipment -> Dojo (BACK).
+    {64.0f, 40.0f, "profile->dojo", 7, 10, 3, 0, nullptr},
+    // 8: Dojo -> FIGHT (Training). Settle deep into phase 2 for the HUD.
+    {358.0f, 518.0f, "dojo->fight", 3, 10, 6, 250, "port_fight.png"},
+    // 9: Pause via P, capture the pause menu.
+    {0.0f, 0.0f, "pause", 6, 10, -1, 40, "port_pause.png", 80},
+    // 10: Resume via P, run to KO -> Results captures on arrival.
+    {0.0f, 0.0f, "resume->results", 6, 10, 10, 0, "port_results.png", 80},
+    // 11: Results -> Dojo (the tour went Dojo->Fight directly, so the
+    // results flow pops back to the hub, unlike the loop's map route).
+    {640.0f, 360.0f, "results->dojo", 10, 10, 3, 0, nullptr},
+    // 12: Dojo -> Settings (SETUP).
+    {85.0f, 34.0f, "dojo->settings", 3, 10, 11, 60, "port_settings.png"},
+};
+constexpr int kUiTourStepCount = static_cast<int>(sizeof(kUiTourSteps) / sizeof(kUiTourSteps[0]));
+
+struct UiTourDriver {
+    int step = 0;
+    int step_frame = 0;
+    int last_seen = -1;
+    bool acted = false;
+    bool key_up_done = false;
+    bool next_clicked = false;
+    int guard = 0;
+    bool finished = false;
+
+    void frame_tick(sf2::app::App& app) {
+        const UiTourStep& s = kUiTourSteps[step];
+        const int cur = app.screens().current_id();
+        if (cur != last_seen) {
+            last_seen = cur;
+            std::fprintf(stdout, "[tour] screen %d (step %d/%d %s)\n", cur, step + 1,
+                         kUiTourStepCount, s.label);
+            std::fflush(stdout);
+        }
+
+        // Round-wait NEXT (copied from the loop driver so tour fights run
+        // to Results instead of holding in EndStance forever).
+        sf2::app::Screen* top = app.screens().top();
+        const bool fight_waiting =
+            cur == kScreenFight && top != nullptr &&
+            static_cast<sf2::app::FightScreen*>(top)->round_wait();
+        if (fight_waiting && !next_clicked) {
+            float cx = 0.0f, cy = 0.0f;
+            static_cast<sf2::app::FightScreen*>(top)->next_button_center(cx, cy);
+            app.inject_click(cx, cy);
+            next_clicked = true;
+            std::fprintf(stdout, "[tour] round_wait -> NEXT click (%.0f, %.0f)\n", cx, cy);
+            std::fflush(stdout);
+        } else if (!fight_waiting) {
+            next_clicked = false;
+        }
+
+        if (!acted) {
+            if (cur == s.wait_screen && step_frame >= s.min_delay) {
+                if (s.key != 0) {
+                    std::fprintf(stdout, "[tour] step %d/%d %s -> key %d\n", step + 1,
+                                 kUiTourStepCount, s.label, s.key);
+                    std::fflush(stdout);
+                    app.inject_key(s.key, true);
+                } else if (!s.no_click) {
+                    std::fprintf(stdout, "[tour] step %d/%d %s -> click (%.0f, %.0f)\n",
+                                 step + 1, kUiTourStepCount, s.label, s.x, s.y);
+                    std::fflush(stdout);
+                    app.inject_click(s.x, s.y);
+                } else {
+                    std::fprintf(stdout, "[tour] step %d/%d %s -> settle\n", step + 1,
+                                 kUiTourStepCount, s.label);
+                    std::fflush(stdout);
+                }
+                acted = true;
+                ++step_frame;
+            } else {
+                ++step_frame;
+            }
+            return;
+        }
+
+        // Key release shortly after the press (P/Esc toggle on down edge).
+        if (s.key != 0 && !key_up_done && step_frame >= s.min_delay + 5) {
+            app.inject_key(s.key, false);
+            key_up_done = true;
+        }
+
+        if (s.hold_frames > 0) {
+            if (step_frame >= s.min_delay + s.hold_frames) {
+                snap(app, s);
+                advance();
+                return;
+            }
+        } else if (cur == s.expect_screen) {
+            snap(app, s);
+            advance();
+            return;
+        }
+        ++step_frame;
+    }
+
+    void snap(sf2::app::App& app, const UiTourStep& s) {
+        if (s.capture != nullptr) {
+            const std::string path = std::string("reference/traces/ui/") + s.capture;
+            app.capture_png(path);
+            std::fprintf(stdout, "[tour] capture %s\n", s.capture);
+            std::fflush(stdout);
+        }
+        std::fprintf(stdout, "[tour] step done (%s)\n", s.label);
+        std::fflush(stdout);
+    }
+
+    void advance() {
+        ++step;
+        step_frame = 0;
+        acted = false;
+        key_up_done = false;
+        if (step >= kUiTourStepCount) {
+            finished = true;
+            std::fprintf(stdout, "[tour] ALL %d STEPS DONE\n", kUiTourStepCount);
+            std::fflush(stdout);
+        }
+    }
+};
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -301,6 +458,7 @@ int main(int argc, char** argv) {
     int headless = 0;
     bool auto_click = false;
     bool headless_loop = false;
+    bool ui_tour = false;
     bool capture_fight = false;
     bool capture_idle_fight = false;  // --capture-idle-fight-at N: boot direct + no input, capture at fight frame N
     bool auto_attack = false;
@@ -323,6 +481,8 @@ int main(int argc, char** argv) {
             auto_click = true;
         } else if (arg == "--headless-loop") {
             headless_loop = true;
+        } else if (arg == "--ui-tour") {
+            ui_tour = true;
         } else if (arg == "--capture" && i + 1 < argc) {
             capture_dir = argv[++i];
         } else if (arg == "--capture-fight") {
@@ -523,6 +683,25 @@ int main(int argc, char** argv) {
         if (!driver.finished) {
             return 1;
         }
+    } else if (ui_tour) {
+        // UI screenshot tour: visit each screen, capture ui/port_*.png.
+        UiTourDriver driver;
+        app.set_auto_attack(false);
+        app.set_headless_frames(1);
+        std::filesystem::create_directories("reference/traces/ui");
+        while (!driver.finished && driver.guard < 60000) {
+            glfwPollEvents();
+            driver.frame_tick(app);
+            app.run_one_frame();
+            ++driver.guard;
+        }
+        if (!driver.finished) {
+            std::fprintf(stderr, "[tour] did not finish after %d frames (step %d)\n",
+                         driver.guard, driver.step);
+            return 1;
+        }
+        app.shutdown();
+        return 0;
     } else if (fight_mode) {
         // [Phase 4c] --fight: boot DIRECTLY into the dojo fight, bypassing
         // the menu/map (which are flat-rectangle placeholders). The user is
