@@ -325,6 +325,8 @@ public:
               const std::vector<TacticsFile>& tactics,
               const TacticDef* tactic,
               const std::map<std::string, MoveDef>* moves);
+    // Mid-fight tactic switch (JS `qpb`: `model.yZa(LL)` for SetTactic).
+    void set_tactic(const TacticDef* tactic) { tactic_ = tactic; }
     // The per-frame decision (JS `de.ia` L592-594). Returns the chosen
     // move name, or "" when no move should start this frame.
     std::string update(const AiFightState& st);

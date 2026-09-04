@@ -50,6 +50,9 @@ struct Vec3 {
 // positions + radius + defense/body-part tags (JS `yu` L803-807).
 struct HitCapsule {
     std::string name;         // edge name (`yu.name`)
+    std::string end1;         // endpoint-1 bone name (`yu.sx`, via `wBa`)
+    std::string end2;         // endpoint-2 bone name (`yu.Zs`, via `wBa`)
+    float rest_length = 0.0f;  // `yu.length` (`|pQ-iU|`, rest — NOT current)
     Vec3 p1;                  // endpoint 1 world pos (`yu.sx.ma`)
     Vec3 p2;                  // endpoint 2 world pos (`yu.Zs.ma`)
     float radius = 0.0f;      // `yu.gb`
@@ -89,6 +92,11 @@ bool capsule_capsule_overlap(const HitCapsule& a, const HitCapsule& b,
 // resolve against it) and only the `Collisible="1"` edges in `Nl.oI`
 // (the target's hit list). `build()` includes every edge; the hit test
 // filters `collidable` on the TARGET side.
+//
+// Endpoint bones resolve per-label via `wBa` (WEA_STATIC §3): the OWN
+// model's `Ic(name)` first, else the FOE model's `Ic(name)` (enemy-bone
+// feed — grab/hold capsules address foe bones). `foe_model`/`foe_pose`
+// may be null/empty to disable the fallback.
 struct BodyState {
     // Edge name -> live capsule (only collidable edges; JS `Nl.oI`).
     std::vector<HitCapsule> capsules;
@@ -100,7 +108,9 @@ struct BodyState {
     // reference bone names; unknown bones produce no capsule.
     // `wall`/`width_minus_wall` are the arena x-bounds (JS `v.tFa`/`v.NKa`).
     void build(const Model& model, const std::vector<float>& pose_xy,
-               float wall, float width_minus_wall);
+               float wall, float width_minus_wall,
+               const Model* foe_model = nullptr,
+               const std::vector<float>* foe_pose_xy = nullptr);
 
     // Clamps every capsule endpoint to the arena bounds (JS `Al.fha` L582 +
     // `P6a` L582): x in [wall, width-wall], y >= 0 (floor). Returns the
@@ -122,21 +132,39 @@ struct BodyState {
 // the fighter scale (`JG`, default 1). Mirrors:
 //   Kwb: d = (b.kw, b.gR, b.hR) * facing * JG
 //   Bl.strike: node1 += d * (1-b)/w1; node2 += d * b/w2
-// where b = how far along the capsule the hit landed (0..1), w = node mass.
+// where b = min(1, |nJa - sx.ma| / rest_length), w = node mass.
+// MG/NG gate (`!sx.MG || !Zs.MG`, NG endpoints skipped) is OPEN: MG/NG are
+// runtime `Vc.sk`-solver flags with no XML source — all endpoints land as
+// dynamic, so the gate always passes (noted, not lowered).
 // The displacement is applied to the DEMO's fighter world-x directly (the
 // full ragdoll integration — Vc.sk L796 gravity/friction — is out of scope
 // for this milestone; the knockback FEEL — direction, weight split,
-// bounds clamp — is exact).
+// bounds clamp — is exact). The per-bone vectors below ALSO feed the
+// defender's bone-knock offsets (`Fighter::add_knockback`), so the hit
+// capsule endpoints visibly displace (WEA_STATIC §5).
 struct ImpulseResult {
     Vec3 impulse;       // the scaled impulse vector
-    float node1_disp = 0.0f;  // displacement applied to endpoint 1
-    float node2_disp = 0.0f;  // displacement applied to endpoint 2
+    Vec3 node1_vec;     // full-vector displacement of endpoint 1
+    Vec3 node2_vec;     // full-vector displacement of endpoint 2
+    float node1_disp = 0.0f;  // .x of node1_vec (legacy world-x feed)
+    float node2_disp = 0.0f;  // .x of node2_vec
     float clamped_dx = 0.0f;  // how much the bounds clamp ate
 };
 
 // `hit_pos` is the hit point on the target capsule (from the collision
 // test). `fighter_x` is the target fighter's world x (for the clamp);
 // returns the target's new world x after the impulse + clamp.
+// Per-frame knockback decay for the bone offsets (the `Vc.sk` L796
+// friction/gravity integrator is out of scope): uniform exponential with
+// `kKnockDecay` per 60 Hz tick. OPEN exact value — pinned by S17 vectors,
+// not by trace.
+inline constexpr float kKnockDecay = 0.9f;
+inline void decay_knockback(std::vector<Vec3>& offs, float factor = kKnockDecay) {
+    for (Vec3& v : offs) {
+        v = v * factor;
+        if (v.dot(v) < 1e-6f) v = Vec3{};
+    }
+}
 float apply_impulse(const HitCapsule& hit_cap, const CapsuleHit& hit,
                     Vec3 impulse, float fighter_x, float wall,
                     float width_minus_wall, ImpulseResult& out);

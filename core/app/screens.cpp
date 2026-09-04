@@ -26,6 +26,7 @@
 // flagged as a gap.
 
 #include "app/screens.hpp"
+#include "app/act_player.hpp"
 #include "app/lang_table.hpp"
 #include "app/quest_engine.hpp"
 #include "app/quest_panel.hpp"
@@ -794,6 +795,43 @@ std::vector<std::pair<std::string, std::string>> owned_items(App& app) {
     return out;
 }
 
+// Perk setup for the fight trigger bus (`ZOa` analog, PERKS §5.4/§5.7):
+// equipped items' `<Perks>`/`<Enchantments>` rows + names from the save,
+// resolved against the perk catalog. Enemy gear is not modeled (empty).
+sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets) {
+    sf2::scene::PerkSetup ps;
+    ps.catalog = &assets.perk_catalog;
+    ps.tactics = &assets.tactic_defs;
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return ps;
+    }
+    const std::vector<CatalogItem> catalog = load_full_catalog(app);
+    std::vector<std::string> equipped = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
+    for (const auto& oi : w.items) {
+        if (oi.count > 0 && oi.equipped) equipped.push_back(oi.name);
+    }
+    for (const std::string& name : equipped) {
+        if (name.empty()) continue;
+        for (const CatalogItem& ci : catalog) {
+            if (ci.name != name) continue;
+            ps.player_items.push_back(name);
+            for (const ItemPerkRef& ref : ci.perks) {
+                sf2::scene::ItemPerkRef scene_ref;
+                scene_ref.name = ref.name;
+                scene_ref.set_num = ref.set_num;
+                scene_ref.set_str = ref.set_str;
+                scene_ref.enchant = ref.enchant;
+                ps.player_refs.push_back(std::move(scene_ref));
+            }
+            break;
+        }
+    }
+    return ps;
+}
+
 } // namespace
 
 // The shared catalog (loaded once, cached).
@@ -1254,6 +1292,16 @@ void DojoScreen::update_impl(float dt) {
             std::fflush(stdout);
         }
     }
+    // Settings entry (small top-left button; the Dojo hub owns it — the
+    // 4-button row is untouched so headless click spots never move).
+    if (p.x >= 20.0 && p.x <= 150.0 && p.y >= 12.0 && p.y <= 56.0) {
+        if (p.pressed) {
+            sf2::audio::AudioEngine::instance().play("click");
+            std::fprintf(stdout, "[dojo] SETUP -> settings\n");
+            std::fflush(stdout);
+            push(kScreenSettings);
+        }
+    }
     hover_ = -1;
     for (std::size_t i = 0; i < buttons_.size(); ++i) {
         const Button& b = buttons_[i];
@@ -1404,6 +1452,10 @@ void DojoScreen::render_impl(App& app) {
                          false);
         (void)app.draw_text(cx - 78.0f, cy - 8.0f, label, 0.7f, 1.0f, 1.0f, 1.0f);
     }
+    // Settings entry (mirrors the update rect above).
+    draw_flat_button(app, "SETUP", 85.0f, 34.0f, 130.0f, 44.0f, 0.3f, 0.32f, 0.4f,
+                     false);
+    (void)app.draw_text(45.0f, 26.0f, "SETUP", 0.7f, 1.0f, 1.0f, 1.0f);
     // Sensei dialog modal on top of everything Dojo.
     draw_quest_modal(app, ren);
 }
@@ -1482,12 +1534,41 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
     std::fflush(stdout);
 }
 
+void MapScreen::launch_battle(const Node& n) {
+    // JS `Ya` battle-start (L2131-2132): `wa.F().mp(6, battle)`.
+    // Carry the battle into the pending flow: name/location +
+    // the reward (the first non-zero <Reward>).
+    PendingBattle& pb = app().pending_battle();
+    pb.battle_name = n.name;
+    pb.location = n.location.empty() ? "dojo" : n.location;
+    pb.has_result = false;
+    // The node's fight -> reward. The Training fight has
+    // Money=0; use the battle's own reward lookup.
+    battle_rewards(n.name, pb.reward_money, pb.reward_exp);
+    // The owned items (JS `ra.Hza` move list input).
+    pb.owned = owned_items(app());
+    std::fprintf(stdout, "[map] click %s [%s] -> Fight (reward money=%d exp=%d)\n",
+                 n.name.c_str(), n.zone.c_str(), pb.reward_money, pb.reward_exp);
+    std::fflush(stdout);
+    push(kScreenFight);
+}
+
 void MapScreen::update_impl(float dt) {
     (void)dt;
     // Sensei modal gate (quest He records): while up, taps advance the
     // dialog instead of tabs/nodes/BACK (headless auto-drains).
     if (quest_modal_consume(app())) return;
     const App::PointerState& p = app().pointer();
+    // Boss-intro act (Rd machine): ticks here; taps skip; completion
+    // launches the armed battle. Tabs/nodes/BACK wait below.
+    if (act_pending_) {
+        act_.tick(dt, p.pressed);
+        if (act_.done()) {
+            act_pending_ = false;
+            launch_battle(act_node_);
+        }
+        return;
+    }
     // Zone tabs (JS `Ya.HXa` L2123 zone strips; the `Vr` scroller is a
     // plain tab row here): geometry mirrors render_impl exactly.
     tab_hover_ = -1;
@@ -1527,22 +1608,39 @@ void MapScreen::update_impl(float dt) {
         if (p.x >= n.x - 60 && p.x <= n.x + 60 && p.y >= n.y - 60 && p.y <= n.y + 60) {
             hover_ = static_cast<int>(i);
             if (p.pressed && n.active) {
-                // JS `Ya` battle-start (L2131-2132): `wa.F().mp(6, battle)`.
-                // Carry the battle into the pending flow: name/location +
-                // the reward (the first non-zero <Reward>).
-                PendingBattle& pb = app().pending_battle();
-                pb.battle_name = n.name;
-                pb.location = n.location.empty() ? "dojo" : n.location;
-                pb.has_result = false;
-                // The node's fight -> reward. The Training fight has
-                // Money=0; use the battle's own reward lookup.
-                battle_rewards(n.name, pb.reward_money, pb.reward_exp);
-                // The owned items (JS `ra.Hza` move list input).
-                pb.owned = owned_items(app());
-                std::fprintf(stdout, "[map] click %s [%s] -> Fight (reward money=%d exp=%d)\n",
-                             n.name.c_str(), n.zone.c_str(), pb.reward_money, pb.reward_exp);
-                std::fflush(stdout);
-                push(kScreenFight);
+                // Boss multi-intro (JS `hCa` L431-432: BOSSES fights carry
+                // the lD intro list; played through the Rd act machine): arm
+                // the act first, launch on completion. Headless bypasses
+                // straight into the fight (loop pins Fight screens).
+                if (!app().headless() &&
+                    (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE")) {
+                    std::vector<ActLine> lines;
+                    if (zone_sel_ >= 0 &&
+                        static_cast<std::size_t>(zone_sel_) < zones_.size()) {
+                        for (const Node& b : zones_[zone_sel_].nodes) {
+                            if (b.type == "BOSSES" || b.type == "BOSSES_REPLAYABLE") {
+                                ActLine ln;
+                                ln.text = b.name;
+                                ln.seconds = 2.5f;
+                                lines.push_back(ln);
+                            }
+                        }
+                    }
+                    if (lines.empty()) {
+                        ActLine ln;
+                        ln.text = n.name;
+                        ln.seconds = 2.5f;
+                        lines.push_back(ln);
+                    }
+                    act_node_ = n;
+                    act_pending_ = true;
+                    act_.start(lines, false);
+                    std::fprintf(stdout, "[map] boss intro act armed (%zu intros, first %s)\n",
+                                 lines.size(), n.name.c_str());
+                    std::fflush(stdout);
+                } else {
+                    launch_battle(n);
+                }
             }
         }
     }
@@ -1604,6 +1702,43 @@ void MapScreen::render_impl(App& app) {
     const bool zone_ok =
         zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size();
     const std::size_t node_count = zone_ok ? zones_[zone_sel_].nodes.size() : 0;
+    // Series line (FLOW_STATIC Modes): tournament won/total + next name from
+    // the zone's TOURNAMENT nodes and save wins; survival best likewise.
+    // Xs/EQ kits and Rk wave rotation are fight-setup concepts with no
+    // shell-visible state — position served from records (see report).
+    if (zone_ok) {
+        int tour_total = 0, tour_won = 0;
+        std::string tour_next;
+        int surv_best = 0;
+        bool has_surv = false;
+        for (const Node& zn : zones_[zone_sel_].nodes) {
+            int wins = 0;
+            for (const auto& fw : fight_wins_) {
+                if (fw.name == zn.name) {
+                    wins = fw.wins;
+                    break;
+                }
+            }
+            if (zn.type == "TOURNAMENT") {
+                ++tour_total;
+                if (wins > 0) ++tour_won;
+                else if (tour_next.empty()) tour_next = zn.name;
+            } else if (zn.type == "SURVIVAL") {
+                has_surv = true;
+                if (wins > surv_best) surv_best = wins;
+            }
+        }
+        std::string series = zones_[zone_sel_].name;
+        if (tour_total > 0) {
+            series += " | TOURNAMENT " + std::to_string(tour_won) + "/" +
+                      std::to_string(tour_total);
+            if (!tour_next.empty()) series += " NEXT " + tour_next;
+        }
+        if (has_surv) {
+            series += " | SURVIVAL BEST " + std::to_string(surv_best);
+        }
+        (void)app.draw_text(130.0f, 76.0f, series, 0.7f, 0.9f, 0.9f, 0.9f);
+    }
     for (std::size_t i = 0; i < node_count; ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
         const bool hovered = static_cast<int>(i) == hover_;
@@ -1643,6 +1778,29 @@ void MapScreen::render_impl(App& app) {
     // The BACK button (top-left) — try textured misc frame, else flat.
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    }
+    // Boss-intro act overlay (Rd machine over the lD multi-intro list;
+    // boss names are display strings, shown raw). Skippable by tap.
+    if (act_pending_ && act_.active()) {
+        const float a = act_.fade();
+        if (a > 0.01f) {
+            const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH,
+                                 0, 0, kViewW, kViewH, 0, kViewH};
+            ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, a);
+        }
+        const sf2::data::font* fnt = app.menu_font();
+        if (fnt != nullptr) {
+            const unsigned int ftex = app.font_texture();
+            (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, 240.0f, "BOSS", 1.2f,
+                                         1.0f, 0.85f, 0.3f);
+            const std::string line = act_.line();
+            if (!line.empty()) {
+                (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, 340.0f, line,
+                                             1.0f, 1.0f, 1.0f, 1.0f);
+            }
+            (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, 560.0f, "TAP TO SKIP",
+                                         0.7f, 0.7f, 0.7f, 0.7f);
+        }
     }
     // Sensei dialog modal on top of the map.
     draw_quest_modal(app, ren);
@@ -1813,7 +1971,8 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                        assets.tactics_sets, tactic, "Player", enemy_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
-                       battle.max_hp, battle.max_hp, roll01, owned);
+                       battle.max_hp, battle.max_hp, roll01, owned,
+                       equipped_perks(app(), assets));
     // Disarm identity (JS `$b(Au)` vs `ownHd`, L394): the player's wielded
     // weapon comes from the save; the enemy defaults to Fists (Training).
     {
@@ -3050,7 +3209,13 @@ std::string shop_stat_line(const CatalogItem& it) {
     } else {
         std::snprintf(buf, sizeof(buf), "Lv%d   %dG", it.level, it.price);
     }
-    return std::string(buf);
+    std::string out(buf);
+    // Timed delivery tag (SHOP `Ec`/DeliveryTime; no live rows carry it —
+    // claim path needs save Timers/yl, noted in the stream report).
+    if (it.delivery_sec > 0) {
+        out += " DL" + std::to_string(it.delivery_sec) + "s";
+    }
+    return out;
 }
 
 // Wielding summary (read-only): the equipped slots' applied stats, resolved
@@ -3583,6 +3748,72 @@ void EquipmentScreen::render_impl(App& app) {
 }
 
 // ---------------------------------------------------------------------------
+// SettingsScreen
+// ---------------------------------------------------------------------------
+
+SettingsScreen::SettingsScreen(ScreenManager& mgr) : Screen(mgr, "Settings") {}
+
+void SettingsScreen::update_impl(float dt) {
+    (void)dt;
+    const App::PointerState& p = app().pointer();
+    hover_ = -1;
+    // BACK (top-left) -> the caller (Dojo hub).
+    if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
+        hover_ = 0;
+        if (p.pressed) {
+            std::fprintf(stdout, "[settings] BACK -> previous screen\n");
+            std::fflush(stdout);
+            manager().pop();
+            return;
+        }
+    }
+    // MUSIC toggle (working): OFF stops the track, ON replays the last
+    // track (play_music of the current track; silent no-op when none —
+    // AudioEngine semantics, no scene touch).
+    if (p.x >= 480 && p.x <= 800 && p.y >= 268 && p.y <= 332) {
+        hover_ = 1;
+        if (p.pressed) {
+            music_off_ = !music_off_;
+            if (music_off_) {
+                sf2::audio::AudioEngine::instance().stop_music();
+            } else {
+                sf2::audio::AudioEngine::instance().play_music(
+                    sf2::audio::AudioEngine::instance().music_track());
+            }
+            sf2::audio::AudioEngine::instance().play("click");
+            std::fprintf(stdout, "[settings] music %s\n", music_off_ ? "OFF" : "ON");
+            std::fflush(stdout);
+        }
+    }
+    // SOUND row is state display only (no runtime SFX mute/set_enabled API
+    // exists — see the stream report); intentionally not clickable.
+}
+
+void SettingsScreen::render_impl(App& app) {
+    sf2::render::Renderer& ren = app.renderer();
+    const float bg[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(bg, 6, 0.07f, 0.08f, 0.11f, 1.0f);
+    (void)app.draw_text(kViewW * 0.5f - 90.0f, 120.0f, "SETTINGS", 1.4f, 1.0f, 1.0f,
+                        1.0f);
+    const std::string music_label =
+        std::string("MUSIC: ") + (music_off_ ? "OFF" : "ON");
+    draw_flat_button(app, music_label, kViewW * 0.5f, 300.0f, 320.0f, 64.0f,
+                     hover_ == 1 ? 0.55f : 0.35f, 0.45f, 0.3f, hover_ == 1);
+    (void)app.draw_text(kViewW * 0.5f - 70.0f, 292.0f, music_label, 0.9f, 1.0f, 1.0f,
+                        1.0f);
+    const bool sfx_on = sf2::audio::AudioEngine::instance().enabled();
+    const std::string sfx_label =
+        std::string("SOUND: ") + (sfx_on ? "ON (no runtime mute API)" : "OFF");
+    draw_flat_button(app, sfx_label, kViewW * 0.5f, 390.0f, 320.0f, 64.0f, 0.25f, 0.25f,
+                     0.3f, false);
+    (void)app.draw_text(kViewW * 0.5f - 150.0f, 382.0f, sfx_label, 0.8f, 0.6f, 0.6f,
+                        0.6f);
+    if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -3607,6 +3838,8 @@ std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id) {
         }
         case kScreenShop:
             return std::make_unique<ShopScreen>(mgr);
+        case kScreenSettings:
+            return std::make_unique<SettingsScreen>(mgr);
         case kScreenProfile:
             return std::make_unique<EquipmentScreen>(mgr);
         default:

@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "app/fight_assets.hpp"
+#include "app/act_player.hpp"
 #include "app/item_catalog.hpp"
 #include "app/save_system.hpp"
 #include "app/screen_manager.hpp"
@@ -172,6 +173,14 @@ private:
     // Tournament-series progress (save Fights/yc win counts, cached at
     // construction; the Map remounts every visit so it stays fresh).
     std::vector<WarriorSave::FightWins> fight_wins_;
+    // Boss-intro act (JS hCa lD + Rd player): armed node + player while the
+    // intro runs; the fight launches when done (headless bypasses).
+    ActPlayer act_;
+    Node act_node_;
+    bool act_pending_ = false;
+    // Shared battle-start body (JS `Ya` mp(6)): fills pending_battle and
+    // pushes the fight. Used by node clicks and act completion alike.
+    void launch_battle(const Node& n);
 };
 
 // The fight — native Fight screen (screen 6, JS `ai`/`ma` L2004-2010).
@@ -348,6 +357,23 @@ public:
 
 private:
     std::vector<CatalogItem> catalog_;
+    int hover_ = -1;
+};
+
+// The settings — native settings screen (JS options equivalents). Sound
+// row is state display (no runtime SFX mute API exists — see the stream
+// report); music toggles via play/stop_music; BACK returns to the caller.
+class SettingsScreen : public Screen {
+public:
+    explicit SettingsScreen(ScreenManager& mgr);
+
+    ScreenId id() const override { return kScreenSettings; }
+
+    void update_impl(float dt) override;
+    void render_impl(App& app) override;
+
+private:
+    bool music_off_ = false;
     int hover_ = -1;
 };
 

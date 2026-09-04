@@ -43,6 +43,8 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
   fidelity реплея **PASS** (281/281 событие f≤600 побайтово: кадр, press/release,
   control, index, type).
 
+
+- Wea/TriggerBus/equip wave (2026-09-04): Bl.strike map (rest-length b, full-vector impulse, per-bone kb offsets + decay, wBa foe fallback, MG/NG OPEN); TriggerBus slots/fire/t0a/Axa/UKa-lY/Qh/ia-JNa/ModExpires-14/Provoke + perks.xml loader (_Var subst, Template merge) + equip mapping (list.xml Perks/Enchantments, ZOa at init, empty for Fists/Body/Head); SetHit-ppb bypass, Ly/jg state ordering, Lifesteal so-ratio, ChangeImpulse u.H=0 + set-semantics; qpb tactic switch; S17/S18/S18c goldens + ElementTree loader check; node 90 GREEN, combat/ai/spatial diff 0, loop 13/13 + save/load PASS.
 - Gr-style + perks wave (2026-09-04): MoveDef::style_factor (RNa) parsed;
   StyleTable/StyleMeter + style_credit/style_vma/style_decay
   (TNa=0.5/tya=0.08/ZIa=2/SNa=1, JS L2090-2092), per-hit credit + b6 feed,

@@ -264,6 +264,16 @@ std::vector<std::string> Fighter::intervals_at(int frame) const {
     return out;
 }
 
+int Fighter::interval_type(const std::string& name) const {
+    if (current_move_ == nullptr) return 0;
+    for (const Interval& iv : current_move_->intervals) {
+        const std::string key =
+            iv.name.empty() ? "type" + std::to_string(iv.type) : iv.name;
+        if (key == name) return iv.type;
+    }
+    return 0;
+}
+
 // JS `wd.qYa`/`Nbb` (L514): a Block interval (`yD(5)`) active now.
 bool Fighter::has_block() const {
     if (current_move_ == nullptr) return false;
@@ -292,8 +302,16 @@ void Fighter::clear_block() { clear_intervals(5, ""); }
 // JS `Te.hT(type)` / `F4(name)` (L554) + scripted `Yob` (L1294): drop every
 // active interval matching TYPE (-1 = any) or NAME ("" = any). Interval
 // identity is the active-set key (name, or "type<N>" for nameless).
-void Fighter::clear_intervals(int type, const std::string& name) {
-    if (current_move_ == nullptr) {
+// Per-bone knockback feed (JS `Bl.strike` L582 moves the endpoint bodies).
+void Fighter::add_knockback(int bone, const sf2::scene::Vec3& v) {
+    if (bone < 0 || model_.bones.empty()) return;
+    const std::size_t n = model_.bones.size();
+    if (kb_.size() != n) kb_.assign(n, sf2::scene::Vec3{});
+    kb_[static_cast<std::size_t>(bone)] =
+        kb_[static_cast<std::size_t>(bone)] + v;
+}
+
+void Fighter::clear_intervals(int type, const std::string& name) {    if (current_move_ == nullptr) {
         active_intervals_.clear();
         return;
     }
@@ -464,6 +482,8 @@ std::string Fighter::try_react(FightContext& ctx, bool prefer_fall) {
 // now advances a subframe counter and samples the interpolated pose.
 void Fighter::advance(float dt) {
     (void)dt;  // fixed 60 Hz — one frame per call (JS 1/60 step)
+    // Knockback offsets decay every tick (JS Vc.sk friction - OPEN rate).
+    if (!kb_.empty()) sf2::scene::decay_knockback(kb_);
     if (current_move_ == nullptr || current_clip_ == nullptr) {
         return;
     }
@@ -729,6 +749,13 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // facing -1 (the world x was mirrored off-screen / doubled).
         pos_[i * 2] = (px[i] - px[com_u]) * f + x;
         pos_[i * 2 + 1] = py[i] + dy;
+        // Knockback ride: the impulse-split offsets displace the hit bones
+        // on top of the clip pose (JS endpoint-body moves persist into the
+        // next frame's `ma`).
+        if (i < kb_.size()) {
+            pos_[i * 2] += kb_[i].x;
+            pos_[i * 2 + 1] += kb_[i].y;
+        }
     }
 
     // [Phase A4 — figure z-sort] Keep the per-bone depth the projection
@@ -741,7 +768,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // captured here alongside the x/y in `pos_`.
     posz_.assign(n, 0.0f);
     for (std::size_t i = 0; i < n; ++i) {
-        posz_[i] = pz[i];
+        posz_[i] = pz[i] + (i < kb_.size() ? kb_[i].z : 0.0f);
     }
 }
 

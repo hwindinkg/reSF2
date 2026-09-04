@@ -20,6 +20,7 @@
 
 #include "scene/conditions.hpp"
 #include "scene/model.hpp"
+#include "scene/physics.hpp"
 
 namespace sf2::data {
 struct anim_clip;
@@ -159,6 +160,9 @@ public:
     const std::set<std::string>& active_intervals() const { return active_intervals_; }
     // Interval names active at `frame` (JS `jc.c7a` L691 semantics).
     std::vector<std::string> intervals_at(int frame) const;
+    // `fe.G0` type of the named interval in the CURRENT move (0 when
+    // absent — powers `CurrentInterval` conditions + Lj edge vars).
+    int interval_type(const std::string& name) const;
     // JS `wd.Nbb` (L514): `qYa()!=null` = a Block interval (`da.yD(5)`)
     // is active at the current frame.
     bool has_block() const;
@@ -213,6 +217,14 @@ public:
     const Model& model() const { return model_; }
     const std::vector<float>& positions() const { return pos_; }  // x,y pairs
 
+    // Per-bone knockback offsets (JS `Bl.strike` L582 moves the hit
+    // capsule's endpoint BODIES, not the whole fighter). `add_knockback`
+    // accumulates the impulse-split vector onto a bone; the offsets ride on
+    // top of the clip sample, decay per tick in advance() (`decay_knockback`,
+    // OPEN exact rate — the `Vc.sk` integrator is out of scope), and feed
+    // the next frame's hit capsules via positions() (emergent correctness).
+    void add_knockback(int bone, const sf2::scene::Vec3& v);
+
     // Fills `out` with the triangle vertex list (screen-space x,y pairs, z
     // dropped). Returns the vertex count (3 * triangle count).
     std::size_t build_vertices(std::vector<float>& out) const;
@@ -261,6 +273,7 @@ private:
     std::vector<float> prev_x_;
     int facing_ = 1;                        // +1 (JS `Te.FX` / `hd()`)
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (COM world pos)
+    std::vector<sf2::scene::Vec3> kb_;  // per-bone knockback offsets (world)
     std::set<std::string> active_intervals_; // active interval names (JS `Te.xj`)
     float enemy_x_ = 0.0f;                  // enemy world X (for facing)
     std::vector<sf2::scene::key_input> keys_; // buffered inputs (JS `Kl.zg`)

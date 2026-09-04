@@ -21,10 +21,21 @@
 // the Model names for the fighter rebuild. The ItemCatalog is pure data +
 // parse — no platform code (portable C++17).
 
+#include <map>
 #include <string>
 #include <vector>
 
 namespace sf2::app {
+
+// One list.xml `<Perks>`/`<Enchantments><Perk Name>` binding (JS `xe`
+// be-entry, L1257): the perk name + its `<Set>` overrides. `enchant`
+// marks `<Enchantments>` rows (budget path `sOa`, PERKS §4).
+struct ItemPerkRef {
+    std::string name;
+    std::map<std::string, double> set_num;
+    std::map<std::string, std::string> set_str;
+    bool enchant = false;
+};
 
 // One list.xml <Item> (JS `p.items.Xm` element).
 struct CatalogItem {
@@ -41,9 +52,11 @@ struct CatalogItem {
     int head_defense = 0;   // HeadDefense
     int unarmed_damage = 0; // UnarmedDamage
     int magic_damage = 0;   // MagicDamage (Magic items; Ranged carries none)
+    int delivery_sec = 0;   // DeliveryTime/Ec (timed delivery; 0 = instant)
     bool shop_hide = false; // ShopHide="1" (not offered in the shop)
     bool hidden = false;    // Hidden="1"
     bool paid = false;      // PaidItem="Paid"/"SuperPaid" (premium-only)
+    std::vector<ItemPerkRef> perks;  // `<Perks>` + `<Enchantments>` rows
     // Owned-equip status comes from the save (users.xml <Items>), not here.
 };
 

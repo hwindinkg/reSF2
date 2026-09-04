@@ -329,6 +329,14 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
         const std::string t_settings = extracted_xml("tactic_settings.xml");
         sf2::scene::parse_tactic_settings(t_settings, fight_assets_->tactic_defs);
 
+        // Perk catalog (res/perks.xml `Be` defs) for the fight trigger bus.
+        try {
+            fight_assets_->perk_catalog =
+                sf2::scene::parse_perks_xml(extracted_xml("perks.xml"));
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "app: perks.xml load failed: %s\n", e.what());
+        }
+
         // The fists tactics file (the AI's decision tables).
         {
             const std::string dir = res + "/tactics";

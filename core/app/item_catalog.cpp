@@ -46,9 +46,39 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         ci.head_defense = sf2::data::xml_attr_int(item, "HeadDefense", 0);
         ci.unarmed_damage = sf2::data::xml_attr_int(item, "UnarmedDamage", 0);
         ci.magic_damage = sf2::data::xml_attr_int(item, "MagicDamage", 0);
+        ci.delivery_sec = sf2::data::xml_attr_int(item, "DeliveryTime", 0);
         ci.shop_hide = attr_bool_str(item.attribute("ShopHide").value());
         ci.hidden = attr_bool_str(item.attribute("Hidden").value());
         if (item.attribute("PaidItem")) ci.paid = true;
+        // `<Perks>` + `<Enchantments>` rows (JS `xe.Qd` be-entries, L1257):
+        // perk name + `<Set>` overrides (numeric vs string by parse).
+        for (const char* section : {"Perks", "Enchantments"}) {
+            const pugi::xml_node sec = item.child(section);
+            if (!sec) continue;
+            const bool enchant = std::string(section) == "Enchantments";
+            for (const pugi::xml_node perk : sec.children("Perk")) {
+                if (!perk.attribute("Name")) continue;
+                ItemPerkRef ref;
+                ref.name = perk.attribute("Name").value();
+                ref.enchant = enchant;
+                const pugi::xml_node set = perk.child("Set");
+                if (set) {
+                    for (const pugi::xml_attribute a : set.attributes()) {
+                        try {
+                            std::size_t pos = 0;
+                            const double d = std::stod(a.value(), &pos);
+                            if (pos == std::string(a.value()).size()) {
+                                ref.set_num[a.name()] = d;
+                                continue;
+                            }
+                        } catch (...) {
+                        }
+                        ref.set_str[a.name()] = a.value();
+                    }
+                }
+                ci.perks.push_back(std::move(ref));
+            }
+        }
         out.push_back(std::move(ci));
     }
     return out;

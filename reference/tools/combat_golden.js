@@ -470,8 +470,8 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
       } else if (t === "ChangeAdditionalDamageValue") {
         o.add += num(a, "Value", 0);
       } else if (t === "ChangeImpulse") {
-        o.ix *= num(a, "MultiplierX", 1); o.iy *= num(a, "MultiplierY", 1);
-        o.iz *= num(a, "MultiplierZ", 1);
+        o.ix = num(a, "MultiplierX", 0); o.iy = num(a, "MultiplierY", 0);
+        o.iz = num(a, "MultiplierZ", 0);
       } else if (t === "ModAttributes") {
         for (const k of Object.keys(a.num)) o.attrs.push([k, a.num[k]]);
       } else if (t === "DisableInterval") {
@@ -518,7 +518,7 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
   eq("S16 sethit", [o16.fc, o16.hc, o16.dmg, o16.hdmg], [true, true, 25, true]);
   eq("S16 lifesteal", o16.heal, 5);
   eq("S16 add", o16.add, 3);
-  eq("S16 impulse", [o16.ix, o16.iy, o16.iz], [2, 1, 0.5]);
+  eq("S16 impulse", [o16.ix, o16.iy, o16.iz], [2, 0, 0.5]);
   eq("S16 attrs", o16.attrs, [["ShockCriticalHitChance", 0.1]]);
   eq("S16 clears", o16.clears, [[5, ""]]);
   eq("S16 dot", [o16.dots[0].name, o16.dots[0].frames, o16.dots[0].per],
@@ -538,6 +538,146 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
     impulse: [o16.ix, o16.iy, o16.iz], attrs: o16.attrs, clears: o16.clears,
     dot: [o16.dots[0].name, o16.dots[0].frames, o16.dots[0].per],
     noop: o16.log, tickHp: hp16, expiry: [h, dots16b.length] });
+  // S17: Bl.strike split (L582): b=min(1,|hit-p1|/rest), full-vector
+  // node displacements, knockback decay. Verbatim C++ twin: apply_impulse
+  // + decay_knockback (physics.hpp).
+  function blSplit(p1, hit, rest, w1, w2, imp) {
+    const dist = Math.hypot(hit.x - p1.x, hit.y - p1.y);
+    const b = rest < 1e-6 ? 1 : Math.min(1, dist / rest);
+    return { b,
+      n1: { x: imp.x * (1 - b) / w1, y: imp.y * (1 - b) / w1 },
+      n2: { x: imp.x * b / w2, y: imp.y * b / w2 } };
+  }
+  function kbDecay(offs, f) {
+    return offs.map(v => {
+      const r = { x: v.x * f, y: v.y * f };
+      if (r.x * r.x + r.y * r.y < 1e-6) { r.x = 0; r.y = 0; }
+      return r;
+    });
+  }
+  const s17 = blSplit({ x: 0, y: 0 }, { x: 30, y: 0 }, 100, 2, 1, { x: 10, y: 4 });
+  eq("S17 b", s17.b, 0.3);
+  eq("S17 n1", [s17.n1.x, s17.n1.y], [3.5, 1.4]);
+  eq("S17 n2", [s17.n2.x, s17.n2.y], [3, 1.2]);
+  const s17c = blSplit({ x: 0, y: 0 }, { x: 500, y: 0 }, 100, 2, 1, { x: 10, y: 4 });
+  eq("S17 clamp", [s17c.b, s17c.n1.x, s17c.n2.x], [1, 0, 10]);
+  const s17d = kbDecay([{ x: 10, y: 0 }, { x: 0, y: 5 }], 0.9);
+  eq("S17 decay", [s17d[0].x, s17d[0].y, s17d[1].x, s17d[1].y], [9, 0, 0, 4.5]);
+  const s17e = kbDecay([{ x: 1e-4, y: 0 }], 0.9);
+  eq("S17 decayzero", [s17e[0].x, s17e[0].y], [0, 0]);
+  out.scenarios.push({ id: "S17-blstrike",
+    b: s17.b, n1: [s17.n1.x, s17.n1.y], n2: [s17.n2.x, s17.n2.y],
+    clamp: [s17c.b, s17c.n1.x, s17c.n2.x],
+    decay: [s17d[0].x, s17d[0].y, s17d[1].x, s17d[1].y],
+    decayzero: [s17e[0].x, s17e[0].y] });
+  // S18: trigger match + conditions (PERKS 5.3/5.5). Verbatim C++ twin:
+  // match_hit_event / eval_cond (trigger.hpp).
+  function matchHit(e, v, entry, fired) {
+    if (e.ob === 1 && entry !== fired) return false;
+    if (e.ob === 2 && entry === fired) return false;
+    const num = (k, d) => (k in v.num ? v.num[k] : d);
+    const str = k => (k in v.str ? v.str[k] : "");
+    if (e.defense && e.defense !== str("Defense")) return false;
+    if (e.animation && (str("Animation") === "" || str("Animation") !== e.animation)) return false;
+    if (e.critical > -1 && e.critical !== (num("Critical", 0) !== 0 ? 1 : 0)) return false;
+    if (e.shock > -1 && e.shock !== (num("Shock", 0) !== 0 ? 1 : 0)) return false;
+    if (e.block > -1 && e.block !== (num("Block", 0) !== 0 ? 1 : 0)) return false;
+    const dmg = num("Damage", 0);
+    if (e.dmgMin > -1 && dmg < e.dmgMin) return false;
+    if (e.dmgMax > -1 && dmg > e.dmgMax) return false;
+    return true;
+  }
+  function evalCond(c, owner, foe) {
+    const m = c.ob === 2 ? foe : owner;
+    let r = false;
+    if (c.kind === "PerkStart") r = true;
+    else if (c.kind === "Random") r = c.chance >= 1 || m.draw < c.chance;
+    else if (c.kind === "Style") {
+      const lv = { Turtle: 0, Hard: 1, Brutal: 2, Aggressive: 3, Crazy: 4, Fantastic: 5 };
+      const lo = c.min in lv ? lv[c.min] : 0, hi = c.max in lv ? lv[c.max] : 5;
+      r = m.style >= lo && m.style <= hi;
+    }
+    else if (c.kind === "Combo") r = (c.min === null || m.combo >= c.min) &&
+      (c.max === null || m.combo <= c.max);
+    else if (c.kind === "Health") r = (c.min === null || m.hp >= c.min) &&
+      (c.max === null || m.hp <= c.max);
+    else if (c.kind === "ModExists") r = m.mods.includes(c.name);
+    else if (c.kind === "Round") r = m.round === c.n;
+    else if (c.kind === "Operator") {
+      if (c.op === "Or") r = c.nested.some(n => evalCond(n, owner, foe));
+      else r = c.nested.every(n => evalCond(n, owner, foe));
+    }
+    return c.neg ? !r : r;
+  }
+  const ev18 = { ob: 1, defense: "", animation: "", critical: 1, shock: -1,
+    block: -1, dmgMin: 5, dmgMax: -1 };
+  const vars18 = { num: { Critical: 1, Block: 0, Damage: 10 }, str: {} };
+  const m18a = matchHit(ev18, vars18, 0, 0);
+  const m18b = matchHit(ev18, { num: { Critical: 0, Damage: 10 }, str: {} }, 0, 0);
+  const m18c = matchHit(ev18, { num: { Critical: 1, Damage: 3 }, str: {} }, 0, 0);
+  const m18d = matchHit(ev18, vars18, 0, 1);
+  eq("S18 match", [m18a, m18b, m18c, m18d], [true, false, false, false]);
+  const own18 = { style: 2, combo: 3, hp: 0.5, round: 2, draw: 0.2, mods: ["Icon"] };
+  const foe18 = { style: 0, combo: 0, hp: 1, round: 2, draw: 0.9, mods: [] };
+  const c18 = [
+    evalCond({ kind: "Random", chance: 0.3, neg: false }, own18, foe18),
+    evalCond({ kind: "Random", chance: 0.3, neg: false }, foe18, own18),
+    evalCond({ kind: "Style", min: "Brutal", max: "Crazy", neg: false }, own18, foe18),
+    evalCond({ kind: "Combo", min: 1, max: 5, neg: false }, own18, foe18),
+    evalCond({ kind: "Health", min: null, max: 0.4, neg: false }, own18, foe18),
+    evalCond({ kind: "ModExists", name: "Icon", neg: false }, own18, foe18),
+    evalCond({ kind: "ModExists", name: "Icon", neg: true }, own18, foe18),
+    evalCond({ kind: "Round", n: 2, neg: false }, own18, foe18),
+    evalCond({ kind: "Operator", op: "Or", neg: false, nested: [
+      { kind: "Round", n: 9, neg: false }, { kind: "PerkStart", neg: false }] },
+      own18, foe18),
+    evalCond({ kind: "Operator", op: "And", neg: false, nested: [
+      { kind: "Round", n: 2, neg: false }, { kind: "Round", n: 9, neg: false }] },
+      own18, foe18),
+  ];
+  eq("S18 conds", c18,
+    [true, false, true, true, false, true, false, true, true, false]);
+  out.scenarios.push({ id: "S18-trigger", match: [m18a, m18b, m18c, m18d], conds: c18 });
+  // S18c: bus routing (Gj/v_a/UKa-lY): slot filter + event + conds gate,
+  // drain yields the queued actions. C++ twin uses the real TrigBus.
+  function busFire(triggers, slot, vars, fired, ctx0, ctx1, stage, frame) {
+    const out = [[], []];
+    const ctxs = [ctx0, ctx1];
+    for (let s = 0; s < 2; s++) {
+      for (const t of triggers[s]) {
+        if (!t.enabled) continue;
+        if (!t.events.some(e => e.type === slot)) continue;
+        let gate = false;
+        for (const e of t.events) {
+          if (e.type !== slot) continue;
+          const ev = { ob: e.ob, defense: e.defense || "", animation: e.animation || "",
+            critical: e.critical ?? -1, shock: e.shock ?? -1, block: e.block ?? -1,
+            dmgMin: e.dmgMin ?? -1, dmgMax: e.dmgMax ?? -1 };
+          if (matchHit(ev, vars, s, fired)) { gate = true; break; }
+        }
+        if (!gate) continue;
+        if (!t.conds.every(c => evalCond(c, ctxs[s], ctxs[1 - s]))) continue;
+        for (const a of t.actions) out[s].push(a);
+      }
+    }
+    return out;
+  }
+  const trig18 = { enabled: true,
+    events: [{ type: 6, ob: 1, critical: 1 }],
+    conds: [{ kind: "ModExists", name: "Icon", neg: true },
+      { kind: "Random", chance: 0.3, neg: false }],
+    actions: ["ModIcon"] };
+  const ctxA = { style: 0, combo: 0, hp: 1, round: 1, draw: 0.2, mods: [] };
+  const ctxB = { style: 0, combo: 0, hp: 1, round: 1, draw: 0.2, mods: [] };
+  const varsC = { num: { Critical: 1, Block: 0, Damage: 4 }, str: {} };
+  const q1 = busFire([[trig18], []], 6, varsC, 0, ctxA, ctxB, 2, 100);
+  const q2 = busFire([[trig18], []],
+    { num: { Critical: 0, Damage: 4 }, str: {} }, 0, ctxA, ctxB, 2, 100);
+  const ctxC = { style: 0, combo: 0, hp: 1, round: 1, draw: 0.2, mods: ["Icon"] };
+  const q3 = busFire([[trig18], []], 6, varsC, 0, ctxC, ctxB, 2, 100);
+  eq("S18c route", [q1[0], q1[1], q2[0].length, q3[0].length],
+    [["ModIcon"], [], 0, 0]);
+  out.scenarios.push({ id: "S18c-bus", q: [q1[0], q1[1], q2[0].length, q3[0].length] });
   out.scenarios.push({ id: "S11-misc", ok: true });
 
   out.selftest = { pass, fail, failures };

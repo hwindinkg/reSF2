@@ -164,7 +164,9 @@ bool capsule_capsule_overlap(const HitCapsule& atk, const HitCapsule& tgt,
 }
 
 void BodyState::build(const Model& model, const std::vector<float>& pose_xy,
-                      float wall, float width_minus_wall) {
+                       float wall, float width_minus_wall,
+                       const Model* foe_model,
+                       const std::vector<float>* foe_pose_xy) {
     capsules.clear();
     // Node masses from the XML Mass attr (JS `Vc.weight` = Mass).
     node_mass.assign(model.bones.size(), 1.0f);
@@ -172,23 +174,36 @@ void BodyState::build(const Model& model, const std::vector<float>& pose_xy,
         node_mass[i] = model.bones[i].mass;
     }
     for (const EdgeDef& edge : model.edges) {
+        // Endpoint resolution per-label via `wBa` (WEA_STATIC §3): own
+        // model first, foe model fallback (enemy-bone feed). A foe-side
+        // endpoint samples the FOE pose; masses come from the foe model.
         const int i1 = model.bone_by_name(edge.end1);
         const int i2 = model.bone_by_name(edge.end2);
-        if (i1 < 0 || i2 < 0) continue;
-        const std::size_t u1 = static_cast<std::size_t>(i1);
-        const std::size_t u2 = static_cast<std::size_t>(i2);
+        const bool foe1 = i1 < 0 && foe_model != nullptr;
+        const bool foe2 = i2 < 0 && foe_model != nullptr;
+        const int r1 = foe1 ? foe_model->bone_by_name(edge.end1) : i1;
+        const int r2 = foe2 ? foe_model->bone_by_name(edge.end2) : i2;
+        if (r1 < 0 || r2 < 0) continue;
+        const std::vector<float>& pose1 = (foe1 && foe_pose_xy != nullptr) ? *foe_pose_xy : pose_xy;
+        const std::vector<float>& pose2 = (foe2 && foe_pose_xy != nullptr) ? *foe_pose_xy : pose_xy;
+        const std::size_t u1 = static_cast<std::size_t>(r1);
+        const std::size_t u2 = static_cast<std::size_t>(r2);
+        if (pose1.size() < u1 * 2 + 2 || pose2.size() < u2 * 2 + 2) continue;
         HitCapsule cap;
         cap.name = edge.name;
-        cap.p1 = {pose_xy[u1 * 2], pose_xy[u1 * 2 + 1], 0.0f};
-        cap.p2 = {pose_xy[u2 * 2], pose_xy[u2 * 2 + 1], 0.0f};
+        cap.end1 = edge.end1;
+        cap.end2 = edge.end2;
+        cap.rest_length = edge.length;
+        cap.p1 = {pose1[u1 * 2], pose1[u1 * 2 + 1], 0.0f};
+        cap.p2 = {pose2[u2 * 2], pose2[u2 * 2 + 1], 0.0f};
         cap.radius = edge.radius;
         cap.margin1 = edge.margin1;
         cap.margin2 = edge.margin2;
         cap.collidable = edge.collisible;  // JS `yu.vZ`
         cap.body_part = edge.body_part;
         cap.defense = edge.defense;
-        cap.weight1 = node_mass[u1];
-        cap.weight2 = node_mass[u2];
+        cap.weight1 = (foe1 ? foe_model->bones[u1].mass : node_mass[u1]);
+        cap.weight2 = (foe2 ? foe_model->bones[u2].mass : node_mass[u2]);
         capsules.push_back(std::move(cap));
     }
     wall_min = wall;
@@ -225,23 +240,28 @@ float apply_impulse(const HitCapsule& hit_cap, const CapsuleHit& hit,
                     Vec3 impulse, float fighter_x, float wall,
                     float width_minus_wall, ImpulseResult& out) {
     out.impulse = impulse;
+    out.node1_vec = Vec3{};
+    out.node2_vec = Vec3{};
     out.node1_disp = 0.0f;
     out.node2_disp = 0.0f;
     out.clamped_dx = 0.0f;
 
-    // JS `Bl.strike` (L582): b = how far along the capsule the hit landed
-    // (0 = at endpoint 1, 1 = at endpoint 2 or beyond).
-    const Vec3 seg = hit_cap.p2 - hit_cap.p1;
-    const float len = std::sqrt(seg.dot(seg));
+    // JS `Bl.strike` (L582): b = min(1, |nJa - sx.ma| / rest_length) —
+    // the REST length (`|pQ-iU|` = `yu.length`), not the current span.
     const Vec3 to_hit = hit.point - hit_cap.p1;
-    float b = len < 1e-6f ? 1.0f : std::sqrt(to_hit.dot(to_hit)) / len;
+    const float dist = std::sqrt(to_hit.dot(to_hit));
+    const float rest = hit_cap.rest_length;
+    float b = rest < 1e-6f ? 1.0f : dist / rest;
     b = std::min(1.0f, b);
 
-    // Node displacement: d * (1-b)/w1 on node1, d * b/w2 on node2.
+    // Node displacement, full vector: d * (1-b)/w1 on node1, d * b/w2 on
+    // node2 (`a.sx.XA(l)` / `a.Zs.XA(c)` — x, y AND z move).
     const float w1 = hit_cap.weight1 > 0.0f ? hit_cap.weight1 : 1.0f;
     const float w2 = hit_cap.weight2 > 0.0f ? hit_cap.weight2 : 1.0f;
-    out.node1_disp = impulse.x * (1.0f - b) / w1;
-    out.node2_disp = impulse.x * b / w2;
+    out.node1_vec = impulse * ((1.0f - b) / w1);
+    out.node2_vec = impulse * (b / w2);
+    out.node1_disp = out.node1_vec.x;
+    out.node2_disp = out.node2_vec.x;
 
     // The demo tracks the fighter's COM x; the capsule midpoint shift is
     // the average of the two node displacements (the ragdoll COM follows

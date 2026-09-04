@@ -21,6 +21,7 @@
 #include "scene/location_scene.hpp"
 #include "scene/model.hpp"
 #include "scene/move_def.hpp"
+#include "scene/trigger.hpp"
 
 namespace sf2::scene {
 class Fighter;
@@ -49,6 +50,9 @@ struct FightAssets {
     std::map<std::string, sf2::scene::MoveDef> moves;
     std::vector<sf2::scene::TacticsFile> tactics_sets;
     std::map<std::string, sf2::scene::TacticDef> tactic_defs;  // by name
+    // Perk catalog (res/perks.xml `Be` defs) for the fight trigger bus
+    // (`ZOa` equip mapping needs def lookup by name at fight setup).
+    std::map<std::string, sf2::scene::PerkDef> perk_catalog;
 
     // The dojo location (the tutorial-zone fight backdrop). The full
     // fight-screen location set is loaded per battle (JS `Bf` per

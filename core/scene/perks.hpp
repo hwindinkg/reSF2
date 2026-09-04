@@ -35,6 +35,8 @@ namespace sf2::scene {
 // One equipped perk action (JS `Ma` entry: Name + attrs).
 struct PerkAction {
     std::string type;  // e.g. "SetHit", "Lifesteal" (31 names, PERKS_STATIC)
+    int ob = 1;  // `Jf.Ob` target scope (`Player`: ""/Me→1, Enemy→2;
+                 // `e6a`: 1→owner model, 2→foe model; default 1 = Me)
     std::map<std::string, double> num;    // Value/Multiplier/Frames/...
     std::map<std::string, std::string> str;  // names
 };
@@ -73,8 +75,12 @@ inline double perk_num(const PerkAction& a, const std::string& key, double def =
 
 // Pure decider over the attacker's equipped actions (JS `lF` dispatch
 // restricted to hit scope; trigger routing OPEN).
+// `atk_so`/`foe_so` feed Lifesteal's exact ratio (`apb` L1294:
+// `aM(model, VZ·Zi·(model.jb.so/model.so))` — heal = DamagePart × Zi ×
+// foe_so/atk_so; both default 1.0).
 inline PerkHitOutcome decide_hit_perks(const std::vector<PerkAction>& perks,
-                                       const HitRecord& rec) {
+                                       const HitRecord& rec, float atk_so = 1.0f,
+                                       float foe_so = 1.0f) {
     PerkHitOutcome o;
     for (const PerkAction& a : perks) {
         const std::string& t = a.type;
@@ -101,13 +107,16 @@ inline PerkHitOutcome decide_hit_perks(const std::vector<PerkAction>& perks,
             }
         } else if (t == "Lifesteal") {
             o.heal += static_cast<float>(perk_num(a, "DamagePart", 0.0) *
-                                         rec.final_damage);
+                                         rec.final_damage * foe_so / atk_so);
         } else if (t == "ChangeAdditionalDamageValue") {
             o.dmg_add += static_cast<float>(perk_num(a, "Value", 0.0));
         } else if (t == "ChangeImpulse") {
-            o.imp_x *= perk_num(a, "MultiplierX", 1.0);
-            o.imp_y *= perk_num(a, "MultiplierY", 1.0);
-            o.imp_z *= perk_num(a, "MultiplierZ", 1.0);
+            // `Lp.parse`: `R2/S2/T2 = u.H(...)` — MISSING multiplier is
+            // 0.0, NOT 1.0 (`u.H` defaults 0; the ctor 1s are overwritten).
+            // `YLa` SETS (last action wins), it does not multiply.
+            o.imp_x = perk_num(a, "MultiplierX", 0.0);
+            o.imp_y = perk_num(a, "MultiplierY", 0.0);
+            o.imp_z = perk_num(a, "MultiplierZ", 0.0);
         } else if (t == "ModAttributes") {
             // `VKa`: every numeric param is an attribute add on the
             // target (`aP` expr map); DamageFactor also records Bb.Tua
@@ -145,14 +154,16 @@ inline PerkHitOutcome decide_hit_perks(const std::vector<PerkAction>& perks,
 }
 
 // Tick installed DoTs/HoTs (JS `Inb` via `znb`: `aM(model,O3)`/frame).
-// Mutates hp (clamped to [0, max_hp]) and drops expired mods.
+// Mutates hp (clamped to [0, max_hp]) and drops expired mods. Entries
+// with `frames_left<=0` are persistent (verbatim `jp` with null `frames`
+// never counts down in `ia`) — they tick until cleared.
 inline void tick_active_mods(std::vector<ActiveMod>& mods, float& hp, float max_hp) {
     for (std::size_t i = 0; i < mods.size();) {
         ActiveMod& m = mods[i];
         hp += static_cast<float>(m.per_frame);
         if (hp < 0.0f) hp = 0.0f;
         if (hp > max_hp) hp = max_hp;
-        if (--m.frames_left <= 0) {
+        if (m.frames_left > 0 && --m.frames_left <= 0) {
             mods[i] = mods.back();
             mods.pop_back();
         } else {

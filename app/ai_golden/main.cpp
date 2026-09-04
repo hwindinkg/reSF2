@@ -391,6 +391,218 @@ int main() {
                         (double)hp, (int)dots.size(), dots[0].frames_left,
                         (double)h2, (int)dots2.size());
         }
+        // S17 Bl.strike split (mirrors combat_golden.js S17).
+        {
+            sf2::scene::HitCapsule cap;
+            cap.rest_length = 100.0f;
+            cap.p1 = {0.0f, 0.0f, 0.0f};
+            cap.p2 = {100.0f, 0.0f, 0.0f};
+            cap.weight1 = 2.0f;
+            cap.weight2 = 1.0f;
+            sf2::scene::CapsuleHit ch;
+            ch.hit = true;
+            ch.point = {30.0f, 0.0f, 0.0f};
+            sf2::scene::ImpulseResult imp;
+            sf2::scene::apply_impulse(cap, ch, {10.0f, 4.0f, 0.0f}, 500.0f, 80.0f,
+                                      1880.0f, imp);
+            ch.point = {500.0f, 0.0f, 0.0f};
+            sf2::scene::ImpulseResult imp2;
+            sf2::scene::apply_impulse(cap, ch, {10.0f, 4.0f, 0.0f}, 500.0f, 80.0f,
+                                      1880.0f, imp2);
+            std::vector<sf2::scene::Vec3> offs = {{10.0f, 0.0f, 0.0f},
+                                                  {0.0f, 5.0f, 0.0f}};
+            sf2::scene::decay_knockback(offs);
+            std::vector<sf2::scene::Vec3> tiny = {{0.0001f, 0.0f, 0.0f}};
+            sf2::scene::decay_knockback(tiny);
+            std::printf("  \"wea\": {\"n1\": [%.17g, %.17g], \"n2\": [%.17g, %.17g], "
+                        "\"clamp\": [%.17g, %.17g, %.17g], "
+                        "\"decay\": [%.17g, %.17g, %.17g, %.17g], "
+                        "\"decayzero\": [%.17g, %.17g]},\n",
+                        (double)imp.node1_vec.x, (double)imp.node1_vec.y,
+                        (double)imp.node2_vec.x, (double)imp.node2_vec.y,
+                        (double)(500.0f / 100.0f > 1.0f ? 1.0 : 0.0),
+                        (double)imp2.node1_vec.x, (double)imp2.node2_vec.x,
+                        (double)offs[0].x, (double)offs[0].y, (double)offs[1].x,
+                        (double)offs[1].y, (double)tiny[0].x, (double)tiny[0].y);
+        }
+        // S18 trigger match + conditions (mirrors combat_golden.js S18).
+        {
+            using sf2::scene::TrigCond;
+            using sf2::scene::TrigEvent;
+            using sf2::scene::TrigVars;
+            using sf2::scene::CondCtx;
+            TrigEvent ev;
+            ev.type = sf2::scene::kEvHitPostCrit;
+            ev.ob = 1;
+            ev.critical = 1;
+            ev.dmg_min = 5.0;
+            TrigVars v;
+            v.num["Critical"] = 1.0;
+            v.num["Block"] = 0.0;
+            v.num["Damage"] = 10.0;
+            const bool m18a = sf2::scene::match_hit_event(ev, v, 0, 0);
+            TrigVars v2;
+            v2.num["Critical"] = 0.0;
+            v2.num["Damage"] = 10.0;
+            const bool m18b = sf2::scene::match_hit_event(ev, v2, 0, 0);
+            TrigVars v3;
+            v3.num["Critical"] = 1.0;
+            v3.num["Damage"] = 3.0;
+            const bool m18c = sf2::scene::match_hit_event(ev, v3, 0, 0);
+            const bool m18d = sf2::scene::match_hit_event(ev, v, 0, 1);
+            CondCtx own, foe;
+            own.style_level = 2;
+            own.combo = 3;
+            own.hp_ratio = 0.5;
+            own.round = 2;
+            own.mods.insert("Icon");
+            own.draw01 = []() { return 0.2; };
+            foe.hp_ratio = 1.0;
+            foe.round = 2;
+            foe.draw01 = []() { return 0.9; };
+            TrigCond r1;
+            r1.kind = "Random";
+            r1.chance = 0.3;
+            TrigCond st;
+            st.kind = "Style";
+            st.s["Min"] = "Brutal";
+            st.s["Max"] = "Crazy";
+            TrigCond co;
+            co.kind = "Combo";
+            co.s["Min"] = "1";
+            co.s["Max"] = "5";
+            TrigCond he;
+            he.kind = "Health";
+            he.s["Max"] = "0.4";
+            TrigCond me;
+            me.kind = "ModExists";
+            me.s["Name"] = "Icon";
+            TrigCond men = me;
+            men.negate = true;
+            TrigCond ro;
+            ro.kind = "Round";
+            ro.s["Number"] = "2";
+            TrigCond orc;
+            orc.kind = "Operator";
+            orc.op = "Or";
+            TrigCond or1;
+            or1.kind = "Round";
+            or1.s["Number"] = "9";
+            TrigCond or2;
+            or2.kind = "PerkStart";
+            orc.nested.push_back(or1);
+            orc.nested.push_back(or2);
+            TrigCond andc;
+            andc.kind = "Operator";
+            andc.op = "And";
+            andc.nested.push_back(ro);
+            andc.nested.push_back(or1);
+            std::printf("  \"trigger\": {\"match\": [%d, %d, %d, %d], \"conds\": [%d, %d, "
+                        "%d, %d, %d, %d, %d, %d, %d, %d]},\n",
+                        (int)m18a, (int)m18b, (int)m18c, (int)m18d,
+                        (int)sf2::scene::eval_cond(r1, own, foe),
+                        (int)sf2::scene::eval_cond(r1, foe, own),
+                        (int)sf2::scene::eval_cond(st, own, foe),
+                        (int)sf2::scene::eval_cond(co, own, foe),
+                        (int)sf2::scene::eval_cond(he, own, foe),
+                        (int)sf2::scene::eval_cond(me, own, foe),
+                        (int)sf2::scene::eval_cond(men, own, foe),
+                        (int)sf2::scene::eval_cond(ro, own, foe),
+                        (int)sf2::scene::eval_cond(orc, own, foe),
+                        (int)sf2::scene::eval_cond(andc, own, foe));
+        }
+        // S18c bus routing (mirrors combat_golden.js S18c; real TrigBus).
+        {
+            using sf2::scene::PerkTrigger;
+            PerkTrigger t;
+            t.perk = "T-AV";
+            t.enabled = true;
+            sf2::scene::TrigEvent e;
+            e.type = sf2::scene::kEvHitPostCrit;
+            e.ob = 1;
+            e.critical = 1;
+            t.events.push_back(e);
+            sf2::scene::TrigCond mx;
+            mx.kind = "ModExists";
+            mx.s["Name"] = "Icon";
+            mx.negate = true;
+            t.conds.push_back(mx);
+            sf2::scene::TrigCond ra;
+            ra.kind = "Random";
+            ra.chance = 0.3;
+            t.conds.push_back(ra);
+            sf2::scene::PerkAction mi;
+            mi.type = "ModIcon";
+            t.actions.push_back(mi);
+            sf2::scene::TrigBus bus;
+            bus.register_side(0, {t}, {});
+            bus.register_side(1, {}, {});
+            sf2::scene::CondCtx a, b;
+            a.draw01 = []() { return 0.2; };
+            b.draw01 = []() { return 0.2; };
+            sf2::scene::TrigVars vc;
+            vc.num["Critical"] = 1.0;
+            vc.num["Block"] = 0.0;
+            vc.num["Damage"] = 4.0;
+            bus.fire(6, vc, true, 0, a, b, 2, 100);
+            std::vector<std::pair<PerkTrigger, sf2::scene::PerkAction>> d0, d1;
+            bus.drain(0, d0);
+            bus.drain(1, d1);
+            (void)d1;
+            sf2::scene::TrigVars vc0;
+            vc0.num["Critical"] = 0.0;
+            vc0.num["Damage"] = 4.0;
+            bus.fire(6, vc0, true, 0, a, b, 2, 100);
+            std::vector<std::pair<PerkTrigger, sf2::scene::PerkAction>> e0;
+            bus.drain(0, e0);
+            sf2::scene::CondCtx c;
+            c.draw01 = []() { return 0.2; };
+            c.mods.insert("Icon");
+            bus.fire(6, vc, true, 0, c, b, 2, 100);
+            std::vector<std::pair<PerkTrigger, sf2::scene::PerkAction>> f0;
+            bus.drain(0, f0);
+            std::printf("  \"busroute\": {\"q\": [[\"%s\"], [], %d, %d]},\n",
+                        d0.empty() ? "-" : d0[0].second.type.c_str(), (int)e0.size(),
+                        (int)f0.size());
+        }
+        // S18b perk loader (verified against perks.xml by combat_diff.py
+        // via ElementTree — independent implementation, not a twin).
+        {
+            std::string xml;
+            if (FILE* f = std::fopen("reference/extracted/xml/res/perks.xml", "rb")) {
+                char buf[65536];
+                std::size_t n = 0;
+                while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+                    xml.append(buf, n);
+                }
+                std::fclose(f);
+            }
+            const std::map<std::string, sf2::scene::PerkDef> defs =
+                sf2::scene::parse_perks_xml(xml);
+            const auto av = defs.find("PERK_AVENGER");
+            const std::size_t av_trigs = av != defs.end() ? av->second.triggers.size() : 0;
+            std::printf("  \"perkload\": {\"count\": %d, \"avenger_trigs\": %d",
+                        (int)defs.size(), (int)av_trigs);
+            if (av != defs.end()) {
+                const sf2::scene::PerkDef& d = av->second;
+                const auto sc = d.set_num.find("Chance");
+                std::printf(", \"chance\": %.17g, \"trig\": [",
+                            sc != d.set_num.end() ? sc->second : -1.0);
+                bool first = true;
+                for (const sf2::scene::PerkTrigger& t : d.triggers) {
+                    if (!first) std::printf(", ");
+                    first = false;
+                    std::printf("[%d, %d, %d]", (int)t.events.size(),
+                                (int)t.conds.size(), (int)t.actions.size());
+                }
+                std::printf("]");
+                if (!d.triggers.empty() && !d.triggers[0].actions.empty()) {
+                    std::printf(", \"act0\": \"%s\"",
+                                d.triggers[0].actions[0].type.c_str());
+                }
+            }
+            std::printf("},\n");
+        }
         // S15 style meter (mirrors combat_golden.js S15).
         {
             const sf2::scene::StyleTable st;

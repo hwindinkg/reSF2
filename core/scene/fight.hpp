@@ -42,6 +42,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,7 @@
 #include "scene/move_def.hpp"
 #include "scene/perks.hpp"
 #include "scene/physics.hpp"
+#include "scene/trigger.hpp"
 #include "scene/sprite.hpp"
 #include "texture.hpp"
 
@@ -218,6 +220,10 @@ struct FightFighter {
     bool is_winner = false;   // `zd` — the round/battle winner flag
     sf2::scene::ShockState shock;  // pain/shock/disarm (`sr/vc/sn/Wx/ws`, L490)
     StyleMeter style;  // HUD style meter (`Gr`, feeds prize b6 via best)
+    sf2::scene::Vec3 jg{1.0f, 1.0f, 1.0f};  // impulse scale (`wd.JG`;
+                                            // `YLa` sets, `gob` resets)
+    float qz = 1.0f;  // hit-effect scale (`wd.Qz`; `fob` resets)
+    std::set<std::string> prev_intervals;  // last tick's intervals (12/13 edge)
     std::vector<sf2::scene::PerkAction> perks;  // equipped perk actions
                                                 // (empty until perk-equip
                                                 // mapping lands)
@@ -449,6 +455,15 @@ inline void fh_lxa(PrizeKx& oc, const PrizeFh& fh, double prize, double coins,
     oc.mOa = oc.oy;
 }
 
+struct PerkSetup {
+    const std::map<std::string, sf2::scene::PerkDef>* catalog = nullptr;
+    std::vector<sf2::scene::ItemPerkRef> player_refs;
+    std::vector<sf2::scene::ItemPerkRef> enemy_refs;
+    std::vector<std::string> player_items;  // equipped names (Item conds)
+    std::vector<std::string> enemy_items;
+    const std::map<std::string, sf2::scene::TacticDef>* tactics = nullptr;
+};
+
 // The fight controller (JS `ca` L379-433).
 class FightController {
 public:
@@ -468,7 +483,8 @@ public:
               float player_x, float player_y,
               float enemy_x, float enemy_y,
               int player_max_hp, int enemy_max_hp,
-              std::function<float()> roll01);
+              std::function<float()> roll01,
+              const PerkSetup& perks = PerkSetup());
 
     // Variant that builds the PLAYER's move list from its OWNED items via
     // the Locks test (JS `ra.Hza` L684-685 — `f.nw(d,b)` against the
@@ -488,7 +504,13 @@ public:
                     float enemy_x, float enemy_y,
                     int player_max_hp, int enemy_max_hp,
                     std::function<float()> roll01,
-                    const std::vector<std::pair<std::string, std::string>>& player_owned);
+                    const std::vector<std::pair<std::string, std::string>>& player_owned,
+                    const PerkSetup& perks = PerkSetup());
+
+// Perk setup for fight init (`ZOa`/`Pma` analog, §5.4/§5.7): the parsed
+// perk catalog (res/perks.xml) + per-side equipped item→perk bindings
+// (list.xml `<Perks>`/`<Enchantments>`). Empty refs = no live triggers
+// (same as now). Tactic defs by name enable SetTactic (`qpb`/`yZa`).
 
     // The arena bounds (wall / width-wall / floor) — set by the caller
     // (JS `ca.ggb` L383: v.tFa = location.NU, v.NKa = location.width - NU).
@@ -603,6 +625,10 @@ private:
 
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)
+    sf2::scene::TrigBus bus_;      // perk trigger bus (`tb`; ZOa registers)
+    const std::map<std::string, sf2::scene::TacticDef>* tactic_defs_ = nullptr;
+    std::vector<std::string> player_items_;  // equipped names (Item conds)
+    std::vector<std::string> enemy_items_;
     PrizeFh prize_fh_;             // JS `Fh` (fresh per battle via kD)
     // The fighter mesh fill color (the location Root Color; default black).
     std::uint32_t fighter_color_ = 0x000000u;
@@ -705,7 +731,29 @@ private:
                    const sf2::scene::HitCapsule& hit_cap, const sf2::scene::CapsuleHit& ch,
                    int frame);
     // Rebuilds a fighter's physics body from its current pose.
-    void rebuild_body(FightFighter& f);
+    void rebuild_body(FightFighter& f, const FightFighter& foe);
+    // --- perk trigger bus (`tb`) -----------------------------------------
+    // `ZOa` (L398-399): build live trigger sets from the PerkSetup and
+    // register both sides (`Gf`).
+    void setup_bus(const PerkSetup& perks);
+    // Condition context for one side (0 = player, 1 = enemy).
+    sf2::scene::CondCtx cond_ctx(int side);
+    // Fire a hit-scope slot (6/7) and execute: combat actions fold into
+    // `rec`/fighters via `decide_hit_perks`, state actions apply now.
+    // `out_has_damage/out_damage` report the last SetHit Damage (`ppb`
+    // sets `Zi` directly — the caller bypasses the lethal clamp).
+    void run_bus_hit(int slot, const sf2::scene::TrigVars& vars, int fired_side,
+                     sf2::scene::HitRecord& rec, FightFighter& atk, FightFighter& def,
+                     int depth = 0, bool* out_has_damage = nullptr,
+                     float* out_damage = nullptr);
+    // Execute one non-hit action (mod registry / vars / logs). `owner_side`
+    // is the trigger owner's side; `foe_side` the other.
+    void exec_action(const sf2::scene::PerkTrigger& t, const sf2::scene::PerkAction& a,
+                     int owner_side, int depth = 0);
+    // EveryFrame tick + mod `ia` tick + interval edge detect for one side.
+    void tick_bus_side(int side);
+    // `ia` mod tick for one side (Uf countdown, JNa, slot-14 publish).
+    void tick_mods(int side);
     // Samples the fighter's idle pose (JS: the weapon stance idle).
     void sample_idle(FightFighter& f);
     // The HUD countdown seconds (JS Sf.iPa: gma - round.time).

@@ -14,6 +14,11 @@
 
 namespace sf2::scene {
 
+namespace {
+// Forward: Jf.OBa stage ids (defined with the bus block below).
+int oba_phase(fight_phase p);
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // FightCamera — the exact JS camera port (`ma.Sya` L1833 + `Ut.Al` L826 +
 // `ql` L362-371). See the FightCamera struct comment in fight.hpp for the
@@ -259,10 +264,11 @@ void FightController::init(const BattleParams& battle,
                            float player_x, float player_y,
                            float enemy_x, float enemy_y,
                            int player_max_hp, int enemy_max_hp,
-                           std::function<float()> roll01) {
+                           std::function<float()> roll01,
+                           const PerkSetup& perks) {
     init_locks(battle, model, moves, clips, tactics, tactic, player_name, enemy_name,
                player_x, player_y, enemy_x, enemy_y, player_max_hp, enemy_max_hp,
-               std::move(roll01), {});
+               std::move(roll01), {}, perks);
 }
 
 void FightController::init_locks(
@@ -274,7 +280,8 @@ void FightController::init_locks(
     const std::string& enemy_name, float player_x, float player_y,
     float enemy_x, float enemy_y, int player_max_hp, int enemy_max_hp,
     std::function<float()> roll01,
-    const std::vector<std::pair<std::string, std::string>>& player_owned) {
+    const std::vector<std::pair<std::string, std::string>>& player_owned,
+    const PerkSetup& perks) {
     battle_ = battle;
     prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
     player_.style = StyleMeter();  // style meters reset per battle
@@ -300,8 +307,10 @@ void FightController::init_locks(
     // Sample the initial stance idle (JS: the weapon's stance idle clip).
     sample_idle(player_);
     sample_idle(enemy_);
-    rebuild_body(player_);
-    rebuild_body(enemy_);
+    rebuild_body(player_, enemy_);
+    rebuild_body(enemy_, player_);
+    // Perk bus register (ZOa analog).
+    setup_bus(perks);
 
     // Camera framing (JS ma.Sya L1833 + the ql dZa intro): the fighters'
     // world anchors are the JS CoM nodes (Eu.ma); the camera starts at the
@@ -400,6 +409,13 @@ void FightController::set_bounds(float wall, float wall_max, float floor_y) {
 // (the move conditions' RoundStage reads it).
 void FightController::set_phase(fight_phase p) {
     phase_ = p;
+    // RoundStageStart publish (slot 1, Ep matches qk.Je per side).
+    for (int q = 0; q < 2; ++q) {
+        bus_.fire(1, sf2::scene::TrigVars(), true, q, cond_ctx(0), cond_ctx(1), oba_phase(phase_), frame_);
+        std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> pairs;
+        bus_.drain(0, pairs); bus_.drain(1, pairs);
+        for (const auto& pr : pairs) exec_action(pr.first, pr.second, q);
+    }
     player_.fighter.set_enemy_x(enemy_.fighter.world_x());
     enemy_.fighter.set_enemy_x(player_.fighter.world_x());
 }
@@ -461,8 +477,8 @@ void FightController::enter_start_stance() {
     enemy_.fighter.set_world_pos(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
     sample_idle(player_);
     sample_idle(enemy_);
-    rebuild_body(player_);
-    rebuild_body(enemy_);
+    rebuild_body(player_, enemy_);
+    rebuild_body(enemy_, player_);
     set_phase(fight_phase::start_stance);
     round_live_ = false;
     start_stance_done_ = false;
@@ -488,8 +504,8 @@ void FightController::enter_fight() {
     enemy_.fighter.clear_move();
     sample_idle(player_);
     sample_idle(enemy_);
-    rebuild_body(player_);
-    rebuild_body(enemy_);
+    rebuild_body(player_, enemy_);
+    rebuild_body(enemy_, player_);
 
     // JS `llb` (L429): replay the StartStance input buffer as if the player
     // pressed NOW — `WC != -1 && (c.yJa(c.WC), c.WC = -1)`. The buffered tap
@@ -654,9 +670,404 @@ void FightController::sample_idle(FightFighter& f) {
     }
 }
 
-void FightController::rebuild_body(FightFighter& f) {
-    f.body.build(f.fighter.model(), f.fighter.positions(), wall_min_, wall_max_);
+void FightController::rebuild_body(FightFighter& f, const FightFighter& foe) {
+    // The foe model/pose enables the `wBa` enemy-bone fallback (WEA_STATIC
+    // §3): edge endpoints missing locally resolve against the foe skeleton.
+    f.body.build(f.fighter.model(), f.fighter.positions(), wall_min_, wall_max_,
+                 &foe.fighter.model(), &foe.fighter.positions());
 }
+
+// --- perk trigger bus (`tb`) -------------------------------------------
+// `ZOa` (L398-399): rebuild live trigger sets from the PerkSetup and
+// register both sides (`Gf`). Enemy refs are usually empty (enemy gear
+// is not modeled — OPEN).
+void FightController::setup_bus(const PerkSetup& perks) {
+    bus_.clear();
+    bus_.log = [](const std::string& line) {
+        std::fprintf(stdout, "[perk] %s\n", line.c_str());
+        std::fflush(stdout);
+    };
+    tactic_defs_ = perks.tactics;
+    player_items_ = perks.player_items;
+    enemy_items_ = perks.enemy_items;
+    if (perks.catalog == nullptr) return;
+    bus_.register_side(
+        0, sf2::scene::build_side_triggers(perks.player_refs, *perks.catalog, bus_.log),
+        player_items_);
+    bus_.register_side(
+        1, sf2::scene::build_side_triggers(perks.enemy_refs, *perks.catalog, bus_.log),
+        enemy_items_);
+}
+
+namespace {
+int oba_phase(fight_phase p) {
+    // `Jf.OBa` stage ids for `Ep` matching.
+    switch (p) {
+        case sf2::scene::fight_phase::start_stance: return 1;
+        case sf2::scene::fight_phase::fight: return 2;
+        case sf2::scene::fight_phase::end_stance: return 3;
+        default: return 0;
+    }
+}
+}  // namespace
+
+sf2::scene::CondCtx FightController::cond_ctx(int side) {
+    const FightFighter& me = side == 0 ? player_ : enemy_;
+    sf2::scene::CondCtx ctx;
+    ctx.style_level = me.style.level;
+    ctx.combo = me.combo_run;
+    ctx.stage = oba_phase(phase_);
+    ctx.anim = me.fighter.current_move() != nullptr ? me.fighter.current_move()->name : "";
+    for (const std::string& n : me.fighter.active_intervals()) {
+        ctx.intervals.emplace_back(n, me.fighter.interval_type(n));
+    }
+    ctx.hp_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+    ctx.items = side == 0 ? player_items_ : enemy_items_;
+    ctx.round = round_.number;
+    ctx.pain = me.shock.pain_sr;
+    ctx.in_area = false;  // `rR` area bounds are OPEN
+    for (const auto& kv : bus_.side(side).mods) ctx.mods.insert(kv.first);
+    ctx.draw01 = [this]() { return roll01_ ? roll01_() : 0.5f; };
+    return ctx;
+}
+
+static bool is_combat_action(const std::string& t) {
+    // Actions that fold into the CURRENT hit record (`ppb`/`apb`/`Yob`/
+    // `hq` run inside the Cgb fire, pre-`LWa`). Everything else is bus
+    // state (JG/Ly/Qz/mods/vars) for future hits.
+    return t == "SetHit" || t == "Lifesteal" || t == "DisableInterval" ||
+           t == "TurnOffCollision";
+}
+
+// Target side for an action (`Ma.e6a`): Ob==1 → owner, Ob==2 → foe.
+static int action_side(int owner_side, const sf2::scene::PerkAction& a) {
+    return a.ob == 2 ? 1 - (owner_side & 1) : (owner_side & 1);
+}
+
+void FightController::exec_action(const sf2::scene::PerkTrigger& t,
+                                  const sf2::scene::PerkAction& a, int owner_side,
+                                  int depth) {
+    if (depth > 8) return;  // Provoke re-entrancy guard (nesting is static)
+    owner_side &= 1;
+    const int tgt = action_side(owner_side, a);
+    FightFighter& target = tgt == 0 ? player_ : enemy_;
+    const std::string& type = a.type;
+    const auto num = [&a](const char* key, double def) {
+        const auto it = a.num.find(key);
+        return it != a.num.end() ? it->second : def;
+    };
+    const auto str = [&a](const char* key) {
+        const auto it = a.str.find(key);
+        return it != a.str.end() ? it->second : std::string();
+    };
+    const int uf = static_cast<int>(num("Frames", 0.0));
+    if (type == "ModAttributes") {
+        // `VKa`: instant ±attr adds on the target + mod entry for `JNa`.
+        sf2::scene::ModState m;
+        m.name = str("Name").empty() ? type : str("Name");
+        m.namespc = str("Namespace");
+        m.parent = t.perk;
+        m.kind = type;
+        m.uf = uf;
+        m.attr_side = tgt;
+        for (const auto& kv : a.num) {
+            if (kv.first == "Frames") continue;
+            target.params.attributes[kv.first] += static_cast<float>(kv.second);
+            m.attr_adds.emplace_back(kv.first, kv.second);
+        }
+        bus_.install_mod(owner_side, std::move(m));
+    } else if (type == "ChangeImpulse") {
+        // `YLa`: SET the target's JG (missing multiplier = 0, `u.H`).
+        // Current hit already consumed JG (`Kwb` runs pre-`Cgb`) — this
+        // shapes FUTURE hits. Timed entries revert via `gob()`.
+        target.jg = sf2::scene::Vec3{static_cast<float>(num("MultiplierX", 0.0)),
+                                     static_cast<float>(num("MultiplierY", 0.0)),
+                                     static_cast<float>(num("MultiplierZ", 0.0))};
+        if (uf > 0) {
+            sf2::scene::ModState m;
+            m.name = str("Name").empty() ? type : str("Name");
+            m.parent = t.perk;
+            m.kind = type;
+            m.uf = uf;
+            bus_.install_mod(owner_side, std::move(m));
+        }
+    } else if (type == "ChangeAdditionalDamageValue") {
+        // `WKa`: Ly SET (+`Tua` record skipped — OPEN).
+        target.params.ly = static_cast<float>(num("Value", 0.0));
+        if (uf > 0) {
+            sf2::scene::ModState m;
+            m.name = str("Name").empty() ? type : str("Name");
+            m.parent = t.perk;
+            m.kind = type;
+            m.uf = uf;
+            bus_.install_mod(owner_side, std::move(m));
+        }
+    } else if (type == "ChangeHitEffectScale") {
+        target.qz = static_cast<float>(num("Scale", 1.0));
+        if (uf > 0) {
+            sf2::scene::ModState m;
+            m.name = str("Name").empty() ? type : str("Name");
+            m.parent = t.perk;
+            m.kind = type;
+            m.uf = uf;
+            bus_.install_mod(owner_side, std::move(m));
+        }
+    } else if (type == "ModHealthChange") {
+        // `Inb` via `znb`: per-frame DoT/HoT on the target + mod entry
+        // (uf from Frames; 0 = persistent — `ia` only counts uf>0).
+        sf2::scene::ActiveMod dot;
+        dot.name = str("Name").empty() ? "dot" : str("Name");
+        const auto fi = a.num.find("Frames");
+        dot.frames_left = fi != a.num.end() ? static_cast<int>(fi->second) : 0;
+        dot.per_frame = num("PerFrameValue", 0.0);
+        if (tgt == 0) {
+            player_.dots.push_back(dot);
+        } else {
+            enemy_.dots.push_back(dot);
+        }
+        sf2::scene::ModState m;
+        m.name = dot.name;
+        m.parent = t.perk;
+        m.kind = type;
+        m.uf = dot.frames_left;
+        m.per_frame = dot.per_frame;
+        bus_.install_mod(owner_side, std::move(m));
+    } else if (type == "ModIcon" || type == "ModInvisibility") {
+        sf2::scene::ModState m;
+        m.name = str("Name").empty() ? type : str("Name");
+        m.namespc = str("Namespace");
+        m.parent = t.perk;
+        m.kind = type;
+        m.uf = uf;
+        bus_.install_mod(owner_side, std::move(m));
+    } else if (type == "SetModFrames") {
+        // `dpb`: retime the named mod (-1 = keep).
+        bus_.retime_mod(owner_side, str("Name"), static_cast<int>(num("Frames", -1.0)),
+                        static_cast<int>(num("Interval", -1.0)));
+    } else if (type == "ApplyModEffect") {
+        bus_.log("perknoop ApplyModEffect " + str("Name") + " (U4 OPEN)");
+    } else if (type == "ClearMods") {
+        bus_.clear_mods(owner_side, str("Name"), str("Namespace"));
+    } else if (type == "SetModVariable") {
+        bus_.mutable_side(owner_side).q3[str("Name")] = num("Value", 0.0);
+    } else if (type == "SetRangeVariable") {
+        double v = num("Value", 0.0);
+        const auto mn = a.num.find("Min");
+        const auto mx = a.num.find("Max");
+        if (mn != a.num.end() && v < mn->second) v = mn->second;
+        if (mx != a.num.end() && v > mx->second) v = mx->second;
+        bus_.mutable_side(owner_side).q3[str("Name")] = v;
+    } else if (type == "SetTactic") {
+        // `qpb`: `model.yZa(LL)` — real tactic switch on the target side.
+        FightFighter& f = tgt == 0 ? player_ : enemy_;
+        const std::string name = str("Name");
+        const sf2::scene::TacticDef* def = nullptr;
+        if (tactic_defs_ != nullptr) {
+            const auto it = tactic_defs_->find(name);
+            if (it != tactic_defs_->end()) def = &it->second;
+        }
+        if (f.ai && def != nullptr) {
+            f.ai->set_tactic(def);
+            std::fprintf(stdout, "[perk] SetTactic %s -> %s\n", f.name.c_str(), name.c_str());
+            std::fflush(stdout);
+        } else {
+            bus_.log("perknoop SetTactic " + name + " (no ai/defs)");
+        }
+    } else if (type == "Provoke") {
+        // `jpb`: re-fire the SL trigger set via `Pob` (immediate `lF`).
+        std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> fired;
+        bus_.provoke(tgt, str("Trigger"), fired);
+        for (const auto& pr : fired) {
+            if (is_combat_action(pr.second.type)) {
+                bus_.log("perknoop Provoke-combat " + pr.second.type +
+                         " (outside hit scope, OPEN)");
+                continue;
+            }
+            exec_action(pr.first, pr.second, tgt, depth + 1);
+        }
+    } else if (is_combat_action(type)) {
+        bus_.log("perknoop " + type + " (outside hit scope, OPEN)");
+    } else {
+        bus_.log("perknoop " + type);
+    }
+}
+
+// Fire a hit-scope slot (6 = HitPostCrit with Damage=0 — `Bb.Zi` reset at
+// strike start; 7 = PostHit with Damage=base) and execute. Combat actions
+// fold into the shared record (ej order: player side first); state
+// actions apply immediately (post-`Kwb`, shaping future hits).
+void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
+                                  int fired_side, sf2::scene::HitRecord& rec,
+                                  FightFighter& atk, FightFighter& def, int depth,
+                                  bool* out_has_damage, float* out_damage) {
+    (void)depth;
+    bus_.fire(slot, vars, true, fired_side & 1, cond_ctx(0), cond_ctx(1),
+              oba_phase(phase_), frame_);
+    for (int s = 0; s < 2; ++s) {
+        std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> pairs;
+        bus_.drain(s, pairs);
+        std::vector<sf2::scene::PerkAction> combat;
+        for (const auto& pr : pairs) {
+            if (is_combat_action(pr.second.type)) {
+                combat.push_back(pr.second);
+            } else {
+                exec_action(pr.first, pr.second, s);
+            }
+        }
+        if (combat.empty()) continue;
+        // Lifesteal heals per-action (target side varies by Ob); the rest
+        // shares the record — split Lifesteal out first.
+        std::vector<sf2::scene::PerkAction> rest, life;
+        for (const auto& a : combat) {
+            if (a.type == "Lifesteal") {
+                life.push_back(a);
+            } else {
+                rest.push_back(a);
+            }
+        }
+        if (!rest.empty()) {
+            const sf2::scene::PerkHitOutcome po =
+                sf2::scene::decide_hit_perks(rest, rec, atk.params.so, def.params.so);
+            if (po.has_critical) rec.critical = po.f_critical;
+            if (po.has_block) rec.blocked = po.f_block;
+            if (po.has_shock) rec.shock = po.f_shock;
+            if (po.has_disarm) rec.disarm = po.f_disarm;
+            if (po.has_damage) {
+                rec.raw_damage = po.f_damage;
+                if (out_has_damage != nullptr) *out_has_damage = true;
+                if (out_damage != nullptr) *out_damage = po.f_damage;
+            }
+            for (const auto& kv : po.attr_adds) {
+                def.params.attributes[kv.first] += static_cast<float>(kv.second);
+            }
+            for (const auto& cl : po.clears) {
+                def.fighter.clear_intervals(cl.first, cl.second);
+            }
+            if (po.collision_off) {
+                std::fprintf(stdout, "[perk] %s collision off (OPEN: needs body flags)\n",
+                             def.name.c_str());
+                std::fflush(stdout);
+            }
+            for (const auto& d : po.install_dots) def.dots.push_back(d);
+            for (const auto& line : po.log) {
+                std::fprintf(stdout, "[perk] %s\n", line.c_str());
+                std::fflush(stdout);
+            }
+        }
+        for (const auto& a : life) {
+            const sf2::scene::PerkHitOutcome po = sf2::scene::decide_hit_perks(
+                std::vector<sf2::scene::PerkAction>{a}, rec, atk.params.so, def.params.so);
+            if (po.heal != 0.0f) {
+                const int t = action_side(s, a);
+                FightFighter& dst = t == 0 ? player_ : enemy_;
+                dst.hp += po.heal;
+                if (dst.hp > dst.max_hp) dst.hp = dst.max_hp;
+                if (dst.hp < 0.0f) dst.hp = 0.0f;
+            }
+        }
+    }
+}
+
+// `ia` mod tick for one side + slot-14 publish on expiry.
+void FightController::tick_mods(int side) {
+    side &= 1;
+    sf2::scene::ModTickCtx ctx;
+    ctx.attrs_by_side[0] = &player_.params.attributes;
+    ctx.attrs_by_side[1] = &enemy_.params.attributes;
+    ctx.jg_by_side[0] = &player_.jg;
+    ctx.jg_by_side[1] = &enemy_.jg;
+    ctx.ly_by_side[0] = &player_.params.ly;
+    ctx.ly_by_side[1] = &enemy_.params.ly;
+    ctx.qz_by_side[0] = &player_.qz;
+    ctx.qz_by_side[1] = &enemy_.qz;
+    ctx.on_expire = [this](int s, const sf2::scene::ModState& m) {
+        // `JNa→Gj(d,14)`: vars carry ModExpires/Namespace/ParentPerk.
+        sf2::scene::TrigVars v;
+        v.str["ModExpires"] = m.name;
+        v.str["Namespace"] = m.namespc;
+        v.str["ParentPerk"] = m.parent;
+        bus_.fire(sf2::scene::kEvModExpires, v, true, s, cond_ctx(0), cond_ctx(1),
+                  oba_phase(phase_), frame_);
+        for (int q = 0; q < 2; ++q) {
+            std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> pairs;
+            bus_.drain(q, pairs);
+            for (const auto& pr : pairs) exec_action(pr.first, pr.second, q);
+        }
+    };
+    sf2::scene::tick_side_mods(bus_, side, ctx);
+}
+
+// Per-side per-frame bus work: EveryFrame publish (slot 2, `Cp.Step`
+// against StepFrame), mod `ia` tick, `qw` flush, interval edge detect
+// (slots 12/13 with `Lj` Name/Type vars).
+void FightController::tick_bus_side(int side) {
+    side &= 1;
+    FightFighter& me = side == 0 ? player_ : enemy_;
+    sf2::scene::TrigVars v;
+    v.num["StepFrame"] = static_cast<double>(frame_);
+    char stepbuf[32];
+    std::snprintf(stepbuf, sizeof(stepbuf), "%d", frame_);
+    v.str["StepFrame"] = stepbuf;
+    bus_.fire(sf2::scene::kEvEveryFrame, v, true, side, cond_ctx(0), cond_ctx(1),
+              oba_phase(phase_), frame_);
+    for (int q = 0; q < 2; ++q) {
+        std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> pairs;
+        bus_.drain(q, pairs);
+        for (const auto& pr : pairs) exec_action(pr.first, pr.second, q);
+    }
+    tick_mods(side);
+    std::vector<std::pair<int, sf2::scene::ModState>> flushed;
+    bus_.flush_qw(flushed);
+    if (!flushed.empty()) {
+        sf2::scene::ModTickCtx ctx;
+        ctx.attrs_by_side[0] = &player_.params.attributes;
+        ctx.attrs_by_side[1] = &enemy_.params.attributes;
+        for (const auto& fm : flushed) {
+            sf2::scene::revert_mod(fm.second, ctx, bus_.log);
+            sf2::scene::TrigVars ev;
+            ev.str["ModExpires"] = fm.second.name;
+            ev.str["Namespace"] = fm.second.namespc;
+            ev.str["ParentPerk"] = fm.second.parent;
+            bus_.fire(sf2::scene::kEvModExpires, ev, true, fm.first, cond_ctx(0),
+                      cond_ctx(1), oba_phase(phase_), frame_);
+            for (int q = 0; q < 2; ++q) {
+                std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> p2;
+                bus_.drain(q, p2);
+                for (const auto& pr : p2) exec_action(pr.first, pr.second, q);
+            }
+        }
+    }
+    // Interval edges (`Lj`): added → Start(12), removed → End(13).
+    std::set<std::string> cur(me.fighter.active_intervals().begin(),
+                              me.fighter.active_intervals().end());
+    for (const std::string& n : cur) {
+        if (me.prev_intervals.find(n) == me.prev_intervals.end()) {
+            sf2::scene::TrigVars ev;
+            ev.str["Interval"] = n;
+            ev.num["IntervalType"] = static_cast<double>(me.fighter.interval_type(n));
+            bus_.fire(sf2::scene::kEvIntervalStart, ev, true, side, cond_ctx(0),
+                      cond_ctx(1), oba_phase(phase_), frame_);
+            std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> p3;
+            bus_.drain(0, p3);
+            bus_.drain(1, p3);
+            for (const auto& pr : p3) exec_action(pr.first, pr.second, side);
+        }
+    }
+    for (const std::string& n : me.prev_intervals) {
+        if (cur.find(n) == cur.end()) {
+            sf2::scene::TrigVars ev;
+            ev.str["Interval"] = n;
+            bus_.fire(sf2::scene::kEvIntervalEnd, ev, true, side, cond_ctx(0),
+                      cond_ctx(1), oba_phase(phase_), frame_);
+            std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> p3;
+            bus_.drain(0, p3);
+            bus_.drain(1, p3);
+            for (const auto& pr : p3) exec_action(pr.first, pr.second, side);
+        }
+    }
+    me.prev_intervals = std::move(cur);
+}
+
 
 void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_type press) {
     // JS `ca.N0a` (L426): in phase 1 (StartStance) a PRESS goes into the
@@ -786,7 +1197,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     if (iv.ignores_block) {
         def.fighter.clear_block();
     }
-    const bool blocked = def.fighter.has_block();
+    bool blocked = def.fighter.has_block();
     // JS `wd.strike` crit (L510): `se = !block && !g.a3 && Lcb(A9a())`;
     // `Lcb(a)` = `Da.cT(a*100)` (L1204): `a>1 -> true` (the `a>b` shortcut)
     // else a fresh draw `< a`. `A9a = pga?100:gya.p8a` (L529; `pga` setter
@@ -796,7 +1207,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // `roll01_` may be empty in unit contexts — fall back to a fixed draw
     // (deterministic; never consumes the shared stream when unset).
     auto draw01 = [this]() { return roll01_ ? roll01_() : 0.5f; };
-    const bool critical =
+    bool critical =
         !blocked && !iv.no_critical && (a9 > 1.0f || draw01() < a9);
     const std::string defense_attr = sf2::scene::select_defense(idmg, blocked, &hit_cap);
     const float dmg = sf2::scene::compute_damage(idmg, atk.params, def.params, defense_attr,
@@ -806,8 +1217,27 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     rec.defense = defense_attr;
     rec.target_part = hit_cap.body_part;
     rec.hit_edge = iv.attacking_parts.empty() ? "" : iv.attacking_parts[0];
+    bool sethit_damage = false;
+    float sethit_value = 0.0f;
     rec.blocked = blocked;
     rec.critical = critical;
+    // Slot 6 = HitPostCrit at the Dgb point (post-se, pre-Ca;
+    // mg.Damage = 0 — Bb.Zi was reset at strike start). Overrides
+    // here feed compute_damage (exact: Dgb precedes Ca).
+    {
+        sf2::scene::TrigVars hv6;
+        hv6.str["Defense"] = defense_attr;
+        hv6.str["Animation"] = move.name;
+        hv6.num["Critical"] = critical ? 1.0 : 0.0;
+        hv6.num["Shock"] = 0.0;
+        hv6.num["Block"] = blocked ? 1.0 : 0.0;
+        hv6.num["Damage"] = 0.0;
+        run_bus_hit(sf2::scene::kEvHitPostCrit, hv6, def.is_player ? 0 : 1, rec, atk, def,
+                    0, &sethit_damage, &sethit_value);
+    }
+    // Slot-6 SetHit overrides feed bCa (exact: Dgb precedes bCa).
+    blocked = rec.blocked;
+    critical = rec.critical;
     // JS `wd.R8a` shock decider on the target (L531-532 + L511):
     // `Uq` = head-zone hit; `b = Zi/atk.so` (`so` OPEN -> 1.0); `ws`
     // (weapon strike, `ola` OPEN -> false, so body strikes add pain);
@@ -861,58 +1291,34 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     if (!blocked) {
         dga_ = true;
     }
-    // Perk hit-actions (PERKS_STATIC 5.2, JS `Ma` L1290-1300): the
-    // ATTACKER's equipped actions decide over the landed record. SetHit
-    // overrides Bb.* AFTER the R8a/disarm rolls above (trigger-bus order
-    // is OPEN — the rolls consumed the pre-override crit; documented in
-    // PERKS_STATIC). SetHit Damage REPLACES raw, ChangeAdditionalDamage
-    // ADDS to it; Lifesteal heals the attacker; ChangeImpulse scales the
-    // knockback below; ModAttributes adds to the TARGET's attrs;
-    // DisableInterval clears the target's intervals; ModHealthChange
-    // installs a DoT/HoT on the target; no-op actions log a line.
+    // Perk trigger bus, hit scope (replaces the direct hook):
+    // slot 7 = PostHit at the `Cgb` point (`Sba(a.model,b,7)` — after the
+    // R8a/disarm rolls, before `LWa`/damage; SetHit overrides land on the
+    // shared record pre-`apply_damage`, `ChangeImpulse`/`Ly` shape FUTURE
+    // hits since `Kwb` already consumed JG). `mg` = the Sba stamps.
     bool hit_blocked = blocked;
     bool hit_critical = critical;
-    double perk_ix = 1.0, perk_iy = 1.0, perk_iz = 1.0;
-    if (!atk.perks.empty()) {
-        const sf2::scene::PerkHitOutcome po =
-            sf2::scene::decide_hit_perks(atk.perks, rec);
-        if (po.has_critical) {
-            hit_critical = po.f_critical;
-            rec.critical = po.f_critical;
-        }
-        if (po.has_block) {
-            hit_blocked = po.f_block;
-            rec.blocked = po.f_block;
-        }
-        if (po.has_shock) rec.shock = po.f_shock;
-        if (po.has_disarm) rec.disarm = po.f_disarm;
-        if (po.has_damage) rec.raw_damage = po.f_damage;
-        rec.raw_damage += po.dmg_add;
-        if (po.heal != 0.0f) {
-            atk.hp += po.heal;
-            if (atk.hp > atk.max_hp) atk.hp = atk.max_hp;
-            if (atk.hp < 0.0f) atk.hp = 0.0f;
-        }
-        for (const auto& kv : po.attr_adds) {
-            def.params.attributes[kv.first] += static_cast<float>(kv.second);
-        }
-        for (const auto& cl : po.clears) {
-            def.fighter.clear_intervals(cl.first, cl.second);
-        }
-        if (po.collision_off) {
-            std::fprintf(stdout, "[perk] %s collision off (OPEN: needs body flags)\n",
-                         def.name.c_str());
-            std::fflush(stdout);
-        }
-        for (const auto& d : po.install_dots) def.dots.push_back(d);
-        for (const auto& line : po.log) {
-            std::fprintf(stdout, "[perk] %s\n", line.c_str());
-            std::fflush(stdout);
-        }
-        perk_ix = po.imp_x;
-        perk_iy = po.imp_y;
-        perk_iz = po.imp_z;
+    {
+        sf2::scene::TrigVars hv;
+        hv.str["Defense"] = defense_attr;
+        hv.str["Animation"] = move.name;
+        hv.num["Critical"] = critical ? 1.0 : 0.0;
+        hv.num["Shock"] = rec.shock ? 1.0 : 0.0;
+        hv.num["Block"] = blocked ? 1.0 : 0.0;
+        hv.num["Damage"] = static_cast<double>(dmg);
+        run_bus_hit(sf2::scene::kEvPostHit, hv, def.is_player ? 0 : 1, rec, atk, def, 0, &sethit_damage, &sethit_value);
+        hit_blocked = rec.blocked;
+        hit_critical = rec.critical;
     }
+    sf2::scene::apply_damage(rec, def.hp, false);
+    if (sethit_damage) {
+        // `ppb` sets `bR` AND `Zi` directly (no lethal clamp at set time).
+        rec.raw_damage = sethit_value;
+        rec.final_damage = sethit_value;
+        rec.hp_after = def.hp > sethit_value ? def.hp - sethit_value : 0.0f;
+        rec.lethal = sethit_value >= def.hp;
+    }
+    def.hp = rec.hp_after;
     sf2::scene::apply_damage(rec, def.hp, false);
     def.hp = rec.hp_after;
 
@@ -966,16 +1372,27 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         }
     }
 
-    // Knockback (JS `Bl.strike` + bounds), scaled by perk ChangeImpulse.
+    // Knockback (JS Kwb + bounds): interval impulse mirrored by facing,
+    // scaled by the attacker JG (ChangeImpulse shapes FUTURE hits).
     sf2::scene::Vec3 impulse{iv.impulse_x, iv.impulse_y, iv.impulse_z};
-    impulse.x *= static_cast<float>(atk.fighter.facing() * perk_ix);
-    impulse.y *= static_cast<float>(perk_iy);
-    impulse.z *= static_cast<float>(perk_iz);
+    impulse.x *= static_cast<float>(atk.fighter.facing()) * atk.jg.x;
+    impulse.y *= atk.jg.y;
+    impulse.z *= atk.jg.z;
     sf2::scene::ImpulseResult imp;
     const float new_x =
         sf2::scene::apply_impulse(hit_cap, ch, impulse, def.fighter.world_x(),
                                   wall_min_, wall_max_, imp);
     def.fighter.set_world_pos(new_x, def.fighter.world_y());
+    // Per-bone feed (JS `Bl.strike`: the impulse-split vectors move the hit
+    // capsule's endpoint BODIES `sx`/`Zs` — resolved per-label via `wBa` at
+    // build time). The offsets ride the pose + decay per tick, and feed the
+    // next frame's capsules via positions().
+    {
+        const int b1 = def.fighter.model().bone_by_name(hit_cap.end1);
+        const int b2 = def.fighter.model().bone_by_name(hit_cap.end2);
+        if (b1 >= 0) def.fighter.add_knockback(b1, imp.node1_vec);
+        if (b2 >= 0 && b2 != b1) def.fighter.add_knockback(b2, imp.node2_vec);
+    }
 
     // [Phase A3] SFX: a landed hit (the game plays the impact sample —
     // JS ca.Cgb's `ta.ak` after the strike lands).
@@ -1035,6 +1452,8 @@ FightController::BattlePrize FightController::prize(int base_coins) const {
 // executes it, the physics body is rebuilt. Mirrors the JS `wd.ia` +
 // `de.ia` path (see core/scene/README.md).
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
+    // Perk bus per-frame work (EveryFrame slot 2 + mod ia + 12/13 edges).
+    tick_bus_side(&me == &player_ ? 0 : 1);
     // Perk DoTs/HoTs (JS `znb`/`Inb`, L1290/L1298): tick installed mods
     // once per frame (signed per-frame value, clamped, expired dropped).
     if (!me.dots.empty()) sf2::scene::tick_active_mods(me.dots, me.hp, me.max_hp);
@@ -1287,7 +1706,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         }
     }
 
-    rebuild_body(me);
+    rebuild_body(me, foe);
 }
 
 int FightController::hud_timer() const {
