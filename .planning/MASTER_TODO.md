@@ -85,6 +85,17 @@
   - READY FOR USER PLAYTHROUGH: инструкция в `reference/traces/README.md`
     (запуск exe → играть → `[INPUT-REC]` в console.log →
     `record_inputs.py` → replay дважды → сравнение sha).
+- Takeover fix (2026-09-04): запуск С `--input-script` инжектил 41 стимул
+  из `input_phase1.txt` («играла сама») + auto-close на f=600 — для ручной
+  игры непригоден. Manual record mode: запуск БЕЗ `--input-script` —
+  ничего не инжектит, auto-close отключён (окно закрывает только пользователь),
+  физическая клавиатура/мышь идут в игру 1:1 (WebView2 форвардит нативно,
+  shell не ставит DOM-перехватчиков), трейсинг + `[INPUT-REC]` активны.
+  Проверено: 35с headless-запуск без скрипта → 601 oracle-запись (f 0..600),
+  0 инжектов, 0 INPUT-REC, процесс жив до kill. Команда пользователю:
+  `& ./shell/bin/Release/net9.0-windows/OracleShell.exe` (кликнуть по окну
+  игры для фокуса). Невоспроизведённые нажатия ранее — гейты уроков `Za.DEa`,
+  не перехват с нашей стороны.
 - Gate (фиксирован заранее): два прогона одного скрипта дают идентичный JSONL;
   в трейсе реально присутствуют все поля
   (`frame, phase, cf, ai_branch, ai_zone, chosen_move, chances{...},

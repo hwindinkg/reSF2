@@ -177,12 +177,23 @@ public sealed class MainForm : Form
 
         AppendConsoleLine($"[shell] navigation completed: {_webView.CoreWebView2.Source}");
         _navigationTime = DateTime.UtcNow;
-        _completionTimer.Start();
 
         if (_inputScriptPath is not null)
         {
+            // Auto mode (gate/replay runs): inject the scripted inputs and
+            // close automatically when the trace finishes (or on timeout).
             StartInputScript(_inputScriptPath);
             ForwardStimulus();
+            _completionTimer.Start();
+        }
+        else
+        {
+            // Manual record mode: inject NOTHING, never auto-close. The
+            // user's physical keyboard/mouse reach the game unmodified
+            // (WebView2 forwards them natively; this shell adds no DOM
+            // interceptors) while tracing + [INPUT-REC] stay fully active.
+            // Close the window when finished playing.
+            AppendConsoleLine("[shell] manual record mode: no input injection, no auto-close - play freely, close the window when finished");
         }
 
         // Screenshot 1 at ~8s after navigation, screenshot 2 at ~20s.

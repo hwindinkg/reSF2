@@ -123,12 +123,25 @@ replay. Full input-path reference: `reference/AI_STATIC.md` §6.
 
 ## READY FOR USER PLAYTHROUGH (manual tutorial run)
 
-1. Run: `& ./shell/bin/Release/net9.0-windows/OracleShell.exe --input-script reference/tools/input_phase1.txt`
-   (any script works; recording is automatic). A window opens with the game.
-2. Play through the tutorial with mouse/touch/keyboard. Every effective
-   input is recorded with its fight.frame — play as far as you like; the
-   shell auto-closes at fight.frame 600 (or 150s timeout).
-3. Recording lands in `reference/traces/console.log` as `[INPUT-REC]` lines.
-4. Convert: `python reference/tools/record_inputs.py reference/traces/console.log reference/traces/recorded_inputs.txt`
-5. Replay twice with `--input-script reference/traces/recorded_inputs.txt`,
+> Why manual: `--input-script` mode injects scripted inputs (the drench in
+> `input_phase1.txt` "plays itself") and auto-closes at fight.frame 600 —
+> unusable for playing. Manual mode injects nothing and never auto-closes.
+
+1. Run WITHOUT `--input-script` (from `E:\reSF2`):
+   `& ./shell/bin/Release/net9.0-windows/OracleShell.exe`
+   A window opens with the game. **Click the game view once** so it has
+   keyboard focus. Physical keyboard/mouse reach the game 1:1 (WebView2
+   forwards them natively; the shell adds no DOM interceptors) while full
+   tracing + `[INPUT-REC]` stay active.
+2. **Play through the tutorial** (move/attack as Sensei asks — go as far as
+   you like). Note: the tutorial gates input classes per lesson (`Za.DEa`:
+   keyboard 9/10 start disabled; punch/kick unlock as lessons advance), so
+   if a button seems dead, do what Sensei currently asks. Every *effective*
+   input is recorded with its fight.frame.
+3. Close the window when finished (only you close it — no frame/timeout
+   auto-close in manual mode).
+4. Recording lands in `reference/traces/console.log` as `[INPUT-REC]` lines:
+   `{"f","i","m":"N0a"|"O0a","c":control,"x":index,"t":type}`.
+5. Convert: `python reference/tools/record_inputs.py reference/traces/console.log reference/traces/recorded_inputs.txt`
+6. Replay twice with `--input-script reference/traces/recorded_inputs.txt`,
    extract both via `extract_oracle.py`, compare sha256 → gate re-run.
