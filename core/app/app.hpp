@@ -115,6 +115,9 @@ public:
     // The shared fight assets (models/moves/clips/tactics/location) —
     // loaded once at init, used by Fight/Shop/Equipment.
     FightAssets& fight_assets() { return *fight_assets_; }
+    // Null-safe probe (asset load may fail while the shell still boots —
+    // the Dojo idle figure uses this to skip display-only setup).
+    bool has_fight_assets() const { return fight_assets_ != nullptr; }
 
     // The pending battle flow data (the Map -> Fight -> Results hand-off).
     PendingBattle& pending_battle() { return pending_battle_; }

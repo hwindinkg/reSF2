@@ -168,3 +168,150 @@ L1294-1295).
 4. `MFa/Xza/threshold/Au/EPa` concrete numbers (fight-settings XML Egypt —
    file id OPEN, AI_STATIC §2); `Wsb/m$/fe.wqb/Cqb/ZAa/DL` presentation tails
    (L396-397).
+
+## APPENDIX A — resolved §OPEN data values (static, from disk + JS)
+
+Appendix only: no restructuring above. All XML below is
+`reference/extracted/xml/res/internal_settings.xml` unless noted; JS lines
+are `reference/www/sf2.502f0946.js`. Values confirmed present on disk;
+formulas transcribed verbatim.
+
+### A1. `A9a` / `pga` (crit-chance base)
+
+- `A9a(){return this.pga?100:v.gya.p8a(this.jb)}` (L529).
+- `pga` init `false` (`this.pga=!1`, `wd` ctor L490); the ONLY setter is the
+  debug cheat `case 22: b.pb.pga=!b.pb.pga` (L438). Shipped runtime value:
+  `pga=false` ⇒ `A9a()=gya.p8a(jb)`.
+- `v.gya` (`Pv`) parsed from `<CriticalHit>` (L1157); `Pv.parse` (L1181):
+  `sH=(Probability.Base, Probability.Attribute)`,
+  `ps=(Damage.Base, Damage.Attribute)`;
+  `p8a(a)`: attr present `? sH.first*attr.G : sH.first` (L1181-1182).
+- XML: `<Probability Base="0.0001" Attribute="CriticalChance"/>`,
+  `<Damage Base="0.0001" Attribute="CriticalDamage"/>`.
+- Resolved: normal crit base = **0.0001** (× `CriticalChance` attr value when
+  the fighter has it); `pga=true` forces **100** (debug only).
+
+### A2. `VY` / `HZ` (block / crit damage factors)
+
+- `Eh.parse`: `Mk=Attribute||"COM"`, `Bc=Base` (L1180).
+- `v.VY←<BlockDamageFactor>`, `v.HZ←<CriticalHit><Damage>` (L1156).
+- XML: `<BlockDamageFactor Base="0.0001" Attribute="BlockDamageFactor"/>`;
+  `<Damage Base="0.0001" Attribute="CriticalDamage"/>`.
+- Resolved: **VY=(Mk=BlockDamageFactor, Bc=0.0001)**,
+  **HZ=(Mk=CriticalDamage, Bc=0.0001)**; consumed via
+  `IAa(flag,Mk,Bc)=flag?pow(2,attr(Mk)*Bc):1` (L512-513).
+- Bonus (same lines): `v.pYa` (`LAa` block fallback, L536) =
+  `<BlockDefense Attribute="BodyDefense"/>` ⇒ **"BodyDefense"**;
+  `v.lNa` (unblocked fallback, L536) = `<SlowMotion Defense="BodyDefense"/>`
+  (L1154) ⇒ **"BodyDefense"**; `v.BP` (`l5a` divisor, L1206) =
+  `<DamageDoublingRange Value="10"/>` ⇒ **10**;
+  `v.lT` (resistance path, L1422) =
+  `<ResistanceDoublingRange Value="500"/>` ⇒ **500**.
+
+### A3. `pAa` armor interpolation (tables, L1204-1205)
+
+- Verbatim signature: `pAa(a,b,c,d,e,f,g,h)` — `k=Bh.Gb(wv,e)` align target,
+  `Ci.a5a((a?c:b).IY,x)` candidate deltas, per-`SZ` loop with
+  `bp/shift` blend, `v.eNa` eclipse filter, `v.Seb.g6a(C)` aspect gate
+  (`Aspect DoublingRange="108" Limit="1.2" Antilimit="0"`), `v.BP` log-scale
+  clamp; double-call guard `k>10&&(k=pAa(...))` in `iea` (L1205-1206).
+- `v.wv` (`AlignTargetAttributes`, L1157): **WeaponDamage 12,
+  UnarmedDamage 0, BodyDefense 12, HeadDefense 5, RangedDamage 12,
+  MagicDamage 12, EnchantmentResistance 12**.
+- Per-warrior rows (`stages.xml` `<AttributesAlign><Delta Factor Shift
+  Priority>`): Punchbag `<Delta Factor="1" Shift="0"/>`; Dojo_Disciple /
+  tutorial `Man_Kungfu` `<Delta Factor="0" Shift="0" Priority="1"/>` +
+  `<Delta Factor="1" Shift="-10" Priority="1"/>`.
+- Per-fight shifts (`stages.xml` `<Rules><Attributes DamageFactor="±N"
+  ApplyTo="Player|Bot">`): e.g. `2000/-2000` (Zone 1 boss), `-3219`,
+  `-4219/-2219` (survival ladder). These feed the same `DamageFactor`
+  attribute `pAa` reads.
+
+### A4. `ACa` / `zCa` / `E9a` (raid/attr damage exponent, L513)
+
+- Setters (L1201) + wire-up (L1155):
+  `utb(DamageFactor.Base)→v.Ypa=ACa`,
+  `ttb(DamageFactor.Attribute)→v.Xpa=zCa`,
+  `vtb(DamageFactor.MaxValue default 2E4)→v.Zpa=E9a`.
+- XML `<DamageFactor Base="0.0001" Attribute="DamageFactor"/>` carries **no**
+  `MaxValue` ⇒ default applies.
+- Resolved: **ACa=0.0001, zCa="DamageFactor", E9a=20000**.
+  (JS defaults L2480: `Ypa=0, Xpa="", Zpa=2E4` — overwritten by parse.)
+
+### A5. `Cea.bp` (charge multiplier, L514/L775)
+
+- `Vm` ctor: `bp=Rja=1, JU=KU=false` (L778);
+  `XL()`: `JU&&KU&&(bp*=Rja)`.
+- `bn` (`ERuleDamageFactor`) parse (L856): `zUa=Factor default 1`,
+  `lVa=RepeatFactor default 1`.
+- Disk: **no `ERuleDamageFactor` element in any extracted XML**
+  (grep over `reference/extracted/**/*.xml` = 0 hits) ⇒ `JU/KU` never latch
+  in shipped data ⇒ **bp=1 always** (static; a runtime trace would only
+  confirm absence). (`perks.xml` `DamageFactor=` mods are `ModAttributes`, a
+  different path.)
+
+### A6. `c2a` (fists cap, L514/L820)
+
+- `c2a(a,b)`: any `a[]=="Fists" ? b*this.M_ : b` (L820);
+  `M_=FistsDamageMod default 1` (L187 `u.H(...,1)`).
+- Disk: **no `FistsDamageMod` in any shipped XML** ⇒ `M_=1` ⇒ **`c2a`
+  is the identity** for all shipped data.
+
+### A7. `Jma` charge attrs (L521/L1186)
+
+- `Jma(a,b,c,d,e)`: `e ? (e2=j6a, c=kea, b=qea) : (e2=W7a, …)`,
+  then `Hwa(pow(2,e2)*c*b*a)+LA()` (L521).
+- `Yv`: `j6a=JAa=DamageRecharge`, `W7a=yBa=PainRecharge`,
+  `a7a=InitialCharge` (L1186); `AQ(name,params)=params? Bc*attr(Mk) : Bc`.
+- XML `<Magic>`: `InitialCharge Base=0.0001 Attr=MagicInitialCharge`;
+  `PainRecharge Base=0.0001 Attr=MagicPainRecharge`;
+  `DamageRecharge Base=0.0001 Attr=MagicDamageRecharge`.
+- Resolved: **j6a→(MagicDamageRecharge, 1e-4)**,
+  **W7a→(MagicPainRecharge, 1e-4)**; `kea/qea` reuse A2 `VY/HZ`.
+
+### A8. Shock (`hw`/`v.Ub`) numbers + settings file id
+
+- Settings root: `td.wjb(Ja.ki(1292))` (L1153); the same `wjb` parses
+  `Attributes/RatingEvaluation/DifficultyEvaluation/SlowMode/SlowMotion/
+  DamageFactor/BlockDamageFactor/CriticalHit/Shock/Camera/…` (L1153-1158).
+  On-disk content match for ALL of these nodes is
+  `reference/extracted/xml/res/internal_settings.xml`
+  (numeric bundle id `1292` itself is loader-resolved — id→file proof needs
+  a runtime trace of `Ja.ki/G.qf`, still OPEN only for that mapping).
+- `<Shock>` (parse L1194-1196): **threshold (`Treshold.Value`) = 999**;
+  **Xza (`FrameReduction.Value`) = 0.001**; **MFa
+  (`LooseningDelay.Frames`) = 12**; **Au (`Weapon.Name`) = "Fists"**;
+  **EPa/FPa (`SetAttribute Name/Value`) = WeaponDamage/0**;
+  **iya/hya (`CriticalHitChance Base/Attribute`) = 0.0001 /
+  "ShockCriticalHitChance"**; **pDa/oDa (`HeadHitChance Base/Attribute`) =
+  0.0001 / "ShockHeadHitChance"**; **kw/gR/hR (`Impulse X/Y/Z`, X,Z absent)
+  = 0 / -0.5 / 0**.
+
+### A9. `Cl.W1a` / `Bz` hit volumes (L567, L12-14)
+
+- `Bz(a,b,c,d,e,f,g,h,k,l)` verbatim (L12 + continuation L13-14):
+  `c+=f; if(ic.f2(c)) return Cz(d,e,a,b,g)?(…,!0):!1;`
+  `l??=Wy(d,e); n=l·a+c; f=l·b+c;`
+  `if(0<=n*f && c<|n| && c<|f|) return !1;`
+  `k??=Wy(a,b); q=k·d+c; r=k·e+c;`
+  `return 0<=q*r && c<|q| && c<|r| ? !1 : q*r<0 && n*f<0 ? (lerp, !0)
+  : Ls(n,…) ? … : Ls(f,…) ? … : Ls(q,…) ? … : Ls(r,…) ? … : !1`
+  (`Wy`=line normal, `Cz`=2-D segment intersect L14, `Ls`=point project —
+  all static, L12-14).
+- `W1a(a,b)` (L567): for each body part `k` of `a=Nl.oI` with `k.vZ`:
+  `Bz(d,e,c, k.Ula,k.Pda,k.gb, W8,X8, f,k.Eda)` → on hit
+  `zXa` records `strike.Py/KD/n$/o$` (L567-568).
+- Segment fields (`yu`, L791-793): `Ula/Pda` endpoints via `Uy()` blend,
+  `gb` radius, `Eda` normal, `vZ` enable flag (toggled by `hq` type-30,
+  L1403); margins (`zu`, L793): `Margin1/Margin2/Radius1(×2=stroke)`.
+- Resolved (static): full test expressions above. **Per-frame segment
+  positions/values stay OPEN (needs runtime trace)** — they live in animated
+  skeleton nodes, not on disk.
+
+### Remaining OPEN (unchanged)
+
+`Pkb/Nsb/jJa/Ukb` reaction geometry (L674-676); `Gc.EZa/w_a` gating inputs
+(L676); `wd.ws` setter beyond init/clone (L490/L493/L536); `Vx.v1/wgb`,
+`Era` reset scope (L510/L525); `Dga` per-round-only confirm (L380/L409);
+`Wsb/m$/fe.wqb/Cqb/ZAa/DL` presentation tails (L396-397);
+`Ja.ki(1292)`→file numeric proof (§A8).

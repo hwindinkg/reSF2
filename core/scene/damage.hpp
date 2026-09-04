@@ -19,6 +19,7 @@
 // Application (Cgb): lethal check (hp < bR -> Zi = hp + 0.01, lethal),
 // invulnerable -> 0, HP -= Zi.
 
+#include <algorithm>
 #include <map>
 #include <string>
 
@@ -76,6 +77,13 @@ struct FightParams {
     float damage_factor_max = 20000.0f;   // Zpa
     std::string damage_factor_attr = "DamageFactor";
     std::string slowmotion_defense = "";  // lNa
+    // Shock config (JS `hw` = `v.Ub`, parsed L1194-1196 from
+    // internal_settings.xml `<Shock>` — values verified 2026-09-04).
+    float shock_threshold = 999.0f;     // `Treshold.Value`
+    float shock_frame_reduction = 0.001f;  // `FrameReduction.Value` (Xza)
+    int shock_loosening_delay = 12;     // `LooseningDelay.Frames` (MFa)
+    float shock_crit_base = 0.0001f;    // `CriticalHitChance.Base`
+    float shock_head_base = 0.0001f;    // `HeadHitChance.Base`
     // AlignTargetAttributes (JS `v.wv`): attribute name -> Align value.
     std::map<std::string, float> align_target_attributes;
 
@@ -99,13 +107,15 @@ struct IntervalDamage {
 
 // The damage computation result (JS `wd.Bb` = `pu` L558).
 struct HitRecord {
-    float raw_damage = 0.0f;   // `bR` — from bCa
-    float final_damage = 0.0f; // `Zi` — after the lethal check
+    float raw_damage = 0.0f;   // `bR` - from bCa
+    float final_damage = 0.0f; // `Zi` - after the lethal check
     bool lethal = false;       // `Iza`
     bool blocked = false;      // `block`
     bool critical = false;     // `se`
     bool shock = false;        // `Ub`
+    bool disarm = false;       // `Yi` (false for unarmed - Au==owned, L394)
     bool head_hit = false;     // `Uq`
+    bool first_hit = false;    // `ep` (first landed hit of the round, !Dga)
     std::string defense;       // `JP` — the defense attribute name used
     std::string target_part;   // the hit capsule's BodyPart
     std::string hit_edge;      // the ATTACKER's edge that landed
@@ -153,5 +163,70 @@ float crit_chance(const FighterParams& attacker,
 // Whether a crit roll succeeds (JS `v.Lcb` L604 + `Da.cT` L1200):
 //   chance > 100 || random01 * 100 < chance
 bool roll_crit(float chance);
+
+// ---------------------------------------------------------------------------
+// Shock / pain / disarm (JS `wd` L490/L517-528 + `R8a` L531-532)
+// ---------------------------------------------------------------------------
+
+// Per-fighter shock state (JS `wd` fields, init L490:
+// `sr=0, vc=sn=false, Wx=-1, ws=false`).
+struct ShockState {
+    float pain_sr = 0.0f;    // `sr` - accumulates Zi, decays per frame
+    bool shocked_vc = false;  // `vc` - shock/disarm latch (vetoes re-shock)
+    bool disarm_sn = false;   // `sn` - disarm latch (no re-arm while set)
+    int weapon_wx = -1;       // `Wx` - pickup timer, frames (-1 = idle)
+    bool weapon_ws = false;   // `ws` - weapon strike (adds 0 pain; ola OPEN)
+};
+
+// JS `Orb(a)` (L517): `sr+=a; return !vc && sr>threshold`.
+inline bool orb_hit(ShockState& st, float add, float threshold) {
+    st.pain_sr += add;
+    return !st.shocked_vc && st.pain_sr > threshold;
+}
+
+// JS `Pnb` (L528): `sr=max(sr-Xza,0)` decay every tick; the pickup timer
+// `!vc&&Wx>=0&&(Wx==0&&Wqb(),Wx--)` — returns true exactly when `Wqb`
+// (weapon pickup) must fire.
+inline bool shock_tick(ShockState& st, float frame_reduction) {
+    st.pain_sr = std::max(0.0f, st.pain_sr - frame_reduction);
+    if (!st.shocked_vc && st.weapon_wx >= 0) {
+        if (st.weapon_wx == 0) {
+            st.weapon_wx = -1;
+            return true;
+        }
+        --st.weapon_wx;
+    }
+    return false;
+}
+
+// JS `wd.R8a(attacker)` decider on the TARGET (L531-532), verbatim shape:
+//   `ecb->true` (`ecb=false`, L2475); `vc->false`;
+//   `b=Zi/atk.so`; `c=Orb(ws?0:b)`; `e=f=false`;
+//   `se&&(e=a*b>RJa)`; `Uq&&!block&&(f=d*b>RJa)`; return `(c||f)?true:e`.
+// `crit_term` = `iya*hya`-attribute, `head_term` = `pDa*oDa`-attribute
+// (both `Base + attr` per the `p8a` pattern; OPEN exact formula).
+// `crit_roll`/`head_roll` are `uf.RJa()` draws (port: the fight stream).
+// The decomposition mirrors combat_golden.js `r8a()` (S8 vectors).
+struct R8aOut {
+    bool raw = false;    // return value: feeds BOTH `Bb.Ub` and `Bb.Yi`
+    bool pain_c = false;  // `c` — Orb pain-shock
+    bool crit_e = false;  // `e` — crit-shock term
+    bool head_f = false;  // `f` — head-shock term
+};
+inline R8aOut r8a_decide(bool ecb, bool target_vc, float zi_over_so,
+                         bool pain_shock_c, float crit_term, bool se, float crit_roll,
+                         float head_term, bool head_zone_uq, bool blocked, float head_roll) {
+    R8aOut o;
+    if (ecb) {
+        o.raw = true;
+        return o;
+    }
+    if (target_vc) return o;
+    o.pain_c = pain_shock_c;
+    if (se) o.crit_e = crit_term * zi_over_so > crit_roll;
+    if (head_zone_uq && !blocked) o.head_f = head_term * zi_over_so > head_roll;
+    o.raw = (o.pain_c || o.head_f) ? true : o.crit_e;
+    return o;
+}
 
 }  // namespace sf2::scene

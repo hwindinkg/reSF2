@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "scene/ai.hpp"
+#include "scene/damage.hpp"
 #include "scene/move_def.hpp"
 
 namespace {
@@ -183,6 +184,61 @@ int main() {
         std::printf("%s{\"i\": %d, \"move\": \"%s\", \"stage\": %d}",
                     i ? ", " : "", i, mv.c_str(), ai.last_stage());
     }
-    std::printf("]\n}\n");
+    std::printf("],\n");
+
+    // ---- combat vectors (mirror combat_golden.js S5/S6 via the SAME free
+    // functions the fight uses: orb_hit / shock_tick / r8a_decide) ----
+    {
+        // S5: pain seq 40/40/40 @ threshold 100 -> [f,f,t], sr=120.
+        // NOTE: sequenced statements (printf arg order is unspecified).
+        sf2::scene::ShockState st;
+        const bool q0 = sf2::scene::orb_hit(st, 40.0f, 100.0f);
+        const bool q1 = sf2::scene::orb_hit(st, 40.0f, 100.0f);
+        const bool q2 = sf2::scene::orb_hit(st, 40.0f, 100.0f);
+        std::printf("  \"pain_seq\": [%s, %s, %s],\n",
+                    q0 ? "true" : "false", q1 ? "true" : "false",
+                    q2 ? "true" : "false");
+        std::printf("  \"pain_sr\": %.1f,\n", static_cast<double>(st.pain_sr));
+        // S5 weapon strike adds 0.
+        sf2::scene::ShockState stw;
+        sf2::scene::orb_hit(stw, 0.0f, 100.0f);
+        std::printf("  \"pain_weapon_adds\": %.1f,\n",
+                    static_cast<double>(stw.pain_sr));
+        // S5 decay: sr=120 Xza=30 -> 90.
+        sf2::scene::ShockState std_;
+        std_.pain_sr = 120.0f;
+        sf2::scene::shock_tick(std_, 30.0f);
+        std::printf("  \"pain_decay\": %.1f,\n",
+                    static_cast<double>(std_.pain_sr));
+        // S5 vc veto: shocked target cannot re-shock.
+        const bool veto = sf2::scene::r8a_decide(
+            false, true, 50.0f, false, 81.0f, true, 0.0f, 81.0f, true, false, 0.0f).raw;
+        std::printf("  \"r8a_veto\": %s,\n", veto ? "true" : "false");
+        // S8 head-hit path (Zi=30, atkSo=3 -> b=10; sr=0/threshold=100;
+        // crit_term=0*0, se=false; head_term=0.2*2=0.4, Uq, rHead=0.5).
+        sf2::scene::ShockState s8;
+        const float b8 = 30.0f / 3.0f;
+        const bool c8 = sf2::scene::orb_hit(s8, b8, 100.0f);
+        const sf2::scene::R8aOut r8 = sf2::scene::r8a_decide(
+            false, false, b8, c8, 0.0f, false, 0.9, 0.4, true, false, 0.5);
+        sf2::scene::ShockState s8b;
+        const bool c8b = sf2::scene::orb_hit(s8b, b8, 100.0f);
+        const sf2::scene::R8aOut r8b = sf2::scene::r8a_decide(
+            false, false, b8, c8b, 0.0f, false, 0.9, 0.4, true, true, 0.5);
+        std::printf("  \"r8a\": {\"raw\": %s, \"headF\": %s, \"critE\": %s, \"painShock\": %s},\n",
+                    r8.raw ? "true" : "false", r8.head_f ? "true" : "false",
+                    r8.crit_e ? "true" : "false", r8.pain_c ? "true" : "false");
+        std::printf("  \"r8a_blocked\": {\"raw\": %s},\n",
+                    r8b.raw ? "true" : "false");
+        // S6: Wx=5 fires wqb on the 6th tick, Wx ends -1.
+        sf2::scene::ShockState st6;
+        st6.weapon_wx = 5;
+        std::printf("  \"wqb_fires\": [");
+        for (int i = 0; i < 7; ++i) {
+            const bool fire = sf2::scene::shock_tick(st6, 0.0f);
+            std::printf("%s%s", i ? ", " : "", fire ? "\"wqb\"" : "null");
+        }
+        std::printf("],\n  \"wqb_wx_end\": %d\n}\n", st6.weapon_wx);
+    }
     return 0;
 }

@@ -149,6 +149,7 @@ struct FightFighter {
     float max_hp = 0.0f;      // `parameters.Zn`
     int rounds_won = 0;       // `parameters.ng` — rounds won
     bool is_winner = false;   // `zd` — the round/battle winner flag
+    sf2::scene::ShockState shock;  // pain/shock/disarm (`sr/vc/sn/Wx/ws`, L490)
     int hits_landed = 0;
     int hits_taken = 0;
     int moves_started = 0;
@@ -471,6 +472,8 @@ private:
     const FightFighter* winner_ = nullptr;
     bool auto_attack_ = false;     // the demo's simple auto-attack driver
     bool round_live_ = false;      // JS `h9` — a round is in progress
+    bool dga_ = false;             // JS `Dga` — a hit landed this round
+                                   // (`ep` = !Dga, L394; init false L380)
     bool round_wait_ = false;      // JS: the host waits for the player's
                                    // Next between rounds (vhb L410 -> Z2)
     // The StartStance input buffer (JS `wd.WC` L426 + `llb` L429): ONE slot
@@ -479,8 +482,11 @@ private:
     sf2::scene::key_type start_buffer_key_ = sf2::scene::key_type::up;
     bool start_buffer_filled_ = false;
     // JS `Cl.ia` one-shot (`dW`, L566-567): last-tested (move, interval)
-    // per attacker name — the same attack object never tests twice in a row.
+    // per attacker name - the same attack object never tests twice in a row.
+    // Reset on every new move start (JS `wd.x3` -> `Fu.hob()`, dW=null), so
+    // repeat swings of the same move re-test.
     std::map<std::string, std::pair<const void*, const void*>> cl_last_;
+    std::map<std::string, const void*> cl_move_;
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
     int start_stance_frames_ = 0;  // phase 1 hold counter
     int end_stance_frames_ = 0;    // phase 3 hold (the FIGHT!/KO banner)
@@ -544,6 +550,10 @@ private:
                   int frame, sf2::scene::HitCapsule& hit_cap,
                   sf2::scene::CapsuleHit& ch,
                   const sf2::scene::Interval*& hit_interval);
+    // JS `wd.HZa` gate position (hzaGate L500-501): yD(4) pick + invuln
+    // bypass check BEFORE geometry. Returns the interval to test, or null.
+    const sf2::scene::Interval* hza_pick(const FightFighter& target,
+                                         const sf2::scene::MoveDef& move, int frame);
     // Applies a landed hit (damage + knockback; JS `ca.Cgb` L394-397).
     void apply_hit(FightFighter& atk, FightFighter& def,
                    const sf2::scene::MoveDef& move, const sf2::scene::Interval& iv,

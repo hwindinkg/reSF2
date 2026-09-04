@@ -422,6 +422,7 @@ void FightController::round_start() {
     // between_rounds_recover() when the previous round ends.
     round_.number++;
     round_init();
+    dga_ = false;  // JS `Dga` reset per round (L409)
     // The ROUND N banner (presentation only — see banner_kind).
     cur_banner_ = banner_kind::round;
     banner_round_ = round_.number;
@@ -675,19 +676,29 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                                const sf2::scene::Interval*& hit_interval) {
     // JS `Cl.ia` one-shot (`dW`, L566-567): the same attack object never
     // tests twice in a row — without this every overlapped frame re-hits.
+    // HZa position (hzaGate L500-501): the caller runs the yD(4)+invuln
+    // gate FIRST; geometry here tests ONLY the first active Attack
+    // interval (`da.yD(4)` — single-d semantics), not every interval.
     auto& last = cl_last_[atk.name];
+    const sf2::scene::Interval* d = nullptr;
     for (const sf2::scene::Interval& iv : move.intervals) {
         if (iv.type != 4) continue;  // Attack
         const int s = std::max(iv.start, move.first_frame);
         const int e = iv.end;
-        if (!(s <= frame && frame <= e)) continue;
-        const auto key = std::make_pair(static_cast<const void*>(&move),
-                                        static_cast<const void*>(&iv));
-        if (last == key) continue;  // dW: already tested
-        last = key;
+        if (s <= frame && frame <= e) {
+            d = &iv;
+            break;
+        }
+    }
+    if (d == nullptr) return false;
+    const auto key = std::make_pair(static_cast<const void*>(&move),
+                                    static_cast<const void*>(d));
+    if (last == key) return false;  // dW: already tested
+    last = key;
+    {
         // JS `!c.aEa` (L566-567): no AttackingParts = always connects
         // (11/618 shipped attack intervals); contact = target COM capsule.
-        if (iv.attacking_parts.empty()) {
+        if (d->attacking_parts.empty()) {
             for (const auto& tgt : def.body.capsules) {
                 if (!tgt.collidable) continue;
                 hit_cap = tgt;
@@ -695,25 +706,56 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                 ch.point.x = (tgt.p1.x + tgt.p2.x) * 0.5f;
                 ch.point.y = (tgt.p1.y + tgt.p2.y) * 0.5f;
                 ch.point.z = (tgt.p1.z + tgt.p2.z) * 0.5f;
-                hit_interval = &iv;
+                hit_interval = d;
                 return true;
             }
-            continue;
+            return false;
         }
-        for (const std::string& edge : iv.attacking_parts) {
+        for (const std::string& edge : d->attacking_parts) {
             const sf2::scene::HitCapsule* atk_cap = atk.body.by_name(edge);
             if (atk_cap == nullptr) continue;
             for (const auto& tgt : def.body.capsules) {
                 if (!tgt.collidable) continue;
                 if (sf2::scene::capsule_capsule_overlap(*atk_cap, tgt, ch)) {
                     hit_cap = tgt;
-                    hit_interval = &iv;
+                    hit_interval = d;
                     return true;
                 }
             }
         }
     }
     return false;
+}
+
+// JS `wd.HZa` gate position (hzaGate L500-501): the yD(4) pick + the
+// invuln/bypass check run BEFORE geometry (a blocked chain must not
+// consume dW). Returns the attack interval to test, or null.
+const sf2::scene::Interval* FightController::hza_pick(const FightFighter& target,
+                                                      const sf2::scene::MoveDef& move,
+                                                      int frame) {
+    const sf2::scene::Interval* d = nullptr;
+    for (const auto& iv : move.intervals) {
+        if (iv.type != 4) continue;
+        const int s = std::max(iv.start, move.first_frame);
+        if (s <= frame && frame <= iv.end) {
+            d = &iv;
+            break;
+        }
+    }
+    if (d == nullptr) return nullptr;
+    // No chain while the TARGET holds Invulnerable (yD(6)) unless the
+    // attack bypasses (`jga` && (`iga` empty || `SZa(iga)`)).
+    if (target.fighter.has_invuln()) {
+        const bool bypass =
+            d->ignores_invuln &&
+            (d->invuln_bypass_names.empty() ||
+             std::any_of(d->invuln_bypass_names.begin(),
+                         d->invuln_bypass_names.end(), [&](const std::string& n) {
+                             return target.fighter.active_intervals().count(n) > 0;
+                         }));
+        if (!bypass) return nullptr;
+    }
+    return d;
 }
 
 // JS `ca.Cgb` (L394-397): apply a landed hit — the bCa damage, the lethal
@@ -737,7 +779,17 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         def.fighter.clear_block();
     }
     const bool blocked = def.fighter.has_block();
-    const bool critical = false;  // 5.3: crit roll (suppressed when blocked)
+    // JS `wd.strike` crit (L510): `se = !block && !g.a3 && Lcb(A9a())`;
+    // `Lcb(a)` = `Da.cT(a*100)` (L1204): `a>1 -> true` (the `a>b` shortcut)
+    // else a fresh draw `< a`. `A9a = pga?100:gya.p8a` (L529; `pga` setter
+    // OPEN -> false path). Draws come from the fight stream (`RJa` analog;
+    // merged stream documented in MASTER_TODO).
+    const float a9 = sf2::scene::crit_chance(atk.params);
+    // `roll01_` may be empty in unit contexts — fall back to a fixed draw
+    // (deterministic; never consumes the shared stream when unset).
+    auto draw01 = [this]() { return roll01_ ? roll01_() : 0.5f; };
+    const bool critical =
+        !blocked && !iv.no_critical && (a9 > 1.0f || draw01() < a9);
     const std::string defense_attr = sf2::scene::select_defense(idmg, blocked, &hit_cap);
     const float dmg = sf2::scene::compute_damage(idmg, atk.params, def.params, defense_attr,
                                                  blocked, critical, &hit_cap);
@@ -748,9 +800,57 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     rec.hit_edge = iv.attacking_parts.empty() ? "" : iv.attacking_parts[0];
     rec.blocked = blocked;
     rec.critical = critical;
+    // JS `wd.R8a` shock decider on the target (L531-532 + L511):
+    // `Uq` = head-zone hit; `b = Zi/atk.so` (`so` OPEN -> 1.0); `ws`
+    // (weapon strike, `ola` OPEN -> false, so body strikes add pain);
+    // crit/head terms = Base + attr (`p8a` pattern, OPEN exact formula).
+    rec.head_hit = hit_cap.body_part == "Head";
+    {
+        const sf2::scene::FightParams& gfp = sf2::scene::FightParams::defaults();
+        const float b = dmg;  // Zi/so with so=1.0 (OPEN)
+        const bool pain_c = sf2::scene::orb_hit(
+            def.shock, atk.shock.weapon_ws ? 0.0f : b, gfp.shock_threshold);
+        const float crit_term =
+            gfp.shock_crit_base + atk.params.attr("ShockCriticalHitChance");
+        const float head_term =
+            gfp.shock_head_base + atk.params.attr("ShockHeadHitChance");
+        const bool ub = sf2::scene::r8a_decide(
+            false, def.shock.shocked_vc, b, pain_c, crit_term, critical, draw01(),
+            head_term, rec.head_hit, blocked, draw01()).raw;
+        rec.shock = ub;
+        // JS `Cgb` shock apply (L394): `Ub&&(vc?Ub=false:vc=true)`.
+        if (ub) {
+            if (def.shock.shocked_vc) {
+                rec.shock = false;
+            } else {
+                def.shock.shocked_vc = true;
+            }
+        }
+        // JS `Cgb` disarm (L394): `Yi&&(d=$b(Au); sn||own?Yi=false:...)`.
+        // The port has no weapon items: unarmed fighters always take the
+        // `ownHd` path -> Yi=false. `Wqb` item-swap body is OPEN.
+        rec.disarm = false;
+    }
     rec.frame = frame;
+    // JS `ep` (L394): `Bb.ep = !Dga`, and `Dga` latches ONLY inside the
+    // unblocked branch (`b.block || (hT(5), Dga=!0, ...)` — blocked hits
+    // neither break block nor consume first-hit status).
+    rec.first_hit = !dga_;
+    if (!blocked) {
+        dga_ = true;
+    }
     sf2::scene::apply_damage(rec, def.hp, false);
     def.hp = rec.hp_after;
+
+    // Event flags for the golden trace (JS `Sba` L393: Defense/Animation/
+    // Critical/Shock/Block/Damage) — one line per landed hit.
+    if (critical || rec.shock || blocked || rec.first_hit) {
+        std::fprintf(stdout, "[hit] F%d %s->%s dmg=%.2f%s%s%s%s\n", frame,
+                     atk.name.c_str(), def.name.c_str(), rec.final_damage,
+                     critical ? " CRIT" : "", rec.shock ? " SHOCK" : "",
+                     blocked ? " BLOCK" : "", rec.first_hit ? " FIRST" : "");
+        std::fflush(stdout);
+    }
 
     // JS `ca.Cgb` (L394-397): `b.block || (model.hT(5), Dga, ...)` — a
     // landed UNBLOCKED hit destroys the target's Block intervals and picks
@@ -794,6 +894,17 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
 // `de.ia` path (see core/scene/README.md).
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
     me.fighter.set_enemy_x(foe.fighter.world_x());
+    // JS `wd.x3` -> `Fu.hob()` (dW=null): every new move start resets the
+    // Cl one-shot, so a repeat swing of the same move re-tests instead of
+    // being skipped forever by the (move, interval) key.
+    {
+        const void* cur = static_cast<const void*>(me.fighter.current_move());
+        auto it = cl_move_.find(me.name);
+        if (it == cl_move_.end() || it->second != cur) {
+            cl_move_[me.name] = cur;
+            cl_last_.erase(me.name);
+        }
+    }
     // [FIX Phase 4b — fighters stay in the arena] The root-motion walk
     // (Fighter::advance) moves world_x freely; clamp it to the arena walls
     // (the params walls at ±(Width/2 - Wall)) so a fighter can't walk out of
@@ -869,6 +980,19 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             ctx.dist_3d = std::fabs(ctx.dist_x);
             ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
             me.fighter.ai_start_move(idle_it->second, ctx);
+        }
+    }
+
+    // JS `wd.Pnb` (L528): pain decay + weapon-pickup timer, every fighter
+    // tick. `Wqb` fires the pickup (unarmed fighters never arm it — Yi is
+    // always false for them — so this is a no-op with shipped data, but
+    // the decay is live and the stream position of future draws is kept).
+    {
+        const sf2::scene::FightParams& gfp = sf2::scene::FightParams::defaults();
+        if (sf2::scene::shock_tick(me.shock, gfp.shock_frame_reduction)) {
+            std::fprintf(stdout, "[fight] F%d %s WQB pickup timer fired\n",
+                         frame_, me.name.c_str());
+            std::fflush(stdout);
         }
     }
 
@@ -1119,36 +1243,15 @@ void FightController::update(float dt) {
             sf2::scene::HitCapsule hit_cap;
             sf2::scene::CapsuleHit ch;
             bool hit_player = false, hit_enemy = false;
-            if (p_move != nullptr) {
+            if (p_move != nullptr &&
+                hza_pick(enemy_, *p_move, player_.fighter.move_frame()) != nullptr) {
                 hit_enemy = hit_test(player_, enemy_, *p_move, player_.fighter.move_frame(),
                                      hit_cap, ch, hit_iv);
             }
-            if (e_move != nullptr && !hit_enemy) {
+            if (e_move != nullptr && !hit_enemy &&
+                hza_pick(player_, *e_move, enemy_.fighter.move_frame()) != nullptr) {
                 hit_player = hit_test(enemy_, player_, *e_move, enemy_.fighter.move_frame(),
                                       hit_cap, ch, hit_iv);
-            }
-            if (hit_iv != nullptr) {
-                // JS `wd.HZa` (L500-501): no chain while the TARGET holds an
-                // Invulnerable interval (`yD(6)`) unless the attack bypasses
-                // (`jga` && (`iga` empty || `SZa(iga)` — any bypass name in
-                // the target's active set)).
-                const FightFighter& target = hit_enemy ? enemy_ : player_;
-                bool chained = true;
-                if (target.fighter.has_invuln()) {
-                    const bool bypass =
-                        hit_iv->ignores_invuln &&
-                        (hit_iv->invuln_bypass_names.empty() ||
-                         std::any_of(hit_iv->invuln_bypass_names.begin(),
-                                     hit_iv->invuln_bypass_names.end(),
-                                     [&](const std::string& n) {
-                                         return target.fighter.active_intervals().count(n) > 0;
-                                     }));
-                    chained = bypass;
-                }
-                if (!chained) {
-                    hit_iv = nullptr;
-                    hit_enemy = hit_player = false;
-                }
             }
             if (hit_iv != nullptr) {
                 if (hit_enemy) {

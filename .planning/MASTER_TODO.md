@@ -168,6 +168,31 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
 - Phase 5 TODO: 5.2 combos (`HZa/tKa`, `yD(4/6)`, `jga/iga`, `SZa`, L499-501);
   5.3 crit/shock/disarm (`R8a`, `Orb/sr/threshold`, `Wqb/kwb/Wx`,
   L517-532 + helper §S4 vectors).
+- Phase 5 — 5.3 crit/shock/disarm + event flags (DONE 2026-09-04,
+  build + both goldens + 13/13 green):
+  - Real `hw` values resolved from `internal_settings.xml` `<Shock>`:
+    threshold=999, Xza=0.001, MFa=12, crit/head Base=0.0001 (+attrs).
+  - `ShockState` per fighter (`sr/vc/sn/Wx/ws`, L490) + free fns `orb_hit`
+    (L517), `shock_tick` = Pnb decay + Wqb-fire (L528), `r8a_decide` with
+    S8 decomposition (L531-532); `ShockConfig` on FightParams.
+  - `apply_hit`: se via Lcb-exact (`a9>1` shortcut else fight-stream draw;
+    `pga` OPEN→false path), R8a AFTER damage (Zi known), Ub→vc latch,
+    disarm structurally Yi=false (no weapon items; Wqb body OPEN),
+    `ep`/Dga (latched on UNBLOCKED only — cgbGuards transcription),
+    `[hit]` event line (CRIT/SHOCK/BLOCK/FIRST).
+  - Pnb ticked per fighter per tick in update_fighter.
+  - C++ mirror in ai_golden: S5/S6/S8 vectors via the SAME free fns.
+  - Combat golden verdict: 0 divergences (S5 pain/decay/veto, S6 Wx-fire,
+    S8 raw+decomposition+blocked). One harness bug caught (printf arg
+    order) — fixed, port was right.
+  - Runtime: BLOCK+FIRST flags observed live (idle Block intervals work);
+    no CRIT/SHOCK in smoke (threshold=999, crit ~1e-4 — expected).
+    Gc.DK reaction-pick + Wqb item-swap remain OPEN; `atk.so`=1.0 OPEN;
+    RJa draws merged into fight stream (documented approximation).
+  - Regression: fight healthy + loop 13/13 PASS post-change.
+- Phase-6 leads still open: enemy phase-2 march to 1179 (oracle holds ~615;
+  advance/retreat tuning, needs real-fight oracle to judge); `eval_random`
+  stream threading; `xaa` Ju-horizon; `iwb` eh-reset; kJ-vs-Xh.
 - Phase 6 — AI 1:1 (IN PROGRESS 2026-09-04, static-first):
   - [x] `DaPrng` exact port (`Xx`+`Rk`, L2352/2366; anchor `B0(1)=1103527590`
     hand-verified; Node↔Python independent transcriptions 0 diffs).
