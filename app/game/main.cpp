@@ -340,7 +340,7 @@ static const UiTourStep kUiTourSteps[] = {
     // results flow pops back to the hub, unlike the loop's map route).
     {640.0f, 360.0f, "results->dojo", 10, 10, 3, 0, nullptr},
     // 12: Dojo -> Settings (SETUP).
-    {85.0f, 34.0f, "dojo->settings", 3, 10, 11, 60, "port_settings.png"},
+    {85.0f, 34.0f, "dojo->settings", 3, 10, 11, 0, "port_settings.png"},
 };
 constexpr int kUiTourStepCount = static_cast<int>(sizeof(kUiTourSteps) / sizeof(kUiTourSteps[0]));
 

@@ -438,6 +438,7 @@ Dojo verdict: PASS (structural) — hint rows non-overlapping + readable,
 buttons/disciple/setup fitted+centered, modal fitted, atlas telemetry
 (`btn_back` the only miss; Dojo/Map/Shop/Profile frames resolve).
 Pushed per-screen per user order.
+- Results/Pause/Settings PASS + PUSHED: fitted titles/labels/buttons; pause menu labeled (was flat-only); settings BACK debounce (push-frame held-click race); modal/title/quest-toast fitted.
 - Map PASS + PUSHED: tabs/series/nodes/badges/BRACKET/BACK fitted via draw_ui_label; act-overlay/modal exclusive (modal wins); BOSS overlay fitted. - Shop PASS + PUSHED: tabs/cards/markers/wallet/delivery/wielding/BACK fitted; Dojo chrome top-gated (disciple/SETUP no longer leak onto Shop); modal top-gated (single instance on layered stack).
 Dense-node label collisions remain (nodes ~60px apart, data-driven; needs leader-line layout, follow-up).
 - Profile PASS + PUSHED: header/slots/cards/dline/MOVES/BACK fitted; slot+card labels added (were flat-only). Hint-bar-under-profile is the allowed global overlay (dimmed).

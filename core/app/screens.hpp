@@ -376,6 +376,7 @@ public:
 private:
     bool music_off_ = false;
     int hover_ = -1;
+    int age_ = 0;  // frames since push (BACK press debounce)
 };
 
 // The moves list — learned moves for the wielded weapon (native moves

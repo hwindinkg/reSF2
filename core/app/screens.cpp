@@ -3059,14 +3059,23 @@ void FightScreen::render_impl(App& app) {
         const float dim[] = {0, 0,         kViewW, 0,         kViewW, kViewH,
                              0, 0,         kViewW, kViewH,    0,      kViewH};
         ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.65f);
-        (void)app.draw_text(kViewW * 0.5f - 70.0f, 200.0f, "PAUSED", 1.4f, 1.0f, 1.0f,
-                            1.0f);
+        draw_ui_label(app, kViewW * 0.5f - 200.0f, 200.0f, 400.0f, 44.0f, "PAUSED", 1.4f,
+                      UiAlign::Center, 1.0f, 1.0f, 1.0f);
         draw_flat_button(app, "RESUME", kViewW * 0.5f, 280.0f, 320.0f, 64.0f, 0.25f, 0.5f,
                          0.3f, false);
+        draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 280.0f - 14.0f,
+                          320.0f - 16.0f, 28.0f, "RESUME", 1.0f, UiAlign::Center,
+                          1.0f, 1.0f, 1.0f);
         draw_flat_button(app, "RESTART", kViewW * 0.5f, 370.0f, 320.0f, 64.0f, 0.5f,
                          0.45f, 0.25f, false);
+        draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 370.0f - 14.0f,
+                          320.0f - 16.0f, 28.0f, "RESTART", 1.0f, UiAlign::Center,
+                          1.0f, 1.0f, 1.0f);
         draw_flat_button(app, "QUIT TO MAP", kViewW * 0.5f, 460.0f, 320.0f, 64.0f, 0.5f,
                          0.3f, 0.3f, false);
+        draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 460.0f - 14.0f,
+                          320.0f - 16.0f, 28.0f, "QUIT TO MAP", 1.0f, UiAlign::Center,
+                          1.0f, 1.0f, 1.0f);
     }
 }
 
@@ -3219,19 +3228,19 @@ void ResultsScreen::render_impl(App& app) {
     const sf2::data::font* fnt = app.menu_font();
     if (fnt != nullptr) {
         const unsigned int ftex = app.font_texture();
-        (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, 150.0f,
-                                     player_won_ ? "VICTORY" : "DEFEAT", 1.6f,
-                                     player_won_ ? 1.0f : 0.8f,
-                                     player_won_ ? 0.85f : 0.3f,
-                                     player_won_ ? 0.3f : 0.3f);
+        draw_ui_label(app, kViewW * 0.5f - 400.0f, 150.0f, 800.0f, 50.0f,
+                      player_won_ ? "VICTORY" : "DEFEAT", 1.6f, UiAlign::Center,
+                      player_won_ ? 1.0f : 0.8f,
+                      player_won_ ? 0.85f : 0.3f,
+                      player_won_ ? 0.3f : 0.3f);
         // Prize breakdown (JS `v.kD`/`bzb` factor lines, FLOW_STATIC §4.3:
         // Perfect $Ia=5, FirstStrike ep=2, Combo Ui=1/combo, Shock Ub=3).
         // Gems (JS hj.Uo) are untracked by prize() — no line (see report).
         if (player_won_) {
             float y = 250.0f;
             auto line = [&](const std::string& s) {
-                (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, y, s, 0.85f,
-                                             1.0f, 1.0f, 1.0f);
+                draw_ui_label(app, kViewW * 0.5f - 300.0f, y, 600.0f, 26.0f, s, 0.85f,
+                              UiAlign::Center, 1.0f, 1.0f, 1.0f);
                 y += 30.0f;
             };
             line("Coins: " + std::to_string(prize_base_) + " + bonus " +
@@ -3247,8 +3256,8 @@ void ResultsScreen::render_impl(App& app) {
             line("EXP +" + std::to_string(exp_reward_));
         }
         if (!quest_toast_.empty()) {
-            (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, kViewH * 0.62f,
-                                         quest_toast_, 0.9f, 1.0f, 0.9f, 0.4f);
+            draw_ui_label(app, kViewW * 0.5f - 300.0f, kViewH * 0.62f, 600.0f, 28.0f,
+                              quest_toast_, 0.9f, UiAlign::Center, 1.0f, 0.9f, 0.4f);
         }
     }
     std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
@@ -4006,6 +4015,7 @@ void EquipmentScreen::render_impl(App& app) {
 SettingsScreen::SettingsScreen(ScreenManager& mgr) : Screen(mgr, "Settings") {}
 
 void SettingsScreen::update_impl(float dt) {
+    ++age_;  // press debounce: ignore the push-frame held click
     (void)dt;
     const App::PointerState& p = app().pointer();
     hover_ = -1;
@@ -4013,10 +4023,12 @@ void SettingsScreen::update_impl(float dt) {
     if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
         hover_ = 0;
         if (p.pressed) {
+        if (age_ > 10) {
             std::fprintf(stdout, "[settings] BACK -> previous screen\n");
             std::fflush(stdout);
             manager().pop();
             return;
+        }
         }
     }
     // MUSIC toggle (working): OFF stops the track, ON replays the last
@@ -4045,21 +4057,21 @@ void SettingsScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     const float bg[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(bg, 6, 0.07f, 0.08f, 0.11f, 1.0f);
-    (void)app.draw_text(kViewW * 0.5f - 90.0f, 120.0f, "SETTINGS", 1.4f, 1.0f, 1.0f,
-                        1.0f);
+    draw_ui_label(app, kViewW * 0.5f - 200.0f, 120.0f, 400.0f, 44.0f, "SETTINGS", 1.4f,
+                      UiAlign::Center, 1.0f, 1.0f, 1.0f);
     const std::string music_label =
         std::string("MUSIC: ") + (music_off_ ? "OFF" : "ON");
     draw_flat_button(app, music_label, kViewW * 0.5f, 300.0f, 320.0f, 64.0f,
                      hover_ == 1 ? 0.55f : 0.35f, 0.45f, 0.3f, hover_ == 1);
-    (void)app.draw_text(kViewW * 0.5f - 70.0f, 292.0f, music_label, 0.9f, 1.0f, 1.0f,
-                        1.0f);
+    draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 292.0f, 320.0f - 16.0f, 28.0f,
+                      music_label, 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     const bool sfx_on = sf2::audio::AudioEngine::instance().enabled();
     const std::string sfx_label =
         std::string("SOUND: ") + (sfx_on ? "ON (no runtime mute API)" : "OFF");
     draw_flat_button(app, sfx_label, kViewW * 0.5f, 390.0f, 320.0f, 64.0f, 0.25f, 0.25f,
                      0.3f, false);
-    (void)app.draw_text(kViewW * 0.5f - 150.0f, 382.0f, sfx_label, 0.8f, 0.6f, 0.6f,
-                        0.6f);
+    draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 382.0f, 320.0f - 16.0f, 28.0f,
+                      sfx_label, 0.8f, UiAlign::Center, 0.6f, 0.6f, 0.6f);
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
