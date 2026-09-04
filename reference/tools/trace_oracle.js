@@ -96,8 +96,15 @@
     lastFrame: -1,
     records: 0,
     hookedFight: null,
-    hookedPaths: { iPa: [], N0a: [] },
+    hookedPaths: { iPa: [], N0a: [], O0a: [] },
     wrappedDe: [null, null], /* legacy: superseded by deList scan */
+    deScanFight: null,
+    deList: null, /* [{obj, label}] every de in the fight graph */
+    deCount: 0,
+    lastDecider: null, /* label of the de with the latest Pqb/ia event */
+    methodHosts: null, /* {N0a:{host},O0a:{host}} for exact replay */
+    orecSeq: 0, /* INPUT-REC sequence number */
+    cO0a: 0, /* O0a (release) wrapper fire counter */
     deScanFight: null,
     deList: null, /* [{obj, label}] every de in the fight graph */
     deCount: 0,
@@ -224,6 +231,68 @@
     return "Enemy";
   }
 
+  /* Input event detail: Df carries {control, index} (+Gfa() type:
+   * 0 touch / 1 keyboard / 2 gamepad). Coordinates do NOT survive device
+   * mapping, so (control, index, type) is sufficient for exact replay. */
+  function inputDetail(a) {
+    var c = null, x = null, t = null;
+    try {
+      if (a && typeof a.control !== "undefined") c = a.control;
+    } catch (e) { /* ignore */ }
+    try {
+      if (a && typeof a.index === "number") x = a.index;
+    } catch (e) { /* ignore */ }
+    try {
+      if (a && typeof a.Gfa === "function") {
+        var g = a.Gfa();
+        if (typeof g === "number") t = g;
+      }
+    } catch (e) { /* ignore */ }
+    return { c: c, x: x, t: t };
+  }
+
+  /* Effective-input recorder: every input that passes Za gating and reaches
+   * the fight is logged for exact replay (record_inputs.py converts these
+   * to `atframe press/release` lines). */
+  function emitInputRec(m, det) {
+    try {
+      or.orecSeq++;
+      console.log("[INPUT-REC] " + JSON.stringify(
+        { f: frameNo(), i: or.orecSeq, m: m, c: det.c, x: det.x, t: det.t }));
+    } catch (e) { /* ignore */ }
+  }
+
+  /* Exact replay: re-inject a recorded effective input by calling the game's
+   * own input method with an equivalent {control, index, Gfa} object. Calls
+   * the WRAPPED method, so replayed inputs are logged identically to live
+   * ones (INPUT-REC echo + recent ring) — the echo is the mechanical
+   * replay-fidelity check. Za DEa lesson gates are still bypassed (no DOM),
+   * deterministically: the recorded stream was already post-gate. */
+  function replayInput(it) {
+    try {
+      var name = it.t === "press" ? "N0a" : "O0a";
+      var self = or.fight;
+      var fn = null;
+      try {
+        var h = or.methodHosts && or.methodHosts[name];
+        if (h && h.host && typeof h.host[name] === "function") {
+          self = h.host;
+          fn = h.host[name];
+        } else if (self && typeof self[name] === "function") {
+          fn = self[name];
+        }
+      } catch (e) { return; }
+      if (!fn || !self) return;
+      var tt = (typeof it.tt === "number") ? it.tt : 0;
+      var fake = {
+        control: it.c,
+        index: (typeof it.x === "number") ? it.x : 0,
+        Gfa: (function (t) { return function () { return t; }; })(tt)
+      };
+      fn.call(self, fake);
+    } catch (e) { /* ignore */ }
+  }
+
   /* ================= 4. Method wrappers (log in/out, delegate) ================= */
 
   function wrapPqb(de, side) {
@@ -288,15 +357,20 @@
         } catch (e) { /* ignore */ }
         return r;
       };
-    } else if (name === "N0a") {
+    } else if (name === "N0a" || name === "O0a") {
+      var isPress = (name === "N0a");
       host[name] = function (a) {
         var r = orig.apply(this, arguments);
         try {
-          or.cN0a++;
-          var ctl = (a && typeof a.control !== "undefined") ? a.control : null;
-          pushTrace({ m: "N0a", f: frameNo(), control: ctl, eu: num(this.eu) });
-          or.n0aRecent.push({ f: frameNo(), control: ctl });
-          while (or.n0aRecent.length > N0A_RECENT) or.n0aRecent.shift();
+          if (isPress) or.cN0a++; else or.cO0a++;
+          var det = inputDetail(a);
+          pushTrace({ m: name, f: frameNo(), control: det.c,
+            index: det.x, eu: num(this.eu) });
+          if (isPress) {
+            or.n0aRecent.push({ f: frameNo(), control: det.c });
+            while (or.n0aRecent.length > N0A_RECENT) or.n0aRecent.shift();
+          }
+          emitInputRec(name, det);
         } catch (e) { /* ignore */ }
         return r;
       };
@@ -306,6 +380,10 @@
     try {
       host.__orWrapped = host.__orWrapped || {};
       host.__orWrapped[name] = true;
+      host.__orOrig = host.__orOrig || {};
+      if (!host.__orOrig[name]) host.__orOrig[name] = orig;
+      or.methodHosts = or.methodHosts || {};
+      or.methodHosts[name] = { host: host };
     } catch (e) { /* ignore */ }
     return rootName + "." + found.path;
   }
@@ -316,14 +394,15 @@
     if (or.hookedFight === fight && or.hookedPaths.iPa.length) return;
     if (or.hookedFight !== fight) {
       or.hookedFight = fight;
-      or.hookedPaths = { iPa: [], N0a: [] };
+      or.hookedPaths = { iPa: [], N0a: [], O0a: [] };
     }
-    /* N0a lives on the fight controller (ca, top screen's Ig). iPa/xU live
-     * on the BFS-found timer host (fight screen Sf). */
-    try {
-      var p = wrapFightMethod(fight, "fight", "N0a");
-      if (p && or.hookedPaths.N0a.indexOf(p) < 0) or.hookedPaths.N0a.push(p);
-    } catch (e) { /* ignore */ }
+    /* N0a/O0a live on the fight controller (ca, top screen's Ig). */
+    ["N0a", "O0a"].forEach(function (nm) {
+      try {
+        var p = wrapFightMethod(fight, "fight", nm);
+        if (p && or.hookedPaths[nm].indexOf(p) < 0) or.hookedPaths[nm].push(p);
+      } catch (e) { /* ignore */ }
+    });
     try {
       var host = timerHost(fight);
       if (host) {
@@ -551,6 +630,7 @@
       hooked: {
         iPa: or.hookedPaths.iPa.slice(),
         N0a: or.hookedPaths.N0a.slice(),
+        O0a: or.hookedPaths.O0a.slice(),
         Pqb: pqb,
         "de.ia": ia
       }
@@ -592,8 +672,8 @@
       },
       round_timer_xU: tmr.xU,
       round_timer_NF: tmr.NF,
-      trace_stats: { Pqb: or.cPqb, ia: or.cIa, N0a: or.cN0a, iPa: or.ciPa,
-        deCount: or.deCount, decider: or.lastDecider },
+      trace_stats: { Pqb: or.cPqb, ia: or.cIa, N0a: or.cN0a, O0a: or.cO0a,
+        iPa: or.ciPa, deCount: or.deCount, decider: or.lastDecider },
       block_state: { me: bMe.a, enemy: bEn.a },
       block_info: { me: bMe.n, enemy: bEn.n },
       camera: camOf(fight)
@@ -690,15 +770,21 @@
     var i, it;
     for (i = 0; i < or.stimulus.length; i++) {
       it = or.stimulus[i];
-      if (it.done || it.down) continue;
-      if (fr >= it.f) {
-        fireDown(it);
-        it.down = true;
-        it.upAt = fr + (it.t === "drag" ? STIM_DRAG_UP : STIM_HOLD_FRAMES);
-        if (it.t === "drag") {
-          it.mx1 = it.f + 3;
-          it.mx2 = it.f + 5;
-        }
+      if (it.done) continue;
+      if (fr < it.f) continue;
+      /* Exact replay items call the game's own input methods directly. */
+      if (it.t === "press" || it.t === "release") {
+        replayInput(it);
+        it.done = true;
+        continue;
+      }
+      if (it.down) continue;
+      fireDown(it);
+      it.down = true;
+      it.upAt = fr + (it.t === "drag" ? STIM_DRAG_UP : STIM_HOLD_FRAMES);
+      if (it.t === "drag") {
+        it.mx1 = it.f + 3;
+        it.mx2 = it.f + 5;
       }
     }
     for (i = 0; i < or.stimulus.length; i++) {

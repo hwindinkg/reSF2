@@ -18,6 +18,10 @@ internal enum InputCommandKind
     AtFrame,
     /// <summary>Drag inner kind for AtFrame (X/Y start, X2/Y2 end).</summary>
     Drag,
+    /// <summary>Exact-replay press (KeyCode=control, X=index, Y=type).</summary>
+    Press,
+    /// <summary>Exact-replay release (KeyCode=control, X=index, Y=type).</summary>
+    Release,
 }
 
 /// <summary>
@@ -42,6 +46,8 @@ internal sealed record InputCommand(
 ///   atframe &lt;f&gt; tap &lt;x&gt; &lt;y&gt; — page-side tap at exact fight.frame f
 ///   atframe &lt;f&gt; key &lt;code&gt;        — page-side key at exact fight.frame f
 ///   atframe &lt;f&gt; drag &lt;x1&gt; &lt;y1&gt; &lt;x2&gt; &lt;y2&gt; — page-side joystick drag
+///   atframe &lt;f&gt; press &lt;c&gt; &lt;x&gt; &lt;t&gt; — exact replay: fight.N0a(control c)
+///   atframe &lt;f&gt; release &lt;c&gt; &lt;x&gt; &lt;t&gt; — exact replay: fight.O0a(control c)
 ///   # comment     — ignored (blank lines too)
 /// atframe items are forwarded to the page once (window.__oracleStimulus)
 /// and skipped by the wall-clock timer: landing frames are exact.
@@ -95,6 +101,16 @@ internal static class InputScriptParser
                     commands.Add(new InputCommand(InputCommandKind.AtFrame, X: dragX1, Y: dragY1,
                         Milliseconds: dragFrame, InnerKind: InputCommandKind.Drag,
                         X2: dragX2, Y2: dragY2));
+                    break;
+                case "atframe" when parts.Length >= 6 && int.TryParse(parts[1], out int prFrame)
+                    && (string.Equals(parts[2], "press", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(parts[2], "release", StringComparison.OrdinalIgnoreCase))
+                    && int.TryParse(parts[3], out int prControl) && int.TryParse(parts[4], out int prIndex)
+                    && int.TryParse(parts[5], out int prType):
+                    commands.Add(new InputCommand(InputCommandKind.AtFrame, KeyCode: prControl, X: prIndex,
+                        Y: prType, Milliseconds: prFrame,
+                        InnerKind: string.Equals(parts[2], "press", StringComparison.OrdinalIgnoreCase)
+                            ? InputCommandKind.Press : InputCommandKind.Release));
                     break;
                 default:
                     throw new FormatException($"Invalid input script line: '{rawLine}'");

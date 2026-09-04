@@ -65,6 +65,26 @@
   (c) drag-only скрипт для чистого детерминизм-прогона без flaky taps.
   Evidence: `reference/traces/oracle_run3.jsonl` / `oracle_run4.jsonl`
   (ignored, на диске) + `console.run*.log`; формат: `reference/traces/README.md`.
+- Prep wave (2026-09-04, перед ручным прохождением tutorial пользователем):
+  - Track A (replay-readiness): PASS (механика). Резолв input-пути по JS:
+    `Df{control,index}` + `Gfa()`-тип (L453), `Za` гейты `DEa` (L459),
+    `Nc.Lh` роутинг (L461), стик-сектора `ze.GBa` 1-8 (L463-471) — координат
+    после мэппинга нет, записи (control,index,type) достаточно для точного
+    реплея. Добавлены: `O0a`-враппер, `[INPUT-REC]`-запись эффективных
+    вводов, `atframe press/release` + page-side прямой реплей через
+    `fight.N0a/O0a` (минуя DOM и `DEa`, детерминированно),
+    `record_inputs.py`, `input_smoke.txt`. Smoke PASS: 4/4 press/release
+    в точных кадрах (150/160/200/210), 0 ERRs, round-trip побайтово точен.
+    Статика input-пути: `reference/AI_STATIC.md` §6.
+  - Track B (static AI): `reference/AI_STATIC.md` написан — полное дерево
+    `de.Pqb` (зоны/fk/шансы), `Md`/`cc.Gb`-формула, PRNG `Da/Xx` + все точки
+    сидирования, файлы значений (`res/tactic_settings.xml` +
+    `tactics/*.dat`), input/tick/таймер линии. OPEN-пункты помечены
+    (нужен runtime trace): fk=3/4/7/8, ResponseDelay-консумер, часть
+    `RJa`-контекстов, id→file для `Ja.ki(272/1314)`.
+  - READY FOR USER PLAYTHROUGH: инструкция в `reference/traces/README.md`
+    (запуск exe → играть → `[INPUT-REC]` в console.log →
+    `record_inputs.py` → replay дважды → сравнение sha).
 - Gate (фиксирован заранее): два прогона одного скрипта дают идентичный JSONL;
   в трейсе реально присутствуют все поля
   (`frame, phase, cf, ai_branch, ai_zone, chosen_move, chances{...},

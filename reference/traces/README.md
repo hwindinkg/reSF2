@@ -97,3 +97,38 @@ repeated runs start from identical state. The shell auto-closes when
   enemy, `PhysicalDummy` player, no round timer in the tutorial HUD).
   Hashes: run3 `75348487…52ec`, run4 `a7a11c1b…e356` (differ only from the
   input-flakiness above).
+
+## Input record / replay (prep wave, 2026-09-04)
+
+Game inputs are discrete post-device-mapping events: `Df{control, index}`
+(L453; subclasses fix the type via `Gfa()`: 0 touch / 1 keyboard / 2 gamepad).
+Controls: 1-8 stick sectors (`ze.GBa`, L463-471), 9/10 keyboard, 11 punch,
+12 kick, 14 special; `yJa`/`Gmb` consume them (L501). Coordinates do NOT
+survive mapping — recording `(control, index, type)` is sufficient for exact
+replay. Full input-path reference: `reference/AI_STATIC.md` §6.
+
+- Recording: the `ca.N0a` (press) / `ca.O0a` (release) wrappers emit
+  `[INPUT-REC] {"f","i","m":"N0a"|"O0a","c","x","t"}` per effective input
+  (post-`Za` gating). `reference/tools/record_inputs.py` converts a
+  console.log to a replay script (`atframe F press|release C X T`).
+- Replay: the shell forwards `atframe press/release` to the page, which
+  re-injects them pre-tick via direct `fight.N0a`/`fight.O0a` calls with
+  equivalent `{control, index, Gfa}` objects — bypassing DOM + `Za.DEa`
+  lesson gates deterministically (the recorded stream was already post-gate).
+  Replayed inputs flow through the same wrappers, so the `[INPUT-REC]` echo
+  is the mechanical fidelity check.
+- Verified 2026-09-04 (smoke): `input_smoke.txt` (press/release 11/12 at
+  f=150/160/200/210) → all four `[INPUT-REC]` at exact frames, 0 tracer
+  ERRs → `record_inputs.py` round-trips the 4 lines byte-identically.
+
+## READY FOR USER PLAYTHROUGH (manual tutorial run)
+
+1. Run: `& ./shell/bin/Release/net9.0-windows/OracleShell.exe --input-script reference/tools/input_phase1.txt`
+   (any script works; recording is automatic). A window opens with the game.
+2. Play through the tutorial with mouse/touch/keyboard. Every effective
+   input is recorded with its fight.frame — play as far as you like; the
+   shell auto-closes at fight.frame 600 (or 150s timeout).
+3. Recording lands in `reference/traces/console.log` as `[INPUT-REC]` lines.
+4. Convert: `python reference/tools/record_inputs.py reference/traces/console.log reference/traces/recorded_inputs.txt`
+5. Replay twice with `--input-script reference/traces/recorded_inputs.txt`,
+   extract both via `extract_oracle.py`, compare sha256 → gate re-run.

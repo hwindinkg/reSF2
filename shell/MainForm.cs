@@ -391,6 +391,10 @@ public sealed class MainForm : Form
                 ? $"{{f:{command.Milliseconds},t:'key',c:{command.KeyCode}}}"
                 : command.InnerKind == InputCommandKind.Drag
                 ? $"{{f:{command.Milliseconds},t:'drag',x1:{command.X},y1:{command.Y},x2:{command.X2},y2:{command.Y2}}}"
+                : command.InnerKind == InputCommandKind.Press
+                ? $"{{f:{command.Milliseconds},t:'press',c:{command.KeyCode},x:{command.X},tt:{command.Y}}}"
+                : command.InnerKind == InputCommandKind.Release
+                ? $"{{f:{command.Milliseconds},t:'release',c:{command.KeyCode},x:{command.X},tt:{command.Y}}}"
                 : $"{{f:{command.Milliseconds},t:'tap',x:{command.X},y:{command.Y}}}");
         }
 

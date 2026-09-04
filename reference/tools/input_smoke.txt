@@ -1,0 +1,11 @@
+# Smoke test for the exact-replay path (press/release verbs).
+# Injects punch (11) and kick (12) controls as touch (type 0) directly via
+# fight.N0a/O0a at exact fight.frames. Success = N0a/O0a recent in oracle
+# records shows controls 11/12 at the listed frames + no tracer ERRs.
+# (No visible fighter effect expected: tutorial lesson gates attacks.)
+wait 90000
+atframe 150 press 11 0 0
+atframe 160 release 11 0 0
+atframe 200 press 12 0 0
+atframe 210 release 12 0 0
+wait 120000
