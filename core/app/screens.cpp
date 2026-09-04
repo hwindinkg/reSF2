@@ -133,7 +133,8 @@ void draw_ui_label(App& app, float x, float y, float w, float h,
     (void)app.draw_text(dx, y, text, scale, r, g, b);
 }
 
-void draw_quest_modal(App& app, sf2::render::Renderer& ren) {
+void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) {
+    if (!is_top) return;  // layered stack: only the top screen draws the modal
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return;
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
@@ -1521,7 +1522,9 @@ void DojoScreen::render_impl(App& app) {
                           b.label, 1.0f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
     }
-    // Disciple sparring toggle (JS `Nfb` STUB — session-local only, see the
+    // Disciple sparring toggle (Dojo chrome: only when the Dojo is the
+    // top screen - never leaks onto Shop/Profile above it).
+    if (app.screens().top() == this) {
     // update handler; needs save Disciple/Y0 to switch the training setup).
     {
         const float cx = kViewW - 140.0f, cy = 40.0f, w = 220.0f, h = 44.0f;
@@ -1531,13 +1534,16 @@ void DojoScreen::render_impl(App& app) {
         draw_ui_label(app, cx - w * 0.5f + 8.0f, cy - 14.0f, w - 16.0f, 28.0f,
                           label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
+    }
     // Settings entry (mirrors the update rect above).
+    if (app.screens().top() == this) {
     draw_flat_button(app, "SETUP", 85.0f, 34.0f, 130.0f, 44.0f, 0.3f, 0.32f, 0.4f,
                      false);
     draw_ui_label(app, 85.0f - 65.0f + 8.0f, 34.0f - 14.0f, 130.0f - 16.0f, 28.0f,
                       "SETUP", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     // Sensei dialog modal on top of everything Dojo.
-    draw_quest_modal(app, ren);
+    }
+    draw_quest_modal(app, ren, app.screens().top() == this);
 }
 
 // ---------------------------------------------------------------------------
@@ -1874,6 +1880,8 @@ void MapScreen::render_impl(App& app) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
+                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
     // BRACKET button (bottom-right corner convention): the series bracket
     // for the current zone. Node taps live center-screen; the corner is
@@ -1908,7 +1916,7 @@ void MapScreen::render_impl(App& app) {
         }
     }
     // Sensei dialog modal on top of the map.
-    draw_quest_modal(app, ren);
+    draw_quest_modal(app, ren, app.screens().top() == this);
 }
 
 // ---------------------------------------------------------------------------
@@ -3599,13 +3607,13 @@ void ShopScreen::render_impl(App& app) {
         draw_flat_button(app, kShopTabs[t].label, cx, kShopTabY, kShopTabW - 8.0f,
                          kShopTabH, sel ? 0.72f : (hov ? 0.6f : 0.38f),
                          sel ? 0.6f : (hov ? 0.5f : 0.32f), sel ? 0.25f : 0.3f, hov);
-        (void)app.draw_text(cx - 52.0f, kShopTabY - 8.0f, kShopTabs[t].label, 0.7f, 1.0f,
-                            1.0f, 1.0f);
+        draw_ui_label(app, cx - kShopTabW * 0.5f + 6.0f, kShopTabY - 11.0f, kShopTabW - 12.0f, 22.0f,
+                          kShopTabs[t].label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
     const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
     if (rows.empty()) {
-        (void)app.draw_text(kShopX0 - 60.0f, kShopY0, "No items in this category yet.", 0.8f,
-                            0.7f, 0.7f, 0.7f);
+        draw_ui_label(app, kShopX0 - 60.0f, kShopY0 - 4.0f, 700.0f, 26.0f,
+                          "No items in this category yet.", 0.8f, UiAlign::Left, 0.7f, 0.7f, 0.7f);
     }
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const CatalogItem& it = items_[rows[i]];
@@ -3641,27 +3649,30 @@ void ShopScreen::render_impl(App& app) {
         // fields readable; render reads the update snapshot only).
         const bool owned = seen_.has_item(it.name);
         const bool equipped = owned && shop_slot_for(seen_, it.type) == it.name;
-        (void)app.draw_text(cx - card_w / 2 + 12.0f, cy - card_h / 2 + 10.0f, it.name, 0.7f,
-                            1.0f, 1.0f, 1.0f);
-        (void)app.draw_text(cx - card_w / 2 + 12.0f, cy + card_h / 2 - 46.0f,
-                            shop_stat_line(it), 0.65f, 0.9f, 0.9f, 0.9f);
+        draw_ui_label(app, cx - card_w / 2 + 12.0f, cy - card_h / 2 + 6.0f, card_w - 24.0f, 24.0f,
+                          it.name, 0.7f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
+        draw_ui_label(app, cx - card_w / 2 + 12.0f, cy + card_h / 2 - 50.0f, card_w - 24.0f, 22.0f,
+                          shop_stat_line(it), 0.65f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
         if (equipped) {
-            (void)app.draw_text(cx - card_w / 2 + 12.0f, cy + card_h / 2 - 24.0f, "EQUIPPED",
-                                0.65f, 0.4f, 1.0f, 0.4f);
+            draw_ui_label(app, cx - card_w / 2 + 12.0f, cy + card_h / 2 - 28.0f, card_w - 24.0f, 22.0f,
+                              "EQUIPPED", 0.65f, UiAlign::Left, 0.4f, 1.0f, 0.4f);
         } else if (owned) {
-            (void)app.draw_text(cx - card_w / 2 + 12.0f, cy + card_h / 2 - 24.0f, "OWNED",
-                                0.65f, 1.0f, 0.85f, 0.4f);
+            draw_ui_label(app, cx - card_w / 2 + 12.0f, cy + card_h / 2 - 28.0f, card_w - 24.0f, 22.0f,
+                              "OWNED", 0.65f, UiAlign::Left, 1.0f, 0.85f, 0.4f);
         }
     }
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
+                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
     // Wielding summary + buy confirmation (display only).
     // Wallet top-right (was invisible — affordability guessing papercut).
     {
         char mbuf[64];
         std::snprintf(mbuf, sizeof(mbuf), "COINS %d", seen_.money);
-        (void)app.draw_text(1060.0f, 32.0f, mbuf, 0.9f, 1.0f, 0.9f, 0.4f);
+        draw_ui_label(app, 1060.0f, 32.0f, 180.0f, 24.0f,
+                      mbuf, 0.9f, UiAlign::Right, 1.0f, 0.9f, 0.4f);
     }
     // Incoming deliveries (mirrors the update rects above): name + countdown
     // or READY-claim hint, capped at 3 rows.
@@ -3675,10 +3686,12 @@ void ShopScreen::render_impl(App& app) {
             const std::int64_t left = kv.second - now;
             const std::string text =
                 kv.first + (left > 0 ? " " + shop_countdown(left) : " READY");
-            (void)app.draw_text(950.0f, ry - 8.0f, text, 0.7f, 1.0f, 1.0f, 1.0f);
+            draw_ui_label(app, 950.0f, ry - 8.0f, 300.0f, 20.0f,
+                      text, 0.7f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
         }
     }
-    (void)app.draw_text(24.0f, 648.0f, wielding_line(app, seen_), 0.7f, 0.9f, 0.9f, 0.9f);
+    draw_ui_label(app, 24.0f, 648.0f, 700.0f, 22.0f,
+                      wielding_line(app, seen_), 0.7f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
     if (!confirm_.empty() && time() <= confirm_until_) {
         draw_ui_label(app, kViewW * 0.5f - 220.0f, 678.0f, 440.0f, 26.0f,
                           confirm_, 1.0f, UiAlign::Center, 0.4f, 1.0f, 0.4f);
@@ -3968,6 +3981,8 @@ void EquipmentScreen::render_impl(App& app) {
     }
     // The BACK button (top-left).
     draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
+                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     // MOVES button (mirrors the update rect above).
     draw_flat_button(app, "MOVES", 1165.0f, 664.0f, 130.0f, 48.0f, 0.3f, 0.32f, 0.4f,
                      false);
@@ -4037,6 +4052,8 @@ void SettingsScreen::render_impl(App& app) {
                         0.6f);
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
+                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
 }
 
@@ -4120,6 +4137,8 @@ void MovesScreen::render_impl(App& app) {
     }
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
+                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
 }
 
@@ -4209,6 +4228,8 @@ void BracketScreen::render_impl(App& app) {
     }
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
+                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
 }
 
