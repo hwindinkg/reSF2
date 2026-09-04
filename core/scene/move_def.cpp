@@ -85,8 +85,41 @@ void parse_interval(pugi::xml_node node, int end_frame_default, Interval& out) {
     out.name = node.attribute("Name") ? node.attribute("Name").value() : "";
     const std::string type = node.attribute("Type") ? node.attribute("Type").value() : "";
     out.type = interval_type_resolve(out.name, type);
-    // JS `Ul.J3` (L774-775): `IgnoresBlock` -> DDa (0 hits in shipped xml).
-    out.ignores_block = data::xml_attr_bool(node, "IgnoresBlock", false);
+    // JS `Ul.J3` (L774-775): `<IgnoresBlock/>` -> DDa (+ hga names);
+    // `<IgnoresInvulnerable Name="A|B"/>` -> jga (+ iga bypass names).
+    // NOTE: child ELEMENTS, not attributes (159/154 live hits in moves.xml).
+    if (node.child("IgnoresBlock")) {
+        out.ignores_block = true;
+        const char* names = node.child("IgnoresBlock").attribute("Name").value();
+        if (names != nullptr) {
+            std::string cur;
+            for (const char* p = names; ; ++p) {
+                if (*p == '|' || *p == '\0') {
+                    if (!cur.empty()) out.ignore_block_names.push_back(cur);
+                    cur.clear();
+                    if (*p == '\0') break;
+                } else {
+                    cur.push_back(*p);
+                }
+            }
+        }
+    }
+    if (node.child("IgnoresInvulnerable")) {
+        out.ignores_invuln = true;
+        const char* names = node.child("IgnoresInvulnerable").attribute("Name").value();
+        if (names != nullptr) {
+            std::string cur;
+            for (const char* p = names; ; ++p) {
+                if (*p == '|' || *p == '\0') {
+                    if (!cur.empty()) out.invuln_bypass_names.push_back(cur);
+                    cur.clear();
+                    if (*p == '\0') break;
+                } else {
+                    cur.push_back(*p);
+                }
+            }
+        }
+    }
     out.start = data::xml_attr_int(node, "Start", 0);
     if (node.attribute("End")) {
         out.end = data::xml_attr_int(node, "End", 2147483647);

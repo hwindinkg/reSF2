@@ -40,8 +40,12 @@
 #include "app/item_catalog.hpp"
 #include "app/screen_manager.hpp"
 
+namespace sf2::data {
+struct anim_clip;
+} // namespace sf2::data
 namespace sf2::scene {
 class FightController;
+class Fighter;
 class LocationScene;
 } // namespace sf2::scene
 
@@ -75,6 +79,22 @@ private:
     int hover_ = -1;
     int last_hover_ = -1;
     bool money_logged_ = false;
+
+    // --- Dojo aliveness (JS `Tf` L1969-1970: the home base runs the
+    // Training setup vs the Punchbag dummy) -------------------------------
+    // The idle player figure: a scene Fighter sampling the stance clip
+    // (display only — never stepped through fight logic). Built lazily on
+    // first render; null-safe when assets are missing (headless).
+    std::unique_ptr<sf2::scene::Fighter> dojo_fighter_;
+    bool dojo_fig_tried_ = false;
+    bool dojo_fig_ok_ = false;
+    const sf2::data::anim_clip* dojo_idle_ = nullptr;  // owned by FightAssets
+    int idle_frame_ = 0;   // fixed-step counter driving the idle cycle
+    // Tutorial quest banner state (quest_panel.hpp; derived read-only from
+    // the save's Tutorial field + the last Training result).
+    std::string tutorial_ = "MOVE";
+    int quest_logged_ = -1;
+    bool training_won_ = false;
 };
 
 // The main menu — native GeneralMenu (screen 8).
@@ -115,14 +135,29 @@ public:
     struct Node {
         std::string name;
         std::string type;
+        std::string zone;      // the stages.xml Zone Name (JS `st`)
+        std::string location;  // the Battle Location (JS fight backdrop)
         float x = 0.0f;  // screen pos (center)
         float y = 0.0f;
         bool active = true;
     };
 
+    // One zone tab (JS `st`, parsed by `p.Dkb` L188): the zone strip the map
+    // renders (`Ya.HXa` L2123). `locked` is the shell stub rule (see the
+    // MapScreen ctor) until the save carries Battles/iF for `WDa`.
+    struct ZoneTab {
+        std::string name;   // "Punchbag" / "ZONE_1" .. "ZONE_7"
+        std::string file;   // FileName ("Map0.1" ..) — the zone backdrop id
+        bool is_start = false;  // the `Start="1"` zone (JS `st.yR`)
+        bool locked = false;
+        std::vector<Node> nodes;
+    };
+
 private:
-    std::vector<Node> nodes_;
+    std::vector<ZoneTab> zones_;
+    int zone_sel_ = 0;
     int hover_ = -1;
+    int tab_hover_ = -1;
 };
 
 // The fight — native Fight screen (screen 6, JS `ai`/`ma` L2004-2010).
@@ -230,6 +265,9 @@ private:
     int money_reward_ = 0;
     int exp_reward_ = 0;
     bool applied_ = false;
+    // Tutorial quest toast (quest_panel.hpp; derived read-only in update —
+    // e.g. the first Training win nudges the player back to Sensei).
+    std::string quest_toast_;
 };
 
 // The shop — native Shop screen (screen 4, JS `Oa` g="468").

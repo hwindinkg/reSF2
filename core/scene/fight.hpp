@@ -474,10 +474,13 @@ private:
     bool round_wait_ = false;      // JS: the host waits for the player's
                                    // Next between rounds (vhb L410 -> Z2)
     // The StartStance input buffer (JS `wd.WC` L426 + `llb` L429): ONE slot
-    // — the LAST press during phase 1 (StartStance) wins; it is replayed
+    // - the LAST press during phase 1 (StartStance) wins; it is replayed
     // when the fight starts (enter_fight) as if the player pressed now.
     sf2::scene::key_type start_buffer_key_ = sf2::scene::key_type::up;
     bool start_buffer_filled_ = false;
+    // JS `Cl.ia` one-shot (`dW`, L566-567): last-tested (move, interval)
+    // per attacker name — the same attack object never tests twice in a row.
+    std::map<std::string, std::pair<const void*, const void*>> cl_last_;
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
     int start_stance_frames_ = 0;  // phase 1 hold counter
     int end_stance_frames_ = 0;    // phase 3 hold (the FIGHT!/KO banner)

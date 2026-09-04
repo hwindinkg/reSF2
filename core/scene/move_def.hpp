@@ -86,10 +86,14 @@ struct Interval {
     // Attack damage block (<Damage Value=..><Damage Type=.. Shift=..>).
     float damage = 0.0f;
     bool no_critical = false;
-    // JS `Ul.J3` (L774-775): `IgnoresBlock` -> `DDa=true` (+ `hga` names).
-    // Zero occurrences in shipped moves.xml (dead with shipped data), but
-    // `strike()` consults it before the block check (L509), so parsed.
-    bool ignores_block = false;    std::string damage_type;  // e.g. "UnarmedDamage"
+    // JS `Ul.J3` (L774-775): `<IgnoresBlock/>` child -> `DDa=true`
+    // (+ `hga` names); `<IgnoresInvulnerable Name="Evade|Dash"/>` child ->
+    // `jga=true` (+ `iga` bypass names). Both live in shipped moves.xml
+    // (159/154 hits) — the strike pre-break (DDa) and the HZa chain gate.
+    bool ignores_block = false;
+    std::vector<std::string> ignore_block_names;
+    bool ignores_invuln = false;
+    std::vector<std::string> invuln_bypass_names;    std::string damage_type;  // e.g. "UnarmedDamage"
     float damage_shift = 0.0f;
     std::string hit_name;     // <Hit Name=..> inside the Attack interval
     float impulse_x = 0.0f, impulse_y = 0.0f, impulse_z = 0.0f;

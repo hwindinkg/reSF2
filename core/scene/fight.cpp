@@ -673,11 +673,33 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                                sf2::scene::HitCapsule& hit_cap,
                                sf2::scene::CapsuleHit& ch,
                                const sf2::scene::Interval*& hit_interval) {
+    // JS `Cl.ia` one-shot (`dW`, L566-567): the same attack object never
+    // tests twice in a row — without this every overlapped frame re-hits.
+    auto& last = cl_last_[atk.name];
     for (const sf2::scene::Interval& iv : move.intervals) {
         if (iv.type != 4) continue;  // Attack
         const int s = std::max(iv.start, move.first_frame);
         const int e = iv.end;
         if (!(s <= frame && frame <= e)) continue;
+        const auto key = std::make_pair(static_cast<const void*>(&move),
+                                        static_cast<const void*>(&iv));
+        if (last == key) continue;  // dW: already tested
+        last = key;
+        // JS `!c.aEa` (L566-567): no AttackingParts = always connects
+        // (11/618 shipped attack intervals); contact = target COM capsule.
+        if (iv.attacking_parts.empty()) {
+            for (const auto& tgt : def.body.capsules) {
+                if (!tgt.collidable) continue;
+                hit_cap = tgt;
+                ch.hit = true;
+                ch.point.x = (tgt.p1.x + tgt.p2.x) * 0.5f;
+                ch.point.y = (tgt.p1.y + tgt.p2.y) * 0.5f;
+                ch.point.z = (tgt.p1.z + tgt.p2.z) * 0.5f;
+                hit_interval = &iv;
+                return true;
+            }
+            continue;
+        }
         for (const std::string& edge : iv.attacking_parts) {
             const sf2::scene::HitCapsule* atk_cap = atk.body.by_name(edge);
             if (atk_cap == nullptr) continue;
@@ -901,8 +923,12 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         me.fighter.advance(0.0f);
     }
 
-    // The AI decision (JS `de.ia`).
-    if (me.ai != nullptr) {
+    // The AI decision (JS `de.ia` via `wd.Anb`/`Ykb`, L499-500:
+    // `(parameters.Fj||P.fP)&&Je==2` — the AI ONLY decides in phase 2
+    // (Fight). Gating the whole block (not just the move start) also
+    // stops the phase-1 QJa roll consumption, keeping the Da stream
+    // aligned with the game.
+    if (me.ai != nullptr && phase_ == fight_phase::fight) {
         sf2::scene::AiFightState st;        st.current_move = me.fighter.current_move();
         st.move_frame = me.fighter.move_frame();
         st.move_len = st.current_move ? st.current_move->end_frame : 0;
@@ -1100,6 +1126,29 @@ void FightController::update(float dt) {
             if (e_move != nullptr && !hit_enemy) {
                 hit_player = hit_test(enemy_, player_, *e_move, enemy_.fighter.move_frame(),
                                       hit_cap, ch, hit_iv);
+            }
+            if (hit_iv != nullptr) {
+                // JS `wd.HZa` (L500-501): no chain while the TARGET holds an
+                // Invulnerable interval (`yD(6)`) unless the attack bypasses
+                // (`jga` && (`iga` empty || `SZa(iga)` — any bypass name in
+                // the target's active set)).
+                const FightFighter& target = hit_enemy ? enemy_ : player_;
+                bool chained = true;
+                if (target.fighter.has_invuln()) {
+                    const bool bypass =
+                        hit_iv->ignores_invuln &&
+                        (hit_iv->invuln_bypass_names.empty() ||
+                         std::any_of(hit_iv->invuln_bypass_names.begin(),
+                                     hit_iv->invuln_bypass_names.end(),
+                                     [&](const std::string& n) {
+                                         return target.fighter.active_intervals().count(n) > 0;
+                                     }));
+                    chained = bypass;
+                }
+                if (!chained) {
+                    hit_iv = nullptr;
+                    hit_enemy = hit_player = false;
+                }
             }
             if (hit_iv != nullptr) {
                 if (hit_enemy) {

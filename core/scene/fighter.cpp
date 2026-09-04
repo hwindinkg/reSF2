@@ -275,6 +275,17 @@ bool Fighter::has_block() const {
     return false;
 }
 
+// JS `Te.yD(6)` presence (L553): Invulnerable active now (HZa gate).
+bool Fighter::has_invuln() const {
+    if (current_move_ == nullptr) return false;
+    for (const Interval& iv : current_move_->intervals) {
+        if (iv.type != 6) continue;  // `fe.G0`: Invulnerable = 6 (L774)
+        const int s = std::max(iv.start, current_move_->first_frame);
+        if (s <= move_frame_ && move_frame_ <= iv.end) return true;
+    }
+    return false;
+}
+
 // JS `Te.hT(5)` (L554, reverse loop): drop every active Block interval.
 void Fighter::clear_block() {
     if (current_move_ == nullptr) {

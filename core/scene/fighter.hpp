@@ -156,6 +156,9 @@ public:
     // JS `Te.hT(5)` (L554): remove ALL active Block intervals (strike()
     // pre-break when `g.DDa`, L509; `Cgb` post-hit when !block, L394-397).
     void clear_block();
+    // JS `Te.yD(6)` presence (L553): an Invulnerable interval active now —
+    // the `HZa` chain gate (L500-501) consults it on the TARGET.
+    bool has_invuln() const;
     // Enemies (for facing). Set by the caller (demo).
     float enemy_x() const { return enemy_x_; }
     void set_enemy_x(float x) { enemy_x_ = x; }

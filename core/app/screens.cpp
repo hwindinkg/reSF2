@@ -26,6 +26,7 @@
 // flagged as a gap.
 
 #include "app/screens.hpp"
+#include "app/quest_panel.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -33,7 +34,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <random>
+#include <string>
 #include <unordered_map>
 
 #include "anim_archive.hpp"
@@ -566,9 +569,13 @@ void draw_magic_effects(sf2::render::Renderer& ren, const sf2::render::Camera& c
     }
 }
 
-// Loads the map battle nodes from stages.xml (the JS `Ch` parser L1224).
-std::vector<MapScreen::Node> load_battle_nodes(float view_w, float view_h) {
-    std::vector<MapScreen::Node> out;
+// The zone map from stages.xml (JS `p.Dkb` L188 / `Ckb` L189): Zone Name +
+// FileName + Start flag, with Battle children (Name/Type/X/Y/Location).
+// Only battles carrying map coordinates become nodes (HIDDEN/INTERMISSION
+// rows without X/Y are not map nodes). Covers all 8 zones (Punchbag +
+// ZONE_1..7) — the old first-zone-only loader is folded into this.
+std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
+    std::vector<MapScreen::ZoneTab> out;
     try {
         sf2::data::xml_doc doc;
         const std::string path = "reference/extracted/xml/res/stages.xml";
@@ -582,19 +589,29 @@ std::vector<MapScreen::Node> load_battle_nodes(float view_w, float view_h) {
         const pugi::xml_node zones = root.child("Zones");
         if (!zones) return out;
         for (const pugi::xml_node zone : zones.children("Zone")) {
+            MapScreen::ZoneTab z;
+            z.name = zone.attribute("Name").value();
+            if (z.name.empty()) continue;
+            z.file = zone.attribute("FileName").value();
+            z.is_start = std::string(zone.attribute("Start").value()) == "1";
             for (const pugi::xml_node battle : zone.children("Battle")) {
+                // Map nodes are positioned battles (JS `qe.X0a` L2144 needs
+                // X/Y); rows without coordinates are not selectable.
+                if (battle.attribute("X").empty() && battle.attribute("Y").empty()) continue;
                 MapScreen::Node n;
                 n.name = battle.attribute("Name").value();
+                if (n.name.empty()) continue;
                 n.type = battle.attribute("Type").value();
+                n.zone = z.name;
+                n.location = battle.attribute("Location").value();
                 const float x = sf2::data::xml_attr_float(battle, "X", 0.0f);
                 const float y = sf2::data::xml_attr_float(battle, "Y", 0.0f);
                 n.x = x * 1.0f + view_w / 2.0f;
                 n.y = view_h / 2.0f - y * 1.0f;
-                n.active = !battle.attribute("Type").empty() ||
-                           n.type == "DUMMY" || n.type == "TUTORIAL";
-                out.push_back(std::move(n));
+                n.active = true;  // the MapScreen ctor applies the lock rule
+                z.nodes.push_back(std::move(n));
             }
-            break;  // the tutorial zone (the playable start)
+            out.push_back(std::move(z));
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "map: stages.xml load failed: %s\n", e.what());
@@ -840,6 +857,133 @@ void MainMenuScreen::render_impl(App& app) {
 // DojoScreen
 // ---------------------------------------------------------------------------
 
+// --- Dojo idle figure + Punchbag dummy (display only) ----------------------
+// Finds the stance-idle clip (moves.xml `StanceIdle` FileName
+// "stance_idle.bytes"): first clip whose archive name contains it, else any
+// "stance" clip, else "" (caller skips the figure).
+std::string find_idle_clip_name(
+    const std::map<std::string, sf2::data::anim_clip>& clips) {
+    for (const auto& kv : clips) {
+        if (kv.first.find("stance_idle") != std::string::npos) return kv.first;
+    }
+    for (const auto& kv : clips) {
+        if (kv.first.find("stance") != std::string::npos) return kv.first;
+    }
+    return "";
+}
+
+// Draws one idle fighter (mesh + capsule strip) with the same formulas as
+// the fight screen's file-local twin (capsule `zu`/`Dk` strip, stroke =
+// Radius1*2 — JS_RENDER §4): kept as a separate helper so the fight render
+// path is untouched. `fighter` must already hold a sampled pose.
+void draw_dojo_figure(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
+                      const sf2::scene::Fighter& fighter) {
+    const float r = fighter.color_r(), g = fighter.color_g(), b = fighter.color_b();
+    std::vector<float> verts;
+    fighter.build_vertices(verts);
+    std::vector<float> pv(verts.size());
+    for (std::size_t i = 0; i < verts.size(); i += 2) {
+        pv[i] = camera.world_to_screen_x(verts[i], 1.0f);
+        pv[i + 1] = camera.world_to_screen_y(verts[i + 1]);
+    }
+    if (!pv.empty()) {
+        ren.draw_triangles(pv.data(), pv.size() / 2, r, g, b, 1.0f);
+    }
+    const sf2::scene::Model& model = fighter.model();
+    std::unordered_map<std::string, float> edge_max;
+    edge_max.reserve(model.capsules.size() * 2u);
+    for (const sf2::scene::Capsule& cap : model.capsules) {
+        auto it = edge_max.find(cap.edge);
+        if (it == edge_max.end() || cap.radius1 > it->second) {
+            edge_max[cap.edge] = cap.radius1;
+        }
+    }
+    constexpr float kPi = 3.14159265358979323846f;
+    constexpr int kDiscSegments = 12;
+    for (const auto& kv : edge_max) {
+        const sf2::scene::EdgeDef* edge = nullptr;
+        for (const sf2::scene::EdgeDef& ed : model.edges) {
+            if (ed.name == kv.first) {
+                edge = &ed;
+                break;
+            }
+        }
+        if (edge == nullptr) continue;
+        const int i1 = model.bone_by_name(edge->end1);
+        const int i2 = model.bone_by_name(edge->end2);
+        if (i1 < 0 || i2 < 0) continue;
+        const std::vector<float>& pos = fighter.positions();
+        const std::size_t u1 = static_cast<std::size_t>(i1) * 2;
+        const std::size_t u2 = static_cast<std::size_t>(i2) * 2;
+        if (u1 + 1 >= pos.size() || u2 + 1 >= pos.size()) continue;
+        const float stroke = kv.second * 2.0f * camera.zoom;
+        if (stroke <= 0.0f) continue;
+        const float sx1 = camera.world_to_screen_x(pos[u1], 1.0f);
+        const float sy1 = camera.world_to_screen_y(pos[u1 + 1]);
+        const float sx2 = camera.world_to_screen_x(pos[u2], 1.0f);
+        const float sy2 = camera.world_to_screen_y(pos[u2 + 1]);
+        float dx = sx2 - sx1;
+        float dy = sy2 - sy1;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        const float cr = stroke * 0.5f;
+        auto draw_disc = [&](float cx, float cy) {
+            const float step = 2.0f * kPi / static_cast<float>(kDiscSegments);
+            for (int s = 0; s < kDiscSegments; ++s) {
+                const float a0 = static_cast<float>(s) * step;
+                const float a1 = static_cast<float>(s + 1) * step;
+                float tri[6] = {
+                    cx, cy, cx + std::cos(a0) * cr, cy + std::sin(a0) * cr,
+                    cx + std::cos(a1) * cr, cy + std::sin(a1) * cr,
+                };
+                ren.draw_triangles(tri, 3, r, g, b, 1.0f);
+            }
+        };
+        if (len < 1e-4f) {
+            draw_disc(sx1, sy1);
+            continue;
+        }
+        dx /= len;
+        dy /= len;
+        const float px = -dy * cr;
+        const float py = dx * cr;
+        float quad[12] = {
+            sx1 + px, sy1 + py, sx2 + px, sy2 + py, sx1 - px, sy1 - py,
+            sx2 + px, sy2 + py, sx2 - px, sy2 - py, sx1 - px, sy1 - py,
+        };
+        ren.draw_triangles(quad, 6, r, g, b, 1.0f);
+        draw_disc(sx1, sy1);
+        draw_disc(sx2, sy2);
+    }
+}
+
+// The Punchbag dummy silhouette (the stages.xml Punchbag-zone Training
+// battle dummy — Warrior "Punchbag", NotAI/NotAnimation, PunchingBag items;
+// JS_FLOW.md §1). The bag models (`mdl_punching_bag` in models_dojo.dat —
+// MODEL_FORMAT.md §"Dojo") are NOT loaded into FightAssets (missing API, see
+// the stream report), so the dummy is a procedural hanging-bag silhouette:
+// chains + leather body + seam, standing on `floor_y` (world units).
+void draw_punchbag(sf2::render::Renderer& ren, const sf2::render::Camera& camera, float x,
+                   float floor_y) {
+    const float sx = camera.world_to_screen_x(x, 1.0f);
+    const float bot = camera.world_to_screen_y(floor_y);
+    const float top = camera.world_to_screen_y(floor_y - 260.0f);
+    const float h = bot - top;
+    if (h <= 0.0f) return;
+    auto quad = [&](float x0, float y0, float x1, float y1, float r, float g, float b,
+                    float a) {
+        const float v[] = {x0, y0, x1, y0, x0, y1, x1, y0, x1, y1, x0, y1};
+        ren.draw_triangles(v, 6, r, g, b, a);
+    };
+    // Chains (two straps from the mount bar to the bag shoulders).
+    quad(sx - 20.0f, top, sx - 14.0f, top + h * 0.18f, 0.45f, 0.45f, 0.5f, 1.0f);
+    quad(sx + 14.0f, top, sx + 20.0f, top + h * 0.18f, 0.45f, 0.45f, 0.5f, 1.0f);
+    // Leather body.
+    quad(sx - 30.0f, top + h * 0.18f, sx + 30.0f, bot, 0.38f, 0.16f, 0.12f, 1.0f);
+    // Highlight seam (left third) + base shadow.
+    quad(sx - 30.0f, top + h * 0.18f, sx - 18.0f, bot, 0.48f, 0.22f, 0.16f, 1.0f);
+    quad(sx - 38.0f, bot - 4.0f, sx + 38.0f, bot + 4.0f, 0.0f, 0.0f, 0.0f, 0.45f);
+}
+
 DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
     const float bw = 240.0f;
     const float bh = 120.0f;
@@ -870,16 +1014,34 @@ DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
 
 void DojoScreen::update_impl(float dt) {
     (void)dt;
+    idle_frame_++;  // drives the idle-stance frame cycle (display only)
     if (!money_logged_) {
         money_logged_ = true;
         try {
             const WarriorSave w = app().save().load();
-            std::fprintf(stdout, "[dojo] MONEY %d   LV %d   POWER %d   WEAPON %s   ARMOR %s   HELM %s\n",
+            tutorial_ = w.tutorial;
+            std::fprintf(stdout, "[dojo] MONEY %d   LV %d   POWER %d   WEAPON %s   ARMOR %s   HELM %s   TUTORIAL %s\n",
                          w.money, w.level, w.power, w.weapon.c_str(), w.armor.c_str(),
-                         w.helm.c_str());
+                         w.helm.c_str(), w.tutorial.c_str());
             std::fflush(stdout);
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[dojo] save read failed: %s\n", e.what());
+        }
+    }
+    // Tutorial quest step (quest_panel.hpp — read-only derivation from the
+    // save's Tutorial field + the last Training result via the existing
+    // pending-battle hook; no save writes, no fight-logic touch).
+    {
+        const PendingBattle& pb = app().pending_battle();
+        if (pb.has_result && pb.player_won && pb.battle_name == "Training") {
+            training_won_ = true;
+        }
+        const QuestStep qs = quest_step_for(tutorial_, training_won_);
+        if (qs.id != quest_logged_) {
+            quest_logged_ = qs.id;
+            std::fprintf(stdout, "[quest] step %d (%s) -> %s\n", qs.id, qs.speaker,
+                         qs.target);
+            std::fflush(stdout);
         }
     }
     const App::PointerState& p = app().pointer();
@@ -941,6 +1103,69 @@ void DojoScreen::render_impl(App& app) {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
     }
+    // --- Dojo aliveness (JS `Tf` L1969-1970: Training setup on screen) ----
+    // World == screen here (center 640x360, zoom 1, Io = 0). The idle player
+    // figure stands left-of-center with feet on the floor row; the Punchbag
+    // dummy hangs right-of-center. Display only — no fight logic runs.
+    {
+        sf2::render::Camera fig_cam;
+        fig_cam.center_x = kViewW * 0.5f;
+        fig_cam.center_y = kViewH * 0.5f;
+        fig_cam.zoom = 1.0f;
+        fig_cam.view_w = kViewW;
+        fig_cam.view_h = kViewH;
+        fig_cam.arena_h = kViewH;
+        fig_cam.arena_floor = 0.0f;
+        fig_cam.arena_center_x = kViewW * 0.5f;
+        if (!dojo_fig_tried_) {
+            dojo_fig_tried_ = true;
+            if (app.has_fight_assets()) {
+                FightAssets& assets = app.fight_assets();
+                const std::string idle_name = find_idle_clip_name(assets.clips);
+                const auto it = idle_name.empty() ? assets.clips.end()
+                                                  : assets.clips.find(idle_name);
+                if (!assets.merged.bones.empty() && it != assets.clips.end() &&
+                    !it->second.frames.empty()) {
+                    dojo_fighter_ = std::make_unique<sf2::scene::Fighter>();
+                    dojo_fighter_->set_model(assets.merged);
+                    dojo_fighter_->set_color(assets.dojo.root_color());
+                    dojo_idle_ = &it->second;
+                    dojo_fig_ok_ = true;
+                    std::fprintf(stdout, "[dojo] idle figure ready (clip %s, frames %zu)\n",
+                                 idle_name.c_str(), it->second.frames.size());
+                    std::fflush(stdout);
+                } else {
+                    std::fprintf(stdout, "[dojo] idle figure skipped (no stance clip/model)\n");
+                    std::fflush(stdout);
+                }
+            }
+        }
+        if (dojo_fig_ok_ && dojo_fighter_ != nullptr && dojo_idle_ != nullptr &&
+            !dojo_idle_->frames.empty()) {
+            const int nframes = static_cast<int>(dojo_idle_->frames.size());
+            const int fr = (idle_frame_ / 10) % nframes;  // slow idle cycle
+            // Feet-on-floor calibration: sample once, measure the mesh bbox,
+            // then re-sample shifted so the feet sit on the floor row.
+            dojo_fighter_->sample(*dojo_idle_, 0, 0.0f, 0.0f, 1);
+            float minx = 0.0f, miny = 0.0f, maxx = 0.0f, maxy = 0.0f;
+            dojo_fighter_->triangle_bbox(minx, miny, maxx, maxy);
+            constexpr float kFeetY = 440.0f;  // floor row above the buttons
+            constexpr float kFigX = 400.0f;
+            dojo_fighter_->sample(*dojo_idle_, fr, kFigX, kFeetY - maxy, 1);
+            draw_dojo_figure(ren, fig_cam, *dojo_fighter_);
+            draw_punchbag(ren, fig_cam, 850.0f, kFeetY);
+        }
+        // Sensei hint panel (quest_panel.hpp — the tutorial quest banner).
+        const QuestStep qs = quest_step_for(tutorial_, training_won_);
+        const float pw = 780.0f, ph = 64.0f, px = kViewW * 0.5f - pw * 0.5f;
+        const float py = 84.0f;
+        const float panel[] = {px, py, px + pw, py, px, py + ph,
+                               px + pw, py, px + pw, py + ph, px, py + ph};
+        ren.draw_triangles(panel, 6, 0.05f, 0.05f, 0.08f, 0.78f);
+        (void)app.draw_text(px + 16.0f, py + 8.0f, qs.speaker, 0.9f, 1.0f, 0.85f, 0.4f);
+        (void)app.draw_text(px + 16.0f, py + 26.0f, qs.line1, 0.75f, 1.0f, 1.0f, 1.0f);
+        (void)app.draw_text(px + 16.0f, py + 43.0f, qs.line2, 0.7f, 0.85f, 0.9f, 0.6f);
+    }
     // The menu-atlas entry buttons (Dojo/Map/Shop/Profile) — the same
     // frames the GeneralMenu renders; the Dojo button is the home hub's
     // training-Fight entry.
@@ -965,17 +1190,60 @@ void DojoScreen::render_impl(App& app) {
 // ---------------------------------------------------------------------------
 
 MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
-    nodes_ = load_battle_nodes(kViewW, kViewH);
-    std::fprintf(stdout, "[map] %zu battle nodes loaded\n", nodes_.size());
-    for (const auto& n : nodes_) {
-        std::fprintf(stdout, "[map] node %s (type=%s) at (%.0f, %.0f)%s\n", n.name.c_str(),
-                     n.type.c_str(), n.x, n.y, n.active ? "" : " [locked]");
+    zones_ = load_zone_map(kViewW, kViewH);
+    // The current zone from the save (JS `xf.ro` / CurrentZone, L248).
+    std::string cur = "ZONE_1";
+    try {
+        const std::string saved = app().save().load().current_zone;
+        if (!saved.empty()) cur = saved;
+    } catch (const std::exception&) {
     }
+    zone_sel_ = 0;
+    for (std::size_t i = 0; i < zones_.size(); ++i) {
+        if (zones_[i].name == cur) zone_sel_ = static_cast<int>(i);
+    }
+    // Lock rule STUB (JS `WDa` L249: a node is open iff it has a record in
+    // the save's Battles/iF table — that table is NOT in WarriorSave, see
+    // the stream report): zones past the current one render locked, the
+    // Start (`yR`) zone is always open.
+    for (std::size_t i = 0; i < zones_.size(); ++i) {
+        zones_[i].locked =
+            !zones_[i].is_start && static_cast<int>(i) > zone_sel_;
+        for (auto& n : zones_[i].nodes) n.active = !zones_[i].locked;
+    }
+    std::fprintf(stdout, "[map] %zu zones loaded (current %s)\n", zones_.size(), cur.c_str());
+    for (const auto& z : zones_) {
+        std::fprintf(stdout, "[map] zone %s (%s)%s: %zu nodes%s\n", z.name.c_str(),
+                     z.file.c_str(), z.is_start ? " [start]" : "", z.nodes.size(),
+                     z.locked ? " [locked]" : "");
+    }
+    std::fflush(stdout);
 }
 
 void MapScreen::update_impl(float dt) {
     (void)dt;
     const App::PointerState& p = app().pointer();
+    // Zone tabs (JS `Ya.HXa` L2123 zone strips; the `Vr` scroller is a
+    // plain tab row here): geometry mirrors render_impl exactly.
+    tab_hover_ = -1;
+    {
+        const float tab_w = 140.0f, tab_h = 44.0f, tab_y = 38.0f, tab_x0 = 130.0f;
+        for (std::size_t i = 0; i < zones_.size(); ++i) {
+            const float cx = tab_x0 + static_cast<float>(i) * tab_w + tab_w * 0.5f;
+            if (p.x >= cx - tab_w / 2 && p.x <= cx + tab_w / 2 && p.y >= tab_y - tab_h / 2 &&
+                p.y <= tab_y + tab_h / 2) {
+                if (zones_[i].locked) break;
+                tab_hover_ = static_cast<int>(i);
+                if (p.pressed && static_cast<int>(i) != zone_sel_) {
+                    zone_sel_ = static_cast<int>(i);
+                    sf2::audio::AudioEngine::instance().play("click");
+                    std::fprintf(stdout, "[map] zone tab %s\n", zones_[zone_sel_].name.c_str());
+                    std::fflush(stdout);
+                }
+                break;
+            }
+        }
+    }
     // BACK (top-left) -> the previous screen (the Dojo home hub — the
     // loop's map -> dojo / map -> equipment legs; the JS map has a
     // back/exit control in the top bar).
@@ -987,9 +1255,10 @@ void MapScreen::update_impl(float dt) {
             return;
         }
     }
+    if (zone_sel_ < 0 || static_cast<std::size_t>(zone_sel_) >= zones_.size()) return;
     hover_ = -1;
-    for (std::size_t i = 0; i < nodes_.size(); ++i) {
-        const Node& n = nodes_[i];
+    for (std::size_t i = 0; i < zones_[zone_sel_].nodes.size(); ++i) {
+        const Node& n = zones_[zone_sel_].nodes[i];
         if (p.x >= n.x - 60 && p.x <= n.x + 60 && p.y >= n.y - 60 && p.y <= n.y + 60) {
             hover_ = static_cast<int>(i);
             if (p.pressed && n.active) {
@@ -998,15 +1267,15 @@ void MapScreen::update_impl(float dt) {
                 // the reward (the first non-zero <Reward>).
                 PendingBattle& pb = app().pending_battle();
                 pb.battle_name = n.name;
-                pb.location = "dojo";
+                pb.location = n.location.empty() ? "dojo" : n.location;
                 pb.has_result = false;
                 // The node's fight -> reward. The Training fight has
                 // Money=0; use the battle's own reward lookup.
                 battle_rewards(n.name, pb.reward_money, pb.reward_exp);
                 // The owned items (JS `ra.Hza` move list input).
                 pb.owned = owned_items(app());
-                std::fprintf(stdout, "[map] click %s -> Fight (reward money=%d exp=%d)\n",
-                             n.name.c_str(), pb.reward_money, pb.reward_exp);
+                std::fprintf(stdout, "[map] click %s [%s] -> Fight (reward money=%d exp=%d)\n",
+                             n.name.c_str(), n.zone.c_str(), pb.reward_money, pb.reward_exp);
                 std::fflush(stdout);
                 push(kScreenFight);
             }
@@ -1032,8 +1301,28 @@ void MapScreen::render_impl(App& app) {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.08f, 0.1f, 0.14f, 1.0f);
     }
-    for (std::size_t i = 0; i < nodes_.size(); ++i) {
-        const Node& n = nodes_[i];
+    // Zone tab strip (JS `Ya.HXa` L2123): one tab per zone, locked tabs dim.
+    {
+        const float tab_w = 140.0f, tab_h = 44.0f, tab_y = 38.0f, tab_x0 = 130.0f;
+        for (std::size_t i = 0; i < zones_.size(); ++i) {
+            const ZoneTab& z = zones_[i];
+            const float cx = tab_x0 + static_cast<float>(i) * tab_w + tab_w * 0.5f;
+            const bool sel = static_cast<int>(i) == zone_sel_;
+            const bool hov = static_cast<int>(i) == tab_hover_ && !z.locked;
+            const float r = z.locked ? 0.25f : (sel ? 0.75f : (hov ? 0.65f : 0.4f));
+            const float g = z.locked ? 0.25f : (sel ? 0.6f : (hov ? 0.55f : 0.4f));
+            const float b = z.locked ? 0.3f : (sel ? 0.25f : (hov ? 0.3f : 0.4f));
+            draw_flat_button(app, z.name, cx, tab_y, tab_w - 8.0f, tab_h, r, g, b, hov);
+            // (draw_flat_button renders the box only — the label is text.)
+            const float tc = z.locked ? 0.45f : 1.0f;
+            (void)app.draw_text(cx - 52.0f, tab_y - 8.0f, z.name, 0.7f, tc, tc, tc);
+        }
+    }
+    const bool zone_ok =
+        zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size();
+    const std::size_t node_count = zone_ok ? zones_[zone_sel_].nodes.size() : 0;
+    for (std::size_t i = 0; i < node_count; ++i) {
+        const Node& n = zones_[zone_sel_].nodes[i];
         const bool hovered = static_cast<int>(i) == hover_;
         const float d = hovered ? 66.0f : 60.0f;
         // Try textured BattleBtn frames (buttons atlas). Use a generic frame that exists for all nodes.
@@ -1054,6 +1343,7 @@ void MapScreen::render_impl(App& app) {
             const float verts[] = {x0, y0, x0 + d, y0, x0 + d, y0 + d, x0, y0, x0 + d, y0 + d, x0, y0 + d};
             ren.draw_triangles(verts, 6, r, g, b, n.active ? 0.95f : 0.5f);
         }
+        (void)app.draw_text(n.x - 44.0f, n.y + d / 2 + 4.0f, n.name, 0.7f, 1.0f, 1.0f, 1.0f);
     }
     // The BACK button (top-left) — try textured misc frame, else flat.
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
@@ -2105,6 +2395,17 @@ void ResultsScreen::update_impl(float dt) {
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[result] save failed: %s\n", e.what());
         }
+        // Tutorial quest nudge (quest_panel.hpp — read-only derivation via
+        // the existing pending-battle hook; the Dojo hint panel picks the
+        // step up from here, no save writes).
+        {
+            const PendingBattle& pb = app().pending_battle();
+            if (player_won_ && pb.has_result && pb.battle_name == "Training") {
+                quest_toast_ = "Quest update: the dummy falls! Sensei awaits in the Dojo.";
+                std::fprintf(stdout, "[result] quest: first Training win -> Sensei hint advanced\n");
+                std::fflush(stdout);
+            }
+        }
     }
     const App::PointerState& p = app().pointer();
     if (p.pressed) {
@@ -2122,6 +2423,14 @@ void ResultsScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(verts, 6, 0.0f, 0.0f, 0.0f, 0.6f);
+    if (!quest_toast_.empty()) {
+        const sf2::data::font* fnt = app.menu_font();
+        if (fnt != nullptr) {
+            (void)app.draw_text_centered(*fnt, app.font_texture(), kViewW * 0.5f,
+                                         kViewH * 0.62f, quest_toast_, 0.9f, 1.0f, 0.9f,
+                                         0.4f);
+        }
+    }
     std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
 }
 

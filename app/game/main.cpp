@@ -63,6 +63,11 @@ struct LoopStep {
     int expect_screen = -1;
     int hold_frames = 0;   // same-screen steps: advance N frames after click
     const char* capture = nullptr;
+    // Zone-tab pre-click (the map's zone strips; 0/0 = none). The map opens
+    // on the save's zone (ZONE_1); fights living in another zone (Punchbag)
+    // need their tab selected first (JS `Ya.HXa` L2123 strips).
+    float tab_x = 0.0f;
+    float tab_y = 0.0f;
 };
 
 // The full scripted progression (Phase 3.6b). Runs in App::run_one_frame
@@ -95,8 +100,9 @@ static const LoopStep kLoopSteps[] = {
     // 1: Map -> Bosses fight (540, 400) - the first money-bearing fight
     //    (Reward Money=70 Exp=10). The fight runs to KO (auto-attack) and
     //    pushes Results. Capture the fists fight (before-equip evidence).
+    //    Punchbag tab (200, 38) first: the map opens on the save's ZONE_1.
     {540.0f, 400.0f, "map->Bosses fight", kScreenMap, 0, kScreenFight, 0,
-     "loop_fight_fists.png"},
+     "loop_fight_fists.png", 200.0f, 38.0f},
     // 2: Results -> Map (click anywhere pops; the results->map flow pops
     //    the dead Fight screen too). Capture loop_results.png on arrival.
     {1280 * 0.5f, 360.0f, "results->map", kScreenResults, 0, kScreenMap, 0, "loop_results.png"},
@@ -128,8 +134,9 @@ static const LoopStep kLoopSteps[] = {
      nullptr},
     // 11: Map -> Training fight (798, 215) with the knives equipped.
     //     Capture loop_fight.png on arrival (the after-equip fight).
+    //     Punchbag tab first (same zone reason as step 1).
     {798.0f, 215.0f, "map->Training fight (knives)", kScreenMap, 0, kScreenFight, 0,
-     "loop_fight.png"},
+     "loop_fight.png", 200.0f, 38.0f},
     // 12: Results -> Map (the loop end).
     {1280 * 0.5f, 360.0f, "results->map (loop end)", kScreenResults, 0, kScreenMap, 0, nullptr},
 };
@@ -142,6 +149,7 @@ struct HeadlessLoopDriver {
     int step_frame = 0;
     int last_seen = -1;
     bool clicked = false;       // the current step's click has been sent
+    bool tab_clicked = false;   // the current step's tab pre-click (if any)
     bool next_clicked = false;  // the between-rounds NEXT click has been sent
     bool captured_menu = false;
     int guard = 0;
@@ -183,9 +191,20 @@ struct HeadlessLoopDriver {
             next_clicked = false;  // re-arm once the fight leaves round_wait
         }
 
-        // Phase A: wait for the target screen, then click.
+        // Phase A: wait for the target screen, then click. Steps with a
+        // zone tab click it first (5 frames before the main click so the
+        // node list switches).
         if (!clicked) {
             if (cur == s.wait_screen && step_frame >= s.min_delay) {
+                if (s.tab_x != 0.0f && !tab_clicked) {
+                    std::fprintf(stdout, "[loop] step %d/%d %s -> tab click (%.0f, %.0f)\n",
+                                 step + 1, kLoopStepCount, s.label, s.tab_x, s.tab_y);
+                    std::fflush(stdout);
+                    app.inject_click(s.tab_x, s.tab_y);
+                    tab_clicked = true;
+                    step_frame = s.min_delay - 5;
+                    return;
+                }
                 if (step == 0 && !captured_menu) {
                     // The menu, after the first render (capture reads the
                     // back buffer).
@@ -261,6 +280,7 @@ struct HeadlessLoopDriver {
         ++step;
         step_frame = 0;
         clicked = false;
+        tab_clicked = false;
         if (step >= kLoopStepCount) {
             finished = true;
             std::fprintf(stdout, "[loop] ALL %d STEPS DONE\n", kLoopStepCount);

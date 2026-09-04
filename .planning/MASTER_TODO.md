@@ -149,6 +149,22 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
   runtime block EVENTS need a block-move occurring in-game (not observed in
   Training smoke — AI rarely blocks) → event-match pending 5.2/5.3.
   Regression: fight healthy + loop 13/13 PASS post-change.
+- Phase 5 — 5.2 combos + phase-1 AI gate (DONE 2026-09-04, build+13/13 green):
+  - `IgnoresBlock`/`IgnoresInvulnerable` are child ELEMENTS (159/154 live
+    hits), not attributes — first parse caught 0; fixed to element parse +
+    `|`-split bypass lists (`hga`/`iga`, COMBAT_STATIC §0).
+  - `Fighter::has_invuln` (`yD(6)`); HZa chain gate in the hit path
+    (L500-501: invuln target blocks unless `jga&&(iga empty||SZa)`).
+  - `Cl.ia` one-shot `dW` (L566-567): per-attacker last-tested (move,iv)
+    guard (`cl_last_`); `!aEa` empty-parts auto-connect (11/618 intervals).
+  - Phase-1 enemy-attack bug (own lead) FIXED + verified: AI block now gated
+    `phase==fight` (`Anb` Je==2, L499) — enemy holds stance through intro
+    (was DoublePunch/ThrowForward at F60-120). Bonus: stops phase-1 QJa
+    stream consumption (Da alignment).
+  - Loop regression broke mid-turn (helper's zone-tab map rework moved
+    fight nodes behind tabs; click missed → step 2 stall, NOT combat):
+    fixed with tab pre-clicks in the driver (steps 1+11, still 13 steps).
+    13/13 PASS + save/load PASS post-fix.
 - Phase 5 TODO: 5.2 combos (`HZa/tKa`, `yD(4/6)`, `jga/iga`, `SZa`, L499-501);
   5.3 crit/shock/disarm (`R8a`, `Orb/sr/threshold`, `Wqb/kwb/Wx`,
   L517-532 + helper §S4 vectors).
