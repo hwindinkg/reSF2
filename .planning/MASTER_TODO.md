@@ -438,6 +438,7 @@ Dojo verdict: PASS (structural) — hint rows non-overlapping + readable,
 buttons/disciple/setup fitted+centered, modal fitted, atlas telemetry
 (`btn_back` the only miss; Dojo/Map/Shop/Profile frames resolve).
 Pushed per-screen per user order.
+- Map PASS + PUSHED: tabs/series/nodes/badges/BRACKET/BACK fitted via draw_ui_label; act-overlay/modal exclusive (modal wins); BOSS overlay fitted. Dense-node label collisions remain (nodes ~60px apart, data-driven; needs leader-line layout, follow-up).
 
 ## FINAL — 1:1 playable build matching the oracle
 

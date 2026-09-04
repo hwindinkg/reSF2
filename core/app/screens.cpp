@@ -1787,7 +1787,8 @@ void MapScreen::render_impl(App& app) {
             draw_flat_button(app, z.name, cx, tab_y, tab_w - 8.0f, tab_h, r, g, b, hov);
             // (draw_flat_button renders the box only — the label is text.)
             const float tc = z.locked ? 0.45f : 1.0f;
-            (void)app.draw_text(cx - 52.0f, tab_y - 8.0f, z.name, 0.7f, tc, tc, tc);
+            draw_ui_label(app, cx - tab_w * 0.5f + 6.0f, tab_y - 11.0f, tab_w - 12.0f, 22.0f,
+                              z.name, 0.7f, UiAlign::Center, tc, tc, tc);
         }
     }
     const bool zone_ok =
@@ -1828,7 +1829,8 @@ void MapScreen::render_impl(App& app) {
         if (has_surv) {
             series += " | SURVIVAL BEST " + std::to_string(surv_best);
         }
-        (void)app.draw_text(130.0f, 76.0f, series, 0.7f, 0.9f, 0.9f, 0.9f);
+        draw_ui_label(app, 130.0f, 76.0f, 1020.0f, 22.0f, series, 0.7f,
+                          UiAlign::Left, 0.9f, 0.9f, 0.9f);
     }
     for (std::size_t i = 0; i < node_count; ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
@@ -1852,7 +1854,8 @@ void MapScreen::render_impl(App& app) {
             const float verts[] = {x0, y0, x0 + d, y0, x0 + d, y0 + d, x0, y0, x0 + d, y0 + d, x0, y0 + d};
             ren.draw_triangles(verts, 6, r, g, b, n.active ? 0.95f : 0.5f);
         }
-        (void)app.draw_text(n.x - 44.0f, n.y + d / 2 + 4.0f, n.name, 0.7f, 1.0f, 1.0f, 1.0f);
+        draw_ui_label(app, n.x - 70.0f, n.y + d / 2 + 4.0f, 140.0f, 20.0f, n.name, 0.7f,
+                          UiAlign::Center, 1.0f, 1.0f, 1.0f);
         // Mode badge (battle Type census: TOURNAMENT/SURVIVAL/PERIODIC/
         // CHALLENGE/BOSSES/…) + series progress from the save Fights/yc
         // win counts (read-only; snapshot cached at construction).
@@ -1863,22 +1866,27 @@ void MapScreen::render_impl(App& app) {
                 break;
             }
         }
-        (void)app.draw_text(n.x - 44.0f, n.y + d / 2 + 22.0f, badge, 0.6f, 0.8f, 0.8f,
-                            0.8f);
+        draw_ui_label(app, n.x - 70.0f, n.y + d / 2 + 22.0f, 140.0f, 18.0f, badge, 0.6f,
+                          UiAlign::Center, 0.8f, 0.8f, 0.8f);
     }
     // The BACK button (top-left) — try textured misc frame, else flat.
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
+                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
     // BRACKET button (bottom-right corner convention): the series bracket
     // for the current zone. Node taps live center-screen; the corner is
     // outside every ±60 node rect on current data (and off loop clicks).
     draw_flat_button(app, "BRACKET", 1165.0f, 664.0f, 130.0f, 48.0f, 0.3f, 0.32f, 0.4f,
                      false);
-    (void)app.draw_text(1125.0f, 656.0f, "BRACKET", 0.7f, 1.0f, 1.0f, 1.0f);
+    draw_ui_label(app, 1165.0f - 65.0f + 8.0f, 664.0f - 10.0f, 130.0f - 16.0f, 20.0f,
+                      "BRACKET", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     // Boss-intro act overlay (Rd machine over the lD multi-intro list;
     // boss names are display strings, shown raw). Skippable by tap.
-    if (act_pending_ && act_.active()) {
+    // Boss-intro act overlay: skipped while a quest modal is up (same
+    // exclusivity rule as Dojo - single voice, modal wins).
+    if (act_pending_ && act_.active() && quest_modal_top(app) == nullptr) {
         const float a = act_.fade();
         if (a > 0.01f) {
             const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH,
@@ -1888,15 +1896,15 @@ void MapScreen::render_impl(App& app) {
         const sf2::data::font* fnt = app.menu_font();
         if (fnt != nullptr) {
             const unsigned int ftex = app.font_texture();
-            (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, 240.0f, "BOSS", 1.2f,
-                                         1.0f, 0.85f, 0.3f);
+            draw_ui_label(app, kViewW * 0.5f - 400.0f, 240.0f, 800.0f, 40.0f, "BOSS", 1.2f,
+                              UiAlign::Center, 1.0f, 0.85f, 0.3f);
             const std::string line = act_.line();
             if (!line.empty()) {
-                (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, 340.0f, line,
-                                             1.0f, 1.0f, 1.0f, 1.0f);
+                draw_ui_label(app, kViewW * 0.5f - 500.0f, 340.0f, 1000.0f, 30.0f, line, 1.0f,
+                                  UiAlign::Center, 1.0f, 1.0f, 1.0f);
             }
-            (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, 560.0f, "TAP TO SKIP",
-                                         0.7f, 0.7f, 0.7f, 0.7f);
+            draw_ui_label(app, kViewW * 0.5f - 200.0f, 560.0f, 400.0f, 26.0f, "TAP TO SKIP", 0.7f,
+                              UiAlign::Center, 0.7f, 0.7f, 0.7f);
         }
     }
     // Sensei dialog modal on top of the map.
