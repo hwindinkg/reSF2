@@ -707,8 +707,15 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     idmg.hit_body_part = iv.hit_name;
     idmg.attack_attrs.push_back({iv.damage_type, iv.damage_shift});
     if (!hit_cap.defense.empty()) idmg.defense_names.push_back(hit_cap.defense);
-    const bool blocked = false;
-    const bool critical = false;
+    // JS `wd.strike` (L509-510) order on the TARGET: block-break FIRST
+    // (`g.DDa` -> `hT(5)`; shipped moves never set IgnoresBlock, so this
+    // is dead with shipped data but faithful), then `Bb.block = Nbb()`
+    // (the defender's Block interval AFTER the break), then LAa/crit.
+    if (iv.ignores_block) {
+        def.fighter.clear_block();
+    }
+    const bool blocked = def.fighter.has_block();
+    const bool critical = false;  // 5.3: crit roll (suppressed when blocked)
     const std::string defense_attr = sf2::scene::select_defense(idmg, blocked, &hit_cap);
     const float dmg = sf2::scene::compute_damage(idmg, atk.params, def.params, defense_attr,
                                                  blocked, critical, &hit_cap);
@@ -722,6 +729,14 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     rec.frame = frame;
     sf2::scene::apply_damage(rec, def.hp, false);
     def.hp = rec.hp_after;
+
+    // JS `ca.Cgb` (L394-397): `b.block || (model.hT(5), Dga, ...)` — a
+    // landed UNBLOCKED hit destroys the target's Block intervals and picks
+    // a new reaction move via `Gc.DK`. The reaction pick is a Phase 5
+    // follow-up (OPEN); the interval break is live here.
+    if (!blocked) {
+        def.fighter.clear_block();
+    }
 
     // Knockback (JS `Bl.strike` + bounds).
     sf2::scene::Vec3 impulse{iv.impulse_x, iv.impulse_y, iv.impulse_z};

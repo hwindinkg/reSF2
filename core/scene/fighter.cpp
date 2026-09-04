@@ -264,6 +264,32 @@ std::vector<std::string> Fighter::intervals_at(int frame) const {
     return out;
 }
 
+// JS `wd.qYa`/`Nbb` (L514): a Block interval (`yD(5)`) active now.
+bool Fighter::has_block() const {
+    if (current_move_ == nullptr) return false;
+    for (const Interval& iv : current_move_->intervals) {
+        if (iv.type != 5) continue;  // `fe.G0`: Block = 5 (L774)
+        const int s = std::max(iv.start, current_move_->first_frame);
+        if (s <= move_frame_ && move_frame_ <= iv.end) return true;
+    }
+    return false;
+}
+
+// JS `Te.hT(5)` (L554, reverse loop): drop every active Block interval.
+void Fighter::clear_block() {
+    if (current_move_ == nullptr) {
+        active_intervals_.clear();
+        return;
+    }
+    for (const Interval& iv : current_move_->intervals) {
+        if (iv.type != 5) continue;
+        const int s = std::max(iv.start, current_move_->first_frame);
+        if (s <= move_frame_ && move_frame_ <= iv.end) {
+            active_intervals_.erase(iv.name.empty() ? "type" + std::to_string(iv.type) : iv.name);
+        }
+    }
+}
+
 // JS `wd.NS` (L506) -> `Te.Skb` (L550): start the move's clip.
 //   - conditions tested by the caller (try_select_move)
 //   - `Mq = a.qx` (FirstFrame) — native: move_frame = FirstFrame

@@ -85,6 +85,8 @@ void parse_interval(pugi::xml_node node, int end_frame_default, Interval& out) {
     out.name = node.attribute("Name") ? node.attribute("Name").value() : "";
     const std::string type = node.attribute("Type") ? node.attribute("Type").value() : "";
     out.type = interval_type_resolve(out.name, type);
+    // JS `Ul.J3` (L774-775): `IgnoresBlock` -> DDa (0 hits in shipped xml).
+    out.ignores_block = data::xml_attr_bool(node, "IgnoresBlock", false);
     out.start = data::xml_attr_int(node, "Start", 0);
     if (node.attribute("End")) {
         out.end = data::xml_attr_int(node, "End", 2147483647);

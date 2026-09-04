@@ -150,6 +150,12 @@ public:
     const std::set<std::string>& active_intervals() const { return active_intervals_; }
     // Interval names active at `frame` (JS `jc.c7a` L691 semantics).
     std::vector<std::string> intervals_at(int frame) const;
+    // JS `wd.Nbb` (L514): `qYa()!=null` = a Block interval (`da.yD(5)`)
+    // is active at the current frame.
+    bool has_block() const;
+    // JS `Te.hT(5)` (L554): remove ALL active Block intervals (strike()
+    // pre-break when `g.DDa`, L509; `Cgb` post-hit when !block, L394-397).
+    void clear_block();
     // Enemies (for facing). Set by the caller (demo).
     float enemy_x() const { return enemy_x_; }
     void set_enemy_x(float x) { enemy_x_ = x; }

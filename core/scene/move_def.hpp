@@ -86,7 +86,10 @@ struct Interval {
     // Attack damage block (<Damage Value=..><Damage Type=.. Shift=..>).
     float damage = 0.0f;
     bool no_critical = false;
-    std::string damage_type;  // e.g. "UnarmedDamage"
+    // JS `Ul.J3` (L774-775): `IgnoresBlock` -> `DDa=true` (+ `hga` names).
+    // Zero occurrences in shipped moves.xml (dead with shipped data), but
+    // `strike()` consults it before the block check (L509), so parsed.
+    bool ignores_block = false;    std::string damage_type;  // e.g. "UnarmedDamage"
     float damage_shift = 0.0f;
     std::string hit_name;     // <Hit Name=..> inside the Attack interval
     float impulse_x = 0.0f, impulse_y = 0.0f, impulse_z = 0.0f;

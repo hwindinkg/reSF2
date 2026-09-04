@@ -134,8 +134,24 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
     (oracle holds 690→615) — AI advance/retreat differs; port enemy ATTACKS
     in phase 1 (DoublePunch F60-120) while JS gates AI to Je==2 (`Anb`) —
     real bug lead.
-- Phase 5 — Combat: 5.1 блок (`yD(5)`, L514); 5.2 комбо (`HZa`, L500-501);
-  5.3 крит/шок/дизарм. Gate: event-trace match.
+- Phase 5 — Combat (5.1 DONE 2026-09-04, build+13/13 green):
+  Spec: helper `reference/COMBAT_STATIC.md` (§0 interval types … §5.1 block;
+  harness `combat_golden.js` GREEN 51 asserts: S1-clean-hit, S2-blocked,
+  S3-ignoreblock, S4-crit-disarm + selftest).
+  Port: `blocked=false` hardcoded → WIRED: `Fighter::has_block` (`yD(5)`,
+  L514) + `clear_block` (`hT(5)`, L554); `Interval.ignores_block` parsed
+  (`Ul.J3` L774-775; 0 hits in shipped moves.xml — dead but faithful);
+  `apply_hit` order = strike pre-break (`g.DDa`, L509) → `Nbb` → LAa
+  (pre-existing `select_defense` order verified: KP[0]/pYa/capsule/lNa) →
+  post-hit `hT(5)` when !blocked (`Cgb`, L394-397). crit still `false`
+  (5.3); reaction-pick `Gc.DK` OPEN follow-up.
+  Gate (event-flag match): `rec.blocked` plumbed (was constant false);
+  runtime block EVENTS need a block-move occurring in-game (not observed in
+  Training smoke — AI rarely blocks) → event-match pending 5.2/5.3.
+  Regression: fight healthy + loop 13/13 PASS post-change.
+- Phase 5 TODO: 5.2 combos (`HZa/tKa`, `yD(4/6)`, `jga/iga`, `SZa`, L499-501);
+  5.3 crit/shock/disarm (`R8a`, `Orb/sr/threshold`, `Wqb/kwb/Wx`,
+  L517-532 + helper §S4 vectors).
 - Phase 6 — AI 1:1 (IN PROGRESS 2026-09-04, static-first):
   - [x] `DaPrng` exact port (`Xx`+`Rk`, L2352/2366; anchor `B0(1)=1103527590`
     hand-verified; Node↔Python independent transcriptions 0 diffs).
