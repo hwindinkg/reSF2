@@ -379,18 +379,20 @@ bool eval_in_the_area(const Cond& c, const FightContext& ctx) {
     return ok;
 }
 
-// JS `xp.he`: Random — (Chance/100) < random().
-// OPEN stream divergence (2026-09-04): the JS goes through `Pl.compare` →
-// `Da.cT` → the SHARED `Da.pg` stream (with the `a>b ? true` no-draw
-// shortcut, sf2.502f0946.js L2352); this uses a private mt19937, so any
-// fight with Random move-conditions drifts from the JS draw order.
-// Fix: thread DaPrng through FightContext (see MASTER_TODO Phase 6).
+// JS `xp.he` via `Pl.compare` → `Da.cT(percent)` (L2352, default b=100):
+// `a>b ? true : s4(100)<a` — no draw when the percent hits 100+. Threaded
+// through `FightContext::roll01` (the shared fight stream); unset contexts
+// (probes/demos) keep the legacy private stream.
 bool eval_random(const Cond& c, const FightContext& ctx) {
-    (void)ctx;
+    const float percent =
+        c.value_int > 0 ? static_cast<float>(c.value_int) : 0.0f;
+    if (ctx.roll01) {
+        if (percent >= 100.0f) return true;  // the `a>b` no-draw shortcut
+        return ctx.roll01() * 100.0f < percent;
+    }
     static std::mt19937 rng(0x5F2);
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    const float chance = c.value_int > 0 ? static_cast<float>(c.value_int) / 100.0f : 0.0f;
-    bool ok = chance > dist(rng);
+    bool ok = percent / 100.0f > dist(rng);
     return ok;
 }
 

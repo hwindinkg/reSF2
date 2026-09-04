@@ -12,11 +12,11 @@
 // the tree with `eval_conditions` (JS `Ha.he` + `Ha.Nba` Not handling +
 // Operator And/Or from `wm.gEa`).
 
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
-
 #include "scene/move_def.hpp"
 
 namespace sf2::scene {
@@ -137,6 +137,11 @@ struct FightContext {
 
     // --- misc (not used by moves.xml but present in the JS) --------------
     bool model_mirrored = false;  // Dm.he ModelMirrored
+    // Random source for `Random` conditions (JS `Da.pg` shared stream).
+    // When set, `eval_random` draws from it with the `Da.cT` shortcut
+    // (`value>=100` -> true, no draw); when unset (probes/demos), the
+    // legacy private stream is used (behavior unchanged).
+    std::function<float()> roll01;
     int round_timer = 0;          // Fm.he RoundResult (zd/Jq = Victory/Defeat)
     bool round_victory = false;   // Fm.zd — "victory round" flag
     int screen = 0;               // Gm.he Screen (0=Fight,10=...)

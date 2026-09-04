@@ -255,6 +255,7 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
 
     // Build a FightContext with the AI's state for the tactics conditions.
     FightContext ctx;
+    ctx.roll01 = [this]() { return roll01(); };  // owned stream or override
     ctx.stage = round_stage::fight;
     ctx.anims_me = {st.my_anim};
     ctx.anims_enemy = {st.enemy_anim};
@@ -507,6 +508,7 @@ int AiController::nwa(const std::vector<AiAnimSlot>& slots, const std::string& a
         // the demo's tactics use condition-free slots).
         for (const Cond& c : s.conditions) {
             FightContext ctx;
+            ctx.roll01 = [this]() { return roll01(); };
             ctx.stage = round_stage::fight;
             ctx.anims_me = {anim};
             if (!eval_conditions(c, ctx)) {

@@ -922,6 +922,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // the input could never win — "no input").
     if (me.ai == nullptr && !auto_attack_ && phase_ == fight_phase::fight) {
         sf2::scene::FightContext ctx;
+        ctx.roll01 = roll01_;  // shared fight stream (`Da.pg` analog)
         ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
         ctx.anims_me = {};
         ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
@@ -972,6 +973,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         const auto idle_it = moves_->find(idle_name);
         if (idle_it != moves_->end()) {
             sf2::scene::FightContext ctx;
+        ctx.roll01 = roll01_;  // shared fight stream (`Da.pg` analog)
             ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
             ctx.anims_me = {idle_name};
             ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name
@@ -1033,6 +1035,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         const auto it = moves_->find(move_name);
         if (it != moves_->end()) {
             sf2::scene::FightContext ctx;
+        ctx.roll01 = roll01_;  // shared fight stream (`Da.pg` analog)
             ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
             ctx.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
             ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
@@ -1095,6 +1098,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 for (const auto& kv : *moves_) {
                     if (kv.second.template_tags.count("Punch") == 0) continue;
                     sf2::scene::FightContext ctx;
+        ctx.roll01 = roll01_;  // shared fight stream (`Da.pg` analog)
                     ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
                     ctx.anims_me = {me.fighter.current_move()
                                         ? me.fighter.current_move()->name
@@ -1113,6 +1117,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             }
             if (chosen != nullptr) {
                 sf2::scene::FightContext ctx;
+        ctx.roll01 = roll01_;  // shared fight stream (`Da.pg` analog)
                 ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
                 ctx.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
                 ctx.anims_enemy = {foe.fighter.current_move()

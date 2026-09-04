@@ -193,6 +193,15 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
 - Phase-6 leads still open: enemy phase-2 march to 1179 (oracle holds ~615;
   advance/retreat tuning, needs real-fight oracle to judge); `eval_random`
   stream threading; `xaa` Ju-horizon; `iwb` eh-reset; kJ-vs-Xh.
+- Debt wave A (DONE 2026-09-04): `eval_random` threaded through
+  `FightContext::roll01` (fight stream at 5 combat sites + AI controller
+  owned stream in v1/nwa; `Da.cT` no-draw shortcut; probes/demos keep
+  legacy); march re-measured post-gate (enemy retreats 690→546 like oracle
+  in phase 1; phase-2 advance residual = tactic behavior, needs real-fight
+  oracle). Deferred with reasons: `xaa` Ju-horizon (parser skips Ju frames
+  — needs parser+model surgery), `iwb` eh-reset (mwb routing unconfirmed),
+  kJ-vs-Xh (animation deep-end), `Gc.DK` reaction-pick (needs candidate
+  infra — own wave), `Wqb` item-swap (no weapon items; stub).
 - Phase 6 — AI 1:1 (IN PROGRESS 2026-09-04, static-first):
   - [x] `DaPrng` exact port (`Xx`+`Rk`, L2352/2366; anchor `B0(1)=1103527590`
     hand-verified; Node↔Python independent transcriptions 0 diffs).
