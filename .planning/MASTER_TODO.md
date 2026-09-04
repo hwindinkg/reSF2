@@ -121,8 +121,25 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
     roulette spread, QJa order, gfa/Aea trunc+1).
   - [x] C++ mirror `app/ai_golden` written (DaPrng+Gb vectors, scripted
     update() trace) — NOT COMPILED (no toolchain on this machine).
-  - [ ] Phase 6 gate OPEN: build+run `ai_golden`, diff vs Node (PRNG exact,
-    Gb ≤1e-5), full-tree branch coverage. BLOCKED: no msbuild/cl here.
+  - [x] TOOLCHAIN FOUND `D:\MicrosoftVisualStudio\2022\BuildTools` (MSVC 14.44;
+    lesson: check CMakeCache + D:\ before claiming absence). Build clean,
+    0 errors (only pre-existing C4458/C4099).
+  - [x] GOLDEN PASS 2026-09-04: Node vs C++ 0 divergences (PRNG bit-exact
+    incl. stream positions; Gb ≤1e-9 observed vs 1e-5 allowed; zones 1-4,
+    roulette spread, QJa order, gfa/Aea trunc+1 all match). Decision trace:
+    12/12 `Jab`/fk=6 end-to-end (slot→V1→roulette). Two transcription bugs
+    caught by the harness itself (discarded lead jf; o1/q1 feed) — fixed.
+  - [x] `mq()` semantic fix: o1/q1 = ABSOLUTE gd (not ratio — HealthFactor
+    1/3 + EnemyHealthFactor -1/-3 authored for absolute; `gd/Zn` ratio exists
+    separately in JS); xY = enemy move frame (kJ-vs-Xh residual OPEN).
+  - [ ] Coverage gaps (honest, not gate-blocking): YAa/XAa/Gea record paths
+    need real `tactics/*.dat` — files EXIST locally
+    (`reference/www/res/tactics/*.dat`, gitignored) + `_.atf` in assets/.
+    Next: C++ record-path smoke with real `_.dat` + Standard/Sensei.
+    fk=3,4,7,8 have NO static assignment in JS — nothing to cover.
+  - [ ] Phase 6 gate OPEN until: full build + `ai_golden` re-run green
+    (done above this line) + record-path smoke + `--fight`/`--headless-loop`
+    regression (below).
   - KNOWN stream divergences (documented, not silent): `eval_random`
     (conditions.cpp) uses private mt19937, not `Da.pg` (+ missing `a>b`
     shortcut) — thread DaPrng through FightContext later; `xaa` Ju-horizon

@@ -150,14 +150,27 @@ int AiController::b6a(const AiFightState& st) const {
 int AiController::facing(const AiFightState& st) const { return b6a(st); }
 
 // JS `mQ` (L620): build the feature state from the fight snapshot.
+// Field semantics (exact):
+//   o1/q1 = ABSOLUTE hp (`this.model.parameters.gd` / `b.parameters.gd`;
+//     gd is absolute — the ratio form `gd/Zn` exists separately, e.g. the
+//     low-HP check `l.parameters.gd/l.parameters.Zn<=v.u4.Uva`). Curves
+//     carrying HealthFactor (1, 3) / EnemyHealthFactor (-1, -3) were authored
+//     for absolute inputs (e.g. Cautious = gd_en - gd_me); feeding ratios
+//     would graduate a nearly-binary signal — verified against
+//     res/tactic_settings.xml scales 2026-09-04.
+//   xY = enemy `kJ()` (played steps); the port feeds `enemy_move_frame`
+//     (Xh-based, same quantity as `Fl_`) — the kJ-vs-Xh residual is OPEN.
+//   pZ = `Tba` (max M2 part frames) — `enemy_max_part_frames` ✓.
+//   counter/Xb/tf = strike-memory accumulators (`Cn.d0`) — the port has no
+//     strike memory yet, stays 0 (documented divergence, not silent).
 void AiController::mq(const AiFightState& st) {
     AiFeatureState& f = feat_;
     f.counter = 0.0f;              // no strike-memory accumulators yet
     f.xb = 0.0f;
     f.tf = 0.0f;
-    f.o1 = st.my_max_hp > 0.0f ? 1.0f - st.my_hp / st.my_max_hp : 0.0f;
-    f.q1 = st.enemy_max_hp > 0.0f ? 1.0f - st.enemy_hp / st.enemy_max_hp : 0.0f;
-    f.xY = static_cast<float>(st.enemy_max_part_frames);
+    f.o1 = st.my_hp;               // absolute gd (NOT a ratio — see above)
+    f.q1 = st.enemy_hp;            // absolute gd
+    f.xY = static_cast<float>(st.enemy_move_frame);
     f.cl = static_cast<float>(st.magic_bullets);
     f.k2 = static_cast<float>(st.ranged);
     f.pz = static_cast<float>(st.enemy_max_part_frames);

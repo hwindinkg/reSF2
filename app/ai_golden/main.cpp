@@ -62,11 +62,13 @@ WeightCurve lin_curve() {
 }
 
 AiFeatureState small_feat() {
+    // Raw field values IDENTICAL to ai_golden.js featS (formula-level
+    // golden — no mq() semantics here): o1=0.9, q1=0.7 feed (1-o1)/(1-q1).
     AiFeatureState f;
     f.counter = 0.2f;
     f.xb = 0.5f;
-    f.o1 = 0.1f;  // 1 - 0.9
-    f.q1 = 0.3f;  // 1 - 0.7
+    f.o1 = 0.9f;
+    f.q1 = 0.7f;
     f.xY = 2.0f;
     f.cl = 0.0f;
     f.k2 = 0.0f;
@@ -150,13 +152,22 @@ int main() {
     slot.priority = 1;
     slot.chance = constant_curve(0.9f);
     tactic.quick_attacks.push_back(slot);
+    // Roulette weights + ExpectedWait for the idle move: without weights
+    // `pick` returns -1; without ExpectedWait the XW branch (JS L607-608)
+    // discards slot candidates every pass (expected_wait defaults to 1.0
+    // when no current move matches).
+    tactic.anim_weights.emplace_back("Jab", constant_curve(1.0f));
+    tactic.expected_wait.emplace_back("Idle", constant_curve(30.0f));
     std::vector<sf2::scene::TacticsFile> tactics;
     AiController ai;
     ai.init("", tactics, &tactic, &moves);
     ai.set_seed(7u);
+    const MoveDef* idle = &moves["Idle"];
     std::printf("  \"updates\": [");
     for (int i = 0; i < 12; ++i) {
         AiFightState st;
+        st.current_move = idle;
+        st.move_frame = 10;
         st.my_hp = 100.0f;
         st.my_max_hp = 100.0f;
         st.enemy_hp = 100.0f;

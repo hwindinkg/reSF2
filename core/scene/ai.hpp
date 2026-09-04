@@ -176,9 +176,9 @@ struct AiFeatureState {
     float counter = 0.0f;      // `counter`
     float xb = 0.0f;           // `Xb` (damage counter)
     float tf = 0.0f;           // `tf` (hits counter)
-    float o1 = 0.0f;           // `o1` — my HP ratio (1 - gd/Zn)
-    float q1 = 0.0f;           // `q1` — enemy HP ratio (1 - gd/Zn)
-    float xY = 0.0f;           // `xY` — enemy animation frames
+    float o1 = 0.0f;           // `o1` — my ABSOLUTE hp (`parameters.gd`, not a ratio)
+    float q1 = 0.0f;           // `q1` — enemy ABSOLUTE hp
+    float xY = 0.0f;           // `xY` — enemy animation frame (`kJ()`; port: move frame)
     float cl = 0.0f;           // `cl` — my magic bullets
     float k2 = 0.0f;           // `K2` — ranged flag (±1)
     float pz = 0.0f;           // `pZ` — enemy's highest body-part frames
