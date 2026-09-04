@@ -103,3 +103,72 @@ Minified names: `Be` perk def (L1328-1349), `dw`/`v.Rg` perk registry
 3. `Pma/Wk` rebuild timing vs `BD` (owned vs catalog races on buy/equip).
 4. `c0a/R_a` + `Vjb` recipe flows (all `debugger`-guarded paths).
 5. `Be.ZFa/bhb/Ffb` expression evaluators (L1344) against live vars.
+
+---
+
+## 5. Perk evaluator semantics (implementable)
+
+### 5.1 Trigger flow (static order)
+
+1. Fight events enter the `bc` bus (`ca.Sba→tb.Gj`, L393; `Gj` dispatch
+   L1364): per `ej` entry → `h8a(type)` slot → per trigger `v_a`.
+2. `v_a` (L1364): `c8a(Wa)` perk lookup → must be `enabled` →
+   `bBa` (model's `Fw` entry, L1366-1367) → event gate
+   `t0a(info)` → `Axa(model, …)` (L1359: **all** `rb` conditions must pass,
+   `cb`-negation aware; `Hc` events pre-matched by `isEqual`).
+3. `Iw.parse` (L1359): `Name`, `Events=Ac.create`, `Conditions=ec.create`,
+   `Actions=Ma.create`. `Kw` slots (`h8a` L1350) route by trigger type;
+   `Pob/UKa` (L1366-1367) build `Fw` queue entries (`jp` wrappers);
+   `FE` (L1366-1367) re-fires owned actions.
+4. `Ma.create` = the 31-name action factory (L1374-1377):
+   `AddBullets→Gp`, `AddMagicCharge→Hp`, `ApplyModEffect→Ip`,
+   `ChangeAdditionalDamageValue→Jp`, `ChangeHitEffectScale→Kp`,
+   `ChangeImpulse→Lp`, `ChangeModelColor→Mp`, `ClearMods→Np`,
+   `DisableInterval→Op`, `Lifesteal→Pp`, `MarkPerkAsUsed→Qp`,
+   `ModAttributes→Rp`, `ModFlag→Sp`, `ModHealthChange→Tp`, `ModIcon→Up`,
+   `ModInvisibility→Vp`, `MoveModel→Wp`, `Provoke→Xp`, `SetCooldown→Yp`,
+   `SetDarkness→Zp`, `SetHit→$p`, `SetModFrames→aq`, `SetModVariable→bq`,
+   `SetRangeVariable→cq`, `SetTactic→dq`, `ShowDebugLine→eq`,
+   `SlowModel→fq`, `StealMagicMod→Kf`, `Switch→gq`,
+   `TurnOffCollision→hq` (L1403: `vZ` toggle).
+
+### 5.2 `fw` dispatch → per-action semantics (L1290-1300)
+
+`lF`: `nm?new jp(d):d` (`jp` state wrapper L1370; `Tb.nm` default true
+L1378), then by `action.type`; `ia` ticks `Uf/Iv` frames and calls
+`JNa` revert on expiry (L1290/L1298-1299); `pP/Z_a` cleanup (L1300-1301).
+
+| Type | Action (class) | XML attrs | `fw` method → effect (inputs/outputs/state) |
+|---|---|---|---|
+| 1 | ModIcon (`Up`) | Image/ShowExpiration/ExpirationVer | `bLa`: show icon (`image/kx/sz`) via `model.cka` (L1292-1293) |
+| 3 | ModAttributes (`Rp`) | any `v.eo` attr → `aP` expr map | `VKa`: `±attr` add on target (sign by apply/remove); `DamageFactor` also records `Bb.Tua` (L1293) |
+| 4 | ClearMods (`Np`) | Name | `Vob`: arm `qw` on same-named mods (+`bc.iAa` namespace) (L1297) |
+| 6 | DisableInterval (`Op`) | IntervalName/IntervalType | `Yob`: `hT(G0)` by type else `F4` by name (L1294) |
+| 7 | AddBullets (`Gp`) | BulletType/Value expr | `Rob`: `MagicBullet→hZ(n)+LA` (L1295) |
+| 8 | AddMagicCharge (`Hp`) | Value expr | `Sob`: `Hwa(n)+LA` (L1295) |
+| 9 | SetHit (`$p`) | Critical/Block/Shock/Disarm/Damage | `ppb`: override `Bb.se/Ub/Yi/block`, set `bR/Zi` (L1294-1295) |
+| 10 | SetModFrames (`aq`) | Name/Frames expr | `dpb`: retime named mod `Uf/Iv` (L1295) |
+| 11 | ApplyModEffect (`Ip`) | Name/Type(Pulse/Stack)/StackCount | `cpb`: fire named mod's `U4` (L1296) |
+| 12 | ModHealthChange (`Tp`) | PerFrameValue | `Inb` (via `znb`, L1290): `aM(model,O3)` every frame (L1298) |
+| 13 | Provoke (`Xp`) | Trigger | `jpb`: fire `SL` trigger set via `tb.Pob` (L1296) |
+| 14 | Lifesteal (`Pp`) | DamagePart | `apb`: `aM(model, VZ·Zi·so-ratio)` (L1294) |
+| 15 | ModInvisibility (`Vp`) | — | `cLa`: `hpb(model)` (L1294) |
+| 16 | SetTactic (`dq`) | Name | `qpb`: `yZa(LL)` (L1295) |
+| 17 | SetModVariable (`bq`) | Value expr | `dka`: `Fc.Q3.set(name,result)` (L1299) |
+| 18 | SetRangeVariable (`cq`) | Value/Min/Max exprs | `rpb`: `Q3.set` clamped (L1299-1300) |
+| 19 | SetCooldown (`Yp`) | Frames/Button | `npb`: `wKa(button)+b5` (L1300) |
+| 20 | ChangeImpulse (`Lp`) | MultiplierX/Y/Z | `YKa`: `gob()`/`YLa(x,y,z)` (L1293-1294) |
+| 21 | ChangeHitEffectScale (`Kp`) | Scale | `XKa`: `Qz` set (L1293-1294) |
+| 22 | ChangeAdditionalDamageValue (`Jp`) | Value expr | `WKa`: `Ly` set (+`Tua` record) (L1294) |
+| 25 | SetDarkness (`Zp`) | Opacity/Color/FrameTimer/Show | `opb`: `Nqb` overlay (L1297-1298) |
+| 26 | Switch (`gq`) | Value + Case/Default children | `tpb`: `Z4a()` returns null (`debugger`) → **effectively inert** (L1402/L1296-1297) |
+| 27 | StealMagicMod (`Kf`) | — | `aLa`: `$o` swap enemy magic + priority-0 pin + move merge (L1398-1401) |
+| 28 | SlowModel (`fq`) | Speed/IsRulePerk | `gLa`: `KT(hU,speed)` timescale (L1398) |
+| 29 | ChangeModelColor (`Mp`) | Color | `ZKa`: `Qs` (L1381) |
+| 30 | TurnOffCollision (`hq`) | bool | `S`: `Nl.oI[].vZ` toggle (L1403) |
+| 31 | MoveModel (`Wp`) | From/To/Offsets/Axis/LerpSpeed | `S`: `Ow` lerp animation (L1385-1387) |
+| 5/23/24 | ModFlag (`Sp`) / ShowDebugLine (`eq`) / MarkPerkAsUsed (`Qp`) | — | **no `fw` case → inert in fight** (flag effect, if any, via mod namespace — OPEN-KEPT) |
+
+No `Ma` action carries `type=2`. `Ma` base has no `S()` — only types
+30/31 route to class `S()`; all others route to `fw` methods above.
+`JNa` revert covers types 1,3,15,20,21,22,27,28,29,30 (L1298-1299).

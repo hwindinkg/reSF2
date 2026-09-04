@@ -10,7 +10,8 @@
 //       Magic -> `SJa` (the shop-tab lists).
 //   - Each Item carries the list.xml attributes: Name, Type, SubType,
 //     Price (gold), BonusPrice (premium), Model, Image, Level, WeaponDamage,
-//     BodyDefense/HeadDefense, UnarmedDamage, ShopHide/Hidden, PaidItem.
+//     BodyDefense/HeadDefense, UnarmedDamage, MagicDamage, ShopHide/Hidden,
+//     PaidItem.
 //   - The shop screen (Oa g="468") shows the priced items; the purchase
 //     flow is `Pa.iwa` (L629626) — money check `p.o.Tb >= a.jp()`, deduct
 //     `p.o.Fr(b)`, add `Pa.gI` (L628934) -> `p.o.xa.Oo` -> save.
@@ -39,6 +40,7 @@ struct CatalogItem {
     int body_defense = 0;   // BodyDefense
     int head_defense = 0;   // HeadDefense
     int unarmed_damage = 0; // UnarmedDamage
+    int magic_damage = 0;   // MagicDamage (Magic items; Ranged carries none)
     bool shop_hide = false; // ShopHide="1" (not offered in the shop)
     bool hidden = false;    // Hidden="1"
     bool paid = false;      // PaidItem="Paid"/"SuperPaid" (premium-only)

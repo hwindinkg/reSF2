@@ -318,11 +318,26 @@ int main() {
         std::printf("  \"dk12_ukb\": [[\"%s\"]],\n", rec12.ukb[0].c_str());
         std::printf("  \"dk12_zy\": [\"%s\", %d],\n",
                     rec12.zy.c_str(), rec12.jza);
-        // S13 prize-bonus arithmetic (mirrors combat_golden.js prizeCoins).
-        std::printf("  \"prize\": {\"zeros\": %d, \"full\": %d, \"style\": %d},\n",
-                    sf2::scene::prize_coins_bonus(false, false, 0, 0, 0),
-                    sf2::scene::prize_coins_bonus(true, true, 4, 2, 0),
-                    sf2::scene::prize_coins_bonus(false, false, 0, 0, 15));
+        // S14 exact Fh.lXa (mirrors combat_golden.js fhLxa; pk EAa order).
+        {
+            const double pk[6] = {0.0, 3.0, 6.0, 9.0, 12.0, 15.0};
+            sf2::scene::PrizeKx k0;
+            sf2::scene::PrizeFh f0;
+            sf2::scene::fh_lxa(k0, f0, 70.0, 70.0, 0.0, 5.0, 2.0, 1.0, 3.0, pk, 0);
+            sf2::scene::PrizeKx k1;
+            sf2::scene::PrizeFh f1;
+            f1.c6 = 2;
+            sf2::scene::fh_lxa(k1, f1, 70.0, 70.0, 0.0, 5.0, 2.0, 1.0, 3.0, pk, 0);
+            sf2::scene::PrizeKx k2;
+            sf2::scene::PrizeFh f2;
+            f2.e6 = 1;
+            sf2::scene::fh_lxa(k2, f2, 70.0, 70.0, 0.0, 5.0, 2.0, 1.0, 3.0, pk, 0);
+            sf2::scene::PrizeKx k3;
+            sf2::scene::PrizeFh f3;
+            sf2::scene::fh_lxa(k3, f3, 70.0, 70.0, 5.0, 5.0, 2.0, 1.0, 3.0, pk, 1);
+            std::printf("  \"lxa\": [%.1f, %.1f, %.1f, %.1f],\n",
+                        k0.m6, k1.m6, k2.m6, k3.m6);
+        }
         // S6: Wx=5 fires wqb on the 6th tick, Wx ends -1.
         sf2::scene::ShockState st6;
         st6.weapon_wx = 5;

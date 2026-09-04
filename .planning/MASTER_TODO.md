@@ -276,6 +276,21 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
     bug (asserted decode(export()) round-trip; export wraps raw XML while
     decode expects compressed payloads — asymmetric by spec). Fixed test:
     SAVE_UNIT PASS (all new fields + envelope + export shape).
+- Phase 7e - Exact bzb/lXa + SHOW_BLOCK note (DONE 2026-09-04, build +
+  goldens + 13/13 green):
+  - Replaced the disproven additive model with verbatim `Fh.lXa`
+    (L2054-2056): Rva/PY/OY/P3/ep/Ui/DZ/Ub/m6/mOa, `Vk(a,b=0)=
+    ceil(a/10^(kq-b))` (kq absent -> 0), pk EAa order; Fh fresh per battle
+    (`v.kD(new Fh,...)`); c6/e6 via strike flags (first-hit->cvb/p1a,
+    shock->yvb/P1a); d6=0 at reward time (gXa only at victory-after);
+    jU never set (0); b6 style untracked (0). S13 retired, S14 golden:
+    fresh=70, c6=2->350, e6=1->280, kq=1->7 — Node==C++ 0 divs.
+  - Verified live: Bosses loss computes total=350 (c6=2 enemy first-hits ->
+    ep=280, JS-faithful) but applies nothing; Training win applies 0
+    (base 0). No money drift (425 stable across the run).
+  - SHOW_BLOCK (Stream 2 resolved): `EStoryTutorialShowBlock` is a quest
+    EVENT class (Fo), zero variable writes in JS — scene needs nothing;
+    `block_lesson` must derive from quest-step position (Stream 3).
 - Phase 7d - Prize completion + music (DONE 2026-09-04, build + goldens
   + 13/13 green):
   - Prize: `gems_bonus` (`hj.Uo`) field flows end-to-end (always 0 — no

@@ -416,3 +416,35 @@ models live in `magic_dds/ktx.dat`. Gameplay numbers live here:
   (L1339).
 - Ranged ammo: `K0()` (`NoRanged?1:-1`, L505); `StartingBullets` has no JS
   literal — resolution OPEN (needs runtime trace).
+
+**Refinement (round 6):** the manifest DOES list magic visuals — ids
+394-551 are `magic/mgc_*` png+json pairs (per-spell start/middle/end),
+392/393 are `magic_ktx/dds.dat` models; only loose files under
+`www/res` are absent. `u0`-style music ids 1318-1353 are separate
+(see `reference/MUSIC_STATIC.md`).
+
+### APPENDIX C — style points (Stream 1 style-factor gap)
+
+Two separate systems — do not conflate:
+
+1. **HUD style bar `Fr` (L2090-2092)**, tables `lw`/`v.hu` (parse L1159,
+   XML `internal_settings.xml` `<StyleLevels>`):
+   `StylePerHit TNa=0.5`, `DecreaseSpeed tya=0.08`, `Penalty ZIa=2`;
+   6 levels (multiplier all 1): Start/Hard/Brutal/Aggressive/Crazy/
+   Fantastic (`BarImage CrazyBar_0..5`). Per-anim credit
+   `Y8a(anim)=TNa·Z8a(bn)·ZI a^(-count)·anim.RNa` (`RNa` per-anim weight:
+   init L690, parsed L710, read L2091); `VS` map counts uses per anim
+   (`Xa` get-or-0). Level-up `KDa`: `bn+=floor`, frac carry, clamp to
+   `pk.length-1`, lower bars reset (`OT`), `ILa` announce. Decay per frame
+   `tya/60/on()` (`ia`). Reset `tob/rqb/g0a`. Current value `$8a=Gb(bn)`.
+2. **Model style score `xP`:** snapshotted per round `ze.rl/kl.xP=yb/pb.dz`
+   (`Ema`, L420); `dz` set by `z3(a,b,c)` on achievement-counter events
+   (`ca.z3`, L423; `dz` init/reset 0, L491/L498/L514-515). Win rule
+   `ERuleWinStyle` (`tj`, L913): `xP>=BVa` (`VIa` parsed). Crazy-gate
+   `an` (L854): `xP<Upa`.
+3. Reward-side names differ: `hF.pk` (Turtle 0/Hard 3/Brutal 6/Agressive 9/
+   Crazy 12/Fantastic 15, L1192-1193) vs `Fr.pk` (Start…Fantastic) vs
+   `Fh.EAa` gold styles (`goldTurtleStyle…`, L2055-2056) — map by position,
+   not by string.
+OPEN-KEPT: live `dz` tick source (counter→`z3` rate) and `RNa` per-anim
+values in `moves.xml` (parsed L710, not yet extracted).

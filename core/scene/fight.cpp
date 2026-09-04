@@ -276,6 +276,7 @@ void FightController::init_locks(
     std::function<float()> roll01,
     const std::vector<std::pair<std::string, std::string>>& player_owned) {
     battle_ = battle;
+    prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
     model_ = model;
     moves_ = &moves;
     clips_ = &clips;
@@ -875,8 +876,13 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // landed UNBLOCKED hit destroys the target's Block intervals and picks
     // a new reaction move via `Gc.DK` (d-set first-match:
     // `Fighter::try_react`; shock prefers *Fall* reactions).
+    // Strike-flag counters for the prize Fh (JS `Sf.strike` flags d/e/h:
+    // first-hit -> `cvb`/`p1a` (c6++), shock -> `yvb`/`P1a` (e6++); blocked
+    // hits take the `UYa` path and count nothing).
     if (!blocked) {
         def.fighter.clear_block();
+        if (rec.first_hit) ++prize_fh_.c6;
+        if (rec.shock) ++prize_fh_.e6;
         sf2::scene::FightContext rctx;
         rctx.roll01 = roll01_;
         rctx.stage = sf2::scene::round_stage::fight;
@@ -937,16 +943,24 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
 
 // JS `v.kD`/`bzb` prize factors (FLOW_STATIC section 4.3;
 // internal_settings `<RewardsPrize>` values verified 2026-09-04).
-FightController::BattlePrize FightController::prize() const {
+FightController::BattlePrize FightController::prize(int base_coins) const {
     BattlePrize p;
     p.perfect = player_.hits_taken == 0;
     p.first_strike = battle_first_hit_ && battle_first_by_player_;
     p.max_combo = player_.max_combo;
     p.shocks = player_.shocks_dealt;
     p.style_value = 0;  // style untracked -> Turtle 0 (OPEN)
-    p.coins_bonus = prize_coins_bonus(p.perfect, p.first_strike, p.max_combo,
-                                      p.shocks, p.style_value);
-    p.gems_bonus = 0;  // `hj.Uo`: no evidenced fight source
+    // Exact `Fh.lXa` (L2054-2056): prize-base `a` = the head prize `ph`
+    // (OPEN D0-table value -> base coins used); coins `b` = base;
+    // gems 0; Ia/epF/UiF/UbF = 5/2/1/3; pk EAa order; kq = 0
+    // (DenominationDigits absent in seed).
+    static const double kPk[6] = {0.0, 3.0, 6.0, 9.0, 12.0, 15.0};
+    PrizeKx kx;
+    fh_lxa(kx, prize_fh_, static_cast<double>(base_coins),
+           static_cast<double>(base_coins), 0.0, 5.0, 2.0, 1.0, 3.0, kPk, 0);
+    p.coins_total = static_cast<int>(kx.m6);
+    p.coins_bonus = p.coins_total - static_cast<int>(prize_vk(base_coins, 0));
+    p.gems_bonus = static_cast<int>(kx.mOa);
     return p;
 }
 

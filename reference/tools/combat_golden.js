@@ -381,17 +381,40 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
   const G11b = cgbGuards({ JP: "j", aI: "a", se: true, Ub: true, Yi: true, block: false, bR: 5, Zi: 5, ep: false, Iza: false },
     { a3: false, gd: 100, fightNone: true, wdVc: false, sn: false, auHdName: "fists", ownHdName: "sword", Dga: false });
   eq("S11 fightnone", [G11b.Bb.se, G11b.Bb.Ub, G11b.Bb.Yi], [false, false, false]);
-  // S13: prize-bonus arithmetic (FLOW_STATIC 4.3; additive reading of the
-  // bzb factor args — the combination inside bzb is OPEN).
-  // Verbatim C++ twin: sf2::scene::prize_coins_bonus (fight.hpp).
-  function prizeCoins(perfect, first, combo, shocks, style) {
-    return (perfect ? 5 : 0) + (first ? 2 : 0) + combo * 1 + shocks * 3 + style;
+  // S14: exact Fh.lXa (L2054-2056 + Kx ctor; pk EAa order).
+  // Verbatim C++ twin: sf2::scene::fh_lxa (fight.hpp). Replaces S13: the
+  // additive reading is disproven by the lXa body (all terms gated by
+  // Fh counters; fresh Fh pays base only).
+  function prizeVk(a, kq) {
+    kq == null && (kq = 0);
+    let div = 1;
+    for (let i = 0; i < kq; i++) div *= 10;
+    return Math.ceil(a / div);
   }
-  eq("S13 zeros", prizeCoins(false, false, 0, 0, 0), 0);
-  eq("S13 full", prizeCoins(true, true, 4, 2, 0), 5 + 2 + 4 + 6);
-  eq("S13 style", prizeCoins(false, false, 0, 0, 15), 15);
-  out.scenarios.push({ id: "S13-prize", zeros: 0,
-    full: prizeCoins(true, true, 4, 2, 0), style: prizeCoins(false, false, 0, 0, 15) });
+  function fhLxa(fh, prize, coins, gems, Ia, epF, UiF, UbF, pk, kq) {
+    const oc = { rva: 0, py: 0, oy: 0, p3: 0, ep: 0, ui: 0, dz: 0, ub: 0, m6: 0, mOa: 0 };
+    oc.rva += prize;
+    oc.py += prizeVk(coins, kq);
+    oc.oy += gems;
+    oc.p3 += prizeVk(Math.trunc(Math.ceil(prize * Ia) * fh.d6 + .5), kq);
+    oc.ep += prizeVk(Math.trunc(Math.ceil(prize * epF) * fh.c6 + .5), kq);
+    oc.ui += prizeVk(Math.trunc(Math.ceil(prize * UiF) + .5), kq) * fh.jU;
+    oc.dz += prizeVk(Math.trunc(Math.ceil(prize * pk[fh.b6]) + .5), kq);
+    oc.ub += prizeVk(Math.trunc(Math.ceil(prize * UbF) * fh.e6 + .5), kq);
+    oc.m6 = oc.py + oc.p3 + oc.ep + oc.ui + oc.dz + oc.ub;
+    oc.mOa = oc.oy;
+    return oc;
+  }
+  const PK = [0, 3, 6, 9, 12, 15];
+  const lxa0 = fhLxa({ d6: 0, c6: 0, jU: 0, e6: 0, b6: 0 }, 70, 70, 0, 5, 2, 1, 3, PK, 0);
+  eq("S14 fresh m6", lxa0.m6, 70);
+  const lxa1 = fhLxa({ d6: 0, c6: 2, jU: 0, e6: 0, b6: 0 }, 70, 70, 0, 5, 2, 1, 3, PK, 0);
+  eq("S14 c6 m6", lxa1.m6, 350);
+  const lxa2 = fhLxa({ d6: 0, c6: 0, jU: 0, e6: 1, b6: 0 }, 70, 70, 0, 5, 2, 1, 3, PK, 0);
+  eq("S14 e6 m6", lxa2.m6, 280);
+  const lxa3 = fhLxa({ d6: 0, c6: 0, jU: 0, e6: 0, b6: 0 }, 70, 70, 5, 5, 2, 1, 3, PK, 1);
+  eq("S14 kq m6", lxa3.m6, 7);
+  out.scenarios.push({ id: "S14-lxa", m6: [lxa0.m6, lxa1.m6, lxa2.m6, lxa3.m6] });
   out.scenarios.push({ id: "S11-misc", ok: true });
 
   out.selftest = { pass, fail, failures };

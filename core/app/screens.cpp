@@ -2242,16 +2242,15 @@ void FightScreen::update_impl(float dt) {
                      fight_->player().hp, fight_->player().rounds_won,
                      fight_->player().hits_landed, fight_->enemy().hp,
                      fight_->enemy().rounds_won, fight_->enemy().hits_landed);
-        // JS `v.kD`/`bzb` prize factors (FLOW_STATIC section 4.3): performance
-        // bonus on top of the battle's base reward. Snapshot the breakdown
-        // into pending_battle BEFORE folding the bonus in, so Results can
-        // show base + factor lines (gems untracked by prize() — see report).
+        // JS `v.kD`/`bzb`/`Fh.lXa` (FLOW_STATIC section 4.3): exact totals.
+        // Snapshot the breakdown into pending_battle, then set the reward
+        // to the lXa TOTAL (m6, base included) — not base+bonus.
         {
-            const auto prize = fight_->prize();
+            const auto prize = fight_->prize(pb.reward_money);
             std::fprintf(stdout,
-                         "[fight] prize: perfect=%d first=%d combo=%d shocks=%d bonus=%d\n",
+                         "[fight] prize: perfect=%d first=%d combo=%d shocks=%d total=%d\n",
                          prize.perfect ? 1 : 0, prize.first_strike ? 1 : 0,
-                         prize.max_combo, prize.shocks, prize.coins_bonus);
+                         prize.max_combo, prize.shocks, prize.coins_total);
             pb.prize_base_coins = pb.reward_money;
             pb.prize_bonus = prize.coins_bonus;
             pb.prize_gems = prize.gems_bonus;
@@ -2259,7 +2258,7 @@ void FightScreen::update_impl(float dt) {
             pb.prize_shocks = prize.shocks;
             pb.prize_perfect = prize.perfect;
             pb.prize_first = prize.first_strike;
-            if (player_won) pb.reward_money += prize.coins_bonus;
+            if (player_won) pb.reward_money = prize.coins_total;
         }
         std::fflush(stdout);
         push(kScreenResults);
@@ -3133,6 +3132,22 @@ void ShopScreen::render_impl(App& app) {
 // EquipmentScreen
 // ---------------------------------------------------------------------------
 
+// Equipped-slot stat value/tag (display only; Ranged has no damage attr in
+// list.xml — Level stands in, flagged here and in the delta line).
+int equip_stat_value(const CatalogItem& ci) {
+    if (ci.type == "Weapon") return ci.weapon_damage;
+    if (ci.type == "Armor") return ci.body_defense;
+    if (ci.type == "Helm") return ci.head_defense;
+    if (ci.type == "Magic") return ci.magic_damage;
+    return ci.level;
+}
+
+const char* equip_stat_tag(const std::string& type) {
+    if (type == "Weapon" || type == "Magic") return "DMG";
+    if (type == "Armor" || type == "Helm") return "DEF";
+    return "Lv";
+}
+
 EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") {
     // The FULL catalog — the owned base items (Body/Head/Fists) are
     // ShopHide/Hidden and absent from the shop-visible list; the grid
@@ -3162,9 +3177,9 @@ void EquipmentScreen::update_impl(float dt) {
         }
     }
     // The owned items grid: click to equip into its type's slot. `card`
-    // counts only the Weapon/Armor/Helm cards (NoRanged/NoMagic etc. are
-    // filtered out and must NOT consume a grid slot — the JS profile grid
-    // shows only the equippable item types).
+    // counts only equippable-type cards (all five slots: Weapon/Armor/Helm/
+    // Ranged/Magic — JS `xc.hk` slots); other owned rows are skipped without
+    // consuming a grid slot.
     const float grid_x = kViewW * 0.55f, grid_y0 = 220.0f, grid_dx = 240.0f, grid_dy = 110.0f;
     int idx = 0;
     int card = 0;
@@ -3177,7 +3192,8 @@ void EquipmentScreen::update_impl(float dt) {
                 break;
             }
         }
-        if (type != "Weapon" && type != "Armor" && type != "Helm") {
+        if (type != "Weapon" && type != "Armor" && type != "Helm" && type != "Ranged" &&
+            type != "Magic") {
             ++idx;
             continue;
         }
@@ -3194,16 +3210,19 @@ void EquipmentScreen::update_impl(float dt) {
                 std::string* slot_val = nullptr;
                 if (type == "Weapon") slot_val = &w2.weapon;
                 else if (type == "Armor") slot_val = &w2.armor;
-                else slot_val = &w2.helm;
+                else if (type == "Helm") slot_val = &w2.helm;
+                else if (type == "Ranged") slot_val = &w2.ranged;
+                else slot_val = &w2.magic;
                 *slot_val = oi.name;
                 for (auto& oi2 : w2.items) {
                     if (oi2.name == oi.name) oi2.equipped = true;
                 }
                 app().save().save(w2);
                 std::fprintf(stdout,
-                             "[equip] EQUIPPED %s (%s) -> %s slot (weapon=%s armor=%s helm=%s); move list rebuilt on next fight\n",
+                             "[equip] EQUIPPED %s (%s) -> %s slot (weapon=%s armor=%s helm=%s ranged=%s magic=%s); move list rebuilt on next fight\n",
                              oi.name.c_str(), subtype.c_str(), type.c_str(), w2.weapon.c_str(),
-                             w2.armor.c_str(), w2.helm.c_str());
+                             w2.armor.c_str(), w2.helm.c_str(), w2.ranged.c_str(),
+                             w2.magic.c_str());
                 std::fflush(stdout);
             }
         }
@@ -3236,13 +3255,59 @@ void EquipmentScreen::render_impl(App& app) {
     } catch (const std::exception&) {
         return;
     }
-    const float slot_x = kViewW * 0.2f, slot_y0 = 220.0f, slot_dy = 110.0f;
-    const char* slot_names[3] = {"Weapon", "Armor", "Helm"};
-    const std::string current[3] = {w.weapon, w.armor, w.helm};
-    for (int s = 0; s < 3; ++s) {
-        const float sy = slot_y0 + s * slot_dy;
-        draw_flat_button(app, std::string(slot_names[s]) + ": " + current[s], slot_x, sy, 400.0f,
-                         80.0f, 0.35f, 0.3f, 0.45f, hover_ == s);
+    // --- Profile header (read-only warrior stats) -------------------------
+    // Level + OLa exp bar (character_progress.xml thresholds, 100 fallback),
+    // total wins (Fights/yc records), coins (Money/Tb) + gems (Bonus/$F per
+    // SHOP_STATIC §1 `I.$F`). Entry: Dojo/Profile buttons (screen 7).
+    {
+        const int need = ResultsScreen::exp_for_level(w.level);
+        int wins = 0;
+        for (const auto& f : w.fights) wins += f.wins;
+        char hbuf[64];
+        std::snprintf(hbuf, sizeof(hbuf), "LV %d", w.level);
+        (void)app.draw_text(130.0f, 82.0f, hbuf, 1.1f, 1.0f, 0.9f, 0.4f);
+        const float bx0 = 130.0f, by0 = 112.0f, bw = 300.0f, bh = 16.0f;
+        const float bbg[] = {bx0, by0, bx0 + bw, by0, bx0, by0 + bh,
+                             bx0 + bw, by0, bx0 + bw, by0 + bh, bx0, by0 + bh};
+        ren.draw_triangles(bbg, 6, 0.15f, 0.15f, 0.18f, 1.0f);
+        const float frac = need > 0 ? std::clamp(static_cast<float>(w.experience) /
+                                                     static_cast<float>(need),
+                                                 0.0f, 1.0f)
+                                    : 0.0f;
+        if (frac > 0.001f) {
+            const float fw = bw * frac;
+            const float bfg[] = {bx0, by0, bx0 + fw, by0, bx0, by0 + bh,
+                                 bx0 + fw, by0, bx0 + fw, by0 + bh, bx0, by0 + bh};
+            ren.draw_triangles(bfg, 6, 0.3f, 0.7f, 1.0f, 1.0f);
+        }
+        char xbuf[64];
+        std::snprintf(xbuf, sizeof(xbuf), "EXP %d/%d", w.experience, need);
+        (void)app.draw_text(440.0f, 108.0f, xbuf, 0.7f, 0.9f, 0.9f, 0.9f);
+        char mbuf[128];
+        std::snprintf(mbuf, sizeof(mbuf), "WINS %d    COINS %d    GEMS %d", wins, w.money,
+                      w.bonus);
+        (void)app.draw_text(130.0f, 138.0f, mbuf, 0.8f, 1.0f, 1.0f, 1.0f);
+    }
+    // --- 5 equipment slots (JS `xc.hk` slots; Ranged/Magic included) -------
+    const float slot_x = kViewW * 0.2f, slot_y0 = 220.0f, slot_dy = 100.0f;
+    const char* slot_names[5] = {"Weapon", "Armor", "Helm", "Ranged", "Magic"};
+    const std::string current[5] = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
+    for (int s = 0; s < 5; ++s) {
+        const float sy = slot_y0 + static_cast<float>(s) * slot_dy;
+        std::string stat;
+        for (const CatalogItem& ci : catalog_) {
+            if (ci.name == current[s]) {
+                char sbuf[96];
+                std::snprintf(sbuf, sizeof(sbuf), "%s %d", equip_stat_tag(ci.type),
+                              equip_stat_value(ci));
+                stat = sbuf;
+                break;
+            }
+        }
+        const std::string label = std::string(slot_names[s]) + ": " + current[s] +
+                                  (stat.empty() ? "" : " (" + stat + ")");
+        draw_flat_button(app, label, slot_x, sy, 400.0f, 80.0f, 0.35f, 0.3f, 0.45f,
+                         hover_ == s);
     }
     const float grid_x = kViewW * 0.55f, grid_y0 = 220.0f, grid_dx = 240.0f, grid_dy = 110.0f;
     int idx = 0;
@@ -3255,7 +3320,8 @@ void EquipmentScreen::render_impl(App& app) {
                 break;
             }
         }
-        if (type != "Weapon" && type != "Armor" && type != "Helm") {
+        if (type != "Weapon" && type != "Armor" && type != "Helm" && type != "Ranged" &&
+            type != "Magic") {
             ++idx;
             continue;
         }
@@ -3269,6 +3335,47 @@ void EquipmentScreen::render_impl(App& app) {
                          equipped ? 0.3f : 0.35f, hover_ == idx);
         ++idx;
         ++card;
+    }
+    // Stat delta preview (read-only): the hovered owned card vs the wielded
+    // same-type item. hover_ indexes the owned list (update_impl parity).
+    {
+        std::string dline = "Hover an owned item to preview its stats.";
+        if (hover_ >= 0 && static_cast<std::size_t>(hover_) < w.items.size()) {
+            const std::string& hov_name = w.items[static_cast<std::size_t>(hover_)].name;
+            const CatalogItem* hov_ci = nullptr;
+            for (const CatalogItem& ci : catalog_) {
+                if (ci.name == hov_name) {
+                    hov_ci = &ci;
+                    break;
+                }
+            }
+            if (hov_ci != nullptr) {
+                std::string cur_name;
+                if (hov_ci->type == "Armor") cur_name = w.armor;
+                else if (hov_ci->type == "Helm") cur_name = w.helm;
+                else if (hov_ci->type == "Ranged") cur_name = w.ranged;
+                else if (hov_ci->type == "Magic") cur_name = w.magic;
+                else cur_name = w.weapon;
+                if (cur_name == hov_name) {
+                    dline = hov_name + " (wielded)";
+                } else {
+                    int cur_stat = 0;
+                    for (const CatalogItem& ci : catalog_) {
+                        if (ci.name == cur_name) {
+                            cur_stat = equip_stat_value(ci);
+                            break;
+                        }
+                    }
+                    const int nw = equip_stat_value(*hov_ci);
+                    char dbuf[160];
+                    std::snprintf(dbuf, sizeof(dbuf), "%s %s %d -> %d (%+d)",
+                                  hov_name.c_str(), equip_stat_tag(hov_ci->type), cur_stat,
+                                  nw, nw - cur_stat);
+                    dline = dbuf;
+                }
+            }
+        }
+        (void)app.draw_text(24.0f, 668.0f, dline, 0.75f, 0.9f, 0.9f, 0.9f);
     }
     // The BACK button (top-left).
     draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);

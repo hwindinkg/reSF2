@@ -35,6 +35,7 @@
 //     the digits.fnt timer, Round_Done/Undone indicators, the FIGHT!/
 //     Round labels (fight/ui atlas).
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -339,6 +340,44 @@ private:
     float view_w_ = 1280.0f, view_h_ = 720.0f;
 };
 
+// Exact `Fh.lXa` accumulator (JS L2054-2056 + `Kx` L2056, `Fh` ctor):
+// `Rva+=prize; PY+=Vk(b); OY+=gems; P3+=Vk(trunc(ceil(a*d)*d6+.5));
+// ep+=Vk(trunc(ceil(a*e)*c6+.5)); Ui+=Vk(trunc(ceil(a*f)+.5))*jU;
+// DZ+=Vk(trunc(ceil(a*h[b6])+.5)); Ub+=Vk(trunc(ceil(a*g)*e6+.5));
+// m6=PY+P3+ep+Ui+DZ+Ub; mOa=OY` with `Vk(a,b=0)=ceil(a/10^(kq-b))`
+// (kq = DenominationDigits, absent in seed -> 0).
+// Fh counters init 0; `d6`++ only via victory `gXa` (post-lXa, so 0 at
+// reward time with fresh-per-battle Fh); `c6`/`e6` via strike flags
+// (`cvb`/`yvb`: first-hit/crit-shock of the round); `jU` never set (0);
+// `b6` max style (untracked -> Turtle 0). `pk` = EAa order
+// (Turtle 0, Hard 3, Brutal 6, Aggressive 9, Crazy 12, Fantastic 15).
+struct PrizeFh {
+    int d6 = 0, c6 = 0, jU = 0, e6 = 0, b6 = 0;
+};
+struct PrizeKx {
+    double rva = 0, py = 0, oy = 0, p3 = 0, ep = 0, ui = 0, dz = 0, ub = 0;
+    double m6 = 0, mOa = 0;
+};
+inline double prize_vk(double a, int kq = 0) {
+    double div = 1.0;
+    for (int i = 0; i < kq; ++i) div *= 10.0;
+    return std::ceil(a / div);
+}
+inline void fh_lxa(PrizeKx& oc, const PrizeFh& fh, double prize, double coins,
+                   double gems, double Ia, double epF, double UiF, double UbF,
+                   const double* pk, int kq = 0) {
+    oc.rva += prize;
+    oc.py += prize_vk(coins, kq);
+    oc.oy += gems;
+    oc.p3 += prize_vk(std::trunc(std::ceil(prize * Ia) * fh.d6 + .5), kq);
+    oc.ep += prize_vk(std::trunc(std::ceil(prize * epF) * fh.c6 + .5), kq);
+    oc.ui += prize_vk(std::trunc(std::ceil(prize * UiF) + .5), kq) * fh.jU;
+    oc.dz += prize_vk(std::trunc(std::ceil(prize * pk[fh.b6]) + .5), kq);
+    oc.ub += prize_vk(std::trunc(std::ceil(prize * UbF) * fh.e6 + .5), kq);
+    oc.m6 = oc.py + oc.p3 + oc.ep + oc.ui + oc.dz + oc.ub;
+    oc.mOa = oc.oy;
+}
+
 // The fight controller (JS `ca` L379-433).
 class FightController {
 public:
@@ -427,23 +466,25 @@ public:
         player_.weapon = player_weapon;
         enemy_.weapon = enemy_weapon;
     }
-    // Battle prize breakdown (JS `v.kD`/`bzb` factors, FLOW_STATIC 4.3).
+    // Battle prize breakdown (JS `v.kD`/`bzb`/`Fh.lXa`, FLOW_STATIC 4.3).
     // Factors from internal_settings `<RewardsPrize>` (verified values):
     // Perfect $Ia=5, FirstStrike ep=2, ComboCount Ui=1, Shock Ub=3,
     // Styles pk (Turtle 0 .. Fantastic 15; port: style untracked -> 0).
-    // The exact combination arithmetic inside `bzb` is OPEN; additive.
-    // `gems_bonus` (JS `hj.Uo`) has no evidenced fight source (Bonus stays
-    // save-driven) — carried as 0 and applied to `w.bonus`.
+    // Totals come from exact `fh_lxa` below (`m6`/`mOa`); `coins_bonus`
+    // is the performance part (total minus base) for the results display.
+    // `gems_bonus` (`hj.Uo`) has no evidenced fight source (Bonus stays
+    // save-driven).
     struct BattlePrize {
         bool perfect = false;      // player took no hits
         bool first_strike = false;  // player landed the battle's first hit
         int max_combo = 0;         // player's best consecutive run
         int shocks = 0;            // player's shock hits
         int style_value = 0;       // style factor (untracked -> Turtle 0)
-        int coins_bonus = 0;       // perfect*5 + first*2 + combo*1 + shocks*3
-        int gems_bonus = 0;        // `hj.Uo` (no fight source evidenced)
+        int coins_bonus = 0;       // m6 minus base (display)
+        int coins_total = 0;       // m6: what the player receives
+        int gems_bonus = 0;        // mOa (no fight source evidenced)
     };
-    BattlePrize prize() const;
+    BattlePrize prize(int base_coins) const;
     int phase() const { return static_cast<int>(phase_); }
     const RoundState& round() const { return round_; }
     bool battle_over() const { return battle_over_; }
@@ -491,6 +532,7 @@ private:
 
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)
+    PrizeFh prize_fh_;             // JS `Fh` (fresh per battle via kD)
     // The fighter mesh fill color (the location Root Color; default black).
     std::uint32_t fighter_color_ = 0x000000u;
     RoundState round_;             // JS `round` ($t L1239)
@@ -598,16 +640,5 @@ private:
     // The HUD countdown seconds (JS Sf.iPa: gma - round.time).
     int hud_timer() const;
 };
-
-// Prize-bonus arithmetic (JS `bzb` factor application, FLOW_STATIC 4.3).
-// Free function so the combat golden pins it directly (S13); `prize()`
-// feeds it the tracked stats. Base scaling (`xya=0.003`, level-scaled
-// `bm` via `D0` tables) is OPEN - the port applies factors onto the
-// battle's base reward instead.
-inline int prize_coins_bonus(bool perfect, bool first_strike, int max_combo,
-                             int shocks, int style_value) {
-    return (perfect ? 5 : 0) + (first_strike ? 2 : 0) + max_combo * 1 +
-           shocks * 3 + style_value;
-}
 
 } // namespace sf2::scene

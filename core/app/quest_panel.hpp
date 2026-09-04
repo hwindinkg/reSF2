@@ -25,9 +25,10 @@
 // Display-only derivation. THE swap point is `quest_state_for()`: the save
 // now carries `story_step()` (WarriorSave L105, `_$StoryTutorialStep`),
 // `map_focus` (ys), `battles` (iF) and `variables` (rv) — all flow into
-// QuestState, so beats 1–7 and 9 serve live. Still stubbed: `block_lesson`
-// (beat 8) — no quest-var name landed in context; expected symbol is a
-// `variables[...]` read beside `Fo` (one line when known).
+// QuestState, so every beat serves live. Fo-beat resolved (Stream 2): `Fo`
+// (L1126-1127) sets no vars — SHOW_BLOCK unconditionally shows the beat-8
+// block-lesson hint on `story_step` alone; no variables expectation remains
+// (`variables` still flows for traceability).
 //
 // line1 comes from the runtime lang table (`lang_table.hpp`) with the
 // verified EN embedded as fallback (titles in en.af2d6604.xml); line2 is
@@ -55,8 +56,7 @@ struct QuestState {
     std::string tutorial = "MOVE";  // WarriorSave.tutorial (readable today)
     std::string story_step;         // _$StoryTutorialStep - "" = unknown yet
     bool training_won = false;      // session Training victory (readable today)
-    bool boss_focus = false;        // MapFocus on BOSS_LYNX (needs save ys)
-    bool block_lesson = false;      // mid SHOW_BLOCK beat (needs quest vars)
+    bool boss_focus = false;        // MapFocus on BOSS_LYNX (save ys)
     int level = 1;                  // WarriorSave.level (readable today)
     // Landed feeds (kept for traceability of the derivation):
     std::string map_focus;                       // save MapFocus/ys
@@ -143,15 +143,10 @@ inline QuestStep quest_step_for_state(const std::string& res_root, const QuestSt
                              "Head to your dojo and try a new move.",
                              "Master the double sweep in the Dojo.", "Dojo");
         if (k == "SHOW_BLOCK")
-            return st.block_lesson
-                       ? make_step(res_root, 8, "SENSEI", "tutorial_block",
-                                   "Take a note that the block is performed automatically "
-                                   "if you're not making another move.",
-                                   "Blocking is automatic while you idle.", "Profile")
-                       : make_step(res_root, 7, "SENSEI", "tutorial_profile_moves",
-                                   "You can take a look at all of your moves in the "
-                                   "profile screen.",
-                                   "Open your moves in the PROFILE screen.", "Profile");
+            return make_step(res_root, 8, "SENSEI", "tutorial_block",
+                             "Take a note that the block is performed automatically "
+                             "if you're not making another move.",
+                             "Blocking is automatic while you idle.", "Profile");
         if (k == "END")
             return make_step(res_root, 9, "SENSEI", "tutorial_return_map",
                              "For now you can return to your map and continue your journey.",
