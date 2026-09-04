@@ -57,6 +57,7 @@
 #include "scene/perks.hpp"
 #include "scene/physics.hpp"
 #include "scene/trigger.hpp"
+#include "scene/modes.hpp"
 #include "scene/sprite.hpp"
 #include "texture.hpp"
 
@@ -519,6 +520,12 @@ public:
     // The arena bounds (wall / width-wall / floor) — set by the caller
     // (JS `ca.ggb` L383: v.tFa = location.NU, v.NKa = location.width - NU).
     void set_bounds(float wall, float wall_max, float floor_y);
+
+    // Modes setup path (tournament/survival `ModeFight`): rounds/time/
+    // recovery, per-side DamageFactor rules, NoBullets flag, enemy
+    // rebuild (items/tactic/attrs/perks). Called post-init by the
+    // battle flow when a stages.xml battle lands.
+    void apply_mode_setup(const ModeSetup& setup);
 
     // Per-frame fight update (JS `ca.Ea` L385 -> `ia` L388). `dt` is the
     // fixed 60 Hz step (1/60). Runs the phase machine, the per-fighter

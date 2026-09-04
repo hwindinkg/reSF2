@@ -968,6 +968,65 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
     sp: [
       evalCond({ kind: "MagicCharge", min: null, max: 0.5, neg: false }, spCtx(0.7), foe18),
       evalCond({ kind: "MagicCharge", min: null, max: 0.5, neg: false }, spCtx(0.3), foe18)] });
+  // S20: modes resolve (tournament fight, survival waves, rewards, series).
+  // Verbatim C++ twin: modes.hpp resolve_*/reward_for/advance_series.
+  const pool20 = ["Ninja_A", "Ninja_B", "Ninja_C"];
+  const wars20 = [{ template: "T0", number: 1, groups: [] },
+    { template: "", number: 3, groups: [{ pool: pool20, random: true }] }];
+  function resolveSurv(wars, wave, draw, used) {
+    let w = wave, slot = null;
+    for (const cand of wars) {
+      if (w < cand.number) { slot = cand; break; }
+      w -= cand.number;
+    }
+    if (!slot) return { ok: false };
+    const out = { ok: true, template: slot.template };
+    for (const g of slot.groups) {
+      let pick = Math.floor(draw() * g.pool.length) % g.pool.length;
+      out.template = g.pool[pick];
+      break;
+    }
+    used.push(out.template);
+    return out;
+  }
+  function rewardFor(type, n, wave, won) {
+    if (type === "SURVIVAL") return Math.min(wave < 0 ? 0 : wave, n - 1);
+    return (won && n > 1) ? 1 : 0;
+  }
+  function advance(type, nFights, totalWaves, s, won) {
+    if (type === "SURVIVAL") {
+      if (s.wave + 1 < totalWaves) return { ...s, wave: s.wave + 1, cont: true };
+      return { ...s, cont: false };
+    }
+    if (won && s.fight + 1 < nFights) return { ...s, fight: s.fight + 1, cont: true };
+    return { ...s, cont: false };
+  }
+  const sw0 = resolveSurv(wars20, 0, () => 0, []);
+  const sw2 = resolveSurv(wars20, 2, () => 0.7, []);
+  const sw9 = resolveSurv(wars20, 9, () => 0, []);
+  eq("S20 surv", [sw0.ok, sw0.template, sw2.ok, sw2.template, sw9.ok],
+    [true, "T0", true, "Ninja_C", false]);
+  eq("S20 reward", [rewardFor("SURVIVAL", 10, 3, true), rewardFor("SURVIVAL", 10, 99, true),
+    rewardFor("TOURNAMENT", 2, 0, true), rewardFor("TOURNAMENT", 2, 0, false),
+    rewardFor("TOURNAMENT", 1, 0, true)], [3, 9, 1, 0, 0]);
+  eq("S20 adv", [
+    advance("SURVIVAL", 1, 4, { fight: 0, wave: 2 }, true).cont,
+    advance("SURVIVAL", 1, 4, { fight: 0, wave: 3 }, true).cont,
+    advance("TOURNAMENT", 3, 0, { fight: 1, wave: 0 }, true).cont,
+    advance("TOURNAMENT", 3, 0, { fight: 1, wave: 0 }, false).cont,
+    advance("TOURNAMENT", 3, 0, { fight: 2, wave: 0 }, true).cont,
+  ], [true, false, true, false, false]);
+  out.scenarios.push({ id: "S20-modes",
+    surv: [sw0.ok, sw0.template, sw2.ok, sw2.template, sw9.ok],
+    reward: [rewardFor("SURVIVAL", 10, 3, true), rewardFor("SURVIVAL", 10, 99, true),
+      rewardFor("TOURNAMENT", 2, 0, true), rewardFor("TOURNAMENT", 2, 0, false),
+      rewardFor("TOURNAMENT", 1, 0, true)],
+    adv: [
+      advance("SURVIVAL", 1, 4, { fight: 0, wave: 2 }, true).cont,
+      advance("SURVIVAL", 1, 4, { fight: 0, wave: 3 }, true).cont,
+      advance("TOURNAMENT", 3, 0, { fight: 1, wave: 0 }, true).cont,
+      advance("TOURNAMENT", 3, 0, { fight: 1, wave: 0 }, false).cont,
+      advance("TOURNAMENT", 3, 0, { fight: 2, wave: 0 }, true).cont] });
   out.scenarios.push({ id: "S11-misc", ok: true });
 
   out.selftest = { pass, fail, failures };

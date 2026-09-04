@@ -22,6 +22,7 @@
 // `load()` returns the template when no save file exists, `save()` writes
 // the current document back.
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -113,6 +114,23 @@ struct WarriorSave {
 
     std::string map_focus;  // `ys` (MapFocus attr; absent in seed)
 
+    // Delivery countdowns (JS `yl`/`Ct` timers: `Uaa/BXa/bva` set, `gJ`
+    // get, `H4` clear, persisted under save `<Timers>`, L250/291; `Gb`
+    // setTime/Tma stamps Cla(now) + save): item name -> wall-clock due
+    // epoch (seconds). due <= now means matured (`Bma/Oda` ->
+    // QUEST_EVENT_DELIVERY). Wall-clock-delta (no ticking needed).
+    std::map<std::string, std::int64_t> timers;
+
+    // Seconds until maturity (<0 = no timer; <=0 with entry = matured).
+    std::int64_t timer_remaining(const std::string& name, std::int64_t now) const {
+        const auto it = timers.find(name);
+        if (it == timers.end()) return -1;
+        return it->second - now;
+    }
+
+    // Current wall-clock epoch seconds (Cla(now) analog).
+    static std::int64_t wall_now();
+
     // Currencies (JS `pG`: `<Currencies>/<Currency Name Count>`; the Count
     // attr name is OPEN) and Resistances (JS `Pw`: `<Resistances>` ATTRS,
     // e.g. `Resistance_2="0"` — certain, in the seed).
@@ -143,16 +161,19 @@ public:
     // `Aa.save` re-serializing the whole document).
     void save(const WarriorSave& warrior);
 
-    // The SF2User envelope (FLOW_STATIC section 3.1, JS L70-73):
-    // decode: base64 -> un-zstd -> XML text (`Aa.load`); the `.sf2` export
-    // is `"SF2" + base64(users + packs + flags)` (`Aa.Ddb/Dpb`).
-    // `load()` below accepts BOTH plain XML (current disk format, first
-    // char `<`) and envelope text (transparent dual-read); `save()` keeps
-    // writing plain XML (existing saves keep working).
+    // The SF2User envelope (FLOW_STATIC section 3.1 + R7, JS L70-73/L2333):
+    // decode: base64 -> `Ug` frames (`ke(len)+yna(bytes)` length-prefixed
+    // zstd frames, no separator) -> XML text (`Aa.load`); the `.sf2` export
+    // is `"SF2" + base64(ke+yna(users) + ke+yna(packs) + $p(H1) + $p(VF))`
+    // (`Aa.Ddb/Dpb`). `ke` = u32 (cP unset in the bundle -> falsy -> LE);
+    // `ke` covers the COMPRESSED length (`Aa.save` round-trippable form;
+    // `Dpb` writes the string length — latent game inconsistency, noted).
+    // `load()` below accepts plain XML (first char `<`), framed envelopes
+    // (`SF2` prefix), and legacy whole-blob envelopes (transparent read);
+    // `save()` keeps writing plain XML (existing saves keep working).
     static std::string envelope_decode(const std::string& envelope_text);
     static std::string export_sf2(const std::string& users_xml,
-                                  const std::string& packs_xml,
-                                  const std::string& flags_json);
+                                  const std::string& packs_xml, bool h1, bool vf);
 
     // Path of the save file (for logging/tests).
     const std::string& save_path() const { return save_path_; }

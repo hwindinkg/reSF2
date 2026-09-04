@@ -3252,7 +3252,24 @@ std::string shop_stat_line(const CatalogItem& it) {
     if (it.delivery_sec > 0) {
         out += " DL" + std::to_string(it.delivery_sec) + "s";
     }
+    // Instant-delivery fees (O2/Od): displayed only — charging needs the ph
+    // buy dialog (no auto-charge without consent).
+    if (it.delivery_coin > 0) {
+        out += " INST" + std::to_string(it.delivery_coin) + "G";
+    }
+    if (it.delivery_gems > 0) {
+        out += " INST" + std::to_string(it.delivery_gems) + "R";
+    }
     return out;
+}
+
+// Delivery countdown text (mm:ss; wall-clock recompute per frame — Gb
+// Cla(now)+save semantics, no ticking needed).
+std::string shop_countdown(std::int64_t sec) {
+    if (sec < 0) sec = 0;
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%02lld:%02lld", sec / 60, sec % 60);
+    return std::string(buf);
 }
 
 // Wielding summary (read-only): the equipped slots' applied stats, resolved
@@ -3361,6 +3378,48 @@ void ShopScreen::update_impl(float dt) {
             return;
         }
     }
+    // Pending deliveries (top-right, mirrors render): click a READY row to
+    // claim (Vxa-notify analog + QUEST_EVENT_DELIVERY log line). Countdowns
+    // are wall-clock compares — never blocking.
+    {
+        const std::int64_t now = WarriorSave::wall_now();
+        int row = 0;
+        for (const auto& kv : seen_.timers) {
+            if (row >= 3) break;
+            const float ry = 84.0f + static_cast<float>(row) * 24.0f;
+            ++row;
+            if (!(p.x >= 940.0 && p.x <= 1270.0 && p.y >= ry - 12.0 && p.y <= ry + 12.0)) {
+                continue;
+            }
+            if (!p.pressed) break;
+            const std::int64_t left = kv.second - now;
+            if (left > 0) {
+                std::fprintf(stdout, "[shop] delivery %s not ready (%s left)\n",
+                             kv.first.c_str(), shop_countdown(left).c_str());
+                std::fflush(stdout);
+                break;
+            }
+            WarriorSave w2;
+            try {
+                w2 = app().save().load();
+            } catch (const std::exception&) {
+                break;
+            }
+            WarriorSave::OwnedItem oi;
+            oi.name = kv.first;
+            oi.count = 1;
+            w2.items.push_back(oi);
+            w2.timers.erase(kv.first);
+            app().save().save(w2);
+            seen_ = w2;
+            confirm_ = "CLAIMED " + kv.first + "!";
+            confirm_until_ = time() + 2.5f;
+            std::fprintf(stdout, "[shop] delivery claimed: %s (Vxa notify)\n",
+                         kv.first.c_str());
+            std::fflush(stdout);
+            break;
+        }
+    }
     // Item grid for the active tab (geometry UNCHANGED — row 0 of Weapons is
     // WEAPON_KNIVES at the pre-tab spot).
     const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
@@ -3389,6 +3448,21 @@ void ShopScreen::update_impl(float dt) {
                     std::fflush(stdout);
                 } else if (w.money >= it.price) {
                     w.money -= it.price;
+                    if (it.delivery_sec > 0) {
+                        // Timed delivery (JS Pa z2a-path: Ec>0 → delivery,
+                        // else Cba instant grant below): paid upfront, the
+                        // item arrives on claim (Gb Cla(now)+save stamped).
+                        w.timers[it.name] =
+                            WarriorSave::wall_now() + it.delivery_sec;
+                        app().save().save(w);
+                        seen_ = w;
+                        confirm_ = "ORDERED " + it.name + "!";
+                        confirm_until_ = time() + 2.5f;
+                        std::fprintf(stdout,
+                                     "[shop] ORDERED %s price=%d -> arrives in %ds (claim on arrival)\n",
+                                     it.name.c_str(), it.price, it.delivery_sec);
+                        std::fflush(stdout);
+                    } else {
                     WarriorSave::OwnedItem oi;
                     oi.name = it.name;
                     oi.count = 1;
@@ -3419,6 +3493,7 @@ void ShopScreen::update_impl(float dt) {
                                  it.name.c_str(), it.subtype.c_str(), it.price, w.money,
                                  tut_buy ? " + EQUIPPED, step -> MAP (Ao)" : "");
                     std::fflush(stdout);
+                    }  // else: instant grant (Cba path)
                 } else {
                     std::fprintf(stdout, "[shop] NOT ENOUGH MONEY for %s (need %d, have %d)\n",
                                  it.name.c_str(), it.price, w.money);
@@ -3518,6 +3593,21 @@ void ShopScreen::render_impl(App& app) {
         char mbuf[64];
         std::snprintf(mbuf, sizeof(mbuf), "COINS %d", seen_.money);
         (void)app.draw_text(1060.0f, 32.0f, mbuf, 0.9f, 1.0f, 0.9f, 0.4f);
+    }
+    // Incoming deliveries (mirrors the update rects above): name + countdown
+    // or READY-claim hint, capped at 3 rows.
+    {
+        const std::int64_t now = WarriorSave::wall_now();
+        int row = 0;
+        for (const auto& kv : seen_.timers) {
+            if (row >= 3) break;
+            const float ry = 84.0f + static_cast<float>(row) * 24.0f;
+            ++row;
+            const std::int64_t left = kv.second - now;
+            const std::string text =
+                kv.first + (left > 0 ? " " + shop_countdown(left) : " READY");
+            (void)app.draw_text(950.0f, ry - 8.0f, text, 0.7f, 1.0f, 1.0f, 1.0f);
+        }
     }
     (void)app.draw_text(24.0f, 648.0f, wielding_line(app, seen_), 0.7f, 0.9f, 0.9f, 0.9f);
     if (!confirm_.empty() && time() <= confirm_until_) {

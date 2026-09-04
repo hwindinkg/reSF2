@@ -408,6 +408,46 @@ void FightController::set_bounds(float wall, float wall_max, float floor_y) {
     camera_.arena_w = wall_min_ + wall_max_;  // the RAW location width (JS Lb.width)
 }
 
+// Modes setup path (tournament/survival): rounds/time/recovery, per-side
+// DamageFactor rules, NoBullets flag, enemy rebuild. Runs post-init,
+// pre-first-update (round_start consumes battle_).
+void FightController::apply_mode_setup(const ModeSetup& setup) {
+    battle_.rounds = setup.rounds;
+    battle_.round_time = setup.round_time;
+    battle_.health_recovery = static_cast<float>(setup.health_recovery);
+    player_.params.attributes["DamageFactor"] +=
+        static_cast<float>(setup.player_damage_factor);
+    set_no_bullets_replenish(setup.no_bullets);
+    // Enemy rebuild from the resolved warrior (items/tactic/attrs/perks).
+    const float ex = enemy_.fighter.world_x();
+    const float ey = enemy_.fighter.world_y();
+    const int emax =
+        enemy_.max_hp > 0.0f ? static_cast<int>(enemy_.max_hp) : 100;
+    enemy_ = make_fighter(enemy_.name, false, ex, ey, emax, "Fists",
+                          setup.enemy.owned);
+    for (const auto& kv : setup.enemy.attrs) {
+        enemy_.params.attributes[kv.first] += static_cast<float>(kv.second);
+    }
+    enemy_.params.attributes["DamageFactor"] +=
+        static_cast<float>(setup.enemy_damage_factor);
+    if (!setup.enemy.tactic.empty() && enemy_.ai != nullptr &&
+        tactic_defs_ != nullptr) {
+        const auto it = tactic_defs_->find(setup.enemy.tactic);
+        if (it != tactic_defs_->end()) enemy_.ai->set_tactic(&it->second);
+    }
+    perk_setup_.enemy_refs.clear();
+    for (const std::string& pn : setup.enemy.perk_names) {
+        sf2::scene::ItemPerkRef ref;
+        ref.name = pn;
+        perk_setup_.enemy_refs.push_back(std::move(ref));
+    }
+    sample_idle(enemy_);
+    rebuild_body(player_, enemy_);
+    rebuild_body(enemy_, player_);
+    setup_bus(perk_setup_);
+    init_magic();
+}
+
 // JS `xF` (L388): set the fight phase and sync the fighters' `Je` stance
 // (the move conditions' RoundStage reads it).
 void FightController::set_phase(fight_phase p) {

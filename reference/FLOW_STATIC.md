@@ -83,12 +83,72 @@ Key action implementations:
 | `ChangeTab` event | `v.qwa` | L1212 | `Sf("QUEST_EVENT_CHANGE_TAB")` |
 | Quest file attach | `Bn` | L1025 | `p.F().L3(filename)` at runtime |
 
-`OPEN (needs runtime trace)`: live `Dh[]` ordering under simultaneous
-`ChangeTab`+`SceneLoaded` (sort `Wy`/priority ties, L1017); `Yb` async waits
-(`Wait Frames`, `Dialog` modal gating, `Activate` delay frames); `be.Mbb/compare`
-per-quest gate details beyond the XML above; `Et/SIa` persisted quest params
-(L262); exact `StoryTutorialOpenScene` delay-frame → scene-open path
-(template tail after L1126-area actions).
+`OPEN (needs runtime trace)`: priority ties in `Pd.sort` (stability,
+L1017); `Qhb`→`He` completion callback for `WaitNotificationClose=1`;
+`Et/SIa` persisted quest params (L262).
+
+### 1.3 Quest async semantics (round 13 — Stream 3 engine)
+
+**`be` lifecycle** (L1006-1010): `SC` 0 idle → `lF` sets 1 + `Ugb` push
+(running) → `Exa/vxa` completion → `SC=2` (done, `Tgb` pop, `Mt`
+removes from `Dh`, L1016). Fields: `priority`, `Unresumable(cyb)`
+(auto-resume via `vxa` on load, L266), `AllowDoubles(RXa)`,
+`GameMode(X_)`, `O8` names, `Jp` persisted params (`HBa`), `TUa` Marks,
+checkpoint `yy`, action chain `YU` (`Yb`, built action-by-action via
+`Fe.Ij` in `Haa/Gib`, L1008), completion event `qd`.
+
+**`Dh[]` ordering** (L1016-1019): `WO` pushes in file-parse order;
+`RA` appends matches in `lC`-list (file) order; `Rla` re-sorts by `Wy`
+(L1010: **running (`SC==1`) before idle, then `pb(priority)`**).
+`eLa` pump: run `Dh[0]` iff `Mbb()`, else **drop it** (`m.ye`, L1018 —
+blocked head is discarded, never skipped). `EJ` latch set by `add()`
+unless inside pump (`xN`) or in fight (`Td.Tf==6`); `update()` pumps on
+`EJ` (L1015). `GEa` dedups by name unless `AllowDoubles` (L1015-1016).
+`Qaa(b=true)` and `cWa` also re-sort. `pP` clears all (L1019).
+
+**`be.Mbb` gate** (L1010): `p.kcb(X_)` = `X_==0 || X_==mode` (L222) —
+GameMode filter (`X_` attr default 1).
+
+**`Wait` frames** = `Ro` (L1113-1114): `Frames` + `ControlsLock` attrs;
+per-frame `hc` ticks via `L.K.Oh.ci(nr)`; locks touches
+(`Sb.F().kk(!0)` + `za.enabled=!1`) while waiting; unlocks at
+`hc>=Oqa`; then `sa()` continues the `Yb` chain.
+
+**Dialog modal gating** (`He`, L1042-1062): types Regular/Stranger/
+NoAvatar/Multiline/ShowLoot build a real dialog object (`C!=null`,
+L1047-1051) → **Yb chain stops until a button fires** (`ria→dhb`
+runs that button's nested sub-`Yb`; dialog close `gf→sa()`, L1061-1062;
+`MD` answered-once latch). `Notification` type posts to the `Ib`
+fire-and-forget queue (`Qhb`, L1050) → chain continues immediately
+(`sa()`); `Native` likewise. So tutorial `Notification` dialogs
+(move/punchbag/sweep/block) never block; `Regular` dialogs
+(training-fight buttons) do. (`Scroll/ThreeButtons/MultilineTMP` hit
+`debugger` — unused in tutorial.)
+
+**`Sn` async across scenes** (L1069-1070): `Yba()` with no args drops
+everything except the running self, then `v.Am` navigates (or `mp(3)`
+fallback) and `sa()` — the chain continues after the fight loads.
+`Tn` (L1070): delayed `kD(false)` (`Re` timer) or immediate.
+
+**`Mn` latch-clear** (L1037 + `Yba` L1019): names split on `|`; reverse
+sweep **keeps** `SC==1` (running) + name-matched, removes the rest
+(`clearParameters` + listener detach).
+
+**`StoryTutorialOpenScene` delay→open** (template tail): event
+`Activate` + `ActionID` match → Switch/Steam branch does
+`Wait Frames=_DelayBeforeOpenScene` + Regular Sensei dialog + auto-click
+(`ClickHint/SceneMenuScroll/ClickButton` to `_NextScene`); **web/else
+branch shows a `Notification` + `MenuBtnFlashing` highlight and does
+NOT navigate** — shell must not auto-navigate there. Tail clears all
+three globals (`DelayBeforeOpenScene/SenseiDialogText/NextScene=""`).
+Handoff for Stream 3: implement Wait-frames + flash-only highlighting;
+navigation happens only via the Switch/Steam click path or user tap.
+
+**`LEARN_PERK` producer**: quest **`FirstGuardBeaten`** (`quests.xml`,
+*not* the tutorial file): `FightEnd` + `Fight==ZONE_1|BOSS_LYNX|1` + Win
+→ `SetStoryTutorialStep LEARN_PERK` (+ clears `StoryTutorialBossFight`,
+sets zone/avatar user vars). `StoryTutorialLearnPerk` additionally gates
+`SceneTo==Profile` + `Level>=2`.
 
 ---
 

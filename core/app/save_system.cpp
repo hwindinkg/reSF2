@@ -8,12 +8,14 @@
 #include "app/save_system.hpp"
 
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <vector>
 
 #include "codec.hpp"
+#include "sf2_envelope.hpp"
 #include "xml_doc.hpp"
 #include "zstd_stream.hpp"
 
@@ -177,7 +179,26 @@ WarriorSave SaveSystem::load() {
             }
         }
     }
+
+    // Delivery timers (`yl`/`Ct` under save `<Timers>`, L250: `Uaa/BXa`
+    // set, `gJ` get, `H4` clear). Child schema `<Timer Name Due>` is the
+    // shell's choice (no Timers element ships in the seed).
+    out.timers.clear();
+    if (pugi::xml_node timers = warrior.child("Timers")) {
+        for (pugi::xml_node t : timers.children("Timer")) {
+            if (!t.attribute("Name")) continue;
+            try {
+                out.timers[t.attribute("Name").value()] =
+                    std::stoll(t.attribute("Due").value());
+            } catch (const std::exception&) {
+            }
+        }
+    }
     return out;
+}
+
+std::int64_t WarriorSave::wall_now() {
+    return static_cast<std::int64_t>(std::time(nullptr));
 }
 
 void SaveSystem::save(const WarriorSave& w) {
@@ -321,17 +342,36 @@ void SaveSystem::save(const WarriorSave& w) {
         }
     }
 
+    // Delivery timers (`yl` under `<Timers>`): rewrite rows.
+    {
+        pugi::xml_node timers = warrior.child("Timers");
+        if (!timers) timers = warrior.append_child("Timers");
+        std::vector<pugi::xml_node> old;
+        for (pugi::xml_node t : timers.children("Timer")) old.push_back(t);
+        for (const pugi::xml_node& t : old) timers.remove_child(t);
+        for (const auto& kv : w.timers) {
+            pugi::xml_node t = timers.append_child("Timer");
+            t.append_attribute("Name").set_value(kv.first.c_str());
+            t.append_attribute("Due").set_value(kv.second);
+        }
+    }
+
     std::ostringstream oss;
     doc.save(oss, "\t", pugi::format_default, pugi::encoding_auto);
     write_file_text(save_path_, oss.str());
 }
 
 std::string SaveSystem::envelope_decode(const std::string& envelope_text) {
-    // `Aa.load` (L70-71): base64 -> un-zstd (`kb.f3`) -> XML text.
-    // Leading/trailing whitespace is tolerated (shells add newlines).
+    // `Aa.load` (L70-71) shape, extended: strip whitespace; a leading
+    // `SF2` selects the framed form (`Ddb`); otherwise the legacy
+    // whole-blob form (base64 -> un-zstd -> XML).
     std::string b64;
     for (char c : envelope_text) {
         if (c != ' ' && c != '\t' && c != '\r' && c != '\n') b64.push_back(c);
+    }
+    if (b64.size() >= 3 && b64[0] == 'S' && b64[1] == 'F' && b64[2] == '2') {
+        return sf2::data::envelope_decode_users(
+            sf2::data::base64_decode(b64.substr(3)));
     }
     const std::vector<std::uint8_t> compressed = sf2::data::base64_decode(b64);
     const std::vector<std::uint8_t> xml =
@@ -340,14 +380,8 @@ std::string SaveSystem::envelope_decode(const std::string& envelope_text) {
 }
 
 std::string SaveSystem::export_sf2(const std::string& users_xml,
-                                   const std::string& packs_xml,
-                                   const std::string& flags_json) {
-    // `Aa.Ddb/Dpb` (L71-73): `.sf2` = `"SF2" + base64(users+packs+flags)`.
-    // The exact concatenation separator is OPEN (no captured .sf2 sample);
-    // plain concatenation is used.
-    const std::string payload = users_xml + packs_xml + flags_json;
-    const std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
-    return "SF2" + sf2::data::base64_encode(bytes);
+                                   const std::string& packs_xml, bool h1, bool vf) {
+    return sf2::data::envelope_export(users_xml, packs_xml, h1, vf);
 }
 
 } // namespace sf2::app

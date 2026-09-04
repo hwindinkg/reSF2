@@ -23,9 +23,11 @@
 #include "scene/combat_decide.hpp"
 #include "scene/damage.hpp"
 #include "scene/fight.hpp"
+#include "scene/modes.hpp"
 #include "scene/move_def.hpp"
 #include "scene/perks.hpp"
 #include "codec.hpp"
+#include "sf2_envelope.hpp"
 #include "zstd_stream.hpp"
 
 namespace {
@@ -701,6 +703,158 @@ int main() {
                         (int)sf2::scene::eval_cond(lpx, lpctx(9, 9), foe19),
                         (int)sf2::scene::eval_cond(spm, spctx(0.7), foe19),
                         (int)sf2::scene::eval_cond(spm, spctx(0.3), foe19));
+        }
+        // S20a modes resolve (mirrors combat_golden.js S20).
+        {
+            using sf2::scene::StageWarrior;
+            using sf2::scene::StageFight;
+            using sf2::scene::GroupDef;
+            using sf2::scene::ResolvedWarrior;
+            using sf2::scene::ModeSeries;
+            using sf2::scene::StageBattle;
+            StageFight f;
+            StageWarrior w0;
+            w0.template_name = "T0";
+            w0.number = 1;
+            f.warriors.push_back(w0);
+            StageWarrior w1;
+            w1.number = 3;
+            StageWarrior::GroupRef g;
+            g.name = "G";
+            g.random = true;
+            w1.groups.push_back(g);
+            f.warriors.push_back(w1);
+            std::map<std::string, sf2::scene::TemplateDef> tpls;
+            std::map<std::string, GroupDef> grps;
+            GroupDef gd;
+            for (const char* nm : {"Ninja_A", "Ninja_B", "Ninja_C"}) {
+                StageWarrior m;
+                m.template_name = nm;
+                gd.members.push_back(m);
+            }
+            grps["G"] = gd;
+            std::vector<std::string> used;
+            ResolvedWarrior r0, r2;
+            const bool ok0 = sf2::scene::resolve_survival_warrior(
+                f, 0, tpls, grps, []() { return 0.0; }, used, r0);
+            const bool ok2 = sf2::scene::resolve_survival_warrior(
+                f, 2, tpls, grps, []() { return 0.7; }, used, r2);
+            ResolvedWarrior r9;
+            const bool ok9 = sf2::scene::resolve_survival_warrior(
+                f, 9, tpls, grps, []() { return 0.0; }, used, r9);
+            StageFight rf;
+            for (int i = 0; i < 10; ++i) {
+                sf2::scene::StageReward rw;
+                rw.money = i;
+                rf.rewards.push_back(rw);
+            }
+            const int rwS3 = sf2::scene::reward_for("SURVIVAL", rf, 3, true).money;
+            const int rwS9 = sf2::scene::reward_for("SURVIVAL", rf, 99, true).money;
+            StageFight rf2;
+            sf2::scene::StageReward r20, r21;
+            r20.money = 0;
+            r21.money = 1;
+            rf2.rewards.push_back(r20);
+            rf2.rewards.push_back(r21);
+            const int rwT1 = sf2::scene::reward_for("TOURNAMENT", rf2, 0, true).money;
+            const int rwT0 = sf2::scene::reward_for("TOURNAMENT", rf2, 0, false).money;
+            StageFight rf1;
+            rf1.rewards.push_back(sf2::scene::StageReward());
+            const int rwT1s = sf2::scene::reward_for("TOURNAMENT", rf1, 0, true).money;
+            StageBattle surv;
+            surv.type = "SURVIVAL";
+            surv.fights.push_back(f);
+            StageBattle tourn;
+            tourn.type = "TOURNAMENT";
+            tourn.fights.push_back(StageFight());
+            tourn.fights.push_back(StageFight());
+            tourn.fights.push_back(StageFight());
+            ModeSeries s1, s2, s3, s4, s5;
+            s1.battle_type = "SURVIVAL";
+            s1.wave = 2;
+            s2 = s1;
+            s2.wave = 3;
+            s3.battle_type = "TOURNAMENT";
+            s3.fight_index = 1;
+            s4 = s3;
+            s5 = s3;
+            s5.fight_index = 2;
+            const bool c1 = sf2::scene::advance_series(surv, s1, true);
+            const bool c2 = sf2::scene::advance_series(surv, s2, true);
+            const bool c3 = sf2::scene::advance_series(tourn, s3, true);
+            const bool c4 = sf2::scene::advance_series(tourn, s4, false);
+            const bool c5 = sf2::scene::advance_series(tourn, s5, true);
+            std::printf("  \"modes\": {\"surv\": [%d, \"%s\", %d, \"%s\", %d], "
+                        "\"reward\": [%d, %d, %d, %d, %d], "
+                        "\"adv\": [%d, %d, %d, %d, %d]},\n",
+                        (int)ok0, r0.template_name.c_str(), (int)ok2,
+                        r2.template_name.c_str(), (int)ok9, rwS3, rwS9, rwT1, rwT0,
+                        rwT1s, (int)c1, (int)c2, (int)c3, (int)c4, (int)c5);
+        }
+        // S20b stages parse (verified against stages.xml by combat_diff.py
+        // via ElementTree — independent implementation, not a twin).
+        {
+            std::string xml;
+            if (FILE* f = std::fopen("reference/extracted/xml/res/stages.xml", "rb")) {
+                char buf[65536];
+                std::size_t n = 0;
+                while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+                    xml.append(buf, n);
+                }
+                std::fclose(f);
+            }
+            std::vector<sf2::scene::StageBattle> battles;
+            std::map<std::string, sf2::scene::TemplateDef> tpls;
+            std::map<std::string, sf2::scene::GroupDef> grps;
+            const bool ok = sf2::scene::parse_stages(xml, battles, tpls, grps);
+            int tourn_fights = -1, surv_rewards = -1, surv_waves = -1;
+            std::string enemy_t0, enemy_tactic;
+            for (const sf2::scene::StageBattle& b : battles) {
+                if (b.name == "Tournament" && tourn_fights < 0 && !b.fights.empty() &&
+                    b.fights[0].warriors.size() == 1 &&
+                    b.fights[0].warriors[0].template_name == "Man_Fist") {
+                    tourn_fights = static_cast<int>(b.fights.size());
+                    const sf2::scene::StageWarrior& w = b.fights[0].warriors[0];
+                    enemy_t0 = w.template_name;
+                    enemy_tactic = w.tactic;
+                }
+                if (b.name == "Survival" && surv_rewards < 0 && !b.fights.empty() &&
+                    b.fights[0].rewards.size() > 6) {
+                    surv_rewards = static_cast<int>(b.fights[0].rewards.size());
+                    surv_waves = sf2::scene::survival_waves(b.fights[0]);
+                }
+            }
+            std::printf("  \"stages\": {\"ok\": %d, \"battles\": %d, "
+                        "\"tourn_fights\": %d, \"surv_rewards\": %d, \"surv_waves\": %d, "
+                        "\"enemy_t0\": \"%s\", \"enemy_tactic\": \"%s\", "
+                        "\"templates\": %d, \"groups\": %d},\n",
+                        (int)ok, (int)battles.size(), tourn_fights, surv_rewards,
+                        surv_waves, enemy_t0.c_str(), enemy_tactic.c_str(),
+                        (int)tpls.size(), (int)grps.size());
+        }
+        // S20c export envelope round-trip (framing verified structurally
+        // by combat_diff.py; content self-verified here).
+        {
+            const std::string users = "<SF2User><Warrior Money=\"425\"/></SF2User>";
+            const std::string packs = "<Packs></Packs>";
+            const std::string env = sf2::data::envelope_export(users, packs, true, false);
+            const bool prefix = env.size() > 3 && env[0] == 'S' && env[1] == 'F' &&
+                                env[2] == '2';
+            std::string back;
+            bool roundtrip = false;
+            try {
+                back = sf2::data::envelope_decode_users(
+                    sf2::data::base64_decode(env.substr(3)));
+                roundtrip = (back == users);
+            } catch (...) {
+                roundtrip = false;
+            }
+            std::printf("  \"export\": {\"prefix\": %d, \"roundtrip\": %d, \"len\": %d},\n",
+                        (int)prefix, (int)roundtrip, (int)env.size());
+            if (FILE* f = std::fopen("C:/Users/user/AppData/Local/Temp/opencode/s20c_env.txt", "wb")) {
+                std::fwrite(env.data(), 1, env.size(), f);
+                std::fclose(f);
+            }
         }
         // S18b perk loader (verified against perks.xml by combat_diff.py
         // via ElementTree — independent implementation, not a twin).

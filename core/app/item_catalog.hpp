@@ -53,6 +53,8 @@ struct CatalogItem {
     int unarmed_damage = 0; // UnarmedDamage
     int magic_damage = 0;   // MagicDamage (Magic items; Ranged carries none)
     int delivery_sec = 0;   // DeliveryTime/Ec (timed delivery; 0 = instant)
+    int delivery_coin = 0;  // MoneyDeliveryPrice (O2 instant-delivery fee)
+    int delivery_gems = 0;  // BonusDeliveryPrice (Od instant-delivery fee)
     bool shop_hide = false; // ShopHide="1" (not offered in the shop)
     bool hidden = false;    // Hidden="1"
     bool paid = false;      // PaidItem="Paid"/"SuperPaid" (premium-only)

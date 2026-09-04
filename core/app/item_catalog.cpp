@@ -47,6 +47,8 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         ci.unarmed_damage = sf2::data::xml_attr_int(item, "UnarmedDamage", 0);
         ci.magic_damage = sf2::data::xml_attr_int(item, "MagicDamage", 0);
         ci.delivery_sec = sf2::data::xml_attr_int(item, "DeliveryTime", 0);
+        ci.delivery_coin = sf2::data::xml_attr_int(item, "MoneyDeliveryPrice", 0);
+        ci.delivery_gems = sf2::data::xml_attr_int(item, "BonusDeliveryPrice", 0);
         ci.shop_hide = attr_bool_str(item.attribute("ShopHide").value());
         ci.hidden = attr_bool_str(item.attribute("Hidden").value());
         if (item.attribute("PaidItem")) ci.paid = true;
