@@ -206,9 +206,9 @@ void FightHud::set_phase(fight_phase phase) { phase_ = phase; }
 void FightHud::update(float dt, bool running) {
     (void)dt;
     (void)running;
-    // The JS Sf.iPa (L2035) decrements the HUD countdown 1/sec while
-    // `round.Vt` (running); the demo reads the countdown directly from the
-    // fight state (gma - round.time), so no per-frame HUD state is needed.
+    // The JS Sf.iPa (L2036) decrements the HUD countdown while `round.Vt`
+    // (running); the demo reads NF directly from the fight state, so no
+    // per-frame HUD state is needed.
 }
 
 void FightHud::layout(float view_w, float view_h) {
@@ -402,11 +402,14 @@ void FightController::set_phase(fight_phase p) {
 }
 
 // JS `tx` (L407): round init — the timer is the round length, Vt=false.
+// The HUD timer (`Sf`) resets `xU = gma*60+1` (L2036); the first phase-2
+// tick decrements it to gma*60 (`NF = gma`).
 void FightController::round_init() {
     round_.running = false;
     round_.length = battle_.rounds;     // Da.pT (Rounds)
-    round_.time = 0.0f;
     round_.gma = battle_.round_time;    // Da.R4 (RoundTime)
+    round_.time_xu = round_.gma * 60 + 1;
+    round_.time_nf = round_.gma;
     round_live_ = false;
     start_stance_done_ = false;
     end_stance_frames_ = 0;
@@ -504,8 +507,9 @@ void FightController::enter_end_stance() {
 // The timeout winner is the ENEMY (JS E3a c==3 branch: `a.ng++` on Zb).
 void FightController::check_round_end() {
     if (!round_live_) return;
-    const bool timeout = battle_.timeout_rule &&
-                         round_.time >= static_cast<float>(round_.gma);
+    // JS `Ar.PEa` (L2020): `mb.NF<=0` — the HUD counter hit zero.
+    // (TimeoutWin rule only; shipped stages end on KO.)
+    const bool timeout = battle_.timeout_rule && round_.time_nf <= 0;
     const bool player_ko = player_.hp <= 0.0f;
     const bool enemy_ko = enemy_.hp <= 0.0f;
 
@@ -963,9 +967,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
 }
 
 int FightController::hud_timer() const {
-    // JS Sf.iPa (L2035): the HUD countdown = round.gma - round.time.
-    const int t = round_.gma - static_cast<int>(std::ceil(round_.time));
-    return std::max(0, t);
+    // JS `Sf.iPa` (L2036): the HUD text is `max(0,NF)`.
+    return std::max(0, round_.time_nf);
 }
 
 // The banner's display text ("" when no banner). banner_round_ is the
@@ -1058,10 +1061,11 @@ void FightController::update(float dt) {
                 cur_banner_ = banner_kind::none;
                 banner_len_ = 0;
             }
-            // The round timer (JS `round.time` — the port advances it
-            // during phase 2; the HUD counts down).
+            // The round timer (JS `Sf.iPa` L2036 — `--xU`, `NF = xU/60|0`;
+            // C++ `/` truncates toward zero = JS `|0`). Ticks while `Vt`.
             if (round_.running) {
-                round_.time += dt;
+                --round_.time_xu;
+                round_.time_nf = round_.time_xu / 60;
             }
             // Both fighters act (JS `ca.Hnb` -> each `wd.ia`).
             update_fighter(player_, enemy_, dt);
@@ -1149,9 +1153,9 @@ void FightController::set_pose_dump(const std::string& path, int frames) {
 
 // One JSONL line per frame (reference/traces/native_pose.jsonl contract):
 // {"t":"frame","f":..,"phase":..,"round":..,"timer":..,"cam":{..},
-//  "fighters":[Me, Enemy]} — Me first, then the enemy. `timer` = the elapsed
-// round seconds (int(round_.time)) — the JS `frameJson` basis (round.time),
-// NOT the HUD countdown (gma - time). Read-only over the simulation:
+//  "fighters":[Me, Enemy]} - Me first, then the enemy. `timer` = the HUD
+// countdown seconds (`NF` — was elapsed-up `int(time)`, which had no JS
+// counterpart: `$t.time` is write-once). Read-only over the simulation:
 // nothing here mutates the fight state.
 void FightController::dump_pose_frame() {
     if (pose_dump_frames_ <= 0) return;
@@ -1172,7 +1176,7 @@ void FightController::dump_pose_frame() {
     std::fprintf(pose_dump_file_,
                  "{\"t\":\"frame\",\"f\":%d,\"phase\":%d,\"round\":%d,\"timer\":%d,"
                  "\"cam\":{\"cx\":%.6f,\"cy\":%.6f,\"zoom\":%.6f},\"fighters\":[",
-                 frame_, phase(), round_.number, static_cast<int>(round_.time),
+                 frame_, phase(), round_.number, round_.time_nf,
                  camera_.center_x, camera_.center_y, camera_.zoom_layer);
     for (int i = 0; i < 2; ++i) {
         const Fighter& f = fighters[i]->fighter;

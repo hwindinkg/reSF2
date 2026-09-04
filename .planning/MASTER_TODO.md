@@ -96,15 +96,17 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
     (`v1`@L601-602 опечатка `V1`?; `bn`@L436; `p8a`@L605; `v.Lcb`@L604 —
     настоящий `Lcb` на L1204 = STALE; `yu`/`Lnb`@L803; дубликаты physics):
     чинить при работе с файлами.
-- Phase 3 — Core loop & timing (SCOPED 2026-09-04 read-only, code next turn):
-  G1 phase-1 buffer — DONE already (`player_input` L648: `WC` single-slot +
-  flush at `Rkb`; verify flush call next turn). G2 banner→Next — DONE already
-  (`round_wait_` L584 + `next_round_requested()` L591; §9 text stale — callers
-  audit next turn: who presses Next in headless/auto?). G6 integer timer —
-  OPEN (real work): `round_.time` float + `>= gma` L508 → rewrite to `xU`
-  (`--xU`, `NF=xU/60|0`, init `gma*60+1`, end-gate `NF<=0`, L2036/L2020).
-  3.1 fixed-tick audit (tick source for `advance`) next turn.
-  Gate: раунд 500+ кадров, `round_timer_xU` + фазы кадр-в-кадр.
+- Phase 3 — Core loop & timing (G6 DONE 2026-09-04, build+regress green):
+  G1 phase-1 buffer — pre-existing DONE (`WC` L648 + flush; untouched).
+  G2 banner→Next — pre-existing DONE (`round_wait_`/`next_round_requested`;
+  untouched). G6 integer timer — PORTED: `RoundState::time_xu/time_nf`
+  (`--xU`, `NF=xU/60|0`, init `gma*60+1`, L2036), gate `NF<=0` (L2020),
+  HUD/screens/demo/pose all read NF; float elapsed timer REMOVED (had no JS
+  counterpart — `$t.time` write-once dead). 3.1 tick audit: headless forces
+  1 fixed step/frame; timer cadence in log exactly 1/sec over 60-frame
+  intervals → 60Hz confirmed. Regression: `--fight --headless 600` healthy
+  (phase 2, AI acts, injected punch lands HighPunch, verify OK),
+  `--headless-loop` 13/13 PASS + save/load PASS (both post-change binaries).
 - Phase 4 — Spatial: 4.1 spawn X (phase=1,cf=0: Me x≈972.95, Enemy x≈690 —
   из oracle_pose); 4.2 per-bone mirror; 4.3 camera zoom. Gate: bone mean<10,
   facing 0%, dc<5.

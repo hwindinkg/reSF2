@@ -13,21 +13,24 @@
 //   - phase machine: `eu` 0=idle 1=StartStance 2=Fight 3=EndStance; each
 //     fighter's `Je` stance is synced by xF (L388) so the move conditions'
 //     RoundStage gate matches the fight phase.
-//   - round end (Onb L411): KO / timeout / (ringout via fight rules).
-//     KO  -> the HIGHER-HP fighter wins the round (vfa L413);
-//     timeout (round.time >= round.eL) -> the ENEMY wins (E3a c==3
-//     branch: `a.ng++` on Zb). The winner's `ng` (rounds won) increments;
-//     the round ends with a 3-phase result (round_result + winner + loser).
+//   - round end (Onb L411): KO / timeout (TimeoutWin rule only).
+//     KO -> the HIGHER-HP fighter wins the round (vfa L413);
+//     `Ar.PEa` (L2020): `NF<=0` — the ENEMY wins (E3a c==3, L412-413).
+//     The winner's `ng` (rounds won) increments.
+//   - the timer: integer `xU` ticks (JS `Sf.iPa` L2036: `--xU`,
+//     `NF = xU/60|0`, init `xU = gma*60+1` on reset, text `max(0,NF)`).
+//     The fight decrements xU once per phase-2 tick while `Vt` (running);
+//     the HUD and the timeout gate read NF.
 //   - battle end: when the winner's `ng >= round.eL` (Rounds), or after a
 //     KO in the final round, the battle ends (`bea` L413); `winner()` is
 //     exposed for the results screen.
 //   - HP recovery: `NA` (L414) heals BOTH fighters by `Da.qDa`
 //     (HealthRecovery, stages.xml default 1) between rounds — NOT a full
 //     reset (the round-2 fighters keep their damaged HP + the recovery).
-//   - the timer: HUD display decrements 1/sec from gma (RoundTime) —
-//     `Sf.iPa` (L2035): `NF = xU/60` where xU = gma*60+1. The fight
-//     round.time advances during phase 2 (this port), matching the HUD
-//     countdown; the round ends at round.time >= round.eL (Rounds).
+//   - the timer: integer `xU` ticks (JS `Sf.iPa` L2036: `--xU`,
+//     `NF = xU/60|0`, init `xU = gma*60+1` on reset, text `max(0,NF)`).
+//     The fight decrements xU once per phase-2 tick while `Vt` (running);
+//     the HUD and the timeout gate (`Ar.PEa`: `NF<=0`) read NF.
 //   - the HUD: `Ar`/`Sf` (L2016-2040) — HealthBar_Full/Empty/Hit bars,
 //     the digits.fnt timer, Round_Done/Undone indicators, the FIGHT!/
 //     Round labels (fight/ui atlas).
@@ -86,8 +89,13 @@ struct BattleParams {
 struct RoundState {
     int number = 0;       // `round` — the current round number (0 before the
                           // first Z2; increments to 1..Rounds)
-    float time = 0.0f;    // `time` — the fight timer (seconds elapsed; the
-                          // HUD countdown = gma - time)
+    // The integer round timer (JS `Sf.iPa` L2036: `--xU`, `NF = xU/60|0`;
+    // init `xU = gma*60+1` on reset; the text shows `max(0,NF)`). The HUD
+    // and the timeout gate both read NF — the port's old float elapsed
+    // timer had NO JS counterpart (`$t.time` is set once in `tx()` and
+    // never incremented anywhere in the file).
+    int time_xu = 0;      // `xU` — countdown ticks (60/sec)
+    int time_nf = 0;      // `NF` — countdown seconds shown + gated
     int length = 0;       // `eL` — Da.pT = Rounds: the ROUNDS-TO-WIN
                           // threshold (JS `Onb` L411: `nB.ng >= round.eL`
                           // ends the battle)
@@ -168,7 +176,7 @@ struct FightLogLine {
     int frame = 0;
     int phase = 0;
     int round = 0;
-    int timer = 0;            // the HUD countdown (gma - round.time)
+    int timer = 0;            // the HUD countdown seconds (NF)
     std::string p_move, e_move;
     float p_hp = 0.0f, e_hp = 0.0f;
 };

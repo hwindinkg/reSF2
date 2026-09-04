@@ -1542,8 +1542,8 @@ void FightScreen::update_impl(float dt) {
     // Per-second log.
     if (fight_->frame() / 60 != last_log_frame_) {
         last_log_frame_ = fight_->frame() / 60;
-        const int timer = fight_->round().gma -
-                          static_cast<int>(std::ceil(fight_->round().time));
+        // JS `Sf.iPa` (L2036): log text shows max(0,NF).
+        const int timer = std::max(0, fight_->round().time_nf);
         std::fprintf(stdout, "[fight] F%d phase=%d round=%d timer=%d P:%.0f (%s) E:%.0f (%s)\n",
                      fight_->frame(), fight_->phase(), fight_->round().number,
                      std::max(0, timer), fight_->player().hp,
@@ -1818,7 +1818,7 @@ void FightScreen::render_impl(App& app) {
     // Timer — bitmap-font centered (Sf.layout: top-center). Uses fight/digits.fnt
     // (fallback to ui/font-en). Scale tuned so ~80px glyph -> ~30px on HUD.
     const int timer =
-        fight_->round().gma - static_cast<int>(std::ceil(fight_->round().time));
+        std::max(0, fight_->round().time_nf);  // JS `Sf.iPa` (L2036)
     const std::string tstr = std::to_string(std::max(0, timer));
     {
         const sf2::data::font* fnt = app.digits_font() ? app.digits_font() : app.menu_font();

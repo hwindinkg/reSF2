@@ -355,8 +355,8 @@ void render_fight(sf2::render::Renderer& renderer, sf2::scene::LocationScene& sc
 
     // The timer: the big digits from the digits.fnt glyphs (the game's Sf
     // timer uses digits.png+digits.fnt via E.get(1308)).
-    const int timer = fight.round().gma -
-                      static_cast<int>(std::ceil(fight.round().time));
+    // JS `Sf.iPa` (L2036): text = max(0,NF).
+    const int timer = std::max(0, fight.round().time_nf);
     const std::string tstr = std::to_string(std::max(0, timer));
     const float digit_scale = 0.35f;
     const float glyph_h = 79.0f * digit_scale;
@@ -459,8 +459,8 @@ void run_fight(sf2::render::Renderer& renderer, sf2::scene::LocationScene& scene
         const int phase = fight.phase();
         const int round = fight.round().number;
         if (phase != last_phase || round != last_round || frame % 60 == 0) {
-            const int timer = fight.round().gma -
-                              static_cast<int>(std::ceil(fight.round().time));
+            // JS `Sf.iPa` (L2036): text = max(0,NF).
+            const int timer = std::max(0, fight.round().time_nf);
             std::cout << "F" << frame << "|phase=" << phase << "|round=" << round
                       << "|timer=" << std::max(0, timer)
                       << "|P:" << static_cast<int>(fight.player().hp)
