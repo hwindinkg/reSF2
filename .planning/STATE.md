@@ -8,7 +8,7 @@ design_approved: false
 design_override: true
 steps_complete: [0, 1, 2, 3, 4, 5, 6, 7, 8]
 steps_pending: [9]
-last_action: "Prep wave done (2efd3354, pushed): replay-ready + AI_STATIC.md"
+last_action: "Manual record mode done (a0d72ede, pushed, verified headless)"
 next_action: "User manual tutorial playthrough, then Phase 1 gate re-run"
 blockers: []
 freshnessStatus: "fresh"
