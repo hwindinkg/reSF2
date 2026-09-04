@@ -1113,6 +1113,8 @@ void DojoScreen::update_impl(float dt) {
         try {
             const WarriorSave w = app().save().load();
             tutorial_ = w.tutorial;
+            story_step_ = w.story_step();
+            level_ = w.level;
             std::fprintf(stdout, "[dojo] MONEY %d   LV %d   POWER %d   WEAPON %s   ARMOR %s   HELM %s   TUTORIAL %s\n",
                          w.money, w.level, w.power, w.weapon.c_str(), w.armor.c_str(),
                          w.helm.c_str(), w.tutorial.c_str());
@@ -1129,7 +1131,8 @@ void DojoScreen::update_impl(float dt) {
         if (pb.has_result && pb.player_won && pb.battle_name == "Training") {
             training_won_ = true;
         }
-        const QuestStep qs = quest_step_for(app().res_root(), tutorial_, training_won_);
+        const QuestStep qs = quest_step_for_state(
+            app().res_root(), quest_state_for(tutorial_, story_step_, training_won_, level_));
         if (qs.id != quest_logged_) {
             quest_logged_ = qs.id;
             std::fprintf(stdout, "[quest] step %d (%s) -> %s\n", qs.id, qs.speaker.c_str(),
@@ -1262,7 +1265,8 @@ void DojoScreen::render_impl(App& app) {
             draw_punchbag(ren, fig_cam, 850.0f, kFeetY);
         }
         // Sensei hint panel (quest_panel.hpp — the tutorial quest banner).
-        const QuestStep qs = quest_step_for(app.res_root(), tutorial_, training_won_);
+        const QuestStep qs = quest_step_for_state(
+            app.res_root(), quest_state_for(tutorial_, story_step_, training_won_, level_));
         const float pw = 780.0f, ph = 64.0f, px = kViewW * 0.5f - pw * 0.5f;
         const float py = 84.0f;
         const float panel[] = {px, py, px + pw, py, px, py + ph,
@@ -1655,6 +1659,17 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
                        battle.max_hp, battle.max_hp, roll01, owned);
+    // Disarm identity (JS `$b(Au)` vs `ownHd`, L394): the player's wielded
+    // weapon comes from the save; the enemy defaults to Fists (Training).
+    {
+        std::string pw = "Fists";
+        try {
+            pw = app().save().load().weapon;
+        } catch (const std::exception&) {
+        }
+        if (pw.empty()) pw = "Fists";
+        fight_->set_fighter_weapons(pw, "Fists");
+    }
     fight_->set_bounds(wall_min, wall_max, floor_y);  // the visible dojo floor (the camera anchor)
     // [FIX Phase 4b — black silhouettes] The fighters' mesh color is the
     // location's Root Color (the dojo_params `<Root Color="0x000000">`,
@@ -2517,6 +2532,39 @@ ResultsScreen::ResultsScreen(ScreenManager& mgr, bool player_won, int money_rewa
     : Screen(mgr, "Results"), player_won_(player_won), money_reward_(money_reward),
       exp_reward_(exp_reward) {}
 
+// JS `OLa`/`Oz` (L253-254): the level-up thresholds (`v.FR`) parsed once
+// from character_progress.xml; 100 fallback when the file is absent.
+int ResultsScreen::exp_for_level(int level) {
+    static std::map<int, int> thresholds;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        try {
+            sf2::data::xml_doc doc;
+            std::ifstream in("reference/extracted/xml/res/character_progress.xml",
+                             std::ios::binary);
+            if (in) {
+                std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                       std::istreambuf_iterator<char>());
+                doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()),
+                          data.size());
+                const pugi::xml_node root = doc.root().first_child();
+                if (root && std::string(root.name()) == "Progress") {
+                    for (pugi::xml_node th :
+                         root.child("Thresholds").children("Threshold")) {
+                        const int lv = th.attribute("Level") ? th.attribute("Level").as_int(0) : 0;
+                        const int xp = th.attribute("Exp") ? th.attribute("Exp").as_int(0) : 0;
+                        if (lv > 0 && xp > 0) thresholds[lv] = xp;
+                    }
+                }
+            }
+        } catch (const std::exception&) {
+        }
+    }
+    const auto it = thresholds.find(level);
+    return it != thresholds.end() ? it->second : 100;
+}
+
 void ResultsScreen::update_impl(float dt) {
     (void)dt;
     if (!applied_) {
@@ -2553,8 +2601,12 @@ void ResultsScreen::update_impl(float dt) {
                 std::fprintf(stdout, "[result] battle record: %s\n",
                              pb.battle_name.c_str());
             }
-            while (w.experience >= 100 && w.level < 50) {
-                w.experience -= 100;
+            // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds
+            // (`v.FR` = character_progress.xml `<Threshold Level Exp>`).
+            while (w.level < 50) {
+                const int need = ResultsScreen::exp_for_level(w.level);
+                if (w.experience < need) break;
+                w.experience -= need;
                 w.level++;
                 w.power += 2;
                 std::fprintf(stdout, "[result] LEVEL UP -> %d (power %d)\n", w.level, w.power);
@@ -2613,6 +2665,74 @@ void ResultsScreen::render_impl(App& app) {
 // ShopScreen
 // ---------------------------------------------------------------------------
 
+// Shop tabs (JS `vj.E0` L1168-1169 category ids → `vj.ifa` tab lists,
+// `Oa.f5`): 1 Weapon, 2 Armor, 3 Helm, 4 Ranged, 5 Magic.
+struct ShopTab {
+    const char* label;
+    const char* type;
+    int e0;
+};
+constexpr ShopTab kShopTabs[] = {
+    {"WEAPONS", "Weapon", 1},
+    {"ARMOR", "Armor", 2},
+    {"HELMS", "Helm", 3},
+    {"RANGED", "Ranged", 4},
+    {"MAGIC", "Magic", 5},
+};
+constexpr int kShopTabCount = 5;
+
+// Card grid geometry (UNCHANGED from the pre-tab layout — the headless loop
+// buys the first card at (x0, y0); tabs sit above the grid).
+constexpr float kShopCardW = 300.0f;
+constexpr float kShopCardH = 150.0f;
+constexpr float kShopX0 = 1280.0f * 0.25f;
+constexpr float kShopY0 = 200.0f;
+constexpr float kShopDx = 330.0f;
+constexpr float kShopDy = 170.0f;
+constexpr float kShopTabW = 140.0f;
+constexpr float kShopTabH = 40.0f;
+constexpr float kShopTabY = 100.0f;
+constexpr float kShopTabX0 = 290.0f;
+
+// Row view: indices into ShopScreen::items_ for tab t (list order kept, so
+// WEAPON_KNIVES stays row 0 of Weapons — the headless-loop buy click).
+std::vector<std::size_t> shop_tab_rows(const std::vector<CatalogItem>& items, int tab) {
+    std::vector<std::size_t> out;
+    if (tab < 0 || tab >= kShopTabCount) return out;
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (items[i].type == kShopTabs[tab].type) out.push_back(i);
+    }
+    return out;
+}
+
+// Equipped-slot value for an item type (JS `xc.hk` slots; save fields readable).
+const std::string& shop_slot_for(const WarriorSave& w, const std::string& type) {
+    if (type == "Armor") return w.armor;
+    if (type == "Helm") return w.helm;
+    if (type == "Ranged") return w.ranged;
+    if (type == "Magic") return w.magic;
+    return w.weapon;
+}
+
+// One-line stat (damage/defense by type; Ranged/Magic carry no damage field
+// in CatalogItem — show subtype + level).
+std::string shop_stat_line(const CatalogItem& it) {
+    char buf[96];
+    if (it.type == "Weapon") {
+        std::snprintf(buf, sizeof(buf), "DMG %d   %dG", it.weapon_damage, it.price);
+    } else if (it.type == "Armor") {
+        std::snprintf(buf, sizeof(buf), "DEF %d   %dG", it.body_defense, it.price);
+    } else if (it.type == "Helm") {
+        std::snprintf(buf, sizeof(buf), "DEF %d   %dG", it.head_defense, it.price);
+    } else if (!it.subtype.empty()) {
+        std::snprintf(buf, sizeof(buf), "%s Lv%d   %dG", it.subtype.c_str(), it.level,
+                      it.price);
+    } else {
+        std::snprintf(buf, sizeof(buf), "Lv%d   %dG", it.level, it.price);
+    }
+    return std::string(buf);
+}
+
 ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
     items_ = load_catalog(app());
     std::fprintf(stdout, "[shop] %zu shop items\n", items_.size());
@@ -2622,6 +2742,33 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
                      it.model.c_str());
     }
     std::fflush(stdout);
+    // Tutorial-buy focus (JS `Ao` S(): `Oa.ska(0, Pca)` — Weapons tab with
+    // WEAPON_KNIVES focused; Pca defaults to WEAPON_KNIVES, L1199).
+    tab_ = 0;
+    hover_ = -1;
+    try {
+        const WarriorSave w = app().save().load();
+        seen_ = w;
+        const std::string step = w.story_step();
+        const PendingBattle& pb = app().pending_battle();
+        const bool tut_shop =
+            step == "STEP_BUY_ITEM" ||
+            (step.empty() && w.tutorial == "MOVE" && pb.has_result && pb.player_won &&
+             pb.battle_name == "Training");
+        if (tut_shop) {
+            const std::vector<std::size_t> rows = shop_tab_rows(items_, 0);
+            for (std::size_t r = 0; r < rows.size(); ++r) {
+                if (items_[rows[r]].name == "WEAPON_KNIVES") {
+                    hover_ = static_cast<int>(r);
+                    break;
+                }
+            }
+            std::fprintf(stdout, "[shop] Ao focus WEAPON_KNIVES (tab Weapons, row %d)\n",
+                         hover_);
+            std::fflush(stdout);
+        }
+    } catch (const std::exception&) {
+    }
 }
 
 void ShopScreen::update_impl(float dt) {
@@ -2634,9 +2781,27 @@ void ShopScreen::update_impl(float dt) {
             std::fprintf(stdout, "[shop] MONEY %d\n", w.money);
             std::fflush(stdout);
         }
+        seen_ = w;  // snapshot for owned/equipped row markers (render reads this)
     } catch (const std::exception&) {
     }
     hover_ = -1;
+    // Tab strip (geometry mirrors render_impl).
+    tab_hover_ = -1;
+    for (int t = 0; t < kShopTabCount; ++t) {
+        const float cx = kShopTabX0 + static_cast<float>(t) * kShopTabW + kShopTabW * 0.5f;
+        if (p.x >= cx - kShopTabW / 2 && p.x <= cx + kShopTabW / 2 &&
+            p.y >= kShopTabY - kShopTabH / 2 && p.y <= kShopTabY + kShopTabH / 2) {
+            tab_hover_ = t;
+            if (p.pressed && t != tab_) {
+                tab_ = t;
+                sf2::audio::AudioEngine::instance().play("click");
+                std::fprintf(stdout, "[shop] tab %s (E0=%d)\n", kShopTabs[tab_].label,
+                             kShopTabs[tab_].e0);
+                std::fflush(stdout);
+            }
+            break;
+        }
+    }
     // BACK (top-left) -> the previous screen (the loop's shop -> dojo leg).
     if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
         if (p.pressed) {
@@ -2646,27 +2811,29 @@ void ShopScreen::update_impl(float dt) {
             return;
         }
     }
-    const float card_w = 300.0f, card_h = 150.0f;
-    const float x0 = kViewW * 0.25f, y0 = 200.0f;
-    const float dx = 330.0f, dy = 170.0f;
-    for (std::size_t i = 0; i < items_.size(); ++i) {
+    // Item grid for the active tab (geometry UNCHANGED — row 0 of Weapons is
+    // WEAPON_KNIVES at the pre-tab spot).
+    const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
+    for (std::size_t i = 0; i < rows.size(); ++i) {
         const int col = static_cast<int>(i % 2);
         const int row = static_cast<int>(i / 2);
-        const float cx = x0 + col * dx;
-        const float cy = y0 + row * dy;
-        if (p.x >= cx - card_w / 2 && p.x <= cx + card_w / 2 && p.y >= cy - card_h / 2 &&
-            p.y <= cy + card_h / 2) {
+        const float cx = kShopX0 + static_cast<float>(col) * kShopDx;
+        const float cy = kShopY0 + static_cast<float>(row) * kShopDy;
+        if (p.x >= cx - kShopCardW / 2 && p.x <= cx + kShopCardW / 2 &&
+            p.y >= cy - kShopCardH / 2 && p.y <= cy + kShopCardH / 2) {
             hover_ = static_cast<int>(i);
             if (p.pressed) {
-                const CatalogItem& it = items_[i];
+                const CatalogItem& it = items_[rows[i]];
                 WarriorSave w;
                 try {
                     w = app().save().load();
                 } catch (const std::exception&) {
                     break;
                 }
-                // JS `Pa.iwa` (L629626): money check `p.o.Tb >= a.jp()`,
-                // deduct `p.o.Fr(b)`, add `Pa.gI` (L628934) -> inventory.
+                // JS `Pa.iwa` coin gate (L1228/SHOP_STATIC §9): `Tb >= jp` →
+                // deduct `Fr` + grant `gI` + save. Coins are the Warrior
+                // Money attr (the seed `<Currencies/>` is empty — no coin
+                // key exists to deduct from; see the stream report).
                 if (w.has_item(it.name)) {
                     std::fprintf(stdout, "[shop] %s already owned\n", it.name.c_str());
                     std::fflush(stdout);
@@ -2675,11 +2842,30 @@ void ShopScreen::update_impl(float dt) {
                     WarriorSave::OwnedItem oi;
                     oi.name = it.name;
                     oi.count = 1;
+                    // Tutorial-buy force-equip (JS `Ao` Qg: `Pa.iwa(b) &&
+                    // xa.$o(b)` — L1120): WEAPON_KNIVES in tutorial context
+                    // equips into its slot and advances the step to MAP
+                    // (row 4). Other buys keep the no-equip behavior.
+                    const bool tut_buy =
+                        it.name == "WEAPON_KNIVES" &&
+                        (w.story_step() == "STEP_BUY_ITEM" ||
+                         (w.story_step().empty() && w.tutorial == "MOVE"));
+                    if (tut_buy) {
+                        if (it.type == "Armor") w.armor = it.name;
+                        else if (it.type == "Helm") w.helm = it.name;
+                        else if (it.type == "Ranged") w.ranged = it.name;
+                        else if (it.type == "Magic") w.magic = it.name;
+                        else w.weapon = it.name;
+                        oi.equipped = true;
+                        w.set_story_step("MAP");
+                    }
                     w.items.push_back(oi);
                     app().save().save(w);
+                    seen_ = w;
                     std::fprintf(stdout,
-                                 "[shop] BOUGHT %s (%s) price=%d -> money %d, item added\n",
-                                 it.name.c_str(), it.subtype.c_str(), it.price, w.money);
+                                 "[shop] BOUGHT %s (%s) price=%d -> money %d, item added%s\n",
+                                 it.name.c_str(), it.subtype.c_str(), it.price, w.money,
+                                 tut_buy ? " + EQUIPPED, step -> MAP (Ao)" : "");
                     std::fflush(stdout);
                 } else {
                     std::fprintf(stdout, "[shop] NOT ENOUGH MONEY for %s (need %d, have %d)\n",
@@ -2709,14 +2895,29 @@ void ShopScreen::render_impl(App& app) {
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
 
-    const float card_w = 300.0f, card_h = 150.0f;
-    const float x0 = kViewW * 0.25f, y0 = 200.0f;
-    const float dx = 330.0f, dy = 170.0f;
-    for (std::size_t i = 0; i < items_.size(); ++i) {
+    // Tab strip (JS `vj.ifa` lists — mirrors update_impl geometry).
+    for (int t = 0; t < kShopTabCount; ++t) {
+        const float cx = kShopTabX0 + static_cast<float>(t) * kShopTabW + kShopTabW * 0.5f;
+        const bool sel = t == tab_;
+        const bool hov = t == tab_hover_;
+        draw_flat_button(app, kShopTabs[t].label, cx, kShopTabY, kShopTabW - 8.0f,
+                         kShopTabH, sel ? 0.72f : (hov ? 0.6f : 0.38f),
+                         sel ? 0.6f : (hov ? 0.5f : 0.32f), sel ? 0.25f : 0.3f, hov);
+        (void)app.draw_text(cx - 52.0f, kShopTabY - 8.0f, kShopTabs[t].label, 0.7f, 1.0f,
+                            1.0f, 1.0f);
+    }
+    const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
+    if (rows.empty()) {
+        (void)app.draw_text(kShopX0 - 60.0f, kShopY0, "No items in this category yet.", 0.8f,
+                            0.7f, 0.7f, 0.7f);
+    }
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        const CatalogItem& it = items_[rows[i]];
         const int col = static_cast<int>(i % 2);
         const int row = static_cast<int>(i / 2);
-        const float cx = x0 + col * dx;
-        const float cy = y0 + row * dy;
+        const float cx = kShopX0 + static_cast<float>(col) * kShopDx;
+        const float cy = kShopY0 + static_cast<float>(row) * kShopDy;
+        const float card_w = kShopCardW, card_h = kShopCardH;
         const bool hovered = static_cast<int>(i) == hover_;
         // Try to draw a shop atlas icon as card background
         bool drawn = false;
@@ -2728,13 +2929,28 @@ void ShopScreen::render_impl(App& app) {
             const float r = hovered ? 0.75f : 0.45f;
             const float g = hovered ? 0.6f : 0.35f;
             const float b = hovered ? 0.3f : 0.2f;
-            draw_flat_button(app, items_[i].name, cx, cy, card_w, card_h, r, g, b, hovered);
+            draw_flat_button(app, it.name, cx, cy, card_w, card_h, r, g, b, hovered);
         } else {
             // Overlay label as flat small indicator (keep text)
             const float lbl_w = 120.0f, lbl_h = 24.0f;
             const float lx0 = cx - lbl_w/2, ly0 = cy + card_h/2 - 20;
             const float lbl[] = {lx0, ly0, lx0+lbl_w, ly0, lx0+lbl_w, ly0+lbl_h, lx0, ly0, lx0+lbl_w, ly0+lbl_h, lx0, ly0+lbl_h};
             ren.draw_triangles(lbl, 6, 0.0f, 0.0f, 0.0f, 0.6f);
+        }
+        // Owned / equipped markers (JS `zf` inventory + `hk` slots — save
+        // fields readable; render reads the update snapshot only).
+        const bool owned = seen_.has_item(it.name);
+        const bool equipped = owned && shop_slot_for(seen_, it.type) == it.name;
+        (void)app.draw_text(cx - card_w / 2 + 12.0f, cy - card_h / 2 + 10.0f, it.name, 0.7f,
+                            1.0f, 1.0f, 1.0f);
+        (void)app.draw_text(cx - card_w / 2 + 12.0f, cy + card_h / 2 - 46.0f,
+                            shop_stat_line(it), 0.65f, 0.9f, 0.9f, 0.9f);
+        if (equipped) {
+            (void)app.draw_text(cx - card_w / 2 + 12.0f, cy + card_h / 2 - 24.0f, "EQUIPPED",
+                                0.65f, 0.4f, 1.0f, 0.4f);
+        } else if (owned) {
+            (void)app.draw_text(cx - card_w / 2 + 12.0f, cy + card_h / 2 - 24.0f, "OWNED",
+                                0.65f, 1.0f, 0.85f, 0.4f);
         }
     }
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {

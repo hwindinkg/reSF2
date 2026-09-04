@@ -423,6 +423,11 @@ void FightController::round_start() {
     round_.number++;
     round_init();
     dga_ = false;  // JS `Dga` reset per round (L409)
+    // JS `wd.wI` per-round re-init: `Wx=-1`, `sr=0` (`vc`/`sn` persist).
+    player_.shock.pain_sr = 0.0f;
+    player_.shock.weapon_wx = -1;
+    enemy_.shock.pain_sr = 0.0f;
+    enemy_.shock.weapon_wx = -1;
     // The ROUND N banner (presentation only — see banner_kind).
     cur_banner_ = banner_kind::round;
     banner_round_ = round_.number;
@@ -826,10 +831,24 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
                 def.shock.shocked_vc = true;
             }
         }
-        // JS `Cgb` disarm (L394): `Yi&&(d=$b(Au); sn||own?Yi=false:...)`.
-        // The port has no weapon items: unarmed fighters always take the
-        // `ownHd` path -> Yi=false. `Wqb` item-swap body is OPEN.
-        rec.disarm = false;
+        // JS `Cgb` disarm (L394): `Yi&&(d=$b(Au); sn||own?Yi=false:...)`
+        // with `Au` = Shock.Weapon (`Fists`, internal_settings, verified).
+        // Unarmed-on-Fists takes the `ownHd` path -> Yi=false; a
+        // knife-wielder proceeds (sn latch + `kwb()` arms `Wx=MFa`).
+        // `Wqb` item-swap/fling/`Wsb`/drop-event bodies are presentation
+        // (OPEN); the swap + attr set + vc latch are live below.
+        rec.disarm = ub;
+        if (rec.disarm) {
+            if (def.shock.disarm_sn || def.weapon == "Fists") {
+                rec.disarm = false;
+            } else {
+                def.shock.disarm_sn = true;
+                // JS `kwb()` (L522): `Wx<0 && (Wx=MFa)`.
+                if (def.shock.weapon_wx < 0) {
+                    def.shock.weapon_wx = gfp.shock_loosening_delay;
+                }
+            }
+        }
     }
     rec.frame = frame;
     // JS `ep` (L394): `Bb.ep = !Dga`, and `Dga` latches ONLY inside the
@@ -854,10 +873,26 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
 
     // JS `ca.Cgb` (L394-397): `b.block || (model.hT(5), Dga, ...)` — a
     // landed UNBLOCKED hit destroys the target's Block intervals and picks
-    // a new reaction move via `Gc.DK`. The reaction pick is a Phase 5
-    // follow-up (OPEN); the interval break is live here.
+    // a new reaction move via `Gc.DK` (d-set first-match:
+    // `Fighter::try_react`; shock prefers *Fall* reactions).
     if (!blocked) {
         def.fighter.clear_block();
+        sf2::scene::FightContext rctx;
+        rctx.roll01 = roll01_;
+        rctx.stage = sf2::scene::round_stage::fight;
+        rctx.anims_me = {def.fighter.current_move() ? def.fighter.current_move()->name : ""};
+        rctx.anims_enemy = {atk.fighter.current_move() ? atk.fighter.current_move()->name : ""};
+        rctx.dist_x = atk.fighter.world_x() - def.fighter.world_x();
+        rctx.dist_3d = std::fabs(rctx.dist_x);
+        rctx.health_ratio = def.max_hp > 0.0f ? def.hp / def.max_hp : 0.0f;
+        rctx.last_hit_type = critical ? "Critical" : (rec.shock ? "Shock" : "");
+        rctx.candidate_moves = {};
+        const std::string reaction = def.fighter.try_react(rctx, rec.shock);
+        if (!reaction.empty()) {
+            std::fprintf(stdout, "[react] F%d %s -> %s\n", frame,
+                         def.name.c_str(), reaction.c_str());
+            std::fflush(stdout);
+        }
     }
 
     // Knockback (JS `Bl.strike` + bounds).
@@ -1017,7 +1052,13 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     {
         const sf2::scene::FightParams& gfp = sf2::scene::FightParams::defaults();
         if (sf2::scene::shock_tick(me.shock, gfp.shock_frame_reduction)) {
-            std::fprintf(stdout, "[fight] F%d %s WQB pickup timer fired\n",
+            // JS `Wqb` (L527-528): swap to the `Au` item, `EPa`/`FPa` attr
+            // set (`WeaponDamage=0`, internal_settings, verified), `vc`
+            // latch. Fling/`Wsb`/drop-event are presentation (OPEN).
+            me.weapon = "Fists";
+            me.shock.shocked_vc = true;
+            me.params.attributes["WeaponDamage"] = 0.0f;
+            std::fprintf(stdout, "[fight] F%d %s WQB pickup -> Fists\n",
                          frame_, me.name.c_str());
             std::fflush(stdout);
         }

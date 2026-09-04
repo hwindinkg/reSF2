@@ -190,6 +190,26 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
     Gc.DK reaction-pick + Wqb item-swap remain OPEN; `atk.so`=1.0 OPEN;
     RJa draws merged into fight stream (documented approximation).
   - Regression: fight healthy + loop 13/13 PASS post-change.
+- Phase 5 — DK reaction-pick + Wqb + OLa (DONE 2026-09-04, build + goldens
+  + 13/13 green):
+  - `combat_decide.hpp` (new): `dk_partition`/`dk_tail` exact mirrors of
+    Node S10/S12 (C++ golden: e/ukb/d-all, pkb-len, nsb, jja, ukb — 0 divs).
+    Pkb/jJa/Nsb bodies stay OPEN (geometry+weight tails); roulette-inside-
+    Pkb OPEN (no tactic weights at reaction time — runtime picks
+    priority-first via `dk_partition` order = hb_ order).
+  - `Fighter::try_react` (54 Hit-event moves in moves.xml): fall-preference
+    on shock as MS/jJa proxy (exact MS mapping OPEN). Wired into apply_hit
+    !blocked branch with hit ctx (last_hit_type/dist/health/roll01).
+    Runtime: `Player -> TitanBlock`, `Enemy -> ..._PHYSICAL_FALL` live.
+  - Wqb REAL (not stub): `weapon` identity on fighters (save→player,
+    enemy Fists); Yi = Ub with sn/Au-vs-own gate; kwb arms Wx=MFa;
+    Pnb-fire swaps to Fists + WeaponDamage=0 + vc; sr/Wx reset per round
+    (`wI`); fling/Wsb/drop presentation OPEN. Unreachable in practice
+    (threshold=999) but structurally complete.
+  - OLa from data: `exp_for_level` parses character_progress `<Threshold>`
+    (150/190/350/...) with 100 fallback; round-reset sr/Wx verified in JS
+    (`wI`: Wx=-1/sr=0; vc/sn persist). Threshold lookup not yet live-fired
+    (loop fights enemy-won) — first player win exercises it.
 - Phase-6 leads still open: enemy phase-2 march to 1179 (oracle holds ~615;
   advance/retreat tuning, needs real-fight oracle to judge); `eval_random`
   stream threading; `xaa` Ju-horizon; `iwb` eh-reset; kJ-vs-Xh.

@@ -22,17 +22,12 @@
 //                                            tutorial_return_map → Map
 //  13  StoryTutorialOpenScene     delayed NextScene opens (SenseiDialogText)
 //
-// Display-only derivation. THE swap point is `quest_state_for()`: it takes
-// only what the shell can read today (Tutorial string + session Training
-// result). When Stream 1 lands the save fields, its body becomes a direct
-// read of the EXACT missing symbols (see report):
-//   WarriorSave::story_step  (_$StoryTutorialStep, `p.o.zi.HH`, L964/so L1119)
-//   WarriorSave::quest_vars  (zi/HH table — STEP_BUY_ITEM/MAP/... values)
-//   WarriorSave::battles     (iF `Battles` map — WDa L256 + Fights/yc wins)
-//   WarriorSave::map_focus   (ys `MapFocus`, m5/Ttb L255)
-//   WarriorSave::disciple    (Y0 `Disciple`, oub/Nfb — Dojo toggle)
-// Until then `story_step` stays empty and the legacy 3-step path serves
-// (MOVE → MOVE+won → non-MOVE), which matches beats 1–3 above.
+// Display-only derivation. THE swap point is `quest_state_for()`: the save
+// now carries `story_step()` (WarriorSave L105, `_$StoryTutorialStep`) and
+// it flows straight into QuestState, so the full table serves as soon as a
+// quest action writes a step. Still missing (same header, bodies unchanged
+// when they land): quest-var/battle-win feeds for `boss_focus`/`block_lesson`
+// (`map_focus`/ys, Battles/iF wins), `disciple`/Y0 (Dojo toggle).
 //
 // line1 comes from the runtime lang table (`lang_table.hpp`) with the
 // verified EN embedded as fallback (titles in en.af2d6604.xml); line2 is
@@ -64,12 +59,14 @@ struct QuestState {
 };
 
 // THE swap point (see file comment): builds QuestState from shell-readable
-// inputs. When WarriorSave::{story_step,quest_vars,battles,map_focus}
-// lands, fill story_step/boss_focus/block_lesson here — callers unchanged.
-inline QuestState quest_state_for(const std::string& tutorial, bool training_won,
-                                  int level) {
+// inputs. `story_step` now passes the landed save field through
+// (WarriorSave::story_step L105); `boss_focus`/`block_lesson` still await
+// `map_focus` and quest-var reads - callers unchanged when they land.
+inline QuestState quest_state_for(const std::string& tutorial, const std::string& story_step,
+                                  bool training_won, int level) {
     QuestState st;
     st.tutorial = tutorial;
+    st.story_step = story_step;
     st.training_won = training_won;
     st.level = level;
     return st;
@@ -154,7 +151,7 @@ inline QuestStep quest_step_for_state(const std::string& res_root, const QuestSt
 // Compat wrapper (legacy 3-step inputs; res_root added for lang lookup).
 inline QuestStep quest_step_for(const std::string& res_root, const std::string& tutorial,
                                 bool training_won) {
-    return quest_step_for_state(res_root, quest_state_for(tutorial, training_won, 1));
+    return quest_step_for_state(res_root, quest_state_for(tutorial, "", training_won, 1));
 }
 
 } // namespace sf2::app

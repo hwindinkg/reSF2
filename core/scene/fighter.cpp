@@ -416,6 +416,26 @@ std::string Fighter::try_select_move(FightContext& ctx) {
     return "";
 }
 
+// Hit-reaction pick (JS `Gc.DK` L673-674, d-set first-match; see
+// fighter.hpp for the roulette caveat).
+std::string Fighter::try_react(FightContext& ctx, bool prefer_fall) {
+    auto try_pass = [&](bool falls_only) -> std::string {
+        for (const MoveDef* m : hb_) {
+            if (m == nullptr) continue;
+            if (!m->has_event("Hit")) continue;
+            const bool is_fall = m->name.find("Fall") != std::string::npos;
+            if (falls_only != is_fall) continue;
+            if (ai_start_move(*m, ctx)) return m->name;
+        }
+        return "";
+    };
+    if (prefer_fall) {
+        const std::string f = try_pass(true);
+        if (!f.empty()) return f;
+    }
+    return try_pass(false);
+}
+
 // JS `Te.ia` (L547-548): each 60 Hz update advances `Xh` (playback frame)
 // and `fG` (physics frame); when `Xh+2 >= clipLen` the clip ends (`KNa()`
 // + lS -> EStopAnimationEvent) and the fighter returns to idle.

@@ -150,6 +150,7 @@ struct FightFighter {
     int rounds_won = 0;       // `parameters.ng` — rounds won
     bool is_winner = false;   // `zd` — the round/battle winner flag
     sf2::scene::ShockState shock;  // pain/shock/disarm (`sr/vc/sn/Wx/ws`, L490)
+    std::string weapon = "Fists";  // wielded weapon (disarm identity)
     int hits_landed = 0;
     int hits_taken = 0;
     int combo_run = 0;        // consecutive landed hits (resets when taken)
@@ -419,6 +420,13 @@ public:
     // --- fight state accessors -------------------------------------------
     const FightFighter& player() const { return player_; }
     const FightFighter& enemy() const { return enemy_; }
+    // Wielded weapons (disarm identity; JS `$b(Au)` vs `ownHd`, L394).
+    // Defaults are Fists; the host sets the player's from the save.
+    void set_fighter_weapons(const std::string& player_weapon,
+                             const std::string& enemy_weapon) {
+        player_.weapon = player_weapon;
+        enemy_.weapon = enemy_weapon;
+    }
     // Battle prize breakdown (JS `v.kD`/`bzb` factors, FLOW_STATIC 4.3).
     // Factors from internal_settings `<RewardsPrize>` (verified values):
     // Perfect $Ia=5, FirstStrike ep=2, ComboCount Ui=1, Shock Ub=3,

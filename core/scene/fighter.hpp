@@ -109,6 +109,15 @@ public:
     // `HB[0]`; `de.V1` tests each candidate in priority order).
     // Returns the started move's name, or "" if none passed.
     std::string try_select_move(sf2::scene::FightContext& ctx);
+    // Hit-reaction pick (JS `Gc.DK` L673-674, d-set first-match): starts the
+    // first priority-ordered `hb` move carrying a `Hit` event whose tactics
+    // conditions pass (54 such moves in moves.xml: HighHit/MiddleHit/...,
+    // PhysicalFall/...). `prefer_fall` (shock knockdown, `Ub`) tries
+    // *Fall*-named reactions first — a proxy for the MS/jJa branch (the
+    // exact MS mapping is OPEN). Roulette-inside-Pkb stays OPEN (no tactic
+    // weights at reaction time); the partition ORDER matches `dk_partition`
+    // (priority descending = hb_ order). Returns the name or "".
+    std::string try_react(sf2::scene::FightContext& ctx, bool prefer_fall);
 
     // Starts `move` if its conditions pass: sets current_move, move_frame=0,
     // loads the clip (FileName -> anim_archive clip), sets facing toward the

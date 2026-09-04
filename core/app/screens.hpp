@@ -38,6 +38,7 @@
 
 #include "app/fight_assets.hpp"
 #include "app/item_catalog.hpp"
+#include "app/save_system.hpp"
 #include "app/screen_manager.hpp"
 
 namespace sf2::data {
@@ -93,6 +94,8 @@ private:
     // Tutorial quest banner state (quest_panel.hpp; derived read-only from
     // the save's Tutorial field + the last Training result).
     std::string tutorial_ = "MOVE";
+    std::string story_step_;  // _$StoryTutorialStep (landed save API, L105)
+    int level_ = 1;
     int quest_logged_ = -1;
     bool training_won_ = false;
     // Disciple sparring toggle (JS `Nfb`): session-local STUB until the save
@@ -263,6 +266,9 @@ public:
 
     void update_impl(float dt) override;
     void render_impl(App& app) override;
+    // JS `OLa`/`Oz` (L253-254): exp needed to go level -> level+1
+    // (`v.FR` = character_progress.xml `<Threshold>`; 100 fallback).
+    static int exp_for_level(int level);
 
 private:
     bool player_won_ = false;
@@ -293,6 +299,13 @@ private:
     std::vector<CatalogItem> items_;
     int hover_ = -1;
     int money_logged_ = 0;
+    // Shop tabs (JS `vj.E0` category ids 1..5 → `vj.ifa` tab lists, Oa L1168).
+    // tab_ indexes kShopTabs (0 = Weapon); tab_hover_ is the tab hover.
+    // seen_ is the last save snapshot (owned/equipped markers, refreshed in
+    // update — render never touches disk).
+    int tab_ = 0;
+    int tab_hover_ = -1;
+    WarriorSave seen_;
 };
 
 // The equipment — native Profile/equipment screen (JS `Oa.f5` case 5 +

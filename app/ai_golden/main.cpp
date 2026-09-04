@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "scene/ai.hpp"
+#include "scene/combat_decide.hpp"
 #include "scene/damage.hpp"
 #include "scene/move_def.hpp"
 #include "codec.hpp"
@@ -255,6 +256,67 @@ int main() {
                     r8.crit_e ? "true" : "false", r8.pain_c ? "true" : "false");
         std::printf("  \"r8a_blocked\": {\"raw\": %s},\n",
                     r8b.raw ? "true" : "false");
+        // S10 DK partition (L673-674 fixture: a/b/c/d, sja=0).
+        sf2::scene::DkCandidate ca, cb, cc, cd;
+        ca.id = "a";
+        cb.id = "b";
+        cc.id = "c";
+        cd.id = "d";
+        ca.anim_id = "A";
+        cb.anim_id = "B";
+        cc.anim_id = "C";
+        cd.anim_id = "D";
+        ca.priority = 1;
+        cb.priority = 5;
+        cc.priority = 3;
+        cd.priority = 5;
+        cb.eb = cc.eb = cd.eb = true;
+        cc.rha = true;
+        const std::vector<sf2::scene::DkCandidate> cands10 = {ca, cb, cc, cd};
+        const sf2::scene::DkPartition p10 =
+            sf2::scene::dk_partition(cands10, false, 0);
+        const sf2::scene::DkPartition p10c =
+            sf2::scene::dk_partition(cands10, true, 0);
+        std::printf("  \"dk10\": {\"e\": \"%s\", \"ukb\": \"%s\"},\n",
+                    cands10[static_cast<std::size_t>(p10.e)].id.c_str(),
+                    [&]() -> const char* {
+                        const auto& u = cands10[static_cast<std::size_t>(p10.ukb)];
+                        return u.anim_id.empty() ? u.id.c_str() : u.anim_id.c_str();
+                    }());
+        std::printf("  \"dk10c_d\": %d,\n",
+                    static_cast<int>(p10c.d.size()));
+        // S12 DK tail matrix (L674): shared recorder across a-f.
+        sf2::scene::DkCandidate cx, cy, cm, cn, cg;
+        cx.id = "x";
+        cy.id = "y";
+        cm.id = "m";
+        cm.ms = true;
+        cm.r1 = 7;
+        cm.anim_type = "Atk";
+        cm.anim_e = 3;
+        cn.id = "n";
+        cn.index = 5;
+        cn.anim_type = "Blk";
+        cn.anim_e = 9;
+        cg.id = "Ganim";
+        cg.anim_id = "Ganim";
+        const std::vector<sf2::scene::DkCandidate> cands12 = {cx, cy, cm, cn, cg};
+        sf2::scene::DkTailCall rec12;
+        sf2::scene::dk_tail(rec12, cands12, {0}, -1, -1);  // a
+        sf2::scene::dk_tail(rec12, cands12, {0}, 1, -1);   // b
+        sf2::scene::dk_tail(rec12, cands12, {}, -1, -1);   // c
+        sf2::scene::dk_tail(rec12, cands12, {}, 2, -1);    // d
+        sf2::scene::dk_tail(rec12, cands12, {}, 3, -1);    // e
+        sf2::scene::dk_tail(rec12, cands12, {}, -1, 4);    // f
+        std::printf("  \"dk12_pkb\": %d,\n",
+                    static_cast<int>(rec12.pkb.size()));
+        std::printf("  \"dk12_nsb\": [[\"%s\", %d]],\n",
+                    cands12[rec12.nsb[0].first].id.c_str(), rec12.nsb[0].second);
+        std::printf("  \"dk12_jja\": [[\"%s\", %d]],\n",
+                    cands12[rec12.jja[0].first].id.c_str(), rec12.jja[0].second);
+        std::printf("  \"dk12_ukb\": [[\"%s\"]],\n", rec12.ukb[0].c_str());
+        std::printf("  \"dk12_zy\": [\"%s\", %d],\n",
+                    rec12.zy.c_str(), rec12.jza);
         // S6: Wx=5 fires wqb on the 6th tick, Wx ends -1.
         sf2::scene::ShockState st6;
         st6.weapon_wx = 5;
