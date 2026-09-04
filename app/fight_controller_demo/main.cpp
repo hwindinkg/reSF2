@@ -600,10 +600,12 @@ int main(int argc, char** argv) {
         // Dojo_Disciple. The demo runs fight 1 (a real timed fight).
         sf2::scene::BattleParams battle = parse_battle(stages_xml, /*fight_index=*/1, "dojo");
         battle.name = "Training/Fight2";
-        battle.player_spawn_x = 690.0f;
-        battle.player_spawn_y = -93.0f;
-        battle.enemy_spawn_x = 973.0f;
-        battle.enemy_spawn_y = -110.0f;
+        // Oracle sides (phase=1,f=0: Me RIGHT 972.954, Enemy LEFT 690.000):
+        // the player (pb) spawns right, the enemy (yb) left.
+        battle.player_spawn_x = 973.0f;
+        battle.player_spawn_y = -110.0f;
+        battle.enemy_spawn_x = 690.0f;
+        battle.enemy_spawn_y = -93.0f;
         // HP: the JS derives max HP from the fighter's `aB` (the saved
         // Health) with the fallback `Zn = aB>0 ? aB : 1` (v.Wka L619). The
         // shipped save has no aB, so the game's own fallback is Zn=1 —

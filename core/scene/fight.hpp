@@ -74,8 +74,8 @@ struct BattleParams {
                               // stages use NO timeout rule — rounds end on KO.
     // Fight-level spawn positions (the game reads location.Yia/B_; the
     // demo supplies the dojo ModelsViewer positions).
-    float player_spawn_x = 690.0f, player_spawn_y = -93.0f;
-    float enemy_spawn_x = 973.0f, enemy_spawn_y = -110.0f;
+    float player_spawn_x = 973.0f, player_spawn_y = -110.0f;
+    float enemy_spawn_x = 690.0f, enemy_spawn_y = -93.0f;
     int max_hp = 100;         // demo HP cap (the game stores HP in the save)
     // Demo damage tuning: the player's UnarmedDamage attr (the JS balance
     // formula: 2^((attr+shift-defense)/10) × base). The shipped warriors

@@ -9,6 +9,7 @@ add_library(sf2_scene STATIC
     fight.cpp
     fighter.cpp
     location_scene.cpp
+    magic_effects.cpp
     model.cpp
     move_def.cpp
     physics.cpp

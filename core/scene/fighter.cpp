@@ -489,6 +489,13 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     if (n == 0) {
         return;
     }
+    // Snapshot this frame's input world-x as the NEXT frame's `ma`-analog
+    // for the MYa/lwa swap check (JS compares stale posed order vs the new
+    // buffer). Updated every sample so prev_x_ always lags one frame.
+    if (pos_.size() == n * 2) {
+        if (prev_x_.size() != n) prev_x_.assign(n, 0.0f);
+        for (std::size_t i = 0; i < n; ++i) prev_x_[i] = pos_[i * 2];
+    }
     const auto& bones = model_.bones;
     const auto& frame_bones = clip.frames[static_cast<std::size_t>(frame)].bones;
     const std::size_t nclip = std::min(frame_bones.size(), n);
@@ -605,20 +612,34 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         pz[i] = bones[i].z - bones[r].z + pz[r];
     }
 
-    // JS mirror swap (Te.Peb L560 -> Ua.Oeb L692): when facing -1 the
-    // buffered clip frames have x negated (Qeb/Neb) and paired _1/_2 bones
-    // swapped. Native mirrors at projection, but also swaps paired bones so
-    // left stays left (otherwise shoulder/leg crossing ~100px, bone mean 140+).
-    if (facing < 0) {
+    // JS mirror swap (Te.Peb L560 -> Te.MYa/lwa -> Ua.Oeb L692): when
+    // facing -1 the buffered clip frames have x negated (Qeb/Neb) and
+    // paired _1/_2 bones are swapped ONLY when the stale world-x order
+    // disagrees with the new buffer order (`lwa`: with facing -1 the
+    // comparison operands are swapped, i.e. fire iff
+    // world-order(a,b) != buffer-order(a,b)). Unconditional swapping
+    // flips already-correct symmetric poses, so the port keeps the
+    // previous sample's world x (`ma` analog) for the check.
+    if (facing < 0 && !mirror_pairs_.empty()) {
+        const bool have_prev = prev_x_.size() == n;
         for (auto& pr : mirror_pairs_) {
             int a = pr.first, b = pr.second;
             if (a < 0 || b < 0) continue;
             std::size_t ua = static_cast<std::size_t>(a);
             std::size_t ub = static_cast<std::size_t>(b);
             if (ua >= n || ub >= n) continue;
-            std::swap(px[ua], px[ub]);
-            std::swap(py[ua], py[ub]);
-            std::swap(pz[ua], pz[ub]);
+            if (ua >= nclip || ub >= nclip) continue;  // order check needs buffer pos
+            bool disagree = true;
+            if (have_prev) {
+                const bool world_ge = prev_x_[ua] >= prev_x_[ub];
+                const bool buf_ge = px[ua] >= px[ub];
+                disagree = (world_ge != buf_ge);
+            }
+            if (disagree) {
+                std::swap(px[ua], px[ub]);
+                std::swap(py[ua], py[ub]);
+                std::swap(pz[ua], pz[ub]);
+            }
         }
     }
 

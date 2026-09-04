@@ -41,9 +41,11 @@
 #include "app/save_system.hpp"
 #include "atlas.hpp"
 #include "audio/audio.hpp"
+#include "audio/special_regen.hpp"
 #include "font.hpp"
 #include "scene/fight.hpp"
 #include "scene/location_scene.hpp"
+#include "scene/magic_effects.hpp"
 #include "scene/model.hpp"
 #include "scene/renderer.hpp"
 #include "scene/sprite.hpp"
@@ -56,6 +58,83 @@ namespace {
 
 constexpr float kViewW = 1280.0f;
 constexpr float kViewH = 720.0f;
+
+// --- HUD HP-bar leak/decay (JS `Br` L2010-2015, Phase 7.3) ---
+// JS `Qyb()` (L2012-2013): damage -> `v5(a, 10)` (instant fill over 10
+// frames) + `g5(a, 30)` (trailing "leak" over 30 frames); heal/new-round ->
+// `zO = 60` (leak hold) + `v5(a, 10)`. `ia()` steps both tweens one frame
+// per tick (`Rnb`/`Jnb`) with `gCa` clamping; `d6a()` (L2015) keeps a minimum
+// show while HP > 0. Reads the existing FightFighter hp/max_hp only (no
+// fight.hpp changes); stepped once per render_impl call (one 60 Hz frame).
+// NOT ported: segment stripes (`b_`, `mO = L5`) and the `Jc.TU` gradient —
+// they need per-fighter segment state from the fight sim (forbidden files
+// this stream); noted in the stream report.
+// Minimum bar show while alive (JS `Jj.jha` from the LifeBarMin config — the
+// exact tuned value is not in the spec excerpts, so this is an
+// approximation flagged for Stream verification).
+constexpr float kLifeBarMinShow = 0.03f;
+
+struct HudBarDecay {
+    float shown() const { return shown_; }
+    float leak() const { return leak_; }
+
+    void retarget(float target) {
+        // JS `gCa` clamp + `d6a` min-show.
+        target = std::clamp(target, 0.0f, 1.0f);
+        if (target > 0.0f && target < kLifeBarMinShow) target = kLifeBarMinShow;
+        if (target < shown_to_ - 0.0005f) {
+            // Damage: instant drops over 10 frames, leak trails over 30.
+            shown_step_ = (target - shown_) / 10.0f;
+            shown_to_ = target;
+            shown_left_ = 10;
+            leak_step_ = (target - leak_) / 30.0f;
+            leak_to_ = target;
+            leak_left_ = 30;
+            hold_ = 0;
+        } else if (target > shown_to_ + 0.0005f) {
+            // Heal / new round: instant rises over 10, leak holds 60 (zO).
+            shown_step_ = (target - shown_) / 10.0f;
+            shown_to_ = target;
+            shown_left_ = 10;
+            hold_ = 60;
+        }
+    }
+
+    void tick() {
+        if (shown_left_ > 0) {
+            shown_ += shown_step_;
+            if (--shown_left_ == 0) shown_ = shown_to_;
+        }
+        if (hold_ > 0) {
+            --hold_;
+        } else if (leak_left_ > 0) {
+            leak_ += leak_step_;
+            if (--leak_left_ == 0) leak_ = leak_to_;
+        }
+    }
+
+private:
+    float shown_ = 1.0f;      // JS `JO` — the instant fill ratio
+    float leak_ = 1.0f;       // JS `oN` — the trailing leak ratio
+    float shown_to_ = 1.0f;   // JS `dC` — instant target
+    float leak_to_ = 1.0f;    // JS `MN` — leak target
+    float shown_step_ = 0.0f;
+    float leak_step_ = 0.0f;
+    int shown_left_ = 0;      // JS `KO` — frames left on the instant tween
+    int leak_left_ = 0;       // JS `pN` — frames left on the leak tween
+    int hold_ = 0;            // JS `zO` — heal hold freezing the leak
+};
+
+HudBarDecay s_hud_player_decay_;
+HudBarDecay s_hud_enemy_decay_;
+
+// Phase 7.2 magic pool + Phase 7.4 regen display copies (presentation only —
+// the fight sim never reads them, so the pose dump is unaffected).
+sf2::scene::MagicEffects s_magic_fx_;
+bool s_magic_fx_seeded_ = false;
+int s_magic_last_phase_ = 0;
+sf2::audio::SpecialMeters s_regen_player_;
+sf2::audio::SpecialMeters s_regen_enemy_;
 
 // The between-rounds HUD "Next" button (JS `vhb` L410 case 1 -> `Z2()`):
 // center + size in screen coords. Drawn only while
@@ -454,6 +533,30 @@ void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& came
         // The spark's world size -> screen px (the same zoom the capsule
         // strokes use); shrink slightly as it fades.
         const float half = p.size * camera.zoom * 0.5f * (0.4f + 0.6f * alpha);
+        if (half < 0.5f) continue;
+        const float verts[] = {
+            sx - half, sy - half, sx + half, sy - half, sx - half, sy + half,
+            sx + half, sy - half, sx + half, sy + half, sx - half, sy + half,
+        };
+        ren.draw_triangles(verts, 6, r, g, b, alpha);
+    }
+}
+
+// Magic containers (JS `Xm`/`cv` L836-839, Phase 7.2): flat tinted quads for
+// each live instance, faded by age/life — the same world->screen path the
+// hit sparks use. Drawn right after the sparks, before the fg floor layers.
+void draw_magic_effects(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
+                        const sf2::scene::MagicEffects& fx) {
+    for (const sf2::scene::MagicInstance& in : fx.live()) {
+        const float alpha = fx.alpha_for(in);
+        if (alpha <= 0.02f) continue;
+        const std::uint32_t color = fx.color_for(in);
+        const float r = static_cast<float>((color >> 16) & 0xFFu) * (1.0f / 255.0f);
+        const float g = static_cast<float>((color >> 8) & 0xFFu) * (1.0f / 255.0f);
+        const float b = static_cast<float>(color & 0xFFu) * (1.0f / 255.0f);
+        const float sx = camera.world_to_screen_x(in.x, 1.0f);
+        const float sy = camera.world_to_screen_y(in.y);
+        const float half = fx.size_for(in) * camera.zoom * 0.5f;
         if (half < 0.5f) continue;
         const float verts[] = {
             sx - half, sy - half, sx + half, sy - half, sx - half, sy + half,
@@ -1539,6 +1642,31 @@ void FightScreen::update_impl(float dt) {
     update_gamepad_input();
     fight_->update(dt);
 
+    // Phase 7.2 + 7.4 display-layer ticks (NO gameplay impact — presentation
+    // copies only; the sim never reads them).
+    // Magic containers (JS `cv.WL()` L839 ticks with `1 / v.on()`; `v.on()`
+    // is not ported, so timescale 1.0): seed the built-in descs once, spawn
+    // the round-intro ring on the phase -> 2 edge, tick every frame.
+    if (!s_magic_fx_seeded_) {
+        s_magic_fx_seeded_ = true;
+        s_magic_fx_.add_default_descs();
+    }
+    const int phase_now = fight_->phase();
+    if (phase_now == 2 && s_magic_last_phase_ != 2) {
+        const float mid_x = (fight_->player().fighter.world_x() +
+                             fight_->enemy().fighter.world_x()) *
+                            0.5f;
+        s_magic_fx_.spawn("round_intro", mid_x, fight_->player().fighter.world_y(), 1);
+    }
+    s_magic_last_phase_ = phase_now;
+    // Special regen display copies (JS `wd.MOa()` L532-533, gated on
+    // `eu == 2` at L499; canonical home is Fighter — see special_regen.hpp).
+    if (sf2::audio::regen_should_tick(phase_now)) {
+        sf2::audio::regen_tick(s_regen_player_, 1.0f);
+        sf2::audio::regen_tick(s_regen_enemy_, 1.0f);
+    }
+    s_magic_fx_.update(1.0f);
+
     // Per-second log.
     if (fight_->frame() / 60 != last_log_frame_) {
         last_log_frame_ = fight_->frame() / 60;
@@ -1752,6 +1880,7 @@ void FightScreen::render_impl(App& app) {
     // fg floor layers (bg -> fighters -> SPARKS -> fg floor — the b615a1bf
     // layer order; the batch preserves submission order).
     draw_hit_sparks(ren, camera, fight_->fx());
+    draw_magic_effects(ren, camera, s_magic_fx_);
 
     // [fix(render): arena layer order] The foreground layers — the ones the
     // params XML places AFTER the ModelsViewer (Type=2) fighter layer: the
@@ -1782,13 +1911,30 @@ void FightScreen::render_impl(App& app) {
                               ? std::clamp(fight_->enemy().hp / fight_->enemy().max_hp, 0.0f, 1.0f)
                               : 0.0f;
 
-    auto draw_hp_bar = [&](float x, float y, float w, float h, float ratio,
-                           const char* fill_frame) {
+    // HP leak/decay (JS `Br.Qyb` L2012-2013): retarget + step the two-layer
+    // bars once per frame, then draw the 30-frame leak UNDER the instant fill.
+    s_hud_player_decay_.retarget(p_ratio);
+    s_hud_enemy_decay_.retarget(e_ratio);
+    s_hud_player_decay_.tick();
+    s_hud_enemy_decay_.tick();
+
+    auto draw_hp_bar = [&](float x, float y, float w, float h, float ratio, float leak_ratio,
+                           const char* fill_frame, const char* leak_frame) {
         // Background: HealthBar_Empty stretched to full width
         if (!app.draw_atlas_rect("HealthBar_Empty", x, y, w, h, 1.0f)) {
             // Fallback flat dark bg
             const float bg[] = {x, y, x + w, y, x, y + h, x + w, y, x + w, y + h, x, y + h};
             ren.draw_triangles(bg, 6, 0.12f, 0.12f, 0.12f, 0.92f);
+        }
+        // Leak layer (JS `EG`: HealthBar_Hit) — the 30-frame trailer, drawn
+        // under the instant fill so only the overhang shows.
+        if (leak_ratio > 0.001f) {
+            const float lw = w * std::clamp(leak_ratio, 0.0f, 1.0f);
+            if (!app.draw_atlas_rect(leak_frame, x, y, lw, h, 1.0f)) {
+                const float lg[] = {x, y, x + lw, y, x, y + h,
+                                    x + lw, y, x + lw, y + h, x, y + h};
+                ren.draw_triangles(lg, 6, 0.95f, 0.85f, 0.45f, 0.85f);
+            }
         }
         if (ratio > 0.001f) {
             const float fw = w * ratio;
@@ -1811,9 +1957,10 @@ void FightScreen::render_impl(App& app) {
         ren.draw_triangles(bot, 6, 0.0f, 0.0f, 0.0f, 0.85f);
     };
 
-    draw_hp_bar(bar_cx_player - bar_w * 0.5f, bar_y, bar_w, bar_h, p_ratio, "HealthBar_Full");
-    draw_hp_bar(bar_cx_enemy - bar_w * 0.5f, bar_y, bar_w, bar_h, e_ratio,
-                "HealthBarBlue_Full");
+    draw_hp_bar(bar_cx_player - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_player_decay_.shown(),
+                s_hud_player_decay_.leak(), "HealthBar_Full", "HealthBar_Hit");
+    draw_hp_bar(bar_cx_enemy - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_enemy_decay_.shown(),
+                s_hud_enemy_decay_.leak(), "HealthBarBlue_Full", "HealthBarBlue_Hit");
 
     // Timer — bitmap-font centered (Sf.layout: top-center). Uses fight/digits.fnt
     // (fallback to ui/font-en). Scale tuned so ~80px glyph -> ~30px on HUD.

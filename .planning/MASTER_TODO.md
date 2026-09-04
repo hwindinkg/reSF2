@@ -107,9 +107,33 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
   intervals → 60Hz confirmed. Regression: `--fight --headless 600` healthy
   (phase 2, AI acts, injected punch lands HighPunch, verify OK),
   `--headless-loop` 13/13 PASS + save/load PASS (both post-change binaries).
-- Phase 4 — Spatial: 4.1 spawn X (phase=1,cf=0: Me x≈972.95, Enemy x≈690 —
-  из oracle_pose); 4.2 per-bone mirror; 4.3 camera zoom. Gate: bone mean<10,
-  facing 0%, dc<5.
+- Phase 4 — Spatial (DONE 2026-09-04, build+13/13 green):
+  - [x] 4.1 spawn X: oracle phase=1,f=0 Me=972.954/-108.114, Enemy=690/-93.
+    Live path (screens.cpp) already correct; fixed stale fallbacks
+    (fight.hpp defaults + fight_controller_demo were mirror-swapped).
+    f=0 identity check: P dx=1.1, E dx=2.9.
+  - [x] 4.2 per-bone mirror: port formula `(px-com)*f+x` PROVEN ≡ JS
+    (negate-buffer-then-shift with COM from negated buffer); PLUS fixed a
+    real bug — swap was unconditional, JS swaps only on order disagreement
+    (`Te.MYa`/`lwa`: world-order vs buffer-order; `prev_x_` kept as
+    `ma`-analog). Skeleton core matches oracle at ~3u.
+  - [x] 4.3 camera: pre-existing full port VERIFIED (Sya/dZa/Al/xCa/Bj,
+    shake); init dcx=0.37, dzoom=0, clip-aligned dcy=3.8.
+  - Directional numbers (settled idle, centered): P(+1)-vs-En 5.02 <10 ✓;
+    E(-1)-vs-mirrored-En 5.95 <10 ✓ (negate path validated on real data).
+    Key insight: align on SETTLED frames (oracle weapon nodes spring-settle
+    cf≈1..10; cf=2 alignment caused the phantom 68-mean).
+  - Gate verdict: PARTIAL PASS — numbers pass but the pre-fixed gate demands
+    `compare_pose.py` on a PAIRED 500-frame round: impossible, scenarios are
+    unpaired (port Training fight vs oracle tutorial; oracle Me is a 15-bone
+    dummy forcing the tool's role-swap; official tool numbers 132/128/104/
+    dcx184 are swap+scenario artifacts, NOT port errors — documented here,
+    criteria NOT lowered). Residuals: head-cloth static ~40x (ragdoll layer),
+    intro cy transient (phase-alignment), cf-phase mismatch.
+  - Phase-6 leads (observed, out of scope): port enemy marches 690→1179
+    (oracle holds 690→615) — AI advance/retreat differs; port enemy ATTACKS
+    in phase 1 (DoublePunch F60-120) while JS gates AI to Je==2 (`Anb`) —
+    real bug lead.
 - Phase 5 — Combat: 5.1 блок (`yD(5)`, L514); 5.2 комбо (`HZa`, L500-501);
   5.3 крит/шок/дизарм. Gate: event-trace match.
 - Phase 6 — AI 1:1 (IN PROGRESS 2026-09-04, static-first):

@@ -20,6 +20,7 @@
 #include "miniaudio.h"
 
 #include "audio/audio.hpp"
+#include "audio/sfx_table.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -34,10 +35,11 @@ namespace sf2::audio {
 
 namespace {
 
-// One event's sample pool. `files` are wav STEM names under the sfx dir:
-// the game's real samples (hit1-6 = punch/weapon impacts, f_pl_/m_pl_jump
-// = the player's jump whooshes, swish* = weapon/body movement for the
-// step/dash, buy = the menu button tick).
+// One event's sample pool. The rows come from the JS `ta.WBa()` table
+// (see audio/sfx_table.hpp): `files` are wav STEM names under the sfx dir,
+// the game's real samples (hit1-6 = punch/weapon impacts, f_pl_/m_pl_* =
+// the fighter voice/jump sets, swish* = weapon/body movement, buy = the
+// menu button tick, magic_* = the spell sets, ...).
 struct EventDef {
     const char* name;                // play("name")
     std::vector<const char*> files;  // candidate wav stems (round-robin)
@@ -45,21 +47,32 @@ struct EventDef {
     int voices = 1;                  // overlapping copies per event
 };
 
-const EventDef kEvents[] = {
-    {"hit", {"hit1", "hit2", "hit3", "hit4", "hit5", "hit6"}, 0.85f, 4},
-    {"jump", {"f_pl_jump1", "f_pl_jump2", "f_pl_jump3", "m_pl_jump1", "m_pl_jump2",
-              "m_pl_jump3"},
-     0.80f, 2},
-    {"step", {"swish1", "swish2", "swish3", "swish4"}, 0.45f, 2},
-    {"click", {"buy"}, 0.55f, 2},
-};
-constexpr int kEventCount = static_cast<int>(sizeof(kEvents) / sizeof(kEvents[0]));
+// The table-driven event list (Phase 7.1): built once from sfx_table.hpp so
+// the JS mapping stays in exactly one place. Stable after construction.
+const std::vector<EventDef>& events() {
+    static const std::vector<EventDef> kBuilt = [] {
+        std::vector<EventDef> out;
+        std::size_t n = 0;
+        const SfxGroup* groups = sfx_groups(n);
+        for (std::size_t g = 0; g < n; ++g) {
+            EventDef e;
+            e.name = groups[g].event;
+            e.files.assign(groups[g].files, groups[g].files + groups[g].count);
+            e.volume = groups[g].volume;
+            e.voices = groups[g].voices;
+            out.push_back(e);
+        }
+        return out;
+    }();
+    return kBuilt;
+}
 
-const EventDef* find_event(const std::string& name) {
-    for (const EventDef& e : kEvents) {
-        if (name == e.name) return &e;
+int find_event_index(const std::string& name) {
+    const std::vector<EventDef>& evs = events();
+    for (std::size_t i = 0; i < evs.size(); ++i) {
+        if (name == evs[i].name) return static_cast<int>(i);
     }
-    return nullptr;
+    return -1;
 }
 
 // First existing candidate directory (see the module comment), else "".
@@ -100,9 +113,10 @@ struct AudioEngine::Impl {
 };
 
 AudioEngine::AudioEngine() : impl_(new Impl()) {
-    impl_->next_voice.assign(kEventCount, 0);
-    impl_->first_logged.assign(kEventCount, 0);
-    impl_->played.assign(kEventCount, 0);
+    const std::size_t n = events().size();
+    impl_->next_voice.assign(n, 0);
+    impl_->first_logged.assign(n, 0);
+    impl_->played.assign(n, 0);
 }
 
 AudioEngine::~AudioEngine() {
@@ -133,9 +147,9 @@ bool AudioEngine::init(const std::string& res_root) {
     const std::string sfx_dir = resolve_sfx_dir(res_root);
     std::size_t loaded = 0;
     std::size_t total = 0;
-    impl_->sounds.assign(kEventCount, {});
-    for (int e = 0; e < kEventCount; ++e) {
-        const EventDef& ev = kEvents[e];
+    impl_->sounds.assign(events().size(), {});
+    for (std::size_t e = 0; e < events().size(); ++e) {
+        const EventDef& ev = events()[e];
         impl_->sounds[e].resize(static_cast<std::size_t>(ev.voices));
         for (int v = 0; v < ev.voices; ++v) {
             ++total;
@@ -188,8 +202,8 @@ bool AudioEngine::init(const std::string& res_root) {
                      sfx_dir.c_str(), impl_->beep_sound_ok ? "OK" : "FAILED");
     }
 
-    std::fprintf(stdout, "[audio] init: sfx_dir='%s' samples=%zu/%zu events=%d\n",
-                 sfx_dir.c_str(), loaded, total, kEventCount);
+    std::fprintf(stdout, "[audio] init: sfx_dir='%s' samples=%zu/%zu events=%zu\n",
+                 sfx_dir.c_str(), loaded, total, events().size());
     std::fflush(stdout);
     enabled_ = impl_->engine_ok;
     return impl_->engine_ok;
@@ -198,14 +212,14 @@ bool AudioEngine::init(const std::string& res_root) {
 void AudioEngine::shutdown() {
     if (impl_ == nullptr) return;
     if (impl_->engine_ok) {
-        std::fprintf(stdout,
-                     "[audio] shutdown: total=%llu hit=%llu jump=%llu step=%llu click=%llu\n",
-                     static_cast<unsigned long long>(played_total_),
-                     static_cast<unsigned long long>(impl_->played[0]),
-                     static_cast<unsigned long long>(impl_->played[1]),
-                     static_cast<unsigned long long>(impl_->played[2]),
-                     static_cast<unsigned long long>(impl_->played[3]));
-        for (int e = 0; e < kEventCount; ++e) {
+        std::fprintf(stdout, "[audio] shutdown: total=%llu",
+                     static_cast<unsigned long long>(played_total_));
+        for (std::size_t e = 0; e < events().size(); ++e) {
+            std::fprintf(stdout, " %s=%llu", events()[e].name,
+                         static_cast<unsigned long long>(impl_->played[e]));
+        }
+        std::fprintf(stdout, "\n");
+        for (std::size_t e = 0; e < impl_->sounds.size(); ++e) {
             for (ma_sound& s : impl_->sounds[e]) {
                 ma_sound_uninit(&s);
             }
@@ -228,22 +242,21 @@ void AudioEngine::shutdown() {
 
 void AudioEngine::play(const std::string& event) {
     ++played_total_;
-    const EventDef* ev = find_event(event);
-    if (ev == nullptr) return;
-
-    const int e = static_cast<int>(ev - kEvents);
+    const int e = find_event_index(event);
+    if (e < 0) return;
+    const EventDef& ev = events()[static_cast<std::size_t>(e)];
     ++impl_->played[static_cast<std::size_t>(e)];
 
     if (!enabled_ || !impl_->engine_ok) return;
 
     // Round-robin over the event's voices: voice v always holds the sample
     // files[v % n], so consecutive plays walk the event's file pool.
-    const int v = impl_->next_voice[e];
-    impl_->next_voice[e] = (v + 1) % ev->voices;
+    const int v = impl_->next_voice[static_cast<std::size_t>(e)];
+    impl_->next_voice[static_cast<std::size_t>(e)] = (v + 1) % ev.voices;
 
     ma_sound* sound = nullptr;
-    if (static_cast<std::size_t>(v) < impl_->sounds[e].size()) {
-        sound = &impl_->sounds[e][static_cast<std::size_t>(v)];
+    if (static_cast<std::size_t>(v) < impl_->sounds[static_cast<std::size_t>(e)].size()) {
+        sound = &impl_->sounds[static_cast<std::size_t>(e)][static_cast<std::size_t>(v)];
     } else if (impl_->beep_sound_ok) {
         sound = &impl_->beep_sound;
     }
@@ -260,17 +273,17 @@ void AudioEngine::play(const std::string& event) {
     if (impl_->first_logged[static_cast<std::size_t>(e)] == 0) {
         impl_->first_logged[static_cast<std::size_t>(e)] = 1;
         const std::size_t fi =
-            static_cast<std::size_t>(v) % ev->files.size();
-        std::fprintf(stdout, "[audio] play '%s' (voice %d -> %s.wav)\n", ev->name, v,
-                     ev->files[fi]);
+            static_cast<std::size_t>(v) % ev.files.size();
+        std::fprintf(stdout, "[audio] play '%s' (voice %d -> %s.wav)\n", ev.name, v,
+                     ev.files[fi]);
         std::fflush(stdout);
     }
 }
 
 std::uint64_t AudioEngine::played(const std::string& event) const {
-    const EventDef* ev = find_event(event);
-    if (ev == nullptr || impl_ == nullptr) return 0;
-    return impl_->played[static_cast<std::size_t>(ev - kEvents)];
+    const int e = find_event_index(event);
+    if (e < 0 || impl_ == nullptr) return 0;
+    return impl_->played[static_cast<std::size_t>(e)];
 }
 
 }  // namespace sf2::audio

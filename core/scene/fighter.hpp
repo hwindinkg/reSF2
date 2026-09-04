@@ -232,6 +232,11 @@ private:
     std::vector<int> nearest_clip_;
     // Paired bones _1 ↔ _2 for mirror swap (JS Te.Peb L560 → Ua.Oeb L692). Built in set_model.
     std::vector<std::pair<int, int>> mirror_pairs_;
+    // Previous sample's world-space x per bone (x only, parallel to `pos_`).
+    // JS `Te.MYa`/`lwa` compares the STALE posed order (`ma`, previous frame)
+    // against the new buffer order to decide the _1/_2 swap — the swap fires
+    // only on disagreement, not on every facing<0 frame.
+    std::vector<float> prev_x_;
     int facing_ = 1;                        // +1 (JS `Te.FX` / `hd()`)
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (COM world pos)
     std::set<std::string> active_intervals_; // active interval names (JS `Te.xj`)
