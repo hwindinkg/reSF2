@@ -316,6 +316,76 @@ formulas transcribed verbatim.
 `Wsb/m$/fe.wqb/Cqb/ZAa/DL` presentation tails (L396-397);
 `Ja.ki(1292)`→file numeric proof (§A8).
 
+### RESOLVED (round 5 research sweep)
+
+- **`Pkb` body (L674-676)**: `M7`-compat filter (`Wcb` pairwise) →
+  `Ts`-entry filter (`nw` with `Fc.xK/Wl/YH`, resize) → `jL` roulette pick
+  → `jJ`-group filter (`ccb`) → recurse `DK(a,d,!0)`. Static; only live
+  anim tables needed (already OPEN as geometry).
+- **`Nsb` body (L681)**: scan `va.p6`, first `Sbb(b)` wins → `fJa(c,d,e,f)`
+  with `VD` flag + `pD`. Static.
+- **`EZa`/`w_a` inputs (L676-677)**: `EZa(model-fighter, Ti-slot, Su.dea
+  anims, index, out-lists)` gated by `!Kbb && OGa(Ob 1..6) && iEa`
+  (L681); builds `Ti{animation,sign,Wl,R1,E_,eb,index,iza}` (L677);
+  `R1=(type==6)`, skips `EAnimationAttack` under BeginnerCheat damage cap
+  (`u4.Uva`, L677). `w_a` mirrors over `JB.sfa`. Static.
+- **`ws` setter source**: `ola(a)` (L493) + clone `ola(a.ws)` (L536) +
+  init `false` (L490); only gameplay caller is the resistance rule
+  (`ola(!b)`, L903). (`De.ws` L852 / `Yn.wsa` L1080 are unrelated fields.)
+- **`Vx.v1` + `Era` scope**: `iu` latch (L489): `wgb()` sets `v1` (via
+  `dca()`, i.e. every unblocked landed hit, L510→L531), `wyb()` counts
+  `OV` vs `pCa()=Lpa=Combo.Time=90` with `Jt` event; `JCa()=lb?lb.JCa():
+  Vx.v1` (L525). `Era`: init 0 (L490), `++` only (L510), read as `r0a`
+  (L510/L543), **never reset ⇒ fight-scoped**.
+- **`Dga` per-round CONFIRMED**: only 4 sites — init `false` (L380),
+  `ep` read (L394), latch on unblocked hit (L395), round reset (L409).
+  No per-exchange reset exists.
+- **`Wsb`/`ZAa`/`DL` tails**: `de.Wsb(a){OO=dBa(a)}` (L597, weapon-equip
+  mapping; call site `nf.Wsb(Yb)` L528); `ZAa(a,b,c)` scans `wDa.sda`
+  for Shock/CriticalHit/HeadHit, else null (L422); `DL(a)` latches
+  `hw/U1/N3/YIa` slow-mo + `gh(0)` (L370).
+- **`atk.so=1.0`**: `wd` ctor default `so=1` (L490); `TT(a)` setter (L494);
+  set from moveset `AP` at spawn/clone (`TT(vo.AP)`, `TT(Pm.AP)` L402;
+  `TT(a.so)` L536). No other writers.
+- **`RJa` stream-merge**: `uf.OKa=new at` (L2471), `at.RGa→Math.random`
+  (L114-115) — `RJa/sja` draw from Math.random, **never touch `Da.pg`**;
+  the `Da/Rk` stream (L2352-2353) is separate. No merge.
+- **`pga` setter**: only debug cheat `case 22` (L438) + init `false`
+  (L490). No gameplay setter exists.
+- **`Jj.jha` LifeBarMin exact**: `Jj.parse` reads `GUI/Fight/LifeBarMin`
+  (L1278-1279); default `0` (L2481); XML value **`0.01`**
+  (`internal_settings.xml`); use `d6a` display floor (L2015).
+- **Segment stripes `b_`/`mO`**: `Br` HP-bar segmentation (L2011/2013):
+  `mO=Ca.L5` segments, `$G=max(1,gd)`,
+  `b_(a)=clamp(a/$G+1, 1, mO)` with exact-division decrement; `oMa`
+  toggles stripe visibility.
+- **`Ja.ki(1292)`→file PROOF**: `G.rq="...".split(" ")` (L2490 tail) is a
+  1357-entry manifest (`G.Sra=1357`); `G.bg(a)=G.rq[a]` (L2393).
+  Index map: **1292→internal_settings.xml**, 9→users_default.xml,
+  272→tactic_settings.xml, 273→stages.xml, 310→perks.xml (closes
+  PERKS_STATIC OPEN #1), 818→list.xml, 1314→computer_settings.xml,
+  1315→character_progress.xml, 392/393→magic_ktx/dds.dat,
+  394-551→`magic/mgc_*` png+json pairs, 313→moves.xml.
+- **`bzb` arithmetic (for Stream 1)**: `hp.bzb(prize,coins,gems,$Ia,ep,
+  Ui,Ub,pk)` → `Ee(=Fh).lXa` (L1239-1241; no-op when `Ee==null`):
+  `Rva+=prize; PY+=Vk(coins); OY+=gems;
+  P3+=Vk(ceil(prize*$Ia)*d6+.5); ep+=Vk(ceil(prize*ep)*c6+.5);
+  Ui+=Vk(ceil(prize*Ui)+.5)*jU; DZ+=Vk(ceil(prize*pk[b6])+.5);
+  Ub+=Vk(ceil(prize*Ub)*e6+.5); m6=PY+P3+ep+Ui+DZ+Ub; mOa=OY`
+  (L2054-2055; `Kx` fields L2056; `Vk`=ceil(/10^kq) L1221;
+  styles `EAa(b6)` L2055-2056); `hj.Tb=m6, hj.Uo=mOa` (`M5a/N5a`, L1241).
+
+### OPEN-KEPT (round 5)
+
+- `Bz` per-frame values + `Pkb/Nsb/jJa/Ukb` live anim data (bodies above
+  are static; need runtime tables).
+- `StartingBullets` literal: **0 JS refs** (`RangedQuantity` also 0);
+  `StartingMagic` attr is read-but-unused (L1156). `dO` inits 0 (L490),
+  `+=` via `vZa` (L525, perk path L519). Initial ranged ammo source needs
+  a live/item trace to close.
+- v7 `aU` merges/`DFa` sets: framing static (`DFa/Gdb/gkb/xea` L635,
+  `cxb` b==7 branch L654); live merge effect needs a runtime trace.
+
 ### APPENDIX B — magic / charge-bar data locations
 
 Verdict: Stream 3 is confirmed — **no `magic/*.json` ships under

@@ -276,6 +276,24 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
     bug (asserted decode(export()) round-trip; export wraps raw XML while
     decode expects compressed payloads — asymmetric by spec). Fixed test:
     SAVE_UNIT PASS (all new fields + envelope + export shape).
+- Phase 7d - Prize completion + music (DONE 2026-09-04, build + goldens
+  + 13/13 green):
+  - Prize: `gems_bonus` (`hj.Uo`) field flows end-to-end (always 0 — no
+    fight gem source evidenced; applied to Bonus); `prize_coins_bonus()`
+    free fn + S13 golden (Node prizeCoins vs C++, 0 divs); style stays 0
+    (Gr stats unported); base scaling xya/bm OPEN (D0 tables unparsed —
+    port applies factors onto battle base reward).
+  - Music streaming: `AudioEngine::play_music/stop_music` (disk-streamed
+    mp3, looped, same-track no-op, headless-safe counting); Dojo -> `menu`,
+    fights -> stages.xml Battle Music (`fight1_samurai_spirit` verified
+    live on Bosses), battles without Music keep current (Training dummy),
+    Results stops (no stinger files on disk — documented approximation).
+    www/res ogg/m4a NOT wired (no AAC decoder). Loop log: menu, fight1,
+    stop, music=2, zero load failures.
+  - Ju-horizon cost note (NOT started): parser flattens Hu frames into
+    per-row outcome lists (ai.cpp); the `b=Fl+b` horizon needs
+    Hu-frame-indexed outcomes (Il/Ju/Gu model) = parser + TacticRow surgery
+    + xaa rewire + re-golden. Half-turn job, queued behind Gr-style work.
 - Phase 7c - Rewards after battle (DONE 2026-09-04):
   - Prize stats in apply_hit (combo/shocks/first-striker),
     `BattlePrize::prize()` (Perfect 5 / FirstStrike 2 / Combo 1 / Shock 3 /

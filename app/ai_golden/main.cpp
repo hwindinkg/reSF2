@@ -22,6 +22,7 @@
 #include "scene/ai.hpp"
 #include "scene/combat_decide.hpp"
 #include "scene/damage.hpp"
+#include "scene/fight.hpp"
 #include "scene/move_def.hpp"
 #include "codec.hpp"
 #include "zstd_stream.hpp"
@@ -317,6 +318,11 @@ int main() {
         std::printf("  \"dk12_ukb\": [[\"%s\"]],\n", rec12.ukb[0].c_str());
         std::printf("  \"dk12_zy\": [\"%s\", %d],\n",
                     rec12.zy.c_str(), rec12.jza);
+        // S13 prize-bonus arithmetic (mirrors combat_golden.js prizeCoins).
+        std::printf("  \"prize\": {\"zeros\": %d, \"full\": %d, \"style\": %d},\n",
+                    sf2::scene::prize_coins_bonus(false, false, 0, 0, 0),
+                    sf2::scene::prize_coins_bonus(true, true, 4, 2, 0),
+                    sf2::scene::prize_coins_bonus(false, false, 0, 0, 15));
         // S6: Wx=5 fires wqb on the 6th tick, Wx ends -1.
         sf2::scene::ShockState st6;
         st6.weapon_wx = 5;

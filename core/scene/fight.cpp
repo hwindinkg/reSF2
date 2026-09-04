@@ -944,8 +944,9 @@ FightController::BattlePrize FightController::prize() const {
     p.max_combo = player_.max_combo;
     p.shocks = player_.shocks_dealt;
     p.style_value = 0;  // style untracked -> Turtle 0 (OPEN)
-    p.coins_bonus = (p.perfect ? 5 : 0) + (p.first_strike ? 2 : 0) +
-                    p.max_combo * 1 + p.shocks * 3 + p.style_value;
+    p.coins_bonus = prize_coins_bonus(p.perfect, p.first_strike, p.max_combo,
+                                      p.shocks, p.style_value);
+    p.gems_bonus = 0;  // `hj.Uo`: no evidenced fight source
     return p;
 }
 

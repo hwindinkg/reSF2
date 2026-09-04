@@ -110,6 +110,11 @@ struct AudioEngine::Impl {
     bool beep_ok = false;
     ma_sound beep_sound{};
     bool beep_sound_ok = false;
+    // Streaming music (JS `ta.Ut`): one streamed slot, looped.
+    ma_sound music{};
+    bool music_ok = false;
+    std::string music_current;
+    std::uint64_t music_plays = 0;
 };
 
 AudioEngine::AudioEngine() : impl_(new Impl()) {
@@ -218,13 +223,20 @@ void AudioEngine::shutdown() {
             std::fprintf(stdout, " %s=%llu", events()[e].name,
                          static_cast<unsigned long long>(impl_->played[e]));
         }
-        std::fprintf(stdout, "\n");
+        std::fprintf(stdout, " music=%llu\n",
+                     static_cast<unsigned long long>(impl_->music_plays));
         for (std::size_t e = 0; e < impl_->sounds.size(); ++e) {
             for (ma_sound& s : impl_->sounds[e]) {
                 ma_sound_uninit(&s);
             }
         }
         impl_->sounds.clear();
+        if (impl_->music_ok) {
+            ma_sound_stop(&impl_->music);
+            ma_sound_uninit(&impl_->music);
+            impl_->music_ok = false;
+            impl_->music_current.clear();
+        }
         if (impl_->beep_sound_ok) {
             ma_sound_uninit(&impl_->beep_sound);
             impl_->beep_sound_ok = false;
@@ -284,6 +296,61 @@ std::uint64_t AudioEngine::played(const std::string& event) const {
     const int e = find_event_index(event);
     if (e < 0 || impl_ == nullptr) return 0;
     return impl_->played[static_cast<std::size_t>(e)];
+}
+
+void AudioEngine::play_music(const std::string& track) {
+    if (impl_ == nullptr || track.empty()) return;
+    ++impl_->music_plays;
+    if (impl_->music_ok && impl_->music_current == track &&
+        ma_sound_is_playing(&impl_->music)) {
+        return;  // same track already playing
+    }
+    std::fprintf(stdout, "[music] play '%s'\n", track.c_str());
+    std::fflush(stdout);
+    if (!impl_->engine_ok) return;  // counted + logged, silent headless
+    if (impl_->music_ok) {
+        ma_sound_stop(&impl_->music);
+        ma_sound_uninit(&impl_->music);
+        impl_->music_ok = false;
+    }
+    const std::string path = std::string("assets/music/") + track + ".mp3";
+    const ma_result r = ma_sound_init_from_file(
+        &impl_->engine, path.c_str(),
+        MA_SOUND_FLAG_STREAM | MA_SOUND_FLAG_ASYNC | MA_SOUND_FLAG_NO_PITCH |
+            MA_SOUND_FLAG_NO_SPATIALIZATION,
+        NULL, NULL, &impl_->music);
+    if (r != MA_SUCCESS) {
+        std::fprintf(stderr, "[music] load failed: %s (%d)\n", path.c_str(),
+                     static_cast<int>(r));
+        return;
+    }
+    impl_->music_ok = true;
+    impl_->music_current = track;
+    ma_sound_set_volume(&impl_->music, 0.7f);
+    ma_sound_set_looping(&impl_->music, MA_TRUE);
+    ma_sound_start(&impl_->music);
+}
+
+void AudioEngine::stop_music() {
+    if (impl_ == nullptr) return;
+    if (impl_->music_ok) {
+        ma_sound_stop(&impl_->music);
+        ma_sound_uninit(&impl_->music);
+        impl_->music_ok = false;
+        impl_->music_current.clear();
+        std::fprintf(stdout, "[music] stop\n");
+        std::fflush(stdout);
+    }
+}
+
+std::string AudioEngine::music_track() const {
+    if (impl_ == nullptr) return {};
+    return impl_->music_ok ? impl_->music_current : std::string();
+}
+
+std::uint64_t AudioEngine::music_plays() const {
+    if (impl_ == nullptr) return 0;
+    return impl_->music_plays;
 }
 
 }  // namespace sf2::audio

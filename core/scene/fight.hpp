@@ -432,6 +432,8 @@ public:
     // Perfect $Ia=5, FirstStrike ep=2, ComboCount Ui=1, Shock Ub=3,
     // Styles pk (Turtle 0 .. Fantastic 15; port: style untracked -> 0).
     // The exact combination arithmetic inside `bzb` is OPEN; additive.
+    // `gems_bonus` (JS `hj.Uo`) has no evidenced fight source (Bonus stays
+    // save-driven) — carried as 0 and applied to `w.bonus`.
     struct BattlePrize {
         bool perfect = false;      // player took no hits
         bool first_strike = false;  // player landed the battle's first hit
@@ -439,6 +441,7 @@ public:
         int shocks = 0;            // player's shock hits
         int style_value = 0;       // style factor (untracked -> Turtle 0)
         int coins_bonus = 0;       // perfect*5 + first*2 + combo*1 + shocks*3
+        int gems_bonus = 0;        // `hj.Uo` (no fight source evidenced)
     };
     BattlePrize prize() const;
     int phase() const { return static_cast<int>(phase_); }
@@ -595,5 +598,16 @@ private:
     // The HUD countdown seconds (JS Sf.iPa: gma - round.time).
     int hud_timer() const;
 };
+
+// Prize-bonus arithmetic (JS `bzb` factor application, FLOW_STATIC 4.3).
+// Free function so the combat golden pins it directly (S13); `prize()`
+// feeds it the tracked stats. Base scaling (`xya=0.003`, level-scaled
+// `bm` via `D0` tables) is OPEN - the port applies factors onto the
+// battle's base reward instead.
+inline int prize_coins_bonus(bool perfect, bool first_strike, int max_combo,
+                             int shocks, int style_value) {
+    return (perfect ? 5 : 0) + (first_strike ? 2 : 0) + max_combo * 1 +
+           shocks * 3 + style_value;
+}
 
 } // namespace sf2::scene

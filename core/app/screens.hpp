@@ -95,9 +95,13 @@ private:
     // the save's Tutorial field + the last Training result).
     std::string tutorial_ = "MOVE";
     std::string story_step_;  // _$StoryTutorialStep (landed save API, L105)
+    std::string map_focus_;   // save MapFocus/ys (landed; feeds boss_focus)
+    std::vector<std::string> battles_;  // save Battles/iF (landed; WDa/wins)
     int level_ = 1;
     int quest_logged_ = -1;
     bool training_won_ = false;
+    int seen_money_ = -1;  // last logged money (snapshot change detection)
+    bool result_synced_ = false;  // save re-read after the last battle result
     // Disciple sparring toggle (JS `Nfb`): session-local STUB until the save
     // carries Disciple/Y0 (see report) — flips display state only.
     bool disciple_ = false;

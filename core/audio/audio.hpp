@@ -57,6 +57,16 @@ public:
     // off) so the headless log proves the integration: played("hit") > 0.
     void play(const std::string& event);
 
+    // Music streaming (JS `ta.Ut` L1264-1265): `assets/music/<name>.mp3`
+    // streamed from disk (never fully preloaded), looped. Same-track
+    // re-play is a no-op. Silent no-op when the engine is off or the file
+    // is missing (headless-safe); every call is counted + logged.
+    // NOTE: www/res ogg/m4a are NOT wired (miniaudio has no AAC decoder).
+    void play_music(const std::string& track);
+    void stop_music();
+    std::string music_track() const;
+    std::uint64_t music_plays() const;
+
     // Diagnostics (headless verification).
     std::uint64_t played_total() const { return played_total_; }
     std::uint64_t played(const std::string& event) const;

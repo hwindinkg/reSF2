@@ -23,17 +23,19 @@
 //  13  StoryTutorialOpenScene     delayed NextScene opens (SenseiDialogText)
 //
 // Display-only derivation. THE swap point is `quest_state_for()`: the save
-// now carries `story_step()` (WarriorSave L105, `_$StoryTutorialStep`) and
-// it flows straight into QuestState, so the full table serves as soon as a
-// quest action writes a step. Still missing (same header, bodies unchanged
-// when they land): quest-var/battle-win feeds for `boss_focus`/`block_lesson`
-// (`map_focus`/ys, Battles/iF wins), `disciple`/Y0 (Dojo toggle).
+// now carries `story_step()` (WarriorSave L105, `_$StoryTutorialStep`),
+// `map_focus` (ys), `battles` (iF) and `variables` (rv) — all flow into
+// QuestState, so beats 1–7 and 9 serve live. Still stubbed: `block_lesson`
+// (beat 8) — no quest-var name landed in context; expected symbol is a
+// `variables[...]` read beside `Fo` (one line when known).
 //
 // line1 comes from the runtime lang table (`lang_table.hpp`) with the
 // verified EN embedded as fallback (titles in en.af2d6604.xml); line2 is
 // shell-authored chrome (EN only). No save writes, ever.
 
+#include <map>
 #include <string>
+#include <vector>
 
 #include "app/lang_table.hpp"
 
@@ -51,24 +53,45 @@ struct QuestStep {
 // What the shell knows about quest progress (grows when the save API lands).
 struct QuestState {
     std::string tutorial = "MOVE";  // WarriorSave.tutorial (readable today)
-    std::string story_step;         // _$StoryTutorialStep — "" = unknown yet
+    std::string story_step;         // _$StoryTutorialStep - "" = unknown yet
     bool training_won = false;      // session Training victory (readable today)
     bool boss_focus = false;        // MapFocus on BOSS_LYNX (needs save ys)
     bool block_lesson = false;      // mid SHOW_BLOCK beat (needs quest vars)
     int level = 1;                  // WarriorSave.level (readable today)
+    // Landed feeds (kept for traceability of the derivation):
+    std::string map_focus;                       // save MapFocus/ys
+    std::vector<std::string> battles;            // save Battles/iF names
+    std::map<std::string, std::string> variables;  // save quest vars (rv)
 };
 
-// THE swap point (see file comment): builds QuestState from shell-readable
-// inputs. `story_step` now passes the landed save field through
-// (WarriorSave::story_step L105); `boss_focus`/`block_lesson` still await
-// `map_focus` and quest-var reads - callers unchanged when they land.
+// THE swap point: builds QuestState from shell-readable inputs. Landed and
+// wired: `story_step` (WarriorSave::story_step), `map_focus` (ys —
+// `boss_focus` when it names BOSS_LYNX, cf. `qo` L1086), `battles` (iF — a
+// recorded "Training" win counts as training_won persistently, beyond the
+// session pending flag). Still stubbed: `block_lesson` — FLOW_STATIC row 12
+// shows the `Fo` beat as unconditional, and no Stream-2 quest-var name for
+// its mid-beat landed in context; expected symbol is a quest variable read
+// beside `Fo` (e.g. `variables["<ShowBlock-beat>"]`) — one line when known.
 inline QuestState quest_state_for(const std::string& tutorial, const std::string& story_step,
-                                  bool training_won, int level) {
+                                  bool training_won, int level,
+                                  const std::string& map_focus,
+                                  const std::vector<std::string>& battles,
+                                  const std::map<std::string, std::string>& variables) {
     QuestState st;
     st.tutorial = tutorial;
     st.story_step = story_step;
     st.training_won = training_won;
     st.level = level;
+    st.map_focus = map_focus;
+    st.battles = battles;
+    st.variables = variables;
+    if (map_focus.find("BOSS_LYNX") != std::string::npos) st.boss_focus = true;
+    for (const std::string& b : battles) {
+        if (b == "Training") {
+            st.training_won = true;
+            break;
+        }
+    }
     return st;
 }
 
@@ -151,7 +174,8 @@ inline QuestStep quest_step_for_state(const std::string& res_root, const QuestSt
 // Compat wrapper (legacy 3-step inputs; res_root added for lang lookup).
 inline QuestStep quest_step_for(const std::string& res_root, const std::string& tutorial,
                                 bool training_won) {
-    return quest_step_for_state(res_root, quest_state_for(tutorial, "", training_won, 1));
+    return quest_step_for_state(
+        res_root, quest_state_for(tutorial, "", training_won, 1, "", {}, {}));
 }
 
 } // namespace sf2::app

@@ -320,3 +320,107 @@ effects (L1202); `zia` next-foe select; `Yxa/S6a/mgb` presentation.
 5. Multi-slot/launch-index/timer countdown persistence (L200, L250).
 6. `qe` widget pointer/loading behavior; `Vr` fling physics constants
    (L2117-2121, L2140-2144).
+
+---
+
+## RESOLVED (round 5 research sweep)
+
+### R1. `block_lesson` var (Stream 3 quest beat 8) — RESOLVED: no such var
+
+`block_lesson`/`BlockLesson`/`lesson` have **0 hits** in JS and 0 in
+`tutorial_quests.xml`/`quests.xml` (only `fight21_lesson_in_the_dark_room`
+music ids, L1275/stages.xml). There is no lesson variable. Beat 8 in file
+order = **`StoryTutorialGoToDojo`** (`SHOW_DOUBLE_SWEEP`, `SceneTo!=Dojo`,
+`SceneFrom∉{None,Loader}`); its only vars are
+`SenseiDialogText=tutorial_dojo_new_move` + `NextScene=Dojo` (+ `Activate
+StoryTutorialOpenScene`). The block lesson beat = `StoryTutorialShowBlock`
+(beat 12: step `SHOW_BLOCK` + `SceneTo==Profile` → step `END`); its action
+`Fo` (L1126-1127) shows the profile-moves overlay and sets **no vars**.
+
+### R2. `Yb` modal / `Wait` gating + `Activate` delay — RESOLVED (static)
+
+- `Yb` (L954): strict sequential chain (`Vl` push, `S` run, `gf` advance on
+  `qd` event). No branching — order is static.
+- `Wait` = `Ro` (L1113-1114): `Frames` + `ControlsLock` attrs; counts `hc`
+  per-frame ticks (`L.K.Oh.ci(nr)`), locks touches (`Sb.F().kk(!0)` +
+  `za.enabled=!1`) while waiting, unlocks at `hc>=Oqa`.
+- `Activate` = `Ge` (L1023-1024): `ActionID→Goa`; `S` fires
+  `RA("QUEST_EVENT_ACTIVATE")` synchronously (`Ge.MZ` set/clear around it).
+  `EActivateTimer` = `yj` (L1024-1025): named save-timer set/cancel
+  (`yl.Uaa/H4`, `RN` EndTimer L1069).
+- `DelayBeforeOpenScene` (tutorial `30`): **0 JS hits** — consumed
+  quest-side via `_$DelayBeforeOpenScene` expressions in the
+  `StoryTutorialOpenScene` template. OPEN-KEPT only for live modal stacking
+  (`Sb.F().kk` queue behavior under overlapping dialogs).
+
+### R3. `hl` progress flags — RESOLVED (L276-279)
+
+`hl` ctor: `Ak` battle id (`hb`), `zo` Locked, `d9` Hidden, `UV/VV`+
+`fv/Qm` random seeds, `D9` EndTime, `zH` ReplayCount, `Sqa` Fight flag.
+Writers (all static): `uMa` rename, `CMa` lock-set, `gx` hide-set,
+`yla` replay-set, `wla/vla` seeds, `l$a` EndTime-now (`D9-p.Dc`,
+`debugger`-guarded), `P9a` seed query. `Iaa` (L260-261) drives
+`uMa/CMa/gx/yla`; `Lc.hMa` records win/loss (L1406). OPEN-KEPT only for
+live win/loss sequencing across replayable replays.
+
+### R4. `Gb` periodic timers + `il`/`Ct` persistence — RESOLVED (static)
+
+- `il` fight record (L279-282): `yG` IDS, `no` CompletedCount (`ptb`
+  reset), `FW` LossCount, `eN/uqa` eclipse variants (`ytb/Gab/Hab`),
+  `Gs` TimeLeft (`Cla` write), `wH` RandomizeTimeLeft (`xla`),
+  `ZB` Level (`xL`), seeds.
+- `Gb extends Lc` (L1409-1411): `setTime/Tma` (Cla now + save),
+  `sob` (sweep all to played), `cla` (static fan-out), `reset/Vab`
+  (zero + `JMa(0)`), `update` (Tma tick), `hMa` (win record).
+- `Ct` save timers (L291): `Uaa/BXa/bva` set, `gJ` get, `H4` clear,
+  persisted under `<Timers>` (L250).
+- Launch/slots (L199-200): `GameLaunchIndex` read-increment-writeback;
+  slot select by `SaveSlot+ID` skipping `IsFake`; `zkb` stamps
+  `SaveSlot=tT`; `Tmb` strips Token/UseNewHash. OPEN-KEPT only for the live
+  tick driver (who calls `Gb.update` per frame) and slot-switch UI.
+
+### R5. `D0` / `bm` / `Ee.oc` / `wi` — RESOLVED (exact lines for Stream 1)
+
+- `fight.D0(a)` (L1420): `wi[a]` by PU index (`Clb` pushes sub-fights;
+  `wi` = `Lc.wi`).
+- `wt.D0()` (L232-233): weighted draw over `U7` weights via `Da.pg.dT`
+  (`xt`: Item→`Zg`/Money→`Di`/Currency→`Ei`/Resistance→`Fi`/Lottery→`Gi`).
+- `eg.bm(level)` (L230-231): merge `npa` + `Msa` level ranges → `Yg`
+  (`Tb/Uo/exp/ph×10^digits`, `P2/Ok/yr` sublists, L240-241);
+  `tt.bm` picks Normal/Eclipse branch (L231).
+- `hp.Ee` = `Fh` fight context (L1239-1241: `Sua` sets `Ee=c`; `bzb`
+  no-ops when null). `bzb(a..h)` → `Ee.lXa` — see COMBAT_STATIC App. B
+  `bzb` entry for the full arithmetic.
+- `$L` (L1425): last-`wi` margins (`h4/g4` coin/gem).
+
+### R6. `qe` / `Vr` constants — RESOLVED (L2117-2124, L2140-2141, L2488)
+
+`Vr.qF` scroll-to (`ub=0`, ease `sLa=.1/(dur/.6)`); fling friction
+`ub*=.9` (L2120); state machine 0 idle / 1 drag (`Kx` 10px threshold) /
+2 snap (`GR` lerp .3); clamp `[size-b+100, 0]` + overshoot 100 (L2120-2121);
+`cCa` content width (`background.fa.x` sum, L2123); `HXa` skip-`yR` +
+skip all-inactive (L2124); `sY` single-widget `Cga` on `Map1.2` (L2122);
+`qe.uM=1.5003663003663004` (L2488); `qe.Bd/zQ/GT/$Va` (L2140-2141).
+OPEN-KEPT only for live pointer positions (inherent runtime input).
+
+### R7. `.sf2` export join — RESOLVED: no separator (L72-73, L2333)
+
+`Dpb`: `Ug` frames `ke(len)+yna(bytes)` × (users, packs) + `$p` flag bits
+(H1/VF), base64'd with `"SF2"` prefix. `ke` = u32 LE/BE (L2333);
+`yna` = zstd-compress (`kb.f3`). Import `Ddb` reads `Yt(ti)` chunks
+(L71-72). Join = length-prefixed frames, no text separator.
+
+### R8. `Wins` / `Count` attrs — RESOLVED: don't exist
+
+0 hits in JS, `stages.xml`, `quests.xml`, `tutorial_quests.xml`. The
+win/loss counters are `il.no` = `CompletedCount` (`ptb` reset) and `il.FW`
+= `LossCount`, plus `eN/uqa` eclipse variants (L280-282). If Stream 1 meant
+other attrs, cite the exact file — no further static candidate exists.
+
+### OPEN-KEPT (round 5)
+
+- `Bz` per-frame segment values: formulas static (COMBAT_STATIC §A9);
+  needs a runtime trace of `Nl.oI` (`Ula/Pda/gb/Eda/vZ`) per frame +
+  `zXa` hit points to close.
+- `Gb.update` live driver + slot-switch UI (R4); modal-stack dynamics (R2);
+  replayable win/loss sequencing (R3).

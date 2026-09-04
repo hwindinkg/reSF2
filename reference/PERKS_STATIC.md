@@ -96,7 +96,8 @@ Minified names: `Be` perk def (L1328-1349), `dw`/`v.Rg` perk registry
 
 ## OPEN (needs runtime trace)
 
-1. `Ja.ki(310)` → file proof (§1).
+1. `Ja.ki(310)` → file proof (§1): RESOLVED (round 5) — `G.rq` manifest
+   order = asset ids (COMBAT_STATIC App. B): **310→perks.xml**.
 2. `Kw.c8a` live fire order + `ModAttributes Frames` countdown/`ModExpires`
    lifecycle; `MarkPerkAsUsed` semantics.
 3. `Pma/Wk` rebuild timing vs `BD` (owned vs catalog races on buy/equip).

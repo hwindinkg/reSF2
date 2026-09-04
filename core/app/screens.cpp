@@ -627,6 +627,34 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
     return out;
 }
 
+// The battle's music track (stages.xml Battle Music="fightN_..." attr;
+// JS `ta.Ut(this.Da.tp)`, L2008). Empty when the battle has none (the
+// Training dummy) — the caller then keeps the current track.
+void battle_music(const std::string& battle_name, std::string& out_track) {
+    out_track.clear();
+    try {
+        sf2::data::xml_doc doc;
+        const std::string path = "reference/extracted/xml/res/stages.xml";
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return;
+        for (const pugi::xml_node zone : root.child("Zones").children("Zone")) {
+            for (const pugi::xml_node battle : zone.children("Battle")) {
+                if (std::string(battle.attribute("Name").value()) != battle_name) continue;
+                if (battle.attribute("Music")) {
+                    out_track = battle.attribute("Music").value();
+                }
+                return;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+}
+
 // The reward of a battle's first non-zero <Reward> (JS `tt.bm` L116924).
 void battle_rewards(const std::string& battle_name, int& out_money, int& out_exp) {
     out_money = 0;
@@ -1077,6 +1105,8 @@ void draw_punchbag(sf2::render::Renderer& ren, const sf2::render::Camera& camera
 }
 
 DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
+    // Menu music (JS `lb.OS` -> `ta.Ut("menu")`, L1276-1277).
+    sf2::audio::AudioEngine::instance().play_music("menu");
     const float bw = 240.0f;
     const float bh = 120.0f;
     const float y = kViewH * 0.72f;
@@ -1108,18 +1138,27 @@ void DojoScreen::update_impl(float dt) {
     (void)dt;
     idle_frame_++;  // drives the idle-stance frame cycle (display only)
     ensure_lang(app());  // runtime Sensei lines (once; silent if absent)
-    if (!money_logged_) {
-        money_logged_ = true;
-        try {
-            const WarriorSave w = app().save().load();
-            tutorial_ = w.tutorial;
-            story_step_ = w.story_step();
-            level_ = w.level;
-            std::fprintf(stdout, "[dojo] MONEY %d   LV %d   POWER %d   WEAPON %s   ARMOR %s   HELM %s   TUTORIAL %s\n",
+    // Quest/save snapshot, re-read every fixed step like ShopScreen's money
+    // watch: the Dojo stays mounted under Fight/Results/Shop, so cached
+    // fields would go stale after wins/buys (e.g. the shop buy writing step
+    // MAP must flip the banner on return). Read-only; failures log once.
+    try {
+        const WarriorSave w = app().save().load();
+        if (!money_logged_ || w.money != seen_money_) {
+            money_logged_ = true;
+            seen_money_ = w.money;
+            std::fprintf(stdout, "[dojo] MONEY %d   LV %d   POWER %d   WEAPON %s   ARMOR %s   HELM %s   TUTORIAL %s STEP %s\n",
                          w.money, w.level, w.power, w.weapon.c_str(), w.armor.c_str(),
-                         w.helm.c_str(), w.tutorial.c_str());
+                         w.helm.c_str(), w.tutorial.c_str(), w.story_step().c_str());
             std::fflush(stdout);
-        } catch (const std::exception& e) {
+        }
+        tutorial_ = w.tutorial;
+        story_step_ = w.story_step();
+        map_focus_ = w.map_focus;
+        battles_ = w.battles;
+        level_ = w.level;
+    } catch (const std::exception& e) {
+        if (!money_logged_) {
             std::fprintf(stderr, "[dojo] save read failed: %s\n", e.what());
         }
     }
@@ -1132,7 +1171,9 @@ void DojoScreen::update_impl(float dt) {
             training_won_ = true;
         }
         const QuestStep qs = quest_step_for_state(
-            app().res_root(), quest_state_for(tutorial_, story_step_, training_won_, level_));
+            app().res_root(),
+            quest_state_for(tutorial_, story_step_, training_won_, level_, map_focus_,
+                            battles_, {}));
         if (qs.id != quest_logged_) {
             quest_logged_ = qs.id;
             std::fprintf(stdout, "[quest] step %d (%s) -> %s\n", qs.id, qs.speaker.c_str(),
@@ -1266,7 +1307,9 @@ void DojoScreen::render_impl(App& app) {
         }
         // Sensei hint panel (quest_panel.hpp — the tutorial quest banner).
         const QuestStep qs = quest_step_for_state(
-            app.res_root(), quest_state_for(tutorial_, story_step_, training_won_, level_));
+            app.res_root(),
+            quest_state_for(tutorial_, story_step_, training_won_, level_, map_focus_,
+                            battles_, {}));
         const float pw = 780.0f, ph = 64.0f, px = kViewW * 0.5f - pw * 0.5f;
         const float py = 84.0f;
         const float panel[] = {px, py, px + pw, py, px, py + ph,
@@ -1310,34 +1353,57 @@ void DojoScreen::render_impl(App& app) {
 
 MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
     zones_ = load_zone_map(kViewW, kViewH);
-    // The current zone from the save (JS `xf.ro` / CurrentZone, L248).
+    // The current zone from the save (JS `xf.ro` / CurrentZone, L248) plus
+    // the battle records (iF) and MapFocus (ys) for the live rules below.
     std::string cur = "ZONE_1";
+    std::string focus;
+    WarriorSave map_save;
     try {
-        const std::string saved = app().save().load().current_zone;
-        if (!saved.empty()) cur = saved;
+        map_save = app().save().load();
+        if (!map_save.current_zone.empty()) cur = map_save.current_zone;
+        focus = map_save.map_focus;
     } catch (const std::exception&) {
     }
     zone_sel_ = 0;
     for (std::size_t i = 0; i < zones_.size(); ++i) {
         if (zones_[i].name == cur) zone_sel_ = static_cast<int>(i);
     }
-    // Lock rule STUB (JS `WDa` L249: a node is open iff it has a record in
-    // the save's Battles/iF table — that table is NOT in WarriorSave, see
-    // the stream report): zones past the current one render locked, the
-    // Start (`yR`) zone is always open.
+    // WDa LIVE (JS L256 `WDa(a) = iF.get(a) != null`, written by `J1a` L259 /
+    // `Iaa` L260-261 and recorded by ResultsScreen): a zone is open when it
+    // is Start, is at/before the current zone (past zones open, current
+    // playable), or holds ANY recorded battle; later unrecorded zones lock.
+    // Record keys here are bare battle names matched against node names (JS
+    // keys zone|loc — same open/locked verdict at zone granularity).
     for (std::size_t i = 0; i < zones_.size(); ++i) {
-        zones_[i].locked =
-            !zones_[i].is_start && static_cast<int>(i) > zone_sel_;
+        bool touched = zones_[i].is_start;
+        if (!touched) {
+            for (const auto& n : zones_[i].nodes) {
+                if (map_save.has_battle(n.name)) {
+                    touched = true;
+                    break;
+                }
+            }
+        }
+        zones_[i].locked = !touched && !zones_[i].is_start &&
+                           static_cast<int>(i) > zone_sel_ && zones_[i].name != cur;
         for (auto& n : zones_[i].nodes) n.active = !zones_[i].locked;
     }
-    // MapFocus STUB (JS `Ya.bKa` L2129 focuses the save's MapFocus `p.o.ys`
-    // via `m5` — NOT in WarriorSave, see report): pre-highlight the first
-    // BOSSES node of the current zone, else the first node (hover highlight
-    // only, no selection change).
+    // MapFocus (JS `Ya.bKa` L2129 focuses the save's MapFocus `p.o.ys` via
+    // `m5`): highlight the node named in MapFocus first (e.g.
+    // ZONE_1|BOSS_LYNX|1 quest focus `qo` L1086), else the first BOSSES
+    // node, else the first node (hover highlight only, no selection).
     hover_ = -1;
     if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size()) {
         const auto& focus_nodes = zones_[zone_sel_].nodes;
-        for (std::size_t i = 0; i < focus_nodes.size(); ++i) {
+        if (!focus.empty()) {
+            for (std::size_t i = 0; i < focus_nodes.size(); ++i) {
+                if (focus.find(focus_nodes[i].name) != std::string::npos) {
+                    hover_ = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
+        for (std::size_t i = 0; hover_ < 0 && i < focus_nodes.size(); ++i) {
             if (focus_nodes[i].type == "BOSSES") {
                 hover_ = static_cast<int>(i);
                 break;
@@ -1519,6 +1585,16 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     std::fprintf(stdout, "[fight] battle=%s location=%s reward money=%d exp=%d\n",
                  battle_name_.c_str(), location_.c_str(), reward_money_, reward_exp_);
     std::fflush(stdout);
+    // Fight music (JS `ta.Ut(this.Da.tp)`, L2008): the battle's Music attr
+    // from stages.xml; battles without one (Training dummy) keep playing
+    // whatever is current (no invented fallback).
+    {
+        std::string track;
+        battle_music(battle_name_, track);
+        if (!track.empty()) {
+            sf2::audio::AudioEngine::instance().play_music(track);
+        }
+    }
 
     // The on-screen gamepad art (JS `Za`): the ui/controller atlas
     // (Joystick*, btn_punch_*, btn_kick_*). Loaded once per process; the
@@ -2178,6 +2254,7 @@ void FightScreen::update_impl(float dt) {
                          prize.max_combo, prize.shocks, prize.coins_bonus);
             pb.prize_base_coins = pb.reward_money;
             pb.prize_bonus = prize.coins_bonus;
+            pb.prize_gems = prize.gems_bonus;
             pb.prize_combo = prize.max_combo;
             pb.prize_shocks = prize.shocks;
             pb.prize_perfect = prize.perfect;
@@ -2538,7 +2615,11 @@ void FightScreen::render_impl(App& app) {
 ResultsScreen::ResultsScreen(ScreenManager& mgr, bool player_won, int money_reward,
                              int exp_reward)
     : Screen(mgr, "Results"), player_won_(player_won), money_reward_(money_reward),
-      exp_reward_(exp_reward) {}
+      exp_reward_(exp_reward) {
+    // No win/lose stinger files ship on disk — stop the fight track on
+    // Results instead (documented approximation).
+    sf2::audio::AudioEngine::instance().stop_music();
+}
 
 // JS `OLa`/`Oz` (L253-254): the level-up thresholds (`v.FR`) parsed once
 // from character_progress.xml; 100 fallback when the file is absent.
@@ -2590,6 +2671,10 @@ void ResultsScreen::update_impl(float dt) {
             const int before = w.money;
             w.money += money_reward_;
             w.experience += exp_reward_;
+            // JS `hj.Uo` gems (FLOW_STATIC section 4.4 `emb`): applied to
+            // Bonus. No fight source evidenced (always 0 today) — the field
+            // flows end-to-end for when gem sources land.
+            w.bonus += app().pending_battle().prize_gems;
             std::fprintf(stdout, "[result] WIN reward money=%d exp=%d (money %d -> %d)\n",
                          money_reward_, exp_reward_, before, w.money);
             // JS battle record (`iF` via `hl`/`lWa`, FLOW_STATIC section 3.2):

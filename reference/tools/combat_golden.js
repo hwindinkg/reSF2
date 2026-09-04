@@ -381,6 +381,17 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
   const G11b = cgbGuards({ JP: "j", aI: "a", se: true, Ub: true, Yi: true, block: false, bR: 5, Zi: 5, ep: false, Iza: false },
     { a3: false, gd: 100, fightNone: true, wdVc: false, sn: false, auHdName: "fists", ownHdName: "sword", Dga: false });
   eq("S11 fightnone", [G11b.Bb.se, G11b.Bb.Ub, G11b.Bb.Yi], [false, false, false]);
+  // S13: prize-bonus arithmetic (FLOW_STATIC 4.3; additive reading of the
+  // bzb factor args — the combination inside bzb is OPEN).
+  // Verbatim C++ twin: sf2::scene::prize_coins_bonus (fight.hpp).
+  function prizeCoins(perfect, first, combo, shocks, style) {
+    return (perfect ? 5 : 0) + (first ? 2 : 0) + combo * 1 + shocks * 3 + style;
+  }
+  eq("S13 zeros", prizeCoins(false, false, 0, 0, 0), 0);
+  eq("S13 full", prizeCoins(true, true, 4, 2, 0), 5 + 2 + 4 + 6);
+  eq("S13 style", prizeCoins(false, false, 0, 0, 15), 15);
+  out.scenarios.push({ id: "S13-prize", zeros: 0,
+    full: prizeCoins(true, true, 4, 2, 0), style: prizeCoins(false, false, 0, 0, 15) });
   out.scenarios.push({ id: "S11-misc", ok: true });
 
   out.selftest = { pass, fail, failures };
