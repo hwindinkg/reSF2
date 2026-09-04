@@ -96,10 +96,15 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
     (`v1`@L601-602 опечатка `V1`?; `bn`@L436; `p8a`@L605; `v.Lcb`@L604 —
     настоящий `Lcb` на L1204 = STALE; `yu`/`Lnb`@L803; дубликаты physics):
     чинить при работе с файлами.
-- Phase 3 — Core loop & timing: 3.1 fixed-tick 1/60 (`Us`, L135 ✓ статика);
-  3.2 целочисленный таймер (`Sf.iPa`, L2036); 3.3 `WC`/`llb` буфер фазы 1
-  (L426-429); 3.4 баннер между раундами. Gate: раунд 500+ кадров,
-  `round_timer_xU` + фазы кадр-в-кадр (нужен real-fight трейс).
+- Phase 3 — Core loop & timing (SCOPED 2026-09-04 read-only, code next turn):
+  G1 phase-1 buffer — DONE already (`player_input` L648: `WC` single-slot +
+  flush at `Rkb`; verify flush call next turn). G2 banner→Next — DONE already
+  (`round_wait_` L584 + `next_round_requested()` L591; §9 text stale — callers
+  audit next turn: who presses Next in headless/auto?). G6 integer timer —
+  OPEN (real work): `round_.time` float + `>= gma` L508 → rewrite to `xU`
+  (`--xU`, `NF=xU/60|0`, init `gma*60+1`, end-gate `NF<=0`, L2036/L2020).
+  3.1 fixed-tick audit (tick source for `advance`) next turn.
+  Gate: раунд 500+ кадров, `round_timer_xU` + фазы кадр-в-кадр.
 - Phase 4 — Spatial: 4.1 spawn X (phase=1,cf=0: Me x≈972.95, Enemy x≈690 —
   из oracle_pose); 4.2 per-bone mirror; 4.3 camera zoom. Gate: bone mean<10,
   facing 0%, dc<5.
