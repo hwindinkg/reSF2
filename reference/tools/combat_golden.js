@@ -161,6 +161,23 @@ function dkPartition(cands, c, sja) {
   return { d: d.map(x => x.id), f: f.map(x => x.id), g: g.map(x => x.id), e: e && e.id, ukb: ukb && ukb.id };
 }
 
+// ---- Gc.DK tail branches (L674); Ukb/Pkb/jJa/Nsb recorded, sja injected ----
+function dkTail(a, dIds, eId, gPickId, sjaNote, rec) {
+  // verbatim: g.length>0 && a.Ukb(g[sja].animation)
+  if (gPickId != null) { a.Ukb = gPickId; rec.ukb.push(gPickId); }
+  // verbatim: d.length>0 ? (e!=null&&d.push(e), Pkb(a,d))
+  //          : e!=null && (MS ? jJa : Nsb, zY/jza)
+  if (dIds.length > 0) {
+    if (eId != null) dIds.push(eId);
+    rec.pkb.push(dIds.slice());
+  } else if (eId != null) {
+    if (eId.MS) rec.jja.push([eId.id, eId.R1]);
+    else rec.nsb.push([eId.id, eId.index]);
+    a.zY = eId.animation.type; a.jza = eId.E_;
+  }
+  return { d: dIds.map(x => x.id || x), e: eId && eId.id };
+}
+
 // ---------------- self-test ----------------
 let pass = 0, fail = 0;
 const failures = [];
@@ -314,6 +331,44 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
   eq("S10 e pick", D10.e, "b");
   eq("S10 ukb", D10.ukb, "C");
   out.scenarios.push({ id: "S10-dk-partition", e: D10.e, ukb: D10.ukb });
+
+  // S12: DK tail-branch matrix (L674). Objects carry the fields the tail reads:
+  // MS/R1 (jJa), index (Nsb), animation.type/E_ (zY/jza).
+  const mkA = () => ({ Ukb: null, zY: null, jza: null });
+  const mkE = (id, o) => Object.assign({ id, MS: false, R1: 0, index: 0, E_: 0, animation: { type: "T" + id } }, o);
+  {
+    const rec = { pkb: [], nsb: [], jja: [], ukb: [] };
+    // S12a: d nonempty, e null -> Pkb(d), no push
+    const A1 = mkA(), x = mkE("x"), y = mkE("y");
+    const R1 = dkTail(A1, [x], null, null, 0, rec);
+    eq("S12a pkb", rec.pkb, [[x]]);
+    eq("S12a no-push", R1.d, ["x"]);
+    eq("S12a e null", R1.e, null);
+    // S12b: d nonempty, e set -> push then Pkb
+    const A2 = mkA();
+    const R2 = dkTail(A2, [x], y, null, 0, rec);
+    eq("S12b push+pkb", rec.pkb[1], [x, y]);
+    // S12c: d empty, e null -> nothing fires
+    const A3 = mkA(), nPkb = rec.pkb.length, nN = rec.nsb.length, nJ = rec.jja.length;
+    dkTail(A3, [], null, null, 0, rec);
+    eq("S12c silent", [rec.pkb.length, rec.nsb.length, rec.jja.length], [nPkb, nN, nJ]);
+    eq("S12c a untouched", [A3.zY, A3.jza, A3.Ukb], [null, null, null]);
+    // S12d: d empty, e MS -> jJa + zY/jza
+    const A4 = mkA(), jm = mkE("m", { MS: true, R1: 7, animation: { type: "Atk" }, E_: 3 });
+    dkTail(A4, [], jm, null, 0, rec);
+    eq("S12d jja", rec.jja, [["m", 7]]);
+    eq("S12d side", [A4.zY, A4.jza], ["Atk", 3]);
+    // S12e: d empty, e non-MS -> Nsb + zY/jza
+    const A5 = mkA(), ns = mkE("n", { MS: false, index: 5, animation: { type: "Blk" }, E_: 9 });
+    dkTail(A5, [], ns, null, 0, rec);
+    eq("S12e nsb", rec.nsb, [["n", 5]]);
+    eq("S12e side", [A5.zY, A5.jza], ["Blk", 9]);
+    // S12f: g pick -> Ukb recorded before branch
+    const A6 = mkA();
+    dkTail(A6, [], null, "Ganim", 0, rec);
+    eq("S12f ukb", [rec.ukb, A6.Ukb], [["Ganim"], "Ganim"]);
+    out.scenarios.push({ id: "S12-dk-tail", pkb: rec.pkb.length, nsb: rec.nsb, jja: rec.jja, ukb: rec.ukb });
+  }
 
   // S11: misc verbatim — G0 map, kwb latch, SZa, health clamp, FightNone
   eq("S11 G0", ["Attack", "Block", "Invulnerable", "Invisible", "X"].map(feG0), [4, 5, 6, 7, 0]);
