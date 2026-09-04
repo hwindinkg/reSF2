@@ -3476,6 +3476,12 @@ void ShopScreen::render_impl(App& app) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
     }
     // Wielding summary + buy confirmation (display only).
+    // Wallet top-right (was invisible — affordability guessing papercut).
+    {
+        char mbuf[64];
+        std::snprintf(mbuf, sizeof(mbuf), "COINS %d", seen_.money);
+        (void)app.draw_text(1060.0f, 32.0f, mbuf, 0.9f, 1.0f, 0.9f, 0.4f);
+    }
     (void)app.draw_text(24.0f, 648.0f, wielding_line(app, seen_), 0.7f, 0.9f, 0.9f, 0.9f);
     if (!confirm_.empty() && time() <= confirm_until_) {
         (void)app.draw_text(kViewW * 0.5f - 110.0f, 678.0f, confirm_, 1.0f, 0.4f, 1.0f,
@@ -3532,8 +3538,11 @@ void EquipmentScreen::update_impl(float dt) {
         }
     }
     // The owned items grid: click to equip into its type's slot. `card`
-    // counts only equippable-type cards (all five slots: Weapon/Armor/Helm/
-    // Ranged/Magic — JS `xc.hk` slots); other owned rows are skipped without
+    // counts equippable-type cards (all five slots: Weapon/Armor/Helm/
+    // Ranged/Magic — JS `xc.hk` slots) EXCEPT the NoRanged/NoMagic
+    // placeholders: those are the empty-slot markers (never bought, equip
+    // is a no-op), and showing them would shift the bought-knives card off
+    // the headless-loop click spot. Other owned rows are skipped without
     // consuming a grid slot.
     const float grid_x = kViewW * 0.55f, grid_y0 = 220.0f, grid_dx = 240.0f, grid_dy = 110.0f;
     int idx = 0;
@@ -3546,6 +3555,10 @@ void EquipmentScreen::update_impl(float dt) {
                 subtype = ci.subtype;
                 break;
             }
+        }
+        if (oi.name == "NoRanged" || oi.name == "NoMagic") {
+            ++idx;
+            continue;
         }
         if (type != "Weapon" && type != "Armor" && type != "Helm" && type != "Ranged" &&
             type != "Magic") {
@@ -3685,6 +3698,10 @@ void EquipmentScreen::render_impl(App& app) {
                 type = ci.type;
                 break;
             }
+        }
+        if (oi.name == "NoRanged" || oi.name == "NoMagic") {
+            ++idx;
+            continue;
         }
         if (type != "Weapon" && type != "Armor" && type != "Helm" && type != "Ranged" &&
             type != "Magic") {

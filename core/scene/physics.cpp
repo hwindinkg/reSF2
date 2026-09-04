@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace sf2::scene {
 
@@ -47,8 +48,12 @@ Line2 line_of(const Vec3& a, const Vec3& b) {
     return l;
 }
 
-// JS `Cz`: segment-segment intersection (2D), returns the crossing point.
-// (Used by Bz only when one capsule radius is ~0.)
+// JS `Uy(a,b,c,d)` (L11): lerp point d = a+(b-a)*c.
+Vec3 lerp_pt(const Vec3& a, const Vec3& b, float t) { return a + (b - a) * t; }
+
+// JS `Cz`: segment-segment crossing (2D). Collinear overlap writes the
+// SECOND segment's start (`e=a` with Cz(a,b)=target pair at the Bz call
+// site — REVIEW A LOW fix; verified against L14-15, not the review text).
 bool seg_seg_hit(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d,
                  Vec3& out) {
     if ((nearly(a.x, b.x) && nearly(a.y, b.y)) ||
@@ -73,7 +78,8 @@ bool seg_seg_hit(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d,
             if (a.y < b.y) { q2 = a.y; g2 = b.y; } else { q2 = b.y; g2 = a.y; }
             if (c.y < d.y) { l2 = c.y; n2 = d.y; } else { l2 = d.y; n2 = c.y; }
             if (q2 > n2 || l2 > g2) return false;
-            return true;  // collinear overlap
+            out = c;  // collinear overlap: e = second-segment start
+            return true;
         }
         return false;
     }
@@ -84,82 +90,91 @@ bool seg_seg_hit(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d,
     return true;
 }
 
-// JS `Ls(a,b,c,d,e,f,g)`: point-in-capsule (2D) test — whether the point
-// d ± a*normal lies within the capsule defined by segment (e,f) with
-// radius b. Returns true when the closest approach is within the radius.
-bool in_capsule(float a, float b, const Line2& l, const Vec3& d,
-                const Vec3& e, const Vec3& f) {
+// JS `Ls(a,b,c,d,e,f,g)`: |a|<=b → project (e = d - a*line), in-range vs
+// (f,g) or near an endpoint. Writes e whenever |a|<=b, even on range
+// failure (X8 dirt — harmless: X8/o$ is only read on success, and every
+// success path below writes it, so per-call zeroing == per-W1a zeroing).
+bool in_capsule(float a, float b, const Line2& l, const Vec3& d, Vec3& e,
+                const Vec3& f, const Vec3& g) {
     if (std::fabs(a) <= b) {
-        const float px = d.x - a * l.a;
-        const float py = d.y - a * l.b;
-        if ((in_range(px, e.x, f.x) || in_range(px, f.x, e.x)) &&
-            (in_range(py, e.y, f.y) || in_range(py, f.y, e.y))) {
+        e.x = d.x - a * l.a;
+        e.y = d.y - a * l.b;
+        e.z = 0.0f;
+        if ((in_range(e.x, f.x, g.x) || in_range(e.x, g.x, f.x)) &&
+            (in_range(e.y, f.y, g.y) || in_range(e.y, f.y, g.y))) {
             return true;
         }
-        return sq(d.x - e.x) + sq(d.y - e.y) <= b * b ||
-               sq(d.x - f.x) + sq(d.y - f.y) <= b * b;
+        return sq(d.x - f.x) + sq(d.y - f.y) <= b * b ||
+               sq(d.x - g.x) + sq(d.y - g.y) <= b * b;
     }
     return false;
 }
 
 }  // namespace
 
-// JS `Bz(a,b,c,d,e,f,g,h,k,l)` — the capsule-vs-capsule sweep test on the
-// X/Y plane (the JS `Bz` uses the x and y axes; z is depth and ignored).
-// `a,b` = attacker capsule endpoints (positions), `c` = attacker radius
-// (+ margin), `d,e` = target capsule endpoints, `f` = target radius.
-// The test resolves the closest approach of the two segment mid-lines and
-// reports a hit when the distance drops below c+f. On hit, the hit point is
-// written to `out.point` (the closest point on the attacker capsule).
+// JS `Bz(a,b,c,d,e,f,g,h,k,l)` verbatim roles (L12):
+// (a,b)=target insets (Ula/Pda), c=target gb, (d,e)=attacker insets,
+// f=attacker gb, g=W8 (n$), h=X8 (o$), k=attacker Eda, l=target Eda.
+// `c+=f` is the RADII SUM (margins are build-time insets, never radius).
+// Lines come from the RAW spans (`Vy(dw,Zs.ma,Eda)`); the test points
+// come from the insets.
 bool capsule_capsule_overlap(const HitCapsule& atk, const HitCapsule& tgt,
                              CapsuleHit& out) {
-    Vec3 a = atk.p1, b = atk.p2;
-    Vec3 d = tgt.p1, e = tgt.p2;
-    float c = atk.radius + atk.margin1 + atk.margin2;
-    float f = tgt.radius + tgt.margin1 + tgt.margin2;
-    c += f;  // JS: `c+=f` — sum of radii
-
-    // Degenerate: attacker is a point (radius ~ 0) — fall back to the
-    // segment-segment crossing test.
+    Vec3 a = tgt.p1, b = tgt.p2;
+    Vec3 d = atk.p1, e = atk.p2;
+    float c = tgt.radius + atk.radius;
+    Vec3 w8{}, x8{};  // W8/X8 zeroed per call (W1a-equivalent, see above)
+    out.hit = false;
+    out.kd_null = false;
     if (f2(c)) {
-        Vec3 p;
-        if (seg_seg_hit(d, e, a, b, p)) {
-            out.point = p;
+        if (seg_seg_hit(d, e, a, b, w8)) {
+            x8 = w8;
+            out.n = w8;
+            out.o = x8;
+            out.point = w8;
             out.hit = true;
             return true;
         }
         return false;
     }
-
-    // Line equations of both segments (on the X/Y plane).
-    Line2 l_tgt = line_of(d, e);  // target line
-    const float n = l_tgt.a * a.x + l_tgt.b * a.y + l_tgt.c;
-    const float f2v = l_tgt.a * b.x + l_tgt.b * b.y + l_tgt.c;
-    // Both attacker endpoints on the same side beyond the radius -> no hit.
+    Line2 l = line_of(atk.r1, atk.r2);  // attacker Eda (raw span)
+    Line2 k = line_of(tgt.r1, tgt.r2);  // target Eda (raw span)
+    const float n = l.a * a.x + l.b * a.y + l.c;
+    const float f2v = l.a * b.x + l.b * b.y + l.c;
+    // Both target endpoints on the same side beyond the radii -> no hit.
     if (n * f2v >= 0 && c < std::fabs(n) && c < std::fabs(f2v)) return false;
 
-    Line2 l_atk = line_of(a, b);
-    const float q = l_atk.a * d.x + l_atk.b * d.y + l_atk.c;
-    const float r = l_atk.a * e.x + l_atk.b * e.y + l_atk.c;
+    const float q = k.a * d.x + k.b * d.y + k.c;
+    const float r = k.a * e.x + k.b * e.y + k.c;
     if (q * r >= 0 && c < std::fabs(q) && c < std::fabs(r)) return false;
 
     if (q * r < 0 && n * f2v < 0) {
-        // Segments cross: the hit point is the intersection.
+        // Segments cross: contact on the attacker segment.
         const float t = q / (q - r);
-        out.point.x = e.x - d.x;
-        out.point.y = e.y - d.y;
-        out.point.z = e.z - d.z;
-        out.point = out.point * t + d;
+        w8 = d + (e - d) * t;
+        x8 = w8;
+        out.n = w8;
+        out.o = x8;
+        out.point = w8;
         out.hit = true;
         return true;
     }
 
-    // Endpoint-vs-capsule checks (JS `Ls` for each endpoint against the
-    // other segment, plus the line-distance tests).
-    if (in_capsule(n, c, l_tgt, a, d, e)) { out.point = a; out.hit = true; return true; }
-    if (in_capsule(f2v, c, l_tgt, b, d, e)) { out.point = b; out.hit = true; return true; }
-    if (in_capsule(q, c, l_atk, d, a, b)) { out.point = d; out.hit = true; return true; }
-    if (in_capsule(r, c, l_atk, e, a, b)) { out.point = e; out.hit = true; return true; }
+    // Endpoint-vs-capsule checks. n$ = the tested endpoint, o$ = its
+    // projection (Ls writes o1..o4; locals keep X8 dirt contained).
+    Vec3 o1 = x8, o2 = x8, o3 = x8, o4 = x8;
+    if (in_capsule(n, c, l, a, o1, d, e)) {
+        out.n = a; out.o = o1; out.point = a; out.hit = true; return true;
+    }
+    if (in_capsule(f2v, c, l, b, o2, d, e)) {
+        out.n = b; out.o = o2; out.point = b; out.hit = true; return true;
+    }
+    if (in_capsule(q, c, k, d, o3, a, b)) {
+        out.n = d; out.o = o3; out.point = d; out.hit = true; return true;
+    }
+    if (in_capsule(r, c, k, e, o4, a, b)) {
+        out.n = e; out.o = o4; out.point = e; out.hit = true; return true;
+    }
     return false;
 }
 
@@ -194,9 +209,23 @@ void BodyState::build(const Model& model, const std::vector<float>& pose_xy,
         cap.end1 = edge.end1;
         cap.end2 = edge.end2;
         cap.rest_length = edge.length;
-        cap.p1 = {pose1[u1 * 2], pose1[u1 * 2 + 1], 0.0f};
-        cap.p2 = {pose2[u2 * 2], pose2[u2 * 2 + 1], 0.0f};
+        cap.r1 = {pose1[u1 * 2], pose1[u1 * 2 + 1], 0.0f};
+        cap.r2 = {pose2[u2 * 2], pose2[u2 * 2 + 1], 0.0f};
+        // Inset endpoints (Lnb L791-793): Ula=lerp($Fa), Pda=lerp(1-aGa).
+        // Radius is gb ONLY (margins never add — REVIEW A).
+        cap.p1 = cap.r1 + (cap.r2 - cap.r1) * edge.margin1;
+        cap.p2 = cap.r1 + (cap.r2 - cap.r1) * (1.0f - edge.margin2);
         cap.radius = edge.radius;
+        // Margins scan telemetry (REVIEW A: shipped margins expected 0 —
+        // nonzero would change hit shapes vs the old inflated radii).
+        static bool margins_logged = false;
+        if (!margins_logged &&
+            (edge.margin1 != 0.0f || edge.margin2 != 0.0f)) {
+            margins_logged = true;
+            std::fprintf(stderr, "[phys] nonzero capsule margins: %s (%g,%g)\n",
+                         edge.name.c_str(), (double)edge.margin1,
+                         (double)edge.margin2);
+        }
         cap.margin1 = edge.margin1;
         cap.margin2 = edge.margin2;
         cap.collidable = edge.collisible;  // JS `yu.vZ`
@@ -248,7 +277,8 @@ float apply_impulse(const HitCapsule& hit_cap, const CapsuleHit& hit,
 
     // JS `Bl.strike` (L582): b = min(1, |nJa - sx.ma| / rest_length) —
     // the REST length (`|pQ-iU|` = `yu.length`), not the current span.
-    const Vec3 to_hit = hit.point - hit_cap.p1;
+    // `nJa` is `o$` (NOT `n$` — REVIEW A MED fix).
+    const Vec3 to_hit = hit.o - hit_cap.p1;
     const float dist = std::sqrt(to_hit.dot(to_hit));
     const float rest = hit_cap.rest_length;
     float b = rest < 1e-6f ? 1.0f : dist / rest;

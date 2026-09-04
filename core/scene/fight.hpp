@@ -626,6 +626,7 @@ private:
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)
     sf2::scene::TrigBus bus_;      // perk trigger bus (`tb`; ZOa registers)
+    sf2::scene::PerkSetup perk_setup_;  // stashed for per-round Yka
     const std::map<std::string, sf2::scene::TacticDef>* tactic_defs_ = nullptr;
     std::vector<std::string> player_items_;  // equipped names (Item conds)
     std::vector<std::string> enemy_items_;
@@ -737,7 +738,8 @@ private:
     // register both sides (`Gf`).
     void setup_bus(const PerkSetup& perks);
     // Condition context for one side (0 = player, 1 = enemy).
-    sf2::scene::CondCtx cond_ctx(int side);
+    // `hit_dmg` feeds `?Hit[].Damage` (the in-flight mg.Damage).
+    sf2::scene::CondCtx cond_ctx(int side, double hit_dmg = 0.0);
     // Fire a hit-scope slot (6/7) and execute: combat actions fold into
     // `rec`/fighters via `decide_hit_perks`, state actions apply now.
     // `out_has_damage/out_damage` report the last SetHit Damage (`ppb`

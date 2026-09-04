@@ -48,37 +48,52 @@ struct Vec3 {
 
 // One live collision capsule: an edge's two endpoint bones' CURRENT world
 // positions + radius + defense/body-part tags (JS `yu` L803-807).
+// `p1`/`p2` are the INSET endpoints (`Ula`/`Pda`: lerp by `$Fa`/`aGa`,
+// L791-793); `r1`/`r2` are the raw bone positions (the `Eda` edge
+// direction uses the raw span). Radius is `gb` ONLY — margins never add
+// to it (REVIEW_PHYS_TRIG A: `$Fa`/`aGa` are lerp factors, L11/L792).
 struct HitCapsule {
     std::string name;         // edge name (`yu.name`)
     std::string end1;         // endpoint-1 bone name (`yu.sx`, via `wBa`)
     std::string end2;         // endpoint-2 bone name (`yu.Zs`, via `wBa`)
     float rest_length = 0.0f;  // `yu.length` (`|pQ-iU|`, rest — NOT current)
-    Vec3 p1;                  // endpoint 1 world pos (`yu.sx.ma`)
-    Vec3 p2;                  // endpoint 2 world pos (`yu.Zs.ma`)
+    Vec3 p1;                  // inset endpoint 1 (`Ula`)
+    Vec3 p2;                  // inset endpoint 2 (`Pda`)
+    Vec3 r1;                  // raw endpoint 1 (`sx.ma`, for `Eda`)
+    Vec3 r2;                  // raw endpoint 2 (`Zs.ma`, for `Eda`)
     float radius = 0.0f;      // `yu.gb`
     float margin1 = 0.0f;     // `yu.$Fa`
     float margin2 = 0.0f;     // `yu.aGa`
     bool collidable = false;  // `yu.vZ` — in the TARGET's hit list (`Nl.oI`)
     std::string body_part;    // `yu.HC` ("Head"/"Body"/"Legs")
     std::string defense;      // `yu.Xi` ("BodyDefense"/"HeadDefense")
+    // Node masses default 1.0 when the Mass attr is absent (model.cpp).
+    // DIVERGENCE NOTE (REVIEW A): JS u.H(absent) = 0, i.e. a missing Mass
+    // gives weight 0 and an Infinite split displacement; ours guards
+    // (weight>0?weight:1.0). Shipped models are binary (.dat) so presence
+    // is unverified — the guard only fires on absent/zero Mass.
     float weight1 = 1.0f;     // endpoint-1 node mass (`Vc.weight`)
     float weight2 = 1.0f;     // endpoint-2 node mass
 };
 
 // The result of one capsule-vs-capsule hit test (JS `Cl.W1a` L566).
+// `n` = `n$` (contact), `o` = `o$` (knockback reference, `Bb.nJa`).
+// `kd_null` = the interval had no AttackingParts (`ia` early-true:
+// n$=o$=0, KD=null → `Bl.strike` skipped, NO knockback).
 struct CapsuleHit {
     bool hit = false;
-    // The closest-point on the attacker capsule (JS `Bz` fills the
-    // hit position into `strike.n$`/`strike.o$` — the two capsules'
-    // closest endpoints; the demo uses the attacker endpoint).
-    Vec3 point;
+    Vec3 point;  // == n (kept for sparks/callers)
+    Vec3 n;      // `n$` (JS `W8`)
+    Vec3 o;      // `o$` (JS `X8`; zeroed per test — W1a staleness)
+    bool kd_null = false;
 };
 
-// --- geometric primitives (JS Bz L12, Uy L12, Vy/Wy L12, Ls L12) -------
-// Segment-segment closest-point/collision on the XZ plane. The fighters'
-// bodies are swept capsules (endpoint positions from the current pose);
-// two capsules overlap when the distance between their segment mid-lines
-// drops below the sum of their radii.
+// --- geometric primitives (JS Bz/Cz/Ls/Uy/Vy, X/Y plane) ---------------
+// Segment-segment closest-point/collision on the X/Y plane (the JS `Bz`
+// uses x and y — height — as its two axes; z is depth, ignored).
+// Two moving capsules (each defined by its two endpoint nodes) with radii:
+// the distance between the segment mid-lines must drop below the sum of
+// radii during the frame.
 // `ic` helpers (L653): $z = |a-b|<1e-10, f2 = |a|<1e-10, wJ = a>=b&&a<=c,
 // c4 = a*a.
 bool capsule_capsule_overlap(const HitCapsule& a, const HitCapsule& b,
@@ -136,6 +151,10 @@ struct BodyState {
 // MG/NG gate (`!sx.MG || !Zs.MG`, NG endpoints skipped) is OPEN: MG/NG are
 // runtime `Vc.sk`-solver flags with no XML source — all endpoints land as
 // dynamic, so the gate always passes (noted, not lowered).
+// Unmodeled by design: s2a() midpoint smoothing (presentation average
+// over Va.all, L588) and bFa length refit (cA-gated spring solve,
+// L583/L792 — needs the Vc.sk integrator state). Both are outside the
+// static milestone (REVIEW A LOW NOTEs).
 // The displacement is applied to the DEMO's fighter world-x directly (the
 // full ragdoll integration — Vc.sk L796 gravity/friction — is out of scope
 // for this milestone; the knockback FEEL — direction, weight split,

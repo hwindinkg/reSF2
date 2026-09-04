@@ -57,7 +57,11 @@ struct PerkHitOutcome {
     bool f_disarm = false, has_disarm = false;
     float f_damage = 0.0f;  // SetHit Zi override (JS `ppb` `bR`/`Zi`)
     bool has_damage = false;
-    float dmg_add = 0.0f;  // ChangeAdditionalDamageValue `+Ly` (adds to Zi)
+    // ChangeAdditionalDamageValue `+Ly`. NOTE (REVIEW A LOW): the bus
+    // routes this to future-hit `Ly` state (`WKa` sets live Ly —
+    // `exec_action`, not the current hit); the field below exists for
+    // decider parity (S16) and direct (non-bus) callers.
+    float dmg_add = 0.0f;
     float heal = 0.0f;  // Lifesteal amount (added to attacker HP, clamped)
     double imp_x = 1.0, imp_y = 1.0, imp_z = 1.0;  // ChangeImpulse scales
     std::vector<std::pair<std::string, double>> attr_adds;  // ModAttributes

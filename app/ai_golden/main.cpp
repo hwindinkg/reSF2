@@ -392,6 +392,7 @@ int main() {
                         (double)h2, (int)dots2.size());
         }
         // S17 Bl.strike split (mirrors combat_golden.js S17).
+        // b uses o$ (nJa), NOT the contact point (REVIEW A MED fix).
         {
             sf2::scene::HitCapsule cap;
             cap.rest_length = 100.0f;
@@ -401,11 +402,15 @@ int main() {
             cap.weight2 = 1.0f;
             sf2::scene::CapsuleHit ch;
             ch.hit = true;
-            ch.point = {30.0f, 0.0f, 0.0f};
+            ch.n = {30.0f, 0.0f, 0.0f};
+            ch.o = {30.0f, 0.0f, 0.0f};
+            ch.point = ch.n;
             sf2::scene::ImpulseResult imp;
             sf2::scene::apply_impulse(cap, ch, {10.0f, 4.0f, 0.0f}, 500.0f, 80.0f,
                                       1880.0f, imp);
-            ch.point = {500.0f, 0.0f, 0.0f};
+            ch.n = {500.0f, 0.0f, 0.0f};
+            ch.o = {500.0f, 0.0f, 0.0f};
+            ch.point = ch.n;
             sf2::scene::ImpulseResult imp2;
             sf2::scene::apply_impulse(cap, ch, {10.0f, 4.0f, 0.0f}, 500.0f, 80.0f,
                                       1880.0f, imp2);
@@ -424,6 +429,41 @@ int main() {
                         (double)imp2.node1_vec.x, (double)imp2.node2_vec.x,
                         (double)offs[0].x, (double)offs[0].y, (double)offs[1].x,
                         (double)offs[1].y, (double)tiny[0].x, (double)tiny[0].y);
+        }
+        // S17b verbatim Bz (mirrors combat_golden.js S17b).
+        {
+            auto mkcap = [](float x1, float y1, float x2, float y2, float r) {
+                sf2::scene::HitCapsule c;
+                c.p1 = {x1, y1, 0.0f};
+                c.p2 = {x2, y2, 0.0f};
+                c.r1 = c.p1;
+                c.r2 = c.p2;
+                c.radius = r;
+                c.rest_length = 100.0f;
+                c.weight1 = 1.0f;
+                c.weight2 = 1.0f;
+                return c;
+            };
+            const sf2::scene::HitCapsule capA = mkcap(0, 0, 10, 0, 1);
+            const sf2::scene::HitCapsule capX = mkcap(5, -5, 5, 5, 1);
+            const sf2::scene::HitCapsule capN = mkcap(9, 0.5f, 20, 0.5f, 1);
+            const sf2::scene::HitCapsule capM = mkcap(50, 0, 60, 0, 1);
+            const sf2::scene::HitCapsule capZ = mkcap(0, 0, 10, 0, 0);
+            const sf2::scene::HitCapsule capC = mkcap(3, 0, 20, 0, 0);
+            sf2::scene::CapsuleHit hx, hn, hm, hc;
+            const bool bx = sf2::scene::capsule_capsule_overlap(capA, capX, hx);
+            const bool bn = sf2::scene::capsule_capsule_overlap(capA, capN, hn);
+            const bool bm = sf2::scene::capsule_capsule_overlap(capA, capM, hm);
+            const bool bc = sf2::scene::capsule_capsule_overlap(capZ, capC, hc);
+            std::printf("  \"bz\": {\"cross\": [%d, %.17g, %.17g, %.17g, %.17g], "
+                        "\"near\": [%d, %.17g, %.17g, %.17g, %.17g], "
+                        "\"miss\": [%d], "
+                        "\"collinear\": [%d, %.17g, %.17g, %.17g, %.17g]},\n",
+                        (int)bx, (double)hx.n.x, (double)hx.n.y, (double)hx.o.x,
+                        (double)hx.o.y, (int)bn, (double)hn.n.x, (double)hn.n.y,
+                        (double)hn.o.x, (double)hn.o.y, (int)bm, (int)bc,
+                        (double)hc.n.x, (double)hc.n.y, (double)hc.o.x,
+                        (double)hc.o.y);
         }
         // S18 trigger match + conditions (mirrors combat_golden.js S18).
         {
@@ -453,12 +493,16 @@ int main() {
             CondCtx own, foe;
             own.style_level = 2;
             own.combo = 3;
-            own.hp_ratio = 0.5;
+            own.hp = 50.0;
             own.round = 2;
+            own.hit_dmg = 15.0;
+            own.q3["X"] = 1.0;
             own.mods.insert("Icon");
+            own.mod_ns["Icon"] = "";
             own.draw01 = []() { return 0.2; };
-            foe.hp_ratio = 1.0;
+            foe.hp = 100.0;
             foe.round = 2;
+            foe.hit_dmg = 15.0;
             foe.draw01 = []() { return 0.9; };
             TrigCond r1;
             r1.kind = "Random";
@@ -473,7 +517,7 @@ int main() {
             co.s["Max"] = "5";
             TrigCond he;
             he.kind = "Health";
-            he.s["Max"] = "0.4";
+            he.s["Max"] = "40";
             TrigCond me;
             me.kind = "ModExists";
             me.s["Name"] = "Icon";
@@ -497,8 +541,38 @@ int main() {
             andc.op = "And";
             andc.nested.push_back(ro);
             andc.nested.push_back(or1);
+            TrigCond k1;
+            k1.kind = "LessEqual";
+            k1.s["Value1"] = "?PlayerParameter[Enemy].Health";
+            k1.s["Value2"] = "60";
+            TrigCond k2;
+            k2.kind = "GreaterEqual";
+            k2.s["Value1"] = "?Hit[].Damage";
+            k2.s["Value2"] = "10";
+            TrigCond k3;
+            k3.kind = "Equal";
+            k3.s["Value1"] = "?Variable[Y]";
+            k3.s["Value2"] = "0";
+            TrigCond k4;
+            k4.kind = "Less";
+            k4.s["Value1"] = "?Abs[0-5]+10";
+            k4.s["Value2"] = "20";
+            TrigCond k5;
+            k5.kind = "Greater";
+            k5.s["Value1"] = "?Variable[X]+1";
+            k5.s["Value2"] = "1";
+            CondCtx nsa, foens;
+            nsa.mods.insert("Act");
+            nsa.mod_ns["Act"] = "NS";
+            CondCtx nsb, foensb;
+            nsb.mods.insert("Act");
+            nsb.mod_ns["Act"] = "other";
+            TrigCond k6;
+            k6.kind = "ModExists";
+            k6.s["Name"] = "Act";
+            k6.s["Namespace"] = "NS";
             std::printf("  \"trigger\": {\"match\": [%d, %d, %d, %d], \"conds\": [%d, %d, "
-                        "%d, %d, %d, %d, %d, %d, %d, %d]},\n",
+                        "%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d]},\n",
                         (int)m18a, (int)m18b, (int)m18c, (int)m18d,
                         (int)sf2::scene::eval_cond(r1, own, foe),
                         (int)sf2::scene::eval_cond(r1, foe, own),
@@ -509,7 +583,14 @@ int main() {
                         (int)sf2::scene::eval_cond(men, own, foe),
                         (int)sf2::scene::eval_cond(ro, own, foe),
                         (int)sf2::scene::eval_cond(orc, own, foe),
-                        (int)sf2::scene::eval_cond(andc, own, foe));
+                        (int)sf2::scene::eval_cond(andc, own, foe),
+                        (int)sf2::scene::eval_cond(k1, own, foe),
+                        (int)sf2::scene::eval_cond(k2, own, foe),
+                        (int)sf2::scene::eval_cond(k3, own, foe),
+                        (int)sf2::scene::eval_cond(k4, own, foe),
+                        (int)sf2::scene::eval_cond(k5, own, foe),
+                        (int)sf2::scene::eval_cond(k6, nsa, foens),
+                        (int)sf2::scene::eval_cond(k6, nsb, foensb));
         }
         // S18c bus routing (mirrors combat_golden.js S18c; real TrigBus).
         {

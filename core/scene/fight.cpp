@@ -310,6 +310,7 @@ void FightController::init_locks(
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
     // Perk bus register (ZOa analog).
+    perk_setup_ = perks;
     setup_bus(perks);
 
     // Camera framing (JS ma.Sya L1833 + the ql dZa intro): the fighters'
@@ -441,6 +442,9 @@ void FightController::round_start() {
     // between_rounds_recover() when the previous round ends.
     round_.number++;
     round_init();
+    // Per-round bus re-register (JS tb.Yka L401/402/405: cKa + Gf both
+    // sides — live timed mods do NOT persist across rounds).
+    setup_bus(perk_setup_);
     dga_ = false;  // JS `Dga` reset per round (L409)
     // JS `wd.wI` per-round re-init: `Wx=-1`, `sr=0` (`vc`/`sn` persist).
     player_.shock.pain_sr = 0.0f;
@@ -711,7 +715,7 @@ int oba_phase(fight_phase p) {
 }
 }  // namespace
 
-sf2::scene::CondCtx FightController::cond_ctx(int side) {
+sf2::scene::CondCtx FightController::cond_ctx(int side, double hit_dmg) {
     const FightFighter& me = side == 0 ? player_ : enemy_;
     sf2::scene::CondCtx ctx;
     ctx.style_level = me.style.level;
@@ -721,12 +725,17 @@ sf2::scene::CondCtx FightController::cond_ctx(int side) {
     for (const std::string& n : me.fighter.active_intervals()) {
         ctx.intervals.emplace_back(n, me.fighter.interval_type(n));
     }
-    ctx.hp_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+    ctx.hp = me.hp;  // absolute gd (L1310-1311)
+    ctx.hit_dmg = hit_dmg;
     ctx.items = side == 0 ? player_items_ : enemy_items_;
     ctx.round = round_.number;
     ctx.pain = me.shock.pain_sr;
     ctx.in_area = false;  // `rR` area bounds are OPEN
-    for (const auto& kv : bus_.side(side).mods) ctx.mods.insert(kv.first);
+    for (const auto& kv : bus_.side(side).mods) {
+        ctx.mods.insert(kv.first);
+        ctx.mod_ns[kv.first] = kv.second.namespc;
+    }
+    for (const auto& kv : bus_.side(side).q3) ctx.q3[kv.first] = kv.second;
     ctx.draw01 = [this]() { return roll01_ ? roll01_() : 0.5f; };
     return ctx;
 }
@@ -832,7 +841,9 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         m.uf = dot.frames_left;
         m.per_frame = dot.per_frame;
         bus_.install_mod(owner_side, std::move(m));
-    } else if (type == "ModIcon" || type == "ModInvisibility") {
+    } else if (type == "ModIcon" || type == "ModInvisibility" || type == "ModFlag") {
+        // ModFlag (Sp, 178 shipped uses): named persistent mod (mirrors
+        // ModIcon) so Blocker/RockOn/Icon-family ModExists chains work.
         sf2::scene::ModState m;
         m.name = str("Name").empty() ? type : str("Name");
         m.namespc = str("Namespace");
@@ -901,7 +912,12 @@ void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
                                   FightFighter& atk, FightFighter& def, int depth,
                                   bool* out_has_damage, float* out_damage) {
     (void)depth;
-    bus_.fire(slot, vars, true, fired_side & 1, cond_ctx(0), cond_ctx(1),
+    double hit_dmg = 0.0;
+    {
+        const auto it = vars.num.find("Damage");
+        if (it != vars.num.end()) hit_dmg = it->second;
+    }
+    bus_.fire(slot, vars, true, fired_side & 1, cond_ctx(0, hit_dmg), cond_ctx(1, hit_dmg),
               oba_phase(phase_), frame_);
     for (int s = 0; s < 2; ++s) {
         std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> pairs;
@@ -1116,12 +1132,17 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
     last = key;
     {
         // JS `!c.aEa` (L566-567): no AttackingParts = always connects
-        // (11/618 shipped attack intervals); contact = target COM capsule.
+        // (11/618 shipped attack intervals); n$=o$=(0,0,0), KD=null.
+        // KD=null skips `Bl.strike` (no knockback); contact stays the
+        // midpoint for presentation (sparks).
         if (d->attacking_parts.empty()) {
             for (const auto& tgt : def.body.capsules) {
                 if (!tgt.collidable) continue;
                 hit_cap = tgt;
                 ch.hit = true;
+                ch.kd_null = true;
+                ch.n = {0.0f, 0.0f, 0.0f};
+                ch.o = {0.0f, 0.0f, 0.0f};
                 ch.point.x = (tgt.p1.x + tgt.p2.x) * 0.5f;
                 ch.point.y = (tgt.p1.y + tgt.p2.y) * 0.5f;
                 ch.point.z = (tgt.p1.z + tgt.p2.z) * 0.5f;
@@ -1379,6 +1400,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     impulse.y *= atk.jg.y;
     impulse.z *= atk.jg.z;
     sf2::scene::ImpulseResult imp;
+    // KD=null (no AttackingParts) skips Bl.strike: no knockback.
+    if (!ch.kd_null) {
     const float new_x =
         sf2::scene::apply_impulse(hit_cap, ch, impulse, def.fighter.world_x(),
                                   wall_min_, wall_max_, imp);
@@ -1392,6 +1415,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         const int b2 = def.fighter.model().bone_by_name(hit_cap.end2);
         if (b1 >= 0) def.fighter.add_knockback(b1, imp.node1_vec);
         if (b2 >= 0 && b2 != b1) def.fighter.add_knockback(b2, imp.node2_vec);
+    }
     }
 
     // [Phase A3] SFX: a landed hit (the game plays the impact sample —

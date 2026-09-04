@@ -570,7 +570,106 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
     clamp: [s17c.b, s17c.n1.x, s17c.n2.x],
     decay: [s17d[0].x, s17d[0].y, s17d[1].x, s17d[1].y],
     decayzero: [s17e[0].x, s17e[0].y] });
-  // S18: trigger match + conditions (PERKS 5.3/5.5). Verbatim C++ twin:
+  // S17b: verbatim Bz (L12) incl. Cz-collinear (e=a start), raw-gb sum,
+  // n$/o$ split. C++ twin: capsule_capsule_overlap.
+  function bzLine(p, q) {
+    const dx = p.x - q.x, dy = p.y - q.y, d = Math.hypot(dx, dy);
+    const a = (p.y - q.y) / d, b = (q.x - p.x) / d;
+    return { a, b, c: -(a * p.x + b * p.y) };
+  }
+  function czHit(a, b, c, d) {
+    const z = v => Math.abs(v) < 1e-10;
+    if ((z(a.x - b.x) && z(a.y - b.y)) || (z(c.x - d.x) && z(c.y - d.y))) return null;
+    const f = b.x - a.x, g = b.y - a.y, h = d.x - c.x, k = d.y - c.y;
+    const l = a.x - c.x, n = a.y - c.y, q = k * f - h * g;
+    const hh = h * n - k * l, ff = f * n - g * l;
+    if (z(q)) {
+      if (z(hh) || z(ff)) {
+        let q2, g2, l2, n2;
+        if (a.x < b.x) { q2 = a.x; g2 = b.x; } else { q2 = b.x; g2 = a.x; }
+        if (c.x < d.x) { l2 = c.x; n2 = d.x; } else { l2 = d.x; n2 = c.x; }
+        if (q2 > n2 || l2 > g2) return null;
+        if (a.y < b.y) { q2 = a.y; g2 = b.y; } else { q2 = b.y; g2 = a.y; }
+        if (c.y < d.y) { l2 = c.y; n2 = d.y; } else { l2 = d.y; n2 = c.y; }
+        if (q2 > n2 || l2 > g2) return null;
+        return { x: a.x, y: a.y };
+      }
+      return null;
+    }
+    const hq = hh / q;
+    const inR = (v, x, y) => (v >= x && v <= y) || (v >= y && v <= x);
+    if (!inR(hq, 0, 1) || !inR(ff / q, 0, 1)) return null;
+    return { x: a.x + hq * (b.x - a.x), y: a.y + hq * (b.y - a.y) };
+  }
+  function bz(atk, tgt) {
+    const a = tgt.p1, b = tgt.p2, d = atk.p1, e = atk.p2;
+    const c = tgt.r + atk.r;
+    const inR = (v, x, y) => (v >= x && v <= y) || (v >= y && v <= x);
+    const z = v => Math.abs(v) < 1e-10;
+    const w8 = { x: 0, y: 0 }, x8 = { x: 0, y: 0 };
+    if (z(c)) {
+      const p = czHit(a, b, d, e);
+      if (p) return { hit: true, n: p, o: p };
+      return { hit: false };
+    }
+    const l = bzLine(atk.r1, atk.r2), k = bzLine(tgt.r1, tgt.r2);
+    const n = l.a * a.x + l.b * a.y + l.c, f = l.a * b.x + l.b * b.y + l.c;
+    if (n * f >= 0 && c < Math.abs(n) && c < Math.abs(f)) return { hit: false };
+    const q = k.a * d.x + k.b * d.y + k.c, r = k.a * e.x + k.b * e.y + k.c;
+    if (q * r >= 0 && c < Math.abs(q) && c < Math.abs(r)) return { hit: false };
+    if (q * r < 0 && n * f < 0) {
+      const t = q / (q - r);
+      const g = { x: d.x + t * (e.x - d.x), y: d.y + t * (e.y - d.y) };
+      return { hit: true, n: g, o: g };
+    }
+    const proj = (s, pt, seg) => {
+      if (Math.abs(s) > c) return null;
+      const o = { x: pt.x - s * (seg === l ? l.a : k.a),
+        y: pt.y - s * (seg === l ? l.b : k.b) };
+      const ok = (inR(o.x, seg === l ? d.x : a.x, seg === l ? e.x : b.x) &&
+        inR(o.y, seg === l ? d.y : a.y, seg === l ? e.y : b.y)) ||
+        (Math.hypot(pt.x - (seg === l ? d.x : a.x), pt.y - (seg === l ? d.y : a.y)) <= c) ||
+        (Math.hypot(pt.x - (seg === l ? e.x : b.x), pt.y - (seg === l ? e.y : b.y)) <= c);
+      return ok ? o : null;
+    };
+    let o = proj(n, a, l);
+    if (o) return { hit: true, n: { x: a.x, y: a.y }, o };
+    o = proj(f, b, l);
+    if (o) return { hit: true, n: { x: b.x, y: b.y }, o };
+    o = proj(q, d, k);
+    if (o) return { hit: true, n: { x: d.x, y: d.y }, o };
+    o = proj(r, e, k);
+    if (o) return { hit: true, n: { x: e.x, y: e.y }, o };
+    return { hit: false };
+  }
+  const capA = { p1: { x: 0, y: 0 }, p2: { x: 10, y: 0 }, r: 1,
+    r1: { x: 0, y: 0 }, r2: { x: 10, y: 0 } };
+  const capX = { p1: { x: 5, y: -5 }, p2: { x: 5, y: 5 }, r: 1,
+    r1: { x: 5, y: -5 }, r2: { x: 5, y: 5 } };
+  const capN = { p1: { x: 9, y: 0.5 }, p2: { x: 20, y: 0.5 }, r: 1,
+    r1: { x: 9, y: 0.5 }, r2: { x: 20, y: 0.5 } };
+  const capM = { p1: { x: 50, y: 0 }, p2: { x: 60, y: 0 }, r: 1,
+    r1: { x: 50, y: 0 }, r2: { x: 60, y: 0 } };
+  const capC = { p1: { x: 3, y: 0 }, p2: { x: 20, y: 0 }, r: 0,
+    r1: { x: 3, y: 0 }, r2: { x: 20, y: 0 } };
+  const capZ = { p1: { x: 0, y: 0 }, p2: { x: 10, y: 0 }, r: 0,
+    r1: { x: 0, y: 0 }, r2: { x: 10, y: 0 } };
+  const bx = bz(capA, capX);
+  const bn = bz(capA, capN);
+  const bm = bz(capA, capM);
+  const bc = bz(capZ, capC);
+  eq("S17b cross", [bx.hit, bx.n.x, bx.n.y, bx.o.x, bx.o.y],
+    [true, 5, 0, 5, 0]);
+  eq("S17b near", [bn.hit, bn.n.x, bn.n.y, bn.o.x, bn.o.y],
+    [true, 9, 0.5, 9, 0]);
+  eq("S17b miss", [bm.hit], [false]);
+  eq("S17b collinear", [bc.hit, bc.n.x, bc.n.y, bc.o.x, bc.o.y],
+    [true, 3, 0, 3, 0]);
+  out.scenarios.push({ id: "S17b-bz",
+    cross: [bx.hit, bx.n.x, bx.n.y, bx.o.x, bx.o.y],
+    near: [bn.hit, bn.n.x, bn.n.y, bn.o.x, bn.o.y],
+    miss: [bm.hit],
+    collinear: [bc.hit, bc.n.x, bc.n.y, bc.o.x, bc.o.y] });  // S18: trigger match + conditions (PERKS 5.3/5.5). Verbatim C++ twin:
   // match_hit_event / eval_cond (trigger.hpp).
   function matchHit(e, v, entry, fired) {
     if (e.ob === 1 && entry !== fired) return false;
@@ -589,6 +688,7 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
   }
   function evalCond(c, owner, foe) {
     const m = c.ob === 2 ? foe : owner;
+    const other = c.ob === 2 ? owner : foe;
     let r = false;
     if (c.kind === "PerkStart") r = true;
     else if (c.kind === "Random") r = c.chance >= 1 || m.draw < c.chance;
@@ -601,13 +701,127 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
       (c.max === null || m.combo <= c.max);
     else if (c.kind === "Health") r = (c.min === null || m.hp >= c.min) &&
       (c.max === null || m.hp <= c.max);
-    else if (c.kind === "ModExists") r = m.mods.includes(c.name);
+    else if (c.kind === "ModExists") {
+      if (c.ns) {
+        if (!c.name) r = Object.values(m.modsNs).includes(c.ns);
+        else r = m.modsNs[c.name] === c.ns;
+      } else r = m.mods.includes(c.name);
+    }
     else if (c.kind === "Round") r = m.round === c.n;
     else if (c.kind === "Operator") {
       if (c.op === "Or") r = c.nested.some(n => evalCond(n, owner, foe));
       else r = c.nested.every(n => evalCond(n, owner, foe));
+    } else if (["Less", "LessEqual", "Greater", "GreaterEqual", "Equal"].includes(c.kind)) {
+      r = evalCmp(c, m, other);
     }
     return c.neg ? !r : r;
+  }
+  function evalOperand(t, m, o) {
+    // minimal twin: number | ?PlayerParameter[Me|Enemy].Health |
+    // ?Hit[].Damage | ?Variable[name] | ?Abs[x] | +,-,*,/,(,)
+    const num = s => { const v = parseFloat(s); return isNaN(v) ? null : v; };
+    function qref(s, pos) {
+      let i = pos + 1, name = "";
+      while (i < s.length && /[A-Za-z0-9_]/.test(s[i])) name += s[i++];
+      while (s[i] === " ") i++;
+      let arg = "";
+      if (s[i] === "[") {
+        let d = 1; i++;
+        const st = i;
+        while (i < s.length && d > 0) {
+          if (s[i] === "[") d++;
+          if (s[i] === "]") d--;
+          i++;
+        }
+        arg = s.slice(st, i - 1);
+      }
+      while (s[i] === " ") i++;
+      let field = "";
+      if (s[i] === ".") {
+        i++;
+        while (i < s.length && /[A-Za-z0-9_]/.test(s[i])) field += s[i++];
+      }
+      if (name === "Abs") {
+        const v = expr(arg, 0).v;
+        return v === null ? null : { v: Math.abs(v), i };
+      }
+      if (name === "Hit") return field === "Damage" ? { v: m.hit, i } : null;
+      if (name === "Variable") {
+        const v = m.q3[arg];
+        return { v: v === undefined ? 0 : v, i };
+      }
+      if (name === "PlayerParameter") {
+        if (arg !== "Me" && arg !== "Enemy") return null;
+        const mm = arg === "Enemy" ? o : m;
+        if (field === "Health") return { v: mm.hp, i };
+        if (field === "MagicBullet") return { v: 0, i };
+        return null;
+      }
+      return null;
+    }
+    function expr(s, pos) {
+      const term = (s, pos) => {
+        const fact = (s, pos) => {
+          while (s[pos] === " ") pos++;
+          if (s[pos] === "-") {
+            const r = fact(s, pos + 1);
+            return r.v === null ? r : { v: -r.v, i: r.i };
+          }
+          if (s[pos] === "(") {
+            const r = expr(s, pos + 1);
+            if (r.v === null || s[r.i] !== ")") return { v: null, i: r.i };
+            return { v: r.v, i: r.i + 1 };
+          }
+          if (s[pos] === "?") return qref(s, pos);
+          let j = pos;
+          while (j < s.length && /[0-9.]/.test(s[j])) j++;
+          if (j === pos) return { v: null, i: pos };
+          const v = num(s.slice(pos, j));
+          return v === null ? { v: null, i: j } : { v, i: j };
+        };
+        let r = fact(s, pos);
+        if (r.v === null) return r;
+        for (;;) {
+          while (s[r.i] === " ") r.i++;
+          if (s[r.i] === "*") {
+            const q = fact(s, r.i + 1);
+            if (q.v === null) return q;
+            r = { v: r.v * q.v, i: q.i };
+          } else if (s[r.i] === "/") {
+            const q = fact(s, r.i + 1);
+            if (q.v === null || q.v === 0) return { v: null, i: q.i };
+            r = { v: r.v / q.v, i: q.i };
+          } else return r;
+        }
+      };
+      let r = term(s, pos);
+      if (r.v === null) return r;
+      for (;;) {
+        while (s[r.i] === " ") r.i++;
+        if (s[r.i] === "+") {
+          const q = term(s, r.i + 1);
+          if (q.v === null) return q;
+          r = { v: r.v + q.v, i: q.i };
+        } else if (s[r.i] === "-") {
+          const q = term(s, r.i + 1);
+          if (q.v === null) return q;
+          r = { v: r.v - q.v, i: q.i };
+        } else return r;
+      }
+    }
+    const r = expr(t, 0);
+    let j = r.i;
+    while (t[j] === " ") j++;
+    return j !== t.length ? null : r.v;
+  }
+  function evalCmp(c, m, o) {
+    const v1 = evalOperand(c.v1, m, o), v2 = evalOperand(c.v2, m, o);
+    if (v1 === null || v2 === null) return false;
+    if (c.kind === "Less") return v1 < v2;
+    if (c.kind === "LessEqual") return v1 <= v2;
+    if (c.kind === "Greater") return v1 > v2;
+    if (c.kind === "GreaterEqual") return v1 >= v2;
+    return v1 === v2;
   }
   const ev18 = { ob: 1, defense: "", animation: "", critical: 1, shock: -1,
     block: -1, dmgMin: 5, dmgMax: -1 };
@@ -617,14 +831,16 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
   const m18c = matchHit(ev18, { num: { Critical: 1, Damage: 3 }, str: {} }, 0, 0);
   const m18d = matchHit(ev18, vars18, 0, 1);
   eq("S18 match", [m18a, m18b, m18c, m18d], [true, false, false, false]);
-  const own18 = { style: 2, combo: 3, hp: 0.5, round: 2, draw: 0.2, mods: ["Icon"] };
-  const foe18 = { style: 0, combo: 0, hp: 1, round: 2, draw: 0.9, mods: [] };
+  const own18 = { style: 2, combo: 3, hp: 50, round: 2, draw: 0.2, mods: ["Icon"],
+    modsNs: { Icon: "" }, hit: 15, q3: { X: 1 } };
+  const foe18 = { style: 0, combo: 0, hp: 100, round: 2, draw: 0.9, mods: [],
+    modsNs: {}, hit: 15, q3: {} };
   const c18 = [
     evalCond({ kind: "Random", chance: 0.3, neg: false }, own18, foe18),
     evalCond({ kind: "Random", chance: 0.3, neg: false }, foe18, own18),
     evalCond({ kind: "Style", min: "Brutal", max: "Crazy", neg: false }, own18, foe18),
     evalCond({ kind: "Combo", min: 1, max: 5, neg: false }, own18, foe18),
-    evalCond({ kind: "Health", min: null, max: 0.4, neg: false }, own18, foe18),
+    evalCond({ kind: "Health", min: null, max: 40, neg: false }, own18, foe18),
     evalCond({ kind: "ModExists", name: "Icon", neg: false }, own18, foe18),
     evalCond({ kind: "ModExists", name: "Icon", neg: true }, own18, foe18),
     evalCond({ kind: "Round", n: 2, neg: false }, own18, foe18),
@@ -634,9 +850,24 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
     evalCond({ kind: "Operator", op: "And", neg: false, nested: [
       { kind: "Round", n: 2, neg: false }, { kind: "Round", n: 9, neg: false }] },
       own18, foe18),
+    evalCond({ kind: "LessEqual", v1: "?PlayerParameter[Enemy].Health",
+      v2: "60", neg: false }, own18, foe18),
+    evalCond({ kind: "GreaterEqual", v1: "?Hit[].Damage", v2: "10", neg: false },
+      own18, foe18),
+    evalCond({ kind: "Equal", v1: "?Variable[Y]", v2: "0", neg: false }, own18, foe18),
+    evalCond({ kind: "Less", v1: "?Abs[0-5]+10", v2: "20", neg: false }, own18, foe18),
+    evalCond({ kind: "Greater", v1: "?Variable[X]+1", v2: "1", neg: false },
+      own18, foe18),
+    evalCond({ kind: "ModExists", name: "Act", ns: "NS", neg: false },
+      { style: 0, combo: 0, hp: 1, round: 1, draw: 0.5, mods: ["Act"],
+        modsNs: { Act: "NS" }, hit: 0, q3: {} }, foe18),
+    evalCond({ kind: "ModExists", name: "Act", ns: "NS", neg: false },
+      { style: 0, combo: 0, hp: 1, round: 1, draw: 0.5, mods: ["Act"],
+        modsNs: { Act: "other" }, hit: 0, q3: {} }, foe18),
   ];
   eq("S18 conds", c18,
-    [true, false, true, true, false, true, false, true, true, false]);
+    [true, false, true, true, false, true, false, true, true, false,
+      false, true, true, true, true, true, false]);
   out.scenarios.push({ id: "S18-trigger", match: [m18a, m18b, m18c, m18d], conds: c18 });
   // S18c: bus routing (Gj/v_a/UKa-lY): slot filter + event + conds gate,
   // drain yields the queued actions. C++ twin uses the real TrigBus.

@@ -24,10 +24,18 @@
 // parsed but never fired): 3 Style, 4 Combo (battle-end `TYa→Gj(a,4)`
 // noted), 5 HitPreCrit (`Egb` site unknown), 8 MagicCharged (no magic),
 // 9/10/11 anim (plumbing cost), 15/16 area (`rR` bounds OPEN).
+// Log-only exec types (JS applies; needs magic/presentation/timing
+// systems — REVIEW B LOW): StealMagicMod(1 shipped use), SlowModel(3),
+// ChangeModelColor(3), SetCooldown(4), SetDarkness(3), MoveModel(1),
+// AddBullets(2), AddMagicCharge(1); JNa revert log-only for 27/28/29;
+// Bullets/MagicCharge conditions read 0 (no bh/dO, 2 perks). (`rR` bounds OPEN).
 
+#include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -159,20 +167,24 @@ struct TrigVars {
 };
 
 // Condition context for ONE side (`Ae` analog). Magic/bullets stay 0
-// (no magic system — OPEN); `expression` conditions are OPEN (the
-// `Be.ZFa` evaluators need a runtime trace) and evaluate false.
+// (no magic system — OPEN). `hp` is ABSOLUTE (`gd`, L1310-1311 — not a
+// ratio); `hit_dmg` is the in-flight `mg.Damage` for `?Hit[].Damage`;
+// `q3` is the side's `Fc.Q3` store (`SetModVariable`, `dka`).
 struct CondCtx {
     int style_level = 0;
     int combo = 0;
     int stage = 0;
     std::string anim;
     std::vector<std::pair<std::string, int>> intervals;  // (name, G0 type)
-    double hp_ratio = 1.0;
+    double hp = 1.0;
+    double hit_dmg = 0.0;
+    std::map<std::string, double> q3;
     std::vector<std::string> items;  // equipped item names
     int round = 1;
     double pain = 0.0;
     bool in_area = false;
     std::set<std::string> mods;  // live mod names (`ModExists`)
+    std::map<std::string, std::string> mod_ns;  // mod name -> namespace (`YZa`)
     std::function<double()> draw01;
 };
 
@@ -199,6 +211,184 @@ inline bool range_check(const TrigCond& c, double v) {
         }
     }
     return true;
+}
+
+// --- `kp` comparison conditions (REVIEW B HIGH fix) --------------------
+// `ec.create` routes expression tags to `kp` (L1302): the tag IS the
+// comparison (`?Compare[Value1,Value2,Tag]`), evaluated by the `Qa`
+// engine (`Uha`, L2362). Shipped tags: Less/LessEqual/Greater/
+// GreaterEqual/Equal (86 uses). Operands: numeric literals, `_Var`
+// (Set-substituted at load), `?PlayerParameter[Me|Enemy].Field`,
+// `?Hit[].Damage`, `?Variable[name]` (side Q3), `?Abs[x]`, and
+// +,-,*,/,(,) combinations. Unknown fields/functions fail closed
+// (same as the old always-false, but numerics now evaluate).
+// Supported `?PlayerParameter` fields: Health (absolute `gd`),
+// MagicBullet (0 — no magic system, OPEN); DamageConverter and anything
+// else fail closed (OPEN).
+
+struct ExprParse {
+    const std::string& s;
+    std::size_t pos = 0;
+    const CondCtx& owner;
+    const CondCtx& foe;
+    bool fail = false;
+
+    void skip() {
+        while (pos < s.size() && std::isspace(static_cast<unsigned char>(s[pos]))) ++pos;
+    }
+    bool eat(char c) {
+        skip();
+        if (pos < s.size() && s[pos] == c) {
+            ++pos;
+            return true;
+        }
+        return false;
+    }
+    std::optional<double> parse_expr() {
+        auto v = parse_term();
+        if (!v) return std::nullopt;
+        for (;;) {
+            if (eat('+')) {
+                auto r = parse_term();
+                if (!r) return std::nullopt;
+                *v += *r;
+            } else if (eat('-')) {
+                auto r = parse_term();
+                if (!r) return std::nullopt;
+                *v -= *r;
+            } else {
+                return v;
+            }
+        }
+    }
+    std::optional<double> parse_term() {
+        auto v = parse_factor();
+        if (!v) return std::nullopt;
+        for (;;) {
+            if (eat('*')) {
+                auto r = parse_factor();
+                if (!r) return std::nullopt;
+                *v *= *r;
+            } else if (eat('/')) {
+                auto r = parse_factor();
+                if (!r || *r == 0.0) return std::nullopt;
+                *v /= *r;
+            } else {
+                return v;
+            }
+        }
+    }
+    std::optional<double> parse_factor() {
+        skip();
+        if (eat('-')) {
+            auto v = parse_factor();
+            if (!v) return std::nullopt;
+            return -*v;
+        }
+        if (eat('(')) {
+            auto v = parse_expr();
+            if (!v || !eat(')')) return std::nullopt;
+            return v;
+        }
+        if (pos < s.size() && (std::isdigit(static_cast<unsigned char>(s[pos])) || s[pos] == '.')) {
+            std::size_t len = 0;
+            try {
+                const double d = std::stod(s.substr(pos), &len);
+                if (len == 0) return std::nullopt;
+                pos += len;
+                return d;
+            } catch (...) {
+                return std::nullopt;
+            }
+        }
+        if (pos < s.size() && s[pos] == '?') {
+            return parse_qref();
+        }
+        if (pos < s.size() && (s[pos] == '_' || std::isalpha(static_cast<unsigned char>(s[pos])))) {
+            // Bare `_Var` (unresolved at load — missing Set) fails closed.
+            return std::nullopt;
+        }
+        return std::nullopt;
+    }
+    std::optional<double> parse_qref() {
+        // `?PlayerParameter[Me|Enemy].Field`, `?Hit[].Damage`,
+        // `?Variable[name]`, `?Abs[expr]`.
+        ++pos;  // '?'
+        std::string name;
+        while (pos < s.size() &&
+               (std::isalnum(static_cast<unsigned char>(s[pos])) || s[pos] == '_')) {
+            name += s[pos++];
+        }
+        skip();
+        std::string arg;
+        if (eat('[')) {
+            std::size_t depth = 1;
+            const std::size_t start = pos;
+            while (pos < s.size() && depth > 0) {
+                if (s[pos] == '[') ++depth;
+                if (s[pos] == ']') --depth;
+                ++pos;
+            }
+            if (depth != 0) return std::nullopt;
+            arg = s.substr(start, pos - start - 1);
+        }
+        std::string field;
+        if (eat('.')) {
+            while (pos < s.size() &&
+                   (std::isalnum(static_cast<unsigned char>(s[pos])) || s[pos] == '_')) {
+                field += s[pos++];
+            }
+        }
+        if (name == "Abs") {
+            ExprParse inner{arg, 0, owner, foe};
+            auto v = inner.parse_expr();
+            inner.skip();
+            if (!v || inner.pos != arg.size()) return std::nullopt;
+            return std::fabs(*v);
+        }
+        if (name == "Hit") {
+            if (field == "Damage") return owner.hit_dmg;
+            return std::nullopt;
+        }
+        if (name == "Variable") {
+            const auto it = owner.q3.find(arg);
+            return it != owner.q3.end() ? std::optional<double>(it->second) : 0.0;
+        }
+        if (name == "PlayerParameter") {
+            const CondCtx& m = (arg == "Enemy") ? foe : (arg == "Me" ? owner : owner);
+            if (arg != "Me" && arg != "Enemy") return std::nullopt;
+            if (field == "Health") return m.hp;
+            if (field == "MagicBullet") return 0.0;  // no magic (OPEN)
+            return std::nullopt;  // DamageConverter etc. OPEN
+        }
+        return std::nullopt;
+    }
+};
+
+inline std::optional<double> eval_operand(const std::string& text, const CondCtx& owner,
+                                          const CondCtx& foe) {
+    ExprParse p{text, 0, owner, foe};
+    auto v = p.parse_expr();
+    p.skip();
+    if (!v || p.pos != text.size()) return std::nullopt;
+    return v;
+}
+
+// `kp.isEqual`: `ih.Wb().Wn()>0` over `?Compare[V1,V2,Tag]`.
+inline bool eval_compare(const TrigCond& c, const CondCtx& owner, const CondCtx& foe) {
+    const auto it1 = c.s.find("Value1");
+    const auto it2 = c.s.find("Value2");
+    if (it1 == c.s.end() || it2 == c.s.end()) return false;
+    const auto v1 = eval_operand(it1->second, owner, foe);
+    const auto v2 = eval_operand(it2->second, owner, foe);
+    if (!v1 || !v2) return false;
+    const std::string& k = c.kind;
+    if (k == "Less") return *v1 < *v2;
+    if (k == "LessEqual") return *v1 <= *v2;
+    if (k == "Greater") return *v1 > *v2;
+    if (k == "GreaterEqual") return *v1 >= *v2;
+    if (k == "Equal") return *v1 == *v2;
+    return false;
 }
 
 // `Axa` per-condition (`ec.isEqual`, L1302-1316 + §5.5 table).
@@ -278,7 +468,7 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
         }
         r = name_ok && type_ok;
     } else if (k == "Health") {
-        r = range_check(c, m.hp_ratio);
+        r = range_check(c, m.hp);
     } else if (k == "Item") {
         // any `Kea()` entry matches all non-empty Name/Type/Subtype —
         // we only track names, so a non-empty Type/Subtype fails closed.
@@ -301,6 +491,9 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
             }
         }
     } else if (k == "Round") {
+        // Round gate VERIFIED (REVIEW B LOW): JS round.round++ per Z2
+        // (1-based in-fight; writers only reset to 0 at battle init),
+        // ours matches (round_.number++ at round_start).
         int want = 0;
         const auto it = c.s.find("Number");
         if (it != c.s.end()) {
@@ -313,20 +506,31 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
         r = want == m.round;
     } else if (k == "Bullets" || k == "MagicCharge") {
         r = range_check(c, 0.0);  // no magic system — fields are 0 (OPEN)
+    } else if (k == "Less" || k == "LessEqual" || k == "Greater" || k == "GreaterEqual" || k == "Equal") {
+        // `kp` comparisons (see above); Lh-selected pair (m = cond model).
+        r = eval_compare(c, m, c.ob == 2 ? owner : foe);
     } else if (k == "ModExists") {
-        // namespace-hit via `bc.YZa` else name in the live list.
+        // `bc.YZa(name, ns)`: entries under ns with action-name match;
+        // else name in the live list.
         bool hit = false;
         const auto ni = c.s.find("Name");
         const auto gi = c.s.find("Namespace");
-        if (gi != c.s.end() && !gi->second.empty()) {
-            for (const auto& mod : m.mods) {
-                if (mod == gi->second) {
-                    hit = true;
-                    break;
+        const std::string wname = ni != c.s.end() ? ni->second : "";
+        const std::string wns = gi != c.s.end() ? gi->second : "";
+        if (!wns.empty()) {
+            if (wname.empty()) {
+                for (const auto& kv : m.mod_ns) {
+                    if (kv.second == wns) {
+                        hit = true;
+                        break;
+                    }
                 }
+            } else {
+                const auto it = m.mod_ns.find(wname);
+                hit = it != m.mod_ns.end() && it->second == wns;
             }
-        } else if (ni != c.s.end()) {
-            hit = m.mods.find(ni->second) != m.mods.end();
+        } else if (!wname.empty()) {
+            hit = m.mods.find(wname) != m.mods.end();
         }
         r = hit;
     } else if (k == "Pain") {

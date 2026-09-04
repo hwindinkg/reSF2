@@ -44,6 +44,8 @@ Runtime AI/timer-трейсы отложены: tutorial не содержит A
   control, index, type).
 
 
+
+- Review-fix wave (2026-09-04, REVIEW_PHYS_TRIG): HIGH ModFlag installs named persistent mod; kp numeric comparisons (?PlayerParameter/?Hit/?Variable/?Abs + arithmetic, 86 shipped uses); MED margins raw-gb + Ula/Pda insets at build (telemetry fired: EHead margin2 0.5, old code inflated), verbatim Bz roles + n$/o$ split + Cz-collinear target-start + kd_null no-knockback, Yka re-register at round_start, Health absolute gd; LOW collinear (in Bz), dmg_add routed-doc, YZa namespace action-name match, Round gate verified 1-based aligned; NOTEs fixed (XY-plane comment); mass-absent guard + s2a/bFa documented OPEN. Node 94 GREEN, combat/ai/spatial diff 0, loop 13/13 + save/load PASS.
 - Wea/TriggerBus/equip wave (2026-09-04): Bl.strike map (rest-length b, full-vector impulse, per-bone kb offsets + decay, wBa foe fallback, MG/NG OPEN); TriggerBus slots/fire/t0a/Axa/UKa-lY/Qh/ia-JNa/ModExpires-14/Provoke + perks.xml loader (_Var subst, Template merge) + equip mapping (list.xml Perks/Enchantments, ZOa at init, empty for Fists/Body/Head); SetHit-ppb bypass, Ly/jg state ordering, Lifesteal so-ratio, ChangeImpulse u.H=0 + set-semantics; qpb tactic switch; S17/S18/S18c goldens + ElementTree loader check; node 90 GREEN, combat/ai/spatial diff 0, loop 13/13 + save/load PASS.
 - Gr-style + perks wave (2026-09-04): MoveDef::style_factor (RNa) parsed;
   StyleTable/StyleMeter + style_credit/style_vma/style_decay
