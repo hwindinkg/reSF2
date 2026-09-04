@@ -124,6 +124,16 @@ float compute_damage(const IntervalDamage& interval, const FighterParams& attack
     return g;
 }
 
+float block_mult(const FighterParams& defender, bool blocked,
+                   const FightParams& fp) {
+    return attr_exp(defender, fp.block_damage_attr, fp.block_damage_base, blocked);
+}
+
+float crit_mult(const FighterParams& attacker, bool critical,
+                const FightParams& fp) {
+    return attr_exp(attacker, fp.crit_damage_attr, fp.crit_damage_base, critical);
+}
+
 void apply_damage(HitRecord& rec, float hp, bool invulnerable) {
     rec.hp_before = hp;
     // Lethal check (JS Cgb L394): hp < raw -> Zi = hp + 0.01, Iza = true.

@@ -646,6 +646,62 @@ int main() {
                         d0.empty() ? "-" : d0[0].second.type.c_str(), (int)e0.size(),
                         (int)f0.size());
         }
+        // S19 ranged/magic (mirrors combat_golden.js S19).
+        {
+            using sf2::scene::TrigCond;
+            using sf2::scene::CondCtx;
+            const int hz = sf2::scene::bullets_add(0, 1);
+            const double hwa0 = sf2::scene::charge_add(0, 0.2, 0.5);
+            const double hwa1 = sf2::scene::charge_add(1, 0.2, 0.5);
+            const sf2::scene::LaNorm la0 = sf2::scene::la_normalize(0, 1.2, false);
+            const sf2::scene::LaNorm la1 = sf2::scene::la_normalize(0, 0.5, false);
+            const sf2::scene::LaNorm la2 = sf2::scene::la_normalize(3, 0.0, false);
+            const sf2::scene::LaNorm la3 = sf2::scene::la_normalize(0, 1.2, true);
+            sf2::scene::FighterParams nop;
+            const float aq0 = sf2::scene::magic_aq(0.0001f, "", nop);
+            nop.attributes["MagicDamageRecharge"] = 10000.0f;
+            const float aq1 = sf2::scene::magic_aq(0.0001f, "MagicDamageRecharge", nop);
+            auto lpctx = [](int bh, int dO) {
+                CondCtx c;
+                c.bullets = bh;
+                c.raid = dO;
+                return c;
+            };
+            auto spctx = [](double my) {
+                CondCtx c;
+                c.charge = my;
+                return c;
+            };
+            CondCtx foe19;
+            TrigCond lpm;
+            lpm.kind = "Bullets";
+            lpm.s["Type"] = "MagicBullet";
+            lpm.s["Min"] = "1";
+            TrigCond lpr;
+            lpr.kind = "Bullets";
+            lpr.s["Type"] = "RaidChargeBullet";
+            lpr.s["Max"] = "2";
+            TrigCond lpx;
+            lpx.kind = "Bullets";
+            lpx.s["Type"] = "X";
+            TrigCond spm;
+            spm.kind = "MagicCharge";
+            spm.s["Max"] = "0.5";
+            std::printf("  \"magic\": {\"hz\": %d, \"hwa\": [%.17g, %.17g], "
+                        "\"la\": [[%d, %.17g], [%d, %.17g], [%d, %.17g], [%d, %.17g]], "
+                        "\"recharge\": %.17g, \"aq\": [%.17g, %.17g], "
+                        "\"lp\": [%d, %d, %d, %d], \"sp\": [%d, %d]},\n",
+                        hz, hwa0, hwa1, la0.bh, la0.my, la1.bh, la1.my, la2.bh,
+                        la2.my, la3.bh, la3.my,
+                        sf2::scene::magic_recharge(1.0, 1.0, 1.0, 10.0),
+                        (double)aq0, (double)aq1,
+                        (int)sf2::scene::eval_cond(lpm, lpctx(1, 0), foe19),
+                        (int)sf2::scene::eval_cond(lpm, lpctx(0, 0), foe19),
+                        (int)sf2::scene::eval_cond(lpr, lpctx(0, 2), foe19),
+                        (int)sf2::scene::eval_cond(lpx, lpctx(9, 9), foe19),
+                        (int)sf2::scene::eval_cond(spm, spctx(0.7), foe19),
+                        (int)sf2::scene::eval_cond(spm, spctx(0.3), foe19));
+        }
         // S18b perk loader (verified against perks.xml by combat_diff.py
         // via ElementTree — independent implementation, not a twin).
         {

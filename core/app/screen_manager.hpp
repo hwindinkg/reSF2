@@ -46,6 +46,8 @@ enum ScreenId : int {
     kScreenGeneralMenu = 8,
     kScreenResults = 10,
     kScreenSettings = 11,
+    kScreenMoves = 12,
+    kScreenBracket = 13,
 };
 
 // Screen-state values ($d.Te, JS L121: 2/3/5 active, else inactive).

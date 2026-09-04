@@ -136,10 +136,15 @@ public:
     bool start_move_impl(const MoveDef& move, sf2::scene::FightContext& ctx,
                          bool ai);
 
+    // Anim timescale (SlowModel `Kvb`/`KT`): apply sets scale (Speed>=1;
+    // Speed<1 is a verbatim no-op), revert restores 1.0 (`v.dB` assumed).
+    void set_time_scale(float s) { time_scale_ = s; scale_acc_ = 0.0f; }
+    float time_scale() const { return time_scale_; }
     // Advances the current clip one frame (60 Hz). Updates active intervals
     // (Start/End), transitions to idle when the clip ends (JS `Te.ia`
     // L547-548: `Xh+2 >= len` -> stop). Samples the pose at move_frame.
     void advance(float dt);
+    void advance_step();  // one fixed sub-step (timescale loop calls this)
 
     // [FIX idle-slide — Phase 1] Clears the current move (JS `KNa`): the
     // fighter returns to idle. Used by the fight controller when the
@@ -273,6 +278,8 @@ private:
     std::vector<float> prev_x_;
     int facing_ = 1;                        // +1 (JS `Te.FX` / `hd()`)
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (COM world pos)
+    float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
+    float scale_acc_ = 0.0f;   // timescale fractional accumulator
     std::vector<sf2::scene::Vec3> kb_;  // per-bone knockback offsets (world)
     std::set<std::string> active_intervals_; // active interval names (JS `Te.xj`)
     float enemy_x_ = 0.0f;                  // enemy world X (for facing)

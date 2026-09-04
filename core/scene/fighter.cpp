@@ -481,9 +481,20 @@ std::string Fighter::try_react(FightContext& ctx, bool prefer_fall) {
 // The old code advanced move_frame_ 1 per step => 3x TOO FAST. The native
 // now advances a subframe counter and samples the interpolated pose.
 void Fighter::advance(float dt) {
-    (void)dt;  // fixed 60 Hz — one frame per call (JS 1/60 step)
+    (void)dt;  // fixed 60 Hz - one frame per call (JS 1/60 step)
     // Knockback offsets decay every tick (JS Vc.sk friction - OPEN rate).
     if (!kb_.empty()) sf2::scene::decay_knockback(kb_);
+    // Timescale steps (SlowModel KT): scale>=1 verbatim (Speed<1 no-ops
+    // at apply); fractional remainder carries to the next tick.
+    scale_acc_ += time_scale_;
+    int steps = static_cast<int>(scale_acc_);
+    if (steps < 1) steps = 1;
+    if (steps > 4) steps = 4;
+    scale_acc_ -= static_cast<float>(steps);
+    for (int i = 0; i < steps; ++i) advance_step();
+}
+
+void Fighter::advance_step() {
     if (current_move_ == nullptr || current_clip_ == nullptr) {
         return;
     }

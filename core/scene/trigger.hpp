@@ -178,6 +178,9 @@ struct CondCtx {
     std::vector<std::pair<std::string, int>> intervals;  // (name, G0 type)
     double hp = 1.0;
     double hit_dmg = 0.0;
+    int bullets = 0;  // wd.bh (MagicBullet count)
+    int raid = 0;     // wd.dO (RaidChargeBullet count)
+    double charge = 0.0;  // wd.my [0,1] (MagicCharge)
     std::map<std::string, double> q3;
     std::vector<std::string> items;  // equipped item names
     int round = 1;
@@ -504,8 +507,19 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
             }
         }
         r = want == m.round;
-    } else if (k == "Bullets" || k == "MagicCharge") {
-        r = range_check(c, 0.0);  // no magic system — fields are 0 (OPEN)
+    } else if (k == "Bullets") {
+        // `lp`: Type MagicBullet->bh, RaidChargeBullet->dO, else false.
+        const auto ti = c.s.find("Type");
+        const std::string t = ti != c.s.end() ? ti->second : "";
+        if (t == "MagicBullet") {
+            r = range_check(c, static_cast<double>(m.bullets));
+        } else if (t == "RaidChargeBullet") {
+            r = range_check(c, static_cast<double>(m.raid));
+        } else {
+            r = false;
+        }
+    } else if (k == "MagicCharge") {
+        r = range_check(c, m.charge);  // `sp`: xE(my)
     } else if (k == "Less" || k == "LessEqual" || k == "Greater" || k == "GreaterEqual" || k == "Equal") {
         // `kp` comparisons (see above); Lh-selected pair (m = cond model).
         r = eval_compare(c, m, c.ob == 2 ? owner : foe);
@@ -661,6 +675,7 @@ struct ModState {
     std::map<std::string, std::string> vars;  // `SetModVariable` Q3 store
     std::vector<std::pair<std::string, double>> attr_adds;  // `Rp` (JNa)
     int attr_side = 0;  // side whose attrs got the adds (JNa target)
+    int col_side = -1;  // TurnOffCollision target side (JNa restores vZ)
     bool qw = false;  // ClearMods-armed (flush at Qh)
 };
 
@@ -801,13 +816,17 @@ class TrigBus {
         }
     }
 
-    void retime_mod(int side, const std::string& name, int uf, int iv) {
-        // `dpb`: retime named mod `Uf/Iv` (-1 = keep).
+    void retime_mod(int side, const std::string& name, int uf, int iv,
+                    const std::string& ns = "") {
+        // `dpb`: retime named mod `Uf/Iv` (-1 = keep); namespace loop
+        // retimes same-named entries under `bc.iAa(ns)`.
         BusSide& s = sides_[side & 1];
-        const auto it = s.mods.find(name);
-        if (it == s.mods.end()) return;
-        if (uf >= 0) it->second.uf = uf;
-        if (iv >= 0) it->second.iv = iv;
+        for (auto& kv : s.mods) {
+            if (kv.first != name) continue;
+            if (!ns.empty() && kv.second.namespc != ns) continue;
+            if (uf >= 0) kv.second.uf = uf;
+            if (iv >= 0) kv.second.iv = iv;
+        }
     }
 
    private:
@@ -819,6 +838,9 @@ class TrigBus {
 struct ModTickCtx {
     std::map<std::string, float>* attrs_by_side[2] = {nullptr, nullptr};
     Vec3* jg_by_side[2] = {nullptr, nullptr};
+    bool* col_by_side[2] = {nullptr, nullptr};  // hq.S vZ restore
+    std::function<void(int, float)> set_timescale;  // fq.Kvb revert
+    std::function<void(int)> reset_color;  // Mp.Qs revert (location color)
     float* ly_by_side[2] = {nullptr, nullptr};
     float* qz_by_side[2] = {nullptr, nullptr};
     // Called per expiry (natural or `qw` flush) for the slot-14 publish.
@@ -831,16 +853,30 @@ struct ModTickCtx {
 //   ChangeImpulse(20): `gob()` → (1,1,1); ChangeHitEffectScale(21):
 //   `fob()` → Qz=1; ChangeAdditionalDamageValue(22): `Ynb()` → Ly=0;
 //   27/28/29: log-only states; TurnOffCollision(30): log (body flags OPEN).
-inline void revert_mod(const ModState& m, ModTickCtx& ctx,
+inline void revert_mod(const ModState& m, int side, ModTickCtx& ctx,
                        std::function<void(const std::string&)> log) {
     if (m.kind == "ModAttributes" && m.attr_side >= 0 && m.attr_side < 2 &&
         ctx.attrs_by_side[m.attr_side] != nullptr) {
         for (const auto& kv : m.attr_adds) {
             (*ctx.attrs_by_side[m.attr_side])[kv.first] -= static_cast<float>(kv.second);
         }
-    } else if (m.kind == "ChangeImpulse" || m.kind == "ChangeAdditionalDamageValue" ||
-               m.kind == "ChangeHitEffectScale") {
-        // jg/ly/qz resets happen in `tick_side_mods` (owner side).
+    } else if (m.kind == "ChangeImpulse" && side >= 0 && side < 2 &&
+               ctx.jg_by_side[side] != nullptr) {
+        *ctx.jg_by_side[side] = Vec3{1.0f, 1.0f, 1.0f};  // `gob()`
+    } else if (m.kind == "ChangeAdditionalDamageValue" && side >= 0 && side < 2 &&
+               ctx.ly_by_side[side] != nullptr) {
+        *ctx.ly_by_side[side] = 0.0f;  // `Ynb()`
+    } else if (m.kind == "ChangeHitEffectScale" && side >= 0 && side < 2 &&
+               ctx.qz_by_side[side] != nullptr) {
+        *ctx.qz_by_side[side] = 1.0f;  // `fob()`
+    } else if (m.kind == "SlowModel" && ctx.set_timescale) {
+        ctx.set_timescale(side, 1.0f);  // `Kvb` revert: KT(hU, v.dB=1)
+    }
+    else if (m.kind == "TurnOffCollision" && m.col_side >= 0 && m.col_side < 2 &&
+               ctx.col_by_side[m.col_side] != nullptr) {
+        *ctx.col_by_side[m.col_side] = true;  // `hq.S(a,true)`
+    } else if (m.kind == "ChangeModelColor" && ctx.reset_color) {
+        ctx.reset_color(side);  // `Mp.Qs(a,true)` -> location color
     }
     if (log) {
         if (m.kind == "StealMagicMod" || m.kind == "SlowModel" ||
@@ -861,17 +897,7 @@ inline void tick_side_mods(TrigBus& bus, int side, ModTickCtx& ctx) {
         ModState& m = it->second;
         if (m.uf > 0) {
             if (--m.uf == 0) {
-                if (m.kind == "ChangeImpulse" && ctx.jg_by_side[side & 1] != nullptr) {
-                    *ctx.jg_by_side[side & 1] = Vec3{1.0f, 1.0f, 1.0f};
-                }
-                if (m.kind == "ChangeAdditionalDamageValue" &&
-                    ctx.ly_by_side[side & 1] != nullptr) {
-                    *ctx.ly_by_side[side & 1] = 0.0f;
-                }
-                if (m.kind == "ChangeHitEffectScale" && ctx.qz_by_side[side & 1] != nullptr) {
-                    *ctx.qz_by_side[side & 1] = 1.0f;
-                }
-                if (bus.log) revert_mod(m, ctx, bus.log);
+                if (bus.log) revert_mod(m, side & 1, ctx, bus.log);
                 if (ctx.on_expire) ctx.on_expire(side & 1, m);
                 it = s.mods.erase(it);
                 continue;

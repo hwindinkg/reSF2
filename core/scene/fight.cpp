@@ -312,6 +312,8 @@ void FightController::init_locks(
     // Perk bus register (ZOa analog).
     perk_setup_ = perks;
     setup_bus(perks);
+    // Magic init (`Ka`: `zL(0)`, `yL($6a)` = InitialCharge table, `LA`).
+    init_magic();
 
     // Camera framing (JS ma.Sya L1833 + the ql dZa intro): the fighters'
     // world anchors are the JS CoM nodes (Eu.ma); the camera starts at the
@@ -442,6 +444,8 @@ void FightController::round_start() {
     // between_rounds_recover() when the previous round ends.
     round_.number++;
     round_init();
+    // Per-round magic reset (`yKa`: bh=0 + InitialCharge; raid persists).
+    init_magic();
     // Per-round bus re-register (JS tb.Yka L401/402/405: cKa + Gf both
     // sides — live timed mods do NOT persist across rounds).
     setup_bus(perk_setup_);
@@ -686,6 +690,18 @@ void FightController::rebuild_body(FightFighter& f, const FightFighter& foe) {
 // register both sides (`Gf`). Enemy refs are usually empty (enemy gear
 // is not modeled — OPEN).
 void FightController::setup_bus(const PerkSetup& perks) {
+    // Full reset first (JS `reset()`+`pP(true)`+`JNa` path + `Yka` re-gf):
+    // live state reverts (JG/Ly/Qz/collision/timescale/color/dots), then
+    // the bus clears and both sides re-register fresh.
+    for (FightFighter* f : {&player_, &enemy_}) {
+        f->jg = sf2::scene::Vec3{1.0f, 1.0f, 1.0f};
+        f->params.ly = 0.0f;
+        f->qz = 1.0f;
+        f->collidable = true;
+        f->fighter.set_time_scale(1.0f);
+        f->fighter.set_color(fighter_color_);
+        f->dots.clear();
+    }
     bus_.clear();
     bus_.log = [](const std::string& line) {
         std::fprintf(stdout, "[perk] %s\n", line.c_str());
@@ -726,6 +742,9 @@ sf2::scene::CondCtx FightController::cond_ctx(int side, double hit_dmg) {
         ctx.intervals.emplace_back(n, me.fighter.interval_type(n));
     }
     ctx.hp = me.hp;  // absolute gd (L1310-1311)
+    ctx.bullets = me.bullets;
+    ctx.raid = me.raid_bullets;
+    ctx.charge = me.charge;
     ctx.hit_dmg = hit_dmg;
     ctx.items = side == 0 ? player_items_ : enemy_items_;
     ctx.round = round_.number;
@@ -741,11 +760,11 @@ sf2::scene::CondCtx FightController::cond_ctx(int side, double hit_dmg) {
 }
 
 static bool is_combat_action(const std::string& t) {
-    // Actions that fold into the CURRENT hit record (`ppb`/`apb`/`Yob`/
-    // `hq` run inside the Cgb fire, pre-`LWa`). Everything else is bus
-    // state (JG/Ly/Qz/mods/vars) for future hits.
-    return t == "SetHit" || t == "Lifesteal" || t == "DisableInterval" ||
-           t == "TurnOffCollision";
+    // Actions that fold into the CURRENT hit record (`ppb`/`apb`/`Yob`
+    // run inside the Cgb fire, pre-`LWa`). TurnOffCollision is state
+    // (`hq.S` on the qk model — handled in exec, not the record).
+    // Everything else is bus state (JG/Ly/Qz/mods/vars) for future hits.
+    return t == "SetHit" || t == "Lifesteal" || t == "DisableInterval";
 }
 
 // Target side for an action (`Ma.e6a`): Ob==1 → owner, Ob==2 → foe.
@@ -783,6 +802,20 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
             if (kv.first == "Frames") continue;
             target.params.attributes[kv.first] += static_cast<float>(kv.second);
             m.attr_adds.emplace_back(kv.first, kv.second);
+        }
+        // `Rp.aP`: non-numeric attrs are per-fire expressions — evaluate
+        // now (owner/foe contexts) and apply like constants.
+        {
+            const sf2::scene::CondCtx oc = cond_ctx(tgt);
+            const sf2::scene::CondCtx fc = cond_ctx(1 - tgt);
+            for (const auto& kv : a.str) {
+                if (kv.first == "Name" || kv.first == "Namespace") continue;
+                const auto v = sf2::scene::eval_operand(kv.second, oc, fc);
+                if (v) {
+                    target.params.attributes[kv.first] += static_cast<float>(*v);
+                    m.attr_adds.emplace_back(kv.first, (double)*v);
+                }
+            }
         }
         bus_.install_mod(owner_side, std::move(m));
     } else if (type == "ChangeImpulse") {
@@ -852,9 +885,9 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         m.uf = uf;
         bus_.install_mod(owner_side, std::move(m));
     } else if (type == "SetModFrames") {
-        // `dpb`: retime the named mod (-1 = keep).
+        // `dpb`: retime the named mod (-1 = keep), incl. the namespace loop.
         bus_.retime_mod(owner_side, str("Name"), static_cast<int>(num("Frames", -1.0)),
-                        static_cast<int>(num("Interval", -1.0)));
+                        static_cast<int>(num("Interval", -1.0)), str("Namespace"));
     } else if (type == "ApplyModEffect") {
         bus_.log("perknoop ApplyModEffect " + str("Name") + " (U4 OPEN)");
     } else if (type == "ClearMods") {
@@ -896,6 +929,86 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
             }
             exec_action(pr.first, pr.second, tgt, depth + 1);
         }
+    } else if (type == "AddBullets") {
+        // `Rob`: value.Wn() int; ONLY MagicBullet acts (`hZ`+`LA`),
+        // other types are a verbatim no-op.
+        const std::string cz = str("BulletType");
+        const int v = static_cast<int>(num("Value", 0.0));
+        if (cz == "MagicBullet") {
+            target.bullets = sf2::scene::bullets_add(target.bullets, v);
+            la_normalize(target);
+            fire_slot8(tgt);
+        } else {
+            bus_.log("perknoop AddBullets " + cz + " (verbatim Rob no-op)");
+        }
+    } else if (type == "AddMagicCharge") {
+        // `Sob`: `Hwa` (only when bh==0) + `LA` + slot-8 publish.
+        const double v = num("Value", 0.0);
+        target.charge = sf2::scene::charge_add(target.bullets, target.charge, v);
+        la_normalize(target);
+        fire_slot8(tgt);
+    } else if (type == "SlowModel") {
+        // `Kvb`: b = Speed (default `v.on()` = 1 assumed); b<1 is a
+        // verbatim no-op; else KT(hU, b) — single channel here.
+        const double b = num("Speed", 1.0);
+        if (b >= 1.0) {
+            if (tgt == 0) {
+                player_.fighter.set_time_scale(static_cast<float>(b));
+            } else {
+                enemy_.fighter.set_time_scale(static_cast<float>(b));
+            }
+            if (uf > 0) {
+                sf2::scene::ModState m;
+                m.name = str("Name").empty() ? type : str("Name");
+                m.parent = t.perk;
+                m.kind = type;
+                m.uf = uf;
+                bus_.install_mod(owner_side, std::move(m));
+            }
+        }
+    } else if (type == "ChangeModelColor") {
+        // `Mp.Qs`: flat tint ($J color expr — hex/dec ints supported,
+        // complex Qa.oh text fails closed); revert restores location color.
+        const std::string col = str("Color");
+        std::uint32_t rgb = 0;
+        bool ok = false;
+        if (!col.empty()) {
+            try {
+                std::size_t pos = 0;
+                const unsigned long v = std::stoul(col, &pos, 0);
+                if (pos == col.size()) {
+                    rgb = static_cast<std::uint32_t>(v) & 0xFFFFFFu;
+                    ok = true;
+                }
+            } catch (...) {
+            }
+        }
+        if (ok) {
+            if (tgt == 0) {
+                player_.fighter.set_color(rgb);
+            } else {
+                enemy_.fighter.set_color(rgb);
+            }
+            sf2::scene::ModState m;
+            m.name = str("Name").empty() ? type : str("Name");
+            m.parent = t.perk;
+            m.kind = type;
+            m.uf = uf;
+            bus_.install_mod(owner_side, std::move(m));
+        } else {
+            bus_.log("perknoop ChangeModelColor " + col + " (unparsed)");
+        }
+    } else if (type == "TurnOffCollision") {
+        // `hq.S`: qk capsules vZ=false (false = apply path); revert
+        // restores true. Fighter-level gate, equivalent outcome.
+        target.collidable = false;
+        sf2::scene::ModState m;
+        m.name = str("Name").empty() ? type : str("Name");
+        m.parent = t.perk;
+        m.kind = type;
+        m.uf = uf;
+        m.col_side = tgt;
+        bus_.install_mod(owner_side, std::move(m));
     } else if (is_combat_action(type)) {
         bus_.log("perknoop " + type + " (outside hit scope, OPEN)");
     } else {
@@ -953,21 +1066,8 @@ void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
                 if (out_has_damage != nullptr) *out_has_damage = true;
                 if (out_damage != nullptr) *out_damage = po.f_damage;
             }
-            for (const auto& kv : po.attr_adds) {
-                def.params.attributes[kv.first] += static_cast<float>(kv.second);
-            }
             for (const auto& cl : po.clears) {
                 def.fighter.clear_intervals(cl.first, cl.second);
-            }
-            if (po.collision_off) {
-                std::fprintf(stdout, "[perk] %s collision off (OPEN: needs body flags)\n",
-                             def.name.c_str());
-                std::fflush(stdout);
-            }
-            for (const auto& d : po.install_dots) def.dots.push_back(d);
-            for (const auto& line : po.log) {
-                std::fprintf(stdout, "[perk] %s\n", line.c_str());
-                std::fflush(stdout);
             }
         }
         for (const auto& a : life) {
@@ -984,9 +1084,8 @@ void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
     }
 }
 
-// `ia` mod tick for one side + slot-14 publish on expiry.
-void FightController::tick_mods(int side) {
-    side &= 1;
+// Shared JNa state bindings (attrs/jg/ly/qz/collision per side).
+sf2::scene::ModTickCtx FightController::mod_tick_ctx() {
     sf2::scene::ModTickCtx ctx;
     ctx.attrs_by_side[0] = &player_.params.attributes;
     ctx.attrs_by_side[1] = &enemy_.params.attributes;
@@ -996,6 +1095,67 @@ void FightController::tick_mods(int side) {
     ctx.ly_by_side[1] = &enemy_.params.ly;
     ctx.qz_by_side[0] = &player_.qz;
     ctx.qz_by_side[1] = &enemy_.qz;
+    ctx.col_by_side[0] = &player_.collidable;
+    ctx.col_by_side[1] = &enemy_.collidable;
+    ctx.set_timescale = [this](int s, float v) {
+        if (s == 0) {
+            player_.fighter.set_time_scale(v);
+        } else {
+            enemy_.fighter.set_time_scale(v);
+        }
+    };
+    ctx.reset_color = [this](int s) {
+        if (s == 0) {
+            player_.fighter.set_color(fighter_color_);
+        } else {
+            enemy_.fighter.set_color(fighter_color_);
+        }
+    };
+    return ctx;
+}
+
+// Magic/bullet normalize (`LA` without the link branch — versus has no
+// link model; the `lb!=null` delegation is OPEN): my>=1 converts to a
+// bullet + reset, bullets cap at 1. `NoBulletsReplenishment` skips the
+// conversion (cj ERule marker).
+// Magic per-fighter init + per-round reset (`Ka`/`yKa`: `zL(0)`,
+// `yL(InitialCharge)`, `LA`; raid bullets persist — no round reset and
+// no consume site in the static text).
+void FightController::init_magic() {
+    const sf2::scene::FightParams& gfp = sf2::scene::FightParams::defaults();
+    for (FightFighter* f : {&player_, &enemy_}) {
+        f->bullets = 0;
+        f->charge = sf2::scene::charge_add(
+            0, 0.0, static_cast<double>(sf2::scene::magic_aq(
+                             gfp.magic_initial_base, gfp.magic_initial_attr, f->params)));
+        la_normalize(*f);
+    }
+}
+
+void FightController::la_normalize(FightFighter& f) {
+    const sf2::scene::LaNorm r =
+        sf2::scene::la_normalize(f.bullets, f.charge, no_bullets_replenish_);
+    f.bullets = r.bh;
+    f.charge = r.my;
+}
+
+// Slot-8 publish after bullet/charge adds (mirrors the only shipped
+// publisher pattern, debug case 18: `hZ+LA` then `Gj(yb,8)`).
+void FightController::fire_slot8(int side) {
+    side &= 1;
+    bus_.fire(sf2::scene::kEvMagicCharged, sf2::scene::TrigVars(), true, side,
+              cond_ctx(0), cond_ctx(1), oba_phase(phase_), frame_);
+    for (int q = 0; q < 2; ++q) {
+        std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> pairs;
+        bus_.drain(q, pairs);
+        for (const auto& pr : pairs) exec_action(pr.first, pr.second, q);
+    }
+}
+
+// `ia` mod tick for one side + slot-14 publish on expiry.
+void FightController::tick_mods(int side) {
+    side &= 1;
+    sf2::scene::ModTickCtx ctx = mod_tick_ctx();
     ctx.on_expire = [this](int s, const sf2::scene::ModState& m) {
         // `JNa→Gj(d,14)`: vars carry ModExpires/Namespace/ParentPerk.
         sf2::scene::TrigVars v;
@@ -1035,11 +1195,9 @@ void FightController::tick_bus_side(int side) {
     std::vector<std::pair<int, sf2::scene::ModState>> flushed;
     bus_.flush_qw(flushed);
     if (!flushed.empty()) {
-        sf2::scene::ModTickCtx ctx;
-        ctx.attrs_by_side[0] = &player_.params.attributes;
-        ctx.attrs_by_side[1] = &enemy_.params.attributes;
+        sf2::scene::ModTickCtx ctx = mod_tick_ctx();
         for (const auto& fm : flushed) {
-            sf2::scene::revert_mod(fm.second, ctx, bus_.log);
+            sf2::scene::revert_mod(fm.second, fm.first, ctx, bus_.log);
             sf2::scene::TrigVars ev;
             ev.str["ModExpires"] = fm.second.name;
             ev.str["Namespace"] = fm.second.namespc;
@@ -1126,6 +1284,8 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
         }
     }
     if (d == nullptr) return false;
+    // TurnOffCollision (`hq.S` zeroes all vZ): no hittable capsules.
+    if (!def.collidable) return false;
     const auto key = std::make_pair(static_cast<const void*>(&move),
                                     static_cast<const void*>(d));
     if (last == key) return false;  // dW: already tested
@@ -1340,8 +1500,29 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         rec.lethal = sethit_value >= def.hp;
     }
     def.hp = rec.hp_after;
-    sf2::scene::apply_damage(rec, def.hp, false);
-    def.hp = rec.hp_after;
+
+    // Magic recharge (`Jma`, lb==null branch — versus has no link model;
+    // the lb!=null delegation is OPEN): attacker charges from dealt
+    // damage while bh==0: `Hwa(2^e*c*b*Zi)` with e = DamageRecharge on
+    // crit else PainRecharge, then `LA()` normalize.
+    {
+        const sf2::scene::FightParams& gfp = sf2::scene::FightParams::defaults();
+        if (atk.bullets == 0 && rec.final_damage > 0.0f) {
+            const float e = hit_critical
+                ? sf2::scene::magic_aq(gfp.magic_damage_base, gfp.magic_damage_attr,
+                                       atk.params)
+                : sf2::scene::magic_aq(gfp.magic_pain_base, gfp.magic_pain_attr,
+                                       atk.params);
+            const float b = sf2::scene::block_mult(def.params, hit_blocked, gfp);
+            const float c = sf2::scene::crit_mult(atk.params, hit_critical, gfp);
+            const double add = sf2::scene::magic_recharge(static_cast<double>(e),
+                                                          static_cast<double>(b),
+                                                          static_cast<double>(c),
+                                                          static_cast<double>(rec.final_damage));
+            atk.charge = sf2::scene::charge_add(atk.bullets, atk.charge, add);
+            la_normalize(atk);
+        }
+    }
 
     // HUD style credit (JS `Sh.Vma` <- `Sf.strike`, L2040; `Jh.Gua` feeds
     // prize b6): every landed hit credits the ATTACKER's meter with the

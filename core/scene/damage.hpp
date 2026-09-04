@@ -20,6 +20,7 @@
 // invulnerable -> 0, HP -= Zi.
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <string>
 
@@ -86,6 +87,14 @@ struct FightParams {
     float shock_head_base = 0.0001f;    // `HeadHitChance.Base`
     // AlignTargetAttributes (JS `v.wv`): attribute name -> Align value.
     std::map<std::string, float> align_target_attributes;
+    // Magic charge tables (JS `v.jA` = settings `<Magic>`, Yv rows:
+    // InitialCharge/PainRecharge/DamageRecharge, Base=0.0001 + Mk attr).
+    std::string magic_initial_attr = "MagicInitialCharge";
+    float magic_initial_base = 0.0001f;
+    std::string magic_pain_attr = "MagicPainRecharge";
+    float magic_pain_base = 0.0001f;
+    std::string magic_damage_attr = "MagicDamageRecharge";
+    float magic_damage_base = 0.0001f;
 
     static const FightParams& defaults() {
         static const FightParams k;
@@ -153,6 +162,51 @@ std::string select_defense(const IntervalDamage& interval, bool blocked,
 //   hp -= final
 // Returns the updated HitRecord (hp_before/hp_after set).
 void apply_damage(HitRecord& rec, float hp, bool invulnerable);
+
+// `kea`/`qea` (L536): 2^(attr*Bc) when the flag holds, else 1.
+// Exported for the Jma magic recharge (`Hwa(2^e*c*b*a)` needs the same
+// block/crit multis the damage path used).
+float block_mult(const FighterParams& defender, bool blocked,
+                 const FightParams& fp = FightParams::defaults());
+float crit_mult(const FighterParams& attacker, bool critical,
+                const FightParams& fp = FightParams::defaults());
+
+// `jA.AQ(name, params)`: row Bc × attr(Mk) when the fighter carries the
+// attribute, else Bc (magic Initial/Pain/Damage recharge table lookup).
+inline float magic_aq(float base, const std::string& attr, const FighterParams& params) {
+    if (!attr.empty() && params.has_attr(attr)) return base * params.attr(attr);
+    return base;
+}
+
+// Ranged/magic state ops (JS `hZ`/`Hwa`/`LA`, lb==null branch):
+// `hZ(n)` = zL(bh+n); `Hwa(v)` = bh==0 && yL(my+v) (my clamped [0,1]);
+// `LA` = my>=1 converts to a bullet + reset (skipped under
+// `ERuleNoBulletsReplenishment`), bullets cap at 1.
+inline int bullets_add(int bh, int n) { return bh + n; }
+inline double charge_add(int bh, double my, double v) {
+    if (bh != 0) return my;
+    double r = my + v;
+    if (r > 1.0) r = 1.0;
+    if (r < 0.0) r = 0.0;
+    return r;
+}
+struct LaNorm {
+    int bh = 0;
+    double my = 0.0;
+};
+inline LaNorm la_normalize(int bh, double my, bool no_replenish) {
+    if (my >= 1.0 && !no_replenish) {
+        bh += 1;
+        my = 0.0;
+    }
+    if (bh > 1) bh = 1;
+    return LaNorm{bh, my};
+}
+
+// Jma recharge amount: `Hwa(2^e*c*b*Zi)`.
+inline double magic_recharge(double e, double b, double c, double zi) {
+    return std::pow(2.0, e) * b * c * zi;
+}
 
 // The critical chance (JS `v.gya.p8a` L605 + `wd.A9a` L529):
 //   CriticalHitChance Base (0.0001) * the ATTACKER's CriticalChance attr.

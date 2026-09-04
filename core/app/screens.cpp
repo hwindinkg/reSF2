@@ -667,6 +667,26 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                 n.x = x * 1.0f + view_w / 2.0f;
                 n.y = view_h / 2.0f - y * 1.0f;
                 n.active = true;  // the MapScreen ctor applies the lock rule
+                // Xs warriors (FLOW_STATIC Modes): FirstNames across the
+                // battle's Fights, deduped, capped (bracket display).
+                for (pugi::xml_node fight = battle.child("Fight"); fight;
+                     fight = fight.next_sibling("Fight")) {
+                    const pugi::xml_node warriors = fight.child("Warriors");
+                    if (!warriors) continue;
+                    for (pugi::xml_node wr = warriors.child("Warrior"); wr;
+                         wr = wr.next_sibling("Warrior")) {
+                        const std::string fn = wr.attribute("FirstName").value();
+                        if (fn.empty() || n.warriors.size() >= 3) continue;
+                        bool dup = false;
+                        for (const auto& have : n.warriors) {
+                            if (have == fn) {
+                                dup = true;
+                                break;
+                            }
+                        }
+                        if (!dup) n.warriors.push_back(fn);
+                    }
+                }
                 z.nodes.push_back(std::move(n));
             }
             out.push_back(std::move(z));
@@ -1601,6 +1621,17 @@ void MapScreen::update_impl(float dt) {
             return;
         }
     }
+    // BRACKET (bottom-right corner, mirrors the render rect): the series
+    // bracket for the current zone. Corner is outside node rects and loop
+    // click spots.
+    if (p.x >= 1100.0 && p.x <= 1230.0 && p.y >= 640.0 && p.y <= 688.0) {
+        if (p.pressed) {
+            sf2::audio::AudioEngine::instance().play("click");
+            std::fprintf(stdout, "[map] BRACKET -> series bracket\n");
+            std::fflush(stdout);
+            push(kScreenBracket);
+        }
+    }
     if (zone_sel_ < 0 || static_cast<std::size_t>(zone_sel_) >= zones_.size()) return;
     hover_ = -1;
     for (std::size_t i = 0; i < zones_[zone_sel_].nodes.size(); ++i) {
@@ -1779,6 +1810,12 @@ void MapScreen::render_impl(App& app) {
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
     }
+    // BRACKET button (bottom-right corner convention): the series bracket
+    // for the current zone. Node taps live center-screen; the corner is
+    // outside every ±60 node rect on current data (and off loop clicks).
+    draw_flat_button(app, "BRACKET", 1165.0f, 664.0f, 130.0f, 48.0f, 0.3f, 0.32f, 0.4f,
+                     false);
+    (void)app.draw_text(1125.0f, 656.0f, "BRACKET", 0.7f, 1.0f, 1.0f, 1.0f);
     // Boss-intro act overlay (Rd machine over the lD multi-intro list;
     // boss names are display strings, shown raw). Skippable by tap.
     if (act_pending_ && act_.active()) {
@@ -3537,6 +3574,16 @@ void EquipmentScreen::update_impl(float dt) {
             return;
         }
     }
+    // MOVES (bottom-right corner): the learned-moves screen for the wielded
+    // weapon. The owned grid lives left of x=1054, so the corner is clear.
+    if (p.x >= 1100.0 && p.x <= 1230.0 && p.y >= 640.0 && p.y <= 688.0) {
+        if (p.pressed) {
+            sf2::audio::AudioEngine::instance().play("click");
+            std::fprintf(stdout, "[equip] MOVES -> moves screen\n");
+            std::fflush(stdout);
+            push(kScreenMoves);
+        }
+    }
     // The owned items grid: click to equip into its type's slot. `card`
     // counts equippable-type cards (all five slots: Weapon/Armor/Helm/
     // Ranged/Magic — JS `xc.hk` slots) EXCEPT the NoRanged/NoMagic
@@ -3762,6 +3809,10 @@ void EquipmentScreen::render_impl(App& app) {
     }
     // The BACK button (top-left).
     draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    // MOVES button (mirrors the update rect above).
+    draw_flat_button(app, "MOVES", 1165.0f, 664.0f, 130.0f, 48.0f, 0.3f, 0.32f, 0.4f,
+                     false);
+    (void)app.draw_text(1125.0f, 656.0f, "MOVES", 0.7f, 1.0f, 1.0f, 1.0f);
 }
 
 // ---------------------------------------------------------------------------
@@ -3831,6 +3882,178 @@ void SettingsScreen::render_impl(App& app) {
 }
 
 // ---------------------------------------------------------------------------
+// MovesScreen
+// ---------------------------------------------------------------------------
+
+MovesScreen::MovesScreen(ScreenManager& mgr) : Screen(mgr, "Moves") {
+    // Exact learned list: a throwaway Fighter builds hb with the save's
+    // owned items (build_move_list_locks — display only, never stepped).
+    try {
+        if (!app().has_fight_assets()) {
+            std::fprintf(stdout, "[moves] no fight assets — list unavailable\n");
+            return;
+        }
+        FightAssets& assets = app().fight_assets();
+        const WarriorSave w = app().save().load();
+        weapon_ = w.weapon;
+        if (weapon_.empty()) weapon_ = "Fists";
+        if (assets.merged.bones.empty() || assets.moves.empty()) {
+            std::fprintf(stdout, "[moves] no model/moves — list unavailable\n");
+            return;
+        }
+        sf2::scene::Fighter fig;
+        fig.set_model(assets.merged);
+        fig.build_move_list_locks(assets.moves, owned_items(app()), true);
+        total_ = static_cast<int>(fig.hb().size());
+        for (const sf2::scene::MoveDef* m : fig.hb()) {
+            if (m == nullptr) continue;
+            Row r;
+            r.name = m->name;
+            r.type = m->type;
+            r.priority = m->priority;
+            rows_.push_back(r);
+        }
+        std::fprintf(stdout, "[moves] %s: %d moves\n", weapon_.c_str(), total_);
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[moves] load failed: %s\n", e.what());
+    }
+}
+
+void MovesScreen::update_impl(float dt) {
+    (void)dt;
+    const App::PointerState& p = app().pointer();
+    // BACK (top-left) -> Equipment.
+    if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
+        if (p.pressed) {
+            std::fprintf(stdout, "[moves] BACK -> previous screen\n");
+            std::fflush(stdout);
+            manager().pop();
+            return;
+        }
+    }
+}
+
+void MovesScreen::render_impl(App& app) {
+    sf2::render::Renderer& ren = app.renderer();
+    const float bg[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(bg, 6, 0.07f, 0.08f, 0.11f, 1.0f);
+    (void)app.draw_text(130.0f, 84.0f, "MOVES - " + weapon_, 1.1f, 1.0f, 0.9f, 0.4f);
+    constexpr std::size_t kMaxRows = 16;
+    for (std::size_t i = 0; i < rows_.size() && i < kMaxRows; ++i) {
+        const Row& r = rows_[i];
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "%s  [%s] P%d", r.name.c_str(),
+                      r.type.empty() ? "-" : r.type.c_str(), r.priority);
+        (void)app.draw_text(150.0f, 140.0f + static_cast<float>(i) * 30.0f, buf, 0.75f,
+                            1.0f, 1.0f, 1.0f);
+    }
+    if (total_ > static_cast<int>(kMaxRows)) {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "+%d more (%d total)",
+                      total_ - static_cast<int>(kMaxRows), total_);
+        (void)app.draw_text(150.0f, 140.0f + 16.0f * 30.0f, buf, 0.75f, 0.7f, 0.7f,
+                            0.7f);
+    }
+    if (rows_.empty()) {
+        (void)app.draw_text(150.0f, 140.0f, "No moves for this weapon.", 0.8f, 0.7f, 0.7f,
+                            0.7f);
+    }
+    if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BracketScreen
+// ---------------------------------------------------------------------------
+
+BracketScreen::BracketScreen(ScreenManager& mgr) : Screen(mgr, "Bracket") {
+    std::string cur = "ZONE_1";
+    try {
+        const WarriorSave w = app().save().load();
+        if (!w.current_zone.empty()) cur = w.current_zone;
+        wins_ = w.fights;
+    } catch (const std::exception&) {
+    }
+    zone_ = cur;
+    const std::vector<MapScreen::ZoneTab> zones = load_zone_map(kViewW, kViewH);
+    for (const auto& z : zones) {
+        if (z.name != cur) continue;
+        for (const auto& n : z.nodes) {
+            if (n.type == "TOURNAMENT") tourn_.push_back(n);
+            else if (n.type == "SURVIVAL") surv_.push_back(n);
+        }
+        break;
+    }
+    std::fprintf(stdout, "[bracket] %s: %zu tournament, %zu survival\n", zone_.c_str(),
+                 tourn_.size(), surv_.size());
+    std::fflush(stdout);
+}
+
+void BracketScreen::update_impl(float dt) {
+    (void)dt;
+    const App::PointerState& p = app().pointer();
+    // BACK (top-left) -> Map.
+    if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
+        if (p.pressed) {
+            std::fprintf(stdout, "[bracket] BACK -> map\n");
+            std::fflush(stdout);
+            manager().pop();
+            return;
+        }
+    }
+}
+
+void BracketScreen::render_impl(App& app) {
+    sf2::render::Renderer& ren = app.renderer();
+    const float bg[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(bg, 6, 0.07f, 0.08f, 0.11f, 1.0f);
+    (void)app.draw_text(130.0f, 84.0f, zone_ + " SERIES", 1.1f, 1.0f, 0.9f, 0.4f);
+    // Tournament bracket: file order, Xs warriors, W/L from save wins.
+    (void)app.draw_text(130.0f, 130.0f, "TOURNAMENT", 0.9f, 1.0f, 0.85f, 0.4f);
+    constexpr std::size_t kMaxTourn = 12;
+    for (std::size_t i = 0; i < tourn_.size() && i < kMaxTourn; ++i) {
+        const auto& n = tourn_[i];
+        int wins = 0;
+        for (const auto& fw : wins_) {
+            if (fw.name == n.name) {
+                wins = fw.wins;
+                break;
+            }
+        }
+        std::string warriors;
+        for (const auto& wname : n.warriors) {
+            if (!warriors.empty()) warriors += "/";
+            warriors += wname;
+        }
+        if (warriors.empty()) warriors = n.name;
+        char buf[192];
+        std::snprintf(buf, sizeof(buf), "%zu. %s  %s", i + 1, warriors.c_str(),
+                      wins > 0 ? ("W" + std::to_string(wins)).c_str() : "-");
+        (void)app.draw_text(150.0f, 162.0f + static_cast<float>(i) * 28.0f, buf, 0.75f,
+                            1.0f, 1.0f, 1.0f);
+    }
+    // Survival history: best wins per node.
+    const float sy0 = 162.0f + static_cast<float>((std::min)(tourn_.size(), kMaxTourn)) * 28.0f + 24.0f;
+    (void)app.draw_text(130.0f, sy0, "SURVIVAL", 0.9f, 1.0f, 0.85f, 0.4f);
+    for (std::size_t i = 0; i < surv_.size() && i < 6; ++i) {
+        const auto& n = surv_[i];
+        int best = 0;
+        for (const auto& fw : wins_) {
+            if (fw.name == n.name && fw.wins > best) best = fw.wins;
+        }
+        char buf[192];
+        std::snprintf(buf, sizeof(buf), "%s  best %d", n.name.c_str(), best);
+        (void)app.draw_text(150.0f, sy0 + 32.0f + static_cast<float>(i) * 28.0f, buf,
+                            0.75f, 1.0f, 1.0f, 1.0f);
+    }
+    if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -3859,6 +4082,10 @@ std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id) {
             return std::make_unique<SettingsScreen>(mgr);
         case kScreenProfile:
             return std::make_unique<EquipmentScreen>(mgr);
+        case kScreenMoves:
+            return std::make_unique<MovesScreen>(mgr);
+        case kScreenBracket:
+            return std::make_unique<BracketScreen>(mgr);
         default:
             return nullptr;
     }

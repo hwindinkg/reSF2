@@ -223,6 +223,10 @@ struct FightFighter {
     sf2::scene::Vec3 jg{1.0f, 1.0f, 1.0f};  // impulse scale (`wd.JG`;
                                             // `YLa` sets, `gob` resets)
     float qz = 1.0f;  // hit-effect scale (`wd.Qz`; `fob` resets)
+    int bullets = 0;  // magic bullets (`wd.bh`; `hZ` adds, cap 1 via `LA`)
+    double charge = 0.0;  // magic charge (`wd.my` [0,1]; `Hwa`/`yL`)
+    int raid_bullets = 0;  // raid charge bullets (`wd.dO`; `vZa` adds)
+    bool collidable = true;  // target hit list (`Nl.oI[].vZ` — `hq.S`)
     std::set<std::string> prev_intervals;  // last tick's intervals (12/13 edge)
     std::vector<sf2::scene::PerkAction> perks;  // equipped perk actions
                                                 // (empty until perk-equip
@@ -531,6 +535,12 @@ public:
     // player steps toward the enemy when far and punches when in reach.
     // Uses the same move-start path as the AI (bypasses the key buffer).
     void set_auto_attack(bool on) { auto_attack_ = on; }
+    // Fight-rule marker (`ERuleNoBulletsReplenishment`, cj L18E): skips the
+    // my->bullet conversion in `la_normalize`. Stream 2 verdict: `replenish`
+    // has 0 JS hits (no refill path exists statically; likely a round-start
+    // refill in the native-driven flow, or a dead marker — Survival-only).
+    // Kept as a plumbed default-off hook.
+    void set_no_bullets_replenish(bool on) { no_bullets_replenish_ = on; }
 
     // [trace, Phase 0] Arms the per-frame pose dump: for the first `frames`
     // fight frames, update() appends one JSONL line to `path` (reference/
@@ -627,6 +637,7 @@ private:
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)
     sf2::scene::TrigBus bus_;      // perk trigger bus (`tb`; ZOa registers)
     sf2::scene::PerkSetup perk_setup_;  // stashed for per-round Yka
+    bool no_bullets_replenish_ = false;  // `ERuleNoBulletsReplenishment`
     const std::map<std::string, sf2::scene::TacticDef>* tactic_defs_ = nullptr;
     std::vector<std::string> player_items_;  // equipped names (Item conds)
     std::vector<std::string> enemy_items_;
@@ -756,6 +767,13 @@ private:
     void tick_bus_side(int side);
     // `ia` mod tick for one side (Uf countdown, JNa, slot-14 publish).
     void tick_mods(int side);
+    // Shared JNa state bindings for the mod tick.
+    sf2::scene::ModTickCtx mod_tick_ctx();
+    // Magic/bullet normalize (`LA` without the link branch) + slot-8 publish.
+    void la_normalize(FightFighter& f);
+    void fire_slot8(int side);
+    // Magic per-fighter init + per-round reset (`Ka`/`yKa`).
+    void init_magic();
     // Samples the fighter's idle pose (JS: the weapon stance idle).
     void sample_idle(FightFighter& f);
     // The HUD countdown seconds (JS Sf.iPa: gma - round.time).

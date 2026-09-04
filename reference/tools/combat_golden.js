@@ -708,6 +708,17 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
       } else r = m.mods.includes(c.name);
     }
     else if (c.kind === "Round") r = m.round === c.n;
+    else if (c.kind === "Bullets") {
+      if (c.sType === "MagicBullet") {
+        r = (c.min === null || m.bullets >= c.min) &&
+          (c.max === null || m.bullets <= c.max);
+      } else if (c.sType === "RaidChargeBullet") {
+        r = (c.min === null || m.raid >= c.min) &&
+          (c.max === null || m.raid <= c.max);
+      } else r = false;
+    }
+    else if (c.kind === "MagicCharge") r = (c.min === null || m.charge >= c.min) &&
+      (c.max === null || m.charge <= c.max);
     else if (c.kind === "Operator") {
       if (c.op === "Or") r = c.nested.some(n => evalCond(n, owner, foe));
       else r = c.nested.every(n => evalCond(n, owner, foe));
@@ -909,6 +920,54 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
   eq("S18c route", [q1[0], q1[1], q2[0].length, q3[0].length],
     [["ModIcon"], [], 0, 0]);
   out.scenarios.push({ id: "S18c-bus", q: [q1[0], q1[1], q2[0].length, q3[0].length] });
+  // S19: ranged/magic state (bh/dO/my, hZ/Hwa/LA, recharge, tables).
+  // Verbatim C++ twin: bullets_add/charge_add/la_normalize/magic_aq/
+  // magic_recharge + lp/sp eval (damage.hpp/trigger.hpp).
+  const clamp01 = v => Math.min(1, Math.max(0, v));
+  const hz = (bh, n) => bh + n;
+  const hwa = (bh, my, v) => (bh === 0 ? clamp01(my + v) : my);
+  const laNorm = (bh, my, noRepl) => {
+    if (my >= 1 && !noRepl) { bh += 1; my = 0; }
+    if (bh > 1) bh = 1;
+    return [bh, my];
+  };
+  const recharge = (e, b, c, zi) => Math.pow(2, e) * b * c * zi;
+  const magicAq = (base, attr) => (attr === null ? base : base * attr);
+  const lpCtx = (bh, dO) => ({ style: 0, combo: 0, hp: 100, round: 1, draw: 0.5,
+    mods: [], modsNs: {}, hit: 0, q3: {}, bullets: bh, raid: dO, charge: 0 });
+  const spCtx = my => ({ style: 0, combo: 0, hp: 100, round: 1, draw: 0.5,
+    mods: [], modsNs: {}, hit: 0, q3: {}, bullets: 0, raid: 0, charge: my });
+  eq("S19 lp", [
+    evalCond({ kind: "Bullets", sType: "MagicBullet", min: 1, max: null, neg: false },
+      lpCtx(1, 0), foe18),
+    evalCond({ kind: "Bullets", sType: "MagicBullet", min: 1, max: null, neg: false },
+      lpCtx(0, 0), foe18),
+    evalCond({ kind: "Bullets", sType: "RaidChargeBullet", min: null, max: 2, neg: false },
+      lpCtx(0, 2), foe18),
+    evalCond({ kind: "Bullets", sType: "X", min: null, max: null, neg: false },
+      lpCtx(9, 9), foe18)], [true, false, true, false]);
+  eq("S19 sp", [
+    evalCond({ kind: "MagicCharge", min: null, max: 0.5, neg: false }, spCtx(0.7), foe18),
+    evalCond({ kind: "MagicCharge", min: null, max: 0.5, neg: false }, spCtx(0.3), foe18)],
+    [false, true]);
+  out.scenarios.push({ id: "S19-magic",
+    hz: hz(0, 1), hwa: [hwa(0, 0.2, 0.5), hwa(1, 0.2, 0.5)],
+    la: [laNorm(0, 1.2, false), laNorm(0, 0.5, false),
+      laNorm(3, 0, false), laNorm(0, 1.2, true)],
+    recharge: recharge(1, 1, 1, 10),
+    aq: [magicAq(0.0001, null), magicAq(0.0001, 10000)],
+    lp: [
+      evalCond({ kind: "Bullets", sType: "MagicBullet", min: 1, max: null, neg: false },
+        lpCtx(1, 0), foe18),
+      evalCond({ kind: "Bullets", sType: "MagicBullet", min: 1, max: null, neg: false },
+        lpCtx(0, 0), foe18),
+      evalCond({ kind: "Bullets", sType: "RaidChargeBullet", min: null, max: 2, neg: false },
+        lpCtx(0, 2), foe18),
+      evalCond({ kind: "Bullets", sType: "X", min: null, max: null, neg: false },
+        lpCtx(9, 9), foe18)],
+    sp: [
+      evalCond({ kind: "MagicCharge", min: null, max: 0.5, neg: false }, spCtx(0.7), foe18),
+      evalCond({ kind: "MagicCharge", min: null, max: 0.5, neg: false }, spCtx(0.3), foe18)] });
   out.scenarios.push({ id: "S11-misc", ok: true });
 
   out.selftest = { pass, fail, failures };

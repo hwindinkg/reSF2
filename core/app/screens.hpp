@@ -148,6 +148,7 @@ public:
         std::string type;
         std::string zone;      // the stages.xml Zone Name (JS `st`)
         std::string location;  // the Battle Location (JS fight backdrop)
+        std::vector<std::string> warriors;  // Fight Warriors FirstNames (Xs)
         float x = 0.0f;  // screen pos (center)
         float y = 0.0f;
         bool active = true;
@@ -377,7 +378,53 @@ private:
     int hover_ = -1;
 };
 
+// The moves list — learned moves for the wielded weapon (native moves
+// screen). Built with the exact fighter move-list rule used by fights
+// (`build_move_list_locks` over the save's owned items — display only, on a
+// throwaway Fighter; never stepped). Entry: EquipmentScreen MOVES button.
+class MovesScreen : public Screen {
+public:
+    explicit MovesScreen(ScreenManager& mgr);
+
+    ScreenId id() const override { return kScreenMoves; }
+
+    void update_impl(float dt) override;
+    void render_impl(App& app) override;
+
+    struct Row {
+        std::string name;
+        std::string type;
+        int priority = 0;
+    };
+
+private:
+    std::string weapon_ = "Fists";
+    std::vector<Row> rows_;
+    int total_ = 0;
+};
+
+// The series bracket — tournament Xs-warriors progression + survival wave
+// history for the current zone, from save wins (read-only). Entry: the Map
+// BRACKET button.
+class BracketScreen : public Screen {
+public:
+    explicit BracketScreen(ScreenManager& mgr);
+
+    ScreenId id() const override { return kScreenBracket; }
+
+    void update_impl(float dt) override;
+    void render_impl(App& app) override;
+
+private:
+    std::string zone_;
+    std::vector<MapScreen::Node> tourn_;  // TOURNAMENT nodes, file order
+    std::vector<MapScreen::Node> surv_;   // SURVIVAL nodes, file order
+    std::vector<WarriorSave::FightWins> wins_;
+};
+
 // The shared item catalog (the shop list + the equipment item lookup).
+// Loaded once from list.xml and cached.
+std::vector<CatalogItem> load_catalog(App& app);
 // Loaded once from list.xml and cached.
 std::vector<CatalogItem> load_catalog(App& app);
 
