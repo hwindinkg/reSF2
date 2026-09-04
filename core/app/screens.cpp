@@ -3852,7 +3852,8 @@ void EquipmentScreen::render_impl(App& app) {
         for (const auto& f : w.fights) wins += f.wins;
         char hbuf[64];
         std::snprintf(hbuf, sizeof(hbuf), "LV %d", w.level);
-        (void)app.draw_text(130.0f, 82.0f, hbuf, 1.1f, 1.0f, 0.9f, 0.4f);
+        draw_ui_label(app, 130.0f, 78.0f, 150.0f, 30.0f,
+                      hbuf, 1.1f, UiAlign::Left, 1.0f, 0.9f, 0.4f);
         const float bx0 = 130.0f, by0 = 112.0f, bw = 300.0f, bh = 16.0f;
         const float bbg[] = {bx0, by0, bx0 + bw, by0, bx0, by0 + bh,
                              bx0 + bw, by0, bx0 + bw, by0 + bh, bx0, by0 + bh};
@@ -3869,11 +3870,13 @@ void EquipmentScreen::render_impl(App& app) {
         }
         char xbuf[64];
         std::snprintf(xbuf, sizeof(xbuf), "EXP %d/%d", w.experience, need);
-        (void)app.draw_text(440.0f, 108.0f, xbuf, 0.7f, 0.9f, 0.9f, 0.9f);
+        draw_ui_label(app, 440.0f, 104.0f, 300.0f, 24.0f,
+                      xbuf, 0.7f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
         char mbuf[128];
         std::snprintf(mbuf, sizeof(mbuf), "WINS %d    COINS %d    GEMS %d", wins, w.money,
                       w.bonus);
-        (void)app.draw_text(130.0f, 138.0f, mbuf, 0.8f, 1.0f, 1.0f, 1.0f);
+        draw_ui_label(app, 130.0f, 134.0f, 600.0f, 24.0f,
+                      mbuf, 0.8f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
     }
     // --- 5 equipment slots (JS `xc.hk` slots; Ranged/Magic included) -------
     // Slot glow follows the HOVERED ITEM's type (the old `hover_ == s`
@@ -3906,6 +3909,8 @@ void EquipmentScreen::render_impl(App& app) {
                                   (stat.empty() ? "" : " (" + stat + ")");
         draw_flat_button(app, label, slot_x, sy, 400.0f, 80.0f, 0.35f, 0.3f, 0.45f,
                          hover_type == slot_names[s]);
+        draw_ui_label(app, slot_x - 200.0f + 8.0f, sy - 14.0f, 400.0f - 16.0f, 28.0f,
+                          label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
     const float grid_x = kViewW * 0.55f, grid_y0 = 220.0f, grid_dx = 240.0f, grid_dy = 110.0f;
     int idx = 0;
@@ -3935,6 +3940,9 @@ void EquipmentScreen::render_impl(App& app) {
         draw_flat_button(app, oi.name + (equipped ? " [EQ]" : ""), cx, cy, 220.0f, 80.0f,
                          equipped ? 0.5f : 0.3f, equipped ? 0.6f : 0.3f,
                          equipped ? 0.3f : 0.35f, hover_ == idx);
+        draw_ui_label(app, cx - 110.0f + 6.0f, cy - 12.0f, 220.0f - 12.0f, 24.0f,
+                          oi.name + (equipped ? " [EQ]" : ""), 0.7f, UiAlign::Center,
+                          1.0f, 1.0f, 1.0f);
         ++idx;
         ++card;
     }
@@ -3977,7 +3985,8 @@ void EquipmentScreen::render_impl(App& app) {
                 }
             }
         }
-        (void)app.draw_text(24.0f, 668.0f, dline, 0.75f, 0.9f, 0.9f, 0.9f);
+        draw_ui_label(app, 24.0f, 664.0f, 760.0f, 24.0f,
+                      dline, 0.75f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
     }
     // The BACK button (top-left).
     draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
@@ -3986,7 +3995,8 @@ void EquipmentScreen::render_impl(App& app) {
     // MOVES button (mirrors the update rect above).
     draw_flat_button(app, "MOVES", 1165.0f, 664.0f, 130.0f, 48.0f, 0.3f, 0.32f, 0.4f,
                      false);
-    (void)app.draw_text(1125.0f, 656.0f, "MOVES", 0.7f, 1.0f, 1.0f, 1.0f);
+    draw_ui_label(app, 1165.0f - 65.0f + 8.0f, 664.0f - 10.0f, 130.0f - 16.0f, 20.0f,
+                      "MOVES", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
 }
 
 // ---------------------------------------------------------------------------
