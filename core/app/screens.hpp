@@ -275,9 +275,17 @@ private:
     int money_reward_ = 0;
     int exp_reward_ = 0;
     bool applied_ = false;
-    // Tutorial quest toast (quest_panel.hpp; derived read-only in update —
+    // Tutorial quest toast (quest_panel.hpp; derived read-only in update -
     // e.g. the first Training win nudges the player back to Sensei).
     std::string quest_toast_;
+    // Prize breakdown snapshot (copied from PendingBattle in update — the
+    // `v.kD`/`bzb` factor lines; render reads these, never the sim).
+    int prize_base_ = 0;
+    int prize_bonus_ = 0;
+    int prize_combo_ = 0;
+    int prize_shocks_ = 0;
+    bool prize_perfect_ = false;
+    bool prize_first_ = false;
 };
 
 // The shop — native Shop screen (screen 4, JS `Oa` g="468").
@@ -306,6 +314,10 @@ private:
     int tab_ = 0;
     int tab_hover_ = -1;
     WarriorSave seen_;
+    // Buy confirmation (display-only): last bought item + the screen time
+    // until which the confirmation line shows.
+    std::string confirm_;
+    float confirm_until_ = 0.0f;
 };
 
 // The equipment — native Profile/equipment screen (JS `Oa.f5` case 5 +

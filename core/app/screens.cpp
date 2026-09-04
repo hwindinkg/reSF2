@@ -2167,13 +2167,21 @@ void FightScreen::update_impl(float dt) {
                      fight_->player().hits_landed, fight_->enemy().hp,
                      fight_->enemy().rounds_won, fight_->enemy().hits_landed);
         // JS `v.kD`/`bzb` prize factors (FLOW_STATIC section 4.3): performance
-        // bonus on top of the battle's base reward.
+        // bonus on top of the battle's base reward. Snapshot the breakdown
+        // into pending_battle BEFORE folding the bonus in, so Results can
+        // show base + factor lines (gems untracked by prize() — see report).
         {
             const auto prize = fight_->prize();
             std::fprintf(stdout,
                          "[fight] prize: perfect=%d first=%d combo=%d shocks=%d bonus=%d\n",
                          prize.perfect ? 1 : 0, prize.first_strike ? 1 : 0,
                          prize.max_combo, prize.shocks, prize.coins_bonus);
+            pb.prize_base_coins = pb.reward_money;
+            pb.prize_bonus = prize.coins_bonus;
+            pb.prize_combo = prize.max_combo;
+            pb.prize_shocks = prize.shocks;
+            pb.prize_perfect = prize.perfect;
+            pb.prize_first = prize.first_strike;
             if (player_won) pb.reward_money += prize.coins_bonus;
         }
         std::fflush(stdout);
@@ -2601,6 +2609,17 @@ void ResultsScreen::update_impl(float dt) {
                 std::fprintf(stdout, "[result] battle record: %s\n",
                              pb.battle_name.c_str());
             }
+            // Prize breakdown snapshot for render (JS `v.kD` factor lines;
+            // base + bonus were captured by the FightScreen handoff).
+            {
+                const PendingBattle& pb = app().pending_battle();
+                prize_base_ = pb.prize_base_coins;
+                prize_bonus_ = pb.prize_bonus;
+                prize_combo_ = pb.prize_combo;
+                prize_shocks_ = pb.prize_shocks;
+                prize_perfect_ = pb.prize_perfect;
+                prize_first_ = pb.prize_first;
+            }
             // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds
             // (`v.FR` = character_progress.xml `<Threshold Level Exp>`).
             while (w.level < 50) {
@@ -2650,12 +2669,39 @@ void ResultsScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(verts, 6, 0.0f, 0.0f, 0.0f, 0.6f);
-    if (!quest_toast_.empty()) {
-        const sf2::data::font* fnt = app.menu_font();
-        if (fnt != nullptr) {
-            (void)app.draw_text_centered(*fnt, app.font_texture(), kViewW * 0.5f,
-                                         kViewH * 0.62f, quest_toast_, 0.9f, 1.0f, 0.9f,
-                                         0.4f);
+    const sf2::data::font* fnt = app.menu_font();
+    if (fnt != nullptr) {
+        const unsigned int ftex = app.font_texture();
+        (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, 150.0f,
+                                     player_won_ ? "VICTORY" : "DEFEAT", 1.6f,
+                                     player_won_ ? 1.0f : 0.8f,
+                                     player_won_ ? 0.85f : 0.3f,
+                                     player_won_ ? 0.3f : 0.3f);
+        // Prize breakdown (JS `v.kD`/`bzb` factor lines, FLOW_STATIC §4.3:
+        // Perfect $Ia=5, FirstStrike ep=2, Combo Ui=1/combo, Shock Ub=3).
+        // Gems (JS hj.Uo) are untracked by prize() — no line (see report).
+        if (player_won_) {
+            float y = 250.0f;
+            auto line = [&](const std::string& s) {
+                (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, y, s, 0.85f,
+                                             1.0f, 1.0f, 1.0f);
+                y += 30.0f;
+            };
+            line("Coins: " + std::to_string(prize_base_) + " + bonus " +
+                 std::to_string(prize_bonus_) + " = " + std::to_string(money_reward_));
+            if (prize_perfect_) line("PERFECT +5");
+            if (prize_first_) line("FIRST STRIKE +2");
+            if (prize_combo_ > 0)
+                line("COMBO x" + std::to_string(prize_combo_) + " +" +
+                     std::to_string(prize_combo_));
+            if (prize_shocks_ > 0)
+                line("SHOCK x" + std::to_string(prize_shocks_) + " +" +
+                     std::to_string(prize_shocks_ * 3));
+            line("EXP +" + std::to_string(exp_reward_));
+        }
+        if (!quest_toast_.empty()) {
+            (void)app.draw_text_centered(*fnt, ftex, kViewW * 0.5f, kViewH * 0.62f,
+                                         quest_toast_, 0.9f, 1.0f, 0.9f, 0.4f);
         }
     }
     std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
@@ -2731,6 +2777,34 @@ std::string shop_stat_line(const CatalogItem& it) {
         std::snprintf(buf, sizeof(buf), "Lv%d   %dG", it.level, it.price);
     }
     return std::string(buf);
+}
+
+// Wielding summary (read-only): the equipped slots' applied stats, resolved
+// through the full catalog (base Body/Head/Fists included).
+std::string wielding_line(App& app, const WarriorSave& seen) {
+    const std::vector<CatalogItem> full = load_full_catalog(app);
+    auto stat = [&](const std::string& name) {
+        for (const auto& ci : full) {
+            if (ci.name != name) continue;
+            char buf[96];
+            if (ci.type == "Weapon") {
+                std::snprintf(buf, sizeof(buf), "%s DMG %d", name.c_str(),
+                              ci.weapon_damage);
+            } else if (ci.type == "Armor") {
+                std::snprintf(buf, sizeof(buf), "%s DEF %d", name.c_str(),
+                              ci.body_defense);
+            } else if (ci.type == "Helm") {
+                std::snprintf(buf, sizeof(buf), "%s DEF %d", name.c_str(),
+                              ci.head_defense);
+            } else {
+                std::snprintf(buf, sizeof(buf), "%s", name.c_str());
+            }
+            return std::string(buf);
+        }
+        return name;
+    };
+    return "WIELDING: " + stat(seen.weapon) + " | " + stat(seen.armor) + " | " +
+           stat(seen.helm);
 }
 
 ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
@@ -2862,6 +2936,8 @@ void ShopScreen::update_impl(float dt) {
                     w.items.push_back(oi);
                     app().save().save(w);
                     seen_ = w;
+                    confirm_ = "BOUGHT " + it.name + "!";
+                    confirm_until_ = time() + 2.5f;
                     std::fprintf(stdout,
                                  "[shop] BOUGHT %s (%s) price=%d -> money %d, item added%s\n",
                                  it.name.c_str(), it.subtype.c_str(), it.price, w.money,
@@ -2926,9 +3002,13 @@ void ShopScreen::render_impl(App& app) {
             if (try_draw_atlas_button(app, sf, cx, cy, card_w, card_h, 0.9f)) { drawn = true; break; }
         }
         if (!drawn) {
-            const float r = hovered ? 0.75f : 0.45f;
-            const float g = hovered ? 0.6f : 0.35f;
-            const float b = hovered ? 0.3f : 0.2f;
+            // Equipped cards read gold (distinct from owned/unowned at a
+            // glance); hover still brightens.
+            const bool card_equipped = seen_.has_item(it.name) &&
+                                       shop_slot_for(seen_, it.type) == it.name;
+            const float r = card_equipped ? 0.72f : (hovered ? 0.75f : 0.45f);
+            const float g = card_equipped ? 0.60f : (hovered ? 0.6f : 0.35f);
+            const float b = card_equipped ? 0.25f : (hovered ? 0.3f : 0.2f);
             draw_flat_button(app, it.name, cx, cy, card_w, card_h, r, g, b, hovered);
         } else {
             // Overlay label as flat small indicator (keep text)
@@ -2955,6 +3035,12 @@ void ShopScreen::render_impl(App& app) {
     }
     if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    }
+    // Wielding summary + buy confirmation (display only).
+    (void)app.draw_text(24.0f, 648.0f, wielding_line(app, seen_), 0.7f, 0.9f, 0.9f, 0.9f);
+    if (!confirm_.empty() && time() <= confirm_until_) {
+        (void)app.draw_text(kViewW * 0.5f - 110.0f, 678.0f, confirm_, 1.0f, 0.4f, 1.0f,
+                            0.4f);
     }
 }
 

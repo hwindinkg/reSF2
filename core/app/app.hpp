@@ -66,6 +66,17 @@ struct PendingBattle {
     std::string enemy_name = "Enemy";
     int reward_money = 0;  // the first non-zero <Reward> of the fight
     int reward_exp = 0;
+    // Prize snapshot (JS `v.kD`/`bzb`, FLOW_STATIC §4): filled by the
+    // FightScreen at battle end from FightController::prize() BEFORE the
+    // bonus is folded into reward_money, so Results can show the breakdown
+    // (base + Perfect/FirstStrike/Combo/Shock lines). Gems are untracked by
+    // prize() — no field here (see the stream report).
+    int prize_base_coins = 0;
+    int prize_bonus = 0;
+    int prize_combo = 0;
+    int prize_shocks = 0;
+    bool prize_perfect = false;
+    bool prize_first = false;
     // The fight outcome (set by the FightScreen at battle end).
     bool has_result = false;
     bool player_won = false;

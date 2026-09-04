@@ -305,8 +305,8 @@ coin gate (`Pa.iwa`, L1228) then force-equips (`$o`, L299-300).
 
 ## OPEN (needs runtime trace)
 
-1. Catalog-count gap vs JS_FLOW §3 (§2 OPEN note): runtime `Xm.length` +
-   www-bundle vs extracted-`list.xml` diff.
+1. Catalog-count gap vs JS_FLOW §3: RESOLVED → §11 (documented drift;
+   bundle authoritative). Runtime `Xm.length` check still welcome.
 2. `Pa.bDa` upgrade-price source (`e7a(Tg)` vs `Np` bookkeeping) against a
    live purchase; `gla("Upgrade")` + `xf*100+30` over-cap rule live check.
 3. Delivery timers live: `Bh/Dc` countdown, `Oda/Bma` events, `y2a/z2a`
@@ -317,3 +317,70 @@ coin gate (`Pa.iwa`, L1228) then force-equips (`$o`, L299-300).
 6. Enchant budget live: `cba.sOa` limits, `gea(level)` values, `qs` apply
   /remove (`c0a/R_a`) flows.
 7. `QV` offers tab + `QJ/qJ/GU` badge plumbing; `IAP` tab 5 gating (`iap`).
+
+---
+
+## 10. `OLa` level curve (L253-254, verbatim — Stream 1 wiring)
+
+```
+Oz(){if(this.Ca!=null){let a=this.Ca.level-1;if(a<this.$B.length)return this.$B[a]}return 2147483647}
+OLa(a){if(this.Ca==null)return!1;let b=!1;var c=this.Oz();a=this.rs=a;if(c<=a){b=!0;let d=this.Ca.level;
+for(;c<=a;)a-=c,++d,this.Ca.level=d,c=this.Oz(),a>v.Bha&&(a=v.Bha),d>this.$B.length&&(d=this.$B.length,a=this.Oz(),b=!1);
+this.rs=a;this.Ca.level=d;this.nF("Level",this.Ca.level)}
+this.Ca.level==this.$B.length&&this.Ca.level>1&&(this.rs=a=this.$B[this.Ca.level-2]);
+b&&(this.xa.vu(),this.xa.Ryb(this.bb()),c=Oa.get(),c!=null&&c.Lma(),p.F().Yyb(this.bb()),this.oS.Z());
+this.nF("Experience",this.rs);this.Zha.Z();return b}
+Jab(a){return this.OLa(this.rs+a)}
+```
+
+- `$B` built by `Bjb` (L274): `Exp` per `v.FR.thresholds` in order;
+  `Oz()` = cost to leave current level (`$B[level-1]`, else 2147483647);
+  `$0()` = last threshold's `Level` = max level (L1202);
+  `Bha` default `3E7` (L2480) = XML `<MaximumExperience Value="30000000"/>`.
+- Table (`character_progress.xml` `<Thresholds>`, = www-bundle copy):
+  `v.FR.parse` (L1184: `Ba(Level,Exp)`); `td.Vib` asset 1315 (L1160-1161).
+
+```
+L:Exp  1:150 2:190 3:350 4:355 5:355 6:790 7:800 8:1300 9:1450 10:1500
+11:1700 12:2400 13:1850 14:2450 15:2950 16:3000 17:3000 18:4000 19:3000 20:4000
+21:4650 22:5000 23:5000 24:6800 25:3600 26:5600 27:6800 28:6900 29:7000 30:8500
+31:4400 32:6700 33:8400 34:8400 35:9000 36:10000 37:10000 38:11500 39:16900 40:16900
+41:16900 42:16900 43:16900 44:150000 45:95000 46:155000 47:90000 48:95000 49:227000
+50:173000 51:280000 52:300000
+```
+
+52 rows, max level 52, lifetime sum 1,813,340. Level-up side effects:
+`xa.vu/Ryb` (unlock point + shop-list refresh eligibility, L303),
+`Oa.Lma` shop refresh, `p.Yyb`, `oS` event.
+
+## 11. Catalog-count gap vs JS_FLOW §3 — RESOLVED (documented drift)
+
+| Source | Weapon | Helm | Armor | Ranged | Magic | RealMoney | Gold* | Bonus* | DailyOffer* |
+|---|---|---|---|---|---|---|---|---|---|
+| Extracted `list.xml` (597 direct) | 141 | 134 | 127 | 56 | 35 | 78 | 33 | 7 | 30 |
+| www bundle `res/list.xml` (731 tags) | 148 | 139 | 133 | 64 | 41 | 91 | 33 | 18 | 30 |
+| JS_FLOW §3 | 150 | 141 | 135 | 66 | 43 | 91 | 33 | 18 | 30 |
+
+*SubTypes. Bundle == JS_FLOW exactly for RealMoney/SubTypes; equipment is a
+clean **+2 per category** in JS_FLOW vs the current bundle. Ruled out:
+ShopHide splits, no-Price rows, nested OfferItems (all Type=None), `SubType`
+grep artifacts (naive-substring recount = exact counts), name-prefix fallback.
+Verdict: **version drift** — JS_FLOW §3 was counted from a www build whose
+`list.xml` carried exactly 2 more rows per equipment category; the extracted
+copy is additionally stale (597 vs 731 tags, upgrade templates 150/141 vs
+214/200/201). **Bundle is authoritative for the port**; JS_FLOW §3 item
+counts superseded (its flow content unaffected). OPEN-item 1 closed.
+
+## 12. Upgrade-pricing verification (hand-computed vs UpgradeLists)
+
+Rule (`zz`, L337): candidates = inline `eB` + template (`D6`) rows with
+`Tc>Tg`, sorted; `Pa.DYa/FYa` charge `Qi.mi/od` (L1228-1229).
+
+1. `WEAPON_KNIVES` (Tg=100, `D6=Weapon_Bonus`): first row Tc>100 → Tc=300
+   → **770 coins / 24 gems** (`Weapon_Bonus[0]`).
+2. `Body` (Armor, no `Upgrades` child, no `UpgradeLevel`): no `D6`, empty
+   `eB` → `zz` empty → **not upgradeable** (also ShopHide/Hidden).
+3. `MAGIC_AE21_SPIRIT_PILLAR` (Tg=600, `D6=Paid_Magic_Bonus`): first row
+   Tc>600 → Tc=620 → **200 coins / 3 gems** (`Paid_Magic_Bonus[1]`;
+   row 0 Tc=600 excluded by strict `>`). Enchanted
+   (`PERK_ITEM_SPECIAL_BLOODRAGE_MAGIC`), Paid/ShopHide/CLANS.

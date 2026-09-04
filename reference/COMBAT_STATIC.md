@@ -315,3 +315,34 @@ formulas transcribed verbatim.
 `Era` reset scope (L510/L525); `Dga` per-round-only confirm (L380/L409);
 `Wsb/m$/fe.wqb/Cqb/ZAa/DL` presentation tails (L396-397);
 `Ja.ki(1292)`→file numeric proof (§A8).
+
+### APPENDIX B — magic / charge-bar data locations
+
+Verdict: Stream 3 is confirmed — **no `magic/*.json` ships under
+`reference/www/res`** (dir listing + `G.rq` manifest, L2490, have no magic
+entries). Magic visuals resolve only through the asset loader:
+`G.qf("magic/"+fileName+".png")` preload (L730, `Yl.preload`) and
+`G.qf("magic/"+fileName+".json")` + `.png` at effect spawn (L838-839);
+models live in `magic_dds/ktx.dat`. Gameplay numbers live here:
+
+- `internal_settings.xml` `<Magic>`: `InitialCharge/PainRecharge/
+  DamageRecharge` all `Base=0.0001` (`jA`/`Yv` tables, L1186; `AQ`
+  name→`Bc*attr(Mk)`); `<StartingBullets Attribute="RangedQuantity">`;
+  `Regeneration Base=0.000001 Attr=RegenerationRate`,
+  `Lifesteal Base=0.0001 Attr=Lifesteal` (`Bja/kha`, L1158).
+- `list.xml` Magic rows (35 extracted / 41 bundle): `MagicDamage/Level/
+  Price|BonusPrice/PaidItem`, e.g. `MAGIC_AE21_SPIRIT_PILLAR`
+  (dmg 5, lvl 1, 105 gems, Paid).
+- `tactic_settings.xml` `<MagicAnimations>` (referenced `P.Lra`, L628).
+- Fighter charge state (no data table — live only): `my` charge 0..1
+  (`yL` clamp, L494), `bh` bullets (`zL`); spawn `yL(vo.vE)/zL(vo.cl)`
+  (L402); `yKa`: `zL(0)+yL(InitialCharge)` (L504);
+  `Hwa(a)`: `bh==0 && yL(my+a)` (L504-505); `LA()`: `my>=1 → hZ(1)`
+  bullet, `bh>1 → zL(1)` cap (L505); intake via `Jma` (§A7).
+  `ju` regen pools (`UNa=500…`, L545) tick in `MOa` (L532).
+- Conditions/events: `MagicBullet→bh` / `RaidChargeBullet→dO` (`lp`,
+  L1313); `MagicCharge` (`sp`, L1303); `MagicCharged` (L1318),
+  `PerkEventMagicCharged` (L1319); quest probes `MagicBullet/MagicCharge`
+  (L1339).
+- Ranged ammo: `K0()` (`NoRanged?1:-1`, L505); `StartingBullets` has no JS
+  literal — resolution OPEN (needs runtime trace).
