@@ -459,7 +459,7 @@ void draw_flat_button(App& app, const std::string& label, float cx, float cy, fl
 
 // Tries to draw an atlas frame centered at (cx,cy) sized to (w,h). Returns true if drawn.
 bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy, float w, float h,
-                           float alpha = 1.0f) {
+                           float alpha = 1.0f, bool fill = false) {
     sf2::data::atlas_frame fr;
     int tw = 0, th = 0;
     unsigned int gl = 0;
@@ -470,6 +470,14 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
             std::fflush(stdout);
         }
         return false;
+    }
+    {
+        static std::set<std::string> resolved;
+        if (resolved.insert(frame_name).second) {
+            std::fprintf(stdout, "[ui] atlas frame hit: %s rect=(%d,%d,%d,%d) tex=%dx%d gl=%u\n",
+                             frame_name.c_str(), fr.x, fr.y, fr.w, fr.h, tw, th, gl);
+            std::fflush(stdout);
+        }
     }
     sf2::scene::Sprite s;
     s.texture_name = frame_name;
@@ -486,7 +494,18 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
     }
     s.transform.set_pos(cx, cy);
     if (fr.w > 0 && fr.h > 0) {
-        s.transform.set_scale(w / static_cast<float>(fr.w), h / static_cast<float>(fr.h));
+        if (fill) {
+            // Bar backing (topPanel, Energy_Bar — the JS stretches these
+            // to their rects; aspect-fit would shrink topPanel 100x191 to
+            // a 44px sliver). Non-uniform stretch is CORRECT here.
+            s.transform.set_scale(w / static_cast<float>(fr.w),
+                                  h / static_cast<float>(fr.h));
+        } else {
+            // Aspect-correct fit (Dojo wave): the old non-uniform stretch
+            // turned 226x193 menu art into wide ovals. Fit inside (w,h).
+            const float sc = std::min(w / static_cast<float>(fr.w), h / static_cast<float>(fr.h));
+            s.transform.set_scale(sc, sc);
+        }
     }
     // UI is screen-space: identity camera (world == screen)
     sf2::render::Camera ui_cam;
@@ -1059,12 +1078,21 @@ void ensure_lang(App& app) {
     try {
         const std::string dir = app.res_root() + "/lang";
         std::string path;
-        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-            const std::string name = entry.path().filename().string();
-            if (name.size() > 7 && name.rfind("en.", 0) == 0 &&
-                entry.path().extension().string() == ".xml") {
-                path = entry.path().string();
-                break;
+        // EN only (Dojo wave lang verdict): ru.*.xml exists but NO
+        // shipped BMF font carries Cyrillic glyphs (font-en 104 ids,
+        // ASCII + 9 extras; no ru.fnt on disk) and the renderer is
+        // byte-wise Latin-1, so RU text renders as garbage (verified:
+        // hint line showed mojibake). The web game renders dialog text
+        // via canvas/system fonts instead - no BMF path exists to port.
+        // Revisit only with a Cyrillic BMF page.
+        if (path.empty()) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.size() > 7 && name.rfind("en.", 0) == 0 &&
+                    entry.path().extension().string() == ".xml") {
+                    path = entry.path().string();
+                    break;
+                }
             }
         }
         if (path.empty()) return;
@@ -1257,10 +1285,11 @@ void draw_punchbag(sf2::render::Renderer& ren, const sf2::render::Camera& camera
     // Chains (two straps from the mount bar to the bag shoulders).
     quad(sx - 20.0f, top, sx - 14.0f, top + h * 0.18f, 0.45f, 0.45f, 0.5f, 1.0f);
     quad(sx + 14.0f, top, sx + 20.0f, top + h * 0.18f, 0.45f, 0.45f, 0.5f, 1.0f);
-    // Leather body.
-    quad(sx - 30.0f, top + h * 0.18f, sx + 30.0f, bot, 0.38f, 0.16f, 0.12f, 1.0f);
-    // Highlight seam (left third) + base shadow.
-    quad(sx - 30.0f, top + h * 0.18f, sx - 18.0f, bot, 0.48f, 0.22f, 0.16f, 1.0f);
+    // Body: near-black silhouette (oracle hanging bag; the mdl_punching_bag
+    // model is not loaded - missing API, noted - so no leather shading).
+    quad(sx - 30.0f, top + h * 0.18f, sx + 30.0f, bot, 0.02f, 0.02f, 0.03f, 1.0f);
+    // Faint edge seam + base shadow.
+    quad(sx - 30.0f, top + h * 0.18f, sx - 18.0f, bot, 0.10f, 0.10f, 0.12f, 1.0f);
     quad(sx - 38.0f, bot - 4.0f, sx + 38.0f, bot + 4.0f, 0.0f, 0.0f, 0.0f, 0.45f);
 }
 
@@ -1408,20 +1437,135 @@ void DojoScreen::update_impl(float dt) {
     }
 }
 
+// Dojo location ensure (mirrors the FightScreen dojo-location block:
+// params scan + LocationScene load + webp texture resolve + frame
+// aliasing). The fight loads it in its ctor; the Dojo hub needs it at
+// boot (otherwise the hub renders black). Guarded by layers().empty().
+void ensure_dojo_location(App& app) {
+    if (!app.has_fight_assets()) return;
+    FightAssets& assets = app.fight_assets();
+    if (!assets.dojo.layers().empty()) return;
+    const std::string loc_dir = app.res_root() + "/locations/dojo";
+    std::string params_xml, atlas_json;
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("dojo_params.", 0) == 0 && name.size() > 4 &&
+                name.substr(name.size() - 4) == ".xml") {
+                params_xml = entry.path().string();
+            } else if (name.rfind("dojo.", 0) == 0 && name.size() > 5 &&
+                       name.substr(name.size() - 5) == ".json") {
+                atlas_json = entry.path().string();
+            }
+        }
+        assets.dojo.load(params_xml, {atlas_json}, app.res_root());
+        const std::string loc_prefix = "dojo.";
+        for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind(loc_prefix, 0) != 0) continue;
+            const std::string ext = entry.path().extension().string();
+            if (ext != ".webp" && ext != ".png" && ext != ".jpg") continue;
+            sf2::data::Texture tex;
+            if (!sf2::data::decode_texture(entry.path().string(), tex)) continue;
+            const GLuint gl = app.renderer().texture_for("dojo_atlas_" + name, tex);
+            if (gl != 0) {
+                std::ifstream in(atlas_json, std::ios::binary);
+                std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                             std::istreambuf_iterator<char>());
+                const sf2::data::atlas a =
+                    sf2::data::atlas_parse(jb.data(), jb.size());
+                for (const auto& fr : a.frames) {
+                    app.renderer().texture_alias(fr.name, gl);
+                }
+                std::fprintf(stdout, "[dojo] location atlas texture: %s (%dx%d, %zu frames)\n",
+                             entry.path().filename().string().c_str(), tex.w, tex.h,
+                             a.frames.size());
+                std::fflush(stdout);
+            }
+        }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[dojo] location load failed: %s\n", e.what());
+    }
+}
+
+// Top HUD bar (oracle Dojo shot proportions): full-width dark-wood bar
+// with level icon + bar, energy bolt + bar, coins, gems, green +.
+// Frames from the misc atlas (JS `za` chrome L1973: `topPanel` backing;
+// `wr` = icon `level` + `Level_bar`; `xr` = icon `energy` + `Energy_Bar`;
+// `yr` = `gold`, `ruby`, text labels, `AddMoney` (+ only with iap
+// feature). `star` is NOT on this bar (achievements `ns` widget L2303 —
+// DOJO_BG_STATIC §3). Values from the save; energy shows full (no
+// energy state in the save — OPEN).
+void draw_dojo_hud_bar(App& app, sf2::render::Renderer& ren) {
+    if (!try_draw_atlas_button(app, "topPanel", 640.0f, 42.0f, 1280.0f, 84.0f, 1.0f,
+                               /*fill=*/true)) {
+        const float bg[] = {0, 0, 1280, 0, 1280, 84, 0, 0, 1280, 84, 0, 84};
+        ren.draw_triangles(bg, 6, 0.10f, 0.07f, 0.05f, 1.0f);
+    }
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+    }
+    try_draw_atlas_button(app, "level", 110.0f, 42.0f, 44.0f, 44.0f, 1.0f);
+    if (!try_draw_atlas_button(app, "Level_bar", 210.0f, 42.0f, 150.0f, 26.0f, 1.0f,
+                               /*fill=*/true)) {
+        try_draw_atlas_button(app, "level_bar_short", 210.0f, 42.0f, 150.0f, 26.0f,
+                              1.0f, /*fill=*/true);
+    }
+    draw_ui_label(app, 140.0f, 28.0f, 90.0f, 30.0f, std::to_string(w.level), 0.9f,
+                  UiAlign::Left, 1.0f, 1.0f, 1.0f);
+    try_draw_atlas_button(app, "energy", 330.0f, 42.0f, 40.0f, 40.0f, 1.0f);
+    try_draw_atlas_button(app, "Energy_Bar", 450.0f, 42.0f, 150.0f, 26.0f, 1.0f,
+                          /*fill=*/true);
+    try_draw_atlas_button(app, "gold", 740.0f, 42.0f, 40.0f, 40.0f, 1.0f);
+    draw_ui_label(app, 770.0f, 28.0f, 110.0f, 30.0f, std::to_string(w.money), 0.9f,
+                  UiAlign::Left, 1.0f, 1.0f, 1.0f);
+    try_draw_atlas_button(app, "ruby", 930.0f, 42.0f, 40.0f, 40.0f, 1.0f);
+    draw_ui_label(app, 960.0f, 28.0f, 90.0f, 30.0f, std::to_string(w.bonus), 0.9f,
+                  UiAlign::Left, 1.0f, 1.0f, 1.0f);
+    if (!try_draw_atlas_button(app, "AddMoney", 1100.0f, 42.0f, 48.0f, 48.0f, 1.0f)) {
+        try_draw_atlas_button(app, "ComboButtons/icon_plus", 1100.0f, 42.0f, 48.0f, 48.0f,
+                              1.0f);
+    }
+}
+
+// Dojo gamepad (display only): the oracle Dojo shows the joystick +
+// punch/kick buttons (same ui/controller frames as the fight pad, norm
+// state — no input handling on the hub).
+void draw_dojo_gamepad(App& app) {
+    const GamepadLayout pad;
+    const float base_size = pad.joy_r * 2.0f;
+    const float knob_size = pad.knob_r * 2.0f;
+    const float btn_size = pad.btn_r * 2.0f;
+    try_draw_atlas_button(app, "JoystickContainer_norm", pad.joy_cx, pad.joy_cy,
+                          base_size, base_size, 1.0f);
+    try_draw_atlas_button(app, "Joystick_norm", pad.joy_cx, pad.joy_cy, knob_size,
+                          knob_size, 1.0f);
+    try_draw_atlas_button(app, "btn_punch_normal", pad.punch_cx, pad.punch_cy,
+                          btn_size, btn_size, 1.0f);
+    try_draw_atlas_button(app, "btn_kick_normal", pad.kick_cx, pad.kick_cy,
+                          btn_size, btn_size, 1.0f);
+}
+
 void DojoScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    sf2::scene::Sprite* dojo = app.dojo_sprite();
-    if (dojo != nullptr) {
+    ensure_dojo_location(app);
+    // NOTE: the HUD bar draws AFTER the scene (see below) — screen-space
+    // chrome on top, like the fight HUD.
+    // Dojo interior: the same location layers the fight renders
+    // (interior + garden, NOT the sky fallback). Static camera (no chase):
+    // the location's fight-start framing (default_camera — the JS `ma.Sya`
+    // whole-arena fit, zoom 1280/1960). The old ad-hoc (831, floor-80,
+    // zoom 1) framing put the 1936-wide wall at screen x -1159..777 and
+    // y -156..356 — the right half + bottom of the hub rendered black.
+    // With the fit framing the wall spans x 8..1272, y 50..384 and the
+    // floor band lands at screen y ~295..333.
+    if (app.has_fight_assets()) {
+        FightAssets& assets = app.fight_assets();
         sf2::render::Camera ui_cam;
-        ui_cam.center_x = kViewW * 0.5f;
-        ui_cam.center_y = kViewH * 0.5f;
-        ui_cam.zoom = 1.0f;
-        ui_cam.view_w = kViewW;
-        ui_cam.view_h = kViewH;
-        ui_cam.arena_h = kViewH;
-        ui_cam.arena_floor = 0.0f;
-        ui_cam.arena_center_x = kViewW * 0.5f;
-        ren.draw_sprite(*dojo, ui_cam);
+        assets.dojo.default_camera(ui_cam, kViewW, kViewH);
+        assets.dojo.render_layers(ren, ui_cam, 0, assets.dojo.layers().size());
     } else {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
@@ -1472,12 +1616,23 @@ void DojoScreen::render_impl(App& app) {
             dojo_fighter_->sample(*dojo_idle_, 0, 0.0f, 0.0f, 1);
             float minx = 0.0f, miny = 0.0f, maxx = 0.0f, maxy = 0.0f;
             dojo_fighter_->triangle_bbox(minx, miny, maxx, maxy);
-            constexpr float kFeetY = 440.0f;  // floor row above the buttons
+            // The fit framing puts the floor band at screen y ~295..333
+            // (computed off default_camera: zoom 1280/1960, floor sprites
+            // world y -86..-27); the feet row sits mid-band.
+            constexpr float kFeetY = 325.0f;  // floor row above the buttons
             constexpr float kFigX = 400.0f;
             dojo_fighter_->sample(*dojo_idle_, fr, kFigX, kFeetY - maxy, 1);
             draw_dojo_figure(ren, fig_cam, *dojo_fighter_);
-            draw_punchbag(ren, fig_cam, 850.0f, kFeetY);
+            // Under the beam mount: dojo_punch_bag_holder lands at screen
+            // x ~633 (world -10 at the fit framing), so the bag hangs from
+            // its mount instead of floating at the old 850.
+            draw_punchbag(ren, fig_cam, 633.0f, kFeetY);
         }
+        draw_dojo_gamepad(app);
+        // Top HUD bar (screen-space chrome above the scene: the wall lamps
+        // land at screen y ~50..130 and would otherwise cover the bar's
+        // right-side icons).
+        draw_dojo_hud_bar(app, ren);
         // Sensei hint panel (quest_panel.hpp — the tutorial quest banner).
         // EXCLUSIVITY (single source of truth): the quest modal dims the
         // screen and blocks input (TAP TO CONTINUE); the ambient hint and
@@ -1494,11 +1649,60 @@ void DojoScreen::render_impl(App& app) {
         const float panel[] = {px, py, px + pw, py, px, py + ph,
                                px + pw, py, px + pw, py + ph, px, py + ph};
         ren.draw_triangles(panel, 6, 0.05f, 0.05f, 0.08f, 0.78f);
-        draw_ui_label(app, px + 16.0f, py + 4.0f, pw - 32.0f, 20.0f, qs.speaker, 0.9f,
+        // Sensei portrait (Dojo wave §5): character_sensei_small (256px,
+        // transparent corners) + the green-circle dialog chrome. The ring
+        // draw site is OPEN in JS (likely shell-side); the portrait sits
+        // at the panel's left, text shifts right.
+        {
+            const float pcx = px + 36.0f, pcy = py + 32.0f;
+            if (app.renderer().texture_lookup("sensei_portrait") != 0) {
+                sf2::scene::Sprite s;
+                s.texture_name = "sensei_portrait";
+                s.frame_x = 0.0f;
+                s.frame_y = 0.0f;
+                s.frame_w = 256.0f;
+                s.frame_h = 256.0f;
+                s.tex_w = 256.0f;
+                s.tex_h = 256.0f;
+                s.solid = false;
+                s.color_a = 1.0f;
+                s.transform.set_pos(pcx, pcy);
+                const float sc = 56.0f / 256.0f;
+                s.transform.set_scale(sc, sc);
+                sf2::render::Camera ui_cam;
+                ui_cam.center_x = 640.0f;
+                ui_cam.center_y = 360.0f;
+                ui_cam.zoom = 1.0f;
+                ui_cam.view_w = 1280.0f;
+                ui_cam.view_h = 720.0f;
+                ui_cam.arena_h = 720.0f;
+                ui_cam.arena_floor = 0.0f;
+                ui_cam.arena_center_x = 640.0f;
+                app.renderer().draw_sprite(s, ui_cam);
+            }
+            // Green ring (dialog chrome): 28-segment outline, r 30..34.
+            constexpr float kPi = 3.14159265358979323846f;
+            constexpr int kSeg = 28;
+            for (int i = 0; i < kSeg; ++i) {
+                const float a0 = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(kSeg);
+                const float a1 = 2.0f * kPi * static_cast<float>(i + 1) / static_cast<float>(kSeg);
+                const float r0 = 30.0f, r1 = 34.0f;
+                const float tri[12] = {
+                    pcx + std::cos(a0) * r0, pcy + std::sin(a0) * r0,
+                    pcx + std::cos(a0) * r1, pcy + std::sin(a0) * r1,
+                    pcx + std::cos(a1) * r0, pcy + std::sin(a1) * r0,
+                    pcx + std::cos(a0) * r1, pcy + std::sin(a0) * r1,
+                    pcx + std::cos(a1) * r1, pcy + std::sin(a1) * r1,
+                    pcx + std::cos(a1) * r0, pcy + std::sin(a1) * r0,
+                };
+                ren.draw_triangles(tri, 6, 0.18f, 0.65f, 0.30f, 1.0f);
+            }
+        }
+        draw_ui_label(app, px + 72.0f, py + 4.0f, pw - 88.0f, 20.0f, qs.speaker, 0.9f,
                       UiAlign::Left, 1.0f, 0.85f, 0.4f);
-        draw_ui_label(app, px + 16.0f, py + 24.0f, pw - 32.0f, 20.0f, qs.line1, 0.75f,
+        draw_ui_label(app, px + 72.0f, py + 24.0f, pw - 88.0f, 20.0f, qs.line1, 0.75f,
                       UiAlign::Left, 1.0f, 1.0f, 1.0f);
-        draw_ui_label(app, px + 16.0f, py + 44.0f, pw - 32.0f, 18.0f, qs.line2, 0.7f,
+        draw_ui_label(app, px + 72.0f, py + 44.0f, pw - 88.0f, 18.0f, qs.line2, 0.7f,
                       UiAlign::Left, 0.85f, 0.9f, 0.6f);
         }
     }
@@ -1524,8 +1728,8 @@ void DojoScreen::render_impl(App& app) {
     }
     // Disciple sparring toggle (Dojo chrome: only when the Dojo is the
     // top screen - never leaks onto Shop/Profile above it).
-    if (app.screens().top() == this) {
-    // update handler; needs save Disciple/Y0 to switch the training setup).
+    // Dev chrome: hidden unless --debug-ui (not in the oracle).
+    if (app.debug_ui() && app.screens().top() == this) {
     {
         const float cx = kViewW - 140.0f, cy = 40.0f, w = 220.0f, h = 44.0f;
         const std::string label = disciple_ ? "DISCIPLE: ON" : "DISCIPLE: OFF";
@@ -1535,14 +1739,16 @@ void DojoScreen::render_impl(App& app) {
                           label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
     }
-    // Settings entry (mirrors the update rect above).
-    if (app.screens().top() == this) {
-    draw_flat_button(app, "SETUP", 85.0f, 34.0f, 130.0f, 44.0f, 0.3f, 0.32f, 0.4f,
-                     false);
-    draw_ui_label(app, 85.0f - 65.0f + 8.0f, 34.0f - 14.0f, 130.0f - 16.0f, 28.0f,
+    // Settings entry: gear icon always (update rect above); flat+text
+    // only in --debug-ui (dev chrome, not in the oracle).
+    try_draw_atlas_button(app, "Settings_normal", 85.0f, 34.0f, 48.0f, 48.0f, 1.0f);
+    if (app.debug_ui() && app.screens().top() == this) {
+        draw_flat_button(app, "SETUP", 85.0f, 34.0f, 130.0f, 44.0f, 0.3f, 0.32f, 0.4f,
+                         false);
+        draw_ui_label(app, 85.0f - 65.0f + 8.0f, 34.0f - 14.0f, 130.0f - 16.0f, 28.0f,
                       "SETUP", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    // Sensei dialog modal on top of everything Dojo.
     }
+    // Sensei dialog modal on top of everything Dojo.
     draw_quest_modal(app, ren, app.screens().top() == this);
 }
 

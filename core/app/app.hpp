@@ -198,6 +198,11 @@ public:
     // this to auto-advance instead of modal-blocking.
     bool headless() const { return headless_frames_ > 0; }
 
+    // Dev chrome (SETUP/DISCIPLE toggles — not in the oracle; Dojo wave):
+    // hidden unless `--debug-ui` was passed.
+    void set_debug_ui(bool on) { debug_ui_ = on; }
+    bool debug_ui() const { return debug_ui_; }
+
     // --- text ---------------------------------------------------------------
     // Draws `text` at (x,y) top-left using the menu font. Returns false
     // when no font is loaded.
@@ -281,6 +286,7 @@ private:
     int headless_frames_ = 0;
     bool auto_click_ = false;
     bool auto_attack_ = false;
+    bool debug_ui_ = false;
     int frame_count_ = 0;
     int auto_click_stage_ = 0;
 };

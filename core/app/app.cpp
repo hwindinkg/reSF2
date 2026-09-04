@@ -278,11 +278,39 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
         load_ui_atlas_bundle_impl(*this, ui, "misc");
         load_ui_atlas_bundle_impl(*this, ui, "skills");
         load_ui_atlas_bundle_impl(*this, mp, "buttons");
+        // Virtual-gamepad art (Joystick*, btn_punch_*, btn_kick_*): loaded
+        // at boot (Dojo wave) so the Dojo hub pad resolves on frame 1.
+        // Before, only the FightScreen ctor loaded it, so the hub pad was
+        // a silent miss until a fight had run ([ui] miss telemetry).
+        load_ui_atlas_bundle_impl(*this, ui, "controller");
         // Fight HUD atlas (HealthBar_*, Round_*, FightPause) — 1px slices
         // stretched to the bar rects (see screens.cpp FightScreen HUD).
         load_ui_atlas_bundle_impl(*this, res_root + "/fight", "ui");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "app: ui atlas load failed: %s\n", e.what());
+    }
+
+    // Sensei portrait (Dojo wave): quest dialogs pass
+    // Image="character_sensei_small" (JS `He` L1045-1048); the 256px webp
+    // ships with transparent corners already (no CPU masking needed).
+    // The green ring is dialog chrome drawn by the Dojo screen.
+    try {
+        const std::string dir = res_root + "/users/images";
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("character_sensei_small.", 0) != 0) continue;
+            const std::string ext = entry.path().extension().string();
+            if (ext != ".webp" && ext != ".png") continue;
+            sf2::data::Texture tex;
+            if (!sf2::data::decode_texture(entry.path().string(), tex)) continue;
+            const GLuint gl = renderer_->texture_for("sensei_portrait", tex);
+            std::fprintf(stdout, "[app] sensei portrait: %s %dx%d (tex %u)\n",
+                         name.c_str(), tex.w, tex.h, gl);
+            std::fflush(stdout);
+            break;
+        }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "app: sensei portrait load failed: %s\n", e.what());
     }
 
     screens_ = std::make_unique<ScreenManager>(*this);

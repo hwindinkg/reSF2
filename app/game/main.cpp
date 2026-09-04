@@ -459,6 +459,7 @@ int main(int argc, char** argv) {
     bool auto_click = false;
     bool headless_loop = false;
     bool ui_tour = false;
+    bool debug_ui = false;
     bool capture_fight = false;
     bool capture_idle_fight = false;  // --capture-idle-fight-at N: boot direct + no input, capture at fight frame N
     bool auto_attack = false;
@@ -483,6 +484,8 @@ int main(int argc, char** argv) {
             headless_loop = true;
         } else if (arg == "--ui-tour") {
             ui_tour = true;
+        } else if (arg == "--debug-ui") {
+            debug_ui = true;
         } else if (arg == "--capture" && i + 1 < argc) {
             capture_dir = argv[++i];
         } else if (arg == "--capture-fight") {
@@ -688,6 +691,7 @@ int main(int argc, char** argv) {
         UiTourDriver driver;
         app.set_auto_attack(false);
         app.set_headless_frames(1);
+        if (debug_ui) app.set_debug_ui(true);
         std::filesystem::create_directories("reference/traces/ui");
         while (!driver.finished && driver.guard < 60000) {
             glfwPollEvents();
