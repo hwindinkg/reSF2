@@ -146,12 +146,13 @@ void render_frame(sf2::render::Renderer& renderer, sf2::scene::LocationScene& sc
         camera.zoom = zoom;
     }
 
+    // Project fighter vertices from world space to screen space.
+    // Fighters are full-camera-tracked objects (parallax factor 1.0f),
+    // identical to JS ev.Gf which passes through the main camera unchanged.
     auto project = [&camera](const std::vector<float>& v) {
         std::vector<float> out(v.size());
         for (std::size_t i = 0; i < v.size(); i += 2) {
-            // Fighters are world-space objects at parallax factor 0 (the
-            // camera offset applies once, not twice).
-            out[i] = camera.world_to_screen_x(v[i], 0.0f);
+            out[i]     = camera.world_to_screen_x(v[i], 1.0f);
             out[i + 1] = camera.world_to_screen_y(v[i + 1]);
         }
         return out;
@@ -167,14 +168,24 @@ void render_frame(sf2::render::Renderer& renderer, sf2::scene::LocationScene& sc
                   << " enemy tris=" << evc / 3 << "\n";
     }
 
+    // JS draw order (ev.Gf L845):
+    //   BG layers [0..fighter_layer) -> enemy (z=-.001) -> player (z=0)
+    //   -> FG layers (floor + vignette) [fighter_layer+1..end)
     renderer.begin_frame(camera);
-    for (const auto& layer : scene.layers()) {
-        scene.render_layer(renderer, *layer, camera);
+    const std::size_t fl = scene.fighter_layer();
+    if (fl != sf2::scene::LocationScene::npos) {
+        scene.render_layers(renderer, camera, 0, fl);
+    } else {
+        scene.render_layers(renderer, camera, 0, scene.layers().size());
     }
-    renderer.draw_triangles(pv.data(), pv.size() / 2, player.color_r(), player.color_g(),
-                            player.color_b());
+    // Enemy behind player: draw enemy first (z=-.001), then player (z=0).
     renderer.draw_triangles(ev.data(), ev.size() / 2, enemy.color_r(), enemy.color_g(),
                             enemy.color_b());
+    renderer.draw_triangles(pv.data(), pv.size() / 2, player.color_r(), player.color_g(),
+                            player.color_b());
+    if (fl != sf2::scene::LocationScene::npos) {
+        scene.render_layers(renderer, camera, fl + 1, scene.layers().size());
+    }
     renderer.batch().flush();
     if (!sf2::render::gl_capture_png(renderer.window(), path)) {
         throw std::runtime_error("gl_capture_png failed: " + path);
