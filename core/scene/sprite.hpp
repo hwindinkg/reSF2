@@ -37,6 +37,17 @@ struct Sprite : public Node {
     float color_b = 1.0f;
     float color_a = 1.0f;
 
+    // Sprite trimming from TexturePacker's spriteSourceSize / sourceSize.
+    // When a packed frame is trimmed (smaller than the original art), the
+    // rendered quad must be shifted by:
+    //   (source_w/2 - trim_x - frame_w/2, source_h/2 - trim_y - frame_h/2)
+    // so the visible content aligns to the center of the full source frame.
+    // Zero-initialised: no adjustment for un-trimmed sprites.
+    float trim_x = 0.0f;    // spriteSourceSize.x in atlas pixels
+    float trim_y = 0.0f;    // spriteSourceSize.y in atlas pixels
+    float source_w = 0.0f;  // sourceSize.w (untrimmed sprite width)
+    float source_h = 0.0f;  // sourceSize.h (untrimmed sprite height)
+
     // True for solid-color fills (ClassName="pixel_1") that do not sample
     // the atlas texture.
     bool solid = false;
