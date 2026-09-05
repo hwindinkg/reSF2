@@ -512,6 +512,18 @@ Dense-node label collisions remain (nodes ~60px apart, data-driven; needs leader
   ui_diff thr12 dojo_norm:dojo = 68.83% over-threshold (round3 68.84% ->
   -0.01pp noise; baseline 84.90% -> -16.07pp).
   Gate 25% NOT MET; NO COMMIT per policy (commit+PUSH only if <=25%).
+- Wave 7 round 7 alpha probe (2026-09-06, UNCOMMITTED, zero net code change):
+  probe forced layer_4 SimpleEffect color_a 0.45 -> 0.0
+  (location_scene.cpp:240 `sprite->color_a = simple_effect_alpha(child)` ->
+  `0.0f`, reverted after; shader `texel * v_color` + SRC_ALPHA/ONE_MINUS_SRC_ALPHA
+  core/render/sprite_batch.cpp:31-41/150-156). Probe frame md5 0e349331... ->
+  b121e698... (bytes move) but ui_diff thr12 dojo_norm:dojo = 68.83% unchanged;
+  reverted rebuild recapture md5 back 0e349331... x2 runs deterministic, 0 px
+  vs saved baseline. Verdict ALPHA-LIVE but GATE-NEUTRAL (layer_4 dim is not
+  the gate driver; B2 sky + B4/B6 plateau remain). Fresh --ui-tour tour 13/13;
+  loop 13/13 + save/load PASS (money 425 items 7 WEAPON_KNIVES); combat 99
+  GREEN + spatial 17 GREEN + ai_golden Node<->C++ ju k=3/0/-1/-1/-1 + horizon
+  T/F/edge 0 divs. Gate 25% NOT MET; NO COMMIT per policy.
 
 ## FINAL — 1:1 playable build matching the oracle
 
