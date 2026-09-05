@@ -22,7 +22,7 @@ namespace {
 // camera when it pans. At fight start (camera centered on the arena,
 // Io == 0) the parallax is a no-op.
 void sprite_to_quad(const sf2::scene::Sprite& s, const Camera& camera, float factor,
-                    SpriteQuad& quad) {
+                     float layer_scale, SpriteQuad& quad) {
     const sf2::scene::Transform& t = s.transform;
 
     const float half_w = t.scale_x * s.frame_w / 2.0f;
@@ -49,12 +49,19 @@ void sprite_to_quad(const sf2::scene::Sprite& s, const Camera& camera, float fac
     const float v[4] = {(cy - half_v) * v_norm, (cy - half_v) * v_norm,
                         (cy + half_v) * v_norm, (cy + half_v) * v_norm};
 
+    // The layer-node scale (JS L488): scaled layers (lEa||ij) carry
+    // go.scale=Bj, so every child world coord is pre-multiplied by Bj
+    // BEFORE the shared camera projection runs. Corner pairing preserved:
+    // 0=(-w,-h) 1=(+w,-h) 2=(-w,+h) 3=(+w,+h).
+    const float sx0 = t.x * layer_scale, sy0 = t.y * layer_scale;
+    const float lx0 = lx[0] * layer_scale, lx1 = lx[1] * layer_scale;
+    const float ly0 = ly[0] * layer_scale, ly1 = ly[2] * layer_scale;
     const float sx[4] = {
-        camera.world_to_screen_x(t.x + lx[0], factor), camera.world_to_screen_x(t.x + lx[1], factor),
-        camera.world_to_screen_x(t.x + lx[2], factor), camera.world_to_screen_x(t.x + lx[3], factor)};
+        camera.world_to_screen_x(sx0 + lx0, factor), camera.world_to_screen_x(sx0 + lx1, factor),
+        camera.world_to_screen_x(sx0 + lx0, factor), camera.world_to_screen_x(sx0 + lx1, factor)};
     const float sy[4] = {
-        camera.world_to_screen_y(t.y + ly[0]), camera.world_to_screen_y(t.y + ly[1]),
-        camera.world_to_screen_y(t.y + ly[2]), camera.world_to_screen_y(t.y + ly[3])};
+        camera.world_to_screen_y(sy0 + ly0), camera.world_to_screen_y(sy0 + ly0),
+        camera.world_to_screen_y(sy0 + ly1), camera.world_to_screen_y(sy0 + ly1)};
 
     // Two triangles: (0,1,2) (2,1,3).
     quad.v[0] = {sx[0], sy[0], u[0], v[0], s.color_r, s.color_g, s.color_b, s.color_a};
@@ -119,9 +126,9 @@ GLuint Renderer::texture_lookup(const std::string& name) const {
 }
 
 void Renderer::draw_sprite(const sf2::scene::Sprite& sprite, const Camera& camera,
-                           float factor) {
+                            float factor, float layer_scale) {
     SpriteQuad quad;
-    sprite_to_quad(sprite, camera, factor, quad);
+    sprite_to_quad(sprite, camera, factor, layer_scale, quad);
     GLuint texture = 0;
     if (!sprite.solid) {
         texture = textures_.count(sprite.texture_name) ? textures_[sprite.texture_name] : 0;

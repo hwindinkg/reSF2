@@ -1555,12 +1555,11 @@ void DojoScreen::render_impl(App& app) {
     // chrome on top, like the fight HUD.
     // Dojo interior: the same location layers the fight renders
     // (interior + garden, NOT the sky fallback). Static camera (no chase):
-    // the location's fight-start framing (default_camera — the JS `ma.Sya`
-    // whole-arena fit, zoom 1280/1960). The old ad-hoc (831, floor-80,
-    // zoom 1) framing put the 1936-wide wall at screen x -1159..777 and
-    // y -156..356 — the right half + bottom of the hub rendered black.
-    // With the fit framing the wall spans x 8..1272, y 50..384 and the
-    // floor band lands at screen y ~295..333.
+    // the hub renders through the JS `ma.Sya` global camera at 16:9
+    // (zoom 1.3, center 0 — Sya never sets x/y at 16:9, only `tMa(f)`).
+    // The arena floor tiles (world y ~194..253) land at screen y ~612..689
+    // and the visible slice is world x ~-492..492 (wall/tiles centered; the
+    // +/-1108 side masks sit off-view).
     if (app.has_fight_assets()) {
         FightAssets& assets = app.fight_assets();
         sf2::render::Camera ui_cam;
@@ -1616,16 +1615,16 @@ void DojoScreen::render_impl(App& app) {
             dojo_fighter_->sample(*dojo_idle_, 0, 0.0f, 0.0f, 1);
             float minx = 0.0f, miny = 0.0f, maxx = 0.0f, maxy = 0.0f;
             dojo_fighter_->triangle_bbox(minx, miny, maxx, maxy);
-            // The fit framing puts the floor band at screen y ~295..333
-            // (computed off default_camera: zoom 1280/1960, floor sprites
-            // world y -86..-27); the feet row sits mid-band.
-            constexpr float kFeetY = 325.0f;  // floor row above the buttons
+    // The arena floor tiles (world y ~194..253) land at screen y ~612..689
+    // (Sya identity: screen = world*1.3 + 360); the fighter feet row sits
+    // on the tile band, clear of the entry buttons.
+    constexpr float kFeetY = 650.0f;  // tile-band screen row
             constexpr float kFigX = 400.0f;
             dojo_fighter_->sample(*dojo_idle_, fr, kFigX, kFeetY - maxy, 1);
             draw_dojo_figure(ren, fig_cam, *dojo_fighter_);
-            // Under the beam mount: dojo_punch_bag_holder lands at screen
-            // x ~633 (world -10 at the fit framing), so the bag hangs from
-            // its mount instead of floating at the old 850.
+            // The Punchbag dummy hangs right-of-center (screen x 633), a
+            // standalone display prop: the hub slice is arena-centered
+            // (Io 0, x -492..492), so the bag is not tied to arena X.
             draw_punchbag(ren, fig_cam, 633.0f, kFeetY);
         }
         draw_dojo_gamepad(app);

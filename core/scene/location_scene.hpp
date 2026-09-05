@@ -27,6 +27,10 @@ struct Layer {
     std::string name;
     float factor = 1.0f;
     int type = 1;  // 1 = visual layer, 2 = ModelsViewer (fighters)
+    // The `Scaling` attr (>0) -> `ij` (JS zjb L475-476: `b.ij=c>0`). Dojo:
+    // every visual layer carries Scaling="1"; Type=2 has none (ij=false)
+    // but takes the setScale branch via lEa() (JS L488).
+    bool scaling = false;
     std::vector<std::shared_ptr<Sprite>> sprites;
 };
 

@@ -3,6 +3,7 @@
 
 #include "scene/location_scene.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -58,6 +59,27 @@ void parse_color(const std::string& hex, float& r, float& g, float& b) {
     r = static_cast<float>((v >> 16) & 0xFF) / 255.0f;
     g = static_cast<float>((v >> 8) & 0xFF) / 255.0f;
     b = static_cast<float>(v & 0xFF) / 255.0f;
+}
+
+// The Transparency loop on a Picture SimpleEffect at rest (JS bkb L478-479:
+// `irb(Offset)` + `KWa(Period,Value,Ease)` keys; xl.ia per-frame
+// `Y.wa(EO.Gb()/100)`; zh.Gb initial with ar=0 is the first Point Value).
+// The background probe is static, so the loop is evaluated at rest:
+// Offset=0 -> first Point Value/100 (dojo layer_4: 45 -> 0.45). Effects
+// without Transparency stay opaque.
+float simple_effect_alpha(const pugi::xml_node& node) {
+    for (const pugi::xml_node child : node.children()) {
+        if (std::strcmp(child.name(), "Transparency") != 0) {
+            continue;
+        }
+        for (const pugi::xml_node pt : child.children()) {
+            if (std::strcmp(pt.name(), "Point") == 0 && pt.attribute("Value")) {
+                const float v = sf2::data::xml_attr_float(pt, "Value", 100.0f);
+                return std::max(0.0f, std::min(1.0f, v / 100.0f));
+            }
+        }
+    }
+    return 1.0f;
 }
 
 // The game's `ujb` (L477): "pixel_1" -> solid fill, else atlas sprite.
@@ -186,6 +208,10 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
         layer->name = "layer_" + std::to_string(layer_index);
         layer->factor = sf2::data::xml_attr_float(layer_node, "Factor", 1.0f);
         layer->type = sf2::data::xml_attr_int(layer_node, "Type", 1);
+        // The `Scaling` attr -> `ij` (JS zjb L475-476: `b.ij=c>0`). Dojo:
+        // every visual layer carries Scaling="1"; Type=2 has none but takes
+        // the setScale branch via lEa() (JS L488 branch).
+        layer->scaling = sf2::data::xml_attr_int(layer_node, "Scaling", 0) > 0;
         // The ModelsViewer (Type=2) layer is where the ORIGINAL game draws
         // the fighters (JS_RENDER §2.5 / §7). Its index splits the draw
         // order: layers before it are the background, layers after it
@@ -200,17 +226,18 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
             if (std::strcmp(child.name(), "Image") == 0) {
                 std::shared_ptr<Sprite> sprite = make_image(child, frames);
                 if (sprite != nullptr) {
-                    // [FIX R2 vertical] Minimal: offset by arena_h/2 (280) as per diagnosis.
-                    sprite->transform.y -= arena_h_ * 0.5f;
+                    // Raw R3a placement (JS L486-487): X/Y straight through.
                     layer->sprites.push_back(std::move(sprite));
                 }
             } else if (std::strcmp(child.name(), "SimpleEffect") == 0) {
                 // Picture SimpleEffects draw a static frame at X/Y — the
                 // game's xl Picture path (L478). Static placement is enough
-                // for the background probe.
+                // for the background probe. Transparency loop at rest: the
+                // first Point Value/100 (xl.ia `Y.wa(EO.Gb()/100)` with
+                // zh ar=0 -> first key; dojo layer_4 -> 0.45 dim).
                 std::shared_ptr<Sprite> sprite = make_image(child, frames);
                 if (sprite != nullptr) {
-                    sprite->transform.y -= arena_h_ * 0.5f;
+                    sprite->color_a = simple_effect_alpha(child);
                     layer->sprites.push_back(std::move(sprite));
                 }
             }
@@ -227,19 +254,56 @@ void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
     camera.view_h = view_h;
     camera.arena_h = arena_h_;
     camera.arena_floor = arena_floor_;
-    camera.arena_center_x = 0.0f;
-    camera.center_x = camera.arena_center_x;  // camera locked to arena center
-    // Fit the arena width in the view (fight-start zoom from `ma.Sya`).
-    camera.zoom = arena_w_ > 0.0f ? view_w / arena_w_ : 1.0f;
-    // [FIX Phase 4b — dojo visible] The vertical center. The arena content
-    // (bg sky at world y=20, floor at y=223.5) spans ~y -430..520; centering
-    // on world y=0 compressed the bright sky/wall layers below the floor line
-    // and left the black off-arena mattes covering the visible band — the
-    // "dojo is black" symptom. Center so the FLOOR (the visible arena floor)
-    // sits at ~0.61 of the view height, matching the oracle's fight view.
-    const float floor_screen_y = view_h * 0.61f;
-    const float vshift = ((arena_h_ / 2.0f - arena_floor_) / 2.0f) * (1.0f - camera.zoom);
-    camera.center_y = arena_floor_ + vshift - (floor_screen_y - view_h / 2.0f) / camera.zoom;
+    // Static Sya hub framing (ma.Sya, JS L1833): the hub renders through
+    // the global camera, whose horizontal is 0 (Sya `b.C(0)` + `tMa(f)`) —
+    // but the hub runs the LIVE fight (`Tf` `YL` L1971-1972), so the `Ut.Al`
+    // layer shift (L826-827 `Wrb(Io*bp)`) applies. Focus = spawn midpoint
+    // `z9a` L475 (690+973)/2 = 831.5; Io = width/2 - focus = 980-831.5 =
+    // +148.5. Renderer Io = arena_center_x - center_x, so arena_center_x =
+    // 148.5 with center_x = 0 reproduces the JS layer shift exactly.
+    camera.arena_center_x = 148.5f;
+    camera.center_x = 0.0f;
+    // The Sya zoom (JS L1833): f = viewH/arenaH, aspect clamp 0.45..1, the
+    // narrow-screen clamp, the width fit min(viewW/(span*f+100),1) with the
+    // dojo fight-start span |973-690| = 283 (qh.ECa, JS L845-846), and the
+    // min-zoom 0.6..1.3 (-> 1.3 at 16:9). Bj = 1 (m$a = Lb.height).
+    const float aspect = view_h > 0.0f ? view_w / view_h : 16.0f / 9.0f;
+    const float e = arena_h_ > 0.0f ? arena_h_ : 560.0f;
+    float f = e > 0.0f ? view_h / e : 1.0f;
+    f *= (aspect < 0.45f ? 0.45f : aspect > 1.0f ? 1.0f : aspect);
+    if (aspect < 0.8f) {
+        f *= 0.8f + ((std::max(0.5f, std::min(0.8f, aspect)) - 0.5f) / 0.3f) * 0.2f;
+    }
+    const float span = 283.0f;
+    f *= std::min(1.0f, view_w / (span * f + 100.0f));
+    const float dmin =
+        0.6f + ((std::max(0.5f, std::min(1.0f, aspect)) - 0.5f) / 0.5f) * 0.7f;
+    if (f < dmin) {
+        f = dmin;
+    }
+    camera.zoom = f;
+    // The hub-statics layer zoom (JS `Ut.Bj`, L826): at the spawn span
+    // ECa=283 (JS L845-846) xCa=min(nC/(283+300),1); nC at 16:9 1280x720
+    // =1280/(720/560)=995.6 -> 995.6/583>1 -> 1; then `Bj=1` reset +
+    // max(Bj,NW) with NW=nC/width=0.508 -> Bj stays 1. Stored on the camera
+    // so render_layer can apply the L488 setScale branch JS-exactly.
+    {
+        const float ira = e > 0.0f ? view_h / e : 1.0f;
+        const float n_c = ira > 0.0f ? view_w / ira : view_w;
+        const float xca = n_c / (span + 300.0f) < 1.0f ? n_c / (span + 300.0f) : 1.0f;
+        const float nw = arena_w_ > 0.0f ? n_c / arena_w_ : 1.0f;
+        camera.layer_zoom = xca > nw ? xca : nw;
+        if (camera.layer_zoom < 1.0f) {
+            camera.layer_zoom = 1.0f;
+        }
+    }
+    // The vertical target: the hub renders through the GLOBAL camera, which
+    // Sya leaves at y=0 (L1833 sets only `tMa(f)` + portrait `b.D`; no `Al`
+    // call, so layers sit at identity and screen = world*f + view/2). The
+    // renderer's projection adds layer_vshift, so center_y = vshift
+    // reproduces the identity mapping exactly (F9 = (Lb.height/2-ct)/2,
+    // JS Ut.init L843; vshift = -30 at zoom 1.3).
+    camera.center_y = ((arena_h_ / 2.0f - arena_floor_) / 2.0f) * (1.0f - camera.zoom);
 }
 
 void LocationScene::render_layers(sf2::render::Renderer& renderer,
@@ -253,18 +317,18 @@ void LocationScene::render_layers(sf2::render::Renderer& renderer,
 
 void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& layer,
                                  const sf2::render::Camera& camera) const {
+    // The per-layer node scale (JS L488 `b.lEa()||b.ij?b.setScale(Bj)`):
+    // Bj comes from the camera (computed once per frame by the caller —
+    // default_camera for the hub statics, fight framing for the fight).
+    // At Bj=1 both branches are the identity; the Xrb-vs-setScale split
+    // only moves pixels when Bj!=1 (push-in / lens-zoom moments).
+    const bool scaled = (layer.type == 2) || layer.scaling;
+    const float ls = scaled ? camera.layer_zoom : 1.0f;
     for (const auto& sprite : layer.sprites) {
-        // [FIX Phase 4b — mattes smother the arena] The params' `pixel_1`
-        // solid fills are the arena-BOUNDS blackout (the area outside the
-        // arena). At the fight camera's vertical scale they cover the whole
-        // visible band (world Y=320..520 maps over the fighter zone) and the
-        // black fighters disappear into them — "no body". The oracle's
-        // equivalent blackout is a thin border drawn by the arena system,
-        // not these full-size fills; skip them in the fight view.
-        if (sprite->solid) {
-            continue;
-        }
-        renderer.draw_sprite(*sprite, camera, layer.factor);
+        // The game's ujb (JS L477) draws pixel_1 masks opaque — they are
+        // part of the arena frame (the side/top/bottom blackout around the
+        // 1960x560 arena), so they draw like every other sprite.
+        renderer.draw_sprite(*sprite, camera, layer.factor, ls);
     }
 }
 

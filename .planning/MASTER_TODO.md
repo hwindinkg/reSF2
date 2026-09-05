@@ -460,6 +460,58 @@ Dense-node label collisions remain (nodes ~60px apart, data-driven; needs leader
   (fix rounds 0/3 used). Follow-up OPEN (not gate-blocking): full-height dojo
   interior framing (portrait-aspect layer projection below floor band) +
   fight-floor fill; needs layer-projection work in screens.cpp, queued.
+- Wave 7 round 1 static-Sya reset (2026-09-05, fix round 1/3, UNCOMMITTED):
+  location_scene.cpp shifts deleted + default_camera static Sya (zoom 1.3,
+  center_x 831.5, arena_center 980, floor 0.78) + solid-skip deleted;
+  screens.cpp kFeetY 325 -> 562 (floor anchor 561.6), framing comments updated.
+  Fresh --ui-tour recapture (tour 13/13 exit 0; loop 13/13 + save/load PASS;
+  ai/combat/spatial goldens GREEN).
+  ui_diff thr12 dojo_norm:dojo = 93.11% over-threshold (baseline 84.90% ->
+  REGRESSED +8.21pp; row means port y120/180 34.2/42.2 vs oracle 111.1/121.7).
+  Gate 25% NOT MET; rounds 1/3 used; NO COMMIT per policy (commit+PUSH on pass
+  only). Diagnosis for round 2: opaque masks now cover the bright garden/wall
+  bands (ujb L477 alpha path OPEN-7d unconfirmed); Sya zoom 1.3 slice
+  (world x 191..1175) may mismatch the oracle hub crop.
+- Wave 7 round 2 Sya-identity slice (2026-09-05, fix round 2/3, UNCOMMITTED):
+  Alpha root-cause CLOSED: Na.cd (JS L1448) alpha always 1 -> ujb L477 packs
+  0xFF -> R.Ed L1619 unpacks w=1, so opaque mask draw is JS-EXACT (no code
+  change; port L91 color_a=1.0 already correct). Culprit was the slice, not
+  alpha. Slice fix: default_camera center_x 831.5 -> 0, arena_center 980 -> 0
+  (Sya at 16:9 never sets camera x — `d!=0&&(f<d?f=d:b.C(0))` L1833 — hub
+  renders at identity, Io=0, side masks off-view), center_y -105.1 -> -30
+  (Sya touches only tMa(f)+portrait b.D; no Al call in hub path -> layers at
+  identity, screen=world*f+view/2); screens.cpp kFeetY 562 -> 650 (tile band
+  194..253 lands y 612..689).
+  Fresh --ui-tour recapture (tour 13/13; loop 13/13 + save/load PASS;
+  combat/ai GREEN + spatial GREEN 17 asserts).
+  ui_diff thr12 dojo_norm:dojo = 85.67% over-threshold (round1 93.11% ->
+  IMPROVED -7.44pp; baseline 84.90% -> +0.77pp).
+  Gate 25% NOT MET; rounds 2/3 used; NO COMMIT per policy. Round 3 OPEN.
+- Wave 7 round 3 hub-Al slice offset (2026-09-05, fix round 3/3 FINAL,
+  UNCOMMITTED): hub runs the LIVE fight (`Tf` `YL` L1971-1972), so the
+  `Ut.Al` layer shift (L826-827 `Wrb(Io*bp)`) applies. Focus = spawn
+  midpoint `z9a` L475 (690+973)/2 = 831.5; Io = width/2 - focus =
+  980-831.5 = +148.5. Fix: default_camera arena_center_x 0 -> 148.5
+  (center_x stays 0 JS-exact per Sya `b.C(0)` L1833; renderer Io =
+  arena_center_x - center_x). Single file: location_scene.cpp.
+  Fresh --ui-tour recapture (tour 13/13 exit 0; loop 13/13 + save/load
+  PASS; combat 99 GREEN + spatial 17 GREEN + ai_golden Node<->C++ 0 divs
+  on shared vectors prng/gb/ju).
+  ui_diff thr12 dojo_norm:dojo = 68.84% over-threshold (round2 85.67% ->
+  IMPROVED -16.83pp; baseline 84.90% -> -16.06pp).
+  Gate 25% NOT MET; rounds 3/3 used; NO COMMIT per policy. FINAL.
+- Wave 7 round 6 wall+layer_4 (2026-09-05, UNCOMMITTED): wall-window alpha
+  verified already-correct, NO code change (window alpha baked in webp RGBA;
+  renderer blends — port window shows garden, not black). layer_4 dim:
+  Transparency loop at rest = first Point Value/100 (xl.ia `wa(EO.Gb()/100)`,
+  zh ar=0 -> 45 -> color_a 0.45); single code file location_scene.cpp
+  (new simple_effect_alpha + 1 call-site line in SimpleEffect branch).
+  Fresh --ui-tour recapture (tour 13/13; loop 13/13 + save/load PASS;
+  combat 99 GREEN + spatial 17 GREEN + ai_golden Node<->C++ 0 divs
+  on shared vectors prng/gb/ju).
+  ui_diff thr12 dojo_norm:dojo = 68.83% over-threshold (round3 68.84% ->
+  -0.01pp noise; baseline 84.90% -> -16.07pp).
+  Gate 25% NOT MET; NO COMMIT per policy (commit+PUSH only if <=25%).
 
 ## FINAL — 1:1 playable build matching the oracle
 

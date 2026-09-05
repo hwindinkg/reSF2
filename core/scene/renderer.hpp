@@ -50,6 +50,11 @@ struct Camera {
     float arena_h = 560.0f;
     float arena_floor = 80.0f;
     float arena_center_x = 0.0f;
+    // The layer zoom Bj (JS `Ut.Bj`, L826): the per-layer node scale.
+    // Layers with Type=2 (lEa) or Scaling (ij) draw at world*Bj (setScale);
+    // the rest draw at identity (their translate carries Xrb(F9*(1-Bj))).
+    // Hub-statics: Bj=1 (xCa=1 at spawn span, reset, max(1,NW)).
+    float layer_zoom = 1.0f;
 
     // Game's vertical focus shift (F9 * (1-zoom)); 0 at zoom == 1.
     float layer_vshift() const { return ((arena_h / 2.0f - arena_floor) / 2.0f) * (1.0f - zoom); }
@@ -95,8 +100,12 @@ public:
 
     // Draws a sprite through the camera. `factor` is the layer's parallax
     // factor (the game's `Wrb(Io * bp)` — layer x offset is scaled by it).
+    // `layer_scale` is the layer node's own scale (the game's per-layer
+    // `Qi.setScale(Bj)` vs `Xrb(F9*(1-Bj))` branch, JS L488): scaled layers
+    // (Type=2 or Scaling) draw at world*Bj through the camera; Xrb layers
+    // draw at identity (their translate already carries F9*(1-Bj)).
     void draw_sprite(const sf2::scene::Sprite& sprite, const Camera& camera,
-                     float factor = 1.0f);
+                      float factor = 1.0f, float layer_scale = 1.0f);
 
     // Draws a flat-color triangle list in screen space (already projected).
     // `verts` = 2 floats per vertex (x,y); color is RGBA 0..1. One draw call
