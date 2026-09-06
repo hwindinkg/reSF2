@@ -22,6 +22,13 @@ LocationScene::default_camera vertical formula:
 
 so the floor sprite lands at screen_y ~= 583 -- correctly framed.
 At zoom=1.3 (16:9 wide screen): bg.center_y = -30, floor at screen_y ~= 651.
+
+Variable naming: the fight render camera in FightScreen::render_impl is
+called 'camera' (not 'c'); verified from screens.cpp search + visual_debug.md:
+    camera.center_x = fight.camera.center_x
+    camera.center_y = cam.center_y  // <-- bug anchor (fight-world cy)
+    camera.zoom = cam.zoom
+    assets.dojo.render_layers(ren, camera, 0, fighter_layer); // bg to fix
 """
 
 import pathlib
@@ -33,15 +40,23 @@ src = SCREENS.read_text(encoding="utf-8")
 orig = src
 
 # -- idempotency guard ---------------------------------------------------
-GUARD = "sf2::render::Camera bg = c;"
+GUARD = "sf2::render::Camera bg = camera;"
 if GUARD in src:
     print("screens.cpp already has R2 fix -- nothing to do")
     sys.exit(0)
 
-# -- 1.  Inject bg camera after 'c.center_y = cam.center_y;' -----------
-# This line is unique to FightScreen::render_impl (DojoScreen uses ui_cam).
-ANCHOR = "c.center_y = cam.center_y;"
+# -- 1.  Inject bg camera after 'camera.center_y = cam.center_y;' --------
+# This line is unique to FightScreen::render_impl (DojoScreen uses ui_cam,
+# not cam.center_y). The 'camera' variable name is confirmed from
+# visual_debug.md and screens.cpp code search.
+ANCHOR = "camera.center_y = cam.center_y;"
 pos = src.find(ANCHOR)
+if pos < 0:
+    # Try fallback: some builds may use a slightly different expression
+    ANCHOR_ALT = "camera.center_y = cam.center_y"
+    pos = src.find(ANCHOR_ALT)
+    if pos >= 0:
+        ANCHOR = ANCHOR_ALT
 if pos < 0:
     print(f"ERROR: anchor not found: {ANCHOR!r}", file=sys.stderr)
     sys.exit(1)
@@ -49,47 +64,51 @@ line_end = src.index("\n", pos) + 1  # character position after the newline
 
 BG_CODE = (
     "    // R2 fix -- bg camera for location layer rendering.\n"
-    "    // Location sprites are in dojo-world Y (raw XML Y values), which is\n"
-    "    // incompatible with the fight cam's center_y (fight-world floor\n"
-    "    // anchor, e.g. -221.6). Using fight cy sends the floor sprite\n"
-    "    // (XML y~=223) to screen_y~=880 -- off the 720-px frame.\n"
-    "    // bg shares center_x (horizontal tracking) and zoom but uses the\n"
-    "    // default_camera vertical formula so sprites land correctly:\n"
+    "    // The fight camera center_y is the floor anchor in fight-world coords\n"
+    "    // (approx. -221.6), incompatible with location-layer world Y values.\n"
+    "    // bg shares center_x/zoom but uses the default_camera vertical formula:\n"
     "    //   center_y = ((arena_h/2 - arena_floor)/2) * (1-zoom)\n"
     "    //   = ((280-80)/2)*(1-1.0) = 0  at zoom=1.0  -> floor at screen_y~=583\n"
     "    //   = ((280-80)/2)*(1-1.3) = -30 at zoom=1.3 -> floor at screen_y~=651\n"
-    "    sf2::render::Camera bg = c;\n"
+    "    sf2::render::Camera bg = camera;\n"
     "    bg.center_y = ((assets.dojo.arena_height() / 2.0f - assets.dojo.arena_floor()) / 2.0f)\n"
-    "                  * (1.0f - c.zoom);\n"
+    "                  * (1.0f - camera.zoom);\n"
 )
 src = src[:line_end] + BG_CODE + src[line_end:]
-print("OK: bg camera injected after 'c.center_y = cam.center_y;'")
+print(f"OK: bg camera injected after {ANCHOR!r}")
 
-# -- 2.  Route all location render_layers to the bg camera -------------
-# DojoScreen uses 'ui_cam'; only FightScreen::render_impl uses bare 'c'.
-# Replace: assets.dojo.render_layers(ren, c,
-# With:    assets.dojo.render_layers(ren, bg,
-new_src, n = re.subn(
-    r"(assets\.dojo\.render_layers\(ren),\s*c,",
-    r"\1, bg,",
-    src,
-)
-if n == 0:
-    # Fallback: any .render_layers(ren, c,  (avoids matching ui_cam calls)
-    new_src, n = re.subn(
-        r"(\brender_layers\(ren),\s*c,",
-        r"\1, bg,",
-        src,
-    )
-if n > 0:
-    src = new_src
-    print(f"OK: {n} render_layers(ren, c, ...) -> render_layers(ren, bg, ...)")
-else:
+# -- 2.  Route background location render_layers to the bg camera --------
+# Target the specific background call (bg layers 0..fighter_layer):
+#   assets.dojo.render_layers(ren, camera, 0, fighter_layer)
+# The foreground call (fighter_layer+1..end) must keep the fight camera.
+# Three patterns to try (ordered most- to least-specific):
+patterns = [
+    # Most specific: full call with 0, fighter_layer
+    (r"(assets\.dojo\.render_layers\(ren),\s*camera,\s*0,\s*fighter_layer\)",
+     r"\1, bg, 0, fighter_layer)"),
+    # Mid: any render_layers with camera starting at layer 0
+    (r"(\.render_layers\(ren),\s*camera,\s*0,",
+     r"\1, bg, 0,"),
+    # Broad fallback: any render_layers(ren, camera, - replaces ALL bg+fg
+    # (acceptable if there is exactly one render_layers in FightScreen)
+    (r"(assets\.dojo\.render_layers\(ren),\s*camera,",
+     r"\1, bg,"),
+]
+replaced = 0
+for pat, repl in patterns:
+    new_src, n = re.subn(pat, repl, src)
+    if n > 0:
+        src = new_src
+        replaced += n
+        print(f"OK: {n} render_layers(ren, camera, ...) -> render_layers(ren, bg, ...) [pattern {patterns.index((pat, repl))+1}]")
+        break
+
+if replaced == 0:
     print(
-        "WARNING: no render_layers(ren, c, ...) calls found -- "
-        "bg camera is constructed but not yet wired to render_layers.\n"
-        "Manually change render_layers(ren, c, ...) to render_layers(ren, bg, ...) "
-        "in FightScreen::render_impl if needed."
+        "WARNING: no render_layers(ren, camera, ...) calls matched.\n"
+        "bg camera is constructed but NOT yet wired to render_layers.\n"
+        "Manually change render_layers(ren, camera, 0, fighter_layer) to\n"
+        "render_layers(ren, bg, 0, fighter_layer) in FightScreen::render_impl."
     )
 
 if src == orig:
