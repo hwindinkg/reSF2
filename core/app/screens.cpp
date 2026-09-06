@@ -640,7 +640,7 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight, int b
 // BEFORE the fg floor layers (bg -> fighters -> SPARKS -> fg floor — the
 // b615a1bf layer order).
 void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
-                     const sf2::scene::EffectSystem& fx) {
+                     const sf2::scene::EffectSystem& fx, float xoff = 0.0f) {
     const std::vector<sf2::scene::particle>& parts = fx.particles();
     for (const sf2::scene::particle& p : parts) {
         if (p.life <= 0.0f || p.age >= p.life) continue;
@@ -651,7 +651,7 @@ void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& came
         const float g = static_cast<float>((p.color >> 8) & 0xFFu) * (1.0f / 255.0f);
         const float b = static_cast<float>(p.color & 0xFFu) * (1.0f / 255.0f);
         // World -> screen (factor 1.0: the sparks live in the fight plane).
-        const float sx = camera.world_to_screen_x(p.x, 1.0f);
+        const float sx = camera.world_to_screen_x(p.x - xoff, 1.0f);
         const float sy = camera.world_to_screen_y(p.y);
         // The spark's world size -> screen px (the same zoom the capsule
         // strokes use); shrink slightly as it fades.
@@ -669,7 +669,7 @@ void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& came
 // each live instance, faded by age/life — the same world->screen path the
 // hit sparks use. Drawn right after the sparks, before the fg floor layers.
 void draw_magic_effects(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
-                        const sf2::scene::MagicEffects& fx) {
+                        const sf2::scene::MagicEffects& fx, float xoff = 0.0f) {
     for (const sf2::scene::MagicInstance& in : fx.live()) {
         const float alpha = fx.alpha_for(in);
         if (alpha <= 0.02f) continue;
@@ -677,7 +677,7 @@ void draw_magic_effects(sf2::render::Renderer& ren, const sf2::render::Camera& c
         const float r = static_cast<float>((color >> 16) & 0xFFu) * (1.0f / 255.0f);
         const float g = static_cast<float>((color >> 8) & 0xFFu) * (1.0f / 255.0f);
         const float b = static_cast<float>(color & 0xFFu) * (1.0f / 255.0f);
-        const float sx = camera.world_to_screen_x(in.x, 1.0f);
+        const float sx = camera.world_to_screen_x(in.x - xoff, 1.0f);
         const float sy = camera.world_to_screen_y(in.y);
         const float half = fx.size_for(in) * camera.zoom * 0.5f;
         if (half < 0.5f) continue;
@@ -1267,7 +1267,12 @@ void draw_dojo_figure(sf2::render::Renderer& ren, const sf2::render::Camera& cam
 DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
     // Menu music (JS `lb.OS` -> `ta.Ut("menu")`, L1276-1277).
     sf2::audio::AudioEngine::instance().play_music("menu");
-    const float bw = 240.0f;
+    // 4-up row at xs 0.28/0.46/0.64/0.82 (spacing 231px): 240px widths
+    // overlapped 9px (flat fallback + hover borders); 220px leaves 11px
+    // gaps. Atlas draws are height-constrained (120px) so art is unchanged;
+    // tour click centers (358/589/819/1050,518) untouched. (menu atlas
+    // Dojo_normal 226x193 etc.; tour kUiTourSteps in app/game/main.cpp.)
+    const float bw = 220.0f;
     const float bh = 120.0f;
     const float y = kViewH * 0.72f;
     const float xs[] = {kViewW * 0.28f, kViewW * 0.46f, kViewW * 0.64f, kViewW * 0.82f};
@@ -1529,7 +1534,10 @@ void draw_dojo_gamepad(App& app) {
     const GamepadLayout pad;
     const float base_size = pad.joy_r * 2.0f;
     const float knob_size = pad.knob_r * 2.0f;
-    const float btn_size = pad.btn_r * 2.0f;
+    // Draw-size 0.9 (centers + hit radii untouched: JS fu Si(120,28)/
+    // fh(-50,198) + uab 115): the 200px art at full hit-diameter left a
+    // 4px gap that read as touching; 0.9 leaves a 12px gap.
+    const float btn_size = pad.btn_r * 2.0f * 0.9f;
     try_draw_atlas_button(app, "JoystickContainer_norm", pad.joy_cx, pad.joy_cy,
                           base_size, base_size, 1.0f);
     try_draw_atlas_button(app, "Joystick_norm", pad.joy_cx, pad.joy_cy, knob_size,
@@ -2616,8 +2624,9 @@ void FightScreen::draw_gamepad(App& app) const {
     }
 
     // --- Attack buttons: punch + kick circles (the JS `ig` swaps the
-    // frame to _action while pressed).
-    const float btn_size = pad.btn_r * 2.0f;
+    // frame to _action while pressed). Draw-size 0.9 (centers + hit radii
+    // untouched — JS fu/uab; draw only): 4px gap -> 12px gap.
+    const float btn_size = pad.btn_r * 2.0f * 0.9f;
     const bool punch_drawn =
         try_draw_atlas_button(app, btn_punch_down_ ? "btn_punch_action" : "btn_punch_normal",
                               pad.punch_cx, pad.punch_cy, btn_size, btn_size, 1.0f);
@@ -2956,7 +2965,20 @@ void FightScreen::render_impl(App& app) {
 
     const sf2::scene::FightCamera& cam = fight_->camera();
     sf2::render::Camera camera;
-    camera.center_x = cam.center_x;
+    // [fix(fight-slice): render-space re-center] The sim stays 0-based
+    // (spawns 690/973, walls [80,1880], pose dump untouched) while the
+    // location art is centered (dojo_params Width=1960, walls +-900,
+    // floor tiles -1024..1024). Rendering both through the same camera
+    // exposed the centered bg's right edge at screen ~1010 + the side
+    // masks over the player (right-half black, player in black). Shift
+    // the RENDER frame by half the arena width (fight-only; the
+    // controller's center/zoom/pose dump are untouched): the fighters
+    // keep byte-identical screens while the bg/masks slide back over
+    // the view. (JS Sya L1833/Ut.Al L826 in fight_camera_sya.hpp;
+    // Camera in core/scene/renderer.hpp; dojo_params.b78df4b4.xml.)
+    const float kCxOff =
+        assets.dojo.arena_width() > 0.0f ? assets.dojo.arena_width() * 0.5f : 980.0f;
+    camera.center_x = cam.center_x - kCxOff;
     camera.center_y = cam.center_y;
     camera.zoom = cam.zoom;
     // [fix(camera): wire the fight layer zoom] The fight controller computes
@@ -2979,7 +3001,7 @@ void FightScreen::render_impl(App& app) {
     // bridge/tree layers landed entirely off-screen and only the sky
     // (factor 0.4) + the walls (factor 1) were visible. With the arena
     // center at 980, Io = +149 -> the parallax is a small, correct shift.
-    camera.arena_center_x = assets.dojo.arena_width() * 0.5f;
+    camera.arena_center_x = assets.dojo.arena_width() * 0.5f - kCxOff;  // render re-center (see above)
     ren.begin_frame(camera);
     // [fix(render): arena layer order] The original game draws the fighters
     // INSIDE the ModelsViewer (Type=2) layer — background layers first, then
@@ -2996,16 +3018,17 @@ void FightScreen::render_impl(App& app) {
     // procedural black ellipse (the A4 commit 84269826) was a native
     // invention — the silhouettes stand straight on the floor line.
 
-    auto project = [&camera, &assets](const std::vector<float>& v) {
+    auto project = [&camera, &assets, kCxOff](const std::vector<float>& v) {
         // JS-exact fighter container offset (DOJO_BG_STATIC 7.4, tl.init
         // L843: container y=height/2-ct; dojo 280-80=200; Yia/B_ L476 are
         // container-local, floor tiles Y=223.5 location-space). World/pose/
         // camera stay container-space (oracle-trace exact); only the visual
         // projection adds the container so feet land in the tile band.
+        // Render re-center: sim x is 0-based, location art centered.
         const float kContY = assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor();
         std::vector<float> out(v.size());
         for (std::size_t i = 0; i < v.size(); i += 2) {
-            out[i] = camera.world_to_screen_x(v[i], 1.0f);
+            out[i] = camera.world_to_screen_x(v[i] - kCxOff, 1.0f);
             out[i + 1] = camera.world_to_screen_y(v[i + 1] + kContY);
         }
         return out;
@@ -3024,7 +3047,7 @@ void FightScreen::render_impl(App& app) {
     // the collidable capsule edges as thick quads over the mesh so the
     // fighter is a solid humanoid silhouette (head/neck/chest/stomach/
     // arms/legs) matching the oracle.
-    auto draw_capsules = [&camera, &ren, &assets](const sf2::scene::FightFighter& f) {
+    auto draw_capsules = [&camera, &ren, &assets, kCxOff](const sf2::scene::FightFighter& f) {
         const float r = f.fighter.color_r(), g = f.fighter.color_g(), b = f.fighter.color_b();
         // [Phase 4d — capsule-figure render] The oracle draws the fighter's
         // body from the merged model's CAPSULE FIGURES (JS `Yc.Tib`: every
@@ -3070,10 +3093,10 @@ void FightScreen::render_impl(App& app) {
             if (stroke <= 0.0f) {
                 continue;
             }
-            const float sx1 = camera.world_to_screen_x(pos[u1], 1.0f);
+            const float sx1 = camera.world_to_screen_x(pos[u1] - kCxOff, 1.0f);
             const float sy1 = camera.world_to_screen_y(
                 pos[u1 + 1] + assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor());
-            const float sx2 = camera.world_to_screen_x(pos[u2], 1.0f);
+            const float sx2 = camera.world_to_screen_x(pos[u2] - kCxOff, 1.0f);
             const float sy2 = camera.world_to_screen_y(
                 pos[u2 + 1] + assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor());
             float dx = sx2 - sx1;
@@ -3135,8 +3158,8 @@ void FightScreen::render_impl(App& app) {
     // baked into the camera framing). Drawn AFTER the fighters, BEFORE the
     // fg floor layers (bg -> fighters -> SPARKS -> fg floor — the b615a1bf
     // layer order; the batch preserves submission order).
-    draw_hit_sparks(ren, camera, fight_->fx());
-    draw_magic_effects(ren, camera, s_magic_fx_);
+    draw_hit_sparks(ren, camera, fight_->fx(), kCxOff);
+    draw_magic_effects(ren, camera, s_magic_fx_, kCxOff);
 
     // [fix(render): arena layer order] The foreground layers — the ones the
     // params XML places AFTER the ModelsViewer (Type=2) fighter layer: the

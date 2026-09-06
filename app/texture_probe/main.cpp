@@ -263,6 +263,41 @@ void probe_dojo(const std::string& res_root, const std::string& out_dir) {
     std::cout << "\n";
 }
 
+// --- task 5: controller atlas (ui/controller) --------------------------------
+// Decodes the ui/controller atlas (ktx ASTC / dds BCn) and saves it as PNG
+// so the pad art (JoystickContainer_norm etc.) can be inspected offline.
+void probe_controller(const std::string& res_root, const std::string& out_dir) {
+    const std::string ctrl_dir = res_root + "/ui";
+    std::cout << "=== 5. controller atlas ===\n";
+    const std::string base = ctrl_dir + "/controller";
+    sf2::data::Texture tex = decode_atlas(base);
+    print_stats("controller atlas", tex);
+
+    // Locate the matching json (controller.<hash>.json) for the sanity check.
+    std::string json_path;
+    for (const auto& entry : std::filesystem::directory_iterator(ctrl_dir)) {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind("controller.", 0) == 0 && entry.path().extension().string() == ".json") {
+            json_path = entry.path().string();
+            break;
+        }
+    }
+    if (!json_path.empty()) {
+        const std::vector<std::uint8_t> json = read_file(json_path);
+        const sf2::data::atlas a = sf2::data::atlas_parse(json.data(), json.size());
+        std::cout << "  atlas json meta.size: " << a.w << "x" << a.h
+                  << "  frames: " << a.frames.size() << "\n";
+        if (a.w != tex.w || a.h != tex.h) {
+            throw std::runtime_error("SANITY FAIL: decoded dims " + std::to_string(tex.w) + "x" +
+                                     std::to_string(tex.h) + " != atlas meta " +
+                                     std::to_string(a.w) + "x" + std::to_string(a.h));
+        }
+        std::cout << "  sanity: dims match atlas meta.size\n";
+    }
+    save_png(out_dir + "/controller_atlas.png", tex);
+    std::cout << "\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -274,6 +309,7 @@ int main(int argc, char** argv) {
         probe_fight_ui(res_root);
         probe_font(res_root);
         probe_dojo(res_root, out_dir);
+        probe_controller(res_root, out_dir);
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "texture_probe: error: " << e.what() << "\n";

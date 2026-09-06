@@ -729,3 +729,54 @@ Node<->C++ 0 divs (prng B0 identical, ju k=3/0/-1/-1/-1, horizon T/F/T,
 Gb max-abs 1.11e-08 <= 1e-5).
 Gate 25% NOT MET (honest; fight-oracle pair mode-mismatched by
 construction). COMMIT+PUSH per orchestrator (STATE.md untouched).
+
+## UI-GATE round 13 - fight-slice re-center + pad/nav spacing (2026-09-06, phase1 step9, 7 hunks core/app/screens.cpp)
+
+Eyeball defects (port captures 1280x720): (1) fight right-half black
+x~830..1280 (right-black 62.81% vs oracle 16.84%) + player in black;
+(2) pad punch/kick 4px gap reading as overlap; (3) bottom-left mirrored
+МЕНЮ — no mirror source in UI (all sprite/text scales positive, no Flip,
+no rotated frames in menu/controller atlases); (4) dojo 4-up row 240px
+widths on 231px spacing = 9px overlap.
+Fix (fight-only slice; sim/pose untouched): render-space re-center by
+half arena width (kCxOff = arena_w/2): camera.center_x/arena_center_x
+shifted, fighter mesh/capsule/spark/magic world-x shifted for projection
+only — fighter screens byte-identical (649/1017), bg/masks slide back
+over the view (JS Sya L1833/Ut.Al L826 fight_camera_sya.hpp; Camera
+core/scene/renderer.hpp; dojo_params.b78df4b4.xml Width=1960 centered).
+Nav bw 240->220 (centers untouched, tour clicks safe; atlas draws
+height-constrained so art unchanged). Pad button draw-size x0.9
+(78->70px, 4px->12px gap; centers + uab-115 hit radii untouched, draw
+only; fight draw_gamepad + dojo draw_dojo_gamepad).
+Binary verified fresh (screens.cpp 21:55:40 <= sf2_app.lib 21:56:07 <=
+game.exe 21:56:08; cmake Release exit 0).
+Method: fresh `game.exe reference/www/res
+reference/saves/fresh_dojo.xml --ui-tour` from E:\reSF2, tour 13/13 ALL
+STEPS DONE (Training vs Punchbag, LOSS no reward).
+Fight: side black GONE (y360 x1000-1030 = bg (188,119,71), was black;
+right-black 62.81%->27.08%, residual = top letterbox masks, oracle
+16.84%); floor-band dark masses x494-681 (enemy) + x1072-1174 (player),
+bg between = BOTH VISIBLE, no black half; left blue strip gone (y360 x0
+= bg). Fight-vs-prior 67.92% maxd 255 = INTENDED slice change (prior SHA
+6A997A49 586919 B). Fight-vs-oracle tut_fight 97.45% (informative only,
+mode-mismatched, was 97.06%).
+Dojo ui_diff thr12 dojo_norm:dojo = 68.70% (baseline 68.88% -> -0.18pp,
+pad/nav spacing only; re-measured on the final 22:50 captures).
+Fresh --ui-tour tour 13/13 exit 0; loop 13/13 + save/load PASS (money 425
+items 7 WEAPON_KNIVES); combat Node 99 GREEN + spatial 17 GREEN +
+ai_golden Node<->C++ 0 divs (B0 identical, ju 
+k=3/0/-1/-1/-1).
+Eyeball-defect triage (controller atlas decoded via texture_probe task 5
+-> reference/extracted/textures/controller_atlas.png): (2) pad "wrong
+icons fist/star/banana" + "overlapping teal circles" = the ORIGINAL
+JoystickContainer_norm art itself — dark discs with faint embossed
+icons (btn_punch_normal center (22,38,40) flat disc, icon pixels sparse
+(42,71,73)); the teal plate + dark diagonal strokes at the base's
+bottom-left are baked-in art, not UI text. Port punch-kick draw circles
+82px apart vs 70.6px radii sum = 11.4px gap, no overlap. (3) "mirrored
+МЕНЮ" = same art plate; teal-mask agreement straight 95.43% vs mirrored
+42.33% = rendered UN-mirrored. No code change needed for (2)/(3).
+(4) dojo nav: 4 plates at y518 (edges 284/446, 506/638, 756/850,
+1002/1109), atlas art gaps 101-121px, no 5th structure.
+Gate 25% NOT MET (honest). NO COMMIT per policy (orchestrator batches;
+STATE.md untouched).
