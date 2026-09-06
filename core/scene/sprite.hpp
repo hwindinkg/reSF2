@@ -43,13 +43,22 @@ struct Sprite : public Node {
     // dL, Yd) — qj carries the trim offset, fa the source size).
     // When a packed frame is trimmed (smaller than the original art), the
     // rendered quad must be shifted by:
-    //   (source_w/2 - trim_x - frame_w/2, source_h/2 - trim_y - frame_h/2)
-    // so the visible content aligns to the center of the full source frame.
+    //   (trim_x + frame_w/2 - source_w/2, trim_y + frame_h/2 - source_h/2)
+    // so the visible content aligns to its offset inside the full source
+    // frame (JS R.Cb L1615: Em=qj + ba(frame) + R.Th L1615 translate
+    // b-f+d: content center lands at x-(fa/2-off-frame/2), i.e. the
+    // NEGATION of (source/2-trim-frame/2)).
     // Zero-initialised: no adjustment for un-trimmed sprites.
     float trim_x = 0.0f;    // spriteSourceSize.x in atlas pixels (JS wNa.x)
     float trim_y = 0.0f;    // spriteSourceSize.y in atlas pixels (JS wNa.y)
     float source_w = 0.0f;  // sourceSize.w untrimmed width (JS fa.x, 0=untrimmed)
     float source_h = 0.0f;  // sourceSize.h untrimmed height (JS fa.y, 0=untrimmed)
+
+    // TexturePacker 90-degree packing flag (JS Iq.dL via pi.VJa L1703 +
+    // Vs.Qq L1705 Pj.dL + le.frame.dL: bk L1765 transposed draw + Cq L1561
+    // rotate(-90deg)). 0 in all 12823 shipped res frames, but plumbed so a
+    // rotated frame samples un-rotated JS-exact instead of stretched.
+    bool rotated = false;
 
     // True for solid-color fills (ClassName="pixel_1") that do not sample
     // the atlas texture.

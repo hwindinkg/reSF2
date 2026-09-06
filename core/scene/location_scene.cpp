@@ -152,7 +152,9 @@ std::shared_ptr<Sprite> make_image(const pugi::xml_node& node,
     }
     // Store trim fields (JS Vs.Qq L1705 qj=wNa offset + fa=sourceSize) so the
     // renderer can apply the sub-pixel position compensation that aligns the
-    // packed content to the source-frame center.
+    // packed content to the source-frame center. Rotated packing flag
+    // (JS Iq.dL L1703 -> Pj.dL L1705 -> le.frame.dL, bk L1765 / Cq L1561).
+    sprite->rotated = fr.rotated;
     if (fr.trimmed) {
         sprite->trim_x   = static_cast<float>(fr.offset_x);
         sprite->trim_y   = static_cast<float>(fr.offset_y);

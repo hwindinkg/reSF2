@@ -632,9 +632,9 @@ bool App::draw_atlas_frame(const std::string& name, float cx, float cy, float sc
     s.tex_h = static_cast<float>(th);
     s.solid = false;
     s.color_a = alpha;
-    if (fr.rotated) {
-        std::swap(s.frame_w, s.frame_h);
-    }
+    // Rotated packing (JS le.frame.dL, bk L1765 / Cq L1561): the renderer
+    // un-rotates UVs; quad keeps stored dims (no w/h swap — TLa keeps Nc).
+    s.rotated = fr.rotated;
     s.transform.set_pos(cx, cy);
     s.transform.set_scale(scale, scale);
     // UI is screen-space: use an identity camera (world == screen)
@@ -667,7 +667,9 @@ bool App::draw_atlas_rect(const std::string& name, float x, float y, float w, fl
     s.tex_h = static_cast<float>(th);
     s.solid = false;
     s.color_a = alpha;
-    if (fr.rotated) std::swap(s.frame_w, s.frame_h);
+    // Rotated packing (JS le.frame.dL, bk L1765 / Cq L1561): the renderer
+    // un-rotates UVs; quad keeps stored dims (no w/h swap — TLa keeps Nc).
+    s.rotated = fr.rotated;
     // x,y is top-left in view space; Sprite pos is center.
     s.transform.set_pos(x + w * 0.5f, y + h * 0.5f);
     if (fr.w > 0 && fr.h > 0) {

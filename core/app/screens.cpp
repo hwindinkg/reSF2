@@ -489,9 +489,9 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
     s.tex_h = static_cast<float>(th);
     s.solid = false;
     s.color_a = alpha;
-    if (fr.rotated) {
-        std::swap(s.frame_w, s.frame_h);
-    }
+    // Rotated packing (JS le.frame.dL, bk L1765 / Cq L1561): the renderer
+    // un-rotates UVs; quad keeps stored dims (no w/h swap — TLa keeps Nc).
+    s.rotated = fr.rotated;
     s.transform.set_pos(cx, cy);
     if (fr.w > 0 && fr.h > 0) {
         if (fill) {
@@ -1459,6 +1459,27 @@ void ensure_dojo_location(App& app) {
             }
         }
         assets.dojo.load(params_xml, {atlas_json}, app.res_root());
+        // [DOJO-HUB] Hide the punchbag holder prop. The params carry it as
+        // a black-tinted Image (ClassName="dojo_punch_bag_holder", hook+beam
+        // art at world (-10,-203.5) -> screen x621-1019 y4-190); the loader
+        // path is JS-exact (ujb tint via Na.cd with alpha 1 + R3a placement
+        // + NWa paint order), but the oracle hub paints clean wall there —
+        // oracle_dojo_norm.png y100-140 x660-940 = (160,129,93) with no hook
+        // or beam trace, while the port's black-tinted opaque beam would
+        // paint a ~390x20 black bar (measured: port sky band y96-168
+        // x400-900 = (52,37,33) vs oracle (130,96,70)). The hide is
+        // therefore hub-level: drop the sprite here (hub-only; the
+        // FightScreen location block keeps it, so fight rendering and all
+        // other locations are untouched).
+        for (const auto& layer : assets.dojo.layers()) {
+            auto& sprites = layer->sprites;
+            sprites.erase(std::remove_if(sprites.begin(), sprites.end(),
+                                         [](const std::shared_ptr<sf2::scene::Sprite>& s) {
+                                             return s != nullptr &&
+                                                    s->texture_name == "dojo_punch_bag_holder";
+                                         }),
+                          sprites.end());
+        }
         const std::string loc_prefix = "dojo.";
         for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
             const std::string name = entry.path().filename().string();
@@ -2080,8 +2101,10 @@ void MapScreen::render_impl(App& app) {
         draw_ui_label(app, n.x - 70.0f, n.y + d / 2 + 22.0f, 140.0f, 18.0f, badge, 0.6f,
                           UiAlign::Center, 0.8f, 0.8f, 0.8f);
     }
-    // The BACK button (top-left) — try textured misc frame, else flat.
-    if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+    // The BACK button (top-left) — JS-exact misc `Arrow` (y.sRa) + flat fallback.
+    // OPEN: no dedicated back frame in JS (btn_back 0 hits); Arrow is the
+    // misc-atlas nav arrow used for back navigation.
+    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
@@ -2260,9 +2283,12 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // Fighter::sample) so the feet land at the given world y. The dojo's
     // VISIBLE floor is the dojo_floor sprite line (world Y=223.5) — the
     // fighters stand on it (feet at 223.5 -> the floor sprite row). The
-    // params Floor attr (80) is the arena's physics line, NOT the visible
-    // wooden floor.
-    const float floor_y = -20.0f;  // camera anchor -> cam ~ -219 -> floor at 559, fighters COM -93/-110 -> feet ~ -3/ -? on floor
+    // params Floor attr (80) is the arena's physics line (JS Bf.init L474:
+    // ct=Floor, tl.init L843 container y=height/2-ct=200). Fighters live
+    // inside that container (DOJO_BG_STATIC 7.4); floor tiles Y=223.5 are
+    // location-space. Render adds the container offset so feet land in the
+    // tile band; world/pose/camera stay container-space (oracle-trace exact).
+    const float floor_y = 80.0f;  // JS Floor (dojo_params Root Floor=80)
     battle.player_spawn_x = 973.0f;
     battle.player_spawn_y = -110.0f;  // COM Y (oracle Me -108, Enemy -93) — ModelsViewer split
     battle.enemy_spawn_x = 690.0f;
@@ -2953,11 +2979,17 @@ void FightScreen::render_impl(App& app) {
     // procedural black ellipse (the A4 commit 84269826) was a native
     // invention — the silhouettes stand straight on the floor line.
 
-    auto project = [&camera](const std::vector<float>& v) {
+    auto project = [&camera, &assets](const std::vector<float>& v) {
+        // JS-exact fighter container offset (DOJO_BG_STATIC 7.4, tl.init
+        // L843: container y=height/2-ct; dojo 280-80=200; Yia/B_ L476 are
+        // container-local, floor tiles Y=223.5 location-space). World/pose/
+        // camera stay container-space (oracle-trace exact); only the visual
+        // projection adds the container so feet land in the tile band.
+        const float kContY = assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor();
         std::vector<float> out(v.size());
         for (std::size_t i = 0; i < v.size(); i += 2) {
             out[i] = camera.world_to_screen_x(v[i], 1.0f);
-            out[i + 1] = camera.world_to_screen_y(v[i + 1]);
+            out[i + 1] = camera.world_to_screen_y(v[i + 1] + kContY);
         }
         return out;
     };
@@ -2975,7 +3007,7 @@ void FightScreen::render_impl(App& app) {
     // the collidable capsule edges as thick quads over the mesh so the
     // fighter is a solid humanoid silhouette (head/neck/chest/stomach/
     // arms/legs) matching the oracle.
-    auto draw_capsules = [&camera, &ren](const sf2::scene::FightFighter& f) {
+    auto draw_capsules = [&camera, &ren, &assets](const sf2::scene::FightFighter& f) {
         const float r = f.fighter.color_r(), g = f.fighter.color_g(), b = f.fighter.color_b();
         // [Phase 4d — capsule-figure render] The oracle draws the fighter's
         // body from the merged model's CAPSULE FIGURES (JS `Yc.Tib`: every
@@ -3022,9 +3054,11 @@ void FightScreen::render_impl(App& app) {
                 continue;
             }
             const float sx1 = camera.world_to_screen_x(pos[u1], 1.0f);
-            const float sy1 = camera.world_to_screen_y(pos[u1 + 1]);
+            const float sy1 = camera.world_to_screen_y(
+                pos[u1 + 1] + assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor());
             const float sx2 = camera.world_to_screen_x(pos[u2], 1.0f);
-            const float sy2 = camera.world_to_screen_y(pos[u2 + 1]);
+            const float sy2 = camera.world_to_screen_y(
+                pos[u2 + 1] + assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor());
             float dx = sx2 - sx1;
             float dy = sy2 - sy1;
             const float len = std::sqrt(dx * dx + dy * dy);
@@ -3243,11 +3277,11 @@ void FightScreen::render_impl(App& app) {
 
     // Between-rounds HUD "Next" button (JS `vhb` L410 case 1): the fight
     // holds in EndStance until the player confirms the next round — drawn
-    // only while round_wait(). Atlas frame: the fight/ui atlas "FightPause"
-    // icon (the same atlas the HUD bars come from); flat fallback when the
-    // frame is missing.
+    // only while round_wait(). Atlas frame: fight/ui `FightPause` (y.IQa,
+    // JS-exact). OPEN: Next/ok 0 atlas hits (guessed names removed); flat
+    // fallback covers the Next confirm.
     if (fight_->round_wait()) {
-        const char* next_frames[] = {"FightPause", "Next", "ok"};
+        const char* next_frames[] = {"FightPause"};
         bool drawn = false;
         for (const char* fn : next_frames) {
             if (try_draw_atlas_button(app, fn, kNextBtnCX, kNextBtnCY, kNextBtnW, kNextBtnH,
@@ -3892,7 +3926,7 @@ void ShopScreen::render_impl(App& app) {
                               "OWNED", 0.65f, UiAlign::Left, 1.0f, 0.85f, 0.4f);
         }
     }
-    if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
@@ -4294,7 +4328,7 @@ void SettingsScreen::render_impl(App& app) {
                      0.3f, false);
     draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 382.0f, 320.0f - 16.0f, 28.0f,
                       sfx_label, 0.8f, UiAlign::Center, 0.6f, 0.6f, 0.6f);
-    if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
@@ -4379,7 +4413,7 @@ void MovesScreen::render_impl(App& app) {
         (void)app.draw_text(150.0f, 140.0f, "No moves for this weapon.", 0.8f, 0.7f, 0.7f,
                             0.7f);
     }
-    if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
@@ -4470,7 +4504,7 @@ void BracketScreen::render_impl(App& app) {
         (void)app.draw_text(150.0f, sy0 + 32.0f + static_cast<float>(i) * 28.0f, buf,
                             0.75f, 1.0f, 1.0f, 1.0f);
     }
-    if (!try_draw_atlas_button(app, "btn_back", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);

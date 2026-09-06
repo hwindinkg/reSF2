@@ -557,3 +557,39 @@ Dense-node label collisions remain (nodes ~60px apart, data-driven; needs leader
    (порог зафиксирован здесь, не подгоняется постфактум).
 3. Полный цикл Dojo→Fight→Results проходим в порту (playable, без заглушек
    на happy path).
+
+## UI-GATE round 8 — holder-skip + plateau-lifter verdict (2026-09-06, UNCOMMITTED)
+
+Sky B2 (rows ~96-156): darkener isolated by solo-layer probes (5 temp builds,
+all reverted; probes: RESF2_DOJO_SOLO/BARE/WHITE/SKIP/DUMP/DUMPQ): the
+black-tinted `dojo_punch_bag_holder` prop (world (-10,-203.5) -> screen
+x621-1019 y4-190; beam opaque white art x black tint) paints a black bar where
+the oracle shows clean wall (oracle holder-core y100-140 x660-940 =
+(160,129,93), zero hook/beam trace; wall renders TEXEL-EXACT everywhere:
+(127,84,62) vs texel (125,82,61)). Loader path JS-exact (ujb tint Na.cd w=1 +
+R3a placement + NWa order + blend on + WebPDecodeRGBA alpha; KTX red herring
+closed via texture_probe PNG identity), so the hide is hub-level.
+Fix (1 hunk, hub-scoped): core/app/screens.cpp ensure_dojo_location drops the
+`dojo_punch_bag_holder` sprite after load (erase by ClassName; FightScreen
+loader untouched, all other locations untouched).
+Sky Δ after: below-panel y150-190 x400-900 = (141,98,73) vs oracle (145,112,81)
+-> (-4,-14,-8) (was (-22,-30,-22)); panel zone y84-148 still panel-black =
+quest-STATE mismatch (fresh-port TUTORIAL/MOVE hint vs progressed-oracle, no
+panel — not a render bug, no code path); right strip x1030-1200 still
+(-57,-64,-40) = oracle-side lighting/version gradient (oracle brighter than
+OUR OWN texture there by (+57,+64,+40); port texel-exact (105,65,48) vs texel
+(105,65,48)), no JS-cited port bug, OPEN.
+Gate: ui_diff thr12 dojo_norm:dojo = 68.77% (baseline 68.83% -> -0.06pp; panel
+covers most of the fixed band in the full render).
+Plateau B4/B6 (+15..+31): lifter IDENTIFIED, not code-fixed this round —
+figure placement: port fighter (black, x400, short axe_stance, feet 650) +
+bag (x633) vs oracle masses (~x440 tall + ~x840): pillar pairs (+71/+51 beside,
+-46/-51 atop) = misalignment signature; needs Tf hub-figure JS research
+(world-x of hub disciple/bag; fight spawns 690/973 map elsewhere). Disproven
+this round: texel gamma (texel-exact), double-draw (quad dump: 1 draw/visit),
+overlay (holder is y<190 only), layer_4 (round7 neutral stands).
+Fresh --ui-tour tour 13/13 exit 0; loop 13/13 + save/load PASS (money 425
+items 7 WEAPON_KNIVES); combat Node GREEN + spatial 17 GREEN + ai_golden exit 0
+(ju k=3/0/-1/-1/-1 + horizon T/F/T match Node).
+Gate 25% NOT MET; NO COMMIT per policy (commit+PUSH only if <=25%).
+Revert (if ever needed): git checkout -- core/app/screens.cpp (single hunk).

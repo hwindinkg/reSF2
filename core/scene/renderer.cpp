@@ -32,39 +32,52 @@ void sprite_to_quad(const sf2::scene::Sprite& s, const Camera& camera, float fac
     const float ax = (t.anchor_x - 0.5f) * 2.0f * half_w;
     const float ay = (t.anchor_y - 0.5f) * 2.0f * half_h;
 
-    const float cx = s.solid ? 0.0f : s.frame_x + s.frame_w / 2.0f;
-    const float cy = s.solid ? 0.0f : s.frame_y + s.frame_h / 2.0f;
-    const float half_u = s.solid ? 0.0f : s.frame_w / 2.0f;
-    const float half_v = s.solid ? 0.0f : s.frame_h / 2.0f;
-
     // Local corners (in world units, centered on anchor).
     const float lx[4] = {-half_w - ax, half_w - ax, -half_w - ax, half_w - ax};
     const float ly[4] = {-half_h - ay, -half_h - ay, half_h - ay, half_h - ay};
-    // Normalized UV corners [0,1] (the shader samples in normalized space).
-    // The game's atlas frames are top-left origin and drawn upright.
+    // Normalized UV corners [0,1].
+    // Y-origin: the atlas frame rect is top-left origin and the upload is
+    // top-row-first with an identity sampler (stb top row -> v=0 row), so
+    // v=(y)/tex_h samples the intended file row — the same net mapping as
+    // JS (dr Rj L1763 `v_tcoord=(x, tex_h-y)/tex_h` over a FLIP_Y upload,
+    // pixelStorei(37440,1) L1821). No flip here.
+    // Rotated packing (JS le.frame.dL: bk L1765 transposed draw + Cq L1561
+    // ctx.rotate(-PI/2)): stored texels are the source rotated 90deg CW, so
+    // quad TL/TR/BL/BR sample stored TR/BR/TL/BL (Cq net screen(dx,dy) =
+    // (dy,h-dx): stored TR -> screen TL). 0/12823 shipped res frames are
+    // rotated, so this branch is neutral today and un-verified on live art.
     const float u_norm = s.tex_w > 0.0f ? 1.0f / s.tex_w : 1.0f;
     const float v_norm = s.tex_h > 0.0f ? 1.0f / s.tex_h : 1.0f;
-    const float u[4] = {(cx - half_u) * u_norm, (cx + half_u) * u_norm,
-                        (cx - half_u) * u_norm, (cx + half_u) * u_norm};
-    const float v[4] = {(cy - half_v) * v_norm, (cy - half_v) * v_norm,
-                        (cy + half_v) * v_norm, (cy + half_v) * v_norm};
+    const float fx0 = s.frame_x, fy0 = s.frame_y;
+    const float fx1 = s.frame_x + s.frame_w, fy1 = s.frame_y + s.frame_h;
+    const float u[4] = {!s.rotated ? fx0 * u_norm : fx1 * u_norm,
+                        !s.rotated ? fx1 * u_norm : fx1 * u_norm,
+                        !s.rotated ? fx0 * u_norm : fx0 * u_norm,
+                        !s.rotated ? fx1 * u_norm : fx0 * u_norm};
+    const float v[4] = {!s.rotated ? fy0 * v_norm : fy0 * v_norm,
+                        !s.rotated ? fy0 * v_norm : fy1 * v_norm,
+                        !s.rotated ? fy1 * v_norm : fy0 * v_norm,
+                        !s.rotated ? fy1 * v_norm : fy1 * v_norm};
 
-    // Trim compensation (JS pi.VJa L1703 + Vs.Qq L1705: the packed frame is
-    // the trimmed content at spriteSourceSize (trim_x, trim_y) inside the
-    // full sourceSize (source_w, source_h); the sprite's XML position is the
-    // center of the FULL source frame). The packed content's center in source
-    // space is (trim_x + frame_w/2, trim_y + frame_h/2), so shifting the quad
-    // by (source_w/2 - trim_x - frame_w/2) * scale_x (and likewise Y)
-    // realigns the visible content to the intended position. Zero when not
-    // trimmed (source_w == 0 sentinel). Verified vs fx.925b16c7.json
-    // "block/block_1" (trimmed:true): source 1024x1024, frame 46x82 at
-    // offset (454,475) -> adj (+35,-4) atlas px = source-center (512,512)
-    // minus content-center (454+23,475+41)=(477,516).
+    // Trim compensation (JS pi.VJa L1703 Iq wNa/fa + Vs.Qq L1705 Pj qj/fa +
+    // R.Cb L1615 Em=qj/ba(frame) + R.Th L1615 translate b-f+d): the packed
+    // frame is the trimmed content at spriteSourceSize (trim_x, trim_y)
+    // inside the full sourceSize (source_w, source_h); the sprite's XML
+    // position is the center of the FULL source frame. JS lands the packed
+    // content's center at x-(source_w/2-trim-frame_w/2) (Th: Tx=x-BS+off,
+    // BS=fa/2 at sx=1), so the quad shifts by the NEGATION of
+    // (source-center minus content-center):
+    //   (trim_x + frame_w/2 - source_w/2) * scale_x (and likewise Y).
+    // (The previous sign mirrored trimmed content across the source center:
+    // e.g. fx block_1 rendered at x+35 instead of x-35.) Zero when not
+    // trimmed (source_w == 0 sentinel). Magnitudes verified vs 5 samples:
+    // fx.925b16c7.json block_1 |35|,|4| + block_3 |26|,|4|, dojo floor_1
+    // |2|y, left_wall |5|x, right_wall |3|x.
     const float trim_adj_x = s.source_w > 0.0f
-        ? (s.source_w / 2.0f - s.trim_x - s.frame_w / 2.0f) * t.scale_x
+        ? (s.trim_x + s.frame_w / 2.0f - s.source_w / 2.0f) * t.scale_x
         : 0.0f;
     const float trim_adj_y = s.source_h > 0.0f
-        ? (s.source_h / 2.0f - s.trim_y - s.frame_h / 2.0f) * t.scale_y
+        ? (s.trim_y + s.frame_h / 2.0f - s.source_h / 2.0f) * t.scale_y
         : 0.0f;
 
     // The layer-node scale (JS L488): scaled layers (lEa||ij) carry
