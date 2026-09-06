@@ -336,6 +336,23 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
         fight_assets_->helm = sf2::scene::Model{};   // Head default
         fight_assets_->rebuild_merged();
 
+        // The Punchbag dummy merge (hub display only — see FightAssets).
+        // Inner-guarded so a missing bag entry can never endanger the base
+        // fight assets above (the outer catch would reset everything).
+        try {
+            fight_assets_->bag_skeleton = load_model("mdl_skeleton_punching_bag");
+            fight_assets_->bag_body = load_model("mdl_punching_bag");
+            fight_assets_->merged_bag = sf2::scene::build_fighter_model(
+                {fight_assets_->bag_skeleton, fight_assets_->bag_body});
+            std::fprintf(stdout, "[assets] punchbag dummy bones=%zu tris=%zu capsules=%zu\n",
+                         fight_assets_->merged_bag.bones.size(),
+                         fight_assets_->merged_bag.resolved_tris.size(),
+                         fight_assets_->merged_bag.capsules.size());
+            std::fflush(stdout);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[assets] punchbag dummy skipped: %s\n", e.what());
+        }
+
         const std::vector<sf2::data::archive_entry> anim =
             load_archive(res + "/animations.b22c72ff.dat");
         const std::vector<sf2::data::archive_entry> anim_dojo =

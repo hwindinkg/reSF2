@@ -1264,35 +1264,6 @@ void draw_dojo_figure(sf2::render::Renderer& ren, const sf2::render::Camera& cam
     }
 }
 
-// The Punchbag dummy silhouette (the stages.xml Punchbag-zone Training
-// battle dummy — Warrior "Punchbag", NotAI/NotAnimation, PunchingBag items;
-// JS_FLOW.md §1). The bag models (`mdl_punching_bag` in models_dojo.dat —
-// MODEL_FORMAT.md §"Dojo") are NOT loaded into FightAssets (missing API, see
-// the stream report), so the dummy is a procedural hanging-bag silhouette:
-// chains + leather body + seam, standing on `floor_y` (world units).
-void draw_punchbag(sf2::render::Renderer& ren, const sf2::render::Camera& camera, float x,
-                   float floor_y) {
-    const float sx = camera.world_to_screen_x(x, 1.0f);
-    const float bot = camera.world_to_screen_y(floor_y);
-    const float top = camera.world_to_screen_y(floor_y - 260.0f);
-    const float h = bot - top;
-    if (h <= 0.0f) return;
-    auto quad = [&](float x0, float y0, float x1, float y1, float r, float g, float b,
-                    float a) {
-        const float v[] = {x0, y0, x1, y0, x0, y1, x1, y0, x1, y1, x0, y1};
-        ren.draw_triangles(v, 6, r, g, b, a);
-    };
-    // Chains (two straps from the mount bar to the bag shoulders).
-    quad(sx - 20.0f, top, sx - 14.0f, top + h * 0.18f, 0.45f, 0.45f, 0.5f, 1.0f);
-    quad(sx + 14.0f, top, sx + 20.0f, top + h * 0.18f, 0.45f, 0.45f, 0.5f, 1.0f);
-    // Body: near-black silhouette (oracle hanging bag; the mdl_punching_bag
-    // model is not loaded - missing API, noted - so no leather shading).
-    quad(sx - 30.0f, top + h * 0.18f, sx + 30.0f, bot, 0.02f, 0.02f, 0.03f, 1.0f);
-    // Faint edge seam + base shadow.
-    quad(sx - 30.0f, top + h * 0.18f, sx - 18.0f, bot, 0.10f, 0.10f, 0.12f, 1.0f);
-    quad(sx - 38.0f, bot - 4.0f, sx + 38.0f, bot + 4.0f, 0.0f, 0.0f, 0.0f, 0.45f);
-}
-
 DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
     // Menu music (JS `lb.OS` -> `ta.Ut("menu")`, L1276-1277).
     sf2::audio::AudioEngine::instance().play_music("menu");
@@ -1581,11 +1552,16 @@ void DojoScreen::render_impl(App& app) {
     // The arena floor tiles (world y ~194..253) land at screen y ~612..689
     // and the visible slice is world x ~-492..492 (wall/tiles centered; the
     // +/-1108 side masks sit off-view).
+    // The hub location camera (JS `ma.Sya` static 16:9 — verified, do not
+    // touch). Hoisted so the Punchbag dummy below hangs in the same space
+    // as the beam mount (world X=-10 -> beam center on screen).
+    sf2::render::Camera hub_cam;
+    bool have_hub_cam = false;
     if (app.has_fight_assets()) {
         FightAssets& assets = app.fight_assets();
-        sf2::render::Camera ui_cam;
-        assets.dojo.default_camera(ui_cam, kViewW, kViewH);
-        assets.dojo.render_layers(ren, ui_cam, 0, assets.dojo.layers().size());
+        assets.dojo.default_camera(hub_cam, kViewW, kViewH);
+        have_hub_cam = true;
+        assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
     } else {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
@@ -1643,10 +1619,51 @@ void DojoScreen::render_impl(App& app) {
             constexpr float kFigX = 400.0f;
             dojo_fighter_->sample(*dojo_idle_, fr, kFigX, kFeetY - maxy, 1);
             draw_dojo_figure(ren, fig_cam, *dojo_fighter_);
-            // The Punchbag dummy hangs right-of-center (screen x 633), a
-            // standalone display prop: the hub slice is arena-centered
-            // (Io 0, x -492..492), so the bag is not tied to arena X.
-            draw_punchbag(ren, fig_cam, 633.0f, kFeetY);
+        }
+        // The Punchbag dummy hangs under the beam mount (stages.xml
+        // Punchbag-zone Training dummy — Warrior "Punchbag",
+        // NotAI/NotAnimation, PunchingBag items; JS_FLOW.md §1; DOJO_BG_STATIC
+        // — bag = `mdl_punching_bag` on the dummy, no bag PNG exists).
+        // Mount = the hidden holder prop anchor (world X=-10, Y=-203.5 —
+        // the `dojo_punch_bag_holder` sprite transform dropped above; ui_cam
+        // maps it to the beam center on screen). Idle hang pose = the merge
+        // bind (Node12 mount on top, body dangling ~316 world units to
+        // screen ~506, clear of the tile band — Tf Training setup feet/
+        // dangle). No clip is ever sampled (NotAnimation); the one-frame
+        // bind pose below only carries the pose into the shared
+        // draw_dojo_figure path (JS_RENDER §4 capsule strip — the bag model
+        // has capsules only, no mesh). Display only — fight untouched.
+        constexpr float kBagMountX = -10.0f;
+        constexpr float kBagMountY = -203.5f;        if (!dojo_bag_tried_) {
+            dojo_bag_tried_ = true;
+            if (app.has_fight_assets()) {
+                FightAssets& assets = app.fight_assets();
+                if (!assets.merged_bag.bones.empty()) {
+                    dojo_bag_ = std::make_unique<sf2::scene::Fighter>();
+                    dojo_bag_->set_model(assets.merged_bag);
+                    dojo_bag_->set_color(assets.dojo.root_color());
+                    dojo_bag_pose_.name = "bag_bind_hang";
+                    dojo_bag_pose_.version = 0;
+                    dojo_bag_pose_.frames.resize(1);
+                    auto& keys = dojo_bag_pose_.frames[0].bones;
+                    keys.reserve(assets.merged_bag.bones.size());
+                    for (const auto& b : assets.merged_bag.bones) {
+                        keys.push_back(sf2::data::anim_keyframe{b.x, b.y, b.z});
+                    }
+                    dojo_bag_ok_ = true;
+                    std::fprintf(stdout, "[dojo] punchbag dummy ready (bind hang, bones %zu)\n",
+                                 keys.size());
+                    std::fflush(stdout);
+                } else {
+                    std::fprintf(stdout, "[dojo] punchbag dummy skipped (no bag model)\n");
+                    std::fflush(stdout);
+                }
+            }
+        }
+        if (dojo_bag_ok_ && dojo_bag_ != nullptr && have_hub_cam &&
+            !dojo_bag_pose_.frames.empty()) {
+            dojo_bag_->sample(dojo_bag_pose_, 0, kBagMountX, kBagMountY, 1);
+            draw_dojo_figure(ren, hub_cam, *dojo_bag_);
         }
         draw_dojo_gamepad(app);
         // Top HUD bar (screen-space chrome above the scene: the wall lamps

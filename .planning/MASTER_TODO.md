@@ -593,3 +593,43 @@ items 7 WEAPON_KNIVES); combat Node GREEN + spatial 17 GREEN + ai_golden exit 0
 (ju k=3/0/-1/-1/-1 + horizon T/F/T match Node).
 Gate 25% NOT MET; NO COMMIT per policy (commit+PUSH only if <=25%).
 Revert (if ever needed): git checkout -- core/app/screens.cpp (single hunk).
+
+## UI-GATE round 9 — punchbag-dummy + boot-hint-state (2026-09-06, UNCOMMITTED)
+
+Two hub-only fixes (fight untouched; Sya camera + kContY untouched):
+(1) Procedural bag DELETED (screens.cpp draw_punchbag + call site — the
+red/black quad silhouette is gone); the dummy is now a hanging Punchbag
+Fighter over the real 3D merge `build_fighter_model({mdl_skeleton_
+punching_bag, mdl_punching_bag})` (DOJO_BG_STATIC: bag items on the dummy,
+no bag PNG; MODEL_FORMAT.md Dojo row: bag = capsules only, skeleton =
+bones+edges, no mesh — live log `punchbag dummy bones=15 tris=0
+capsules=11`). Load: core/app/app.cpp +339 (same-dat load_model pattern,
+inner-guarded so base assets never endanger); model: fight_assets.hpp +47
+(bag_skeleton/bag_body/merged_bag); hub: screens.hpp +94 (dojo_bag_ lazy
+pattern mirroring dojo_fighter_), screens.cpp +1619 (one-frame bind hang
+pose — NotAnimation warrior, bind = hang with Node12 mount on top — sampled
+at the beam mount world (-10,-203.5) = hidden holder anchor, drawn through
+the hoisted hub Sya camera (+1552, same default_camera, zero camera change)
+via the shared draw_dojo_figure capsule strip (JS_RENDER §4)). Result:
+straps emerge behind the hint panel, body dangles to screen ~506, beam
+center x~820 (oracle x~830-900, top-behind-panel, bottom ~520).
+(2) Boot hint-panel STATE (quest_panel.hpp +86, THE swap point):
+`story_step` "" now carries `NotStarted` (save_system.hpp empty = not
+started; tutorial_quests.xml StoryTutorialWelcome step==NotStarted,
+FLOW_STATIC §1 row 1) and the battles→training_won memory is gated on the
+step having left Welcome (Welcome notifications + He Regular modal L1045-
+1048 run BEFORE any fight — rows 1-3, UI_EXCLUSIVITY truth table; He modal
++ Xob→txa exclusivity stand, untouched). Kills the boot crater: the
+working save (Tutorial=MOVE, step "", stored Training battle) showed the
+punchbag step; the oracle fresh shows the move step ("Сначала покажи, как
+ты двигаешься!"). Live log now `[quest] step 0 (SENSEI) -> Training`
+("Let me see you move!..."); in-session Training wins still advance the
+hint (session flag ungated).
+Fresh --ui-tour tour 13/13 exit 0; loop 13/13 + save/load PASS (money 425
+items 7 WEAPON_KNIVES); combat Node GREEN fail 0 + spatial 17 GREEN +
+ai_golden Node<->C++ exit 0 (prng bit-exact, ju k=3/0/-1/-1/-1, horizon
+T/F/T, shared gb ≤1.1e-8 vs 1e-5 gate).
+ui_diff thr12 dojo_norm:dojo = 68.88% (baseline 68.83% -> +0.05pp noise).
+Gate 25% NOT MET (honest; residual = panel chrome parchment-vs-dark, black
+lower-floor band, gear buttons, EN-vs-RU text — all separate OPENs).
+NO COMMIT per policy (orchestrator batches; STATE.md untouched).

@@ -45,6 +45,16 @@ struct FightAssets {
     // fighter from the equipment's `model` list).
     sf2::scene::Model merged;
 
+    // The Punchbag dummy parts (DOJO_BG_STATIC: the Punchbag Warrior wears
+    // the PunchingBag/SkeletonPunchingBag items = `mdl_punching_bag` +
+    // `mdl_skeleton_punching_bag` in models.dat; MODEL_FORMAT.md Dojo row:
+    // bag = edges+capsules only, bag skeleton = bones+edges, no mesh).
+    // Display-only: the Dojo hub hangs this dummy under the beam (Tf
+    // Training setup); the fight sim keeps using `merged`.
+    sf2::scene::Model bag_skeleton;
+    sf2::scene::Model bag_body;
+    sf2::scene::Model merged_bag;
+
     // The shared data (JS `G.data`).
     std::map<std::string, sf2::data::anim_clip> clips;
     std::map<std::string, sf2::scene::MoveDef> moves;

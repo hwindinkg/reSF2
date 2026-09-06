@@ -65,13 +65,20 @@ struct QuestState {
 };
 
 // THE swap point: builds QuestState from shell-readable inputs. Landed and
-// wired: `story_step` (WarriorSave::story_step), `map_focus` (ys —
-// `boss_focus` when it names BOSS_LYNX, cf. `qo` L1086), `battles` (iF — a
-// recorded "Training" win counts as training_won persistently, beyond the
-// session pending flag). Still stubbed: `block_lesson` — FLOW_STATIC row 12
-// shows the `Fo` beat as unconditional, and no Stream-2 quest-var name for
-// its mid-beat landed in context; expected symbol is a quest variable read
-// beside `Fo` (e.g. `variables["<ShowBlock-beat>"]`) — one line when known.
+// wired: `story_step` (WarriorSave::story_step — "" = not started, i.e. the
+// Welcome `NotStarted` step per tutorial_quests.xml StoryTutorialWelcome),
+// `map_focus` (ys — `boss_focus` when it names BOSS_LYNX, cf. `qo` L1086),
+// `battles` (iF — a recorded "Training" win counts as training_won
+// persistently, but ONLY once the tutorial has left the Welcome beat: the
+// Welcome notifications (move -> punchbag, then the Regular training-fight
+// modal) run BEFORE any fight (FLOW_STATIC.md §1 rows 1-3; UI_EXCLUSIVITY
+// truth table), so a stored Training record with the step still at/before
+// NotStarted must not flip the banner to the punchbag step — that was the
+// boot crater (fresh-port MOVE hint vs progressed-oracle wall, y90-180)).
+// Still stubbed: `block_lesson` — FLOW_STATIC row 12 shows the `Fo` beat as
+// unconditional, and no Stream-2 quest-var name for its mid-beat landed in
+// context; expected symbol is a quest variable read beside `Fo`
+// (e.g. `variables["<ShowBlock-beat>"]`) — one line when known.
 inline QuestState quest_state_for(const std::string& tutorial, const std::string& story_step,
                                   bool training_won, int level,
                                   const std::string& map_focus,
@@ -79,17 +86,25 @@ inline QuestState quest_state_for(const std::string& tutorial, const std::string
                                   const std::map<std::string, std::string>& variables) {
     QuestState st;
     st.tutorial = tutorial;
-    st.story_step = story_step;
+    // Empty save step IS the Welcome step (save_system.hpp: empty = not
+    // started; the quest chain names it `NotStarted`).
+    st.story_step = story_step.empty() ? "NotStarted" : story_step;
     st.training_won = training_won;
     st.level = level;
     st.map_focus = map_focus;
     st.battles = battles;
     st.variables = variables;
     if (map_focus.find("BOSS_LYNX") != std::string::npos) st.boss_focus = true;
-    for (const std::string& b : battles) {
-        if (b == "Training") {
-            st.training_won = true;
-            break;
+    // Quest-gated win memory (see above): battles feed the banner only
+    // after the Welcome beat (He modal L1045-1048 RP path + Xob→txa bar
+    // exclusivity stand — untouched). The live session flag above stays
+    // ungated (a just-played Training win still advances the hint).
+    if (!st.story_step.empty() && st.story_step != "NotStarted") {
+        for (const std::string& b : battles) {
+            if (b == "Training") {
+                st.training_won = true;
+                break;
+            }
         }
     }
     return st;

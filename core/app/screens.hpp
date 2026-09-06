@@ -92,6 +92,14 @@ private:
     bool dojo_fig_ok_ = false;
     const sf2::data::anim_clip* dojo_idle_ = nullptr;  // owned by FightAssets
     int idle_frame_ = 0;   // fixed-step counter driving the idle cycle
+    // The hanging Punchbag dummy (Tf Training setup): a scene Fighter over
+    // FightAssets::merged_bag, posed once in the bind hang pose (the bag
+    // Warrior is NotAnimation — no clip; bind = hang, Node12 mount on top).
+    // Same lazy display-only pattern as the idle figure above.
+    std::unique_ptr<sf2::scene::Fighter> dojo_bag_;
+    bool dojo_bag_tried_ = false;
+    bool dojo_bag_ok_ = false;
+    sf2::data::anim_clip dojo_bag_pose_;  // one-frame bind pose (owned here)
     // Tutorial quest banner state (quest_panel.hpp; derived read-only from
     // the save's Tutorial field + the last Training result).
     std::string tutorial_ = "MOVE";
