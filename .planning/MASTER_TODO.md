@@ -633,3 +633,99 @@ ui_diff thr12 dojo_norm:dojo = 68.88% (baseline 68.83% -> +0.05pp noise).
 Gate 25% NOT MET (honest; residual = panel chrome parchment-vs-dark, black
 lower-floor band, gear buttons, EN-vs-RU text — all separate OPENs).
 NO COMMIT per policy (orchestrator batches; STATE.md untouched).
+
+## UI-GATE round 10 — topstrip rects + mask alpha + right-gradient verdict (2026-09-06, phase1 step9, ZERO code hunks)
+
+JS-PROVEN verify-only round (Dojo-scoped; camera/wall/ujb untouched):
+(1) Topstrip HUD bar rects vs oracle proportions: all 6 frames HIT this
+tour (log: topPanel 100x191, level 115x111, Level_bar 380x38,
+energy 95x103, Energy_Bar 238x32, gold 95x95, ruby 88x87,
+AddMoney 115x113 — misc.9f231a04.json intrinsics match). Port rects
+core/app/screens.cpp:1491-1523 (bar 1280x84 fill; icons 44/40; bars
+150x26; AddMoney 48x48) vs JS za.odb (PL.xc(w)/Pb(min(v*.13,100))→93.6,
+Sp=PL.qa()*.78→73.0, b=Sp*.65→47.4; wr/xr/yr layout(a=b): icons ~47-49,
+bar h ~19, AddMoney ~48 exact). Bar 84px measured matches the oracle
+norm band (oracle center-column dark through ~y112 = bar+icons, port
+bar+hint contiguous dark; y20 full-width both (49,20,11) exact).
+Topstrip thr12 78.87%; means O(65.4,35.1,20.0) P(97.0,62.5,41.9)
+D(+31.6,+27.3,+21.9) = icon/text placement + values-from-save
+(MONEY 425 LV 2 live vs oracle fresh 0/00 — save-STATE mismatch, not a
+render bug). Verdict: rects/scale JS-exact, NO code change (hint py=84
+abuts bar; camera verified do-not-touch).
+(2) Mask per-rect alpha (Na.cd path, closes OPEN-7a/7d PROVEN opaque):
+Na.cd (JS: w=1 always) → ujb L477 packs (d.w*255|0)<<24 = 0xFF →
+R.Ed L1619 unpacks via Na.Rv → w=1 opaque for all 5 dojo pixel_1
+(Color 0x000000 → 0xFF000000). Port core/scene/location_scene.cpp:112
+color_a=1.0 JS-exact. Hub slice (Io=148.5, zoom=1.3, center_x=0):
+right mask world 933..1283 → screen x2045+ fully off-view; maskzone
+x933-1283 y300-500 D(+9.5,-3.7,-10.3) near-zero, no blackout. Enemy
+spawn 973 sits inside the arena-range but off-screen at the hub slice;
+hub figures (screen x400/x820) never covered. Verdict: player NOT
+covered, NO code change.
+(3) Right-gradient texel verdict: wall-right texel (152.7,101.5,76.0)
+vs port y180-220 x1030-1200 (144.0,98.8,75.7) D(-8.7,-2.7,-0.3) =
+TEXEL-EXACT; vs oracle (179.4,143.3,97.0) D(+26.7,+41.8,+21.0) = oracle
+brighter than OUR OWN webp art; wall-center lighting both +~40 equally
+(port +3.8,+3.6,+4.0 vs oracle). Verdict: oracle-side
+lighting/version-diff, NO port bug, NO code change.
+Fresh --ui-tour tour 13/13 exit 0; loop 13/13 + save/load PASS (money 425
+items 7 WEAPON_KNIVES); combat Node 99 GREEN + spatial 17 GREEN +
+ai_golden Node<->C++ 0 divs (ju k=3/0/-1/-1/-1, horizon T/F/T).
+ui_diff thr12 dojo_norm:dojo = 68.88% (baseline 68.88% -> +0.00pp).
+Gate 25% NOT MET (honest). NO COMMIT per policy (orchestrator batches;
+STATE.md untouched).
+
+## UI-GATE round 11 — FRESH-save dojo recapture (2026-09-06, phase1 step9, ZERO code hunks)
+
+Method (no production change — app/game/main.cpp already takes save_path
+as 2nd positional): `game.exe reference/www/res
+reference/saves/fresh_dojo.xml --ui-tour` from E:\reSF2, where
+fresh_dojo.xml = copy of tracked reference/saves/ui_tour.xml (Money 0,
+Level 1, Exp 0, Weapon Fists, Quests empty = story NotStarted). Tour log
+proves fresh state: `[dojo] MONEY 0 LV 1 POWER 5 WEAPON Fists TUTORIAL
+MOVE`; fight = Training vs Punchbag reward 0, result LOSS no reward, end
+save money=0 exp=0 level=1 weapon=Fists. Tour 13/13 exit 0.
+port_dojo.png recaptured fresh (774077 B vs dirty 775166 B); non-dojo
+ports restored byte-identical (map SHA256-verified). Dirty-vs-fresh port
+diff = 223 px over thr12, bbox y35-47 x141-797 = HUD value-glyph row
+only ("425"->"0", "2"->"1").
+Topstrip y0-84 full-width (round10 region, reproduced EXACTLY on dirty:
+O(65.4,35.1,20.0) D(97.0,62.5,41.9) thr12 78.87%): fresh
+F(96.9,62.3,41.7) thr12 78.87%, D vs oracle (+31.5,+27.2,+21.7).
+Verdict: fresh-state hypothesis FALSIFIED for the band mean (money/level
+values move it by <=0.2); residual = icon/text placement + oracle-side
+art, separate OPEN. NO code change.
+Fresh --ui-tour tour 13/13 exit 0; loop 13/13 on temp dirty-save copy +
+save/load PASS (money 425 items 7 WEAPON_KNIVES; real save.xml
+untouched); combat Node 99 GREEN + spatial 17 GREEN + ai_golden
+Node<->C++ 0 divs (prng B0 identical, ju k=3/0/-1/-1/-1, horizon T/F/T,
+Gb max-abs 1.1e-08 <= 1e-5).
+ui_diff thr12 dojo_norm:dojo = 68.88% (baseline 68.88% -> +0.00pp).
+Gate 25% NOT MET (honest). NO COMMIT per policy (orchestrator batches;
+STATE.md untouched).
+
+## UI-GATE round 12 — FIGHT re-gate post-fundamentals (2026-09-06, phase1 step9, ZERO code hunks)
+
+Binary verified fresh (sources <=21:04:27 <= sf2_app.lib 21:04:52 <=
+game.exe 21:04:53; cmake Release rebuild no-op, 0 errors) — tree =
+f16def3f incl. fundamentals: trim-sign fix, rotated UV, draw-order
+enemy-first, feet kContY, Sya wired.
+Method: fresh `game.exe reference/www/res
+reference/saves/fresh_dojo.xml --ui-tour` from E:\reSF2, tour 13/13 ALL
+STEPS DONE (fight = Training vs Punchbag, LOSS no reward, end save
+money=0 exp=0 level=1 weapon=Fists).
+Fight vs oracle ui_diff thr12 tut_fight:fight = 97.06% (INFORMATIVE ONLY
+— different modes/moments: oracle tutorial-fight frame vs port Training
+hold-frame 250; no threshold fitted, NOT a gate).
+Fight vs prior (pre-tour backup SHA 6A997A49, 586919 B): byte-identical,
+0 px over thr12, maxd 0 = NO REGRESSION (prior 21:20 capture already
+contained all fundamentals; this re-gate confirms determinism through
+them).
+Dojo context ui_diff thr12 dojo_norm:dojo = 68.88% (baseline 68.88% ->
++0.00pp).
+Fresh --ui-tour tour 13/13; loop 13/13 + save/load PASS (money 425 items
+7 WEAPON_KNIVES); combat Node 99 GREEN + spatial 17 GREEN + ai_golden
+Node<->C++ 0 divs (prng B0 identical, ju k=3/0/-1/-1/-1, horizon T/F/T,
+Gb max-abs 1.11e-08 <= 1e-5).
+Gate 25% NOT MET (honest; fight-oracle pair mode-mismatched by
+construction). COMMIT+PUSH per orchestrator (STATE.md untouched).
