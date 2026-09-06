@@ -38,6 +38,9 @@ jobs:
       - name: Apply visual correctness fixes (parallax factor 0->1 + ASTC mips==0)
         run: python3 scripts/fix_visuals.py
 
+      - name: Apply R2 two-camera fix (fight floor vertical framing)
+        run: python3 scripts/fix_r2.py
+
       - name: Configure (Release)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
