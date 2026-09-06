@@ -41,6 +41,9 @@ jobs:
       - name: Apply R2 two-camera fix (fight floor vertical framing)
         run: python3 scripts/fix_r2.py
 
+      - name: Apply R3 capsule disc-cap ends fix
+        run: python3 scripts/fix_r3.py
+
       - name: Configure (Release)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
