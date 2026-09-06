@@ -6,6 +6,7 @@
 
 #include "texture.hpp"
 
+#include <cstring>
 #include <webp/decode.h>
 
 namespace sf2::data {

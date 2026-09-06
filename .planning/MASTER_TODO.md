@@ -522,8 +522,30 @@ Dense-node label collisions remain (nodes ~60px apart, data-driven; needs leader
   vs saved baseline. Verdict ALPHA-LIVE but GATE-NEUTRAL (layer_4 dim is not
   the gate driver; B2 sky + B4/B6 plateau remain). Fresh --ui-tour tour 13/13;
   loop 13/13 + save/load PASS (money 425 items 7 WEAPON_KNIVES); combat 99
-  GREEN + spatial 17 GREEN + ai_golden Node<->C++ ju k=3/0/-1/-1/-1 + horizon
-  T/F/edge 0 divs. Gate 25% NOT MET; NO COMMIT per policy.
+   GREEN + spatial 17 GREEN + ai_golden Node<->C++ ju k=3/0/-1/-1/-1 + horizon
+   T/F/edge 0 divs. Gate 25% NOT MET; NO COMMIT per policy.
+- Proven-fixes wave (2026-09-06, COMMITTED+PUSHED): JS-PROVEN items only, no
+  R1/R2/R3/README/CI. (a) FightScreen enemy-behind draw order
+  core/app/screens.cpp:3066-3078 (ev.Gf L845 Rw z=-.001 behind/pF z=0 top;
+  o1a L403 yb=Gf(kc) first/pb=Gf(Zb) second; trace.js pb=Me/yb=Enemy;
+  container UWa L832 + NWa/Dla L487-488/L1599; enemy capsules+mesh then
+  player). (b) includes core/data/third_party/astc/astc_decomp.h:25
+  <cstdint> + webp.cpp:6/png.cpp:6 <cstring>. (c) trim fields
+  core/scene/sprite.hpp:40-50 (VJa L1703 + Vs.Qq L1705 qj/fa) +
+  core/scene/renderer.cpp:52-69 compensation +
+  core/scene/location_scene.cpp:131-165 source_w/h scale (verified vs
+  fx.925b16c7.json block_1 trimmed:true source 1024 frame 46x82 off 454,475).
+  (d) framing_sya_impl WIRED core/scene/fight_camera_sya.hpp (ma.Sya L1833 +
+  ql.dZa L363 + Ut.Al L826; FightCamera::framing delegates; body relocated,
+  no dead code) + render camera layer_zoom core/app/screens.cpp:2926.
+  Fresh --ui-tour tour 13/13; loop 13/13 + save/load PASS (money 425 items 7
+  WEAPON_KNIVES); combat 99 GREEN + spatial 17 GREEN + ai_golden exit 0
+  Node<->C++ prng B0 identical + ju k=3/0/-1/-1/-1 + horizon T/F/T 0 divs.
+  ui_diff thr12 dojo_norm:dojo = 68.83% (baseline 68.83% -> +0.00pp neutral;
+  port_dojo.png md5 dfef4345... vs r7 baseline 0e349331... — bytes move but
+  gate-neutral). Gate 25% NOT MET (honest). Rollback: git revert <hash> (or
+  reset --hard efb2bbf1) restores pre-wave tree; captures under
+  reference/traces/ui/ re-runnable via --ui-tour + ui_diff.py.
 
 ## FINAL — 1:1 playable build matching the oracle
 

@@ -2916,6 +2916,14 @@ void FightScreen::render_impl(App& app) {
     camera.center_x = cam.center_x;
     camera.center_y = cam.center_y;
     camera.zoom = cam.zoom;
+    // [fix(camera): wire the fight layer zoom] The fight controller computes
+    // the per-frame layer zoom Bj (JS Ut.Bj L826 via Ut.xCa L831, stored on
+    // FightCamera::zoom_layer); the hub statics path (default_camera) does
+    // the same via Camera::layer_zoom. Feed it into the render camera so the
+    // L488 setScale branch (JS `b.lEa()||b.ij?b.setScale(Bj)`) moves pixels
+    // on the fight path too — no dead state. (JS ma.Sya L1833, ql.dZa L363,
+    // Ut.Al L826: framing_sya_impl computes it in FightCamera::framing.)
+    camera.layer_zoom = cam.zoom_layer;
     camera.view_w = kViewW;
     camera.view_h = kViewH;
     camera.arena_h = assets.dojo.arena_height() > 0.0f ? assets.dojo.arena_height() : 560.0f;
@@ -3055,12 +3063,21 @@ void FightScreen::render_impl(App& app) {
             draw_disc(sx2, sy2);
         }
     };
-    draw_capsules(fight_->player());
+    // [fix(render): enemy-behind draw order] JS ev.Gf L845: the FIRST
+    // registered fighter becomes Rw with z=-.001 (behind), the SECOND becomes
+    // pF with z=0 (top). Fight creation (JS o1a L403: yb=Gf(kc) first,
+    // pb=Gf(Zb) second; trace.js frameJson: pb="Me", yb="Enemy") makes
+    // Rw=yb=Enemy (behind) and pF=pb=Me/Player (top). The container is built
+    // by UWa L832 with per-child z steps via NWa/Dla L487-488 (QH+=-.01) and
+    // Dla L1599 (translate.z=). The batch preserves submission order, so draw
+    // the whole enemy node FIRST (capsules+mesh, z=-.001) then the whole
+    // player node (z=0) on top.
     draw_capsules(fight_->enemy());
-    ren.draw_triangles(pv.data(), pv.size() / 2, fight_->player().fighter.color_r(),
-                       fight_->player().fighter.color_g(), fight_->player().fighter.color_b());
     ren.draw_triangles(ev.data(), ev.size() / 2, fight_->enemy().fighter.color_r(),
                        fight_->enemy().fighter.color_g(), fight_->enemy().fighter.color_b());
+    draw_capsules(fight_->player());
+    ren.draw_triangles(pv.data(), pv.size() / 2, fight_->player().fighter.color_r(),
+                       fight_->player().fighter.color_g(), fight_->player().fighter.color_b());
 
     // The hit sparks (JS `Hyb`/`ryb`/`av`): world-space particles projected
     // through the SAME camera the fighters used (factor 1.0 — the shake is

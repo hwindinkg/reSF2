@@ -128,10 +128,36 @@ std::shared_ptr<Sprite> make_image(const pugi::xml_node& node,
     sprite->tex_w = static_cast<float>(ref.atlas_w);
     sprite->tex_h = static_cast<float>(ref.atlas_h);
 
-    // The game scales the sprite to the XML Width/Height (Rh/mj, L486).
-    if (w > 0.0f && h > 0.0f && fr.w > 0 && fr.h > 0) {
-        sprite->transform.set_scale(w / static_cast<float>(fr.w),
-                                    h / static_cast<float>(fr.h));
+    // The game scales the sprite to the XML Width/Height (Rh/mj, L486-487:
+    // `b.Rh(f/g); b.mj(a/h)` where g/h = fa.x/fa.y = source size, JS L486-487).
+    // For trimmed sprites the XML dimensions refer to the original source art
+    // (JS pi.VJa L1703: Iq(filename, frame Ec, spriteSourceSize Ec, sourceSize
+    // fc, trimmed) + Vs.Qq L1705: Pj(id, name, fa=sourceSize, frame, yx,
+    // qj=wNa offset) — fa carries sourceSize, qj the trim offset), not the
+    // packed frame — use source_w/h so the scale maps correctly.
+    // (Using the packed frame size inflates the scale by source/frame ratio,
+    // rendering the sprite at the wrong physical size. Verified vs
+    // fx.925b16c7.json "block/block_1": source 1024x1024, frame 46x82 at
+    // offset (454,475) — scale must map XML w/h over 1024, not 46/82.)
+    {
+        const float scale_w = (fr.trimmed && fr.source_w > 0)
+                                  ? static_cast<float>(fr.source_w)
+                                  : static_cast<float>(fr.w);
+        const float scale_h = (fr.trimmed && fr.source_h > 0)
+                                  ? static_cast<float>(fr.source_h)
+                                  : static_cast<float>(fr.h);
+        if (w > 0.0f && h > 0.0f && scale_w > 0.0f && scale_h > 0.0f) {
+            sprite->transform.set_scale(w / scale_w, h / scale_h);
+        }
+    }
+    // Store trim fields (JS Vs.Qq L1705 qj=wNa offset + fa=sourceSize) so the
+    // renderer can apply the sub-pixel position compensation that aligns the
+    // packed content to the source-frame center.
+    if (fr.trimmed) {
+        sprite->trim_x   = static_cast<float>(fr.offset_x);
+        sprite->trim_y   = static_cast<float>(fr.offset_y);
+        sprite->source_w = static_cast<float>(fr.source_w);
+        sprite->source_h = static_cast<float>(fr.source_h);
     }
 
     if (node.attribute("Color")) {

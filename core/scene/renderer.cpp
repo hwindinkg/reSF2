@@ -49,11 +49,30 @@ void sprite_to_quad(const sf2::scene::Sprite& s, const Camera& camera, float fac
     const float v[4] = {(cy - half_v) * v_norm, (cy - half_v) * v_norm,
                         (cy + half_v) * v_norm, (cy + half_v) * v_norm};
 
+    // Trim compensation (JS pi.VJa L1703 + Vs.Qq L1705: the packed frame is
+    // the trimmed content at spriteSourceSize (trim_x, trim_y) inside the
+    // full sourceSize (source_w, source_h); the sprite's XML position is the
+    // center of the FULL source frame). The packed content's center in source
+    // space is (trim_x + frame_w/2, trim_y + frame_h/2), so shifting the quad
+    // by (source_w/2 - trim_x - frame_w/2) * scale_x (and likewise Y)
+    // realigns the visible content to the intended position. Zero when not
+    // trimmed (source_w == 0 sentinel). Verified vs fx.925b16c7.json
+    // "block/block_1" (trimmed:true): source 1024x1024, frame 46x82 at
+    // offset (454,475) -> adj (+35,-4) atlas px = source-center (512,512)
+    // minus content-center (454+23,475+41)=(477,516).
+    const float trim_adj_x = s.source_w > 0.0f
+        ? (s.source_w / 2.0f - s.trim_x - s.frame_w / 2.0f) * t.scale_x
+        : 0.0f;
+    const float trim_adj_y = s.source_h > 0.0f
+        ? (s.source_h / 2.0f - s.trim_y - s.frame_h / 2.0f) * t.scale_y
+        : 0.0f;
+
     // The layer-node scale (JS L488): scaled layers (lEa||ij) carry
     // go.scale=Bj, so every child world coord is pre-multiplied by Bj
     // BEFORE the shared camera projection runs. Corner pairing preserved:
     // 0=(-w,-h) 1=(+w,-h) 2=(-w,+h) 3=(+w,+h).
-    const float sx0 = t.x * layer_scale, sy0 = t.y * layer_scale;
+    const float sx0 = (t.x + trim_adj_x) * layer_scale;
+    const float sy0 = (t.y + trim_adj_y) * layer_scale;
     const float lx0 = lx[0] * layer_scale, lx1 = lx[1] * layer_scale;
     const float ly0 = ly[0] * layer_scale, ly1 = ly[2] * layer_scale;
     const float sx[4] = {

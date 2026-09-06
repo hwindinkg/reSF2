@@ -11,6 +11,7 @@
 #include <string>
 
 #include "audio/audio.hpp"
+#include "scene/fight_camera_sya.hpp"
 
 namespace sf2::scene {
 
@@ -48,103 +49,15 @@ int oba_phase(fight_phase p);
 // trajectory (`em`) configs.
 void FightCamera::framing(float ax, float ay, float bx, float by, float view_w,
                           float view_h) {
-    // The CoM y's (ay/by) are the JS `Eu.ma` vertical target — the native
-    // keeps the verified floor@0.78 composition instead of the oracle's
-    // dummy-CoM (see the struct comment); the horizontal target uses ax/bx.
-    (void)ay;
-    (void)by;
-    // --- the Sya zoom (exact JS L1833) ----------------------------------
-    const float aspect = view_w / view_h;
-    const float span = std::fabs(bx - ax);             // d = qh.ECa() = |x1-x2|
-    const float e = arena_h;                           // m$a() = Lb.height*Bj, Bj = 1
-    float f = view_h / e;
-    f *= (aspect < 0.45f ? 0.45f : aspect > 1.0f ? 1.0f : aspect);  // c<.45?.45:c>1?1:c
-    if (aspect < 0.8f) {
-        f *= 0.8f + ((std::max(0.5f, std::min(0.8f, aspect)) - 0.5f) / 0.3f) * 0.2f;
-    }
-    f *= std::min(1.0f, view_w / (span * f + 100.0f));  // min(viewW/(d*f+100),1)
-    const float dmin = 0.6f +
-                       ((std::max(0.5f, std::min(1.0f, aspect)) - 0.5f) / 0.5f) *
-                           0.7f;                        // the min zoom 0.6..1.3
-    if (f < dmin) f = dmin;
-    // The layer zoom Bj (Ut.xCa L831): min(nC/(span+300),1) — nC = the
-    // half-view world width (mwa: b/Ira, Ira = viewH/arenaH). BJ drives
-    // the layer scaling AND the panorama clamp (Ut.Al); the oracle trace
-    // records Bj as its "zoom" (trace.js hooks Ut.Al and reads this.Bj —
-    // 1.0 at the fight-start span: 995.6/583 < 1). The RENDER zoom stays
-    // the Sya f (1.3 at 16:9) — both numbers come from the spec: the
-    // camera zoom is Sya's f (L1833), the layer/pano zoom is Ut.Bj (L826).
-    const float n_c = view_w / (view_h / e);           // mwa: nC = b/Ira
-    zoom_layer = std::min(1.0f, n_c / (span + 300.0f));  // Ut.xCa() -> Bj
-    zoom = f;
-
-    // --- the target (ql.tyb + the vertical floor anchor) ----------------
-    // First call: start at the spawn midpoint (Lb.z9a) — the f=0 oracle
-    // view (831.5, -101.5) — without advancing the chase; the first real
-    // frame then produces the oracle's -50 intro jump.
-    if (!initialized_) {
-        du_prev_x_ = go_x_ = go_prev_x_ = start_x_;
-        du_prev_y_ = go_y_ = go_prev_y_ = start_y_;
-        du_x_ = start_x_;
-        du_y_ = start_y_;
-        initialized_ = true;
-        center_x = start_x_;
-        center_y = start_y_;
-        return;
-    }
-    du_x_ = (ax + bx) * 0.5f;                          // By = mid of the CoM's x
-    // The vertical target: the arena FLOOR line at 0.78 of the view height
-    // (F9*(1-zoom) keeps the line anchored at any zoom — JS Ut.init
-    // F9 = (Lb.height/2 - ct)/2).
-    const float floor_screen_y = view_h * 0.78f;
-    const float vshift = ((arena_h / 2.0f - floor) / 2.0f) * (1.0f - zoom);
-    du_y_ = floor + vshift - (floor_screen_y - view_h / 2.0f) / zoom;
-
-    // --- the smoothing (ql.dZa, exact) ----------------------------------
-    const float d_x = du_x_ - du_prev_x_;              // $X = By - DO
-    const float d_y = du_y_ - du_prev_y_;
-    const float b_y_x = go_prev_x_ + d_x;              // bY = iq + $X
-    const float b_y_y = go_prev_y_ + d_y;
-    float lo_x = (b_y_x - go_x_) + (du_x_ - go_x_) * 0.15f;  // LO = aY + IO
-    float lo_y = (b_y_y - go_y_) + (du_y_ - go_y_) * 0.15f;
-    const float lo_len = std::sqrt(lo_x * lo_x + lo_y * lo_y);
-    if (lo_len > 200.0f) {                             // |LO|>200 -> 200
-        lo_x *= 200.0f / lo_len;
-        lo_y *= 200.0f / lo_len;
-    }
-    go_x_ += lo_x;                                     // Jl += LO
-    go_y_ += lo_y;
-    float vg_x = go_x_ - go_prev_x_;                   // VG = Jl - iq
-    float vg_y = go_y_ - go_prev_y_;
-    const float vg_len = std::sqrt(vg_x * vg_x + vg_y * vg_y);
-    if (vg_len > 50.0f) {                              // |VG|>50 -> 50
-        go_x_ = go_prev_x_ + vg_x * 50.0f / vg_len;
-        go_y_ = go_prev_y_ + vg_y * 50.0f / vg_len;
-    }
-    du_prev_x_ = du_x_;                                // DO = Du.ma
-    du_prev_y_ = du_y_;
-    go_prev_x_ = go_x_;                                // iq = Go.ma (post-XA)
-    go_prev_y_ = go_y_;
-
-    // --- the panorama clamp (Ut.Al: Io = arenaWidth/2 - focus -----------
-    // clamped to +/-((arenaWidth-oGa)*Bj*0.5 - nC*0.5)). The native
-    // camera's Io = arena_center - center_x, so the clamp bounds the
-    // smoothed focus x by the same range (the fight never leaves the
-    // arena view — the floor stays fully covered). n_c = the mwa half-view
-    // width (computed above in the zoom section); the clamp uses the
-    // LAYER zoom Bj (Ut.Al's d formula), not the camera zoom.
-    const float d_io = (arena_w - 0.0f) * 0.5f * zoom_layer - n_c * 0.5f;
-    const float center = arena_w * 0.5f;
-    center_x = go_x_ < center - d_io   ? center - d_io
-                : go_x_ > center + d_io ? center + d_io
-                                        : go_x_;
-    center_y = go_y_;
-
-    // --- the portrait vertical shift (Sya: c<1 && b.D(...)) -------------
-    if (aspect < 1.0f) {
-        center_y += std::round((view_h - e * zoom) / 2.0f) / zoom * 0.5f;
-    }
+    // Wired: the exact JS camera chain lives in fight_camera_sya.hpp
+    // (ql.tyb L363 + ql.dZa L363-365 + Ut.Al L826 + ma.Sya L1833) —
+    // framing_sya_impl runs it against this camera's live state.
+    framing_sya_impl(*this, ax, ay, bx, by, view_w, view_h);
 }
+
+// duplicate of framing() body kept for reference — REMOVED (dead code guard):
+// (the pre-wire body moved verbatim into framing_sya_impl; see
+// core/scene/fight_camera_sya.hpp)
 
 // The hit-shake kick (JS `d3a` + `DL` — see the FightCamera comment). The
 // RNG is a PRIVATE LCG (same shape as EffectSystem's): std::rand would be

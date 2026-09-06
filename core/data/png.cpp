@@ -6,6 +6,7 @@
 
 #include "texture.hpp"
 
+#include <cstring>
 #define STB_IMAGE_IMPLEMENTATION
 #include "third_party/stb_image.h"
 
