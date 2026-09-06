@@ -35,6 +35,9 @@ jobs:
       - name: Apply compile compatibility fixes (fopen_s -> std::fopen for Linux GCC)
         run: python3 scripts/fix_compile.py
 
+      - name: Apply visual correctness fixes (parallax factor 0->1 + ASTC mips==0)
+        run: python3 scripts/fix_visuals.py
+
       - name: Configure (Release)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
