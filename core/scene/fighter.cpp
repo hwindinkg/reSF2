@@ -7,8 +7,10 @@
 #include "scene/fighter.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <limits>
 #include <set>
@@ -23,87 +25,37 @@ void Fighter::set_model(const Model& model) {
     model_ = model;
     pos_.assign(model_.bones.size() * 2, 0.0f);
 
-    // [FIX Phase 4a — stretched cloth] The merged model appends the body
-    // cloth nodes (BODY-Node*) and the head nodes AFTER the skeleton; the
-    // animation clips drive ONLY the 67 skeleton bones (clip bone i =
-    // merged bone i). The remaining bones keep their model-space bind
-    // position (x≈0, y≈-90..-160) while the clip pose sits at x≈-360 —
-    // the cloth mesh (body tris mixing cloth + skeleton) exploded ~360
-    // world units. The game's ragdoll solver (Al) keeps the cloth attached
-    // to the skeleton; without it the native anchors each non-clip bone to
-    // its NEAREST clip-driven bone (bind-space) and carries the bind
-    // offset along with that bone's clip position.
-    nearest_clip_.assign(model_.bones.size(), 0);
+    // [FIX stretched mesh — ragdoll solver] The game keeps the body/head
+    // cloth nodes attached to the skeleton with a Verlet ragdoll solver
+    // (JS `Al`, L296179: `ia()` = `sk()` integrate + `jE()` edge relax x
+    // `IterativeProcess`=2, internal_settings.xml Physics). The old native
+    // anchored each cloth node at its bind offset from the bind-nearest
+    // skeleton bone — but the cloth's <Edges> constraints (rest lengths
+    // 10-45) bind the cloth to DIFFERENT bones (the head cloth to the
+    // HEAD-MacroNode* weighted averages, the body cloth to knees/ankles/
+    // hips), which move independently of the bind-nearest bone. The static
+    // offset left cloth+mesh triangles stretched tens of units (median
+    // aspect 2.1, max 462.9 in the idle pose). The solver state below is
+    // seeded from the bind pose (JS `Vc` ctor: ma = mf = p8) and stepped
+    // once per sample() call — the game's 60 Hz cadence.
+    const std::size_t n3 = model_.bones.size() * 3;
+    sol_ma_.assign(n3, 0.0f);
+    sol_mf_.assign(n3, 0.0f);
     for (std::size_t i = 0; i < model_.bones.size(); ++i) {
-        if (i < 67) {  // the skeleton bones (clip-driven; see anim clip bone count)
-            nearest_clip_[i] = static_cast<int>(i);
-            continue;
-        }
-        // [FIX Phase 4a — stretched cloth] Anchor each non-clip bone to its
-        // ragdoll-connected skeleton bone (the model's <Edges> End1/End2 —
-        // the game's Al solver keeps the cloth at the edge endpoints). This
-        // is correct where the bind-nearest fails: the HEAD-Node* cloth
-        // nodes' bind positions sit at the FIST height (the weapon
-        // placeholder rig), so the bind-nearest picked the hand/weapon bones
-        // and the head mesh exploded. The edges connect the head nodes to
-        // the head macros (which follow the skeleton head bones).
-        int ref = -1;
-        for (const EdgeDef& e : model_.edges) {
-            const int ei = model_.bone_by_name(e.end1);
-            const int ej = model_.bone_by_name(e.end2);
-            const int other = (ei == static_cast<int>(i)) ? ej : (ej == static_cast<int>(i) ? ei : -1);
-            if (other < 0) continue;
-            if (other < 67) {  // the clip-driven skeleton bone
-                ref = other;
-                break;
-            }
-        }
-        if (ref < 0) {
-            // [FIX Phase 4a] The HEAD-Node* cloth nodes' edges connect only
-            // to each other + the head macros (no direct skeleton edge), so
-            // the edge lookup above fails and the bind-nearest picks the
-            // fist/weapon bones (the head nodes' bind positions sit at the
-            // fist height). Anchor the head nodes to the skeleton HEAD bone
-            // cluster (the head macros' children) instead.
-            const std::string& nm = model_.bones[i].name;
-            if (nm.rfind("HEAD-Node", 0) == 0) {
-                static const char* kHeadBones[4] = {"NTop", "NHeadF", "NHeadS_1", "NHeadS_2"};
-                int hbest = 0;
-                float hd = std::numeric_limits<float>::max();
-                for (int hb = 0; hb < 4; ++hb) {
-                    const int hj = model_.bone_by_name(kHeadBones[hb]);
-                    if (hj < 0 || hj >= 67) continue;
-                    const float dx = model_.bones[i].x - model_.bones[static_cast<std::size_t>(hj)].x;
-                    const float dy = model_.bones[i].y - model_.bones[static_cast<std::size_t>(hj)].y;
-                    const float dz = model_.bones[i].z - model_.bones[static_cast<std::size_t>(hj)].z;
-                    const float d = dx * dx + dy * dy + dz * dz;
-                    if (d < hd) {
-                        hd = d;
-                        hbest = hj;
-                    }
-                }
-                ref = hbest;
-            }
-        }
-        if (ref < 0) {
-            // Fallback: the bind-space nearest non-weapon clip-driven bone.
-            int best = 0;
-            float best_d = std::numeric_limits<float>::max();
-            for (std::size_t j = 0; j < 67; ++j) {
-                if (j >= 19 && j <= 26) continue;  // the weapon placeholder rig
-                const float dx = model_.bones[i].x - model_.bones[j].x;
-                const float dy = model_.bones[i].y - model_.bones[j].y;
-                const float dz = model_.bones[i].z - model_.bones[j].z;
-                const float d = dx * dx + dy * dy + dz * dz;
-                if (d < best_d) {
-                    best_d = d;
-                    best = static_cast<int>(j);
-                }
-            }
-            ref = best;
-        }
-        nearest_clip_[i] = ref;
+        const Bone& b = model_.bones[i];
+        sol_ma_[i * 3] = b.x;
+        sol_ma_[i * 3 + 1] = b.y;
+        sol_ma_[i * 3 + 2] = b.z;
+        sol_mf_[i * 3] = b.x;
+        sol_mf_[i * 3 + 1] = b.y;
+        sol_mf_[i * 3 + 2] = b.z;
     }
+    solver_init_ = true;
+    // [FIX stretched mesh] Warm the solver on the first sample() (see the
+    // member comment): the game's cloth is settled long before a fight's
+    // first frame (the Dojo hub runs the solver at 60 Hz continuously);
+    // the native fight boots straight into the fight.
+    solver_warmup_ = 600;
 
     // Build mirror swap pairs for _1 ↔ _2 (JS Te.Peb L560 → Ua.Oeb L692).
     // When facing -1 the buffered clip frames are negated (vu.Neb L668) and
@@ -629,81 +581,232 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         } else { px[i] = bones[i].x; py[i] = bones[i].y; pz[i] = bones[i].z; }
     }
 
-    // 2. MacroNodes not driven by the clip (index >= clip bone count) are the
-    //    weighted average of their child bones' current positions (Fl.seb).
-    //    Clip-driven macro nodes were explicitly placed (Ega) and skipped.
-    //    Children may be skeleton bones or other macros; recursion is bounded
-    //    by a per-call visited set (defensive against malformed cycles).
-    std::vector<std::uint8_t> visiting(n, 0);
-    std::function<void(std::size_t)> compute_macro = [&](std::size_t idx) {
-        if (visiting[idx]) {
-            return;  // cycle guard
-        }
-        visiting[idx] = 1;
-        const auto& name = bones[idx].name;
-        const auto it = model_.macro_children.find(name);
-        if (it != model_.macro_children.end()) {
-            const MacroChildren& mc = it->second;
-            float ax = 0.0f, ay = 0.0f, az = 0.0f;
-            for (std::size_t c = 0; c < mc.child_names.size(); ++c) {
-                const int ci = model_.bone_by_name(mc.child_names[c]);
-                if (ci < 0) {
-                    continue;
+    // 2. [FIX stretched mesh — ragdoll solver] The game's per-frame pose
+    //    pipeline (JS fighter `ia` L253769: `da.ia()` [Te.eda applies the
+    //    clip] -> `Nd.ia()` [Al.ia = sk + jE] -> `oa.Qja()` [macros]):
+    //    (see the step comments inside; n3 = the solver state stride)
+    //
+    //    a) `Te.eda` (L282908): every clip-driven bone gets `f4()` (mf =
+    //    ma — the previous SOLVED position) then `XA(clip)` (ma = the
+    //    interpolated clip position). Bones past the clip bone count keep
+    //    their solved state (the cloth ragdoll).
+    //    b) `Al.sk` (L296832, `Vc.sk` L405734): Verlet integrate every
+    //    non-immovable bone — new = ma + (ma - mf) * (cloth ? 1-Att :
+    //    1) + (0, grav, 0); grav = `xd.fDa` = 0.4 (internal_settings.xml
+    //    Physics Gravitation). Immovable (`NG`): Fixed="1" bones and ALL
+    //    MacroNodes (JS `Fl` ctor `QMa(1)` -> nh=false -> NG=true).
+    //    c) `Al.jE` (L296592): `IterativeProcess`=2 passes over every
+    //    <Edges> entry; `yu.bFa` (L403731) relaxes the pair toward the
+    //    rest Length, mass-weighted (`f=(1-len/dist)/(w1+w2)`), moving
+    //    only the non-immovable endpoints. This is what keeps the cloth
+    //    at its constraint lengths around the posed skeleton — the
+    //    static bind-offset anchoring it replaces stretched the cloth
+    //    triangles (the cloth's edges bind to head macros / knees /
+    //    ankles, not the bind-nearest bone).
+    //    d) `Dl.Qja` (L294688) -> `Fl.seb` (L406288): every macro not
+    //    clip-posed this frame is re-derived as the weighted average of
+    //    its children's SOLVED positions (mf = ma — velocity zeroed).
+    //    The solver state (sol_ma_/sol_mf_) persists across sample()
+    //    calls — one step per call matches the game's 60 Hz cadence.
+    const std::size_t n3 = n * 3;
+    if (solver_init_ && sol_ma_.size() == n3) {
+        // [FIX stretched mesh] Keep the solver space CONTINUOUS across clip
+        // switches: the clips are authored at different world offsets (the
+        // COM jumps ~740 units between stance_2 and the attack clips), and
+        // the game's whole fighter (skeleton + cloth) teleports together
+        // with its world position. Translate the persisted solver state by
+        // the COM delta so the cloth keeps its pose RELATIVE to the
+        // skeleton across the switch (the raw clip coords alone would
+        // leave the cloth state 740 units from the new skeleton).
+        if (nclip > 0) {
+            const float com_x = px[0];
+            const float com_y = py[0];
+            const float com_z = pz[0];
+            if (sol_have_prev_com_) {
+                const float dx = com_x - sol_prev_com_x_;
+                const float dy = com_y - sol_prev_com_y_;
+                const float dz = com_z - sol_prev_com_z_;
+                if (dx != 0.0f || dy != 0.0f || dz != 0.0f) {
+                    for (std::size_t i = 0; i < n; ++i) {
+                        sol_ma_[i * 3] += dx;
+                        sol_ma_[i * 3 + 1] += dy;
+                        sol_ma_[i * 3 + 2] += dz;
+                        sol_mf_[i * 3] += dx;
+                        sol_mf_[i * 3 + 1] += dy;
+                        sol_mf_[i * 3 + 2] += dz;
+                    }
                 }
-                const std::size_t u = static_cast<std::size_t>(ci);
-                if (u >= n) {
-                    continue;
-                }
-                if (bones[u].is_macro && u >= nclip) {
-                    compute_macro(u);
-                }
-                const float w = c < mc.weights.size() ? mc.weights[c] : 0.0f;
-                ax += px[u] * w;
-                ay += py[u] * w;
-                az += pz[u] * w;
             }
-            px[idx] = ax;
-            py[idx] = ay;
-            pz[idx] = az;
+            sol_prev_com_x_ = com_x;
+            sol_prev_com_y_ = com_y;
+            sol_prev_com_z_ = com_z;
+            sol_have_prev_com_ = true;
         }
-        visiting[idx] = 0;
-    };
-    for (std::size_t i = nclip; i < n; ++i) {
-        if (bones[i].is_macro) {
-            compute_macro(i);
+        // (a) eda: clip bones mf = solved, ma = interpolated clip pose.
+        for (std::size_t i = 0; i < nclip; ++i) {
+            sol_mf_[i * 3] = sol_ma_[i * 3];
+            sol_mf_[i * 3 + 1] = sol_ma_[i * 3 + 1];
+            sol_mf_[i * 3 + 2] = sol_ma_[i * 3 + 2];
+            sol_ma_[i * 3] = px[i];
+            sol_ma_[i * 3 + 1] = py[i];
+            sol_ma_[i * 3 + 2] = pz[i];
         }
-    }
-
-    // [FIX Phase 4a — stretched cloth] Non-macro bones not driven by the
-    // clip (the body/head cloth nodes) keep their BIND position in the
-    // model space (x≈0), while the clip-driven skeleton sits at x≈-360 —
-    // the body mesh exploded ~360 world units. Anchor each cloth node at
-    // its bind offset from the nearest clip-driven bone (precomputed in
-    // set_model): the cloth follows the skeleton's motion.
-    // [FIX Phase 4d — cloth side under mirror] The bind offset
-    // (bones[i].x - bones[r].x) is in the AUTHORED (right-facing) space.
-    // The clip pose is authored once and mirrored by facing at the final
-    // projection (below, `* f`). If the cloth offset is added UNMIRRORED
-    // to the clip anchor and then the whole pose is mirrored, the cloth
-    // nodes CROSS sides: the left-leg cloth (BODY-Node16) lands on the
-    // fighter's right and the right-leg cloth (BODY-Node12) on the left,
-    // so the body-mesh legs overlap into a thin column (the oracle's
-    // ragdoll solver keeps each cloth node on its own side). Mirror the
-    // offset by the facing here so the two mirror operations cancel and
-    // the cloth node stays on the correct side of its anchor.
-    for (std::size_t i = nclip; i < n; ++i) {
-        if (bones[i].is_macro) {
-            continue;  // macros are computed from the (anchored) children
+        // [FIX stretched mesh] Warmup: the first sample() after set_model
+        // runs the solver cycle extra times with the spawn pose held (the
+        // game's cloth is settled by the Dojo-hub display time before any
+        // fight; the native boots straight in). After the warmup this is
+        // exactly one cycle per call — the game's 60 Hz cadence.
+        int cycles = 1;
+        // [FIX stretched mesh] The warmup targets the FIRST PLAYED clip pose
+        // (advance_step -> sample_current), not the idle snapshot the fight
+        // controller takes at spawn: the intro stance clip (stance_1) sits up
+        // to ~367 units from the idle pose, so a warmup against the idle
+        // pose left the cloth ~270 units behind at fight frame 1 (the oracle
+        // enters the fight at ~86 — its cloth settled against the stance
+        // pose during the hub display). Warming on the first played pose
+        // matches that initial condition.
+        if (solver_warmup_ > 0 && current_move_ != nullptr) {
+            cycles = solver_warmup_;
+            solver_warmup_ = 0;
         }
-        const int ref = nearest_clip_[i];
-        if (ref < 0 || static_cast<std::size_t>(ref) >= nclip) {
-            continue;
+        for (int cycle = 0; cycle < cycles; ++cycle) {
+        // Warmup hold: during the extra cycles the clip pose is RE-APPLIED
+        // each cycle (eda with a zero clip delta: ma = mf = clip) — exactly
+        // the game's per-frame eda -> solver cadence. Merely zeroing the
+        // velocity (mf = ma) is NOT enough: the edge relaxation drags the
+        // movable clip bones ~104 units (mean) off the clip pose (the edge
+        // rest lengths conflict with the posed skeleton), and the first
+        // regular step would inject that distortion back as Verlet velocity,
+        // exploding the cloth.
+        if (cycles > 1) {
+            for (std::size_t i = 0; i < nclip; ++i) {
+                sol_mf_[i * 3] = px[i];
+                sol_mf_[i * 3 + 1] = py[i];
+                sol_mf_[i * 3 + 2] = pz[i];
+                sol_ma_[i * 3] = px[i];
+                sol_ma_[i * 3 + 1] = py[i];
+                sol_ma_[i * 3 + 2] = pz[i];
+            }
         }
-        const std::size_t r = static_cast<std::size_t>(ref);
-        const float f_cloth = facing < 0 ? -1.0f : 1.0f;
-        px[i] = (bones[i].x - bones[r].x) * f_cloth + px[r];
-        py[i] = bones[i].y - bones[r].y + py[r];
-        pz[i] = bones[i].z - bones[r].z + pz[r];
+        // (b) sk: Verlet integrate (grav 0.4 = `xd.fDa`).
+        constexpr float kGrav = 0.4f;
+        for (std::size_t i = 0; i < n; ++i) {
+            const Bone& b = bones[i];
+            if (b.fixed || b.is_macro) continue;  // NG: immovable
+            const std::size_t i3 = i * 3;
+            float vx = sol_ma_[i3] - sol_mf_[i3];
+            float vy = sol_ma_[i3 + 1] - sol_mf_[i3 + 1];
+            float vz = sol_ma_[i3 + 2] - sol_mf_[i3 + 2];
+            if (b.cloth) {
+                const float k = 1.0f - b.attenuation;  // `Vc.bI` damp
+                vx *= k;
+                vy *= k;
+                vz *= k;
+            }
+            sol_mf_[i3] = sol_ma_[i3];
+            sol_mf_[i3 + 1] = sol_ma_[i3 + 1];
+            sol_mf_[i3 + 2] = sol_ma_[i3 + 2];
+            sol_ma_[i3] += vx;
+            sol_ma_[i3 + 1] += vy + kGrav;
+            sol_ma_[i3 + 2] += vz;
+        }
+        // (c) jE: 2 edge-relaxation passes (`yu.bFa` mass-weighted).
+        constexpr int kEdgeIters = 2;  // `xd.jE` IterativeProcess
+        for (int it = 0; it < kEdgeIters; ++it) {
+            for (const EdgeDef& e : model_.edges) {
+                const int bi1 = model_.bone_by_name(e.end1);
+                const int bi2 = model_.bone_by_name(e.end2);
+                if (bi1 < 0 || bi2 < 0) continue;
+                const std::size_t i1 = static_cast<std::size_t>(bi1);
+                const std::size_t i2 = static_cast<std::size_t>(bi2);
+                if (i1 >= n || i2 >= n) continue;
+                const bool ng1 = bones[i1].fixed || bones[i1].is_macro;
+                const bool ng2 = bones[i2].fixed || bones[i2].is_macro;
+                if (ng1 && ng2) continue;
+                const std::size_t u1 = i1 * 3;
+                const std::size_t u2 = i2 * 3;
+                const float ex = sol_ma_[u2] - sol_ma_[u1];
+                const float ey = sol_ma_[u2 + 1] - sol_ma_[u1 + 1];
+                const float ez = sol_ma_[u2 + 2] - sol_ma_[u1 + 2];
+                const float dist = std::sqrt(ex * ex + ey * ey + ez * ez);
+                if (dist < 1e-9f) continue;
+                const float r = e.length / dist;
+                const float w1 = bones[i1].mass;
+                const float w2 = bones[i2].mass;
+                const float fk = (1.0f - r) / (w1 + w2);
+                const float g1 = w1 * fk;
+                const float g2 = w2 * fk;
+                const float bx = sol_ma_[u1] * g1 + sol_ma_[u2] * g2;
+                const float by = sol_ma_[u1 + 1] * g1 + sol_ma_[u2 + 1] * g2;
+                const float bz = sol_ma_[u1 + 2] * g1 + sol_ma_[u2 + 2] * g2;
+                if (!ng1) {
+                    sol_ma_[u1] = sol_ma_[u1] * r + bx;
+                    sol_ma_[u1 + 1] = sol_ma_[u1 + 1] * r + by;
+                    sol_ma_[u1 + 2] = sol_ma_[u1 + 2] * r + bz;
+                }
+                if (!ng2) {
+                    sol_ma_[u2] = sol_ma_[u2] * r + bx;
+                    sol_ma_[u2 + 1] = sol_ma_[u2 + 1] * r + by;
+                    sol_ma_[u2 + 2] = sol_ma_[u2 + 2] * r + bz;
+                }
+            }
+        }
+        // (d) Qja/seb: macros re-derived from the solved children.
+        std::vector<std::uint8_t> visiting(n, 0);
+        std::function<void(std::size_t)> compute_macro = [&](std::size_t idx) {
+            if (visiting[idx]) {
+                return;  // cycle guard
+            }
+            visiting[idx] = 1;
+            const auto it2 = model_.macro_children.find(bones[idx].name);
+            if (it2 != model_.macro_children.end()) {
+                const MacroChildren& mc = it2->second;
+                float ax = 0.0f, ay = 0.0f, az = 0.0f;
+                for (std::size_t c = 0; c < mc.child_names.size(); ++c) {
+                    const int ci = model_.bone_by_name(mc.child_names[c]);
+                    if (ci < 0) continue;
+                    const std::size_t u = static_cast<std::size_t>(ci);
+                    if (u >= n) continue;
+                    if (bones[u].is_macro && u >= nclip) {
+                        compute_macro(u);
+                    }
+                    const float w = c < mc.weights.size() ? mc.weights[c] : 0.0f;
+                    ax += sol_ma_[u * 3] * w;
+                    ay += sol_ma_[u * 3 + 1] * w;
+                    az += sol_ma_[u * 3 + 2] * w;
+                }
+                sol_ma_[idx * 3] = ax;
+                sol_ma_[idx * 3 + 1] = ay;
+                sol_ma_[idx * 3 + 2] = az;
+                sol_mf_[idx * 3] = ax;
+                sol_mf_[idx * 3 + 1] = ay;
+                sol_mf_[idx * 3 + 2] = az;
+            }
+            visiting[idx] = 0;
+        };
+        for (std::size_t i = nclip; i < n; ++i) {
+            if (bones[i].is_macro) {
+                compute_macro(i);
+            }
+        }
+        }  // warmup cycle loop
+        // The solved pose becomes this frame's positions.
+        for (std::size_t i = 0; i < n; ++i) {
+            px[i] = sol_ma_[i * 3];
+            py[i] = sol_ma_[i * 3 + 1];
+            pz[i] = sol_ma_[i * 3 + 2];
+        }
+    } else {
+        // No solver state (defensive): fall back to the bind pose for the
+        // non-clip bones (the pre-solver behavior minus the cloth anchor).
+        for (std::size_t i = nclip; i < n; ++i) {
+            if (bones[i].is_macro) {
+                continue;
+            }
+            px[i] = bones[i].x;
+            py[i] = bones[i].y;
+            pz[i] = bones[i].z;
+        }
     }
 
     // JS mirror swap (Te.Peb L560 -> Te.MYa/lwa -> Ua.Oeb L692): when
@@ -768,19 +871,9 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             pos_[i * 2 + 1] += kb_[i].y;
         }
     }
-
-    // [Phase A4 — figure z-sort] Keep the per-bone depth the projection
-    // drops (JS `dv.ia`: `Xg[a++]=d.x; Xg[a++]=d.y` — z is dropped at skin
-    // time). The clip z is the absolute world depth (`ma.z`), untouched by
-    // the facing x-mirror (`Te.Qeb` negates x only). In the authored space
-    // the near side carries the LARGER z (e.g. NAnkle_1 z=38.1 vs
-    // NAnkle_2 z=24.8), so build_vertices sorts the triangles far-to-near
-    // by mean vertex z. Sample is the pose source for the frame — z is
-    // captured here alongside the x/y in `pos_`.
-    posz_.assign(n, 0.0f);
-    for (std::size_t i = 0; i < n; ++i) {
-        posz_[i] = pz[i] + (i < kb_.size() ? kb_[i].z : 0.0f);
-    }
+    // JS `dv.ia` (L840) drops z when it skins the mesh (`Xg[a++] = d.x;
+    // Xg[a++] = d.y`), so no per-bone depth is retained for drawing — the
+    // triangles draw in XML document order (see build_vertices).
 }
 
 std::size_t Fighter::build_vertices(std::vector<float>& out) const {
@@ -788,35 +881,13 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
     const std::size_t ntri = model_.resolved_tris.size();
     out.reserve(ntri * 6);
 
-    // [Phase A4 — figure z-sort] Triangle draw order = painter's algorithm:
-    // far-to-near by the triangle's mean vertex z (the per-bone `posz_`
-    // captured in sample()). The shipped XML document order is z-scattered
-    // (mdl_head's 218 triangles: z increases on 109 consecutive pairs,
-    // decreases on 108), so near limbs/head can draw under far ones and the
-    // overlapping silhouette shows squared edges. Sorting by the pose z
-    // keeps near parts (larger z — the _1 side in author space, NAnkle_1
-    // z=38.1 vs NAnkle_2 z=24.8) on top. Stable: equal-z triangles keep
-    // the document order (the game's draw order), so coplanar quads/cloth
-    // tris stay unperturbed. Without a sampled pose the identity order
-    // falls back to the document order.
-    std::vector<std::uint32_t> order(ntri);
-    for (std::size_t t = 0; t < ntri; ++t) {
-        order[t] = static_cast<std::uint32_t>(t);
-    }
-    if (posz_.size() >= model_.bones.size() && ntri > 1) {
-        auto tri_z_sum = [this](std::uint32_t t) {
-            const TriResolved& tri = model_.resolved_tris[static_cast<std::size_t>(t)];
-            return posz_[static_cast<std::size_t>(tri.i1)] +
-                   posz_[static_cast<std::size_t>(tri.i2)] +
-                   posz_[static_cast<std::size_t>(tri.i3)];
-        };
-        std::stable_sort(order.begin(), order.end(),
-                         [&tri_z_sum](std::uint32_t a, std::uint32_t b) {
-                             return tri_z_sum(a) < tri_z_sum(b);
-                         });
-    }
-    for (const std::uint32_t t : order) {
-        const TriResolved& tri = model_.resolved_tris[static_cast<std::size_t>(t)];
+    // JS `dv.ia` (L840) emits the triangles in XML DOCUMENT order: `zU` is
+    // pushed in `dv.DXa` resolution order and `Xg` copies each node's
+    // `ma.x/ma.y` (z dropped) — there is NO depth sort. The previous native
+    // painter's sort by mean pose z re-ordered overlapping limbs and read as
+    // "some triangles wrong" against the oracle (PORT_AUDIT_RENDER §3.3/§4.1,
+    // ranked P0 #1): restore the document order exactly.
+    for (const TriResolved& tri : model_.resolved_tris) {
         out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2]);
         out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2 + 1]);
         out.push_back(pos_[static_cast<std::size_t>(tri.i2) * 2]);

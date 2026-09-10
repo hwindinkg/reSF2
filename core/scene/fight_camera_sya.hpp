@@ -36,7 +36,12 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
     // --- the Sya zoom (exact JS L1833) ----------------------------------
     const float aspect = view_w / view_h;
     const float span = std::fabs(bx - ax);             // d = qh.ECa() = |x1-x2|
-    const float e = cam.arena_h;                       // m$a() = Lb.height*Bj, Bj = 1
+    // The layer zoom Bj (Ut.xCa L831) FIRST: min(nC/(span+300),1), where
+    // nC = b/Ira = viewW/(viewH/Lb.height) (mwa L823-824, raw arena height).
+    // Bj then feeds the Sya denominator m$a() = Lb.height * Bj (W5/D11).
+    const float n_c = view_w / (view_h / cam.arena_h);  // mwa: nC = b/Ira
+    cam.zoom_layer = std::min(1.0f, n_c / (span + 300.0f));  // Ut.xCa() -> Bj
+    const float e = cam.arena_h * cam.zoom_layer;       // m$a() = Lb.height*Bj
     float f = view_h / e;
     f *= (aspect < 0.45f ? 0.45f : aspect > 1.0f ? 1.0f : aspect);  // c<.45?.45:c>1?1:c
     if (aspect < 0.8f) {
@@ -47,15 +52,8 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
                        ((std::max(0.5f, std::min(1.0f, aspect)) - 0.5f) / 0.5f) *
                            0.7f;                        // the min zoom 0.6..1.3
     if (f < dmin) f = dmin;
-    // The layer zoom Bj (Ut.xCa L831): min(nC/(span+300),1) — nC = the
-    // half-view world width (mwa: b/Ira, Ira = viewH/arenaH). BJ drives
-    // the layer scaling AND the panorama clamp (Ut.Al); the oracle trace
-    // records Bj as its "zoom" (trace.js hooks Ut.Al and reads this.Bj —
-    // 1.0 at the fight-start span: 995.6/583 < 1). The RENDER zoom stays
-    // the Sya f (1.3 at 16:9) — both numbers come from the spec: the
-    // camera zoom is Sya's f (L1833), the layer/pano zoom is Ut.Bj (L826).
-    const float n_c = view_w / (view_h / e);           // mwa: nC = b/Ira
-    cam.zoom_layer = std::min(1.0f, n_c / (span + 300.0f));  // Ut.xCa() -> Bj
+    // The RENDER zoom is the Sya f (1.3 at 16:9); the layer/pano zoom is
+    // Ut.Bj (1.0 at the fight-start span) — both come from the spec.
     cam.zoom = f;
 
     // --- the target (ql.tyb + the vertical floor anchor) ----------------
@@ -69,7 +67,9 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
         cam.du_y_ = cam.start_y_;
         cam.initialized_ = true;
         cam.center_x = cam.start_x_;
-        cam.center_y = cam.start_y_;
+        // JS `N.Ta.K4` (L85) leaves the camera position y at 0; the vertical
+        // focus never feeds the render camera (D1/W1).
+        cam.center_y = 0.0f;
         return;
     }
     cam.du_x_ = (ax + bx) * 0.5f;                      // By = mid of the CoM's x
@@ -118,7 +118,11 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
     cam.center_x = cam.go_x_ < center - d_io   ? center - d_io
                 : cam.go_x_ > center + d_io ? center + d_io
                                         : cam.go_x_;
-    cam.center_y = cam.go_y_;
+    // JS `N.Ta.K4` (L85) resets the camera position to (0,0) each frame and
+    // `Sya` never writes position.y (only the aspect<1 portrait `b.D`). The
+    // smoothed `go_y_` stays as chase state but must NOT feed the render
+    // camera (D1/W1): the whole invented vertical camera is removed.
+    cam.center_y = 0.0f;
 
     // --- the portrait vertical shift (Sya: c<1 && b.D(...)) -------------
     if (aspect < 1.0f) {

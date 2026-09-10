@@ -1,23 +1,22 @@
 #pragma once
 
-// The shell screens — Dojo, MainMenu, Map, BattleResult.
+// The shell screens — Dojo, Map, Fight, Results, Shop, Profile (Equipment),
+// Settings, Moves, Bracket.
 //
-// JS study (Task 1 documentation lives in core/scene/README.md):
-//   - Dojo (screen 3, `Tf`): the HOME base — the screen the ORIGINAL boots
-//     into (the JS trace: Preloader -> Loader -> Dojo). It shows the dojo
-//     backdrop with the Map/Shop/Profile entry buttons, the gem chest and
-//     the training fight vs the Punchbag dummy (the stages.xml Punchbag
-//     zone Start=1). The native DojoScreen is that home hub: its FIGHT
-//     button starts the Training battle of the Punchbag zone (which the
-//     MapScreen's Training node also runs).
-//   - GeneralMenu (screen 8, xn L1167): the game's main menu. The four
-//     top-tab buttons are `cs` (JS L2188): Progress/Strikes/Achiev/Seal
-//     from the profile atlas; the map/dojo/shop/profile entry buttons are
-//     the menu atlas frames (menu.aaef83fb.json): Dojo_normal/Map_normal/
-//     Shop_normal/Profile_normal (+ _active/_pushed). The menu shows the
-//     dojo background + the za top bar (JS L1972: topPanel frame from
-//     misc, money/energy display). Clicking "Fight" (the Dojo button)
-//     enters the map.
+// JS study (the per-screen wire-spec is reference/PORT_AUDIT_UI.md):
+//   - Dojo (screen 3, `Tf` L1969-1972): the HOME base — the screen the
+//     ORIGINAL boots into (Preloader -> Loader -> Dojo). It runs the
+//     `FightNone` ModelViewer (the idle stance figure at the location's
+//     ModelsViewer spawn) over the dojo location layer stack, with the
+//     shared `za` top chrome. There is NO FIGHT button / punchbag / gear on
+//     the JS hub (those were native inventions — PORT_AUDIT_UI §2.2).
+//   - Top chrome (`za` L1972-1984): the persistent shell chrome mounted on
+//     every shell screen via `ma.D1()` (L1831): a full-width `topPanel`
+//     (misc id 260) at min(H*0.13,100), three widgets `wr`/`xr`/`yr`
+//     (level/energy/money) centred in a row, and a VERTICAL column of five
+//     `Le` nav buttons (menu id 262): Dojo/Map/Shop/Profile/Settings.
+//     There is NO JS GeneralMenu screen — screen 8 does not exist in this
+//     build (`dJ()` returns 0/3/4/5/6/7 only); the shell home is the Dojo.
 //   - Map (screen 5, Ya L2124-2132): the battle-node screen. The
 //     backgrounds are `map/part0..6` (asset ids 336..324, the `map0` frame
 //     is 2046x854); the battle nodes come from stages.xml <Zone>/<Battle>
@@ -27,10 +26,10 @@
 //     BattleBtnBase/base_<name> + BattleBtnActive/active_<name> +
 //     BattleBtnPressed/pressed_<name> (e.g. base_training/active_training).
 //
-// The menu/map atlases ship as ASTC ktx / crunch dds (not CPU-decodable by
-// the current pipeline — see core/data/README.md), so this phase renders a
-// functional menu: the dojo webp background + flat labeled buttons at the
-// JS-derived positions. The exact atlas-art layout is flagged as a gap.
+// The misc/menu/controller/fight-ui atlases are KTX ASTC — the data layer
+// CPU-decodes them (core/data/ktx.cpp) and App::init registers their frames,
+// so the `za` chrome art resolves. A flat fallback still covers a real
+// per-frame miss (never a silent blank).
 
 #include <memory>
 #include <string>
@@ -54,11 +53,10 @@ class LocationScene;
 namespace sf2::app {
 
 // The dojo — the home screen (native Dojo screen 3, JS `Tf`). The screen
-// the game boots into (the original starts here, not in the GeneralMenu):
-// the dojo backdrop + the Map/Shop/Profile entry buttons + the FIGHT
-// button that starts the training fight vs the Punchbag dummy (the
-// stages.xml Punchbag zone Training battle; the fight itself runs the
-// shared FightScreen/FightController).
+// the game boots into: the dojo location layer stack + the `FightNone`
+// ModelViewer idle figure + the shared `za` top chrome (nav column). No
+// FIGHT button / punchbag / gear — those were native inventions
+// (PORT_AUDIT_UI §2.2, §4).
 class DojoScreen : public Screen {
 public:
     explicit DojoScreen(ScreenManager& mgr);
@@ -69,21 +67,11 @@ public:
     void render_impl(App& app) override;
 
 private:
-    struct Button {
-        std::string label;
-        float x = 0.0f;  // center
-        float y = 0.0f;
-        float w = 0.0f;
-        float h = 0.0f;
-        int target = -1;  // ScreenId to push when clicked
-    };
-    std::vector<Button> buttons_;
-    int hover_ = -1;
-    int last_hover_ = -1;
     bool money_logged_ = false;
 
-    // --- Dojo aliveness (JS `Tf` L1969-1970: the home base runs the
-    // Training setup vs the Punchbag dummy) -------------------------------
+    // --- Dojo aliveness (JS `Tf` L1969-1972: the hub runs the `FightNone`
+    // ModelViewer — the idle stance figure at the location's ModelsViewer
+    // spawn, not a hand-placed capsule) -----------------------------------
     // The idle player figure: a scene Fighter sampling the stance clip
     // (display only — never stepped through fight logic). Built lazily on
     // first render; null-safe when assets are missing (headless).
@@ -92,14 +80,6 @@ private:
     bool dojo_fig_ok_ = false;
     const sf2::data::anim_clip* dojo_idle_ = nullptr;  // owned by FightAssets
     int idle_frame_ = 0;   // fixed-step counter driving the idle cycle
-    // The hanging Punchbag dummy (Tf Training setup): a scene Fighter over
-    // FightAssets::merged_bag, posed once in the bind hang pose (the bag
-    // Warrior is NotAnimation — no clip; bind = hang, Node12 mount on top).
-    // Same lazy display-only pattern as the idle figure above.
-    std::unique_ptr<sf2::scene::Fighter> dojo_bag_;
-    bool dojo_bag_tried_ = false;
-    bool dojo_bag_ok_ = false;
-    sf2::data::anim_clip dojo_bag_pose_;  // one-frame bind pose (owned here)
     // Tutorial quest banner state (quest_panel.hpp; derived read-only from
     // the save's Tutorial field + the last Training result).
     std::string tutorial_ = "MOVE";
@@ -110,35 +90,6 @@ private:
     int quest_logged_ = -1;
     bool training_won_ = false;
     int seen_money_ = -1;  // last logged money (snapshot change detection)
-    bool result_synced_ = false;  // save re-read after the last battle result
-    // Disciple sparring toggle (JS `Nfb`): session-local STUB until the save
-    // carries Disciple/Y0 (see report) — flips display state only.
-    bool disciple_ = false;
-};
-
-// The main menu — native GeneralMenu (screen 8).
-class MainMenuScreen : public Screen {
-public:
-    explicit MainMenuScreen(ScreenManager& mgr);
-
-    ScreenId id() const override { return kScreenGeneralMenu; }
-
-    void update_impl(float dt) override;
-    void render_impl(App& app) override;
-
-private:
-    struct Button {
-        std::string label;
-        float x = 0.0f;  // center
-        float y = 0.0f;
-        float w = 0.0f;
-        float h = 0.0f;
-        int target = -1;  // ScreenId to push when clicked
-    };
-    std::vector<Button> buttons_;
-    int hover_ = -1;
-    int last_hover_ = -1;
-    bool money_logged_ = false;
 };
 
 // The map — native Map (screen 5).

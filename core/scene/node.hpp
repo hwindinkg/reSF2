@@ -26,6 +26,10 @@ struct Transform {
     float scale_y = 1.0f;
     float anchor_x = 0.5f;
     float anchor_y = 0.5f;
+    // Node rotation in DEGREES (JS `R3a` L486-487 `s.Wg(rot)`, `rot` = the
+    // XML `Rotation` attr; the camera rotates with the same *pi/180 scale at
+    // L79). 0 = unrotated (the common case).
+    float rotation = 0.0f;
 
     void set_pos(float px, float py) {
         x = px;

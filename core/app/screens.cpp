@@ -1,29 +1,25 @@
-// The shell screens implementation — Dojo (home), MainMenu, Map, Fight,
-// Results, Shop, Equipment.
+// The shell screens implementation — Dojo (home), Map, Fight, Results,
+// Shop, Profile (Equipment), Settings, Moves, Bracket.
 //
-// Layout math (JS-derived):
-//   - Dojo/home buttons: the same menu-atlas entry buttons + positions as
-//     the GeneralMenu (the four entry buttons sit in the lower half of the
-//     dojo backdrop, horizontally spaced by ~0.26 of the view width,
-//     centered). The Dojo FIGHT button starts the training fight vs the
-//     Punchbag dummy; Map/Shop/Profile push their screens.
-//   - MainMenu buttons: the game's za top bar + the 4 tab buttons are the
-//     exact JS layout; this phase uses the menu atlas frame proportions
-//     (Dojo_normal 226x193, Map_normal 191x194, Shop_normal 246x238,
-//     Profile_normal 193x231) at the JS positions: the four entry buttons
-//     sit in the lower half of the dojo backdrop, horizontally spaced by
-//     ~0.26 of the view width, centered. The Fight button (the Dojo
-//     button) is the primary entry -> Map (screen 5).
+// JS study (the per-screen wire-spec is reference/PORT_AUDIT_UI.md):
+//   - Dojo/home: the JS `Tf` hub (L1969-1972) — the dojo location layer
+//     stack + the `FightNone` ModelViewer idle figure at the location's
+//     ModelsViewer spawn, plus the shared `za` top chrome. There is no
+//     FIGHT/MAP/SHOP/PROFILE 4-up row, punchbag or gear (native
+//     inventions, PORT_AUDIT_UI §2.1-2.2).
+//   - Top chrome (`za` L1972-1984): a full-width `topPanel` (misc 260) at
+//     min(H*0.13,100), centred `wr`/`xr`/`yr` widgets (level/energy/money)
+//     and a VERTICAL column of five `Le` (menu 262) nav buttons, mounted on
+//     Dojo/Map/Shop/Profile. No GeneralMenu screen exists in this build
+//     (`dJ()` returns 0/3/4/5/6/7 only).
 //   - Map nodes: stages.xml <Zone><Battle X=.. Y=..> -> screen pos
-//     x = X*1.0 + view_w/2, y = view_h/2 - Y*1.0 (qe.X0a's
-//     bg.w/2 / bg.h/2 with uM≈1 for the 2046-wide map0 frame scaled to the
-//     view). The Training battle (X=158, Y=145) lands lower-right.
+//     x = X*1.0 + view_w/2, y = view_h/2 - Y*1.0 (qe.X0a's bg.w/2 /
+//     bg.h/2 with uM≈1 for the 2046-wide map0 frame scaled to the view).
 //
-// The menu/map/shop atlases ship as ASTC ktx / crunch dds (not CPU-decodable
-// by the current pipeline — see core/data/README.md), so this phase renders
-// a functional menu/map/shop: the dojo webp background + flat labeled
-// buttons at the JS-derived positions. The exact atlas-art layout is
-// flagged as a gap.
+// The misc/menu/controller/fight-ui atlases are KTX ASTC — the data layer
+// CPU-decodes them (core/data/ktx.cpp) and App::init registers their frames,
+// so the `za` chrome art resolves; a flat fallback covers a real per-frame
+// miss (never a silent blank).
 
 #include "app/screens.hpp"
 #include "app/act_player.hpp"
@@ -522,18 +518,295 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
 }
 
 // ---------------------------------------------------------------------------
+// Shared `za` top chrome (JS L1972-1984) — the persistent shell chrome.
+//
+// `ma.D1()` (L1831) mounts one `za` on every `ma` shell screen. The JS
+// constructor (L1973-1980) + layouts (`odb` L1975 / `ndb` L1976-1977) give:
+//   - the topPanel backing (misc id 260, frame `topPanel`) stretched full
+//     width at min(rect.h*0.13, 100) (desktop; `L.K.un?230:100`, L1975);
+//   - a centred widget strip `Pr` carrying `wr` (level, L1986), `xr`
+//     (energy, L1984) and `yr` (money, L1990) left->right, gap c = 50*N.lc;
+//   - a VERTICAL column of five `Le` (menu id 262) nav buttons created in
+//     `Aub` (L1977-1980) with normal/pushed/active frames; `ndb` lays them
+//     at x = 100*(0.2+((lc<.5?.5:lc>2?2:lc)-.5)/1.5*.8), y just below the
+//     bar, row height b = buttons[0].Y.fa.y*.85 (menu source frame 278),
+//     scale d = max(.1, min(W,H)*.35/430) clamped so the column fits.
+// The old native horizontal 4-up rows (MainMenu + Dojo) were INVENTED
+// (PORT_AUDIT_UI §2.1): the nav column is VERTICAL.
+// ---------------------------------------------------------------------------
+
+// The five nav buttons (JS `Aub` L1978-1979). normal/pushed/active resolve
+// the `y.*` frame table (L2464-2466); Settings passes null as its third
+// frame (L1979). No text is baked into the `Le` art (UI_EXCLUSIVITY §2), so
+// the label draws only on the flat fallback.
+struct ZaNavDef {
+    const char* normal;
+    const char* pushed;
+    const char* active;
+    ScreenId nav;
+    const char* label;
+};
+constexpr int kZaNavCount = 5;
+const ZaNavDef kZaNav[kZaNavCount] = {
+    {"Dojo_normal", "Dojo_pushed", "Dojo_active", kScreenDojo, "DOJO"},
+    {"Map_normal", "Map_pushed", "Map_active", kScreenMap, "MAP"},
+    {"Shop_normal", "Shop_pushed", "Shop_active", kScreenShop, "SHOP"},
+    {"Profile_normal", "Profile_pushed", "Profile_active", kScreenProfile, "PROFILE"},
+    {"Settings_normal", "Settings_active", nullptr, kScreenSettings, "SETTINGS"},
+};
+
+// The nav button source frame is 278x278 (menu atlas Dojo_normal
+// sourceSize), so row height b = 278*0.85 (JS `buttons[0].Y.fa.y*.85`).
+constexpr float kZaNavSource = 278.0f;
+
+struct ZaLayout {
+    float bar_h = 0.0f;        // topPanel height (odb: PL.Pb)
+    float sp = 0.0f;           // bar visual height (Sp = PL.qa()*.78)
+    float widget_h = 0.0f;     // b = Sp*.65
+    float gap = 0.0f;          // c = 50*N.lc
+    float nav_x = 0.0f;        // scroll.node.C
+    float nav_w = 0.0f;        // content frame width e = 430*d
+    float nav_scale = 1.0f;    // d
+    float nav_step = 0.0f;     // row step b*d
+    float nav_first_y = 0.0f;  // Sp + b/2*d
+    float nav_btn = 0.0f;      // on-screen button size 278*d
+};
+
+ZaLayout za_layout() {
+    ZaLayout lay;
+    const float w = kViewW, h = kViewH;
+    const float lc = w / h;  // N.lc
+    // odb() (L1975).
+    lay.bar_h = std::min(h * 0.13f, 100.0f);
+    lay.sp = lay.bar_h * 0.78f;
+    lay.widget_h = lay.sp * 0.65f;
+    lay.gap = 50.0f * lc;
+    // ndb() (L1976-1977).
+    const float lc_clamped = std::clamp(lc, 0.5f, 2.0f);
+    lay.nav_x = 100.0f * (0.2f + (lc_clamped - 0.5f) / 1.5f * 0.8f);
+    const float row = kZaNavSource * 0.85f;                            // b
+    const float col_h = row * static_cast<float>(kZaNavCount) + 45.0f;  // c
+    float d = std::max(0.1f, std::min(w, h) * 0.35f / 430.0f);
+    const float avail = h - lay.sp - 100.0f;                           // rect.v - Sp - 100
+    if (col_h * d > avail) {
+        d = avail / col_h;
+    }
+    lay.nav_w = 430.0f * d;                                            // e
+    lay.nav_scale = d;
+    lay.nav_step = row * d;
+    lay.nav_first_y = lay.sp + (row * 0.5f) * d;                       // Sp + a
+    lay.nav_btn = kZaNavSource * d;
+    return lay;
+}
+
+// Hit test for the vertical nav column; -1 when outside every button.
+int za_nav_hit(double px, double py) {
+    const ZaLayout lay = za_layout();
+    const float cx = lay.nav_x + lay.nav_w * 0.5f;  // g.C(wc.Gv/2)
+    const float half = lay.nav_btn * 0.5f;
+    for (int i = 0; i < kZaNavCount; ++i) {
+        const float cy = lay.nav_first_y + static_cast<float>(i) * lay.nav_step;
+        if (px >= cx - half && px <= cx + half && py >= cy - half && py <= cy + half) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Handles the nav-column taps for a shell screen (JS listeners Ofb/Qfb/Wfb/
+// Rfb/Vfb -> `ma.Jg().jI(cls)`): a tap pushes the target screen unless it is
+// the screen already showing (the JS highlights that one active, `xyb`
+// L1982).
+void za_update(App& app, Screen& self, ScreenId active) {
+    const int hit = za_nav_hit(app.pointer().x, app.pointer().y);
+    if (hit < 0 || !app.pointer().pressed) return;
+    const ScreenId target = kZaNav[hit].nav;
+    sf2::audio::AudioEngine::instance().play("click");
+    std::fprintf(stdout, "[za] nav %s -> screen %d\n", kZaNav[hit].label,
+                 static_cast<int>(target));
+    std::fflush(stdout);
+    if (target != active) {
+        self.push(target);
+    }
+}
+
+// Draws the shared chrome on top of a shell screen's own content. `active`
+// selects the active nav frame (JS `xyb`). The widget strip mirrors `odb`:
+// widgets are laid left->right and the strip is centred; each widget is
+// icon + value (+ bar), scaled to `widget_h` (JS wr/xr/yr `layout`).
+void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
+    sf2::render::Renderer& ren = app.renderer();
+    const float w = kViewW;
+    const ZaLayout lay = za_layout();
+    // topPanel (misc id 260) stretched full width (odb L1975).
+    if (!try_draw_atlas_button(app, "topPanel", w * 0.5f, lay.bar_h * 0.5f, w, lay.bar_h,
+                               1.0f, /*fill=*/true)) {
+        const float bg[] = {0, 0, w, 0, w, lay.bar_h, 0, 0, w, lay.bar_h, 0, lay.bar_h};
+        ren.draw_triangles(bg, 6, 0.10f, 0.07f, 0.05f, 1.0f);
+    }
+    // Widgets wr/xr/yr (odb L1975).
+    WarriorSave sv;
+    try {
+        sv = app.save().load();
+    } catch (const std::exception&) {
+    }
+    const float icon = lay.widget_h;
+    const float bar_h = lay.widget_h * 0.4f;              // c = a*.4 (wr/xr layout)
+    const float num_scale = lay.widget_h * 0.9f / 100.0f;  // ua(a*.9), eF=100
+    // Per-widget logical widths: `wr` = level icon + value + Level_bar; `xr`
+    // = energy icon + Energy_Bar; `yr` = gold + money + ruby + gems.
+    const float icon_level = icon * (115.0f / 111.0f);   // misc `level` 115x111
+    const float icon_energy = icon * (95.0f / 103.0f);   // misc `energy` 95x103
+    const float icon_gold = icon;                        // misc `gold` 95x95
+    const float icon_ruby = icon * (88.0f / 87.0f);      // misc `ruby` 88x87
+    const float q = icon * 0.25f;                        // b = icon.za()*.25
+    const float num_w = icon * 1.4f;                     // value text slot
+    const float bar_w = icon * 2.0f;                     // widget bar length
+    const float lvl_w = icon_level + q + num_w + q + bar_w;
+    const float en_w = icon_energy + q + bar_w;
+    const float money_w = icon_gold + q + num_w + q + icon_ruby + q + num_w;
+    const float total = lvl_w + lay.gap + en_w + lay.gap + money_w;
+    float x = (w - total) * 0.5f;
+    const float cy = lay.sp * 0.5f;  // strip centred in the bar (Pr.D((Sp-...)/2))
+    // `wr` (level).
+    try_draw_atlas_button(app, "level", x + icon_level * 0.5f, cy, icon_level, icon, 1.0f);
+    draw_ui_label(app, x + icon_level + q, cy - lay.widget_h * 0.45f, num_w, lay.widget_h,
+                  std::to_string(sv.level), num_scale, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    try_draw_atlas_button(app, "Level_bar", x + icon_level + q + num_w + q + bar_w * 0.5f, cy,
+                          bar_w, bar_h, 1.0f, /*fill=*/true);
+    x += lvl_w + lay.gap;
+    // `xr` (energy).
+    try_draw_atlas_button(app, "energy", x + icon_energy * 0.5f, cy, icon_energy, icon, 1.0f);
+    try_draw_atlas_button(app, "Energy_Bar", x + icon_energy + q + bar_w * 0.5f, cy, bar_w,
+                          bar_h, 1.0f, /*fill=*/true);
+    x += en_w + lay.gap;
+    // `yr` (money).
+    try_draw_atlas_button(app, "gold", x + icon_gold * 0.5f, cy, icon_gold, icon, 1.0f);
+    draw_ui_label(app, x + icon_gold + q, cy - lay.widget_h * 0.45f, num_w, lay.widget_h,
+                  std::to_string(sv.money), num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+    try_draw_atlas_button(app, "ruby", x + icon_gold + q + num_w + q + icon_ruby * 0.5f, cy,
+                          icon_ruby, icon, 1.0f);
+    draw_ui_label(app, x + icon_gold + q + num_w + q + icon_ruby + q,
+                  cy - lay.widget_h * 0.45f, num_w, lay.widget_h, std::to_string(sv.bonus),
+                  num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+    // Vertical nav column (ndb L1976-1977).
+    const int hover = za_nav_hit(app.pointer().x, app.pointer().y);
+    const float nav_cx = lay.nav_x + lay.nav_w * 0.5f;
+    for (int i = 0; i < kZaNavCount; ++i) {
+        const ZaNavDef& def = kZaNav[i];
+        const bool is_active = def.nav == active;
+        const bool is_hover = i == hover;
+        const char* frame = is_hover && def.pushed != nullptr
+                                ? def.pushed
+                                : (is_active && def.active != nullptr ? def.active : def.normal);
+        const float cy_i = lay.nav_first_y + static_cast<float>(i) * lay.nav_step;
+        if (!try_draw_atlas_button(app, frame, nav_cx, cy_i, lay.nav_btn, lay.nav_btn, 1.0f)) {
+            draw_flat_button(app, def.label, nav_cx, cy_i, lay.nav_btn, lay.nav_btn,
+                             is_active ? 0.6f : (is_hover ? 0.5f : 0.35f), 0.4f, 0.28f,
+                             is_hover);
+            draw_ui_label(app, nav_cx - lay.nav_btn * 0.5f, cy_i - 10.0f, lay.nav_btn, 20.0f,
+                          def.label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        }
+        // Le badge (JS `Dg`/`Le` L1848-1850: notification_circle + count).
+        // The counts are screen-specific saves (Shop `tCa`, Profile totals)
+        // NOT derived natively — callers pass nullptr until then (OPEN).
+        if (badges != nullptr && badges[i] > 0) {
+            const float bx = nav_cx + lay.nav_btn * 0.28f;
+            const float by = cy_i - lay.nav_btn * 0.28f;
+            if (!try_draw_atlas_button(app, "notification_circle", bx, by, lay.nav_btn * 0.34f,
+                                       lay.nav_btn * 0.34f, 1.0f)) {
+                draw_flat_button(app, "", bx, by, lay.nav_btn * 0.3f, lay.nav_btn * 0.3f,
+                                 0.85f, 0.2f, 0.2f, false);
+            }
+            draw_ui_label(app, bx - lay.nav_btn * 0.2f, by - 9.0f, lay.nav_btn * 0.4f, 18.0f,
+                          std::to_string(badges[i]), 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Fight banner + hit sparks (JS `Cr` L2021-2026 / `Hyb`+`ryb`+`av`).
 //
-// The original's ROUND/FIGHT!/VICTORY/DEFEAT labels are pre-rendered sprites
-// in the `image` atlas (id 1310, JS_GAMEPLAY §"ai" L373-375: `y.BQa/uQa/
-// zQa/wQa`) + the round NUMBER drawn with fight/round.fnt. That atlas ships
-// as ASTC ktx / crunch dds — not CPU-decodable by this pipeline (see the
-// file header) — so the native banner renders the text with the menu font
-// (ui/font-en.fnt, full A-Z coverage; round.fnt carries ONLY digits/":"/"/"
-// glyphs, no letters). The banner is a pure presentation layer over the
-// fight: it reads FightController::banner()/banner_text()/banner_progress()
-// and never touches the simulation.
+// `Cr` (L2022-2026): `image = R.$(E.get(1310), null, content)` — the
+// `res/fight/callouts.*` atlas (frames round/fight/perfect/great/label_win/
+// label_lose/ringout/timesup/...; the `y.*` table L2462-2463: BQa="round",
+// uQa="fight", zQa="perfect", wQa="great"); the ROUND number is a font text
+// (`round = ea(E.get(1298), content)`, id 1298 = fight/round.fnt). `image`
+// is scaled `min(800, min(W,H))/image.fa.x*0.6` (layout L2027) and centred
+// (`content.setPosition(ma.Kq.F5a())`). The banner is a pure presentation
+// layer over the fight (reads FightController::banner()/banner_text()/
+// banner_progress()), never the simulation.
+//
+// App::init registers menu/misc/controller/fight-ui but not callouts, so the
+// atlas is loaded lazily here (the `load_controller_atlas` pattern; ASTC KTX
+// is CPU-decoded — core/data/ktx.cpp). A flat/menu-font fallback covers a
+// real frame miss.
 // ---------------------------------------------------------------------------
+
+// Lazily loads `res/fight/callouts.*` (JS asset id 1310) into the app atlas
+// cache. Returns true once the frames are registered.
+bool load_callouts_atlas(App& app) {
+    static bool done = false;
+    static bool ok = false;
+    if (done) return ok;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/fight";
+        std::string json_path;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("callouts.", 0) == 0 && entry.path().extension() == ".json") {
+                json_path = entry.path().string();
+                break;
+            }
+        }
+        if (json_path.empty()) return false;
+        sf2::data::Texture tex;
+        bool decoded = false;
+        for (const std::string& ext : {".png", ".webp", ".ktx", ".dds"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("callouts.", 0) == 0 && entry.path().extension() == ext) {
+                    if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                        decoded = true;
+                        break;
+                    }
+                }
+            }
+            if (decoded) break;
+        }
+        if (!decoded) return false;
+        const GLuint gl = app.renderer().texture_for("callouts_atlas", tex);
+        if (gl == 0) return false;
+        std::ifstream in(json_path, std::ios::binary);
+        std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+        const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+        for (const auto& fr : a.frames) {
+            app.register_atlas_frame(fr, a.w, a.h, gl);
+        }
+        std::fprintf(stdout, "[fight] callouts atlas: %dx%d tex %dx%d %zu frames\n", a.w, a.h,
+                     tex.w, tex.h, a.frames.size());
+        std::fflush(stdout);
+        ok = true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[fight] callouts atlas load failed: %s\n", e.what());
+    }
+    return ok;
+}
+
+// Maps the controller's banner kind to the callouts frame (JS `Cr` L2022-
+// 2026: `init(y.BQa)` for round, `Zy` -> `y.uQa` fight, `GZ` -> `y.zQa`/
+// `y.wQa` for win/lose). Returns nullptr for kinds with no cited frame.
+const char* banner_atlas_frame(sf2::scene::banner_kind kind) {
+    switch (kind) {
+        case sf2::scene::banner_kind::round: return "round";
+        case sf2::scene::banner_kind::fight: return "fight";
+        case sf2::scene::banner_kind::victory: return "perfect";
+        case sf2::scene::banner_kind::defeat: return "great";
+        default: return nullptr;
+    }
+}
 
 // The banner's animation envelope over `progress` (0..1): scale-in 0.5 -> 1.0
 // over the first 15%, hold at 1.0, fade out over the last 20%. The
@@ -559,11 +832,11 @@ float banner_alpha_at(float progress) {
     return 1.0f;
 }
 
-// Draws the current fight banner (ROUND N / FIGHT! / K.O. / VICTORY /
-// DEFEAT) centered at ~35% of the view height. White with a black drop
-// shadow (ROUND/FIGHT), red (K.O., larger), gold (VICTORY), red (DEFEAT).
-// Screen-space (the UI camera), drawn over the fight but under the gamepad
-// and the Next button (the caller's draw order).
+// Draws the current fight banner centered at ~35% of the view height: the
+// callouts atlas art (id 1310) for round/fight/victory/defeat, with the
+// menu-font text as the fallback when the frame is missing. Screen-space
+// (the UI camera), drawn over the fight and under the gamepad (the caller's
+// draw order).
 //
 // `banner_age` = fight frames since the banner was raised (tracked by the
 // FightScreen — the controller's banner_progress() divides by banner_len_,
@@ -572,12 +845,6 @@ float banner_alpha_at(float progress) {
 void draw_fight_banner(App& app, const sf2::scene::FightController& fight, int banner_age) {
     const sf2::scene::banner_kind kind = fight.banner();
     if (kind == sf2::scene::banner_kind::none) return;
-    const char* text = fight.banner_text();
-    if (text == nullptr || text[0] == '\0') return;
-
-    const sf2::data::font* fnt = app.menu_font();
-    const unsigned int tex = app.font_texture();
-    if (fnt == nullptr || tex == 0) return;  // no font -> no banner
 
     float progress = fight.banner_progress();
     if (kind == sf2::scene::banner_kind::victory ||
@@ -594,6 +861,43 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight, int b
     const float scale_anim = banner_scale_at(progress);
     const float alpha = banner_alpha_at(progress);
     if (alpha <= 0.01f) return;
+
+    // Centered at ~35% of the view height (draw_text_* anchors a line at its
+    // top y; the pop-in scale animates the art's box too).
+    const float cx = kViewW * 0.5f;
+    const float cy = kViewH * 0.35f;
+
+    // The callouts atlas art (JS `Cr` L2022: `image = R.$(E.get(1310))`);
+    // scaled min(800,min(W,H))/image.w*0.6 (layout L2027), centred.
+    const char* frame = banner_atlas_frame(kind);
+    if (frame != nullptr && load_callouts_atlas(app)) {
+        const float art = std::min(800.0f, std::min(kViewW, kViewH)) * 0.6f;
+        if (try_draw_atlas_button(app, frame, cx, cy, art * scale_anim, art * scale_anim,
+                                  alpha)) {
+            // The ROUND number: `round = ea(E.get(1298))`, Ia(64),
+            // ua(fontSize*1.6) (JS `Cr` L2022/L2026) — round digits above
+            // the ROUND art.
+            if (kind == sf2::scene::banner_kind::round) {
+                const sf2::data::font* rf = app.round_font();
+                const unsigned int rtex = app.round_texture();
+                if (rf != nullptr && rtex != 0) {
+                    const float rscale = (64.0f * 1.6f) / 140.0f;  // round eF=140
+                    app.draw_text_centered(*rf, rtex, cx,
+                                           cy - art * 0.5f * scale_anim - 78.0f * scale_anim,
+                                           std::to_string(fight.round().number),
+                                           rscale * scale_anim, 1.0f, 1.0f, 1.0f, alpha);
+                }
+            }
+            return;
+        }
+    }
+
+    // Flat fallback: menu-font text when the callouts frame is missing.
+    const char* text = fight.banner_text();
+    if (text == nullptr || text[0] == '\0') return;
+    const sf2::data::font* fnt = app.menu_font();
+    const unsigned int tex = app.font_texture();
+    if (fnt == nullptr || tex == 0) return;  // no font -> no banner
 
     // The base glyph scale: font-en caps are ~53px tall; the banner reads
     // big at ~1.6x, K.O. bigger still.
@@ -616,13 +920,6 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight, int b
         size = 1.9f;
     }
     const float scale = size * scale_anim;
-
-    // Centered at ~35% of the view height. draw_text_* anchors a line at
-    // its top y, so center the font's line box on the target point (the
-    // caps sit in the line's upper half — slightly above center, right for
-    // a banner).
-    const float cx = kViewW * 0.5f;
-    const float cy = kViewH * 0.35f;
     const float y = cy - static_cast<float>(fnt->line_height) * scale * 0.5f;
 
     // The black drop shadow (offset ~2px per scale unit), then the text.
@@ -962,112 +1259,6 @@ std::vector<CatalogItem> load_full_catalog(App& app) {
     return cached;
 }
 
-// ---------------------------------------------------------------------------
-// MainMenuScreen
-// ---------------------------------------------------------------------------
-
-MainMenuScreen::MainMenuScreen(ScreenManager& mgr) : Screen(mgr, "GeneralMenu") {
-    const float bw = 240.0f;
-    const float bh = 120.0f;
-    const float y = kViewH * 0.72f;
-    const float xs[] = {kViewW * 0.28f, kViewW * 0.46f, kViewW * 0.64f, kViewW * 0.82f};
-    struct Def {
-        const char* label;
-        int target;
-    };
-    const Def defs[] = {
-        {"FIGHT", kScreenMap}, {"MAP", kScreenMap}, {"SHOP", kScreenShop}, {"PROFILE", kScreenProfile},
-    };
-    for (int i = 0; i < 4; ++i) {
-        Button b;
-        b.label = defs[i].label;
-        b.x = xs[i];
-        b.y = y;
-        b.w = bw;
-        b.h = bh;
-        b.target = defs[i].target;
-        buttons_.push_back(b);
-    }
-}
-
-void MainMenuScreen::update_impl(float dt) {
-    (void)dt;
-    if (!money_logged_) {
-        money_logged_ = true;
-        try {
-            const WarriorSave w = app().save().load();
-            std::fprintf(stdout, "[menu] MONEY %d   LV %d   POWER %d   WEAPON %s   ARMOR %s   HELM %s\n",
-                         w.money, w.level, w.power, w.weapon.c_str(), w.armor.c_str(),
-                         w.helm.c_str());
-            std::fflush(stdout);
-        } catch (const std::exception& e) {
-            std::fprintf(stderr, "[menu] save read failed: %s\n", e.what());
-        }
-    }
-    const App::PointerState& p = app().pointer();
-    hover_ = -1;
-    for (std::size_t i = 0; i < buttons_.size(); ++i) {
-        const Button& b = buttons_[i];
-        if (p.x >= b.x - b.w / 2 && p.x <= b.x + b.w / 2 && p.y >= b.y - b.h / 2 &&
-            p.y <= b.y + b.h / 2) {
-            hover_ = static_cast<int>(i);
-            if (p.pressed) {
-                // [Phase A3] SFX: the menu button click (the game's
-                // snd_click_1 — `ta.ak("snd_click_1")` on UI taps).
-                sf2::audio::AudioEngine::instance().play("click");
-                std::fprintf(stdout, "[menu] click %s -> screen %d\n", b.label.c_str(), b.target);
-                std::fflush(stdout);
-                push(static_cast<ScreenId>(b.target));
-            }
-        }
-    }
-    if (hover_ != last_hover_) {
-        last_hover_ = hover_;
-        if (hover_ >= 0) {
-            std::fprintf(stdout, "[menu] hover %s\n", buttons_[hover_].label.c_str());
-            std::fflush(stdout);
-        }
-    }
-}
-
-void MainMenuScreen::render_impl(App& app) {
-    sf2::render::Renderer& ren = app.renderer();
-    sf2::scene::Sprite* dojo = app.dojo_sprite();
-    if (dojo != nullptr) {
-        sf2::render::Camera ui_cam;
-        ui_cam.center_x = kViewW * 0.5f;
-        ui_cam.center_y = kViewH * 0.5f;
-        ui_cam.zoom = 1.0f;
-        ui_cam.view_w = kViewW;
-        ui_cam.view_h = kViewH;
-        ui_cam.arena_h = kViewH;
-        ui_cam.arena_floor = 0.0f;
-        ui_cam.arena_center_x = kViewW * 0.5f;
-        ren.draw_sprite(*dojo, ui_cam);
-    } else {
-        const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-        ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
-    }
-    // Frame names for the 4 menu buttons (TexturePacker menu atlas)
-    const char* frame_names[4] = {"Dojo_normal", "Map_normal", "Shop_normal", "Profile_normal"};
-    const char* frame_hover[4] = {"Dojo_active", "Map_active", "Shop_active", "Profile_active"};
-    for (std::size_t i = 0; i < buttons_.size(); ++i) {
-        const Button& b = buttons_[i];
-        const bool hovered = static_cast<int>(i) == hover_;
-        const char* fn = hovered ? frame_hover[i] : frame_names[i];
-        if (!try_draw_atlas_button(app, fn, b.x, b.y, b.w, b.h, 1.0f)) {
-            const float r = hovered ? 0.85f : (b.target == kScreenMap ? 0.72f : 0.45f);
-            const float g = hovered ? 0.72f : (b.target == kScreenMap ? 0.62f : 0.48f);
-            const float bl = hovered ? 0.35f : (b.target == kScreenMap ? 0.2f : 0.42f);
-            draw_flat_button(app, b.label, b.x, b.y, b.w, b.h, r, g, bl, hovered);
-            // No baked text on art (UI_EXCLUSIVITY 2) and JS draws none:
-            // label only on the flat fallback, fitted + centered.
-            draw_ui_label(app, b.x - b.w * 0.5f + 8.0f, b.y - 14.0f, b.w - 16.0f, 28.0f,
-                          b.label, 1.0f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-        }
-    }
-}
-
 // Resolves + loads the hashed `en.<hash>.xml` lang file once (the
 // controller-atlas prefix-scan pattern). Silent when absent — callers fall
 // back to embedded EN (headless-safe).
@@ -1078,13 +1269,13 @@ void ensure_lang(App& app) {
     try {
         const std::string dir = app.res_root() + "/lang";
         std::string path;
-        // EN only (Dojo wave lang verdict): ru.*.xml exists but NO
-        // shipped BMF font carries Cyrillic glyphs (font-en 104 ids,
-        // ASCII + 9 extras; no ru.fnt on disk) and the renderer is
-        // byte-wise Latin-1, so RU text renders as garbage (verified:
-        // hint line showed mojibake). The web game renders dialog text
-        // via canvas/system fonts instead - no BMF path exists to port.
-        // Revisit only with a Cyrillic BMF page.
+        // EN only for now: the RU string table (ru.<hash>.xml) IS shipped,
+        // and so is a Cyrillic BMF font (res/ui/font-ru.32eaddc0.fnt +
+        // font-ru.3338e715.png — PORT_AUDIT_UI §0.3 corrects the old
+        // "no ru.fnt on disk" claim). The blocker is App::init, which
+        // hardcodes font-en.7043b83b.fnt (app.cpp) — outside this file.
+        // Selecting RU therefore needs the app-level font swap
+        // (`asset id 264 = ui/font{lang}.png`); OPEN until then.
         if (path.empty()) {
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
                 const std::string name = entry.path().filename().string();
@@ -1165,7 +1356,7 @@ void load_map_backdrops(App& app) {
 // DojoScreen
 // ---------------------------------------------------------------------------
 
-// --- Dojo idle figure + Punchbag dummy (display only) ----------------------
+// --- Dojo idle figure (FightNone viewer, display only) ---------------------
 // Finds the stance-idle clip (moves.xml `StanceIdle` FileName
 // "stance_idle.bytes"): first clip whose archive name contains it, else any
 // "stance" clip, else "" (caller skips the figure).
@@ -1267,41 +1458,20 @@ void draw_dojo_figure(sf2::render::Renderer& ren, const sf2::render::Camera& cam
 DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
     // Menu music (JS `lb.OS` -> `ta.Ut("menu")`, L1276-1277).
     sf2::audio::AudioEngine::instance().play_music("menu");
-    // 4-up row at xs 0.28/0.46/0.64/0.82 (spacing 231px): 240px widths
-    // overlapped 9px (flat fallback + hover borders); 220px leaves 11px
-    // gaps. Atlas draws are height-constrained (120px) so art is unchanged;
-    // tour click centers (358/589/819/1050,518) untouched. (menu atlas
-    // Dojo_normal 226x193 etc.; tour kUiTourSteps in app/game/main.cpp.)
-    const float bw = 220.0f;
-    const float bh = 120.0f;
-    const float y = kViewH * 0.72f;
-    const float xs[] = {kViewW * 0.28f, kViewW * 0.46f, kViewW * 0.64f, kViewW * 0.82f};
-    struct Def {
-        const char* label;
-        int target;
-    };
-    // The home hub: FIGHT starts the training battle vs the Punchbag dummy
-    // (the stages.xml Punchbag zone "Training"), Map/Shop/Profile are the
-    // entry buttons (JS menu atlas Dojo_normal/Map_normal/Shop_normal/
-    // Profile_normal — the original home screen's buttons).
-    const Def defs[] = {
-        {"FIGHT", kScreenFight}, {"MAP", kScreenMap}, {"SHOP", kScreenShop}, {"PROFILE", kScreenProfile},
-    };
-    for (int i = 0; i < 4; ++i) {
-        Button b;
-        b.label = defs[i].label;
-        b.x = xs[i];
-        b.y = y;
-        b.w = bw;
-        b.h = bh;
-        b.target = defs[i].target;
-        buttons_.push_back(b);
-    }
+    // No bespoke ctor art: the JS hub is the `FightNone` ModelViewer over
+    // the dojo layer stack + the shared `za` chrome (Tf L1969-1972). The
+    // FIGHT/MAP/SHOP/PROFILE 4-up row, punchbag, gear and disciple chrome
+    // were native inventions (PORT_AUDIT_UI §2.1-2.2) — navigation is the
+    // `za` vertical nav column (draw_za_chrome / za_update below).
 }
 
 void DojoScreen::update_impl(float dt) {
-    (void)dt;
     idle_frame_++;  // drives the idle-stance frame cycle (display only)
+    // Location timeline (D6): advance the SimpleEffect Transparency loop
+    // (`xl.ia` L478-481) once per frame for the hub backdrop.
+    if (app().has_fight_assets()) {
+        app().fight_assets().dojo.update(dt);
+    }
     ensure_lang(app());  // runtime Sensei lines (once; silent if absent)
     // Quest/save snapshot, re-read every fixed step like ShopScreen's money
     // watch: the Dojo stays mounted under Fight/Results/Shop, so cached
@@ -1347,70 +1517,11 @@ void DojoScreen::update_impl(float dt) {
         }
     }
     // Sensei modal gate (quest He records): while a dialog is up, taps
-    // advance it instead of the Dojo buttons (headless auto-drains).
+    // advance it instead of the chrome (headless auto-drains).
     if (quest_modal_consume(app())) return;
-    const App::PointerState& p = app().pointer();
-    // Disciple sparring toggle (JS `Nfb` — flips `p.o.Y0()` via `oub()` and
-    // reopens Dojo `mp(3)`): STUB — the save has no Disciple/Y0 field, so
-    // this flips session-local display state only (no fight setup change).
-    // Geometry mirrors the render toggle below.
-    if (p.x >= kViewW - 250.0 && p.x <= kViewW - 30.0 && p.y >= 18.0 && p.y <= 62.0) {
-        if (p.pressed) {
-            disciple_ = !disciple_;
-            sf2::audio::AudioEngine::instance().play("click");
-            std::fprintf(stdout, "[dojo] Disciple toggle %s (stub — needs save Y0)\n",
-                         disciple_ ? "ON" : "OFF");
-            std::fflush(stdout);
-        }
-    }
-    // Settings entry (small top-left button; the Dojo hub owns it — the
-    // 4-button row is untouched so headless click spots never move).
-    if (p.x >= 20.0 && p.x <= 150.0 && p.y >= 12.0 && p.y <= 56.0) {
-        if (p.pressed) {
-            sf2::audio::AudioEngine::instance().play("click");
-            std::fprintf(stdout, "[dojo] SETUP -> settings\n");
-            std::fflush(stdout);
-            push(kScreenSettings);
-        }
-    }
-    hover_ = -1;
-    for (std::size_t i = 0; i < buttons_.size(); ++i) {
-        const Button& b = buttons_[i];
-        if (p.x >= b.x - b.w / 2 && p.x <= b.x + b.w / 2 && p.y >= b.y - b.h / 2 &&
-            p.y <= b.y + b.h / 2) {
-            hover_ = static_cast<int>(i);
-            if (p.pressed) {
-                sf2::audio::AudioEngine::instance().play("click");
-                std::fprintf(stdout, "[dojo] click %s -> screen %d\n", b.label.c_str(), b.target);
-                std::fflush(stdout);
-                if (b.target == kScreenFight) {
-                    // The training fight vs the Punchbag dummy — the same
-                    // pending-battle hand-off the MapScreen uses (JS `Ya`
-                    // battle-start); the "Training" battle of the stages.xml
-                    // Punchbag zone (Start=1, Money=0/Exp=0).
-                    PendingBattle& pb = app().pending_battle();
-                    pb.battle_name = "Training";
-                    pb.location = "dojo";
-                    pb.enemy_name = "Punchbag";
-                    pb.has_result = false;
-                    battle_rewards("Training", pb.reward_money, pb.reward_exp);
-                    pb.owned = owned_items(app());
-                    std::fprintf(stdout,
-                                 "[dojo] FIGHT -> Training fight vs %s (reward money=%d exp=%d)\n",
-                                 pb.enemy_name.c_str(), pb.reward_money, pb.reward_exp);
-                    std::fflush(stdout);
-                }
-                push(static_cast<ScreenId>(b.target));
-            }
-        }
-    }
-    if (hover_ != last_hover_) {
-        last_hover_ = hover_;
-        if (hover_ >= 0) {
-            std::fprintf(stdout, "[dojo] hover %s\n", buttons_[hover_].label.c_str());
-            std::fflush(stdout);
-        }
-    }
+    // The shared `za` nav column (JS `za.Aub` L1978-1980 / `za.Ofb`..`Vfb`):
+    // a tap switches to Dojo/Map/Shop/Profile/Settings (JS `ma.Jg().jI`).
+    za_update(app(), *this, kScreenDojo);
 }
 
 // Dojo location ensure (mirrors the FightScreen dojo-location block:
@@ -1485,48 +1596,6 @@ void ensure_dojo_location(App& app) {
     }
 }
 
-// Top HUD bar (oracle Dojo shot proportions): full-width dark-wood bar
-// with level icon + bar, energy bolt + bar, coins, gems, green +.
-// Frames from the misc atlas (JS `za` chrome L1973: `topPanel` backing;
-// `wr` = icon `level` + `Level_bar`; `xr` = icon `energy` + `Energy_Bar`;
-// `yr` = `gold`, `ruby`, text labels, `AddMoney` (+ only with iap
-// feature). `star` is NOT on this bar (achievements `ns` widget L2303 —
-// DOJO_BG_STATIC §3). Values from the save; energy shows full (no
-// energy state in the save — OPEN).
-void draw_dojo_hud_bar(App& app, sf2::render::Renderer& ren) {
-    if (!try_draw_atlas_button(app, "topPanel", 640.0f, 42.0f, 1280.0f, 84.0f, 1.0f,
-                               /*fill=*/true)) {
-        const float bg[] = {0, 0, 1280, 0, 1280, 84, 0, 0, 1280, 84, 0, 84};
-        ren.draw_triangles(bg, 6, 0.10f, 0.07f, 0.05f, 1.0f);
-    }
-    WarriorSave w;
-    try {
-        w = app.save().load();
-    } catch (const std::exception&) {
-    }
-    try_draw_atlas_button(app, "level", 110.0f, 42.0f, 44.0f, 44.0f, 1.0f);
-    if (!try_draw_atlas_button(app, "Level_bar", 210.0f, 42.0f, 150.0f, 26.0f, 1.0f,
-                               /*fill=*/true)) {
-        try_draw_atlas_button(app, "level_bar_short", 210.0f, 42.0f, 150.0f, 26.0f,
-                              1.0f, /*fill=*/true);
-    }
-    draw_ui_label(app, 140.0f, 28.0f, 90.0f, 30.0f, std::to_string(w.level), 0.9f,
-                  UiAlign::Left, 1.0f, 1.0f, 1.0f);
-    try_draw_atlas_button(app, "energy", 330.0f, 42.0f, 40.0f, 40.0f, 1.0f);
-    try_draw_atlas_button(app, "Energy_Bar", 450.0f, 42.0f, 150.0f, 26.0f, 1.0f,
-                          /*fill=*/true);
-    try_draw_atlas_button(app, "gold", 740.0f, 42.0f, 40.0f, 40.0f, 1.0f);
-    draw_ui_label(app, 770.0f, 28.0f, 110.0f, 30.0f, std::to_string(w.money), 0.9f,
-                  UiAlign::Left, 1.0f, 1.0f, 1.0f);
-    try_draw_atlas_button(app, "ruby", 930.0f, 42.0f, 40.0f, 40.0f, 1.0f);
-    draw_ui_label(app, 960.0f, 28.0f, 90.0f, 30.0f, std::to_string(w.bonus), 0.9f,
-                  UiAlign::Left, 1.0f, 1.0f, 1.0f);
-    if (!try_draw_atlas_button(app, "AddMoney", 1100.0f, 42.0f, 48.0f, 48.0f, 1.0f)) {
-        try_draw_atlas_button(app, "ComboButtons/icon_plus", 1100.0f, 42.0f, 48.0f, 48.0f,
-                              1.0f);
-    }
-}
-
 // Dojo gamepad (display only): the oracle Dojo shows the joystick +
 // punch/kick buttons (same ui/controller frames as the fight pad, norm
 // state — no input handling on the hub).
@@ -1551,8 +1620,8 @@ void draw_dojo_gamepad(App& app) {
 void DojoScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     ensure_dojo_location(app);
-    // NOTE: the HUD bar draws AFTER the scene (see below) — screen-space
-    // chrome on top, like the fight HUD.
+    // NOTE: the shared `za` chrome draws AFTER the scene (see below) —
+    // screen-space chrome on top, like the fight HUD.
     // Dojo interior: the same location layers the fight renders
     // (interior + garden, NOT the sky fallback). Static camera (no chase):
     // the hub renders through the JS `ma.Sya` global camera at 16:9
@@ -1561,8 +1630,8 @@ void DojoScreen::render_impl(App& app) {
     // and the visible slice is world x ~-492..492 (wall/tiles centered; the
     // +/-1108 side masks sit off-view).
     // The hub location camera (JS `ma.Sya` static 16:9 — verified, do not
-    // touch). Hoisted so the Punchbag dummy below hangs in the same space
-    // as the beam mount (world X=-10 -> beam center on screen).
+    // touch). Hoisted so the `FightNone` idle figure below projects through
+    // the same framing as the location layers.
     sf2::render::Camera hub_cam;
     bool have_hub_cam = false;
     if (app.has_fight_assets()) {
@@ -1574,20 +1643,22 @@ void DojoScreen::render_impl(App& app) {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
     }
-    // --- Dojo aliveness (JS `Tf` L1969-1970: Training setup on screen) ----
-    // World == screen here (center 640x360, zoom 1, Io = 0). The idle player
-    // figure stands left-of-center with feet on the floor row; the Punchbag
-    // dummy hangs right-of-center. Display only — no fight logic runs.
+    // --- Dojo aliveness (JS `Tf` L1969-1972: the hub runs the `FightNone`
+    // ModelViewer through the live `Sya` framing) -------------------------
+    // The idle figure is the player at the location's ModelsViewer spawn
+    // (dojo 690,-93 — Bf.zjb L476), projected through the SAME hub camera
+    // the location layers use, plus the fighter container transform
+    // (tl.init L843: translate.x = -width/2, translate.y = height/2 - floor).
+    // NOT the old hand-placed kFigX/kFeetY capsule (PORT_AUDIT_UI §2.2).
+    // Display only — no fight logic runs.
     {
-        sf2::render::Camera fig_cam;
-        fig_cam.center_x = kViewW * 0.5f;
-        fig_cam.center_y = kViewH * 0.5f;
-        fig_cam.zoom = 1.0f;
-        fig_cam.view_w = kViewW;
-        fig_cam.view_h = kViewH;
-        fig_cam.arena_h = kViewH;
-        fig_cam.arena_floor = 0.0f;
-        fig_cam.arena_center_x = kViewW * 0.5f;
+        const float arena_half = app.has_fight_assets()
+                                     ? app.fight_assets().dojo.arena_width() * 0.5f
+                                     : 980.0f;
+        const float cont_y = app.has_fight_assets()
+                                 ? app.fight_assets().dojo.arena_height() * 0.5f -
+                                       app.fight_assets().dojo.arena_floor()
+                                 : 200.0f;
         if (!dojo_fig_tried_) {
             dojo_fig_tried_ = true;
             if (app.has_fight_assets()) {
@@ -1612,72 +1683,24 @@ void DojoScreen::render_impl(App& app) {
             }
         }
         if (dojo_fig_ok_ && dojo_fighter_ != nullptr && dojo_idle_ != nullptr &&
-            !dojo_idle_->frames.empty()) {
+            !dojo_idle_->frames.empty() && have_hub_cam) {
             const int nframes = static_cast<int>(dojo_idle_->frames.size());
             const int fr = (idle_frame_ / 10) % nframes;  // slow idle cycle
-            // Feet-on-floor calibration: sample once, measure the mesh bbox,
-            // then re-sample shifted so the feet sit on the floor row.
-            dojo_fighter_->sample(*dojo_idle_, 0, 0.0f, 0.0f, 1);
-            float minx = 0.0f, miny = 0.0f, maxx = 0.0f, maxy = 0.0f;
-            dojo_fighter_->triangle_bbox(minx, miny, maxx, maxy);
-    // The arena floor tiles (world y ~194..253) land at screen y ~612..689
-    // (Sya identity: screen = world*1.3 + 360); the fighter feet row sits
-    // on the tile band, clear of the entry buttons.
-    constexpr float kFeetY = 650.0f;  // tile-band screen row
-            constexpr float kFigX = 400.0f;
-            dojo_fighter_->sample(*dojo_idle_, fr, kFigX, kFeetY - maxy, 1);
-            draw_dojo_figure(ren, fig_cam, *dojo_fighter_);
-        }
-        // The Punchbag dummy hangs under the beam mount (stages.xml
-        // Punchbag-zone Training dummy — Warrior "Punchbag",
-        // NotAI/NotAnimation, PunchingBag items; JS_FLOW.md §1; DOJO_BG_STATIC
-        // — bag = `mdl_punching_bag` on the dummy, no bag PNG exists).
-        // Mount = the hidden holder prop anchor (world X=-10, Y=-203.5 —
-        // the `dojo_punch_bag_holder` sprite transform dropped above; ui_cam
-        // maps it to the beam center on screen). Idle hang pose = the merge
-        // bind (Node12 mount on top, body dangling ~316 world units to
-        // screen ~506, clear of the tile band — Tf Training setup feet/
-        // dangle). No clip is ever sampled (NotAnimation); the one-frame
-        // bind pose below only carries the pose into the shared
-        // draw_dojo_figure path (JS_RENDER §4 capsule strip — the bag model
-        // has capsules only, no mesh). Display only — fight untouched.
-        constexpr float kBagMountX = -10.0f;
-        constexpr float kBagMountY = -203.5f;        if (!dojo_bag_tried_) {
-            dojo_bag_tried_ = true;
-            if (app.has_fight_assets()) {
-                FightAssets& assets = app.fight_assets();
-                if (!assets.merged_bag.bones.empty()) {
-                    dojo_bag_ = std::make_unique<sf2::scene::Fighter>();
-                    dojo_bag_->set_model(assets.merged_bag);
-                    dojo_bag_->set_color(assets.dojo.root_color());
-                    dojo_bag_pose_.name = "bag_bind_hang";
-                    dojo_bag_pose_.version = 0;
-                    dojo_bag_pose_.frames.resize(1);
-                    auto& keys = dojo_bag_pose_.frames[0].bones;
-                    keys.reserve(assets.merged_bag.bones.size());
-                    for (const auto& b : assets.merged_bag.bones) {
-                        keys.push_back(sf2::data::anim_keyframe{b.x, b.y, b.z});
-                    }
-                    dojo_bag_ok_ = true;
-                    std::fprintf(stdout, "[dojo] punchbag dummy ready (bind hang, bones %zu)\n",
-                                 keys.size());
-                    std::fflush(stdout);
-                } else {
-                    std::fprintf(stdout, "[dojo] punchbag dummy skipped (no bag model)\n");
-                    std::fflush(stdout);
-                }
-            }
-        }
-        if (dojo_bag_ok_ && dojo_bag_ != nullptr && have_hub_cam &&
-            !dojo_bag_pose_.frames.empty()) {
-            dojo_bag_->sample(dojo_bag_pose_, 0, kBagMountX, kBagMountY, 1);
-            draw_dojo_figure(ren, hub_cam, *dojo_bag_);
+            const float spawn_x =
+                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_x() : 690.0f) -
+                arena_half;
+            const float spawn_y =
+                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_y() : -93.0f) +
+                cont_y;
+            dojo_fighter_->sample(*dojo_idle_, fr, spawn_x, spawn_y, 1);
+            draw_dojo_figure(ren, hub_cam, *dojo_fighter_);
         }
         draw_dojo_gamepad(app);
-        // Top HUD bar (screen-space chrome above the scene: the wall lamps
-        // land at screen y ~50..130 and would otherwise cover the bar's
-        // right-side icons).
-        draw_dojo_hud_bar(app, ren);
+        // Shared `za` chrome (topPanel + wr/xr/yr widgets + the vertical nav
+        // column) — the JS `ma.D1` chrome on every shell screen
+        // (PORT_AUDIT_UI §2.1). Replaces the invented draw_dojo_hud_bar
+        // (its hard-coded coords are PORT_AUDIT_UI §3 item 5).
+        draw_za_chrome(app, kScreenDojo);
         // Sensei hint panel (quest_panel.hpp — the tutorial quest banner).
         // EXCLUSIVITY (single source of truth): the quest modal dims the
         // screen and blocks input (TAP TO CONTINUE); the ambient hint and
@@ -1751,48 +1774,10 @@ void DojoScreen::render_impl(App& app) {
                       UiAlign::Left, 0.85f, 0.9f, 0.6f);
         }
     }
-    // The menu-atlas entry buttons (Dojo/Map/Shop/Profile) — the same
-    // frames the GeneralMenu renders; the Dojo button is the home hub's
-    // training-Fight entry.
-    const char* frame_names[4] = {"Dojo_normal", "Map_normal", "Shop_normal", "Profile_normal"};
-    const char* frame_hover[4] = {"Dojo_active", "Map_active", "Shop_active", "Profile_active"};
-    for (std::size_t i = 0; i < buttons_.size(); ++i) {
-        const Button& b = buttons_[i];
-        const bool hovered = static_cast<int>(i) == hover_;
-        const char* fn = hovered ? frame_hover[i] : frame_names[i];
-        if (!try_draw_atlas_button(app, fn, b.x, b.y, b.w, b.h, 1.0f)) {
-            const float r = hovered ? 0.85f : (b.target == kScreenFight ? 0.72f : 0.45f);
-            const float g = hovered ? 0.72f : (b.target == kScreenFight ? 0.62f : 0.48f);
-            const float bl = hovered ? 0.35f : (b.target == kScreenFight ? 0.2f : 0.42f);
-            draw_flat_button(app, b.label, b.x, b.y, b.w, b.h, r, g, bl, hovered);
-            // No baked text on art (UI_EXCLUSIVITY 2) and JS draws none:
-            // label only on the flat fallback, fitted + centered.
-            draw_ui_label(app, b.x - b.w * 0.5f + 8.0f, b.y - 14.0f, b.w - 16.0f, 28.0f,
-                          b.label, 1.0f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-        }
-    }
-    // Disciple sparring toggle (Dojo chrome: only when the Dojo is the
-    // top screen - never leaks onto Shop/Profile above it).
-    // Dev chrome: hidden unless --debug-ui (not in the oracle).
-    if (app.debug_ui() && app.screens().top() == this) {
-    {
-        const float cx = kViewW - 140.0f, cy = 40.0f, w = 220.0f, h = 44.0f;
-        const std::string label = disciple_ ? "DISCIPLE: ON" : "DISCIPLE: OFF";
-        draw_flat_button(app, label, cx, cy, w, h, disciple_ ? 0.6f : 0.35f, 0.4f, 0.3f,
-                         false);
-        draw_ui_label(app, cx - w * 0.5f + 8.0f, cy - 14.0f, w - 16.0f, 28.0f,
-                          label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    }
-    }
-    // Settings entry: gear icon always (update rect above); flat+text
-    // only in --debug-ui (dev chrome, not in the oracle).
-    try_draw_atlas_button(app, "Settings_normal", 85.0f, 34.0f, 48.0f, 48.0f, 1.0f);
-    if (app.debug_ui() && app.screens().top() == this) {
-        draw_flat_button(app, "SETUP", 85.0f, 34.0f, 130.0f, 44.0f, 0.3f, 0.32f, 0.4f,
-                         false);
-        draw_ui_label(app, 85.0f - 65.0f + 8.0f, 34.0f - 14.0f, 130.0f - 16.0f, 28.0f,
-                      "SETUP", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    }
+    // The JS hub carries no entry-button row: the Dojo 4-up row, the gear
+    // and the disciple chrome were native inventions (PORT_AUDIT_UI
+    // §2.1-2.2). Navigation is the `za` nav column drawn in the aliveness
+    // block above.
     // Sensei dialog modal on top of everything Dojo.
     draw_quest_modal(app, ren, app.screens().top() == this);
 }
@@ -1992,6 +1977,8 @@ void MapScreen::update_impl(float dt) {
             }
         }
     }
+    // Shared `za` nav column (JS `ma.D1`): Dojo/Shop/Profile/Settings hops.
+    za_update(app(), *this, kScreenMap);
 }
 
 void MapScreen::render_impl(App& app) {
@@ -2143,6 +2130,8 @@ void MapScreen::render_impl(App& app) {
                      false);
     draw_ui_label(app, 1165.0f - 65.0f + 8.0f, 664.0f - 10.0f, 130.0f - 16.0f, 20.0f,
                       "BRACKET", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
+    draw_za_chrome(app, kScreenMap);
     // Boss-intro act overlay (Rd machine over the lD multi-intro list;
     // boss names are display strings, shown raw). Skippable by tap.
     // Boss-intro act overlay: skipped while a quest modal is up (same
@@ -2783,6 +2772,11 @@ void FightScreen::verify_fight() const {
 }
 void FightScreen::update_impl(float dt) {
     if (fight_ == nullptr) return;
+    // Location timeline (D6): the fight renders the same location layers as
+    // the hub, so advance the SimpleEffect Transparency loop per frame.
+    if (app().has_fight_assets()) {
+        app().fight_assets().dojo.update(dt);
+    }
     if (!auto_attack_wired_) {
         auto_attack_wired_ = true;
         if (app().auto_attack()) {
@@ -2888,10 +2882,12 @@ void FightScreen::update_impl(float dt) {
         std::fflush(stdout);
     }
 
-    // Between-rounds HUD "Next" button (JS `vhb` L410 case 1 -> `Z2()`): a
-    // click on the button while the host waits between rounds runs the
-    // recovery and starts the next round (no button while the round is
-    // live; Space/Enter handled in on_key).
+    // Between-rounds "Next" click rect (headless driver only): the fight
+    // holds in EndStance until next_round_requested(). The VISIBLE Next
+    // button was an invention and is removed (PORT_AUDIT_UI section 3 item
+    // 26); this invisible rect stays because the headless loop/tour clicks
+    // `next_button_center` (main.cpp) until the JS auto-advance (`Cr.tca`
+    // L2023) is ported into FightController — OPEN.
     if (fight_->round_wait()) {
         const App::PointerState& p = app().pointer();
         if (p.pressed && p.x >= kNextBtnCX - kNextBtnW * 0.5f &&
@@ -2965,20 +2961,17 @@ void FightScreen::render_impl(App& app) {
 
     const sf2::scene::FightCamera& cam = fight_->camera();
     sf2::render::Camera camera;
-    // [fix(fight-slice): render-space re-center] The sim stays 0-based
-    // (spawns 690/973, walls [80,1880], pose dump untouched) while the
-    // location art is centered (dojo_params Width=1960, walls +-900,
-    // floor tiles -1024..1024). Rendering both through the same camera
-    // exposed the centered bg's right edge at screen ~1010 + the side
-    // masks over the player (right-half black, player in black). Shift
-    // the RENDER frame by half the arena width (fight-only; the
-    // controller's center/zoom/pose dump are untouched): the fighters
-    // keep byte-identical screens while the bg/masks slide back over
-    // the view. (JS Sya L1833/Ut.Al L826 in fight_camera_sya.hpp;
-    // Camera in core/scene/renderer.hpp; dojo_params.b78df4b4.xml.)
-    const float kCxOff =
+    // The JS render camera position is (0,0) (N.Ta.K4 L85); `Sya` writes
+    // only the aspect<1 portrait y-shift and `Ut.Al` (L826) carries
+    // Io = Lb.width/2 - focus. The old native `center_x = focus-980 /
+    // arena_center_x = 0` re-center was INVENTED (PORT_AUDIT_UI D2); the
+    // renderer takes Io alone and centres the location art itself
+    // (renderer.hpp `world_to_screen_x`). The ModelsViewer container's own
+    // x-translate (-width/2, `tl.init` L843) still applies to the FIGHTERS
+    // below (they live in the container, not the centered layer frame).
+    const float arena_half =
         assets.dojo.arena_width() > 0.0f ? assets.dojo.arena_width() * 0.5f : 980.0f;
-    camera.center_x = cam.center_x - kCxOff;
+    camera.center_x = 0.0f;
     camera.center_y = cam.center_y;
     camera.zoom = cam.zoom;
     // [fix(camera): wire the fight layer zoom] The fight controller computes
@@ -2993,15 +2986,10 @@ void FightScreen::render_impl(App& app) {
     camera.view_h = kViewH;
     camera.arena_h = assets.dojo.arena_height() > 0.0f ? assets.dojo.arena_height() : 560.0f;
     camera.arena_floor = assets.dojo.arena_floor();
-    // [FIX Phase 4a — dojo behind the fighters] The arena center (the
-    // parallax Io reference) is the LOCATION's center = Width/2 (the
-    // dojo_params Width=1960 -> 980), NOT 0. With arena_center_x=0 the
-    // camera at the fighters (center 831) gave Io = -831 and every
-    // background layer shifted 831*Factor px LEFT — the mountains/temple/
-    // bridge/tree layers landed entirely off-screen and only the sky
-    // (factor 0.4) + the walls (factor 1) were visible. With the arena
-    // center at 980, Io = +149 -> the parallax is a small, correct shift.
-    camera.arena_center_x = assets.dojo.arena_width() * 0.5f - kCxOff;  // render re-center (see above)
+    // Io = Lb.width/2 - focus (JS `Ut.Al` L826): the parallax reference the
+    // renderer folds into every layer (renderer.hpp `camera_offset_x`). At
+    // the fight-start focus 831.5 -> Io = 148.5.
+    camera.arena_center_x = arena_half - cam.center_x;
     ren.begin_frame(camera);
     // [fix(render): arena layer order] The original game draws the fighters
     // INSIDE the ModelsViewer (Type=2) layer — background layers first, then
@@ -3018,17 +3006,18 @@ void FightScreen::render_impl(App& app) {
     // procedural black ellipse (the A4 commit 84269826) was a native
     // invention — the silhouettes stand straight on the floor line.
 
-    auto project = [&camera, &assets, kCxOff](const std::vector<float>& v) {
+    auto project = [&camera, &assets, arena_half](const std::vector<float>& v) {
         // JS-exact fighter container offset (DOJO_BG_STATIC 7.4, tl.init
         // L843: container y=height/2-ct; dojo 280-80=200; Yia/B_ L476 are
         // container-local, floor tiles Y=223.5 location-space). World/pose/
         // camera stay container-space (oracle-trace exact); only the visual
         // projection adds the container so feet land in the tile band.
-        // Render re-center: sim x is 0-based, location art centered.
+        // The -arena_half is that container x-translate (tl.init L843), not
+        // the removed camera re-center.
         const float kContY = assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor();
         std::vector<float> out(v.size());
         for (std::size_t i = 0; i < v.size(); i += 2) {
-            out[i] = camera.world_to_screen_x(v[i] - kCxOff, 1.0f);
+            out[i] = camera.world_to_screen_x(v[i] - arena_half, 1.0f);
             out[i + 1] = camera.world_to_screen_y(v[i + 1] + kContY);
         }
         return out;
@@ -3047,7 +3036,7 @@ void FightScreen::render_impl(App& app) {
     // the collidable capsule edges as thick quads over the mesh so the
     // fighter is a solid humanoid silhouette (head/neck/chest/stomach/
     // arms/legs) matching the oracle.
-    auto draw_capsules = [&camera, &ren, &assets, kCxOff](const sf2::scene::FightFighter& f) {
+    auto draw_capsules = [&camera, &ren, &assets, arena_half](const sf2::scene::FightFighter& f) {
         const float r = f.fighter.color_r(), g = f.fighter.color_g(), b = f.fighter.color_b();
         // [Phase 4d — capsule-figure render] The oracle draws the fighter's
         // body from the merged model's CAPSULE FIGURES (JS `Yc.Tib`: every
@@ -3093,10 +3082,10 @@ void FightScreen::render_impl(App& app) {
             if (stroke <= 0.0f) {
                 continue;
             }
-            const float sx1 = camera.world_to_screen_x(pos[u1] - kCxOff, 1.0f);
+            const float sx1 = camera.world_to_screen_x(pos[u1] - arena_half, 1.0f);
             const float sy1 = camera.world_to_screen_y(
                 pos[u1 + 1] + assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor());
-            const float sx2 = camera.world_to_screen_x(pos[u2] - kCxOff, 1.0f);
+            const float sx2 = camera.world_to_screen_x(pos[u2] - arena_half, 1.0f);
             const float sy2 = camera.world_to_screen_y(
                 pos[u2 + 1] + assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor());
             float dx = sx2 - sx1;
@@ -3158,8 +3147,8 @@ void FightScreen::render_impl(App& app) {
     // baked into the camera framing). Drawn AFTER the fighters, BEFORE the
     // fg floor layers (bg -> fighters -> SPARKS -> fg floor — the b615a1bf
     // layer order; the batch preserves submission order).
-    draw_hit_sparks(ren, camera, fight_->fx(), kCxOff);
-    draw_magic_effects(ren, camera, s_magic_fx_, kCxOff);
+    draw_hit_sparks(ren, camera, fight_->fx(), arena_half);
+    draw_magic_effects(ren, camera, s_magic_fx_, arena_half);
 
     // [fix(render): arena layer order] The foreground layers — the ones the
     // params XML places AFTER the ModelsViewer (Type=2) fighter layer: the
@@ -3173,16 +3162,28 @@ void FightScreen::render_impl(App& app) {
         assets.dojo.render_layers(ren, camera, fighter_layer + 1, n_layers);
     }
 
-    // --- HUD Phase A2: HealthBar frames + bitmap-font timer/rounds (1:1 original) ---
-    // Frames: fight/ui.json -> HealthBar_Empty (bg), HealthBar_Full (player fill),
-    //          HealthBarBlue_Full (enemy fill), HealthBar_Hit/Blue_Hit (damage), Round_Done/Undone.
-    // JS Sf.layout (L2036) for 1280x720: d=1.5, e=1.1, c=min(W,H)/2/675*g,
-    // g=1+(d-1)/0.5*0.1=1.1, f=c0*0.07 -> c=0.5867, bar centers =
-    // W*0.5 +/- 520*c*e, bar y = P + 150*c + f*g. Bar frame h = 43 (atlas),
-    // on-screen h = 43*c.
-    const float bar_w = 440.0f, bar_h = 25.0f, bar_y = 115.7f;
-    const float bar_cx_player = kViewW * 0.5f - 520.0f * 0.5867f * 1.1f;
-    const float bar_cx_enemy = kViewW * 0.5f + 520.0f * 0.5867f * 1.1f;
+    // --- Fight HUD (JS `Ar`/`Sf`/`lk`/`Er` L2016-2041) ------------------
+    // Frames: fight/ui.json -> HealthBar_Empty (bg), HealthBar_Full (player
+    // fill), HealthBarBlue_Full (enemy fill), HealthBar_Hit/Blue_Hit (leak),
+    // Round_Done/Undone (pips). `Sf.layout` (L2036-2038) computes, with
+    // ma.Kq = the screen rect (J=0, N=W, P=0, W=H):
+    //   d = clamp(W/H, .4, 1.5); e = clamp(d, 1, 1.1);
+    //   c0 = min(W,H)/2; f = c0*.07 (+ (1-d)*200 when d<1);
+    //   g = 1 + (clamp(d,1,1.5)-1)/.5*.1; c = c0/675*g;
+    //   bar centers = W/2 ∓ 520*c*e; bar Y = P + 150*c + f*g.
+    // At 1280x720: d=1.5, e=1.1, g=1.1, c=0.5867, f=25.2 -> centers
+    // 304.4/975.6, y=115.7. Bar frame 425x43 (`Br` uL(425)/krb L2011-2012;
+    // PORT_AUDIT_UI §2.6).
+    const float hud_d = std::clamp(kViewW / kViewH, 0.4f, 1.5f);
+    const float hud_e = std::clamp(hud_d, 1.0f, 1.1f);
+    const float hud_c0 = std::min(kViewW, kViewH) * 0.5f;
+    const float hud_f = hud_c0 * 0.07f + (hud_d < 1.0f ? (1.0f - hud_d) * 200.0f : 0.0f);
+    const float hud_g = 1.0f + (std::clamp(hud_d, 1.0f, 1.5f) - 1.0f) / 0.5f * 0.1f;
+    const float hud_c = hud_c0 / 675.0f * hud_g;
+    const float bar_w = 425.0f, bar_h = 43.0f;
+    const float bar_y = 150.0f * hud_c + hud_f * hud_g;
+    const float bar_cx_player = kViewW * 0.5f - 520.0f * hud_c * hud_e;
+    const float bar_cx_enemy = kViewW * 0.5f + 520.0f * hud_c * hud_e;
     const float p_ratio = fight_->player().max_hp > 0.0f
                               ? std::clamp(fight_->player().hp / fight_->player().max_hp, 0.0f, 1.0f)
                               : 0.0f;
@@ -3250,9 +3251,10 @@ void FightScreen::render_impl(App& app) {
         const sf2::data::font* fnt = app.digits_font() ? app.digits_font() : app.menu_font();
         unsigned int tex = app.digits_font() ? app.digits_texture() : app.font_texture();
         if (fnt != nullptr && tex != 0) {
-            // digits.fnt glyphs are ~80px tall; JS fontSize = 120*c = 70px
-            // (Sf.layout: Kp.D = Id.node.ra - 120*c), so ~0.75 scale.
-            const float scale = (fnt == app.digits_font()) ? 0.75f : 0.9f;
+            // JS `Kp.Ia(128)`, `Kp.ua(120*c)` (Sf.layout L2037): fontSize =
+            // 120*c; digits eF=90 -> native scale = 120*c/90.
+            const float scale = (fnt == app.digits_font()) ? (120.0f * hud_c / 90.0f)
+                                                           : (120.0f * hud_c / 100.0f);
             // shadow (black) slightly offset, then white foreground
             const float ty = 44.0f;
             app.draw_text_centered(*fnt, tex, kViewW * 0.5f + 1.8f, ty + 1.8f, tstr, scale, 0.0f, 0.0f,
@@ -3271,25 +3273,31 @@ void FightScreen::render_impl(App& app) {
         }
     }
 
-    // Rounds — Round_Done / Round_Undone atlas pips (Er layout), fallback to font digits
+    // Rounds — Round pips (JS `Er` L2021-2022): e=32, f=e/2, step e+f, height 43, frames y.UU/y.LQa
+    const float pip_e = 32.0f;
+    const float pip_step = pip_e + pip_e * 0.5f;  // e + f (Er L2021)
+    const float pip_h = 43.0f;                    // Pb(43)
+    const float pip_y = bar_y + bar_h + 6.0f;
     const int rounds_total = fight_->round().length;
     for (int i = 0; i < rounds_total; ++i) {
         const bool p_done = i < fight_->player().rounds_won;
         const bool e_done = i < fight_->enemy().rounds_won;
         const char* p_frame = p_done ? "Round_Done" : "Round_Undone";
         const char* e_frame = e_done ? "Round_Done" : "Round_Undone";
-        const float round_y = bar_y + bar_h + 12.0f;
-        const float px = 78.0f + static_cast<float>(i) * 22.0f;
-        const float ex = kViewW - 78.0f - 18.0f - static_cast<float>(i) * 22.0f;
-        if (!app.draw_atlas_rect(p_frame, px, round_y, 18.0f, 18.0f, 1.0f)) {
-            float dv[12] = {px, round_y, px + 16.0f, round_y, px, round_y + 18.0f,
-                            px + 16.0f, round_y, px + 16.0f, round_y + 18.0f, px, round_y + 18.0f};
+        // The player's pips step left from the bar's inner (right) end; the
+        // enemy's step right from its inner (left) end (`lk.kva` L2028).
+        const float px = bar_cx_player + bar_w * 0.5f - pip_e -
+                         static_cast<float>(i) * pip_step;
+        const float ex = bar_cx_enemy - bar_w * 0.5f + static_cast<float>(i) * pip_step;
+        if (!app.draw_atlas_rect(p_frame, px, pip_y, pip_e, pip_h, 1.0f)) {
+            float dv[12] = {px, pip_y, px + pip_e, pip_y, px, pip_y + pip_h,
+                            px + pip_e, pip_y, px + pip_e, pip_y + pip_h, px, pip_y + pip_h};
             ren.draw_triangles(dv, 6, p_done ? 0.18f : 0.32f, p_done ? 0.92f : 0.32f,
                                p_done ? 0.18f : 0.32f, 1.0f);
         }
-        if (!app.draw_atlas_rect(e_frame, ex, round_y, 18.0f, 18.0f, 1.0f)) {
-            float ev2[12] = {ex, round_y, ex + 16.0f, round_y, ex, round_y + 18.0f,
-                             ex + 16.0f, round_y, ex + 16.0f, round_y + 18.0f, ex, round_y + 18.0f};
+        if (!app.draw_atlas_rect(e_frame, ex, pip_y, pip_e, pip_h, 1.0f)) {
+            float ev2[12] = {ex, pip_y, ex + pip_e, pip_y, ex, pip_y + pip_h,
+                             ex + pip_e, pip_y, ex + pip_e, pip_y + pip_h, ex, pip_y + pip_h};
             ren.draw_triangles(ev2, 6, e_done ? 0.18f : 0.32f, e_done ? 0.92f : 0.32f,
                                e_done ? 0.18f : 0.32f, 1.0f);
         }
@@ -3315,28 +3323,12 @@ void FightScreen::render_impl(App& app) {
     // replaces it between rounds (see the round_wait block below).
     draw_gamepad(app);
 
-    // Between-rounds HUD "Next" button (JS `vhb` L410 case 1): the fight
-    // holds in EndStance until the player confirms the next round — drawn
-    // only while round_wait(). Atlas frame: fight/ui `FightPause` (y.IQa,
-    // JS-exact). OPEN: Next/ok 0 atlas hits (guessed names removed); flat
-    // fallback covers the Next confirm.
-    if (fight_->round_wait()) {
-        const char* next_frames[] = {"FightPause"};
-        bool drawn = false;
-        for (const char* fn : next_frames) {
-            if (try_draw_atlas_button(app, fn, kNextBtnCX, kNextBtnCY, kNextBtnW, kNextBtnH,
-                                      1.0f)) {
-                drawn = true;
-                break;
-            }
-        }
-        if (!drawn) {
-            draw_flat_button(app, "NEXT", kNextBtnCX, kNextBtnCY, kNextBtnW, kNextBtnH, 0.2f,
-                             0.5f, 0.8f, false);
-            draw_ui_label(app, kNextBtnCX - kNextBtnW * 0.5f, kNextBtnCY - 14.0f,
-                              kNextBtnW, 28.0f, "NEXT", 1.0f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-        }
-    }
+    // NOTE: the JS has NO between-rounds "NEXT" button (JS `ai`/`Cr` advances
+    // rounds with `Cr.tca` timers, L2023). The native Next button was
+    // INVENTED (PORT_AUDIT_UI §3 item 26) and is removed here. The keyboard
+    // path (Space/Enter -> next_round_requested, on_key) and the headless
+    // driver's `next_button_center` click rect (update_impl) remain until the
+    // JS auto-advance is ported into FightController — OPEN.
     // Pause menu render (JS `Jn` button + `Ar.Qrb` overlay — display only).
     // Geometry mirrors update_impl.
     const bool live =
@@ -3511,9 +3503,12 @@ void ResultsScreen::update_impl(float dt) {
         std::fflush(stdout);
         // JS `qxa` (L1213) pops back to the map: the Results screen sits on
         // top of the Fight screen it replaced, so both pop (the fight is
-        // done; the map is the caller the flow returns to).
-        manager().pop();
-        manager().pop();
+        // done; the map is the caller the flow returns to). Capture the
+        // manager first — the first pop destroys `this`, so a second
+        // `manager()` call would re-read a freed member (use-after-free).
+        ScreenManager& mgr = manager();
+        mgr.pop();
+        mgr.pop();
     }
 }
 
@@ -3601,6 +3596,32 @@ std::vector<std::size_t> shop_tab_rows(const std::vector<CatalogItem>& items, in
         if (items[i].type == kShopTabs[tab].type) out.push_back(i);
     }
     return out;
+}
+
+// Shop atlas art per tab (shop.<hash>.json buttons/* — the JS `vj.ifa` tab
+// icons). Index matches kShopTabs order.
+const char* shop_tab_art(int tab, bool active) {
+    static const char* kNormal[kShopTabCount] = {
+        "buttons/Weapon", "buttons/Armor", "buttons/Helmet",
+        "buttons/Ranged_weapon", "buttons/Magic",
+    };
+    static const char* kActive[kShopTabCount] = {
+        "buttons/Weapon_active", "buttons/Armor_active", "buttons/Helmet_active",
+        "buttons/Ranged_weapon_active", "buttons/Magic_active",
+    };
+    if (tab < 0 || tab >= kShopTabCount) return nullptr;
+    return active ? kActive[tab] : kNormal[tab];
+}
+
+// Shop atlas attribute icon for an item type (attributes/* — the JS card
+// icon per category; _light variants are the lit/hover versions).
+const char* shop_item_art(const std::string& type, bool light) {
+    if (type == "Weapon") return light ? "attributes/weapon_attack_light" : "attributes/weapon_attack";
+    if (type == "Armor") return light ? "attributes/body_armor_light" : "attributes/body_armor";
+    if (type == "Helm") return light ? "attributes/head_armor_light" : "attributes/head_armor";
+    if (type == "Ranged") return light ? "attributes/ranged_attack_light" : "attributes/ranged_attack";
+    if (type == "Magic") return light ? "attributes/magic_attack_light" : "attributes/magic_attack";
+    return nullptr;
 }
 
 // Equipped-slot value for an item type (JS `xc.hk` slots; save fields readable).
@@ -3884,6 +3905,8 @@ void ShopScreen::update_impl(float dt) {
             }
         }
     }
+    // Shared `za` nav column (JS `ma.D1`): Dojo/Map/Profile/Settings hops.
+    za_update(app(), *this, kScreenShop);
 }
 
 void ShopScreen::render_impl(App& app) {
@@ -3904,14 +3927,24 @@ void ShopScreen::render_impl(App& app) {
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
 
-    // Tab strip (JS `vj.ifa` lists — mirrors update_impl geometry).
+    // Tab strip (JS `vj.ifa` lists — mirrors update_impl geometry). Real
+    // shop-atlas tab art (buttons/<Category>[_active]); flat fallback only
+    // if the frame is missing.
     for (int t = 0; t < kShopTabCount; ++t) {
         const float cx = kShopTabX0 + static_cast<float>(t) * kShopTabW + kShopTabW * 0.5f;
         const bool sel = t == tab_;
         const bool hov = t == tab_hover_;
-        draw_flat_button(app, kShopTabs[t].label, cx, kShopTabY, kShopTabW - 8.0f,
-                         kShopTabH, sel ? 0.72f : (hov ? 0.6f : 0.38f),
-                         sel ? 0.6f : (hov ? 0.5f : 0.32f), sel ? 0.25f : 0.3f, hov);
+        const char* art = shop_tab_art(t, sel || hov);
+        bool drawn = false;
+        if (art != nullptr) {
+            drawn = try_draw_atlas_button(app, art, cx, kShopTabY, kShopTabW - 8.0f, kShopTabH,
+                                          sel ? 1.0f : (hov ? 0.9f : 0.75f));
+        }
+        if (!drawn) {
+            draw_flat_button(app, kShopTabs[t].label, cx, kShopTabY, kShopTabW - 8.0f,
+                             kShopTabH, sel ? 0.72f : (hov ? 0.6f : 0.38f),
+                             sel ? 0.6f : (hov ? 0.5f : 0.32f), sel ? 0.25f : 0.3f, hov);
+        }
         draw_ui_label(app, cx - kShopTabW * 0.5f + 6.0f, kShopTabY - 11.0f, kShopTabW - 12.0f, 22.0f,
                           kShopTabs[t].label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
@@ -3928,11 +3961,13 @@ void ShopScreen::render_impl(App& app) {
         const float cy = kShopY0 + static_cast<float>(row) * kShopDy;
         const float card_w = kShopCardW, card_h = kShopCardH;
         const bool hovered = static_cast<int>(i) == hover_;
-        // Try to draw a shop atlas icon as card background
+        // Shop-atlas attribute icon for the item's type (attributes/* —
+        // per-category art, not one shared icon); flat fallback keeps the
+        // card visible if the frame is missing.
         bool drawn = false;
-        const char* shop_frames[] = {"attributes/body_armor", "attributes/head_armor", "attributes/critical_chance"};
-        for (const char* sf : shop_frames) {
-            if (try_draw_atlas_button(app, sf, cx, cy, card_w, card_h, 0.9f)) { drawn = true; break; }
+        const char* item_art = shop_item_art(it.type, hovered);
+        if (item_art != nullptr) {
+            drawn = try_draw_atlas_button(app, item_art, cx, cy, card_w, card_h, 0.9f);
         }
         if (!drawn) {
             // Equipped cards read gold (distinct from owned/unowned at a
@@ -4001,6 +4036,8 @@ void ShopScreen::render_impl(App& app) {
         draw_ui_label(app, kViewW * 0.5f - 220.0f, 678.0f, 440.0f, 26.0f,
                           confirm_, 1.0f, UiAlign::Center, 0.4f, 1.0f, 0.4f);
     }
+    // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
+    draw_za_chrome(app, kScreenShop);
 }
 
 // ---------------------------------------------------------------------------
@@ -4121,6 +4158,8 @@ void EquipmentScreen::update_impl(float dt) {
         ++idx;
         ++card;
     }
+    // Shared `za` nav column (JS `ma.D1`): Dojo/Map/Shop/Settings hops.
+    za_update(app(), *this, kScreenProfile);
 }
 
 void EquipmentScreen::render_impl(App& app) {
@@ -4157,6 +4196,13 @@ void EquipmentScreen::render_impl(App& app) {
         for (const auto& f : w.fights) wins += f.wins;
         char hbuf[64];
         std::snprintf(hbuf, sizeof(hbuf), "LV %d", w.level);
+        // Profile-atlas level badge (pieces/level1..9 — clamped to the
+        // shipped range; skipped if the frame is missing).
+        if (w.level >= 1 && w.level <= 9) {
+            char lvl_frame[32];
+            std::snprintf(lvl_frame, sizeof(lvl_frame), "pieces/level%d", w.level);
+            try_draw_atlas_button(app, lvl_frame, 100.0f, 92.0f, 56.0f, 56.0f, 1.0f);
+        }
         draw_ui_label(app, 130.0f, 78.0f, 150.0f, 30.0f,
                       hbuf, 1.1f, UiAlign::Left, 1.0f, 0.9f, 0.4f);
         const float bx0 = 130.0f, by0 = 112.0f, bw = 300.0f, bh = 16.0f;
@@ -4197,6 +4243,8 @@ void EquipmentScreen::render_impl(App& app) {
     }
     const float slot_x = kViewW * 0.2f, slot_y0 = 220.0f, slot_dy = 100.0f;
     const char* slot_names[5] = {"Weapon", "Armor", "Helm", "Ranged", "Magic"};
+    // Profile-atlas slot backing art (profile.<hash>.json pieces/*): the
+    // perkback square behind each slot, perkcircle for the empty marker.
     const std::string current[5] = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
     for (int s = 0; s < 5; ++s) {
         const float sy = slot_y0 + static_cast<float>(s) * slot_dy;
@@ -4212,8 +4260,22 @@ void EquipmentScreen::render_impl(App& app) {
         }
         const std::string label = std::string(slot_names[s]) + ": " + current[s] +
                                   (stat.empty() ? "" : " (" + stat + ")");
-        draw_flat_button(app, label, slot_x, sy, 400.0f, 80.0f, 0.35f, 0.3f, 0.45f,
-                         hover_type == slot_names[s]);
+        const bool slot_hov = hover_type == slot_names[s];
+        // Real art first (perkback square + the type's shop attribute icon
+        // centered); flat fallback keeps the slot visible if art is missing.
+        bool drawn = false;
+        if (try_draw_atlas_button(app, "pieces/perkback", slot_x, sy, 400.0f, 80.0f,
+                                  slot_hov ? 0.95f : 0.8f)) {
+            const char* icon = shop_item_art(slot_names[s], slot_hov);
+            if (icon != nullptr) {
+                try_draw_atlas_button(app, icon, slot_x - 170.0f, sy, 64.0f, 64.0f, 1.0f);
+            }
+            drawn = true;
+        }
+        if (!drawn) {
+            draw_flat_button(app, label, slot_x, sy, 400.0f, 80.0f, 0.35f, 0.3f, 0.45f,
+                             slot_hov);
+        }
         draw_ui_label(app, slot_x - 200.0f + 8.0f, sy - 14.0f, 400.0f - 16.0f, 28.0f,
                           label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
@@ -4242,9 +4304,22 @@ void EquipmentScreen::render_impl(App& app) {
         const float cx = grid_x + col * grid_dx;
         const float cy = grid_y0 + row * grid_dy;
         const bool equipped = oi.equipped;
-        draw_flat_button(app, oi.name + (equipped ? " [EQ]" : ""), cx, cy, 220.0f, 80.0f,
-                         equipped ? 0.5f : 0.3f, equipped ? 0.6f : 0.3f,
-                         equipped ? 0.3f : 0.35f, hover_ == idx);
+        // Real art: perkback card + the type's attribute icon (profile +
+        // shop atlases); flat fallback keeps the card visible.
+        bool drawn = false;
+        if (try_draw_atlas_button(app, "pieces/perkback", cx, cy, 220.0f, 80.0f,
+                                  equipped ? 1.0f : (hover_ == idx ? 0.95f : 0.8f))) {
+            const char* icon = shop_item_art(type, equipped || hover_ == idx);
+            if (icon != nullptr) {
+                try_draw_atlas_button(app, icon, cx - 80.0f, cy, 56.0f, 56.0f, 1.0f);
+            }
+            drawn = true;
+        }
+        if (!drawn) {
+            draw_flat_button(app, oi.name + (equipped ? " [EQ]" : ""), cx, cy, 220.0f, 80.0f,
+                             equipped ? 0.5f : 0.3f, equipped ? 0.6f : 0.3f,
+                             equipped ? 0.3f : 0.35f, hover_ == idx);
+        }
         draw_ui_label(app, cx - 110.0f + 6.0f, cy - 12.0f, 220.0f - 12.0f, 24.0f,
                           oi.name + (equipped ? " [EQ]" : ""), 0.7f, UiAlign::Center,
                           1.0f, 1.0f, 1.0f);
@@ -4302,6 +4377,8 @@ void EquipmentScreen::render_impl(App& app) {
                      false);
     draw_ui_label(app, 1165.0f - 65.0f + 8.0f, 664.0f - 10.0f, 130.0f - 16.0f, 20.0f,
                       "MOVES", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
+    draw_za_chrome(app, kScreenProfile);
 }
 
 // ---------------------------------------------------------------------------
@@ -4558,9 +4635,10 @@ void BracketScreen::render_impl(App& app) {
 std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id) {
     switch (id) {
         case kScreenDojo:
-            return std::make_unique<DojoScreen>(mgr);
         case kScreenGeneralMenu:
-            return std::make_unique<MainMenuScreen>(mgr);
+            // No JS screen 8 (`dJ()` never returns 8 — PORT_AUDIT_UI §0):
+            // the Dojo is the shell home, so screen 8 routes there.
+            return std::make_unique<DojoScreen>(mgr);
         case kScreenMap:
             return std::make_unique<MapScreen>(mgr);
         case kScreenFight: {

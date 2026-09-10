@@ -6,6 +6,9 @@
 // 2. res/fight/: decode ui.png + parse ui.json -> frame count + first 10.
 // 3. res/ui/: parse font-en.fnt -> char count + first 10 chars.
 // 4. res/locations/dojo/: decode the dojo atlas texture -> report + save PNG.
+// 5. res/ui/controller: decode the controller atlas -> report + save PNG.
+// 6. res/ui/shop + profile: decode both atlases -> dump every frame as PNG
+//    to reference/traces/ui/frames/ (real decoded art).
 //
 // Usage: texture_probe [res_root]
 // Defaults to reference/www/res at the repo root.
@@ -298,6 +301,82 @@ void probe_controller(const std::string& res_root, const std::string& out_dir) {
     std::cout << "\n";
 }
 
+// --- task 6: shop + profile atlas frames (ui/) -------------------------------
+// Decodes the shop + profile atlases (ktx ASTC) and dumps every frame as an
+// individual PNG into reference/traces/ui/frames/<prefix>_<name>.png so the
+// real decoded art replaces any synthetic placeholder dumps there.
+void probe_ui_frames(const std::string& res_root, const std::string& out_dir) {
+    const std::string ui_dir = res_root + "/ui";
+    const char* prefixes[] = {"shop", "profile"};
+    for (const char* prefix : prefixes) {
+        std::cout << "=== " << prefix << " atlas frames ===\n";
+        const std::string base = ui_dir + "/" + prefix;
+        sf2::data::Texture tex = decode_atlas(base);
+        print_stats(std::string(prefix) + " atlas", tex);
+
+        // Locate the matching json (<prefix>.<hash>.json).
+        std::string json_path;
+        for (const auto& entry : std::filesystem::directory_iterator(ui_dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind(std::string(prefix) + ".", 0) == 0 &&
+                entry.path().extension().string() == ".json") {
+                json_path = entry.path().string();
+                break;
+            }
+        }
+        if (json_path.empty()) {
+            throw std::runtime_error("atlas json missing for " + base);
+        }
+        const std::vector<std::uint8_t> json = read_file(json_path);
+        const sf2::data::atlas a = sf2::data::atlas_parse(json.data(), json.size());
+        std::cout << "  atlas json meta.size: " << a.w << "x" << a.h
+                  << "  frames: " << a.frames.size() << "\n";
+        if (a.w != tex.w || a.h != tex.h) {
+            throw std::runtime_error("SANITY FAIL: decoded dims " + std::to_string(tex.w) +
+                                     "x" + std::to_string(tex.h) + " != atlas meta " +
+                                     std::to_string(a.w) + "x" + std::to_string(a.h));
+        }
+        std::cout << "  sanity: dims match atlas meta.size\n";
+
+        // Dump each frame: crop the atlas rect into its own RGBA texture.
+        // Rotated frames (TexturePacker CW packing) are un-rotated here so
+        // the PNG shows the sprite upright.
+        const std::string frame_dir = out_dir + "/frames";
+        ensure_dir(frame_dir);
+        std::size_t saved = 0;
+        for (const auto& f : a.frames) {
+            if (f.w <= 0 || f.h <= 0) continue;
+            sf2::data::Texture ft;
+            ft.w = f.rotated ? f.h : f.w;
+            ft.h = f.rotated ? f.w : f.h;
+            ft.rgba.assign(static_cast<std::size_t>(ft.w) * ft.h * 4, 0);
+            for (int y = 0; y < f.h; ++y) {
+                for (int x = 0; x < f.w; ++x) {
+                    const std::size_t src =
+                        (static_cast<std::size_t>(f.y + y) * tex.w + (f.x + x)) * 4;
+                    if (src + 3 >= tex.rgba.size()) continue;
+                    const int dx = f.rotated ? y : x;
+                    const int dy = f.rotated ? x : y;
+                    const std::size_t dst =
+                        (static_cast<std::size_t>(dy) * ft.w + dx) * 4;
+                    ft.rgba[dst + 0] = tex.rgba[src + 0];
+                    ft.rgba[dst + 1] = tex.rgba[src + 1];
+                    ft.rgba[dst + 2] = tex.rgba[src + 2];
+                    ft.rgba[dst + 3] = tex.rgba[src + 3];
+                }
+            }
+            // Filename: <prefix>_<name with '/' -> '_'>.png
+            std::string fname = f.name;
+            for (char& c : fname) {
+                if (c == '/') c = '_';
+            }
+            save_png(frame_dir + "/" + prefix + "_" + fname + ".png", ft);
+            ++saved;
+        }
+        std::cout << "  dumped " << saved << " frame PNGs to " << frame_dir << "\n\n";
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -310,6 +389,7 @@ int main(int argc, char** argv) {
         probe_font(res_root);
         probe_dojo(res_root, out_dir);
         probe_controller(res_root, out_dir);
+        probe_ui_frames(res_root, "reference/traces/ui");
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "texture_probe: error: " << e.what() << "\n";

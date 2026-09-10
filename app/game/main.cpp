@@ -84,8 +84,9 @@ struct LoopStep {
 //   dojo -> Map -> Training fight -> Results -> Map
 //
 // Layout math (matches the screen implementations in core/app/screens.cpp):
-//   - dojo/menu buttons: y = 0.72*720 = 518, x = 0.28/0.46/0.64/0.82*1280
-//     (FIGHT, MAP, SHOP, PROFILE).
+//   - dojo/shell nav: the shared `za` VERTICAL column (kZaNav, za_layout):
+//     nav_cx = 184, rows y = 126/231/337/442/548 for
+//     MAP/SHOP/PROFILE/SETTINGS (index 1..4; DOJO is index 0/self).
 //   - map nodes: x = X + 640, y = 360 - Y (stages.xml <Zone> coords):
 //       Training (X=158,Y=145) -> (798, 215)
 //       Bosses    (X=-100,Y=-40) -> (540, 400)
@@ -96,7 +97,7 @@ struct LoopStep {
 //     the Dojo hub).
 static const LoopStep kLoopSteps[] = {
     // 0: Dojo -> Map (the MAP button). Capture loop_map.png on arrival.
-    {1280 * 0.46f, 720 * 0.72f, "dojo->map (MAP)", kScreenDojo, 0, kScreenMap, 0,
+    {184.0f, 231.0f, "dojo->map (MAP)", kScreenDojo, 0, kScreenMap, 0,
      "loop_map.png"},
     // 1: Map -> Bosses fight (540, 400) - the first money-bearing fight
     //    (Reward Money=70 Exp=10). The fight runs to KO (auto-attack) and
@@ -110,7 +111,7 @@ static const LoopStep kLoopSteps[] = {
     // 3: Map -> BACK to the Dojo hub (top-left).
     {64.0f, 40.0f, "map->dojo (BACK)", kScreenMap, 0, kScreenDojo, 0, nullptr},
     // 4: Dojo -> Shop (the SHOP button). Capture loop_shop.png on arrival.
-    {1280 * 0.64f, 720 * 0.72f, "dojo->shop", kScreenDojo, 0, kScreenShop, 0,
+    {184.0f, 337.0f, "dojo->shop", kScreenDojo, 0, kScreenShop, 0,
      "loop_shop.png"},
     // 5: Shop -> buy WEAPON_KNIVES (first card, price 50).
     {1280 * 0.25f + 150.0f, 200.0f + 75.0f, "shop->buy WEAPON_KNIVES", kScreenShop, 0, -1, 12,
@@ -119,7 +120,7 @@ static const LoopStep kLoopSteps[] = {
     {64.0f, 40.0f, "shop->dojo (BACK)", kScreenShop, 0, kScreenDojo, 0, nullptr},
     // 7: Dojo -> Equipment (the PROFILE button). Capture loop_equip.png on
     //    arrival.
-    {1280 * 0.82f, 720 * 0.72f, "dojo->equipment (PROFILE)", kScreenDojo, 0,
+    {184.0f, 442.0f, "dojo->equipment (PROFILE)", kScreenDojo, 0,
      kScreenProfile, 0, "loop_equip.png"},
     // 8: Equipment -> equip WEAPON_KNIVES. With the 5 base items
     //    (Body/Head/Fists/NoRanged/NoMagic) + the bought knives, the grid
@@ -131,7 +132,7 @@ static const LoopStep kLoopSteps[] = {
     // 9: Equipment -> BACK to the Dojo hub.
     {64.0f, 40.0f, "equipment->dojo (BACK)", kScreenProfile, 0, kScreenDojo, 0, nullptr},
     // 10: Dojo -> Map again (MAP).
-    {1280 * 0.46f, 720 * 0.72f, "dojo->map (MAP)", kScreenDojo, 0, kScreenMap, 0,
+    {184.0f, 231.0f, "dojo->map (MAP)", kScreenDojo, 0, kScreenMap, 0,
      nullptr},
     // 11: Map -> Training fight (798, 215) with the knives equipped.
     //     Capture loop_fight.png on arrival (the after-equip fight).
@@ -311,36 +312,49 @@ struct UiTourStep {
     const char* capture = nullptr;
     int key = 0;
     bool no_click = false;
+    // Zone-tab pre-click (the map's zone strips; 0/0 = none). The map opens
+    // on the save's zone (ZONE_1), so the tutorial/dojo fights living in the
+    // Punchbag zone need their tab selected first.
+    float tab_x = 0.0f;
+    float tab_y = 0.0f;
 };
 
 static const UiTourStep kUiTourSteps[] = {
     // 0: Dojo hub at boot (fresh save) - settle then capture.
     {0.0f, 0.0f, "dojo hub", 3, 150, -1, 60, "port_dojo.png", 0, true},
-    // 1: Dojo -> Map.
-    {589.0f, 518.0f, "dojo->map", 3, 10, 5, 60, "port_map.png"},
+    // 1: Dojo -> Map (`za` vertical nav column, MAP = row 1 @184,231).
+    {184.0f, 231.0f, "dojo->map", 3, 10, 5, 60, "port_map.png"},
     // 2: Map -> Dojo (BACK).
     {64.0f, 40.0f, "map->dojo", 5, 10, 3, 0, nullptr},
-    // 3: Dojo -> Shop.
-    {819.0f, 518.0f, "dojo->shop", 3, 10, 4, 60, "port_shop.png"},
+    // 3: Dojo -> Shop (nav row 2 @184,337).
+    {184.0f, 337.0f, "dojo->shop", 3, 10, 4, 60, "port_shop.png"},
     // 4: Shop tab 2 (same screen).
     {640.0f, 100.0f, "shop tab 2", 4, 10, -1, 40, "port_shop_tab2.png"},
     // 5: Shop -> Dojo (BACK).
     {64.0f, 40.0f, "shop->dojo", 4, 10, 3, 0, nullptr},
-    // 6: Dojo -> Equipment (PROFILE).
-    {1050.0f, 518.0f, "dojo->profile", 3, 10, 7, 60, "port_profile.png"},
+    // 6: Dojo -> Equipment (PROFILE, nav row 3 @184,442).
+    {184.0f, 442.0f, "dojo->profile", 3, 10, 7, 60, "port_profile.png"},
     // 7: Equipment -> Dojo (BACK).
     {64.0f, 40.0f, "profile->dojo", 7, 10, 3, 0, nullptr},
-    // 8: Dojo -> FIGHT (Training). Settle deep into phase 2 for the HUD.
-    {358.0f, 518.0f, "dojo->fight", 3, 10, 6, 250, "port_fight.png"},
-    // 9: Pause via P, capture the pause menu.
+    // 8: Dojo -> Map again. The JS hub has no direct Fight button (it is the
+    //    `FightNone` viewer); fights launch from the map's zone nodes.
+    {184.0f, 231.0f, "dojo->map (fight)", 3, 10, 5, 0, nullptr},
+    // 9: Map -> Training fight. The map opens on the save's ZONE_1; the
+    //    Punchbag tab (200,38) selects the tutorial zone, then the Training
+    //    node (798,215) launches the dojo fight. Hold 250 for the HUD.
+    {798.0f, 215.0f, "map->Training fight", 5, 10, 6, 250, "port_fight.png", 0, false,
+     200.0f, 38.0f},
+    // 10: Pause via P, capture the pause menu.
     {0.0f, 0.0f, "pause", 6, 10, -1, 40, "port_pause.png", 80},
-    // 10: Resume via P, run to KO -> Results captures on arrival.
+    // 11: Resume via P, run to KO -> Results captures on arrival.
     {0.0f, 0.0f, "resume->results", 6, 10, 10, 0, "port_results.png", 80},
-    // 11: Results -> Dojo (the tour went Dojo->Fight directly, so the
-    // results flow pops back to the hub, unlike the loop's map route).
-    {640.0f, 360.0f, "results->dojo", 10, 10, 3, 0, nullptr},
-    // 12: Dojo -> Settings (SETUP).
-    {85.0f, 34.0f, "dojo->settings", 3, 10, 11, 0, "port_settings.png"},
+    // 12: Results -> Map (the tour went Dojo->Map->Fight, so Results pops
+    //     back to the map beneath the fight).
+    {640.0f, 360.0f, "results->map", 10, 10, 5, 0, nullptr},
+    // 13: Map -> Dojo (BACK).
+    {64.0f, 40.0f, "map->dojo (post-fight)", 5, 10, 3, 0, nullptr},
+    // 14: Dojo -> Settings (nav row 4 @184,547).
+    {184.0f, 547.0f, "dojo->settings", 3, 10, 11, 0, "port_settings.png"},
 };
 constexpr int kUiTourStepCount = static_cast<int>(sizeof(kUiTourSteps) / sizeof(kUiTourSteps[0]));
 
@@ -351,6 +365,7 @@ struct UiTourDriver {
     bool acted = false;
     bool key_up_done = false;
     bool next_clicked = false;
+    bool tab_clicked = false;   // the step's zone-tab pre-click has been sent
     int guard = 0;
     bool finished = false;
 
@@ -383,6 +398,15 @@ struct UiTourDriver {
 
         if (!acted) {
             if (cur == s.wait_screen && step_frame >= s.min_delay) {
+                if (s.tab_x != 0.0f && !tab_clicked) {
+                    std::fprintf(stdout, "[tour] step %d/%d %s -> tab click (%.0f, %.0f)\n",
+                                 step + 1, kUiTourStepCount, s.label, s.tab_x, s.tab_y);
+                    std::fflush(stdout);
+                    app.inject_click(s.tab_x, s.tab_y);
+                    tab_clicked = true;
+                    step_frame = s.min_delay - 5;  // 5 frames for the list to switch
+                    return;
+                }
                 if (s.key != 0) {
                     std::fprintf(stdout, "[tour] step %d/%d %s -> key %d\n", step + 1,
                                  kUiTourStepCount, s.label, s.key);
@@ -442,6 +466,7 @@ struct UiTourDriver {
         step_frame = 0;
         acted = false;
         key_up_done = false;
+        tab_clicked = false;
         if (step >= kUiTourStepCount) {
             finished = true;
             std::fprintf(stdout, "[tour] ALL %d STEPS DONE\n", kUiTourStepCount);

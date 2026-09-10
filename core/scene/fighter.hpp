@@ -241,12 +241,6 @@ public:
 private:
     Model model_;
     std::vector<float> pos_;  // per-bone [x, y] after sampling (world space)
-    // [Phase A4 — figure z-sort] Per-bone world-space z after sampling
-    // (parallel to `pos_`). The projection drops z (JS `dv.ia` copies only
-    // x,y), but the pose keeps the depth, so build_vertices can draw the
-    // triangles far-to-near (painter's order) instead of the XML document
-    // order (which is z-scattered in the shipped models).
-    std::vector<float> posz_;
     float color_r_ = 1.0f;
     float color_g_ = 1.0f;
     float color_b_ = 1.0f;
@@ -263,12 +257,42 @@ private:
     // at `subframe_/sub_`.
     int sub_ = 1;
     int subframe_ = 0;
-    // [FIX Phase 4a — stretched cloth] For each merged-model bone >= the
-    // clip bone count (the body/head cloth nodes), the index of its
-    // bind-space nearest clip-driven skeleton bone. The cloth node is
-    // rendered at that bone's clip position + the bind offset (the ragdoll
-    // keeps the cloth attached to the skeleton in the real game).
-    std::vector<int> nearest_clip_;
+    // [FIX stretched mesh — ragdoll solver] The game's `Al` Verlet solver
+    // state (JS `Vc.ma`/`Vc.mf`): current and previous posed position per
+    // bone, in the CLIP's model space (before the COM/world placement).
+    // The solver runs once per sample() call (the game's 60 Hz cadence:
+    // `Te.eda` applies the clip, `Al.ia` = `sk` integrate + `jE` edge
+    // relax x2, `Dl.Qja` re-derives the macros). Replaces the old static
+    // bind-offset cloth anchoring (`nearest_clip_`), which stretched the
+    // cloth triangles because the cloth's <Edges> constraints bind the
+    // cloth nodes to DIFFERENT bones (head macros, knees, ankles) than the
+    // bind-nearest skeleton bone.
+    std::vector<float> sol_ma_;  // 3*n: current posed positions (JS `ma`)
+    std::vector<float> sol_mf_;  // 3*n: previous positions (JS `mf`)
+    bool solver_init_ = false;   // ma/mf seeded from the bind pose once
+    // [FIX stretched mesh] The solver runs in a CONTINUOUS space: the clips
+    // are authored at different world x offsets (stance_2 COM x=-502 vs
+    // short_upward_elbow_strike COM x=+237 — a 740-unit jump on the clip
+    // switch). The game's fighter world position follows the clip's COM
+    // (the whole fighter — skeleton AND cloth — teleports together, so the
+    // relative cloth state is preserved). The native solver state lives in
+    // raw clip space, so on every clip switch the state is translated by
+    // the COM delta before the clip pose is applied (below in sample()).
+    float sol_prev_com_x_ = 0.0f;
+    float sol_prev_com_y_ = 0.0f;
+    float sol_prev_com_z_ = 0.0f;
+    bool sol_have_prev_com_ = false;
+    // [FIX stretched mesh] Warmup steps pending on the first sample() after
+    // set_model (JS-equivalent of the game's Dojo-hub display time: the
+    // game's solver runs at 60 Hz for the whole hub session before a fight
+    // starts, so the fight's first trace frame already shows the cloth at
+    // its gravity/edge equilibrium — oracle_pose.jsonl frame 0). The native
+    // fight boots directly, so the first sample() runs the solver cycle
+    // `kSolverWarmupFrames` extra times with the spawn pose held; the cloth
+    // (mass 0.1 vs its macro anchors' 0.001 — the `yu.bFa` mass weighting
+    // moves it only ~1.2%/iteration) otherwise needs ~300+ frames to settle
+    // and stretches the mesh for the whole fight intro.
+    int solver_warmup_ = 0;
     // Paired bones _1 ↔ _2 for mirror swap (JS Te.Peb L560 → Ua.Oeb L692). Built in set_model.
     std::vector<std::pair<int, int>> mirror_pairs_;
     // Previous sample's world-space x per bone (x only, parallel to `pos_`).

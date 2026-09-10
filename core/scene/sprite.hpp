@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "scene/node.hpp"
 
@@ -63,6 +64,28 @@ struct Sprite : public Node {
     // True for solid-color fills (ClassName="pixel_1") that do not sample
     // the atlas texture.
     bool solid = false;
+
+    // Draw-depth (JS `Qi.NWa`/`Dla` L487, L1599): every sprite inside a layer
+    // carries z = -0.01 * spriteIndex (the layer's `QH` starts at 0). The
+    // renderer preserves the XML/insertion order — which already equals the
+    // sorted order for the shipped venues — so this is neutral today; it is
+    // carried so a future depth sort cannot regress the composition (D5).
+    float z = 0.0f;
+
+    // SimpleEffect Transparency animation (JS `bkb` L478-481: `irb(Offset)` +
+    // `KWa(Period,Value,Ease)` keys). Each key's `Value` (0..100) is the
+    // alpha reached `Period` seconds after the previous key; the list loops.
+    // Dojo layer_4: 45@1.1, 75@3.5, 55@2.1, 75@2.5 -> live alpha 0.45..0.75.
+    // Empty = static (color_a holds the rest value). The Ease curve shape is
+    // not pinned down by the audit (OPEN) — LocationScene::update evaluates
+    // the segments linearly (endpoints exact).
+    struct TransKey {
+        float value = 100.0f;  // Point/@Value (percent)
+        float period = 1.0f;   // Point/@Period (seconds)
+        float ease = 0.0f;     // Point/@Ease (unused; OPEN)
+    };
+    std::vector<TransKey> trans_keys;
+    float trans_t = 0.0f;  // seconds into the looping timeline
 
     Transform transform;
 

@@ -26,6 +26,12 @@ Bone parse_bone(const pugi::xml_node& node) {
         b.x = -b.x;
     }
     b.mass = sf2::data::xml_attr_float(node, "Mass", 1.0f);
+    // [FIX stretched mesh] Solver attrs (JS `Yc.Ijb` L290482/L290534/L290797):
+    // Cloth -> `Vc.PG` (always solver-active + damped velocity), Attenuation ->
+    // `Vc.bI`, Fixed -> `Vc.MG` (immovable).
+    b.cloth = sf2::data::xml_attr_bool(node, "Cloth", false);
+    b.attenuation = sf2::data::xml_attr_float(node, "Attenuation", 0.0f);
+    b.fixed = sf2::data::xml_attr_bool(node, "Fixed", false);
     return b;
 }
 

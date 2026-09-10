@@ -28,6 +28,16 @@ struct Bone {
     float z = 0.0f;
     bool is_macro = false;
     float mass = 1.0f;  // `<Nodes>` Mass attr (JS `Vc.weight` / `HPa`)
+    // [FIX stretched mesh] Ragdoll-solver attrs (JS `Yc.Ijb` L290482-290797):
+    // `cloth` = the Cloth="1" flag (`Vc.PG`/`jy` — the node is always
+    // solver-active and its Verlet velocity is damped by `attenuation`
+    // (`Vc.bI`, the Attenuation attr, `sk`: v *= 1-bI)); `fixed` = the
+    // Fixed="1" flag (`Vc.MG`/`NG` — the node never moves). MacroNodes are
+    // always immovable (JS `Fl` ctor calls `QMa(1)` -> `nh=false` ->
+    // `NG=true`).
+    bool cloth = false;
+    float attenuation = 0.0f;
+    bool fixed = false;
 };
 
 // One mesh triangle: the three referenced bone NAMES. The game resolves

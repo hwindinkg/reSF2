@@ -6,6 +6,7 @@
 #include <GLFW/glfw3.h>
 
 #include <cstdio>
+#include <cmath>
 
 #include "render/gl.hpp"
 #include "render/texture_gpu.hpp"
@@ -22,7 +23,7 @@ namespace {
 // camera when it pans. At fight start (camera centered on the arena,
 // Io == 0) the parallax is a no-op.
 void sprite_to_quad(const sf2::scene::Sprite& s, const Camera& camera, float factor,
-                     float layer_scale, SpriteQuad& quad) {
+                     float layer_scale, float layer_y, SpriteQuad& quad) {
     const sf2::scene::Transform& t = s.transform;
 
     const float half_w = t.scale_x * s.frame_w / 2.0f;
@@ -32,9 +33,26 @@ void sprite_to_quad(const sf2::scene::Sprite& s, const Camera& camera, float fac
     const float ax = (t.anchor_x - 0.5f) * 2.0f * half_w;
     const float ay = (t.anchor_y - 0.5f) * 2.0f * half_h;
 
-    // Local corners (in world units, centered on anchor).
-    const float lx[4] = {-half_w - ax, half_w - ax, -half_w - ax, half_w - ax};
-    const float ly[4] = {-half_h - ay, -half_h - ay, half_h - ay, half_h - ay};
+    // Local corners (in world units, centered on anchor):
+    //   0=(-w,-h) 1=(+w,-h) 2=(-w,+h) 3=(+w,+h)
+    float lx[4] = {-half_w - ax, half_w - ax, -half_w - ax, half_w - ax};
+    float ly[4] = {-half_h - ay, -half_h - ay, half_h - ay, half_h - ay};
+    // JS `R3a` L486-487: `s.Wg(rot); s.ik(.5,.5)` — sprite rotation about
+    // its center anchor. `Rotation` is the XML attribute in degrees (the raw
+    // number `u.H(attr)`; the camera's own rotation converts with *pi/180 at
+    // L79, so degrees is the convention). 0 = no-op; dojo has no Rotation,
+    // locations like autumn carry one (parsed as its leading number by the
+    // same numeric reader the native uses for every XML float).
+    if (t.rotation != 0.0f) {
+        const float th = t.rotation * 3.14159265358979323846f / 180.0f;
+        const float ct = std::cos(th), st = std::sin(th);
+        for (int c = 0; c < 4; ++c) {
+            const float px = lx[c] * ct - ly[c] * st;
+            const float py = lx[c] * st + ly[c] * ct;
+            lx[c] = px;
+            ly[c] = py;
+        }
+    }
     // Normalized UV corners [0,1].
     // Y-origin: the atlas frame rect is top-left origin and the upload is
     // top-row-first with an identity sampler (stb top row -> v=0 row), so
@@ -85,7 +103,7 @@ void sprite_to_quad(const sf2::scene::Sprite& s, const Camera& camera, float fac
     // BEFORE the shared camera projection runs. Corner pairing preserved:
     // 0=(-w,-h) 1=(+w,-h) 2=(-w,+h) 3=(+w,+h).
     const float sx0 = (t.x + trim_adj_x) * layer_scale;
-    const float sy0 = (t.y + trim_adj_y) * layer_scale;
+    const float sy0 = (t.y + trim_adj_y) * layer_scale + layer_y;
     const float lx0 = lx[0] * layer_scale, lx1 = lx[1] * layer_scale;
     const float ly0 = ly[0] * layer_scale, ly1 = ly[2] * layer_scale;
     const float sx[4] = {
@@ -158,9 +176,9 @@ GLuint Renderer::texture_lookup(const std::string& name) const {
 }
 
 void Renderer::draw_sprite(const sf2::scene::Sprite& sprite, const Camera& camera,
-                            float factor, float layer_scale) {
+                            float factor, float layer_scale, float layer_y) {
     SpriteQuad quad;
-    sprite_to_quad(sprite, camera, factor, layer_scale, quad);
+    sprite_to_quad(sprite, camera, factor, layer_scale, layer_y, quad);
     GLuint texture = 0;
     if (!sprite.solid) {
         texture = textures_.count(sprite.texture_name) ? textures_[sprite.texture_name] : 0;
