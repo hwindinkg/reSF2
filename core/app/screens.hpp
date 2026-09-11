@@ -17,14 +17,20 @@
 //     `Le` nav buttons (menu id 262): Dojo/Map/Shop/Profile/Settings.
 //     There is NO JS GeneralMenu screen — screen 8 does not exist in this
 //     build (`dJ()` returns 0/3/4/5/6/7 only); the shell home is the Dojo.
-//   - Map (screen 5, Ya L2124-2132): the battle-node screen. The
-//     backgrounds are `map/part0..6` (asset ids 336..324, the `map0` frame
-//     is 2046x854); the battle nodes come from stages.xml <Zone>/<Battle>
-//     with X/Y positions (qe.X0a L2144: node x = battle.x*uM + bg.w/2,
-//     y = -battle.y*uM + bg.h/2, uM ~ 1). Clicking a node starts a fight.
-//   - The battle-node button art is in map/buttons.json:
-//     BattleBtnBase/base_<name> + BattleBtnActive/active_<name> +
-//     BattleBtnPressed/pressed_<name> (e.g. base_training/active_training).
+//   - Map (screen 5, Ya L2124-2132): the battle-node screen. The backdrop is
+//     `map<N>` where N = parseInt(FileName.split(".")[1]) - 1 (JS `qe.W0a`
+//     L2143; res/map/partN json, the mapN frame is 2046x854). The battle
+//     nodes come from stages.xml <Zone>/<Battle> with X/Y positions
+//     (qe.X0a L2144: x = battle.x*uM + bg.w/2, y = -battle.y*uM + bg.h/2,
+//     then -50; uM = 1.5003663003663004, JS L2488). Clicking a node starts a
+//     fight.
+//   - The battle-node button art is per node (JS `Qr` L2092-2095):
+//     BattleBtn{Base|Active|Lock|LockActive|Pressed}/<prefix><Icon>, prefix
+//     base_/active_/locked_/locked_active_/pressed_ (`Lc.*` L2482), Icon the
+//     Battle Icon attr (default "training", L205).
+//     There is NO zone tab strip and no BRACKET button in the JS map
+//     (PORT_AUDIT_UI §2.3/§2.4): zone nav is the `Vr` scroller + the `Rr`
+//     info panel / `Xr` status list (OPEN — not ported).
 //
 // The misc/menu/controller/fight-ui atlases are KTX ASTC — the data layer
 // CPU-decodes them (core/data/ktx.cpp) and App::init registers their frames,
@@ -105,10 +111,12 @@ public:
     struct Node {
         std::string name;
         std::string type;
+        std::string icon;      // Battle Icon (JS `Lc.icon`; default "training",
+                               // L205) — the per-node `BattleBtn*` art suffix
         std::string zone;      // the stages.xml Zone Name (JS `st`)
         std::string location;  // the Battle Location (JS fight backdrop)
         std::vector<std::string> warriors;  // Fight Warriors FirstNames (Xs)
-        float x = 0.0f;  // screen pos (center)
+        float x = 0.0f;  // screen pos (center; JS `qe.X0a` L2144)
         float y = 0.0f;
         bool active = true;
     };

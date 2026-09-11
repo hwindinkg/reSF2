@@ -64,9 +64,8 @@ struct LoopStep {
     int expect_screen = -1;
     int hold_frames = 0;   // same-screen steps: advance N frames after click
     const char* capture = nullptr;
-    // Zone-tab pre-click (the map's zone strips; 0/0 = none). The map opens
-    // on the save's zone (ZONE_1); fights living in another zone (Punchbag)
-    // need their tab selected first (JS `Ya.HXa` L2123 strips).
+    // Optional pre-click (0/0 = none). The JS map has no zone-tab strip
+    // (PORT_AUDIT_UI §2.3); kept for drivers that need a settle click.
     float tab_x = 0.0f;
     float tab_y = 0.0f;
 };
@@ -87,10 +86,12 @@ struct LoopStep {
 //   - dojo/shell nav: the shared `za` VERTICAL column (kZaNav, za_layout):
 //     nav_cx = 184, rows y = 126/231/337/442/548 for
 //     MAP/SHOP/PROFILE/SETTINGS (index 1..4; DOJO is index 0/self).
-//   - map nodes: x = X + 640, y = 360 - Y (stages.xml <Zone> coords):
-//       Training (X=158,Y=145) -> (798, 215)
-//       Bosses    (X=-100,Y=-40) -> (540, 400)
-//     (the first zone = the tutorial zone the map shows).
+//   - map nodes (JS `qe.X0a` L2144): x = pos.x*uM + bg.w/2, y = -pos.y*uM
+//     + bg.h/2 - 50, mapped through the 2046x854 backdrop -> the 1280x720
+//     view (uM = 1.5003663). The map opens on the save's CurrentZone
+//     (ZONE_1); there is NO zone-tab strip in the JS map (PORT_AUDIT_UI
+//     §2.3) and the zone scroller is not ported, so only ZONE_1 nodes are
+//     reachable. Its first node (BOSS_LYNX, X=-180 Y=-45) sits at ~(471,375).
 //   - shop card grid: first card center (0.25*1280+150, 200+75).
 //   - equipment owned-item grid: first card (0.55*1280+110, 220+40).
 //   - BACK buttons: top-left (64, 40) on Map/Shop/Equipment (pops back to
@@ -99,12 +100,13 @@ static const LoopStep kLoopSteps[] = {
     // 0: Dojo -> Map (the MAP button). Capture loop_map.png on arrival.
     {184.0f, 231.0f, "dojo->map (MAP)", kScreenDojo, 0, kScreenMap, 0,
      "loop_map.png"},
-    // 1: Map -> Bosses fight (540, 400) - the first money-bearing fight
-    //    (Reward Money=70 Exp=10). The fight runs to KO (auto-attack) and
+    // 1: Map -> ZONE_1 boss fight (BOSS_LYNX, X=-180 Y=-45 -> ~471,375) —
+    //    a money-bearing fight. The fight runs to KO (auto-attack) and
     //    pushes Results. Capture the fists fight (before-equip evidence).
-    //    Punchbag tab (200, 38) first: the map opens on the save's ZONE_1.
-    {540.0f, 400.0f, "map->Bosses fight", kScreenMap, 0, kScreenFight, 0,
-     "loop_fight_fists.png", 200.0f, 38.0f},
+    //    No zone tab: the map opens on the save's CurrentZone (ZONE_1) and
+    //    the JS map has no tab strip (PORT_AUDIT_UI §2.3).
+    {471.0f, 375.0f, "map->BOSS_LYNX fight", kScreenMap, 0, kScreenFight, 0,
+     "loop_fight_fists.png"},
     // 2: Results -> Map (click anywhere pops; the results->map flow pops
     //    the dead Fight screen too). Capture loop_results.png on arrival.
     {1280 * 0.5f, 360.0f, "results->map", kScreenResults, 0, kScreenMap, 0, "loop_results.png"},
@@ -134,11 +136,10 @@ static const LoopStep kLoopSteps[] = {
     // 10: Dojo -> Map again (MAP).
     {184.0f, 231.0f, "dojo->map (MAP)", kScreenDojo, 0, kScreenMap, 0,
      nullptr},
-    // 11: Map -> Training fight (798, 215) with the knives equipped.
-    //     Capture loop_fight.png on arrival (the after-equip fight).
-    //     Punchbag tab first (same zone reason as step 1).
-    {798.0f, 215.0f, "map->Training fight (knives)", kScreenMap, 0, kScreenFight, 0,
-     "loop_fight.png", 200.0f, 38.0f},
+    // 11: Map -> ZONE_1 boss fight with the knives equipped (same reachable
+    //     node as step 1). Capture loop_fight.png on arrival (after-equip).
+    {471.0f, 375.0f, "map->BOSS_LYNX fight (knives)", kScreenMap, 0, kScreenFight, 0,
+     "loop_fight.png"},
     // 12: Results -> Map (the loop end).
     {1280 * 0.5f, 360.0f, "results->map (loop end)", kScreenResults, 0, kScreenMap, 0, nullptr},
 };
@@ -312,9 +313,7 @@ struct UiTourStep {
     const char* capture = nullptr;
     int key = 0;
     bool no_click = false;
-    // Zone-tab pre-click (the map's zone strips; 0/0 = none). The map opens
-    // on the save's zone (ZONE_1), so the tutorial/dojo fights living in the
-    // Punchbag zone need their tab selected first.
+    // Optional pre-click (0/0 = none; the JS map has no zone-tab strip).
     float tab_x = 0.0f;
     float tab_y = 0.0f;
 };
@@ -339,11 +338,10 @@ static const UiTourStep kUiTourSteps[] = {
     // 8: Dojo -> Map again. The JS hub has no direct Fight button (it is the
     //    `FightNone` viewer); fights launch from the map's zone nodes.
     {184.0f, 231.0f, "dojo->map (fight)", 3, 10, 5, 0, nullptr},
-    // 9: Map -> Training fight. The map opens on the save's ZONE_1; the
-    //    Punchbag tab (200,38) selects the tutorial zone, then the Training
-    //    node (798,215) launches the dojo fight. Hold 250 for the HUD.
-    {798.0f, 215.0f, "map->Training fight", 5, 10, 6, 250, "port_fight.png", 0, false,
-     200.0f, 38.0f},
+    // 9: Map -> ZONE_1 boss fight (BOSS_LYNX ~471,375). The map opens on the
+    //    save's CurrentZone (ZONE_1) and has no zone-tab strip; its first
+    //    node launches the fight. Hold 250 for the HUD.
+    {471.0f, 375.0f, "map->BOSS_LYNX fight", 5, 10, 6, 250, "port_fight.png"},
     // 10: Pause via P, capture the pause menu.
     {0.0f, 0.0f, "pause", 6, 10, -1, 40, "port_pause.png", 80},
     // 11: Resume via P, run to KO -> Results captures on arrival.

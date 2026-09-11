@@ -4,6 +4,7 @@
 
 #include <GLFW/glfw3.h>
 
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -92,6 +93,59 @@ bool decode_atlas_any(const std::string& base, sf2::data::Texture& out) {
     return false;
 }
 
+// Localized asset resolution (JS `G.bg`, L2393-2394): a localized file is
+// named `<stem>-<lang>.<hash><ext>`; when it is absent the `<lang=en>` file
+// is used (the EN fallback). Returns "" when neither exists.
+std::string find_localized_file(const std::string& dir, const std::string& stem,
+                                const std::string& lang, const std::string& ext) {
+    for (const std::string& l : {lang, std::string("en")}) {
+        if (l.empty()) continue;
+        const std::string prefix = stem + "-" + l + ".";
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind(prefix, 0) == 0 && entry.path().extension() == ext) {
+                    return entry.path().string();
+                }
+            }
+        } catch (const std::exception&) {
+            // missing directory — fall through to the EN attempt
+        }
+    }
+    return {};
+}
+
+// JS `G.Ska` (L2392): lowercase the requested language and coerce it to the
+// supported set `G.v9` (L2492); anything else (including null) becomes "en".
+// Vanilla `assets/localization.xml` (<Languages Default="eng">) agrees.
+std::string resolve_language(const std::string& lang) {
+    std::string l;
+    l.reserve(lang.size());
+    for (const char ch : lang) {
+        l.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    static const char* const kSupported[] = {"tr", "ru", "pt", "ko", "ja",
+                                             "it", "fr", "es", "en", "de"};
+    for (const char* const s : kSupported) {
+        if (l == s) return l;
+    }
+    return "en";
+}
+
+// JS `Tk.n5` (L88) verbatim: the localized "Loading" word (UTF-8 bytes).
+const char* loading_word(const std::string& lang) {
+    if (lang == "de") return "Laden";
+    if (lang == "es") return "Cargando";
+    if (lang == "fr") return "Chargement";
+    if (lang == "it") return "Caricamento";
+    if (lang == "ja") return "\xE8\xAA\xAD\xE3\x81\xBF\xE8\xBE\xBC\xE3\x81\xBF\xE4\xB8\xAD";
+    if (lang == "ko") return "\xEB\xA1\x9C\xEB\x94\xA9 \xEC\xA4\x91";
+    if (lang == "pt") return "Carregando";
+    if (lang == "ru") return "\xD0\x97\xD0\xB0\xD0\xB3\xD1\x80\xD1\x83\xD0\xB7\xD0\xBA\xD0\xB0";
+    if (lang == "tr") return "Y\xC3\xBCkleniyor";
+    return "Loading";
+}
+
 // Helper to load a TexturePacker atlas (json + sibling texture) under dir/prefix.
 static GLuint load_ui_atlas_bundle_impl(sf2::app::App& app, const std::string& dir, const std::string& prefix) {
     std::string json_path;
@@ -131,9 +185,14 @@ App::App() = default;
 
 App::~App() { shutdown(); }
 
-bool App::init(const std::string& res_root, const std::string& save_path) {
+bool App::init(const std::string& res_root, const std::string& save_path,
+               const std::string& lang) {
     res_root_ = res_root;
     save_path_ = save_path;
+    // JS `G.Ska` (L2392): lowercase + default/coerce to "en" (the supported
+    // set is `G.v9`, L2492). Runtime lang source (JS `Ca.c6a()` = the
+    // platform `getCurrentLanguage`) is the caller's to pass; default "en".
+    lang_ = resolve_language(lang);
 
     renderer_ = std::make_unique<sf2::render::Renderer>();
     GLFWwindow* window = nullptr;
@@ -206,28 +265,75 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
         std::fprintf(stderr, "app: dojo bg load failed: %s\n", e.what());
     }
 
-    // Menu font (BMFont binary + png page).
+    // Menu font (BMFont binary + png page): JS asset ids 264/265,
+    // `ui/font{lang}.{png,fnt}` (PORT_AUDIT_UI §0.3 — the RU BMF ships).
+    // The .fnt page name is "-" (a relative ref); the real page is
+    // ui/font-<lang>.<hash>.png. Missing localized files fall back to EN
+    // (JS `G.bg` L2394). The texture cache key stays "font-en" because the
+    // sprite layer aliases the menu font under that name.
     try {
         const std::string ui = res_root + "/ui";
         menu_font_ = std::make_unique<sf2::data::font>();
+        const std::string fnt_path = find_localized_file(ui, "font", lang_, ".fnt");
+        if (fnt_path.empty()) {
+            throw std::runtime_error("no ui/font-*.fnt");
+        }
         {
-            const std::vector<std::uint8_t> fnt_bytes = read_file_bytes(ui + "/font-en.7043b83b.fnt");
+            const std::vector<std::uint8_t> fnt_bytes = read_file_bytes(fnt_path);
             *menu_font_ = sf2::data::font_parse(fnt_bytes.data(), fnt_bytes.size());
         }
-        // The .fnt page name is "-" (a relative ref); the real page is
-        // ui/font-en.<hash>.png (asset id 264 = ui/font{lang}.png).
         sf2::data::Texture font_tex;
-        if (decode_atlas_any(ui + "/font-en", font_tex)) {
+        if (decode_atlas_any(ui + "/font-" + lang_, font_tex)) {
             font_tex_ = renderer_->texture_for("font-en", font_tex);
+        } else if (lang_ != "en" && decode_atlas_any(ui + "/font-en", font_tex)) {
+            font_tex_ = renderer_->texture_for("font-en", font_tex);
+            std::fprintf(stdout, "[app] font page fallback -> en\n");
         } else {
             std::fprintf(stderr, "app: font page png unavailable\n");
         }
-        std::fprintf(stdout, "[app] menu font: %zu chars %dx%d tex %u\n",
-                     menu_font_->chars.size(), menu_font_->scale_w, menu_font_->scale_h,
-                     font_tex_);
+        std::fprintf(stdout, "[app] menu font[%s]: %zu chars %dx%d tex %u (%s)\n",
+                     lang_.c_str(), menu_font_->chars.size(), menu_font_->scale_w,
+                     menu_font_->scale_h, font_tex_, fnt_path.c_str());
     } catch (const std::exception& e) {
         std::fprintf(stderr, "app: font load failed: %s\n", e.what());
         menu_font_.reset();
+    }
+
+    // Splash/Loader art (JS `Rg` L1967 / `ad` L1969; asset ids 274-279):
+    // `splash/loading{lang}.{png,fnt}` (276/277), `splash/logo.png` (275),
+    // `splash/bg.jpg` (279). Crash-safe: a miss leaves the overlay art
+    // null/0 and the boot proceeds (PORT_AUDIT_UI §4.12).
+    try {
+        const std::string splash = res_root + "/splash";
+        const std::string lf = find_localized_file(splash, "loading", lang_, ".fnt");
+        if (!lf.empty()) {
+            const std::vector<std::uint8_t> b = read_file_bytes(lf);
+            splash_loading_font_ =
+                std::make_unique<sf2::data::font>(sf2::data::font_parse(b.data(), b.size()));
+            sf2::data::Texture ltex;
+            if (decode_atlas_any(splash + "/loading-" + lang_, ltex) ||
+                (lang_ != "en" && decode_atlas_any(splash + "/loading-en", ltex))) {
+                splash_loading_tex_ = renderer_->texture_for("splash_loading", ltex);
+            }
+        }
+        sf2::data::Texture logo;
+        if (decode_atlas_any(splash + "/logo", logo)) {
+            splash_logo_tex_ = renderer_->texture_for("splash_logo", logo);
+            splash_logo_w_ = logo.w;
+            splash_logo_h_ = logo.h;
+        }
+        sf2::data::Texture bg;
+        if (decode_atlas_any(splash + "/bg", bg)) {
+            splash_bg_tex_ = renderer_->texture_for("splash_bg", bg);
+            splash_bg_w_ = bg.w;
+            splash_bg_h_ = bg.h;
+        }
+        std::fprintf(stdout,
+                     "[app] splash: loading font %zu chars tex %u, logo tex %u, bg tex %u\n",
+                     splash_loading_font_ != nullptr ? splash_loading_font_->chars.size() : 0,
+                     splash_loading_tex_, splash_logo_tex_, splash_bg_tex_);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "app: splash load failed: %s\n", e.what());
     }
 
     // Fight HUD fonts: digits (timer) + round (round label). The .fnt page
@@ -425,14 +531,24 @@ bool App::init(const std::string& res_root, const std::string& save_path) {
     return true;
 }
 
+// Boot overlay length: JS `Rg` (Preloader, L1967) runs 0-95%, then `ad`
+// (Loader, L1969) holds "Loading 100%" until `aHa>30` frames. The native
+// shell shows the same art for a fixed number of 1/60 steps (asset loading
+// itself is synchronous in `init`).
+constexpr int kBootSplashFrames = 75;
+constexpr int kBootLoaderFrames = 30;
+
 void App::boot() {
     // Boot to the Dojo home screen (screen 3) — the ORIGINAL starts in the
     // Dojo (the JS flow: Preloader(0) -> Loader(2) -> Dojo(3)), NOT in the
-    // GeneralMenu (screen 8; the native GeneralMenu is kept for the menu
-    // flow but the game boots through Preloader -> Loader -> Dojo -> the
-    // home hub; the shell skips the loading screens and starts at the dojo).
+    // GeneralMenu (screen 8). The shell draws the Preloader/Loader art as a
+    // boot overlay (JS `Rg` L1967 / `ad` L1969, PORT_AUDIT_UI §4.12); the
+    // Dojo is pushed immediately so screen ids/inputs stay deterministic,
+    // and the overlay is draw-only (skipped when headless).
     std::fprintf(stdout, "[screen] boot: Preloader(0) -> Loader(2) -> Dojo(3)\n");
     std::fflush(stdout);
+    boot_splash_total_ = kBootSplashFrames;
+    boot_splash_frames_ = kBootSplashFrames;
     screens_->push(make_screen(*screens_, kScreenDojo));
     // Session start for the quest engine (JS `v.uwb` -> QUEST_EVENT_SESSION,
     // fired from the loader; the Dojo push above already fired ChangeTab +
@@ -505,6 +621,10 @@ void App::poll_input() {
 }
 
 void App::update_fixed(float dt) {
+    // Boot overlay countdown (JS `Rg`/`ad`), one step per fixed update.
+    if (boot_splash_frames_ > 0) {
+        --boot_splash_frames_;
+    }
     screens_->update(dt);
 }
 
@@ -514,7 +634,99 @@ void App::render_frame() {
     camera.view_h = static_cast<float>(view_h_);
     renderer_->begin_frame(camera);
     screens_->render(*this);
+    // Boot overlay (JS `Rg`/`ad`). Headless runs skip the draw so captures
+    // and goldens stay byte-stable (the countdown still runs).
+    if (boot_splash_frames_ > 0 && headless_frames_ == 0) {
+        draw_boot_splash();
+    }
     renderer_->end_frame();
+}
+
+void App::draw_boot_splash() {
+    // JS `Rg`/`Tk` (L1967, L87-90) Preloader -> `ad` (L1969) Loader.
+    // The full `Tk` node layout (cast id 278, scroll id 274, the `Ev`
+    // 95-100% module split) is OPEN (PORT_AUDIT_UI §4.12); this draws the
+    // splash bg (id 279) + logo (id 275) and the progress text. The text
+    // BMF is `splash/loading{lang}` (ids 276/277); the Cyrillic/UTF-8
+    // glyph path in `draw_text_with_font` is OPEN.
+    const bool loader = boot_splash_frames_ <= kBootLoaderFrames;
+    sf2::render::Camera ui_cam;
+    ui_cam.center_x = static_cast<float>(view_w_) * 0.5f;
+    ui_cam.center_y = static_cast<float>(view_h_) * 0.5f;
+    ui_cam.zoom = 1.0f;
+    ui_cam.view_w = static_cast<float>(view_w_);
+    ui_cam.view_h = static_cast<float>(view_h_);
+    ui_cam.arena_h = ui_cam.view_h;
+    ui_cam.arena_floor = 0.0f;
+    ui_cam.arena_center_x = ui_cam.center_x;
+
+    // JS `ad` clears the frame to black (L1969: `Ha.yT(new H(0,0,0,1))`);
+    // the Preloader draws its splash over the same black base. This also
+    // hides the Dojo that is already pushed underneath the overlay.
+    {
+        sf2::scene::Sprite cover;
+        cover.solid = true;
+        cover.color_r = 0.0f;
+        cover.color_g = 0.0f;
+        cover.color_b = 0.0f;
+        cover.color_a = 1.0f;
+        cover.frame_w = static_cast<float>(view_w_);
+        cover.frame_h = static_cast<float>(view_h_);
+        cover.transform.set_pos(ui_cam.center_x, ui_cam.center_y);
+        renderer_->draw_sprite(cover, ui_cam);
+    }
+
+    if (!loader) {
+        if (splash_bg_tex_ != 0 && splash_bg_w_ > 0 && splash_bg_h_ > 0) {
+            sf2::scene::Sprite bg;
+            bg.texture_name = "splash_bg";
+            bg.frame_x = 0.0f;
+            bg.frame_y = 0.0f;
+            bg.frame_w = static_cast<float>(splash_bg_w_);
+            bg.frame_h = static_cast<float>(splash_bg_h_);
+            bg.tex_w = static_cast<float>(splash_bg_w_);
+            bg.tex_h = static_cast<float>(splash_bg_h_);
+            bg.solid = false;
+            bg.transform.set_pos(ui_cam.center_x, ui_cam.center_y);
+            bg.transform.set_scale(static_cast<float>(view_w_) / static_cast<float>(splash_bg_w_),
+                                   static_cast<float>(view_h_) / static_cast<float>(splash_bg_h_));
+            renderer_->draw_sprite(bg, ui_cam);
+        }
+        if (splash_logo_tex_ != 0 && splash_logo_w_ > 0 && splash_logo_h_ > 0) {
+            sf2::scene::Sprite logo;
+            logo.texture_name = "splash_logo";
+            logo.frame_x = 0.0f;
+            logo.frame_y = 0.0f;
+            logo.frame_w = static_cast<float>(splash_logo_w_);
+            logo.frame_h = static_cast<float>(splash_logo_h_);
+            logo.tex_w = static_cast<float>(splash_logo_w_);
+            logo.tex_h = static_cast<float>(splash_logo_h_);
+            logo.solid = false;
+            logo.transform.set_pos(ui_cam.center_x, ui_cam.center_y);
+            renderer_->draw_sprite(logo, ui_cam);
+        }
+    }
+
+    if (splash_loading_font_ == nullptr || splash_loading_tex_ == 0) {
+        return;
+    }
+    char buf[64];
+    if (loader) {
+        // JS `ad.Ea` (L1969): literally "Loading 100%".
+        std::snprintf(buf, sizeof(buf), "Loading 100%%");
+    } else {
+        // JS `Tk.n5` (L88): "<word> <n>%" mapped 0..95.
+        const int pre_span = boot_splash_total_ - kBootLoaderFrames;
+        const int elapsed = pre_span - boot_splash_frames_;
+        const int pct = pre_span > 0 ? (elapsed * 95) / pre_span : 95;
+        std::snprintf(buf, sizeof(buf), "%s %d%%", loading_word(lang_), pct);
+    }
+    const float scale = 1.0f;
+    const float w = measure_text(*splash_loading_font_, buf, scale);
+    draw_text_with_font(*splash_loading_font_, splash_loading_tex_,
+                        ui_cam.center_x - w * 0.5f,
+                        ui_cam.center_y + static_cast<float>(view_h_) * 0.25f, buf, scale,
+                        1.0f, 1.0f, 1.0f);
 }
 
 void App::run_one_frame() {
@@ -590,6 +802,7 @@ void App::shutdown() {
     save_.reset();
     dojo_sprite_.reset();
     menu_font_.reset();
+    splash_loading_font_.reset();
     digits_font_.reset();
     round_font_.reset();
     if (renderer_) {

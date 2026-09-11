@@ -105,8 +105,11 @@ public:
     App& operator=(const App&) = delete;
 
     // Creates the window + GL context, loads the shared assets, boots to
-    // the main menu. Returns false on failure.
-    bool init(const std::string& res_root, const std::string& save_path);
+    // the main menu. Returns false on failure. `lang` selects the UI
+    // language: the JS default is "en" (`G.lang` L134; `G.Ska` L2392) and
+    // remains the fallback when a localized asset is absent (`G.bg` L2394).
+    bool init(const std::string& res_root, const std::string& save_path,
+              const std::string& lang = "en");
 
     // The main loop — runs until the window closes. `headless_frames`
     // > 0 runs that many frames then closes (used by the log-only verify
@@ -145,9 +148,19 @@ public:
     // unavailable.
     sf2::scene::Sprite* dojo_sprite() const { return dojo_sprite_.get(); }
 
-    // The menu font (ui/font-en.fnt + png). Null when unavailable.
+    // The menu font (ui/font{lang}.fnt + png — JS asset ids 264/265).
+    // Null when unavailable.
     const sf2::data::font* menu_font() const { return menu_font_.get(); }
     unsigned int font_texture() const { return font_tex_; }
+    // The resolved UI language (JS `G.lang`, default "en").
+    const std::string& language() const { return lang_; }
+    // Splash/loader art (JS `Rg` L1967 / `ad` L1969, asset ids 274-279):
+    // `splash/loading{lang}` BMF + `splash/logo.png` + `splash/bg.jpg`.
+    // Null/0 when unavailable (the boot overlay then draws nothing).
+    const sf2::data::font* splash_loading_font() const { return splash_loading_font_.get(); }
+    unsigned int splash_loading_texture() const { return splash_loading_tex_; }
+    unsigned int splash_logo_texture() const { return splash_logo_tex_; }
+    unsigned int splash_bg_texture() const { return splash_bg_tex_; }
     const sf2::data::font* digits_font() const { return digits_font_.get(); }
     unsigned int digits_texture() const { return digits_tex_; }
     const sf2::data::font* round_font() const { return round_font_.get(); }
@@ -234,6 +247,8 @@ private:
     void poll_input();
     void update_fixed(float dt);
     void render_frame();
+    // Draws the Preloader/Loader boot overlay (JS `Rg` L1967 / `ad` L1969).
+    void draw_boot_splash();
 
     // Called by ScreenManager boot; builds the initial MainMenu screen.
     void boot();
@@ -243,6 +258,8 @@ private:
 
     std::string res_root_;
     std::string save_path_;
+    // The resolved UI language (JS `G.lang`; default "en", `G.Ska` L2392).
+    std::string lang_ = "en";
 
     std::unique_ptr<sf2::render::Renderer> renderer_;
     std::unique_ptr<ScreenManager> screens_;
@@ -255,6 +272,18 @@ private:
     std::unique_ptr<sf2::scene::Sprite> dojo_sprite_;
     std::unique_ptr<sf2::data::font> menu_font_;
     unsigned int font_tex_ = 0;
+    // Splash/loader art (JS `Rg` L1967 / `ad` L1969; asset ids 274-279).
+    std::unique_ptr<sf2::data::font> splash_loading_font_;
+    unsigned int splash_loading_tex_ = 0;
+    unsigned int splash_logo_tex_ = 0;
+    unsigned int splash_bg_tex_ = 0;
+    int splash_logo_w_ = 0;
+    int splash_logo_h_ = 0;
+    int splash_bg_w_ = 0;
+    int splash_bg_h_ = 0;
+    // Boot overlay countdown in fixed steps (0 = off; drawn when not headless).
+    int boot_splash_frames_ = 0;
+    int boot_splash_total_ = 0;
     std::unique_ptr<sf2::data::font> digits_font_;
     unsigned int digits_tex_ = 0;
     std::unique_ptr<sf2::data::font> round_font_;
