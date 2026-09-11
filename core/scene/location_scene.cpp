@@ -74,6 +74,29 @@ void parse_color(const std::string& hex, float& r, float& g, float& b) {
     b = static_cast<float>(v & 0xFF) / 255.0f;
 }
 
+// Particle color parse: `Na.Rv(K.parseInt(s))` (JS L1448 + `Zib` L1152).
+// `s` is a packed ARGB literal (e.g. "0xff5C3D2A"): R = bits 16-23,
+// G = 8-15, B = 0-7, A = 24-31, each /255. Returns false (leaving the
+// arguments untouched) on a malformed value, so the caller keeps white.
+bool parse_argb(const std::string& s, float& r, float& g, float& b, float& a) {
+    if (s.empty()) {
+        return false;
+    }
+    unsigned long v = 0;
+    try {
+        v = std::stoul(s, nullptr, 16);  // base 16 accepts the "0x" prefix
+    } catch (...) {
+        return false;
+    }
+    const std::uint32_t argb = static_cast<std::uint32_t>(v);
+    r = static_cast<float>((argb >> 16) & 0xFFu) / 255.0f;
+    g = static_cast<float>((argb >> 8) & 0xFFu) / 255.0f;
+    b = static_cast<float>(argb & 0xFFu) / 255.0f;
+    a = static_cast<float>((argb >> 24) & 0xFFu) / 255.0f;
+    return true;
+}
+
+
 // JS `zh.Gb` + `zh.cmb` (L1145-1146): evaluate segment `seg` at local time
 // `t`. Ease 0 = line, Ease != 0 = parabola; both hit `A` at t=0 and `B` at
 // t=Period (cmb solves `b`/`c` so `e*(P+b)^2+c == B`). This is the D6
@@ -208,6 +231,15 @@ ParticleLayer parse_particle(const pugi::xml_node& node, std::uint32_t ordinal) 
     p.prewarm = prewarm != nullptr && std::strcmp(prewarm, "1") == 0;
     const char* color = prm.attribute("Color").value();
     p.color = color != nullptr ? color : "";
+    // JS `Zib` (L1151-1152): "a,b" -> [Na.Rv(a), Na.Rv(b)]; a single value ->
+    // [Na.Rv(a)]. Only `rP[0]` reaches the fragment (the shader's mix
+    // parameter `a_t` is the always-zero `view.KXa`), so keep the first.
+    if (!p.color.empty()) {
+        const std::size_t comma = p.color.find(',');
+        const std::string first =
+            comma == std::string::npos ? p.color : p.color.substr(0, comma);
+        parse_argb(first, p.tint_r, p.tint_g, p.tint_b, p.tint_a);
+    }
     return p;
 }
 
@@ -401,7 +433,7 @@ void LocationScene::load(const std::string& params_xml, const std::string& atlas
 
 void LocationScene::load(const std::string& params_xml, const std::vector<std::string>& atlas_jsons,
                          const std::string& res_root) {
-    (void)res_root;
+    res_root_ = res_root;
 
     sf2::data::xml_doc doc;
     const std::vector<std::uint8_t> params_bytes = read_file_bytes(params_xml);
@@ -528,15 +560,37 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
                 for (int i = 0; i < 150; ++i) {
                     step_particle_(layer->particles.back(), kParticleFixedStep);
                 }
+                // JS `zjb` L477: `QIa` appends the emitter node to the layer
+                // display list in document order; record it for interleaving.
+                {
+                    Layer::DrawItem item;
+                    item.is_particle = true;
+                    item.particle_index = layer->particles.size() - 1;
+                    layer->draw_order.push_back(item);
+                }
             }
             // ModelsViewer children are skipped (fighters are drawn by the
             // fight screen); ParticleEffect/NewParticleEffect are parsed above.
             if (sprite != nullptr) {
                 // JS `Qi.NWa`/`Dla` L487/L1599: z = -0.01*spriteIndex.
                 sprite->z = -0.01f * static_cast<float>(sprite_index);
+                // JS `zjb` L477: `ujb`/`UIa` append the sprite in document
+                // order. Weak ref so a later erase cannot dangle; index is
+                // not used (sprites may be erased post-load).
+                {
+                    Layer::DrawItem item;
+                    item.is_particle = false;
+                    item.sprite = sprite;
+                    layer->draw_order.push_back(item);
+                }
                 layer->sprites.push_back(std::move(sprite));
                 ++sprite_index;
             }
+        }
+        // Only emitter-carrying layers need the ordered list; keep the common
+        // (sprite-only) layer lean.
+        if (layer->particles.empty()) {
+            layer->draw_order.clear();
         }
         layers_.push_back(std::move(layer));
     }
@@ -788,19 +842,33 @@ std::vector<ParticleDraw> LocationScene::particle_draws() const {
     for (const auto& layer : layers_) {
         for (const ParticleLayer& emitter : layer->particles) {
             for (const Particle& p : emitter.live) {
-                ParticleDraw d;
-                d.x = p.x;
-                d.y = p.y;
-                d.rotation_rad = p.rotation_rad;
-                d.alpha = p.alpha;
-                d.start_size = p.start_size;
-                d.factor = layer->factor;
-                d.frame = emitter.frame;
-                out.push_back(std::move(d));
+                out.push_back(make_particle_draw_(*layer, emitter, p));
             }
         }
     }
     return out;
+}
+
+ParticleDraw LocationScene::make_particle_draw_(const Layer& layer,
+                                                const ParticleLayer& emitter,
+                                                const Particle& p) const {
+    ParticleDraw d;
+    // JS `jh` ctor (L1148): the emitter node `Hd` carries `translate=(X,Y)`;
+    // the batch owner `Xb` child carries `scale=(1,-1)` (L1149). The rendered
+    // centre is therefore `(X + ca.x, Y - ca.y)` and the rotation flips sign.
+    d.x = emitter.x + p.x;
+    d.y = emitter.y - p.y;
+    d.rotation_rad = -p.rotation_rad;
+    d.alpha = p.alpha;
+    d.start_size = p.start_size;
+    d.factor = layer.factor;
+    d.frame = emitter.frame;
+    // JS `BA.rP[0] = Zib(Color)[0]` (L1151-1152); white when absent.
+    d.color_r = emitter.tint_r;
+    d.color_g = emitter.tint_g;
+    d.color_b = emitter.tint_b;
+    d.color_a = emitter.tint_a;
+    return d;
 }
 
 void LocationScene::render_layers(sf2::render::Renderer& renderer,
@@ -826,11 +894,51 @@ void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& l
     // layer keeps scale 1 and carries translate_y = F9*(1-Bj) (D4/W2). At
     // Bj=1 both branches are identity (only push-in/lens-zoom moves pixels).
     const float layer_y = scaled ? 0.0f : camera.f9() * (1.0f - camera.layer_zoom);
-    for (const auto& sprite : layer.sprites) {
-        // The game's ujb (JS L477) draws pixel_1 masks opaque — they are
-        // part of the arena frame (the side/top/bottom blackout around the
-        // 1960x560 arena), so they draw like every other sprite.
-        renderer.draw_sprite(*sprite, camera, layer.factor, ls, layer_y);
+
+    // Emitter-free layers keep the previous sprite-only path byte-for-byte.
+    if (layer.particles.empty()) {
+        for (const auto& sprite : layer.sprites) {
+            // The game's ujb (JS L477) draws pixel_1 masks opaque — they are
+            // part of the arena frame (the side/top/bottom blackout around the
+            // 1960x560 arena), so they draw like every other sprite.
+            renderer.draw_sprite(*sprite, camera, layer.factor, ls, layer_y);
+        }
+        return;
+    }
+
+    // The location effects atlas `E.get(1304)` = `fight/particles.png`
+    // (manifest L2490 token 1304; frames in token 1305). Lazy + cached.
+    renderer.ensure_particle_atlas(res_root_);
+
+    const auto draw_emitter = [&](const ParticleLayer& emitter) {
+        for (const Particle& p : emitter.live) {
+            renderer.draw_particle(make_particle_draw_(layer, emitter, p), camera, ls, layer_y);
+        }
+    };
+
+    if (layer.draw_order.empty()) {
+        // Defensive: a layer built without order info draws sprites then
+        // emitters (document order was not recorded).
+        for (const auto& sprite : layer.sprites) {
+            renderer.draw_sprite(*sprite, camera, layer.factor, ls, layer_y);
+        }
+        for (const ParticleLayer& emitter : layer.particles) {
+            draw_emitter(emitter);
+        }
+        return;
+    }
+
+    // JS `nja` L29: draw self, then each display-list child in list order.
+    // `zjb` L476-477 appends sprites and emitters in document order, and the
+    // WebGL context disables depth (L64), so this is the exact composition.
+    for (const Layer::DrawItem& item : layer.draw_order) {
+        if (item.is_particle) {
+            if (item.particle_index < layer.particles.size()) {
+                draw_emitter(layer.particles[item.particle_index]);
+            }
+        } else if (const std::shared_ptr<Sprite> sprite = item.sprite.lock()) {
+            renderer.draw_sprite(*sprite, camera, layer.factor, ls, layer_y);
+        }
     }
 }
 

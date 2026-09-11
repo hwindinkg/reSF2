@@ -52,6 +52,7 @@
 #include "scene/ai.hpp"
 #include "scene/damage.hpp"
 #include "scene/effects.hpp"
+#include "scene/magic_effects.hpp"
 #include "scene/fighter.hpp"
 #include "scene/move_def.hpp"
 #include "scene/perks.hpp"
@@ -62,6 +63,295 @@
 #include "texture.hpp"
 
 namespace sf2::scene {
+
+// ---------------------------------------------------------------------------
+// Stage <Rules> engine (JS `bb.OE`/`M3`/`xe` L887-894 + manager `du` L894-910).
+//
+// The JS parses every child of a Fight's <Rules> into a typed rule object
+// (`bb.M3` dispatch L888-891 for the item/UI tags, `bb.xe` L891-894 for the
+// `ERule*` combat tags) and keeps them in `du.Ae`; the active subset is the
+// one that passes the per-round `kI` (Round attr, `Lb.kI` L846) and `Ti`
+// (power range, `Lb.Ti`/`c_a` L846) gates (`du.osb` L898). `du.f_a`
+// (L896-897) runs the per-round rule effects; `du.F1` (L897) calls each
+// rule's `Zk`; `du.Ih(1,3,ze)` (L896, dispatched from `ca.ia` L389
+// `PC(1,3)`) + `nj.hh` (L885-886) is the per-frame Ringout detection.
+// `du.Oob` (L901) applies a fired rule and `ca.BT` (L392-393) records the
+// round `ey`.
+//
+// The native keeps the FULL dispatch (every tag maps to a kind so a new rule
+// plugs in without touching the parser) and evaluates the rules the fight
+// sim actually uses: the field-exit detector (Ringout), the timeout rule
+// (TimeOutWin) and the ApplyTo/Round/Eclipse/Death gating. Rules whose
+// effect needs a subsystem the port does not model (HotGround damage,
+// Points, Regeneration/LifeSteal heal, Darkness, RandomArea, Attributes,
+// perk/UI rules) are parsed + gated but carry no sim effect yet (marked OPEN
+// below) - they never silently change the simulation.
+// ---------------------------------------------------------------------------
+enum class FightRuleKind : int {
+    none = 0,
+    // --- `bb.M3` (L888-891): item/UI/wrapper tags (JS `Lb` base) ---------
+    require_item, equip_item, random_acquired_item, no_button, no_animation,
+    random_rule, complex_rule, rules_with_conditions, description,
+    change_fight, currency_cost, raid_currency_cost, avatar, name,
+    // --- `bb.xe` (L891-894): `ERule*` combat tags (JS `Ga` base) ---------
+    attributes, combo, crazy, damage_factor, darkness, hot_ground,
+    invert_joystick, invulnerability, life_steal, light_in_the_darkness,
+    lose_fall, no_bullets_replenishment, no_health_bar, no_perks, perk,
+    points, pvp, random_area, recharge_magic_each_round, regeneration,
+    remove_interval, resistance, ringout, tactic, timeout_win, win_combo,
+    win_shock, win_style, rating_evaluation,
+};
+
+// `bb.M3` (L888-891) + `bb.xe` (L891-894) tag dispatch. The `ERule*` names
+// are the canonical `bb.xe` arguments (e.g. XML `TimeOutWin` ->
+// `ERuleTimeoutWin`); the item/UI names are the raw `bb.M3` cases.
+inline FightRuleKind fight_rule_kind(const std::string& tag) {
+    if (tag == "RequireItem") return FightRuleKind::require_item;
+    if (tag == "EquipItem") return FightRuleKind::equip_item;
+    if (tag == "RandomAquiredItem") return FightRuleKind::random_acquired_item;
+    if (tag == "NoButton") return FightRuleKind::no_button;
+    if (tag == "NoAnimation") return FightRuleKind::no_animation;
+    if (tag == "RandomRule") return FightRuleKind::random_rule;
+    if (tag == "ComplexRule") return FightRuleKind::complex_rule;
+    if (tag == "RulesWithConditions") return FightRuleKind::rules_with_conditions;
+    if (tag == "Description") return FightRuleKind::description;
+    if (tag == "ChangeFight") return FightRuleKind::change_fight;
+    if (tag == "CurrencyCost") return FightRuleKind::currency_cost;
+    if (tag == "RaidCurrencyCost") return FightRuleKind::raid_currency_cost;
+    if (tag == "Avatar" || tag == "ERuleAvatar") return FightRuleKind::avatar;
+    if (tag == "Name") return FightRuleKind::name;
+    if (tag == "Attributes") return FightRuleKind::attributes;
+    if (tag == "Combo") return FightRuleKind::combo;
+    if (tag == "Crazy") return FightRuleKind::crazy;
+    if (tag == "DamageFactor") return FightRuleKind::damage_factor;
+    if (tag == "Darkness") return FightRuleKind::darkness;
+    if (tag == "HotGround") return FightRuleKind::hot_ground;
+    if (tag == "InvertJoystick") return FightRuleKind::invert_joystick;
+    if (tag == "Invulnerability") return FightRuleKind::invulnerability;
+    if (tag == "Lifesteal" || tag == "ERuleLifeSteal")
+        return FightRuleKind::life_steal;
+    if (tag == "LightInTheDarkness")
+        return FightRuleKind::light_in_the_darkness;
+    if (tag == "LoseFall") return FightRuleKind::lose_fall;
+    if (tag == "NoBulletsReplenishment")
+        return FightRuleKind::no_bullets_replenishment;
+    if (tag == "NoHealthBar") return FightRuleKind::no_health_bar;
+    if (tag == "NoPerks") return FightRuleKind::no_perks;
+    if (tag == "Perk") return FightRuleKind::perk;
+    if (tag == "Points") return FightRuleKind::points;
+    if (tag == "Pvp") return FightRuleKind::pvp;
+    if (tag == "RandomArea") return FightRuleKind::random_area;
+    if (tag == "RechargeMagicEachRound")
+        return FightRuleKind::recharge_magic_each_round;
+    if (tag == "Regeneration") return FightRuleKind::regeneration;
+    if (tag == "RemoveInterval") return FightRuleKind::remove_interval;
+    if (tag == "Resistance") return FightRuleKind::resistance;
+    if (tag == "Ringout") return FightRuleKind::ringout;
+    if (tag == "SetTactic" || tag == "ERuleTactic")
+        return FightRuleKind::tactic;
+    if (tag == "TimeOutWin") return FightRuleKind::timeout_win;
+    if (tag == "WinCombo") return FightRuleKind::win_combo;
+    if (tag == "WinShock") return FightRuleKind::win_shock;
+    if (tag == "WinStyle") return FightRuleKind::win_style;
+    if (tag == "RatingEvaluation") return FightRuleKind::rating_evaluation;
+    return FightRuleKind::none;
+}
+
+// One parsed rule (JS `Ga`/`Lb`, L846-848). Fields follow the JS names.
+struct FightRule {
+    FightRuleKind kind = FightRuleKind::none;
+    std::string tag;                 // raw XML tag (debug/log)
+    int apply_to = 3;                // `Li` = mc(): 1 Player / 2 Bot / 3 All / 0
+    bool active = true;              // `Ga.active`
+    bool death = false;              // `gra` (Death attr; Ringout kills on fire)
+    // `Round="1|2"` (Lb.TIa L847): `Noa=false`, `lta` holds the numbers.
+    bool has_rounds = false;
+    std::vector<int> rounds;
+    // `Eclipse` (Lb.MIa L847): mode 2 = unset, 1 = false, 0 = true.
+    bool eclipse_set = false;
+    int eclipse_mode = 2;
+    // `Zf(a,0,MAX)` / `<Level>` power range (`xFa`/`wFa`, L847). Absent in
+    // the shipped stages -> [0, INT_MAX] -> `Ti()` always true. The port has
+    // no warrior-power source (`p.o.bb()`), so a non-default range is OPEN.
+    long power_min = 0;
+    long power_max = 2147483647L;
+    // --- Ringout / field-exit detector (JS `nj` L885-886) -----------------
+    std::string node;                // `ON` (Node attr; "NPivot")
+    std::string axis;                // Axis attr ("X"/"Y"/"")
+    float min_x = -1.0e5f;           // `ZG` (of(a,-1E5,1E5) first)
+    float max_x = 1.0e5f;            // `BH` (second)
+    float min_y = -1.0e5f;           // `dN`
+    float max_y = 1.0e5f;            // `HO`
+    int sequention_speed = 3;        // `tta` (SequentionSpeed default 3)
+    // --- other parsed attrs (registered; effect OPEN) ---------------------
+    int frames = 0;                  // HotGround Frames
+    float value = 0.0f;              // WinCombo/Points Value
+};
+
+// True for the rules that extend JS `Ga` (the `bb.xe` combat rules that
+// carry `ApplyTo`/`mc()` and are split by `du.o4` L909 when ApplyTo=All).
+// The `bb.M3` item/UI wrappers (`Lb`/`nh`/`pn`/`qn`) return false.
+inline bool fight_rule_is_combat(FightRuleKind k) {
+    switch (k) {
+        case FightRuleKind::attributes:
+        case FightRuleKind::combo:
+        case FightRuleKind::crazy:
+        case FightRuleKind::damage_factor:
+        case FightRuleKind::darkness:
+        case FightRuleKind::hot_ground:
+        case FightRuleKind::invert_joystick:
+        case FightRuleKind::invulnerability:
+        case FightRuleKind::life_steal:
+        case FightRuleKind::light_in_the_darkness:
+        case FightRuleKind::lose_fall:
+        case FightRuleKind::no_bullets_replenishment:
+        case FightRuleKind::no_health_bar:
+        case FightRuleKind::no_perks:
+        case FightRuleKind::perk:
+        case FightRuleKind::points:
+        case FightRuleKind::pvp:
+        case FightRuleKind::random_area:
+        case FightRuleKind::recharge_magic_each_round:
+        case FightRuleKind::regeneration:
+        case FightRuleKind::remove_interval:
+        case FightRuleKind::resistance:
+        case FightRuleKind::ringout:
+        case FightRuleKind::tactic:
+        case FightRuleKind::timeout_win:
+        case FightRuleKind::win_combo:
+        case FightRuleKind::win_shock:
+        case FightRuleKind::win_style:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// `bb.xe` ApplyTo code (L891): Player=1, Bot=2, All=3, anything else=0.
+inline int fight_rule_apply_to(const std::map<std::string, std::string>& a) {
+    const auto it = a.find("ApplyTo");
+    const std::string v = it != a.end() ? it->second : std::string("All");
+    if (v == "Player") return 1;
+    if (v == "Bot") return 2;
+    if (v == "All") return 3;
+    return 0;
+}
+
+inline bool fight_rule_bool(const std::map<std::string, std::string>& a,
+                            const char* key, bool def) {
+    const auto it = a.find(key);
+    if (it == a.end()) return def;
+    const std::string& v = it->second;
+    return v == "1" || v == "true" || v == "True";
+}
+
+inline float fight_rule_float(const std::map<std::string, std::string>& a,
+                              const char* key, float def) {
+    const auto it = a.find(key);
+    if (it == a.end()) return def;
+    try {
+        return std::stof(it->second);
+    } catch (...) {
+        return def;
+    }
+}
+
+inline int fight_rule_int(const std::map<std::string, std::string>& a,
+                          const char* key, int def) {
+    const auto it = a.find(key);
+    if (it == a.end()) return def;
+    try {
+        return std::stoi(it->second);
+    } catch (...) {
+        return def;
+    }
+}
+
+// `bb.M3`/`bb.xe` -> `Ga`/`Lb` constructor (L885-894): parse one StageRule.
+inline FightRule parse_fight_rule(const StageRule& sr) {
+    FightRule r;
+    r.kind = fight_rule_kind(sr.tag);
+    r.tag = sr.tag;
+    if (r.kind == FightRuleKind::none) return r;
+    r.apply_to = fight_rule_apply_to(sr.attrs);
+    r.death = fight_rule_bool(sr.attrs, "Death", false);
+    r.eclipse_set = sr.attrs.find("Eclipse") != sr.attrs.end();
+    if (r.eclipse_set) {
+        r.eclipse_mode = fight_rule_bool(sr.attrs, "Eclipse", false) ? 0 : 1;
+    }
+    // `Round="1|2"` (Lb.TIa L847): non-empty -> lta list.
+    const auto rit = sr.attrs.find("Round");
+    if (rit != sr.attrs.end() && !rit->second.empty()) {
+        r.has_rounds = true;
+        std::string s = rit->second;
+        std::size_t p = 0;
+        while (p <= s.size()) {
+            const std::size_t q = s.find('|', p);
+            const std::string tok = s.substr(p, q == std::string::npos ? std::string::npos : q - p);
+            try {
+                r.rounds.push_back(std::stoi(tok));
+            } catch (...) {
+            }
+            if (q == std::string::npos) break;
+            p = q + 1;
+        }
+    }
+    // `nj.parse` (L886)/`jn.parse` (L868): Node + Axis + Min/Max.
+    const auto nit = sr.attrs.find("Node");
+    if (nit != sr.attrs.end()) r.node = nit->second;
+    const auto ait = sr.attrs.find("Axis");
+    if (ait != sr.attrs.end()) r.axis = ait->second;
+    const float mn = fight_rule_float(sr.attrs, "Min", -1.0e5f);
+    const float mx = fight_rule_float(sr.attrs, "Max", 1.0e5f);
+    if (r.axis == "X") {  // JS: only Axis=X fills ZG/BH (L886)
+        r.min_x = mn;
+        r.max_x = mx;
+    } else if (r.axis == "Y") {  // JS: Axis=Y fills dN/HO
+        r.min_y = mn;
+        r.max_y = mx;
+    }
+    r.sequention_speed = fight_rule_int(sr.attrs, "SequentionSpeed", 3);
+    r.frames = fight_rule_int(sr.attrs, "Frames", 0);
+    r.value = fight_rule_float(sr.attrs, "Value", 0.0f);
+    // `qj` ctor (L912): TimeOutWin forces `Li=1` (player wins on timeout;
+    // `Yu=false` -> `wfa()` = 1 -> E3a `a=true`).
+    if (r.kind == FightRuleKind::timeout_win) r.apply_to = 1;
+    return r;
+}
+
+// `du.o4` (L909): an ApplyTo=All combat rule is split into two copies with
+// `Li=1`/`Li=2` (`b.BLa(1); c.BLa(2)`) so each tracks one fighter.
+inline std::vector<FightRule> fight_rules_split(const FightRule& r) {
+    std::vector<FightRule> out;
+    if (fight_rule_is_combat(r.kind) && r.apply_to == 3) {
+        FightRule a = r; a.apply_to = 1;
+        FightRule b = r; b.apply_to = 2;
+        out.push_back(a);
+        out.push_back(b);
+    } else {
+        out.push_back(r);
+    }
+    return out;
+}
+
+// `du.osb` (L898): `active = kI(cz) && Ti()`. `kI` = the Round attr
+// membership (`Lb.kI` L846); `Ti` = the power range `[xFa,wFa]` (`Lb.c_a`
+// L846). `power` is `p.o.bb()` - the port has no source, so callers pass 0;
+// a non-default range is therefore OPEN (never matches) and documented.
+inline bool fight_rule_gate(const FightRule& r, int round, long power) {
+    if (r.has_rounds) {
+        bool found = false;
+        for (int rr : r.rounds) {
+            if (rr == round) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false;
+    }
+    if (power < r.power_min || power > r.power_max) return false;
+    return true;
+}
 
 // The battle parameters (JS `Da`, L1418-1424): the fight's config read from
 // the stages.xml <Fight> element.
@@ -89,6 +379,12 @@ struct BattleParams {
     float ringout_min_x = -1.0e5f;  // JS `ZG` (`of` Min default -1E5, L886)
     float ringout_max_x = 1.0e5f;   // JS `BH` (`of` Max default 1E5, L886)
     float ringout_speed = 3.0f;     // JS `tta` (SequentionSpeed default 3, L886)
+    // The FULL parsed stage <Rules> set (JS `du.Ae`): every tag dispatched
+    // via `bb.M3`/`bb.xe`, ApplyTo=All split into two (`du.o4`), with the
+    // Round/Eclipse/Death gating attrs. Filled by `apply_stage_ringout_rule`
+    // from StageFight.rules; the controller runs the sim-relevant subset
+    // (Ringout/TimeOutWin) with JS-exact result mapping.
+    std::vector<FightRule> rules;
     // Fight-level spawn positions (the game reads location.Yia/B_; the
     // demo supplies the dojo ModelsViewer positions).
     float player_spawn_x = 973.0f, player_spawn_y = -110.0f;
@@ -102,38 +398,42 @@ struct BattleParams {
     float player_unarmed_damage = 0.0f;
 };
 
-// JS `nj.parse` (L885-886) + `bb.M3` (L888): map the stage fight's
-// `<Ringout .../>` rule into `b`'s marker config. `rules` are the parsed
-// `<Rules>` children (StageRule; `parse_stages` modes.hpp L251-261 stores
-// any child tag + attrs, so `<Ringout>` is already available). Axis="X"
-// sets `ZG`/`BH` from Min/Max (`of(a,-1E5,1E5)` L886; `of` first=Min,
-// second=Max); `SequentionSpeed` defaults 3. JS `f_a` (L896-897) uses the
-// FIRST active Ringout rule (`a||(a=g, ...)`), so the first match wins; no
-// element leaves the rule disabled. Condition/`ApplyTo` gates on rules are
-// not evaluated here (the shipped stages carry neither on `<Ringout>`).
+// JS `bb.OE` (L887-888) + `bb.M3`/`bb.xe` (L888-894): parse the stage
+// fight's `<Rules>` children into `b.rules` (with the ApplyTo split) and
+// mirror the FIRST `<Ringout>` into `b.ringout_*` for the marker config.
+// `rules` are the parsed `<Rules>` children (StageRule; `parse_stages`
+// modes.hpp stores any child tag + attrs). Axis="X" sets `ZG`/`BH` from
+// Min/Max (`of(a,-1E5,1E5)` L886; `of` first=Min, second=Max);
+// `SequentionSpeed` defaults 3. JS `f_a` (L896-897) uses the FIRST active
+// Ringout rule (`a||(a=g, ...)`), so the first match wins. `TimeOutWin`
+// (JS `qj` L912) flips `b.timeout_rule` so the timer end is live.
+//
+// OPEN: `bb.Ajb`/`bb.OE` also descend into `<Level Min Max>` wrappers
+// (L887-888); the native StageRule holds only direct children, and the port
+// has no warrior-power source (`p.o.bb()`), so a `<Level>`-gated rule is not
+// seen. The shipped stages carry no `<Level>` around `<Ringout>`.
 inline void apply_stage_ringout_rule(BattleParams& b,
                                      const std::vector<StageRule>& rules) {
-    for (const StageRule& r : rules) {
-        if (r.tag != "Ringout") continue;
-        b.ringout_rule = true;
-        const auto attr = [&](const char* k, float def) -> float {
-            const auto it = r.attrs.find(k);
-            if (it == r.attrs.end()) return def;
-            try {
-                return std::stof(it->second);
-            } catch (...) {
-                return def;
-            }
-        };
-        const auto axis_it = r.attrs.find("Axis");
-        const std::string axis =
-            axis_it != r.attrs.end() ? axis_it->second : std::string();
-        if (axis == "X") {  // JS: only Axis=X fills ZG/BH (L886)
-            b.ringout_min_x = attr("Min", -1.0e5f);
-            b.ringout_max_x = attr("Max", 1.0e5f);
+    // Full dispatch (`bb.OE` L887-888): every child -> kind, ApplyTo=All
+    // split into the two `BLa(1)`/`BLa(2)` copies (`du.o4` L909).
+    b.rules.clear();
+    for (const StageRule& sr : rules) {
+        const FightRule r = parse_fight_rule(sr);
+        if (r.kind == FightRuleKind::none) continue;
+        for (const FightRule& copy : fight_rules_split(r)) {
+            b.rules.push_back(copy);
         }
-        b.ringout_speed = attr("SequentionSpeed", 3.0f);
-        break;  // JS `f_a` keeps the first Ringout rule (L897)
+        if (r.kind == FightRuleKind::timeout_win) b.timeout_rule = true;
+    }
+    // `f_a` (L896-897): the FIRST Ringout rule feeds `H1a(ZG,BH,tta)`. The
+    // ApplyTo split means the first copy is the Player-tracking one.
+    for (const FightRule& r : b.rules) {
+        if (r.kind != FightRuleKind::ringout) continue;
+        b.ringout_rule = true;
+        b.ringout_min_x = r.min_x;
+        b.ringout_max_x = r.max_x;
+        b.ringout_speed = static_cast<float>(r.sequention_speed);
+        break;
     }
 }
 
@@ -291,6 +591,14 @@ struct FightFighter {
     int last_ai_stage = -1;
     // The fighter's move list is built from the shared move map + weapon.
     std::vector<const sf2::scene::MoveDef*> hb;
+    // [fx] The strike capsule's endpoint positions at the END of the previous
+    // tick, keyed by capsule (edge) name: `HitCapsule.r1/r2` are the JS
+    // `sx.ma`/`Zs.ma` (current world endpoints); this map holds the previous
+    // frame's `sx.mf`/`Zs.mf`. JS `Hyb`'s hit direction is
+    // `(sx.ma-sx.mf)+(Zs.ma-Zs.mf)` (L395). Snapshotted once per tick
+    // (after the hit pass) so `apply_hit` reads the true previous frame.
+    std::map<std::string, std::pair<sf2::scene::Vec3, sf2::scene::Vec3>>
+        prev_cap_ends;
 };
 
 // One finished round's result (for the demo log + the next-round flow).
@@ -684,6 +992,9 @@ public:
     // The visual effects layer (hit sparks) — presentation only, never
     // touches the simulation (its RNG is a private LCG, not roll01).
     const EffectSystem& fx() const { return fx_; }
+    // The magic/effect containers (JS `tl.Rf`, L842-844) fed by the `Yl`
+    // "Effect" trigger action (`tl.Nt` L842; split `Gq`/`Hq`). Presentation.
+    const MagicEffects& magic_fx() const { return magic_fx_; }
     // The current center-screen banner (ROUND N / FIGHT! / K.O. /
     // VICTORY / DEFEAT) — presentation only.
     banner_kind banner() const { return cur_banner_; }
@@ -748,12 +1059,23 @@ private:
     int banner_round_ = 0;       // the ROUND N number (banner_round_+1 shown)
     // The visual effects layer (hit sparks) — presentation only.
     EffectSystem fx_;
+    // The magic/effect containers (JS `tl.Rf` = `Gq`/`Hq`, L842-844): the
+    // `Yl` "Effect" trigger action (`Uh(a){a.gwb(this)}` L728 -> fighter `Nt`
+    // bus -> `tl.Nt` L842) routes a started effect into `background()`
+    // (`Gq`, OnBackground) or `foreground()` (`Hq`). Presentation only.
+    MagicEffects magic_fx_;
     // JS `nj` (ERuleRingout) marker state (L885): `ZG`/`BH` axis bounds and
     // `tta` (SequentionSpeed). Set via set_ringout_rule; presentation only.
     bool ringout_rule_ = false;
     float ringout_min_ = -1.0e5f;  // JS `ZG` default (`of(a,-1E5,1E5)` L886)
     float ringout_max_ = 1.0e5f;   // JS `BH` default
     float ringout_speed_ = 3.0f;   // JS `tta` (SequentionSpeed default 3)
+    // --- stage <Rules> engine (JS `du` L894-910) --------------------------
+    std::vector<FightRule> rules_;  // parsed rules (JS `du.Ae`)
+    int rule_round_ = 1;            // JS `cz` (`rob(round>0?round:1)`)
+    bool rule_pending_ = false;     // JS `ca.Pu != null`
+    round_result rule_result_ = round_result::ko;  // JS `ca.ey`
+    bool rule_winner_player_ = false;  // JS `Pu.wfa()` winner resolution
     std::vector<RoundOutcome> history_;
     FightLogLine last_log_;
     float wall_min_ = 80.0f, wall_max_ = 1880.0f, floor_y_ = 0.0f;
@@ -785,6 +1107,27 @@ private:
     void enter_end_stance();
     // JS `Onb` (L411): the round-end check (KO / timeout).
     void check_round_end();
+    // --- stage <Rules> engine (JS `du` L894-910) --------------------------
+    // JS `ca.F1` L428 -> `du.rob` L900 (`cz`, `osb`, ...): per-round reset +
+    // activation by the `kI`/`Ti` gates; then `du.f_a` L896-897 shows the
+    // Ringout markers (`ca.H1a` L390 -> `sXa`).
+    void rules_begin_round(int round);
+    // JS `ca.$_a` L427 -> `du.Iwb` L898 + `ca.onb` L390: round-end cleanup.
+    void rules_end_round();
+    // JS `ca.ia` L389 `PC(1,3)` -> `du.Ih(1,3,ze)` L896: the per-frame rule
+    // detection pass (the Ringout `nj.hh` + the TimeOutWin timer end).
+    void rules_frame();
+    // JS `nj.hh` (L885-886): the tracked node leaves [ZG,BH]x[dN,HO] ->
+    // `setActive(false)` + fire. Returns true when the rule fired.
+    bool rules_ringout_detect(FightRule& r);
+    // JS `du.Oob` (L901) + `ca.BT` (L392-393): apply a fired rule's effect
+    // (Ringout -> `ey=4`; TimeOutWin -> `ey=2`) and record the winner.
+    void rules_fire(FightRule& r);
+    // JS `f_a` L897 `ERuleRingout -> this.Oe.H1a(ZG,BH,tta)` (marker show).
+    void rules_show_markers();
+    // JS `E3a` L412-413 `wfa()` (L848): the winner for a fired `Pu` rule.
+    // `true` = the player (kc) wins; `false` = the enemy (Zb).
+    bool rule_winner_is_player(const FightRule& r) const;
     // JS `E3a` (L412): apply a round result (rounds-won, winner flags).
     void apply_round_result(round_result result, const FightFighter& winner,
                             const FightFighter& loser);
@@ -806,16 +1149,20 @@ private:
     bool hit_test(FightFighter& atk, FightFighter& def, const sf2::scene::MoveDef& move,
                   int frame, sf2::scene::HitCapsule& hit_cap,
                   sf2::scene::CapsuleHit& ch,
-                  const sf2::scene::Interval*& hit_interval);
+                  const sf2::scene::Interval*& hit_interval,
+                  const sf2::scene::HitCapsule*& atk_cap);
     // JS `wd.HZa` gate position (hzaGate L500-501): yD(4) pick + invuln
     // bypass check BEFORE geometry. Returns the interval to test, or null.
     const sf2::scene::Interval* hza_pick(const FightFighter& target,
                                          const sf2::scene::MoveDef& move, int frame);
     // Applies a landed hit (damage + knockback; JS `ca.Cgb` L394-397).
+    // `atk_cap` is the attacker's strike capsule (`b.Py`, L395) - the source
+    // of the `Hyb` hit direction (`sx/Zs .ma-.mf`); null when the interval
+    // has no AttackingParts.
     void apply_hit(FightFighter& atk, FightFighter& def,
                    const sf2::scene::MoveDef& move, const sf2::scene::Interval& iv,
                    const sf2::scene::HitCapsule& hit_cap, const sf2::scene::CapsuleHit& ch,
-                   int frame);
+                   int frame, const sf2::scene::HitCapsule* atk_cap = nullptr);
     // Rebuilds a fighter's physics body from its current pose.
     void rebuild_body(FightFighter& f, const FightFighter& foe);
     // --- perk trigger bus (`tb`) -----------------------------------------

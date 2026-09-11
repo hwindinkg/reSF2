@@ -36,6 +36,7 @@ struct Texture;
 namespace sf2::scene {
 struct Node;
 struct Sprite;
+struct ParticleDraw;
 } // namespace sf2::scene
 
 namespace sf2::render {
@@ -119,6 +120,26 @@ public:
                       float factor = 1.0f, float layer_scale = 1.0f,
                       float layer_y = 0.0f);
 
+    // Lazily loads the location particle effects atlas (JS `E.get(1304)` =
+    // `fight/particles.png`, manifest L2490 token 1304; frames in the sibling
+    // `fight/particles.json`, token 1305). Decodes the texture, parses the
+    // TexturePacker frames and caches them for `draw_particle`. Idempotent:
+    // the first call attempts the load, later calls return the cached result.
+    // An empty/absent `res_root` is a no-op (returns false). Requires a
+    // current GL context on the first (loading) call.
+    bool ensure_particle_atlas(const std::string& res_root);
+
+    // Draws one location particle billboard through the camera — the native
+    // equivalent of the game's instanced billboard batch `Ah`/`Xb`
+    // (`Ah.submit` L1150; the WebGL batch `ar` L1753-1755). The billboard is
+    // the atlas frame `draw.frame` scaled by `draw.start_size / sourceSize.x`
+    // (JS L1151 `jka`/`kka`), centred on the already-flipped world position,
+    // rotated by `draw.rotation_rad` and tinted by `draw.color_* * alpha`.
+    // `layer_scale`/`layer_y` are the owning layer's node transform, exactly
+    // as `draw_sprite` receives them.
+    void draw_particle(const sf2::scene::ParticleDraw& draw, const Camera& camera,
+                       float layer_scale = 1.0f, float layer_y = 0.0f);
+
     // Draws a flat-color triangle list in screen space (already projected).
     // `verts` = 2 floats per vertex (x,y); color is RGBA 0..1. One draw call
     // (the game's Path2D flat fill — MODEL_FORMAT §2.3).
@@ -149,10 +170,26 @@ public:
     GLFWwindow* window() const { return window_; }
 
 private:
+    // One frame of the particle effects atlas (JS `b.re.dt[id]`, L1148/L1151):
+    // the packed rect `Nc`, the untrimmed `sourceSize` `fa`, the `yx` trim
+    // flag and the owning texture size (for UV normalization).
+    struct ParticleFrame {
+        float fx = 0.0f, fy = 0.0f, fw = 0.0f, fh = 0.0f;  // packed frame rect
+        float src_w = 0.0f, src_h = 0.0f;                  // sourceSize (fa)
+        float tex_w = 0.0f, tex_h = 0.0f;                  // atlas texture size
+        bool trimmed = false;                              // Nc.yx
+    };
+
     GLFWwindow* window_ = nullptr;
     SpriteBatch batch_;
     std::map<std::string, GLuint> textures_;
     Camera camera_;
+
+    // Location particle effects atlas (`E.get(1304)`), resolved lazily by
+    // `ensure_particle_atlas` and drawn by `draw_particle`.
+    std::map<std::string, ParticleFrame> particle_frames_;
+    GLuint particle_texture_ = 0;
+    bool particle_atlas_attempted_ = false;
 };
 
 } // namespace sf2::render

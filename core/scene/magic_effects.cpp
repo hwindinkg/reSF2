@@ -47,14 +47,6 @@ void MagicEffects::add_default_descs() {
     flash.ticks_per_frame = 1.0f;               // JS `NL` default = 1 (L729)
     flash.size = 40.0f;                         // fx frame ~34..84 px
 
-    MagicEffectDesc intro;
-    intro.name = "round_intro";
-    intro.frames = fx_frames("block", 24);      // fx atlas: block_1..24
-    intro.loop = false;
-    intro.on_background = false;
-    intro.ticks_per_frame = 1.0f;
-    intro.size = 120.0f;
-
     MagicEffectDesc trail;
     trail.name = "magic_trail";
     trail.frames = fx_frames("effect_shield_hex_hit", 16);
@@ -66,7 +58,6 @@ void MagicEffects::add_default_descs() {
     trail.vy = -0.4f;         // rises while alive (native drift extension)
 
     descs_.push_back(flash);
-    descs_.push_back(intro);
     descs_.push_back(trail);
 }
 
@@ -97,7 +88,12 @@ bool MagicEffects::spawn(const std::string& name, float x, float y, int facing) 
     in.playing = true;
     in.accum = 0.0f;
     in.age = 0.0f;
-    // JS `tl.Nt` (L842): `a.Gfb ? this.Gq.Nt(a) : this.Hq.Nt(a)`.
+    // JS `tl.Nt(a)` (L842): `a.Gfb ? this.Gq.Nt(a) : this.Hq.Nt(a)` — the
+    // `Yl` (Effect trigger action, L728: `Uh(a){a.gwb(this)}` -> fighter `Nt`
+    // bus -> `tl.ZP` listener) routes by the descriptor's `OnBackground`
+    // (`Gfb`, L729). OPEN: this snapshot ships no `magic/*.json` descriptor
+    // registry, so an unknown `Name` is a no-op (the `Yl` caller itself is in
+    // the moves.xml <Triggers>, which the native sim does not load).
     if (d->on_background) {
         background_.push_back(in);
     } else {

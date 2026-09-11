@@ -88,6 +88,14 @@ struct ParticleLayer {
     float emitter_y = 0.0f;
     bool prewarm = false;         // Params/@Prewarm == "1" (JS jh L1149)
     std::string color;            // Params/@Color (1 or 2 packed ARGB)
+    // JS `Zib(Color)[0]` (L1151-1152) after `Na.Rv` (L1448): the packed-ARGB
+    // START colour, normalised to RGBA 0..1. White when `Color` is absent.
+    // The end colour (`Zib[1]`) is parsed by the JS but never reaches a
+    // fragment (the shader mix parameter `a_t` is always 0) — not stored.
+    float tint_r = 1.0f;
+    float tint_g = 1.0f;
+    float tint_b = 1.0f;
+    float tint_a = 1.0f;
 
     // ---- runtime state (JS `jh` fields, L1147-1151) -----------------------
     float spawn_acc = 0.0f;       // JS `$P` — spawn-interval accumulator (s)
@@ -96,19 +104,30 @@ struct ParticleLayer {
 };
 
 // One live particle draw, ready for the effects renderer (JS `Dv` view +
-// `Ah.pl`, L1147/L1649). Values are LAYER-LOCAL like the layer's sprites:
-// apply the layer transform (parallax `Io*factor`) at draw time. The renderer
-// must resolve `frame` (the `Params/@Frame` name) through the effects atlas
-// `E.get(1304)` and divide `start_size` by the frame's `sourceSize.x`
-// (JS L1148/L1151) — both OPEN, the atlas is not loaded here.
+// `Ah.pl`, L1147/L1649). Position/rotation are LAYER-LOCAL and already carry
+// the emitter node transform: the batch node `Xb` has `scale=(1,-1)`
+// (JS L1149), so the rendered centre is `(emitter.x + ca.x, emitter.y - ca.y)`
+// and the rotation is negated. The renderer resolves `frame` through the
+// effects atlas `E.get(1304)` and divides `start_size` by the frame's
+// `sourceSize.x` (JS L1151).
 struct ParticleDraw {
-    float x = 0.0f;             // JS `ca.x` (layer-local)
-    float y = 0.0f;             // JS `ca.y`
-    float rotation_rad = 0.0f;  // JS `view.rotation` (radians)
+    float x = 0.0f;             // JS `emitter.x + ca.x` (layer-local)
+    float y = 0.0f;             // JS `emitter.y - ca.y` (the Xb y-flip)
+    float rotation_rad = 0.0f;  // JS `view.rotation`, negated for the flip
     float alpha = 0.0f;         // JS `view.alpha`
     float start_size = 0.0f;    // JS `view.jka`/`kka` before /sourceSize.x
     float factor = 1.0f;        // owning layer parallax Factor (`Qi.bp`)
     std::string frame;          // JS `Params/@Frame` (atlas 1304)
+    // JS `Ah.rP[0]` = `Zib(Color)[0]` (L1151-1152), an `Na.Rv` ARGB colour
+    // (L1448). White when the emitter carries no `Color`. The WebGL batch
+    // shader (L1750) mixes `rP[0]`/`rP[1]` by the per-vertex `a_t`, which is
+    // the view's `KXa` — initialised 0 (L1649) and never assigned, so only
+    // `rP[0]` reaches the fragment. `rP[1]` (the end colour) is therefore
+    // inert in the shipped build; see `Renderer::draw_particle`.
+    float color_r = 1.0f;
+    float color_g = 1.0f;
+    float color_b = 1.0f;
+    float color_a = 1.0f;
 };
 
 struct Layer {
@@ -126,9 +145,26 @@ struct Layer {
     std::vector<std::shared_ptr<Sprite>> sprites;
     // `ParticleEffect`/`NewParticleEffect` emitters (JS `QIa` L481-482).
     // Empty for the dojo (it ships none); populated for volcano / factory /
-    // battlefield / autumn / ... . Simulated by `update`; drawn by the
-    // effects renderer via `particle_draws()` (render OPEN — ParticleLayer).
+    // battlefield / autumn / ... . Simulated by `update`; drawn by
+    // `render_layer` via `make_particle_draw_` + `Renderer::draw_particle`.
     std::vector<ParticleLayer> particles;
+
+    // XML child draw order for layers that carry emitters (JS `zjb` L476-477
+    // appends every `Image` / `SimpleEffect` / `ParticleEffect` to the layer
+    // display list in document order; `nja` L29 renders self then children in
+    // list order). The WebGL context runs with `depth:false` (L64) and
+    // `u_zndc = -0.001*z` (L1488) only feeds `gl_Position.z`, so z does NOT
+    // sort — document order does. Emitters must therefore interleave with
+    // sprites, e.g. dark_room layer 4 / factory layer 4 (emitter BEFORE
+    // sprites). Empty for emitter-free layers (sprite-only fast path).
+    // `sprite` is a weak reference so a post-load erase (the hub drops
+    // `dojo_punch_bag_holder`) can never dangle here.
+    struct DrawItem {
+        bool is_particle = false;
+        std::size_t particle_index = 0;  // valid when `is_particle`
+        std::weak_ptr<Sprite> sprite;    // valid when `!is_particle`
+    };
+    std::vector<DrawItem> draw_order;
 };
 
 // One animated SimpleEffect property (`Transparency` / `OscillationX/Y`),
@@ -219,13 +255,17 @@ public:
 
     // JS `jh` live draws (L1149): flattens every live particle into
     // layer-local draws (position/alpha/rotation/start_size/frame + the
-    // owning layer's parallax Factor). The renderer resolves `frame` through
-    // the effects atlas `E.get(1304)` and divides `start_size` by the frame
-    // `sourceSize.x` (L1148/L1151). Empty for locations without particles.
-    // NOTE: the JS emitter node is a LAYER child (`Qi.fXa`, L481) appended in
-    // XML order with z=0, so a depth-sorted render must interleave these draws
-    // with `Layer::sprites`; the current paths draw sprites by insertion.
+    // owning layer's parallax Factor and `Zib(Color)` start colour). The
+    // renderer resolves `frame` through the effects atlas `E.get(1304)` and
+    // divides `start_size` by the frame `sourceSize.x` (L1148/L1151). Empty
+    // for locations without particles. `render_layer` draws these in XML
+    // child order (see `Layer::draw_order`); this flat list is the composed
+    // view of every layer.
     std::vector<ParticleDraw> particle_draws() const;
+
+    // The res root this scene was loaded from; used to lazily load the
+    // effects atlas (`Renderer::ensure_particle_atlas`).
+    const std::string& res_root() const { return res_root_; }
 
     // The ModelsViewer spawns (JS `Bf.zjb` L476: `Yia` = PlayerPosition,
     // `B_` = EnemyPosition). `has_spawns()` is false when the location has no
@@ -275,12 +315,20 @@ private:
     void spawn_particle_(ParticleLayer& emitter);
     // JS `Ie.Gb` (L1152) over `oa.eT` (uniform in [lo,hi]) on a private LCG.
     float rand_range_(ParticleLayer& emitter, float lo, float hi);
+    // Builds one renderer-ready draw from a live particle: applies the emitter
+    // node offset and the batch node `Xb` y-flip (`x+X`, `y-Y`, negated
+    // rotation, L1148-1149) and carries the `Zib(Color)` start colour.
+    ParticleDraw make_particle_draw_(const Layer& layer, const ParticleLayer& emitter,
+                                     const Particle& p) const;
 
     std::vector<std::shared_ptr<Layer>> layers_;
     // Per-SimpleEffect Oscillation/Reappear/Speed state (JS `bkb` L479-481),
     // advanced by `update(dt)`. Pointers target `Layer::sprites` elements.
     std::vector<SpriteAnim> anims_;
     std::vector<std::string> atlas_names_;
+    // Res root passed to `load`; `render_layer` uses it to lazily load the
+    // location effects atlas (`E.get(1304)`).
+    std::string res_root_;
     std::size_t fighter_layer_ = npos;
     float arena_w_ = 0.0f;
     float arena_h_ = 0.0f;

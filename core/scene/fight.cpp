@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <map>
 #include <string>
+#include <utility>
 
 #include "audio/audio.hpp"
 #include "scene/fight_camera_sya.hpp"
@@ -36,6 +37,17 @@ constexpr int kFlashFramesBlock = 24;     // L731 "block" = 24
 // else 1/120.
 constexpr float kFlashTimeCrit = 1.0f / 60.0f;
 constexpr float kFlashTimeNormal = 1.0f / 120.0f;
+
+// [fx] Latch a fighter's current strike-capsule endpoints (`HitCapsule.r1/r2`
+// = JS `sx.ma`/`Zs.ma`) into `prev_cap_ends` (= JS `sx.mf`/`Zs.mf`). Called
+// once per tick AFTER the hit pass, so the next frame's `apply_hit` reads the
+// true previous-frame positions for the `Hyb` hit direction (JS L395).
+void snapshot_capsule_ends(FightFighter& f) {
+    f.prev_cap_ends.clear();
+    for (const sf2::scene::HitCapsule& c : f.body.capsules) {
+        f.prev_cap_ends[c.name] = std::make_pair(c.r1, c.r2);
+    }
+}
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -243,6 +255,10 @@ void FightController::init_locks(
     // Perk bus register (ZOa analog).
     perk_setup_ = perks;
     setup_bus(perks);
+    // Magic/effect containers (JS `tl.Rf` L842-844): the `fight/fx` frame
+    // runs are the available `ni` sets (this snapshot has no `magic/*.json`);
+    // `Yl` "Effect" actions route here via `tl.Nt`.
+    magic_fx_.add_default_descs();
     // Magic init (`Ka`: `zL(0)`, `yL($6a)` = InitialCharge table, `LA`).
     init_magic();
 
@@ -359,6 +375,145 @@ void FightController::set_ringout_rule(bool enabled, float min_x, float max_x,
     } else if (!enabled) {
         fx_.hide_offscreen_markers();
     }
+}
+
+// --- stage <Rules> engine (JS `du` L894-910) ----------------------------
+// JS `Ga.wfa` (L848): the fired rule's winner. Li==1 -> (Yu?2:1); Li==2 ->
+// (Yu?1:2); else 3. `E3a` (L412) then does `a=false; case 1: a=true` (wfa==1
+// = player/kc wins; any other = enemy/Zb). `Yu` (Ga ctor L846) is true for
+// the field rules and false for TimeOutWin/LoseFall/Win* (their ctors).
+bool FightController::rule_winner_is_player(const FightRule& r) const {
+    bool yu = true;
+    switch (r.kind) {
+        case FightRuleKind::timeout_win:
+        case FightRuleKind::lose_fall:
+        case FightRuleKind::win_combo:
+        case FightRuleKind::win_shock:
+        case FightRuleKind::win_style:
+            yu = false;
+            break;
+        default:
+            break;
+    }
+    int wfa = 3;
+    if (r.apply_to == 1) {
+        wfa = yu ? 2 : 1;
+    } else if (r.apply_to == 2) {
+        wfa = yu ? 1 : 2;
+    }
+    return wfa == 1;
+}
+
+// JS `nj.Zk` (L885) + `nj.hh` (L885-886): the tracked fighter node leaves
+// [ZG,BH]x[dN,HO] -> `setActive(false)` + fire. `oy=-location.width/2`,
+// `eC=-location.ct`; the node is `Jc.oa.Ic(ON)` (player) / `QI...` (bot).
+// The native reduces the node lookup to the fighter's world anchor (the
+// model pivot NPivot == the COM the port already places). The rule fires
+// only with a Node name (JS `ga==null` -> false) and only for the axis set
+// by Axis= (the other axis keeps the +/-1E5 defaults, so it never triggers).
+bool FightController::rules_ringout_detect(FightRule& r) {
+    if (r.node.empty()) return false;  // JS `this.ga == null` (L885)
+    const float oy = -camera_.arena_w * 0.5f;   // JS `this.oy` (L885)
+    const float eC = -floor_y_;                 // JS `this.eC` (= -location.ct)
+    const FightFighter* f = (r.apply_to == 2) ? &enemy_ : &player_;
+    const float x = f->fighter.world_x() + oy;  // JS `a.x + this.oy`
+    const float y = -f->fighter.world_y() + eC; // JS `-a.y + this.eC`
+    const bool outside =
+        x > r.max_x || x < r.min_x || y > r.max_y || y < r.min_y;
+    if (outside) {
+        r.active = false;  // JS `setActive(false)` (L886)
+        return true;
+    }
+    return false;
+}
+
+// JS `du.Oob` (L901) + `ca.BT` (L392-393): record the fired rule's round
+// result. Ringout -> `ey=4` (Death attr kills the tracked side first:
+// `a.gra && this.Oe.jT(a.mc())`); TimeOutWin -> `ey=2`. The winner is the
+// LAST fired rule (`Pu` overwritten per `Oob`, `BT` sets `ey`).
+void FightController::rules_fire(FightRule& r) {
+    switch (r.kind) {
+        case FightRuleKind::ringout: {
+            if (r.death) {
+                FightFighter* t = (r.apply_to == 2) ? &enemy_ : &player_;
+                t->hp = 0.0f;  // JS `jT(mc)`: `b.du(0)` -> hp 0
+            }
+            rule_result_ = round_result::ringout;  // JS `BT` L392
+            break;
+        }
+        case FightRuleKind::timeout_win:
+            rule_result_ = round_result::timeout_win;  // JS `BT` L393
+            break;
+        default:
+            return;  // effect OPEN (HotGround/Points/... not modelled)
+    }
+    rule_winner_player_ = rule_winner_is_player(r);
+    rule_pending_ = true;  // JS `Pu = a`
+}
+
+// JS `ca.ia` L389 `PC(1,3)` -> `du.Ih(1,3,ze)` (L896) + `ca.Onb` L412
+// (`Ema(9); ud.Ih(9,3,ze)` at the HUD timer 0). Detection runs while the
+// round is live.
+void FightController::rules_frame() {
+    if (!round_live_) return;
+    for (FightRule& r : rules_) {
+        if (!r.active) continue;
+        if (r.kind == FightRuleKind::ringout && rules_ringout_detect(r)) {
+            rules_fire(r);
+        }
+    }
+    // JS `ca.ia` L412: `this.ha.PEa()` (NF<=0) -> `Ema(9); ud.Ih(9,3,ze)`;
+    // `qj.hh` (L912) is `return true`, so an active TimeOutWin fires.
+    if (round_.time_nf <= 0) {
+        for (FightRule& r : rules_) {
+            if (r.active && r.kind == FightRuleKind::timeout_win) {
+                rules_fire(r);
+                break;
+            }
+        }
+    }
+}
+
+// JS `du.f_a` L896-897 (`ERuleRingout -> this.Oe.H1a(ZG,BH,tta)`) ->
+// `ca.H1a` L390 -> `sXa` L827-828. The FIRST active Ringout rule wins
+// (`a||(a=g,...)`); none -> hide the markers.
+void FightController::rules_show_markers() {
+    for (const FightRule& r : rules_) {
+        if (r.active && r.kind == FightRuleKind::ringout) {
+            set_ringout_rule(true, r.min_x, r.max_x,
+                             static_cast<float>(r.sequention_speed));
+            return;
+        }
+    }
+    set_ringout_rule(false, ringout_min_, ringout_max_, ringout_speed_);
+}
+
+// JS `ca.F1` L428 -> `du.rob(round>0?round:1)` L900 (mxa/cz/osb/qob/rmb) +
+// `du.f_a` L896-897. Per-round: reload the rule set, apply the `kI`/`Ti`
+// gates (`du.osb` L898), then the marker pass.
+void FightController::rules_begin_round(int round) {
+    rule_round_ = round > 0 ? round : 1;  // JS `rob` L900
+    rule_pending_ = false;
+    rules_ = battle_.rules;
+    // JS: `du.init` (L895) registers every rule with `Lb.active=true` for
+    // round 1; the `kI`/`Ti` gates are applied only by `rob` (L900), which
+    // `ca.F1` (L428) calls for `round.round >= 2` (L417). So round 1 keeps
+    // the parsed defaults; rounds 2+ gate. `power` (p.o.bb()) has no native
+    // source -> 0 (a `<Level>` range is OPEN, documented).
+    if (rule_round_ >= 2) {
+        for (FightRule& r : rules_) {
+            r.active = fight_rule_gate(r, rule_round_, 0L);
+        }
+    }
+    rules_show_markers();
+}
+
+// JS `ca.$_a` L427 -> `du.Iwb` L898 (`c.stop()` on every active rule) +
+// `ca.onb` L390 (`pnb` L828: remove both arrows).
+void FightController::rules_end_round() {
+    for (FightRule& r : rules_) r.active = false;
+    rule_pending_ = false;
+    set_ringout_rule(false, ringout_min_, ringout_max_, ringout_speed_);
 }
 
 // Modes setup path (tournament/survival): rounds/time/recovery, per-side
@@ -496,12 +651,11 @@ void FightController::enter_fight() {
     start_stance_done_ = true;
     // JS `f_a` (L896-897): with the round live, the FIRST active
     // `ERuleRingout` rule feeds the two `sXa` arrows
-    // (`this.Oe.H1a(a.ZG, a.BH, a.tta)`). The rule is the stage's
-    // `<Ringout>` parsed into battle_ (apply_stage_ringout_rule); when the
-    // stage has none this hides the markers (harmless no-op). Presentation
-    // only — set_ringout_rule never touches the simulation / RNG.
-    set_ringout_rule(battle_.ringout_rule, battle_.ringout_min_x,
-                     battle_.ringout_max_x, battle_.ringout_speed);
+    // (`this.Oe.H1a(a.ZG, a.BH, a.tta)`). The rules come from the stage's
+    // `<Rules>` parsed into battle_.rules (apply_stage_ringout_rule); the
+    // per-round `kI`/`Ti` gates run in `rob` (L900) before `f_a`. Presentation
+    // only - set_ringout_rule never touches the simulation / RNG.
+    rules_begin_round(round_.number);
     // [FIX idle-slide] Cut the intro stance clip (stance_1/stance_2,
     // root-moving) so the fighters don't keep sliding 853 units into the
     // idle phase. The intro clip was re-triggered at f130 because its
@@ -533,21 +687,33 @@ void FightController::enter_end_stance() {
     round_.running = false;
     round_live_ = false;
     end_stance_frames_ = 0;
-    // JS `$_a` (L427) -> `onb()`/`pnb` (L828) -> `clear()` (L898): the
-    // ringout arrows are removed at the round-end cleanup. Route through
-    // set_ringout_rule(false, ..) so the configured flag + markers clear
-    // together (presentation only).
-    set_ringout_rule(false, ringout_min_, ringout_max_, ringout_speed_);
+    // JS `$_a` (L427) -> `onb()`/`pnb` (L828) -> `du.Iwb` (L898): the
+    // ringout arrows are removed at the round-end cleanup and every active
+    // rule is stopped. `rules_end_round` clears the marker + rule set.
+    rules_end_round();
 }
 
 // JS `Onb` (L411): the round-end check. KO when a fighter's hp <= 0;
 // timeout ONLY when the fight has the TimeoutWin rule (JS `BT` L392 sets
 // `ey=2` for ERuleTimeoutWin; the shipped stages use no timeout rule).
 // The timeout winner is the ENEMY (JS E3a c==3 branch: `a.ng++` on Zb).
+// JS `Onb` (L411): the round-end check. A fired stage rule (`Pu != null`)
+// ends the round first (JS `ca.ia` L412: `... || this.Pu != null ...` ->
+// `E3a(vfa(!0), vfa(!1), this.ey)`), with its `ey`/winner from `BT`/`wfa`.
+// Otherwise KO when a fighter's hp <= 0; timer 0 only with a TimeOutWin rule
+// (handled by `rules_frame`; the fallback below keeps the old behaviour).
 void FightController::check_round_end() {
     if (!round_live_) return;
+    // JS `ca.ia` L412: `this.Pu != null` -> the round ends with `this.ey`;
+    // `E3a` L412-413 picks the winner from `Pu.wfa()` (any of c==2/3/4).
+    if (rule_pending_) {
+        rule_pending_ = false;
+        const FightFighter& w = rule_winner_player_ ? player_ : enemy_;
+        const FightFighter& l = rule_winner_player_ ? enemy_ : player_;
+        apply_round_result(rule_result_, w, l);
+        return;
+    }
     // JS `Ar.PEa` (L2020): `mb.NF<=0` — the HUD counter hit zero.
-    // (TimeoutWin rule only; shipped stages end on KO.)
     const bool timeout = battle_.timeout_rule && round_.time_nf <= 0;
     const bool player_ko = player_.hp <= 0.0f;
     const bool enemy_ko = enemy_.hp <= 0.0f;
@@ -555,8 +721,9 @@ void FightController::check_round_end() {
     if (!player_ko && !enemy_ko && !timeout) return;
 
     if (timeout) {
-        // The timeout rule: the enemy wins the round (JS E3a `c==3`).
-        apply_round_result(round_result::timeout_win, enemy_, player_);
+        // JS `qj` (L912): TimeOutWin forces `Li=1`, `Yu=false` -> `wfa()`=1
+        // -> `E3a` `a=true` -> the PLAYER (kc) wins on timeout.
+        apply_round_result(round_result::timeout_win, player_, enemy_);
     } else if (player_ko && enemy_ko) {
         // Both KO'd the same frame: higher HP wins (JS vfa L413).
         const FightFighter& w = round_winner_by_hp();
@@ -650,6 +817,9 @@ void FightController::end_battle(const FightFighter& winner) {
     cur_banner_ = winner.is_player ? banner_kind::victory : banner_kind::defeat;
     banner_start_ = frame_;
     banner_len_ = 1000000000;
+    // JS `tl.fB` (L844) / `ca.kD`: the effect containers drain at the battle
+    // end (`fB()` -> `Gq.fB()`/`Hq.fB()`).
+    magic_fx_.clear();
     std::fprintf(stdout, "[fight] banner: %s\n",
                  winner.is_player ? "VICTORY" : "DEFEAT");
     std::fflush(stdout);
@@ -1015,6 +1185,22 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         m.uf = uf;
         m.col_side = tgt;
         bus_.install_mod(owner_side, std::move(m));
+    } else if (type == "Effect") {
+        // JS `Yl` (L728) trigger action -> `wd.gwb` (L519: `this.Nt.Z(a)`) ->
+        // `tl.Nt` (L842): route the started effect by `Gfb` (OnBackground)
+        // into `Gq`/`Hq` (modelled by `magic_fx_`). OPEN: this snapshot ships
+        // no `magic/*.json` registry, so an unknown Name is a no-op; the
+        // `<Position>`/bone attach (L730) is not modelled (the effect spawns
+        // at the owner's anchor).
+        const std::string nm = str("Name");
+        if (!nm.empty()) {
+            FightFighter& owner = (owner_side == 0) ? player_ : enemy_;
+            const bool ok = magic_fx_.spawn(nm, owner.fighter.world_x(),
+                                            owner.fighter.world_y(),
+                                            owner.fighter.facing());
+            bus_.log("effect " + nm +
+                     (ok ? std::string() : std::string(" (no descriptor)")));
+        }
     } else if (is_combat_action(type)) {
         bus_.log("perknoop " + type + " (outside hit scope, OPEN)");
     } else {
@@ -1272,7 +1458,9 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                                const sf2::scene::MoveDef& move, int frame,
                                sf2::scene::HitCapsule& hit_cap,
                                sf2::scene::CapsuleHit& ch,
-                               const sf2::scene::Interval*& hit_interval) {
+                               const sf2::scene::Interval*& hit_interval,
+                               const sf2::scene::HitCapsule*& atk_cap) {
+    atk_cap = nullptr;  // JS `b.Py` = the attacker strike capsule (L395)
     // JS `Cl.ia` one-shot (`dW`, L566-567): the same attack object never
     // tests twice in a row — without this every overlapped frame re-hits.
     // HZa position (hzaGate L500-501): the caller runs the yD(4)+invuln
@@ -1318,12 +1506,13 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
             return false;
         }
         for (const std::string& edge : d->attacking_parts) {
-            const sf2::scene::HitCapsule* atk_cap = atk.body.by_name(edge);
-            if (atk_cap == nullptr) continue;
+            const sf2::scene::HitCapsule* ac = atk.body.by_name(edge);
+            if (ac == nullptr) continue;
             for (const auto& tgt : def.body.capsules) {
                 if (!tgt.collidable) continue;
-                if (sf2::scene::capsule_capsule_overlap(*atk_cap, tgt, ch)) {
+                if (sf2::scene::capsule_capsule_overlap(*ac, tgt, ch)) {
                     hit_cap = tgt;
+                    atk_cap = ac;  // JS `b.Py` (L395)
                     hit_interval = d;
                     return true;
                 }
@@ -1370,7 +1559,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
                                 const sf2::scene::MoveDef& move,
                                 const sf2::scene::Interval& iv,
                                 const sf2::scene::HitCapsule& hit_cap,
-                                const sf2::scene::CapsuleHit& ch, int frame) {
+                                const sf2::scene::CapsuleHit& ch, int frame,
+                                const sf2::scene::HitCapsule* atk_cap) {
     sf2::scene::IntervalDamage idmg;
     idmg.base_damage = iv.damage;
     idmg.no_critical = iv.no_critical;
@@ -1609,13 +1799,30 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // JS ca.Cgb's `ta.ak` after the strike lands).
     sf2::audio::AudioEngine::instance().play("hit");
 
-    // [fx] The hit sparks + the camera kick (presentation only — the
-    // sparks' RNG is EffectSystem's private LCG, the shake's a private
-    // LCG too; neither touches the fight's shared roll01, so the pose
-    // dump stays byte-identical). The burst origin is the contact point
-    // (CapsuleHit::point — the attacker capsule's closest point, the JS
-    // `strike.n$`), fanned AWAY from the attacker's facing.
-    fx_.spawn_hit_sparks(ch.point.x, ch.point.y, atk.fighter.facing());
+    // [fx] The `Hyb` hit direction (JS L395): the strike capsule's per-frame
+    // motion delta `b.Py.sx/Zs .ma-.mf` -- the endpoints' current minus
+    // previous-frame world positions. `r1/r2` are `sx.ma`/`Zs.ma`; the
+    // snapshot map holds the previous frame (`sx.mf`/`Zs.mf`).
+    sf2::scene::Vec3 hdir{0.0f, 0.0f, 0.0f};
+    if (atk_cap != nullptr) {
+        const auto pit = atk.prev_cap_ends.find(atk_cap->name);
+        if (pit != atk.prev_cap_ends.end()) {
+            hdir.x = (atk_cap->r1.x - pit->second.first.x) +
+                     (atk_cap->r2.x - pit->second.second.x);
+            hdir.y = (atk_cap->r1.y - pit->second.first.y) +
+                     (atk_cap->r2.y - pit->second.second.y);
+        }
+    }
+
+    // [fx] Hit sparks `ql.Rub`/`Ut.ryb` (JS L369/L824): the burst is spawned
+    // ONLY on a critical strike -- JS L395 `b.se && this.Ta.Rub(b.bk,b.fg)`.
+    // The burst origin is the contact point (`strike.n$` = `ch.point`). The
+    // presentation RNG is EffectSystem's private LCG (never roll01). JS fans
+    // by the impulse direction `b.fg`; the native keeps the facing x
+    // reduction (`spawn_hit_sparks`) - the impulse-vector fan is OPEN.
+    if (hit_critical) {
+        fx_.spawn_hit_sparks(ch.point.x, ch.point.y, atk.fighter.facing());
+    }
 
     // [fx] The hit flash `Hyb` (JS L825). JS fires the `HitEffect` trigger
     // action (`jg`, L738) on the landed `<Hit/>` event; `Xvb` (L519) then
@@ -1626,15 +1833,18 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // conditions (moves.xml L33561-33602): critical -> "critical", block ->
     // "block", otherwise "hit_blade"; the run length comes from `jg.Rza`
     // (L731). `speed` = `Vu.time` (L395: 1/60 critical else 1/120), `scale`
-    // = the target's `Qz` (`this.Qz`; the shipped crit/block/hit_blade
-    // actions carry no ChangeHitEffectScale -> default 1), `offset` =
-    // StartingRotation (absent in those actions -> 0). The direction is the
-    // attacker's facing x -- the same x-reduction `spawn_hit_sparks` makes of
-    // the JS direction vector; JS uses the strike capsule's frame-motion
-    // delta `b.Py.sx/Zs .ma-.mf` (L395), which the sim does not retain.
+    // = the target's `Qz` (`this.Qz` -> `def.qz`), `offset` = StartingRotation
+    // (absent -> 0). `dir` = the real capsule motion delta (above).
+    //
+    // JS gate `a.Pd.da.yD(4).DL` (L395): the flash only fires when the
+    // ATTACKER's active Attack interval has `DL = !NoEffect`. `iv` is that
+    // interval (`hit_test`'s `d`), and `Interval::no_effect` is now parsed
+    // from the `<Interval NoEffect="1">` attribute -> `!iv.no_effect` is the
+    // exact gate.
+    //
     // Presentation only: no RNG, no sim effect (the sparks' private LCG is
     // untouched).
-    {
+    if (!iv.no_effect) {
         const char* flash_prefix = hit_critical ? "critical"
                                  : hit_blocked  ? "block"
                                                 : "hit_blade";
@@ -1642,14 +1852,23 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
                                : hit_blocked  ? kFlashFramesBlock
                                               : kFlashFramesCritical;
         const float flash_time = hit_critical ? kFlashTimeCrit : kFlashTimeNormal;
-        fx_.spawn_hit_flash(ch.point.x, ch.point.y,
-                            static_cast<float>(atk.fighter.facing()), 0.0f, 0.0f,
+        fx_.spawn_hit_flash(ch.point.x, ch.point.y, hdir.x, hdir.y, 0.0f,
                             def.qz, flash_time, flash_prefix, flash_frames);
     }
 
-    camera_.shake(6.0f);
-    std::fprintf(stdout, "[fx] sparks at %.0f,%.0f\n", ch.point.x, ch.point.y);
-    std::fflush(stdout);
+    // [fx] The camera kick (JS `ca.Cgb` L396: `if(b.se||b.Uq&&!b.block||b.Ub)
+    // c=this.ZAa(...),c!=null&&this.Ta.DL(c)`) fires on a critical, a head
+    // hit that was not blocked, or a shock. The JS trajectory config (`ZAa`)
+    // is not in the specs; the native keeps the fixed decaying kick (`shake`)
+    // but now applies the SAME gate.
+    if (hit_critical || (hit_cap.body_part == "Head" && !hit_blocked) ||
+        rec.shock) {
+        camera_.shake(6.0f);
+    }
+    if (hit_critical) {
+        std::fprintf(stdout, "[fx] sparks at %.0f,%.0f\n", ch.point.x, ch.point.y);
+        std::fflush(stdout);
+    }
 
     ++atk.hits_landed;
     ++def.hits_taken;
@@ -1991,6 +2210,9 @@ void FightController::update(float dt) {
     // even after the battle ends so the KO burst finishes and the camera
     // kick settles back to 0; neither touches the simulation).
     fx_.update();
+    // Magic/effect containers (JS `tl.WL` L837 -> `Gq.WL`/`Hq.WL`; the
+    // timescale `1/v.on()` = 1.0 here). Presentation only.
+    magic_fx_.update(1.0f);
     camera_.shake_x_ *= 0.85f;
     camera_.shake_y_ *= 0.85f;
     if (battle_over_) return;
@@ -2062,27 +2284,41 @@ void FightController::update(float dt) {
             const sf2::scene::Interval* hit_iv = nullptr;
             sf2::scene::HitCapsule hit_cap;
             sf2::scene::CapsuleHit ch;
+            const sf2::scene::HitCapsule* atk_cap = nullptr;
             bool hit_player = false, hit_enemy = false;
             if (p_move != nullptr &&
                 hza_pick(enemy_, *p_move, player_.fighter.move_frame()) != nullptr) {
                 hit_enemy = hit_test(player_, enemy_, *p_move, player_.fighter.move_frame(),
-                                     hit_cap, ch, hit_iv);
+                                     hit_cap, ch, hit_iv, atk_cap);
             }
             if (e_move != nullptr && !hit_enemy &&
                 hza_pick(player_, *e_move, enemy_.fighter.move_frame()) != nullptr) {
                 hit_player = hit_test(enemy_, player_, *e_move, enemy_.fighter.move_frame(),
-                                      hit_cap, ch, hit_iv);
+                                      hit_cap, ch, hit_iv, atk_cap);
             }
             if (hit_iv != nullptr) {
                 if (hit_enemy) {
-                    apply_hit(player_, enemy_, *p_move, *hit_iv, hit_cap, ch, frame_);
+                    apply_hit(player_, enemy_, *p_move, *hit_iv, hit_cap, ch, frame_,
+                              atk_cap);
                 } else {
-                    apply_hit(enemy_, player_, *e_move, *hit_iv, hit_cap, ch, frame_);
+                    apply_hit(enemy_, player_, *e_move, *hit_iv, hit_cap, ch, frame_,
+                              atk_cap);
                 }
             }
 
+            // JS `ca.ia` L389 `PC(1,3)` -> `du.Ih(1,3,ze)` (rule detection:
+            // the Ringout field exit + the TimeOutWin timer end). Runs before
+            // the round-end check so the fired `Pu` ends the round this frame.
+            rules_frame();
+
             // The round-end check (JS `Onb`).
             check_round_end();
+
+            // [fx] Latch this frame's strike-capsule endpoints as the next
+            // frame's `sx.mf`/`Zs.mf` (JS `Vc.f4`/`sk` L794-796). The hit
+            // pass above read the PREVIOUS frame's values, so snapshot after.
+            snapshot_capsule_ends(player_);
+            snapshot_capsule_ends(enemy_);
             break;
         }
         case fight_phase::end_stance: {

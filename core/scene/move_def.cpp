@@ -85,6 +85,8 @@ void parse_interval(pugi::xml_node node, int end_frame_default, Interval& out) {
     out.name = node.attribute("Name") ? node.attribute("Name").value() : "";
     const std::string type = node.attribute("Type") ? node.attribute("Type").value() : "";
     out.type = interval_type_resolve(out.name, type);
+    // JS `Ul.J3` (L775): `DL = !NoEffect` (an <Interval> attribute).
+    out.no_effect = data::xml_attr_bool(node, "NoEffect", false);
     // JS `Ul.J3` (L774-775): `<IgnoresBlock/>` -> DDa (+ hga names);
     // `<IgnoresInvulnerable Name="A|B"/>` -> jga (+ iga bypass names).
     // NOTE: child ELEMENTS, not attributes (159/154 live hits in moves.xml).

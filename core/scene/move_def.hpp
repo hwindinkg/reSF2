@@ -86,6 +86,11 @@ struct Interval {
     // Attack damage block (<Damage Value=..><Damage Type=.. Shift=..>).
     float damage = 0.0f;
     bool no_critical = false;
+    // JS `Ul.J3` (L775): `this.DL = !u.ka(attrs.get("NoEffect"), false)` —
+    // the `<Interval NoEffect="1">` attribute. `DL` gates the hit flash
+    // (`Hyb`): `a.Pd.da.yD(4).DL && a.model.lrb(...)` (L395). 118 shipped
+    // `<Interval>` entries carry the attribute.
+    bool no_effect = false;
     // JS `Ul.J3` (L774-775): `<IgnoresBlock/>` child -> `DDa=true`
     // (+ `hga` names); `<IgnoresInvulnerable Name="Evade|Dash"/>` child ->
     // `jga=true` (+ `iga` bypass names). Both live in shipped moves.xml

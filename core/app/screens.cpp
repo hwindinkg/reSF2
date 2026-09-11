@@ -266,11 +266,12 @@ private:
 HudBarDecay s_hud_player_decay_;
 HudBarDecay s_hud_enemy_decay_;
 
-// Phase 7.2 magic pool + Phase 7.4 regen display copies (presentation only —
-// the fight sim never reads them, so the pose dump is unaffected).
-sf2::scene::MagicEffects s_magic_fx_;
-bool s_magic_fx_seeded_ = false;
-int s_magic_last_phase_ = 0;
+// Phase 7.4 regen display copies (presentation only — the fight sim never
+// reads them, so the pose dump is unaffected). The magic/effect containers
+// (JS `tl.Rf` L842-844) are owned by FightController (`magic_fx_`) — the
+// single JS-faithful source, fed by the `Yl` Effect triggers via `tl.Nt`
+// (L842) and ticked in `FightController::update` (`tl.WL` L837); the fight
+// draw path reads them from the controller.
 sf2::audio::SpecialMeters s_regen_player_;
 sf2::audio::SpecialMeters s_regen_enemy_;
 
@@ -548,16 +549,31 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
         s.transform.anchor_x = 0.0f;
         s.transform.anchor_y = 0.0f;
     }
-    if (fr.w > 0 && fr.h > 0) {
+    // Natural sprite size = the frame's UNTRIMMED `sourceSize` (`fa`), not the
+    // packed/trimmed rect: JS `R.Cb` (L1616) sets `this.fa = a.fa * atlasScale`
+    // then `b.ba(this.fa)`; `R.$` (L1620) sizes the node the same way. The
+    // packer's `spriteSourceSize` offset (`qj`) is the trim origin `Em` the
+    // renderer's trim compensation consumes. Fall back to the packed rect for
+    // packs that omit `sourceSize`. (Wave T (A): size by untrimmed sourceSize
+    // + spriteSourceSize trim for EVERY UI frame.)
+    const float nat_w =
+        fr.source_w > 0 ? static_cast<float>(fr.source_w) : static_cast<float>(fr.w);
+    const float nat_h =
+        fr.source_h > 0 ? static_cast<float>(fr.source_h) : static_cast<float>(fr.h);
+    s.source_w = nat_w;                          // JS frame `fa.x` (R.Cb L1616)
+    s.source_h = nat_h;                          // JS frame `fa.y`
+    s.trim_x = static_cast<float>(fr.offset_x);  // JS frame `qj.x` -> `Em`
+    s.trim_y = static_cast<float>(fr.offset_y);  // JS frame `qj.y`
+    if (nat_w > 0.0f && nat_h > 0.0f) {
         if (fill) {
             // Bar backing (topPanel, Energy_Bar — JS stretches these to their
             // rects; aspect-fit would shrink topPanel 100x191 to a 44px
             // sliver). Non-uniform stretch is CORRECT here.
-            s.transform.set_scale(w / static_cast<float>(fr.w), h / static_cast<float>(fr.h));
+            s.transform.set_scale(w / nat_w, h / nat_h);
         } else {
             // Aspect-correct fit (Dojo wave): the old non-uniform stretch
             // turned 226x193 menu art into wide ovals. Fit inside (w,h).
-            const float sc = std::min(w / static_cast<float>(fr.w), h / static_cast<float>(fr.h));
+            const float sc = std::min(w / nat_w, h / nat_h);
             s.transform.set_scale(sc, sc);
         }
     }
@@ -666,22 +682,31 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speak
     const float oy = sp;
     auto lx = [&](float v) { return ox + v * c; };
     auto ly = [&](float v) { return oy + v * c; };
-    // The `Ib` scroll uses the `paper` sheet, NOT the JS `Zh` `roll_*`
-    // composite. [OPEN / regression guard] 876a3a97 switched this to
-    // `roll_end`/`roll_center` (JS L1872-1873, `gk(600,250,50,0,!1)`); its
-    // dark rounded caps do not match the oracle banner and REGRESSED the
-    // `dojo_norm` gate 58.39 -> 63.98 (isolated, frozen focus held). Kept on
-    // `paper` until the roll geometry is verified against the oracle.
-    const float pw = 600.0f * c, ph = 250.0f * c;
+    // JS `Ib` (L1906) builds the bar as the `gk(600,250,50,0,!1)` scroll
+    // (L1906 `O1a`), whose art is the `Zh` roll composite (L1872-1873),
+    // NOT the `paper` sheet: `Zh` ctor adds `roll_end` (child 0),
+    // `roll_center` (child 1) and `roll_end` flipped `Hr(!0)` (child 2)
+    // (`y.goa`/`y.pSa` L2467-2468). `Zh.ba(600,250)` (horizontal: `c =
+    // h>w = false`, `d = min(w,h) = 250`, `h = d/capSrcH`):
+    //   capW  = 101 * 250/114      (roll_end sourceSize 101x114)
+    //   bodyW = max(600 - 2*capW, 10)
+    //   left cap x=0, body x=capW, right cap x=capW+bodyW (all 250 tall).
+    constexpr float kRollEndW = 101.0f, kRollEndH = 114.0f;  // scroll.json roll_end
+    constexpr float kBarW = 600.0f, kBarH = 250.0f;          // gk(600,250)
+    const float cap_w = kRollEndW * (kBarH / kRollEndH);     // 221.49 local
+    const float body_w = std::max(kBarW - 2.0f * cap_w, 10.0f);
+    const float ph = kBarH * c;
     bool drew = false;
     if (load_scroll_atlas(app)) {
-        drew = try_draw_atlas_button(app, "paper", lx(300.0f), ly(125.0f), pw, ph, 1.0f,
-                                     /*fill=*/true);
+        drew = try_draw_atlas_button(app, "roll_end", lx(cap_w * 0.5f), ly(kBarH * 0.5f),
+                                     cap_w * c, ph, 1.0f, /*fill=*/true);
         if (drew) {
-            try_draw_atlas_button(app, "paper_edge_left", lx(0.0f), ly(125.0f), pw, ph, 1.0f,
-                                  false);
-            try_draw_atlas_button(app, "paper_edge_right", lx(600.0f), ly(125.0f), pw, ph,
-                                  1.0f, false);
+            try_draw_atlas_button(app, "roll_center", lx(cap_w + body_w * 0.5f),
+                                  ly(kBarH * 0.5f), body_w * c, ph, 1.0f, /*fill=*/true);
+            // Right cap: the third `Zh` child is `roll_end` with `Hr(!0)`.
+            try_draw_atlas_button(app, "roll_end",
+                                  lx(cap_w + body_w + cap_w * 0.5f), ly(kBarH * 0.5f),
+                                  cap_w * c, ph, 1.0f, /*fill=*/true, /*flip_x=*/true);
         }
     }
     if (!drew) {
@@ -1068,25 +1093,24 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                   std::to_string(sv.level), num_scale, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     // JS `wr.Vd = Uf(y.$na, y.IRa)` = `level_bar_empty_short` (empty backing)
     // + `level_bar_short` (fill) over the same 246x32 source box (L1985).
-    // Fill fraction: `wr.myb(rs, Oz())` (L1989) calls `Vd.PT(max)`,
-    // `Vd.DF(rs)`; `Uf.ratio()` = `(Mb-KN)/(JW-KN)` = `rs/Oz()` (L2002-2003).
-    // `Oz()` (L253) = `$B[level-1]` and `$B` is `v.FR.thresholds[i].second`
-    // (`v.FR` = character_progress.xml `<Threshold Level Exp>`), so the max is
-    // the native `ResultsScreen::exp_for_level(level)`; `rs` = the save
-    // `Experience` (JS `p.o.rs`).
-    // JS `wr.myb(rs, Oz())` (L1989) fill = `(Mb-KN)/(JW-KN)` = `rs/Oz()`, where
-    // `Oz()` (L253) is the `character_progress.xml` `<Threshold Level Exp>`
-    // (the native `ResultsScreen::exp_for_level`) and `rs` is the save
-    // `Experience`. REVERTED: on a fresh default save (lvl 1, exp 0) this
-    // JS-exact fill renders `level_bar_short` at 0 width and measured dojo
-    // 58.41% vs the 58.36% baseline (+0.05pp), so the fill is drawn at full
-    // length per the no-regression rule. Re-landing the JS-exact fill needs
-    // its own isolated oracle-gate measurement (OPEN).
+    // `wr.myb(rs, Oz())` (L1989) -> `Vd.PT(max)` + `Vd.DF(rs)`; `Uf.ratio()`
+    // (L2002-2003) = `(Mb-KN)/(JW-KN)` = `rs/Oz()`. `Oz()` (L253) = the
+    // `character_progress.xml` threshold (`ResultsScreen::exp_for_level`),
+    // `rs` = the save `Experience` (JS `p.o.rs`). Clamped 0..1.
     const float lvl_bar_x = x + icon_level + q + num_w + q;
     try_draw_atlas_button(app, "level_bar_empty_short", lvl_bar_x, cy - bar_h * 0.5f, bar_w,
                           bar_h, 1.0f, /*fill=*/true, false, /*top_left=*/true);
-    try_draw_atlas_button(app, "level_bar_short", lvl_bar_x, cy - bar_h * 0.5f, bar_w, bar_h,
-                          1.0f, /*fill=*/true, false, /*top_left=*/true);
+    const int need_exp = ResultsScreen::exp_for_level(sv.level);
+    const float lvl_frac =
+        need_exp > 0
+            ? std::clamp(static_cast<float>(sv.experience) / static_cast<float>(need_exp),
+                         0.0f, 1.0f)
+            : 0.0f;
+    if (lvl_frac > 0.0f) {
+        try_draw_atlas_button(app, "level_bar_short", lvl_bar_x, cy - bar_h * 0.5f,
+                              bar_w * lvl_frac, bar_h, 1.0f, /*fill=*/true, false,
+                              /*top_left=*/true);
+    }
     x += lvl_w + lay.gap;
     // `xr` (energy). `icon` is a plain `R.$` (no `Ga`) -> left/top-edge.
     // `xr.Vd = zr` extends `Uf` and passes the SAME `y.$na` base
@@ -2481,15 +2505,30 @@ void DojoScreen::render_impl(App& app) {
     bool have_hub_cam = false;
     if (app.has_fight_assets()) {
         FightAssets& assets = app.fight_assets();
-        // Hub framing = the FROZEN spawn constant (JS `ma.Sya` L1833 /
-        // frame-0 `Ut.Al` L826): `Io = arenaW/2 - (playerSpawn+enemySpawn)/2`.
-        // [OPEN / regression guard] 876a3a97 wired the live CoM midpoint
-        // (`focus_x`/`fighter_span` args, PORT_AUDIT_SCENE §4.4 + W1). On the
-        // oracle `dojo_norm` gate that REGRESSED 59.26 -> 83.25 (whole-scene
-        // camera shift; isolated: variant B live+no-bag 83.26 vs variant C
-        // frozen+no-bag 63.98). Reverted to the frozen constant until the
-        // live-focus semantics are machine-verified against the oracle.
-        assets.dojo.default_camera(hub_cam, kViewW, kViewH);
+        // Hub framing = the LIVE viewer CoM midpoint (JS `Tf.Ea` L1972 runs
+        // the `FightNone` viewer through `Sya`; `Ut.Al` L826 recomputes
+        // `Io = Lb.width/2 - focus` from `Go.ma` every frame). The two
+        // viewers' CoMs are the player idle figure and the Punchbag dummy:
+        // `Fighter::sample` (fighter.hpp L207) anchors each COM bone at the
+        // passed (x,y), and neither viewer moves on the hub, so the live CoMs
+        // are their spawns. Container -> location: `+arenaW/2`.
+        // NOTE: 876a3a97 passed `Fighter::world_x()` here, but
+        // `Fighter::sample` never assigns `world_x_` (only `set_world_pos` /
+        // root motion do), so those reads were 0 and `Io` went to `arenaW/2`
+        // (the +19.3pp oracle regression). Use the spawn-anchored CoMs.
+        // OPEN: if the idle clip's authored root motion moves the COM (the
+        // native anchors it at spawn), a per-frame posed-skeleton COM would be
+        // needed — not modelled.
+        float focus_x = -1.0f;
+        float fighter_span = -1.0f;
+        {
+            const float half = assets.dojo.arena_width() * 0.5f;
+            const float player_x = assets.dojo.player_spawn_x() - half;
+            const float enemy_x = assets.dojo.enemy_spawn_x() - half;
+            focus_x = (player_x + enemy_x) * 0.5f + half;
+            fighter_span = std::fabs(enemy_x - player_x);
+        }
+        assets.dojo.default_camera(hub_cam, kViewW, kViewH, focus_x, fighter_span);
         have_hub_cam = true;
         assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
     } else {
@@ -3651,30 +3690,18 @@ void FightScreen::update_impl(float dt) {
     update_gamepad_input();
     fight_->update(dt);
 
-    // Phase 7.2 + 7.4 display-layer ticks (NO gameplay impact — presentation
-    // copies only; the sim never reads them).
-    // Magic containers (JS `cv.WL()` L839 ticks with `1 / v.on()`; `v.on()`
-    // is not ported, so timescale 1.0): seed the built-in descs once, spawn
-    // the round-intro ring on the phase -> 2 edge, tick every frame.
-    if (!s_magic_fx_seeded_) {
-        s_magic_fx_seeded_ = true;
-        s_magic_fx_.add_default_descs();
-    }
+    // Phase 7.4 display-layer tick (NO gameplay impact — presentation
+    // copies only; the sim never reads them). The magic/effect containers
+    // (JS `tl.Rf`, `tl.WL` L837) tick inside `FightController::update`; the
+    // renderer reads them from the fight (see draw_fight). This layer only
+    // ticks the regen copies.
     const int phase_now = fight_->phase();
-    if (phase_now == 2 && s_magic_last_phase_ != 2) {
-        const float mid_x = (fight_->player().fighter.world_x() +
-                             fight_->enemy().fighter.world_x()) *
-                            0.5f;
-        s_magic_fx_.spawn("round_intro", mid_x, fight_->player().fighter.world_y(), 1);
-    }
-    s_magic_last_phase_ = phase_now;
     // Special regen display copies (JS `wd.MOa()` L532-533, gated on
     // `eu == 2` at L499; canonical home is Fighter — see special_regen.hpp).
     if (sf2::audio::regen_should_tick(phase_now)) {
         sf2::audio::regen_tick(s_regen_player_, 1.0f);
         sf2::audio::regen_tick(s_regen_enemy_, 1.0f);
     }
-    s_magic_fx_.update(1.0f);
 
     // Per-second log.
     if (fight_->frame() / 60 != last_log_frame_) {
@@ -3969,10 +3996,12 @@ void FightScreen::render_impl(App& app) {
     // (`Gfb` = OnBackground) -> Hq (air), both z=+.01 over the fighters.
     // Route by `MagicEffects::background_for` (JS `tl.Nt` L842): the
     // background pass draws first, the air pass second. Both use the same
-    // container offset (JS `tl.init` L843).
-    draw_magic_effects(app, ren, camera, s_magic_fx_, /*background_pass=*/true,
+    // container offset (JS `tl.init` L843). The containers are the fight's
+    // own (`FightController::magic_fx_`, JS `tl.Rf`) — the single source fed
+    // by the `Yl` Effect triggers; no parallel screen-owned pool.
+    draw_magic_effects(app, ren, camera, fight_->magic_fx(), /*background_pass=*/true,
                        arena_half, cont_y);
-    draw_magic_effects(app, ren, camera, s_magic_fx_, /*background_pass=*/false,
+    draw_magic_effects(app, ren, camera, fight_->magic_fx(), /*background_pass=*/false,
                        arena_half, cont_y);
     // JS `sXa` (L827-828): the two `fight/ringout` (asset 1300) off-screen
     // arrows. Register the frame run here so `marker_frame_name` resolves

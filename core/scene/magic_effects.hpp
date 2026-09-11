@@ -75,13 +75,20 @@ struct MagicInstance {
 // into `Gq`/`Hq` (L842) — see `background()`/`foreground()`.
 class MagicEffects {
 public:
+    // JS `tl.Zab` (L843-844): the two `Xm` containers are glued to the scene
+    // with `translate.z = .01` (`Gq` first, `Hq` second) -> the effects layer
+    // sits above the fighters (z=0) and the background. The renderer draws
+    // `background()` at `kBackgroundZ` and `foreground()` at `kForegroundZ`.
+    static constexpr float kBackgroundZ = 0.01f;  // JS `Gq` z=+.01 (L843)
+    static constexpr float kForegroundZ = 0.01f;  // JS `Hq` z=+.01 (L844)
+
     // Replaces the descriptor set (JS: the `magic/*.json` registry).
     // Returns false when `descs` is empty (keeps the old set).
     bool load(const std::vector<MagicEffectDesc>& descs);
 
-    // Seeds the three built-in descriptors from the real `fight/fx` atlas
+    // Seeds the two built-in descriptors from the real `fight/fx` atlas
     // frame runs (the available `ni` frames): "hit_flash" (hit_blade),
-    // "round_intro" (block), "magic_trail" (effect_shield_hex_hit, looping).
+    // "magic_trail" (effect_shield_hex_hit, looping).
     void add_default_descs();
 
     // Spawns a live instance (JS `Nt`/`lwb`). Returns false for unknown

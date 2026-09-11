@@ -132,9 +132,11 @@ void EffectSystem::show_offscreen_markers(float left_off, float right_off, float
     if (markers_.active) return;
     // JS `sXa` (L827-828): `c=1/(c/60)|0` then `kg.Yda(frames, c)`. `Yda`
     // sets each frame duration to `1/fps` (L1620, `b=1/b`), so with
-    // `fps=60/speed` one frame lasts `speed/60` s.
-    const float fps = speed > 0.0f ? (60.0f / speed) : 60.0f;
-    const float frame_time = 1.0f / fps;
+    // `fps = trunc(60/speed)` one frame lasts `1/trunc(60/speed)` s. Note the
+    // JS `|0` truncation (not a plain division).
+    const float fps_raw = speed > 0.0f ? (60.0f / speed) : 60.0f;
+    const float fps = static_cast<float>(static_cast<int>(fps_raw));
+    const float frame_time = fps > 0.0f ? (1.0f / fps) : (1.0f / 60.0f);
     const float h = 7.0f + 2.0f * floor_y;               // JS `h`
     const float y = view_h * 0.5f - floor_y - 7.0f;      // JS `-k`, k=7+ct-H/2
     markers_ = offscreen_markers{};
