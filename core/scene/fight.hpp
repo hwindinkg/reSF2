@@ -564,6 +564,10 @@ public:
         fighter_color_ = rgb;
         player_.fighter.set_color(rgb);
         enemy_.fighter.set_color(rgb);
+        // JS `Na.cd(Lb.N2)` (L824/L833): the SAME location Root Color fills
+        // every effect sprite, so the hit sparks inherit it at the source
+        // (`av` ctor / `ryb` spawn) — not just at the draw site.
+        fx_.set_color(rgb);
     }
 
     // --- fight state accessors -------------------------------------------

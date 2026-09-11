@@ -31,7 +31,8 @@ bool MagicEffects::load(const std::vector<MagicEffectDesc>& descs) {
     descs_ = descs;
     // Live instances hold desc INDICES — a reload invalidates them (same as
     // JS re-entering a fight: `fB()` drains every effect first).
-    live_.clear();
+    background_.clear();
+    foreground_.clear();
     return true;
 }
 
@@ -96,59 +97,83 @@ bool MagicEffects::spawn(const std::string& name, float x, float y, int facing) 
     in.playing = true;
     in.accum = 0.0f;
     in.age = 0.0f;
-    live_.push_back(in);
+    // JS `tl.Nt` (L842): `a.Gfb ? this.Gq.Nt(a) : this.Hq.Nt(a)`.
+    if (d->on_background) {
+        background_.push_back(in);
+    } else {
+        foreground_.push_back(in);
+    }
     return true;
+}
+
+std::vector<MagicInstance> MagicEffects::live() const {
+    std::vector<MagicInstance> all;
+    all.reserve(background_.size() + foreground_.size());
+    all.insert(all.end(), background_.begin(), background_.end());
+    all.insert(all.end(), foreground_.begin(), foreground_.end());
+    return all;
 }
 
 void MagicEffects::stop(const std::string& name) {
     const MagicEffectDesc* d = find(name);
     if (d == nullptr) return;
     const std::size_t idx = static_cast<std::size_t>(d - descs_.data());
-    live_.erase(std::remove_if(live_.begin(), live_.end(),
-                               [idx](const MagicInstance& in) { return in.desc == idx; }),
-                live_.end());
+    const auto dead = [idx](const MagicInstance& in) { return in.desc == idx; };
+    background_.erase(std::remove_if(background_.begin(), background_.end(), dead),
+                      background_.end());
+    foreground_.erase(std::remove_if(foreground_.begin(), foreground_.end(), dead),
+                      foreground_.end());
 }
 
-void MagicEffects::stop_all() { live_.clear(); }
+void MagicEffects::stop_all() {
+    background_.clear();
+    foreground_.clear();
+}
 
 void MagicEffects::update(float timescale) {
     const float ts = timescale > 0.0f ? timescale : 1.0f;
     // JS `cv.WL` (L839): `animate.ia(L.K.sk.Bm * a)` with `a = 1/v.on()`.
     const float dt = (1.0f / 60.0f) / ts;
-    std::size_t w = 0;
-    for (std::size_t i = 0; i < live_.size(); ++i) {
-        MagicInstance& in = live_[i];
-        const MagicEffectDesc& d = descs_[in.desc];
-        in.age += 1.0f;
-        in.x += in.vx / ts;
-        in.y += in.vy / ts;
-        if (d.frames.empty()) {
-            // Timeless tint pulse without frames: lives off the end-fade.
-            if (in.age >= kEndFadeTicks * 2.0f) continue;  // dead — dropped
-        } else if (!in.playing) {
-            continue;  // JS `cv.WL`: `!d.animate.LJ` -> remove
-        } else {
-            const int n = static_cast<int>(d.frames.size());
-            const float tpf = d.ticks_per_frame > 0.0f ? d.ticks_per_frame : 1.0f;
-            const float mp = tpf / 60.0f;  // JS `ni.mP = NL/60` (seconds/frame)
-            // JS `ni.ia`: for(Qe += a; Qe >= mP;) { JXa(); Qe -= mP }.
-            in.accum += dt;
-            while (in.playing && in.accum >= mp) {
-                in.accum -= mp;
-                in.frame += in.frame_step;
-                if (in.frame >= n || in.frame < 0) {
-                    in.frame = 0;  // JS `JXa`: `this.hc = this.mv`
-                    if (in.iterations_left > 0) {
-                        --in.iterations_left;
-                        if (in.iterations_left <= 0) in.playing = false;
+    // The same stepping runs for both containers (JS `Gq.WL()` + `Hq.WL()`,
+    // `tl.WL` L837 calls each `Xm.WL`).
+    const auto step = [this, ts, dt](std::vector<MagicInstance>& live) {
+        std::size_t w = 0;
+        for (std::size_t i = 0; i < live.size(); ++i) {
+            MagicInstance& in = live[i];
+            const MagicEffectDesc& d = descs_[in.desc];
+            in.age += 1.0f;
+            in.x += in.vx / ts;
+            in.y += in.vy / ts;
+            if (d.frames.empty()) {
+                // Timeless tint pulse without frames: lives off the end-fade.
+                if (in.age >= kEndFadeTicks * 2.0f) continue;  // dead — dropped
+            } else if (!in.playing) {
+                continue;  // JS `cv.WL`: `!d.animate.LJ` -> remove
+            } else {
+                const int n = static_cast<int>(d.frames.size());
+                const float tpf = d.ticks_per_frame > 0.0f ? d.ticks_per_frame : 1.0f;
+                const float mp = tpf / 60.0f;  // JS `ni.mP = NL/60` (s/frame)
+                // JS `ni.ia`: for(Qe += a; Qe >= mP;) { JXa(); Qe -= mP }.
+                in.accum += dt;
+                while (in.playing && in.accum >= mp) {
+                    in.accum -= mp;
+                    in.frame += in.frame_step;
+                    if (in.frame >= n || in.frame < 0) {
+                        in.frame = 0;  // JS `JXa`: `this.hc = this.mv`
+                        if (in.iterations_left > 0) {
+                            --in.iterations_left;
+                            if (in.iterations_left <= 0) in.playing = false;
+                        }
                     }
                 }
+                if (!in.playing) continue;  // JS `LNa` — destroy finished
             }
-            if (!in.playing) continue;  // JS `LNa` — destroy finished one-shots
+            live[w++] = in;
         }
-        live_[w++] = in;
-    }
-    live_.resize(w);
+        live.resize(w);
+    };
+    step(background_);  // JS `Gq`
+    step(foreground_);  // JS `Hq`
 }
 
 float MagicEffects::life_for(const MagicInstance& in) const {

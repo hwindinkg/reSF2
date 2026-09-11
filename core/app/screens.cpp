@@ -1130,6 +1130,121 @@ bool load_pause_atlas(App& app) {
     return ok;
 }
 
+// Lazily loads `res/fight/fx.*` — the `fight/fx` atlas (JS asset id 1306,
+// magic_effects.hpp) that carries the REAL `ni` frame runs the magic
+// instances play: `hit_blade/hit_blade_1..29`, `block/block_1..24`,
+// `effect_shield_hex_hit/effect_shield_hex_hit_1..16` (fx.925b16c7.json).
+// App::init registers fight/ui but not `fx.*`, so it is loaded on demand
+// (same pattern as `load_pause_atlas`). Returns true once registered.
+bool load_fx_atlas(App& app) {
+    static bool done = false;
+    static bool ok = false;
+    if (done) return ok;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/fight";
+        std::string json_path;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("fx.", 0) == 0 && entry.path().extension() == ".json") {
+                json_path = entry.path().string();
+                break;
+            }
+        }
+        if (json_path.empty()) return false;
+        sf2::data::Texture tex;
+        bool decoded = false;
+        for (const std::string& ext : {".png", ".webp", ".ktx", ".dds"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("fx.", 0) == 0 && entry.path().extension() == ext) {
+                    if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                        decoded = true;
+                        break;
+                    }
+                }
+            }
+            if (decoded) break;
+        }
+        if (!decoded) return false;
+        const GLuint gl = app.renderer().texture_for("fx_atlas", tex);
+        if (gl == 0) return false;
+        std::ifstream in(json_path, std::ios::binary);
+        std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+        const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+        for (const auto& fr : a.frames) {
+            app.register_atlas_frame(fr, a.w, a.h, gl);
+        }
+        std::fprintf(stdout, "[fight] fx atlas: %dx%d tex %dx%d %zu frames\n", a.w, a.h,
+                     tex.w, tex.h, a.frames.size());
+        std::fflush(stdout);
+        ok = true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[fight] fx atlas load failed: %s\n", e.what());
+    }
+    return ok;
+}
+
+// Lazily loads `res/fight/ringout.*` — the `fight/ringout` atlas (JS asset id
+// 1300, effects.hpp) that carries the two off-screen arrow runs `sXa`
+// (L827-828) plays: frames "0".."19" (ringout.80bc6e99.json), each 256x128.
+// App::init does not register `ringout.*`, so it is loaded on demand (the
+// `load_fx_atlas` pattern). NOTE: these frame names are bare (`"0"`..`"19"`,
+// the JSON filename); `App::atlas_cache_` is keyed by that name, which would
+// collide with another atlas that ships bare numeric frames (the oracle's
+// `ui/sale` does; it is not loaded by the port). The registration is kept
+// here because it is the JS-exact key for this atlas.
+bool load_ringout_atlas(App& app) {
+    static bool done = false;
+    static bool ok = false;
+    if (done) return ok;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/fight";
+        std::string json_path;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("ringout.", 0) == 0 && entry.path().extension() == ".json") {
+                json_path = entry.path().string();
+                break;
+            }
+        }
+        if (json_path.empty()) return false;
+        sf2::data::Texture tex;
+        bool decoded = false;
+        for (const std::string& ext : {".png", ".webp", ".ktx", ".dds"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("ringout.", 0) == 0 && entry.path().extension() == ext) {
+                    if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                        decoded = true;
+                        break;
+                    }
+                }
+            }
+            if (decoded) break;
+        }
+        if (!decoded) return false;
+        const GLuint gl = app.renderer().texture_for("ringout_atlas", tex);
+        if (gl == 0) return false;
+        std::ifstream in(json_path, std::ios::binary);
+        std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+        const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+        for (const auto& fr : a.frames) {
+            app.register_atlas_frame(fr, a.w, a.h, gl);
+        }
+        std::fprintf(stdout, "[fight] ringout atlas: %dx%d tex %dx%d %zu frames\n", a.w, a.h,
+                     tex.w, tex.h, a.frames.size());
+        std::fflush(stdout);
+        ok = true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[fight] ringout atlas load failed: %s\n", e.what());
+    }
+    return ok;
+}
+
 // Maps the controller's banner kind to the callouts frame (JS `Cr` L2022-
 // 2026: `init(y.BQa)` for round, `Zy` -> `y.uQa` fight, `GZ` -> `y.zQa`/
 // `y.wQa` for win/lose). Returns nullptr for kinds with no cited frame.
@@ -1272,23 +1387,27 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight, int b
 // BEFORE the fg floor layers (bg -> fighters -> SPARKS -> fg floor — the
 // b615a1bf layer order).
 //
+// `color` is the location Root Color (JS `Na.cd(Lb.N2)` at the `av` ctor
+// L833 and the `ryb` spawn L824: every spark is filled with the location
+// colour, the same as the fighter silhouettes). FightController's spawn
+// (`fx_.spawn_hit_sparks`, fight.cpp) does not thread it yet — cross-file
+// OPEN; the draw site passes the loaded location's `root_color()`.
+//
 // `xoff`/`yoff` are the `tl` container offset (JS `tl.init` L843:
 // translate.x = -width/2, translate.y = height/2 - Floor) — the SAME offset
 // `project()` applies to the fighters, so effects sit in the container.
-// The `OnBackground` bg/fg routing (JS `tl.Nt` L842-843) is still pending
-// (Wave G has no API yet): this draws every effect on the fighter plane.
 void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
-                     const sf2::scene::EffectSystem& fx, float xoff = 0.0f,
-                     float yoff = 0.0f) {
+                     const sf2::scene::EffectSystem& fx, std::uint32_t color,
+                     float xoff = 0.0f, float yoff = 0.0f) {
     const std::vector<sf2::scene::particle>& parts = fx.particles();
     for (const sf2::scene::particle& p : parts) {
         if (p.life <= 0.0f || p.age >= p.life) continue;
         const float t = p.age / p.life;          // 0..1 lived
         const float alpha = 1.0f - t;            // fade out by age/life
         if (alpha <= 0.02f) continue;
-        const float r = static_cast<float>((p.color >> 16) & 0xFFu) * (1.0f / 255.0f);
-        const float g = static_cast<float>((p.color >> 8) & 0xFFu) * (1.0f / 255.0f);
-        const float b = static_cast<float>(p.color & 0xFFu) * (1.0f / 255.0f);
+        const float r = static_cast<float>((color >> 16) & 0xFFu) * (1.0f / 255.0f);
+        const float g = static_cast<float>((color >> 8) & 0xFFu) * (1.0f / 255.0f);
+        const float b = static_cast<float>(color & 0xFFu) * (1.0f / 255.0f);
         // World -> screen (factor 1.0: the sparks live in the fight plane),
         // container offset applied (JS `tl.init` L843).
         const float sx = camera.world_to_screen_x(p.x - xoff, 1.0f);
@@ -1305,31 +1424,115 @@ void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& came
     }
 }
 
-// Magic containers (JS `Xm`/`cv` L836-839, Phase 7.2): flat tinted quads for
-// each live instance, faded by age/life — the same world->screen path the
-// hit sparks use, with the same `tl` container offset (`xoff`/`yoff`, JS
-// `tl.init` L843). Drawn right after the sparks, before the fg floor layers.
-// `OnBackground` routing (JS `tl.Nt` L842-843) is pending (Wave G API not
-// ready) — every instance draws on the fighter plane for now.
-void draw_magic_effects(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
-                        const sf2::scene::MagicEffects& fx, float xoff = 0.0f,
-                        float yoff = 0.0f) {
+// Draws one REAL `fight/fx` frame (JS asset id 1306 — the `ni` frame runs)
+// centered at screen (cx,cy), fit into a `size`-px box, tinted (r,g,b)/
+// `alpha`, and mirrored when `facing < 0` (JS `cv.lwb` L838:
+// `e.scale.x = c.Wl * a.scale.x`, `c.Wl = b.da.hd()`). Returns false on a
+// genuine atlas/frame miss — the caller then draws the flat tinted quad.
+bool draw_fx_frame(App& app, const std::string& frame_name, float cx, float cy,
+                   float size, int facing, float r, float g, float b, float alpha) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl)) {
+        // A genuine atlas miss — the caller draws the flat quad fallback. Log
+        // only when the missing name changes (a real data gap, not per-frame
+        // spam); the fx/ringout runs all resolve, so this stays silent.
+        static std::string last_miss;
+        if (last_miss != frame_name) {
+            last_miss = frame_name;
+            std::fprintf(stderr, "[fx] atlas miss: %s\n", frame_name.c_str());
+        }
+        return false;
+    }
+    if (fr.w <= 0 || fr.h <= 0) return false;
+    // The frame's own box is `sourceSize` (JS `le` draws at `fa`); fall back
+    // to the packed rect when the atlas did not carry a source size.
+    const float src_w = fr.source_w > 0 ? static_cast<float>(fr.source_w)
+                                        : static_cast<float>(fr.w);
+    const float src_h = fr.source_h > 0 ? static_cast<float>(fr.source_h)
+                                        : static_cast<float>(fr.h);
+    sf2::scene::Sprite s;
+    s.texture_name = frame_name;
+    s.frame_x = static_cast<float>(fr.x);
+    s.frame_y = static_cast<float>(fr.y);
+    s.frame_w = static_cast<float>(fr.w);
+    s.frame_h = static_cast<float>(fr.h);
+    s.tex_w = static_cast<float>(tw);
+    s.tex_h = static_cast<float>(th);
+    s.solid = false;
+    s.color_r = r;
+    s.color_g = g;
+    s.color_b = b;
+    s.color_a = alpha;
+    s.rotated = fr.rotated;
+    // The fx frames are packed TRIMMED: the packed rect sits at
+    // `spriteSourceSize` inside the full `sourceSize`; the renderer shifts
+    // the quad by the trim compensation (sprite_to_quad).
+    s.trim_x = static_cast<float>(fr.offset_x);
+    s.trim_y = static_cast<float>(fr.offset_y);
+    s.source_w = static_cast<float>(fr.source_w);
+    s.source_h = static_cast<float>(fr.source_h);
+    s.transform.set_pos(cx, cy);
+    // Fit the source-size frame into `size` px; a negative x-scale mirrors
+    // on facing (no face culling — a flipped winding still draws).
+    s.transform.set_scale(size / src_w * (facing < 0 ? -1.0f : 1.0f), size / src_h);
+    // Effects are screen-projected already: draw through the identity camera
+    // (world == screen), same as `try_draw_atlas_button`.
+    sf2::render::Camera ui_cam;
+    ui_cam.center_x = 640.0f;
+    ui_cam.center_y = 360.0f;
+    ui_cam.zoom = 1.0f;
+    ui_cam.view_w = 1280.0f;
+    ui_cam.view_h = 720.0f;
+    ui_cam.arena_h = 720.0f;
+    ui_cam.arena_floor = 0.0f;
+    ui_cam.arena_center_x = 640.0f;
+    app.renderer().draw_sprite(s, ui_cam);
+    return true;
+}
+
+// Magic containers (JS `Xm`/`cv` L836-839, Phase 7.2): the REAL `ni` frame
+// runs (JS `ni` L1141-1144 via `cv.lwb` L838-839) for each live instance,
+// faded by age/life — the same world->screen path the hit sparks use, with
+// the same `tl` container offset (`xoff`/`yoff`, JS `tl.init` L843).
+// `background_pass` routes by JS `tl.Nt` (L842): `a.Gfb ? Gq : Hq` — the
+// Gq (`background_for()==true`) pass draws first, the Hq (air) pass second,
+// both after the fighters (tl.init L843-844 appends qh -> Gq -> Hq). A flat
+// tinted quad is drawn ONLY on a genuine atlas/frame miss.
+void draw_magic_effects(App& app, sf2::render::Renderer& ren,
+                        const sf2::render::Camera& camera,
+                        const sf2::scene::MagicEffects& fx, bool background_pass,
+                        float xoff = 0.0f, float yoff = 0.0f) {
+    // The real `fight/fx` atlas (JS `E.get(1306)`) carries the frame names
+    // `frame_for` returns; load it on demand (the `load_pause_atlas` pattern).
+    const bool have_fx = load_fx_atlas(app);
     for (const sf2::scene::MagicInstance& in : fx.live()) {
+        // JS `tl.Nt` (L842): `a.Gfb ? Gq : Hq` — one instance belongs to
+        // exactly one of the two passes.
+        if (fx.background_for(in) != background_pass) continue;
         const float alpha = fx.alpha_for(in);
         if (alpha <= 0.02f) continue;
         const std::uint32_t color = fx.color_for(in);
         const float r = static_cast<float>((color >> 16) & 0xFFu) * (1.0f / 255.0f);
         const float g = static_cast<float>((color >> 8) & 0xFFu) * (1.0f / 255.0f);
         const float b = static_cast<float>(color & 0xFFu) * (1.0f / 255.0f);
+        // Container offset (JS `tl.init` L843): x -= width/2, y += height/2-ct.
         const float sx = camera.world_to_screen_x(in.x - xoff, 1.0f);
         const float sy = camera.world_to_screen_y(in.y + yoff);
-        const float half = fx.size_for(in) * camera.zoom * 0.5f;
-        if (half < 0.5f) continue;
-        const float verts[] = {
-            sx - half, sy - half, sx + half, sy - half, sx - half, sy + half,
-            sx + half, sy - half, sx + half, sy + half, sx - half, sy + half,
-        };
-        ren.draw_triangles(verts, 6, r, g, b, alpha);
+        const float size = fx.size_for(in) * camera.zoom;
+        if (size < 1.0f) continue;
+        // The REAL frame (JS `ni` L1141-1144): draw the atlas frame; the flat
+        // tinted quad is the fallback ONLY on a genuine atlas/frame miss.
+        const std::string frame = have_fx ? fx.frame_for(in) : std::string();
+        if (!frame.empty() &&
+            draw_fx_frame(app, frame, sx, sy, size, in.facing, r, g, b, alpha)) {
+            continue;
+        }
+        // The flat tinted quad is the renderer's effect primitive (JS `R3a`
+        // L486 + the effect sprite's center anchor `Ga`), the same path the
+        // ringout arrow bodies use — not a raw triangle list.
+        ren.draw_effect_quad(sx, sy, size, size, 0.0f, r, g, b, alpha);
     }
 }
 
@@ -3508,10 +3711,30 @@ void FightScreen::render_impl(App& app) {
     // layer order; the batch preserves submission order).
     // The effects share the fighters' `tl` container offset (JS `tl.init`
     // L843: x=-width/2, y=height/2-Floor) — the same kContY `project()`
-    // applies; PORT_AUDIT_SCENE D12. (OnBackground routing pending Wave G.)
+    // applies; PORT_AUDIT_SCENE D12.
     const float cont_y = camera.arena_h * 0.5f - camera.arena_floor;
-    draw_hit_sparks(ren, camera, fight_->fx(), arena_half, cont_y);
-    draw_magic_effects(ren, camera, s_magic_fx_, arena_half, cont_y);
+    // JS `Na.cd(Lb.N2)` (L824/L833): every spark is filled with the location
+    // Root Color — the same colour the fighter silhouettes use. The fight
+    // spawn (FightController, fight.cpp:1565) does not thread it yet
+    // (cross-file OPEN), so pass the loaded location's root colour here.
+    draw_hit_sparks(ren, camera, fight_->fx(), assets.dojo.root_color(), arena_half,
+                    cont_y);
+    // JS `tl.init` (L843-844): the container order is qh (fighters) -> Gq
+    // (`Gfb` = OnBackground) -> Hq (air), both z=+.01 over the fighters.
+    // Route by `MagicEffects::background_for` (JS `tl.Nt` L842): the
+    // background pass draws first, the air pass second. Both use the same
+    // container offset (JS `tl.init` L843).
+    draw_magic_effects(app, ren, camera, s_magic_fx_, /*background_pass=*/true,
+                       arena_half, cont_y);
+    draw_magic_effects(app, ren, camera, s_magic_fx_, /*background_pass=*/false,
+                       arena_half, cont_y);
+    // JS `sXa` (L827-828): the two `fight/ringout` (asset 1300) off-screen
+    // arrows. Register the frame run here so `marker_frame_name` resolves
+    // BEFORE any marker draw. The native round logic never emits the JS
+    // `ERuleRingout` marker (`round_result::ringout` is never assigned), so
+    // no arrow is active in the current sim (OPEN) — the atlas is loaded so
+    // the Wave J `sXa` path is complete and cannot atlas-miss.
+    load_ringout_atlas(app);
 
     // [fix(render): arena layer order] The foreground layers — the ones the
     // params XML places AFTER the ModelsViewer (Type=2) fighter layer: the

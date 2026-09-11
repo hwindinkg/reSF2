@@ -190,6 +190,32 @@ void Renderer::draw_triangles(const float* verts, std::size_t vertex_count,
                               float r, float g, float b, float a) {
     batch_.add_triangles(verts, vertex_count, r, g, b, a);
 }
+
+void Renderer::draw_effect_quad(float cx, float cy, float w, float h,
+                                float rotation_deg, float r, float g, float b,
+                                float a) {
+    const float hw = w * 0.5f, hh = h * 0.5f;
+    // Corner pairing matches the sprite path: 0=(-w,-h) 1=(+w,-h)
+    // 2=(-w,+h) 3=(+w,+h).
+    float lx[4] = {-hw, hw, -hw, hw};
+    float ly[4] = {-hh, -hh, hh, hh};
+    if (rotation_deg != 0.0f) {
+        const float th = rotation_deg * 3.14159265358979323846f / 180.0f;
+        const float ct = std::cos(th), st = std::sin(th);
+        for (int c = 0; c < 4; ++c) {
+            const float px = lx[c] * ct - ly[c] * st;
+            const float py = lx[c] * st + ly[c] * ct;
+            lx[c] = px;
+            ly[c] = py;
+        }
+    }
+    // Two triangles: (0,1,2) (2,1,3) — same winding as the sprite batch.
+    const float verts[12] = {
+        cx + lx[0], cy + ly[0], cx + lx[1], cy + ly[1], cx + lx[2], cy + ly[2],
+        cx + lx[1], cy + ly[1], cx + lx[3], cy + ly[3], cx + lx[2], cy + ly[2],
+    };
+    batch_.add_triangles(verts, 6, r, g, b, a);
+}
 void Renderer::render_node(sf2::scene::Node& node, const Camera& camera) {
     node.render(*this);
     for (const auto& child : node.children()) {

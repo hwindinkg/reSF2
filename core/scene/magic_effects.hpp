@@ -70,7 +70,9 @@ struct MagicInstance {
     float age = 0.0f;         // ticks lived (for the end-fade)
 };
 
-// The container: data-loaded descriptors + live instances (JS `Xm` + `cv`).
+// The two render containers (JS `Xm` + `cv`, L836-839): descriptors + live
+// instances, split by `OnBackground` (`Gfb`, L729) the way `tl.Nt` routes
+// into `Gq`/`Hq` (L842) — see `background()`/`foreground()`.
 class MagicEffects {
 public:
     // Replaces the descriptor set (JS: the `magic/*.json` registry).
@@ -95,10 +97,22 @@ public:
     // (`!LJ`) are destroyed (JS `LNa`); loopers wrap.
     void update(float timescale);
 
-    // The live instances (for rendering).
-    const std::vector<MagicInstance>& live() const { return live_; }
-    bool empty() const { return live_.empty(); }
-    void clear() { live_.clear(); }
+    // The two render containers (JS `tl.Gq`/`tl.Hq`, L842-844). `background`
+    // holds the `OnBackground` (`Gfb`) instances (JS `Gq`, z=+.01) that draw
+    // BEFORE the fighters; `foreground` holds the rest (JS `Hq`, z=+.01)
+    // that draw AFTER — the two render passes (PORT_AUDIT_SCENE W4).
+    const std::vector<MagicInstance>& background() const { return background_; }
+    const std::vector<MagicInstance>& foreground() const { return foreground_; }
+
+    // Combined view (background then foreground) for callers that do not
+    // split the passes. Returns a copy.
+    std::vector<MagicInstance> live() const;
+
+    bool empty() const { return background_.empty() && foreground_.empty(); }
+    void clear() {
+        background_.clear();
+        foreground_.clear();
+    }
 
     // Frame fade for one instance: 1.0 through most of life, ramping out
     // over the last 8 ticks for one-shots (the `uub` fade in JS terms).
@@ -122,7 +136,8 @@ private:
     const MagicEffectDesc* find(const std::string& name) const;
 
     std::vector<MagicEffectDesc> descs_;
-    std::vector<MagicInstance> live_;
+    std::vector<MagicInstance> background_;  // JS `Gq` — before the fighters
+    std::vector<MagicInstance> foreground_;  // JS `Hq` — after the fighters
 };
 
 }  // namespace sf2::scene

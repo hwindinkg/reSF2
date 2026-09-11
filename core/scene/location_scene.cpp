@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -62,19 +63,200 @@ void parse_color(const std::string& hex, float& r, float& g, float& b) {
     b = static_cast<float>(v & 0xFF) / 255.0f;
 }
 
+// JS `zh.Gb` + `zh.cmb` (L1145-1146): evaluate segment `seg` at local time
+// `t`. Ease 0 = line, Ease != 0 = parabola; both hit `A` at t=0 and `B` at
+// t=Period (cmb solves `b`/`c` so `e*(P+b)^2+c == B`). This is the D6
+// `Point/@Ease` curve the previous port ignored (it always lerped).
+float zh_value(const std::vector<Sprite::TransKey>& keys, std::size_t n,
+               std::size_t seg, float t) {
+    const float a = keys[seg].value;
+    const float b = keys[(seg + 1) % n].value;
+    const float p = keys[seg].period;
+    const float e = keys[seg].ease;
+    if (p <= 0.0f) {
+        return a;  // JS Gw==0 -> cmb zeroes b/c; degenerate
+    }
+    if (e == 0.0f) {
+        return a + (b - a) * (t / p);
+    }
+    const float bc = (b - a - e * p * p) / (2.0f * e * p);
+    const float cc = a - e * bc * bc;
+    return e * (t + bc) * (t + bc) + cc;
+}
+
+// JS `zh.update` (L1146): advance the clock by `dt` (seconds) and roll the
+// segment index while the accumulated time exceeds the segment's Period (a
+// strict `>`, wrapping `wp` to 0 at the end of the list).
+void advance_timeline(EffectTimeline& tl, float dt) {
+    if (tl.keys.empty()) {
+        return;
+    }
+    tl.t += dt;
+    const std::size_t n = tl.keys.size();
+    while (true) {
+        const float per = tl.keys[tl.seg].period;
+        if (per <= 0.0f) {  // degenerate JS Gw==0; do not spin
+            tl.t = 0.0f;
+            break;
+        }
+        if (tl.t <= per) {
+            break;
+        }
+        tl.t -= per;
+        if (++tl.seg >= n) {
+            tl.seg = 0;
+        }
+    }
+}
+
+// JS `irb`/`Mrb`/`Nrb(Offset)` (L480-481): seed the timeline clock. The JS
+// call is `zh.update(Offset)`, i.e. the same roll applied to the initial time.
+void seed_timeline(EffectTimeline& tl) {
+    if (tl.keys.empty()) {
+        return;
+    }
+    tl.t = tl.offset;
+    advance_timeline(tl, 0.0f);
+}
+
+// Current value of a modifier timeline (JS `zh.Gb`, L1146); 0 when inactive.
+float timeline_value(const EffectTimeline& tl) {
+    if (tl.keys.empty()) {
+        return 0.0f;
+    }
+    return zh_value(tl.keys, tl.keys.size(), tl.seg, tl.t);
+}
+
+// JS `Ie` reader (L1152-1153): "a,b" -> [a,b] range (min != max), a single
+// number -> a fixed value (min == max). Returns false when the attr is absent.
+bool parse_range_attr(const pugi::xml_node& node, const char* name, float& lo,
+                      float& hi) {
+    const char* raw = node.attribute(name).value();
+    if (raw == nullptr || raw[0] == '\0') {
+        lo = hi = 0.0f;
+        return false;
+    }
+    const char* comma = std::strchr(raw, ',');
+    if (comma == nullptr) {
+        lo = hi = static_cast<float>(std::atof(raw));
+    } else {
+        lo = static_cast<float>(std::atof(std::string(raw, comma).c_str()));
+        hi = static_cast<float>(std::atof(comma + 1));
+    }
+    return true;
+}
+
+// JS `xkb` (L1151): "x,y" -> H(x,y). `parseFloat` stops at the comma, so a
+// plain prefix parse is exact; a missing second component yields 0.
+void parse_emitter_attr(const pugi::xml_node& node, float& ex, float& ey) {
+    ex = ey = 0.0f;
+    const char* raw = node.attribute("Emitter").value();
+    if (raw == nullptr || raw[0] == '\0') {
+        return;
+    }
+    const char* comma = std::strchr(raw, ',');
+    ex = static_cast<float>(std::atof(raw));
+    if (comma != nullptr) {
+        ey = static_cast<float>(std::atof(comma + 1));
+    }
+}
+
+// JS `QIa` L481-482 + `jh` ctor L1147-1148: one particle emitter. `a.st()`
+// is the node's FIRST child (`st(){return this.children[0]}`), i.e. the
+// `<Params>` element carrying every emitter attribute. Parsed only — see
+// ParticleLayer (OPEN): the simulation/render are not ported.
+ParticleLayer parse_particle(const pugi::xml_node& node) {
+    ParticleLayer p;
+    const char* cls = node.attribute("ClassName").value();
+    p.class_name = cls != nullptr ? cls : "";
+    p.x = sf2::data::xml_attr_float(node, "X");
+    p.y = sf2::data::xml_attr_float(node, "Y");
+    pugi::xml_node prm = node.child("Params");
+    if (prm == nullptr) {
+        prm = node;  // defensive: attrs on the emitter node itself
+    }
+    const char* frame = prm.attribute("Frame").value();
+    p.frame = frame != nullptr ? frame : "";
+    parse_range_attr(prm, "Life", p.life_min, p.life_max);
+    p.gravity = sf2::data::xml_attr_float(prm, "Gravity");
+    parse_range_attr(prm, "ForceX", p.force_x_min, p.force_x_max);
+    parse_range_attr(prm, "ForceY", p.force_y_min, p.force_y_max);
+    p.rate = sf2::data::xml_attr_float(prm, "Rate");
+    p.max_particles = sf2::data::xml_attr_int(prm, "MaxParticles", 500);
+    parse_range_attr(prm, "AngVel", p.ang_vel_min, p.ang_vel_max);
+    parse_range_attr(prm, "StartSize", p.start_size_min, p.start_size_max);
+    parse_range_attr(prm, "StartRotation", p.start_rot_min, p.start_rot_max);
+    p.start_speed = sf2::data::xml_attr_float(prm, "StartSpeed");
+    parse_range_attr(prm, "VelocityX", p.vel_x_min, p.vel_x_max);
+    parse_range_attr(prm, "VelocityY", p.vel_y_min, p.vel_y_max);
+    parse_emitter_attr(prm, p.emitter_x, p.emitter_y);
+    const char* prewarm = prm.attribute("Prewarm").value();
+    p.prewarm = prewarm != nullptr && std::strcmp(prewarm, "1") == 0;
+    const char* color = prm.attribute("Color").value();
+    p.color = color != nullptr ? color : "";
+    return p;
+}
+
+// The JS `bkb` modifier block (L479-481): OscillationX/Y (`Mrb`/`bXa`,
+// `Nrb`/`cXa`), ReappearX/Y (`gsb`/`hsb` over `Zo`), Speed (`zsb`). The
+// SimpleEffect Rotation modifier (`$sb`/`Zsb`/`GXa`) and nested SimpleEffect
+// are not handled here (OPEN, L481).
+void parse_simple_effect_modifiers(const pugi::xml_node& node, SpriteAnim& anim) {
+    for (const pugi::xml_node child : node.children()) {
+        const char* n = child.name();
+        if (std::strcmp(n, "OscillationX") == 0 ||
+            std::strcmp(n, "OscillationY") == 0) {
+            EffectTimeline& tl =
+                std::strcmp(n, "OscillationX") == 0 ? anim.osc_x : anim.osc_y;
+            tl.offset = sf2::data::xml_attr_float(child, "Offset", 0.0f);
+            for (const pugi::xml_node pt : child.children()) {
+                if (std::strcmp(pt.name(), "Point") != 0) {
+                    continue;
+                }
+                Sprite::TransKey k;
+                k.value = sf2::data::xml_attr_float(pt, "Value", 0.0f);
+                k.period = sf2::data::xml_attr_float(pt, "Period", 1.0f);
+                k.ease = sf2::data::xml_attr_float(pt, "Ease", 0.0f);
+                tl.keys.push_back(k);
+            }
+            seed_timeline(tl);
+        } else if (std::strcmp(n, "ReappearX") == 0 ||
+                   std::strcmp(n, "ReappearY") == 0) {
+            const bool is_x = std::strcmp(n, "ReappearX") == 0;
+            // JS `of(a)` (`new Ba(u.H(Min), u.H(Max))` -> .first/.second).
+            const float mn = sf2::data::xml_attr_float(child, "Min", 0.0f);
+            const float mx = sf2::data::xml_attr_float(child, "Max", 0.0f);
+            if (is_x) {
+                anim.reappear_x = true;
+                anim.re_x_min = mn;
+                anim.re_x_max = mx;
+            } else {
+                anim.reappear_y = true;
+                anim.re_y_min = mn;
+                anim.re_y_max = mx;
+            }
+        } else if (std::strcmp(n, "Speed") == 0) {
+            // JS `zsb(X,Y)` L481 -> `Kta`/`Lta`, added per frame (L1139).
+            anim.speed_x = sf2::data::xml_attr_float(child, "X", 0.0f);
+            anim.speed_y = sf2::data::xml_attr_float(child, "Y", 0.0f);
+        }
+    }
+}
+
 // The Transparency timeline on a Picture SimpleEffect (JS bkb L478-481:
 // `irb(Offset)` + `KWa(Period,Value,Ease)` keys; xl.ia per-frame
 // `Y.wa(EO.Gb()/100)`; zh.Gb initial with ar=0 is the first Point Value).
 // The rest alpha is the FIRST Point Value/100 (dojo layer_4: 45 -> 0.45).
 // Each key's Value is the alpha reached `Period` seconds after the previous
-// key; the list loops (LocationScene::update evaluates it). Returns the rest
-// alpha and fills `keys` (empty when the effect has no Transparency).
-float parse_transparency(const pugi::xml_node& node,
-                         std::vector<Sprite::TransKey>& keys) {
+// key; the list loops (LocationScene::update evaluates it). `Offset` seeds
+// the clock (JS `irb` L481), and `KWa` clamps every Value to [0,100]
+// (L1138). Returns the rest alpha; `sprite.trans_keys` holds the timeline.
+float parse_transparency(const pugi::xml_node& node, Sprite& sprite) {
     for (const pugi::xml_node child : node.children()) {
         if (std::strcmp(child.name(), "Transparency") != 0) {
             continue;
         }
+        sprite.trans_t = sf2::data::xml_attr_float(child, "Offset", 0.0f);
         float rest = 1.0f;
         bool first = true;
         for (const pugi::xml_node pt : child.children()) {
@@ -82,12 +264,13 @@ float parse_transparency(const pugi::xml_node& node,
                 continue;
             }
             Sprite::TransKey k;
-            k.value = sf2::data::xml_attr_float(pt, "Value", 100.0f);
+            const float v = sf2::data::xml_attr_float(pt, "Value", 100.0f);
+            k.value = std::max(0.0f, std::min(100.0f, v));
             k.period = sf2::data::xml_attr_float(pt, "Period", 1.0f);
             k.ease = sf2::data::xml_attr_float(pt, "Ease", 0.0f);
-            keys.push_back(k);
+            sprite.trans_keys.push_back(k);
             if (first) {
-                rest = std::max(0.0f, std::min(1.0f, k.value / 100.0f));
+                rest = k.value / 100.0f;  // already clamped to [0,100]
                 first = false;
             }
         }
@@ -244,6 +427,7 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
     }
 
     layers_.clear();
+    anims_.clear();
     fighter_layer_ = npos;
     int layer_index = 0;
     for (const pugi::xml_node layer_node : root.children()) {
@@ -293,11 +477,30 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
                 // is stored and evaluated by update() (rest = first key).
                 sprite = make_image(child, frames);
                 if (sprite != nullptr) {
-                    sprite->color_a = parse_transparency(child, sprite->trans_keys);
+                    sprite->color_a = parse_transparency(child, *sprite);
+                    // Oscillation / Reappear / Speed (`bkb` L479-481): build
+                    // the per-sprite modifier state before the sprite moves
+                    // into the layer (the Sprite address stays stable).
+                    SpriteAnim anim;
+                    anim.sprite = sprite.get();
+                    anim.base_x = sprite->transform.x;
+                    anim.base_y = sprite->transform.y;
+                    parse_simple_effect_modifiers(child, anim);
+                    if (anim.animated()) {
+                        anims_.push_back(std::move(anim));
+                    }
                 }
+            } else if (std::strcmp(child.name(), "ParticleEffect") == 0 ||
+                       std::strcmp(child.name(), "NewParticleEffect") == 0) {
+                // JS `Bf.zjb` L476-477: both tags route to `QIa` ->
+                // `fXa(new jh)`. The native port parses the emitter (D7) but
+                // does not yet simulate/render it (OPEN — needs the effects
+                // atlas `E.get(1304)` plus the renderer/effects owner). No
+                // sprite is emitted, so `sprite_index` (z) is unaffected.
+                layer->particles.push_back(parse_particle(child));
             }
-            // ModelsViewer / ParticleEffect children are skipped (fighters,
-            // effects) — background-only milestone.
+            // ModelsViewer children are skipped (fighters are drawn by the
+            // fight screen); ParticleEffect/NewParticleEffect are parsed above.
             if (sprite != nullptr) {
                 // JS `Qi.NWa`/`Dla` L487/L1599: z = -0.01*spriteIndex.
                 sprite->z = -0.01f * static_cast<float>(sprite_index);
@@ -376,10 +579,13 @@ void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
 }
 
 void LocationScene::update(float dt) {
-    // SimpleEffect Transparency loop (JS `bkb` L478-481 + `xl.ia`): each key's
-    // Value (percent) is reached `period` seconds after the previous key; the
-    // list loops. Segment i runs value[i] -> value[(i+1) % n] over period[i],
-    // so the rest value (t=0) is value[0] = the parser's initial color_a.
+    // SimpleEffect Transparency loop (JS `bkb` L478-481 + `xl.ia` L1139 +
+    // `zh` L1144-1146): each key's Value (percent) is reached `Period`
+    // seconds after the previous key; the list loops. Segment i runs
+    // value[i] -> value[(i+1) % n] over period[i] using the `Ease` curve
+    // (`zh_value`: line for Ease 0, parabola otherwise; dojo layer_4 has
+    // Ease +/-1), so the rest value (t=0) is value[0] = the parser's
+    // initial color_a.
     for (const auto& layer : layers_) {
         for (const auto& sprite : layer->sprites) {
             const std::size_t nk = sprite->trans_keys.size();
@@ -410,14 +616,37 @@ void LocationScene::update(float dt) {
             if (seg >= nk) {
                 seg = nk - 1;
             }
-            const float per = std::max(0.0f, sprite->trans_keys[seg].period);
-            const float u =
-                per > 0.0f
-                    ? std::max(0.0f, std::min(1.0f, (sprite->trans_t - acc) / per))
-                    : 0.0f;
-            const float a = sprite->trans_keys[seg].value / 100.0f;
-            const float b = sprite->trans_keys[(seg + 1) % nk].value / 100.0f;
-            sprite->color_a = std::max(0.0f, std::min(1.0f, a + (b - a) * u));
+            const float t = sprite->trans_t - acc;
+            const float v = zh_value(sprite->trans_keys, nk, seg, t);
+            sprite->color_a = std::max(0.0f, std::min(1.0f, v / 100.0f));
+        }
+    }
+
+    // SimpleEffect Oscillation / Reappear / Speed (JS `xl.ia` L1139): per
+    // frame `JM += Kta` (Speed X), `x = JM + RW.Gb()` (OscillationX) and
+    // likewise for Y; a `Reappear` wraps `JM` into [min,max] once the
+    // RENDERED coord leaves it (JS `Zo.Zwa` L1140). `P7` sprites are all
+    // evaluated when the effect is active (`ia` L1139).
+    const float frames = dt * 60.0f;  // `xl.ia` runs once per fixed 60 Hz tick
+    for (SpriteAnim& a : anims_) {
+        a.acc_x += a.speed_x * frames;
+        a.acc_y += a.speed_y * frames;
+        advance_timeline(a.osc_x, dt);
+        advance_timeline(a.osc_y, dt);
+        const float x = a.base_x + a.acc_x + timeline_value(a.osc_x);
+        const float y = a.base_y + a.acc_y + timeline_value(a.osc_y);
+        a.sprite->transform.x = x;
+        a.sprite->transform.y = y;
+        // `Zwa(a,b)` tests the rendered coord and stores the wrapped value
+        // back into JM/KM for the NEXT frame (this frame's `Y.C(a)` already
+        // ran, so there is no re-placement).
+        if (a.reappear_x && (x > a.re_x_max || x < a.re_x_min)) {
+            a.acc_x = x > a.re_x_max ? a.re_x_min - a.re_x_max + x
+                                     : a.re_x_max - a.re_x_min + x;
+        }
+        if (a.reappear_y && (y > a.re_y_max || y < a.re_y_min)) {
+            a.acc_y = y > a.re_y_max ? a.re_y_min - a.re_y_max + y
+                                     : a.re_y_max - a.re_y_min + y;
         }
     }
 }

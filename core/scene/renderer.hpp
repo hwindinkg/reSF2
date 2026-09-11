@@ -125,6 +125,15 @@ public:
     void draw_triangles(const float* verts, std::size_t vertex_count, float r,
                         float g, float b, float a = 1.0f);
 
+    // Effect-layer primitive: a screen-space tinted quad centered on (cx,cy)
+    // in SCREEN pixels, size (w,h) in screen pixels, rotated `rotation_deg`
+    // about its center (JS `R3a` L486 `Wg` + the effect sprites' `Ga`
+    // center anchor). Used for the flat effect draws (magic fallback, the
+    // ringout arrow bodies) — it emits through the same batch as
+    // `draw_triangles` and does not touch the sprite/camera geometry.
+    void draw_effect_quad(float cx, float cy, float w, float h, float rotation_deg,
+                          float r, float g, float b, float a = 1.0f);
+
     // Render pass: renders `node` (and its children) through `camera`.
     void render_node(sf2::scene::Node& node, const Camera& camera);
 

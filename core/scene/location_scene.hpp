@@ -23,6 +23,49 @@ struct Texture;
 
 namespace sf2::scene {
 
+// One `ParticleEffect` / `NewParticleEffect` emitter node inside a location
+// layer (JS `QIa` L481-482 + `jh` ctor L1147-1148). The game runs BOTH tags
+// through the same `jh` system (`Bf.zjb` L476-477 -> `QIa` -> `fXa(new jh)`),
+// which draws an instanced billboard batch (`Ah`/`Xb`, L1147) from the
+// effects atlas `E.get(1304)`, sampler keyed on `Params/@Frame`.
+//
+// STATUS: parsed only. The native port does NOT yet simulate (`jh.update`
+// L1149-1151) or render (`Dv`/`Xb`/`Ah` L1147) location particles — that
+// needs the effects atlas plus the renderer/effects owner (OPEN, D7). The
+// emitter config is carried here so a future wave can drive it without
+// re-parsing the XML. Range attrs follow the JS `Ie` reader (L1152-1153):
+// "a,b" = random in [a,b], a single number = a fixed value (min == max).
+struct ParticleLayer {
+    std::string class_name;    // node/@ClassName (metadata; `jh` ignores it)
+    float x = 0.0f;            // node/@X   (JS QIa L481)
+    float y = 0.0f;            // node/@Y   (JS QIa L481)
+    std::string frame;         // Params/@Frame         (JS jh L1148)
+    float life_min = 0.0f;     // Params/@Life          (JS Ie L1147)
+    float life_max = 0.0f;
+    float gravity = 0.0f;      // Params/@Gravity       (JS jh L1147)
+    float force_x_min = 0.0f;  // Params/@ForceX        (JS Ie L1147)
+    float force_x_max = 0.0f;
+    float force_y_min = 0.0f;  // Params/@ForceY
+    float force_y_max = 0.0f;
+    float rate = 0.0f;         // Params/@Rate          (JS jh L1147, u.H)
+    int max_particles = 500;   // Params/@MaxParticles  (JS default 500)
+    float ang_vel_min = 0.0f;  // Params/@AngVel        (JS Ie L1147)
+    float ang_vel_max = 0.0f;
+    float start_size_min = 0.0f;  // Params/@StartSize  (JS Ie L1147)
+    float start_size_max = 0.0f;
+    float start_rot_min = 0.0f;   // Params/@StartRotation (JS Ie L1147)
+    float start_rot_max = 0.0f;
+    float start_speed = 0.0f;     // Params/@StartSpeed    (JS jh L1148)
+    float vel_x_min = 0.0f;       // Params/@VelocityX     (JS Ie L1148)
+    float vel_x_max = 0.0f;
+    float vel_y_min = 0.0f;       // Params/@VelocityY     (JS Ie L1148)
+    float vel_y_max = 0.0f;
+    float emitter_x = 0.0f;       // Params/@Emitter "x,y" (JS xkb L1151)
+    float emitter_y = 0.0f;
+    bool prewarm = false;         // Params/@Prewarm == "1" (JS jh L1149)
+    std::string color;            // Params/@Color (1 or 2 packed ARGB)
+};
+
 struct Layer {
     std::string name;
     float factor = 1.0f;
@@ -36,6 +79,56 @@ struct Layer {
     // value is carried against future depth sorting (audit D5).
     float z = 0.0f;
     std::vector<std::shared_ptr<Sprite>> sprites;
+    // `ParticleEffect`/`NewParticleEffect` emitters (JS `QIa` L481-482).
+    // Empty for the dojo (it ships none); populated for volcano / factory /
+    // battlefield / autumn / ... . Parsed only — see ParticleLayer (OPEN).
+    std::vector<ParticleLayer> particles;
+};
+
+// One animated SimpleEffect property (`Transparency` / `OscillationX/Y`),
+// mirroring the JS `zh` timeline (L1144-1146): a looping list of
+// (Period, Value, Ease) keys with a seed `Offset`. The JS per-frame update
+// (`zh.update`, L1146) advances `ar` by the frame delta and wraps segment
+// `wp`; `zh.Gb` (L1146) evaluates the current segment as a line (Ease == 0)
+// or a parabola (Ease != 0) hitting both endpoints exactly:
+//   e == 0 : value = ((B-A)/P)*t + A
+//   e != 0 : value = e*(t+b)^2 + c, b = (B-A - e*P^2)/(2eP), c = A - e*b^2
+// (coefficients precomputed by `zh.cmb`, L1145). This is the D6 OPEN curve.
+// `keys` reuses `Sprite::TransKey` for the (Period, Value, Ease) triple.
+struct EffectTimeline {
+    std::vector<Sprite::TransKey> keys;
+    float offset = 0.0f;  // JS `Mrb`/`irb` Offset -> seeds `zh.ar`
+    float t = 0.0f;       // JS `zh.ar` (seconds into the current segment)
+    std::size_t seg = 0;  // JS `zh.wp` (current segment index)
+};
+
+// Per-sprite SimpleEffect modifier state (JS `xl` fields, L1135-1139):
+//   osc_x / osc_y   <- OscillationX/Y (`RW`/`SW`, `bXa`/`cXa` L1137)
+//   speed_x/speed_y <- Speed X/Y (`Kta`/`Lta`, `zsb` L1138; per-frame px)
+//   reappear_x/y    <- ReappearX/Y (`qX`/`rX`, `gsb`/`hsb` + `of` L1138)
+// `acc_x`/`acc_y` are the JS `JM`/`KM` accumulators (XML X/Y + speed).
+// `sprite` is a non-owning pointer into `Layer::sprites` (stable address).
+// The SimpleEffect Rotation modifier (`$sb`/`Zsb`/`GXa`) and nested
+// SimpleEffect are not represented here (OPEN, JS L481).
+struct SpriteAnim {
+    Sprite* sprite = nullptr;
+    float base_x = 0.0f;  // XML X (JS setPosition L1138)
+    float base_y = 0.0f;  // XML Y
+    float acc_x = 0.0f;   // JS JM (speed accumulation + Reappear wrap)
+    float acc_y = 0.0f;   // JS KM
+    float speed_x = 0.0f;  // JS Kta (per-frame pixels, L1139)
+    float speed_y = 0.0f;  // JS Lta
+    EffectTimeline osc_x;  // JS RW
+    EffectTimeline osc_y;  // JS SW
+    bool reappear_x = false;
+    bool reappear_y = false;
+    float re_x_min = 0.0f, re_x_max = 0.0f;  // JS Zo.min/max (L1140)
+    float re_y_min = 0.0f, re_y_max = 0.0f;
+
+    bool animated() const {
+        return !osc_x.keys.empty() || !osc_y.keys.empty() || reappear_x ||
+               reappear_y || speed_x != 0.0f || speed_y != 0.0f;
+    }
 };
 
 class LocationScene {
@@ -72,8 +165,9 @@ public:
     void default_camera(sf2::render::Camera& camera, float view_w, float view_h,
                         float focus_x = -1.0f, float fighter_span = -1.0f) const;
 
-    // Advances time-animated scene elements (SimpleEffect Transparency `KWa`
-    // loop; JS `bkl`/`xl.ia` L478-481). `dt` in seconds. A no-op when no
+    // Advances time-animated scene elements: the SimpleEffect Transparency
+    // `KWa` loop and the OscillationX/Y / ReappearX/Y / Speed modifier block
+    // (JS `xl.ia` L1139, `bkb` L479-481). `dt` in seconds. A no-op when no
     // layer carries a timeline. The host calls it once per rendered frame.
     void update(float dt);
 
@@ -117,6 +211,9 @@ public:
 
 private:
     std::vector<std::shared_ptr<Layer>> layers_;
+    // Per-SimpleEffect Oscillation/Reappear/Speed state (JS `bkb` L479-481),
+    // advanced by `update(dt)`. Pointers target `Layer::sprites` elements.
+    std::vector<SpriteAnim> anims_;
     std::vector<std::string> atlas_names_;
     std::size_t fighter_layer_ = npos;
     float arena_w_ = 0.0f;
