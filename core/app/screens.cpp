@@ -1271,8 +1271,15 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight, int b
 // `color` (0xRRGGBB), fading by age/life. Draw order: AFTER the fighters,
 // BEFORE the fg floor layers (bg -> fighters -> SPARKS -> fg floor — the
 // b615a1bf layer order).
+//
+// `xoff`/`yoff` are the `tl` container offset (JS `tl.init` L843:
+// translate.x = -width/2, translate.y = height/2 - Floor) — the SAME offset
+// `project()` applies to the fighters, so effects sit in the container.
+// The `OnBackground` bg/fg routing (JS `tl.Nt` L842-843) is still pending
+// (Wave G has no API yet): this draws every effect on the fighter plane.
 void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
-                     const sf2::scene::EffectSystem& fx, float xoff = 0.0f) {
+                     const sf2::scene::EffectSystem& fx, float xoff = 0.0f,
+                     float yoff = 0.0f) {
     const std::vector<sf2::scene::particle>& parts = fx.particles();
     for (const sf2::scene::particle& p : parts) {
         if (p.life <= 0.0f || p.age >= p.life) continue;
@@ -1282,9 +1289,10 @@ void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& came
         const float r = static_cast<float>((p.color >> 16) & 0xFFu) * (1.0f / 255.0f);
         const float g = static_cast<float>((p.color >> 8) & 0xFFu) * (1.0f / 255.0f);
         const float b = static_cast<float>(p.color & 0xFFu) * (1.0f / 255.0f);
-        // World -> screen (factor 1.0: the sparks live in the fight plane).
+        // World -> screen (factor 1.0: the sparks live in the fight plane),
+        // container offset applied (JS `tl.init` L843).
         const float sx = camera.world_to_screen_x(p.x - xoff, 1.0f);
-        const float sy = camera.world_to_screen_y(p.y);
+        const float sy = camera.world_to_screen_y(p.y + yoff);
         // The spark's world size -> screen px (the same zoom the capsule
         // strokes use); shrink slightly as it fades.
         const float half = p.size * camera.zoom * 0.5f * (0.4f + 0.6f * alpha);
@@ -1299,9 +1307,13 @@ void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& came
 
 // Magic containers (JS `Xm`/`cv` L836-839, Phase 7.2): flat tinted quads for
 // each live instance, faded by age/life — the same world->screen path the
-// hit sparks use. Drawn right after the sparks, before the fg floor layers.
+// hit sparks use, with the same `tl` container offset (`xoff`/`yoff`, JS
+// `tl.init` L843). Drawn right after the sparks, before the fg floor layers.
+// `OnBackground` routing (JS `tl.Nt` L842-843) is pending (Wave G API not
+// ready) — every instance draws on the fighter plane for now.
 void draw_magic_effects(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
-                        const sf2::scene::MagicEffects& fx, float xoff = 0.0f) {
+                        const sf2::scene::MagicEffects& fx, float xoff = 0.0f,
+                        float yoff = 0.0f) {
     for (const sf2::scene::MagicInstance& in : fx.live()) {
         const float alpha = fx.alpha_for(in);
         if (alpha <= 0.02f) continue;
@@ -1310,7 +1322,7 @@ void draw_magic_effects(sf2::render::Renderer& ren, const sf2::render::Camera& c
         const float g = static_cast<float>((color >> 8) & 0xFFu) * (1.0f / 255.0f);
         const float b = static_cast<float>(color & 0xFFu) * (1.0f / 255.0f);
         const float sx = camera.world_to_screen_x(in.x - xoff, 1.0f);
-        const float sy = camera.world_to_screen_y(in.y);
+        const float sy = camera.world_to_screen_y(in.y + yoff);
         const float half = fx.size_for(in) * camera.zoom * 0.5f;
         if (half < 0.5f) continue;
         const float verts[] = {
@@ -1318,6 +1330,46 @@ void draw_magic_effects(sf2::render::Renderer& ren, const sf2::render::Camera& c
             sx + half, sy - half, sx + half, sy + half, sx - half, sy + half,
         };
         ren.draw_triangles(verts, 6, r, g, b, alpha);
+    }
+}
+
+// Scene letterbox bars (JS `ma.Sya` L1833-1834; PORT_AUDIT_SCENE D10/W5).
+// The JS render camera position is (0,0) (`N.Ta.K4` L85), so the extents use
+// world_y * zoom + view_h/2 (center_y is NOT applied). Two independent bars:
+//   - side bars: N.BK = round((W - sTa*H)/2) when lc > sTa (sTa=2.5, L2462),
+//     two `ma.YY[]` nodes sized (BK, H) at x=0 and x=W-BK (`Sya` L1834).
+//   - top/bottom bars: e = m$a() = Lb.height*Bj (L823); the projected arena
+//     top P = -e/2 and bottom W = +e/2 give a top bar [0,P] when P>0 and a
+//     bottom bar [W,viewH] when viewH-W>0 (`Sya` L1834).
+// At 16:9 dojo (arena 560*1.3 = 728 -> y[-4,724], lc=1.78 < 2.5) this is a
+// no-op — exactly the oracle.
+void draw_scene_letterbox(sf2::render::Renderer& ren,
+                          const sf2::render::Camera& camera) {
+    const float w = camera.view_w, h = camera.view_h;
+    const float lc = (h > 0.0f) ? w / h : 1.0f;
+    constexpr float kSta = 2.5f;  // N.sTa (JS L2462)
+    // Side bars (`N.BK`, JS `Ut.mwa` L823-824).
+    if (lc > kSta) {
+        const float bk = std::round((w - kSta * h) * 0.5f);
+        if (bk > 0.0f) {
+            const float left[] = {0, 0, bk, 0, 0, h, bk, 0, bk, h, 0, h};
+            const float right[] = {w - bk, 0, w, 0, w - bk, h,
+                                   w, 0,      w, h, w - bk, h};
+            ren.draw_triangles(left, 6, 0.0f, 0.0f, 0.0f, 1.0f);
+            ren.draw_triangles(right, 6, 0.0f, 0.0f, 0.0f, 1.0f);
+        }
+    }
+    // Top/bottom bars (`Sya` L1833-1834): e = arena_h * layer_zoom (m$a L823).
+    const float e = camera.arena_h * camera.layer_zoom;
+    const float top_y = -e * 0.5f * camera.zoom + h * 0.5f;
+    const float bot_y = e * 0.5f * camera.zoom + h * 0.5f;
+    if (top_y > 0.0f) {
+        const float top[] = {0, 0, w, 0, 0, top_y, w, 0, w, top_y, 0, top_y};
+        ren.draw_triangles(top, 6, 0.0f, 0.0f, 0.0f, 1.0f);
+    }
+    if (h - bot_y > 0.0f) {
+        const float bot[] = {0, bot_y, w, bot_y, 0, h, w, bot_y, w, h, 0, h};
+        ren.draw_triangles(bot, 6, 0.0f, 0.0f, 0.0f, 1.0f);
     }
 }
 
@@ -2010,6 +2062,11 @@ void DojoScreen::render_impl(App& app) {
     } else {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
+    }
+    // Scene letterbox bars (JS `ma.Sya` L1833-1834; PORT_AUDIT_SCENE D10) —
+    // over the location art, under the figure/chrome; no-op at 16:9.
+    if (have_hub_cam) {
+        draw_scene_letterbox(ren, hub_cam);
     }
     // --- Dojo aliveness (JS `Tf` L1969-1972: the hub runs the `FightNone`
     // ModelViewer through the live `Sya` framing) -------------------------
@@ -3449,8 +3506,12 @@ void FightScreen::render_impl(App& app) {
     // baked into the camera framing). Drawn AFTER the fighters, BEFORE the
     // fg floor layers (bg -> fighters -> SPARKS -> fg floor — the b615a1bf
     // layer order; the batch preserves submission order).
-    draw_hit_sparks(ren, camera, fight_->fx(), arena_half);
-    draw_magic_effects(ren, camera, s_magic_fx_, arena_half);
+    // The effects share the fighters' `tl` container offset (JS `tl.init`
+    // L843: x=-width/2, y=height/2-Floor) — the same kContY `project()`
+    // applies; PORT_AUDIT_SCENE D12. (OnBackground routing pending Wave G.)
+    const float cont_y = camera.arena_h * 0.5f - camera.arena_floor;
+    draw_hit_sparks(ren, camera, fight_->fx(), arena_half, cont_y);
+    draw_magic_effects(ren, camera, s_magic_fx_, arena_half, cont_y);
 
     // [fix(render): arena layer order] The foreground layers — the ones the
     // params XML places AFTER the ModelsViewer (Type=2) fighter layer: the
@@ -3463,6 +3524,11 @@ void FightScreen::render_impl(App& app) {
     if (fighter_layer != sf2::scene::LocationScene::npos) {
         assets.dojo.render_layers(ren, camera, fighter_layer + 1, n_layers);
     }
+
+    // Scene letterbox bars (JS `ma.Sya` L1833-1834; PORT_AUDIT_SCENE D10):
+    // drawn over the scene, under the HUD — no-op at 16:9 (BK=0, arena
+    // 728px spans y[-4,724]).
+    draw_scene_letterbox(ren, camera);
 
     // --- Fight HUD (JS `Ar`/`Sf`/`lk`/`Er` L2016-2041) ------------------
     // Frames: fight/ui.json -> HealthBar_Empty (bg), HealthBar_Full (player
@@ -3905,16 +3971,74 @@ constexpr ShopTab kShopTabs[] = {
 };
 constexpr int kShopTabCount = 5;
 
-// Card grid geometry (kept - the headless loop buys the first card at
-// (x0, y0); app/game/main.cpp:117). PORT_AUDIT_UI 4 #5 wants the `Oa.layout`
-// responsive `gb` split (L2293-2295), but that is OPEN (the `Oe`/`gb` math,
-// audit OPEN #4) and moves the driver click; deferred.
-constexpr float kShopCardW = 300.0f;
-constexpr float kShopCardH = 150.0f;
-constexpr float kShopX0 = 1280.0f * 0.25f;
-constexpr float kShopY0 = 200.0f;
-constexpr float kShopDx = 330.0f;
-constexpr float kShopDy = 170.0f;
+// Responsive shop layout (JS `Oa.layout` L2293-2295 + the `gb` rect class
+// L1551-1552). Replaces the invented fixed grid (PORT_AUDIT_UI §3 #16,
+// ranked MEDIUM #5). `gb` = (J=left, P=top, N=right, W=bottom); `gb.fn(a)`
+// (L1552) returns the largest sub-rect with width:height = a:1 centred
+// inside. `Oa.layout` at 16:9:
+//   margin   = W*.05 * clamp(lc,.6,1)                       (L2293)
+//   content  = gb(margin, Sp*1.4, W-margin, H-Sp*1.5*1.3)   (L2293)
+//   content  = content.fn(1.85 + (clamp(lc,.6,1)-.6)/.4*.15)(L2293)
+//   viewer c = content.fn(.75)  -> `this.Za.Pn(c)`          (L2294)
+//   gap e    = (c.N-c.J)*.03 ;  slot b = (c.W-c.P)*.8       (L2294)
+// The JS cells `ns` are laid out in the `Oe` viewer list (`Za.uw` anchors
+// 300,220|400|280|320 + `LT` spacing) — that sub-layout is OPEN (audit OPEN
+// #4); the native grid fills the exact JS viewer rect `c` in 2 columns with
+// the JS gap.
+struct ShopRect {
+    float J = 0.0f, P = 0.0f, N = 0.0f, W = 0.0f;  // left/top/right/bottom
+    float width() const { return N - J; }
+    float height() const { return W - P; }
+};
+
+// `gb.fn` (JS L1551-1552): contain-fit a width:height = aspect:1 rect.
+ShopRect shop_gb_fn(const ShopRect& r, float aspect) {
+    const float bw = r.width();
+    const float bh = r.height();
+    const float d = bw / aspect;  // scaled width
+    const float e = bh;           // height/1
+    if (d <= e) {
+        const float t = r.P + (e - d) * 0.5f;
+        return {r.J, t, r.N, t + d};
+    }
+    const float w2 = aspect * e;
+    const float l = r.J + (bw - w2) * 0.5f;
+    return {l, r.P, l + w2, r.W};
+}
+
+struct ShopLayout {
+    ShopRect content;     // b (L2293, after fn)
+    ShopRect viewer;      // c = b.fn(.75) (L2294) — the JS `Za` item area
+    float gap = 0.0f;     // e = (c.N-c.J)*.03 (L2294)
+    float slot_h = 0.0f;  // b = (c.W-c.P)*.8 (L2294, side-slot height)
+    // Native item grid inside `viewer` (2 columns; the JS `ns` pitch OPEN).
+    float card_w = 0.0f, card_h = 0.0f;
+    float dx = 0.0f, dy = 0.0f;
+    float x0 = 0.0f, y0 = 0.0f;  // first card centre
+};
+
+ShopLayout shop_layout() {
+    const float lc = kViewW / kViewH;            // N.lc
+    const float t = std::clamp(lc, 0.6f, 1.0f);  // clamp(lc,.6,1)
+    const float sp = za_layout().sp;             // za.Sp (JS L1975)
+    const float margin = kViewW * 0.05f * ((t - 0.6f) / 0.4f);  // L2293
+    ShopRect b{margin, sp * 1.4f, kViewW - margin,
+               kViewH - sp * 1.5f * 1.3f};  // L2293
+    b = shop_gb_fn(b, 1.85f + ((t - 0.6f) / 0.4f) * 0.15f);  // L2293 fn
+    ShopLayout l;
+    l.content = b;
+    l.viewer = shop_gb_fn(b, 0.75f);       // c = b.fn(.75) L2294
+    l.gap = l.viewer.width() * 0.03f;      // L2294 e
+    l.slot_h = l.viewer.height() * 0.8f;   // L2294 b
+    // 2-column grid filling the viewer rect (gap = the JS `.03`).
+    l.card_w = l.viewer.width() * 0.5f - l.gap * 0.5f;
+    l.card_h = l.viewer.height() * 0.5f - l.gap * 0.5f;
+    l.dx = l.card_w + l.gap;
+    l.dy = l.card_h + l.gap;
+    l.x0 = l.viewer.J + l.card_w * 0.5f;
+    l.y0 = l.viewer.P + l.card_h * 0.5f;
+    return l;
+}
 
 // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width bar
 // `height = za.Sp*1.2` with `Le` buttons (id 248 shop atlas) scaled to the
@@ -4186,16 +4310,17 @@ void ShopScreen::update_impl(float dt) {
             break;
         }
     }
-    // Item grid for the active tab (geometry UNCHANGED — row 0 of Weapons is
-    // WEAPON_KNIVES at the pre-tab spot).
+    // Item grid for the active tab (geometry = the responsive `Oa.layout`
+    // `gb` split, `shop_layout()`; row 0 of Weapons is WEAPON_KNIVES).
+    const ShopLayout sl = shop_layout();
     const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const int col = static_cast<int>(i % 2);
         const int row = static_cast<int>(i / 2);
-        const float cx = kShopX0 + static_cast<float>(col) * kShopDx;
-        const float cy = kShopY0 + static_cast<float>(row) * kShopDy;
-        if (p.x >= cx - kShopCardW / 2 && p.x <= cx + kShopCardW / 2 &&
-            p.y >= cy - kShopCardH / 2 && p.y <= cy + kShopCardH / 2) {
+        const float cx = sl.x0 + static_cast<float>(col) * sl.dx;
+        const float cy = sl.y0 + static_cast<float>(row) * sl.dy;
+        if (p.x >= cx - sl.card_w / 2 && p.x <= cx + sl.card_w / 2 &&
+            p.y >= cy - sl.card_h / 2 && p.y <= cy + sl.card_h / 2) {
             hover_ = static_cast<int>(i);
             if (p.pressed) {
                 const CatalogItem& it = items_[rows[i]];
@@ -4318,18 +4443,21 @@ void ShopScreen::render_impl(App& app) {
             }
         }
     }
+    // Item grid inside the responsive `Oa.layout` `gb` viewer rect
+    // (`shop_layout()`, JS L2293-2295).
+    const ShopLayout sl = shop_layout();
     const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
     if (rows.empty()) {
-        draw_ui_label(app, kShopX0 - 60.0f, kShopY0 - 4.0f, 700.0f, 26.0f,
+        draw_ui_label(app, sl.viewer.J, sl.viewer.P, sl.viewer.width(), 26.0f,
                           "No items in this category yet.", 0.8f, UiAlign::Left, 0.7f, 0.7f, 0.7f);
     }
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const CatalogItem& it = items_[rows[i]];
         const int col = static_cast<int>(i % 2);
         const int row = static_cast<int>(i / 2);
-        const float cx = kShopX0 + static_cast<float>(col) * kShopDx;
-        const float cy = kShopY0 + static_cast<float>(row) * kShopDy;
-        const float card_w = kShopCardW, card_h = kShopCardH;
+        const float cx = sl.x0 + static_cast<float>(col) * sl.dx;
+        const float cy = sl.y0 + static_cast<float>(row) * sl.dy;
+        const float card_w = sl.card_w, card_h = sl.card_h;
         const bool hovered = static_cast<int>(i) == hover_;
         // Item image (JS `ns.j5` L2307: `Rf(Ye.qI(item.fileName))` ->
         // res/items/images-1x/<dir>/<file>; `it.image` is the list.xml Image

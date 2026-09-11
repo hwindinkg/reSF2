@@ -1,30 +1,31 @@
 #pragma once
 
 // Magic/effect containers (Phase 7.2) — the native port of the JS effect
-// containers `Xm` (L836-837) / `cv` "EffectsRunning" (L837-839).
+// containers `Xm` (L836-837) / `cv` "EffectsRunning" (L837-839) driven by the
+// frame animator `ni` (L1141-1144).
 //
-// JS cites (sf2.502f0946.js, verified 2026-09-04):
+// JS cites (sf2.502f0946.js, verified this session):
 //   - `tl` (L842-844): `qh` = fighters, `Gq` = `Xm` ground effects (z=+.01),
-//     `Hq` = `Xm` air effects (z=+.01) — effects layer just above everything.
-//     `tl.ZP` subscribes fighter `Nt`/`Ot`/`Pt` events to effect start/stop.
-//   - `cv.lwb(a, b)` (L838-839): builds a `dd` effect from
-//     `magic/<fileName>.json` + `magic/<fileName>.png`
-//     (`E.get(G.qf("magic/" + a.fileName + ".json"))`), wraps it in a `bv`
-//     (facing mirror via `hd()`, position from the bone, scale), with
-//     `iterations` (`wcb` -> -1 = loop), direction `RLa`/`wrb`
-//     (forward/backward), speed `mP = NL / 60`.
-//   - `cv.WL()` (L839): ticks with `a = 1 / v.on()` (global timescale):
-//     `d.animate.ia(L.K.sk.Bm * a)` — and destroys finished non-loop effects
-//     (`LJ` false -> `LNa` remove). `P1 && !Yla` effects also `update()`.
-//   - `Xm`: `Nt` (add `lwb`), `Ot` (remove `Dwb`), `Pt` (stop `Hwb`).
+//     `Hq` = `Xm` air effects (z=+.01). `tl.Nt(a)` (L842) routes a started
+//     effect by `a.Gfb` (OnBackground): `Gfb ? Gq.Nt(a) : Hq.Nt(a)`.
+//   - `cv.lwb(a, b)` (L838-839) attaches an effect to a bone and builds the
+//     `ni` frame animation: `c = a.NL/60` seconds per frame, `f.mP = c`,
+//     `f.iterations = a.wcb ? -1 : 1`, `a.lYa ? f.wrb() : f.RLa()`.
+//   - `ni` (L1141-1144): `mP` = seconds per frame, `Qe` accumulator, `hc`
+//     cursor, `K9` step (±1), `Qu`=last / `mv`=first, `iterations` (>0
+//     finite, -1 loop), `LJ` playing. `ia(a)` loops
+//     `for(Qe+=a; Qe>=mP;) { JXa(); Qe-=mP }`; `JXa` steps `hc`, wraps to
+//     `mv` and decrements `iterations` (clearing `LJ` at 0).
+//   - `a.NL` = the `TimeScale` attribute (L729, default 1); so one `ni`
+//     frame lasts `NL` ticks at 60 Hz (native `ticks_per_frame`).
+//   - `cv.WL()` (L839): ticks with `a = 1/v.on()` (global timescale) via
+//     `d.animate.ia(L.K.sk.Bm*a)`; a finished one-shot (`!LJ`) is removed.
 //
-// Data note: this www snapshot ships NO `magic/*.json` (only the fight fx
-// atlas `fight/fx.*.json` + `particles.*.json`, both TexturePacker frame
-// lists — verified on disk). So descriptors are fed as DATA
-// (`MagicEffectDesc`, e.g. frame runs collected from the fx atlas by the
-// caller); `add_default_descs()` seeds three built-in descriptors so the
-// pipeline works headless. When real `magic/*.json` assets land, parse them
-// into `MagicEffectDesc` and `load()` them — no code change here.
+// Asset facts (manifest L2490): hit flash `E.get(1306)` = `fight/fx` (frames
+// `hit_blade/*`, `critical/*`, `block/*`, `effect_shield_hex_hit/*` — the
+// real `ni` frame source); markers `E.get(1300)` = `fight/ringout`; sparks
+// `E.get(260)` = `ui/misc`. There are NO `magic/*.json` in this snapshot; the
+// `fight/fx` atlas frame runs are the available `ni` frame sets.
 //
 // NO gameplay impact: instances carry only presentation state (position,
 // facing, frame cursor). Spawning/updating/destroying never touches the
@@ -41,9 +42,10 @@ namespace sf2::scene {
 struct MagicEffectDesc {
     std::string name;                  // spawn("name")
     std::vector<std::string> frames;   // atlas frame names, play order
-    bool loop = false;                 // JS `LJ` / iterations `wcb` -> -1
-    bool reverse = false;              // JS `wrb()` (vs `RLa()` forward)
-    float ticks_per_frame = 4.0f;      // JS `mP = NL / 60` frame pacing
+    bool loop = false;                 // JS `wcb` / iterations -1
+    bool reverse = false;              // JS `lYa` -> `wrb()` (vs `RLa()`)
+    bool on_background = false;        // JS `Gfb` (L729) -> `tl.Nt` ground layer
+    float ticks_per_frame = 1.0f;      // JS `NL` (TimeScale, L729); mP = NL/60 s
     float scale = 1.0f;                // JS `Wl * scale` (with facing)
     float size = 24.0f;                // world-unit quad size
     std::uint32_t color = 0xFFFFFFFFu;  // 0xRRGGBB tint
@@ -60,7 +62,11 @@ struct MagicInstance {
     float vx = 0.0f;          // per-instance drift (copied at spawn)
     float vy = 0.0f;
     int facing = 1;           // JS `Fc.Wl = da.hd()` (+1 / -1 mirror)
-    float frame_pos = 0.0f;   // JS `animate` cursor, in frames
+    int frame = 0;            // JS `ni.hc` — current frame cursor
+    int frame_step = 1;       // JS `ni.K9` (+1 forward / -1 backward)
+    int iterations_left = 1;  // JS `ni.iterations` (>0 finite; -1 = loop)
+    bool playing = true;      // JS `ni.LJ`
+    float accum = 0.0f;       // JS `ni.Qe` — frame-time accumulator (seconds)
     float age = 0.0f;         // ticks lived (for the end-fade)
 };
 
@@ -71,10 +77,9 @@ public:
     // Returns false when `descs` is empty (keeps the old set).
     bool load(const std::vector<MagicEffectDesc>& descs);
 
-    // Seeds the three built-in descriptors (data-or-default so the pipeline
-    // runs before real magic JSON lands): "hit_flash" (one-shot impact
-    // flash), "round_intro" (one-shot ring at round start), "magic_trail"
-    // (looping missile trail).
+    // Seeds the three built-in descriptors from the real `fight/fx` atlas
+    // frame runs (the available `ni` frames): "hit_flash" (hit_blade),
+    // "round_intro" (block), "magic_trail" (effect_shield_hex_hit, looping).
     void add_default_descs();
 
     // Spawns a live instance (JS `Nt`/`lwb`). Returns false for unknown
@@ -85,9 +90,9 @@ public:
     void stop(const std::string& name);
     void stop_all();
 
-    // Advances one 60 Hz tick (JS `WL`: `animate.ia(Bm * (1 / v.on()))`).
-    // `timescale` is JS `v.on()` (1.0 = real time). Finished non-loop
-    // instances are destroyed (JS `LNa`); loopers wrap.
+    // Advances one 60 Hz tick (JS `ni.ia`: `animate.ia(Bm * (1 / v.on()))`).
+    // `timescale` is JS `v.on()` (1.0 = real time). Finished one-shots
+    // (`!LJ`) are destroyed (JS `LNa`); loopers wrap.
     void update(float timescale);
 
     // The live instances (for rendering).
@@ -109,6 +114,9 @@ public:
     // Presentation fields of the instance's descriptor (for the renderer).
     float size_for(const MagicInstance& in) const;
     std::uint32_t color_for(const MagicInstance& in) const;
+
+    // JS `Gfb` (L729) -> JS `tl.Nt` (L842) picks `Gq` (ground) vs `Hq` (air).
+    bool background_for(const MagicInstance& in) const;
 
 private:
     const MagicEffectDesc* find(const std::string& name) const;

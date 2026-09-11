@@ -50,6 +50,17 @@ void Fighter::set_model(const Model& model) {
         sol_mf_[i * 3 + 1] = b.y;
         sol_mf_[i * 3 + 2] = b.z;
     }
+    // [FIX stretched mesh — continuity seed] Seed the continuity reference
+    // with the BIND COM so the FIRST sample also translates the cloth from
+    // bind into the first clip's frame (the JS solver space is continuous
+    // from the very first frame). Without this the first frames leave the
+    // cloth behind the posed skeleton.
+    if (!model_.bones.empty()) {
+        sol_prev_com_x_ = model_.bones[0].x;
+        sol_prev_com_y_ = model_.bones[0].y;
+        sol_prev_com_z_ = model_.bones[0].z;
+        sol_have_prev_com_ = true;
+    }
     solver_init_ = true;
     // JS `Vc` ctor (L793-794): ma = mf = the bind position (`p8`). The
     // solver then runs exactly one `Al.ia()` step per frame (L582) — the
@@ -710,14 +721,42 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     //    calls — one step per call matches the game's 60 Hz cadence.
     const std::size_t n3 = n * 3;
     if (solver_init_ && sol_ma_.size() == n3) {
+        // [FIX stretched mesh — continuous solver space] The JS `ma`/`mf`
+        // live in the fighter's ONE continuous space (skeleton and cloth
+        // share the world placement), so a clip switch never teleports the
+        // cloth. The native solver is authored in raw CLIP coordinates,
+        // which jump ~740 units between clips; translate the persisted
+        // state by the COM delta each sample so the cloth stays continuous
+        // with the (align-shifted) skeleton. This is the native-space
+        // equivalent of the JS continuity, NOT new JS behavior.
+        if (nclip > 0) {
+            const float com_x = px[0], com_y = py[0], com_z = pz[0];
+            if (sol_have_prev_com_) {
+                const float dx = com_x - sol_prev_com_x_;
+                const float dy = com_y - sol_prev_com_y_;
+                const float dz = com_z - sol_prev_com_z_;
+                if (dx != 0.0f || dy != 0.0f || dz != 0.0f) {
+                    for (std::size_t i = 0; i < n; ++i) {
+                        sol_ma_[i * 3] += dx;
+                        sol_ma_[i * 3 + 1] += dy;
+                        sol_ma_[i * 3 + 2] += dz;
+                        sol_mf_[i * 3] += dx;
+                        sol_mf_[i * 3 + 1] += dy;
+                        sol_mf_[i * 3 + 2] += dz;
+                    }
+                }
+            }
+            sol_prev_com_x_ = com_x;
+            sol_prev_com_y_ = com_y;
+            sol_prev_com_z_ = com_z;
+            sol_have_prev_com_ = true;
+        }
         // [FIX stretched mesh — JS-faithful] `Al.ia()` (L582) is exactly
-        // `sk(); jE();`. The game keeps NO cross-clip COM-delta translation
-        // of the solver state and NO warmup. `eda` (JS L556) sets each clip
-        // bone's mf = ma (the previous solved position) then ma = the
-        // (align-shifted) clip pose; the cloth bones keep their prior state.
-        // The invented COM-delta continuity block (PORT_AUDIT_RENDER §2.4
-        // candidate 2) is removed — JS-faithful continuity is the align
-        // shift applied above (`Gla`).
+        // `sk(); jE();` per frame. `eda` (JS L556) sets each clip bone's
+        // mf = ma (the previous solved position) then ma = the (align-shifted)
+        // clip pose; the cloth bones keep their prior state. The native's raw
+        // clip-space state is kept continuous by the COM translation above
+        // (the JS solver space is inherently continuous).
         // (a) eda: clip bones mf = solved, ma = interpolated clip pose.
         for (std::size_t i = 0; i < nclip; ++i) {
             sol_mf_[i * 3] = sol_ma_[i * 3];
@@ -732,10 +771,18 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // 600-step warmup (PORT_AUDIT_RENDER §2.4 candidate 1; absent from
         // JS) is removed.
         // (b) sk: Verlet integrate (grav 0.4 = `xd.fDa`).
+        // [FIX stretched mesh — cloth-only] JS `Al.sk` @296832 gates EVERY
+        // body on `this.nk` (ragdoll-active, set ONLY by `Al.start` @296449
+        // from `Lwb` @260135 = ragdoll start): `... && (this.nk || c.jy ||
+        // ...) && c.sk(...)`. For a NORMAL animated fighter `nk` is false, so
+        // only cloth bodies (`jy`) integrate; the clip-driven skeleton bodies
+        // are NOT moved by the solver (they keep their `Te.eda` pose). The
+        // old native integrated every non-fixed non-macro bone, dragging the
+        // posed skeleton off the clip (the stretched mesh).
         constexpr float kGrav = 0.4f;
         for (std::size_t i = 0; i < n; ++i) {
             const Bone& b = bones[i];
-            if (b.fixed || b.is_macro) continue;  // NG: immovable
+            if (!b.cloth || b.fixed || b.is_macro) continue;  // cloth-only (JS nk=false)
             const std::size_t i3 = i * 3;
             float vx = sol_ma_[i3] - sol_mf_[i3];
             float vy = sol_ma_[i3 + 1] - sol_mf_[i3 + 1];
@@ -763,9 +810,15 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 const std::size_t i1 = static_cast<std::size_t>(bi1);
                 const std::size_t i2 = static_cast<std::size_t>(bi2);
                 if (i1 >= n || i2 >= n) continue;
-                const bool ng1 = bones[i1].fixed || bones[i1].is_macro;
-                const bool ng2 = bones[i2].fixed || bones[i2].is_macro;
-                if (ng1 && ng2) continue;
+                // [FIX stretched mesh — cloth-only] JS `Al.jE` @296592:
+                // `d.cA = d.nh && !d.NG && (this.nk || d.jy || a && d.vc)`.
+                // `nh` = the body participates, `NG` = immovable (Fixed /
+                // MacroNode), `jy` = cloth. With `nk` false a body is a
+                // relaxation endpoint ONLY when it is cloth. Non-cloth clip
+                // bones are NOT relaxed (they stay exactly at the clip pose).
+                const bool cA1 = bones[i1].cloth && !bones[i1].fixed && !bones[i1].is_macro;
+                const bool cA2 = bones[i2].cloth && !bones[i2].fixed && !bones[i2].is_macro;
+                if (!cA1 && !cA2) continue;
                 const std::size_t u1 = i1 * 3;
                 const std::size_t u2 = i2 * 3;
                 const float ex = sol_ma_[u2] - sol_ma_[u1];
@@ -782,12 +835,12 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 const float bx = sol_ma_[u1] * g1 + sol_ma_[u2] * g2;
                 const float by = sol_ma_[u1 + 1] * g1 + sol_ma_[u2 + 1] * g2;
                 const float bz = sol_ma_[u1 + 2] * g1 + sol_ma_[u2 + 2] * g2;
-                if (!ng1) {
+                if (cA1) {
                     sol_ma_[u1] = sol_ma_[u1] * r + bx;
                     sol_ma_[u1 + 1] = sol_ma_[u1 + 1] * r + by;
                     sol_ma_[u1 + 2] = sol_ma_[u1 + 2] * r + bz;
                 }
-                if (!ng2) {
+                if (cA2) {
                     sol_ma_[u2] = sol_ma_[u2] * r + bx;
                     sol_ma_[u2 + 1] = sol_ma_[u2 + 1] * r + by;
                     sol_ma_[u2 + 2] = sol_ma_[u2 + 2] * r + bz;

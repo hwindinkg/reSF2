@@ -4,12 +4,25 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
+#include <vector>
 
 namespace sf2::scene {
 
 namespace {
 
 constexpr float kEndFadeTicks = 8.0f;  // one-shot fade-out tail (ticks)
+
+// Builds a `ni` frame run from the `fight/fx` atlas naming convention:
+// `<prefix>/<prefix>_<i>` for i in [1, count] (e.g. "hit_blade/hit_blade_7").
+std::vector<std::string> fx_frames(const char* prefix, int count) {
+    std::vector<std::string> out;
+    out.reserve(static_cast<std::size_t>(count));
+    for (int i = 1; i <= count; ++i) {
+        out.push_back(std::string(prefix) + "/" + prefix + "_" + std::to_string(i));
+    }
+    return out;
+}
 
 }  // namespace
 
@@ -23,31 +36,33 @@ bool MagicEffects::load(const std::vector<MagicEffectDesc>& descs) {
 }
 
 void MagicEffects::add_default_descs() {
+    // Real `fight/fx` atlas frame runs (asset 1306, manifest L2490) replace
+    // the previous placeholder names; every one is an `ni`-playable run.
     MagicEffectDesc flash;
     flash.name = "hit_flash";
-    flash.frames = {"hit_flash_0", "hit_flash_1", "hit_flash_2", "hit_flash_3"};
-    flash.loop = false;
-    flash.ticks_per_frame = 2.0f;  // 8-tick flash (~0.13 s)
-    flash.size = 30.0f;
-    flash.color = 0xFFFFEE66u;  // warm spark tint (matches hit sparks)
+    flash.frames = fx_frames("hit_blade", 29);  // fx atlas: hit_blade_1..29
+    flash.loop = false;                         // JS `wcb` false -> iterations 1
+    flash.on_background = false;                // JS `Gfb` false -> air layer
+    flash.ticks_per_frame = 1.0f;               // JS `NL` default = 1 (L729)
+    flash.size = 40.0f;                         // fx frame ~34..84 px
 
     MagicEffectDesc intro;
     intro.name = "round_intro";
-    intro.frames = {"round_intro_0", "round_intro_1", "round_intro_2",
-                    "round_intro_3", "round_intro_4", "round_intro_5"};
+    intro.frames = fx_frames("block", 24);      // fx atlas: block_1..24
     intro.loop = false;
-    intro.ticks_per_frame = 5.0f;  // 30-tick ring (~0.5 s)
+    intro.on_background = false;
+    intro.ticks_per_frame = 1.0f;
     intro.size = 120.0f;
-    intro.color = 0xFFFFFFCCu;  // white-hot ring
 
     MagicEffectDesc trail;
     trail.name = "magic_trail";
-    trail.frames = {"magic_trail_0", "magic_trail_1", "magic_trail_2"};
-    trail.loop = true;  // JS `wcb` -> iterations -1
-    trail.ticks_per_frame = 3.0f;
+    trail.frames = fx_frames("effect_shield_hex_hit", 16);
+    trail.loop = true;                          // JS `wcb` true -> iterations -1
+    trail.on_background = false;
+    trail.ticks_per_frame = 1.0f;
     trail.size = 18.0f;
-    trail.color = 0x66CCFFu;  // cold magic tint
-    trail.vy = -0.4f;         // rises while alive
+    trail.color = 0x66CCFFu;  // cold magic tint (native extension)
+    trail.vy = -0.4f;         // rises while alive (native drift extension)
 
     descs_.push_back(flash);
     descs_.push_back(intro);
@@ -72,9 +87,14 @@ bool MagicEffects::spawn(const std::string& name, float x, float y, int facing) 
     in.vx = d->vx;
     in.vy = d->vy;
     in.facing = facing >= 0 ? 1 : -1;
-    in.frame_pos = d->reverse && !d->frames.empty()
-                       ? static_cast<float>(d->frames.size()) - 1.0f
-                       : 0.0f;
+    const int n = static_cast<int>(d->frames.size());
+    // JS `cv.lwb` (L839): `a.lYa ? f.wrb() : f.RLa()` — backward starts at the
+    // last frame (`Qu`), forward at the first (`mv` = 0).
+    in.frame = (d->reverse && n > 0) ? n - 1 : 0;
+    in.frame_step = d->reverse ? -1 : 1;
+    in.iterations_left = d->loop ? -1 : 1;  // JS `wcb ? -1 : 1`
+    in.playing = true;
+    in.accum = 0.0f;
     in.age = 0.0f;
     live_.push_back(in);
     return true;
@@ -93,28 +113,38 @@ void MagicEffects::stop_all() { live_.clear(); }
 
 void MagicEffects::update(float timescale) {
     const float ts = timescale > 0.0f ? timescale : 1.0f;
+    // JS `cv.WL` (L839): `animate.ia(L.K.sk.Bm * a)` with `a = 1/v.on()`.
+    const float dt = (1.0f / 60.0f) / ts;
     std::size_t w = 0;
     for (std::size_t i = 0; i < live_.size(); ++i) {
         MagicInstance& in = live_[i];
         const MagicEffectDesc& d = descs_[in.desc];
-        const float rate = (d.ticks_per_frame > 0.0f ? 1.0f / d.ticks_per_frame : 1.0f) / ts;
         in.age += 1.0f;
         in.x += in.vx / ts;
         in.y += in.vy / ts;
         if (d.frames.empty()) {
             // Timeless tint pulse without frames: lives off the end-fade.
             if (in.age >= kEndFadeTicks * 2.0f) continue;  // dead — dropped
-        } else if (d.loop) {
-            const float n = static_cast<float>(d.frames.size());
-            in.frame_pos += d.reverse ? -rate : rate;
-            // Wrap into [0, n) (JS looped `animate`).
-            in.frame_pos = in.frame_pos - std::floor(in.frame_pos / n) * n;
+        } else if (!in.playing) {
+            continue;  // JS `cv.WL`: `!d.animate.LJ` -> remove
         } else {
-            in.frame_pos += d.reverse ? -rate : rate;
-            const float n = static_cast<float>(d.frames.size());
-            const bool done =
-                d.reverse ? (in.frame_pos < 0.0f) : (in.frame_pos >= n);
-            if (done) continue;  // JS `LNa` — destroy finished one-shots
+            const int n = static_cast<int>(d.frames.size());
+            const float tpf = d.ticks_per_frame > 0.0f ? d.ticks_per_frame : 1.0f;
+            const float mp = tpf / 60.0f;  // JS `ni.mP = NL/60` (seconds/frame)
+            // JS `ni.ia`: for(Qe += a; Qe >= mP;) { JXa(); Qe -= mP }.
+            in.accum += dt;
+            while (in.playing && in.accum >= mp) {
+                in.accum -= mp;
+                in.frame += in.frame_step;
+                if (in.frame >= n || in.frame < 0) {
+                    in.frame = 0;  // JS `JXa`: `this.hc = this.mv`
+                    if (in.iterations_left > 0) {
+                        --in.iterations_left;
+                        if (in.iterations_left <= 0) in.playing = false;
+                    }
+                }
+            }
+            if (!in.playing) continue;  // JS `LNa` — destroy finished one-shots
         }
         live_[w++] = in;
     }
@@ -137,6 +167,11 @@ std::uint32_t MagicEffects::color_for(const MagicInstance& in) const {
     return descs_[in.desc].color;
 }
 
+bool MagicEffects::background_for(const MagicInstance& in) const {
+    // JS `tl.Nt` (L842): `a.Gfb ? Gq : Hq`.
+    return descs_[in.desc].on_background;
+}
+
 float MagicEffects::alpha_for(const MagicInstance& in) const {
     const float life = life_for(in);
     if (life < 0.0f) return 1.0f;  // loopers hold full alpha until stop()
@@ -149,9 +184,11 @@ float MagicEffects::alpha_for(const MagicInstance& in) const {
 std::string MagicEffects::frame_for(const MagicInstance& in) const {
     const MagicEffectDesc& d = descs_[in.desc];
     if (d.frames.empty()) return "";
-    int f = static_cast<int>(std::floor(in.frame_pos));
+    int f = in.frame;
     if (f < 0) f = 0;
-    if (f >= static_cast<int>(d.frames.size())) f = static_cast<int>(d.frames.size()) - 1;
+    if (f >= static_cast<int>(d.frames.size())) {
+        f = static_cast<int>(d.frames.size()) - 1;
+    }
     return d.frames[static_cast<std::size_t>(f)];
 }
 

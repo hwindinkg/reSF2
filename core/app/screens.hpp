@@ -280,11 +280,13 @@ private:
 };
 
 // The shop — native Shop screen (screen 4, JS `Oa` g="468").
-// Lists the priced Weapon/Armor/Helm items from list.xml as flat cards
-// (the shop atlas is ASTC — not CPU-decodable, so the cards are flat with
-// labels + the item's price). Click an item to buy: check money (JS
-// `Pa.iwa` L629626: `p.o.Tb >= a.jp()`), deduct, add to the inventory
-// (JS `Pa.gI` L628934 -> `p.o.xa.Oo`), save.
+// Lists the priced Weapon/Armor/Helm items from list.xml; the item cells use
+// the responsive `Oa.layout` `gb` split (L2293-2295: content rect -> viewer
+// `c = b.fn(.75)`) instead of a fixed grid, and draw the real item image
+// (JS `ns.j5` L2307 `Rf(Ye.qI(fileName))`), with the `Eg` bottom tab strip
+// kept. Click an item to buy: check money (JS `Pa.iwa` L629626:
+// `p.o.Tb >= a.jp()`), deduct, add to the inventory (JS `Pa.gI` L628934 ->
+// `p.o.xa.Oo`), save.
 class ShopScreen : public Screen {
 public:
     explicit ShopScreen(ScreenManager& mgr);

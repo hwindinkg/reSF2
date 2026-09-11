@@ -270,6 +270,18 @@ private:
     std::vector<float> sol_ma_;  // 3*n: current posed positions (JS `ma`)
     std::vector<float> sol_mf_;  // 3*n: previous positions (JS `mf`)
     bool solver_init_ = false;   // ma/mf seeded from the bind pose once
+    // [FIX stretched mesh — continuous solver space] The JS solver state
+    // (`ma`/`mf`) lives in the fighter's CONTINUOUS space: the whole fighter
+    // (skeleton AND cloth) shares one world placement, so switching clips
+    // never teleports the cloth. The native solver is authored in raw CLIP
+    // coordinates, which jump ~740 units between clips (stance_2 COM x=-502
+    // vs an attack clip x=+237); without compensation the cloth is left
+    // behind on every clip switch. Translate the persisted state by the COM
+    // delta each sample (the native-space equivalent of the JS continuity).
+    float sol_prev_com_x_ = 0.0f;
+    float sol_prev_com_y_ = 0.0f;
+    float sol_prev_com_z_ = 0.0f;
+    bool sol_have_prev_com_ = false;
     // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550
     // (`jc.shift`)] The move's <Align> offset, applied ONCE at clip start as
     // a shift of the whole clip buffer. Native equivalent: added to every

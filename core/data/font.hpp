@@ -28,6 +28,16 @@
 //     i16 xoffset, i16 yoffset, i16 xadvance, u8 page, u8 chnl
 //   optional kerning block: u32 blockSize, then triples
 //     (u32 first, u32 second, i16 amount) until EOF.
+//
+// `id` is a **Unicode codepoint**, not a raw byte. Proof from the shipped
+// assets + JS: `tq.ek` reads it as `a.ti()` (u32); `uq.Qq` builds every glyph
+// as `new Pj(id, String.fromCodePoint(id), ...)`, and `uq.vAa` stores it into
+// an array indexed by `id` (`c[e.id] = e`). The text node then looks a glyph
+// up directly by code (`charset.Uy[65]` = 'A', `charset.Uy[U+041D..]` = the
+// Cyrillic fallback caps). Confirmed on disk: `font-en.7043b83b.fnt` carries
+// ids 0xD7/0xE9/0x2013… and `font-ru.32eaddc0.fnt` carries ids 0x410.. (U+0410
+// CYRILLIC CAPITAL LETTER A). Source strings here are UTF-8, so decode
+// codepoints before the lookup — see `utf8_next`/`find_glyph` below.
 
 #include <cstdint>
 #include <string>
@@ -58,5 +68,28 @@ struct font {
 // Parses a BMFont binary v3 .fnt (UTF-8/ASCII bytes). Throws std::runtime_error
 // on malformed/truncated input.
 font font_parse(const std::uint8_t* data, std::size_t size);
+
+// --- UTF-8 text helpers --------------------------------------------------
+// The .fnt `id` field is a Unicode codepoint (see the header note), so the
+// draw/measure path must decode the UTF-8 source string into codepoints and
+// look each one up by `id`. Iterating raw bytes only accidentally matches ASCII
+// (single-byte codepoints); Cyrillic (U+0410..) is multi-byte UTF-8 and would
+// otherwise be skipped.
+
+// Returned by `utf8_next` for malformed/truncated input.
+inline constexpr std::uint32_t kUtf8ReplacementChar = 0xFFFD;  // U+FFFD
+
+// Decodes the UTF-8 codepoint at `text[i]`, advancing `i` past it. Invalid or
+// truncated sequences consume exactly one byte and return
+// `kUtf8ReplacementChar`, so malformed input can never loop or read out of
+// bounds. Returns `kUtf8ReplacementChar` (no advance) when `i >= text.size()`.
+std::uint32_t utf8_next(const std::string& text, std::size_t& i) noexcept;
+
+// Linear glyph lookup by codepoint. Returns nullptr when absent.
+const font_char* find_glyph(const font& f, std::uint32_t codepoint) noexcept;
+
+// UTF-8-aware advance width. Unknown codepoints contribute nothing (the
+// previous byte-skip behavior), so ASCII output is unchanged.
+float measure_text_utf8(const font& f, const std::string& text, float scale) noexcept;
 
 } // namespace sf2::data

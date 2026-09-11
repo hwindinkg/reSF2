@@ -6,22 +6,36 @@
 
 namespace sf2::scene {
 
-// Spark tuning (world units / 60 Hz frames). The specs give the JS names
-// (`Hyb` sprite 1306, `av` texture 260) but not the numeric configs; these
-// constants approximate the original's look: a short-lived fan of sparks.
+// Spark tuning — every value is the JS `av`/`ryb` number, not a guess.
 namespace {
 
-constexpr int kSparksMin = 8;        // sparks per burst (spec: 8-14)
-constexpr int kSparksMax = 14;
-constexpr float kSpeedMin = 2.0f;     // initial speed (world units/frame)
-constexpr float kSpeedMax = 6.0f;
-constexpr float kSpreadRad = 0.9f;   // fan half-angle (~52°) around the
-                                      // blow-away direction
-constexpr float kGravity = 0.35f;     // world units/frame² (down = +y)
-constexpr float kLifeMin = 20.0f;     // frames (spec: ~20-30)
-constexpr float kLifeMax = 30.0f;
-constexpr float kSizeMin = 3.0f;      // spark size (world units)
-constexpr float kSizeMax = 7.0f;
+// JS `ql.Rub` (L369): `c==null&&(c=4)` — the burst count.
+constexpr int kSparkCount = 4;
+// JS `Ut.ryb` (L824): `e.Y.la(.3)` — uniform sprite scale.
+constexpr float kSparkScale = 0.3f;
+// `y.xRa` -> "drop_blood" (L2465) in the ui/misc atlas (asset 260, manifest
+// L2490): sourceSize 26x26. World base = sourceSize * scale = 26 * 0.3.
+constexpr float kSparkSpriteWorld = 26.0f;
+constexpr float kSparkSize = kSparkScale * kSparkSpriteWorld;  // 7.8 units
+// JS `av` ctor (L833): fg = (dir/200) + rand ranges.
+constexpr float kSparkDirDiv = 200.0f;
+constexpr float kJitterXMin = -40.0f;
+constexpr float kJitterXMax = 40.0f;
+constexpr float kJitterYMin = -60.0f;
+constexpr float kJitterYMax = 20.0f;
+constexpr float kJitterDiv = 10.0f;
+// JS `av.ia` (L833): `this.fg.y += .2` every tick.
+constexpr float kSparkGravity = 0.2f;
+// JS `Ut.Cnb` (L824): clear the pool once `uba > 90`.
+constexpr float kSparkPoolLife = 90.0f;
+
+constexpr float kPi = 3.14159265358979323846f;
+
+// JS `Y.Wg(atan2(fg.y,fg.x)*57.29577951308232*(fg.x<0?-1:1))`.
+float spark_rotation_deg(float vx, float vy) {
+    const float deg = std::atan2(vy, vx) * (180.0f / kPi);
+    return vx < 0.0f ? -deg : deg;
+}
 
 }  // namespace
 
@@ -32,49 +46,55 @@ float EffectSystem::next01() {
     return static_cast<float>(lcg_ >> 8) * (1.0f / 16777216.0f);
 }
 
-void EffectSystem::spawn_hit_sparks(float x, float y, int facing) {
-    // The fan blows AWAY from the attacker: facing +1 (attacker looks
-    // right) -> sparks fly right (+x); facing -1 -> sparks fly left.
-    const float dir = static_cast<float>(facing >= 0 ? 1 : -1);
-    const int count = kSparksMin +
-                     static_cast<int>(next01() * static_cast<float>(kSparksMax - kSparksMin + 1));
-    live_.reserve(live_.size() + static_cast<std::size_t>(count));
-    for (int i = 0; i < count; ++i) {
-        const float speed = kSpeedMin + next01() * (kSpeedMax - kSpeedMin);
-        const float angle = (next01() * 2.0f - 1.0f) * kSpreadRad;
+void EffectSystem::spawn_hit_sparks(float x, float y, int facing,
+                                    std::uint32_t color) {
+    // JS `Ut.ryb` (L824) clears the previous burst before spawning the new
+    // one (`this.dKa()`), then resets the pool clock (`this.uba=0`).
+    live_.clear();
+    pool_age_ = 0.0f;
+
+    // The native hit is directed along ±x by the attacker's facing — the JS
+    // `IDa` direction vector reduced to its x component.
+    const float dir_x = facing >= 0 ? 1.0f : -1.0f;
+    const float dir_y = 0.0f;
+
+    live_.reserve(static_cast<std::size_t>(kSparkCount));
+    for (int i = 0; i < kSparkCount; ++i) {
         particle p;
         p.x = x;
         p.y = y;
-        p.vx = dir * speed * std::cos(angle);
-        // The vertical spread is symmetric around the hit point (sparks
-        // fly up and down from the contact); gravity pulls them down.
-        p.vy = speed * std::sin(angle) * 0.6f;
-        p.life = kLifeMin + next01() * (kLifeMax - kLifeMin);
+        // JS `av` ctor (L833):
+        //   fg.x = dir.x/200 + rand(-40,40)/10
+        //   fg.y = dir.y/200 + rand(-60,20)/10
+        p.vx = dir_x / kSparkDirDiv +
+               (kJitterXMin + next01() * (kJitterXMax - kJitterXMin)) / kJitterDiv;
+        p.vy = dir_y / kSparkDirDiv +
+               (kJitterYMin + next01() * (kJitterYMax - kJitterYMin)) / kJitterDiv;
+        p.rotation_deg = spark_rotation_deg(p.vx, p.vy);
+        p.life = kSparkPoolLife;  // JS `uba>90` (whole burst)
         p.age = 0.0f;
-        p.size = kSizeMin + next01() * (kSizeMax - kSizeMin);
-        // Warm spark palette (the original's sparks are white-yellow).
-        const float t = next01();
-        p.color = t < 0.5f   ? 0xFFFFEE66u   // warm yellow
-                : t < 0.8f ? 0xFFFFFFCCu   // white-hot
-                           : 0xFFAA6622u;  // ember orange
+        p.size = kSparkSize;      // JS `la(.3)`
+        p.color = color;          // JS `Na.cd(Lb.N2)` (location root colour)
         live_.push_back(p);
     }
 }
 
 void EffectSystem::update() {
-    // Advance + compact in place (dead particles drop out; the order of
-    // the survivors is preserved).
-    std::size_t w = 0;
-    for (std::size_t i = 0; i < live_.size(); ++i) {
-        particle& p = live_[i];
-        p.age += 1.0f;
-        if (p.age >= p.life) continue;  // dead — dropped
-        p.vy += kGravity;               // gravity (down = world +y)
+    // JS `Ut.Cnb` (L824): for each particle `ia()`, then `uba++` and
+    // `dKa()` (clear) when `uba > 90`.
+    for (particle& p : live_) {
+        // JS `av.ia` (L833).
         p.x += p.vx;
         p.y += p.vy;
-        live_[w++] = p;
+        p.vy += kSparkGravity;
+        p.rotation_deg = spark_rotation_deg(p.vx, p.vy);
+        p.age += 1.0f;
     }
-    live_.resize(w);
+    pool_age_ += 1.0f;
+    if (pool_age_ > kSparkPoolLife) {
+        live_.clear();
+        pool_age_ = 0.0f;
+    }
 }
 
 }  // namespace sf2::scene

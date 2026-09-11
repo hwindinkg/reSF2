@@ -921,17 +921,9 @@ bool App::draw_atlas_rect(const std::string& name, float x, float y, float w, fl
 
 float App::measure_text(const sf2::data::font& font, const std::string& text,
                         float scale) const {
-    float w = 0.0f;
-    for (unsigned char ch : text) {
-        const std::uint32_t id = static_cast<std::uint32_t>(ch);
-        const sf2::data::font_char* g = nullptr;
-        for (const auto& c : font.chars) {
-            if (c.id == id) { g = &c; break; }
-        }
-        if (g == nullptr) continue;
-        w += static_cast<float>(g->xadvance) * scale;
-    }
-    return w;
+    // UTF-8 aware: .fnt glyph ids are Unicode codepoints (see font.hpp), so
+    // decode before lookup. ASCII stays byte-identical.
+    return sf2::data::measure_text_utf8(font, text, scale);
 }
 
 bool App::draw_text_with_font(const sf2::data::font& font, unsigned int tex, float x,
@@ -957,12 +949,11 @@ bool App::draw_text_with_font(const sf2::data::font& font, unsigned int tex, flo
     float cursor_x = x;
     float cursor_y = y;
     bool any = false;
-    for (unsigned char ch : text) {
-        const std::uint32_t id = static_cast<std::uint32_t>(ch);
-        const sf2::data::font_char* glyph = nullptr;
-        for (const auto& c : font.chars) {
-            if (c.id == id) { glyph = &c; break; }
-        }
+    // UTF-8 aware: decode each codepoint, then look the glyph up by id (the
+    // .fnt id is a Unicode codepoint; see font.hpp). ASCII stays identical.
+    for (std::size_t i = 0; i < text.size();) {
+        const std::uint32_t id = sf2::data::utf8_next(text, i);
+        const sf2::data::font_char* glyph = sf2::data::find_glyph(font, id);
         if (glyph == nullptr) continue;
         if (glyph->w == 0 || glyph->h == 0) {
             cursor_x += static_cast<float>(glyph->xadvance) * scale;

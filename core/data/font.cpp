@@ -170,4 +170,77 @@ font font_parse(const std::uint8_t* data, std::size_t size) {
     return result;
 }
 
+// --- UTF-8 text helpers ---------------------------------------------------
+
+std::uint32_t utf8_next(const std::string& text, std::size_t& i) noexcept {
+    const auto* p = reinterpret_cast<const unsigned char*>(text.data());
+    const std::size_t n = text.size();
+    if (i >= n) {
+        return kUtf8ReplacementChar;
+    }
+
+    const std::uint32_t lead = p[i++];
+    if (lead < 0x80) {
+        return lead;  // ASCII: byte == codepoint (EN path unchanged)
+    }
+
+    std::size_t extra = 0;
+    std::uint32_t cp = 0;
+    std::uint32_t min_cp = 0;
+    if ((lead & 0xE0) == 0xC0) {
+        extra = 1;
+        cp = lead & 0x1F;
+        min_cp = 0x80;
+    } else if ((lead & 0xF0) == 0xE0) {
+        extra = 2;
+        cp = lead & 0x0F;
+        min_cp = 0x800;
+    } else if ((lead & 0xF8) == 0xF0) {
+        extra = 3;
+        cp = lead & 0x07;
+        min_cp = 0x10000;
+    } else {
+        return kUtf8ReplacementChar;  // invalid lead byte (consume 1)
+    }
+
+    if (extra > n - i) {
+        return kUtf8ReplacementChar;  // truncated sequence (consume 1)
+    }
+    for (std::size_t k = 0; k < extra; ++k) {
+        const std::uint32_t b = p[i + k];
+        if ((b & 0xC0) != 0x80) {
+            return kUtf8ReplacementChar;  // bad continuation (consume 1)
+        }
+        cp = (cp << 6) | (b & 0x3F);
+    }
+    // Reject overlong encodings, UTF-16 surrogates, and out-of-range values.
+    if (cp < min_cp || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+        return kUtf8ReplacementChar;
+    }
+    i += extra;
+    return cp;
+}
+
+const font_char* find_glyph(const font& f, std::uint32_t codepoint) noexcept {
+    for (const auto& c : f.chars) {
+        if (c.id == codepoint) {
+            return &c;
+        }
+    }
+    return nullptr;
+}
+
+float measure_text_utf8(const font& f, const std::string& text, float scale) noexcept {
+    float width = 0.0f;
+    std::size_t i = 0;
+    while (i < text.size()) {
+        const std::uint32_t cp = utf8_next(text, i);
+        if (const font_char* g = find_glyph(f, cp)) {
+            width += static_cast<float>(g->xadvance) * scale;
+        }
+        // Unknown codepoint: contributes nothing (previous skip behavior).
+    }
+    return width;
+}
+
 } // namespace sf2::data

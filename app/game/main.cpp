@@ -92,7 +92,8 @@ struct LoopStep {
 //     (ZONE_1); there is NO zone-tab strip in the JS map (PORT_AUDIT_UI
 //     §2.3) and the zone scroller is not ported, so only ZONE_1 nodes are
 //     reachable. Its first node (BOSS_LYNX, X=-180 Y=-45) sits at ~(471,375).
-//   - shop card grid: first card center (0.25*1280+150, 200+75).
+//   - shop card grid: first card center (548.2, 218.4) at 1280x720 (the
+//     responsive `Oa.layout` split, Wave H).
 //   - equipment owned-item grid: first card (0.55*1280+110, 220+40).
 //   - BACK buttons: top-left (64, 40) on Map/Shop/Equipment (pops back to
 //     the Dojo hub).
@@ -115,9 +116,9 @@ static const LoopStep kLoopSteps[] = {
     // 4: Dojo -> Shop (the SHOP button). Capture loop_shop.png on arrival.
     {184.0f, 337.0f, "dojo->shop", kScreenDojo, 0, kScreenShop, 0,
      "loop_shop.png"},
-    // 5: Shop -> buy WEAPON_KNIVES (first card, price 50).
-    {1280 * 0.25f + 150.0f, 200.0f + 75.0f, "shop->buy WEAPON_KNIVES", kScreenShop, 0, -1, 12,
-     nullptr},
+    // 5: Shop -> buy WEAPON_KNIVES (first card, price 50). First-card centre
+    //    from the responsive `Oa.layout` split = (548.2, 218.4) at 1280x720.
+    {548.2f, 218.4f, "shop->buy WEAPON_KNIVES", kScreenShop, 0, -1, 12, nullptr},
     // 6: Shop -> BACK to the Dojo hub.
     {64.0f, 40.0f, "shop->dojo (BACK)", kScreenShop, 0, kScreenDojo, 0, nullptr},
     // 7: Dojo -> Equipment (the PROFILE button). Capture loop_equip.png on
