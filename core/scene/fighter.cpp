@@ -375,6 +375,29 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // JS `Te.Skb` (L551) runs `Gub()` (align, L557-559) right after loading
     // the clip and before the first `ia()` sample.
     compute_align(move);
+
+    // [FIX root motion — JS `Skb` L551-552] Seed the authored root-motion
+    // state exactly as the JS controller does when a move starts:
+    //   `a=this.j8; a.x=0` (always reset the applied offset),
+    //   `this.Ua.qta || (this.DM = Qfa() = wua; this.DM.x*=hd())`
+    //     (DM = <Velocity X/Y/Z>, x mirrored by facing; kept when
+    //      SaveVelocity/`qta` is set),
+    //   `this.aV = t9a() = Coa; this.aV.x*=hd()`
+    //     (aV = <Velocity Ax/Ay/Az>, x mirrored by facing — always).
+    // Reference: `Fa.ykb` L721-722 (parse), `Te.Qfa`/`Te.t9a` L699,
+    // `Te.jub` L722 (`SaveVelocity` -> `qta`).
+    const float fsign = facing_ < 0 ? -1.0f : 1.0f;
+    if (move.velocity.has_velocity) {
+        root_active_ = true;
+        if (!move.velocity.save_velocity) {
+            root_dm_x_ = move.velocity.x * fsign;
+        }
+        root_av_x_ = move.velocity.ax * fsign;
+    } else {
+        root_active_ = false;
+        root_dm_x_ = 0.0f;
+        root_av_x_ = 0.0f;
+    }
     sample_current();
     return true;
 }
@@ -481,11 +504,31 @@ void Fighter::advance_step() {
         active_intervals_.insert(n);
     }
 
-    // Root motion (JS `Al.ia` L582 + Te.eda j8): the old native added the
-    // full clip-frame COM delta every 60 Hz tick — for sub=3 that counted
-    // the delta 3x per clip frame (2.4x/3.6x over-application). Fix: distribute
-    // the delta over subframes (single-application per clip frame).
-    if (move_frame_ >= 0 && static_cast<std::size_t>(move_frame_) < current_clip_->frames.size()) {
+    // Root motion (JS `Te.eda` L556 + `Te.j8`/`DM`/`aV` L546/564). Two paths:
+    //
+    //  (a) AUTHORED <Velocity> (JS `Fa.ykb` L721-722; `Skb` L551-552 seeds
+    //      `DM`=`wua`, `aV`=`Coa`). `eda` L556 runs `Pab` (`Qab(DM)`:
+    //      `j8 += DM*sG`) at frame start and `Nab` (`Oab(aV)`:
+    //      `DM += aV*sG`) at frame end; the `j8` offset is added to EVERY
+    //      posed bone (`d.x+=c.x; d.y+=c.y; d.z+=c.z`) — i.e. the whole
+    //      fighter shifts, so the native anchor world_x_ takes the same
+    //      per-frame delta. `sG = 1/Tx`, `Tx = model.model.HD()` (`Gka`
+    //      L561) = 1.
+    //  (b) FALLBACK (clip-baked root): a move with no <Velocity> leaves
+    //      `wua`/`Coa` = 0, so `DM`/`aV`/`j8` stay 0 (JS) and the clip's own
+    //      root-bone (bone 0) displacement moves the pose. The native
+    //      reproduces that as the COM-x delta per clip frame spread over the
+    //      `sub` subframes (one clip-frame delta over `sub` `eda` calls).
+    //      Retained ONLY here, for moves without authored <Velocity>.
+    // NOTE: every shipped fighter/locomotion move takes (b) — all 62 live
+    // <Velocity> elements are on projectile/magic moves (summary).
+    constexpr float kSG = 1.0f;  // JS `Gka` L561: sG = 1/Tx, Tx = HD() = 1
+    if (root_active_) {
+        const float d = root_dm_x_ * kSG;  // `Pab`/`Qab`: j8 += DM*sG
+        world_x_ += d;                     // the j8 delta lands on the COM anchor
+        root_dm_x_ += root_av_x_ * kSG;    // `Nab`/`Oab`: DM += aV*sG
+    } else if (move_frame_ >= 0 &&
+               static_cast<std::size_t>(move_frame_) < current_clip_->frames.size()) {
         const float com_now = current_clip_->frames[static_cast<std::size_t>(move_frame_)].bones.empty()
                                   ? 0.0f
                                   : current_clip_->frames[static_cast<std::size_t>(move_frame_)]
@@ -515,6 +558,9 @@ void Fighter::advance_step() {
         active_intervals_.clear();
         subframe_ = 0;
         align_x_ = align_y_ = align_z_ = 0.0f;
+        // JS `stop()`/`KNa()` call `jc.reset()`; `Skb` L551 zeroes `j8`.
+        root_active_ = false;
+        root_dm_x_ = root_av_x_ = 0.0f;
         return;
     }
 
@@ -538,6 +584,10 @@ void Fighter::clear_move() {
     active_intervals_.clear();
     subframe_ = 0;
     align_x_ = align_y_ = align_z_ = 0.0f;
+    // JS `stop()` -> `jc.reset()` / `Skb` L551: the authored root state is
+    // per-move; clear it so a later move starts from a zero `j8`.
+    root_active_ = false;
+    root_dm_x_ = root_av_x_ = 0.0f;
 }
 
 // [FIX root-motion align] JS `Te.Gub` (L557-559) + `Te.Gla` (L550):
@@ -901,6 +951,39 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             px[i] = bones[i].x;
             py[i] = bones[i].y;
             pz[i] = bones[i].z;
+        }
+    }
+
+    // [FIX root motion — JS `Te.bYa` L564, invoked from `eda` L556 while
+    // `Ua.zX != 0`] The move's <Rotation Angle> + <Position> pivot rotates
+    // EVERY posed bone about the pivot by `Angle` degrees in the local
+    // model (x,y) plane: `e = zX*0.017453292519943295; h=f.x-b.x;
+    // f=f.y-b.y; f=(cos(e)*h-sin(e)*f+b.x, sin(e)*h+cos(e)*f+b.y, 0, 1)`.
+    // The pivot `b = Ua.AX.nt(model.Fc)` (`ee.nt` L786): for
+    // Object="Nodes" it is the posed node `Part`, with `c.x += ix*Wl`
+    // (Wl = fighter scale = 1) and `c.y -= jx`. Only the shipped
+    // Object="Nodes" case is handled; Object=Animation/Pivot/Wall are OPEN
+    // (none of the 6 shipped <Rotation> moves use them). Applies to px/py
+    // after the solver — the JS `bYa` runs in `eda` before `Al.ia`, so the
+    // native cloth solver state (`sol_ma_`) is NOT rotated (OPEN, cloth-only
+    // on rotation moves).
+    if (current_move_ != nullptr && current_move_->rotation.has_rotation &&
+        current_move_->rotation.angle != 0.0f &&
+        current_move_->rotation.pos_object == "Nodes") {
+        const int pit = model_.bone_by_name(current_move_->rotation.pos_part);
+        if (pit >= 0 && static_cast<std::size_t>(pit) < n) {
+            const std::size_t pu = static_cast<std::size_t>(pit);
+            const float ox = px[pu] + current_move_->rotation.shift_x;  // `c.x += ix*Wl`
+            const float oy = py[pu] - current_move_->rotation.shift_y;  // `c.y -= jx`
+            const float rad = current_move_->rotation.angle * 0.017453292519943295f;
+            const float cs = std::cos(rad);
+            const float sn = std::sin(rad);
+            for (std::size_t i = 0; i < n; ++i) {
+                const float hx = px[i] - ox;
+                const float hy = py[i] - oy;
+                px[i] = cs * hx - sn * hy + ox;
+                py[i] = sn * hx + cs * hy + oy;
+            }
         }
     }
 

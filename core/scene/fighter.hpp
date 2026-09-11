@@ -290,6 +290,20 @@ private:
     float align_x_ = 0.0f;
     float align_y_ = 0.0f;
     float align_z_ = 0.0f;
+    // [FIX root motion — JS `Te.j8`/`Te.DM`/`Te.aV`] The move's authored
+    // <Velocity> (JS `Fa.ykb` L721-722) integrated per frame exactly like
+    // the JS controller (`Te` ctor L546; `Skb` L551-552 seeds `DM`/`aV`;
+    // `eda` L556 calls `Pab`/`Nab` L564 = `Qab`/`Oab`). `root_dm_x_` and
+    // `root_av_x_` are the x components of `DM` (velocity) and `aV`
+    // (acceleration); `sG = 1/Tx` (`Gka` L561, Tx = model.HD() = 1). The JS
+    // `j8 += DM*sG` accumulation is applied straight onto world_x_ per
+    // frame, so no separate `j8` field is kept.
+    // `root_active_` is true only when the current move carries <Velocity>;
+    // otherwise the COM-delta fallback (the clip's baked root bone) drives
+    // world_x_, matching JS where `j8` stays 0 with no <Velocity>.
+    float root_dm_x_ = 0.0f;
+    float root_av_x_ = 0.0f;
+    bool root_active_ = false;
     // [FIX stretched mesh — JS-faithful] The game runs exactly one solver
     // step per frame (`Al.ia()` L582 = `sk(); jE();`); there is no warmup
     // and no cross-clip COM-delta translation of the solver state.

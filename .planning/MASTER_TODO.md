@@ -780,3 +780,36 @@ bottom-left are baked-in art, not UI text. Port punch-kick draw circles
 1002/1109), atlas art gaps 101-121px, no 5th structure.
 Gate 25% NOT MET (honest). NO COMMIT per policy (orchestrator batches;
 STATE.md untouched).
+
+## Integration round 14 - Wave R (Act/Settings) + Wave S (root motion) (2026-09-11, phase1 step9)
+
+CLEAN full Release rebuild (`--clean-first`, VS17, 0 errors). Final tree =
+HEAD ea53d1b1 + Wave R (Act `Rd` label node; Settings OPEN note) + Wave S
+(`<Velocity>`/`<Rotation>` parse + authored root-motion/rotation). The Wave R
+HUD-strip rewrite was REVERTED (reason below).
+Method: fresh `game.exe reference/www/res <fresh_dojo copy> --ui-tour` from
+E:\reSF2 (ALL 15 STEPS DONE, exit 0); `--headless-loop` on a temp dirty-save
+copy (ALL 13 STEPS DONE, save/load PASS money=90 items=7 WEAPON_KNIVES; real
+saves untouched).
+Dojo ui_diff thr12 dojo_norm:dojo = 58.39% (baseline 58.39% -> +0.00pp; gate
+met). The HUD-strip rewrite measured 58.41% (+0.02pp = 198 px) with 100% of
+the delta inside the strip (rows below y84 byte-identical), so it was
+reverted per the no-regression rule. ROOT CAUSE (OPEN): the port passes the
+JS `C()` LEFT-edge values as sprite CENTERS for `gold`/`ruby`/`AddMoney` and
+the gems text - JS `Ss.C(Ss.za()/2)`, `PA.C(PA.za()/2+Dq.ya+c+b)`,
+`Fg.C(au.ya+au.za()+Fg.Y.za()/2+b)`, and `C` sets `position.x` = left edge
+(proven by the strip centering `Pr.C((a.w-Pr.node.za())/2)`). The bars
+themselves resolved (`level_bar_empty_short` rect=(447,272,246,32);
+`AddMoney` rect=(171,598,115,113)) but the rewrite must be made JS-faithful
+and re-gated before landing.
+Wave S: `--fight --headless 700 --dump-pose 600` healthy (600 frames, phase
+1->2, timer 99->91, clean shutdown); player idle widest-tri-span=79.2 =
+baseline (no stretch regression); all fighter/locomotion moves lack
+`<Velocity>` -> the static root fallback is unchanged.
+Goldens: combat_golden 99 GREEN; spatial_golden 17 GREEN; ai_golden
+Node<->C++ prng bit-exact, gb max-abs 1.11e-08 <= 1e-5, ju k=3/0/-1/-1/-1,
+horizon T/F/T; combat S5-S20 value-equal (only diff = an emitter-shape
+wrapper on dk12_ukb - same value).
+Fight internal (port_fight.png): both fighters visible (silhouettes, no black
+half; right side = dojo scenery), orange/blue HP bars + timer 97 present.
+COMMIT+PUSH per orchestrator (STATE.md untouched).

@@ -544,6 +544,48 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
             }
         }
 
+        // <Velocity> (JS `Fa.ykb` L721-722): `b = move.A("Velocity")`, else
+        // the first inherited template that has one. Fields X/Y/Z -> `wua`,
+        // Ax/Ay/Az -> `Coa`, SaveVelocity -> `qta`.
+        auto parse_velocity = [](pugi::xml_node vel, Velocity& v) {
+            v.has_velocity = true;
+            v.x = data::xml_attr_float(vel, "X", 0.0f);
+            v.y = data::xml_attr_float(vel, "Y", 0.0f);
+            v.z = data::xml_attr_float(vel, "Z", 0.0f);
+            v.ax = data::xml_attr_float(vel, "Ax", 0.0f);
+            v.ay = data::xml_attr_float(vel, "Ay", 0.0f);
+            v.az = data::xml_attr_float(vel, "Az", 0.0f);
+            v.save_velocity = data::xml_attr_bool(vel, "SaveVelocity", false);
+        };
+        if (pugi::xml_node vel = move.child("Velocity")) {
+            parse_velocity(vel, def.velocity);
+        } else {
+            for (pugi::xml_node tpl_node : templates) {
+                if (pugi::xml_node vel = tpl_node.child("Velocity")) {
+                    parse_velocity(vel, def.velocity);
+                    break;
+                }
+            }
+        }
+
+        // <Rotation> (JS `Fa.Yjb(l, k.A("Rotation"))` L722 — the move's OWN
+        // element; `Yjb` reads `Angle` + the `<Position>` child into
+        // `jc.zX`/`jc.AX`). `AX` is an `ee` object-ref (`Fa.Yjb` L722).
+        if (pugi::xml_node rot = move.child("Rotation")) {
+            def.rotation.has_rotation = true;
+            def.rotation.angle = data::xml_attr_float(rot, "Angle", 0.0f);
+            if (pugi::xml_node pos = rot.child("Position")) {
+                def.rotation.pos_player =
+                    pos.attribute("Player") ? pos.attribute("Player").value() : "Null";
+                def.rotation.pos_object =
+                    pos.attribute("Object") ? pos.attribute("Object").value() : "";
+                def.rotation.pos_part =
+                    pos.attribute("Part") ? pos.attribute("Part").value() : "";
+                def.rotation.shift_x = data::xml_attr_float(pos, "ShiftX", 0.0f);
+                def.rotation.shift_y = data::xml_attr_float(pos, "ShiftY", 0.0f);
+            }
+        }
+
         out.emplace(def.name, std::move(def));
     }
     return true;

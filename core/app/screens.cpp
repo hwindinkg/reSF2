@@ -2804,18 +2804,21 @@ void MapScreen::render_impl(App& app) {
                                  0, 0, kViewW, kViewH, 0, kViewH};
             ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, a);
         }
-        const sf2::data::font* fnt = app.menu_font();
-        if (fnt != nullptr) {
-            const unsigned int ftex = app.font_texture();
-            draw_ui_label(app, kViewW * 0.5f - 400.0f, 240.0f, 800.0f, 40.0f, "BOSS", 1.2f,
-                              UiAlign::Center, 1.0f, 0.85f, 0.3f);
-            const std::string line = act_.line();
-            if (!line.empty()) {
-                draw_ui_label(app, kViewW * 0.5f - 500.0f, 340.0f, 1000.0f, 30.0f, line, 1.0f,
-                                  UiAlign::Center, 1.0f, 1.0f, 1.0f);
-            }
-            draw_ui_label(app, kViewW * 0.5f - 200.0f, 560.0f, 400.0f, 26.0f, "TAP TO SKIP", 0.7f,
-                              UiAlign::Center, 0.7f, 0.7f, 0.7f);
+        // `label = ea` (L2095): geometry `Fa(N.width/this.node.Eb*
+        // (.9+(N.lc-.4)/1.6*-.5), 400)` + `ua(130)` (L2096; menu eF=100 ->
+        // native scale 1.3) + color `Na.cd(13743222)` = (0.82,0.71,0.46).
+        // Shown from the node fade-in (step 1) through the timed lines
+        // (step 3). Replaces the invented flat "BOSS"/"TAP TO SKIP" text
+        // (PORT_AUDIT_UI §3 item 15).
+        const std::string line = act_.label();
+        if (!line.empty()) {
+            const float lc = kViewW / kViewH;
+            const float label_w = kViewW * (0.9f + (lc - 0.4f) / 1.6f * -0.5f);
+            const float label_h = 400.0f;
+            const float label_x = (kViewW - label_w) * 0.5f;
+            const float label_y = (kViewH - label_h) * 0.5f;  // box height-centred
+            draw_ui_label(app, label_x, label_y, label_w, label_h, line, 1.3f,
+                          UiAlign::Center, 0.82f, 0.71f, 0.46f);
         }
     }
     // Sensei dialog modal on top of the map.
@@ -5497,11 +5500,15 @@ void SettingsScreen::update_impl(float dt) {
 
 void SettingsScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    // Minimal options overlay (NOT a standalone screen): the JS `za` nav
-    // button #5 (`y.mRa`/`y.lRa`) routes to `za.Vfb` (L1979), which attaches
-    // a `Bi` spinner and `G.load([250..253])` — there is no `dJ()==11`
-    // screen (PORT_AUDIT_UI §3 item 30). The exact options dialog/spinner
-    // widget is OPEN; the caller (Dojo) stays beneath this dim.
+    // Minimal options overlay (NOT a standalone screen; PORT_AUDIT_UI §2.1 /
+    // §3 item 30). The JS `za` nav button #5 (`y.mRa`/`y.lRa`, L1979) routes
+    // to `za.Vfb` (L1981): it appends a `Bi` spinner (frame `y.aoa`
+    // loading_circle, L1867) and `G.load([250,251,252,253])`. On load
+    // completion `xvb()` (L1981) tears the spinner down and calls
+    // `Xc.Shb()` — the real options DIALOG built by the `Xc` factory.
+    // OPEN: `Xc.Shb`'s node tree is not in the audit and there is no runtime
+    // trace, so the spinner + options dialog are not derivable from the
+    // provided cites; this native overlay is the explicit stand-in.
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.55f);
     const float px = kViewW * 0.5f - 260.0f, py = 180.0f;

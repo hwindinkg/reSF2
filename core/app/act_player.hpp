@@ -121,12 +121,14 @@ public:
     bool done() const { return done_; }
     int step() const { return step_; }
 
-    // Black-overlay alpha (ramps up on step 0, holds through the text,
-    // ramps down on step 5).
+    // Black-overlay alpha (ramps 0->1 on step 0, then holds to the end: the
+    // JS fader never lifts — step 5 fades the label node instead).
     float fade() const {
         if (done_) return 0.0f;
         if (step_ == 0) return time_ >= 1.0f ? 1.0f : time_;
-        if (step_ == 5) return time_ >= 1.0f ? 0.0f : 1.0f - time_;
+        // JS `hf.wa(ed(1))` ramps to 1 only on step 0 and STAYS opaque through
+        // steps 1..7 (L2096). Step 5 fades the LABEL node (`this.node.wa`),
+        // not the fader, so the black never lifts mid-sequence.
         return 1.0f;
     }
 
@@ -134,6 +136,15 @@ public:
     std::string line() const {
         if (step_ != 3 || cursor_ >= lines_.size()) return "";
         return lines_[cursor_].text;
+    }
+
+    // The VISIBLE label (`Rd.label`, L2095-2096): `fm` sets the first line
+    // key on arm, so it shows from the node fade-in (step 1) through the
+    // timed-line stage (step 3); steps 0 and >= 4 carry none.
+    std::string label() const {
+        if (step_ == 3 && cursor_ < lines_.size()) return lines_[cursor_].text;
+        if ((step_ == 1 || step_ == 2) && !lines_.empty()) return lines_[0].text;
+        return "";
     }
 
     void reset() {

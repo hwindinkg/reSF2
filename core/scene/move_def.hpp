@@ -128,6 +128,31 @@ struct Align {
     std::string shift_model_node;  // <Align ShiftModelNode> (JS `Fla`)
 };
 
+// <Velocity> (JS `Fa.ykb` L721-722 -> `jc.wub`/`jc.btb`/`jc.jub`).
+// `wua` (X/Y/Z) seeds `Te.DM` on move start (`Skb` L551) and `Coa`
+// (Ax/Ay/Az) seeds `Te.aV`; `qta` (SaveVelocity) keeps `DM` across moves.
+// Reference: `Te` ctor L546 (`j8`/`DM`/`aV`), `Skb` L551-552, `eda` L556.
+struct Velocity {
+    bool has_velocity = false;
+    float x = 0.0f, y = 0.0f, z = 0.0f;    // `wua` (<Velocity X/Y/Z>)
+    float ax = 0.0f, ay = 0.0f, az = 0.0f; // `Coa` (<Velocity Ax/Ay/Az>)
+    bool save_velocity = false;            // `qta` (SaveVelocity)
+};
+
+// <Rotation Angle=".."><Position/></Rotation> (JS `Fa.Yjb` L722 ->
+// `jc.hub`/`jc.iub`). `angle` = `jc.zX` (degrees); the `<Position>` is the
+// `ee` object-ref `jc.AX` the rotation pivots about (`Te.bYa` L564, called
+// from `eda` L556 while `zX!=0`).
+struct Rotation {
+    bool has_rotation = false;
+    float angle = 0.0f;              // `zX` (<Rotation Angle>)
+    std::string pos_player;          // <Position Player> (`ee.pe`)
+    std::string pos_object;          // <Position Object> (`ee.object`)
+    std::string pos_part;            // <Position Part>   (`ee.part`)
+    float shift_x = 0.0f;            // `ee.ix` (<Position ShiftX>)
+    float shift_y = 0.0f;            // `ee.jx` (<Position ShiftY>)
+};
+
 // A move definition (JS `jc`).
 struct MoveDef {
     std::string name;
@@ -147,6 +172,8 @@ struct MoveDef {
     std::vector<Interval> intervals;   // <Intervals><Interval> (own + template)
     std::vector<Lock> locks;           // <Locks>
     Align align;                       // <Align>
+    Velocity velocity;                 // <Velocity> (JS `jc.wua`/`Coa`/`qta`)
+    Rotation rotation;                 // <Rotation> (JS `jc.zX`/`AX`)
     // Event names (JS `kz.create` L771-772 + `tb.D6a` L763): "KeyPressed"
     // (type 2), "AnimationEnd" (10), "IntervalEnd" (13), ... The fighter's
     // input path (JS `Gc.Vkb` L671 -> `Gc.EZa` L676) only considers moves
