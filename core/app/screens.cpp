@@ -652,31 +652,22 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speak
     const float oy = sp;
     auto lx = [&](float v) { return ox + v * c; };
     auto ly = [&](float v) { return oy + v * c; };
-    const float ph = 250.0f * c;
+    // The `Ib` scroll uses the `paper` sheet, NOT the JS `Zh` `roll_*`
+    // composite. [OPEN / regression guard] 876a3a97 switched this to
+    // `roll_end`/`roll_center` (JS L1872-1873, `gk(600,250,50,0,!1)`); its
+    // dark rounded caps do not match the oracle banner and REGRESSED the
+    // `dojo_norm` gate 58.39 -> 63.98 (isolated, frozen focus held). Kept on
+    // `paper` until the roll geometry is verified against the oracle.
+    const float pw = 600.0f * c, ph = 250.0f * c;
     bool drew = false;
     if (load_scroll_atlas(app)) {
-        // JS `Ib` (L1906) builds the bar as the `gk(600,250,50,0,!1)` scroll
-        // (L1906 `O1a`), whose art is the `Zh` roll composite (L1872-1873),
-        // NOT the `paper` sheet: `Zh` ctor adds `roll_end` (child 0),
-        // `roll_center` (child 1) and `roll_end` flipped `Hr(!0)` (child 2)
-        // (`y.goa`/`y.pSa` L2467-2468). `Zh.ba(600,250)` (horizontal: `c =
-        // h>w = false`, `d = min(w,h) = 250`, `h = d/capSrcH`):
-        //   capW  = 101 * 250/114      (roll_end sourceSize 101x114)
-        //   bodyW = max(600 - 2*capW, 10)
-        //   left cap x=0, body x=capW, right cap x=capW+bodyW (all 250 tall).
-        constexpr float kRollEndW = 101.0f, kRollEndH = 114.0f;  // scroll.json roll_end
-        constexpr float kBarW = 600.0f, kBarH = 250.0f;          // gk(600,250)
-        const float cap_w = kRollEndW * (kBarH / kRollEndH);     // 221.49 local
-        const float body_w = std::max(kBarW - 2.0f * cap_w, 10.0f);
-        drew = try_draw_atlas_button(app, "roll_end", lx(cap_w * 0.5f), ly(kBarH * 0.5f),
-                                     cap_w * c, ph, 1.0f, /*fill=*/true);
+        drew = try_draw_atlas_button(app, "paper", lx(300.0f), ly(125.0f), pw, ph, 1.0f,
+                                     /*fill=*/true);
         if (drew) {
-            try_draw_atlas_button(app, "roll_center", lx(cap_w + body_w * 0.5f),
-                                  ly(kBarH * 0.5f), body_w * c, ph, 1.0f, /*fill=*/true);
-            // Right cap: the third `Zh` child is `roll_end` with `Hr(!0)`.
-            try_draw_atlas_button(app, "roll_end",
-                                  lx(cap_w + body_w + cap_w * 0.5f), ly(kBarH * 0.5f),
-                                  cap_w * c, ph, 1.0f, /*fill=*/true, /*flip_x=*/true);
+            try_draw_atlas_button(app, "paper_edge_left", lx(0.0f), ly(125.0f), pw, ph, 1.0f,
+                                  false);
+            try_draw_atlas_button(app, "paper_edge_right", lx(600.0f), ly(125.0f), pw, ph,
+                                  1.0f, false);
         }
     }
     if (!drew) {
@@ -2388,28 +2379,15 @@ void DojoScreen::render_impl(App& app) {
     bool have_hub_cam = false;
     if (app.has_fight_assets()) {
         FightAssets& assets = app.fight_assets();
-        // [fix(hub): live focus, D3 / PORT_AUDIT_SCENE §4.4 + W1] The JS `Tf`
-        // hub (L1971-1972) runs the `FightNone` viewer, whose `Ut.Al` (L826)
-        // recomputes `Io = Lb.width/2 - focus` every frame from the live CoM
-        // midpoint `Go.ma` (the two viewers' COM anchors). The old call passed
-        // no focus, freezing `Io` at the spawn constant. Pass the viewers'
-        // live CoM mid: the idle player + bag dummy `world_x()` are the COM
-        // anchors (fighter.hpp:305), in container space (spawn - arenaW/2), so
-        // +halfW converts back to the location space `default_camera` expects.
-        float focus_x = -1.0f;      // <0 -> default_camera's spawn fallback
-        float fighter_span = -1.0f;
-        {
-            const float half = assets.dojo.arena_width() * 0.5f;
-            const bool have_p = dojo_fig_ok_ && dojo_fighter_ != nullptr;
-            const bool have_b = dojo_bag_ok_ && dojo_bag_ != nullptr;
-            if (have_p && have_b) {
-                focus_x = (dojo_fighter_->world_x() + dojo_bag_->world_x()) * 0.5f + half;
-                fighter_span = std::fabs(dojo_bag_->world_x() - dojo_fighter_->world_x());
-            } else if (have_p) {
-                focus_x = dojo_fighter_->world_x() + half;
-            }
-        }
-        assets.dojo.default_camera(hub_cam, kViewW, kViewH, focus_x, fighter_span);
+        // Hub framing = the FROZEN spawn constant (JS `ma.Sya` L1833 /
+        // frame-0 `Ut.Al` L826): `Io = arenaW/2 - (playerSpawn+enemySpawn)/2`.
+        // [OPEN / regression guard] 876a3a97 wired the live CoM midpoint
+        // (`focus_x`/`fighter_span` args, PORT_AUDIT_SCENE §4.4 + W1). On the
+        // oracle `dojo_norm` gate that REGRESSED 59.26 -> 83.25 (whole-scene
+        // camera shift; isolated: variant B live+no-bag 83.26 vs variant C
+        // frozen+no-bag 63.98). Reverted to the frozen constant until the
+        // live-focus semantics are machine-verified against the oracle.
+        assets.dojo.default_camera(hub_cam, kViewW, kViewH);
         have_hub_cam = true;
         assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
     } else {
@@ -2460,44 +2438,12 @@ void DojoScreen::render_impl(App& app) {
                 }
             }
         }
-        // The hub's enemy = the Punchbag dummy. The JS `Tf` hub runs the
-        // `FightNone` Punchbag Training viewer, so its ModelsViewer enemy is
-        // the hanging bag (DOJO_BG_STATIC §1/§6). `merged_bag` is loaded for
-        // exactly this (fight_assets.hpp:48-56 / app.cpp:445-460) but was
-        // never drawn. The bag is a rigid prop, so it is sampled once at its
-        // BIND pose: a synthetic 1-frame / 0-bone clip makes
-        // `Fighter::sample` keep every bone at its bind position
-        // (fighter.cpp:678) with the `COM` bone anchored at the spawn
-        // (fighter.cpp:945-960). Drawn BEFORE the player because the enemy is
-        // the first-registered fighter (z=-0.001, PORT_AUDIT_SCENE §2 `ev.Gf`
-        // L845: enemy behind, player on top).
-        if (!dojo_bag_tried_) {
-            dojo_bag_tried_ = true;
-            if (app.has_fight_assets() && !app.fight_assets().merged_bag.bones.empty()) {
-                dojo_bag_ = std::make_unique<sf2::scene::Fighter>();
-                dojo_bag_->set_model(app.fight_assets().merged_bag);
-                dojo_bag_->set_color(app.fight_assets().dojo.root_color());
-                dojo_bag_ok_ = true;
-                std::fprintf(stdout, "[dojo] punchbag dummy ready (bones %zu)\n",
-                             app.fight_assets().merged_bag.bones.size());
-                std::fflush(stdout);
-            } else {
-                std::fprintf(stdout, "[dojo] punchbag dummy skipped (no model)\n");
-                std::fflush(stdout);
-            }
-        }
-        if (dojo_bag_ok_ && dojo_bag_ != nullptr && have_hub_cam) {
-            const float enemy_x =
-                (app.has_fight_assets() ? app.fight_assets().dojo.enemy_spawn_x() : 973.0f) -
-                arena_half;
-            const float enemy_y =
-                (app.has_fight_assets() ? app.fight_assets().dojo.enemy_spawn_y() : -110.0f) +
-                cont_y;
-            sf2::data::anim_clip bind_clip;  // 1 frame, 0 bones -> bind pose
-            bind_clip.frames.resize(1);
-            dojo_bag_->sample(bind_clip, 0, enemy_x, enemy_y, 1);
-            draw_dojo_figure(ren, hub_cam, *dojo_bag_);
-        }
+        // [OPEN] The hub's enemy (the Punchbag dummy, `merged_bag`) is not
+        // drawn. 876a3a97 added a bind-pose draw here; it rendered nothing
+        // (isolated: bag ON vs OFF = +0.03pp, oracle punchbag still absent),
+        // so it was removed — the pre-regression baseline had no bag either.
+        // A correct draw needs the bag's real idle clip / COM anchor verified
+        // against the oracle (DOJO_BG_STATIC §1/§6), not a 0-bone synthetic.
         if (dojo_fig_ok_ && dojo_fighter_ != nullptr && dojo_idle_ != nullptr &&
             !dojo_idle_->frames.empty() && have_hub_cam) {
             const int nframes = static_cast<int>(dojo_idle_->frames.size());
