@@ -133,7 +133,8 @@ void draw_ui_label(App& app, float x, float y, float w, float h,
 // Helpers defined later in this file (the atlas sprite path sits after this
 // point; the `od`/`Ib` dialog art below needs it).
 bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy,
-                           float w, float h, float alpha, bool fill, bool flip_x);
+                           float w, float h, float alpha = 1.0f, bool fill = false,
+                           bool flip_x = false, bool top_left = false);
 bool load_scroll_atlas(App& app);
 void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speaker,
                   const std::string& line1, const std::string& line2, bool show_ok);
@@ -497,9 +498,12 @@ void draw_flat_button(App& app, const std::string& label, float cx, float cy, fl
     (void)label;
 }
 
-// Tries to draw an atlas frame centered at (cx,cy) sized to (w,h). Returns true if drawn.
+// Tries to draw an atlas frame sized to (w,h). Returns true if drawn.
+// `top_left=false` (default) anchors the frame CENTRE at (cx,cy) - the JS
+// `Ga()`/button case (`db`/`Le`/`Qr`). `top_left=true` anchors its LEFT/TOP
+// edge at (cx,cy) - the plain `R.$` case (`wr`/`xr` icons, progress bars).
 bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy, float w, float h,
-                           float alpha = 1.0f, bool fill = false, bool flip_x = false) {
+                           float alpha, bool fill, bool flip_x, bool top_left) {
     sf2::data::atlas_frame fr;
     int tw = 0, th = 0;
     unsigned int gl = 0;
@@ -533,13 +537,23 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
     // un-rotates UVs; quad keeps stored dims (no w/h swap — TLa keeps Nc).
     s.rotated = fr.rotated;
     s.transform.set_pos(cx, cy);
+    // Anchor: JS `Ke` ctor (L1599) defaults `BS=CS=Via=Wia=0`, so a plain
+    // `R.$`/`R.Ed` node's `position` is its LEFT/TOP edge; `Ga()` (L1602)
+    // sets it to the CENTRE (`ik(.5,.5)` + `Rn(.5,.5)`). Buttons call `Ga()`
+    // (`db.$w` L1840, `Le` L1848, `Qr` L2092), so (cx,cy) is their centre.
+    // The `wr`/`xr` icons and the `PL`/progress-bar containers do NOT
+    // (`R.$(E.get(260), y.Zna)` has no `Ga`), so `top_left` selects the
+    // matched left/top-edge anchor for those call sites.
+    if (top_left) {
+        s.transform.anchor_x = 0.0f;
+        s.transform.anchor_y = 0.0f;
+    }
     if (fr.w > 0 && fr.h > 0) {
         if (fill) {
-            // Bar backing (topPanel, Energy_Bar — the JS stretches these
-            // to their rects; aspect-fit would shrink topPanel 100x191 to
-            // a 44px sliver). Non-uniform stretch is CORRECT here.
-            s.transform.set_scale(w / static_cast<float>(fr.w),
-                                  h / static_cast<float>(fr.h));
+            // Bar backing (topPanel, Energy_Bar — JS stretches these to their
+            // rects; aspect-fit would shrink topPanel 100x191 to a 44px
+            // sliver). Non-uniform stretch is CORRECT here.
+            s.transform.set_scale(w / static_cast<float>(fr.w), h / static_cast<float>(fr.h));
         } else {
             // Aspect-correct fit (Dojo wave): the old non-uniform stretch
             // turned 226x193 menu art into wide ovals. Fit inside (w,h).
@@ -989,40 +1003,70 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     const float num_scale = lay.widget_h * 0.9f / 100.0f;  // ua(a*.9), eF=100
     // Per-widget logical widths: `wr` = level icon + value + Level_bar; `xr`
     // = energy icon + Energy_Bar; `yr` = gold + money + ruby + gems.
-    const float icon_level = icon * (115.0f / 111.0f);   // misc `level` 115x111
-    const float icon_energy = icon * (95.0f / 103.0f);   // misc `energy` 95x103
-    const float icon_gold = icon;                        // misc `gold` 95x95
-    const float icon_ruby = icon * (88.0f / 87.0f);      // misc `ruby` 88x87
-    const float q = icon * 0.25f;                        // b = icon.za()*.25
+    // Icon widths use the UNTRIMMED source ratios (JS `R.za()` = `fa.x*Eb`):
+    // misc `level` 115x111, `energy` **101x103** (frame is 95x103 — the
+    // packed rect is trimmed), `gold` 95x95, `ruby` 88x87.
+    const float icon_level = icon * (115.0f / 111.0f);
+    const float icon_energy = icon * (101.0f / 103.0f);
+    const float icon_gold = icon;
+    const float icon_ruby = icon * (88.0f / 87.0f);
+    const float q = icon * 0.25f;                        // wr text gap b = iw.za()*.25
     const float num_w = icon * 1.4f;                     // value text slot
-    const float bar_w = icon * 2.0f;                     // widget bar length
+    // JS `hk.zf(a)` (L2002) = `node.la(a / Ud.fa.y)`, `Ud` = the empty frame
+    // `level_bar_empty_short` (source 246x32); `wr.Vd.zf(a*.4)` (L1987) so the
+    // bar length = 246/32 * 0.4 * widget_h = 3.075*widget_h (was icon*2).
+    const float bar_w = icon * (246.0f / 32.0f) * 0.4f;  // widget bar length
+    // JS `yr.layout` (L1991) uses a DIFFERENT gap: `b = ((clamp(N.lc,.6,2)
+    // -.6)/1.4*100)`, an aspect offset (~84px at 16:9), between the money
+    // value and the ruby (and before AddMoney). Previously the native reused
+    // the `wr` icon gap `q` (~12px), which made the money widget far too
+    // narrow and — with the strip centred — shifted every widget.
+    const float lc_clamp = std::clamp(kViewW / kViewH, 0.6f, 2.0f);
+    const float yr_gap = (lc_clamp - 0.6f) / 1.4f * 100.0f;
     const float lvl_w = icon_level + q + num_w + q + bar_w;
-    const float en_w = icon_energy + q + bar_w;
-    const float money_w = icon_gold + q + num_w + q + icon_ruby + q + num_w;
+    // `xr.layout` L1985: the Energy bar sits at `icon.za()*1.1`, not icon+q.
+    const float en_w = std::max(icon_energy, icon_energy * 1.1f + bar_w);
+    const float money_w = icon_gold + num_w + yr_gap + icon_ruby + num_w;
     const float total = lvl_w + lay.gap + en_w + lay.gap + money_w;
     float x = (w - total) * 0.5f;
     const float cy = lay.sp * 0.5f;  // strip centred in the bar (Pr.D((Sp-...)/2))
-    // `wr` (level).
-    try_draw_atlas_button(app, "level", x + icon_level * 0.5f, cy, icon_level, icon, 1.0f);
+    // `wr` (level). `iw` is a plain `R.$` (no `Ga`) -> left/top-edge anchor;
+    // `iw.la(a/fa.y)` scales to height `a`, so the top-left y = cy - a/2.
+    try_draw_atlas_button(app, "level", x, cy - icon * 0.5f, icon_level, icon, 1.0f, false,
+                          false, /*top_left=*/true);
     draw_ui_label(app, x + icon_level + q, cy - lay.widget_h * 0.45f, num_w, lay.widget_h,
                   std::to_string(sv.level), num_scale, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    try_draw_atlas_button(app, "Level_bar", x + icon_level + q + num_w + q + bar_w * 0.5f, cy,
-                          bar_w, bar_h, 1.0f, /*fill=*/true);
+    // JS `wr.Vd = Uf(y.$na, y.IRa)` = `level_bar_empty_short` (empty backing)
+    // + `level_bar_short` (fill) over the same 246x32 source box (L1985).
+    // The fill fraction needs the `Oz()` max-exp curve (not modelled) -> the
+    // fill is drawn at full length (OPEN).
+    const float lvl_bar_x = x + icon_level + q + num_w + q;
+    try_draw_atlas_button(app, "level_bar_empty_short", lvl_bar_x, cy - bar_h * 0.5f, bar_w,
+                          bar_h, 1.0f, /*fill=*/true, false, /*top_left=*/true);
+    try_draw_atlas_button(app, "level_bar_short", lvl_bar_x, cy - bar_h * 0.5f, bar_w, bar_h,
+                          1.0f, /*fill=*/true, false, /*top_left=*/true);
     x += lvl_w + lay.gap;
-    // `xr` (energy).
-    try_draw_atlas_button(app, "energy", x + icon_energy * 0.5f, cy, icon_energy, icon, 1.0f);
-    try_draw_atlas_button(app, "Energy_Bar", x + icon_energy + q + bar_w * 0.5f, cy, bar_w,
-                          bar_h, 1.0f, /*fill=*/true);
+    // `xr` (energy). `icon` is a plain `R.$` (no `Ga`) -> left/top-edge.
+    // `xr.Vd = zr` extends `Uf` and passes the SAME `y.$na` base
+    // (`level_bar_empty_short`, L2003-2004), so the base matches the level bar.
+    try_draw_atlas_button(app, "energy", x, cy - icon * 0.5f, icon_energy, icon, 1.0f, false,
+                          false, /*top_left=*/true);
+    try_draw_atlas_button(app, "level_bar_empty_short", x + icon_energy * 1.1f,
+                          cy - bar_h * 0.5f, bar_w, bar_h, 1.0f, /*fill=*/true, false,
+                          /*top_left=*/true);
+    try_draw_atlas_button(app, "Energy_Bar", x + icon_energy * 1.1f, cy - bar_h * 0.5f, bar_w,
+                          bar_h, 1.0f, /*fill=*/true, false, /*top_left=*/true);
     x += en_w + lay.gap;
-    // `yr` (money).
+    // `yr` (money). `Ss`/`PA` DO call `Ga()` (L1990) -> centre anchor, so the
+    // JS `Ss.C(Ss.za()/2)` etc. are CENTRE positions (left edge 0).
     try_draw_atlas_button(app, "gold", x + icon_gold * 0.5f, cy, icon_gold, icon, 1.0f);
-    draw_ui_label(app, x + icon_gold + q, cy - lay.widget_h * 0.45f, num_w, lay.widget_h,
+    const float money_tx = x + icon_gold;  // JS `Dq.C(Ss.za())`: no gap
+    draw_ui_label(app, money_tx, cy - lay.widget_h * 0.45f, num_w, lay.widget_h,
                   std::to_string(sv.money), num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
-    try_draw_atlas_button(app, "ruby", x + icon_gold + q + num_w + q + icon_ruby * 0.5f, cy,
-                          icon_ruby, icon, 1.0f);
-    draw_ui_label(app, x + icon_gold + q + num_w + q + icon_ruby + q,
-                  cy - lay.widget_h * 0.45f, num_w, lay.widget_h, std::to_string(sv.bonus),
-                  num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+    const float ruby_left = money_tx + num_w + yr_gap;  // JS `PA.C(PA.za()/2+Dq.ya+c+b)`
+    try_draw_atlas_button(app, "ruby", ruby_left + icon_ruby * 0.5f, cy, icon_ruby, icon, 1.0f);
+    draw_ui_label(app, ruby_left + icon_ruby, cy - lay.widget_h * 0.45f, num_w, lay.widget_h,
+                  std::to_string(sv.bonus), num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
     // JS `gk` collapsed default (L1978): only the `Lx` title header shows;
     // the five `Le` buttons render only once expanded (`NLa` L2001).
     if (!g_za_nav_open) {

@@ -813,3 +813,33 @@ wrapper on dk12_ukb - same value).
 Fight internal (port_fight.png): both fighters visible (silhouettes, no black
 half; right side = dojo scenery), orange/blue HP bars + timer 97 present.
 COMMIT+PUSH per orchestrator (STATE.md untouched).
+
+## Integration round 15 - Wave T (JS-exact za HUD strip; global sprite anchor audit) (2026-09-11, phase1 step9)
+
+CLEAN full Release rebuild (`--clean-first`, VS17, 0 errors). Wave T landed as
+TWO coupled halves and was isolated by toggling each on a fresh tour:
+  (A) global sourceSize sizing in `try_draw_atlas_button` (size by untrimmed
+      `sourceSize` + `spriteSourceSize` trim for EVERY trimmed UI frame);
+  (B) the `za` strip re-authoring (icon/bar source ratios, `yr_gap`, `top_left`
+      left/top-edge anchors, `level_bar_empty_short`/`level_bar_short` base).
+Isolation (fresh `--ui-tour`, ui_diff thr12 dojo_norm:dojo, baseline 58.39):
+  A-only  = 58.44% (+0.05pp)  -> OFFENDING, reverted
+  B-only  = 58.36% (-0.03pp)  -> kept (deterministic 2/2 runs)
+  A+B (T) = 58.42% (+0.03pp)
+Decision: keep B, revert A. The `top_left` anchor param + strip geometry are
+KEPT; the global source-size sizing is REVERTED. OPEN: (A) is JS-faithful
+(`R.$`/`R.Cb` size by `fa`; the renderer already applies the trim compensation)
+but its global application worsens the oracle metric, so a JS-fidelity-vs-oracle
+tradeoff was resolved in favour of the oracle gate per the no-regression rule.
+A future landing of (A) must first identify which trimmed frame(s) regress
+(topPanel / energy / AddMoney / back-Arrow / gamepad art) rather than applying
+it globally.
+Method: fresh `game.exe reference/www/res <fresh_dojo copy> --ui-tour` from
+E:\reSF2 (ALL 15 STEPS DONE, exit 0); `--headless-loop` on a temp dirty-save
+copy (ALL 13 STEPS DONE, save/load PASS money=90 items=7 WEAPON_KNIVES).
+Goldens: combat_golden 99 GREEN; spatial_golden 17 GREEN; ai_golden Node<->C++
+prng bit-exact, gb max-abs 1.11e-08 <= 1e-5, ju k=3/0/-1/-1/-1, horizon T/F/T.
+Sanity: Map/Shop/Profile non-black art present (black 1.56/0.01/0.00%, lum
+137.9/112.8/109.8); fight internal both halves lit (L81.3/R90.6), orange/blue
+HP bars present, no black half.
+COMMIT+PUSH per orchestrator (STATE.md untouched).
