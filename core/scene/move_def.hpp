@@ -110,16 +110,22 @@ struct Lock {
     bool or_ = false;     // inside an Operator Type="Or" (any of the group)
 };
 
-// Align (JS `Ui`, g="109") — only the fields needed by the evaluator.
+// Align (JS `Ui`, g="109"; parse `Fa.jva` L719-721) — the evaluator fields
+// plus the pose-align fields read by `Te.Gub` (L557-559).
 struct Align {
     bool has_align = false;
-    std::string axis;         // "X|Z" etc.
-    std::string pivot_object; // Pivot Object ("Nodes"/"Pivot"/...)
-    std::string pivot_part;   // Pivot Part (bone name)
+    std::string axis;         // "X|Z" etc.; empty => X|Y|Z (JS L719)
+    // JS `jva` axis flags: `cI`=X, `dI`=Y, `MY`=Z. An absent Axis sets all.
+    bool axis_x = true, axis_y = true, axis_z = true;
+    std::string pivot_object; // Pivot Object ("Nodes"/"Pivot"/"Animation"/"Wall")
+    std::string pivot_part;   // Pivot Part (bone name, or Front/Back for Wall)
     std::string pivot_player; // "Me"/"Enemy"
     std::string pos_object;   // Position Object
     std::string pos_part;     // Position Part
     std::string pos_player;   // "Me"/"Enemy"
+    float shift_x = 0.0f;     // <Position ShiftX> (JS `dja`)
+    float shift_y = 0.0f;     // <Position ShiftY> (JS `eja`)
+    std::string shift_model_node;  // <Align ShiftModelNode> (JS `Fla`)
 };
 
 // A move definition (JS `jc`).

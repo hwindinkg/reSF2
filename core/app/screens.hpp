@@ -1,7 +1,7 @@
 #pragma once
 
-// The shell screens — Dojo, Map, Fight, Results, Shop, Profile (Equipment),
-// Settings, Moves, Bracket.
+// The shell screens — Dojo, Map, Fight, Results, Shop, Profile (tabbed),
+// Settings (minimal overlay).
 //
 // JS study (the per-screen wire-spec is reference/PORT_AUDIT_UI.md):
 //   - Dojo (screen 3, `Tf` L1969-1972): the HOME base — the screen the
@@ -207,11 +207,13 @@ private:
     bool key_state_[16] = {};
     int last_log_frame_ = 0;
     bool auto_attack_wired_ = false;
-    // Pause menu (JS `Jn`/`Ar.Qrb` — UI-layer only): Esc/P or the HUD pause
-    // icon freezes the sim (update skipped); Resume/Restart/Quit-To-Map.
-    // Never engages headless (key/pointer driven; the loop injects neither
-    // here — see the stream report).
+    // Pause dialog (JS `Jn` -> `Ar.Qg(0)` -> `Aia()` `Dr`, L2018/L425 —
+    // UI-layer only): Esc/P or the HUD pause icon freezes the sim (update
+    // skipped) and shows the `Dr` dialog (`res/fight/pause.*`: Pause title,
+    // PauseMusic/PauseSound toggles, play=resume, home=quit). Never engages
+    // headless (key/pointer driven; the loop injects neither here).
     bool paused_ = false;
+    bool music_off_ = false;  // `Dr.PauseMusic_on/off` toggle state
 
     // --- on-screen gamepad (JS `Za` virtual controls, JS_GAMEPLAY §2) ----
     // The original's touch gamepad: the joystick `ze` (base + knob, the
@@ -309,11 +311,13 @@ private:
     float confirm_until_ = 0.0f;
 };
 
-// The equipment — native Profile/equipment screen (JS `Oa.f5` case 5 +
-// `$g.$o` L152184 the equip flow). Shows the slots (Weapon/Armor/Helm) +
-// the owned items; click an owned item to equip it: set the Warrior's
-// slot + the item's Equipped flag (JS `xc.hk` L412433 + `setItem`),
-// rebuild the fighter (merged model + move list), save.
+// The Profile — native `vb` (JS L2189-2201, `dJ()==7`): a tabbed screen with
+// the `cs` bottom tab strip (L2188: 4 `Le` on the profile atlas id 258,
+// `Tw=[0,1,2,3]`). Tab 1 folds the invented standalone Moves screen (JS
+// Profile sub-view `qv`, `To.kOa`=11 L2201) and the standalone Moves class is
+// deleted with it. The equipment view (slot list + owned grid — JS `$g.$o`
+// L152184 equip flow) is an interim on tab 0: the JS moves equip into the
+// shop detail panel (`$o`) — OPEN (SHOP_STATIC §4).
 class EquipmentScreen : public Screen {
 public:
     explicit EquipmentScreen(ScreenManager& mgr);
@@ -323,14 +327,32 @@ public:
     void update_impl(float dt) override;
     void render_impl(App& app) override;
 
+    // The folded Moves tab row (JS Profile sub-view `qv`; same rule as the
+    // deleted standalone MovesScreen — build_move_list_locks over the save's
+    // owned items, display only).
+    struct MoveRow {
+        std::string name;
+        std::string type;
+        int priority = 0;
+    };
+
 private:
     std::vector<CatalogItem> catalog_;
+    int tab_ = 0;        // `cs` tab index (0 = equipment interim .. 3)
+    int tab_hover_ = -1;
     int hover_ = -1;
+    // Folded Moves tab data (JS Profile sub-view `qv`, To.kOa=11 L2201).
+    std::string weapon_ = "Fists";
+    std::vector<MoveRow> move_rows_;
+    int move_total_ = 0;
 };
 
-// The settings — native settings screen (JS options equivalents). Sound
-// row is state display (no runtime SFX mute API exists — see the stream
-// report); music toggles via play/stop_music; BACK returns to the caller.
+// The settings — a minimal options overlay, not a standalone screen: the
+// JS `za` nav button #5 routes to `za.Vfb` (L1979: a `Bi` spinner +
+// `G.load([250..253])`), and no `dJ()==11` screen exists (PORT_AUDIT_UI §3
+// item 30). Sound row is state display (no runtime SFX mute API); music
+// toggles via play/stop_music; BACK returns to the caller. Exact options
+// dialog is OPEN.
 class SettingsScreen : public Screen {
 public:
     explicit SettingsScreen(ScreenManager& mgr);
@@ -344,50 +366,6 @@ private:
     bool music_off_ = false;
     int hover_ = -1;
     int age_ = 0;  // frames since push (BACK press debounce)
-};
-
-// The moves list — learned moves for the wielded weapon (native moves
-// screen). Built with the exact fighter move-list rule used by fights
-// (`build_move_list_locks` over the save's owned items — display only, on a
-// throwaway Fighter; never stepped). Entry: EquipmentScreen MOVES button.
-class MovesScreen : public Screen {
-public:
-    explicit MovesScreen(ScreenManager& mgr);
-
-    ScreenId id() const override { return kScreenMoves; }
-
-    void update_impl(float dt) override;
-    void render_impl(App& app) override;
-
-    struct Row {
-        std::string name;
-        std::string type;
-        int priority = 0;
-    };
-
-private:
-    std::string weapon_ = "Fists";
-    std::vector<Row> rows_;
-    int total_ = 0;
-};
-
-// The series bracket — tournament Xs-warriors progression + survival wave
-// history for the current zone, from save wins (read-only). Entry: the Map
-// BRACKET button.
-class BracketScreen : public Screen {
-public:
-    explicit BracketScreen(ScreenManager& mgr);
-
-    ScreenId id() const override { return kScreenBracket; }
-
-    void update_impl(float dt) override;
-    void render_impl(App& app) override;
-
-private:
-    std::string zone_;
-    std::vector<MapScreen::Node> tourn_;  // TOURNAMENT nodes, file order
-    std::vector<MapScreen::Node> surv_;   // SURVIVAL nodes, file order
-    std::vector<WarriorSave::FightWins> wins_;
 };
 
 // The shared item catalog (the shop list + the equipment item lookup).

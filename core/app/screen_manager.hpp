@@ -36,6 +36,9 @@ class ScreenManager;
 // 5=Map, 6=Fight, 7=Profile, 8=GeneralMenu, 9=Pvp. `kScreenResults` is a
 // native-only id (the JS shows the results inside the Fight screen; the
 // native shell gives it a dedicated screen for the clean flow).
+// The standalone Moves (12) and Bracket (13) ids are deleted: neither has a
+// JS screen (Moves is a Profile tab, `To.kOa`=11 L2201; `Xr` is a map panel)
+// — PORT_AUDIT_UI §3 items 31/32.
 enum ScreenId : int {
     kScreenPreloader = 0,
     kScreenDojo = 3,
@@ -46,8 +49,6 @@ enum ScreenId : int {
     kScreenGeneralMenu = 8,
     kScreenResults = 10,
     kScreenSettings = 11,
-    kScreenMoves = 12,
-    kScreenBracket = 13,
 };
 
 // Screen-state values ($d.Te, JS L121: 2/3/5 active, else inactive).

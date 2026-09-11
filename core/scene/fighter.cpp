@@ -51,11 +51,10 @@ void Fighter::set_model(const Model& model) {
         sol_mf_[i * 3 + 2] = b.z;
     }
     solver_init_ = true;
-    // [FIX stretched mesh] Warm the solver on the first sample() (see the
-    // member comment): the game's cloth is settled long before a fight's
-    // first frame (the Dojo hub runs the solver at 60 Hz continuously);
-    // the native fight boots straight into the fight.
-    solver_warmup_ = 600;
+    // JS `Vc` ctor (L793-794): ma = mf = the bind position (`p8`). The
+    // solver then runs exactly one `Al.ia()` step per frame (L582) — the
+    // game has NO warmup and NO cross-clip state translation.
+    align_x_ = align_y_ = align_z_ = 0.0f;
 
     // Build mirror swap pairs for _1 ↔ _2 (JS Te.Peb L560 → Ua.Oeb L692).
     // When facing -1 the buffered clip frames are negated (vu.Neb L668) and
@@ -362,6 +361,9 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
 
     // Facing toward the enemy (JS `b6a` L603: `enemy.x - my.x >= 0 ? 1 : -1`).
     facing_ = (enemy_x_ - world_x_) >= 0.0f ? 1 : -1;
+    // JS `Te.Skb` (L551) runs `Gub()` (align, L557-559) right after loading
+    // the clip and before the first `ia()` sample.
+    compute_align(move);
     sample_current();
     return true;
 }
@@ -501,6 +503,7 @@ void Fighter::advance_step() {
         current_clip_ = nullptr;
         active_intervals_.clear();
         subframe_ = 0;
+        align_x_ = align_y_ = align_z_ = 0.0f;
         return;
     }
 
@@ -523,6 +526,89 @@ void Fighter::clear_move() {
     current_clip_ = nullptr;
     active_intervals_.clear();
     subframe_ = 0;
+    align_x_ = align_y_ = align_z_ = 0.0f;
+}
+
+// [FIX root-motion align] JS `Te.Gub` (L557-559) + `Te.Gla` (L550):
+// compute the move's <Align> offset and store it as a clip-buffer shift
+// (`Gla` -> `jc.shift` L550). Called once at clip start — JS `Skb` (L551)
+// runs `Gub()` right after loading the clip, before the first `ia()`.
+// Object mapping (JS `Fa.jva` L719-720): Pivot Object = `VE`, Position
+// Object = `JK`; the axis flags (`cI`=X, `dI`=Y, `MY`=Z) select which
+// components shift (`Gla(cI?Fk.x:dja, dI?Fk.y:eja, MY?Fk.z:0)`).
+//
+// The shipped Fists stance moves are
+// `<Pivot Object="Nodes" Part="NHeel_2"/><Position Object="Pivot" ShiftX=..>`
+// -> d = the clip's NHeel_2 at FirstFrame (`jc.Kh(2)`), e = the posed
+// NHeel_2 (`currentNode.ma`) + facing*ShiftX, so the clip is shifted to
+// keep the pivot bone where the previous pose left it.
+void Fighter::compute_align(const MoveDef& move) {
+    align_x_ = align_y_ = align_z_ = 0.0f;
+    if (!move.align.has_align || current_clip_ == nullptr ||
+        current_clip_->frames.empty()) {
+        return;
+    }
+    const Align& al = move.align;
+    const std::size_t n = model_.bones.size();
+    // JS `Gub` L558/559 switch on the resolved `VE`/`JK` enum.
+    const auto map_object = [](const std::string& s) -> int {
+        if (s == "Nodes") return 1;      // EObjectNodes
+        if (s == "Animation") return 2;  // EObjectAnimation
+        if (s == "Wall") return 3;       // EObjectWall
+        if (s == "Pivot") return 4;      // EObjectPivot
+        return 0;                        // EObjectNone
+    };
+    const int ve = map_object(al.pivot_object);
+    const int jk = map_object(al.pos_object);
+
+    // Reference frame = FirstFrame (JS `Pka(jc, Mq)` loads it before `Gub`;
+    // `this.jc.Kh(2)` is that buffer, `Kh(2).data[node]` = the raw clip pos).
+    const std::size_t f0 = static_cast<std::size_t>(
+        std::max(0, std::min(move.first_frame,
+                             static_cast<int>(current_clip_->frames.size()) - 1)));
+    const auto& fb = current_clip_->frames[f0].bones;
+    const int pivot_idx = model_.bone_by_name(al.pivot_part);  // UE / `this.os`
+    const float f = facing_ < 0 ? -1.0f : 1.0f;
+
+    // d = the Pivot object's position (JS `Gub` L558).
+    float dx = 0.0f, dy = 0.0f, dz = 0.0f;
+    if (ve == 1 || ve == 4) {  // EObjectNodes / EObjectPivot: clip buffer node
+        if (pivot_idx >= 0 && static_cast<std::size_t>(pivot_idx) < fb.size()) {
+            const std::size_t u = static_cast<std::size_t>(pivot_idx);
+            dx = fb[u].x;
+            dy = fb[u].y;
+            dz = fb[u].z;
+        }
+    }
+    // ve == 2 (EObjectAnimation) -> d = 0. ve == 3 (EObjectWall) needs the
+    // scene wall bounds `yu`/`zu` (not owned by Fighter) — OPEN, d stays 0.
+
+    // e/f/g = the Position object's position (JS `Gub` L559), in solver
+    // (clip) space: `currentNode.ma` / `L7a(i).ma` are the posed positions.
+    float ex = 0.0f, ey = 0.0f, ez = 0.0f;
+    auto posed = [&](int idx, float& ox, float& oy, float& oz) {
+        if (idx < 0 || static_cast<std::size_t>(idx) >= n) return;
+        if (sol_ma_.size() != n * 3) return;
+        const std::size_t u = static_cast<std::size_t>(idx);
+        ox = sol_ma_[u * 3];
+        oy = sol_ma_[u * 3 + 1];
+        oz = sol_ma_[u * 3 + 2];
+    };
+    if (jk == 1) {        // EObjectNodes: posed Position-Part bone
+        posed(model_.bone_by_name(al.pos_part), ex, ey, ez);
+    } else if (jk == 4) { // EObjectPivot: posed pivot node (`currentNode.ma`)
+        posed(pivot_idx, ex, ey, ez);
+    }
+    // jk == 2 (EObjectAnimation) -> e = this.Fk = 0 at clip start.
+    // jk == 3 (EObjectWall) needs the wall bounds — OPEN, e stays 0.
+    ex += f * al.shift_x;  // JS `e += this.hd()*a.dja`
+    ey += al.shift_y;      // JS `f += a.eja`
+
+    // `Fk = e - d` (JS L559 `c.x=e-d.x; ...`); `Gla` selects the per-axis
+    // component (X/Z here; `ShiftY` when Y is not an align axis).
+    align_x_ = al.axis_x ? (ex - dx) : al.shift_x;
+    align_y_ = al.axis_y ? (ey - dy) : al.shift_y;
+    align_z_ = al.axis_z ? (ez - dz) : 0.0f;
 }
 
 void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
@@ -581,6 +667,20 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         } else { px[i] = bones[i].x; py[i] = bones[i].y; pz[i] = bones[i].z; }
     }
 
+    // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550]
+    // `Gla` shifts the whole clip buffer (`jc.shift`) by the move's align
+    // offset once at clip start; every later `eda` (JS L556) reads the
+    // shifted buffer. Native equivalent: add the stored shift to every
+    // clip-driven bone before the solver. Only `fq`-sized (clip) bones are
+    // shifted in JS, so the cloth/macro bones keep their own state.
+    if (align_x_ != 0.0f || align_y_ != 0.0f || align_z_ != 0.0f) {
+        for (std::size_t i = 0; i < nclip; ++i) {
+            px[i] += align_x_;
+            py[i] += align_y_;
+            pz[i] += align_z_;
+        }
+    }
+
     // 2. [FIX stretched mesh — ragdoll solver] The game's per-frame pose
     //    pipeline (JS fighter `ia` L253769: `da.ia()` [Te.eda applies the
     //    clip] -> `Nd.ia()` [Al.ia = sk + jE] -> `oa.Qja()` [macros]):
@@ -610,38 +710,14 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     //    calls — one step per call matches the game's 60 Hz cadence.
     const std::size_t n3 = n * 3;
     if (solver_init_ && sol_ma_.size() == n3) {
-        // [FIX stretched mesh] Keep the solver space CONTINUOUS across clip
-        // switches: the clips are authored at different world offsets (the
-        // COM jumps ~740 units between stance_2 and the attack clips), and
-        // the game's whole fighter (skeleton + cloth) teleports together
-        // with its world position. Translate the persisted solver state by
-        // the COM delta so the cloth keeps its pose RELATIVE to the
-        // skeleton across the switch (the raw clip coords alone would
-        // leave the cloth state 740 units from the new skeleton).
-        if (nclip > 0) {
-            const float com_x = px[0];
-            const float com_y = py[0];
-            const float com_z = pz[0];
-            if (sol_have_prev_com_) {
-                const float dx = com_x - sol_prev_com_x_;
-                const float dy = com_y - sol_prev_com_y_;
-                const float dz = com_z - sol_prev_com_z_;
-                if (dx != 0.0f || dy != 0.0f || dz != 0.0f) {
-                    for (std::size_t i = 0; i < n; ++i) {
-                        sol_ma_[i * 3] += dx;
-                        sol_ma_[i * 3 + 1] += dy;
-                        sol_ma_[i * 3 + 2] += dz;
-                        sol_mf_[i * 3] += dx;
-                        sol_mf_[i * 3 + 1] += dy;
-                        sol_mf_[i * 3 + 2] += dz;
-                    }
-                }
-            }
-            sol_prev_com_x_ = com_x;
-            sol_prev_com_y_ = com_y;
-            sol_prev_com_z_ = com_z;
-            sol_have_prev_com_ = true;
-        }
+        // [FIX stretched mesh — JS-faithful] `Al.ia()` (L582) is exactly
+        // `sk(); jE();`. The game keeps NO cross-clip COM-delta translation
+        // of the solver state and NO warmup. `eda` (JS L556) sets each clip
+        // bone's mf = ma (the previous solved position) then ma = the
+        // (align-shifted) clip pose; the cloth bones keep their prior state.
+        // The invented COM-delta continuity block (PORT_AUDIT_RENDER §2.4
+        // candidate 2) is removed — JS-faithful continuity is the align
+        // shift applied above (`Gla`).
         // (a) eda: clip bones mf = solved, ma = interpolated clip pose.
         for (std::size_t i = 0; i < nclip; ++i) {
             sol_mf_[i * 3] = sol_ma_[i * 3];
@@ -651,43 +727,10 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             sol_ma_[i * 3 + 1] = py[i];
             sol_ma_[i * 3 + 2] = pz[i];
         }
-        // [FIX stretched mesh] Warmup: the first sample() after set_model
-        // runs the solver cycle extra times with the spawn pose held (the
-        // game's cloth is settled by the Dojo-hub display time before any
-        // fight; the native boots straight in). After the warmup this is
-        // exactly one cycle per call — the game's 60 Hz cadence.
-        int cycles = 1;
-        // [FIX stretched mesh] The warmup targets the FIRST PLAYED clip pose
-        // (advance_step -> sample_current), not the idle snapshot the fight
-        // controller takes at spawn: the intro stance clip (stance_1) sits up
-        // to ~367 units from the idle pose, so a warmup against the idle
-        // pose left the cloth ~270 units behind at fight frame 1 (the oracle
-        // enters the fight at ~86 — its cloth settled against the stance
-        // pose during the hub display). Warming on the first played pose
-        // matches that initial condition.
-        if (solver_warmup_ > 0 && current_move_ != nullptr) {
-            cycles = solver_warmup_;
-            solver_warmup_ = 0;
-        }
-        for (int cycle = 0; cycle < cycles; ++cycle) {
-        // Warmup hold: during the extra cycles the clip pose is RE-APPLIED
-        // each cycle (eda with a zero clip delta: ma = mf = clip) — exactly
-        // the game's per-frame eda -> solver cadence. Merely zeroing the
-        // velocity (mf = ma) is NOT enough: the edge relaxation drags the
-        // movable clip bones ~104 units (mean) off the clip pose (the edge
-        // rest lengths conflict with the posed skeleton), and the first
-        // regular step would inject that distortion back as Verlet velocity,
-        // exploding the cloth.
-        if (cycles > 1) {
-            for (std::size_t i = 0; i < nclip; ++i) {
-                sol_mf_[i * 3] = px[i];
-                sol_mf_[i * 3 + 1] = py[i];
-                sol_mf_[i * 3 + 2] = pz[i];
-                sol_ma_[i * 3] = px[i];
-                sol_ma_[i * 3 + 1] = py[i];
-                sol_ma_[i * 3 + 2] = pz[i];
-            }
-        }
+        // [FIX stretched mesh — JS-faithful] `Al.ia()` (L582) runs exactly
+        // ONE solver step per 60 Hz frame: `sk(); jE();`. The invented
+        // 600-step warmup (PORT_AUDIT_RENDER §2.4 candidate 1; absent from
+        // JS) is removed.
         // (b) sk: Verlet integrate (grav 0.4 = `xd.fDa`).
         constexpr float kGrav = 0.4f;
         for (std::size_t i = 0; i < n; ++i) {
@@ -789,7 +832,6 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 compute_macro(i);
             }
         }
-        }  // warmup cycle loop
         // The solved pose becomes this frame's positions.
         for (std::size_t i = 0; i < n; ++i) {
             px[i] = sol_ma_[i * 3];

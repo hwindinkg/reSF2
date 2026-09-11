@@ -1,5 +1,5 @@
 // The shell screens implementation — Dojo (home), Map, Fight, Results,
-// Shop, Profile (Equipment), Settings, Moves, Bracket.
+// Shop, Profile (tabbed), Settings (minimal overlay).
 //
 // JS study (the per-screen wire-spec is reference/PORT_AUDIT_UI.md):
 //   - Dojo/home: the JS `Tf` hub (L1969-1972) — the dojo location layer
@@ -1071,6 +1071,61 @@ bool load_callouts_atlas(App& app) {
         ok = true;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[fight] callouts atlas load failed: %s\n", e.what());
+    }
+    return ok;
+}
+
+// Lazily loads `res/fight/pause.*` (the `Dr` pause-dialog art; PAUSE_STATIC
+// §3) into the app atlas cache. Returns true once the frames are registered.
+// App::init registers fight/ui but not the `pause.*` atlas, so it is loaded
+// on demand (same pattern as `load_callouts_atlas`). Frames: home, Pause,
+// Pause_selected, PauseMusic_off/on, PauseSound_off/on, play.
+bool load_pause_atlas(App& app) {
+    static bool done = false;
+    static bool ok = false;
+    if (done) return ok;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/fight";
+        std::string json_path;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("pause.", 0) == 0 && entry.path().extension() == ".json") {
+                json_path = entry.path().string();
+                break;
+            }
+        }
+        if (json_path.empty()) return false;
+        sf2::data::Texture tex;
+        bool decoded = false;
+        for (const std::string& ext : {".png", ".webp", ".ktx", ".dds"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("pause.", 0) == 0 && entry.path().extension() == ext) {
+                    if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                        decoded = true;
+                        break;
+                    }
+                }
+            }
+            if (decoded) break;
+        }
+        if (!decoded) return false;
+        const GLuint gl = app.renderer().texture_for("pause_atlas", tex);
+        if (gl == 0) return false;
+        std::ifstream in(json_path, std::ios::binary);
+        std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+        const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+        for (const auto& fr : a.frames) {
+            app.register_atlas_frame(fr, a.w, a.h, gl);
+        }
+        std::fprintf(stdout, "[fight] pause atlas: %dx%d tex %dx%d %zu frames\n", a.w, a.h,
+                     tex.w, tex.h, a.frames.size());
+        std::fflush(stdout);
+        ok = true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[fight] pause atlas load failed: %s\n", e.what());
     }
     return ok;
 }
@@ -2163,8 +2218,8 @@ void MapScreen::update_impl(float dt) {
         }
     }
     // JS has no BRACKET button (no screen 13; `Xr` is the map status panel,
-    // PORT_AUDIT_UI 2.3/2.4). The native BracketScreen is now unreachable
-    // from the map (kept for the screen id / other callers).
+    // PORT_AUDIT_UI 2.3/2.4). The native BracketScreen was deleted with the
+    // id (screens.hpp / screen_manager.hpp).
     if (zone_sel_ < 0 || static_cast<std::size_t>(zone_sel_) >= zones_.size()) return;
     hover_ = -1;
     for (std::size_t i = 0; i < zones_[zone_sel_].nodes.size(); ++i) {
@@ -2982,6 +3037,24 @@ void FightScreen::verify_fight() const {
     report("enemy", fight_->enemy().fighter);
     std::fflush(stdout);
 }
+// --- Pause dialog `Dr` layout (JS L2018; PAUSE_STATIC §3) ------------------
+// The fight HUD pause widget (`Sf.Jn`, L2034) / Esc/P opens `ha.Aia`'s `Dr`
+// dialog. The exact node tree is OPEN (PAUSE_STATIC OPEN #5); the evidenced
+// `res/fight/pause.*` frames are `Pause` (400x96 title), `PauseMusic_on/off`,
+// `PauseSound_on/off`, `play` (resume) and `home` (quit) 150x150 buttons.
+// Replaces the invented flat RESUME/RESTART/QUIT stack (PORT_AUDIT_UI §3 #25).
+constexpr float kPauseDlgTitleCx = kViewW * 0.5f;
+constexpr float kPauseDlgTitleCy = 150.0f;
+constexpr float kPauseDlgTitleW = 400.0f;
+constexpr float kPauseDlgTitleH = 96.0f;
+constexpr float kPauseDlgMusicX = 560.0f;
+constexpr float kPauseDlgSoundX = 720.0f;
+constexpr float kPauseDlgToggleY = 300.0f;
+constexpr float kPauseDlgToggleS = 150.0f;
+constexpr float kPauseDlgPlayX = 560.0f;
+constexpr float kPauseDlgHomeX = 720.0f;
+constexpr float kPauseDlgActionY = 470.0f;
+
 void FightScreen::update_impl(float dt) {
     if (fight_ == nullptr) return;
     // Location timeline (D6): the fight renders the same location layers as
@@ -2996,10 +3069,9 @@ void FightScreen::update_impl(float dt) {
             std::fprintf(stdout, "[fight] auto-attack ON\n");
         }
     }
-    // Pause menu geometry (mirrors render_impl; the `Jn` HUD button slot).
+    // Pause dialog hit geometry (mirrors render_impl; the `Jn` HUD button
+    // slot + the `Dr` frame rows, JS L2018).
     const float kPauseIx = 1216.0f, kPauseIy = 40.0f, kPauseIw = 64.0f, kPauseIh = 48.0f;
-    const float kPauseBtnW = 320.0f, kPauseBtnH = 64.0f, kPauseBtnCx = kViewW * 0.5f;
-    const float kPauseResumeY = 280.0f, kPauseRestartY = 370.0f, kPauseQuitY = 460.0f;
     auto pause_hit = [&](float cx, float cy, float w, float h) {
         const App::PointerState& pp = app().pointer();
         return pp.x >= cx - w / 2 && pp.x <= cx + w / 2 && pp.y >= cy - h / 2 &&
@@ -3008,28 +3080,46 @@ void FightScreen::update_impl(float dt) {
     const bool live =
         fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over();
     if (paused_) {
-        // Frozen sim (UI-layer pause): menu clicks only; everything below
+        // Frozen sim (UI-layer pause): dialog clicks only; everything below
         // (log, Next, results) is skipped by the early return.
         const App::PointerState& p = app().pointer();
         if (p.pressed) {
-            if (pause_hit(kPauseBtnCx, kPauseResumeY, kPauseBtnW, kPauseBtnH)) {
+            if (pause_hit(kPauseDlgPlayX, kPauseDlgActionY, kPauseDlgToggleS,
+                          kPauseDlgToggleS)) {
+                // `play` frame = resume (PAUSE_STATIC §3 `tZ`).
                 paused_ = false;
                 sf2::audio::AudioEngine::instance().play("click");
-                std::fprintf(stdout, "[fight] pause OFF (resume)\n");
+                std::fprintf(stdout, "[fight] pause OFF (resume, Dr.play)\n");
                 std::fflush(stdout);
-            } else if (pause_hit(kPauseBtnCx, kPauseRestartY, kPauseBtnW, kPauseBtnH)) {
+            } else if (pause_hit(kPauseDlgMusicX, kPauseDlgToggleY, kPauseDlgToggleS,
+                                 kPauseDlgToggleS)) {
+                // `PauseMusic_on/off` toggle (JS music keeps playing under a
+                // pause — PAUSE_STATIC §5; this toggle is UI-layer).
+                music_off_ = !music_off_;
+                if (music_off_) {
+                    sf2::audio::AudioEngine::instance().stop_music();
+                } else {
+                    sf2::audio::AudioEngine::instance().play_music(
+                        sf2::audio::AudioEngine::instance().music_track());
+                }
                 sf2::audio::AudioEngine::instance().play("click");
-                std::fprintf(stdout, "[fight] pause RESTART (fresh fight)\n");
+                std::fprintf(stdout, "[fight] pause music %s (Dr.PauseMusic)\n",
+                             music_off_ ? "OFF" : "ON");
                 std::fflush(stdout);
-                // Fresh fight through the existing factory (pending_battle
-                // still carries the battle — full re-init, no scene hooks).
-                app().pending_battle().has_result = false;
-                manager().pop();
-                push(kScreenFight);
-                return;
-            } else if (pause_hit(kPauseBtnCx, kPauseQuitY, kPauseBtnW, kPauseBtnH)) {
+            } else if (pause_hit(kPauseDlgSoundX, kPauseDlgToggleY, kPauseDlgToggleS,
+                                 kPauseDlgToggleS)) {
+                // `PauseSound_on/off` (display only — no runtime SFX mute API;
+                // see the stream report).
                 sf2::audio::AudioEngine::instance().play("click");
-                std::fprintf(stdout, "[fight] pause QUIT (back to caller)\n");
+                std::fprintf(stdout,
+                             "[fight] pause sound toggle (Dr.PauseSound, display-only)\n");
+                std::fflush(stdout);
+            } else if (pause_hit(kPauseDlgHomeX, kPauseDlgActionY, kPauseDlgToggleS,
+                                 kPauseDlgToggleS)) {
+                // `home` = quit (JS `Xc.Zhb` exit-confirm -> `O3a`; the confirm
+                // dialog is not ported — direct pop, OPEN).
+                sf2::audio::AudioEngine::instance().play("click");
+                std::fprintf(stdout, "[fight] pause QUIT (Dr.home -> caller)\n");
                 std::fflush(stdout);
                 paused_ = false;
                 manager().pop();
@@ -3044,7 +3134,7 @@ void FightScreen::update_impl(float dt) {
         if (p.pressed && pause_hit(kPauseIx, kPauseIy, kPauseIw, kPauseIh)) {
             paused_ = true;
             sf2::audio::AudioEngine::instance().play("click");
-            std::fprintf(stdout, "[fight] pause ON (HUD icon)\n");
+            std::fprintf(stdout, "[fight] pause ON (HUD icon -> Dr)\n");
             std::fflush(stdout);
             return;
         }
@@ -3559,23 +3649,31 @@ void FightScreen::render_impl(App& app) {
         const float dim[] = {0, 0,         kViewW, 0,         kViewW, kViewH,
                              0, 0,         kViewW, kViewH,    0,      kViewH};
         ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.65f);
-        draw_ui_label(app, kViewW * 0.5f - 200.0f, 200.0f, 400.0f, 44.0f, "PAUSED", 1.4f,
-                      UiAlign::Center, 1.0f, 1.0f, 1.0f);
-        draw_flat_button(app, "RESUME", kViewW * 0.5f, 280.0f, 320.0f, 64.0f, 0.25f, 0.5f,
-                         0.3f, false);
-        draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 280.0f - 14.0f,
-                          320.0f - 16.0f, 28.0f, "RESUME", 1.0f, UiAlign::Center,
-                          1.0f, 1.0f, 1.0f);
-        draw_flat_button(app, "RESTART", kViewW * 0.5f, 370.0f, 320.0f, 64.0f, 0.5f,
-                         0.45f, 0.25f, false);
-        draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 370.0f - 14.0f,
-                          320.0f - 16.0f, 28.0f, "RESTART", 1.0f, UiAlign::Center,
-                          1.0f, 1.0f, 1.0f);
-        draw_flat_button(app, "QUIT TO MAP", kViewW * 0.5f, 460.0f, 320.0f, 64.0f, 0.5f,
-                         0.3f, 0.3f, false);
-        draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 460.0f - 14.0f,
-                          320.0f - 16.0f, 28.0f, "QUIT TO MAP", 1.0f, UiAlign::Center,
-                          1.0f, 1.0f, 1.0f);
+        // `Dr` pause dialog (JS L2018; PAUSE_STATIC §3): `res/fight/pause.*`
+        // frames — `Pause` title, `PauseMusic_on/off`, `PauseSound_on/off`,
+        // `play` (resume), `home` (quit). Flat fallback only on a genuine
+        // atlas miss (PORT_AUDIT_UI §3 item 25).
+        const bool have = load_pause_atlas(app);
+        auto frame = [&](const char* art, float cx, float cy, float w, float h,
+                         const char* label) {
+            if (have && art != nullptr &&
+                try_draw_atlas_button(app, art, cx, cy, w, h, 1.0f)) {
+                return;
+            }
+            draw_flat_button(app, label, cx, cy, w, h, 0.35f, 0.3f, 0.28f, false);
+            draw_ui_label(app, cx - w * 0.5f + 8.0f, cy - 14.0f, w - 16.0f, 28.0f,
+                          label, 0.8f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        };
+        frame("Pause", kPauseDlgTitleCx, kPauseDlgTitleCy, kPauseDlgTitleW,
+              kPauseDlgTitleH, "PAUSED");
+        frame(music_off_ ? "PauseMusic_off" : "PauseMusic_on", kPauseDlgMusicX,
+              kPauseDlgToggleY, kPauseDlgToggleS, kPauseDlgToggleS, "MUSIC");
+        frame("PauseSound_on", kPauseDlgSoundX, kPauseDlgToggleY, kPauseDlgToggleS,
+              kPauseDlgToggleS, "SOUND");
+        frame("play", kPauseDlgPlayX, kPauseDlgActionY, kPauseDlgToggleS,
+              kPauseDlgToggleS, "RESUME");
+        frame("home", kPauseDlgHomeX, kPauseDlgActionY, kPauseDlgToggleS,
+              kPauseDlgToggleS, "QUIT");
     }
 }
 
@@ -3726,43 +3824,64 @@ void ResultsScreen::update_impl(float dt) {
 
 void ResultsScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(verts, 6, 0.0f, 0.0f, 0.0f, 0.6f);
-    const sf2::data::font* fnt = app.menu_font();
-    if (fnt != nullptr) {
-        const unsigned int ftex = app.font_texture();
-        draw_ui_label(app, kViewW * 0.5f - 400.0f, 150.0f, 800.0f, 50.0f,
-                      player_won_ ? "VICTORY" : "DEFEAT", 1.6f, UiAlign::Center,
-                      player_won_ ? 1.0f : 0.8f,
-                      player_won_ ? 0.85f : 0.3f,
-                      player_won_ ? 0.3f : 0.3f);
-        // Prize breakdown (JS `v.kD`/`bzb` factor lines, FLOW_STATIC §4.3:
-        // Perfect $Ia=5, FirstStrike ep=2, Combo Ui=1/combo, Shock Ub=3).
-        // Gems (JS hj.Uo) are untracked by prize() — no line (see report).
-        if (player_won_) {
-            float y = 250.0f;
-            auto line = [&](const std::string& s) {
-                draw_ui_label(app, kViewW * 0.5f - 300.0f, y, 600.0f, 26.0f, s, 0.85f,
-                              UiAlign::Center, 1.0f, 1.0f, 1.0f);
-                y += 30.0f;
-            };
-            line("Coins: " + std::to_string(prize_base_) + " + bonus " +
-                 std::to_string(prize_bonus_) + " = " + std::to_string(money_reward_));
-            if (prize_perfect_) line("PERFECT +5");
-            if (prize_first_) line("FIRST STRIKE +2");
-            if (prize_combo_ > 0)
-                line("COMBO x" + std::to_string(prize_combo_) + " +" +
-                     std::to_string(prize_combo_));
-            if (prize_shocks_ > 0)
-                line("SHOCK x" + std::to_string(prize_shocks_) + " +" +
-                     std::to_string(prize_shocks_ * 3));
-            line("EXP +" + std::to_string(exp_reward_));
-        }
-        if (!quest_toast_.empty()) {
-            draw_ui_label(app, kViewW * 0.5f - 300.0f, kViewH * 0.62f, 600.0f, 28.0f,
-                              quest_toast_, 0.9f, UiAlign::Center, 1.0f, 0.9f, 0.4f);
-        }
+    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.6f);
+    // `kk` result dialog (JS L2057-2061; PORT_AUDIT_UI §2.8 item 28): a
+    // 750-wide base (`Qa = R.$(E.Zxa(750))`, L2058) carrying the win/lose
+    // label from the callouts atlas id 1310 (`mT = R.$(E.get(1310))`, frame
+    // `y.Lna` win / `y.Kna` lose) with the `Fh` breakdown lines below.
+    // Replaces the invented standalone VICTORY/DEFEAT screen layout.
+    constexpr float kKkW = 750.0f;
+    constexpr float kKkH = 480.0f;
+    const float px = kViewW * 0.5f - kKkW * 0.5f;
+    const float py = kViewH * 0.5f - kKkH * 0.5f;
+    const float panel[] = {px, py, px + kKkW, py, px, py + kKkH,
+                           px + kKkW, py, px + kKkW, py + kKkH, px, py + kKkH};
+    ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.92f);
+    // Win/lose label art (callouts id 1310: `label_win`/`label_lose` are the
+    // `y.Lna`/`y.Kna` frames, JS L2058). Flat text only on a genuine miss.
+    bool label_drawn = false;
+    if (load_callouts_atlas(app)) {
+        label_drawn = try_draw_atlas_button(
+            app, player_won_ ? "label_win" : "label_lose", kViewW * 0.5f, py + 92.0f,
+            380.0f, 130.0f, 1.0f);
     }
+    if (!label_drawn) {
+        draw_ui_label(app, kViewW * 0.5f - 300.0f, py + 72.0f, 600.0f, 60.0f,
+                      player_won_ ? "VICTORY" : "DEFEAT", 1.6f, UiAlign::Center,
+                      player_won_ ? 1.0f : 0.8f, player_won_ ? 0.85f : 0.3f,
+                      player_won_ ? 0.3f : 0.3f);
+    }
+    // Prize breakdown (JS `Fh`/`Lr` inner list; `v.kD`/`bzb` factor lines,
+    // FLOW_STATIC §4.3: Perfect $Ia=5, FirstStrike ep=2, Combo Ui=1/combo,
+    // Shock Ub=3). Gems (JS hj.Uo) are untracked by prize() — no line.
+    float y = py + 190.0f;
+    auto line = [&](const std::string& s) {
+        draw_ui_label(app, kViewW * 0.5f - 300.0f, y, 600.0f, 26.0f, s, 0.85f,
+                      UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        y += 32.0f;
+    };
+    if (player_won_) {
+        line("Coins: " + std::to_string(prize_base_) + " + bonus " +
+             std::to_string(prize_bonus_) + " = " + std::to_string(money_reward_));
+        if (prize_perfect_) line("PERFECT +5");
+        if (prize_first_) line("FIRST STRIKE +2");
+        if (prize_combo_ > 0)
+            line("COMBO x" + std::to_string(prize_combo_) + " +" +
+                 std::to_string(prize_combo_));
+        if (prize_shocks_ > 0)
+            line("SHOCK x" + std::to_string(prize_shocks_) + " +" +
+                 std::to_string(prize_shocks_ * 3));
+        line("EXP +" + std::to_string(exp_reward_));
+    }
+    if (!quest_toast_.empty()) {
+        draw_ui_label(app, kViewW * 0.5f - 300.0f, py + kKkH - 62.0f, 600.0f, 28.0f,
+                      quest_toast_, 0.9f, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+    }
+    // Continue affordance (any tap advances; the update pops — JS `kk` routes
+    // through its `Lr` buttons / `v.qxa`).
+    draw_ui_label(app, kViewW * 0.5f - 300.0f, py + kKkH - 32.0f, 600.0f, 24.0f,
+                  "TAP TO CONTINUE", 0.8f, UiAlign::Center, 0.8f, 0.8f, 0.8f);
     std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
 }
 
@@ -4285,6 +4404,95 @@ void ShopScreen::render_impl(App& app) {
 }
 
 // ---------------------------------------------------------------------------
+// Profile `cs` tab strip (JS L2188: class `cs extends Eg`, 4 `Le` on the
+// profile atlas id 258, `Tw=[0,1,2,3]`). `Eg` is the shared bottom tab strip
+// (L1851: height = za.Sp*1.3, `node.D(rect.v - height)`, buttons scaled
+// `height/button.Y.fa.y`, spread lc-dependent). The `y.*` frame table for
+// `cs` (`y.WRa/YRa/XRa` ...) is OPEN (PORT_AUDIT_UI §5 OPEN #2); the art
+// names below are the profile atlas `buttons/*` frames (sourceSize 199x190).
+// ---------------------------------------------------------------------------
+constexpr int kProfileTabCount = 4;
+constexpr int kProfileTabEquip = 0;  // equipment interim (JS moves equip to shop `$o`, OPEN)
+constexpr int kProfileTabMoves = 1;  // folded Moves sub-view (JS `qv`, To.kOa=11 L2201)
+
+struct ProfileTabArt {
+    const char* normal;
+    const char* active;
+    const char* pushed;
+    const char* label;
+};
+const ProfileTabArt kProfileTabs[kProfileTabCount] = {
+    {"buttons/Strikes", "buttons/Strikes_active", "buttons/Strikes_pushed", "SKILLS"},
+    {"buttons/Progress", "buttons/Progress_active", "buttons/Progress_pushed", "MOVES"},
+    {"buttons/Achiev", "buttons/Achiev_active", "buttons/Achiev_pushed", "ACHIEV"},
+    {"buttons/Seal", "buttons/Seal_active", "buttons/Seal_pushed", "SEAL"},
+};
+
+struct ProfileTabLayout {
+    float bar_h = 0.0f;  // Eg.height
+    float cy = 0.0f;     // strip centre y
+    float cx0 = 0.0f;    // first button centre x
+    float step = 0.0f;   // centre-to-centre
+    float btn_w = 0.0f;
+    float btn_h = 0.0f;
+};
+
+ProfileTabLayout profile_tab_layout() {
+    const ZaLayout z = za_layout();
+    ProfileTabLayout t;
+    t.bar_h = z.sp * 1.3f;                           // Eg.aa: za.Sp*1.3
+    constexpr float kSrcW = 199.0f, kSrcH = 190.0f;  // profile Le sourceSize
+    const float scale = t.bar_h / kSrcH;             // Eg: height/button.Y.fa.y
+    t.btn_h = t.bar_h;
+    t.btn_w = kSrcW * scale;
+    constexpr float kSpread = 1.2f;                  // Eg `b` (lc>1 clamp)
+    t.step = t.btn_w * kSpread;
+    const float total = t.btn_w + t.step * static_cast<float>(kProfileTabCount - 1);
+    t.cx0 = (kViewW - total) * 0.5f + t.btn_w * 0.5f;
+    t.cy = kViewH - t.bar_h * 0.5f;
+    return t;
+}
+
+// Hit test for the `cs` tab strip; -1 when outside every button.
+int profile_tab_hit(double px, double py) {
+    const ProfileTabLayout t = profile_tab_layout();
+    for (int i = 0; i < kProfileTabCount; ++i) {
+        const float cx = t.cx0 + static_cast<float>(i) * t.step;
+        if (px >= cx - t.btn_w * 0.5f && px <= cx + t.btn_w * 0.5f &&
+            py >= t.cy - t.btn_h * 0.5f && py <= t.cy + t.btn_h * 0.5f) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Draws the `cs` strip (art first; flat fallback only on a genuine miss).
+void draw_profile_tabs(App& app, int tab, int hover) {
+    sf2::render::Renderer& ren = app.renderer();
+    const ProfileTabLayout t = profile_tab_layout();
+    const float bar[] = {0, kViewH - t.bar_h, kViewW, kViewH - t.bar_h, kViewW, kViewH,
+                         0, kViewH - t.bar_h, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(bar, 6, 0.16f, 0.16f, 0.18f, 1.0f);
+    for (int i = 0; i < kProfileTabCount; ++i) {
+        const ProfileTabArt& art = kProfileTabs[i];
+        const bool sel = i == tab;
+        const bool hov = i == hover;
+        const char* frame = hov && art.pushed != nullptr
+                                ? art.pushed
+                                : (sel && art.active != nullptr ? art.active : art.normal);
+        const float cx = t.cx0 + static_cast<float>(i) * t.step;
+        if (try_draw_atlas_button(app, frame, cx, t.cy, t.btn_w, t.btn_h,
+                                  sel ? 1.0f : (hov ? 0.9f : 0.75f))) {
+            continue;
+        }
+        draw_flat_button(app, art.label, cx, t.cy, t.btn_w, t.btn_h,
+                         sel ? 0.55f : (hov ? 0.45f : 0.32f), 0.4f, 0.28f, hov);
+        draw_ui_label(app, cx - t.btn_w * 0.5f, t.cy - 10.0f, t.btn_w, 20.0f,
+                      art.label, 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // EquipmentScreen
 // ---------------------------------------------------------------------------
 
@@ -4309,6 +4517,41 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
     // ShopHide/Hidden and absent from the shop-visible list; the grid
     // must resolve their type/subtype to place the cards.
     catalog_ = load_full_catalog(app());
+    // Folded Moves tab (JS Profile sub-view `qv`, To.kOa=11 L2201): the exact
+    // learned list built with the fight rule (`build_move_list_locks` over the
+    // save's owned items — display only, on a throwaway Fighter; never
+    // stepped). Moved verbatim from the deleted standalone MovesScreen.
+    try {
+        if (!app().has_fight_assets()) {
+            std::fprintf(stdout, "[profile] no fight assets — move list unavailable\n");
+            return;
+        }
+        FightAssets& assets = app().fight_assets();
+        const WarriorSave w = app().save().load();
+        weapon_ = w.weapon;
+        if (weapon_.empty()) weapon_ = "Fists";
+        if (assets.merged.bones.empty() || assets.moves.empty()) {
+            std::fprintf(stdout, "[profile] no model/moves — move list unavailable\n");
+            return;
+        }
+        sf2::scene::Fighter fig;
+        fig.set_model(assets.merged);
+        fig.build_move_list_locks(assets.moves, owned_items(app()), true);
+        move_total_ = static_cast<int>(fig.hb().size());
+        for (const sf2::scene::MoveDef* m : fig.hb()) {
+            if (m == nullptr) continue;
+            MoveRow r;
+            r.name = m->name;
+            r.type = m->type;
+            r.priority = m->priority;
+            move_rows_.push_back(r);
+        }
+        std::fprintf(stdout, "[profile] moves tab: %s, %d moves\n", weapon_.c_str(),
+                     move_total_);
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[profile] move list load failed: %s\n", e.what());
+    }
 }
 
 void EquipmentScreen::update_impl(float dt) {
@@ -4332,17 +4575,19 @@ void EquipmentScreen::update_impl(float dt) {
             return;
         }
     }
-    // MOVES (bottom-right corner): the learned-moves screen for the wielded
-    // weapon. The owned grid lives left of x=1054, so the corner is clear.
-    if (p.x >= 1100.0 && p.x <= 1230.0 && p.y >= 640.0 && p.y <= 688.0) {
-        if (p.pressed) {
-            sf2::audio::AudioEngine::instance().play("click");
-            std::fprintf(stdout, "[equip] MOVES -> moves screen\n");
-            std::fflush(stdout);
-            push(kScreenMoves);
-        }
+    // `cs` bottom tab strip (JS L2188): select the Profile sub-view
+    // (0 = equipment interim, 1 = folded Moves, 2/3 = OPEN stubs).
+    tab_hover_ = profile_tab_hit(p.x, p.y);
+    if (tab_hover_ >= 0 && p.pressed) {
+        sf2::audio::AudioEngine::instance().play("click");
+        std::fprintf(stdout, "[profile] tab %d (%s)\n", tab_hover_,
+                     kProfileTabs[tab_hover_].label);
+        std::fflush(stdout);
+        tab_ = tab_hover_;
     }
-    // The owned items grid: click to equip into its type's slot. `card`
+    // The owned items grid (equipment tab only): click to equip into its
+    // type's slot. `card`
+    if (tab_ == kProfileTabEquip) {
     // counts equippable-type cards (all five slots: Weapon/Armor/Helm/
     // Ranged/Magic — JS `xc.hk` slots) EXCEPT the NoRanged/NoMagic
     // placeholders: those are the empty-slot markers (never bought, equip
@@ -4402,6 +4647,7 @@ void EquipmentScreen::update_impl(float dt) {
         ++idx;
         ++card;
     }
+    }  // end equipment-tab grid
     // Shared `za` nav column (JS `ma.D1`): Dojo/Map/Shop/Settings hops.
     za_update(app(), *this, kScreenProfile);
 }
@@ -4423,6 +4669,8 @@ void EquipmentScreen::render_impl(App& app) {
     }
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
+    // `cs` tab strip (JS L2188) — always visible; the body below is per-tab.
+    draw_profile_tabs(app, tab_, tab_hover_);
 
     WarriorSave w;
     try {
@@ -4430,6 +4678,7 @@ void EquipmentScreen::render_impl(App& app) {
     } catch (const std::exception&) {
         return;
     }
+    if (tab_ == kProfileTabEquip) {
     // --- Profile header (read-only warrior stats) -------------------------
     // Level + OLa exp bar (character_progress.xml thresholds, 100 fallback),
     // total wins (Fights/yc records), coins (Money/Tb) + gems (Bonus/$F per
@@ -4612,15 +4861,43 @@ void EquipmentScreen::render_impl(App& app) {
         draw_ui_label(app, 24.0f, 664.0f, 760.0f, 24.0f,
                       dline, 0.75f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
     }
+    } else if (tab_ == kProfileTabMoves) {
+        // Folded Moves sub-view (JS `qv`, To.kOa=11 L2201) — the learned
+        // moves for the wielded weapon; moved verbatim from the deleted
+        // standalone MovesScreen.
+        (void)app.draw_text(130.0f, 84.0f, "MOVES - " + weapon_, 1.1f, 1.0f, 0.9f, 0.4f);
+        constexpr std::size_t kMaxRows = 16;
+        for (std::size_t i = 0; i < move_rows_.size() && i < kMaxRows; ++i) {
+            const MoveRow& r = move_rows_[i];
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "%s  [%s] P%d", r.name.c_str(),
+                          r.type.empty() ? "-" : r.type.c_str(), r.priority);
+            (void)app.draw_text(150.0f, 140.0f + static_cast<float>(i) * 30.0f, buf, 0.75f,
+                                1.0f, 1.0f, 1.0f);
+        }
+        if (move_total_ > static_cast<int>(kMaxRows)) {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "+%d more (%d total)",
+                          move_total_ - static_cast<int>(kMaxRows), move_total_);
+            (void)app.draw_text(150.0f, 140.0f + 16.0f * 30.0f, buf, 0.75f, 0.7f, 0.7f,
+                                0.7f);
+        }
+        if (move_rows_.empty()) {
+            (void)app.draw_text(150.0f, 140.0f, "No moves for this weapon.", 0.8f, 0.7f,
+                                0.7f, 0.7f);
+        }
+    } else {
+        // Tabs 2/3: the `vb` sub-views (JS `fs`/`gs`, To.kOa 12/13) are not
+        // reproduced — no static content rule recovered (OPEN). The `cs`
+        // strip still selects them so the surface exists.
+        draw_ui_label(app, kViewW * 0.5f - 300.0f, 300.0f, 600.0f, 40.0f,
+                      std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)",
+                      1.0f, UiAlign::Center, 0.8f, 0.8f, 0.8f);
+    }
     // The BACK button (top-left).
     draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    // MOVES button (mirrors the update rect above).
-    draw_flat_button(app, "MOVES", 1165.0f, 664.0f, 130.0f, 48.0f, 0.3f, 0.32f, 0.4f,
-                     false);
-    draw_ui_label(app, 1165.0f - 65.0f + 8.0f, 664.0f - 10.0f, 130.0f - 16.0f, 20.0f,
-                      "MOVES", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
     draw_za_chrome(app, kScreenProfile);
 }
@@ -4672,9 +4949,18 @@ void SettingsScreen::update_impl(float dt) {
 
 void SettingsScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    const float bg[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(bg, 6, 0.07f, 0.08f, 0.11f, 1.0f);
-    draw_ui_label(app, kViewW * 0.5f - 200.0f, 120.0f, 400.0f, 44.0f, "SETTINGS", 1.4f,
+    // Minimal options overlay (NOT a standalone screen): the JS `za` nav
+    // button #5 (`y.mRa`/`y.lRa`) routes to `za.Vfb` (L1979), which attaches
+    // a `Bi` spinner and `G.load([250..253])` — there is no `dJ()==11`
+    // screen (PORT_AUDIT_UI §3 item 30). The exact options dialog/spinner
+    // widget is OPEN; the caller (Dojo) stays beneath this dim.
+    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.55f);
+    const float px = kViewW * 0.5f - 260.0f, py = 180.0f;
+    const float panel[] = {px, py, px + 520.0f, py, px, py + 340.0f,
+                           px + 520.0f, py, px + 520.0f, py + 340.0f, px, py + 340.0f};
+    ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.95f);
+    draw_ui_label(app, kViewW * 0.5f - 200.0f, 210.0f, 400.0f, 44.0f, "OPTIONS", 1.4f,
                       UiAlign::Center, 1.0f, 1.0f, 1.0f);
     const std::string music_label =
         std::string("MUSIC: ") + (music_off_ ? "OFF" : "ON");
@@ -4697,180 +4983,19 @@ void SettingsScreen::render_impl(App& app) {
 }
 
 // ---------------------------------------------------------------------------
-// MovesScreen
+// MovesScreen (DELETED)
 // ---------------------------------------------------------------------------
-
-MovesScreen::MovesScreen(ScreenManager& mgr) : Screen(mgr, "Moves") {
-    // Exact learned list: a throwaway Fighter builds hb with the save's
-    // owned items (build_move_list_locks — display only, never stepped).
-    try {
-        if (!app().has_fight_assets()) {
-            std::fprintf(stdout, "[moves] no fight assets — list unavailable\n");
-            return;
-        }
-        FightAssets& assets = app().fight_assets();
-        const WarriorSave w = app().save().load();
-        weapon_ = w.weapon;
-        if (weapon_.empty()) weapon_ = "Fists";
-        if (assets.merged.bones.empty() || assets.moves.empty()) {
-            std::fprintf(stdout, "[moves] no model/moves — list unavailable\n");
-            return;
-        }
-        sf2::scene::Fighter fig;
-        fig.set_model(assets.merged);
-        fig.build_move_list_locks(assets.moves, owned_items(app()), true);
-        total_ = static_cast<int>(fig.hb().size());
-        for (const sf2::scene::MoveDef* m : fig.hb()) {
-            if (m == nullptr) continue;
-            Row r;
-            r.name = m->name;
-            r.type = m->type;
-            r.priority = m->priority;
-            rows_.push_back(r);
-        }
-        std::fprintf(stdout, "[moves] %s: %d moves\n", weapon_.c_str(), total_);
-        std::fflush(stdout);
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "[moves] load failed: %s\n", e.what());
-    }
-}
-
-void MovesScreen::update_impl(float dt) {
-    (void)dt;
-    const App::PointerState& p = app().pointer();
-    // BACK (top-left) -> Equipment.
-    if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
-        if (p.pressed) {
-            std::fprintf(stdout, "[moves] BACK -> previous screen\n");
-            std::fflush(stdout);
-            manager().pop();
-            return;
-        }
-    }
-}
-
-void MovesScreen::render_impl(App& app) {
-    sf2::render::Renderer& ren = app.renderer();
-    const float bg[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(bg, 6, 0.07f, 0.08f, 0.11f, 1.0f);
-    (void)app.draw_text(130.0f, 84.0f, "MOVES - " + weapon_, 1.1f, 1.0f, 0.9f, 0.4f);
-    constexpr std::size_t kMaxRows = 16;
-    for (std::size_t i = 0; i < rows_.size() && i < kMaxRows; ++i) {
-        const Row& r = rows_[i];
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "%s  [%s] P%d", r.name.c_str(),
-                      r.type.empty() ? "-" : r.type.c_str(), r.priority);
-        (void)app.draw_text(150.0f, 140.0f + static_cast<float>(i) * 30.0f, buf, 0.75f,
-                            1.0f, 1.0f, 1.0f);
-    }
-    if (total_ > static_cast<int>(kMaxRows)) {
-        char buf[64];
-        std::snprintf(buf, sizeof(buf), "+%d more (%d total)",
-                      total_ - static_cast<int>(kMaxRows), total_);
-        (void)app.draw_text(150.0f, 140.0f + 16.0f * 30.0f, buf, 0.75f, 0.7f, 0.7f,
-                            0.7f);
-    }
-    if (rows_.empty()) {
-        (void)app.draw_text(150.0f, 140.0f, "No moves for this weapon.", 0.8f, 0.7f, 0.7f,
-                            0.7f);
-    }
-    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
-        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
-        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
-                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    }
-}
+// Moves is a Profile tab, not a screen (JS `To.kOa`=11 L2201; PORT_AUDIT_UI
+// §3 item 31). The learned-move list is folded into EquipmentScreen tab 1
+// (`kProfileTabMoves`) above; the standalone class/id is removed.
 
 // ---------------------------------------------------------------------------
-// BracketScreen
+// BracketScreen (DELETED)
 // ---------------------------------------------------------------------------
-
-BracketScreen::BracketScreen(ScreenManager& mgr) : Screen(mgr, "Bracket") {
-    std::string cur = "ZONE_1";
-    try {
-        const WarriorSave w = app().save().load();
-        if (!w.current_zone.empty()) cur = w.current_zone;
-        wins_ = w.fights;
-    } catch (const std::exception&) {
-    }
-    zone_ = cur;
-    const std::vector<MapScreen::ZoneTab> zones = load_zone_map(kViewW, kViewH);
-    for (const auto& z : zones) {
-        if (z.name != cur) continue;
-        for (const auto& n : z.nodes) {
-            if (n.type == "TOURNAMENT") tourn_.push_back(n);
-            else if (n.type == "SURVIVAL") surv_.push_back(n);
-        }
-        break;
-    }
-    std::fprintf(stdout, "[bracket] %s: %zu tournament, %zu survival\n", zone_.c_str(),
-                 tourn_.size(), surv_.size());
-    std::fflush(stdout);
-}
-
-void BracketScreen::update_impl(float dt) {
-    (void)dt;
-    const App::PointerState& p = app().pointer();
-    // BACK (top-left) -> Map.
-    if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
-        if (p.pressed) {
-            std::fprintf(stdout, "[bracket] BACK -> map\n");
-            std::fflush(stdout);
-            manager().pop();
-            return;
-        }
-    }
-}
-
-void BracketScreen::render_impl(App& app) {
-    sf2::render::Renderer& ren = app.renderer();
-    const float bg[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(bg, 6, 0.07f, 0.08f, 0.11f, 1.0f);
-    (void)app.draw_text(130.0f, 84.0f, zone_ + " SERIES", 1.1f, 1.0f, 0.9f, 0.4f);
-    // Tournament bracket: file order, Xs warriors, W/L from save wins.
-    (void)app.draw_text(130.0f, 130.0f, "TOURNAMENT", 0.9f, 1.0f, 0.85f, 0.4f);
-    constexpr std::size_t kMaxTourn = 12;
-    for (std::size_t i = 0; i < tourn_.size() && i < kMaxTourn; ++i) {
-        const auto& n = tourn_[i];
-        int wins = 0;
-        for (const auto& fw : wins_) {
-            if (fw.name == n.name) {
-                wins = fw.wins;
-                break;
-            }
-        }
-        std::string warriors;
-        for (const auto& wname : n.warriors) {
-            if (!warriors.empty()) warriors += "/";
-            warriors += wname;
-        }
-        if (warriors.empty()) warriors = n.name;
-        char buf[192];
-        std::snprintf(buf, sizeof(buf), "%zu. %s  %s", i + 1, warriors.c_str(),
-                      wins > 0 ? ("W" + std::to_string(wins)).c_str() : "-");
-        (void)app.draw_text(150.0f, 162.0f + static_cast<float>(i) * 28.0f, buf, 0.75f,
-                            1.0f, 1.0f, 1.0f);
-    }
-    // Survival history: best wins per node.
-    const float sy0 = 162.0f + static_cast<float>((std::min)(tourn_.size(), kMaxTourn)) * 28.0f + 24.0f;
-    (void)app.draw_text(130.0f, sy0, "SURVIVAL", 0.9f, 1.0f, 0.85f, 0.4f);
-    for (std::size_t i = 0; i < surv_.size() && i < 6; ++i) {
-        const auto& n = surv_[i];
-        int best = 0;
-        for (const auto& fw : wins_) {
-            if (fw.name == n.name && fw.wins > best) best = fw.wins;
-        }
-        char buf[192];
-        std::snprintf(buf, sizeof(buf), "%s  best %d", n.name.c_str(), best);
-        (void)app.draw_text(150.0f, sy0 + 32.0f + static_cast<float>(i) * 28.0f, buf,
-                            0.75f, 1.0f, 1.0f, 1.0f);
-    }
-    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
-        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
-        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
-                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    }
-}
+// No JS screen 13 and no bracket surface: `Xr` is the map status panel
+// (L2133-2136), reached from the `Vr` scroller, not a standalone screen
+// (PORT_AUDIT_UI §3 item 32). The Map BRACKET corner button was already
+// removed; the class/id is deleted here.
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -4902,10 +5027,6 @@ std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id) {
             return std::make_unique<SettingsScreen>(mgr);
         case kScreenProfile:
             return std::make_unique<EquipmentScreen>(mgr);
-        case kScreenMoves:
-            return std::make_unique<MovesScreen>(mgr);
-        case kScreenBracket:
-            return std::make_unique<BracketScreen>(mgr);
         default:
             return nullptr;
     }

@@ -509,7 +509,27 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         // Align.
         if (pugi::xml_node align = move.child("Align")) {
             def.align.has_align = true;
-            if (pugi::xml_attribute a = align.attribute("Axis")) def.align.axis = a.value();
+            if (pugi::xml_attribute a = align.attribute("Axis")) {
+                def.align.axis = a.value();
+                // JS `jva` (L719): Axis split on '|' sets cI/dI/MY; an absent
+                // Axis leaves all three true (already the struct default).
+                def.align.axis_x = def.align.axis_y = def.align.axis_z = false;
+                std::size_t start = 0;
+                while (start <= def.align.axis.size()) {
+                    const std::size_t sep = def.align.axis.find('|', start);
+                    const std::string tok = def.align.axis.substr(
+                        start,
+                        sep == std::string::npos ? std::string::npos : sep - start);
+                    if (tok == "X") def.align.axis_x = true;
+                    else if (tok == "Y") def.align.axis_y = true;
+                    else if (tok == "Z") def.align.axis_z = true;
+                    if (sep == std::string::npos) break;
+                    start = sep + 1;
+                }
+            }
+            if (pugi::xml_attribute sm = align.attribute("ShiftModelNode")) {
+                def.align.shift_model_node = sm.value();
+            }
             if (pugi::xml_node pivot = align.child("Pivot")) {
                 if (pugi::xml_attribute o = pivot.attribute("Object")) def.align.pivot_object = o.value();
                 if (pugi::xml_attribute p = pivot.attribute("Part")) def.align.pivot_part = p.value();
@@ -519,6 +539,8 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
                 if (pugi::xml_attribute o = pos.attribute("Object")) def.align.pos_object = o.value();
                 if (pugi::xml_attribute p = pos.attribute("Part")) def.align.pos_part = p.value();
                 if (pugi::xml_attribute p = pos.attribute("Player")) def.align.pos_player = p.value();
+                if (pugi::xml_attribute sx = pos.attribute("ShiftX")) def.align.shift_x = sx.as_float();
+                if (pugi::xml_attribute sy = pos.attribute("ShiftY")) def.align.shift_y = sy.as_float();
             }
         }
 

@@ -270,29 +270,18 @@ private:
     std::vector<float> sol_ma_;  // 3*n: current posed positions (JS `ma`)
     std::vector<float> sol_mf_;  // 3*n: previous positions (JS `mf`)
     bool solver_init_ = false;   // ma/mf seeded from the bind pose once
-    // [FIX stretched mesh] The solver runs in a CONTINUOUS space: the clips
-    // are authored at different world x offsets (stance_2 COM x=-502 vs
-    // short_upward_elbow_strike COM x=+237 — a 740-unit jump on the clip
-    // switch). The game's fighter world position follows the clip's COM
-    // (the whole fighter — skeleton AND cloth — teleports together, so the
-    // relative cloth state is preserved). The native solver state lives in
-    // raw clip space, so on every clip switch the state is translated by
-    // the COM delta before the clip pose is applied (below in sample()).
-    float sol_prev_com_x_ = 0.0f;
-    float sol_prev_com_y_ = 0.0f;
-    float sol_prev_com_z_ = 0.0f;
-    bool sol_have_prev_com_ = false;
-    // [FIX stretched mesh] Warmup steps pending on the first sample() after
-    // set_model (JS-equivalent of the game's Dojo-hub display time: the
-    // game's solver runs at 60 Hz for the whole hub session before a fight
-    // starts, so the fight's first trace frame already shows the cloth at
-    // its gravity/edge equilibrium — oracle_pose.jsonl frame 0). The native
-    // fight boots directly, so the first sample() runs the solver cycle
-    // `kSolverWarmupFrames` extra times with the spawn pose held; the cloth
-    // (mass 0.1 vs its macro anchors' 0.001 — the `yu.bFa` mass weighting
-    // moves it only ~1.2%/iteration) otherwise needs ~300+ frames to settle
-    // and stretches the mesh for the whole fight intro.
-    int solver_warmup_ = 0;
+    // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550
+    // (`jc.shift`)] The move's <Align> offset, applied ONCE at clip start as
+    // a shift of the whole clip buffer. Native equivalent: added to every
+    // clip-driven bone in sample() before the solver runs. Computed by
+    // `compute_align` in start_move_impl; zero while no move is playing.
+    float align_x_ = 0.0f;
+    float align_y_ = 0.0f;
+    float align_z_ = 0.0f;
+    // [FIX stretched mesh — JS-faithful] The game runs exactly one solver
+    // step per frame (`Al.ia()` L582 = `sk(); jE();`); there is no warmup
+    // and no cross-clip COM-delta translation of the solver state.
+    // (The invented warmup 600 + COM-delta block were removed.)
     // Paired bones _1 ↔ _2 for mirror swap (JS Te.Peb L560 → Ua.Oeb L692). Built in set_model.
     std::vector<std::pair<int, int>> mirror_pairs_;
     // Previous sample's world-space x per bone (x only, parallel to `pos_`).
@@ -311,6 +300,7 @@ private:
     int tap_age_ = 0;                       // frames since last tap (JS `zl.Qe`)
     std::function<const sf2::data::anim_clip*(const std::string&)> clip_lookup_;
 
+    void compute_align(const MoveDef& move);
     void sample_current();
 };
 
