@@ -354,12 +354,15 @@ private:
     int move_total_ = 0;
 };
 
-// The settings — a minimal options overlay, not a standalone screen: the
-// JS `za` nav button #5 routes to `za.Vfb` (L1979: a `Bi` spinner +
-// `G.load([250..253])`), and no `dJ()==11` screen exists (PORT_AUDIT_UI §3
-// item 30). Sound row is state display (no runtime SFX mute API); music
-// toggles via play/stop_music; BACK returns to the caller. Exact options
-// dialog is OPEN.
+// The settings — the real JS `un extends od` dialog (L1916-1930), reached
+// from the `za` nav button #5 (`za.Vfb` L1979 -> `Xc.Shb()` = `Wb.openDialog
+// (310,null)` -> `new un`). 9-slice `od` base (`AV=fc(2340,1530)`, `Md=750`
+// L1894/L1930) + title + Sound/Music/Credits/Language rows (gated by
+// `Ca.hasFeature`) + BACK (`EButtonDark`) / RESTART (`EButtonBeige`). Music
+// toggles via play/stop_music; BACK returns to the caller; Sound is state
+// display (no runtime SFX mute API). OPEN: the per-language BMF atlas build
+// (`G.Oq(253)`/`un.C8`, L1927) and the exact per-row offsets (need the
+// `E.get(250)` frame sizes, L1917) are not modelled.
 class SettingsScreen : public Screen {
 public:
     explicit SettingsScreen(ScreenManager& mgr);

@@ -96,34 +96,61 @@ bool quest_modal_consume(App& app) {
     return true;
 }
 
-// Draws the modal panel (title + up to 3 lines, truncated + dim backdrop).
-// Common UI label (Dojo UI-diff wave): single-line text fitted into a
-// rect with alignment. Measures at scale 1.0 via the menu font, then
-// shrinks (never grows past `base_scale`) so width AND line height fit.
-// This replaces every constant-scale draw_text that overflowed its rect
-// (Dojo buttons at 1.0f, hint/modal lines, NEXT/confirm prompts).
-// `halign`: 0 = left, 1 = center, 2 = right. y is the rect TOP.
+// JS `ea` text node (L1711) + its `Bg`/`Qh` effect (L1622-1634). A label's
+// size is its `ua()` value: `ea.ua(a)` -> `effect.ua(a*ea.a1)` (L1711) and
+// `Qh.print` (L1631) draws each glyph at `fontSize/charset.eF`. The shipped
+// menu BMF (`res/ui/font-en.7043b83b.fnt`) has `eF = fontSize = 100`
+// (verified on disk), so the native draw scale == `ua_size/100`. `Fa(w,h)`
+// (L1712) sets the box; the explicit `Bg.Sk()` fit (L1626-1627, reached via
+// `mk()`) shrinks text to it, and JS runs that for the button (`Bb.mk`
+// L1844), hint (`Ib.Sk` L1910), dialog-row and map-node labels � i.e. the
+// overwhelming majority of UI text. Wave D removed the native fit globally
+// as an over-broad approximation; this restores it as the default `fit=true`
+// (a label that already fits its box is unchanged, since `Sk` never grows).
+// A bare `ea` whose `Fa` box is alignment-only can pass `fit=false`. `Oj()`
+// (L1713) is the tight measured width (`N-J`) used to place siblings (e.g.
+// `wr` L1987) and to centre `Ia(128)` (`xv` L1630). `align` maps the JS `Ia`
+// masks: left = `Ia(64)` (bits 8|64|512), centre = `Ia(128)` (2|128|1024),
+// right = `Ia(4|256|2048)` (L1630). y is the box TOP (node `D` + top text
+// alignment).
 enum class UiAlign { Left = 0, Center = 1, Right = 2 };
 
+// JS `ea.a1` (L1931/L2484): ja/ko/ru scale every `ua` by 0.8, every other
+// locale by 1. `ensure_lang` is EN-only (the app loads `ui/font-en.*`), so
+// the active `a1` is 1; the 0.8 branch is unreachable until the app-level
+// per-language font/atlas swap exists (OPEN).
+constexpr float kEaA1 = 1.0f;
+
 void draw_ui_label(App& app, float x, float y, float w, float h,
-                   const std::string& text, float base_scale, UiAlign align,
-                   float r, float g, float b, float a = 1.0f) {
+                   const std::string& text, float ua_scale, UiAlign align,
+                   float r, float g, float b, float a = 1.0f, bool fit = true) {
     if (text.empty() || w <= 0.0f || h <= 0.0f) return;
     const sf2::data::font* font = app.menu_font();
     if (font == nullptr) return;
-    const float tw = app.measure_text(*font, text, 1.0f);
-    const float th =
-        static_cast<float>(font->line_height > 0 ? font->line_height : 40);
-    float scale = base_scale;
-    if (tw > 0.0f && tw * scale > w) scale = w / tw;
-    if (th > 0.0f && th * scale > h) scale = h / th;
+    // Glyph scale = ua(size)/charset.eF (L1631); `ua_scale` is that ratio.
+    float scale = ua_scale * kEaA1;
     if (scale <= 0.0f) return;
-    const float draw_w = tw * scale;
-    float dx = x;
+    // JS `Bg.Sk()` (L1627) single-line fit, reached via `mk()` (L1626):
+    // `a = min(boxW/textW, boxH/textH)` then clamp to the authored `ua` (a
+    // label never grows past its size). `Bb.mk()` (L1844) fits every button
+    // caption and `Ib.Sk()` (L1910) the hint bar; dialog rows use the same
+    // `Fa` box. Wave D removed this globally as an over-broad approximation
+    // — the text bounds here are the tight glyph bounds (`rg`, L1630), not
+    // the line advance, so a label whose box already fits is unchanged.
+    // `fit=false` keeps a bare `ea`'s `Fa` box as alignment-only.
+    if (fit) {
+        const float tw = app.measure_text(*font, text, 1.0f);
+        const float th = sf2::data::measure_text_height_utf8(*font, text, 1.0f);
+        if (tw > 0.0f && tw * scale > w) scale = w / tw;
+        if (th > 0.0f && th * scale > h) scale = h / th;
+    }
+    // `Oj()` (L1713): tight measured width (`N-J`); empty text contributes 0.
+    const float draw_w = app.measure_text(*font, text, scale);
+    float dx = x;  // `ea.C` = node left edge (Ia(64) left / align 0)
     if (align == UiAlign::Center) {
-        dx = x + (w - draw_w) * 0.5f;
+        dx = x + (w - draw_w) * 0.5f;  // `xv` (e&1170)>0 (L1630)
     } else if (align == UiAlign::Right) {
-        dx = x + w - draw_w;
+        dx = x + w - draw_w;  // `xv` (e&2340)>0
     }
     // NOTE: menu draw_text has no alpha channel (opaque labels).
     (void)a;
@@ -195,6 +222,112 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
                       pw - 160.0f * c, 40.0f * c, d->lines[i], 0.8f, UiAlign::Left, 1.0f,
                       1.0f, 1.0f);
     }
+}
+
+// --- `od` 9-slice dialog base (JS L1894-1900) ----------------------------
+// Shared by the quest modal above and the Settings `un` dialog. `od`'s base
+// is `AV = new fc(a,b)` with JS defaults (2340, 1530) — NOTE: the audit
+// (PORT_AUDIT_UI §0/§2.9) records 2340x1300, but the shipped JS line 1894
+// reads `b==null&&(b=1530)`, so 1530 is the JS value (`un` calls `super()`
+// with no args, L1917). `l4a()` (L1896) contain-fits `AV` to the screen
+// (`N.fn(AV.x/AV.y)`) and scales the node by `(b.N-b.J)/AV.x`; the three
+// `XN` slices are `E.get(254)` frames (left `bg_edge`, centre `bg`, right
+// `bg_edge`, the right one flipped `Hr(!0)`).
+struct OdPanel {
+    float px = 0.0f, py = 0.0f, pw = 0.0f, ph = 0.0f;  // on-screen panel rect
+    float c = 1.0f;                                    // design -> screen scale
+};
+
+OdPanel od_panel(float src_w, float src_h) {
+    OdPanel p;
+    const float screen_ar = kViewW / kViewH;  // N.lc
+    const float src_ar = src_w / src_h;
+    if (screen_ar >= src_ar) {
+        p.ph = kViewH;
+        p.pw = p.ph * src_ar;
+    } else {
+        p.pw = kViewW;
+        p.ph = p.pw / src_ar;
+    }
+    p.c = p.pw / src_w;  // (b.N-b.J)/AV.x
+    p.px = kViewW * 0.5f - p.pw * 0.5f;
+    p.py = kViewH * 0.5f - p.ph * 0.5f;
+    return p;
+}
+
+void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p) {
+    bool drew = false;
+    if (load_scroll_atlas(app)) {
+        drew = try_draw_atlas_button(app, "bg", p.px + p.pw * 0.5f, p.py + p.ph * 0.5f,
+                                     p.pw, p.ph, 1.0f, /*fill=*/true, /*flip_x=*/false);
+        if (drew) {
+            // `XN[0]` left + `XN[2]` right (the right one flipped, L1894).
+            try_draw_atlas_button(app, "bg_edge", p.px, p.py + p.ph * 0.5f, p.pw, p.ph,
+                                  1.0f, false, /*flip_x=*/false);
+            try_draw_atlas_button(app, "bg_edge", p.px + p.pw, p.py + p.ph * 0.5f, p.pw,
+                                  p.ph, 1.0f, false, /*flip_x=*/true);
+        }
+    }
+    if (!drew) {
+        const float panel[] = {p.px, p.py, p.px + p.pw, p.py, p.px, p.py + p.ph,
+                               p.px + p.pw, p.py, p.px + p.pw, p.py + p.ph, p.px, p.py + p.ph};
+        ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.95f);
+    }
+}
+
+// --- Settings `un` dialog geometry (JS L1916-1930) -----------------------
+// `un extends od` (L1916) with `Md=750` (L1930). `od.layout` (L1898) puts the
+// content node at `Ne.D(-Md/2)` and the button zone at `a=clamp(Md/2,300,1000)`
+// (=375 for Md=750); the title `Vc` sits at `D(-(a+Vc.pfa().y))`. Rows are
+// Sound/Music (gated by `Ca.hasFeature("audio")`, L1928), Credits
+// (`hasFeature("credits")`, L1929) and Language. The exact per-row offsets
+// (`b`: `k*icon.qa()*1.25`; `c`: `k*icon.qa()*1.25-icon.qa()/2`, L1917) need
+// the `E.get(250)` frame sizes, which the native does not decode — rows are
+// stacked on the `Md` zone (OPEN, PORT_AUDIT_UI §2.9).
+struct SettingsLayout {
+    OdPanel panel;
+    float title_x = 0.0f, title_y = 0.0f, title_w = 0.0f, title_h = 0.0f;
+    float row_x = 0.0f, row_w = 0.0f, row_h = 0.0f;
+    float row_y[4] = {0.0f, 0.0f, 0.0f, 0.0f};  // Sound/Music/Credits/Language
+    float back_cx = 0.0f, back_cy = 0.0f;
+    float restart_cx = 0.0f, restart_cy = 0.0f;
+    float btn_w = 0.0f, btn_h = 0.0f;
+    float notice_y = 0.0f;
+};
+
+SettingsLayout settings_layout() {
+    SettingsLayout s;
+    s.panel = od_panel(2340.0f, 1530.0f);  // od AV = fc(2340,1530), L1894
+    const OdPanel& p = s.panel;
+    const float cx = p.px + p.pw * 0.5f;
+    const float cy = p.py + p.ph * 0.5f;
+    // Title `Vc`: `$T` L1930 `Fa(1560,160)` + `C(-780)`; `ua(152)`, `Ia(128)`
+    // (L1900). `od.layout` L1898: `Vc.D(-(a+Vc.pfa().y))` with a=375.
+    s.title_w = 1560.0f * p.c;
+    s.title_h = 160.0f * p.c;
+    s.title_x = cx - s.title_w * 0.5f;
+    s.title_y = cy - 535.0f * p.c - s.title_h * 0.5f;
+    // Rows span `Md` (750) centred on the panel.
+    s.row_w = 860.0f * p.c;
+    s.row_x = cx - s.row_w * 0.5f;
+    s.row_h = 110.0f * p.c;
+    const float step = s.row_h + 16.0f * p.c;
+    const float zone_top = cy - 300.0f * p.c;
+    s.row_y[0] = zone_top;
+    s.row_y[1] = zone_top + step;
+    s.row_y[2] = zone_top + step * 2.0f;
+    s.row_y[3] = zone_top + step * 3.0f;
+    // Buttons `Bb.Pb(150)` (L1930): BACK left, RESTART at `C(500)`.
+    s.btn_w = 320.0f * p.c;
+    s.btn_h = 150.0f * p.c;
+    s.back_cx = cx - 320.0f * p.c;
+    s.restart_cx = cx + 500.0f * p.c;
+    // `od.layout` (L1898) D: `Cd.D(a + Cd.node.qa()/2)` with a = Md/2 = 375
+    // and the button container height = one `Bb.Pb(150)` -> centre 450.
+    s.back_cy = s.restart_cy = cy + 450.0f * p.c;
+    // Notice `Nm`: `C(-750)`, `D(250)`, `Fa(1500,50)` (L1929).
+    s.notice_y = cy + 250.0f * p.c;
+    return s;
 }
 
 // --- HUD HP-bar leak/decay (JS `Br` L2010-2015, Phase 7.3) ---
@@ -1066,7 +1199,23 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     const float icon_gold = icon;
     const float icon_ruby = icon * (88.0f / 87.0f);
     const float q = icon * 0.25f;                        // wr text gap b = iw.za()*.25
-    const float num_w = icon * 1.4f;                     // value text slot
+    // JS `wr.layout` (L1987): the level BAR starts at the MEASURED value
+    // width — `d.C(gA.ya + (f.N-f.J) + b)` with `f = gA.Oj()` (the level text
+    // node is `gA`, `Ia(64)` L1986, so its drawn width is `Oj().N-Oj().J`).
+    // `yr` lays its icons off the same measured widths (L1991). This replaces
+    // the fixed `icon*1.4` value slot (the strip-width OPEN, PORT_AUDIT_UI §5):
+    // the strip now sizes to the actual level/money/gem strings. The old slot
+    // is only the fallback when no menu font is loaded.
+    const sf2::data::font* mfont = app.menu_font();
+    const std::string lvl_text = std::to_string(sv.level);
+    const std::string money_text = std::to_string(sv.money);
+    const std::string gem_text = std::to_string(sv.bonus);
+    const auto measured_w = [&](const std::string& s) -> float {
+        return mfont != nullptr ? app.measure_text(*mfont, s, num_scale) : icon * 1.4f;
+    };
+    const float num_w = measured_w(lvl_text);
+    const float money_num_w = measured_w(money_text);
+    const float gem_num_w = measured_w(gem_text);
     // JS `hk.zf(a)` (L2002) = `node.la(a / Ud.fa.y)`, `Ud` = the empty frame
     // `level_bar_empty_short` (source 246x32); `wr.Vd.zf(a*.4)` (L1987) so the
     // bar length = 246/32 * 0.4 * widget_h = 3.075*widget_h (was icon*2).
@@ -1081,7 +1230,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     const float lvl_w = icon_level + q + num_w + q + bar_w;
     // `xr.layout` L1985: the Energy bar sits at `icon.za()*1.1`, not icon+q.
     const float en_w = std::max(icon_energy, icon_energy * 1.1f + bar_w);
-    const float money_w = icon_gold + num_w + yr_gap + icon_ruby + num_w;
+    const float money_w = icon_gold + money_num_w + yr_gap + icon_ruby + gem_num_w;
     const float total = lvl_w + lay.gap + en_w + lay.gap + money_w;
     float x = (w - total) * 0.5f;
     const float cy = lay.sp * 0.5f;  // strip centred in the bar (Pr.D((Sp-...)/2))
@@ -1090,7 +1239,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     try_draw_atlas_button(app, "level", x, cy - icon * 0.5f, icon_level, icon, 1.0f, false,
                           false, /*top_left=*/true);
     draw_ui_label(app, x + icon_level + q, cy - lay.widget_h * 0.45f, num_w, lay.widget_h,
-                  std::to_string(sv.level), num_scale, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+                  lvl_text, num_scale, UiAlign::Left, 1.0f, 1.0f, 1.0f);
     // JS `wr.Vd = Uf(y.$na, y.IRa)` = `level_bar_empty_short` (empty backing)
     // + `level_bar_short` (fill) over the same 246x32 source box (L1985).
     // `wr.myb(rs, Oz())` (L1989) -> `Vd.PT(max)` + `Vd.DF(rs)`; `Uf.ratio()`
@@ -1143,12 +1292,12 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     // JS `Ss.C(Ss.za()/2)` etc. are CENTRE positions (left edge 0).
     try_draw_atlas_button(app, "gold", x + icon_gold * 0.5f, cy, icon_gold, icon, 1.0f);
     const float money_tx = x + icon_gold;  // JS `Dq.C(Ss.za())`: no gap
-    draw_ui_label(app, money_tx, cy - lay.widget_h * 0.45f, num_w, lay.widget_h,
-                  std::to_string(sv.money), num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
-    const float ruby_left = money_tx + num_w + yr_gap;  // JS `PA.C(PA.za()/2+Dq.ya+c+b)`
+    draw_ui_label(app, money_tx, cy - lay.widget_h * 0.45f, money_num_w, lay.widget_h,
+                  money_text, num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+    const float ruby_left = money_tx + money_num_w + yr_gap;  // JS `PA.C(PA.za()/2+Dq.ya+c+b)`
     try_draw_atlas_button(app, "ruby", ruby_left + icon_ruby * 0.5f, cy, icon_ruby, icon, 1.0f);
-    draw_ui_label(app, ruby_left + icon_ruby, cy - lay.widget_h * 0.45f, num_w, lay.widget_h,
-                  std::to_string(sv.bonus), num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+    draw_ui_label(app, ruby_left + icon_ruby, cy - lay.widget_h * 0.45f, gem_num_w, lay.widget_h,
+                  gem_text, num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
     // JS `gk` collapsed default (L1978): only the `Lx` title header shows;
     // the five `Le` buttons render only once expanded (`NLa` L2001).
     if (!g_za_nav_open) {
@@ -4535,10 +4684,26 @@ constexpr int kShopTabCount = 5;
 //   content  = content.fn(1.85 + (clamp(lc,.6,1)-.6)/.4*.15)(L2293)
 //   viewer c = content.fn(.75)  -> `this.Za.Pn(c)`          (L2294)
 //   gap e    = (c.N-c.J)*.03 ;  slot b = (c.W-c.P)*.8       (L2294)
-// The JS cells `ns` are laid out in the `Oe` viewer list (`Za.uw` anchors
-// 300,220|400|280|320 + `LT` spacing) — that sub-layout is OPEN (audit OPEN
-// #4); the native grid fills the exact JS viewer rect `c` in 2 columns with
-// the JS gap.
+// The JS cells `ns` (L2303-2308) are laid out in the `Oe` viewer list. `Oa.f5`
+// (L2286-2288) sets the per-category viewer anchor `Za.uw` and list spacing
+// `Za.LT` BEFORE building the list `yF(...)`:
+//   tab0 Weapon  uw=(300,220) LT(50)   tab1 Armor  uw=(300,400) LT(20)
+//   tab2 Helm    uw=(300,280) LT(100)  tab3 Ranged uw=(300,220) LT(50)
+//   tab4 Magic   uw=(300,220) LT(50)   tab5 IAP    uw=(300,320) (no LT)
+//   tab7 event   uw=(670,500)          (no LT)
+// (`Za` here is the `Oe` card viewer, not the gamepad `Za`.) `Oe.Pn(c)` (L2262)
+// then docks `scroll` at `c.J/c.P`, sizes it `(c.width, c.height, c.width*.08)`,
+// sets the cell list `Pa.C(4)`/`Pa.ba(scroll.Gv-8, scroll.Xy)` and the `Dn`
+// "noItems" label. `LT(a)` = `Pa.spacing`. The exact cell rects need `Oe`'s
+// `Fg` scroll content dims (`Gv`/`Xy`), the `Gg` list (`Pa`) cell sizing and
+// the `y.*` frame-name table — none of which is derivable statically
+// (PORT_AUDIT_UI §5 OPEN #4). The landed native grid keeps the exact JS viewer
+// rect `c` (`Oa.layout`, L2293-2295) in 2 columns with the JS gap; the `uw`
+// anchors and `LT` spacing are recorded above but not applied to the grid
+// (OPEN). The `ns` cell internals (L2305: icon `ky.zf(40)`, name
+// `av.Fa(ky.za()*2, ky.qa()*.7)` at `C(ky.za())D(ky.ra+ky.qa()*.2)`, price
+// `pv.Fa(a,b*.3)` at `C(a*.05)D(b*.8)`) need the `E.get(260)` icon frame
+// dims (`y.PRa`), also OPEN.
 struct ShopRect {
     float J = 0.0f, P = 0.0f, N = 0.0f, W = 0.0f;  // left/top/right/bottom
     float width() const { return N - J; }
@@ -5092,6 +5257,15 @@ void ShopScreen::render_impl(App& app) {
 // `height/button.Y.fa.y`, spread lc-dependent). The `y.*` frame table for
 // `cs` (`y.WRa/YRa/XRa` ...) is OPEN (PORT_AUDIT_UI §5 OPEN #2); the art
 // names below are the profile atlas `buttons/*` frames (sourceSize 199x190).
+// Tab content: `vb.hla` (L2190-2191) routes tab 0 -> `Rl=ds`, tab 1 ->
+// `qv=es`, tab 2 -> `Zr=fs`, tab 3 -> `lv=gs`. Only `ds`/`es` are modelled
+// (equipment interim + folded Moves); tabs 2/3 (`fs` and `gs`, L2193) are
+// OPEN — their builders are not in the static extract, so the native keeps
+// the flat placeholder for those tabs. Nav/`cs` badges (`Dg`, L1850-1851):
+// `cs.getCounterValue` (L2189) reads `p.o.co.uCa()/p.o.sCa()/p.o.yi.rCa()/
+// p.o.vCa()` and `ss` (L2284) `p.items.T5a(Cj.zxb(a))` — the badge COUNTS are
+// not derivable from the native save (OPEN); the `Dg.ba(65)`/`Ia(128)`
+// geometry is ported in `draw_za_chrome`'s badge path.
 // ---------------------------------------------------------------------------
 constexpr int kProfileTabCount = 4;
 constexpr int kProfileTabEquip = 0;  // equipment interim (JS moves equip to shop `$o`, OPEN)
@@ -5595,22 +5769,23 @@ void SettingsScreen::update_impl(float dt) {
     (void)dt;
     const App::PointerState& p = app().pointer();
     hover_ = -1;
-    // BACK (top-left) -> the caller (Dojo hub).
-    if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
+    // BACK (`Bb` "BACK", `un.Kb`, L1930 -> `Ge(0)` closes) -> pop.
+    const SettingsLayout s = settings_layout();
+    if (p.x >= s.back_cx - s.btn_w * 0.5f && p.x <= s.back_cx + s.btn_w * 0.5f &&
+        p.y >= s.back_cy - s.btn_h * 0.5f && p.y <= s.back_cy + s.btn_h * 0.5f) {
         hover_ = 0;
-        if (p.pressed) {
-        if (age_ > 10) {
+        if (p.pressed && age_ > 10) {
             std::fprintf(stdout, "[settings] BACK -> previous screen\n");
             std::fflush(stdout);
             manager().pop();
             return;
         }
-        }
     }
     // MUSIC toggle (working): OFF stops the track, ON replays the last
     // track (play_music of the current track; silent no-op when none —
     // AudioEngine semantics, no scene touch).
-    if (p.x >= 480 && p.x <= 800 && p.y >= 268 && p.y <= 332) {
+    if (p.x >= s.row_x && p.x <= s.row_x + s.row_w && p.y >= s.row_y[1] &&
+        p.y <= s.row_y[1] + s.row_h) {
         hover_ = 1;
         if (p.pressed) {
             music_off_ = !music_off_;
@@ -5643,37 +5818,51 @@ void SettingsScreen::render_impl(App& app) {
     // Credits (`y.rSa`), Language + BACK (`EButtonDark`) / RESTART
     // (`EButtonBeige`), gated by `Ca.hasFeature("audio")`/("credits") with
     // labels from the `un` localized `IVa` table.
-    // OPEN: a faithful `un` port needs `od`'s 9-slice geometry (`fc` 2340x1300,
-    // `Md=750`) and its per-language BMF atlas build (`G.Oq(253)` + `un.C8`)
-    // that the native does not model, so the node geometry is not derivable
-    // from the static cites alone. This overlay is the explicit stand-in — no
-    // invented geometry is added.
+    // The `od` base is `AV=fc(2340,1530)` per JS L1894 (`b==null&&(b=1530)`);
+    // the audit's 2340x1300 is stale. `Md=750` (L1930). The per-language BMF
+    // atlas build (`G.Oq(253)` + `un.C8`, L1927) is not modelled, so the row
+    // labels use the EN `IVa` strings and the Language row is EN-only.
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.55f);
-    const float px = kViewW * 0.5f - 260.0f, py = 180.0f;
-    const float panel[] = {px, py, px + 520.0f, py, px, py + 340.0f,
-                           px + 520.0f, py, px + 520.0f, py + 340.0f, px, py + 340.0f};
-    ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.95f);
-    draw_ui_label(app, kViewW * 0.5f - 200.0f, 210.0f, 400.0f, 44.0f, "OPTIONS", 1.4f,
-                      UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    const std::string music_label =
-        std::string("MUSIC: ") + (music_off_ ? "OFF" : "ON");
-    draw_flat_button(app, music_label, kViewW * 0.5f, 300.0f, 320.0f, 64.0f,
-                     hover_ == 1 ? 0.55f : 0.35f, 0.45f, 0.3f, hover_ == 1);
-    draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 292.0f, 320.0f - 16.0f, 28.0f,
-                      music_label, 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    // Real `un extends od` dialog (L1916-1930): 9-slice base + title + rows.
+    const SettingsLayout s = settings_layout();
+    draw_od_base(app, ren, s.panel);
+    // Title `Vc`: `IVa.Settings_Title` EN = "SETTINGS" (L1917); `ua(152)` +
+    // `La(Z.W6)` (L1900), `Ia(128)` centre.
+    draw_ui_label(app, s.title_x, s.title_y, s.title_w, s.title_h, "SETTINGS", 1.52f,
+                  UiAlign::Center, 0.404f, 0.243f, 0.141f);
+    // Rows from the `un` `IVa` table (L1917-1924). `Ca.hasFeature("audio")`
+    // (L1928) gates Sound+Music and `("credits")` (L1929) gates Credits; both
+    // features are present, so four rows. Language is EN-only in the native
+    // (`G.Rq()` switch `Oyb` L1931 unreachable), so it shows `app.language()`.
     const bool sfx_on = sf2::audio::AudioEngine::instance().enabled();
-    const std::string sfx_label =
-        std::string("SOUND: ") + (sfx_on ? "ON (no runtime mute API)" : "OFF");
-    draw_flat_button(app, sfx_label, kViewW * 0.5f, 390.0f, 320.0f, 64.0f, 0.25f, 0.25f,
-                     0.3f, false);
-    draw_ui_label(app, kViewW * 0.5f - 160.0f + 8.0f, 382.0f, 320.0f - 16.0f, 28.0f,
-                      sfx_label, 0.8f, UiAlign::Center, 0.6f, 0.6f, 0.6f);
-    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
-        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
-        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
-                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    const std::string rows[4] = {
+        std::string("Sound: ") + (sfx_on ? "ON" : "OFF"),
+        std::string("Music: ") + (music_off_ ? "OFF" : "ON"),
+        std::string("Credits"),
+        std::string("Language: ") + app.language(),
+    };
+    for (int i = 0; i < 4; ++i) {
+        const bool hov = (i == 1 && hover_ == 1);
+        draw_flat_button(app, "", s.row_x + s.row_w * 0.5f, s.row_y[i] + s.row_h * 0.5f,
+                         s.row_w, s.row_h, hov ? 0.55f : 0.30f, 0.42f, 0.3f, hov);
+        draw_ui_label(app, s.row_x + 12.0f, s.row_y[i] + s.row_h * 0.5f - 14.0f,
+                      s.row_w - 24.0f, 28.0f, rows[i], 0.9f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
     }
+    // Restart notice `Nm` (`dlgSettingsRestart`, `ua(75)`, L1929).
+    draw_ui_label(app, kViewW * 0.5f - 500.0f, s.notice_y, 1000.0f, 40.0f,
+                  "Attention! Game must be restarted for these settings to apply.",
+                  0.75f, UiAlign::Center, 1.0f, 0.8f, 0.5f);
+    // BACK (`EButtonDark`) + RESTART (`EButtonBeige`, L1930). `draw_flat_button`
+    // draws the plate only; the `Bb` label is a separate text node.
+    draw_flat_button(app, "", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 0.35f, 0.3f, 0.28f,
+                     hover_ == 0);
+    draw_ui_label(app, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f, s.btn_w, 28.0f, "BACK",
+                  0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    draw_flat_button(app, "", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h, 0.6f, 0.5f, 0.3f,
+                     false);
+    draw_ui_label(app, s.restart_cx - s.btn_w * 0.5f, s.restart_cy - 14.0f, s.btn_w, 28.0f,
+                  "RESTART", 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
 }
 
 // ---------------------------------------------------------------------------

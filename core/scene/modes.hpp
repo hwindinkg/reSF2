@@ -57,6 +57,11 @@ struct StageWarrior {
 struct StageRule {
     std::string tag;  // Attributes / NoBulletsReplenishment / ...
     std::map<std::string, std::string> attrs;
+    // `<Level Min Max>` wrapper range (JS `bb.Ajb` L894 via `Zf(a,0,MAX)` —
+    // a Min/Max ATTR read): the power range `[xFa,wFa]` the rule gates on
+    // (`Lb.Ti`/`c_a` L846). No wrapper -> [0, INT_MAX] -> always true.
+    int power_min = 0;
+    int power_max = 2147483647;
 };
 
 // One <Reward> row.
@@ -250,9 +255,28 @@ inline bool parse_stages(const std::string& xml_text, std::vector<StageBattle>& 
                     }
                     const pugi::xml_node rules = f.child("Rules");
                     if (rules) {
+                        // JS `bb.OE` (L887-888) + `bb.Ajb` (L894): a
+                        // `<Level Min Max>` child wraps rules and stamps the
+                        // range on each; other children are rules themselves.
                         for (const pugi::xml_node r : rules.children()) {
+                            const std::string rname = r.name();
+                            if (rname == "Level") {
+                                const int lo = xml_int(r, "Min", 0);
+                                const int hi = xml_int(r, "Max", 2147483647);
+                                for (const pugi::xml_node c : r.children()) {
+                                    StageRule rule;
+                                    rule.tag = c.name();
+                                    for (const pugi::xml_attribute a : c.attributes()) {
+                                        rule.attrs[a.name()] = a.value();
+                                    }
+                                    rule.power_min = lo;
+                                    rule.power_max = hi;
+                                    fight.rules.push_back(std::move(rule));
+                                }
+                                continue;
+                            }
                             StageRule rule;
-                            rule.tag = r.name();
+                            rule.tag = rname;
                             for (const pugi::xml_attribute a : r.attributes()) {
                                 rule.attrs[a.name()] = a.value();
                             }

@@ -281,6 +281,14 @@ private:
     int splash_logo_h_ = 0;
     int splash_bg_w_ = 0;
     int splash_bg_h_ = 0;
+    // `Tk` (L87): `mG = E.get(278)` cast art + `qe = E.get(274)` scroll art
+    // (splash/cast.* + splash/scroll.*, standalone webp/avif).
+    unsigned int splash_cast_tex_ = 0;
+    unsigned int splash_scroll_tex_ = 0;
+    int splash_cast_w_ = 0;
+    int splash_cast_h_ = 0;
+    int splash_scroll_w_ = 0;
+    int splash_scroll_h_ = 0;
     // Boot overlay countdown in fixed steps (0 = off; drawn when not headless).
     int boot_splash_frames_ = 0;
     int boot_splash_total_ = 0;

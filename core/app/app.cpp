@@ -5,6 +5,7 @@
 #include <GLFW/glfw3.h>
 
 #include <cctype>
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -328,10 +329,35 @@ bool App::init(const std::string& res_root, const std::string& save_path,
             splash_bg_w_ = bg.w;
             splash_bg_h_ = bg.h;
         }
+        // `Tk.mG` = E.get(278) (cast) and `Tk.qe` = E.get(274) (scroll):
+        // standalone splash art (cast.* / scroll.*, webp/avif), decoded
+        // directly like the sensei portrait below. `E.get(279)` is the
+        // full-screen fill (bg.jpg) `gG`, already loaded as "splash_bg".
+        const auto load_splash_art = [&](const char* prefix, const char* alias,
+                                         unsigned int* out_tex, int* out_w, int* out_h) {
+            for (const auto& entry : std::filesystem::directory_iterator(splash)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind(prefix, 0) != 0) continue;
+                const std::string ext = entry.path().extension().string();
+                if (ext != ".webp" && ext != ".png" && ext != ".avif") continue;
+                sf2::data::Texture tex;
+                if (!sf2::data::decode_texture(entry.path().string(), tex)) continue;
+                *out_tex = renderer_->texture_for(alias, tex);
+                *out_w = tex.w;
+                *out_h = tex.h;
+                break;
+            }
+        };
+        load_splash_art("cast.", "splash_cast", &splash_cast_tex_, &splash_cast_w_,
+                        &splash_cast_h_);
+        load_splash_art("scroll.", "splash_scroll", &splash_scroll_tex_, &splash_scroll_w_,
+                        &splash_scroll_h_);
         std::fprintf(stdout,
-                     "[app] splash: loading font %zu chars tex %u, logo tex %u, bg tex %u\n",
+                     "[app] splash: loading font %zu chars tex %u, logo tex %u, bg tex %u, "
+                     "cast tex %u, scroll tex %u\n",
                      splash_loading_font_ != nullptr ? splash_loading_font_->chars.size() : 0,
-                     splash_loading_tex_, splash_logo_tex_, splash_bg_tex_);
+                     splash_loading_tex_, splash_logo_tex_, splash_bg_tex_, splash_cast_tex_,
+                     splash_scroll_tex_);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "app: splash load failed: %s\n", e.what());
     }
@@ -676,34 +702,83 @@ void App::draw_boot_splash() {
         renderer_->draw_sprite(cover, ui_cam);
     }
 
+    // `Tk` (L87-90) splash layout. `gG`=E.get(279) is the full-screen fill
+    // (already covered by the black base above); `mG`=E.get(278) cast,
+    // `ly`=E.get(275) logo, `qe`=E.get(274) scroll, `Jo`=E.get(276) text.
+    // `Jo` position/scale is computed here and used by the text draw below.
+    float jo_cx = ui_cam.center_x;
+    float jo_cy = ui_cam.center_y + static_cast<float>(view_h_) * 0.25f;
+    float jo_scale = 1.0f;
     if (!loader) {
-        if (splash_bg_tex_ != 0 && splash_bg_w_ > 0 && splash_bg_h_ > 0) {
-            sf2::scene::Sprite bg;
-            bg.texture_name = "splash_bg";
-            bg.frame_x = 0.0f;
-            bg.frame_y = 0.0f;
-            bg.frame_w = static_cast<float>(splash_bg_w_);
-            bg.frame_h = static_cast<float>(splash_bg_h_);
-            bg.tex_w = static_cast<float>(splash_bg_w_);
-            bg.tex_h = static_cast<float>(splash_bg_h_);
-            bg.solid = false;
-            bg.transform.set_pos(ui_cam.center_x, ui_cam.center_y);
-            bg.transform.set_scale(static_cast<float>(view_w_) / static_cast<float>(splash_bg_w_),
-                                   static_cast<float>(view_h_) / static_cast<float>(splash_bg_h_));
-            renderer_->draw_sprite(bg, ui_cam);
+        const float W = static_cast<float>(view_w_);
+        const float H = static_cast<float>(view_h_);
+        const float lc = W / H;  // N.lc
+        const auto draw_tex = [&](const char* alias, unsigned int tex, int tw, int th,
+                                  float cxp, float cyp, float dw, float dh) {
+            if (tex == 0 || tw <= 0 || th <= 0) return;
+            sf2::scene::Sprite s;
+            s.texture_name = alias;
+            s.frame_x = 0.0f;
+            s.frame_y = 0.0f;
+            s.frame_w = static_cast<float>(tw);
+            s.frame_h = static_cast<float>(th);
+            s.tex_w = static_cast<float>(tw);
+            s.tex_h = static_cast<float>(th);
+            s.solid = false;
+            s.transform.set_pos(cxp, cyp);
+            s.transform.set_scale(dw / static_cast<float>(tw), dh / static_cast<float>(th));
+            renderer_->draw_sprite(s, ui_cam);
+        };
+        // `gG` (E.get(279)): the full-screen fill, stretched over the view.
+        draw_tex("splash_bg", splash_bg_tex_, splash_bg_w_, splash_bg_h_, ui_cam.center_x,
+                 ui_cam.center_y, static_cast<float>(view_w_), static_cast<float>(view_h_));
+        // `ly` (logo) L89: width `min(W,H)*fac` (`c<1 ? .9+... : .7-.2*(lc1-1)`),
+        // top-centre `C(W/2)`, `D(ly.qa()*.25)` (`c<.6` portrait branch).
+        const float lc_hi = std::clamp(lc, 1.0f, 2.0f);
+        const float ly_fac =
+            lc < 1.0f ? 0.9f + (std::clamp(lc, 0.5f, 1.0f) - 0.5f) / 0.5f * -0.2f
+                      : 0.7f - 0.2f * (lc_hi - 1.0f);
+        if (splash_logo_tex_ != 0 && splash_logo_w_ > 0) {
+            const float lw = std::min(W, H) * ly_fac;
+            const float lh = lw * static_cast<float>(splash_logo_h_) /
+                             static_cast<float>(splash_logo_w_);
+            float ly_top = lh * 0.25f;
+            if (lc < 0.6f) {
+                const float lc_lo = std::clamp(lc, 0.5f, 0.6f);
+                ly_top = lh + (lc_lo - 0.5f) / 0.1f * (0.0f - lh);
+            }
+            draw_tex("splash_logo", splash_logo_tex_, splash_logo_w_, splash_logo_h_,
+                     W * 0.5f, ly_top + lh * 0.5f, lw, lh);
         }
-        if (splash_logo_tex_ != 0 && splash_logo_w_ > 0 && splash_logo_h_ > 0) {
-            sf2::scene::Sprite logo;
-            logo.texture_name = "splash_logo";
-            logo.frame_x = 0.0f;
-            logo.frame_y = 0.0f;
-            logo.frame_w = static_cast<float>(splash_logo_w_);
-            logo.frame_h = static_cast<float>(splash_logo_h_);
-            logo.tex_w = static_cast<float>(splash_logo_w_);
-            logo.tex_h = static_cast<float>(splash_logo_h_);
-            logo.solid = false;
-            logo.transform.set_pos(ui_cam.center_x, ui_cam.center_y);
-            renderer_->draw_sprite(logo, ui_cam);
+        // `mG` (cast) L89: width `W*fac`, `D(H)` bottom, `C(W/2)` (anchor
+        // bottom-centre, `ik(.5,1)`/`Rn(.5,1)` L87).
+        const float cast_fac =
+            lc < 1.0f ? 2.2f + (std::clamp(lc, 0.5f, 1.0f) - 0.5f) / 0.5f * -1.2f
+                      : 1.0f - 0.5f * (lc_hi - 1.0f);
+        const float cast_w = W * cast_fac;
+        const float cast_h =
+            splash_cast_w_ > 0
+                ? cast_w * static_cast<float>(splash_cast_h_) / static_cast<float>(splash_cast_w_)
+                : 0.0f;
+        draw_tex("splash_cast", splash_cast_tex_, splash_cast_w_, splash_cast_h_, W * 0.5f,
+                 H - cast_h * 0.5f, cast_w, cast_h);
+        // `qe` (scroll) L89-90: `C(W/2)`, `D(mG.ra)` (cast bottom), width
+        // `c<1 ? W*.5 : H*.4`, then shifted up by `H*.15`.
+        const float scroll_w = lc < 1.0f ? W * 0.5f : H * 0.4f;
+        const float scroll_h =
+            splash_scroll_w_ > 0 ? scroll_w * static_cast<float>(splash_scroll_h_) /
+                                       static_cast<float>(splash_scroll_w_)
+                                 : 0.0f;
+        const float scroll_top = H - H * 0.15f;
+        draw_tex("splash_scroll", splash_scroll_tex_, splash_scroll_w_, splash_scroll_h_,
+                 W * 0.5f, scroll_top + scroll_h * 0.5f, scroll_w, scroll_h);
+        // `Jo` (text) L90: `Fa(qe.za()*.75, qe.qa())`, `ua(a*.4)`, `C(qe.ya)`
+        // (scroll left), `D(qe.ra)` (scroll bottom), `Ia(128)` centre.
+        if (splash_loading_font_ != nullptr && scroll_h > 0.0f) {
+            const int eF = splash_loading_font_->size > 0 ? splash_loading_font_->size : 100;
+            jo_scale = (scroll_h * 0.4f) / static_cast<float>(eF);  // Qh.print L1631
+            jo_cx = (W * 0.5f - scroll_w * 0.5f) + scroll_w * 0.75f * 0.5f;
+            jo_cy = scroll_top + scroll_h;
         }
     }
 
@@ -721,12 +796,12 @@ void App::draw_boot_splash() {
         const int pct = pre_span > 0 ? (elapsed * 95) / pre_span : 95;
         std::snprintf(buf, sizeof(buf), "%s %d%%", loading_word(lang_), pct);
     }
-    const float scale = 1.0f;
-    const float w = measure_text(*splash_loading_font_, buf, scale);
-    draw_text_with_font(*splash_loading_font_, splash_loading_tex_,
-                        ui_cam.center_x - w * 0.5f,
-                        ui_cam.center_y + static_cast<float>(view_h_) * 0.25f, buf, scale,
-                        1.0f, 1.0f, 1.0f);
+    // `Jo` (L90): `ua(qe.qa()*.4)` centred on the scroll node.
+    const float w = measure_text(*splash_loading_font_, buf, jo_scale);
+    const float lh = std::max(
+        1.0f, static_cast<float>(splash_loading_font_->line_height) * jo_scale);
+    draw_text_with_font(*splash_loading_font_, splash_loading_tex_, jo_cx - w * 0.5f,
+                        jo_cy - lh * 0.5f, buf, jo_scale, 1.0f, 1.0f, 1.0f);
 }
 
 void App::run_one_frame() {

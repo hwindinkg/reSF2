@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "scene/node.hpp"
@@ -167,8 +168,8 @@ struct Layer {
     std::vector<DrawItem> draw_order;
 };
 
-// One animated SimpleEffect property (`Transparency` / `OscillationX/Y`),
-// mirroring the JS `zh` timeline (L1144-1146): a looping list of
+// One animated SimpleEffect property (`Transparency` / `OscillationX/Y` /
+// `Rotation`), mirroring the JS `zh` timeline (L1144-1146): a looping list of
 // (Period, Value, Ease) keys with a seed `Offset`. The JS per-frame update
 // (`zh.update`, L1146) advances `ar` by the frame delta and wraps segment
 // `wp`; `zh.Gb` (L1146) evaluates the current segment as a line (Ease == 0)
@@ -184,14 +185,61 @@ struct EffectTimeline {
     std::size_t seg = 0;  // JS `zh.wp` (current segment index)
 };
 
+// One `Sequention` frame (JS `ni.frames` L1142 + `R.Cb` L1616): the resolved
+// TexturePacker frame the sequence steps through. `name` is also the texture
+// alias the caller registers per page, so swapping frames (which may live on
+// different atlas pages, e.g. autumn / autumn-2) swaps the sampled texture.
+struct SequenceFrame {
+    std::string name;
+    float frame_x = 0.0f;
+    float frame_y = 0.0f;
+    float frame_w = 0.0f;
+    float frame_h = 0.0f;
+    float tex_w = 0.0f;
+    float tex_h = 0.0f;
+    bool trimmed = false;
+    float trim_x = 0.0f;
+    float trim_y = 0.0f;
+    float source_w = 0.0f;
+    float source_h = 0.0f;
+    bool rotated = false;
+};
+
+// The `Sequention` playhead (JS `ni` L1141-1144) plus the outer `xl`
+// sequence clock (JS `xl.vqb` L1136-1137, `k4a`/`ia`/`uma` L1138-1140).
+// The frame stepper is `ni` (`mP` seconds/frame = `Speed/60`; `grb` selects
+// the frame range, `hc` is the current frame). The outer clock measures in
+// 1/60 s units (`uB = Speed*frames.length + 1`, `eG = Pause`); it feeds
+// `ni.ia` while the sequence plays and calls `ni.nxa` (hide + reset) during
+// the `Pause` tail, then loops.
+struct SequenceAnim {
+    std::vector<SequenceFrame> frames;
+    float mP = 0.03f;    // JS `ni.mP` = Speed/60 (default 0.03, L1141)
+    std::size_t mv = 0;  // JS `ni.mv` (first frame index)
+    std::size_t qu = 0;  // JS `ni.Qu` (last frame index)
+    std::size_t ux = 0;  // JS `ni.UX` (frame count in the active range)
+    std::size_t hc = 0;  // JS `ni.hc` (frame currently shown)
+    float qe = 0.0f;     // JS `ni.Qe` (frame-clock accumulator, seconds)
+    int k9 = 1;          // JS `ni.K9` (step direction)
+    bool lj = true;      // JS `ni.LJ` (playing)
+    float uB = 0.0f;     // JS `xl.uB` = Speed*frames.length + 1 (vqb L1137)
+    float eG = 0.0f;     // JS `xl.eG` = Pause (`ALa` L1137)
+    float bs = 0.0f;     // JS `xl.bs` (units played within `uB`)
+    float gl = 0.0f;     // JS `xl.Gl` (units elapsed in the `Pause` tail)
+    float uoa = 0.0f;    // JS `xl.Uoa` = Offset/100 (`XXa` L1136)
+};
+
 // Per-sprite SimpleEffect modifier state (JS `xl` fields, L1135-1139):
 //   osc_x / osc_y   <- OscillationX/Y (`RW`/`SW`, `bXa`/`cXa` L1137)
+//   rot             <- Rotation (`lO`, `GXa` L1137; `rot_start` = `$sb`)
 //   speed_x/speed_y <- Speed X/Y (`Kta`/`Lta`, `zsb` L1138; per-frame px)
 //   reappear_x/y    <- ReappearX/Y (`qX`/`rX`, `gsb`/`hsb` + `of` L1138)
 // `acc_x`/`acc_y` are the JS `JM`/`KM` accumulators (XML X/Y + speed).
 // `sprite` is a non-owning pointer into `Layer::sprites` (stable address).
-// The SimpleEffect Rotation modifier (`$sb`/`Zsb`/`GXa`) and nested
-// SimpleEffect are not represented here (OPEN, JS L481).
+// A nested `SimpleEffect` (JS `bkb` L481 `case "SimpleEffect"` -> `xl.nd`)
+// is a separate layer sprite registered here as a child: it starts with
+// `hidden=true` (JS `OX`) and is only driven after this parent launches it
+// (`kdb` on `EndAnimChildLaunch`/`ReappearChildLaunch`, `vOa` L1140).
 struct SpriteAnim {
     Sprite* sprite = nullptr;
     float base_x = 0.0f;  // XML X (JS setPosition L1138)
@@ -202,15 +250,21 @@ struct SpriteAnim {
     float speed_y = 0.0f;  // JS Lta
     EffectTimeline osc_x;  // JS RW
     EffectTimeline osc_y;  // JS SW
+    EffectTimeline rot;    // JS lO (Rotation modifier, GXa L1137)
+    float rot_start = 0.0f;  // JS kta ($sb StartAngle, L1137)
     bool reappear_x = false;
     bool reappear_y = false;
     float re_x_min = 0.0f, re_x_max = 0.0f;  // JS Zo.min/max (L1140)
     float re_y_min = 0.0f, re_y_max = 0.0f;
-
-    bool animated() const {
-        return !osc_x.keys.empty() || !osc_y.keys.empty() || reappear_x ||
-               reappear_y || speed_x != 0.0f || speed_y != 0.0f;
-    }
+    SequenceAnim seq;                  // Sequention state (empty for Picture)
+    std::vector<SpriteAnim*> children;  // nested SimpleEffect (JS Fpa)
+    bool has_parent = false;       // JS As != null
+    bool hidden = false;           // JS OX (true = ia gated off)
+    bool visible = true;           // JS Y.R / $m (false = not drawn)
+    bool first = true;             // JS Lqa (k4a runs once)
+    bool end_launch = false;       // JS Fra (EndAnimChildLaunch)
+    bool reappear_launch = false;  // JS Gra (ReappearChildLaunch)
+    bool hide_paused = false;      // JS Wqa (HidePaused)
 };
 
 class LocationScene {
@@ -248,9 +302,10 @@ public:
                         float focus_x = -1.0f, float fighter_span = -1.0f) const;
 
     // Advances time-animated scene elements: the SimpleEffect Transparency
-    // `KWa` loop and the OscillationX/Y / ReappearX/Y / Speed modifier block
-    // (JS `xl.ia` L1139, `bkb` L479-481). `dt` in seconds. A no-op when no
-    // layer carries a timeline. The host calls it once per rendered frame.
+    // `KWa` loop, the OscillationX/Y / ReappearX/Y / Speed / Rotation modifier
+    // block, and the `Sequention` frame timeline (JS `xl.ia` L1138-1140,
+    // `bkb` L479-481). `dt` in seconds. A no-op when no layer carries a
+    // timeline. The host calls it once per rendered frame.
     void update(float dt);
 
     // JS `jh` live draws (L1149): flattens every live particle into
@@ -322,9 +377,15 @@ private:
                                      const Particle& p) const;
 
     std::vector<std::shared_ptr<Layer>> layers_;
-    // Per-SimpleEffect Oscillation/Reappear/Speed state (JS `bkb` L479-481),
-    // advanced by `update(dt)`. Pointers target `Layer::sprites` elements.
-    std::vector<SpriteAnim> anims_;
+    // Per-SimpleEffect state (JS `bkb` L479-481), advanced by `update(dt)`.
+    // Pointers target `Layer::sprites` elements; nested SimpleEffect children
+    // (JS `xl.Fpa`) point into this same list, so it must not reallocate
+    // after parsing (built once, then only iterated).
+    std::vector<std::unique_ptr<SpriteAnim>> anims_;
+    // Sprites hidden by the SimpleEffect visibility path (JS `Y.R(false)` /
+    // `Nka`, L1136) — a launched nested effect that finishes hides itself
+    // (`Wwb` L1140). Rebuilt every `update`; `render_layer` skips members.
+    std::unordered_set<const Sprite*> hidden_sprites_;
     std::vector<std::string> atlas_names_;
     // Res root passed to `load`; `render_layer` uses it to lazily load the
     // location effects atlas (`E.get(1304)`).

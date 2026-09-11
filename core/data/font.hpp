@@ -61,6 +61,10 @@ struct font {
     int base = 0;
     int scale_w = 0;
     int scale_h = 0;
+    // BMF info-block `fontSize`. JS `charset.eF` (L1672/L1631) is this value;
+    // `Qh.print` scales glyphs by `fontSize/charset.eF`, so it is the
+    // reference size every `ua()` is measured against.
+    int size = 0;
     std::string page;  // texture file name (first page; the game uses 1 page)
     std::vector<font_char> chars;
 };
@@ -91,5 +95,11 @@ const font_char* find_glyph(const font& f, std::uint32_t codepoint) noexcept;
 // UTF-8-aware advance width. Unknown codepoints contribute nothing (the
 // previous byte-skip behavior), so ASCII output is unchanged.
 float measure_text_utf8(const font& f, const std::string& text, float scale) noexcept;
+
+// UTF-8-aware tight text height: the tallest glyph box in `text` at `scale`
+// (max `font_char::h * scale`), 0 when no glyph matches. Mirrors the JS
+// `Qh` text bounds `rg.W - rg.P` (L1630) used by the explicit `Sk()` fit
+// (L1627) — NOT `line_height`, which is the line advance.
+float measure_text_height_utf8(const font& f, const std::string& text, float scale) noexcept;
 
 } // namespace sf2::data

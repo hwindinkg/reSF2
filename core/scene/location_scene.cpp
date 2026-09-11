@@ -11,6 +11,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 #include "atlas.hpp"
 #include "scene/sprite.hpp"
@@ -31,6 +32,17 @@ constexpr float kParticleGravityScale = 9.81f * 0.02f;
 constexpr float kParticleAlphaStep = 0.1f;
 constexpr float kParticleFixedStep = 1.0f / 60.0f;  // JS `Prewarm` tick (L1149)
 constexpr std::uint32_t kParticleSeed = 0x853C49E7u;
+
+// JS `QIa` L481: `if(!v.AEa)` — the global particle-effect kill switch. In
+// the shipped build `v.AEa` is only ever assigned `!1` (the `L` ctor L63 and
+// the `v` reset L2481), so the gate is always open (emitters are created).
+// Kept as a named constant so the branch mirrors the oracle instead of
+// silently dropping the gate.
+constexpr bool kParticleEffectsEnabled = true;
+// JS `Bf.UIa` L478: `if(v.Qcb)return null` — the global Sequention kill
+// switch. `v.Qcb` is likewise only ever `!1` (L478/L2481), so sequentions are
+// built; kept named for the same reason.
+constexpr bool kSequentionEnabled = true;
 
 // A ClassName resolved against an atlas: the frame rect plus the pixel size
 // of the atlas texture it lives in (for UV normalization).
@@ -244,48 +256,297 @@ ParticleLayer parse_particle(const pugi::xml_node& node, std::uint32_t ordinal) 
 }
 
 // The JS `bkb` modifier block (L479-481): OscillationX/Y (`Mrb`/`bXa`,
-// `Nrb`/`cXa`), ReappearX/Y (`gsb`/`hsb` over `Zo`), Speed (`zsb`). The
-// SimpleEffect Rotation modifier (`$sb`/`Zsb`/`GXa`) and nested SimpleEffect
-// are not handled here (OPEN, L481).
-void parse_simple_effect_modifiers(const pugi::xml_node& node, SpriteAnim& anim) {
-    for (const pugi::xml_node child : node.children()) {
-        const char* n = child.name();
-        if (std::strcmp(n, "OscillationX") == 0 ||
-            std::strcmp(n, "OscillationY") == 0) {
-            EffectTimeline& tl =
-                std::strcmp(n, "OscillationX") == 0 ? anim.osc_x : anim.osc_y;
-            tl.offset = sf2::data::xml_attr_float(child, "Offset", 0.0f);
-            for (const pugi::xml_node pt : child.children()) {
-                if (std::strcmp(pt.name(), "Point") != 0) {
-                    continue;
-                }
-                Sprite::TransKey k;
-                k.value = sf2::data::xml_attr_float(pt, "Value", 0.0f);
-                k.period = sf2::data::xml_attr_float(pt, "Period", 1.0f);
-                k.ease = sf2::data::xml_attr_float(pt, "Ease", 0.0f);
-                tl.keys.push_back(k);
+// `Nrb`/`cXa`), ReappearX/Y (`gsb`/`hsb` over `Zo`), Speed (`zsb`),
+// Rotation (`$sb` StartAngle + `Zsb` Offset + `GXa` keys). `Transparency`
+// is handled by `parse_transparency` and nested `SimpleEffect` by the
+// recursive `parse_simple_effect_node`; both are skipped here.
+void parse_effect_modifier(const pugi::xml_node& child, SpriteAnim& anim) {
+    const char* n = child.name();
+    if (std::strcmp(n, "OscillationX") == 0 ||
+        std::strcmp(n, "OscillationY") == 0) {
+        EffectTimeline& tl =
+            std::strcmp(n, "OscillationX") == 0 ? anim.osc_x : anim.osc_y;
+        tl.offset = sf2::data::xml_attr_float(child, "Offset", 0.0f);
+        for (const pugi::xml_node pt : child.children()) {
+            if (std::strcmp(pt.name(), "Point") != 0) {
+                continue;
             }
-            seed_timeline(tl);
-        } else if (std::strcmp(n, "ReappearX") == 0 ||
-                   std::strcmp(n, "ReappearY") == 0) {
-            const bool is_x = std::strcmp(n, "ReappearX") == 0;
-            // JS `of(a)` (`new Ba(u.H(Min), u.H(Max))` -> .first/.second).
-            const float mn = sf2::data::xml_attr_float(child, "Min", 0.0f);
-            const float mx = sf2::data::xml_attr_float(child, "Max", 0.0f);
-            if (is_x) {
-                anim.reappear_x = true;
-                anim.re_x_min = mn;
-                anim.re_x_max = mx;
-            } else {
-                anim.reappear_y = true;
-                anim.re_y_min = mn;
-                anim.re_y_max = mx;
-            }
-        } else if (std::strcmp(n, "Speed") == 0) {
-            // JS `zsb(X,Y)` L481 -> `Kta`/`Lta`, added per frame (L1139).
-            anim.speed_x = sf2::data::xml_attr_float(child, "X", 0.0f);
-            anim.speed_y = sf2::data::xml_attr_float(child, "Y", 0.0f);
+            Sprite::TransKey k;
+            k.value = sf2::data::xml_attr_float(pt, "Value", 0.0f);
+            k.period = sf2::data::xml_attr_float(pt, "Period", 1.0f);
+            k.ease = sf2::data::xml_attr_float(pt, "Ease", 0.0f);
+            tl.keys.push_back(k);
         }
+        seed_timeline(tl);
+    } else if (std::strcmp(n, "ReappearX") == 0 ||
+               std::strcmp(n, "ReappearY") == 0) {
+        const bool is_x = std::strcmp(n, "ReappearX") == 0;
+        // JS `of(a)` (`new Ba(u.H(Min), u.H(Max))` -> .first/.second).
+        const float mn = sf2::data::xml_attr_float(child, "Min", 0.0f);
+        const float mx = sf2::data::xml_attr_float(child, "Max", 0.0f);
+        if (is_x) {
+            anim.reappear_x = true;
+            anim.re_x_min = mn;
+            anim.re_x_max = mx;
+        } else {
+            anim.reappear_y = true;
+            anim.re_y_min = mn;
+            anim.re_y_max = mx;
+        }
+    } else if (std::strcmp(n, "Speed") == 0) {
+        // JS `zsb(X,Y)` L481 -> `Kta`/`Lta`, added per frame (L1139).
+        anim.speed_x = sf2::data::xml_attr_float(child, "X", 0.0f);
+        anim.speed_y = sf2::data::xml_attr_float(child, "Y", 0.0f);
+    } else if (std::strcmp(n, "Rotation") == 0) {
+        // JS `case "Rotation"` L480-481: `$sb(StartAngle)`,
+        // `Zsb(Offset)` (seed `lO`), then a `GXa(Period,Value,Ease)` key per
+        // Point. `ia` L1139 drives `Wg(lO.Gb()+kta)` every frame.
+        anim.rot_start = sf2::data::xml_attr_float(child, "StartAngle", 0.0f);
+        anim.rot.offset = sf2::data::xml_attr_float(child, "Offset", 0.0f);
+        for (const pugi::xml_node pt : child.children()) {
+            if (std::strcmp(pt.name(), "Point") != 0) {
+                continue;
+            }
+            Sprite::TransKey k;
+            k.value = sf2::data::xml_attr_float(pt, "Value", 0.0f);
+            k.period = sf2::data::xml_attr_float(pt, "Period", 1.0f);
+            k.ease = sf2::data::xml_attr_float(pt, "Ease", 0.0f);
+            anim.rot.keys.push_back(k);
+        }
+        seed_timeline(anim.rot);
+    }
+}
+
+// JS `ky(a,b)` (L17): `a -= floor(a/b)*b; return a<0?0:a>b?b:a`.
+float wrap_js(float a, float b) {
+    if (b <= 0.0f) {
+        return a;
+    }
+    a -= std::floor(a / b) * b;
+    return a < 0.0f ? 0.0f : (a > b ? b : a);
+}
+
+// JS `Qi.NWa`/`Dla` for a Sequention frame: swap the sprite's atlas rect,
+// source/trim and texture alias to `f` (the `R.Cb` path, L1616). The scale is
+// set once from frame 0 (JS `vqb` `Rh`/`mj`, L1137) and is NOT recomputed.
+void apply_sequence_frame(Sprite& sprite, const SequenceFrame& f) {
+    sprite.texture_name = f.name;
+    sprite.frame_x = f.frame_x;
+    sprite.frame_y = f.frame_y;
+    sprite.frame_w = f.frame_w;
+    sprite.frame_h = f.frame_h;
+    sprite.tex_w = f.tex_w;
+    sprite.tex_h = f.tex_h;
+    sprite.rotated = f.rotated;
+    if (f.trimmed) {
+        sprite.trim_x = f.trim_x;
+        sprite.trim_y = f.trim_y;
+        sprite.source_w = f.source_w;
+        sprite.source_h = f.source_h;
+    }
+}
+
+// JS `ni.init` L1142 sort key: `K.parseInt(name.substr(len-2))` (the last two
+// characters, parsed as an int; non-numeric -> 0).
+long sequence_sort_key(const std::string& name) {
+    if (name.size() < 2) {
+        return 0;
+    }
+    const std::string tail = name.substr(name.size() - 2);
+    char* end = nullptr;
+    const long v = std::strtol(tail.c_str(), &end, 10);
+    return end == tail.c_str() ? 0 : v;
+}
+
+// JS `ni.MT` (L1143): show frame `idx` (re-aliases the texture), if in range.
+void seq_mt(SpriteAnim& a, std::size_t idx) {
+    const SequenceAnim& s = a.seq;
+    if (a.sprite == nullptr || s.frames.empty() || idx > s.qu || idx < s.mv) {
+        return;
+    }
+    apply_sequence_frame(*a.sprite, s.frames[idx]);
+    a.visible = true;  // JS `Y.R(!0)`
+}
+
+// JS `ni.JXa` (L1144): show the current frame, then step `hc` and wrap.
+void seq_jxa(SpriteAnim& a) {
+    SequenceAnim& s = a.seq;
+    seq_mt(a, s.hc);
+    const long next = static_cast<long>(s.hc) + s.k9;
+    s.hc = (next > static_cast<long>(s.qu) || next < static_cast<long>(s.mv))
+               ? s.mv
+               : static_cast<std::size_t>(next);
+}
+
+// JS `ni.ia` (L1142): advance the frame clock by `sec` seconds.
+void seq_ia(SpriteAnim& a, float sec) {
+    SequenceAnim& s = a.seq;
+    if (!s.lj || a.sprite == nullptr || s.frames.empty() || s.mP <= 0.0f) {
+        return;
+    }
+    s.qe += sec;
+    while (s.qe >= s.mP) {
+        seq_jxa(a);
+        s.qe -= s.mP;
+    }
+}
+
+// JS `ni.nxa` (L1142): reset to the first frame and hide.
+void seq_nxa(SpriteAnim& a) {
+    SequenceAnim& s = a.seq;
+    s.hc = s.mv;
+    s.qe = 0.0f;
+    seq_mt(a, s.hc);
+    a.visible = false;  // JS `Y.R(!1)`
+}
+
+// JS `ni.rdb` (L1143): seek by the normalized Offset fraction (`k4a` first
+// tick). `e5a() = mP*UX`.
+void seq_rdb(SpriteAnim& a, float uoa) {
+    SequenceAnim& s = a.seq;
+    if (s.frames.empty()) {
+        return;
+    }
+    s.qe = s.mP * static_cast<float>(s.ux) * uoa;
+    long hc = static_cast<long>(static_cast<float>(s.ux) * uoa);  // `|0`
+    hc += static_cast<long>(s.mv);
+    if (hc >= static_cast<long>(s.qu)) {
+        hc = static_cast<long>(s.qu);
+    }
+    if (hc < static_cast<long>(s.mv)) {
+        hc = static_cast<long>(s.mv);
+    }
+    s.hc = static_cast<std::size_t>(hc);
+    seq_mt(a, s.hc);
+}
+
+// JS `xl.jdb` (L1136): reset and show a child effect (`kdb` -> `jdb`).
+void anim_jdb(SpriteAnim& a) {
+    a.seq.bs = 0.0f;
+    a.seq.gl = 0.0f;
+    a.hidden = false;
+    a.visible = true;
+}
+
+// JS `xl.Wwb` (L1136): hide this effect and reset its sequence.
+void anim_wwb(SpriteAnim& a) {
+    a.hidden = true;
+    if (!a.seq.frames.empty()) {
+        seq_nxa(a);
+    }
+    a.visible = false;
+}
+
+// JS `xl.vOa` (L1140): on a sequence end (`end`) or reappear (`reappear`),
+// a nested effect hides itself and, if the matching launch flag is set,
+// launches its children.
+void anim_vOa(SpriteAnim& a, bool reappear, bool end) {
+    if (a.has_parent) {
+        anim_wwb(a);
+    }
+    if ((a.end_launch && end) || (a.reappear_launch && reappear)) {
+        for (SpriteAnim* c : a.children) {
+            if (c != nullptr) {
+                anim_jdb(*c);
+            }
+        }
+    }
+}
+
+// JS `xl.uma` (L1140): the outer sequence clock, in 1/60 s units. Returns the
+// units to feed `ni.ia`; 0 while in the `Pause` tail. Ported verbatim,
+// including the `abs(Gl)<1e-6` idle test and the end-crossing `vOa(false,true)`.
+float seq_uma(SpriteAnim& a, float au) {
+    SequenceAnim& s = a.seq;
+    float x = wrap_js(au, s.uB + s.eG);
+    if (std::fabs(s.gl) < 1.0e-6f) {
+        if (s.bs < s.uB && s.bs + x >= s.uB) {
+            anim_vOa(a, false, true);
+        }
+        s.bs += x;
+        if (s.bs < s.uB) {
+            return x;
+        }
+        s.gl += s.bs - s.uB;
+        if (s.gl >= s.eG) {
+            const float rest = s.gl - s.eG;
+            s.bs = 0.0f;
+            s.gl = 0.0f;
+            return seq_uma(a, rest);
+        }
+        return s.uB - (s.bs - x + 1.0e-6f);
+    }
+    s.gl += x;
+    if (s.gl < s.eG) {
+        return 0.0f;
+    }
+    const float rest = s.gl - s.eG;
+    s.bs = 0.0f;
+    s.gl = 0.0f;
+    return seq_uma(a, rest);
+}
+
+// JS `xl.ia` (L1138-1140): one SimpleEffect tick. Position/oscillation/
+// rotation/reappear run for both Picture and Sequention; the Sequention
+// clock additionally steps the `ni` frames. `dt` seconds; `au` = the number
+// of 1/60 s units (`a` in the oracle, L1139 `var b=.016666*a`).
+void update_effect(SpriteAnim& a, float dt) {
+    if (a.sprite == nullptr) {
+        return;
+    }
+    // JS `if(this.As==null||!this.OX)`: a nested child that has not been
+    // launched (OX) runs no update at all.
+    if (a.has_parent && a.hidden) {
+        return;
+    }
+    const float au = dt * 60.0f;
+    // JS `Nka(!(this.Gl>0&&this.Wqa))` (L1139): HidePaused hides during the
+    // Pause tail.
+    a.visible = !(a.seq.gl > 0.0f && a.hide_paused);
+    // JS `k4a()` (L1138): first tick seeks a Sequention to `Uoa`.
+    if (a.first) {
+        if (!a.seq.frames.empty()) {
+            seq_rdb(a, a.seq.uoa);
+        }
+        a.first = false;
+    }
+    // JS `uc==1 && (a=uma(a), a>0 ? pq.ia(.016666*a) : Gl>0 && pq.nxa())`.
+    if (!a.seq.frames.empty()) {
+        const float adv = seq_uma(a, au);
+        if (adv > 0.0f) {
+            seq_ia(a, adv / 60.0f);
+        } else if (a.seq.gl > 0.0f) {
+            seq_nxa(a);
+        }
+    }
+    // JS `a=this.JM+=this.Kta; this.RW.update(b); a+=this.RW.Gb(); C(a)`.
+    a.acc_x += a.speed_x * au;
+    a.acc_y += a.speed_y * au;
+    advance_timeline(a.osc_x, dt);
+    advance_timeline(a.osc_y, dt);
+    const float x = a.base_x + a.acc_x + timeline_value(a.osc_x);
+    const float y = a.base_y + a.acc_y + timeline_value(a.osc_y);
+    a.sprite->transform.x = x;
+    a.sprite->transform.y = y;
+    // JS `if(this.lO.active()){this.lO.update(b); Wg(this.lO.Gb()+this.kta)}`.
+    if (!a.rot.keys.empty()) {
+        advance_timeline(a.rot, dt);
+        a.sprite->transform.rotation = timeline_value(a.rot) + a.rot_start;
+    }
+    // JS ReappearX/Y `Zwa` (L1140): wrap and `vOa(!0,!1)` if either fired.
+    bool triggered = false;
+    if (a.reappear_x && (x > a.re_x_max || x < a.re_x_min)) {
+        a.acc_x = x > a.re_x_max ? a.re_x_min - a.re_x_max + x
+                                 : a.re_x_max - a.re_x_min + x;
+        triggered = true;
+    }
+    if (a.reappear_y && (y > a.re_y_max || y < a.re_y_min)) {
+        a.acc_y = y > a.re_y_max ? a.re_y_min - a.re_y_max + y
+                                 : a.re_y_max - a.re_y_min + y;
+        triggered = true;
+    }
+    if (triggered) {
+        anim_vOa(a, true, false);
     }
 }
 
@@ -422,6 +683,161 @@ std::shared_ptr<Sprite> make_image(const pugi::xml_node& node,
     return sprite;
 }
 
+// JS `xl.ala`/`vqb` (L1137) builds a Sequention sprite: collect every atlas
+// frame whose name starts with `ClassName` (`ni.init` L1142 `qd` prefix
+// match), sort by the last two digits, then size the sprite from `Width`/
+// `Height` over frame 0's source size. The frame list is stored in `seq`; the
+// driver (`seq_mt`) swaps the frame + texture alias at run time. Returns
+// nullptr when no frame matches (the JS would have no `Y`).
+std::shared_ptr<Sprite> make_sequention(
+    const pugi::xml_node& node,
+    const std::unordered_map<std::string, FrameRef>& frames, SequenceAnim& seq) {
+    const char* cls = node.attribute("ClassName").value();
+    const std::string prefix = cls != nullptr ? cls : "";
+    std::vector<std::pair<long, SequenceFrame>> ordered;
+    for (const auto& kv : frames) {
+        if (kv.first.rfind(prefix, 0) != 0) {  // JS qd: indexOf(name)==0
+            continue;
+        }
+        const sf2::data::atlas_frame& fr = kv.second.frame;
+        SequenceFrame f;
+        f.name = kv.first;
+        f.frame_x = static_cast<float>(fr.x);
+        f.frame_y = static_cast<float>(fr.y);
+        f.frame_w = static_cast<float>(fr.w);
+        f.frame_h = static_cast<float>(fr.h);
+        f.tex_w = static_cast<float>(kv.second.atlas_w);
+        f.tex_h = static_cast<float>(kv.second.atlas_h);
+        f.trimmed = fr.trimmed;
+        f.trim_x = static_cast<float>(fr.offset_x);
+        f.trim_y = static_cast<float>(fr.offset_y);
+        f.source_w = static_cast<float>(fr.source_w);
+        f.source_h = static_cast<float>(fr.source_h);
+        f.rotated = fr.rotated;
+        ordered.emplace_back(sequence_sort_key(kv.first), std::move(f));
+    }
+    if (ordered.empty()) {
+        std::fprintf(stderr,
+                     "location_scene: Sequention ClassName=\"%s\" has no frames\n",
+                     prefix.c_str());
+        return nullptr;
+    }
+    std::stable_sort(ordered.begin(), ordered.end(),
+                     [](const std::pair<long, SequenceFrame>& a,
+                        const std::pair<long, SequenceFrame>& b) {
+                         return a.first < b.first;
+                     });
+    for (auto& p : ordered) {
+        seq.frames.push_back(std::move(p.second));
+    }
+    // JS `ni.init`/`grb(0,-1)`/`RLa`: full range, play forward.
+    seq.mv = 0;
+    seq.qu = seq.frames.size() - 1;
+    seq.ux = seq.frames.size();
+    seq.hc = 0;
+    seq.k9 = 1;
+    seq.lj = true;
+    // JS `vqb`: `mP=Speed/60`, `uB=Speed*frames.length+1`, `eG=Pause`.
+    const float speed = sf2::data::xml_attr_float(node, "Speed", 0.0f);
+    seq.mP = speed / 60.0f;
+    seq.uB = speed * static_cast<float>(seq.frames.size()) + 1.0f;
+    seq.eG = sf2::data::xml_attr_float(node, "Pause", 0.0f);
+    // JS `XXa(Offset)` (L1136): >0 wraps mod 100, <0 -> 100 - wrap(-offset).
+    float off = sf2::data::xml_attr_float(node, "Offset", 0.0f);
+    if (off > 0.0f) {
+        off = wrap_js(off, 100.0f);
+    } else if (off < 0.0f) {
+        off = 100.0f - wrap_js(-off, 100.0f);
+    }
+    seq.uoa = off / 100.0f;
+    // JS `vqb`: `Y = R.$(frames[0])`, `Rh(Width/fa.x)`, `mj(Height/fa.y)`,
+    // `ik(.5,.5)`. The JS `mj` is negative but is cancelled by the following
+    // `C5()` texture flipY (L1610) in the shader's flipY V-swap (L1769), so
+    // the net orientation is upright — positive scale here.
+    const SequenceFrame& f0 = seq.frames[0];
+    auto sprite = std::make_shared<Sprite>();
+    apply_sequence_frame(*sprite, f0);
+    const float w = sf2::data::xml_attr_float(node, "Width");
+    const float h = sf2::data::xml_attr_float(node, "Height");
+    const float sw = (f0.trimmed && f0.source_w > 0.0f) ? f0.source_w : f0.frame_w;
+    const float sh = (f0.trimmed && f0.source_h > 0.0f) ? f0.source_h : f0.frame_h;
+    if (w > 0.0f && h > 0.0f && sw > 0.0f && sh > 0.0f) {
+        sprite->transform.set_scale(w / sw, h / sh);
+    }
+    return sprite;
+}
+
+// Recursive `Bf.UIa` (L478-479) + `bkb` (L479-481): build one SimpleEffect
+// (Picture or Sequention) and its nested `SimpleEffect` children. Every
+// emitted sprite is appended to `out_sprites` in JS `pWa` order — nested
+// children first (their `UIa` runs during the parent's `bkb`, before the
+// parent's own `c.pWa`), then the parent — and every state object is pushed
+// to `anims` in the same order (the layer `P7` list `Qi.ia` walks). Returns
+// the new state, or nullptr when the element cannot be built.
+SpriteAnim* parse_simple_effect_node(
+    const pugi::xml_node& node,
+    const std::unordered_map<std::string, FrameRef>& frames,
+    std::vector<std::unique_ptr<SpriteAnim>>& anims,
+    std::vector<std::shared_ptr<Sprite>>& out_sprites, SpriteAnim* parent) {
+    const char* type_raw = node.attribute("Type").value();
+    const std::string type = type_raw != nullptr ? type_raw : "";
+    if (type != "Picture" && type != "Sequention") {
+        // JS `UIa` L478 only builds Picture/Sequention; any other Type would
+        // leave `Y` null and fault downstream. Skip safely.
+        std::fprintf(stderr, "location_scene: SimpleEffect Type=\"%s\" ignored\n",
+                     type.c_str());
+        return nullptr;
+    }
+    if (type == "Sequention" && !kSequentionEnabled) {
+        return nullptr;  // JS `if(v.Qcb)return null` (L478)
+    }
+    auto anim_u = std::make_unique<SpriteAnim>();
+    SpriteAnim* anim = anim_u.get();
+    anim->has_parent = parent != nullptr;
+    anim->hidden = parent != nullptr;  // JS xl.nd: a.OX = !0
+    anim->base_x = sf2::data::xml_attr_float(node, "X");
+    anim->base_y = sf2::data::xml_attr_float(node, "Y");
+    // JS `xl` ctor L1135-1136: child-launch flags off the SimpleEffect node.
+    anim->end_launch = sf2::data::xml_attr_bool(node, "EndAnimChildLaunch", false);
+    anim->reappear_launch =
+        sf2::data::xml_attr_bool(node, "ReappearChildLaunch", false);
+    anim->hide_paused = sf2::data::xml_attr_bool(node, "HidePaused", false);
+
+    std::shared_ptr<Sprite> sprite = type == "Sequention"
+                                         ? make_sequention(node, frames, anim->seq)
+                                         : make_image(node, frames);
+    if (sprite == nullptr) {
+        return nullptr;
+    }
+    sprite->transform.set_pos(anim->base_x, anim->base_y);
+    anim->sprite = sprite.get();
+    // JS `bkb` `case "Transparency"` (L481): rest alpha = first key.
+    sprite->color_a = parse_transparency(node, *sprite);
+
+    // `bkb` switch (L479-481) in document order. A nested `SimpleEffect`
+    // (`case "SimpleEffect": b.nd(UIa(f,c,d))`) is parsed here; its sprite
+    // is appended before ours (nested `UIa` runs `c.pWa` first).
+    for (const pugi::xml_node child : node.children()) {
+        if (std::strcmp(child.name(), "SimpleEffect") == 0) {
+            SpriteAnim* c =
+                parse_simple_effect_node(child, frames, anims, out_sprites, anim);
+            if (c != nullptr) {
+                anim->children.push_back(c);
+            }
+        } else {
+            parse_effect_modifier(child, *anim);
+        }
+    }
+    // JS `a.has("Flip") && d.Y.Hr(!0)` for the Sequention path; the Picture
+    // path already consumed `Flip` inside `make_image`.
+    if (type == "Sequention" && sf2::data::xml_attr_bool(node, "Flip", false)) {
+        sprite->transform.scale_x = -sprite->transform.scale_x;
+    }
+    out_sprites.push_back(sprite);       // JS `c.pWa(d)` — after the nested
+    anims.push_back(std::move(anim_u));  // JS `P7.push(d)` — same order
+    return anim;
+}
+
 } // namespace
 
 void LocationScene::load(const std::string& params_xml, const std::string& atlas_json,
@@ -474,6 +890,7 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
 
     layers_.clear();
     anims_.clear();
+    hidden_sprites_.clear();
     fighter_layer_ = npos;
     int layer_index = 0;
     std::uint32_t emitter_ordinal = 0;  // unique LCG seed per emitter
@@ -514,31 +931,26 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
 
         int sprite_index = 0;  // JS `Qi.QH` starts at 0 per layer (Dla L1599)
         for (const pugi::xml_node child : layer_node.children()) {
-            std::shared_ptr<Sprite> sprite;
+            // Sprites emitted by this XML child, in JS `pWa` order. A
+            // SimpleEffect can emit several: a nested `SimpleEffect` is
+            // appended before its parent (JS `bkb` L481).
+            std::vector<std::shared_ptr<Sprite>> emitted;
             if (std::strcmp(child.name(), "Image") == 0) {
                 // Raw R3a placement (JS L486-487): X/Y straight through.
-                sprite = make_image(child, frames);
-            } else if (std::strcmp(child.name(), "SimpleEffect") == 0) {
-                // Picture SimpleEffects draw a static frame at X/Y — the
-                // game's xl Picture path (L478). The Transparency `KWa` loop
-                // is stored and evaluated by update() (rest = first key).
-                sprite = make_image(child, frames);
+                std::shared_ptr<Sprite> sprite = make_image(child, frames);
                 if (sprite != nullptr) {
-                    sprite->color_a = parse_transparency(child, *sprite);
-                    // Oscillation / Reappear / Speed (`bkb` L479-481): build
-                    // the per-sprite modifier state before the sprite moves
-                    // into the layer (the Sprite address stays stable).
-                    SpriteAnim anim;
-                    anim.sprite = sprite.get();
-                    anim.base_x = sprite->transform.x;
-                    anim.base_y = sprite->transform.y;
-                    parse_simple_effect_modifiers(child, anim);
-                    if (anim.animated()) {
-                        anims_.push_back(std::move(anim));
-                    }
+                    emitted.push_back(std::move(sprite));
                 }
-            } else if (std::strcmp(child.name(), "ParticleEffect") == 0 ||
-                       std::strcmp(child.name(), "NewParticleEffect") == 0) {
+            } else if (std::strcmp(child.name(), "SimpleEffect") == 0) {
+                // Picture / Sequention + the `bkb` modifier block (JS
+                // `UIa` L478-479, `bkb` L479-481). The recursive parse builds
+                // the effect, its nested SimpleEffect children and registers
+                // every SpriteAnim in `anims_`; sprites come back in `pWa`
+                // order.
+                parse_simple_effect_node(child, frames, anims_, emitted, nullptr);
+            } else if (kParticleEffectsEnabled &&
+                       (std::strcmp(child.name(), "ParticleEffect") == 0 ||
+                        std::strcmp(child.name(), "NewParticleEffect") == 0)) {
                 // JS `Bf.zjb` L476-477: both tags route to `QIa` ->
                 // `fXa(new jh)`. Parse the emitter, run the ctor `Prewarm`
                 // loop, attach it, then the `Qi.fXa` warm-up; `update` runs
@@ -571,7 +983,7 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
             }
             // ModelsViewer children are skipped (fighters are drawn by the
             // fight screen); ParticleEffect/NewParticleEffect are parsed above.
-            if (sprite != nullptr) {
+            for (auto& sprite : emitted) {
                 // JS `Qi.NWa`/`Dla` L487/L1599: z = -0.01*spriteIndex.
                 sprite->z = -0.01f * static_cast<float>(sprite_index);
                 // JS `zjb` L477: `ujb`/`UIa` append the sprite in document
@@ -583,7 +995,7 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
                     item.sprite = sprite;
                     layer->draw_order.push_back(item);
                 }
-                layer->sprites.push_back(std::move(sprite));
+                layer->sprites.push_back(sprite);
                 ++sprite_index;
             }
         }
@@ -706,31 +1118,19 @@ void LocationScene::update(float dt) {
         }
     }
 
-    // SimpleEffect Oscillation / Reappear / Speed (JS `xl.ia` L1139): per
-    // frame `JM += Kta` (Speed X), `x = JM + RW.Gb()` (OscillationX) and
-    // likewise for Y; a `Reappear` wraps `JM` into [min,max] once the
-    // RENDERED coord leaves it (JS `Zo.Zwa` L1140). `P7` sprites are all
-    // evaluated when the effect is active (`ia` L1139).
-    const float frames = dt * 60.0f;  // `xl.ia` runs once per fixed 60 Hz tick
-    for (SpriteAnim& a : anims_) {
-        a.acc_x += a.speed_x * frames;
-        a.acc_y += a.speed_y * frames;
-        advance_timeline(a.osc_x, dt);
-        advance_timeline(a.osc_y, dt);
-        const float x = a.base_x + a.acc_x + timeline_value(a.osc_x);
-        const float y = a.base_y + a.acc_y + timeline_value(a.osc_y);
-        a.sprite->transform.x = x;
-        a.sprite->transform.y = y;
-        // `Zwa(a,b)` tests the rendered coord and stores the wrapped value
-        // back into JM/KM for the NEXT frame (this frame's `Y.C(a)` already
-        // ran, so there is no re-placement).
-        if (a.reappear_x && (x > a.re_x_max || x < a.re_x_min)) {
-            a.acc_x = x > a.re_x_max ? a.re_x_min - a.re_x_max + x
-                                     : a.re_x_max - a.re_x_min + x;
-        }
-        if (a.reappear_y && (y > a.re_y_max || y < a.re_y_min)) {
-            a.acc_y = y > a.re_y_max ? a.re_y_min - a.re_y_max + y
-                                     : a.re_y_max - a.re_y_min + y;
+    // SimpleEffect tick (JS `xl.ia` L1138-1140, `Qi.ia` L488): oscillation /
+    // reappear / speed / Rotation, the `Sequention` clock, and the nested
+    // child launch/hide paths. `update_effect` ports `ia` per effect; the
+    // layer `P7` order is the `anims_` order (children before parents).
+    for (const auto& anim : anims_) {
+        update_effect(*anim, dt);
+    }
+    // Rebuild the draw-time visibility set (JS `Y.R`/`$m`, L1136): a new frame
+    // of a launched nested effect shows it, `Wwb`/`HidePaused` hide it.
+    hidden_sprites_.clear();
+    for (const auto& anim : anims_) {
+        if (anim->sprite != nullptr && !anim->visible) {
+            hidden_sprites_.insert(anim->sprite);
         }
     }
 
@@ -898,9 +1298,13 @@ void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& l
     // Emitter-free layers keep the previous sprite-only path byte-for-byte.
     if (layer.particles.empty()) {
         for (const auto& sprite : layer.sprites) {
-            // The game's ujb (JS L477) draws pixel_1 masks opaque — they are
+            // The game's ujb (JS L477) draws pixel_1 masks opaque - they are
             // part of the arena frame (the side/top/bottom blackout around the
             // 1960x560 arena), so they draw like every other sprite.
+            // `Y.R(false)` hides an effect (JS `nxa`/`Wwb` L1136/L1142).
+            if (hidden_sprites_.count(sprite.get()) != 0) {
+                continue;
+            }
             renderer.draw_sprite(*sprite, camera, layer.factor, ls, layer_y);
         }
         return;
@@ -920,6 +1324,9 @@ void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& l
         // Defensive: a layer built without order info draws sprites then
         // emitters (document order was not recorded).
         for (const auto& sprite : layer.sprites) {
+            if (hidden_sprites_.count(sprite.get()) != 0) {
+                continue;
+            }
             renderer.draw_sprite(*sprite, camera, layer.factor, ls, layer_y);
         }
         for (const ParticleLayer& emitter : layer.particles) {
@@ -937,6 +1344,9 @@ void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& l
                 draw_emitter(layer.particles[item.particle_index]);
             }
         } else if (const std::shared_ptr<Sprite> sprite = item.sprite.lock()) {
+            if (hidden_sprites_.count(sprite.get()) != 0) {
+                continue;
+            }
             renderer.draw_sprite(*sprite, camera, layer.factor, ls, layer_y);
         }
     }

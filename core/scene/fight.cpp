@@ -416,8 +416,25 @@ bool FightController::rules_ringout_detect(FightRule& r) {
     const float oy = -camera_.arena_w * 0.5f;   // JS `this.oy` (L885)
     const float eC = -floor_y_;                 // JS `this.eC` (= -location.ct)
     const FightFighter* f = (r.apply_to == 2) ? &enemy_ : &player_;
-    const float x = f->fighter.world_x() + oy;  // JS `a.x + this.oy`
-    const float y = -f->fighter.world_y() + eC; // JS `-a.y + this.eC`
+    // JS `nj.Zk` (L885): `this.ga = a.Jc.oa.Ic(this.ON)` — resolve the
+    // named node in the fighter's merged model; `nj.hh` reads `this.ga.ma`
+    // (the node's WORLD position). The old code always used the COM anchor;
+    // now a non-pivot `Node` name (e.g. "NToeTip_1"/"NKnee_1"/"COM") is
+    // resolved by name. "NPivot" (the shipped Ringout node) is the COM in
+    // the native model, so it falls back to the world anchor — unchanged.
+    float nx = f->fighter.world_x();
+    float ny = f->fighter.world_y();
+    const int bi = f->fighter.model().bone_by_name(r.node);
+    if (bi >= 0) {
+        const std::vector<float>& pos = f->fighter.positions();
+        const std::size_t o = static_cast<std::size_t>(bi) * 2;
+        if (o + 1 < pos.size()) {
+            nx = pos[o];
+            ny = pos[o + 1];
+        }
+    }
+    const float x = nx + oy;   // JS `a.x + this.oy`
+    const float y = -ny + eC;  // JS `-a.y + this.eC`
     const bool outside =
         x > r.max_x || x < r.min_x || y > r.max_y || y < r.min_y;
     if (outside) {
@@ -444,8 +461,44 @@ void FightController::rules_fire(FightRule& r) {
         case FightRuleKind::timeout_win:
             rule_result_ = round_result::timeout_win;  // JS `BT` L393
             break;
+        case FightRuleKind::hot_ground: {
+            // `Oob` (L901): `a.gra && this.Oe.jT(a.mc())` (death attr ->
+            // that side hp 0), then `BT(a)` -> `ey=2` (`qj`/`en` path).
+            if (r.death) {
+                FightFighter& t = (r.apply_to == 2) ? enemy_ : player_;
+                t.hp = 0.0f;
+            }
+            rule_result_ = round_result::timeout_win;  // JS `BT` -> ey=2
+            break;
+        }
+        case FightRuleKind::regeneration: {
+            // `Oob` (L901): `c = kVa; c /= on(); VOa(mc,c)` — heal the
+            // rule's side. `VOa && BT` only when the healed fighter is
+            // already DEAD (`aM` returns `Jfa()`, L199-199): unreachable
+            // while the round is live, so Regeneration never ends a round.
+            FightFighter& f = (r.apply_to == 2) ? enemy_ : player_;
+            f.hp = std::min(f.max_hp, f.hp + r.regen_rate);
+            return;
+        }
+        case FightRuleKind::life_steal:
+            // Heal is applied in `rules_on_hit` (it needs the hit damage
+            // `TZ`); `Oob`'s `BT` is dead-gated like Regeneration.
+            return;
+        case FightRuleKind::points: {
+            // `Oob` (L901): `HU(qH,gN)` (HUD), and `a.EV && BT(a)` -> the
+            // Score Max was reached (ey=2). The winner is `gj.wfa` (L872):
+            // the firing copy's own counter reached Max -> that side wins.
+            rule_winner_player_ = (r.apply_to == 1);
+            rule_result_ = round_result::timeout_win;  // JS `BT` -> ey=2
+            rule_pending_ = true;  // JS `Pu = a`
+            return;
+        }
+        case FightRuleKind::win_combo:
+        case FightRuleKind::win_shock:
+            rule_result_ = round_result::timeout_win;  // JS `BT` -> ey=2
+            break;
         default:
-            return;  // effect OPEN (HotGround/Points/... not modelled)
+            return;  // effect OPEN (Darkness/RandomArea/... not modelled)
     }
     rule_winner_player_ = rule_winner_is_player(r);
     rule_pending_ = true;  // JS `Pu = a`
@@ -456,11 +509,49 @@ void FightController::rules_fire(FightRule& r) {
 // round is live.
 void FightController::rules_frame() {
     if (!round_live_) return;
+    // `du.Ih(1,3,ze)` (L896): the per-frame pass over `tX` (the `Zf(1)`
+    // rules: Darkness, HotGround, LoseFall, Regeneration, RandomArea).
+    // Ringout (`nj`) is the shipped one; HotGround/Regeneration now fire:
     for (FightRule& r : rules_) {
         if (!r.active) continue;
-        if (r.kind == FightRuleKind::ringout && rules_ringout_detect(r)) {
-            rules_fire(r);
+        bool fire = false;
+        switch (r.kind) {
+            case FightRuleKind::ringout:
+                fire = rules_ringout_detect(r);
+                break;
+            case FightRuleKind::hot_ground:
+                // `en.hh` (L859) cp==1: `Voa` is false with shipped data
+                // (the rule has no `<Animation>` children -> `EM` empty ->
+                // `Lba` false), so the else branch runs: `jc += 1/rO`,
+                // `jc>=60 -> jc=0; Qe>0 && Qe--, cK=true`; return
+                // `Qe<=0`. `rO = a.hNa = on() = 1` (`gja` L859).
+                r.hot_frac += 1.0f;
+                if (r.hot_frac >= 60.0f) {
+                    r.hot_frac -= 60.0f;
+                    if (r.hot_time > 0) {
+                        --r.hot_time;
+                        r.hot_changed = true;  // spawn ground effect (`o_a`)
+                    }
+                }
+                fire = r.hot_time <= 0;
+                break;
+            case FightRuleKind::regeneration:
+                // `kj.hh` (L882) cp==1: `jc++`; `if (MUa && a.pw) break`;
+                // `jc>=DUa -> true` (fires EVERY frame once reached — only
+                // `Zk`/the hit reset clears `jc`). `a.pw` (`U0`) is false
+                // with shipped data (no WeaponStrike attr).
+                ++r.regen_counter;
+                fire = r.regen_counter >= r.regen_frames_after_hit;
+                break;
+            case FightRuleKind::lose_fall:
+                // OPEN: `jn` needs the `<Animation>`-gated `tN` arming
+                // (`Zf(7)` only when the rule owns a "Physical" animation,
+                // `jn` ctor L866) + the node-zone `Rba`. Not modelled.
+                break;
+            default:
+                break;
         }
+        if (fire) rules_fire(r);
     }
     // JS `ca.ia` L412: `this.ha.PEa()` (NF<=0) -> `Ema(9); ud.Ih(9,3,ze)`;
     // `qj.hh` (L912) is `return true`, so an active TimeOutWin fires.
@@ -495,16 +586,17 @@ void FightController::rules_begin_round(int round) {
     rule_round_ = round > 0 ? round : 1;  // JS `rob` L900
     rule_pending_ = false;
     rules_ = battle_.rules;
-    // JS: `du.init` (L895) registers every rule with `Lb.active=true` for
-    // round 1; the `kI`/`Ti` gates are applied only by `rob` (L900), which
-    // `ca.F1` (L428) calls for `round.round >= 2` (L417). So round 1 keeps
-    // the parsed defaults; rounds 2+ gate. `power` (p.o.bb()) has no native
-    // source -> 0 (a `<Level>` range is OPEN, documented).
-    if (rule_round_ >= 2) {
-        for (FightRule& r : rules_) {
-            r.active = fight_rule_gate(r, rule_round_, 0L);
-        }
+    // JS `du.osb` (L898): `active = kI(cz) && Ti()`. `cz` = the round
+    // (`rob(round>0?round:1)` L900, called by `ca.F1` L428 — for round 1 in
+    // the ctor and for every `round.round>=2` in `IKa` L417, so every round
+    // gates). `Ti` = the power range `[xFa,wFa]` vs `p.o.bb()` = the save's
+    // current warrior level (`xf.bb` L129409 = `Ca.level`); the port's
+    // analog is the per-fighter `FighterParams.level` (make_fighter = 1.0).
+    const long power = static_cast<long>(player_.params.level);
+    for (FightRule& r : rules_) {
+        r.active = fight_rule_gate(r, rule_round_, power);
     }
+    rules_apply_round_effects();  // JS `du.F1(a)` L897 (Zk) + `kZ` + `m_a`
     rules_show_markers();
 }
 
@@ -514,6 +606,166 @@ void FightController::rules_end_round() {
     for (FightRule& r : rules_) r.active = false;
     rule_pending_ = false;
     set_ringout_rule(false, ringout_min_, ringout_max_, ringout_speed_);
+}
+
+// JS `du.F1(a)` (L897) + `du.kZ` (L902) + `du.m_a` (L902-903): the per-round
+// apply pass. `a` = the `eu` context built in `ca.cYa` (L428: `Jc=yb`,
+// `QI=pb`, `DA=kc`, `Bda=Zb`), so `Jc`/`QI` are the two fighters and
+// `DA`/`Bda` their parameter maps.
+void FightController::rules_apply_round_effects() {
+    for (FightRule& r : rules_) {
+        if (!r.active) continue;
+        switch (r.kind) {
+            case FightRuleKind::attributes: {
+                // `Zi.Zk` (L849-850): `DA`(player)/`Bda`(bot) attr += (d|0).
+                std::map<std::string, float>& attrs =
+                    (r.apply_to == 2) ? enemy_.params.attributes
+                                      : player_.params.attributes;
+                for (const auto& kv : r.attr_adds) {
+                    attrs[kv.first] += static_cast<float>(kv.second);
+                }
+                break;
+            }
+            case FightRuleKind::remove_interval: {
+                // `lj.Zk` (L883): `a.Jc.oY(a9)` (player) / `a.QI.oY(a9)`.
+                FightFighter& f = (r.apply_to == 2) ? enemy_ : player_;
+                f.fighter.clear_intervals(r.remove_interval_type, "");
+                break;
+            }
+            case FightRuleKind::recharge_magic_each_round:
+                // `F1` -> `Oe.fmb(d.mc())` (L397) -> `wd.yKa` (L504).
+                reset_magic_fighter((r.apply_to == 2) ? enemy_ : player_);
+                break;
+            case FightRuleKind::tactic:
+                // `F1` -> `Oe.Gqb(d.CVa)` (L397) -> `this.pb.s5(a)` (L399):
+                // always the ENEMY (`pb`).
+                if (enemy_.ai != nullptr && tactic_defs_ != nullptr) {
+                    const auto it = tactic_defs_->find(r.tactic_name);
+                    if (it != tactic_defs_->end()) {
+                        enemy_.ai->set_tactic(&it->second);
+                    }
+                }
+                break;
+            case FightRuleKind::hot_ground:
+                // `en.reset` (L859): `Qe=Tra=Frames/60|0`, `jc=0`, `cK=true`
+                // (the node list `Va` is empty — no `<Node>` child parsing).
+                r.hot_time = r.frames / 60;
+                r.hot_frac = 0.0f;
+                r.hot_changed = true;
+                break;
+            case FightRuleKind::regeneration:
+                r.regen_counter = 0;  // `kj.Zk` (L882)
+                break;
+            case FightRuleKind::points:
+                r.points_self = 0;  // `gj.reset` (L872)
+                break;
+            default:
+                break;  // Darkness/RandomArea resets are presentation-only
+        }
+    }
+    // `du.kZ(3)` (L902): for each side, `b = AND(!e.ws)` over the active
+    // `wV` (Invulnerability) rules of that side, then the OPPOSITE fighter's
+    // `ola(!b)` (which sets `wd.ws` — the weapon-strike pain flag). `ws`
+    // stays false (`De.Zk` has no live setter here), so this is the JS reset.
+    for (int side = 1; side <= 2; ++side) {
+        bool b = true;
+        for (const FightRule& r : rules_) {
+            if (r.active && r.kind == FightRuleKind::invulnerability &&
+                r.apply_to == side) {
+                b = b && !r.ws;
+            }
+        }
+        FightFighter& other = (side == 1) ? enemy_ : player_;
+        other.shock.weapon_ws = !b;
+    }
+    // `du.m_a` (L902-903): Resistance -> per-fighter `dta`. The JS `g` is
+    // the SAVE's resistance count (`p.o.Pw.c0(eta)`, a `Dt` over the save
+    // `<Resistances>`); the port has no save-resistance table -> 0. With
+    // `g=0` every shipped `<Resistance>` (none in stages.xml) would scale.
+    float c = 1.0f, d = 1.0f;
+    const float lT = 500.0f;  // JS `v.lT` ResistanceDoublingRange (A2)
+    for (const FightRule& r : rules_) {
+        if (!r.active || r.kind != FightRuleKind::resistance) continue;
+        const float h = r.resist_value;
+        const float g = 0.0f;  // p.o.Pw.c0(r.resist_name) — no native source
+        if (g < h) {
+            c *= std::pow(2.0f, (g - h) / lT);
+            d *= std::pow(2.0f, (h - g) / lT);
+        }
+    }
+    player_.params.dta = c;  // `a.zla(c)` (L903)
+    enemy_.params.dta = d;   // `b.zla(d)` (L903)
+}
+
+// JS `ca.Cgb`'s `PC(5/6,...)` (L396) -> `du.Ih(5/6, side, ze)` (L896) and
+// `ca.Ihb`'s `PC(11,...)` (L423): the landed-hit rule pass. `atk_side` is
+// the `Ih` `b` argument, so only rules whose `mc()` matches (or is All)
+// run — mirroring `f.mc()!=b && f.mc()!=3 && b!=3`.
+void FightController::rules_on_hit(FightFighter& atk, FightFighter& def,
+                                   const sf2::scene::HitRecord& rec) {
+    if (!round_live_) return;
+    // JS `Cgb` (L396): `a.model` is the target, so `PC(5, targetSide)` resets
+    // the target's Regeneration counter (`kj.hh` cp==5, L882), while
+    // `PC(6, attackerSide)` runs LifeSteal/Points/WinShock and `PC(11,
+    // attackerSide)` (`Ihb` L423) runs WinCombo — all on the attacker side.
+    const int atk_side = atk.is_player ? 1 : 2;
+    const int def_side = def.is_player ? 1 : 2;
+    for (FightRule& r : rules_) {
+        if (!r.active) continue;
+        if (r.kind == FightRuleKind::regeneration) {
+            if (r.apply_to == def_side || r.apply_to == 3) {
+                r.regen_counter = 0;  // `Ih(5, targetSide)`
+            }
+            continue;
+        }
+        if (r.apply_to != atk_side && r.apply_to != 3) continue;
+        switch (r.kind) {
+            case FightRuleKind::life_steal: {
+                // `bj.hh` (L865): `cp==6 -> T8 = TZ*nUa; T8!=0`; `Oob`
+                // (L901) heals `mc` by `T8/on()`. `TZ` = the dealt damage.
+                const float t8 = rec.final_damage * r.lifesteal_part;
+                if (t8 != 0.0f) {
+                    atk.hp = std::min(atk.max_hp, atk.hp + t8);
+                }
+                break;
+            }
+            case FightRuleKind::points: {
+                // `gj.compare` (L872) -> `Uwa` (L873): on the side that dealt
+                // damage (`a.cp==6 && a.t1`), require the Block/Critical/
+                // Shock/Defense filters, then ++own counter. Score fires at
+                // `Max` (`EV`), Contest only decides at the timer (`cp==9`).
+                bool ok = true;
+                if (r.points_has_block && rec.blocked != r.points_block) ok = false;
+                if (r.points_has_crit && rec.critical != r.points_crit) ok = false;
+                if (r.points_has_shock &&
+                    def.shock.shocked_vc != r.points_shock) ok = false;
+                if (r.points_defense == 0) ok = ok && rec.head_hit;
+                else if (r.points_defense == 1) ok = ok && !rec.head_hit;
+                if (ok) {
+                    ++r.points_self;
+                    if (r.points_type == 1 &&
+                        static_cast<float>(r.points_self) >= r.points_max) {
+                        rules_fire(r);  // Sets `Pu`/`ey=2` via BT
+                    }
+                }
+                break;
+            }
+            case FightRuleKind::win_combo:
+                // `rj.hh` (L912): `NZ` = the combo run -> `BT` (`ey=2`).
+                if (static_cast<float>(atk.combo_run) >= r.win_combo_value) {
+                    rules_fire(r);
+                }
+                break;
+            case FightRuleKind::win_shock:
+                // `sj.hh` (L913): `a.C3` = the OPPONENT's shock -> `BT`.
+                if (def.shock.shocked_vc) {
+                    rules_fire(r);
+                }
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 // Modes setup path (tournament/survival): rounds/time/recovery, per-side
@@ -713,17 +965,46 @@ void FightController::check_round_end() {
         apply_round_result(rule_result_, w, l);
         return;
     }
-    // JS `Ar.PEa` (L2020): `mb.NF<=0` — the HUD counter hit zero.
-    const bool timeout = battle_.timeout_rule && round_.time_nf <= 0;
+    // JS `Ar.PEa` (L2020): `mb.NF<=0` — the HUD counter hit zero. JS ends
+    // the round at `PEa()` for ANY fight (Onb L412); the native only did so
+    // with a TimeOutWin rule. A Points rule also lives off the timer end
+    // (Contest decides by `qH>gN` at `cp==9`; Score fires at `Max`).
+    bool has_points_rule = false;
+    for (const FightRule& r : rules_) {
+        if (r.active && r.kind == FightRuleKind::points) {
+            has_points_rule = true;
+            break;
+        }
+    }
+    const bool timeout = round_.time_nf <= 0 &&
+                         (battle_.timeout_rule || has_points_rule);
     const bool player_ko = player_.hp <= 0.0f;
     const bool enemy_ko = enemy_.hp <= 0.0f;
 
     if (!player_ko && !enemy_ko && !timeout) return;
 
     if (timeout) {
-        // JS `qj` (L912): TimeOutWin forces `Li=1`, `Yu=false` -> `wfa()`=1
-        // -> `E3a` `a=true` -> the PLAYER (kc) wins on timeout.
-        apply_round_result(round_result::timeout_win, player_, enemy_);
+        if (has_points_rule) {
+            // `gj.wfa` (L872): Contest `qH>gN` (the player copy vs the enemy
+            // copy). `E3a` L412-413 c==2/3/4 uses `Pu.wfa()`.
+            const FightRule* p1 = nullptr;
+            const FightRule* p2 = nullptr;
+            for (const FightRule& r : rules_) {
+                if (!r.active || r.kind != FightRuleKind::points) continue;
+                if (r.apply_to == 1) p1 = &r;
+                else if (r.apply_to == 2) p2 = &r;
+            }
+            const int qH = p1 != nullptr ? p1->points_self : 0;
+            const int gN = p2 != nullptr ? p2->points_self : 0;
+            const bool player_wins = qH > gN;
+            apply_round_result(round_result::timeout_win,
+                               player_wins ? player_ : enemy_,
+                               player_wins ? enemy_ : player_);
+        } else {
+            // JS `qj` (L912): TimeOutWin forces `Li=1`, `Yu=false` ->
+            // `wfa()`=1 -> `E3a` `a=true` -> the PLAYER (kc) wins.
+            apply_round_result(round_result::timeout_win, player_, enemy_);
+        }
     } else if (player_ko && enemy_ko) {
         // Both KO'd the same frame: higher HP wins (JS vfa L413).
         const FightFighter& w = round_winner_by_hp();
@@ -1314,14 +1595,16 @@ sf2::scene::ModTickCtx FightController::mod_tick_ctx() {
 // `yL(InitialCharge)`, `LA`; raid bullets persist — no round reset and
 // no consume site in the static text).
 void FightController::init_magic() {
+    for (FightFighter* f : {&player_, &enemy_}) reset_magic_fighter(*f);
+}
+
+void FightController::reset_magic_fighter(FightFighter& f) {
     const sf2::scene::FightParams& gfp = sf2::scene::FightParams::defaults();
-    for (FightFighter* f : {&player_, &enemy_}) {
-        f->bullets = 0;
-        f->charge = sf2::scene::charge_add(
-            0, 0.0, static_cast<double>(sf2::scene::magic_aq(
-                             gfp.magic_initial_base, gfp.magic_initial_attr, f->params)));
-        la_normalize(*f);
-    }
+    f.bullets = 0;
+    f.charge = sf2::scene::charge_add(
+        0, 0.0, static_cast<double>(sf2::scene::magic_aq(
+                         gfp.magic_initial_base, gfp.magic_initial_attr, f.params)));
+    la_normalize(f);
 }
 
 void FightController::la_normalize(FightFighter& f) {
@@ -1883,6 +2166,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         battle_first_hit_ = true;
         battle_first_by_player_ = atk.is_player;
     }
+    // JS `ca.Cgb` (L396) `PC(5/6,...)` + `ca.Ihb` (L423): the landed-hit
+    // rule pass (LifeSteal heal, Regeneration reset, Points, WinCombo/
+    // WinShock). Runs after the combo counters so `NZ` includes this hit.
+    rules_on_hit(atk, def, rec);
     (void)move;
 }
 

@@ -79,13 +79,18 @@ namespace sf2::scene {
 // round `ey`.
 //
 // The native keeps the FULL dispatch (every tag maps to a kind so a new rule
-// plugs in without touching the parser) and evaluates the rules the fight
-// sim actually uses: the field-exit detector (Ringout), the timeout rule
-// (TimeOutWin) and the ApplyTo/Round/Eclipse/Death gating. Rules whose
-// effect needs a subsystem the port does not model (HotGround damage,
-// Points, Regeneration/LifeSteal heal, Darkness, RandomArea, Attributes,
-// perk/UI rules) are parsed + gated but carry no sim effect yet (marked OPEN
-// below) - they never silently change the simulation.
+// plugs in without touching the parser) and now evaluates the rules the JS
+// fight sim actually runs: the per-frame pass (`du.Ih(1,3,ze)` L896) for the
+// field-exit detector (Ringout) and the HotGround timer; the per-round Zk
+// apply pass (`du.F1(a)` L897) for Attributes / RemoveInterval /
+// RechargeMagicEachRound / Tactic / Resistance / Invulnerability; and the
+// landed-hit pass (`ca.Cgb` -> `PC(5/6/11)` L396/L423) for Regeneration /
+// LifeSteal / Points / WinCombo / WinShock. The ApplyTo/Round/Eclipse/Death
+// gating and the `<Level>` power range are live. Still parsed + gated but
+// inert (OPEN, cited below): LoseFall (arming), RatingEvaluation, DamageFactor
+// (animation-scoped), Darkness / RandomArea / LightInTheDarkness (render-side),
+// Combo/Crazy (`ws`/`ola` mutuality), WinStyle (model style `dz` has no source),
+// and the perk/UI/item rules.
 // ---------------------------------------------------------------------------
 enum class FightRuleKind : int {
     none = 0,
@@ -170,9 +175,11 @@ struct FightRule {
     // `Eclipse` (Lb.MIa L847): mode 2 = unset, 1 = false, 0 = true.
     bool eclipse_set = false;
     int eclipse_mode = 2;
-    // `Zf(a,0,MAX)` / `<Level>` power range (`xFa`/`wFa`, L847). Absent in
-    // the shipped stages -> [0, INT_MAX] -> `Ti()` always true. The port has
-    // no warrior-power source (`p.o.bb()`), so a non-default range is OPEN.
+    // `Zf(a,0,MAX)` / `<Level Min Max>` power range (`xFa`/`wFa`, L846-847).
+    // Filled by modes.hpp flattening the `<Level>` wrapper (`bb.Ajb` L894);
+    // absent -> [0, INT_MAX] -> `Ti()` always true. `c_a` compares against
+    // `p.o.bb()` = the save's current warrior level (`xf.bb` L129409 =
+    // `Ca.level`); the native source is `FighterParams.level` (make_fighter).
     long power_min = 0;
     long power_max = 2147483647L;
     // --- Ringout / field-exit detector (JS `nj` L885-886) -----------------
@@ -186,6 +193,55 @@ struct FightRule {
     // --- other parsed attrs (registered; effect OPEN) ---------------------
     int frames = 0;                  // HotGround Frames
     float value = 0.0f;              // WinCombo/Points Value
+    // --- per-rule effect data (JS per-class parse bodies, L846-913) -------
+    // `Zi` (`ERuleAttributes`, L849-850): attr name -> int delta (`wB`).
+    // Every attr except Round/ApplyTo/Eclipse/WarriorPower lands here; the
+    // `WarriorPower` attr fans out over the `v.wv` align names (L850).
+    // Applied per round by `Zi.Zk`.
+    std::map<std::string, int> attr_adds;
+    // `lj` (`ERuleRemoveInterval`, L883): the interval TYPE code (`a9`):
+    // Attack 4 / Block 5 / Invulnerable 6 / None 0 / SelfUninterrupt 3 /
+    // Uninterrupt 2 / Unstable 1 (`fe.G0` + `fe` ctor remap, L773-774).
+    int remove_interval_type = 0;
+    // `pj` (`ERuleTactic`, L911): the tactic name (`CVa`).
+    std::string tactic_name;
+    // `mj` (`ERuleResistance`, L884): `eta` (Name) + `vX` (Value).
+    std::string resist_name;
+    float resist_value = 0.0f;
+    bool resist_set = false;
+    // `kj` (`ERuleRegeneration`, L882): `DUa` (FramesAfterHit), `kVa`
+    // (Rate), `MUa` (WeaponStrike).
+    int regen_frames_after_hit = 0;
+    float regen_rate = 0.0f;
+    bool regen_weapon_strike = false;
+    // `bj` (`ERuleLifeSteal`, L865): `nUa` (DamagePart).
+    float lifesteal_part = 0.0f;
+    // `gj` (`ERulePoints`, L871-873): `ZN` (Type 0 Contest / 1 Score),
+    // `IW` (Max), the Block/Critical/Shock filters (`eUa/ZTa/fUa/lUa/
+    // hUa/vVa`) and `JH` (Defense: 0 HeadDefense / 1 BodyDefense / 2 any).
+    int points_type = 0;
+    float points_max = 0.0f;
+    bool points_has_block = false;
+    bool points_block = false;
+    bool points_has_crit = false;
+    bool points_crit = false;
+    bool points_has_shock = false;
+    bool points_shock = false;
+    int points_defense = 2;
+    // `rj` (`ERuleWinCombo`, L912): `pV` (Value).
+    float win_combo_value = 0.0f;
+    // `tj` (`ERuleWinStyle`, L913): `BVa` (`VIa(Type)`). Effect OPEN (the
+    // model style score `dz` has no native source — COMBAT_STATIC App. C).
+    int win_style_type = 0;
+    // `De.ws` (L852): the rule's own `ws` flag (Invulnerability `kZ` reads
+    // `!e.ws`). Stays false with shipped data (`De.Zk` has no setter here).
+    bool ws = false;
+    // --- runtime per-round state (reset by the rule's `Zk`/`reset`) -------
+    int hot_time = 0;          // `en.Qe` HotGround countdown (seconds)
+    float hot_frac = 0.0f;     // `en.jc` sub-second accumulator
+    bool hot_changed = false;  // `en.cK` (timer changed -> spawn effect)
+    int regen_counter = 0;     // `kj.jc` frames since the last landed hit
+    int points_self = 0;       // `gj.qH` (Li=1) / `gj.gN` (Li=2)
 };
 
 // True for the rules that extend JS `Ga` (the `bb.xe` combat rules that
@@ -313,6 +369,93 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
     r.sequention_speed = fight_rule_int(sr.attrs, "SequentionSpeed", 3);
     r.frames = fight_rule_int(sr.attrs, "Frames", 0);
     r.value = fight_rule_float(sr.attrs, "Value", 0.0f);
+    // `<Level Min Max>` wrapper range (`bb.Ajb` L894 via `Zf(a,0,MAX)`, a
+    // Min/Max ATTR read; modes.hpp flattens the wrapper into this rule).
+    r.power_min = sr.power_min;
+    r.power_max = sr.power_max;
+    // --- per-rule parse (JS per-class constructors/parse) -----------------
+    if (r.kind == FightRuleKind::attributes) {
+        // `Zi.parse` (L850): `wB` starts with the `v.wv` align names at 0;
+        // every attr except Round/ApplyTo/Eclipse/WarriorPower adds its int.
+        static const char* kWvNames[] = {
+            "WeaponDamage", "UnarmedDamage", "BodyDefense", "HeadDefense",
+            "RangedDamage", "MagicDamage", "EnchantmentResistance"};
+        for (const char* n : kWvNames) r.attr_adds[n] = 0;
+        for (const auto& kv : sr.attrs) {
+            if (kv.first == "Round" || kv.first == "ApplyTo" ||
+                kv.first == "Eclipse" || kv.first == "WarriorPower")
+                continue;
+            int v = 0;
+            try { v = static_cast<int>(std::stof(kv.second)); } catch (...) {}
+            r.attr_adds[kv.first] += v;
+        }
+        const auto wp = sr.attrs.find("WarriorPower");
+        if (wp != sr.attrs.end()) {
+            int v = 0;
+            try { v = static_cast<int>(std::stof(wp->second)); } catch (...) {}
+            for (const char* n : kWvNames) r.attr_adds[n] += v;
+        }
+    } else if (r.kind == FightRuleKind::remove_interval) {
+        // `lj.parse` (L883): the Type attr -> `a9`.
+        const auto it = sr.attrs.find("Type");
+        const std::string t = it != sr.attrs.end() ? it->second : std::string();
+        r.remove_interval_type = t == "Attack" ? 4 : t == "Block" ? 5
+                              : t == "Invulnerable" ? 6 : t == "SelfUninterrupt" ? 3
+                              : t == "Uninterrupt" ? 2 : t == "Unstable" ? 1 : 0;
+    } else if (r.kind == FightRuleKind::tactic) {
+        // `pj.parse` (L911): the Name attr -> `CVa`.
+        const auto it = sr.attrs.find("Name");
+        if (it != sr.attrs.end()) r.tactic_name = it->second;
+    } else if (r.kind == FightRuleKind::resistance) {
+        // `mj.parse` (L884): Name -> `eta`, Value -> `vX` (clamped >= 0).
+        const auto it = sr.attrs.find("Name");
+        if (it != sr.attrs.end()) r.resist_name = it->second;
+        r.resist_value = fight_rule_float(sr.attrs, "Value", 0.0f);
+        if (r.resist_value < 0.0f) r.resist_value = 0.0f;
+        r.resist_set = true;
+    } else if (r.kind == FightRuleKind::regeneration) {
+        // `kj.parse` (L882): FramesAfterHit/Rate/WeaponStrike.
+        r.regen_frames_after_hit =
+            fight_rule_int(sr.attrs, "FramesAfterHit", 0);
+        r.regen_rate = fight_rule_float(sr.attrs, "Rate", 0.0f);
+        r.regen_weapon_strike =
+            fight_rule_bool(sr.attrs, "WeaponStrike", false);
+    } else if (r.kind == FightRuleKind::life_steal) {
+        // `bj.parse` (L865): DamagePart -> `nUa`.
+        r.lifesteal_part = fight_rule_float(sr.attrs, "DamagePart", 0.0f);
+    } else if (r.kind == FightRuleKind::points) {
+        // `gj.parse` (L872-873): Type Contest/Score, Max, the filters.
+        const auto tt = sr.attrs.find("Type");
+        const std::string t = tt != sr.attrs.end() ? tt->second
+                                                   : std::string("Contest");
+        r.points_type = t == "Score" ? 1 : 0;
+        r.points_max = fight_rule_float(sr.attrs, "Max", 0.0f);
+        r.points_has_block = sr.attrs.find("Block") != sr.attrs.end();
+        r.points_block = fight_rule_bool(sr.attrs, "Block", false);
+        r.points_has_crit = sr.attrs.find("Critical") != sr.attrs.end();
+        r.points_crit = fight_rule_bool(sr.attrs, "Critical", false);
+        r.points_has_shock = sr.attrs.find("Shock") != sr.attrs.end();
+        r.points_shock = fight_rule_bool(sr.attrs, "Shock", false);
+        const auto di = sr.attrs.find("Defense");
+        const std::string df = di != sr.attrs.end() ? di->second : std::string();
+        r.points_defense = df == "BodyDefense" ? 1 : df == "HeadDefense" ? 0 : 2;
+    } else if (r.kind == FightRuleKind::win_combo) {
+        // `rj.parse` (L912): Value -> `pV`.
+        r.win_combo_value = fight_rule_float(sr.attrs, "Value", 0.0f);
+    } else if (r.kind == FightRuleKind::win_style) {
+        // `tj.parse` (L913) via `bb.VIa` (L891): Type -> `BVa`.
+        const auto it = sr.attrs.find("Type");
+        const std::string t = it != sr.attrs.end() ? it->second : std::string();
+        r.win_style_type = t == "Hard" ? 1 : t == "Brutal" ? 2
+                         : t == "Aggressive" ? 3 : t == "Crazy" ? 4
+                         : t == "Fantastic" ? 5 : 0;
+    }
+    // ApplyTo overrides from the `bb.xe` dispatch (L891-893): Points is
+    // always All (`new gj(b,3)`) -> split; Darkness always Player
+    // (`new $i(b,1)`); Tactic defaults Bot (`new pj(b)`).
+    if (r.kind == FightRuleKind::points) r.apply_to = 3;
+    else if (r.kind == FightRuleKind::darkness) r.apply_to = 1;
+    else if (r.kind == FightRuleKind::tactic) r.apply_to = 2;
     // `qj` ctor (L912): TimeOutWin forces `Li=1` (player wins on timeout;
     // `Yu=false` -> `wfa()` = 1 -> E3a `a=true`).
     if (r.kind == FightRuleKind::timeout_win) r.apply_to = 1;
@@ -336,8 +479,9 @@ inline std::vector<FightRule> fight_rules_split(const FightRule& r) {
 
 // `du.osb` (L898): `active = kI(cz) && Ti()`. `kI` = the Round attr
 // membership (`Lb.kI` L846); `Ti` = the power range `[xFa,wFa]` (`Lb.c_a`
-// L846). `power` is `p.o.bb()` - the port has no source, so callers pass 0;
-// a non-default range is therefore OPEN (never matches) and documented.
+// L846). `power` is `p.o.bb()` = the save's current warrior level
+// (`xf.bb` L129409 = `Ca.level`); the native callers pass the player's
+// `FighterParams.level` (the port's warrior-level analog).
 inline bool fight_rule_gate(const FightRule& r, int round, long power) {
     if (r.has_rounds) {
         bool found = false;
@@ -408,10 +552,10 @@ struct BattleParams {
 // Ringout rule (`a||(a=g, ...)`), so the first match wins. `TimeOutWin`
 // (JS `qj` L912) flips `b.timeout_rule` so the timer end is live.
 //
-// OPEN: `bb.Ajb`/`bb.OE` also descend into `<Level Min Max>` wrappers
-// (L887-888); the native StageRule holds only direct children, and the port
-// has no warrior-power source (`p.o.bb()`), so a `<Level>`-gated rule is not
-// seen. The shipped stages carry no `<Level>` around `<Ringout>`.
+// `<Level Min Max>` wrappers (JS `bb.Ajb` L894, `Zf(a,0,MAX)`): modes.hpp
+// flattens the wrapper into its child rules and stamps `power_min`/`power_max`
+// on each StageRule, so `parse_fight_rule` copies them onto the FightRule and
+// `fight_rule_gate` enforces the range against the player's level.
 inline void apply_stage_ringout_rule(BattleParams& b,
                                      const std::vector<StageRule>& rules) {
     // Full dispatch (`bb.OE` L887-888): every child -> kind, ApplyTo=All
@@ -1123,6 +1267,16 @@ private:
     // JS `du.Oob` (L901) + `ca.BT` (L392-393): apply a fired rule's effect
     // (Ringout -> `ey=4`; TimeOutWin -> `ey=2`) and record the winner.
     void rules_fire(FightRule& r);
+    // JS `du.F1(a)` (L897) + `du.kZ` (L902) + `du.m_a` (L902-903): the
+    // per-round rule apply pass — `Zk` on every active rule (Attributes
+    // deltas, RemoveInterval, RechargeMagicEachRound, Tactic, the resets),
+    // then the Invulnerability `ola` pass and the Resistance `dta` pass.
+    void rules_apply_round_effects();
+    // JS `du.Oob` via the hit-scope `Ih(5/6/11,...)` calls (L896 + `ca.Cgb`
+    // L396): the landed-hit rule effects — LifeSteal heal, Regeneration
+    // counter reset, Points accumulation/fire, WinCombo/WinShock.
+    void rules_on_hit(FightFighter& atk, FightFighter& def,
+                      const sf2::scene::HitRecord& rec);
     // JS `f_a` L897 `ERuleRingout -> this.Oe.H1a(ZG,BH,tta)` (marker show).
     void rules_show_markers();
     // JS `E3a` L412-413 `wfa()` (L848): the winner for a fired `Pu` rule.
@@ -1195,6 +1349,10 @@ private:
     void fire_slot8(int side);
     // Magic per-fighter init + per-round reset (`Ka`/`yKa`).
     void init_magic();
+    // One fighter's magic reset (JS `wd.yKa` L504: `zL(0)`, `yL(
+    // InitialCharge)`, `LA`) — shared by `init_magic` and the
+    // `ERuleRechargeMagicEachRound` per-side apply (`fmb` L397).
+    void reset_magic_fighter(FightFighter& f);
     // Samples the fighter's idle pose (JS: the weapon stance idle).
     void sample_idle(FightFighter& f);
     // The HUD countdown seconds (JS Sf.iPa: gma - round.time).

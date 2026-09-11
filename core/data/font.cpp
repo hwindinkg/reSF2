@@ -82,6 +82,7 @@ font font_parse(const std::uint8_t* data, std::size_t size) {
         }
         const std::uint16_t font_size = rd16(data + off);  // i16 fontSize (always positive here)
         line_height_candidate = static_cast<int>(font_size);
+        result.size = static_cast<int>(font_size);  // JS `charset.eF` (L1672)
         off += block_size;  // skip the whole payload
     }
 
@@ -241,6 +242,19 @@ float measure_text_utf8(const font& f, const std::string& text, float scale) noe
         // Unknown codepoint: contributes nothing (previous skip behavior).
     }
     return width;
+}
+
+float measure_text_height_utf8(const font& f, const std::string& text, float scale) noexcept {
+    float height = 0.0f;
+    std::size_t i = 0;
+    while (i < text.size()) {
+        const std::uint32_t cp = utf8_next(text, i);
+        if (const font_char* g = find_glyph(f, cp)) {
+            const float h = static_cast<float>(g->h) * scale;
+            if (h > height) height = h;
+        }
+    }
+    return height;
 }
 
 } // namespace sf2::data
