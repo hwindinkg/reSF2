@@ -9,6 +9,7 @@
 // layer node. ModelsViewer layers (the fighters) are skipped — this phase
 // renders the background only.
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -23,18 +24,41 @@ struct Texture;
 
 namespace sf2::scene {
 
+// One live particle — JS `Cv` (L1152) wrapping the `Dv` view (L1649):
+// `ca` = position, `ub` = velocity, `force` = spawn-time force vector,
+// `wY` = angular velocity, `hA` = life, `view.{alpha,rotation,jka,kka}` = the
+// billboard. `rotation_rad`/`ang_vel_rad` are radians (JS `d*.0174532925199`,
+// L1151). `start_size` stays raw: the JS divides it by the frame
+// `sourceSize.x` at spawn (L1151), which needs the unowned effects atlas.
+struct Particle {
+    float x = 0.0f;             // JS `ca.x` / `view.x`
+    float y = 0.0f;             // JS `ca.y` / `view.y`
+    float vx = 0.0f;            // JS `ub.x`
+    float vy = 0.0f;            // JS `ub.y`
+    float force_x = 0.0f;       // JS `force.x` (ForceX draw, L1150)
+    float force_y = 0.0f;       // JS `force.y` (ForceY draw, L1150)
+    float rotation_rad = 0.0f;  // JS `view.rotation` (radians)
+    float ang_vel_rad = 0.0f;   // JS `wY` (radians/second)
+    float life = 0.0f;          // JS `hA` (seconds remaining)
+    float alpha = 0.0f;         // JS `view.alpha`
+    float start_size = 0.0f;    // JS `vwb.Gb()` raw (renderer / sourceSize.x)
+};
+
 // One `ParticleEffect` / `NewParticleEffect` emitter node inside a location
 // layer (JS `QIa` L481-482 + `jh` ctor L1147-1148). The game runs BOTH tags
 // through the same `jh` system (`Bf.zjb` L476-477 -> `QIa` -> `fXa(new jh)`),
 // which draws an instanced billboard batch (`Ah`/`Xb`, L1147) from the
 // effects atlas `E.get(1304)`, sampler keyed on `Params/@Frame`.
 //
-// STATUS: parsed only. The native port does NOT yet simulate (`jh.update`
-// L1149-1151) or render (`Dv`/`Xb`/`Ah` L1147) location particles — that
-// needs the effects atlas plus the renderer/effects owner (OPEN, D7). The
-// emitter config is carried here so a future wave can drive it without
-// re-parsing the XML. Range attrs follow the JS `Ie` reader (L1152-1153):
-// "a,b" = random in [a,b], a single number = a fixed value (min == max).
+// STATUS: the SIM is ported (`jh.update` L1149-1151: emission, force/gravity
+// integration, life/alpha, cap). The RENDER pass is OPEN (D7): it needs the
+// effects atlas `E.get(1304)` (Frame name -> id `b.re.et.v[Frame].id`, L1148),
+// the instanced billboard batch `Xb`/`Ah` (`Ah.submit`, L1150; gradient start/
+// end colour `BA.rP = Zib(Color)`, L1151) and the per-particle scale divisor
+// `sourceSize.x` (L1151) — all owned by the renderer/effects layer, not this
+// file. `particle_draws()` exposes the layer-local draws that renderer needs.
+// Range attrs follow the JS `Ie` reader (L1152-1153): "a,b" = random in [a,b],
+// a single number = a fixed value (min == max).
 struct ParticleLayer {
     std::string class_name;    // node/@ClassName (metadata; `jh` ignores it)
     float x = 0.0f;            // node/@X   (JS QIa L481)
@@ -64,6 +88,27 @@ struct ParticleLayer {
     float emitter_y = 0.0f;
     bool prewarm = false;         // Params/@Prewarm == "1" (JS jh L1149)
     std::string color;            // Params/@Color (1 or 2 packed ARGB)
+
+    // ---- runtime state (JS `jh` fields, L1147-1151) -----------------------
+    float spawn_acc = 0.0f;       // JS `$P` — spawn-interval accumulator (s)
+    std::uint32_t rng = 0u;       // private deterministic LCG (see note below)
+    std::vector<Particle> live;   // JS `pl` — the live particle list
+};
+
+// One live particle draw, ready for the effects renderer (JS `Dv` view +
+// `Ah.pl`, L1147/L1649). Values are LAYER-LOCAL like the layer's sprites:
+// apply the layer transform (parallax `Io*factor`) at draw time. The renderer
+// must resolve `frame` (the `Params/@Frame` name) through the effects atlas
+// `E.get(1304)` and divide `start_size` by the frame's `sourceSize.x`
+// (JS L1148/L1151) — both OPEN, the atlas is not loaded here.
+struct ParticleDraw {
+    float x = 0.0f;             // JS `ca.x` (layer-local)
+    float y = 0.0f;             // JS `ca.y`
+    float rotation_rad = 0.0f;  // JS `view.rotation` (radians)
+    float alpha = 0.0f;         // JS `view.alpha`
+    float start_size = 0.0f;    // JS `view.jka`/`kka` before /sourceSize.x
+    float factor = 1.0f;        // owning layer parallax Factor (`Qi.bp`)
+    std::string frame;          // JS `Params/@Frame` (atlas 1304)
 };
 
 struct Layer {
@@ -81,7 +126,8 @@ struct Layer {
     std::vector<std::shared_ptr<Sprite>> sprites;
     // `ParticleEffect`/`NewParticleEffect` emitters (JS `QIa` L481-482).
     // Empty for the dojo (it ships none); populated for volcano / factory /
-    // battlefield / autumn / ... . Parsed only — see ParticleLayer (OPEN).
+    // battlefield / autumn / ... . Simulated by `update`; drawn by the
+    // effects renderer via `particle_draws()` (render OPEN — ParticleLayer).
     std::vector<ParticleLayer> particles;
 };
 
@@ -171,6 +217,16 @@ public:
     // layer carries a timeline. The host calls it once per rendered frame.
     void update(float dt);
 
+    // JS `jh` live draws (L1149): flattens every live particle into
+    // layer-local draws (position/alpha/rotation/start_size/frame + the
+    // owning layer's parallax Factor). The renderer resolves `frame` through
+    // the effects atlas `E.get(1304)` and divides `start_size` by the frame
+    // `sourceSize.x` (L1148/L1151). Empty for locations without particles.
+    // NOTE: the JS emitter node is a LAYER child (`Qi.fXa`, L481) appended in
+    // XML order with z=0, so a depth-sorted render must interleave these draws
+    // with `Layer::sprites`; the current paths draw sprites by insertion.
+    std::vector<ParticleDraw> particle_draws() const;
+
     // The ModelsViewer spawns (JS `Bf.zjb` L476: `Yia` = PlayerPosition,
     // `B_` = EnemyPosition). `has_spawns()` is false when the location has no
     // ModelsViewer layer.
@@ -210,6 +266,16 @@ public:
     std::uint32_t root_color() const { return root_color_; }
 
 private:
+    // JS `jh.update` (L1149-1151) for one emitter: advance the spawn clock,
+    // emit at most one particle, integrate force/gravity/life/alpha, reap the
+    // dead. `update()` drives every emitter; `load` runs the ctor `Prewarm`
+    // loop and the `Qi.fXa` 150-tick attach warm-up (L481).
+    void step_particle_(ParticleLayer& emitter, float dt);
+    // JS `jh.Nvb` (L1150-1151): spawn one particle at a random emitter offset.
+    void spawn_particle_(ParticleLayer& emitter);
+    // JS `Ie.Gb` (L1152) over `oa.eT` (uniform in [lo,hi]) on a private LCG.
+    float rand_range_(ParticleLayer& emitter, float lo, float hi);
+
     std::vector<std::shared_ptr<Layer>> layers_;
     // Per-SimpleEffect Oscillation/Reappear/Speed state (JS `bkb` L479-481),
     // advanced by `update(dt)`. Pointers target `Layer::sprites` elements.

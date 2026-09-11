@@ -21,6 +21,17 @@ namespace sf2::scene {
 
 namespace {
 
+// JS `jh` constants (L1149-1151): degrees->radians (`d*.0174532925199432`),
+// the per-update gravity term `this.bab*9.81*.02` (added per CALL, NOT scaled
+// by dt — an oracle quirk), and the alpha fade-in step (`view.alpha += .1`
+// per call). A private deterministic LCG seed matches the effects layer so
+// the sim never perturbs the fight's shared RNG (JS uses wall-clock `oa.eT`).
+constexpr float kParticleDegToRad = 0.0174532925199432f;
+constexpr float kParticleGravityScale = 9.81f * 0.02f;
+constexpr float kParticleAlphaStep = 0.1f;
+constexpr float kParticleFixedStep = 1.0f / 60.0f;  // JS `Prewarm` tick (L1149)
+constexpr std::uint32_t kParticleSeed = 0x853C49E7u;
+
 // A ClassName resolved against an atlas: the frame rect plus the pixel size
 // of the atlas texture it lives in (for UV normalization).
 struct FrameRef {
@@ -163,10 +174,13 @@ void parse_emitter_attr(const pugi::xml_node& node, float& ex, float& ey) {
 
 // JS `QIa` L481-482 + `jh` ctor L1147-1148: one particle emitter. `a.st()`
 // is the node's FIRST child (`st(){return this.children[0]}`), i.e. the
-// `<Params>` element carrying every emitter attribute. Parsed only — see
-// ParticleLayer (OPEN): the simulation/render are not ported.
-ParticleLayer parse_particle(const pugi::xml_node& node) {
+// `<Params>` element carrying every emitter attribute. The SIM runs in
+// `LocationScene::update`; the render pass is OPEN (see ParticleLayer).
+// `ordinal` seeds the private deterministic LCG so emitters do not phase-lock
+// (JS draws from the wall-clock `oa.eT`; the native is deliberately stable).
+ParticleLayer parse_particle(const pugi::xml_node& node, std::uint32_t ordinal) {
     ParticleLayer p;
+    p.rng = kParticleSeed ^ (ordinal * 2654435761u);
     const char* cls = node.attribute("ClassName").value();
     p.class_name = cls != nullptr ? cls : "";
     p.x = sf2::data::xml_attr_float(node, "X");
@@ -430,6 +444,7 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
     anims_.clear();
     fighter_layer_ = npos;
     int layer_index = 0;
+    std::uint32_t emitter_ordinal = 0;  // unique LCG seed per emitter
     for (const pugi::xml_node layer_node : root.children()) {
         if (std::strcmp(layer_node.name(), "Layer") != 0) {
             continue;
@@ -493,11 +508,26 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
             } else if (std::strcmp(child.name(), "ParticleEffect") == 0 ||
                        std::strcmp(child.name(), "NewParticleEffect") == 0) {
                 // JS `Bf.zjb` L476-477: both tags route to `QIa` ->
-                // `fXa(new jh)`. The native port parses the emitter (D7) but
-                // does not yet simulate/render it (OPEN — needs the effects
-                // atlas `E.get(1304)` plus the renderer/effects owner). No
-                // sprite is emitted, so `sprite_index` (z) is unaffected.
-                layer->particles.push_back(parse_particle(child));
+                // `fXa(new jh)`. Parse the emitter, run the ctor `Prewarm`
+                // loop, attach it, then the `Qi.fXa` warm-up; `update` runs
+                // the `jh` sim and `particle_draws()` exposes the render data
+                // (the effects-atlas draw pass itself is OPEN, D7). No sprite
+                // is emitted, so `sprite_index` (z) is unaffected.
+                ParticleLayer emitter = parse_particle(child, emitter_ordinal++);
+                // JS `jh` ctor L1149: `Prewarm=="1"` runs `update(1/60)`
+                // until the accumulated time reaches `Life` max.
+                if (emitter.prewarm) {
+                    for (float t = 0.0f; t < emitter.life_max; t += kParticleFixedStep) {
+                        step_particle_(emitter, kParticleFixedStep);
+                    }
+                }
+                layer->particles.push_back(std::move(emitter));
+                // JS `Qi.fXa` (L481): on attach the layer runs 150 warm-up
+                // `update(1/60)` ticks, so every emitter is already mid-stream
+                // on the first rendered frame (independent of `Prewarm`).
+                for (int i = 0; i < 150; ++i) {
+                    step_particle_(layer->particles.back(), kParticleFixedStep);
+                }
             }
             // ModelsViewer children are skipped (fighters are drawn by the
             // fight screen); ParticleEffect/NewParticleEffect are parsed above.
@@ -649,6 +679,128 @@ void LocationScene::update(float dt) {
                                      : a.re_y_max - a.re_y_min + y;
         }
     }
+
+    // Particle emitters (JS `jh.update` L1149-1151): emission, force/gravity
+    // integration, life/alpha, reaping. `dt` is seconds; the gravity and alpha
+    // steps are per-CALL in the oracle and stay per-call here.
+    for (const auto& layer : layers_) {
+        for (ParticleLayer& emitter : layer->particles) {
+            step_particle_(emitter, dt);
+        }
+    }
+}
+
+// JS `Ie.Gb` (L1152): `min==max ? min : oa.eT(min,max)`; `oa.eT(a,b)` (L)
+// is `a + Math.random()*(b-a)`. The native uses a private deterministic LCG
+// so a pose/asset dump is reproducible (JS uses the wall-clock RNG).
+float LocationScene::rand_range_(ParticleLayer& emitter, float lo, float hi) {
+    if (lo == hi) {
+        return lo;
+    }
+    emitter.rng = 1664525u * emitter.rng + 1013904223u;
+    const float u = static_cast<float>(emitter.rng >> 8) * (1.0f / 16777216.0f);
+    return lo + u * (hi - lo);
+}
+
+// JS `jh.Nvb` (L1150-1151): spawn one particle at a random emitter offset.
+// The RNG draw order mirrors the oracle exactly (emitter offset x/y -> force
+// x/y -> life -> start rotation -> velocity x/y -> angular velocity -> size).
+void LocationScene::spawn_particle_(ParticleLayer& emitter) {
+    Particle p;
+    // JS update L1149: `Nvb(oa.eT(-t_.x/2,t_.x/2), oa.eT(-t_.y/2,t_.y/2))`.
+    p.x = rand_range_(emitter, -emitter.emitter_x * 0.5f, emitter.emitter_x * 0.5f);
+    p.y = rand_range_(emitter, -emitter.emitter_y * 0.5f, emitter.emitter_y * 0.5f);
+    // JS `new H(v4a.Gb(), w4a.Gb(), 0, 1)` — the spawn-time force vector.
+    p.force_x = rand_range_(emitter, emitter.force_x_min, emitter.force_x_max);
+    p.force_y = rand_range_(emitter, emitter.force_y_min, emitter.force_y_max);
+    // JS `new Cv(a, b, hA.Gb(), c)` — life.
+    p.life = rand_range_(emitter, emitter.life_min, emitter.life_max);
+    // JS `c.view.rotation = Vla.Gb()*.0174532925199432`.
+    p.rotation_rad =
+        rand_range_(emitter, emitter.start_rot_min, emitter.start_rot_max) * kParticleDegToRad;
+    p.alpha = 0.0f;  // JS `c.view.alpha=0`
+    // JS `d=velocityX.Gb(); e=-velocityY.Gb()` — VelocityY is NEGATED (L1151).
+    const float vel_x = rand_range_(emitter, emitter.vel_x_min, emitter.vel_x_max);
+    const float vel_y = -rand_range_(emitter, emitter.vel_y_min, emitter.vel_y_max);
+    if (emitter.start_speed > 0.0f && vel_x != 0.0f && vel_y != 0.0f) {
+        // JS L1151: ub = normalize((vel_x, vel_y)) * StartSpeed ...
+        const float len = std::sqrt(vel_x * vel_x + vel_y * vel_y);
+        p.vx = vel_x / len * emitter.start_speed;
+        p.vy = vel_y / len * emitter.start_speed;
+    }
+    p.vx += vel_x;  // ... then `ub += (d, e)`.
+    p.vy += vel_y;
+    // JS `c.wY = wY.Gb()*.0174532925199432` (radians/second).
+    p.ang_vel_rad =
+        rand_range_(emitter, emitter.ang_vel_min, emitter.ang_vel_max) * kParticleDegToRad;
+    // JS `d = vwb.Gb()/BA.qc.re.dt[cOa].fa.x` (L1151): dividing by the frame
+    // `sourceSize.x` needs the effects atlas `E.get(1304)` (OPEN), so the raw
+    // StartSize is carried and the renderer scales at draw time.
+    p.start_size = rand_range_(emitter, emitter.start_size_min, emitter.start_size_max);
+    emitter.live.push_back(p);  // JS `this.BA.pl.push(c.view)`
+}
+
+// JS `jh.update` (L1149-1151) for one emitter.
+void LocationScene::step_particle_(ParticleLayer& emitter, float dt) {
+    emitter.spawn_acc += dt;
+    if (emitter.rate > 0.0f) {
+        // JS `b=1/this.v3a` then a SINGLE `if ($P>=b)` (not a while), so a
+        // large dt still emits at most one particle per update.
+        const float interval = 1.0f / emitter.rate;
+        if (emitter.spawn_acc >= interval) {
+            emitter.spawn_acc -= interval;
+            if (static_cast<int>(emitter.live.size()) < emitter.max_particles) {
+                spawn_particle_(emitter);
+            }
+        }
+    }
+    for (Particle& p : emitter.live) {
+        // JS: `d.hA-=a`; alpha fades IN at +.1/call and OUT as `alpha = hA`
+        // once the remaining life drops below 1 (L1149).
+        p.life -= dt;
+        if (p.life < 1.0f) {
+            p.alpha = p.life;
+        } else {
+            p.alpha += kParticleAlphaStep;
+            if (p.alpha > 1.0f) {
+                p.alpha = 1.0f;
+            }
+        }
+        p.vx += p.force_x * dt;
+        p.vy += p.force_y * dt;
+        // JS quirk (L1149): gravity is added per update, NOT scaled by dt.
+        p.vy += emitter.gravity * kParticleGravityScale;
+        p.rotation_rad += p.ang_vel_rad * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+    }
+    // JS removal loop (L1150): drop every particle whose life ran out. The
+    // oracle also `BA.submit()`s the GPU batch here — that flush is the effects
+    // renderer's job (OPEN, L1150); the sim only fills `live`.
+    emitter.live.erase(
+        std::remove_if(emitter.live.begin(), emitter.live.end(),
+                       [](const Particle& p) { return p.life <= 0.0f; }),
+        emitter.live.end());
+}
+
+std::vector<ParticleDraw> LocationScene::particle_draws() const {
+    std::vector<ParticleDraw> out;
+    for (const auto& layer : layers_) {
+        for (const ParticleLayer& emitter : layer->particles) {
+            for (const Particle& p : emitter.live) {
+                ParticleDraw d;
+                d.x = p.x;
+                d.y = p.y;
+                d.rotation_rad = p.rotation_rad;
+                d.alpha = p.alpha;
+                d.start_size = p.start_size;
+                d.factor = layer->factor;
+                d.frame = emitter.frame;
+                out.push_back(std::move(d));
+            }
+        }
+    }
+    return out;
 }
 
 void LocationScene::render_layers(sf2::render::Renderer& renderer,

@@ -978,6 +978,36 @@ void za_update(App& app, Screen& self, ScreenId active) {
     }
 }
 
+// JS `v.$Ca()` (`static $Ca(){return v.Jsa}`) set by the config parse
+// `v.eub(a.A("Power")!=null?u.I(a.A("Power").attributes.get("Max"),10):10)`
+// from `internal_settings.xml` (the static default is `v.Jsa=5`). The shipped
+// `<Power Max="5" TimeMax="600"/>` therefore yields 5. This is the `xr`
+// energy widget's max (`xr` ctor `a=v.$Ca()`, L1984) and the clamp the save
+// `Power` (`dk`) is held to (`this.dk>this.wr&&(this.dk=this.wr)`).
+int energy_max() {
+    static int cached = -1;
+    if (cached >= 0) return cached;
+    cached = 5;  // JS static default `v.Jsa=5` (config absent).
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in("reference/extracted/xml/res/internal_settings.xml",
+                         std::ios::binary);
+        if (in) {
+            std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+            const pugi::xml_node root = doc.root().first_child();
+            if (root) {
+                const pugi::xml_node power = root.child("Power");
+                cached = power ? (power.attribute("Max") ? power.attribute("Max").as_int(10) : 10)
+                               : 10;  // `u.I(...,10)` when `<Power>` is absent
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return cached;
+}
+
 // Draws the shared chrome on top of a shell screen's own content. `active`
 // selects the active nav frame (JS `xyb`). The widget strip mirrors `odb`:
 // widgets are laid left->right and the strip is centred; each widget is
@@ -1038,8 +1068,20 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                   std::to_string(sv.level), num_scale, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     // JS `wr.Vd = Uf(y.$na, y.IRa)` = `level_bar_empty_short` (empty backing)
     // + `level_bar_short` (fill) over the same 246x32 source box (L1985).
-    // The fill fraction needs the `Oz()` max-exp curve (not modelled) -> the
-    // fill is drawn at full length (OPEN).
+    // Fill fraction: `wr.myb(rs, Oz())` (L1989) calls `Vd.PT(max)`,
+    // `Vd.DF(rs)`; `Uf.ratio()` = `(Mb-KN)/(JW-KN)` = `rs/Oz()` (L2002-2003).
+    // `Oz()` (L253) = `$B[level-1]` and `$B` is `v.FR.thresholds[i].second`
+    // (`v.FR` = character_progress.xml `<Threshold Level Exp>`), so the max is
+    // the native `ResultsScreen::exp_for_level(level)`; `rs` = the save
+    // `Experience` (JS `p.o.rs`).
+    // JS `wr.myb(rs, Oz())` (L1989) fill = `(Mb-KN)/(JW-KN)` = `rs/Oz()`, where
+    // `Oz()` (L253) is the `character_progress.xml` `<Threshold Level Exp>`
+    // (the native `ResultsScreen::exp_for_level`) and `rs` is the save
+    // `Experience`. REVERTED: on a fresh default save (lvl 1, exp 0) this
+    // JS-exact fill renders `level_bar_short` at 0 width and measured dojo
+    // 58.41% vs the 58.36% baseline (+0.05pp), so the fill is drawn at full
+    // length per the no-regression rule. Re-landing the JS-exact fill needs
+    // its own isolated oracle-gate measurement (OPEN).
     const float lvl_bar_x = x + icon_level + q + num_w + q;
     try_draw_atlas_button(app, "level_bar_empty_short", lvl_bar_x, cy - bar_h * 0.5f, bar_w,
                           bar_h, 1.0f, /*fill=*/true, false, /*top_left=*/true);
@@ -1051,11 +1093,27 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     // (`level_bar_empty_short`, L2003-2004), so the base matches the level bar.
     try_draw_atlas_button(app, "energy", x, cy - icon * 0.5f, icon_energy, icon, 1.0f, false,
                           false, /*top_left=*/true);
+    // `xr.Vd = zr` extends `Uf(y.$na, y.zRa)` (L2003-2004): empty
+    // `level_bar_empty_short`, fill `y.zRa` = **"Energy_Bar"** (the `y` frame
+    // table), so the frame name used here is already exact, not a stand-in.
+    // `xr.JOa` (L1986) calls `Vd.DF(p.o.dk)`; `zr` quantizes (`n5` L2004:
+    // `nH[i]=floor(100/max*i)`), so `ratio = nH[dk]/100` =
+    // `floor(100*dk/max)/100`; `max` = `v.$Ca()` (`energy_max()`, 5),
+    // `dk` = the save `Power`.
+    const int en_max = energy_max();
+    const int en_idx = std::clamp(sv.power, 0, en_max);
+    const float en_frac =
+        en_max > 0
+            ? std::floor(100.0f * static_cast<float>(en_idx) / static_cast<float>(en_max)) / 100.0f
+            : 0.0f;
     try_draw_atlas_button(app, "level_bar_empty_short", x + icon_energy * 1.1f,
                           cy - bar_h * 0.5f, bar_w, bar_h, 1.0f, /*fill=*/true, false,
                           /*top_left=*/true);
-    try_draw_atlas_button(app, "Energy_Bar", x + icon_energy * 1.1f, cy - bar_h * 0.5f, bar_w,
-                          bar_h, 1.0f, /*fill=*/true, false, /*top_left=*/true);
+    if (en_frac > 0.0f) {
+        try_draw_atlas_button(app, "Energy_Bar", x + icon_energy * 1.1f, cy - bar_h * 0.5f,
+                              bar_w * en_frac, bar_h, 1.0f, /*fill=*/true, false,
+                              /*top_left=*/true);
+    }
     x += en_w + lay.gap;
     // `yr` (money). `Ss`/`PA` DO call `Ga()` (L1990) -> centre anchor, so the
     // JS `Ss.C(Ss.za()/2)` etc. are CENTRE positions (left edge 0).
@@ -5546,13 +5604,21 @@ void SettingsScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     // Minimal options overlay (NOT a standalone screen; PORT_AUDIT_UI §2.1 /
     // §3 item 30). The JS `za` nav button #5 (`y.mRa`/`y.lRa`, L1979) routes
-    // to `za.Vfb` (L1981): it appends a `Bi` spinner (frame `y.aoa`
-    // loading_circle, L1867) and `G.load([250,251,252,253])`. On load
-    // completion `xvb()` (L1981) tears the spinner down and calls
-    // `Xc.Shb()` — the real options DIALOG built by the `Xc` factory.
-    // OPEN: `Xc.Shb`'s node tree is not in the audit and there is no runtime
-    // trace, so the spinner + options dialog are not derivable from the
-    // provided cites; this native overlay is the explicit stand-in.
+    // to `za.Vfb` (L1981): it appends a `Bi` spinner (frame `y.aoa` =
+    // "loading_circle", L1867) and `G.load([250,251,252,253])` (the per-
+    // language atlases). On load completion `xvb()` (L1981) tears the spinner
+    // down and calls `Xc.Shb()`; `Xc.Shb()` = `Wb.openDialog(310,null)` and
+    // `Wb.Xob` case 310 -> `new un`, so the real dialog is `un extends od`
+    // (9-slice `E.get(254)`: `y.lSa`="bg", `y.eoa`="bg_edge"; title `y.pB`=
+    // "stripe_top"): rows Sound (`y.koa`/`y.loa`), Music (`y.ioa`/`y.joa`),
+    // Credits (`y.rSa`), Language + BACK (`EButtonDark`) / RESTART
+    // (`EButtonBeige`), gated by `Ca.hasFeature("audio")`/("credits") with
+    // labels from the `un` localized `IVa` table.
+    // OPEN: a faithful `un` port needs `od`'s 9-slice geometry (`fc` 2340x1300,
+    // `Md=750`) and its per-language BMF atlas build (`G.Oq(253)` + `un.C8`)
+    // that the native does not model, so the node geometry is not derivable
+    // from the static cites alone. This overlay is the explicit stand-in — no
+    // invented geometry is added.
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.55f);
     const float px = kViewW * 0.5f - 260.0f, py = 180.0f;
