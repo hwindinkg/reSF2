@@ -18,6 +18,24 @@ namespace sf2::scene {
 namespace {
 // Forward: Jf.OBa stage ids (defined with the bus block below).
 int oba_phase(fight_phase p);
+
+// The fight viewport (JS `Lb.width`/`Lb.height` for the fight screen) - the
+// same 1280x720 the camera framing hardcodes (framing calls below). The
+// `sXa` ringout arrows are screen-space and need it.
+constexpr float kFightViewW = 1280.0f;
+constexpr float kFightViewH = 720.0f;
+
+// JS `jg.parse` (L731): the `fight/fx` run lengths keyed by the HitEffect
+// `FileName` (`vT`). The native hit path has no per-hit HitEffect XML (the
+// global moves.xml `<Triggers>` HitEffect actions are not loaded - see
+// apply_hit), so the shipped Crit/Block/HitEffect trigger conditions pick
+// the run (moves.xml L33561-33602).
+constexpr int kFlashFramesCritical = 29;  // L731 "critical"/"hit_blade" = 29
+constexpr int kFlashFramesBlock = 24;     // L731 "block" = 24
+// JS `lrb` (L395): the flash time `c` (`Vu.time`) = 1/60 on a critical hit,
+// else 1/120.
+constexpr float kFlashTimeCrit = 1.0f / 60.0f;
+constexpr float kFlashTimeNormal = 1.0f / 120.0f;
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -321,6 +339,28 @@ void FightController::set_bounds(float wall, float wall_max, float floor_y) {
     camera_.arena_w = wall_min_ + wall_max_;  // the RAW location width (JS Lb.width)
 }
 
+// JS `nj` (L885, ERuleRingout): the off-screen-marker rule. The native sim
+// has no ERuleRingout engine (stages.xml `<Ringout .../>` is not parsed), so
+// the host supplies the bounds (`min_x`/`max_x` = `ZG`/`BH`) and speed
+// (`speed` = `tta`, SequentionSpeed). The arrows are shown while a round is
+// live (JS `f_a` L897) and hidden at the round-end cleanup (JS `$_a` L427 ->
+// `onb`/`pnb` L828). Presentation only - no RNG, no sim effect.
+void FightController::set_ringout_rule(bool enabled, float min_x, float max_x,
+                                       float speed) {
+    ringout_rule_ = enabled;
+    ringout_min_ = min_x;
+    ringout_max_ = max_x;
+    ringout_speed_ = speed;
+    // JS `f_a` (L897) runs every frame while the rule is active: enabling
+    // mid-round shows the arrows now; disabling hides them immediately.
+    if (enabled && phase_ == fight_phase::fight) {
+        fx_.show_offscreen_markers(ringout_min_, ringout_max_, ringout_speed_,
+                                   kFightViewW, kFightViewH, camera_.floor);
+    } else if (!enabled) {
+        fx_.hide_offscreen_markers();
+    }
+}
+
 // Modes setup path (tournament/survival): rounds/time/recovery, per-side
 // DamageFactor rules, NoBullets flag, enemy rebuild. Runs post-init,
 // pre-first-update (round_start consumes battle_).
@@ -454,6 +494,14 @@ void FightController::enter_fight() {
     round_live_ = true;
     round_.running = true;   // the timer counts down (JS Sf.play L2037)
     start_stance_done_ = true;
+    // JS `f_a` (L896-897): with the round live, the FIRST active
+    // `ERuleRingout` rule feeds the two `sXa` arrows
+    // (`this.Oe.H1a(a.ZG, a.BH, a.tta)`). The rule is the stage's
+    // `<Ringout>` parsed into battle_ (apply_stage_ringout_rule); when the
+    // stage has none this hides the markers (harmless no-op). Presentation
+    // only — set_ringout_rule never touches the simulation / RNG.
+    set_ringout_rule(battle_.ringout_rule, battle_.ringout_min_x,
+                     battle_.ringout_max_x, battle_.ringout_speed);
     // [FIX idle-slide] Cut the intro stance clip (stance_1/stance_2,
     // root-moving) so the fighters don't keep sliding 853 units into the
     // idle phase. The intro clip was re-triggered at f130 because its
@@ -485,6 +533,11 @@ void FightController::enter_end_stance() {
     round_.running = false;
     round_live_ = false;
     end_stance_frames_ = 0;
+    // JS `$_a` (L427) -> `onb()`/`pnb` (L828) -> `clear()` (L898): the
+    // ringout arrows are removed at the round-end cleanup. Route through
+    // set_ringout_rule(false, ..) so the configured flag + markers clear
+    // together (presentation only).
+    set_ringout_rule(false, ringout_min_, ringout_max_, ringout_speed_);
 }
 
 // JS `Onb` (L411): the round-end check. KO when a fighter's hp <= 0;
@@ -1563,6 +1616,37 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // (CapsuleHit::point — the attacker capsule's closest point, the JS
     // `strike.n$`), fanned AWAY from the attacker's facing.
     fx_.spawn_hit_sparks(ch.point.x, ch.point.y, atk.fighter.facing());
+
+    // [fx] The hit flash `Hyb` (JS L825). JS fires the `HitEffect` trigger
+    // action (`jg`, L738) on the landed `<Hit/>` event; `Xvb` (L519) then
+    // calls `Kla(Vu.bk, Vu.fg, Vu.time, a.vT, a.aza>0?a.aza:this.Qz, a.ywb)`
+    // -> `Hyb(point, dir, speed, run, scale, offset)`. The native sim does
+    // NOT load the global moves.xml `<Triggers>` (the HitEffect actions), so
+    // the run is selected from the shipped Crit/Block/HitEffect trigger
+    // conditions (moves.xml L33561-33602): critical -> "critical", block ->
+    // "block", otherwise "hit_blade"; the run length comes from `jg.Rza`
+    // (L731). `speed` = `Vu.time` (L395: 1/60 critical else 1/120), `scale`
+    // = the target's `Qz` (`this.Qz`; the shipped crit/block/hit_blade
+    // actions carry no ChangeHitEffectScale -> default 1), `offset` =
+    // StartingRotation (absent in those actions -> 0). The direction is the
+    // attacker's facing x -- the same x-reduction `spawn_hit_sparks` makes of
+    // the JS direction vector; JS uses the strike capsule's frame-motion
+    // delta `b.Py.sx/Zs .ma-.mf` (L395), which the sim does not retain.
+    // Presentation only: no RNG, no sim effect (the sparks' private LCG is
+    // untouched).
+    {
+        const char* flash_prefix = hit_critical ? "critical"
+                                 : hit_blocked  ? "block"
+                                                : "hit_blade";
+        const int flash_frames = hit_critical ? kFlashFramesCritical
+                               : hit_blocked  ? kFlashFramesBlock
+                                              : kFlashFramesCritical;
+        const float flash_time = hit_critical ? kFlashTimeCrit : kFlashTimeNormal;
+        fx_.spawn_hit_flash(ch.point.x, ch.point.y,
+                            static_cast<float>(atk.fighter.facing()), 0.0f, 0.0f,
+                            def.qz, flash_time, flash_prefix, flash_frames);
+    }
+
     camera_.shake(6.0f);
     std::fprintf(stdout, "[fx] sparks at %.0f,%.0f\n", ch.point.x, ch.point.y);
     std::fflush(stdout);

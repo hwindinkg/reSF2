@@ -60,9 +60,10 @@ namespace sf2::app {
 
 // The dojo — the home screen (native Dojo screen 3, JS `Tf`). The screen
 // the game boots into: the dojo location layer stack + the `FightNone`
-// ModelViewer idle figure + the shared `za` top chrome (nav column). No
-// FIGHT button / punchbag / gear — those were native inventions
-// (PORT_AUDIT_UI §2.2, §4).
+// ModelViewer (player idle + Punchbag enemy) + the shared `za` top chrome
+// (nav column). The FIGHT button, the hand-drawn bag and the gear were
+// native inventions (PORT_AUDIT_UI §2.2, §4); the Punchbag dummy is instead
+// the viewer's real enemy model (`merged_bag`, DOJO_BG_STATIC §1/§6).
 class DojoScreen : public Screen {
 public:
     explicit DojoScreen(ScreenManager& mgr);
@@ -86,6 +87,13 @@ private:
     bool dojo_fig_ok_ = false;
     const sf2::data::anim_clip* dojo_idle_ = nullptr;  // owned by FightAssets
     int idle_frame_ = 0;   // fixed-step counter driving the idle cycle
+    // The hub's enemy: the Punchbag dummy the `FightNone`/Training viewer
+    // spawns at the location's EnemyPosition (dojo 973,-110, `Bf.zjb` L476).
+    // The model is loaded for the hub (fight_assets.hpp:48-56 /
+    // app.cpp:445-460) and drawn at its bind pose (rigid prop). Null-safe.
+    std::unique_ptr<sf2::scene::Fighter> dojo_bag_;
+    bool dojo_bag_tried_ = false;
+    bool dojo_bag_ok_ = false;
     // Tutorial quest banner state (quest_panel.hpp; derived read-only from
     // the save's Tutorial field + the last Training result).
     std::string tutorial_ = "MOVE";

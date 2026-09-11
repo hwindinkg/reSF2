@@ -133,7 +133,7 @@ void draw_ui_label(App& app, float x, float y, float w, float h,
 // Helpers defined later in this file (the atlas sprite path sits after this
 // point; the `od`/`Ib` dialog art below needs it).
 bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy,
-                           float w, float h, float alpha, bool fill);
+                           float w, float h, float alpha, bool fill, bool flip_x);
 bool load_scroll_atlas(App& app);
 void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speaker,
                   const std::string& line1, const std::string& line2, bool show_ok);
@@ -169,12 +169,14 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
     bool drew_bg = false;
     if (have) {
         drew_bg = try_draw_atlas_button(app, "bg", px + pw * 0.5f, py + ph * 0.5f, pw, ph,
-                                        1.0f, /*fill=*/true);
+                                        1.0f, /*fill=*/true, /*flip_x=*/false);
         if (drew_bg) {
             // `XN[0]` (left) + `XN[2]` (right; JS `Hr(!0)` flips it — native
             // flip is OPEN, the cap reads as a symmetric frame edge here).
-            try_draw_atlas_button(app, "bg_edge", px, py + ph * 0.5f, pw, ph, 1.0f, false);
-            try_draw_atlas_button(app, "bg_edge", px + pw, py + ph * 0.5f, pw, ph, 1.0f, false);
+            try_draw_atlas_button(app, "bg_edge", px, py + ph * 0.5f, pw, ph, 1.0f, false,
+                                  /*flip_x=*/false);
+            try_draw_atlas_button(app, "bg_edge", px + pw, py + ph * 0.5f, pw, ph, 1.0f, false,
+                                  /*flip_x=*/false);
         }
     }
     if (!drew_bg) {
@@ -497,7 +499,7 @@ void draw_flat_button(App& app, const std::string& label, float cx, float cy, fl
 
 // Tries to draw an atlas frame centered at (cx,cy) sized to (w,h). Returns true if drawn.
 bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy, float w, float h,
-                           float alpha = 1.0f, bool fill = false) {
+                           float alpha = 1.0f, bool fill = false, bool flip_x = false) {
     sf2::data::atlas_frame fr;
     int tw = 0, th = 0;
     unsigned int gl = 0;
@@ -544,6 +546,11 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
             const float sc = std::min(w / static_cast<float>(fr.w), h / static_cast<float>(fr.h));
             s.transform.set_scale(sc, sc);
         }
+    }
+    // JS `Hr(!0)` (flipX, e.g. the right `roll_end` cap of `Zh` L1872): mirror
+    // the quad on x. No face culling — a flipped winding still draws.
+    if (flip_x) {
+        s.transform.scale_x = -s.transform.scale_x;
     }
     // UI is screen-space: identity camera (world == screen)
     sf2::render::Camera ui_cam;
@@ -645,16 +652,31 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speak
     const float oy = sp;
     auto lx = [&](float v) { return ox + v * c; };
     auto ly = [&](float v) { return oy + v * c; };
-    const float pw = 600.0f * c, ph = 250.0f * c;
+    const float ph = 250.0f * c;
     bool drew = false;
     if (load_scroll_atlas(app)) {
-        drew = try_draw_atlas_button(app, "paper", lx(300.0f), ly(125.0f), pw, ph, 1.0f,
-                                     /*fill=*/true);
+        // JS `Ib` (L1906) builds the bar as the `gk(600,250,50,0,!1)` scroll
+        // (L1906 `O1a`), whose art is the `Zh` roll composite (L1872-1873),
+        // NOT the `paper` sheet: `Zh` ctor adds `roll_end` (child 0),
+        // `roll_center` (child 1) and `roll_end` flipped `Hr(!0)` (child 2)
+        // (`y.goa`/`y.pSa` L2467-2468). `Zh.ba(600,250)` (horizontal: `c =
+        // h>w = false`, `d = min(w,h) = 250`, `h = d/capSrcH`):
+        //   capW  = 101 * 250/114      (roll_end sourceSize 101x114)
+        //   bodyW = max(600 - 2*capW, 10)
+        //   left cap x=0, body x=capW, right cap x=capW+bodyW (all 250 tall).
+        constexpr float kRollEndW = 101.0f, kRollEndH = 114.0f;  // scroll.json roll_end
+        constexpr float kBarW = 600.0f, kBarH = 250.0f;          // gk(600,250)
+        const float cap_w = kRollEndW * (kBarH / kRollEndH);     // 221.49 local
+        const float body_w = std::max(kBarW - 2.0f * cap_w, 10.0f);
+        drew = try_draw_atlas_button(app, "roll_end", lx(cap_w * 0.5f), ly(kBarH * 0.5f),
+                                     cap_w * c, ph, 1.0f, /*fill=*/true);
         if (drew) {
-            try_draw_atlas_button(app, "paper_edge_left", lx(0.0f), ly(125.0f), pw, ph, 1.0f,
-                                  false);
-            try_draw_atlas_button(app, "paper_edge_right", lx(600.0f), ly(125.0f), pw, ph,
-                                  1.0f, false);
+            try_draw_atlas_button(app, "roll_center", lx(cap_w + body_w * 0.5f),
+                                  ly(kBarH * 0.5f), body_w * c, ph, 1.0f, /*fill=*/true);
+            // Right cap: the third `Zh` child is `roll_end` with `Hr(!0)`.
+            try_draw_atlas_button(app, "roll_end",
+                                  lx(cap_w + body_w + cap_w * 0.5f), ly(kBarH * 0.5f),
+                                  cap_w * c, ph, 1.0f, /*fill=*/true, /*flip_x=*/true);
         }
     }
     if (!drew) {
@@ -879,6 +901,24 @@ ZaLayout za_layout() {
     return lay;
 }
 
+// JS `za.Aub` (L1977-1978): the nav is a `gk(400,800,50,1,!0,Y.na("menu"))`
+// scroll and the ctor immediately calls `this.scroll.collapse(0)` — the
+// COLLAPSED default. `gk.NLa` (L2001) then sets `zI=2` (collapsed) and hides
+// the `Le` buttons (`i3.Z(!1)`); expanding (`zI=1`) reveals them. Only the
+// `Lx` title (`Y.na("menu")` = "МЕНЮ", oracle x64-176 y72-110) shows while
+// collapsed. The native keeps one shared flag (JS `za.instance` is a
+// singleton mounted on every shell screen). `gk.Bgb` (L2000) toggles it.
+bool g_za_nav_open = false;  // JS `collapse(0)` (L1978) default = collapsed
+
+// The collapsed menu header rect (oracle tutorial shot, 1280x720 space).
+void za_header_rect(float& x, float& y, float& w, float& h) {
+    const float s = kViewW / 1280.0f;
+    x = 64.0f * s;
+    y = 72.0f * s;
+    w = 112.0f * s;
+    h = 38.0f * s;
+}
+
 // Hit test for the vertical nav column; -1 when outside every button.
 int za_nav_hit(double px, double py) {
     const ZaLayout lay = za_layout();
@@ -898,15 +938,38 @@ int za_nav_hit(double px, double py) {
 // the screen already showing (the JS highlights that one active, `xyb`
 // L1982).
 void za_update(App& app, Screen& self, ScreenId active) {
-    const int hit = za_nav_hit(app.pointer().x, app.pointer().y);
-    if (hit < 0 || !app.pointer().pressed) return;
-    const ScreenId target = kZaNav[hit].nav;
-    sf2::audio::AudioEngine::instance().play("click");
-    std::fprintf(stdout, "[za] nav %s -> screen %d\n", kZaNav[hit].label,
-                 static_cast<int>(target));
-    std::fflush(stdout);
-    if (target != active) {
-        self.push(target);
+    // JS `gk.Bgb` (L2000): a press on the scroll header toggles
+    // `this.uJ?collapse(.3):expand(.3)`. While collapsed the five `Le`
+    // buttons are hidden (`NLa` L2001), so only the header answers taps.
+    float hx = 0.0f, hy = 0.0f, hw = 0.0f, hh = 0.0f;
+    za_header_rect(hx, hy, hw, hh);
+    const double px = app.pointer().x, py = app.pointer().y;
+    const bool header_hit = px >= hx && px <= hx + hw && py >= hy && py <= hy + hh;
+    // Collapsed (JS `collapse(0)` L1978): the header expands the column.
+    if (!g_za_nav_open) {
+        if (header_hit && app.pointer().pressed) {
+            g_za_nav_open = true;
+            sf2::audio::AudioEngine::instance().play("click");
+        }
+        return;
+    }
+    // Expanded: a nav button wins over the header (the compact top-left
+    // column overlaps); a header tap with no button collapses (L2000 toggle).
+    const int hit = za_nav_hit(px, py);
+    if (hit >= 0 && app.pointer().pressed) {
+        const ScreenId target = kZaNav[hit].nav;
+        sf2::audio::AudioEngine::instance().play("click");
+        std::fprintf(stdout, "[za] nav %s -> screen %d\n", kZaNav[hit].label,
+                     static_cast<int>(target));
+        std::fflush(stdout);
+        if (target != active) {
+            self.push(target);
+        }
+        return;
+    }
+    if (header_hit && app.pointer().pressed) {
+        g_za_nav_open = false;
+        sf2::audio::AudioEngine::instance().play("click");
     }
 }
 
@@ -969,6 +1032,26 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     draw_ui_label(app, x + icon_gold + q + num_w + q + icon_ruby + q,
                   cy - lay.widget_h * 0.45f, num_w, lay.widget_h, std::to_string(sv.bonus),
                   num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+    // JS `gk` collapsed default (L1978): only the `Lx` title header shows;
+    // the five `Le` buttons render only once expanded (`NLa` L2001).
+    if (!g_za_nav_open) {
+        float hx = 0.0f, hy = 0.0f, hw = 0.0f, hh = 0.0f;
+        za_header_rect(hx, hy, hw, hh);
+        // The collapsed header over the `gk` scroll art (`Zh` roll frames);
+        // the label is `Y.na("menu")` ("МЕНЮ" in the oracle locale).
+        if (!try_draw_atlas_button(app, "roll_center", hx + hw * 0.5f, hy + hh * 0.5f, hw,
+                                   hh, 1.0f, /*fill=*/true)) {
+            const float panel[] = {hx, hy, hx + hw, hy, hx, hy + hh,
+                                   hx + hw, hy, hx + hw, hy + hh, hx, hy + hh};
+            ren.draw_triangles(panel, 6, 0.10f, 0.07f, 0.05f, 0.9f);
+        }
+        // The label is `Y.na("menu")`: UTF-8 bytes for `МЕНЮ` (0xD0 0x9C
+        // 0xD0 0x95 0xD0 0x9D 0xD0 0xAE) written as escapes so the string
+        // literal is independent of the compiler's source charset (MSVC).
+        draw_ui_label(app, hx, hy + hh * 0.28f, hw, hh, "\xD0\x9C\xD0\x95\xD0\x9D\xD0\xAE",
+                      0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        return;
+    }
     // Vertical nav column (ndb L1976-1977).
     const int hover = za_nav_hit(app.pointer().x, app.pointer().y);
     const float nav_cx = lay.nav_x + lay.nav_w * 0.5f;
@@ -1430,7 +1513,8 @@ void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& came
 // `e.scale.x = c.Wl * a.scale.x`, `c.Wl = b.da.hd()`). Returns false on a
 // genuine atlas/frame miss — the caller then draws the flat tinted quad.
 bool draw_fx_frame(App& app, const std::string& frame_name, float cx, float cy,
-                   float size, int facing, float r, float g, float b, float alpha) {
+                   float size, int facing, float r, float g, float b, float alpha,
+                   float rotation_deg = 0.0f) {
     sf2::data::atlas_frame fr;
     int tw = 0, th = 0;
     unsigned int gl = 0;
@@ -1477,6 +1561,9 @@ bool draw_fx_frame(App& app, const std::string& frame_name, float cx, float cy,
     // Fit the source-size frame into `size` px; a negative x-scale mirrors
     // on facing (no face culling — a flipped winding still draws).
     s.transform.set_scale(size / src_w * (facing < 0 ? -1.0f : 1.0f), size / src_h);
+    // JS `Hyb` (L825): `this.lo.Wg(isNaN(a)?0:-a)` — the overlay rotation in
+    // degrees (0 for the magic frames, which share this helper).
+    s.transform.rotation = rotation_deg;
     // Effects are screen-projected already: draw through the identity camera
     // (world == screen), same as `try_draw_atlas_button`.
     sf2::render::Camera ui_cam;
@@ -1749,6 +1836,48 @@ void battle_rewards(const std::string& battle_name, int& out_money, int& out_exp
         }
     } catch (const std::exception&) {
     }
+}
+
+// The battle's first <Fight><Rules> children (stages.xml). JS `Ya` mp(6)
+// parses the stage fight (`nj.parse` L885) and `f_a` L896-897 feeds the
+// FIRST active `ERuleRingout` rule to the `sXa` off-screen markers. The
+// native battle is hardcoded (FightNone), so the caller maps these rules via
+// `apply_stage_ringout_rule` (scene/fight.hpp) before init_locks. Empty when
+// the battle/fight has no <Rules> (the dojo Training dummy: NoPerks only, no
+// Ringout -> markers stay dormant).
+std::vector<sf2::scene::StageRule> battle_fight_rules(const std::string& battle_name) {
+    std::vector<sf2::scene::StageRule> out;
+    try {
+        sf2::data::xml_doc doc;
+        const std::string path = "reference/extracted/xml/res/stages.xml";
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return out;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return out;
+        for (const pugi::xml_node zone : root.child("Zones").children("Zone")) {
+            for (const pugi::xml_node battle : zone.children("Battle")) {
+                if (std::string(battle.attribute("Name").value()) != battle_name) continue;
+                const pugi::xml_node fight = battle.child("Fight");
+                if (!fight) return out;
+                const pugi::xml_node rules = fight.child("Rules");
+                if (!rules) return out;
+                for (const pugi::xml_node r : rules.children()) {
+                    sf2::scene::StageRule rule;
+                    rule.tag = r.name();
+                    for (const pugi::xml_attribute a : r.attributes()) {
+                        rule.attrs[a.name()] = a.value();
+                    }
+                    out.push_back(std::move(rule));
+                }
+                return out;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return out;
 }
 
 // The player's (type, subtype) items for the Locks move list: the equipped
@@ -2259,7 +2388,28 @@ void DojoScreen::render_impl(App& app) {
     bool have_hub_cam = false;
     if (app.has_fight_assets()) {
         FightAssets& assets = app.fight_assets();
-        assets.dojo.default_camera(hub_cam, kViewW, kViewH);
+        // [fix(hub): live focus, D3 / PORT_AUDIT_SCENE §4.4 + W1] The JS `Tf`
+        // hub (L1971-1972) runs the `FightNone` viewer, whose `Ut.Al` (L826)
+        // recomputes `Io = Lb.width/2 - focus` every frame from the live CoM
+        // midpoint `Go.ma` (the two viewers' COM anchors). The old call passed
+        // no focus, freezing `Io` at the spawn constant. Pass the viewers'
+        // live CoM mid: the idle player + bag dummy `world_x()` are the COM
+        // anchors (fighter.hpp:305), in container space (spawn - arenaW/2), so
+        // +halfW converts back to the location space `default_camera` expects.
+        float focus_x = -1.0f;      // <0 -> default_camera's spawn fallback
+        float fighter_span = -1.0f;
+        {
+            const float half = assets.dojo.arena_width() * 0.5f;
+            const bool have_p = dojo_fig_ok_ && dojo_fighter_ != nullptr;
+            const bool have_b = dojo_bag_ok_ && dojo_bag_ != nullptr;
+            if (have_p && have_b) {
+                focus_x = (dojo_fighter_->world_x() + dojo_bag_->world_x()) * 0.5f + half;
+                fighter_span = std::fabs(dojo_bag_->world_x() - dojo_fighter_->world_x());
+            } else if (have_p) {
+                focus_x = dojo_fighter_->world_x() + half;
+            }
+        }
+        assets.dojo.default_camera(hub_cam, kViewW, kViewH, focus_x, fighter_span);
         have_hub_cam = true;
         assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
     } else {
@@ -2309,6 +2459,44 @@ void DojoScreen::render_impl(App& app) {
                     std::fflush(stdout);
                 }
             }
+        }
+        // The hub's enemy = the Punchbag dummy. The JS `Tf` hub runs the
+        // `FightNone` Punchbag Training viewer, so its ModelsViewer enemy is
+        // the hanging bag (DOJO_BG_STATIC §1/§6). `merged_bag` is loaded for
+        // exactly this (fight_assets.hpp:48-56 / app.cpp:445-460) but was
+        // never drawn. The bag is a rigid prop, so it is sampled once at its
+        // BIND pose: a synthetic 1-frame / 0-bone clip makes
+        // `Fighter::sample` keep every bone at its bind position
+        // (fighter.cpp:678) with the `COM` bone anchored at the spawn
+        // (fighter.cpp:945-960). Drawn BEFORE the player because the enemy is
+        // the first-registered fighter (z=-0.001, PORT_AUDIT_SCENE §2 `ev.Gf`
+        // L845: enemy behind, player on top).
+        if (!dojo_bag_tried_) {
+            dojo_bag_tried_ = true;
+            if (app.has_fight_assets() && !app.fight_assets().merged_bag.bones.empty()) {
+                dojo_bag_ = std::make_unique<sf2::scene::Fighter>();
+                dojo_bag_->set_model(app.fight_assets().merged_bag);
+                dojo_bag_->set_color(app.fight_assets().dojo.root_color());
+                dojo_bag_ok_ = true;
+                std::fprintf(stdout, "[dojo] punchbag dummy ready (bones %zu)\n",
+                             app.fight_assets().merged_bag.bones.size());
+                std::fflush(stdout);
+            } else {
+                std::fprintf(stdout, "[dojo] punchbag dummy skipped (no model)\n");
+                std::fflush(stdout);
+            }
+        }
+        if (dojo_bag_ok_ && dojo_bag_ != nullptr && have_hub_cam) {
+            const float enemy_x =
+                (app.has_fight_assets() ? app.fight_assets().dojo.enemy_spawn_x() : 973.0f) -
+                arena_half;
+            const float enemy_y =
+                (app.has_fight_assets() ? app.fight_assets().dojo.enemy_spawn_y() : -110.0f) +
+                cont_y;
+            sf2::data::anim_clip bind_clip;  // 1 frame, 0 bones -> bind pose
+            bind_clip.frames.resize(1);
+            dojo_bag_->sample(bind_clip, 0, enemy_x, enemy_y, 1);
+            draw_dojo_figure(ren, hub_cam, *dojo_bag_);
         }
         if (dojo_fig_ok_ && dojo_fighter_ != nullptr && dojo_idle_ != nullptr &&
             !dojo_idle_->frames.empty() && have_hub_cam) {
@@ -2836,6 +3024,13 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     battle.enemy_spawn_y = -93.0f;
     battle.max_hp = 1;  // the game's HP fallback (Zn = aB>0 ? aB : 1)
     battle.player_unarmed_damage = 80.0f;
+    // [fx] JS `nj.parse` (L885) + `f_a` (L896-897): the stage fight's
+    // `<Ringout>` rule configures the off-screen marker arrows (`sXa`). The
+    // native battle is hardcoded above, so pull the battle's first-fight
+    // `<Rules>` from stages.xml and map them into `battle.ringout_*` here,
+    // BEFORE init_locks copies the battle into the controller. The dojo
+    // Training dummy carries no Ringout -> the markers stay dormant.
+    sf2::scene::apply_stage_ringout_rule(battle, battle_fight_rules(battle_name_));
 
     const sf2::scene::TacticDef* tactic = nullptr;
     const auto it = assets.tactic_defs.find("Standard");
@@ -3746,6 +3941,62 @@ void FightScreen::render_impl(App& app) {
     const std::size_t n_layers = assets.dojo.layers().size();
     if (fighter_layer != sf2::scene::LocationScene::npos) {
         assets.dojo.render_layers(ren, camera, fighter_layer + 1, n_layers);
+    }
+
+    // --- Fight feedback overlays on the camera-glued `Cu` container ------
+    // JS `Ut.UWa` (L832) appends `Cu` as the LAST child of the render
+    // container `go`, so `Cu` (and its `WV` flash node) draws over every
+    // location layer. Both overlays live in container space (the same `tl`
+    // offset the fighters/sparks use) and are drawn here, on top.
+    {
+        constexpr float kPi = 3.14159265358979323846f;
+        // JS `ge.gba` = params `ArrowFlashingFrames` (L1278), default 120.
+        constexpr float kArrowFlashingFrames = 120.0f;
+
+        // JS `Hyb` (L825): the one-shot `fight/fx` (asset 1306) hit overlay
+        // `this.lo` (`Ut.s1a` L831-832). `C(a.x)`/`D(a.y)` place it at the hit
+        // point; `la(e*.7)` is the stored `scale`; `Wg(isNaN(a)?0:-a)` is
+        // `angle_deg`; the sine `kyb` alpha = .5+.5*sin(pi/gba*frame).
+        const sf2::scene::hit_flash& flash = fight_->fx().hit_flash_state();
+        if (flash.active && load_fx_atlas(app)) {
+            const std::string frame = fight_->fx().hit_flash_frame();
+            if (!frame.empty()) {
+                const float alpha =
+                    0.5f + 0.5f * std::sin(kPi / kArrowFlashingFrames * flash.age);
+                const float sx = camera.world_to_screen_x(flash.x - arena_half, 1.0f);
+                const float sy = camera.world_to_screen_y(flash.y + cont_y);
+                // The `hit_blade`/`critical` fx frames all carry sourceSize
+                // 1024x1024 (fx.json), so `size/1024 = la(e*.7) * camera zoom`.
+                const float size = 1024.0f * flash.scale * camera.zoom;
+                if (alpha > 0.02f && size > 0.5f &&
+                    !draw_fx_frame(app, frame, sx, sy, size, /*facing=*/1, 1.0f, 1.0f,
+                                   1.0f, alpha, flash.angle_deg)) {
+                    // Genuine atlas/frame miss only.
+                    ren.draw_effect_quad(sx, sy, size * 0.25f, size * 0.25f, 0.0f, 1.0f,
+                                         1.0f, 1.0f, alpha);
+                }
+            }
+        }
+
+        // JS `sXa` (L827-828): the two `fight/ringout` (asset 1300) arrows on
+        // `Cu`, frames "0".."19" (`kg.Yda` L827). `EffectSystem` stores the
+        // screen-space x/width (`d(n,q)`: `xc(n)`/`C(q)`) and y/height
+        // (`Pb(h)`/`D(-k)`), so each frame draws 1:1 stretched to
+        // `m.width x m.height`.
+        const sf2::scene::offscreen_markers& mk = fight_->fx().markers_state();
+        if (mk.active && load_ringout_atlas(app)) {
+            auto draw_marker = [&](const sf2::scene::fight_marker& m) {
+                if (m.width <= 0.0f || m.height <= 0.0f) return;
+                const std::string fname = sf2::scene::EffectSystem::marker_frame_name(m);
+                if (!try_draw_atlas_button(app, fname, m.x, m.y, m.width, m.height, 1.0f,
+                                           /*fill=*/true)) {
+                    ren.draw_effect_quad(m.x, m.y, m.width, m.height, 0.0f, 1.0f, 1.0f, 1.0f,
+                                         0.9f);
+                }
+            };
+            draw_marker(mk.left);
+            draw_marker(mk.right);
+        }
     }
 
     // Scene letterbox bars (JS `ma.Sya` L1833-1834; PORT_AUDIT_SCENE D10):

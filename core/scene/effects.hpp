@@ -55,9 +55,12 @@ struct particle {
 //   - `this.lo.C(a.x); this.lo.D(a.y)` — position = the hit point `a`.
 //   - `this.lo.la(e*.7)` — uniform scale (`la`).
 //   - `a=Az(dir,(1,0))+f; this.lo.Wg(isNaN(a)?0:-a)` — rotation in degrees.
-//   - `d.uub(1/c/60)` (L1621) — frame timing. The overlay is TIMED
-//     (one-shot): when the run ends the `gJa` completion callback hides it
-//     (`g.lo.R(!1)`).
+//   - `d.uub(1/c/60)` (L825 -> `uub` L1621): sets the run time-scale
+//     `NL = 1/(c*60)`. The `kg.Yda(run,60)` run frame is `1/60` animation-s
+//     (L732) and the controller advances `CA += dt*NL` (`Vj.update` L1451),
+//     so the real per-frame time is exactly `c` (= `Vu.time`, `lrb` L395).
+//     The overlay is TIMED (one-shot): when the run ends the `gJa`
+//     completion callback hides it (`g.lo.R(!1)`).
 struct hit_flash {
     bool active = false;
     float x = 0.0f;               // world/container x (JS `C(a.x)`)
@@ -126,7 +129,8 @@ public:
 
     // JS `Hyb` (L825): starts the one-shot hit-flash overlay. `dir_x/dir_y`
     // is the hit direction `b`, `angle_offset_deg` is `f`, `scale` is `e`
-    // (stored as `e*.7`), `speed` is `c` (frame time = 1/(speed*60)).
+    // (stored as `e*.7`), `speed` is `c` = `Vu.time` (real per-frame seconds,
+    // `lrb` L395: 1/60 critical else 1/120).
     void spawn_hit_flash(float x, float y, float dir_x, float dir_y,
                          float angle_offset_deg, float scale, float speed,
                          const std::string& frame_prefix, int frame_count);

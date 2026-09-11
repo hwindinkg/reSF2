@@ -104,8 +104,12 @@ void EffectSystem::spawn_hit_flash(float x, float y, float dir_x, float dir_y,
     flash_.scale = scale * 0.7f;  // JS `this.lo.la(e*.7)`
     flash_.frame_prefix = frame_prefix;
     flash_.frame_count = flash_.active ? frame_count : 0;
-    // JS `d.uub(1/c/60)` — seconds per frame (speed<=0 -> the 60 Hz tick).
-    flash_.frame_time_sec = speed > 0.0f ? (1.0f / (speed * 60.0f)) : (1.0f / 60.0f);
+    // JS `Hyb` (L825): `d.uub(1/c/60)` sets the run time-scale
+    // `NL = 1/(c*60)`; the `kg.Yda(run,60)` run frame is `1/60` animation-s
+    // (L732) and `Vj.update` advances `CA += dt*NL` (L1451), so the real
+    // per-frame time is exactly `c` (`Vu.time`, `lrb` L395) -- not
+    // `1/(c*60)` (that is `NL`, a time-scale, not a duration).
+    flash_.frame_time_sec = speed > 0.0f ? speed : (1.0f / 60.0f);
     flash_.frame = 0;
     flash_.accum = 0.0f;
     flash_.age = 0.0f;

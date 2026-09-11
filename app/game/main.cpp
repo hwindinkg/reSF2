@@ -99,8 +99,12 @@ struct LoopStep {
 //     the Dojo hub).
 static const LoopStep kLoopSteps[] = {
     // 0: Dojo -> Map (the MAP button). Capture loop_map.png on arrival.
+    //    `tab_x/tab_y` = the collapsed `za` header tap (JS `gk.collapse(0)`
+    //    default, L1978): the nav column is hidden until the header is
+    //    tapped, so expand it 5 frames before the MAP click (header rect
+    //    x64-176 y72-110; see za_header_rect in screens.cpp).
     {184.0f, 231.0f, "dojo->map (MAP)", kScreenDojo, 0, kScreenMap, 0,
-     "loop_map.png"},
+     "loop_map.png", 120.0f, 90.0f},
     // 1: Map -> ZONE_1 boss fight (BOSS_LYNX, X=-180 Y=-45 -> ~471,375) —
     //    a money-bearing fight. The fight runs to KO (auto-attack) and
     //    pushes Results. Capture the fists fight (before-equip evidence).
@@ -323,7 +327,10 @@ static const UiTourStep kUiTourSteps[] = {
     // 0: Dojo hub at boot (fresh save) - settle then capture.
     {0.0f, 0.0f, "dojo hub", 3, 150, -1, 60, "port_dojo.png", 0, true},
     // 1: Dojo -> Map (`za` vertical nav column, MAP = row 1 @184,231).
-    {184.0f, 231.0f, "dojo->map", 3, 10, 5, 60, "port_map.png"},
+    //    `tab_x/tab_y` = the collapsed `za` header tap: expand the nav
+    //    before the MAP click (step 0 captured the collapsed hub look).
+    {184.0f, 231.0f, "dojo->map", 3, 10, 5, 60, "port_map.png", 0, false,
+     120.0f, 90.0f},
     // 2: Map -> Dojo (BACK).
     {64.0f, 40.0f, "map->dojo", 5, 10, 3, 0, nullptr},
     // 3: Dojo -> Shop (nav row 2 @184,337).

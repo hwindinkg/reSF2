@@ -78,6 +78,17 @@ struct BattleParams {
                               // when the HUD timer reaches 0 (JS `BT` sets
                               // `ey=2` for the TimeoutWin rule). The shipped
                               // stages use NO timeout rule — rounds end on KO.
+    // `ERuleRingout` — the stage fight's `<Ringout Node=".." Axis="X"
+    // Min=".." Max=".." ApplyTo=".."/>` rule (stages.xml, e.g. L2238
+    // `Min="-600" Max="600"`). JS `nj` (L885-886): `ZG`/`BH` = the Axis=X
+    // Min/Max (`of(a,-1E5,1E5)`, `of` def: first=Min, second=Max), `tta` =
+    // `SequentionSpeed` (default 3). Absent element => no rule => no marker.
+    // Filled by `apply_stage_ringout_rule` from StageFight.rules and fed to
+    // set_ringout_rule each round (presentation only).
+    bool ringout_rule = false;
+    float ringout_min_x = -1.0e5f;  // JS `ZG` (`of` Min default -1E5, L886)
+    float ringout_max_x = 1.0e5f;   // JS `BH` (`of` Max default 1E5, L886)
+    float ringout_speed = 3.0f;     // JS `tta` (SequentionSpeed default 3, L886)
     // Fight-level spawn positions (the game reads location.Yia/B_; the
     // demo supplies the dojo ModelsViewer positions).
     float player_spawn_x = 973.0f, player_spawn_y = -110.0f;
@@ -90,6 +101,41 @@ struct BattleParams {
     // while keeping the exact bCa formula.
     float player_unarmed_damage = 0.0f;
 };
+
+// JS `nj.parse` (L885-886) + `bb.M3` (L888): map the stage fight's
+// `<Ringout .../>` rule into `b`'s marker config. `rules` are the parsed
+// `<Rules>` children (StageRule; `parse_stages` modes.hpp L251-261 stores
+// any child tag + attrs, so `<Ringout>` is already available). Axis="X"
+// sets `ZG`/`BH` from Min/Max (`of(a,-1E5,1E5)` L886; `of` first=Min,
+// second=Max); `SequentionSpeed` defaults 3. JS `f_a` (L896-897) uses the
+// FIRST active Ringout rule (`a||(a=g, ...)`), so the first match wins; no
+// element leaves the rule disabled. Condition/`ApplyTo` gates on rules are
+// not evaluated here (the shipped stages carry neither on `<Ringout>`).
+inline void apply_stage_ringout_rule(BattleParams& b,
+                                     const std::vector<StageRule>& rules) {
+    for (const StageRule& r : rules) {
+        if (r.tag != "Ringout") continue;
+        b.ringout_rule = true;
+        const auto attr = [&](const char* k, float def) -> float {
+            const auto it = r.attrs.find(k);
+            if (it == r.attrs.end()) return def;
+            try {
+                return std::stof(it->second);
+            } catch (...) {
+                return def;
+            }
+        };
+        const auto axis_it = r.attrs.find("Axis");
+        const std::string axis =
+            axis_it != r.attrs.end() ? axis_it->second : std::string();
+        if (axis == "X") {  // JS: only Axis=X fills ZG/BH (L886)
+            b.ringout_min_x = attr("Min", -1.0e5f);
+            b.ringout_max_x = attr("Max", 1.0e5f);
+        }
+        b.ringout_speed = attr("SequentionSpeed", 3.0f);
+        break;  // JS `f_a` keeps the first Ringout rule (L897)
+    }
+}
 
 // The live round state (JS `$t` L1239).
 struct RoundState {
@@ -521,6 +567,17 @@ public:
     // (JS `ca.ggb` L383: v.tFa = location.NU, v.NKa = location.width - NU).
     void set_bounds(float wall, float wall_max, float floor_y);
 
+    // JS `nj` (L885, ERuleRingout): configure the off-screen marker arrows
+    // (`sXa` L827-828). The native sim has no ERuleRingout engine (the
+    // stages.xml `<Ringout .../>` combat rule is not simulated), so the
+    // controller feeds this from the parsed stage rule each round
+    // (BattleParams.ringout_*; see apply_stage_ringout_rule): `min_x`/
+    // `max_x` are `ZG`/`BH` and `speed` is `tta` (SequentionSpeed default
+    // 3). The arrows show while a round is live (JS `f_a` L897) and hide at
+    // the round-end cleanup (JS `$_a` L427 -> `onb`/`pnb` L828).
+    // Presentation only - never touches the simulation (no RNG).
+    void set_ringout_rule(bool enabled, float min_x, float max_x, float speed);
+
     // Modes setup path (tournament/survival `ModeFight`): rounds/time/
     // recovery, per-side DamageFactor rules, NoBullets flag, enemy
     // rebuild (items/tactic/attrs/perks). Called post-init by the
@@ -691,6 +748,12 @@ private:
     int banner_round_ = 0;       // the ROUND N number (banner_round_+1 shown)
     // The visual effects layer (hit sparks) — presentation only.
     EffectSystem fx_;
+    // JS `nj` (ERuleRingout) marker state (L885): `ZG`/`BH` axis bounds and
+    // `tta` (SequentionSpeed). Set via set_ringout_rule; presentation only.
+    bool ringout_rule_ = false;
+    float ringout_min_ = -1.0e5f;  // JS `ZG` default (`of(a,-1E5,1E5)` L886)
+    float ringout_max_ = 1.0e5f;   // JS `BH` default
+    float ringout_speed_ = 3.0f;   // JS `tta` (SequentionSpeed default 3)
     std::vector<RoundOutcome> history_;
     FightLogLine last_log_;
     float wall_min_ = 80.0f, wall_max_ = 1880.0f, floor_y_ = 0.0f;
