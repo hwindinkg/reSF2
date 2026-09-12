@@ -416,7 +416,7 @@ bool FightController::rule_winner_is_player(const FightRule& r) const {
 // [ZG,BH]x[dN,HO] -> `setActive(false)` + fire. `oy=-location.width/2`,
 // `eC=-location.ct`; the node is `Jc.oa.Ic(ON)` (player) / `QI...` (bot).
 // The native reduces the node lookup to the fighter's world anchor (the
-// model pivot NPivot == the COM the port already places). The rule fires
+// model pivot NPivot, which is now the port's anchor). The rule fires
 // only with a Node name (JS `ga==null` -> false) and only for the axis set
 // by Axis= (the other axis keeps the +/-1E5 defaults, so it never triggers).
 bool FightController::rules_ringout_detect(FightRule& r) {
@@ -428,8 +428,8 @@ bool FightController::rules_ringout_detect(FightRule& r) {
     // named node in the fighter's merged model; `nj.hh` reads `this.ga.ma`
     // (the node's WORLD position). The old code always used the COM anchor;
     // now a non-pivot `Node` name (e.g. "NToeTip_1"/"NKnee_1"/"COM") is
-    // resolved by name. "NPivot" (the shipped Ringout node) is the COM in
-    // the native model, so it falls back to the world anchor — unchanged.
+    // resolved by name. "NPivot" (the shipped Ringout node) resolves to the
+    // world anchor (positions() already places the pivot there).
     float nx = f->fighter.world_x();
     float ny = f->fighter.world_y();
     const int bi = f->fighter.model().bone_by_name(r.node);
@@ -1158,16 +1158,13 @@ void FightController::round_start() {
 // JS `FNa` (L409): phase 1 — fighters at their spawn, no input yet.
 void FightController::enter_start_stance() {
     // Respawn the fighters at their spawn positions (JS `tja`/`Qlb`).
-    // [FIX Phase 4a — fighters on the floor] The dojo spawn Y (-110/-93,
-    // the ModelsViewer Y) is the COM's world y, but the clip's COM sits
-    // ~125 world units ABOVE the feet (stance_1: COM_y=-140, feet_y=-15;
-    // the COM is the body center). Anchoring the COM at the spawn put the
-    // feet ~440 px above the visible floor — "fighters in nowhere". The
-    // game's physics (Al solver) rests the fighter on the arena floor
-    // (dojo_params Floor="80"); the native places the COM so the clip's
-    // ground-contact bones land on the floor line. The floor offset is
-    // taken from the stance clip the fighter samples at spawn (feet y -
-    // COM y of the first clip frame).
+    // [FIX Phase 4a — fighters on the floor; Wave U pivot anchor] The dojo
+    // spawn Y (-110/-93, the ModelsViewer Y) is the PivotNode world y:
+    // `Fighter::sample` anchors the model's PivotNode bone (`Dl.Ic(v.wya)`,
+    // `internal_settings.xml` `<PivotNode Name="NPivot"/>`) at the spawn, so
+    // the clip's ground-contact bones rest on the dojo floor line
+    // (dojo_params Floor="80"). The old COM anchor sat the pivot ~17 units
+    // high (bag: 226).
     player_.fighter.set_world_pos(battle_.player_spawn_x, battle_.player_spawn_y);
     enemy_.fighter.set_world_pos(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
     sample_idle(player_);

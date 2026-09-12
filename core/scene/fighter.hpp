@@ -7,9 +7,11 @@
 // world positions each frame, and a CPU-skinned 2D mesh (z dropped, flat
 // color fill, one draw call).
 //
-// World placement: the fighter's world position anchors the COM bone
-// (`wd.oL` offsets all bones relative to the COM). Facing negates X
-// (`Te.Qeb`). Clip bone i maps to merged model bone i (order-sensitive).
+// World placement: the fighter's world position anchors the model's
+// PivotNode bone (`Dl.jX` = `v.wya`, `internal_settings.xml`
+// `<PivotNode Name>`, default "NPivot"; `Dl.oL` L577 offsets all bones so
+// the pivot lands on the placement point). Facing negates X (`Te.Qeb`).
+// Clip bone i maps to merged model bone i (order-sensitive).
 
 #include <cstdint>
 #include <functional>
@@ -31,6 +33,17 @@ struct FightContext;
 } // namespace sf2::scene
 
 namespace sf2::scene {
+
+// JS config `v.wya` (`internal_settings.xml` `<PivotNode Name>`; parsed at
+// L1155 as `v.wya = b != null ? b : "NPivot"`): the bone name every fighter
+// is anchored on. JS `Dl` holds it in `Dl.jX` (`this.jX = v.wya`); `Dl.Trb`
+// (L577) resolves `Dl.Ic(v.wya)` into the anchor `Dl.Va.Yd`, and `Dl.oL`
+// (L577) offsets every bone so that anchor's `ma` lands on the placement
+// point. `Fighter::sample` anchors this bone at (x, y).
+const std::string& fighter_pivot_bone();
+// Sets the anchor bone from the parsed config (JS assigns `v.wya` once at
+// config parse L1155). Empty input is ignored (keeps the shipped default).
+void set_fighter_pivot_bone(const std::string& name);
 
 // A rendered fighter: merged model + one animation clip sampled at a frame.
 // Phase 3.2b: the fighter is now CONTROLLABLE — it owns a move list (`hb`)
@@ -204,8 +217,9 @@ public:
 
     // --- existing render path ---------------------------------------------
     // Per-bone world positions at frame `f` of `clip`, anchored so the
-    // fighter's COM bone sits at (x, y). Bones beyond the clip's bone count
-    // keep their bind position. Facing -1 mirrors X.
+    // fighter's PivotNode bone (`fighter_pivot_bone()`) sits at (x, y).
+    // Bones beyond the clip's bone count keep their bind position.
+    // Facing -1 mirrors X.
     void sample(const sf2::data::anim_clip& clip, int frame, float x, float y,
                 int facing);
 
@@ -316,7 +330,7 @@ private:
     // only on disagreement, not on every facing<0 frame.
     std::vector<float> prev_x_;
     int facing_ = 1;                        // +1 (JS `Te.FX` / `hd()`)
-    float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (COM world pos)
+    float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (pivot world pos)
     float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
     float scale_acc_ = 0.0f;   // timescale fractional accumulator
     std::vector<sf2::scene::Vec3> kb_;  // per-bone knockback offsets (world)

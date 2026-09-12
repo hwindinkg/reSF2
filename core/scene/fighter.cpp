@@ -21,6 +21,22 @@
 
 namespace sf2::scene {
 
+namespace {
+// JS `v.wya` (`internal_settings.xml` `<PivotNode Name>`, parse L1155:
+// `v.wya = b != null ? b : "NPivot"`). The config parse overwrites the
+// initial `""` default; the shipped value is "NPivot".
+std::string& pivot_bone_storage() {
+    static std::string name = "NPivot";
+    return name;
+}
+} // namespace
+
+const std::string& fighter_pivot_bone() { return pivot_bone_storage(); }
+
+void set_fighter_pivot_bone(const std::string& name) {
+    if (!name.empty()) pivot_bone_storage() = name;
+}
+
 void Fighter::set_model(const Model& model) {
     model_ = model;
     pos_.assign(model_.bones.size() * 2, 0.0f);
@@ -1018,28 +1034,35 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         }
     }
 
-    // 3. World placement: the fighter's (x, y) anchors the model's COM at
-//    (x, y) — matching the JS oracle where world_y is the COM (Dl.mea),
-//    not the feet. The oracle trace shows world_y -93 while feet are at
-//    ~5 (delta ~98): the COM is ~98 below the feet. The old native anchored
-//    the feet at (x, y) (dy = y - ground, ground = max py), which placed
-//    the COM ~98 above the oracle and left the world_y gap ~310. Facing
-//    mirrors X (Te.Qeb).
-    int com = model_.bone_by_name("COM");
-    if (com < 0) {
-        com = 0;
+    // 3. World placement: the fighter's (x, y) anchors the model's PivotNode
+    //    bone at (x, y) — the JS anchor is `Dl.Ic(v.wya)`: `Dl.Trb` (L577)
+    //    sets `Va.Yd` to the PivotNode and `Dl.oL` (L577) offsets every bone
+    //    so that pivot's `ma` lands on the placement point.
+    //    `internal_settings.xml` ships `<PivotNode Name="NPivot"/>` (parse
+    //    L1155, default "NPivot"). The old native anchored
+    //    `bone_by_name("COM")`, but COM is NOT the pivot (bag COM == Node12 is
+    //    226 units above NPivot; player ~17) -> wrong vertical anchor
+    //    (Wave U finding). Facing mirrors X (Te.Qeb).
+    int anchor = model_.bone_by_name(fighter_pivot_bone());
+    if (anchor < 0) {
+        // Shipped models all carry the pivot; a model without it keeps the
+        // legacy COM anchor (JS `Dl.Trb` L577 falls back to `all[0]`).
+        anchor = model_.bone_by_name("COM");
     }
-    const std::size_t com_u = static_cast<std::size_t>(com);
-    const float com_y = py[com_u];
-    const float dy = y - com_y;
+    if (anchor < 0) {
+        anchor = 0;
+    }
+    const std::size_t anchor_u = static_cast<std::size_t>(anchor);
+    const float anchor_y = py[anchor_u];
+    const float dy = y - anchor_y;
     const float f = facing < 0 ? -1.0f : 1.0f;
     for (std::size_t i = 0; i < n; ++i) {
         // [FIX Phase 4a] The facing mirror (JS `Te.Qeb` L550: `jc.Neb()`
         // flips the CLIP BUFFER x) applies to the LOCAL pose only: the
-        // clip x is offset by the COM, mirrored, then the world x is added.
+        // clip x is offset by the anchor, mirrored, then the world x is added.
         // The old `(px+dx)*f` (or `px*f+dx`) misplaced the fighter when
         // facing -1 (the world x was mirrored off-screen / doubled).
-        pos_[i * 2] = (px[i] - px[com_u]) * f + x;
+        pos_[i * 2] = (px[i] - px[anchor_u]) * f + x;
         pos_[i * 2 + 1] = py[i] + dy;
         // Knockback ride: the impulse-split offsets displace the hit bones
         // on top of the clip pose (JS endpoint-body moves persist into the

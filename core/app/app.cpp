@@ -451,6 +451,26 @@ bool App::init(const std::string& res_root, const std::string& save_path,
     // once; the Shop/Equipment screens rebuild the merged model on equip.
     try {
         fight_assets_ = std::make_unique<FightAssets>();
+        // JS `v.wya` (`internal_settings.xml` `<PivotNode Name>`, parse L1155,
+        // default "NPivot"): the bone every fighter is anchored on
+        // (`Dl.jX`/`Dl.Trb`/`Dl.oL` L577). Wire the shipped value into the
+        // scene anchor before any Fighter samples (dojo figures are created
+        // lazily on first render, the fight later).
+        try {
+            const std::string settings_xml = extracted_xml("internal_settings.xml");
+            sf2::data::xml_doc doc;
+            doc.parse(reinterpret_cast<const std::uint8_t*>(settings_xml.data()),
+                      settings_xml.size());
+            const pugi::xml_node root = doc.root().first_child();
+            if (root) {
+                const pugi::xml_node pivot = root.child("PivotNode");
+                if (pivot && pivot.attribute("Name")) {
+                    sf2::scene::set_fighter_pivot_bone(pivot.attribute("Name").value());
+                }
+            }
+        } catch (const std::exception&) {
+            // Config absent: keep the shipped default "NPivot".
+        }
         const std::string res = res_root_;
         const std::vector<sf2::data::archive_entry> models =
             load_archive(res + "/models.473fd74f.dat");
@@ -476,6 +496,11 @@ bool App::init(const std::string& res_root, const std::string& save_path,
             fight_assets_->bag_body = load_model("mdl_punching_bag");
             fight_assets_->merged_bag = sf2::scene::build_fighter_model(
                 {fight_assets_->bag_skeleton, fight_assets_->bag_body});
+            // The bag's COM (== the top-mount Node12, bind Y=+335) is 226
+            // units above its NPivot (Y=+109). `Fighter::sample` now anchors
+            // on the model's PivotNode bone (Wave U general fix), so the bag
+            // lands on NPivot directly and NO bag-scoped COM re-point is
+            // needed (the old patch was a no-op once the general fix landed).
             std::fprintf(stdout, "[assets] punchbag dummy bones=%zu tris=%zu capsules=%zu\n",
                          fight_assets_->merged_bag.bones.size(),
                          fight_assets_->merged_bag.resolved_tris.size(),

@@ -199,12 +199,17 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
         drew_bg = try_draw_atlas_button(app, "bg", px + pw * 0.5f, py + ph * 0.5f, pw, ph,
                                         1.0f, /*fill=*/true, /*flip_x=*/false);
         if (drew_bg) {
-            // `XN[0]` (left) + `XN[2]` (right; JS `Hr(!0)` flips it — native
-            // flip is OPEN, the cap reads as a symmetric frame edge here).
-            try_draw_atlas_button(app, "bg_edge", px, py + ph * 0.5f, pw, ph, 1.0f, false,
-                                  /*flip_x=*/false);
-            try_draw_atlas_button(app, "bg_edge", px + pw, py + ph * 0.5f, pw, ph, 1.0f, false,
-                                  /*flip_x=*/false);
+            // `XN[0]` left + `XN[2]` right (`l4a` L1896): the caps sit FLUSH
+            // OUTSIDE the centre body - `e=bg_edge.fa.x/2`, cap centre
+            // -(e+bodyW/2) left / +(e+bodyW/2) right, cap width
+            // `fa.x*nodeScale`, cap height = body height (`f.Pb(g.qa())`).
+            // The right cap is `Hr(!0)` (flipped).
+            constexpr float kOdEdgeW = 219.0f;  // scroll.json bg_edge 219x1536
+            const float cap_w = kOdEdgeW * c;   // fa.x * node scale
+            try_draw_atlas_button(app, "bg_edge", px - cap_w * 0.5f, py + ph * 0.5f, cap_w,
+                                  ph, 1.0f, /*fill=*/true, /*flip_x=*/false);
+            try_draw_atlas_button(app, "bg_edge", px + pw + cap_w * 0.5f, py + ph * 0.5f,
+                                  cap_w, ph, 1.0f, /*fill=*/true, /*flip_x=*/true);
         }
     }
     if (!drew_bg) {
@@ -261,11 +266,16 @@ void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p) {
         drew = try_draw_atlas_button(app, "bg", p.px + p.pw * 0.5f, p.py + p.ph * 0.5f,
                                      p.pw, p.ph, 1.0f, /*fill=*/true, /*flip_x=*/false);
         if (drew) {
-            // `XN[0]` left + `XN[2]` right (the right one flipped, L1894).
-            try_draw_atlas_button(app, "bg_edge", p.px, p.py + p.ph * 0.5f, p.pw, p.ph,
-                                  1.0f, false, /*flip_x=*/false);
-            try_draw_atlas_button(app, "bg_edge", p.px + p.pw, p.py + p.ph * 0.5f, p.pw,
-                                  p.ph, 1.0f, false, /*flip_x=*/true);
+            // `XN[0]` left + `XN[2]` right (`l4a` L1896): flush OUTSIDE the
+            // centre body; cap width `bg_edge.fa.x*nodeScale` (=219*p.c), cap
+            // height = body height, right cap `Hr(!0)` -> flip_x.
+            constexpr float kOdEdgeW = 219.0f;  // scroll.json bg_edge 219x1536
+            const float cap_w = kOdEdgeW * p.c;
+            try_draw_atlas_button(app, "bg_edge", p.px - cap_w * 0.5f, p.py + p.ph * 0.5f,
+                                  cap_w, p.ph, 1.0f, /*fill=*/true, /*flip_x=*/false);
+            try_draw_atlas_button(app, "bg_edge", p.px + p.pw + cap_w * 0.5f,
+                                  p.py + p.ph * 0.5f, cap_w, p.ph, 1.0f, /*fill=*/true,
+                                  /*flip_x=*/true);
         }
     }
     if (!drew) {
@@ -644,9 +654,13 @@ bool load_controller_atlas(App& app) {
     return ok;
 }
 
-// Draws a flat (untextured) button + its label as a solid quad. The exact
-// menu atlas art (ASTC) is unavailable to the CPU pipeline this phase —
-// flagged as the exact-layout gap.
+// Draws a flat (untextured) button + its label as a solid quad. It is used
+// ONLY as a caller's fallback AFTER the JS art path misses (a `try_draw_*` /
+// `draw_bb_plate` false return, or an absent user image). No user-visible
+// control is flat as its PRIMARY art: the `Bb` sliced plates now route through
+// `draw_bb_plate` (ESliced). Remaining flat sites are all genuine art misses
+// (incl. the seals cell image - OPEN: JS `js` draws only the item image and
+// has no art for a missing one).
 void draw_flat_button(App& app, const std::string& label, float cx, float cy, float w, float h,
                       float r, float g, float b, bool hovered) {
     sf2::render::Renderer& ren = app.renderer();
@@ -775,6 +789,116 @@ sf2::render::Camera ui_camera() {
     c.arena_floor = 0.0f;
     c.arena_center_x = kViewW * 0.5f;
     return c;
+}
+
+// --- 9-slice (JS `gfx.effect.DrawMode.ESliced`) --------------------------
+// JS `vc.qM(rect, mode)` (L1662-1663) builds the `ESliced` draw mode that
+// `R.wl` (L1610) assigns to `le.mode`: `rect` is the frame's source CENTRE
+// region (`Ec(x,y,w,h)`, L1661-1663) and `mode` is a `gfx.effect.TileMode`
+// (`Th.SU` = EContinuous / `Th.Fna(n)` = EAdaptive, both L1661). The 9-slice
+// insets are L=rect.x, T=rect.y, R=fa.x-rect.x-rect.w, B=fa.y-rect.y-rect.h;
+// the four corners keep the insets and the edges/centre stretch. The engine's
+// EAdaptive destination adaptation is internal to the compiled renderer ->
+// OPEN; the native folds every border by ONE uniform fit scale
+// `k = min(1, w/fa.x, h/fa.y)` (never enlarging a cap, shrinking only to fit)
+// and lets the centre absorb the remainder (clamped at 0). That removes the
+// old single-quad non-uniform stretch (300x222 -> 213x42 gave X 0.71 / Y 0.19
+// on every cap). Frames are emitted sub-rect by sub-rect; rotated/trimmed
+// packs fall back to the plain path (sliced-atlas frames are untrimmed).
+void draw_atlas_region(App& app, const std::string& frame_name, float fx, float fy, float fw,
+                       float fh, float tw, float th, float cx, float cy, float dw, float dh,
+                       float alpha, bool flip_x) {
+    if (fw <= 0.0f || fh <= 0.0f || dw <= 0.0f || dh <= 0.0f) return;
+    sf2::scene::Sprite s;
+    s.texture_name = frame_name;  // `register_atlas_frame` aliases the name -> GL
+    s.frame_x = fx;
+    s.frame_y = fy;
+    s.frame_w = fw;
+    s.frame_h = fh;
+    s.tex_w = tw;
+    s.tex_h = th;
+    s.solid = false;
+    s.color_a = alpha;
+    s.rotated = false;
+    s.source_w = fw;  // sub-rect drawn 1:1 in its own box -> no trim offset
+    s.source_h = fh;
+    s.trim_x = 0.0f;
+    s.trim_y = 0.0f;
+    s.transform.set_pos(cx, cy);
+    s.transform.set_scale(dw / fw, dh / fh);
+    if (flip_x) s.transform.scale_x = -s.transform.scale_x;
+    app.renderer().draw_sprite(s, ui_camera());
+}
+
+bool draw_sliced_plate(App& app, const std::string& frame_name, float cx, float cy, float w,
+                       float h, float l, float t, float r, float b, float alpha,
+                       bool flip_x) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl)) return false;
+    (void)gl;
+    if (fr.rotated) return false;  // sub-rect UVs assume unrotated packing
+    const float nat_w =
+        fr.source_w > 0 ? static_cast<float>(fr.source_w) : static_cast<float>(fr.w);
+    const float nat_h =
+        fr.source_h > 0 ? static_cast<float>(fr.source_h) : static_cast<float>(fr.h);
+    if (nat_w <= 0.0f || nat_h <= 0.0f) return false;
+    // The packed rect must equal the untrimmed source (the sliced atlas and
+    // the `od`/`Ib` caps are all untrimmed); otherwise the sub-rect atlas math
+    // is not 1:1 and the caller's flat fallback stands.
+    if (fr.offset_x != 0 || fr.offset_y != 0 || fr.w != static_cast<int>(nat_w) ||
+        fr.h != static_cast<int>(nat_h)) {
+        return false;
+    }
+    l = std::clamp(l, 0.0f, nat_w);
+    r = std::clamp(r, 0.0f, nat_w - l);
+    t = std::clamp(t, 0.0f, nat_h);
+    b = std::clamp(b, 0.0f, nat_h - t);
+    // One uniform border scale: caps never stretch to fit (the old bug), they
+    // are only shrunk when the destination is smaller than the border sum.
+    float k = std::min(1.0f, std::min(w / nat_w, h / nat_h));
+    if (l + r > 0.0f) k = std::min(k, w / (l + r));
+    if (t + b > 0.0f) k = std::min(k, h / (t + b));
+    const float sx[4] = {0.0f, l, nat_w - r, nat_w};
+    const float sy[4] = {0.0f, t, nat_h - b, nat_h};
+    const float x_lo = cx - w * 0.5f, y_lo = cy - h * 0.5f;
+    const float x_hi = cx + w * 0.5f, y_hi = cy + h * 0.5f;
+    const float dx[4] = {x_lo, x_lo + l * k, x_hi - r * k, x_hi};
+    const float dy[4] = {y_lo, y_lo + t * k, y_hi - b * k, y_hi};
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            const float sw = sx[i + 1] - sx[i], sh = sy[j + 1] - sy[j];
+            const float dw = dx[i + 1] - dx[i], dh = dy[j + 1] - dy[j];
+            if (sw <= 0.0f || sh <= 0.0f || dw <= 0.0f || dh <= 0.0f) continue;
+            draw_atlas_region(app, frame_name, static_cast<float>(fr.x) + sx[i],
+                              static_cast<float>(fr.y) + sy[j], sw, sh, static_cast<float>(tw),
+                              static_cast<float>(th), (dx[i] + dx[i + 1]) * 0.5f,
+                              (dy[j] + dy[j + 1]) * 0.5f, dw, dh, alpha, flip_x);
+        }
+    }
+    return true;
+}
+
+// JS `Bb` plate (L1842): `Y.wl(vc.qM(new Ec((Y.fa.x/2|0)-2, 0, 4, Y.fa.y|0),
+// Th.Fna(1)))` -> centre = a 4px vertical strip at the horizontal mid, full
+// height. Insets: L=(fa.x/2|0)-2, T=0, R=fa.x-L-4, B=0 -> a 3-column / 1-row
+// slice. Used by every `Bb` text button (`EButtonWhite/Dark/Beige`).
+bool draw_bb_plate(App& app, const std::string& frame_name, float cx, float cy, float w,
+                   float h, float alpha = 1.0f, bool flip_x = false) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl)) return false;
+    (void)tw;
+    (void)th;
+    (void)gl;
+    const float nat_w =
+        fr.source_w > 0 ? static_cast<float>(fr.source_w) : static_cast<float>(fr.w);
+    if (nat_w <= 0.0f) return false;
+    const float l = static_cast<float>(static_cast<int>(nat_w) / 2 - 2);
+    const float r = nat_w - l - 4.0f;
+    return draw_sliced_plate(app, frame_name, cx, cy, w, h, l, 0.0f, r, 0.0f, alpha, flip_x);
 }
 
 // Lazily registers the `res/ui/scroll.*` atlas (JS asset id 254) — the `od`
@@ -1124,10 +1248,12 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speak
                       0.184f, 0.145f, 0.106f);
     }
     // OK (`Bb(Zva)` = "EButtonWhite", local (450,185), `zf(100)`); `Ib.RP`
-    // gate (L1910) — only when the notification carries a button.
+    // gate (L1910) - only when the notification carries a button. `Bb` draws
+    // through the `ESliced` plate (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842).
     if (show_ok) {
-        if (!try_draw_atlas_button(app, "btnWhite", lx(450.0f), ly(185.0f), 100.0f * c,
-                                   72.0f * c, 1.0f, false)) {
+        if (!(load_sliced_atlas(app) &&
+              draw_bb_plate(app, "btnWhite", lx(450.0f), ly(185.0f), 100.0f * c,
+                            72.0f * c, 1.0f))) {
             draw_flat_button(app, "OK", lx(450.0f), ly(185.0f), 100.0f * c, 72.0f * c, 0.3f,
                              0.5f, 0.3f, false);
         }
@@ -3002,10 +3128,10 @@ void DojoScreen::render_impl(App& app) {
         // Hub framing = the LIVE viewer CoM midpoint (JS `Tf.Ea` L1972 runs
         // the `FightNone` viewer through `Sya`; `Ut.Al` L826 recomputes
         // `Io = Lb.width/2 - focus` from `Go.ma` every frame). The two
-        // viewers' CoMs are the player idle figure and the Punchbag dummy:
-        // `Fighter::sample` (fighter.hpp L207) anchors each COM bone at the
-        // passed (x,y), and neither viewer moves on the hub, so the live CoMs
-        // are their spawns. Container -> location: `+arenaW/2`.
+        // viewers' anchors are the player idle figure and the Punchbag dummy:
+        // `Fighter::sample` (fighter.hpp L207) anchors each model's PivotNode
+        // bone at the passed (x,y), and neither viewer moves on the hub, so
+        // the live anchors are their spawns. Container -> location: `+arenaW/2`.
         // NOTE: 876a3a97 passed `Fighter::world_x()` here, but
         // `Fighter::sample` never assigns `world_x_` (only `set_world_pos` /
         // root motion do), so those reads were 0 and `Io` went to `arenaW/2`
@@ -3590,8 +3716,8 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // fight ENEMY). The old code spawned the player LEFT — the fighters
     // appeared on the wrong sides ("in nowhere" + mirrored).
     // [FIX Phase 4a — fighters on the floor] The spawn Y is the ModelsViewer
-    // COM y; the native anchors the fighter by its clip ground-contact (see
-    // Fighter::sample) so the feet land at the given world y. The dojo's
+    // placement y (the PivotNode target — `Fighter::sample` anchors the model
+    // pivot there), so the posed feet rest on the visible floor line. The dojo's
     // VISIBLE floor is the dojo_floor sprite line (world Y=223.5) — the
     // fighters stand on it (feet at 223.5 -> the floor sprite row). The
     // params Floor attr (80) is the arena's physics line (JS Bf.init L474:
@@ -3604,7 +3730,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // dojo's 80 for every location.
     const float floor_y = assets.fight_location.arena_floor();
     battle.player_spawn_x = 973.0f;
-    battle.player_spawn_y = -110.0f;  // COM Y (oracle Me -108, Enemy -93) — ModelsViewer split
+    battle.player_spawn_y = -110.0f;  // pivot Y (oracle Me -108, Enemy -93) — ModelsViewer split
     battle.enemy_spawn_x = 690.0f;
     battle.enemy_spawn_y = -93.0f;
     battle.max_hp = 1;  // the game's HP fallback (Zn = aB>0 ? aB : 1)
@@ -5870,12 +5996,13 @@ void ShopScreen::render_impl(App& app) {
             const char* alabel = shop_action_label(seen_, *sel_it);
             const bool ah = side_hover_ == 1;
             // JS `Oa.init` (L2289): `Up = new Bb("EButtonWhite")` -> the
-            // sliced-atlas frame `btnWhite` (`Bb.fza` L1844). Flat only on a
-            // genuine art miss.
+            // sliced-atlas frame `btnWhite` (`Bb.fza` L1844) drawn with the
+            // `ESliced` 3-slice (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842) so the
+            // caps keep their aspect (was a single-quad 0.71x/0.19y stretch).
+            // Flat only on a genuine art miss.
             if (!(load_sliced_atlas(app) &&
-                  try_draw_atlas_button(app, "btnWhite", (ar.J + ar.N) * 0.5f,
-                                        (ar.P + ar.W) * 0.5f, ar.width(), ar.height(), 1.0f,
-                                        /*fill=*/true))) {
+                  draw_bb_plate(app, "btnWhite", (ar.J + ar.N) * 0.5f,
+                                (ar.P + ar.W) * 0.5f, ar.width(), ar.height(), 1.0f))) {
                 draw_flat_button(app, alabel, (ar.J + ar.N) * 0.5f, (ar.P + ar.W) * 0.5f,
                                  ar.width(), ar.height(), ah ? 0.35f : 0.25f,
                                  ah ? 0.65f : 0.45f, ah ? 0.35f : 0.25f, ah);
@@ -6314,6 +6441,8 @@ void EquipmentScreen::render_impl(App& app) {
                 const float cy = y0 + static_cast<float>(i / kCols) * (chh + 16.0f);
                 if (cy + chh * 0.5f > v.W) break;
                 if (!draw_user_image(app, s.image, cx, cy, chh * 0.75f, chh * 0.7f, 1.0f)) {
+                    // Genuine art miss -> OPEN: JS `js` (L2232) draws only the
+                    // `oe(a.fileName)` image; there is no JS flat/seal-name art.
                     draw_flat_button(app, s.name, cx, cy, cw - 20.0f, chh, 0.3f, 0.3f, 0.4f,
                                      false);
                 }
@@ -6342,19 +6471,23 @@ void EquipmentScreen::render_impl(App& app) {
                       "fs ACHIEVEMENT_SLIDER (L2213): v.uv.tI (achievements.xml 1356) + p.o.yi counters -> hs/is cell", 0.5f,
                       UiAlign::Center, 0.6f, 0.6f, 0.6f);
     }
-    // The BACK button (top-left). OPEN: the JS Profile `vb` (L2189-2201) is a
-    // tabbed screen (`cs` tabs only) with no BACK node, so there is no JS art
-    // for this control — it is a native navigation affordance. It uses the
-    // same misc `Arrow` frame (`y.sRa`) as the other back buttons, not an
-    // unconditional non-JS flat plate.
+    // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
+    draw_za_chrome(app, kScreenProfile);
+    // The BACK button (top-left) is drawn AFTER the `za` chrome so the chrome's
+    // full-width topPanel (`odb` L1975, height min(H*.13,100)) no longer
+    // occludes it. NOTE: the JS Profile `vb` (L2189-2201) is a tabbed screen
+    // (`cs` tabs only) with no BACK node - this is a native navigation
+    // affordance kept because the headless loop uses the equipment->dojo back
+    // leg (`EquipmentScreen::update_impl`), so the JS-decided "remove" option
+    // would break the loop. It uses the misc `Arrow` frame (`y.sRa`); the flat
+    // plate is only a genuine atlas-miss fallback -> OPEN (no JS art).
     if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
-    // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
-    draw_za_chrome(app, kScreenProfile);
 }
+
 
 // ---------------------------------------------------------------------------
 // SettingsScreen
@@ -6471,19 +6604,17 @@ void SettingsScreen::render_impl(App& app) {
                   0.75f, UiAlign::Center, 1.0f, 0.8f, 0.5f);
     // BACK (`Bb("EButtonDark")`) + RESTART (`Bb("EButtonBeige")`, od defaults
     // L1894): `Bb.fza` (L1844) maps the style to the sliced-atlas frame
-    // (`btnDark` / `btnBeige`). Flat plate only on a genuine art miss; the
-    // `Bb` label is a separate text node.
+    // (`btnDark` / `btnBeige`), drawn through the `ESliced` plate
+    // (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842). Flat only on a genuine art miss.
     if (!(load_sliced_atlas(app) &&
-          try_draw_atlas_button(app, "btnDark", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 1.0f,
-                                /*fill=*/true))) {
+          draw_bb_plate(app, "btnDark", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 1.0f))) {
         draw_flat_button(app, "", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 0.35f, 0.3f, 0.28f,
                          hover_ == 0);
     }
     draw_ui_label(app, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f, s.btn_w, 28.0f, "BACK",
                   0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     if (!(load_sliced_atlas(app) &&
-          try_draw_atlas_button(app, "btnBeige", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h,
-                                1.0f, /*fill=*/true))) {
+          draw_bb_plate(app, "btnBeige", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h, 1.0f))) {
         draw_flat_button(app, "", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h, 0.6f, 0.5f, 0.3f,
                          false);
     }

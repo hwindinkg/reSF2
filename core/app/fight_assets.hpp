@@ -51,6 +51,10 @@ struct FightAssets {
     // bag = edges+capsules only, bag skeleton = bones+edges, no mesh).
     // Display-only: the Dojo hub hangs this dummy under the beam (Tf
     // Training setup); the fight sim keeps using `merged`.
+    // `Fighter::sample` anchors each fighter on its PivotNode bone
+    // (`internal_settings.xml` <PivotNode Name="NPivot"/>, `Dl.oL` L577), so
+    // the bag is placed by NPivot (bind Y=+109) directly -- no COM re-point
+    // is applied (see app.cpp).
     sf2::scene::Model bag_skeleton;
     sf2::scene::Model bag_body;
     sf2::scene::Model merged_bag;
