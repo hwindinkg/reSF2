@@ -6959,17 +6959,60 @@ void EquipmentScreen::render_impl(App& app) {
     } else {
         const float row_h = 52.0f;
         const float gutter = 78.0f;  // `Rx` + tier-level track width
-        const float col_w = std::max(140.0f, (v.width() - gutter - 8.0f) * 0.5f);
+        // --- JS `tk`/`Rx`/`uk` row geometry (L2217-2230) ------------------
+        // `ds.NC` (L2230) sizes every `tk` cell `b.ba(400,150)`. `tk.$i`
+        // (L2217) fixes `H9=80`; `tk.ba` (L2218) centres the two `uk` nodes
+        // at `ce.x/2 -/+ H9` (`c.C(a-this.H9)` / `d.C(a+this.H9)`, lone cell
+        // `c.C(a)`), scales each node to `f = ce.y*.7`, and scales the
+        // `jC.gw` (`Rx`) group by `.5`.
+        constexpr float kTkCellH = 150.0f;          // `ba(400,150)` L2230
+        constexpr float kTkH9 = 80.0f;              // `this.H9=80` L2217
+        constexpr float kUkCellScale = 0.7f;        // `ce.y*.7` L2218
+        // `Rx` (L2226): `pieces/perkcircle` (`y.kSa`, 64), `pieces/perk_line_h`
+        // (`y.coa`, `xc(50)`, src 10), `pieces/perk_line_v` (`y.doa`,
+        // `CO.Pb(130)`, src 10). `uk.Dy` (L2222) `pieces/level1` (56x55) at
+        // `la(.8)` offset `FH/2 - Dy*1.15`; `Ed.FH` `pieces/perkback` src 158
+        // fixes the `uk` local frame.
+        constexpr float kPerkCircleSrc = 64.0f;
+        constexpr float kPerkLineSrc = 10.0f;
+        constexpr float kPerkLineLen = 50.0f;       // `b.xc(50)` L2226
+        constexpr float kPerkLineVSrc = 130.0f;     // `CO.Pb(130)` L2226
+        constexpr float kPerkbackSrc = 158.0f;
+        constexpr float kLevelSrcW = 56.0f;
+        constexpr float kLevelSrcH = 55.0f;
+        constexpr float kRxScale = 0.5f;            // `jC.gw.la(.5)` L2218
+        constexpr float kFlagScale = 0.8f;          // `Dy.la(.8)` L2222
+        const float tk_s = row_h / kTkCellH;        // JS `tk` unit -> native px
+        const float h9 = kTkH9 * tk_s;              // `H9` L2217, native px
+        const float ico = row_h * kUkCellScale;     // `uk` node target (L2218)
+        const float rx_circ = kPerkCircleSrc * kRxScale * tk_s;
+        const float rx_line = kPerkLineLen * kRxScale * tk_s;
+        const float rx_th = kPerkLineSrc * kRxScale * tk_s;
+        const float rx_arrow = kPerkLineVSrc * kRxScale * tk_s;
+        const float rx_arrow_w = kPerkLineSrc * kRxScale * tk_s;
+        const float rx_a = rx_circ * 0.5f;          // `kSa.za()/2` L2226
+        const float bdg_unit = ico / kPerkbackSrc;  // `uk` local -> native px
+        const float bdg_w = kLevelSrcW * kFlagScale * bdg_unit;
+        const float bdg_h = kLevelSrcH * kFlagScale * bdg_unit;
+        const float bdg_dx = (kPerkbackSrc * 0.5f -
+                              kLevelSrcW * kFlagScale * 1.15f) * bdg_unit;
+        const float bdg_dy = (kPerkbackSrc * 0.5f -
+                              kLevelSrcH * kFlagScale * 1.15f) * bdg_unit;
+        // The `tk` is symmetric about the seam the `Rx` group docks to.
+        const float rcx = v.J + (v.width() + gutter) * 0.5f;
         float row_top = v.P + 6.0f;
         int last_tier = -1;
+        int tier_idx = -1;   // `tk.$i(a==0, a+1==len)` L2228 first/last gate
         int col = 0;
-        for (const PerkRow& r : perk_rows_) {
+        for (std::size_t i = 0; i < perk_rows_.size(); ++i) {
+            const PerkRow& r = perk_rows_[i];
             if (r.tier != last_tier) {
                 if (last_tier != -1) {
                     row_top += row_h + 6.0f;
                     col = 0;
                 }
                 last_tier = r.tier;
+                ++tier_idx;
                 char tbuf[32];
                 std::snprintf(tbuf, sizeof(tbuf), "LV %d", r.tier);
                 draw_ui_label(app, v.J + 4.0f, row_top + 8.0f, gutter - 10.0f, 20.0f, tbuf,
@@ -6981,28 +7024,45 @@ void EquipmentScreen::render_impl(App& app) {
                 col = 0;
             }
             if (row_top + row_h > v.W) break;
-            const float cw = col_w - 10.0f;
-            const float cx = v.J + gutter + (static_cast<float>(col) + 0.5f) * col_w;
             const float cy = row_top + row_h * 0.5f;
+            const bool pair_left = (col == 0) && (i + 1 < perk_rows_.size()) &&
+                                   (perk_rows_[i + 1].tier == r.tier);
+            // `tk.ba` (L2218) `uk` slots: `a-/+H9` for a pair, `a` alone.
+            const float cx = pair_left ? rcx - h9 : (col == 1 ? rcx + h9 : rcx);
             sf2::render::Renderer& rr = app.renderer();
-            // `tk.jC` gutter (`Rx`, L2226/2217): `pieces/perkcircle` (`y.kSa`)
-            // at the seam between the two `uk` cells with `pieces/perk_line_h`
-            // (`y.coa`) connectors. Drawn once per two-cell row.
-            if (col == 1) {
-                const float gx = cx - col_w * 0.5f;
-                const float gsz = row_h * 0.5f;
-                (void)try_draw_atlas_button(app, "pieces/perk_line_h", gx - gsz * 0.9f, cy,
-                                            gsz * 1.2f, 4.0f, 0.85f, /*fill=*/true);
-                (void)try_draw_atlas_button(app, "pieces/perk_line_h", gx + gsz * 0.9f, cy,
-                                            gsz * 1.2f, 4.0f, 0.85f, /*fill=*/true);
-                (void)try_draw_atlas_button(app, "pieces/perkcircle", gx, cy, gsz, gsz, 1.0f);
+            // `tk` ctor (L2217) appends `jC.gw` BEFORE `Xj`/`xi`, so the `Rx`
+            // seam group renders UNDER the `uk` art. Drawn once per pair.
+            if (pair_left) {
+                // `y.kSa` hub at the seam (`jC.gw.C/D`, L2218).
+                (void)try_draw_atlas_button(app, "pieces/perkcircle", rcx, cy, rx_circ,
+                                            rx_circ, 1.0f);
+                // `y.coa` runs `xc(50)`: left `ik(1,.5)` right edge at `-a`,
+                // right `ik(0,.5)` left edge at `+a` (L2226).
+                (void)try_draw_atlas_button(app, "pieces/perk_line_h",
+                                            rcx - rx_a - rx_line * 0.5f, cy, rx_line, rx_th,
+                                            0.85f, /*fill=*/true);
+                (void)try_draw_atlas_button(app, "pieces/perk_line_h",
+                                            rcx + rx_a + rx_line * 0.5f, cy, rx_line, rx_th,
+                                            0.85f, /*fill=*/true);
+                // `y.doa` runs `Pb(130)` (`CO`/`MM`), bottom/top-centre anchored
+                // at `-a`/`+a`; `refresh` (L2226) hides the up run on the first
+                // tier and the down run on the last (`tk.$i` L2217).
+                if (tier_idx > 0) {
+                    (void)try_draw_atlas_button(app, "pieces/perk_line_v", rcx,
+                                                cy - rx_a - rx_arrow * 0.5f, rx_arrow_w,
+                                                rx_arrow, 0.85f, /*fill=*/true);
+                }
+                if (i + 2 < perk_rows_.size()) {
+                    (void)try_draw_atlas_button(app, "pieces/perk_line_v", rcx,
+                                                cy + rx_a + rx_arrow * 0.5f, rx_arrow_w,
+                                                rx_arrow, 0.85f, /*fill=*/true);
+                }
             }
             // `uk` cell icon `Ed.Fs` (L2202): the perks.xml `Image` frame on
             // atlas 246 (`skills`; default `y.gTa` "Icons01/IconAvenger" L2470,
             // `Ye.qI` dot->slash). `pieces/perkback` (`Ed.FH`, L2202) is the
             // backplate; a flat plate is the explicit miss fallback.
-            const float ico = row_h * 0.78f;
-            const float icx = cx - cw * 0.5f + ico * 0.7f;
+            const float icx = cx;   // `uk` node centre (`tk.ba` L2218)
             if (!try_draw_atlas_button(app, "pieces/perkback", icx, cy, ico, ico, 1.0f)) {
                 const float pr = r.available ? 0.22f : 0.12f;
                 const float pg = r.available ? 0.26f : 0.14f;
@@ -7036,18 +7096,19 @@ void EquipmentScreen::render_impl(App& app) {
             if (!r.available) {
                 (void)try_draw_atlas_button(app, "pieces/icons_kick_off", icx, cy, ico, ico, 0.9f);
             }
-            // `uk.Dy` perk-level badge (`i9a` "pieces/level<N>", L2222).
+            // `uk.Dy` perk-level badge (`i9a` "pieces/level<N>", L2222):
+            // `la(.8)`, `C(FH.x/2 - za()*1.15)`, `D(FH.y/2 - qa()*1.15)`.
             if (r.learned_level >= 1 && r.learned_level <= 9) {
                 char lb[24];
                 std::snprintf(lb, sizeof(lb), "pieces/level%d", r.learned_level);
-                (void)try_draw_atlas_button(app, lb, icx + ico * 0.42f, cy - ico * 0.42f,
-                                            ico * 0.5f, ico * 0.5f, 1.0f);
+                (void)try_draw_atlas_button(app, lb, icx + bdg_dx + bdg_w * 0.5f,
+                                            cy + bdg_dy + bdg_h * 0.5f, bdg_w, bdg_h, 1.0f);
             }
-            const float tx = cx - cw * 0.5f + ico * 1.45f;
-            const float tw = std::max(24.0f, cw - ico * 1.45f - 4.0f);
+            // In-cell name/status label (native fallback; the JS `uk` cell
+            // draws no text). Flanks the `tk` pair — the left cell is right
+            // aligned into the gutter side, the right/lone cell left aligned
+            // outward — so it never crosses the `Rx` seam.
             const std::string nm = loc(app, r.name, r.name);
-            draw_ui_label(app, tx, cy - 17.0f, tw, 18.0f, nm, 0.52f,
-                          UiAlign::Left, 1.0f, 1.0f, 1.0f);
             char sbuf[64];
             if (r.kind == "Upgrade") {
                 std::snprintf(sbuf, sizeof(sbuf), "UPGRADE %d/%d", r.learned_level, r.tier);
@@ -7056,8 +7117,17 @@ void EquipmentScreen::render_impl(App& app) {
             } else {
                 std::snprintf(sbuf, sizeof(sbuf), "LEARN AT LV %d", r.tier);
             }
-            draw_ui_label(app, tx, cy + 3.0f, tw, 16.0f, sbuf, 0.44f,
-                          UiAlign::Left, 0.8f, 0.85f, 0.9f);
+            float tx = icx + ico * 0.5f + 6.0f;
+            float tw = v.N - 2.0f - tx;
+            UiAlign al = UiAlign::Left;
+            if (pair_left) {
+                tx = v.J + gutter;
+                tw = (icx - ico * 0.5f - 6.0f) - tx;
+                al = UiAlign::Right;
+            }
+            tw = std::max(24.0f, tw);
+            draw_ui_label(app, tx, cy - 17.0f, tw, 18.0f, nm, 0.52f, al, 1.0f, 1.0f, 1.0f);
+            draw_ui_label(app, tx, cy + 3.0f, tw, 16.0f, sbuf, 0.44f, al, 0.8f, 0.85f, 0.9f);
             ++col;
         }
     }
