@@ -64,10 +64,20 @@ struct FightAssets {
     // (`ZOa` equip mapping needs def lookup by name at fight setup).
     std::map<std::string, sf2::scene::PerkDef> perk_catalog;
 
-    // The dojo location (the tutorial-zone fight backdrop). The full
-    // fight-screen location set is loaded per battle (JS `Bf` per
-    // location); the dojo is the tutorial zone's location.
+    // The hub's dojo location (the home-screen backdrop, JS `Tf`
+    // L1969-1972). Loaded once by `ensure_dojo_location`. The hub renders
+    // this every frame, including while a Fight is on top (ScreenManager
+    // renders back-to-front, screen_manager.cpp), so it must stay the dojo
+    // and must NOT be shared with the fight.
     sf2::scene::LocationScene dojo;
+
+    // The battle's location scene. JS `Bf.init` L474 builds one scene per
+    // battle location; kept separate from `dojo` because the hub keeps
+    // rendering its backdrop beneath the fight (a reload of the shared scene
+    // by the hub would clobber the fight's location). Reloaded when the
+    // battle's location differs from `fight_location_name`.
+    sf2::scene::LocationScene fight_location;
+    std::string fight_location_name;
 
     // Rebuilds the merged model from the current part set (JS `xc.cM`).
     void rebuild_merged() {

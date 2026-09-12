@@ -277,18 +277,33 @@ void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p) {
 
 // --- Settings `un` dialog geometry (JS L1916-1930) -----------------------
 // `un extends od` (L1916) with `Md=750` (L1930). `od.layout` (L1898) puts the
-// content node at `Ne.D(-Md/2)` and the button zone at `a=clamp(Md/2,300,1000)`
-// (=375 for Md=750); the title `Vc` sits at `D(-(a+Vc.pfa().y))`. Rows are
-// Sound/Music (gated by `Ca.hasFeature("audio")`, L1928), Credits
-// (`hasFeature("credits")`, L1929) and Language. The exact per-row offsets
-// (`b`: `k*icon.qa()*1.25`; `c`: `k*icon.qa()*1.25-icon.qa()/2`, L1917) need
-// the `E.get(250)` frame sizes, which the native does not decode — rows are
-// stacked on the `Md` zone (OPEN, PORT_AUDIT_UI §2.9).
+// content node at `Ne.D(-Md/2)`. Rows are built by the `un` factories:
+//   b(q) L1917: icon `R.$(E.get(250),q,l)` at `C(-q.za()*.9)` (centre anchor
+//               after `Ga()`), `D(k*q.qa()*1.25)`.
+//   c(q,r) L1917: an invisible row hit-rect `R.Ed(65280,800,q.qa())` parented
+//               to the same container `l`, left `r.ya-t/2`, top
+//               `k*x*1.25-x/2` (alpha byte of 65280 = 0x00FF00 -> invisible).
+// `k` starts 0.5 (L1927) and advances 1 per gated block; with both
+// `Ca.hasFeature("audio")` and `("credits")` true (L1928-1929) the rows are:
+//   k=0.5  Sound (container C(-300)) + Music (container C(+300)), side by side
+//   k=1.5  Credits
+//   k=2.5  Language
+// The `E.get(250)` tiles are 170x170 (`res/ui/settings_icons.*`), so the row
+// step is 170*1.25 = 212.5 and the icon x is -170*0.9 = -153 (container
+// space). Buttons `Bb.Pb(150)` and the `Nm` notice keep the `od`/`Md` geometry.
 struct SettingsLayout {
     OdPanel panel;
     float title_x = 0.0f, title_y = 0.0f, title_w = 0.0f, title_h = 0.0f;
-    float row_x = 0.0f, row_w = 0.0f, row_h = 0.0f;
-    float row_y[4] = {0.0f, 0.0f, 0.0f, 0.0f};  // Sound/Music/Credits/Language
+    float icon = 0.0f;  // 170 * panel.c
+    // Icon centres (screen px); Sound/Music share the k=0.5 row.
+    float sound_cx = 0.0f, sound_cy = 0.0f;
+    float music_cx = 0.0f, music_cy = 0.0f;
+    float credits_cx = 0.0f, credits_cy = 0.0f;
+    float lang_cx = 0.0f, lang_cy = 0.0f;
+    // Invisible row hit-rects (JS `c` L1917): 800 x icon, one per container.
+    float row_w = 0.0f, row_h = 0.0f;
+    float sound_row_cx = 0.0f, music_row_cx = 0.0f;
+    float credits_row_cx = 0.0f, lang_row_cx = 0.0f;
     float back_cx = 0.0f, back_cy = 0.0f;
     float restart_cx = 0.0f, restart_cy = 0.0f;
     float btn_w = 0.0f, btn_h = 0.0f;
@@ -299,24 +314,42 @@ SettingsLayout settings_layout() {
     SettingsLayout s;
     s.panel = od_panel(2340.0f, 1530.0f);  // od AV = fc(2340,1530), L1894
     const OdPanel& p = s.panel;
-    const float cx = p.px + p.pw * 0.5f;
-    const float cy = p.py + p.ph * 0.5f;
+    const float cx = p.px + p.pw * 0.5f;  // design x=0
+    const float cy = p.py + p.ph * 0.5f;  // design y=0
     // Title `Vc`: `$T` L1930 `Fa(1560,160)` + `C(-780)`; `ua(152)`, `Ia(128)`
     // (L1900). `od.layout` L1898: `Vc.D(-(a+Vc.pfa().y))` with a=375.
     s.title_w = 1560.0f * p.c;
     s.title_h = 160.0f * p.c;
     s.title_x = cx - s.title_w * 0.5f;
     s.title_y = cy - 535.0f * p.c - s.title_h * 0.5f;
-    // Rows span `Md` (750) centred on the panel.
-    s.row_w = 860.0f * p.c;
-    s.row_x = cx - s.row_w * 0.5f;
-    s.row_h = 110.0f * p.c;
-    const float step = s.row_h + 16.0f * p.c;
-    const float zone_top = cy - 300.0f * p.c;
-    s.row_y[0] = zone_top;
-    s.row_y[1] = zone_top + step;
-    s.row_y[2] = zone_top + step * 2.0f;
-    s.row_y[3] = zone_top + step * 3.0f;
+    // `un` rows (L1917): 170x170 tile, step 170*1.25 = 212.5, icon x
+    // -170*0.9 = -153; content node anchor D(-375) (od.layout, Md=750).
+    constexpr float kIcon = 170.0f;
+    constexpr float kStep = kIcon * 1.25f;    // 212.5
+    constexpr float kIconX = -kIcon * 0.9f;   // -153
+    constexpr float kContY = -375.0f;         // Ne.D(-Md/2), Md=750
+    s.icon = kIcon * p.c;
+    const float icon_x = kIconX * p.c;
+    const float y_audio = cy + (kContY + 0.5f * kStep) * p.c;   // k=0.5
+    const float y_credits = cy + (kContY + 1.5f * kStep) * p.c;  // k=1.5
+    const float y_lang = cy + (kContY + 2.5f * kStep) * p.c;     // k=2.5
+    s.sound_cx = cx + (-300.0f) * p.c + icon_x;
+    s.sound_cy = y_audio;
+    s.music_cx = cx + 300.0f * p.c + icon_x;
+    s.music_cy = y_audio;
+    s.credits_cx = cx + icon_x;
+    s.credits_cy = y_credits;
+    s.lang_cx = cx + icon_x;
+    s.lang_cy = y_lang;
+    // `c` hit-rect (L1917): left = icon local x - icon/2, width 800, height
+    // = icon; centre x = left + 400 = icon local x + 315.
+    s.row_w = 800.0f * p.c;
+    s.row_h = s.icon;
+    const float row_off = kIconX + 400.0f - kIcon * 0.5f;  // +315 design
+    s.sound_row_cx = cx + (-300.0f + row_off) * p.c;
+    s.music_row_cx = cx + (300.0f + row_off) * p.c;
+    s.credits_row_cx = cx + row_off * p.c;
+    s.lang_row_cx = cx + row_off * p.c;
     // Buttons `Bb.Pb(150)` (L1930): BACK left, RESTART at `C(500)`.
     s.btn_w = 320.0f * p.c;
     s.btn_h = 150.0f * p.c;
@@ -794,6 +827,166 @@ bool load_scroll_atlas(App& app) {
         ok = true;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[ui] scroll atlas load failed: %s\n", e.what());
+    }
+    return ok;
+}
+
+// --- Location atlas page chain (JS `Bf.init` L474 + `ni.init` L1142) ------
+// A location ships one TexturePacker pack per page: `<loc>.<hash>.json` for
+// page 1, then `<loc>-2.<hash>.json`, `<loc>-3.<hash>.json`, … (verified in
+// `reference/www/res/locations/`, e.g. arena.ca2949ef.json +
+// arena-2.586e4f15.json). `Bf.init` chains them and `ni.init` (L1142) walks
+// `b.nextPage`, so a `Sequention` frame can live on page 2+. The image beside
+// each JSON has a DIFFERENT hash stem (`dojo.b920e18e.webp` vs
+// `dojo.d31b1e71.json`), so a page is matched by its `<loc>[-N]` prefix, not
+// by the JSON stem. Returns that prefix; `page` receives N (1-based).
+std::string location_page_prefix(const std::string& filename, int& page) {
+    const std::size_t ext = filename.find_last_of('.');
+    const std::string stem = ext == std::string::npos ? filename : filename.substr(0, ext);
+    const std::size_t hash_dot = stem.find_last_of('.');
+    const std::string base = hash_dot == std::string::npos ? stem : stem.substr(0, hash_dot);
+    page = 1;
+    const std::size_t dash = base.find_last_of('-');
+    if (dash != std::string::npos && dash + 1 < base.size()) {
+        int n = 0;
+        bool digits = true;
+        for (std::size_t i = dash + 1; i < base.size(); ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(base[i]))) {
+                digits = false;
+                break;
+            }
+            n = n * 10 + (base[i] - '0');
+        }
+        if (digits) page = n;
+    }
+    return base;
+}
+
+// Loads a location's FULL page chain into `scene` and aliases every page's
+// `frame_names` to that page's GL texture (the multi-page contract in
+// `LocationScene::atlas_pages`, location_scene.hpp). Returns the number of
+// pages whose texture was uploaded and aliased.
+int load_location_atlas_pages(App& app, sf2::scene::LocationScene& scene,
+                              const std::string& loc_dir, const std::string& loc_name) {
+    std::vector<std::pair<int, std::string>> pages;  // (page, json path)
+    std::string params_xml;
+    for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind(loc_name + "_params.", 0) == 0 &&
+            entry.path().extension() == ".xml") {
+            params_xml = entry.path().string();
+            continue;
+        }
+        if ((name.rfind(loc_name + ".", 0) != 0 &&
+             name.rfind(loc_name + "-", 0) != 0) ||
+            entry.path().extension() != ".json") {
+            continue;
+        }
+        int page = 1;
+        location_page_prefix(name, page);
+        pages.emplace_back(page, entry.path().string());
+    }
+    std::sort(pages.begin(), pages.end(),
+              [](const std::pair<int, std::string>& a, const std::pair<int, std::string>& b) {
+                  return a.first < b.first;
+              });
+    std::vector<std::string> jsons;
+    jsons.reserve(pages.size());
+    for (const auto& p : pages) jsons.push_back(p.second);
+    if (jsons.empty()) {
+        throw std::runtime_error("location atlas: no page JSON for " + loc_name);
+    }
+    scene.load(params_xml, jsons, app.res_root());
+    int aliased_pages = 0;
+    for (const sf2::scene::AtlasPage& page : scene.atlas_pages()) {
+        int n = 1;
+        const std::string prefix = location_page_prefix(
+            std::filesystem::path(page.json_path).filename().string(), n);
+        sf2::data::Texture tex;
+        bool decoded = false;
+        for (const std::string& ext : {".webp", ".png", ".jpg", ".ktx", ".dds"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind(prefix + ".", 0) != 0) continue;
+                if (entry.path().extension() != ext) continue;
+                if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                    decoded = true;
+                    break;
+                }
+            }
+            if (decoded) break;
+        }
+        if (!decoded) {
+            std::fprintf(stderr, "[ui] location page %d texture not decodable: %s\n", n,
+                         prefix.c_str());
+            continue;
+        }
+        const GLuint gl = app.renderer().texture_for("loc_atlas_" + prefix, tex);
+        if (gl == 0) continue;
+        for (const std::string& frame : page.frame_names) {
+            app.renderer().texture_alias(frame, gl);
+        }
+        ++aliased_pages;
+        std::fprintf(stdout, "[ui] location atlas page %d %s: %dx%d, %zu frames\n", n,
+                     prefix.c_str(), tex.w, tex.h, page.frame_names.size());
+    }
+    std::fflush(stdout);
+    return aliased_pages;
+}
+
+// --- Settings `un` row icons atlas (JS `E.get(250)`, L1917) --------------
+// `res/ui/settings_icons.*` (16 frames, one 170x170 tile each: sound,
+// sound_off, music, music_off, credits, restore + the language codes). The
+// `un` row factory `b(q)` (L1917) draws one tile per row at `C(-q.za()*.9)`
+// with the row step `q.qa()*1.25` (= 212.5 for a 170 tile).
+bool load_settings_icons_atlas(App& app) {
+    static bool done = false;
+    static bool ok = false;
+    if (done) return ok;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/ui";
+        std::string json_path;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("settings_icons.", 0) == 0 &&
+                entry.path().extension() == ".json") {
+                json_path = entry.path().string();
+                break;
+            }
+        }
+        if (json_path.empty()) return false;
+        sf2::data::Texture tex;
+        bool decoded = false;
+        for (const std::string& ext : {".webp", ".png", ".ktx", ".dds"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("settings_icons.", 0) == 0 &&
+                    entry.path().extension() == ext) {
+                    if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                        decoded = true;
+                        break;
+                    }
+                }
+            }
+            if (decoded) break;
+        }
+        if (!decoded) return false;
+        const GLuint gl = app.renderer().texture_for("settings_icons_atlas", tex);
+        if (gl == 0) return false;
+        std::ifstream in(json_path, std::ios::binary);
+        std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+        const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+        for (const auto& fr : a.frames) {
+            app.register_atlas_frame(fr, a.w, a.h, gl);
+        }
+        std::fprintf(stdout, "[ui] settings_icons atlas: %dx%d %zu frames\n", a.w, a.h,
+                     a.frames.size());
+        std::fflush(stdout);
+        ok = true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[ui] settings_icons atlas load failed: %s\n", e.what());
     }
     return ok;
 }
@@ -2542,28 +2735,21 @@ void DojoScreen::update_impl(float dt) {
     za_update(app(), *this, kScreenDojo);
 }
 
-// Dojo location ensure (mirrors the FightScreen dojo-location block:
-// params scan + LocationScene load + webp texture resolve + frame
-// aliasing). The fight loads it in its ctor; the Dojo hub needs it at
-// boot (otherwise the hub renders black). Guarded by layers().empty().
+// Dojo location ensure (the hub's own `assets.dojo`; the fight keeps a
+// separate `assets.fight_location`). Params scan + LocationScene load + webp
+// texture resolve + frame aliasing. The Dojo hub needs it at boot (otherwise
+// the hub renders black). Guarded by layers().empty().
 void ensure_dojo_location(App& app) {
     if (!app.has_fight_assets()) return;
     FightAssets& assets = app.fight_assets();
     if (!assets.dojo.layers().empty()) return;
     const std::string loc_dir = app.res_root() + "/locations/dojo";
-    std::string params_xml, atlas_json;
     try {
-        for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
-            const std::string name = entry.path().filename().string();
-            if (name.rfind("dojo_params.", 0) == 0 && name.size() > 4 &&
-                name.substr(name.size() - 4) == ".xml") {
-                params_xml = entry.path().string();
-            } else if (name.rfind("dojo.", 0) == 0 && name.size() > 5 &&
-                       name.substr(name.size() - 5) == ".json") {
-                atlas_json = entry.path().string();
-            }
-        }
-        assets.dojo.load(params_xml, {atlas_json}, app.res_root());
+        // JS `Bf.init` L474 page chain: load every `dojo[-N].*.json` page and
+        // alias each page's frames. The old single-`{atlas_json}` load only
+        // aliased page 1, so a `Sequention` frame packed on page 2+ stayed
+        // unresolved (JS `ni.init` L1142 walks `b.nextPage`).
+        load_location_atlas_pages(app, assets.dojo, loc_dir, "dojo");
         // [DOJO-HUB] Hide the punchbag holder prop. The params carry it as
         // a black-tinted Image (ClassName="dojo_punch_bag_holder", hook+beam
         // art at world (-10,-203.5) -> screen x621-1019 y4-190); the loader
@@ -2584,30 +2770,6 @@ void ensure_dojo_location(App& app) {
                                                     s->texture_name == "dojo_punch_bag_holder";
                                          }),
                           sprites.end());
-        }
-        const std::string loc_prefix = "dojo.";
-        for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
-            const std::string name = entry.path().filename().string();
-            if (name.rfind(loc_prefix, 0) != 0) continue;
-            const std::string ext = entry.path().extension().string();
-            if (ext != ".webp" && ext != ".png" && ext != ".jpg") continue;
-            sf2::data::Texture tex;
-            if (!sf2::data::decode_texture(entry.path().string(), tex)) continue;
-            const GLuint gl = app.renderer().texture_for("dojo_atlas_" + name, tex);
-            if (gl != 0) {
-                std::ifstream in(atlas_json, std::ios::binary);
-                std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
-                                             std::istreambuf_iterator<char>());
-                const sf2::data::atlas a =
-                    sf2::data::atlas_parse(jb.data(), jb.size());
-                for (const auto& fr : a.frames) {
-                    app.renderer().texture_alias(fr.name, gl);
-                }
-                std::fprintf(stdout, "[dojo] location atlas texture: %s (%dx%d, %zu frames)\n",
-                             entry.path().filename().string().c_str(), tex.w, tex.h,
-                             a.frames.size());
-                std::fflush(stdout);
-            }
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[dojo] location load failed: %s\n", e.what());
@@ -3147,68 +3309,34 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // frames register into the app's atlas cache for draw_gamepad.
     (void)load_controller_atlas(app());
 
-    // The dojo location (the tutorial-zone backdrop). Load once; the
-    // FightAssets keeps it.
-    if (assets.dojo.layers().empty()) {
+    // The battle's location scene. The hub keeps its own `assets.dojo`, so
+    // the old `assets.dojo.layers().empty()` guard never fired after hub boot
+    // and EVERY battle reused the dojo scene (BOSS_LYNX Location="moon"
+    // rendered the dojo; this block never logged). JS `Bf.init` L474 builds a
+    // scene per battle location, so (re)load `fight_location` whenever the
+    // battle's location differs from the one currently held.
+    if (assets.fight_location.layers().empty() || assets.fight_location_name != location_) {
         const std::string loc_dir = app().res_root() + "/locations/" + location_;
-        std::string params_xml, atlas_json;
+        assets.fight_location_name.clear();  // mark unloaded until the load succeeds
         try {
-            for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
-                const std::string name = entry.path().filename().string();
-                if (name.rfind(location_ + "_params.", 0) == 0 &&
-                    name.size() > 4 && name.substr(name.size() - 4) == ".xml") {
-                    params_xml = entry.path().string();
-                } else if (name.rfind(location_ + ".", 0) == 0 &&
-                           name.size() > 5 && name.substr(name.size() - 5) == ".json") {
-                    atlas_json = entry.path().string();
-                }
-            }
-            assets.dojo.load(params_xml, {atlas_json}, app().res_root());
-            // [FIX Phase 4a/4b - dojo texture resolve] The atlas texture for
-            // the location is the IMAGE beside the JSON (`dojo.b920e18e.webp`),
-            // NOT the JSON path - the JSON's hash stem (`dojo.d31b1e71`)
-            // does not match the image's (`dojo.b920e18e`). The old code
-            // derived the image path from the JSON stem
-            // (`dojo.d31b1e71.webp`, does not exist) -> no texture uploaded
-            // -> every location sprite rendered as a black solid -> the whole
-            // dojo black + the black fighters invisible. Resolve the image by
-            // the LOCATION prefix (`dojo.*`) like the scene_probe.
-            const std::string loc_prefix = location_ + ".";
-            for (const auto& entry : std::filesystem::directory_iterator(loc_dir)) {
-                const std::string name = entry.path().filename().string();
-                if (name.rfind(loc_prefix, 0) != 0) continue;
-                const std::string ext = entry.path().extension().string();
-                if (ext != ".webp" && ext != ".png" && ext != ".jpg") continue;
-                sf2::data::Texture tex;
-                if (!sf2::data::decode_texture(entry.path().string(), tex)) continue;
-                const GLuint gl = app().renderer().texture_for("dojo_atlas_" + name, tex);
-                if (gl != 0) {
-                    std::ifstream in(atlas_json, std::ios::binary);
-                    std::vector<std::uint8_t> jb(
-                        (std::istreambuf_iterator<char>(in)),
-                        std::istreambuf_iterator<char>());
-                    const sf2::data::atlas a =
-                        sf2::data::atlas_parse(jb.data(), jb.size());
-                    for (const auto& fr : a.frames) {
-                        app().renderer().texture_alias(fr.name, gl);
-                    }
-                    std::fprintf(stdout, "[fight] dojo atlas texture: %s (%dx%d, %zu frames)\n",
-                                 entry.path().filename().string().c_str(), tex.w, tex.h,
-                                 a.frames.size());
-                }
-                break;  // one atlas image per location
-            }
-            std::fprintf(stdout, "[fight] dojo scene: %zu layers, arena %.0fx%.0f\n",
-                         assets.dojo.layers().size(), assets.dojo.arena_width(),
-                         assets.dojo.arena_height());
+            // JS `Bf.init` L474 page chain (`ni.init` L1142 walks `b.nextPage`):
+            // load every `<loc>[-N].*.json` page and alias each page's frames,
+            // not just page 1 (the old single-`{atlas_json}` load).
+            load_location_atlas_pages(app(), assets.fight_location, loc_dir, location_);
+            assets.fight_location_name = location_;
+            std::fprintf(stdout, "[fight] location scene (%s): %zu layers, arena %.0fx%.0f\n",
+                         location_.c_str(), assets.fight_location.layers().size(),
+                         assets.fight_location.arena_width(),
+                         assets.fight_location.arena_height());
             // [FIX Phase 4b — the floor the fighters stand on] The dojo's
             // `dojo_floor_*` atlas sprites are white frames tinted black by
             // the params `Color="0x000000"` — they render as a pure-black
             // strip where the fighters stand, making the black silhouettes
             // invisible ("no body"). The oracle's fighter-zone floor is a
             // warm wooden floor (~0xC77946); tint the floor sprites warm so
-            // the black fighters are visible on it.
-            for (const auto& layer : assets.dojo.layers()) {
+            // the black fighters are visible on it. (The hub's `assets.dojo`
+            // keeps the raw tint, matching the hub oracle.)
+            for (const auto& layer : assets.fight_location.layers()) {
                 for (const auto& s : layer->sprites) {
                     if (s->texture_name.rfind("dojo_floor_", 0) == 0) {
                         s->color_r = 0xC7 / 255.0f;
@@ -3218,15 +3346,18 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                 }
             }
         } catch (const std::exception& e) {
-            std::fprintf(stderr, "[fight] dojo scene load failed: %s\n", e.what());
+            std::fprintf(stderr, "[fight] location scene load failed: %s\n", e.what());
         }
     }
 
-    const float arena_w = assets.dojo.arena_width() > 0.0f ? assets.dojo.arena_width() : 1960.0f;
-    const float wall = 80.0f;
-    // Arena bounds are [wall, arena_w-wall] = [80,1880] (0-based, JS Bf NU/width).
-    // The centered ±900 calculation placed spawn 973 outside the arena (clamped to 900,
-    // causing |dx| ~211 vs oracle). Reverted to JS-accurate bounds.
+    const float arena_w = assets.fight_location.arena_width() > 0.0f
+                              ? assets.fight_location.arena_width()
+                              : 1960.0f;
+    // Arena bounds are [Wall, width-Wall] (JS `ca.ggb` L383 `v.tFa=location.NU`,
+    // `v.NKa=location.width-NU`; `Bf.init` L474 `this.NU = Root Wall`). `Wall`
+    // ranges 80..250 across the shipped locations (dojo=80); the old
+    // hard-coded 80 clamped every other zone's fighters into the wrong arena.
+    const float wall = assets.fight_location.arena_wall();
     const float wall_min = wall;
     const float wall_max = arena_w - wall;
 
@@ -3256,7 +3387,10 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // inside that container (DOJO_BG_STATIC 7.4); floor tiles Y=223.5 are
     // location-space. Render adds the container offset so feet land in the
     // tile band; world/pose/camera stay container-space (oracle-trace exact).
-    const float floor_y = 80.0f;  // JS Floor (dojo_params Root Floor=80)
+    // JS `Bf.ct` = Root `Floor` (`Bf.init` L474; dojo 80) — the `tl`
+    // container y anchor (`tl.init` L843 `height/2-ct`). Was hard-coded to
+    // dojo's 80 for every location.
+    const float floor_y = assets.fight_location.arena_floor();
     battle.player_spawn_x = 973.0f;
     battle.player_spawn_y = -110.0f;  // COM Y (oracle Me -108, Enemy -93) — ModelsViewer split
     battle.enemy_spawn_x = 690.0f;
@@ -3308,9 +3442,9 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // location's Root Color (the dojo_params `<Root Color="0x000000">`,
     // JS `Na.cd` fills the fighter Path2D with it). The oracle's fighters
     // are black silhouettes — no red/blue team colors.
-    fight_->set_fighter_color(assets.dojo.root_color());
+    fight_->set_fighter_color(assets.fight_location.root_color());
     std::fprintf(stdout, "[fight] fighter color 0x%06X (location %s Root Color)\n",
-                 assets.dojo.root_color(), location_.c_str());
+                 assets.fight_location.root_color(), location_.c_str());
 
     // Log the player's move list (the equipment-change evidence).
     std::fprintf(stdout, "[fight] player move list (%zu moves):\n",
@@ -3637,9 +3771,11 @@ void FightScreen::verify_fight() const {
         c.zoom = cam.zoom;
         c.view_w = 1280.0f;
         c.view_h = 720.0f;
-        c.arena_h = assets.dojo.arena_height() > 0.0f ? assets.dojo.arena_height() : 560.0f;
-        c.arena_floor = assets.dojo.arena_floor();
-        c.arena_center_x = assets.dojo.arena_width() * 0.5f;
+        c.arena_h = assets.fight_location.arena_height() > 0.0f
+                        ? assets.fight_location.arena_height()
+                        : 560.0f;
+        c.arena_floor = assets.fight_location.arena_floor();
+        c.arena_center_x = assets.fight_location.arena_width() * 0.5f;
         const float feet_y = fight_->player().fighter.world_y();
         const float psx = c.world_to_screen_x(fight_->player().fighter.world_x(), 1.0f);
         const float psy = c.world_to_screen_y(feet_y);
@@ -3751,10 +3887,11 @@ constexpr float kPauseDlgActionY = 470.0f;
 
 void FightScreen::update_impl(float dt) {
     if (fight_ == nullptr) return;
-    // Location timeline (D6): the fight renders the same location layers as
-    // the hub, so advance the SimpleEffect Transparency loop per frame.
+    // Location timeline (D6): advance the battle location's SimpleEffect
+    // Transparency loop per frame (its own `fight_location`, separate from
+    // the hub's `dojo`).
     if (app().has_fight_assets()) {
-        app().fight_assets().dojo.update(dt);
+        app().fight_assets().fight_location.update(dt);
     }
     if (!auto_attack_wired_) {
         auto_attack_wired_ = true;
@@ -3953,8 +4090,9 @@ void FightScreen::render_impl(App& app) {
     // (renderer.hpp `world_to_screen_x`). The ModelsViewer container's own
     // x-translate (-width/2, `tl.init` L843) still applies to the FIGHTERS
     // below (they live in the container, not the centered layer frame).
-    const float arena_half =
-        assets.dojo.arena_width() > 0.0f ? assets.dojo.arena_width() * 0.5f : 980.0f;
+    const float arena_half = assets.fight_location.arena_width() > 0.0f
+                                 ? assets.fight_location.arena_width() * 0.5f
+                                 : 980.0f;
     camera.center_x = 0.0f;
     camera.center_y = cam.center_y;
     camera.zoom = cam.zoom;
@@ -3968,8 +4106,10 @@ void FightScreen::render_impl(App& app) {
     camera.layer_zoom = cam.zoom_layer;
     camera.view_w = kViewW;
     camera.view_h = kViewH;
-    camera.arena_h = assets.dojo.arena_height() > 0.0f ? assets.dojo.arena_height() : 560.0f;
-    camera.arena_floor = assets.dojo.arena_floor();
+    camera.arena_h = assets.fight_location.arena_height() > 0.0f
+                         ? assets.fight_location.arena_height()
+                         : 560.0f;
+    camera.arena_floor = assets.fight_location.arena_floor();
     // Io = Lb.width/2 - focus (JS `Ut.Al` L826): the parallax reference the
     // renderer folds into every layer (renderer.hpp `camera_offset_x`). At
     // the fight-start focus 831.5 -> Io = 148.5.
@@ -3982,8 +4122,8 @@ void FightScreen::render_impl(App& app) {
     // (JS_RENDER §7, "Что у нас не так" #1). The old code drew ALL layers
     // before the fighters, so the floor rendered UNDER their feet — the
     // broken "arena behind the fighters" look.
-    const std::size_t fighter_layer = assets.dojo.fighter_layer();
-    assets.dojo.render_layers(ren, camera, 0, fighter_layer);  // background (parallax)
+    const std::size_t fighter_layer = assets.fight_location.fighter_layer();
+    assets.fight_location.render_layers(ren, camera, 0, fighter_layer);  // background (parallax)
 
     // [fix(render): remove fake shadow] The oracle JS draws NO per-fighter
     // shadow (JS_RENDER §3.2: "в JS НЕТ пер-бойцовской тени"). The old
@@ -3998,7 +4138,8 @@ void FightScreen::render_impl(App& app) {
         // projection adds the container so feet land in the tile band.
         // The -arena_half is that container x-translate (tl.init L843), not
         // the removed camera re-center.
-        const float kContY = assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor();
+        const float kContY = assets.fight_location.arena_height() * 0.5f -
+                             assets.fight_location.arena_floor();
         std::vector<float> out(v.size());
         for (std::size_t i = 0; i < v.size(); i += 2) {
             out[i] = camera.world_to_screen_x(v[i] - arena_half, 1.0f);
@@ -4068,10 +4209,12 @@ void FightScreen::render_impl(App& app) {
             }
             const float sx1 = camera.world_to_screen_x(pos[u1] - arena_half, 1.0f);
             const float sy1 = camera.world_to_screen_y(
-                pos[u1 + 1] + assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor());
+                pos[u1 + 1] + assets.fight_location.arena_height() * 0.5f -
+                assets.fight_location.arena_floor());
             const float sx2 = camera.world_to_screen_x(pos[u2] - arena_half, 1.0f);
             const float sy2 = camera.world_to_screen_y(
-                pos[u2 + 1] + assets.dojo.arena_height() * 0.5f - assets.dojo.arena_floor());
+                pos[u2 + 1] + assets.fight_location.arena_height() * 0.5f -
+                assets.fight_location.arena_floor());
             float dx = sx2 - sx1;
             float dy = sy2 - sy1;
             const float len = std::sqrt(dx * dx + dy * dy);
@@ -4139,7 +4282,7 @@ void FightScreen::render_impl(App& app) {
     // Root Color — the same colour the fighter silhouettes use. The fight
     // spawn (FightController, fight.cpp:1565) does not thread it yet
     // (cross-file OPEN), so pass the loaded location's root colour here.
-    draw_hit_sparks(ren, camera, fight_->fx(), assets.dojo.root_color(), arena_half,
+    draw_hit_sparks(ren, camera, fight_->fx(), assets.fight_location.root_color(), arena_half,
                     cont_y);
     // JS `tl.init` (L843-844): the container order is qh (fighters) -> Gq
     // (`Gfb` = OnBackground) -> Hq (air), both z=+.01 over the fighters.
@@ -4167,9 +4310,9 @@ void FightScreen::render_impl(App& app) {
     // like the original's `_0007_arena` / dust / glow (JS_RENDER §7).
     // Fall back to rendering nothing extra when the location has no
     // fighter layer (fighter_layer == npos already drew every layer above).
-    const std::size_t n_layers = assets.dojo.layers().size();
+    const std::size_t n_layers = assets.fight_location.layers().size();
     if (fighter_layer != sf2::scene::LocationScene::npos) {
-        assets.dojo.render_layers(ren, camera, fighter_layer + 1, n_layers);
+        assets.fight_location.render_layers(ren, camera, fighter_layer + 1, n_layers);
     }
 
     // --- Fight feedback overlays on the camera-glued `Cu` container ------
@@ -4607,13 +4750,36 @@ void ResultsScreen::render_impl(App& app) {
     const float panel[] = {px, py, px + kKkW, py, px, py + kKkH,
                            px + kKkW, py, px + kKkW, py + kKkH, px, py + kKkH};
     ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.92f);
-    // Win/lose label art (callouts id 1310: `label_win`/`label_lose` are the
-    // `y.Lna`/`y.Kna` frames, JS L2058). Flat text only on a genuine miss.
+    // Win/lose label `mT` (callouts id 1310: `y.Lna` win / `y.Kna` lose,
+    // JS L2058) placed by `kk.layout` (L2058-2059): `ma.Kq` = the fight
+    // viewport rect, `b = a.fn(1.0714285714285714)` (the `gb` contain-fit,
+    // L1552), content scale `(b.N-b.J)/750`, `mT.C(375) D(60) la(.5)`.
+    // The native fight path uses the screen rect for ma.Kq (J=0,P=0,N=W,W=H —
+    // the fight HUD note above); at 16:9 that is b=(254.3,0,1025.7,720),
+    // scale 1.0286 -> the title centres at (640, 61.7) at 0.514x.
+    // OPEN: ma.Kq.P/W in JS are the projected arena top/bottom (`Sya` L1833),
+    // not 0/H — a standalone Results screen has no live camera to derive them.
+    constexpr float kKkAspect = 1.0714285714285714f;
+    const float kkb_w = (kViewW / kViewH >= kKkAspect) ? kViewH * kKkAspect : kViewW;
+    const float kkb_h = (kViewW / kViewH >= kKkAspect) ? kViewH : kViewW / kKkAspect;
+    const float kkb_j = (kViewW - kkb_w) * 0.5f;
+    const float kkb_p = (kViewH - kkb_h) * 0.5f;
+    const float kk_scale = kkb_w / 750.0f;
+    const float kk_label_cx = kkb_j + 375.0f * kk_scale;
+    const float kk_label_cy = kkb_p + 60.0f * kk_scale;
+    const float kk_label_scale = 0.5f * kk_scale;
     bool label_drawn = false;
     if (load_callouts_atlas(app)) {
-        label_drawn = try_draw_atlas_button(
-            app, player_won_ ? "label_win" : "label_lose", kViewW * 0.5f, py + 92.0f,
-            380.0f, 130.0f, 1.0f);
+        const char* lname = player_won_ ? "label_win" : "label_lose";
+        sf2::data::atlas_frame lfr;
+        int ltw = 0, lth = 0;
+        unsigned int lgl = 0;
+        if (app.get_atlas_frame(lname, &lfr, &ltw, &lth, &lgl)) {
+            const float lw = (lfr.source_w > 0 ? lfr.source_w : lfr.w) * kk_label_scale;
+            const float lh = (lfr.source_h > 0 ? lfr.source_h : lfr.h) * kk_label_scale;
+            label_drawn =
+                try_draw_atlas_button(app, lname, kk_label_cx, kk_label_cy, lw, lh, 1.0f);
+        }
     }
     if (!label_drawn) {
         draw_ui_label(app, kViewW * 0.5f - 300.0f, py + 72.0f, 600.0f, 60.0f,
@@ -5788,9 +5954,11 @@ void SettingsScreen::update_impl(float dt) {
     }
     // MUSIC toggle (working): OFF stops the track, ON replays the last
     // track (play_music of the current track; silent no-op when none —
-    // AudioEngine semantics, no scene touch).
-    if (p.x >= s.row_x && p.x <= s.row_x + s.row_w && p.y >= s.row_y[1] &&
-        p.y <= s.row_y[1] + s.row_h) {
+    // AudioEngine semantics, no scene touch). Hit-rect = the JS `c` row
+    // (L1917): 800 x icon, centred on the icon local x + 315 design.
+    if (p.x >= s.music_row_cx - s.row_w * 0.5f &&
+        p.x <= s.music_row_cx + s.row_w * 0.5f &&
+        p.y >= s.music_cy - s.row_h * 0.5f && p.y <= s.music_cy + s.row_h * 0.5f) {
         hover_ = 1;
         if (p.pressed) {
             music_off_ = !music_off_;
@@ -5838,21 +6006,37 @@ void SettingsScreen::render_impl(App& app) {
                   UiAlign::Center, 0.404f, 0.243f, 0.141f);
     // Rows from the `un` `IVa` table (L1917-1924). `Ca.hasFeature("audio")`
     // (L1928) gates Sound+Music and `("credits")` (L1929) gates Credits; both
-    // features are present, so four rows. Language is EN-only in the native
-    // (`G.Rq()` switch `Oyb` L1931 unreachable), so it shows `app.language()`.
+    // features are present, so the k=0.5/1.5/2.5 rows. The 170x170
+    // `E.get(250)` tiles carry the on/off state (sound/sound_off,
+    // music/music_off); labels are the plain `IVa` captions (`a()` L1917),
+    // placed at `icon_ya + icon_w/2 + icon_w*.2` (i.e. icon_cx + .7 icon).
+    // Language is EN-only in the native (`G.Rq()`/`Oyb` L1931 unreachable);
+    // the language tile is its code.
     const bool sfx_on = sf2::audio::AudioEngine::instance().enabled();
-    const std::string rows[4] = {
-        std::string("Sound: ") + (sfx_on ? "ON" : "OFF"),
-        std::string("Music: ") + (music_off_ ? "OFF" : "ON"),
-        std::string("Credits"),
-        std::string("Language: ") + app.language(),
+    const std::string lang = app.language().empty() ? "en" : app.language();
+    if (load_settings_icons_atlas(app)) {
+        try_draw_atlas_button(app, sfx_on ? "sound" : "sound_off", s.sound_cx, s.sound_cy,
+                              s.icon, s.icon, 1.0f);
+        try_draw_atlas_button(app, music_off_ ? "music_off" : "music", s.music_cx,
+                              s.music_cy, s.icon, s.icon, 1.0f);
+        try_draw_atlas_button(app, "credits", s.credits_cx, s.credits_cy, s.icon, s.icon,
+                              1.0f);
+        try_draw_atlas_button(app, lang, s.lang_cx, s.lang_cy, s.icon, s.icon, 1.0f);
+    }
+    struct RowLabel {
+        float cx, cy;
+        const char* text;
     };
-    for (int i = 0; i < 4; ++i) {
-        const bool hov = (i == 1 && hover_ == 1);
-        draw_flat_button(app, "", s.row_x + s.row_w * 0.5f, s.row_y[i] + s.row_h * 0.5f,
-                         s.row_w, s.row_h, hov ? 0.55f : 0.30f, 0.42f, 0.3f, hov);
-        draw_ui_label(app, s.row_x + 12.0f, s.row_y[i] + s.row_h * 0.5f - 14.0f,
-                      s.row_w - 24.0f, 28.0f, rows[i], 0.9f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
+    const RowLabel labels[4] = {
+        {s.sound_cx, s.sound_cy, "Sound"},
+        {s.music_cx, s.music_cy, "Music"},
+        {s.credits_cx, s.credits_cy, "Credits"},
+        {s.lang_cx, s.lang_cy, "English"},
+    };
+    for (const RowLabel& row : labels) {
+        draw_ui_label(app, row.cx + s.icon * 0.7f, row.cy - s.icon * 0.25f,
+                      596.0f * s.panel.c, s.icon, row.text, 0.6f, UiAlign::Left, 1.0f, 1.0f,
+                      1.0f);
     }
     // Restart notice `Nm` (`dlgSettingsRestart`, `ua(75)`, L1929).
     draw_ui_label(app, kViewW * 0.5f - 500.0f, s.notice_y, 1000.0f, 40.0f,
