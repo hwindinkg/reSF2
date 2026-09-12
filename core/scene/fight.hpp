@@ -86,11 +86,14 @@ namespace sf2::scene {
 // RechargeMagicEachRound / Tactic / Resistance / Invulnerability; and the
 // landed-hit pass (`ca.Cgb` -> `PC(5/6/11)` L396/L423) for Regeneration /
 // LifeSteal / Points / WinCombo / WinShock. The ApplyTo/Round/Eclipse/Death
-// gating and the `<Level>` power range are live. Still parsed + gated but
-// inert (OPEN, cited below): LoseFall (arming), RatingEvaluation, DamageFactor
-// (animation-scoped), Darkness / RandomArea / LightInTheDarkness (render-side),
-// Combo/Crazy (`ws`/`ola` mutuality), WinStyle (model style `dz` has no source),
-// and the perk/UI/item rules.
+// gating and the `<Level>` power range are live. The animation-scoped
+// LoseFall (`jn`, arm + `Rba` zone), the Combo/Crazy `ws` mutuality
+// (`$m`/`an` via `du.kZ`) and Invulnerability's `Zk` (`gn.ws=true`) are now
+// implemented. Still parsed + gated but inert (OPEN, cited below):
+// RatingEvaluation (UI), DamageFactor (no per-interval `Cea` setter; A5),
+// Darkness / RandomArea / LightInTheDarkness (render-side), WinStyle (the
+// model style score `dz` has no native source — COMBAT_STATIC App. C), and
+// the perk/UI/item rules.
 // ---------------------------------------------------------------------------
 enum class FightRuleKind : int {
     none = 0,
@@ -230,11 +233,30 @@ struct FightRule {
     int points_defense = 2;
     // `rj` (`ERuleWinCombo`, L912): `pV` (Value).
     float win_combo_value = 0.0f;
-    // `tj` (`ERuleWinStyle`, L913): `BVa` (`VIa(Type)`). Effect OPEN (the
-    // model style score `dz` has no native source — COMBAT_STATIC App. C).
+    // `tj` (`ERuleWinStyle`, L913): `BVa` (`VIa(Type)`). Effect OPEN: `hh`
+    // (L913) reads `a.xP` = the model style score `dz` snapshotted per
+    // context (`ca.Ema` L420 `ze.rl/kl.xP=yb/pb.dz`), which is set only by
+    // the achievement-counter event (`ca.z3` L423) — no native source
+    // (COMBAT_STATIC App. C "OPEN-KEPT: live dz tick source"). See OPEN.
     int win_style_type = 0;
-    // `De.ws` (L852): the rule's own `ws` flag (Invulnerability `kZ` reads
-    // `!e.ws`). Stays false with shipped data (`De.Zk` has no setter here).
+    // `Ce.EM` (L848): the rule's `<Animation Name="..."/>` child names
+    // (JS `bn.parse` also folds a top-level `Animation` attr — DamageFactor
+    // only, and its effect is OPEN). The animation-scoped rules match the
+    // current animation (`Lba`, L848); `Mwa("Physical")` (L866) tests this
+    // list for the "Physical" group.
+    std::vector<std::string> animations;
+    bool physical = false;   // `Mwa("Physical")` (L866) — gates `Zf(7)`.
+    // `jn.tN` (L866): LoseFall armed flag. Armed by the current animation
+    // (cp==4 `tN=this.Lba(a.AI)`, L867) or, for a Physical rule, by the
+    // fall reaction (cp==7 `tN=!0`, L867).
+    bool armed = false;
+    // `$m.pV` (L852): Combo `Value`; `an.Upa` (L854): Crazy `VIa(Type)`.
+    float combo_value = 0.0f;
+    int crazy_style = 0;
+    // `De.ws` (L852): the rule's own `ws` flag; `kZ` (L902) ANDs `!e.ws`
+    // over the active `wV` (bit 10 = Invulnerability `gn`/Combo `$m`/
+    // Crazy `an`) then drives the opposite fighter's `ola`. Set by each
+    // rule's `Zk` (Invulnerability true, L863; Combo/Crazy `hh`, L852/L854).
     bool ws = false;
     // --- runtime per-round state (reset by the rule's `Zk`/`reset`) -------
     int hot_time = 0;          // `en.Qe` HotGround countdown (seconds)
@@ -323,12 +345,29 @@ inline int fight_rule_int(const std::map<std::string, std::string>& a,
     }
 }
 
+// `bb.VIa` (L891): the style `Type` attr -> code (Turtle 0, Hard 1, Brutal 2,
+// Aggressive 3, Crazy 4, Fantastic 5; unknown/default -> 0). Shared by the
+// WinStyle `BVa` (L913) and the Crazy `Upa` (L854).
+inline int fight_rule_style_type(const std::map<std::string, std::string>& a) {
+    const auto it = a.find("Type");
+    const std::string t = it != a.end() ? it->second : std::string();
+    return t == "Turtle" ? 0 : t == "Hard" ? 1 : t == "Brutal" ? 2
+         : t == "Aggressive" ? 3 : t == "Crazy" ? 4
+         : t == "Fantastic" ? 5 : 0;
+}
+
 // `bb.M3`/`bb.xe` -> `Ga`/`Lb` constructor (L885-894): parse one StageRule.
 inline FightRule parse_fight_rule(const StageRule& sr) {
     FightRule r;
     r.kind = fight_rule_kind(sr.tag);
     r.tag = sr.tag;
     if (r.kind == FightRuleKind::none) return r;
+    // `Ce.c4a`/`Mwa` (L848/L866): the rule's animation list + the
+    // `Physical` group test (gates LoseFall's `Zf(7)` registration).
+    r.animations = sr.animations;
+    for (const std::string& n : r.animations) {
+        if (n == "Physical") { r.physical = true; break; }
+    }
     r.apply_to = fight_rule_apply_to(sr.attrs);
     r.death = fight_rule_bool(sr.attrs, "Death", false);
     r.eclipse_set = sr.attrs.find("Eclipse") != sr.attrs.end();
@@ -357,9 +396,21 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
     if (nit != sr.attrs.end()) r.node = nit->second;
     const auto ait = sr.attrs.find("Axis");
     if (ait != sr.attrs.end()) r.axis = ait->second;
-    const float mn = fight_rule_float(sr.attrs, "Min", -1.0e5f);
-    const float mx = fight_rule_float(sr.attrs, "Max", 1.0e5f);
-    if (r.axis == "X") {  // JS: only Axis=X fills ZG/BH (L886)
+    // `jn` ctor (L866) seeds the four bounds `BH=-1E5; ZG=1E5; HO=-1E5;
+    // dN=1E5` (the reversed "always outside once armed" zone); `nj` ctor
+    // (L885) keeps the normal `-1E5..1E5`. `of(a,1E5,-1E5)` (L867) -> Min
+    // default +1E5, Max default -1E5 for LoseFall; `of(a,-1E5,1E5)` (L886)
+    // for Ringout.
+    const bool lose_fall = (r.kind == FightRuleKind::lose_fall);
+    if (lose_fall) {
+        r.min_x = 1.0e5f;
+        r.max_x = -1.0e5f;
+        r.min_y = 1.0e5f;
+        r.max_y = -1.0e5f;
+    }
+    const float mn = fight_rule_float(sr.attrs, "Min", lose_fall ? 1.0e5f : -1.0e5f);
+    const float mx = fight_rule_float(sr.attrs, "Max", lose_fall ? -1.0e5f : 1.0e5f);
+    if (r.axis == "X") {  // JS: only Axis=X fills ZG/BH (L886/L867)
         r.min_x = mn;
         r.max_x = mx;
     } else if (r.axis == "Y") {  // JS: Axis=Y fills dN/HO
@@ -439,16 +490,27 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
         const auto di = sr.attrs.find("Defense");
         const std::string df = di != sr.attrs.end() ? di->second : std::string();
         r.points_defense = df == "BodyDefense" ? 1 : df == "HeadDefense" ? 0 : 2;
+    } else if (r.kind == FightRuleKind::combo) {
+        // `$m.parse` (L852): `Value` -> `pV`. `De.Zk`/`hh` (L852) derive the
+        // per-side `ws` from `NZ < pV` (the `kZ` mutuality, L902).
+        r.combo_value = fight_rule_float(sr.attrs, "Value", 0.0f);
+    } else if (r.kind == FightRuleKind::crazy) {
+        // `an.parse` (L854): `bb.VIa(Type)` -> `Upa`. `hh` (L854) derives
+        // `ws` from `xP < Upa`.
+        r.crazy_style = fight_rule_style_type(sr.attrs);
     } else if (r.kind == FightRuleKind::win_combo) {
         // `rj.parse` (L912): Value -> `pV`.
         r.win_combo_value = fight_rule_float(sr.attrs, "Value", 0.0f);
     } else if (r.kind == FightRuleKind::win_style) {
         // `tj.parse` (L913) via `bb.VIa` (L891): Type -> `BVa`.
-        const auto it = sr.attrs.find("Type");
-        const std::string t = it != sr.attrs.end() ? it->second : std::string();
-        r.win_style_type = t == "Hard" ? 1 : t == "Brutal" ? 2
-                         : t == "Aggressive" ? 3 : t == "Crazy" ? 4
-                         : t == "Fantastic" ? 5 : 0;
+        r.win_style_type = fight_rule_style_type(sr.attrs);
+    } else if (r.kind == FightRuleKind::damage_factor) {
+        // `bn.parse` (L855-856): `Animation` attr + `Factor`/`RepeatFactor`
+        // -> the per-interval charge (`zUa`/`lVa`). Effect OPEN: the native
+        // has no per-interval `Cea(side)` setter (`Vm.bp/Rja/JU/KU`, L775) —
+        // `damage.cpp:118` keeps `bp=1` (documented at `modes.hpp:562`), so
+        // the charge cannot be wired (COMBAT_STATIC A5: no shipped
+        // `ERuleDamageFactor` element either).
     }
     // ApplyTo overrides from the `bb.xe` dispatch (L891-893): Points is
     // always All (`new gj(b,3)`) -> split; Darkness always Player
@@ -459,6 +521,16 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
     // `qj` ctor (L912): TimeOutWin forces `Li=1` (player wins on timeout;
     // `Yu=false` -> `wfa()` = 1 -> E3a `a=true`).
     if (r.kind == FightRuleKind::timeout_win) r.apply_to = 1;
+    // `gn.Fbb` (L863): Invulnerability swaps its side at construction
+    // (`Li==1 -> 2`, `Li==2 -> 1`) — the `kZ` pass reads `mc()` on one side
+    // and calls `ola` on the OTHER (`Rea(a==1?2:1)`), so the swap makes
+    // `ApplyTo=Player` grant the PLAYER the `ws` (shock-immunity) flag.
+    // Shipped rules are Player/Bot only (54/54); ApplyTo=All (none shipped)
+    // is split by `du.o4` into base `De` copies in JS — not replicated here.
+    if (r.kind == FightRuleKind::invulnerability) {
+        if (r.apply_to == 1) r.apply_to = 2;
+        else if (r.apply_to == 2) r.apply_to = 1;
+    }
     return r;
 }
 
@@ -1264,6 +1336,11 @@ private:
     // JS `nj.hh` (L885-886): the tracked node leaves [ZG,BH]x[dN,HO] ->
     // `setActive(false)` + fire. Returns true when the rule fired.
     bool rules_ringout_detect(FightRule& r);
+    // JS `jn.hh`/`Rba` (L866-867): LoseFall — arm `tN` from the tracked
+    // fighter's current animation (cp==4 `Lba(a.AI)`, L848) or, for a
+    // Physical rule, the fall reaction (cp==7), then the node-zone exit.
+    // Returns true when the rule fired.
+    bool rules_lose_fall(FightRule& r);
     // JS `du.Oob` (L901) + `ca.BT` (L392-393): apply a fired rule's effect
     // (Ringout -> `ey=4`; TimeOutWin -> `ey=2`) and record the winner.
     void rules_fire(FightRule& r);
@@ -1272,6 +1349,10 @@ private:
     // deltas, RemoveInterval, RechargeMagicEachRound, Tactic, the resets),
     // then the Invulnerability `ola` pass and the Resistance `dta` pass.
     void rules_apply_round_effects();
+    // JS `du.kZ` (L902): the per-side `wV` (bit 10) AND over the active
+    // Invulnerability / Combo / Crazy `!ws`, then the opposite fighter's
+    // `ola(!b)` (`Rea(a==1?2:1)`). `side` 3 -> both.
+    void rules_kz(int side);
     // JS `du.Oob` via the hit-scope `Ih(5/6/11,...)` calls (L896 + `ca.Cgb`
     // L396): the landed-hit rule effects — LifeSteal heal, Regeneration
     // counter reset, Points accumulation/fire, WinCombo/WinShock.

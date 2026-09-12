@@ -19,6 +19,8 @@
 //
 // The game's .ktx files are ASTC (glInternalFormat 0x93B0..0x93BD).
 // This file implements ETC1/ETC2 and ASTC (via astc_dec) CPU decode.
+// KTX rows are stored bottom-first (OpenGL order); decode_ktx normalises the
+// result to top-first so it matches the PNG/WebP/DDS decoders in this module.
 
 #include "texture.hpp"
 
@@ -388,6 +390,37 @@ void decode_astc_texture(const std::uint8_t* data, std::size_t data_size,
     }
 }
 
+// Converts a GL-order (bottom-row-first) image to the top-row-first order used
+// by every other decoder in this module (stb PNG/JPEG, libwebp, DDS) and by the
+// shared sprite renderer (`v = frame_y / tex_h` in scene/renderer.cpp).
+//
+// KTX image data — like the data glTexImage2D/glCompressedTexImage2D consumes —
+// is stored with the first row at the BOTTOM (OpenGL origin). A verbatim decode
+// therefore comes out vertically mirrored. The JS engine never flips it at
+// upload either: `mr.upload` (sf2.502f0946.js L1821) hands the KTX image bytes
+// straight to `compressedTexImage2D`, and the sprite vertex shader `dr Rj`
+// (L1763) compensates with `v_tcoord = (x, tex_h - a_tcoord.y) / tex_h` for a
+// top-left atlas rect. Our renderer instead maps the TexturePacker top-left
+// rect directly (`v = frame_y / tex_h`), so flip once here to keep all formats
+// upright and interchangeable. Evidence: same arena artwork decoded as ktx vs
+// webp differs by 116.7 mean abs (direct) but 27.5 flipped — the ktx is the
+// mirror of the top-first webp.
+void flip_rows_vertical(Texture& tex) {
+    if (tex.w <= 0 || tex.h <= 1) {
+        return;
+    }
+    const std::size_t stride = static_cast<std::size_t>(tex.w) * 4u;
+    std::vector<std::uint8_t> tmp(stride);
+    for (int y = 0; y < tex.h / 2; ++y) {
+        std::uint8_t* a = tex.rgba.data() + static_cast<std::size_t>(y) * stride;
+        std::uint8_t* b =
+            tex.rgba.data() + static_cast<std::size_t>(tex.h - 1 - y) * stride;
+        std::memcpy(tmp.data(), a, stride);
+        std::memcpy(a, b, stride);
+        std::memcpy(b, tmp.data(), stride);
+    }
+}
+
 } // namespace
 
 bool decode_ktx(const std::uint8_t* data, std::size_t size, Texture& out) {
@@ -474,6 +507,10 @@ bool decode_ktx(const std::uint8_t* data, std::size_t size, Texture& out) {
     } else {
         decode_etc_rgb_texture(data + off, image_size, width, height, punchthrough, tex);
     }
+
+    // KTX rows are bottom-first (OpenGL order); normalise to top-first so the
+    // shared renderer and the PNG/WebP/DDS paths all agree (see the helper).
+    flip_rows_vertical(tex);
 
     out = std::move(tex);
     return true;

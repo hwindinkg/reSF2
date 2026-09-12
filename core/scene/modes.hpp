@@ -57,6 +57,11 @@ struct StageWarrior {
 struct StageRule {
     std::string tag;  // Attributes / NoBulletsReplenishment / ...
     std::map<std::string, std::string> attrs;
+    // Child `<Animation Name="..."/>` names (JS `Ce.c4a` L848 -> `ra.yz`):
+    // the `EM` animation list every animation-scoped rule (`Ce`: HotGround,
+    // LoseFall, DamageFactor) matches against (`Lba`, L848). Empty -> no
+    // animations (LoseFall then never arms; HotGround `Voa` stays false).
+    std::vector<std::string> animations;
     // `<Level Min Max>` wrapper range (JS `bb.Ajb` L894 via `Zf(a,0,MAX)` —
     // a Min/Max ATTR read): the power range `[xFa,wFa]` the rule gates on
     // (`Lb.Ti`/`c_a` L846). No wrapper -> [0, INT_MAX] -> always true.
@@ -269,6 +274,12 @@ inline bool parse_stages(const std::string& xml_text, std::vector<StageBattle>& 
                                     for (const pugi::xml_attribute a : c.attributes()) {
                                         rule.attrs[a.name()] = a.value();
                                     }
+                                    // JS `Ce.c4a` (L848): the `Animation`
+                                    // child names -> the rule's `EM` list.
+                                    for (const pugi::xml_node an : c.children("Animation")) {
+                                        if (an.attribute("Name"))
+                                            rule.animations.push_back(an.attribute("Name").value());
+                                    }
                                     rule.power_min = lo;
                                     rule.power_max = hi;
                                     fight.rules.push_back(std::move(rule));
@@ -279,6 +290,11 @@ inline bool parse_stages(const std::string& xml_text, std::vector<StageBattle>& 
                             rule.tag = rname;
                             for (const pugi::xml_attribute a : r.attributes()) {
                                 rule.attrs[a.name()] = a.value();
+                            }
+                            // JS `Ce.c4a` (L848): the `Animation` child names.
+                            for (const pugi::xml_node an : r.children("Animation")) {
+                                if (an.attribute("Name"))
+                                    rule.animations.push_back(an.attribute("Name").value());
                             }
                             fight.rules.push_back(std::move(rule));
                         }

@@ -381,12 +381,15 @@ void FightController::set_ringout_rule(bool enabled, float min_x, float max_x,
 // JS `Ga.wfa` (L848): the fired rule's winner. Li==1 -> (Yu?2:1); Li==2 ->
 // (Yu?1:2); else 3. `E3a` (L412) then does `a=false; case 1: a=true` (wfa==1
 // = player/kc wins; any other = enemy/Zb). `Yu` (Ga ctor L846) is true for
-// the field rules and false for TimeOutWin/LoseFall/Win* (their ctors).
+// the field rules and false only for the rules whose ctors set `Yu=!1`:
+// TimeOutWin `qj` (L912), WinCombo `rj` (L912), WinShock `sj` (L913),
+// WinStyle `tj` (L913), Points `gj` (L872), Combo `$m` (L852), Crazy `an`
+// (L854). LoseFall `jn` (L866) does NOT clear `Yu` -> stays true (the native
+// previously grouped it with the Win*/TimeOutWin rules — fixed).
 bool FightController::rule_winner_is_player(const FightRule& r) const {
     bool yu = true;
     switch (r.kind) {
         case FightRuleKind::timeout_win:
-        case FightRuleKind::lose_fall:
         case FightRuleKind::win_combo:
         case FightRuleKind::win_shock:
         case FightRuleKind::win_style:
@@ -444,6 +447,61 @@ bool FightController::rules_ringout_detect(FightRule& r) {
     return false;
 }
 
+// JS `jn.hh` (L867) + `Rba` (L866-867): LoseFall. The JS rule registers the
+// per-frame (1) and animation-start (4) passes, plus the fall-reaction pass
+// (7) only when `Mwa("Physical")` (L866, the ctor's conditional `Zf(7)`).
+//   cp==4 (`Pf` L387 -> `PC(4,side)`): `tN = this.Lba(a.AI)` (L867; `Lba`
+//     L848 compares the current animation name against `EM`). The native
+//     maps `a.AI` to `current_move()->name` (the established anim proxy) and
+//     re-derives `tN` every frame — JS only re-arms on an animation START;
+//     equivalent while the animation persists (documented drift).
+//   cp==7 (`Lgb` L387: `a.model.lb==null` -> `PC(7,side)`; unarmed ->
+//     `tN=true`): the native approximates the weaponless fall reaction with
+//     the KO state (`hp<=0`). Cited but approximate (see drift).
+//   cp==1: `Rba` — the tracked node leaves [ZG,BH]x[dN,HO] -> `setActive(false)`.
+bool FightController::rules_lose_fall(FightRule& r) {
+    FightFighter& f = (r.apply_to == 2) ? enemy_ : player_;
+    // cp==4: `tN = this.Lba(a.AI)` (L867) — the current animation match.
+    const std::string anim = f.fighter.current_move() != nullptr
+                                 ? f.fighter.current_move()->name
+                                 : std::string();
+    bool match = false;
+    for (const std::string& n : r.animations) {
+        if (n == anim) { match = true; break; }
+    }
+    r.armed = match;
+    // cp==7 (registered only when the rule owns a "Physical" animation,
+    // `jn` ctor L866): `tN=true` on the fall reaction (L867).
+    if (r.physical && f.weapon == "Fists" && f.hp <= 0.0f) r.armed = true;
+    if (!r.armed) return false;
+    if (r.node.empty()) return false;  // JS `this.ga == null` (L866)
+    float nx = f.fighter.world_x();
+    float ny = f.fighter.world_y();
+    const int bi = f.fighter.model().bone_by_name(r.node);
+    if (bi >= 0) {
+        const std::vector<float>& pos = f.fighter.positions();
+        const std::size_t o = static_cast<std::size_t>(bi) * 2;
+        if (o + 1 < pos.size()) {
+            nx = pos[o];
+            ny = pos[o + 1];
+        }
+    }
+    const float oy = -camera_.arena_w * 0.5f;  // `oy = -location.width/2`
+    // JS `eC = -location.Tza` (L866-867); the native has no `Tza` field —
+    // the floor anchor (`location.ct`, used by Ringout) stands in. No effect
+    // on shipped data: LoseFall's zone is a tautology once armed (see below).
+    const float eC = -floor_y_;
+    const float x = nx + oy;
+    const float y = -ny + eC;
+    // `jn` ctor (L866) + `of(a,1E5,-1E5)` (L867) make the shipped Player
+    // rules (`Min` absent -> 1E5, `Max=30`) an always-true zone, so the rule
+    // fires as soon as the fall animation arms `tN`.
+    const bool outside =
+        x > r.max_x || x < r.min_x || y > r.max_y || y < r.min_y;
+    if (outside) r.active = false;  // `setActive(false)` (L867)
+    return outside;
+}
+
 // JS `du.Oob` (L901) + `ca.BT` (L392-393): record the fired rule's round
 // result. Ringout -> `ey=4` (Death attr kills the tracked side first:
 // `a.gra && this.Oe.jT(a.mc())`); TimeOutWin -> `ey=2`. The winner is the
@@ -495,6 +553,10 @@ void FightController::rules_fire(FightRule& r) {
         }
         case FightRuleKind::win_combo:
         case FightRuleKind::win_shock:
+        case FightRuleKind::lose_fall:
+            // `Oob` (L901-902): `case "ERuleLoseFall": ... this.Oe.BT(a)` ->
+            // `BT` (L392-393) sets `ey=2`. The winner is resolved by
+            // `wfa()` (LoseFall `Yu=true` -> the enemy wins).
             rule_result_ = round_result::timeout_win;  // JS `BT` -> ey=2
             break;
         default:
@@ -544,9 +606,9 @@ void FightController::rules_frame() {
                 fire = r.regen_counter >= r.regen_frames_after_hit;
                 break;
             case FightRuleKind::lose_fall:
-                // OPEN: `jn` needs the `<Animation>`-gated `tN` arming
-                // (`Zf(7)` only when the rule owns a "Physical" animation,
-                // `jn` ctor L866) + the node-zone `Rba`. Not modelled.
+                // `jn.hh` cp==1 (L867): `return this.Rba()` — armed by the
+                // animation (cp==4) / Physical fall (cp==7) passes.
+                fire = rules_lose_fall(r);
                 break;
             default:
                 break;
@@ -659,25 +721,28 @@ void FightController::rules_apply_round_effects() {
             case FightRuleKind::points:
                 r.points_self = 0;  // `gj.reset` (L872)
                 break;
+            case FightRuleKind::invulnerability:
+                // `gn.Zk` (L863): `this.ws=!0`.
+                r.ws = true;
+                break;
+            case FightRuleKind::combo:
+                // `$m.Zk` (L852) -> `De.Zk` -> `compare(ze)` -> `hh`.
+                // `ca.cob` (L417) resets `ze` just before `cYa`/`F1(a)`, so
+                // `NZ=0` at this point -> `ws = (0 < pV)`.
+                r.ws = (0.0f < r.combo_value);
+                break;
+            case FightRuleKind::crazy:
+                // `an.Zk` (L854) -> `hh`: `ze` reset -> `xP=0` ->
+                // `ws = (0 < Upa)`.
+                r.ws = (0.0f < static_cast<float>(r.crazy_style));
+                break;
             default:
                 break;  // Darkness/RandomArea resets are presentation-only
         }
     }
-    // `du.kZ(3)` (L902): for each side, `b = AND(!e.ws)` over the active
-    // `wV` (Invulnerability) rules of that side, then the OPPOSITE fighter's
-    // `ola(!b)` (which sets `wd.ws` — the weapon-strike pain flag). `ws`
-    // stays false (`De.Zk` has no live setter here), so this is the JS reset.
-    for (int side = 1; side <= 2; ++side) {
-        bool b = true;
-        for (const FightRule& r : rules_) {
-            if (r.active && r.kind == FightRuleKind::invulnerability &&
-                r.apply_to == side) {
-                b = b && !r.ws;
-            }
-        }
-        FightFighter& other = (side == 1) ? enemy_ : player_;
-        other.shock.weapon_ws = !b;
-    }
+    // `du.kZ(3)` (L902): the `wV` (bit 10) AND per side -> the opposite
+    // fighter's `ola(!b)`.
+    rules_kz(3);
     // `du.m_a` (L902-903): Resistance -> per-fighter `dta`. The JS `g` is
     // the SAVE's resistance count (`p.o.Pw.c0(eta)`, a `Dt` over the save
     // `<Resistances>`); the port has no save-resistance table -> 0. With
@@ -695,6 +760,32 @@ void FightController::rules_apply_round_effects() {
     }
     player_.params.dta = c;  // `a.zla(c)` (L903)
     enemy_.params.dta = d;   // `b.zla(d)` (L903)
+}
+
+// JS `du.kZ` (L902): for one side, `b = AND(!e.ws)` over the active `wV`
+// (bit 10) rules of that side, then the OPPOSITE fighter's `ola(!b)` (which
+// sets `wd.ws` — the shock/pain immunity flag, read by `wd.R8a`
+// `Orb(this.ws?0:b)` L521). `wV` is populated by `De` (L852), the base of
+// Invulnerability `gn` (L863), Combo `$m` (L852) and Crazy `an` (L854).
+// `side` 3 -> `kZ(1); kZ(2)`; `Oob` also calls `kZ(mc)` when a Combo/Crazy
+// `ws` flips (L901-902).
+void FightController::rules_kz(int side) {
+    if (side == 3) {  // `kZ(3)` -> both (L902)
+        rules_kz(1);
+        rules_kz(2);
+        return;
+    }
+    bool b = true;
+    for (const FightRule& r : rules_) {
+        if (!r.active || r.apply_to != side) continue;
+        if (r.kind == FightRuleKind::invulnerability ||
+            r.kind == FightRuleKind::combo ||
+            r.kind == FightRuleKind::crazy) {
+            b = b && !r.ws;  // `b = b && !e.ws` (L902)
+        }
+    }
+    FightFighter& other = (side == 1) ? enemy_ : player_;  // `Rea(a==1?2:1)`
+    other.shock.weapon_ws = !b;                            // `ola(!b)`
 }
 
 // JS `ca.Cgb`'s `PC(5/6,...)` (L396) -> `du.Ih(5/6, side, ze)` (L896) and
@@ -750,6 +841,18 @@ void FightController::rules_on_hit(FightFighter& atk, FightFighter& def,
                 }
                 break;
             }
+            case FightRuleKind::combo: {
+                // `$m.hh` (L852) via `PC(11, side)` (`ca.Ihb` L423): the
+                // attacker's `ws = (NZ < pV)`; a flip re-runs `kZ(mc)`
+                // (`De.Vwa` returns changed -> `Oob` -> `kZ`, L852/L901-902).
+                const bool nw =
+                    (static_cast<float>(atk.combo_run) < r.combo_value);
+                if (r.ws != nw) {
+                    r.ws = nw;
+                    rules_kz(r.apply_to);
+                }
+                break;
+            }
             case FightRuleKind::win_combo:
                 // `rj.hh` (L912): `NZ` = the combo run -> `BT` (`ey=2`).
                 if (static_cast<float>(atk.combo_run) >= r.win_combo_value) {
@@ -764,6 +867,18 @@ void FightController::rules_on_hit(FightFighter& atk, FightFighter& def,
                 break;
             default:
                 break;
+        }
+    }
+    // `ca.Ihb` (L423) fires for BOTH fighters' combo trackers: the target's
+    // run resets to 0 on every landed hit, so its Combo `ws` is re-derived
+    // (`PC(11, targetSide)`) and the `kZ` mutuality re-runs on a flip.
+    for (FightRule& r : rules_) {
+        if (!r.active || r.kind != FightRuleKind::combo) continue;
+        if (r.apply_to != def_side) continue;
+        const bool nw = (static_cast<float>(def.combo_run) < r.combo_value);
+        if (r.ws != nw) {
+            r.ws = nw;
+            rules_kz(r.apply_to);
         }
     }
 }
@@ -1900,14 +2015,17 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     critical = rec.critical;
     // JS `wd.R8a` shock decider on the target (L531-532 + L511):
     // `Uq` = head-zone hit; `b = Zi/atk.so` (`so` OPEN -> 1.0); `ws`
-    // (weapon strike, `ola` OPEN -> false, so body strikes add pain);
+    // (weapon strike) is the TARGET's flag — `strike` runs on the target and
+    // `R8a(e)` receives the attacker only for its `Shock*Chance` attrs, so
+    // `this.Orb(this.ws?0:b)` gates the TARGET's pain (`this.ws`, L521). Set
+    // by the Invulnerability/Combo/Crazy `kZ` pass (`ola(!b)`, L902).
     // crit/head terms = Base + attr (`p8a` pattern, OPEN exact formula).
     rec.head_hit = hit_cap.body_part == "Head";
     {
         const sf2::scene::FightParams& gfp = sf2::scene::FightParams::defaults();
         const float b = dmg;  // Zi/so with so=1.0 (OPEN)
         const bool pain_c = sf2::scene::orb_hit(
-            def.shock, atk.shock.weapon_ws ? 0.0f : b, gfp.shock_threshold);
+            def.shock, def.shock.weapon_ws ? 0.0f : b, gfp.shock_threshold);
         const float crit_term =
             gfp.shock_crit_base + atk.params.attr("ShockCriticalHitChance");
         const float head_term =

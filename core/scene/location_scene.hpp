@@ -58,6 +58,22 @@ struct Particle {
 // end colour `BA.rP = Zib(Color)`, L1151) and the per-particle scale divisor
 // `sourceSize.x` (L1151) — all owned by the renderer/effects layer, not this
 // file. `particle_draws()` exposes the layer-local draws that renderer needs.
+//
+// D7 ROUTING (CONFIRMED N/A for locations): the `OnBackground` -> `Gfb`
+// bg/fg split is a FIGHT-effect property, never a location-layer one. `Gfb`
+// is parsed only by `Yl.parse` (L729 `this.Gfb=u.ka(a.attributes.get(
+// "OnBackground"),!1)`) and consumed only by `tl.Nt` (L842
+// `a.Gfb?this.Gq.Nt(a):this.Hq.Nt(a)`), whose `tl` container is attached
+// inside the ModelsViewer layer (`tl.init` L843 `a.hn.go.nd(this.go)`) and
+// fed by the fight `cv` effects manager (`tl.ZP` L844). Location layers never
+// route through `tl`: `Bf.zjb` L476-477 sends every child to the owning `Qi`
+// — `Image`->`ujb`(NWa L487), `SimpleEffect`->`UIa`(pWa L488),
+// `ParticleEffect`/`NewParticleEffect`->`QIa`(fXa L488) — and `UWa` L832
+// appends the layer nodes to the Render node in XML order. No shipped
+// location params XML carries an `OnBackground` attribute (0 of 45). The
+// native layer-ordered `draw_order` interleave is therefore JS-exact; do NOT
+// add `Gfb` routing here. Only the effects-atlas billboard *draw*
+// (`Ah.submit`, L1150) is still OPEN, and it is owned by the renderer.
 // Range attrs follow the JS `Ie` reader (L1152-1153): "a,b" = random in [a,b],
 // a single number = a fixed value (min == max).
 struct ParticleLayer {
@@ -187,8 +203,12 @@ struct EffectTimeline {
 
 // One `Sequention` frame (JS `ni.frames` L1142 + `R.Cb` L1616): the resolved
 // TexturePacker frame the sequence steps through. `name` is also the texture
-// alias the caller registers per page, so swapping frames (which may live on
-// different atlas pages, e.g. autumn / autumn-2) swaps the sampled texture.
+// alias the caller registers per page, so swapping frames swaps the sampled
+// texture. Frames may live on different atlas pages (e.g. autumn + autumn-2):
+// `ni.init` L1142 walks the page chain (`for(b=a;b!=null;b=b.nextPage)`) and
+// collects matching frames from EVERY attached page, so this list spans pages.
+// The caller must therefore alias every page's `frame_names` to that page's GL
+// texture — see `atlas_pages()` (single page for dojo).
 struct SequenceFrame {
     std::string name;
     float frame_x = 0.0f;
@@ -267,6 +287,23 @@ struct SpriteAnim {
     bool hide_paused = false;      // JS Wqa (HidePaused)
 };
 
+// One TexturePacker atlas page loaded by `load` (JS `Bf.init` L474: the
+// primary `locations/<name>/<name>.png` plus the `-2`, `-3`, … pages attached
+// to the same atlas via `c.eXa(...)`; `ni.init` L1142 walks `b.nextPage`).
+// Location textures are split across pages for 45 of the 46 shipped
+// locations (only dojo is single-page; e.g. autumn + autumn-2), so a frame
+// swap in a `Sequention` can cross pages. The caller uploads each page's image
+// and aliases exactly `frame_names` to that page's GL texture; then a
+// `Sequention` frame's `texture_name` resolves to the correct page. This is
+// the scene-side half of the JS page chain; the `core/app/*` loaders must pass
+// every page JSON to `load` and alias each page (see the note in the .cpp).
+struct AtlasPage {
+    std::string json_path;                 // the TexturePacker JSON for this page
+    std::vector<std::string> frame_names;  // ClassNames packed in this page
+    int width = 0;                         // atlas pixel size (UV normalization)
+    int height = 0;
+};
+
 class LocationScene {
 public:
     // Parses `params_xml`, resolves ClassNames via `atlas` and `atlas_tex`.
@@ -288,8 +325,17 @@ public:
     // nodes in draw order (back to front).
     const std::vector<std::shared_ptr<Layer>>& layers() const { return layers_; }
 
-    // ClassNames per atlas image, in load order — the caller uses this to
-    // upload each atlas texture and alias every ClassName to its GL texture.
+    // The loaded atlas pages in load order, each with its JSON path, pixel
+    // size and the ClassNames packed in it. The caller uploads each page's
+    // image (sibling of `json_path`, resolved by the location prefix — the
+    // packer hash stems differ between JSON and image) and calls
+    // `Renderer::texture_alias(frame_name, gl)` for every `frame_names` entry,
+    // so a multi-page `Sequention` swap samples the right texture. Empty until
+    // `load` succeeds.
+    const std::vector<AtlasPage>& atlas_pages() const { return atlas_pages_; }
+
+    // JSON paths of the loaded pages (same order as `atlas_pages()`), kept for
+    // callers that only need the page list.
     const std::vector<std::string>& atlas_names() const { return atlas_names_; }
 
     // Fills `camera` with the game's Sya framing at the given focus. `Tf`
@@ -354,6 +400,16 @@ public:
     float arena_width() const { return arena_w_; }
     float arena_height() const { return arena_h_; }
     float arena_floor() const { return arena_floor_; }
+    // Root `Wall` -> JS `Bf.NU` (L474). The fighters are clamped to the
+    // x-range [Wall, Width-Wall] (JS `ca.ggb` L383 `v.tFa=location.NU`,
+    // `v.NKa=location.width-NU`; `Al.ia` L582 `fha`), so the caller must feed
+    // the per-location value — it ranges 80..250 across the shipped
+    // locations (dojo=80, the old hard-coded value). 0 when absent.
+    float arena_wall() const { return arena_wall_; }
+    // Root `PositionY` -> JS `Bf.Tza` (L474). The camera-bounds rule reads it
+    // (L867 `this.eC=-a.location.Tza`); all shipped locations use -93/-94.
+    // 0 when absent (the caller falls back as needed).
+    float arena_position_y() const { return arena_position_y_; }
     // The location Root Color (the `Root` element's Color attr, e.g.
     // "0x000000" for the dojo). The game's fighters are silhouettes filled
     // with this flat color (JS `Na.cd`); the fight screen sets the fighter
@@ -387,6 +443,9 @@ private:
     // (`Wwb` L1140). Rebuilt every `update`; `render_layer` skips members.
     std::unordered_set<const Sprite*> hidden_sprites_;
     std::vector<std::string> atlas_names_;
+    // Per-page frame lists for the multi-page aliasing contract (see
+    // `AtlasPage`): the caller aliases every page, not just the primary one.
+    std::vector<AtlasPage> atlas_pages_;
     // Res root passed to `load`; `render_layer` uses it to lazily load the
     // location effects atlas (`E.get(1304)`).
     std::string res_root_;
@@ -394,6 +453,8 @@ private:
     float arena_w_ = 0.0f;
     float arena_h_ = 0.0f;
     float arena_floor_ = 0.0f;
+    float arena_wall_ = 0.0f;        // Root Wall (JS NU, L474)
+    float arena_position_y_ = 0.0f;  // Root PositionY (JS Tza, L474)
     std::uint32_t root_color_ = 0x000000u;  // default black (the dojo's Color)
     // ModelsViewer spawns (JS `Yia`/`B_`, Bf.zjb L476).
     bool has_spawns_ = false;

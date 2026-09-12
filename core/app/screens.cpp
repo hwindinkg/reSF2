@@ -544,7 +544,7 @@ int joy_sector_of(float dx, float dy, float base_r) {
 
 // Loads the ui/controller atlas (the virtual gamepad art: Joystick*,
 // btn_punch_*, btn_kick_*) into the app's atlas cache. Returns true when
-// the frames are registered (logged once). The atlas ships as ASTC ktx —
+// the frames are registered (logged once). The atlas ships as ASTC ktx -
 // the same decode path the other UI atlases use.
 bool load_controller_atlas(App& app) {
     static bool done = false;
@@ -5184,7 +5184,12 @@ void ShopScreen::render_impl(App& app) {
         // standalone texture, so it is drawn directly; a genuine miss keeps
         // the flat card. Replaces the invented `attributes/*` stand-ins
         // (PORT_AUDIT_UI 3 #18).
-        bool drawn = draw_item_image(app, it.image, cx, cy, card_w * 0.7f, card_h * 0.8f, 0.95f);
+        // Item image band (`ns.ba` L2304-2306: `Bk.kLa(c, ce.y*.8)` with
+        // `c = ce.x*.8`, Ga-centred at `(ce.x/2, ce.y/2)`; the `jw` icon/name
+        // group is bottom-docked at `D(ce.y-40)` so the title never crosses
+        // the art). Native card = one `ns` cell: keep the image in the middle
+        // band, clear of the top title and the bottom stat/owned lines.
+        bool drawn = draw_item_image(app, it.image, cx, cy, card_w * 0.62f, card_h * 0.52f, 0.95f);
         if (!drawn) {
             // Equipped cards read gold (distinct from owned/unowned at a
             // glance); hover still brightens.
@@ -5625,8 +5630,8 @@ void EquipmentScreen::render_impl(App& app) {
             draw_flat_button(app, label, slot_x, sy, 400.0f, 80.0f, 0.35f, 0.3f, 0.45f,
                              slot_hov);
         }
-        draw_ui_label(app, slot_x - 200.0f + 8.0f, sy - 14.0f, 400.0f - 16.0f, 28.0f,
-                          label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        draw_ui_label(app, slot_x - 130.0f, sy - 14.0f, 260.0f, 28.0f,
+                          label, 0.7f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
     }
     const float grid_x = kViewW * 0.55f, grid_y0 = 220.0f, grid_dx = 240.0f, grid_dy = 110.0f;
     int idx = 0;
@@ -5669,8 +5674,8 @@ void EquipmentScreen::render_impl(App& app) {
                              equipped ? 0.5f : 0.3f, equipped ? 0.6f : 0.3f,
                              equipped ? 0.3f : 0.35f, hover_ == idx);
         }
-        draw_ui_label(app, cx - 110.0f + 6.0f, cy - 12.0f, 220.0f - 12.0f, 24.0f,
-                          oi.name + (equipped ? " [EQ]" : ""), 0.7f, UiAlign::Center,
+        draw_ui_label(app, cx - 44.0f, cy - 12.0f, 150.0f, 24.0f,
+                          oi.name + (equipped ? " [EQ]" : ""), 0.7f, UiAlign::Left,
                           1.0f, 1.0f, 1.0f);
         ++idx;
         ++card;

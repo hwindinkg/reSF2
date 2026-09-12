@@ -329,6 +329,11 @@ float wrap_js(float a, float b) {
 // JS `Qi.NWa`/`Dla` for a Sequention frame: swap the sprite's atlas rect,
 // source/trim and texture alias to `f` (the `R.Cb` path, L1616). The scale is
 // set once from frame 0 (JS `vqb` `Rh`/`mj`, L1137) and is NOT recomputed.
+// `f.name` is a ClassName on one specific atlas page and `f.tex_w/h` are that
+// page's pixel size, so the caller must have aliased EVERY page's frames
+// (`atlas_pages()` -> `Renderer::texture_alias`); `draw_sprite` resolves the
+// alias to the page's GL texture. Frames of one sequence may span pages
+// (autumn + autumn-2; JS `ni.init` L1142 walks `b.nextPage`).
 void apply_sequence_frame(Sprite& sprite, const SequenceFrame& f) {
     sprite.texture_name = f.name;
     sprite.frame_x = f.frame_x;
@@ -861,6 +866,12 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
     arena_w_ = sf2::data::xml_attr_float(root, "Width", 0.0f);
     arena_h_ = sf2::data::xml_attr_float(root, "Height", 0.0f);
     arena_floor_ = sf2::data::xml_attr_float(root, "Floor", 0.0f);
+    // JS `Bf.init` L474: `this.NU=u.H(a.attributes.get("Wall"))` and
+    // `this.Tza=u.H(a.attributes.get("PositionY"))` — the fighter x-clamp
+    // (L383) and camera-bound (L867) sources. Exposed so the caller stops
+    // hard-coding dojo's 80 for every location.
+    arena_wall_ = sf2::data::xml_attr_float(root, "Wall", 0.0f);
+    arena_position_y_ = sf2::data::xml_attr_float(root, "PositionY", 0.0f);
     // The Root Color (the fighters' silhouette fill, JS `Na.cd`). Default
     // black when the attr is absent.
     if (root.attribute("Color")) {
@@ -875,17 +886,29 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
     // collision; each frame remembers its owning atlas pixel size).
     std::unordered_map<std::string, FrameRef> frames;
     atlas_names_.clear();
+    atlas_pages_.clear();
     for (const std::string& json_path : atlas_jsons) {
         std::vector<std::uint8_t> json_bytes = read_file_bytes(json_path);
         const sf2::data::atlas a = sf2::data::atlas_parse(json_bytes.data(), json_bytes.size());
         atlas_names_.push_back(json_path);
+        // Record this page's frame list so the caller can alias every page
+        // (JS `Bf.init` L474 attaches `-2`, `-3`, … via `c.eXa`; `ni.init`
+        // L1142 walks `b.nextPage`, so a Sequention spans all pages). The
+        // merged `frames` map keeps the multi-page ClassName -> frame lookup.
+        AtlasPage page;
+        page.json_path = json_path;
+        page.width = a.w;
+        page.height = a.h;
+        page.frame_names.reserve(a.frames.size());
         for (const auto& f : a.frames) {
             FrameRef ref;
             ref.frame = f;
             ref.atlas_w = a.w;
             ref.atlas_h = a.h;
             frames[f.name] = ref;
+            page.frame_names.push_back(f.name);
         }
+        atlas_pages_.push_back(std::move(page));
     }
 
     layers_.clear();
@@ -955,8 +978,14 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
                 // `fXa(new jh)`. Parse the emitter, run the ctor `Prewarm`
                 // loop, attach it, then the `Qi.fXa` warm-up; `update` runs
                 // the `jh` sim and `particle_draws()` exposes the render data
-                // (the effects-atlas draw pass itself is OPEN, D7). No sprite
-                // is emitted, so `sprite_index` (z) is unaffected.
+                // (the effects-atlas draw pass itself is OPEN, D7; it is owned
+                // by the renderer). D7 routing is N/A for locations: `QIa`
+                // appends the `jh` node to the owning `Qi` layer (`Qi.fXa`
+                // L488 `this.go.node.appendChild(a.node)`), so emitters are
+                // layer children in document order — the `OnBackground`/`Gfb`
+                // bg/fg split (`Yl.parse` L729 / `tl.Nt` L842) belongs to the
+                // FIGHT's `Yl` effects only. No sprite is emitted, so
+                // `sprite_index` (z) is unaffected.
                 ParticleLayer emitter = parse_particle(child, emitter_ordinal++);
                 // JS `jh` ctor L1149: `Prewarm=="1"` runs `update(1/60)`
                 // until the accumulated time reaches `Life` max.
