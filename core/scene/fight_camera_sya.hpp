@@ -19,7 +19,8 @@
 #include <algorithm>
 #include <cmath>
 
-#include "scene/fight.hpp"  // FightCamera definition (fields framing wires)
+#include "scene/fight.hpp"           // FightCamera definition (fields framing wires)
+#include "scene/location_scene.hpp"  // LocationScene::active_arena_height()
 
 namespace sf2::scene {
 
@@ -39,6 +40,17 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
     // The layer zoom Bj (Ut.xCa L831) FIRST: min(nC/(span+300),1), where
     // nC = b/Ira = viewW/(viewH/Lb.height) (mwa L823-824, raw arena height).
     // Bj then feeds the Sya denominator m$a() = Lb.height * Bj (W5/D11).
+    // JS `m$a()` L823: `e = Lb.height * Bj` — the ACTIVE location's Root
+    // `Height` (moon 512, dojo 560, arena 512), NOT a fixed default. The fight
+    // screen (re)loads its location before the first framing call, and
+    // `LocationScene::load` publishes that height; consume it so non-560
+    // locations fit the view exactly (e.g. moon: 720/512 = 1.40625 instead of
+    // the 560-default 1.3 that left 27 px bars top and bottom). Standalone
+    // callers with no scene fall back to the camera's own `arena_h`.
+    const float loc_h = sf2::scene::LocationScene::active_arena_height();
+    if (loc_h > 0.0f) {
+        cam.arena_h = loc_h;
+    }
     const float n_c = view_w / (view_h / cam.arena_h);  // mwa: nC = b/Ira
     cam.zoom_layer = std::min(1.0f, n_c / (span + 300.0f));  // Ut.xCa() -> Bj
     const float e = cam.arena_h * cam.zoom_layer;       // m$a() = Lb.height*Bj

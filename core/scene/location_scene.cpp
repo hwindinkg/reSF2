@@ -44,6 +44,12 @@ constexpr bool kParticleEffectsEnabled = true;
 // built; kept named for the same reason.
 constexpr bool kSequentionEnabled = true;
 
+// The arena height (`Root` `Height`) of the most recently loaded location —
+// the native analogue of the JS `Bf` instance's `this.height` (`Bf.init` L474),
+// which `Ut.m$a` L823 reads for the `ma.Sya` render zoom. `load` refreshes it;
+// `framing_sya_impl` (fight_camera_sya.hpp) consumes it. 0 = no location yet.
+float g_active_arena_height = 0.0f;
+
 // A ClassName resolved against an atlas: the frame rect plus the pixel size
 // of the atlas texture it lives in (for UV normalization).
 struct FrameRef {
@@ -865,6 +871,11 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
     }
     arena_w_ = sf2::data::xml_attr_float(root, "Width", 0.0f);
     arena_h_ = sf2::data::xml_attr_float(root, "Height", 0.0f);
+    // Publish `Lb.height` for the Sya render zoom (`Ut.m$a` L823): the fight
+    // camera has no pointer to the scene, and its own `arena_h` defaults to
+    // the dojo's 560 (see `active_arena_height`). Refreshed on every load, so
+    // the fight location loaded by the fight screen wins over the hub's dojo.
+    g_active_arena_height = arena_h_;
     arena_floor_ = sf2::data::xml_attr_float(root, "Floor", 0.0f);
     // JS `Bf.init` L474: `this.NU=u.H(a.attributes.get("Wall"))` and
     // `this.Tza=u.H(a.attributes.get("PositionY"))` — the fighter x-clamp
@@ -1036,6 +1047,8 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
         layers_.push_back(std::move(layer));
     }
 }
+
+float LocationScene::active_arena_height() { return g_active_arena_height; }
 
 void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
                                    float view_h, float focus_x, float fighter_span) const {

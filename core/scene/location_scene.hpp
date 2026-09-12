@@ -416,6 +416,15 @@ public:
     // mesh color from it.
     std::uint32_t root_color() const { return root_color_; }
 
+    // JS `Bf.height` — the Root `Height` attr (`Bf.init` L474 stores it;
+    // `Ut.m$a` L823 returns `Lb.height * Bj`, the `ma.Sya` L1833 render-zoom
+    // denominator). `load` publishes the value of the location it just parsed;
+    // the fight camera reads it back (`FightCamera::framing` ->
+    // `framing_sya_impl`), because that camera keeps its own `arena_h` but has
+    // no pointer to the scene. 0 until a location has been loaded, so callers
+    // with no scene (the standalone demos) keep their own default.
+    static float active_arena_height();
+
 private:
     // JS `jh.update` (L1149-1151) for one emitter: advance the spawn clock,
     // emit at most one particle, integrate force/gravity/life/alpha, reap the
