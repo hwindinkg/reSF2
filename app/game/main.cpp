@@ -345,8 +345,10 @@ static const UiTourStep kUiTourSteps[] = {
     {64.0f, 40.0f, "map->dojo", 5, 10, 3, 0, nullptr},
     // 3: Dojo -> Shop (nav row 2 @184,337).
     {184.0f, 337.0f, "dojo->shop", 3, 10, 4, 60, "port_shop.png"},
-    // 4: Shop tab 2 (same screen).
-    {640.0f, 100.0f, "shop tab 2", 4, 10, -1, 40, "port_shop_tab2.png"},
+    // 4: Shop tab 2 (HELMS). The `ss`/`Eg` strip is the BOTTOM bar
+    //    (`shop_tab_layout().cy = H - bar_h/2` ~= 673), so click the tab-2
+    //    button there (the old (640,100) missed the strip and re-captured tab 0).
+    {640.0f, 673.0f, "shop tab 2", 4, 10, -1, 40, "port_shop_tab2.png"},
     // 5: Shop -> Dojo (BACK).
     {64.0f, 40.0f, "shop->dojo", 4, 10, 3, 0, nullptr},
     // 6: Dojo -> Equipment (PROFILE, nav row 3 @184,442).

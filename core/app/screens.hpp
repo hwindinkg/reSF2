@@ -119,6 +119,8 @@ public:
 
     struct Node {
         std::string name;
+        std::string alias;     // stages.xml Alias — the JS `Qr.Bka(a.Cg)`
+                               // label key (L2144; `Lc.Cg` = Alias, L1403).
         std::string type;
         std::string icon;      // Battle Icon (JS `Lc.icon`; default "training",
                                // L205) — the per-node `BattleBtn*` art suffix

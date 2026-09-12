@@ -157,6 +157,85 @@ void draw_ui_label(App& app, float x, float y, float w, float h,
     (void)app.draw_text(dx, y, text, scale, r, g, b);
 }
 
+// JS `Y.na(key, ...)` (L917): the runtime string-table lookup (`Cc.F().ln`,
+// L920). Returns the localized text when the key is in the loaded table, else
+// `fallback` — never a raw key. The table ships as `res/lang/en.<hash>.xml`
+// and is loaded once by `ensure_lang`; a missing file/key falls back silently.
+std::string loc(App& app, const std::string& key, const std::string& fallback) {
+    if (key.empty()) return fallback;
+    return lang_text(app.res_root(), key, fallback);
+}
+
+// Item display name: JS `Y.na(item.Cg || item.name)` (L2246-2247 `Ne.refresh`
+// -> `Vc.V(Y.na(a))`; L1881 `ur.info.V(Y.na(a.name))`). The list.xml `Name` is
+// a lang key ("WEAPON_KNIVES" -> "Knives"). When the table lacks it, fall back
+// to the item's human SubType/Type (never a raw key).
+std::string item_display_name(App& app, const CatalogItem& it) {
+    const std::string fallback = it.subtype.empty() ? it.type : it.subtype;
+    return loc(app, it.name, fallback);
+}
+
+// JS `Qh.apply` multiline wrap (L1628-1629), reached via `ea.rd(!0)`: greedy
+// UTF-8 break at the box width (`f.N > width-jd` -> pop the overflowing glyph
+// and start a new line) with vertical overflow (`e > height-jd`) setting `vn`
+// and clipping. The single-line `Bg.Sk` fit (L1626-1627) is `draw_ui_label`;
+// a multiline label keeps its authored `ua` and wraps instead. `line_step` is
+// the JS line advance `(fontSize/eF)*lineHeight` (L1628 `d`); native menu
+// eF=100, so `line_step = ua_scale * font->line_height`.
+void draw_ui_wrapped(App& app, float x, float y, float w, float h,
+                     const std::string& text, float ua_scale, UiAlign align,
+                     float r, float g, float b) {
+    if (text.empty() || w <= 0.0f || h <= 0.0f) return;
+    const sf2::data::font* font = app.menu_font();
+    if (font == nullptr) return;
+    const float scale = ua_scale * kEaA1;
+    if (scale <= 0.0f) return;
+    const float line_step = scale * static_cast<float>(font->line_height);
+    if (line_step <= 0.0f) return;
+    // `bx.Csb` (L1624) splits on '\n' first; `apply` char-wraps each logical
+    // line.
+    std::vector<std::string> logical;
+    {
+        std::string cur;
+        for (char ch : text) {
+            if (ch == '\n') {
+                logical.push_back(cur);
+                cur.clear();
+            } else {
+                cur.push_back(ch);
+            }
+        }
+        logical.push_back(cur);
+    }
+    std::vector<std::string> lines;
+    for (const std::string& para : logical) {
+        std::string cur;
+        std::size_t i = 0;
+        while (i < para.size()) {
+            std::size_t next = i;
+            (void)sf2::data::utf8_next(para, next);
+            const std::string cand = cur + para.substr(i, next - i);
+            if (!cur.empty() && app.measure_text(*font, cand, scale) > w) {
+                lines.push_back(cur);
+                cur.clear();
+                continue;  // retry this glyph on the new line (JS pops it)
+            }
+            cur = cand;
+            i = next;
+        }
+        lines.push_back(cur);
+    }
+    float yy = y;
+    for (const std::string& ln : lines) {
+        if (yy + line_step > y + h) break;  // `e > height-jd` -> vn (clip)
+        // 1.0f = the `a` param; `fit=false` keeps the wrapped width (the line
+        // already fits `w`, so the single-line `Sk` shrink must not re-run).
+        draw_ui_label(app, x, yy, w, line_step, ln, ua_scale, align, r, g, b,
+                      1.0f, /*fit=*/false);
+        yy += line_step;
+    }
+}
+
 // Helpers defined later in this file (the atlas sprite path sits after this
 // point; the `od`/`Ib` dialog art below needs it).
 bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy,
@@ -185,11 +264,14 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
                      d->lines.size() > 1 ? d->lines[1] : "", /*show_ok=*/true);
         return;
     }
-    // `od` 9-slice: fit the 2340x1300 design rect into the view (`l4a`
-    // L1895-1896), draw the `bg` body + `bg_edge` caps, then the `Vc` title.
+    // `od` 9-slice: fit the AV design rect into the view (`l4a` L1895-1896),
+    // draw the `bg` body + `bg_edge` caps, then the `Vc` title. The AV is
+    // `new fc(a,b)` with JS defaults (2340,1530) — `od` ctor L1894
+    // `b==null&&(b=1530)`; the quest dialog is `ph extends od` with `super()`
+    // (L1963-1964, no explicit size), so 1530 (NOT the audit's stale 1300).
     const bool have = load_scroll_atlas(app);
     constexpr float kOdW = 2340.0f;
-    constexpr float kOdH = 1300.0f;
+    constexpr float kOdH = 1530.0f;
     const float c = std::min(kViewW / kOdW, kViewH / kOdH);
     const float pw = kOdW * c, ph = kOdH * c;
     const float px = kViewW * 0.5f - pw * 0.5f;
@@ -221,12 +303,20 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
     const float title_w = 1560.0f * c, title_h = 160.0f * c;
     draw_ui_label(app, px + pw * 0.5f - title_w * 0.5f, py + 8.0f * c, title_w, title_h,
                   d->title, 1.0f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
+    // Body `Cd`: the JS runs the body text multiline (`ea.rd(!0)`) — wrap each
+    // line into the panel width and clip at the panel bottom (`Qh.apply`
+    // L1628-1629; the `Sk` single-line fit is L1626-1627). Replaces the old
+    // single-line draw with a 44*c step that overlapped/clipped the longer
+    // Sensei lines.
     const float body_y = py + title_h + 24.0f * c;
-    for (std::size_t i = 0; i < d->lines.size() && i < 4; ++i) {
-        draw_ui_label(app, px + 80.0f * c, body_y + static_cast<float>(i) * 44.0f * c,
-                      pw - 160.0f * c, 40.0f * c, d->lines[i], 0.8f, UiAlign::Left, 1.0f,
-                      1.0f, 1.0f);
+    const float body_h = (py + ph) - body_y - 24.0f * c;
+    std::string body;
+    for (std::size_t i = 0; i < d->lines.size(); ++i) {
+        if (i != 0) body += "\n";
+        body += d->lines[i];
     }
+    draw_ui_wrapped(app, px + 80.0f * c, body_y, pw - 160.0f * c, body_h, body, 0.8f,
+                    UiAlign::Left, 1.0f, 1.0f, 1.0f);
 }
 
 // --- `od` 9-slice dialog base (JS L1894-1900) ----------------------------
@@ -2439,6 +2529,7 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                 MapScreen::Node n;
                 n.name = battle.attribute("Name").value();
                 if (n.name.empty()) continue;
+                n.alias = battle.attribute("Alias").value();  // JS `Lc.Cg`
                 n.type = battle.attribute("Type").value();
                 n.zone = z.name;
                 n.location = battle.attribute("Location").value();
@@ -3373,6 +3464,7 @@ void MapScreen::launch_battle(const Node& n) {
 
 void MapScreen::update_impl(float dt) {
     (void)dt;
+    ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     // Sensei modal gate (quest He records): while up, taps advance the
     // dialog instead of tabs/nodes/BACK (headless auto-drains).
     if (quest_modal_consume(app())) return;
@@ -3528,17 +3620,24 @@ void MapScreen::render_impl(App& app) {
                 if (wins > surv_best) surv_best = wins;
             }
         }
-        std::string series = zones_[zone_sel_].name;
+        // Zone/battle names are lang keys too ("ZONE_1" -> "Hero Reborn",
+        // "Tournament" -> "TOURNAMENT"); resolve them via `Y.na`.
+        std::string series = loc(app, zones_[zone_sel_].name, zones_[zone_sel_].name);
         if (tour_total > 0) {
             series += " | TOURNAMENT " + std::to_string(tour_won) + "/" +
                       std::to_string(tour_total);
-            if (!tour_next.empty()) series += " NEXT " + tour_next;
+            if (!tour_next.empty()) series += " NEXT " + loc(app, tour_next, tour_next);
         }
         if (has_surv) {
             series += " | SURVIVAL BEST " + std::to_string(surv_best);
         }
-        draw_ui_label(app, 130.0f, 76.0f, 1020.0f, 22.0f, series, 0.7f,
-                          UiAlign::Left, 0.9f, 0.9f, 0.9f);
+        // Keep the readout clear of the shared `za` chrome: below the top
+        // panel (`za.Sp`, L1975) and right of the vertical nav column
+        // (`za.ndb` L1976-1977) so it can collide with neither.
+        const ZaLayout zal = za_layout();
+        const float series_x = zal.nav_x + zal.nav_w + 12.0f;
+        draw_ui_label(app, series_x, zal.sp + 8.0f, kViewW - series_x - 16.0f, 22.0f, series,
+                      0.7f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
     }
     const float node_px = map_node_size(kViewW);
     for (std::size_t i = 0; i < node_count; ++i) {
@@ -3567,11 +3666,16 @@ void MapScreen::render_impl(App& app) {
             ren.draw_triangles(verts, 6, r, g, b, n.active ? 0.95f : 0.5f);
         }
         // Label `cC` (JS L2093): `Fa(100,55)`, `ua(60)`, `C(-50)`, `D(65)`,
-        // black. Node-local -> screen at the node scale (node_px/150).
+        // black, `Ia(128)`; text = `Y.na(a.Cg)` where `Cg` is the battle Alias
+        // (`Qr.Bka` L2094 / `qe.X0a` L2144; `Lc.Cg` = Alias L1403). Node-local
+        // -> screen at the node scale (node_px/150). The box TOP is anchored at
+        // `D(65)` so the label sits below the node art (the old -27.5*ls lift
+        // pushed it onto the icon).
         const float ls = node_px / 150.0f;
-        draw_ui_label(app, n.x - 50.0f * ls - 50.0f * ls, n.y + 65.0f * ls - 27.5f * ls,
-                      100.0f * ls, 55.0f * ls, n.name, 0.6f, UiAlign::Center, 0.0f, 0.0f,
-                      0.0f);
+        const std::string label_key = n.alias.empty() ? n.name : n.alias;
+        draw_ui_label(app, n.x - 50.0f * ls - 50.0f * ls, n.y + 65.0f * ls,
+                      100.0f * ls, 55.0f * ls, loc(app, label_key, n.name), 0.6f,
+                      UiAlign::Center, 0.0f, 0.0f, 0.0f);
     }
     // The BACK button (top-left) — JS-exact misc `Arrow` (y.sRa) + flat fallback.
     // OPEN: no dedicated back frame in JS (btn_back 0 hits); Arrow is the
@@ -5011,6 +5115,7 @@ int ResultsScreen::exp_for_level(int level) {
 
 void ResultsScreen::update_impl(float dt) {
     (void)dt;
+    ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     if (!applied_) {
         applied_ = true;
         WarriorSave w;
@@ -5108,22 +5213,55 @@ void ResultsScreen::update_impl(float dt) {
     }
 }
 
+// JS `kk.Qa = R.$(E.Zxa(750))` (L2057): `E.Zxa` (L93) builds a 750x4 canvas
+// HORIZONTAL gradient, filled by `E.Eua` (L94) with stops
+// `#00000020 @0 / #00000080 @.25/.5/.75 / #00000020 @1` (black, alpha
+// 32/128/128/128/32). `kk.layout` (L2059) stretches it over `ma.Kq`
+// (`Rh/mj`), i.e. the whole fight viewport — the "panel" is a full-viewport
+// alpha gradient, not a flat rect. `draw_triangles` is flat-color, so the
+// gradient is sampled into N vertical strips.
+void draw_kk_gradient(sf2::render::Renderer& ren, float x, float y, float w, float h) {
+    struct Stop {
+        float t;
+        float a;
+    };
+    const Stop stops[5] = {{0.0f, 0x20 / 255.0f}, {0.25f, 0x80 / 255.0f},
+                           {0.5f, 0x80 / 255.0f},  {0.75f, 0x80 / 255.0f},
+                           {1.0f, 0x20 / 255.0f}};
+    constexpr int kStrips = 48;
+    for (int i = 0; i < kStrips; ++i) {
+        const float t0 = static_cast<float>(i) / kStrips;
+        const float t1 = static_cast<float>(i + 1) / kStrips;
+        const float tm = (t0 + t1) * 0.5f;
+        float a = stops[0].a;
+        for (int s = 0; s < 4; ++s) {
+            if (tm <= stops[s + 1].t) {
+                const float f = (tm - stops[s].t) / (stops[s + 1].t - stops[s].t);
+                a = stops[s].a + (stops[s + 1].a - stops[s].a) * f;
+                break;
+            }
+            a = stops[s + 1].a;
+        }
+        const float x0 = x + w * t0, x1 = x + w * t1;
+        const float v[] = {x0, y, x1, y, x1, y + h, x0, y, x1, y + h, x0, y + h};
+        ren.draw_triangles(v, 6, 0.0f, 0.0f, 0.0f, a);
+    }
+}
+
 void ResultsScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.6f);
-    // `kk` result dialog (JS L2057-2061; PORT_AUDIT_UI §2.8 item 28): a
-    // 750-wide base (`Qa = R.$(E.Zxa(750))`, L2058) carrying the win/lose
-    // label from the callouts atlas id 1310 (`mT = R.$(E.get(1310))`, frame
-    // `y.Lna` win / `y.Kna` lose) with the `Fh` breakdown lines below.
+    // `kk.Qa` base (L2057): the `E.Zxa(750)` gradient over `ma.Kq` (native =
+    // the viewport). Replaces the flat near-black 750x480 rect + 0.6 dim
+    // (PORT_AUDIT_UI §2.8 item 28).
+    draw_kk_gradient(ren, 0.0f, 0.0f, kViewW, kViewH);
+    // `kk` result dialog (JS L2057-2061; PORT_AUDIT_UI 2.8 item 28): the
+    // win/lose label from the callouts atlas id 1310 (`mT = R.$(E.get(1310))`,
+    // frame `y.Lna` win / `y.Kna` lose) with the `Fh` breakdown lines below.
     // Replaces the invented standalone VICTORY/DEFEAT screen layout.
     constexpr float kKkW = 750.0f;
     constexpr float kKkH = 480.0f;
     const float px = kViewW * 0.5f - kKkW * 0.5f;
     const float py = kViewH * 0.5f - kKkH * 0.5f;
-    const float panel[] = {px, py, px + kKkW, py, px, py + kKkH,
-                           px + kKkW, py, px + kKkW, py + kKkH, px, py + kKkH};
-    ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.92f);
     // Win/lose label `mT` (callouts id 1310: `y.Lna` win / `y.Kna` lose,
     // JS L2058) placed by `kk.layout` (L2058-2059): `ma.Kq` = the fight
     // viewport rect, `b = a.fn(1.0714285714285714)` (the `gb` contain-fit,
@@ -5435,12 +5573,14 @@ bool shop_equipped(const WarriorSave& w, const CatalogItem& it) {
     return w.has_item(it.name) && shop_slot_for(w, it.type) == it.name;
 }
 
-// `Oa.DU` action label (L2299): equipped -> Unequip; owned (or RaidItemPack)
-// -> Equip; else Try. RaidItemPack (`I.sB`) is not a shipped shop row.
-const char* shop_action_label(const WarriorSave& w, const CatalogItem& it) {
-    if (shop_equipped(w, it)) return "UNEQUIP";
-    if (shop_owned_live(w, it.name)) return "EQUIP";
-    return "TRY";
+// `Oa.DU` action label (L2299, verbatim): `Up.V(Y.na("btnShopUnequip"))` /
+// `btnShopEquip` / `btnShopTry` (`re.rga` gates, L2299). The lang table
+// resolves the JS keys to the human captions; the fallbacks mirror those
+// captions (never a raw key).
+std::string shop_action_label(App& app, const WarriorSave& w, const CatalogItem& it) {
+    if (shop_equipped(w, it)) return loc(app, "btnShopUnequip", "UNEQUIP");
+    if (shop_owned_live(w, it.name)) return loc(app, "btnShopEquip", "EQUIP");
+    return loc(app, "btnShopTry", "TRY ON");
 }
 
 // `xc.hk` + `p.bo`/`xa.$o` (SHOP_STATIC §7): write the type slot and sync the
@@ -5496,32 +5636,35 @@ std::string shop_countdown(std::int64_t sec) {
     return std::string(buf);
 }
 
-// Wielding summary (read-only): the equipped slots' applied stats, resolved
-// through the full catalog (base Body/Head/Fists included).
+// Wielding summary (read-only): the equipped slots' applied stats. Item names
+// resolve through the same `Y.na(name)` lookup the JS uses (L2247 `Ne.Vc`,
+// L1881 `ur.info.V(Y.na(a.name))`); the panel carries no invented title (the
+// JS `ps` params pane `pca` L2276 has no header — the old "WIELDING" literal
+// was a native invention).
 std::string wielding_line(App& app, const WarriorSave& seen) {
     const std::vector<CatalogItem> full = load_full_catalog(app);
     auto stat = [&](const std::string& name) {
+        const std::string disp = loc(app, name, name);
         for (const auto& ci : full) {
             if (ci.name != name) continue;
             char buf[96];
             if (ci.type == "Weapon") {
-                std::snprintf(buf, sizeof(buf), "%s DMG %d", name.c_str(),
+                std::snprintf(buf, sizeof(buf), "%s DMG %d", disp.c_str(),
                               ci.weapon_damage);
             } else if (ci.type == "Armor") {
-                std::snprintf(buf, sizeof(buf), "%s DEF %d", name.c_str(),
+                std::snprintf(buf, sizeof(buf), "%s DEF %d", disp.c_str(),
                               ci.body_defense);
             } else if (ci.type == "Helm") {
-                std::snprintf(buf, sizeof(buf), "%s DEF %d", name.c_str(),
+                std::snprintf(buf, sizeof(buf), "%s DEF %d", disp.c_str(),
                               ci.head_defense);
             } else {
-                std::snprintf(buf, sizeof(buf), "%s", name.c_str());
+                std::snprintf(buf, sizeof(buf), "%s", disp.c_str());
             }
             return std::string(buf);
         }
-        return name;
+        return disp;
     };
-    return "WIELDING: " + stat(seen.weapon) + " | " + stat(seen.armor) + " | " +
-           stat(seen.helm);
+    return stat(seen.weapon) + " | " + stat(seen.armor) + " | " + stat(seen.helm);
 }
 
 ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
@@ -5565,6 +5708,7 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
 
 void ShopScreen::update_impl(float dt) {
     (void)dt;
+    ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     const App::PointerState& p = app().pointer();
     try {
         const WarriorSave w = app().save().load();
@@ -5641,7 +5785,7 @@ void ShopScreen::update_impl(float dt) {
             w2.timers.erase(kv.first);
             app().save().save(w2);
             seen_ = w2;
-            confirm_ = "CLAIMED " + kv.first + "!";
+            confirm_ = "CLAIMED " + loc(app(), kv.first, kv.first) + "!";
             confirm_until_ = time() + 2.5f;
             std::fprintf(stdout, "[shop] delivery claimed: %s (Vxa notify)\n",
                          kv.first.c_str());
@@ -5789,7 +5933,8 @@ void ShopScreen::update_impl(float dt) {
                     shop_apply_slot(w, it.type, new_slot);
                     app().save().save(w);
                     seen_ = w;
-                    confirm_ = (was_equipped ? "UNEQUIPPED " : "EQUIPPED ") + it.name + "!";
+                    confirm_ = (was_equipped ? "UNEQUIPPED " : "EQUIPPED ") +
+                               item_display_name(app(), it) + "!";
                     confirm_until_ = time() + 2.5f;
                     std::fprintf(stdout, "[shop] %s %s -> %s slot %s\n",
                                  was_equipped ? "Qxb UNEQUIP" : "$o EQUIP", it.name.c_str(),
@@ -5807,7 +5952,7 @@ void ShopScreen::update_impl(float dt) {
                         w.timers[it.name] = WarriorSave::wall_now() + it.delivery_sec;
                         app().save().save(w);
                         seen_ = w;
-                        confirm_ = "ORDERED " + it.name + "!";
+                        confirm_ = "ORDERED " + item_display_name(app(), it) + "!";
                         confirm_until_ = time() + 2.5f;
                         std::fprintf(stdout,
                                      "[shop] ORDERED %s price=%d -> arrives in %ds\n",
@@ -5831,7 +5976,7 @@ void ShopScreen::update_impl(float dt) {
                         w.items.push_back(oi);
                         app().save().save(w);
                         seen_ = w;
-                        confirm_ = "BOUGHT " + it.name + "!";
+                        confirm_ = "BOUGHT " + item_display_name(app(), it) + "!";
                         confirm_until_ = time() + 2.5f;
                         std::fprintf(stdout,
                                      "[shop] BOUGHT %s (%s) price=%d -> money %d%s\n",
@@ -5934,6 +6079,10 @@ void ShopScreen::render_impl(App& app) {
     ren.push_clip(sl.viewer.J, sl.viewer.P, sl.viewer.width(), sl.viewer.height());
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const CatalogItem& it = items_[rows[i]];
+        // JS `Y.na(item.name)` resolution (L2247 `Ne.Vc`, L1881): the list.xml
+        // `Name` is a lang key ("WEAPON_KNIVES" -> "Knives"); the helper falls
+        // back to the human SubType/Type so no raw key is ever shown.
+        const std::string iname = item_display_name(app, it);
         // `Gg.aa` (L1886): the scroll offset `ei.node.ra` (`scroll_y_`) shifts
         // every cell; the rect cull below drops FULLY-outside cells, the clip
         // handles the partially-visible ones.
@@ -5957,12 +6106,12 @@ void ShopScreen::render_impl(App& app) {
             const float r = equipped ? 0.72f : (selected ? 0.75f : (hovered ? 0.7f : 0.5f));
             const float g = equipped ? 0.60f : (selected ? 0.62f : (hovered ? 0.56f : 0.4f));
             const float b = equipped ? 0.25f : (selected ? 0.3f : (hovered ? 0.26f : 0.2f));
-            draw_flat_button(app, it.name, cx, cy, cw, ch, r, g, b, hovered);
+            draw_flat_button(app, iname, cx, cy, cw, ch, r, g, b, hovered);
         }
         if (selected) outline(cell, 1.0f, 0.85f, 0.3f, 3.0f);
         // `ns.av` name (`C(ky.za()) D(ky.ra+ky.qa()*.2)`, L2305); stat/price
         // `ns.pv` (`Fa(a,b*.3)`, `D(b*.8)`, L2305); owned/equipped markers.
-        draw_ui_label(app, cell.J + 12.0f, cell.P + 6.0f, cw - 24.0f, ch * 0.14f, it.name, 0.7f,
+        draw_ui_label(app, cell.J + 12.0f, cell.P + 6.0f, cw - 24.0f, ch * 0.14f, iname, 0.7f,
                       UiAlign::Left, 1.0f, 1.0f, 1.0f);
         draw_ui_label(app, cell.J + 12.0f, cell.W - ch * 0.20f, cw - 24.0f, ch * 0.14f,
                       shop_stat_line(it), 0.65f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
@@ -5981,8 +6130,9 @@ void ShopScreen::render_impl(App& app) {
         const ShopRect rp = sl.right_panel;
         quad(rp, 0.10f, 0.10f, 0.13f, 0.9f);
         if (sel_it != nullptr) {
-            draw_ui_label(app, rp.J + 8.0f, rp.P + 6.0f, rp.width() - 16.0f, 26.0f, sel_it->name,
-                          0.8f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+            draw_ui_label(app, rp.J + 8.0f, rp.P + 6.0f, rp.width() - 16.0f, 26.0f,
+                          item_display_name(app, *sel_it), 0.8f, UiAlign::Center, 1.0f, 1.0f,
+                          1.0f);
             const std::string sub = sel_it->subtype.empty() ? sel_it->type : sel_it->subtype;
             draw_ui_label(app, rp.J + 8.0f, rp.P + 30.0f, rp.width() - 16.0f, 20.0f, sub, 0.6f,
                           UiAlign::Center, 0.8f, 0.8f, 0.9f);
@@ -5993,7 +6143,7 @@ void ShopScreen::render_impl(App& app) {
                           0.9f, 0.9f, 0.9f);
             // Detail action = `Oa.DU` label (L2299) + `Fhb` equip/buy (L2300).
             const ShopRect ar = shop_action_rect(rp);
-            const char* alabel = shop_action_label(seen_, *sel_it);
+            const std::string alabel = shop_action_label(app, seen_, *sel_it);
             const bool ah = side_hover_ == 1;
             // JS `Oa.init` (L2289): `Up = new Bb("EButtonWhite")` -> the
             // sliced-atlas frame `btnWhite` (`Bb.fza` L1844) drawn with the
@@ -6020,30 +6170,38 @@ void ShopScreen::render_impl(App& app) {
         const ShopRect mj{lp.J, lp.P, lp.N, mid - 6.0f};
         const ShopRect op{lp.J, mid + 6.0f, lp.N, lp.W};
         quad(mj, 0.10f, 0.10f, 0.13f, 0.9f);
-        draw_ui_label(app, mj.J + 8.0f, mj.P + 6.0f, mj.width() - 16.0f, 22.0f, "WIELDING", 0.6f,
-                      UiAlign::Left, 0.85f, 0.85f, 0.5f);
-        draw_ui_label(app, mj.J + 8.0f, mj.P + 30.0f, mj.width() - 16.0f, mj.height() - 36.0f,
+        // `MJ` = the JS `ps` params pane (`pca` L2276): it has NO title — the
+        // old "WIELDING" literal was a native invention. Draw the params rows
+        // from the panel top so they clear the `op` pane below.
+        draw_ui_label(app, mj.J + 8.0f, mj.P + 8.0f, mj.width() - 16.0f, mj.height() - 44.0f,
                       wielding_line(app, seen_), 0.55f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
         if (sel_it != nullptr) {
-            draw_ui_label(app, mj.J + 8.0f, mj.W - 30.0f, mj.width() - 16.0f, 24.0f,
-                          "SEL " + shop_stat_line(*sel_it), 0.55f, UiAlign::Left, 0.9f, 0.9f, 0.7f);
+            // `Ne` params (`ms`, L2247): the selected item's stat line (the
+            // JS `pv` label L2305 carries the text only — no "SEL" prefix).
+            draw_ui_label(app, mj.J + 8.0f, mj.W - 28.0f, mj.width() - 16.0f, 22.0f,
+                          shop_stat_line(*sel_it), 0.55f, UiAlign::Left, 0.9f, 0.9f, 0.7f);
         }
         quad(op, 0.10f, 0.10f, 0.13f, 0.9f);
-        draw_ui_label(app, op.J + 8.0f, op.P + 6.0f, op.width() - 16.0f, 22.0f, "ENCHANTMENTS",
+        // `qs` enchant pane title = `Y.na("shopEnchantments")` (L2280).
+        draw_ui_label(app, op.J + 8.0f, op.P + 6.0f, op.width() - 16.0f, 22.0f,
+                      loc(app, "shopEnchantments", "Enchantments"),
                       0.58f, UiAlign::Left, 0.8f, 0.8f, 0.95f);
         if (sel_it != nullptr && !sel_it->perks.empty()) {
             float yy = op.P + 30.0f;
             int n = 0;
             for (const ItemPerkRef& perk : sel_it->perks) {
                 if (n >= 4 || yy + 18.0f > op.W) break;
-                draw_ui_label(app, op.J + 8.0f, yy, op.width() - 16.0f, 18.0f, perk.name, 0.5f,
+                draw_ui_label(app, op.J + 8.0f, yy, op.width() - 16.0f, 18.0f,
+                              loc(app, perk.name, perk.name), 0.5f,
                               UiAlign::Left, 1.0f, 0.9f, 0.6f);
                 yy += 18.0f;
                 ++n;
             }
         } else {
+            // `qs.py.V(Y.na("shopNoEnchantments"))` (L2281) -> "None".
             draw_ui_label(app, op.J + 8.0f, op.P + 30.0f, op.width() - 16.0f, 20.0f,
-                          "shopNoEnchantments", 0.5f, UiAlign::Left, 0.6f, 0.6f, 0.6f);
+                          loc(app, "shopNoEnchantments", "None"), 0.5f, UiAlign::Left, 0.6f,
+                          0.6f, 0.6f);
         }
     }
     if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
@@ -6149,10 +6307,12 @@ ProfileTabLayout profile_tab_layout() {
 }
 
 // JS `vb.layout` (L2195): the content `b` split (identical to the shop
-// `Oa.layout` L2293) with the active sub-view `jq` docked into `a = b.fn(.75)`.
+// `Oa.layout` L2293) with the active sub-view `jq` docked into `a = b.fn(.75)`
+// and the header `XB=ei` docked into the left slot `b2` (L2196).
 struct ProfileLayout {
-    ShopRect content;  // b (L2195)
-    ShopRect viewer;   // a = b.fn(.75) (L2195) — the active `jq` rect
+    ShopRect content;    // b (L2195)
+    ShopRect viewer;     // a = b.fn(.75) (L2195) — the active `jq` rect
+    ShopRect left_slot;  // b2 (L2195-2196) — the `XB=ei` header (`Pn(b)`)
 };
 
 ProfileLayout profile_layout() {
@@ -6166,6 +6326,14 @@ ProfileLayout profile_layout() {
     ProfileLayout l;
     l.content = b;
     l.viewer = shop_gb_fn(b, 0.75f);              // a = b.fn(.75) L2195
+    // Left slot `b2` (L2195, same construction as the shop `MJ`/`op`): right
+    // edge `a.J + d`, height `(a.W-a.P)*.8`, width `b*.7`, vertically centred.
+    const float gap = l.viewer.width() * 0.03f;   // d = (a.N-a.J)*.03
+    const float slot_h = l.viewer.height() * 0.8f;
+    const float slot_w = slot_h * 0.7f;
+    const float cy = (l.viewer.P + l.viewer.W) * 0.5f;
+    l.left_slot = {l.viewer.J + gap - slot_w, cy - slot_h * 0.5f, l.viewer.J + gap,
+                   cy + slot_h * 0.5f};
     return l;
 }
 
@@ -6272,6 +6440,7 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
 
 void EquipmentScreen::update_impl(float dt) {
     (void)dt;
+    ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     const App::PointerState& p = app().pointer();
     hover_ = -1;
     // BACK (top-left) -> the previous screen (the loop's equipment -> dojo
@@ -6337,6 +6506,11 @@ void EquipmentScreen::render_impl(App& app) {
     // total wins (Fights/yc records), coins (Money/Tb) + gems (Bonus/$F per
     // SHOP_STATIC §1 `I.$F`). Entry: Dojo/Profile buttons (screen 7).
     {
+        // Anchored into the JS header dock `XB=ei` -> left slot `b2`
+        // (`XB.Pn(b)`, L2196), NOT hard-coded (100,78): the old fixed block
+        // sat under the shared `za` top bar / vertical nav column (the
+        // WINS/COINS/GEMS overlap).
+        const ShopRect hs = pl.left_slot;
         const int need = ResultsScreen::exp_for_level(w.level);
         int wins = 0;
         for (const auto& f : w.fights) wins += f.wins;
@@ -6347,11 +6521,13 @@ void EquipmentScreen::render_impl(App& app) {
         if (w.level >= 1 && w.level <= 9) {
             char lvl_frame[32];
             std::snprintf(lvl_frame, sizeof(lvl_frame), "pieces/level%d", w.level);
-            try_draw_atlas_button(app, lvl_frame, 100.0f, 92.0f, 56.0f, 56.0f, 1.0f);
+            try_draw_atlas_button(app, lvl_frame, hs.J + 28.0f, hs.P + 28.0f, 56.0f, 56.0f,
+                                  1.0f);
         }
-        draw_ui_label(app, 130.0f, 78.0f, 150.0f, 30.0f,
-                      hbuf, 1.1f, UiAlign::Left, 1.0f, 0.9f, 0.4f);
-        const float bx0 = 130.0f, by0 = 112.0f, bw = 300.0f, bh = 16.0f;
+        draw_ui_label(app, hs.J + 64.0f, hs.P + 16.0f, hs.width() - 72.0f, 30.0f, hbuf, 1.1f,
+                      UiAlign::Left, 1.0f, 0.9f, 0.4f);
+        const float bx0 = hs.J + 8.0f, by0 = hs.P + 56.0f;
+        const float bw = hs.width() - 16.0f, bh = 16.0f;
         const float bbg[] = {bx0, by0, bx0 + bw, by0, bx0, by0 + bh,
                              bx0 + bw, by0, bx0 + bw, by0 + bh, bx0, by0 + bh};
         ren.draw_triangles(bbg, 6, 0.15f, 0.15f, 0.18f, 1.0f);
@@ -6367,13 +6543,13 @@ void EquipmentScreen::render_impl(App& app) {
         }
         char xbuf[64];
         std::snprintf(xbuf, sizeof(xbuf), "EXP %d/%d", w.experience, need);
-        draw_ui_label(app, 440.0f, 104.0f, 300.0f, 24.0f,
-                      xbuf, 0.7f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
+        draw_ui_label(app, hs.J + 8.0f, hs.P + 78.0f, hs.width() - 16.0f, 24.0f, xbuf, 0.7f,
+                      UiAlign::Left, 0.9f, 0.9f, 0.9f);
         char mbuf[128];
         std::snprintf(mbuf, sizeof(mbuf), "WINS %d    COINS %d    GEMS %d", wins, w.money,
                       w.bonus);
-        draw_ui_label(app, 130.0f, 134.0f, 600.0f, 24.0f,
-                      mbuf, 0.8f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
+        draw_ui_label(app, hs.J + 8.0f, hs.P + 106.0f, hs.width() - 16.0f, 24.0f, mbuf, 0.8f,
+                      UiAlign::Left, 1.0f, 1.0f, 1.0f);
     }
     // `ds` POWERLEVELING_SLIDER body (L2227) stays OPEN — the data is not
     // missing (the audit's "not in the native save" note is corrected): the
@@ -6386,18 +6562,17 @@ void EquipmentScreen::render_impl(App& app) {
     // `ba(400,150)` (`ds.NC` L2230). OPEN because neither the
     // perks/progression pipeline nor the `tk` cell art is modelled. The
     // `XB=ei` header above (`ivb()`, L2191) is the derivable part.
-    draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 40.0f, v.width(), 40.0f,
-                  std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)", 1.0f,
-                  UiAlign::Center, 0.8f, 0.8f, 0.8f);
-    draw_ui_label(app, v.J, v.P + v.height() * 0.5f + 4.0f, v.width(), 22.0f,
-                  "ds POWERLEVELING_SLIDER (L2227): id.ht().tH (PerkTree 1315+perks 310+save perks) + tk cell", 0.5f,
-                  UiAlign::Center, 0.6f, 0.6f, 0.6f);
+    // Faithful EMPTY state: the `Yr` sub-header `Y.na("profileNoSkills")`
+    // (L2191) - "No perks to learn". No invented placeholder text.
+    draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
+                  loc(app, "profileNoSkills", "No perks to learn"), 0.9f, UiAlign::Center,
+                  0.8f, 0.8f, 0.8f);
     } else if (tab_ == kProfileTabMoves) {
         // Folded Moves sub-view (JS `qv`, To.kOa=11 L2201) — the learned
         // moves for the wielded weapon; moved verbatim from the deleted
         // standalone MovesScreen.
-        (void)app.draw_text(v.J + 8.0f, v.P + 8.0f, "MOVES - " + weapon_, 1.1f, 1.0f, 0.9f,
-                            0.4f);
+        (void)app.draw_text(v.J + 8.0f, v.P + 8.0f,
+                            "MOVES - " + loc(app, weapon_, weapon_), 1.1f, 1.0f, 0.9f, 0.4f);
         constexpr std::size_t kMaxRows = 16;
         for (std::size_t i = 0; i < move_rows_.size() && i < kMaxRows; ++i) {
             const MoveRow& r = move_rows_[i];
@@ -6447,7 +6622,10 @@ void EquipmentScreen::render_impl(App& app) {
                                      false);
                 }
                 char buf[64];
-                std::snprintf(buf, sizeof(buf), "%s x%d", s.name.c_str(), s.count);
+                // list.xml Seal `Name` is a lang key ("drop_name_blueseal"
+                // -> "BLUE SEAL"); resolve it like every other item name.
+                std::snprintf(buf, sizeof(buf), "%s x%d", loc(app, s.name, s.name).c_str(),
+                              s.count);
                 draw_ui_label(app, cx - cw * 0.5f + 10.0f, cy + chh * 0.5f - 24.0f, cw - 20.0f,
                               20.0f, buf, 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
             }
@@ -6463,13 +6641,8 @@ void EquipmentScreen::render_impl(App& app) {
         // `Ed` icon, name, description and the `uH`/`uy` progress slider.
         // OPEN because the counters->definition join and the `hs`/`is` cell
         // art are not modelled. The `cs` strip still selects it; the body
-        // uses the real `vb` viewer rect.
-        draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 40.0f, v.width(), 40.0f,
-                      std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)", 1.0f,
-                      UiAlign::Center, 0.8f, 0.8f, 0.8f);
-        draw_ui_label(app, v.J, v.P + v.height() * 0.5f + 4.0f, v.width(), 22.0f,
-                      "fs ACHIEVEMENT_SLIDER (L2213): v.uv.tI (achievements.xml 1356) + p.o.yi counters -> hs/is cell", 0.5f,
-                      UiAlign::Center, 0.6f, 0.6f, 0.6f);
+        // uses the real `vb` viewer rect. The faithful EMPTY list is drawn
+        // (the JS `fs` has no empty-state string; no debug placeholder).
     }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
     draw_za_chrome(app, kScreenProfile);
