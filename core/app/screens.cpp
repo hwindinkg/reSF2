@@ -2304,6 +2304,14 @@ void battle_rewards(const std::string& battle_name, int& out_money, int& out_exp
 // `apply_stage_ringout_rule` (scene/fight.hpp) before init_locks. Empty when
 // the battle/fight has no <Rules> (the dojo Training dummy: NoPerks only, no
 // Ringout -> markers stay dormant).
+//
+// Parses the FULL child structure JS `bb.OE`/`bb.M3` (L887-888) sees — the
+// rule tag + attrs AND the `<Animation>`/`<Node>` children (`Ce.c4a` L848,
+// `en.Mia` L860) — and flattens `<Level Min Max>` wrappers exactly like
+// `parse_stages` (shared `modes_detail::parse_rule_children`). Copying tag +
+// attrs alone dropped the child elements, which left the Wave-M HotGround /
+// LoseFall / Ringout engines inert in-game (the rule feeder is the single
+// path from stages.xml into `FightController`).
 std::vector<sf2::scene::StageRule> battle_fight_rules(const std::string& battle_name) {
     std::vector<sf2::scene::StageRule> out;
     try {
@@ -2324,11 +2332,32 @@ std::vector<sf2::scene::StageRule> battle_fight_rules(const std::string& battle_
                 const pugi::xml_node rules = fight.child("Rules");
                 if (!rules) return out;
                 for (const pugi::xml_node r : rules.children()) {
+                    const std::string rname = r.name();
+                    // JS `bb.OE` (L887-888) + `bb.Ajb` (L894): a `<Level
+                    // Min Max>` child wraps rules and stamps the power range;
+                    // every other child is a rule (`bb.M3`).
+                    if (rname == "Level") {
+                        const int lo = sf2::data::xml_attr_int(r, "Min", 0);
+                        const int hi = sf2::data::xml_attr_int(r, "Max", 2147483647);
+                        for (const pugi::xml_node c : r.children()) {
+                            sf2::scene::StageRule rule;
+                            rule.tag = c.name();
+                            for (const pugi::xml_attribute a : c.attributes()) {
+                                rule.attrs[a.name()] = a.value();
+                            }
+                            sf2::scene::modes_detail::parse_rule_children(c, rule);
+                            rule.power_min = lo;
+                            rule.power_max = hi;
+                            out.push_back(std::move(rule));
+                        }
+                        continue;
+                    }
                     sf2::scene::StageRule rule;
-                    rule.tag = r.name();
+                    rule.tag = rname;
                     for (const pugi::xml_attribute a : r.attributes()) {
                         rule.attrs[a.name()] = a.value();
                     }
+                    sf2::scene::modes_detail::parse_rule_children(r, rule);
                     out.push_back(std::move(rule));
                 }
                 return out;
@@ -3126,8 +3155,9 @@ void MapScreen::render_impl(App& app) {
     load_map_backdrops(app);  // once; silent unless frames decode
     // Per-zone backdrop (res/map/part0..6 — FLOW_STATIC.md §2.1): the
     // selected zone's "map<N>" art full-bleed when its texture decoded,
-    // else the dojo sprite, else flat. Zone→part assumes file order
-    // (ZONE_1→part0 … ZONE_7→part6); the Start zone keeps the dojo art.
+    // else the dojo sprite, else flat. Zone→part = the zone FileName number
+    // (JS `qe.W0a` L2143 `parseInt(fileName.split(".")[1])-1`); the Start
+    // zone has no FileName -> no map backdrop.
     // NOTE: part textures ship as ASTC ktx / crunch dds (not CPU-decodable),
     // so the fallback path is the live one until the pipeline decodes them.
     bool bg_done = false;
@@ -3238,8 +3268,6 @@ void MapScreen::render_impl(App& app) {
     // misc-atlas nav arrow used for back navigation.
     if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
-        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
-                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
@@ -3404,6 +3432,30 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // BEFORE init_locks copies the battle into the controller. The dojo
     // Training dummy carries no Ringout -> the markers stay dormant.
     sf2::scene::apply_stage_ringout_rule(battle, battle_fight_rules(battle_name_));
+    // Feeder verification (JS `bb.OE`/`bb.M3` L887-888): log what actually
+    // reached the rule engine, including the `<Animation>`/`<Node>` children
+    // the old tag+attrs-only feeder dropped (Wave M engines).
+    {
+        int n_ringout = 0, n_hot = 0, n_lose_fall = 0, n_invert = 0;
+        std::size_t n_anims = 0, n_zones = 0;
+        for (const sf2::scene::FightRule& r : battle.rules) {
+            n_anims += r.animations.size();
+            n_zones += r.hot_zones.size();
+            switch (r.kind) {
+                case sf2::scene::FightRuleKind::ringout: ++n_ringout; break;
+                case sf2::scene::FightRuleKind::hot_ground: ++n_hot; break;
+                case sf2::scene::FightRuleKind::lose_fall: ++n_lose_fall; break;
+                case sf2::scene::FightRuleKind::invert_joystick: ++n_invert; break;
+                default: break;
+            }
+        }
+        std::fprintf(stdout,
+                     "[fight] stage rules: %zu parsed from %s (%d ringout, %d hotground, "
+                     "%d losefall, %d invert; %zu anim names, %zu node zones)\n",
+                     battle.rules.size(), battle_name_.c_str(), n_ringout, n_hot, n_lose_fall,
+                     n_invert, n_anims, n_zones);
+        std::fflush(stdout);
+    }
 
     const sf2::scene::TacticDef* tactic = nullptr;
     const auto it = assets.tactic_defs.find("Standard");
@@ -4982,17 +5034,6 @@ const char* shop_tab_art(int tab, bool active) {
     return active ? kActive[tab] : kNormal[tab];
 }
 
-// Shop atlas attribute icon for an item type (attributes/* — the JS card
-// icon per category; _light variants are the lit/hover versions).
-const char* shop_item_art(const std::string& type, bool light) {
-    if (type == "Weapon") return light ? "attributes/weapon_attack_light" : "attributes/weapon_attack";
-    if (type == "Armor") return light ? "attributes/body_armor_light" : "attributes/body_armor";
-    if (type == "Helm") return light ? "attributes/head_armor_light" : "attributes/head_armor";
-    if (type == "Ranged") return light ? "attributes/ranged_attack_light" : "attributes/ranged_attack";
-    if (type == "Magic") return light ? "attributes/magic_attack_light" : "attributes/magic_attack";
-    return nullptr;
-}
-
 // Equipped-slot value for an item type (JS `xc.hk` slots; save fields readable).
 const std::string& shop_slot_for(const WarriorSave& w, const std::string& type) {
     if (type == "Armor") return w.armor;
@@ -5428,18 +5469,20 @@ void ShopScreen::render_impl(App& app) {
 // `height/button.Y.fa.y`, spread lc-dependent). The `y.*` frame table for
 // `cs` (`y.WRa/YRa/XRa` ...) is OPEN (PORT_AUDIT_UI §5 OPEN #2); the art
 // names below are the profile atlas `buttons/*` frames (sourceSize 199x190).
-// Tab content: `vb.hla` (L2190-2191) routes tab 0 -> `Rl=ds`, tab 1 ->
-// `qv=es`, tab 2 -> `Zr=fs`, tab 3 -> `lv=gs`. Only `ds`/`es` are modelled
-// (equipment interim + folded Moves); tabs 2/3 (`fs` and `gs`, L2193) are
-// OPEN — their builders are not in the static extract, so the native keeps
-// the flat placeholder for those tabs. Nav/`cs` badges (`Dg`, L1850-1851):
+// Tab content: `vb.hla` (L2190-2191) routes tab 0 -> `Rl=ds`
+// (POWERLEVELING_SLIDER L2227), tab 1 -> `qv=es` (SKILLS_SLIDER L2239),
+// tab 2 -> `Zr=fs` (ACHIEVEMENT_SLIDER L2213), tab 3 -> `lv=gs`
+// (SEALS_SLIDER L2231). Only tab 1 (the folded Moves list) is reproduced;
+// tabs 0/2/3 are OPEN — the native docks the real `vb.layout` `a =
+// b.fn(.75)` viewer rect (L2195) and shows a placeholder. Nav/`cs` badges
+// (`Dg`, L1850-1851):
 // `cs.getCounterValue` (L2189) reads `p.o.co.uCa()/p.o.sCa()/p.o.yi.rCa()/
 // p.o.vCa()` and `ss` (L2284) `p.items.T5a(Cj.zxb(a))` — the badge COUNTS are
 // not derivable from the native save (OPEN); the `Dg.ba(65)`/`Ia(128)`
 // geometry is ported in `draw_za_chrome`'s badge path.
 // ---------------------------------------------------------------------------
 constexpr int kProfileTabCount = 4;
-constexpr int kProfileTabEquip = 0;  // equipment interim (JS moves equip to shop `$o`, OPEN)
+constexpr int kProfileTabLeveling = 0;  // `ds` leveling tab (`Rl=ds` L2227) — body OPEN
 constexpr int kProfileTabMoves = 1;  // folded Moves sub-view (JS `qv`, To.kOa=11 L2201)
 
 struct ProfileTabArt {
@@ -5478,6 +5521,27 @@ ProfileTabLayout profile_tab_layout() {
     t.cx0 = (kViewW - total) * 0.5f + t.btn_w * 0.5f;
     t.cy = kViewH - t.bar_h * 0.5f;
     return t;
+}
+
+// JS `vb.layout` (L2195): the content `b` split (identical to the shop
+// `Oa.layout` L2293) with the active sub-view `jq` docked into `a = b.fn(.75)`.
+struct ProfileLayout {
+    ShopRect content;  // b (L2195)
+    ShopRect viewer;   // a = b.fn(.75) (L2195) — the active `jq` rect
+};
+
+ProfileLayout profile_layout() {
+    const float lc = kViewW / kViewH;             // N.lc
+    const float t = std::clamp(lc, 0.6f, 1.0f);   // clamp(lc,.6,1)
+    const float sp = za_layout().sp;              // kA.Sp (JS L1975)
+    const float margin = kViewW * 0.05f * ((t - 0.6f) / 0.4f);  // L2195
+    ShopRect b{margin, sp * 1.4f, kViewW - margin,
+               kViewH - sp * 1.5f * 1.3f};        // L2195
+    b = shop_gb_fn(b, 1.85f + ((t - 0.6f) / 0.4f) * 0.15f);     // L2195 fn
+    ProfileLayout l;
+    l.content = b;
+    l.viewer = shop_gb_fn(b, 0.75f);              // a = b.fn(.75) L2195
+    return l;
 }
 
 // Hit test for the `cs` tab strip; -1 when outside every button.
@@ -5523,27 +5587,7 @@ void draw_profile_tabs(App& app, int tab, int hover) {
 // EquipmentScreen
 // ---------------------------------------------------------------------------
 
-// Equipped-slot stat value/tag (display only; Ranged has no damage attr in
-// list.xml — Level stands in, flagged here and in the delta line).
-int equip_stat_value(const CatalogItem& ci) {
-    if (ci.type == "Weapon") return ci.weapon_damage;
-    if (ci.type == "Armor") return ci.body_defense;
-    if (ci.type == "Helm") return ci.head_defense;
-    if (ci.type == "Magic") return ci.magic_damage;
-    return ci.level;
-}
-
-const char* equip_stat_tag(const std::string& type) {
-    if (type == "Weapon" || type == "Magic") return "DMG";
-    if (type == "Armor" || type == "Helm") return "DEF";
-    return "Lv";
-}
-
 EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") {
-    // The FULL catalog — the owned base items (Body/Head/Fists) are
-    // ShopHide/Hidden and absent from the shop-visible list; the grid
-    // must resolve their type/subtype to place the cards.
-    catalog_ = load_full_catalog(app());
     // Folded Moves tab (JS Profile sub-view `qv`, To.kOa=11 L2201): the exact
     // learned list built with the fight rule (`build_move_list_locks` over the
     // save's owned items — display only, on a throwaway Fighter; never
@@ -5584,13 +5628,6 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
 void EquipmentScreen::update_impl(float dt) {
     (void)dt;
     const App::PointerState& p = app().pointer();
-    WarriorSave w;
-    try {
-        w = app().save().load();
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "[equip] save load failed: %s\n", e.what());
-        return;
-    }
     hover_ = -1;
     // BACK (top-left) -> the previous screen (the loop's equipment -> dojo
     // leg).
@@ -5603,7 +5640,7 @@ void EquipmentScreen::update_impl(float dt) {
         }
     }
     // `cs` bottom tab strip (JS L2188): select the Profile sub-view
-    // (0 = equipment interim, 1 = folded Moves, 2/3 = OPEN stubs).
+    // (0 = `ds` leveling, 1 = folded Moves, 2/3 = OPEN — L2190-2191).
     tab_hover_ = profile_tab_hit(p.x, p.y);
     if (tab_hover_ >= 0 && p.pressed) {
         sf2::audio::AudioEngine::instance().play("click");
@@ -5612,69 +5649,6 @@ void EquipmentScreen::update_impl(float dt) {
         std::fflush(stdout);
         tab_ = tab_hover_;
     }
-    // The owned items grid (equipment tab only): click to equip into its
-    // type's slot. `card`
-    if (tab_ == kProfileTabEquip) {
-    // counts equippable-type cards (all five slots: Weapon/Armor/Helm/
-    // Ranged/Magic — JS `xc.hk` slots) EXCEPT the NoRanged/NoMagic
-    // placeholders: those are the empty-slot markers (never bought, equip
-    // is a no-op), and showing them would shift the bought-knives card off
-    // the headless-loop click spot. Other owned rows are skipped without
-    // consuming a grid slot.
-    const float grid_x = kViewW * 0.55f, grid_y0 = 220.0f, grid_dx = 240.0f, grid_dy = 110.0f;
-    int idx = 0;
-    int card = 0;
-    for (const auto& oi : w.items) {
-        std::string type, subtype;
-        for (const CatalogItem& ci : catalog_) {
-            if (ci.name == oi.name) {
-                type = ci.type;
-                subtype = ci.subtype;
-                break;
-            }
-        }
-        if (oi.name == "NoRanged" || oi.name == "NoMagic") {
-            ++idx;
-            continue;
-        }
-        if (type != "Weapon" && type != "Armor" && type != "Helm" && type != "Ranged" &&
-            type != "Magic") {
-            ++idx;
-            continue;
-        }
-        const int col = card % 2;
-        const int row = card / 2;
-        const float cx = grid_x + col * grid_dx;
-        const float cy = grid_y0 + row * grid_dy;
-        if (p.x >= cx - 110 && p.x <= cx + 110 && p.y >= cy - 40 && p.y <= cy + 40) {
-            hover_ = idx;
-            if (p.pressed) {
-                // JS `$g.$o` (L152184): `p.o.Ca.hk(a.type, a)` sets the
-                // slot, `setItem`, `save()`.
-                WarriorSave w2 = app().save().load();
-                std::string* slot_val = nullptr;
-                if (type == "Weapon") slot_val = &w2.weapon;
-                else if (type == "Armor") slot_val = &w2.armor;
-                else if (type == "Helm") slot_val = &w2.helm;
-                else if (type == "Ranged") slot_val = &w2.ranged;
-                else slot_val = &w2.magic;
-                *slot_val = oi.name;
-                for (auto& oi2 : w2.items) {
-                    if (oi2.name == oi.name) oi2.equipped = true;
-                }
-                app().save().save(w2);
-                std::fprintf(stdout,
-                             "[equip] EQUIPPED %s (%s) -> %s slot (weapon=%s armor=%s helm=%s ranged=%s magic=%s); move list rebuilt on next fight\n",
-                             oi.name.c_str(), subtype.c_str(), type.c_str(), w2.weapon.c_str(),
-                             w2.armor.c_str(), w2.helm.c_str(), w2.ranged.c_str(),
-                             w2.magic.c_str());
-                std::fflush(stdout);
-            }
-        }
-        ++idx;
-        ++card;
-    }
-    }  // end equipment-tab grid
     // Shared `za` nav column (JS `ma.D1`): Dojo/Map/Shop/Settings hops.
     za_update(app(), *this, kScreenProfile);
 }
@@ -5705,7 +5679,13 @@ void EquipmentScreen::render_impl(App& app) {
     } catch (const std::exception&) {
         return;
     }
-    if (tab_ == kProfileTabEquip) {
+    // JS `vb.layout` (L2195): the active sub-view `jq` docks into
+    // `a = b.fn(.75)`; the content split mirrors the shop `Oa.layout`.
+    const ProfileLayout pl = profile_layout();
+    const ShopRect& v = pl.viewer;
+    // JS `XB=ei` header is shown on tab 0 only (`hla` case 0 `ivb()`); the
+    // other cases call `dga()` and hide it (L2190-2191).
+    if (tab_ == kProfileTabLeveling) {
     // --- Profile header (read-only warrior stats) -------------------------
     // Level + OLa exp bar (character_progress.xml thresholds, 100 fallback),
     // total wins (Fights/yc records), coins (Money/Tb) + gems (Bonus/$F per
@@ -5749,175 +5729,41 @@ void EquipmentScreen::render_impl(App& app) {
         draw_ui_label(app, 130.0f, 134.0f, 600.0f, 24.0f,
                       mbuf, 0.8f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
     }
-    // --- 5 equipment slots (JS `xc.hk` slots; Ranged/Magic included) -------
-    // Slot glow follows the HOVERED ITEM's type (the old `hover_ == s`
-    // compared an item index against a slot index — coincidental flashes).
-    std::string hover_type;
-    if (hover_ >= 0 && static_cast<std::size_t>(hover_) < w.items.size()) {
-        for (const CatalogItem& ci : catalog_) {
-            if (ci.name == w.items[static_cast<std::size_t>(hover_)].name) {
-                hover_type = ci.type;
-                break;
-            }
-        }
-    }
-    const float slot_x = kViewW * 0.2f, slot_y0 = 220.0f, slot_dy = 100.0f;
-    const char* slot_names[5] = {"Weapon", "Armor", "Helm", "Ranged", "Magic"};
-    // Profile-atlas slot backing art (profile.<hash>.json pieces/*): the
-    // perkback square behind each slot, perkcircle for the empty marker.
-    const std::string current[5] = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
-    for (int s = 0; s < 5; ++s) {
-        const float sy = slot_y0 + static_cast<float>(s) * slot_dy;
-        std::string stat;
-        for (const CatalogItem& ci : catalog_) {
-            if (ci.name == current[s]) {
-                char sbuf[96];
-                std::snprintf(sbuf, sizeof(sbuf), "%s %d", equip_stat_tag(ci.type),
-                              equip_stat_value(ci));
-                stat = sbuf;
-                break;
-            }
-        }
-        const std::string label = std::string(slot_names[s]) + ": " + current[s] +
-                                  (stat.empty() ? "" : " (" + stat + ")");
-        const bool slot_hov = hover_type == slot_names[s];
-        // Real art first (perkback square + the type's shop attribute icon
-        // centered); flat fallback keeps the slot visible if art is missing.
-        bool drawn = false;
-        if (try_draw_atlas_button(app, "pieces/perkback", slot_x, sy, 400.0f, 80.0f,
-                                  slot_hov ? 0.95f : 0.8f)) {
-            const char* icon = shop_item_art(slot_names[s], slot_hov);
-            if (icon != nullptr) {
-                try_draw_atlas_button(app, icon, slot_x - 170.0f, sy, 64.0f, 64.0f, 1.0f);
-            }
-            drawn = true;
-        }
-        if (!drawn) {
-            draw_flat_button(app, label, slot_x, sy, 400.0f, 80.0f, 0.35f, 0.3f, 0.45f,
-                             slot_hov);
-        }
-        draw_ui_label(app, slot_x - 130.0f, sy - 14.0f, 260.0f, 28.0f,
-                          label, 0.7f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
-    }
-    const float grid_x = kViewW * 0.55f, grid_y0 = 220.0f, grid_dx = 240.0f, grid_dy = 110.0f;
-    int idx = 0;
-    int card = 0;
-    for (const auto& oi : w.items) {
-        std::string type;
-        for (const CatalogItem& ci : catalog_) {
-            if (ci.name == oi.name) {
-                type = ci.type;
-                break;
-            }
-        }
-        if (oi.name == "NoRanged" || oi.name == "NoMagic") {
-            ++idx;
-            continue;
-        }
-        if (type != "Weapon" && type != "Armor" && type != "Helm" && type != "Ranged" &&
-            type != "Magic") {
-            ++idx;
-            continue;
-        }
-        const int col = card % 2;
-        const int row = card / 2;
-        const float cx = grid_x + col * grid_dx;
-        const float cy = grid_y0 + row * grid_dy;
-        const bool equipped = oi.equipped;
-        // Real art: perkback card + the type's attribute icon (profile +
-        // shop atlases); flat fallback keeps the card visible.
-        bool drawn = false;
-        if (try_draw_atlas_button(app, "pieces/perkback", cx, cy, 220.0f, 80.0f,
-                                  equipped ? 1.0f : (hover_ == idx ? 0.95f : 0.8f))) {
-            const char* icon = shop_item_art(type, equipped || hover_ == idx);
-            if (icon != nullptr) {
-                try_draw_atlas_button(app, icon, cx - 80.0f, cy, 56.0f, 56.0f, 1.0f);
-            }
-            drawn = true;
-        }
-        if (!drawn) {
-            draw_flat_button(app, oi.name + (equipped ? " [EQ]" : ""), cx, cy, 220.0f, 80.0f,
-                             equipped ? 0.5f : 0.3f, equipped ? 0.6f : 0.3f,
-                             equipped ? 0.3f : 0.35f, hover_ == idx);
-        }
-        draw_ui_label(app, cx - 44.0f, cy - 12.0f, 150.0f, 24.0f,
-                          oi.name + (equipped ? " [EQ]" : ""), 0.7f, UiAlign::Left,
-                          1.0f, 1.0f, 1.0f);
-        ++idx;
-        ++card;
-    }
-    // Stat delta preview (read-only): the hovered owned card vs the wielded
-    // same-type item. hover_ indexes the owned list (update_impl parity).
-    {
-        std::string dline = "Hover an owned item to preview its stats.";
-        if (hover_ >= 0 && static_cast<std::size_t>(hover_) < w.items.size()) {
-            const std::string& hov_name = w.items[static_cast<std::size_t>(hover_)].name;
-            const CatalogItem* hov_ci = nullptr;
-            for (const CatalogItem& ci : catalog_) {
-                if (ci.name == hov_name) {
-                    hov_ci = &ci;
-                    break;
-                }
-            }
-            if (hov_ci != nullptr) {
-                std::string cur_name;
-                if (hov_ci->type == "Armor") cur_name = w.armor;
-                else if (hov_ci->type == "Helm") cur_name = w.helm;
-                else if (hov_ci->type == "Ranged") cur_name = w.ranged;
-                else if (hov_ci->type == "Magic") cur_name = w.magic;
-                else cur_name = w.weapon;
-                if (cur_name == hov_name) {
-                    dline = hov_name + " (wielded)";
-                } else {
-                    int cur_stat = 0;
-                    for (const CatalogItem& ci : catalog_) {
-                        if (ci.name == cur_name) {
-                            cur_stat = equip_stat_value(ci);
-                            break;
-                        }
-                    }
-                    const int nw = equip_stat_value(*hov_ci);
-                    char dbuf[160];
-                    std::snprintf(dbuf, sizeof(dbuf), "%s %s %d -> %d (%+d)",
-                                  hov_name.c_str(), equip_stat_tag(hov_ci->type), cur_stat,
-                                  nw, nw - cur_stat);
-                    dline = dbuf;
-                }
-            }
-        }
-        draw_ui_label(app, 24.0f, 664.0f, 760.0f, 24.0f,
-                      dline, 0.75f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
-    }
+    // `ds` POWERLEVELING_SLIDER body (L2227) not reproduced — OPEN.
+    draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 20.0f, v.width(), 40.0f,
+                  std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)",
+                  1.0f, UiAlign::Center, 0.8f, 0.8f, 0.8f);
     } else if (tab_ == kProfileTabMoves) {
         // Folded Moves sub-view (JS `qv`, To.kOa=11 L2201) — the learned
         // moves for the wielded weapon; moved verbatim from the deleted
         // standalone MovesScreen.
-        (void)app.draw_text(130.0f, 84.0f, "MOVES - " + weapon_, 1.1f, 1.0f, 0.9f, 0.4f);
+        (void)app.draw_text(v.J + 8.0f, v.P + 8.0f, "MOVES - " + weapon_, 1.1f, 1.0f, 0.9f,
+                            0.4f);
         constexpr std::size_t kMaxRows = 16;
         for (std::size_t i = 0; i < move_rows_.size() && i < kMaxRows; ++i) {
             const MoveRow& r = move_rows_[i];
             char buf[128];
             std::snprintf(buf, sizeof(buf), "%s  [%s] P%d", r.name.c_str(),
                           r.type.empty() ? "-" : r.type.c_str(), r.priority);
-            (void)app.draw_text(150.0f, 140.0f + static_cast<float>(i) * 30.0f, buf, 0.75f,
-                                1.0f, 1.0f, 1.0f);
+            (void)app.draw_text(v.J + 16.0f, v.P + 48.0f + static_cast<float>(i) * 30.0f,
+                                buf, 0.75f, 1.0f, 1.0f, 1.0f);
         }
         if (move_total_ > static_cast<int>(kMaxRows)) {
             char buf[64];
             std::snprintf(buf, sizeof(buf), "+%d more (%d total)",
                           move_total_ - static_cast<int>(kMaxRows), move_total_);
-            (void)app.draw_text(150.0f, 140.0f + 16.0f * 30.0f, buf, 0.75f, 0.7f, 0.7f,
-                                0.7f);
-        }
-        if (move_rows_.empty()) {
-            (void)app.draw_text(150.0f, 140.0f, "No moves for this weapon.", 0.8f, 0.7f,
+            (void)app.draw_text(v.J + 16.0f, v.P + 48.0f + 16.0f * 30.0f, buf, 0.75f, 0.7f,
                                 0.7f, 0.7f);
         }
+        if (move_rows_.empty()) {
+            (void)app.draw_text(v.J + 16.0f, v.P + 48.0f, "No moves for this weapon.", 0.8f,
+                                0.7f, 0.7f, 0.7f);
+        }
     } else {
-        // Tabs 2/3: the `vb` sub-views (JS `fs`/`gs`, To.kOa 12/13) are not
-        // reproduced — no static content rule recovered (OPEN). The `cs`
-        // strip still selects them so the surface exists.
-        draw_ui_label(app, kViewW * 0.5f - 300.0f, 300.0f, 600.0f, 40.0f,
+        // Tabs 2/3: the `vb` sub-views (`Zr`=`fs` ACHIEVEMENT_SLIDER L2213,
+        // `gs` SEALS_SLIDER L2231) are not reproduced (OPEN). The `cs` strip
+        // still selects them; the body uses the real `vb` viewer rect.
+        draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 20.0f, v.width(), 40.0f,
                       std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)",
                       1.0f, UiAlign::Center, 0.8f, 0.8f, 0.8f);
     }

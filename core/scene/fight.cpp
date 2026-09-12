@@ -447,6 +447,37 @@ bool FightController::rules_ringout_detect(FightRule& r) {
     return false;
 }
 
+// JS `en.Zk` (L859) + `ZZa` (L860-861): the HotGround `<Node>` zone test.
+// `Zk` resolves each zone's node on the tracked fighter (`a.oa.Ic(name)`)
+// and sets `oy=-location.width/2`. `ZZa` returns TRUE iff EVERY zone has the
+// node OUTSIDE it: `d=(node.x+oy, -node.y, node.z, 1)` and, per zone,
+// `!(x>=N||x<=J||y>=W||y<=P)` -> inside -> false. The native resolves the
+// bone by name (world coords, like Ringout); an unknown name falls back to
+// the fighter anchor (defensive; shipped nodes exist).
+bool FightController::rules_hot_zones_out(const FightRule& r,
+                                          const FightFighter& f) {
+    const float oy = -camera_.arena_w * 0.5f;  // JS `this.oy` (L859)
+    for (const FightRule::HotZone& z : r.hot_zones) {
+        float nx = f.fighter.world_x();
+        float ny = f.fighter.world_y();
+        const int bi = f.fighter.model().bone_by_name(z.name);
+        if (bi >= 0) {
+            const std::vector<float>& pos = f.fighter.positions();
+            const std::size_t o = static_cast<std::size_t>(bi) * 2;
+            if (o + 1 < pos.size()) {
+                nx = pos[o];
+                ny = pos[o + 1];
+            }
+        }
+        const float x = nx + oy;  // JS `d.x + this.oy`
+        const float y = -ny;      // JS `-d.y` (no `eC` for HotGround)
+        const bool outside =
+            x >= z.max_x || x <= z.min_x || y >= z.max_y || y <= z.min_y;
+        if (!outside) return false;  // JS `return!1` (node inside a zone)
+    }
+    return true;  // JS `return!0` (every node outside every zone)
+}
+
 // JS `jn.hh` (L867) + `Rba` (L866-867): LoseFall. The JS rule registers the
 // per-frame (1) and animation-start (4) passes, plus the fall-reaction pass
 // (7) only when `Mwa("Physical")` (L866, the ctor's conditional `Zf(7)`).
@@ -455,9 +486,11 @@ bool FightController::rules_ringout_detect(FightRule& r) {
 //     maps `a.AI` to `current_move()->name` (the established anim proxy) and
 //     re-derives `tN` every frame — JS only re-arms on an animation START;
 //     equivalent while the animation persists (documented drift).
-//   cp==7 (`Lgb` L387: `a.model.lb==null` -> `PC(7,side)`; unarmed ->
-//     `tN=true`): the native approximates the weaponless fall reaction with
-//     the KO state (`hp<=0`). Cited but approximate (see drift).
+//   cp==7 (`Lgb` L387: `a.model.lb==null` -> `PC(7,side)`; from
+//     `wd.Lwb`/`Qnb` L507/L511): `tN=!0`. The native uses the per-fighter
+//     `reaction_fall` pulse (a Fall reaction started by `try_react` in
+//     `apply_hit`); the JS `lb==null`/ragdoll `Qnb` gate has no native
+//     counterpart (see drift in `rules_lose_fall`).
 //   cp==1: `Rba` — the tracked node leaves [ZG,BH]x[dN,HO] -> `setActive(false)`.
 bool FightController::rules_lose_fall(FightRule& r) {
     FightFighter& f = (r.apply_to == 2) ? enemy_ : player_;
@@ -471,8 +504,14 @@ bool FightController::rules_lose_fall(FightRule& r) {
     }
     r.armed = match;
     // cp==7 (registered only when the rule owns a "Physical" animation,
-    // `jn` ctor L866): `tN=true` on the fall reaction (L867).
-    if (r.physical && f.weapon == "Fists" && f.hp <= 0.0f) r.armed = true;
+    // `jn` ctor L866): `tN=!0` on the physical fall reaction (L867). The JS
+    // event is `ca.Lgb` (L387: `a.model.lb==null -> PC(7,side)`), fired from
+    // `wd.Lwb`/`Qnb` (L507/L511) — `Gc.DK` (L673-674) sets the knockdown
+    // `qs`/`jJa`. The native has no ragdoll `Qnb`; the per-fighter
+    // `reaction_fall` pulse (a Fall reaction started by `try_react` in
+    // `apply_hit`, the `DK` analog) stands in. Replaces the old KO-state
+    // approximation (`weapon=="Fists" && hp<=0`).
+    if (r.physical && f.reaction_fall) r.armed = true;
     if (!r.armed) return false;
     if (r.node.empty()) return false;  // JS `this.ga == null` (L866)
     float nx = f.fighter.world_x();
@@ -581,22 +620,48 @@ void FightController::rules_frame() {
             case FightRuleKind::ringout:
                 fire = rules_ringout_detect(r);
                 break;
-            case FightRuleKind::hot_ground:
-                // `en.hh` (L859) cp==1: `Voa` is false with shipped data
-                // (the rule has no `<Animation>` children -> `EM` empty ->
-                // `Lba` false), so the else branch runs: `jc += 1/rO`,
-                // `jc>=60 -> jc=0; Qe>0 && Qe--, cK=true`; return
-                // `Qe<=0`. `rO = a.hNa = on() = 1` (`gja` L859).
-                r.hot_frac += 1.0f;
-                if (r.hot_frac >= 60.0f) {
-                    r.hot_frac -= 60.0f;
-                    if (r.hot_time > 0) {
-                        --r.hot_time;
-                        r.hot_changed = true;  // spawn ground effect (`o_a`)
+            case FightRuleKind::hot_ground: {
+                // `en.hh` (L859-860) cp==1. `Voa` = the tracked fighter's
+                // current animation ∈ the rule's `EM` list (case 4
+                // `Voa=this.Lba(a.AI)`, L860). The native re-derives `Voa`
+                // each frame and treats an animation CHANGE as the cp==4
+                // edge (`haa=!1`). If (`Voa && ZZa()`) the timer resets to
+                // full once (`haa||(Qe=Tra,jc=0,haa=cK=!0)`); otherwise the
+                // countdown runs: `jc += 1/rO` (`rO=a.hNa=on()=1`), and every
+                // 60 ticks `Qe>0 && (Qe--, cK=true)`. Fires on `Qe<=0`.
+                FightFighter& f = (r.apply_to == 2) ? enemy_ : player_;
+                const std::string anim =
+                    f.fighter.current_move() != nullptr
+                        ? f.fighter.current_move()->name
+                        : std::string();
+                if (anim != r.hot_anim) {  // cp==4: `haa=!1`
+                    r.hot_anim = anim;
+                    r.hot_haa = false;
+                }
+                bool voa = false;
+                for (const std::string& n : r.animations) {
+                    if (n == anim) { voa = true; break; }
+                }
+                if (voa && rules_hot_zones_out(r, f)) {
+                    if (!r.hot_haa) {
+                        r.hot_time = r.frames / 60;  // `Tra=Frames/60|0`
+                        r.hot_frac = 0.0f;
+                        r.hot_haa = true;
+                        r.hot_changed = true;
+                    }
+                } else {
+                    r.hot_frac += 1.0f;
+                    if (r.hot_frac >= 60.0f) {
+                        r.hot_frac = 0.0f;  // JS `jc=0` (not `-=60`)
+                        if (r.hot_time > 0) {
+                            --r.hot_time;
+                            r.hot_changed = true;  // spawn effect (`o_a`)
+                        }
                     }
                 }
                 fire = r.hot_time <= 0;
                 break;
+            }
             case FightRuleKind::regeneration:
                 // `kj.hh` (L882) cp==1: `jc++`; `if (MUa && a.pw) break`;
                 // `jc>=DUa -> true` (fires EVERY frame once reached — only
@@ -675,6 +740,9 @@ void FightController::rules_end_round() {
 // `QI=pb`, `DA=kc`, `Bda=Zb`), so `Jc`/`QI` are the two fighters and
 // `DA`/`Bda` their parameter maps.
 void FightController::rules_apply_round_effects() {
+    // JS `I0a` (L409) resets `Iga=!1` at round start; the loop below
+    // re-sets it when an active InvertJoystick rule runs (`F1` L897).
+    invert_joystick_ = false;
     for (FightRule& r : rules_) {
         if (!r.active) continue;
         switch (r.kind) {
@@ -709,8 +777,10 @@ void FightController::rules_apply_round_effects() {
                 }
                 break;
             case FightRuleKind::hot_ground:
-                // `en.reset` (L859): `Qe=Tra=Frames/60|0`, `jc=0`, `cK=true`
-                // (the node list `Va` is empty — no `<Node>` child parsing).
+                // `en.Zk` (L859) -> `reset()` (L859): `Qe=Tra=Frames/60|0`,
+                // `jc=0`, `cK=true`. (`Zk` also resolves each `<Node>` zone
+                // on the tracked fighter and sets `oy`; the native resolves
+                // nodes per-frame in `rules_hot_zones_out` instead.)
                 r.hot_time = r.frames / 60;
                 r.hot_frac = 0.0f;
                 r.hot_changed = true;
@@ -720,6 +790,10 @@ void FightController::rules_apply_round_effects() {
                 break;
             case FightRuleKind::points:
                 r.points_self = 0;  // `gj.reset` (L872)
+                break;
+            case FightRuleKind::invert_joystick:
+                // `F1` (L897): `ERuleInvertJoystick -> this.Oe.Iga=!0`.
+                invert_joystick_ = true;
                 break;
             case FightRuleKind::invulnerability:
                 // `gn.Zk` (L863): `this.ws=!0`.
@@ -959,6 +1033,23 @@ void FightController::round_start() {
     // between_rounds_recover() when the previous round ends.
     round_.number++;
     round_init();
+    // JS `IKa` L417 / ctor `F1` (L381): the rule pass runs at round SETUP,
+    // before the StartStance, so `Iga` (InvertJoystick) is already live for
+    // the phase-1 buffered press (`N0a` L426 -> `LBa` L399). `du.osb` (L898)
+    // gate = `kI(round) && Ti()` (InvertJoystick ships with no Round/Level
+    // attrs, so it always passes).
+    invert_joystick_ = false;
+    {
+        const int rr = round_.number > 0 ? round_.number : 1;
+        const long power = static_cast<long>(player_.params.level);
+        for (const FightRule& r : battle_.rules) {
+            if (r.kind == FightRuleKind::invert_joystick &&
+                fight_rule_gate(r, rr, power)) {
+                invert_joystick_ = true;
+                break;
+            }
+        }
+    }
     // Per-round magic reset (`yKa`: bh=0 + InitialCharge; raid persists).
     init_magic();
     // Per-round bus re-register (JS tb.Yka L401/402/405: cKa + Gf both
@@ -1834,6 +1925,23 @@ void FightController::tick_bus_side(int side) {
 
 
 void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_type press) {
+    // JS `ca.LBa` (L399) via `N0a`/`O0a` (L426): when `Iga` (the
+    // InvertJoystick flag, set by `F1` L897) is live, a directional control
+    // 1..8 is remapped (up<->down / forward<->back): 1<->5, 2<->6, 3<->7,
+    // 4<->8. Keys 9+ (Punch/Kick/...) are returned unchanged (`default:a`).
+    if (invert_joystick_) {
+        switch (static_cast<int>(key)) {
+            case 1: key = static_cast<sf2::scene::key_type>(5); break;
+            case 2: key = static_cast<sf2::scene::key_type>(6); break;
+            case 3: key = static_cast<sf2::scene::key_type>(7); break;
+            case 4: key = static_cast<sf2::scene::key_type>(8); break;
+            case 5: key = static_cast<sf2::scene::key_type>(1); break;
+            case 6: key = static_cast<sf2::scene::key_type>(2); break;
+            case 7: key = static_cast<sf2::scene::key_type>(3); break;
+            case 8: key = static_cast<sf2::scene::key_type>(4); break;
+            default: break;
+        }
+    }
     // JS `ca.N0a` (L426): in phase 1 (StartStance) a PRESS goes into the
     // round's single-slot input buffer `WC` (the last press wins; it is
     // replayed by `llb` when the fight starts). In phase 2 the press is
@@ -2165,6 +2273,13 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         rctx.candidate_moves = {};
         const std::string reaction = def.fighter.try_react(rctx, rec.shock);
         if (!reaction.empty()) {
+            // JS `Gc.DK` (L673-674) -> `jJa`/`Qnb` -> `wd.Lwb` -> `ca.Lgb`
+            // (L387) -> `PC(7,side)`: the knockdown reaction start is the
+            // LoseFall cp==7 event. A *Fall*-named reaction is the native
+            // proxy for the JS `Qnb`/`qs.animation` knockdown.
+            if (reaction.find("Fall") != std::string::npos) {
+                def.reaction_fall = true;
+            }
             std::fprintf(stdout, "[react] F%d %s -> %s\n", frame,
                          def.name.c_str(), reaction.c_str());
             std::fflush(stdout);
@@ -2630,6 +2745,12 @@ void FightController::update(float dt) {
     if (cur_banner_ == banner_kind::ko && frame_ - banner_start_ < 30) {
         dt *= 0.5f;
     }
+
+    // The cp==7 LoseFall edge (JS `ca.Lgb` L387) is a one-frame pulse: it is
+    // set by `apply_hit` and consumed by `rules_frame()` later this same
+    // update, so clear it here at the frame boundary.
+    player_.reaction_fall = false;
+    enemy_.reaction_fall = false;
 
     // The phase machine.
     switch (phase_) {

@@ -320,10 +320,12 @@ private:
 
 // The Profile — native `vb` (JS L2189-2201, `dJ()==7`): a tabbed screen with
 // the `cs` bottom tab strip (L2188: 4 `Le` on the profile atlas id 258,
-// `Tw=[0,1,2,3]`). Tab 1 folds the invented standalone Moves screen (JS
-// Profile sub-view `qv`, `To.kOa`=11 L2201) and the standalone Moves class is
-// deleted with it. The equipment view (slot list + owned grid — JS `$g.$o`
-// L152184 equip flow) is an interim on tab 0: the JS moves equip into the
+// `Tw=[0,1,2,3]`). The active sub-view docks into the real `vb.layout`
+// `a = b.fn(.75)` viewer rect (L2195). Tab 1 folds the Moves/skills sub-view
+// (JS `qv`=`es`, SKILLS_SLIDER L2239, `To.kOa`=11 L2201). Tabs 0/2/3 (`ds`
+// POWERLEVELING L2227, `fs` ACHIEVEMENT L2213, `gs` SEALS L2231) are OPEN —
+// their builders are not reproduced. The invented equipment slot list + owned
+// grid were removed (PORT_AUDIT_UI §3 #19, §4 #6): JS moves equip into the
 // shop detail panel (`$o`) — OPEN (SHOP_STATIC §4).
 class EquipmentScreen : public Screen {
 public:
@@ -344,8 +346,7 @@ public:
     };
 
 private:
-    std::vector<CatalogItem> catalog_;
-    int tab_ = 0;        // `cs` tab index (0 = equipment interim .. 3)
+    int tab_ = 0;        // `cs` tab index (0 = `ds` leveling .. 3)
     int tab_hover_ = -1;
     int hover_ = -1;
     // Folded Moves tab data (JS Profile sub-view `qv`, To.kOa=11 L2201).

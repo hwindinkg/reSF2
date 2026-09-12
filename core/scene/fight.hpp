@@ -81,19 +81,25 @@ namespace sf2::scene {
 // The native keeps the FULL dispatch (every tag maps to a kind so a new rule
 // plugs in without touching the parser) and now evaluates the rules the JS
 // fight sim actually runs: the per-frame pass (`du.Ih(1,3,ze)` L896) for the
-// field-exit detector (Ringout) and the HotGround timer; the per-round Zk
-// apply pass (`du.F1(a)` L897) for Attributes / RemoveInterval /
-// RechargeMagicEachRound / Tactic / Resistance / Invulnerability; and the
-// landed-hit pass (`ca.Cgb` -> `PC(5/6/11)` L396/L423) for Regeneration /
-// LifeSteal / Points / WinCombo / WinShock. The ApplyTo/Round/Eclipse/Death
-// gating and the `<Level>` power range are live. The animation-scoped
-// LoseFall (`jn`, arm + `Rba` zone), the Combo/Crazy `ws` mutuality
+// field-exit detector (Ringout, with the node-zone exit) and the HotGround
+// timer (with the `en.ZZa` `<Node>` zone test and `en` `Voa` animation gate);
+// the per-round Zk apply pass (`du.F1(a)` L897) for Attributes /
+// RemoveInterval / RechargeMagicEachRound / Tactic / Resistance /
+// Invulnerability and the InvertJoystick `Iga` flag (`ca.LBa` L399 consumes
+// it in the input path); and the landed-hit pass (`ca.Cgb` -> `PC(5/6/11)`
+// L396/L423) for Regeneration / LifeSteal / Points / WinCombo / WinShock.
+// The ApplyTo/Round/Eclipse/Death gating and the `<Level>` power range are
+// live. The animation-scoped LoseFall (`jn`, arm + `Rba` zone, cp==4 anim
+// match and the cp==7 reaction-start pulse), the Combo/Crazy `ws` mutuality
 // (`$m`/`an` via `du.kZ`) and Invulnerability's `Zk` (`gn.ws=true`) are now
 // implemented. Still parsed + gated but inert (OPEN, cited below):
 // RatingEvaluation (UI), DamageFactor (no per-interval `Cea` setter; A5),
 // Darkness / RandomArea / LightInTheDarkness (render-side), WinStyle (the
 // model style score `dz` has no native source — COMBAT_STATIC App. C), and
-// the perk/UI/item rules.
+// the perk/UI/item rules. `<ComplexRule>`/`<RandomRule>` child rules are
+// NOT expanded by the native parser (modes.hpp reads direct `<Rules>`
+// children + `<Level>` only) — JS `nh.parse` (L853) / `pn` (L879) do; that
+// structural gap keeps the story-fight nested rules inert (see OPEN note).
 // ---------------------------------------------------------------------------
 enum class FightRuleKind : int {
     none = 0,
@@ -196,6 +202,18 @@ struct FightRule {
     // --- other parsed attrs (registered; effect OPEN) ---------------------
     int frames = 0;                  // HotGround Frames
     float value = 0.0f;              // WinCombo/Points Value
+    // `en.Va` (L859) + `fv` (L861-862): HotGround's `<Node>` zones. `Axis=X`
+    // fills min_x/max_x (`J`/`N`); `Axis=Y` fills min_y/max_y (`P`/`W`); the
+    // other pair keeps the +/-3.4e38 defaults (never outside).
+    struct HotZone {
+        std::string name;  // `fv.name` (Node Name)
+        std::string axis;  // `fv` Axis attr
+        float min_x = -3.4028234663852886e38f;  // `J` (Axis X first)
+        float max_x = 3.4028234663852886e38f;   // `N` (Axis X second)
+        float min_y = -3.4028234663852886e38f;  // `P` (Axis Y first)
+        float max_y = 3.4028234663852886e38f;   // `W` (Axis Y second)
+    };
+    std::vector<HotZone> hot_zones;  // `en.Va` (parsed by `Mia`, L860)
     // --- per-rule effect data (JS per-class parse bodies, L846-913) -------
     // `Zi` (`ERuleAttributes`, L849-850): attr name -> int delta (`wB`).
     // Every attr except Round/ApplyTo/Eclipse/WarriorPower lands here; the
@@ -262,6 +280,8 @@ struct FightRule {
     int hot_time = 0;          // `en.Qe` HotGround countdown (seconds)
     float hot_frac = 0.0f;     // `en.jc` sub-second accumulator
     bool hot_changed = false;  // `en.cK` (timer changed -> spawn effect)
+    bool hot_haa = false;      // `en.haa` (L859): reset-pulse latch
+    std::string hot_anim;      // last animation (native cp==4 edge: haa=false)
     int regen_counter = 0;     // `kj.jc` frames since the last landed hit
     int points_self = 0;       // `gj.qH` (Li=1) / `gj.gN` (Li=2)
 };
@@ -420,6 +440,25 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
     r.sequention_speed = fight_rule_int(sr.attrs, "SequentionSpeed", 3);
     r.frames = fight_rule_int(sr.attrs, "Frames", 0);
     r.value = fight_rule_float(sr.attrs, "Value", 0.0f);
+    // `en.Mia` (L860) + `fv` (L861-862): the HotGround `<Node>` zones. Only
+    // the `Axis`-named pair is filled; the other keeps +/-3.4e38 (JS leaves
+    // J/N or P/W untouched). `of` (L16) gave Min -> first, Max -> second.
+    if (r.kind == FightRuleKind::hot_ground) {
+        for (const StageRule::Zone& z : sr.zones) {
+            FightRule::HotZone hz;
+            hz.name = z.name;
+            hz.axis = z.axis;
+            if (z.axis == "X" || z.axis == "x") {
+                hz.min_x = z.min;   // `J`
+                hz.max_x = z.max;   // `N`
+            }
+            if (z.axis == "Y" || z.axis == "y") {
+                hz.min_y = z.min;   // `P`
+                hz.max_y = z.max;   // `W`
+            }
+            r.hot_zones.push_back(std::move(hz));
+        }
+    }
     // `<Level Min Max>` wrapper range (`bb.Ajb` L894 via `Zf(a,0,MAX)`, a
     // Min/Max ATTR read; modes.hpp flattens the wrapper into this rule).
     r.power_min = sr.power_min;
@@ -790,6 +829,10 @@ struct FightFighter {
     double charge = 0.0;  // magic charge (`wd.my` [0,1]; `Hwa`/`yL`)
     int raid_bullets = 0;  // raid charge bullets (`wd.dO`; `vZa` adds)
     bool collidable = true;  // target hit list (`Nl.oI[].vZ` — `hq.S`)
+    // Native cp==7 edge (JS `ca.Lgb` L387 -> `PC(7,side)`): set by
+    // `apply_hit` when a Fall reaction starts, consumed by `rules_frame`
+    // the same frame (cleared at the top of `update`).
+    bool reaction_fall = false;
     std::set<std::string> prev_intervals;  // last tick's intervals (12/13 edge)
     std::vector<sf2::scene::PerkAction> perks;  // equipped perk actions
                                                 // (empty until perk-equip
@@ -1286,6 +1329,10 @@ private:
     float ringout_min_ = -1.0e5f;  // JS `ZG` default (`of(a,-1E5,1E5)` L886)
     float ringout_max_ = 1.0e5f;   // JS `BH` default
     float ringout_speed_ = 3.0f;   // JS `tta` (SequentionSpeed default 3)
+    // JS `ca.Iga` (init false L380; reset in `I0a` L409; set by `F1` L897
+    // `ERuleInvertJoystick -> this.Oe.Iga=!0`): the input-inversion flag
+    // consumed by `ca.LBa` (L399) in `N0a`/`O0a` (L426).
+    bool invert_joystick_ = false;
     // --- stage <Rules> engine (JS `du` L894-910) --------------------------
     std::vector<FightRule> rules_;  // parsed rules (JS `du.Ae`)
     int rule_round_ = 1;            // JS `cz` (`rob(round>0?round:1)`)
@@ -1336,6 +1383,10 @@ private:
     // JS `nj.hh` (L885-886): the tracked node leaves [ZG,BH]x[dN,HO] ->
     // `setActive(false)` + fire. Returns true when the rule fired.
     bool rules_ringout_detect(FightRule& r);
+    // JS `en.ZZa` (L860-861): true iff EVERY HotGround `<Node>` zone has the
+    // tracked fighter's node OUTSIDE it (all-outside = "safe"). Resolves each
+    // zone's bone by name on `f`.
+    bool rules_hot_zones_out(const FightRule& r, const FightFighter& f);
     // JS `jn.hh`/`Rba` (L866-867): LoseFall — arm `tN` from the tracked
     // fighter's current animation (cp==4 `Lba(a.AI)`, L848) or, for a
     // Physical rule, the fall reaction (cp==7), then the node-zone exit.

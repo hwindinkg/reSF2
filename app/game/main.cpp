@@ -38,8 +38,9 @@ void print_usage(const char* argv0) {
                  "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
                  "  --headless-loop  run the scripted playable loop, then exit\n"
-                 "                   (menu -> map -> Bosses fight -> results -> shop buy\n"
-                 "                    WEAPON_KNIVES -> equip -> map -> Training fight -> results)\n"
+                 "                   (dojo -> map -> BOSS_LYNX fight -> results -> shop\n"
+                 "                    buy WEAPON_KNIVES -> profile viewer (equip OPEN)\n"
+                 "                    -> map -> BOSS_LYNX fight -> results)\n"
                  "  --fight          boot DIRECTLY into the dojo fight (skip menu/map):\n"
                  "                   dojo, player Fists (keyboard) vs enemy Fists (AI)\n"
                  "  --dump-pose N    (with --fight) dump the first N fight frames as JSONL to\n"
@@ -77,10 +78,13 @@ struct LoopStep {
 // The navigation hub is the DOJO home screen (screen 3 — the screen the
 // game boots into; the original starts in the Dojo, not the GeneralMenu).
 // The Dojo buttons are FIGHT(training)/MAP/SHOP/PROFILE. The loop is:
-//   dojo -> Map -> Bosses fight -> Results -> Map -> BACK to dojo
+//   dojo -> Map -> BOSS_LYNX fight -> Results -> Map -> BACK to dojo
 //   dojo -> Shop -> buy knives -> BACK to dojo
-//   dojo -> Equipment -> equip knives -> BACK to dojo
-//   dojo -> Map -> Training fight -> Results -> Map
+//   dojo -> Profile (MOVES tab; equip is OPEN) -> BACK to dojo
+//   dojo -> Map -> BOSS_LYNX fight -> Results -> Map
+// (Equip is OPEN — JS moves it into the shop detail `$o`, SHOP_STATIC §4 —
+//  so the bought knives are owned but not equipped and the move list stays
+//  the saved weapon's; the loop verifies the honest path and logs it.)
 //
 // Layout math (matches the screen implementations in core/app/screens.cpp):
 //   - dojo/shell nav: the shared `za` VERTICAL column (kZaNav, za_layout):
@@ -129,12 +133,15 @@ static const LoopStep kLoopSteps[] = {
     //    arrival.
     {184.0f, 442.0f, "dojo->equipment (PROFILE)", kScreenDojo, 0,
      kScreenProfile, 0, "loop_equip.png"},
-    // 8: Equipment -> equip WEAPON_KNIVES. With the 5 base items
-    //    (Body/Head/Fists/NoRanged/NoMagic) + the bought knives, the grid
-    //    (only Weapon/Armor/Helm cards count) is: Body(0) (704,220),
-    //    Head(1) (944,220), Fists(2) (704,330), WEAPON_KNIVES(3) (944,330)
-    //    - grid_x = 0.55*1280 = 704, card 3 = row 1 col 1.
-    {1280 * 0.55f + 240.0f, 220.0f + 110.0f, "equip WEAPON_KNIVES", kScreenProfile, 0, -1, 12,
+    // 8: Profile -> MOVES tab (`cs` strip tab 1, the folded `qv` sub-view).
+    //    RE-POINTED: the removed 5-slot equip grid used to be clicked here,
+    //    but equip is OPEN (JS moves it into the shop detail `$o`,
+    //    SHOP_STATIC §4) and the ported Profile has no equip action. The
+    //    honest remaining Profile content is the tab strip + the learned
+    //    move list (`qv`), so the loop exercises that instead. Tab 1 centre:
+    //    cx0 + step = 461.1 + 119.3 = 580.4, cy = 720 - 94.9/2 = 672.6
+    //    (profile_tab_layout()).
+    {580.4f, 672.6f, "profile MOVES tab (equip OPEN)", kScreenProfile, 0, -1, 12,
      nullptr},
     // 9: Equipment -> BACK to the Dojo hub.
     {64.0f, 40.0f, "equipment->dojo (BACK)", kScreenProfile, 0, kScreenDojo, 0, nullptr},
@@ -162,8 +169,8 @@ struct HeadlessLoopDriver {
     bool captured_menu = false;
     int guard = 0;
     bool finished = false;
-    int before_equip_moves = 0;
-    int after_equip_moves = 0;
+    int before_moves = 0;   // move-list size at the first fight (saved weapon)
+    int after_moves = 0;    // move-list size at the second fight (post-buy)
     bool logged_before = false;
     bool logged_after = false;
     std::string last_capture;
@@ -256,14 +263,17 @@ struct HeadlessLoopDriver {
                                                            ->move_list_size())
                                      : 0;
                 if (step == 1) {
-                    before_equip_moves = size;
+                    before_moves = size;
                     logged_before = true;
-                    std::fprintf(stdout, "[loop] move list before equip: %d moves (Fists)\n",
+                    std::fprintf(stdout, "[loop] move list before buy: %d moves (saved weapon)\n",
                                  size);
                 } else if (step == 11) {
-                    after_equip_moves = size;
+                    after_moves = size;
                     logged_after = true;
-                    std::fprintf(stdout, "[loop] move list after equip: %d moves (Knives)\n",
+                    // Equip is OPEN (JS shop detail `$o`, SHOP_STATIC §4): the
+                    // bought knives are owned but not equipped, so the saved
+                    // weapon's move list is unchanged.
+                    std::fprintf(stdout, "[loop] move list after buy: %d moves (equip OPEN)\n",
                                  size);
                 }
                 std::fflush(stdout);
@@ -294,8 +304,8 @@ struct HeadlessLoopDriver {
             std::fprintf(stdout, "[loop] ALL %d STEPS DONE\n", kLoopStepCount);
             if (logged_before && logged_after) {
                 std::fprintf(stdout,
-                             "[loop] move-list diff: %d moves (Fists) -> %d moves (Knives equipped)\n",
-                             before_equip_moves, after_equip_moves);
+                             "[loop] move-list before/after buy: %d -> %d moves (equip OPEN)\n",
+                             before_moves, after_moves);
             }
         }
     }
