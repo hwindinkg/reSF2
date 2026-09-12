@@ -24,6 +24,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "render/gl_types.hpp"
 #include "render/sprite_batch.hpp"
@@ -158,6 +159,21 @@ public:
     // Render pass: renders `node` (and its children) through `camera`.
     void render_node(sf2::scene::Node& node, const Camera& camera);
 
+    // Screen-space clip (top-left origin, pixels): every draw issued between
+    // push_clip and pop_clip is masked to the rect. This is the native
+    // equivalent of the JS node clip `node.lL(gb)`:
+    //   `lL(a){...b=new wg...b.lL(a)}` (sf2.js L1603) stores the rect on a
+    //   per-node mask state; `wg.lL` (L1603) turns the `gb` (left/top/right/
+    //   bottom) into a 4-corner polygon in the node's local space; the WebGL
+    //   backend applies it with GL_STENCIL_TEST (`Vka`, 2960), the canvas
+    //   backend with `Path2D` + `ctx.clip`.
+    // The native renderer has no stencil pass, so this maps to the closest
+    // axis-aligned equivalent, glScissor (documented in SpriteBatch::set_clip).
+    // It clips the node AND its children (the JS state stacks per node), so
+    // nested pushes intersect with the currently active rect.
+    void push_clip(float x, float y, float w, float h);
+    void pop_clip();
+
     // Clear to `color` (RGBA bytes, e.g. 0x000000) and start a frame.
     void begin_frame(const Camera& camera);
 
@@ -170,6 +186,20 @@ public:
     GLFWwindow* window() const { return window_; }
 
 private:
+    // One screen-space clip rect (top-left origin, pixels); the clip stack
+    // entry (see push_clip). Kept in float and rounded when handed to
+    // glScissor so nested intersections stay exact.
+    struct ClipRect {
+        float x = 0.0f;
+        float y = 0.0f;
+        float w = 0.0f;
+        float h = 0.0f;
+    };
+
+    // Pushes the top of `clip_stack_` (or clears the clip when empty) into
+    // the SpriteBatch.
+    void apply_clip();
+
     // One frame of the particle effects atlas (JS `b.re.dt[id]`, L1148/L1151):
     // the packed rect `Nc`, the untrimmed `sourceSize` `fa`, the `yx` trim
     // flag and the owning texture size (for UV normalization).
@@ -184,6 +214,9 @@ private:
     SpriteBatch batch_;
     std::map<std::string, GLuint> textures_;
     Camera camera_;
+
+    // Active clip stack (see push_clip); empty = no clip.
+    std::vector<ClipRect> clip_stack_;
 
     // Location particle effects atlas (`E.get(1304)`), resolved lazily by
     // `ensure_particle_atlas` and drawn by `draw_particle`.

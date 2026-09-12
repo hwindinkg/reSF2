@@ -7,6 +7,7 @@
 
 #include <cstdio>
 #include <cmath>
+#include <algorithm>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -390,8 +391,51 @@ void Renderer::render_node(sf2::scene::Node& node, const Camera& camera) {
     }
 }
 
+void Renderer::apply_clip() {
+    if (clip_stack_.empty()) {
+        batch_.set_clip(false, 0, 0, 0, 0);
+        return;
+    }
+    const ClipRect& r = clip_stack_.back();
+    batch_.set_clip(true, static_cast<int>(std::lround(r.x)),
+                    static_cast<int>(std::lround(r.y)),
+                    static_cast<int>(std::lround(std::max(0.0f, r.w))),
+                    static_cast<int>(std::lround(std::max(0.0f, r.h))));
+}
+
+void Renderer::push_clip(float x, float y, float w, float h) {
+    ClipRect r{x, y, w, h};
+    if (!clip_stack_.empty()) {
+        // A child node mask is bounded by its parent's (the JS state stacks
+        // per node): intersect the two axis-aligned rects.
+        const ClipRect& p = clip_stack_.back();
+        const float nx = std::max(p.x, r.x);
+        const float ny = std::max(p.y, r.y);
+        const float nr = std::min(p.x + p.w, r.x + r.w);
+        const float nb = std::min(p.y + p.h, r.y + r.h);
+        r.x = nx;
+        r.y = ny;
+        r.w = std::max(0.0f, nr - nx);
+        r.h = std::max(0.0f, nb - ny);
+    }
+    clip_stack_.push_back(r);
+    apply_clip();
+}
+
+void Renderer::pop_clip() {
+    if (clip_stack_.empty()) {
+        return;  // unbalanced pop: keep the caller's no-clip invariant
+    }
+    clip_stack_.pop_back();
+    apply_clip();
+}
+
 void Renderer::begin_frame(const Camera& camera) {
     camera_ = camera;
+    // Drop any clip left from the previous frame BEFORE the clear — a stale
+    // scissor would mask glClear itself.
+    clip_stack_.clear();
+    batch_.set_clip(false, 0, 0, 0, 0);
     gl::glViewport(0, 0, static_cast<int>(camera.view_w), static_cast<int>(camera.view_h));
     gl::glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     gl::glClear(GL_COLOR_BUFFER_BIT);

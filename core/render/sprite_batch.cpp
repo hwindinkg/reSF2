@@ -143,6 +143,29 @@ void SpriteBatch::set_viewport(int view_w, int view_h) {
     gl::glViewport(0, 0, view_w_, view_h_);
 }
 
+void SpriteBatch::set_clip(bool enabled, int x, int y, int w, int h) {
+    if (enabled == clip_enabled_ &&
+        (!enabled || (x == clip_x_ && y == clip_y_ && w == clip_w_ && h == clip_h_))) {
+        return;  // no state change — do not force a batch flush
+    }
+    // Flush what is already batched under the PREVIOUS clip, exactly like a
+    // texture change forces a draw boundary in `add_quad`.
+    draw_batch();
+    clip_enabled_ = enabled;
+    clip_x_ = x;
+    clip_y_ = y;
+    clip_w_ = w;
+    clip_h_ = h;
+    if (enabled) {
+        gl::glEnable(GL_SCISSOR_TEST);
+        // Screen top-left -> GL bottom-left origin.
+        const int sy = view_h_ - (clip_y_ + clip_h_);
+        gl::glScissor(clip_x_, sy, clip_w_, clip_h_);
+    } else {
+        gl::glDisable(GL_SCISSOR_TEST);
+    }
+}
+
 void SpriteBatch::add_quad(const SpriteQuad& quad, unsigned int texture) {
     if (!vertices_.empty() && texture != current_texture_) {
         draw_batch();

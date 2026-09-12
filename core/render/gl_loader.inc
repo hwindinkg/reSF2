@@ -18,6 +18,7 @@ SF2_GL_FUNC(void, glClearColor, (float r, float g, float b, float a))
 SF2_GL_FUNC(void, glClear, (unsigned int mask))
 SF2_GL_FUNC(void, glViewport, (int x, int y, int w, int h))
 SF2_GL_FUNC(void, glBlendFunc, (unsigned int sfactor, unsigned int dfactor))
+SF2_GL_FUNC(void, glScissor, (int x, int y, int w, int h))
 SF2_GL_FUNC(void, glPixelStorei, (unsigned int pname, int param))
 SF2_GL_FUNC(void, glReadBuffer, (unsigned int mode))
 SF2_GL_FUNC(void, glReadPixels, (int x, int y, int w, int h, unsigned int format,

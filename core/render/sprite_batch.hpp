@@ -55,6 +55,18 @@ public:
     void add_triangles(const float* verts, std::size_t vertex_count, float r,
                        float g, float b, float a = 1.0f);
 
+    // Screen-space clip rect (top-left origin, pixels). The native stand-in
+    // for the JS node mask (`sf2.js` `lL` L1603 / Shop scroller `Gg.ba`
+    // L1885); the JS WebGL backend actually draws the mask polygon into the
+    // stencil buffer (`Vka`, GL_STENCIL_TEST 2960), which this axis-aligned
+    // renderer has no pass for. `glScissor` is the closest faithful
+    // equivalent for the scroller's axis-aligned viewer rect. glScissor uses
+    // a BOTTOM-left origin, so the rect is flipped against the view height.
+    // Changing the clip is a hard draw boundary: pending geometry is flushed
+    // under the OLD clip first, so a batch never mixes clip states.
+    // `enabled=false` clears the clip (a no-op state).
+    void set_clip(bool enabled, int x, int y, int w, int h);
+
     // Draws everything currently batched and empties the buffer.
     void flush();
 
@@ -73,6 +85,14 @@ private:
 
     std::vector<SpriteVertex> vertices_;
     unsigned int current_texture_ = 0;  // 0 = none bound yet
+
+    // Active clip (top-left origin, screen pixels); `clip_enabled_` false =
+    // no clip (GL_SCISSOR_TEST disabled).
+    bool clip_enabled_ = false;
+    int clip_x_ = 0;
+    int clip_y_ = 0;
+    int clip_w_ = 0;
+    int clip_h_ = 0;
 };
 
 } // namespace sf2::render
