@@ -991,6 +991,62 @@ bool load_settings_icons_atlas(App& app) {
     return ok;
 }
 
+// Lazily registers the `res/ui/sliced.*` atlas (JS asset id 244) — the `Bb`
+// text-button plates. `Bb.$w(E.get(244), this.fza(a))` (L1842) with
+// `fza(a) = "btn" + a.substr(7)` (L1844): style "EButtonWhite" -> "btnWhite",
+// "EButtonDark" -> "btnDark", "EButtonBeige" -> "btnBeige". App::init does
+// not load this atlas, so every non-`od` `Bb` would otherwise fall back to a
+// flat quad. Ships as ASTC ktx / dds (the menu/misc decode path).
+bool load_sliced_atlas(App& app) {
+    static bool done = false;
+    static bool ok = false;
+    if (done) return ok;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/ui";
+        std::string json_path;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("sliced.", 0) == 0 && entry.path().extension() == ".json") {
+                json_path = entry.path().string();
+                break;
+            }
+        }
+        if (json_path.empty()) return false;
+        sf2::data::Texture tex;
+        bool decoded = false;
+        for (const std::string& ext : {".ktx", ".dds", ".webp", ".png"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("sliced.", 0) == 0 && entry.path().extension() == ext) {
+                    if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                        decoded = true;
+                        break;
+                    }
+                }
+            }
+            if (decoded) break;
+        }
+        if (!decoded) return false;
+        const GLuint gl = app.renderer().texture_for("sliced_atlas", tex);
+        if (gl == 0) return false;
+        std::ifstream in(json_path, std::ios::binary);
+        std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+        const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+        for (const auto& fr : a.frames) {
+            app.register_atlas_frame(fr, a.w, a.h, gl);
+        }
+        std::fprintf(stdout, "[ui] sliced atlas: %dx%d %zu frames\n", a.w, a.h,
+                     a.frames.size());
+        std::fflush(stdout);
+        ok = true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[ui] sliced atlas load failed: %s\n", e.what());
+    }
+    return ok;
+}
+
 // The `Ib` notification/hint bar (JS L1905-1912). Layout: `node.C(W -
 // scroll.width*scale)`, `node.D(za.Sp)`; scroll `gk(600,250,50,0)` horizontal
 // with a `Fg(600,250,1,30)` content frame (paper rails). Sensei image = JS
@@ -1617,6 +1673,18 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                           std::to_string(badges[i]), 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
     }
+    // [OPEN] Disciple toggle `za.zq` (JS L1983): an icon-button
+    // `db.xz(E.get(262), p.o.Y0() ? y.Tna : y.Sna)` — menu-atlas frames
+    // `btn_punching_bag` / `btn_disciple` (`y` table L2464). `za.layout`
+    // (L1975) scales it `scroll.Af.width*.5 / zq.Y.fa.x` and places it at
+    // `(a/2 + scroll.node.ya, a/2 + PL.qa() + scroll.Af.height)`; a tap
+    // toggles the save `Disciple` attr (`oub`, L271) and refreshes the frame
+    // (`FU`). It is shown only when the active screen is Dojo AND the
+    // `ShowDojoDisciple` save attr is > 0 (`g$a`, L271; the static `za.FU`
+    // L1207 sets `Xub(screen==3 && g$a())`). The native `WarriorSave` has
+    // neither `Disciple` nor `ShowDojoDisciple`, so the visibility gate and
+    // the toggle persistence are not derivable without new save storage —
+    // OPEN (no invention).
 }
 
 // ---------------------------------------------------------------------------
@@ -3005,12 +3073,41 @@ void DojoScreen::render_impl(App& app) {
                 }
             }
         }
-        // [OPEN] The hub's enemy (the Punchbag dummy, `merged_bag`) is not
-        // drawn. 876a3a97 added a bind-pose draw here; it rendered nothing
-        // (isolated: bag ON vs OFF = +0.03pp, oracle punchbag still absent),
-        // so it was removed — the pre-regression baseline had no bag either.
-        // A correct draw needs the bag's real idle clip / COM anchor verified
-        // against the oracle (DOJO_BG_STATIC §1/§6), not a 0-bone synthetic.
+        // The hub's enemy = the Punchbag dummy (`merged_bag`). JS runs the
+        // `FightNone` Punchbag Training viewer on the hub (`Tf.init` L1971),
+        // so its enemy is the dummy at the ModelsViewer enemy spawn
+        // (973,-110; `Bf.zjb` L476 `B_ = EnemyPosition`). The Warrior is
+        // `NotAnimation=1` (JS_FLOW.md:66), so the dummy HOLDS its bind pose
+        // (no clip needed — a 1-frame empty clip keeps every bone at bind).
+        // `ev.Gf` L845 draws the enemy FIRST (z=-.001), behind the player.
+        if (!dojo_bag_tried_) {
+            dojo_bag_tried_ = true;
+            if (app.has_fight_assets()) {
+                FightAssets& assets = app.fight_assets();
+                if (!assets.merged_bag.bones.empty()) {
+                    dojo_bag_ = std::make_unique<sf2::scene::Fighter>();
+                    dojo_bag_->set_model(assets.merged_bag);
+                    dojo_bag_->set_color(assets.dojo.root_color());
+                    dojo_bag_ok_ = true;
+                    std::fprintf(stdout,
+                                 "[dojo] punchbag dummy ready (bones %zu, bind pose)\n",
+                                 assets.merged_bag.bones.size());
+                    std::fflush(stdout);
+                }
+            }
+        }
+        if (dojo_bag_ok_ && dojo_bag_ != nullptr && have_hub_cam) {
+            const float enemy_x =
+                (app.has_fight_assets() ? app.fight_assets().dojo.enemy_spawn_x() : 973.0f) -
+                arena_half;
+            const float enemy_y =
+                (app.has_fight_assets() ? app.fight_assets().dojo.enemy_spawn_y() : -110.0f) +
+                cont_y;
+            sf2::data::anim_clip bind_clip;  // NotAnimation=1: bind pose (empty frame)
+            bind_clip.frames.resize(1);
+            dojo_bag_->sample(bind_clip, 0, enemy_x, enemy_y, 1);
+            draw_dojo_figure(ren, hub_cam, *dojo_bag_);
+        }
         if (dojo_fig_ok_ && dojo_fighter_ != nullptr && dojo_idle_ != nullptr &&
             !dojo_idle_->frames.empty() && have_hub_cam) {
             const int nframes = static_cast<int>(dojo_idle_->frames.size());
@@ -4618,7 +4715,10 @@ void FightScreen::render_impl(App& app) {
             const float scale = (fnt == app.digits_font()) ? (120.0f * hud_c / 90.0f)
                                                            : (120.0f * hud_c / 100.0f);
             // shadow (black) slightly offset, then white foreground
-            const float ty = 44.0f;
+            // JS `Sf.layout` (L2037): `this.Kp.D(this.Id.node.ra-120*c)` — the
+            // timer text sits `120*c` above the HUD plate bottom. (At 1280x720
+            // the old constant 44 matched 45.3; the formula now scales.)
+            const float ty = bar_y - 120.0f * hud_c;
             app.draw_text_centered(*fnt, tex, kViewW * 0.5f + 1.8f, ty + 1.8f, tstr, scale, 0.0f, 0.0f,
                                    0.0f);
             app.draw_text_centered(*fnt, tex, kViewW * 0.5f, ty, tstr, scale, 1.0f, 0.95f, 0.75f);
@@ -5700,11 +5800,17 @@ void ShopScreen::render_impl(App& app) {
                       sl.viewer.width(), 26.0f, "No items in this category yet.", 0.8f,
                       UiAlign::Center, 0.7f, 0.7f, 0.7f);
     }
+    // The JS scroller clips its cells to the viewer rect — `Gg.VK` (L1891)
+    // plus the node mask `lL` (L1603). `Renderer::push_clip`/`pop_clip` is
+    // the native equivalent (renderer.hpp: glScissor, top-left origin), so a
+    // partially-scrolled cell is cut at the viewer edge instead of drawing
+    // over the side panels / tab strip.
+    ren.push_clip(sl.viewer.J, sl.viewer.P, sl.viewer.width(), sl.viewer.height());
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const CatalogItem& it = items_[rows[i]];
-        // `Gg.aa` (L1886): the scroll offset `ei.node.ra` (`scroll_y_`)
-        // shifts every cell; the native culls fully-outside cells by rect
-        // (the renderer has no scissor/mask) — partial cells still draw.
+        // `Gg.aa` (L1886): the scroll offset `ei.node.ra` (`scroll_y_`) shifts
+        // every cell; the rect cull below drops FULLY-outside cells, the clip
+        // handles the partially-visible ones.
         const float cell_y = sl.cell_top + scroll_y_ +
                              static_cast<float>(i) * sl.cell_step;
         if (cell_y + sl.cell_h <= sl.cell_top ||
@@ -5742,6 +5848,7 @@ void ShopScreen::render_impl(App& app) {
                           "OWNED", 0.6f, UiAlign::Left, 1.0f, 0.85f, 0.4f);
         }
     }
+    ren.pop_clip();  // end the `Gg` scroller viewer mask
     // Side panels (L2294-2295): right detail `bc`, left `MJ` params + `op`
     // enchantments. Only tabs 0..4 (`Q5` L2302).
     {
@@ -5762,9 +5869,17 @@ void ShopScreen::render_impl(App& app) {
             const ShopRect ar = shop_action_rect(rp);
             const char* alabel = shop_action_label(seen_, *sel_it);
             const bool ah = side_hover_ == 1;
-            draw_flat_button(app, alabel, (ar.J + ar.N) * 0.5f, (ar.P + ar.W) * 0.5f,
-                             ar.width(), ar.height(), ah ? 0.35f : 0.25f, ah ? 0.65f : 0.45f,
-                             ah ? 0.35f : 0.25f, ah);
+            // JS `Oa.init` (L2289): `Up = new Bb("EButtonWhite")` -> the
+            // sliced-atlas frame `btnWhite` (`Bb.fza` L1844). Flat only on a
+            // genuine art miss.
+            if (!(load_sliced_atlas(app) &&
+                  try_draw_atlas_button(app, "btnWhite", (ar.J + ar.N) * 0.5f,
+                                        (ar.P + ar.W) * 0.5f, ar.width(), ar.height(), 1.0f,
+                                        /*fill=*/true))) {
+                draw_flat_button(app, alabel, (ar.J + ar.N) * 0.5f, (ar.P + ar.W) * 0.5f,
+                                 ar.width(), ar.height(), ah ? 0.35f : 0.25f,
+                                 ah ? 0.65f : 0.45f, ah ? 0.35f : 0.25f, ah);
+            }
             draw_ui_label(app, ar.J, (ar.P + ar.W) * 0.5f - 10.0f, ar.width(), 20.0f, alabel,
                           0.75f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
@@ -6227,10 +6342,16 @@ void EquipmentScreen::render_impl(App& app) {
                       "fs ACHIEVEMENT_SLIDER (L2213): v.uv.tI (achievements.xml 1356) + p.o.yi counters -> hs/is cell", 0.5f,
                       UiAlign::Center, 0.6f, 0.6f, 0.6f);
     }
-    // The BACK button (top-left).
-    draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
+    // The BACK button (top-left). OPEN: the JS Profile `vb` (L2189-2201) is a
+    // tabbed screen (`cs` tabs only) with no BACK node, so there is no JS art
+    // for this control — it is a native navigation affordance. It uses the
+    // same misc `Arrow` frame (`y.sRa`) as the other back buttons, not an
+    // unconditional non-JS flat plate.
+    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
+        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
     draw_za_chrome(app, kScreenProfile);
 }
@@ -6348,14 +6469,24 @@ void SettingsScreen::render_impl(App& app) {
     draw_ui_label(app, kViewW * 0.5f - 500.0f, s.notice_y, 1000.0f, 40.0f,
                   "Attention! Game must be restarted for these settings to apply.",
                   0.75f, UiAlign::Center, 1.0f, 0.8f, 0.5f);
-    // BACK (`EButtonDark`) + RESTART (`EButtonBeige`, L1930). `draw_flat_button`
-    // draws the plate only; the `Bb` label is a separate text node.
-    draw_flat_button(app, "", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 0.35f, 0.3f, 0.28f,
-                     hover_ == 0);
+    // BACK (`Bb("EButtonDark")`) + RESTART (`Bb("EButtonBeige")`, od defaults
+    // L1894): `Bb.fza` (L1844) maps the style to the sliced-atlas frame
+    // (`btnDark` / `btnBeige`). Flat plate only on a genuine art miss; the
+    // `Bb` label is a separate text node.
+    if (!(load_sliced_atlas(app) &&
+          try_draw_atlas_button(app, "btnDark", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 1.0f,
+                                /*fill=*/true))) {
+        draw_flat_button(app, "", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 0.35f, 0.3f, 0.28f,
+                         hover_ == 0);
+    }
     draw_ui_label(app, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f, s.btn_w, 28.0f, "BACK",
                   0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    draw_flat_button(app, "", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h, 0.6f, 0.5f, 0.3f,
-                     false);
+    if (!(load_sliced_atlas(app) &&
+          try_draw_atlas_button(app, "btnBeige", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h,
+                                1.0f, /*fill=*/true))) {
+        draw_flat_button(app, "", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h, 0.6f, 0.5f, 0.3f,
+                         false);
+    }
     draw_ui_label(app, s.restart_cx - s.btn_w * 0.5f, s.restart_cy - 14.0f, s.btn_w, 28.0f,
                   "RESTART", 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
 }
