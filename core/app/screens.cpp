@@ -1048,6 +1048,64 @@ bool load_scroll_atlas(App& app) {
     return ok;
 }
 
+// Lazily registers the `res/ui/achievements.*` atlas (JS asset id 270) — the
+// `Ed` achievement-cell icon atlas (`Achievements01/ach_*` .. `Achievements03/*`,
+// `panel`). `is` builds the icon via `Ed(270,y.MQa)` (L2212) and `y.MQa`
+// (L2470) = "Achievements01/ach_block_gold". App::init registers menu/shop/
+// profile/misc/skills/controller but NOT this atlas, so every achievement cell
+// icon resolved to nothing (the old `draw_user_image` looked under
+// res/users/images). Ships as ASTC ktx (+ dds sibling), decodable after the
+// KTX row-orientation fix. Idempotent.
+bool load_achievements_atlas(App& app) {
+    static bool done = false;
+    static bool ok = false;
+    if (done) return ok;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/ui";
+        std::string json_path;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("achievements.", 0) == 0 && entry.path().extension() == ".json") {
+                json_path = entry.path().string();
+                break;
+            }
+        }
+        if (json_path.empty()) return false;
+        sf2::data::Texture tex;
+        bool decoded = false;
+        for (const std::string& ext : {".ktx", ".dds", ".webp", ".png"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("achievements.", 0) == 0 && entry.path().extension() == ext) {
+                    if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                        decoded = true;
+                        break;
+                    }
+                }
+            }
+            if (decoded) break;
+        }
+        if (!decoded) return false;
+        const GLuint gl = app.renderer().texture_for("achievements_atlas", tex);
+        if (gl == 0) return false;
+        std::ifstream in(json_path, std::ios::binary);
+        std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+        const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+        for (const auto& fr : a.frames) {
+            app.register_atlas_frame(fr, a.w, a.h, gl);
+        }
+        std::fprintf(stdout, "[ui] achievements atlas: %dx%d %zu frames\n", a.w, a.h,
+                     a.frames.size());
+        std::fflush(stdout);
+        ok = true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[ui] achievements atlas load failed: %s\n", e.what());
+    }
+    return ok;
+}
+
 // --- Location atlas page chain (JS `Bf.init` L474 + `ni.init` L1142) ------
 // A location ships one TexturePacker pack per page: `<loc>.<hash>.json` for
 // page 1, then `<loc>-2.<hash>.json`, `<loc>-3.<hash>.json`, … (verified in
@@ -1521,6 +1579,24 @@ bool draw_user_image(App& app, const std::string& file_name, float cx, float cy,
     s.transform.set_scale(sc, sc);
     app.renderer().draw_sprite(s, ui_camera());
     return true;
+}
+
+// Draws a profile-cell icon: the JS `Ed.Fs = R.$(E.get(atlas), frame, icon)`
+// (L2202) used by the `uk` perk cell (`Icons01/IconAvenger`, L2222) and the
+// `is` achievement cell (`Achievements01/ach_block_gold`, L2212). The XML
+// image refs are dot-form; JS `Ye.qI` (L1354) and `Eb.replace(a,".","/")`
+// (L2212) rewrite EVERY '.' to '/' (`Eb.replace` = `a.split(b).join(c)`,
+// L2477), so `Icons01.IconAvenger` -> `Icons01/IconAvenger`,
+// `Achievements01.ach_x` -> `Achievements01/ach_x`, `Trick4.double_sweep` ->
+// `Trick4/double_sweep`. Aspect-fit centred via the shared atlas path (which
+// logs a genuine miss once); returns false so the caller keeps its explicit
+// flat fallback — the cell is never a silent blank.
+bool draw_cell_icon(App& app, const std::string& ref, float cx, float cy, float w, float h,
+                    float alpha) {
+    if (ref.empty() || w <= 0.0f || h <= 0.0f) return false;
+    std::string frame = ref;
+    std::replace(frame.begin(), frame.end(), '.', '/');
+    return try_draw_atlas_button(app, frame, cx, cy, w, h, alpha);
 }
 
 // ---------------------------------------------------------------------------
@@ -6909,19 +6985,68 @@ void EquipmentScreen::render_impl(App& app) {
             const float cx = v.J + gutter + (static_cast<float>(col) + 0.5f) * col_w;
             const float cy = row_top + row_h * 0.5f;
             sf2::render::Renderer& rr = app.renderer();
-            // `uk` cell art miss -> a flat plate (never a silent blank).
-            const float pr = r.available ? 0.22f : 0.12f;
-            const float pg = r.available ? 0.26f : 0.14f;
-            const float pb = r.available ? 0.36f : 0.17f;
-            const float q[] = {cx - cw * 0.5f, cy - row_h * 0.5f + 3.0f,
-                               cx + cw * 0.5f, cy - row_h * 0.5f + 3.0f,
-                               cx + cw * 0.5f, cy + row_h * 0.5f - 3.0f,
-                               cx - cw * 0.5f, cy - row_h * 0.5f + 3.0f,
-                               cx + cw * 0.5f, cy + row_h * 0.5f - 3.0f,
-                               cx - cw * 0.5f, cy + row_h * 0.5f - 3.0f};
-            rr.draw_triangles(q, 6, pr, pg, pb, 0.95f);
+            // `tk.jC` gutter (`Rx`, L2226/2217): `pieces/perkcircle` (`y.kSa`)
+            // at the seam between the two `uk` cells with `pieces/perk_line_h`
+            // (`y.coa`) connectors. Drawn once per two-cell row.
+            if (col == 1) {
+                const float gx = cx - col_w * 0.5f;
+                const float gsz = row_h * 0.5f;
+                (void)try_draw_atlas_button(app, "pieces/perk_line_h", gx - gsz * 0.9f, cy,
+                                            gsz * 1.2f, 4.0f, 0.85f, /*fill=*/true);
+                (void)try_draw_atlas_button(app, "pieces/perk_line_h", gx + gsz * 0.9f, cy,
+                                            gsz * 1.2f, 4.0f, 0.85f, /*fill=*/true);
+                (void)try_draw_atlas_button(app, "pieces/perkcircle", gx, cy, gsz, gsz, 1.0f);
+            }
+            // `uk` cell icon `Ed.Fs` (L2202): the perks.xml `Image` frame on
+            // atlas 246 (`skills`; default `y.gTa` "Icons01/IconAvenger" L2470,
+            // `Ye.qI` dot->slash). `pieces/perkback` (`Ed.FH`, L2202) is the
+            // backplate; a flat plate is the explicit miss fallback.
+            const float ico = row_h * 0.78f;
+            const float icx = cx - cw * 0.5f + ico * 0.7f;
+            if (!try_draw_atlas_button(app, "pieces/perkback", icx, cy, ico, ico, 1.0f)) {
+                const float pr = r.available ? 0.22f : 0.12f;
+                const float pg = r.available ? 0.26f : 0.14f;
+                const float pb = r.available ? 0.36f : 0.17f;
+                const float q[] = {icx - ico * 0.5f, cy - ico * 0.5f,
+                                   icx + ico * 0.5f, cy - ico * 0.5f,
+                                   icx + ico * 0.5f, cy + ico * 0.5f,
+                                   icx - ico * 0.5f, cy - ico * 0.5f,
+                                   icx + ico * 0.5f, cy + ico * 0.5f,
+                                   icx - ico * 0.5f, cy + ico * 0.5f};
+                rr.draw_triangles(q, 6, pr, pg, pb, 0.95f);
+            }
+            // `uk.k5`/`Ed.Syb` (L2222/L2203): `zo = EW || Be==3` where
+            // `EW = p.o.bb() < perk.level` (player level below the tier) and
+            // `Be==3` = an owned/learned perk (`new Ih(...,3)` in `mXa`, L2211).
+            // When `zo` the icon `Fs` is HIDDEN and `pieces/icons_kick_blocked`
+            // (`V$`) is shown; `Ed.DOa` overlays `pieces/icons_kick_off` (`X$`)
+            // whenever the perk is not active (`!$r`).
+            const bool perk_owned = r.learned_level > 0;
+            const bool perk_locked = (w.level < r.tier) || perk_owned;
+            if (perk_locked) {
+                (void)try_draw_atlas_button(app, "pieces/icons_kick_blocked", icx, cy, ico, ico,
+                                            0.95f);
+            } else if (!draw_cell_icon(app, r.image, icx, cy, ico * 0.92f, ico * 0.92f, 1.0f)) {
+                const float isz = ico * 0.22f;
+                const float iq[] = {icx - isz, cy - isz, icx + isz, cy - isz,
+                                    icx + isz, cy + isz, icx - isz, cy - isz,
+                                    icx + isz, cy + isz, icx - isz, cy + isz};
+                rr.draw_triangles(iq, 6, 0.35f, 0.35f, 0.4f, 0.95f);
+            }
+            if (!r.available) {
+                (void)try_draw_atlas_button(app, "pieces/icons_kick_off", icx, cy, ico, ico, 0.9f);
+            }
+            // `uk.Dy` perk-level badge (`i9a` "pieces/level<N>", L2222).
+            if (r.learned_level >= 1 && r.learned_level <= 9) {
+                char lb[24];
+                std::snprintf(lb, sizeof(lb), "pieces/level%d", r.learned_level);
+                (void)try_draw_atlas_button(app, lb, icx + ico * 0.42f, cy - ico * 0.42f,
+                                            ico * 0.5f, ico * 0.5f, 1.0f);
+            }
+            const float tx = cx - cw * 0.5f + ico * 1.45f;
+            const float tw = std::max(24.0f, cw - ico * 1.45f - 4.0f);
             const std::string nm = loc(app, r.name, r.name);
-            draw_ui_label(app, cx - cw * 0.5f + 5.0f, cy - 17.0f, cw - 10.0f, 18.0f, nm, 0.52f,
+            draw_ui_label(app, tx, cy - 17.0f, tw, 18.0f, nm, 0.52f,
                           UiAlign::Left, 1.0f, 1.0f, 1.0f);
             char sbuf[64];
             if (r.kind == "Upgrade") {
@@ -6931,7 +7056,7 @@ void EquipmentScreen::render_impl(App& app) {
             } else {
                 std::snprintf(sbuf, sizeof(sbuf), "LEARN AT LV %d", r.tier);
             }
-            draw_ui_label(app, cx - cw * 0.5f + 5.0f, cy + 3.0f, cw - 10.0f, 16.0f, sbuf, 0.44f,
+            draw_ui_label(app, tx, cy + 3.0f, tw, 16.0f, sbuf, 0.44f,
                           UiAlign::Left, 0.8f, 0.85f, 0.9f);
             ++col;
         }
@@ -7000,13 +7125,18 @@ void EquipmentScreen::render_impl(App& app) {
             }
         }
     } else if (tab_ == kProfileTabAchiev) {
+        // JS atlas id 270 (`achievements`) is NOT registered by App::init —
+        // load it lazily here (`is`/`Ed(270,y.MQa)`, L2212) before the icon
+        // draws below.
+        (void)load_achievements_atlas(app);
         // Ported `fs` ACHIEVEMENT_SLIDER body (L2213-2216): `fs.El` of
         // `Ba(def, value)` built by `uZ`/`cab` from achievements.xml (asset
         // 1356 via `td.Adb`/`Fib` L1160) joined with the save
         // `<Counters>`/`<Achievements>`. Each row is the `hs`/`is` cell
         // (`ba(400,130)`, `fs.NC` L2216): `Ed(270,y.MQa)` icon + `Uf`
         // progress + the `uy` progress text (`is.D1a` L2213). The icon atlas
-        // (270) is ASTC -> flat cell + the `as` description text (L2210).
+        // (270) is registered by `load_achievements_atlas` above (ASTC ktx,
+        // decodable after the KTX row-orientation fix); miss -> flat square.
         if (achiev_rows_.empty()) {
             draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
                           loc(app, "achievement_Completed", "Completed"), 0.8f, UiAlign::Center,
@@ -7023,8 +7153,10 @@ void EquipmentScreen::render_impl(App& app) {
                                    x0, yy + 2.0f, x1, yy + row_h - 2.0f, x0, yy + row_h - 2.0f};
                 rr.draw_triangles(q, 6, r.reward_available ? 0.28f : 0.14f, 0.16f, 0.12f,
                                   0.95f);
-                // Icon `is.icon` (atlas 270 art miss -> flat square).
-                if (!draw_user_image(app, r.icon, x0 + 22.0f, cy, 32.0f, 32.0f, 0.9f)) {
+                // Icon `is` `Ed.Fs` (L2212): `Achievements01/ach_*` on atlas
+                // 270 (`y.MQa` "Achievements01/ach_block_gold", L2470). The
+                // flat square is the explicit miss fallback.
+                if (!draw_cell_icon(app, r.icon, x0 + 22.0f, cy, 34.0f, 34.0f, 1.0f)) {
                     const float isz = 16.0f;
                     const float iq[] = {x0 + 22.0f - isz, cy - isz, x0 + 22.0f + isz, cy - isz,
                                         x0 + 22.0f + isz, cy + isz, x0 + 22.0f - isz, cy - isz,
@@ -7047,6 +7179,29 @@ void EquipmentScreen::render_impl(App& app) {
                 }
                 draw_ui_label(app, x1 - 104.0f, cy - 8.0f, 100.0f, 16.0f, pbuf, 0.5f,
                               UiAlign::Right, 0.9f, 0.9f, 0.7f);
+                // `is.uH` progress bar (`Uf(y.eSa,y.HRa,258)` L2212): empty
+                // `pieces/achiev_progress_empty` (profile atlas, `y.eSa`) +
+                // `Level_bar` fill (misc atlas, `y.HRa`) at
+                // min(value,target)/target (`is.D1a` `uH.PT`/`DF`, L2213). The
+                // flat backing is the explicit miss fallback.
+                const float pbx = x0 + 46.0f;
+                const float pby = cy + 10.0f;
+                const float pbw = std::max(40.0f, x1 - 8.0f - pbx);
+                const float pbh = 9.0f;
+                const float pfrac =
+                    r.target > 0 ? std::clamp(static_cast<float>(r.value) /
+                                                  static_cast<float>(r.target),
+                                              0.0f, 1.0f)
+                                 : 0.0f;
+                if (!app.draw_atlas_rect("pieces/achiev_progress_empty", pbx, pby, pbw, pbh,
+                                         0.9f)) {
+                    const float bq[] = {pbx, pby, pbx + pbw, pby, pbx + pbw, pby + pbh,
+                                        pbx, pby, pbx + pbw, pby + pbh, pbx, pby + pbh};
+                    rr.draw_triangles(bq, 6, 0.20f, 0.20f, 0.24f, 0.9f);
+                }
+                if (pfrac > 0.0f) {
+                    (void)app.draw_atlas_rect("Level_bar", pbx, pby, pbw * pfrac, pbh, 1.0f);
+                }
                 yy += row_h;
             }
         }
