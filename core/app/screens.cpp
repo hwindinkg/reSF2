@@ -5424,27 +5424,117 @@ void ShopScreen::update_impl(float dt) {
         }
     }
     // Item cells: the `Oe`/`Gg` single-column list (L2261-2262, L1883-1893).
-    // A click selects the row (`Oa.xA` L2296); the detail-panel action
-    // button performs the `Fhb` L2300 equip/buy path. Row 0 of Weapons is
-    // WEAPON_KNIVES — the headless-loop focus row.
+    // `Gg.aa` (L1886-1890) is the vertical scroller: a drag (`state 1`)
+    // shifts the list by `p_ = c.y-Fq` off the grab base `gj`, with momentum
+    // (`ub*=.9`), a target lerp (`state 2`, `*.3`) and the top/bottom clamps
+    // (`state 4` -> `gj=uz` first cell centred; `state 5` ->
+    // `gj=-last.ra+(size.y-last.qa())/2` last cell centred). A tap selects
+    // the row (`Oa.xA` L2296); the detail-panel action button performs the
+    // `Fhb` L2300 equip/buy path. `scroll_y_` = `ei.node.ra` relative to the
+    // list top (`cell_top`).
+    // NOTE: the wheel branch (`L.K.Lfa().ufa()`, L1887; `Zq`-gated) needs a
+    // wheel field on `App::PointerState` (app.hpp/app.cpp) — plumbing
+    // outside screens.{cpp,hpp} — and is therefore not ported here (OPEN).
     const ShopLayout sl = shop_layout(tab_);
     const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
-    const float list_bottom = shop_list_bottom(sl);
-    for (std::size_t i = 0; i < rows.size(); ++i) {
-        const float cy =
-            sl.cell_top + static_cast<float>(i) * sl.cell_step + sl.cell_h * 0.5f;
-        if (cy - sl.cell_h * 0.5f >= list_bottom) break;  // Gg hides off-range rows
-        if (p.x >= sl.cell_cx - sl.cell_w * 0.5f && p.x <= sl.cell_cx + sl.cell_w * 0.5f &&
-            p.y >= cy - sl.cell_h * 0.5f && p.y <= cy + sl.cell_h * 0.5f) {
-            hover_ = static_cast<int>(i);
-            if (p.pressed) {
-                sel_ = static_cast<int>(i);
-                sf2::audio::AudioEngine::instance().play("click");
-                std::fprintf(stdout, "[shop] select %s\n", items_[rows[i]].name.c_str());
-                std::fflush(stdout);
+    const int nrows = static_cast<int>(rows.size());
+    const float list_h = sl.viewer.height();
+    const float uz = (list_h - sl.cell_h) * 0.5f;             // Gg.ba L1885
+    const float max_off = uz;                                 // state 4 target
+    const float min_off =
+        nrows > 0 ? -(static_cast<float>(nrows - 1) * sl.cell_step) + uz : uz;
+    const float lo = std::min(min_off, max_off);              // state 5 target
+    const float hi = max_off;
+    if (scroll_tab_ != tab_ || scroll_count_ != nrows) {
+        scroll_tab_ = tab_;              // Gg.VK/ba (L1891/L1885): first cell
+        scroll_count_ = nrows;           // centred on a fresh list.
+        scroll_y_ = std::clamp(uz, lo, hi);
+        scroll_vel_ = 0.0f;
+        scroll_target_ = scroll_y_;
+        scroll_state_ = 0;
+    }
+    scroll_y_ = std::clamp(scroll_y_, lo, hi);
+    const bool in_list = p.x >= sl.cell_cx - sl.cell_w * 0.5f &&
+                         p.x <= sl.cell_cx + sl.cell_w * 0.5f &&
+                         p.y >= sl.cell_top && p.y <= shop_list_bottom(sl);
+    const float local_y = static_cast<float>(p.y) - sl.cell_top;
+    if (scroll_state_ == 0) {
+        scroll_y_ = std::clamp(scroll_y_ + scroll_vel_, lo, hi);
+        scroll_vel_ *= 0.9f;                                  // L1887 `ub*=.9`
+        if (std::fabs(scroll_vel_) < 0.5f) scroll_vel_ = 0.0f;
+        if (scroll_vel_ == 0.0f && nrows > 0) {
+            // `Lvb` (L1892): once the fling stops, snap the nearest cell to
+            // the viewer centre (state 2/3 spring).
+            int best = 0;
+            float best_d = 1.0e9f;
+            for (int i = 0; i < nrows; ++i) {
+                const float qk = list_h * 0.5f -
+                                 (scroll_y_ + static_cast<float>(i) * sl.cell_step +
+                                  sl.cell_h * 0.5f);
+                if (std::fabs(qk) < best_d) {
+                    best_d = std::fabs(qk);
+                    best = i;
+                }
             }
-            break;
+            const float tgt =
+                std::clamp(-(static_cast<float>(best) * sl.cell_step) + uz, lo, hi);
+            if (std::fabs(tgt - scroll_y_) > 1.0f) {
+                scroll_target_ = tgt;
+                scroll_state_ = 2;
+            }
         }
+        if (scroll_state_ == 0 && in_list && p.down) {        // L1887 b&&d
+            scroll_state_ = 1;
+            drag_start_ = local_y;                            // `Fq`
+            drag_base_ = scroll_y_;                           // `gj`
+            drag_delta_ = 0.0f;                               // `p_`
+            drag_prev_ = local_y;
+            drag_vel_ = 0.0f;
+            scroll_vel_ = 0.0f;
+        }
+    }
+    if (scroll_state_ == 1) {
+        if (p.down) {
+            drag_delta_ = local_y - drag_start_;              // L1888
+            drag_vel_ = local_y - drag_prev_;                 // `jM[0].y`
+            drag_prev_ = local_y;
+            scroll_y_ = std::clamp(drag_base_ + drag_delta_, lo, hi);
+        } else {
+            scroll_state_ = 0;                                // released
+            // `abs(p_)<10` = tap (already handled on press); else fling with
+            // the last pointer velocity (`ub`, L1888), which state 0 decays
+            // and then snaps.
+            scroll_vel_ = std::fabs(drag_delta_) >= 10.0f ? drag_vel_ : 0.0f;
+            drag_delta_ = 0.0f;
+            drag_vel_ = 0.0f;
+        }
+    }
+    if (scroll_state_ == 2) {
+        scroll_y_ += (scroll_target_ - scroll_y_) * 0.3f;     // L1889
+        if (std::fabs(scroll_target_ - scroll_y_) < 1.0f) {
+            scroll_y_ = scroll_target_;
+            scroll_state_ = 0;
+        }
+    }
+    for (int i = 0; i < nrows; ++i) {
+        // `Gg.aa` (L1886) hides cells outside `|Qk| <= size.y/2 + cell.qa()/2`.
+        // The renderer has no scissor/mask (core/scene out of scope), so a
+        // fully-outside cell is culled by its rect; partial cells still draw.
+        const float cell_y = sl.cell_top + scroll_y_ +
+                             static_cast<float>(i) * sl.cell_step;
+        if (cell_y + sl.cell_h <= sl.cell_top ||
+            cell_y >= sl.cell_top + list_h) continue;
+        const float cy = cell_y + sl.cell_h * 0.5f;
+        if (!in_list || p.y < cy - sl.cell_h * 0.5f || p.y > cy + sl.cell_h * 0.5f) continue;
+        hover_ = i;
+        if (p.pressed) {
+            sel_ = i;  // tap-select (`Oa.xA` L2296)
+            sf2::audio::AudioEngine::instance().play("click");
+            std::fprintf(stdout, "[shop] select %s\n",
+                         items_[rows[static_cast<std::size_t>(i)]].name.c_str());
+            std::fflush(stdout);
+        }
+        break;
     }
     // Detail-panel action button (`bc` content `Up.Fhb`, L2300; label
     // `Oa.DU` L2299). Side panels show on tabs 0..4 (`Q5` L2302).
@@ -5588,7 +5678,7 @@ void ShopScreen::render_impl(App& app) {
     // (`Gg.aa` `Qk` range, L1886).
     const ShopLayout sl = shop_layout(tab_);
     const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
-    const float list_bottom = shop_list_bottom(sl);
+    const float list_h = sl.viewer.height();
     const CatalogItem* sel_it = nullptr;
     if (!rows.empty()) {
         const int sel = std::clamp(sel_, 0, static_cast<int>(rows.size()) - 1);
@@ -5612,9 +5702,14 @@ void ShopScreen::render_impl(App& app) {
     }
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const CatalogItem& it = items_[rows[i]];
-        const float cy =
-            sl.cell_top + static_cast<float>(i) * sl.cell_step + sl.cell_h * 0.5f;
-        if (cy - sl.cell_h * 0.5f >= list_bottom) break;  // Gg hides off-range rows
+        // `Gg.aa` (L1886): the scroll offset `ei.node.ra` (`scroll_y_`)
+        // shifts every cell; the native culls fully-outside cells by rect
+        // (the renderer has no scissor/mask) — partial cells still draw.
+        const float cell_y = sl.cell_top + scroll_y_ +
+                             static_cast<float>(i) * sl.cell_step;
+        if (cell_y + sl.cell_h <= sl.cell_top ||
+            cell_y >= sl.cell_top + list_h) continue;
+        const float cy = cell_y + sl.cell_h * 0.5f;
         const float cx = sl.cell_cx, cw = sl.cell_w, ch = sl.cell_h;
         const ShopRect cell{cx - cw * 0.5f, cy - ch * 0.5f, cx + cw * 0.5f, cy + ch * 0.5f};
         const bool hovered = static_cast<int>(i) == hover_;
@@ -6038,15 +6133,22 @@ void EquipmentScreen::render_impl(App& app) {
         draw_ui_label(app, 130.0f, 134.0f, 600.0f, 24.0f,
                       mbuf, 0.8f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
     }
-    // `ds` POWERLEVELING_SLIDER body (L2227) stays OPEN: it needs the
-    // leveling table `id.ht().Mi/tH` (built from `character_progress.xml`
-    // thresholds; not in the native save) + the `Qx` counter strip. The
+    // `ds` POWERLEVELING_SLIDER body (L2227) stays OPEN — the data is not
+    // missing (the audit's "not in the native save" note is corrected): the
+    // tier list `Tt=id.ht().tH` (`uZ` L2227) is built by `bya`/`dPa`/`cPa`
+    // (L1353-1357) from the `character_progress.xml` `<PerkTree>` (asset
+    // 1315, `td.Vib` L1160 `id.ht().parse(f)`) joined with `perks.xml`
+    // (`v.Rg`, asset 310) and the save's perk progression
+    // (`p.o.co.KS.Oa`). Each tier is the `tk` compare cell (`Rx` left/right
+    // arrows + two `uk` level badges + the level track, L2217-2222) sized
+    // `ba(400,150)` (`ds.NC` L2230). OPEN because neither the
+    // perks/progression pipeline nor the `tk` cell art is modelled. The
     // `XB=ei` header above (`ivb()`, L2191) is the derivable part.
     draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 40.0f, v.width(), 40.0f,
                   std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)", 1.0f,
                   UiAlign::Center, 0.8f, 0.8f, 0.8f);
     draw_ui_label(app, v.J, v.P + v.height() * 0.5f + 4.0f, v.width(), 22.0f,
-                  "ds POWERLEVELING_SLIDER (L2227): id.ht().Mi/tH + tk cells", 0.5f,
+                  "ds POWERLEVELING_SLIDER (L2227): id.ht().tH (PerkTree 1315+perks 310+save perks) + tk cell", 0.5f,
                   UiAlign::Center, 0.6f, 0.6f, 0.6f);
     } else if (tab_ == kProfileTabMoves) {
         // Folded Moves sub-view (JS `qv`, To.kOa=11 L2201) — the learned
@@ -6107,15 +6209,22 @@ void EquipmentScreen::render_impl(App& app) {
             }
         }
     } else if (tab_ == kProfileTabAchiev) {
-        // Tab 2 (`Zr`=`fs` ACHIEVEMENT_SLIDER L2213) stays OPEN: it needs
-        // `v.uv.tI` achievements + `p.o.yi.mC/jO` counters, absent from the
-        // native save. The `cs` strip still selects it; the body uses the
-        // real `vb` viewer rect.
+        // Tab 2 (`Zr`=`fs` ACHIEVEMENT_SLIDER L2213) stays OPEN. The data
+        // exists on disk/save: `fs.uZ` (L2214) lists `v.uv.tI` achievements
+        // (`Iv` L1175, parsed from `achievements.xml` asset 1356 via
+        // `td.Adb`/`Fib` L1160) and joins them with the save counters
+        // (`p.o.yi` = `yt.parse`, L294; `<Counters>`/`<Achievements>`, read
+        // at `this.yi.parse(a)` L250) through `cab` (L2216); each row is the
+        // `hs`/`is` achievement cell (`ba(400,130)`, `fs.NC` L2216) with an
+        // `Ed` icon, name, description and the `uH`/`uy` progress slider.
+        // OPEN because the counters->definition join and the `hs`/`is` cell
+        // art are not modelled. The `cs` strip still selects it; the body
+        // uses the real `vb` viewer rect.
         draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 40.0f, v.width(), 40.0f,
                       std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)", 1.0f,
                       UiAlign::Center, 0.8f, 0.8f, 0.8f);
         draw_ui_label(app, v.J, v.P + v.height() * 0.5f + 4.0f, v.width(), 22.0f,
-                      "fs ACHIEVEMENT_SLIDER (L2213): v.uv.tI + p.o.yi counters", 0.5f,
+                      "fs ACHIEVEMENT_SLIDER (L2213): v.uv.tI (achievements.xml 1356) + p.o.yi counters -> hs/is cell", 0.5f,
                       UiAlign::Center, 0.6f, 0.6f, 0.6f);
     }
     // The BACK button (top-left).

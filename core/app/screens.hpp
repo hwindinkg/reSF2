@@ -312,6 +312,25 @@ private:
     int sel_ = 0;         // selected grid row (JS `Oa.xA`/`Za.Ac` L2296)
     int side_hover_ = 0;  // 0 = none, 1 = detail action button (JS `Up`)
     int money_logged_ = 0;
+    // --- `Gg` list scroll (JS L1883-1893): drag + momentum + snap --------
+    // The `Oe` viewer's cell list is the JS `Gg` scroller: `scroll_y_` =
+    // `ei.node.ra` (list-container y relative to the viewer top, shifted by
+    // the drag), `scroll_vel_` = `ub`, `scroll_target_` = `targetY`,
+    // `scroll_state_` = `state` (0 idle / 1 drag / 2 target lerp). The
+    // top/bottom clamps mirror states 4/5 (`gj=uz` first-centred /
+    // `gj=-last.ra+(size.y-last.h)/2` last-centred). Init re-runs when the
+    // tab or row count changes (`Gg.VK` L1891).
+    float scroll_y_ = 0.0f;
+    float scroll_vel_ = 0.0f;
+    float scroll_target_ = 0.0f;
+    int scroll_state_ = 0;
+    int scroll_tab_ = -1;
+    int scroll_count_ = -1;
+    float drag_start_ = 0.0f;  // `Fq` (pointer y at grab)
+    float drag_base_ = 0.0f;   // `gj` (list y at grab)
+    float drag_delta_ = 0.0f;  // `p_` (drag displacement, L1888)
+    float drag_prev_ = 0.0f;   // previous local y (velocity source)
+    float drag_vel_ = 0.0f;    // `ub = jM[0].y*.01` (L1888) -> fling
     // Shop tabs (JS `vj.E0` category ids 1..5 → `vj.ifa` tab lists, Oa L1168).
     // tab_ indexes kShopTabs (0 = Weapon); tab_hover_ is the tab hover.
     // seen_ is the last save snapshot (owned/equipped markers, refreshed in
@@ -335,12 +354,21 @@ private:
 // Tab 1 folds the Moves/skills list. Tab 3 (SEALS) is ported from the
 // derivable `gs.uZ` filter (`p.o.xa.hJ(I.Vr)`, L2231): the save's owned
 // `Type="Seal"` catalog rows, drawn with the `js` cell (`js.ba` L2232
-// `oe(a.fileName)`). Tabs 0 and 2 stay OPEN with cites: `ds` needs the
-// leveling table `id.ht().Mi/tH` (not in the native save); `fs` needs
-// `v.uv.tI` achievements + `p.o.yi` counters (no native source). The
-// invented equipment slot list + owned grid were removed (PORT_AUDIT_UI §3
-// #19, §4 #6): JS moves equip into the shop detail panel (`$o`) — now
-// implemented in ShopScreen.
+// `oe(a.fileName)`). Tabs 0 and 2 stay OPEN with cites (the audit note they
+// are not derivable 1:1, not that the data is missing): `ds` shows
+// `id.ht().tH` tiers of `Ih` rows (`uZ` L2227) which `bya`/`dPa`/`cPa`
+// (L1353-1357) merge from the `character_progress.xml` `<PerkTree>` (asset
+// 1315, `td.Vib` L1160 `id.ht().parse(f)`) with `perks.xml` (`v.Rg`, asset
+// 310) and the save's perk progression (`p.o.co.KS.Oa`); each tier renders
+// the `tk` compare cell (`Rx` arrows + two `uk` level badges, L2217-2222) —
+// neither pipeline nor cell art is modelled. `fs` shows `v.uv.tI`
+// achievements (`Iv` L1175, parsed from `achievements.xml` asset 1356 via
+// `td.Adb`/`Fib` L1160) joined with the save's `<Counters>`/`<Achievements>`
+// (`p.o.yi` = `yt.parse`, L294, read at `this.yi.parse(a)` L250) through
+// `cab` (L2216), rendered by the `hs`/`is` achievement cell (L2209-2213) —
+// the counters/save join and cell art are OPEN. The invented equipment slot
+// list + owned grid were removed (PORT_AUDIT_UI §3 #19, §4 #6): JS moves
+// equip into the shop detail panel (`$o`) — now implemented in ShopScreen.
 class EquipmentScreen : public Screen {
 public:
     explicit EquipmentScreen(ScreenManager& mgr);

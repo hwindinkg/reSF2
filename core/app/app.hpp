@@ -160,6 +160,19 @@ public:
     unsigned int font_texture() const { return font_tex_; }
     // The resolved UI language (JS `G.lang`, default "en").
     const std::string& language() const { return lang_; }
+    // Per-language UI text scale (JS `ea.a1`): the boot bootstrap switches on
+    // `G.Rq()` and sets `ea.a1=.8, ea.b1=1.2` for ja/ko/ru, leaving the L2484
+    // globals at 1 for every other locale (L65; the settings picker repeats
+    // the same switch at L1931). `ea.ua(a)` multiplies by `ea.a1` (L1711), so
+    // every `ua()` size is scaled by this. `ea.b1` (1.2 ja/ko/ru, else 1)
+    // scales `ea.Kc()` letter-spacing (L1712) — expose it as the paired
+    // factor for callers that draw `Kc` (e.g. Act's `Kc(.7)`).
+    float ui_text_scale() const {
+        return (lang_ == "ja" || lang_ == "ko" || lang_ == "ru") ? 0.8f : 1.0f;
+    }
+    float ui_text_spacing_scale() const {
+        return (lang_ == "ja" || lang_ == "ko" || lang_ == "ru") ? 1.2f : 1.0f;
+    }
     // Splash/loader art (JS `Rg` L1967 / `ad` L1969, asset ids 274-279):
     // `splash/loading{lang}` BMF + `splash/logo.png` + `splash/bg.jpg`.
     // Null/0 when unavailable (the boot overlay then draws nothing).

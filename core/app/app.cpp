@@ -670,11 +670,16 @@ void App::render_frame() {
 
 void App::draw_boot_splash() {
     // JS `Rg`/`Tk` (L1967, L87-90) Preloader -> `ad` (L1969) Loader.
-    // The full `Tk` node layout (cast id 278, scroll id 274, the `Ev`
-    // 95-100% module split) is OPEN (PORT_AUDIT_UI §4.12); this draws the
-    // splash bg (id 279) + logo (id 275) and the progress text. The text
-    // BMF is `splash/loading{lang}` (ids 276/277); the Cyrillic/UTF-8
-    // glyph path in `draw_text_with_font` is OPEN.
+    // `Tk` layout (cast id 278, scroll id 274) + the localized
+    // `splash/loading{lang}` BMF (ids 276/277, `ea` L87-88) with the UTF-8
+    // glyph path are implemented below. Still OPEN (PORT_AUDIT_UI §4.12):
+    //   - `Rg.Ea` state-3 module passes (L1967: `Ev` + `ap`/`cp`/`$o`/`bp`/
+    //     `dp`, defs L1160-1164). They are async app-startup side effects
+    //     (version, quest login dialogs, reload) whose `Ev.x$a()` progress
+    //     (L1163 = round(PZ/N*100)) feeds `gMa(x,95,100)`. Native init is
+    //     synchronous, so there is no per-module frame boundary to derive the
+    //     95->100 ramp from — the passes are performed inside `init`/`boot`.
+    //   - the `ad` view `tr` bar art (id 816/817, L1867-1868) is not drawn.
     const bool loader = boot_splash_frames_ <= kBootLoaderFrames;
     sf2::render::Camera ui_cam;
     ui_cam.center_x = static_cast<float>(view_w_) * 0.5f;
@@ -776,7 +781,10 @@ void App::draw_boot_splash() {
         // (scroll left), `D(qe.ra)` (scroll bottom), `Ia(128)` centre.
         if (splash_loading_font_ != nullptr && scroll_h > 0.0f) {
             const int eF = splash_loading_font_->size > 0 ? splash_loading_font_->size : 100;
-            jo_scale = (scroll_h * 0.4f) / static_cast<float>(eF);  // Qh.print L1631
+            // JS `Tk.aa` L90 `Jo.ua(qe.qa()*.4)` -> `ea.ua` (L1711) multiplies
+            // by `ea.a1` (ja/ko/ru 0.8, else 1 — L65/L1931/L2484); `Qh.print`
+            // L1631 divides by `charset.eF`.
+            jo_scale = (scroll_h * 0.4f * ui_text_scale()) / static_cast<float>(eF);
             jo_cx = (W * 0.5f - scroll_w * 0.5f) + scroll_w * 0.75f * 0.5f;
             jo_cy = scroll_top + scroll_h;
         }
@@ -1012,6 +1020,7 @@ bool App::draw_text_with_font(const sf2::data::font& font, unsigned int tex, flo
     if (tex == font_tex_) tex_name = "font-en";
     else if (tex == digits_tex_) tex_name = "digits_font";
     else if (tex == round_tex_) tex_name = "round_font";
+    else if (tex == splash_loading_tex_) tex_name = "splash_loading";
     else tex_name = "font-en";
     // Ensure renderer knows the alias for the font's page name if it
     // differs (the .fnt page string is e.g. "digits_0.png" vs "digits_font").
