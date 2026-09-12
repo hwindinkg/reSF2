@@ -13,8 +13,10 @@
 //     Dojo/Map/Shop/Profile. No GeneralMenu screen exists in this build
 //     (`dJ()` returns 0/3/4/5/6/7 only).
 //   - Map nodes: stages.xml <Zone><Battle X=.. Y=..> -> screen pos
-//     x = X*1.0 + view_w/2, y = view_h/2 - Y*1.0 (qe.X0a's bg.w/2 /
-//     bg.h/2 with uM≈1 for the 2046-wide map0 frame scaled to the view).
+//     x = X*uM + bg.w/2, y = -Y*uM + bg.h/2 - 50 mapped through the
+//     2046x854 backdrop (JS `qe.X0a` L2144; uM = 1.5003663003663004 L2488).
+//     `Qr.lla` (L2094) draws a button only while its save `<Battles>` record
+//     exists and is not Hidden/expired.
 //
 // The misc/menu/controller/fight-ui atlases are KTX ASTC — the data layer
 // CPU-decodes them (core/data/ktx.cpp) and App::init registers their frames,
@@ -30,6 +32,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -2524,8 +2527,12 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
             z.is_start = std::string(zone.attribute("Start").value()) == "1";
             for (const pugi::xml_node battle : zone.children("Battle")) {
                 // Map nodes are positioned battles (JS `qe.X0a` L2144 needs
-                // X/Y); rows without coordinates are not selectable.
+                // X/Y); rows without coordinates are not selectable. `X0a`
+                // also skips `FightUnregister` (raw type "HIDDEN", L182) and
+                // the `Hide` attr (`uDa`, L206) — e.g. ZONE_6 QuestBattle.
                 if (battle.attribute("X").empty() && battle.attribute("Y").empty()) continue;
+                if (std::string(battle.attribute("Type").value()) == "HIDDEN") continue;
+                if (sf2::data::xml_attr_bool(battle, "Hide", false)) continue;
                 MapScreen::Node n;
                 n.name = battle.attribute("Name").value();
                 if (n.name.empty()) continue;
@@ -2539,6 +2546,22 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                 // `Lc.U9a` L1405 -> base_/active_/... + icon).
                 n.icon = battle.attribute("Icon").value();
                 if (n.icon.empty()) n.icon = "training";
+                // Alternate-state twins (JS hides the unrecorded ones via
+                // `Qr.lla` L2094): the `*_INTERMISSION` / `FightBossesIntermission`
+                // rows and the `BOSSES_REPLAYABLE`/`FINAL_BATTLE_REPLAYABLE`
+                // hard-mode boss.
+                n.alt_state = n.type == "BOSSES_REPLAYABLE" ||
+                              n.type == "FINAL_BATTLE_REPLAYABLE" ||
+                              n.type == "REPLAYABLE" ||
+                              n.type == "BOSSES_INTERMISSION";
+                {
+                    const std::string suffix = "_INTERMISSION";
+                    if (n.name.size() > suffix.size() &&
+                        n.name.compare(n.name.size() - suffix.size(), suffix.size(),
+                                       suffix) == 0) {
+                        n.alt_state = true;
+                    }
+                }
                 // JS `qe.X0a` (L2144): x = pos.x*uM + bg.fa.x/2,
                 // y = -pos.y*uM + bg.fa.y/2, then -50. Mapped to the
                 // full-view-stretched backdrop.
@@ -3410,6 +3433,22 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
                            static_cast<int>(i) > zone_sel_ && zones_[i].name != cur;
         for (auto& n : zones_[i].nodes) n.active = !zones_[i].locked;
     }
+    // JS `Qr.lla` (L2094): a button renders only while `hs.isActive && !a.li()`
+    // — a save `<Battles>` record exists (`WDa`, L205/L256) and its `hl` is
+    // not Hidden/expired (`li`, L278). The native quest unlock-write (`J1a`
+    // L259 / `Iaa` L260) is not fully modelled, so the BASE battles stay
+    // reachable without a record (the playable map); the alternate-state
+    // twins (`*_INTERMISSION`, boss hard-mode) are hidden until recorded,
+    // which is exactly what removes the coincident-node label collisions
+    // (Tournament/Tournament_INTERMISSION, BOSS_LYNX/BOSS_HARDMODE,
+    // Survival/Survival_INTERMISSION).
+    for (auto& z : zones_) {
+        for (auto& n : z.nodes) {
+            const WarriorSave::BattleRecord* rec = map_save.find_battle(n.zone, n.name);
+            n.visible = !(n.alt_state && rec == nullptr);
+            if (rec != nullptr && rec->hidden) n.visible = false;
+        }
+    }
     // MapFocus (JS `Ya.bKa` L2129 focuses the save's MapFocus `p.o.ys` via
     // `m5`): highlight the node named in MapFocus first (e.g.
     // ZONE_1|BOSS_LYNX|1 quest focus `qo` L1086), else the first BOSSES
@@ -3419,19 +3458,27 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
         const auto& focus_nodes = zones_[zone_sel_].nodes;
         if (!focus.empty()) {
             for (std::size_t i = 0; i < focus_nodes.size(); ++i) {
-                if (focus.find(focus_nodes[i].name) != std::string::npos) {
+                if (focus_nodes[i].visible &&
+                    focus.find(focus_nodes[i].name) != std::string::npos) {
                     hover_ = static_cast<int>(i);
                     break;
                 }
             }
         }
         for (std::size_t i = 0; hover_ < 0 && i < focus_nodes.size(); ++i) {
-            if (focus_nodes[i].type == "BOSSES") {
+            if (focus_nodes[i].visible && focus_nodes[i].type == "BOSSES") {
                 hover_ = static_cast<int>(i);
                 break;
             }
         }
-        if (hover_ < 0 && !focus_nodes.empty()) hover_ = 0;
+        if (hover_ < 0 && !focus_nodes.empty()) {
+            for (std::size_t i = 0; i < focus_nodes.size(); ++i) {
+                if (focus_nodes[i].visible) {
+                    hover_ = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
     }
     std::fprintf(stdout, "[map] %zu zones loaded (current %s)\n", zones_.size(), cur.c_str());
     for (const auto& z : zones_) {
@@ -3501,6 +3548,7 @@ void MapScreen::update_impl(float dt) {
     hover_ = -1;
     for (std::size_t i = 0; i < zones_[zone_sel_].nodes.size(); ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
+        if (!n.visible) continue;  // JS `Qr.lla` L2094 (hidden alt-state twin)
         const float node_half = map_node_size(kViewW) * 0.5f;
         if (p.x >= n.x - node_half && p.x <= n.x + node_half &&
             p.y >= n.y - node_half && p.y <= n.y + node_half) {
@@ -3642,6 +3690,7 @@ void MapScreen::render_impl(App& app) {
     const float node_px = map_node_size(kViewW);
     for (std::size_t i = 0; i < node_count; ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
+        if (!n.visible) continue;  // JS `Qr.lla` L2094 (hidden alt-state twin)
         const bool hovered = static_cast<int>(i) == hover_;
         const bool locked = !n.active;
         // JS `Qr` (L2092-2095): frame = "BattleBtn<State>/<suffix>", suffix
@@ -6377,6 +6426,255 @@ void draw_profile_tabs(App& app, int tab, int hover) {
 }
 
 // ---------------------------------------------------------------------------
+// Profile data pipelines — the real JS parsers/joins
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Reads one XML document from the extracted res dir (same rule the other
+// shell loaders use: silent on absence, the caller keeps its empty state).
+bool parse_res_xml(const std::string& path, sf2::data::xml_doc& doc) {
+    try {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return false;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[profile] %s: %s\n", path.c_str(), e.what());
+        return false;
+    }
+    return true;
+}
+
+// JS `Y.na` (L917) with the description template: XML Description attrs carry
+// their arguments as trailing `{a}{b}` groups (e.g.
+// "PERKDESCRIPTION_HELM_BREAKER{15}{35}{5}" or
+// "Achievement_Desc_Perfect_Rounds_1{1}"), while the lang table stores the
+// base key with `{0}`/`{1}` placeholders ("A {0}%% chance ..."). Resolve the
+// base, substitute the args, and unescape `%%`.
+std::string loc_template(App& app, const std::string& raw, const std::string& fallback) {
+    const std::size_t brace = raw.find('{');
+    if (brace == std::string::npos) return loc(app, raw, fallback);
+    const std::string base = raw.substr(0, brace);
+    std::vector<std::string> args;
+    for (std::size_t i = brace; i < raw.size();) {
+        if (raw[i] != '{') {
+            ++i;
+            continue;
+        }
+        const std::size_t end = raw.find('}', i + 1);
+        if (end == std::string::npos) break;
+        args.push_back(raw.substr(i + 1, end - i - 1));
+        i = end + 1;
+    }
+    std::string text = loc(app, base, fallback);
+    for (std::size_t k = 0; k < args.size(); ++k) {
+        const std::string ph = "{" + std::to_string(k) + "}";
+        for (std::size_t p = text.find(ph); p != std::string::npos; p = text.find(ph, p)) {
+            text.replace(p, ph.size(), args[k]);
+        }
+    }
+    for (std::size_t p = text.find("%%"); p != std::string::npos; p = text.find("%%", p)) {
+        text.replace(p, 2, "%");
+    }
+    return text;
+}
+
+// `ds` PERK TREE (L2227): `id.ht().tH` tiers. The tier list `Tt` is built by
+// `bya`/`EWa`/`dPa`/`cPa` (L1353-1357) from three sources:
+//   - `character_progress.xml` `<PerkTree>` (asset 1315, `td.Vib` L1160 ->
+//     `id.ht().parse(f)` L1352 `lkb` reads `<Level Value>` + `<Perk|Upgrade
+//     Name>` into `Lw`/`Mw`), and its `<Perks>` base descriptions (`bPa`);
+//   - `perks.xml` (`v.Rg`, asset 310) for the perk `Image`;
+//   - the save `<PerkHistory>` (`p.o.co.KS.Oa`, `Ht` L1327) for the learned
+//     level, fed through `Mw.K1` (L1358) for the availability flag.
+// Each tier renders the `tk` compare cell (up to two `uk` cells + `Rx`
+// arrows, L2217-2222) — the data rows here feed the native text/flat cell.
+std::vector<EquipmentScreen::PerkRow> load_perk_tree(App& app, const WarriorSave& w) {
+    (void)app;
+    std::vector<EquipmentScreen::PerkRow> out;
+
+    // perks.xml: Name -> Image ("Icons01.IconAvenger") + Description.
+    std::map<std::string, std::pair<std::string, std::string>> perk_art;
+    {
+        sf2::data::xml_doc doc;
+        if (parse_res_xml("reference/extracted/xml/res/perks.xml", doc)) {
+            const pugi::xml_node root = doc.root().first_child();
+            if (root) {
+                for (pugi::xml_node p : root.children("Perk")) {
+                    const std::string name = p.attribute("Name").value();
+                    if (name.empty()) continue;
+                    perk_art[name] = {p.attribute("Image").value(),
+                                      p.attribute("Description").value()};
+                }
+            }
+        }
+    }
+
+    // character_progress.xml: `<Perks>` base/upgrade descriptions + `<PerkTree>`.
+    std::map<std::string, std::string> base_desc;                    // Perk Description
+    std::map<std::pair<std::string, int>, std::string> upgrade_desc; // (Name,Value)
+    sf2::data::xml_doc doc;
+    if (!parse_res_xml("reference/extracted/xml/res/character_progress.xml", doc)) {
+        return out;
+    }
+    const pugi::xml_node root = doc.root().first_child();
+    if (!root) return out;
+    for (pugi::xml_node p : root.child("Perks").children("Perk")) {
+        const std::string name = p.attribute("Name").value();
+        if (name.empty()) continue;
+        if (p.attribute("Description")) base_desc[name] = p.attribute("Description").value();
+        for (pugi::xml_node u : p.children("UpgradeLevel")) {
+            const std::string d = u.attribute("Description").value();
+            if (!d.empty()) {
+                upgrade_desc[{name, sf2::data::xml_attr_int(u, "Value", 0)}] = d;
+            }
+        }
+    }
+    for (pugi::xml_node lvl : root.child("PerkTree").children("Level")) {
+        const int tier = sf2::data::xml_attr_int(lvl, "Value", 0);
+        for (pugi::xml_node item = lvl.first_child(); item; item = item.next_sibling()) {
+            const std::string tag = item.name();
+            if (tag != "Perk" && tag != "Upgrade") continue;  // `id.k7a` L1355
+            EquipmentScreen::PerkRow r;
+            r.tier = tier;
+            r.kind = tag;
+            r.name = item.attribute("Name").value();
+            if (r.name.empty()) continue;
+            const auto art = perk_art.find(r.name);
+            if (art != perk_art.end()) r.image = art->second.first;
+            for (const WarriorSave::PerkLevel& pl : w.perk_history) {
+                if (pl.name == r.name) r.learned_level = std::max(r.learned_level, pl.level);
+            }
+            // Description: the upgrade tier's text when learned, else the base
+            // perk text, else the perks.xml def text (`Be.description`).
+            const auto up = upgrade_desc.find({r.name, r.learned_level});
+            if (tag == "Upgrade" && up != upgrade_desc.end()) {
+                r.description = up->second;
+            } else if (base_desc.count(r.name) != 0) {
+                r.description = base_desc[r.name];
+            } else if (art != perk_art.end()) {
+                r.description = art->second.second;
+            }
+            // `Mw.K1` (L1358): Perk -> not-learned or learned >= tier;
+            // Upgrade -> learned and learned <= tier.
+            const bool learned = r.learned_level > 0;
+            r.available = tag == "Perk" ? (!learned || r.learned_level >= tier)
+                                        : (learned && r.learned_level <= tier);
+            out.push_back(std::move(r));
+        }
+    }
+    return out;
+}
+
+// `fs` ACHIEVEMENTS (L2213-2216): definitions from `achievements.xml` (asset
+// 1356, `td.Adb`/`Fib` L1160 -> `v.uv.parse` L1175) joined with the save
+// `<Counters>`/`<Achievements>` (`p.o.yi` = `yt.parse` L294; `kl` L1249,
+// `ll` L1247, `Yua` L297) through `cab` (L2216). Mirrors the JS order:
+// unlocked achievements first, then the still-visible remainder (break once
+// the running counter is below a target).
+std::vector<EquipmentScreen::AchievRow> load_achievements(App& app, const WarriorSave& w) {
+    (void)app;
+    std::vector<EquipmentScreen::AchievRow> out;
+    struct Def {
+        std::string name, description, icon;
+        int counter = 0, money = 0, bonus = 0;
+        bool hidden = false, completed = false, obtained = false;
+    };
+    struct Group {
+        std::string name;
+        std::vector<Def> items;
+    };
+    std::vector<Group> groups;
+    sf2::data::xml_doc doc;
+    if (parse_res_xml("reference/extracted/xml/res/achievements.xml", doc)) {
+        const pugi::xml_node root = doc.root().first_child();
+        if (root) {
+            for (pugi::xml_node c : root.children("Counter")) {  // `Jv` L1249
+                Group g;
+                g.name = c.attribute("Name").value();
+                if (g.name.empty()) continue;
+                for (pugi::xml_node a : c.children("Achievement")) {  // `xw` L1248
+                    Def d;
+                    d.name = a.attribute("Name").value();
+                    if (d.name.empty()) continue;
+                    d.description = a.attribute("Description").value();
+                    d.icon = a.attribute("Icon").value();
+                    const std::size_t dot = d.icon.find('.');
+                    if (dot != std::string::npos) d.icon[dot] = '/';  // `Ed.replace` L2212
+                    d.counter = sf2::data::xml_attr_int(a, "CounterValue", 0);
+                    d.money = sf2::data::xml_attr_int(a, "MoneyPrize", 0);
+                    d.bonus = sf2::data::xml_attr_int(a, "BonusPrize", 0);
+                    d.hidden = sf2::data::xml_attr_bool(a, "Hidden", false);
+                    g.items.push_back(std::move(d));
+                }
+                groups.push_back(std::move(g));
+            }
+        }
+    }
+    // `yt.Yua` L297: an unlock record marks its def completed + sets the
+    // reward-available flag (`Ir`, L1248).
+    for (Group& g : groups) {
+        for (Def& d : g.items) {
+            for (const WarriorSave::AchievementUnlock& u : w.achievement_unlocks) {
+                if (u.name == d.name) {
+                    d.completed = true;      // `Yua` L297
+                    d.obtained = u.obtained_reward;
+                    break;
+                }
+            }
+        }
+    }
+    // `fs.uZ` (L2214) + `cab` (L2216).
+    std::vector<WarriorSave::AchievementCounter> counters = w.counters;  // `m.Ib(mC)`
+    for (const Group& g : groups) {
+        int value = 0;
+        for (std::size_t i = 0; i < counters.size(); ++i) {
+            if (counters[i].name == g.name) {
+                value = counters[i].value;
+                counters.erase(counters.begin() + static_cast<std::ptrdiff_t>(i));
+                break;
+            }
+        }
+        std::vector<Def> subs = g.items;  // `m.Ib(a[f].Hy)`
+        auto push = [&out](const Def& d, int v) {
+            EquipmentScreen::AchievRow r;
+            r.name = d.name;
+            r.description = d.description;
+            r.icon = d.icon;
+            r.target = d.counter;
+            r.value = std::min(v, d.counter);
+            r.completed = d.completed || r.value >= d.counter;
+            r.money_prize = d.money;
+            r.bonus_prize = d.bonus;
+            // `xw.yj` (`Ir(!ObtainedReward)`, L1248/L297): an unclaimed prize.
+            r.reward_available = !d.obtained && (d.money > 0 || d.bonus > 0);
+            out.push_back(std::move(r));
+        };
+        for (const WarriorSave::AchievementUnlock& u : w.achievement_unlocks) {
+            for (std::size_t k = 0; k < subs.size(); ++k) {
+                const Def& l = subs[k];
+                if ((!l.hidden || l.completed) && u.name == l.name) {
+                    push(l, l.counter);
+                    subs.erase(subs.begin() + static_cast<std::ptrdiff_t>(k));
+                    break;
+                }
+            }
+        }
+        for (const Def& l : subs) {
+            if (!l.hidden || l.completed) {
+                push(l, value);
+                if (value < l.counter) break;
+            }
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
 // EquipmentScreen
 // ---------------------------------------------------------------------------
 
@@ -6400,6 +6698,26 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
         std::fflush(stdout);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[profile] seals load failed: %s\n", e.what());
+    }
+    // Ported `ds` PERK TREE (L2227) — PerkTree + perks.xml + save <PerkHistory>.
+    // Placed before the Moves block (whose failure paths `return`) so it loads
+    // even without fight assets.
+    try {
+        const WarriorSave w = app().save().load();
+        perk_rows_ = load_perk_tree(app(), w);
+        std::fprintf(stdout, "[profile] perk tree: %zu rows\n", perk_rows_.size());
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[profile] perk tree load failed: %s\n", e.what());
+    }
+    // Ported `fs` ACHIEVEMENTS (L2213) — achievements.xml + save counters join.
+    try {
+        const WarriorSave w = app().save().load();
+        achiev_rows_ = load_achievements(app(), w);
+        std::fprintf(stdout, "[profile] achievements: %zu rows\n", achiev_rows_.size());
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[profile] achievements load failed: %s\n", e.what());
     }
     // Folded Moves tab (JS Profile sub-view `qv`, To.kOa=11 L2201): the exact
     // learned list built with the fight rule (`build_move_list_locks` over the
@@ -6454,8 +6772,8 @@ void EquipmentScreen::update_impl(float dt) {
         }
     }
     // `cs` bottom tab strip (JS L2188): select the Profile sub-view via
-    // `vb.hla` (L2190-2193) — 0 = `ds` leveling, 1 = folded Moves (`es`),
-    // 2 = `fs` ACHIEVEMENT (OPEN), 3 = `gs` SEALS (ported).
+    // `vb.hla` (L2190-2193) — 0 = `ds` perk tree, 1 = folded Moves (`es`),
+    // 2 = `fs` achievements, 3 = `gs` seals (all ported).
     tab_hover_ = profile_tab_hit(p.x, p.y);
     if (tab_hover_ >= 0 && p.pressed) {
         sf2::audio::AudioEngine::instance().play("click");
@@ -6551,22 +6869,73 @@ void EquipmentScreen::render_impl(App& app) {
         draw_ui_label(app, hs.J + 8.0f, hs.P + 106.0f, hs.width() - 16.0f, 24.0f, mbuf, 0.8f,
                       UiAlign::Left, 1.0f, 1.0f, 1.0f);
     }
-    // `ds` POWERLEVELING_SLIDER body (L2227) stays OPEN — the data is not
-    // missing (the audit's "not in the native save" note is corrected): the
-    // tier list `Tt=id.ht().tH` (`uZ` L2227) is built by `bya`/`dPa`/`cPa`
-    // (L1353-1357) from the `character_progress.xml` `<PerkTree>` (asset
-    // 1315, `td.Vib` L1160 `id.ht().parse(f)`) joined with `perks.xml`
-    // (`v.Rg`, asset 310) and the save's perk progression
-    // (`p.o.co.KS.Oa`). Each tier is the `tk` compare cell (`Rx` left/right
-    // arrows + two `uk` level badges + the level track, L2217-2222) sized
-    // `ba(400,150)` (`ds.NC` L2230). OPEN because neither the
-    // perks/progression pipeline nor the `tk` cell art is modelled. The
-    // `XB=ei` header above (`ivb()`, L2191) is the derivable part.
-    // Faithful EMPTY state: the `Yr` sub-header `Y.na("profileNoSkills")`
-    // (L2191) - "No perks to learn". No invented placeholder text.
-    draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
-                  loc(app, "profileNoSkills", "No perks to learn"), 0.9f, UiAlign::Center,
-                  0.8f, 0.8f, 0.8f);
+    // Ported `ds` POWERLEVELING_SLIDER body (L2227): `Tt = id.ht().tH` — the
+    // PerkTree tiers (character_progress.xml asset 1315 via `td.Vib` L1160),
+    // each the `tk` compare cell (up to two `uk` cells + `Rx` arrows,
+    // L2217-2222) sized `ba(400,150)` (`ds.NC` L2230). The `tk`/`uk` atlas art
+    // (profile 258/246) is ASTC -> the text/flat cell is the live path.
+    if (perk_rows_.empty()) {
+        // Faithful EMPTY state: the `Yr` sub-header `Y.na("profileNoSkills")`
+        // (L2191) - "No perks to learn". No invented placeholder text.
+        draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
+                      loc(app, "profileNoSkills", "No perks to learn"), 0.9f, UiAlign::Center,
+                      0.8f, 0.8f, 0.8f);
+    } else {
+        const float row_h = 52.0f;
+        const float gutter = 78.0f;  // `Rx` + tier-level track width
+        const float col_w = std::max(140.0f, (v.width() - gutter - 8.0f) * 0.5f);
+        float row_top = v.P + 6.0f;
+        int last_tier = -1;
+        int col = 0;
+        for (const PerkRow& r : perk_rows_) {
+            if (r.tier != last_tier) {
+                if (last_tier != -1) {
+                    row_top += row_h + 6.0f;
+                    col = 0;
+                }
+                last_tier = r.tier;
+                char tbuf[32];
+                std::snprintf(tbuf, sizeof(tbuf), "LV %d", r.tier);
+                draw_ui_label(app, v.J + 4.0f, row_top + 8.0f, gutter - 10.0f, 20.0f, tbuf,
+                              0.6f, UiAlign::Left, 1.0f, 0.9f, 0.4f);
+            }
+            if (row_top + row_h > v.W) break;
+            if (col >= 2) {  // `tk` packs two `uk` cells per tier
+                row_top += row_h + 6.0f;
+                col = 0;
+            }
+            if (row_top + row_h > v.W) break;
+            const float cw = col_w - 10.0f;
+            const float cx = v.J + gutter + (static_cast<float>(col) + 0.5f) * col_w;
+            const float cy = row_top + row_h * 0.5f;
+            sf2::render::Renderer& rr = app.renderer();
+            // `uk` cell art miss -> a flat plate (never a silent blank).
+            const float pr = r.available ? 0.22f : 0.12f;
+            const float pg = r.available ? 0.26f : 0.14f;
+            const float pb = r.available ? 0.36f : 0.17f;
+            const float q[] = {cx - cw * 0.5f, cy - row_h * 0.5f + 3.0f,
+                               cx + cw * 0.5f, cy - row_h * 0.5f + 3.0f,
+                               cx + cw * 0.5f, cy + row_h * 0.5f - 3.0f,
+                               cx - cw * 0.5f, cy - row_h * 0.5f + 3.0f,
+                               cx + cw * 0.5f, cy + row_h * 0.5f - 3.0f,
+                               cx - cw * 0.5f, cy + row_h * 0.5f - 3.0f};
+            rr.draw_triangles(q, 6, pr, pg, pb, 0.95f);
+            const std::string nm = loc(app, r.name, r.name);
+            draw_ui_label(app, cx - cw * 0.5f + 5.0f, cy - 17.0f, cw - 10.0f, 18.0f, nm, 0.52f,
+                          UiAlign::Left, 1.0f, 1.0f, 1.0f);
+            char sbuf[64];
+            if (r.kind == "Upgrade") {
+                std::snprintf(sbuf, sizeof(sbuf), "UPGRADE %d/%d", r.learned_level, r.tier);
+            } else if (r.learned_level > 0) {
+                std::snprintf(sbuf, sizeof(sbuf), "LEARNED %d", r.learned_level);
+            } else {
+                std::snprintf(sbuf, sizeof(sbuf), "LEARN AT LV %d", r.tier);
+            }
+            draw_ui_label(app, cx - cw * 0.5f + 5.0f, cy + 3.0f, cw - 10.0f, 16.0f, sbuf, 0.44f,
+                          UiAlign::Left, 0.8f, 0.85f, 0.9f);
+            ++col;
+        }
+    }
     } else if (tab_ == kProfileTabMoves) {
         // Folded Moves sub-view (JS `qv`, To.kOa=11 L2201) — the learned
         // moves for the wielded weapon; moved verbatim from the deleted
@@ -6631,18 +7000,56 @@ void EquipmentScreen::render_impl(App& app) {
             }
         }
     } else if (tab_ == kProfileTabAchiev) {
-        // Tab 2 (`Zr`=`fs` ACHIEVEMENT_SLIDER L2213) stays OPEN. The data
-        // exists on disk/save: `fs.uZ` (L2214) lists `v.uv.tI` achievements
-        // (`Iv` L1175, parsed from `achievements.xml` asset 1356 via
-        // `td.Adb`/`Fib` L1160) and joins them with the save counters
-        // (`p.o.yi` = `yt.parse`, L294; `<Counters>`/`<Achievements>`, read
-        // at `this.yi.parse(a)` L250) through `cab` (L2216); each row is the
-        // `hs`/`is` achievement cell (`ba(400,130)`, `fs.NC` L2216) with an
-        // `Ed` icon, name, description and the `uH`/`uy` progress slider.
-        // OPEN because the counters->definition join and the `hs`/`is` cell
-        // art are not modelled. The `cs` strip still selects it; the body
-        // uses the real `vb` viewer rect. The faithful EMPTY list is drawn
-        // (the JS `fs` has no empty-state string; no debug placeholder).
+        // Ported `fs` ACHIEVEMENT_SLIDER body (L2213-2216): `fs.El` of
+        // `Ba(def, value)` built by `uZ`/`cab` from achievements.xml (asset
+        // 1356 via `td.Adb`/`Fib` L1160) joined with the save
+        // `<Counters>`/`<Achievements>`. Each row is the `hs`/`is` cell
+        // (`ba(400,130)`, `fs.NC` L2216): `Ed(270,y.MQa)` icon + `Uf`
+        // progress + the `uy` progress text (`is.D1a` L2213). The icon atlas
+        // (270) is ASTC -> flat cell + the `as` description text (L2210).
+        if (achiev_rows_.empty()) {
+            draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
+                          loc(app, "achievement_Completed", "Completed"), 0.8f, UiAlign::Center,
+                          0.7f, 0.7f, 0.7f);
+        } else {
+            const float row_h = 46.0f;
+            float yy = v.P + 6.0f;
+            for (const AchievRow& r : achiev_rows_) {
+                if (yy + row_h > v.W) break;
+                const float cy = yy + row_h * 0.5f;
+                sf2::render::Renderer& rr = app.renderer();
+                const float x0 = v.J + 4.0f, x1 = v.J + v.width() - 4.0f;
+                const float q[] = {x0, yy + 2.0f, x1, yy + 2.0f, x1, yy + row_h - 2.0f,
+                                   x0, yy + 2.0f, x1, yy + row_h - 2.0f, x0, yy + row_h - 2.0f};
+                rr.draw_triangles(q, 6, r.reward_available ? 0.28f : 0.14f, 0.16f, 0.12f,
+                                  0.95f);
+                // Icon `is.icon` (atlas 270 art miss -> flat square).
+                if (!draw_user_image(app, r.icon, x0 + 22.0f, cy, 32.0f, 32.0f, 0.9f)) {
+                    const float isz = 16.0f;
+                    const float iq[] = {x0 + 22.0f - isz, cy - isz, x0 + 22.0f + isz, cy - isz,
+                                        x0 + 22.0f + isz, cy + isz, x0 + 22.0f - isz, cy - isz,
+                                        x0 + 22.0f + isz, cy + isz, x0 + 22.0f - isz, cy + isz};
+                    rr.draw_triangles(iq, 6, 0.35f, 0.35f, 0.4f, 0.95f);
+                }
+                const std::string desc_key = r.description.empty() ? r.name : r.description;
+                const float text_w = std::max(60.0f, x1 - x0 - 150.0f);
+                draw_ui_label(app, x0 + 46.0f, cy - 16.0f, text_w, 18.0f,
+                              loc_template(app, desc_key, r.name), 0.5f, UiAlign::Left, 1.0f,
+                              1.0f, 1.0f);
+                // `is.D1a` (L2213): `min(QZ,counter)/counter` else
+                // `Y.na("achievement_Completed")`.
+                char pbuf[48];
+                if (r.value >= r.target && r.target > 0) {
+                    std::snprintf(pbuf, sizeof(pbuf), "%s",
+                                  loc(app, "achievement_Completed", "Completed").c_str());
+                } else {
+                    std::snprintf(pbuf, sizeof(pbuf), "%d/%d", r.value, r.target);
+                }
+                draw_ui_label(app, x1 - 104.0f, cy - 8.0f, 100.0f, 16.0f, pbuf, 0.5f,
+                              UiAlign::Right, 0.9f, 0.9f, 0.7f);
+                yy += row_h;
+            }
+        }
     }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
     draw_za_chrome(app, kScreenProfile);

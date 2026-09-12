@@ -126,6 +126,27 @@ WarriorSave SaveSystem::load() {
         if (b.attribute("Name")) out.battles.push_back(b.attribute("Name").value());
     }
 
+    // Battle progress records (JS `hl`): split Name "ZONE|BATTLE|" and read
+    // the Locked/Hidden flags that drive `Qr.lla` (L2094) visibility.
+    out.battle_records.clear();
+    for (pugi::xml_node b : warrior.child("Battles").children("Battle")) {
+        WarriorSave::BattleRecord r;
+        const std::string raw = b.attribute("Name").value();
+        const std::size_t p1 = raw.find('|');
+        if (p1 == std::string::npos) {
+            r.name = raw;
+        } else {
+            r.zone = raw.substr(0, p1);
+            const std::size_t p2 = raw.find('|', p1 + 1);
+            r.name = raw.substr(p1 + 1, p2 == std::string::npos ? std::string::npos
+                                                                : p2 - (p1 + 1));
+        }
+        if (r.name.empty()) continue;
+        r.locked = sf2::data::xml_attr_bool(b, "Locked", false);
+        r.hidden = sf2::data::xml_attr_bool(b, "Hidden", false);
+        out.battle_records.push_back(std::move(r));
+    }
+
     // Fight win counts (JS `yc`): `<Fights>/<Fight Name Wins>` (`Wins`
     // attr name OPEN — no <Fights> in the seed).
     out.fights.clear();
@@ -178,6 +199,36 @@ WarriorSave SaveSystem::load() {
             } catch (const std::exception&) {
             }
         }
+    }
+
+    // Perk progression (`Bt.KS`/`Ht.parse` L1327): `<PerkHistory><Level
+    // Perk="NAME" Value="N"/>`.
+    out.perk_history.clear();
+    for (pugi::xml_node lvl : warrior.child("PerkHistory").children("Level")) {
+        WarriorSave::PerkLevel pl;
+        if (lvl.attribute("Perk")) pl.name = lvl.attribute("Perk").value();
+        pl.level = sf2::data::xml_attr_int(lvl, "Value", 0);
+        if (!pl.name.empty()) out.perk_history.push_back(std::move(pl));
+    }
+
+    // Achievement counters (`kl`/`yi.mC`, L1249/L294): `<Counters><Counter
+    // Name=".." CurrentValue=".."/>`.
+    out.counters.clear();
+    for (pugi::xml_node c : warrior.child("Counters").children("Counter")) {
+        WarriorSave::AchievementCounter ac;
+        if (c.attribute("Name")) ac.name = c.attribute("Name").value();
+        ac.value = sf2::data::xml_attr_int(c, "CurrentValue", 0);
+        if (!ac.name.empty()) out.counters.push_back(std::move(ac));
+    }
+
+    // Achievement unlocks (`ll`/`yi.jO`, L1247/L294): `<Achievements>
+    // <Achievement Name=".." ObtainedReward=".."/>`.
+    out.achievement_unlocks.clear();
+    for (pugi::xml_node a : warrior.child("Achievements").children("Achievement")) {
+        WarriorSave::AchievementUnlock au;
+        if (a.attribute("Name")) au.name = a.attribute("Name").value();
+        au.obtained_reward = sf2::data::xml_attr_bool(a, "ObtainedReward", false);
+        if (!au.name.empty()) out.achievement_unlocks.push_back(std::move(au));
     }
 
     // Delivery timers (`yl`/`Ct` under save `<Timers>`, L250: `Uaa/BXa`
@@ -277,6 +328,25 @@ void SaveSystem::save(const WarriorSave& w) {
         for (const std::string& name : w.battles) {
             battles.append_child("Battle").append_attribute("Name").set_value(name.c_str());
         }
+        // `hl` Locked/Hidden flags (L277-278): patch the matching row (the
+        // Name list above already carries the zone-qualified "ZONE|BATTLE|").
+        for (const WarriorSave::BattleRecord& r : w.battle_records) {
+            const std::string raw =
+                r.zone.empty() ? r.name : (r.zone + "|" + r.name + "|");
+            pugi::xml_node node;
+            for (pugi::xml_node b : battles.children("Battle")) {
+                if (raw == b.attribute("Name").value()) {
+                    node = b;
+                    break;
+                }
+            }
+            if (!node) {
+                node = battles.append_child("Battle");
+                node.append_attribute("Name").set_value(raw.c_str());
+            }
+            if (r.locked) node.append_attribute("Locked").set_value("1");
+            if (r.hidden) node.append_attribute("Hidden").set_value("1");
+        }
     }
 
     // Fights (`yc`): replace the <Fight> children.
@@ -353,6 +423,52 @@ void SaveSystem::save(const WarriorSave& w) {
             pugi::xml_node t = timers.append_child("Timer");
             t.append_attribute("Name").set_value(kv.first.c_str());
             t.append_attribute("Due").set_value(kv.second);
+        }
+    }
+
+    // Perk progression (`Bt.Epb` L307 appends a <Level> per perk level):
+    // rewrite <PerkHistory> (create only when there is something to hold —
+    // `Bt.parse` appends it lazily via `Epb`).
+    {
+        pugi::xml_node ph = warrior.child("PerkHistory");
+        if (!ph && !w.perk_history.empty()) ph = warrior.append_child("PerkHistory");
+        if (ph) {
+            std::vector<pugi::xml_node> old;
+            for (pugi::xml_node l : ph.children("Level")) old.push_back(l);
+            for (const pugi::xml_node& l : old) ph.remove_child(l);
+            for (const WarriorSave::PerkLevel& pl : w.perk_history) {
+                pugi::xml_node l = ph.append_child("Level");
+                l.append_attribute("Perk").set_value(pl.name.c_str());
+                l.append_attribute("Value").set_value(pl.level);
+            }
+        }
+    }
+
+    // Achievement counters (`yt.parse` L294 always materializes <Counters>).
+    {
+        pugi::xml_node ctr = warrior.child("Counters");
+        if (!ctr) ctr = warrior.append_child("Counters");
+        std::vector<pugi::xml_node> old;
+        for (pugi::xml_node c : ctr.children("Counter")) old.push_back(c);
+        for (const pugi::xml_node& c : old) ctr.remove_child(c);
+        for (const WarriorSave::AchievementCounter& ac : w.counters) {
+            pugi::xml_node c = ctr.append_child("Counter");
+            c.append_attribute("Name").set_value(ac.name.c_str());
+            c.append_attribute("CurrentValue").set_value(ac.value);
+        }
+    }
+
+    // Achievement unlocks (`yt.parse` L294 always materializes <Achievements>).
+    {
+        pugi::xml_node ach = warrior.child("Achievements");
+        if (!ach) ach = warrior.append_child("Achievements");
+        std::vector<pugi::xml_node> old;
+        for (pugi::xml_node a : ach.children("Achievement")) old.push_back(a);
+        for (const pugi::xml_node& a : old) ach.remove_child(a);
+        for (const WarriorSave::AchievementUnlock& au : w.achievement_unlocks) {
+            pugi::xml_node a = ach.append_child("Achievement");
+            a.append_attribute("Name").set_value(au.name.c_str());
+            a.append_attribute("ObtainedReward").set_value(au.obtained_reward ? "true" : "false");
         }
     }
 

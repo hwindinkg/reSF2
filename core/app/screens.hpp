@@ -130,6 +130,13 @@ public:
         float x = 0.0f;  // screen pos (center; JS `qe.X0a` L2144)
         float y = 0.0f;
         bool active = true;
+        // JS `Qr.lla` (L2094): the button draws only while
+        // `hs.isActive && !a.li()` (a save `<Battles>` record exists and is
+        // not Hidden/expired). `alt_state` marks the `*_INTERMISSION` /
+        // boss hard-mode twins — hidden until they have a record, which is
+        // what keeps their labels off the base node's.
+        bool visible = true;
+        bool alt_state = false;
     };
 
     // One zone tab (JS `st`, parsed by `p.Dkb` L188): the zone strip the map
@@ -360,19 +367,19 @@ private:
 // Tab 1 folds the Moves/skills list. Tab 3 (SEALS) is ported from the
 // derivable `gs.uZ` filter (`p.o.xa.hJ(I.Vr)`, L2231): the save's owned
 // `Type="Seal"` catalog rows, drawn with the `js` cell (`js.ba` L2232
-// `oe(a.fileName)`). Tabs 0 and 2 stay OPEN with cites (the audit note they
-// are not derivable 1:1, not that the data is missing): `ds` shows
-// `id.ht().tH` tiers of `Ih` rows (`uZ` L2227) which `bya`/`dPa`/`cPa`
-// (L1353-1357) merge from the `character_progress.xml` `<PerkTree>` (asset
-// 1315, `td.Vib` L1160 `id.ht().parse(f)`) with `perks.xml` (`v.Rg`, asset
-// 310) and the save's perk progression (`p.o.co.KS.Oa`); each tier renders
-// the `tk` compare cell (`Rx` arrows + two `uk` level badges, L2217-2222) —
-// neither pipeline nor cell art is modelled. `fs` shows `v.uv.tI`
-// achievements (`Iv` L1175, parsed from `achievements.xml` asset 1356 via
-// `td.Adb`/`Fib` L1160) joined with the save's `<Counters>`/`<Achievements>`
-// (`p.o.yi` = `yt.parse`, L294, read at `this.yi.parse(a)` L250) through
-// `cab` (L2216), rendered by the `hs`/`is` achievement cell (L2209-2213) —
-// the counters/save join and cell art are OPEN. The invented equipment slot
+// `oe(a.fileName)`). Tab 0 (PERK TREE) is ported: `ds.uZ` L2227 reads
+// `id.ht().tH` tiers built by `bya`/`dPa`/`cPa` (L1353-1357) from the
+// `character_progress.xml` `<PerkTree>` (asset 1315, `td.Vib` L1160
+// `id.ht().parse(f)`) joined with `perks.xml` (`v.Rg`, asset 310) and the
+// save's `<PerkHistory>` (`p.o.co.KS.Oa`); each tier is the `tk` compare
+// cell (`Rx` arrows + two `uk` level badges, L2217-2222). Tab 2
+// (ACHIEVEMENTS) is ported: `fs.uZ` L2214 lists `v.uv.tI` groups (`Iv`
+// L1175, from `achievements.xml` asset 1356 via `td.Adb`/`Fib` L1160)
+// joined with the save `<Counters>`/`<Achievements>` (`p.o.yi` = `yt.parse`
+// L294, read at `this.yi.parse(a)` L250) through `cab` (L2216), rendered by
+// the `hs`/`is` cell (L2209-2213). The `tk`/`is` atlas art (profile 258/270)
+// is ASTC; a genuine frame miss falls back to the flat row (the same
+// never-silent rule as the rest of the shell). The invented equipment slot
 // list + owned grid were removed (PORT_AUDIT_UI §3 #19, §4 #6): JS moves
 // equip into the shop detail panel (`$o`) — now implemented in ShopScreen.
 class EquipmentScreen : public Screen {
@@ -400,6 +407,36 @@ public:
         std::string image;  // list.xml Image ("drop_blue_seal") -> `oe` name
     };
 
+    // One `ds` perk-tier row item (JS `id.ht().tH` tiers of `Ih`, L1353/2227;
+    // the `tk` cell L2217-2222 shows up to two per tier). `tier` = the
+    // PerkTree `<Level Value>`; `kind` = the XML tag ("Perk"/"Upgrade",
+    // `id.k7a` L1355); `learned_level` = the save `<PerkHistory>` level
+    // (`p.o.co.KS.Oa`); `available` = `Mw.K1()` (L1358).
+    struct PerkRow {
+        int tier = 0;             // PerkTree <Level Value>
+        std::string name;         // perk Name (perks.xml / character_progress.xml)
+        std::string kind;         // "Perk" (type 1) or "Upgrade" (type 2)
+        std::string image;        // perks.xml Image ("Icons01.IconAvenger")
+        std::string description;  // perks.xml Description key
+        int learned_level = 0;    // save progression level (0 = not learned)
+        bool available = false;   // Mw.K1
+    };
+
+    // One `fs` achievement row (JS `fs.El` of `Ba(def, value)`, L2214-2216;
+    // cell `is` L2212). Definition from achievements.xml, value from the
+    // save `<Counters>`/`<Achievements>` join.
+    struct AchievRow {
+        std::string name;         // Achievement Name (lang key)
+        std::string description;  // Description (lang key, `{n}` placeholders)
+        std::string icon;         // Icon ("Achievements01.ach_x" -> '/' path)
+        int target = 0;           // CounterValue (`xw.counter`)
+        int value = 0;            // displayed progress (`is.QZ`)
+        bool completed = false;   // `xw.completed` (`yt.Yua` L297) / value>=target
+        int money_prize = 0;      // MoneyPrize (`xw.AE`)
+        int bonus_prize = 0;      // BonusPrize (`xw.dP`)
+        bool reward_available = false;  // `xw.yj` (`Ir` L1248)
+    };
+
 private:
     int tab_ = 0;        // `cs` tab index (0 = `ds` leveling .. 3)
     int tab_hover_ = -1;
@@ -410,6 +447,10 @@ private:
     int move_total_ = 0;
     // Ported `gs` SEALS tab data (owned `I.Vr` rows, L2231).
     std::vector<SealRow> seal_rows_;
+    // Ported `ds` PERK TREE (tab 0) rows, L2227.
+    std::vector<PerkRow> perk_rows_;
+    // Ported `fs` ACHIEVEMENTS (tab 2) rows, L2213-2216.
+    std::vector<AchievRow> achiev_rows_;
 };
 
 // The settings — the real JS `un extends od` dialog (L1916-1930), reached

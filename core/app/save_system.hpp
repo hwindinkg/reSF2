@@ -82,6 +82,35 @@ struct WarriorSave {
         if (!has_battle(name)) battles.push_back(name);
     }
 
+    // Battle progress records (JS `hl`, `<Battles><Battle Name="ZONE_1|BOSS_LYNX|"
+    // Locked=".." Hidden=".." EndTime="..">`): `hl` ctor L276-277, `tt()` L278
+    // (locked art), `li()` L278 (Hidden/expired). The map node button's
+    // visibility is `Qr.lla` L2094 `X(hs.isActive && !a)` where
+    // `hs.isActive = WDa(zone|battle)` (L205/L256) and `a = li()`.
+    // `Name` splits on "|" -> zone / battle; rows written before this existed
+    // carry a bare battle name (no "|") -> `zone` empty.
+    struct BattleRecord {
+        std::string zone;      // `hb.Me`
+        std::string name;      // `hb.Re`
+        bool locked = false;   // `hl.zo` / `tt()` (Locked attr)
+        bool hidden = false;   // `hl.d9` / `li()` (Hidden attr)
+    };
+    std::vector<BattleRecord> battle_records;
+
+    // The `<Battles>` record for (zone, name) (`At.get` L276 via
+    // `WDa(a) = iF.get(a) != null`, L256). A zone-qualified row wins; a
+    // bare-name row (empty zone) matches any zone.
+    const BattleRecord* find_battle(const std::string& zone,
+                                    const std::string& name) const {
+        const BattleRecord* loose = nullptr;
+        for (const BattleRecord& r : battle_records) {
+            if (r.name != name) continue;
+            if (r.zone == zone) return &r;
+            if (r.zone.empty() && loose == nullptr) loose = &r;
+        }
+        return loose;
+    }
+
     // Fight win counts (JS `yc`, `<Fights>/<Fight>`; the `no` win count).
     // The count attr name is OPEN (no <Fights> in the seed) — "Wins" used.
     struct FightWins {
@@ -136,6 +165,35 @@ struct WarriorSave {
     // e.g. `Resistance_2="0"` — certain, in the seed).
     std::map<std::string, int> currencies;
     std::map<std::string, int> resistances;
+
+    // Perk progression (JS `Bt.KS` = `Ht`, `<PerkHistory><Level Perk="NAME"
+    // Value="N"/>`; `Ht.parse` L1327, exposed as `p.o.co.KS.Oa`). The `ds`
+    // perk tree merges it via `id.cPa` (L1353) and `Mw.K1` (L1358).
+    struct PerkLevel {
+        std::string name;   // `Mj.name` (Perk attr)
+        int level = 0;      // `Mj.level` (Value attr)
+    };
+    std::vector<PerkLevel> perk_history;
+
+    // Achievement counter values (JS `kl`, `yi.mC`: `<Counters><Counter
+    // Name="PerfectRound" CurrentValue="3"/>`; `kl` ctor L1249, `yt.parse`
+    // L294). The `fs` list join keys this Name against achievements.xml's
+    // `<Counter Name>` (`fs.uZ` L2214).
+    struct AchievementCounter {
+        std::string name;   // `kl.Ba` (Name)
+        int value = 0;      // `kl.AB` (CurrentValue)
+    };
+    std::vector<AchievementCounter> counters;
+
+    // Achievement unlock records (JS `ll`, `yi.jO`: `<Achievements>
+    // <Achievement Name=".." ObtainedReward="true"/>`; `ll` ctor L1247,
+    // `yt.parse` L294). `yt.Yua` L297 sets the def's `completed` + reward
+    // flag; `yt.sca` L296 writes it back.
+    struct AchievementUnlock {
+        std::string name;              // `ll.Ba` (Name)
+        bool obtained_reward = false;  // `ll.gO` (ObtainedReward)
+    };
+    std::vector<AchievementUnlock> achievement_unlocks;
 };
 
 // Loads/saves the users.xml document. Portable C++17 — the path is passed
