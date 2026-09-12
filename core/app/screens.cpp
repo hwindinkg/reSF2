@@ -1175,6 +1175,79 @@ bool draw_item_image(App& app, const std::string& image_ref, float cx, float cy,
     return true;
 }
 
+// Draws a JS `oe` user image (L1823-1825): `res/users/images/<fileName>.png`,
+// lowercased, loaded lazily. The shipped assets are hashed
+// (`<stem>.<hash>.<ext>`), so the stem is prefix-scanned like
+// `resolve_item_image`. Seal rows carry Image="drop_blue_seal" while the
+// shipped stem is "img_drop_blue_seal" (bundle drift, SHOP_STATIC §11), so
+// both stems are tried. Returns false on a genuine miss.
+bool draw_user_image(App& app, const std::string& file_name, float cx, float cy, float w,
+                     float h, float alpha) {
+    if (file_name.empty() || w <= 0.0f || h <= 0.0f) return false;
+    static std::map<std::string, ItemImage> cache;
+    static std::set<std::string> failed;
+    ItemImage ii;
+    const auto hit = cache.find(file_name);
+    if (hit != cache.end()) {
+        ii = hit->second;
+        if (ii.gl == 0) return false;
+    } else if (failed.count(file_name) != 0) {
+        return false;
+    } else {
+        std::string stem = file_name;
+        std::transform(stem.begin(), stem.end(), stem.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        const std::string stems[2] = {stem, "img_" + stem};
+        const std::string dir = app.res_root() + "/users/images";
+        sf2::data::Texture tex;
+        bool decoded = false;
+        try {
+            for (const std::string& s : stems) {
+                for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                    const std::string name = entry.path().filename().string();
+                    if (name.rfind(s + ".", 0) != 0) continue;
+                    const std::string ext = entry.path().extension().string();
+                    if (ext != ".png" && ext != ".webp") continue;
+                    if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                        decoded = true;
+                        break;
+                    }
+                }
+                if (decoded) break;
+            }
+        } catch (const std::exception&) {
+        }
+        if (!decoded) {
+            failed.insert(file_name);
+            return false;
+        }
+        ii.name = "user_img_" + stem;
+        ii.w = tex.w;
+        ii.h = tex.h;
+        ii.gl = app.renderer().texture_for(ii.name, tex);
+        cache[file_name] = ii;
+        if (ii.gl == 0) {
+            failed.insert(file_name);
+            return false;
+        }
+    }
+    sf2::scene::Sprite s;
+    s.texture_name = ii.name;
+    s.frame_x = 0.0f;
+    s.frame_y = 0.0f;
+    s.frame_w = static_cast<float>(ii.w);
+    s.frame_h = static_cast<float>(ii.h);
+    s.tex_w = static_cast<float>(ii.w);
+    s.tex_h = static_cast<float>(ii.h);
+    s.solid = false;
+    s.color_a = alpha;
+    s.transform.set_pos(cx, cy);
+    const float sc = std::min(w / static_cast<float>(ii.w), h / static_cast<float>(ii.h));
+    s.transform.set_scale(sc, sc);
+    app.renderer().draw_sprite(s, ui_camera());
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Shared `za` top chrome (JS L1972-1984) — the persistent shell chrome.
 //
@@ -2307,12 +2380,23 @@ void battle_rewards(const std::string& battle_name, int& out_money, int& out_exp
 //
 // Parses the FULL child structure JS `bb.OE`/`bb.M3` (L887-888) sees — the
 // rule tag + attrs AND the `<Animation>`/`<Node>` children (`Ce.c4a` L848,
-// `en.Mia` L860) — and flattens `<Level Min Max>` wrappers exactly like
-// `parse_stages` (shared `modes_detail::parse_rule_children`). Copying tag +
-// attrs alone dropped the child elements, which left the Wave-M HotGround /
-// LoseFall / Ringout engines inert in-game (the rule feeder is the single
-// path from stages.xml into `FightController`).
-std::vector<sf2::scene::StageRule> battle_fight_rules(const std::string& battle_name) {
+// `en.Mia` L860) — and expands `<Level>` (`bb.Ajb` L894), `<ComplexRule>`
+// (`nh.parse` L853) and `<RandomRule>` (`pn.parse` L879) exactly like
+// `parse_stages` via the shared `modes_detail::append_rule_element`. Copying
+// tag + attrs alone (or Level-only) dropped the child elements, which left
+// the Wave-M HotGround / LoseFall / Ringout engines inert in-game (the rule
+// feeder is the single path from stages.xml into `FightController`).
+//
+// `zone_name` = the current stages.xml Zone (`PendingBattle.zone`). The same
+// battle name repeats in every zone (Duel / Tournament / Challenge / ...),
+// so the battle MUST be resolved among the current zone's direct `<Battle>`
+// children (`hp` semantics, matching JS map node resolution). The old
+// all-zones scan bound the FIRST match in document order — another zone's
+// ruleset (e.g. `Duel` -> ZONE_1 even when the player is in ZONE_5, whose
+// `Duel` carries a different RandomRule/ComplexRule set). Empty `zone_name`
+// (the direct-boot path) falls back to the legacy first-match scan.
+std::vector<sf2::scene::StageRule> battle_fight_rules(const std::string& battle_name,
+                                                      const std::string& zone_name) {
     std::vector<sf2::scene::StageRule> out;
     try {
         sf2::data::xml_doc doc;
@@ -2324,44 +2408,46 @@ std::vector<sf2::scene::StageRule> battle_fight_rules(const std::string& battle_
         doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
         const pugi::xml_node root = doc.root().first_child();
         if (!root) return out;
-        for (const pugi::xml_node zone : root.child("Zones").children("Zone")) {
-            for (const pugi::xml_node battle : zone.children("Battle")) {
-                if (std::string(battle.attribute("Name").value()) != battle_name) continue;
-                const pugi::xml_node fight = battle.child("Fight");
-                if (!fight) return out;
-                const pugi::xml_node rules = fight.child("Rules");
-                if (!rules) return out;
-                for (const pugi::xml_node r : rules.children()) {
-                    const std::string rname = r.name();
-                    // JS `bb.OE` (L887-888) + `bb.Ajb` (L894): a `<Level
-                    // Min Max>` child wraps rules and stamps the power range;
-                    // every other child is a rule (`bb.M3`).
-                    if (rname == "Level") {
-                        const int lo = sf2::data::xml_attr_int(r, "Min", 0);
-                        const int hi = sf2::data::xml_attr_int(r, "Max", 2147483647);
-                        for (const pugi::xml_node c : r.children()) {
-                            sf2::scene::StageRule rule;
-                            rule.tag = c.name();
-                            for (const pugi::xml_attribute a : c.attributes()) {
-                                rule.attrs[a.name()] = a.value();
-                            }
-                            sf2::scene::modes_detail::parse_rule_children(c, rule);
-                            rule.power_min = lo;
-                            rule.power_max = hi;
-                            out.push_back(std::move(rule));
-                        }
-                        continue;
+        const pugi::xml_node zones = root.child("Zones");
+        if (!zones) return out;
+        // JS `hp` direct-children: resolve the battle inside the CURRENT
+        // zone only when it is known.
+        pugi::xml_node battle;
+        if (!zone_name.empty()) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                if (std::string(z.attribute("Name").value()) != zone_name) continue;
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
                     }
-                    sf2::scene::StageRule rule;
-                    rule.tag = rname;
-                    for (const pugi::xml_attribute a : r.attributes()) {
-                        rule.attrs[a.name()] = a.value();
-                    }
-                    sf2::scene::modes_detail::parse_rule_children(r, rule);
-                    out.push_back(std::move(rule));
                 }
-                return out;
+                break;  // the zone was found (whether or not it had the battle)
             }
+        }
+        if (!battle) {
+            // Zone unknown (direct-boot path): legacy first-match scan.
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                if (battle) break;
+            }
+        }
+        if (!battle) return out;
+        const pugi::xml_node fight = battle.child("Fight");
+        if (!fight) return out;
+        const pugi::xml_node rules = fight.child("Rules");
+        if (!rules) return out;
+        // JS `bb.OE` (L887-888): walk the DIRECT `<Rules>` children and let
+        // the shared expander flatten Level/ComplexRule/RandomRule.
+        int next_group = 0;
+        for (const pugi::xml_node r : rules.children()) {
+            sf2::scene::modes_detail::append_rule_element(
+                r, out, 0, 2147483647, next_group, -1, -1, false, false);
         }
     } catch (const std::exception&) {
     }
@@ -3048,6 +3134,7 @@ void MapScreen::launch_battle(const Node& n) {
     // the reward (the first non-zero <Reward>).
     PendingBattle& pb = app().pending_battle();
     pb.battle_name = n.name;
+    pb.zone = n.zone;  // stages.xml Zone (`hp` scope for the <Rules> feeder)
     pb.location = n.location.empty() ? "dojo" : n.location;
     pb.has_result = false;
     // The node's fight -> reward. The Training fight has
@@ -3428,10 +3515,13 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // [fx] JS `nj.parse` (L885) + `f_a` (L896-897): the stage fight's
     // `<Ringout>` rule configures the off-screen marker arrows (`sXa`). The
     // native battle is hardcoded above, so pull the battle's first-fight
-    // `<Rules>` from stages.xml and map them into `battle.ringout_*` here,
-    // BEFORE init_locks copies the battle into the controller. The dojo
-    // Training dummy carries no Ringout -> the markers stay dormant.
-    sf2::scene::apply_stage_ringout_rule(battle, battle_fight_rules(battle_name_));
+    // `<Rules>` from stages.xml (resolved in the battle's own zone —
+    // `pending_battle().zone`, `hp` semantics) and map them into
+    // `battle.ringout_*` here, BEFORE init_locks copies the battle into the
+    // controller. The dojo Training dummy carries no Ringout -> the markers
+    // stay dormant.
+    sf2::scene::apply_stage_ringout_rule(
+        battle, battle_fight_rules(battle_name_, app().pending_battle().zone));
     // Feeder verification (JS `bb.OE`/`bb.M3` L887-888): log what actually
     // reached the rule engine, including the `<Animation>`/`<Node>` children
     // the old tag+attrs-only feeder dropped (Wave M engines).
@@ -3466,6 +3556,12 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     auto roll01 = [&rng]() {
         return static_cast<float>(rng()) / static_cast<float>(rng.max());
     };
+    // JS `Da.IT` reseed analog (`Da.pg.sL`, L1210444): the fight's shared
+    // stream is reseeded by `rules_begin_round` before the RandomRule draws
+    // (JS `cl.pmb`). Same mt19937 the draws use, so the reseed is exact.
+    auto reseed01 = [&rng](int seed) {
+        rng.seed(static_cast<std::uint32_t>(seed));
+    };
 
     fight_ = std::make_unique<sf2::scene::FightController>();
     // The enemy's display name: the Dojo training fight names its Punchbag
@@ -3477,7 +3573,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
                        battle.max_hp, battle.max_hp, roll01, owned,
-                       equipped_perks(app(), assets));
+                       equipped_perks(app(), assets), reseed01);
     // Disarm identity (JS `$b(Au)` vs `ownHd`, L394): the player's wielded
     // weapon comes from the save; the enemy defaults to Fists (Training).
     {
@@ -4902,26 +4998,27 @@ constexpr int kShopTabCount = 5;
 //   content  = content.fn(1.85 + (clamp(lc,.6,1)-.6)/.4*.15)(L2293)
 //   viewer c = content.fn(.75)  -> `this.Za.Pn(c)`          (L2294)
 //   gap e    = (c.N-c.J)*.03 ;  slot b = (c.W-c.P)*.8       (L2294)
-// The JS cells `ns` (L2303-2308) are laid out in the `Oe` viewer list. `Oa.f5`
+// The side slots (L2294-2295) are the two `gb(0,0,b*.7,b)` rects:
+//   left  b2 = [c.J+e - w, c.J+e], vertically centred on c -> `MJ`/`op`
+//   right d  = [c.N-e, c.N-e + w], vertically centred on c -> `bc`
+// (`MJ.Pn(b2); op.Pn(b2); Za.Pn(c); bc.Pn(d)`, L2295).
+// The JS cells `ns` (L2303-2308) live in the `Oe` viewer list. `Oa.f5`
 // (L2286-2288) sets the per-category viewer anchor `Za.uw` and list spacing
 // `Za.LT` BEFORE building the list `yF(...)`:
 //   tab0 Weapon  uw=(300,220) LT(50)   tab1 Armor  uw=(300,400) LT(20)
 //   tab2 Helm    uw=(300,280) LT(100)  tab3 Ranged uw=(300,220) LT(50)
 //   tab4 Magic   uw=(300,220) LT(50)   tab5 IAP    uw=(300,320) (no LT)
 //   tab7 event   uw=(670,500)          (no LT)
-// (`Za` here is the `Oe` card viewer, not the gamepad `Za`.) `Oe.Pn(c)` (L2262)
-// then docks `scroll` at `c.J/c.P`, sizes it `(c.width, c.height, c.width*.08)`,
-// sets the cell list `Pa.C(4)`/`Pa.ba(scroll.Gv-8, scroll.Xy)` and the `Dn`
-// "noItems" label. `LT(a)` = `Pa.spacing`. The exact cell rects need `Oe`'s
-// `Fg` scroll content dims (`Gv`/`Xy`), the `Gg` list (`Pa`) cell sizing and
-// the `y.*` frame-name table — none of which is derivable statically
-// (PORT_AUDIT_UI §5 OPEN #4). The landed native grid keeps the exact JS viewer
-// rect `c` (`Oa.layout`, L2293-2295) in 2 columns with the JS gap; the `uw`
-// anchors and `LT` spacing are recorded above but not applied to the grid
-// (OPEN). The `ns` cell internals (L2305: icon `ky.zf(40)`, name
-// `av.Fa(ky.za()*2, ky.qa()*.7)` at `C(ky.za())D(ky.ra+ky.qa()*.2)`, price
-// `pv.Fa(a,b*.3)` at `C(a*.05)D(b*.8)`) need the `E.get(260)` icon frame
-// dims (`y.PRa`), also OPEN.
+// (`Za` here is the `Oe` card viewer, not the gamepad `Za`.) `Oe.Pn(c)`
+// (L2262) docks `scroll` at `c.J/c.P`, sizes it `(c.width, c.height,
+// c.width*.08)`, then `Pa.C(4)`, `Pa.ba(scroll.Gv-8, scroll.Xy)`. `Gg.ba`
+// (L1884-1885) scales each cell to the list width (`ff.kf(a)`, L1893) and
+// stacks them with `spacing` (`LT`): screen cell height = `uw.y * (listW /
+// uw.x)` (`ff.qa` = `ce.y*node.Eb`, L1893). The exact `Fg` inner dims
+// (`Gv`/`Xy`) and the `hi` interior insets (`b=bg.Eb*28`, L2311) still need
+// the `y.*` frame-name table (PORT_AUDIT_UI §5 OPEN #2/#4); the list width is
+// taken as the viewer width - 8 (the `scroll.Gv-8` term) and cell x as
+// `viewer.J + 4` (the `Pa.C(4)` term).
 struct ShopRect {
     float J = 0.0f, P = 0.0f, N = 0.0f, W = 0.0f;  // left/top/right/bottom
     float width() const { return N - J; }
@@ -4943,18 +5040,42 @@ ShopRect shop_gb_fn(const ShopRect& r, float aspect) {
     return {l, r.P, l + w2, r.W};
 }
 
-struct ShopLayout {
-    ShopRect content;     // b (L2293, after fn)
-    ShopRect viewer;      // c = b.fn(.75) (L2294) — the JS `Za` item area
-    float gap = 0.0f;     // e = (c.N-c.J)*.03 (L2294)
-    float slot_h = 0.0f;  // b = (c.W-c.P)*.8 (L2294, side-slot height)
-    // Native item grid inside `viewer` (2 columns; the JS `ns` pitch OPEN).
-    float card_w = 0.0f, card_h = 0.0f;
-    float dx = 0.0f, dy = 0.0f;
-    float x0 = 0.0f, y0 = 0.0f;  // first card centre
+// Per-category viewer anchor `uw` + list spacing `LT` (Oa.f5 L2286-2288).
+// Index = kShopTabs order (0 Weapon .. 4 Magic); tabs 5/7 are not shipped.
+struct ShopViewerParams {
+    float uw_x;
+    float uw_y;
+    float spacing;
+};
+constexpr ShopViewerParams kShopViewer[kShopTabCount] = {
+    {300.0f, 220.0f, 50.0f},   // tab0 Weapon: uw=(300,220) LT(50)
+    {300.0f, 400.0f, 20.0f},   // tab1 Armor:  uw=(300,400) LT(20)
+    {300.0f, 280.0f, 100.0f},  // tab2 Helm:   uw=(300,280) LT(100)
+    {300.0f, 220.0f, 50.0f},   // tab3 Ranged: uw=(300,220) LT(50)
+    {300.0f, 220.0f, 50.0f},   // tab4 Magic:  uw=(300,220) LT(50)
 };
 
-ShopLayout shop_layout() {
+struct ShopLayout {
+    ShopRect content;      // b (L2293, after fn)
+    ShopRect viewer;       // c = b.fn(.75) (L2294) — the JS `Za`/`Oe` area
+    ShopRect left_panel;   // b2 (L2294) — `MJ`/`op`
+    ShopRect right_panel;  // d  (L2294) — `bc` item detail
+    float gap = 0.0f;      // e = (c.N-c.J)*.03 (L2294)
+    float slot_h = 0.0f;   // b = (c.W-c.P)*.8 (L2294, side-slot height)
+    // `Oe`/`Gg` single-column cell list (L2261-2262, L1883-1893).
+    float uw_x = 0.0f, uw_y = 0.0f, spacing = 0.0f;
+    float cell_w = 0.0f;    // scroll.Gv - 8 (L2262)
+    float cell_h = 0.0f;    // uw.y * cell_w / uw.x (ff.qa, L1893)
+    float cell_step = 0.0f; // cell_h + spacing (Gg.ba, L1885)
+    float cell_cx = 0.0f;   // viewer.J + 4 + cell_w/2 (Pa.C(4), L2262)
+    float cell_top = 0.0f;  // viewer.P (scroll.P, L2262)
+};
+
+// `viewer` clipped to the JS `Oe.scroll` inner content height (`Xy`, L2262).
+// `Fg` rail dims are OPEN (PORT_AUDIT_UI §5 #4); native uses the full viewer.
+float shop_list_bottom(const ShopLayout& l) { return l.viewer.W; }
+
+ShopLayout shop_layout(int tab) {
     const float lc = kViewW / kViewH;            // N.lc
     const float t = std::clamp(lc, 0.6f, 1.0f);  // clamp(lc,.6,1)
     const float sp = za_layout().sp;             // za.Sp (JS L1975)
@@ -4967,14 +5088,41 @@ ShopLayout shop_layout() {
     l.viewer = shop_gb_fn(b, 0.75f);       // c = b.fn(.75) L2294
     l.gap = l.viewer.width() * 0.03f;      // L2294 e
     l.slot_h = l.viewer.height() * 0.8f;   // L2294 b
-    // 2-column grid filling the viewer rect (gap = the JS `.03`).
-    l.card_w = l.viewer.width() * 0.5f - l.gap * 0.5f;
-    l.card_h = l.viewer.height() * 0.5f - l.gap * 0.5f;
-    l.dx = l.card_w + l.gap;
-    l.dy = l.card_h + l.gap;
-    l.x0 = l.viewer.J + l.card_w * 0.5f;
-    l.y0 = l.viewer.P + l.card_h * 0.5f;
+    const float slot_w = l.slot_h * 0.7f;  // gb(0,0,b*.7,b) L2294
+    const float cy = (l.viewer.P + l.viewer.W) * 0.5f;
+    l.left_panel = {l.viewer.J + l.gap - slot_w, cy - l.slot_h * 0.5f,
+                    l.viewer.J + l.gap, cy + l.slot_h * 0.5f};
+    l.right_panel = {l.viewer.N - l.gap, cy - l.slot_h * 0.5f,
+                     l.viewer.N - l.gap + slot_w, cy + l.slot_h * 0.5f};
+    // `Gg` cell pitch from the per-category `uw` + `LT` (L2286-2288).
+    const ShopViewerParams vp = kShopViewer[std::clamp(tab, 0, kShopTabCount - 1)];
+    l.uw_x = vp.uw_x;
+    l.uw_y = vp.uw_y;
+    l.spacing = vp.spacing;
+    l.cell_w = l.viewer.width() - 8.0f;                 // scroll.Gv - 8 (L2262)
+    l.cell_h = vp.uw_y * (l.cell_w / vp.uw_x);          // ff.qa (L1893/L2262)
+    l.cell_step = l.cell_h + vp.spacing;                // Gg.ba (L1885)
+    l.cell_cx = l.viewer.J + 4.0f + l.cell_w * 0.5f;    // Pa.C(4) (L2262)
+    l.cell_top = l.viewer.P;                            // scroll.P (L2262)
     return l;
+}
+
+// The detail-panel action button (`bc` content `Up`, JS `Oa.init` L2289 +
+// `Up.Pn` via `hi` L2311). `Ne.ba` (L2248-2249) lays its buttons upward from
+// the panel bottom; native anchors the single equip/buy action there.
+ShopRect shop_action_rect(const ShopRect& panel) {
+    const float inset = panel.width() * 0.1f;
+    const float h = 42.0f;
+    return {panel.J + inset, panel.W - inset - h, panel.N - inset, panel.W - inset};
+}
+
+// Slot fallback when unequipping (JS `p.vzb`, L214-215).
+const char* shop_default_for_type(const std::string& type) {
+    if (type == "Armor") return "Body";
+    if (type == "Helm") return "Head";
+    if (type == "Ranged") return "NoRanged";
+    if (type == "Magic") return "NoMagic";
+    return "Fists";
 }
 
 // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width bar
@@ -5020,8 +5168,9 @@ std::vector<std::size_t> shop_tab_rows(const std::vector<CatalogItem>& items, in
 }
 
 // Shop atlas art per tab (shop.<hash>.json buttons/* — the JS `vj.ifa` tab
-// icons). Index matches kShopTabs order.
-const char* shop_tab_art(int tab, bool active) {
+// icons). Index matches kShopTabs order; state = 0 normal / 1 active / 2
+// pushed (JS `ss`: `a(n, y.KSa, y.MSa, y.LSa)`, L2284 = normal/active/pushed).
+const char* shop_tab_art(int tab, int state) {
     static const char* kNormal[kShopTabCount] = {
         "buttons/Weapon", "buttons/Armor", "buttons/Helmet",
         "buttons/Ranged_weapon", "buttons/Magic",
@@ -5030,8 +5179,14 @@ const char* shop_tab_art(int tab, bool active) {
         "buttons/Weapon_active", "buttons/Armor_active", "buttons/Helmet_active",
         "buttons/Ranged_weapon_active", "buttons/Magic_active",
     };
+    static const char* kPushed[kShopTabCount] = {
+        "buttons/Weapon_pushed", "buttons/Armor_pushed", "buttons/Helmet_pushed",
+        "buttons/Ranged_weapon_pushed", "buttons/Magic_pushed",
+    };
     if (tab < 0 || tab >= kShopTabCount) return nullptr;
-    return active ? kActive[tab] : kNormal[tab];
+    if (state == 1) return kActive[tab];
+    if (state == 2) return kPushed[tab];
+    return kNormal[tab];
 }
 
 // Equipped-slot value for an item type (JS `xc.hk` slots; save fields readable).
@@ -5041,6 +5196,36 @@ const std::string& shop_slot_for(const WarriorSave& w, const std::string& type) 
     if (type == "Ranged") return w.ranged;
     if (type == "Magic") return w.magic;
     return w.weapon;
+}
+
+// `re.XDa` (L2285): live-owned = owned and not awaiting delivery (`Bh<=Dc`).
+bool shop_owned_live(const WarriorSave& w, const std::string& name) {
+    if (!w.has_item(name)) return false;
+    return w.timers.find(name) == w.timers.end();
+}
+
+// `re.rga`/`c.G` (L2285): the item occupies its type slot (`zf.Ru`).
+bool shop_equipped(const WarriorSave& w, const CatalogItem& it) {
+    return w.has_item(it.name) && shop_slot_for(w, it.type) == it.name;
+}
+
+// `Oa.DU` action label (L2299): equipped -> Unequip; owned (or RaidItemPack)
+// -> Equip; else Try. RaidItemPack (`I.sB`) is not a shipped shop row.
+const char* shop_action_label(const WarriorSave& w, const CatalogItem& it) {
+    if (shop_equipped(w, it)) return "UNEQUIP";
+    if (shop_owned_live(w, it.name)) return "EQUIP";
+    return "TRY";
+}
+
+// `xc.hk` + `p.bo`/`xa.$o` (SHOP_STATIC §7): write the type slot and sync the
+// owned-item `Equipped` flags (`zf.Ru`). Unequip passes the `p.vzb` default.
+void shop_apply_slot(WarriorSave& w, const std::string& type, const std::string& name) {
+    if (type == "Armor") w.armor = name;
+    else if (type == "Helm") w.helm = name;
+    else if (type == "Ranged") w.ranged = name;
+    else if (type == "Magic") w.magic = name;
+    else w.weapon = name;
+    for (auto& oi : w.items) oi.equipped = (oi.name == name);
 }
 
 // One-line stat (damage/defense by type; Ranged/Magic carry no damage field
@@ -5140,6 +5325,7 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
             for (std::size_t r = 0; r < rows.size(); ++r) {
                 if (items_[rows[r]].name == "WEAPON_KNIVES") {
                     hover_ = static_cast<int>(r);
+                    sel_ = static_cast<int>(r);
                     break;
                 }
             }
@@ -5176,6 +5362,7 @@ void ShopScreen::update_impl(float dt) {
                 tab_hover_ = t;
                 if (p.pressed && t != tab_) {
                     tab_ = t;
+                    sel_ = 0;  // Oa.f5 -> usb() auto-selects the first cell
                     sf2::audio::AudioEngine::instance().play("click");
                     std::fprintf(stdout, "[shop] tab %s (E0=%d)\n", kShopTabs[tab_].label,
                                  kShopTabs[tab_].e0);
@@ -5236,81 +5423,106 @@ void ShopScreen::update_impl(float dt) {
             break;
         }
     }
-    // Item grid for the active tab (geometry = the responsive `Oa.layout`
-    // `gb` split, `shop_layout()`; row 0 of Weapons is WEAPON_KNIVES).
-    const ShopLayout sl = shop_layout();
+    // Item cells: the `Oe`/`Gg` single-column list (L2261-2262, L1883-1893).
+    // A click selects the row (`Oa.xA` L2296); the detail-panel action
+    // button performs the `Fhb` L2300 equip/buy path. Row 0 of Weapons is
+    // WEAPON_KNIVES — the headless-loop focus row.
+    const ShopLayout sl = shop_layout(tab_);
     const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
+    const float list_bottom = shop_list_bottom(sl);
     for (std::size_t i = 0; i < rows.size(); ++i) {
-        const int col = static_cast<int>(i % 2);
-        const int row = static_cast<int>(i / 2);
-        const float cx = sl.x0 + static_cast<float>(col) * sl.dx;
-        const float cy = sl.y0 + static_cast<float>(row) * sl.dy;
-        if (p.x >= cx - sl.card_w / 2 && p.x <= cx + sl.card_w / 2 &&
-            p.y >= cy - sl.card_h / 2 && p.y <= cy + sl.card_h / 2) {
+        const float cy =
+            sl.cell_top + static_cast<float>(i) * sl.cell_step + sl.cell_h * 0.5f;
+        if (cy - sl.cell_h * 0.5f >= list_bottom) break;  // Gg hides off-range rows
+        if (p.x >= sl.cell_cx - sl.cell_w * 0.5f && p.x <= sl.cell_cx + sl.cell_w * 0.5f &&
+            p.y >= cy - sl.cell_h * 0.5f && p.y <= cy + sl.cell_h * 0.5f) {
             hover_ = static_cast<int>(i);
             if (p.pressed) {
-                const CatalogItem& it = items_[rows[i]];
+                sel_ = static_cast<int>(i);
+                sf2::audio::AudioEngine::instance().play("click");
+                std::fprintf(stdout, "[shop] select %s\n", items_[rows[i]].name.c_str());
+                std::fflush(stdout);
+            }
+            break;
+        }
+    }
+    // Detail-panel action button (`bc` content `Up.Fhb`, L2300; label
+    // `Oa.DU` L2299). Side panels show on tabs 0..4 (`Q5` L2302).
+    side_hover_ = 0;
+    if (!rows.empty()) {
+        const int sel = std::clamp(sel_, 0, static_cast<int>(rows.size()) - 1);
+        const CatalogItem& it = items_[rows[static_cast<std::size_t>(sel)]];
+        const ShopRect ar = shop_action_rect(sl.right_panel);
+        if (p.x >= ar.J && p.x <= ar.N && p.y >= ar.P && p.y <= ar.W) {
+            side_hover_ = 1;
+            if (p.pressed) {
                 WarriorSave w;
                 try {
                     w = app().save().load();
                 } catch (const std::exception&) {
-                    break;
+                    return;
                 }
-                // JS `Pa.iwa` coin gate (L1228/SHOP_STATIC §9): `Tb >= jp` →
-                // deduct `Fr` + grant `gI` + save. Coins are the Warrior
-                // Money attr (the seed `<Currencies/>` is empty — no coin
-                // key exists to deduct from; see the stream report).
-                if (w.has_item(it.name)) {
-                    std::fprintf(stdout, "[shop] %s already owned\n", it.name.c_str());
+                if (shop_owned_live(w, it.name)) {
+                    // `Fhb` L2300: owned -> equip (`xa.$o`) / unequip (`xa.Qxb`
+                    // -> `p.vzb` default slot). Slot write via `shop_apply_slot`
+                    // (SHOP_STATIC §7 `xc.hk`/`zf.Ru`).
+                    const bool was_equipped = shop_equipped(w, it);
+                    const std::string new_slot =
+                        was_equipped ? std::string(shop_default_for_type(it.type))
+                                     : it.name;
+                    shop_apply_slot(w, it.type, new_slot);
+                    app().save().save(w);
+                    seen_ = w;
+                    confirm_ = (was_equipped ? "UNEQUIPPED " : "EQUIPPED ") + it.name + "!";
+                    confirm_until_ = time() + 2.5f;
+                    std::fprintf(stdout, "[shop] %s %s -> %s slot %s\n",
+                                 was_equipped ? "Qxb UNEQUIP" : "$o EQUIP", it.name.c_str(),
+                                 it.type.c_str(), new_slot.c_str());
                     std::fflush(stdout);
                 } else if (w.money >= it.price) {
+                    // `Fhb` else-branch `Ex(a,7)` -> buy dialog -> `Pa.iwa`
+                    // (SHOP_STATIC §6): `Tb >= jp` -> deduct + grant + save.
+                    // The `ph` dialog is OPEN; native collapses it to the
+                    // gate+grant.
                     w.money -= it.price;
                     if (it.delivery_sec > 0) {
-                        // Timed delivery (JS Pa z2a-path: Ec>0 → delivery,
-                        // else Cba instant grant below): paid upfront, the
-                        // item arrives on claim (Gb Cla(now)+save stamped).
-                        w.timers[it.name] =
-                            WarriorSave::wall_now() + it.delivery_sec;
+                        // Pa z2a timed delivery: paid upfront, arrives on
+                        // claim (Gb Cla(now) stamped).
+                        w.timers[it.name] = WarriorSave::wall_now() + it.delivery_sec;
                         app().save().save(w);
                         seen_ = w;
                         confirm_ = "ORDERED " + it.name + "!";
                         confirm_until_ = time() + 2.5f;
                         std::fprintf(stdout,
-                                     "[shop] ORDERED %s price=%d -> arrives in %ds (claim on arrival)\n",
+                                     "[shop] ORDERED %s price=%d -> arrives in %ds\n",
                                      it.name.c_str(), it.price, it.delivery_sec);
                         std::fflush(stdout);
                     } else {
-                    WarriorSave::OwnedItem oi;
-                    oi.name = it.name;
-                    oi.count = 1;
-                    // Tutorial-buy force-equip (JS `Ao` Qg: `Pa.iwa(b) &&
-                    // xa.$o(b)` — L1120): WEAPON_KNIVES in tutorial context
-                    // equips into its slot and advances the step to MAP
-                    // (row 4). Other buys keep the no-equip behavior.
-                    const bool tut_buy =
-                        it.name == "WEAPON_KNIVES" &&
-                        (w.story_step() == "STEP_BUY_ITEM" ||
-                         (w.story_step().empty() && w.tutorial == "MOVE"));
-                    if (tut_buy) {
-                        if (it.type == "Armor") w.armor = it.name;
-                        else if (it.type == "Helm") w.helm = it.name;
-                        else if (it.type == "Ranged") w.ranged = it.name;
-                        else if (it.type == "Magic") w.magic = it.name;
-                        else w.weapon = it.name;
-                        oi.equipped = true;
-                        w.set_story_step("MAP");
+                        WarriorSave::OwnedItem oi;
+                        oi.name = it.name;
+                        oi.count = 1;
+                        // Tutorial-buy force-equip (JS `Ao` Qg L1120:
+                        // `Pa.iwa(b) && xa.$o(b)`); step -> MAP.
+                        const bool tut_buy =
+                            it.name == "WEAPON_KNIVES" &&
+                            (w.story_step() == "STEP_BUY_ITEM" ||
+                             (w.story_step().empty() && w.tutorial == "MOVE"));
+                        if (tut_buy) {
+                            shop_apply_slot(w, it.type, it.name);
+                            oi.equipped = true;
+                            w.set_story_step("MAP");
+                        }
+                        w.items.push_back(oi);
+                        app().save().save(w);
+                        seen_ = w;
+                        confirm_ = "BOUGHT " + it.name + "!";
+                        confirm_until_ = time() + 2.5f;
+                        std::fprintf(stdout,
+                                     "[shop] BOUGHT %s (%s) price=%d -> money %d%s\n",
+                                     it.name.c_str(), it.subtype.c_str(), it.price, w.money,
+                                     tut_buy ? " + EQUIPPED, step -> MAP (Ao)" : "");
+                        std::fflush(stdout);
                     }
-                    w.items.push_back(oi);
-                    app().save().save(w);
-                    seen_ = w;
-                    confirm_ = "BOUGHT " + it.name + "!";
-                    confirm_until_ = time() + 2.5f;
-                    std::fprintf(stdout,
-                                 "[shop] BOUGHT %s (%s) price=%d -> money %d, item added%s\n",
-                                 it.name.c_str(), it.subtype.c_str(), it.price, w.money,
-                                 tut_buy ? " + EQUIPPED, step -> MAP (Ao)" : "");
-                    std::fflush(stdout);
-                    }  // else: instant grant (Cba path)
                 } else {
                     std::fprintf(stdout, "[shop] NOT ENOUGH MONEY for %s (need %d, have %d)\n",
                                  it.name.c_str(), it.price, w.money);
@@ -5353,7 +5565,8 @@ void ShopScreen::render_impl(App& app) {
             const float cx = tl.cx0 + static_cast<float>(t) * tl.step;
             const bool sel = t == tab_;
             const bool hov = t == tab_hover_;
-            const char* art = shop_tab_art(t, sel || hov);
+            const int state = sel ? 1 : (hov ? 2 : 0);  // normal/active/pushed
+            const char* art = shop_tab_art(t, state);
             bool drawn = false;
             if (art != nullptr) {
                 drawn = try_draw_atlas_button(app, art, cx, tl.cy, tl.btn_w, tl.btn_h,
@@ -5369,58 +5582,131 @@ void ShopScreen::render_impl(App& app) {
             }
         }
     }
-    // Item grid inside the responsive `Oa.layout` `gb` viewer rect
-    // (`shop_layout()`, JS L2293-2295).
-    const ShopLayout sl = shop_layout();
+    // `Oe`/`Gg` single-column cell list (L2261-2262, L1883-1893). Cells are
+    // scaled to the list width (`ff.kf` L1893) and stacked with the
+    // per-category `LT` spacing; rows past the viewer bottom are hidden
+    // (`Gg.aa` `Qk` range, L1886).
+    const ShopLayout sl = shop_layout(tab_);
     const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
+    const float list_bottom = shop_list_bottom(sl);
+    const CatalogItem* sel_it = nullptr;
+    if (!rows.empty()) {
+        const int sel = std::clamp(sel_, 0, static_cast<int>(rows.size()) - 1);
+        sel_it = &items_[rows[static_cast<std::size_t>(sel)]];
+    }
+    auto quad = [&](const ShopRect& r, float cr, float cg, float cb, float ca) {
+        const float v[] = {r.J, r.P, r.N, r.P, r.N, r.W, r.J, r.P, r.N, r.W, r.J, r.W};
+        ren.draw_triangles(v, 6, cr, cg, cb, ca);
+    };
+    auto outline = [&](const ShopRect& r, float cr, float cg, float cb, float t) {
+        const ShopRect e{r.J - t, r.P - t, r.N + t, r.W + t};
+        quad(ShopRect{r.J, e.P, r.N, r.P}, cr, cg, cb, 1.0f);
+        quad(ShopRect{r.J, r.W, r.N, e.W}, cr, cg, cb, 1.0f);
+        quad(ShopRect{e.J, e.P, r.J, e.W}, cr, cg, cb, 1.0f);
+        quad(ShopRect{r.N, e.P, e.N, e.W}, cr, cg, cb, 1.0f);
+    };
     if (rows.empty()) {
-        draw_ui_label(app, sl.viewer.J, sl.viewer.P, sl.viewer.width(), 26.0f,
-                          "No items in this category yet.", 0.8f, UiAlign::Left, 0.7f, 0.7f, 0.7f);
+        draw_ui_label(app, sl.viewer.J, sl.viewer.P + sl.viewer.height() * 0.5f - 13.0f,
+                      sl.viewer.width(), 26.0f, "No items in this category yet.", 0.8f,
+                      UiAlign::Center, 0.7f, 0.7f, 0.7f);
     }
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const CatalogItem& it = items_[rows[i]];
-        const int col = static_cast<int>(i % 2);
-        const int row = static_cast<int>(i / 2);
-        const float cx = sl.x0 + static_cast<float>(col) * sl.dx;
-        const float cy = sl.y0 + static_cast<float>(row) * sl.dy;
-        const float card_w = sl.card_w, card_h = sl.card_h;
+        const float cy =
+            sl.cell_top + static_cast<float>(i) * sl.cell_step + sl.cell_h * 0.5f;
+        if (cy - sl.cell_h * 0.5f >= list_bottom) break;  // Gg hides off-range rows
+        const float cx = sl.cell_cx, cw = sl.cell_w, ch = sl.cell_h;
+        const ShopRect cell{cx - cw * 0.5f, cy - ch * 0.5f, cx + cw * 0.5f, cy + ch * 0.5f};
         const bool hovered = static_cast<int>(i) == hover_;
-        // Item image (JS `ns.j5` L2307: `Rf(Ye.qI(item.fileName))` ->
-        // res/items/images-1x/<dir>/<file>; `it.image` is the list.xml Image
-        // ref, e.g. "Weapon1.img_weapon_knives"). The shipped item art is a
-        // standalone texture, so it is drawn directly; a genuine miss keeps
-        // the flat card. Replaces the invented `attributes/*` stand-ins
-        // (PORT_AUDIT_UI 3 #18).
-        // Item image band (`ns.ba` L2304-2306: `Bk.kLa(c, ce.y*.8)` with
-        // `c = ce.x*.8`, Ga-centred at `(ce.x/2, ce.y/2)`; the `jw` icon/name
-        // group is bottom-docked at `D(ce.y-40)` so the title never crosses
-        // the art). Native card = one `ns` cell: keep the image in the middle
-        // band, clear of the top title and the bottom stat/owned lines.
-        bool drawn = draw_item_image(app, it.image, cx, cy, card_w * 0.62f, card_h * 0.52f, 0.95f);
-        if (!drawn) {
-            // Equipped cards read gold (distinct from owned/unowned at a
-            // glance); hover still brightens.
-            const bool card_equipped = seen_.has_item(it.name) &&
-                                       shop_slot_for(seen_, it.type) == it.name;
-            const float r = card_equipped ? 0.72f : (hovered ? 0.75f : 0.45f);
-            const float g = card_equipped ? 0.60f : (hovered ? 0.6f : 0.35f);
-            const float b = card_equipped ? 0.25f : (hovered ? 0.3f : 0.2f);
-            draw_flat_button(app, it.name, cx, cy, card_w, card_h, r, g, b, hovered);
-        }
-        // Owned / equipped markers (JS `zf` inventory + `hk` slots — save
-        // fields readable; render reads the update snapshot only).
+        const bool selected = sel_it != nullptr && sel_it->name == it.name;
         const bool owned = seen_.has_item(it.name);
         const bool equipped = owned && shop_slot_for(seen_, it.type) == it.name;
-        draw_ui_label(app, cx - card_w / 2 + 12.0f, cy - card_h / 2 + 6.0f, card_w - 24.0f, 24.0f,
-                          it.name, 0.7f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
-        draw_ui_label(app, cx - card_w / 2 + 12.0f, cy + card_h / 2 - 50.0f, card_w - 24.0f, 22.0f,
-                          shop_stat_line(it), 0.65f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
+        // `ns` cell art: item image band (`Bk.kLa(c, ce.y*.8)`, `c=ce.x*.8`,
+        // L2306 / `ns.j5` `Rf(Ye.qI(fileName))` L2307). Flat card only on a
+        // genuine art miss (equipped reads gold).
+        bool drawn = draw_item_image(app, it.image, cx, cy - ch * 0.06f, cw * 0.8f, ch * 0.55f,
+                                     0.95f);
+        if (!drawn) {
+            const float r = equipped ? 0.72f : (selected ? 0.75f : (hovered ? 0.7f : 0.5f));
+            const float g = equipped ? 0.60f : (selected ? 0.62f : (hovered ? 0.56f : 0.4f));
+            const float b = equipped ? 0.25f : (selected ? 0.3f : (hovered ? 0.26f : 0.2f));
+            draw_flat_button(app, it.name, cx, cy, cw, ch, r, g, b, hovered);
+        }
+        if (selected) outline(cell, 1.0f, 0.85f, 0.3f, 3.0f);
+        // `ns.av` name (`C(ky.za()) D(ky.ra+ky.qa()*.2)`, L2305); stat/price
+        // `ns.pv` (`Fa(a,b*.3)`, `D(b*.8)`, L2305); owned/equipped markers.
+        draw_ui_label(app, cell.J + 12.0f, cell.P + 6.0f, cw - 24.0f, ch * 0.14f, it.name, 0.7f,
+                      UiAlign::Left, 1.0f, 1.0f, 1.0f);
+        draw_ui_label(app, cell.J + 12.0f, cell.W - ch * 0.20f, cw - 24.0f, ch * 0.14f,
+                      shop_stat_line(it), 0.65f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
         if (equipped) {
-            draw_ui_label(app, cx - card_w / 2 + 12.0f, cy + card_h / 2 - 28.0f, card_w - 24.0f, 22.0f,
-                              "EQUIPPED", 0.65f, UiAlign::Left, 0.4f, 1.0f, 0.4f);
+            draw_ui_label(app, cell.J + 12.0f, cell.W - ch * 0.12f, cw - 24.0f, ch * 0.12f,
+                          "EQUIPPED", 0.6f, UiAlign::Left, 0.4f, 1.0f, 0.4f);
         } else if (owned) {
-            draw_ui_label(app, cx - card_w / 2 + 12.0f, cy + card_h / 2 - 28.0f, card_w - 24.0f, 22.0f,
-                              "OWNED", 0.65f, UiAlign::Left, 1.0f, 0.85f, 0.4f);
+            draw_ui_label(app, cell.J + 12.0f, cell.W - ch * 0.12f, cw - 24.0f, ch * 0.12f,
+                          "OWNED", 0.6f, UiAlign::Left, 1.0f, 0.85f, 0.4f);
+        }
+    }
+    // Side panels (L2294-2295): right detail `bc`, left `MJ` params + `op`
+    // enchantments. Only tabs 0..4 (`Q5` L2302).
+    {
+        const ShopRect rp = sl.right_panel;
+        quad(rp, 0.10f, 0.10f, 0.13f, 0.9f);
+        if (sel_it != nullptr) {
+            draw_ui_label(app, rp.J + 8.0f, rp.P + 6.0f, rp.width() - 16.0f, 26.0f, sel_it->name,
+                          0.8f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+            const std::string sub = sel_it->subtype.empty() ? sel_it->type : sel_it->subtype;
+            draw_ui_label(app, rp.J + 8.0f, rp.P + 30.0f, rp.width() - 16.0f, 20.0f, sub, 0.6f,
+                          UiAlign::Center, 0.8f, 0.8f, 0.9f);
+            draw_item_image(app, sel_it->image, (rp.J + rp.N) * 0.5f, rp.P + rp.height() * 0.42f,
+                            rp.width() * 0.72f, rp.height() * 0.28f, 1.0f);
+            draw_ui_label(app, rp.J + 8.0f, rp.P + rp.height() * 0.60f, rp.width() - 16.0f,
+                          rp.height() * 0.14f, shop_stat_line(*sel_it), 0.65f, UiAlign::Center,
+                          0.9f, 0.9f, 0.9f);
+            // Detail action = `Oa.DU` label (L2299) + `Fhb` equip/buy (L2300).
+            const ShopRect ar = shop_action_rect(rp);
+            const char* alabel = shop_action_label(seen_, *sel_it);
+            const bool ah = side_hover_ == 1;
+            draw_flat_button(app, alabel, (ar.J + ar.N) * 0.5f, (ar.P + ar.W) * 0.5f,
+                             ar.width(), ar.height(), ah ? 0.35f : 0.25f, ah ? 0.65f : 0.45f,
+                             ah ? 0.35f : 0.25f, ah);
+            draw_ui_label(app, ar.J, (ar.P + ar.W) * 0.5f - 10.0f, ar.width(), 20.0f, alabel,
+                          0.75f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        }
+        // `MJ` (`ps` params, L2275) top / `op` (`qs` enchantments, L2280)
+        // bottom. JS gives both the SAME `b2` (`MJ.Pn(b2); op.Pn(b2)`, L2295)
+        // and `hi.$ka` (L2312) opens one at a time — the native stack split
+        // and the `hi` interior insets (`b=bg.Eb*28`, L2311; OPEN) are an
+        // approximation.
+        const ShopRect lp = sl.left_panel;
+        const float mid = (lp.P + lp.W) * 0.5f;
+        const ShopRect mj{lp.J, lp.P, lp.N, mid - 6.0f};
+        const ShopRect op{lp.J, mid + 6.0f, lp.N, lp.W};
+        quad(mj, 0.10f, 0.10f, 0.13f, 0.9f);
+        draw_ui_label(app, mj.J + 8.0f, mj.P + 6.0f, mj.width() - 16.0f, 22.0f, "WIELDING", 0.6f,
+                      UiAlign::Left, 0.85f, 0.85f, 0.5f);
+        draw_ui_label(app, mj.J + 8.0f, mj.P + 30.0f, mj.width() - 16.0f, mj.height() - 36.0f,
+                      wielding_line(app, seen_), 0.55f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
+        if (sel_it != nullptr) {
+            draw_ui_label(app, mj.J + 8.0f, mj.W - 30.0f, mj.width() - 16.0f, 24.0f,
+                          "SEL " + shop_stat_line(*sel_it), 0.55f, UiAlign::Left, 0.9f, 0.9f, 0.7f);
+        }
+        quad(op, 0.10f, 0.10f, 0.13f, 0.9f);
+        draw_ui_label(app, op.J + 8.0f, op.P + 6.0f, op.width() - 16.0f, 22.0f, "ENCHANTMENTS",
+                      0.58f, UiAlign::Left, 0.8f, 0.8f, 0.95f);
+        if (sel_it != nullptr && !sel_it->perks.empty()) {
+            float yy = op.P + 30.0f;
+            int n = 0;
+            for (const ItemPerkRef& perk : sel_it->perks) {
+                if (n >= 4 || yy + 18.0f > op.W) break;
+                draw_ui_label(app, op.J + 8.0f, yy, op.width() - 16.0f, 18.0f, perk.name, 0.5f,
+                              UiAlign::Left, 1.0f, 0.9f, 0.6f);
+                yy += 18.0f;
+                ++n;
+            }
+        } else {
+            draw_ui_label(app, op.J + 8.0f, op.P + 30.0f, op.width() - 16.0f, 20.0f,
+                          "shopNoEnchantments", 0.5f, UiAlign::Left, 0.6f, 0.6f, 0.6f);
         }
     }
     if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
@@ -5428,7 +5714,8 @@ void ShopScreen::render_impl(App& app) {
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
-    // Wielding summary + buy confirmation (display only).
+    // Buy confirmation (display only; the wielding summary now lives in the
+    // `MJ` left side panel).
     // Wallet top-right (was invisible — affordability guessing papercut).
     {
         char mbuf[64];
@@ -5452,8 +5739,6 @@ void ShopScreen::render_impl(App& app) {
                       text, 0.7f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
         }
     }
-    draw_ui_label(app, 24.0f, 648.0f, 700.0f, 22.0f,
-                      wielding_line(app, seen_), 0.7f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
     if (!confirm_.empty() && time() <= confirm_until_) {
         draw_ui_label(app, kViewW * 0.5f - 220.0f, 678.0f, 440.0f, 26.0f,
                           confirm_, 1.0f, UiAlign::Center, 0.4f, 1.0f, 0.4f);
@@ -5472,9 +5757,10 @@ void ShopScreen::render_impl(App& app) {
 // Tab content: `vb.hla` (L2190-2191) routes tab 0 -> `Rl=ds`
 // (POWERLEVELING_SLIDER L2227), tab 1 -> `qv=es` (SKILLS_SLIDER L2239),
 // tab 2 -> `Zr=fs` (ACHIEVEMENT_SLIDER L2213), tab 3 -> `lv=gs`
-// (SEALS_SLIDER L2231). Only tab 1 (the folded Moves list) is reproduced;
-// tabs 0/2/3 are OPEN — the native docks the real `vb.layout` `a =
-// b.fn(.75)` viewer rect (L2195) and shows a placeholder. Nav/`cs` badges
+// (SEALS_SLIDER L2231). Tabs 1 (folded Moves) and 3 (`gs` SEALS) are
+// reproduced; tabs 0 (`ds`, needs `id.ht().Mi/tH`) and 2 (`fs`, needs
+// `v.uv.tI`) are OPEN — the native docks the real `vb.layout` `a =
+// b.fn(.75)` viewer rect (L2195) and shows a cited placeholder. Nav/`cs` badges
 // (`Dg`, L1850-1851):
 // `cs.getCounterValue` (L2189) reads `p.o.co.uCa()/p.o.sCa()/p.o.yi.rCa()/
 // p.o.vCa()` and `ss` (L2284) `p.items.T5a(Cj.zxb(a))` — the badge COUNTS are
@@ -5484,6 +5770,8 @@ void ShopScreen::render_impl(App& app) {
 constexpr int kProfileTabCount = 4;
 constexpr int kProfileTabLeveling = 0;  // `ds` leveling tab (`Rl=ds` L2227) — body OPEN
 constexpr int kProfileTabMoves = 1;  // folded Moves sub-view (JS `qv`, To.kOa=11 L2201)
+constexpr int kProfileTabAchiev = 2;  // `fs` ACHIEVEMENT_SLIDER (L2213) — body OPEN
+constexpr int kProfileTabSeals = 3;  // `gs` SEALS_SLIDER (L2231) — ported
 
 struct ProfileTabArt {
     const char* normal;
@@ -5588,6 +5876,26 @@ void draw_profile_tabs(App& app, int tab, int hover) {
 // ---------------------------------------------------------------------------
 
 EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") {
+    // Ported SEALS tab (`gs.uZ`, L2231): JS filters `p.o.xa.hJ(I.Vr)` then
+    // keeps count>0. Native uses the full catalog (`<Item Type="Seal">`, 7 on
+    // disk) + the save inventory; the row image is the list.xml `Image`
+    // ("drop_blue_seal"), resolved through `oe`/`draw_user_image` (L2232).
+    try {
+        const std::vector<CatalogItem> full = load_full_catalog(app());
+        const WarriorSave w = app().save().load();
+        for (const CatalogItem& ci : full) {
+            if (ci.type != "Seal") continue;
+            int count = 0;
+            for (const auto& oi : w.items) {
+                if (oi.name == ci.name) count += oi.count;
+            }
+            if (count > 0) seal_rows_.push_back({ci.name, count, ci.image});
+        }
+        std::fprintf(stdout, "[profile] seals tab: %zu owned\n", seal_rows_.size());
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[profile] seals load failed: %s\n", e.what());
+    }
     // Folded Moves tab (JS Profile sub-view `qv`, To.kOa=11 L2201): the exact
     // learned list built with the fight rule (`build_move_list_locks` over the
     // save's owned items — display only, on a throwaway Fighter; never
@@ -5639,8 +5947,9 @@ void EquipmentScreen::update_impl(float dt) {
             return;
         }
     }
-    // `cs` bottom tab strip (JS L2188): select the Profile sub-view
-    // (0 = `ds` leveling, 1 = folded Moves, 2/3 = OPEN — L2190-2191).
+    // `cs` bottom tab strip (JS L2188): select the Profile sub-view via
+    // `vb.hla` (L2190-2193) — 0 = `ds` leveling, 1 = folded Moves (`es`),
+    // 2 = `fs` ACHIEVEMENT (OPEN), 3 = `gs` SEALS (ported).
     tab_hover_ = profile_tab_hit(p.x, p.y);
     if (tab_hover_ >= 0 && p.pressed) {
         sf2::audio::AudioEngine::instance().play("click");
@@ -5729,10 +6038,16 @@ void EquipmentScreen::render_impl(App& app) {
         draw_ui_label(app, 130.0f, 134.0f, 600.0f, 24.0f,
                       mbuf, 0.8f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
     }
-    // `ds` POWERLEVELING_SLIDER body (L2227) not reproduced — OPEN.
-    draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 20.0f, v.width(), 40.0f,
-                  std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)",
-                  1.0f, UiAlign::Center, 0.8f, 0.8f, 0.8f);
+    // `ds` POWERLEVELING_SLIDER body (L2227) stays OPEN: it needs the
+    // leveling table `id.ht().Mi/tH` (built from `character_progress.xml`
+    // thresholds; not in the native save) + the `Qx` counter strip. The
+    // `XB=ei` header above (`ivb()`, L2191) is the derivable part.
+    draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 40.0f, v.width(), 40.0f,
+                  std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)", 1.0f,
+                  UiAlign::Center, 0.8f, 0.8f, 0.8f);
+    draw_ui_label(app, v.J, v.P + v.height() * 0.5f + 4.0f, v.width(), 22.0f,
+                  "ds POWERLEVELING_SLIDER (L2227): id.ht().Mi/tH + tk cells", 0.5f,
+                  UiAlign::Center, 0.6f, 0.6f, 0.6f);
     } else if (tab_ == kProfileTabMoves) {
         // Folded Moves sub-view (JS `qv`, To.kOa=11 L2201) — the learned
         // moves for the wielded weapon; moved verbatim from the deleted
@@ -5759,13 +6074,49 @@ void EquipmentScreen::render_impl(App& app) {
             (void)app.draw_text(v.J + 16.0f, v.P + 48.0f, "No moves for this weapon.", 0.8f,
                                 0.7f, 0.7f, 0.7f);
         }
-    } else {
-        // Tabs 2/3: the `vb` sub-views (`Zr`=`fs` ACHIEVEMENT_SLIDER L2213,
-        // `gs` SEALS_SLIDER L2231) are not reproduced (OPEN). The `cs` strip
-        // still selects them; the body uses the real `vb` viewer rect.
-        draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 20.0f, v.width(), 40.0f,
-                      std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)",
-                      1.0f, UiAlign::Center, 0.8f, 0.8f, 0.8f);
+    } else if (tab_ == kProfileTabSeals) {
+        // Ported `gs` SEALS_SLIDER body (`gs.uZ` L2231): the owned `I.Vr`
+        // rows. Cell `js` (L2232) draws `image = oe(a.fileName)`; native
+        // resolves `res/users/images/<Image>` via `draw_user_image`. JS
+        // `gs.NC` (`js.ba(400,300)`, L2232) is an `Xd` slider; the native
+        // lays a wrapped grid inside the `vb` viewer rect — the `Xd`
+        // scroll/centring behaviour is OPEN.
+        if (seal_rows_.empty()) {
+            draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 20.0f, v.width(), 40.0f,
+                          "No seals owned yet.", 0.9f, UiAlign::Center, 0.7f, 0.7f, 0.7f);
+        } else {
+            const float cw = std::min(400.0f, v.width() / 2.0f - 12.0f);
+            const float chh = cw * 0.75f;  // `js` cell 400x300 (L2232)
+            constexpr int kCols = 2;
+            const float x0 =
+                v.J + (v.width() - static_cast<float>(kCols) * cw) * 0.5f + cw * 0.5f;
+            const float y0 = v.P + 20.0f + chh * 0.5f;
+            for (std::size_t i = 0; i < seal_rows_.size(); ++i) {
+                const SealRow& s = seal_rows_[i];
+                const float cx = x0 + static_cast<float>(i % kCols) * cw;
+                const float cy = y0 + static_cast<float>(i / kCols) * (chh + 16.0f);
+                if (cy + chh * 0.5f > v.W) break;
+                if (!draw_user_image(app, s.image, cx, cy, chh * 0.75f, chh * 0.7f, 1.0f)) {
+                    draw_flat_button(app, s.name, cx, cy, cw - 20.0f, chh, 0.3f, 0.3f, 0.4f,
+                                     false);
+                }
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "%s x%d", s.name.c_str(), s.count);
+                draw_ui_label(app, cx - cw * 0.5f + 10.0f, cy + chh * 0.5f - 24.0f, cw - 20.0f,
+                              20.0f, buf, 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+            }
+        }
+    } else if (tab_ == kProfileTabAchiev) {
+        // Tab 2 (`Zr`=`fs` ACHIEVEMENT_SLIDER L2213) stays OPEN: it needs
+        // `v.uv.tI` achievements + `p.o.yi.mC/jO` counters, absent from the
+        // native save. The `cs` strip still selects it; the body uses the
+        // real `vb` viewer rect.
+        draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 40.0f, v.width(), 40.0f,
+                      std::string("PROFILE TAB ") + kProfileTabs[tab_].label + " (OPEN)", 1.0f,
+                      UiAlign::Center, 0.8f, 0.8f, 0.8f);
+        draw_ui_label(app, v.J, v.P + v.height() * 0.5f + 4.0f, v.width(), 22.0f,
+                      "fs ACHIEVEMENT_SLIDER (L2213): v.uv.tI + p.o.yi counters", 0.5f,
+                      UiAlign::Center, 0.6f, 0.6f, 0.6f);
     }
     // The BACK button (top-left).
     draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);

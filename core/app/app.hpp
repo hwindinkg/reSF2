@@ -61,6 +61,12 @@ class QuestEngine;
 struct PendingBattle {
     std::string battle_name = "Training";
     std::string location = "dojo";
+    // The stages.xml Zone Name the battle was selected in (JS map `st`).
+    // Required to resolve the battle's `<Rules>` correctly: the same battle
+    // name repeats across zones (Duel/Tournament/Challenge/...), so the
+    // feeder must look among the CURRENT zone's direct `<Battle>` children
+    // (`hp` semantics) — the old all-zones scan bound another zone's ruleset.
+    std::string zone;
     // The enemy's display name. The Dojo's training fight names its
     // "Punchbag" dummy (JS stages.xml Fight 1 Warrior FirstName="Punchbag");
     // the map flow keeps the default "Enemy".

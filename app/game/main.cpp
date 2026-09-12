@@ -33,7 +33,8 @@ using namespace sf2::app;  // kScreen* ids + the App/SaveSystem types
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
                  "usage: %s [res_root] [save_path] [--headless N] [--autoclick] [--headless-loop]\n"
-                  "                  [--fight] [--dump-pose N] [--dump-clip <name>]\n"
+                  "                  [--fight] [--battle <name>] [--zone <name>]\n"
+                  "                  [--dump-pose N] [--dump-clip <name>]\n"
                   "                  [--ui-tour]\n"
                  "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
@@ -79,12 +80,13 @@ struct LoopStep {
 // game boots into; the original starts in the Dojo, not the GeneralMenu).
 // The Dojo buttons are FIGHT(training)/MAP/SHOP/PROFILE. The loop is:
 //   dojo -> Map -> BOSS_LYNX fight -> Results -> Map -> BACK to dojo
-//   dojo -> Shop -> buy knives -> BACK to dojo
-//   dojo -> Profile (MOVES tab; equip is OPEN) -> BACK to dojo
+//   dojo -> Shop -> BUY knives -> EQUIP knives -> BACK to dojo
+//   dojo -> Profile -> BACK to dojo
 //   dojo -> Map -> BOSS_LYNX fight -> Results -> Map
-// (Equip is OPEN — JS moves it into the shop detail `$o`, SHOP_STATIC §4 —
-//  so the bought knives are owned but not equipped and the move list stays
-//  the saved weapon's; the loop verifies the honest path and logs it.)
+// (Equip lives in the shop detail `$o` (SHOP_STATIC §4): the detail-panel
+//  action button buys while the item is unowned, then equips the owned item.
+//  The loop exercises both, so the second fight's Locks move list reflects
+//  the equipped weapon.)
 //
 // Layout math (matches the screen implementations in core/app/screens.cpp):
 //   - dojo/shell nav: the shared `za` VERTICAL column (kZaNav, za_layout):
@@ -124,25 +126,23 @@ static const LoopStep kLoopSteps[] = {
     // 4: Dojo -> Shop (the SHOP button). Capture loop_shop.png on arrival.
     {184.0f, 337.0f, "dojo->shop", kScreenDojo, 0, kScreenShop, 0,
      "loop_shop.png"},
-    // 5: Shop -> buy WEAPON_KNIVES (first card, price 50). First-card centre
-    //    from the responsive `Oa.layout` split = (548.2, 218.4) at 1280x720.
-    {548.2f, 218.4f, "shop->buy WEAPON_KNIVES", kScreenShop, 0, -1, 12, nullptr},
-    // 6: Shop -> BACK to the Dojo hub.
+    // 5: Shop -> BUY WEAPON_KNIVES (row 0, price 50). The grid click only
+    //    SELECTS (JS `Oa.xA` L2296); the purchase is the detail-panel action
+    //    button (`bc` content `Up.Fhb`, L2300). `sel_` already defaults to
+    //    row 0 on entry, so the action click alone buys. Button centre from
+    //    `shop_action_rect(right_panel)` = (940.7, 482.5) at 1280x720.
+    {940.7f, 482.5f, "shop->buy WEAPON_KNIVES", kScreenShop, 0, -1, 12, nullptr},
+    // 6: Shop -> EQUIP WEAPON_KNIVES (same action button; now owned ->
+    //    `xa.$o`, L2300). The honest buy->equip path.
+    {940.7f, 482.5f, "shop->equip WEAPON_KNIVES", kScreenShop, 0, -1, 12, nullptr},
+    // 7: Shop -> BACK to the Dojo hub.
     {64.0f, 40.0f, "shop->dojo (BACK)", kScreenShop, 0, kScreenDojo, 0, nullptr},
-    // 7: Dojo -> Equipment (the PROFILE button). Capture loop_equip.png on
-    //    arrival.
+    // 8: Dojo -> Equipment (the PROFILE button). Capture loop_equip.png on
+    //    arrival. The old Profile MOVES-tab step is gone: equip now lives in
+    //    the shop detail (`$o`), so the shop BUY/EQUIP steps are the honest
+    //    path and the Profile visit is just the viewer capture.
     {184.0f, 442.0f, "dojo->equipment (PROFILE)", kScreenDojo, 0,
      kScreenProfile, 0, "loop_equip.png"},
-    // 8: Profile -> MOVES tab (`cs` strip tab 1, the folded `qv` sub-view).
-    //    RE-POINTED: the removed 5-slot equip grid used to be clicked here,
-    //    but equip is OPEN (JS moves it into the shop detail `$o`,
-    //    SHOP_STATIC §4) and the ported Profile has no equip action. The
-    //    honest remaining Profile content is the tab strip + the learned
-    //    move list (`qv`), so the loop exercises that instead. Tab 1 centre:
-    //    cx0 + step = 461.1 + 119.3 = 580.4, cy = 720 - 94.9/2 = 672.6
-    //    (profile_tab_layout()).
-    {580.4f, 672.6f, "profile MOVES tab (equip OPEN)", kScreenProfile, 0, -1, 12,
-     nullptr},
     // 9: Equipment -> BACK to the Dojo hub.
     {64.0f, 40.0f, "equipment->dojo (BACK)", kScreenProfile, 0, kScreenDojo, 0, nullptr},
     // 10: Dojo -> Map again (MAP).
@@ -270,10 +270,10 @@ struct HeadlessLoopDriver {
                 } else if (step == 11) {
                     after_moves = size;
                     logged_after = true;
-                    // Equip is OPEN (JS shop detail `$o`, SHOP_STATIC §4): the
-                    // bought knives are owned but not equipped, so the saved
-                    // weapon's move list is unchanged.
-                    std::fprintf(stdout, "[loop] move list after buy: %d moves (equip OPEN)\n",
+                    // The shop BUY + EQUIP steps ran, so the Locks move list
+                    // reflects the equipped WEAPON_KNIVES (JS `xa.$o`).
+                    std::fprintf(stdout,
+                                 "[loop] move list after buy+equip: %d moves (knives)\n",
                                  size);
                 }
                 std::fflush(stdout);
@@ -304,7 +304,7 @@ struct HeadlessLoopDriver {
             std::fprintf(stdout, "[loop] ALL %d STEPS DONE\n", kLoopStepCount);
             if (logged_before && logged_after) {
                 std::fprintf(stdout,
-                             "[loop] move-list before/after buy: %d -> %d moves (equip OPEN)\n",
+                             "[loop] move-list before/after buy+equip: %d -> %d moves\n",
                              before_moves, after_moves);
             }
         }
@@ -509,6 +509,12 @@ int main(int argc, char** argv) {
     std::string capture_dir;  // when set, capture screens to this dir
     std::string dump_clip;    // --dump-clip <name>: dump one anim clip as JSON, exit
     int dump_pose_frames = 0;  // --dump-pose N: dump the first N fight frames (0 = off)
+    // `--battle <name>` / `--zone <name>` (used with --fight): direct-boot a
+    // named stages.xml battle resolved in a named zone — the verification
+    // path for the stage-rule feeder (e.g. `Duel` in `ZONE_1`). Defaults to
+    // the Training dojo battle with no zone (legacy first-match scan).
+    std::string fight_battle;
+    std::string fight_zone;
 
     // Positional args (res_root, save_path) are assigned by slot, not by
     // value: a user passing the default res_root explicitly used to collide
@@ -553,6 +559,10 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--fight") {
             fight_mode = true;
+        } else if (arg == "--battle" && i + 1 < argc) {
+            fight_battle = argv[++i];
+        } else if (arg == "--zone" && i + 1 < argc) {
+            fight_zone = argv[++i];
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -769,14 +779,16 @@ int main(int argc, char** argv) {
         }
         {
             PendingBattle& pb = app.pending_battle();
-            pb.battle_name = "Training";
+            pb.battle_name = fight_battle.empty() ? "Training" : fight_battle;
+            pb.zone = fight_zone;
             pb.location = "dojo";
             pb.has_result = false;
             pb.reward_money = 0;
             pb.reward_exp = 0;
             pb.owned.clear();
-            std::fprintf(stdout, "[fight] direct boot: battle=%s location=%s owned=%zu\n",
-                         pb.battle_name.c_str(), pb.location.c_str(), pb.owned.size());
+            std::fprintf(stdout, "[fight] direct boot: battle=%s zone=%s location=%s owned=%zu\n",
+                         pb.battle_name.c_str(), pb.zone.c_str(), pb.location.c_str(),
+                         pb.owned.size());
             std::fflush(stdout);
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));

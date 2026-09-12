@@ -285,13 +285,18 @@ private:
 };
 
 // The shop — native Shop screen (screen 4, JS `Oa` g="468").
-// Lists the priced Weapon/Armor/Helm items from list.xml; the item cells use
-// the responsive `Oa.layout` `gb` split (L2293-2295: content rect -> viewer
-// `c = b.fn(.75)`) instead of a fixed grid, and draw the real item image
-// (JS `ns.j5` L2307 `Rf(Ye.qI(fileName))`), with the `Eg` bottom tab strip
-// kept. Click an item to buy: check money (JS `Pa.iwa` L629626:
-// `p.o.Tb >= a.jp()`), deduct, add to the inventory (JS `Pa.gI` L628934 ->
-// `p.o.xa.Oo`), save.
+// The responsive `Oa.layout` `gb` split (L2293-2295) yields three JS rects:
+//   viewer `c = b.fn(.75)`  -> the `Oe` card viewer (`Za.Pn(c)`, L2295),
+//   right slot `d` (bc)     -> the item detail side panel,
+//   left slot  `b` (b2)     -> the `MJ`/`op` side panels (params/enchant).
+// Items are laid out by the `Oe`/`Gg` cell list (L2261-2262, L1883-1893): a
+// single column of `ns` cells (L2303-2308) with per-category anchor `uw` and
+// spacing `LT` (Oa.f5 L2286-2288: 50/20/100/50/50), drawing the real item
+// image (JS `ns.j5` L2307 `Rf(Ye.qI(fileName))`). A grid click selects the
+// item (`Oa.xA` L2296); the detail panel's action button is the `Fhb` L2300
+// equip/buy path (`re.rga` L2285): owned+equipped -> UNEQUIP (`xa.Qxb`),
+// owned -> EQUIP (`xa.$o`), else TRY (buy gate `Pa.iwa` L1228).
+// The `Eg` bottom tab strip (`ss` L2283-2284) is kept.
 class ShopScreen : public Screen {
 public:
     explicit ShopScreen(ScreenManager& mgr);
@@ -303,7 +308,9 @@ public:
 
 private:
     std::vector<CatalogItem> items_;
-    int hover_ = -1;
+    int hover_ = -1;      // grid cell hover (row index within the tab)
+    int sel_ = 0;         // selected grid row (JS `Oa.xA`/`Za.Ac` L2296)
+    int side_hover_ = 0;  // 0 = none, 1 = detail action button (JS `Up`)
     int money_logged_ = 0;
     // Shop tabs (JS `vj.E0` category ids 1..5 → `vj.ifa` tab lists, Oa L1168).
     // tab_ indexes kShopTabs (0 = Weapon); tab_hover_ is the tab hover.
@@ -321,12 +328,19 @@ private:
 // The Profile — native `vb` (JS L2189-2201, `dJ()==7`): a tabbed screen with
 // the `cs` bottom tab strip (L2188: 4 `Le` on the profile atlas id 258,
 // `Tw=[0,1,2,3]`). The active sub-view docks into the real `vb.layout`
-// `a = b.fn(.75)` viewer rect (L2195). Tab 1 folds the Moves/skills sub-view
-// (JS `qv`=`es`, SKILLS_SLIDER L2239, `To.kOa`=11 L2201). Tabs 0/2/3 (`ds`
-// POWERLEVELING L2227, `fs` ACHIEVEMENT L2213, `gs` SEALS L2231) are OPEN —
-// their builders are not reproduced. The invented equipment slot list + owned
-// grid were removed (PORT_AUDIT_UI §3 #19, §4 #6): JS moves equip into the
-// shop detail panel (`$o`) — OPEN (SHOP_STATIC §4).
+// `a = b.fn(.75)` viewer rect (L2195). Tab routing mirrors `vb.hla`
+// (L2190-2193): 0 -> `Rl=ds` (POWERLEVELING_SLIDER L2227) + the `XB=ei`
+// header (`ivb()`); 1 -> `qv=es` (SKILLS_SLIDER L2239, `To.kOa`=11 L2201);
+// 2 -> `Zr=fs` (ACHIEVEMENT_SLIDER L2213); 3 -> `lv=gs` (SEALS_SLIDER L2231).
+// Tab 1 folds the Moves/skills list. Tab 3 (SEALS) is ported from the
+// derivable `gs.uZ` filter (`p.o.xa.hJ(I.Vr)`, L2231): the save's owned
+// `Type="Seal"` catalog rows, drawn with the `js` cell (`js.ba` L2232
+// `oe(a.fileName)`). Tabs 0 and 2 stay OPEN with cites: `ds` needs the
+// leveling table `id.ht().Mi/tH` (not in the native save); `fs` needs
+// `v.uv.tI` achievements + `p.o.yi` counters (no native source). The
+// invented equipment slot list + owned grid were removed (PORT_AUDIT_UI §3
+// #19, §4 #6): JS moves equip into the shop detail panel (`$o`) — now
+// implemented in ShopScreen.
 class EquipmentScreen : public Screen {
 public:
     explicit EquipmentScreen(ScreenManager& mgr);
@@ -345,6 +359,13 @@ public:
         int priority = 0;
     };
 
+    // One `gs` seal row (JS `gs.TA` entries, L2231; cell `js` L2232).
+    struct SealRow {
+        std::string name;
+        int count = 0;
+        std::string image;  // list.xml Image ("drop_blue_seal") -> `oe` name
+    };
+
 private:
     int tab_ = 0;        // `cs` tab index (0 = `ds` leveling .. 3)
     int tab_hover_ = -1;
@@ -353,6 +374,8 @@ private:
     std::string weapon_ = "Fists";
     std::vector<MoveRow> move_rows_;
     int move_total_ = 0;
+    // Ported `gs` SEALS tab data (owned `I.Vr` rows, L2231).
+    std::vector<SealRow> seal_rows_;
 };
 
 // The settings — the real JS `un extends od` dialog (L1916-1930), reached

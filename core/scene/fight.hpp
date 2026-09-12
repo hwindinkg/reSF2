@@ -97,9 +97,18 @@ namespace sf2::scene {
 // Darkness / RandomArea / LightInTheDarkness (render-side), WinStyle (the
 // model style score `dz` has no native source — COMBAT_STATIC App. C), and
 // the perk/UI/item rules. `<ComplexRule>`/`<RandomRule>` child rules are
-// NOT expanded by the native parser (modes.hpp reads direct `<Rules>`
-// children + `<Level>` only) — JS `nh.parse` (L853) / `pn` (L879) do; that
-// structural gap keeps the story-fight nested rules inert (see OPEN note).
+// now expanded by the shared parser (modes.hpp `append_rule_element`,
+// `hp` direct-children semantics): `<ComplexRule>` flattens its children
+// (JS `nh.parse` L853) and `<RandomRule>` flattens its direct children as
+// pick-one choices (JS `pn.parse` L879); the choice is drawn at round start
+// via `Da.pg.jf()` (`rules_begin_round`, the `Da.pg` analog `roll01_`).
+// Shipped pattern is `RandomRule > ComplexRule` (407 wrappers across
+// Duel / Duel_INTERMISSION / FINAL_BATTLE / C3_Challenge / C3_Duel).
+// DRIFT: JS `cl.pmb` reseeds the stream (`Da.IT(...)`) immediately before
+// the `pn.M4` draws; the port draws from the ongoing shared `roll01_`
+// stream without a reseed, and does not model `NoDoubles` across battles
+// (one pick per group per fight). Battles without `<RandomRule>` (e.g.
+// Training) draw nothing, so their sim stays byte-identical.
 // ---------------------------------------------------------------------------
 enum class FightRuleKind : int {
     none = 0,
@@ -191,6 +200,15 @@ struct FightRule {
     // `Ca.level`); the native source is `FighterParams.level` (make_fighter).
     long power_min = 0;
     long power_max = 2147483647L;
+    // JS `pn` (`ERuleRandom`, L879): group id + the wrapper's direct-child
+    // index this rule came from when nested under a `<RandomRule>` (`pn.Ae`
+    // order; `-1` = not random-wrapped). `pn.M4` picks ONE choice per group
+    // via `Da.pg.jf()`; only that choice's rules activate. `random_each_round`
+    // = `Refresh=="EachRound"` (`pn.Zsa==2`), else the pick is per fight.
+    int random_group = -1;
+    int random_choice = -1;
+    bool random_no_doubles = false;  // `pn.aVa` (`u.ka` NoDoubles)
+    bool random_each_round = false;
     // --- Ringout / field-exit detector (JS `nj` L885-886) -----------------
     std::string node;                // `ON` (Node attr; "NPivot")
     std::string axis;                // Axis attr ("X"/"Y"/"")
@@ -463,6 +481,12 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
     // Min/Max ATTR read; modes.hpp flattens the wrapper into this rule).
     r.power_min = sr.power_min;
     r.power_max = sr.power_max;
+    // `pn` RandomRule group/choice (modes.hpp flattens the wrapper; the
+    // activation pick is `FightController::rules_begin_round`).
+    r.random_group = sr.random_group;
+    r.random_choice = sr.random_choice;
+    r.random_no_doubles = sr.random_no_doubles;
+    r.random_each_round = sr.random_each_round;
     // --- per-rule parse (JS per-class constructors/parse) -----------------
     if (r.kind == FightRuleKind::attributes) {
         // `Zi.parse` (L850): `wB` starts with the `v.wv` align names at 0;
@@ -1123,7 +1147,11 @@ public:
                     int player_max_hp, int enemy_max_hp,
                     std::function<float()> roll01,
                     const std::vector<std::pair<std::string, std::string>>& player_owned,
-                    const PerkSetup& perks = PerkSetup());
+                    const PerkSetup& perks = PerkSetup(),
+                    // JS `Da.IT` reseed hook for the shared fight stream
+                    // (`Da.pg` analog). See `rules_begin_round` (`cl.pmb`).
+                    // nullptr = leave the stream untouched.
+                    std::function<void(int)> reseed01 = nullptr);
 
 // Perk setup for fight init (`ZOa`/`Pma` analog, §5.4/§5.7): the parsed
 // perk catalog (res/perks.xml) + per-side equipped item→perk bindings
@@ -1270,6 +1298,10 @@ private:
     std::vector<sf2::scene::TacticsFile> tactics_;
     const sf2::scene::TacticDef* tactic_ = nullptr;
     std::function<float()> roll01_;
+    // JS `Da.IT` (L1210444) reseed hook: the fight's shared random stream
+    // (`Da.pg` analog). `rules_begin_round` calls it once, immediately
+    // before the first `pn.M4` RandomRule draw pass, mirroring `cl.pmb`.
+    std::function<void(int)> reseed01_;
 
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)
@@ -1335,6 +1367,11 @@ private:
     bool invert_joystick_ = false;
     // --- stage <Rules> engine (JS `du` L894-910) --------------------------
     std::vector<FightRule> rules_;  // parsed rules (JS `du.Ae`)
+    // JS `pn.CB` (L879): the chosen RandomRule child per group. The pick is
+    // drawn once per fight (`EachFight`) or every round (`EachRound`); it is
+    // cached here so `EachFight` groups keep the same choice across rounds.
+    std::map<int, int> random_pick_;
+    bool random_pick_done_ = false;
     int rule_round_ = 1;            // JS `cz` (`rob(round>0?round:1)`)
     bool rule_pending_ = false;     // JS `ca.Pu != null`
     round_result rule_result_ = round_result::ko;  // JS `ca.ey`

@@ -224,7 +224,8 @@ void FightController::init_locks(
     float enemy_x, float enemy_y, int player_max_hp, int enemy_max_hp,
     std::function<float()> roll01,
     const std::vector<std::pair<std::string, std::string>>& player_owned,
-    const PerkSetup& perks) {
+    const PerkSetup& perks,
+    std::function<void(int)> reseed01) {
     battle_ = battle;
     prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
     player_.style = StyleMeter();  // style meters reset per battle
@@ -235,6 +236,10 @@ void FightController::init_locks(
     tactics_ = tactics;
     tactic_ = tactic;
     roll01_ = std::move(roll01);
+    reseed01_ = std::move(reseed01);
+    // JS `cl.pmb`: each battle re-picks the `ERuleRandom` children (`pn.M4`).
+    random_pick_.clear();
+    random_pick_done_ = false;
 
     player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp,
                            "Fists", player_owned);
@@ -722,6 +727,82 @@ void FightController::rules_begin_round(int round) {
     const long power = static_cast<long>(player_.params.level);
     for (FightRule& r : rules_) {
         r.active = fight_rule_gate(r, rule_round_, power);
+    }
+    // JS `cl.pmb`: each `ERuleRandom` (`pn`) picks ONE child via `pn.M4` —
+    // `b = eligible.length; b = b*Da.pg.jf()|0; CB = eligible[b]` — and only
+    // that child's rules stay active (`pn.setActive`/`A$`). `M4`'s filter is
+    // `Ti()` (power range) only; the Round `kI` gate is the `osb` pass above
+    // (`fight_rule_gate`). `Refresh="EachRound"` (`pn.Zsa==2`) re-draws every
+    // round; otherwise the choice is cached for the fight. `roll01_` is the
+    // shared fight stream (`Da.pg` analog; set in `init_locks`) — a battle
+    // with no `<RandomRule>` (e.g. Training) draws nothing and is unchanged.
+    {
+        std::map<int, std::vector<int>> groups;  // group -> distinct choices
+        for (const FightRule& r : rules_) {
+            if (r.random_group < 0) continue;
+            std::vector<int>& ch = groups[r.random_group];
+            bool seen = false;
+            for (int c : ch) {
+                if (c == r.random_choice) { seen = true; break; }
+            }
+            if (!seen) ch.push_back(r.random_choice);
+        }
+        // JS `cl.pmb` (L723937): `Da.IT(this.ob!=null?this.ob.Qm:
+        // 2147483647*Da.pg.jf()|0)` RESEEDS the shared stream immediately
+        // before the `pn.M4` draws. The shipped single fights carry no
+        // persisted replay record (`this.ob == null`), so the seed is the
+        // random path: ONE shared draw (`Da.pg.jf()` = `roll01_`) scaled to
+        // 31 bits, then reseed. Fires once per fight, exactly when the port
+        // is about to emulate the `pn.M4` draw set; battles with no
+        // `<RandomRule>` group draw nothing and stay byte-identical.
+        if (!random_pick_done_ && !groups.empty() && reseed01_) {
+            const float reseed_draw = roll01_ ? roll01_() : 0.5f;
+            const int seed =
+                static_cast<int>(2147483647.0 * static_cast<double>(reseed_draw));
+            reseed01_(seed);
+        }
+        for (const auto& kv : groups) {
+            const int gid = kv.first;
+            const std::vector<int>& choices = kv.second;
+            bool each_round = false;
+            for (const FightRule& r : rules_) {
+                if (r.random_group == gid && r.random_each_round) each_round = true;
+            }
+            if (!each_round && random_pick_done_ &&
+                random_pick_.find(gid) != random_pick_.end())
+                continue;  // `EachFight`: keep this fight's pick
+            // `pn.M4` eligible = choices whose `Ti()` (power range) holds.
+            std::vector<int> eligible;
+            for (int c : choices) {
+                for (const FightRule& r : rules_) {
+                    if (r.random_group == gid && r.random_choice == c &&
+                        r.power_min <= power && power <= r.power_max) {
+                        eligible.push_back(c);
+                        break;
+                    }
+                }
+            }
+            int pick = -1;
+            if (!eligible.empty()) {
+                const float roll = roll01_ ? roll01_() : 0.5f;  // `Da.pg.jf()`
+                int idx = static_cast<int>(
+                    static_cast<float>(eligible.size()) * roll);  // `*|0`
+                if (idx < 0) idx = 0;
+                if (idx >= static_cast<int>(eligible.size()))
+                    idx = static_cast<int>(eligible.size()) - 1;
+                pick = eligible[idx];
+            } else if (!choices.empty()) {
+                pick = choices[0];  // JS `a$.length>0` reset-retry (no re-roll)
+            }
+            random_pick_[gid] = pick;
+        }
+        random_pick_done_ = true;
+        for (FightRule& r : rules_) {
+            if (r.random_group < 0) continue;
+            const auto it = random_pick_.find(r.random_group);
+            if (it != random_pick_.end() && r.random_choice != it->second)
+                r.active = false;  // `pn.CB`: only the chosen child is active
+        }
     }
     rules_apply_round_effects();  // JS `du.F1(a)` L897 (Zk) + `kZ` + `m_a`
     rules_show_markers();

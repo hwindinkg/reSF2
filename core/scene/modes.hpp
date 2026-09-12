@@ -80,6 +80,17 @@ struct StageRule {
     // (`Lb.Ti`/`c_a` L846). No wrapper -> [0, INT_MAX] -> always true.
     int power_min = 0;
     int power_max = 2147483647;
+    // JS `pn` (`ERuleRandom`, L879): when this leaf was nested under a
+    // `<RandomRule>` wrapper, the wrapper's group id and the wrapper's DIRECT
+    // child index it came from (`pn.Ae` order). `pn.M4` picks ONE choice per
+    // group via `Da.pg.jf()` and only that choice's rules activate. `-1` =
+    // not random-wrapped. `random_no_doubles` = the wrapper `NoDoubles`
+    // (`pn.aVa` via `u.ka`) and `random_each_round` = `Refresh=="EachRound"`
+    // (`pn.Zsa`; anything else -> 1 = per fight).
+    int random_group = -1;
+    int random_choice = -1;
+    bool random_no_doubles = false;
+    bool random_each_round = false;
 };
 
 // One <Reward> row.
@@ -244,6 +255,77 @@ inline void parse_rule_children(const pugi::xml_node& el, StageRule& rule) {
     }
 }
 
+// JS `bb.OE`/`bb.M3` (L887-894) + `nh.parse` (L853) + `pn.parse` (L879):
+// expand one `<Rules>` child into the flat StageRule list. Every node-name
+// resolution walks DIRECT children only (JS element `hp(a)`: `e.name==a`
+// over `this.children`) — never a descendant/global search, so a wrapper's
+// own tag (`ComplexRule`/`RandomRule`) cannot shadow the effect rules
+// nested inside it.
+//   - `<Level Min Max>` (`bb.Ajb` L894: `Zf(a,0,MAX)` + `bb.M3` per child):
+//     stamp the range on the subtree.
+//   - `<ComplexRule>` (`nh.parse` L853: `a=a.children` then `bb.M3`):
+//     flatten its direct children into the parent, same group/choice (the
+//     whole ComplexRule is one random choice; `nh.jh` returns `Ae`).
+//   - `<RandomRule>` (`pn.parse` L879: `bb.OE(a,this.Ae)`): flatten its
+//     direct children as CHOICES of a new group; `NoDoubles`/`Refresh`
+//     (`pn.aVa`/`pn.Zsa`) come from the wrapper attrs. The actual pick is
+//     deferred to `FightController::rules_begin_round` (`pn.M4` ->
+//     `Da.pg.jf()`), because only ONE choice may activate.
+//   - anything else: one leaf StageRule (tag + attrs + the `Ce.c4a` L848 /
+//     `en.Mia` L860 direct children via `parse_rule_children`).
+inline void append_rule_element(const pugi::xml_node& el,
+                                std::vector<StageRule>& out, int power_lo,
+                                int power_hi, int& next_group, int random_group,
+                                int random_choice, bool no_doubles,
+                                bool each_round) {
+    const std::string tag = el.name();
+    if (tag == "Level") {
+        // `bb.Ajb` (L894): Min/Max attrs -> the subtree's power range.
+        const int lo = xml_int(el, "Min", 0);
+        const int hi = xml_int(el, "Max", 2147483647);
+        for (const pugi::xml_node c : el.children())
+            append_rule_element(c, out, lo, hi, next_group, random_group,
+                                random_choice, no_doubles, each_round);
+        return;
+    }
+    if (tag == "ComplexRule") {
+        // `nh.parse` (L853): direct children (`a.children`); the ComplexRule
+        // is a single unit, so every leaf keeps the parent group/choice.
+        for (const pugi::xml_node c : el.children())
+            append_rule_element(c, out, power_lo, power_hi, next_group,
+                                random_group, random_choice, no_doubles,
+                                each_round);
+        return;
+    }
+    if (tag == "RandomRule") {
+        // `pn.parse` (L879): `bb.OE` fills `Ae` with the direct children
+        // (each is one choice). `pn.M4` draws `Da.pg.jf()` at activation.
+        const int gid = next_group++;
+        const pugi::xml_attribute nd = el.attribute("NoDoubles");
+        const bool no_dbl = nd && std::string(nd.value()) == "1";  // `u.ka`
+        const pugi::xml_attribute rf = el.attribute("Refresh");
+        const bool each = rf && std::string(rf.value()) == "EachRound";  // `Zsa`
+        int choice = 0;
+        for (const pugi::xml_node c : el.children())
+            append_rule_element(c, out, power_lo, power_hi, next_group, gid,
+                                choice++, no_dbl, each);
+        return;
+    }
+    StageRule rule;
+    rule.tag = tag;
+    for (const pugi::xml_attribute a : el.attributes())
+        rule.attrs[a.name()] = a.value();
+    // `Ce.c4a` (L848) + `en.Mia` (L860): direct `<Animation>`/`<Node>`.
+    parse_rule_children(el, rule);
+    rule.power_min = power_lo;
+    rule.power_max = power_hi;
+    rule.random_group = random_group;
+    rule.random_choice = random_choice;
+    rule.random_no_doubles = no_doubles;
+    rule.random_each_round = each_round;
+    out.push_back(std::move(rule));
+}
+
 }  // namespace modes_detail
 
 // Parses the stages document into battles + templates + groups. Returns
@@ -294,39 +376,17 @@ inline bool parse_stages(const std::string& xml_text, std::vector<StageBattle>& 
                     }
                     const pugi::xml_node rules = f.child("Rules");
                     if (rules) {
-                        // JS `bb.OE` (L887-888) + `bb.Ajb` (L894): a
-                        // `<Level Min Max>` child wraps rules and stamps the
-                        // range on each; other children are rules themselves.
-                        for (const pugi::xml_node r : rules.children()) {
-                            const std::string rname = r.name();
-                            if (rname == "Level") {
-                                const int lo = xml_int(r, "Min", 0);
-                                const int hi = xml_int(r, "Max", 2147483647);
-                                for (const pugi::xml_node c : r.children()) {
-                                    StageRule rule;
-                                    rule.tag = c.name();
-                                    for (const pugi::xml_attribute a : c.attributes()) {
-                                        rule.attrs[a.name()] = a.value();
-                                    }
-                                    // JS `Ce.c4a` (L848) + `en.Mia` (L860):
-                                    // <Animation> names + <Node> zones.
-                                    parse_rule_children(c, rule);
-                                    rule.power_min = lo;
-                                    rule.power_max = hi;
-                                    fight.rules.push_back(std::move(rule));
-                                }
-                                continue;
-                            }
-                            StageRule rule;
-                            rule.tag = rname;
-                            for (const pugi::xml_attribute a : r.attributes()) {
-                                rule.attrs[a.name()] = a.value();
-                            }
-                            // JS `Ce.c4a` (L848) + `en.Mia` (L860):
-                            // <Animation> names + <Node> zones.
-                            parse_rule_children(r, rule);
-                            fight.rules.push_back(std::move(rule));
-                        }
+                        // JS `bb.OE` (L887-888): walk the DIRECT `<Rules>`
+                        // children (`hp` semantics) and expand `<Level>`
+                        // (`bb.Ajb` L894), `<ComplexRule>` (`nh.parse` L853)
+                        // and `<RandomRule>` (`pn.parse` L879) into flat
+                        // StageRules. `next_group` numbers the RandomRule
+                        // wrappers (`pn` groups) for the activation pick.
+                        int next_group = 0;
+                        for (const pugi::xml_node r : rules.children())
+                            append_rule_element(r, fight.rules, 0, 2147483647,
+                                                next_group, -1, -1, false,
+                                                false);
                     }
                     battle.fights.push_back(std::move(fight));
                 }
