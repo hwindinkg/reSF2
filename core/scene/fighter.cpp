@@ -429,12 +429,32 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
 // `de.V1` L601). The FIRST passing move starts. The `1key` template means
 // one buffered Tap of a single key.
 std::string Fighter::try_select_move(FightContext& ctx) {
-    // A move can only start when no clip is playing (JS: `tKa` L499 guards
-    // `da.Ua==null` for strike checks; the KeyPressed event handler only
-    // acts when the fighter is not busy).
-    if (current_move_ != nullptr) {
-        return "";
+    // JS `wd.Ykb` (L500, the player's KeyPressed handler — `Anb` -> `Ykb` when
+    // `Je==2`/RoundStage Fight) calls the move finder `nf.ia(a, ...)`
+    // UNCONDITIONALLY: there is NO `da.Ua==null` (no-anim-playing) test. The
+    // only `da.Ua==null` guard in this area is in `wd.tKa` (L499) and gates
+    // the STRIKE/hit check, not move selection. The old blanket
+    // `current_move_ != nullptr` early-return was therefore a port bug: it
+    // locked the player into the auto-played stance idle (`ai_start_move`
+    // of FistsStartStanceIdle-*, a 38-frame clip x3 subframes = 114 fight
+    // frames), which outlasts the whole round, so every real-time key/pointer
+    // press was dropped — the reported dead fight input (menus/map pointer
+    // work; in-fight pad + keyboard "do nothing"). Interrupt gating is done
+    // by the candidate's OWN Conditions (Uninterrupt / SemiUninterrupt /
+    // CurrentAnimation), which `try_start_move` -> `eval_move_conditions`
+    // already evaluates below; `hb_` is priority-sorted like the JS finder.
+    // JS `wd.Ykb` fires from the `Anb` KeyPressed event (`Gc.type==2`) — on a
+    // PRESS EDGE, not every tick. Only attempt selection when a Tap is
+    // buffered; a lingering Hold is a continuation for the current move's
+    // conditions, not a new press.
+    bool has_tap = false;
+    for (const auto& k : keys_) {
+        if (k.press == press_type::tap) {
+            has_tap = true;
+            break;
+        }
     }
+    if (!has_tap) return "";
     for (const MoveDef* m : hb_) {
         if (m == nullptr) continue;
         // Input-selectable moves are those whose Events contain

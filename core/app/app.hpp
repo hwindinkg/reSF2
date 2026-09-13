@@ -332,7 +332,13 @@ private:
 
     PointerState pointer_;
     std::set<int> keys_pressed_;
-    bool keys_held_[16] = {};  // the fight keys' held state (for edges)
+    // The physical GLFW keys currently held (per-key edge state). Keyed by
+    // the GLFW key code, NOT by the game action: two physical keys bound to
+    // one action (A+Left, Space+J, ...) must each keep their own edge, else
+    // polling them separately toggled a shared flag every frame and emitted
+    // a phantom release of the partner key (holding D fired on_key(D,true) +
+    // on_key(RIGHT,false) every tick — cancelled Holds and re-fired taps).
+    std::set<int> fight_keys_down_;
     bool injected_click_pending_ = false;
     int injected_click_steps_ = 0;  // remaining fixed steps the click stays pressed
     double injected_x_ = 0.0;

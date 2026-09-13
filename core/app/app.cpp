@@ -652,32 +652,27 @@ void App::poll_input() {
     pointer_.y = y;
 
     // Keyboard: poll the fight keys and route edge transitions to the top
-    // screen (JS `Ik` keydown/keyup -> the fight input path). The set must
-    // cover every key `FightScreen::on_key` maps, otherwise a bound action
-    // has no poll source (kick L / super K,B were mapped but never polled).
-    // Keys sharing one game action share an `idx` so A+Left read as a single
-    // edge (JS `De(control, key...)` maps several physical keys per control).
-    struct KeyMap {
-        int glfw;
-        int idx;
+    // screen (JS `Ik` keydown/keyup -> the fight input path). Each physical
+    // GLFW key keeps its OWN held edge: binding two keys to one action must
+    // not make them share a flag (that emitted a phantom release of the
+    // partner every frame while either was held — see `fight_keys_down_`).
+    static const int kFightKeys[] = {
+        GLFW_KEY_A, GLFW_KEY_LEFT, GLFW_KEY_D, GLFW_KEY_RIGHT,
+        GLFW_KEY_W, GLFW_KEY_UP, GLFW_KEY_S, GLFW_KEY_DOWN,
+        GLFW_KEY_SPACE, GLFW_KEY_J, GLFW_KEY_L, GLFW_KEY_K, GLFW_KEY_B,
     };
-    static const KeyMap kFightKeys[] = {
-        {GLFW_KEY_A, 0}, {GLFW_KEY_LEFT, 0}, {GLFW_KEY_D, 1},
-        {GLFW_KEY_RIGHT, 1}, {GLFW_KEY_W, 2}, {GLFW_KEY_UP, 2},
-        {GLFW_KEY_S, 3}, {GLFW_KEY_DOWN, 3}, {GLFW_KEY_SPACE, 4},
-        {GLFW_KEY_J, 4}, {GLFW_KEY_L, 5}, {GLFW_KEY_K, 6}, {GLFW_KEY_B, 6},
-    };
-    for (const KeyMap& km : kFightKeys) {
-        const bool now_down = glfwGetKey(renderer_->window(), km.glfw) == GLFW_PRESS;
-        if (now_down && !keys_held_[km.idx]) {
-            keys_held_[km.idx] = true;
+    for (const int glfw_key : kFightKeys) {
+        const bool now_down = glfwGetKey(renderer_->window(), glfw_key) == GLFW_PRESS;
+        const bool was_down = fight_keys_down_.count(glfw_key) != 0;
+        if (now_down && !was_down) {
+            fight_keys_down_.insert(glfw_key);
             if (screens_ != nullptr && screens_->top() != nullptr) {
-                screens_->top()->on_key(km.glfw, true);
+                screens_->top()->on_key(glfw_key, true);
             }
-        } else if (!now_down && keys_held_[km.idx]) {
-            keys_held_[km.idx] = false;
+        } else if (!now_down && was_down) {
+            fight_keys_down_.erase(glfw_key);
             if (screens_ != nullptr && screens_->top() != nullptr) {
-                screens_->top()->on_key(km.glfw, false);
+                screens_->top()->on_key(glfw_key, false);
             }
         }
     }
