@@ -7230,7 +7230,20 @@ const char* shop_default_for_type(const std::string& type) {
 // `buttons/Weapon` sourceSize is 200x190.
 constexpr float kShopTabSrcW = 200.0f;
 constexpr float kShopTabSrcH = 190.0f;
-constexpr float kShopTabBarK = 1.2f;
+// JS `Eg` ctor (L1851): `this.background=R.Ed(-13034231,1,1,this.node)` — the
+// full-width tab-strip background quad (`Eg.aa` L1852 `background.zm(w,height)`).
+// -13034231 = ARGB 0xFF391D09 = RGB(57,29,9), a warm dark brown. The oracle
+// `shop_tab*`/`profile_tab*` bottom band measures exactly (57,29,9); the old
+// flat 0.21/0.16 grey quad was invented.
+constexpr float kTabBarBgR = 0x39 / 255.0f;
+constexpr float kTabBarBgG = 0x1D / 255.0f;
+constexpr float kTabBarBgB = 0x09 / 255.0f;
+// `Eg.aa` (L1852): `this.height=za.Sp*(L.K.un?clamp(lc,.9,1.5):1.3+...)`.
+// The oracle captures measure bar_h=109 at Sp=73.008 -> factor 1.49, so
+// `L.K.un` (`nxb` L61: `"ontouchstart"in window||maxTouchPoints>0||
+// pointer:coarse`) is TRUE in the oracle shell -> 1.5.
+constexpr float kTabBarHeightK = 1.5f;
+constexpr float kShopTabBarK = kTabBarHeightK;
 constexpr float kShopTabSpread = 1.2f;
 
 struct ShopTabLayout {
@@ -7727,8 +7740,17 @@ void ShopScreen::update_impl(float dt) {
             }
         }
     }
-    // Shared `za` nav column (JS `ma.D1`): Dojo/Map/Profile/Settings hops.
-    za_update(app(), *this, kScreenShop);
+    // Shared `za` nav column (JS `ma.D1` L1831): `D1` destroys the live `za`
+    // and re-appends a FRESH one (`this.kA=this.Qo(za)`), whose `gk` nav scroll
+    // ctor starts COLLAPSED (`collapse(0)`, L1978). So on entering the Shop the
+    // column draws collapsed (the `gk` header rect x89..279,y72..112) and
+    // paints NO `gk.background` 0.5-black dim over the dojo backdrop — the
+    // oracle `shop_tab*`/`shop_detail` right-wall backdrop measures ~0.7x the
+    // `dojo_hub` wall (no 0.5 dim), vs the port's 0.5-dimmed, icon-column
+    // capture. `force_collapsed` = the Map/Profile precedent
+    // (screens.cpp:4623 / 8731), both already oracle-matched.
+    // Display-only: `g_za_nav_open` is left intact so the Dojo keeps its column.
+    za_update(app(), *this, kScreenShop, /*force_collapsed=*/true);
 }
 
 void ShopScreen::render_impl(App& app) {
@@ -7809,7 +7831,7 @@ void ShopScreen::render_impl(App& app) {
         const ShopTabLayout tl = shop_tab_layout();
         const float bar[] = {0, kViewH - tl.bar_h, kViewW, kViewH - tl.bar_h, kViewW, kViewH,
                              0, kViewH - tl.bar_h, kViewW, kViewH, 0, kViewH};
-        ren.draw_triangles(bar, 6, 0.21f, 0.21f, 0.21f, 1.0f);
+        ren.draw_triangles(bar, 6, kTabBarBgR, kTabBarBgG, kTabBarBgB, 1.0f);
         for (int t = 0; t < kShopTabCount; ++t) {
             const float cx = tl.cx0 + static_cast<float>(t) * tl.step;
             const bool sel = t == tab_;
@@ -8055,7 +8077,11 @@ void ShopScreen::render_impl(App& app) {
                           confirm_, 1.0f, UiAlign::Center, 0.4f, 1.0f, 0.4f);
     }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
-    draw_za_chrome(app, kScreenShop);
+    // `D1` (L1831) re-appends a fresh, collapsed `za` -> the oracle shop shows
+    // the collapsed header and NO `gk.background` 0.5-black dim (measured: the
+    // oracle shop right-wall backdrop is ~0.7x the hub, not 0.5x). Same
+    // force-collapsed draw as the Map/Profile (L5078/L9345).
+    draw_za_chrome(app, kScreenShop, nullptr, /*force_collapsed=*/true);
 }
 
 // ---------------------------------------------------------------------------
@@ -8113,7 +8139,7 @@ struct ProfileTabLayout {
 ProfileTabLayout profile_tab_layout() {
     const ZaLayout z = za_layout();
     ProfileTabLayout t;
-    t.bar_h = z.sp * 1.3f;                           // Eg.aa: za.Sp*1.3
+    t.bar_h = z.sp * kTabBarHeightK;                 // Eg.aa: za.Sp*1.5 (un)
     constexpr float kSrcW = 199.0f, kSrcH = 190.0f;  // profile Le sourceSize
     const float scale = t.bar_h / kSrcH;             // Eg: height/button.Y.fa.y
     t.btn_h = t.bar_h;
@@ -8223,7 +8249,7 @@ void draw_profile_tabs(App& app, int tab, int hover) {
     const ProfileTabLayout t = profile_tab_layout();
     const float bar[] = {0, kViewH - t.bar_h, kViewW, kViewH - t.bar_h, kViewW, kViewH,
                          0, kViewH - t.bar_h, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(bar, 6, 0.16f, 0.16f, 0.18f, 1.0f);
+    ren.draw_triangles(bar, 6, kTabBarBgR, kTabBarBgG, kTabBarBgB, 1.0f);
     for (int i = 0; i < kProfileTabCount; ++i) {
         const ProfileTabArt& art = kProfileTabs[i];
         const bool sel = i == tab;
@@ -8565,7 +8591,32 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
         }
         sf2::scene::Fighter fig;
         fig.set_model(assets.merged);
-        fig.build_move_list_locks(assets.moves, owned_items(app()), true);
+        // JS `es.uZ` (L2239): `this.Ul=v.uQ(9)` — the MOVES list is the CURRENT
+        // WEAPON's move set (`v.cw()` -> `ra.e9a`/`ra.Z6a` L684-686, which test
+        // each weapon move-set's Locks against the weapon's items), NOT the
+        // fight's item-lock rule. `build_move_list_locks(..., true)` kept every
+        // no-lock move (moves.xml has 242 of 873) -> the port listed the whole
+        // catalog; the oracle shows the wielded weapon's few. Build the
+        // weapon-scoped list (the same primitive the fight uses per weapon,
+        // fight.cpp:362) from the equipped weapon's SubType.
+        std::string wsub;
+        try {
+            for (const CatalogItem& ci : load_full_catalog(app())) {
+                if (ci.name == weapon_ && ci.type == "Weapon") {
+                    wsub = ci.subtype;
+                    break;
+                }
+            }
+        } catch (const std::exception&) {
+        }
+        if (wsub.empty()) wsub = "Fists";
+        fig.build_move_list(assets.moves, wsub, /*include_universal=*/false);
+        if (fig.hb().empty()) {
+            // Defensive guard: never regress to an empty tab if the SubType
+            // resolves to no `TacticWeapon` row (the exact `v.uQ(9)` weapon-set
+            // join still needs a runtime trace — PORT_AUDIT_UI §5 OPEN).
+            fig.build_move_list_locks(assets.moves, owned_items(app()), true);
+        }
         move_total_ = static_cast<int>(fig.hb().size());
         for (const sf2::scene::MoveDef* m : fig.hb()) {
             if (m == nullptr) continue;
@@ -9100,7 +9151,10 @@ void EquipmentScreen::render_impl(App& app) {
         // giant overlapping text in the port capture.
         const float inner_top = v.P + 34.0f;                 // below the `Zh` roll
         const float inner_h = v.height() - 68.0f;
-        constexpr float kMoveRowH = 44.0f;
+        // `es.NC` (L2239): `b=new ks; b.init(this.Ul[a],this); b.ba(400,150)` —
+        // every skill row is a 400x150 cell, so only the oracle's few fit the
+        // viewer band. The old 44px pitch stacked ~8 rows of the full catalog.
+        constexpr float kMoveRowH = 150.0f;
         draw_ui_label(app, v.J + 16.0f, inner_top, v.width() - 32.0f, 28.0f,
                       loc(app, weapon_, weapon_), 0.85f, UiAlign::Center, 0.35f, 0.22f,
                       0.10f);
@@ -9114,7 +9168,7 @@ void EquipmentScreen::render_impl(App& app) {
                           r.type.empty() ? "-" : r.type.c_str(), r.priority);
             draw_ui_label(app, v.J + 20.0f,
                           inner_top + 34.0f + static_cast<float>(i) * kMoveRowH,
-                          v.width() - 40.0f, kMoveRowH, buf, 0.62f, UiAlign::Left, 0.18f,
+                          v.width() - 40.0f, 28.0f, buf, 0.62f, UiAlign::Left, 0.18f,
                           0.13f, 0.08f);
         }
         if (move_rows_.empty()) {
