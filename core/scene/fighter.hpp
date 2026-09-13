@@ -111,11 +111,15 @@ public:
                                const std::vector<std::pair<std::string, std::string>>& owned,
                                bool include_universal = true);
 
-    // Buffers one key press (JS `Kl.Sgb`, L798): Tap (and Hold if
-    // `held`). Clears on `release` (JS `Xgb`, L799).
+    // Buffers one key press (JS `Kl.Sgb`/`zl.Sgb`, L798): appends the key to
+    // the 2-slot Tap sequence (`zg.sh`), rebuilds the held set (`zg.Fh`),
+    // resets the tap age (`dX=0`). `release` (JS `zl.Xgb`, L799) drops the
+    // hold and records the release when the key was not tapped.
     void input(sf2::scene::key_type key, sf2::scene::press_type press);
 
-    // Per-frame tap buffer aging (JS `zl.ia` L798: clears after 30 frames).
+    // Per-frame input aging (JS `zl.ia` L798): drop the Tap sequence at
+    // `dX>=15`; at the 30-frame `Qe` cycle clear the holds/releases; rebuild
+    // the held set from the currently-down keys (`yLa`).
     void age_keys();
 
     // Attempts move selection from `hb` (priority order) with the buffered
@@ -175,6 +179,9 @@ public:
     int sub() const { return sub_; }
     int facing() const { return facing_; }
     const std::vector<const MoveDef*>& hb() const { return hb_; }
+    // Test/trace accessors (no behavior change): live input-buffer counts.
+    int buffered_tap_count() const;
+    int buffered_hold_count() const;
     const std::set<std::string>& active_intervals() const { return active_intervals_; }
     // Interval names active at `frame` (JS `jc.c7a` L691 semantics).
     std::vector<std::string> intervals_at(int frame) const;
@@ -355,9 +362,16 @@ private:
     std::set<std::string> active_intervals_; // active interval names (JS `Te.xj`)
     float enemy_x_ = 0.0f;                  // enemy world X (for facing)
     std::vector<sf2::scene::key_input> keys_; // buffered inputs (JS `Kl.zg`)
-    int tap_age_ = 0;                       // frames since last tap (JS `zl.Qe`)
+    int tap_age_ = 0;                       // frames since last tap (JS `zl.dX`)
+    // Keys currently held down (JS `zl.Ff[].sl` -> rebuilt `zg.Fh`): the
+    // physical keydown set. `input(tap)` inserts, `input(release)` erases;
+    // `rebuild_holds()` projects it into the `keys_` Hold entries.
+    std::set<sf2::scene::key_type> held_keys_;
+    // JS `zl.Qe` (L798): the 30-frame hold/release clear cycle.
+    int hold_age_ = 0;
     std::function<const sf2::data::anim_clip*(const std::string&)> clip_lookup_;
 
+    void rebuild_holds();
     void compute_align(const MoveDef& move);
     void build_prepend(const MoveDef& move);
     void sample_current();

@@ -4312,17 +4312,35 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     std::fflush(stdout);
 }
 
+// JS `sc.OD` (`Af.oUa` L2472) key table -> the native GLFW binding.
+int FightScreen::key_type_for_glfw(int glfw_key) {
+    switch (glfw_key) {
+        case 65: case 263: return static_cast<int>(sf2::scene::key_type::back);         // A / Left
+        case 68: case 262: return static_cast<int>(sf2::scene::key_type::forward);      // D / Right
+        case 87: case 265: return static_cast<int>(sf2::scene::key_type::up);           // W / Up
+        case 83: case 264: return static_cast<int>(sf2::scene::key_type::down);         // S / Down
+        case 32: case 75: return static_cast<int>(sf2::scene::key_type::punch);         // Space / K
+        case 76: return static_cast<int>(sf2::scene::key_type::kick);                   // L
+        case 79: return static_cast<int>(sf2::scene::key_type::ranged);                 // O
+        case 80: return static_cast<int>(sf2::scene::key_type::magic);                  // P
+        case 74: return static_cast<int>(sf2::scene::key_type::raid_charge);            // J
+        case 81: return static_cast<int>(sf2::scene::key_type::super);                  // Q
+        default: return 0;
+    }
+}
+
 void FightScreen::on_key(int glfw_key, bool down) {
-    // Pause toggle (JS `Jn` pause button → `Ar.Qg(0)` → `Aia()` L425; the
-    // P/Esc desktop equivalents — app-layer only). Esc (256) / P (80) on the
-    // down edge toggle while the round is live. Headless-safe: the headless
-    // driver injects pointer clicks, never keys, so this cannot trigger
-    // there (no code gate needed — noted for the record).
-    if (down && (glfw_key == 256 || glfw_key == 80)) {
+    // Pause toggle (JS `Jn` pause button → `Ar.Qg(0)` → `Aia()` L425 — the
+    // native Escape desktop alias, app-layer only). Esc (256) on the down
+    // edge toggles while the round is live. P (80) is NO LONGER a pause key:
+    // JS binds P to Magic (`Af.oUa` L2472 `a.v[12]=80`), so P must reach the
+    // fight key map below. Headless-safe: the headless driver injects pointer
+    // clicks, never keys, so this cannot trigger there (no code gate needed).
+    if (down && glfw_key == 256) {
         if (fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over()) {
             paused_ = !paused_;
             sf2::audio::AudioEngine::instance().play("click");
-            std::fprintf(stdout, "[fight] pause %s (Esc/P)\n", paused_ ? "ON" : "OFF");
+            std::fprintf(stdout, "[fight] pause %s (Esc)\n", paused_ ? "ON" : "OFF");
             std::fflush(stdout);
         }
         return;
@@ -4341,27 +4359,20 @@ void FightScreen::on_key(int glfw_key, bool down) {
         fight_->next_round_requested();
         return;
     }
-    // GLFW key codes -> the game's key_type (JS `Ik` keyboard events ->
-    // the fight input; the move Keys conditions read Punch/Forward/Back).
-    // Bindings (reasonable desktop keys):
-    //   A/Left = Back, D/Right = Forward, W/Up = Jump(up),
-    //   Space/J = Punch, L = Kick, S/Down = Crouch(down).
-    // K/B = Super (the Fists moveset has no Super-key moves; bound for the
-    // weapon movesets that do). Blocking is NOT a raw key in this game: the
-    // fighter blocks while any move's `Block` interval is active (e.g. the
-    // HighPunch recovery), so attacking/stepping with the keys above also
-    // provides the block window.
-    sf2::scene::key_type kt = static_cast<sf2::scene::key_type>(0);
-    switch (glfw_key) {
-        case 65: case 263: kt = sf2::scene::key_type::back; break;     // A / Left
-        case 68: case 262: kt = sf2::scene::key_type::forward; break;  // D / Right
-        case 87: case 265: kt = sf2::scene::key_type::up; break;       // W / Up (Jump)
-        case 83: case 264: kt = sf2::scene::key_type::down; break;     // S / Down (Crouch)
-        case 32: case 74: kt = sf2::scene::key_type::punch; break;     // Space / J
-        case 76: kt = sf2::scene::key_type::kick; break;               // L
-        case 75: case 66: kt = sf2::scene::key_type::super; break;     // K / B (special)
-        default: return;
-    }
+    // GLFW key codes -> the game's key_type, bound from the JS key map
+    // `sc.OD` (`Af.oUa` L2472):
+    //   a.v[1]=87 (W->Up), a.v[3]=68 (D->Forward), a.v[5]=83 (S->Down),
+    //   a.v[7]=65 (A->Back), a.v[9]=75 (K->Punch), a.v[10]=76 (L->Kick),
+    //   a.v[11]=79 (O->Ranged), a.v[12]=80 (P->Magic), a.v[13]=74
+    //   (J->RaidCharge), a.v[14]=81 (Q->Super).
+    // The JS table defines no B key (the old non-JS B->Super alias is
+    // dropped). Space and the arrows stay as documented desktop aliases
+    // (Left/Right/Up/Down directions; Space = K/Punch). Blocking is NOT a raw
+    // key in this game: the fighter blocks while any move's `Block` interval
+    // is active (e.g. the HighPunch recovery).
+    const int kt_id = key_type_for_glfw(glfw_key);
+    if (kt_id == 0) return;
+    sf2::scene::key_type kt = static_cast<sf2::scene::key_type>(kt_id);
     const int idx = static_cast<int>(kt);
     if (idx < 0 || idx >= 16) return;
     key_state_[idx] = down;
@@ -4371,8 +4382,30 @@ void FightScreen::on_key(int glfw_key, bool down) {
     }
 }
 
+// The replay/test hook: feed a game key edge (key_type id) into the fight
+// input. Mirrors the on_key tail (key_state_ + player_input) without the
+// GLFW key map so a recorded `control` id (JS `sa.$h`: 1..14) can be applied
+// directly.
+void FightScreen::inject_game_key(int key_type_index, bool down) {
+    if (key_type_index < 0 || key_type_index >= 16) return;
+    key_state_[key_type_index] = down;
+    if (fight_ != nullptr) {
+        fight_->player_input(static_cast<sf2::scene::key_type>(key_type_index),
+                             down ? sf2::scene::press_type::tap
+                                  : sf2::scene::press_type::release);
+    }
+}
+
 std::size_t FightScreen::move_list_size() const {
     return fight_ != nullptr ? fight_->player().fighter.hb().size() : 0;
+}
+
+std::string FightScreen::player_last_decision() const {
+    return fight_ != nullptr ? fight_->player().last_decision : std::string();
+}
+
+int FightScreen::player_moves_started() const {
+    return fight_ != nullptr ? fight_->player().moves_started : 0;
 }
 
 bool FightScreen::round_wait() const {
@@ -7798,6 +7831,17 @@ void SettingsScreen::update_impl(float dt) {
     }
     // SOUND row is state display only (no runtime SFX mute/set_enabled API
     // exists — see the stream report); intentionally not clickable.
+}
+
+// JS `od.aa` (L1895: the key gate `L.K.Tj().Db(156)`) applied to the
+// `un extends od` dialog (L1916): Escape closes it. JS menus are
+// pointer-only — this only handles the key edge, no menu navigation.
+void SettingsScreen::on_key(int glfw_key, bool down) {
+    if (down && glfw_key == 256) {  // GLFW_KEY_ESCAPE
+        std::fprintf(stdout, "[settings] ESC -> previous screen\n");
+        std::fflush(stdout);
+        manager().pop();
+    }
 }
 
 void SettingsScreen::render_impl(App& app) {

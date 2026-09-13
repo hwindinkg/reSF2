@@ -223,27 +223,52 @@ bool eval_keys(const Cond& c, const FightContext& ctx) {
         return press_type::tap;
     };
 
-    // JS `$ga`: every required key of every required press-type must be
-    // present in the fighter's buffer. An unknown key type maps to code 0
-    // (JS `sa.HQ` returns 0 for unregistered names, and the buffered codes
-    // are 1..14), so it can never match — the condition fails.
-    bool ok = true;
+    // JS `vm.he` (L749): `(a.keys.S1||a.Wl>0 ? this.xn : this.TDa).$ga(...)`.
+    // The normal required list `xn` is used when the buffer's S1 flag is set
+    // OR the fighter's scale `Wl>0`; otherwise the direction-reversed clone
+    // `TDa` (JS `zd.reverse(-1)` -> `Fha` L688 flips 3<->7, 2<->8, 4<->6).
+    const bool normal = ctx.keys_s1 || ctx.scale > 0.0f;
+    auto fha = [](int k) -> int {
+        switch (k) {
+            case 2: return 8;
+            case 8: return 2;
+            case 3: return 7;
+            case 7: return 3;
+            case 4: return 6;
+            case 6: return 4;
+            default: return k;
+        }
+    };
+    // JS `$ga` (L688): multiset containment —
+    //   `eca(sh, req.sh) && eca(Fh, req.Fh) ? eca(released, req.released) : false`
+    // where `eca(x,y)` (`Eab`) requires every element of `x` to match a
+    // DISTINCT element of `y`. Equivalently: for every (key, press) pair the
+    // buffered count must be >= the required count. An unknown key type maps
+    // to code 0 (JS `sa.HQ` returns 0 for unregistered names) and the
+    // buffered codes are 1..14, so it can never match.
+    std::vector<std::pair<int, press_type>> required;
+    required.reserve(wanted.size());
     for (const std::string& w : wanted) {
         const std::size_t colon = w.find(':');
         const std::string type_s = colon == std::string::npos ? w : w.substr(0, colon);
         const std::string press_s = colon == std::string::npos ? "Tap" : w.substr(colon + 1);
-        const int k = key_id(type_s);
-        const press_type p = press_id(press_s);
-        if (k == 0) {
-            ok = false;
-            break;
-        }
-        if (!ctx.key_pressed(static_cast<key_type>(k), p)) {
-            ok = false;
-            break;
-        }
+        int k = key_id(type_s);
+        if (k == 0) return false;
+        if (!normal) k = fha(k);
+        required.emplace_back(k, press_id(press_s));
     }
-    return ok;
+    for (const std::pair<int, press_type>& rp : required) {
+        int need = 0;
+        for (const std::pair<int, press_type>& rp2 : required) {
+            if (rp2 == rp) ++need;
+        }
+        int have = 0;
+        for (const key_input& ki : ctx.keys) {
+            if (static_cast<int>(ki.key) == rp.first && ki.press == rp.second) ++have;
+        }
+        if (have < need) return false;
+    }
+    return true;
 }
 
 // JS `qm.he`: Distance.

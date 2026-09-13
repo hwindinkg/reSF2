@@ -191,10 +191,25 @@ public:
     // Keyboard -> game key types (JS `Ik` key events -> the fight input).
     void on_key(int glfw_key, bool down);
 
+    // The GLFW -> game key_type id map (0 = unbound), from the JS `sc.OD`
+    // table (`Af.oUa` L2472). Exposed so the key-map verification can assert
+    // the binding without running a fight.
+    static int key_type_for_glfw(int glfw_key);
+
+    // Test/replay hook: inject a game key edge by key_type id (1..14) into
+    // the same `player_input` path the keyboard uses, bypassing the GLFW key
+    // map. The `atframe <n> press <control>` replay stream uses these ids.
+    void inject_game_key(int key_type_index, bool down);
+
     // The player's move-list size (the equipment-change evidence: the
     // headless-loop driver logs it before/after equipping a weapon).
     // Defined in screens.cpp (needs the full FightController type).
     std::size_t move_list_size() const;
+
+    // Test hooks for the input replay/verification harness (no behavior
+    // change): the player's last decision and started-move count.
+    std::string player_last_decision() const;
+    int player_moves_started() const;
 
     // [FIX Phase 4a verification] Prints the sampled bone positions of the
     // player/enemy (a clip-frame bone-sample check) + their triangle bbox
@@ -495,6 +510,12 @@ public:
 
     void update_impl(float dt) override;
     void render_impl(App& app) override;
+
+    // JS `od.aa` (L1895: `this.V7||this.oEa||this.Aqa||!L.K.Tj().Db(156)`)
+    // applied to `un extends od` (L1916): the dialog closes on the Escape
+    // key-down edge. JS menus are pointer-only — NO arrow-key navigation is
+    // added here (that would be invention).
+    void on_key(int glfw_key, bool down) override;
 
 private:
     bool music_off_ = false;

@@ -80,8 +80,26 @@
 
   /* ================= 2. Config ================= */
 
-  var MAX_FIGHT_FRAMES = 600; /* stop when fight.frame reaches this */
-  var MAX_RECORDS = 1500; /* backstop: stop after this many oracle records */
+  /* UI-tour mode (phase1 step9): the old auto-finish (fight.frame >= 600, i.e.
+   * ~10s of fight) closed OracleShell before a scripted tour could reach the
+   * later screens, so only boot.png was ever produced. Both defaults are now
+   * effectively unreachable (1e9): the shell closes on its --timeout-ms safety
+   * timeout / window close instead, letting a tour span every screen. This
+   * changes only WHEN the trace stops, never what is recorded, so the trace
+   * stays deterministic (same pins: Date frozen + mulberry32). Callers that
+   * still need the Phase-1 gate set window.__oracleLimits =
+   * {maxFightFrames:600,maxRecords:1500} any time before the cap would hit
+   * (read live below, so a runner/index.html script can arm it pre-tick). */
+  var DEFAULT_MAX_FIGHT_FRAMES = 1000000000; /* stop when fight.frame reaches this */
+  var DEFAULT_MAX_RECORDS = 1000000000; /* backstop: stop after this many oracle records */
+
+  function limit(name, fallback) {
+    try {
+      var o = window.__oracleLimits;
+      if (o && typeof o[name] === "number") return o[name];
+    } catch (e) { /* ignore */ }
+    return fallback;
+  }
   var TRACE_CAP = 20000; /* window.__trace ring cap */
   var N0A_RECENT = 8; /* input events kept in input_buffer_state.recent */
 
@@ -931,7 +949,8 @@
     or.lastFrame = fr;
     emit(oracleRecord(fight));
     or.records++;
-    if (fr >= MAX_FIGHT_FRAMES || or.records >= MAX_RECORDS) finish();
+    if (fr >= limit("maxFightFrames", DEFAULT_MAX_FIGHT_FRAMES) ||
+        or.records >= limit("maxRecords", DEFAULT_MAX_RECORDS)) finish();
   }
 
   function finish() {

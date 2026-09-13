@@ -2592,6 +2592,12 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // the idle (otherwise the idle would re-start a clip every frame and
     // the input could never win — "no input").
     if (me.ai == nullptr && !auto_attack_ && phase_ == fight_phase::fight) {
+        // JS `zl.ia` (L798): one input-age tick per fight frame — drop the
+        // Tap sequence at `dX>=15`, run the 30-frame hold/release cycle,
+        // rebuild the held set from the down keys. Must run BEFORE the move
+        // selection so the selection sees the same aged buffer the JS `Ykb`
+        // handler would.
+        me.fighter.age_keys();
         sf2::scene::FightContext ctx;
         ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
         ctx.stage = static_cast<sf2::scene::round_stage>(phase_);

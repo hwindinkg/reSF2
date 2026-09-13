@@ -14,17 +14,24 @@
 //
 // Defaults: res_root = reference/www/res, save = reference/saves/save.xml.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <map>
+#include <set>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include <GLFW/glfw3.h>
 
 #include "app/app.hpp"
 #include "app/save_system.hpp"
 #include "app/screens.hpp"
+#include "scene/fighter.hpp"
 
 namespace {
 
@@ -35,7 +42,8 @@ void print_usage(const char* argv0) {
                  "usage: %s [res_root] [save_path] [--headless N] [--autoclick] [--headless-loop]\n"
                   "                  [--fight] [--battle <name>] [--zone <name>]\n"
                   "                  [--dump-pose N] [--dump-clip <name>]\n"
-                  "                  [--ui-tour]\n"
+                  "                  [--ui-tour] [--fidelity-tour]\n"
+                  "                  [--replay [file]] [--verify-input]\n"
                  "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
                  "  --headless-loop  run the scripted playable loop, then exit\n"
@@ -331,6 +339,10 @@ struct UiTourStep {
     // Optional pre-click (0/0 = none; the JS map has no zone-tab strip).
     float tab_x = 0.0f;
     float tab_y = 0.0f;
+    // Optional per-step auto-attack override (-1 = leave unchanged). The
+    // fidelity tour arms it on the map node-click step, before the
+    // FightScreen is constructed, so the fight resolves to Results.
+    int auto_attack = -1;
 };
 
 static const UiTourStep kUiTourSteps[] = {
@@ -362,10 +374,11 @@ static const UiTourStep kUiTourSteps[] = {
     //    save's CurrentZone (ZONE_1) and has no zone-tab strip; its first
     //    node launches the fight. Hold 250 for the HUD.
     {471.0f, 375.0f, "map->BOSS_LYNX fight", 5, 10, 6, 250, "port_fight.png"},
-    // 10: Pause via P, capture the pause menu.
-    {0.0f, 0.0f, "pause", 6, 10, -1, 40, "port_pause.png", 80},
-    // 11: Resume via P, run to KO -> Results captures on arrival.
-    {0.0f, 0.0f, "resume->results", 6, 10, 10, 0, "port_results.png", 80},
+    // 10: Pause via Esc, capture the pause menu. (P is the JS Magic key now
+    //     — `Af.oUa` v[12]=80 — so the native pause alias is Escape only.)
+    {0.0f, 0.0f, "pause.png", 6, 10, -1, 40, "port_pause.png", 256},
+    // 11: Resume via Esc, run to KO -> Results captures on arrival.
+    {0.0f, 0.0f, "resume->results", 6, 10, 10, 0, "port_results.png", 256},
     // 12: Results -> Map (the tour went Dojo->Map->Fight, so Results pops
     //     back to the map beneath the fight).
     {640.0f, 360.0f, "results->map", 10, 10, 5, 0, nullptr},
@@ -376,7 +389,97 @@ static const UiTourStep kUiTourSteps[] = {
 };
 constexpr int kUiTourStepCount = static_cast<int>(sizeof(kUiTourSteps) / sizeof(kUiTourSteps[0]));
 
-struct UiTourDriver {
+// Fidelity tour (Phase 0 harness, phase1 step9): mirror the oracle's state
+// matrix (reference/traces/oracle_matrix/<state>.png) into the port's
+// reference/traces/port_matrix/<state>.png. The same proven navigate/settle/
+// capture machine as the UI tour; `capture` is the raw state name. States the
+// port cannot reach are captured from their closest reachable state (see
+// reference/FIDELITY_MATRIX.md for the per-state owner notes). The two boot
+// states (splash/loader) are captured before the driver (non-headless overlay).
+//
+// Coordinates (1280x720, matching core/app/screens.cpp layout math):
+//   za header (collapsed nav expand) = (120, 90); nav rows MAP/SHOP/PROFILE/
+//   SETTINGS = (184, 231/337/442/547); map node BOSS_LYNX = (471, 375);
+//   BACK = (64, 40); results pop = (640, 360).
+//   shop tab strip (shop_tab_layout): y=676, x = 418.7/529.3/640.0/750.7/861.3.
+//   profile tab strip (profile_tab_layout): y=672.5, x = 461.1/580.4/699.7/818.9.
+//   shop first card = (548.2, 218.4).
+static const UiTourStep kFidelitySteps[] = {
+    // --- Dojo hub (boot) + the not-yet-ported tutorial states ---------------
+    // 0: the Dojo hub (boot; `za` nav collapsed).
+    {0.0f, 0.0f, "dojo hub", 3, 150, -1, 60, "dojo_hub.png", 0, true},
+    // 1-4: the oracle's tutorial fight states. The port has NO tutorial fight
+    //      (it boots straight into the Dojo hub); closest reachable = the hub.
+    {0.0f, 0.0f, "tut_fight_stance (closest: dojo)", 3, 0, -1, 6, "tut_fight_stance.png", 0, true},
+    {0.0f, 0.0f, "tut_fight_phase2 (closest: dojo)", 3, 0, -1, 6, "tut_fight_phase2.png", 0, true},
+    {0.0f, 0.0f, "tut_block (closest: dojo)", 3, 0, -1, 6, "tut_block.png", 0, true},
+    {0.0f, 0.0f, "tut_win (closest: dojo)", 3, 0, -1, 6, "tut_win.png", 0, true},
+    // 5: expand the collapsed `za` nav column (the header tap).
+    {120.0f, 90.0f, "dojo menu open (za header)", 3, 10, -1, 40, "dojo_menu_open.png", 0, false},
+    // 6: the Sensei quest modal — headless auto-drains the queue
+    //    (quest_modal_top), so closest reachable = the expanded hub.
+    {0.0f, 0.0f, "dojo sensei (closest: expanded hub)", 3, 0, -1, 30, "dojo_sensei.png", 0, true},
+    // --- Map ----------------------------------------------------------------
+    {184.0f, 231.0f, "dojo->map", 3, 10, 5, 60, "map_zone1.png", 0, false},
+    // node selection / info panels are not modelled (PORT_AUDIT_UI §2.3/2.4):
+    // closest reachable = the ZONE_1 map itself.
+    {0.0f, 0.0f, "map node sel (closest: map)", 5, 0, -1, 20, "map_node_sel.png", 0, true},
+    {0.0f, 0.0f, "map panels (closest: map)", 5, 0, -1, 20, "map_panels.png", 0, true},
+    // act_boss: the boss intro act is bypassed in headless (MapScreen guards
+    // `!app().headless()`); closest reachable = the map with its boss node.
+    {0.0f, 0.0f, "act_boss (closest: map)", 5, 0, -1, 10, "act_boss.png", 0, true},
+    // --- Fight (auto-attack ON so it resolves to Results) -------------------
+    {471.0f, 375.0f, "map->fight", 5, 10, 6, 40, "fight_intro.png", 0, false, 0.0f, 0.0f, 1},
+    // Pause early (phase 1, definitely live), capture, resume. Esc is the
+    // native pause alias (P is the JS Magic key).
+    {0.0f, 0.0f, "pause (Esc)", 6, 0, -1, 40, "pause.png", 256, false},
+    {0.0f, 0.0f, "resume (Esc)", 6, 0, -1, 30, nullptr, 256, false},
+    // Phase 2 (>133 fight frames): idle stance.
+    {0.0f, 0.0f, "fight stance", 6, 0, -1, 140, "fight_stance.png", 0, true},
+    {0.0f, 0.0f, "fight attack (punch)", 6, 0, -1, 25, "fight_attack.png", 32, false},
+    // Block is not a raw key in this game (on_key: it is a move interval);
+    // closest reachable = the attack-recovery frame.
+    {0.0f, 0.0f, "fight block (closest: recovery)", 6, 0, -1, 8, "fight_block.png", 0, true},
+    {0.0f, 0.0f, "fight hit (closest: mid-fight)", 6, 0, -1, 40, "fight_hit.png", 0, true},
+    {0.0f, 0.0f, "fight->results", 6, 0, 10, 0, "results_win.png", 0, true},
+    // results_lose: no deterministic headless loss path (the enemy AI is
+    // passive in the tested direct fight; the auto fight wins) — closest
+    // reachable = the win Results.
+    {0.0f, 0.0f, "results_lose (closest: results_win)", 10, 0, -1, 5, "results_lose.png", 0, true},
+    {640.0f, 360.0f, "results->map", 10, 10, 5, 0, nullptr},
+    {64.0f, 40.0f, "map->dojo", 5, 10, 3, 0, nullptr},
+    // --- Shop ---------------------------------------------------------------
+    {184.0f, 337.0f, "dojo->shop", 3, 10, 4, 60, "shop_tab1.png", 0, false},
+    {548.2f, 218.4f, "shop detail (select row 0)", 4, 10, -1, 30, "shop_detail.png", 0, false},
+    {529.3f, 676.0f, "shop tab 2", 4, 10, -1, 30, "shop_tab2.png", 0, false},
+    {640.0f, 676.0f, "shop tab 3", 4, 10, -1, 30, "shop_tab3.png", 0, false},
+    {750.7f, 676.0f, "shop tab 4", 4, 10, -1, 30, "shop_tab4.png", 0, false},
+    {861.3f, 676.0f, "shop tab 5", 4, 10, -1, 30, "shop_tab5.png", 0, false},
+    {64.0f, 40.0f, "shop->dojo", 4, 10, 3, 0, nullptr},
+    // --- Profile (folded Moves = tab 1) -------------------------------------
+    {184.0f, 442.0f, "dojo->profile", 3, 10, 7, 60, "profile_tab0.png", 0, false},
+    {580.4f, 672.5f, "profile tab 1 (MOVES)", 7, 10, -1, 40, "profile_tab1.png", 0, false},
+    {0.0f, 0.0f, "moves (folded into profile tab 1)", 7, 0, -1, 20, "moves.png", 0, true},
+    {699.7f, 672.5f, "profile tab 2", 7, 10, -1, 40, "profile_tab2.png", 0, false},
+    {818.9f, 672.5f, "profile tab 3", 7, 10, -1, 40, "profile_tab3.png", 0, false},
+    {64.0f, 40.0f, "profile->dojo", 7, 10, 3, 0, nullptr},
+    // --- Settings (last; no nav column) -------------------------------------
+    {184.0f, 547.0f, "dojo->settings", 3, 10, 11, 60, "settings.png", 0, false},
+};
+constexpr int kFidelityStepCount =
+    static_cast<int>(sizeof(kFidelitySteps) / sizeof(kFidelitySteps[0]));
+
+// Generic tour driver — the proven navigate/settle/capture state machine,
+// parameterized so BOTH the UI tour (reference/traces/ui/port_*.png) and the
+// fidelity tour (reference/traces/port_matrix/<state>.png) reuse it. `steps`/
+// `count` come from the caller, `out_dir` is the capture directory and `tag`
+// the log prefix. Key steps inject a GLFW key down/up; `no_click` settles
+// and captures only. Round_wait NEXT clicks run each fight to Results.
+struct TourDriver {
+    const UiTourStep* steps = nullptr;
+    int count = 0;
+    const char* out_dir = "reference/traces/ui";
+    const char* tag = "[tour]";
     int step = 0;
     int step_frame = 0;
     int last_seen = -1;
@@ -386,14 +489,25 @@ struct UiTourDriver {
     bool tab_clicked = false;   // the step's zone-tab pre-click has been sent
     int guard = 0;
     bool finished = false;
+    int applied_auto_attack = -1;  // last per-step auto-attack override applied
 
     void frame_tick(sf2::app::App& app) {
-        const UiTourStep& s = kUiTourSteps[step];
+        const UiTourStep& s = steps[step];
         const int cur = app.screens().current_id();
+        // Per-step auto-attack override. The fidelity tour arms it on the
+        // map node-click step, BEFORE the FightScreen is constructed, so the
+        // fight it pushes picks up the mode.
+        if (s.auto_attack != -1 && s.auto_attack != applied_auto_attack) {
+            app.set_auto_attack(s.auto_attack != 0);
+            applied_auto_attack = s.auto_attack;
+            std::fprintf(stdout, "%s step %d/%d auto_attack=%d\n", tag, step + 1, count,
+                         s.auto_attack);
+            std::fflush(stdout);
+        }
         if (cur != last_seen) {
             last_seen = cur;
-            std::fprintf(stdout, "[tour] screen %d (step %d/%d %s)\n", cur, step + 1,
-                         kUiTourStepCount, s.label);
+            std::fprintf(stdout, "%s screen %d (step %d/%d %s)\n", tag, cur, step + 1,
+                         count, s.label);
             std::fflush(stdout);
         }
 
@@ -408,7 +522,7 @@ struct UiTourDriver {
             static_cast<sf2::app::FightScreen*>(top)->next_button_center(cx, cy);
             app.inject_click(cx, cy);
             next_clicked = true;
-            std::fprintf(stdout, "[tour] round_wait -> NEXT click (%.0f, %.0f)\n", cx, cy);
+            std::fprintf(stdout, "%s round_wait -> NEXT click (%.0f, %.0f)\n", tag, cx, cy);
             std::fflush(stdout);
         } else if (!fight_waiting) {
             next_clicked = false;
@@ -417,8 +531,8 @@ struct UiTourDriver {
         if (!acted) {
             if (cur == s.wait_screen && step_frame >= s.min_delay) {
                 if (s.tab_x != 0.0f && !tab_clicked) {
-                    std::fprintf(stdout, "[tour] step %d/%d %s -> tab click (%.0f, %.0f)\n",
-                                 step + 1, kUiTourStepCount, s.label, s.tab_x, s.tab_y);
+                    std::fprintf(stdout, "%s step %d/%d %s -> tab click (%.0f, %.0f)\n", tag,
+                                 step + 1, count, s.label, s.tab_x, s.tab_y);
                     std::fflush(stdout);
                     app.inject_click(s.tab_x, s.tab_y);
                     tab_clicked = true;
@@ -426,18 +540,18 @@ struct UiTourDriver {
                     return;
                 }
                 if (s.key != 0) {
-                    std::fprintf(stdout, "[tour] step %d/%d %s -> key %d\n", step + 1,
-                                 kUiTourStepCount, s.label, s.key);
+                    std::fprintf(stdout, "%s step %d/%d %s -> key %d\n", tag, step + 1,
+                                 count, s.label, s.key);
                     std::fflush(stdout);
                     app.inject_key(s.key, true);
                 } else if (!s.no_click) {
-                    std::fprintf(stdout, "[tour] step %d/%d %s -> click (%.0f, %.0f)\n",
-                                 step + 1, kUiTourStepCount, s.label, s.x, s.y);
+                    std::fprintf(stdout, "%s step %d/%d %s -> click (%.0f, %.0f)\n", tag,
+                                 step + 1, count, s.label, s.x, s.y);
                     std::fflush(stdout);
                     app.inject_click(s.x, s.y);
                 } else {
-                    std::fprintf(stdout, "[tour] step %d/%d %s -> settle\n", step + 1,
-                                 kUiTourStepCount, s.label);
+                    std::fprintf(stdout, "%s step %d/%d %s -> settle\n", tag, step + 1,
+                                 count, s.label);
                     std::fflush(stdout);
                 }
                 acted = true;
@@ -470,12 +584,12 @@ struct UiTourDriver {
 
     void snap(sf2::app::App& app, const UiTourStep& s) {
         if (s.capture != nullptr) {
-            const std::string path = std::string("reference/traces/ui/") + s.capture;
+            const std::string path = std::string(out_dir) + "/" + s.capture;
             app.capture_png(path);
-            std::fprintf(stdout, "[tour] capture %s\n", s.capture);
+            std::fprintf(stdout, "%s capture %s\n", tag, path.c_str());
             std::fflush(stdout);
         }
-        std::fprintf(stdout, "[tour] step done (%s)\n", s.label);
+        std::fprintf(stdout, "%s step done (%s)\n", tag, s.label);
         std::fflush(stdout);
     }
 
@@ -485,13 +599,138 @@ struct UiTourDriver {
         acted = false;
         key_up_done = false;
         tab_clicked = false;
-        if (step >= kUiTourStepCount) {
+        if (step >= count) {
             finished = true;
-            std::fprintf(stdout, "[tour] ALL %d STEPS DONE\n", kUiTourStepCount);
+            std::fprintf(stdout, "%s ALL %d STEPS DONE\n", tag, count);
             std::fflush(stdout);
         }
     }
 };
+
+// ---------------------------------------------------------------------------
+// Input replay / scripted verification (phase1 step9)
+// ---------------------------------------------------------------------------
+// A reconstructed key edge for the recorded input stream
+// (`atframe <n> press <control> <player> <value>`): a down/up of a game
+// control id (JS `sa.$h`, 1..14). The stream lists a control once per frame
+// it is held, so a contiguous run of frames is one down..up edge; duplicate
+// rows on the SAME frame are extra taps (the multi-tap `2key`/`3key` inputs
+// that a single tap can never satisfy).
+struct ReplayEdge {
+    int frame = 0;
+    int control = 0;   // game key id, or GLFW key code when `glfw`
+    bool down = false;
+    bool glfw = false;  // route through FightScreen::on_key (key-map test)
+};
+
+struct VerifyProbe {
+    int frame = 0;
+    const char* label = "";
+    const char* expect = "";  // "<..." = expect NO move
+    int window = 4;           // frames after `frame` to observe the move start
+    bool substring = false;   // expect is a substring of the move name
+};
+
+// The `--verify-input` tape. Control ids are JS `sa.$h`
+// (1=Up,3=Forward,5=Down,7=Back,9=Punch,10=Kick,11=Ranged,12=Magic,
+// 13=RaidCharge,14=Super). The double-taps are two same-frame taps: JS
+// `zl.Sgb` (L798) appends every keydown to the 2-slot `zg.sh`, so two taps
+// that never get consumed by a lower-priority move combine into the `2key`
+// move — exactly what the debug audit flagged as missing.
+static const VerifyProbe kVerifyProbes[] = {
+    {180, "Back Tap x2 (spawn gap 283)", "DashBackwards", 4, false},
+    {300, "Forward Tap x2", "DoubleStepForward", 4, false},
+    {420, "Punch Tap x2 + Forward Hold", "DoublePunch", 4, false},
+    {520, "Forward Tap x1 (1key)", "StaffStepForward", 4, false},
+    {550, "Forward Tap x1 (+30f)", "StaffStepForward", 4, false},
+    {620, "K key -> Punch-key move", "ShortUpwardElbowStrike", 4, false},
+    {700, "B key -> dropped (no move)", "<none>", 12, false},
+};
+constexpr int kVerifyProbeCount =
+    static_cast<int>(sizeof(kVerifyProbes) / sizeof(kVerifyProbes[0]));
+
+std::vector<ReplayEdge> build_verify_edges() {
+    std::vector<ReplayEdge> e;
+    auto down = [&](int f, int c) { e.push_back(ReplayEdge{f, c, true}); };
+    auto up = [&](int f, int c) { e.push_back(ReplayEdge{f, c, false}); };
+    // DashBackwards = Back Tap x2 (moves.xml L358527) FIRST, at the spawn gap
+    // (dist 283): once the higher-priority `WallDashForward_50` (Back Tap x2
+    // + a `Max=100` gap) is out of range.
+    down(180, 7);
+    down(180, 7);
+    up(220, 7);
+    // DoubleStepForward = Forward Tap x2 (moves.xml L499745).
+    down(300, 3);
+    down(300, 3);
+    up(340, 3);
+    // DoublePunch = Punch Tap x2 + Forward Hold (moves.xml L609376).
+    down(400, 3);
+    down(420, 9);
+    down(420, 9);
+    up(470, 3);
+    // Single Forward taps: 1key StepForward; two lone taps 30 frames apart
+    // are two single steps — never DoubleStepForward (the first tap is
+    // consumed by the 1key move).
+    down(520, 3);
+    up(530, 3);
+    down(550, 3);
+    up(560, 3);
+    // Key-map fixes: K (GLFW 75) must be Punch, not Super; the non-JS B
+    // (GLFW 66) is dropped (no binding -> no move).
+    e.push_back(ReplayEdge{620, 75, true, true});
+    e.push_back(ReplayEdge{632, 75, false, true});
+    e.push_back(ReplayEdge{700, 66, true, true});
+    e.push_back(ReplayEdge{712, 66, false, true});
+    std::stable_sort(e.begin(), e.end(),
+                     [](const ReplayEdge& a, const ReplayEdge& b) { return a.frame < b.frame; });
+    return e;
+}
+
+// Parses the recorded input stream into down/up edges.
+std::vector<ReplayEdge> parse_replay_file(const std::string& path) {
+    std::ifstream in(path);
+    std::map<int, std::map<int, int>> by_frame;  // frame -> control -> count
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream ss(line);
+        std::string tag, press;
+        int frame = 0, control = 0, player = 0, value = 0;
+        if (!(ss >> tag >> frame >> press >> control >> player >> value)) continue;
+        if (tag != "atframe" || press != "press") continue;
+        by_frame[frame][control] += 1;
+    }
+    std::set<int> controls;
+    for (const auto& f : by_frame) {
+        for (const auto& c : f.second) controls.insert(c.first);
+    }
+    std::vector<ReplayEdge> edges;
+    for (const int c : controls) {
+        bool prev_down = false;
+        int prev_frame = -1000;
+        for (const auto& f : by_frame) {
+            const int frame = f.first;
+            const auto it = f.second.find(c);
+            const int count = it == f.second.end() ? 0 : it->second;
+            const bool active = count > 0;
+            const bool contiguous = frame == prev_frame + 1;
+            if (active && (!prev_down || !contiguous)) {
+                edges.push_back(ReplayEdge{frame, c, true});
+                for (int x = 1; x < count; ++x) edges.push_back(ReplayEdge{frame, c, true});
+            } else if (active && prev_down && contiguous && count > 1) {
+                for (int x = 0; x < count - 1; ++x) edges.push_back(ReplayEdge{frame, c, true});
+            } else if (!active && prev_down) {
+                edges.push_back(ReplayEdge{frame, c, false});
+            }
+            prev_down = active;
+            prev_frame = frame;
+        }
+        if (prev_down) edges.push_back(ReplayEdge{prev_frame + 1, c, false});
+    }
+    std::stable_sort(edges.begin(), edges.end(),
+                     [](const ReplayEdge& a, const ReplayEdge& b) { return a.frame < b.frame; });
+    return edges;
+}
 
 } // namespace
 
@@ -502,6 +741,10 @@ int main(int argc, char** argv) {
     bool auto_click = false;
     bool headless_loop = false;
     bool ui_tour = false;
+    bool fidelity_tour = false;
+    bool replay_mode = false;
+    bool verify_input = false;
+    std::string replay_file = "reference/traces/recorded_inputs.txt";
     bool debug_ui = false;
     bool capture_fight = false;
     bool capture_idle_fight = false;  // --capture-idle-fight-at N: boot direct + no input, capture at fight frame N
@@ -533,6 +776,15 @@ int main(int argc, char** argv) {
             headless_loop = true;
         } else if (arg == "--ui-tour") {
             ui_tour = true;
+        } else if (arg == "--fidelity-tour") {
+            fidelity_tour = true;
+        } else if (arg == "--replay") {
+            replay_mode = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                replay_file = argv[++i];
+            }
+        } else if (arg == "--verify-input") {
+            verify_input = true;
         } else if (arg == "--debug-ui") {
             debug_ui = true;
         } else if (arg == "--capture" && i + 1 < argc) {
@@ -741,7 +993,11 @@ int main(int argc, char** argv) {
         }
     } else if (ui_tour) {
         // UI screenshot tour: visit each screen, capture ui/port_*.png.
-        UiTourDriver driver;
+        TourDriver driver;
+        driver.steps = kUiTourSteps;
+        driver.count = kUiTourStepCount;
+        driver.out_dir = "reference/traces/ui";
+        driver.tag = "[tour]";
         app.set_auto_attack(false);
         app.set_headless_frames(1);
         if (debug_ui) app.set_debug_ui(true);
@@ -754,8 +1010,210 @@ int main(int argc, char** argv) {
         }
         if (!driver.finished) {
             std::fprintf(stderr, "[tour] did not finish after %d frames (step %d)\n",
-                         driver.guard, driver.step);
+                         driver.guard, driver.step + 1);
             return 1;
+        }
+        app.shutdown();
+        return 0;
+    } else if (fidelity_tour) {
+        // [Phase 0 harness, phase1 step9] Fidelity tour: mirror the oracle's
+        // reference/traces/oracle_matrix/<state>.png state list into
+        // reference/traces/port_matrix/<state>.png (App::capture_png).
+        // The boot overlay (splash/loader) draws ONLY in non-headless mode
+        // (App::render_frame), so capture those two first with the overlay
+        // live, then run the deterministic headless step tour.
+        std::filesystem::create_directories("reference/traces/port_matrix");
+        // splash: right after boot (Preloader counts down from 75).
+        app.set_headless_frames(0);
+        app.run_one_frame();
+        app.capture_png("reference/traces/port_matrix/splash.png");
+        // loader: advance the fixed-step countdown into the loader window
+        // (<= kBootLoaderFrames = 30), then render one non-headless frame so
+        // the overlay draws and capture it.
+        app.set_headless_frames(1);
+        for (int i = 0; i < 46; ++i) {
+            app.run_one_frame();
+        }
+        app.set_headless_frames(0);
+        app.run_one_frame();
+        app.capture_png("reference/traces/port_matrix/loader.png");
+        app.set_headless_frames(1);
+        TourDriver driver;
+        driver.steps = kFidelitySteps;
+        driver.count = kFidelityStepCount;
+        driver.out_dir = "reference/traces/port_matrix";
+        driver.tag = "[fidelity]";
+        app.set_auto_attack(false);
+        while (!driver.finished && driver.guard < 80000) {
+            glfwPollEvents();
+            driver.frame_tick(app);
+            app.run_one_frame();
+            ++driver.guard;
+        }
+        if (!driver.finished) {
+            std::fprintf(stderr, "[fidelity] did not finish after %d frames (step %d)\n",
+                         driver.guard, driver.step + 1);
+            app.shutdown();
+            return 1;
+        }
+        app.shutdown();
+        return 0;
+    } else if (replay_mode || verify_input) {
+        // ---- Input replay / scripted verification (phase1 step9) ----------
+        // Boots the direct dojo fight (same as --fight) and feeds a game
+        // control stream into the fight input. `--replay [file]` reads
+        // `reference/traces/recorded_inputs.txt` (control = the JS `sa.$h`
+        // key id); `--verify-input` runs the embedded tape that exercises the
+        // double-tap / window / key-map fixes.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name = "Training";
+            pb.zone.clear();
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned.clear();
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+
+        // Unit-level buffer check (JS `zl.Sgb`/`ia` L798): 2-slot Tap
+        // sequence, no same-key replacement, holds rebuilt from the down
+        // keys, and the 15-frame tap window (present through +14, gone +15).
+        if (verify_input) {
+            sf2::scene::Fighter f;
+            f.input(sf2::scene::key_type::forward, sf2::scene::press_type::tap);
+            f.input(sf2::scene::key_type::forward, sf2::scene::press_type::tap);
+            const bool two = f.buffered_tap_count() == 2;
+            f.input(sf2::scene::key_type::forward, sf2::scene::press_type::tap);
+            const bool cap = f.buffered_tap_count() == 2;  // 3rd evicts the oldest
+            const bool hold = f.buffered_hold_count() == 1;
+            for (int i = 0; i < 15; ++i) f.age_keys();
+            const bool alive = f.buffered_tap_count() == 2;  // still there at +14
+            f.age_keys();
+            const bool gone = f.buffered_tap_count() == 0;  // cleared at +15
+            std::fprintf(stdout,
+                         "[verify] buffer: 2-tap=%d cap2=%d hold=%d alive@+14=%d "
+                         "empty@+15=%d -> %s\n",
+                         two, cap, hold, alive, gone,
+                         (two && cap && hold && alive && gone) ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        }
+
+        const std::vector<ReplayEdge> edges =
+            verify_input ? build_verify_edges() : parse_replay_file(replay_file);
+        std::fprintf(stdout, "[replay] %s: %zu edges\n",
+                     verify_input ? "verify tape" : replay_file.c_str(), edges.size());
+        std::fflush(stdout);
+
+        if (verify_input) {
+            // Key-map assertion (JS `sc.OD` `Af.oUa` L2472): K->Punch(9) not
+            // Super(14), Q->Super(14), P->Magic(12), and the non-JS B is
+            // unbound (0).
+            const bool map_ok =
+                FightScreen::key_type_for_glfw(75) == 9 &&
+                FightScreen::key_type_for_glfw(81) == 14 &&
+                FightScreen::key_type_for_glfw(80) == 12 &&
+                FightScreen::key_type_for_glfw(79) == 11 &&
+                FightScreen::key_type_for_glfw(74) == 13 &&
+                FightScreen::key_type_for_glfw(76) == 10 &&
+                FightScreen::key_type_for_glfw(66) == 0 &&
+                FightScreen::key_type_for_glfw(65) == 7 &&
+                FightScreen::key_type_for_glfw(68) == 3 &&
+                FightScreen::key_type_for_glfw(87) == 1 &&
+                FightScreen::key_type_for_glfw(83) == 5;
+            std::fprintf(stdout,
+                         "[verify] key map: K75->%d Q81->%d P80->%d O79->%d J74->%d "
+                         "L76->%d B66->%d A65->%d D68->%d W87->%d S83->%d -> %s\n",
+                         FightScreen::key_type_for_glfw(75),
+                         FightScreen::key_type_for_glfw(81),
+                         FightScreen::key_type_for_glfw(80),
+                         FightScreen::key_type_for_glfw(79),
+                         FightScreen::key_type_for_glfw(74),
+                         FightScreen::key_type_for_glfw(76),
+                         FightScreen::key_type_for_glfw(66),
+                         FightScreen::key_type_for_glfw(65),
+                         FightScreen::key_type_for_glfw(68),
+                         FightScreen::key_type_for_glfw(87),
+                         FightScreen::key_type_for_glfw(83),
+                         map_ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        }
+
+        app.set_headless_frames(1);
+        bool fight_seen = false;
+        int fight_frames = 0;
+        std::size_t ei = 0;
+        int last_started = 0;
+        const VerifyProbe* pending = nullptr;
+        int guard = 0;
+        const int last_frame = edges.empty() ? 0 : edges.back().frame;
+        while (guard < 6000) {
+            glfwPollEvents();
+            sf2::app::FightScreen* fs =
+                fight_seen ? static_cast<sf2::app::FightScreen*>(app.screens().top()) : nullptr;
+            if (fight_seen && fs != nullptr) {
+                while (ei < edges.size() && edges[ei].frame <= fight_frames) {
+                    if (edges[ei].glfw) {
+                        fs->on_key(edges[ei].control, edges[ei].down);
+                    } else {
+                        fs->inject_game_key(edges[ei].control, edges[ei].down);
+                    }
+                    ++ei;
+                }
+            }
+            if (fight_seen && verify_input) {
+                for (int p = 0; p < kVerifyProbeCount; ++p) {
+                    if (kVerifyProbes[p].frame == fight_frames) pending = &kVerifyProbes[p];
+                }
+            }
+            app.run_one_frame();
+            ++guard;
+            if (!fight_seen && app.screens().current_id() == kScreenFight) {
+                fight_seen = true;
+                fight_frames = 0;
+                std::fprintf(stdout, "[replay] fight screen up\n");
+                std::fflush(stdout);
+            } else if (fight_seen) {
+                ++fight_frames;
+                fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+                const int started = fs != nullptr ? fs->player_moves_started() : 0;
+                if (pending != nullptr && started > last_started) {
+                    const std::string dec = fs->player_last_decision();
+                    const bool pass =
+                        pending->substring
+                            ? dec.find(pending->expect) != std::string::npos
+                            : dec == std::string("input:") + pending->expect;
+                    std::fprintf(stdout, "[verify] %s -> %s (F%d) expect=%s %s\n",
+                                 pending->label, dec.c_str(), fight_frames, pending->expect,
+                                 pass ? "PASS" : "FAIL");
+                    std::fflush(stdout);
+                    pending = nullptr;
+                } else if (pending != nullptr && pending->window > 0 &&
+                           fight_frames > pending->frame + pending->window) {
+                    const bool expect_none = pending->expect[0] == '<';
+                    std::fprintf(stdout, "[verify] %s -> (no move) (F%d) expect=%s %s\n",
+                                 pending->label, fight_frames, pending->expect,
+                                 expect_none ? "PASS" : "FAIL");
+                    std::fflush(stdout);
+                    pending = nullptr;
+                }
+                last_started = started;
+            }
+            if (fight_seen && fight_frames > last_frame + 40) break;
+        }
+        // Escape closes the Settings dialog (JS `od.aa` L1895 `Db(156)`
+        // applied to `un extends od` L1916). Push Settings over the fight,
+        // inject Escape, confirm it popped.
+        {
+            app.screens().push(make_screen(app.screens(), kScreenSettings));
+            const int before = app.screens().current_id();
+            app.inject_key(256, true);
+            const int after = app.screens().current_id();
+            const bool ok = before == kScreenSettings && after != kScreenSettings;
+            std::fprintf(stdout, "[verify] Escape closes Settings: id %d -> %d %s\n", before,
+                         after, ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
         }
         app.shutdown();
         return 0;

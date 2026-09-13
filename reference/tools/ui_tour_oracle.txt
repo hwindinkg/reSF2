@@ -1,26 +1,32 @@
-# UI tour probe v1 (oracle): boot to tutorial fight, screenshot, then probe
-# hub-button spots to discover reachable states. Generous load waits
-# (asset loader is slow; boot2 showed Loading 43% at ~20s).
-wait 60000
-shot tut_fight
-# Joystick drag right (tutorial step 1 = MOVE): press-drag-release via taps.
-tap 150 590
+# Canonical oracle fidelity tour (phase1 step9).
+# Requires the post-tutorial seed: reference/runner/index.html installs a
+# Tutorial="END" savegame before boot (ORACLE_POST_TUTORIAL = true). Without it
+# the game boots into the blocking tutorial and the hub is unreachable.
+#
+# Reached/emitted here: dojo_hub, dojo_menu_open, map_zone1, fight_intro,
+# fight_stance, fight_attack, fight_hit.
+# The other hub destinations (Shop / Profile / Settings) have no in-game route
+# back to the dojo nav, so they use short one-destination tours documented in
+# reference/traces/oracle_matrix/MANIFEST.md.
+#
+# Run from the repo root:
+#   shell\bin\Release\net9.0-windows\OracleShell.exe --input-script reference/tools/ui_tour_oracle.txt --timeout-ms 42000
+wait 8000
+shot dojo_hub
+tap 180 98
 wait 1500
-tap 250 590
-wait 1500
-shot tut_move
-# Punch button (fist icon lower-right ~1150,490 in boot.png).
-tap 1150 490
+shot dojo_menu_open
+tap 140 250
 wait 2500
-shot tut_punch
-# Kick button (~1070,590).
-tap 1070 590
-wait 2500
-shot tut_kick
-# Probe hub spots (likely dead in fight, screenshots tell).
-tap 589 518
+shot map_zone1
+tap 1130 580
+wait 9000
+shot fight_intro
+wait 5000
+shot fight_stance
 wait 3000
-shot probe_map_spot
-tap 819 518
-wait 3000
-shot probe_shop_spot
+tap 1135 540
+wait 1200
+shot fight_attack
+wait 1200
+shot fight_hit

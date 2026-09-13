@@ -184,49 +184,95 @@ void Fighter::build_move_list_locks(
               [](const MoveDef* a, const MoveDef* b) { return a->priority > b->priority; });
 }
 
-void Fighter::age_keys() {
-    // JS `zl.ia` (L798): after 30 frames the tap buffer is cleared.
-    if (tap_age_ > 0) {
-        ++tap_age_;
-        if (tap_age_ > 30) {
-            tap_age_ = 0;
-            for (auto it = keys_.begin(); it != keys_.end();) {
-                if (it->press == press_type::tap) it = keys_.erase(it);
-                else ++it;
-            }
-        }
+// JS `zl.yLa` (L799): `zg.Fh` = a Hold for every currently-down key
+// (`Ff[].sl`). Rebuilt from the physical held set each tick/press.
+void Fighter::rebuild_holds() {
+    for (auto it = keys_.begin(); it != keys_.end();) {
+        if (it->press == press_type::hold) it = keys_.erase(it);
+        else ++it;
     }
+    for (const key_type k : held_keys_) keys_.push_back({k, press_type::hold});
 }
 
-// JS `Kl.Sgb` (L798): press buffers the key as a Tap and marks Hold.
-// `Xgb` (L799) removes it from Hold on release.
-void Fighter::input(sf2::scene::key_type key, sf2::scene::press_type press) {
-    key_input ki{key, press};
-    // Replace an existing entry for the same key (Tap replaces Tap).
-    for (auto& k : keys_) {
-        if (k.key == key && k.press == press) {
-            k = ki;
-            return;
-        }
-    }
-    keys_.push_back(ki);
-    // Tap also implies Hold is active (JS `zl.yLa` L799 builds Hold from
-    // the pressed keys).
-    if (press == press_type::tap) {
-        tap_age_ = 1;
-        bool held = false;
-        for (const auto& k : keys_) {
-            if (k.key == key && k.press == press_type::hold) held = true;
-        }
-        if (!held) keys_.push_back({key, press_type::hold});
-    }
-    if (press == press_type::release) {
-        // Remove the hold.
+void Fighter::age_keys() {
+    // JS `zl.ia` (L798):
+    //   Qe==30 -> zg.clear() (drop holds + releases), Qe=0;
+    //   dX>=15 -> dX=0, zg.sh.length=0 (drop the Tap sequence);
+    //   yLa(); dX++; Qe++.
+    if (hold_age_ == 30) {
         for (auto it = keys_.begin(); it != keys_.end();) {
-            if (it->key == key && it->press == press_type::hold) it = keys_.erase(it);
+            if (it->press == press_type::hold || it->press == press_type::release)
+                it = keys_.erase(it);
+            else ++it;
+        }
+        hold_age_ = 0;
+    }
+    if (tap_age_ >= 15) {
+        tap_age_ = 0;
+        for (auto it = keys_.begin(); it != keys_.end();) {
+            if (it->press == press_type::tap) it = keys_.erase(it);
             else ++it;
         }
     }
+    rebuild_holds();  // yLa()
+    ++tap_age_;       // dX++
+    ++hold_age_;      // Qe++
+}
+
+// JS `zl.Sgb` (L798): on a key-down edge append the key to the 2-slot Tap
+// sequence `zg.sh` (NO same-key replacement — two taps of one key are two
+// entries, which is what the `2key`/`3key` templates require), evicting the
+// oldest past 2, then rebuild `zg.Fh` from the down keys. `zl.Xgb` (L799)
+// on release drops the hold and records the release only when the key was
+// never tapped (`!zg.sh.includes(index)`).
+void Fighter::input(sf2::scene::key_type key, sf2::scene::press_type press) {
+    if (press == press_type::tap) {
+        keys_.push_back({key, press_type::tap});
+        int taps = 0;
+        for (const key_input& k : keys_) {
+            if (k.press == press_type::tap) ++taps;
+        }
+        while (taps > 2) {
+            for (auto it = keys_.begin(); it != keys_.end(); ++it) {
+                if (it->press == press_type::tap) {
+                    keys_.erase(it);
+                    break;
+                }
+            }
+            --taps;
+        }
+        tap_age_ = 0;            // `this.dX=0`
+        held_keys_.insert(key);  // `a.sl=!0`
+        rebuild_holds();         // `yLa()`
+    } else if (press == press_type::hold) {
+        held_keys_.insert(key);
+        rebuild_holds();
+    } else {  // release (JS `zl.Xgb`)
+        bool in_taps = false;
+        for (const key_input& k : keys_) {
+            if (k.key == key && k.press == press_type::tap) in_taps = true;
+        }
+        const bool was_held = held_keys_.erase(key) != 0;
+        rebuild_holds();
+        if (!in_taps && was_held) keys_.push_back({key, press_type::release});
+    }
+}
+
+// Test/trace accessors (no behavior change).
+int Fighter::buffered_tap_count() const {
+    int n = 0;
+    for (const key_input& k : keys_) {
+        if (k.press == press_type::tap) ++n;
+    }
+    return n;
+}
+
+int Fighter::buffered_hold_count() const {
+    int n = 0;
+    for (const key_input& k : keys_) {
+        if (k.press == press_type::hold) ++n;
+    }
+    return n;
 }
 
 // JS `jc.c7a` (L691): an interval is active when

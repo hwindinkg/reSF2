@@ -656,10 +656,20 @@ void App::poll_input() {
     // GLFW key keeps its OWN held edge: binding two keys to one action must
     // not make them share a flag (that emitted a phantom release of the
     // partner every frame while either was held — see `fight_keys_down_`).
+    //
+    // The polled set must deliver EVERY key the JS key map can produce plus
+    // the shell's non-fight keys (JS `Gz` L24 builds `Os.v` with Space/
+    // Escape/Enter/arrows; `Za.bbb` L456 wires the keydown/keyup). The old
+    // set omitted Escape(256)/P(80)/Enter(257)/O(79)/Q(81) and carried a
+    // non-JS `B` — a pressed key that is never polled delivers no edge at
+    // all. The JS fight controls are `sc.OD` (`Af.oUa` L2472): A/S/D/W +
+    // K/L/O/P/J/Q (no B).
     static const int kFightKeys[] = {
+        GLFW_KEY_ESCAPE, GLFW_KEY_ENTER,
         GLFW_KEY_A, GLFW_KEY_LEFT, GLFW_KEY_D, GLFW_KEY_RIGHT,
         GLFW_KEY_W, GLFW_KEY_UP, GLFW_KEY_S, GLFW_KEY_DOWN,
-        GLFW_KEY_SPACE, GLFW_KEY_J, GLFW_KEY_L, GLFW_KEY_K, GLFW_KEY_B,
+        GLFW_KEY_SPACE, GLFW_KEY_J, GLFW_KEY_K, GLFW_KEY_L,
+        GLFW_KEY_O, GLFW_KEY_P, GLFW_KEY_Q,
     };
     for (const int glfw_key : kFightKeys) {
         const bool now_down = glfwGetKey(renderer_->window(), glfw_key) == GLFW_PRESS;

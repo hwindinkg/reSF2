@@ -95,6 +95,10 @@ struct FightContext {
     // --- buffered keys (JS `Ae.keys` = zd) -------------------------------
     std::vector<key_input> keys;
     bool keys_gm = false;  // `Ae.gm`: "hold mode" — if set, only Held keys match
+    // `Ae.keys.S1` (JS `zd.S1`): the move-executing flag `Ykb` sets when a
+    // move starts (`a.S1=!0` L499). `vm.he` (L749) picks the normal key list
+    // when `S1 || Wl>0`, else the direction-reversed `TDa`.
+    bool keys_s1 = false;
 
     // --- items (Weapon/Item/Player conditions) ---------------------------
     // Each item: (type, subtype, name).
