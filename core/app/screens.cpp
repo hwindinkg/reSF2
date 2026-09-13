@@ -3446,6 +3446,20 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
                     tmpl_attrs[a.name()] = a.value();
                 }
             }
+            // The template `<Items>` (JS `rkb` clone + `pGa` merge): the
+            // Warrior inherits the equipped set from its `<Template>` chain
+            // (BOSS_LYNX Fight 1 is `<Warrior Template="Man_Kunai" .../>` with
+            // no own <Items>; the kit lives on `<Template Name="Man_Kunai">`,
+            // stages.xml L24400-24405). Base-first so the derived template's
+            // item wins when bucketed by type (see fighter_model_names).
+            for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+                for (const pugi::xml_node node :
+                     templates[*it].child("Items").children("Item")) {
+                    if (const pugi::xml_attribute nm = node.attribute("Name")) {
+                        out.items.emplace_back(nm.value());
+                    }
+                }
+            }
         }
         // The Warrior's own attrs win over the inherited template ones.
         for (const auto& kv : tmpl_attrs) out.attrs.emplace(kv.first, kv.second);
@@ -3511,6 +3525,49 @@ std::vector<std::pair<std::string, std::string>> owned_items(App& app) {
     out.emplace_back("Skeleton", "Skeleton");
     // The default Fists (the unarmed weapon subtype).
     out.emplace_back("Weapon", "Fists");
+    return out;
+}
+
+// JS `xc.cM` (L809-810): the fighter's model-name list, in the exact slot
+// order the game emits. The equipped items are bucketed by their list.xml
+// `Type` into the typed slots (JS `Fd` L808 / `hk` L809: Of=Skeleton,
+// Hd=Weapon, hg=Armor, Lg=Helm; `I.e7="Decorate"` L2473 -> the `Kv` extras),
+// then each slot's `<Item Model>` attribute is emitted: Of, Hd, hg, Lg, Kv.
+// One item per slot, last-in wins (JS `hk` overwrites the slot). Every
+// returned string is a models.dat archive entry name (e.g. WEAPON_KUNAI ->
+// `mdl_weapon_kunai`, list.xml L1819).
+std::vector<std::string> fighter_model_names(
+    App& app, const std::vector<std::string>& item_names) {
+    const std::vector<CatalogItem> catalog = load_full_catalog(app);
+    const auto find = [&catalog](const std::string& name) -> const CatalogItem* {
+        for (const CatalogItem& ci : catalog) {
+            if (ci.name == name) return &ci;
+        }
+        return nullptr;
+    };
+    const CatalogItem* skeleton_it = nullptr;
+    const CatalogItem* weapon_it = nullptr;
+    const CatalogItem* armor_it = nullptr;
+    const CatalogItem* helm_it = nullptr;
+    std::vector<std::string> extras;
+    for (const std::string& name : item_names) {
+        if (name.empty()) continue;
+        const CatalogItem* ci = find(name);
+        if (ci == nullptr) continue;
+        if (ci->type == "Skeleton") skeleton_it = ci;
+        else if (ci->type == "Weapon") weapon_it = ci;
+        else if (ci->type == "Armor") armor_it = ci;
+        else if (ci->type == "Helm") helm_it = ci;
+        else if (ci->type == "Decorate") extras.push_back(ci->model);
+    }
+    const auto model_of = [](const CatalogItem* ci) {
+        return ci != nullptr ? ci->model : std::string();
+    };
+    std::vector<std::string> out = {model_of(skeleton_it), model_of(weapon_it),
+                                    model_of(armor_it), model_of(helm_it)};
+    for (const std::string& e : extras) {
+        if (!e.empty()) out.push_back(e);
+    }
     return out;
 }
 
@@ -5188,30 +5245,76 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     }
     battle.enemy_not_ai = bw.has_not_ai;
     battle.enemy_not_animation = bw.has_not_animation;
-    // JS `xc.cM`: the enemy renders its OWN equipment model. Only the
-    // NotAnimation Punchbag dummy has a distinct model here (`merged_bag`,
-    // the 15-bone bag the hub loads); every other warrior keeps `merged`.
-    const sf2::scene::Model* enemy_model =
-        (battle.enemy_not_animation && !assets.merged_bag.bones.empty())
-            ? &assets.merged_bag
-            : nullptr;
+    // JS `xc.cM` L809-810: each warrior is built from its OWN equipment
+    // (Skeleton + Weapon + Armor + Helm `Model` list -> `Yc.load` L568 merges
+    // them into ONE bone hierarchy, skeleton first). Resolve the PLAYER from
+    // the save's typed slots and the ENEMY from its stages.xml
+    // `<Warrior>/<Template>` <Items> (a boss gears up via the template:
+    // Man_Kunai -> mdl_skeleton + mdl_weapon_kunai + mdl_body_shin +
+    // mdl_helm_green_mask). A resolved skeleton is required (clip bone i =
+    // merged bone i); when a side resolves to nothing the shared base model
+    // (`assets.merged`) is kept (OPEN -> base body).
+    sf2::scene::Model player_model_storage;
+    sf2::scene::Model enemy_model_storage;
+    const sf2::scene::Model* player_model = nullptr;
+    const sf2::scene::Model* enemy_model = nullptr;
+    {
+        std::vector<std::string> player_items;
+        try {
+            const WarriorSave w = app().save().load();
+            player_items = {w.skeleton, w.weapon, w.armor, w.helm};
+        } catch (const std::exception&) {
+        }
+        const std::vector<std::string> pnames =
+            fighter_model_names(app(), player_items);
+        if (!pnames.empty() && !pnames[0].empty()) {  // skeleton slot present
+            player_model_storage = assets.merge_names(pnames);
+            if (!player_model_storage.bones.empty()) player_model = &player_model_storage;
+        }
+        if (battle.enemy_not_animation && !assets.merged_bag.bones.empty()) {
+            // The NotAnimation Punchbag dummy keeps its own model (its <Items>
+            // are PunchingBag/SkeletonPunchingBag; preserved RC-3 path).
+            enemy_model = &assets.merged_bag;
+        } else {
+            const std::vector<std::string> enames =
+                fighter_model_names(app(), bw.items);
+            if (!enames.empty() && !enames[0].empty()) {
+                enemy_model_storage = assets.merge_names(enames);
+                if (!enemy_model_storage.bones.empty()) enemy_model = &enemy_model_storage;
+            }
+        }
+        const sf2::scene::Model& pm =
+            player_model != nullptr ? *player_model : assets.merged;
+        const sf2::scene::Model& em =
+            enemy_model != nullptr ? *enemy_model : assets.merged;
+        std::fprintf(stdout,
+                     "[fight] fighter models: player=%s %zu bones/%zu tris; "
+                     "enemy=%s %zu bones/%zu tris\n",
+                     player_model != nullptr ? "gear" : "base", pm.bones.size(),
+                     pm.resolved_tris.size(),
+                     enemy_model == &assets.merged_bag
+                         ? "bag"
+                         : (enemy_model != nullptr ? "gear" : "base"),
+                     em.bones.size(), em.resolved_tris.size());
+        std::fflush(stdout);
+    }
     const std::string& enemy_name = app().pending_battle().enemy_name;
     fight_->init_locks(battle, assets.merged, assets.moves, assets.clips,
                        assets.tactics_sets, tactic, "Player", enemy_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
                        battle.max_hp, battle.max_hp, {},
-                       owned, equipped_perks(app(), assets), nullptr, enemy_model);
+                       owned, equipped_perks(app(), assets), nullptr,
+                       player_model, enemy_model);
     fight_->set_seed(fight_seed);  // JS `Da.pg=new Rk(L.seed)` (L67)
     // [Phase 1 step 9] The resolved stage Warrior (JS `ur` L186-195) and the
     // input it feeds: the NotAI/NotAnimation gates, the player's resolved
     // UnarmedDamage and the location-sourced spawns.
     std::fprintf(stdout,
-                 "[fight] warrior first='%s' not_ai=%d not_animation=%d enemy_model=%s "
+                 "[fight] warrior first='%s' not_ai=%d not_animation=%d "
                  "unarmed=%.2f spawn P=(%.0f,%.0f) E=(%.0f,%.0f) hp=%d\n",
                  bw.first_name.c_str(), battle.enemy_not_ai ? 1 : 0,
                  battle.enemy_not_animation ? 1 : 0,
-                 enemy_model != nullptr ? "merged_bag" : "merged",
                  battle.player_unarmed_damage, battle.player_spawn_x, battle.player_spawn_y,
                  battle.enemy_spawn_x, battle.enemy_spawn_y, battle.max_hp);
     std::fflush(stdout);

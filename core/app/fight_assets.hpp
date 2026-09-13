@@ -22,6 +22,7 @@
 #include "scene/model.hpp"
 #include "scene/move_def.hpp"
 #include "scene/trigger.hpp"
+#include "xml_archive.hpp"
 
 namespace sf2::scene {
 class Fighter;
@@ -58,6 +59,46 @@ struct FightAssets {
     sf2::scene::Model bag_skeleton;
     sf2::scene::Model bag_body;
     sf2::scene::Model merged_bag;
+
+    // Retained models.dat entries + the parsed part cache (filled by app.cpp).
+    // A fight builds each warrior's model from its OWN equipment (JS `xc.cM`
+    // L809-810 -> `wd.Erb` L496 -> `Yc.load` L568): the list.xml `<Item
+    // Model>` attribute is the archive entry name (e.g. WEAPON_KUNAI ->
+    // `mdl_weapon_kunai`, BODY_SHIN -> `mdl_body_shin`). Parts are parsed once
+    // and shared across fighters.
+    std::vector<sf2::data::archive_entry> model_archive;
+    std::map<std::string, sf2::scene::Model> model_cache;
+
+    // Parses (once) + returns the model for an archive entry name, or
+    // nullptr when the archive has no such entry (JS `Yc.parse` on a name
+    // that is not in models.dat) — the caller then keeps the base body.
+    const sf2::scene::Model* load_part(const std::string& model_name) {
+        const auto it = model_cache.find(model_name);
+        if (it != model_cache.end()) return &it->second;
+        for (const sf2::data::archive_entry& e : model_archive) {
+            if (e.name != model_name) continue;
+            return &model_cache
+                        .emplace(model_name,
+                                 sf2::scene::model_parse(e.data.data(), e.data.size()))
+                        .first->second;
+        }
+        return nullptr;
+    }
+
+    // Merges an ordered model-name list into one fighter body (JS `Yc.load`
+    // L568 loop over `xc.cM`'s list: skeleton first, then weapon/armor/helm;
+    // first-definition-wins on shared bone names so clip indices stay valid
+    // for the skeleton). Empty/unknown names are skipped (that part is simply
+    // not worn).
+    sf2::scene::Model merge_names(const std::vector<std::string>& names) {
+        std::vector<sf2::scene::Model> parts;
+        for (const std::string& n : names) {
+            if (n.empty()) continue;
+            const sf2::scene::Model* p = load_part(n);
+            if (p != nullptr) parts.push_back(*p);
+        }
+        return sf2::scene::build_fighter_model(parts);
+    }
 
     // The shared data (JS `G.data`).
     std::map<std::string, sf2::data::anim_clip> clips;

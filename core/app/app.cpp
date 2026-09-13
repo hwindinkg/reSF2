@@ -544,6 +544,13 @@ bool App::init(const std::string& res_root, const std::string& save_path,
         fight_assets_->weapon = sf2::scene::Model{};
         fight_assets_->armor = sf2::scene::Model{};  // Body default
         fight_assets_->helm = sf2::scene::Model{};   // Head default
+        // Retain the models archive + seed the part cache (no re-parse) so a
+        // fight can build each warrior's OWN equipment model (JS `xc.cM`
+        // L809-810 -> `Yc.load` L568); see FightAssets::merge_names.
+        fight_assets_->model_archive = models;
+        fight_assets_->model_cache.emplace("mdl_skeleton", fight_assets_->skeleton);
+        fight_assets_->model_cache.emplace("mdl_body", fight_assets_->body);
+        fight_assets_->model_cache.emplace("mdl_head", fight_assets_->head);
         fight_assets_->rebuild_merged();
 
         // The Punchbag dummy merge (hub display only — see FightAssets).
@@ -554,6 +561,10 @@ bool App::init(const std::string& res_root, const std::string& save_path,
             fight_assets_->bag_body = load_model("mdl_punching_bag");
             fight_assets_->merged_bag = sf2::scene::build_fighter_model(
                 {fight_assets_->bag_skeleton, fight_assets_->bag_body});
+            fight_assets_->model_cache.emplace("mdl_skeleton_punching_bag",
+                                               fight_assets_->bag_skeleton);
+            fight_assets_->model_cache.emplace("mdl_punching_bag",
+                                               fight_assets_->bag_body);
             // The bag's COM (== the top-mount Node12, bind Y=+335) is 226
             // units above its NPivot (Y=+109). `Fighter::sample` now anchors
             // on the model's PivotNode bone (Wave U general fix), so the bag

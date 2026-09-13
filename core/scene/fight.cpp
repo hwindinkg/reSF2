@@ -226,6 +226,7 @@ void FightController::init_locks(
     const std::vector<std::pair<std::string, std::string>>& player_owned,
     const PerkSetup& perks,
     std::function<void(int)> reseed01,
+    const sf2::scene::Model* player_model,
     const sf2::scene::Model* enemy_model) {
     battle_ = battle;
     prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
@@ -243,10 +244,11 @@ void FightController::init_locks(
     random_pick_done_ = false;
 
     player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp,
-                           "Fists", player_owned);
+                           "Fists", player_owned, false, false, player_model);
     // JS `ur` L194-195 gates the enemy: NotAI -> no AiController, and
-    // NotAnimation -> no animation attach (bind pose). The enemy also gets
-    // its OWN model (the Punchbag's `merged_bag`) when supplied.
+    // NotAnimation -> no animation attach (bind pose). Each side also renders
+    // its OWN equipment model (JS `xc.cM` L809-810; the Punchbag dummy's
+    // `merged_bag`, the boss's gear model).
     enemy_ = make_fighter(enemy_name, false, enemy_x, enemy_y, enemy_max_hp, "Fists", {},
                           battle.enemy_not_ai, battle.enemy_not_animation, enemy_model);
     // [FIX Phase 4b — manual control] The player is MANUAL: no AiController,

@@ -1168,11 +1168,13 @@ public:
                     // (`Da.pg` analog). See `rules_begin_round` (`cl.pmb`).
                     // nullptr = leave the stream untouched.
                     std::function<void(int)> reseed01 = nullptr,
-                    // The enemy's own merged model (JS `xc.cM` rebuilds each
-                    // warrior from its OWN equipment). nullptr = the shared
-                    // `model` (the player's); the dojo Punchbag passes
-                    // `assets.merged_bag` (its <Items> = PunchingBag +
-                    // SkeletonPunchingBag, stages.xml L14-15).
+                    // Each fighter's OWN merged model (JS `xc.cM` rebuilds
+                    // every warrior from its OWN equipment -> `Yc.load`).
+                    // nullptr = the shared `model` for that side. The dojo
+                    // Punchbag passes `assets.merged_bag` as `enemy_model`
+                    // (its <Items> = PunchingBag + SkeletonPunchingBag,
+                    // stages.xml L14-15).
+                    const sf2::scene::Model* player_model = nullptr,
                     const sf2::scene::Model* enemy_model = nullptr);
 
     // Seeds the OWNED fight stream (JS `Da.pg=new Rk(L.seed)`, L67). Every
