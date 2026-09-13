@@ -347,6 +347,29 @@ public:
     void default_camera(sf2::render::Camera& camera, float view_w, float view_h,
                         float focus_x = -1.0f, float fighter_span = -1.0f) const;
 
+    // JS `ma.Tya` (L1832): the DESTINATION-screen camera (Shop `Oa` L2293,
+    // Profile `vb` L2195 — both call `this.Tya(this.Ad)`). This is NOT the
+    // fight/hub `ma.Sya` camera: the zoom is `view_h/1152` (0.625 @720p) with
+    // an ultra-wide correction, and the camera y gets a positive offset when
+    // the aspect exceeds 1.7 (`Tya` L1832 `e.y = ((c<1.7?1.7:c>2.2?2.2:c)
+    // -1.7)/.5*200`). It is a pure scale+translate (no `Ut.Al`, no parallax):
+    //   lc = view_w/view_h;  d = view_h/1152
+    //   lc <= 1 : d *= min(lc, 1);                     center = (0, 0)
+    //   lc >  1 : d += t*0.2 only when lc > 1.7,
+    //             t = (clamp(lc,1.7,2.2) - 1.7)/0.5;    center_y = t*200
+    //   zoom = d;  center_x = 0;  arena_center_x = Io = 0
+    // The `a.bla(...)` call in `Tya` moves the scene's MODEL layer node
+    // (`Pi.Lb.hn`, `Pi.bla` L440), NOT the camera — see
+    // `destination_model_offset_x`.
+    static void destination_camera(sf2::render::Camera& camera, float view_w, float view_h);
+
+    // JS `Pi.bla` (L440) under `ma.Tya` (L1832): the destination model layer
+    // node `hn` gets `translate.x = -200 + blarg`, `translate.y = 412`, and
+    // `hn` itself carries `scale = 1.8` (`Pi` ctor L439). `blarg`:
+    //   lc <= 1 : -100            (Tya L1832 `c<=1 ? -100`)
+    //   lc >  1 : -300*(clamp(lc,1,2) - 1)
+    static float destination_model_offset_x(float view_w, float view_h);
+
     // Advances time-animated scene elements: the SimpleEffect Transparency
     // `KWa` loop, the OscillationX/Y / ReappearX/Y / Speed / Rotation modifier
     // block, and the `Sequention` frame timeline (JS `xl.ia` L1138-1140,

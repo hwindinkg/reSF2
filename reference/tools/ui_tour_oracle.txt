@@ -1,16 +1,22 @@
-# Canonical oracle fidelity tour (phase1 step9).
+# Canonical oracle fidelity tour (phase1 step9), extended for pause/results in
+# the SAME battle the port's fight states use: the ZONE_1 BOSS_LYNX battle
+# (ТЕНЬ vs ШИН, moonlit rooftops), reached dojo -> Map -> Рысь "В БОЙ".
+# Reached/emitted here: dojo_hub, dojo_menu_open, map_zone1, fight_intro,
+# fight_stance, fight_attack, fight_hit, pause, results_a..e.
+#
 # Requires the post-tutorial seed: reference/runner/index.html installs a
 # Tutorial="END" savegame before boot (ORACLE_POST_TUTORIAL = true). Without it
 # the game boots into the blocking tutorial and the hub is unreachable.
 #
-# Reached/emitted here: dojo_hub, dojo_menu_open, map_zone1, fight_intro,
-# fight_stance, fight_attack, fight_hit.
-# The other hub destinations (Shop / Profile / Settings) have no in-game route
-# back to the dojo nav, so they use short one-destination tours documented in
-# reference/traces/oracle_matrix/MANIFEST.md.
+# The pause dialog is the JS `Dr` dialog opened by the fight HUD pause disc
+# (627,125); its play button (884,390) resumes. The fight is vs a passive
+# opponent: with no KO the rounds end on the 99s timer and `ca.E3a` (timeout
+# branch, c==3) awards the round to the enemy, so the 2-round fight ends in the
+# `kk` "You lose!" results screen (over the moon scene). The results_a..e probes
+# bracket that arrival (a shot every 7-8s from just before it).
 #
-# Run from the repo root:
-#   shell\bin\Release\net9.0-windows\OracleShell.exe --input-script reference/tools/ui_tour_oracle.txt --timeout-ms 42000
+# Run from the reference/traces directory (so `shot` lands in reference/traces/ui):
+#   shell\bin\Release\net9.0-windows\OracleShell.exe --input-script reference/tools/ui_tour_oracle.txt --timeout-ms 300000
 wait 8000
 shot dojo_hub
 tap 180 98
@@ -30,3 +36,20 @@ wait 1200
 shot fight_attack
 wait 1200
 shot fight_hit
+tap 627 125
+wait 1800
+shot pause
+tap 884 390
+wait 1800
+# The `kk` results screen arrives ~228s after "В БОЙ" (2 timed rounds); probe
+# from just before arrival through the settled screen (rows slide in ~2s).
+wait 195000
+shot results_a
+wait 7000
+shot results_b
+wait 7000
+shot results_c
+wait 8000
+shot results_d
+wait 8000
+shot results_e

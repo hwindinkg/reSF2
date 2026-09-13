@@ -1116,6 +1116,41 @@ void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
     }
 }
 
+// JS `ma.Tya` (L1832): the destination-screen camera. See the header note.
+void LocationScene::destination_camera(sf2::render::Camera& camera, float view_w,
+                                       float view_h) {
+    camera.view_w = view_w;
+    camera.view_h = view_h;
+    const float lc = view_h > 0.0f ? view_w / view_h : 16.0f / 9.0f;
+    float d = view_h / 1152.0f;  // `Tya` L1832: d = N.height/1152
+    float center_y = 0.0f;
+    if (lc <= 1.0f) {
+        // `Tya` L1832 `if(c<=1) a.bla(-100), d*=min(c,1)` — the bla moves the
+        // model node (see destination_model_offset_x); only d is the camera.
+        d *= std::min(lc, 1.0f);
+    } else if (lc > 1.7f) {
+        // `Tya` L1832 ultra-wide branch: `d += ((c<1.7?1.7:c>2.2?2.2:c)-1.7)
+        // /.5*.2` and `position.y = ((...)-1.7)/.5*200`.
+        const float t = (std::max(1.7f, std::min(2.2f, lc)) - 1.7f) / 0.5f;
+        d += t * 0.2f;
+        center_y = t * 200.0f;
+    }
+    camera.zoom = d;
+    camera.center_x = 0.0f;
+    camera.center_y = center_y;
+    // `Tya` never runs `Ut.Al`, so there is no per-frame parallax: Io = 0.
+    camera.arena_center_x = 0.0f;
+    camera.layer_zoom = 1.0f;
+}
+
+float LocationScene::destination_model_offset_x(float view_w, float view_h) {
+    const float lc = view_h > 0.0f ? view_w / view_h : 16.0f / 9.0f;
+    if (lc <= 1.0f) {
+        return -300.0f;  // `bla(-100)` -> -200 + (-100)
+    }
+    return -200.0f + (-300.0f * (std::min(2.0f, std::max(1.0f, lc)) - 1.0f));
+}
+
 void LocationScene::update(float dt) {
     // SimpleEffect Transparency loop (JS `bkb` L478-481 + `xl.ia` L1139 +
     // `zh` L1144-1146): each key's Value (percent) is reached `Period`

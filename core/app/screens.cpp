@@ -3840,15 +3840,20 @@ std::string find_idle_clip_name(
 // the fight screen's file-local twin (capsule `zu`/`Dk` strip, stroke =
 // Radius1*2 — JS_RENDER §4): kept as a separate helper so the fight render
 // path is untouched. `fighter` must already hold a sampled pose.
+// Projects a posed fighter through `camera`. `model_scale`/`offset_*` emulate
+// a parent node transform the fighter is nested under (JS `Pi.Lb.hn`, L439:
+// `scale=1.8`, `translate=(-200+bla,412)`): world = vert*model_scale + offset.
+// Defaults are the identity (the dojo hub draws the fighter at its spawn).
 void draw_dojo_figure(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
-                      const sf2::scene::Fighter& fighter) {
+                      const sf2::scene::Fighter& fighter, float model_scale = 1.0f,
+                      float offset_x = 0.0f, float offset_y = 0.0f) {
     const float r = fighter.color_r(), g = fighter.color_g(), b = fighter.color_b();
     std::vector<float> verts;
     fighter.build_vertices(verts);
     std::vector<float> pv(verts.size());
     for (std::size_t i = 0; i < verts.size(); i += 2) {
-        pv[i] = camera.world_to_screen_x(verts[i], 1.0f);
-        pv[i + 1] = camera.world_to_screen_y(verts[i + 1]);
+        pv[i] = camera.world_to_screen_x(verts[i] * model_scale + offset_x, 1.0f);
+        pv[i + 1] = camera.world_to_screen_y(verts[i + 1] * model_scale + offset_y);
     }
     if (!pv.empty()) {
         ren.draw_triangles(pv.data(), pv.size() / 2, r, g, b, 1.0f);
@@ -3880,12 +3885,12 @@ void draw_dojo_figure(sf2::render::Renderer& ren, const sf2::render::Camera& cam
         const std::size_t u1 = static_cast<std::size_t>(i1) * 2;
         const std::size_t u2 = static_cast<std::size_t>(i2) * 2;
         if (u1 + 1 >= pos.size() || u2 + 1 >= pos.size()) continue;
-        const float stroke = kv.second * 2.0f * camera.zoom;
+        const float stroke = kv.second * 2.0f * model_scale * camera.zoom;
         if (stroke <= 0.0f) continue;
-        const float sx1 = camera.world_to_screen_x(pos[u1], 1.0f);
-        const float sy1 = camera.world_to_screen_y(pos[u1 + 1]);
-        const float sx2 = camera.world_to_screen_x(pos[u2], 1.0f);
-        const float sy2 = camera.world_to_screen_y(pos[u2 + 1]);
+        const float sx1 = camera.world_to_screen_x(pos[u1] * model_scale + offset_x, 1.0f);
+        const float sy1 = camera.world_to_screen_y(pos[u1 + 1] * model_scale + offset_y);
+        const float sx2 = camera.world_to_screen_x(pos[u2] * model_scale + offset_x, 1.0f);
+        const float sy2 = camera.world_to_screen_y(pos[u2 + 1] * model_scale + offset_y);
         float dx = sx2 - sx1;
         float dy = sy2 - sy1;
         const float len = std::sqrt(dx * dx + dy * dy);
@@ -3918,6 +3923,131 @@ void draw_dojo_figure(sf2::render::Renderer& ren, const sf2::render::Camera& cam
         draw_disc(sx1, sy1);
         draw_disc(sx2, sy2);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Destination-screen backdrop (Shop `Oa` L2289 / Profile `vb` L2192).
+//
+// The JS `Pi` scene (`this.Ad`) renders a single full-bleed backdrop sprite
+// `Pi.Qa = R.$(E.get(752))` (L439) framed by `ma.Tya` (L1832). `E.get(752)`
+// resolves through the client manifest `G.rq[752]` (L2490) to
+// `locations/dojo_shop/bg.{image}` — a dedicated 2048x1152 destination
+// background (NOT the dojo location layers). It is decoded once and
+// registered as the whole-texture frame `dojo_shop_bg`.
+// ---------------------------------------------------------------------------
+
+bool load_dojo_shop_bg(App& app) {
+    static bool done = false;
+    static bool ok = false;
+    if (done) return ok;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/locations/dojo_shop";
+        for (const std::string& ext : {".webp", ".png", ".ktx", ".dds"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("bg.", 0) != 0 || entry.path().extension() != ext) continue;
+                sf2::data::Texture tex;
+                if (!sf2::data::decode_texture(entry.path().string(), tex)) continue;
+                const GLuint gl = app.renderer().texture_for("dojo_shop_bg", tex);
+                if (gl == 0) continue;
+                sf2::data::atlas_frame bf;
+                bf.name = "dojo_shop_bg";
+                bf.x = 0;
+                bf.y = 0;
+                bf.w = tex.w;
+                bf.h = tex.h;
+                bf.source_w = tex.w;
+                bf.source_h = tex.h;
+                app.register_atlas_frame(bf, tex.w, tex.h, gl);
+                std::fprintf(stdout, "[shop] dojo_shop bg: %dx%d gl=%u\n", tex.w, tex.h, gl);
+                std::fflush(stdout);
+                ok = true;
+                return ok;
+            }
+        }
+        std::fprintf(stderr, "[shop] dojo_shop bg not found under %s\n", dir.c_str());
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[shop] dojo_shop bg load failed: %s\n", e.what());
+    }
+    return ok;
+}
+
+// Draws `Pi.Qa` at world (0,0) through `ma.Tya` (`Tya` L1832). The camera is a
+// pure scale+translate, so the whole 2048x1152 frame lands centred on the
+// projected world origin.
+void draw_destination_backdrop(App& app) {
+    if (!load_dojo_shop_bg(app)) return;
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame("dojo_shop_bg", &fr, &tw, &th, &gl)) return;
+    sf2::render::Camera cam;
+    sf2::scene::LocationScene::destination_camera(cam, kViewW, kViewH);
+    sf2::scene::Sprite s;
+    s.texture_name = "dojo_shop_bg";
+    s.frame_x = static_cast<float>(fr.x);
+    s.frame_y = static_cast<float>(fr.y);
+    s.frame_w = static_cast<float>(fr.w);
+    s.frame_h = static_cast<float>(fr.h);
+    s.tex_w = static_cast<float>(tw);
+    s.tex_h = static_cast<float>(th);
+    s.solid = false;
+    s.rotated = fr.rotated;
+    s.transform.set_pos(0.0f, 0.0f);
+    s.transform.set_scale(1.0f, 1.0f);
+    app.renderer().draw_sprite(s, cam);
+}
+
+// The `Pi` model node transform (`Pi` ctor L439 + `Pi.bla` L440 + `ma.Tya`
+// L1832): `hn.scale = 1.8`, `hn.translate = (destination_model_offset_x, 412)`.
+// The fighter's own container-local position is `Pi.J9 = (0,-93)` (L441).
+constexpr float kDestinationModelScale = 1.8f;
+constexpr float kDestinationModelY = 412.0f;
+constexpr float kDestinationModelLocalY = -93.0f;
+
+// The `Pi` model (`this.Jc`, a `wd` fighter at `Pi.Ca.position = J9 = (0,-93)`
+// L441) nested in `hn` (scale 1.8, translate (offset,412)). Its clip/model
+// source is the same player warrior + idle clip the dojo hub uses.
+void draw_destination_model(App& app, sf2::render::Renderer& ren,
+                            std::unique_ptr<sf2::scene::Fighter>& fighter,
+                            bool& tried, bool& ok, const sf2::data::anim_clip*& idle) {
+    if (!app.has_fight_assets()) return;
+    if (!tried) {
+        tried = true;
+        FightAssets& assets = app.fight_assets();
+        const std::string idle_name = find_idle_clip_name(assets.clips);
+        const auto it = idle_name.empty() ? assets.clips.end()
+                                          : assets.clips.find(idle_name);
+        if (!assets.merged.bones.empty() && it != assets.clips.end() &&
+            !it->second.frames.empty()) {
+            fighter = std::make_unique<sf2::scene::Fighter>();
+            fighter->set_model(assets.merged);
+            fighter->set_color(assets.dojo.root_color());
+            idle = &it->second;
+            ok = true;
+        }
+    }
+    if (!ok || fighter == nullptr || idle == nullptr || idle->frames.empty()) return;
+    sf2::render::Camera cam;
+    sf2::scene::LocationScene::destination_camera(cam, kViewW, kViewH);
+    fighter->sample(*idle, 0, 0.0f, kDestinationModelLocalY, 1);
+    draw_dojo_figure(ren, cam, *fighter, kDestinationModelScale,
+                     sf2::scene::LocationScene::destination_model_offset_x(kViewW, kViewH),
+                     kDestinationModelY);
+}
+
+// JS `Pi` ctor (L439): `this.W9 = Fc.Ed(1342177280, this.node.L)` — a
+// full-screen colour quad appended AFTER `Qa` (bg) and the model node, so it
+// dims the destination scene (bg + model) but sits under the screen UI.
+// `1342177280` = 0x50000000 -> `Na.Rv` (L1448) = black, alpha 0x50/255.
+// Measured on the oracle shop backdrop: oracle/port luminance = 0.688 =
+// 1 - 80/255, confirming the overlay.
+void draw_destination_dim(sf2::render::Renderer& ren) {
+    constexpr float kAlpha = 80.0f / 255.0f;
+    const float verts[] = {0, 0, kViewW, 0, 0, kViewH,
+                           kViewW, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(verts, 6, 0.0f, 0.0f, 0.0f, kAlpha);
 }
 
 DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
@@ -7755,74 +7885,15 @@ void ShopScreen::update_impl(float dt) {
 
 void ShopScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    // --- Backdrop: the persistent dojo location ----------------------------
-    // JS `Oa extends ma` (L2285): the shop is an overlay on the running dojo
-    // location, so the oracle shop captures show the dojo interior + the
-    // `FightNone` idle figure (PORT_AUDIT_UI §2.4). Same `assets.dojo` layer
-    // stack + `ma.Sya` hub framing the DojoScreen hub uses. OPEN: the exact
-    // shop camera (`ma.Tya` L1832 is driven by the `Pi` item viewer; its
-    // literal mapping onto the location layers is not statically resolved —
-    // the hub framing is the nearest cited fit).
-    sf2::render::Camera hub_cam;
-    bool have_hub_cam = false;
-    if (app.has_fight_assets()) {
-        FightAssets& assets = app.fight_assets();
-        const float half = assets.dojo.arena_width() * 0.5f;
-        const float player_x = assets.dojo.player_spawn_x() - half;
-        const float enemy_x = assets.dojo.enemy_spawn_x() - half;
-        const float focus_x = (player_x + enemy_x) * 0.5f + half;
-        const float fighter_span = std::fabs(enemy_x - player_x);
-        assets.dojo.default_camera(hub_cam, kViewW, kViewH, focus_x, fighter_span);
-        have_hub_cam = true;
-        ensure_dojo_location(app);
-        assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
-    } else {
-        const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH,
-                               0, 0, kViewW, kViewH, 0, kViewH};
-        ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
-    }
-    if (have_hub_cam) {
-        // Letterbox bars (JS `ma.Sya` L1833-1835) — no-op at 16:9.
-        draw_scene_letterbox(ren, hub_cam);
-        // The `FightNone` viewer's idle player figure at the location's
-        // ModelsViewer spawn (dojo 690,-93; `Bf.zjb` L476), projected through
-        // the same hub camera (identical to DojoScreen's aliveness block).
-        const float arena_half = app.has_fight_assets()
-                                     ? app.fight_assets().dojo.arena_width() * 0.5f
-                                     : 980.0f;
-        const float cont_y = app.has_fight_assets()
-                                 ? app.fight_assets().dojo.arena_height() * 0.5f -
-                                       app.fight_assets().dojo.arena_floor()
-                                 : 200.0f;
-        if (!backdrop_fig_tried_) {
-            backdrop_fig_tried_ = true;
-            if (app.has_fight_assets()) {
-                FightAssets& assets = app.fight_assets();
-                const std::string idle_name = find_idle_clip_name(assets.clips);
-                const auto it = idle_name.empty() ? assets.clips.end()
-                                                  : assets.clips.find(idle_name);
-                if (!assets.merged.bones.empty() && it != assets.clips.end() &&
-                    !it->second.frames.empty()) {
-                    backdrop_fighter_ = std::make_unique<sf2::scene::Fighter>();
-                    backdrop_fighter_->set_model(assets.merged);
-                    backdrop_fighter_->set_color(assets.dojo.root_color());
-                    backdrop_idle_ = &it->second;
-                    backdrop_fig_ok_ = true;
-                }
-            }
-        }
-        if (backdrop_fig_ok_ && backdrop_fighter_ != nullptr &&
-            backdrop_idle_ != nullptr && !backdrop_idle_->frames.empty()) {
-            const float spawn_x =
-                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_x() : 690.0f) -
-                arena_half;
-            const float spawn_y =
-                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_y() : -93.0f) +
-                cont_y;
-            backdrop_fighter_->sample(*backdrop_idle_, 0, spawn_x, spawn_y, 1);
-            draw_dojo_figure(ren, hub_cam, *backdrop_fighter_);
-        }
-    }
+    // --- Backdrop: the destination `dojo_shop` art (`Pi.Qa`, L439) ---------
+    // JS `Oa extends ma` (L2285): `this.Ad = new Pi` (L2291) and `Ea` calls
+    // `this.Tya(this.Ad)` (L2293). `Pi` renders `Qa = R.$(E.get(752))` =
+    // `locations/dojo_shop/bg.{image}` under `ma.Tya` (L1832) — a dedicated
+    // destination background, NOT the dojo location layers.
+    draw_destination_backdrop(app);
+    draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
+                           backdrop_fig_ok_, backdrop_idle_);
+    draw_destination_dim(ren);
 
     // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width
     // bar + `Le` buttons (id 248 shop atlas `buttons/<Category>[_active]`),
@@ -8784,71 +8855,15 @@ void EquipmentScreen::update_impl(float dt) {
 
 void EquipmentScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    // --- Backdrop: the persistent dojo location ----------------------------
-    // JS `vb extends ma` (L2189): the Profile is an overlay on the running
-    // dojo location, so the oracle `profile_tab*`/`moves` captures show the
-    // dojo interior + the `FightNone` idle figure (PORT_AUDIT_UI §2.5). Same
-    // `assets.dojo` layer stack + `ma.Sya` hub framing as the DojoScreen hub /
-    // ShopScreen `Oa`. Replaces the old `dojo_sprite` + flat dim (wrong art).
-    sf2::render::Camera hub_cam;
-    bool have_hub_cam = false;
-    if (app.has_fight_assets()) {
-        FightAssets& assets = app.fight_assets();
-        const float half = assets.dojo.arena_width() * 0.5f;
-        const float player_x = assets.dojo.player_spawn_x() - half;
-        const float enemy_x = assets.dojo.enemy_spawn_x() - half;
-        const float focus_x = (player_x + enemy_x) * 0.5f + half;
-        const float fighter_span = std::fabs(enemy_x - player_x);
-        assets.dojo.default_camera(hub_cam, kViewW, kViewH, focus_x, fighter_span);
-        have_hub_cam = true;
-        ensure_dojo_location(app);
-        assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
-    } else {
-        const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH,
-                               0, 0, kViewW, kViewH, 0, kViewH};
-        ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
-    }
-    if (have_hub_cam) {
-        draw_scene_letterbox(ren, hub_cam);
-        // The `FightNone` viewer idle figure (same block as ShopScreen).
-        const float arena_half = app.has_fight_assets()
-                                     ? app.fight_assets().dojo.arena_width() * 0.5f
-                                     : 980.0f;
-        const float cont_y = app.has_fight_assets()
-                                 ? app.fight_assets().dojo.arena_height() * 0.5f -
-                                       app.fight_assets().dojo.arena_floor()
-                                 : 200.0f;
-        if (!backdrop_fig_tried_) {
-            backdrop_fig_tried_ = true;
-            if (app.has_fight_assets()) {
-                FightAssets& assets = app.fight_assets();
-                const std::string idle_name = find_idle_clip_name(assets.clips);
-                const auto it = idle_name.empty() ? assets.clips.end()
-                                                  : assets.clips.find(idle_name);
-                if (!assets.merged.bones.empty() && it != assets.clips.end() &&
-                    !it->second.frames.empty()) {
-                    backdrop_fighter_ = std::make_unique<sf2::scene::Fighter>();
-                    backdrop_fighter_->set_model(assets.merged);
-                    backdrop_fighter_->set_color(assets.dojo.root_color());
-                    backdrop_idle_ = &it->second;
-                    backdrop_fig_ok_ = true;
-                }
-            }
-        }
-        if (backdrop_fig_ok_ && backdrop_fighter_ != nullptr &&
-            backdrop_idle_ != nullptr && !backdrop_idle_->frames.empty()) {
-            const float spawn_x =
-                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_x()
-                                        : 690.0f) -
-                arena_half;
-            const float spawn_y =
-                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_y()
-                                        : -93.0f) +
-                cont_y;
-            backdrop_fighter_->sample(*backdrop_idle_, 0, spawn_x, spawn_y, 1);
-            draw_dojo_figure(ren, hub_cam, *backdrop_fighter_);
-        }
-    }
+    // --- Backdrop: the destination `dojo_shop` art (`Pi.Qa`, L439) ---------
+    // JS `vb extends ma` (L2189): `this.Ad = new Pi` (L2196) and `Ea` calls
+    // `this.Tya(this.Ad)` (L2195). `Pi` renders `Qa = R.$(E.get(752))` =
+    // `locations/dojo_shop/bg.{image}` under `ma.Tya` (L1832) — a dedicated
+    // destination background, NOT the dojo location layers.
+    draw_destination_backdrop(app);
+    draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
+                           backdrop_fig_ok_, backdrop_idle_);
+    draw_destination_dim(ren);
 
     WarriorSave w;
     try {
