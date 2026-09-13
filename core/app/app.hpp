@@ -319,6 +319,15 @@ private:
     int splash_cast_h_ = 0;
     int splash_scroll_w_ = 0;
     int splash_scroll_h_ = 0;
+    // Loader-screen art (JS `ad` view `tr`, L1867-1868; asset ids 816/817):
+    // `loader/logo.png` (`tr.pE`) + `loader/bg.jpg` (`ef.Qa`, tiled mirrored).
+    // Distinct from the Preloader's `Tk` splash art (ids 274-279).
+    unsigned int loader_logo_tex_ = 0;
+    unsigned int loader_bg_tex_ = 0;
+    int loader_logo_w_ = 0;
+    int loader_logo_h_ = 0;
+    int loader_bg_w_ = 0;
+    int loader_bg_h_ = 0;
     // Boot overlay countdown in fixed steps (0 = off; drawn when not headless).
     int boot_splash_frames_ = 0;
     int boot_splash_total_ = 0;

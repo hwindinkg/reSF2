@@ -410,6 +410,28 @@ bool App::init(const std::string& res_root, const std::string& save_path,
                         &splash_cast_h_);
         load_splash_art("scroll.", "splash_scroll", &splash_scroll_tex_, &splash_scroll_w_,
                         &splash_scroll_h_);
+        // Loader screen (`ad` view `tr`, L1867-1868): `loader/logo.png` (816,
+        // `tr.pE`) + `loader/bg.jpg` (817, `ef.Qa`). Separate assets from the
+        // Preloader `Tk` art above; a miss leaves them 0 and the loader falls
+        // back to the text-only overlay.
+        {
+            const std::string loader_dir = res_root + "/loader";
+            sf2::data::Texture llogo;
+            if (decode_atlas_any(loader_dir + "/logo", llogo)) {
+                loader_logo_tex_ = renderer_->texture_for("loader_logo", llogo);
+                loader_logo_w_ = llogo.w;
+                loader_logo_h_ = llogo.h;
+            }
+            sf2::data::Texture lbg;
+            if (decode_atlas_any(loader_dir + "/bg", lbg)) {
+                loader_bg_tex_ = renderer_->texture_for("loader_bg", lbg);
+                loader_bg_w_ = lbg.w;
+                loader_bg_h_ = lbg.h;
+            }
+            std::fprintf(stdout, "[app] loader art: logo %dx%d tex %u, bg %dx%d tex %u\n",
+                         loader_logo_w_, loader_logo_h_, loader_logo_tex_, loader_bg_w_,
+                         loader_bg_h_, loader_bg_tex_);
+        }
         std::fprintf(stdout,
                      "[app] splash: loading font %zu chars tex %u, logo tex %u, bg tex %u, "
                      "cast tex %u, scroll tex %u\n",
@@ -782,7 +804,8 @@ void App::draw_boot_splash() {
     //     (L1163 = round(PZ/N*100)) feeds `gMa(x,95,100)`. Native init is
     //     synchronous, so there is no per-module frame boundary to derive the
     //     95->100 ramp from — the passes are performed inside `init`/`boot`.
-    //   - the `ad` view `tr` bar art (id 816/817, L1867-1868) is not drawn.
+    //   - the `ad` view `tr` art (id 816/817, L1867-1868) IS drawn below
+    //     (loader branch); the Preloader `Tk` branch is the `!loader` path.
     const bool loader = boot_splash_frames_ <= kBootLoaderFrames;
     sf2::render::Camera ui_cam;
     ui_cam.center_x = static_cast<float>(view_w_) * 0.5f;
@@ -817,26 +840,30 @@ void App::draw_boot_splash() {
     float jo_cx = ui_cam.center_x;
     float jo_cy = ui_cam.center_y + static_cast<float>(view_h_) * 0.25f;
     float jo_scale = 1.0f;
+    const float W = static_cast<float>(view_w_);
+    const float H = static_cast<float>(view_h_);
+    const float lc = W / H;  // N.lc
+    // Centred textured-quad helper. `flip_x` mirrors the quad (negative
+    // scale on the render quad — the same `scale_x = -scale_x` idiom the
+    // location renderer uses for `Hr()`-flipped images).
+    const auto draw_tex = [&](const char* alias, unsigned int tex, int tw, int th, float cxp,
+                              float cyp, float dw, float dh, bool flip_x = false) {
+        if (tex == 0 || tw <= 0 || th <= 0) return;
+        sf2::scene::Sprite s;
+        s.texture_name = alias;
+        s.frame_x = 0.0f;
+        s.frame_y = 0.0f;
+        s.frame_w = static_cast<float>(tw);
+        s.frame_h = static_cast<float>(th);
+        s.tex_w = static_cast<float>(tw);
+        s.tex_h = static_cast<float>(th);
+        s.solid = false;
+        s.transform.set_pos(cxp, cyp);
+        s.transform.set_scale((flip_x ? -1.0f : 1.0f) * dw / static_cast<float>(tw),
+                              dh / static_cast<float>(th));
+        renderer_->draw_sprite(s, ui_cam);
+    };
     if (!loader) {
-        const float W = static_cast<float>(view_w_);
-        const float H = static_cast<float>(view_h_);
-        const float lc = W / H;  // N.lc
-        const auto draw_tex = [&](const char* alias, unsigned int tex, int tw, int th,
-                                  float cxp, float cyp, float dw, float dh) {
-            if (tex == 0 || tw <= 0 || th <= 0) return;
-            sf2::scene::Sprite s;
-            s.texture_name = alias;
-            s.frame_x = 0.0f;
-            s.frame_y = 0.0f;
-            s.frame_w = static_cast<float>(tw);
-            s.frame_h = static_cast<float>(th);
-            s.tex_w = static_cast<float>(tw);
-            s.tex_h = static_cast<float>(th);
-            s.solid = false;
-            s.transform.set_pos(cxp, cyp);
-            s.transform.set_scale(dw / static_cast<float>(tw), dh / static_cast<float>(th));
-            renderer_->draw_sprite(s, ui_cam);
-        };
         // `gG` (E.get(279)): the full-screen fill, stretched over the view.
         draw_tex("splash_bg", splash_bg_tex_, splash_bg_w_, splash_bg_h_, ui_cam.center_x,
                  ui_cam.center_y, static_cast<float>(view_w_), static_cast<float>(view_h_));
@@ -893,14 +920,73 @@ void App::draw_boot_splash() {
         }
     }
 
+    if (loader) {
+        // JS `ad` (Loader, L1969) renders through its view class `tr`
+        // (L1867-1868) — a DIFFERENT view from the Preloader's `Tk`. `ef`
+        // (L1867) draws a black base + `Qa` (two tiled `E.get(817)` =
+        // `loader/bg.jpg`, the second `Hr(true)` mirrored); `tr` adds
+        // `pE = E.get(816)` = `loader/logo.png` and the `info` text node.
+        // `ad.Ea` (L1969) writes literally "Loading 100%".
+        //
+        // `ef.layout` (L1867): `node.la(min(1024, N.Eha) / (oea()*1.1))`, the
+        // node centred on the safe rect (`N.rect` centre = W/2, H/2); `oea()`
+        // = `tr.pE.fa.x` (the logo source width), `N.Eha = min(W, H)`.
+        // `tr.aa` (L1868): `a = (1.2 + ((clamp(lc,.4,1)-.4)/.6*-1)) * pE.fa.y`
+        // shifts BOTH `pE` and `Qa` up by `a` node-local (`pE.D(-a)`,
+        // `Qa.D(-a)`).
+        const float logo_sw =
+            loader_logo_w_ > 0 ? static_cast<float>(loader_logo_w_) : 1024.0f;
+        const float logo_sh =
+            loader_logo_h_ > 0 ? static_cast<float>(loader_logo_h_) : 300.0f;
+        const float node_scale = std::min(1024.0f, std::min(W, H)) / (logo_sw * 1.1f);
+        const float a_off =
+            (1.2f + ((std::clamp(lc, 0.4f, 1.0f) - 0.4f) / 0.6f) * -1.0f) * logo_sh;
+        const float node_cx = W * 0.5f;
+        const float node_cy = H * 0.5f;
+        const float art_cy = node_cy - a_off * node_scale;
+        // `ef.layout`: `Qa.Rh(min(2, W/oYa/node.Eb))` = x scale, and
+        // `Qa.mj(b + (1-lc)*.75)` = y scale (b = W/oYa/node.Eb); `oYa` = the
+        // pair width = 2 * the bg source width.
+        const float oYa =
+            (loader_bg_w_ > 0 ? static_cast<float>(loader_bg_w_) : 512.0f) * 2.0f;
+        const float b_rep = node_scale > 0.0f ? W / oYa / node_scale : 1.0f;
+        const float qa_sx = std::min(2.0f, b_rep);
+        const float qa_sy = b_rep + (1.0f - lc) * 0.75f;
+        if (loader_bg_tex_ != 0 && loader_bg_w_ > 0 && loader_bg_h_ > 0) {
+            const float dw = static_cast<float>(loader_bg_w_) * qa_sx * node_scale;
+            const float dh = static_cast<float>(loader_bg_h_) * qa_sy * node_scale;
+            // Left half = `a` (normal); right half = `b` (`Hr(true)` mirror).
+            draw_tex("loader_bg", loader_bg_tex_, loader_bg_w_, loader_bg_h_,
+                     node_cx - dw * 0.5f, art_cy, dw, dh, false);
+            draw_tex("loader_bg", loader_bg_tex_, loader_bg_w_, loader_bg_h_,
+                     node_cx + dw * 0.5f, art_cy, dw, dh, true);
+        }
+        if (loader_logo_tex_ != 0 && loader_logo_w_ > 0 && loader_logo_h_ > 0) {
+            draw_tex("loader_logo", loader_logo_tex_, loader_logo_w_, loader_logo_h_, node_cx,
+                     art_cy, static_cast<float>(loader_logo_w_) * node_scale,
+                     static_cast<float>(loader_logo_h_) * node_scale, false);
+        }
+        // `tr.info` (L1867-1868): font `E.Na()` = `E.get(264,16)` =
+        // `ui/font{lang}` (the port's menu font), colour `Na.cd(13743222)` =
+        // (209,182,118), centred at `pE.ra + pE.qa()*.75` (node-local, scaled
+        // by the parent node). The whole node scale applies.
+        if (menu_font_ != nullptr && font_tex_ != 0) {
+            const std::string text = "Loading 100%";
+            const float info_cy = node_cy + (-a_off + logo_sh * 0.75f) * node_scale;
+            const float scale = node_scale;
+            const float tw = measure_text(*menu_font_, text, scale);
+            const float th = sf2::data::measure_text_height_utf8(*menu_font_, text, scale);
+            draw_text_with_font(*menu_font_, font_tex_, node_cx - tw * 0.5f,
+                                info_cy - th * 0.5f, text, scale, 209.0f / 255.0f,
+                                182.0f / 255.0f, 118.0f / 255.0f);
+        }
+        return;
+    }
     if (splash_loading_font_ == nullptr || splash_loading_tex_ == 0) {
         return;
     }
     char buf[64];
-    if (loader) {
-        // JS `ad.Ea` (L1969): literally "Loading 100%".
-        std::snprintf(buf, sizeof(buf), "Loading 100%%");
-    } else {
+    {
         // JS `Tk.n5` (L88): "<word> <n>%" mapped 0..95.
         const int pre_span = boot_splash_total_ - kBootLoaderFrames;
         const int elapsed = pre_span - boot_splash_frames_;
