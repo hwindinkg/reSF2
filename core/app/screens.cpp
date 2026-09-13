@@ -3411,7 +3411,50 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         for (const pugi::xml_attribute a : w.attributes()) {
             out.attrs[a.name()] = a.value();
         }
-        if (const pugi::xml_attribute a = w.attribute("FirstName")) out.first_name = a.value();
+        // JS `ukb`/`rkb`/`lzb` (asset 273 = stages.xml): a battle's
+        // `<Warrior Template="X" ...>` inherits its identity from the file's
+        // `<Templates>` — the named `<Template Name="X" Template="Y">` is
+        // cloned from its base chain (...->Default) and the owning Warrior's
+        // attrs are merged on top (`pGa`). FirstName/Avatar live on the
+        // TEMPLATE, not the `<Warrior>`: BOSS_LYNX Fight 1 is only
+        // `<Warrior Template="Man_Kunai" ...>` (stages.xml L81 of the extracted
+        // file); its name/Avatar are on `<Template Name="Man_Kunai" ...
+        // FirstName="NAME_SHIN" Avatar="man_kunai">` (L32443). Reading
+        // FirstName off the Warrior alone leaves it empty, so the VS/HUD falls
+        // back to the battle name -> "РЫСЬ" instead of the oracle's "ШИН".
+        // JS `ukb` reads the templates from the `Warriors` clone's child
+        // `Templates` (the file nests `<Templates>` inside `<Warriors>`), NOT
+        // a root sibling.
+        std::map<std::string, std::string> tmpl_attrs;
+        {
+            std::map<std::string, pugi::xml_node> templates;
+            const pugi::xml_node templates_node =
+                root.child("Warriors").child("Templates");
+            for (const pugi::xml_node t : templates_node.children("Template")) {
+                const std::string nm = t.attribute("Name").value();
+                if (!nm.empty()) templates.emplace(nm, t);
+            }
+            std::vector<std::string> chain;
+            for (std::string cur = w.attribute("Template").value();
+                 !cur.empty() && templates.count(cur) != 0;) {
+                chain.push_back(cur);
+                cur = templates[cur].attribute("Template").value();
+            }
+            // base-first (Default ... named) so the derived template wins.
+            for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+                for (const pugi::xml_attribute a : templates[*it].attributes()) {
+                    tmpl_attrs[a.name()] = a.value();
+                }
+            }
+        }
+        // The Warrior's own attrs win over the inherited template ones.
+        for (const auto& kv : tmpl_attrs) out.attrs.emplace(kv.first, kv.second);
+        if (const pugi::xml_attribute a = w.attribute("FirstName")) {
+            out.first_name = a.value();
+        } else {
+            const auto fn = tmpl_attrs.find("FirstName");
+            if (fn != tmpl_attrs.end()) out.first_name = fn->second;
+        }
         out.has_not_ai = w.attribute("NotAI") != nullptr;
         out.has_not_animation = w.attribute("NotAnimation") != nullptr;
         if (const pugi::xml_attribute a = w.attribute("Tactic")) out.tactic = a.value();
@@ -5101,15 +5144,17 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // NotAnimation="1", stages.xml L12); BOSS_LYNX Fight 1 is a Warrior
     // template with neither flag (L78).
     const BattleWarriorInfo bw = battle_warrior(battle_name_, app().pending_battle().zone);
+    // `first_name` is a lang key (`NAME_SHIN`) resolved for display (JS `ur`).
     app().pending_battle().enemy_name =
-        bw.first_name.empty() ? "Enemy" : bw.first_name;
+        bw.first_name.empty() ? "Enemy" : loc(app(), bw.first_name, bw.first_name);
     // VS intro (`ik`, L2069-2071): resolve the two names + portraits the VS
     // screen and the HUD show. Player = the save Warrior (`FirstName`, a lang
     // key like "NAME_SHADOW" -> "SHADOW"; the shipped save's `Avatar` is
-    // `avatar_hero`). Enemy = the stage Warrior `FirstName` when present, else
-    // the battle Name (`BOSS_LYNX` is itself a lang key -> "LYNX"), with the
-    // `Template` stem as the portrait. OPEN: `WarriorSave` does not carry the
-    // `Avatar` attr yet, so the historical default is used.
+    // `avatar_hero`). Enemy = the battle Warrior's resolved `FirstName` (from
+    // its `<Template>`; see `battle_warrior`), else the battle Name
+    // (`BOSS_LYNX` is itself a lang key -> "LYNX"), with the resolved
+    // `Avatar` as the portrait. OPEN: `WarriorSave` does not carry the
+    // `Avatar` attr yet, so the player's historical default is used.
     {
         std::string pfirst = "NAME_SHADOW";
         try {
@@ -5121,9 +5166,18 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         vs_player_image_ = "avatar_hero";
         std::string efirst = bw.first_name.empty() ? battle_name_ : bw.first_name;
         vs_enemy_name_ = loc(app(), efirst, efirst);
-        const auto tmpl = bw.attrs.find("Template");
-        std::string eimg = (tmpl != bw.attrs.end() && !tmpl->second.empty()) ? tmpl->second
-                                                                             : "avatar_masked";
+        // The portrait is the resolved template's `Avatar` (JS `ur` -> `Hf`);
+        // the `Template` stem is the legacy fallback. BOSS_LYNX Fight 1
+        // resolves `Avatar="man_kunai"` (the oracle's ШИН portrait).
+        std::string eimg;
+        const auto av = bw.attrs.find("Avatar");
+        if (av != bw.attrs.end() && !av->second.empty()) {
+            eimg = av->second;
+        } else {
+            const auto tmpl = bw.attrs.find("Template");
+            eimg = (tmpl != bw.attrs.end() && !tmpl->second.empty()) ? tmpl->second
+                                                                     : "avatar_masked";
+        }
         std::transform(eimg.begin(), eimg.end(), eimg.begin(),
                        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
         vs_enemy_image_ = eimg;
