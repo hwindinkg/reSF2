@@ -5302,23 +5302,25 @@ void FightScreen::verify_fight() const {
     report("enemy", fight_->enemy().fighter);
     std::fflush(stdout);
 }
-// --- Pause dialog `Dr` layout (JS L2018; PAUSE_STATIC §3) ------------------
-// The fight HUD pause widget (`Sf.Jn`, L2034) / Esc/P opens `ha.Aia`'s `Dr`
-// dialog. The exact node tree is OPEN (PAUSE_STATIC OPEN #5); the evidenced
-// `res/fight/pause.*` frames are `Pause` (400x96 title), `PauseMusic_on/off`,
-// `PauseSound_on/off`, `play` (resume) and `home` (quit) 150x150 buttons.
-// Replaces the invented flat RESUME/RESTART/QUIT stack (PORT_AUDIT_UI §3 #25).
-constexpr float kPauseDlgTitleCx = kViewW * 0.5f;
-constexpr float kPauseDlgTitleCy = 150.0f;
-constexpr float kPauseDlgTitleW = 400.0f;
-constexpr float kPauseDlgTitleH = 96.0f;
-constexpr float kPauseDlgMusicX = 560.0f;
-constexpr float kPauseDlgSoundX = 720.0f;
-constexpr float kPauseDlgToggleY = 300.0f;
-constexpr float kPauseDlgToggleS = 150.0f;
-constexpr float kPauseDlgPlayX = 560.0f;
-constexpr float kPauseDlgHomeX = 720.0f;
-constexpr float kPauseDlgActionY = 470.0f;
+// --- Pause dialog `Dr` layout (JS L2065-2068; PAUSE_STATIC §3) -------------
+// The HUD pause widget (`Sf.Jn`, L2034) / Esc opens `ha.Aia`'s `Dr` dialog.
+// `Dr.layout` (L2068): `content` is scaled `(b.N-b.J)/900` with
+// `b = ma.Kq.fn(1.125)`; the 4 `Mr` buttons are 150x150 at design y=440,
+// x = `(900-(4*150+75))/2 + 75` + i*(150+25) = 187.5/362.5/537.5/712.5, and
+// the title (`E.get(1302)` `y.FQa`, 400x96) at design (450,280). At 16:9
+// (ma.Kq = 0,0,1280,720): b = (235,0,1045,720), scale 0.9 ->
+// title (640,252) 360x86; button row y=396, x=403.75/561.25/718.75/876.25.
+// Button order: home, music, sound, play (L2066: home/tp/Sla/play).
+constexpr float kPauseDlgTitleCx = 640.0f;
+constexpr float kPauseDlgTitleCy = 252.0f;
+constexpr float kPauseDlgTitleW = 360.0f;
+constexpr float kPauseDlgTitleH = 86.4f;
+constexpr float kPauseDlgToggleS = 135.0f;   // 150 * 0.9
+constexpr float kPauseDlgRowY = 396.0f;      // 440 * 0.9
+constexpr float kPauseDlgHomeX = 403.75f;
+constexpr float kPauseDlgMusicX = 561.25f;
+constexpr float kPauseDlgSoundX = 718.75f;
+constexpr float kPauseDlgPlayX = 876.25f;
 
 void FightScreen::update_impl(float dt) {
     if (fight_ == nullptr) return;
@@ -5350,14 +5352,14 @@ void FightScreen::update_impl(float dt) {
         // (log, Next, results) is skipped by the early return.
         const App::PointerState& p = app().pointer();
         if (p.pressed) {
-            if (pause_hit(kPauseDlgPlayX, kPauseDlgActionY, kPauseDlgToggleS,
+            if (pause_hit(kPauseDlgPlayX, kPauseDlgRowY, kPauseDlgToggleS,
                           kPauseDlgToggleS)) {
                 // `play` frame = resume (PAUSE_STATIC §3 `tZ`).
                 paused_ = false;
                 sf2::audio::AudioEngine::instance().play("click");
                 std::fprintf(stdout, "[fight] pause OFF (resume, Dr.play)\n");
                 std::fflush(stdout);
-            } else if (pause_hit(kPauseDlgMusicX, kPauseDlgToggleY, kPauseDlgToggleS,
+            } else if (pause_hit(kPauseDlgMusicX, kPauseDlgRowY, kPauseDlgToggleS,
                                  kPauseDlgToggleS)) {
                 // `PauseMusic_on/off` toggle (JS music keeps playing under a
                 // pause — PAUSE_STATIC §5; this toggle is UI-layer).
@@ -5372,7 +5374,7 @@ void FightScreen::update_impl(float dt) {
                 std::fprintf(stdout, "[fight] pause music %s (Dr.PauseMusic)\n",
                              music_off_ ? "OFF" : "ON");
                 std::fflush(stdout);
-            } else if (pause_hit(kPauseDlgSoundX, kPauseDlgToggleY, kPauseDlgToggleS,
+            } else if (pause_hit(kPauseDlgSoundX, kPauseDlgRowY, kPauseDlgToggleS,
                                  kPauseDlgToggleS)) {
                 // `PauseSound_on/off` (display only — no runtime SFX mute API;
                 // see the stream report).
@@ -5380,7 +5382,7 @@ void FightScreen::update_impl(float dt) {
                 std::fprintf(stdout,
                              "[fight] pause sound toggle (Dr.PauseSound, display-only)\n");
                 std::fflush(stdout);
-            } else if (pause_hit(kPauseDlgHomeX, kPauseDlgActionY, kPauseDlgToggleS,
+            } else if (pause_hit(kPauseDlgHomeX, kPauseDlgRowY, kPauseDlgToggleS,
                                  kPauseDlgToggleS)) {
                 // `home` = quit (JS `Xc.Zhb` exit-confirm -> `O3a`; the confirm
                 // dialog is not ported — direct pop, OPEN).
@@ -5998,7 +6000,9 @@ void FightScreen::render_impl(App& app) {
     if (paused_) {
         const float dim[] = {0, 0,         kViewW, 0,         kViewW, kViewH,
                              0, 0,         kViewW, kViewH,    0,      kViewH};
-        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.65f);
+        // `Dr.Qa` (L2065): `R.$(E.Zxa(900))` `wa(0)` `wh(6,1,.25)` full-screen
+        // -> a ~0.25-alpha dim (was an invented 0.65).
+        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
         // `Dr` pause dialog (JS L2018; PAUSE_STATIC §3): `res/fight/pause.*`
         // frames — `Pause` title, `PauseMusic_on/off`, `PauseSound_on/off`,
         // `play` (resume), `home` (quit). Flat fallback only on a genuine
@@ -6017,12 +6021,12 @@ void FightScreen::render_impl(App& app) {
         frame("Pause", kPauseDlgTitleCx, kPauseDlgTitleCy, kPauseDlgTitleW,
               kPauseDlgTitleH, "PAUSED");
         frame(music_off_ ? "PauseMusic_off" : "PauseMusic_on", kPauseDlgMusicX,
-              kPauseDlgToggleY, kPauseDlgToggleS, kPauseDlgToggleS, "MUSIC");
-        frame("PauseSound_on", kPauseDlgSoundX, kPauseDlgToggleY, kPauseDlgToggleS,
+              kPauseDlgRowY, kPauseDlgToggleS, kPauseDlgToggleS, "MUSIC");
+        frame("PauseSound_on", kPauseDlgSoundX, kPauseDlgRowY, kPauseDlgToggleS,
               kPauseDlgToggleS, "SOUND");
-        frame("play", kPauseDlgPlayX, kPauseDlgActionY, kPauseDlgToggleS,
+        frame("play", kPauseDlgPlayX, kPauseDlgRowY, kPauseDlgToggleS,
               kPauseDlgToggleS, "RESUME");
-        frame("home", kPauseDlgHomeX, kPauseDlgActionY, kPauseDlgToggleS,
+        frame("home", kPauseDlgHomeX, kPauseDlgRowY, kPauseDlgToggleS,
               kPauseDlgToggleS, "QUIT");
     }
 }
@@ -6265,33 +6269,66 @@ void ResultsScreen::render_impl(App& app) {
     // Prize breakdown (JS `Fh`/`Lr` inner list; `v.kD`/`bzb` factor lines,
     // FLOW_STATIC §4.3: Perfect $Ia=5, FirstStrike ep=2, Combo Ui=1/combo,
     // Shock Ub=3). Gems (JS hj.Uo) are untracked by prize() — no line.
-    float y = py + 190.0f;
-    auto line = [&](const std::string& s) {
-        draw_ui_label(app, kViewW * 0.5f - 300.0f, y, 600.0f, 26.0f, s, 0.85f,
-                      UiAlign::Center, 1.0f, 1.0f, 1.0f);
-        y += 32.0f;
+    // `Fh` stat table (JS `Lr.ZMa` L2078-2079): `lf` = 7 rows, each
+    // `vI(label, value, ...)` -> a label + a gold `coin` + the value; the
+    // last is `v1a(Math.trunc(Hi.ap), b)` = the star row. The oracle
+    // `results_lose`/`results_win` show all 7 rows ALWAYS (even on a loss).
+    // Labels are the lang keys goldPrize/goldPerfect/goldFirstStrike/
+    // goldCombo/goldShock/goldPassiveStyle (EN fallback — the oracle is EN).
+    struct KkRow {
+        const char* key;
+        const char* fallback;
+        int value;
+        bool mult;
+        bool star;
     };
-    if (player_won_) {
-        line("Coins: " + std::to_string(prize_base_) + " + bonus " +
-             std::to_string(prize_bonus_) + " = " + std::to_string(money_reward_));
-        if (prize_perfect_) line("PERFECT +5");
-        if (prize_first_) line("FIRST STRIKE +2");
-        if (prize_combo_ > 0)
-            line("COMBO x" + std::to_string(prize_combo_) + " +" +
-                 std::to_string(prize_combo_));
-        if (prize_shocks_ > 0)
-            line("SHOCK x" + std::to_string(prize_shocks_) + " +" +
-                 std::to_string(prize_shocks_ * 3));
-        line("EXP +" + std::to_string(exp_reward_));
+    const KkRow kk_rows[7] = {
+        {"goldPrize", "PRIZE", money_reward_, false, false},
+        {"goldPerfect", "PERFECT", prize_perfect_ ? 1 : 0, true, false},
+        {"goldFirstStrike", "FIRST STRIKE", prize_first_ ? 1 : 0, true, false},
+        {"goldCombo", "MAX COMBO", prize_combo_, true, false},
+        {"goldShock", "SHOCK", prize_shocks_, true, false},
+        {"goldPassiveStyle", "PASSIVE STYLE", 0, false, false},
+        {"", "", 0, false, true},  // star row (`v1a`, L2078)
+    };
+    constexpr float kKkRowX = 420.0f;    // label left edge
+    constexpr float kKkCoinX = 822.0f;   // gold coin centre
+    constexpr float kKkValX = 838.0f;    // value left edge (cyan)
+    constexpr float kKkRowY0 = 155.0f;
+    constexpr float kKkRowStep = 58.0f;
+    for (int i = 0; i < 7; ++i) {
+        const KkRow& r = kk_rows[i];
+        const float ry = kKkRowY0 + static_cast<float>(i) * kKkRowStep;
+        if (r.star) {
+            (void)try_draw_atlas_button(app, "star", kKkRowX + 26.0f, ry, 52.0f, 48.0f,
+                                        1.0f);
+        } else {
+            std::string lab = loc(app, r.key, r.fallback);
+            if (r.mult) lab += " x" + std::to_string(r.value);
+            draw_ui_label(app, kKkRowX, ry - 16.0f, 400.0f, 32.0f, lab, 0.95f,
+                          UiAlign::Left, 0.94f, 0.89f, 0.72f);
+            (void)try_draw_atlas_button(app, "gold", kKkCoinX, ry, 48.0f, 48.0f, 1.0f);
+        }
+        draw_ui_label(app, kKkValX, ry - 16.0f, 60.0f, 32.0f, std::to_string(r.value),
+                      0.95f, UiAlign::Left, 0.31f, 0.79f, 0.84f);
     }
     if (!quest_toast_.empty()) {
-        draw_ui_label(app, kViewW * 0.5f - 300.0f, py + kKkH - 62.0f, 600.0f, 28.0f,
+        draw_ui_label(app, kViewW * 0.5f - 300.0f, kViewH - 96.0f, 600.0f, 28.0f,
                       quest_toast_, 0.9f, UiAlign::Center, 1.0f, 0.9f, 0.4f);
     }
-    // Continue affordance (any tap advances; the update pops — JS `kk` routes
-    // through its `Lr` buttons / `v.qxa`).
-    draw_ui_label(app, kViewW * 0.5f - 300.0f, py + kKkH - 32.0f, 600.0f, 24.0f,
-                  "TAP TO CONTINUE", 0.8f, UiAlign::Center, 0.8f, 0.8f, 0.8f);
+    // OK button (JS `Lr.$g = new Bb("EButtonWhite"); $g.V(Y.na("OK"))`, L2075)
+    // bottom-centre in the beige hexagon fleet (`EButtonBeige`). Flat is the
+    // genuine atlas-miss fallback.
+    {
+        const float okx = kViewW * 0.5f;
+        const float oky = 645.0f;
+        if (!try_draw_atlas_button(app, "EButtonBeige", okx, oky, 230.0f, 52.0f, 1.0f)) {
+            draw_flat_button(app, "OK", okx, oky, 210.0f, 48.0f, 0.85f, 0.78f, 0.55f,
+                             false);
+        }
+        draw_ui_label(app, okx - 105.0f, oky - 13.0f, 210.0f, 26.0f, "OK", 0.85f,
+                      UiAlign::Center, 0.20f, 0.15f, 0.08f);
+    }
     std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
 }
 
@@ -7370,8 +7407,12 @@ struct ProfileTabArt {
     const char* label;
 };
 const ProfileTabArt kProfileTabs[kProfileTabCount] = {
-    {"buttons/Strikes", "buttons/Strikes_active", "buttons/Strikes_pushed", "SKILLS"},
-    {"buttons/Progress", "buttons/Progress_active", "buttons/Progress_pushed", "MOVES"},
+    // Oracle capture order (profile_tab0..3): tab0 = pyramid (leveling/perk
+    // tree), tab1 = kicking figure (MOVES), tab2 = ribbon (achievements),
+    // tab3 = seal coin. The `buttons/Progress*` art is the pyramid and
+    // `buttons/Strikes*` the kick (profile.ff77c0ff.json frame table).
+    {"buttons/Progress", "buttons/Progress_active", "buttons/Progress_pushed", "SKILLS"},
+    {"buttons/Strikes", "buttons/Strikes_active", "buttons/Strikes_pushed", "MOVES"},
     {"buttons/Achiev", "buttons/Achiev_active", "buttons/Achiev_pushed", "ACHIEV"},
     {"buttons/Seal", "buttons/Seal_active", "buttons/Seal_pushed", "SEAL"},
 };
@@ -7408,6 +7449,8 @@ struct ProfileLayout {
     ShopRect content;    // b (L2195)
     ShopRect viewer;     // a = b.fn(.75) (L2195) — the active `jq` rect
     ShopRect left_slot;  // b2 (L2195-2196) — the `XB=ei` header (`Pn(b)`)
+    ShopRect right_slot; // c (L2196) — the `zr=Yr` status panel (`Pn(c)`)
+    float gap = 0.0f;    // d = (a.N-a.J)*.03 (L2195)
 };
 
 ProfileLayout profile_layout() {
@@ -7421,14 +7464,18 @@ ProfileLayout profile_layout() {
     ProfileLayout l;
     l.content = b;
     l.viewer = shop_gb_fn(b, 0.75f);              // a = b.fn(.75) L2195
-    // Left slot `b2` (L2195, same construction as the shop `MJ`/`op`): right
-    // edge `a.J + d`, height `(a.W-a.P)*.8`, width `b*.7`, vertically centred.
-    const float gap = l.viewer.width() * 0.03f;   // d = (a.N-a.J)*.03
+    // Side slots `b`/`c` (L2195-2196): both are `gb(0,0, slot_h*.7, slot_h)`
+    // rects (`slot_h = (a.W-a.P)*.8`), centred beside the viewer at
+    // `a.J + d` (left, right edge) / `a.N - d` (right, left edge) with
+    // `d = (a.N-a.J)*.03`. `this.XB.Pn(b); this.zr.Pn(c)` (L2196).
+    l.gap = l.viewer.height() * 0.03f;            // d = (a.N-a.J)*.03
     const float slot_h = l.viewer.height() * 0.8f;
-    const float slot_w = slot_h * 0.7f;
+    const float slot_w = slot_h * 0.7f;           // gb(0,0,b*.7,b) L2195
     const float cy = (l.viewer.P + l.viewer.W) * 0.5f;
-    l.left_slot = {l.viewer.J + gap - slot_w, cy - slot_h * 0.5f, l.viewer.J + gap,
-                   cy + slot_h * 0.5f};
+    l.left_slot = {l.viewer.J + l.gap - slot_w, cy - slot_h * 0.5f,
+                   l.viewer.J + l.gap, cy + slot_h * 0.5f};
+    l.right_slot = {l.viewer.N - l.gap, cy - slot_h * 0.5f,
+                    l.viewer.N - l.gap + slot_w, cy + slot_h * 0.5f};
     return l;
 }
 
@@ -7994,29 +8041,79 @@ void EquipmentScreen::update_impl(float dt) {
             }
         }
     }
-    // Shared `za` nav column (JS `ma.D1`): Dojo/Map/Shop/Settings hops.
-    za_update(app(), *this, kScreenProfile);
+    // Shared `za` nav column (JS `ma.D1`): Dojo/Map/Shop/Settings hops. The
+    // oracle `profile_tab*` captures show the nav COLLAPSED (the `МЕНО`
+    // header only) — force it like the Map (`za.xyb` collapses on arrival).
+    za_update(app(), *this, kScreenProfile, /*force_collapsed=*/true);
 }
 
 void EquipmentScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    sf2::scene::Sprite* dojo = app.dojo_sprite();
-    if (dojo != nullptr) {
-        sf2::render::Camera ui_cam;
-        ui_cam.center_x = kViewW * 0.5f;
-        ui_cam.center_y = kViewH * 0.5f;
-        ui_cam.zoom = 1.0f;
-        ui_cam.view_w = kViewW;
-        ui_cam.view_h = kViewH;
-        ui_cam.arena_h = kViewH;
-        ui_cam.arena_floor = 0.0f;
-        ui_cam.arena_center_x = kViewW * 0.5f;
-        ren.draw_sprite(*dojo, ui_cam);
+    // --- Backdrop: the persistent dojo location ----------------------------
+    // JS `vb extends ma` (L2189): the Profile is an overlay on the running
+    // dojo location, so the oracle `profile_tab*`/`moves` captures show the
+    // dojo interior + the `FightNone` idle figure (PORT_AUDIT_UI §2.5). Same
+    // `assets.dojo` layer stack + `ma.Sya` hub framing as the DojoScreen hub /
+    // ShopScreen `Oa`. Replaces the old `dojo_sprite` + flat dim (wrong art).
+    sf2::render::Camera hub_cam;
+    bool have_hub_cam = false;
+    if (app.has_fight_assets()) {
+        FightAssets& assets = app.fight_assets();
+        const float half = assets.dojo.arena_width() * 0.5f;
+        const float player_x = assets.dojo.player_spawn_x() - half;
+        const float enemy_x = assets.dojo.enemy_spawn_x() - half;
+        const float focus_x = (player_x + enemy_x) * 0.5f + half;
+        const float fighter_span = std::fabs(enemy_x - player_x);
+        assets.dojo.default_camera(hub_cam, kViewW, kViewH, focus_x, fighter_span);
+        have_hub_cam = true;
+        ensure_dojo_location(app);
+        assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
+    } else {
+        const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH,
+                               0, 0, kViewW, kViewH, 0, kViewH};
+        ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
     }
-    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
-    // `cs` tab strip (JS L2188) — always visible; the body below is per-tab.
-    draw_profile_tabs(app, tab_, tab_hover_);
+    if (have_hub_cam) {
+        draw_scene_letterbox(ren, hub_cam);
+        // The `FightNone` viewer idle figure (same block as ShopScreen).
+        const float arena_half = app.has_fight_assets()
+                                     ? app.fight_assets().dojo.arena_width() * 0.5f
+                                     : 980.0f;
+        const float cont_y = app.has_fight_assets()
+                                 ? app.fight_assets().dojo.arena_height() * 0.5f -
+                                       app.fight_assets().dojo.arena_floor()
+                                 : 200.0f;
+        if (!backdrop_fig_tried_) {
+            backdrop_fig_tried_ = true;
+            if (app.has_fight_assets()) {
+                FightAssets& assets = app.fight_assets();
+                const std::string idle_name = find_idle_clip_name(assets.clips);
+                const auto it = idle_name.empty() ? assets.clips.end()
+                                                  : assets.clips.find(idle_name);
+                if (!assets.merged.bones.empty() && it != assets.clips.end() &&
+                    !it->second.frames.empty()) {
+                    backdrop_fighter_ = std::make_unique<sf2::scene::Fighter>();
+                    backdrop_fighter_->set_model(assets.merged);
+                    backdrop_fighter_->set_color(assets.dojo.root_color());
+                    backdrop_idle_ = &it->second;
+                    backdrop_fig_ok_ = true;
+                }
+            }
+        }
+        if (backdrop_fig_ok_ && backdrop_fighter_ != nullptr &&
+            backdrop_idle_ != nullptr && !backdrop_idle_->frames.empty()) {
+            const float spawn_x =
+                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_x()
+                                        : 690.0f) -
+                arena_half;
+            const float spawn_y =
+                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_y()
+                                        : -93.0f) +
+                cont_y;
+            backdrop_fighter_->sample(*backdrop_idle_, 0, spawn_x, spawn_y, 1);
+            draw_dojo_figure(ren, hub_cam, *backdrop_fighter_);
+        }
+    }
 
     WarriorSave w;
     try {
@@ -8024,77 +8121,102 @@ void EquipmentScreen::render_impl(App& app) {
     } catch (const std::exception&) {
         return;
     }
-    // JS `vb.layout` (L2195): the active sub-view `jq` docks into
-    // `a = b.fn(.75)`; the content split mirrors the shop `Oa.layout`.
+    // JS `vb.layout` (L2195-2196): the active sub-view `jq` docks into
+    // `a = b.fn(.75)`; `XB=ei` (`Pn(b)`) and `zr=Yr` (`Pn(c)`) dock into the
+    // two side slots. The content split mirrors the shop `Oa.layout`.
     const ProfileLayout pl = profile_layout();
     const ShopRect& v = pl.viewer;
+    // --- Parchment chrome (JS `E.get(254)` = res/ui/scroll) ----------------
+    // Centre viewer `jq` = the `Xd`/`Fg` paper content frame (L1868-1872):
+    // body `bg` + top/bottom `Zh` rolls (`roll_end` + stretched
+    // `roll_center` + mirrored `roll_end`). The side panels (`XB`/`zr`) use
+    // the `info_panel_v` frame stretched into their slots. Flat fallback only
+    // on a genuine atlas miss (never a silent blank).
+    if (load_scroll_atlas(app)) {
+        const float midx = v.J + v.width() * 0.5f;
+        const float midy = v.P + v.height() * 0.5f;
+        if (!try_draw_atlas_button(app, "bg", midx, midy, v.width(), v.height(), 1.0f,
+                                   /*fill=*/true, /*flip_x=*/false)) {
+            draw_flat_button(app, "", midx, midy, v.width(), v.height(), 0.62f, 0.5f,
+                             0.34f, false);
+        }
+        constexpr float kRollSrcH = 114.0f, kRollCapSrcW = 101.0f;
+        const float roll_h = 30.0f;                                 // Zh(w,30)
+        const float capw = kRollCapSrcW * (roll_h / kRollSrcH);
+        const float bodyw = v.width() - 2.0f * capw;
+        auto roll_bar = [&](float cy) {
+            try_draw_atlas_button(app, "roll_end", v.J + capw * 0.5f, cy, capw, roll_h,
+                                  1.0f);
+            try_draw_atlas_button(app, "roll_end", v.N - capw * 0.5f, cy, capw, roll_h,
+                                  1.0f);
+            if (bodyw > 0.0f) {
+                try_draw_atlas_button(app, "roll_center", v.J + capw + bodyw * 0.5f, cy,
+                                      bodyw, roll_h, 1.0f, /*fill=*/true);
+            }
+        };
+        roll_bar(v.P + roll_h * 0.5f);
+        roll_bar(v.W - roll_h * 0.5f);
+        auto side_panel = [&](const ShopRect& s) {
+            if (!try_draw_atlas_button(app, "info_panel_v",
+                                       s.J + s.width() * 0.5f, s.P + s.height() * 0.5f,
+                                       s.width(), s.height(), 1.0f, /*fill=*/true)) {
+                draw_flat_button(app, "", s.J + s.width() * 0.5f, s.P + s.height() * 0.5f,
+                                 s.width(), s.height(), 0.62f, 0.5f, 0.34f, false);
+            }
+        };
+        side_panel(pl.right_slot);              // `zr=Yr` (always visible)
+        if (tab_ == kProfileTabLeveling) {
+            side_panel(pl.left_slot);           // `XB=ei` (tab 0 only, L2190)
+        }
+    }
+    // `cs` tab strip (JS L2188) — always visible, drawn over the body bottom.
+    draw_profile_tabs(app, tab_, tab_hover_);
     // JS `XB=ei` header is shown on tab 0 only (`hla` case 0 `ivb()`); the
     // other cases call `dga()` and hide it (L2190-2191).
     if (tab_ == kProfileTabLeveling) {
     perk_cell_hits_.clear();  // repopulated below (update hit-tests them)
-    // --- Profile header (read-only warrior stats) -------------------------
-    // Level + OLa exp bar (character_progress.xml thresholds, 100 fallback),
-    // total wins (Fights/yc records), coins (Money/Tb) + gems (Bonus/$F per
-    // SHOP_STATIC §1 `I.$F`). Entry: Dojo/Profile buttons (screen 7).
-    {
-        // Anchored into the JS header dock `XB=ei` -> left slot `b2`
-        // (`XB.Pn(b)`, L2196), NOT hard-coded (100,78): the old fixed block
-        // sat under the shared `za` top bar / vertical nav column (the
-        // WINS/COINS/GEMS overlap).
-        const ShopRect hs = pl.left_slot;
-        const int need = ResultsScreen::exp_for_level(w.level);
-        int wins = 0;
-        for (const auto& f : w.fights) wins += f.wins;
-        char hbuf[64];
-        std::snprintf(hbuf, sizeof(hbuf), "LV %d", w.level);
-        // Profile-atlas level badge (pieces/level1..9 — clamped to the
-        // shipped range; skipped if the frame is missing).
-        if (w.level >= 1 && w.level <= 9) {
-            char lvl_frame[32];
-            std::snprintf(lvl_frame, sizeof(lvl_frame), "pieces/level%d", w.level);
-            try_draw_atlas_button(app, lvl_frame, hs.J + 28.0f, hs.P + 28.0f, 56.0f, 56.0f,
-                                  1.0f);
-        }
-        draw_ui_label(app, hs.J + 64.0f, hs.P + 16.0f, hs.width() - 72.0f, 30.0f, hbuf, 1.1f,
-                      UiAlign::Left, 1.0f, 0.9f, 0.4f);
-        const float bx0 = hs.J + 8.0f, by0 = hs.P + 56.0f;
-        const float bw = hs.width() - 16.0f, bh = 16.0f;
-        const float bbg[] = {bx0, by0, bx0 + bw, by0, bx0, by0 + bh,
-                             bx0 + bw, by0, bx0 + bw, by0 + bh, bx0, by0 + bh};
-        ren.draw_triangles(bbg, 6, 0.15f, 0.15f, 0.18f, 1.0f);
-        const float frac = need > 0 ? std::clamp(static_cast<float>(w.experience) /
-                                                     static_cast<float>(need),
-                                                 0.0f, 1.0f)
-                                    : 0.0f;
-        if (frac > 0.001f) {
-            const float fw = bw * frac;
-            const float bfg[] = {bx0, by0, bx0 + fw, by0, bx0, by0 + bh,
-                                 bx0 + fw, by0, bx0 + fw, by0 + bh, bx0, by0 + bh};
-            ren.draw_triangles(bfg, 6, 0.3f, 0.7f, 1.0f, 1.0f);
-        }
-        char xbuf[64];
-        std::snprintf(xbuf, sizeof(xbuf), "EXP %d/%d", w.experience, need);
-        draw_ui_label(app, hs.J + 8.0f, hs.P + 78.0f, hs.width() - 16.0f, 24.0f, xbuf, 0.7f,
-                      UiAlign::Left, 0.9f, 0.9f, 0.9f);
-        char mbuf[128];
-        std::snprintf(mbuf, sizeof(mbuf), "WINS %d    COINS %d    GEMS %d", wins, w.money,
-                      w.bonus);
-        draw_ui_label(app, hs.J + 8.0f, hs.P + 106.0f, hs.width() - 16.0f, 24.0f, mbuf, 0.8f,
-                      UiAlign::Left, 1.0f, 1.0f, 1.0f);
-    }
-    // Ported `ds` POWERLEVELING_SLIDER body (L2227): `Tt = id.ht().tH` — the
+    // Ported `ds` POWERLEVELING_SLIDER body (L2227): `Tt = id.ht().tH` - the
     // PerkTree tiers (character_progress.xml asset 1315 via `td.Vib` L1160),
     // each the `tk` compare cell (up to two `uk` cells + `Rx` arrows,
     // L2217-2222) sized `ba(400,150)` (`ds.NC` L2230). The `tk`/`uk` atlas art
     // (profile 258/246) is ASTC -> the text/flat cell is the live path.
-    if (perk_rows_.empty()) {
-        // Faithful EMPTY state: the `Yr` sub-header `Y.na("profileNoSkills")`
-        // (L2191) - "No perks to learn". No invented placeholder text.
-        draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
-                      loc(app, "profileNoSkills", "No perks to learn"), 0.9f, UiAlign::Center,
-                      0.8f, 0.8f, 0.8f);
-    } else {
-        const float row_h = 52.0f;
+    // `XB=ei.zs` (L2206) shows `ProfileNoPerks` while the learned grid (`Gk`,
+    // fed by `p.o.co.jF`) is empty; the `zr=Yr` panel shows
+    // `profileNoSkills` while nothing is available (`vb.hla` case 0, L2190).
+    // Both dock into the side slots (L2196 `Pn(b)`/`Pn(c)`).
+    {
+        bool any_learned = false, any_avail = false;
+        for (const PerkRow& pr : perk_rows_) {
+            if (pr.learned_level > 0) any_learned = true;
+            // `ds.MCa` (L2227): a learnable (`Be==0`) perk whose `level` the
+            // player has reached. The oracle `profile_tab0` (level 1) shows
+            // `profileNoSkills` — the min perk tier is 2.
+            if (pr.kind == "Perk" && w.level >= pr.tier) any_avail = true;
+        }
+        if (!any_learned) {
+            // `ei.zs` wraps (`ea.rd(!0)`, L2206) into the panel: oracle shows
+            // "У вас нет / изученных / умений" (3 centred lines).
+            draw_ui_wrapped(app, pl.left_slot.J + 14.0f,
+                            pl.left_slot.P + pl.left_slot.height() * 0.5f - 50.0f,
+                            pl.left_slot.width() - 28.0f, 100.0f,
+                            loc(app, "ProfileNoPerks", "You have no learned skills"),
+                            0.5f, UiAlign::Center, 0.16f, 0.11f, 0.06f);
+        }
+        if (!any_avail) {
+            draw_ui_wrapped(app, pl.right_slot.J + 14.0f,
+                            pl.right_slot.P + pl.right_slot.height() * 0.5f - 36.0f,
+                            pl.right_slot.width() - 28.0f, 72.0f,
+                            loc(app, "profileNoSkills", "No available skills"), 0.5f,
+                            UiAlign::Center, 0.16f, 0.11f, 0.06f);
+        }
+    }
+    if (!perk_rows_.empty()) {
+        // `ds.NC` (L2230) sizes every `tk` cell `b.ba(400,150)` and the `Xd`
+        // slider scales the cell to the list width (`ff.kf`): cell height =
+        // 150 * (listW/400) = 0.375*listW. The native list width is the `jq`
+        // viewer width, so `row_h = 0.375*v.width()` (the old flat 52px was
+        // ~0.15x, packing the whole tree into the visible band).
+        const float row_h = 0.25f * v.width();
         const float gutter = 78.0f;  // `Rx` + tier-level track width
         // --- JS `tk`/`Rx`/`uk` row geometry (L2217-2230) ------------------
         // `ds.NC` (L2230) sizes every `tk` cell `b.ba(400,150)`. `tk.$i`
@@ -8136,8 +8258,8 @@ void EquipmentScreen::render_impl(App& app) {
         const float bdg_dy = (kPerkbackSrc * 0.5f -
                               kLevelSrcH * kFlagScale * 1.15f) * bdg_unit;
         // The `tk` is symmetric about the seam the `Rx` group docks to.
-        const float rcx = v.J + (v.width() + gutter) * 0.5f;
-        float row_top = v.P + 6.0f;
+        const float rcx = v.J + v.width() * 0.5f;  // pair centred on the scroll
+        float row_top = v.P + 40.0f;               // below the top `Zh` roll
         int last_tier = -1;
         int tier_idx = -1;   // `tk.$i(a==0, a+1==len)` L2228 first/last gate
         int col = 0;
@@ -8152,15 +8274,15 @@ void EquipmentScreen::render_impl(App& app) {
                 ++tier_idx;
                 char tbuf[32];
                 std::snprintf(tbuf, sizeof(tbuf), "LV %d", r.tier);
-                draw_ui_label(app, v.J + 4.0f, row_top + 8.0f, gutter - 10.0f, 20.0f, tbuf,
+                draw_ui_label(app, v.J + 16.0f, row_top + 8.0f, gutter - 10.0f, 20.0f, tbuf,
                               0.6f, UiAlign::Left, 1.0f, 0.9f, 0.4f);
             }
-            if (row_top + row_h > v.W) break;
+            if (row_top + row_h > v.W - 34.0f) break;
             if (col >= 2) {  // `tk` packs two `uk` cells per tier
                 row_top += row_h + 6.0f;
                 col = 0;
             }
-            if (row_top + row_h > v.W) break;
+            if (row_top + row_h > v.W - 34.0f) break;
             const float cy = row_top + row_h * 0.5f;
             const bool pair_left = (col == 0) && (i + 1 < perk_rows_.size()) &&
                                    (perk_rows_[i + 1].tier == r.tier);
@@ -8286,30 +8408,53 @@ void EquipmentScreen::render_impl(App& app) {
         }
     }
     } else if (tab_ == kProfileTabMoves) {
-        // Folded Moves sub-view (JS `qv`, To.kOa=11 L2201) — the learned
-        // moves for the wielded weapon; moved verbatim from the deleted
-        // standalone MovesScreen.
-        (void)app.draw_text(v.J + 8.0f, v.P + 8.0f,
-                            "MOVES - " + loc(app, weapon_, weapon_), 1.1f, 1.0f, 0.9f, 0.4f);
-        constexpr std::size_t kMaxRows = 16;
-        for (std::size_t i = 0; i < move_rows_.size() && i < kMaxRows; ++i) {
+        // Folded Moves sub-view (JS `qv`/`es`, To.kOa=11 L2201): the learned
+        // moves for the wielded weapon. `es.NC` (L2239) cells are
+        // `ba(400,150)`; the native lays the rows inside the `jq` viewer
+        // content band (below the top `Zh` roll) via `draw_ui_label`. The old
+        // `app.draw_text` passed a RAW glyph scale (not `ua*ea_a1`) — the
+        // giant overlapping text in the port capture.
+        const float inner_top = v.P + 34.0f;                 // below the `Zh` roll
+        const float inner_h = v.height() - 68.0f;
+        constexpr float kMoveRowH = 44.0f;
+        draw_ui_label(app, v.J + 16.0f, inner_top, v.width() - 32.0f, 28.0f,
+                      loc(app, weapon_, weapon_), 0.85f, UiAlign::Center, 0.35f, 0.22f,
+                      0.10f);
+        const int max_rows =
+            std::max(0, static_cast<int>((inner_h - 32.0f) / kMoveRowH));
+        const int n = std::min(static_cast<int>(move_rows_.size()), max_rows);
+        for (int i = 0; i < n; ++i) {
             const MoveRow& r = move_rows_[i];
             char buf[128];
-            std::snprintf(buf, sizeof(buf), "%s  [%s] P%d", r.name.c_str(),
+            std::snprintf(buf, sizeof(buf), "%s   [%s] P%d", r.name.c_str(),
                           r.type.empty() ? "-" : r.type.c_str(), r.priority);
-            (void)app.draw_text(v.J + 16.0f, v.P + 48.0f + static_cast<float>(i) * 30.0f,
-                                buf, 0.75f, 1.0f, 1.0f, 1.0f);
-        }
-        if (move_total_ > static_cast<int>(kMaxRows)) {
-            char buf[64];
-            std::snprintf(buf, sizeof(buf), "+%d more (%d total)",
-                          move_total_ - static_cast<int>(kMaxRows), move_total_);
-            (void)app.draw_text(v.J + 16.0f, v.P + 48.0f + 16.0f * 30.0f, buf, 0.75f, 0.7f,
-                                0.7f, 0.7f);
+            draw_ui_label(app, v.J + 20.0f,
+                          inner_top + 34.0f + static_cast<float>(i) * kMoveRowH,
+                          v.width() - 40.0f, kMoveRowH, buf, 0.62f, UiAlign::Left, 0.18f,
+                          0.13f, 0.08f);
         }
         if (move_rows_.empty()) {
-            (void)app.draw_text(v.J + 16.0f, v.P + 48.0f, "No moves for this weapon.", 0.8f,
-                                0.7f, 0.7f, 0.7f);
+            draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
+                          "No moves for this weapon.", 0.8f, UiAlign::Center, 0.4f, 0.3f,
+                          0.2f);
+        }
+        // `zr=Yr` right panel: the selected move name + the `$r.Op`
+        // `Y.na("profile_BtnShow")` view button (L2234 `$r.ba`).
+        if (!move_rows_.empty()) {
+            const ShopRect& rp = pl.right_slot;
+            const std::string& nm = move_rows_.front().name;
+            draw_ui_label(app, rp.J + 8.0f, rp.P + 26.0f, rp.width() - 16.0f, 44.0f,
+                          loc(app, nm, nm), 0.95f, UiAlign::Center, 0.16f, 0.11f, 0.06f);
+            const float bw2 = rp.width() * 0.72f, bh2 = 46.0f;
+            const float bx2 = rp.J + rp.width() * 0.5f;
+            const float by2 = rp.W - 70.0f;
+            if (!try_draw_atlas_button(app, "EButtonBeige", bx2, by2, bw2, bh2, 1.0f)) {
+                draw_flat_button(app, "VIEW", bx2, by2, bw2, bh2, 0.85f, 0.78f, 0.55f,
+                                 false);
+            }
+            draw_ui_label(app, bx2 - bw2 * 0.5f, by2 - 10.0f, bw2, 20.0f,
+                          loc(app, "profile_BtnShow", "VIEW"), 0.7f, UiAlign::Center, 0.2f,
+                          0.15f, 0.08f);
         }
     } else if (tab_ == kProfileTabSeals) {
         // Ported `gs` SEALS_SLIDER body (`gs.uZ` L2231): the owned `I.Vr`
@@ -8376,8 +8521,12 @@ void EquipmentScreen::render_impl(App& app) {
                 const float x0 = v.J + 4.0f, x1 = v.J + v.width() - 4.0f;
                 const float q[] = {x0, yy + 2.0f, x1, yy + 2.0f, x1, yy + row_h - 2.0f,
                                    x0, yy + 2.0f, x1, yy + row_h - 2.0f, x0, yy + row_h - 2.0f};
-                rr.draw_triangles(q, 6, r.reward_available ? 0.28f : 0.14f, 0.16f, 0.12f,
-                                  0.95f);
+                // `hs`/`is` cell band: the oracle `profile_tab2` rows read as a
+                // warm translucent band over the parchment (was an opaque
+                // near-black quad).
+                rr.draw_triangles(q, 6, r.reward_available ? 0.40f : 0.34f,
+                                  r.reward_available ? 0.30f : 0.25f,
+                                  r.reward_available ? 0.16f : 0.14f, 0.55f);
                 // Icon `is` `Ed.Fs` (L2212): `Achievements01/ach_*` on atlas
                 // 270 (`y.MQa` "Achievements01/ach_block_gold", L2470). The
                 // flat square is the explicit miss fallback.
@@ -8388,11 +8537,9 @@ void EquipmentScreen::render_impl(App& app) {
                                         x0 + 22.0f + isz, cy + isz, x0 + 22.0f - isz, cy + isz};
                     rr.draw_triangles(iq, 6, 0.35f, 0.35f, 0.4f, 0.95f);
                 }
-                const std::string desc_key = r.description.empty() ? r.name : r.description;
-                const float text_w = std::max(60.0f, x1 - x0 - 150.0f);
-                draw_ui_label(app, x0 + 46.0f, cy - 16.0f, text_w, 18.0f,
-                              loc_template(app, desc_key, r.name), 0.5f, UiAlign::Left, 1.0f,
-                              1.0f, 1.0f);
+                // `is` cell (L2212) draws NO description text — the text
+                // lives in the `zr=Yr` info panel (below). Replaced the inline
+                // description with the cited cell (icon + bar + count).
                 // `is.D1a` (L2213): `min(QZ,counter)/counter` else
                 // `Y.na("achievement_Completed")`.
                 char pbuf[48];
@@ -8443,9 +8590,38 @@ void EquipmentScreen::render_impl(App& app) {
                 yy += row_h;
             }
         }
+        // `zr=Yr` info panel (L2196 `zr.Pn(c)`): the selected achievement's
+        // title (`as.le` L2210) + description (`as.le.V(Y.na(a.description))`)
+        // + the reward line (`as.sq` L2210 `achievementReward`). The oracle
+        // `profile_tab2` right panel shows row 0 ("Ни царапины").
+        {
+            const ShopRect& rp = pl.right_slot;
+            const float pad = rp.width() * 0.06f;
+            if (!achiev_rows_.empty()) {
+                const AchievRow& ar = achiev_rows_.front();
+                draw_ui_label(app, rp.J + pad, rp.P + 22.0f, rp.width() - 2.0f * pad,
+                              40.0f, loc(app, ar.name, ar.name), 0.95f, UiAlign::Left,
+                              0.16f, 0.11f, 0.06f);
+                const std::string dk = ar.description.empty() ? ar.name : ar.description;
+                draw_ui_wrapped(app, rp.J + pad, rp.P + 78.0f, rp.width() - 2.0f * pad,
+                                rp.height() - 156.0f, loc_template(app, dk, ar.name),
+                                0.52f, UiAlign::Left, 0.20f, 0.14f, 0.08f);
+                if (ar.money_prize > 0 || ar.bonus_prize > 0) {
+                    char rb[64];
+                    // The RU `achievementReward` value already carries its
+                    // trailing colon ("НАГРАДА:"), so join with a space.
+                    std::snprintf(rb, sizeof(rb), "%s %d",
+                                  loc(app, "achievementReward", "REWARD:").c_str(),
+                                  ar.money_prize + ar.bonus_prize);
+                    draw_ui_label(app, rp.J + pad, rp.W - 58.0f, rp.width() - 2.0f * pad,
+                                  30.0f, rb, 0.7f, UiAlign::Left, 0.20f, 0.14f, 0.08f);
+                }
+            }
+        }
     }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
-    draw_za_chrome(app, kScreenProfile);
+    // Collapsed on arrival (oracle `profile_tab*` shows the `МЕНО` header).
+    draw_za_chrome(app, kScreenProfile, nullptr, /*force_collapsed=*/true);
     // The BACK button (top-left) is drawn AFTER the `za` chrome so the chrome's
     // full-width topPanel (`odb` L1975, height min(H*.13,100)) no longer
     // occludes it. NOTE: the JS Profile `vb` (L2189-2201) is a tabbed screen

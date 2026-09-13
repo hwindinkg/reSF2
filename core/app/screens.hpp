@@ -509,6 +509,18 @@ private:
     // Ported `fs` ACHIEVEMENTS (tab 2) rows, L2213-2216.
     std::vector<AchievRow> achiev_rows_;
 
+    // --- Backdrop = the persistent dojo scene (JS `vb extends ma`) ---------
+    // Like `Oa` (L2285), `vb` (L2189) is an overlay on the running dojo
+    // location: the oracle `profile_tab*`/`moves` captures show the dojo
+    // interior + the `FightNone` idle figure behind the parchment UI
+    // (PORT_AUDIT_UI §2.5). Same `assets.dojo` layer stack + `ma.Sya` hub
+    // framing as the DojoScreen hub / ShopScreen (the old `dojo_sprite` +
+    // flat dim was the wrong backdrop).
+    std::unique_ptr<sf2::scene::Fighter> backdrop_fighter_;
+    bool backdrop_fig_tried_ = false;
+    bool backdrop_fig_ok_ = false;
+    const sf2::data::anim_clip* backdrop_idle_ = nullptr;  // owned by FightAssets
+
     // `uk` cell hit rects captured during render (so update_impl hit-tests
     // the SAME wrapping layout the renderer produced). `index` = perk_rows_.
     struct PerkCellHit {

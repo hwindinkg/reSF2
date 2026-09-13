@@ -430,7 +430,8 @@ static const UiTourStep kFidelitySteps[] = {
     //    start_tutorial_fight).
     {0.0f, 0.0f, "tut fight pause (Esc)", 6, 10, -1, 30, nullptr, 256, false},
     // 6: the pause dialog home ("QUIT") pops the fight -> the clean Dojo hub.
-    {720.0f, 470.0f, "tut fight quit->dojo", 6, 10, 3, 0, nullptr},
+    //    `Dr` home button centre (L2066/L2068 layout: row y=396, x=403.75).
+    {403.75f, 396.0f, "tut fight quit->dojo", 6, 10, 3, 0, nullptr},
     // 7: the clean Dojo hub (tutorial done; no banner).
     {0.0f, 0.0f, "dojo hub", 3, 20, -1, 80, "dojo_hub.png", 0, true},
     // 8: expand the collapsed `za` nav column (the header tap).
@@ -447,8 +448,10 @@ static const UiTourStep kFidelitySteps[] = {
     // --- Fight (auto-attack ON so it resolves to Results) -------------------
     {471.0f, 375.0f, "map->fight", 5, 10, 6, 40, "fight_intro.png", 0, false, 0.0f, 0.0f, 1},
     // Pause early (phase 1, definitely live), capture, resume. Esc is the
-    // native pause alias (P is the JS Magic key).
-    {0.0f, 0.0f, "pause (Esc)", 6, 0, -1, 40, "pause.png", 256, false},
+    // native pause alias (P is the JS Magic key). `min_delay=90` lets the
+    // ROUND intro banner clear first (the oracle `pause` capture has no
+    // banner over the dialog).
+    {0.0f, 0.0f, "pause (Esc)", 6, 90, -1, 40, "pause.png", 256, false},
     {0.0f, 0.0f, "resume (Esc)", 6, 0, -1, 30, nullptr, 256, false},
     // Phase 2 (>133 fight frames): idle stance.
     {0.0f, 0.0f, "fight stance", 6, 0, -1, 140, "fight_stance.png", 0, true},
