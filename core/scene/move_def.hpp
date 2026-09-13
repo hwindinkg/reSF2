@@ -166,6 +166,15 @@ struct MoveDef {
     std::string file_name;
     int mid_frames = 0;
     int first_frame = 0;
+    // JS `jc.WGa` (`NoInterpolationFrames` attr): when set, `Te.Skb` passes
+    // `!WGa` as `Qqa`, which makes `Te.Pka` PREPEND two copies of clip frame
+    // `min(len-1, FirstFrame+2)` to the play buffer (`vu.Pka` L340543). When
+    // clear, `Qqa` is true and `Te.qrb` (L282683) instead seeds the two
+    // prepended slots from the CURRENT posed node ± 1.5·velocity — the
+    // clip-start pose blend. Either way `vu.J$a()` (= size) is 2 larger, so
+    // the clip plays two extra ranges (the source of the JS 133-vs-128 intro
+    // frame count). Absent attr -> false (most moves).
+    bool no_interp = false;
     int end_frame = 0;   // EndFrame attr, else 0 (JS `jc.Lj`)
     int priority = 0;
     float style_factor = 1.0f;  // `RNa` (StyleFactor attr, default 1.0)

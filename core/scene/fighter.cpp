@@ -40,6 +40,8 @@ void set_fighter_pivot_bone(const std::string& name) {
 void Fighter::set_model(const Model& model) {
     model_ = model;
     pos_.assign(model_.bones.size() * 2, 0.0f);
+    playhead_ = 0;
+    prepend_.clear();
 
     // [FIX stretched mesh — ragdoll solver] The game keeps the body/head
     // cloth nodes attached to the skeleton with a Verlet ragdoll solver
@@ -359,6 +361,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
 
     current_move_ = &move;
     move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
+    playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
     active_intervals_.clear();
     // [FIX Phase 4a — pacing] Subframes per clip-frame (JS `Te.Gka`:
     // `Tx = model.model.HD()`, `rpa.initialize((Ua.XJ+1)*Tx)`; `eda`
@@ -414,6 +417,9 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         root_dm_x_ = 0.0f;
         root_av_x_ = 0.0f;
     }
+    // JS `Te.Skb` order: the play buffer prepend (`Pka`/`qrb`) is built
+    // before the first `eda` sample; `Gub` (align) also precedes it.
+    build_prepend(move);
     sample_current();
     return true;
 }
@@ -512,9 +518,14 @@ void Fighter::advance_step() {
     // `eda`: `mo += Tx`, `Tx = (Ua.XJ+1)`). MidFrames=2 -> 3.
     const int sub = std::max(1, (current_move_->mid_frames + 1) * 1);
 
+    // Clip frame (JS `Te.M0()`: `(Xh<=2?0:Xh-2)+Mq`): playback slot
+    // `playhead_` maps to clip frame `FirstFrame + max(0, Xh-2)`. `move_frame_`
+    // stays this CLIP frame for the interval/cf consumers, while `sample()`
+    // reads the play buffer (prepend slots 0/1 then clip[FirstFrame..]).
+    const int ff = std::max(0, current_move_->first_frame);
+    move_frame_ = ff + std::max(0, playhead_ - 2);
+
     // Interval update: active when max(start,qx) <= frame <= min(finish,Lj).
-    // The intervals use the CLIP frame (Xh = move_frame_) — the subframe
-    // phase is a render detail.
     active_intervals_.clear();
     for (const std::string& n : intervals_at(move_frame_)) {
         active_intervals_.insert(n);
@@ -550,7 +561,7 @@ void Fighter::advance_step() {
                                   : current_clip_->frames[static_cast<std::size_t>(move_frame_)]
                                         .bones[0]
                                         .x;
-        if (move_frame_ > 0 && static_cast<std::size_t>(move_frame_ - 1) <
+        if (move_frame_ > ff && static_cast<std::size_t>(move_frame_ - 1) <
                                    current_clip_->frames.size()) {
             const float com_prev =
                 current_clip_->frames[static_cast<std::size_t>(move_frame_ - 1)].bones.empty()
@@ -561,18 +572,20 @@ void Fighter::advance_step() {
         }
     }
 
-    // Clip end (JS `Te.ia` L547-548: `Xh+2 >= len` -> KNa + lS + Sca).
-    // With the subframe pacing the anim plays the playable range
-    // [FirstFrame..len-1] at `sub` subframes each + the extra hold frame
-    // (the Pka `CT` duplicates the last key, JS `vu.Pka` L340694). The
-    // observed duration = (len - FirstFrame)*sub + 1 fight-frames; the
-    // clip-frame (Xh) counter advances once every `sub` steps.
-    if (move_frame_ >= clip_len - 2 && subframe_ >= sub - 1) {
-        // The clip has fully played (the last playable frame's subframes).
+    // Clip end (JS `Te.ia` L547-548: `Xh+2 >= vu.J$a()` -> KNa + lS + Sca).
+    // `vu.J$a()` = the play buffer size = 2 prepended slots + the playable
+    // range [FirstFrame..len-1], i.e. `clip_len - ff + 2`. The buffer is
+    // sampled at `Xh = 0 .. (clip_len - ff - 1)` (the first two `Xh` ranges
+    // read the prepend slots — JS `vu.Pka` L340543 / `Te.qrb` L282683), each
+    // at `sub` subframes.
+    if (playhead_ >= clip_len - ff) {
+        // The clip has fully played (the last play buffer range's subframes).
         current_move_ = nullptr;
         current_clip_ = nullptr;
         active_intervals_.clear();
         subframe_ = 0;
+        playhead_ = 0;
+        prepend_.clear();
         align_x_ = align_y_ = align_z_ = 0.0f;
         // JS `stop()`/`KNa()` call `jc.reset()`; `Skb` L551 zeroes `j8`.
         root_active_ = false;
@@ -583,14 +596,17 @@ void Fighter::advance_step() {
     ++subframe_;
     if (subframe_ >= sub) {
         subframe_ = 0;
-        ++move_frame_;  // JS `Xh++` (once per `sub` steps)
+        ++playhead_;  // JS `Xh++` (once per `sub` steps)
     }
+    move_frame_ = ff + std::max(0, playhead_ - 2);
     sample_current();
 }
 
 void Fighter::sample_current() {
     if (current_clip_ != nullptr) {
-        sample(*current_clip_, move_frame_, world_x_, world_y_, facing_);
+        sample(*current_clip_, move_frame_, world_x_, world_y_, facing_,
+               /*interp=*/true, current_move_ != nullptr ? current_move_->first_frame : 0,
+               playhead_);
     }
 }
 
@@ -599,6 +615,8 @@ void Fighter::clear_move() {
     current_clip_ = nullptr;
     active_intervals_.clear();
     subframe_ = 0;
+    playhead_ = 0;
+    prepend_.clear();
     align_x_ = align_y_ = align_z_ = 0.0f;
     // JS `stop()` -> `jc.reset()` / `Skb` L551: the authored root state is
     // per-move; clear it so a later move starts from a zero `j8`.
@@ -688,8 +706,78 @@ void Fighter::compute_align(const MoveDef& move) {
     align_z_ = al.axis_z ? (ez - dz) : 0.0f;
 }
 
+// JS `Te.Skb` L550-551: builds the two play-buffer slots prepended before the
+// clip. `vu.Pka(a,b,c,d)` (L340543) — when the move has `NoInterpolationFrames`
+// (`c` true = `WGa` = `!Qqa`) it copies clip frame `min(len-1, FirstFrame+2)`
+// into BOTH slots. Otherwise `Te.qrb(ZW)` (L282683) seeds slot0 = `ma -
+// 1.5*(ma-mf)` and slot1 = `ma + 1.5*(ma-mf)` from the CURRENT posed node
+// (`ma`) and its previous position (`mf`) — the clip-start pose blend, where
+// 1.5 = (MidFrames+1)/2. `ZW` = the clip bone count, so only the clip bones
+// are seeded; the buffer is indexed 0..ZW-1 (JS `m.resize(this.fq, a.ZW, ...)`).
+void Fighter::build_prepend(const MoveDef& move) {
+    prepend_.clear();
+    if (current_clip_ == nullptr || current_clip_->frames.empty()) {
+        return;
+    }
+    const std::size_t nclip = current_clip_->bone_count();
+    if (nclip == 0) {
+        return;
+    }
+    prepend_.assign(nclip * 2 * 3, 0.0f);
+    const int ff = std::max(0, move.first_frame);
+    if (move.no_interp) {
+        // `vu.Pka` prepend: both slots = clip[min(len-1, FirstFrame+2)].
+        const int f = std::min(static_cast<int>(current_clip_->frames.size()) - 1, ff + 2);
+        const auto& fb = current_clip_->frames[static_cast<std::size_t>(f)].bones;
+        for (std::size_t i = 0; i < nclip; ++i) {
+            const sf2::data::anim_keyframe k = i < fb.size() ? fb[i] : sf2::data::anim_keyframe{};
+            for (int slot = 0; slot < 2; ++slot) {
+                const std::size_t u = (static_cast<std::size_t>(slot) * nclip + i) * 3;
+                prepend_[u] = k.x;
+                prepend_[u + 1] = k.y;
+                prepend_[u + 2] = k.z;
+            }
+        }
+        return;
+    }
+    // `Te.qrb`: slot0/1 = ma ∓ (XJ+1)/2 · (ma-mf) from the pre-clip solver
+    // state (`Al` ma/mf). Without solver state fall back to clip[FirstFrame]
+    // (the JS `ma`/`mf` would still hold the bind pose, not the origin).
+    if (!solver_init_ || sol_ma_.size() != model_.bones.size() * 3 ||
+        sol_mf_.size() != sol_ma_.size()) {
+        const int f = std::min(static_cast<int>(current_clip_->frames.size()) - 1, ff);
+        const auto& fb = current_clip_->frames[static_cast<std::size_t>(f)].bones;
+        for (std::size_t i = 0; i < nclip; ++i) {
+            const sf2::data::anim_keyframe k = i < fb.size() ? fb[i] : sf2::data::anim_keyframe{};
+            for (int slot = 0; slot < 2; ++slot) {
+                const std::size_t u = (static_cast<std::size_t>(slot) * nclip + i) * 3;
+                prepend_[u] = k.x;
+                prepend_[u + 1] = k.y;
+                prepend_[u + 2] = k.z;
+            }
+        }
+        return;
+    }
+    const float half = static_cast<float>(move.mid_frames + 1) * 0.5f;  // (XJ+1)/2
+    for (std::size_t i = 0; i < nclip; ++i) {
+        const std::size_t u = i * 3;
+        const float vx = (sol_ma_[u] - sol_mf_[u]) * half;
+        const float vy = (sol_ma_[u + 1] - sol_mf_[u + 1]) * half;
+        const float vz = (sol_ma_[u + 2] - sol_mf_[u + 2]) * half;
+        const std::size_t u0 = (0 * nclip + i) * 3;
+        const std::size_t u1 = (1 * nclip + i) * 3;
+        prepend_[u0] = sol_ma_[u] - vx;
+        prepend_[u0 + 1] = sol_ma_[u + 1] - vy;
+        prepend_[u0 + 2] = sol_ma_[u + 2] - vz;
+        prepend_[u1] = sol_ma_[u] + vx;
+        prepend_[u1 + 1] = sol_ma_[u + 1] + vy;
+        prepend_[u1 + 2] = sol_ma_[u + 2] + vz;
+    }
+}
+
 void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
-                     float y, int facing) {
+                     float y, int facing, bool interp, int first_frame,
+                     int playhead) {
     if (clip.frames.empty()) {
         return;
     }
@@ -706,7 +794,16 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         for (std::size_t i = 0; i < n; ++i) prev_x_[i] = pos_[i * 2];
     }
     const auto& bones = model_.bones;
-    const auto& frame_bones = clip.frames[static_cast<std::size_t>(frame)].bones;
+    // Clip bone count (JS `Ua.ZW`). In the playback path the three Bezier
+    // control points are play-buffer slots [playhead, playhead+1, playhead+2]
+    // where slots 0,1 are the prepend (`prepend_`) and slots >=2 are clip
+    // frame `FirstFrame + slot - 2` (JS `Te.Gka` reads `jc.Kh(Xh..Xh+2)`). The
+    // static path (`interp=false`) keeps the legacy (frame, frame+1, frame+2)
+    // mapping used by the dojo probe/bag poses.
+    const int clip_len_i = static_cast<int>(clip.frames.size());
+    const int fbase = interp ? std::max(0, first_frame) : frame;
+    const auto& frame_bones =
+        clip.frames[static_cast<std::size_t>(std::max(0, std::min(fbase, clip_len_i - 1)))].bones;
     const std::size_t nclip = std::min(frame_bones.size(), n);
 
     // [FIX root-motion] JS `wu` Bezier (Te.Gka/wu.f6a L1284-1286):
@@ -717,30 +814,58 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     const float w0 = omt * omt;
     const float w1 = 2.0f * omt * t_bez;
     const float w2 = t_bez * t_bez;
-    const auto& next_bones = clip.frames[std::min(frame + 1, static_cast<int>(clip.frames.size()) - 1)].bones;
-    const std::size_t nnext = std::min(next_bones.size(), n);
-    const auto& next2_bones = clip.frames[std::min(frame + 2, static_cast<int>(clip.frames.size()) - 1)].bones;
-    const std::size_t nnext2 = std::min(next2_bones.size(), n);
+    const float t_lin = static_cast<float>(subframe_) / static_cast<float>(sub_i);
+
+    // Resolve one (control slot, bone) position in clip/model space. In the
+    // playback path the buffer index is `playhead + rel`; slots 0,1 are the
+    // clip-start prepend and slots >=2 are clip frame `FirstFrame + slot - 2`.
+    // Returns false when the bone has no key at that slot (the caller then
+    // keeps the bind position).
+    auto ctl = [&](int rel, std::size_t i, float& ox, float& oy, float& oz) -> bool {
+        int abs_slot;
+        if (interp) {
+            abs_slot = playhead + rel;
+            if (abs_slot < 2) {
+                if (i >= nclip || prepend_.size() != nclip * 6) return false;
+                const std::size_t u = (static_cast<std::size_t>(abs_slot) * nclip + i) * 3;
+                ox = prepend_[u];
+                oy = prepend_[u + 1];
+                oz = prepend_[u + 2];
+                return true;
+            }
+        } else {
+            abs_slot = frame + rel;
+        }
+        int f = interp ? (fbase + abs_slot - 2) : abs_slot;
+        f = std::max(0, std::min(f, clip_len_i - 1));
+        const auto& fb = clip.frames[static_cast<std::size_t>(f)].bones;
+        if (i >= fb.size()) return false;
+        ox = fb[i].x;
+        oy = fb[i].y;
+        oz = fb[i].z;
+        return true;
+    };
+
     std::vector<float> px(n), py(n), pz(n);
     for (std::size_t i = 0; i < n; ++i) {
-        if (i < nclip) {
-            if (i < nnext && i < nnext2 && sub_i > 1) {
-                const float ax = frame_bones[i].x, ay = frame_bones[i].y, az = frame_bones[i].z;
-                const float bx = next_bones[i].x, by = next_bones[i].y, bz = next_bones[i].z;
-                const float cx = next2_bones[i].x, cy = next2_bones[i].y, cz = next2_bones[i].z;
-                const float p0x = (ax + bx) * 0.5f, p0y = (ay + by) * 0.5f, p0z = (az + bz) * 0.5f;
-                const float p2x = (bx + cx) * 0.5f, p2y = (by + cy) * 0.5f, p2z = (bz + cz) * 0.5f;
-                px[i] = w0 * p0x + w1 * bx + w2 * p2x;
-                py[i] = w0 * p0y + w1 * by + w2 * p2y;
-                pz[i] = w0 * p0z + w1 * bz + w2 * p2z;
-            } else if (i < nnext) {
-                const float t_lin = static_cast<float>(subframe_) / static_cast<float>(sub_i);
-                px[i] = frame_bones[i].x + (next_bones[i].x - frame_bones[i].x) * t_lin;
-                py[i] = frame_bones[i].y + (next_bones[i].y - frame_bones[i].y) * t_lin;
-                pz[i] = frame_bones[i].z + (next_bones[i].z - frame_bones[i].z) * t_lin;
-            } else {
-                px[i] = frame_bones[i].x; py[i] = frame_bones[i].y; pz[i] = frame_bones[i].z;
-            }
+        float ax = 0.0f, ay = 0.0f, az = 0.0f;
+        float bx = 0.0f, by = 0.0f, bz = 0.0f;
+        float cx = 0.0f, cy = 0.0f, cz = 0.0f;
+        const bool ha = ctl(0, i, ax, ay, az);
+        const bool hb = ctl(1, i, bx, by, bz);
+        const bool hc = ctl(2, i, cx, cy, cz);
+        if (i < nclip && hb && hc && sub_i > 1) {
+            const float p0x = (ax + bx) * 0.5f, p0y = (ay + by) * 0.5f, p0z = (az + bz) * 0.5f;
+            const float p2x = (bx + cx) * 0.5f, p2y = (by + cy) * 0.5f, p2z = (bz + cz) * 0.5f;
+            px[i] = w0 * p0x + w1 * bx + w2 * p2x;
+            py[i] = w0 * p0y + w1 * by + w2 * p2y;
+            pz[i] = w0 * p0z + w1 * bz + w2 * p2z;
+        } else if (i < nclip && hb) {
+            px[i] = ax + (bx - ax) * t_lin;
+            py[i] = ay + (by - ay) * t_lin;
+            pz[i] = az + (bz - az) * t_lin;
+        } else if (i < nclip && ha) {
+            px[i] = ax; py[i] = ay; pz[i] = az;
         } else { px[i] = bones[i].x; py[i] = bones[i].y; pz[i] = bones[i].z; }
     }
 

@@ -441,6 +441,7 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         if (pugi::xml_attribute f = move.attribute("FileName")) def.file_name = f.value();
         def.mid_frames = data::xml_attr_int(move, "MidFrames", 0);
         def.first_frame = data::xml_attr_int(move, "FirstFrame", 0);
+        def.no_interp = data::xml_attr_bool(move, "NoInterpolationFrames", false);
         def.end_frame = data::xml_attr_int(move, "EndFrame", 0);
         def.priority = data::xml_attr_int(move, "Priority", 0);
         def.style_factor = data::xml_attr_float(move, "StyleFactor", 1.0f);  // `RNa`

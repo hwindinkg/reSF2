@@ -220,8 +220,16 @@ public:
     // fighter's PivotNode bone (`fighter_pivot_bone()`) sits at (x, y).
     // Bones beyond the clip's bone count keep their bind position.
     // Facing -1 mirrors X.
+    //
+    // `interp` selects the JS clip-playback sampling (`Te.Gka` L285802): the
+    // interpolation buffer is [slot0, slot1, clip[FirstFrame], ...] where
+    // slots 0,1 are the clip-start prepend (JS `vu.Pka`/`Te.qrb`); the sampled
+    // control points are buffer [playhead, playhead+1, playhead+2]. With
+    // `interp=false` the legacy static mapping (frame, frame+1, frame+2) is
+    // kept for the dojo probe/bag poses.
     void sample(const sf2::data::anim_clip& clip, int frame, float x, float y,
-                int facing);
+                int facing, bool interp = false, int first_frame = 0,
+                int playhead = 0);
 
     // Flat fill color (RGB, 0..255).
     void set_color(std::uint32_t rgb) {
@@ -263,7 +271,17 @@ private:
     std::vector<const MoveDef*> hb_;        // move list (sorted, priority desc)
     const MoveDef* current_move_ = nullptr; // playing move (JS `da.Ua`)
     const sf2::data::anim_clip* current_clip_ = nullptr; // clip for `current_move_`
-    int move_frame_ = 0;                    // playback frame (JS `Te.Xh`)
+    int move_frame_ = 0;                    // clip frame (JS `Te.M0()`) for intervals/cf
+    // JS `Te.Xh` (the playback/buffer index). The play buffer is
+    // [slot0, slot1, clip[FirstFrame], clip[FirstFrame+1], ...]: slots 0,1
+    // are the clip-start prepend (JS `vu.Pka` L340543 copies of clip
+    // [FirstFrame+2] when `NoInterpolationFrames`, else `Te.qrb` L282683's
+    // `ma ± 1.5·(ma-mf)`). `move_frame_` stays the CLIP frame for the
+    // interval/cf consumers; `playhead_` drives sampling (JS `Te.Gka`).
+    int playhead_ = 0;
+    // Clip-start prepend pose, stride 3 (x,y,z) over the clip bone count
+    // (2 slots). Built by `build_prepend` at clip start; cleared when idle.
+    std::vector<float> prepend_;
     // [FIX Phase 4a — pacing] The subframe phase within the current
     // clip-frame (JS `Te.mo`). `sub_` = (MidFrames+1) subframes per
     // clip-frame (JS `eda`: `mo += Tx`, `Tx=(XJ+1)*HD`). The sample()
@@ -341,6 +359,7 @@ private:
     std::function<const sf2::data::anim_clip*(const std::string&)> clip_lookup_;
 
     void compute_align(const MoveDef& move);
+    void build_prepend(const MoveDef& move);
     void sample_current();
 };
 
