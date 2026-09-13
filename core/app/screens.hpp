@@ -125,11 +125,25 @@ private:
     void start_tutorial_fight();
 };
 
+// One boss-intro roster entry (JS `jk.init` L2062 iterates the `lD` boss
+// battle list: `g.Hf` = the warrior portrait, `g.$s` = its name).
+struct BossRosterEntry {
+    std::string name;
+    std::string image;
+};
+
+// Fidelity-tour hook (main.cpp): while on, MapScreen draws the boss-intro
+// roster (`jk`, JS L2061-2065) full-screen and freezes input, so
+// `--fidelity-tour` can capture `act_boss` headlessly (the JS shows `jk` at
+// the start of a multi-fight boss battle; `act_boss` is the oracle matrix's
+// name for that roster capture).
+bool force_boss_roster();
+void set_force_boss_roster(bool on);
+
 // The map — native Map (screen 5).
 class MapScreen : public Screen {
 public:
     explicit MapScreen(ScreenManager& mgr);
-
     ScreenId id() const override { return kScreenMap; }
 
     void update_impl(float dt) override;

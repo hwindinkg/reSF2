@@ -344,6 +344,10 @@ struct UiTourStep {
     // fidelity tour arms it on the map node-click step, before the
     // FightScreen is constructed, so the fight resolves to Results.
     int auto_attack = -1;
+    // Optional boss-roster capture hook (the fidelity tour's `act_boss`
+    // step): while set, MapScreen draws the JS `jk` boss-intro roster
+    // instead of the map so the headless tour can capture it.
+    bool force_boss_roster = false;
 };
 
 static const UiTourStep kUiTourSteps[] = {
@@ -442,9 +446,12 @@ static const UiTourStep kFidelitySteps[] = {
     // closest reachable = the ZONE_1 map itself.
     {0.0f, 0.0f, "map node sel (closest: map)", 5, 0, -1, 20, "map_node_sel.png", 0, true},
     {0.0f, 0.0f, "map panels (closest: map)", 5, 0, -1, 20, "map_panels.png", 0, true},
-    // act_boss: the boss intro act is bypassed in headless (MapScreen guards
-    // `!app().headless()`); closest reachable = the map with its boss node.
-    {0.0f, 0.0f, "act_boss (closest: map)", 5, 0, -1, 10, "act_boss.png", 0, true},
+    // act_boss: the JS `jk` boss-intro roster (multi-fight boss battle start).
+    // The port renders it headlessly via the `force_boss_roster` hook (the
+    // boss act itself is bypassed in headless — MapScreen guards
+    // `!app().headless()`), so the capture is the roster, not the map.
+    {0.0f, 0.0f, "act_boss (boss roster)", 5, 10, -1, 30, "act_boss.png", 0, true, 0.0f, 0.0f, -1,
+     true},
     // --- Fight (auto-attack ON so it resolves to Results) -------------------
     {471.0f, 375.0f, "map->fight", 5, 10, 6, 40, "fight_intro.png", 0, false, 0.0f, 0.0f, 1},
     // Pause early (phase 1, definitely live), capture, resume. Esc is the
@@ -509,6 +516,7 @@ struct TourDriver {
     int guard = 0;
     bool finished = false;
     int applied_auto_attack = -1;  // last per-step auto-attack override applied
+    int applied_force_roster = -1;  // last per-step boss-roster hook applied
 
     void frame_tick(sf2::app::App& app) {
         const UiTourStep& s = steps[step];
@@ -521,6 +529,14 @@ struct TourDriver {
             applied_auto_attack = s.auto_attack;
             std::fprintf(stdout, "%s step %d/%d auto_attack=%d\n", tag, step + 1, count,
                          s.auto_attack);
+            std::fflush(stdout);
+        }
+        // Per-step boss-roster capture hook (fidelity `act_boss`).
+        if ((s.force_boss_roster ? 1 : 0) != applied_force_roster) {
+            sf2::app::set_force_boss_roster(s.force_boss_roster);
+            applied_force_roster = s.force_boss_roster ? 1 : 0;
+            std::fprintf(stdout, "%s step %d/%d force_boss_roster=%d\n", tag, step + 1, count,
+                         applied_force_roster);
             std::fflush(stdout);
         }
         if (cur != last_seen) {

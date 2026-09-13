@@ -843,3 +843,42 @@ Sanity: Map/Shop/Profile non-black art present (black 1.56/0.01/0.00%, lum
 137.9/112.8/109.8); fight internal both halves lit (L81.3/R90.6), orange/blue
 HP bars present, no black half.
 COMMIT+PUSH per orchestrator (STATE.md untouched).
+
+## Integration round 16 - Wave U (JS-exact fight HUD + `jk` boss roster) (2026-09-13, phase1 step9)
+
+CLEAN full Release rebuild (`--clean-first`, VS17, 0 errors). Final tree =
+HEAD e1bff318 + Wave U. Extracted the REAL JS (minified
+`sf2.502f0946.js`): `lk.bMa` `al.uL(330)`/`Sh.uL(165)`, `Br.init` `uL(425)`
+default + `krb()=Pb(43)` (audit §2.6's "425" is `Br`'s DEFAULT, overridden to
+330), `Er` `e=(b==2?40:32)` `step=e+f`, `lk.Uab` `Hf.fp()` (player flip),
+`lk.obb` name frame, `ik.EK.fp()` (VS player flip), `jk.init` `d += g*.8`.
+Changes: player fight-HUD portrait horizontal flip; VS-intro player portrait
+flip; invented 1-px black HP-bar border REMOVED (no JS equivalent — `Br` draws
+only the 3 frames); `Br` band pinned to atlas rows 7..33 of 43 (`bar_y` 86.4);
+portrait canvas 307 -> 300; pause `Jn` disc 68 -> 77 px @ y115.5 (oracle 74 px);
+`jk` roster backdrop alpha 1.0 (was 0.94 = 6% dark) + pitch 277 -> 282.4
+(`d += g*.8`); fidelity-tour `force_boss_roster` hook so `act_boss` captures the
+roster headlessly.
+
+Method: fresh `game.exe reference/www/res <fresh_dojo copy> --fidelity-tour`
+from E:\reSF2 (ALL 38 STEPS DONE; 33/33 matrix files); `--ui-tour` ALL 15 STEPS
+DONE; `--headless-loop` ALL 13 STEPS DONE + save/load PASS; `--fight --headless
+700 --dump-pose 600` healthy (600 frames, phase 1->2, timer 99->91, clean
+shutdown); player idle widest-tri-span=79.5, deterministic (UI-only change; the
+mesh is HEAD e1bff318's, no scene/model edits).
+
+Oracle matrix (thr12, `oracle_matrix/*` vs `port_matrix/*`), orchestrator
+baseline -> Wave U: act_boss 95.32 -> 9.22; fight_intro 62.67 -> 41.12;
+fight_hit 47.0 -> 42.04; fight_stance 33.5 -> 28.33 (WIP 30.37); fight_attack
+-> 38.96; fight_block -> 27.02. Per-region (fight_stance): player portrait
+region 58.5% -> 17.6% (best-align 8.7%), enemy portrait 36% -> 35% (`man_kunai`
+is the best-matching asset; 33% floor = intrinsic art/crop), pause 37% -> 7.2%,
+bars 49% -> 33%/22% (residual = the `HealthBar_Empty` chevron art), timer
+56% -> 42% (glyph shape: JS `ea` id128 size `120*c` vs the native digits font).
+OPEN: the VS `Tr` big red brush + `Sn.Wg(27)` rotation (the port has no textured
+rotated-quad for the stroke band) -> fight_intro's top-left red field; the
+oracle `ma.Kq` projection not re-derived (constants calibrated to the capture).
+
+Goldens: combat_golden GREEN; spatial_golden 17 GREEN; ai_golden Node<->C++
+prng bit-exact, gb S-variant max-abs 1.11e-08 <= 1e-5, ju k=3/0/-1/-1/-1,
+horizon T/F/T. COMMIT+PUSH per orchestrator (STATE.md untouched).

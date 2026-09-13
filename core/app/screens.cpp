@@ -1554,7 +1554,7 @@ bool draw_item_image(App& app, const std::string& image_ref, float cx, float cy,
 // shipped stem is "img_drop_blue_seal" (bundle drift, SHOP_STATIC §11), so
 // both stems are tried. Returns false on a genuine miss.
 bool draw_user_image(App& app, const std::string& file_name, float cx, float cy, float w,
-                     float h, float alpha) {
+                     float h, float alpha, bool flip_x = false) {
     if (file_name.empty() || w <= 0.0f || h <= 0.0f) return false;
     static std::map<std::string, ItemImage> cache;
     static std::set<std::string> failed;
@@ -1616,6 +1616,9 @@ bool draw_user_image(App& app, const std::string& file_name, float cx, float cy,
     s.transform.set_pos(cx, cy);
     const float sc = std::min(w / static_cast<float>(ii.w), h / static_cast<float>(ii.h));
     s.transform.set_scale(sc, sc);
+    // JS `oe.fp()` — the flipped portrait (`ik.EK` in the VS intro, `lk.Hf`
+    // for the player HUD portrait, both `fp()`). Mirror about the sprite centre.
+    if (flip_x) s.transform.scale_x = -s.transform.scale_x;
     app.renderer().draw_sprite(s, ui_camera());
     return true;
 }
@@ -2581,33 +2584,22 @@ void draw_vs_intro(App& app, float t, const std::string& pname,
         try_draw_atlas_button(app, "right", 512.0f * s + 246.0f * s * 1.6f, 286.0f * s,
                               492.0f * s * 1.6f, 254.0f * s * 1.6f, sa);
     }
-    // Portraits `EK`/`RS`: slide from x=-388/1412 to 182/842 (design units),
-    // diameter 200 (oracle circles ≈ 230 px @1280).
+    // Portraits `EK`/`RS` (JS `ik` L2069-2071): `oe(Hf)` draws the users
+    // image at its natural 512 px canvas, scaled by the `ik` node scale
+    // `(a.N-a.J)/1024` (L2073) -> 512*s = 640 px canvas (the oracle ring
+    // measures ~350 px = 300/512 of the canvas). The circular frame is BAKED
+    // INTO the portrait art (avatar_masked alpha content 93..412 x 79..404),
+    // so no procedural ring is drawn (JS `Rp` stays hidden — `Fr.izb` only
+    // shows it for a `dma` portrait name). Centres: JS `EK`/`RS` `C(512)`/
+    // `D(286)` then `C(ya-330)`/`D(ra+80)` etc.; the capture pins
+    // (227.5,453.5) player / (1037.5,244.5) enemy.
     const float pdx = (-388.0f + 570.0f * slide) * s;
     const float edx = (1412.0f - 570.0f * slide) * s;
-    const float pcy = 336.0f * s;
-    const float ecy = 172.0f * s;
-    const float dia = 200.0f * s;
-    // dark ring behind the portrait (the oracle's circular frame)
-    auto ring = [&](float cx, float cy) {
-        constexpr int kSeg = 40;
-        const float r0 = dia * 0.5f;
-        const float r1 = r0 * 1.12f;
-        for (int i = 0; i < kSeg; ++i) {
-            const float a0 = 2.0f * 3.14159265f * i / kSeg;
-            const float a1 = 2.0f * 3.14159265f * (i + 1) / kSeg;
-            const float c0 = std::cos(a0), s0 = std::sin(a0);
-            const float c1 = std::cos(a1), s1 = std::sin(a1);
-            const float v[] = {cx + c0 * r0, cy + s0 * r0, cx + c1 * r0, cy + s1 * r0,
-                               cx + c1 * r1, cy + s1 * r1, cx + c0 * r0, cy + s0 * r0,
-                               cx + c1 * r1, cy + s1 * r1, cx + c0 * r1, cy + s0 * r1};
-            ren.draw_triangles(v, 6, 0.18f, 0.12f, 0.08f, alpha);
-        }
-    };
-    ring(pdx, pcy);
-    ring(edx, ecy);
-    if (!draw_user_image(app, pimg, pdx, pcy, dia, dia, alpha)) {
-        draw_user_image(app, "avatar_hero", pdx, pcy, dia, dia, alpha);
+    const float pcy = 367.8f * s;
+    const float ecy = 207.1f * s;
+    const float dia = 512.0f * s;  // JS `oe` natural canvas * node scale
+    if (!draw_user_image(app, pimg, pdx, pcy, dia, dia, alpha, /*flip_x=*/true)) {
+        draw_user_image(app, "avatar_hero", pdx, pcy, dia, dia, alpha, /*flip_x=*/true);
     }
     if (!draw_user_image(app, eimg, edx, ecy, dia, dia, alpha)) {
         draw_user_image(app, "avatar_masked", edx, ecy, dia, dia, alpha);
@@ -2619,21 +2611,26 @@ void draw_vs_intro(App& app, float t, const std::string& pname,
         try_draw_atlas_button(app, "vs", 486.0f * s, 286.0f * s, gs * s, 507.0f * s,
                               g * alpha);
     }
-    // Names `Yeb/Xeb` (C(185,114)/C(845,464), gold, Ia(128) centre).
+    // Names `Yeb/Xeb` (C(185,114)/C(845,464), gold, `Ia(128)` centre; JS
+    // `c()` L2069 calls `Ga()` so the (400,50) node anchors at its CENTRE).
+    // `draw_text_centered` takes the glyph-box TOP: subtract the box half
+    // (ink ~50 px) + the glyph `yo` (~19.5 px at native scale 1.0) -> design
+    // top 78.5 (player) / 428.5 (enemy); the capture's ink centres are
+    // (227.5,140)/(1056,580) matching JS * s.
     if (t >= kVsNameT) {
         const float na = std::clamp((t - kVsNameT) / 0.15f, 0.0f, 1.0f) * alpha;
         const sf2::data::font* fnt = app.menu_font();
         unsigned int tex = app.font_texture();
         if (fnt != nullptr && tex != 0) {
             const float nscale = 80.0f * s / 100.0f;
-            app.draw_text_centered(*fnt, tex, 185.0f * s, 114.0f * s, pname, nscale, 62.0f / 255.0f,
-                                   45.0f / 255.0f, 20.0f / 255.0f, na);  // shadow
-            app.draw_text_centered(*fnt, tex, 185.0f * s, 114.0f * s, pname, nscale, 250.0f / 255.0f,
-                                   226.0f / 255.0f, 150.0f / 255.0f, na);
-            app.draw_text_centered(*fnt, tex, 845.0f * s, 464.0f * s, ename, nscale, 62.0f / 255.0f,
-                                   45.0f / 255.0f, 20.0f / 255.0f, na);
-            app.draw_text_centered(*fnt, tex, 845.0f * s, 464.0f * s, ename, nscale, 250.0f / 255.0f,
-                                   226.0f / 255.0f, 150.0f / 255.0f, na);
+            app.draw_text_centered(*fnt, tex, 185.0f * s, 78.5f * s, pname, nscale,
+                                   62.0f / 255.0f, 45.0f / 255.0f, 20.0f / 255.0f, na);  // shadow
+            app.draw_text_centered(*fnt, tex, 185.0f * s, 78.5f * s, pname, nscale,
+                                   250.0f / 255.0f, 226.0f / 255.0f, 150.0f / 255.0f, na);
+            app.draw_text_centered(*fnt, tex, 845.0f * s, 428.5f * s, ename, nscale,
+                                   62.0f / 255.0f, 45.0f / 255.0f, 20.0f / 255.0f, na);
+            app.draw_text_centered(*fnt, tex, 845.0f * s, 428.5f * s, ename, nscale,
+                                   250.0f / 255.0f, 226.0f / 255.0f, 150.0f / 255.0f, na);
         }
     }
 }
@@ -3363,7 +3360,7 @@ struct BattleWarriorInfo {
 };
 
 BattleWarriorInfo battle_warrior(const std::string& battle_name,
-                                 const std::string& zone_name) {
+                                 const std::string& zone_name, int fight_index = 0) {
     BattleWarriorInfo out;
     try {
         sf2::data::xml_doc doc;
@@ -3402,7 +3399,17 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
             }
         }
         if (!battle) return out;
-        const pugi::xml_node fight = battle.child("Fight");
+        // The Nth `<Fight>` (JS `lD`: one `jk` roster entry per boss-fight).
+        pugi::xml_node fight;
+        {
+            int fi = 0;
+            for (const pugi::xml_node f : battle.children("Fight")) {
+                if (fi++ == fight_index) {
+                    fight = f;
+                    break;
+                }
+            }
+        }
         if (!fight) return out;
         const pugi::xml_node warriors = fight.child("Warriors");
         if (!warriors) return out;
@@ -4521,6 +4528,9 @@ void MapScreen::launch_battle(const Node& n) {
 
 void MapScreen::update_impl(float dt) {
     (void)dt;
+    // Fidelity-tour boss-roster capture: freeze the map (no taps/launches)
+    // while the roster overlay is forced (render_impl draws it).
+    if (force_boss_roster()) return;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     // Sensei modal gate (quest He records): while up, taps advance the
     // dialog instead of tabs/nodes/BACK (headless auto-drains).
@@ -4878,8 +4888,90 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
                   0.106f);
 }
 
+// ---------------------------------------------------------------------------
+// Boss-intro roster (`jk`, JS L2061-2065) + the fidelity-tour capture hook.
+// ---------------------------------------------------------------------------
+namespace {
+bool g_force_boss_roster = false;
+}  // namespace
+
+bool force_boss_roster() { return g_force_boss_roster; }
+void set_force_boss_roster(bool on) { g_force_boss_roster = on; }
+
+// `jk` (L2061-2065): a horizontal row of circular warrior portraits on the
+// `hf = Fc.Ed(-16777216)` fader + `Qa = R.$(E.get(3,6))` panel. `jk.aa`
+// state 3 scales the SELECTED entry to 1.4 and dims the rest to 0.5
+// (`Hf.node.wa(1+-.5*a)`), with the row scrolled so the selected is centred
+// (`Pp`, L2063). The oracle capture (`act_boss`) pins: selected ring ~325 px
+// centred, the others ~180 px at +-265 px. The portrait art carries its own
+// circular frame, so it is drawn at its natural 512 px canvas.
+void draw_boss_roster(App& app, sf2::render::Renderer& ren,
+                      const std::vector<BossRosterEntry>& roster, int index) {
+    // `hf = Fc.Ed(-16777216)` full-screen fader (near-black corners).
+    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(dim, 6, 0.02f, 0.015f, 0.01f, 1.0f);
+    // `Qa = R.$(E.get(3,6))` backdrop panel (the brown radial gradient),
+    // stretched full-screen. Drawn opaque (JS `Qa` has no alpha): the oracle
+    // background luminance equals the raw `bg` art, so the 0.94 alpha (which
+    // darkened it ~6%) is removed.
+    if (load_vs_atlas(app)) {
+        try_draw_atlas_button(app, "vs_bg", kViewW * 0.5f, kViewH * 0.5f, kViewW, kViewH,
+                              1.0f, /*fill=*/true);
+    }
+    if (roster.empty()) return;
+    if (index < 0 || index >= static_cast<int>(roster.size())) index = 0;
+    // Geometry pinned to the oracle capture (`act_boss`): selected disc
+    // d~271 (canvas 504), others d~213 (canvas 353), row pitch 282.4 =
+    // `d += g*.8` with g = the 353 canvas (L2062), vertical centre 362.
+    constexpr float kStep = 282.4f;   // `d += g*.8` row pitch (L2062)
+    constexpr float kSelD = 504.0f;   // selected canvas (1.4x) -> ~295 px ring
+    constexpr float kOtherD = 353.0f; // others canvas -> ~207 px ring
+    constexpr float kCy = 362.0f;
+    for (int i = 0; i < static_cast<int>(roster.size()); ++i) {
+        const float cx = kViewW * 0.5f + static_cast<float>(i - index) * kStep;
+        const float d = (i == index) ? kSelD : kOtherD;
+        const float a = (i == index) ? 1.0f : 0.5f;
+        if (!draw_user_image(app, roster[i].image, cx, kCy, d, d, a)) {
+            draw_user_image(app, "avatar_masked", cx, kCy, d, d, a);
+        }
+    }
+}
+
 void MapScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
+    // Fidelity-tour boss-roster capture (`--fidelity-tour`): draw the
+    // boss-intro roster (`jk`) instead of the map while the hook is on.
+    if (force_boss_roster()) {
+        ensure_lang(app);
+        std::vector<BossRosterEntry> roster;
+        std::string boss_battle, boss_zone;
+        if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size()) {
+            for (const Node& n : zones_[zone_sel_].nodes) {
+                if (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE") {
+                    boss_battle = n.name;
+                    boss_zone = n.zone;
+                    break;
+                }
+            }
+        }
+        // `jk.init(lD)` iterates the boss battle's `<Fight>` list (BOSS_LYNX
+        // has Fight 1/2/3 -> three roster portraits, the oracle capture).
+        for (int i = 0; i < 3 && !boss_battle.empty(); ++i) {
+            const BattleWarriorInfo bw = battle_warrior(boss_battle, boss_zone, i);
+            if (bw.attrs.empty()) break;  // no Nth <Fight>
+            BossRosterEntry e;
+            e.name = bw.first_name.empty() ? boss_battle : loc(app, bw.first_name, bw.first_name);
+            const auto av = bw.attrs.find("Avatar");
+            std::string img = (av != bw.attrs.end() && !av->second.empty()) ? av->second
+                                                                            : "avatar_masked";
+            std::transform(img.begin(), img.end(), img.begin(),
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            e.image = img;
+            roster.push_back(e);
+        }
+        draw_boss_roster(app, ren, roster, 0);
+        return;
+    }
     load_map_backdrops(app);  // once; silent unless frames decode
     const MapMetrics mm = map_metrics();
     // `Vr` map strip (JS `qk.layout` L2137 / `Vr.ba` L2118): the selected
@@ -6336,14 +6428,24 @@ void FightScreen::render_impl(App& app) {
     // centred under the timer. `Sf.layout` places the `lk` panels at
     // `W/2 ∓ 520*c*e` (L2036-2037) and `lk.bMa` hangs the bar/portrait/name
     // off them; the native view is a fixed 1280x720 (`kViewW`/`kViewH`), so
-    // the anchors are expressed directly in view px. The prior 520*c*e spread
-    // put the bars ~40 px too far apart and ~26 px too low vs the capture.
+    // the anchors are expressed directly in view px.
+    //
+    // The oracle capture (`fight_stance`) pins the panel scale: the `Br` bar
+    // is `uL(330)` design units (`lk.bMa` L2028) and measures 178 px wide,
+    // so c = 178/330 = 0.5394. The bar art is a 1-px x 43 vertical strip
+    // (HealthBar_Empty/_Full/_Hit) whose opaque band is frame rows 8..34 of
+    // 43, so a rect h = 43*c = 23.2..24.8 places the solid band at the
+    // capture's orange rows y90..104 (rect y = 90 - 8*(h/43)). The prior
+    // 209x30 @ y90 was ~31 px too wide and 6 px too low.
     // OPEN: the exact `ma.Kq` J/P projection at 16:9 (`Sya` L1834) is not
-    // re-derived here; the constants are calibrated to the oracle capture.
-    const float bar_w = 209.0f, bar_h = 30.0f;
-    const float bar_y = 90.0f;
-    const float bar_cx_player = 497.0f;
-    const float bar_cx_enemy = 783.0f;
+    // re-derived here (the port FightCamera reports Kq_h = 720 -> c=0.5867,
+    // the capture implies Kq_h = 662 -> c=0.5394; other owner). The
+    // constants are calibrated to the oracle capture, JS structure cited.
+    const float bar_w = 183.0f;   // `Br.uL(330)`; oracle fill spans x392..571 (180 px)
+    const float bar_h = 24.8f;    // `Br.Pb(43)`: opaque band = frame rows 7..33
+    const float bar_y = 86.4f;    // `al.node.D(-50)`: band pinned to oracle y90..106
+    const float bar_cx_player = 481.5f;
+    const float bar_cx_enemy = 797.0f;
     (void)hud_d;
     (void)hud_e;
     (void)hud_f;
@@ -6397,14 +6499,11 @@ void FightScreen::render_impl(App& app) {
                 ren.draw_triangles(fg, 6, r, g, b, 0.96f);
             }
         }
-        // thin border over bar for readability
-        const float br = 1.0f;
-        const float top[] = {x - br, y - br, x + w + br, y - br, x - br, y,
-                             x + w + br, y - br, x + w + br, y, x - br, y};
-        const float bot[] = {x - br, y + h, x + w + br, y + h, x - br, y + h + br,
-                             x + w + br, y + h, x + w + br, y + h + br, x - br, y + h + br};
-        ren.draw_triangles(top, 6, 0.0f, 0.0f, 0.0f, 0.85f);
-        ren.draw_triangles(bot, 6, 0.0f, 0.0f, 0.0f, 0.85f);
+        // NOTE: the former 1-px black top/bottom "readability border" was
+        // INVENTED (no JS equivalent) — `Br` draws only the three frames
+        // (`Ud` base / `nN` hit / `EG` full, L2011-2013). Its rows y84/y110
+        // are absent in the oracle capture, so it is removed (oracle: the
+        // bar's opaque band is exactly frame rows 7..33 of 43).
     };
 
     draw_hp_bar(bar_cx_player - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_player_decay_.shown(),
@@ -6415,36 +6514,27 @@ void FightScreen::render_impl(App& app) {
     draw_hp_bar(bar_cx_enemy - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_enemy_decay_.shown(),
                 s_hud_enemy_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/true);
 
-    // Fighter portraits + names (JS `lk.obb` `Sh = Fr` portrait `Rp` from the
-    // callouts atlas 1310 + `lk.gbb` two `ea` name labels at local
-    // `x=150/-550`, `y=-100`, `ua(70)`, `Ia(8/32)`). The oracle anchors:
-    // player portrait centre (310,131) r80 with the name to its right at
-    // (395,~72); enemy mirrored (970,131) with the name left of it. Portraits
-    // resolve through the `oe` user-image path (`draw_user_image`), the same
-    // one the sensei/item art uses.
+    // Fighter portraits + names (JS `lk.obb` L2029 `Sh = Fr`; `lk.gbb` L2030
+    // two `ea` name labels `ua(70)`). The oracle anchors: portrait centres
+    // (307,122)/(973,122), ring diameter ~180. Both portraits are the
+    // `oe`/`Hf` user-image art drawn at its natural 512 px canvas, whose
+    // circular frame is BAKED IN at ~300/512 = 0.586 of the canvas, so a
+    // 307 px canvas renders the capture's 180 px ring (canvas-centred: the
+    // oracle's ring centre == the canvas centre). Names sit at the bar's
+    // shoulder: player centred 432 (capture bbox x395..469), enemy 847.5
+    // (x811..884); the capture's ink rows are 59..80.
     {
-        const float port_d = 165.0f;
-        const float port_px = 310.0f, port_ex = kViewW - 310.0f;
-        const float port_py = 131.0f;
-        auto portrait_ring = [&](float cx, float cy) {
-            constexpr int kSeg = 40;
-            const float r0 = port_d * 0.5f;
-            const float r1 = r0 * 1.06f;
-            for (int i = 0; i < kSeg; ++i) {
-                const float a0 = 2.0f * 3.14159265f * i / kSeg;
-                const float a1 = 2.0f * 3.14159265f * (i + 1) / kSeg;
-                const float c0 = std::cos(a0), s0 = std::sin(a0);
-                const float c1 = std::cos(a1), s1 = std::sin(a1);
-                const float v[] = {cx + c0 * r0, cy + s0 * r0, cx + c1 * r0, cy + s1 * r0,
-                                   cx + c1 * r1, cy + s1 * r1, cx + c0 * r0, cy + s0 * r0,
-                                   cx + c1 * r1, cy + s1 * r1, cx + c0 * r1, cy + s0 * r1};
-                ren.draw_triangles(v, 6, 0.16f, 0.11f, 0.07f, 0.95f);
-            }
-        };
-        portrait_ring(port_px, port_py);
-        portrait_ring(port_ex, port_py);
-        if (!draw_user_image(app, vs_player_image_, port_px, port_py, port_d, port_d, 1.0f)) {
-            draw_user_image(app, "avatar_hero", port_px, port_py, port_d, port_d, 1.0f);
+        // `oe(Hf)` natural canvas (the old 165 px canvas shrank the art 1.9x).
+        // The canvas is the alpha-fit that reproduces the oracle ring (the
+        // 512-canvas art's opaque ring is 307/512 wide; a 300 px canvas puts
+        // it at the captured 176-180 px).
+        const float port_d = 300.0f;
+        const float port_px = 307.0f, port_ex = 973.0f;
+        const float port_py = 116.5f;
+        if (!draw_user_image(app, vs_player_image_, port_px, port_py, port_d, port_d, 1.0f,
+                             /*flip_x=*/true)) {
+            draw_user_image(app, "avatar_hero", port_px, port_py, port_d, port_d, 1.0f,
+                            /*flip_x=*/true);
         }
         if (!draw_user_image(app, vs_enemy_image_, port_ex, port_py, port_d, port_d, 1.0f)) {
             draw_user_image(app, "avatar_masked", port_ex, port_py, port_d, port_d, 1.0f);
@@ -6452,17 +6542,22 @@ void FightScreen::render_impl(App& app) {
         const sf2::data::font* nf = app.menu_font();
         const unsigned int nt = app.font_texture();
         if (nf != nullptr && nt != 0) {
-            // Names sit at the bar's inner shoulder (JS `lk.gbb` label
-            // anchor). Oracle: player left-aligned at x≈397, enemy
-            // right-aligned at x≈883; baseline y≈84.
-            app.draw_text_centered(*nf, nt, 460.0f + 1.5f, 45.0f + 1.5f, vs_player_name_, 0.80f,
-                                   0.0f, 0.0f, 0.0f, 0.55f);
-            app.draw_text_centered(*nf, nt, 460.0f, 45.0f, vs_player_name_, 0.80f, 1.0f, 0.90f,
-                                   0.62f, 1.0f);
-            app.draw_text_centered(*nf, nt, 842.0f + 1.5f, 45.0f + 1.5f, vs_enemy_name_, 0.80f,
-                                   0.0f, 0.0f, 0.0f, 0.55f);
-            app.draw_text_centered(*nf, nt, 842.0f, 45.0f, vs_enemy_name_, 0.80f, 1.0f, 0.90f,
-                                   0.62f, 1.0f);
+            // `ea.ua(70)` = font-en size 100 -> 0.70 (FONT_METRICS §2). The
+            // native menu font renders Cyrillic wider than the oracle's at a
+            // given height, so 0.48 minimises the capture ink-box error
+            // (oracle "ТЕНЬ" 75x22; native 0.63 -> 106x27, so both dims
+            // scale by ~0.48 to 81x20.6). `draw_text_centered` takes the
+            // glyph-box TOP; the capture's ink rows are 59..80.
+            const float nscale = 0.48f;
+            const float name_top = 50.0f;
+            app.draw_text_centered(*nf, nt, 432.0f + 1.5f, name_top + 1.5f, vs_player_name_,
+                                   nscale, 0.0f, 0.0f, 0.0f, 0.55f);
+            app.draw_text_centered(*nf, nt, 432.0f, name_top, vs_player_name_, nscale, 1.0f,
+                                   0.90f, 0.62f, 1.0f);
+            app.draw_text_centered(*nf, nt, 847.5f + 1.5f, name_top + 1.5f, vs_enemy_name_,
+                                   nscale, 0.0f, 0.0f, 0.0f, 0.55f);
+            app.draw_text_centered(*nf, nt, 847.5f, name_top, vs_enemy_name_, nscale, 1.0f,
+                                   0.90f, 0.62f, 1.0f);
         }
     }
 
@@ -6499,37 +6594,40 @@ void FightScreen::render_impl(App& app) {
         }
     }
 
-    // Rounds — Round pips (JS `Er` L2021-2022: e=32, f=e/2, step e+f, BL(25)
-    // rotation, frames y.UU undone / y.LQa done). Oracle places them on the
-    // bar's INNER shoulder as the dark segment marks, so the pip row rides
-    // the bar rect (was drawn below it).
-    const float pip_e = 14.0f;
-    const float pip_step = pip_e + pip_e * 0.5f;  // e + f (Er L2021)
-    const float pip_h = bar_h;
-    const float pip_y = bar_y + 3.0f;
+    // Rounds — the `lk` SECOND row: the name-frame base (`lk.Sh = Fr`,
+    // whose `Qp = Mx` L2088 draws `background = R.$(E.get(1294), y.UU)`
+    // `uL(165)`) plus the round pips (`Er` L2021-2022: `e = count==2?40:32`,
+    // `f = e/2`, step `e+f`, frames `y.UU` undone / `y.LQa` done, `Pb(43)`).
+    // In the capture the row sits BELOW the bar (panel-local y 0 vs the bar's
+    // -50): the `Mx` base rides the bar's OUTER end (player x388..472 = 84 px
+    // ≈ 165*c) and the pips step INWARD (player 535, 500 -> 22 px wide,
+    // 35 px step; `round.eL == 2` gives exactly 2 pips). The old code rode
+    // the pips ON the bar — the capture shows them on their own row.
+    constexpr float kPipW = 22.0f;     // `Er` e=40 * 0.5394
+    constexpr float kPipStep = 35.0f;  // `Er` (e+f)=60 * 0.5394
+    constexpr float kPipH = 24.8f;     // `Pb(43)` * c + opaque-band fit
+    constexpr float kPipY = 116.4f;
+    constexpr float kBaseW = 84.0f;    // `Mx` base `uL(165)` * 0.5394
     const int rounds_total = fight_->round().length;
+    auto draw_row2 = [&](const char* frame, float x, float w, bool done) {
+        if (app.draw_atlas_rect(frame, x, kPipY, w, kPipH, 1.0f)) return;
+        float dv[12] = {x, kPipY, x + w, kPipY, x, kPipY + kPipH,
+                        x + w, kPipY, x + w, kPipY + kPipH, x, kPipY + kPipH};
+        // `HealthBar_Empty` (49,26,20)/255; `Round_Done` orange.
+        const float r = done ? 1.0f : 0.19f;
+        const float g = done ? 0.41f : 0.10f;
+        const float b = done ? 0.07f : 0.08f;
+        ren.draw_triangles(dv, 6, r, g, b, 1.0f);
+    };
+    draw_row2("HealthBar_Empty", 388.0f, kBaseW, false);  // player `Mx` base
+    draw_row2("HealthBar_Empty", 807.0f, kBaseW, false);  // enemy `Mx` base
     for (int i = 0; i < rounds_total; ++i) {
         const bool p_done = i < fight_->player().rounds_won;
         const bool e_done = i < fight_->enemy().rounds_won;
-        const char* p_frame = p_done ? "Round_Done" : "Round_Undone";
-        const char* e_frame = e_done ? "Round_Done" : "Round_Undone";
-        // The player's pips step left from the bar's inner (right) end; the
-        // enemy's step right from its inner (left) end (`lk.kva` L2028).
-        const float px = bar_cx_player + bar_w * 0.5f - pip_e -
-                         static_cast<float>(i) * pip_step;
-        const float ex = bar_cx_enemy - bar_w * 0.5f + static_cast<float>(i) * pip_step;
-        if (!app.draw_atlas_rect(p_frame, px, pip_y, pip_e, pip_h, 1.0f)) {
-            float dv[12] = {px, pip_y, px + pip_e, pip_y, px, pip_y + pip_h,
-                            px + pip_e, pip_y, px + pip_e, pip_y + pip_h, px, pip_y + pip_h};
-            ren.draw_triangles(dv, 6, p_done ? 0.18f : 0.32f, p_done ? 0.92f : 0.32f,
-                               p_done ? 0.18f : 0.32f, 1.0f);
-        }
-        if (!app.draw_atlas_rect(e_frame, ex, pip_y, pip_e, pip_h, 1.0f)) {
-            float ev2[12] = {ex, pip_y, ex + pip_e, pip_y, ex, pip_y + pip_h,
-                             ex + pip_e, pip_y, ex + pip_e, pip_y + pip_h, ex, pip_y + pip_h};
-            ren.draw_triangles(ev2, 6, e_done ? 0.18f : 0.32f, e_done ? 0.92f : 0.32f,
-                               e_done ? 0.18f : 0.32f, 1.0f);
-        }
+        draw_row2(p_done ? "Round_Done" : "Round_Undone", 535.0f - static_cast<float>(i) * kPipStep,
+                  kPipW, p_done);
+        draw_row2(e_done ? "Round_Done" : "Round_Undone", 722.0f + static_cast<float>(i) * kPipStep,
+                  kPipW, e_done);
     }
 
     // The round banner (ROUND N / FIGHT! / K.O. / VICTORY / DEFEAT — JS
@@ -6563,13 +6661,15 @@ void FightScreen::render_impl(App& app) {
     const bool live =
         fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over();
     if (live && !paused_) {
-        // The HUD pause icon (`Jn`, L2034: `db.xz(E.get(1294), y.IQa)`).
-        // Oracle: centred under the timer at (640,117), 68 px.
-        if (!try_draw_atlas_button(app, "FightPause", 640.0f, 117.0f, 68.0f, 68.0f,
+        // The HUD pause icon (`Jn`, L2034: `db.xz(E.get(1294), y.IQa)`;
+        // `Jn.node.la(c*.8)` at `C(b/2)`). Oracle: disc 74 px centred at
+        // (639.5,115); the 77 px rect reproduces it (the sprite carries a
+        // ~4% transparent margin).
+        if (!try_draw_atlas_button(app, "FightPause", 640.0f, 115.5f, 77.0f, 77.0f,
                                    1.0f)) {
-            draw_flat_button(app, "II", 640.0f, 117.0f, 68.0f, 68.0f, 0.3f, 0.3f, 0.4f,
+            draw_flat_button(app, "II", 640.0f, 115.5f, 77.0f, 77.0f, 0.3f, 0.3f, 0.4f,
                              false);
-            draw_ui_label(app, 640.0f - 34.0f + 4.0f, 117.0f - 12.0f, 68.0f - 8.0f, 24.0f,
+            draw_ui_label(app, 640.0f - 34.0f + 4.0f, 115.5f - 12.0f, 68.0f - 8.0f, 24.0f,
                               "II", 0.8f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
     }
