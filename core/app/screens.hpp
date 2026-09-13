@@ -398,6 +398,17 @@ private:
     // until which the confirmation line shows.
     std::string confirm_;
     float confirm_until_ = 0.0f;
+    // --- Backdrop = the persistent dojo scene ----------------------------
+    // JS `Oa extends ma` (L2285) is an overlay on the running dojo location,
+    // so the oracle `shop_tab1..5`/`shop_detail` captures show the dojo
+    // interior + the `FightNone` idle figure behind the shop UI
+    // (PORT_AUDIT_UI §2.4; the old `_0015_bg` sky sprite was the wrong art).
+    // Rendered with the same `assets.dojo` layer stack + `ma.Sya` framing as
+    // the DojoScreen hub (`Tf.init`/`Tf.Ea` L1971-1972).
+    std::unique_ptr<sf2::scene::Fighter> backdrop_fighter_;
+    bool backdrop_fig_tried_ = false;
+    bool backdrop_fig_ok_ = false;
+    const sf2::data::anim_clip* backdrop_idle_ = nullptr;  // owned by FightAssets
 };
 
 // The Profile — native `vb` (JS L2189-2201, `dJ()==7`): a tabbed screen with

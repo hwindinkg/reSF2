@@ -6391,16 +6391,20 @@ struct ShopLayout {
     float slot_h = 0.0f;   // b = (c.W-c.P)*.8 (L2294, side-slot height)
     // `Oe`/`Gg` single-column cell list (L2261-2262, L1883-1893).
     float uw_x = 0.0f, uw_y = 0.0f, spacing = 0.0f;
+    float scroll_inset = 0.0f;  // `Fg` rail width c = viewer.width*.08 (L2262)
+    float roll_h = 0.0f;        // `vk` = 30 (top/bottom `Zh` roll bands, L2261)
+    float list_h = 0.0f;        // `scroll.Xy` = viewer.height - 2*roll_h (L1870)
     float cell_w = 0.0f;    // scroll.Gv - 8 (L2262)
     float cell_h = 0.0f;    // uw.y * cell_w / uw.x (ff.qa, L1893)
     float cell_step = 0.0f; // cell_h + spacing (Gg.ba, L1885)
-    float cell_cx = 0.0f;   // viewer.J + 4 + cell_w/2 (Pa.C(4), L2262)
-    float cell_top = 0.0f;  // viewer.P (scroll.P, L2262)
+    float cell_cx = 0.0f;   // viewer.J + inset + 4 + cell_w/2 (Pa.C(4), L2262)
+    float cell_top = 0.0f;  // viewer.P + roll_h (content.D(vk), L1871)
 };
 
 // `viewer` clipped to the JS `Oe.scroll` inner content height (`Xy`, L2262).
-// `Fg` rail dims are OPEN (PORT_AUDIT_UI §5 #4); native uses the full viewer.
-float shop_list_bottom(const ShopLayout& l) { return l.viewer.W; }
+// `Fg.ba` inssets `Xy = h - n_rolls*30`; the native has both `Dl` rolls
+// (`Vaa(30)`), so the visible list band is `viewer.P+30 .. viewer.W-30`.
+float shop_list_bottom(const ShopLayout& l) { return l.cell_top + l.list_h; }
 
 ShopLayout shop_layout(int tab) {
     const float lc = kViewW / kViewH;            // N.lc
@@ -6426,21 +6430,68 @@ ShopLayout shop_layout(int tab) {
     l.uw_x = vp.uw_x;
     l.uw_y = vp.uw_y;
     l.spacing = vp.spacing;
-    l.cell_w = l.viewer.width() - 8.0f;                 // scroll.Gv - 8 (L2262)
+    l.scroll_inset = l.viewer.width() * 0.08f;          // Fg.Pn .08 (L2262)
+    l.roll_h = 30.0f;                                   // vk (`Vaa(30)` L2261)
+    l.list_h = l.viewer.height() - 2.0f * l.roll_h;     // scroll.Xy (L1870)
+    l.cell_w = l.viewer.width() - 2.0f * l.scroll_inset - 8.0f;  // scroll.Gv-8
     l.cell_h = vp.uw_y * (l.cell_w / vp.uw_x);          // ff.qa (L1893/L2262)
     l.cell_step = l.cell_h + vp.spacing;                // Gg.ba (L1885)
-    l.cell_cx = l.viewer.J + 4.0f + l.cell_w * 0.5f;    // Pa.C(4) (L2262)
-    l.cell_top = l.viewer.P;                            // scroll.P (L2262)
+    l.cell_cx = l.viewer.J + l.scroll_inset + 4.0f + l.cell_w * 0.5f;  // Pa.C(4)
+    l.cell_top = l.viewer.P + l.roll_h;                 // content.D(vk) L1871
     return l;
 }
 
-// The detail-panel action button (`bc` content `Up`, JS `Oa.init` L2289 +
-// `Up.Pn` via `hi` L2311). `Ne.ba` (L2248-2249) lays its buttons upward from
-// the panel bottom; native anchors the single equip/buy action there.
-ShopRect shop_action_rect(const ShopRect& panel) {
-    const float inset = panel.width() * 0.1f;
-    const float h = 42.0f;
-    return {panel.J + inset, panel.W - inset - h, panel.N - inset, panel.W - inset};
+// The `Up` TRY/EQUIP/UNEQUIP action button (JS `Oa.init` L2289
+// `this.Up=new Bb("EButtonWhite")`, docked in the `jP` container over the
+// LEFT slot). `Oa.layout` (L2295, verbatim):
+//   this.jP.C((b.J+b.N)*.5*.9);
+//   this.Up.kf(b.N-b.J);            // node scale = width / btnWhite.fa.x
+//   this.jP.D(b.P+this.Up.qa());    // Bb.qa() = 112*Eb (L1843)
+// so the button spans the left slot width at the slot's TOP; the old
+// native put it in the right detail panel (invented).
+ShopRect shop_try_rect(const ShopLayout& l) {
+    const ShopRect& b = l.left_panel;
+    const float w = b.width();
+    const float sc = w / 600.0f;          // btnWhite runtime fa.x (2x sourceSize)
+    const float h = 112.0f * sc;          // Bb.qa() L1843
+    const float cx = (b.J + b.N) * 0.5f * 0.9f;  // L2295
+    const float cy = b.P + h;             // jP.D(b.P+Up.qa()) L2295
+    return {cx - w * 0.5f, cy - h * 0.5f, cx + w * 0.5f, cy + h * 0.5f};
+}
+
+// The `Oe` viewer scroll = JS `new Fg(500,800,0,30)` + `.Vaa(30)` (L2261-2262)
+// rendered in `Fg.ba` (L1869-1871) + `Zh.ba` (L1872):
+//   rails  `paper_edge_left/right` (`y.nSa/oSa` L2467), width `c = w*.08`,
+//          full height, at x [0,c] and [w-c,w];
+//   body   `paper` (`y.mSa`), x [c, w-c], full height;
+//   rolls  `Zh(w,30)`: `roll_end` (`y.goa` L2468) caps `101*30/114` wide +
+//          `roll_center` stretched between, 30 tall, at y [0,30] and
+//          [h-30,h] (top + bottom);
+//   content inset `(c, 30)` -> cell list origin (`scroll.content` L1870-1871).
+void draw_shop_scroll(App& app, sf2::render::Renderer& ren, const ShopRect& v) {
+    (void)ren;
+    if (!load_scroll_atlas(app)) return;
+    const float w = v.width(), h = v.height();
+    const float c = w * 0.08f;                       // Fg.Pn `(a.N-a.J)*.08`
+    const float cx = (v.J + v.N) * 0.5f, cy = (v.P + v.W) * 0.5f;
+    try_draw_atlas_button(app, "paper", cx, cy, w - 2.0f * c, h, 1.0f, true, false);
+    try_draw_atlas_button(app, "paper_edge_left", v.J + c * 0.5f, cy, c, h, 1.0f, true,
+                          false);
+    try_draw_atlas_button(app, "paper_edge_right", v.N - c * 0.5f, cy, c, h, 1.0f, true,
+                          false);
+    constexpr float kRollH = 30.0f;                  // vk (`Fg(500,800,0,30)`)
+    constexpr float kCapSrcW = 101.0f, kCapSrcH = 114.0f;  // roll_end 101x114
+    const float capw = kCapSrcW * (kRollH / kCapSrcH);
+    const float midw = std::max(w - 2.0f * capw, 10.0f);
+    for (int band = 0; band < 2; ++band) {
+        const float by = (band == 0) ? v.P + kRollH * 0.5f : v.W - kRollH * 0.5f;
+        try_draw_atlas_button(app, "roll_end", v.J + capw * 0.5f, by, capw, kRollH, 1.0f,
+                              true, false);
+        try_draw_atlas_button(app, "roll_end", v.N - capw * 0.5f, by, capw, kRollH, 1.0f,
+                              true, true);
+        try_draw_atlas_button(app, "roll_center", v.J + capw + midw * 0.5f, by, midw, kRollH,
+                              1.0f, true, false);
+    }
 }
 
 // Slot fallback when unequipping (JS `p.vzb`, L214-215).
@@ -6771,7 +6822,7 @@ void ShopScreen::update_impl(float dt) {
     const ShopLayout sl = shop_layout(tab_);
     const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
     const int nrows = static_cast<int>(rows.size());
-    const float list_h = sl.viewer.height();
+    const float list_h = sl.list_h;
     const float uz = (list_h - sl.cell_h) * 0.5f;             // Gg.ba L1885
     const float max_off = uz;                                 // state 4 target
     const float min_off =
@@ -6875,7 +6926,7 @@ void ShopScreen::update_impl(float dt) {
     if (!rows.empty()) {
         const int sel = std::clamp(sel_, 0, static_cast<int>(rows.size()) - 1);
         const CatalogItem& it = items_[rows[static_cast<std::size_t>(sel)]];
-        const ShopRect ar = shop_action_rect(sl.right_panel);
+        const ShopRect ar = shop_try_rect(sl);
         if (p.x >= ar.J && p.x <= ar.N && p.y >= ar.P && p.y <= ar.W) {
             side_hover_ = 1;
             if (p.pressed) {
@@ -6961,21 +7012,74 @@ void ShopScreen::update_impl(float dt) {
 
 void ShopScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    sf2::scene::Sprite* dojo = app.dojo_sprite();
-    if (dojo != nullptr) {
-        sf2::render::Camera ui_cam;
-        ui_cam.center_x = kViewW * 0.5f;
-        ui_cam.center_y = kViewH * 0.5f;
-        ui_cam.zoom = 1.0f;
-        ui_cam.view_w = kViewW;
-        ui_cam.view_h = kViewH;
-        ui_cam.arena_h = kViewH;
-        ui_cam.arena_floor = 0.0f;
-        ui_cam.arena_center_x = kViewW * 0.5f;
-        ren.draw_sprite(*dojo, ui_cam);
+    // --- Backdrop: the persistent dojo location ----------------------------
+    // JS `Oa extends ma` (L2285): the shop is an overlay on the running dojo
+    // location, so the oracle shop captures show the dojo interior + the
+    // `FightNone` idle figure (PORT_AUDIT_UI §2.4). Same `assets.dojo` layer
+    // stack + `ma.Sya` hub framing the DojoScreen hub uses. OPEN: the exact
+    // shop camera (`ma.Tya` L1832 is driven by the `Pi` item viewer; its
+    // literal mapping onto the location layers is not statically resolved —
+    // the hub framing is the nearest cited fit).
+    sf2::render::Camera hub_cam;
+    bool have_hub_cam = false;
+    if (app.has_fight_assets()) {
+        FightAssets& assets = app.fight_assets();
+        const float half = assets.dojo.arena_width() * 0.5f;
+        const float player_x = assets.dojo.player_spawn_x() - half;
+        const float enemy_x = assets.dojo.enemy_spawn_x() - half;
+        const float focus_x = (player_x + enemy_x) * 0.5f + half;
+        const float fighter_span = std::fabs(enemy_x - player_x);
+        assets.dojo.default_camera(hub_cam, kViewW, kViewH, focus_x, fighter_span);
+        have_hub_cam = true;
+        ensure_dojo_location(app);
+        assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
+    } else {
+        const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH,
+                               0, 0, kViewW, kViewH, 0, kViewH};
+        ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
     }
-    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
+    if (have_hub_cam) {
+        // Letterbox bars (JS `ma.Sya` L1833-1835) — no-op at 16:9.
+        draw_scene_letterbox(ren, hub_cam);
+        // The `FightNone` viewer's idle player figure at the location's
+        // ModelsViewer spawn (dojo 690,-93; `Bf.zjb` L476), projected through
+        // the same hub camera (identical to DojoScreen's aliveness block).
+        const float arena_half = app.has_fight_assets()
+                                     ? app.fight_assets().dojo.arena_width() * 0.5f
+                                     : 980.0f;
+        const float cont_y = app.has_fight_assets()
+                                 ? app.fight_assets().dojo.arena_height() * 0.5f -
+                                       app.fight_assets().dojo.arena_floor()
+                                 : 200.0f;
+        if (!backdrop_fig_tried_) {
+            backdrop_fig_tried_ = true;
+            if (app.has_fight_assets()) {
+                FightAssets& assets = app.fight_assets();
+                const std::string idle_name = find_idle_clip_name(assets.clips);
+                const auto it = idle_name.empty() ? assets.clips.end()
+                                                  : assets.clips.find(idle_name);
+                if (!assets.merged.bones.empty() && it != assets.clips.end() &&
+                    !it->second.frames.empty()) {
+                    backdrop_fighter_ = std::make_unique<sf2::scene::Fighter>();
+                    backdrop_fighter_->set_model(assets.merged);
+                    backdrop_fighter_->set_color(assets.dojo.root_color());
+                    backdrop_idle_ = &it->second;
+                    backdrop_fig_ok_ = true;
+                }
+            }
+        }
+        if (backdrop_fig_ok_ && backdrop_fighter_ != nullptr &&
+            backdrop_idle_ != nullptr && !backdrop_idle_->frames.empty()) {
+            const float spawn_x =
+                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_x() : 690.0f) -
+                arena_half;
+            const float spawn_y =
+                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_y() : -93.0f) +
+                cont_y;
+            backdrop_fighter_->sample(*backdrop_idle_, 0, spawn_x, spawn_y, 1);
+            draw_dojo_figure(ren, hub_cam, *backdrop_fighter_);
+        }
+    }
 
     // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width
     // bar + `Le` buttons (id 248 shop atlas `buttons/<Category>[_active]`),
@@ -7012,7 +7116,7 @@ void ShopScreen::render_impl(App& app) {
     // (`Gg.aa` `Qk` range, L1886).
     const ShopLayout sl = shop_layout(tab_);
     const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
-    const float list_h = sl.viewer.height();
+    const float list_h = sl.list_h;
     const CatalogItem* sel_it = nullptr;
     if (!rows.empty()) {
         const int sel = std::clamp(sel_, 0, static_cast<int>(rows.size()) - 1);
@@ -7022,24 +7126,35 @@ void ShopScreen::render_impl(App& app) {
         const float v[] = {r.J, r.P, r.N, r.P, r.N, r.W, r.J, r.P, r.N, r.W, r.J, r.W};
         ren.draw_triangles(v, 6, cr, cg, cb, ca);
     };
-    auto outline = [&](const ShopRect& r, float cr, float cg, float cb, float t) {
-        const ShopRect e{r.J - t, r.P - t, r.N + t, r.W + t};
-        quad(ShopRect{r.J, e.P, r.N, r.P}, cr, cg, cb, 1.0f);
-        quad(ShopRect{r.J, r.W, r.N, e.W}, cr, cg, cb, 1.0f);
-        quad(ShopRect{e.J, e.P, r.J, e.W}, cr, cg, cb, 1.0f);
-        quad(ShopRect{r.N, e.P, e.N, e.W}, cr, cg, cb, 1.0f);
-    };
     if (rows.empty()) {
-        draw_ui_label(app, sl.viewer.J, sl.viewer.P + sl.viewer.height() * 0.5f - 13.0f,
-                      sl.viewer.width(), 26.0f, "No items in this category yet.", 0.8f,
-                      UiAlign::Center, 0.7f, 0.7f, 0.7f);
+        // `Oe.Dn` no-items label (L2261 `Dn.V("noItems")`); `Oa.f5` overrides
+        // it with the lock copy per tab: `Y.na("shopRangedLocked")` (case 3) /
+        // `Y.na("shopMagicLocked")` (case 4) (L2287). The old native drew a
+        // hard-coded EN sentence.
+        const char* key = "noItems";
+        const char* fb = "No items";
+        if (tab_ == 3) {
+            key = "shopRangedLocked";
+            fb = "Defeat Lynx to unlock";
+        } else if (tab_ == 4) {
+            key = "shopMagicLocked";
+            fb = "Defeat the Hermit to unlock";
+        }
+        draw_ui_wrapped(app, sl.viewer.J + sl.scroll_inset, sl.cell_top,
+                        sl.viewer.width() - 2.0f * sl.scroll_inset, sl.list_h,
+                        loc(app, key, fb), 1.0f, UiAlign::Center, 0.25f, 0.18f, 0.10f);
     }
-    // The JS scroller clips its cells to the viewer rect — `Gg.VK` (L1891)
-    // plus the node mask `lL` (L1603). `Renderer::push_clip`/`pop_clip` is
-    // the native equivalent (renderer.hpp: glScissor, top-left origin), so a
-    // partially-scrolled cell is cut at the viewer edge instead of drawing
-    // over the side panels / tab strip.
-    ren.push_clip(sl.viewer.J, sl.viewer.P, sl.viewer.width(), sl.viewer.height());
+    // The `Oe.scroll` `Fg(500,800,0,30)` frame (paper body + rails + the two
+    // `Zh` roll bands, L1869-1872) — the oracle centre column (the port drew
+    // the room through the viewer with no scroll art).
+    draw_shop_scroll(app, ren, sl.viewer);
+    // The JS scroller clips its cells to the `scroll.content` rect (inset by
+    // the rails `c` and the roll bands `vk`) — `Gg.VK` (L1891) plus the node
+    // mask (L1603). `Renderer::push_clip`/`pop_clip` is the native equivalent
+    // (renderer.hpp: glScissor, top-left origin), so a partially-scrolled cell
+    // is cut at the content edge instead of drawing over the rolls/panels.
+    ren.push_clip(sl.viewer.J + sl.scroll_inset, sl.cell_top,
+                  sl.viewer.width() - 2.0f * sl.scroll_inset, sl.list_h);
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const CatalogItem& it = items_[rows[i]];
         // JS `Y.na(item.name)` resolution (L2247 `Ne.Vc`, L1881): the list.xml
@@ -7060,10 +7175,13 @@ void ShopScreen::render_impl(App& app) {
         const bool selected = sel_it != nullptr && sel_it->name == it.name;
         const bool owned = seen_.has_item(it.name);
         const bool equipped = owned && shop_slot_for(seen_, it.type) == it.name;
-        // `ns` cell art: item image band (`Bk.kLa(c, ce.y*.8)`, `c=ce.x*.8`,
-        // L2306 / `ns.j5` `Rf(Ye.qI(fileName))` L2307). Flat card only on a
-        // genuine art miss (equipped reads gold).
-        bool drawn = draw_item_image(app, it.image, cx, cy - ch * 0.06f, cw * 0.8f, ch * 0.55f,
+        // `ns` cell (L2303-2308): only the item image `Bk` (`Rf(Ye.qI(fileName))`,
+        // L2307; sized `kLa(c, ce.y*.8)`, `c=ce.x*.8`, L2306), the required-level
+        // star `ky` (`E.get(260), y.PRa` = "star") + the level label `av`
+        // (`V(K.T(this.bc.xf))`, L2307, shown only when `xf>0`). The name/price
+        // belong to the `bc` detail panel — the old native drew them IN the cell
+        // (invented: the oracle centre column shows only the art + "★ 1").
+        bool drawn = draw_item_image(app, it.image, cx, cy - ch * 0.04f, cw * 0.8f, ch * 0.8f,
                                      0.95f);
         if (!drawn) {
             const float r = equipped ? 0.72f : (selected ? 0.75f : (hovered ? 0.7f : 0.5f));
@@ -7071,101 +7189,115 @@ void ShopScreen::render_impl(App& app) {
             const float b = equipped ? 0.25f : (selected ? 0.3f : (hovered ? 0.26f : 0.2f));
             draw_flat_button(app, iname, cx, cy, cw, ch, r, g, b, hovered);
         }
-        if (selected) outline(cell, 1.0f, 0.85f, 0.3f, 3.0f);
-        // `ns.av` name (`C(ky.za()) D(ky.ra+ky.qa()*.2)`, L2305); stat/price
-        // `ns.pv` (`Fa(a,b*.3)`, `D(b*.8)`, L2305); owned/equipped markers.
-        draw_ui_label(app, cell.J + 12.0f, cell.P + 6.0f, cw - 24.0f, ch * 0.14f, iname, 0.7f,
-                      UiAlign::Left, 1.0f, 1.0f, 1.0f);
-        draw_ui_label(app, cell.J + 12.0f, cell.W - ch * 0.20f, cw - 24.0f, ch * 0.14f,
-                      shop_stat_line(it), 0.65f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
-        if (equipped) {
-            draw_ui_label(app, cell.J + 12.0f, cell.W - ch * 0.12f, cw - 24.0f, ch * 0.12f,
-                          "EQUIPPED", 0.6f, UiAlign::Left, 0.4f, 1.0f, 0.4f);
-        } else if (owned) {
-            draw_ui_label(app, cell.J + 12.0f, cell.W - ch * 0.12f, cw - 24.0f, ch * 0.12f,
-                          "OWNED", 0.6f, UiAlign::Left, 1.0f, 0.85f, 0.4f);
+        if (it.level > 0) {
+            // `ky.zf(40)` (L2305): the star at the cell's lower-left, the level
+            // number `av` to its right (`av.C(ky.za())`, `av.D(ky.ra+ky.qa()*.2)`).
+            const float sy = cell.W - ch * 0.16f;
+            const float sx = cell.J + cw * 0.12f;
+            if (!try_draw_atlas_button(app, "star", sx, sy, 34.0f, 32.0f, 1.0f, false, false)) {
+                draw_ui_label(app, sx - 17.0f, sy - 16.0f, 34.0f, 32.0f, "*", 0.9f,
+                              UiAlign::Center, 1.0f, 0.9f, 0.4f);
+            }
+            draw_ui_label(app, sx + 20.0f, sy - 16.0f, 60.0f, 32.0f, std::to_string(it.level),
+                          0.8f, UiAlign::Left, 0.25f, 0.18f, 0.10f);
         }
     }
     ren.pop_clip();  // end the `Gg` scroller viewer mask
-    // Side panels (L2294-2295): right detail `bc`, left `MJ` params + `op`
-    // enchantments. Only tabs 0..4 (`Q5` L2302).
-    {
-        const ShopRect rp = sl.right_panel;
-        quad(rp, 0.10f, 0.10f, 0.13f, 0.9f);
-        if (sel_it != nullptr) {
-            draw_ui_label(app, rp.J + 8.0f, rp.P + 6.0f, rp.width() - 16.0f, 26.0f,
-                          item_display_name(app, *sel_it), 0.8f, UiAlign::Center, 1.0f, 1.0f,
-                          1.0f);
-            const std::string sub = sel_it->subtype.empty() ? sel_it->type : sel_it->subtype;
-            draw_ui_label(app, rp.J + 8.0f, rp.P + 30.0f, rp.width() - 16.0f, 20.0f, sub, 0.6f,
-                          UiAlign::Center, 0.8f, 0.8f, 0.9f);
-            draw_item_image(app, sel_it->image, (rp.J + rp.N) * 0.5f, rp.P + rp.height() * 0.42f,
-                            rp.width() * 0.72f, rp.height() * 0.28f, 1.0f);
-            draw_ui_label(app, rp.J + 8.0f, rp.P + rp.height() * 0.60f, rp.width() - 16.0f,
-                          rp.height() * 0.14f, shop_stat_line(*sel_it), 0.65f, UiAlign::Center,
-                          0.9f, 0.9f, 0.9f);
-            // Detail action = `Oa.DU` label (L2299) + `Fhb` equip/buy (L2300).
-            const ShopRect ar = shop_action_rect(rp);
-            const std::string alabel = shop_action_label(app, seen_, *sel_it);
-            const bool ah = side_hover_ == 1;
-            // JS `Oa.init` (L2289): `Up = new Bb("EButtonWhite")` -> the
-            // sliced-atlas frame `btnWhite` (`Bb.fza` L1844) drawn with the
-            // `ESliced` 3-slice (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842) so the
-            // caps keep their aspect (was a single-quad 0.71x/0.19y stretch).
-            // Flat only on a genuine art miss.
-            if (!(load_sliced_atlas(app) &&
-                  draw_bb_plate(app, "btnWhite", (ar.J + ar.N) * 0.5f,
-                                (ar.P + ar.W) * 0.5f, ar.width(), ar.height(), 1.0f))) {
-                draw_flat_button(app, alabel, (ar.J + ar.N) * 0.5f, (ar.P + ar.W) * 0.5f,
-                                 ar.width(), ar.height(), ah ? 0.35f : 0.25f,
-                                 ah ? 0.65f : 0.45f, ah ? 0.35f : 0.25f, ah);
-            }
-            draw_ui_label(app, ar.J, (ar.P + ar.W) * 0.5f - 10.0f, ar.width(), 20.0f, alabel,
-                          0.75f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    // `bc` item-detail panel (JS `hi(1,!1)` docked right, `Oa.init` L2290;
+    // `Ne` content L2243-2260). Background = `y.rM` = "info_panel_h" from the
+    // scroll atlas (id 254), scaled to the panel width (`hi.Pn` L2311
+    // `this.background.kf(a.N-a.J)`); the old flat dark quad was invented.
+    const ShopRect rp = sl.right_panel;
+    // `Oa.Q5` (L2302): `this.bc.X(a)` with `a=HOa()` — the detail panel is
+    // HIDDEN on an empty/locked tab (the oracle `shop_tab4/5` show no panel).
+    bool drew_panel = false;
+    if (!rows.empty() && load_scroll_atlas(app)) {
+        drew_panel = try_draw_atlas_button(app, "info_panel_h", (rp.J + rp.N) * 0.5f,
+                                           (rp.P + rp.W) * 0.5f, rp.width(), rp.height(), 1.0f,
+                                           /*fill=*/false, /*flip_x=*/false);
+    }
+    if (!rows.empty() && !drew_panel) quad(rp, 0.10f, 0.10f, 0.13f, 0.9f);
+    if (sel_it != nullptr) {
+        // `hi.Pn` interior insets (`b=background.Eb*28`, `c=background.Eb*24`,
+        // L2311); the right panel (`Evb=1`) adds `b` on the left and `b*2` on
+        // the right.
+        const float pscale = rp.width() / 608.0f;  // info_panel_h 608x866
+        const float bx = 28.0f * pscale, by = 24.0f * pscale;
+        const float cx0 = rp.J + bx, cw0 = rp.width() - 3.0f * bx;
+        const float cy0 = rp.P + by, ch0 = rp.height() - 2.0f * by;
+        // Title `Vc` (L2243): item name `Y.na(Y.c9a(name))` (L2247), font
+        // `a*.2`, centred, at `Vc.D(d-c/2)` with `d=b*.1` (L2248).
+        const float tfont = cw0 * 0.2f;
+        const float ty = cy0 + ch0 * 0.1f - tfont * 0.5f;
+        draw_ui_label(app, cx0, ty, cw0, tfont, item_display_name(app, *sel_it), 0.85f,
+                      UiAlign::Center, 0.30f, 0.20f, 0.10f);
+        // `lH` = the `ms` attribute list (`lH.ba(a, a*.22)`, L2248): the primary
+        // combat stat icon + value + a parameter bar (`shop.json attributes/*`).
+        const char* sicon = "attributes/weapon_attack";
+        int sval = sel_it->weapon_damage;
+        if (sel_it->type == "Armor") {
+            sicon = "attributes/body_armor";
+            sval = sel_it->body_defense;
+        } else if (sel_it->type == "Helm") {
+            sicon = "attributes/head_armor";
+            sval = sel_it->head_defense;
+        } else if (sel_it->type == "Ranged") {
+            sicon = "attributes/ranged_attack";
+        } else if (sel_it->type == "Magic") {
+            sicon = "attributes/magic_attack";
         }
-        // `MJ` (`ps` params, L2275) top / `op` (`qs` enchantments, L2280)
-        // bottom. JS gives both the SAME `b2` (`MJ.Pn(b2); op.Pn(b2)`, L2295)
-        // and `hi.$ka` (L2312) opens one at a time — the native stack split
-        // and the `hi` interior insets (`b=bg.Eb*28`, L2311; OPEN) are an
-        // approximation.
-        const ShopRect lp = sl.left_panel;
-        const float mid = (lp.P + lp.W) * 0.5f;
-        const ShopRect mj{lp.J, lp.P, lp.N, mid - 6.0f};
-        const ShopRect op{lp.J, mid + 6.0f, lp.N, lp.W};
-        quad(mj, 0.10f, 0.10f, 0.13f, 0.9f);
-        // `MJ` = the JS `ps` params pane (`pca` L2276): it has NO title — the
-        // old "WIELDING" literal was a native invention. Draw the params rows
-        // from the panel top so they clear the `op` pane below.
-        draw_ui_label(app, mj.J + 8.0f, mj.P + 8.0f, mj.width() - 16.0f, mj.height() - 44.0f,
-                      wielding_line(app, seen_), 0.55f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
-        if (sel_it != nullptr) {
-            // `Ne` params (`ms`, L2247): the selected item's stat line (the
-            // JS `pv` label L2305 carries the text only — no "SEL" prefix).
-            draw_ui_label(app, mj.J + 8.0f, mj.W - 28.0f, mj.width() - 16.0f, 22.0f,
-                          shop_stat_line(*sel_it), 0.55f, UiAlign::Left, 0.9f, 0.9f, 0.7f);
+        const float stat_h = cw0 * 0.22f;
+        const float stat_y = cy0 + ch0 * 0.1f + tfont * 1.3f;
+        try_draw_atlas_button(app, sicon, cx0 + 24.0f, stat_y + stat_h * 0.5f, 44.0f, 44.0f,
+                              1.0f, false, false);
+        draw_ui_label(app, cx0 + 50.0f, stat_y + stat_h * 0.5f - 15.0f, 56.0f, 30.0f,
+                      std::to_string(sval), 0.9f, UiAlign::Left, 0.20f, 0.12f, 0.06f);
+        // `parametersBar/bar_N` is the value bar behind the number (shop atlas).
+        {
+            const float bxx = cx0 + 110.0f;
+            const float bww = cw0 - 110.0f;
+            const float bh2 = 16.0f;
+            const ShopRect track{bxx, stat_y + stat_h * 0.5f - bh2 * 0.5f, bxx + bww,
+                                 stat_y + stat_h * 0.5f + bh2 * 0.5f};
+            quad(track, 0.35f, 0.24f, 0.14f, 0.6f);
+            const ShopRect fill{bxx, track.P, bxx + bww * 0.7f, track.W};
+            quad(fill, 0.95f, 0.62f, 0.20f, 1.0f);
         }
-        quad(op, 0.10f, 0.10f, 0.13f, 0.9f);
-        // `qs` enchant pane title = `Y.na("shopEnchantments")` (L2280).
-        draw_ui_label(app, op.J + 8.0f, op.P + 6.0f, op.width() - 16.0f, 22.0f,
-                      loc(app, "shopEnchantments", "Enchantments"),
-                      0.58f, UiAlign::Left, 0.8f, 0.8f, 0.95f);
-        if (sel_it != nullptr && !sel_it->perks.empty()) {
-            float yy = op.P + 30.0f;
-            int n = 0;
-            for (const ItemPerkRef& perk : sel_it->perks) {
-                if (n >= 4 || yy + 18.0f > op.W) break;
-                draw_ui_label(app, op.J + 8.0f, yy, op.width() - 16.0f, 18.0f,
-                              loc(app, perk.name, perk.name), 0.5f,
-                              UiAlign::Left, 1.0f, 0.9f, 0.6f);
-                yy += 18.0f;
-                ++n;
-            }
-        } else {
-            // `qs.py.V(Y.na("shopNoEnchantments"))` (L2281) -> "None".
-            draw_ui_label(app, op.J + 8.0f, op.P + 30.0f, op.width() - 16.0f, 20.0f,
-                          loc(app, "shopNoEnchantments", "None"), 0.5f, UiAlign::Left, 0.6f,
-                          0.6f, 0.6f);
+        // Bottom price button `M8` = `GoldButton` (`EButtonGreen` + the
+        // `p.o.Vf` gold icon), `Ne.Wub` L2254-2255 -> `c5(M8, Aa.jp())`. The
+        // buttons stack up from `d=b-c*3`, each `e.kf(a)` (full content width)
+        // (`Ne.ba` L2249).
+        const float bpad = cw0 * 0.05f;
+        const float bh = 112.0f * pscale;
+        const float byy = cy0 + ch0 - bpad * 3.0f - bh * 0.5f;
+        if (!(load_sliced_atlas(app) &&
+              draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, byy, cw0, bh, 1.0f))) {
+            draw_flat_button(app, "", cx0 + cw0 * 0.5f, byy, cw0, bh, 0.30f, 0.62f, 0.30f, false);
         }
+        try_draw_atlas_button(app, "gold", cx0 + 30.0f, byy, 40.0f, 40.0f, 1.0f, false, false);
+        draw_ui_label(app, cx0 + 56.0f, byy - 15.0f, cw0 - 56.0f, 30.0f,
+                      std::to_string(sel_it->price), 0.9f, UiAlign::Left, 0.15f, 0.10f, 0.05f);
+    }
+    // `MJ` (`ps` params, L2275) / `op` (`qs` enchantments, L2280) are CLOSED in
+    // the oracle shop states: `Oa.init` opens only `bc` (`init(a,!0)`); MJ/op
+    // get `init(a,!1)` (`hi.$ka(false)`, L2312) and slide away. The old
+    // always-on flat left panel covered the dojo backdrop (invented).
+    // `Up` TRY/EQUIP/UNEQUIP button (`Oa.init` L2289 `Bb("EButtonWhite")`;
+    // `Oa.layout` L2295 `Up.kf(b.N-b.J)`, `jP.D(b.P+Up.qa())` — top of the
+    // LEFT slot). Label via `Oa.DU` (L2299), visible on tabs 0..4 (`h$a`).
+    if (sel_it != nullptr) {
+        const ShopRect ar = shop_try_rect(sl);
+        const std::string alabel = shop_action_label(app, seen_, *sel_it);
+        const bool ah = side_hover_ == 1;
+        if (!(load_sliced_atlas(app) &&
+              draw_bb_plate(app, "btnWhite", (ar.J + ar.N) * 0.5f, (ar.P + ar.W) * 0.5f,
+                            ar.width(), ar.height(), 1.0f))) {
+            draw_flat_button(app, alabel, (ar.J + ar.N) * 0.5f, (ar.P + ar.W) * 0.5f, ar.width(),
+                             ar.height(), ah ? 0.35f : 0.25f, ah ? 0.65f : 0.45f,
+                             ah ? 0.35f : 0.25f, ah);
+        }
+        draw_ui_label(app, ar.J, (ar.P + ar.W) * 0.5f - 11.0f, ar.width(), 22.0f, alabel, 0.8f,
+                      UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
     if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);

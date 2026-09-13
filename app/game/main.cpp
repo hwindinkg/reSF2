@@ -135,14 +135,15 @@ static const LoopStep kLoopSteps[] = {
     {184.0f, 337.0f, "dojo->shop", kScreenDojo, 0, kScreenShop, 0,
      "loop_shop.png"},
     // 5: Shop -> BUY WEAPON_KNIVES (row 0, price 50). The grid click only
-    //    SELECTS (JS `Oa.xA` L2296); the purchase is the detail-panel action
-    //    button (`bc` content `Up.Fhb`, L2300). `sel_` already defaults to
-    //    row 0 on entry, so the action click alone buys. Button centre from
-    //    `shop_action_rect(right_panel)` = (940.7, 482.5) at 1280x720.
-    {940.7f, 482.5f, "shop->buy WEAPON_KNIVES", kScreenShop, 0, -1, 12, nullptr},
+    //    SELECTS (JS `Oa.xA` L2296); the purchase is the `Up.Fhb` action
+    //    button (`Oa.layout` L2295: left-slot top, `jP.C((b.J+b.N)*.5*.9)`,
+    //    `jP.D(b.P+Up.qa())`). `sel_` already defaults to row 0 on entry, so
+    //    the action click alone buys. Button centre from `shop_try_rect` =
+    //    (305.4, 199.5) at 1280x720.
+    {305.4f, 199.5f, "shop->buy WEAPON_KNIVES", kScreenShop, 0, -1, 12, nullptr},
     // 6: Shop -> EQUIP WEAPON_KNIVES (same action button; now owned ->
     //    `xa.$o`, L2300). The honest buy->equip path.
-    {940.7f, 482.5f, "shop->equip WEAPON_KNIVES", kScreenShop, 0, -1, 12, nullptr},
+    {305.4f, 199.5f, "shop->equip WEAPON_KNIVES", kScreenShop, 0, -1, 12, nullptr},
     // 7: Shop -> BACK to the Dojo hub.
     {64.0f, 40.0f, "shop->dojo (BACK)", kScreenShop, 0, kScreenDojo, 0, nullptr},
     // 8: Dojo -> Equipment (the PROFILE button). Capture loop_equip.png on
