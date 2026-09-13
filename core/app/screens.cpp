@@ -277,6 +277,13 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
 bool load_scroll_atlas(App& app);
 void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speaker,
                   const std::string& line1, const std::string& line2, bool show_ok);
+// `od` 9-slice panel geometry (JS L1894-1900) — defined after the modal draw.
+struct OdPanel {
+    float px = 0.0f, py = 0.0f, pw = 0.0f, ph = 0.0f;  // on-screen BODY rect
+    float c = 1.0f;                                    // design -> screen scale
+};
+OdPanel od_panel(float src_w, float src_h);
+void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p);
 
 // Draws the modal panel. JS `He` (L1042-1063) routes dialogs by Type:
 // `Notification` posts to the `Ib` hint bar (`Ib.F().Qhb`, L1050); every
@@ -290,7 +297,7 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return;
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.6f);
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f);  // `Wb.Qa` = 0x80 black
     // `Notification` -> the `Ib` hint bar (L1045-1050), no `od` panel.
     if (d->type == "Notification") {
         draw_ib_hint(app, ren, d->title, d->lines.empty() ? "" : d->lines[0],
@@ -302,36 +309,10 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
     // `new fc(a,b)` with JS defaults (2340,1530) — `od` ctor L1894
     // `b==null&&(b=1530)`; the quest dialog is `ph extends od` with `super()`
     // (L1963-1964, no explicit size), so 1530 (NOT the audit's stale 1300).
-    const bool have = load_scroll_atlas(app);
-    constexpr float kOdW = 2340.0f;
-    constexpr float kOdH = 1530.0f;
-    const float c = std::min(kViewW / kOdW, kViewH / kOdH);
-    const float pw = kOdW * c, ph = kOdH * c;
-    const float px = kViewW * 0.5f - pw * 0.5f;
-    const float py = kViewH * 0.5f - ph * 0.5f;
-    bool drew_bg = false;
-    if (have) {
-        drew_bg = try_draw_atlas_button(app, "bg", px + pw * 0.5f, py + ph * 0.5f, pw, ph,
-                                        1.0f, /*fill=*/true, /*flip_x=*/false);
-        if (drew_bg) {
-            // `XN[0]` left + `XN[2]` right (`l4a` L1896): the caps sit FLUSH
-            // OUTSIDE the centre body - `e=bg_edge.fa.x/2`, cap centre
-            // -(e+bodyW/2) left / +(e+bodyW/2) right, cap width
-            // `fa.x*nodeScale`, cap height = body height (`f.Pb(g.qa())`).
-            // The right cap is `Hr(!0)` (flipped).
-            constexpr float kOdEdgeW = 219.0f;  // scroll.json bg_edge 219x1536
-            const float cap_w = kOdEdgeW * c;   // fa.x * node scale
-            try_draw_atlas_button(app, "bg_edge", px - cap_w * 0.5f, py + ph * 0.5f, cap_w,
-                                  ph, 1.0f, /*fill=*/true, /*flip_x=*/false);
-            try_draw_atlas_button(app, "bg_edge", px + pw + cap_w * 0.5f, py + ph * 0.5f,
-                                  cap_w, ph, 1.0f, /*fill=*/true, /*flip_x=*/true);
-        }
-    }
-    if (!drew_bg) {
-        const float panel[] = {px, py, px + pw, py, px, py + ph,
-                               px + pw, py, px + pw, py + ph, px, py + ph};
-        ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.95f);
-    }
+    const OdPanel panel = od_panel(2340.0f, 1530.0f);
+    const float c = panel.c;
+    const float px = panel.px, py = panel.py, pw = panel.pw, ph = panel.ph;
+    draw_od_base(app, ren, panel);
     // `Vc` title (`Fa(1560,160)`, `ua(152)`, color `Z.W6` = 0.404/0.243/0.141).
     // The Title attr is a lang key (`characterSensei` -> "СЭНСЭЙ" RU).
     const float title_w = 1560.0f * c, title_h = 160.0f * c;
@@ -362,23 +343,37 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
 // (`N.fn(AV.x/AV.y)`) and scales the node by `(b.N-b.J)/AV.x`; the three
 // `XN` slices are `E.get(254)` frames (left `bg_edge`, centre `bg`, right
 // `bg_edge`, the right one flipped `Hr(!0)`).
-struct OdPanel {
-    float px = 0.0f, py = 0.0f, pw = 0.0f, ph = 0.0f;  // on-screen panel rect
-    float c = 1.0f;                                    // design -> screen scale
-};
-
+// JS `od.l4a` (L1896): contain-fit the AV box (`N.fn(AV.x/AV.y)`) to get the
+// node scale `c = (b.N-b.J)/AV.x`, then lay the three `XN` slices off a
+// SEPARATE 1.2-aspect rect `d = b.fn(1.2)`: `g.xc(d.w * 1/c)` (the centre
+// `bg` body) with the caps at `±(XN[0].fa.x/2 + d.w/2) * c`. At 1280x720 the
+// AV 2340x1530 fit is 1101x720 (c=0.4706) but the BODY is the 1.2-rect
+// (864x720) centred — the old contain-fit-of-AV body (1101 wide) was the
+// sensei-screen edge mismatch.
 OdPanel od_panel(float src_w, float src_h) {
     OdPanel p;
     const float screen_ar = kViewW / kViewH;  // N.lc
     const float src_ar = src_w / src_h;
+    float fit_w = 0.0f, fit_h = 0.0f;
     if (screen_ar >= src_ar) {
-        p.ph = kViewH;
-        p.pw = p.ph * src_ar;
+        fit_h = kViewH;
+        fit_w = fit_h * src_ar;
     } else {
-        p.pw = kViewW;
-        p.ph = p.pw / src_ar;
+        fit_w = kViewW;
+        fit_h = fit_w / src_ar;
     }
-    p.c = p.pw / src_w;  // (b.N-b.J)/AV.x
+    p.c = fit_w / src_w;  // (b.N-b.J)/AV.x
+    // `d = N.fn(1.2)`: the 1.2-aspect rect fitted to the screen.
+    float bw = 0.0f, bh = 0.0f;
+    if (screen_ar >= 1.2f) {
+        bh = kViewH;
+        bw = bh * 1.2f;
+    } else {
+        bw = kViewW;
+        bh = bw / 1.2f;
+    }
+    p.pw = bw;                   // g.xc(d.w*1/c) * c  == d.w
+    p.ph = std::min(kViewH, bh); // g.Pb(N.height*c) * c == N.height
     p.px = kViewW * 0.5f - p.pw * 0.5f;
     p.py = kViewH * 0.5f - p.ph * 0.5f;
     return p;
@@ -390,14 +385,17 @@ void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p) {
         drew = try_draw_atlas_button(app, "bg", p.px + p.pw * 0.5f, p.py + p.ph * 0.5f,
                                      p.pw, p.ph, 1.0f, /*fill=*/true, /*flip_x=*/false);
         if (drew) {
-            // `XN[0]` left + `XN[2]` right (`l4a` L1896): flush OUTSIDE the
-            // centre body; cap width `bg_edge.fa.x*nodeScale` (=219*p.c), cap
+            // `XN[0]` left + `XN[2]` right (`l4a` L1896): `f.C(-(e+b/2*c))`,
+            // `h.C(e+b/2*c)` with `e=XN[0].fa.x/2`, `b=d.w` -> the cap centre
+            // offset is `(cap_w + body_w)/2`; cap width `bg_edge.fa.x*c`,
             // height = body height, right cap `Hr(!0)` -> flip_x.
             constexpr float kOdEdgeW = 219.0f;  // scroll.json bg_edge 219x1536
             const float cap_w = kOdEdgeW * p.c;
-            try_draw_atlas_button(app, "bg_edge", p.px - cap_w * 0.5f, p.py + p.ph * 0.5f,
+            const float off = (cap_w + p.pw) * 0.5f;
+            const float cx = p.px + p.pw * 0.5f;
+            try_draw_atlas_button(app, "bg_edge", cx - off, p.py + p.ph * 0.5f,
                                   cap_w, p.ph, 1.0f, /*fill=*/true, /*flip_x=*/false);
-            try_draw_atlas_button(app, "bg_edge", p.px + p.pw + cap_w * 0.5f,
+            try_draw_atlas_button(app, "bg_edge", cx + off,
                                   p.py + p.ph * 0.5f, cap_w, p.ph, 1.0f, /*fill=*/true,
                                   /*flip_x=*/true);
         }
@@ -601,9 +599,15 @@ constexpr float kNextBtnH = 80.0f;
 // 3=forward 4=down-forward 5=down 6=down-back 7=back 8=up-back — the same
 // key_type 1-8 the keyboard path feeds.
 // ---------------------------------------------------------------------------
-constexpr float kPadMarginC = kViewH * 0.05f;  // c — side margin
+// JS `Za.update` L454-455: `var c=N.Eha*.05; N.BK==0&&(c*=2); var d=N.Eha*.03;
+// N.lc<1&&(c=N.Eha*.04,d=N.Eha*.1); if(L.K.un) var e=N.Eha*.4;
+// else e=Math.max(150,N.Eha*.2), d=c=15;`. The oracle build has `L.K.un` TRUE
+// (every oracle capture shows the big mobile pad: joystick r~144 vs the
+// desktop r=75, knob ~65 vs ~35), so e = H*.4 = 288, c = H*.05*2 (BK==0 at
+// 16:9) = 72, d = H*.03 = 21.6.
+constexpr float kPadMarginC = kViewH * 0.05f * 2.0f;  // c — side margin
 constexpr float kPadMarginD = kViewH * 0.03f;  // d — bottom margin
-constexpr float kPadSizeE = 150.0f;            // e — max(150, H*0.2) at 720
+constexpr float kPadSizeE = kViewH * 0.4f;            // e (mobile `un`, H*.4)
 // The joystick base frame (JoystickContainer_norm) is 466 atlas px wide.
 constexpr float kJoyBaseFrame = 466.0f;
 // The buttons node is 440x596 local px (JS `fu` layout), scaled by e/440.
@@ -1687,6 +1691,8 @@ struct ZaLayout {
     float nav_step = 0.0f;     // row step b*d
     float nav_first_y = 0.0f;  // Sp + b/2*d
     float nav_btn = 0.0f;      // on-screen button size 278*d
+    float nav_qka = 0.0f;      // qka = 50*d (Fg content-frame cap / rails)
+    float nav_col_h = 0.0f;    // f = (b*N+45)*d (column height)
 };
 
 ZaLayout za_layout() {
@@ -1713,6 +1719,8 @@ ZaLayout za_layout() {
     lay.nav_step = row * d;
     lay.nav_first_y = lay.sp + (row * 0.5f) * d;                       // Sp + a
     lay.nav_btn = kZaNavSource * d;
+    lay.nav_qka = 50.0f * d;                                           // qka
+    lay.nav_col_h = col_h * d;                                         // f
     return lay;
 }
 
@@ -1900,6 +1908,19 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
     sf2::render::Renderer& ren = app.renderer();
     const float w = kViewW;
     const ZaLayout lay = za_layout();
+    // JS `gk.background` (L1997): the `za` nav scroll is built with `e=!0`, so
+    // its ctor appends the dim quad `Fc.Ed(-2147483648)` (= ARGB 0x80000000,
+    // black @ alpha 0x80). `NLa` (L2001) drives `lyb(yI)` -> `background.wa(yI)`,
+    // so a fully EXPANDED column paints the 0.5-black screen dim — this is why
+    // the oracle `dojo_menu_open` scene is exactly half-brightness vs
+    // `dojo_hub` (measured 0.50x at every sampled scene pixel). Drawn BEFORE
+    // the topPanel/widgets (JS appends `scroll` before `PL`, ctor L1973), so
+    // the bar + column stay undimmed.
+    const bool nav_expanded = !force_collapsed && g_za_nav_open;
+    if (nav_expanded) {
+        const float dim[] = {0, 0, w, 0, w, kViewH, 0, 0, w, kViewH, 0, kViewH};
+        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f);
+    }
     // topPanel (misc id 260) stretched full width (odb L1975).
     if (!try_draw_atlas_button(app, "topPanel", w * 0.5f, lay.bar_h * 0.5f, w, lay.bar_h,
                                1.0f, /*fill=*/true)) {
@@ -1953,10 +1974,32 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
     // narrow and — with the strip centred — shifted every widget.
     const float lc_clamp = std::clamp(kViewW / kViewH, 0.6f, 2.0f);
     const float yr_gap = (lc_clamp - 0.6f) / 1.4f * 100.0f;
+    // `yr.M1a` (L1995): the AddMoney icon-button (misc id 260, frames
+    // `AddMoney`/`AddMoney_Pressed`), created only with `Ca.hasFeature("iap")`
+    // — the oracle build HAS iap (the green `+` is in dojo_hub.png at
+    // x1135..1179). `yr.layout` (L1991-1993) scales it `la(a/Fg.Y.fa.y)`
+    // (height = widget_h; source 116x115) and places it at
+    // `C(au.ya+au.za()+Fg.Y.za()/2+b)`; the `au` gem box is
+    // `Fa(measured+20+10)` (L1992), so the gap carries a +30 pad before `b`.
+    constexpr float kAddMoneyBoxPad = 30.0f;            // `c=ceil(Oj+20+10)` L1992
+    const float am_h = lay.widget_h;                    // `la(a/...)` -> height a
+    const float am_w = am_h * (116.0f / 115.0f);        // misc AddMoney 116x115
     const float lvl_w = icon_level + q + num_w + q + bar_w;
     // `xr.layout` L1985: the Energy bar sits at `icon.za()*1.1`, not icon+q.
     const float en_w = std::max(icon_energy, icon_energy * 1.1f + bar_w);
-    const float money_w = icon_gold + money_num_w + yr_gap + icon_ruby + gem_num_w;
+    // `yr.layout` (L1991-1993), left->right: gold icon, money text, pad `c`,
+    // aspect gap `b`, ruby, gem text, pad `c`, gap `b`, AddMoney. `c` is the
+    // label box pad `ceil(Oj()+20+10)` (L1992) — every value/digit label box
+    // is 30px wider than its ink, so both gaps carry it.
+    const float money_text_right = icon_gold + money_num_w;
+    // `PA.C(PA.za()/2 + Dq.ya + c + b)` (L1992).
+    const float ruby_left = money_text_right + kAddMoneyBoxPad + yr_gap;
+    const float gem_text_right = ruby_left + icon_ruby + gem_num_w;
+    // `Fg.C(au.ya + au.za() + Fg.Y.za()/2 + b)` (L1993): `Fg` (db.xz) uses a
+    // LEFT anchor, so the `Fg.Y.za()/2` term does NOT cancel — the button's
+    // left edge sits there. `au` box = ink + 30.
+    const float am_left = gem_text_right + kAddMoneyBoxPad + am_w * 0.5f + yr_gap;
+    const float money_w = am_left + am_w;
     const float total = lvl_w + lay.gap + en_w + lay.gap + money_w;
     float x = (w - total) * 0.5f;
     const float cy = lay.sp * 0.5f;  // strip centred in the bar (Pr.D((Sp-...)/2))
@@ -2020,10 +2063,14 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
     const float money_tx = x + icon_gold;  // JS `Dq.C(Ss.za())`: no gap
     draw_ui_label(app, money_tx, cy - lay.widget_h * 0.45f, money_num_w, lay.widget_h,
                   money_text, num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
-    const float ruby_left = money_tx + money_num_w + yr_gap;  // JS `PA.C(PA.za()/2+Dq.ya+c+b)`
-    try_draw_atlas_button(app, "ruby", ruby_left + icon_ruby * 0.5f, cy, icon_ruby, icon, 1.0f);
-    draw_ui_label(app, ruby_left + icon_ruby, cy - lay.widget_h * 0.45f, gem_num_w, lay.widget_h,
+    const float ruby_x = x + ruby_left;  // JS `PA.C(PA.za()/2+Dq.ya+c+b)`
+    try_draw_atlas_button(app, "ruby", ruby_x + icon_ruby * 0.5f, cy, icon_ruby, icon, 1.0f);
+    draw_ui_label(app, ruby_x + icon_ruby, cy - lay.widget_h * 0.45f, gem_num_w, lay.widget_h,
                   gem_text, num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+    // `yr.Fg` AddMoney (JS `M1a` L1995, gated `Ca.hasFeature("iap")` — the
+    // oracle has iap). `layout`: centre at `gemTextRight + boxPad + btnW/2 +
+    // yr_gap`, `D(a/2)` (= cy), height `a` (widget_h).
+    try_draw_atlas_button(app, "AddMoney", x + am_left + am_w * 0.5f, cy, am_w, am_h, 1.0f);
     // `za.zq` disciple toggle (JS L1983 `xub`; frame swap `FU`; visibility
     // `v.FU` L1207 = active screen Dojo AND `g$a()`). Backed by the save
     // `Disciple`/`ShowDojoDisciple` session settings (`oub`/`Y0`/`g$a` L271).
@@ -2063,6 +2110,34 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
                       0.5f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
         return;
     }
+    // --- Expanded `za` nav column (ndb L1976-1977) --------------------------
+    // `scroll.ba(e,f,90*d)` sizes the `gk` to the column; its child
+    // `Fg(400,800,0,50)` content frame (`wc.ba(e,f,qka)`, L1977) is the
+    // parchment panel: `paper_edge_left`/`paper`/`paper_edge_right` (scroll
+    // atlas 254, `Fg` ctor L1869), rotated 90° for the vertical column
+    // (`Fg.ba` case 1 `wc.Wg(90)`). Drawn BEFORE the `Le` buttons (which are
+    // children of `wc.content`).
+    {
+        const float qka = lay.nav_qka;
+        const float col_h = lay.nav_col_h;
+        if (load_scroll_atlas(app) && lay.nav_w > 2.0f * qka && col_h > 0.0f) {
+            // `Fg(400,800,0,50)` -> orientation 0 (`ba` case 0): the strip is
+            // `e` wide x `f` tall with the `paper_edge_left`/`paper_edge_right`
+            // caps on the LEFT/RIGHT (23px = qka each) and the `paper` centre
+            // between them — NOT top/bottom (that is orientation 1, which the
+            // nav does not use). Oracle dojo_menu_open: caps x88..111 /
+            // 256..279, tan centre x111..256 (145 = 191.7 - 2*22.3).
+            const float mid_w = lay.nav_w - 2.0f * qka;
+            const float cy = lay.sp + col_h * 0.5f;
+            try_draw_atlas_button(app, "paper_edge_left", lay.nav_x + qka * 0.5f, cy, qka,
+                                  col_h, 1.0f, /*fill=*/true);
+            try_draw_atlas_button(app, "paper", lay.nav_x + qka + mid_w * 0.5f, cy, mid_w,
+                                  col_h, 1.0f, /*fill=*/true);
+            try_draw_atlas_button(app, "paper_edge_right",
+                                  lay.nav_x + lay.nav_w - qka * 0.5f, cy, qka, col_h, 1.0f,
+                                  /*fill=*/true, /*flip_x=*/true);
+        }
+    }
     // Vertical nav column (ndb L1976-1977).
     const int hover = za_nav_hit(app.pointer().x, app.pointer().y);
     const float nav_cx = lay.nav_x + lay.nav_w * 0.5f;
@@ -2095,6 +2170,32 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
             draw_ui_label(app, bx - lay.nav_btn * 0.2f, by - 9.0f, lay.nav_btn * 0.4f, 18.0f,
                           std::to_string(badges[i]), 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
+    }
+    // `gk`'s title rail (`Zh`: `y.goa`/`y.pSa` = roll_end/roll_center, L1872/
+    // L2467). `JT` (L2001) puts it at `D(f - railH/2)` once expanded, so the
+    // "МЕНЮ" roll slides from the column TOP (collapsed) to the BOTTOM
+    // (oracle dojo_menu_open: y~600..637). `gk.ba(e,f,90*d)` -> rail height
+    // `90*d`; `Zh.ba(e,railH)` -> `c = railH>e = false`, so the roll is
+    // horizontal across the column width with `roll_end` caps.
+    {
+        const float rail_h = 90.0f * lay.nav_scale;
+        const float rail_cy = lay.sp + lay.nav_col_h - rail_h * 0.5f;
+        constexpr float kRollEndW = 101.0f, kRollEndH = 114.0f;  // scroll.json roll_end
+        const float cap_w = kRollEndW * (rail_h / kRollEndH);
+        const float body_w = std::max(lay.nav_w - 2.0f * cap_w, 10.0f);
+        load_scroll_atlas(app);
+        try_draw_atlas_button(app, "roll_end", lay.nav_x + cap_w * 0.5f, rail_cy, cap_w,
+                              rail_h, 1.0f, /*fill=*/true);
+        try_draw_atlas_button(app, "roll_center", lay.nav_x + cap_w + body_w * 0.5f, rail_cy,
+                              body_w, rail_h, 1.0f, /*fill=*/true);
+        try_draw_atlas_button(app, "roll_end", lay.nav_x + cap_w + body_w + cap_w * 0.5f,
+                              rail_cy, cap_w, rail_h, 1.0f, /*fill=*/true, /*flip_x=*/true);
+        // Label (`gk.ba` case 1): `Lx.Fa(a-2*b, c-2*d)`, `C(b)`, `D(d)` with
+        // `b=a*.2`, `d=c*.2`; color `Z.sc` (0.184/0.145/0.106).
+        draw_ui_label(app, lay.nav_x + 0.2f * lay.nav_w,
+                      rail_cy - rail_h * 0.5f + 0.2f * rail_h, 0.6f * lay.nav_w,
+                      0.6f * rail_h, "\xD0\x9C\xD0\x95\xD0\x9D\xD0\xAE", 0.5f,
+                      UiAlign::Center, 0.184f, 0.145f, 0.106f);
     }
 }
 
@@ -3830,27 +3931,13 @@ void ensure_dojo_location(App& app) {
         // aliased page 1, so a `Sequention` frame packed on page 2+ stayed
         // unresolved (JS `ni.init` L1142 walks `b.nextPage`).
         load_location_atlas_pages(app, assets.dojo, loc_dir, "dojo");
-        // [DOJO-HUB] Hide the punchbag holder prop. The params carry it as
-        // a black-tinted Image (ClassName="dojo_punch_bag_holder", hook+beam
-        // art at world (-10,-203.5) -> screen x621-1019 y4-190); the loader
-        // path is JS-exact (ujb tint via Na.cd with alpha 1 + R3a placement
-        // + NWa paint order), but the oracle hub paints clean wall there —
-        // oracle_dojo_norm.png y100-140 x660-940 = (160,129,93) with no hook
-        // or beam trace, while the port's black-tinted opaque beam would
-        // paint a ~390x20 black bar (measured: port sky band y96-168
-        // x400-900 = (52,37,33) vs oracle (130,96,70)). The hide is
-        // therefore hub-level: drop the sprite here (hub-only; the
-        // FightScreen location block keeps it, so fight rendering and all
-        // other locations are untouched).
-        for (const auto& layer : assets.dojo.layers()) {
-            auto& sprites = layer->sprites;
-            sprites.erase(std::remove_if(sprites.begin(), sprites.end(),
-                                         [](const std::shared_ptr<sf2::scene::Sprite>& s) {
-                                             return s != nullptr &&
-                                                    s->texture_name == "dojo_punch_bag_holder";
-                                         }),
-                          sprites.end());
-        }
+        // [DOJO-HUB] The `dojo_punch_bag_holder` prop is KEPT. An earlier
+        // round erased it on the strength of a stale probe capture, but the
+        // authoritative oracle `oracle_matrix/dojo_hub.png` paints the black
+        // hook+beam bracket over the bag (measured region x650..1050 y90..190
+        // = (81,55,41) vs the port's clean wall (141,98,73)). The JS draws
+        // every params layer in XML order (`UWa` L832) — the holder is
+        // layer 9 (DOJO_BG_STATIC §2) — so drawing it is the JS-exact path.
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[dojo] location load failed: %s\n", e.what());
     }
@@ -3905,17 +3992,23 @@ TutorialDialogLayout tutorial_dialog_layout() {
     const OdPanel& p = t.panel;
     t.title_h = 160.0f * p.c;
     t.title_y = p.py + p.ph * 0.20f;
-    t.portrait = 300.0f;
-    t.portrait_cx = p.px + p.pw * 0.27f;
-    t.portrait_cy = p.py + p.ph * 0.47f;
-    t.body_x = p.px + p.pw * 0.45f;
-    t.body_y = p.py + p.ph * 0.30f;
-    t.body_w = p.pw * 0.44f;
-    t.body_h = p.ph * 0.45f;
-    t.btn_w = 300.0f;
-    t.btn_h = 72.0f;
-    t.btn_cx = p.px + p.pw * 0.70f;
-    t.btn_cy = p.py + p.ph * 0.78f;
+    // Portrait: oracle dojo_sensei green circle bbox x307..543 y253..403
+    // (diameter ~236, centre ~425,340). The `sensei_portrait` texture is the
+    // 512px `character_sensei` (DOJO_BG_STATIC §5); the olive disc is ~55% of
+    // the texture, so the drawn quad is ~430px.
+    t.portrait = 430.0f;
+    t.portrait_cx = p.px + p.pw * 0.251f;   // 425 at 1280x720 (body 864 @208)
+    t.portrait_cy = p.py + p.ph * 0.500f;   // 360
+    // Body: oracle lines start x~595, first top y~249, pitch ~50
+    // (`draw_ui_wrapped` ua 0.70 -> drawn scale 0.56 at RU ea.a1=0.8).
+    t.body_x = p.px + p.pw * 0.436f;
+    t.body_y = p.py + p.ph * 0.325f;
+    t.body_w = p.pw * 0.490f;
+    t.body_h = p.ph * 0.42f;
+    t.btn_w = 270.0f;
+    t.btn_h = 60.0f;
+    t.btn_cx = p.px + p.pw * 0.755f;
+    t.btn_cy = p.py + p.ph * 0.762f;
     return t;
 }
 
@@ -3939,13 +4032,13 @@ void DojoScreen::draw_tutorial(App& app, sf2::render::Renderer& ren) {
     // Regular dialog (`he`/`Xc`): `od` base + title + portrait + wrapped body
     // + the localized FIGHT button (`dlgStoryBtnFight`).
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.6f);
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f);  // `Wb.Qa` = 0x80 black
     const TutorialDialogLayout t = tutorial_dialog_layout();
     draw_od_base(app, ren, t.panel);
     // Title `Vc` (`characterSensei` -> "СЭНСЭЙ").
     draw_ui_label(app, t.panel.px + t.panel.pw * 0.5f - 780.0f * t.panel.c, t.title_y,
                   1560.0f * t.panel.c, t.title_h, loc(app, "characterSensei", "SENSEI"),
-                  1.52f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
+                  0.98f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
     // Portrait (sensei, 256px, transparent corners).
     if (app.renderer().texture_lookup("sensei_portrait") != 0) {
         sf2::scene::Sprite s;
@@ -3965,7 +4058,7 @@ void DojoScreen::draw_tutorial(App& app, sf2::render::Renderer& ren) {
     draw_ui_wrapped(app, t.body_x, t.body_y, t.body_w, t.body_h,
                     loc(app, "tutorial_training_fight",
                         "Impressive... but a bag cannot defend itself."),
-                    0.8f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
+                    0.70f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
     // FIGHT button (`dlgStoryBtnFight` -> "В БОЙ").
     if (!(load_sliced_atlas(app) &&
           draw_bb_plate(app, "btnBeige", t.btn_cx, t.btn_cy, t.btn_w, t.btn_h, 1.0f))) {
@@ -4074,6 +4167,19 @@ void DojoScreen::render_impl(App& app) {
             focus_x = (player_x + enemy_x) * 0.5f + half;
             fighter_span = std::fabs(enemy_x - player_x);
         }
+        // Hub framing correction vs the oracle `dojo_hub`/`dojo_menu_open`:
+        // the JS `Ut.Al` focus is the raw fighter midpoint (`wd.mea(Rw,pF)`,
+        // `Io = Lb.width/2 - focus`, L827), but the oracle composition inverts
+        // to `Io ~= 180`, i.e. `focus ~= 800` vs the spawn midpoint 831.5. Both
+        // an unambiguous factor-1 layer (`_0009_lamp_left` X=-415.5 -> oracle
+        // x335.4) and the bag (~x860) invert to the same `Io`, and the whole
+        // scene is a pure -42px x-translation vs the raw formula. Correcting
+        // the focus here shifts the entire hub (statics + viewer) into the
+        // oracle frame. OPEN: whether the residual is a model-root vs
+        // container-position difference or the effective `arena_w` is not
+        // statically traced (core/scene is out of this stream's scope).
+        constexpr float kHubFocusDelta = -31.5f;
+        focus_x += kHubFocusDelta;
         assets.dojo.default_camera(hub_cam, kViewW, kViewH, focus_x, fighter_span);
         have_hub_cam = true;
         assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
