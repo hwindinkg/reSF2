@@ -1763,11 +1763,13 @@ ZaDiscipleRect za_disciple_rect(App& app, bool disciple) {
 
 // The collapsed menu header rect (oracle tutorial shot, 1280x720 space).
 void za_header_rect(float& x, float& y, float& w, float& h) {
+    // Oracle-measured `gk` collapsed title header (map_zone1/dojo_hub):
+    // x 89..279, y 72..112 at 1280x720.
     const float s = kViewW / 1280.0f;
-    x = 64.0f * s;
+    x = 89.0f * s;
     y = 72.0f * s;
-    w = 112.0f * s;
-    h = 38.0f * s;
+    w = 190.0f * s;
+    h = 40.0f * s;
 }
 
 // Hit test for the vertical nav column; -1 when outside every button.
@@ -1788,7 +1790,7 @@ int za_nav_hit(double px, double py) {
 // Rfb/Vfb -> `ma.Jg().jI(cls)`): a tap pushes the target screen unless it is
 // the screen already showing (the JS highlights that one active, `xyb`
 // L1982).
-void za_update(App& app, Screen& self, ScreenId active) {
+void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = false) {
     // `za.zq` disciple toggle (JS L1983, `Nfb` L1981): a child of `za`, so it
     // answers taps regardless of the nav collapse. Shown only on the Dojo
     // (`v.FU` L1207 `Td.Tf==3`) while `ShowDojoDisciple > 0` (`g$a` L271).
@@ -1830,8 +1832,10 @@ void za_update(App& app, Screen& self, ScreenId active) {
     const double px = app.pointer().x, py = app.pointer().y;
     const bool header_hit = px >= hx && px <= hx + hw && py >= hy && py <= hy + hh;
     // Collapsed (JS `collapse(0)` L1978): the header expands the column.
-    if (!g_za_nav_open) {
-        if (header_hit && app.pointer().pressed) {
+    // `force_collapsed` (the Map) draws/behaves collapsed without touching the
+    // shared flag, so returning to the Dojo keeps its expanded column.
+    if (force_collapsed || !g_za_nav_open) {
+        if (!force_collapsed && header_hit && app.pointer().pressed) {
             g_za_nav_open = true;
             sf2::audio::AudioEngine::instance().play("click");
         }
@@ -1891,7 +1895,8 @@ int energy_max() {
 // selects the active nav frame (JS `xyb`). The widget strip mirrors `odb`:
 // widgets are laid left->right and the strip is centred; each widget is
 // icon + value (+ bar), scaled to `widget_h` (JS wr/xr/yr `layout`).
-void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
+void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
+                    bool force_collapsed = false) {
     sf2::render::Renderer& ren = app.renderer();
     const float w = kViewW;
     const ZaLayout lay = za_layout();
@@ -2035,12 +2040,16 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         }
     }
     // JS `gk` collapsed default (L1978): only the `Lx` title header shows;
-    // the five `Le` buttons render only once expanded (`NLa` L2001).
-    if (!g_za_nav_open) {
+    // the five `Le` buttons render only once expanded (`NLa` L2001). The Map
+    // forces the collapsed header (JS mounts a fresh `za` per screen,
+    // `Aub` -> `collapse(0)`) without disturbing the shared nav flag other
+    // shell screens rely on.
+    if (force_collapsed || !g_za_nav_open) {
         float hx = 0.0f, hy = 0.0f, hw = 0.0f, hh = 0.0f;
         za_header_rect(hx, hy, hw, hh);
         // The collapsed header over the `gk` scroll art (`Zh` roll frames);
         // the label is `Y.na("menu")` ("МЕНЮ" in the oracle locale).
+        load_scroll_atlas(app);
         if (!try_draw_atlas_button(app, "roll_center", hx + hw * 0.5f, hy + hh * 0.5f, hw,
                                    hh, 1.0f, /*fill=*/true)) {
             const float panel[] = {hx, hy, hx + hw, hy, hx, hy + hh,
@@ -2051,7 +2060,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         // 0xD0 0x95 0xD0 0x9D 0xD0 0xAE) written as escapes so the string
         // literal is independent of the compiler's source charset (MSVC).
         draw_ui_label(app, hx, hy + hh * 0.28f, hw, hh, "\xD0\x9C\xD0\x95\xD0\x9D\xD0\xAE",
-                      0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+                      0.5f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
         return;
     }
     // Vertical nav column (ndb L1976-1977).
@@ -2668,9 +2677,21 @@ void draw_scene_letterbox(sf2::render::Renderer& ren,
 // --- Map node geometry (JS `Ya`/`qe` L2124-2145) --------------------------
 // `qe.uM` is a class static set at boot (JS L2488: 1.5003663003663004) and
 // `y5a()` = 150/225*uM. The backdrop frame (`map<N>`, res/map/partN json) is
-// 2046x854 (sourceSize), and the node is `pos*uM + bg.fa/2`, then `-50`
-// (`qe.X0a` L2144). The native stretches the backdrop to the full view, so
-// the zone-space point is mapped through the view/backdrop scale.
+// 2046x854 (sourceSize).
+//
+// Layout is the `qk.layout` / `Vr.ba` / `Rr.layout` triple (JS L2100/L2118/
+// L2137):
+//   * `qk.layout`: the `Vr` map scroller sits at y = za.Sp with height
+//     `d = (H - Sp)*(.5 + (clamp(lc,.9,1.5)-.9)/.6*.5) - H*.1` (the non-tall
+//     `!Ya.tw` branch; `lc >= .9` at every desktop aspect), and `Ur` (the
+//     zone strip) starts at `Sp + d` with height `H - (Sp + d)`.
+//   * `Vr.ba`: `dA.la(d / background.fa.y)` (backdrop scaled to the strip
+//     height) and `dA.C(-100 + ca)`. With one zone the content fits
+//     (`N.width > cCa() - 200`), so `Vr.aa` takes the `ca = 0, dA.C(0)`
+//     branch (L2119) and the backdrop is drawn at x = 0.
+//   * `qe.X0a`: node = `pos*uM + bg.fa/2`, `-pos.y*uM + bg.fa/2`, `-50`
+//     (item-local; the `dA` scale/offset above maps it to the screen).
+//   * `Qr` is sized `y5a() = 150/225*uM` times its 225px source frame.
 constexpr float kMapFrameW = 2046.0f;                  // mapN sourceSize
 constexpr float kMapFrameH = 854.0f;
 constexpr float kMapNodeUnit = 1.5003663003663004f;    // JS L2488 qe.uM
@@ -2678,9 +2699,57 @@ constexpr float kMapNodeYOffset = 50.0f;               // JS L2144 d.node.ra-50
 constexpr float kMapNodeSourcePx = 225.0f;             // Qr frame sourceSize
 constexpr float kMapNodeScaleK = 150.0f / 225.0f;      // JS L2144 y5a()
 
-// On-screen node size (view px): 225 * (150/225*uM) * (view_w/2046).
+struct MapMetrics {
+    float sp = 0.0f;        // za.Sp
+    float qka = 0.0f;       // za.qka (Rr rail / `wc.ba` third arg)
+    float map_y = 0.0f;     // Vr.node.y
+    float map_h = 0.0f;     // Vr strip height `d`
+    float bg_scale = 1.0f;  // dA.Eb = d / 854
+    float bg_x = 0.0f;      // dA.x (0 when the one-zone content fits)
+    float bar_y = 0.0f;     // Wj.node.y = Sp + d
+    float bar_h = 0.0f;     // H - bar_y
+    float panel_x = 0.0f;   // Rr wc.node.x = W - panel_w
+    float panel_y = 0.0f;   // Rr wc.node.y = Sp
+    float panel_w = 0.0f;   // f = 430*e
+    float panel_h = 0.0f;   // g = (Sp + d) * (1.1 + (clamp(lc,1,1.4)-1)/.4*-.15)
+    float rail = 0.0f;      // wc rail width c = qka
+    float content_w = 0.0f; // wc.Gv = panel_w - 2*rail
+    float content_h = 0.0f; // wc.Xy = panel_h - 1*rail (one rail: bottom)
+};
+
+MapMetrics map_metrics() {
+    const ZaLayout za = za_layout();
+    const float lc = kViewW / kViewH;
+    MapMetrics m;
+    m.sp = za.sp;
+    m.qka = 50.0f * std::max(0.1f, std::min(kViewW, kViewH) * 0.35f / 430.0f);
+    // `qk.layout` d (`Ya.tw` = lc<.9; false for desktop).
+    m.map_h = (kViewH - m.sp) * (0.5f + (std::clamp(lc, 0.9f, 1.5f) - 0.9f) / 0.6f * 0.5f) -
+              kViewH * 0.1f;
+    m.map_y = m.sp;
+    m.bg_scale = m.map_h / kMapFrameH;
+    // `Vr.aa`: a single-zone content fits -> ca = 0, `dA.C(0)`.
+    m.bg_x = (kViewW > kMapFrameW * m.bg_scale - 200.0f) ? 0.0f : -100.0f;
+    m.bar_y = m.map_y + m.map_h;
+    m.bar_h = kViewH - m.bar_y;
+    // `Rr.layout` (L2100).
+    const float e = std::min(kViewW, kViewH) *
+                    (0.32f + (std::clamp(lc, 1.0f, 1.6f) - 1.0f) / 0.6f * 0.13f) / 430.0f;
+    m.panel_w = 430.0f * e;
+    m.panel_y = m.sp;
+    m.panel_h = m.bar_y * (1.1f + (std::clamp(lc, 1.0f, 1.4f) - 1.0f) / 0.4f * -0.15f);
+    m.panel_x = kViewW - m.panel_w;
+    m.rail = m.qka;
+    m.content_w = m.panel_w - 2.0f * m.rail;
+    m.content_h = m.panel_h - m.rail;
+    return m;
+}
+
+// On-screen node box (view px): the 225px `Qr` source scaled by
+// `y5a() = 150/225*uM` and then by the strip scale `dA.Eb`.
 float map_node_size(float view_w) {
-    return kMapNodeSourcePx * kMapNodeScaleK * kMapNodeUnit * (view_w / kMapFrameW);
+    (void)view_w;  // the layout is the JS `qk.layout`/`Vr.ba` chain, not the view
+    return kMapNodeSourcePx * kMapNodeScaleK * kMapNodeUnit * map_metrics().bg_scale;
 }
 
 // The zone map from stages.xml (JS `p.Dkb` L188 / `Ckb` L189): Zone Name +
@@ -2689,6 +2758,8 @@ float map_node_size(float view_w) {
 // rows without X/Y are not map nodes). Covers all 8 zones (Punchbag +
 // ZONE_1..7) — the old first-zone-only loader is folded into this.
 std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
+    (void)view_w;  // node coords come from map_metrics(), not the view size
+    (void)view_h;
     std::vector<MapScreen::ZoneTab> out;
     try {
         sf2::data::xml_doc doc;
@@ -2721,6 +2792,16 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                 if (n.name.empty()) continue;
                 n.alias = battle.attribute("Alias").value();  // JS `Lc.Cg`
                 n.type = battle.attribute("Type").value();
+                n.title = battle.attribute("Title").value();  // JS `Lc.k6`
+                // `Preview="preview_bosses.lynx"` (JS `Lc.olb`): `Me.CT`
+                // splits on "/" after `Ye.qI` and loads
+                // `res/map/images/<stem>.img` (L2105/L2111) — the stem after
+                // the last '.'.
+                {
+                    const std::string pv = battle.attribute("Preview").value();
+                    const std::size_t pdot = pv.find_last_of('.');
+                    n.preview = (pdot == std::string::npos) ? pv : pv.substr(pdot + 1);
+                }
                 n.zone = z.name;
                 n.location = battle.attribute("Location").value();
                 const float x = sf2::data::xml_attr_float(battle, "X", 0.0f);
@@ -2746,17 +2827,34 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                     }
                 }
                 // JS `qe.X0a` (L2144): x = pos.x*uM + bg.fa.x/2,
-                // y = -pos.y*uM + bg.fa.y/2, then -50. Mapped to the
-                // full-view-stretched backdrop.
-                const float sx = view_w / kMapFrameW;
-                const float sy = view_h / kMapFrameH;
-                n.x = (x * kMapNodeUnit + kMapFrameW * 0.5f) * sx;
-                n.y = (-y * kMapNodeUnit + kMapFrameH * 0.5f - kMapNodeYOffset) * sy;
+                // y = -pos.y*uM + bg.fa.y/2, then -50 — item-local, mapped to
+                // the screen through the `Vr` strip transform (map_metrics).
+                const MapMetrics mm = map_metrics();
+                n.x = mm.bg_x + (x * kMapNodeUnit + kMapFrameW * 0.5f) * mm.bg_scale;
+                n.y = mm.map_y +
+                      (-y * kMapNodeUnit + kMapFrameH * 0.5f - kMapNodeYOffset) * mm.bg_scale;
                 n.active = true;  // the MapScreen ctor applies the lock rule
                 // Xs warriors (FLOW_STATIC Modes): FirstNames across the
                 // battle's Fights, deduped, capped (bracket display).
                 for (pugi::xml_node fight = battle.child("Fight"); fight;
                      fight = fight.next_sibling("Fight")) {
+                    ++n.fight_count;  // JS `Lc.Kz().length` (Xr pip count)
+                    // First positive <Reward Money> of the first fight (the
+                    // `ci` gold icon value under the difficulty bar, L2133).
+                    if (n.fight_count == 1 && n.reward_money == 0) {
+                        const pugi::xml_node rewards = fight.child("Rewards");
+                        if (rewards) {
+                            for (pugi::xml_node rw = rewards.child("Reward"); rw;
+                                 rw = rw.next_sibling("Reward")) {
+                                if (rw.attribute("Money").empty()) continue;
+                                const int money = rw.attribute("Money").as_int(0);
+                                if (money > 0) {
+                                    n.reward_money = money;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     const pugi::xml_node warriors = fight.child("Warriors");
                     if (!warriors) continue;
                     for (pugi::xml_node wr = warriors.child("Warrior"); wr;
@@ -3938,41 +4036,23 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
     for (std::size_t i = 0; i < zones_.size(); ++i) {
         if (zones_[i].name == cur) zone_sel_ = static_cast<int>(i);
     }
-    // WDa LIVE (JS L256 `WDa(a) = iF.get(a) != null`, written by `J1a` L259 /
-    // `Iaa` L260-261 and recorded by ResultsScreen): a zone is open when it
-    // is Start, is at/before the current zone (past zones open, current
-    // playable), or holds ANY recorded battle; later unrecorded zones lock.
-    // JS `Qr.lla` (L2094) rule: a node button renders only while
-    // `hs.isActive && !a.li()`. `hs.isActive` = `WDa(zone|battle|)` — a save
-    // `<Battles>` record exists (L205/L256), written by `J1a` L259 / `Iaa`
-    // L260-261 (native `WarriorSave::battle_unlock`/`battle_set_visibility`,
-    // driven by the quest ShowBattle/HideBattle/SetBattleVisibility/
-    // ToggleBattle actions). `a.li()` = Hidden/expired (`hl.li` L278).
-    // HYBRID (documented): the base playable nodes keep the pre-existing
-    // "record-less base is playable" rule — the full `st.Dg` record-
-    // population pipeline (`bl.Ayb` L159-162 + authored `ShowBattle`
-    // coverage) is not ported, so applying `WDa` verbatim to BASE nodes would
-    // hide the entire playable map. The alt-state twins (`*_INTERMISSION`,
-    // boss hard-mode) and the `li()` hidden gate ARE verbatim, so an authored
-    // ShowBattle/HideBattle flips visibility exactly as JS.
+    // WDa/`Qr.lla` VERBATIM (JS L256/L2094). `WDa(a) = iF.get(a) != null`:
+    // a battle node is ACTIVE iff the save carries a `<Battles>` record for
+    // `zone|name|` (written by `J1a` L259 / `Iaa` L260-261, native
+    // `WarriorSave::battle_unlock`/`battle_set_visibility`, driven by the
+    // quest ShowBattle/HideBattle/SetBattleVisibility/ToggleBattle actions).
+    // `Qr.lla` (L2094) renders the button only while `hs.isActive && !a.li()`
+    // (`a.li()` = Hidden/expired, `hl.li` L278). The oracle's
+    // ZONE_1 capture is exactly this: on the tutorial save only
+    // `ZONE_1|BOSS_LYNX|` is recorded, so Рысь is the only node on the map.
+    // (This replaces the old native "record-less base is playable" hybrid.)
     for (std::size_t i = 0; i < zones_.size(); ++i) {
-        bool touched = zones_[i].is_start;
-        if (!touched) {
-            for (const auto& n : zones_[i].nodes) {
-                if (map_save.find_battle(n.zone, n.name) != nullptr) {
-                    touched = true;
-                    break;
-                }
-            }
-        }
-        zones_[i].locked = !touched && !zones_[i].is_start &&
-                           static_cast<int>(i) > zone_sel_ && zones_[i].name != cur;
         for (auto& n : zones_[i].nodes) {
             const WarriorSave::BattleRecord* rec = map_save.find_battle(n.zone, n.name);
             const bool has_rec = rec != nullptr;
             const bool hidden = has_rec && rec->hidden;
-            n.active = !zones_[i].locked && (has_rec || !n.alt_state);  // `WDa`
-            n.visible = n.active && !hidden;                            // `Qr.lla`
+            n.active = has_rec;                 // `WDa` (JS L256)
+            n.visible = n.active && !hidden;    // `Qr.lla` (JS L2094)
         }
     }
     // MapFocus (JS `Ya.bKa` L2129 focuses the save's MapFocus `p.o.ys` via
@@ -4071,7 +4151,9 @@ void MapScreen::update_impl(float dt) {
     // PORT_AUDIT_UI 2.3/2.4). The native BracketScreen was deleted with the
     // id (screens.hpp / screen_manager.hpp).
     if (zone_sel_ < 0 || static_cast<std::size_t>(zone_sel_) >= zones_.size()) return;
-    hover_ = -1;
+    // JS `Ya.Uw` (L2129) focuses the save MapFocus node at init and `Rr`
+    // tracks it (`ue.tea()`); a tap re-targets (`qe.jhb` -> `GT`). The focus
+    // persists between taps, so it is NOT reset here — `hover_` holds it.
     for (std::size_t i = 0; i < zones_[zone_sel_].nodes.size(); ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
         if (!n.visible) continue;  // JS `Qr.lla` L2094 (hidden alt-state twin)
@@ -4123,145 +4205,390 @@ void MapScreen::update_impl(float dt) {
         }
     }
     // Shared `za` nav column (JS `ma.D1`): Dojo/Shop/Profile/Settings hops.
-    za_update(app(), *this, kScreenMap);
+    // The Map forces the collapsed header (fresh `za` per screen).
+    za_update(app(), *this, kScreenMap, /*force_collapsed=*/true);
+}
+
+// --- Map info panel (JS `Rr` L2098-2104, `pk` L2160, `Xr` L2133, `Wc`
+// L2163, `bi` L2133) -------------------------------------------------------
+//
+// `Wc` difficulty levels (`DifficultyEvaluation`, internal_settings.xml
+// L545-551 -> `Wc.gD` `{name, RatingRatioTreshold}` in document order; the
+// *name* is the label key (`Y.na(a.first)`) and `Z.iQa[index]` is the fill
+// frame (JS L2163, `Z.iQa` L2478).
+struct MapDiffLevel { const char* key; float threshold; };
+const MapDiffLevel kMapDiffLevels[] = {
+    {"diff0", 0.0f}, {"diff1", 0.82f}, {"diff2", 1.3f},
+    {"diff3", 2.6f}, {"diff4", 5.2f}};
+const char* const kMapDiffFill[] = {
+    "difficulty_very_easy", "difficulty_easy", "difficulty_middle",
+    "difficulty_hard", "difficulty_very_hard"};
+
+// OPEN: the JS rating `v.OAa(battle)` (L1219, `RatingEvaluation`
+// internal_settings L490-527) is not ported. A neutral ratio 1.0 lands in
+// `diff1` [0.82,1.3) — exactly the oracle's ZONE_1/BOSS_LYNX value
+// ("Нормально"/diff1, fill frame `difficulty_easy`).
+constexpr float kMapDefaultRatingRatio = 1.0f;
+
+int map_difficulty_level() {
+    const int n = static_cast<int>(sizeof(kMapDiffLevels) / sizeof(kMapDiffLevels[0]));
+    int idx = 0;
+    for (int i = 0; i < n; ++i) {
+        if (kMapDiffLevels[i].threshold < kMapDefaultRatingRatio) idx = i;
+    }
+    return idx;
+}
+
+// Source size of an atlas frame (untrimmed `sourceSize`), for the JS
+// aspect-driven scale (`R.za()/qa()`).
+bool map_frame_size(App& app, const char* name, float& w, float& h) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame(name, &fr, &tw, &th, &gl)) return false;
+    w = fr.source_w > 0 ? static_cast<float>(fr.source_w) : static_cast<float>(fr.w);
+    h = fr.source_h > 0 ? static_cast<float>(fr.source_h) : static_cast<float>(fr.h);
+    return true;
+}
+
+// The `Fg(430,800,0,50)` paper content frame (L1868): `paper_edge_left` +
+// stretched `paper` + `paper_edge_right` at the `c = qka` rail width, with
+// the `Dl[1]` bottom `Zh` rail (`roll_end` + `roll_center` + mirrored
+// `roll_end`) at `D(g - 50*e)` (`Rr.layout` L2101).
+void draw_map_paper_panel(App& app, const MapMetrics& mm) {
+    sf2::render::Renderer& ren = app.renderer();
+    const bool scroll_ok = load_scroll_atlas(app);
+    bool drew = false;
+    if (scroll_ok) {
+        drew = try_draw_atlas_button(app, "paper_edge_left", mm.panel_x, mm.panel_y,
+                                     mm.rail, mm.panel_h, 1.0f, /*fill=*/true,
+                                     /*flip_x=*/false, /*top_left=*/true);
+        if (drew) {
+            try_draw_atlas_button(app, "paper", mm.panel_x + mm.rail, mm.panel_y,
+                                  mm.content_w, mm.panel_h, 1.0f, true, false, true);
+            try_draw_atlas_button(app, "paper_edge_right",
+                                  mm.panel_x + mm.panel_w - mm.rail, mm.panel_y,
+                                  mm.rail, mm.panel_h, 1.0f, true, false, true);
+        }
+    }
+    if (!drew) {
+        const float p[] = {mm.panel_x, mm.panel_y, mm.panel_x + mm.panel_w, mm.panel_y,
+                           mm.panel_x, mm.panel_y + mm.panel_h,
+                           mm.panel_x + mm.panel_w, mm.panel_y,
+                           mm.panel_x + mm.panel_w, mm.panel_y + mm.panel_h,
+                           mm.panel_x, mm.panel_y + mm.panel_h};
+        ren.draw_triangles(p, 6, 0.72f, 0.58f, 0.38f, 1.0f);
+    }
+    const float rail_h = 50.0f * (mm.panel_w / 430.0f);  // `Dl[1].ba(f, 50*e)`
+    const float rail_y = mm.panel_y + mm.panel_h - rail_h;
+    constexpr float kRollEndW = 101.0f, kRollEndH = 114.0f;
+    const float cap = kRollEndW * (rail_h / kRollEndH);
+    const float body = std::max(mm.panel_w - 2.0f * cap, 10.0f);
+    if (scroll_ok) {
+        try_draw_atlas_button(app, "roll_end", mm.panel_x + cap * 0.5f,
+                              rail_y + rail_h * 0.5f, cap, rail_h, 1.0f, true);
+        try_draw_atlas_button(app, "roll_center", mm.panel_x + cap + body * 0.5f,
+                              rail_y + rail_h * 0.5f, body, rail_h, 1.0f, true);
+        try_draw_atlas_button(app, "roll_end", mm.panel_x + cap + body + cap * 0.5f,
+                              rail_y + rail_h * 0.5f, cap, rail_h, 1.0f, true, true);
+    }
+}
+
+// The `Me` battle preview image (L2110-2111): `res/map/images/<stem>.img`
+// (the stem of the stages.xml `Preview` attr), a standalone 400x200 texture.
+bool load_map_preview(App& app, const std::string& stem) {
+    if (stem.empty()) return false;
+    const std::string tex_name = "map_preview_" + stem;
+    if (app.renderer().texture_lookup(tex_name) != 0) return true;
+    const std::string dir = app.res_root() + "/map/images";
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind(stem + ".", 0) != 0) continue;
+            const std::string ext = entry.path().extension().string();
+            if (ext != ".dds" && ext != ".ktx" && ext != ".webp" && ext != ".png") continue;
+            sf2::data::Texture tex;
+            if (!sf2::data::decode_texture(entry.path().string(), tex)) continue;
+            app.renderer().texture_for(tex_name, tex);
+            std::fprintf(stdout, "[map] preview %s: %dx%d\n", stem.c_str(), tex.w, tex.h);
+            std::fflush(stdout);
+            return true;
+        }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[map] preview load failed (%s): %s\n", stem.c_str(), e.what());
+    }
+    return false;
+}
+
+void draw_map_preview(App& app, const std::string& stem, float x, float y, float w) {
+    if (!load_map_preview(app, stem)) return;
+    constexpr float kSrcW = 768.0f, kSrcH = 384.0f;  // res/map/images/lynx.dds
+    sf2::scene::Sprite s;
+    s.texture_name = "map_preview_" + stem;
+    s.frame_x = 0.0f;
+    s.frame_y = 0.0f;
+    s.frame_w = kSrcW;
+    s.frame_h = kSrcH;
+    s.tex_w = kSrcW;
+    s.tex_h = kSrcH;
+    s.solid = false;
+    s.color_a = 1.0f;
+    const float scale = w / kSrcW;
+    s.transform.set_pos(x + w * 0.5f, y + kSrcH * scale * 0.5f);
+    s.transform.set_scale(scale, scale);
+    app.renderer().draw_sprite(s, ui_camera());
+}
+
+// The `Rr` info panel body. `node` may be null (empty panel: title only).
+void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics& mm) {
+    draw_map_paper_panel(app, mm);
+    const float cx = mm.panel_x + mm.rail;  // `wc.content.C(rail)`
+    const float cy = mm.panel_y;
+    const float qka = mm.qka;
+    const float d = qka * 0.4f;             // `Rr.layout` `d = c*.4`
+    const float cw = mm.content_w;          // `wc.Gv`
+    const float ch = mm.content_h;          // `wc.Xy`
+    const float title_h = cw * 0.2f;        // `g = c*.2`
+    // Title `oq` (L2101): `C(d)`, `D(0)`, `ua(c*.17)`, `Fa(c-2*d, g)`,
+    // `La(Z.sc)`, `Ia(2)` (horizontal centre).
+    std::string title;
+    if (node != nullptr) {
+        const std::string key = node->title.empty()
+                                    ? (node->alias.empty() ? node->name : node->alias)
+                                    : node->title;
+        title = loc(app, key, node->name);
+    }
+    if (!title.empty()) {
+        draw_ui_label(app, cx + d, cy, cw - 2.0f * d, title_h, title,
+                      cw * 0.17f / 100.0f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
+    }
+    if (node == nullptr) return;
+    // Preview `Wu`/`Me` (L2101-2102, L2111): `C(d)`, `D(f)`,
+    // `f = 10 + title_h + 20`, scaled to the content width.
+    float f = 10.0f + title_h + 20.0f;
+    const float pv_w = cw - 2.0f * d;
+    draw_map_preview(app, node->preview, cx + d, cy + f, pv_w);
+    f += pv_w * 0.5f + 20.0f;  // `Wu.qa()` = pv_w * (200/400)
+    // Body `pk` rect (L2102): `gb(d, f, d+(c-2*d), f+(e-f))`.
+    const float body_x = cx + d;
+    const float body_y = cy + f;
+    const float body_w = cw - 2.0f * d;
+    const float body_h = ch - f;
+    // --- `Xr` status pips (L2133-2136, `pk.ba` L2161 `aUa.ba(a, b*.3)`) ---
+    const float xr_h = body_h * 0.3f;
+    const float pip_label_h = body_w * 0.16f;  // `Xr.ba` `c = a*.16`
+    int pips = node->fight_count;
+    if (node->type == "BOSSES" || node->type == "BOSSES_REPLAYABLE" ||
+        node->type == "FINAL_BATTLE_TITAN") {
+        --pips;  // `Xr` ctor L2134
+    }
+    if (pips > 0) {
+        // `H0a` (L2135): boss group w/ d -> "bodyguards", else title/challenge;
+        // challenge families -> "stage{...}".
+        std::string xr_label;
+        if (node->type == "BOSSES" || node->type == "BOSSES_REPLAYABLE" ||
+            node->type == "BOSSES_INTERMISSION" || node->type == "FINAL_BATTLE_TITAN") {
+            xr_label = loc(app, "bodyguards", "BODYGUARDS");
+        } else {
+            const std::string tk = node->title.empty() ? node->name : node->title;
+            xr_label = loc(app, tk, node->name);
+        }
+        draw_ui_label(app, body_x, body_y, body_w, pip_label_h, xr_label,
+                      pip_label_h / 100.0f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+        // `mdb` (L2136): capacity `c>12?10:6`, square side
+        // `min(a/d, b/f)`, single row centred.
+        const int per_row = (pips > 12) ? 10 : 6;
+        const int rows = (pips + per_row - 1) / per_row;
+        const float g = body_w / static_cast<float>(per_row);
+        const float h = (xr_h - pip_label_h) / static_cast<float>(rows);
+        const float pip = std::min(g, h);
+        for (int i = 0; i < pips; ++i) {
+            const int row = i / per_row;
+            const int col = i % per_row;
+            const int in_row = std::min(per_row, pips - row * per_row);
+            const float px = body_x + (body_w - in_row * pip) * 0.5f +
+                             static_cast<float>(col) * pip;
+            const float py = body_y + pip_label_h + static_cast<float>(row) * pip;
+            try_draw_atlas_button(app, "indicatorOff", px + pip * 0.5f, py + pip * 0.5f,
+                                  pip, pip, 1.0f);
+        }
+    }
+    // --- `Wc` difficulty (L2161 `b = b*.35 + c`, `Lm.D(b)`, `Lm.ba(a,
+    // a*.25)`; L2163) ---
+    float wy = body_h * 0.35f + body_h * 0.05f;  // `c = b*.05`, `b*.35 + c`
+    {
+        float fw = 0.0f, fh = 0.0f;
+        const float bar_h = map_frame_size(app, "difficulty_empty", fw, fh) && fw > 0.0f
+                                ? body_w * (fh / fw)
+                                : body_w * 0.1f;
+        try_draw_atlas_button(app, "difficulty_empty", body_x + body_w * 0.5f,
+                              body_y + wy + bar_h * 0.5f, body_w, bar_h, 1.0f);
+        const int lvl = map_difficulty_level();
+        try_draw_atlas_button(app, kMapDiffFill[lvl], body_x + body_w * 0.5f,
+                              body_y + wy + bar_h * 0.5f, body_w, bar_h, 1.0f);
+        // `Wc.ba` label: `ua(a*.16)`, `Fa(a, ua)`, `D(bar_h)`.
+        const float lab_h = body_w * 0.16f;
+        draw_ui_label(app, body_x, body_y + wy + bar_h, body_w, lab_h,
+                      loc(app, kMapDiffLevels[lvl].key, kMapDiffLevels[lvl].key),
+                      lab_h / 100.0f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
+        wy += bar_h + lab_h;
+    }
+    // --- reward gold (JS `pk.ty` = `bi` -> `ci`/`Ig`, L2133/L2148) ---
+    {
+        float gw = 0.0f, gh = 0.0f;
+        const float icon_h = body_w * 0.15f;
+        const float icon_w = (map_frame_size(app, "gold", gw, gh) && gh > 0.0f)
+                                 ? icon_h * (gw / gh)
+                                 : icon_h;
+        const std::string amount = std::to_string(node->reward_money);
+        const float txt_scale = body_w * 0.16f / 100.0f;
+        const sf2::data::font* mfont = app.menu_font();
+        const float txt_w = mfont != nullptr
+                                ? app.measure_text(*mfont, amount, txt_scale)
+                                : icon_h;
+        const float total = icon_w + txt_w;
+        const float gx = body_x + (body_w - total) * 0.5f;
+        try_draw_atlas_button(app, "gold", gx + icon_w * 0.5f, body_y + wy + icon_h * 0.5f,
+                              icon_w, icon_h, 1.0f);
+        draw_ui_label(app, gx + icon_w, body_y + wy, txt_w, icon_h, amount, txt_scale,
+                      UiAlign::Left, 0.184f, 0.145f, 0.106f);
+    }
+    // --- FIGHT button `tj` = `Bb("EButtonWhite")` (L2099/L2102) ------------
+    // `tj.Pb(c*.2)` -> node scale `c*.2/112`; `Bb` is 600 wide x 112 tall
+    // (`Bb` ctor `xc(600)`), so on screen `600*c*.2/112` x `c*.2`; centred on
+    // the body, bottom at `a.W`.
+    const float btn_h = cw * 0.2f;
+    const float btn_w = 600.0f * (btn_h / 112.0f);
+    const float btn_cx = body_x + body_w * 0.5f;
+    const float btn_cy = body_y + body_h - btn_h * 0.5f;
+    bool btn_drawn = false;
+    if (load_sliced_atlas(app)) {
+        btn_drawn = draw_bb_plate(app, "btnWhite", btn_cx, btn_cy, btn_w, btn_h, 1.0f);
+    }
+    if (!btn_drawn) {
+        draw_flat_button(app, "^startFight^", btn_cx, btn_cy, btn_w, btn_h, 0.35f, 0.45f,
+                         0.3f, false);
+    }
+    draw_ui_label(app, btn_cx - btn_w * 0.5f + 8.0f, btn_cy - 11.0f, btn_w - 16.0f, 22.0f,
+                  loc(app, "startFight", "FIGHT"), 0.44f, UiAlign::Center, 0.184f, 0.145f,
+                  0.106f);
 }
 
 void MapScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     load_map_backdrops(app);  // once; silent unless frames decode
-    // Per-zone backdrop (res/map/part0..6 — FLOW_STATIC.md §2.1): the
-    // selected zone's "map<N>" art full-bleed when its texture decoded,
-    // else the dojo sprite, else flat. Zone→part = the zone FileName number
-    // (JS `qe.W0a` L2143 `parseInt(fileName.split(".")[1])-1`); the Start
-    // zone has no FileName -> no map backdrop.
-    // NOTE: part textures ship as ASTC ktx / crunch dds (not CPU-decodable),
-    // so the fallback path is the live one until the pipeline decodes them.
+    const MapMetrics mm = map_metrics();
+    // `Vr` map strip (JS `qk.layout` L2137 / `Vr.ba` L2118): the selected
+    // zone's backdrop (JS `qe.W0a` L2143 `parseInt(fileName.split(".")[1])-1`)
+    // is scaled to the strip height `d` and drawn at `dA.x` (0 for the
+    // single-zone content; `-100+ca` once the strip scrolls).
     bool bg_done = false;
     if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size() &&
         zones_[zone_sel_].part >= 0) {
-        bg_done = app.draw_atlas_rect(
-            "map" + std::to_string(zones_[zone_sel_].part), 0.0f, 0.0f, kViewW, kViewH,
-            1.0f);
+        bg_done = app.draw_atlas_rect("map" + std::to_string(zones_[zone_sel_].part),
+                                      mm.bg_x, mm.map_y, kMapFrameW * mm.bg_scale,
+                                      mm.map_h, 1.0f);
     }
-    if (bg_done) {
-        // Backdrop art already covers the view (nodes/tabs/BACK below).
-    } else {
-    sf2::scene::Sprite* dojo = app.dojo_sprite();
-    if (dojo != nullptr) {
-        sf2::render::Camera ui_cam;
-        ui_cam.center_x = kViewW * 0.5f;
-        ui_cam.center_y = kViewH * 0.5f;
-        ui_cam.zoom = 1.0f;
-        ui_cam.view_w = kViewW;
-        ui_cam.view_h = kViewH;
-        ui_cam.arena_h = kViewH;
-        ui_cam.arena_floor = 0.0f;
-        ui_cam.arena_center_x = kViewW * 0.5f;
-        ren.draw_sprite(*dojo, ui_cam);
-    } else {
-        const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    if (!bg_done) {
+        const float verts[] = {0, mm.map_y, kViewW, mm.map_y, kViewW, mm.bar_y,
+                               0, mm.map_y, kViewW, mm.bar_y, 0, mm.bar_y};
         ren.draw_triangles(verts, 6, 0.08f, 0.1f, 0.14f, 1.0f);
     }
-    }  // else (!bg_done): dojo sprite / flat fallback above
-    // JS `Ya` has no zone tab strip (PORT_AUDIT_UI 2.3). Zone nav is the
-    // `Vr` scroller + `Rr`/`Xr` panels (OPEN - not ported).
+    // The JS map is a full shell screen; the native stack still holds the Dojo
+    // underneath, so cover the `Ur` band (y >= Sp+d) with the shell base
+    // colour (the oracle bar reads 16,7,3).
+    {
+        const float bar[] = {0, mm.bar_y, kViewW, mm.bar_y, kViewW, kViewH,
+                             0, mm.bar_y, kViewW, kViewH, 0, kViewH};
+        ren.draw_triangles(bar, 6, 0.063f, 0.027f, 0.012f, 1.0f);
+    }
     const bool zone_ok =
         zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size();
     const std::size_t node_count = zone_ok ? zones_[zone_sel_].nodes.size() : 0;
-    // Series line (FLOW_STATIC Modes): tournament won/total + next name from
-    // the zone's TOURNAMENT nodes and save wins; survival best likewise.
-    // Xs/EQ kits and Rk wave rotation are fight-setup concepts with no
-    // shell-visible state — position served from records (see report).
-    if (zone_ok) {
-        int tour_total = 0, tour_won = 0;
-        std::string tour_next;
-        int surv_best = 0;
-        bool has_surv = false;
-        for (const Node& zn : zones_[zone_sel_].nodes) {
-            int wins = 0;
-            for (const auto& fw : fight_wins_) {
-                if (fw.name == zn.name) {
-                    wins = fw.wins;
-                    break;
-                }
-            }
-            if (zn.type == "TOURNAMENT") {
-                ++tour_total;
-                if (wins > 0) ++tour_won;
-                else if (tour_next.empty()) tour_next = zn.name;
-            } else if (zn.type == "SURVIVAL") {
-                has_surv = true;
-                if (wins > surv_best) surv_best = wins;
-            }
-        }
-        // Zone/battle names are lang keys too ("ZONE_1" -> "Hero Reborn",
-        // "Tournament" -> "TOURNAMENT"); resolve them via `Y.na`.
-        std::string series = loc(app, zones_[zone_sel_].name, zones_[zone_sel_].name);
-        if (tour_total > 0) {
-            series += " | TOURNAMENT " + std::to_string(tour_won) + "/" +
-                      std::to_string(tour_total);
-            if (!tour_next.empty()) series += " NEXT " + loc(app, tour_next, tour_next);
-        }
-        if (has_surv) {
-            series += " | SURVIVAL BEST " + std::to_string(surv_best);
-        }
-        // Keep the readout clear of the shared `za` chrome: below the top
-        // panel (`za.Sp`, L1975) and right of the vertical nav column
-        // (`za.ndb` L1976-1977) so it can collide with neither.
-        const ZaLayout zal = za_layout();
-        const float series_x = zal.nav_x + zal.nav_w + 12.0f;
-        draw_ui_label(app, series_x, zal.sp + 8.0f, kViewW - series_x - 16.0f, 22.0f, series,
-                      0.7f, UiAlign::Left, 0.9f, 0.9f, 0.9f);
-    }
     const float node_px = map_node_size(kViewW);
+    const float node_ls = node_px / kMapNodeSourcePx;  // local -> screen
     for (std::size_t i = 0; i < node_count; ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
-        if (!n.visible) continue;  // JS `Qr.lla` L2094 (hidden alt-state twin)
+        if (!n.visible) continue;  // `WDa` + `Qr.lla` (JS L256/L2094)
         const bool hovered = static_cast<int>(i) == hover_;
         const bool locked = !n.active;
         // JS `Qr` (L2092-2095): frame = "BattleBtn<State>/<suffix>", suffix
         // base_/active_/locked_/locked_active_/pressed_ + Icon (`Lc.*` L2482,
         // `U9a..X9a` L1405). Hover swaps to Active; locked uses BattleBtnLock*.
-        const std::string base = std::string(locked ? "BattleBtnLock/locked_" : "BattleBtnBase/base_") + n.icon;
-        const std::string active = std::string(locked ? "BattleBtnLockActive/locked_active_" : "BattleBtnActive/active_") + n.icon;
+        const std::string base =
+            std::string(locked ? "BattleBtnLock/locked_" : "BattleBtnBase/base_") + n.icon;
+        const std::string active =
+            std::string(locked ? "BattleBtnLockActive/locked_active_"
+                               : "BattleBtnActive/active_") +
+            n.icon;
         const char* tex_frame = hovered ? active.c_str() : base.c_str();
         bool drawn = try_draw_atlas_button(app, tex_frame, n.x, n.y, node_px, node_px, 1.0f);
         if (!drawn && locked) {
-            // Some icons carry no lock art (buttons.json Lock=21 vs Base=34):
-            // fall back to the unlocked base frame, then flat.
             const std::string lock_base = std::string("BattleBtnBase/base_") + n.icon;
-            drawn = try_draw_atlas_button(app, lock_base.c_str(), n.x, n.y, node_px, node_px, 0.6f);
+            drawn = try_draw_atlas_button(app, lock_base.c_str(), n.x, n.y, node_px,
+                                          node_px, 0.6f);
         }
         if (!drawn) {
             const float r = hovered ? 0.9f : (n.active ? 0.6f : 0.3f);
             const float g = hovered ? 0.5f : (n.active ? 0.4f : 0.3f);
             const float b = hovered ? 0.3f : (n.active ? 0.25f : 0.3f);
             const float x0 = n.x - node_px / 2, y0 = n.y - node_px / 2;
-            const float verts[] = {x0, y0, x0 + node_px, y0, x0 + node_px, y0 + node_px, x0, y0, x0 + node_px, y0 + node_px, x0, y0 + node_px};
+            const float verts[] = {x0, y0, x0 + node_px, y0, x0 + node_px, y0 + node_px,
+                                   x0, y0, x0 + node_px, y0 + node_px, x0, y0 + node_px};
             ren.draw_triangles(verts, 6, r, g, b, n.active ? 0.95f : 0.5f);
         }
         // Label `cC` (JS L2093): `Fa(100,55)`, `ua(60)`, `C(-50)`, `D(65)`,
-        // black, `Ia(128)`; text = `Y.na(a.Cg)` where `Cg` is the battle Alias
-        // (`Qr.Bka` L2094 / `qe.X0a` L2144; `Lc.Cg` = Alias L1403). Node-local
-        // -> screen at the node scale (node_px/150). The box TOP is anchored at
-        // `D(65)` so the label sits below the node art (the old -27.5*ls lift
-        // pushed it onto the icon).
-        const float ls = node_px / 150.0f;
+        // black, `Ia(128)` (no align shift -> left edge at `C`); text
+        // `Y.na(a.Cg)` (Alias, `Qr.Bka` L2094 / `Lc.Cg` L1403).
         const std::string label_key = n.alias.empty() ? n.name : n.alias;
-        draw_ui_label(app, n.x - 50.0f * ls - 50.0f * ls, n.y + 65.0f * ls,
-                      100.0f * ls, 55.0f * ls, loc(app, label_key, n.name), 0.6f,
-                      UiAlign::Center, 0.0f, 0.0f, 0.0f);
+        draw_ui_label(app, n.x - 50.0f * node_ls, n.y + 65.0f * node_ls,
+                      100.0f * node_ls, 55.0f * node_ls, loc(app, label_key, n.name), 0.6f,
+                      UiAlign::Left, 0.0f, 0.0f, 0.0f);
     }
-    // The BACK button (top-left) — JS-exact misc `Arrow` (y.sRa) + flat fallback.
-    // OPEN: no dedicated back frame in JS (btn_back 0 hits); Arrow is the
-    // misc-atlas nav arrow used for back navigation.
-    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
-        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
-        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
-                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    // `Ur` zone strip (JS L2112-2116, `qk.layout` L2137): the selected zone
+    // name + the zone dots (`inactive_bulb` dots, `bulb` highlight at `q9`).
+    // OPEN: the JS `Ur.ba` label/dot offsets (`Ia(4)` alignment) are not
+    // derived; the measured oracle placement is used.
+    if (zone_ok) {
+        const float label_h = mm.bar_h * 0.6f;
+        draw_ui_label(app, 170.0f, mm.bar_y + (mm.bar_h - label_h) * 0.5f, 380.0f,
+                      label_h, loc(app, zones_[zone_sel_].name, zones_[zone_sel_].name),
+                      0.52f, UiAlign::Left, 0.78f, 0.655f, 0.451f);
+        // One dot per rendered zone widget (`Vr.HXa` L2123-2124: only zones
+        // with an active battle render).
+        float dot_x = 547.0f;
+        const float dot_d = 34.0f;
+        const float dot_cy = mm.bar_y + mm.bar_h * 0.5f;
+        for (std::size_t zi = 0; zi < zones_.size(); ++zi) {
+            bool any = false;
+            for (const Node& n : zones_[zi].nodes) {
+                if (n.visible) {
+                    any = true;
+                    break;
+                }
+            }
+            if (!any) continue;
+            const bool sel = static_cast<int>(zi) == zone_sel_;
+            if (!try_draw_atlas_button(app, sel ? "bulb" : "inactive_bulb", dot_x, dot_cy,
+                                       dot_d, dot_d, 1.0f)) {
+                draw_flat_button(app, "", dot_x, dot_cy, dot_d * 0.5f, dot_d * 0.5f, 0.8f,
+                                 0.45f, 0.15f, false);
+            }
+            dot_x += 60.0f;
+        }
     }
-    // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
-    draw_za_chrome(app, kScreenMap);
+    // Shared `za` chrome (JS `ma.D1`): topPanel + widgets, or the collapsed
+    // `МЕНЮ` header (JS `za.Aub` collapse(0) — the map's default).
+    draw_za_chrome(app, kScreenMap, nullptr, /*force_collapsed=*/true);
+    // The `Rr` info panel (JS `Ya.Zq = Qo(Rr)` L2125) draws last, over the
+    // `Vr` strip and the `Ur` bar (the oracle panel overlaps both).
+    const Node* sel = nullptr;
+    if (zone_ok && hover_ >= 0 &&
+        static_cast<std::size_t>(hover_) < zones_[zone_sel_].nodes.size()) {
+        sel = &zones_[zone_sel_].nodes[static_cast<std::size_t>(hover_)];
+    }
+    draw_map_info_panel(app, sel, mm);
+
     // Boss-intro act overlay (Rd machine over the lD multi-intro list;
     // boss names are display strings, shown raw). Skippable by tap.
     // Boss-intro act overlay: skipped while a quest modal is up (same

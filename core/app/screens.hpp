@@ -142,8 +142,18 @@ public:
         std::string type;
         std::string icon;      // Battle Icon (JS `Lc.icon`; default "training",
                                // L205) — the per-node `BattleBtn*` art suffix
+        std::string title;     // stages.xml Title lang key (JS `Lc.k6` — the
+                               // `Rr` info-panel title, L2103)
+        std::string preview;   // stages.xml Preview, stem after the last '.'
+                               // (JS `Lc.olb` -> `Me.CT` `res/map/images/
+                               // <stem>.img`, L2105/L2111)
         std::string zone;      // the stages.xml Zone Name (JS `st`)
         std::string location;  // the Battle Location (JS fight backdrop)
+        int fight_count = 0;   // <Fight> count (JS `Lc.Kz().length`, L2134):
+                               // the `Xr` status pip count is this - 1 for
+                               // boss types (`Xr` ctor L2134)
+        int reward_money = 0;  // first <Reward Money> (the `ci`/`bi` gold icon
+                               // value shown under the difficulty bar, L2133)
         std::vector<std::string> warriors;  // Fight Warriors FirstNames (Xs)
         float x = 0.0f;  // screen pos (center; JS `qe.X0a` L2144)
         float y = 0.0f;
