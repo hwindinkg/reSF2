@@ -225,7 +225,8 @@ void FightController::init_locks(
     std::function<float()> roll01,
     const std::vector<std::pair<std::string, std::string>>& player_owned,
     const PerkSetup& perks,
-    std::function<void(int)> reseed01) {
+    std::function<void(int)> reseed01,
+    const sf2::scene::Model* enemy_model) {
     battle_ = battle;
     prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
     player_.style = StyleMeter();  // style meters reset per battle
@@ -243,7 +244,11 @@ void FightController::init_locks(
 
     player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp,
                            "Fists", player_owned);
-    enemy_ = make_fighter(enemy_name, false, enemy_x, enemy_y, enemy_max_hp, "Fists", {});
+    // JS `ur` L194-195 gates the enemy: NotAI -> no AiController, and
+    // NotAnimation -> no animation attach (bind pose). The enemy also gets
+    // its OWN model (the Punchbag's `merged_bag`) when supplied.
+    enemy_ = make_fighter(enemy_name, false, enemy_x, enemy_y, enemy_max_hp, "Fists", {},
+                          battle.enemy_not_ai, battle.enemy_not_animation, enemy_model);
     // [FIX Phase 4b — manual control] The player is MANUAL: no AiController,
     // no auto-attack. The input path (player_input -> Fighter::input ->
     // try_select_move) drives the player's moves; the enemy keeps the AI.
@@ -253,8 +258,9 @@ void FightController::init_locks(
     // animating randomly.)
 
     // Sample the initial stance idle (JS: the weapon's stance idle clip).
+    // NotAnimation enemies hold their bind pose instead (JS `QD` L195).
     sample_idle(player_);
-    sample_idle(enemy_);
+    sample_enemy_idle();
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
     // Perk bus register (ZOa analog).
@@ -322,11 +328,15 @@ void FightController::reseed_stream(int seed) {
 FightFighter FightController::make_fighter(
     const std::string& nm, bool is_player, float x, float y, int max_hp,
     const std::string& weapon_subtype,
-    const std::vector<std::pair<std::string, std::string>>& owned) {
+    const std::vector<std::pair<std::string, std::string>>& owned,
+    bool not_ai, bool not_animation, const sf2::scene::Model* model) {
     FightFighter f;
     f.name = nm;
     f.is_player = is_player;
-    f.fighter.set_model(model_);
+    // JS `xc.cM`: the fighter is built from its OWN equipment model. The
+    // caller passes the enemy's model (the Punchbag) or nullptr for the
+    // shared fight model.
+    f.fighter.set_model(model != nullptr ? *model : model_);
     // [FIX Phase 4b — black silhouettes] The fighters' fill color is the
     // LOCATION's Root Color (the dojo_params `<Root Color="0x000000">`),
     // not a hardcoded team color — the oracle's fighters are black
@@ -335,11 +345,17 @@ FightFighter FightController::make_fighter(
     // by the fight screen after init_locks; the default here is black so
     // the standalone demos (which have no location) also draw black.
     f.fighter.set_color(fighter_color_);
-    f.fighter.set_clip_lookup(
-        [this](const std::string& name) -> const sf2::data::anim_clip* {
-            const auto it = clips_->find(name);
-            return it != clips_->end() ? &it->second : nullptr;
-        });
+    // JS `ur` L195 `QD` gates the animation attach (`Te.NS`/`da.ia` L499/
+    // L505): a NotAnimation warrior never plays a clip. Skipping the lookup
+    // leaves `current_clip_` null, so every later start/sample is a no-op
+    // and the fighter keeps the bind pose sampled by `sample_enemy_idle`.
+    if (!not_animation) {
+        f.fighter.set_clip_lookup(
+            [this](const std::string& name) -> const sf2::data::anim_clip* {
+                const auto it = clips_->find(name);
+                return it != clips_->end() ? &it->second : nullptr;
+            });
+    }
     if (owned.empty()) {
         f.fighter.build_move_list(*moves_, weapon_subtype);
     } else {
@@ -364,7 +380,9 @@ FightFighter FightController::make_fighter(
     f.params.attributes["DamageFactor"] = 0.0f;
     f.max_hp = static_cast<float>(max_hp);
     f.hp = f.max_hp;
-    if (!is_player && tactic_ != nullptr) {
+    // JS `ur` L194: `Fj = NotAI==null`; the AI is created ONLY when the
+    // warrior is not an AI-less dummy (and the tactic resolved).
+    if (!is_player && !not_ai && tactic_ != nullptr) {
         f.ai = std::make_unique<sf2::scene::AiController>();
         f.ai->init("Fists", tactics_, tactic_, moves_);
     }
@@ -1089,7 +1107,7 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
         ref.name = pn;
         perk_setup_.enemy_refs.push_back(std::move(ref));
     }
-    sample_idle(enemy_);
+    sample_enemy_idle();
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
     setup_bus(perk_setup_);
@@ -1186,7 +1204,7 @@ void FightController::enter_start_stance() {
     player_.fighter.set_world_pos(battle_.player_spawn_x, battle_.player_spawn_y);
     enemy_.fighter.set_world_pos(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
     sample_idle(player_);
-    sample_idle(enemy_);
+    sample_enemy_idle();
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
     set_phase(fight_phase::start_stance);
@@ -1220,7 +1238,7 @@ void FightController::enter_fight() {
     player_.fighter.clear_move();
     enemy_.fighter.clear_move();
     sample_idle(player_);
-    sample_idle(enemy_);
+    sample_enemy_idle();
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
 
@@ -1435,6 +1453,21 @@ void FightController::sample_idle(FightFighter& f) {
         f.fighter.sample(it->second, 0, f.fighter.world_x(), f.fighter.world_y(),
                          f.fighter.facing());
     }
+}
+
+void FightController::sample_enemy_idle() {
+    // JS `QD` (NotAnimation, L195/L499): the dummy holds its BIND pose.
+    // `Fighter::sample` with a 1-frame clip whose frame has no bones leaves
+    // every bone at its bind position — the exact hub path
+    // (screens.cpp:3510-3512). Otherwise the enemy uses the stance idle.
+    if (battle_.enemy_not_animation) {
+        sf2::data::anim_clip bind_clip;
+        bind_clip.frames.resize(1);
+        enemy_.fighter.sample(bind_clip, 0, enemy_.fighter.world_x(),
+                              enemy_.fighter.world_y(), enemy_.fighter.facing());
+        return;
+    }
+    sample_idle(enemy_);
 }
 
 void FightController::rebuild_body(FightFighter& f, const FightFighter& foe) {
@@ -2589,7 +2622,11 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // (`FistsStartStance-Left/-Right`, stance_1/stance_2 — the trace F2..
     // F134 = `FistsStartStance-Left`); the idle variant is the phase-2
     // loop.
-    if (me.fighter.current_move() == nullptr) {
+    // The NotAnimation dummy never auto-plays the stance idle: JS `QD`
+    // (L499) gates `da.ia`, and the idle move would otherwise register as a
+    // started move. It stays exactly where `sample_enemy_idle` left it.
+    const bool stance_locked = battle_.enemy_not_animation && &me == &enemy_;
+    if (me.fighter.current_move() == nullptr && !stance_locked) {
         const bool intro = phase_ == fight_phase::start_stance;
         // The mirror variant is picked from the direction to the enemy
         // (JS `wd.NS` L506: facing = sign(enemyX - myX); the move's

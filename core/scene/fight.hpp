@@ -668,16 +668,28 @@ struct BattleParams {
     // from StageFight.rules; the controller runs the sim-relevant subset
     // (Ringout/TimeOutWin) with JS-exact result mapping.
     std::vector<FightRule> rules;
-    // Fight-level spawn positions (the game reads location.Yia/B_; the
-    // demo supplies the dojo ModelsViewer positions).
-    float player_spawn_x = 973.0f, player_spawn_y = -110.0f;
-    float enemy_spawn_x = 690.0f, enemy_spawn_y = -93.0f;
+    // Fight-level spawn positions. JS `Bf.zjb` L476 stores the ModelsViewer
+    // `PlayerPositionX/Y` into `location.Yia` and `EnemyPositionX/Y` into
+    // `location.B_`; JS L381 then spawns the player (`kc`) at `Yia` and the
+    // enemy (`Zb`) at `B_`. So the fight roles FOLLOW the ModelsViewer
+    // labels: dojo player (690,-93) / enemy (973,-105). (The oracle dump's
+    // `id` labels are swapped — its 15-bone Punchbag sits at x=973 = the
+    // enemy — which is what the deleted comment got wrong.) The caller
+    // sources these from LocationScene (screens.cpp); the defaults are the
+    // dojo values.
+    float player_spawn_x = 690.0f, player_spawn_y = -93.0f;
+    float enemy_spawn_x = 973.0f, enemy_spawn_y = -110.0f;
     int max_hp = 100;         // demo HP cap (the game stores HP in the save)
-    // Demo damage tuning: the player's UnarmedDamage attr (the JS balance
-    // formula: 2^((attr+shift-defense)/10) × base). The shipped warriors
-    // carry UnarmedDamage=2 → ~0.055/hit vs the 1-HP fallback, so a KO
-    // would take ~18 hits; the demo raises it so the fight completes fast
-    // while keeping the exact bCa formula.
+    // JS `ur` L194-195: `Fj = NotAI==null`, `QD = NotAnimation==null`. A
+    // stage Warrior with NotAI="1" gets NO AiController (the dummy never
+    // selects a move); NotAnimation="1" keeps it at the BIND pose (no
+    // stance-idle clip). Resolved from the battle's first <Warrior>
+    // (`battle_warrior`, screens.cpp).
+    bool enemy_not_ai = false;
+    bool enemy_not_animation = false;
+    // The player's resolved `UnarmedDamage` (JS `wd.Fm` L811: item bonus
+    // `m7a` + group `g8a` + StartingAttributes + level × LevelAttributeGain)
+    // — the bCa balance input, not a tuning knob. Dojo default = 15.
     float player_unarmed_damage = 0.0f;
 };
 
@@ -1155,7 +1167,13 @@ public:
                     // JS `Da.IT` reseed hook for the shared fight stream
                     // (`Da.pg` analog). See `rules_begin_round` (`cl.pmb`).
                     // nullptr = leave the stream untouched.
-                    std::function<void(int)> reseed01 = nullptr);
+                    std::function<void(int)> reseed01 = nullptr,
+                    // The enemy's own merged model (JS `xc.cM` rebuilds each
+                    // warrior from its OWN equipment). nullptr = the shared
+                    // `model` (the player's); the dojo Punchbag passes
+                    // `assets.merged_bag` (its <Items> = PunchingBag +
+                    // SkeletonPunchingBag, stages.xml L14-15).
+                    const sf2::scene::Model* enemy_model = nullptr);
 
     // Seeds the OWNED fight stream (JS `Da.pg=new Rk(L.seed)`, L67). Every
     // fight draw - rules (`cl.pmb`/`pn.M4`), combat (`Lcb`/`R8a`), the AI
@@ -1487,10 +1505,15 @@ private:
     void update_fighter(FightFighter& me, FightFighter& foe, float dt);
     // Builds one fighter (shared init helper). `weapon_subtype` selects the
     // TacticWeapon-based move list; `owned` (when non-empty) selects the
-    // Locks-based list (JS `ra.Hza`).
+    // Locks-based list (JS `ra.Hza`). `not_ai` = JS `Fj==false` (NotAI, no
+    // AiController); `not_animation` = JS `QD==false` (NotAnimation, no clip
+    // attach — the dummy holds its bind pose); `model` = the fighter's own
+    // model (nullptr = the shared fight `model`).
     FightFighter make_fighter(const std::string& nm, bool is_player, float x, float y,
                               int max_hp, const std::string& weapon_subtype,
-                              const std::vector<std::pair<std::string, std::string>>& owned);
+                              const std::vector<std::pair<std::string, std::string>>& owned,
+                              bool not_ai = false, bool not_animation = false,
+                              const sf2::scene::Model* model = nullptr);
     // The hit test (JS `ca.Enb` -> `wd.tKa` -> `Fu.ia`).
     bool hit_test(FightFighter& atk, FightFighter& def, const sf2::scene::MoveDef& move,
                   int frame, sf2::scene::HitCapsule& hit_cap,
@@ -1547,6 +1570,10 @@ private:
     void reset_magic_fighter(FightFighter& f);
     // Samples the fighter's idle pose (JS: the weapon stance idle).
     void sample_idle(FightFighter& f);
+    // The enemy's initial/round pose: the stance idle, or — when the stage
+    // Warrior is NotAnimation (JS `QD` L195) — its BIND pose (a 1-frame
+    // empty clip, exactly as the dojo hub does at screens.cpp:3510-3512).
+    void sample_enemy_idle();
     // The HUD countdown seconds (JS Sf.iPa: gma - round.time).
     int hud_timer() const;
 };

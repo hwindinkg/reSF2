@@ -2909,6 +2909,89 @@ std::vector<sf2::scene::StageRule> battle_fight_rules(const std::string& battle_
     return out;
 }
 
+// The FIRST <Warrior> of the current battle's first <Fight> (stages.xml),
+// resolved exactly like JS `ur` (L186-195) reads a warrior node: FirstName
+// (`$s`, L188), the NotAI (`Fj`, L194) and NotAnimation (`QD`, L195)
+// PRESENCE flags, the Tactic (`Gc`, L194), the raw attrs and the <Items>
+// names. The dojo Training Fight 1 is the Punchbag dummy:
+//   <Warrior FirstName="Punchbag" NotAI="1" NotAnimation="1">
+//     <Items><Item Name="PunchingBag"/><Item Name="SkeletonPunchingBag"/>
+// (stages.xml L12-16): `Fj==false` -> no AI (`wd.Anb` L499), `QD==false`
+// -> no animation (`NS` L505 / `da.ia` L499). The battle is resolved among
+// the current zone's direct <Battle> children (same `hp` semantics as
+// `battle_fight_rules`); empty `zone_name` falls back to the legacy scan.
+struct BattleWarriorInfo {
+    std::string first_name;
+    bool has_not_ai = false;
+    bool has_not_animation = false;
+    std::string tactic;
+    std::map<std::string, std::string> attrs;
+    std::vector<std::string> items;
+};
+
+BattleWarriorInfo battle_warrior(const std::string& battle_name,
+                                 const std::string& zone_name) {
+    BattleWarriorInfo out;
+    try {
+        sf2::data::xml_doc doc;
+        const std::string path = "reference/extracted/xml/res/stages.xml";
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return out;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return out;
+        const pugi::xml_node zones = root.child("Zones");
+        if (!zones) return out;
+        pugi::xml_node battle;
+        if (!zone_name.empty()) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                if (std::string(z.attribute("Name").value()) != zone_name) continue;
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                break;  // the zone was found (whether or not it had the battle)
+            }
+        }
+        if (!battle) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                if (battle) break;
+            }
+        }
+        if (!battle) return out;
+        const pugi::xml_node fight = battle.child("Fight");
+        if (!fight) return out;
+        const pugi::xml_node warriors = fight.child("Warriors");
+        if (!warriors) return out;
+        const pugi::xml_node w = warriors.child("Warrior");
+        if (!w) return out;
+        for (const pugi::xml_attribute a : w.attributes()) {
+            out.attrs[a.name()] = a.value();
+        }
+        if (const pugi::xml_attribute a = w.attribute("FirstName")) out.first_name = a.value();
+        out.has_not_ai = w.attribute("NotAI") != nullptr;
+        out.has_not_animation = w.attribute("NotAnimation") != nullptr;
+        if (const pugi::xml_attribute a = w.attribute("Tactic")) out.tactic = a.value();
+        for (const pugi::xml_node it : w.child("Items").children("Item")) {
+            if (const pugi::xml_attribute nm = it.attribute("Name")) {
+                out.items.emplace_back(nm.value());
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return out;
+}
+
 // The player's (type, subtype) items for the Locks move list: the equipped
 // slots (JS `xc.hk`) + the owned inventory (JS `p.o.xa`).
 std::vector<std::pair<std::string, std::string>> owned_items(App& app) {
@@ -3038,6 +3121,66 @@ std::vector<CatalogItem> load_full_catalog(App& app) {
     }
     (void)app;
     return cached;
+}
+
+// The player's resolved `UnarmedDamage` (JS `wd.Fm` L811, per attribute
+// name `h`): an explicit node attr wins; otherwise `m7a` (item bonus,
+// L810) + `g8a` (group/move bonus, L810) + `v.GNa` StartingAttributes +
+// `this.level` × `v.uFa` LevelAttributeGain. `v.GNa`/`v.uFa` are parsed
+// from character_progress.xml (JS `Vib` L1160-1161: `a.A("LevelAttribute
+// Gain")`, `a.A("StartingAttributes")`). For the shipped default warrior
+// (users_default.xml L10: Level=1, Armor Body, Weapon Fists — no node
+// UnarmedDamage) the item total is 0 (Body UnarmedDamage=0, list.xml L89;
+// Fists carries none, L91), so the resolved value is
+//   StartingAttributes.UnarmedDamage(5, character_progress.xml L63)
+//   + level(1) × LevelAttributeGain.UnarmedDamage(10, L64) = 15.
+float resolve_player_unarmed_damage(App& app) {
+    float starting = 0.0f;
+    float per_level = 0.0f;
+    try {
+        sf2::data::xml_doc doc;
+        const std::string path = "reference/extracted/xml/res/character_progress.xml";
+        std::ifstream in(path, std::ios::binary);
+        if (in) {
+            std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+            const pugi::xml_node root = doc.root().first_child();
+            if (root) {
+                if (const pugi::xml_node sa = root.child("StartingAttributes")) {
+                    starting = sa.attribute("UnarmedDamage").as_float(0.0f);
+                }
+                if (const pugi::xml_node lg = root.child("LevelAttributeGain")) {
+                    per_level = lg.attribute("UnarmedDamage").as_float(0.0f);
+                }
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    int level = 1;
+    std::vector<std::string> equipped;
+    try {
+        const WarriorSave w = app.save().load();
+        level = w.level > 0 ? w.level : 1;
+        equipped = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
+        for (const auto& oi : w.items) {
+            if (oi.count > 0) equipped.push_back(oi.name);
+        }
+    } catch (const std::exception&) {
+    }
+    // `m7a` item bonus: sum the equipped/owned items' UnarmedDamage rows.
+    float item_bonus = 0.0f;
+    const std::vector<CatalogItem> catalog = load_full_catalog(app);
+    for (const std::string& name : equipped) {
+        if (name.empty()) continue;
+        for (const CatalogItem& ci : catalog) {
+            if (ci.name == name) {
+                item_bonus += static_cast<float>(ci.unarmed_damage);
+                break;
+            }
+        }
+    }
+    return starting + static_cast<float>(level) * per_level + item_bonus;
 }
 
 // Resolves + loads the hashed `en.<hash>.xml` lang file once (the
@@ -4024,15 +4167,6 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     battle.rounds = 2;
     battle.round_time = 99;
     battle.health_recovery = 1.0f;
-    // [FIX Phase 4a — spawn sides] The dojo_params ModelsViewer places
-    // PlayerPositionX=690 (left) / EnemyPositionX=973 (right) — but the
-    // ORACLE trace (reference/traces/console.log) shows the PLAYER at the
-    // RIGHT (P:972.954) and the ENEMY (Punchbag) at the LEFT (E:690.000):
-    //   F0|1|0|0|P:972.954,-108.114,1,,1,NAME_SHADOW|E:690.000,-93.000,1,,1,Punchbag
-    // The ModelsViewer "Player"/"Enemy" labels are reversed relative to
-    // the fight roles (the viewer's "Player" = the left Punchbag = the
-    // fight ENEMY). The old code spawned the player LEFT — the fighters
-    // appeared on the wrong sides ("in nowhere" + mirrored).
     // [FIX Phase 4a — fighters on the floor] The spawn Y is the ModelsViewer
     // placement y (the PivotNode target — `Fighter::sample` anchors the model
     // pivot there), so the posed feet rest on the visible floor line. The dojo's
@@ -4047,12 +4181,23 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // container y anchor (`tl.init` L843 `height/2-ct`). Was hard-coded to
     // dojo's 80 for every location.
     const float floor_y = assets.fight_location.arena_floor();
-    battle.player_spawn_x = 973.0f;
-    battle.player_spawn_y = -110.0f;  // pivot Y (oracle Me -108, Enemy -93) — ModelsViewer split
-    battle.enemy_spawn_x = 690.0f;
-    battle.enemy_spawn_y = -93.0f;
+    // [FIX Phase 1 step 9 — spawn sides] Source BOTH spawns from the
+    // location's ModelsViewer (JS `Bf.zjb` L476 parses PlayerPositionX/Y ->
+    // `location.Yia`, EnemyPositionX/Y -> `location.B_`; JS L381 spawns the
+    // player `kc` at `Yia` and the enemy `Zb` at `B_`). Dojo: player
+    // (690,-93), enemy (973,-110) (dojo_params.b78df4b4.xml ModelsViewer). The old hard-coded 973/690 pair trusted
+    // the oracle dump's swapped `id` labels (the fighter at x=973 is the
+    // 15-bone Punchbag = the enemy) and put the player on the enemy's mark.
+    // Falls back to the dojo defaults when a location has no <ModelsViewer>.
+    if (assets.fight_location.has_spawns()) {
+        battle.player_spawn_x = assets.fight_location.player_spawn_x();
+        battle.player_spawn_y = assets.fight_location.player_spawn_y();
+        battle.enemy_spawn_x = assets.fight_location.enemy_spawn_x();
+        battle.enemy_spawn_y = assets.fight_location.enemy_spawn_y();
+    }
     battle.max_hp = 1;  // the game's HP fallback (Zn = aB>0 ? aB : 1)
-    battle.player_unarmed_damage = 80.0f;
+    // JS `wd.Fm` L811 — the player's resolved UnarmedDamage (see the helper).
+    battle.player_unarmed_damage = resolve_player_unarmed_damage(app());
     // [fx] JS `nj.parse` (L885) + `f_a` (L896-897): the stage fight's
     // `<Ringout>` rule configures the off-screen marker arrows (`sXa`). The
     // native battle is hardcoded above, so pull the battle's first-fight
@@ -4101,17 +4246,43 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     const std::uint32_t fight_seed = 0x5F2u;
 
     fight_ = std::make_unique<sf2::scene::FightController>();
-    // The enemy's display name: the Dojo training fight names its Punchbag
-    // dummy (JS stages.xml Fight 1 Warrior FirstName="Punchbag"); the map
-    // flow keeps the pending-battle default "Enemy".
+    // JS `ur` L186-195: resolve the battle's FIRST <Warrior> — FirstName,
+    // the NotAI/NotAnimation presence flags, items and attrs. Dojo Training
+    // Fight 1 is the Punchbag dummy (FirstName="Punchbag" NotAI="1"
+    // NotAnimation="1", stages.xml L12); BOSS_LYNX Fight 1 is a Warrior
+    // template with neither flag (L78).
+    const BattleWarriorInfo bw = battle_warrior(battle_name_, app().pending_battle().zone);
+    app().pending_battle().enemy_name =
+        bw.first_name.empty() ? "Enemy" : bw.first_name;
+    battle.enemy_not_ai = bw.has_not_ai;
+    battle.enemy_not_animation = bw.has_not_animation;
+    // JS `xc.cM`: the enemy renders its OWN equipment model. Only the
+    // NotAnimation Punchbag dummy has a distinct model here (`merged_bag`,
+    // the 15-bone bag the hub loads); every other warrior keeps `merged`.
+    const sf2::scene::Model* enemy_model =
+        (battle.enemy_not_animation && !assets.merged_bag.bones.empty())
+            ? &assets.merged_bag
+            : nullptr;
     const std::string& enemy_name = app().pending_battle().enemy_name;
     fight_->init_locks(battle, assets.merged, assets.moves, assets.clips,
                        assets.tactics_sets, tactic, "Player", enemy_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
                        battle.max_hp, battle.max_hp, {},
-                       owned, equipped_perks(app(), assets), nullptr);
+                       owned, equipped_perks(app(), assets), nullptr, enemy_model);
     fight_->set_seed(fight_seed);  // JS `Da.pg=new Rk(L.seed)` (L67)
+    // [Phase 1 step 9] The resolved stage Warrior (JS `ur` L186-195) and the
+    // input it feeds: the NotAI/NotAnimation gates, the player's resolved
+    // UnarmedDamage and the location-sourced spawns.
+    std::fprintf(stdout,
+                 "[fight] warrior first='%s' not_ai=%d not_animation=%d enemy_model=%s "
+                 "unarmed=%.2f spawn P=(%.0f,%.0f) E=(%.0f,%.0f) hp=%d\n",
+                 bw.first_name.c_str(), battle.enemy_not_ai ? 1 : 0,
+                 battle.enemy_not_animation ? 1 : 0,
+                 enemy_model != nullptr ? "merged_bag" : "merged",
+                 battle.player_unarmed_damage, battle.player_spawn_x, battle.player_spawn_y,
+                 battle.enemy_spawn_x, battle.enemy_spawn_y, battle.max_hp);
+    std::fflush(stdout);
     // Disarm identity (JS `$b(Au)` vs `ownHd`, L394): the player's wielded
     // weapon comes from the save; the enemy defaults to Fists (Training).
     {
