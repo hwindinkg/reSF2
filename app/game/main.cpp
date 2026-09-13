@@ -405,20 +405,35 @@ constexpr int kUiTourStepCount = static_cast<int>(sizeof(kUiTourSteps) / sizeof(
 //   profile tab strip (profile_tab_layout): y=672.5, x = 461.1/580.4/699.7/818.9.
 //   shop first card = (548.2, 218.4).
 static const UiTourStep kFidelitySteps[] = {
-    // --- Dojo hub (boot) + the not-yet-ported tutorial states ---------------
-    // 0: the Dojo hub (boot; `za` nav collapsed).
-    {0.0f, 0.0f, "dojo hub", 3, 150, -1, 60, "dojo_hub.png", 0, true},
-    // 1-4: the oracle's tutorial fight states. The port has NO tutorial fight
-    //      (it boots straight into the Dojo hub); closest reachable = the hub.
-    {0.0f, 0.0f, "tut_fight_stance (closest: dojo)", 3, 0, -1, 6, "tut_fight_stance.png", 0, true},
-    {0.0f, 0.0f, "tut_fight_phase2 (closest: dojo)", 3, 0, -1, 6, "tut_fight_phase2.png", 0, true},
-    {0.0f, 0.0f, "tut_block (closest: dojo)", 3, 0, -1, 6, "tut_block.png", 0, true},
-    {0.0f, 0.0f, "tut_win (closest: dojo)", 3, 0, -1, 6, "tut_win.png", 0, true},
-    // 5: expand the collapsed `za` nav column (the header tap).
+    // --- Fresh-profile tutorial (JS StoryTutorialWelcome) --------------------
+    // Approved `fresh/tutorial-from-0` boot: the Dojo plays the Sensei beats
+    // (App::fresh_tutorial), then the `Punchbag|Bosses|1` training fight, then
+    // the clean hub. Beats mirror tutorial_quests.xml StoryTutorialWelcome
+    // (tutorial_move -> tutorial_punchbag -> the characterSensei Regular
+    // dialog + dlgStoryBtnFight).
+    // 0: beat 0 notification ("tutorial_move") -> tut_fight_stance.
+    {0.0f, 0.0f, "tut stance (move notification)", 3, 150, -1, 90, "tut_fight_stance.png", 0, true},
+    // 1: tap the notification banner -> beat 1 ("tutorial_punchbag").
+    {1145.0f, 244.0f, "tut phase2 (punchbag notification)", 3, 10, -1, 50, "tut_fight_phase2.png", 0, false},
+    // 2: tut_block (oracle CLOSEST: the same punchbag lesson).
+    {0.0f, 0.0f, "tut block (punchbag notification)", 3, 0, -1, 30, "tut_block.png", 0, true},
+    // 3: tap -> beat 2, the Regular Sensei training-fight dialog.
+    {1145.0f, 244.0f, "dojo sensei (training dialog)", 3, 10, -1, 50, "dojo_sensei.png", 0, false},
+    // 4: the dialog FIGHT button (`dlgStoryBtnFight`) -> the training fight
+    //    (a real tutorial fight state for tut_win).
+    {860.0f, 554.0f, "tut fight (Punchbag training)", 3, 10, 6, 520, "tut_win.png", 0, false,
+     0.0f, 0.0f, 1},
+    // 5: pause the training fight (Esc). The Training <Rules> carry no round
+    //    end (the dummy never KOs), so the fight is exited, not won; the
+    //    tutorial completes when the fight starts (screens.cpp
+    //    start_tutorial_fight).
+    {0.0f, 0.0f, "tut fight pause (Esc)", 6, 10, -1, 30, nullptr, 256, false},
+    // 6: the pause dialog home ("QUIT") pops the fight -> the clean Dojo hub.
+    {720.0f, 470.0f, "tut fight quit->dojo", 6, 10, 3, 0, nullptr},
+    // 7: the clean Dojo hub (tutorial done; no banner).
+    {0.0f, 0.0f, "dojo hub", 3, 20, -1, 80, "dojo_hub.png", 0, true},
+    // 8: expand the collapsed `za` nav column (the header tap).
     {120.0f, 90.0f, "dojo menu open (za header)", 3, 10, -1, 40, "dojo_menu_open.png", 0, false},
-    // 6: the Sensei quest modal — headless auto-drains the queue
-    //    (quest_modal_top), so closest reachable = the expanded hub.
-    {0.0f, 0.0f, "dojo sensei (closest: expanded hub)", 3, 0, -1, 30, "dojo_sensei.png", 0, true},
     // --- Map ----------------------------------------------------------------
     {184.0f, 231.0f, "dojo->map", 3, 10, 5, 60, "map_zone1.png", 0, false},
     // node selection / info panels are not modelled (PORT_AUDIT_UI §2.3/2.4):
@@ -1023,6 +1038,9 @@ int main(int argc, char** argv) {
         // (App::render_frame), so capture those two first with the overlay
         // live, then run the deterministic headless step tour.
         std::filesystem::create_directories("reference/traces/port_matrix");
+        // Fresh-profile tutorial (JS StoryTutorialWelcome): the Dojo plays the
+        // Sensei beats then the Punchbag training fight before the clean hub.
+        app.set_fresh_tutorial(true);
         // splash: right after boot (Preloader counts down from 75).
         app.set_headless_frames(0);
         app.run_one_frame();

@@ -2,6 +2,11 @@
 
 #include "app/app.hpp"
 
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include <GLFW/glfw3.h>
 
 #include <cctype>
@@ -9,6 +14,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <locale>
 #include <vector>
 
 #include "app/fight_assets.hpp"
@@ -133,6 +139,46 @@ std::string resolve_language(const std::string& lang) {
     return "en";
 }
 
+// The platform UI language's primary subtag (the native analog of the browser
+// `navigator.language` the JS platform bridge returns — `Ca.c6a()` =
+// `window.GameInterface.getCurrentLanguage()` = `p.get().locale ||
+// navigator.language`, microsite-game-interface L61141; `L.web` L33041 reads
+// it and validates it against `iv` before `new L(a)`). `std::locale("")`
+// reports the user's default locale ("ru-RU"/"Russian_Russia.1251"); take the
+// leading 2-letter subtag lowercased. "" when unavailable.
+std::string platform_language() {
+#ifdef _WIN32
+    // The user's default locale (e.g. "ru-RU" -> "ru"). WebView2's
+    // `navigator.language` reports the same OS UI language.
+    wchar_t buf[LOCALE_NAME_MAX_LENGTH] = {};
+    const int n = GetUserDefaultLocaleName(buf, LOCALE_NAME_MAX_LENGTH);
+    if (n > 1) {
+        std::string l;
+        for (int i = 0; i < n - 1 && l.size() < 2; ++i) {
+            const wchar_t c = buf[i];
+            if (c < 0x80 && std::isalpha(static_cast<unsigned char>(c))) {
+                l.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+            } else {
+                break;
+            }
+        }
+        if (!l.empty()) return l;
+    }
+#endif
+    try {
+        const std::string name = std::locale("").name();
+        std::string l;
+        for (const char ch : name) {
+            if (!std::isalpha(static_cast<unsigned char>(ch))) break;
+            l.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+            if (l.size() == 2) break;
+        }
+        return l;
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 // JS `Tk.n5` (L88) verbatim: the localized "Loading" word (UTF-8 bytes).
 const char* loading_word(const std::string& lang) {
     if (lang == "de") return "Laden";
@@ -191,9 +237,13 @@ bool App::init(const std::string& res_root, const std::string& save_path,
     res_root_ = res_root;
     save_path_ = save_path;
     // JS `G.Ska` (L2392): lowercase + default/coerce to "en" (the supported
-    // set is `G.v9`, L2492). Runtime lang source (JS `Ca.c6a()` = the
-    // platform `getCurrentLanguage`) is the caller's to pass; default "en".
-    lang_ = resolve_language(lang);
+    // set is `G.v9`, L2492). The runtime lang source is the platform locale
+    // (JS `Ca.c6a()`, see platform_language) unless the caller passes one.
+    const std::string requested = lang.empty() ? platform_language() : lang;
+    lang_ = resolve_language(requested);
+    std::fprintf(stdout, "[app] language: platform='%s' requested='%s' -> '%s'\n",
+                 platform_language().c_str(), lang.c_str(), lang_.c_str());
+    std::fflush(stdout);
 
     renderer_ = std::make_unique<sf2::render::Renderer>();
     GLFWwindow* window = nullptr;

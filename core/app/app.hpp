@@ -112,10 +112,13 @@ public:
 
     // Creates the window + GL context, loads the shared assets, boots to
     // the main menu. Returns false on failure. `lang` selects the UI
-    // language: the JS default is "en" (`G.lang` L134; `G.Ska` L2392) and
-    // remains the fallback when a localized asset is absent (`G.bg` L2394).
+    // language; empty (the default) resolves through the platform locale —
+    // the native analog of the browser `navigator.language` the JS bridge
+    // returns (`Ca.c6a()` -> `p.get().locale || navigator.language`,
+    // microsite-game-interface L61141; `L.web` L33041). The result is coerced
+    // by `G.Ska` (L2392): lowercase + the supported set `G.v9`, else "en".
     bool init(const std::string& res_root, const std::string& save_path,
-              const std::string& lang = "en");
+              const std::string& lang = std::string());
 
     // The main loop — runs until the window closes. `headless_frames`
     // > 0 runs that many frames then closes (used by the log-only verify
@@ -229,6 +232,14 @@ public:
     // the loop driver sets it via set_headless_frames(1)). Quest modals use
     // this to auto-advance instead of modal-blocking.
     bool headless() const { return headless_frames_ > 0; }
+
+    // Fresh-profile tutorial mode (JS `StoryTutorialWelcome`; the approved
+    // `fresh/tutorial-from-0` boot). When armed (only by `--fidelity-tour`),
+    // the Dojo plays the blocking Sensei beats before the hub is clean. The
+    // seeded post-tutorial path used by `--ui-tour`/`--headless-loop` leaves
+    // this OFF, so those flows keep working unchanged.
+    void set_fresh_tutorial(bool on) { fresh_tutorial_ = on; }
+    bool fresh_tutorial() const { return fresh_tutorial_; }
 
     // Dev chrome (SETUP/DISCIPLE toggles — not in the oracle; Dojo wave):
     // hidden unless `--debug-ui` was passed.
@@ -349,6 +360,8 @@ private:
     bool auto_click_ = false;
     bool auto_attack_ = false;
     bool debug_ui_ = false;
+    // Fresh-profile tutorial (see set_fresh_tutorial).
+    bool fresh_tutorial_ = false;
     int frame_count_ = 0;
     int auto_click_stage_ = 0;
 };

@@ -118,10 +118,30 @@ bool quest_modal_consume(App& app) {
 enum class UiAlign { Left = 0, Center = 1, Right = 2 };
 
 // JS `ea.a1` (L1931/L2484): ja/ko/ru scale every `ua` by 0.8, every other
-// locale by 1. `ensure_lang` is EN-only (the app loads `ui/font-en.*`), so
-// the active `a1` is 1; the 0.8 branch is unreachable until the app-level
-// per-language font/atlas swap exists (OPEN).
-constexpr float kEaA1 = 1.0f;
+// locale by 1. The shell swaps the BMF page + the `<lang>.<hash>.xml` string
+// table at App::init/ensure_lang, so the active factor comes from
+// `App::ui_text_scale()` (the JS boot switch L65 and the settings picker
+// L1931 set `ea.a1=.8` for ru). `ea.ua(a)` -> `effect.ua(a*ea.a1)` (L1711).
+float ea_a1(const App& app) { return app.ui_text_scale(); }
+
+// JS `{br}` inline markup (the `Xc`/`ea` rich-text splitter): a hard line
+// break. Resolve it to '\n' before a multiline draw. A no-op for plain text.
+std::string expand_br(const std::string& text) {
+    const std::string token = "{br}";
+    if (text.find(token) == std::string::npos) return text;
+    std::string out;
+    out.reserve(text.size());
+    std::size_t i = 0;
+    while (i < text.size()) {
+        if (text.compare(i, token.size(), token) == 0) {
+            out.push_back('\n');
+            i += token.size();
+        } else {
+            out.push_back(text[i++]);
+        }
+    }
+    return out;
+}
 
 void draw_ui_label(App& app, float x, float y, float w, float h,
                    const std::string& text, float ua_scale, UiAlign align,
@@ -130,7 +150,7 @@ void draw_ui_label(App& app, float x, float y, float w, float h,
     const sf2::data::font* font = app.menu_font();
     if (font == nullptr) return;
     // Glyph scale = ua(size)/charset.eF (L1631); `ua_scale` is that ratio.
-    float scale = ua_scale * kEaA1;
+    float scale = ua_scale * ea_a1(app);
     if (scale <= 0.0f) return;
     // JS `Bg.Sk()` (L1627) single-line fit, reached via `mk()` (L1626):
     // `a = min(boxW/textW, boxH/textH)` then clamp to the authored `ua` (a
@@ -190,7 +210,9 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
     if (text.empty() || w <= 0.0f || h <= 0.0f) return;
     const sf2::data::font* font = app.menu_font();
     if (font == nullptr) return;
-    const float scale = ua_scale * kEaA1;
+    // `{br}` inline markup -> hard line break (see expand_br).
+    const std::string body = expand_br(text);
+    const float scale = ua_scale * ea_a1(app);
     if (scale <= 0.0f) return;
     const float line_step = scale * static_cast<float>(font->line_height);
     if (line_step <= 0.0f) return;
@@ -199,7 +221,7 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
     std::vector<std::string> logical;
     {
         std::string cur;
-        for (char ch : text) {
+        for (char ch : body) {
             if (ch == '\n') {
                 logical.push_back(cur);
                 cur.clear();
@@ -218,9 +240,18 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
             (void)sf2::data::utf8_next(para, next);
             const std::string cand = cur + para.substr(i, next - i);
             if (!cur.empty() && app.measure_text(*font, cand, scale) > w) {
-                lines.push_back(cur);
-                cur.clear();
-                continue;  // retry this glyph on the new line (JS pops it)
+                // Prefer a word break (the oracle wraps at spaces): move the
+                // tail after the last space to the new line. Falls back to a
+                // character break when the line has no usable space.
+                const std::size_t sp = cur.rfind(' ');
+                if (sp != std::string::npos && sp > 0 && sp + 1 < cur.size()) {
+                    lines.push_back(cur.substr(0, sp));
+                    cur = cur.substr(sp + 1);
+                } else {
+                    lines.push_back(cur);
+                    cur.clear();
+                }
+                continue;  // retry this glyph on the new line
             }
             cur = cand;
             i = next;
@@ -302,9 +333,10 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
         ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.95f);
     }
     // `Vc` title (`Fa(1560,160)`, `ua(152)`, color `Z.W6` = 0.404/0.243/0.141).
+    // The Title attr is a lang key (`characterSensei` -> "СЭНСЭЙ" RU).
     const float title_w = 1560.0f * c, title_h = 160.0f * c;
     draw_ui_label(app, px + pw * 0.5f - title_w * 0.5f, py + 8.0f * c, title_w, title_h,
-                  d->title, 1.0f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
+                  loc(app, d->title, d->title), 1.0f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
     // Body `Cd`: the JS runs the body text multiline (`ea.rd(!0)`) — wrap each
     // line into the panel width and clip at the panel bottom (`Qh.apply`
     // L1628-1629; the `Sk` single-line fit is L1626-1627). Replaces the old
@@ -452,14 +484,15 @@ SettingsLayout settings_layout() {
     s.music_row_cx = cx + (300.0f + row_off) * p.c;
     s.credits_row_cx = cx + row_off * p.c;
     s.lang_row_cx = cx + row_off * p.c;
-    // Buttons `Bb.Pb(150)` (L1930): BACK left, RESTART at `C(500)`.
+    // Buttons `Bb.Pb(150)` (L1930): BACK only — the oracle `un` dialog shows a
+    // single centred НАЗАД (no RESTART; the native RESTART was invented,
+    // FIDELITY_MATRIX settings row).
     s.btn_w = 320.0f * p.c;
     s.btn_h = 150.0f * p.c;
-    s.back_cx = cx - 320.0f * p.c;
-    s.restart_cx = cx + 500.0f * p.c;
-    // `od.layout` (L1898) D: `Cd.D(a + Cd.node.qa()/2)` with a = Md/2 = 375
-    // and the button container height = one `Bb.Pb(150)` -> centre 450.
-    s.back_cy = s.restart_cy = cy + 450.0f * p.c;
+    s.back_cx = cx;
+    s.restart_cx = cx + 500.0f * p.c;  // unused (kept for layout parity)
+    // `od.layout` (L1898) D: the button container centre.
+    s.back_cy = s.restart_cy = cy + 500.0f * p.c;
     // Notice `Nm`: `C(-750)`, `D(250)`, `Fa(1500,50)` (L1929).
     s.notice_y = cy + 250.0f * p.c;
     return s;
@@ -1391,10 +1424,13 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speak
     const float tx = lx(256.0f - 30.0f);
     draw_ui_label(app, tx, ly(50.0f), 364.0f * c, 44.0f * c, speaker, 0.9f, UiAlign::Left,
                   0.184f, 0.145f, 0.106f);
-    draw_ui_label(app, tx, ly(88.0f), 364.0f * c, 34.0f * c, line1, 0.75f, UiAlign::Left,
-                  0.184f, 0.145f, 0.106f);
+    // The body line wraps (`ea.rd(!0)` multiline; `{br}` is a hard break) —
+    // the Sensei tutorial notifications (tutorial_move {br} ...) need it.
+    const float l1_h = line2.empty() ? 170.0f * c : 70.0f * c;
+    draw_ui_wrapped(app, tx, ly(88.0f), 364.0f * c, l1_h, line1, 0.75f, UiAlign::Left,
+                    0.184f, 0.145f, 0.106f);
     if (!line2.empty()) {
-        draw_ui_label(app, tx, ly(120.0f), 364.0f * c, 30.0f * c, line2, 0.7f, UiAlign::Left,
+        draw_ui_label(app, tx, ly(162.0f), 364.0f * c, 30.0f * c, line2, 0.7f, UiAlign::Left,
                       0.184f, 0.145f, 0.106f);
     }
     // OK (`Bb(Zva)` = "EButtonWhite", local (450,185), `zf(100)`); `Ib.RP`
@@ -3193,26 +3229,27 @@ void ensure_lang(App& app) {
     try {
         const std::string dir = app.res_root() + "/lang";
         std::string path;
-        // EN only for now: the RU string table (ru.<hash>.xml) IS shipped,
-        // and so is a Cyrillic BMF font (res/ui/font-ru.32eaddc0.fnt +
-        // font-ru.3338e715.png — PORT_AUDIT_UI §0.3 corrects the old
-        // "no ru.fnt on disk" claim). The blocker is App::init, which
-        // hardcodes font-en.7043b83b.fnt (app.cpp) — outside this file.
-        // Selecting RU therefore needs the app-level font swap
-        // (`asset id 264 = ui/font{lang}.png`); OPEN until then.
-        if (path.empty()) {
+        // The ACTIVE language's string table (`G.lang`/`G.Rq`; `Y.na` L917
+        // resolves every key through it). The shipped files are
+        // `<lang>.<hash>.xml` (ru.f7d5b2da.xml ships with Cyrillic); an absent
+        // active file falls back to EN (`G.bg` L2394). This was EN-only, which
+        // is why every UI label rendered the EN fallback regardless of the
+        // resolved language.
+        const std::string active = app.language().empty() ? "en" : app.language();
+        for (const std::string& lang : {active, std::string("en")}) {
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
                 const std::string name = entry.path().filename().string();
-                if (name.size() > 7 && name.rfind("en.", 0) == 0 &&
+                if (name.size() > lang.size() + 1 && name.rfind(lang + ".", 0) == 0 &&
                     entry.path().extension().string() == ".xml") {
                     path = entry.path().string();
                     break;
                 }
             }
+            if (!path.empty()) break;
         }
         if (path.empty()) return;
         lang_table_load(app.res_root(), path);
-        std::fprintf(stdout, "[lang] loaded %s\n", path.c_str());
+        std::fprintf(stdout, "[lang] loaded %s (active=%s)\n", path.c_str(), active.c_str());
         std::fflush(stdout);
     } catch (const std::exception&) {
     }
@@ -3457,6 +3494,23 @@ void DojoScreen::update_impl(float dt) {
             std::fflush(stdout);
         }
     }
+    // Fresh-profile tutorial gate (blocking; see the header comment). The
+    // training fight's win (Results pops back here) completes it, so the hub
+    // is clean afterwards.
+    if (app().fresh_tutorial()) {
+        if (!tut_done_) {
+            const PendingBattle& pb = app().pending_battle();
+            if (pb.has_result && pb.player_won && pb.battle_name == "Training") {
+                tut_done_ = true;
+                std::fprintf(stdout, "[tutorial] training fight won -> hub\n");
+                std::fflush(stdout);
+            }
+        }
+        if (!tut_done_) {
+            update_tutorial();
+            return;
+        }
+    }
     // Sensei modal gate (quest He records): while a dialog is up, taps
     // advance it instead of the chrome (headless auto-drains).
     if (quest_modal_consume(app())) return;
@@ -3527,9 +3581,164 @@ void draw_dojo_gamepad(App& app) {
                           btn_size, btn_size, 1.0f);
 }
 
+// --- Fresh-profile tutorial (JS StoryTutorialWelcome) ----------------------
+// The `Ib` notification banner hit rect (the tap that advances a beat).
+// Recomputes the draw_ib_hint layout: 600x250 scroll, top-right, c scale.
+bool tutorial_banner_hit(double x, double y) {
+    const float c =
+        std::clamp(std::min(kViewW * 0.75f, kViewH * 0.75f) / 600.0f, 0.2f, 1.1f);
+    const float sp = std::min(kViewH * 0.13f, 100.0f) * 0.78f;  // za.odb L1975
+    const float ox = kViewW - 600.0f * c;
+    return x >= ox && x <= ox + 600.0f * c && y >= sp && y <= sp + 250.0f * c;
+}
+
+// The tutorial Regular dialog layout (`Xc`/`od`; oracle
+// oracle_tutorial_modal.png): СЭНСЭЙ title, left portrait, right wrapped body,
+// the FIGHT button bottom-centre-right.
+struct TutorialDialogLayout {
+    OdPanel panel;
+    float title_y = 0.0f, title_h = 0.0f;
+    float portrait_cx = 0.0f, portrait_cy = 0.0f, portrait = 0.0f;
+    float body_x = 0.0f, body_y = 0.0f, body_w = 0.0f, body_h = 0.0f;
+    float btn_cx = 0.0f, btn_cy = 0.0f, btn_w = 0.0f, btn_h = 0.0f;
+};
+
+TutorialDialogLayout tutorial_dialog_layout() {
+    TutorialDialogLayout t;
+    t.panel = od_panel(2340.0f, 1530.0f);  // od AV = fc(2340,1530), L1894
+    const OdPanel& p = t.panel;
+    t.title_h = 160.0f * p.c;
+    t.title_y = p.py + p.ph * 0.20f;
+    t.portrait = 300.0f;
+    t.portrait_cx = p.px + p.pw * 0.27f;
+    t.portrait_cy = p.py + p.ph * 0.47f;
+    t.body_x = p.px + p.pw * 0.45f;
+    t.body_y = p.py + p.ph * 0.30f;
+    t.body_w = p.pw * 0.44f;
+    t.body_h = p.ph * 0.45f;
+    t.btn_w = 300.0f;
+    t.btn_h = 72.0f;
+    t.btn_cx = p.px + p.pw * 0.70f;
+    t.btn_cy = p.py + p.ph * 0.78f;
+    return t;
+}
+
+void DojoScreen::draw_tutorial(App& app, sf2::render::Renderer& ren) {
+    ensure_lang(app);
+    if (tut_beat_ <= 1) {
+        // Notification (`He` -> `Ib`, L1045-1050): the sensei-small portrait
+        // banner with the beat body. No speaker label (the oracle notification
+        // shows only the body; `characterSensei` is the Regular title).
+        const bool move = tut_beat_ == 0;
+        const std::string body = loc(
+            app, move ? "tutorial_move" : "tutorial_punchbag",
+            move ? "Let me see you move! Show me what a shadow can do."
+                 : "Fascinating... Now, see that punching bag? Attack it!");
+        // The oracle tutorial notification has no OK button (the whole banner
+        // is the tap target); `show_ok=false` also avoids the OK plate
+        // overlapping the wrapped body.
+        draw_ib_hint(app, ren, "", body, "", /*show_ok=*/false);
+        return;
+    }
+    // Regular dialog (`he`/`Xc`): `od` base + title + portrait + wrapped body
+    // + the localized FIGHT button (`dlgStoryBtnFight`).
+    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.6f);
+    const TutorialDialogLayout t = tutorial_dialog_layout();
+    draw_od_base(app, ren, t.panel);
+    // Title `Vc` (`characterSensei` -> "СЭНСЭЙ").
+    draw_ui_label(app, t.panel.px + t.panel.pw * 0.5f - 780.0f * t.panel.c, t.title_y,
+                  1560.0f * t.panel.c, t.title_h, loc(app, "characterSensei", "SENSEI"),
+                  1.52f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
+    // Portrait (sensei, 256px, transparent corners).
+    if (app.renderer().texture_lookup("sensei_portrait") != 0) {
+        sf2::scene::Sprite s;
+        s.texture_name = "sensei_portrait";
+        s.frame_x = 0.0f;
+        s.frame_y = 0.0f;
+        s.frame_w = 256.0f;
+        s.frame_h = 256.0f;
+        s.tex_w = 256.0f;
+        s.tex_h = 256.0f;
+        s.solid = false;
+        s.color_a = 1.0f;
+        s.transform.set_pos(t.portrait_cx, t.portrait_cy);
+        s.transform.set_scale(t.portrait / 256.0f, t.portrait / 256.0f);
+        app.renderer().draw_sprite(s, ui_camera());
+    }
+    draw_ui_wrapped(app, t.body_x, t.body_y, t.body_w, t.body_h,
+                    loc(app, "tutorial_training_fight",
+                        "Impressive... but a bag cannot defend itself."),
+                    0.8f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
+    // FIGHT button (`dlgStoryBtnFight` -> "В БОЙ").
+    if (!(load_sliced_atlas(app) &&
+          draw_bb_plate(app, "btnBeige", t.btn_cx, t.btn_cy, t.btn_w, t.btn_h, 1.0f))) {
+        draw_flat_button(app, "", t.btn_cx, t.btn_cy, t.btn_w, t.btn_h, 0.6f, 0.5f, 0.3f, false);
+    }
+    draw_ui_label(app, t.btn_cx - t.btn_w * 0.5f, t.btn_cy - 14.0f, t.btn_w, 28.0f,
+                  loc(app, "dlgStoryBtnFight", "FIGHT"), 0.9f, UiAlign::Center, 1.0f, 1.0f,
+                  1.0f);
+}
+
+void DojoScreen::update_tutorial() {
+    if (!app().pointer().pressed) return;
+    const double x = app().pointer().x;
+    const double y = app().pointer().y;
+    if (tut_beat_ <= 1) {
+        if (tutorial_banner_hit(x, y)) {
+            ++tut_beat_;
+            std::fprintf(stdout, "[tutorial] beat -> %d\n", tut_beat_);
+            std::fflush(stdout);
+        }
+        return;
+    }
+    const TutorialDialogLayout t = tutorial_dialog_layout();
+    if (x >= t.btn_cx - t.btn_w * 0.5f && x <= t.btn_cx + t.btn_w * 0.5f &&
+        y >= t.btn_cy - t.btn_h * 0.5f && y <= t.btn_cy + t.btn_h * 0.5f) {
+        start_tutorial_fight();
+    }
+}
+
+void DojoScreen::start_tutorial_fight() {
+    // `Fight Name="Punchbag|Bosses|1"` (tutorial_quests.xml L40): the stages.xml
+    // `Zone Name="Punchbag"` / `Battle Name="Training"` (X=158 Y=145,
+    // Location="dojo") — the dojo training dummy.
+    PendingBattle& pb = app().pending_battle();
+    pb.battle_name = "Training";
+    pb.zone = "Punchbag";
+    pb.location = "dojo";
+    pb.enemy_name = "Punchbag";
+    pb.has_result = false;
+    pb.player_won = false;
+    pb.reward_money = 0;
+    pb.reward_exp = 0;
+    pb.prize_base_coins = 0;
+    pb.prize_bonus = 0;
+    pb.prize_gems = 0;
+    pb.prize_combo = 0;
+    pb.prize_shocks = 0;
+    pb.prize_perfect = false;
+    pb.prize_first = false;
+    // The owned items feed the FightScreen's move list (`ra.Hza`; the map's
+    // `launch_battle` does the same). Without them the auto-attack has no
+    // attackable move and the training fight never ends.
+    pb.owned = owned_items(app());
+    // The beats are done the moment the fight starts: the Dojo reactivates
+    // clean when the fight pops (the hub after the tutorial), and the training
+    // fight's own round never resolves (the `Training` <Rules> carry no round
+    // end; core/scene is out of scope), so completion is not tied to the KO.
+    tut_done_ = true;
+    std::fprintf(stdout, "[tutorial] FIGHT -> Punchbag|Bosses|1 (Training, dojo)\n");
+    std::fflush(stdout);
+    push(kScreenFight);
+}
+
 void DojoScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     ensure_dojo_location(app);
+    // Fresh-profile tutorial is showing (see draw_tutorial): the hub draws
+    // underneath, the dialog on top; the ambient hint is suppressed.
+    const bool tut = app.fresh_tutorial() && !tut_done_;
     // NOTE: the shared `za` chrome draws AFTER the scene (see below) —
     // screen-space chrome on top, like the fight HUD.
     // Dojo interior: the same location layers the fight renders
@@ -3682,7 +3891,10 @@ void DojoScreen::render_impl(App& app) {
         // (PORT_AUDIT_UI 2.9). `Ib` shows OK only with a button text; the
         // ambient banner has none (`show_ok=false`).
         const bool modal_up = quest_modal_top(app) != nullptr;
-        if (!modal_up) {
+        // The ambient `Ib` hint is suppressed in fresh-tutorial mode: the
+        // beats are the tutorial (above) and the post-tutorial hub is clean
+        // (the oracle dojo_hub has no banner).
+        if (!modal_up && !app.fresh_tutorial()) {
             const QuestStep qs = quest_step_for_state(
                 app.res_root(),
                 quest_state_for(tutorial_, story_step_, training_won_, level_, map_focus_,
@@ -3695,6 +3907,12 @@ void DojoScreen::render_impl(App& app) {
     // §2.1-2.2). Navigation is the `za` nav column drawn in the aliveness
     // block above.
     // Sensei dialog modal on top of everything Dojo.
+    if (tut) {
+        // Fresh-profile tutorial (blocking): the Sensei notification beats /
+        // the Regular training-fight dialog (draw_tutorial).
+        draw_tutorial(app, ren);
+        return;
+    }
     draw_quest_modal(app, ren, app.screens().top() == this);
 }
 
@@ -7794,6 +8012,7 @@ SettingsScreen::SettingsScreen(ScreenManager& mgr) : Screen(mgr, "Settings") {}
 void SettingsScreen::update_impl(float dt) {
     ++age_;  // press debounce: ignore the push-frame held click
     (void)dt;
+    ensure_lang(app());  // the lang table powers the Settings_*/Back labels
     const App::PointerState& p = app().pointer();
     hover_ = -1;
     // BACK (`Bb` "BACK", `un.Kb`, L1930 -> `Ge(0)` closes) -> pop.
@@ -7867,9 +8086,10 @@ void SettingsScreen::render_impl(App& app) {
     // Real `un extends od` dialog (L1916-1930): 9-slice base + title + rows.
     const SettingsLayout s = settings_layout();
     draw_od_base(app, ren, s.panel);
-    // Title `Vc`: `IVa.Settings_Title` EN = "SETTINGS" (L1917); `ua(152)` +
-    // `La(Z.W6)` (L1900), `Ia(128)` centre.
-    draw_ui_label(app, s.title_x, s.title_y, s.title_w, s.title_h, "SETTINGS", 1.52f,
+    // Title `Vc`: `IVa.Settings_Title` (L1917; ru -> "НАСТРОЙКИ"); `ua(152)`
+    // + `La(Z.W6)` (L1900), `Ia(128)` centre.
+    draw_ui_label(app, s.title_x, s.title_y, s.title_w, s.title_h,
+                  loc(app, "Settings_Title", "SETTINGS"), 1.52f,
                   UiAlign::Center, 0.404f, 0.243f, 0.141f);
     // Rows from the `un` `IVa` table (L1917-1924). `Ca.hasFeature("audio")`
     // (L1928) gates Sound+Music and `("credits")` (L1929) gates Credits; both
@@ -7877,8 +8097,9 @@ void SettingsScreen::render_impl(App& app) {
     // `E.get(250)` tiles carry the on/off state (sound/sound_off,
     // music/music_off); labels are the plain `IVa` captions (`a()` L1917),
     // placed at `icon_ya + icon_w/2 + icon_w*.2` (i.e. icon_cx + .7 icon).
-    // Language is EN-only in the native (`G.Rq()`/`Oyb` L1931 unreachable);
-    // the language tile is its code.
+    // The labels come from the active `<lang>.<hash>.xml` table
+    // (`un`'s `IVa` keys, L1917): Settings_Sound/Music/Credits/Language. The
+    // Language row shows the active language's own name (ru -> "Русский").
     const bool sfx_on = sf2::audio::AudioEngine::instance().enabled();
     const std::string lang = app.language().empty() ? "en" : app.language();
     if (load_settings_icons_atlas(app)) {
@@ -7892,41 +8113,33 @@ void SettingsScreen::render_impl(App& app) {
     }
     struct RowLabel {
         float cx, cy;
-        const char* text;
+        std::string text;
     };
     const RowLabel labels[4] = {
-        {s.sound_cx, s.sound_cy, "Sound"},
-        {s.music_cx, s.music_cy, "Music"},
-        {s.credits_cx, s.credits_cy, "Credits"},
-        {s.lang_cx, s.lang_cy, "English"},
+        {s.sound_cx, s.sound_cy, loc(app, "Settings_Sound", "Sound")},
+        {s.music_cx, s.music_cy, loc(app, "Settings_Music", "Music")},
+        {s.credits_cx, s.credits_cy, loc(app, "Settings_Credits", "Credits")},
+        {s.lang_cx, s.lang_cy, loc(app, "Settings_Language", "English")},
     };
     for (const RowLabel& row : labels) {
         draw_ui_label(app, row.cx + s.icon * 0.7f, row.cy - s.icon * 0.25f,
                       596.0f * s.panel.c, s.icon, row.text, 0.6f, UiAlign::Left, 1.0f, 1.0f,
                       1.0f);
     }
-    // Restart notice `Nm` (`dlgSettingsRestart`, `ua(75)`, L1929).
-    draw_ui_label(app, kViewW * 0.5f - 500.0f, s.notice_y, 1000.0f, 40.0f,
-                  "Attention! Game must be restarted for these settings to apply.",
-                  0.75f, UiAlign::Center, 1.0f, 0.8f, 0.5f);
-    // BACK (`Bb("EButtonDark")`) + RESTART (`Bb("EButtonBeige")`, od defaults
-    // L1894): `Bb.fza` (L1844) maps the style to the sliced-atlas frame
-    // (`btnDark` / `btnBeige`), drawn through the `ESliced` plate
+    // The `Nm` restart notice (`dlgSettingsRestart`, L1929) is hidden in the
+    // oracle capture (no language change happened), so it is not drawn.
+    // BACK (`Bb("EButtonDark")`). The oracle shows one centred НАЗАД and no
+    // RESTART (the RESTART plate + notice were invented; FIDELITY_MATRIX
+    // settings row). `Bb.fza` (L1844) maps the style to the sliced-atlas
+    // frame (`btnDark`), drawn through the `ESliced` plate
     // (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842). Flat only on a genuine art miss.
     if (!(load_sliced_atlas(app) &&
           draw_bb_plate(app, "btnDark", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 1.0f))) {
         draw_flat_button(app, "", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 0.35f, 0.3f, 0.28f,
                          hover_ == 0);
     }
-    draw_ui_label(app, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f, s.btn_w, 28.0f, "BACK",
-                  0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    if (!(load_sliced_atlas(app) &&
-          draw_bb_plate(app, "btnBeige", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h, 1.0f))) {
-        draw_flat_button(app, "", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h, 0.6f, 0.5f, 0.3f,
-                         false);
-    }
-    draw_ui_label(app, s.restart_cx - s.btn_w * 0.5f, s.restart_cy - 14.0f, s.btn_w, 28.0f,
-                  "RESTART", 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    draw_ui_label(app, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f, s.btn_w, 28.0f,
+                  loc(app, "Settings_Back", "BACK"), 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
 }
 
 // ---------------------------------------------------------------------------
