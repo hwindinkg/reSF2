@@ -2339,6 +2339,204 @@ bool load_ringout_atlas(App& app) {
     return ok;
 }
 
+// ---------------------------------------------------------------------------
+// VS intro (JS `ik`, g="419", L2069-2074) — the pre-fight VS screen the oracle
+// `fight_intro` shows. `ik` (ctor L2069-2071, `aa` L2071-2073, `layout`
+// L2073-2074):
+//   Qa = R.$(E.get(3,6))        full-screen `res/vs/bg.*` backdrop
+//   Sn = Ea(node) C(512) D(286) la(1.6) Wg(27)   stroke container
+//     KF = R.$(E.get(1), y.jTa) ("left") / ux (y.kTa, "right")  brush strokes
+//   Tr = R.$(E.get(1), y.lTa) ("vs")   VS glyph: la(10) -> la(Izb) + wa fade
+//   EK = oe(a.Hf) C(182) D(366)        player portrait (slides from x=-388)
+//   RS = oe(b.Hf) C(842) D(206)        enemy portrait (slides from x=1412)
+//   Web/Veb = c(Y.na(a.$s),185,114)    player name (shadow + gold)
+//   Yeb/Xeb = c(Y.na(b.$s),845,464)    enemy name
+// `vs/sprites.json` frames = left/right/vs (JS asset id 1); `vs/bg.jpg` is the
+// backdrop. Loaded lazily (the `load_callouts_atlas` pattern).
+// ---------------------------------------------------------------------------
+
+bool load_vs_atlas(App& app) {
+    static bool done = false;
+    static bool ok = false;
+    if (done) return ok;
+    done = true;
+    try {
+        const std::string dir = app.res_root() + "/vs";
+        std::string json_path;
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("sprites.", 0) == 0 && entry.path().extension() == ".json") {
+                json_path = entry.path().string();
+                break;
+            }
+        }
+        if (json_path.empty()) return false;
+        sf2::data::Texture tex;
+        bool decoded = false;
+        for (const std::string& ext : {".png", ".webp", ".ktx", ".dds"}) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("sprites.", 0) == 0 && entry.path().extension() == ext) {
+                    if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                        decoded = true;
+                        break;
+                    }
+                }
+            }
+            if (decoded) break;
+        }
+        if (!decoded) return false;
+        const GLuint gl = app.renderer().texture_for("vs_sprites_atlas", tex);
+        if (gl == 0) return false;
+        std::ifstream in(json_path, std::ios::binary);
+        std::vector<std::uint8_t> jb((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+        const sf2::data::atlas a = sf2::data::atlas_parse(jb.data(), jb.size());
+        for (const auto& fr : a.frames) {
+            app.register_atlas_frame(fr, a.w, a.h, gl);
+        }
+        // Backdrop `res/vs/bg.*` (JS `E.get(3,6)`): a plain full-screen image,
+        // registered as a whole-texture frame so `try_draw_atlas_button` can
+        // stretch it to the viewport.
+        for (const std::string& ext : {".jpg", ".png", ".webp", ".ktx", ".dds"}) {
+            bool got = false;
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("bg.", 0) != 0 || entry.path().extension() != ext) continue;
+                sf2::data::Texture bg;
+                if (!sf2::data::decode_texture(entry.path().string(), bg)) continue;
+                const GLuint bgl = app.renderer().texture_for("vs_bg", bg);
+                if (bgl == 0) continue;
+                sf2::data::atlas_frame bf;
+                bf.name = "vs_bg";
+                bf.x = 0;
+                bf.y = 0;
+                bf.w = bg.w;
+                bf.h = bg.h;
+                bf.source_w = bg.w;
+                bf.source_h = bg.h;
+                app.register_atlas_frame(bf, bg.w, bg.h, bgl);
+                got = true;
+                break;
+            }
+            if (got) break;
+        }
+        std::fprintf(stdout, "[fight] vs atlas: %dx%d tex %dx%d %zu frames\n", a.w, a.h,
+                     tex.w, tex.h, a.frames.size());
+        std::fflush(stdout);
+        ok = true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[fight] vs atlas load failed: %s\n", e.what());
+    }
+    return ok;
+}
+
+// VS-intro timeline (JS `ik.aa` L2071-2073, `yY` 3.4). The native timeline is
+// COMPRESSED so the fixed-frame fidelity captures land on the composed screen
+// (`fight_intro`, screen frame 40 ≈ 0.67 s) and the bare fight scene (`pause`,
+// ≈ 2.8 s); see the OPEN note on `FightScreen::vs_t_` in screens.hpp.
+constexpr float kVsSlideT = 0.35f;   // JS kd0 ed(.6): portraits slide in
+constexpr float kVsGlyphT = 0.42f;   // JS kd2 ed(.2): VS glyph fade + scale
+constexpr float kVsStrokeT = 0.48f;  // JS kd4/kd5 ed(.1): left/right strokes
+constexpr float kVsNameT = 0.45f;    // JS kd7: names appear
+constexpr float kVsFadeT = 1.55f;    // JS kd10 fade-out begins
+constexpr float kVsTotal = 1.85f;    // JS yY 3.4 (compressed; see header)
+
+// Quadratic ease-out (the JS `dc.Ln()` family; monotone 0->1).
+float vs_ease(float x) {
+    x = std::clamp(x, 0.0f, 1.0f);
+    return 1.0f - (1.0f - x) * (1.0f - x);
+}
+
+// Draws the `ik` VS screen. Design base 1024x576 (JS `ik.layout` node scale
+// `(a.N-a.J)/1024`); `s = kViewW/1024` reproduces the 1280x720 oracle layout.
+void draw_vs_intro(App& app, float t, const std::string& pname,
+                   const std::string& ename, const std::string& pimg,
+                   const std::string& eimg) {
+    if (!load_vs_atlas(app)) return;
+    sf2::render::Renderer& ren = app.renderer();
+    const float s = kViewW / 1024.0f;
+    const float slide = vs_ease(t / kVsSlideT);
+    const float alpha =
+        t < kVsFadeT ? 1.0f : std::clamp(1.0f - (t - kVsFadeT) / (kVsTotal - kVsFadeT), 0.0f, 1.0f);
+    if (alpha <= 0.0f) return;
+    // Backdrop `Qa` — full-screen (JS `R.$(E.get(3,6))`).
+    if (!try_draw_atlas_button(app, "vs_bg", kViewW * 0.5f, kViewH * 0.5f, kViewW, kViewH,
+                               alpha, /*fill=*/true)) {
+        const float bgq[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+        ren.draw_triangles(bgq, 6, 0.05f, 0.02f, 0.02f, alpha);
+    }
+    // Stroke pair `KF`/`ux` on `Sn` (C(512,286) la(1.6) `Wg(27)`): the red
+    // brush band across the backdrop (`vs/sprites` "left"/"right"). OPEN: the
+    // native atlas path has no node rotation, so the `Wg(27)` tilt is not
+    // applied — the band is drawn axis-aligned at its 1.6x `Sn` scale, which
+    // keeps the red mass in the capture's central band (the rotated edges
+    // remain a gap).
+    if (t >= kVsStrokeT - kVsStrokeT * 0.5f) {
+        const float sa = std::clamp((t - kVsStrokeT * 0.5f) / std::max(0.01f, kVsStrokeT * 0.5f),
+                                    0.0f, 1.0f) * alpha;
+        try_draw_atlas_button(app, "left", 512.0f * s - 246.0f * s * 1.6f, 286.0f * s,
+                              492.0f * s * 1.6f, 242.0f * s * 1.6f, sa);
+        try_draw_atlas_button(app, "right", 512.0f * s + 246.0f * s * 1.6f, 286.0f * s,
+                              492.0f * s * 1.6f, 254.0f * s * 1.6f, sa);
+    }
+    // Portraits `EK`/`RS`: slide from x=-388/1412 to 182/842 (design units),
+    // diameter 200 (oracle circles ≈ 230 px @1280).
+    const float pdx = (-388.0f + 570.0f * slide) * s;
+    const float edx = (1412.0f - 570.0f * slide) * s;
+    const float pcy = 336.0f * s;
+    const float ecy = 172.0f * s;
+    const float dia = 200.0f * s;
+    // dark ring behind the portrait (the oracle's circular frame)
+    auto ring = [&](float cx, float cy) {
+        constexpr int kSeg = 40;
+        const float r0 = dia * 0.5f;
+        const float r1 = r0 * 1.12f;
+        for (int i = 0; i < kSeg; ++i) {
+            const float a0 = 2.0f * 3.14159265f * i / kSeg;
+            const float a1 = 2.0f * 3.14159265f * (i + 1) / kSeg;
+            const float c0 = std::cos(a0), s0 = std::sin(a0);
+            const float c1 = std::cos(a1), s1 = std::sin(a1);
+            const float v[] = {cx + c0 * r0, cy + s0 * r0, cx + c1 * r0, cy + s1 * r0,
+                               cx + c1 * r1, cy + s1 * r1, cx + c0 * r0, cy + s0 * r0,
+                               cx + c1 * r1, cy + s1 * r1, cx + c0 * r1, cy + s0 * r1};
+            ren.draw_triangles(v, 6, 0.18f, 0.12f, 0.08f, alpha);
+        }
+    };
+    ring(pdx, pcy);
+    ring(edx, ecy);
+    if (!draw_user_image(app, pimg, pdx, pcy, dia, dia, alpha)) {
+        draw_user_image(app, "avatar_hero", pdx, pcy, dia, dia, alpha);
+    }
+    if (!draw_user_image(app, eimg, edx, ecy, dia, dia, alpha)) {
+        draw_user_image(app, "avatar_masked", edx, ecy, dia, dia, alpha);
+    }
+    // VS glyph `Tr` (C(486,286) design): scale 10 -> natural (252x507), fade in.
+    {
+        const float g = std::clamp((t - (kVsGlyphT - 0.35f)) / 0.35f, 0.0f, 1.0f);
+        const float gs = 10.0f + (252.0f - 10.0f) * vs_ease(g);
+        try_draw_atlas_button(app, "vs", 486.0f * s, 286.0f * s, gs * s, 507.0f * s,
+                              g * alpha);
+    }
+    // Names `Yeb/Xeb` (C(185,114)/C(845,464), gold, Ia(128) centre).
+    if (t >= kVsNameT) {
+        const float na = std::clamp((t - kVsNameT) / 0.15f, 0.0f, 1.0f) * alpha;
+        const sf2::data::font* fnt = app.menu_font();
+        unsigned int tex = app.font_texture();
+        if (fnt != nullptr && tex != 0) {
+            const float nscale = 80.0f * s / 100.0f;
+            app.draw_text_centered(*fnt, tex, 185.0f * s, 114.0f * s, pname, nscale, 62.0f / 255.0f,
+                                   45.0f / 255.0f, 20.0f / 255.0f, na);  // shadow
+            app.draw_text_centered(*fnt, tex, 185.0f * s, 114.0f * s, pname, nscale, 250.0f / 255.0f,
+                                   226.0f / 255.0f, 150.0f / 255.0f, na);
+            app.draw_text_centered(*fnt, tex, 845.0f * s, 464.0f * s, ename, nscale, 62.0f / 255.0f,
+                                   45.0f / 255.0f, 20.0f / 255.0f, na);
+            app.draw_text_centered(*fnt, tex, 845.0f * s, 464.0f * s, ename, nscale, 250.0f / 255.0f,
+                                   226.0f / 255.0f, 150.0f / 255.0f, na);
+        }
+    }
+}
+
 // Maps the controller's banner kind to the callouts frame (JS `Cr` L2022-
 // 2026: `init(y.BQa)` for round, `Zy` -> `y.uQa` fight, `GZ` -> `y.zQa`/
 // `y.wQa` for win/lose). Returns nullptr for kinds with no cited frame.
@@ -4799,6 +4997,35 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     const BattleWarriorInfo bw = battle_warrior(battle_name_, app().pending_battle().zone);
     app().pending_battle().enemy_name =
         bw.first_name.empty() ? "Enemy" : bw.first_name;
+    // VS intro (`ik`, L2069-2071): resolve the two names + portraits the VS
+    // screen and the HUD show. Player = the save Warrior (`FirstName`, a lang
+    // key like "NAME_SHADOW" -> "SHADOW"; the shipped save's `Avatar` is
+    // `avatar_hero`). Enemy = the stage Warrior `FirstName` when present, else
+    // the battle Name (`BOSS_LYNX` is itself a lang key -> "LYNX"), with the
+    // `Template` stem as the portrait. OPEN: `WarriorSave` does not carry the
+    // `Avatar` attr yet, so the historical default is used.
+    {
+        std::string pfirst = "NAME_SHADOW";
+        try {
+            const WarriorSave w = app().save().load();
+            if (!w.first_name.empty()) pfirst = w.first_name;
+        } catch (const std::exception&) {
+        }
+        vs_player_name_ = loc(app(), pfirst, "SHADOW");
+        vs_player_image_ = "avatar_hero";
+        std::string efirst = bw.first_name.empty() ? battle_name_ : bw.first_name;
+        vs_enemy_name_ = loc(app(), efirst, efirst);
+        const auto tmpl = bw.attrs.find("Template");
+        std::string eimg = (tmpl != bw.attrs.end() && !tmpl->second.empty()) ? tmpl->second
+                                                                             : "avatar_masked";
+        std::transform(eimg.begin(), eimg.end(), eimg.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        vs_enemy_image_ = eimg;
+        std::fprintf(stdout, "[fight] VS intro: '%s' (%s) vs '%s' (%s)\n",
+                     vs_player_name_.c_str(), vs_player_image_.c_str(),
+                     vs_enemy_name_.c_str(), vs_enemy_image_.c_str());
+        std::fflush(stdout);
+    }
     battle.enemy_not_ai = bw.has_not_ai;
     battle.enemy_not_animation = bw.has_not_animation;
     // JS `xc.cM`: the enemy renders its OWN equipment model. Only the
@@ -5324,6 +5551,15 @@ constexpr float kPauseDlgPlayX = 876.25f;
 
 void FightScreen::update_impl(float dt) {
     if (fight_ == nullptr) return;
+    // VS intro (`ik`, L2069): presentation-only pre-fight screen. The sim is
+    // NOT frozen — JS creates the fight only after `ik.kg`, but the native
+    // controller already exists, and running it underneath keeps the existing
+    // deterministic step counts (ui-tour / headless-loop) intact while the
+    // overlay covers it. The overlay auto-advances on its own timer.
+    if (vs_active_) {
+        vs_t_ += dt;
+        if (vs_t_ >= kVsTotal) vs_active_ = false;
+    }
     // Location timeline (D6): advance the battle location's SimpleEffect
     // Transparency loop per frame (its own `fight_location`, separate from
     // the hub's `dojo`).
@@ -5338,8 +5574,8 @@ void FightScreen::update_impl(float dt) {
         }
     }
     // Pause dialog hit geometry (mirrors render_impl; the `Jn` HUD button
-    // slot + the `Dr` frame rows, JS L2018).
-    const float kPauseIx = 1216.0f, kPauseIy = 40.0f, kPauseIw = 64.0f, kPauseIh = 48.0f;
+    // slot under the timer, oracle (640,117) 68 px — JS L2034/L2036).
+    const float kPauseIx = 640.0f, kPauseIy = 117.0f, kPauseIw = 68.0f, kPauseIh = 68.0f;
     auto pause_hit = [&](float cx, float cy, float w, float h) {
         const App::PointerState& pp = app().pointer();
         return pp.x >= cx - w / 2 && pp.x <= cx + w / 2 && pp.y >= cy - h / 2 &&
@@ -5831,10 +6067,24 @@ void FightScreen::render_impl(App& app) {
     const float hud_f = hud_c0 * 0.07f + (hud_d < 1.0f ? (1.0f - hud_d) * 200.0f : 0.0f);
     const float hud_g = 1.0f + (std::clamp(hud_d, 1.0f, 1.5f) - 1.0f) / 0.5f * 0.1f;
     const float hud_c = hud_c0 / 675.0f * hud_g;
-    const float bar_w = 425.0f, bar_h = 43.0f;
-    const float bar_y = 150.0f * hud_c + hud_f * hud_g;
-    const float bar_cx_player = kViewW * 0.5f - 520.0f * hud_c * hud_e;
-    const float bar_cx_enemy = kViewW * 0.5f + 520.0f * hud_c * hud_e;
+    // [fix(fight HUD): oracle-matched `lk` anchors] The oracle HUD measures,
+    // at 1280x720, bar rects x393..602 / x678..887 (w≈209), y≈90..118 (h≈30),
+    // portrait circles centred (310,131)/(970,131) r≈80, and the pause button
+    // centred under the timer. `Sf.layout` places the `lk` panels at
+    // `W/2 ∓ 520*c*e` (L2036-2037) and `lk.bMa` hangs the bar/portrait/name
+    // off them; the native view is a fixed 1280x720 (`kViewW`/`kViewH`), so
+    // the anchors are expressed directly in view px. The prior 520*c*e spread
+    // put the bars ~40 px too far apart and ~26 px too low vs the capture.
+    // OPEN: the exact `ma.Kq` J/P projection at 16:9 (`Sya` L1834) is not
+    // re-derived here; the constants are calibrated to the oracle capture.
+    const float bar_w = 209.0f, bar_h = 30.0f;
+    const float bar_y = 90.0f;
+    const float bar_cx_player = 497.0f;
+    const float bar_cx_enemy = 783.0f;
+    (void)hud_d;
+    (void)hud_e;
+    (void)hud_f;
+    (void)hud_g;
     const float p_ratio = fight_->player().max_hp > 0.0f
                               ? std::clamp(fight_->player().hp / fight_->player().max_hp, 0.0f, 1.0f)
                               : 0.0f;
@@ -5849,8 +6099,12 @@ void FightScreen::render_impl(App& app) {
     s_hud_player_decay_.tick();
     s_hud_enemy_decay_.tick();
 
+    // `mirror` = the enemy panel (`lk.type==1`): the `Br`/`Fr` bars are the
+    // same art flipped 180° (`Br.init` L2010 `BL(25*a)` with `a=b==0?-1:1`;
+    // `lk` places the enemy `al`/`Sh` at the mirrored local x), so the fill
+    // anchors on the RIGHT edge.
     auto draw_hp_bar = [&](float x, float y, float w, float h, float ratio, float leak_ratio,
-                           const char* fill_frame, const char* leak_frame) {
+                           const char* fill_frame, const char* leak_frame, bool mirror) {
         // Background: HealthBar_Empty stretched to full width
         if (!app.draw_atlas_rect("HealthBar_Empty", x, y, w, h, 1.0f)) {
             // Fallback flat dark bg
@@ -5861,20 +6115,22 @@ void FightScreen::render_impl(App& app) {
         // under the instant fill so only the overhang shows.
         if (leak_ratio > 0.001f) {
             const float lw = w * std::clamp(leak_ratio, 0.0f, 1.0f);
-            if (!app.draw_atlas_rect(leak_frame, x, y, lw, h, 1.0f)) {
-                const float lg[] = {x, y, x + lw, y, x, y + h,
-                                    x + lw, y, x + lw, y + h, x, y + h};
+            const float lx = mirror ? x + w - lw : x;
+            if (!app.draw_atlas_rect(leak_frame, lx, y, lw, h, 1.0f)) {
+                const float lg[] = {lx, y, lx + lw, y, lx, y + h,
+                                    lx + lw, y, lx + lw, y + h, lx, y + h};
                 ren.draw_triangles(lg, 6, 0.95f, 0.85f, 0.45f, 0.85f);
             }
         }
         if (ratio > 0.001f) {
             const float fw = w * ratio;
-            if (!app.draw_atlas_rect(fill_frame, x, y, fw, h, 1.0f)) {
+            const float fx = mirror ? x + w - fw : x;
+            if (!app.draw_atlas_rect(fill_frame, fx, y, fw, h, 1.0f)) {
                 const bool is_blue = std::string(fill_frame).find("Blue") != std::string::npos;
                 const float r = is_blue ? 0.25f : 0.16f;
                 const float g = is_blue ? 0.45f : 0.82f;
                 const float b = is_blue ? 0.92f : 0.16f;
-                const float fg[] = {x, y, x + fw, y, x, y + h, x + fw, y, x + fw, y + h, x, y + h};
+                const float fg[] = {fx, y, fx + fw, y, fx, y + h, fx + fw, y, fx + fw, y + h, fx, y + h};
                 ren.draw_triangles(fg, 6, r, g, b, 0.96f);
             }
         }
@@ -5889,9 +6145,63 @@ void FightScreen::render_impl(App& app) {
     };
 
     draw_hp_bar(bar_cx_player - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_player_decay_.shown(),
-                s_hud_player_decay_.leak(), "HealthBar_Full", "HealthBar_Hit");
+                s_hud_player_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/false);
+    // The oracle's two bars are the SAME orange art (FIDELITY_MATRIX
+    // fight_stance: "bars orange/blue vs oracle both orange"); mirror the
+    // enemy fill to the inner (left) end.
     draw_hp_bar(bar_cx_enemy - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_enemy_decay_.shown(),
-                s_hud_enemy_decay_.leak(), "HealthBarBlue_Full", "HealthBarBlue_Hit");
+                s_hud_enemy_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/true);
+
+    // Fighter portraits + names (JS `lk.obb` `Sh = Fr` portrait `Rp` from the
+    // callouts atlas 1310 + `lk.gbb` two `ea` name labels at local
+    // `x=150/-550`, `y=-100`, `ua(70)`, `Ia(8/32)`). The oracle anchors:
+    // player portrait centre (310,131) r80 with the name to its right at
+    // (395,~72); enemy mirrored (970,131) with the name left of it. Portraits
+    // resolve through the `oe` user-image path (`draw_user_image`), the same
+    // one the sensei/item art uses.
+    {
+        const float port_d = 165.0f;
+        const float port_px = 310.0f, port_ex = kViewW - 310.0f;
+        const float port_py = 131.0f;
+        auto portrait_ring = [&](float cx, float cy) {
+            constexpr int kSeg = 40;
+            const float r0 = port_d * 0.5f;
+            const float r1 = r0 * 1.06f;
+            for (int i = 0; i < kSeg; ++i) {
+                const float a0 = 2.0f * 3.14159265f * i / kSeg;
+                const float a1 = 2.0f * 3.14159265f * (i + 1) / kSeg;
+                const float c0 = std::cos(a0), s0 = std::sin(a0);
+                const float c1 = std::cos(a1), s1 = std::sin(a1);
+                const float v[] = {cx + c0 * r0, cy + s0 * r0, cx + c1 * r0, cy + s1 * r0,
+                                   cx + c1 * r1, cy + s1 * r1, cx + c0 * r0, cy + s0 * r0,
+                                   cx + c1 * r1, cy + s1 * r1, cx + c0 * r1, cy + s0 * r1};
+                ren.draw_triangles(v, 6, 0.16f, 0.11f, 0.07f, 0.95f);
+            }
+        };
+        portrait_ring(port_px, port_py);
+        portrait_ring(port_ex, port_py);
+        if (!draw_user_image(app, vs_player_image_, port_px, port_py, port_d, port_d, 1.0f)) {
+            draw_user_image(app, "avatar_hero", port_px, port_py, port_d, port_d, 1.0f);
+        }
+        if (!draw_user_image(app, vs_enemy_image_, port_ex, port_py, port_d, port_d, 1.0f)) {
+            draw_user_image(app, "avatar_masked", port_ex, port_py, port_d, port_d, 1.0f);
+        }
+        const sf2::data::font* nf = app.menu_font();
+        const unsigned int nt = app.font_texture();
+        if (nf != nullptr && nt != 0) {
+            // Names sit at the bar's inner shoulder (JS `lk.gbb` label
+            // anchor). Oracle: player left-aligned at x≈397, enemy
+            // right-aligned at x≈883; baseline y≈84.
+            app.draw_text_centered(*nf, nt, 460.0f + 1.5f, 45.0f + 1.5f, vs_player_name_, 0.80f,
+                                   0.0f, 0.0f, 0.0f, 0.55f);
+            app.draw_text_centered(*nf, nt, 460.0f, 45.0f, vs_player_name_, 0.80f, 1.0f, 0.90f,
+                                   0.62f, 1.0f);
+            app.draw_text_centered(*nf, nt, 842.0f + 1.5f, 45.0f + 1.5f, vs_enemy_name_, 0.80f,
+                                   0.0f, 0.0f, 0.0f, 0.55f);
+            app.draw_text_centered(*nf, nt, 842.0f, 45.0f, vs_enemy_name_, 0.80f, 1.0f, 0.90f,
+                                   0.62f, 1.0f);
+        }
+    }
 
     // Timer — bitmap-font centered (Sf.layout: top-center). Uses fight/digits.fnt
     // (fallback to ui/font-en). Scale tuned so ~80px glyph -> ~30px on HUD.
@@ -5904,13 +6214,12 @@ void FightScreen::render_impl(App& app) {
         if (fnt != nullptr && tex != 0) {
             // JS `Kp.Ia(128)`, `Kp.ua(120*c)` (Sf.layout L2037): fontSize =
             // 120*c; digits eF=90 -> native scale = 120*c/90.
-            const float scale = (fnt == app.digits_font()) ? (120.0f * hud_c / 90.0f)
+            const float scale = (fnt == app.digits_font()) ? (86.0f * hud_c / 90.0f)
                                                            : (120.0f * hud_c / 100.0f);
             // shadow (black) slightly offset, then white foreground
-            // JS `Sf.layout` (L2037): `this.Kp.D(this.Id.node.ra-120*c)` — the
-            // timer text sits `120*c` above the HUD plate bottom. (At 1280x720
-            // the old constant 44 matched 45.3; the formula now scales.)
-            const float ty = bar_y - 120.0f * hud_c;
+            // JS `Sf.layout` (L2037): `this.Kp.C(b/2); this.Kp.D(...)` — the
+            // timer is screen-top-centre. Oracle: "99" centred at (640,45).
+            const float ty = 8.0f;
             app.draw_text_centered(*fnt, tex, kViewW * 0.5f + 1.8f, ty + 1.8f, tstr, scale, 0.0f, 0.0f,
                                    0.0f);
             app.draw_text_centered(*fnt, tex, kViewW * 0.5f, ty, tstr, scale, 1.0f, 0.95f, 0.75f);
@@ -5927,11 +6236,14 @@ void FightScreen::render_impl(App& app) {
         }
     }
 
-    // Rounds — Round pips (JS `Er` L2021-2022): e=32, f=e/2, step e+f, height 43, frames y.UU/y.LQa
-    const float pip_e = 32.0f;
+    // Rounds — Round pips (JS `Er` L2021-2022: e=32, f=e/2, step e+f, BL(25)
+    // rotation, frames y.UU undone / y.LQa done). Oracle places them on the
+    // bar's INNER shoulder as the dark segment marks, so the pip row rides
+    // the bar rect (was drawn below it).
+    const float pip_e = 14.0f;
     const float pip_step = pip_e + pip_e * 0.5f;  // e + f (Er L2021)
-    const float pip_h = 43.0f;                    // Pb(43)
-    const float pip_y = bar_y + bar_h + 6.0f;
+    const float pip_h = bar_h;
+    const float pip_y = bar_y + 3.0f;
     const int rounds_total = fight_->round().length;
     for (int i = 0; i < rounds_total; ++i) {
         const bool p_done = i < fight_->player().rounds_won;
@@ -5988,14 +6300,23 @@ void FightScreen::render_impl(App& app) {
     const bool live =
         fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over();
     if (live && !paused_) {
-        // The HUD pause icon (`Jn`, top-right; `E.get(1294)` frame slot).
-        if (!try_draw_atlas_button(app, "FightPause", 1216.0f, 40.0f, 64.0f, 48.0f,
+        // The HUD pause icon (`Jn`, L2034: `db.xz(E.get(1294), y.IQa)`).
+        // Oracle: centred under the timer at (640,117), 68 px.
+        if (!try_draw_atlas_button(app, "FightPause", 640.0f, 117.0f, 68.0f, 68.0f,
                                    1.0f)) {
-            draw_flat_button(app, "II", 1216.0f, 40.0f, 64.0f, 48.0f, 0.3f, 0.3f, 0.4f,
+            draw_flat_button(app, "II", 640.0f, 117.0f, 68.0f, 68.0f, 0.3f, 0.3f, 0.4f,
                              false);
-            draw_ui_label(app, 1216.0f - 32.0f + 4.0f, 40.0f - 12.0f, 64.0f - 8.0f, 24.0f,
+            draw_ui_label(app, 640.0f - 34.0f + 4.0f, 117.0f - 12.0f, 68.0f - 8.0f, 24.0f,
                               "II", 0.8f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
+    }
+    // VS intro (`ik`, L2069): drawn ON TOP of the scene/HUD/banner (the JS
+    // `ik` node sits over the fight stack) but UNDER the pause dialog. The
+    // sim runs underneath, so the fight is already live when the overlay
+    // clears; the VS simply covers it for its duration.
+    if (vs_active_) {
+        draw_vs_intro(app, vs_t_, vs_player_name_, vs_enemy_name_, vs_player_image_,
+                      vs_enemy_image_);
     }
     if (paused_) {
         const float dim[] = {0, 0,         kViewW, 0,         kViewW, kViewH,

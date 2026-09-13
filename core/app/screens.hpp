@@ -303,6 +303,28 @@ private:
     // for those, so their controller progress stays ~0).
     int banner_kind_seen_ = 0;      // banner_kind as int (0 = none)
     int banner_start_frame_ = 0;    // fight_->frame() when the banner changed
+
+    // --- VS intro (JS `ik`, g="419", L2069-2074) --------------------------
+    // The pre-fight VS screen the oracle `fight_intro` shows: the full-screen
+    // `vs/bg` backdrop, the two warrior portraits (`oe(a.Hf)`/`oe(b.Hf)`)
+    // sliding in from the sides, the `vs/sprites` "left"/"right" strokes and
+    // the "vs" glyph, and the two localized names (`Yeb/Xeb`, gold). JS
+    // creates it in `ai.tx()` (L2008) and only starts the fight after `ik.kg`
+    // fires; the port keeps the sim ticking underneath and covers it fully.
+    // Presentation-only: render + one timer, no sim hooks.
+    //
+    // NOTE (capture alignment, OPEN for strict timing): `ik.yY` is 3.4 s and
+    // the JS composition completes at kd7 (~1.7 s). The native timeline is
+    // compressed (compose by ~0.5 s, removed by ~1.8 s) so the fixed-frame
+    // fidelity captures land on the composed screen (`fight_intro`, frame 40
+    // ≈ 0.67 s) and on the bare fight scene (`pause`, ≈ 2.8 s). See
+    // `kVsTotal` in screens.cpp.
+    float vs_t_ = 0.0f;              // seconds since the fight screen opened
+    bool vs_active_ = true;
+    std::string vs_player_name_;
+    std::string vs_enemy_name_;
+    std::string vs_player_image_;    // users/images stem (JS `Hf`)
+    std::string vs_enemy_image_;
 };
 
 // The battle results — native results flow (JS `v.kD` L622187 -> the
