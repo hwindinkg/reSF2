@@ -46,10 +46,11 @@
 
 #include "scene/conditions.hpp"
 
+#include "scene/ai.hpp"  // DaPrng (the shared `Da.pg` stream; see eval_random)
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <random>
 #include <sstream>
 
 namespace sf2::scene {
@@ -380,20 +381,19 @@ bool eval_in_the_area(const Cond& c, const FightContext& ctx) {
 }
 
 // JS `xp.he` via `Pl.compare` → `Da.cT(percent)` (L2352, default b=100):
-// `a>b ? true : s4(100)<a` — no draw when the percent hits 100+. Threaded
-// through `FightContext::roll01` (the shared fight stream); unset contexts
-// (probes/demos) keep the legacy private stream.
+// `a>b ? true : s4(b)<a` — `s4(100) < percent`, one shared draw. Threaded
+// through `FightContext::roll01` (the shared fight stream `Da.pg`); unset
+// contexts (probes/demos) fall back to the SAME `Xx`+`Rk` DaPrng stream
+// (was a private mt19937 — the documented RNG divergence).
 bool eval_random(const Cond& c, const FightContext& ctx) {
     const float percent =
         c.value_int > 0 ? static_cast<float>(c.value_int) : 0.0f;
+    if (percent >= 100.0f) return true;  // the `a>b` no-draw shortcut
     if (ctx.roll01) {
-        if (percent >= 100.0f) return true;  // the `a>b` no-draw shortcut
         return ctx.roll01() * 100.0f < percent;
     }
-    static std::mt19937 rng(0x5F2);
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    bool ok = percent / 100.0f > dist(rng);
-    return ok;
+    static DaPrng rng(0x5F2);
+    return static_cast<float>(rng.s4(1.0)) * 100.0f < percent;
 }
 
 // JS `wp.he`: PerkStart — always true.

@@ -144,6 +144,7 @@ WarriorSave SaveSystem::load() {
         if (r.name.empty()) continue;
         r.locked = sf2::data::xml_attr_bool(b, "Locked", false);
         r.hidden = sf2::data::xml_attr_bool(b, "Hidden", false);
+        r.replay_count = sf2::data::xml_attr_int(b, "ReplayCount", 0);
         out.battle_records.push_back(std::move(r));
     }
 
@@ -211,6 +212,17 @@ WarriorSave SaveSystem::load() {
         if (!pl.name.empty()) out.perk_history.push_back(std::move(pl));
     }
 
+    // Perk unlock/upgrade records (JS `Bt.jF`/`Ji` L284-285):
+    // `<Perks><Perk Name=".." Level=".." UpgradeLevel="..">`.
+    out.perks.clear();
+    for (pugi::xml_node p : warrior.child("Perks").children("Perk")) {
+        WarriorSave::PerkState ps;
+        if (p.attribute("Name")) ps.name = p.attribute("Name").value();
+        ps.level = sf2::data::xml_attr_int(p, "Level", 0);
+        ps.upgrade_level = sf2::data::xml_attr_int(p, "UpgradeLevel", 0);
+        if (!ps.name.empty()) out.perks.push_back(std::move(ps));
+    }
+
     // Achievement counters (`kl`/`yi.mC`, L1249/L294): `<Counters><Counter
     // Name=".." CurrentValue=".."/>`.
     out.counters.clear();
@@ -229,6 +241,20 @@ WarriorSave SaveSystem::load() {
         if (a.attribute("Name")) au.name = a.attribute("Name").value();
         au.obtained_reward = sf2::data::xml_attr_bool(a, "ObtainedReward", false);
         if (!au.name.empty()) out.achievement_unlocks.push_back(std::move(au));
+    }
+
+    // Session settings (JS `jfa` L256 / `Aka` L264): `<SessionSettings>
+    // <Disciple Value="0|1"/>` (`Y0` L271) + `<ShowDojoDisciple Value="0|1"/>`
+    // (`g$a` L271). Absent in the seed -> both default 0.
+    out.disciple = false;
+    out.show_dojo_disciple = false;
+    if (pugi::xml_node ss = warrior.child("SessionSettings")) {
+        if (pugi::xml_node d = ss.child("Disciple")) {
+            out.disciple = sf2::data::xml_attr_int(d, "Value", 0) > 0;
+        }
+        if (pugi::xml_node s = ss.child("ShowDojoDisciple")) {
+            out.show_dojo_disciple = sf2::data::xml_attr_int(s, "Value", 0) > 0;
+        }
     }
 
     // Delivery timers (`yl`/`Ct` under save `<Timers>`, L250: `Uaa/BXa`
@@ -344,8 +370,30 @@ void SaveSystem::save(const WarriorSave& w) {
                 node = battles.append_child("Battle");
                 node.append_attribute("Name").set_value(raw.c_str());
             }
-            if (r.locked) node.append_attribute("Locked").set_value("1");
-            if (r.hidden) node.append_attribute("Hidden").set_value("1");
+            // `hl` flags (`CMa` L278, `gx` L278, `yla` L279): set the flag
+            // when on; clear the attribute when off so a `HideBattle`
+            // (`battle_remove`) / show transition is reflected exactly.
+            pugi::xml_attribute la = node.attribute("Locked");
+            if (r.locked) {
+                if (!la) la = node.append_attribute("Locked");
+                la.set_value("1");
+            } else if (la) {
+                node.remove_attribute("Locked");
+            }
+            pugi::xml_attribute ha = node.attribute("Hidden");
+            if (r.hidden) {
+                if (!ha) ha = node.append_attribute("Hidden");
+                ha.set_value("1");
+            } else if (ha) {
+                node.remove_attribute("Hidden");
+            }
+            pugi::xml_attribute ra = node.attribute("ReplayCount");
+            if (r.replay_count > 0) {
+                if (!ra) ra = node.append_attribute("ReplayCount");
+                ra.set_value(r.replay_count);
+            } else if (ra) {
+                node.remove_attribute("ReplayCount");
+            }
         }
     }
 
@@ -442,6 +490,41 @@ void SaveSystem::save(const WarriorSave& w) {
                 l.append_attribute("Value").set_value(pl.level);
             }
         }
+    }
+
+    // Perk unlock/upgrade records (JS `Bt.parse` L305 / `Ji` L284): rewrite
+    // `<Perks><Perk Name Level UpgradeLevel>`. Materialize only when there
+    // is something to hold (same lazy rule as `<PerkHistory>`).
+    {
+        pugi::xml_node pk = warrior.child("Perks");
+        if (!pk && !w.perks.empty()) pk = warrior.append_child("Perks");
+        if (pk) {
+            std::vector<pugi::xml_node> old;
+            for (pugi::xml_node p : pk.children("Perk")) old.push_back(p);
+            for (const pugi::xml_node& p : old) pk.remove_child(p);
+            for (const WarriorSave::PerkState& ps : w.perks) {
+                pugi::xml_node p = pk.append_child("Perk");
+                p.append_attribute("Name").set_value(ps.name.c_str());
+                p.append_attribute("Level").set_value(ps.level);
+                p.append_attribute("UpgradeLevel").set_value(ps.upgrade_level);
+            }
+        }
+    }
+
+    // Session settings (JS `Aka`/`xLa` L264): `Y0`/`g$a` (L271) materialize
+    // their defaults on read, so the native writes both rows every save.
+    {
+        pugi::xml_node ss = warrior.child("SessionSettings");
+        if (!ss) ss = warrior.append_child("SessionSettings");
+        const auto set_val = [&ss](const char* tag, bool on) {
+            pugi::xml_node n = ss.child(tag);
+            if (!n) n = ss.append_child(tag);
+            pugi::xml_attribute v = n.attribute("Value");
+            if (!v) v = n.append_attribute("Value");
+            v.set_value(on ? 1 : 0);
+        };
+        set_val("Disciple", w.disciple);
+        set_val("ShowDojoDisciple", w.show_dojo_disciple);
     }
 
     // Achievement counters (`yt.parse` L294 always materializes <Counters>).

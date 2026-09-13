@@ -22,6 +22,7 @@
 // `load()` returns the template when no save file exists, `save()` writes
 // the current document back.
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -71,13 +72,22 @@ struct WarriorSave {
     // Presence = node progress record for the `WDa` unlock rule.
     std::vector<std::string> battles;
 
+    // A battle is "recorded" when either the raw `<Battle Name>` list carries
+    // it (legacy native rows, incl. the zone-qualified raw form) or a parsed
+    // `hl` record does (`battle_records` below). JS `WDa` (L256) keys the
+    // zone-qualified `hb` triple; the native also accepts the bare name.
     bool has_battle(const std::string& name) const {
         for (const std::string& b : battles) {
             if (b == name) return true;
         }
+        for (const BattleRecord& r : battle_records) {
+            if (r.name == name) return true;
+        }
         return false;
     }
 
+    // Legacy native writer (kept for the old bare-name rows). The JS-exact
+    // path is `battle_unlock` below (`J1a` L259, zone-qualified `hb` key).
     void record_battle_win(const std::string& name) {
         if (!has_battle(name)) battles.push_back(name);
     }
@@ -89,12 +99,13 @@ struct WarriorSave {
     // `hs.isActive = WDa(zone|battle)` (L205/L256) and `a = li()`.
     // `Name` splits on "|" -> zone / battle; rows written before this existed
     // carry a bare battle name (no "|") -> `zone` empty.
-    struct BattleRecord {
-        std::string zone;      // `hb.Me`
-        std::string name;      // `hb.Re`
-        bool locked = false;   // `hl.zo` / `tt()` (Locked attr)
-        bool hidden = false;   // `hl.d9` / `li()` (Hidden attr)
-    };
+struct BattleRecord {
+    std::string zone;      // `hb.Me`
+    std::string name;      // `hb.Re`
+    bool locked = false;   // `hl.zo` / `tt()` (Locked attr)
+    bool hidden = false;   // `hl.d9` / `li()` (Hidden attr)
+    int replay_count = 0;  // `hl.zH` / `yla` (ReplayCount attr, L279)
+};
     std::vector<BattleRecord> battle_records;
 
     // The `<Battles>` record for (zone, name) (`At.get` L276 via
@@ -109,6 +120,69 @@ struct WarriorSave {
             if (r.zone.empty() && loose == nullptr) loose = &r;
         }
         return loose;
+    }
+
+    // Mutable lookup (the `hl` write path). Same match rule as `find_battle`.
+    BattleRecord* battle_record(const std::string& zone, const std::string& name) {
+        BattleRecord* loose = nullptr;
+        for (BattleRecord& r : battle_records) {
+            if (r.name != name) continue;
+            if (r.zone == zone) return &r;
+            if (r.zone.empty() && loose == nullptr) loose = &r;
+        }
+        return loose;
+    }
+
+    // JS `J1a` L259 / `u4a` L260: find-or-append the `<Battles><Battle
+    // Name="zone|name|">` row (`hb.toString` L1416: `Me+"|"+Re+"|"`). Record
+    // presence IS the `WDa` unlock (L256: `iF.get(a)!=null`). JS `J1a` wraps
+    // the node in `hl` and adds it to `iF`; the native stores the parsed
+    // `BattleRecord` (the raw `battles` string list is written alongside by
+    // `SaveSystem::save`, which re-serializes every `<Battle>` row).
+    void battle_unlock(const std::string& zone, const std::string& name) {
+        if (name.empty()) return;
+        if (find_battle(zone, name) != nullptr) return;
+        BattleRecord r;
+        r.zone = zone;
+        r.name = name;
+        battle_records.push_back(std::move(r));
+    }
+
+    // JS `Iaa(a,b,c,d,e,f)` L260-261: the `hl` flag write (`uMa/CMa/gx/yla`).
+    // Ensures the row first (the `c=true` -> `u4a` path) then sets
+    // Locked/Hidden/ReplayCount (`d`/`e`/`f`).
+    void battle_set_visibility(const std::string& zone, const std::string& name,
+                               bool locked, bool hidden, int replay_count) {
+        if (name.empty()) return;
+        BattleRecord* rec = battle_record(zone, name);
+        if (rec == nullptr) {
+            battle_unlock(zone, name);
+            rec = battle_record(zone, name);
+        }
+        if (rec == nullptr) return;
+        rec->locked = locked;
+        rec->hidden = hidden;
+        rec->replay_count = replay_count;
+    }
+
+    // JS `Eja` L261 / `Rmb` L261 (+ `inb`-style row removal): drop the battle
+    // record entirely (`HideBattle` -> `Aj(false)` -> `Iaa` `c=false` ->
+    // `Eja`). The node's `WDa` bit then reads false.
+    void battle_remove(const std::string& zone, const std::string& name) {
+        if (name.empty()) return;
+        const std::string raw =
+            zone.empty() ? name : (zone + "|" + name + "|");
+        battles.erase(std::remove(battles.begin(), battles.end(), name), battles.end());
+        battles.erase(std::remove(battles.begin(), battles.end(), raw), battles.end());
+        for (std::size_t i = 0; i < battle_records.size();) {
+            const BattleRecord& r = battle_records[i];
+            if (r.name == name && (r.zone == zone || r.zone.empty())) {
+                battle_records.erase(battle_records.begin() +
+                                     static_cast<std::ptrdiff_t>(i));
+            } else {
+                ++i;
+            }
+        }
     }
 
     // Fight win counts (JS `yc`, `<Fights>/<Fight>`; the `no` win count).
@@ -143,6 +217,14 @@ struct WarriorSave {
 
     std::string map_focus;  // `ys` (MapFocus attr; absent in seed)
 
+    // Session settings (JS `Aka` -> `xLa` L264: `<SessionSettings><Name
+    // Value="0|1"/>`). `Disciple` = `Y0()` (L271) — the dojo disciple toggle
+    // (`oub(a)` L271 writes it; `za.Nfb` L1981 flips it); `ShowDojoDisciple`
+    // = `g$a()` (L271) — gates the `za.zq` toggle's visibility (`v.FU`
+    // L1207: shown only when the active screen is Dojo AND this is > 0).
+    bool disciple = false;
+    bool show_dojo_disciple = false;
+
     // Delivery countdowns (JS `yl`/`Ct` timers: `Uaa/BXa/bva` set, `gJ`
     // get, `H4` clear, persisted under save `<Timers>`, L250/291; `Gb`
     // setTime/Tma stamps Cla(now) + save): item name -> wall-clock due
@@ -175,6 +257,61 @@ struct WarriorSave {
     };
     std::vector<PerkLevel> perk_history;
 
+    // Perk unlock/upgrade records (JS `Bt.jF` of `Ji`, `<Perks><Perk
+    // Name=".." Level=".." UpgradeLevel="..">`; `Ji` ctor L284-285:
+    // `Ba`=Name, `ZB`=Level, `Ce`=UpgradeLevel). Written by `Bt.L1a`
+    // (L306) -> `Qua` (L307). `learned_level` in the Profile tree is the
+    // `<PerkHistory>` max for the name (`id.cPa` L1353).
+    struct PerkState {
+        std::string name;         // `Ji.Ba`
+        int level = 0;            // `Ji.ZB` (the learned tier)
+        int upgrade_level = 0;    // `Ji.Ce` (`Ih.PQ()` = the def `Tc`)
+    };
+    std::vector<PerkState> perks;
+
+    // JS `Ht.xI`/`Epb` L1328/L307: append a `<PerkHistory><Level Perk Value>`
+    // row unless that level already exists (`Ht.fcb` L1328), keeping the
+    // list sorted (`Ht.parse` L1327 sorts `Oa` by `Wy`).
+    void record_perk_level(const std::string& name, int level) {
+        if (name.empty() || level <= 0) return;
+        for (const PerkLevel& pl : perk_history) {
+            if (pl.level == level) return;  // `Ht.fcb(level)` guard
+        }
+        perk_history.push_back({name, level});
+        std::sort(perk_history.begin(), perk_history.end(),
+                  [](const PerkLevel& a, const PerkLevel& b) { return a.level < b.level; });
+    }
+
+    // JS `Bt.L1a` L306 (create branch) + `Ji` L284-285 + `Ht.xI` L1328: write
+    // the `<Perks><Perk>` record (one per name) and its `<PerkHistory>` row.
+    void learn_perk(const std::string& name, int level, int upgrade_level) {
+        if (name.empty() || level <= 0) return;
+        bool found = false;
+        for (PerkState& p : perks) {
+            if (p.name != name) continue;
+            p.level = level;                                   // `Ji.xL`
+            if (upgrade_level > 0) p.upgrade_level = upgrade_level;  // `Ji.Np`
+            found = true;
+            break;
+        }
+        if (!found) perks.push_back({name, level, upgrade_level});
+        record_perk_level(name, level);
+    }
+
+    // JS `Bt.L1a` L306 match branch (`e&&f`, existing name + type 2): only
+    // `Np(a.PQ())` (UpgradeLevel) is written — `Ji.xL` (Level) is untouched.
+    // Falls back to `learn_perk` when no `<Perks>` row exists yet.
+    void learn_perk_upgrade(const std::string& name, int tier, int upgrade_level) {
+        if (name.empty()) return;
+        for (PerkState& p : perks) {
+            if (p.name != name) continue;
+            if (upgrade_level > 0) p.upgrade_level = upgrade_level;  // `Ji.Np`
+            record_perk_level(name, tier);
+            return;
+        }
+        learn_perk(name, tier, upgrade_level);
+    }
+
     // Achievement counter values (JS `kl`, `yi.mC`: `<Counters><Counter
     // Name="PerfectRound" CurrentValue="3"/>`; `kl` ctor L1249, `yt.parse`
     // L294). The `fs` list join keys this Name against achievements.xml's
@@ -194,6 +331,26 @@ struct WarriorSave {
         bool obtained_reward = false;  // `ll.gO` (ObtainedReward)
     };
     std::vector<AchievementUnlock> achievement_unlocks;
+
+    // JS `vb.exb` L2199 + `yt.sca` L296: claim the achievement reward. Writes
+    // `ObtainedReward="true"` (`ll.LMa`), then pays the prizes
+    // (`p.o.Fr(p.o.Tb+AE)` money += MoneyPrize, `p.o.vl(p.o.fd+dP,2)` bonus
+    // += BonusPrize). Self-guarded by the caller on `reward_available`
+    // (JS `exb` `if(!a.bS)`; `bS` = already claimed).
+    void claim_achievement(const std::string& name, int money_prize, int bonus_prize) {
+        if (name.empty()) return;
+        bool found = false;
+        for (AchievementUnlock& u : achievement_unlocks) {
+            if (u.name == name) {
+                u.obtained_reward = true;  // `ll.LMa(true)` L296
+                found = true;
+                break;
+            }
+        }
+        if (!found) achievement_unlocks.push_back({name, true});
+        if (money_prize > 0) money += money_prize;   // `exb` L2199
+        if (bonus_prize > 0) bonus += bonus_prize;   // `exb` L2199
+    }
 };
 
 // Loads/saves the users.xml document. Portable C++17 — the path is passed

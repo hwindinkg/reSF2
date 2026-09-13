@@ -38,7 +38,6 @@
 #include <fstream>
 #include <iterator>
 #include <map>
-#include <random>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -1690,6 +1689,42 @@ ZaLayout za_layout() {
 // singleton mounted on every shell screen). `gk.Bgb` (L2000) toggles it.
 bool g_za_nav_open = false;  // JS `collapse(0)` (L1978) default = collapsed
 
+// JS `za.zq` (L1983) + `ndb` (L1975): the disciple toggle icon-button. `zq`
+// is scaled `scroll.Af.width*.5 / zq.Y.fa.x` (so the on-screen width is half
+// the nav content width) and placed at `(a/2 + scroll.node.ya, a/2 + PL.qa()
+// + scroll.Af.height)` where `a` = that width. `FU` (L1983) swaps the frame
+// on `p.o.Y0()`: `Tna`="btn_punching_bag" (L2464) when on, else `Sna`=
+// "btn_disciple". Visibility is `v.FU` L1207 = active screen Dojo (Tf==3) AND
+// `p.o.g$a()` (`ShowDojoDisciple`). Shared by draw + hit-test.
+struct ZaDiscipleRect {
+    float cx = 0.0f;
+    float cy = 0.0f;
+    float w = 0.0f;
+    float h = 0.0f;
+};
+
+ZaDiscipleRect za_disciple_rect(App& app, bool disciple) {
+    const ZaLayout lay = za_layout();
+    const float row = kZaNavSource * 0.85f;
+    const float content_h =
+        (row * static_cast<float>(kZaNavCount) + 45.0f) * lay.nav_scale;
+    ZaDiscipleRect r;
+    r.w = lay.nav_w * 0.5f;
+    r.h = r.w;  // default square; refined from the frame aspect below
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    const char* frame = disciple ? "btn_punching_bag" : "btn_disciple";
+    if (app.get_atlas_frame(frame, &fr, &tw, &th, &gl) && fr.w > 0 && fr.h > 0) {
+        // JS uses `zq.Y.fa` (the untrimmed SourceSize); the packed rect is the
+        // closest available proxy (documented approximation).
+        r.h = r.w * static_cast<float>(fr.h) / static_cast<float>(fr.w);
+    }
+    r.cx = lay.nav_x + r.w * 0.5f;
+    r.cy = r.w * 0.5f + lay.bar_h + content_h;
+    return r;
+}
+
 // The collapsed menu header rect (oracle tutorial shot, 1280x720 space).
 void za_header_rect(float& x, float& y, float& w, float& h) {
     const float s = kViewW / 1280.0f;
@@ -1718,6 +1753,39 @@ int za_nav_hit(double px, double py) {
 // the screen already showing (the JS highlights that one active, `xyb`
 // L1982).
 void za_update(App& app, Screen& self, ScreenId active) {
+    // `za.zq` disciple toggle (JS L1983, `Nfb` L1981): a child of `za`, so it
+    // answers taps regardless of the nav collapse. Shown only on the Dojo
+    // (`v.FU` L1207 `Td.Tf==3`) while `ShowDojoDisciple > 0` (`g$a` L271).
+    if (active == kScreenDojo) {
+        bool shown = false;
+        bool disc = false;
+        try {
+            const WarriorSave sv = app.save().load();
+            shown = sv.show_dojo_disciple;
+            disc = sv.disciple;
+        } catch (const std::exception&) {
+        }
+        if (shown) {
+            const ZaDiscipleRect dr = za_disciple_rect(app, disc);
+            const double px0 = app.pointer().x, py0 = app.pointer().y;
+            if (px0 >= dr.cx - dr.w * 0.5f && px0 <= dr.cx + dr.w * 0.5f &&
+                py0 >= dr.cy - dr.h * 0.5f && py0 <= dr.cy + dr.h * 0.5f) {
+                if (app.pointer().pressed) {
+                    try {
+                        WarriorSave sv = app.save().load();
+                        sv.disciple = !sv.disciple;  // `oub(!p.o.Y0())` L1981
+                        app.save().save(sv);
+                    } catch (const std::exception& e) {
+                        std::fprintf(stderr, "[za] disciple toggle failed: %s\n", e.what());
+                    }
+                    sf2::audio::AudioEngine::instance().play("click");
+                    std::fprintf(stdout, "[za] disciple toggle -> %d\n", disc ? 0 : 1);
+                    std::fflush(stdout);
+                }
+                return;  // the toggle owns its rect
+            }
+        }
+    }
     // JS `gk.Bgb` (L2000): a press on the scroll header toggles
     // `this.uJ?collapse(.3):expand(.3)`. While collapsed the five `Le`
     // buttons are hidden (`NLa` L2001), so only the header answers taps.
@@ -1915,6 +1983,21 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     try_draw_atlas_button(app, "ruby", ruby_left + icon_ruby * 0.5f, cy, icon_ruby, icon, 1.0f);
     draw_ui_label(app, ruby_left + icon_ruby, cy - lay.widget_h * 0.45f, gem_num_w, lay.widget_h,
                   gem_text, num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+    // `za.zq` disciple toggle (JS L1983 `xub`; frame swap `FU`; visibility
+    // `v.FU` L1207 = active screen Dojo AND `g$a()`). Backed by the save
+    // `Disciple`/`ShowDojoDisciple` session settings (`oub`/`Y0`/`g$a` L271).
+    // A child of `za`, so it draws in both the collapsed and expanded nav.
+    if (active == kScreenDojo && sv.show_dojo_disciple) {
+        const ZaDiscipleRect dr = za_disciple_rect(app, sv.disciple);
+        const char* frame = sv.disciple ? "btn_punching_bag" : "btn_disciple";
+        if (!try_draw_atlas_button(app, frame, dr.cx, dr.cy, dr.w, dr.h, 1.0f)) {
+            draw_flat_button(app, sv.disciple ? "BAG" : "DISC", dr.cx, dr.cy, dr.w, dr.h,
+                             0.35f, 0.4f, 0.3f, false);
+            draw_ui_label(app, dr.cx - dr.w * 0.5f, dr.cy - 9.0f, dr.w, 18.0f,
+                          sv.disciple ? "BAG" : "DISC", 0.6f, UiAlign::Center, 1.0f, 1.0f,
+                          1.0f);
+        }
+    }
     // JS `gk` collapsed default (L1978): only the `Lx` title header shows;
     // the five `Le` buttons render only once expanded (`NLa` L2001).
     if (!g_za_nav_open) {
@@ -1968,18 +2051,6 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                           std::to_string(badges[i]), 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
     }
-    // [OPEN] Disciple toggle `za.zq` (JS L1983): an icon-button
-    // `db.xz(E.get(262), p.o.Y0() ? y.Tna : y.Sna)` — menu-atlas frames
-    // `btn_punching_bag` / `btn_disciple` (`y` table L2464). `za.layout`
-    // (L1975) scales it `scroll.Af.width*.5 / zq.Y.fa.x` and places it at
-    // `(a/2 + scroll.node.ya, a/2 + PL.qa() + scroll.Af.height)`; a tap
-    // toggles the save `Disciple` attr (`oub`, L271) and refreshes the frame
-    // (`FU`). It is shown only when the active screen is Dojo AND the
-    // `ShowDojoDisciple` save attr is > 0 (`g$a`, L271; the static `za.FU`
-    // L1207 sets `Xub(screen==3 && g$a())`). The native `WarriorSave` has
-    // neither `Disciple` nor `ShowDojoDisciple`, so the visibility gate and
-    // the toggle persistence are not derivable without new save storage —
-    // OPEN (no invention).
 }
 
 // ---------------------------------------------------------------------------
@@ -3201,6 +3272,23 @@ void DojoScreen::update_impl(float dt) {
         story_step_ = w.story_step();
         map_focus_ = w.map_focus;
         battles_ = w.battles;
+        // The JS `<Battle Name>` is the `hb` triple "Zone|Name|" (L1416), while
+        // the quest-panel/tutorial consumers below match the BAR (e.g.
+        // `Training`). Expose the leaf name alongside the raw rows so the
+        // banner logic keeps working with the zone-qualified `J1a`/`Iaa`
+        // records (legacy bare rows pass through unchanged).
+        for (const std::string& b : w.battles) {
+            const std::size_t p1 = b.find('|');
+            if (p1 == std::string::npos) continue;
+            const std::size_t p2 = b.find('|', p1 + 1);
+            const std::string leaf =
+                b.substr(p1 + 1,
+                         p2 == std::string::npos ? std::string::npos : p2 - (p1 + 1));
+            if (!leaf.empty() &&
+                std::find(battles_.begin(), battles_.end(), leaf) == battles_.end()) {
+                battles_.push_back(leaf);
+            }
+        }
         level_ = w.level;
     } catch (const std::exception& e) {
         if (!money_logged_) {
@@ -3493,13 +3581,24 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
     // `Iaa` L260-261 and recorded by ResultsScreen): a zone is open when it
     // is Start, is at/before the current zone (past zones open, current
     // playable), or holds ANY recorded battle; later unrecorded zones lock.
-    // Record keys here are bare battle names matched against node names (JS
-    // keys zone|loc — same open/locked verdict at zone granularity).
+    // JS `Qr.lla` (L2094) rule: a node button renders only while
+    // `hs.isActive && !a.li()`. `hs.isActive` = `WDa(zone|battle|)` — a save
+    // `<Battles>` record exists (L205/L256), written by `J1a` L259 / `Iaa`
+    // L260-261 (native `WarriorSave::battle_unlock`/`battle_set_visibility`,
+    // driven by the quest ShowBattle/HideBattle/SetBattleVisibility/
+    // ToggleBattle actions). `a.li()` = Hidden/expired (`hl.li` L278).
+    // HYBRID (documented): the base playable nodes keep the pre-existing
+    // "record-less base is playable" rule — the full `st.Dg` record-
+    // population pipeline (`bl.Ayb` L159-162 + authored `ShowBattle`
+    // coverage) is not ported, so applying `WDa` verbatim to BASE nodes would
+    // hide the entire playable map. The alt-state twins (`*_INTERMISSION`,
+    // boss hard-mode) and the `li()` hidden gate ARE verbatim, so an authored
+    // ShowBattle/HideBattle flips visibility exactly as JS.
     for (std::size_t i = 0; i < zones_.size(); ++i) {
         bool touched = zones_[i].is_start;
         if (!touched) {
             for (const auto& n : zones_[i].nodes) {
-                if (map_save.has_battle(n.name)) {
+                if (map_save.find_battle(n.zone, n.name) != nullptr) {
                     touched = true;
                     break;
                 }
@@ -3507,22 +3606,12 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
         }
         zones_[i].locked = !touched && !zones_[i].is_start &&
                            static_cast<int>(i) > zone_sel_ && zones_[i].name != cur;
-        for (auto& n : zones_[i].nodes) n.active = !zones_[i].locked;
-    }
-    // JS `Qr.lla` (L2094): a button renders only while `hs.isActive && !a.li()`
-    // — a save `<Battles>` record exists (`WDa`, L205/L256) and its `hl` is
-    // not Hidden/expired (`li`, L278). The native quest unlock-write (`J1a`
-    // L259 / `Iaa` L260) is not fully modelled, so the BASE battles stay
-    // reachable without a record (the playable map); the alternate-state
-    // twins (`*_INTERMISSION`, boss hard-mode) are hidden until recorded,
-    // which is exactly what removes the coincident-node label collisions
-    // (Tournament/Tournament_INTERMISSION, BOSS_LYNX/BOSS_HARDMODE,
-    // Survival/Survival_INTERMISSION).
-    for (auto& z : zones_) {
-        for (auto& n : z.nodes) {
+        for (auto& n : zones_[i].nodes) {
             const WarriorSave::BattleRecord* rec = map_save.find_battle(n.zone, n.name);
-            n.visible = !(n.alt_state && rec == nullptr);
-            if (rec != nullptr && rec->hidden) n.visible = false;
+            const bool has_rec = rec != nullptr;
+            const bool hidden = has_rec && rec->hidden;
+            n.active = !zones_[i].locked && (has_rec || !n.alt_state);  // `WDa`
+            n.visible = n.active && !hidden;                            // `Qr.lla`
         }
     }
     // MapFocus (JS `Ya.bKa` L2129 focuses the save's MapFocus `p.o.ys` via
@@ -4003,17 +4092,13 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     const auto it = assets.tactic_defs.find("Standard");
     if (it != assets.tactic_defs.end()) tactic = &it->second;
 
-    static std::mt19937 s_rng(0x5F2);
-    std::mt19937& rng = s_rng;
-    auto roll01 = [&rng]() {
-        return static_cast<float>(rng()) / static_cast<float>(rng.max());
-    };
-    // JS `Da.IT` reseed analog (`Da.pg.sL`, L1210444): the fight's shared
-    // stream is reseeded by `rules_begin_round` before the RandomRule draws
-    // (JS `cl.pmb`). Same mt19937 the draws use, so the reseed is exact.
-    auto reseed01 = [&rng](int seed) {
-        rng.seed(static_cast<std::uint32_t>(seed));
-    };
+    // JS `Da.pg` (L67: `Da.pg=new Rk(L.seed)`; `Xx`+`Rk` L2352/2366): the
+    // ONE global fight stream. The scene layer OWNS it (`FightController`
+    // DaPrng), so the app only seeds it and installs NO override — the former
+    // private mt19937 stream (the documented RNG divergence) is gone.
+    // `rules_begin_round` reseeds it in place before the RandomRule draws
+    // (JS `cl.pmb`, L1413). 0x5F2 = the native replay-seed analog.
+    const std::uint32_t fight_seed = 0x5F2u;
 
     fight_ = std::make_unique<sf2::scene::FightController>();
     // The enemy's display name: the Dojo training fight names its Punchbag
@@ -4024,8 +4109,9 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                        assets.tactics_sets, tactic, "Player", enemy_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
-                       battle.max_hp, battle.max_hp, roll01, owned,
-                       equipped_perks(app(), assets), reseed01);
+                       battle.max_hp, battle.max_hp, {},
+                       owned, equipped_perks(app(), assets), nullptr);
+    fight_->set_seed(fight_seed);  // JS `Da.pg=new Rk(L.seed)` (L67)
     // Disarm identity (JS `$b(Au)` vs `ownHd`, L394): the player's wielded
     // weapon comes from the save; the enemy defaults to Fists (Training).
     {
@@ -5267,7 +5353,10 @@ void ResultsScreen::update_impl(float dt) {
             // win count (`yc`/`no`) bumps too.
             {
                 const PendingBattle& pb = app().pending_battle();
-                w.record_battle_win(pb.battle_name);
+                // JS `J1a` L259 / `u4a` L260: the unlock write is the
+                // zone-qualified `hb` key (`Me+"|"+Re+"|"`, L1416), never a
+                // bare name (the legacy `record_battle_win` is superseded).
+                w.battle_unlock(pb.zone, pb.battle_name);
                 bool found = false;
                 for (auto& f : w.fights) {
                     if (f.name == pb.battle_name) {
@@ -6462,6 +6551,47 @@ ProfileLayout profile_layout() {
     return l;
 }
 
+// JS `Zr.ba` (L2220) places the improve button `Yk` at `C(a/2)` and
+// `D(b - c*1.5)` inside the active `vb` viewer rect `a`; the native renders
+// it as a flat full-width button near the viewer bottom (the ASTC `Zr`
+// arrows/`uk` compare art is the OPEN part). Shared by render + hit-test so
+// both agree on the rect.
+ShopRect profile_improve_rect() {
+    const ProfileLayout pl = profile_layout();
+    const ShopRect& v = pl.viewer;
+    ShopRect r;
+    constexpr float kBtnH = 44.0f;
+    r.J = v.J + 6.0f;
+    r.N = v.N - 6.0f;
+    r.W = v.W - 8.0f;
+    r.P = r.W - kBtnH;
+    return r;
+}
+
+// `fs.NC` (L2216) sizes every achievement cell `ba(400,130)`; the native
+// lays one per row (`row_h`). Shared by render + hit-test.
+constexpr float kAchievRowH = 46.0f;
+ShopRect profile_achiev_row_rect(const ShopRect& v, int i) {
+    ShopRect r;
+    r.J = v.J + 4.0f;
+    r.N = v.J + v.width() - 4.0f;
+    r.P = v.P + 6.0f + static_cast<float>(i) * kAchievRowH;
+    r.W = r.P + kAchievRowH;
+    return r;
+}
+
+// `as` (L2210) reward button: `nv.xc(a*.4)` at `C(a/2)`, `D(b - nv.qa())`
+// (bottom-centre of the cell). Native anchor: the row's right edge.
+ShopRect profile_achiev_reward_rect(const ShopRect& v, int i) {
+    const ShopRect row = profile_achiev_row_rect(v, i);
+    ShopRect b;
+    b.N = row.N - 8.0f;
+    b.J = b.N - 92.0f;
+    b.P = row.P + row.height() * 0.5f - 13.0f;
+    b.W = b.P + 26.0f;
+    return b;
+}
+
 // Hit test for the `cs` tab strip; -1 when outside every button.
 int profile_tab_hit(double px, double py) {
     const ProfileTabLayout t = profile_tab_layout();
@@ -6591,6 +6721,10 @@ std::vector<EquipmentScreen::PerkRow> load_perk_tree(App& app, const WarriorSave
     // character_progress.xml: `<Perks>` base/upgrade descriptions + `<PerkTree>`.
     std::map<std::string, std::string> base_desc;                    // Perk Description
     std::map<std::pair<std::string, int>, std::string> upgrade_desc; // (Name,Value)
+    // The def's max upgrade level (`Be.Tc`/`Gt.Tc`, read from
+    // character_progress.xml `<UpgradeLevel Value>` via `j0a` L1190).
+    // Written into the save as `Ji.Ce` (UpgradeLevel) by `Bt.L1a` L306.
+    std::map<std::string, int> upgrade_max;
     sf2::data::xml_doc doc;
     if (!parse_res_xml("reference/extracted/xml/res/character_progress.xml", doc)) {
         return out;
@@ -6603,9 +6737,11 @@ std::vector<EquipmentScreen::PerkRow> load_perk_tree(App& app, const WarriorSave
         if (p.attribute("Description")) base_desc[name] = p.attribute("Description").value();
         for (pugi::xml_node u : p.children("UpgradeLevel")) {
             const std::string d = u.attribute("Description").value();
+            const int val = sf2::data::xml_attr_int(u, "Value", 0);
             if (!d.empty()) {
-                upgrade_desc[{name, sf2::data::xml_attr_int(u, "Value", 0)}] = d;
+                upgrade_desc[{name, val}] = d;
             }
+            upgrade_max[name] = std::max(upgrade_max[name], val);
         }
     }
     for (pugi::xml_node lvl : root.child("PerkTree").children("Level")) {
@@ -6620,6 +6756,8 @@ std::vector<EquipmentScreen::PerkRow> load_perk_tree(App& app, const WarriorSave
             if (r.name.empty()) continue;
             const auto art = perk_art.find(r.name);
             if (art != perk_art.end()) r.image = art->second.first;
+            const auto um = upgrade_max.find(r.name);
+            if (um != upgrade_max.end()) r.upgrade_max = um->second;
             for (const WarriorSave::PerkLevel& pl : w.perk_history) {
                 if (pl.name == r.name) r.learned_level = std::max(r.learned_level, pl.level);
             }
@@ -6781,6 +6919,7 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
     try {
         const WarriorSave w = app().save().load();
         perk_rows_ = load_perk_tree(app(), w);
+        player_level_ = w.level;  // `p.o.bb()` for the `uk.zo` gate (L2223)
         std::fprintf(stdout, "[profile] perk tree: %zu rows\n", perk_rows_.size());
         std::fflush(stdout);
     } catch (const std::exception& e) {
@@ -6832,6 +6971,74 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
     }
 }
 
+// JS `Zr.ROa` (L2222) improve-button gate: `Lc.Be!=3 && Lc.Be!=2 && Lc.Be!=1
+// && !zo && vb.uwa()`. `Be==0` is the learnable cell (`id.Txb` L1356 sets
+// `Bla(0)` on the first tier's items; `mXa` L1355 pushes the owned `Be==3`
+// cells); `zo` = `uk.k5(p.o.bb()<a.level)` (L2223) = the player level gate.
+// Native mapping: an unlearned "Perk" row (type 1) above the player level is
+// not buyable; a "Perk" row at/below level is (`Be==0`). An "Upgrade" row
+// (type 2) improves an ALREADY-learned perk (`Bt.L1a` L306 `e&&f` branch).
+bool EquipmentScreen::perk_buyable(int index) const {
+    if (index < 0 || index >= static_cast<int>(perk_rows_.size())) return false;
+    const PerkRow& r = perk_rows_[index];
+    if (!r.available) return false;          // `Mw.K1` L1358
+    if (player_level_ < r.tier) return false;  // `zo` (L2223) -> hidden button
+    if (r.kind == "Perk") return r.learned_level == 0;  // `Be==0` learn target
+    // Upgrade: `L1a` L306 matches the existing `<Perk>` by name (`e`) and
+    // type 2 (`f`) -> `Np(PQ())`.
+    return r.learned_level > 0;
+}
+
+// JS `vb.Jzb` case 1 (L2200): `p.o.co.L1a(this.ql)` (the `<Perks>` write) +
+// `p.o.co.KS.xI(name, ql.level)` (the `<PerkHistory>` append).
+void EquipmentScreen::perk_buy(int index) {
+    if (!perk_buyable(index)) return;
+    const PerkRow r = perk_rows_[index];
+    try {
+        WarriorSave w = app().save().load();
+        if (r.kind == "Upgrade") {
+            // `Bt.L1a` L306 match branch (`e&&f`): update UpgradeLevel only.
+            w.learn_perk_upgrade(r.name, r.tier, r.upgrade_max);
+        } else {
+            w.learn_perk(r.name, r.tier, r.upgrade_max);
+        }
+        app().save().save(w);
+        perk_rows_ = load_perk_tree(app(), w);
+        player_level_ = w.level;
+        std::fprintf(stdout, "[profile] perk buy %s (tier %d, upgrade %d)\n",
+                     r.name.c_str(), r.tier, r.upgrade_max);
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[profile] perk buy failed: %s\n", e.what());
+    }
+}
+
+// JS `as.refresh` (L2211): the reward button shows while
+// `sq.dg() && this.Wpa >= this.Xr.counter` (an unclaimed prize and the
+// progress reached the target).
+bool EquipmentScreen::achiev_claimable(int index) const {
+    if (index < 0 || index >= static_cast<int>(achiev_rows_.size())) return false;
+    const AchievRow& r = achiev_rows_[index];
+    return r.reward_available && r.target > 0 && r.value >= r.target;
+}
+
+// JS `as.zhb` L2211 -> `vb.exb` L2199 -> `yt.sca` L296 + the prize payout.
+void EquipmentScreen::achiev_claim(int index) {
+    if (!achiev_claimable(index)) return;
+    const AchievRow r = achiev_rows_[index];
+    try {
+        WarriorSave w = app().save().load();
+        w.claim_achievement(r.name, r.money_prize, r.bonus_prize);
+        app().save().save(w);
+        achiev_rows_ = load_achievements(app(), w);
+        std::fprintf(stdout, "[profile] achievement claim %s (+%d money +%d bonus)\n",
+                     r.name.c_str(), r.money_prize, r.bonus_prize);
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[profile] achievement claim failed: %s\n", e.what());
+    }
+}
+
 void EquipmentScreen::update_impl(float dt) {
     (void)dt;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
@@ -6857,6 +7064,54 @@ void EquipmentScreen::update_impl(float dt) {
                      kProfileTabs[tab_hover_].label);
         std::fflush(stdout);
         tab_ = tab_hover_;
+    }
+    // --- Tab 0 PERK TREE: `uk` cell selection (`vb.hqb` L2198) + the flat
+    // improve button (`Zr.ygb` L2222 -> `vb.Cab` -> `Jzb` case 1 L2200 ->
+    // `Bt.L1a` L306 + `Ht.xI` L1328). The `uk` hit rects were captured by
+    // render_impl so update hit-tests the exact wrapping layout.
+    perk_hover_ = -1;
+    if (tab_ == kProfileTabLeveling) {
+        for (const PerkCellHit& h : perk_cell_hits_) {
+            if (h.index < 0) continue;
+            if (p.x >= h.cx - h.half && p.x <= h.cx + h.half &&
+                p.y >= h.cy - h.half && p.y <= h.cy + h.half) {
+                perk_hover_ = h.index;
+                if (p.pressed) {
+                    sf2::audio::AudioEngine::instance().play("click");
+                    perk_sel_ = h.index;  // `vb.uj = a` (L2198)
+                }
+                return;
+            }
+        }
+        const ShopRect ib = profile_improve_rect();
+        if (perk_sel_ >= 0 && perk_buyable(perk_sel_) && p.x >= ib.J && p.x <= ib.N &&
+            p.y >= ib.P && p.y <= ib.W) {
+            if (p.pressed) {
+                sf2::audio::AudioEngine::instance().play("click");
+                perk_buy(perk_sel_);
+            }
+            return;
+        }
+    }
+    // --- Tab 2 ACHIEVEMENTS: the cell reward button (`as.zhb` L2211 ->
+    // `vb.exb` L2199 -> `yt.sca` L296 + money/bonus payout).
+    achiev_hover_ = -1;
+    if (tab_ == kProfileTabAchiev) {
+        const ProfileLayout pl = profile_layout();
+        for (int i = 0; i < static_cast<int>(achiev_rows_.size()); ++i) {
+            const ShopRect row = profile_achiev_row_rect(pl.viewer, i);
+            if (row.W > pl.viewer.W) break;
+            if (!achiev_claimable(i)) continue;
+            const ShopRect rb = profile_achiev_reward_rect(pl.viewer, i);
+            if (p.x >= rb.J && p.x <= rb.N && p.y >= rb.P && p.y <= rb.W) {
+                achiev_hover_ = i;
+                if (p.pressed) {
+                    sf2::audio::AudioEngine::instance().play("click");
+                    achiev_claim(i);
+                }
+                return;
+            }
+        }
     }
     // Shared `za` nav column (JS `ma.D1`): Dojo/Map/Shop/Settings hops.
     za_update(app(), *this, kScreenProfile);
@@ -6895,6 +7150,7 @@ void EquipmentScreen::render_impl(App& app) {
     // JS `XB=ei` header is shown on tab 0 only (`hla` case 0 `ivb()`); the
     // other cases call `dga()` and hide it (L2190-2191).
     if (tab_ == kProfileTabLeveling) {
+    perk_cell_hits_.clear();  // repopulated below (update hit-tests them)
     // --- Profile header (read-only warrior stats) -------------------------
     // Level + OLa exp bar (character_progress.xml thresholds, 100 fallback),
     // total wins (Fights/yc records), coins (Money/Tb) + gems (Bonus/$F per
@@ -7063,6 +7319,7 @@ void EquipmentScreen::render_impl(App& app) {
             // `Ye.qI` dot->slash). `pieces/perkback` (`Ed.FH`, L2202) is the
             // backplate; a flat plate is the explicit miss fallback.
             const float icx = cx;   // `uk` node centre (`tk.ba` L2218)
+            perk_cell_hits_.push_back({icx, cy, ico * 0.5f, static_cast<int>(i)});
             if (!try_draw_atlas_button(app, "pieces/perkback", icx, cy, ico, ico, 1.0f)) {
                 const float pr = r.available ? 0.22f : 0.12f;
                 const float pg = r.available ? 0.26f : 0.14f;
@@ -7129,6 +7386,22 @@ void EquipmentScreen::render_impl(App& app) {
             draw_ui_label(app, tx, cy - 17.0f, tw, 18.0f, nm, 0.52f, al, 1.0f, 1.0f, 1.0f);
             draw_ui_label(app, tx, cy + 3.0f, tw, 16.0f, sbuf, 0.44f, al, 0.8f, 0.85f, 0.9f);
             ++col;
+        }
+        // `Zr` improve button (`ygb` L2222 -> `vb.Cab` L2199): shown while
+        // the selected row is buyable (`Zr.ROa` L2222 `Be==0 && !zo`). The
+        // `Zr` `EButtonWhite` ASTC art (`y.qB`) is OPEN (PORT_AUDIT_UI §5);
+        // the label is `Y.na("profile_BtnImprove")` (L2219).
+        if (perk_sel_ >= 0 && perk_buyable(perk_sel_)) {
+            const ShopRect ib = profile_improve_rect();
+            const float bx = (ib.J + ib.N) * 0.5f;
+            const float by = (ib.P + ib.W) * 0.5f;
+            const bool hov = app.pointer().x >= ib.J && app.pointer().x <= ib.N &&
+                             app.pointer().y >= ib.P && app.pointer().y <= ib.W;
+            draw_flat_button(app, "IMPROVE", bx, by, ib.width(), ib.height(),
+                             hov ? 0.55f : 0.4f, 0.4f, 0.25f, hov);
+            draw_ui_label(app, ib.J, by - 10.0f, ib.width(), 20.0f,
+                          loc(app, "profile_BtnImprove", "Improve"), 0.65f,
+                          UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
     }
     } else if (tab_ == kProfileTabMoves) {
@@ -7212,9 +7485,10 @@ void EquipmentScreen::render_impl(App& app) {
                           loc(app, "achievement_Completed", "Completed"), 0.8f, UiAlign::Center,
                           0.7f, 0.7f, 0.7f);
         } else {
-            const float row_h = 46.0f;
+            const float row_h = kAchievRowH;
             float yy = v.P + 6.0f;
-            for (const AchievRow& r : achiev_rows_) {
+            for (std::size_t ri = 0; ri < achiev_rows_.size(); ++ri) {
+                const AchievRow& r = achiev_rows_[ri];
                 if (yy + row_h > v.W) break;
                 const float cy = yy + row_h * 0.5f;
                 sf2::render::Renderer& rr = app.renderer();
@@ -7271,6 +7545,19 @@ void EquipmentScreen::render_impl(App& app) {
                 }
                 if (pfrac > 0.0f) {
                     (void)app.draw_atlas_rect("Level_bar", pbx, pby, pbw * pfrac, pbh, 1.0f);
+                }
+                // `as.nv` reward button (L2210, `Y.na("achievement_BtnReward")`)
+                // visible while `sq.dg() && Wpa >= counter` (L2211).
+                if (achiev_claimable(static_cast<int>(ri))) {
+                    const ShopRect rb = profile_achiev_reward_rect(v, static_cast<int>(ri));
+                    const float bx = (rb.J + rb.N) * 0.5f;
+                    const float by = (rb.P + rb.W) * 0.5f;
+                    const bool hov = achiev_hover_ == static_cast<int>(ri);
+                    draw_flat_button(app, "REWARD", bx, by, rb.width(), rb.height(),
+                                     hov ? 0.6f : 0.42f, 0.5f, 0.2f, hov);
+                    draw_ui_label(app, rb.J, by - 9.0f, rb.width(), 18.0f,
+                                  loc(app, "achievement_BtnReward", "Reward"), 0.5f,
+                                  UiAlign::Center, 1.0f, 1.0f, 1.0f);
                 }
                 yy += row_h;
             }

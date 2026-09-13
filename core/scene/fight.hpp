@@ -104,11 +104,15 @@ namespace sf2::scene {
 // via `Da.pg.jf()` (`rules_begin_round`, the `Da.pg` analog `roll01_`).
 // Shipped pattern is `RandomRule > ComplexRule` (407 wrappers across
 // Duel / Duel_INTERMISSION / FINAL_BATTLE / C3_Challenge / C3_Duel).
-// DRIFT: JS `cl.pmb` reseeds the stream (`Da.IT(...)`) immediately before
-// the `pn.M4` draws; the port draws from the ongoing shared `roll01_`
-// stream without a reseed, and does not model `NoDoubles` across battles
-// (one pick per group per fight). Battles without `<RandomRule>` (e.g.
-// Training) draw nothing, so their sim stays byte-identical.
+// JS-EXACT STREAM: `cl.pmb` (L1413) ALWAYS draws `2147483647*Da.pg.jf()|0`
+// and reseeds the shared stream (`Da.IT`, L2353) once per fight, then each
+// `pn.M4` (L879) draws `eligible.length*Da.pg.jf()|0`. The port does the
+// same on the OWNED `DaPrng` (`Da.pg` analog): one draw + reseed at the
+// first `rules_begin_round`, then one draw per group - matching the JS draw
+// ORDER/VALUES (previously the private mt19937 stream, and the reseed draw
+// was skipped when a battle carried no `<RandomRule>`). Still OPEN: `qmb`
+// (the second `$Ja` reseed, L1413) is not modeled, and `NoDoubles` across
+// battles is not modeled (one pick per group per fight).
 // ---------------------------------------------------------------------------
 enum class FightRuleKind : int {
     none = 0,
@@ -1153,6 +1157,12 @@ public:
                     // nullptr = leave the stream untouched.
                     std::function<void(int)> reseed01 = nullptr);
 
+    // Seeds the OWNED fight stream (JS `Da.pg=new Rk(L.seed)`, L67). Every
+    // fight draw - rules (`cl.pmb`/`pn.M4`), combat (`Lcb`/`R8a`), the AI
+    // (`de.ia`) and conditions (`Random`) - uses this ONE stream unless a
+    // `roll01` override was injected (the demo/probe path).
+    void set_seed(std::uint32_t seed) { prng_.seed(seed); }
+
 // Perk setup for fight init (`ZOa`/`Pma` analog, §5.4/§5.7): the parsed
 // perk catalog (res/perks.xml) + per-side equipped item→perk bindings
 // (list.xml `<Perks>`/`<Enchantments>`). Empty refs = no live triggers
@@ -1297,11 +1307,24 @@ private:
     const std::map<std::string, sf2::data::anim_clip>* clips_ = nullptr;
     std::vector<sf2::scene::TacticsFile> tactics_;
     const sf2::scene::TacticDef* tactic_ = nullptr;
+    // External stream override (the demo/probe path). Empty -> the OWNED
+    // `prng_` (JS `Da.pg`) is used for every fight draw.
     std::function<float()> roll01_;
-    // JS `Da.IT` (L1210444) reseed hook: the fight's shared random stream
-    // (`Da.pg` analog). `rules_begin_round` calls it once, immediately
-    // before the first `pn.M4` RandomRule draw pass, mirroring `cl.pmb`.
+    // JS `Da.IT` (L1210444/L2353) reseed hook for an EXTERNAL override
+    // stream. `rules_begin_round` calls it once, immediately before the
+    // `pn.M4` RandomRule draw pass, mirroring `cl.pmb` (L1413).
     std::function<void(int)> reseed01_;
+    // The OWNED fight stream (JS `Da.pg`, L67: `Da.pg=new Rk(L.seed)`;
+    // `Xx`+`Rk` L2352/2366). Shared by EVERY fight draw - rules, combat,
+    // AI and conditions - like the game's single global `Da.pg`. Default
+    // seed 0x5F2 (the native replay-seed analog).
+    DaPrng prng_{0x5F2};
+    // The shared fight draw (JS `Da.pg.jf()`, L2352): the external override
+    // when installed, else the owned `prng_` (`Rk.s4(1)` == `Rk.jf`).
+    float draw01();
+    // JS `Da.IT(a)` (L2353: `Da.pg.sL(a)`): reseed the shared stream in
+    // place (the `cl.pmb` reseed).
+    void reseed_stream(int seed);
 
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)

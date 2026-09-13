@@ -83,6 +83,25 @@ struct EngineDialog {
     std::vector<std::string> lines;  // resolved Line texts (lang-applied)
     std::string quest;               // firing quest name
 };
+// One `<Battles>` write a quest action asks for. JS mapping:
+//   ShowBattle            -> `Aj(true)`  L1108 -> `Iaa(hb,true,true,..)` +
+//                            `hl.yla` — ensure the record, set flags;
+//   HideBattle            -> `Aj(false)` L1108 -> `Iaa` `c=false` -> `Eja`
+//                            L261 — drop the record;
+//   SetBattleVisibility   -> `no` L1096 -> `Iaa(hb,false,true,false,hidden)`
+//                            — ensure + set Hidden (`IsVisible<=0` => hidden);
+//   ToggleBattle          -> `Ho` L1106 -> `hl.gx(!li)` — flip Hidden only
+//                            when the record already exists.
+struct QuestBattleWrite {
+    std::string zone;            // resolved `hb.Me`
+    std::string name;            // `hb.Re`
+    bool remove = false;         // HideBattle -> `Eja`
+    bool toggle_hidden = false;  // ToggleBattle -> flip `hl.gx`
+    bool locked = false;         // `Kra` (Iaa `d`)
+    bool hidden = false;         // Iaa `e`
+    int replay_count = 0;        // `yla` (Iaa `f`)
+};
+
 // Side effects of one run: save writes (applied) + records (logged only).
 struct QuestSideEffects {
     bool has_story_step = false;
@@ -92,6 +111,7 @@ struct QuestSideEffects {
     bool has_current_zone = false;
     std::string current_zone;
     std::map<std::string, std::string> set_vars;  // Global SetVariable
+    std::vector<QuestBattleWrite> battle_writes;  // Show/Hide/SetVisibility/Toggle
     std::vector<std::string> scene_requests;      // Gn (record only)
     std::vector<std::string> fight_requests;      // Sn (record only)
     std::vector<std::string> dialogs;             // He summaries (record only)

@@ -420,6 +420,9 @@ public:
         std::string description;  // perks.xml Description key
         int learned_level = 0;    // save progression level (0 = not learned)
         bool available = false;   // Mw.K1
+        int upgrade_max = 0;      // `Lc.Tc` (`Be.Tc`): the def's max
+                                  // UpgradeLevel value (character_progress.xml
+                                  // `<UpgradeLevel Value>`; written as `Ji.Ce`)
     };
 
     // One `fs` achievement row (JS `fs.El` of `Ba(def, value)`, L2214-2216;
@@ -451,6 +454,28 @@ private:
     std::vector<PerkRow> perk_rows_;
     // Ported `fs` ACHIEVEMENTS (tab 2) rows, L2213-2216.
     std::vector<AchievRow> achiev_rows_;
+
+    // `uk` cell hit rects captured during render (so update_impl hit-tests
+    // the SAME wrapping layout the renderer produced). `index` = perk_rows_.
+    struct PerkCellHit {
+        float cx = 0.0f;
+        float cy = 0.0f;
+        float half = 0.0f;
+        int index = -1;
+    };
+    std::vector<PerkCellHit> perk_cell_hits_;
+    int perk_sel_ = -1;    // `vb.uj` (`hqb` L2198): the selected `uk` cell
+    int perk_hover_ = -1;
+    int player_level_ = 1;  // `p.o.bb()` (the `uk.zo` level gate, L2223)
+    int achiev_hover_ = -1;
+    // `Bt.L1a`/`Qua` (L306-307): is the selected row buyable (JS `Be==0`
+    // learnable + `!zo` level gate + `uwa()`)? Then `perk_buy` performs the
+    // save write (`<Perks>` + `<PerkHistory>`).
+    bool perk_buyable(int index) const;
+    void perk_buy(int index);
+    // `vb.exb` L2199 / `yt.sca` L296: is the row's reward claimable?
+    bool achiev_claimable(int index) const;
+    void achiev_claim(int index);
 };
 
 // The settings — the real JS `un extends od` dialog (L1916-1930), reached

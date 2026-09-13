@@ -295,6 +295,26 @@ void FightController::init_locks(
     std::fflush(stdout);
 }
 
+// The shared fight draw (JS `Da.pg.jf()`, L2352). An injected override (the
+// demo/probe path) wins; otherwise the OWNED `DaPrng` stream is used - the
+// same `Xx`+`Rk` LCG the game's global `Da.pg` uses (L2352/2366). `Rk.s4(1)`
+// is exactly `Rk.jf()` (L2352: `s4(a){return this.jf()*a}`).
+float FightController::draw01() {
+    if (roll01_) return roll01_();
+    return static_cast<float>(prng_.s4(1.0));
+}
+
+// JS `Da.IT(a)` (L2353: `Da.pg.sL(a)`): reseed the shared fight stream in
+// place - the `cl.pmb` reseed (L1413). An injected override's reseed hook
+// reseeds the external stream; otherwise the owned `DaPrng`.
+void FightController::reseed_stream(int seed) {
+    if (reseed01_) {
+        reseed01_(seed);
+        return;
+    }
+    prng_.seed(static_cast<std::uint32_t>(seed));
+}
+
 // JS `o1a` (L403) + `Gf` (L403-404): build one fighter. The move list is
 // the TacticWeapon-based list (`weapon_subtype`) or, when `owned` is
 // non-empty, the Locks-based list against the fighter's items (JS `ra.Hza`
@@ -733,9 +753,9 @@ void FightController::rules_begin_round(int round) {
     // that child's rules stay active (`pn.setActive`/`A$`). `M4`'s filter is
     // `Ti()` (power range) only; the Round `kI` gate is the `osb` pass above
     // (`fight_rule_gate`). `Refresh="EachRound"` (`pn.Zsa==2`) re-draws every
-    // round; otherwise the choice is cached for the fight. `roll01_` is the
-    // shared fight stream (`Da.pg` analog; set in `init_locks`) — a battle
-    // with no `<RandomRule>` (e.g. Training) draws nothing and is unchanged.
+    // round; otherwise the choice is cached for the fight. `draw01()` is the
+    // shared fight stream (JS `Da.pg.jf()`, L2352) - the OWNED `DaPrng`
+    // unless a caller injected an override (the demo/probe path).
     {
         std::map<int, std::vector<int>> groups;  // group -> distinct choices
         for (const FightRule& r : rules_) {
@@ -747,19 +767,17 @@ void FightController::rules_begin_round(int round) {
             }
             if (!seen) ch.push_back(r.random_choice);
         }
-        // JS `cl.pmb` (L723937): `Da.IT(this.ob!=null?this.ob.Qm:
-        // 2147483647*Da.pg.jf()|0)` RESEEDS the shared stream immediately
-        // before the `pn.M4` draws. The shipped single fights carry no
-        // persisted replay record (`this.ob == null`), so the seed is the
-        // random path: ONE shared draw (`Da.pg.jf()` = `roll01_`) scaled to
-        // 31 bits, then reseed. Fires once per fight, exactly when the port
-        // is about to emulate the `pn.M4` draw set; battles with no
-        // `<RandomRule>` group draw nothing and stay byte-identical.
-        if (!random_pick_done_ && !groups.empty() && reseed01_) {
-            const float reseed_draw = roll01_ ? roll01_() : 0.5f;
-            const int seed =
-                static_cast<int>(2147483647.0 * static_cast<double>(reseed_draw));
-            reseed01_(seed);
+        // JS `cl.pmb` (L1413): `Da.IT(this.ob!=null?this.ob.Qm:
+        // 2147483647*Da.pg.jf()|0)` - `$Ja` runs this for EVERY fight, so the
+        // port draws once and reseeds ONCE per fight (before any `pn.M4`
+        // pick), even when the battle carries no ERuleRandom group. The
+        // shipped single fights have no persisted replay record
+        // (`this.ob == null`), so the seed is the random path: ONE shared
+        // draw (`Da.pg.jf()`) scaled to 31 bits, then `Da.pg.sL(seed)`.
+        if (!random_pick_done_) {
+            const int seed = static_cast<int>(
+                2147483647.0 * static_cast<double>(draw01()));
+            reseed_stream(seed);
         }
         for (const auto& kv : groups) {
             const int gid = kv.first;
@@ -784,7 +802,7 @@ void FightController::rules_begin_round(int round) {
             }
             int pick = -1;
             if (!eligible.empty()) {
-                const float roll = roll01_ ? roll01_() : 0.5f;  // `Da.pg.jf()`
+                const float roll = draw01();  // `Da.pg.jf()`
                 int idx = static_cast<int>(
                     static_cast<float>(eligible.size()) * roll);  // `*|0`
                 if (idx < 0) idx = 0;
@@ -1496,7 +1514,7 @@ sf2::scene::CondCtx FightController::cond_ctx(int side, double hit_dmg) {
         ctx.mod_ns[kv.first] = kv.second.namespc;
     }
     for (const auto& kv : bus_.side(side).q3) ctx.q3[kv.first] = kv.second;
-    ctx.draw01 = [this]() { return roll01_ ? roll01_() : 0.5f; };
+    ctx.draw01 = [this]() { return draw01(); };
     return ctx;
 }
 
@@ -2160,14 +2178,11 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     }
     bool blocked = def.fighter.has_block();
     // JS `wd.strike` crit (L510): `se = !block && !g.a3 && Lcb(A9a())`;
-    // `Lcb(a)` = `Da.cT(a*100)` (L1204): `a>1 -> true` (the `a>b` shortcut)
+    // JS `Lcb(a)` = `Da.cT(a*100)` (L1204): `a>1 -> true` (the `a>b` shortcut)
     // else a fresh draw `< a`. `A9a = pga?100:gya.p8a` (L529; `pga` setter
-    // OPEN -> false path). Draws come from the fight stream (`RJa` analog;
-    // merged stream documented in MASTER_TODO).
+    // OPEN -> false path). Draws come from the shared fight stream
+    // (`Da.pg.dT` analog; `draw01()` = the owned `DaPrng` or an override).
     const float a9 = sf2::scene::crit_chance(atk.params);
-    // `roll01_` may be empty in unit contexts — fall back to a fixed draw
-    // (deterministic; never consumes the shared stream when unset).
-    auto draw01 = [this]() { return roll01_ ? roll01_() : 0.5f; };
     bool critical =
         !blocked && !iv.no_critical && (a9 > 1.0f || draw01() < a9);
     const std::string defense_attr = sf2::scene::select_defense(idmg, blocked, &hit_cap);
@@ -2340,7 +2355,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         if (rec.first_hit) ++prize_fh_.c6;
         if (rec.shock) ++prize_fh_.e6;
         sf2::scene::FightContext rctx;
-        rctx.roll01 = roll01_;
+        rctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
         rctx.stage = sf2::scene::round_stage::fight;
         rctx.anims_me = {def.fighter.current_move() ? def.fighter.current_move()->name : ""};
         rctx.anims_enemy = {atk.fighter.current_move() ? atk.fighter.current_move()->name : ""};
@@ -2545,7 +2560,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // the input could never win — "no input").
     if (me.ai == nullptr && !auto_attack_ && phase_ == fight_phase::fight) {
         sf2::scene::FightContext ctx;
-        ctx.roll01 = roll01_;  // shared fight stream (`Da.pg` analog)
+        ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
         ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
         ctx.anims_me = {};
         ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
@@ -2596,7 +2611,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         const auto idle_it = moves_->find(idle_name);
         if (idle_it != moves_->end()) {
             sf2::scene::FightContext ctx;
-        ctx.roll01 = roll01_;  // shared fight stream (`Da.pg` analog)
+        ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
             ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
             ctx.anims_me = {idle_name};
             ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name
@@ -2667,7 +2682,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         const auto it = moves_->find(move_name);
         if (it != moves_->end()) {
             sf2::scene::FightContext ctx;
-        ctx.roll01 = roll01_;  // shared fight stream (`Da.pg` analog)
+        ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
             ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
             ctx.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
             ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
@@ -2712,7 +2727,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.magic_bullets = 0;
         st.enemy_part_frames.push_back(foe.fighter.move_frame());
         st.fight_frame = frame_;
-        st.roll01 = roll01_;
+        st.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
 
         const std::string decision = me.ai->update(st);
         me.last_decision = decision;
@@ -2730,7 +2745,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 for (const auto& kv : *moves_) {
                     if (kv.second.template_tags.count("Punch") == 0) continue;
                     sf2::scene::FightContext ctx;
-        ctx.roll01 = roll01_;  // shared fight stream (`Da.pg` analog)
+        ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
                     ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
                     ctx.anims_me = {me.fighter.current_move()
                                         ? me.fighter.current_move()->name
@@ -2749,7 +2764,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             }
             if (chosen != nullptr) {
                 sf2::scene::FightContext ctx;
-        ctx.roll01 = roll01_;  // shared fight stream (`Da.pg` analog)
+        ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
                 ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
                 ctx.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
                 ctx.anims_enemy = {foe.fighter.current_move()

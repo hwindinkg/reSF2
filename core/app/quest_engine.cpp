@@ -123,6 +123,37 @@ std::string attr_or(const std::map<std::string, std::string>& attrs, const char*
     return it != attrs.end() ? it->second : fallback;
 }
 
+// Splits an `hb` triple (`Me|Re|Lq`, `hb.toString` L1416) into zone/name.
+void split_battle_triple(const std::string& s, std::string& zone, std::string& name) {
+    const std::size_t p1 = s.find('|');
+    if (p1 == std::string::npos) {
+        zone.clear();
+        name = s;
+        return;
+    }
+    zone = s.substr(0, p1);
+    const std::size_t p2 = s.find('|', p1 + 1);
+    name = s.substr(p1 + 1,
+                    p2 == std::string::npos ? std::string::npos : p2 - (p1 + 1));
+}
+
+// `u.ka(a,b)` L2455: "1"/"true" -> true.
+bool attr_bool01(const std::string& v) { return v == "1" || v == "true"; }
+
+// Resolves a `ShowBattle`/`HideBattle`/... `Name` attr into the `hb`
+// zone/name pair (a triple keeps its zone; a bare name uses the stages index).
+QuestBattleWrite battle_write_from(const std::string& triple, const std::string& zone_hint) {
+    QuestBattleWrite bw;
+    std::string zone;
+    split_battle_triple(triple, zone, bw.name);
+    if (bw.name.empty()) {
+        bw.name = triple;
+        zone.clear();
+    }
+    bw.zone = zone.empty() ? zone_hint : zone;
+    return bw;
+}
+
 } // namespace
 
 bool QuestEngine::ensure_loaded(App& app) {
@@ -354,6 +385,39 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
             fx.has_current_zone = true;
             const std::string name = attr_or(a.attrs, "Name");
             fx.current_zone = name.empty() ? attr_or(a.attrs, "Value") : name;
+        } else if (t == "ShowBattle" || t == "HideBattle") {
+            // `Aj` L1108/L1109 (`EShowBattle`/`EHideBattle`): `Name` is the
+            // `hb` triple; `ShowBattle` -> `Iaa(hb,true,true,Locked,Hidden,
+            // ReplayCount)`, `HideBattle` -> `Aj(false)` -> `Iaa` `c=false`
+            // -> `Eja` (record dropped).
+            const std::string nm = attr_or(a.attrs, "Name");
+            QuestBattleWrite bw = battle_write_from(nm, battle_zone(nm));
+            if (!bw.name.empty()) {
+                bw.remove = (t == "HideBattle");
+                bw.locked = attr_bool01(attr_or(a.attrs, "Locked"));
+                bw.hidden = attr_bool01(attr_or(a.attrs, "Hidden"));
+                bw.replay_count = parse_int_or(attr_or(a.attrs, "ReplayCount"), 0);
+                fx.battle_writes.push_back(std::move(bw));
+            }
+        } else if (t == "SetBattleVisibility") {
+            // `no` L1095-1096 (`ESetBattleVisibility`): `IsVisible` default
+            // "0"; hidden = `!(IsVisible>0)` (`b = !ba.Zv(a,AN)`), written
+            // via `Iaa(hb,false,true,false,hidden)` (ensure + set Hidden).
+            const std::string nm = attr_or(a.attrs, "Name");
+            QuestBattleWrite bw = battle_write_from(nm, battle_zone(nm));
+            if (!bw.name.empty()) {
+                bw.hidden = !attr_bool01(attr_or(a.attrs, "IsVisible", "0"));
+                fx.battle_writes.push_back(std::move(bw));
+            }
+        } else if (t == "ToggleBattle") {
+            // `Ho` L1106 (`EToggleBattle`): `Toggle` on/On -> flip Hidden on
+            // the EXISTING record (`hl.gx(!li)`), no create.
+            const std::string nm = attr_or(a.attrs, "Name");
+            QuestBattleWrite bw = battle_write_from(nm, battle_zone(nm));
+            if (!bw.name.empty()) {
+                bw.toggle_hidden = true;
+                fx.battle_writes.push_back(std::move(bw));
+            }
         } else if (t == "SetVariable") {
             if (attr_or(a.attrs, "Scope") == "Global") {
                 fx.set_vars[attr_or(a.attrs, "Name")] = attr_or(a.attrs, "Value");
@@ -412,6 +476,34 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
                 w.variables[kv.first] = kv.second;
                 dirty = true;
             }
+        }
+        // `hl` battle-record writes (JS `J1a` L259 / `Iaa` L260-261 /
+        // `Eja` L261 / `Ho` L1106) — the `WDa` unlock bit `Qr.lla` reads.
+        for (const QuestBattleWrite& bw : fx.battle_writes) {
+            if (bw.name.empty()) continue;
+            if (bw.remove) {
+                w.battle_remove(bw.zone, bw.name);  // HideBattle -> `Eja`
+                std::fprintf(stdout, "[quest] battle record remove %s|%s\n",
+                             bw.zone.c_str(), bw.name.c_str());
+                dirty = true;
+                continue;
+            }
+            if (bw.toggle_hidden) {
+                WarriorSave::BattleRecord* rec = w.battle_record(bw.zone, bw.name);
+                if (rec != nullptr) {  // `Ho` L1106: flip only, never create
+                    rec->hidden = !rec->hidden;
+                    dirty = true;
+                }
+                std::fprintf(stdout, "[quest] battle hidden toggle %s|%s\n",
+                             bw.zone.c_str(), bw.name.c_str());
+                continue;
+            }
+            w.battle_set_visibility(bw.zone, bw.name, bw.locked, bw.hidden,
+                                    bw.replay_count);
+            std::fprintf(stdout, "[quest] battle record %s|%s locked=%d hidden=%d\n",
+                         bw.zone.c_str(), bw.name.c_str(), bw.locked ? 1 : 0,
+                         bw.hidden ? 1 : 0);
+            dirty = true;
         }
         if (dirty) {
             app.save().save(w);
