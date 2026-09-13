@@ -201,6 +201,14 @@ bool App::init(const std::string& res_root, const std::string& save_path,
         std::fprintf(stderr, "app: renderer init failed\n");
         return false;
     }
+    // Keyboard is read by polling `glfwGetKey`, which only reflects keys the
+    // focused window received (GLFW `Ik` equivalent: the browser canvas holds
+    // focus while playing). A window launched under a terminal can open
+    // inactive, so request focus explicitly; otherwise no key reaches
+    // `poll_input` until the user clicks.
+    if (window != nullptr) {
+        glfwFocusWindow(window);
+    }
 
     // Save system — first run uses the users_default template. The shipped
     // res has the hashed name users_default.b7da2019.xml (G.rq[9]); the
@@ -644,8 +652,11 @@ void App::poll_input() {
     pointer_.y = y;
 
     // Keyboard: poll the fight keys and route edge transitions to the top
-    // screen (JS `Ik` keydown/keyup -> the fight input path). Only the keys
-    // the fight uses (WASD/arrows/space).
+    // screen (JS `Ik` keydown/keyup -> the fight input path). The set must
+    // cover every key `FightScreen::on_key` maps, otherwise a bound action
+    // has no poll source (kick L / super K,B were mapped but never polled).
+    // Keys sharing one game action share an `idx` so A+Left read as a single
+    // edge (JS `De(control, key...)` maps several physical keys per control).
     struct KeyMap {
         int glfw;
         int idx;
@@ -654,6 +665,7 @@ void App::poll_input() {
         {GLFW_KEY_A, 0}, {GLFW_KEY_LEFT, 0}, {GLFW_KEY_D, 1},
         {GLFW_KEY_RIGHT, 1}, {GLFW_KEY_W, 2}, {GLFW_KEY_UP, 2},
         {GLFW_KEY_S, 3}, {GLFW_KEY_DOWN, 3}, {GLFW_KEY_SPACE, 4},
+        {GLFW_KEY_J, 4}, {GLFW_KEY_L, 5}, {GLFW_KEY_K, 6}, {GLFW_KEY_B, 6},
     };
     for (const KeyMap& km : kFightKeys) {
         const bool now_down = glfwGetKey(renderer_->window(), km.glfw) == GLFW_PRESS;
@@ -871,6 +883,16 @@ void App::run_one_frame() {
         acc_ = kFixedDt;
     } else {
         acc_ += dt;
+        // A real pointer press edge is latched for THIS present frame only
+        // (`poll_input` clears `pointer_.pressed` on the next frame), while
+        // the pointer consumers (the on-screen gamepad `update_gamepad_input`
+        // and every screen's `update_impl`) sample it at the fixed 60 Hz step.
+        // With vsync off (`glfwSwapInterval(0)`) the present rate is far above
+        // 60 Hz, so most fixed ticks have no accumulator credit and the click
+        // edge is dropped before any consumer sees it (measured: 5/60 clicks).
+        // Run one fixed step on the edge frame so the JS `Hk` mouse-event
+        // dispatch is never lost (JS: `Hk` mousedown -> `DGa` -> handlers).
+        if (pointer_.pressed && acc_ < kFixedDt) acc_ = kFixedDt;
     }
 
     while (acc_ >= kFixedDt) {

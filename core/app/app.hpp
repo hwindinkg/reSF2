@@ -332,7 +332,7 @@ private:
 
     PointerState pointer_;
     std::set<int> keys_pressed_;
-    bool keys_held_[5] = {};  // the fight keys' held state (for edges)
+    bool keys_held_[16] = {};  // the fight keys' held state (for edges)
     bool injected_click_pending_ = false;
     int injected_click_steps_ = 0;  // remaining fixed steps the click stays pressed
     double injected_x_ = 0.0;
