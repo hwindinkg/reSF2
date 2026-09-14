@@ -114,6 +114,16 @@ void parse_action(const pugi::xml_node& node, QuestAction& act) {
             parse_action(ch, sub);
             act.children.push_back(std::move(sub));
         }
+    } else if (act.tag == "Button") {
+        // JS `He.Rib` L1057: the button's nested `Yb` actions
+        // (`SetStoryTutorialStep`/`Fight`/...) run on press (`dhb` L1061),
+        // not at parse time — keep them structured for `press_dialog`.
+        for (pugi::xml_node ch = node.first_child(); ch; ch = ch.next_sibling()) {
+            if (ch.type() != pugi::node_element) continue;
+            QuestAction sub;
+            parse_action(ch, sub);
+            act.children.push_back(std::move(sub));
+        }
     }
 }
 
@@ -247,7 +257,16 @@ std::string QuestEngine::battle_zone(const std::string& battle) const {
 std::string QuestEngine::resolve_token(const std::string& token,
                                        const QuestJournal& journal,
                                        const std::string& story_step, int level) const {
-    if (token == "_$StoryTutorialStep") return story_step;
+    if (token == "_$StoryTutorialStep") {
+        // JS `zt.parse` L309-310: the live step defaults to `kU[0]` =
+        // "NotStarted" for a fresh profile (the stock <Warrior Tutorial="MOVE">
+        // is not a valid step name -> `Ucb` false -> kU[0]). The port keeps
+        // the step in the save's quest variables, so an absent value reads as
+        // NotStarted ONLY on the armed fresh-tutorial path — the seeded
+        // post-tutorial saves stay chain-silent.
+        if (story_step.empty() && fresh_tutorial_) return "NotStarted";
+        return story_step;
+    }
     if (token == "_$SceneTo") return journal.scene_to;
     if (token == "_$SceneFrom") return journal.scene_from;
     if (token == "_$Fight") return journal.fight;
@@ -342,39 +361,50 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
                                  attr_or(a.attrs, "Title") + ": " + lines);
             // Structured record for the Sensei modal (screens.cpp displays).
             // Line refs: `_Local` resolves via the run's locals (If/Else set
-            // NotificationTextMove/PunchBag just above); bare lang keys go
-            // through the runtime table with raw fallback.
+            // NotificationTextMove/PunchBag just above); the result is kept
+            // as a runtime lang key and resolved at DRAW time (the lang table
+            // is not loaded when the quest fires at boot).
             {
                 EngineDialog dlg;
                 dlg.type = attr_or(a.attrs, "Type");
                 dlg.title = attr_or(a.attrs, "Title");
                 dlg.image = attr_or(a.attrs, "Image");
                 dlg.quest = quest;
+                dlg.journal = journal;
                 for (const QuestAction& c : a.children) {
-                    if (c.tag != "Line") continue;
-                    std::string text = attr_or(c.attrs, "Text");
-                    if (!text.empty() && text[0] == '_') {
-                        const auto it = locals.find(text.substr(1));
-                        text = it != locals.end() ? it->second : text.substr(1);
+                    if (c.tag == "Line") {
+                        std::string text = attr_or(c.attrs, "Text");
+                        if (!text.empty() && text[0] == '_') {
+                            const auto it = locals.find(text.substr(1));
+                            text = it != locals.end() ? it->second : text.substr(1);
+                        }
+                        if (!text.empty()) dlg.lines.push_back(text);
+                        if (dlg.button_text.empty()) {
+                            dlg.button_text = attr_or(c.attrs, "ButtonText");
+                        }
+                    } else if (c.tag == "Button") {
+                        // JS `He.Rib` L1057: the nested actions run on press
+                        // (`dhb` L1061) — defer them (do NOT run eagerly).
+                        for (const QuestAction& sub : c.children) {
+                            dlg.button_actions.push_back(sub);
+                        }
+                        if (dlg.button_text.empty()) {
+                            dlg.button_text = attr_or(c.attrs, "Text");
+                        }
                     }
-                    if (text.find(' ') == std::string::npos && text.find('_') == std::string::npos) {
-                        text = lang_text(app.res_root(), text, text);
-                    }
-                    if (!text.empty()) dlg.lines.push_back(text);
                 }
                 if (!dlg.lines.empty()) {
                     if (dialogs_.size() >= 8) {
                         std::fprintf(stdout, "[quest] dialog queue full, dropping oldest\n");
                         dialogs_.erase(dialogs_.begin());
                     }
-                    std::fprintf(stdout, "[quest] dialog queued (%s): %zu lines\n",
-                                 dlg.title.c_str(), dlg.lines.size());
+                    std::fprintf(stdout, "[quest] dialog queued (%s/%s): %zu lines\n",
+                                 dlg.type.c_str(), dlg.title.c_str(), dlg.lines.size());
                     dialogs_.push_back(std::move(dlg));
                 }
             }
-            // Nested Button/Line/If actions (SetStoryTutorialStep + Fight
-            // live inside Welcome's dialog Button) — same allowlist.
-            run_actions(app, a.children, journal, fx, locals, quest, depth + 1);
+            // Dialog children (Line/Button) are NOT run here: Line is a data
+            // row and Button's actions are deferred to `press_dialog`.
         } else if (t == "SetStoryTutorialStep") {
             fx.has_story_step = true;
             fx.story_step = attr_or(a.attrs, "Value");
@@ -619,9 +649,26 @@ void QuestEngine::note_fight(const std::string& name, const std::string& result)
     last_result_ = result;
 }
 
+std::vector<std::string> QuestEngine::press_dialog(App& app) {
+    std::vector<std::string> fights;
+    if (dialogs_.empty()) return fights;
+    EngineDialog dlg = dialogs_.front();
+    dialogs_.erase(dialogs_.begin());
+    std::fprintf(stdout, "[quest] dialog button pressed: %s (%s)\n", dlg.title.c_str(),
+                 dlg.button_text.c_str());
+    std::fflush(stdout);
+    QuestSideEffects fx;
+    std::map<std::string, std::string> locals;
+    run_actions(app, dlg.button_actions, dlg.journal, fx, locals, dlg.quest, 0);
+    apply_effects(app, fx);
+    for (const std::string& f : fx.fight_requests) fights.push_back(f);
+    return fights;
+}
+
 std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
                                            const QuestJournal& journal) {
     std::vector<std::string> fired;
+    fresh_tutorial_ = app.fresh_tutorial();
     if (!ensure_loaded(app)) return fired;
     QuestJournal j = journal;
     if (j.fight.empty()) {

@@ -78,10 +78,23 @@ struct QuestDef {
 // screens.cpp; the engine only queues).
 struct EngineDialog {
     std::string type;   // Notification / Regular
-    std::string title;  // characterSensei / boss_lynx / ...
+    std::string title;  // characterSensei / boss_lynx / ... (lang key)
     std::string image;
-    std::vector<std::string> lines;  // resolved Line texts (lang-applied)
+    // Resolved Line texts. Each entry is a runtime lang key (`tutorial_move`,
+    // `tutorial_training_fight`, ...) — NOT pre-resolved, so the display
+    // layer resolves it after the lang table is loaded (JS `ba.cg`/`ba.Fz`
+    // resolve at He.S time; the port queues before boot renders).
+    std::vector<std::string> lines;
+    // The dialog's button caption (Line `ButtonText`, e.g. `dlgStoryBtnFight`)
+    // — JS `He.jkb` stores it on the row and `hab()` turns it into a button
+    // only when the button nests actions.
+    std::string button_text;
+    // The Right button's deferred nested actions (JS `vh.actions`, run on
+    // press via `He.dhb(1)` L1061). Empty = no button (Notification OK with
+    // no actions, `hab()` false).
+    std::vector<QuestAction> button_actions;
     std::string quest;               // firing quest name
+    QuestJournal journal;            // `Qt` (He.S stores the firing journal)
 };
 // One `<Battles>` write a quest action asks for. JS mapping:
 //   ShowBattle            -> `Aj(true)`  L1108 -> `Iaa(hb,true,true,..)` +
@@ -144,6 +157,15 @@ public:
         if (!dialogs_.empty()) dialogs_.erase(dialogs_.begin());
     }
 
+    // JS `He.dhb(1)` L1061 (the Right button): pops the head dialog and runs
+    // its deferred nested actions (`SetStoryTutorialStep`/`Fight`/...).
+    // Returns the recorded fight-request names (`Sn`) for the caller to
+    // launch (the engine never navigates). Save writes are applied.
+    std::vector<std::string> press_dialog(App& app);
+
+    // Drops every queued dialog (tutorial handoff / scene reset).
+    void clear_dialogs() { dialogs_.clear(); }
+
     // For logs/tests.
     std::size_t quest_count() const { return quests_.size(); }
     bool loaded() const { return loaded_; }
@@ -170,6 +192,10 @@ private:
     std::string last_fight_;
     std::string last_result_;
     std::vector<EngineDialog> dialogs_;  // Sensei-modal queue (cap below)
+    // Harness gate (JS fresh profile): an empty `_$StoryTutorialStep` reads
+    // as `NotStarted` only while the fresh-tutorial path is armed (the
+    // fidelity tour), so the seeded post-tutorial saves stay chain-silent.
+    bool fresh_tutorial_ = false;
 };
 
 } // namespace sf2::app

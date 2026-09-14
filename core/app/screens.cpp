@@ -70,9 +70,10 @@ constexpr float kViewH = 720.0f;
 // tap-to-advance modal and gate their own buttons behind it (dialog modal
 // gating). Headless drains the queue silently instead (auto-advance — the
 // scripted loop never modal-blocks; detected via App::headless(), i.e. the
-// headless_frames_ > 0 pattern the driver sets).
+// headless_frames_ > 0 pattern the driver sets) EXCEPT on the armed
+// fresh-tutorial path, where the fidelity tour captures the real beats.
 const EngineDialog* quest_modal_top(App& app) {
-    if (app.headless()) {
+    if (app.headless() && !app.fresh_tutorial()) {
         while (app.quest_engine().has_dialog()) {
             std::fprintf(stdout, "[quest] dialog skipped (headless): %s\n",
                          app.quest_engine().dialog().title.c_str());
@@ -85,15 +86,37 @@ const EngineDialog* quest_modal_top(App& app) {
     return &app.quest_engine().dialog();
 }
 
-// Returns true while a modal is up (caller skips its own buttons/keys that
-// frame); advances the queue on press.
-bool quest_modal_consume(App& app) {
+// Regular-dialog button hit-test (defined after the `od` dialog layout
+// helpers below): the `dlgStoryBtnFight` plate.
+bool quest_modal_button_hit(const EngineDialog& d, double x, double y);
+
+// JS `He` gating (L1045-1062): a `Notification` is fire-and-forget (any tap
+// advances, `sa()` continues); a `Regular` dialog holds the chain until its
+// button fires (`dhb(1)` L1061 -> the nested `Yb`), IgnoreBack="1" so a
+// backdrop tap does not close it. Returns true while a modal is up (the
+// caller skips its own input that frame). `fight_out` (optional) receives a
+// `Fight` request from the button's nested actions (`Sn` L1069).
+bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return false;
-    if (app.pointer().pressed) {
-        std::fprintf(stdout, "[quest] dialog advanced: %s\n", d->title.c_str());
+    if (!app.pointer().pressed) return true;
+    if (d->type == "Notification") {
+        std::fprintf(stdout, "[quest] notification advanced: %s\n", d->title.c_str());
         std::fflush(stdout);
         app.quest_engine().pop_dialog();
+        return true;
+    }
+    // Regular. A button with actions fires on press; a buttonless dialog
+    // (no `hab()` button) advances on tap.
+    if (d->button_actions.empty()) {
+        std::fprintf(stdout, "[quest] dialog advanced (no button): %s\n", d->title.c_str());
+        std::fflush(stdout);
+        app.quest_engine().pop_dialog();
+        return true;
+    }
+    if (quest_modal_button_hit(*d, app.pointer().x, app.pointer().y)) {
+        const std::vector<std::string> fights = app.quest_engine().press_dialog(app);
+        if (fight_out != nullptr && !fights.empty()) *fight_out = fights.front();
     }
     return true;
 }
@@ -284,6 +307,20 @@ struct OdPanel {
 };
 OdPanel od_panel(float src_w, float src_h);
 void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p);
+// Sliced-button path (defined below): the Regular quest dialog's button
+// plate reuses it. No default args here (the definitions below carry the
+// defaults; repeating them is an error).
+bool load_sliced_atlas(App& app);
+bool draw_bb_plate(App& app, const std::string& frame_name, float cx, float cy, float w,
+                   float h, float alpha, bool flip_x);
+void draw_flat_button(App& app, const std::string& label, float cx, float cy, float w, float h,
+                      float r, float g, float b, bool hovered);
+// The Regular dialog's action button (Line `ButtonText` / Right Button
+// `Text`) at the `od` layout plate - defined with the dialog layout below.
+void draw_dialog_button(App& app, const std::string& text);
+// The Regular dialog body (dim + `od` panel + title + portrait + wrapped
+// lines + button) - defined with the dialog layout below.
+void draw_regular_quest_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d);
 
 // Draws the modal panel. JS `He` (L1042-1063) routes dialogs by Type:
 // `Notification` posts to the `Ib` hint bar (`Ib.F().Qhb`, L1050); every
@@ -296,42 +333,18 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
     if (!is_top) return;  // layered stack: only the top screen draws the modal
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return;
-    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f);  // `Wb.Qa` = 0x80 black
-    // `Notification` -> the `Ib` hint bar (L1045-1050), no `od` panel.
+    // `Notification` -> the `Ib` hint bar (L1045-1050): fire-and-forget, no
+    // dialog object -> no screen dim (`BlockRaycast="0"`); the OK plate only
+    // draws when the button nests actions (`hab()` L1060).
     if (d->type == "Notification") {
-        draw_ib_hint(app, ren, d->title, d->lines.empty() ? "" : d->lines[0],
-                     d->lines.size() > 1 ? d->lines[1] : "", /*show_ok=*/true);
+        const std::string l0 = d->lines.empty() ? std::string() : loc(app, d->lines[0], d->lines[0]);
+        const std::string l1 =
+            d->lines.size() > 1 ? loc(app, d->lines[1], d->lines[1]) : std::string();
+        draw_ib_hint(app, ren, d->title, l0, l1,
+                     /*show_ok=*/!d->button_actions.empty() && !d->button_text.empty());
         return;
     }
-    // `od` 9-slice: fit the AV design rect into the view (`l4a` L1895-1896),
-    // draw the `bg` body + `bg_edge` caps, then the `Vc` title. The AV is
-    // `new fc(a,b)` with JS defaults (2340,1530) — `od` ctor L1894
-    // `b==null&&(b=1530)`; the quest dialog is `ph extends od` with `super()`
-    // (L1963-1964, no explicit size), so 1530 (NOT the audit's stale 1300).
-    const OdPanel panel = od_panel(2340.0f, 1530.0f);
-    const float c = panel.c;
-    const float px = panel.px, py = panel.py, pw = panel.pw, ph = panel.ph;
-    draw_od_base(app, ren, panel);
-    // `Vc` title (`Fa(1560,160)`, `ua(152)`, color `Z.W6` = 0.404/0.243/0.141).
-    // The Title attr is a lang key (`characterSensei` -> "СЭНСЭЙ" RU).
-    const float title_w = 1560.0f * c, title_h = 160.0f * c;
-    draw_ui_label(app, px + pw * 0.5f - title_w * 0.5f, py + 8.0f * c, title_w, title_h,
-                  loc(app, d->title, d->title), 1.0f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
-    // Body `Cd`: the JS runs the body text multiline (`ea.rd(!0)`) — wrap each
-    // line into the panel width and clip at the panel bottom (`Qh.apply`
-    // L1628-1629; the `Sk` single-line fit is L1626-1627). Replaces the old
-    // single-line draw with a 44*c step that overlapped/clipped the longer
-    // Sensei lines.
-    const float body_y = py + title_h + 24.0f * c;
-    const float body_h = (py + ph) - body_y - 24.0f * c;
-    std::string body;
-    for (std::size_t i = 0; i < d->lines.size(); ++i) {
-        if (i != 0) body += "\n";
-        body += d->lines[i];
-    }
-    draw_ui_wrapped(app, px + 80.0f * c, body_y, pw - 160.0f * c, body_h, body, 0.8f,
-                    UiAlign::Left, 1.0f, 1.0f, 1.0f);
+    draw_regular_quest_dialog(app, ren, *d);
 }
 
 // --- `od` 9-slice dialog base (JS L1894-1900) ----------------------------
@@ -4163,26 +4176,17 @@ void DojoScreen::update_impl(float dt) {
             std::fflush(stdout);
         }
     }
-    // Fresh-profile tutorial gate (blocking; see the header comment). The
-    // training fight's win (Results pops back here) completes it, so the hub
-    // is clean afterwards.
-    if (app().fresh_tutorial()) {
-        if (!tut_done_) {
-            const PendingBattle& pb = app().pending_battle();
-            if (pb.has_result && pb.player_won && pb.battle_name == "Training") {
-                tut_done_ = true;
-                std::fprintf(stdout, "[tutorial] training fight won -> hub\n");
-                std::fflush(stdout);
-            }
-        }
-        if (!tut_done_) {
-            update_tutorial();
+    // Quest modal gate (engine `He` records): while a dialog is up, a tap
+    // advances a Notification or fires the Regular dialog's action button
+    // (`dhb(1)`); the button's deferred `Fight` request launches here and the
+    // chrome stays blocked beneath the modal.
+    {
+        std::string fight;
+        if (quest_modal_consume(app(), &fight)) {
+            if (!fight.empty()) launch_quest_fight(fight);
             return;
         }
     }
-    // Sensei modal gate (quest He records): while a dialog is up, taps
-    // advance it instead of the chrome (headless auto-drains).
-    if (quest_modal_consume(app())) return;
     // The shared `za` nav column (JS `za.Aub` L1978-1980 / `za.Ofb`..`Vfb`):
     // a tap switches to Dojo/Map/Shop/Profile/Settings (JS `ma.Jg().jI`).
     za_update(app(), *this, kScreenDojo);
@@ -4237,19 +4241,11 @@ void draw_dojo_gamepad(App& app) {
 }
 
 // --- Fresh-profile tutorial (JS StoryTutorialWelcome) ----------------------
-// The `Ib` notification banner hit rect (the tap that advances a beat).
-// Recomputes the draw_ib_hint layout: 600x250 scroll, top-right, c scale.
-bool tutorial_banner_hit(double x, double y) {
-    const float c =
-        std::clamp(std::min(kViewW * 0.75f, kViewH * 0.75f) / 600.0f, 0.2f, 1.1f);
-    const float sp = std::min(kViewH * 0.13f, 100.0f) * 0.78f;  // za.odb L1975
-    const float ox = kViewW - 600.0f * c;
-    return x >= ox && x <= ox + 600.0f * c && y >= sp && y <= sp + 250.0f * c;
-}
-
-// The tutorial Regular dialog layout (`Xc`/`od`; oracle
-// oracle_tutorial_modal.png): СЭНСЭЙ title, left portrait, right wrapped body,
-// the FIGHT button bottom-centre-right.
+// The Regular dialog layout (`Xc`/`od`; oracle oracle_tutorial_modal.png):
+// СЭНСЭЙ title, left portrait, right wrapped body, the FIGHT button
+// bottom-centre-right. `draw_quest_modal` draws the panel; this layout also
+// gives the dialog button's hit rect (the tap that fires its deferred
+// actions, `He.dhb(1)` L1061).
 struct TutorialDialogLayout {
     OdPanel panel;
     float title_y = 0.0f, title_h = 0.0f;
@@ -4264,15 +4260,10 @@ TutorialDialogLayout tutorial_dialog_layout() {
     const OdPanel& p = t.panel;
     t.title_h = 160.0f * p.c;
     t.title_y = p.py + p.ph * 0.20f;
-    // Portrait: oracle dojo_sensei green circle bbox x307..543 y253..403
-    // (diameter ~236, centre ~425,340). The `sensei_portrait` texture is the
-    // 512px `character_sensei` (DOJO_BG_STATIC §5); the olive disc is ~55% of
-    // the texture, so the drawn quad is ~430px.
+    // Portrait: oracle dojo_sensei green circle bbox x307..543 y253..403.
     t.portrait = 430.0f;
     t.portrait_cx = p.px + p.pw * 0.251f;   // 425 at 1280x720 (body 864 @208)
     t.portrait_cy = p.py + p.ph * 0.500f;   // 360
-    // Body: oracle lines start x~595, first top y~249, pitch ~50
-    // (`draw_ui_wrapped` ua 0.70 -> drawn scale 0.56 at RU ea.a1=0.8).
     t.body_x = p.px + p.pw * 0.436f;
     t.body_y = p.py + p.ph * 0.325f;
     t.body_w = p.pw * 0.490f;
@@ -4284,39 +4275,44 @@ TutorialDialogLayout tutorial_dialog_layout() {
     return t;
 }
 
-void DojoScreen::draw_tutorial(App& app, sf2::render::Renderer& ren) {
-    ensure_lang(app);
-    if (tut_beat_ <= 1) {
-        // Notification (`He` -> `Ib`, L1045-1050): the sensei-small portrait
-        // banner with the beat body. No speaker label (the oracle notification
-        // shows only the body; `characterSensei` is the Regular title).
-        const bool move = tut_beat_ == 0;
-        const std::string body = loc(
-            app, move ? "tutorial_move" : "tutorial_punchbag",
-            move ? "Let me see you move! Show me what a shadow can do."
-                 : "Fascinating... Now, see that punching bag? Attack it!");
-        // The oracle tutorial notification has no OK button (the whole banner
-        // is the tap target); `show_ok=false` also avoids the OK plate
-        // overlapping the wrapped body.
-        draw_ib_hint(app, ren, "", body, "", /*show_ok=*/false);
-        return;
+// The dialog's action-button plate (`dlgStoryBtnFight` -> "В БОЙ"): the
+// `btnBeige` slice when the atlas resolved, else the flat fallback.
+namespace {
+void draw_dialog_button(App& app, const std::string& text) {
+    const TutorialDialogLayout t = tutorial_dialog_layout();
+    if (!(load_sliced_atlas(app) &&
+          draw_bb_plate(app, "btnBeige", t.btn_cx, t.btn_cy, t.btn_w, t.btn_h, 1.0f, false))) {
+        draw_flat_button(app, "", t.btn_cx, t.btn_cy, t.btn_w, t.btn_h, 0.6f, 0.5f, 0.3f, false);
     }
-    // Regular dialog (`he`/`Xc`): `od` base + title + portrait + wrapped body
-    // + the localized FIGHT button (`dlgStoryBtnFight`).
+    draw_ui_label(app, t.btn_cx - t.btn_w * 0.5f, t.btn_cy - 14.0f, t.btn_w, 28.0f,
+                  loc(app, text, text), 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+}
+
+bool quest_modal_button_hit(const EngineDialog& d, double x, double y) {
+    (void)d;
+    const TutorialDialogLayout t = tutorial_dialog_layout();
+    return x >= t.btn_cx - t.btn_w * 0.5f && x <= t.btn_cx + t.btn_w * 0.5f &&
+           y >= t.btn_cy - t.btn_h * 0.5f && y <= t.btn_cy + t.btn_h * 0.5f;
+}
+
+// The `Regular`/other `Xc` dialog: `Wb.Qa` (0x80 black) dim + the `od`
+// 9-slice base + `Vc` title + the `Image` avatar (`oe`) + the wrapped body
+// lines + the action button. Mirrors the JS `He.S` line/portrait layout
+// (oracle oracle_tutorial_modal / dojo_sensei).
+void draw_regular_quest_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d) {
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f);  // `Wb.Qa` = 0x80 black
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f);
     const TutorialDialogLayout t = tutorial_dialog_layout();
     draw_od_base(app, ren, t.panel);
     // Title `Vc` (`characterSensei` -> "СЭНСЭЙ").
     draw_ui_label(app, t.panel.px + t.panel.pw * 0.5f - 780.0f * t.panel.c, t.title_y,
-                  1560.0f * t.panel.c, t.title_h, loc(app, "characterSensei", "SENSEI"),
-                  0.98f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
-    // Portrait (sensei, 256px, transparent corners).
-    if (app.renderer().texture_lookup("sensei_portrait") != 0) {
+                  1560.0f * t.panel.c, t.title_h, loc(app, d.title, d.title), 0.98f,
+                  UiAlign::Center, 0.404f, 0.243f, 0.141f);
+    // Portrait (`He` `Image` -> the `oe` avatar): the sensei disc.
+    if (d.image.find("character_sensei") != std::string::npos &&
+        app.renderer().texture_lookup("sensei_portrait") != 0) {
         sf2::scene::Sprite s;
         s.texture_name = "sensei_portrait";
-        s.frame_x = 0.0f;
-        s.frame_y = 0.0f;
         s.frame_w = 256.0f;
         s.frame_h = 256.0f;
         s.tex_w = 256.0f;
@@ -4327,52 +4323,63 @@ void DojoScreen::draw_tutorial(App& app, sf2::render::Renderer& ren) {
         s.transform.set_scale(t.portrait / 256.0f, t.portrait / 256.0f);
         app.renderer().draw_sprite(s, ui_camera());
     }
-    draw_ui_wrapped(app, t.body_x, t.body_y, t.body_w, t.body_h,
-                    loc(app, "tutorial_training_fight",
-                        "Impressive... but a bag cannot defend itself."),
-                    0.70f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
-    // FIGHT button (`dlgStoryBtnFight` -> "В БОЙ").
-    if (!(load_sliced_atlas(app) &&
-          draw_bb_plate(app, "btnBeige", t.btn_cx, t.btn_cy, t.btn_w, t.btn_h, 1.0f))) {
-        draw_flat_button(app, "", t.btn_cx, t.btn_cy, t.btn_w, t.btn_h, 0.6f, 0.5f, 0.3f, false);
+    // Body `Cd`: the dialog's lines (lang keys resolved at draw) wrapped into
+    // the panel rect.
+    std::string body;
+    for (std::size_t i = 0; i < d.lines.size(); ++i) {
+        if (i != 0) body += "\n";
+        body += loc(app, d.lines[i], d.lines[i]);
     }
-    draw_ui_label(app, t.btn_cx - t.btn_w * 0.5f, t.btn_cy - 14.0f, t.btn_w, 28.0f,
-                  loc(app, "dlgStoryBtnFight", "FIGHT"), 0.9f, UiAlign::Center, 1.0f, 1.0f,
-                  1.0f);
+    draw_ui_wrapped(app, t.body_x, t.body_y, t.body_w, t.body_h, body, 0.70f, UiAlign::Left,
+                    0.12f, 0.09f, 0.06f);
+    // Action button (`hab()` true): the deferred-actions plate (`dhb(1)`).
+    if (!d.button_actions.empty() && !d.button_text.empty()) {
+        draw_dialog_button(app, d.button_text);
+    }
 }
+} // namespace
 
-void DojoScreen::update_tutorial() {
-    if (!app().pointer().pressed) return;
-    const double x = app().pointer().x;
-    const double y = app().pointer().y;
-    if (tut_beat_ <= 1) {
-        if (tutorial_banner_hit(x, y)) {
-            ++tut_beat_;
-            std::fprintf(stdout, "[tutorial] beat -> %d\n", tut_beat_);
-            std::fflush(stdout);
-        }
+// JS `Sn` L1069 (`Fight Name="<zone>|<battle>|<n>"`): resolve the triple
+// through stages.xml (the same `load_zone_map` path the Map uses), fill the
+// pending battle and push the fight. The tutorial request is
+// `Fight Name="Punchbag|Bosses|1"` (tutorial_quests.xml L40) — the
+// bamboo_grove 2 x 99 s tutorial battle (`stages.xml` Zone Punchbag / Battle
+// Bosses / Fight 1), NOT the `Training` dojo dummy.
+void DojoScreen::launch_quest_fight(const std::string& triple) {
+    std::string zone, battle;
+    const std::size_t p1 = triple.find('|');
+    if (p1 == std::string::npos) {
+        battle = triple;
+    } else {
+        zone = triple.substr(0, p1);
+        const std::size_t p2 = triple.find('|', p1 + 1);
+        battle = triple.substr(
+            p1 + 1, p2 == std::string::npos ? std::string::npos : p2 - (p1 + 1));
+    }
+    if (battle.empty()) {
+        std::fprintf(stderr, "[quest] Fight request '%s' has no battle\n", triple.c_str());
         return;
     }
-    const TutorialDialogLayout t = tutorial_dialog_layout();
-    if (x >= t.btn_cx - t.btn_w * 0.5f && x <= t.btn_cx + t.btn_w * 0.5f &&
-        y >= t.btn_cy - t.btn_h * 0.5f && y <= t.btn_cy + t.btn_h * 0.5f) {
-        start_tutorial_fight();
+    std::string location;
+    for (const MapScreen::ZoneTab& z : load_zone_map(kViewW, kViewH)) {
+        if (!zone.empty() && z.name != zone) continue;
+        for (const MapScreen::Node& n : z.nodes) {
+            if (n.name == battle) {
+                zone = z.name;
+                location = n.location;
+                break;
+            }
+        }
+        if (!location.empty()) break;
     }
-}
-
-void DojoScreen::start_tutorial_fight() {
-    // `Fight Name="Punchbag|Bosses|1"` (tutorial_quests.xml L40): the stages.xml
-    // `Zone Name="Punchbag"` / `Battle Name="Training"` (X=158 Y=145,
-    // Location="dojo") — the dojo training dummy.
     PendingBattle& pb = app().pending_battle();
-    pb.battle_name = "Training";
-    pb.zone = "Punchbag";
-    pb.location = "dojo";
-    pb.enemy_name = "Punchbag";
+    pb.battle_name = battle;
+    pb.zone = zone;
+    pb.location = location.empty() ? "bamboo_grove" : location;
+    pb.enemy_name = battle;
     pb.has_result = false;
     pb.player_won = false;
-    pb.reward_money = 0;
-    pb.reward_exp = 0;
+    battle_rewards(battle, pb.reward_money, pb.reward_exp);
     pb.prize_base_coins = 0;
     pb.prize_bonus = 0;
     pb.prize_gems = 0;
@@ -4380,27 +4387,24 @@ void DojoScreen::start_tutorial_fight() {
     pb.prize_shocks = 0;
     pb.prize_perfect = false;
     pb.prize_first = false;
-    // The owned items feed the FightScreen's move list (`ra.Hza`; the map's
-    // `launch_battle` does the same). Without them the auto-attack has no
-    // attackable move and the training fight never ends.
+    // The owned items feed the FightScreen's move list (`ra.Hza`).
     pb.owned = owned_items(app());
-    // The beats are done the moment the fight starts: the Dojo reactivates
-    // clean when the fight pops (the hub after the tutorial), and the training
-    // fight's own round never resolves (the `Training` <Rules> carry no round
-    // end; core/scene is out of scope), so completion is not tied to the KO.
-    tut_done_ = true;
-    std::fprintf(stdout, "[tutorial] FIGHT -> Punchbag|Bosses|1 (Training, dojo)\n");
+    std::fprintf(stdout, "[quest] Fight '%s' -> %s [%s] (%s, reward money=%d exp=%d)\n",
+                 triple.c_str(), battle.c_str(), zone.c_str(), pb.location.c_str(),
+                 pb.reward_money, pb.reward_exp);
     std::fflush(stdout);
     push(kScreenFight);
+    // Hand off to the post-tutorial seed (see App::finish_tutorial_handoff):
+    // the remaining chain (StepBuyItem -> ... -> ShowBlock/END) needs the
+    // player's shop/map/boss navigation (engine records, never navigates).
+    app().finish_tutorial_handoff();
 }
 
 void DojoScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     ensure_dojo_location(app);
-    // Fresh-profile tutorial is showing (see draw_tutorial): the hub draws
-    // underneath, the dialog on top; the ambient hint is suppressed.
-    const bool tut = app.fresh_tutorial() && !tut_done_;
-    // NOTE: the shared `za` chrome draws AFTER the scene (see below) —
+    ensure_lang(app);  // runtime Sensei dialog lines (once; silent if absent)
+    // NOTE: the shared `za` chrome draws AFTER the scene (see below) -
     // screen-space chrome on top, like the fight HUD.
     // Dojo interior: the same location layers the fight renders
     // (interior + garden, NOT the sky fallback). Static camera (no chase):
@@ -4580,13 +4584,9 @@ void DojoScreen::render_impl(App& app) {
     // and the disciple chrome were native inventions (PORT_AUDIT_UI
     // §2.1-2.2). Navigation is the `za` nav column drawn in the aliveness
     // block above.
-    // Sensei dialog modal on top of everything Dojo.
-    if (tut) {
-        // Fresh-profile tutorial (blocking): the Sensei notification beats /
-        // the Regular training-fight dialog (draw_tutorial).
-        draw_tutorial(app, ren);
-        return;
-    }
+    // Sensei dialog modal on top of everything Dojo (engine `He` records:
+    // `Notification` -> the `Ib` banner, `Regular` -> the `od` panel + its
+    // action button).
     draw_quest_modal(app, ren, app.screens().top() == this);
 }
 
@@ -4697,9 +4697,37 @@ void MapScreen::update_impl(float dt) {
     // while the roster overlay is forced (render_impl draws it).
     if (force_boss_roster()) return;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
-    // Sensei modal gate (quest He records): while up, taps advance the
-    // dialog instead of tabs/nodes/BACK (headless auto-drains).
-    if (quest_modal_consume(app())) return;
+    // Sensei modal gate (quest He records): while up, a tap advances the
+    // dialog or fires its button; a `Fight` request (`Sn`) resolves to the
+    // map node and runs the shared battle-start body.
+    {
+        std::string fight;
+        if (quest_modal_consume(app(), &fight)) {
+            if (!fight.empty()) {
+                std::string z, b;
+                const std::size_t p1 = fight.find('|');
+                if (p1 == std::string::npos) {
+                    b = fight;
+                } else {
+                    z = fight.substr(0, p1);
+                    const std::size_t p2 = fight.find('|', p1 + 1);
+                    b = fight.substr(
+                        p1 + 1, p2 == std::string::npos ? std::string::npos : p2 - (p1 + 1));
+                }
+                for (const ZoneTab& zt : zones_) {
+                    if (!z.empty() && zt.name != z) continue;
+                    for (const Node& n : zt.nodes) {
+                        if (n.name == b) {
+                            launch_battle(n);
+                            return;
+                        }
+                    }
+                }
+                std::fprintf(stderr, "[quest] Fight '%s' not on the map\n", fight.c_str());
+            }
+            return;
+        }
+    }
     const App::PointerState& p = app().pointer();
     // Boss-intro act (Rd machine): ticks here; taps skip; completion
     // launches the armed battle. Tabs/nodes/BACK wait below.

@@ -237,9 +237,21 @@ public:
     // `fresh/tutorial-from-0` boot). When armed (only by `--fidelity-tour`),
     // the Dojo plays the blocking Sensei beats before the hub is clean. The
     // seeded post-tutorial path used by `--ui-tour`/`--headless-loop` leaves
-    // this OFF, so those flows keep working unchanged.
-    void set_fresh_tutorial(bool on) { fresh_tutorial_ = on; }
+    // this OFF, so those flows keep working unchanged. Arming replays the
+    // Loader->Dojo `ChangeTab` so the shipped tutorial chain
+    // (`StoryTutorialWelcome`, step `NotStarted`) takes off — the harness
+    // arms this AFTER boot, when no nav edge is left to fire it. Defined in
+    // app.cpp (needs the QuestEngine type).
+    void set_fresh_tutorial(bool on);
     bool fresh_tutorial() const { return fresh_tutorial_; }
+
+    // Tutorial handoff (harness): lands the post-tutorial seed the oracle
+    // harness installs (`Tutorial="END"`) so the remaining fidelity-tour
+    // states run the clean seeded profile. The tutorial chain steps beyond
+    // the training fight (STEP_BUY_ITEM -> ... -> END) need the player's
+    // shop/map/boss navigation and are recorded only (engine records, never
+    // navigates); the port hands off here. Logs the handoff.
+    void finish_tutorial_handoff();
 
     // Dev chrome (SETUP/DISCIPLE toggles — not in the oracle; Dojo wave):
     // hidden unless `--debug-ui` was passed.

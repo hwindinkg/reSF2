@@ -426,10 +426,12 @@ static const UiTourStep kFidelitySteps[] = {
     {0.0f, 0.0f, "tut stance (move notification)", 3, 150, -1, 90, "tut_fight_stance.png", 0, true},
     // 1: tap the notification banner -> beat 1 ("tutorial_punchbag").
     {1145.0f, 244.0f, "tut phase2 (punchbag notification)", 3, 10, -1, 50, "tut_fight_phase2.png", 0, false},
-    // 2: tut_block (oracle CLOSEST: the same punchbag lesson).
-    {0.0f, 0.0f, "tut block (punchbag notification)", 3, 0, -1, 30, "tut_block.png", 0, true},
-    // 3: tap -> beat 2, the Regular Sensei training-fight dialog.
-    {1145.0f, 244.0f, "dojo sensei (training dialog)", 3, 10, -1, 50, "dojo_sensei.png", 0, false},
+    // 2: tap -> the Regular Sensei training-fight dialog. `tut_block`'s oracle
+    //    frame (`oracle_matrix/tut_block.png`, sourced from
+    //    oracle_tutorial_punchbag) IS that modal (СЭНСЭЙ portrait + В БОЙ).
+    {1145.0f, 244.0f, "tut block (sensei training dialog)", 3, 10, -1, 50, "tut_block.png", 0, false},
+    // 3: the same training dialog (`oracle_tutorial_modal`) -> dojo_sensei.
+    {0.0f, 0.0f, "dojo sensei (training dialog)", 3, 10, -1, 30, "dojo_sensei.png", 0, true},
     // 4: the dialog FIGHT button (`dlgStoryBtnFight`) -> the training fight
     //    (a real tutorial fight state for tut_win).
     {860.0f, 554.0f, "tut fight (Punchbag training)", 3, 10, 6, 520, "tut_win.png", 0, false,

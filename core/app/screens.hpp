@@ -107,22 +107,17 @@ private:
     int seen_money_ = -1;  // last logged money (snapshot change detection)
 
     // --- Fresh-profile tutorial (JS `StoryTutorialWelcome` chain) ----------
-    // The approved `fresh/tutorial-from-0` boot: the hub plays the Sensei
-    // beats before it is clean. Beats come from
-    // `quest_extensions/tutorial_quests.xml` L4-44:
-    //   0 `<Line Text="tutorial_move">`      -> tut_fight_stance
-    //   1 `<Line Text="tutorial_punchbag">`  -> tut_fight_phase2 / tut_block
-    //   2 `<Dialog Type="Regular" Title="characterSensei" ... Line
-    //      tutorial_training_fight>` + the FIGHT button (`dlgStoryBtnFight`)
-    //      -> the `Fight Name="Punchbag|Bosses|1"` training fight (tut_win)
-    // Session-only (no save write) and only while `App::fresh_tutorial()` is
-    // armed (the fidelity harness), so the seeded ui-tour/loop path is
-    // untouched.
-    int tut_beat_ = 0;
-    bool tut_done_ = false;
-    void update_tutorial();
-    void draw_tutorial(App& app, sf2::render::Renderer& ren);
-    void start_tutorial_fight();
+    // The approved `fresh/tutorial-from-0` boot. The beats are NOT hand-coded:
+    // the app-layer QuestEngine loads the shipped
+    // `quest_extensions/tutorial_quests.xml` and queues the `He` dialogs
+    // (`Notification` move/punchbag + the `Regular` characterSensei
+    // training-fight modal); the shared modal layer (screens.cpp
+    // `quest_modal_consume`) displays them, and the modal's FIGHT button runs
+    // the dialog's deferred `Fight Name="Punchbag|Bosses|1"` action here.
+    // `launch_quest_fight` resolves the triple through stages.xml (the same
+    // `load_zone_map`/`battle_rewards` path the Map uses) and pushes the real
+    // tutorial battle (bamboo_grove, 2 x 99 s rounds).
+    void launch_quest_fight(const std::string& triple);
 };
 
 // One boss-intro roster entry (JS `jk.init` L2062 iterates the `lD` boss

@@ -706,6 +706,45 @@ void App::boot() {
     }
 }
 
+void App::set_fresh_tutorial(bool on) {
+    fresh_tutorial_ = on;
+    if (!on || screens_ == nullptr || save_ == nullptr) return;
+    // JS `v.qwa` (L1212) -> `QUEST_EVENT_CHANGE_TAB` on the Loader->Dojo
+    // edge: the harness arms the fresh tutorial AFTER boot, so replay that
+    // edge here to start `StoryTutorialWelcome` (step == NotStarted).
+    try {
+        QuestJournal j;
+        j.scene_from = "Loader";
+        j.scene_to = "Dojo";
+        try {
+            j.player_level = save_->load().level;
+        } catch (const std::exception&) {
+        }
+        quest_engine().fire(*this, "ChangeTab", j);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[quest] fresh tutorial arm failed: %s\n", e.what());
+    }
+}
+
+void App::finish_tutorial_handoff() {
+    // Land the post-tutorial seed (oracle harness: `Tutorial="END"`). The
+    // chain tail (STEP_BUY_ITEM -> ... -> END) needs the player's shop/map/
+    // boss navigation (engine records only, never navigates) — the port
+    // hands off so the seeded fidelity states run clean.
+    quest_engine().clear_dialogs();
+    try {
+        WarriorSave w = save_->load();
+        if (w.story_step() != "END") {
+            w.set_story_step("END");
+            save_->save(w);
+        }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[quest] tutorial handoff save failed: %s\n", e.what());
+    }
+    std::fprintf(stdout, "[quest] tutorial handoff: step -> END (post-tutorial seed)\n");
+    std::fflush(stdout);
+}
+
 void App::poll_input() {
     pointer_.pressed = false;
     if (injected_click_pending_) {
