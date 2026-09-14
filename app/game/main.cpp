@@ -78,6 +78,11 @@ struct LoopStep {
     // (PORT_AUDIT_UI §2.3); kept for drivers that need a settle click.
     float tab_x = 0.0f;
     float tab_y = 0.0f;
+    // Battle-start step: click the Map's `Rr` FIGHT button (`tj`, JS L2099)
+    // instead of a literal coordinate. JS starts a fight ONLY on that button
+    // (a node tap just re-targets the panel), so the driver resolves the
+    // button centre at click time (`MapScreen::fight_button_center`).
+    bool map_fight = false;
 };
 
 // The full scripted progression (Phase 3.6b). Runs in App::run_one_frame
@@ -124,8 +129,8 @@ static const LoopStep kLoopSteps[] = {
     //    pushes Results. Capture the fists fight (before-equip evidence).
     //    No zone tab: the map opens on the save's CurrentZone (ZONE_1) and
     //    the JS map has no tab strip (PORT_AUDIT_UI §2.3).
-    {471.0f, 375.0f, "map->BOSS_LYNX fight", kScreenMap, 0, kScreenFight, 0,
-     "loop_fight_fists.png"},
+    {0.0f, 0.0f, "map->BOSS_LYNX fight", kScreenMap, 0, kScreenFight, 0,
+     "loop_fight_fists.png", 0.0f, 0.0f, true},
     // 2: Results -> Map (click anywhere pops; the results->map flow pops
     //    the dead Fight screen too). Capture loop_results.png on arrival.
     {1280 * 0.5f, 360.0f, "results->map", kScreenResults, 0, kScreenMap, 0, "loop_results.png"},
@@ -159,8 +164,8 @@ static const LoopStep kLoopSteps[] = {
      nullptr},
     // 11: Map -> ZONE_1 boss fight with the knives equipped (same reachable
     //     node as step 1). Capture loop_fight.png on arrival (after-equip).
-    {471.0f, 375.0f, "map->BOSS_LYNX fight (knives)", kScreenMap, 0, kScreenFight, 0,
-     "loop_fight.png"},
+    {0.0f, 0.0f, "map->BOSS_LYNX fight (knives)", kScreenMap, 0, kScreenFight, 0,
+     "loop_fight.png", 0.0f, 0.0f, true},
     // 12: Results -> Map (the loop end).
     {1280 * 0.5f, 360.0f, "results->map (loop end)", kScreenResults, 0, kScreenMap, 0, nullptr},
 };
@@ -239,10 +244,14 @@ struct HeadlessLoopDriver {
                     std::fprintf(stdout, "[loop] capture loop_menu.png\n");
                     std::fflush(stdout);
                 }
+                float ccx = s.x, ccy = s.y;
+                if (s.map_fight && cur == kScreenMap && top != nullptr) {
+                    static_cast<sf2::app::MapScreen*>(top)->fight_button_center(ccx, ccy);
+                }
                 std::fprintf(stdout, "[loop] step %d/%d %s -> click (%.0f, %.0f)\n", step + 1,
-                             kLoopStepCount, s.label, s.x, s.y);
+                             kLoopStepCount, s.label, ccx, ccy);
                 std::fflush(stdout);
-                app.inject_click(s.x, s.y);
+                app.inject_click(ccx, ccy);
                 clicked = true;
                 ++step_frame;
             } else {
@@ -354,6 +363,10 @@ struct UiTourStep {
     // -1 = use the generic hold_frames timing. The fidelity tour's targets are
     // the oracle `fight.frame` values mapped to the port's phase-local frame.
     int fight_frame = -1;
+    // Battle-start step: click the Map's `Rr` FIGHT button (`tj`, JS L2099)
+    // resolved at click time (`MapScreen::fight_button_center`) instead of a
+    // literal coordinate. JS starts a fight ONLY on that button.
+    bool map_fight = false;
 };
 
 static const UiTourStep kUiTourSteps[] = {
@@ -381,10 +394,12 @@ static const UiTourStep kUiTourSteps[] = {
     // 8: Dojo -> Map again. The JS hub has no direct Fight button (it is the
     //    `FightNone` viewer); fights launch from the map's zone nodes.
     {184.0f, 231.0f, "dojo->map (fight)", 3, 10, 5, 0, nullptr},
-    // 9: Map -> ZONE_1 boss fight (BOSS_LYNX ~471,375). The map opens on the
-    //    save's CurrentZone (ZONE_1) and has no zone-tab strip; its first
-    //    node launches the fight. Hold 250 for the HUD.
-    {471.0f, 375.0f, "map->BOSS_LYNX fight", 5, 10, 6, 250, "port_fight.png"},
+    // 9: Map -> ZONE_1 boss fight (BOSS_LYNX, JS `Rr` FIGHT button). The map
+    //    opens on the save's CurrentZone (ZONE_1) and has no zone-tab strip;
+    //    the node tap only re-targets the panel, so the tour clicks the
+    //    FIGHT button centre (resolved at click time). Hold 250 for the HUD.
+    {0.0f, 0.0f, "map->BOSS_LYNX fight", 5, 10, 6, 250, "port_fight.png", 0, false, 0.0f,
+     0.0f, -1, false, -1, true},
     // 10: Pause via Esc, capture the pause menu. (P is the JS Magic key now
     //     — `Af.oUa` v[12]=80 — so the native pause alias is Escape only.)
     {0.0f, 0.0f, "pause.png", 6, 10, -1, 40, "port_pause.png", 256},
@@ -483,7 +498,8 @@ static const UiTourStep kFidelitySteps[] = {
     // take the oracle's own offsets from the press (attack 257=press+30 ->
     // 390, hit 501 -> 634). `auto_attack=0` keeps the player otherwise idle,
     // like the oracle's passive opponent.
-    {471.0f, 375.0f, "map->fight", 5, 10, 6, 40, "fight_intro.png", 0, false, 0.0f, 0.0f, 0},
+    {0.0f, 0.0f, "map->fight", 5, 10, 6, 40, "fight_intro.png", 0, false, 0.0f, 0.0f, 0, false,
+     -1, true},
     {0.0f, 0.0f, "fight stance", 6, 0, -1, 0, "fight_stance.png", 0, true, 0.0f, 0.0f, -1, false,
      120},
     {0.0f, 0.0f, "fight block", 6, 0, -1, 0, "fight_block.png", 0, true, 0.0f, 0.0f, -1, false,
@@ -658,10 +674,15 @@ struct TourDriver {
                     std::fflush(stdout);
                     app.inject_key(s.key, true);
                 } else if (!s.no_click) {
+                    float ccx = s.x, ccy = s.y;
+                    sf2::app::Screen* top_s = app.screens().top();
+                    if (s.map_fight && cur == kScreenMap && top_s != nullptr) {
+                        static_cast<sf2::app::MapScreen*>(top_s)->fight_button_center(ccx, ccy);
+                    }
                     std::fprintf(stdout, "%s step %d/%d %s -> click (%.0f, %.0f)\n", tag,
-                                 step + 1, count, s.label, s.x, s.y);
+                                 step + 1, count, s.label, ccx, ccy);
                     std::fflush(stdout);
-                    app.inject_click(s.x, s.y);
+                    app.inject_click(ccx, ccy);
                 } else {
                     std::fprintf(stdout, "%s step %d/%d %s -> settle\n", tag, step + 1,
                                  count, s.label);
@@ -985,6 +1006,38 @@ int main(int argc, char** argv) {
         }
     }
 
+    // `--fidelity-tour` captures the stock FRESH tutorial beats, so start the
+    // story at NotStarted BEFORE boot: the JS loads `quests.xml` with the
+    // `tutorial_quests.xml` include gated on `_$StoryTutorialStep != END`
+    // (L2478) and the port's `QuestEngine::ensure_loaded` short-circuits on an
+    // END step (L200) — once short-circuited the chain cannot be armed, so a
+    // stale completed local save would make the tutorial steps stall. The
+    // oracle harness seeds the same fresh state.
+    if (fidelity_tour) {
+        std::string def = res_root + "/users_default.xml";
+        if (!std::filesystem::exists(def)) {
+            const std::string hashed = res_root + "/users_default.b7da2019.xml";
+            if (std::filesystem::exists(hashed)) {
+                def = hashed;
+            } else {
+                const std::string extracted = "reference/extracted/xml/res/users_default.xml";
+                if (std::filesystem::exists(extracted)) def = extracted;
+            }
+        }
+        try {
+            sf2::app::SaveSystem ss(save_path, def);
+            sf2::app::WarriorSave w = ss.load();
+            if (!w.story_step().empty()) {
+                w.set_story_step("");
+                ss.save(w);
+                std::fprintf(stdout, "[fidelity] reset story step -> NotStarted\n");
+                std::fflush(stdout);
+            }
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[fidelity] story-step reset failed: %s\n", e.what());
+        }
+    }
+
     sf2::app::App app;
     if (!app.init(res_root, save_path)) {
         std::fprintf(stderr, "game: app init failed\n");
@@ -1138,6 +1191,10 @@ int main(int argc, char** argv) {
         std::filesystem::create_directories("reference/traces/port_matrix");
         // Fresh-profile tutorial (JS StoryTutorialWelcome): the Dojo plays the
         // Sensei beats then the Punchbag training fight before the clean hub.
+        // The save was seeded fresh before boot (see the `--fidelity-tour`
+        // pre-init reset) so the engine loaded the tutorial include; replay the
+        // Loader->Dojo ChangeTab to arm the chain. The END seed is re-landed
+        // by `App::finish_tutorial_handoff` at the training-fight launch.
         app.set_fresh_tutorial(true);
         // splash: right after boot (Preloader counts down from 75).
         app.set_headless_frames(0);
@@ -1539,6 +1596,25 @@ int main(int argc, char** argv) {
         app.capture_png(capture_dir + "/screen.png");
         std::fprintf(stdout, "[game] captured %s/screen.png\n", capture_dir.c_str());
         } else {
+        // Plain interactive boot (no harness). A FRESH profile (empty
+        // `_$StoryTutorialStep` == the JS `NotStarted` default, quest_engine
+        // `resolve_token` L267) arms the shipped tutorial chain so the Dojo
+        // plays the Sensei beats and the training fight starts ONLY on the
+        // player's `dlgStoryBtnFight` press (JS `He.dhb(1)` L1061). Seeded
+        // saves (step END) stay chain-silent.
+        if (headless == 0 && !auto_click) {
+            bool fresh = false;
+            try {
+                fresh = app.save().load().story_step().empty();
+            } catch (const std::exception&) {
+            }
+            if (fresh) {
+                std::fprintf(stdout,
+                             "[game] fresh profile: arming StoryTutorialWelcome (player-driven)\n");
+                std::fflush(stdout);
+                app.set_fresh_tutorial(true);
+            }
+        }
         app.run(headless, auto_click);
     }
     app.shutdown();

@@ -3061,6 +3061,37 @@ float map_node_size(float view_w) {
     return kMapNodeSourcePx * kMapNodeScaleK * kMapNodeUnit * map_metrics().bg_scale;
 }
 
+// The `Rr` info-panel FIGHT button (`tj` = `Bb("EButtonWhite")`, JS L2099/
+// L2102). Its plate is the ONLY fight trigger on the map (JS: a node tap
+// re-targets the `Rr` focus via `qe.jhb`/`Ya.Uw` L2129; the fight starts on
+// the button press -> `v.Am` L1216). Shared by the draw and the hit-test so
+// they can never diverge.
+struct MapFightButtonRect {
+    float cx = 0.0f, cy = 0.0f, w = 0.0f, h = 0.0f;
+};
+
+MapFightButtonRect map_fight_button_rect(const MapMetrics& mm) {
+    const float cx = mm.panel_x + mm.rail;  // `wc.content.C(rail)` (L2100)
+    const float cy = mm.panel_y;
+    const float qka = mm.qka;
+    const float d = qka * 0.4f;             // `Rr.layout` `d = c*.4`
+    const float cw = mm.content_w;
+    const float title_h = cw * 0.2f;        // `g = c*.2`
+    float f = 10.0f + title_h + 20.0f;
+    const float pv_w = cw - 2.0f * d;
+    f += pv_w * 0.5f + 20.0f;               // `Wu.qa()` = pv_w * (200/400)
+    const float body_x = cx + d;
+    const float body_y = cy + f;
+    const float body_w = cw - 2.0f * d;
+    const float body_h = mm.content_h - f;
+    MapFightButtonRect r;
+    r.h = cw * 0.2f;                        // `tj.Pb(c*.2)`
+    r.w = 600.0f * (r.h / 112.0f);          // `Bb` ctor `xc(600)`
+    r.cx = body_x + body_w * 0.5f;
+    r.cy = body_y + body_h - r.h * 0.5f;
+    return r;
+}
+
 // The zone map from stages.xml (JS `p.Dkb` L188 / `Ckb` L189): Zone Name +
 // FileName + Start flag, with Battle children (Name/Type/X/Y/Location).
 // Only battles carrying map coordinates become nodes (HIDDEN/INTERMISSION
@@ -4394,10 +4425,14 @@ void DojoScreen::launch_quest_fight(const std::string& triple) {
                  pb.reward_money, pb.reward_exp);
     std::fflush(stdout);
     push(kScreenFight);
-    // Hand off to the post-tutorial seed (see App::finish_tutorial_handoff):
-    // the remaining chain (StepBuyItem -> ... -> ShowBlock/END) needs the
-    // player's shop/map/boss navigation (engine records, never navigates).
-    app().finish_tutorial_handoff();
+    // Harness-only post-tutorial seed (see App::finish_tutorial_handoff):
+    // the chain tail (StoryTutorialShop -> ... -> ShowBlock/END) runs on
+    // player navigation in the JS (`ChangeScene`/`mp` L1032), which the port
+    // records but never performs, so the headless fidelity tour/loop lands
+    // the seeded `Tutorial="END"` state here. The INTERACTIVE path is
+    // player-driven: the chain stays at step FIGHT and the player continues
+    // it (no auto-advance).
+    if (app().headless()) app().finish_tutorial_handoff();
 }
 
 void DojoScreen::render_impl(App& app) {
@@ -4671,6 +4706,12 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
     std::fflush(stdout);
 }
 
+void MapScreen::fight_button_center(float& x, float& y) const {
+    const MapFightButtonRect r = map_fight_button_rect(map_metrics());
+    x = r.cx;
+    y = r.cy;
+}
+
 void MapScreen::launch_battle(const Node& n) {
     // JS `Ya` battle-start (L2131-2132): `wa.F().mp(6, battle)`.
     // Carry the battle into the pending flow: name/location +
@@ -4761,6 +4802,9 @@ void MapScreen::update_impl(float dt) {
     // JS `Ya.Uw` (L2129) focuses the save MapFocus node at init and `Rr`
     // tracks it (`ue.tea()`); a tap re-targets (`qe.jhb` -> `GT`). The focus
     // persists between taps, so it is NOT reset here — `hover_` holds it.
+    // A node tap only RE-TARGETS the `Rr` panel (selects); it never starts a
+    // fight (JS `qe` -> `Ya.Uw`, L2129 — the fight is the FIGHT button below).
+    bool node_tap = false;
     for (std::size_t i = 0; i < zones_[zone_sel_].nodes.size(); ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
         if (!n.visible) continue;  // JS `Qr.lla` L2094 (hidden alt-state twin)
@@ -4768,47 +4812,57 @@ void MapScreen::update_impl(float dt) {
         if (p.x >= n.x - node_half && p.x <= n.x + node_half &&
             p.y >= n.y - node_half && p.y <= n.y + node_half) {
             hover_ = static_cast<int>(i);
-            if (p.pressed && n.active) {
-                // Boss multi-intro (JS `hCa` L431-432: BOSSES fights carry
-                // the lD intro list; played through the Rd act machine): arm
-                // the act first, launch on completion. Headless bypasses
-                // straight into the fight (loop pins Fight screens).
-                if (!app().headless() &&
-                    (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE")) {
-                    std::vector<ActLine> lines;
-                    if (zone_sel_ >= 0 &&
-                        static_cast<std::size_t>(zone_sel_) < zones_.size()) {
-                        for (const Node& b : zones_[zone_sel_].nodes) {
-                            if (b.type == "BOSSES" || b.type == "BOSSES_REPLAYABLE") {
-                                ActLine ln;
-                                ln.text = b.name;
-                                ln.seconds = 2.5f;
-                                lines.push_back(ln);
-                            }
-                        }
-                    }
-                    if (lines.empty()) {
+            // One node per tap (JS buttons are exclusive — the topmost node
+            // fires). ZONE_1 has coincident nodes (BOSS_LYNX / *_INTERMISSION
+            // / BOSS_HARDMODE at the same X/Y).
+            if (p.pressed) {
+                node_tap = true;
+                std::fprintf(stdout, "[map] node focus -> %s [%s] (%s)\n", n.name.c_str(),
+                             n.zone.c_str(), n.active ? "active" : "locked");
+                std::fflush(stdout);
+                break;
+            }
+        }
+    }
+    // The `Rr` FIGHT button (`tj`, L2099/L2102): the ONLY fight trigger.
+    // JS `Ya` -> `v.Am(battle)` (L1216) -> `wa.mp(6)`. A boss node arms the
+    // `jk`/`Rd` intro first (interactive); the fight launches after it.
+    if (p.pressed && !node_tap && hover_ >= 0 &&
+        static_cast<std::size_t>(hover_) < zones_[zone_sel_].nodes.size()) {
+        const Node& n = zones_[zone_sel_].nodes[static_cast<std::size_t>(hover_)];
+        const MapFightButtonRect fb = map_fight_button_rect(map_metrics());
+        if (n.visible && p.x >= fb.cx - fb.w * 0.5f && p.x <= fb.cx + fb.w * 0.5f &&
+            p.y >= fb.cy - fb.h * 0.5f && p.y <= fb.cy + fb.h * 0.5f) {
+            if (!n.active) {
+                std::fprintf(stdout, "[map] FIGHT ignored: %s [%s] locked\n", n.name.c_str(),
+                             n.zone.c_str());
+                std::fflush(stdout);
+            } else if (!app().headless() &&
+                       (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE")) {
+                std::vector<ActLine> lines;
+                for (const Node& b : zones_[zone_sel_].nodes) {
+                    if (b.type == "BOSSES" || b.type == "BOSSES_REPLAYABLE") {
                         ActLine ln;
-                        ln.text = n.name;
+                        ln.text = b.name;
                         ln.seconds = 2.5f;
                         lines.push_back(ln);
                     }
-                    act_node_ = n;
-                    act_pending_ = true;
-                    act_.start(lines, false);
-                    std::fprintf(stdout, "[map] boss intro act armed (%zu intros, first %s)\n",
-                                 lines.size(), n.name.c_str());
-                    std::fflush(stdout);
-                } else {
-                    launch_battle(n);
                 }
+                if (lines.empty()) {
+                    ActLine ln;
+                    ln.text = n.name;
+                    ln.seconds = 2.5f;
+                    lines.push_back(ln);
+                }
+                act_node_ = n;
+                act_pending_ = true;
+                act_.start(lines, false);
+                std::fprintf(stdout, "[map] FIGHT -> boss intro act armed (%zu intros, first %s)\n",
+                             lines.size(), n.name.c_str());
+                std::fflush(stdout);
+            } else {
+                launch_battle(n);
             }
-            // One battle per tap (JS buttons are exclusive — the topmost node
-            // fires, not every node under the pointer). ZONE_1 has coincident
-            // nodes (BOSS_LYNX / *_INTERMISSION / BOSS_HARDMODE at the same
-            // X/Y); without this the click stacks several Fight screens and
-            // the Results pop lands back on a leftover fight.
-            if (p.pressed) break;
         }
     }
     // Shared `za` nav column (JS `ma.D1`): Dojo/Shop/Profile/Settings hops.
@@ -5062,12 +5116,13 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     }
     // --- FIGHT button `tj` = `Bb("EButtonWhite")` (L2099/L2102) ------------
     // `tj.Pb(c*.2)` -> node scale `c*.2/112`; `Bb` is 600 wide x 112 tall
-    // (`Bb` ctor `xc(600)`), so on screen `600*c*.2/112` x `c*.2`; centred on
-    // the body, bottom at `a.W`.
-    const float btn_h = cw * 0.2f;
-    const float btn_w = 600.0f * (btn_h / 112.0f);
-    const float btn_cx = body_x + body_w * 0.5f;
-    const float btn_cy = body_y + body_h - btn_h * 0.5f;
+    // (`Bb` ctor `xc(600)`). Geometry comes from the shared
+    // `map_fight_button_rect` so the update hit-test can never diverge.
+    const MapFightButtonRect fb = map_fight_button_rect(mm);
+    const float btn_h = fb.h;
+    const float btn_w = fb.w;
+    const float btn_cx = fb.cx;
+    const float btn_cy = fb.cy;
     bool btn_drawn = false;
     if (load_sliced_atlas(app)) {
         btn_drawn = draw_bb_plate(app, "btnWhite", btn_cx, btn_cy, btn_w, btn_h, 1.0f);

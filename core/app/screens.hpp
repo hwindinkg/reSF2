@@ -144,6 +144,11 @@ public:
     void update_impl(float dt) override;
     void render_impl(App& app) override;
 
+    // The `Rr` info-panel FIGHT button centre (`tj`, JS L2099/L2102) — the
+    // ONLY fight trigger on the map (a node tap only re-targets the panel).
+    // The headless-loop/tour's battle-start step clicks this.
+    void fight_button_center(float& x, float& y) const;
+
     struct Node {
         std::string name;
         std::string alias;     // stages.xml Alias — the JS `Qr.Bka(a.Cg)`
