@@ -472,27 +472,37 @@ static const UiTourStep kFidelitySteps[] = {
     // port's phase-local frame:
     //   stance 251-131=120 ; block 347-334+133=146 ; pause 588-334+133=387 ;
     //   attack 591-334+133=390 ; hit 835-334+133=634.
-    // The port's BOSS_LYNX round 0 ends by K.O. at ~F181 for this (fresh)
-    // warrior, so only the phase-1 stance (+120) and the phase-2 opening
-    // (+13) are reachable at the oracle's offsets; pause/attack/hit are
-    // CLAMPED into the reachable round-0 phase-2 window (they keep the
-    // oracle's phase 2 + ROUND 1 HUD; the exact +254/+257/+501 offsets are
-    // unreachable — see FIDELITY_MATRIX OPEN). `auto_attack=0` keeps the
-    // player idle (the oracle's passive opponent); the old coupling
-    // (auto-attack ON) KO'd round 0 at ~F200 and landed these in round 1.
-    // Punch frames (attack/hit) press Space at the target and capture 10
-    // frames into the move (the oracle's attack/hit frames have cf>0).
+    // The port's BOSS_LYNX round 0 now survives the full 99 s timer (the
+    // 8cb8a65e JS-exact fight), so the earlier ~F181 K.O. clamp is gone and
+    // every mapped phase-2 frame is reachable. The oracle's ONLY fight input
+    // is the punch (control 9 = K/Space): press at oracle `fight.frame` 561
+    // (phase-2 local 227), release at 566 — `reference/traces/_residual_fight.log`
+    // [INPUT-REC] {"f":561,"i":1,"m":"N0a","c":9} / {"f":566,...,"O0a"}; the
+    // tour's `tap 1135 540` punch button. Phase-2 local 227 -> port frame
+    // 133+227=360, so the punch is pressed there and the attack/hit captures
+    // take the oracle's own offsets from the press (attack 257=press+30 ->
+    // 390, hit 501 -> 634). `auto_attack=0` keeps the player otherwise idle,
+    // like the oracle's passive opponent.
     {471.0f, 375.0f, "map->fight", 5, 10, 6, 40, "fight_intro.png", 0, false, 0.0f, 0.0f, 0},
     {0.0f, 0.0f, "fight stance", 6, 0, -1, 0, "fight_stance.png", 0, true, 0.0f, 0.0f, -1, false,
      120},
     {0.0f, 0.0f, "fight block", 6, 0, -1, 0, "fight_block.png", 0, true, 0.0f, 0.0f, -1, false,
      146},
-    {0.0f, 0.0f, "pause (Esc)", 6, 0, -1, 3, "pause.png", 256, true, 0.0f, 0.0f, -1, false, 148},
+    // The oracle's single fight input: punch (control 9 = K/Space) pressed at
+    // phase-2 local 227 (oracle f=561 -> port frame 360).
+    {0.0f, 0.0f, "fight punch (oracle control 9)", 6, 0, -1, 0, nullptr, 32, true, 0.0f, 0.0f,
+     -1, false, 360},
+    // Pause at the oracle pause shot's frame f=588 (phase-2 local 254 -> port
+    // frame 387), so the frozen backdrop matches the oracle `pause.png`
+    // backdrop (opened by the HUD pause disc 627,125; native Esc alias). The
+    // pause/resume freeze does not skip the move clock, so the attack capture
+    // below still lands at move-frame 30 as in the oracle.
+    {0.0f, 0.0f, "pause (Esc)", 6, 0, -1, 2, "pause.png", 256, true, 0.0f, 0.0f, -1, false, 387},
     {0.0f, 0.0f, "resume (Esc)", 6, 0, -1, 2, nullptr, 256, false},
-    {0.0f, 0.0f, "fight attack (punch)", 6, 0, -1, 10, "fight_attack.png", 32, true, 0.0f, 0.0f,
-     -1, false, 150},
-    {0.0f, 0.0f, "fight hit (punch)", 6, 0, -1, 10, "fight_hit.png", 32, true, 0.0f, 0.0f, -1,
-     false, 154},
+    {0.0f, 0.0f, "fight attack", 6, 0, -1, 0, "fight_attack.png", 0, true, 0.0f, 0.0f, -1, false,
+     390},
+    {0.0f, 0.0f, "fight hit", 6, 0, -1, 0, "fight_hit.png", 0, true, 0.0f, 0.0f, -1, false,
+     634},
     {0.0f, 0.0f, "fight->results", 6, 0, 10, 0, "results_win.png", 0, true},
     // results_lose: no deterministic headless loss path (the enemy AI is
     // passive in the tested direct fight; the auto fight wins) — closest
