@@ -691,6 +691,15 @@ struct BattleParams {
     // `m7a` + group `g8a` + StartingAttributes + level × LevelAttributeGain)
     // — the bCa balance input, not a tuning knob. Dojo default = 15.
     float player_unarmed_damage = 0.0f;
+    // The player's FULL resolved attribute map (JS `wd.Fm` L811: the same
+    // `m7a`+`g8a`+StartingAttributes+level×LevelAttributeGain sum, computed
+    // for EVERY name in `v.eo.attributes`). The bCa inputs `BodyDefense`,
+    // `HeadDefense` and `BlockDamageFactor` live here — without them a landed
+    // hit is computed against 0 defense and a 1× block factor (JS-exact
+    // values from character_progress.xml: BodyDefense 5+10·lvl, HeadDefense
+    // 0+10·lvl, BlockDamageFactor −23219 ⇒ 2^(−2.3219)=0.2× on block). The
+    // app layer fills this (character_progress.xml + the save's level/items).
+    std::map<std::string, float> player_attrs;
 };
 
 // JS `bb.OE` (L887-888) + `bb.M3`/`bb.xe` (L888-894): parse the stage

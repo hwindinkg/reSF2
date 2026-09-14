@@ -1,26 +1,136 @@
-# FIDELITY_MATRIX — oracle vs port state captures
+# FIDELITY_MATRIX — oracle vs port state captures (DEFINITIVE)
 
-Phase 0 harness (phase1 step9). One row per state in the oracle's fixed state
-list. The oracle agent captures `reference/traces/oracle_matrix/<state>.png`;
-the port captures `reference/traces/port_matrix/<state>.png` via
-`game --fidelity-tour` (driver: `app/game/main.cpp`, `kFidelitySteps` L398-460).
+Phase 1 step 9. One row per state, all **33** pairs
+`reference/traces/oracle_matrix/<state>.png` vs
+`reference/traces/port_matrix/<state>.png`, each verified **1280×720**.
+This file supersedes every earlier revision: earlier waves mixed
+`thr12 %` with MAD and were computed on stale port captures (the port_matrix
+PNGs were regenerated 13.09 23:55 at HEAD `132bfca1`, after
+`0def24b6`/`ca8e2a20`/`b55cd05c`/`132bfca1`). The table below is the single
+authoritative read of the on-disk artifacts.
 
-## Diff method
+## Metric definition
 
-- **diff %** — pixels with `max-channel abs-delta > 12/255` at 1280x720
-  (the `ui_diff.py` gate, `reference/tools/ui_diff.py:36-52`). Computed by
-  invoking the same algorithm inline over the two directories (the shipped
-  script hard-codes `oracle_<name>.png`/`port_<name>.png` in **one** dir, so
-  the split `oracle_matrix/`+`port_matrix/` layout needs the inline pass; no
-  temp files written).
-- **structural check** — measured, not expected: near-black fraction
-  (lum<16), tile-level content/black/flat classification on a 16x9 grid
-  (80x80 px tiles), and the diff bounding box.
-- **verdict** — `MATCH` (same screen, diff <= 8% and only localized state
-  differences), `CLOSE` (same screen/intent, moderate diff), `WRONG`
-  (reachable but different screen content/layout/backdrop), `UNREACHABLE`
-  (port cannot render the oracle state; artifact is a substitute, often a
-  byte-identical duplicate frame).
+Computed inline with `python -c` (numpy + PIL), one pair at a time, no temp
+files, no image bulk-loads. Exact algorithm = `reference/tools/ui_diff.py:36-52`:
+
+- `a`, `b` = RGB arrays (`int16`), shape `(720,1280,3)`.
+- per-pixel delta `d = max_channel |a - b|` (max over R,G,B).
+- **`%pixels>12`** = `100 * mean(d > 12)` — fraction of pixels whose **max
+  channel** abs-delta exceeds 12/255. This is the `ui_diff.py` gate metric
+  (`--threshold 12`).
+- **MAD** = `mean(|a - b|)` over **all** pixels and all 3 channels (mean
+  absolute difference, 0–255 scale), reported for cross-wave comparability.
+- **dominant residual region** = the 80×80 tile (16×9 grid over the frame)
+  with the largest mean max-channel delta, given as `x0-x1 y0-y1 (Δmean)`.
+- **verdict**: `MATCH` `<10%`; `CLOSE` `10–30%`; `WRONG` `30–60%`;
+  `UNREACHABLE` `>60%`, **or** the port artifact is a byte-identical
+  substitute frame, **or** the port has no route to the state (tutorial).
+
+## Invalid oracle captures — do NOT chase
+
+| state | oracle MD5 | why it is not the state it claims |
+|---|---|---|
+| `results_win` | `03CDD2107B8034AA47441A938D04ECB0` | **byte-identical to `results_lose`** — the oracle only ever reached the BOSS_LYNX timed loss (`kk` "You lose!"); there is no oracle win frame. |
+| `map_node_sel` | `D5FA21852E3881831B9B5173697A5F34` | identical to `map_panels`/`map_zone1` — no distinct node-selection highlight exists. |
+| `map_panels` | `D5FA21852E3881831B9B5173697A5F34` | identical to `map_zone1` — the panels are visible but there is no distinct "panels" capture. |
+| `moves` | `E8A8D1C204EB7E0720A1E35403BF0F2A` | identical to `profile_tab1` — the oracle folds MOVES into Profile tab 1; no separate screen. |
+| `tut_block` | `46987E8BE6EF8B66E856ADF913EFA0AD` | CLOSEST substitute: punchbag lesson, the tutorial has no distinct block step. |
+| `tut_win` | `421DA63DB2C66CBA3CA6533B6AA682FB` | CLOSEST substitute: "FIRST STRIKE!" frame; the tutorial fight was not won. |
+| `fight_block` | `93CA3E6F8CF12589D89D35E479AB5F2A` | CLOSEST substitute: mid-fight frame; block is a move interval, not a raw key. |
+
+Also excluded: `pause.tutorial.bak.png`, `results_win.tutorial.bak.png`,
+`results_lose.tutorial.bak.png` — the **old tutorial battle** (ТЕНЬ vs КЕНДЖИ,
+bamboo) captures, replaced by the normalized BOSS_LYNX frames; not part of the
+33-pair set.
+
+## Definitive table — ranked worst-first by `%pixels>12`
+
+| state | oracle | port | %pixels>12 | MAD | verdict | dominant residual region | owner note |
+|---|---|---|---|---|---|---|---|
+| tut_block | `oracle_matrix/tut_block.png` | `port_matrix/tut_block.png` | 94.663 | 54.361 | UNREACHABLE | x720-880 y320-480 (Δ162) — centre fight area | No tutorial flow: port boots to Dojo hub. `App::boot` `app.cpp:661`; fidelity steps `app/main.cpp:412`. Oracle CLOSEST (no block step). |
+| tut_win | `oracle_matrix/tut_win.png` | `port_matrix/tut_win.png` | 84.717 | 68.178 | UNREACHABLE | x720-800 y320-400 (Δ224) — centre fight area | As `tut_block`. Oracle CLOSEST ("FIRST STRIKE!" frame, no win). |
+| profile_tab2 | `oracle_matrix/profile_tab2.png` | `port_matrix/profile_tab2.png` | 66.150 | 28.521 | WRONG | x240-400 y400-560 (Δ116) — centre-left content list | Profile is the invented Equipment screen (slots+grid); `vb` tabbed content missing. `EquipmentScreen::render_impl` `screens.cpp:8856`; JS `vb` `sf2.js L2189-2201`, `cs` strip `L2188`. |
+| profile_tab3 | `oracle_matrix/profile_tab3.png` | `port_matrix/profile_tab3.png` | 60.910 | 24.906 | WRONG | x240-400 y400-560 (Δ117) — centre-left content list | As `profile_tab2`. |
+| profile_tab1 | `oracle_matrix/profile_tab1.png` | `port_matrix/profile_tab1.png` | 60.881 | 24.899 | WRONG | x240-400 y400-560 (Δ117) — centre-left content list | As `profile_tab2`. |
+| moves | `oracle_matrix/moves.png` | `port_matrix/moves.png` | 60.881 | 24.899 | WRONG | x240-400 y400-560 (Δ117) — centre-left content list | Port now renders a distinct Moves screen, but layout ≠ oracle. Oracle `moves.png` == `profile_tab1.png` (invalid). `EquipmentScreen::render_impl` `screens.cpp:8856`; JS `To.kOa`=11 `sf2.js L2201`. |
+| pause | `oracle_matrix/pause.png` | `port_matrix/pause.png` | 52.985 | 18.424 | WRONG | x720-800 y240-400 (Δ80) — centre pause buttons | Pause overlay layout/button order/backdrop. `FightScreen::render_impl` `screens.cpp:6236`; JS `Dr` dialog `sf2.js L2065`. |
+| profile_tab0 | `oracle_matrix/profile_tab0.png` | `port_matrix/profile_tab0.png` | 50.286 | 19.598 | WRONG | x80-160 y80-160 (Δ62) nav tab + x480-800 y480-560 (Δ56) content | As `profile_tab2`. |
+| loader | `oracle_matrix/loader.png` | `port_matrix/loader.png` | 42.933 | 20.427 | WRONG | x400-960 y240-400 (Δ149) — loader art centre | Loader logo/figure art missing; only the "Loading" string draws. `App::draw_boot_splash` `app.cpp:774`. |
+| fight_hit | `oracle_matrix/fight_hit.png` | `port_matrix/fight_hit.png` | 42.038 | 25.477 | WRONG | x480-720 y320-480 (Δ133) — centre impact | Frame substitute (no deterministic hit trigger) + HUD. `FightScreen::render_impl` `screens.cpp:6236`; JS `Sf`/`lk` `sf2.js L2021-2038`. Oracle CLOSEST. |
+| fight_intro | `oracle_matrix/fight_intro.png` | `port_matrix/fight_intro.png` | 41.124 | 17.854 | WRONG | x160-400 y0-80 (Δ195) — top VS banner | VS roster intro act. `FightScreen::render_impl` `screens.cpp:6236`; JS `Rd`/`ik` intro `sf2.js L2095-2098`. |
+| results_win | `oracle_matrix/results_win.png` | `port_matrix/results_win.png` | 39.846 | 21.768 | WRONG | x560-880 y320-480 (Δ96) — centre stat overlay | **Oracle invalid (== `results_lose`).** Layout/stat-table; `ResultsScreen::render_impl` `screens.cpp:7032`; JS `kk` `sf2.js L2057-2061`. |
+| results_lose | `oracle_matrix/results_lose.png` | `port_matrix/results_lose.png` | 39.838 | 21.826 | WRONG | x560-880 y320-480 (Δ96) — centre stat overlay | Results stat table/OK button; `ResultsScreen::render_impl` `screens.cpp:7032`; JS `kk` `sf2.js L2057-2061`. |
+| fight_attack | `oracle_matrix/fight_attack.png` | `port_matrix/fight_attack.png` | 38.962 | 23.562 | WRONG | x480-720 y320-400 (Δ195) — centre fighters/impact | Fight HUD + move-interval timing. `FightScreen::render_impl` `screens.cpp:6236`; JS `Sf`/`lk` `sf2.js L2021-2038`. |
+| tut_fight_stance | `oracle_matrix/tut_fight_stance.png` | `port_matrix/tut_fight_stance.png` | 37.885 | 23.370 | UNREACHABLE | x400-560 y400-560 (Δ148) — centre fight area | No tutorial flow `App::boot` `app.cpp:661`. Oracle MANIFEST MATCH. |
+| tut_fight_phase2 | `oracle_matrix/tut_fight_phase2.png` | `port_matrix/tut_fight_phase2.png` | 34.722 | 22.711 | UNREACHABLE | x400-560 y400-560 (Δ146) — centre fight area | As `tut_fight_stance`. |
+| fight_stance | `oracle_matrix/fight_stance.png` | `port_matrix/fight_stance.png` | 28.331 | 14.389 | CLOSE | x720-960 y320-480 (Δ116) — right fighter | Scene aligns; HUD incomplete (portraits/names/bar segments, bar formula). `FightScreen::render_impl` `screens.cpp:6236`; JS `Sf`/`lk` `sf2.js L2021-2038`. |
+| fight_block | `oracle_matrix/fight_block.png` | `port_matrix/fight_block.png` | 27.020 | 12.241 | CLOSE | x320-400 / x880-960 y400-480 (Δ53) — both fighters | Frame substitute (block is a move interval, `on_key`); `screens.cpp:6236`. Oracle CLOSEST. |
+| settings | `oracle_matrix/settings.png` | `port_matrix/settings.png` | 26.106 | 10.899 | CLOSE | x1120-1280 y400-560 (Δ79) — right value rows | Settings rows/locale; `SettingsScreen::render_impl` `screens.cpp:9454`; language EN-only `ensure_lang` `screens.cpp:3729`. |
+| dojo_hub | `oracle_matrix/dojo_hub.png` | `port_matrix/dojo_hub.png` | 23.589 | 14.533 | CLOSE | x400-560 y400-560 (Δ146) — dojo centre | Dojo room framing/viewer; `DojoScreen::render_impl` `screens.cpp:4362`; JS `za` nav `sf2.js L1972-1980`. |
+| shop_tab3 | `oracle_matrix/shop_tab3.png` | `port_matrix/shop_tab3.png` | 21.377 | 13.762 | CLOSE | x240-400 y400-560 (Δ108) — item grid | Shop layout/art/backdrop; `ShopScreen::render_impl` `screens.cpp:7886`; JS `Oa.layout` `sf2.js L2293-2295`, item art `L2307`. |
+| shop_tab2 | `oracle_matrix/shop_tab2.png` | `port_matrix/shop_tab2.png` | 20.981 | 13.925 | CLOSE | x240-400 y400-560 (Δ108) — item grid | As `shop_tab3`. |
+| shop_tab1 | `oracle_matrix/shop_tab1.png` | `port_matrix/shop_tab1.png` | 19.112 | 13.204 | CLOSE | x320-400 y400-480 (Δ127) — item grid | As `shop_tab3`. |
+| shop_detail | `oracle_matrix/shop_detail.png` | `port_matrix/shop_detail.png` | 18.796 | 12.808 | CLOSE | x240-400 y400-480 (Δ108) — detail/grid | Detail panel; `ShopScreen::render_impl` `screens.cpp:7886`. Oracle MANIFEST MATCH. |
+| dojo_menu_open | `oracle_matrix/dojo_menu_open.png` | `port_matrix/dojo_menu_open.png` | 16.952 | 8.571 | CLOSE | x400-560 y400-560 (Δ73) + x160-240 y560-640 (Δ68) — dojo centre + left nav | Sticky sensei modal + nav column; `quest_modal_top` `screens.cpp:74`, `draw_quest_modal` `screens.cpp:295`. |
+| map_zone1 | `oracle_matrix/map_zone1.png` | `port_matrix/map_zone1.png` | 15.775 | 12.013 | CLOSE | x1040-1200 y160-320 (Δ77) — right info panel | Map right `Rr` panel / `Xr` list; `MapScreen::render_impl` `screens.cpp:5070`; `load_zone_map` `screens.cpp:3056`; JS `Rr` `sf2.js L2098`, `Xr` `L2133`. |
+| map_node_sel | `oracle_matrix/map_node_sel.png` | `port_matrix/map_node_sel.png` | 15.775 | 12.013 | UNREACHABLE | x1040-1200 y160-320 (Δ77) — right info panel | **Oracle invalid (== `map_zone1`)** and port frame byte-identical to `map_zone1` (`022B9E34B8E243FEE69EC3C2D10EF359`) — node-select is not separately rendered. `app/main.cpp:412`. |
+| map_panels | `oracle_matrix/map_panels.png` | `port_matrix/map_panels.png` | 15.775 | 12.013 | UNREACHABLE | x1040-1200 y160-320 (Δ77) — right info panel | **Oracle invalid (== `map_zone1`)** and port frame byte-identical to `map_zone1` — panels not separately captured/reinterpreted. Same source as `map_zone1`. |
+| shop_tab4 | `oracle_matrix/shop_tab4.png` | `port_matrix/shop_tab4.png` | 14.634 | 9.791 | CLOSE | x240-400 y400-480 (Δ109) — item grid | As `shop_tab3`. |
+| shop_tab5 | `oracle_matrix/shop_tab5.png` | `port_matrix/shop_tab5.png` | 14.587 | 9.744 | CLOSE | x240-400 y400-480 (Δ108) — item grid | As `shop_tab3`. |
+| dojo_sensei | `oracle_matrix/dojo_sensei.png` | `port_matrix/dojo_sensei.png` | 14.106 | 9.158 | CLOSE | x400-480 y240-400 (Δ64) + x1120-1200 y480-560 (Δ58) — modal body + buttons | Sensei dialog 9-slice/panel; `draw_quest_modal` `screens.cpp:295`; JS `od` `sf2.js L1894-1900`. Oracle MANIFEST MATCH. |
+| act_boss | `oracle_matrix/act_boss.png` | `port_matrix/act_boss.png` | 9.218 | 6.015 | MATCH | x1200-1280 y240-480 (Δ38) — right edge | Boss roster right column; `FightScreen::render_impl` `screens.cpp:6236`. Oracle MANIFEST MATCH. |
+| splash | `oracle_matrix/splash.png` | `port_matrix/splash.png` | 7.337 | 4.577 | MATCH | x480-640 y560-720 (Δ98) — bottom loading banner | Loading banner + locale ("Loading" vs "Загрузка"); `App::draw_boot_splash` `app.cpp:774`; `ensure_lang` `screens.cpp:3729`. Oracle MANIFEST MATCH. |
+
+## Summary
+
+- **33/33** pairs present and 1280×720. Metric: max-channel `d > 12` →
+  `%pixels>12`; MAD over all pixels/channels.
+- **Range**: `%pixels>12` 7.337 (`splash`) … 94.663 (`tut_block`);
+  MAD 4.577 … 68.178.
+- **Verdicts**: MATCH **2** (`splash`, `act_boss`), CLOSE **14**, WRONG **10**,
+  UNREACHABLE **7** (`tut_block`, `tut_win`, `tut_fight_stance`,
+  `tut_fight_phase2`, `map_node_sel`, `map_panels`, plus `moves` is WRONG and
+  only the oracle side is invalid).
+- **Byte-identical port clusters** (a substitute frame reused, hard evidence the
+  state is not separately rendered): `map_zone1` = `map_node_sel` = `map_panels`
+  (`022B9E34B8E243FEE69EC3C2D10EF359`); the port `tut_*` are near-duplicates of
+  `dojo_hub`.
+- **Invalid oracle captures** (see table above): `results_win`, `map_node_sel`,
+  `map_panels`, `moves` (hash duplicates) + `tut_block`, `tut_win`,
+  `fight_block` (CLOSEST substitutes).
+
+### Remaining root causes (fix order by blast radius)
+
+1. **Tutorial flow absent** — `App::boot` `app.cpp:661` pushes Dojo directly;
+   fidelity steps `app/main.cpp:412`. Blocks all four `tut_*` states.
+2. **Profile/Moves content** — `EquipmentScreen::render_impl`
+   `screens.cpp:8856`; JS `vb` `sf2.js L2189-2201`. Worst *reachable* residuals
+   (50–66%).
+3. **Pause / Results / Fight HUD** — `FightScreen::render_impl`
+   `screens.cpp:6236`, `ResultsScreen::render_impl` `screens.cpp:7032`;
+   JS `Dr` `L2065`, `kk` `L2057-2061`, `Sf`/`lk` `L2021-2038`.
+4. **Loader logo art** — `App::draw_boot_splash` `app.cpp:774`.
+5. **Map right panel** — `MapScreen::render_impl` `screens.cpp:5070`; JS `Rr`
+   `L2098`/`Xr` `L2133`.
+6. **Shop grid/detail** — `ShopScreen::render_impl` `screens.cpp:7886`;
+   JS `Oa.layout` `sf2.js L2293-2295`.
+7. **Dojo sticky modal + framing** — `quest_modal_top` `screens.cpp:74`,
+   `DojoScreen::render_impl` `screens.cpp:4362`.
+8. **Locale / loading banner** — `ensure_lang` `screens.cpp:3729`
+   (`splash`, `settings`).
+
+## Repro / method
+
+```
+python -c "import os,numpy as np;from PIL import Image as I;\
+o='reference/traces/oracle_matrix';p='reference/traces/port_matrix';\
+ns=sorted(x for x in os.listdir(p) if x.endswith('.png'));\
+[(lambda a,b: print(n, round(float(np.mean(np.max(np.abs(a-b),axis=2)>12))*100,3),\
+round(float(np.mean(np.abs(a-b))),3)))(\
+np.asarray(I.open(os.path.join(o,n)).convert('RGB'),dtype=np.int16),\
+np.asarray(I.open(os.path.join(p,n)).convert('RGB'),dtype=np.int16)) for n in ns]"
+```
 
 Regenerate the port column with:
 
@@ -28,136 +138,6 @@ Regenerate the port column with:
 build/app/game/Release/game.exe reference/www/res reference/saves/save.xml --fidelity-tour
 ```
 
-Oracle-side reachability (which oracle states are MATCH vs CLOSEST in the
-MANIFEST) is carried in the owner note; it is orthogonal to the port diff.
-
-## Matrix
-
-| state | oracle file | port file | diff % | structural check | verdict | owner note |
-|---|---|---|---|---|---|---|
-| splash | `oracle_matrix/splash.png` | `port_matrix/splash.png` | 7.30 | Art (cast/logo/bg) aligns; diff is the loading banner only: oracle "Загрузка 94%" in a scroll frame vs port "Loading 31%" in a plain rect (x500-780, y560-660). bbox 250,37-1278,719. | CLOSE | Locale: port EN vs oracle RU. `loading_word` (`app.cpp:137-147`) + `ensure_lang` EN-only (`screens.cpp:3189`; comment `screens.cpp:121-123`). Oracle MANIFEST: MATCH. |
-| loader | `oracle_matrix/loader.png` | `port_matrix/loader.png` | 43.54 | Oracle = gold SHADOW FIGHT 2 logo+figure centred (x96-1219, y128-400, 64.4% black); port = 98.8% black, only "Loading 100%" text. Loader art entirely missing. | WRONG | `app.cpp:749` `if (!loader)` gates all splash art; loader branch (`app.cpp:829-831`) draws only the string, so `res/splash/logo.png` is never drawn in the loader window. |
-| tut_fight_stance | `oracle_matrix/tut_fight_stance.png` | `port_matrix/tut_fight_stance.png` | 56.00 | Port = Dojo hub with the SENSEI modal open (not a fight). Oracle = tutorial fight idle stance. | UNREACHABLE | No tutorial fight in the port — `app.cpp:601-611 boot()` pushes Dojo directly; fidelity steps L404-407 capture the hub. Oracle MANIFEST: MATCH. |
-| tut_fight_phase2 | `oracle_matrix/tut_fight_phase2.png` | `port_matrix/tut_fight_phase2.png` | 54.61 | Port = Dojo hub + sensei modal. Oracle = tutorial punchbag lesson. | UNREACHABLE | Same as `tut_fight_stance` (step L405). |
-| tut_block | `oracle_matrix/tut_block.png` | `port_matrix/tut_block.png` | 95.43 | Port = Dojo hub + sensei modal. Oracle = punchbag lesson (oracle itself CLOSEST — no distinct block step). | UNREACHABLE | Step L406. Oracle MANIFEST CLOSEST. |
-| tut_win | `oracle_matrix/tut_win.png` | `port_matrix/tut_win.png` | 86.21 | Port = Dojo hub + sensei modal. Oracle = "FIRST STRIKE!" tutorial frame. | UNREACHABLE | Step L407. Oracle MANIFEST CLOSEST. |
-| results_win | `oracle_matrix/results_win.png` | `port_matrix/results_win.png` | 85.31 | Port = fight-scene overlay "You lose!" / GREAT / TAP TO CONTINUE; stat table (PRIZE/PERFECT/FIRST STRIKE/MAX COMBO/SHOCK/PASSIVE STYLE) absent; moonlit backdrop vs oracle bamboo. Oracle only ever reached a loss. | WRONG | `ResultsScreen::render_impl` (`screens.cpp:5636`) is an INVENTED screen (no `dJ()==10`); JS `kk` result dialog `sf2.js L2057-2061`. Oracle MANIFEST CLOSEST. |
-| dojo_hub | `oracle_matrix/dojo_hub.png` | `port_matrix/dojo_hub.png` | 54.47 | Port dojo room + SENSEI modal (x760-1230, y40-290) + a zoomed viewer framing (bag x795 y295-615 vs oracle x830 y75-575; lantern larger). Oracle hub = nav collapsed, no modal. | WRONG | Sensei modal should not be up: `quest_modal_top` only drains in headless (`screens.cpp:74-77`), but the fidelity capture is non-headless, so `draw_quest_modal` (`screens.cpp:257`) renders. Viewer/bag framing invented (`DojoScreen::render_impl` `screens.cpp:3530`; PORT_AUDIT_UI §2.2). |
-| dojo_menu_open | `oracle_matrix/dojo_menu_open.png` | `port_matrix/dojo_menu_open.png` | 77.36 | Port nav column expanded (left icon stack) BUT the sensei modal is still open; flat icon buttons vs oracle framed `Le` buttons; oracle has no modal. | WRONG | Same stuck-modal root; nav is the INVENTED flat row/column vs JS `za` vertical `Le` column (`sf2.js L1972-1980`; PORT_AUDIT_UI §2.1). |
-| dojo_sensei | `oracle_matrix/dojo_sensei.png` | `port_matrix/dojo_sensei.png` | 95.13 | Port == `dojo_menu_open` (modal already up); oracle = centred sensei quest dialog over a dimmed hub. | UNREACHABLE | Port never renders the oracle's modal state distinctly; `draw_quest_modal` flat panel vs JS `od` 9-slice (`sf2.js L1894-1900`; PORT_AUDIT_UI §2.9/§0 item 29). Oracle MANIFEST: MATCH. |
-| map_zone1 | `oracle_matrix/map_zone1.png` | `port_matrix/map_zone1.png` | 75.02 | Port = invented flat circular node buttons (TOURNAMENT/DUEL/SURVIVAL/OLD WOUNDS/LYNX) over a sepia backdrop + header "Hero Reborn \| TOURNAMENT 0/2 NEXT TOURNAMENT \| SURVIVAL BEST 0"; no `Rr` info panel, no МЕНЮ. Oracle = ZONE_1 parchment, Рысь highlighted, right panel (Рысь/Телохранители/Нормально/50/В БОЙ). | WRONG | Backdrop by file order vs JS `fileName#` (`sf2.js L2143`); `load_zone_map` (`screens.cpp:2655`). Node art INVENTED (single `BattleBtnActive/*lynx`); `Rr` panel `L2098` / `Xr` list `L2133` not modelled; zone tab strip + BRACKET invented. `MapScreen::render_impl` (`screens.cpp:3911`). |
-| map_node_sel | `oracle_matrix/map_node_sel.png` | `port_matrix/map_node_sel.png` | 75.02 | Port == `map_zone1` (byte-identical MD5). Oracle node highlight not modelled. | UNREACHABLE | Step L417. Oracle MANIFEST CLOSEST. |
-| map_panels | `oracle_matrix/map_panels.png` | `port_matrix/map_panels.png` | 75.02 | Port == `map_zone1` (byte-identical). Oracle `Rr`/`Xr` panels absent. | UNREACHABLE | Step L418. Oracle MANIFEST: MATCH (panels) but not ported. |
-| act_boss | `oracle_matrix/act_boss.png` | `port_matrix/act_boss.png` | 98.64 | Port == `map_zone1` (byte-identical). Oracle = BOSS_LYNX intro roster. | UNREACHABLE | Boss act bypassed; step L419-421. Oracle MANIFEST: MATCH. |
-| shop_tab1 | `oracle_matrix/shop_tab1.png` | `port_matrix/shop_tab1.png` | 91.85 | Port = flat card grid on a blue/sky gradient (NOT the dojo), left nav column, "Knives" EN, invented dark detail panel, top-left "Fists DMG 0". Oracle = dojo bg + scroll + right item panel "Ножи" + bottom icon strip + ПРИМЕРИТЬ. | WRONG | `ShopScreen::render_impl` (`screens.cpp:6384`); fixed grid vs JS `Oa.layout` `sf2.js L2293-2295`; card art `attributes/*` vs item images (`sf2.js L2307`; PORT_AUDIT_UI §2.4/§0 item 16/18). Locale EN vs RU. |
-| shop_tab2 | `oracle_matrix/shop_tab2.png` | `port_matrix/shop_tab2.png` | 91.84 | Same invented grid; armor tab. | WRONG | As `shop_tab1`; tab art guessed. |
-| shop_tab3 | `oracle_matrix/shop_tab3.png` | `port_matrix/shop_tab3.png` | 91.84 | Same invented grid; helm tab. | WRONG | As `shop_tab1`. |
-| shop_tab4 | `oracle_matrix/shop_tab4.png` | `port_matrix/shop_tab4.png` | 91.85 | Same invented grid; ranged tab (oracle locked "Побей Рысь..."). | WRONG | As `shop_tab1`. |
-| shop_tab5 | `oracle_matrix/shop_tab5.png` | `port_matrix/shop_tab5.png` | 91.85 | Same invented grid; magic tab (oracle locked "Побей Отшельника..."). | WRONG | As `shop_tab1`. |
-| shop_detail | `oracle_matrix/shop_detail.png` | `port_matrix/shop_detail.png` | 91.85 | Port == `shop_tab1` (byte-identical): the "select row 0" step produced no distinct detail state. Oracle = detail panel + ПРИМЕРИТЬ. | UNREACHABLE | Step L443 ("shop detail") is a no-op on the port's grid. Oracle MANIFEST: MATCH. |
-| profile_tab0 | `oracle_matrix/profile_tab0.png` | `port_matrix/profile_tab0.png` | 91.52 | Port = LV1-9 perk list, EN ("LEARN AT LV n"), blue bg, left nav; level badge "1" overlaps the nav column (x~230, y~150). Oracle = skill scroll "У вас нет изученных умений" over the dojo. | WRONG | `EquipmentScreen::render_impl` (`screens.cpp:7291`) shows slots+grid, not JS `vb` tabbed Profile (`sf2.js L2189-2201`); `cs` tabs (`L2188`) MISSING (PORT_AUDIT_UI §2.5/§0 item 19/20). Locale EN vs RU. |
-| profile_tab1 | `oracle_matrix/profile_tab1.png` | `port_matrix/profile_tab1.png` | 91.82 | Port == `moves` (byte-identical); EN; wrong bg. Oracle = profile MOVES tab. | WRONG | As `profile_tab0`. |
-| profile_tab2 | `oracle_matrix/profile_tab2.png` | `port_matrix/profile_tab2.png` | 91.70 | Port = invented tab content, EN. Oracle = achievements. | WRONG | As `profile_tab0`. |
-| profile_tab3 | `oracle_matrix/profile_tab3.png` | `port_matrix/profile_tab3.png` | 91.84 | Port = invented tab content, EN. Oracle = seal. | WRONG | As `profile_tab0`. |
-| moves | `oracle_matrix/moves.png` | `port_matrix/moves.png` | 91.82 | Port == `profile_tab1` (byte-identical). Oracle = MOVES list (folded into Profile tab 1). | UNREACHABLE | Step L452 captures tab 1's screen; the port's separate `MovesScreen` is INVENTED (`sf2.js` `To.kOa`=11, `L2201`). Oracle MANIFEST: MATCH. |
-| fight_intro | `oracle_matrix/fight_intro.png` | `port_matrix/fight_intro.png` | 92.77 | Port = in-fight ROUND banner (0/99, "ROUND") with both fighters. Oracle = VS roster (ТЕНЬ / ШИН) intro act. | WRONG | The `Rd` intro act (fade+lines, `sf2.js L2095-2098`) is not rendered; port jumps straight to the round. `FightScreen::render_impl` (`screens.cpp:4935`). Oracle MANIFEST: MATCH. |
-| fight_stance | `oracle_matrix/fight_stance.png` | `port_matrix/fight_stance.png` | 43.88 | Scene + both fighters align (moonlit rooftops). Port HUD missing: fighter portrait avatars (`Hf=oe`), names (`Sh=Fr`), health-bar segment marks; timer 97 vs oracle 99; bars orange/blue vs oracle both orange. | CLOSE | HUD hard-coded 440x25@115.7 vs JS `Sf`/`lk` (`sf2.js L2033-2038`: 425x43, `c=min(W,H)/2/675*g`, centers `∓520*c*e`); PORT_AUDIT_UI §2.6/§0 items 21-23. |
-| fight_attack | `oracle_matrix/fight_attack.png` | `port_matrix/fight_attack.png` | 49.54 | Same scene; attack/action frame differs (pose + timing). | CLOSE | As `fight_stance` (HUD) + move-interval timing. Step L429. |
-| fight_hit | `oracle_matrix/fight_hit.png` | `port_matrix/fight_hit.png` | 49.04 | Port = mid-fight frame (no deterministic hit trigger). Oracle = "FIRST STRIKE!" hit frame. | UNREACHABLE | Step L433. Oracle MANIFEST CLOSEST. |
-| fight_block | `oracle_matrix/fight_block.png` | `port_matrix/fight_block.png` | 36.95 | Port = attack-recovery frame. Oracle (CLOSEST) mid-fight frame. | UNREACHABLE | Blocking is a move interval, not a raw key (`on_key`); step L430-432. Oracle MANIFEST CLOSEST. |
-| pause | `oracle_matrix/pause.png` | `port_matrix/pause.png` | 87.33 | Both "Pause" + 4 circular buttons over the fight scene. Port leaves the ROUND banner + HUD visible, button order differs (music/sound/play/exit vs oracle exit/music/sound/play), moonlit vs bamboo backdrop. | CLOSE | Pause is INVENTED 4-btn overlay vs JS `Dr` dialog (`sf2.js L2065`; PAUSE_STATIC.md; PORT_AUDIT_UI §0 items 25/28). `FightScreen` render (`screens.cpp:4935`). |
-| settings | `oracle_matrix/settings.png` | `port_matrix/settings.png` | 37.45 | Both 4 rows (Sound/Music/Credits/Language). Port = full-screen parchment "SETTINGS" EN + BACK/RESTART; oracle = НАСТРОЙКИ RU over the dojo + НАЗАД (no RESTART). | CLOSE | `SettingsScreen::render_impl` (`screens.cpp:7803`); INVENTED screen (no `dJ()==11`); language row EN-only (`screens.cpp:7836-7857`). PORT_AUDIT_UI §0 item 30. |
-| results_lose | `oracle_matrix/results_lose.png` | `port_matrix/results_lose.png` | 85.31 | Port = fight-scene overlay "You lose!" / GREAT / TAP TO CONTINUE; oracle = dedicated results screen with the stat table over bamboo. Stat table + OK button absent. | WRONG | As `results_win`; `ResultsScreen` INVENTED (`screens.cpp:5636`). |
-
-## Summary
-
-- **33/33** oracle and port artifacts present, 1280x720.
-- **diff (thr12)**: min 7.30 (`splash`), max 98.64 (`act_boss`), median ≈ 85.
-- **Verdict counts**: MATCH **0**, CLOSE **5**
-  (`splash`, `fight_stance`, `fight_attack`, `pause`, `settings`),
-  WRONG **17**, UNREACHABLE **11**.
-- **Byte-identical port clusters** (a substitute frame reused for several
-  states — hard evidence a state is not separately reachable):
-  `act_boss` = `map_node_sel` = `map_panels` = `map_zone1`;
-  `shop_detail` = `shop_tab1`;
-  `moves` = `profile_tab1`.
-  Oracle clusters: `results_lose` = `results_win`;
-  `map_node_sel` = `map_panels` = `map_zone1`; `moves` = `profile_tab1`.
-- **Dominant cross-cutting defects**: (1) locale EN vs RU; (2) the dojo
-  SENSEI modal stuck open in every dojo capture; (3) invented screen layouts
-  (map/shop/profile/settings/results/pause) vs the JS `za`/`Rr`/`vb`/`Oa`/`kk`
-  node specs; (4) missing Loader logo art.
-
-## Ranked worklist — worst first
-
-Root causes are grouped (a row's `source` is the cluster source unless noted).
-Native line numbers are current (`screens.cpp` is 7705 lines; PORT_AUDIT_UI's
-older 4666-line cites are stale). JS cites are `reference/www/sf2.502f0946.js`
-1-based (`L###`).
-
-| rank | state(s) | diff % | dominant defect | likely source |
-|---|---|---|---|---|
-| 1 | act_boss, map_node_sel, map_panels, map_zone1 | 98.64 / 75.02 | **Map is an invented screen**: flat circular node buttons, wrong/“global” backdrop, extra header line, no `Rr` info panel / `Xr` status list, `МЕНЮ` missing. | `MapScreen::render_impl` `screens.cpp:3911`; `load_zone_map` `screens.cpp:2655` (backdrop by file order vs JS `fileName#` `sf2.js L2143`); node art invented; panels `sf2.js L2098/L2133`. |
-| 2 | tut_block, tut_win, tut_fight_stance, tut_fight_phase2 | 95.43 / 86.21 / 56.00 / 54.61 | **No tutorial flow**: port boots to the Dojo hub; every `tut_*` capture is the hub (+ stuck sensei modal). | `app.cpp:601-611 boot()` pushes `kScreenDojo` directly; fidelity steps `app.cpp:404-407`. (`FLOW_STATIC.md §1`.) |
-| 3 | dojo_sensei, dojo_hub, dojo_menu_open | 95.13 / 54.47 / 77.36 | **Sensei modal stuck open + invented dojo viewer/nav**: modal is up in all three dojo captures; viewer framing + hand-placed bag; nav is a flat icon column vs the `za` `Le` column. | `quest_modal_top` drains only headless `screens.cpp:74-77`; `draw_quest_modal` `screens.cpp:257`; `DojoScreen::render_impl` `screens.cpp:3530`; JS `za` `sf2.js L1972-1980`. |
-| 4 | fight_intro | 92.77 | **VS roster intro act missing**: port jumps to the in-fight ROUND banner. | JS `Rd` act `sf2.js L2095-2098`; `FightScreen::render_impl` `screens.cpp:4935`. |
-| 5 | shop_detail, shop_tab1, shop_tab4, shop_tab5, shop_tab2, shop_tab3 | 91.85 / 91.85 / 91.85 / 91.84 / 91.84 | **Shop invented (layout + art + backdrop) + EN**: flat grid on a blue gradient (not the dojo), attribute icons vs item images, no responsive `Oa.layout`; detail select is a no-op. | `ShopScreen::render_impl` `screens.cpp:6384`; JS `Oa.layout` `sf2.js L2293-2295`, item images `L2307`. |
-| 6 | profile_tab3, moves, profile_tab1, profile_tab2, profile_tab0 | 91.84 / 91.82 / 91.82 / 91.70 / 91.52 | **Profile wrong screen (Equipment) + EN**: slots+grid instead of the `vb` tabbed content; `cs` tab strip missing; Moves is a separate invented screen; level badge overlaps nav. | `EquipmentScreen::render_impl` `screens.cpp:7291`; JS `vb` `sf2.js L2189-2201`, `cs` `L2188`; PORT_AUDIT_UI §2.5. |
-| 7 | pause | 87.33 | **Pause is an invented 4-btn overlay**: leaves ROUND banner + HUD up; button order differs; wrong backdrop. | JS `Dr` dialog `sf2.js L2065`; PAUSE_STATIC.md; `screens.cpp:4935`. |
-| 8 | results_lose, results_win | 85.31 | **Results layout wrong**: no stat table (PRIZE/PERFECT/FIRST STRIKE/MAX COMBO/SHOCK/PASSIVE STYLE), no OK; overlay on the fight scene vs oracle's bamboo results screen. | `ResultsScreen::render_impl` `screens.cpp:5636` (INVENTED; no `dJ()==10`); JS `kk` `sf2.js L2057-2061`. |
-| 9 | loader | 43.54 | **Loader logo art missing**: 98.8% black, only "Loading 100%". | `app.cpp:749 if (!loader)` gates art; loader branch `app.cpp:829-831`. |
-| 10 | settings | 37.45 | **Settings layout + locale**: EN "SETTINGS", BACK/RESTART vs RU НАСТРОЙКИ over the dojo; RESTART is invented. | `SettingsScreen::render_impl` `screens.cpp:7803`; language EN-only `screens.cpp:7836-7857`. |
-| 11 | fight_stance, fight_attack, fight_hit, fight_block | 49.04–43.88 (block 36.95) | **Fight HUD incomplete** (scene itself close): missing portraits/names/bar segments; hard-coded bar 440x25@115.7 vs JS formula; timer/pips off. | JS `Sf`/`lk`/`Er` `sf2.js L2021-2038`; `FightScreen::render_impl` `screens.cpp:4935`; PORT_AUDIT_UI §2.6. |
-| 12 | splash | 7.30 | **Locale + loading %**: "Loading 31%" vs "Загрузка 94%" (scroll frame shape differs). | `app.cpp:137-147` + `ensure_lang` EN-only `screens.cpp:3189`. |
-
-### Cluster source (fix order by blast radius)
-
-1. **Locale RU support** (`screens.cpp:3189 ensure_lang` + `app.cpp lang_`) — unblocks `splash`, `settings`, all shop/profile/map labels. `res/ui/font-ru.*` ships (PORT_AUDIT_UI §0.3), so this is a wiring gap, not an asset gap.
-2. **Dojo modal gating** (`quest_modal_top`, `screens.cpp:74`) — the captures are non-headless, so the modal must be dismissed/queued correctly; fixes `dojo_hub`/`dojo_menu_open`/`dojo_sensei`.
-3. **Map rewrite** (`screens.cpp:3911`, `2655`) — biggest single-screen diff (`act_boss` 98.6%).
-4. **Shop / Profile / Results / Settings rewrites** per PORT_AUDIT_UI §4 (HUGE/MEDIUM/SMALL).
-5. **Fight HUD formula** (`sf2.js L2033-2038`).
-6. **Tutorial flow** (`app.cpp:601`) — new screen(s), the largest build.
-7. **Loader logo** (`app.cpp:749`).
-
-## Structural FLOW divergence — CONFIRMED
-
-The port and the original boot into **different default states**:
-
-- **Port**: `App::boot()` (`app.cpp:601-611`) logs
-  `Preloader(0) -> Loader(2) -> Dojo(3)` and immediately
-  `screens_->push(make_screen(*screens_, kScreenDojo))`. Booting to the Dojo
-  hub is hard-coded; there is no tutorial-fight screen. Every `tut_*` port
-  artifact is the hub (differing only by animation frame; sizes within ~500 B
-  of `dojo_hub.png`), and each carries the stuck sensei modal.
-- **Original (JS), fresh profile**: boots into the **blocking tutorial**
-  (move -> punchbag fight). The oracle MANIFEST is explicit (`MANIFEST.md`
-  L30-34): *"Without (2) the game boots into the blocking tutorial (move ->
-  punchbag fight); the hub and all of Map/Shop/Profile/Settings are
-  unreachable."* The oracle's hub/map/shop/profile/settings captures were only
-  reachable because `reference/runner/index.html` seeds a **post-tutorial**
-  `localStorage` save (`Tutorial=END`, `ORACLE_POST_TUTORIAL=true`) — i.e. the
-  harness had to defeat the tutorial to reach the hub at all.
-
-**Confirmed from the matrices**: oracle `tut_*` exist as real tutorial states
-and the oracle MANIFEST documents tutorial-blocked reachability; the port
-`tut_*` files are near-duplicates of `dojo_hub` with no fight content. The
-approved fresh-profile target (`fresh/tutorial-from-0`) therefore requires the
-port to add the tutorial flow, not the post-tutorial seed.
-
-## Tools used
-
-- `reference/tools/ui_diff.py` — the thr12 pixel-diff algorithm (run inline;
-  its `oracle_<name>`/`port_<name>` single-dir convention does not fit the
-  `oracle_matrix/`+`port_matrix/` split).
-- Inline `python -c` (numpy + PIL): thr12 diff %, mirror probe, near-black
-  fraction, 16x9 tile content/black/flat classification, diff bbox.
-- `Get-FileHash` (MD5) — byte-identical cluster detection.
-- `reference/traces/oracle_matrix/MANIFEST.md` — oracle reachability
-  (MATCH vs CLOSEST) and the post-tutorial-seed harness fact.
-- `reference/PORT_AUDIT_UI.md` — JS `L###` ↔ native line mapping and verdicts.
-- `app/game/main.cpp` (`kFidelitySteps` L398-460) — port tour/state mapping.
-- `core/app/screens.cpp` (`ensure_lang` L3189, `quest_modal_top` L74,
-  screen `*_impl` cites above), `core/app/app.cpp` (`boot` L600-611,
-  `draw_boot_splash` L703).
-- Read-only image inspection of the differing pairs.
+Tools: `reference/tools/ui_diff.py:36-52` (metric), inline `python -c`
+(numpy/PIL), `Get-FileHash` MD5 (cluster/substitute detection),
+`reference/traces/oracle_matrix/MANIFEST.md` (oracle reachability).

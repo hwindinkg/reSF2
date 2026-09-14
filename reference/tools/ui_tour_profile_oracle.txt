@@ -1,0 +1,25 @@
+# Profile destination tour (phase1 step9 render-state trace).
+# Reaches: dojo_hub -> nav expanded -> Profile (perks) -> MOVES -> achievements
+# -> seal. Requires the post-tutorial seed (reference/runner/index.html,
+# ORACLE_POST_TUTORIAL = true).
+#
+# Run from reference/traces/ so `shot` lands in reference/traces/ui/:
+#   shell\bin\Release\net9.0-windows\OracleShell.exe --input-script reference/tools/ui_tour_profile_oracle.txt --timeout-ms 90000
+wait 8000
+shot prof_hub
+tap 180 98
+wait 1500
+shot prof_menu_open
+tap 140 430
+wait 3500
+shot prof_tab0
+tap 560 672
+wait 2000
+shot prof_tab1
+tap 690 672
+wait 2000
+shot prof_tab2
+tap 820 672
+wait 2000
+shot prof_tab3
+wait 2500

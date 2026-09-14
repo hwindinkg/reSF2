@@ -106,6 +106,7 @@
   var or = {
     mc: null,
     fight: null,
+    app: null,
     screenTop: null,
     timerHostObj: null,
     timerHostPath: null,
@@ -113,6 +114,9 @@
     headerDone: false,
     lastFrame: -1,
     records: 0,
+    lastRTag: null,
+    rFrames: 0,
+    rFightFrames: 0,
     hookedFight: null,
     hookedPaths: { iPa: [], N0a: [], O0a: [] },
     wrappedDe: [null, null], /* legacy: superseded by deList scan */
@@ -625,6 +629,260 @@
     return null;
   }
 
+  /* ================= 5b. Render-state dump (phase1 step9 residuals) =====
+   * Static analysis left two residuals unresolved:
+   *   (a) the shop/profile destination "scrim" multiplier (a measured
+   *       port/oracle luminance ratio of ~0.64 on the Profile backdrop),
+   *   (b) the ~48px fight-centre enemy offset.
+   * Both are decided at runtime by the display graph, so this section walks
+   * the live `Ke` display list (verbatim engine objects) and emits the raw
+   * node transforms/colours/alphas:
+   *   - every display node: wrapper class, alpha (`mn()`), alpha effect
+   *     (`Ke.oQ(5).opacity`), visible (`Ke.Kw`), local x/y (`ya`/`ra`),
+   *     scale (`Eb`/`Rm`), size (`fa`), tint/colour (`.sf()` -> RGBA),
+   *   - the `Pi` destination object (`Qa` bg sprite + `W9` full-screen
+   *     `Fc.Ed(1342177280, node.L)` dim quad) and `ma.KI` (global fade rect),
+   *   - `ma.Kq` HUD scale rect, renderer `clearColor`,
+   *   - at a fight frame: each fighter's root-node transform (`oa.Fe().ma`)
+   *     and the skeleton screen-space bbox.
+   * Records are emitted as "[ORACLE] {t:'render_screen'|'render_fight',...}"
+   * on screen-class change / periodically, so the volume stays bounded.
+   */
+
+  function rnum(v) {
+    return (typeof v === "number" && isFinite(v)) ? v : null;
+  }
+
+  function r5(v) {
+    return typeof v === "number" && isFinite(v) ? Math.round(v * 1e5) / 1e5 : null;
+  }
+
+  /* RGBA of a node wrapper (R/Fc/...): `sf()` returns the colour effect H. */
+  function nodeColor(n) {
+    try {
+      if (n && typeof n.sf === "function") {
+        var c = n.sf();
+        if (c && typeof c.x === "number" && isFinite(c.x)) {
+          return { r: r5(c.x), g: r5(c.y), b: r5(c.z), a: r5(c.w) };
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  function nodeAlpha(n) {
+    try {
+      if (n && typeof n.mn === "function") return r5(n.mn());
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  /* Alpha effect directly on the Ke display object (oQ(5) = `vf` opacity). */
+  function keAlphaEff(ke) {
+    try {
+      if (ke && typeof ke.oQ === "function") {
+        var ef = ke.oQ(5);
+        if (ef && typeof ef.opacity === "number") return r5(ef.opacity);
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  /* One display node -> compact record. `n` is the wrapper (Ke.Ze). */
+  function nodeRec(n, ke, depth) {
+    var rec = { d: depth };
+    try { rec.cn = (n && n.constructor && n.constructor.name) || null; } catch (e) { /* ignore */ }
+    var a = nodeAlpha(n); if (a != null) rec.a = a;
+    var ae = keAlphaEff(ke); if (ae != null) rec.ae = ae;
+    try { rec.vis = (ke && typeof ke.Kw !== "undefined") ? !!ke.Kw : null; } catch (e) { /* ignore */ }
+    try {
+      if (n) {
+        rec.x = rnum(n.ya); rec.y = rnum(n.ra);
+        rec.sx = rnum(n.Eb); rec.sy = rnum(n.Rm);
+        if (n.fa) { rec.w = rnum(n.fa.x); rec.h = rnum(n.fa.y); }
+      }
+    } catch (e) { /* ignore */ }
+    try { if (ke && typeof ke.name === "string" && ke.name) rec.nm = ke.name; } catch (e) { /* ignore */ }
+    var col = nodeColor(n); if (col) rec.col = col;
+    return rec;
+  }
+
+  /* Walk a Ke sub-tree (children are a sibling linked list via `.Ma`). */
+  function walkKe(ke, out, depth) {
+    if (!ke || depth > 10 || out.length > 3000) return;
+    var c = null;
+    try { c = ke.children; } catch (e) { return; }
+    var guard = 0;
+    while (c && guard++ < 4000 && out.length < 3000) {
+      var rec = null;
+      try {
+        rec = nodeRec(c.Ze, c, depth);
+      } catch (e) { rec = { d: depth, err: 1 }; }
+      out.push(rec);
+      try { walkKe(c, out, depth + 1); } catch (e) { /* ignore */ }
+      try { c = c.Ma; } catch (e) { break; }
+    }
+  }
+
+  /* Renderer clear colour: `Pf.clearColor` (H) reached via app/stage. */
+  function clearColorOf() {
+    var cands = [];
+    try { if (or.app) cands.push(or.app.Ha); } catch (e) { /* ignore */ }
+    try { if (or.mc && or.mc.K) { cands.push(or.mc.K.Ha); cands.push(or.mc.K); } } catch (e) { /* ignore */ }
+    for (var i = 0; i < cands.length; i++) {
+      try {
+        var cc = cands[i] && cands[i].clearColor;
+        if (cc && typeof cc.x === "number") {
+          return { r: r5(cc.x), g: r5(cc.y), b: r5(cc.z), a: r5(cc.w) };
+        }
+      } catch (e) { /* ignore */ }
+    }
+    return null;
+  }
+
+  function staticOf(screen, key) {
+    try { return screen.constructor ? screen.constructor[key] : null; } catch (e) { return null; }
+  }
+
+  function renderScreenRecord(tag) {
+    try {
+      if (!or.mc || !or.mc.stack || !or.mc.stack.length) return;
+      var stack = or.mc.stack;
+      var top = stack[stack.length - 1];
+      var out = {
+        t: "render_screen", tag: tag, f: frameNo(),
+        screen: (top && top.constructor) ? top.constructor.name : null,
+        stack: stack.length
+      };
+      try { out.screen_mLa = (top && typeof top.dJ === "function") ? top.dJ() : null; } catch (e) { /* ignore */ }
+      try { out.screen_alpha = nodeAlpha(top); } catch (e) { /* ignore */ }
+      out.clearColor = clearColorOf();
+      try {
+        var ki = staticOf(top, "KI"); /* global fade rect `ma.KI` */
+        if (ki) {
+          out.ma_KI = { a: nodeAlpha(ki), col: nodeColor(ki) };
+        }
+      } catch (e) { /* ignore */ }
+      try {
+        var kq = staticOf(top, "Kq"); /* HUD scale rect `ma.Kq` */
+        if (kq) out.ma_Kq = { N: rnum(kq.N), P: rnum(kq.P), W: rnum(kq.W) };
+      } catch (e) { /* ignore */ }
+      /* The `Pi` destination of the current screen (`this.Ad`). */
+      try {
+        var ad = top && top.Ad;
+        if (ad) {
+          out.Pi = {
+            a: nodeAlpha(ad),
+            J9: (function () { try { return ad.J9 ? { x: rnum(ad.J9.x), y: rnum(ad.J9.y) } : null; } catch (e) { return null; } })(),
+            Qa: nodeRec(ad.Qa, ad.Qa && ad.Qa.L, 0),
+            Qa_col: nodeColor(ad.Qa),
+            W9: nodeRec(ad.W9, ad.W9 && ad.W9.L, 0),
+            W9_col: nodeColor(ad.W9)
+          };
+        }
+      } catch (e) { /* ignore */ }
+      /* Full display tree of every stacked screen + the root stage container. */
+      var recs = [];
+      for (var i = 0; i < stack.length; i++) {
+        try { walkKe(stack[i].node && stack[i].node.L, recs, 0); } catch (e) { /* ignore */ }
+      }
+      try { if (or.mc.K && or.mc.K.cf) walkKe(or.mc.K.cf, recs, 0); } catch (e) { /* ignore */ }
+      out.nodes = recs;
+      emit(out);
+    } catch (e) { orFail(e); }
+  }
+
+  /* Fight-frame fighter geometry: root-node transform + screen bbox. */
+  function fighterRec(f, side) {
+    var o = { side: side };
+    try { o.cls = (f && f.constructor) ? f.constructor.name : null; } catch (e) { /* ignore */ }
+    try {
+      if (f && f.oa && typeof f.oa.Fe === "function") {
+        var r = f.oa.Fe();
+        if (r && r.ma) o.root = { x: rnum(r.ma.x), y: rnum(r.ma.y), z: rnum(r.ma.z) };
+      }
+    } catch (e) { /* ignore */ }
+    /* `oa.Eu` = the `_CenterOfMass_` node the JS camera targets
+     * (`Dl.mea(a.Eu,b.Eu)` -> midpoint). Dump it to compare with the port's
+     * `world_x()` anchor (the fight-centre residual). */
+    try {
+      if (f && f.oa && f.oa.Eu && f.oa.Eu.ma) {
+        o.com = { x: rnum(f.oa.Eu.ma.x), y: rnum(f.oa.Eu.ma.y), z: rnum(f.oa.Eu.ma.z) };
+      }
+    } catch (e) { /* ignore */ }
+    /* NotAI flag (`parameters.Fj`): true = human-controlled. The AI side is
+     * the true enemy; this pins which of fight.pb/fight.yb it is. */
+    try {
+      o.notai = (f && f.parameters) ? !!f.parameters.Fj : null;
+    } catch (e) { /* ignore */ }
+    try {
+      if (f && f.parameters && f.parameters.position) {
+        o.px = rnum(f.parameters.position.x);
+        o.py = rnum(f.parameters.position.y);
+      }
+    } catch (e) { /* ignore */ }
+    try { o.facing = (f && typeof f.hd === "function") ? rnum(f.hd()) : null; } catch (e) { /* ignore */ }
+    try { o.rr = (f && f.rR) ? 1 : 0; } catch (e) { /* ignore */ }
+    try {
+      var ns = f.oa && f.oa.Va && f.oa.Va.all;
+      if (ns) {
+        var mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9;
+        for (var i = 0; i < ns.length; i++) {
+          var m = ns[i] && ns[i].ma;
+          if (m && typeof m.x === "number" && isFinite(m.x)) {
+            if (m.x < mnx) mnx = m.x; if (m.x > mxx) mxx = m.x;
+            if (m.y < mny) mny = m.y; if (m.y > mxy) mxy = m.y;
+          }
+        }
+        if (mxx > mnx) o.bbox = { x0: rnum(mnx), x1: rnum(mxx), y0: rnum(mny), y1: rnum(mxy) };
+      }
+    } catch (e) { /* ignore */ }
+    return o;
+  }
+
+  function renderFightRecord(fight) {
+    try {
+      var out = {
+        t: "render_fight", tag: "fight", f: frameNo(),
+        camera: camOf(fight),
+        fighters: [
+          fighterRec(fighterAt(fight, "Me"), "Me"),
+          fighterRec(fighterAt(fight, "Enemy"), "Enemy")
+        ]
+      };
+      try {
+        var mgr = or.mc, top = mgr && mgr.stack && mgr.stack[mgr.stack.length - 1];
+        var ki = staticOf(top, "KI");
+        if (ki) out.ma_KI = { a: nodeAlpha(ki), col: nodeColor(ki) };
+        out.clearColor = clearColorOf();
+      } catch (e) { /* ignore */ }
+      emit(out);
+    } catch (e) { orFail(e); }
+  }
+
+  /* Per-frame driver for the render dump (runs on ALL screens, unlike
+   * `oracleTick` which needs a fight object). */
+  function renderTick() {
+    if (window.__oracleDone) return;
+    try {
+      if (!or.mc || !or.mc.stack || !or.mc.stack.length) return;
+      var top = or.mc.stack[or.mc.stack.length - 1];
+      var cls = (top && top.constructor) ? top.constructor.name : "?";
+      if (cls !== or.lastRTag) {
+        or.lastRTag = cls;
+        renderScreenRecord("screen_change");
+      } else if (or.rFrames % 240 === 0) {
+        renderScreenRecord("periodic");
+      }
+      or.rFrames++;
+      var f = fightObj();
+      if (f) {
+        if (or.rFightFrames % 30 === 0) renderFightRecord(f);
+        or.rFightFrames++;
+      }
+    } catch (e) { orFail(e); }
+  }
+
   /* ================= 6. Records ================= */
 
   function emitHeader(fight) {
@@ -973,6 +1231,7 @@
     } catch (e) { return false; }
     try {
       app.__oracleHooked = true;
+      or.app = app;
       var origAa = app.aa;
       app.aa = function (a) {
         try {
@@ -983,6 +1242,11 @@
         var r = origAa.apply(this, arguments);
         try {
           oracleTick();
+        } catch (err) {
+          orFail(err);
+        }
+        try {
+          renderTick();
         } catch (err) {
           orFail(err);
         }

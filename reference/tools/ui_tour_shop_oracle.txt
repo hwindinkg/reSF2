@@ -1,0 +1,34 @@
+# Shop destination tour (phase1 step9 render-state trace).
+# Reaches: dojo_hub -> nav expanded -> Shop (weapons) -> tab2..tab5 -> grid detail.
+# Requires the post-tutorial seed (reference/runner/index.html,
+# ORACLE_POST_TUTORIAL = true); without it the game boots into the blocking
+# tutorial and the hub is unreachable.
+#
+# Run from reference/traces/ so `shot` lands in reference/traces/ui/:
+#   shell\bin\Release\net9.0-windows\OracleShell.exe --input-script reference/tools/ui_tour_shop_oracle.txt --timeout-ms 90000
+wait 8000
+shot shop_hub
+tap 180 98
+wait 1500
+shot shop_menu_open
+tap 140 340
+wait 3000
+shot shop_tab1
+tap 490 675
+wait 1800
+shot shop_tab2
+tap 600 675
+wait 1800
+shot shop_tab3
+tap 805 675
+wait 1800
+shot shop_tab4
+tap 910 675
+wait 1800
+shot shop_tab5
+tap 380 675
+wait 1800
+tap 300 320
+wait 1800
+shot shop_detail
+wait 2500

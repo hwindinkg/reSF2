@@ -266,6 +266,14 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
     for (const auto& iv : st.my_intervals) {
         ctx.intervals.push_back({iv.first, iv.second, true});
     }
+    // JS `de.V1` (L601-602): `a.Yz(this.model,null,a.FQ(2))` evaluates the
+    // MOVE's condition tree (`va.rb`) — the main `<Conditions>` (Distance /
+    // CurrentAnimation / …), not only the `<Tactics>` wrapper. The port used
+    // to test `m.tactics` alone, so a distance-gated move (e.g.
+    // `ThrowForward`'s `<Distance Max="100">`) was never rejected and the AI
+    // started/landed throws from across the arena. Keys conditions pass for
+    // the AI (`ctx.keys_gm=false`, the same `gm=false` gate `NS` uses).
+    if (!eval_move_conditions(m.conditions, ctx)) return false;
     return eval_move_conditions(m.tactics, ctx);
 }
 

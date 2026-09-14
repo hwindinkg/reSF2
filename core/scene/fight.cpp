@@ -237,6 +237,9 @@ void FightController::init_locks(
     clips_ = &clips;
     tactics_ = tactics;
     tactic_ = tactic;
+    std::fprintf(stdout, "[fight] enemy tactic: %s\n",
+                 tactic_ != nullptr ? tactic_->name.c_str() : "<none>");
+    std::fflush(stdout);
     roll01_ = std::move(roll01);
     reseed01_ = std::move(reseed01);
     // JS `cl.pmb`: each battle re-picks the `ERuleRandom` children (`pn.M4`).
@@ -380,6 +383,15 @@ FightFighter FightController::make_fighter(
     f.params.attributes["CriticalDamage"] = 0.0f;
     f.params.attributes["BlockDamageFactor"] = 0.0f;
     f.params.attributes["DamageFactor"] = 0.0f;
+    // JS `wd.Fm` (L811): the player's FULL attribute map overrides the zeros
+    // above (item `m7a` + group `g8a` + StartingAttributes + level ×
+    // LevelAttributeGain, for every `v.eo.attributes` name). The enemy keeps
+    // its warrior/rule-resolved attrs (stages.xml `<Attributes>`).
+    if (is_player) {
+        for (const auto& kv : battle_.player_attrs) {
+            f.params.attributes[kv.first] = kv.second;
+        }
+    }
     f.max_hp = static_cast<float>(max_hp);
     f.hp = f.max_hp;
     // JS `ur` L194: `Fj = NotAI==null`; the AI is created ONLY when the
@@ -1287,10 +1299,12 @@ void FightController::check_round_end() {
         apply_round_result(rule_result_, w, l);
         return;
     }
-    // JS `Ar.PEa` (L2020): `mb.NF<=0` — the HUD counter hit zero. JS ends
-    // the round at `PEa()` for ANY fight (Onb L412); the native only did so
-    // with a TimeOutWin rule. A Points rule also lives off the timer end
-    // (Contest decides by `qH>gN` at `cp==9`; Score fires at `Max`).
+    // JS `Ar.PEa` (L2020): `mb.NF<=0` — the HUD counter hit zero. JS
+    // `ca.ia` L412 ends the round at `ha.PEa()` for ANY fight (`Da.type !=
+    // "FightNone"`), so the timeout does NOT require a TimeOutWin rule (the
+    // native port used to gate on `battle_.timeout_rule`). The winner then
+    // comes from `E3a` L412-413 below (a Points `Pu.wfa()`, a TimeOutWin rule
+    // forcing `wfa()=1` -> player, else `Zb` = the ENEMY).
     bool has_points_rule = false;
     for (const FightRule& r : rules_) {
         if (r.active && r.kind == FightRuleKind::points) {
@@ -1298,8 +1312,7 @@ void FightController::check_round_end() {
             break;
         }
     }
-    const bool timeout = round_.time_nf <= 0 &&
-                         (battle_.timeout_rule || has_points_rule);
+    const bool timeout = round_.time_nf <= 0;
     const bool player_ko = player_.hp <= 0.0f;
     const bool enemy_ko = enemy_.hp <= 0.0f;
 
@@ -1322,10 +1335,15 @@ void FightController::check_round_end() {
             apply_round_result(round_result::timeout_win,
                                player_wins ? player_ : enemy_,
                                player_wins ? enemy_ : player_);
-        } else {
+        } else if (battle_.timeout_rule) {
             // JS `qj` (L912): TimeOutWin forces `Li=1`, `Yu=false` ->
             // `wfa()`=1 -> `E3a` `a=true` -> the PLAYER (kc) wins.
             apply_round_result(round_result::timeout_win, player_, enemy_);
+        } else {
+            // JS `E3a` (L413) with `ey==3` and no fired rule (`Pu==null`):
+            // `a=false` -> the winner is `Zb` (the ENEMY). The oracle's
+            // BOSS_LYNX timeout is a player loss (`kk` "You lose!").
+            apply_round_result(round_result::timeout_win, enemy_, player_);
         }
     } else if (player_ko && enemy_ko) {
         // Both KO'd the same frame: higher HP wins (JS vfa L413).
@@ -2779,12 +2797,30 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         me.last_ai_stage = me.ai->last_stage();
         if (!decision.empty()) {
             const sf2::scene::MoveDef* chosen = nullptr;
+            auto pick_ctx = [&]() {
+                sf2::scene::FightContext c;
+                c.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
+                c.stage = static_cast<sf2::scene::round_stage>(phase_);
+                c.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
+                c.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
+                c.dist_x = foe.fighter.world_x() - me.fighter.world_x();
+                c.dist_3d = std::fabs(c.dist_x);
+                c.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+                return c;
+            };
+            // JS `de.V1` (L601-602) resolves the candidate to the MOVE whose
+            // condition tree passes. A tag can match several moves, so take
+            // the first whose `<Conditions>` hold — `Throw` must resolve to
+            // the distance-gated `ThrowForward`, never a far throw.
             for (const auto& kv : *moves_) {
-                if (kv.second.name == decision ||
-                    kv.second.template_tags.count(decision) > 0) {
-                    chosen = &kv.second;
-                    break;
+                if (kv.second.name != decision &&
+                    kv.second.template_tags.count(decision) == 0) {
+                    continue;
                 }
+                sf2::scene::FightContext c = pick_ctx();
+                if (!sf2::scene::eval_move_conditions(kv.second.conditions, c)) continue;
+                chosen = &kv.second;
+                break;
             }
             if (chosen == nullptr && decision == "ShortAttack") {
                 for (const auto& kv : *moves_) {

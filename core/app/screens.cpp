@@ -3674,9 +3674,21 @@ std::vector<CatalogItem> load_full_catalog(App& app) {
 // Fists carries none, L91), so the resolved value is
 //   StartingAttributes.UnarmedDamage(5, character_progress.xml L63)
 //   + level(1) × LevelAttributeGain.UnarmedDamage(10, L64) = 15.
-float resolve_player_unarmed_damage(App& app) {
-    float starting = 0.0f;
-    float per_level = 0.0f;
+// JS `wd.Fm` (L811): the player's attribute map. Every name in
+// `v.eo.attributes` is filled as
+//   item bonus (`m7a`, sum of the equipped items' rows)
+// + group bonus (`g8a`; none for the shipped warrior)
+// + `v.GNa` StartingAttributes[name]
+// + `this.level` × `v.uFa` LevelAttributeGain[name].
+// The bCa inputs `BodyDefense`/`HeadDefense`/`BlockDamageFactor` (and the
+// crit attrs) live here — the fight previously hardcoded them to 0, so a
+// landed hit was computed against 0 defense and a 1× block factor.
+std::map<std::string, float> resolve_player_attributes(App& app) {
+    std::map<std::string, float> out;
+    // The name list = the attributes present on <StartingAttributes> /
+    // <LevelAttributeGain> (JS `v.eo.attributes`).
+    std::map<std::string, float> starting;
+    std::map<std::string, float> per_level;
     try {
         sf2::data::xml_doc doc;
         const std::string path = "reference/extracted/xml/res/character_progress.xml";
@@ -3688,10 +3700,14 @@ float resolve_player_unarmed_damage(App& app) {
             const pugi::xml_node root = doc.root().first_child();
             if (root) {
                 if (const pugi::xml_node sa = root.child("StartingAttributes")) {
-                    starting = sa.attribute("UnarmedDamage").as_float(0.0f);
+                    for (const pugi::xml_attribute a : sa.attributes()) {
+                        starting[a.name()] = a.as_float(0.0f);
+                    }
                 }
                 if (const pugi::xml_node lg = root.child("LevelAttributeGain")) {
-                    per_level = lg.attribute("UnarmedDamage").as_float(0.0f);
+                    for (const pugi::xml_attribute a : lg.attributes()) {
+                        per_level[a.name()] = a.as_float(0.0f);
+                    }
                 }
             }
         }
@@ -3708,19 +3724,31 @@ float resolve_player_unarmed_damage(App& app) {
         }
     } catch (const std::exception&) {
     }
-    // `m7a` item bonus: sum the equipped/owned items' UnarmedDamage rows.
-    float item_bonus = 0.0f;
+    // `m7a` item bonus: the item row's matching attribute (the catalog
+    // carries WeaponDamage/BodyDefense/HeadDefense/UnarmedDamage/MagicDamage;
+    // other names have no item row in this build).
     const std::vector<CatalogItem> catalog = load_full_catalog(app);
-    for (const std::string& name : equipped) {
-        if (name.empty()) continue;
-        for (const CatalogItem& ci : catalog) {
-            if (ci.name == name) {
-                item_bonus += static_cast<float>(ci.unarmed_damage);
+    for (const auto& ap : starting) {
+        const std::string& name = ap.first;
+        float bonus = 0.0f;
+        for (const std::string& iname : equipped) {
+            if (iname.empty()) continue;
+            for (const CatalogItem& ci : catalog) {
+                if (ci.name != iname) continue;
+                if (name == "WeaponDamage") bonus += ci.weapon_damage;
+                else if (name == "UnarmedDamage") bonus += ci.unarmed_damage;
+                else if (name == "BodyDefense") bonus += ci.body_defense;
+                else if (name == "HeadDefense") bonus += ci.head_defense;
+                else if (name == "MagicDamage") bonus += ci.magic_damage;
                 break;
             }
         }
+        float v = bonus + ap.second;
+        const auto it = per_level.find(name);
+        if (it != per_level.end()) v += static_cast<float>(level) * it->second;
+        out[name] = v;
     }
-    return starting + static_cast<float>(level) * per_level + item_bonus;
+    return out;
 }
 
 // Resolves + loads the hashed `en.<hash>.xml` lang file once (the
@@ -5374,8 +5402,13 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         battle.enemy_spawn_y = assets.fight_location.enemy_spawn_y();
     }
     battle.max_hp = 1;  // the game's HP fallback (Zn = aB>0 ? aB : 1)
-    // JS `wd.Fm` L811 — the player's resolved UnarmedDamage (see the helper).
-    battle.player_unarmed_damage = resolve_player_unarmed_damage(app());
+    // JS `wd.Fm` L811 — the player's resolved attribute map (defense/block/
+    // crit included; see the helper). `player_unarmed_damage` is kept as the
+    // rounded bCa fallback.
+    battle.player_attrs = resolve_player_attributes(app());
+    battle.player_unarmed_damage = battle.player_attrs.count("UnarmedDamage")
+                                       ? battle.player_attrs["UnarmedDamage"]
+                                       : 0.0f;
     // [fx] JS `nj.parse` (L885) + `f_a` (L896-897): the stage fight's
     // `<Ringout>` rule configures the off-screen marker arrows (`sXa`). The
     // native battle is hardcoded above, so pull the battle's first-fight
@@ -5474,6 +5507,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     }
     battle.enemy_not_ai = bw.has_not_ai;
     battle.enemy_not_animation = bw.has_not_animation;
+    if (!bw.tactic.empty()) { const auto tit = assets.tactic_defs.find(bw.tactic); if (tit != assets.tactic_defs.end()) tactic = &tit->second; }  // JS `ur` L194: stage warrior `Tactic`
     // JS `xc.cM` L809-810: each warrior is built from its OWN equipment
     // (Skeleton + Weapon + Armor + Helm `Model` list -> `Yc.load` L568 merges
     // them into ONE bone hierarchy, skeleton first). Resolve the PLAYER from
