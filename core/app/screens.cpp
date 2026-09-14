@@ -3976,7 +3976,12 @@ bool load_dojo_shop_bg(App& app) {
 // Draws `Pi.Qa` at world (0,0) through `ma.Tya` (`Tya` L1832). The camera is a
 // pure scale+translate, so the whole 2048x1152 frame lands centred on the
 // projected world origin.
-void draw_destination_backdrop(App& app) {
+//
+// `tint` = the `Qa` sprite colour (JS `Qa.sf()`). The Shop's `Zkb` resets it
+// to white (`a.x=a.y=a.z=a.w=1`); the Profile keeps the shared `Z.Ena` scrim
+// (`sf2.502f0946.js` L2479: `Z.Ena = new H(.6392156862745098,.6392156862745098,
+// .6392156862745098,1)`) that the oracle trace read on `vb.Ad.Qa`.
+void draw_destination_backdrop(App& app, float tint) {
     if (!load_dojo_shop_bg(app)) return;
     sf2::data::atlas_frame fr;
     int tw = 0, th = 0;
@@ -3994,6 +3999,8 @@ void draw_destination_backdrop(App& app) {
     s.tex_h = static_cast<float>(th);
     s.solid = false;
     s.rotated = fr.rotated;
+    // JS `Qa.sf()` colour: white for Shop, `Z.Ena` (0.6392...) for Profile.
+    s.color_r = s.color_g = s.color_b = tint;
     s.transform.set_pos(0.0f, 0.0f);
     s.transform.set_scale(1.0f, 1.0f);
     app.renderer().draw_sprite(s, cam);
@@ -7890,7 +7897,7 @@ void ShopScreen::render_impl(App& app) {
     // `this.Tya(this.Ad)` (L2293). `Pi` renders `Qa = R.$(E.get(752))` =
     // `locations/dojo_shop/bg.{image}` under `ma.Tya` (L1832) — a dedicated
     // destination background, NOT the dojo location layers.
-    draw_destination_backdrop(app);
+    draw_destination_backdrop(app, 1.0f);  // JS `Oa.Zkb` resets Qa to white
     draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
                            backdrop_fig_ok_, backdrop_idle_);
     draw_destination_dim(ren);
@@ -8860,7 +8867,7 @@ void EquipmentScreen::render_impl(App& app) {
     // `this.Tya(this.Ad)` (L2195). `Pi` renders `Qa = R.$(E.get(752))` =
     // `locations/dojo_shop/bg.{image}` under `ma.Tya` (L1832) — a dedicated
     // destination background, NOT the dojo location layers.
-    draw_destination_backdrop(app);
+    draw_destination_backdrop(app, 0.6392156862745098f);  // JS `Z.Ena` (L2479)
     draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
                            backdrop_fig_ok_, backdrop_idle_);
     draw_destination_dim(ren);

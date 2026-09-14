@@ -211,6 +211,20 @@ public:
     }
     float world_x() const { return world_x_; }
     float world_y() const { return world_y_; }
+    // JS `Dl.Eu.ma` — the fighter's Center-Of-Mass BODY. It is NOT the XML
+    // `<COM Type="CenterOfMass">` bone (that one has Mass=0 and no LCC — a
+    // separate immovable body in JS, `sf2.502f0946.js` L571), and NOT the
+    // render root (`Fe().ma` = the NPivot anchor `world_x()`/`world_y()`
+    // above). JS derives `Eu.ma` every frame in `Dl.v6()` (L577) as the
+    // MASS-WEIGHTED centroid of the whole body:
+    //     Eu.ma = Σ(L0()[i].ma · L0()[i].weight) / VR
+    // where `weight` = the node's `Mass` attribute (`Yc.Ijb`), `VR = Σ weight`
+    // (`Dl.Esb`), and `L0()` = the resolved `<Nodes>` body list (`Du.bca`,
+    // filled by `Yc.Mia` → `Du.rWa`). The fight camera targets the midpoint
+    // of the two fighters' COMs (`Dl.mea(a.Eu,b.Eu)`, L535/L581). Falls back
+    // to the render anchor when the merged model carries no mass.
+    float com_x() const { return com_axis(0); }
+    float com_y() const { return com_axis(1); }
     // Clamps the fighter's world x to [min_x, max_x] (the arena walls).
     // Called each frame by the fight controller after the root-motion walk.
     void clamp_x(float min_x, float max_x) {
@@ -375,6 +389,27 @@ private:
     void compute_align(const MoveDef& move);
     void build_prepend(const MoveDef& move);
     void sample_current();
+
+    // Mass-weighted centroid of the posed body (JS `Dl.v6` L577: `Eu.ma`).
+    // `axis` 0 = x, 1 = y. Falls back to the render anchor when `pos_` is not
+    // sampled yet or no bone carries mass.
+    float com_axis(int axis) const {
+        const std::size_t n = model_.bones.size();
+        if (pos_.size() < n * 2) {
+            return axis == 0 ? world_x_ : world_y_;
+        }
+        float acc = 0.0f, wsum = 0.0f;
+        for (std::size_t i = 0; i < n; ++i) {
+            const float w = model_.bones[i].mass;
+            if (w <= 0.0f) continue;
+            acc += pos_[i * 2 + static_cast<std::size_t>(axis)] * w;
+            wsum += w;
+        }
+        if (wsum <= 0.0f) {
+            return axis == 0 ? world_x_ : world_y_;
+        }
+        return acc / wsum;
+    }
 };
 
 } // namespace sf2::scene

@@ -2996,8 +2996,12 @@ void FightController::update(float dt) {
     }
 
     // The camera follows the fight (JS ql.Ea -> tyb/dZa/c3a + ma.Sya).
-    camera_.framing(player_.fighter.world_x(), player_.fighter.world_y(),
-                    enemy_.fighter.world_x(), enemy_.fighter.world_y(), 1280.0f, 720.0f);
+    // JS `ql.tyb` (L363 + the L535/L581 `Dl.mea(a.Eu,b.Eu)`) targets the
+    // midpoint of the two fighters' Center-Of-Mass BODY (`Eu.ma`, the
+    // mass-weighted centroid computed by `Dl.v6` L577), NOT the render root
+    // (`Fe().ma` = the NPivot anchor fed to `dv.ia`). Feed the COM.
+    camera_.framing(player_.fighter.com_x(), player_.fighter.com_y(),
+                    enemy_.fighter.com_x(), enemy_.fighter.com_y(), 1280.0f, 720.0f);
 
     // The HUD state.
     hud_.set_hp(player_.hp, player_.max_hp, enemy_.hp, enemy_.max_hp);
