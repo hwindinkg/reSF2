@@ -348,6 +348,12 @@ struct UiTourStep {
     // step): while set, MapScreen draws the JS `jk` boss-intro roster
     // instead of the map so the headless tour can capture it.
     bool force_boss_roster = false;
+    // [fidelity fight-frame gate] Optional capture frame for fight states:
+    // while the Fight screen is current, hold until the FightController's
+    // frame counter (JS `ca.frame`) reaches this port frame, then capture.
+    // -1 = use the generic hold_frames timing. The fidelity tour's targets are
+    // the oracle `fight.frame` values mapped to the port's phase-local frame.
+    int fight_frame = -1;
 };
 
 static const UiTourStep kUiTourSteps[] = {
@@ -452,21 +458,39 @@ static const UiTourStep kFidelitySteps[] = {
     // `!app().headless()`), so the capture is the roster, not the map.
     {0.0f, 0.0f, "act_boss (boss roster)", 5, 10, -1, 30, "act_boss.png", 0, true, 0.0f, 0.0f, -1,
      true},
-    // --- Fight (auto-attack ON so it resolves to Results) -------------------
-    {471.0f, 375.0f, "map->fight", 5, 10, 6, 40, "fight_intro.png", 0, false, 0.0f, 0.0f, 1},
-    // Pause early (phase 1, definitely live), capture, resume. Esc is the
-    // native pause alias (P is the JS Magic key). `min_delay=90` lets the
-    // ROUND intro banner clear first (the oracle `pause` capture has no
-    // banner over the dialog).
-    {0.0f, 0.0f, "pause (Esc)", 6, 90, -1, 40, "pause.png", 256, false},
-    {0.0f, 0.0f, "resume (Esc)", 6, 0, -1, 30, nullptr, 256, false},
-    // Phase 2 (>133 fight frames): idle stance.
-    {0.0f, 0.0f, "fight stance", 6, 0, -1, 140, "fight_stance.png", 0, true},
-    {0.0f, 0.0f, "fight attack (punch)", 6, 0, -1, 25, "fight_attack.png", 32, false},
-    // Block is not a raw key in this game (on_key: it is a move interval);
-    // closest reachable = the attack-recovery frame.
-    {0.0f, 0.0f, "fight block (closest: recovery)", 6, 0, -1, 8, "fight_block.png", 0, true},
-    {0.0f, 0.0f, "fight hit (closest: mid-fight)", 6, 0, -1, 40, "fight_hit.png", 0, true},
+    // --- Fight (passive player so round 0 survives, like the oracle) --------
+    // [fidelity fight-frame alignment] The oracle `fight_*` captures are
+    // pinned to `fight.frame` (each shot is row-adjacent to its `oracle`
+    // record in the oracle per-frame trace — `console.big.bak.log` for the
+    // oracle_matrix set): fight_intro f=0 (phase 0, VS), fight_stance f=251
+    // (phase 1), fight_block f=347 (phase 2), pause f=588, fight_attack f=591,
+    // fight_hit f=835. The port's phase 1 starts at frame 0 (the oracle's
+    // phase 1 at f=131) and its phase 2 at frame 133 (the oracle's at f=334),
+    // so each state's port frame = oracle phase-local frame mapped onto the
+    // port's phase-local frame:
+    //   stance 251-131=120 ; block 347-334+133=146 ; pause 588-334+133=387 ;
+    //   attack 591-334+133=390 ; hit 835-334+133=634.
+    // The port's BOSS_LYNX round 0 ends by K.O. at ~F181 for this (fresh)
+    // warrior, so only the phase-1 stance (+120) and the phase-2 opening
+    // (+13) are reachable at the oracle's offsets; pause/attack/hit are
+    // CLAMPED into the reachable round-0 phase-2 window (they keep the
+    // oracle's phase 2 + ROUND 1 HUD; the exact +254/+257/+501 offsets are
+    // unreachable — see FIDELITY_MATRIX OPEN). `auto_attack=0` keeps the
+    // player idle (the oracle's passive opponent); the old coupling
+    // (auto-attack ON) KO'd round 0 at ~F200 and landed these in round 1.
+    // Punch frames (attack/hit) press Space at the target and capture 10
+    // frames into the move (the oracle's attack/hit frames have cf>0).
+    {471.0f, 375.0f, "map->fight", 5, 10, 6, 40, "fight_intro.png", 0, false, 0.0f, 0.0f, 0},
+    {0.0f, 0.0f, "fight stance", 6, 0, -1, 0, "fight_stance.png", 0, true, 0.0f, 0.0f, -1, false,
+     120},
+    {0.0f, 0.0f, "fight block", 6, 0, -1, 0, "fight_block.png", 0, true, 0.0f, 0.0f, -1, false,
+     146},
+    {0.0f, 0.0f, "pause (Esc)", 6, 0, -1, 3, "pause.png", 256, true, 0.0f, 0.0f, -1, false, 148},
+    {0.0f, 0.0f, "resume (Esc)", 6, 0, -1, 2, nullptr, 256, false},
+    {0.0f, 0.0f, "fight attack (punch)", 6, 0, -1, 10, "fight_attack.png", 32, true, 0.0f, 0.0f,
+     -1, false, 150},
+    {0.0f, 0.0f, "fight hit (punch)", 6, 0, -1, 10, "fight_hit.png", 32, true, 0.0f, 0.0f, -1,
+     false, 154},
     {0.0f, 0.0f, "fight->results", 6, 0, 10, 0, "results_win.png", 0, true},
     // results_lose: no deterministic headless loss path (the enemy AI is
     // passive in the tested direct fight; the auto fight wins) — closest
@@ -561,6 +585,48 @@ struct TourDriver {
             std::fflush(stdout);
         } else if (!fight_waiting) {
             next_clicked = false;
+        }
+
+        // [fidelity fight-frame gate] Hold a fight capture until the
+        // FightController's frame counter (JS `ca.frame`) reaches the step's
+        // port frame, then capture. The oracle fight captures are pinned to
+        // `fight.frame`: stance f=251 (phase 1 +120), block f=347 (phase 2
+        // +13), pause f=588 (+254), attack f=591 (+257), hit f=835 (+501).
+        // The port's phase 1 starts at frame 0 (the oracle's phase 1 starts
+        // at f=131; its phase 2 at f=334) and its phase 2 at frame 133, so the
+        // targets are the oracle phase-local frame mapped onto the port's
+        // phase-local frame. A keyed step presses `key` once at the target and
+        // waits `hold_frames` so the move / pause dialog is drawn at capture.
+        if (s.fight_frame >= 0) {
+            const bool on_fight = (cur == kScreenFight);
+            sf2::app::Screen* ftop = app.screens().top();
+            const int ff = (on_fight && ftop != nullptr)
+                               ? static_cast<sf2::app::FightScreen*>(ftop)->fight_frame()
+                               : -1;
+            if (ff >= s.fight_frame || !on_fight) {
+                if (on_fight && s.key != 0 && !key_up_done) {
+                    app.inject_key(s.key, true);
+                    app.inject_key(s.key, false);
+                    key_up_done = true;
+                    step_frame = 0;
+                    std::fprintf(stdout, "%s step %d/%d %s -> key %d @F%d\n", tag,
+                                 step + 1, count, s.label, s.key, ff);
+                    std::fflush(stdout);
+                    return;
+                }
+                if (step_frame < s.hold_frames) {
+                    ++step_frame;
+                    return;
+                }
+                std::fprintf(stdout, "%s fight frame F%d (gate %d) capture %s\n", tag, ff,
+                             s.fight_frame, s.capture != nullptr ? s.capture : "-");
+                std::fflush(stdout);
+                snap(app, s);
+                advance();
+                return;
+            }
+            ++step_frame;
+            return;
         }
 
         if (!acted) {

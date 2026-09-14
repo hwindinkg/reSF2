@@ -2890,6 +2890,27 @@ void FightController::update(float dt) {
     player_.reaction_fall = false;
     enemy_.reaction_fall = false;
 
+    // The banner countdown (PRESENTATION ONLY). JS `Cr.aa` (`sf2.502f0946.js`
+    // L2027) ticks the banner timer EVERY frame — `!this.pause && this.wU &&
+    // (this.Sc -= a, this.Sc <= 0 && this.ONa())` — it is NOT phase-gated:
+    // the total banner life is 1.666 s (`fu(1.666)` L2023 = 100 frames at
+    // 60 Hz, modelled here as ROUND N 60f + FIGHT! 40f), which already
+    // expires inside phase 1 (the JS phase 1 is 203 frames long). The old
+    // code ran this machine only inside `case fight_phase::fight`, so the
+    // ROUND banner overstayed the whole 133-frame phase 1 and FIGHT! spilled
+    // into phase 2 (F133-173), polluting the fight captures.
+    if (cur_banner_ == banner_kind::round && frame_ - banner_start_ >= banner_len_) {
+        cur_banner_ = banner_kind::fight;
+        banner_start_ = frame_;
+        banner_len_ = 40;
+        std::fprintf(stdout, "[fight] banner: FIGHT!\n");
+        std::fflush(stdout);
+    } else if (cur_banner_ == banner_kind::fight &&
+               frame_ - banner_start_ >= banner_len_) {
+        cur_banner_ = banner_kind::none;
+        banner_len_ = 0;
+    }
+
     // The phase machine.
     switch (phase_) {
         case fight_phase::idle:
@@ -2917,21 +2938,6 @@ void FightController::update(float dt) {
             break;
         }
         case fight_phase::fight: {
-            // The banner machine (presentation only): ROUND N (60f) ->
-            // FIGHT! (40f) -> none. The round banner is raised in
-            // round_start(); the FIGHT! banner fires when it expires.
-            if (cur_banner_ == banner_kind::round &&
-                frame_ - banner_start_ >= banner_len_) {
-                cur_banner_ = banner_kind::fight;
-                banner_start_ = frame_;
-                banner_len_ = 40;
-                std::fprintf(stdout, "[fight] banner: FIGHT!\n");
-                std::fflush(stdout);
-            } else if (cur_banner_ == banner_kind::fight &&
-                       frame_ - banner_start_ >= banner_len_) {
-                cur_banner_ = banner_kind::none;
-                banner_len_ = 0;
-            }
             // The round timer (JS `Sf.iPa` L2036 — `--xU`, `NF = xU/60|0`;
             // C++ `/` truncates toward zero = JS `|0`). Ticks while `Vt`.
             if (round_.running) {

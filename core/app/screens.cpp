@@ -5672,6 +5672,10 @@ int FightScreen::player_moves_started() const {
     return fight_ != nullptr ? fight_->player().moves_started : 0;
 }
 
+int FightScreen::fight_frame() const {
+    return fight_ != nullptr ? fight_->frame() : -1;
+}
+
 bool FightScreen::round_wait() const {
     return fight_ != nullptr && fight_->round_wait();
 }

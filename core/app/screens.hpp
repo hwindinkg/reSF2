@@ -253,6 +253,12 @@ public:
     std::string player_last_decision() const;
     int player_moves_started() const;
 
+    // [fidelity] The fight controller's frame counter (JS `ca.frame`). The
+    // fidelity tour uses it to capture a fight state at a deterministic frame
+    // (the oracle fight captures are pinned to `fight.frame`). -1 before the
+    // controller exists.
+    int fight_frame() const;
+
     // [FIX Phase 4a verification] Prints the sampled bone positions of the
     // player/enemy (a clip-frame bone-sample check) + their triangle bbox
     // (the stretched/on-screen check). Defined in screens.cpp.
