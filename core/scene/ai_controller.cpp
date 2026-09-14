@@ -40,6 +40,14 @@
 //     application (`b=Fl+b` windowing over `Ju.frames`, L611) is OPEN — the
 //     port keys outcomes off distance windows only.
 // Exact since this wave (no oracle needed — pure JS math):
+//   - the `mW` watch-recompute (JS `de.ia` L592): after `dsb` the port now
+//     recomputes `eh` from the OPPONENT's move length (`p0`/`zD`/`$I`/`Tea`
+//     via the MoveLengthIntervals Strict/Extended names) instead of holding
+//     a fixed `eh=120`; `dsb` sets `eh=INT_MIN` verbatim. This restores the
+//     decision cadence (the port previously evaluated ~1 pass per 120 frames
+//     and was practically inert).
+//   - `Pqb`'s `this.ds.pcb(this.Fl)` operand is the OPPONENT's move
+//     (`jwb` L596-597 `this.ds=c`), not my own (`st.enemy_move`).
 //   - `Da.jf()` stream: owned `DaPrng` (Xx+Rk, L2352/2366); QJa 5-roll cache,
 //     `$x` ResponseDelay cache, per-pass dqb/jL/XW/slot draws all on it in
 //     JS call order when no roll01 override is injected.
@@ -48,6 +56,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include "scene/conditions.hpp"
@@ -75,6 +84,31 @@ int uninterrupt_end(const MoveDef& m) {
     int best = 0;
     for (const Interval& iv : m.intervals) {
         if (iv.name == "Uninterrupt") best = std::max(best, iv.end);
+    }
+    if (m.end_frame > 0) best = std::min(best, m.end_frame);
+    return best;
+}
+// JS `jc.$I` (L697): `vBa(P.s$a())` — the max finish among the Strict
+// move-length interval names. `P.s$a()` = computer_settings.xml
+// `MoveLengthIntervals/Strict` = {Uninterrupt, SemiUninterrupt}.
+int strict_end(const MoveDef& m) {
+    int best = 0;
+    for (const Interval& iv : m.intervals) {
+        if (iv.name == "Uninterrupt" || iv.name == "SemiUninterrupt")
+            best = std::max(best, iv.end);
+    }
+    if (m.end_frame > 0) best = std::min(best, m.end_frame);
+    return best;
+}
+// JS `jc.Tea` (L697): `vBa(P.r$a())` — the max finish among the Extended
+// move-length interval names. `P.r$a()` = `MoveLengthIntervals/Extended`
+// = Strict + {SelfUninterrupt}.
+int extended_end(const MoveDef& m) {
+    int best = 0;
+    for (const Interval& iv : m.intervals) {
+        if (iv.name == "Uninterrupt" || iv.name == "SemiUninterrupt" ||
+            iv.name == "SelfUninterrupt")
+            best = std::max(best, iv.end);
     }
     if (m.end_frame > 0) best = std::min(best, m.end_frame);
     return best;
@@ -662,14 +696,15 @@ int AiController::pqb(const AiFightState& st) {
     }
 
     // The response-delay + uninterruptible gate (JS L604-605):
-    //   $x < enemy_frame && !Ycb(enemy)   (enemy in its move start)
-    //   && my move is uninterruptible at Fl (ds.pcb(Fl))
+    //   $x < b.kJ() && !Ycb(b)   (the OPPONENT is inside its Uninterrupt
+    //   startup window) && `this.ds.pcb(this.Fl)` — `ds` is the OPPONENT's
+    //   current move (`jwb` L596-597 `this.ds=c` with c = the opponent's
+    //   `Ua`), `Fl` the opponent's offset frame.
     // `$x` is the CACHED ResponseDelay from `jwb` (NOT re-rolled per pass).
-    // `ycb`/`lbb` test the ENEMY's current move (JS `de.Ycb(b)` where b =
-    // the passed-in enemy's da controller).
+    // `ycb`/`lbb` test the OPPONENT's current move.
     const int enemy_frame = st.enemy_move_frame;
     if (enemy_frame > x_ && !ycb(st)) {
-        if (st.current_move == nullptr || pcb(*st.current_move, Fl_)) {
+        if (st.enemy_move == nullptr || pcb(*st.enemy_move, Fl_)) {
             if (lbb(st)) {
                 // Safe attack / attack table (JS L605).
                 if (tactic_ != nullptr) {
@@ -834,12 +869,48 @@ std::string AiController::update(const AiFightState& st) {
         qja_done_ = true;
     }
 
-    // The wait counter (JS L592): `if(this.eh>1) return --this.eh, null`.
+    // JS `de.ia` (L592) — the `mW` watch-recompute, the load-bearing piece
+    // the port lacked: after `dsb` (the watch), the JS recomputes the wait
+    // `eh` from the OPPONENT's current move length (clamped to MY move
+    // length) instead of holding a fixed count. `c=this.Ji.Ua` (my move),
+    // `d=b.Ua` (the opponent's move); `e=c.$I()` (my Strict end).
+    if (mW_) {
+        mW_ = false;
+        if (st.current_move != nullptr && st.enemy_move != nullptr) {
+            const int eI = strict_end(*st.current_move);
+            switch (oC_) {
+                case 1: {
+                    int d = attack_end(*st.enemy_move) - Fl_ + 1;
+                    const int c = extended_end(*st.current_move);
+                    eh_ = d > c ? c : d;
+                    if (eI > eh_) eh_ = eI;
+                    --eh_;
+                    break;
+                }
+                case 2: {
+                    int d = uninterrupt_end(*st.enemy_move) - Fl_ + 1;
+                    const int c = extended_end(*st.current_move);
+                    eh_ = d > c ? c : d;
+                    if (eI > eh_) eh_ = eI;
+                    --eh_;
+                    break;
+                }
+                case 3:
+                    eh_ = eI;
+                    --eh_;
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+    oC_ = 0;
+
+    // The wait counter (JS L592-593): `if(this.eh>1) return --this.eh, null`.
     if (eh_ > 1) {
         --eh_;
         return "";
     }
-    eh_ = 1;
 
     // The distance category + chance draws (JS L593-594).
     aqa_ = dqb(st);
@@ -860,11 +931,12 @@ std::string AiController::update(const AiFightState& st) {
     }
 
     if (cnt <= 0 && pH_) {
-        // Watch (JS dsb L600): wait a long time; the mW re-evaluation at
-        // the top of the next update clears it when the state changes.
+        // Watch (JS dsb L600): `this.eh=-2147483648` (not a fixed count) —
+        // the next frame's `mW` block recomputes `eh` from the opponent's
+        // move length. `this.model.hJa(!1)` is the animation hook (n/a).
         fk_ = -2;
         mW_ = true;
-        eh_ = 120;
+        eh_ = std::numeric_limits<int>::min();
         return "";
     }
 
