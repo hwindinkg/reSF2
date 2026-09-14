@@ -387,6 +387,16 @@ private:
 
     void rebuild_holds();
     void compute_align(const MoveDef& move);
+    // [FIX prepend-lag] Translate the persisted ragdoll solver state
+    // (`sol_ma_`/`sol_mf_`) from the previous clip's raw coordinate space into
+    // the new clip's space, anchored at the new clip's root `(com_x,com_y,com_z)`.
+    // JS `Te.Skb` L550 builds the play-buffer prepend (`Te.qrb` L282683) from
+    // the CURRENT continuous `ma`/`mf` BEFORE the first `eda` sample, so the
+    // native prepend must be frozen in the NEW clip space too (otherwise the
+    // two prepended slots sit a whole cross-clip COM delta away, and every
+    // move start snaps). Called from `start_move_impl` just before
+    // `build_prepend`.
+    void translate_solver_state(float com_x, float com_y, float com_z);
     void build_prepend(const MoveDef& move);
     void sample_current();
 

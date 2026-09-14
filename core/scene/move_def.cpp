@@ -310,10 +310,21 @@ void parse_cond_node(pugi::xml_node node, Cond& out) {
         if (node.attribute("Namespace")) out.value = node.attribute("Namespace").value();
     } else if (out.type == "Perk") {
         // JS `Bm`: Name attr = perk name; checks my/enemy perk lists.
-    } else if (out.type == "Item" || out.type == "Weapon" || out.type == "Player") {
+    } else if (out.type == "Item" || out.type == "Weapon") {
         // JS `um` (Item) / `Hm` (Weapon): Type + SubType + Name attrs.
         // Note: JS `um` reads SubType, `Hm` reads SubType too.
         // The XML uses SubType="Fists" etc.
+    } else if (out.type == "Player") {
+        // JS `Dm` (Player; `sa.oe.set("Player",6)` L705, class g="139" L755):
+        //   ctor: `this.LUa = u.I(a.attributes.get("Number"),1)==1`
+        //   he:   `a = this.LUa == a.qb; return this.cb?!a:a`
+        // `Number` is the side index with default 1 (`u.I(get("Number"),1)`).
+        // `qb` is the "controlled fighter" flag on the event context
+        // (`a.qb=b.parameters.qb` L680). `Number=1` therefore selects the
+        // PLAYER (moves.xml `FistsStartStance-Left`/`…Idle-Left`), any other
+        // value the other side (`…-Right`). The element name itself is the
+        // semantics flag the evaluator keys on (`eval_player`).
+        out.value_int = data::xml_attr_int(node, "Number", 1);
     } else if (out.type == "CurrentAnimation") {
         // JS `lg`: Name + Physics attr + $Move/$NoAnimation$ special values.
         // (handled by evaluator)

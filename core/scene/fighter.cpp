@@ -465,6 +465,29 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     }
     // JS `Te.Skb` order: the play buffer prepend (`Pka`/`qrb`) is built
     // before the first `eda` sample; `Gub` (align) also precedes it.
+    // [FIX prepend-lag] Move the persisted solver state into the NEW clip's
+    // space BEFORE `build_prepend` freezes slots 0/1 from it (JS `Skb` L550
+    // builds `qrb` from the current continuous `ma`/`mf` ahead of the first
+    // `eda`). Anchor = the new clip's root (bone 0) at the starting frame,
+    // aligned exactly as `sample()` aligns it. With no clip the anchor is the
+    // existing COM, i.e. the translation is a no-op.
+    {
+        float com_x = sol_prev_com_x_;
+        float com_y = sol_prev_com_y_;
+        float com_z = sol_prev_com_z_;
+        if (current_clip_ != nullptr && !current_clip_->frames.empty()) {
+            const int f = std::max(0, std::min(
+                move.first_frame,
+                static_cast<int>(current_clip_->frames.size()) - 1));
+            const auto& fb = current_clip_->frames[static_cast<std::size_t>(f)].bones;
+            if (!fb.empty()) {
+                com_x = fb[0].x + align_x_;
+                com_y = fb[0].y + align_y_;
+                com_z = fb[0].z + align_z_;
+            }
+        }
+        translate_solver_state(com_x, com_y, com_z);
+    }
     build_prepend(move);
     sample_current();
     return true;
@@ -780,6 +803,43 @@ void Fighter::compute_align(const MoveDef& move) {
 // (`ma`) and its previous position (`mf`) — the clip-start pose blend, where
 // 1.5 = (MidFrames+1)/2. `ZW` = the clip bone count, so only the clip bones
 // are seeded; the buffer is indexed 0..ZW-1 (JS `m.resize(this.fq, a.ZW, ...)`).
+// [FIX prepend-lag — JS `Te.Skb` L550 order] The JS play-buffer prepend
+// (`Te.qrb`, L282683) is built from the CURRENT continuous pose (`ma`/`mf`)
+// at `Skb` time, i.e. BEFORE the first `eda` sample. The native solver state
+// is authored in raw clip coordinates (the clips' root bones differ by
+// hundreds of units: stance_2 root x=-502 vs an attack clip x=+237), so it
+// must be moved into the NEW clip's space BEFORE `build_prepend` freezes
+// slots 0/1 from it. Otherwise the two prepended slots describe a pose a
+// whole COM delta away from the clip, and the first sampled frame of every
+// move inherits that offset (the observed idle cf=2 weapon-bone error). This
+// applies the SAME delta `sample()` would apply on its first frame; that
+// frame's own translation is then a no-op (sol_prev_com_ already updated).
+void Fighter::translate_solver_state(float com_x, float com_y, float com_z) {
+    const std::size_t n3 = model_.bones.size() * 3;
+    if (!solver_init_ || sol_ma_.size() != n3 || sol_mf_.size() != n3) {
+        return;
+    }
+    if (sol_have_prev_com_) {
+        const float dx = com_x - sol_prev_com_x_;
+        const float dy = com_y - sol_prev_com_y_;
+        const float dz = com_z - sol_prev_com_z_;
+        if (dx != 0.0f || dy != 0.0f || dz != 0.0f) {
+            for (std::size_t i = 0; i < n3; i += 3) {
+                sol_ma_[i] += dx;
+                sol_ma_[i + 1] += dy;
+                sol_ma_[i + 2] += dz;
+                sol_mf_[i] += dx;
+                sol_mf_[i + 1] += dy;
+                sol_mf_[i + 2] += dz;
+            }
+        }
+    }
+    sol_prev_com_x_ = com_x;
+    sol_prev_com_y_ = com_y;
+    sol_prev_com_z_ = com_z;
+    sol_have_prev_com_ = true;
+}
+
 void Fighter::build_prepend(const MoveDef& move) {
     prepend_.clear();
     if (current_clip_ == nullptr || current_clip_->frames.empty()) {

@@ -140,7 +140,12 @@ struct FightContext {
     int physics_frame = 0;
 
     // --- misc (not used by moves.xml but present in the JS) --------------
-    bool model_mirrored = false;  // Dm.he ModelMirrored
+    bool model_mirrored = false;  // zm.he ModelMirrored (`sa.oe.set(...19)` L706)
+    // JS `Dm.he` Player condition source: `qb` = "this fighter is the
+    // CONTROLLED one" (`parameters.qb`; set true at L1207, false for the AI
+    // at L806 `this.qb=!1;this.Fj=!0`; copied into the event ctx at L680
+    // `a.qb=b.parameters.qb`). true = player, false = enemy.
+    bool qb = false;
     // Random source for `Random` conditions (JS `Da.pg` shared stream).
     // When set, `eval_random` draws from it with the `Da.cT` shortcut
     // (`value>=100` -> true, no draw); when unset (probes/demos), the

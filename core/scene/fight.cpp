@@ -1251,8 +1251,20 @@ void FightController::enter_fight() {
     // FistsStartStanceIdle-Left (fists1_stance_idle, 38f, delta 0).
     player_.fighter.clear_move();
     enemy_.fighter.clear_move();
-    sample_idle(player_);
-    sample_enemy_idle();
+    // [FIX transition continuity — Root 2] Do NOT pre-pose the fighters with
+    // `sample_idle` here. `Fighter::sample` also advances the ragdoll solver
+    // state (`sol_ma_`/`sol_mf_`/`sol_prev_com_`), so pre-posing the idle
+    // clip's frame 0 leaves `sol_ma_`/`sol_mf_` straddling a full intro→idle
+    // pose jump; the idle move's prepend is then built as
+    // `ma ± 1.5·(ma-mf)` from that jump and the first sampled idle frame
+    // overshoots (idle cf=2 weapon bones +267 world units). The JS has no
+    // such cut: the oracle trace (reference/traces/console.run4.log) keeps
+    // the intro clip through the transition frame and steps into the idle
+    // smoothly (root-relative 19.6 units), while the port's pre-pose broke
+    // the pose by 353 units. Leaving the pose at the intro's end keeps the
+    // solver space continuous; the idle move starts on the next update.
+    // The NotAnimation dummy still needs its bind pose.
+    if (battle_.enemy_not_animation) sample_enemy_idle();
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
 
@@ -2621,8 +2633,21 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         sf2::scene::FightContext ctx;
         ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
         ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
-        ctx.anims_me = {};
+        // [FIX input anim list — Root 3] JS `lg.he` CurrentAnimation reads the
+        // fighter's OWN animation-name list (`a.rr.ef(player)`, L749). The
+        // port passed `{}`, so every non-negated CurrentAnimation gate on the
+        // input path read false (and `$NoAnimation$` read true). The list
+        // carries the current move plus the logical stance state
+        // (`StanceLeft`/`StanceRight` — the names used by moves.xml
+        // `<CurrentAnimation Name="StanceLeft"/>` in the stance-idle set).
+        ctx.anims_me.clear();
+        if (me.fighter.current_move() != nullptr) {
+            ctx.anims_me.push_back(me.fighter.current_move()->name);
+        }
+        ctx.anims_me.push_back(me.is_player ? "StanceLeft" : "StanceRight");
         ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
+        // JS `Dm.he` Player condition source (`a.qb=b.parameters.qb` L680).
+        ctx.qb = me.is_player;
         ctx.dist_x = foe.fighter.world_x() - me.fighter.world_x();
         ctx.dist_3d = std::fabs(ctx.dist_x);
         ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
@@ -2659,24 +2684,30 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // MirrorNode maps it to the -Left/-Right variant). The FIRST
         // auto-play runs before any move has set facing_, so derive it
         // from the raw positions instead of the (defaulted) facing_.
-        const bool face_left =
-            (foe.fighter.world_x() - me.fighter.world_x()) < 0.0f;
-        // [FIX idle-clip — surgical] Phase 2 (Fight) idle must use the
-        // NON-moving clip (fists1_stance_idle, 38f, delta 0) — the oracle's
-        // FistsStartStanceIdle-Left. The old code picked Left/Right by
-        // facing, so a right-facing fighter used FistsStartStanceIdle-Right
-        // (fists2_stance_idle, 101f) or, during the early re-trigger at the
-        // end of phase 1, stance_2 (52f, delta -148.6) which slid 853 units.
-        // Mirror is via fx (facing), not a distinct clip.
+        // [FIX stance side — JS `<Player Number>` gate] The variant is chosen
+        // by the move's own `<Player Number=..>` gate, NOT by facing:
+        // moves.xml gives `…-Left` `<Player Number="1"/>` (JS `Dm.he` L755:
+        // `Number==1 == qb` -> the CONTROLLED fighter) and `…-Right` to the
+        // other side. The oracle trace (reference/traces/console.run4.log)
+        // shows the controlled fighter on `FistsStartStance-Left` with fx=+1
+        // (cf=4, sub=2), so Left is independent of facing. The old
+        // facing-derived `face_left` rule was invented: it gave a right-facing
+        // player the enemy clip `…-Right` (clip stance_2 / fists2_stance_idle,
+        // the wrong mirror), and hard-coded `Idle-Left` for BOTH sides — the
+        // reported wrong models/animations.
+        const char* const side = me.is_player ? "Left" : "Right";
         const std::string idle_name =
-            intro ? std::string("FistsStartStance-") + (face_left ? "Left" : "Right")
-                  : std::string("FistsStartStanceIdle-Left");
+            intro ? std::string("FistsStartStance-") + side
+                  : std::string("FistsStartStanceIdle-") + side;
         const auto idle_it = moves_->find(idle_name);
         if (idle_it != moves_->end()) {
             sf2::scene::FightContext ctx;
         ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
             ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
-            ctx.anims_me = {idle_name};
+            // JS `Dm.he` Player source + the fighter's animation-name list
+            // (current move + the logical stance state; see the input path).
+            ctx.qb = me.is_player;
+            ctx.anims_me = {idle_name, me.is_player ? "StanceLeft" : "StanceRight"};
             ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name
                                                           : idle_name};
             ctx.dist_x = foe.fighter.world_x() - me.fighter.world_x();

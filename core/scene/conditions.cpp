@@ -519,11 +519,25 @@ bool eval_birth(const Cond& c, const FightContext& ctx) {
     return ok;
 }
 
+// JS `Dm.he` (Player condition — `sa.oe.set("Player",6)` L705, class L755):
+//   ctor: `this.LUa = u.I(a.attributes.get("Number"),1)==1`
+//   he:   `a = this.LUa == a.qb; return this.cb?!a:a`
+// `qb` is true for the CONTROLLED fighter (L1207 `a.wu=!0;a.Fj=!1;a.qb=!0`)
+// and false for the AI (L806 `this.qb=!1;this.Fj=!0`); the event context
+// copies it (`a.qb=b.parameters.qb` L680). So `Number=1` == the player,
+// any other value == the enemy. `Number` is parsed into `c.value_int`
+// (default 1; move_def.cpp `Player` branch).
+bool eval_player(const Cond& c, const FightContext& ctx) {
+    bool ok = ((c.value_int == 1) == ctx.qb);
+    return ok;
+}
+
 // Dispatch one leaf condition (JS `Ha.he`).
 bool eval_leaf(const Cond& c, const FightContext& ctx) {
     if (c.type == "Keys") return eval_keys(c, ctx);
     if (c.type == "Distance") return eval_distance(c, ctx);
-    if (c.type == "Weapon" || c.type == "Player") return eval_item_like(c, ctx);
+    if (c.type == "Weapon") return eval_item_like(c, ctx);
+    if (c.type == "Player") return eval_player(c, ctx);
     if (c.type == "Health") return eval_health(c, ctx);
     if (c.type == "CurrentInterval") return eval_current_interval(c, ctx);
     if (c.type == "CurrentAnimation") return eval_current_animation(c, ctx);
