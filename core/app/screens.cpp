@@ -4932,6 +4932,16 @@ void MapScreen::update_impl(float dt) {
         const MapFightButtonRect fb = map_fight_button_rect(map_metrics());
         if (n.visible && p.x >= fb.cx - fb.w * 0.5f && p.x <= fb.cx + fb.w * 0.5f &&
             p.y >= fb.cy - fb.h * 0.5f && p.y <= fb.cy + fb.h * 0.5f) {
+            // `Nn` (L1114) non-ignored `ClickButton Target=
+            // "InfoBattle.FightButton"`: while the quest armed this plate the
+            // player's press dispatches the plate's OWN callback (`Nn.Qg`
+            // completes the quest step) — the hit-test below IS that callback.
+            if (app().quest_engine().click_armed("InfoBattle.FightButton")) {
+                std::fprintf(stdout,
+                             "[quest] ClickButton dispatched: InfoBattle.FightButton\n");
+                std::fflush(stdout);
+                app().quest_engine().clear_click_armed();
+            }
             if (!n.active) {
                 std::fprintf(stdout, "[map] FIGHT ignored: %s [%s] locked\n", n.name.c_str(),
                              n.zone.c_str());
@@ -7819,6 +7829,14 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
         }
     } catch (const std::exception&) {
     }
+    // Quest `OpenShop` (`go` L1092): apply the pending `Oa.uLa(tab,item)` the
+    // engine queued before pushing this screen.
+    if (app().has_pending_shop()) {
+        const std::string qtab = app().pending_shop_tab();
+        const std::string qitem = app().pending_shop_item();
+        app().clear_pending_shop();
+        open_at(qtab, qitem);
+    }
 }
 
 void ShopScreen::update_impl(float dt) {
@@ -9825,6 +9843,87 @@ std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id) {
         default:
             return nullptr;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Quest live-action helpers (quest_engine.cpp `tick`)
+// ---------------------------------------------------------------------------
+
+std::string catalog_item_type(App& app, const std::string& item_name) {
+    if (item_name.empty()) return std::string();
+    const std::vector<CatalogItem> all = load_full_catalog(app);
+    for (const CatalogItem& ci : all) {
+        if (ci.name == item_name) return ci.type;  // list.xml <Item Type>
+    }
+    return std::string();
+}
+
+// `eo.N3a` (L1117 `za.instance.sxa()` -> `scroll.collapse(0)`, L2001).
+void set_za_nav_open(bool open) { g_za_nav_open = open; }
+
+namespace {
+
+// `vj.E0` (L1168) category name -> the `kShopTabs` index (0 Weapon .. 4
+// Magic). Only the five shipped shop tabs exist (`vj.ifa` L1168); Ruby(6)/
+// Free(7)/event tabs have no `kShopTabs` row -> -1.
+int shop_tab_index_for(const std::string& tab) {
+    int e0 = 0;
+    if (tab == "Weapon") e0 = 1;
+    else if (tab == "Armor") e0 = 2;
+    else if (tab == "Helm") e0 = 3;
+    else if (tab == "Ranged") e0 = 4;
+    else if (tab == "Magic") e0 = 5;
+    else return -1;
+    for (int i = 0; i < kShopTabCount; ++i) {
+        if (kShopTabs[i].e0 == e0) return i;
+    }
+    return -1;
+}
+
+} // namespace
+
+// `Oa.uLa(a,b)` (L1181866) = `e1(a)` (`f5(Cj.l6(a))`, L2286) + `Za.SA(b)`
+// (select the named cell).
+bool ShopScreen::open_at(const std::string& tab, const std::string& item) {
+    const int idx = shop_tab_index_for(tab);
+    if (idx < 0) return false;
+    tab_ = idx;
+    sel_ = 0;   // `Oa.f5` -> `usb()` auto-selects the first cell
+    hover_ = -1;
+    if (!item.empty()) {
+        const std::vector<std::size_t> rows = shop_tab_rows(items_, idx);
+        for (std::size_t r = 0; r < rows.size(); ++r) {
+            if (items_[rows[r]].name == item) {
+                sel_ = static_cast<int>(r);
+                hover_ = static_cast<int>(r);
+                break;
+            }
+        }
+    }
+    std::fprintf(stdout, "[shop] uLa tab=%s (idx %d) item=%s -> sel %d\n", tab.c_str(), idx,
+                 item.c_str(), sel_);
+    std::fflush(stdout);
+    return true;
+}
+
+bool shop_open_at(App& app, const std::string& tab, const std::string& item) {
+    if (shop_tab_index_for(tab) < 0) {
+        std::fprintf(stdout, "[quest] OpenShop tab '%s': no shipped shop tab (vj.E0)\n",
+                     tab.c_str());
+        std::fflush(stdout);
+        return false;
+    }
+    // `go.Thb` (L1092): with the shop already live (`Oa.get()!=null &&
+    // this.qO!=0`) the JS applies `uLa` directly; otherwise it pushes the
+    // scene (`mp(4, new Gj(qO, ib))`) and applies on load. The pending request
+    // is consumed by the ShopScreen ctor / update.
+    Screen* top = app.screens().top();
+    if (top != nullptr && top->id() == kScreenShop) {
+        return static_cast<ShopScreen*>(top)->open_at(tab, item);
+    }
+    app.set_pending_shop(tab, item);
+    app.screens().push(make_screen(app.screens(), kScreenShop));
+    return true;
 }
 
 } // namespace sf2::app

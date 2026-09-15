@@ -132,6 +132,23 @@ struct QuestBattleWrite {
     int replay_count = 0;        // `yla` (Iaa `f`)
 };
 
+// `Gn` `ChangeScene` (L1032 `S` -> `qIa` -> `wa.F().mp`): the destination the
+// engine navigates the ScreenManager to. `reopen` mirrors the `ReopenScene`
+// attr (`this.bta`, L1031: navigate even when the target IS the current
+// scene). The engine skips the push when the target already is on top.
+struct QuestSceneRequest {
+    std::string destination;  // resolved `xn.jOa` name (Dojo/Map/Shop/Profile)
+    bool reopen = false;      // `ReopenScene="1"`
+};
+
+// `go` `OpenShop` (L1092): `mp(4, new Gj(tab, item))` then `Oa.uLa(tab,item)`
+// (`f5(tab)` + `Za.SA(item)`, L1181866) — open the Shop, set the `vj.E0` tab
+// and select the item by name.
+struct QuestShopOpen {
+    std::string tab;   // `vj.E0` category name (Weapon/Armor/Helm/…)
+    std::string item;  // items.xml Name, or "" (tab only)
+};
+
 // Side effects of one run: save writes (applied) + records (logged only).
 struct QuestSideEffects {
     bool has_story_step = false;
@@ -170,6 +187,23 @@ struct QuestSideEffects {
     std::vector<std::string> activate_requests;
     // `SceneMenuScroll Action` (the Switch/Steam branch): recorded.
     std::vector<std::string> scene_menu_scroll;
+    // --- live action execution (interactive; headless keeps records) -------
+    // The JS action classes that ACT (not merely record), collected during the
+    // run and performed by `tick` after the firing pass (so a `mp` push never
+    // re-enters the ScreenManager's update iteration). See each cite below.
+    //
+    // `Gn` L1032: `wa.F().mp(xn.jOa(dest), …)` — push the scene.
+    std::vector<QuestSceneRequest> navigate;
+    // `go` L1092: `wa.F().mp(4, new Gj(tab,item))` + `Oa.uLa(tab,item)`.
+    std::vector<QuestShopOpen> shop_opens;
+    // `Nn` L1114 WITHOUT `IgnoreCallback`: the target's own click listeners
+    // stay live (`xk.pa` is NOT cleared), so the player's press dispatches the
+    // target's callback. The engine only ARMS + logs it (the JS never
+    // auto-presses: `Nn.S` hooks `xk.pa.addListener(Qg)` and waits).
+    std::vector<std::string> click_arm;
+    // `eo` L1117 (`Nn`… `sxa()`): `MenuBtnFlashing` collapses the `za` scroll
+    // (`za.instance.sxa()` -> `scroll.collapse(0)`, L2001) before it flashes.
+    bool collapse_nav = false;
     std::vector<std::string> unknown;             // unhandled tags
 };
 
@@ -204,6 +238,30 @@ public:
 
     // Drops every queued dialog (tutorial handoff / scene reset).
     void clear_dialogs() { dialogs_.clear(); }
+
+    // One fixed step (called by App::update_fixed AFTER the screen update):
+    // resumes deferred `Wait` runs (`Ro` L1119) and performs the queued
+    // scene/shop navigation (`Gn`/`go`). A no-op while headless (the driver
+    // paths keep the record-only behaviour). Never throws.
+    void tick(App& app);
+
+    // `Nn` (L1114) non-ignored target currently armed for the player's press.
+    // The screen's own hit-test consults this to log the dispatch (the JS
+    // `Qg` listener completes the quest step on the click).
+    bool click_armed(const std::string& target) const {
+        for (const std::string& t : armed_clicks_) {
+            if (t == target) return true;
+        }
+        return false;
+    }
+    // Consumes the armed target after the player's press dispatched it.
+    void clear_click_armed() { armed_clicks_.clear(); }
+
+    // Test hooks for the interactive verification: how many `ChangeScene` /
+    // `OpenShop` actions actually EXECUTED (resolved + performed) rather than
+    // being recorded. Monotonic; headless runs leave them at 0.
+    std::size_t scene_actions() const { return scene_actions_; }
+    std::size_t shop_actions() const { return shop_actions_; }
 
     // --- live UI-guidance signals (draw-only; no navigation) --------------
     // `Nn` `ClickButton UseFlashing="1"` target — the shell pulses the named
@@ -277,13 +335,41 @@ private:
     bool resolve_query(App& app, const std::string& token, const EvalCtx& ctx,
                        std::string& out);
     void note_unanswerable(const std::string& token);
-    void run_actions(App& app, const std::vector<QuestAction>& acts,
-                     const QuestJournal& journal, QuestSideEffects& fx,
-                     std::map<std::string, std::string>& locals,
-                     const std::string& quest, int depth);
+    // Remainder of one action list when a `Wait` suspends it: `Yb` (L954)
+    // serializes the list and `Ro` (L1119) completes N frames later, so the
+    // actions AFTER the Wait run only once the delay elapses. `rest` is the
+    // suspended tail (`inner remainder ++ outer remainder`).
+    struct ActionRest {
+        bool suspended = false;
+        int frames = 0;
+        std::vector<QuestAction> rest;
+    };
+    // One deferred action run (a suspended tail + its journal/locals).
+    struct PendingRun {
+        std::vector<QuestAction> actions;
+        QuestJournal journal;
+        std::map<std::string, std::string> locals;
+        std::string quest;
+        int frames = 0;
+    };
+
+    ActionRest run_actions(App& app, const std::vector<QuestAction>& acts,
+                           const QuestJournal& journal, QuestSideEffects& fx,
+                           std::map<std::string, std::string>& locals,
+                           const std::string& quest, int depth);
+    // Collects the executable side effects of one run (interactive only).
+    void enqueue_effects(App& app, const QuestSideEffects& fx,
+                         const QuestJournal& journal,
+                         const std::map<std::string, std::string>& locals,
+                         const std::string& quest);
+    // Resumes a deferred run (its tail) and re-defers when another Wait hits.
+    void resume_run(App& app, PendingRun& run);
+    // `Gn.qIa` (L1032): navigate to a resolved scene name.
+    void do_navigate(App& app, const QuestSceneRequest& req);
+    // `go.Thb` (L1092): open/point the Shop at a tab + item.
+    void do_open_shop(App& app, const QuestShopOpen& open);
     void apply_effects(App& app, const QuestSideEffects& fx);
     std::string battle_zone(const std::string& battle) const;
-
     bool loaded_ = false;
     std::vector<QuestDef> quests_;
     // Evaluation context of the load pass (the JS `ha.ta` journal an
@@ -307,6 +393,14 @@ private:
     // the port answers the subset it models). Logged once each; a condition
     // whose operand is unanswerable is UNKNOWN (never fires).
     std::set<std::string> logged_queries_;
+    // Deferred `Wait` runs + the queued live actions (see `tick`).
+    std::vector<PendingRun> pending_;
+    std::vector<QuestSceneRequest> nav_queue_;
+    std::vector<QuestShopOpen> shop_queue_;
+    bool collapse_nav_pending_ = false;
+    std::vector<std::string> armed_clicks_;  // `Nn` non-ignored targets
+    std::size_t scene_actions_ = 0;          // executed `ChangeScene` count
+    std::size_t shop_actions_ = 0;           // executed `OpenShop` count
 };
 
 } // namespace sf2::app

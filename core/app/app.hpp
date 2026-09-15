@@ -157,6 +157,19 @@ public:
     // passive unless quest events fire (headless-safe).
     QuestEngine& quest_engine();
 
+    // Quest `OpenShop` (`go` L1092) request, consumed by ShopScreen on mount /
+    // first update: the `vj.E0` tab name + the item Name to select
+    // (`Oa.uLa(tab,item)` L1181866). Cleared once applied.
+    void set_pending_shop(std::string tab, std::string item) {
+        pending_shop_tab_ = std::move(tab);
+        pending_shop_item_ = std::move(item);
+        has_pending_shop_ = true;
+    }
+    bool has_pending_shop() const { return has_pending_shop_; }
+    const std::string& pending_shop_tab() const { return pending_shop_tab_; }
+    const std::string& pending_shop_item() const { return pending_shop_item_; }
+    void clear_pending_shop() { has_pending_shop_ = false; }
+
     // The dojo background sprite (the main menu / map backdrop). Loaded at
     // init from the dojo location webp + atlas. Null when the asset is
     // unavailable.
@@ -388,6 +401,10 @@ private:
     bool debug_ui_ = false;
     // Fresh-profile tutorial (see set_fresh_tutorial).
     bool fresh_tutorial_ = false;
+    // Quest `OpenShop` request (see set_pending_shop).
+    bool has_pending_shop_ = false;
+    std::string pending_shop_tab_;
+    std::string pending_shop_item_;
     int frame_count_ = 0;
     int auto_click_stage_ = 0;
 };

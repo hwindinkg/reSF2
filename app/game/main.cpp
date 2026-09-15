@@ -14,6 +14,8 @@
 //
 // Defaults: res_root = reference/www/res, save = reference/saves/save.xml.
 
+#define NOMINMAX  // before any <windows.h> pull-in (glfw3native.h includes it)
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -25,13 +27,21 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <windows.h>
 
 #include <GLFW/glfw3.h>
+// `--quest-verify` posts REAL window messages to the game window (the
+// interactive quest-action verification); the Win32 window handle comes from
+// GLFW's native accessor.
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
 
 #include "app/app.hpp"
+#include "app/quest_engine.hpp"
 #include "app/save_system.hpp"
 #include "app/screens.hpp"
 #include "scene/fighter.hpp"
+#include "scene/renderer.hpp"
 
 namespace {
 
@@ -42,7 +52,7 @@ void print_usage(const char* argv0) {
                  "usage: %s [res_root] [save_path] [--headless N] [--autoclick] [--headless-loop]\n"
                   "                  [--fight] [--battle <name>] [--zone <name>]\n"
                   "                  [--dump-pose N] [--dump-clip <name>]\n"
-                  "                  [--ui-tour] [--fidelity-tour]\n"
+                  "                  [--ui-tour] [--fidelity-tour] [--quest-verify]\n"
                   "                  [--replay [file]] [--verify-input]\n"
                  "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
@@ -866,6 +876,173 @@ std::vector<ReplayEdge> parse_replay_file(const std::string& path) {
     return edges;
 }
 
+// --- `--quest-verify`: interactive quest-action verification ---------------
+// A REAL window (headless_frames_ == 0, so the engine EXECUTES actions instead
+// of recording them) driven by REAL Win32 window messages posted to the GLFW
+// window: WM_MOUSEMOVE/WM_LBUTTONDOWN/WM_LBUTTONUP reach GLFW's WndProc, which
+// updates the cursor/button state `App::poll_input` reads each frame. Drives
+// the shipped `StoryTutorial*` chain (fresh profile) and asserts the live
+// behaviours: the chain fires, `ChangeScene` executes, `MenuBtnFlashing`
+// resolves the `_NextScene` nav target, `OpenShop` opens the Shop at the
+// tutorial tab/item, and the Lynx (Shin) fight launches.
+struct QuestVerifyDriver {
+    HWND hwnd = nullptr;
+    int frame = 0;
+    int down_x = -1, down_y = -1;
+    int hold = 0;      // frames the left button stays down after a press
+    int cooldown = 0;  // frames before the next press
+    bool nav_toggle = false;
+    int last_screen = -1;
+    // Assertions (PASS/FAIL logged at the end).
+    bool saw_chain = false;       // the fresh tutorial chain fired
+    bool saw_nav_flash = false;   // `MenuBtnFlashing` resolved a nav target
+    bool saw_shop = false;        // the Shop screen became current
+    bool saw_lynx_dialog = false; // the Lynx boss dialog queued
+    bool saw_shin = false;        // the boss fight carries BOSS_LYNX
+    bool saw_fight = false;       // the Fight screen launched
+    bool go_map = false;          // post-OpenShop: navigate to the Map
+
+    int target_x = -1, target_y = -1;  // the point the cursor is held on
+    // Real window messages: move the REAL cursor (SetCursorPos -> GLFW's
+    // WM_MOUSEMOVE -> `glfwGetCursorPos`) and post the button messages, so
+    // `App::poll_input` sees a genuine OS click at the intended point.
+    void post(UINT msg, int x, int y, WPARAM wp) {
+        if (hwnd == nullptr) return;
+        PostMessageW(hwnd, msg, wp,
+                     MAKELPARAM(static_cast<short>(x), static_cast<short>(y)));
+    }
+    void place_cursor(int x, int y) {
+        if (hwnd == nullptr) return;
+        POINT pt;
+        pt.x = x;
+        pt.y = y;
+        ClientToScreen(hwnd, &pt);
+        SetCursorPos(pt.x, pt.y);
+    }
+    // Re-asserts the target point right before the frame polls input, so an
+    // external cursor move cannot displace the queued click.
+    void keep_cursor() {
+        if (target_x >= 0) place_cursor(target_x, target_y);
+    }
+    void press(int x, int y) {
+        target_x = x;
+        target_y = y;
+        down_x = x;
+        down_y = y;
+        hold = 3;
+        cooldown = 8;
+        std::fprintf(stdout, "[qverify] click (%d, %d)\n", x, y);
+        std::fflush(stdout);
+        place_cursor(x, y);
+        post(WM_MOUSEMOVE, x, y, 0);
+        post(WM_LBUTTONDOWN, x, y, MK_LBUTTON);
+    }
+
+    void tick(sf2::app::App& app) {
+        ++frame;
+        if (hold > 0 && --hold == 0) post(WM_LBUTTONUP, down_x, down_y, 0);
+        if (cooldown > 0) --cooldown;
+        const int cur = app.screens().current_id();
+        if (cur != last_screen) {
+            last_screen = cur;
+            std::fprintf(stdout, "[qverify] screen -> %d\n", cur);
+            std::fflush(stdout);
+        }
+        if (app.quest_engine().scene_actions() > 0) saw_chain = true;
+        if (app.quest_engine().shop_actions() > 0) go_map = true;
+        if (cur == kScreenShop) saw_shop = true;
+        if (cur == kScreenFight) {
+            saw_fight = true;
+            const std::string nm = app.pending_battle().battle_name;
+            if (nm.find("BOSS_LYNX") != std::string::npos) saw_shin = true;
+        }
+        sf2::app::QuestEngine& q = app.quest_engine();
+        // 1. A queued dialog owns the input (advance / fire the plate).
+        if (q.has_dialog()) {
+            const sf2::app::EngineDialog& d = q.dialog();
+            if (d.image.find("boss_lynx") != std::string::npos ||
+                d.title.find("Lynx") != std::string::npos) {
+                saw_lynx_dialog = true;
+            }
+            if (cooldown == 0) {
+                if (d.type == "Notification")
+                    press(640, 400);  // any tap advances
+                else
+                    press(860, 549);  // tutorial_dialog_layout action plate
+            }
+            return;
+        }
+        // 2. Between-rounds Next button (the fight holds until it is pressed).
+        sf2::app::Screen* top = app.screens().top();
+        if (cur == kScreenFight && top != nullptr &&
+            static_cast<sf2::app::FightScreen*>(top)->round_wait()) {
+            if (cooldown == 0) {
+                float cx = 0.0f, cy = 0.0f;
+                static_cast<sf2::app::FightScreen*>(top)->next_button_center(cx, cy);
+                press(static_cast<int>(cx), static_cast<int>(cy));
+            }
+            return;
+        }
+        // 3. Results -> back (pops to the caller).
+        if (cur == kScreenResults) {
+            if (cooldown == 0) press(640, 360);
+            return;
+        }
+        // 4. `MenuBtnFlashing` guidance: expand the collapsed `za` column,
+        //    then click the flashed row (the JS `eo` collapse + row flash).
+        const std::string flash = q.nav_flash();
+        if (!flash.empty()) {
+            saw_nav_flash = true;
+            int idx = -1;
+            if (flash == "Dojo") idx = 0;
+            else if (flash == "Map") idx = 1;
+            else if (flash == "Shop") idx = 2;
+            else if (flash == "Profile") idx = 3;
+            else if (flash == "Settings") idx = 4;
+            if (idx >= 0 && cooldown == 0) {
+                // The `za` nav column is interactive on the Dojo hub (the
+                // shared chrome's `za_update`); from a sub-screen (Shop/Map/
+                // Profile) press BACK first, then use the column.
+                if (cur != kScreenDojo) {
+                    press(64, 40);
+                    return;
+                }
+                static const int kRowY[5] = {126, 231, 337, 442, 548};
+                if (nav_toggle) {
+                    press(184, kRowY[idx]);
+                } else {
+                    press(184, 92);  // the collapsed `gk` header (za_header_rect)
+                }
+                nav_toggle = !nav_toggle;
+            }
+            return;
+        }
+        // 5. After `OpenShop` executed: head to the Map for the Lynx beat.
+        //    (`StoryTutorialOpenScene` is latched after its first fire, so the
+        //    second `Activate` does not re-arm a nav flash; the driver closes
+        //    the loop by navigating to the Map itself.)
+        if (go_map && !saw_lynx_dialog) {
+            if (cooldown == 0) {
+                if (cur == kScreenMap) {
+                    return;  // wait for `StoryTutorialBossFight`'s Lynx dialog
+                }
+                if (cur != kScreenDojo) {
+                    press(64, 40);  // BACK to the hub
+                } else {
+                    static const int kRowY[5] = {126, 231, 337, 442, 548};
+                    if (nav_toggle) {
+                        press(184, kRowY[1]);  // Map
+                    } else {
+                        press(184, 92);  // header
+                    }
+                    nav_toggle = !nav_toggle;
+                }
+            }
+            return;
+        }
+    }
+};
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -876,6 +1053,8 @@ int main(int argc, char** argv) {
     bool headless_loop = false;
     bool ui_tour = false;
     bool fidelity_tour = false;
+    bool quest_verify = false;  // --quest-verify: interactive action check
+    bool quest_verify_buy = false;  // --quest-verify-buy: seeded STEP_BUY_ITEM
     bool replay_mode = false;
     bool verify_input = false;
     std::string replay_file = "reference/traces/recorded_inputs.txt";
@@ -912,6 +1091,11 @@ int main(int argc, char** argv) {
             ui_tour = true;
         } else if (arg == "--fidelity-tour") {
             fidelity_tour = true;
+        } else if (arg == "--quest-verify") {
+            quest_verify = true;
+        } else if (arg == "--quest-verify-buy") {
+            quest_verify = true;
+            quest_verify_buy = true;
         } else if (arg == "--replay") {
             replay_mode = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -1013,7 +1197,7 @@ int main(int argc, char** argv) {
     // END step (L200) — once short-circuited the chain cannot be armed, so a
     // stale completed local save would make the tutorial steps stall. The
     // oracle harness seeds the same fresh state.
-    if (fidelity_tour) {
+    if (fidelity_tour || quest_verify) {
         std::string def = res_root + "/users_default.xml";
         if (!std::filesystem::exists(def)) {
             const std::string hashed = res_root + "/users_default.b7da2019.xml";
@@ -1027,14 +1211,27 @@ int main(int argc, char** argv) {
         try {
             sf2::app::SaveSystem ss(save_path, def);
             sf2::app::WarriorSave w = ss.load();
-            if (!w.story_step().empty()) {
+            if (quest_verify_buy) {
+                // Harness seed for the `OpenShop` verification: the tutorial
+                // chain only advances to STEP_BUY_ITEM on a training-fight WIN
+                // (tutorial_quests.xml L77-80 — the port's shipped fight is
+                // decided by the enemy AI and is a loss, a pre-existing
+                // gameplay gap outside this task). Seeding the step (the same
+                // device the fidelity tour uses for its END handoff) makes
+                // `StoryTutorialShop` arm the Shop nav flash at boot, so the
+                // driver verifies the LIVE `OpenShop` execution.
+                w.set_story_step("STEP_BUY_ITEM");
+                ss.save(w);
+                std::fprintf(stdout, "[qverify] seeded story step -> STEP_BUY_ITEM\n");
+                std::fflush(stdout);
+            } else if (!w.story_step().empty()) {
                 w.set_story_step("");
                 ss.save(w);
-                std::fprintf(stdout, "[fidelity] reset story step -> NotStarted\n");
+                std::fprintf(stdout, "[quest] story step reset -> NotStarted (fresh profile)\n");
                 std::fflush(stdout);
             }
         } catch (const std::exception& e) {
-            std::fprintf(stderr, "[fidelity] story-step reset failed: %s\n", e.what());
+            std::fprintf(stderr, "[qverify] story-step reset failed: %s\n", e.what());
         }
     }
 
@@ -1231,6 +1428,70 @@ int main(int argc, char** argv) {
         }
         app.shutdown();
         return 0;
+    } else if (quest_verify || quest_verify_buy) {
+        // --- interactive quest-action verification (REAL window messages) ---
+        // A live window (headless_frames_ == 0, so the engine EXECUTES actions
+        // rather than recording them) driven by posted Win32 messages.
+        //   `--quest-verify`     fresh profile: the shipped StoryTutorial*
+        //                        chain fires, `ChangeScene` executes, the
+        //                        training fight launches.
+        //   `--quest-verify-buy` seeded STEP_BUY_ITEM: `OpenShop` opens the
+        //                        Shop at the tutorial tab/item, then the Lynx
+        //                        (Shin) boss dialog/fight.
+        if (quest_verify && !quest_verify_buy) app.set_fresh_tutorial(true);
+        app.set_auto_attack(true);
+        QuestVerifyDriver drv;
+        drv.hwnd = glfwGetWin32Window(app.renderer().window());
+        if (drv.hwnd != nullptr) {
+            // The injected clicks are real OS input: put the game window in
+            // front so they land on it.
+            ShowWindow(drv.hwnd, SW_RESTORE);
+            SetWindowPos(drv.hwnd, HWND_TOP, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            SetForegroundWindow(drv.hwnd);
+            SetActiveWindow(drv.hwnd);
+        }
+        std::fprintf(stdout, "[qverify] window handle %p, engine live (headless=0), buy=%d\n",
+                     static_cast<void*>(drv.hwnd), quest_verify_buy ? 1 : 0);
+        std::fflush(stdout);
+        const std::size_t quests_loaded = app.quest_engine().quest_count();
+        while (!glfwWindowShouldClose(app.renderer().window()) && drv.frame < 24000) {
+            drv.tick(app);
+            drv.keep_cursor();  // re-assert the click point before input polls
+            app.run_one_frame();
+            if (drv.saw_lynx_dialog && drv.saw_shin && drv.saw_shop) break;
+            if (!quest_verify_buy && drv.saw_fight && drv.frame > 600) break;
+            Sleep(6);  // pace the presents so the fixed 60 Hz steps advance
+        }
+        sf2::app::QuestEngine& q = app.quest_engine();
+        const bool ok_chain = drv.saw_chain && quests_loaded > 0;
+        const bool ok_change = q.scene_actions() > 0;
+        const bool ok_flash = drv.saw_nav_flash;
+        const bool ok_shop = drv.saw_shop;
+        const bool ok_open = q.shop_actions() > 0;
+        const bool ok_lynx = drv.saw_lynx_dialog;
+        const bool ok_shin = drv.saw_shin;
+        const bool ok_fight = drv.saw_fight;
+        std::fprintf(stdout,
+                     "[qverify] chain=%d ChangeScene executed=%zu navflash=%d Shop=%d "
+                     "OpenShop executed=%zu LynxDialog=%d ShinFight=%d trainingFight=%d\n",
+                     ok_chain ? 1 : 0, q.scene_actions(), ok_flash ? 1 : 0, ok_shop ? 1 : 0,
+                     q.shop_actions(), ok_lynx ? 1 : 0, ok_shin ? 1 : 0, ok_fight ? 1 : 0);
+        const bool all = quest_verify_buy
+                             ? (ok_chain && ok_change && ok_flash && ok_shop && ok_open &&
+                                ok_lynx && ok_shin)
+                             : (ok_chain && ok_change && ok_fight);
+        std::fprintf(stdout,
+                     "[qverify] RESULT chain=%s ChangeScene=%s navflash=%s Shop=%s "
+                     "OpenShop=%s LynxDialog=%s ShinFight=%s trainingFight=%s -> %s\n",
+                     ok_chain ? "PASS" : "FAIL", ok_change ? "PASS" : "FAIL",
+                     ok_flash ? "PASS" : "FAIL", ok_shop ? "PASS" : "FAIL",
+                     ok_open ? "PASS" : "FAIL", ok_lynx ? "PASS" : "FAIL",
+                     ok_shin ? "PASS" : "FAIL", ok_fight ? "PASS" : "FAIL",
+                     all ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return all ? 0 : 1;
     } else if (replay_mode || verify_input) {
         // ---- Input replay / scripted verification (phase1 step9) ----------
         // Boots the direct dojo fight (same as --fight) and feeds a game

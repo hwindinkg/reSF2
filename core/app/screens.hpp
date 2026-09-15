@@ -412,6 +412,12 @@ public:
     void update_impl(float dt) override;
     void render_impl(App& app) override;
 
+    // `Oa.uLa(a,b)` (JS L1181866) = `f5(tab)` + `Za.SA(item)`: switch to the
+    // tab named by the `vj.E0` category (Weapon/Armor/Helm/Ranged/Magic/…) and
+    // select the item by list.xml Name (`` = first row). Returns false for an
+    // unknown tab (the caller logs; no screen change).
+    bool open_at(const std::string& tab, const std::string& item);
+
 private:
     std::vector<CatalogItem> items_;
     int hover_ = -1;      // grid cell hover (row index within the tab)
@@ -638,5 +644,20 @@ std::vector<CatalogItem> load_full_catalog(App& app);
 
 // Factory: creates a screen by id (used by Screen::push).
 std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id);
+
+// --- quest live-action helpers (quest_engine.cpp) --------------------------
+// `Xn`/`Pa` catalog type lookup for `OpenShop Tab="?Purchase[X].Type"`
+// (tutorial_quests.xml L107): the item's list.xml Type, or "" when unknown.
+std::string catalog_item_type(App& app, const std::string& item_name);
+
+// `eo.N3a` (L1117 `za.instance.sxa()` -> `scroll.collapse(0)`, L2001): drives
+// the shared `za` nav scroll flag (the collapsed header then carries the
+// `MenuBtnFlashing` pulse until the player expands it).
+void set_za_nav_open(bool open);
+
+// `go.Thb` (L1092) + `Oa.uLa` (L1181866): open the Shop at the `vj.E0` tab
+// name and select the item by name. Pushes the Shop when it is not current;
+// otherwise re-points the live screen. Returns false for an unknown tab.
+bool shop_open_at(App& app, const std::string& tab, const std::string& item);
 
 } // namespace sf2::app

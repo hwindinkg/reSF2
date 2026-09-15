@@ -7,6 +7,7 @@
 
 #include "app/quest_engine.hpp"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include "app/app.hpp"
 #include "app/lang_table.hpp"
 #include "app/save_system.hpp"
+#include "app/screens.hpp"
 #include "xml_doc.hpp"
 
 namespace sf2::app {
@@ -221,6 +223,37 @@ QuestBattleWrite battle_write_from(const std::string& triple, const std::string&
     }
     bw.zone = zone.empty() ? zone_hint : zone;
     return bw;
+}
+
+// `xn.jOa(a)` (L1168): scene NAME -> screen id (11 = unknown, the JS default).
+// `xn.iOa(a)` (L1167) is the reverse; only the ids the shell ports exist.
+int scene_id_for_name(const std::string& name) {
+    if (name == "Preloader") return 0;
+    if (name == "Loader") return 2;
+    if (name == "Dojo") return 3;
+    if (name == "Shop") return 4;
+    if (name == "Map") return 5;
+    if (name == "Fight") return 6;
+    if (name == "Profile") return 7;
+    if (name == "GeneralMenu") return 8;
+    if (name == "Pvp") return 9;
+    return 11;  // JS default (no such screen in the shell)
+}
+
+// `xn.iOa(a)` (L1167): screen id -> scene name (the quest journal's scene).
+std::string scene_name_for_id(int id) {
+    switch (id) {
+        case 0: return "Preloader";
+        case 2: return "Loader";
+        case 3: return "Dojo";
+        case 4: return "Shop";
+        case 5: return "Map";
+        case 6: return "Fight";
+        case 7: return "Profile";
+        case 8: return "GeneralMenu";
+        case 9: return "Pvp";
+        default: return std::string();
+    }
 }
 
 } // namespace
@@ -679,12 +712,14 @@ bool QuestEngine::conditions_hold(App& app, const QuestCond& cond, const EvalCtx
     return eval_cond(app, cond, ctx) == Tri::True;
 }
 
-void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
-                              const QuestJournal& journal, QuestSideEffects& fx,
-                              std::map<std::string, std::string>& locals,
-                              const std::string& quest, int depth) {
-    if (depth > kMaxActionDepth) return;
-    for (const QuestAction& a : acts) {
+QuestEngine::ActionRest QuestEngine::run_actions(
+    App& app, const std::vector<QuestAction>& acts, const QuestJournal& journal,
+    QuestSideEffects& fx, std::map<std::string, std::string>& locals,
+    const std::string& quest, int depth) {
+    ActionRest result;
+    if (depth > kMaxActionDepth) return result;
+    for (std::size_t i = 0; i < acts.size(); ++i) {
+        const QuestAction& a = acts[i];
         const std::string& t = a.tag;
         if (t == "If") {
             // `co.S` (L1038): the If's own `<Conditions>` against the live
@@ -701,20 +736,53 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
             } catch (const std::exception&) {
             }
             const bool take = conditions_hold(app, a.if_cond, c);
-            run_actions(app, take ? a.if_then : a.if_else, journal, fx, locals, quest,
-                        depth + 1);
+            ActionRest sub = run_actions(app, take ? a.if_then : a.if_else, journal, fx,
+                                         locals, quest, depth + 1);
+            // `co` (L1038) runs the chosen `Yb`; a `Wait` inside it suspends
+            // the whole walk, so the outer tail is appended to the remainder.
+            if (sub.suspended) {
+                sub.rest.insert(sub.rest.end(), acts.begin() + i + 1, acts.end());
+                return sub;
+            }
         } else if (t == "ChangeScene") {
             std::string dst = attr_or(a.attrs, "Destination");
             if (dst == "_$SceneTo") dst = journal.scene_to;
             fx.scene_requests.push_back(dst);
+            // `Gn.S` (L1032): `qIa(xn.jOa(ba.Pc(a, Destination)))` — the live
+            // request the engine performs in `tick`.
+            QuestSceneRequest req;
+            req.destination = dst;
+            req.reopen = attr_bool01(attr_or(a.attrs, "ReopenScene"));
+            fx.navigate.push_back(std::move(req));
         } else if (t == "Fight") {
             fx.fight_requests.push_back(attr_or(a.attrs, "Name"));
         } else if (t == "FightEnd") {
             fx.unknown.push_back("FightEnd (needs ca.Ka().kD scene hook)");
         } else if (t == "OpenShop") {
             std::string tab = attr_or(a.attrs, "Tab");
-            if (tab == "?Purchase[WEAPON_KNIVES].Type") tab = "Weapon";
-            fx.scene_requests.push_back("Shop:" + tab + ":" + attr_or(a.attrs, "Item"));
+            // `vj.E0(ba.Pc(a, Tab))` (L1093): the tab arg is resolved through
+            // the expression engine. `?Purchase[X].Type` (tutorial_quests.xml
+            // L107) reads the purchased item's catalog Type (`Pa`), the only
+            // `?`-form the shipped shop quests use.
+            const std::string kPurchase = "?Purchase[";
+            const std::string kTypeTail = "].Type";
+            if (tab.compare(0, kPurchase.size(), kPurchase) == 0 &&
+                tab.size() > kPurchase.size() + kTypeTail.size() &&
+                tab.compare(tab.size() - kTypeTail.size(), kTypeTail.size(), kTypeTail) == 0) {
+                const std::string item = tab.substr(
+                    kPurchase.size(),
+                    tab.size() - kPurchase.size() - kTypeTail.size());
+                const std::string resolved = catalog_item_type(app, item);
+                if (!resolved.empty()) tab = resolved;
+            }
+            const std::string item = attr_or(a.attrs, "Item");
+            fx.scene_requests.push_back("Shop:" + tab + ":" + item);
+            // `go.S` (L1092): `this.qO = vj.E0(...)`, `this.ah = ba.Pc(a,Item)`
+            // -> `mp(4, new Gj(qO, ib))` + `Oa.uLa(qO, ah)`.
+            QuestShopOpen open;
+            open.tab = tab;
+            open.item = item;
+            fx.shop_opens.push_back(std::move(open));
         } else if (t == "Dialog") {
             std::string lines;
             for (const QuestAction& c : a.children) {
@@ -841,13 +909,22 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
                 }
             }
         } else if (t == "ClickButton") {
-            fx.clicks.push_back(attr_or(a.attrs, "Target"));
-            // `Nn` `UseFlashing="1"` (L1115): highlight the target plate. The
+            const std::string target = attr_or(a.attrs, "Target");
+            fx.clicks.push_back(target);
+            // `Nn` `UseFlashing="1"` (L1114): highlight the target plate. The
             // tutorial pairs it with `IgnoreCallback="1"` so the map FIGHT
             // button is focused/flashed but NEVER launched by the quest
             // (tutorial_quests.xml L156).
-            if (attr_bool01(attr_or(a.attrs, "UseFlashing"))) {
-                fx.flash_targets.push_back(attr_or(a.attrs, "Target"));
+            const bool use_flash = attr_bool01(attr_or(a.attrs, "UseFlashing"));
+            if (use_flash) fx.flash_targets.push_back(target);
+            // `Nn.S` (L1114): `IgnoreCallback` saves + clears the target's own
+            // click listeners (`this.I$ = this.xk.pa.ni.slice();
+            // this.xk.pa.clear()`), so a press only completes the quest step;
+            // WITHOUT it the target's callback stays live and the PLAYER's
+            // press dispatches it. The JS never auto-presses (`xk.pa
+            // .addListener(Qg)` waits for the click) — the engine only arms.
+            if (!attr_bool01(attr_or(a.attrs, "IgnoreCallback"))) {
+                fx.click_arm.push_back(target);
             }
         } else if (t == "MenuBtnFlashing") {
             // Desktop navigation guidance (FLOW_STATIC L140-142): the web/
@@ -857,13 +934,20 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
             // the global `NextScene` (Shop/Map/Dojo/Profile).
             fx.menu_flashes.push_back(
                 quest_var(app, locals, attr_or(a.attrs, "BtnName")));
+            // `eo.parse`/`N3a` (L1117): `BtnName` + `za.instance.sxa()` ->
+            // `scroll.collapse(0)` (L2001) — the flash first collapses the
+            // `za` scroll so the collapsed header carries the pulse; the row
+            // flash lands once the player expands it.
+            fx.collapse_nav = true;
         } else if (t == "ClickHint") {
-            // `ClickHint` (the Switch/Steam branch, tutorial_quests.xml L338):
-            // recorded only — the desktop shell drives navigation through the
-            // nav flash instead of an auto-click.
+            // `Fe.S0a` (L947-953) has NO `EClickHint` case, so `Fe.Ij`
+            // (`Nz.hi` L953 matches "ClickHint") falls back to the base `S`
+            // (L945 `S.S` = no-op) — the shipped build does NOT render an
+            // arrow for it. Recorded (never invents an arrow the JS lacks).
             fx.click_hints.push_back(attr_or(a.attrs, "Target"));
         } else if (t == "SceneMenuScroll") {
-            // `SceneMenuScroll Action` (the Switch/Steam branch): recorded.
+            // Same as `ClickHint`: no `ESceneMenuScroll` case in `Fe.S0a`
+            // (L947-953) -> base `S` no-op. Recorded only.
             fx.scene_menu_scroll.push_back(attr_or(a.attrs, "Action"));
         } else if (t == "ClearQuestQueue") {
             fx.clears.push_back(attr_or(a.attrs, "Name"));
@@ -878,19 +962,67 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
             // `Ge.MZ` = the ActionID; re-fired by fire_inner.
             fx.activate_requests.push_back(attr_or(a.attrs, "ActionID"));
         } else if (t == "Wait") {
-            // Collapsed (synchronous runs) — recorded for traceability.
-            fx.unknown.push_back("Wait:" + attr_or(a.attrs, "Frames") + "f");
+            // `Ro.S` (L1119): `this.Oqa = ba.UBa(a, Frames)` then a frame
+            // listener fires `stop()` after that many frames. `Yb` (L954)
+            // serializes the list, so the actions AFTER the Wait must not run
+            // until the delay elapses. Interactive: suspend here and let
+            // `tick` resume the tail. Headless (no scheduler armed) collapses
+            // in order — the tail still runs after this point, never before.
+            const std::string raw = attr_or(a.attrs, "Frames", "0");
+            const int frames = parse_int_or(quest_var(app, locals, raw), 0);
+            if (!app.headless() && frames > 0) {
+                ActionRest suspended;
+                suspended.suspended = true;
+                suspended.frames = frames;
+                suspended.rest.assign(acts.begin() + i + 1, acts.end());
+                return suspended;
+            }
+            fx.unknown.push_back("Wait:" + raw + "f (collapsed)");
+        } else if (t == "GiveItem") {
+            // `Yn.S` (L1238): `Pa.W$a(name, level, qty, putOn, packItem)`.
+            // The port's WarriorSave has no `Pa.W$a` inventory-write path and
+            // the Name is usually a `?Concat[...]` the query engine does not
+            // model -> record-only.
+            fx.unknown.push_back("GiveItem (needs Pa.W$a; ?Concat unresolved): " +
+                                 attr_or(a.attrs, "Name"));
+        } else if (t == "ShowNews") {
+            // `xo` (L1246): `S(a){super.S(a); this.sa()}` — the shipped build
+            // is a NO-OP. Nothing to execute.
+        } else if (t == "ForceExecution") {
+            // `Wn.S` (L1205): `ha.F().AD(Name)` + `ha.F().Qaa(q, true)` —
+            // re-queue the named quest so it can run again. The port's latch
+            // is `fired_`; un-latch the name (a following `Activate`/event
+            // pass re-runs it).
+            const std::string name = attr_or(a.attrs, "Name");
+            if (!name.empty()) {
+                std::vector<std::string> keep;
+                for (const std::string& f : fired_) {
+                    if (f != name) keep.push_back(f);
+                }
+                fired_.swap(keep);
+                std::fprintf(stdout, "[quest] ForceExecution unlatched %s\n", name.c_str());
+                std::fflush(stdout);
+            }
         } else if (t == "StoryTutorialMove" || t == "StoryTutorialPunchbag" ||
                    t == "StoryTutorialBuyItem" || t == "StoryTutorialLearnPerk" ||
                    t == "StoryTutorialDoubleSweep" || t == "StoryTutorialShowBlock") {
+            // `Do`/`Eo`/`Ao`/`Co`/`Bo`/`Fo` (L1242-1247) all forward to the
+            // story-tutorial scene hooks (`Oa.ska`, fight move hooks) the
+            // shell drives itself; record-only.
             fx.minigames.push_back(t + " (needs fight hooks)");
         } else if (t == "Line" || t == "Button" || t == "Then" || t == "Else" ||
                    t == "Conditions") {
-            run_actions(app, a.children, journal, fx, locals, quest, depth + 1);
+            ActionRest sub = run_actions(app, a.children, journal, fx, locals, quest,
+                                         depth + 1);
+            if (sub.suspended) {
+                sub.rest.insert(sub.rest.end(), acts.begin() + i + 1, acts.end());
+                return sub;
+            }
         } else {
             fx.unknown.push_back(t);
         }
     }
+    return result;
 }
 
 void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
@@ -960,6 +1092,126 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
     }
 }
 
+// --- live action execution ------------------------------------------------
+// The JS action classes do their work in `S(a)`; the port collects the
+// executable ones in `QuestSideEffects` and performs the navigations here.
+// Interactive only — a headless run keeps the record-only behaviour and stays
+// deterministic (the task's headless-safe rule).
+void QuestEngine::enqueue_effects(App& app, const QuestSideEffects& fx,
+                                  const QuestJournal& journal,
+                                  const std::map<std::string, std::string>& locals,
+                                  const std::string& quest) {
+    (void)journal;
+    (void)locals;
+    (void)quest;
+    if (app.headless()) return;
+    for (const QuestSceneRequest& s : fx.navigate) nav_queue_.push_back(s);
+    for (const QuestShopOpen& s : fx.shop_opens) shop_queue_.push_back(s);
+    for (const std::string& t : fx.click_arm) {
+        armed_clicks_.push_back(t);
+        std::fprintf(stdout, "[quest] ClickButton armed: %s (callback live)\n", t.c_str());
+    }
+    if (fx.collapse_nav) collapse_nav_pending_ = true;
+    std::fflush(stdout);
+}
+
+void QuestEngine::resume_run(App& app, PendingRun& run) {
+    QuestSideEffects fx;
+    const ActionRest rest =
+        run_actions(app, run.actions, run.journal, fx, run.locals, run.quest, 0);
+    apply_effects(app, fx);
+    enqueue_effects(app, fx, run.journal, run.locals, run.quest);
+    if (rest.suspended) {
+        run.actions = rest.rest;
+        run.frames = rest.frames;
+    } else {
+        run.actions.clear();
+    }
+}
+
+// `Gn.qIa` (L1032): `mp(a,null,null,CallEvents)` — push the target scene. The
+// push is skipped when the target already is the current scene (unless
+// `ReopenScene`), and `Fight`(6) routes to the Dojo(3) (`mp(3)`).
+void QuestEngine::do_navigate(App& app, const QuestSceneRequest& req) {
+    ++scene_actions_;  // `Gn` executed (test hook; not a record)
+    std::string name = req.destination;
+    if (name.empty()) name = "Dojo";   // `a==null||a=="" ? qIa(3)`
+    int id = scene_id_for_name(name);  // `xn.jOa` L1168
+    if (id == 11) {
+        std::fprintf(stdout, "[quest] ChangeScene '%s': xn.jOa -> 11 (no shell screen)\n",
+                     name.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    const int cur = app.screens().current_id();
+    if (id == 6) id = 3;  // `a==6 ? wa.F().mp(3,...)`
+    if (id == cur && !req.reopen) {
+        std::fprintf(stdout, "[quest] ChangeScene %s: already current (skip)\n", name.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    std::unique_ptr<Screen> scr = make_screen(app.screens(), static_cast<ScreenId>(id));
+    if (scr == nullptr) {
+        std::fprintf(stdout, "[quest] ChangeScene %s (id %d): no shell screen\n",
+                     name.c_str(), id);
+        std::fflush(stdout);
+        return;
+    }
+    std::fprintf(stdout, "[quest] ChangeScene %s -> push (id %d)\n", name.c_str(), id);
+    std::fflush(stdout);
+    armed_clicks_.clear();
+    app.screens().push(std::move(scr));
+}
+
+// `go.Thb` (L1092) + `Oa.uLa` (L1181866): open the Shop at the `vj.E0` tab and
+// select the item (the shell helper owns the shop tab table + catalog).
+void QuestEngine::do_open_shop(App& app, const QuestShopOpen& open) {
+    ++shop_actions_;  // `go` executed (test hook; not a record)
+    std::fprintf(stdout, "[quest] OpenShop tab=%s item=%s -> shop\n", open.tab.c_str(),
+                 open.item.c_str());
+    std::fflush(stdout);
+    armed_clicks_.clear();
+    shop_open_at(app, open.tab, open.item);
+}
+
+void QuestEngine::tick(App& app) {
+    if (app.headless()) {
+        // The driver paths never auto-run: drop anything queued so a stale
+        // request can never fire later (defensive; enqueue is gated too).
+        pending_.clear();
+        nav_queue_.clear();
+        shop_queue_.clear();
+        collapse_nav_pending_ = false;
+        return;
+    }
+    if (!loaded_) return;
+    // `Ro` (L1119): resume every run whose frame delay elapsed.
+    std::vector<PendingRun> due;
+    for (std::size_t i = 0; i < pending_.size();) {
+        if (--pending_[i].frames <= 0) {
+            due.push_back(std::move(pending_[i]));
+            pending_.erase(pending_.begin() + static_cast<std::ptrdiff_t>(i));
+        } else {
+            ++i;
+        }
+    }
+    for (PendingRun& run : due) resume_run(app, run);
+    // `Gn`/`go`/`eo`: perform the queued navigation. Bounded drain — a push
+    // fires ChangeTab/SceneLoaded, which may enqueue more work.
+    for (int pass = 0; pass < 16; ++pass) {
+        if (nav_queue_.empty() && shop_queue_.empty() && !collapse_nav_pending_) break;
+        std::vector<QuestSceneRequest> navs;
+        navs.swap(nav_queue_);
+        std::vector<QuestShopOpen> shops;
+        shops.swap(shop_queue_);
+        const bool collapse = collapse_nav_pending_;
+        collapse_nav_pending_ = false;
+        if (collapse) set_za_nav_open(false);  // `eo` L1117 -> `za.sxa()`
+        for (const QuestSceneRequest& n : navs) do_navigate(app, n);
+        for (const QuestShopOpen& s : shops) do_open_shop(app, s);
+    }
+}
+
 void QuestEngine::fire_inner(App& app, const std::string& event,
                              const QuestJournal& journal,
                              std::vector<std::string>& fired, int depth) {
@@ -1002,8 +1254,23 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         if (!conditions_hold(app, q.root, ctx)) continue;
         QuestSideEffects fx;
         std::map<std::string, std::string> locals;  // run-local vars
-        run_actions(app, q.actions, journal, fx, locals, q.name, 0);
+        const ActionRest rest =
+            run_actions(app, q.actions, journal, fx, locals, q.name, 0);
         apply_effects(app, fx);
+        // Live actions (`Gn`/`go`/`Nn`/`eo`) + a suspended `Wait` tail.
+        enqueue_effects(app, fx, journal, locals, q.name);
+        if (rest.suspended) {
+            PendingRun run;
+            run.actions = rest.rest;
+            run.journal = journal;
+            run.locals = locals;
+            run.quest = q.name;
+            run.frames = rest.frames;
+            std::fprintf(stdout, "[quest] Wait %d frames -> deferred %zu actions\n",
+                         rest.frames, run.actions.size());
+            std::fflush(stdout);
+            pending_.push_back(std::move(run));
+        }
         // Live UI guidance (draw-only, last value wins): the shell reads
         // these each frame instead of the quest auto-acting.
         if (!fx.flash_targets.empty()) flash_target_ = fx.flash_targets.back();
@@ -1147,8 +1414,19 @@ std::vector<std::string> QuestEngine::press_dialog(App& app) {
     std::fflush(stdout);
     QuestSideEffects fx;
     std::map<std::string, std::string> locals;
-    run_actions(app, dlg.button_actions, dlg.journal, fx, locals, dlg.quest, 0);
+    const ActionRest rest =
+        run_actions(app, dlg.button_actions, dlg.journal, fx, locals, dlg.quest, 0);
     apply_effects(app, fx);
+    enqueue_effects(app, fx, dlg.journal, locals, dlg.quest);
+    if (rest.suspended) {
+        PendingRun run;
+        run.actions = rest.rest;
+        run.journal = dlg.journal;
+        run.locals = locals;
+        run.quest = dlg.quest;
+        run.frames = rest.frames;
+        pending_.push_back(std::move(run));
+    }
     for (const std::string& f : fx.fight_requests) fights.push_back(f);
     return fights;
 }

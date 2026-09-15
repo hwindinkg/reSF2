@@ -824,6 +824,12 @@ void App::update_fixed(float dt) {
         --boot_splash_frames_;
     }
     screens_->update(dt);
+    // Quest live actions: resume deferred `Wait` runs + perform the queued
+    // scene/shop navigation. Runs AFTER the screen update so a `mp` push never
+    // re-enters the ScreenManager iteration (the JS `mp` L477182 pushes from
+    // the action's `S()`; the port defers to the fixed-step edge). Headless is
+    // a no-op inside `tick`.
+    if (quest_engine_) quest_engine_->tick(*this);
 }
 
 void App::render_frame() {
