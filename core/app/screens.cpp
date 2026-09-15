@@ -87,8 +87,9 @@ const EngineDialog* quest_modal_top(App& app) {
 }
 
 // Regular-dialog button hit-test (defined after the `od` dialog layout
-// helpers below): the `dlgStoryBtnFight` plate.
-bool quest_modal_button_hit(const EngineDialog& d, double x, double y);
+// helpers below). Returns the `He.dhb` L1061 slot index of the plate under
+// (x, y) — 0=Left, 1=Right, 2=Middle, 100=Close — or -1 for no hit.
+int quest_dialog_button_hit_index(const EngineDialog& d, double x, double y);
 
 // JS `He` gating (L1045-1062): a `Notification` is fire-and-forget (any tap
 // advances, `sa()` continues); a `Regular` dialog holds the chain until its
@@ -108,25 +109,28 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
     }
     // Regular. `He` pages a multi-row dialog (`He.jkb` L1042: every `<Line>`
     // row carries its own `ButtonText`): the page plate advances until the
-    // LAST row, whose plate fires the nested actions (`dhb(1)` L1061). The
+    // LAST row, whose plate fires the nested actions (`dhb(a)` L1061). The
     // tutorial Lynx dialog is exactly this (`dlgStoryBtnMore` -> L159,
     // `dlgStoryBtnFight` -> L160).
     if (app.quest_engine().dialog_has_next_page()) {
-        if (quest_modal_button_hit(*d, app.pointer().x, app.pointer().y)) {
+        if (quest_dialog_button_hit_index(*d, app.pointer().x, app.pointer().y) >= 0) {
             app.quest_engine().advance_dialog_page();
         }
         return true;
     }
-    // Regular. A button with actions fires on press; a buttonless dialog
-    // (no `hab()` button) advances on tap.
-    if (d->button_actions.empty()) {
+    // Regular. A dialog whose slot carries actions fires on press; a
+    // buttonless dialog (no `hab()` slot, L1060) advances on tap.
+    if (!app.quest_engine().dialog_has_button()) {
         std::fprintf(stdout, "[quest] dialog advanced (no button): %s\n", d->title.c_str());
         std::fflush(stdout);
         app.quest_engine().pop_dialog();
         return true;
     }
-    if (quest_modal_button_hit(*d, app.pointer().x, app.pointer().y)) {
-        const std::vector<std::string> fights = app.quest_engine().press_dialog(app);
+    // `He.dhb(a)` L1061: the plate's slot index (0=Left, 1=Right, 2=Middle,
+    // 100=Close) selects which deferred action list runs.
+    const int slot = quest_dialog_button_hit_index(*d, app.pointer().x, app.pointer().y);
+    if (slot >= 0) {
+        const std::vector<std::string> fights = app.quest_engine().press_dialog(app, slot);
         if (fight_out != nullptr && !fights.empty()) *fight_out = fights.front();
     }
     return true;
@@ -326,11 +330,12 @@ bool draw_bb_plate(App& app, const std::string& frame_name, float cx, float cy, 
                    float h, float alpha, bool flip_x);
 void draw_flat_button(App& app, const std::string& label, float cx, float cy, float w, float h,
                       float r, float g, float b, bool hovered);
-// The Regular dialog's action button (Line `ButtonText` / Right Button
-// `Text`) at the `od` layout plate - defined with the dialog layout below.
-void draw_dialog_button(App& app, const std::string& text);
+// The Regular dialog's action plate (a `He.dhb` slot) drawn through the
+// `od.EF` L1899 two-button row - defined with the dialog layout below.
+void draw_dialog_plate(App& app, const std::string& text, const std::string& color,
+                       bool primary, float cx, float cy, float w, float h);
 // The Regular dialog body (dim + `od` panel + title + portrait + wrapped
-// lines + button) - defined with the dialog layout below.
+// lines + the button row) - defined with the dialog layout below.
 void draw_regular_quest_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d);
 
 // Draws the modal panel. JS `He` (L1042-1063) routes dialogs by Type:
@@ -4371,22 +4376,98 @@ TutorialDialogLayout tutorial_dialog_layout() {
 
 // The dialog's action-button plate (`dlgStoryBtnFight` -> "В БОЙ"): the
 // `btnBeige` slice when the atlas resolved, else the flat fallback.
-namespace {
-void draw_dialog_button(App& app, const std::string& text) {
-    const TutorialDialogLayout t = tutorial_dialog_layout();
-    if (!(load_sliced_atlas(app) &&
-          draw_bb_plate(app, "btnBeige", t.btn_cx, t.btn_cy, t.btn_w, t.btn_h, 1.0f, false))) {
-        draw_flat_button(app, "", t.btn_cx, t.btn_cy, t.btn_w, t.btn_h, 0.6f, 0.5f, 0.3f, false);
-    }
-    draw_ui_label(app, t.btn_cx - t.btn_w * 0.5f, t.btn_cy - 14.0f, t.btn_w, 28.0f,
-                  loc(app, text, text), 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+// `He.lea` L1063 -> `nz.hi` L1840 -> `Bb.fza` L1844 (`"btn"+name.substr(7)`):
+// the action plate's frame is derived from the button's `<Button Color>`.
+//   Red -> EButtonDark, Green -> EButtonGreen, White|Beige -> EButtonWhite,
+//   Gold -> EButtonGold, anything else -> EButtonWhite.
+// `He.lea`'s default is `"Beige"` (White); a secondary slot defaults to Dark
+// (`od.jR` L1899: primary `EButtonWhite`, secondary `EButtonDark`). The port
+// drew a single invented `btnBeige` plate for every button (`nz.hi` never
+// produces Beige).
+const char* quest_button_frame(const std::string& color, bool primary) {
+    if (color == "Red") return "btnDark";
+    if (color == "Green") return "btnGreen";
+    if (color == "White" || color == "Beige") return "btnWhite";
+    if (color == "Gold") return "btnGold";
+    return primary ? "btnWhite" : "btnDark";
 }
 
-bool quest_modal_button_hit(const EngineDialog& d, double x, double y) {
-    (void)d;
+namespace {
+void draw_dialog_plate(App& app, const std::string& text, const std::string& color,
+                       bool primary, float cx, float cy, float w, float h) {
+    if (!(load_sliced_atlas(app) &&
+          draw_bb_plate(app, quest_button_frame(color, primary), cx, cy, w, h, 1.0f, false))) {
+        draw_flat_button(app, "", cx, cy, w, h, 0.6f, 0.5f, 0.3f, false);
+    }
+    draw_ui_label(app, cx - w * 0.5f, cy - 14.0f, w, 28.0f, loc(app, text, text), 0.9f,
+                  UiAlign::Center, 1.0f, 1.0f, 1.0f);
+}
+
+// One plate of the dialog's button row. `slot` is the `He.dhb` L1061 index
+// (0=Left, 1=Right, 2=Middle, 100=Close); `primary` is the `od.jR` L1899 role
+// (`Rb`/`b==1` = primary `EButtonWhite`, `Kb`/`b==2` = secondary
+// `EButtonDark`) that also drives the default colour.
+struct QuestDialogPlate {
+    int slot = -1;
+    bool primary = true;
+    float cx = 0.0f, cy = 0.0f, w = 0.0f, h = 0.0f;
+    std::string text;
+    std::string color;
+};
+
+// `od.EF` L1899 lays out TWO plates: with both present (`a==3`) the primary
+// (`Rb`) sits at `+width/2+32` and the secondary (`Kb`) at `-(width/2+32)`;
+// a lone plate sits at the panel centre (`a==1`/`a==2`). The `He` slots map
+// Right->primary, Left->secondary (Middle/Close take a free plate).
+struct QuestDialogRow {
+    QuestDialogPlate plates[2];
+    int count = 0;
+};
+
+constexpr float kDialogBtnGap = 32.0f;  // `od.EF` L1899: width/2 + 32
+
+QuestDialogRow quest_dialog_row(const EngineDialog& d) {
     const TutorialDialogLayout t = tutorial_dialog_layout();
-    return x >= t.btn_cx - t.btn_w * 0.5f && x <= t.btn_cx + t.btn_w * 0.5f &&
-           y >= t.btn_cy - t.btn_h * 0.5f && y <= t.btn_cy + t.btn_h * 0.5f;
+    QuestDialogRow r;
+    auto add = [&](int slot, bool primary, const std::string& text, const std::string& color) {
+        if (r.count >= 2) return;
+        QuestDialogPlate& p = r.plates[r.count++];
+        p.slot = slot;
+        p.primary = primary;
+        p.cx = t.btn_cx;
+        p.cy = t.btn_cy;
+        p.w = t.btn_w;
+        p.h = t.btn_h;
+        p.text = text;
+        p.color = color;
+    };
+    // `hab()` L1060: a slot "exists" when its nested action list is non-empty.
+    if (!d.button_actions.empty()) add(1, true, d.button_text, d.button_color);
+    if (!d.left_.actions.empty()) add(0, false, d.left_.text, d.left_.color);
+    if (r.count < 2 && !d.middle_.actions.empty()) {
+        add(2, false, d.middle_.text, d.middle_.color);
+    }
+    if (r.count < 2 && !d.close_.actions.empty()) {
+        add(100, false, d.close_.text, d.close_.color);
+    }
+    if (r.count == 2) {
+        const float half = t.btn_w * 0.5f + kDialogBtnGap;
+        r.plates[0].cx = t.btn_cx + half;  // `Rb.node.C(width/2+32)`
+        r.plates[1].cx = t.btn_cx - half;  // `Kb.node.C(-(width/2+32))`
+    }
+    return r;
+}
+
+int quest_dialog_button_hit_index(const EngineDialog& d, double x, double y) {
+    const QuestDialogRow r = quest_dialog_row(d);
+    for (int i = 0; i < r.count; ++i) {
+        const QuestDialogPlate& p = r.plates[i];
+        if (x >= p.cx - p.w * 0.5f && x <= p.cx + p.w * 0.5f && y >= p.cy - p.h * 0.5f &&
+            y <= p.cy + p.h * 0.5f) {
+            return p.slot;
+        }
+    }
+    return -1;
 }
 
 // The `Regular`/other `Xc` dialog: `Wb.Qa` (0x80 black) dim + the `od`
@@ -4434,11 +4515,17 @@ void draw_regular_quest_dialog(App& app, sf2::render::Renderer& ren, const Engin
     }
     draw_ui_wrapped(app, t.body_x, t.body_y, t.body_w, t.body_h, body, 0.70f, UiAlign::Left,
                     0.12f, 0.09f, 0.06f);
-    // Action button (`hab()` true): the page's caption (`He.jkb`) on the
-    // deferred-actions plate (`dhb(1)`).
-    const std::string caption = app.quest_engine().dialog_button_text();
-    if (!d.button_actions.empty() && !caption.empty()) {
-        draw_dialog_button(app, caption);
+    // The button row (`hab()` L1060 true). The Right plate carries the pager
+    // caption (`dialog_button_text`, `Od.EF` L1946); every other slot carries
+    // its own `<Button Text>` (`He.Rib` L1057). Frames come from the slot's
+    // `Color` (`quest_button_frame`).
+    const QuestDialogRow row = quest_dialog_row(d);
+    for (int i = 0; i < row.count; ++i) {
+        const QuestDialogPlate& p = row.plates[i];
+        std::string caption =
+            p.slot == 1 ? app.quest_engine().dialog_button_text() : p.text;
+        if (caption.empty()) caption = p.text;
+        draw_dialog_plate(app, caption, p.color, p.primary, p.cx, p.cy, p.w, p.h);
     }
 }
 } // namespace
@@ -6310,6 +6397,12 @@ constexpr float kPauseDlgPlayX = 876.25f;
 
 void FightScreen::update_impl(float dt) {
     if (fight_ == nullptr) return;
+    // Sensei dialog modal gate (quest engine `He` records): a dialog queued
+    // while the fight is up owns the input (`He` `IgnoreBack="1"`), so the
+    // fight's own input path is skipped until its plate fires. The Dojo/Map/
+    // Shop screens already gate this way; the Fight screen did not, so a
+    // dialog queued here rendered nowhere and blocked nothing.
+    if (quest_modal_consume(app())) return;
     // VS intro (`ik`, L2069): presentation-only pre-fight screen. The sim is
     // NOT frozen — JS creates the fight only after `ik.kg`, but the native
     // controller already exists, and running it underneath keeps the existing
@@ -7125,6 +7218,9 @@ void FightScreen::render_impl(App& app) {
         frame("home", kPauseDlgHomeX, kPauseDlgRowY, kPauseDlgToggleS,
               kPauseDlgToggleS, "QUIT");
     }
+    // Sensei dialog modal overlay (`He`): drawn last so it covers the fight
+    // HUD and the pause dialog (the other screens draw it the same way).
+    draw_quest_modal(app, ren, app.screens().top() == this);
 }
 
 // ---------------------------------------------------------------------------
@@ -9959,6 +10055,173 @@ bool shop_open_at(App& app, const std::string& tab, const std::string& item) {
     app.set_pending_shop(tab, item);
     app.screens().push(make_screen(app.screens(), kScreenShop));
     return true;
+}
+
+// --- `--dialog-verify` self-check (see screens.hpp) ------------------------
+namespace {
+
+int g_dlg_passed = 0;
+int g_dlg_failed = 0;
+
+void dlg_case(const std::string& name, bool ok) {
+    std::fprintf(stdout, "[dlgverify] %s %s\n", ok ? "PASS" : "FAIL", name.c_str());
+    std::fflush(stdout);
+    if (ok) {
+        ++g_dlg_passed;
+    } else {
+        ++g_dlg_failed;
+    }
+}
+
+// A nested `Dialog` action that queues a one-line marker dialog. Running it
+// (`He.dhb` L1061) is observable, so the harness can tell WHICH slot fired
+// without touching gameplay state (scene/shop actions are headless-gated).
+QuestAction marker_action(const std::string& marker) {
+    QuestAction act;
+    act.tag = "Dialog";
+    act.attrs["Title"] = marker;
+    QuestAction line;
+    line.tag = "Line";
+    line.attrs["Text"] = marker;
+    act.children.push_back(line);
+    return act;
+}
+
+EngineDialog probe_dialog(const std::string& title) {
+    EngineDialog d;
+    d.type = "Regular";
+    d.title = title;
+    d.lines.push_back(title + "_line");
+    d.line_buttons.push_back(title + "_row");
+    return d;
+}
+
+} // namespace
+
+bool run_quest_dialog_selfcheck(App& app) {
+    g_dlg_passed = 0;
+    g_dlg_failed = 0;
+    QuestEngine& q = app.quest_engine();
+
+    // --- D1: a Left button renders BOTH plates; Left fires the Left action.
+    {
+        q.clear_dialogs();
+        EngineDialog d = probe_dialog("d1_probe");
+        d.button_actions.push_back(marker_action("RIGHT_FIRED"));
+        d.button_text = "right_cap";
+        d.button_color = "Red";
+        d.left_.actions.push_back(marker_action("LEFT_FIRED"));
+        d.left_.text = "left_cap";
+        d.left_.color = "Green";
+        q.push_dialog_for_test(d);
+
+        const QuestDialogRow row = quest_dialog_row(q.dialog());
+        const bool both = row.count == 2;
+        dlg_case("D1 left+right lays out BOTH plates (od.EF a==3)", both);
+        const bool split = both && row.plates[1].cx < row.plates[0].cx;
+        dlg_case("D1 primary plate sits right of the secondary plate", split);
+        const int hit_l =
+            both ? quest_dialog_button_hit_index(q.dialog(), row.plates[1].cx,
+                                                 row.plates[1].cy)
+                 : -1;
+        const int hit_r =
+            both ? quest_dialog_button_hit_index(q.dialog(), row.plates[0].cx,
+                                                 row.plates[0].cy)
+                 : -1;
+        dlg_case("D1 left plate hit-tests to slot 0 (Left)", hit_l == 0);
+        dlg_case("D1 right plate hit-tests to slot 1 (Right)", hit_r == 1);
+        // Fire through the plate's own hit point: `dhb(0)` runs the Left
+        // actions, NOT the Right ones (`dhb(1)`).
+        q.press_dialog(app, hit_l);
+        const bool left_fired = q.has_dialog() && !q.dialog().lines.empty() &&
+                                q.dialog().lines[0] == "LEFT_FIRED";
+        dlg_case("D1 Left press dispatches the Left action (LEFT_FIRED)", left_fired);
+    }
+
+    // --- D2: `He.lea` L1063 -> `nz.hi` L1840 colour->frame.
+    {
+        const struct {
+            const char* color;
+            const char* frame;
+        } kCases[] = {{"Red", "btnDark"},
+                      {"Green", "btnGreen"},
+                      {"White", "btnWhite"},
+                      {"Beige", "btnWhite"},
+                      {"Gold", "btnGold"}};
+        for (const auto& c : kCases) {
+            dlg_case(std::string("D2 Color ") + c.color + " -> " + c.frame,
+                     quest_button_frame(c.color, true) == std::string(c.frame));
+        }
+        dlg_case("D2 empty primary -> btnWhite (He.lea default Beige)",
+                 quest_button_frame("", true) == std::string("btnWhite"));
+        dlg_case("D2 empty secondary -> btnDark (od.jR L1899 secondary)",
+                 quest_button_frame("", false) == std::string("btnDark"));
+        // The row must carry the slots' own colours (not one plate for all).
+        q.clear_dialogs();
+        EngineDialog d = probe_dialog("d2_probe");
+        d.button_actions.push_back(marker_action("R"));
+        d.button_color = "Red";
+        d.left_.actions.push_back(marker_action("L"));
+        d.left_.color = "Green";
+        q.push_dialog_for_test(d);
+        const QuestDialogRow row = quest_dialog_row(q.dialog());
+        const bool coloured =
+            row.count == 2 && row.plates[1].color == "Green" && row.plates[0].color == "Red";
+        dlg_case("D2 left/right plates keep their own Color", coloured);
+    }
+
+    // --- D7: `Od.EF` L1946 last-page caption precedence.
+    {
+        q.clear_dialogs();
+        EngineDialog d = probe_dialog("d7_pager");
+        d.lines = {"row_a", "row_b"};
+        d.line_buttons = {"cap_a", "cap_b"};
+        d.button_text = "cap_explicit";  // the authored right `Text` (`qy`)
+        d.button_actions.push_back(marker_action("PAGER_FIRED"));
+        q.push_dialog_for_test(d);
+        dlg_case("D7 non-last page shows the ROW ButtonText (cap_a)",
+                 q.dialog_button_text() == "cap_a");
+        q.advance_dialog_page();
+        dlg_case("D7 LAST page: explicit right Text wins (cap_explicit)",
+                 q.dialog_button_text() == "cap_explicit");
+    }
+    {
+        q.clear_dialogs();
+        EngineDialog d = probe_dialog("d7_pager2");
+        d.lines = {"row_a", "row_b"};
+        d.line_buttons = {"cap_a", "cap_b"};
+        d.button_text = "cap_b";  // parse-time fallback = last row caption
+        d.button_actions.push_back(marker_action("PAGER2_FIRED"));
+        q.push_dialog_for_test(d);
+        q.advance_dialog_page();
+        dlg_case("D7 LAST page, no authored Text: row caption (cap_b)",
+                 q.dialog_button_text() == "cap_b");
+    }
+
+    // --- D1 (case 4): a dialog queued on the FIGHT screen renders + blocks.
+    {
+        q.clear_dialogs();
+        EngineDialog d = probe_dialog("fight_block");
+        d.button_actions.push_back(marker_action("FIGHT_BLOCK"));
+        d.button_text = "fight_cap";
+        q.push_dialog_for_test(d);
+        PendingBattle& pb = app.pending_battle();
+        if (pb.battle_name.empty()) {
+            pb.battle_name = "Training";
+            pb.location = "dojo";
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        const bool on_fight = app.screens().current_id() == kScreenFight;
+        const bool live = quest_modal_top(app) != nullptr;
+        const bool blocks = quest_modal_consume(app);
+        dlg_case("D1 dialog on the Fight screen renders (modal live)", on_fight && live);
+        dlg_case("D1 dialog on the Fight screen blocks input", on_fight && blocks);
+    }
+    q.clear_dialogs();
+
+    std::fprintf(stdout, "[dlgverify] %d passed, %d failed\n", g_dlg_passed, g_dlg_failed);
+    std::fflush(stdout);
+    return g_dlg_failed == 0;
 }
 
 } // namespace sf2::app

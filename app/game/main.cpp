@@ -17,6 +17,7 @@
 #define NOMINMAX  // before any <windows.h> pull-in (glfw3native.h includes it)
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -26,15 +27,9 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
-#include <windows.h>
-
 #include <GLFW/glfw3.h>
-// `--quest-verify` posts REAL window messages to the game window (the
-// interactive quest-action verification); the Win32 window handle comes from
-// GLFW's native accessor.
-#define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3native.h>
 
 #include "app/app.hpp"
 #include "app/quest_engine.hpp"
@@ -53,7 +48,7 @@ void print_usage(const char* argv0) {
                   "                  [--fight] [--battle <name>] [--zone <name>]\n"
                   "                  [--dump-pose N] [--dump-clip <name>]\n"
                   "                  [--ui-tour] [--fidelity-tour] [--quest-verify]\n"
-                  "                  [--replay [file]] [--verify-input]\n"
+                  "                  [--dialog-verify] [--replay [file]] [--verify-input]\n"
                  "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
                  "  --headless-loop  run the scripted playable loop, then exit\n"
@@ -877,20 +872,18 @@ std::vector<ReplayEdge> parse_replay_file(const std::string& path) {
 }
 
 // --- `--quest-verify`: interactive quest-action verification ---------------
-// A REAL window (headless_frames_ == 0, so the engine EXECUTES actions instead
-// of recording them) driven by REAL Win32 window messages posted to the GLFW
-// window: WM_MOUSEMOVE/WM_LBUTTONDOWN/WM_LBUTTONUP reach GLFW's WndProc, which
-// updates the cursor/button state `App::poll_input` reads each frame. Drives
+// A live app (headless_frames_ == 0, so the engine EXECUTES actions instead
+// of recording them) driven ONLY through the app's own input injection
+// (`App::inject_click` — the JS `ma.Bd`/pointer tap primitive the scripted
+// drivers already use). No OS input is generated: the window is hidden and
+// never foregrounded, so the user's cursor and desktop are untouched. Drives
 // the shipped `StoryTutorial*` chain (fresh profile) and asserts the live
 // behaviours: the chain fires, `ChangeScene` executes, `MenuBtnFlashing`
 // resolves the `_NextScene` nav target, `OpenShop` opens the Shop at the
 // tutorial tab/item, and the Lynx (Shin) fight launches.
 struct QuestVerifyDriver {
-    HWND hwnd = nullptr;
     int frame = 0;
-    int down_x = -1, down_y = -1;
-    int hold = 0;      // frames the left button stays down after a press
-    int cooldown = 0;  // frames before the next press
+    int cooldown = 0;  // frames before the next injected click
     bool nav_toggle = false;
     int last_screen = -1;
     // Assertions (PASS/FAIL logged at the end).
@@ -902,45 +895,16 @@ struct QuestVerifyDriver {
     bool saw_fight = false;       // the Fight screen launched
     bool go_map = false;          // post-OpenShop: navigate to the Map
 
-    int target_x = -1, target_y = -1;  // the point the cursor is held on
-    // Real window messages: move the REAL cursor (SetCursorPos -> GLFW's
-    // WM_MOUSEMOVE -> `glfwGetCursorPos`) and post the button messages, so
-    // `App::poll_input` sees a genuine OS click at the intended point.
-    void post(UINT msg, int x, int y, WPARAM wp) {
-        if (hwnd == nullptr) return;
-        PostMessageW(hwnd, msg, wp,
-                     MAKELPARAM(static_cast<short>(x), static_cast<short>(y)));
-    }
-    void place_cursor(int x, int y) {
-        if (hwnd == nullptr) return;
-        POINT pt;
-        pt.x = x;
-        pt.y = y;
-        ClientToScreen(hwnd, &pt);
-        SetCursorPos(pt.x, pt.y);
-    }
-    // Re-asserts the target point right before the frame polls input, so an
-    // external cursor move cannot displace the queued click.
-    void keep_cursor() {
-        if (target_x >= 0) place_cursor(target_x, target_y);
-    }
-    void press(int x, int y) {
-        target_x = x;
-        target_y = y;
-        down_x = x;
-        down_y = y;
-        hold = 3;
+    // Queue an internal click at the view coordinate (no OS input).
+    void tap(sf2::app::App& app, int x, int y) {
         cooldown = 8;
-        std::fprintf(stdout, "[qverify] click (%d, %d)\n", x, y);
+        std::fprintf(stdout, "[qverify] injected click (%d, %d)\n", x, y);
         std::fflush(stdout);
-        place_cursor(x, y);
-        post(WM_MOUSEMOVE, x, y, 0);
-        post(WM_LBUTTONDOWN, x, y, MK_LBUTTON);
+        app.inject_click(x, y);
     }
 
     void tick(sf2::app::App& app) {
         ++frame;
-        if (hold > 0 && --hold == 0) post(WM_LBUTTONUP, down_x, down_y, 0);
         if (cooldown > 0) --cooldown;
         const int cur = app.screens().current_id();
         if (cur != last_screen) {
@@ -966,9 +930,9 @@ struct QuestVerifyDriver {
             }
             if (cooldown == 0) {
                 if (d.type == "Notification")
-                    press(640, 400);  // any tap advances
+                    tap(app, 640, 400);  // any tap advances
                 else
-                    press(860, 549);  // tutorial_dialog_layout action plate
+                    tap(app, 860, 549);  // tutorial_dialog_layout action plate
             }
             return;
         }
@@ -979,13 +943,13 @@ struct QuestVerifyDriver {
             if (cooldown == 0) {
                 float cx = 0.0f, cy = 0.0f;
                 static_cast<sf2::app::FightScreen*>(top)->next_button_center(cx, cy);
-                press(static_cast<int>(cx), static_cast<int>(cy));
+                tap(app, static_cast<int>(cx), static_cast<int>(cy));
             }
             return;
         }
         // 3. Results -> back (pops to the caller).
         if (cur == kScreenResults) {
-            if (cooldown == 0) press(640, 360);
+            if (cooldown == 0) tap(app, 640, 360);
             return;
         }
         // 4. `MenuBtnFlashing` guidance: expand the collapsed `za` column,
@@ -1004,14 +968,14 @@ struct QuestVerifyDriver {
                 // shared chrome's `za_update`); from a sub-screen (Shop/Map/
                 // Profile) press BACK first, then use the column.
                 if (cur != kScreenDojo) {
-                    press(64, 40);
+                    tap(app, 64, 40);
                     return;
                 }
                 static const int kRowY[5] = {126, 231, 337, 442, 548};
                 if (nav_toggle) {
-                    press(184, kRowY[idx]);
+                    tap(app, 184, kRowY[idx]);
                 } else {
-                    press(184, 92);  // the collapsed `gk` header (za_header_rect)
+                    tap(app, 184, 92);  // the collapsed `gk` header (za_header_rect)
                 }
                 nav_toggle = !nav_toggle;
             }
@@ -1027,13 +991,13 @@ struct QuestVerifyDriver {
                     return;  // wait for `StoryTutorialBossFight`'s Lynx dialog
                 }
                 if (cur != kScreenDojo) {
-                    press(64, 40);  // BACK to the hub
+                    tap(app, 64, 40);  // BACK to the hub
                 } else {
                     static const int kRowY[5] = {126, 231, 337, 442, 548};
                     if (nav_toggle) {
-                        press(184, kRowY[1]);  // Map
+                        tap(app, 184, kRowY[1]);  // Map
                     } else {
-                        press(184, 92);  // header
+                        tap(app, 184, 92);  // header
                     }
                     nav_toggle = !nav_toggle;
                 }
@@ -1055,6 +1019,7 @@ int main(int argc, char** argv) {
     bool fidelity_tour = false;
     bool quest_verify = false;  // --quest-verify: interactive action check
     bool quest_verify_buy = false;  // --quest-verify-buy: seeded STEP_BUY_ITEM
+    bool dialog_verify = false;     // --dialog-verify: headless dialog harness
     bool replay_mode = false;
     bool verify_input = false;
     std::string replay_file = "reference/traces/recorded_inputs.txt";
@@ -1096,6 +1061,8 @@ int main(int argc, char** argv) {
         } else if (arg == "--quest-verify-buy") {
             quest_verify = true;
             quest_verify_buy = true;
+        } else if (arg == "--dialog-verify") {
+            dialog_verify = true;
         } else if (arg == "--replay") {
             replay_mode = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -1428,40 +1395,76 @@ int main(int argc, char** argv) {
         }
         app.shutdown();
         return 0;
+    } else if (dialog_verify) {
+        // --- headless dialog harness (`--dialog-verify`) -------------------
+        // No OS input at all: the window is hidden (never foregrounded) and
+        // the harness uses only the app's internal primitives. Asserts the
+        // `He` dialog contracts — D1 (a Left button renders BOTH plates and
+        // the Left press dispatches the Left action), D2 (color -> button
+        // frame), D7 (last-page caption precedence) and a dialog queued on
+        // the Fight screen — then the shipped quest-tree `<Button Type>`
+        // census. `headless_frames_ == 0` keeps the modal live (the headless
+        // path drains the queue silently, screens.cpp `quest_modal_top`).
+        glfwHideWindow(app.renderer().window());
+        app.set_headless_frames(0);
+        app.set_auto_attack(false);
+        const bool selfcheck_ok = run_quest_dialog_selfcheck(app);
+
+        const QuestButtonCensus census = census_quest_tree();
+        // Parsed slots = the `<Button>` ELEMENTS the parser sees (XML comments
+        // are not elements). The raw text additionally carries commented-out
+        // quests (zone_4..zone_7 ship 3 each), which is where the 680/159
+        // inventory comes from.
+        std::fprintf(stdout,
+                     "[dlgverify] parsed slots: %zu files, %zu dialogs, %zu buttons "
+                     "(Right %zu / Left %zu / Middle %zu / Close %zu)\n",
+                     census.files, census.dialogs, census.typed(), census.right, census.left,
+                     census.middle, census.close);
+        std::fprintf(stdout,
+                     "[dlgverify] raw XML text (incl. %zu commented-out dialogs): %zu dialogs, "
+                     "%zu buttons (Right %zu / Left %zu / Middle %zu / Close %zu)\n",
+                     census.text_dialogs - census.dialogs, census.text_dialogs,
+                     census.text_typed(), census.text_right, census.text_left,
+                     census.text_middle, census.text_close);
+        const bool elements_ok = census.right == 668 && census.left == 153 &&
+                                 census.middle == 16 && census.close == 1;
+        const bool raw_ok = census.text_right == 680 && census.text_left == 159 &&
+                            census.text_middle == 16 && census.text_close == 1;
+        const bool census_ok = elements_ok && raw_ok;
+        std::fprintf(stdout,
+                     "[dlgverify] %s parse census (parsed elements Right 668 / Left 153 / "
+                     "Middle 16 / Close 1; raw text Right 680 / Left 159 / Middle 16 / "
+                     "Close 1 - the +12/+6 are commented-out quests)\n",
+                     census_ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return (selfcheck_ok && census_ok) ? 0 : 1;
     } else if (quest_verify || quest_verify_buy) {
-        // --- interactive quest-action verification (REAL window messages) ---
-        // A live window (headless_frames_ == 0, so the engine EXECUTES actions
-        // rather than recording them) driven by posted Win32 messages.
+        // --- interactive quest-action verification (internal injection) -----
+        // A live app (headless_frames_ == 0, so the engine EXECUTES actions
+        // rather than recording them) driven by `App::inject_click`. The
+        // window is HIDDEN and never foregrounded — no OS input is generated,
+        // so the user's cursor and desktop are untouched.
         //   `--quest-verify`     fresh profile: the shipped StoryTutorial*
         //                        chain fires, `ChangeScene` executes, the
         //                        training fight launches.
         //   `--quest-verify-buy` seeded STEP_BUY_ITEM: `OpenShop` opens the
         //                        Shop at the tutorial tab/item, then the Lynx
         //                        (Shin) boss dialog/fight.
+        glfwHideWindow(app.renderer().window());
         if (quest_verify && !quest_verify_buy) app.set_fresh_tutorial(true);
         app.set_auto_attack(true);
         QuestVerifyDriver drv;
-        drv.hwnd = glfwGetWin32Window(app.renderer().window());
-        if (drv.hwnd != nullptr) {
-            // The injected clicks are real OS input: put the game window in
-            // front so they land on it.
-            ShowWindow(drv.hwnd, SW_RESTORE);
-            SetWindowPos(drv.hwnd, HWND_TOP, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-            SetForegroundWindow(drv.hwnd);
-            SetActiveWindow(drv.hwnd);
-        }
-        std::fprintf(stdout, "[qverify] window handle %p, engine live (headless=0), buy=%d\n",
-                     static_cast<void*>(drv.hwnd), quest_verify_buy ? 1 : 0);
+        std::fprintf(stdout, "[qverify] engine live (headless=0, hidden window), buy=%d\n",
+                     quest_verify_buy ? 1 : 0);
         std::fflush(stdout);
         const std::size_t quests_loaded = app.quest_engine().quest_count();
         while (!glfwWindowShouldClose(app.renderer().window()) && drv.frame < 24000) {
             drv.tick(app);
-            drv.keep_cursor();  // re-assert the click point before input polls
             app.run_one_frame();
             if (drv.saw_lynx_dialog && drv.saw_shin && drv.saw_shop) break;
             if (!quest_verify_buy && drv.saw_fight && drv.frame > 600) break;
-            Sleep(6);  // pace the presents so the fixed 60 Hz steps advance
+            std::this_thread::sleep_for(std::chrono::milliseconds(6));  // pace the 60 Hz steps
         }
         sf2::app::QuestEngine& q = app.quest_engine();
         const bool ok_chain = drv.saw_chain && quests_loaded > 0;

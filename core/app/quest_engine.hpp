@@ -82,6 +82,19 @@ struct QuestDef {
     std::vector<QuestAction> actions;
 };
 
+// JS `vh` (L1063): one `<Button>` slot of a `He` dialog. `He.Rib` (L1057-1058)
+// files each nested `<Button Type="...">` into its own slot — Left→`Ng`,
+// Middle→`Nh`, Right→`rh`, Close→`Hj` — each carrying its own caption, colour
+// and deferred actions. The port folded every `<Button>` into the single
+// Right slot (`button_actions`/`button_text`), stranding the 159 Left / 16
+// Middle / 1 Close shipped slots.
+struct EngineDialogButton {
+    std::string text;                 // `vh.text` (`Button Text`)
+    std::string color;                // `vh.color` (`Button Color`)
+    std::vector<QuestAction> actions; // `vh.actions` (deferred to the press)
+    bool hint = false;                // `vh.aA` (`Button Flashing`)
+};
+
 // Structured dialog record for the Sensei modal (He display lives in
 // screens.cpp; the engine only queues).
 struct EngineDialog {
@@ -106,10 +119,18 @@ struct EngineDialog {
     // e.g. sensei_arc.xml L59, else the LAST row's `ButtonText`: the page
     // that carries the nested actions, `hab()` L1060).
     std::string button_text;
+    // The Right button's `<Button Color>` (JS `vh.color` via `He.Rib` L1057).
+    // The frame is `nz.hi(color)` (`He.lea` L1063): Red→Dark, Green→Green,
+    // White/Beige→White, Gold→Gold.
+    std::string button_color;
     // The Right button's deferred nested actions (JS `vh.actions`, run on
     // press via `He.dhb(1)` L1061). Empty = no button (Notification OK with
     // no actions, `hab()` false).
     std::vector<QuestAction> button_actions;
+    // The other `He` slots (`He.Rib` L1057-1058): Left→`Ng`, Middle→`Nh`,
+    // Close→`Hj`. `dhb` L1061 dispatches them by index (0/2/100); the Right
+    // slot above is index 1.
+    EngineDialogButton left_, middle_, close_;
     std::string quest;               // firing quest name
     QuestJournal journal;            // `Qt` (He.S stores the firing journal)
 };
@@ -230,14 +251,34 @@ public:
         if (!dialogs_.empty()) dialogs_.erase(dialogs_.begin());
     }
 
-    // JS `He.dhb(1)` L1061 (the Right button): pops the head dialog and runs
-    // its deferred nested actions (`SetStoryTutorialStep`/`Fight`/...).
+    // JS `He.dhb(a)` L1061: pops the head dialog and runs the deferred nested
+    // actions of the slot selected by `button_index` — 0=Left(`Ng`),
+    // 1=Right(`rh`, the historical default), 2=Middle(`Nh`), 100=Close(`Hj`).
     // Returns the recorded fight-request names (`Sn`) for the caller to
     // launch (the engine never navigates). Save writes are applied.
-    std::vector<std::string> press_dialog(App& app);
+    std::vector<std::string> press_dialog(App& app, int button_index = 1);
+
+    // JS `hab()` L1060: any slot carries actions (`Ng`/`rh`/`Nh`/`Hj`). A
+    // dialog with no such slot advances on tap instead of firing a plate.
+    bool dialog_has_button() const {
+        return !dialogs_.empty() &&
+               (!dialogs_.front().button_actions.empty() ||
+                !dialogs_.front().left_.actions.empty() ||
+                !dialogs_.front().middle_.actions.empty() ||
+                !dialogs_.front().close_.actions.empty());
+    }
 
     // Drops every queued dialog (tutorial handoff / scene reset).
     void clear_dialogs() { dialogs_.clear(); }
+
+    // Test hook (the `--dialog-verify` harness): queue a dialog record built
+    // in-process, so the display/dispatch contracts (Left-vs-Right plate,
+    // colour→frame, page caption precedence) can be asserted without firing a
+    // quest. Goes through the same queue + cap the parse path uses.
+    void push_dialog_for_test(EngineDialog d) {
+        if (dialogs_.size() >= 8) dialogs_.erase(dialogs_.begin());
+        dialogs_.push_back(std::move(d));
+    }
 
     // One fixed step (called by App::update_fixed AFTER the screen update):
     // resumes deferred `Wait` runs (`Ro` L1119) and performs the queued
@@ -402,5 +443,37 @@ private:
     std::size_t scene_actions_ = 0;          // executed `ChangeScene` count
     std::size_t shop_actions_ = 0;           // executed `OpenShop` count
 };
+
+// The `<Button Type>` slot census of the shipped quest tree (`quests.xml` plus
+// every `quest_extensions/**` file — the tree `ensure_loaded` walks). Each
+// `<Button>` is one slot: `He.Rib` L1057-1058. Used by the `--dialog-verify`
+// parse assertion; expected 680 Right / 159 Left / 16 Middle / 1 Close.
+struct QuestButtonCensus {
+    std::size_t right = 0;
+    std::size_t left = 0;
+    std::size_t middle = 0;
+    std::size_t close = 0;
+    std::size_t dialogs = 0;  // `<Dialog>` elements seen
+    std::size_t files = 0;    // quest XML files read
+    std::size_t typed() const { return right + left + middle + close; }
+
+    // Raw TEXT census (regex-equivalent scan of the file bytes, INCLUDING
+    // commented-out XML). The parser excludes comments, so this is always >=
+    // the element counts above. zone_4/zone_5/zone_6/zone_7 each ship three
+    // commented-out quests, so the raw inventory is +12 dialogs / +12 Right /
+    // +6 Left over the parsed slots.
+    std::size_t text_right = 0;
+    std::size_t text_left = 0;
+    std::size_t text_middle = 0;
+    std::size_t text_close = 0;
+    std::size_t text_dialogs = 0;
+    std::size_t text_typed() const {
+        return text_right + text_left + text_middle + text_close;
+    }
+};
+
+// Reads and counts the shipped quest tree. Never throws; a missing tree
+// yields an all-zero census (the caller reports FAIL).
+QuestButtonCensus census_quest_tree();
 
 } // namespace sf2::app

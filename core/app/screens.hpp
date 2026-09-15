@@ -674,4 +674,18 @@ void set_za_nav_open(bool open);
 // otherwise re-points the live screen. Returns false for an unknown tab.
 bool shop_open_at(App& app, const std::string& tab, const std::string& item);
 
+// --- quest dialog (He) display/dispatch contracts (screens.cpp) -------------
+// The action-plate frame for a `<Button Color>` (`He.lea` L1063 ->
+// `nz.hi` L1840): Red->"btnDark", Green->"btnGreen", White/Beige->"btnWhite",
+// Gold->"btnGold". `primary` (the Right slot) defaults an empty/unknown colour
+// to White; the secondary slots (Left/Middle/Close) default to Dark — the
+// `od.jR` L1899 primary `EButtonWhite` / secondary `EButtonDark` convention.
+const char* quest_button_frame(const std::string& color, bool primary);
+
+// `--dialog-verify` headless self-check (no OS input, no pixels): queues the
+// crafted `He` dialogs and asserts the D1/D2/D7 display + dispatch contracts,
+// printing `[dlgverify] PASS/FAIL <case>` per case. Returns true only when
+// every case passes.
+bool run_quest_dialog_selfcheck(App& app);
+
 } // namespace sf2::app

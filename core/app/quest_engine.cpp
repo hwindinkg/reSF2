@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 
@@ -817,15 +818,36 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                         // `He.jkb` (L1042): the row keeps its own caption.
                         dlg.line_buttons.push_back(attr_or(c.attrs, "ButtonText"));
                     } else if (c.tag == "Button") {
-                        // JS `He.Rib` L1057: the nested actions run on press
-                        // (`dhb` L1061) — defer them (do NOT run eagerly).
-                        for (const QuestAction& sub : c.children) {
-                            dlg.button_actions.push_back(sub);
-                        }
-                        // An explicit `Button Text` (sensei_arc.xml L59
-                        // `dlgStoryBtnFight`) overrides the last row's caption.
+                        // JS `He.Rib` L1057-1058: `Type` selects the slot —
+                        // `Left`→`Ng`, `Middle`→`Nh`, `Right`→`rh`,
+                        // `Close`→`Hj` — each keeping its own `Text`/`Color`/
+                        // `Flashing` (`vh`, L1063). An absent `Type` is the
+                        // Right slot (the historical single-button path).
+                        const std::string btype = attr_or(c.attrs, "Type");
                         const std::string bt = attr_or(c.attrs, "Text");
-                        if (!bt.empty()) dlg.button_text = bt;
+                        const std::string bc = attr_or(c.attrs, "Color");
+                        const bool hint = attr_or(c.attrs, "Flashing") == "1";
+                        if (btype.empty() || btype == "Right") {
+                            // Defer the nested actions (`dhb(1)` L1061).
+                            for (const QuestAction& sub : c.children) {
+                                dlg.button_actions.push_back(sub);
+                            }
+                            // An explicit `Button Text` (sensei_arc.xml L59
+                            // `dlgStoryBtnFight`) overrides the last caption.
+                            if (!bt.empty()) dlg.button_text = bt;
+                            if (!bc.empty()) dlg.button_color = bc;
+                        } else if (btype == "Left" || btype == "Middle" ||
+                                   btype == "Close") {
+                            EngineDialogButton& slot = btype == "Left"      ? dlg.left_
+                                                      : btype == "Middle" ? dlg.middle_
+                                                                          : dlg.close_;
+                            for (const QuestAction& sub : c.children) {
+                                slot.actions.push_back(sub);
+                            }
+                            if (!bt.empty()) slot.text = bt;
+                            slot.color = bc;
+                            slot.hint = hint;
+                        }
                     }
                 }
                 // No authored `Button Text`: the LAST row's `ButtonText`
@@ -1375,17 +1397,31 @@ void QuestEngine::note_fight(const std::string& name, const std::string& result)
     last_result_ = result;
 }
 
-// `He` pager (L1042-1062). The head dialog's current page caption: the row's
-// `ButtonText` (`He.jkb`), falling back to the action plate's caption.
+// `He` pager (L1042-1062). The head dialog's current page caption. `Od.EF`
+// L1946 / `Od.X2` L1950 set the primary (`Right`) caption per page:
+//   - NON-last page: the current row's `ButtonText` (`ai[oo].KC`, via `DLa`);
+//   - LAST page: the explicit right `Text` (`qy`) WINS —
+//     `this.Ql=this.qy==""?this.ai[this.oo].KC:this.qy` — and only falls back
+//     to the row caption when `qy` is empty.
+// The port returned the row caption on EVERY page (the precedence inverted).
 std::string QuestEngine::dialog_button_text() const {
     if (dialogs_.empty()) return std::string();
     const EngineDialog& d = dialogs_.front();
-    const std::size_t page =
-        d.lines.empty() ? 0 : (d.page < d.lines.size() ? d.page : d.lines.size() - 1);
-    if (page < d.line_buttons.size() && !d.line_buttons[page].empty()) {
-        return d.line_buttons[page];
+    const std::size_t n = d.lines.size();
+    const std::size_t page = n == 0 ? 0 : (d.page < n ? d.page : n - 1);
+    const bool last = n == 0 || page + 1 >= n;
+    if (!last && page < d.line_buttons.size() && !d.line_buttons[page].empty()) {
+        return d.line_buttons[page];  // `DLa(ai[oo].KC)`
     }
-    return d.button_text;
+    // LAST page: `qy` (the authored right `Text`) wins, else the row caption.
+    // `button_text` already carries the authored text or the last row's
+    // `ButtonText` (the parse-time fallback), so this matches
+    // `qy==""?ai[oo].KC:qy`. A non-last page whose row caption is empty keeps
+    // the fallback so the pager plate stays visible (the port draws the plate
+    // only when the caption is non-empty).
+    if (!d.button_text.empty()) return d.button_text;
+    if (page < d.line_buttons.size()) return d.line_buttons[page];
+    return std::string();
 }
 
 bool QuestEngine::dialog_has_next_page() const {
@@ -1404,18 +1440,32 @@ void QuestEngine::advance_dialog_page() {
     std::fflush(stdout);
 }
 
-std::vector<std::string> QuestEngine::press_dialog(App& app) {
+std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
     std::vector<std::string> fights;
     if (dialogs_.empty()) return fights;
     EngineDialog dlg = dialogs_.front();
     dialogs_.erase(dialogs_.begin());
-    std::fprintf(stdout, "[quest] dialog button pressed: %s (%s)\n", dlg.title.c_str(),
-                 dlg.button_text.c_str());
+    // `He.dhb(a)` L1061: 0=Left(`Ng`), 1=Right(`rh`), 2=Middle(`Nh`),
+    // 100=Close(`Hj`). Anything else fires nothing (`dhb` falls through).
+    const std::vector<QuestAction>* chosen = &dlg.button_actions;
+    const char* slot = "Right";
+    if (button_index == 0) {
+        chosen = &dlg.left_.actions;
+        slot = "Left";
+    } else if (button_index == 2) {
+        chosen = &dlg.middle_.actions;
+        slot = "Middle";
+    } else if (button_index == 100) {
+        chosen = &dlg.close_.actions;
+        slot = "Close";
+    }
+    std::fprintf(stdout, "[quest] dialog button pressed: %s (%s, %s)\n", dlg.title.c_str(),
+                 dlg.button_text.c_str(), slot);
     std::fflush(stdout);
     QuestSideEffects fx;
     std::map<std::string, std::string> locals;
     const ActionRest rest =
-        run_actions(app, dlg.button_actions, dlg.journal, fx, locals, dlg.quest, 0);
+        run_actions(app, *chosen, dlg.journal, fx, locals, dlg.quest, 0);
     apply_effects(app, fx);
     enqueue_effects(app, fx, dlg.journal, locals, dlg.quest);
     if (rest.suspended) {
@@ -1458,6 +1508,112 @@ std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
 QuestEngine& App::quest_engine() {
     if (!quest_engine_) quest_engine_ = std::make_unique<QuestEngine>();
     return *quest_engine_;
+}
+
+// --- `--dialog-verify` slot census (see the header) ------------------------
+namespace {
+
+void census_walk(const pugi::xml_node& node, QuestButtonCensus& out) {
+    for (pugi::xml_node ch = node.first_child(); ch; ch = ch.next_sibling()) {
+        if (ch.type() == pugi::node_element) {
+            const std::string tag = ch.name();
+            if (tag == "Dialog") {
+                ++out.dialogs;
+            } else if (tag == "Button") {
+                const std::string ty = ch.attribute("Type").value();
+                if (ty.empty() || ty == "Right") {
+                    ++out.right;
+                } else if (ty == "Left") {
+                    ++out.left;
+                } else if (ty == "Middle") {
+                    ++out.middle;
+                } else if (ty == "Close") {
+                    ++out.close;
+                }
+            }
+        }
+        census_walk(ch, out);
+    }
+}
+
+void census_file(const std::filesystem::path& p, QuestButtonCensus& out) {
+    const std::string xml = read_file_text(p.string());
+    if (xml.empty()) return;
+    sf2::data::xml_doc doc;
+    doc.parse(reinterpret_cast<const std::uint8_t*>(xml.data()), xml.size());
+    const pugi::xml_node root = doc.root();
+    if (!root) return;
+    QuestButtonCensus local;
+    census_walk(root, local);
+    // Raw text census (INCLUDING commented-out XML) — the naive inventory.
+    for (std::size_t at = 0; (at = xml.find("<Button", at)) != std::string::npos;) {
+        const std::size_t gt = xml.find('>', at);
+        const std::size_t end = gt == std::string::npos ? xml.size() : gt;
+        const std::string tag = xml.substr(at, end - at);
+        std::string ty;
+        const std::size_t tp = tag.find("Type=\"");
+        if (tp != std::string::npos) {
+            const std::size_t s = tp + 6;
+            const std::size_t q = tag.find('"', s);
+            if (q != std::string::npos) ty = tag.substr(s, q - s);
+        }
+        if (ty.empty() || ty == "Right") {
+            ++local.text_right;
+        } else if (ty == "Left") {
+            ++local.text_left;
+        } else if (ty == "Middle") {
+            ++local.text_middle;
+        } else if (ty == "Close") {
+            ++local.text_close;
+        }
+        at = end;
+    }
+    for (std::size_t at = 0; (at = xml.find("<Dialog", at)) != std::string::npos;) {
+        const std::size_t nx = at + 7;  // exact element name (not <Dialogs>)
+        if (nx < xml.size() && xml[nx] != '>' && xml[nx] != ' ' && xml[nx] != '/') {
+            at = nx;
+            continue;
+        }
+        ++local.text_dialogs;
+        at = nx;
+    }
+    std::fprintf(stdout,
+                 "[dlgverify] census %-40s dlg=%-4zu R=%-4zu L=%-4zu M=%-3zu C=%zu (bytes=%zu)\n",
+                 (p.parent_path().filename() / p.filename()).string().c_str(), local.dialogs,
+                 local.right, local.left, local.middle, local.close, xml.size());
+    std::fflush(stdout);
+    ++out.files;
+    out.dialogs += local.dialogs;
+    out.right += local.right;
+    out.left += local.left;
+    out.middle += local.middle;
+    out.close += local.close;
+    out.text_dialogs += local.text_dialogs;
+    out.text_right += local.text_right;
+    out.text_left += local.text_left;
+    out.text_middle += local.text_middle;
+    out.text_close += local.text_close;
+}
+
+} // namespace
+
+QuestButtonCensus census_quest_tree() {
+    QuestButtonCensus out;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path root(kQuestResRoot);
+    const fs::path q = root / "quests.xml";
+    if (fs::exists(q, ec)) census_file(q, out);
+    const fs::path ext = root / "quest_extensions";
+    if (fs::is_directory(ext, ec)) {
+        for (fs::recursive_directory_iterator it(ext, ec), end; it != end; it.increment(ec)) {
+            if (ec) break;
+            if (!it->is_regular_file(ec)) continue;
+            if (it->path().extension() != ".xml") continue;
+            census_file(it->path(), out);
+        }
+    }
+    return out;
 }
 
 } // namespace sf2::app
