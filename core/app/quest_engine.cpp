@@ -7,6 +7,7 @@
 
 #include "app/quest_engine.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -804,6 +805,20 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 dlg.type = attr_or(a.attrs, "Type");
                 dlg.title = attr_or(a.attrs, "Title");
                 dlg.image = attr_or(a.attrs, "Image");
+                // `He.L` L1044 `Loot` (`ShowLoot` -> `Xc.Uhb` L929 splits it on
+                // `|`) and `MinContentHeight` (`Od.cv`, the `Md` floor).
+                dlg.min_content_height = static_cast<float>(
+                    std::atof(attr_or(a.attrs, "MinContentHeight").c_str()));
+                {
+                    const std::string loot = attr_or(a.attrs, "Loot");
+                    for (std::size_t p = 0; p < loot.size();) {
+                        const std::size_t bar = loot.find('|', p);
+                        const std::size_t end = bar == std::string::npos ? loot.size() : bar;
+                        const std::string one = loot.substr(p, end - p);
+                        if (!one.empty()) dlg.loot.push_back(one);
+                        p = end + 1;
+                    }
+                }
                 dlg.quest = quest;
                 dlg.journal = journal;
                 for (const QuestAction& c : a.children) {
@@ -1408,7 +1423,11 @@ std::string QuestEngine::dialog_button_text() const {
     if (dialogs_.empty()) return std::string();
     const EngineDialog& d = dialogs_.front();
     const std::size_t n = d.lines.size();
-    const std::size_t page = n == 0 ? 0 : (d.page < n ? d.page : n - 1);
+    // `uj.sqb()` L1953: `Multiline`/`MultilineBig` have no pager, so the plate
+    // carries the LAST row's caption (or the authored right `Text`) at once.
+    const bool scroll_all = d.type == "Multiline" || d.type == "MultilineBig";
+    const std::size_t page =
+        n == 0 ? 0 : (scroll_all ? n - 1 : (d.page < n ? d.page : n - 1));
     const bool last = n == 0 || page + 1 >= n;
     if (!last && page < d.line_buttons.size() && !d.line_buttons[page].empty()) {
         return d.line_buttons[page];  // `DLa(ai[oo].KC)`
@@ -1426,7 +1445,12 @@ std::string QuestEngine::dialog_button_text() const {
 
 bool QuestEngine::dialog_has_next_page() const {
     if (dialogs_.empty()) return false;
-    return dialogs_.front().page + 1 < dialogs_.front().lines.size();
+    const EngineDialog& d = dialogs_.front();
+    // `uj.sqb()` L1953 (`Multiline`/`MultilineBig`) lays out EVERY `<Line>` as
+    // one scrollable body, so there is NO pager: `Od.EF`/`Od.X2` L1946/L1950
+    // never run and the plate carries the last-page caption straight away.
+    if (d.type == "Multiline" || d.type == "MultilineBig") return false;
+    return d.page + 1 < d.lines.size();
 }
 
 void QuestEngine::advance_dialog_page() {
@@ -1519,6 +1543,9 @@ void census_walk(const pugi::xml_node& node, QuestButtonCensus& out) {
             const std::string tag = ch.name();
             if (tag == "Dialog") {
                 ++out.dialogs;
+                // `He` L1043: an absent `Type` defaults to "Regular".
+                const std::string ty = ch.attribute("Type").value();
+                ++out.types[ty.empty() ? "Regular" : ty];
             } else if (tag == "Button") {
                 const std::string ty = ch.attribute("Type").value();
                 if (ty.empty() || ty == "Right") {
@@ -1593,6 +1620,7 @@ void census_file(const std::filesystem::path& p, QuestButtonCensus& out) {
     out.text_left += local.text_left;
     out.text_middle += local.text_middle;
     out.text_close += local.text_close;
+    for (const auto& kv : local.types) out.types[kv.first] += kv.second;
 }
 
 } // namespace
@@ -1613,6 +1641,31 @@ QuestButtonCensus census_quest_tree() {
             census_file(it->path(), out);
         }
     }
+    // The `<Dialog Type=...>` distribution (`He.S` L1045-1051). Sorted by
+    // descending count so the report reads like the routing table.
+    std::vector<std::pair<std::string, std::size_t>> dist(out.types.begin(),
+                                                          out.types.end());
+    std::sort(dist.begin(), dist.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;
+        return a.first < b.first;
+    });
+    std::fprintf(stdout, "[dlgverify] dialog Type distribution (%zu parsed elements):\n",
+                 dist.empty() ? 0 : out.dialogs);
+    for (const auto& kv : dist) {
+        // The `He.S` routing for each Type (see screens.cpp `dialog_kind`).
+        const char* route = "";
+        if (kv.first == "Regular") route = "-> Xc.Xhb -> 280 Od";
+        else if (kv.first == "Stranger") route = "-> Xc.Bia -> 290 uj";
+        else if (kv.first == "Multiline") route = "-> Xc.Bia -> 290 uj (all lines)";
+        else if (kv.first == "MultilineBig") route = "-> Xc.Nhb -> 290 uj (all lines)";
+        else if (kv.first == "NoAvatar") route = "-> Xc.rIa -> 340 Ve";
+        else if (kv.first == "ShowLoot") route = "-> Xc.Uhb -> 370 vn";
+        else if (kv.first == "Notification") route = "-> Ib bar";
+        else route = "-> JS `debugger`: NO renderer (auto-advance)";
+        std::fprintf(stdout, "[dlgverify]   %-16s %4zu  %s\n", kv.first.c_str(), kv.second,
+                     route);
+    }
+    std::fflush(stdout);
     return out;
 }
 

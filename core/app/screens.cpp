@@ -89,7 +89,13 @@ const EngineDialog* quest_modal_top(App& app) {
 // Regular-dialog button hit-test (defined after the `od` dialog layout
 // helpers below). Returns the `He.dhb` L1061 slot index of the plate under
 // (x, y) — 0=Left, 1=Right, 2=Middle, 100=Close — or -1 for no hit.
-int quest_dialog_button_hit_index(const EngineDialog& d, double x, double y);
+int quest_dialog_button_hit_index(App& app, const EngineDialog& d, double x, double y);
+// `He.S` L1045-1051 Type routing + the `od.close` L1898 retained-dialog copy
+// (both defined with the dialog layout below; `quest_modal_consume` needs
+// them first).
+enum class DialogKind { kNone, kOd280, kUj290, kVe340, kVn370, kIbBar };
+DialogKind dialog_kind(const std::string& type);
+void dialog_capture_closing(App& app, const EngineDialog& d);
 
 // JS `He` gating (L1045-1062): a `Notification` is fire-and-forget (any tap
 // advances, `sa()` continues); a `Regular` dialog holds the chain until its
@@ -100,10 +106,22 @@ int quest_dialog_button_hit_index(const EngineDialog& d, double x, double y);
 bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return false;
+    // `He.S` L1048-1050: the Types whose JS body is a bare `debugger;`
+    // (`Scroll`, `MultiLineScroll`, `ThreeButtons`, `ItemSetDialog`,
+    // `MultilineTMP`, `Simple`) never build a dialog object, so `He.S` falls
+    // through to `this.sa()` — advance without display or input block.
+    if (dialog_kind(d->type) == DialogKind::kNone) {
+        std::fprintf(stdout, "[quest] dialog Type '%s' has no renderer (JS debugger) -> advance\n",
+                     d->type.c_str());
+        std::fflush(stdout);
+        app.quest_engine().pop_dialog();
+        return false;
+    }
     if (!app.pointer().pressed) return true;
     if (d->type == "Notification") {
         std::fprintf(stdout, "[quest] notification advanced: %s\n", d->title.c_str());
         std::fflush(stdout);
+        dialog_capture_closing(app, *d);  // `Ib.close` L1911 (0.5 s collapse)
         app.quest_engine().pop_dialog();
         return true;
     }
@@ -113,7 +131,7 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
     // tutorial Lynx dialog is exactly this (`dlgStoryBtnMore` -> L159,
     // `dlgStoryBtnFight` -> L160).
     if (app.quest_engine().dialog_has_next_page()) {
-        if (quest_dialog_button_hit_index(*d, app.pointer().x, app.pointer().y) >= 0) {
+        if (quest_dialog_button_hit_index(app, *d, app.pointer().x, app.pointer().y) >= 0) {
             app.quest_engine().advance_dialog_page();
         }
         return true;
@@ -123,13 +141,15 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
     if (!app.quest_engine().dialog_has_button()) {
         std::fprintf(stdout, "[quest] dialog advanced (no button): %s\n", d->title.c_str());
         std::fflush(stdout);
+        dialog_capture_closing(app, *d);
         app.quest_engine().pop_dialog();
         return true;
     }
     // `He.dhb(a)` L1061: the plate's slot index (0=Left, 1=Right, 2=Middle,
     // 100=Close) selects which deferred action list runs.
-    const int slot = quest_dialog_button_hit_index(*d, app.pointer().x, app.pointer().y);
+    const int slot = quest_dialog_button_hit_index(app, *d, app.pointer().x, app.pointer().y);
     if (slot >= 0) {
+        dialog_capture_closing(app, *d);  // `od.Ge(1)` L1898 close tween
         const std::vector<std::string> fights = app.quest_engine().press_dialog(app, slot);
         if (fight_out != nullptr && !fights.empty()) *fight_out = fights.front();
     }
@@ -242,18 +262,26 @@ std::string item_display_name(App& app, const CatalogItem& it) {
 // a multiline label keeps its authored `ua` and wraps instead. `line_step` is
 // the JS line advance `(fontSize/eF)*lineHeight` (L1628 `d`); native menu
 // eF=100, so `line_step = ua_scale * font->line_height`.
-void draw_ui_wrapped(App& app, float x, float y, float w, float h,
-                     const std::string& text, float ua_scale, UiAlign align,
-                     float r, float g, float b) {
-    if (text.empty() || w <= 0.0f || h <= 0.0f) return;
+struct UiWrap {
+    std::vector<std::string> lines;
+    float line_step = 0.0f;
+};
+
+// The wrap + line advance itself, shared by the draw below and by the `od`
+// content-height measurement (`Od.lj` L1950 `this.Md = Math.max(kb.ew(),
+// this.cv)` — `od.layout` L1898 is derived from `Md`). `kb.ew()` is the text
+// element's measured height, i.e. `lines * line_step`.
+UiWrap wrap_ui_text(App& app, const std::string& text, float w, float ua_scale) {
+    UiWrap out;
+    if (text.empty() || w <= 0.0f) return out;
     const sf2::data::font* font = app.menu_font();
-    if (font == nullptr) return;
+    if (font == nullptr) return out;
     // `{br}` inline markup -> hard line break (see expand_br).
     const std::string body = expand_br(text);
     const float scale = ua_scale * ea_a1(app);
-    if (scale <= 0.0f) return;
-    const float line_step = scale * static_cast<float>(font->line_height);
-    if (line_step <= 0.0f) return;
+    if (scale <= 0.0f) return out;
+    out.line_step = scale * static_cast<float>(font->line_height);
+    if (out.line_step <= 0.0f) return out;
     // `bx.Csb` (L1624) splits on '\n' first; `apply` char-wraps each logical
     // line.
     std::vector<std::string> logical;
@@ -269,7 +297,6 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
         }
         logical.push_back(cur);
     }
-    std::vector<std::string> lines;
     for (const std::string& para : logical) {
         std::string cur;
         std::size_t i = 0;
@@ -283,10 +310,10 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
                 // character break when the line has no usable space.
                 const std::size_t sp = cur.rfind(' ');
                 if (sp != std::string::npos && sp > 0 && sp + 1 < cur.size()) {
-                    lines.push_back(cur.substr(0, sp));
+                    out.lines.push_back(cur.substr(0, sp));
                     cur = cur.substr(sp + 1);
                 } else {
-                    lines.push_back(cur);
+                    out.lines.push_back(cur);
                     cur.clear();
                 }
                 continue;  // retry this glyph on the new line
@@ -294,10 +321,26 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
             cur = cand;
             i = next;
         }
-        lines.push_back(cur);
+        out.lines.push_back(cur);
     }
+    return out;
+}
+
+// `kb.ew()` (L1950): the wrapped block height (`od` `Md`).
+float measure_ui_wrapped(App& app, const std::string& text, float w, float ua_scale) {
+    const UiWrap wr = wrap_ui_text(app, text, w, ua_scale);
+    return static_cast<float>(wr.lines.size()) * wr.line_step;
+}
+
+void draw_ui_wrapped(App& app, float x, float y, float w, float h,
+                     const std::string& text, float ua_scale, UiAlign align,
+                     float r, float g, float b) {
+    if (text.empty() || w <= 0.0f || h <= 0.0f) return;
+    const UiWrap wr = wrap_ui_text(app, text, w, ua_scale);
+    const float line_step = wr.line_step;
+    if (line_step <= 0.0f) return;
     float yy = y;
-    for (const std::string& ln : lines) {
+    for (const std::string& ln : wr.lines) {
         if (yy + line_step > y + h) break;  // `e > height-jd` -> vn (clip)
         // 1.0f = the `a` param; `fit=false` keeps the wrapped width (the line
         // already fits `w`, so the single-line `Sk` shrink must not re-run).
@@ -313,8 +356,18 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
                            float w, float h, float alpha = 1.0f, bool fill = false,
                            bool flip_x = false, bool top_left = false);
 bool load_scroll_atlas(App& app);
-void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speaker,
-                  const std::string& line1, const std::string& line2, bool show_ok);
+// JS `oe` user image (`res/users/images/<name>.png`, L1823). Defined with the
+// item-image helpers below; the `Ib` bar needs it for the dialog portrait.
+bool draw_user_image(App& app, const std::string& file_name, float cx, float cy, float w,
+                     float h, float alpha, bool flip_x);
+// `Ib` notification/hint bar (JS L1905-1912). `Sr()` L1908-1910 builds exactly
+// ONE label = the JOINED lines (`lj` L1908 formats `^{0}^\n` per line) plus a
+// portrait from the resolved `Image` (`Qhb(a=wt,...)` L1907 -> `v.RIa` L1909).
+// There is NO speaker row — the port drew an invented speaker label.
+void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image,
+                  const std::string& joined_lines, bool show_ok);
+// `He.S` L1045-1051 Type routing (see the definition below).
+bool dialog_scrolls_all_lines(const std::string& type);
 // `od` 9-slice panel geometry (JS L1894-1900) — defined after the modal draw.
 struct OdPanel {
     float px = 0.0f, py = 0.0f, pw = 0.0f, ph = 0.0f;  // on-screen BODY rect
@@ -334,33 +387,99 @@ void draw_flat_button(App& app, const std::string& label, float cx, float cy, fl
 // `od.EF` L1899 two-button row - defined with the dialog layout below.
 void draw_dialog_plate(App& app, const std::string& text, const std::string& color,
                        bool primary, float cx, float cy, float w, float h);
-// The Regular dialog body (dim + `od` panel + title + portrait + wrapped
-// lines + the button row) - defined with the dialog layout below.
-void draw_regular_quest_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d);
+// The per-`Type` dialog drawers (`He.S` L1045-1051 -> `Wb.Xob` L926):
+// `Regular`->280 `Od`, `Stranger`/`Multiline`/`MultilineBig`->290 `uj`,
+// `NoAvatar`->340 `Ve`, `ShowLoot`->370 `vn`, `Notification`->the `Ib` bar.
+//
+// --- `od.aa` L1895 open/close tween (0.25 s) -------------------------------
+// `ed(.25)` normalizes the 0.25 s timer. OPEN: `node.wa(dc.Ln()(t))` +
+// `node.la(node.Eb + (-.2+.2*dc.kYa()(t)))` — alpha 0->1, scale 0.8->1.0.
+// CLOSE: `node.wa(1-dc.KK()(t))` + `node.D(node.ra + 1000*dc.KK()(t))` — alpha
+// 1->0, slide +1000 design px — then `n_()` at t==1. `dc.Ln()` =
+// `1-(1-t)^2`, `dc.KK()` = `t^2`, `dc.kYa()` = back-out with `b=17.0158*.1`
+// (`dc` L2349). `Wb.x3a` L927 fades the backdrop with the SAME 0.25 s tween
+// (`r6(1,null,dc.Ln())` open / `r6(0,cb,dc.KK())` close; `Fc.r6` L1476 is
+// `start(this.mn(), a, .25, c)`).
+constexpr float kDialogAnimSecs = 0.25f;
 
-// Draws the modal panel. JS `He` (L1042-1063) routes dialogs by Type:
-// `Notification` posts to the `Ib` hint bar (`Ib.F().Qhb`, L1050); every
-// other type builds an `Xc` dialog over the `od` 9-slice base (L1894-1900).
-// The base is `bg`/`bg_edge` (asset id 254 = res/ui/scroll, `y.lSa`/`y.eoa`
-// L2467; `XN[0..2]` L1894), title `Vc` (`Fa(1560,160)`, `C(-780)`, `ua(152)`,
-// color `Z.W6` L1900) and the body lines. Replaces the invented flat
-// 900x220 quad + "TAP TO CONTINUE" (PORT_AUDIT_UI §2.9).
+float dialog_ease_out(float t) { return 1.0f - (1.0f - t) * (1.0f - t); }  // dc.Ln
+float dialog_ease_in(float t) { return t * t; }                             // dc.KK
+float dialog_ease_back(float t) {                                           // dc.kYa
+    constexpr float kB = 17.0158f * 0.1f;
+    const float c = t - 1.0f;
+    return c * c * ((kB + 1.0f) * c + kB) + 1.0f;
+}
+
+struct DialogAnim {
+    float alpha = 1.0f;  // `node.wa`
+    float scale = 1.0f;  // `node.la`
+    float slide = 0.0f;  // `node.D` x offset, design px (close only)
+};
+
+// `od.aa` L1895 at normalized time `t` (`ed(.25)`).
+DialogAnim dialog_anim_at(float age, bool closing) {
+    DialogAnim a;
+    float t = age / kDialogAnimSecs;
+    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    if (closing) {
+        a.alpha = 1.0f - dialog_ease_in(t);
+        a.slide = 1000.0f * dialog_ease_in(t);
+        return a;
+    }
+    a.alpha = dialog_ease_out(t);
+    a.scale = 1.0f + (-0.2f + 0.2f * dialog_ease_back(t));
+    return a;
+}
+
+// `Wb.x3a` L927 backdrop alpha (`Qa` = `Fc.Ed(-2147483648)`, i.e. 0x80 black).
+float dialog_backdrop_alpha_at(float age, bool closing) {
+    float t = age / kDialogAnimSecs;
+    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    return closing ? (1.0f - dialog_ease_in(t)) : dialog_ease_out(t);
+}
+
+void draw_notification(App& app, sf2::render::Renderer& ren, const EngineDialog& d);
+void draw_od280_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
+                       const DialogAnim& anim);
+void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
+                       const DialogAnim& anim);
+void draw_ve340_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
+                       const DialogAnim& anim);
+void draw_vn370_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
+                       const DialogAnim& anim);
+// The live dialog's 0.25 s open/close tween (`od.aa` L1895) at this frame.
+DialogAnim dialog_anim_now(App& app, const EngineDialog& d);
+// The dismissed dialog's 0.25 s close tween (`od.Ge(1)`/`n_` L1898).
+void draw_closing_dialog(App& app, sf2::render::Renderer& ren);
+
+// Draws the modal panel. JS `He.S` (L1045-1051) routes dialogs by `Type`:
+// `Regular` -> `Xc.Xhb` -> `Wb.openDialog(280)` (`Od`, L929); `Stranger` /
+// `Multiline` / `MultilineBig` -> `Xc.Bia`/`Xc.Nhb` -> 290 (`uj`, L929/L1050);
+// `NoAvatar` -> `Xc.rIa` -> `Vhb` -> 340 (`Ve`, L930); `ShowLoot` ->
+// `Xc.Uhb` -> 370 (`vn`, L929); `Notification` posts to the `Ib` bar
+// (`Ib.F().Qhb`, L1050). The remaining Types (`Scroll`, `MultiLineScroll`,
+// `ThreeButtons`, `ItemSetDialog`, `MultilineTMP`, `Simple`) hit a bare
+// `debugger;` in the JS (L1048-1050) — no dialog object is built and `He.S`
+// falls through to `this.sa()`, so the port advances without displaying.
 void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) {
     if (!is_top) return;  // layered stack: only the top screen draws the modal
+    draw_closing_dialog(app, ren);  // `od.Ge(1)` L1898: the dismissed tween
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return;
-    // `Notification` -> the `Ib` hint bar (L1045-1050): fire-and-forget, no
-    // dialog object -> no screen dim (`BlockRaycast="0"`); the OK plate only
-    // draws when the button nests actions (`hab()` L1060).
-    if (d->type == "Notification") {
-        const std::string l0 = d->lines.empty() ? std::string() : loc(app, d->lines[0], d->lines[0]);
-        const std::string l1 =
-            d->lines.size() > 1 ? loc(app, d->lines[1], d->lines[1]) : std::string();
-        draw_ib_hint(app, ren, d->title, l0, l1,
-                     /*show_ok=*/!d->button_actions.empty() && !d->button_text.empty());
-        return;
+    const DialogAnim anim = dialog_anim_now(app, *d);
+    switch (dialog_kind(d->type)) {
+        case DialogKind::kIbBar:
+            // `Notification` (L1050): fire-and-forget, no dialog object -> no
+            // screen dim (`BlockRaycast="0"`); the OK plate only draws when
+            // the button nests a callback (`hab()` L1060).
+            draw_notification(app, ren, *d);
+            return;
+        case DialogKind::kOd280: draw_od280_dialog(app, ren, *d, anim); return;
+        case DialogKind::kUj290: draw_uj290_dialog(app, ren, *d, anim); return;
+        case DialogKind::kVe340: draw_ve340_dialog(app, ren, *d, anim); return;
+        case DialogKind::kVn370: draw_vn370_dialog(app, ren, *d, anim); return;
+        case DialogKind::kNone: return;  // JS `debugger` branch (L1048-1050)
     }
-    draw_regular_quest_dialog(app, ren, *d);
 }
 
 // --- `od` 9-slice dialog base (JS L1894-1900) ----------------------------
@@ -1389,14 +1508,17 @@ bool load_sliced_atlas(App& app) {
 
 // The `Ib` notification/hint bar (JS L1905-1912). Layout: `node.C(W -
 // scroll.width*scale)`, `node.D(za.Sp)`; scroll `gk(600,250,50,0)` horizontal
-// with a `Fg(600,250,1,30)` content frame (paper rails). Sensei image = JS
-// `E.get(12)` (native `sensei_portrait`); label `Fa(600-image.w+20,150)`,
-// `C(image.w-30)`, `D(50)`; OK `Bb` at local (450,185). The `gYa()` gate is
-// the shell predicate (true on Dojo/Map — the preloader/fight cases are
-// OPEN); `Ib.RP` (He.DisableNotificationsButtons, L1045) gates the OK button
-// — the native EngineDialog does not carry it, so callers pass `show_ok`.
-void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speaker,
-                  const std::string& line1, const std::string& line2, bool show_ok) {
+// with a `Fg(600,250,1,30)` content frame (paper rails). The portrait is the
+// dialog's resolved `Image` (`Qhb(a=wt,...)` L1907 -> `v.RIa` L1909 ->
+// `R.$(E.get(12), fileName, ...)`, with the JS `_small` suffix stripped);
+// `Sr()` L1908-1910 builds exactly ONE label from the JOINED lines (`lj`
+// L1908) at `Fa(600-image.w+20,150)`, `C(image.w-30)`, `D(50)` — there is NO
+// speaker row. OK `Bb` at local (450,185). The `gYa()` gate is the shell
+// predicate (true on Dojo/Map — the preloader/fight cases are OPEN);
+// `Ib.RP` (He.DisableNotificationsButtons, L1045) gates the OK button — the
+// native EngineDialog does not carry it, so callers pass `show_ok`.
+void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image,
+                  const std::string& joined_lines, bool show_ok) {
     const float c =
         std::clamp(std::min(kViewW * 0.75f, kViewH * 0.75f) / 600.0f, 0.2f, 1.1f);
     const float sp = std::min(kViewH * 0.13f, 100.0f) * 0.78f;  // za.odb L1975
@@ -1436,36 +1558,46 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& speak
                                lx(600), ly(0), lx(600), ly(250), lx(0), ly(250)};
         ren.draw_triangles(panel, 6, 0.05f, 0.05f, 0.08f, 0.82f);
     }
-    // Sensei (256px, transparent corners). No procedural ring — JS draws none
-    // (PORT_AUDIT_UI §2.9).
-    if (app.renderer().texture_lookup("sensei_portrait") != 0) {
-        sf2::scene::Sprite s;
-        s.texture_name = "sensei_portrait";
-        s.frame_x = 0.0f;
-        s.frame_y = 0.0f;
-        s.frame_w = 256.0f;
-        s.frame_h = 256.0f;
-        s.tex_w = 256.0f;
-        s.tex_h = 256.0f;
-        s.solid = false;
-        s.color_a = 1.0f;
-        s.transform.set_pos(lx(128.0f), ly(130.0f));
-        s.transform.set_scale(c, c);
-        app.renderer().draw_sprite(s, ui_camera());
+    // Portrait: `Ib.Sr()` L1909 resolves the dialog's `Image` into
+    // `R.$(E.get(12), fileName, this.scroll.iL)`; `_small` is stripped first
+    // (`fileName.replace(RegExp("_small$"),"")`). The sensei stem maps to the
+    // native `sensei_portrait` disc; every other name is a `oe` user image.
+    float image_w = 0.0f;
+    if (!image.empty()) {
+        std::string name = image;
+        constexpr char kSmall[] = "_small";
+        if (name.size() > sizeof(kSmall) - 1 &&
+            name.compare(name.size() - (sizeof(kSmall) - 1), sizeof(kSmall) - 1, kSmall) ==
+                0) {
+            name = name.substr(0, name.size() - (sizeof(kSmall) - 1));
+        }
+        if (name == "character_sensei" &&
+            app.renderer().texture_lookup("sensei_portrait") != 0) {
+            sf2::scene::Sprite s;
+            s.texture_name = "sensei_portrait";
+            s.frame_x = 0.0f;
+            s.frame_y = 0.0f;
+            s.frame_w = 256.0f;
+            s.frame_h = 256.0f;
+            s.tex_w = 256.0f;
+            s.tex_h = 256.0f;
+            s.solid = false;
+            s.color_a = 1.0f;
+            s.transform.set_pos(lx(128.0f), ly(130.0f));
+            s.transform.set_scale(c, c);
+            app.renderer().draw_sprite(s, ui_camera());
+            image_w = 256.0f;
+        } else if (draw_user_image(app, name, lx(128.0f), ly(130.0f), 256.0f * c,
+                                   256.0f * c, 1.0f, false)) {
+            image_w = 256.0f;
+        }
     }
-    // Label (`Z.sc` = 0.184/0.145/0.106).
-    const float tx = lx(256.0f - 30.0f);
-    draw_ui_label(app, tx, ly(50.0f), 364.0f * c, 44.0f * c, speaker, 0.9f, UiAlign::Left,
-                  0.184f, 0.145f, 0.106f);
-    // The body line wraps (`ea.rd(!0)` multiline; `{br}` is a hard break) —
-    // the Sensei tutorial notifications (tutorial_move {br} ...) need it.
-    const float l1_h = line2.empty() ? 170.0f * c : 70.0f * c;
-    draw_ui_wrapped(app, tx, ly(88.0f), 364.0f * c, l1_h, line1, 0.75f, UiAlign::Left,
-                    0.184f, 0.145f, 0.106f);
-    if (!line2.empty()) {
-        draw_ui_label(app, tx, ly(162.0f), 364.0f * c, 30.0f * c, line2, 0.7f, UiAlign::Left,
-                      0.184f, 0.145f, 0.106f);
-    }
+    // The ONE label: the joined lines (`lj` L1908). `Fa(600-image.w+20,150)`,
+    // `C(image.w-30)`, `D(50)`, `rd(!0)` (multiline — `{br}` is a hard break,
+    // the Sensei tutorial notifications need it).
+    const float tx = lx(image_w - 30.0f);
+    draw_ui_wrapped(app, tx, ly(50.0f), (620.0f - image_w) * c, 170.0f * c, joined_lines,
+                    0.75f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
     // OK (`Bb(Zva)` = "EButtonWhite", local (450,185), `zf(100)`); `Ib.RP`
     // gate (L1910) - only when the notification carries a button. `Bb` draws
     // through the `ESliced` plate (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842).
@@ -4339,40 +4471,216 @@ void draw_dojo_gamepad(App& app) {
                           btn_size, btn_size, 1.0f);
 }
 
-// --- Fresh-profile tutorial (JS StoryTutorialWelcome) ----------------------
-// The Regular dialog layout (`Xc`/`od`; oracle oracle_tutorial_modal.png):
-// СЭНСЭЙ title, left portrait, right wrapped body, the FIGHT button
-// bottom-centre-right. `draw_quest_modal` draws the panel; this layout also
-// gives the dialog button's hit rect (the tap that fires its deferred
-// actions, `He.dhb(1)` L1061).
-struct TutorialDialogLayout {
+namespace {
+
+// --- Dialogs: `He.S` L1045-1051 + `od` L1894-1900 --------------------------
+// `draw_quest_modal` draws the panel; this layout also gives the dialog
+// button's hit rect (the tap that fires its deferred actions, `He.dhb(1)`
+// L1061).
+// --- Dialog layout: `od` L1894-1900 + `He.S` Type routing L1045-1051 -------
+// `od.layout` (L1898) is derived ENTIRELY from the dialog's content height
+// `Md`:
+//     this.Ne.D(-this.Md/2);
+//     let a = this.Md/2; a<300 && (a=300); a>1E3 && (a=1E3);
+//     this.Vc.D(-(a + this.Vc.pfa().y));
+//     let b = this.Cd.node.qa()/2;
+//     this.Cd.D(a + this.Cd.node.qa()/2);
+//     this.Cy.D(this.Vc.ra + -25);   this.Rx.D(this.Cd.node.ra + b);
+// `Md` is measured by `Od.lj` / `uj.sqb` (L1950 / L1953) — the wrapped body
+// height, floored by the `MinContentHeight` attribute (`this.cv`). `Vc` is
+// `Fa(1560,160)` (L1900), a `Bb` plate is `Pb(125)` (L1899 / L1944), the body
+// box is `Fa(DG?900:1680,..)` at `C(DG?-100:0)` (L1953-1954) and the `oe`
+// avatar (L1823) is `la(1.8*iy)` of a 512px sheet at `C(-450+OB)` (L1947).
+// Every constant below is one of those JS values — the previous fixed
+// fractions (0.251/0.436/0.325/0.490/0.755/0.762 + a 270x60 plate) were
+// invented.
+constexpr float kOdTitleW = 1560.0f;    // `$T` L1900 `Vc.Fa(1560,160)`
+constexpr float kOdTitleH = 160.0f;
+constexpr float kOdBtnH = 125.0f;       // `Bb.Pb(125)` L1899/L1944
+constexpr float kOdBtnW = 600.0f;       // `od.rI` L1948 `Rb.xc(600)`
+constexpr float kOdBodyW = 900.0f;      // `sqb` L1953 `a = DG?900:1680`
+constexpr float kOdBodyX = -100.0f;     // `f.C(this.DG?-100:0)` L1954
+constexpr float kOdAvatarX = -450.0f;   // `ala` L1947 `b = -450`
+constexpr float kOdAvatarSrc = 512.0f;  // `oe` sheet (L1823)
+constexpr float kOdAvatarScale = 1.8f;  // `la(1.8*iy)` L1947
+constexpr float kOdDivGap = 25.0f;      // `Cy.D(Vc.ra+-25)` L1898
+constexpr float kOdDefaultMd = 550.0f;  // `od` ctor L1894 `this.Md=550`
+constexpr float kOdVeBodyW = 1100.0f;   // `Ve` ctor L1913 `kb.Fa(1100,550)`
+constexpr float kOdVeBodyX = -550.0f;   // `kb.C(-550)` L1913
+
+// `He.S` L1045-1051 Type -> dialog class (`Wb.Xob` L926):
+//   Regular      -> `Xc.Xhb`            -> `Wb.openDialog(280)` -> `Od` (L929)
+//   Stranger     -> `Xc.Bia`->`Yhb`     -> `Wb.openDialog(290)` -> `uj` (L929)
+//   Multiline    -> `Xc.Bia`            -> 290 -> `uj`          (L1049)
+//   MultilineBig -> `Xc.Nhb`->`Bia`     -> 290 -> `uj`          (L1050)
+//   NoAvatar     -> `Xc.rIa`->`Vhb`     -> `Wb.openDialog(340)` -> `Ve` (L930)
+//   ShowLoot     -> `Xc.Uhb`            -> `Wb.openDialog(370)` -> `vn` (L929)
+//   Notification -> `Ib.F().Qhb` (the `Ib` bar)                 (L1050)
+//   Scroll / MultiLineScroll / ThreeButtons / ItemSetDialog / MultilineTMP /
+//   Simple -> a bare `debugger;` in the JS (L1048-1050): no dialog object is
+//   built and `He.S` falls through to `this.sa()` (advance, no display).
+DialogKind dialog_kind(const std::string& type) {
+    if (type == "Notification") return DialogKind::kIbBar;
+    if (type == "NoAvatar") return DialogKind::kVe340;
+    if (type == "ShowLoot") return DialogKind::kVn370;
+    if (type == "Stranger" || type == "Multiline" || type == "MultilineBig") {
+        return DialogKind::kUj290;
+    }
+    if (type.empty() || type == "Regular") return DialogKind::kOd280;
+    return DialogKind::kNone;  // the JS `debugger` branch
+}
+
+// `Xc.Nhb` L1050 -> `uj.sqb()` L1953: `Multiline`/`MultilineBig` lay out
+// EVERY `<Line>` as one scrollable body (`this.yO` + `this.MV`, `Md`
+// accumulates the whole stack). Every other Type keeps `Od.EF`'s
+// one-row-per-page pager (`Od.X2` L1950).
+bool dialog_scrolls_all_lines(const std::string& type) {
+    return type == "Multiline" || type == "MultilineBig";
+}
+
+struct OdLayout {
     OdPanel panel;
-    float title_y = 0.0f, title_h = 0.0f;
-    float portrait_cx = 0.0f, portrait_cy = 0.0f, portrait = 0.0f;
+    float md = 0.0f;          // `Md` (design px)
+    float a = 300.0f;         // `clamp(Md/2, 300, 1000)`
+    float anim_scale = 1.0f;  // `od.aa` L1895 `node.la`
+    float anim_slide = 0.0f;  // `od.aa` close slide (design px)
+    float title_x = 0.0f, title_y = 0.0f, title_w = 0.0f, title_h = 0.0f;
     float body_x = 0.0f, body_y = 0.0f, body_w = 0.0f, body_h = 0.0f;
     float btn_cx = 0.0f, btn_cy = 0.0f, btn_w = 0.0f, btn_h = 0.0f;
+    float portrait_cx = 0.0f, portrait_cy = 0.0f, portrait = 0.0f;
+    float div1_y = 0.0f, div2_y = 0.0f;
+    // design -> screen. The `od` node sits at the panel centre, scaled `c`
+    // (`l4a` L1896); `anim_scale`/`anim_slide` are the L1895 tween.
+    float sx(float dx) const {
+        return panel.px + panel.pw * 0.5f + (dx + anim_slide) * panel.c * anim_scale;
+    }
+    float sy(float dy) const {
+        return panel.py + panel.ph * 0.5f + dy * panel.c * anim_scale;
+    }
 };
 
-TutorialDialogLayout tutorial_dialog_layout() {
-    TutorialDialogLayout t;
-    t.panel = od_panel(2340.0f, 1530.0f);  // od AV = fc(2340,1530), L1894
-    const OdPanel& p = t.panel;
-    t.title_h = 160.0f * p.c;
-    t.title_y = p.py + p.ph * 0.20f;
-    // Portrait: oracle dojo_sensei green circle bbox x307..543 y253..403.
-    t.portrait = 430.0f;
-    t.portrait_cx = p.px + p.pw * 0.251f;   // 425 at 1280x720 (body 864 @208)
-    t.portrait_cy = p.py + p.ph * 0.500f;   // 360
-    t.body_x = p.px + p.pw * 0.436f;
-    t.body_y = p.py + p.ph * 0.325f;
-    t.body_w = p.pw * 0.490f;
-    t.body_h = p.ph * 0.42f;
-    t.btn_w = 270.0f;
-    t.btn_h = 60.0f;
-    t.btn_cx = p.px + p.pw * 0.755f;
-    t.btn_cy = p.py + p.ph * 0.762f;
-    return t;
+OdLayout od_layout(float md) {
+    OdLayout o;
+    o.panel = od_panel(2340.0f, 1530.0f);  // od AV = fc(2340,1530), L1894
+    o.md = md < 0.0f ? 0.0f : md;
+    o.a = std::clamp(o.md * 0.5f, 300.0f, 1000.0f);  // L1898
+    // `Vc.Fa(1560,160)` + `C(-780)`: the title box spans design x [-780,780].
+    o.title_w = kOdTitleW * o.panel.c;
+    o.title_h = kOdTitleH * o.panel.c;
+    o.title_x = o.sx(-kOdTitleW * 0.5f);
+    o.title_y = o.sy(-(o.a + kOdTitleH));  // `Vc.D(-(a+Vc.pfa().y))`
+    o.btn_h = kOdBtnH * o.panel.c;
+    o.btn_w = kOdBtnW * o.panel.c;
+    o.btn_cy = o.sy(o.a + kOdBtnH * 0.5f);  // `Cd.D(a+Cd.node.qa()/2)`
+    o.body_w = kOdBodyW * o.panel.c;
+    o.body_x = o.sx(kOdBodyX);  // `f.C(this.DG?-100:0)`
+    o.body_y = o.sy(-o.md * 0.5f);  // `Ne.D(-Md/2)`
+    o.body_h = o.md * o.panel.c;
+    o.btn_cx = o.sx(0.0f);  // `od.EF` L1899 centres a lone plate on the panel
+    o.portrait = kOdAvatarSrc * kOdAvatarScale * o.panel.c;  // L1947
+    o.portrait_cx = o.sx(kOdAvatarX);
+    o.portrait_cy = o.sy(0.0f);
+    o.div1_y = o.sy(-(o.a + kOdTitleH) - kOdDivGap);  // `Cy.D(Vc.ra+-25)`
+    o.div2_y = o.sy(o.a + kOdBtnH);                   // `Rx.D(Cd.node.ra+b)`
+    return o;
 }
+
+// `Od.Xma` L1948: the CURRENT row's text (`He` pages one `<Line>` at a time
+// via `Od.EF`/`Od.X2` L1946/L1950).
+std::string dialog_page_body(App& app, const EngineDialog& d) {
+    if (d.lines.empty()) return std::string();
+    const std::size_t page = d.page < d.lines.size() ? d.page : d.lines.size() - 1;
+    return loc(app, d.lines[page], d.lines[page]);
+}
+
+// The dialog's content height `Md` (design px). `Od.lj` L1950
+// `Md = Math.max(kb.ew(), cv)`; `uj.sqb` L1953 accumulates every row. `cv` is
+// the `MinContentHeight` attribute (0 when absent). `Ve` never recomputes
+// `Md`, so it keeps the `od` ctor default (L1894 `this.Md=550`); `vn.$A`
+// L1935 hard-sets `this.Md=600`.
+float dialog_content_md(App& app, const EngineDialog& d) {
+    const DialogKind kind = dialog_kind(d.type);
+    if (kind == DialogKind::kVe340) return kOdDefaultMd;  // L1894
+    if (kind == DialogKind::kVn370) return 600.0f;        // `vn.$A` L1935
+    const float c = od_panel(2340.0f, 1530.0f).c;
+    const float safe_c = c > 0.0f ? c : 1.0f;
+    float h = 0.0f;
+    if (dialog_scrolls_all_lines(d.type)) {
+        for (const std::string& ln : d.lines) {  // `sqb` L1953 rows
+            h += measure_ui_wrapped(app, loc(app, ln, ln), kOdBodyW * safe_c, 0.70f);
+        }
+    } else {
+        // `Od.Xma` L1948 -> `lj` re-measures the CURRENT row.
+        h = measure_ui_wrapped(app, dialog_page_body(app, d), kOdBodyW * safe_c, 0.70f);
+    }
+    return std::max(h / safe_c, d.min_content_height);
+}
+
+OdLayout dialog_layout_for(App& app, const EngineDialog& d, const DialogAnim& anim) {
+    OdLayout o = od_layout(dialog_content_md(app, d));
+    o.anim_scale = anim.scale;  // `od.aa` L1895 `node.la`
+    o.anim_slide = anim.slide;  // `od.aa` close slide
+    return o;
+}
+
+// `od.aa` L1895: the live dialog's 0.25 s tween. The clock is the top
+// screen's `time()` — a fixed 60 Hz accumulation, NEVER the wall clock or the
+// OS cursor — so a capture after settle is byte-identical to the steady state
+// (alpha 1, scale 1, slide 0). A NEW dialog (`type|title`) restarts the open
+// tween at t=0.
+DialogAnim dialog_anim_now(App& app, const EngineDialog& d) {
+    static std::string key;
+    static float start = 0.0f;
+    const std::string cur = d.type + "|" + d.title;
+    const float now = app.screens().top() != nullptr ? app.screens().top()->time() : 0.0f;
+    if (key != cur || now < start) {
+        key = cur;
+        start = now;
+    }
+    return dialog_anim_at(now - start, /*closing=*/false);
+}
+
+// `od.close`/`Ge(1)` L1898 + `n_()`: the dismissed dialog slides + fades for
+// the same 0.25 s (alpha `1-KK(t)`, x `+1000*KK(t)`). The engine pops it
+// immediately (`Wb.Bwb` L928 unlinks in `n_()`), so the drawer retains a COPY
+// here and clears it once the tween lands.
+struct ClosingDialog {
+    bool active = false;
+    EngineDialog d;
+    float start = 0.0f;
+};
+ClosingDialog& closing_slot() {
+    static ClosingDialog s;
+    return s;
+}
+
+void dialog_capture_closing(App& app, const EngineDialog& d) {
+    ClosingDialog& s = closing_slot();
+    s.active = true;
+    s.d = d;
+    s.start = app.screens().top() != nullptr ? app.screens().top()->time() : 0.0f;
+}
+
+// `Ib.lj` L1908: `$s.uva(b, "^{0}^\n", a[c].text)` for every line, trailing
+// newlines trimmed -> the lines joined with '\n'. This is the bar's ONE label.
+std::string ib_joined_lines(App& app, const EngineDialog& d) {
+    std::string joined;
+    for (const std::string& ln : d.lines) {
+        if (!joined.empty()) joined.push_back('\n');
+        joined += loc(app, ln, ln);
+    }
+    return joined;
+}
+
+// `Ib.F().Qhb(r, z, c, g, k, SK, x, $Ta)` L1050: the notification bar. The
+// body is the JOINED lines and the portrait the resolved `Image` — `Sr()`
+// L1908-1910 builds exactly ONE label and NO speaker row.
+void draw_notification(App& app, sf2::render::Renderer& ren, const EngineDialog& d) {
+    draw_ib_hint(app, ren, d.image, ib_joined_lines(app, d),
+                 /*show_ok=*/!d.button_actions.empty() && !d.button_text.empty());
+}
+
+} // namespace
 
 // The dialog's action-button plate (`dlgStoryBtnFight` -> "В БОЙ"): the
 // `btnBeige` slice when the atlas resolved, else the flat fallback.
@@ -4415,31 +4723,50 @@ struct QuestDialogPlate {
     std::string color;
 };
 
-// `od.EF` L1899 lays out TWO plates: with both present (`a==3`) the primary
-// (`Rb`) sits at `+width/2+32` and the secondary (`Kb`) at `-(width/2+32)`;
-// a lone plate sits at the panel centre (`a==1`/`a==2`). The `He` slots map
-// Right->primary, Left->secondary (Middle/Close take a free plate).
+// `od.EF` L1899 lays out TWO plates with both present (`a==3`); a lone plate
+// sits at the panel centre. `Od.rI` L1948 (the class every `Xc` dialog builds)
+// then re-places them: `Rb.C(850-Rb.width/2)` (the primary), `Kb.C(Rb.node.ya
+// - 20 - (Rb.width+Kb.width)/2)` (the secondary), both `xc(600)/Pb(125)`; a
+// LONE primary gets `C(ya-50)` + `xc(width+50)`, a lone secondary
+// `C((1680-width)/2-850)`. The `He` slots map Right->primary, Left->secondary
+// (Middle/Close take a free plate).
 struct QuestDialogRow {
     QuestDialogPlate plates[2];
     int count = 0;
 };
 
-constexpr float kDialogBtnGap = 32.0f;  // `od.EF` L1899: width/2 + 32
+constexpr float kDialogBtnGap = 32.0f;   // `od.EF` L1899: width/2 + 32
+constexpr float kOdBtnPrimaryX = 550.0f;  // `rI` L1948 `850 - 600/2`
+constexpr float kOdBtnLonePrimaryX = 500.0f;   // `rI` `ya - 50`
+constexpr float kOdBtnLonePrimaryW = 650.0f;   // `rI` `xc(width + 50)`
+constexpr float kOdBtnSecondaryX = -70.0f;     // `rI` `ya - 20 - (600+600)/2`
+constexpr float kOdBtnLoneSecondaryX = -310.0f;  // `rI` `(1680-600)/2 - 850`
 
-QuestDialogRow quest_dialog_row(const EngineDialog& d) {
-    const TutorialDialogLayout t = tutorial_dialog_layout();
+// The plate row geometry for `d` (`Od.rI` L1948 / `od.EF` L1899).
+// `anim` is identity for the settled hit-test (`quest_dialog_button_hit_index`)
+// and the live `od.aa` tween for the draw.
+QuestDialogRow quest_dialog_row(App& app, const EngineDialog& d,
+                                const DialogAnim& anim = DialogAnim{}) {
+    const OdLayout L = dialog_layout_for(app, d, anim);
     QuestDialogRow r;
-    auto add = [&](int slot, bool primary, const std::string& text, const std::string& color) {
+    bool primary = false, secondary = false;
+    auto add = [&](int slot, bool is_primary, const std::string& text,
+                   const std::string& color) {
         if (r.count >= 2) return;
         QuestDialogPlate& p = r.plates[r.count++];
         p.slot = slot;
-        p.primary = primary;
-        p.cx = t.btn_cx;
-        p.cy = t.btn_cy;
-        p.w = t.btn_w;
-        p.h = t.btn_h;
+        p.primary = is_primary;
+        p.cx = L.btn_cx;
+        p.cy = L.btn_cy;
+        p.w = kOdBtnW * L.panel.c;
+        p.h = kOdBtnH * L.panel.c;
         p.text = text;
         p.color = color;
+        if (is_primary) {
+            primary = true;
+        } else {
+            secondary = true;
+        }
     };
     // `hab()` L1060: a slot "exists" when its nested action list is non-empty.
     if (!d.button_actions.empty()) add(1, true, d.button_text, d.button_color);
@@ -4450,16 +4777,24 @@ QuestDialogRow quest_dialog_row(const EngineDialog& d) {
     if (r.count < 2 && !d.close_.actions.empty()) {
         add(100, false, d.close_.text, d.close_.color);
     }
-    if (r.count == 2) {
-        const float half = t.btn_w * 0.5f + kDialogBtnGap;
-        r.plates[0].cx = t.btn_cx + half;  // `Rb.node.C(width/2+32)`
-        r.plates[1].cx = t.btn_cx - half;  // `Kb.node.C(-(width/2+32))`
+    if (r.count > 0) {
+        // `rI` L1948: exactly one primary (`Rb`) and one secondary (`Kb`).
+        QuestDialogPlate& prim = r.plates[primary ? 0 : 1];
+        if (primary && secondary) {
+            prim.cx = L.sx(kOdBtnPrimaryX);
+            r.plates[1].cx = L.sx(kOdBtnSecondaryX);
+        } else if (primary) {
+            prim.cx = L.sx(kOdBtnLonePrimaryX);
+            prim.w = kOdBtnLonePrimaryW * L.panel.c;
+        } else {
+            prim.cx = L.sx(kOdBtnLoneSecondaryX);
+        }
     }
     return r;
 }
 
-int quest_dialog_button_hit_index(const EngineDialog& d, double x, double y) {
-    const QuestDialogRow r = quest_dialog_row(d);
+int quest_dialog_button_hit_index(App& app, const EngineDialog& d, double x, double y) {
+    const QuestDialogRow r = quest_dialog_row(app, d);
     for (int i = 0; i < r.count; ++i) {
         const QuestDialogPlate& p = r.plates[i];
         if (x >= p.cx - p.w * 0.5f && x <= p.cx + p.w * 0.5f && y >= p.cy - p.h * 0.5f &&
@@ -4470,24 +4805,34 @@ int quest_dialog_button_hit_index(const EngineDialog& d, double x, double y) {
     return -1;
 }
 
-// The `Regular`/other `Xc` dialog: `Wb.Qa` (0x80 black) dim + the `od`
-// 9-slice base + `Vc` title + the `Image` avatar (`oe`) + the wrapped body
-// lines + the action button. Mirrors the JS `He.S` line/portrait layout
-// (oracle oracle_tutorial_modal / dojo_sensei).
-void draw_regular_quest_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d) {
+// --- The per-`Type` dialog drawers (`He.S` L1045-1051) ---------------------
+// Shared chrome: the `Wb.Qa` backdrop (`Fc.Ed(-2147483648)` = 0x80 black,
+// `x3a` L927 fades it in/out with the same 0.25 s tween), the `od` 9-slice
+// base, the `Vc` title, the `Cd` plate row and the `oe` avatar.
+void draw_dialog_backdrop(sf2::render::Renderer& ren, float alpha) {
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f);
-    const TutorialDialogLayout t = tutorial_dialog_layout();
-    draw_od_base(app, ren, t.panel);
-    // Title `Vc` (`characterSensei` -> "СЭНСЭЙ").
-    draw_ui_label(app, t.panel.px + t.panel.pw * 0.5f - 780.0f * t.panel.c, t.title_y,
-                  1560.0f * t.panel.c, t.title_h, loc(app, d.title, d.title), 0.98f,
-                  UiAlign::Center, 0.404f, 0.243f, 0.141f);
-    // Portrait (`He` `Image` -> the `oe` avatar). `character_sensei` is the
-    // shipped `sensei_portrait` disc; any other name is a `res/users/images`
-    // user image (tutorial_quests.xml L158 `boss_lynx` — Lynx's portrait).
-    bool portrait_drawn = false;
-    if (d.image.find("character_sensei") != std::string::npos &&
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f * alpha);
+}
+
+// `Vc` (L1900): `Fa(1560,160)`, `C(-780)`, `ua(152)`, colour `Z.W6`.
+void draw_dialog_title(App& app, const OdLayout& L, const std::string& title) {
+    draw_ui_label(app, L.title_x, L.title_y, L.title_w, L.title_h, loc(app, title, title),
+                  0.98f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
+}
+
+// `od.ala` L1947 (`oe` avatar) + `od.$A` L1945 (`or` item image). The
+// `character_sensei` stem is the native `sensei_portrait` disc (the shipped
+// `oe` sheet); every other name is a `res/users/images` user image
+// (tutorial_quests.xml L158 `boss_lynx` — Lynx's portrait).
+bool draw_dialog_portrait(App& app, const std::string& image, const OdLayout& L) {
+    if (image.empty()) return false;
+    std::string name = image;
+    constexpr char kSmall[] = "_small";
+    if (name.size() > sizeof(kSmall) - 1 &&
+        name.compare(name.size() - (sizeof(kSmall) - 1), sizeof(kSmall) - 1, kSmall) == 0) {
+        name = name.substr(0, name.size() - (sizeof(kSmall) - 1));
+    }
+    if (name == "character_sensei" &&
         app.renderer().texture_lookup("sensei_portrait") != 0) {
         sf2::scene::Sprite s;
         s.texture_name = "sensei_portrait";
@@ -4497,35 +4842,132 @@ void draw_regular_quest_dialog(App& app, sf2::render::Renderer& ren, const Engin
         s.tex_h = 256.0f;
         s.solid = false;
         s.color_a = 1.0f;
-        s.transform.set_pos(t.portrait_cx, t.portrait_cy);
-        s.transform.set_scale(t.portrait / 256.0f, t.portrait / 256.0f);
+        s.transform.set_pos(L.portrait_cx, L.portrait_cy);
+        s.transform.set_scale(L.portrait / 256.0f, L.portrait / 256.0f);
         app.renderer().draw_sprite(s, ui_camera());
-        portrait_drawn = true;
+        return true;
     }
-    if (!portrait_drawn && !d.image.empty()) {
-        draw_user_image(app, d.image, t.portrait_cx, t.portrait_cy, t.portrait, t.portrait,
-                        1.0f);
-    }
-    // Body `Cd`: the CURRENT `He` page row (JS `He.jkb`: one `<Line>` per
-    // page). A single-row dialog is page 0, i.e. identical to before.
-    std::string body;
-    if (!d.lines.empty()) {
-        const std::size_t page = d.page < d.lines.size() ? d.page : d.lines.size() - 1;
-        body = loc(app, d.lines[page], d.lines[page]);
-    }
-    draw_ui_wrapped(app, t.body_x, t.body_y, t.body_w, t.body_h, body, 0.70f, UiAlign::Left,
-                    0.12f, 0.09f, 0.06f);
-    // The button row (`hab()` L1060 true). The Right plate carries the pager
-    // caption (`dialog_button_text`, `Od.EF` L1946); every other slot carries
-    // its own `<Button Text>` (`He.Rib` L1057). Frames come from the slot's
-    // `Color` (`quest_button_frame`).
-    const QuestDialogRow row = quest_dialog_row(d);
+    return draw_user_image(app, name, L.portrait_cx, L.portrait_cy, L.portrait, L.portrait,
+                           1.0f, false);
+}
+
+// The plate row (`hab()` L1060). The Right plate carries the pager caption
+// (`dialog_button_text`, `Od.EF` L1946); every other slot carries its own
+// `<Button Text>` (`He.Rib` L1057). Frames come from the slot's `Color`.
+void draw_dialog_buttons(App& app, const EngineDialog& d, const DialogAnim& anim) {
+    const QuestDialogRow row = quest_dialog_row(app, d, anim);
     for (int i = 0; i < row.count; ++i) {
         const QuestDialogPlate& p = row.plates[i];
-        std::string caption =
-            p.slot == 1 ? app.quest_engine().dialog_button_text() : p.text;
+        std::string caption = p.slot == 1 ? app.quest_engine().dialog_button_text() : p.text;
         if (caption.empty()) caption = p.text;
         draw_dialog_plate(app, caption, p.color, p.primary, p.cx, p.cy, p.w, p.h);
+    }
+}
+
+// `Xc.Xhb` L931 -> `Wb.openDialog(280, new mv(..))` -> `Od`: the `Wb` dim +
+// `od` 9-slice + `Vc` title + the `Image` avatar + the CURRENT page row
+// (`Od.EF`/`Od.X2` L1946/L1950) + the plate row.
+void draw_od280_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
+                       const DialogAnim& anim) {
+    draw_dialog_backdrop(ren, anim.alpha);
+    const OdLayout L = dialog_layout_for(app, d, anim);
+    draw_od_base(app, ren, L.panel);
+    draw_dialog_title(app, L, d.title);
+    draw_dialog_portrait(app, d.image, L);
+    draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, L.body_h, dialog_page_body(app, d),
+                    0.70f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
+    draw_dialog_buttons(app, d, anim);
+}
+
+// `Xc.Bia`/`Xc.Nhb` L929-930 -> `Wb.openDialog(290, ..)` -> `uj`. For
+// `Multiline`/`MultilineBig` `uj.sqb()` L1953 lays out EVERY `<Line>` as one
+// scrollable body (`this.yO`, `Md` = the whole stack) — NO pager;
+// `Stranger` keeps the `Od` pager.
+void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
+                       const DialogAnim& anim) {
+    draw_dialog_backdrop(ren, anim.alpha);
+    const OdLayout L = dialog_layout_for(app, d, anim);
+    draw_od_base(app, ren, L.panel);
+    draw_dialog_title(app, L, d.title);
+    draw_dialog_portrait(app, d.image, L);
+    const float c = L.panel.c > 0.0f ? L.panel.c : 1.0f;
+    if (dialog_scrolls_all_lines(d.type)) {
+        // `sqb` L1953: one text node per `<Line>`, `b += f.ew() + e.offsetY`,
+        // all inside the scroll container `this.yO`.
+        float y = L.body_y;
+        for (const std::string& ln : d.lines) {
+            const std::string text = loc(app, ln, ln);
+            const float h = measure_ui_wrapped(app, text, kOdBodyW * c, 0.70f);
+            draw_ui_wrapped(app, L.body_x, y, L.body_w, h, text, 0.70f, UiAlign::Left,
+                            0.12f, 0.09f, 0.06f);
+            y += h;
+        }
+    } else {
+        draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, L.body_h,
+                        dialog_page_body(app, d), 0.70f, UiAlign::Left, 0.12f, 0.09f,
+                        0.06f);
+    }
+    draw_dialog_buttons(app, d, anim);
+}
+
+// `Xc.rIa` L930 -> `Xc.Vhb` -> `Wb.openDialog(340, new qh(..))` -> `Ve`: the
+// NO-AVATAR layout — `Vc` title + the big body (`kb.Fa(1100,550)`, `C(-550)`,
+// `ua(125)`, L1913) + the plate row. `Ve` builds NO portrait node.
+void draw_ve340_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
+                       const DialogAnim& anim) {
+    draw_dialog_backdrop(ren, anim.alpha);
+    const OdLayout L = dialog_layout_for(app, d, anim);
+    draw_od_base(app, ren, L.panel);
+    draw_dialog_title(app, L, d.title);
+    const std::string body =
+        d.lines.empty() ? std::string() : loc(app, d.lines[0], d.lines[0]);
+    draw_ui_wrapped(app, L.sx(kOdVeBodyX), L.body_y, kOdVeBodyW * L.panel.c, L.body_h, body,
+                    0.70f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
+    draw_dialog_buttons(app, d, anim);
+}
+
+// `Xc.Uhb` L929 -> `Wb.openDialog(370, new Uo(..))` -> `vn extends Ve`: the
+// loot grid. `vn.$A` L1935 `ebb(this.IN)` builds one `vr` cell per `Loot`
+// entry (`Rf` item icon + "x N"), `Md = 600`; the title/plates are `Ve`'s.
+void draw_vn370_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
+                       const DialogAnim& anim) {
+    draw_dialog_backdrop(ren, anim.alpha);
+    const OdLayout L = dialog_layout_for(app, d, anim);
+    draw_od_base(app, ren, L.panel);
+    draw_dialog_title(app, L, d.title);
+    const float cell = 125.0f * L.panel.c;  // `vr.text.Fa(125,125)` L1939
+    const float step = cell * 0.75f;
+    const float start_cx = L.sx(-300.0f);
+    for (std::size_t i = 0; i < d.loot.size(); ++i) {
+        const float cx = start_cx + static_cast<float>(i) * step;
+        if (!draw_item_image(app, d.loot[i], cx, L.body_y + cell * 0.5f, cell, cell, 1.0f)) {
+            draw_ui_label(app, cx - cell * 0.5f, L.body_y, cell, cell * 0.4f,
+                          loc(app, d.loot[i], d.loot[i]), 0.6f, UiAlign::Center, 0.12f,
+                          0.09f, 0.06f);
+        }
+    }
+    draw_dialog_buttons(app, d, anim);
+}
+
+// `Od.Ge(1)`/`n_()` L1898: a dismissed dialog slides + fades for the same
+// 0.25 s (`wa(1-KK(t))`, `D(ra+1000*KK(t))`) before `Wb.Bwb` L928 unlinks it.
+void draw_closing_dialog(App& app, sf2::render::Renderer& ren) {
+    ClosingDialog& s = closing_slot();
+    if (!s.active) return;
+    const float now = app.screens().top() != nullptr ? app.screens().top()->time() : 0.0f;
+    const float age = now - s.start;
+    if (age < 0.0f || age >= kDialogAnimSecs) {
+        s.active = false;  // `n_()`: the tween landed, unlink
+        return;
+    }
+    const DialogAnim anim = dialog_anim_at(age, /*closing=*/true);
+    switch (dialog_kind(s.d.type)) {
+        case DialogKind::kOd280: draw_od280_dialog(app, ren, s.d, anim); return;
+        case DialogKind::kUj290: draw_uj290_dialog(app, ren, s.d, anim); return;
+        case DialogKind::kVe340: draw_ve340_dialog(app, ren, s.d, anim); return;
+        case DialogKind::kVn370: draw_vn370_dialog(app, ren, s.d, anim); return;
+        case DialogKind::kIbBar:
+        case DialogKind::kNone: s.active = false; return;
     }
 }
 } // namespace
@@ -4776,7 +5218,15 @@ void DojoScreen::render_impl(App& app) {
                 app.res_root(),
                 quest_state_for(tutorial_, story_step_, training_won_, level_, map_focus_,
                                 battles_, {}));
-            draw_ib_hint(app, ren, qs.speaker, qs.line1, qs.line2, /*show_ok=*/false);
+            // `Ib.Sr()` L1908: exactly ONE label = the joined lines, and the
+            // portrait is the resolved `Image` (the ambient tutorial line uses
+            // the sensei disc, `E.get(12)`) — there is NO speaker row.
+            std::string ambient = qs.line1;
+            if (!qs.line2.empty()) {
+                if (!ambient.empty()) ambient.push_back('\n');
+                ambient += qs.line2;
+            }
+            draw_ib_hint(app, ren, "character_sensei", ambient, /*show_ok=*/false);
         }
     }
     // The JS hub carries no entry-button row: the Dojo 4-up row, the gear
@@ -7272,6 +7722,10 @@ int ResultsScreen::exp_for_level(int level) {
 void ResultsScreen::update_impl(float dt) {
     (void)dt;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
+    // D3: `Wb` is a GLOBAL overlay — a dialog queued on ANY screen blocks that
+    // screen's input (`Wb.NOa` L927; the JS dialog node is parented to the
+    // ACTIVE screen's content root).
+    if (quest_modal_consume(app())) return;
     if (!applied_) {
         applied_ = true;
         WarriorSave w;
@@ -7522,6 +7976,10 @@ void ResultsScreen::render_impl(App& app) {
                       UiAlign::Center, 0.20f, 0.15f, 0.08f);
     }
     std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
+    // D3: `Wb` is a GLOBAL overlay — `Wb.Xob` L927 appends the dialog node to
+    // the ACTIVE screen's content root, so a queued dialog draws on ANY screen
+    // (Results included), not just Dojo/Map/Shop/Fight.
+    draw_quest_modal(app, ren, app.screens().top() == this);
 }
 
 // ---------------------------------------------------------------------------
@@ -9172,6 +9630,9 @@ void EquipmentScreen::achiev_claim(int index) {
 void EquipmentScreen::update_impl(float dt) {
     (void)dt;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
+    // D3: `Wb` is a GLOBAL overlay — a dialog queued on ANY screen blocks that
+    // screen's input (the Profile tab strip included).
+    if (quest_modal_consume(app())) return;
     const App::PointerState& p = app().pointer();
     hover_ = -1;
     // BACK (top-left) -> the previous screen (the loop's equipment -> dojo
@@ -9187,7 +9648,15 @@ void EquipmentScreen::update_impl(float dt) {
     // `cs` bottom tab strip (JS L2188): select the Profile sub-view via
     // `vb.hla` (L2190-2193) — 0 = `ds` perk tree, 1 = folded Moves (`es`),
     // 2 = `fs` achievements, 3 = `gs` seals (all ported).
-    tab_hover_ = profile_tab_hit(p.x, p.y);
+    // D-HOVER determinism: the hover comes from the LOGICAL pointer — the
+    // same source the internal-injection harness drives — and is LATCHED on
+    // the frames the pointer is actually driven (`pressed`/`down`), instead of
+    // re-sampling the process every frame. `App::poll_input` falls back to
+    // `glfwGetCursorPos` whenever no injected click is pending, so an
+    // unlatched hover tracked the user's real mouse and made
+    // `profile_tab3.png` diff between runs. At steady state (no press) the
+    // latch keeps the last logical position -> byte-identical captures.
+    if (p.pressed || p.down) tab_hover_ = profile_tab_hit(p.x, p.y);
     if (tab_hover_ >= 0 && p.pressed) {
         sf2::audio::AudioEngine::instance().play("click");
         std::fprintf(stdout, "[profile] tab %d (%s)\n", tab_hover_,
@@ -9784,6 +10253,9 @@ void EquipmentScreen::render_impl(App& app) {
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
+    // D3: `Wb` is a GLOBAL overlay — the Profile screen shows + blocks on a
+    // queued dialog (`Wb.Xob` L927 appends to the ACTIVE screen's content).
+    draw_quest_modal(app, ren, app.screens().top() == this);
 }
 
 
@@ -9797,6 +10269,9 @@ void SettingsScreen::update_impl(float dt) {
     ++age_;  // press debounce: ignore the push-frame held click
     (void)dt;
     ensure_lang(app());  // the lang table powers the Settings_*/Back labels
+    // D3: `Wb` is a GLOBAL overlay — a dialog queued on ANY screen blocks that
+    // screen's input.
+    if (quest_modal_consume(app())) return;
     const App::PointerState& p = app().pointer();
     hover_ = -1;
     // BACK (`Bb` "BACK", `un.Kb`, L1930 -> `Ge(0)` closes) -> pop.
@@ -9924,6 +10399,9 @@ void SettingsScreen::render_impl(App& app) {
     }
     draw_ui_label(app, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f, s.btn_w, 28.0f,
                   loc(app, "Settings_Back", "BACK"), 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    // D3: `Wb` is a GLOBAL overlay — the Settings screen shows + blocks on a
+    // queued dialog (`Wb.Xob` L927 appends to the ACTIVE screen's content).
+    draw_quest_modal(app, ren, app.screens().top() == this);
 }
 
 // ---------------------------------------------------------------------------
@@ -10115,17 +10593,17 @@ bool run_quest_dialog_selfcheck(App& app) {
         d.left_.color = "Green";
         q.push_dialog_for_test(d);
 
-        const QuestDialogRow row = quest_dialog_row(q.dialog());
+        const QuestDialogRow row = quest_dialog_row(app, q.dialog());
         const bool both = row.count == 2;
         dlg_case("D1 left+right lays out BOTH plates (od.EF a==3)", both);
         const bool split = both && row.plates[1].cx < row.plates[0].cx;
         dlg_case("D1 primary plate sits right of the secondary plate", split);
         const int hit_l =
-            both ? quest_dialog_button_hit_index(q.dialog(), row.plates[1].cx,
+            both ? quest_dialog_button_hit_index(app, q.dialog(), row.plates[1].cx,
                                                  row.plates[1].cy)
                  : -1;
         const int hit_r =
-            both ? quest_dialog_button_hit_index(q.dialog(), row.plates[0].cx,
+            both ? quest_dialog_button_hit_index(app, q.dialog(), row.plates[0].cx,
                                                  row.plates[0].cy)
                  : -1;
         dlg_case("D1 left plate hit-tests to slot 0 (Left)", hit_l == 0);
@@ -10164,7 +10642,7 @@ bool run_quest_dialog_selfcheck(App& app) {
         d.left_.actions.push_back(marker_action("L"));
         d.left_.color = "Green";
         q.push_dialog_for_test(d);
-        const QuestDialogRow row = quest_dialog_row(q.dialog());
+        const QuestDialogRow row = quest_dialog_row(app, q.dialog());
         const bool coloured =
             row.count == 2 && row.plates[1].color == "Green" && row.plates[0].color == "Red";
         dlg_case("D2 left/right plates keep their own Color", coloured);
@@ -10216,6 +10694,178 @@ bool run_quest_dialog_selfcheck(App& app) {
         const bool blocks = quest_modal_consume(app);
         dlg_case("D1 dialog on the Fight screen renders (modal live)", on_fight && live);
         dlg_case("D1 dialog on the Fight screen blocks input", on_fight && blocks);
+    }
+    q.clear_dialogs();
+
+    // --- D4: `He.S` L1045-1051 per-Type renderer routing. -------------------
+    {
+        struct KindCase {
+            const char* type;
+            DialogKind kind;
+            const char* cls;
+        };
+        const KindCase kKinds[] = {
+            {"Regular", DialogKind::kOd280, "280 Od"},
+            {"Stranger", DialogKind::kUj290, "290 uj"},
+            {"Multiline", DialogKind::kUj290, "290 uj"},
+            {"MultilineBig", DialogKind::kUj290, "290 uj"},
+            {"NoAvatar", DialogKind::kVe340, "340 Ve"},
+            {"ShowLoot", DialogKind::kVn370, "370 vn"},
+            {"Notification", DialogKind::kIbBar, "Ib bar"},
+            {"Scroll", DialogKind::kNone, "debugger (no renderer)"},
+            {"MultiLineScroll", DialogKind::kNone, "debugger (no renderer)"},
+            {"ThreeButtons", DialogKind::kNone, "debugger (no renderer)"},
+            {"ItemSetDialog", DialogKind::kNone, "debugger (no renderer)"},
+            {"MultilineTMP", DialogKind::kNone, "debugger (no renderer)"},
+            {"Simple", DialogKind::kNone, "debugger (no renderer)"},
+            {"", DialogKind::kOd280, "280 Od (absent Type -> He L1043 Regular)"},
+        };
+        for (const KindCase& k : kKinds) {
+            dlg_case(std::string("D4 Type ") + (k.type[0] != '\0' ? k.type : "(none)") +
+                         " -> " + k.cls,
+                     dialog_kind(k.type) == k.kind);
+        }
+        dlg_case("D4 the four dialog classes are distinct",
+                 dialog_kind("Regular") != dialog_kind("Multiline") &&
+                     dialog_kind("Multiline") != dialog_kind("NoAvatar") &&
+                     dialog_kind("NoAvatar") != dialog_kind("ShowLoot") &&
+                     dialog_kind("ShowLoot") != dialog_kind("Notification"));
+    }
+
+    // --- D5: `uj.sqb()` L1953 — Multiline/MultilineBig show ALL lines. ------
+    {
+        q.clear_dialogs();
+        EngineDialog d = probe_dialog("d5_multi");
+        d.type = "Multiline";
+        d.lines = {"m1", "m2", "m3", "m4"};
+        d.line_buttons = {"b1", "b2", "b3", "b4"};
+        d.button_text = "last_cap";
+        d.button_actions.push_back(marker_action("D5_FIRED"));
+        q.push_dialog_for_test(d);
+        dlg_case("D5 Multiline has NO pager (uj.sqb)", !q.dialog_has_next_page());
+        dlg_case("D5 Multiline scrolls ALL lines", dialog_scrolls_all_lines("Multiline"));
+        dlg_case("D5 MultilineBig scrolls ALL lines", dialog_scrolls_all_lines("MultilineBig"));
+        dlg_case("D5 Stranger keeps the pager", !dialog_scrolls_all_lines("Stranger"));
+        dlg_case("D5 Multiline plate carries the last-page caption at once",
+                 q.dialog_button_text() == "last_cap");
+    }
+    {
+        q.clear_dialogs();
+        EngineDialog r = probe_dialog("d5_reg");
+        r.type = "Regular";
+        r.lines = {"r1", "r2", "r3"};
+        r.line_buttons = {"c1", "c2", "c3"};
+        r.button_text = "c3";
+        r.button_actions.push_back(marker_action("D5R_FIRED"));
+        q.push_dialog_for_test(r);
+        dlg_case("D5 Regular keeps the pager (3 rows)", q.dialog_has_next_page());
+        dlg_case("D5 Regular page 0 caption is the ROW caption (c1)",
+                 q.dialog_button_text() == "c1");
+    }
+
+    // --- D6: `od.aa` L1895 (0.25 s) + the `Wb.x3a` L927 backdrop tween. -----
+    {
+        const DialogAnim t0 = dialog_anim_at(0.0f, false);
+        const DialogAnim tmid = dialog_anim_at(0.125f, false);
+        const DialogAnim t1 = dialog_anim_at(kDialogAnimSecs, false);
+        const DialogAnim t2 = dialog_anim_at(kDialogAnimSecs * 4.0f, false);
+        dlg_case("D6 open t=0: alpha 0, scale 0.8 (Ln(0)=0, kYa(0)=0)",
+                 t0.alpha < 1e-5f && std::fabs(t0.scale - 0.8f) < 1e-4f);
+        dlg_case("D6 open steady state t=0.25: alpha 1, scale 1",
+                 std::fabs(t1.alpha - 1.0f) < 1e-5f && std::fabs(t1.scale - 1.0f) < 1e-5f);
+        dlg_case("D6 open stays at steady state past 0.25 s",
+                 std::fabs(t2.alpha - 1.0f) < 1e-5f && std::fabs(t2.scale - 1.0f) < 1e-5f);
+        dlg_case("D6 open alpha is monotonic (dc.Ln)",
+                 t0.alpha < tmid.alpha && tmid.alpha < t1.alpha);
+        const DialogAnim c0 = dialog_anim_at(0.0f, true);
+        const DialogAnim c1 = dialog_anim_at(kDialogAnimSecs, true);
+        dlg_case("D6 close t=0: alpha 1, slide 0",
+                 std::fabs(c0.alpha - 1.0f) < 1e-5f && std::fabs(c0.slide) < 1e-5f);
+        dlg_case("D6 close t=0.25: alpha 0, slide 1000 (dc.KK(1)=1)",
+                 std::fabs(c1.alpha) < 1e-5f && std::fabs(c1.slide - 1000.0f) < 1e-3f);
+        dlg_case("D6 backdrop fades IN (`r6(1,null,dc.Ln())` L927)",
+                 dialog_backdrop_alpha_at(0.0f, false) < 1e-5f &&
+                     std::fabs(dialog_backdrop_alpha_at(kDialogAnimSecs, false) - 1.0f) <
+                         1e-5f);
+        dlg_case("D6 backdrop fades OUT on close (`r6(0,..,dc.KK())` L927)",
+                 dialog_backdrop_alpha_at(kDialogAnimSecs, true) < 1e-5f);
+    }
+
+    // --- D12: `od.layout` L1898 — the layout is DERIVED from `Md`. ----------
+    {
+        const OdLayout l550 = od_layout(550.0f);
+        const float cy = l550.panel.py + l550.panel.ph * 0.5f;
+        const float c = l550.panel.c;
+        dlg_case("D12 a = clamp(Md/2,300,1000): Md=550 -> 300",
+                 std::fabs(l550.a - 300.0f) < 1e-4f);
+        dlg_case("D12 Md=400 -> a = 300 (lower clamp)",
+                 std::fabs(od_layout(400.0f).a - 300.0f) < 1e-4f);
+        dlg_case("D12 Md=2400 -> a = 1000 (upper clamp)",
+                 std::fabs(od_layout(2400.0f).a - 1000.0f) < 1e-4f);
+        dlg_case("D12 title y = -(a + 160) (`Vc.pfa().y` = Fa(1560,160))",
+                 std::fabs(l550.title_y - (cy - (300.0f + 160.0f) * c)) < 1e-3f);
+        dlg_case("D12 button y = a + 125/2 (`Bb.Pb(125)`)",
+                 std::fabs(l550.btn_cy - (cy + (300.0f + 62.5f) * c)) < 1e-3f);
+        dlg_case("D12 body top = -Md/2 (`Ne.D(-Md/2)`)",
+                 std::fabs(l550.body_y - (cy - 275.0f * c)) < 1e-3f);
+        dlg_case("D12 body box is 900 wide at design x -100 (D4/L1953-1954)",
+                 std::fabs(l550.body_w - 900.0f * c) < 1e-3f &&
+                     std::fabs(l550.body_x -
+                               (l550.panel.px + l550.panel.pw * 0.5f - 100.0f * c)) < 1e-3f);
+        dlg_case("D12 portrait is 512*1.8 design px (`oe` `la(1.8*iy)`)",
+                 std::fabs(l550.portrait - 512.0f * 1.8f * c) < 1e-3f);
+        dlg_case("D12 the layout really moves with Md (no invented fractions)",
+                 std::fabs(od_layout(2400.0f).btn_cy - l550.btn_cy) > 1.0f);
+    }
+
+    // --- D11: the `Ib` bar = ONE label of the JOINED lines, NO speaker row. -
+    {
+        q.clear_dialogs();
+        EngineDialog d = probe_dialog("d11_speaker");
+        d.type = "Notification";
+        d.title = "d11_speaker_title";
+        d.lines = {"d11_l0", "d11_l1", "d11_l2"};
+        const std::string joined = ib_joined_lines(app, d);
+        dlg_case("D11 notification joins EVERY line (`lj` L1908)",
+                 joined == std::string("d11_l0\nd11_l1\nd11_l2"));
+        dlg_case("D11 notification text carries NO speaker/title row",
+                 joined.find(d.title) == std::string::npos);
+        dlg_case("D11 notification portrait comes from `Image` (`Qhb(a=wt)` L1907)",
+                 dialog_kind(d.type) == DialogKind::kIbBar);
+    }
+
+    // --- D3: the `Wb` dialog is a GLOBAL overlay (any screen, not just
+    // Fight/Dojo/Map/Shop). `Wb.Xob` L927 appends the dialog node to the
+    // ACTIVE screen's content root, so Results/Profile/Settings show + block.
+    {
+        struct BlockCase {
+            const char* name;
+            ScreenId id;
+        };
+        const BlockCase kScreens[] = {
+            {"Fight", kScreenFight},       {"Results", kScreenResults},
+            {"Profile", kScreenProfile},   {"Settings", kScreenSettings},
+        };
+        for (const BlockCase& bs : kScreens) {
+            q.clear_dialogs();
+            EngineDialog d = probe_dialog("d3_block");
+            d.button_actions.push_back(marker_action("D3_BLOCK"));
+            d.button_text = "d3_cap";
+            q.push_dialog_for_test(d);
+            if (bs.id == kScreenFight) {
+                PendingBattle& pb = app.pending_battle();
+                if (pb.battle_name.empty()) {
+                    pb.battle_name = "Training";
+                    pb.location = "dojo";
+                }
+            }
+            app.screens().push(make_screen(app.screens(), bs.id));
+            const bool on_screen = app.screens().current_id() == bs.id;
+            const bool live = quest_modal_top(app) != nullptr;
+            const bool blocks = quest_modal_consume(app);
+            dlg_case(std::string("D3 dialog renders on ") + bs.name, on_screen && live);
+            dlg_case(std::string("D3 dialog blocks ") + bs.name, on_screen && blocks);
+        }
     }
     q.clear_dialogs();
 

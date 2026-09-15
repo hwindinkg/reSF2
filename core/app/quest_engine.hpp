@@ -131,6 +131,13 @@ struct EngineDialog {
     // Close→`Hj`. `dhb` L1061 dispatches them by index (0/2/100); the Right
     // slot above is index 1.
     EngineDialogButton left_, middle_, close_;
+    // `He.L` L1044 `MinContentHeight` -> `Od.cv` L1944: the floor `od.layout`
+    // L1898 applies to the measured content height (`Od.lj` L1950
+    // `Math.max(kb.ew(), this.cv)`).
+    float min_content_height = 0.0f;
+    // `He.L` L1044 `Loot` -> the `ShowLoot` type's item list (`Xc.Uhb` L929:
+    // `ba.Pc(a,this.IN).split("|")`, offers.xml is the only shipped one).
+    std::vector<std::string> loot;
     std::string quest;               // firing quest name
     QuestJournal journal;            // `Qt` (He.S stores the firing journal)
 };
@@ -470,6 +477,11 @@ struct QuestButtonCensus {
     std::size_t text_typed() const {
         return text_right + text_left + text_middle + text_close;
     }
+
+    // The `<Dialog Type=...>` distribution over the shipped tree — one entry
+    // per `He.S` L1045-1051 routing case (every Type the parser meets, missing
+    // `Type` counted as "Regular", the JS default at `He` L1043).
+    std::map<std::string, std::size_t> types;
 };
 
 // Reads and counts the shipped quest tree. Never throws; a missing tree
