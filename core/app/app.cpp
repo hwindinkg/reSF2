@@ -761,17 +761,22 @@ void App::poll_input() {
         return;
     }
     // The real pointer comes from GLFW callbacks in the platform layer; for
-    // this phase the shell polls the mouse button + cursor position.
-    int button = glfwGetMouseButton(renderer_->window(), GLFW_MOUSE_BUTTON_LEFT);
-    bool down = button == GLFW_PRESS;
-    if (down && !pointer_.down) {
-        pointer_.pressed = true;
-    }
-    pointer_.down = down;
+    // this phase the shell polls the mouse button + cursor position. The
+    // cursor is read BEFORE the button edge so the press log carries the
+    // coordinates the screens will hit-test with (interactive verification:
+    // one line per real click; the injected path returned above).
     double x = 0.0, y = 0.0;
     glfwGetCursorPos(renderer_->window(), &x, &y);
     pointer_.x = x;
     pointer_.y = y;
+    int button = glfwGetMouseButton(renderer_->window(), GLFW_MOUSE_BUTTON_LEFT);
+    bool down = button == GLFW_PRESS;
+    if (down && !pointer_.down) {
+        pointer_.pressed = true;
+        std::fprintf(stdout, "[input] press at (%.0f, %.0f)\n", x, y);
+        std::fflush(stdout);
+    }
+    pointer_.down = down;
 
     // Keyboard: poll the fight keys and route edge transitions to the top
     // screen (JS `Ik` keydown/keyup -> the fight input path). Each physical

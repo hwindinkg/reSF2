@@ -106,6 +106,17 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
         app.quest_engine().pop_dialog();
         return true;
     }
+    // Regular. `He` pages a multi-row dialog (`He.jkb` L1042: every `<Line>`
+    // row carries its own `ButtonText`): the page plate advances until the
+    // LAST row, whose plate fires the nested actions (`dhb(1)` L1061). The
+    // tutorial Lynx dialog is exactly this (`dlgStoryBtnMore` -> L159,
+    // `dlgStoryBtnFight` -> L160).
+    if (app.quest_engine().dialog_has_next_page()) {
+        if (quest_modal_button_hit(*d, app.pointer().x, app.pointer().y)) {
+            app.quest_engine().advance_dialog_page();
+        }
+        return true;
+    }
     // Regular. A button with actions fires on press; a buttonless dialog
     // (no `hab()` button) advances on tap.
     if (d->button_actions.empty()) {
@@ -1915,6 +1926,37 @@ int energy_max() {
     return cached;
 }
 
+// `Nn`/`MenuBtnFlashing` highlight (`UseFlashing="1"`, tutorial_quests.xml
+// L156/L361): a draw-side pulse clock (one tick per rendered frame — the
+// flash has no gameplay time source), 2 s sine.
+float ui_flash_pulse() {
+    static constexpr float kTwoPi = 6.28318530717958647692f;
+    static float t = 0.0f;
+    t += 1.0f / 60.0f;
+    return 0.5f + 0.5f * std::sin(kTwoPi * t / 2.0f);
+}
+
+// `MenuBtnFlashing BtnName` names the `za` nav target by its SCENE id
+// (`_NextScene` = Shop/Map/Dojo/Profile, tutorial_quests.xml L93/L116/L138/
+// L200). Returns the `kZaNav` row, or -1.
+int za_nav_index_for_scene(const std::string& scene) {
+    static const char* const kNavScene[kZaNavCount] = {"Dojo", "Map", "Shop", "Profile",
+                                                       "Settings"};
+    for (int i = 0; i < kZaNavCount; ++i) {
+        if (scene == kNavScene[i]) return i;
+    }
+    return -1;
+}
+
+// The flash tint over a rect (translucent, pulses).
+void draw_flash_tint(sf2::render::Renderer& ren, float cx, float cy, float w, float h) {
+    const float p = ui_flash_pulse();
+    const float x0 = cx - w * 0.5f, y0 = cy - h * 0.5f;
+    const float x1 = cx + w * 0.5f, y1 = cy + h * 0.5f;
+    const float verts[] = {x0, y0, x1, y0, x1, y1, x0, y0, x1, y1, x0, y1};
+    ren.draw_triangles(verts, 6, 1.0f, 0.88f, 0.35f, 0.20f + 0.45f * p);
+}
+
 // Draws the shared chrome on top of a shell screen's own content. `active`
 // selects the active nav frame (JS `xyb`). The widget strip mirrors `odb`:
 // widgets are laid left->right and the strip is centred; each widget is
@@ -1933,6 +1975,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
     // the topPanel/widgets (JS appends `scroll` before `PL`, ctor L1973), so
     // the bar + column stay undimmed.
     const bool nav_expanded = !force_collapsed && g_za_nav_open;
+    const int flash_idx = za_nav_index_for_scene(app.quest_engine().nav_flash());
     if (nav_expanded) {
         const float dim[] = {0, 0, w, 0, w, kViewH, 0, 0, w, kViewH, 0, kViewH};
         ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f);
@@ -2124,6 +2167,13 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
         // literal is independent of the compiler's source charset (MSVC).
         draw_ui_label(app, hx, hy + hh * 0.28f, hw, hh, "\xD0\x9C\xD0\x95\xD0\x9D\xD0\xAE",
                       0.5f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
+        // `_NextScene` guidance while the column is collapsed: the `Le` art
+        // is hidden (JS `NLa` L2001), so the header carries the flash — the
+        // player is shown that the menu must be opened. The JS nav flash
+        // itself lands on the row once expanded (below).
+        if (flash_idx >= 0) {
+            draw_flash_tint(ren, hx + hw * 0.5f, hy + hh * 0.5f, hw, hh);
+        }
         return;
     }
     // --- Expanded `za` nav column (ndb L1976-1977) --------------------------
@@ -2165,6 +2215,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
                                 ? def.pushed
                                 : (is_active && def.active != nullptr ? def.active : def.normal);
         const float cy_i = lay.nav_first_y + static_cast<float>(i) * lay.nav_step;
+        const bool row_flash = (i == flash_idx);
         if (!try_draw_atlas_button(app, frame, nav_cx, cy_i, lay.nav_btn, lay.nav_btn, 1.0f)) {
             draw_flat_button(app, def.label, nav_cx, cy_i, lay.nav_btn, lay.nav_btn,
                              is_active ? 0.6f : (is_hover ? 0.5f : 0.35f), 0.4f, 0.28f,
@@ -2185,6 +2236,12 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
             }
             draw_ui_label(app, bx - lay.nav_btn * 0.2f, by - 9.0f, lay.nav_btn * 0.4f, 18.0f,
                           std::to_string(badges[i]), 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        }
+        // `MenuBtnFlashing BtnName` (FLOW_STATIC L141): pulse the row the
+        // quest asked the player to use (drawn OVER the art). Draw-only; the
+        // tap still navigates normally.
+        if (row_flash) {
+            draw_flash_tint(ren, nav_cx, cy_i, lay.nav_btn, lay.nav_btn);
         }
     }
     // `gk`'s title rail (`Zh`: `y.goa`/`y.pSa` = roll_end/roll_center, L1872/
@@ -4339,7 +4396,10 @@ void draw_regular_quest_dialog(App& app, sf2::render::Renderer& ren, const Engin
     draw_ui_label(app, t.panel.px + t.panel.pw * 0.5f - 780.0f * t.panel.c, t.title_y,
                   1560.0f * t.panel.c, t.title_h, loc(app, d.title, d.title), 0.98f,
                   UiAlign::Center, 0.404f, 0.243f, 0.141f);
-    // Portrait (`He` `Image` -> the `oe` avatar): the sensei disc.
+    // Portrait (`He` `Image` -> the `oe` avatar). `character_sensei` is the
+    // shipped `sensei_portrait` disc; any other name is a `res/users/images`
+    // user image (tutorial_quests.xml L158 `boss_lynx` — Lynx's portrait).
+    bool portrait_drawn = false;
     if (d.image.find("character_sensei") != std::string::npos &&
         app.renderer().texture_lookup("sensei_portrait") != 0) {
         sf2::scene::Sprite s;
@@ -4353,19 +4413,26 @@ void draw_regular_quest_dialog(App& app, sf2::render::Renderer& ren, const Engin
         s.transform.set_pos(t.portrait_cx, t.portrait_cy);
         s.transform.set_scale(t.portrait / 256.0f, t.portrait / 256.0f);
         app.renderer().draw_sprite(s, ui_camera());
+        portrait_drawn = true;
     }
-    // Body `Cd`: the dialog's lines (lang keys resolved at draw) wrapped into
-    // the panel rect.
+    if (!portrait_drawn && !d.image.empty()) {
+        draw_user_image(app, d.image, t.portrait_cx, t.portrait_cy, t.portrait, t.portrait,
+                        1.0f);
+    }
+    // Body `Cd`: the CURRENT `He` page row (JS `He.jkb`: one `<Line>` per
+    // page). A single-row dialog is page 0, i.e. identical to before.
     std::string body;
-    for (std::size_t i = 0; i < d.lines.size(); ++i) {
-        if (i != 0) body += "\n";
-        body += loc(app, d.lines[i], d.lines[i]);
+    if (!d.lines.empty()) {
+        const std::size_t page = d.page < d.lines.size() ? d.page : d.lines.size() - 1;
+        body = loc(app, d.lines[page], d.lines[page]);
     }
     draw_ui_wrapped(app, t.body_x, t.body_y, t.body_w, t.body_h, body, 0.70f, UiAlign::Left,
                     0.12f, 0.09f, 0.06f);
-    // Action button (`hab()` true): the deferred-actions plate (`dhb(1)`).
-    if (!d.button_actions.empty() && !d.button_text.empty()) {
-        draw_dialog_button(app, d.button_text);
+    // Action button (`hab()` true): the page's caption (`He.jkb`) on the
+    // deferred-actions plate (`dhb(1)`).
+    const std::string caption = app.quest_engine().dialog_button_text();
+    if (!d.button_actions.empty() && !caption.empty()) {
+        draw_dialog_button(app, caption);
     }
 }
 } // namespace
@@ -4670,33 +4737,8 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
     // `m5`): highlight the node named in MapFocus first (e.g.
     // ZONE_1|BOSS_LYNX|1 quest focus `qo` L1086), else the first BOSSES
     // node, else the first node (hover highlight only, no selection).
-    hover_ = -1;
-    if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size()) {
-        const auto& focus_nodes = zones_[zone_sel_].nodes;
-        if (!focus.empty()) {
-            for (std::size_t i = 0; i < focus_nodes.size(); ++i) {
-                if (focus_nodes[i].visible &&
-                    focus.find(focus_nodes[i].name) != std::string::npos) {
-                    hover_ = static_cast<int>(i);
-                    break;
-                }
-            }
-        }
-        for (std::size_t i = 0; hover_ < 0 && i < focus_nodes.size(); ++i) {
-            if (focus_nodes[i].visible && focus_nodes[i].type == "BOSSES") {
-                hover_ = static_cast<int>(i);
-                break;
-            }
-        }
-        if (hover_ < 0 && !focus_nodes.empty()) {
-            for (std::size_t i = 0; i < focus_nodes.size(); ++i) {
-                if (focus_nodes[i].visible) {
-                    hover_ = static_cast<int>(i);
-                    break;
-                }
-            }
-        }
-    }
+    applied_focus_ = focus;
+    apply_map_focus(focus);
     std::fprintf(stdout, "[map] %zu zones loaded (current %s)\n", zones_.size(), cur.c_str());
     for (const auto& z : zones_) {
         std::fprintf(stdout, "[map] zone %s (%s)%s: %zu nodes%s\n", z.name.c_str(),
@@ -4710,6 +4752,39 @@ void MapScreen::fight_button_center(float& x, float& y) const {
     const MapFightButtonRect r = map_fight_button_rect(map_metrics());
     x = r.cx;
     y = r.cy;
+}
+
+// JS `Ya.Uw` (L2129) + `ue.tea()`: focus the `Rr` panel on the node named in
+// a MapFocus string. The shipped tutorial focus is `ZONE_1|BOSS_LYNX|1`
+// (tutorial_quests.xml L155) and only the visible (record-backed) nodes are
+// candidates (`Qr.lla` L2094). Falls back to the first BOSSES node, then the
+// first visible node, so the panel is never empty.
+void MapScreen::apply_map_focus(const std::string& battle) {
+    hover_ = -1;
+    if (zone_sel_ < 0 || static_cast<std::size_t>(zone_sel_) >= zones_.size()) return;
+    const auto& nodes = zones_[zone_sel_].nodes;
+    if (!battle.empty()) {
+        for (std::size_t i = 0; i < nodes.size(); ++i) {
+            if (nodes[i].visible && battle.find(nodes[i].name) != std::string::npos) {
+                hover_ = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+    for (std::size_t i = 0; hover_ < 0 && i < nodes.size(); ++i) {
+        if (nodes[i].visible && nodes[i].type == "BOSSES") {
+            hover_ = static_cast<int>(i);
+            break;
+        }
+    }
+    if (hover_ < 0) {
+        for (std::size_t i = 0; i < nodes.size(); ++i) {
+            if (nodes[i].visible) {
+                hover_ = static_cast<int>(i);
+                break;
+            }
+        }
+    }
 }
 
 void MapScreen::launch_battle(const Node& n) {
@@ -4738,6 +4813,22 @@ void MapScreen::update_impl(float dt) {
     // while the roster overlay is forced (render_impl draws it).
     if (force_boss_roster()) return;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
+    // `SetMapFocus` focus refresh (`qo` L1086 = `p.o.m5(battle)` + the `Ya`
+    // focus refresh): StoryTutorialBossFight fires on THIS map's SceneLoaded
+    // (tutorial_quests.xml L143-155), i.e. AFTER the ctor read the save, so
+    // the live map must re-target `Rr` when the engine's focus changes. The
+    // BOSS_LYNX node is the only visible one on the tutorial save, so this
+    // lands `SetMapFocus Battle="ZONE_1|BOSS_LYNX|1"` verbatim.
+    {
+        const std::string& focus = app().quest_engine().last_map_focus();
+        if (!focus.empty() && focus != applied_focus_) {
+            applied_focus_ = focus;
+            apply_map_focus(focus);
+            std::fprintf(stdout, "[map] focus refresh -> %s (hover %d)\n", focus.c_str(),
+                         hover_);
+            std::fflush(stdout);
+        }
+    }
     // Sensei modal gate (quest He records): while up, a tap advances the
     // dialog or fires its button; a `Fight` request (`Sn`) resolves to the
     // map node and runs the shared battle-start body.
@@ -5134,6 +5225,13 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     draw_ui_label(app, btn_cx - btn_w * 0.5f + 8.0f, btn_cy - 11.0f, btn_w - 16.0f, 22.0f,
                   loc(app, "startFight", "FIGHT"), 0.44f, UiAlign::Center, 0.184f, 0.145f,
                   0.106f);
+    // `Nn` `ClickButton Target="InfoBattle.FightButton" UseFlashing="1"
+    // IgnoreCallback="1"` (tutorial_quests.xml L156): the quest FOCUSES and
+    // FLASHES this plate but must NOT press it — the pulse is draw-only and
+    // the launch still needs the player's tap (update_impl FIGHT hit-test).
+    if (app.quest_engine().flash_target() == "InfoBattle.FightButton") {
+        draw_flash_tint(app.renderer(), btn_cx, btn_cy, btn_w, btn_h);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -7715,6 +7813,13 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
 void ShopScreen::update_impl(float dt) {
     (void)dt;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
+    // Sensei dialog modal gate (quest engine `He` records). The tutorial
+    // lands here: `StoryTutorialBuyItem` fires on SceneTo==Shop
+    // (tutorial_quests.xml L98-118) and queues the `tutorial_buy_knives`
+    // Regular dialog. Without draining the queue here the modal would stay
+    // queued and resurface as the head on the NEXT screen (the Map would show
+    // the stale Shop dialog instead of the Lynx one).
+    if (quest_modal_consume(app())) return;
     const App::PointerState& p = app().pointer();
     try {
         const WarriorSave w = app().save().load();
@@ -8281,6 +8386,9 @@ void ShopScreen::render_impl(App& app) {
     // oracle shop right-wall backdrop is ~0.7x the hub, not 0.5x). Same
     // force-collapsed draw as the Map/Profile (L5078/L9345).
     draw_za_chrome(app, kScreenShop, nullptr, /*force_collapsed=*/true);
+    // Sensei/tutorial dialog modal over the shop (the tutorial's
+    // `tutorial_buy_knives` beat, `He` L1042; see update_impl).
+    draw_quest_modal(app, ren, app.screens().top() == this);
 }
 
 // ---------------------------------------------------------------------------

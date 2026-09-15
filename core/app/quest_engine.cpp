@@ -150,6 +150,28 @@ void split_battle_triple(const std::string& s, std::string& zone, std::string& n
 // `u.ka(a,b)` L2455: "1"/"true" -> true.
 bool attr_bool01(const std::string& v) { return v == "1" || v == "true"; }
 
+// `_Name` quest-variable reference (JS `to` + the `_`-prefixed resolver).
+// `StoryTutorialOpenScene` passes its arguments through refs — `Dialog`
+// `Line Text="_SenseiDialogText"` (tutorial_quests.xml L328) and
+// `MenuBtnFlashing BtnName="_NextScene"` (L361) — while the producer quests
+// write them with `SetVariable Scope="Global"` (L115-116, L137-138), i.e.
+// into the save's quest variables. A run-local (`NotificationTextMove`,
+// L18) wins; an unknown name is the empty string (so `!= ""` reads false).
+std::string quest_var(App& app, const std::map<std::string, std::string>& locals,
+                      const std::string& token) {
+    if (token.size() < 2 || token[0] != '_' || token[1] == '$') return token;
+    const std::string name = token.substr(1);
+    const auto it = locals.find(name);
+    if (it != locals.end()) return it->second;
+    try {
+        const WarriorSave w = app.save().load();
+        const auto gv = w.variables.find(name);
+        if (gv != w.variables.end()) return gv->second;
+    } catch (const std::exception&) {
+    }
+    return std::string();
+}
+
 // Resolves a `ShowBattle`/`HideBattle`/... `Name` attr into the `hb`
 // zone/name pair (a triple keeps its zone; a bare name uses the stages index).
 QuestBattleWrite battle_write_from(const std::string& triple, const std::string& zone_hint) {
@@ -321,7 +343,6 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
                               std::map<std::string, std::string>& locals,
                               const std::string& quest, int depth) {
     if (depth > kMaxActionDepth) return;
-    (void)app;
     for (const QuestAction& a : acts) {
         const std::string& t = a.tag;
         if (t == "If") {
@@ -374,22 +395,36 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
                 for (const QuestAction& c : a.children) {
                     if (c.tag == "Line") {
                         std::string text = attr_or(c.attrs, "Text");
+                        // `_`-refs: run-locals then the global quest variables
+                        // (see `quest_var`). An unresolved ref drops the row.
                         if (!text.empty() && text[0] == '_') {
-                            const auto it = locals.find(text.substr(1));
-                            text = it != locals.end() ? it->second : text.substr(1);
+                            text = quest_var(app, locals, text);
                         }
                         if (!text.empty()) dlg.lines.push_back(text);
-                        if (dlg.button_text.empty()) {
-                            dlg.button_text = attr_or(c.attrs, "ButtonText");
-                        }
+                        // `He.jkb` (L1042): the row keeps its own caption.
+                        dlg.line_buttons.push_back(attr_or(c.attrs, "ButtonText"));
                     } else if (c.tag == "Button") {
                         // JS `He.Rib` L1057: the nested actions run on press
                         // (`dhb` L1061) — defer them (do NOT run eagerly).
                         for (const QuestAction& sub : c.children) {
                             dlg.button_actions.push_back(sub);
                         }
-                        if (dlg.button_text.empty()) {
-                            dlg.button_text = attr_or(c.attrs, "Text");
+                        // An explicit `Button Text` (sensei_arc.xml L59
+                        // `dlgStoryBtnFight`) overrides the last row's caption.
+                        const std::string bt = attr_or(c.attrs, "Text");
+                        if (!bt.empty()) dlg.button_text = bt;
+                    }
+                }
+                // No authored `Button Text`: the LAST row's `ButtonText`
+                // labels the action plate (tutorial_quests.xml L160
+                // `dlgStoryBtnFight`) — the earlier rows are the pager's
+                // intermediate captions (`dlgStoryBtnMore`, L159).
+                if (dlg.button_text.empty()) {
+                    for (auto it = dlg.line_buttons.rbegin();
+                         it != dlg.line_buttons.rend(); ++it) {
+                        if (!it->empty()) {
+                            dlg.button_text = *it;
+                            break;
                         }
                     }
                 }
@@ -462,6 +497,26 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
             }
         } else if (t == "ClickButton") {
             fx.clicks.push_back(attr_or(a.attrs, "Target"));
+            // `Nn` `UseFlashing="1"` (L1115): highlight the target plate. The
+            // tutorial pairs it with `IgnoreCallback="1"` so the map FIGHT
+            // button is focused/flashed but NEVER launched by the quest
+            // (tutorial_quests.xml L156).
+            if (attr_bool01(attr_or(a.attrs, "UseFlashing"))) {
+                fx.flash_targets.push_back(attr_or(a.attrs, "Target"));
+            }
+        } else if (t == "MenuBtnFlashing") {
+            // Desktop navigation guidance (FLOW_STATIC L140-142): the web/
+            // else branch of `StoryTutorialOpenScene` shows the notification
+            // and flashes the `_NextScene` nav button; the shell never
+            // navigates (tutorial_quests.xml L361). `_NextScene` resolves to
+            // the global `NextScene` (Shop/Map/Dojo/Profile).
+            fx.menu_flashes.push_back(
+                quest_var(app, locals, attr_or(a.attrs, "BtnName")));
+        } else if (t == "ClickHint") {
+            // `ClickHint` (the Switch/Steam branch, tutorial_quests.xml L338):
+            // recorded only — the desktop shell drives navigation through the
+            // nav flash instead of an auto-click.
+            fx.click_hints.push_back(attr_or(a.attrs, "Target"));
         } else if (t == "ClearQuestQueue") {
             fx.clears.push_back(attr_or(a.attrs, "Name"));
         } else if (t == "Activate") {
@@ -586,6 +641,11 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         std::map<std::string, std::string> locals;  // run-local vars
         run_actions(app, q.actions, journal, fx, locals, q.name, 0);
         apply_effects(app, fx);
+        // Live UI guidance (draw-only, last value wins): the shell reads
+        // these each frame instead of the quest auto-acting.
+        if (!fx.flash_targets.empty()) flash_target_ = fx.flash_targets.back();
+        if (!fx.menu_flashes.empty()) nav_flash_ = fx.menu_flashes.back();
+        if (fx.has_map_focus) last_map_focus_ = fx.map_focus;
         if (q.unresumable) fired_.push_back(q.name);
         fired.push_back(q.name);
         std::fprintf(stdout, "[quest] FIRED %s on %s (step=%s scene=%s->%s)\n", q.name.c_str(),
@@ -614,6 +674,16 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         if (!fx.clicks.empty()) {
             for (const std::string& s : fx.clicks) {
                 std::fprintf(stdout, "[quest]   click (record only): %s\n", s.c_str());
+            }
+        }
+        if (!fx.click_hints.empty()) {
+            for (const std::string& s : fx.click_hints) {
+                std::fprintf(stdout, "[quest]   click hint (record only): %s\n", s.c_str());
+            }
+        }
+        if (!fx.menu_flashes.empty()) {
+            for (const std::string& s : fx.menu_flashes) {
+                std::fprintf(stdout, "[quest]   nav flash: %s\n", s.c_str());
             }
         }
         std::fflush(stdout);
@@ -649,6 +719,35 @@ void QuestEngine::note_fight(const std::string& name, const std::string& result)
     last_result_ = result;
 }
 
+// `He` pager (L1042-1062). The head dialog's current page caption: the row's
+// `ButtonText` (`He.jkb`), falling back to the action plate's caption.
+std::string QuestEngine::dialog_button_text() const {
+    if (dialogs_.empty()) return std::string();
+    const EngineDialog& d = dialogs_.front();
+    const std::size_t page =
+        d.lines.empty() ? 0 : (d.page < d.lines.size() ? d.page : d.lines.size() - 1);
+    if (page < d.line_buttons.size() && !d.line_buttons[page].empty()) {
+        return d.line_buttons[page];
+    }
+    return d.button_text;
+}
+
+bool QuestEngine::dialog_has_next_page() const {
+    if (dialogs_.empty()) return false;
+    return dialogs_.front().page + 1 < dialogs_.front().lines.size();
+}
+
+void QuestEngine::advance_dialog_page() {
+    if (dialogs_.empty()) return;
+    EngineDialog& d = dialogs_.front();
+    if (d.page + 1 >= d.lines.size()) return;
+    ++d.page;
+    std::fprintf(stdout, "[quest] dialog page -> %zu/%zu (%s, more=%d)\n", d.page + 1,
+                 d.lines.size(), dialog_button_text().c_str(),
+                 dialog_has_next_page() ? 1 : 0);
+    std::fflush(stdout);
+}
+
 std::vector<std::string> QuestEngine::press_dialog(App& app) {
     std::vector<std::string> fights;
     if (dialogs_.empty()) return fights;
@@ -669,6 +768,14 @@ std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
                                            const QuestJournal& journal) {
     std::vector<std::string> fired;
     fresh_tutorial_ = app.fresh_tutorial();
+    // Scene-scoped UI guidance resets on the navigation edge: a flash target
+    // belongs to the screen that requested it (the map's FIGHT plate), and a
+    // nav highlight clears once the player reaches its named screen (`Mn`/
+    // `Yba` clear semantics, FLOW_STATIC L82/L133).
+    if (event == "SceneLoaded") {
+        flash_target_.clear();
+        if (journal.scene_to == nav_flash_) nav_flash_.clear();
+    }
     if (!ensure_loaded(app)) return fired;
     QuestJournal j = journal;
     if (j.fight.empty()) {

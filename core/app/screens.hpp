@@ -206,6 +206,14 @@ private:
     ActPlayer act_;
     Node act_node_;
     bool act_pending_ = false;
+    // The `qo` focus-refresh marker (JS `Ya.Uw` L2129): the last
+    // `SetMapFocus Battle=` the quest engine applied. A focus landing AFTER
+    // this screen was constructed (the StoryTutorialBossFight SceneLoaded
+    // fire, tutorial_quests.xml L155) re-targets `Rr` on the live map.
+    std::string applied_focus_;
+    // Re-targets `Rr` to the node named in a MapFocus string (the `Ya.Uw` +
+    // `ue.tea` focus rule, incl. the BOSSES/first-visible fallbacks).
+    void apply_map_focus(const std::string& battle);
     // Shared battle-start body (JS `Ya` mp(6)): fills pending_battle and
     // pushes the fight. Used by node clicks and act completion alike.
     void launch_battle(const Node& n);

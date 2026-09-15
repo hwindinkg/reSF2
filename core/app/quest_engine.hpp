@@ -85,9 +85,18 @@ struct EngineDialog {
     // layer resolves it after the lang table is loaded (JS `ba.cg`/`ba.Fz`
     // resolve at He.S time; the port queues before boot renders).
     std::vector<std::string> lines;
-    // The dialog's button caption (Line `ButtonText`, e.g. `dlgStoryBtnFight`)
-    // — JS `He.jkb` stores it on the row and `hab()` turns it into a button
-    // only when the button nests actions.
+    // Per-row advance captions (`ButtonText`), parallel to `lines`. JS
+    // `He.jkb` (L1042) stores the caption on the ROW: a `Regular` dialog with
+    // several `<Line>` rows pages through them, and each page's caption
+    // labels the advance plate. In the shipped tutorial the two-row Lynx
+    // dialog is `dlgStoryBtnMore` (row 1) / `dlgStoryBtnFight` (row 2,
+    // tutorial_quests.xml L159-160).
+    std::vector<std::string> line_buttons;
+    // Current page (JS `He` line cursor). 0 for a single-row dialog.
+    std::size_t page = 0;
+    // The dialog button's caption (the `Right` `<Button Text>` when authored,
+    // e.g. sensei_arc.xml L59, else the LAST row's `ButtonText`: the page
+    // that carries the nested actions, `hab()` L1060).
     std::string button_text;
     // The Right button's deferred nested actions (JS `vh.actions`, run on
     // press via `He.dhb(1)` L1061). Empty = no button (Notification OK with
@@ -129,6 +138,18 @@ struct QuestSideEffects {
     std::vector<std::string> fight_requests;      // Sn (record only)
     std::vector<std::string> dialogs;             // He summaries (record only)
     std::vector<std::string> clicks;              // Nn targets (record only)
+    // `Nn` (`ClickButton`) with `UseFlashing="1"`: flash the target plate
+    // WITHOUT firing its callback (`IgnoreCallback="1"`). The tutorial asks
+    // for `InfoBattle.FightButton` (tutorial_quests.xml L156) — the map
+    // FIGHT button is highlighted, never auto-pressed.
+    std::vector<std::string> flash_targets;
+    // `MenuBtnFlashing BtnName` (L361): highlight a `za` nav button by scene.
+    // The desktop guidance for `_NextScene` (FLOW_STATIC L140-142: the web/
+    // else branch shows the notification + the flash and does NOT navigate).
+    std::vector<std::string> menu_flashes;
+    // `ClickHint Target` (L338, the Switch/Steam branch): arrow hint. Recorded
+    // (the desktop shell drives navigation through the nav flash).
+    std::vector<std::string> click_hints;
     std::vector<std::string> clears;              // Mn queue names
     std::vector<std::string> minigames;           // Do/Eo/Ao/Bo/Co/Fo (record)
     std::vector<std::string> unknown;             // unhandled tags
@@ -166,6 +187,27 @@ public:
     // Drops every queued dialog (tutorial handoff / scene reset).
     void clear_dialogs() { dialogs_.clear(); }
 
+    // --- live UI-guidance signals (draw-only; no navigation) --------------
+    // `Nn` `ClickButton UseFlashing="1"` target — the shell pulses the named
+    // plate (the map's `InfoBattle.FightButton`). Cleared on the next
+    // SceneLoaded (it belongs to the screen it was requested on).
+    const std::string& flash_target() const { return flash_target_; }
+    // `MenuBtnFlashing BtnName` — the `za` nav button (by scene name) to
+    // highlight until the player navigates there.
+    const std::string& nav_flash() const { return nav_flash_; }
+    // Last `SetMapFocus Battle=` value applied (`qo` L1086 = `p.o.m5(battle)`
+    // + the `Ya` focus refresh). The Map re-targets `Rr` on change, so a
+    // focus landing after the map's construction still takes effect.
+    const std::string& last_map_focus() const { return last_map_focus_; }
+
+    // --- `He` pager (L1042-1062) ------------------------------------------
+    // A `Regular` dialog with several `<Line>` rows shows one row per page;
+    // the page's `ButtonText` labels the advance plate and only the LAST
+    // page's plate fires the nested actions (`hab()` L1060 / `dhb(1)` L1061).
+    std::string dialog_button_text() const;
+    bool dialog_has_next_page() const;
+    void advance_dialog_page();
+
     // For logs/tests.
     std::size_t quest_count() const { return quests_.size(); }
     bool loaded() const { return loaded_; }
@@ -192,6 +234,10 @@ private:
     std::string last_fight_;
     std::string last_result_;
     std::vector<EngineDialog> dialogs_;  // Sensei-modal queue (cap below)
+    // Live UI guidance (see flash_target/nav_flash/last_map_focus above).
+    std::string flash_target_;
+    std::string nav_flash_;
+    std::string last_map_focus_;
     // Harness gate (JS fresh profile): an empty `_$StoryTutorialStep` reads
     // as `NotStarted` only while the fresh-tutorial path is armed (the
     // fidelity tour), so the seeded post-tutorial saves stay chain-silent.
