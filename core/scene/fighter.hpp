@@ -343,6 +343,24 @@ private:
     float align_x_ = 0.0f;
     float align_y_ = 0.0f;
     float align_z_ = 0.0f;
+    // [FIX render anchor — JS `Dl.Fe()` (L575, `Va.Yd` = the `<PivotNode
+    // Name>` node) + `Te.Gub`/`Te.Gla` (L557-559/L550)] The JS trace/camera
+    // anchor is NPivot's POSED x, and the align shifts the whole clip buffer
+    // so the `<Align><Pivot Part>` node (NHeel_2) keeps its world x across a
+    // clip switch; NPivot then rides the clip from there:
+    //   world_x = clip_interp(NPivot) + (prev_world(Part) - clip(Part, FirstFrame))
+    // `render_offset_` is that per-move constant (captured on the first
+    // sample; `render_offset_valid_ == false` = recompute). The old code
+    // accumulated the clip's root-BONE-0 delta instead, which is a different
+    // node's swing and drifted the intro stance ~19u off the JS.
+    float render_offset_ = 0.0f;
+    bool render_offset_valid_ = true;
+    float prev_align_pivot_world_x_ = 0.0f;  // previous frame's world x of the Part
+    int align_pivot_u_ = -1;                 // `<Align><Pivot Part>` bone index (`UE`)
+    // [FIX root motion — JS `Te.j8.x` (L546, `eda` L556)] The authored
+    // `<Velocity>` offset accumulated per frame (`Pab`/`Qab` L564:
+    // `j8 += DM*sG`). JS adds `j8` to every posed bone, i.e. to the anchor.
+    float j8_x_ = 0.0f;
     // [FIX root motion — JS `Te.j8`/`Te.DM`/`Te.aV`] The move's authored
     // <Velocity> (JS `Fa.ykb` L721-722) integrated per frame exactly like
     // the JS controller (`Te` ctor L546; `Skb` L551-552 seeds `DM`/`aV`;

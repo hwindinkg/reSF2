@@ -4472,6 +4472,10 @@ void DojoScreen::launch_quest_fight(const std::string& triple) {
     }
     PendingBattle& pb = app().pending_battle();
     pb.battle_name = battle;
+    // JS `hb.toString()` (L1416): the quest journal's `_$Fight` is the
+    // triple, not the bare battle name (FirstGuardBeaten keys on
+    // `ZONE_1|BOSS_LYNX|1`, quests.xml L265).
+    pb.fight_triple = triple;
     pb.zone = zone;
     pb.location = location.empty() ? "bamboo_grove" : location;
     pb.enemy_name = battle;
@@ -4793,6 +4797,10 @@ void MapScreen::launch_battle(const Node& n) {
     // the reward (the first non-zero <Reward>).
     PendingBattle& pb = app().pending_battle();
     pb.battle_name = n.name;
+    // JS `hb.toString()` (L1416): the map launches Fight 1 of the battle,
+    // so the quest journal's `_$Fight` is `zone|name|1`
+    // (FirstGuardBeaten keys on `ZONE_1|BOSS_LYNX|1`, quests.xml L265).
+    pb.fight_triple = n.zone + "|" + n.name + "|1";
     pb.zone = n.zone;  // stages.xml Zone (`hp` scope for the <Rules> feeder)
     pb.location = n.location.empty() ? "dojo" : n.location;
     pb.has_result = false;
@@ -6420,7 +6428,10 @@ void FightScreen::update_impl(float dt) {
         // The subsequent push(Results) fires ChangeTab(From=Fight).
         {
             QuestJournal j;
-            j.fight = pb.battle_name;
+            // JS `_$Fight` = `Bj.Nb.toString()` = the `hb` triple (L961);
+            // the port records it at launch (falls back to the bare name
+            // for triple-less boots).
+            j.fight = pb.fight_triple.empty() ? pb.battle_name : pb.fight_triple;
             j.fight_result = player_won ? "Win" : "Loss";
             try {
                 j.player_level = app().save().load().level;

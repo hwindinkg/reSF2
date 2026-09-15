@@ -463,6 +463,40 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         root_dm_x_ = 0.0f;
         root_av_x_ = 0.0f;
     }
+    j8_x_ = 0.0f;  // JS `Skb` L551: `a=this.j8; a.x=0`
+    // [FIX render anchor — JS `Te.Gub` L557-559 + `Te.Gla` L550] `compute_align`
+    // above just used `sol_ma_[<Align><Pivot Part>]` as the continuity target
+    // (`e = currentNode.ma`), so capture the PREVIOUS frame's rendered world x
+    // of that Part HERE, before `translate_solver_state` rewrites the persisted
+    // state. `sample()` renders clip bones as
+    //   pos_[p] = (sol_ma_[p] - sol_ma_[anchor]) * facing + world_x_
+    // so that Part's last world x is exactly this expression. `sample()` then
+    // pins `world_x_` (the NPivot anchor = JS `Dl.Fe()`) from it, letting
+    // NPivot ride the clip — exactly like the JS. Without an align (JS
+    // `Gla(0,0,0)`, no shift) the anchor stays where it was.
+    align_pivot_u_ = -1;
+    render_offset_valid_ = true;  // default: anchor-continuous (no align)
+    if (move.align.has_align) {
+        const int pv = model_.bone_by_name(move.align.pivot_part);
+        const int an = model_.bone_by_name(fighter_pivot_bone());
+        if (pv >= 0 && an >= 0 && solver_init_ &&
+            sol_ma_.size() == model_.bones.size() * 3) {
+            const std::size_t pu = static_cast<std::size_t>(pv);
+            const std::size_t au = static_cast<std::size_t>(an);
+            prev_align_pivot_world_x_ =
+                (sol_ma_[pu * 3] - sol_ma_[au * 3]) * fsign + world_x_;
+            align_pivot_u_ = pv;
+            // JS `Gub` (L559) reads `d` from the RAW buffer (`jc.Kh(2)` =
+            // clip[FirstFrame]) and `e` from the posed node (`currentNode.ma`)
+            // BEFORE the first `eda`, i.e. exactly this `sol_ma_` state. So
+            // the align constant maps `sol_ma_` (this clip space) to world:
+            //   world_x = px[anchor] + (prev_world(Part) - sol_ma_[Part])
+            // using the PRE-sample `sol_ma_`, not the first interpolated
+            // sample (the buffer's slot-2 reference is the raw clip frame).
+            render_offset_ = prev_align_pivot_world_x_ - sol_ma_[pu * 3];
+            render_offset_valid_ = true;
+        }
+    }
     // JS `Te.Skb` order: the play buffer prepend (`Pka`/`qrb`) is built
     // before the first `eda` sample; `Gub` (align) also precedes it.
     // [FIX prepend-lag] Move the persisted solver state into the NEW clip's
@@ -620,45 +654,32 @@ void Fighter::advance_step() {
         active_intervals_.insert(n);
     }
 
-    // Root motion (JS `Te.eda` L556 + `Te.j8`/`DM`/`aV` L546/564). Two paths:
+    // Root motion (JS `Te.eda` L556 + `Te.j8`/`DM`/`aV` L546/564).
     //
     //  (a) AUTHORED <Velocity> (JS `Fa.ykb` L721-722; `Skb` L551-552 seeds
     //      `DM`=`wua`, `aV`=`Coa`). `eda` L556 runs `Pab` (`Qab(DM)`:
     //      `j8 += DM*sG`) at frame start and `Nab` (`Oab(aV)`:
     //      `DM += aV*sG`) at frame end; the `j8` offset is added to EVERY
     //      posed bone (`d.x+=c.x; d.y+=c.y; d.z+=c.z`) — i.e. the whole
-    //      fighter shifts, so the native anchor world_x_ takes the same
-    //      per-frame delta. `sG = 1/Tx`, `Tx = model.model.HD()` (`Gka`
+    //      fighter shifts. `sG = 1/Tx`, `Tx = model.model.HD()` (`Gka`
     //      L561) = 1.
-    //  (b) FALLBACK (clip-baked root): a move with no <Velocity> leaves
-    //      `wua`/`Coa` = 0, so `DM`/`aV`/`j8` stay 0 (JS) and the clip's own
-    //      root-bone (bone 0) displacement moves the pose. The native
-    //      reproduces that as the COM-x delta per clip frame spread over the
-    //      `sub` subframes (one clip-frame delta over `sub` `eda` calls).
-    //      Retained ONLY here, for moves without authored <Velocity>.
-    // NOTE: every shipped fighter/locomotion move takes (b) — all 62 live
+    //  (b) NO <Velocity>: `wua`/`Coa` = 0, so `DM`/`aV`/`j8` stay 0 (JS) and
+    //      the ONLY placement is the clip itself, read by the render anchor
+    //      in `sample()` (NPivot's interpolated clip x + the align constant).
+    // NOTE: every shipped fighter/locomotion move is (b) — all 62 live
     // <Velocity> elements are on projectile/magic moves (summary).
     constexpr float kSG = 1.0f;  // JS `Gka` L561: sG = 1/Tx, Tx = HD() = 1
+    // [FIX render anchor] The whole-pose placement is now driven by the render
+    // anchor in `sample()` (the clip-interpolated NPivot x + the align
+    // constant), so here only the authored `<Velocity>` root motion is
+    // integrated: `Pab`/`Qab` (JS L564) `j8 += DM*sG` at frame start; the
+    // `Nab`/`Oab` half (`DM += aV*sG`) runs AFTER the sample, per `eda` L556.
+    // The old raw bone-0 clip-delta accumulation is removed: NPivot (the JS
+    // `Dl.Fe()` anchor), not bone 0, is the node whose swing the JS applies,
+    // and accumulating the wrong node's delta drifted the fighter ~19 world
+    // units at the intro stance idle start.
     if (root_active_) {
-        const float d = root_dm_x_ * kSG;  // `Pab`/`Qab`: j8 += DM*sG
-        world_x_ += d;                     // the j8 delta lands on the COM anchor
-        root_dm_x_ += root_av_x_ * kSG;    // `Nab`/`Oab`: DM += aV*sG
-    } else if (move_frame_ >= 0 &&
-               static_cast<std::size_t>(move_frame_) < current_clip_->frames.size()) {
-        const float com_now = current_clip_->frames[static_cast<std::size_t>(move_frame_)].bones.empty()
-                                  ? 0.0f
-                                  : current_clip_->frames[static_cast<std::size_t>(move_frame_)]
-                                        .bones[0]
-                                        .x;
-        if (move_frame_ > ff && static_cast<std::size_t>(move_frame_ - 1) <
-                                   current_clip_->frames.size()) {
-            const float com_prev =
-                current_clip_->frames[static_cast<std::size_t>(move_frame_ - 1)].bones.empty()
-                    ? 0.0f
-                    : current_clip_->frames[static_cast<std::size_t>(move_frame_ - 1)].bones[0].x;
-            world_x_ += (com_now - com_prev) * (facing_ < 0 ? -1.0f : 1.0f) /
-                        static_cast<float>(sub);
-        }
+        j8_x_ += root_dm_x_ * kSG;  // `Pab`/`Qab`: j8 += DM*sG
     }
 
     // Clip end (JS `Te.ia` L547-548: `Xh+2 >= vu.J$a()` -> KNa + lS + Sca).
@@ -679,6 +700,10 @@ void Fighter::advance_step() {
         // JS `stop()`/`KNa()` call `jc.reset()`; `Skb` L551 zeroes `j8`.
         root_active_ = false;
         root_dm_x_ = root_av_x_ = 0.0f;
+        j8_x_ = 0.0f;
+        render_offset_ = 0.0f;
+        render_offset_valid_ = true;
+        align_pivot_u_ = -1;
         return;
     }
 
@@ -689,6 +714,11 @@ void Fighter::advance_step() {
     }
     move_frame_ = ff + std::max(0, playhead_ - 2);
     sample_current();
+    // JS `Te.eda` L556 frame END: `Nab`/`Oab(aV)` -> `DM += aV*sG` (only the
+    // authored `<Velocity>` path carries a non-zero `aV`).
+    if (root_active_) {
+        root_dm_x_ += root_av_x_ * kSG;
+    }
 }
 
 void Fighter::sample_current() {
@@ -711,6 +741,10 @@ void Fighter::clear_move() {
     // per-move; clear it so a later move starts from a zero `j8`.
     root_active_ = false;
     root_dm_x_ = root_av_x_ = 0.0f;
+    j8_x_ = 0.0f;
+    render_offset_ = 0.0f;
+    render_offset_valid_ = true;
+    align_pivot_u_ = -1;
 }
 
 // [FIX root-motion align] JS `Te.Gub` (L557-559) + `Te.Gla` (L550):
@@ -972,6 +1006,20 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         return true;
     };
 
+    // Render anchor: JS `Dl.Fe()` (L575) = `Va.Yd` = the `<PivotNode Name>`
+    // node ("NPivot", read from internal_settings.xml). Hoisted here so the
+    // anchor-drive below and the `pos_` placement share one lookup.
+    int anchor = model_.bone_by_name(fighter_pivot_bone());
+    if (anchor < 0) {
+        // Shipped models all carry the pivot; a model without it keeps the
+        // legacy COM anchor (JS `Dl.Trb` L577 falls back to `all[0]`).
+        anchor = model_.bone_by_name("COM");
+    }
+    if (anchor < 0) {
+        anchor = 0;
+    }
+    const std::size_t anchor_u = static_cast<std::size_t>(anchor);
+
     std::vector<float> px(n), py(n), pz(n);
     for (std::size_t i = 0; i < n; ++i) {
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
@@ -1007,6 +1055,29 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             py[i] += align_y_;
             pz[i] += align_z_;
         }
+    }
+
+    // [FIX render anchor — JS `Dl.Fe()` L575 + `Te.Gub`/`Te.Gla` L557-559/L550]
+    // The JS anchor (`Dl.Fe()` = `Va.Yd` = NPivot) is a POSED node: every
+    // `eda` (L556) sets `ma = fq[mo] + j8`, and `fq` is the clip buffer after
+    // `Gla` shifted it so the buffer's `<Align><Pivot Part>` reference frame
+    // matched the previous pose. So the anchor's world x is
+    //   clip_interp(NPivot) + (prev_world(Part) - clip(Part, FirstFrame))
+    // — the clip's OWN motion of NPivot, plus the per-move constant in
+    // `render_offset_` (captured in `start_move_impl`), plus the authored
+    // `<Velocity>` offset (`j8`).
+    // The old code instead accumulated the raw clip bone-0 delta onto
+    // `world_x_` — a different node's swing — which is the intro-stance drift
+    // (~19u at the idle start) this fixes.
+    if (interp && current_move_ != nullptr) {
+        if (!render_offset_valid_) {
+            // No `<Align>` (JS `Gla(0,0,0)` shifts nothing): hold the anchor
+            // itself continuous.
+            render_offset_ = world_x_ - px[anchor_u];
+            render_offset_valid_ = true;
+        }
+        world_x_ = px[anchor_u] + render_offset_ + j8_x_;
+        x = world_x_;  // `pos_` below is built from the recomputed anchor
     }
 
     // 2. [FIX stretched mesh — ragdoll solver] The game's per-frame pose
@@ -1294,16 +1365,8 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     //    `bone_by_name("COM")`, but COM is NOT the pivot (bag COM == Node12 is
     //    226 units above NPivot; player ~17) -> wrong vertical anchor
     //    (Wave U finding). Facing mirrors X (Te.Qeb).
-    int anchor = model_.bone_by_name(fighter_pivot_bone());
-    if (anchor < 0) {
-        // Shipped models all carry the pivot; a model without it keeps the
-        // legacy COM anchor (JS `Dl.Trb` L577 falls back to `all[0]`).
-        anchor = model_.bone_by_name("COM");
-    }
-    if (anchor < 0) {
-        anchor = 0;
-    }
-    const std::size_t anchor_u = static_cast<std::size_t>(anchor);
+    //    `anchor`/`anchor_u` were resolved above (shared with the anchor
+    //    drive, which rewrites `x` to the JS-posed NPivot world x).
     const float anchor_y = py[anchor_u];
     const float dy = y - anchor_y;
     const float f = facing < 0 ? -1.0f : 1.0f;

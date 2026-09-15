@@ -1,13 +1,14 @@
 // Quest engine core — see quest_engine.hpp for the spec/notes.
 //
-// Data paths (existing patterns, read-only): tutorial chain at
-// `reference/extracted/xml/res/quest_extensions/tutorial_quests.xml` (like
-// list.xml in screens.cpp); battle→zone index from
+// Data paths (existing patterns, read-only): the real quest tree root at
+// `reference/extracted/xml/res/quests.xml` (the same extracted-res source
+// stages.xml/list.xml resolve from in screens.cpp); battle→zone index from
 // `reference/extracted/xml/res/stages.xml` (like load_zone_map).
 
 #include "app/quest_engine.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 
@@ -23,6 +24,8 @@ namespace {
 constexpr int kMaxActivateDepth = 4;
 constexpr int kMaxActionDepth = 6;
 
+constexpr const char* kQuestResRoot = "reference/extracted/xml/res/";
+
 int parse_int_or(const std::string& s, int fallback) {
     try {
         std::size_t pos = 0;
@@ -34,6 +37,37 @@ int parse_int_or(const std::string& s, int fallback) {
     }
 }
 
+// JS `ki` (the numeric test behind `yb.Uha` L966): a whole string that
+// parses as a number takes the numeric compare; anything else is a string
+// (`yb.PNa` = exact equality).
+bool is_numeric(const std::string& s) {
+    if (s.empty()) return false;
+    char* end = nullptr;
+    std::strtod(s.c_str(), &end);
+    return end != nullptr && *end == '\0' && end != s.c_str();
+}
+
+double to_number(const std::string& s) { return std::strtod(s.c_str(), nullptr); }
+
+bool truthy01(const std::string& s) {
+    return s == "1" || s == "true" || (is_numeric(s) && to_number(s) != 0.0);
+}
+
+// Splits a `hb` triple (`Me|Re|Lq`, `hb.toString` L1416) field index.
+std::string triple_field(const std::string& s, int index) {
+    std::size_t start = 0;
+    for (int i = 0; i <= index; ++i) {
+        if (start > s.size()) return std::string();
+        const std::size_t bar = s.find('|', start);
+        const std::string part =
+            s.substr(start, bar == std::string::npos ? std::string::npos : bar - start);
+        if (i == index) return part;
+        if (bar == std::string::npos) return std::string();
+        start = bar + 1;
+    }
+    return std::string();
+}
+
 std::string read_file_text(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) return "";
@@ -41,48 +75,51 @@ std::string read_file_text(const std::string& path) {
                        std::istreambuf_iterator<char>());
 }
 
-// Parses one <Conditions> element into cond (AND of Equal/Operator kids).
+// One condition element (JS `yb.parse` L958 / `yb.tD` L994): the leaf tag
+// table is Equal|Greater|GreaterEqual|Less|LessEqual (all carry
+// Value1/Value2 + optional Not="1"), and `<Operator Type="And|Or" Not>`
+// nests further elements. A `<Conditions>` block is an implicit AND of its
+// element children (`be.GS` L1010).
+void parse_condition_element(const pugi::xml_node& ch, QuestCond& parent) {
+    const std::string tag = ch.name();
+    const std::string not_attr = ch.attribute("Not").value();
+    if (tag == "Equal" || tag == "Greater" || tag == "GreaterEqual" || tag == "Less" ||
+        tag == "LessEqual" || tag == "Contains" || tag == "Starts" || tag == "Ends") {
+        QuestCond leaf;
+        leaf.kind = tag;
+        leaf.value1 = ch.attribute("Value1").value();
+        leaf.value2 = ch.attribute("Value2").value();
+        leaf.invert = not_attr == "1";
+        parent.children.push_back(std::move(leaf));
+        return;
+    }
+    if (tag == "Operator" || tag == "And" || tag == "Or") {
+        QuestCond op;
+        const std::string type = ch.attribute("Type").value();
+        op.kind = (type == "Or" || tag == "Or") ? "Or" : "And";
+        op.invert = not_attr == "1";
+        for (pugi::xml_node g = ch.first_child(); g; g = g.next_sibling()) {
+            if (g.type() != pugi::node_element) continue;
+            parse_condition_element(g, op);
+        }
+        parent.children.push_back(std::move(op));
+        return;
+    }
+    // Unknown condition element: kept so it evaluates UNKNOWN (never fires).
+    QuestCond leaf;
+    leaf.kind = tag;
+    leaf.value1 = ch.attribute("Value1").value();
+    leaf.value2 = ch.attribute("Value2").value();
+    leaf.invert = not_attr == "1";
+    parent.children.push_back(std::move(leaf));
+}
+
+// Parses one <Conditions> element into cond (AND of its element children).
 void parse_conds(const pugi::xml_node& node, QuestCond& cond) {
     cond.kind = "And";
     for (pugi::xml_node ch = node.first_child(); ch; ch = ch.next_sibling()) {
-        const std::string tag = ch.name();
-        if (tag == "Equal" || tag == "GreaterEqual") {
-            QuestCond leaf;
-            leaf.kind = tag;
-            leaf.value1 = ch.attribute("Value1").value();
-            leaf.value2 = ch.attribute("Value2").value();
-            leaf.invert = std::string(ch.attribute("Not").value()) == "1";
-            cond.children.push_back(std::move(leaf));
-        } else if (tag == "Operator") {
-            QuestCond op;
-            const std::string type = ch.attribute("Type").value();
-            op.kind = (type == "Or") ? "Or" : "And";
-            op.invert = std::string(ch.attribute("Not").value()) == "1";
-            for (pugi::xml_node g = ch.first_child(); g; g = g.next_sibling()) {
-                if (g.type() != pugi::node_element) continue;
-                const std::string gtag = g.name();
-                if (gtag == "Equal" || gtag == "GreaterEqual") {
-                    QuestCond leaf;
-                    leaf.kind = gtag;
-                    leaf.value1 = g.attribute("Value1").value();
-                    leaf.value2 = g.attribute("Value2").value();
-                    leaf.invert = std::string(g.attribute("Not").value()) == "1";
-                    op.children.push_back(std::move(leaf));
-                } else if (gtag == "Operator") {
-                    QuestCond sub;
-                    const std::string st = g.attribute("Type").value();
-                    sub.kind = (st == "Or") ? "Or" : "And";
-                    sub.invert = std::string(g.attribute("Not").value()) == "1";
-                    parse_conds(g, sub);
-                    QuestCond fixed;
-                    fixed.kind = sub.kind;
-                    fixed.invert = sub.invert;
-                    fixed.children = std::move(sub.children);
-                    op.children.push_back(std::move(fixed));
-                }
-            }
-            cond.children.push_back(std::move(op));
-        }
+        if (ch.type() != pugi::node_element) continue;
+        parse_condition_element(ch, cond);
     }
 }
 
@@ -188,11 +225,117 @@ QuestBattleWrite battle_write_from(const std::string& triple, const std::string&
 
 } // namespace
 
+const WarriorSave& QuestEngine::EvalCtx::live(App& app) const {
+    if (!save_loaded) {
+        try {
+            save = app.save().load();
+        } catch (const std::exception&) {
+            save = WarriorSave{};
+        }
+        save_loaded = true;
+    }
+    return save;
+}
+
+// JS `L3(a,b)` (L184): if the file exists (`Ixb` gate), read it and walk the
+// ROOT element's children — `Quest` registers (`WO(new be(e,a))`), `Include`
+// recurses through `Sjb`. The port appends to `quests_` in load order.
+void QuestEngine::load_quest_file(App& app, const std::string& rel) {
+    if (rel.empty()) return;
+    // The shipped tree names the same file from more than one place
+    // (AttachScripts_Zone1 L110-111 and FirstGuardBeaten L284-285 both
+    // attach zone_1); registering it twice would double-fire every quest
+    // in it, so each file loads once (JS `WO` has no such guard — noted).
+    for (const std::string& f : loaded_files_) {
+        if (f == rel) return;
+    }
+    const std::string path = std::string(kQuestResRoot) + rel;
+    {
+        std::ifstream probe(path, std::ios::binary);
+        if (!probe) {
+            std::fprintf(stdout, "[quest] include/attach missing (skipped): %s\n", rel.c_str());
+            return;  // JS `Ixb(a)` file-exists gate
+        }
+    }
+    const std::string xml = read_file_text(path);
+    if (xml.empty()) return;
+    sf2::data::xml_doc doc;
+    doc.parse(reinterpret_cast<const std::uint8_t*>(xml.data()), xml.size());
+    const pugi::xml_node root = doc.root().first_child();
+    if (!root) return;
+    loaded_files_.push_back(rel);  // before walking: self-includes terminate
+    for (pugi::xml_node ch = root.first_child(); ch; ch = ch.next_sibling()) {
+        if (ch.type() != pugi::node_element) continue;
+        const std::string tag = ch.name();
+        if (tag == "Quest") {
+            parse_quest_node(app, ch, rel);
+        } else if (tag == "Include") {
+            load_include(app, ch);
+        }
+    }
+}
+
+// JS `Sjb(a,b)` (L184): `be.GS(a.A("Conditions"), c)` over the Include's own
+// `<Conditions>`; if ANY condition fails the include is skipped. Otherwise
+// `File` is split on `|` and every alternative that exists is loaded in
+// order (`for(c=0;c<a.length;) this.L3(a[c++], b+"--")`).
+void QuestEngine::load_include(App& app, const pugi::xml_node& node) {
+    QuestCond conds;
+    const pugi::xml_node cs = node.child("Conditions");
+    if (cs) parse_conds(cs, conds);
+    if (!conds.children.empty() && !conditions_hold(app, conds, load_ctx_)) {
+        std::fprintf(stdout, "[quest] include gated off: %s\n",
+                     node.attribute("File").value());
+        return;
+    }
+    const std::string file = node.attribute("File").value();
+    std::size_t start = 0;
+    while (start <= file.size()) {
+        const std::size_t bar = file.find('|', start);
+        const std::string alt = file.substr(
+            start, bar == std::string::npos ? std::string::npos : bar - start);
+        if (!alt.empty()) load_quest_file(app, alt);
+        if (bar == std::string::npos) break;
+        start = bar + 1;
+    }
+}
+
+// JS `WO`/`be` ctor (L1006): one `<Quest>` node -> QuestDef.
+void QuestEngine::parse_quest_node(App& app, const pugi::xml_node& q,
+                                   const std::string& file) {
+    (void)app;
+    (void)file;
+    QuestDef def;
+    def.name = q.attribute("Name").value();
+    if (def.name.empty()) return;
+    def.priority = parse_int_or(q.attribute("Priority").value(), 0);
+    def.unresumable = std::string(q.attribute("Unresumable").value()) == "1";
+    const pugi::xml_node events = q.child("Events");
+    if (events) {
+        for (pugi::xml_node e = events.first_child(); e; e = e.next_sibling()) {
+            if (e.type() != pugi::node_element) continue;
+            def.events.push_back(e.name());
+        }
+    }
+    const pugi::xml_node conds = q.child("Conditions");
+    if (conds) parse_conds(conds, def.root);
+    const pugi::xml_node acts = q.child("Actions");
+    if (acts) {
+        for (pugi::xml_node a = acts.first_child(); a; a = a.next_sibling()) {
+            if (a.type() != pugi::node_element) continue;
+            QuestAction act;
+            parse_action(a, act);
+            def.actions.push_back(std::move(act));
+        }
+    }
+    quests_.push_back(std::move(def));
+}
+
 bool QuestEngine::ensure_loaded(App& app) {
     if (loaded_) return true;
     // Battle→zone index (stages.xml Zone/Battle names).
     try {
-        const std::string xml = read_file_text("reference/extracted/xml/res/stages.xml");
+        const std::string xml = read_file_text(std::string(kQuestResRoot) + "stages.xml");
         if (!xml.empty()) {
             sf2::data::xml_doc doc;
             doc.parse(reinterpret_cast<const std::uint8_t*>(xml.data()), xml.size());
@@ -212,54 +355,28 @@ bool QuestEngine::ensure_loaded(App& app) {
         }
     } catch (const std::exception&) {
     }
-    // Tutorial chain (Sjb-equivalent: included while step != END).
+    // The real tree (JS `p.F().L3("quests.xml")`): the root's inline
+    // quests plus every `<Include>` whose `<Conditions>` hold. The
+    // tutorial chain is one of those includes, gated on
+    // `_$StoryTutorialStep != END` (quests.xml L10-14), so the loader no
+    // longer short-circuits on an END step.
     try {
-        std::string step;
+        load_ctx_ = EvalCtx{};
         try {
-            step = app.save().load().story_step();
+            const WarriorSave w = app.save().load();
+            load_ctx_.story_step = w.story_step();
+            load_ctx_.level = w.level;
+            load_ctx_.save = w;
+            load_ctx_.save_loaded = true;
         } catch (const std::exception&) {
         }
-        if (step == "END") {
-            loaded_ = true;
-            return true;
-        }
-        const std::string xml = read_file_text(
-            "reference/extracted/xml/res/quest_extensions/tutorial_quests.xml");
-        if (xml.empty()) return false;
-        sf2::data::xml_doc doc;
-        doc.parse(reinterpret_cast<const std::uint8_t*>(xml.data()), xml.size());
-        const pugi::xml_node root = doc.root().first_child();
-        if (!root || std::string(root.name()) != "Quests") return false;
-        for (pugi::xml_node q = root.child("Quest"); q; q = q.next_sibling("Quest")) {
-            QuestDef def;
-            def.name = q.attribute("Name").value();
-            if (def.name.empty()) continue;
-            def.priority = parse_int_or(q.attribute("Priority").value(), 0);
-            def.unresumable =
-                std::string(q.attribute("Unresumable").value()) == "1";
-            const pugi::xml_node events = q.child("Events");
-            if (events) {
-                for (pugi::xml_node e = events.first_child(); e; e = e.next_sibling()) {
-                    if (e.type() != pugi::node_element) continue;
-                    def.events.push_back(e.name());
-                }
-            }
-            const pugi::xml_node conds = q.child("Conditions");
-            if (conds) parse_conds(conds, def.root);
-            const pugi::xml_node acts = q.child("Actions");
-            if (acts) {
-                for (pugi::xml_node a = acts.first_child(); a; a = a.next_sibling()) {
-                    if (a.type() != pugi::node_element) continue;
-                    QuestAction act;
-                    parse_action(a, act);
-                    def.actions.push_back(std::move(act));
-                }
-            }
-            quests_.push_back(std::move(def));
-        }
+        load_quest_file(app, "quests.xml");
         loaded_ = true;
-        std::fprintf(stdout, "[quest] engine loaded: %zu quests, %zu battle zones\n",
-                     quests_.size(), battle_zone_.size());
+        std::fprintf(stdout,
+                     "[quest] engine loaded: %zu quests from %zu files, %zu battle zones, "
+                     "%zu unanswerable queries\n",
+                     quests_.size(), loaded_files_.size(), battle_zone_.size(),
+                     logged_queries_.size());
         std::fflush(stdout);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[quest] engine load failed: %s\n", e.what());
@@ -276,66 +393,290 @@ std::string QuestEngine::battle_zone(const std::string& battle) const {
     return it != battle_zone_.end() ? it->second : std::string();
 }
 
-std::string QuestEngine::resolve_token(const std::string& token,
-                                       const QuestJournal& journal,
-                                       const std::string& story_step, int level) const {
-    if (token == "_$StoryTutorialStep") {
-        // JS `zt.parse` L309-310: the live step defaults to `kU[0]` =
-        // "NotStarted" for a fresh profile (the stock <Warrior Tutorial="MOVE">
-        // is not a valid step name -> `Ucb` false -> kU[0]). The port keeps
-        // the step in the save's quest variables, so an absent value reads as
-        // NotStarted ONLY on the armed fresh-tutorial path — the seeded
-        // post-tutorial saves stay chain-silent.
-        if (story_step.empty() && fresh_tutorial_) return "NotStarted";
-        return story_step;
+void QuestEngine::note_unanswerable(const std::string& token) {
+    if (logged_queries_.insert(token).second) {
+        std::fprintf(stdout,
+                     "[quest] unanswerable query (condition UNKNOWN, no fire): %s\n",
+                     token.c_str());
+        std::fflush(stdout);
     }
-    if (token == "_$SceneTo") return journal.scene_to;
-    if (token == "_$SceneFrom") return journal.scene_from;
-    if (token == "_$Fight") return journal.fight;
-    if (token == "_$FightResult") return journal.fight_result;
-    if (token == "_$ActionID") return journal.action_id;
-    if (token == "?Fight[_$Fight].Zone") return journal.fight_zone;
-    if (token == "?Player[].Level") return std::to_string(level);
-    if (token == "?SysInfo[].Switch" || token == "?SysInfo[].Steam" ||
-        token == "?SysInfo[].Paid" || token == "?SysInfo[].AnyF2P") {
-        return "0";  // desktop shell: no Switch/Steam/paid flags
-    }
-    if (token == "?Purchase[WEAPON_KNIVES].Type") return "Weapon";
-    // `?Concat[...]`/unknown queries + plain literals pass through (literals
-    // compare verbatim; unresolved queries never equal a bare literal).
-    return token;
 }
 
-bool QuestEngine::conditions_hold(const QuestCond& cond, const QuestJournal& journal,
-                                  const std::string& story_step, int level) const {
-    if (cond.kind == "Equal" || cond.kind == "GreaterEqual") {
-        const std::string a = resolve_token(cond.value1, journal, story_step, level);
-        const std::string b = resolve_token(cond.value2, journal, story_step, level);
-        bool ok = false;
-        if (cond.kind == "GreaterEqual") {
-            ok = parse_int_or(a, -1) >= parse_int_or(b, 0);
-        } else {
-            ok = (a == b);
-        }
-        return cond.invert ? !ok : ok;
+// `?Method[arg].Field` queries the shell models. Mirrors the JS `sg.gAa`
+// dispatch (L959) for the methods the shipped quests actually read through
+// conditions; everything else is UNKNOWN (logged) rather than invented.
+bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCtx& ctx,
+                                std::string& out) {
+    const std::size_t lb = token.find('[');
+    const std::size_t rb = (lb == std::string::npos) ? std::string::npos : token.find(']', lb);
+    if (lb == std::string::npos || rb == std::string::npos) {
+        note_unanswerable(token);
+        return false;
     }
-    // And (default) / Or over children.
-    if (cond.kind == "Or") {
-        bool ok = false;
+    const std::string method = token.substr(1, lb - 1);
+    std::string arg = token.substr(lb + 1, rb - lb - 1);
+    std::string field = token.substr(rb + 1);
+    if (!field.empty() && field[0] == '.') field = field.substr(1);
+    // A nested `_$`/`_` reference inside the brackets (`?Fight[_$Fight].Zone`).
+    if (!arg.empty() && arg[0] == '_') {
+        std::string inner;
+        if (!resolve_token(app, arg, ctx, inner)) return false;
+        arg = inner;
+    }
+    if (method == "SysInfo") {
+        // JS `$wb` (L983-987) for the shipped desktop/web build.
+        static const char* const kSys[][2] = {
+            {"Paid", "1"},          {"AnyPaid", "1"},          {"AnyF2P", "0"},
+            {"ChinaF2P", "0"},      {"FacebookLoginSupport", "0"}, {"IsDebug", "0"},
+            {"Steam", "0"},         {"Switch", "0"},           {"UserObserved", "0"},
+            {"F2P", "0"},           {"DailyOffersAvailable", "0"}, {"AdvertisingSupport", "0"},
+            {"AndroidAPILevel", "0"}, {"Editor", "0"},         {"GamingServiceHasAccount", "0"},
+            {"HuaweiF2P", "0"},     {"IsbnF2P", "0"},          {"LowGraphicsSupport", "0"},
+            {"MyGamezF2P", "0"},    {"RaidsSupport", "0"},     {"SamsungF2P", "0"},
+            {"QualityCondition", "HIGH"}, {"CurrentPlatformName", "PAID"},
+            {"DeviceType", "Desktop"}, {"HasPayments", "0"},
+        };
+        for (const auto& row : kSys) {
+            if (field == row[0]) {
+                out = row[1];
+                return true;
+            }
+        }
+        note_unanswerable(token);
+        return false;
+    }
+    if (method == "Player") {
+        const WarriorSave& w = ctx.live(app);
+        if (field == "Level") {
+            out = std::to_string(w.level);
+            return true;
+        }
+        if (field == "Money") {
+            out = std::to_string(w.money);
+            return true;
+        }
+        if (field == "Weapon") {
+            out = w.weapon;
+            return true;
+        }
+        if (field == "Armor") {
+            out = w.armor;
+            return true;
+        }
+        if (field == "Helm") {
+            out = w.helm;
+            return true;
+        }
+        if (field == "Ranged") {
+            out = w.ranged;
+            return true;
+        }
+        if (field == "Magic") {
+            out = w.magic;
+            return true;
+        }
+        if (field == "MapFocus") {
+            out = w.map_focus;
+            return true;
+        }
+        if (field == "HasPayments") {
+            out = "0";
+            return true;
+        }
+        note_unanswerable(token);
+        return false;
+    }
+    if (method == "Fight") {
+        // JS `X3a` (L970): the live fight controller. The port's journal
+        // carries the `hb` triple at FightEnd (`_$Fight`) and the
+        // save carries the win counts (`<Fights>`).
+        const std::string triple = arg.empty() ? ctx.journal.fight : arg;
+        if (field == "Zone") {
+            out = triple_field(triple, 0);
+            return true;
+        }
+        if (field == "Battle") {
+            out = triple_field(triple, 1);
+            return true;
+        }
+        if (field == "Fight") {
+            out = triple_field(triple, 2);
+            return true;
+        }
+        if (field == "Name") {
+            out = triple;
+            return true;
+        }
+        if (field == "WinCount") {
+            const WarriorSave& w = ctx.live(app);
+            int wins = 0;
+            for (const WarriorSave::FightWins& f : w.fights) {
+                if (f.name == triple) wins = f.wins;
+            }
+            out = std::to_string(wins);
+            return true;
+        }
+        note_unanswerable(token);
+        return false;
+    }
+    if (method == "Purchase") {
+        // Only the shipped tutorial lookup is modelled (JS `IJa` on the
+        // weapons purchase the chain performs).
+        if (field == "Type" && arg == "WEAPON_KNIVES") {
+            out = "Weapon";
+            return true;
+        }
+        note_unanswerable(token);
+        return false;
+    }
+    note_unanswerable(token);
+    return false;
+}
+
+bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCtx& ctx,
+                                std::string& out) {
+    out.clear();
+    if (token.empty()) return true;
+    // A top-level boolean expression in ONE Value1 (the shipped
+    // `?SysInfo[].Switch Or ?SysInfo[].Steam` form, tutorial_quests.xml
+    // L15/L234/L311): JS evaluates the expression string; on the desktop
+    // build every operand is "0", so the result is "0".
+    {
+        const std::string or_sep = " Or ";
+        const std::string and_sep = " And ";
+        const std::size_t op = token.find(or_sep);
+        if (op != std::string::npos) {
+            std::string a, b;
+            if (!resolve_token(app, token.substr(0, op), ctx, a)) return false;
+            if (!resolve_token(app, token.substr(op + or_sep.size()), ctx, b)) return false;
+            out = (truthy01(a) || truthy01(b)) ? "1" : "0";
+            return true;
+        }
+        const std::size_t ap = token.find(and_sep);
+        if (ap != std::string::npos) {
+            std::string a, b;
+            if (!resolve_token(app, token.substr(0, ap), ctx, a)) return false;
+            if (!resolve_token(app, token.substr(ap + and_sep.size()), ctx, b)) return false;
+            out = (truthy01(a) && truthy01(b)) ? "1" : "0";
+            return true;
+        }
+    }
+    if (token.rfind("_$", 0) == 0) {
+        if (token == "_$StoryTutorialStep") {
+            // JS `p.o.zi.HH`: the live step defaults to `kU[0]` =
+            // "NotStarted" for a fresh profile (the stock
+            // `<Warrior Tutorial="MOVE">` is not a valid step name). The
+            // port keeps the step in the save's quest variables, so an
+            // absent value reads as NotStarted ONLY on the armed
+            // fresh-tutorial path — the seeded post-tutorial saves stay
+            // chain-silent.
+            if (ctx.story_step.empty() && fresh_tutorial_) {
+                out = "NotStarted";
+                return true;
+            }
+            out = ctx.story_step;
+            return true;
+        }
+        if (token == "_$SceneTo") {
+            out = ctx.journal.scene_to;
+            return true;
+        }
+        if (token == "_$SceneFrom") {
+            out = ctx.journal.scene_from;
+            return true;
+        }
+        if (token == "_$Fight") {
+            out = ctx.journal.fight;
+            return true;
+        }
+        if (token == "_$FightResult") {
+            out = ctx.journal.fight_result;
+            return true;
+        }
+        if (token == "_$ActionID") {
+            out = ctx.journal.action_id;
+            return true;
+        }
+        // Other `Bj` journal fields (`_$CurrentScene`, `_$Iterator`, ...):
+        // the shell does not model them -> UNKNOWN.
+        note_unanswerable(token);
+        return false;
+    }
+    if (token[0] == '_') {
+        // `_Name` quest/session variable (JS `p.o.f5a`: the variable's
+        // value, default "0"). The save's `<Variables>` store holds the
+        // `SetVariable Scope="Global"` writes.
+        const std::string name = token.substr(1);
+        const WarriorSave& w = ctx.live(app);
+        const auto it = w.variables.find(name);
+        out = (it != w.variables.end()) ? it->second : "0";
+        return true;
+    }
+    if (token[0] == '?') return resolve_query(app, token, ctx, out);
+    out = token;  // literal
+    return true;
+}
+
+QuestEngine::Tri QuestEngine::eval_cond(App& app, const QuestCond& cond, const EvalCtx& ctx) {
+    if (cond.kind == "And" || cond.kind == "Or") {
+        const bool is_or = cond.kind == "Or";
+        bool acc = !is_or;      // And starts true, Or starts false
+        bool unknown = false;
         for (const QuestCond& c : cond.children) {
-            if (conditions_hold(c, journal, story_step, level)) {
-                ok = true;
+            const Tri r = eval_cond(app, c, ctx);
+            if (r == Tri::Unknown) {
+                unknown = true;
+                continue;
+            }
+            if (is_or && r == Tri::True) {
+                acc = true;
+                unknown = false;
+                break;
+            }
+            if (!is_or && r == Tri::False) {
+                acc = false;
+                unknown = false;
                 break;
             }
         }
-        return cond.invert ? !ok : ok;
-    }
-    for (const QuestCond& c : cond.children) {
-        if (!conditions_hold(c, journal, story_step, level)) {
-            return cond.invert ? true : false;
+        Tri result = unknown ? Tri::Unknown : (acc ? Tri::True : Tri::False);
+        if (cond.invert) {
+            if (result == Tri::True) result = Tri::False;
+            else if (result == Tri::False) result = Tri::True;
         }
+        return result;
     }
-    return cond.invert ? false : true;
+    // Leaf comparison (JS `yb.tga`/`w0a`/`Uha` L965-966).
+    std::string a, b;
+    if (!resolve_token(app, cond.value1, ctx, a)) return Tri::Unknown;
+    if (!resolve_token(app, cond.value2, ctx, b)) return Tri::Unknown;
+    bool ok = false;
+    if (cond.kind == "Equal" || cond.kind == "Contains" || cond.kind == "Starts" ||
+        cond.kind == "Ends") {
+        // Both numeric -> numeric compare; otherwise exact string compare
+        // (`w0a` falls back to `PNa`).
+        ok = (is_numeric(a) && is_numeric(b)) ? (to_number(a) == to_number(b)) : (a == b);
+    } else if (cond.kind == "Greater" || cond.kind == "GreaterEqual" ||
+               cond.kind == "Less" || cond.kind == "LessEqual") {
+        if (is_numeric(a) && is_numeric(b)) {
+            const double va = to_number(a);
+            const double vb = to_number(b);
+            if (cond.kind == "Greater") ok = va > vb;
+            else if (cond.kind == "GreaterEqual") ok = va >= vb;
+            else if (cond.kind == "Less") ok = va < vb;
+            else ok = va <= vb;
+        } else {
+            ok = (a == b);  // JS `w0a` -> `PNa`
+        }
+    } else {
+        return Tri::Unknown;  // unsupported leaf tag
+    }
+    if (cond.invert) ok = !ok;
+    return ok ? Tri::True : Tri::False;
+}
+
+bool QuestEngine::conditions_hold(App& app, const QuestCond& cond, const EvalCtx& ctx) {
+    return eval_cond(app, cond, ctx) == Tri::True;
 }
 
 void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
@@ -346,16 +687,20 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
     for (const QuestAction& a : acts) {
         const std::string& t = a.tag;
         if (t == "If") {
-            // If needs the live step/level for its Conditions.
-            std::string step;
-            int level = journal.player_level;
+            // `co.S` (L1038): the If's own `<Conditions>` against the live
+            // journal/save; an UNKNOWN operand takes the Else branch.
+            EvalCtx c;
+            c.journal = journal;
+            c.level = journal.player_level;
             try {
                 const WarriorSave w = app.save().load();
-                step = w.story_step();
-                level = w.level;
+                c.story_step = w.story_step();
+                c.level = w.level;
+                c.save = w;
+                c.save_loaded = true;
             } catch (const std::exception&) {
             }
-            const bool take = conditions_hold(a.if_cond, journal, step, level);
+            const bool take = conditions_hold(app, a.if_cond, c);
             run_actions(app, take ? a.if_then : a.if_else, journal, fx, locals, quest,
                         depth + 1);
         } else if (t == "ChangeScene") {
@@ -517,11 +862,21 @@ void QuestEngine::run_actions(App& app, const std::vector<QuestAction>& acts,
             // recorded only — the desktop shell drives navigation through the
             // nav flash instead of an auto-click.
             fx.click_hints.push_back(attr_or(a.attrs, "Target"));
+        } else if (t == "SceneMenuScroll") {
+            // `SceneMenuScroll Action` (the Switch/Steam branch): recorded.
+            fx.scene_menu_scroll.push_back(attr_or(a.attrs, "Action"));
         } else if (t == "ClearQuestQueue") {
             fx.clears.push_back(attr_or(a.attrs, "Name"));
+        } else if (t == "AttachQuestFile") {
+            // JS `Bn.S` (L1025): `p.F().L3(this.filename)` — load the file
+            // at this point in the run. Deferred to the end of the fire
+            // pass (the JS `RA` loop captured its list length, so the
+            // newly loaded quests only run on FUTURE events).
+            fx.attach_files.push_back(attr_or(a.attrs, "File"));
         } else if (t == "Activate") {
-            // Chained Activate (StoryTutorialOpenScene): fired by fire().
-            fx.unknown.push_back("Activate:" + attr_or(a.attrs, "ActionID"));
+            // JS `Ge.S` (L1023): `ha.F().RA("QUEST_EVENT_ACTIVATE")` with
+            // `Ge.MZ` = the ActionID; re-fired by fire_inner.
+            fx.activate_requests.push_back(attr_or(a.attrs, "ActionID"));
         } else if (t == "Wait") {
             // Collapsed (synchronous runs) — recorded for traceability.
             fx.unknown.push_back("Wait:" + attr_or(a.attrs, "Frames") + "f");
@@ -609,15 +964,23 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
                              const QuestJournal& journal,
                              std::vector<std::string>& fired, int depth) {
     if (depth > kMaxActivateDepth) return;
-    std::string step;
-    int level = journal.player_level;
+    EvalCtx ctx;
+    ctx.journal = journal;
+    ctx.level = journal.player_level;
     try {
         const WarriorSave w = app.save().load();
-        step = w.story_step();
-        level = w.level;
+        ctx.story_step = w.story_step();
+        ctx.level = w.level;
+        ctx.save = w;
+        ctx.save_loaded = true;
     } catch (const std::exception&) {
     }
-    for (const QuestDef& q : quests_) {
+    std::vector<std::string> attaches;  // AttachQuestFile, applied post-pass
+    // JS `ha.RA` (L1018) captures the event list length before iterating:
+    // quests registered by an attach during this pass run on FUTURE events.
+    const std::size_t quest_total = quests_.size();
+    for (std::size_t i = 0; i < quest_total; ++i) {
+        const QuestDef& q = quests_[i];
         bool listens = false;
         for (const std::string& e : q.events) {
             if (e == event) {
@@ -636,7 +999,7 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
             }
             if (seen) continue;
         }
-        if (!conditions_hold(q.root, journal, step, level)) continue;
+        if (!conditions_hold(app, q.root, ctx)) continue;
         QuestSideEffects fx;
         std::map<std::string, std::string> locals;  // run-local vars
         run_actions(app, q.actions, journal, fx, locals, q.name, 0);
@@ -649,7 +1012,7 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         if (q.unresumable) fired_.push_back(q.name);
         fired.push_back(q.name);
         std::fprintf(stdout, "[quest] FIRED %s on %s (step=%s scene=%s->%s)\n", q.name.c_str(),
-                     event.c_str(), step.c_str(), journal.scene_from.c_str(),
+                     event.c_str(), ctx.story_step.c_str(), journal.scene_from.c_str(),
                      journal.scene_to.c_str());
         if (!fx.dialogs.empty()) {
             for (const std::string& d : fx.dialogs) {
@@ -686,16 +1049,18 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
                 std::fprintf(stdout, "[quest]   nav flash: %s\n", s.c_str());
             }
         }
-        std::fflush(stdout);
-        // Chained Activate (StoryTutorialOpenScene): re-fire synchronously.
-        for (const std::string& u : fx.unknown) {
-            if (u.rfind("Activate:", 0) == 0) {
-                QuestJournal j2 = journal;
-                j2.action_id = u.substr(9);
-                fire_inner(app, "Activate", j2, fired, depth + 1);
+        if (!fx.attach_files.empty()) {
+            for (const std::string& s : fx.attach_files) {
+                std::fprintf(stdout, "[quest]   attach quest file: %s\n", s.c_str());
             }
         }
-        // Queue clears (Mn): latch the named quest as done.
+        if (!fx.unknown.empty()) {
+            for (const std::string& s : fx.unknown) {
+                std::fprintf(stdout, "[quest]   action (record only): %s\n", s.c_str());
+            }
+        }
+        std::fflush(stdout);
+        // Queue clears (Mn `Yba` L1019): latch the named quest as done.
         for (const std::string& c : fx.clears) {
             bool seen = false;
             for (const std::string& f : fired_) {
@@ -706,11 +1071,35 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
             }
             if (!seen) fired_.push_back(c);
         }
-        // Refresh the step for later quests in this same firing.
+        for (const std::string& f : fx.attach_files) attaches.push_back(f);
+        // Refresh the step/save snapshot for later quests in this firing.
         try {
-            step = app.save().load().story_step();
+            const WarriorSave w = app.save().load();
+            ctx.story_step = w.story_step();
+            ctx.level = w.level;
+            ctx.save = w;
+            ctx.save_loaded = true;
         } catch (const std::exception&) {
         }
+        // Chained Activate (`Ge` L1024): re-fire synchronously with
+        // `Ge.MZ` = ActionID. Done last so an attach inside it has already
+        // been collected (`attaches` above) and never touches `q`.
+        for (const std::string& u : fx.activate_requests) {
+            QuestJournal j2 = journal;
+            j2.action_id = u;
+            fire_inner(app, "Activate", j2, fired, depth + 1);
+        }
+    }
+    // `AttachQuestFile` (`Bn.S` L1025 -> `L3`): load after the pass, so the
+    // loaded quests register for FUTURE events only (JS `RA` semantics).
+    for (const std::string& f : attaches) {
+        load_ctx_ = ctx;
+        load_quest_file(app, f);
+    }
+    if (!attaches.empty()) {
+        std::fprintf(stdout, "[quest] attach applied: %zu quests from %zu files\n",
+                     quests_.size(), loaded_files_.size());
+        std::fflush(stdout);
     }
 }
 

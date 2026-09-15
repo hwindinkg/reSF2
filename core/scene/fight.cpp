@@ -1477,14 +1477,22 @@ const FightFighter& FightController::round_winner_by_hp() const {
 }
 
 void FightController::sample_idle(FightFighter& f) {
-    // The Fists stance idle (the dojo archive's fists1_stance_idle — the
-    // game's weapon stance idle). Fall back to the first move's clip.
-    const std::string idle_name = "fists1_stance_idle";
-    const auto it = clips_->find(idle_name);
-    if (it != clips_->end()) {
-        f.fighter.sample(it->second, 0, f.fighter.world_x(), f.fighter.world_y(),
-                         f.fighter.facing());
-    }
+    // [FIX pre-stance pose — JS `Te.NS`/`da.Ua == null`] A fighter with no
+    // clip playing holds the BIND pose: the JS fighter's nodes are never posed
+    // before the first `Skb` (the oracle's first fight frames — clip `null` —
+    // are exactly the model's bind pose, e.g. yb bones[18]=690.000,
+    // bones[30]=672.318, bones[31]=710.761, i.e. the XML bind deltas
+    // -17.682/+20.761 about NPivot). The old body POSED the fighter with
+    // `fists1_stance_idle` frame 0, which is not in the JS and left
+    // `sol_ma_` (the JS `currentNode.ma` analog that `Te.Gub` L557-559 reads
+    // as the align reference `e`) 23.8 units off the bind pose — the residual
+    // intro-stance offset. `sample` with a 1-frame, bone-less clip leaves
+    // every bone at its bind position (the same hub path the NotAnimation
+    // dummy uses).
+    sf2::data::anim_clip bind_clip;
+    bind_clip.frames.resize(1);
+    f.fighter.sample(bind_clip, 0, f.fighter.world_x(), f.fighter.world_y(),
+                     f.fighter.facing());
 }
 
 void FightController::sample_enemy_idle() {

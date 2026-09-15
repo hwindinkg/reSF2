@@ -692,15 +692,18 @@ void App::boot() {
     boot_splash_total_ = kBootSplashFrames;
     boot_splash_frames_ = kBootSplashFrames;
     screens_->push(make_screen(*screens_, kScreenDojo));
-    // Session start for the quest engine (JS `v.uwb` -> QUEST_EVENT_SESSION,
-    // fired from the loader; the Dojo push above already fired ChangeTab +
-    // SceneLoaded for the boot edge).
+    // Quest-engine boot events, in the JS order: the application start
+    // (`QUEST_EVENT_START_APPLICATION`, the `AttachScripts_*` quests attach
+    // their zone files here) precedes the session start (`v.uwb` ->
+    // QUEST_EVENT_SESSION, fired from the loader). The Dojo push above
+    // already fired ChangeTab + SceneLoaded for the boot edge.
     try {
         QuestJournal j;
         try {
             j.player_level = save_->load().level;
         } catch (const std::exception&) {
         }
+        quest_engine().fire(*this, "ApplicationStart", j);
         quest_engine().fire(*this, "SessionStart", j);
     } catch (const std::exception&) {
     }

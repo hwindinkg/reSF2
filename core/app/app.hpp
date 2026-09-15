@@ -60,6 +60,11 @@ class QuestEngine;
 // the `v.kD` results data: the battle, the reward, the winner).
 struct PendingBattle {
     std::string battle_name = "Training";
+    // The JS `hb` triple string (`Me|Re|Lq`, `hb.toString` L1416) the fight
+    // was launched from — the quest journal's `_$Fight` value (`Bj.Nb`).
+    // Empty when the battle was started without a triple (the direct
+    // `--fight` boot), in which case `battle_name` is used.
+    std::string fight_triple;
     std::string location = "dojo";
     // The stages.xml Zone Name the battle was selected in (JS map `st`).
     // Required to resolve the battle's `<Rules>` correctly: the same battle

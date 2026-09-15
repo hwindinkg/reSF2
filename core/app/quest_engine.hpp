@@ -1,34 +1,41 @@
 #pragma once
 
-// Quest engine core (app scope) — data-driven tutorial quest machine.
+// Quest engine core (app scope) — data-driven quest machine.
 //
-// Spec: FLOW_STATIC.md §1 (engine mapping Fe.Ij/ha/Bj/Yb, event/condition/
-// action tables) over `reference/extracted/xml/res/quest_extensions/
-// tutorial_quests.xml` (root `quests.xml` includes it while
-// `_$StoryTutorialStep != END`).
+// Spec: the JS quest loader/engine (`Fe.Ij`/`ha`/`Bj`/`Yb`, event/condition/
+// action tables) over the real shipped tree. The ROOT is
+// `reference/extracted/xml/res/quests.xml` (the same extracted-res source
+// `stages.xml`/`list.xml` resolve from): its `<Quest>` children register
+// inline, its `<Include File="a.xml|b.xml">` children load further files
+// (each `|` alternative that exists, in order, after evaluating the
+// Include's own `<Conditions>`), and a running quest's
+// `<AttachQuestFile File="x.xml">` action loads a file at that point
+// (JS `Bn.S` -> `p.F().L3`).
 //
 // What this IS: QuestDef parse (Quest/Events/Conditions/Actions incl.
 // nested If/Dialog/Button children), session latch for Unresumable="1",
-// condition eval (Equal/Not/GreaterEqual + And/Or nesting, `_$` journal
-// vars + the `?`-queries the shell can answer), and runners for the
-// APP-SCOPED actions only — save/UI writes (so/to/qo/oo/SetVariable,
-// queue clears) plus RECORDS for everything else (scene/fight/click/
-// dialog/minigame requests are logged, never executed: no auto-navigation,
-// no auto-fights, no auto-clicks — headless-safe by construction).
+// condition eval (Equal/Greater/GreaterEqual/Less/LessEqual + Not and
+// And/Or nesting, `_$` journal vars + the `?`-queries the shell can
+// answer; an operand the shell cannot answer makes the condition
+// UNKNOWN — the quest does not fire and the query is logged, never
+// silently true/false), and runners for the APP-SCOPED actions only —
+// save/UI writes (so/to/qo/oo/SetVariable, queue clears) plus RECORDS for
+// everything else (scene/fight/click/dialog/minigame requests are logged,
+// never executed: no auto-navigation, no auto-fights, no auto-clicks —
+// headless-safe by construction).
 // Async semantics (Wait Frames, Dialog modal gating, Activate delays,
 // `Dh[]` ordering, `be.Mbb` gates) collapse to synchronous runs — noted.
-//
-// What this is NOT (missing hooks, all noted in the report, none touched):
-// fight-affecting actions need scene hooks — Sn (battle start `v.Am`),
-// Tn (`ca.Ka().kD`), Do/Eo/Bo/Co/Fo minigames (fighter/AI/perk hooks),
-// Nn auto-click (deliberately record-only).
 //
 // Journal (Bj analog): story_step comes from the LIVE save at fire time;
 // scene_to/from from ScreenManager push/pop; fight triple from FightEnd.
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
+
+#include "app/save_system.hpp"
+#include "xml_doc.hpp"
 
 namespace sf2::app {
 
@@ -45,9 +52,10 @@ struct QuestJournal {
     std::string action_id;  // Activate ActionID
 };
 
-// Condition node (Equal/GreaterEqual leaf or And/Or operator).
+// Condition node (leaf comparison or And/Or operator). Leaf kinds mirror
+// the JS `yb.tD` tag table: Equal/Greater/GreaterEqual/Less/LessEqual.
 struct QuestCond {
-    std::string kind = "Equal";  // "Equal" | "GreaterEqual" | "And" | "Or"
+    std::string kind = "Equal";  // leaf kind, or "And" / "Or" operator
     bool invert = false;         // Not="1"
     std::string value1;
     std::string value2;
@@ -152,6 +160,16 @@ struct QuestSideEffects {
     std::vector<std::string> click_hints;
     std::vector<std::string> clears;              // Mn queue names
     std::vector<std::string> minigames;           // Do/Eo/Ao/Bo/Co/Fo (record)
+    // `Bn.S` (L1025): `AttachQuestFile File` loads a quest file at this
+    // point in the run (deferred to the end of the fire pass — the loaded
+    // quests register for FUTURE events, exactly like the JS `RA` loop
+    // which captures `a.length` before iterating).
+    std::vector<std::string> attach_files;
+    // `Ge.S` (L1023-1024): `Activate ActionID` (re-fires the Activate
+    // event with `_$ActionID` bound; the JS `Ge.MZ` handshake).
+    std::vector<std::string> activate_requests;
+    // `SceneMenuScroll Action` (the Switch/Steam branch): recorded.
+    std::vector<std::string> scene_menu_scroll;
     std::vector<std::string> unknown;             // unhandled tags
 };
 
@@ -211,15 +229,54 @@ public:
     // For logs/tests.
     std::size_t quest_count() const { return quests_.size(); }
     bool loaded() const { return loaded_; }
+    // Shipped files the loader actually read (root + every resolvable
+    // `<Include>` alternative + every executed `<AttachQuestFile>`).
+    std::size_t file_count() const { return loaded_files_.size(); }
+    const std::vector<std::string>& loaded_files() const { return loaded_files_; }
+    // Queries the shell could not answer (logged; a condition using one is
+    // UNKNOWN and never fires the quest).
+    std::size_t unanswerable_count() const { return logged_queries_.size(); }
+    const std::set<std::string>& unanswerable_queries() const { return logged_queries_; }
 
 private:
+    // One condition-evaluation context (the JS `Bj` journal `ta` plus the
+    // live save snapshot the `?`-queries read).
+    struct EvalCtx {
+        QuestJournal journal;
+        std::string story_step;
+        int level = 1;
+        mutable bool save_loaded = false;
+        mutable WarriorSave save;
+        const WarriorSave& live(App& app) const;
+    };
+
     bool ensure_loaded(App& app);
+    // JS `L3(a,b)` (L184): read one file, walk the root's children —
+    // `Quest` -> register, `Include` -> `Sjb`.
+    void load_quest_file(App& app, const std::string& rel);
+    // JS `Sjb(a,b)` (L184): evaluate the Include's `<Conditions>` against
+    // the current journal; if they hold, load every `File` alternative.
+    void load_include(App& app, const pugi::xml_node& include_node);
+    void parse_quest_node(App& app, const pugi::xml_node& quest_node,
+                          const std::string& file);
     void fire_inner(App& app, const std::string& event, const QuestJournal& journal,
                     std::vector<std::string>& fired, int depth);
-    bool conditions_hold(const QuestCond& cond, const QuestJournal& journal,
-                         const std::string& story_step, int level) const;
-    std::string resolve_token(const std::string& token, const QuestJournal& journal,
-                              const std::string& story_step, int level) const;
+    // JS `yb.compare` (L959): 3-valued so a condition using a query the
+    // shell cannot answer is UNKNOWN (the quest does not fire) instead of
+    // silently true/false.
+    enum class Tri { False, True, Unknown };
+    Tri eval_cond(App& app, const QuestCond& cond, const EvalCtx& ctx);
+    bool conditions_hold(App& app, const QuestCond& cond, const EvalCtx& ctx);
+    // Resolves one Value1/Value2 expression. Returns false when the shell
+    // cannot answer it (a `?`-query it does not model) — the caller then
+    // treats the comparison as UNKNOWN.
+    bool resolve_token(App& app, const std::string& token, const EvalCtx& ctx,
+                       std::string& out);
+    // `?Method[arg].Field` — the subset of the JS query engine the shipped
+    // conditions read. Returns false (UNKNOWN, logged) for the rest.
+    bool resolve_query(App& app, const std::string& token, const EvalCtx& ctx,
+                       std::string& out);
+    void note_unanswerable(const std::string& token);
     void run_actions(App& app, const std::vector<QuestAction>& acts,
                      const QuestJournal& journal, QuestSideEffects& fx,
                      std::map<std::string, std::string>& locals,
@@ -229,6 +286,10 @@ private:
 
     bool loaded_ = false;
     std::vector<QuestDef> quests_;
+    // Evaluation context of the load pass (the JS `ha.ta` journal an
+    // `<Include>`'s conditions read). The root pass uses the boot journal.
+    EvalCtx load_ctx_;
+    std::vector<std::string> loaded_files_;  // shipped files the loader read
     std::vector<std::string> fired_;  // Unresumable session latch
     std::map<std::string, std::string> battle_zone_;  // battle -> zone index
     std::string last_fight_;
@@ -242,6 +303,10 @@ private:
     // as `NotStarted` only while the fresh-tutorial path is armed (the
     // fidelity tour), so the seeded post-tutorial saves stay chain-silent.
     bool fresh_tutorial_ = false;
+    // `?`-queries the shell could not answer (JS has a full query engine;
+    // the port answers the subset it models). Logged once each; a condition
+    // whose operand is unanswerable is UNKNOWN (never fires).
+    std::set<std::string> logged_queries_;
 };
 
 } // namespace sf2::app
