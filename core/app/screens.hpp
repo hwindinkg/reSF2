@@ -242,9 +242,19 @@ public:
     void on_key(int glfw_key, bool down);
 
     // The GLFW -> game key_type id map (0 = unbound), from the JS `sc.OD`
-    // table (`Af.oUa` L2472). Exposed so the key-map verification can assert
-    // the binding without running a fight.
+    // table (`Af.oUa` L2472) — EXACTLY the ten keys the JS binds. Exposed so
+    // the key-map verification can assert the binding without running a fight.
     static int key_type_for_glfw(int glfw_key);
+
+    // [F8] The desktop-only aliases (Left/Right/Up/Down movement, Space=Punch)
+    // — NOT part of `Af.oUa`, consulted only when opted in.
+    static int desktop_alias_for_glfw(int glfw_key);
+
+    // [F8] Opt-in for the desktop key aliases (arrows / Space=Punch / Esc=pause
+    // / Space-Enter=next round). OFF by default so the default key map equals
+    // the JS `Af.oUa` table exactly.
+    void set_desktop_key_aliases(bool on) { desktop_key_aliases_ = on; }
+    bool desktop_key_aliases() const { return desktop_key_aliases_; }
 
     // Test/replay hook: inject a game key edge by key_type id (1..14) into
     // the same `player_input` path the keyboard uses, bypassing the GLFW key
@@ -297,12 +307,16 @@ private:
     int last_log_frame_ = 0;
     bool auto_attack_wired_ = false;
     // Pause dialog (JS `Jn` -> `Ar.Qg(0)` -> `Aia()` `Dr`, L2018/L425 —
-    // UI-layer only): Esc/P or the HUD pause icon freezes the sim (update
-    // skipped) and shows the `Dr` dialog (`res/fight/pause.*`: Pause title,
-    // PauseMusic/PauseSound toggles, play=resume, home=quit). Never engages
-    // headless (key/pointer driven; the loop injects neither here).
+    // UI-layer only): the HUD pause icon freezes the sim (update skipped) and
+    // shows the `Dr` dialog (`res/fight/pause.*`: Pause title,
+    // PauseMusic/PauseSound toggles, play=resume, home=quit). The Esc key
+    // toggle is a desktop-only alias (NOT in `Af.oUa`) and is OFF unless
+    // `set_desktop_key_aliases(true)` is called.
     bool paused_ = false;
     bool music_off_ = false;  // `Dr.PauseMusic_on/off` toggle state
+    // [F8] Desktop key aliases opt-in (arrows/Space/Esc/Enter). OFF by default:
+    // the default key map is exactly the JS `Af.oUa` 10-key table.
+    bool desktop_key_aliases_ = false;
 
     // --- on-screen gamepad (JS `Za` virtual controls, JS_GAMEPLAY §2) ----
     // The original's touch gamepad: the joystick `ze` (base + knob, the

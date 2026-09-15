@@ -3988,20 +3988,20 @@ void draw_dojo_figure(sf2::render::Renderer& ren, const sf2::render::Camera& cam
         ren.draw_triangles(pv.data(), pv.size() / 2, r, g, b, 1.0f);
     }
     const sf2::scene::Model& model = fighter.model();
-    std::unordered_map<std::string, float> edge_max;
-    edge_max.reserve(model.capsules.size() * 2u);
-    for (const sf2::scene::Capsule& cap : model.capsules) {
-        auto it = edge_max.find(cap.edge);
-        if (it == edge_max.end() || cap.radius1 > it->second) {
-            edge_max[cap.edge] = cap.radius1;
-        }
-    }
+    // [F6] ONE strip per `<Capsule_* Type="Capsule">` in `<Figures>` DOCUMENT
+    // ORDER (JS `Yc.Uib` L570 walks `Figures.children` in order, `Yc.Tib` L573
+    // makes one `zu` per capsule; `Dk.update` L836 strokes it with
+    // `Radius1*2` and margin-shifts the endpoints by the CAPSULE's
+    // Margin1/Margin2). The old port deduped by edge through an
+    // `unordered_map` (76 strips in nondeterministic order) and ignored the
+    // margins.
+    const std::vector<float>& pos = fighter.positions();
     constexpr float kPi = 3.14159265358979323846f;
     constexpr int kDiscSegments = 12;
-    for (const auto& kv : edge_max) {
+    for (const sf2::scene::Capsule& cap : model.capsules) {
         const sf2::scene::EdgeDef* edge = nullptr;
         for (const sf2::scene::EdgeDef& ed : model.edges) {
-            if (ed.name == kv.first) {
+            if (ed.name == cap.edge) {
                 edge = &ed;
                 break;
             }
@@ -4010,16 +4010,22 @@ void draw_dojo_figure(sf2::render::Renderer& ren, const sf2::render::Camera& cam
         const int i1 = model.bone_by_name(edge->end1);
         const int i2 = model.bone_by_name(edge->end2);
         if (i1 < 0 || i2 < 0) continue;
-        const std::vector<float>& pos = fighter.positions();
         const std::size_t u1 = static_cast<std::size_t>(i1) * 2;
         const std::size_t u2 = static_cast<std::size_t>(i2) * 2;
         if (u1 + 1 >= pos.size() || u2 + 1 >= pos.size()) continue;
-        const float stroke = kv.second * 2.0f * model_scale * camera.zoom;
+        // `Dk.update` L836 margin shift (world space; the model_scale/offset
+        // below is affine, so lerp-then-transform == transform-then-lerp).
+        const float wx1 = pos[u1] + (pos[u2] - pos[u1]) * cap.margin1;
+        const float wy1 = pos[u1 + 1] + (pos[u2 + 1] - pos[u1 + 1]) * cap.margin1;
+        const float wx2 = pos[u1] + (pos[u2] - pos[u1]) * (1.0f - cap.margin2);
+        const float wy2 =
+            pos[u1 + 1] + (pos[u2 + 1] - pos[u1 + 1]) * (1.0f - cap.margin2);
+        const float stroke = cap.radius1 * 2.0f * model_scale * camera.zoom;
         if (stroke <= 0.0f) continue;
-        const float sx1 = camera.world_to_screen_x(pos[u1] * model_scale + offset_x, 1.0f);
-        const float sy1 = camera.world_to_screen_y(pos[u1 + 1] * model_scale + offset_y);
-        const float sx2 = camera.world_to_screen_x(pos[u2] * model_scale + offset_x, 1.0f);
-        const float sy2 = camera.world_to_screen_y(pos[u2 + 1] * model_scale + offset_y);
+        const float sx1 = camera.world_to_screen_x(wx1 * model_scale + offset_x, 1.0f);
+        const float sy1 = camera.world_to_screen_y(wy1 * model_scale + offset_y);
+        const float sx2 = camera.world_to_screen_x(wx2 * model_scale + offset_x, 1.0f);
+        const float sy2 = camera.world_to_screen_y(wy2 * model_scale + offset_y);
         float dx = sx2 - sx1;
         float dy = sy2 - sy1;
         const float len = std::sqrt(dx * dx + dy * dy);
@@ -5810,30 +5816,58 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
 }
 
 // JS `sc.OD` (`Af.oUa` L2472) key table -> the native GLFW binding.
+// [F8] `Af.oUa` is EXACTLY ten entries and nothing else (L2472):
+//   a.v[1]=87 (W->Up), a.v[3]=68 (D->Forward), a.v[5]=83 (S->Down),
+//   a.v[7]=65 (A->Back), a.v[9]=75 (K->Punch), a.v[10]=76 (L->Kick),
+//   a.v[11]=79 (O->Ranged), a.v[12]=80 (P->Magic), a.v[13]=74 (J->RaidCharge),
+//   a.v[14]=81 (Q->Super).
+// The JS table has NO Space/Enter/arrow/Escape binding. The old port added
+// invented aliases (ArrowUp/Down/Left/Right, Space=Punch) plus the app-layer
+// Esc pause and Space/Enter next-round shortcuts. Those now live behind the
+// explicit opt-in `set_desktop_key_aliases(true)` (OFF by default, see
+// `on_key`), so the DEFAULT map below is byte-for-byte `Af.oUa`.
 int FightScreen::key_type_for_glfw(int glfw_key) {
     switch (glfw_key) {
-        case 65: case 263: return static_cast<int>(sf2::scene::key_type::back);         // A / Left
-        case 68: case 262: return static_cast<int>(sf2::scene::key_type::forward);      // D / Right
-        case 87: case 265: return static_cast<int>(sf2::scene::key_type::up);           // W / Up
-        case 83: case 264: return static_cast<int>(sf2::scene::key_type::down);         // S / Down
-        case 32: case 75: return static_cast<int>(sf2::scene::key_type::punch);         // Space / K
-        case 76: return static_cast<int>(sf2::scene::key_type::kick);                   // L
-        case 79: return static_cast<int>(sf2::scene::key_type::ranged);                 // O
-        case 80: return static_cast<int>(sf2::scene::key_type::magic);                  // P
-        case 74: return static_cast<int>(sf2::scene::key_type::raid_charge);            // J
-        case 81: return static_cast<int>(sf2::scene::key_type::super);                  // Q
+        case 87: return static_cast<int>(sf2::scene::key_type::up);           // W
+        case 68: return static_cast<int>(sf2::scene::key_type::forward);      // D
+        case 83: return static_cast<int>(sf2::scene::key_type::down);         // S
+        case 65: return static_cast<int>(sf2::scene::key_type::back);         // A
+        case 75: return static_cast<int>(sf2::scene::key_type::punch);        // K
+        case 76: return static_cast<int>(sf2::scene::key_type::kick);         // L
+        case 79: return static_cast<int>(sf2::scene::key_type::ranged);       // O
+        case 80: return static_cast<int>(sf2::scene::key_type::magic);        // P
+        case 74: return static_cast<int>(sf2::scene::key_type::raid_charge);  // J
+        case 81: return static_cast<int>(sf2::scene::key_type::super);        // Q
+        default: return 0;
+    }
+}
+
+// Desktop-only movement/attack aliases (arrows + Space). Not part of
+// `Af.oUa`; only consulted when `desktop_key_aliases_` is on.
+int FightScreen::desktop_alias_for_glfw(int glfw_key) {
+    switch (glfw_key) {
+        case 263: return static_cast<int>(sf2::scene::key_type::back);     // Left
+        case 262: return static_cast<int>(sf2::scene::key_type::forward);  // Right
+        case 265: return static_cast<int>(sf2::scene::key_type::up);       // Up
+        case 264: return static_cast<int>(sf2::scene::key_type::down);     // Down
+        case 32: return static_cast<int>(sf2::scene::key_type::punch);     // Space
         default: return 0;
     }
 }
 
 void FightScreen::on_key(int glfw_key, bool down) {
-    // Pause toggle (JS `Jn` pause button → `Ar.Qg(0)` → `Aia()` L425 — the
-    // native Escape desktop alias, app-layer only). Esc (256) on the down
-    // edge toggles while the round is live. P (80) is NO LONGER a pause key:
-    // JS binds P to Magic (`Af.oUa` L2472 `a.v[12]=80`), so P must reach the
-    // fight key map below. Headless-safe: the headless driver injects pointer
-    // clicks, never keys, so this cannot trigger there (no code gate needed).
-    if (down && glfw_key == 256) {
+    // [F8] Every binding here that is not one of the ten `Af.oUa` keys is a
+    // desktop affordance and is OFF unless explicitly opted in, so the default
+    // key map equals the JS table exactly. The headless harness (`--fidelity-
+    // tour` / `--ui-tour` / `--headless-loop` / `--fight --headless`) injects
+    // Esc and Space as its own control surface and opts in here; a windowed
+    // session runs with `App::headless() == false` and gets the pure JS table
+    // (a user can opt in via `set_desktop_key_aliases(true)`).
+    const bool aliases = desktop_key_aliases_ || app().headless();
+    // Pause toggle. The JS path is the HUD pause disc (`Jn` -> `Ar.Qg(0)` ->
+    // `Aia()` L425, drawn by this screen); Esc (256) is a desktop alias, so it
+    // is gated. The headless drivers inject the disc click, never keys.
+    if (aliases && down && glfw_key == 256) {
         if (fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over()) {
             paused_ = !paused_;
             sf2::audio::AudioEngine::instance().play("click");
@@ -5846,9 +5880,8 @@ void FightScreen::on_key(int glfw_key, bool down) {
     // is frozen too, so buffered keys would otherwise fire on resume).
     if (paused_) return;
     // Between rounds: Space (32) / Enter (257) = the HUD "Next" button (JS
-    // `vhb` L410 case 1) — confirm the next round instead of feeding the
-    // punch/attack mapping below.
-    if (fight_ != nullptr && down && fight_->round_wait() &&
+    // `vhb` L410 case 1) — a desktop alias, gated like the rest.
+    if (aliases && fight_ != nullptr && down && fight_->round_wait() &&
         (glfw_key == 32 || glfw_key == 257)) {
         sf2::audio::AudioEngine::instance().play("click");
         std::fprintf(stdout, "[fight] NEXT round requested (Space/Enter)\n");
@@ -5857,17 +5890,14 @@ void FightScreen::on_key(int glfw_key, bool down) {
         return;
     }
     // GLFW key codes -> the game's key_type, bound from the JS key map
-    // `sc.OD` (`Af.oUa` L2472):
-    //   a.v[1]=87 (W->Up), a.v[3]=68 (D->Forward), a.v[5]=83 (S->Down),
-    //   a.v[7]=65 (A->Back), a.v[9]=75 (K->Punch), a.v[10]=76 (L->Kick),
-    //   a.v[11]=79 (O->Ranged), a.v[12]=80 (P->Magic), a.v[13]=74
-    //   (J->RaidCharge), a.v[14]=81 (Q->Super).
-    // The JS table defines no B key (the old non-JS B->Super alias is
-    // dropped). Space and the arrows stay as documented desktop aliases
-    // (Left/Right/Up/Down directions; Space = K/Punch). Blocking is NOT a raw
-    // key in this game: the fighter blocks while any move's `Block` interval
-    // is active (e.g. the HighPunch recovery).
-    const int kt_id = key_type_for_glfw(glfw_key);
+    // `sc.OD` (`Af.oUa` L2472) — the ten keys in `key_type_for_glfw` above.
+    // The desktop aliases (Left/Right/Up/Down/Space) are folded in only when
+    // opted in. Blocking is NOT a raw key in this game: the fighter blocks
+    // while any move's `Block` interval is active (e.g. HighPunch recovery).
+    int kt_id = key_type_for_glfw(glfw_key);
+    if (aliases && kt_id == 0) {
+        kt_id = desktop_alias_for_glfw(glfw_key);
+    }
     if (kt_id == 0) return;
     sf2::scene::key_type kt = static_cast<sf2::scene::key_type>(kt_id);
     const int idx = static_cast<int>(kt);
@@ -6568,57 +6598,62 @@ void FightScreen::render_impl(App& app) {
     // arms/legs) matching the oracle.
     auto draw_capsules = [&camera, &ren, &assets, arena_half](const sf2::scene::FightFighter& f) {
         const float r = f.fighter.color_r(), g = f.fighter.color_g(), b = f.fighter.color_b();
-        // [Phase 4d — capsule-figure render] The oracle draws the fighter's
-        // body from the merged model's CAPSULE FIGURES (JS `Yc.Tib`: every
-        // `<Capsule_* Type="Capsule" Radius1=".." Edge="..">` becomes a `zu`
-        // visual node -> a `Dk` stroked line, stroke = Radius1*2). Dedup by
-        // edge keeps max Radius to avoid double squares (EThigh 12+15).
+        // [F6 — capsule-figure render] JS `Yc.Uib` L570 walks
+        // `A("Figures").children` in DOCUMENT ORDER and calls `Yc.Tib` (L573)
+        // for every `Type="Capsule"` figure, so there is ONE `zu` visual per
+        // capsule figure (84 for the merged fist body), drawn in that order.
+        // `Dk.update` (L836) strokes it with
+        //     stroke = this.Bc.stroke = Radius1*2      (half-stroke stroke/2)
+        // and margin-shifts the span endpoints along the edge:
+        //     x1 = sx.x + (ex.x-sx.x)*cGa          (cGa = capsule Margin1)
+        //     x2 = sx.x + (ex.x-sx.x)*(1-bGa)      (bGa = capsule Margin2)
+        // where `sx`/`ex` are the live endpoint node positions (`yu.dw()` =
+        // `sx.ma`). The old port deduped by edge into an `unordered_map`
+        // (nondeterministic draw order, 76 strips instead of 84), kept the max
+        // Radius1 per edge and ignored Margin1/Margin2 entirely.
         const sf2::scene::Model& model = f.fighter.model();
-        std::unordered_map<std::string, float> edge_max;
-        edge_max.reserve(model.capsules.size() * 2u);
-        for (const sf2::scene::Capsule& cap : model.capsules) {
-            auto it = edge_max.find(cap.edge);
-            if (it == edge_max.end() || cap.radius1 > it->second) {
-                edge_max[cap.edge] = cap.radius1;
-            }
-        }
+        const std::vector<float>& pos = f.fighter.positions();
         constexpr float kPi = 3.14159265358979323846f;
         constexpr int kDiscSegments = 12;
-        for (const auto& kv : edge_max) {
-            const std::string& edge_name = kv.first;
-            const float rad = kv.second;
+        for (const sf2::scene::Capsule& cap : model.capsules) {
             const sf2::scene::EdgeDef* edge = nullptr;
             for (const sf2::scene::EdgeDef& ed : model.edges) {
-                if (ed.name == edge_name) {
+                if (ed.name == cap.edge) {
                     edge = &ed;
                     break;
                 }
             }
             if (edge == nullptr) {
-                continue;
+                continue;  // JS `Tib`: `a.RAa(Edge)==null` -> no node is made
             }
             const int i1 = model.bone_by_name(edge->end1);
             const int i2 = model.bone_by_name(edge->end2);
             if (i1 < 0 || i2 < 0) {
                 continue;
             }
-            const std::vector<float>& pos = f.fighter.positions();
             const std::size_t u1 = static_cast<std::size_t>(i1) * 2;
             const std::size_t u2 = static_cast<std::size_t>(i2) * 2;
             if (u1 + 1 >= pos.size() || u2 + 1 >= pos.size()) {
                 continue;
             }
-            const float stroke = rad * 2.0f * camera.zoom;
+            // `Dk.update` L836: `c=b.x-a.x; d=b.y-a.y;`
+            //   `b=a.x+c*cGa; e=a.y+d*cGa; c=a.x+c*(1-bGa); a=a.y+d*(1-bGa)`
+            const float wx1 = pos[u1] + (pos[u2] - pos[u1]) * cap.margin1;
+            const float wy1 = pos[u1 + 1] + (pos[u2 + 1] - pos[u1 + 1]) * cap.margin1;
+            const float wx2 = pos[u1] + (pos[u2] - pos[u1]) * (1.0f - cap.margin2);
+            const float wy2 =
+                pos[u1 + 1] + (pos[u2 + 1] - pos[u1 + 1]) * (1.0f - cap.margin2);
+            const float stroke = cap.radius1 * 2.0f * camera.zoom;  // `stroke=Radius1*2`
             if (stroke <= 0.0f) {
                 continue;
             }
-            const float sx1 = camera.world_to_screen_x(pos[u1] - arena_half, 1.0f);
+            const float sx1 = camera.world_to_screen_x(wx1 - arena_half, 1.0f);
             const float sy1 = camera.world_to_screen_y(
-                pos[u1 + 1] + assets.fight_location.arena_height() * 0.5f -
+                wy1 + assets.fight_location.arena_height() * 0.5f -
                 assets.fight_location.arena_floor());
-            const float sx2 = camera.world_to_screen_x(pos[u2] - arena_half, 1.0f);
+            const float sx2 = camera.world_to_screen_x(wx2 - arena_half, 1.0f);
             const float sy2 = camera.world_to_screen_y(
-                pos[u2 + 1] + assets.fight_location.arena_height() * 0.5f -
+                wy2 + assets.fight_location.arena_height() * 0.5f -
                 assets.fight_location.arena_floor());
             float dx = sx2 - sx1;
             float dy = sy2 - sy1;

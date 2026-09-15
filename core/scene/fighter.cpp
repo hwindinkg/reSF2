@@ -73,11 +73,18 @@ void Fighter::set_model(const Model& model) {
     // bind into the first clip's frame (the JS solver space is continuous
     // from the very first frame). Without this the first frames leave the
     // cloth behind the posed skeleton.
+    // [F9] The continuity reference is NOT seeded here any more. Its old seed
+    // was `model_.bones[0].x` — the BIND x of a DIFFERENT node in a DIFFERENT
+    // space than the align anchor `translate_solver_state` now uses, so the
+    // first move translated the whole state by `align_anchor - bones[0]`
+    // (hundreds of units). The reference is now recorded on the first
+    // `translate_solver_state` call instead, i.e. the first move performs no
+    // translation (the align alone already re-expresses the clip space).
     if (!model_.bones.empty()) {
         sol_prev_com_x_ = model_.bones[0].x;
         sol_prev_com_y_ = model_.bones[0].y;
         sol_prev_com_z_ = model_.bones[0].z;
-        sol_have_prev_com_ = true;
+        sol_have_prev_com_ = false;
     }
     solver_init_ = true;
     // JS `Vc` ctor (L793-794): ma = mf = the bind position (`p8`). The
@@ -86,19 +93,29 @@ void Fighter::set_model(const Model& model) {
     align_x_ = align_y_ = align_z_ = 0.0f;
 
     // Build mirror swap pairs for _1 ↔ _2 (JS Te.Peb L560 → Ua.Oeb L692).
-    // When facing -1 the buffered clip frames are negated (vu.Neb L668) and
-    // left/right paired bones are swapped so the skeleton's left stays left.
+    // [F1/F3] JS `Dl.Hqb` (L580) -> `Dl.v5a` (L580): for EVERY node whose name
+    // ends in `_1`, find the node named `<stem>_2` and push `Ba(_1.id, _2.id)`
+    // — the ORDER of the two in `Va.all` is irrelevant. The old
+    // `if (j <= i) continue;` guard dropped every pair the skeleton stores
+    // `_2`-first (NShoulder, NElbow, NWrist, NHip, NKnee, NAnkle, NToe,
+    // NHeel, NToeS, NToeTip, NKnuckles, NFingertips, NChestS, NStomachS,
+    // NHeadS, MacroNode1..6, ...) — i.e. every body pair; only the
+    // `Weapon-Node1..4` pairs (stored `_1`-first) survived.
     mirror_pairs_.clear();
     for (std::size_t i = 0; i < model_.bones.size(); ++i) {
         const std::string& nm = model_.bones[i].name;
         if (nm.size() < 3) continue;
         if (nm.compare(nm.size() - 2, 2, "_1") != 0) continue;
-        std::string other = nm.substr(0, nm.size() - 2) + "_2";
-        int j = model_.bone_by_name(other);
+        const std::string other = nm.substr(0, nm.size() - 2) + "_2";
+        const int j = model_.bone_by_name(other);
         if (j < 0) continue;
-        if (static_cast<std::size_t>(j) <= i) continue;  // avoid double
         mirror_pairs_.emplace_back(static_cast<int>(i), j);
     }
+    // Per-move mirror state (set by `start_move_impl`): idle until a move runs.
+    mirror_swap_ = false;
+    mirror_x_ = false;
+    mirror_prepend_ = false;
+    pose_sampled_ = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,9 +371,10 @@ void Fighter::clear_intervals(int type, const std::string& name) {    if (curren
 // JS `wd.NS` (L506) -> `Te.Skb` (L550): start the move's clip.
 //   - conditions tested by the caller (try_select_move)
 //   - `Mq = a.qx` (FirstFrame) — native: move_frame = FirstFrame
-//   - facing `b` = ±1 toward the enemy (JS `b6a`, L603: sign of enemyX - meX)
-//   - `Peb()` (L560) auto-mirrors when the MirrorNode flips — the native
-//     pose mirror is the render `facing` (x flip in Fighter::sample).
+//   - facing `b` = ±1 toward the enemy (JS `b6a`, L603:
+//     `my.ma.x - enemy.ma.x >= 0 ? 1 : -1`)
+//   - `Peb()` (L560) mirrors the clip BUFFER when the facing is -1 and swaps
+//     the `_1`/`_2` pairs when the MirrorNode cross disagrees (Te.MYa, L566).
 //
 // Keys gating: the fighter's OWN context keeps `gm` true (only the AI
 // move-finder `de.V1` clears it: `f.gm=!1` L601). With gm=true the Keys
@@ -435,10 +453,77 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         current_clip_ = clip_lookup_(clip_name);
     }
 
-    // Facing toward the enemy (JS `b6a` L603: `enemy.x - my.x >= 0 ? 1 : -1`).
-    facing_ = (enemy_x_ - world_x_) >= 0.0f ? 1 : -1;
+    // Facing toward the enemy (JS `b6a` L603).
+    // [F2] JS `b6a(a){a=a.Fe(); let b=this.Ji.Fe(); return a==null||b==null?0:
+    // a.ma.x-b.ma.x>=0?1:-1}` — `a` = MY anchor node (`wd.Fe()`), `b` = the
+    // ENEMY's. The old port computed `(enemy_x_ - world_x_)`, i.e. the sign is
+    // INVERTED. Evidence (same scenario, both traces): the old native run
+    // `traces/native_pose_prefix.jsonl` f1 has Me at x=971.812 facing Enemy at
+    // x=692.938 and reports `fx=-1`, while the oracle
+    // `traces/oracle_pose.jsonl` f0 has Me at x=972.954 facing Enemy at x=690
+    // and reports `fx=+1` (`972.954-690 >= 0`).
+    facing_ = (world_x_ - enemy_x_) >= 0.0f ? 1 : -1;
+
+    // [F1] JS `Te.Peb` L560 -> `Te.Qeb` L550 -> `vu.Neb` L668: with facing -1
+    // the clip BUFFER x is negated about clip-space 0, from slot `jW?2:0` up.
+    // `jW` is true whenever `qrb` seeded the two prepend slots (`vu.Cbb` L667
+    // sets `this.jW=!0`), i.e. whenever the move does NOT carry
+    // `NoInterpolationFrames`; in the `Pka`-prepend case (`no_interp`,
+    // `jW==false`) the negation starts at slot 0 and covers the prepend too.
+    mirror_x_ = facing_ < 0;
+    mirror_prepend_ = mirror_x_ && move.no_interp;
+
+    // [F3] JS `Te.Peb` L560: `this.rw = Te.MYa(this.model, this.Ua, this.hd(),
+    // this.jc.Kh(2).data)` — decided ONCE here (the buffer has already been
+    // negated by `Qeb`) and then applied to the WHOLE buffer by `Ua.Oeb`
+    // (L692). Two JS gates the old port dropped:
+    //   - `!this.Ua.J2.Vj` — the move must carry a `<MirrorNode>`
+    //     (`Ou.Grb` L702: empty/absent -> `Vj=true` -> `MYa` never runs);
+    //   - `Ic(J2.qq.key)` and its `NE` partner must both resolve.
+    // `lwa(a,b,c,d)` (L566): `if(c==-1){a<->b}` first, then
+    // `(a.ma.x>=b.ma.x) != (d[a.id].x>=d[b.id].x)` — the POSED node order
+    // (`ma` = last frame's node x) against the MIRRORED slot-2 clip order.
+    mirror_swap_ = false;
+    if (!move.mirror_node.empty() && current_clip_ != nullptr &&
+        !current_clip_->frames.empty() &&
+        pos_.size() == model_.bones.size() * 2) {
+        const int ni_a = model_.bone_by_name(move.mirror_node);
+        // `Ou.Grb` L702: the partner name flips the TRAILING digit
+        // (`nf(a,len-1,1)` = a minus its last char, + ("2"|"1")) —
+        // `NHeel_1` -> `NHeel_2`.
+        std::string partner = move.mirror_node;
+        partner.back() = (partner.back() == '1') ? '2' : '1';
+        const int ni_b = model_.bone_by_name(partner);
+        if (ni_a >= 0 && ni_b >= 0) {
+            const std::size_t ref = static_cast<std::size_t>(std::max(
+                0, std::min(move.first_frame,
+                            static_cast<int>(current_clip_->frames.size()) - 1)));
+            const auto& rb = current_clip_->frames[ref].bones;
+            const std::size_t zclip = std::min(rb.size(), model_.bones.size());
+            int ia = ni_a, ib = ni_b;
+            if (facing_ == -1) std::swap(ia, ib);  // `lwa` swaps the operands
+            if (static_cast<std::size_t>(ia) < zclip &&
+                static_cast<std::size_t>(ib) < zclip) {
+                // `Neb` already ran -> the buffer x is mirrored. `ma` (the
+                // previous frame's node x) shares one placement offset, so the
+                // order comparison is done on `pos_` (world) exactly like JS.
+                const float neg = mirror_x_ ? -1.0f : 1.0f;
+                const bool have_pose = pose_sampled_;
+                const float pa = have_pose
+                                     ? pos_[static_cast<std::size_t>(ia) * 2]
+                                     : model_.bones[static_cast<std::size_t>(ia)].x;
+                const float pb = have_pose
+                                     ? pos_[static_cast<std::size_t>(ib) * 2]
+                                     : model_.bones[static_cast<std::size_t>(ib)].x;
+                const float ba = neg * rb[static_cast<std::size_t>(ia)].x;
+                const float bb = neg * rb[static_cast<std::size_t>(ib)].x;
+                mirror_swap_ = ((pa >= pb) != (ba >= bb));
+            }
+        }
+    }
+
     // JS `Te.Skb` (L551) runs `Gub()` (align, L557-559) right after loading
-    // the clip and before the first `ia()` sample.
+    // the clip (and after `Peb`) and before the first `ia()` sample.
     compute_align(move);
 
     // [FIX root motion — JS `Skb` L551-552] Seed the authored root-motion
@@ -479,13 +564,26 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     if (move.align.has_align) {
         const int pv = model_.bone_by_name(move.align.pivot_part);
         const int an = model_.bone_by_name(fighter_pivot_bone());
-        if (pv >= 0 && an >= 0 && solver_init_ &&
+        // [F1/F3] The `<Align><Pivot Part>` node the JS actually anchors on is
+        // the POST-`Peb` one (`os`, i.e. `NQ(UE)` when `rw`) — see compute_align.
+        const int aur = align_ref_u_ >= 0 ? align_ref_u_ : pv;
+        if (aur >= 0 && an >= 0 && solver_init_ &&
             sol_ma_.size() == model_.bones.size() * 3) {
-            const std::size_t pu = static_cast<std::size_t>(pv);
+            const std::size_t pu = static_cast<std::size_t>(aur);
             const std::size_t au = static_cast<std::size_t>(an);
+            // [F1] The previous WORLD x of the `<Align><Pivot Part>` node.
+            // `pos_[pu] - pos_[au] == px[pu] - px[au]` (the placement offset
+            // cancels) and `sol_ma_` is that same clip-space state, so the
+            // clip-space difference maps to world 1:1 — NO facing factor is
+            // involved any more (the mirror now lives INSIDE `px`). The old
+            // `* fsign` belonged to the pre-F1 placement
+            // `pos_ = (px[i]-px[anchor])*f + x`, where the world difference was
+            // `(px[pu]-px[au])*f`; keeping it after moving the mirror into the
+            // buffer negated the whole `(sol_ma_[pu]-sol_ma_[au])` term and
+            // threw the anchor 2x that offset off the spawn.
             prev_align_pivot_world_x_ =
-                (sol_ma_[pu * 3] - sol_ma_[au * 3]) * fsign + world_x_;
-            align_pivot_u_ = pv;
+                (sol_ma_[pu * 3] - sol_ma_[au * 3]) + world_x_;
+            align_pivot_u_ = aur;
             // JS `Gub` (L559) reads `d` from the RAW buffer (`jc.Kh(2)` =
             // clip[FirstFrame]) and `e` from the posed node (`currentNode.ma`)
             // BEFORE the first `eda`, i.e. exactly this `sol_ma_` state. So
@@ -506,21 +604,40 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // aligned exactly as `sample()` aligns it. With no clip the anchor is the
     // existing COM, i.e. the translation is a no-op.
     {
-        float com_x = sol_prev_com_x_;
-        float com_y = sol_prev_com_y_;
-        float com_z = sol_prev_com_z_;
+        float tx = sol_prev_com_x_;
+        float ty = sol_prev_com_y_;
+        float tz = sol_prev_com_z_;
         if (current_clip_ != nullptr && !current_clip_->frames.empty()) {
             const int f = std::max(0, std::min(
                 move.first_frame,
                 static_cast<int>(current_clip_->frames.size()) - 1));
             const auto& fb = current_clip_->frames[static_cast<std::size_t>(f)].bones;
             if (!fb.empty()) {
-                com_x = fb[0].x + align_x_;
-                com_y = fb[0].y + align_y_;
-                com_z = fb[0].z + align_z_;
+                // [F9] Anchor the translation on the SAME node the align uses
+                // (`<Align><Pivot Part>` — or its `Peb` mirror partner when
+                // `rw`; JS `Gub` L558 reads `this.jc.Kh(2).data[this.os]`),
+                // not bone 0. The old port used `fb[0]`: a different node's
+                // swing, so the state it froze into `build_prepend` disagreed
+                // with the node `compute_align` had just re-anchored on.
+                int anchor_u = align_ref_u_ >= 0
+                                   ? align_ref_u_
+                                   : model_.bone_by_name(move.align.pivot_part);
+                if (anchor_u < 0 ||
+                    static_cast<std::size_t>(anchor_u) >= fb.size()) {
+                    anchor_u = 0;  // no <Align> Part: the clip root
+                }
+                const float msign = mirror_x_ ? -1.0f : 1.0f;
+                // The align node's clip value goes through the same `Oeb`
+                // swap the sampling uses, so `tx` lands exactly on
+                // `sol_ma_[align_ref_u_]` (the align constant's fixed point).
+                const std::size_t src = static_cast<std::size_t>(
+                    mirror_swap_src(anchor_u, fb.size()));
+                tx = msign * fb[src].x + align_x_;
+                ty = fb[src].y + align_y_;
+                tz = fb[src].z + align_z_;
             }
         }
-        translate_solver_state(com_x, com_y, com_z);
+        translate_solver_state(tx, ty, tz);
     }
     build_prepend(move);
     sample_current();
@@ -745,6 +862,30 @@ void Fighter::clear_move() {
     render_offset_ = 0.0f;
     render_offset_valid_ = true;
     align_pivot_u_ = -1;
+    // JS `stop()`/`jc.reset()` drops the per-clip mirror decision too.
+    mirror_swap_ = false;
+    mirror_x_ = false;
+    mirror_prepend_ = false;
+}
+
+// JS `Dl.NQ` (L575): `for(d in this.Wf.b3){if(a==d.first)return d.second;
+// if(a==d.second)return d.first} return -1` — the mirror partner of bone `i`.
+int Fighter::mirror_partner(int i) const {
+    for (const auto& pr : mirror_pairs_) {
+        if (pr.first == i) return pr.second;
+        if (pr.second == i) return pr.first;
+    }
+    return -1;
+}
+
+// JS `Ua.Oeb` (L692): when `rw` is set, `b.Kh(l).data[a.first] <-> data[a.second]`
+// for every slot `l >= 2` and every pair with BOTH ids `< b.Kh(2).size`. So the
+// value sampled for bone `i` is the buffered value of its partner.
+int Fighter::mirror_swap_src(int i, std::size_t zclip) const {
+    if (!mirror_swap_) return i;
+    const int j = mirror_partner(i);
+    if (j < 0 || static_cast<std::size_t>(j) >= zclip) return i;
+    return j;
 }
 
 // [FIX root-motion align] JS `Te.Gub` (L557-559) + `Te.Gla` (L550):
@@ -787,13 +928,41 @@ void Fighter::compute_align(const MoveDef& move) {
     const auto& fb = current_clip_->frames[f0].bones;
     const int pivot_idx = model_.bone_by_name(al.pivot_part);  // UE / `this.os`
     const float f = facing_ < 0 ? -1.0f : 1.0f;
+    // [F1/F3] `Te.Skb` L551 order is `Mkb(); Mqb(); Peb(); Gub();`. `Mqb`
+    // (L563) sets `os = align.UE` / `currentNode = Va.all[os]`; `Peb` (L560)
+    // then — when `rw` — sets `os = model.NQ(os)` and `currentNode` to that
+    // partner. `Gub` therefore reads BOTH sides at the POST-SWAP node:
+    //   d (L558): `b = b.rw && a.Tia > -1 ? a.Tia : a.UE` (`Tia` = `NQ(UE)`),
+    //             then `this.jc.Kh(2).data[b]` — the already-swapped buffer;
+    //   e (L559): `c.L7a(c.rw&&a.bja>-1 ? a.bja : a.TS).ma` / `currentNode.ma`.
+    // The old port always used `<Align><Pivot Part>` itself, which is a
+    // DIFFERENT bone whenever `rw` (38 world units here for the fists stance)
+    // and left the anchor off the spawn.
+    int align_idx = pivot_idx;
+    if (mirror_swap_ && pivot_idx >= 0) {
+        const int j = mirror_partner(pivot_idx);
+        if (j >= 0) align_idx = j;
+    }
+    align_ref_u_ = align_idx;
+    const std::size_t zclip = std::min(fb.size(), model_.bones.size());
+    // `Oeb`-swapped buffer source for a bone index.
+    const auto buf_src = [&](int idx) -> std::size_t {
+        if (idx < 0) return 0;
+        const int s = mirror_swap_src(idx, zclip);
+        return static_cast<std::size_t>(s < 0 ? idx : s);
+    };
 
     // d = the Pivot object's position (JS `Gub` L558).
+    // [F1] `Skb` L551 runs `Peb();Gub();` — `Peb` -> `Qeb` (L550) ->
+    // `vu.Neb` (L668) has ALREADY negated the buffer x (from slot `jW?2:0`,
+    // and slot 2 — the `Kh(2)` this reads — is always covered), so `d` must be
+    // the MIRRORED clip x when facing -1. The old port read the raw `fb[u].x`.
     float dx = 0.0f, dy = 0.0f, dz = 0.0f;
     if (ve == 1 || ve == 4) {  // EObjectNodes / EObjectPivot: clip buffer node
-        if (pivot_idx >= 0 && static_cast<std::size_t>(pivot_idx) < fb.size()) {
-            const std::size_t u = static_cast<std::size_t>(pivot_idx);
-            dx = fb[u].x;
+        if (align_idx >= 0 && static_cast<std::size_t>(align_idx) < fb.size()) {
+            const std::size_t u = buf_src(align_idx);
+            const float msign = (facing_ < 0) ? -1.0f : 1.0f;
+            dx = msign * fb[u].x;  // `Neb` negates x ONLY (`data[b].x*=-1`)
             dy = fb[u].y;
             dz = fb[u].z;
         }
@@ -813,9 +982,16 @@ void Fighter::compute_align(const MoveDef& move) {
         oz = sol_ma_[u * 3 + 2];
     };
     if (jk == 1) {        // EObjectNodes: posed Position-Part bone
-        posed(model_.bone_by_name(al.pos_part), ex, ey, ez);
+        // JS L559: `c.L7a(c.rw&&a.bja>-1 ? a.bja : a.TS).ma` — the Position
+        // Part's own mirror partner when `rw` (`bja` = `NQ(TS)`).
+        int pi = model_.bone_by_name(al.pos_part);
+        if (mirror_swap_ && pi >= 0) {
+            const int j = mirror_partner(pi);
+            if (j >= 0) pi = j;
+        }
+        posed(pi, ex, ey, ez);
     } else if (jk == 4) { // EObjectPivot: posed pivot node (`currentNode.ma`)
-        posed(pivot_idx, ex, ey, ez);
+        posed(align_idx, ex, ey, ez);
     }
     // jk == 2 (EObjectAnimation) -> e = this.Fk = 0 at clip start.
     // jk == 3 (EObjectWall) needs the wall bounds — OPEN, e stays 0.
@@ -848,15 +1024,19 @@ void Fighter::compute_align(const MoveDef& move) {
 // move inherits that offset (the observed idle cf=2 weapon-bone error). This
 // applies the SAME delta `sample()` would apply on its first frame; that
 // frame's own translation is then a no-op (sol_prev_com_ already updated).
-void Fighter::translate_solver_state(float com_x, float com_y, float com_z) {
+// [F9] Anchored on the `<Align><Pivot Part>` node's clip position (see the
+// header doc) — NOT bone 0. Called ONCE per move start; the per-sample
+// re-application inside `sample()` is removed (it re-stepped the same delta
+// and used bone 0, desyncing it from `compute_align`).
+void Fighter::translate_solver_state(float px, float py, float pz) {
     const std::size_t n3 = model_.bones.size() * 3;
     if (!solver_init_ || sol_ma_.size() != n3 || sol_mf_.size() != n3) {
         return;
     }
     if (sol_have_prev_com_) {
-        const float dx = com_x - sol_prev_com_x_;
-        const float dy = com_y - sol_prev_com_y_;
-        const float dz = com_z - sol_prev_com_z_;
+        const float dx = px - sol_prev_com_x_;
+        const float dy = py - sol_prev_com_y_;
+        const float dz = pz - sol_prev_com_z_;
         if (dx != 0.0f || dy != 0.0f || dz != 0.0f) {
             for (std::size_t i = 0; i < n3; i += 3) {
                 sol_ma_[i] += dx;
@@ -868,9 +1048,9 @@ void Fighter::translate_solver_state(float com_x, float com_y, float com_z) {
             }
         }
     }
-    sol_prev_com_x_ = com_x;
-    sol_prev_com_y_ = com_y;
-    sol_prev_com_z_ = com_z;
+    sol_prev_com_x_ = px;
+    sol_prev_com_y_ = py;
+    sol_prev_com_z_ = pz;
     sol_have_prev_com_ = true;
 }
 
@@ -885,6 +1065,17 @@ void Fighter::build_prepend(const MoveDef& move) {
     }
     prepend_.assign(nclip * 2 * 3, 0.0f);
     const int ff = std::max(0, move.first_frame);
+    // [F1] JS `Te.Skb` L551 order is `Peb()` (mirror) THEN `Gub()` (align), so
+    // the prepend slots end up as `-(clip x) + align`. The two transforms
+    // differ per branch (`vu.shift`/`vu.Neb` both start at `this.jW?2:0`):
+    //   - `qrb` prepend (`!no_interp`, `jW==true`): neither the negation nor
+    //     the shift touches slots 0/1, so they are stored verbatim;
+    //   - `Pka` prepend (`no_interp`, `jW==false`): both run from slot 0, so
+    //     the prepend is negated (facing<0) and then shifted by the align.
+    const float msign = mirror_prepend_ ? -1.0f : 1.0f;
+    const float sh_x = move.no_interp ? align_x_ : 0.0f;
+    const float sh_y = move.no_interp ? align_y_ : 0.0f;
+    const float sh_z = move.no_interp ? align_z_ : 0.0f;
     if (move.no_interp) {
         // `vu.Pka` prepend: both slots = clip[min(len-1, FirstFrame+2)].
         const int f = std::min(static_cast<int>(current_clip_->frames.size()) - 1, ff + 2);
@@ -893,9 +1084,9 @@ void Fighter::build_prepend(const MoveDef& move) {
             const sf2::data::anim_keyframe k = i < fb.size() ? fb[i] : sf2::data::anim_keyframe{};
             for (int slot = 0; slot < 2; ++slot) {
                 const std::size_t u = (static_cast<std::size_t>(slot) * nclip + i) * 3;
-                prepend_[u] = k.x;
-                prepend_[u + 1] = k.y;
-                prepend_[u + 2] = k.z;
+                prepend_[u] = msign * k.x + sh_x;
+                prepend_[u + 1] = k.y + sh_y;
+                prepend_[u + 2] = k.z + sh_z;
             }
         }
         return;
@@ -946,13 +1137,6 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     if (n == 0) {
         return;
     }
-    // Snapshot this frame's input world-x as the NEXT frame's `ma`-analog
-    // for the MYa/lwa swap check (JS compares stale posed order vs the new
-    // buffer). Updated every sample so prev_x_ always lags one frame.
-    if (pos_.size() == n * 2) {
-        if (prev_x_.size() != n) prev_x_.assign(n, 0.0f);
-        for (std::size_t i = 0; i < n; ++i) prev_x_[i] = pos_[i * 2];
-    }
     const auto& bones = model_.bones;
     // Clip bone count (JS `Ua.ZW`). In the playback path the three Bezier
     // control points are play-buffer slots [playhead, playhead+1, playhead+2]
@@ -975,6 +1159,19 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     const float w1 = 2.0f * omt * t_bez;
     const float w2 = t_bez * t_bez;
     const float t_lin = static_cast<float>(subframe_) / static_cast<float>(sub_i);
+
+    // [F3] JS `Ua.Oeb` L692: when `rw` (`mirror_swap_`) is true the buffered
+    // clip's `_1`/`_2` pairs are swapped in EVERY slot from slot 2 up (the two
+    // prepend slots are never swapped — `let h=2,k=b.size`); pairs whose
+    // partner id is outside the slot-2 size are skipped
+    // (`a[c].first<e&&a[c].second<e`). Handled by `mirror_swap_src` in `ctl`.
+    // [F1] JS `Te.Qeb` L550 -> `vu.Neb` L668: with facing -1 the clip buffer x
+    // is negated around clip-space 0 (`data[b].x*=-1` — x only). Applied to
+    // the raw clip control points here; the prepend slots are already stored
+    // mirrored by `build_prepend` for the `jW==false` case (`Neb` starts at
+    // slot 0 there), so they are used verbatim. `sample_current()` always
+    // passes `facing_`, so this matches the `mirror_x_` used at move start.
+    const float mneg = (facing < 0) ? -1.0f : 1.0f;
 
     // Resolve one (control slot, bone) position in clip/model space. In the
     // playback path the buffer index is `playhead + rel`; slots 0,1 are the
@@ -1000,9 +1197,17 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         f = std::max(0, std::min(f, clip_len_i - 1));
         const auto& fb = clip.frames[static_cast<std::size_t>(f)].bones;
         if (i >= fb.size()) return false;
-        ox = fb[i].x;
-        oy = fb[i].y;
-        oz = fb[i].z;
+        const std::size_t src =
+            static_cast<std::size_t>(mirror_swap_src(static_cast<int>(i), nclip));
+        // [F1] The mirror (`Neb`) and the align (`Gla` -> `vu.shift`, L550/L667)
+        // are BUFFER transforms: `shift` adds the align to every slot from
+        // `jW?2:0` up, i.e. to these clip-frame slots (never to the `qrb`
+        // prepend). Applying them here — instead of to the interpolated `px`
+        // afterwards — is what the JS does: `wu`/`rp` blend buffer slots, so
+        // the prepend contribution must NOT carry the align.
+        ox = mneg * fb[src].x + align_x_;
+        oy = fb[src].y + align_y_;
+        oz = fb[src].z + align_z_;
         return true;
     };
 
@@ -1043,19 +1248,12 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         } else { px[i] = bones[i].x; py[i] = bones[i].y; pz[i] = bones[i].z; }
     }
 
-    // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550]
-    // `Gla` shifts the whole clip buffer (`jc.shift`) by the move's align
-    // offset once at clip start; every later `eda` (JS L556) reads the
-    // shifted buffer. Native equivalent: add the stored shift to every
-    // clip-driven bone before the solver. Only `fq`-sized (clip) bones are
-    // shifted in JS, so the cloth/macro bones keep their own state.
-    if (align_x_ != 0.0f || align_y_ != 0.0f || align_z_ != 0.0f) {
-        for (std::size_t i = 0; i < nclip; ++i) {
-            px[i] += align_x_;
-            py[i] += align_y_;
-            pz[i] += align_z_;
-        }
-    }
+    // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550 -> `vu.shift`
+    // L667] `Gla` shifts the clip BUFFER (`jc.shift`, slots `jW?2:0` and up)
+    // once at clip start; every later `eda` (JS L556) reads the shifted buffer.
+    // The shift is therefore applied to the buffer slots inside `ctl` above —
+    // NOT to the interpolated `px` here, which would also shift the `qrb`
+    // prepend's share of the blend (the JS prepend slots are never shifted).
 
     // [FIX render anchor — JS `Dl.Fe()` L575 + `Te.Gub`/`Te.Gla` L557-559/L550]
     // The JS anchor (`Dl.Fe()` = `Va.Yd` = NPivot) is a POSED node: every
@@ -1109,42 +1307,19 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     //    calls — one step per call matches the game's 60 Hz cadence.
     const std::size_t n3 = n * 3;
     if (solver_init_ && sol_ma_.size() == n3) {
-        // [FIX stretched mesh — continuous solver space] The JS `ma`/`mf`
-        // live in the fighter's ONE continuous space (skeleton and cloth
-        // share the world placement), so a clip switch never teleports the
-        // cloth. The native solver is authored in raw CLIP coordinates,
-        // which jump ~740 units between clips; translate the persisted
-        // state by the COM delta each sample so the cloth stays continuous
-        // with the (align-shifted) skeleton. This is the native-space
-        // equivalent of the JS continuity, NOT new JS behavior.
-        if (nclip > 0) {
-            const float com_x = px[0], com_y = py[0], com_z = pz[0];
-            if (sol_have_prev_com_) {
-                const float dx = com_x - sol_prev_com_x_;
-                const float dy = com_y - sol_prev_com_y_;
-                const float dz = com_z - sol_prev_com_z_;
-                if (dx != 0.0f || dy != 0.0f || dz != 0.0f) {
-                    for (std::size_t i = 0; i < n; ++i) {
-                        sol_ma_[i * 3] += dx;
-                        sol_ma_[i * 3 + 1] += dy;
-                        sol_ma_[i * 3 + 2] += dz;
-                        sol_mf_[i * 3] += dx;
-                        sol_mf_[i * 3 + 1] += dy;
-                        sol_mf_[i * 3 + 2] += dz;
-                    }
-                }
-            }
-            sol_prev_com_x_ = com_x;
-            sol_prev_com_y_ = com_y;
-            sol_prev_com_z_ = com_z;
-            sol_have_prev_com_ = true;
-        }
+        // [F9] The per-sample COM translation that used to live here is
+        // REMOVED. The JS solver space is inherently continuous, so the port's
+        // bridge only needs to move the persisted state ONCE per clip switch
+        // (`translate_solver_state`, called from `start_move_impl`, anchored on
+        // the `<Align><Pivot Part>` node). Re-applying the delta here every
+        // frame re-stepped the same translation on top of that and measured it
+        // from bone 0 — a node the align never uses. During playback the cloth
+        // follows the posed skeleton through the `<Edges>` relaxation (`jE`)
+        // exactly as in JS.
         // [FIX stretched mesh — JS-faithful] `Al.ia()` (L582) is exactly
         // `sk(); jE();` per frame. `eda` (JS L556) sets each clip bone's
         // mf = ma (the previous solved position) then ma = the (align-shifted)
-        // clip pose; the cloth bones keep their prior state. The native's raw
-        // clip-space state is kept continuous by the COM translation above
-        // (the JS solver space is inherently continuous).
+        // clip pose; the cloth bones keep their prior state.
         // (a) eda: clip bones mf = solved, ma = interpolated clip pose.
         for (std::size_t i = 0; i < nclip; ++i) {
             sol_mf_[i * 3] = sol_ma_[i * 3];
@@ -1325,58 +1500,27 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         }
     }
 
-    // JS mirror swap (Te.Peb L560 -> Te.MYa/lwa -> Ua.Oeb L692): when
-    // facing -1 the buffered clip frames have x negated (Qeb/Neb) and
-    // paired _1/_2 bones are swapped ONLY when the stale world-x order
-    // disagrees with the new buffer order (`lwa`: with facing -1 the
-    // comparison operands are swapped, i.e. fire iff
-    // world-order(a,b) != buffer-order(a,b)). Unconditional swapping
-    // flips already-correct symmetric poses, so the port keeps the
-    // previous sample's world x (`ma` analog) for the check.
-    if (facing < 0 && !mirror_pairs_.empty()) {
-        const bool have_prev = prev_x_.size() == n;
-        for (auto& pr : mirror_pairs_) {
-            int a = pr.first, b = pr.second;
-            if (a < 0 || b < 0) continue;
-            std::size_t ua = static_cast<std::size_t>(a);
-            std::size_t ub = static_cast<std::size_t>(b);
-            if (ua >= n || ub >= n) continue;
-            if (ua >= nclip || ub >= nclip) continue;  // order check needs buffer pos
-            bool disagree = true;
-            if (have_prev) {
-                const bool world_ge = prev_x_[ua] >= prev_x_[ub];
-                const bool buf_ge = px[ua] >= px[ub];
-                disagree = (world_ge != buf_ge);
-            }
-            if (disagree) {
-                std::swap(px[ua], px[ub]);
-                std::swap(py[ua], py[ub]);
-                std::swap(pz[ua], pz[ub]);
-            }
-        }
-    }
+    // JS mirror: `Te.Qeb`/`vu.Neb` (L550/L668) negate the clip BUFFER x and
+    // `Ua.Oeb` (L692) swaps the `_1`/`_2` pairs — both are applied to the
+    // buffered clip above (`ctl`), decided ONCE at clip start in
+    // `start_move_impl` (`mirror_swap_`). The old per-frame post-solve swap
+    // here (re-derived from `prev_x_`) is removed.
 
-    // 3. World placement: the fighter's (x, y) anchors the model's PivotNode
-    //    bone at (x, y) — the JS anchor is `Dl.Ic(v.wya)`: `Dl.Trb` (L577)
-    //    sets `Va.Yd` to the PivotNode and `Dl.oL` (L577) offsets every bone
-    //    so that pivot's `ma` lands on the placement point.
+    // [F1] World placement: the fighter's (x, y) anchors the model's PivotNode
+    //    bone at (x, y) — JS `Dl.oL` (L577) offsets every bone so the anchor's
+    //    `ma` lands on the placement point (`pos = ma - ma[anchor] + anchor`).
+    //    The facing mirror is NOT applied here: JS mirrors the CLIP BUFFER
+    //    (`Te.Qeb` L550 -> `vu.Neb` L668, applied in `ctl` above), so the
+    //    placement is a plain offset. The old `(px[i]-px[anchor_u])*f` applied
+    //    the mirror a SECOND time on top of the buffer negation.
     //    `internal_settings.xml` ships `<PivotNode Name="NPivot"/>` (parse
-    //    L1155, default "NPivot"). The old native anchored
-    //    `bone_by_name("COM")`, but COM is NOT the pivot (bag COM == Node12 is
-    //    226 units above NPivot; player ~17) -> wrong vertical anchor
-    //    (Wave U finding). Facing mirrors X (Te.Qeb).
-    //    `anchor`/`anchor_u` were resolved above (shared with the anchor
-    //    drive, which rewrites `x` to the JS-posed NPivot world x).
+    //    L1155, default "NPivot"); `anchor`/`anchor_u` were resolved above
+    //    (shared with the anchor drive, which rewrites `x` to the JS-posed
+    //    NPivot world x).
     const float anchor_y = py[anchor_u];
     const float dy = y - anchor_y;
-    const float f = facing < 0 ? -1.0f : 1.0f;
     for (std::size_t i = 0; i < n; ++i) {
-        // [FIX Phase 4a] The facing mirror (JS `Te.Qeb` L550: `jc.Neb()`
-        // flips the CLIP BUFFER x) applies to the LOCAL pose only: the
-        // clip x is offset by the anchor, mirrored, then the world x is added.
-        // The old `(px+dx)*f` (or `px*f+dx`) misplaced the fighter when
-        // facing -1 (the world x was mirrored off-screen / doubled).
-        pos_[i * 2] = (px[i] - px[anchor_u]) * f + x;
+        pos_[i * 2] = px[i] - px[anchor_u] + x;
         pos_[i * 2 + 1] = py[i] + dy;
         // Knockback ride: the impulse-split offsets displace the hit bones
         // on top of the clip pose (JS endpoint-body moves persist into the
@@ -1389,6 +1533,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // JS `dv.ia` (L840) drops z when it skins the mesh (`Xg[a++] = d.x;
     // Xg[a++] = d.y`), so no per-bone depth is retained for drawing — the
     // triangles draw in XML document order (see build_vertices).
+    pose_sampled_ = true;  // `pos_` now holds a real frame (the `ma` analog)
 }
 
 std::size_t Fighter::build_vertices(std::vector<float>& out) const {

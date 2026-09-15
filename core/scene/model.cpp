@@ -52,12 +52,37 @@ Model model_parse(const std::uint8_t* xml, std::size_t size) {
     if (const pugi::xml_node nodes = scene.child("Nodes")) {
         for (const pugi::xml_node node : nodes.children()) {
             Bone b = parse_bone(node);
-            if (model.bone_index.count(b.name) != 0) {
-                continue;  // first definition wins (merged hierarchy)
-            }
+            // [F5] JS `Yc.Ijb` L571-572 (L290482): every `<Nodes>` child is
+            // pushed into the body list (`a.Va.all.push(d)`) — duplicates
+            // included — while only the NAME -> bone map is first-wins
+            // (`X.Xa(a.Va.Xca,d.name)||a.Va.Xca.set(d.name,d)`). Skipping the
+            // duplicate here made `bones[]` a SUBSEQUENCE of `Va.all`, so as
+            // soon as any part redefined a name (the weapon / armor / helm
+            // parts redefine `Weapon-Node1..4_1/_2`) every clip bone index
+            // past that point landed on the wrong bone.
             const int idx = static_cast<int>(model.bones.size());
-            model.bone_index[b.name] = idx;
+            if (model.bone_index.count(b.name) == 0) {
+                model.bone_index[b.name] = idx;  // first definition wins
+            }
             model.bones.push_back(b);
+
+            // [F4] JS `Yc.Ijb` L571: for the `Type="CenterOfMass"` node the
+            // per-part child list is reset and filled from
+            // `NodesCount`/`ChildNodeN` (`h&&(c.length=0, Yc.FIa(c,b,!1))`).
+            // `Yc.Mia` L573 then hands it to `Dl.rWa` (L580), which resolves
+            // every name into `Du.bca` — the ONLY list `Dl.L0()` (L575)
+            // averages (`Dl.v6` L577 -> `Eu.ma`, the camera COM).
+            if (std::strcmp(node.attribute("Type").value(), "CenterOfMass") == 0) {
+                model.com_child_names.clear();
+                const int count = sf2::data::xml_attr_int(node, "NodesCount", 0);
+                for (int c = 1; c <= count; ++c) {
+                    const std::string child =
+                        node.attribute(("ChildNode" + std::to_string(c)).c_str()).value();
+                    if (!child.empty()) {
+                        model.com_child_names.push_back(child);
+                    }
+                }
+            }
 
             // Capture the MacroNode child list (Yc.FIa: NodesCount,
             // ChildNodeN + LCCN weights).
@@ -78,6 +103,12 @@ Model model_parse(const std::uint8_t* xml, std::size_t size) {
                 model.macro_children[b.name] = std::move(mc);
             }
         }
+    }
+    // [F4] Resolve the COM child names (JS `Dl.rWa` L580:
+    // `this.Va.bca.push(this.Ic(name))`, first-wins name lookup).
+    for (const std::string& n : model.com_child_names) {
+        const int ci = model.bone_by_name(n);
+        if (ci >= 0) model.com_children.push_back(ci);
     }
 
     // <Figures Type="Triangle"> — mesh. Node1/2/3 are bone names; the bones
@@ -164,13 +195,16 @@ Model model_parse(const std::uint8_t* xml, std::size_t size) {
 Model build_fighter_model(const std::vector<Model>& parts) {
     Model merged;
     for (const Model& part : parts) {
-        // Append part bones (first definition wins on name conflict).
+        // [F5] JS `Yc.Ijb` L571-572: append EVERY bone of every part (dupes
+        // included) so `bones[]` is exactly the JS `Va.all` order that the
+        // clip bone indices address; only the name -> bone map is first-wins
+        // (the skeleton's node, so triangle/capsule references keep resolving
+        // to the skeleton bone).
         for (const Bone& bone : part.bones) {
-            if (merged.bone_index.count(bone.name) != 0) {
-                continue;  // skeleton bones defined first win
-            }
             const int idx = static_cast<int>(merged.bones.size());
-            merged.bone_index[bone.name] = idx;
+            if (merged.bone_index.count(bone.name) == 0) {
+                merged.bone_index[bone.name] = idx;  // skeleton first wins
+            }
             merged.bones.push_back(bone);
         }
         for (const Tri& tri : part.tris) {
@@ -188,10 +222,21 @@ Model build_fighter_model(const std::vector<Model>& parts) {
                 merged.macro_children[kv.first] = kv.second;
             }
         }
+        // [F4] The COM child list (only the skeleton part carries one; JS
+        // `Dl.rWa` L580 accumulates across parts into `Du.bca`).
+        if (merged.com_child_names.empty() && !part.com_child_names.empty()) {
+            merged.com_child_names = part.com_child_names;
+        }
         merged.capsules.insert(merged.capsules.end(), part.capsules.begin(),
                                part.capsules.end());
         merged.edges.insert(merged.edges.end(), part.edges.begin(),
                             part.edges.end());
+    }
+    // [F4] Resolve the COM children against the MERGED hierarchy (JS `Dl.rWa`
+    // L580 uses `Dl.Ic`, the first-wins merged map).
+    for (const std::string& n : merged.com_child_names) {
+        const int ci = merged.bone_by_name(n);
+        if (ci >= 0) merged.com_children.push_back(ci);
     }
     return merged;
 }

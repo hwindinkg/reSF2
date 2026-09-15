@@ -1,5 +1,6 @@
 #include "anim_archive.hpp"
 
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
@@ -98,9 +99,27 @@ anim_clip anim_clip_parse(const std::string& name, const std::uint8_t* data,
             }
             clip.frames.push_back(std::move(frame));
         }
-    } else if (clip.version == 0) {
-        // u32 frame count; per frame: 1 skip byte + u32 bone count +
-        // 3 x float32 LE (x, y, z), position = (x, -y, z).
+    } else {
+        // [F7] JS `jc.Vlb` L694-695: the `else` branch of `if(a.ea()==1)`,
+        // i.e. EVERY version != 1 uses this layout — L695:
+        //   `else for(b=a.ti(), c=0,d=b; c<d;)
+        //      for(a.ea(), e=a.ti(), f=m.l(), this.Kk[c++]=f, g=0; g<e;)
+        //        f[g++]=new H(a.RK(), -a.RK(), a.RK(), 1)`
+        // `us.ti()` (L2331) reads FOUR bytes (`a|b<<8|c<<16|d<<24`) = u32, and
+        // `us.RK()` = `jf.xab(this.ti())` (L2330/L2334) = `setInt32(0,v,true)`
+        // then `getFloat32(0,true)` = IEEE-754 float32 LE. `us.ea()` (L2332) is
+        // the single skip byte. So: u32 frame count, then per frame 1 skip byte
+        // + u32 bone count + 3 x f32 LE (x, -y, z). (There is no u16/u16
+        // "scaled" variant in the JS — `ti()` is 32-bit and `RK()` is a float.)
+        // The old code guarded this on `version == 0` and threw for anything
+        // else; the JS has no such guard, so a clip with any other version
+        // byte would have thrown instead of parsing.
+        if (clip.version != 0) {
+            std::fprintf(stderr,
+                         "anim_archive: '%s' version %d != 1 -> float32 layout "
+                         "(JS `Vlb` else-branch)\n",
+                         name.c_str(), clip.version);
+        }
         const std::uint32_t frame_count = r.u32le();
         clip.frames.reserve(frame_count);
         for (std::uint32_t f = 0; f < frame_count; ++f) {
@@ -117,9 +136,6 @@ anim_clip anim_clip_parse(const std::string& name, const std::uint8_t* data,
             }
             clip.frames.push_back(std::move(frame));
         }
-    } else {
-        throw std::runtime_error("anim_archive: unknown animation version " +
-                                 std::to_string(clip.version) + " in '" + name + "'");
     }
     return clip;
 }

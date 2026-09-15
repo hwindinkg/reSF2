@@ -954,10 +954,24 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
         {
             const pugi::xml_node mv = layer_node.child("ModelsViewer");
             if (mv != nullptr) {
-                player_spawn_x_ = sf2::data::xml_attr_float(mv, "PlayerPositionX", 0.0f);
-                player_spawn_y_ = sf2::data::xml_attr_float(mv, "PlayerPositionY", 0.0f);
-                enemy_spawn_x_ = sf2::data::xml_attr_float(mv, "EnemyPositionX", 0.0f);
-                enemy_spawn_y_ = sf2::data::xml_attr_float(mv, "EnemyPositionY", 0.0f);
+                // [spawn-mapping] JS `Bf.zjb` L476 reads `Yia.x = PlayerPositionX`
+                // and `B_.x = EnemyPositionX`, but `ca` L381 assigns them the
+                // OTHER way round:
+                //   `a=this.kc.position; b=this.location.Yia; a.x=b.x; ...`
+                //   `a=this.Zb.position; b=this.location.B_;  a.x=b.x; ...`
+                // `kc` is the ENEMY warrior (`o1a` L403 `this.yb=this.Gf(this.kc)`
+                // -> trace id "Enemy") and `Zb` the PLAYER (`this.pb=this.Gf(this.Zb)`
+                // -> "Me"), so the XML's `PlayerPosition*` is the ENEMY's spawn and
+                // `EnemyPosition*` the PLAYER's. Confirmed against the oracle: the
+                // moon `ModelsViewer` has PlayerPositionX=868/EnemyPositionX=1068
+                // and the oracle trace has pb/Me root.x=1068, yb/Enemy root.x=868
+                // (reference/traces/_residual_pins.md §2). The old port kept the
+                // attribute names, which put the player on the wrong side — and so
+                // inverted every fighter's facing/mirror state.
+                player_spawn_x_ = sf2::data::xml_attr_float(mv, "EnemyPositionX", 0.0f);
+                player_spawn_y_ = sf2::data::xml_attr_float(mv, "EnemyPositionY", 0.0f);
+                enemy_spawn_x_ = sf2::data::xml_attr_float(mv, "PlayerPositionX", 0.0f);
+                enemy_spawn_y_ = sf2::data::xml_attr_float(mv, "PlayerPositionY", 0.0f);
                 has_spawns_ = true;
             }
         }

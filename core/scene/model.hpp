@@ -102,6 +102,19 @@ struct Model {
     std::vector<Bone> bones;  // document order — clip bone i = bones[i]
     std::vector<Tri> tris;    // unresolved names (part models)
     std::vector<TriResolved> resolved_tris;  // merged: indices into `bones`
+    // [F4] The `Type="CenterOfMass"` bone's `<NodesCount>/<ChildNodeN>` list
+    // (JS `Yc.Ijb` L571: `h&&(c.length=0, Yc.FIa(c,b,!1))` fills the per-part
+    // `Ba` list; `Yc.Mia` then hands it to `Dl.rWa` which resolves every name
+    // and pushes the NODE into `Du.bca`). `Dl.L0()` (L575) returns `bca` when
+    // non-empty, so the COM average `Dl.v6` (L577) runs over THIS list only —
+    // never over all bones. `com_child_names` is the raw XML order (kept so
+    // the merge can re-resolve against the merged hierarchy); `com_children`
+    // is the resolved bone-index form used by `Fighter::com_axis`.
+    std::vector<std::string> com_child_names;
+    std::vector<int> com_children;
+    // Capsule FIGURES (`<Figures><Capsule_* Type="Capsule">`), document
+    // order — JS `Yc.Uib` L570 walks `Figures.children` in order and makes
+    // one `zu` visual per Capsule, so the draw order is document order.
     std::vector<Capsule> capsules;
     // <Edges> collision capsules (fight-physics hit shapes).
     std::vector<EdgeDef> edges;

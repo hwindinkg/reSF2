@@ -331,18 +331,25 @@ chain.** (The `Rank` attribute and `GroupsOfSelection` are not used for posing.)
   `new ih(b)` (`ih` L589, the sub-fighter) — every fight fighter is actually an
   `ih` sharing the "main" fighter's body via `wI`/`Rlb` (L514-515) →
   `this.init()` → `Erb(parameters.lx)`.
-- `parameters.lx` (model list) is filled by `xc.cM()` (L809-810) from equipment:
-  - `Of` (Weapon slot, `I.Px="Skeleton"` per L2473! — the enum is
-    `I.Px="Skeleton"; I.vg="Weapon"; I.Ai="Armor"; I.Bi="Helm"; I.Vh="Ranged"; I.Cf="Magic"`):
-    actually `Of` = **melee weapon**; `Hd` = **weapon in hand** (`I.vg="Weapon"`).
-  - `hg` (Helm) → `Lg` (Armor) → `Of`/`Hd` → `Kv` extras.
+- `parameters.lx` (model list) is filled by `xc.cM()` (L809-810) from equipment,
+  in this exact order: **Skeleton → Weapon → Armor → Helm** → `Kv` extras.
+  The slot fields are `Of`=Skeleton, `Hd`=Weapon, `hg`=**Armor**, `Lg`=**Helm**
+  (`Fd` L808: `case I.Ai: return this.hg; case I.Bi: return this.Lg;
+  case I.Px: return this.Of; case I.vg: return this.Hd`), and the enum
+  constants are `I.Px="Skeleton"; I.vg="Weapon"; I.Ai="Armor"; I.Bi="Helm";
+  I.Vh="Ranged"; I.Cf="Magic"` (L2473). (`cM()` L809-810 pushes `Of`, `Hd`,
+  `hg`, `Lg` — so Armor comes third and Helm fourth; the earlier note here had
+  `hg`/`Lg` swapped and ordered before the weapon.)
   - `cM()` pushes `this.LQ(item.model)` — the `Model` attribute string (the
     `mdl_*` name) for each equipped item that has one.
 - `Yc.load` parses all these models into ONE `Dl` — **single shared bone
-  hierarchy** (bones are appended in list order; duplicate names in later models
-  are skipped by the `Xca` map guard `X.Xa(...)||set` L572, so skeleton bones
-  defined first win). Mesh triangles and capsules from every part merge into the
-  single `MW`/`Jba` render nodes.
+  hierarchy**. `Yc.Ijb` (L571-572) appends EVERY node of EVERY part to
+  `Va.all` (duplicates included), while only the name→bone map `Xca` is
+  first-wins (`X.Xa(a.Va.Xca,d.name)||a.Va.Xca.set(d.name,d)` L572) — so
+  `Va.all` order (and therefore the animation-clip bone indexing) is the raw
+  concatenation, and name lookups (mesh triangle / capsule references) always
+  resolve to the skeleton bone defined first. Mesh triangles and capsules from
+  every part merge into the single `MW`/`Jba` render nodes.
 - Model→part mapping (from items.xml `Model` attributes + observed names):
   - Skeleton: not an item; `mdl_skeleton` is always in `lx` (it is the base
     rig; armor/body models reference its bones).

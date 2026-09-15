@@ -357,6 +357,11 @@ private:
     bool render_offset_valid_ = true;
     float prev_align_pivot_world_x_ = 0.0f;  // previous frame's world x of the Part
     int align_pivot_u_ = -1;                 // `<Align><Pivot Part>` bone index (`UE`)
+    // [F1/F3] The bone the align actually reads after `Peb`'s `rw` node swap
+    // (`Te.Peb` L560 `this.os = model.NQ(this.os)` -> `Gub` L558/559 read `os`,
+    // i.e. the mirror PARTNER of `<Align><Pivot Part>` when `rw`). Used by the
+    // solver-state translation anchor too (F9).
+    int align_ref_u_ = -1;
     // [FIX root motion — JS `Te.j8.x` (L546, `eda` L556)] The authored
     // `<Velocity>` offset accumulated per frame (`Pab`/`Qab` L564:
     // `j8 += DM*sG`). JS adds `j8` to every posed bone, i.e. to the anchor.
@@ -379,13 +384,31 @@ private:
     // step per frame (`Al.ia()` L582 = `sk(); jE();`); there is no warmup
     // and no cross-clip COM-delta translation of the solver state.
     // (The invented warmup 600 + COM-delta block were removed.)
-    // Paired bones _1 ↔ _2 for mirror swap (JS Te.Peb L560 → Ua.Oeb L692). Built in set_model.
+    // Paired bones _1 ↔ _2 (JS `Dl.Hqb` L580 -> `Dl.v5a` L580, the `Wf.b3`
+    // list `Ua.Oeb` L692 consumes). Built in `set_model` from the merged
+    // `Va.all` order, exactly like `v5a`.
     std::vector<std::pair<int, int>> mirror_pairs_;
-    // Previous sample's world-space x per bone (x only, parallel to `pos_`).
-    // JS `Te.MYa`/`lwa` compares the STALE posed order (`ma`, previous frame)
-    // against the new buffer order to decide the _1/_2 swap — the swap fires
-    // only on disagreement, not on every facing<0 frame.
-    std::vector<float> prev_x_;
+    // [F3] JS `Te.Peb` L560 (`this.rw = Te.MYa(...)`): the mirror swap is
+    // decided ONCE at clip start and then applied to the WHOLE buffered clip
+    // (`Ua.Oeb` L692 swaps every `_1`/`_2` pair for every buffer slot >= 2; the
+    // two `qrb` prepend slots are never swapped). The old port re-derived it
+    // per frame from `prev_x_` vs the new `px` order and dropped both JS gates
+    // (`!Ua.J2.Vj` = the move carries no `<MirrorNode>`, and the `Ic`+`NE`
+    // pair resolving). `mirror_swap_` is set in `start_move_impl`.
+    bool mirror_swap_ = false;
+    // [F1] JS `Te.Qeb` L550 -> `vu.Neb` L668: with `Te.FX == -1` (facing -1)
+    // the whole clip BUFFER x is negated around clip-space 0, from slot
+    // `jW ? 2 : 0` up. `jW` is true whenever `qrb` seeded the two prepend
+    // slots (`vu.Cbb` L667 sets `this.jW = !0`), i.e. whenever the move does
+    // NOT carry `NoInterpolationFrames`; in the `Pka`-prepend case
+    // (`no_interp`, `jW == false`) the negation starts at slot 0 and the two
+    // prepend slots are negated too.
+    bool mirror_x_ = false;        // facing_ < 0 for the current move
+    bool mirror_prepend_ = false;  // mirror_x_ && current_move_->no_interp
+    // True once `sample()` has written a real frame into `pos_`. JS `ma` always
+    // holds a pose (the bind pose before the first `eda`), so the `lwa` order
+    // test in `start_move_impl` falls back to the BIND x until then.
+    bool pose_sampled_ = false;
     int facing_ = 1;                        // +1 (JS `Te.FX` / `hd()`)
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (pivot world pos)
     float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
@@ -405,33 +428,61 @@ private:
 
     void rebuild_holds();
     void compute_align(const MoveDef& move);
-    // [FIX prepend-lag] Translate the persisted ragdoll solver state
+    // JS `Dl.NQ` (L575) over the `Wf.b3` pair list (`Dl.v5a` L580): the mirror
+    // partner bone of `i` (`_1` <-> `_2`), or -1 when `i` is unpaired.
+    int mirror_partner(int i) const;
+    // JS `Ua.Oeb` (L692): when `rw` (`Te.Peb` L560) is set the buffered clip's
+    // `_1`/`_2` pairs are swapped for every slot >= 2, so sampling bone `i`
+    // reads the buffer value of its partner. `zclip` guards the JS
+    // `a[c].first<e&&a[c].second<e` test (`e` = `Kh(2).size`).
+    int mirror_swap_src(int i, std::size_t zclip) const;
+    // [FIX prepend-lag / F9] Translate the persisted ragdoll solver state
     // (`sol_ma_`/`sol_mf_`) from the previous clip's raw coordinate space into
-    // the new clip's space, anchored at the new clip's root `(com_x,com_y,com_z)`.
+    // the new clip's space, anchored at the new clip's `<Align><Pivot Part>`
+    // node position `(px,py,pz)` (NOT bone 0 — the align's own reference node
+    // is the one whose world continuity `Te.Gub` L558-559 preserves).
     // JS `Te.Skb` L550 builds the play-buffer prepend (`Te.qrb` L282683) from
     // the CURRENT continuous `ma`/`mf` BEFORE the first `eda` sample, so the
     // native prepend must be frozen in the NEW clip space too (otherwise the
     // two prepended slots sit a whole cross-clip COM delta away, and every
-    // move start snaps). Called from `start_move_impl` just before
-    // `build_prepend`.
-    void translate_solver_state(float com_x, float com_y, float com_z);
+    // move start snaps). This is the port's bridge (the JS has no counterpart);
+    // it runs ONCE per move start — the per-sample re-application that used to
+    // follow inside `sample()` re-stepped the same delta every frame (and used
+    // bone 0), which is removed.
+    void translate_solver_state(float px, float py, float pz);
     void build_prepend(const MoveDef& move);
     void sample_current();
 
-    // Mass-weighted centroid of the posed body (JS `Dl.v6` L577: `Eu.ma`).
-    // `axis` 0 = x, 1 = y. Falls back to the render anchor when `pos_` is not
-    // sampled yet or no bone carries mass.
+    // [F4] Mass-weighted centroid of the posed body over the COM child list
+    // (JS `Dl.v6` L577: `Eu.ma`). `axis` 0 = x, 1 = y. Falls back to the
+    // render anchor when `pos_` is not sampled yet or no listed bone carries
+    // mass.
     float com_axis(int axis) const {
         const std::size_t n = model_.bones.size();
         if (pos_.size() < n * 2) {
             return axis == 0 ? world_x_ : world_y_;
         }
-        float acc = 0.0f, wsum = 0.0f;
-        for (std::size_t i = 0; i < n; ++i) {
-            const float w = model_.bones[i].mass;
-            if (w <= 0.0f) continue;
-            acc += pos_[i * 2 + static_cast<std::size_t>(axis)] * w;
+        // [F4] JS `Dl.v6` L577 averages `L0()`: `Va.bca` — the resolved
+        // `<CenterOfMass NodesCount ChildNodeN>` node list (42 nodes for
+        // `mdl_skeleton`) — and only falls back to `Va.all` when that list is
+        // empty (`L0()` L575: `this.Va.bca.length>0?this.Va.bca:this.Va.all`).
+        // `VR` = `Σ weight` (`Dl.Esb` L576), `weight` = the node's `Mass`.
+        // The old code averaged ALL bones unconditionally, i.e. it used
+        // neither list.
+        auto accum = [&](int idx, float& acc, float& wsum) {
+            if (idx < 0 || static_cast<std::size_t>(idx) >= n) return;
+            const float w = model_.bones[static_cast<std::size_t>(idx)].mass;
+            if (w <= 0.0f) return;
+            acc += pos_[static_cast<std::size_t>(idx) * 2 +
+                        static_cast<std::size_t>(axis)] *
+                   w;
             wsum += w;
+        };
+        float acc = 0.0f, wsum = 0.0f;
+        if (!model_.com_children.empty()) {
+            for (const int idx : model_.com_children) accum(idx, acc, wsum);
+        } else {
+            for (std::size_t i = 0; i < n; ++i) accum(static_cast<int>(i), acc, wsum);
         }
         if (wsum <= 0.0f) {
             return axis == 0 ? world_x_ : world_y_;
