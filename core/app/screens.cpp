@@ -65,6 +65,25 @@ namespace {
 constexpr float kViewW = 1280.0f;
 constexpr float kViewH = 720.0f;
 
+// --- D13/D15 Settings dialog state -----------------------------------------
+// The Settings surface is `un extends od` (JS L1916-1930), built by `Wb.Xob`
+// case 310 (`new un`, L926) after `Xc.Shb()` = `Wb.openDialog(310,null)` (L931).
+// `Wb` owns ONE top dialog appended to the ACTIVE screen (L927), so the `za`
+// nav button #5 (`Vfb` L1981) opens it OVER the current screen — it does not
+// navigate (`ma.Jg().jI(11)` was invented). `g_settings_lang` is `un.$u` (the
+// DISPLAYED language, L1928 `this.$u=G.Rq()`); RESTART is revealed only once
+// it differs from the saved `G.Rq()` (`t9`, L1931).
+bool g_settings_dialog_open = false;
+bool g_settings_restart_visible = false;
+std::string g_settings_lang;  // `un.$u`
+int g_settings_hover = -1;    // flat-fallback hover (`Kb`/`Km`/rows)
+int g_settings_age = 0;       // frames since open (press debounce)
+bool g_settings_music_off = false;  // `un.W$`/`lb.Lz()` state (shared)
+// JS `iv` (L2477): the language cycle order `un.rHa` case 4 walks (L1931).
+const char* const kSettingsLangs[] = {"en", "de", "it", "fr", "pt",
+                                      "ru", "es", "tr", "ja", "ko"};
+constexpr int kSettingsLangCount = 10;
+
 // --- Sensei dialog modal (quest engine He records) -------------------------
 // The engine queues structured dialogs on fire; Dojo/Map show the head as a
 // tap-to-advance modal and gate their own buttons behind it (dialog modal
@@ -96,6 +115,77 @@ int quest_dialog_button_hit_index(App& app, const EngineDialog& d, double x, dou
 enum class DialogKind { kNone, kOd280, kUj290, kVe340, kVn370, kIbBar };
 DialogKind dialog_kind(const std::string& type);
 void dialog_capture_closing(App& app, const EngineDialog& d);
+// D13: the Settings `un extends od` dialog (JS L1916-1930, opened by
+// `Xc.Shb()` -> `Wb.openDialog(310,null)` L931/L926) is `Wb`'s top dialog over
+// the CURRENT screen. Returns true while it is open (the caller skips its own
+// input, exactly like the quest modal). Defined with the settings drawer below.
+bool settings_dialog_consume(App& app);
+void draw_settings_dialog(App& app, sf2::render::Renderer& ren);
+
+// --- D8 `ReadTime` auto-dismiss (`Ib.SK`, JS L1905/L1908) -------------------
+// `Ib.aa(a)` L1905: `this.SK-=a; this.SK<=0&&(this.qma=!0)`, then `OZa` L1908
+// (`this.qma&&this.scroll.uJ&&this.Dcb()&&this.y4(!1)`) collapses the bar. The
+// budget is `He.SK` (L1043 `u.H(ReadTime, ge.ZGa)`), only ever carried by the
+// `Notification` Type (`Qhb(...,f=this.SK,...)` L1050). The clock is the app
+// clock (the top screen's fixed 60 Hz `time()`), never the wall clock.
+struct ReadTimeState {
+    std::string key;      // the visible bar's identity — a new one restarts it
+    float elapsed = 0.0f; // seconds the current bar has been up (`Ib.SK` spent)
+    float last_time = -1.0f;  // app clock at the previous tick (per-notification)
+};
+ReadTimeState& read_time_state() {
+    static ReadTimeState s;
+    return s;
+}
+
+// Returns true when the top Notification's `ReadTime` budget elapsed (the bar
+// is popped, with the JS close tween). A non-Notification, a missing budget or
+// no top dialog is a no-op.
+bool quest_read_time_advance(App& app, float dt) {
+    const EngineDialog* d = quest_modal_top(app);
+    if (d == nullptr || dialog_kind(d->type) != DialogKind::kIbBar) return false;
+    if (d->read_time <= 0.0f) return false;
+    // `Qhb` L1907 resets `this.SK=f` on EVERY post, so the identity of the
+    // visible bar is its whole content — the tutorial notifications carry an
+    // EMPTY Title (`Notification/`), so the joined lines are what separates
+    // `_NotificationTextMove` from `_NotificationTextPunchBag`.
+    std::string key = d->type + "|" + d->title;
+    for (const std::string& ln : d->lines) {
+        key += "|";
+        key += ln;
+    }
+    ReadTimeState& st = read_time_state();
+    if (st.key != key) {
+        st.key = key;
+        st.elapsed = 0.0f;  // `Qhb` L1907 sets `this.SK=f` afresh
+    }
+    st.elapsed += dt;
+    if (st.elapsed < d->read_time) return false;
+    std::fprintf(stdout, "[quest] notification auto-dismissed (ReadTime %.2fs at t=%.2fs)\n",
+                 d->read_time, st.elapsed);
+    std::fflush(stdout);
+    dialog_capture_closing(app, *d);  // `Ib.close` L1911 (0.5 s collapse)
+    app.quest_engine().pop_dialog();
+    st.key.clear();
+    st.elapsed = 0.0f;
+    return true;
+}
+
+// The per-frame driver: advances the countdown by the app-clock delta. The
+// clock baseline resets with the bar's identity, so the budget is spent from
+// the frame the notification is first visible (never from a stale screen clock).
+// `quest_modal_consume` calls this each screen update; the harness calls
+// `quest_read_time_advance` with an explicit dt for determinism.
+bool quest_read_time_tick(App& app) {
+    const float now = app.screens().top() != nullptr ? app.screens().top()->time() : 0.0f;
+    ReadTimeState& st = read_time_state();
+    if (st.last_time < 0.0f) st.last_time = now;
+    float dt = now - st.last_time;
+    st.last_time = now;
+    if (dt < 0.0f) dt = 0.0f;
+    if (dt > 0.5f) dt = 0.5f;  // a screen change never jumps the countdown
+    return quest_read_time_advance(app, dt);
+}
 
 // JS `He` gating (L1045-1062): a `Notification` is fire-and-forget (any tap
 // advances, `sa()` continues); a `Regular` dialog holds the chain until its
@@ -104,6 +194,11 @@ void dialog_capture_closing(App& app, const EngineDialog& d);
 // caller skips its own input that frame). `fight_out` (optional) receives a
 // `Fight` request from the button's nested actions (`Sn` L1069).
 bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
+    // D13: `Wb` keeps ONE top dialog; the Settings `un` (case 310) blocks the
+    // screen beneath it exactly like a quest dialog.
+    if (settings_dialog_consume(app)) return true;
+    // D8 `Ib.aa` L1905: the app-clock ReadTime countdown runs before input.
+    quest_read_time_tick(app);
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return false;
     // `He.S` L1048-1050: the Types whose JS body is a bare `debugger;`
@@ -360,6 +455,10 @@ bool load_scroll_atlas(App& app);
 // item-image helpers below; the `Ib` bar needs it for the dialog portrait.
 bool draw_user_image(App& app, const std::string& file_name, float cx, float cy, float w,
                      float h, float alpha, bool flip_x);
+// `Rf`/`or` item icon (`Od.$A` L1945 prefers the Item composite). Defined with
+// the item-image helpers below; the dialog portrait needs it (D14).
+bool draw_item_image(App& app, const std::string& image_ref, float cx, float cy, float w,
+                     float h, float alpha);
 // `Ib` notification/hint bar (JS L1905-1912). `Sr()` L1908-1910 builds exactly
 // ONE label = the JOINED lines (`lj` L1908 formats `^{0}^\n` per line) plus a
 // portrait from the resolved `Image` (`Qhb(a=wt,...)` L1907 -> `v.RIa` L1909).
@@ -463,6 +562,9 @@ void draw_closing_dialog(App& app, sf2::render::Renderer& ren);
 // falls through to `this.sa()`, so the port advances without displaying.
 void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) {
     if (!is_top) return;  // layered stack: only the top screen draws the modal
+    // D13: `Wb` owns ONE top dialog — the Settings `un` (case 310) draws here
+    // too, over the CURRENT screen (it is opened by the `za` nav #5).
+    draw_settings_dialog(app, ren);
     draw_closing_dialog(app, ren);  // `od.Ge(1)` L1898: the dismissed tween
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return;
@@ -630,13 +732,15 @@ SettingsLayout settings_layout() {
     s.music_row_cx = cx + (300.0f + row_off) * p.c;
     s.credits_row_cx = cx + row_off * p.c;
     s.lang_row_cx = cx + row_off * p.c;
-    // Buttons `Bb.Pb(150)` (L1930): BACK only — the oracle `un` dialog shows a
-    // single centred НАЗАД (no RESTART; the native RESTART was invented,
-    // FIDELITY_MATRIX settings row).
+    // Buttons (L1930 `Kb=Bb("EButtonDark")` BACK / `Km=Bb("EButtonBeige")`
+    // RESTART, both `Pb(150)`). D15: RESTART is `X(!1)` hidden until the
+    // language row changed (`t9`), when `un.rHa` case 4 (L1931) reveals it and
+    // splits BACK/RESTART by `width*.6` (`Kb.C(-w*.6)` / `Km.C(w*.6)`).
     s.btn_w = 320.0f * p.c;
     s.btn_h = 150.0f * p.c;
-    s.back_cx = cx;
-    s.restart_cx = cx + 500.0f * p.c;  // unused (kept for layout parity)
+    const float split = g_settings_restart_visible ? s.btn_w * 0.6f : 0.0f;
+    s.back_cx = cx - split;
+    s.restart_cx = cx + split;
     // `od.layout` (L1898) D: the button container centre.
     s.back_cy = s.restart_cy = cy + 500.0f * p.c;
     // Notice `Nm`: `C(-750)`, `D(250)`, `Fa(1500,50)` (L1929).
@@ -1506,6 +1610,94 @@ bool load_sliced_atlas(App& app) {
     return ok;
 }
 
+// D14 `v.RIa` L1222: split the Image ref on `|`, take the BASENAME after the
+// last `/` (`a[0].lastIndexOf("/")`), and flag a case-insensitive `flip` token
+// -> `new pw(fp=c, fileName=b)` (L1225 `pw`). The dialog's `Mirrored` attr
+// already appended `|Flip` at parse time (`He.S` L1047), so this is the one
+// place the flip + path strip happens; `Od.ala` L1947 (`oe(ref.fileName)`) and
+// `Ib.Sr` L1909 (`R.$(E.get(12), fileName, ..)`) both consume it.
+struct DialogImageRef {
+    std::string file_name;
+    bool flip = false;
+};
+DialogImageRef dialog_image_ref(const std::string& image) {
+    DialogImageRef out;
+    std::size_t end = image.size();
+    const std::size_t bar = image.find('|');
+    if (bar != std::string::npos) end = bar;
+    for (std::size_t p = bar == std::string::npos ? image.size() : bar + 1;
+         p < image.size();) {
+        const std::size_t nb = image.find('|', p);
+        const std::size_t ne = nb == std::string::npos ? image.size() : nb;
+        std::string token = image.substr(p, ne - p);
+        std::transform(token.begin(), token.end(), token.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        if (token == "flip") out.flip = true;
+        p = ne + 1;
+    }
+    const std::string head = image.substr(0, end);
+    const std::size_t slash = head.rfind('/');
+    out.file_name = slash == std::string::npos ? head : head.substr(slash + 1);
+    return out;
+}
+
+// D14 portrait resolution (`Od.$A` L1945 + `ala` L1947 + `Ib.Sr` L1909).
+//   `Od.$A`: `this.sV!=null ? new or(this.sV) : this.ala(this.p$)` — when the
+//   dialog carries an `Item` (`He.ah` L1045 -> `p.items.$b(x)` -> its composite
+//   `Ev`), the item image WINS; otherwise the `Image` goes through `v.RIa`
+//   L1222 (basename + `|Flip`) into `oe(fileName)`.
+// The port's registered `sensei_portrait` texture (app.cpp:518 loads the
+// shipped `character_sensei_small` asset) is the fallback registry entry for
+// that stem, so a genuine user-image miss on the sensei still draws.
+bool draw_dialog_image(App& app, const std::string& image, const std::string& item,
+                       float cx, float cy, float size, float alpha, bool strip_small) {
+    if (size <= 0.0f) return false;
+    const DialogImageRef ref = dialog_image_ref(image);
+    std::string name = ref.file_name;
+    if (strip_small) {
+        // `Ib.Sr` L1909: `fileName.replace(RegExp("_small$"),"")`.
+        constexpr char kSmall[] = "_small";
+        if (name.size() > sizeof(kSmall) - 1 &&
+            name.compare(name.size() - (sizeof(kSmall) - 1), sizeof(kSmall) - 1, kSmall) == 0) {
+            name = name.substr(0, name.size() - (sizeof(kSmall) - 1));
+        }
+    }
+    if (!item.empty()) {
+        // `p.items.$b(ba.Pc(a,this.ah))` L1046 -> the item's icon/composite.
+        for (const CatalogItem& ci : load_full_catalog(app)) {
+            if (ci.name == item && !ci.image.empty() &&
+                draw_item_image(app, ci.image, cx, cy, size, size, alpha)) {
+                return true;
+            }
+        }
+        if (draw_item_image(app, item, cx, cy, size, size, alpha)) return true;
+    }
+    if (name.empty()) return false;
+    if (draw_user_image(app, name, cx, cy, size, size, alpha, ref.flip)) return true;
+    if (name == "character_sensei") {
+        const GLuint tex = app.renderer().texture_lookup("sensei_portrait");
+        if (tex != 0) {
+            sf2::scene::Sprite s;
+            s.texture_name = "sensei_portrait";
+            s.frame_x = 0.0f;
+            s.frame_y = 0.0f;
+            s.frame_w = 256.0f;
+            s.frame_h = 256.0f;
+            s.tex_w = 256.0f;
+            s.tex_h = 256.0f;
+            s.solid = false;
+            s.color_a = alpha;
+            s.transform.set_pos(cx, cy);
+            const float sc = size / 256.0f;
+            s.transform.set_scale(sc, sc);
+            if (ref.flip) s.transform.scale_x = -s.transform.scale_x;
+            app.renderer().draw_sprite(s, ui_camera());
+            return true;
+        }
+    }
+    return false;
+}
+
 // The `Ib` notification/hint bar (JS L1905-1912). Layout: `node.C(W -
 // scroll.width*scale)`, `node.D(za.Sp)`; scroll `gk(600,250,50,0)` horizontal
 // with a `Fg(600,250,1,30)` content frame (paper rails). The portrait is the
@@ -1516,7 +1708,7 @@ bool load_sliced_atlas(App& app) {
 // speaker row. OK `Bb` at local (450,185). The `gYa()` gate is the shell
 // predicate (true on Dojo/Map — the preloader/fight cases are OPEN);
 // `Ib.RP` (He.DisableNotificationsButtons, L1045) gates the OK button — the
-// native EngineDialog does not carry it, so callers pass `show_ok`.
+// caller passes `show_ok` already gated on RP.
 void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image,
                   const std::string& joined_lines, bool show_ok) {
     const float c =
@@ -1559,38 +1751,13 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
         ren.draw_triangles(panel, 6, 0.05f, 0.05f, 0.08f, 0.82f);
     }
     // Portrait: `Ib.Sr()` L1909 resolves the dialog's `Image` into
-    // `R.$(E.get(12), fileName, this.scroll.iL)`; `_small` is stripped first
-    // (`fileName.replace(RegExp("_small$"),"")`). The sensei stem maps to the
-    // native `sensei_portrait` disc; every other name is a `oe` user image.
+    // `R.$(E.get(12), fileName, this.scroll.iL)` via `v.RIa` (basename +
+    // `|Flip`), `_small` stripped. The `Item` composite never applies to the
+    // bar (`Qhb` passes no `Ev`), so `item` is empty here.
     float image_w = 0.0f;
-    if (!image.empty()) {
-        std::string name = image;
-        constexpr char kSmall[] = "_small";
-        if (name.size() > sizeof(kSmall) - 1 &&
-            name.compare(name.size() - (sizeof(kSmall) - 1), sizeof(kSmall) - 1, kSmall) ==
-                0) {
-            name = name.substr(0, name.size() - (sizeof(kSmall) - 1));
-        }
-        if (name == "character_sensei" &&
-            app.renderer().texture_lookup("sensei_portrait") != 0) {
-            sf2::scene::Sprite s;
-            s.texture_name = "sensei_portrait";
-            s.frame_x = 0.0f;
-            s.frame_y = 0.0f;
-            s.frame_w = 256.0f;
-            s.frame_h = 256.0f;
-            s.tex_w = 256.0f;
-            s.tex_h = 256.0f;
-            s.solid = false;
-            s.color_a = 1.0f;
-            s.transform.set_pos(lx(128.0f), ly(130.0f));
-            s.transform.set_scale(c, c);
-            app.renderer().draw_sprite(s, ui_camera());
-            image_w = 256.0f;
-        } else if (draw_user_image(app, name, lx(128.0f), ly(130.0f), 256.0f * c,
-                                   256.0f * c, 1.0f, false)) {
-            image_w = 256.0f;
-        }
+    if (draw_dialog_image(app, image, std::string(), lx(128.0f), ly(130.0f), 256.0f * c,
+                          1.0f, /*strip_small=*/true)) {
+        image_w = 256.0f;
     }
     // The ONE label: the joined lines (`lj` L1908). `Fa(600-image.w+20,150)`,
     // `C(image.w-30)`, `D(50)`, `rd(!0)` (multiline — `{br}` is a hard break,
@@ -1958,6 +2125,28 @@ int za_nav_hit(double px, double py) {
     return -1;
 }
 
+// The `za` nav-button tap (JS listeners Ofb/Qfb/Wfb/Rfb/Vfb -> `ma.Jg().jI`).
+// Button #5 is `Vfb` (L1981) — NOT a screen: it loads the per-language atlases
+// then `Xc.Shb()` opens the `un` dialog OVER the current screen (D13). The
+// other four push their `kZaNav` screen unless it is already showing.
+void za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
+    if (hit < 0 || hit >= kZaNavCount) return;
+    sf2::audio::AudioEngine::instance().play("click");
+    if (hit == 4) {  // Settings (JS `Vfb` L1981 -> `Xc.Shb()` L931)
+        std::fprintf(stdout, "[za] nav %s -> settings dialog (no nav)\n", kZaNav[hit].label);
+        std::fflush(stdout);
+        open_settings_dialog(app);
+        return;
+    }
+    const ScreenId target = kZaNav[hit].nav;
+    std::fprintf(stdout, "[za] nav %s -> screen %d\n", kZaNav[hit].label,
+                 static_cast<int>(target));
+    std::fflush(stdout);
+    if (target != active) {
+        self.push(target);
+    }
+}
+
 // Handles the nav-column taps for a shell screen (JS listeners Ofb/Qfb/Wfb/
 // Rfb/Vfb -> `ma.Jg().jI(cls)`): a tap pushes the target screen unless it is
 // the screen already showing (the JS highlights that one active, `xyb`
@@ -2017,14 +2206,7 @@ void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = f
     // column overlaps); a header tap with no button collapses (L2000 toggle).
     const int hit = za_nav_hit(px, py);
     if (hit >= 0 && app.pointer().pressed) {
-        const ScreenId target = kZaNav[hit].nav;
-        sf2::audio::AudioEngine::instance().play("click");
-        std::fprintf(stdout, "[za] nav %s -> screen %d\n", kZaNav[hit].label,
-                     static_cast<int>(target));
-        std::fflush(stdout);
-        if (target != active) {
-            self.push(target);
-        }
+        za_nav_activate(app, self, active, hit);
         return;
     }
     if (header_hit && app.pointer().pressed) {
@@ -4620,6 +4802,22 @@ OdLayout dialog_layout_for(App& app, const EngineDialog& d, const DialogAnim& an
     OdLayout o = od_layout(dialog_content_md(app, d));
     o.anim_scale = anim.scale;  // `od.aa` L1895 `node.la`
     o.anim_slide = anim.slide;  // `od.aa` close slide
+    // D10: `He.S` L1051 applies the parsed attrs to the built dialog —
+    //   `XLa()`   (L1955)  the `ImageScale` slot `iy` (-> `la(1.8*iy)` L1947);
+    //   `VLa(OB)` (L1956)  ImageOffsetX -> avatar x (`ala` L1947 `C(-450+OB)`);
+    //   `WLa(YV)` (L1956)  ImageOffsetY -> avatar y (`ala` L1947 `D(YV)`);
+    //   `mMa(ov)` (L1956)  TextOffset -> `eba` L1950 (`a.D(a.ra+ov.y)`);
+    //   `nMa(LH)` (L1956)  TextPosXByImage -> `Jva` L1951;
+    //   `TM`      (L1044)  ContentOffsetX -> the content x (`Jva`/`sqb`).
+    // Defaults reproduce `od_layout` exactly (scale 1, offsets 0, LH true).
+    o.portrait = kOdAvatarSrc * kOdAvatarScale * d.image_scale * o.panel.c;  // L1947
+    o.portrait_cx = o.sx(kOdAvatarX + d.image_offset_x);  // `C(-450+OB)`
+    o.portrait_cy = o.sy(d.image_offset_y);               // `D(YV)`
+    // `Jva` L1951 `this.LH?a.C(-100+this.OB):a.C(0)` + `eba` L1950 `ov` +
+    // the authored `ContentOffsetX`.
+    o.body_x = o.sx((d.text_pos_x_by_image ? kOdBodyX + d.image_offset_x : 0.0f) +
+                    d.content_offset_x + d.text_offset_x);
+    o.body_y = o.sy(-o.md * 0.5f + d.text_offset_y);  // `Ne.D(-Md/2+ov.y)`
     return o;
 }
 
@@ -4675,9 +4873,23 @@ std::string ib_joined_lines(App& app, const EngineDialog& d) {
 // `Ib.F().Qhb(r, z, c, g, k, SK, x, $Ta)` L1050: the notification bar. The
 // body is the JOINED lines and the portrait the resolved `Image` — `Sr()`
 // L1908-1910 builds exactly ONE label and NO speaker row.
+// `Ib.Qhb(...,h=this.$Ta)` L1050 -> L1907 `h&&(this.Uz=Fc.Ed(-65281,this.node
+// .L),...)`: `BlockRaycast` gates the bar's `Uz` overlay. `Uz` is a child of
+// the BAR node whose size comes from `Fc.Ed`'s parented rect, which this seam
+// does not expose — recorded (the flag is parsed + applied to the draw call),
+// NOT drawn as an invented full-screen dim.
+bool notification_blocks_raycast(const EngineDialog& d) { return d.block_raycast; }
+
+// `Ib.Sr` L1910: the OK plate draws only when `Ib.RP` is clear and the
+// notification carries a button caption (`b=!(b==null||b=="")`). `Ib.RP` is
+// `He.DisableNotificationsButtons` (L1045 `Ib.RP=this.qUa`).
+bool notification_show_ok(const EngineDialog& d) {
+    return !d.disable_notifications_buttons && !d.button_actions.empty() &&
+           !d.button_text.empty();
+}
+
 void draw_notification(App& app, sf2::render::Renderer& ren, const EngineDialog& d) {
-    draw_ib_hint(app, ren, d.image, ib_joined_lines(app, d),
-                 /*show_ok=*/!d.button_actions.empty() && !d.button_text.empty());
+    draw_ib_hint(app, ren, d.image, ib_joined_lines(app, d), notification_show_ok(d));
 }
 
 } // namespace
@@ -4820,35 +5032,13 @@ void draw_dialog_title(App& app, const OdLayout& L, const std::string& title) {
                   0.98f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
 }
 
-// `od.ala` L1947 (`oe` avatar) + `od.$A` L1945 (`or` item image). The
-// `character_sensei` stem is the native `sensei_portrait` disc (the shipped
-// `oe` sheet); every other name is a `res/users/images` user image
-// (tutorial_quests.xml L158 `boss_lynx` — Lynx's portrait).
-bool draw_dialog_portrait(App& app, const std::string& image, const OdLayout& L) {
-    if (image.empty()) return false;
-    std::string name = image;
-    constexpr char kSmall[] = "_small";
-    if (name.size() > sizeof(kSmall) - 1 &&
-        name.compare(name.size() - (sizeof(kSmall) - 1), sizeof(kSmall) - 1, kSmall) == 0) {
-        name = name.substr(0, name.size() - (sizeof(kSmall) - 1));
-    }
-    if (name == "character_sensei" &&
-        app.renderer().texture_lookup("sensei_portrait") != 0) {
-        sf2::scene::Sprite s;
-        s.texture_name = "sensei_portrait";
-        s.frame_w = 256.0f;
-        s.frame_h = 256.0f;
-        s.tex_w = 256.0f;
-        s.tex_h = 256.0f;
-        s.solid = false;
-        s.color_a = 1.0f;
-        s.transform.set_pos(L.portrait_cx, L.portrait_cy);
-        s.transform.set_scale(L.portrait / 256.0f, L.portrait / 256.0f);
-        app.renderer().draw_sprite(s, ui_camera());
-        return true;
-    }
-    return draw_user_image(app, name, L.portrait_cx, L.portrait_cy, L.portrait, L.portrait,
-                           1.0f, false);
+// `od.$A` L1945 (`this.sV!=null ? new or(this.sV) : this.ala(this.p$)`) +
+// `od.ala` L1947 (`v.RIa(a)` -> `oe(a.fileName)` at `C(-450+OB)`, `D(YV)`,
+// `la(1.8*iy)`). The dialog's `Item` composite (`Ej.Ev`, `He.ah` L1045) wins;
+// otherwise the `Image` resolves through the `RIa` registry (D14).
+bool draw_dialog_portrait(App& app, const EngineDialog& d, const OdLayout& L) {
+    return draw_dialog_image(app, d.image, d.item, L.portrait_cx, L.portrait_cy, L.portrait,
+                             1.0f, /*strip_small=*/false);
 }
 
 // The plate row (`hab()` L1060). The Right plate carries the pager caption
@@ -4873,7 +5063,7 @@ void draw_od280_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     const OdLayout L = dialog_layout_for(app, d, anim);
     draw_od_base(app, ren, L.panel);
     draw_dialog_title(app, L, d.title);
-    draw_dialog_portrait(app, d.image, L);
+    draw_dialog_portrait(app, d, L);
     draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, L.body_h, dialog_page_body(app, d),
                     0.70f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
     draw_dialog_buttons(app, d, anim);
@@ -4889,7 +5079,7 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     const OdLayout L = dialog_layout_for(app, d, anim);
     draw_od_base(app, ren, L.panel);
     draw_dialog_title(app, L, d.title);
-    draw_dialog_portrait(app, d.image, L);
+    draw_dialog_portrait(app, d, L);
     const float c = L.panel.c > 0.0f ? L.panel.c : 1.0f;
     if (dialog_scrolls_all_lines(d.type)) {
         // `sqb` L1953: one text node per `<Line>`, `b += f.ew() + e.offsetY`,
@@ -10263,52 +10453,21 @@ void EquipmentScreen::render_impl(App& app) {
 // SettingsScreen
 // ---------------------------------------------------------------------------
 
-SettingsScreen::SettingsScreen(ScreenManager& mgr) : Screen(mgr, "Settings") {}
+// The `un extends od` settings dialog (JS L1916-1930). `SettingsScreen` hosts
+// it on its own screen (the native `make_screen(kScreenSettings)` path used by
+// `--verify-input`); the `za` nav #5 tap opens the SAME dialog as a `Wb`
+// overlay over the current screen (D13). Both route through
+// `settings_dialog_consume` / `draw_settings_dialog`.
+SettingsScreen::SettingsScreen(ScreenManager& mgr) : Screen(mgr, "Settings") {
+    open_settings_dialog(app());
+}
 
 void SettingsScreen::update_impl(float dt) {
     ++age_;  // press debounce: ignore the push-frame held click
     (void)dt;
-    ensure_lang(app());  // the lang table powers the Settings_*/Back labels
-    // D3: `Wb` is a GLOBAL overlay — a dialog queued on ANY screen blocks that
-    // screen's input.
-    if (quest_modal_consume(app())) return;
-    const App::PointerState& p = app().pointer();
-    hover_ = -1;
-    // BACK (`Bb` "BACK", `un.Kb`, L1930 -> `Ge(0)` closes) -> pop.
-    const SettingsLayout s = settings_layout();
-    if (p.x >= s.back_cx - s.btn_w * 0.5f && p.x <= s.back_cx + s.btn_w * 0.5f &&
-        p.y >= s.back_cy - s.btn_h * 0.5f && p.y <= s.back_cy + s.btn_h * 0.5f) {
-        hover_ = 0;
-        if (p.pressed && age_ > 10) {
-            std::fprintf(stdout, "[settings] BACK -> previous screen\n");
-            std::fflush(stdout);
-            manager().pop();
-            return;
-        }
-    }
-    // MUSIC toggle (working): OFF stops the track, ON replays the last
-    // track (play_music of the current track; silent no-op when none —
-    // AudioEngine semantics, no scene touch). Hit-rect = the JS `c` row
-    // (L1917): 800 x icon, centred on the icon local x + 315 design.
-    if (p.x >= s.music_row_cx - s.row_w * 0.5f &&
-        p.x <= s.music_row_cx + s.row_w * 0.5f &&
-        p.y >= s.music_cy - s.row_h * 0.5f && p.y <= s.music_cy + s.row_h * 0.5f) {
-        hover_ = 1;
-        if (p.pressed) {
-            music_off_ = !music_off_;
-            if (music_off_) {
-                sf2::audio::AudioEngine::instance().stop_music();
-            } else {
-                sf2::audio::AudioEngine::instance().play_music(
-                    sf2::audio::AudioEngine::instance().music_track());
-            }
-            sf2::audio::AudioEngine::instance().play("click");
-            std::fprintf(stdout, "[settings] music %s\n", music_off_ ? "OFF" : "ON");
-            std::fflush(stdout);
-        }
-    }
-    // SOUND row is state display only (no runtime SFX mute/set_enabled API
-    // exists — see the stream report); intentionally not clickable.
+    // D3/D13: `Wb` is a GLOBAL overlay — the settings dialog (and any queued
+    // quest dialog) blocks the screen beneath.
+    quest_modal_consume(app());
 }
 
 // JS `od.aa` (L1895: the key gate `L.K.Tj().Db(156)`) applied to the
@@ -10316,55 +10475,162 @@ void SettingsScreen::update_impl(float dt) {
 // pointer-only — this only handles the key edge, no menu navigation.
 void SettingsScreen::on_key(int glfw_key, bool down) {
     if (down && glfw_key == 256) {  // GLFW_KEY_ESCAPE
-        std::fprintf(stdout, "[settings] ESC -> previous screen\n");
+        std::fprintf(stdout, "[settings] ESC -> close dialog\n");
         std::fflush(stdout);
-        manager().pop();
+        close_settings_dialog();
+        if (app().screens().top() != nullptr &&
+            app().screens().top()->id() == kScreenSettings) {
+            manager().pop();
+        }
     }
 }
 
-void SettingsScreen::render_impl(App& app) {
-    sf2::render::Renderer& ren = app.renderer();
-    // Minimal options overlay (NOT a standalone screen; PORT_AUDIT_UI §2.1 /
-    // §3 item 30). The JS `za` nav button #5 (`y.mRa`/`y.lRa`, L1979) routes
-    // to `za.Vfb` (L1981): it appends a `Bi` spinner (frame `y.aoa` =
-    // "loading_circle", L1867) and `G.load([250,251,252,253])` (the per-
-    // language atlases). On load completion `xvb()` (L1981) tears the spinner
-    // down and calls `Xc.Shb()`; `Xc.Shb()` = `Wb.openDialog(310,null)` and
-    // `Wb.Xob` case 310 -> `new un`, so the real dialog is `un extends od`
-    // (9-slice `E.get(254)`: `y.lSa`="bg", `y.eoa`="bg_edge"; title `y.pB`=
-    // "stripe_top"): rows Sound (`y.koa`/`y.loa`), Music (`y.ioa`/`y.joa`),
-    // Credits (`y.rSa`), Language + BACK (`EButtonDark`) / RESTART
-    // (`EButtonBeige`), gated by `Ca.hasFeature("audio")`/("credits") with
-    // labels from the `un` localized `IVa` table.
-    // The `od` base is `AV=fc(2340,1530)` per JS L1894 (`b==null&&(b=1530)`);
-    // the audit's 2340x1300 is stale. `Md=750` (L1930). The per-language BMF
-    // atlas build (`G.Oq(253)` + `un.C8`, L1927) is not modelled, so the row
-    // labels use the EN `IVa` strings and the Language row is EN-only.
+// ---------------------------------------------------------------------------
+// The Settings `un` dialog (D13/D15) — shared by the `za` overlay + the screen
+// ---------------------------------------------------------------------------
+// `Xc.Shb()` L931 = `Wb.openDialog(310,null)` -> `Wb.Xob` case 310 (L926)
+// `this.If=new un`, so the settings surface is `un extends od` (L1916-1930):
+// a `Wb` dialog appended to the ACTIVE screen (L927). The `za` nav button #5
+// (`Vfb` L1981) therefore opens it OVER the current screen — the port's
+// `ma.Jg().jI(11)` navigation was INVENTED. `Vfb` also appends a `Bi` spinner
+// and `G.load([250,251,252,253])`; that per-language BMF atlas build is not
+// modelled, so `draw_settings_dialog` uses the resolved `loc` strings.
+
+// `un.$u=G.Rq()` (L1928): `$u` is the DISPLAYED language, initialised from the
+// saved one (`t9 = G.Rq()!=this.$u` is false at open, so RESTART stays hidden).
+void open_settings_dialog(App& app) {
+    g_settings_dialog_open = true;
+    g_settings_lang = app.language().empty() ? "en" : app.language();
+    g_settings_restart_visible = false;
+    g_settings_age = 0;
+}
+
+void close_settings_dialog() { g_settings_dialog_open = false; }
+
+bool settings_dialog_open() { return g_settings_dialog_open; }
+
+bool settings_dialog_restart_visible() { return g_settings_restart_visible; }
+
+// `un.rHa` case 4 (L1931): `this.u9=(this.u9+1)%iv.length; this.$u=iv[this.u9];
+// this.t9=G.Rq()!=this.$u;` then `this.t9?(this.Km.X(!0),...)` reveals RESTART.
+void settings_dialog_cycle_language(App& app) {
+    int idx = 0;
+    for (int i = 0; i < kSettingsLangCount; ++i) {
+        if (g_settings_lang == kSettingsLangs[i]) idx = i;
+    }
+    idx = (idx + 1) % kSettingsLangCount;
+    g_settings_lang = kSettingsLangs[idx];
+    const std::string saved = app.language().empty() ? "en" : app.language();
+    g_settings_restart_visible = g_settings_lang != saved;  // `t9`
+    std::fprintf(stdout, "[settings] language -> %s (RESTART %s)\n", g_settings_lang.c_str(),
+                 g_settings_restart_visible ? "shown" : "hidden");
+    std::fflush(stdout);
+}
+
+namespace {
+
+// `un.rHa` (L1930-1932) row switch, shared by the overlay + the hosted screen.
+enum class SettingsRow { kNone = 0, kBack, kMusic, kRestart, kLanguage };
+
+SettingsRow settings_row_at(const SettingsLayout& s, double x, double y) {
+    auto in = [&](float cx, float cy, float w, float h) {
+        return x >= cx - w * 0.5f && x <= cx + w * 0.5f && y >= cy - h * 0.5f &&
+               y <= cy + h * 0.5f;
+    };
+    if (in(s.back_cx, s.back_cy, s.btn_w, s.btn_h)) return SettingsRow::kBack;
+    if (g_settings_restart_visible && in(s.restart_cx, s.restart_cy, s.btn_w, s.btn_h)) {
+        return SettingsRow::kRestart;
+    }
+    // `un`'s `c` hit-rect (L1917): 800 x icon, one per container.
+    if (in(s.music_row_cx, s.music_cy, s.row_w, s.row_h)) return SettingsRow::kMusic;
+    if (in(s.lang_row_cx, s.lang_cy, s.row_w, s.row_h)) return SettingsRow::kLanguage;
+    return SettingsRow::kNone;
+}
+
+// Runs a row action; returns true when the dialog must close (`Ge(0)` L1930 /
+// L1932 RESTART `close()`).
+bool settings_run_row(App& app, SettingsRow row) {
+    switch (row) {
+        case SettingsRow::kBack:
+            std::fprintf(stdout, "[settings] BACK -> close dialog\n");
+            std::fflush(stdout);
+            return true;
+        case SettingsRow::kMusic:
+            // `un.W$`/`lb.Lz()` (L1928) + case 0 (L1931): stop/restart the track.
+            g_settings_music_off = !g_settings_music_off;
+            if (g_settings_music_off) {
+                sf2::audio::AudioEngine::instance().stop_music();
+            } else {
+                sf2::audio::AudioEngine::instance().play_music(
+                    sf2::audio::AudioEngine::instance().music_track());
+            }
+            sf2::audio::AudioEngine::instance().play("click");
+            std::fprintf(stdout, "[settings] music %s\n", g_settings_music_off ? "OFF" : "ON");
+            std::fflush(stdout);
+            return false;
+        case SettingsRow::kLanguage:
+            settings_dialog_cycle_language(app);
+            return false;
+        case SettingsRow::kRestart:
+            sf2::audio::AudioEngine::instance().play("click");
+            // `un.rHa` case 5 (L1932): `G.Ska(this.$u); p.TJ.save(!0)` then
+            // `L.K.reload()`. The port exposes no runtime language setter nor a
+            // reload path, so the press is reported, never faked.
+            std::fprintf(stdout, "[settings] RESTART (needs L.K.reload; not modelled)\n");
+            std::fflush(stdout);
+            return true;
+        case SettingsRow::kNone:
+        default:
+            return false;
+    }
+}
+
+// D13 input: `Wb`'s top dialog blocks the screen beneath. Returns true while
+// the settings dialog is open.
+bool settings_dialog_consume(App& app) {
+    if (!g_settings_dialog_open) return false;
+    ensure_lang(app);
+    ++g_settings_age;
+    const App::PointerState& p = app.pointer();
+    const SettingsLayout s = settings_layout();
+    const SettingsRow row = settings_row_at(s, p.x, p.y);
+    // 0 = BACK, 2 = RESTART for the flat fallback hover (row - 1).
+    g_settings_hover = static_cast<int>(row) - 1;
+    // A held button must not re-fire on the frame the dialog opened (`age_>10`
+    // is the existing push-frame debounce).
+    if (row != SettingsRow::kNone && p.pressed && g_settings_age > 10) {
+        if (settings_run_row(app, row)) {
+            close_settings_dialog();
+            if (app.screens().top() != nullptr &&
+                app.screens().top()->id() == kScreenSettings) {
+                app.screens().pop();
+            }
+        }
+    }
+    return true;
+}
+
+// The `un extends od` drawer: `od` 9-slice + `Vc` title + the four
+// `E.get(250)` rows + the `Nm` restart notice + BACK (`EButtonDark`) /
+// RESTART (`EButtonBeige`), the last two `X(!1)`-hidden until the language row
+// changed (D15, L1929-1931).
+void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
+    if (!g_settings_dialog_open) return;
+    ensure_lang(app);
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.55f);
-    // Real `un extends od` dialog (L1916-1930): 9-slice base + title + rows.
     const SettingsLayout s = settings_layout();
     draw_od_base(app, ren, s.panel);
-    // Title `Vc`: `IVa.Settings_Title` (L1917; ru -> "НАСТРОЙКИ"); `ua(152)`
-    // + `La(Z.W6)` (L1900), `Ia(128)` centre.
+    // Title `Vc`: `IVa.Settings_Title` (L1917); `ua(152)` + `La(Z.W6)` (L1900).
     draw_ui_label(app, s.title_x, s.title_y, s.title_w, s.title_h,
-                  loc(app, "Settings_Title", "SETTINGS"), 1.52f,
-                  UiAlign::Center, 0.404f, 0.243f, 0.141f);
-    // Rows from the `un` `IVa` table (L1917-1924). `Ca.hasFeature("audio")`
-    // (L1928) gates Sound+Music and `("credits")` (L1929) gates Credits; both
-    // features are present, so the k=0.5/1.5/2.5 rows. The 170x170
-    // `E.get(250)` tiles carry the on/off state (sound/sound_off,
-    // music/music_off); labels are the plain `IVa` captions (`a()` L1917),
-    // placed at `icon_ya + icon_w/2 + icon_w*.2` (i.e. icon_cx + .7 icon).
-    // The labels come from the active `<lang>.<hash>.xml` table
-    // (`un`'s `IVa` keys, L1917): Settings_Sound/Music/Credits/Language. The
-    // Language row shows the active language's own name (ru -> "Русский").
+                  loc(app, "Settings_Title", "SETTINGS"), 1.52f, UiAlign::Center, 0.404f,
+                  0.243f, 0.141f);
     const bool sfx_on = sf2::audio::AudioEngine::instance().enabled();
-    const std::string lang = app.language().empty() ? "en" : app.language();
+    const std::string lang = g_settings_lang.empty() ? "en" : g_settings_lang;
     if (load_settings_icons_atlas(app)) {
         try_draw_atlas_button(app, sfx_on ? "sound" : "sound_off", s.sound_cx, s.sound_cy,
                               s.icon, s.icon, 1.0f);
-        try_draw_atlas_button(app, music_off_ ? "music_off" : "music", s.music_cx,
+        try_draw_atlas_button(app, g_settings_music_off ? "music_off" : "music", s.music_cx,
                               s.music_cy, s.icon, s.icon, 1.0f);
         try_draw_atlas_button(app, "credits", s.credits_cx, s.credits_cy, s.icon, s.icon,
                               1.0f);
@@ -10385,20 +10651,43 @@ void SettingsScreen::render_impl(App& app) {
                       596.0f * s.panel.c, s.icon, row.text, 0.6f, UiAlign::Left, 1.0f, 1.0f,
                       1.0f);
     }
-    // The `Nm` restart notice (`dlgSettingsRestart`, L1929) is hidden in the
-    // oracle capture (no language change happened), so it is not drawn.
-    // BACK (`Bb("EButtonDark")`). The oracle shows one centred НАЗАД and no
-    // RESTART (the RESTART plate + notice were invented; FIDELITY_MATRIX
-    // settings row). `Bb.fza` (L1844) maps the style to the sliced-atlas
-    // frame (`btnDark`), drawn through the `ESliced` plate
-    // (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842). Flat only on a genuine art miss.
+    // `Nm` (L1929): `ea` at `Fa(1500,50)`, `C(-750)`, `D(250)`, `ua(75)`,
+    // `Kc(.6)`, `V(Y.na("dlgSettingsRestart"))`, `R(!1)`; `R(t9)` (L1933) on a
+    // language change.
+    if (g_settings_restart_visible) {
+        draw_ui_label(app, s.panel.px + s.panel.pw * 0.5f - 750.0f * s.panel.c,
+                      s.notice_y - 25.0f * s.panel.c, 1500.0f * s.panel.c, 50.0f * s.panel.c,
+                      loc(app, "dlgSettingsRestart", "RESTART"), 0.75f, UiAlign::Center, 1.0f,
+                      1.0f, 1.0f);
+    }
+    // BACK (`Bb("EButtonDark")` L1930 -> `btnDark`), `Ge(0)` closes.
     if (!(load_sliced_atlas(app) &&
           draw_bb_plate(app, "btnDark", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 1.0f))) {
         draw_flat_button(app, "", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 0.35f, 0.3f, 0.28f,
-                         hover_ == 0);
+                         g_settings_hover == 0);
     }
     draw_ui_label(app, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f, s.btn_w, 28.0f,
                   loc(app, "Settings_Back", "BACK"), 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    // RESTART (`Bb("EButtonBeige")` L1930 -> `btnBeige`), revealed by L1931.
+    if (g_settings_restart_visible) {
+        if (!(load_sliced_atlas(app) &&
+              draw_bb_plate(app, "btnBeige", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h,
+                            1.0f))) {
+            draw_flat_button(app, "", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h, 0.6f, 0.5f,
+                             0.3f, g_settings_hover == 2);
+        }
+        draw_ui_label(app, s.restart_cx - s.btn_w * 0.5f, s.restart_cy - 14.0f, s.btn_w,
+                      28.0f, loc(app, "dlgServiceRestart", "RESTART"), 0.9f, UiAlign::Center,
+                      1.0f, 1.0f, 1.0f);
+    }
+}
+
+}  // namespace
+
+void SettingsScreen::render_impl(App& app) {
+    sf2::render::Renderer& ren = app.renderer();
+    // The `un extends od` dialog is the same surface the `za` nav #5 opens as
+    // an overlay (D13); `draw_quest_modal` (is_top) draws it here too.
     // D3: `Wb` is a GLOBAL overlay — the Settings screen shows + blocks on a
     // queued dialog (`Wb.Xob` L927 appends to the ACTIVE screen's content).
     draw_quest_modal(app, ren, app.screens().top() == this);
@@ -10572,6 +10861,20 @@ EngineDialog probe_dialog(const std::string& title) {
     d.lines.push_back(title + "_line");
     d.line_buttons.push_back(title + "_row");
     return d;
+}
+
+// A nested `Dialog` action with explicit attrs — the D8/D9/D10 parse path
+// (`He` L1043-1046) exercised through the real `run_actions` Dialog branch.
+QuestAction dialog_action(const std::map<std::string, std::string>& attrs,
+                          const std::string& line) {
+    QuestAction act;
+    act.tag = "Dialog";
+    act.attrs = attrs;
+    QuestAction line_a;
+    line_a.tag = "Line";
+    line_a.attrs["Text"] = line;
+    act.children.push_back(line_a);
+    return act;
 }
 
 } // namespace
@@ -10834,6 +11137,235 @@ bool run_quest_dialog_selfcheck(App& app) {
                  dialog_kind(d.type) == DialogKind::kIbBar);
     }
 
+    // --- D8: `He.SK` L1043 ReadTime -> `Ib.aa` L1905 auto-dismiss. ----------
+    {
+        // The default budget is `ge.ZGa` (`<NotificationDlgDefaultReadTime
+        // Value="1.0">`, internal_settings.xml L1278): an absent `ReadTime`
+        // resolves to it (`u.H(ReadTime, ge.ZGa)`).
+        q.clear_dialogs();
+        EngineDialog outer = probe_dialog("d8_parse");
+        outer.button_actions.push_back(
+            dialog_action({{"Type", "Notification"}, {"Title", "d8t"}, {"Line", "x"}},
+                          "d8_line"));
+        q.push_dialog_for_test(outer);
+        q.press_dialog(app, 1);
+        const bool default_rt = q.has_dialog() &&
+                                std::fabs(q.dialog().read_time - 1.0f) < 1e-4f;
+        dlg_case("D8 absent ReadTime -> ge.ZGa default 1.0 s (L1043/L1278)", default_rt);
+        q.clear_dialogs();
+        EngineDialog outer5 = probe_dialog("d8_parse5");
+        outer5.button_actions.push_back(dialog_action({{"Type", "Notification"},
+                                                       {"Title", "d8t5"},
+                                                       {"ReadTime", "5.0"}},
+                                                      "d8_line5"));
+        q.push_dialog_for_test(outer5);
+        q.press_dialog(app, 1);
+        dlg_case("D8 ReadTime=5.0 parsed onto the dialog (He L1043)",
+                 q.has_dialog() && std::fabs(q.dialog().read_time - 5.0f) < 1e-4f);
+        // `Ib.aa` L1905: `this.SK-=a; this.SK<=0&&(this.qma=!0)` -> `OZa` L1908.
+        q.clear_dialogs();
+        EngineDialog n = probe_dialog("d8_notif");
+        n.type = "Notification";
+        n.image = "character_sensei_small";
+        n.read_time = 5.0f;
+        q.push_dialog_for_test(n);
+        const bool not_yet = !quest_read_time_advance(app, 4.9f) && q.has_dialog();
+        dlg_case("D8 4.9 s of 5.0: the bar is still up (`SK-=a`)", not_yet);
+        const bool popped = quest_read_time_advance(app, 0.2f) && !q.has_dialog();
+        dlg_case("D8 5.1 s of 5.0: the bar auto-pops (`SK<=0 -> y4(false)`)", popped);
+        // `SK` only ever belongs to the `Notification` Type (L1050 `Qhb(..,SK,..)`).
+        q.clear_dialogs();
+        EngineDialog reg = probe_dialog("d8_reg");
+        reg.read_time = 5.0f;
+        reg.button_actions.push_back(marker_action("D8_REG"));
+        reg.button_text = "d8_cap";
+        q.push_dialog_for_test(reg);
+        dlg_case("D8 a Regular dialog ignores ReadTime (SK is the Ib bar)",
+                 !quest_read_time_advance(app, 9.0f) && q.has_dialog());
+    }
+
+    // --- D9: `He.S` L1046 `f=ba.Pc(a,this.title); r=ba.Pc(a,this.image)`. ----
+    {
+        WarriorSave w = app.save().load();
+        const bool had_t = w.variables.count("Title_Assistant") != 0;
+        const bool had_i = w.variables.count("Avatar_Assistant_1") != 0;
+        const std::string old_t = had_t ? w.variables["Title_Assistant"] : std::string();
+        const std::string old_i = had_i ? w.variables["Avatar_Assistant_1"] : std::string();
+        w.variables["Title_Assistant"] = "RESOLVED_TITLE";
+        w.variables["Avatar_Assistant_1"] = "RESOLVED_IMAGE";
+        app.save().save(w);
+
+        q.clear_dialogs();
+        EngineDialog outer = probe_dialog("d9_outer");
+        outer.button_actions.push_back(dialog_action(
+            {{"Type", "Regular"}, {"Title", "_Title_Assistant"},
+             {"Image", "_Avatar_Assistant_1"}},
+            "d9_line"));
+        q.push_dialog_for_test(outer);
+        q.press_dialog(app, 1);
+        const bool resolved = q.has_dialog() && q.dialog().title == "RESOLVED_TITLE" &&
+                              q.dialog().image == "RESOLVED_IMAGE";
+        dlg_case("D9 Title/Image run the quest-var resolution (ba.Pc L1046)", resolved);
+        // A plain lang key (sensei_arc.xml `NAME_LYNX`) passes through untouched.
+        q.clear_dialogs();
+        EngineDialog outer2 = probe_dialog("d9_outer2");
+        outer2.button_actions.push_back(dialog_action(
+            {{"Type", "Regular"}, {"Title", "NAME_LYNX"}, {"Image", "boss_lynx_young"}},
+            "d9_line2"));
+        q.push_dialog_for_test(outer2);
+        q.press_dialog(app, 1);
+        dlg_case("D9 a non-`_` Title stays literal (NAME_LYNX)",
+                 q.has_dialog() && q.dialog().title == "NAME_LYNX" &&
+                     q.dialog().image == "boss_lynx_young");
+
+        WarriorSave back = app.save().load();
+        if (had_t) back.variables["Title_Assistant"] = old_t;
+        else back.variables.erase("Title_Assistant");
+        if (had_i) back.variables["Avatar_Assistant_1"] = old_i;
+        else back.variables.erase("Avatar_Assistant_1");
+        app.save().save(back);
+    }
+
+    // --- D10: `He` L1043-1045 parse + `He.S` L1051 apply. -------------------
+    {
+        // D14 `v.RIa` L1222: split on `|`, basename after the last `/`, `flip`.
+        const DialogImageRef r1 = dialog_image_ref("boss_lynx_young|Flip");
+        dlg_case("D10 Mirrored -> image gets |Flip; RIa flags it (L1047/L1222)",
+                 r1.file_name == "boss_lynx_young" && r1.flip);
+        const DialogImageRef r2 = dialog_image_ref("UI/Items/img_unlimited_energy|Flip");
+        dlg_case("D10 RIa basenames a path ref (L1222)",
+                 r2.file_name == "img_unlimited_energy" && r2.flip);
+        const DialogImageRef r3 = dialog_image_ref("UI/Items/img_unlimited_energy");
+        dlg_case("D10 RIa without a flip token is unflipped",
+                 r3.file_name == "img_unlimited_energy" && !r3.flip);
+
+        q.clear_dialogs();
+        EngineDialog outer = probe_dialog("d10_outer");
+        outer.button_actions.push_back(dialog_action(
+            {{"Type", "Regular"},
+             {"Title", "d10t"},
+             {"Image", "boss_lynx_young"},
+             {"Mirrored", "1"},
+             {"ImageScale", "0.9"},
+             {"ImageOffsetX", "-130"},
+             {"ImageOffsetY", "40"},
+             {"ContentOffsetX", "30"},
+             {"TextOffset", "10;20"},
+             {"TextPosXByImage", "0"},
+             {"BlockRaycast", "0"},
+             {"DisableNotificationsButtons", "1"},
+             {"MinContentHeight", "777"}},
+            "d10_line"));
+        q.push_dialog_for_test(outer);
+        q.press_dialog(app, 1);
+        const EngineDialog& d = q.dialog();
+        dlg_case("D10 Mirrored parsed (L1043 n4a)", d.mirrored);
+        dlg_case("D10 image carries the |Flip token (L1047)",
+                 d.image == "boss_lynx_young|Flip");
+        dlg_case("D10 ImageScale parsed (L1044 iy)", std::fabs(d.image_scale - 0.9f) < 1e-4f);
+        dlg_case("D10 ImageOffsetX/Y parsed (L1044 OB/YV)",
+                 std::fabs(d.image_offset_x + 130.0f) < 1e-4f &&
+                     std::fabs(d.image_offset_y - 40.0f) < 1e-4f);
+        dlg_case("D10 ContentOffsetX parsed (L1044 TM)",
+                 std::fabs(d.content_offset_x - 30.0f) < 1e-4f);
+        dlg_case("D10 TextOffset \"x;y\" parsed (L1044 Xy)",
+                 std::fabs(d.text_offset_x - 10.0f) < 1e-4f &&
+                     std::fabs(d.text_offset_y - 20.0f) < 1e-4f);
+        dlg_case("D10 TextPosXByImage=0 parsed (L1045 LH)", !d.text_pos_x_by_image);
+        dlg_case("D10 BlockRaycast=0 parsed (L1044 $Ta)", !d.block_raycast);
+        dlg_case("D10 DisableNotificationsButtons=1 parsed (L1044 qUa)",
+                 d.disable_notifications_buttons);
+        dlg_case("D10 MinContentHeight parsed (L1044 cv -> Od.cv)",
+                 std::fabs(d.min_content_height - 777.0f) < 1e-3f);
+
+        // Apply (`He.S` L1051 -> `Od.ala` L1947 / `Jva` L1951 / `eba` L1950).
+        const OdLayout L = dialog_layout_for(app, d, DialogAnim{});
+        const float c = L.panel.c;
+        const float cx0 = L.panel.px + L.panel.pw * 0.5f;
+        const float cy0 = L.panel.py + L.panel.ph * 0.5f;
+        dlg_case("D10 ImageScale -> portrait 512*1.8*iy*c (L1947 `la(1.8*iy)`)",
+                 std::fabs(L.portrait - 512.0f * 1.8f * 0.9f * c) < 1e-2f);
+        dlg_case("D10 ImageOffsetX -> avatar x -450+OB (L1947 `C(-450+OB)`)",
+                 std::fabs(L.portrait_cx - (cx0 + (-450.0f - 130.0f) * c)) < 1e-2f);
+        dlg_case("D10 ImageOffsetY -> avatar y = YV (L1947 `D(YV)`)",
+                 std::fabs(L.portrait_cy - (cy0 + 40.0f * c)) < 1e-2f);
+        dlg_case("D10 TextPosXByImage=0 -> content x from 0 + TM + TextOffset "
+                 "(`Jva` L1951 / `eba` L1950)",
+                 std::fabs(L.body_x - (cx0 + (0.0f + 30.0f + 10.0f) * c)) < 1e-2f);
+        dlg_case("D10 TextOffset.y -> body top -Md/2 + ov.y (`eba` L1950)",
+                 std::fabs(L.body_y - (cy0 + (-L.md * 0.5f + 20.0f) * c)) < 1e-2f);
+
+        // The `Ib` gates: `BlockRaycast` gates the dim (L1050/L1907), `Ib.RP`
+        // gates the OK plate (L1910).
+        EngineDialog nt = probe_dialog("d10_notif");
+        nt.type = "Notification";
+        nt.button_actions.push_back(marker_action("D10_OK"));
+        nt.button_text = "OK";
+        dlg_case("D10 BlockRaycast=0 parsed and gates the Ib Uz overlay "
+                 "(L1050 h / L1907)",
+                 !notification_blocks_raycast(d));
+        nt.disable_notifications_buttons = true;
+        dlg_case("D10 DisableNotificationsButtons hides the OK plate (Ib.RP L1910)",
+                 !notification_show_ok(nt));
+        nt.disable_notifications_buttons = false;
+        dlg_case("D10 RP clear + a caption shows the OK plate (L1910)",
+                 notification_show_ok(nt));
+    }
+
+    // --- D14: the portrait resolves through the `RIa` registry. -------------
+    {
+        EngineDialog di = probe_dialog("d14_item");
+        di.item = "Chest_Gems";
+        dlg_case("D14 an Item composite wins over the Image (Od.$A L1945)", !di.item.empty());
+        EngineDialog dn = probe_dialog("d14_img");
+        dlg_case("D14 without an Item the Image is the RIa registry ref",
+                 dn.item.empty() &&
+                     dialog_image_ref(dn.image).file_name == dn.image);
+    }
+
+    q.clear_dialogs();  // the D8/D9/D10 parse cases leave their queued dialogs
+
+    // --- D13: nav #5 opens the Settings `un` dialog over the current screen. -
+    {
+        close_settings_dialog();
+        app.screens().push(make_screen(app.screens(), kScreenShop));
+        const int before = app.screens().current_id();
+        Screen* top = app.screens().top();
+        const bool on_shop = before == kScreenShop && top != nullptr;
+        if (top != nullptr) {
+            za_nav_activate(app, *top, static_cast<ScreenId>(before), 4);
+        }
+        const bool no_nav = on_shop && app.screens().current_id() == kScreenShop;
+        dlg_case("D13 nav #5 does NOT navigate (`Vfb` L1981 -> `Xc.Shb` L931)", no_nav);
+        dlg_case("D13 the Settings `un` dialog is open over the current screen",
+                 settings_dialog_open() && app.screens().current_id() == kScreenShop);
+        const bool blocks = quest_modal_consume(app);
+        dlg_case("D13 the open dialog blocks the screen beneath (`Wb` top)", blocks);
+        close_settings_dialog();
+        dlg_case("D13 closing the dialog releases the block", !quest_modal_consume(app));
+    }
+
+    // --- D15: RESTART hidden at open, revealed on a language change. --------
+    {
+        close_settings_dialog();
+        open_settings_dialog(app);
+        dlg_case("D15 RESTART + notice hidden at open (un `X(!1)`/`R(!1)` L1929/30)",
+                 !settings_dialog_restart_visible());
+        const SettingsLayout s_hidden = settings_layout();
+        dlg_case("D15 hidden: BACK centred, RESTART not offset (L1930)",
+                 std::fabs(s_hidden.back_cx - s_hidden.restart_cx) < 1e-3f);
+        settings_dialog_cycle_language(app);
+        const std::string saved = app.language().empty() ? "en" : app.language();
+        dlg_case("D15 a language change reveals RESTART (`t9`, L1931)",
+                 settings_dialog_restart_visible() && g_settings_lang != saved);
+        const SettingsLayout s_shown = settings_layout();
+        dlg_case("D15 revealed: BACK/RESTART split by width*.6 (L1931)",
+                 s_shown.back_cx < s_shown.restart_cx &&
+                     std::fabs((s_shown.restart_cx - s_shown.back_cx) - s_shown.btn_w * 1.2f) <
+                         1e-2f);
+        close_settings_dialog();
+    }
+
     // --- D3: the `Wb` dialog is a GLOBAL overlay (any screen, not just
     // Fight/Dojo/Map/Shop). `Wb.Xob` L927 appends the dialog node to the
     // ACTIVE screen's content root, so Results/Profile/Settings show + block.
@@ -10868,6 +11400,9 @@ bool run_quest_dialog_selfcheck(App& app) {
         }
     }
     q.clear_dialogs();
+    // D13: the Settings `un` dialog a pushed `SettingsScreen` hosts (the D3
+    // Settings iteration) must not leak into the next section.
+    close_settings_dialog();
 
     std::fprintf(stdout, "[dlgverify] %d passed, %d failed\n", g_dlg_passed, g_dlg_failed);
     std::fflush(stdout);

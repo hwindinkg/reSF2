@@ -213,6 +213,49 @@ std::string quest_var(App& app, const std::map<std::string, std::string>& locals
     return std::string();
 }
 
+// `ge.ZGa` (L1278): `u.H(<NotificationDlgDefaultReadTime Value>)` from
+// internal_settings.xml (<Basic>), statically 0 (L2481). The shipped file has
+// `Value="1.0"`, so an absent `ReadTime` attr on a Notification dismisses
+// after 1 s (L1043 `this.SK=u.H(ReadTime, ge.ZGa)`).
+float default_notification_read_time() {
+    static bool cached = false;
+    static float value = 0.0f;
+    if (cached) return value;
+    cached = true;
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in(std::string(kQuestResRoot) + "internal_settings.xml",
+                         std::ios::binary);
+        if (in) {
+            std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+            const pugi::xml_node root = doc.root().first_child();
+            const pugi::xml_node basic = root ? root.child("GUI").child("Basic") : pugi::xml_node();
+            const pugi::xml_node node = basic ? basic.child("NotificationDlgDefaultReadTime")
+                                              : pugi::xml_node();
+            if (node) value = static_cast<float>(std::atof(node.attribute("Value").as_string("")));
+        }
+    } catch (const std::exception&) {
+    }
+    return value;
+}
+
+// `Xy` L1044: the `TextOffset` vector literal ("x;y") -> an `H`. An absent
+// attr is `null` (the `He` ctor default `new H(0,0,0,1)`).
+void parse_text_offset(const std::string& v, float& x, float& y) {
+    x = 0.0f;
+    y = 0.0f;
+    if (v.empty()) return;
+    const std::size_t semi = v.find(';');
+    if (semi == std::string::npos) {
+        x = static_cast<float>(std::atof(v.c_str()));
+        return;
+    }
+    x = static_cast<float>(std::atof(v.substr(0, semi).c_str()));
+    y = static_cast<float>(std::atof(v.substr(semi + 1).c_str()));
+}
+
 // Resolves a `ShowBattle`/`HideBattle`/... `Name` attr into the `hb`
 // zone/name pair (a triple keeps its zone; a bare name uses the stages index).
 QuestBattleWrite battle_write_from(const std::string& triple, const std::string& zone_hint) {
@@ -803,8 +846,41 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             {
                 EngineDialog dlg;
                 dlg.type = attr_or(a.attrs, "Type");
-                dlg.title = attr_or(a.attrs, "Title");
-                dlg.image = attr_or(a.attrs, "Image");
+                // D9 `He.S` L1046: `f=ba.Pc(a,this.title); f=ba.Fz(f,a); r=
+                // ba.Pc(a,this.image)` — the `Title`/`Image` attrs run the SAME
+                // quest-variable resolution as the `Line` text (xml quests.xml
+                // L313 `Title="_Title_Assistant" Image="_Avatar_Assistant_1"`).
+                dlg.title = quest_var(app, locals, attr_or(a.attrs, "Title"));
+                dlg.image = quest_var(app, locals, attr_or(a.attrs, "Image"));
+                // D10 `He` L1043-1045 parse (see the appliers at `He.S` L1051).
+                dlg.mirrored = attr_bool01(attr_or(a.attrs, "Mirrored"));
+                // `He.S` L1047: `this.n4a&&(r+="|Flip")` — the mirror rides the
+                // image string that `v.RIa` L1222 parses.
+                if (dlg.mirrored) dlg.image += "|Flip";
+                dlg.image_scale = static_cast<float>(
+                    std::atof(attr_or(a.attrs, "ImageScale", "1").c_str()));
+                dlg.content_offset_x = static_cast<float>(
+                    std::atof(attr_or(a.attrs, "ContentOffsetX").c_str()));
+                dlg.image_offset_x = static_cast<float>(
+                    std::atof(attr_or(a.attrs, "ImageOffsetX").c_str()));
+                dlg.image_offset_y = static_cast<float>(
+                    std::atof(attr_or(a.attrs, "ImageOffsetY").c_str()));
+                parse_text_offset(attr_or(a.attrs, "TextOffset"), dlg.text_offset_x,
+                                  dlg.text_offset_y);
+                dlg.text_pos_x_by_image =
+                    attr_bool01(attr_or(a.attrs, "TextPosXByImage", "1"));
+                dlg.block_raycast = attr_bool01(attr_or(a.attrs, "BlockRaycast", "1"));
+                dlg.disable_notifications_buttons =
+                    attr_bool01(attr_or(a.attrs, "DisableNotificationsButtons"));
+                // D8 `He.SK` L1043: `u.H(ReadTime, ge.ZGa)`.
+                {
+                    const std::string rt = attr_or(a.attrs, "ReadTime");
+                    dlg.read_time = rt.empty()
+                                        ? default_notification_read_time()
+                                        : static_cast<float>(std::atof(rt.c_str()));
+                }
+                // `He.ah` L1045: the `Item` attr the portrait prefers (L1046).
+                dlg.item = attr_or(a.attrs, "Item");
                 // `He.L` L1044 `Loot` (`ShowLoot` -> `Xc.Uhb` L929 splits it on
                 // `|`) and `MinContentHeight` (`Od.cv`, the `Md` floor).
                 dlg.min_content_height = static_cast<float>(

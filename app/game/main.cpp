@@ -415,8 +415,10 @@ static const UiTourStep kUiTourSteps[] = {
     {640.0f, 360.0f, "results->map", 10, 10, 5, 0, nullptr},
     // 13: Map -> Dojo (BACK).
     {64.0f, 40.0f, "map->dojo (post-fight)", 5, 10, 3, 0, nullptr},
-    // 14: Dojo -> Settings (nav row 4 @184,547).
-    {184.0f, 547.0f, "dojo->settings", 3, 10, 11, 0, "port_settings.png"},
+    // 14: Dojo -> Settings (nav row 4 @184,547). D13: nav #5 opens the `un`
+    //     dialog OVER the Dojo (`Vfb` L1981 -> `Xc.Shb` L931) — it does NOT
+    //     navigate, so the step expects to STAY on the Dojo (id 3).
+    {184.0f, 547.0f, "dojo->settings", 3, 10, 3, 0, "port_settings.png"},
 };
 constexpr int kUiTourStepCount = static_cast<int>(sizeof(kUiTourSteps) / sizeof(kUiTourSteps[0]));
 
@@ -443,9 +445,13 @@ static const UiTourStep kFidelitySteps[] = {
     // (tutorial_move -> tutorial_punchbag -> the characterSensei Regular
     // dialog + dlgStoryBtnFight).
     // 0: beat 0 notification ("tutorial_move") -> tut_fight_stance.
-    {0.0f, 0.0f, "tut stance (move notification)", 3, 150, -1, 90, "tut_fight_stance.png", 0, true},
+    //    The beat notifications carry `ReadTime="5.0"` (tutorial_quests.xml
+    //    L26/L31), so the scripted taps below must land inside that window
+    //    (`Ib.aa` L1905 auto-dismisses) — the pre-ReadTime timing held 240
+    //    frames, which ran past 5 s and shifted the beats.
+    {0.0f, 0.0f, "tut stance (move notification)", 3, 60, -1, 30, "tut_fight_stance.png", 0, true},
     // 1: tap the notification banner -> beat 1 ("tutorial_punchbag").
-    {1145.0f, 244.0f, "tut phase2 (punchbag notification)", 3, 10, -1, 50, "tut_fight_phase2.png", 0, false},
+    {1145.0f, 244.0f, "tut phase2 (punchbag notification)", 3, 10, -1, 30, "tut_fight_phase2.png", 0, false},
     // 2: tap -> the Regular Sensei training-fight dialog. `tut_block`'s oracle
     //    frame (`oracle_matrix/tut_block.png`, sourced from
     //    oracle_tutorial_punchbag) IS that modal (СЭНСЭЙ portrait + В БОЙ).

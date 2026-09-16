@@ -639,10 +639,23 @@ public:
     void on_key(int glfw_key, bool down) override;
 
 private:
-    bool music_off_ = false;
-    int hover_ = -1;
-    int age_ = 0;  // frames since push (BACK press debounce)
+    int age_ = 0;  // frames since push (press debounce)
 };
+
+// --- D13/D15 the Settings `un` dialog (JS L1916-1930) -----------------------
+// `Xc.Shb()` (L931) = `Wb.openDialog(310,null)`; `Wb.Xob` case 310 (L926)
+// builds `new un`, a `Wb` dialog appended to the ACTIVE screen (L927). The `za`
+// nav button #5 (`Vfb` L1981) opens it OVER the current screen — it does NOT
+// navigate (`ma.Jg().jI(11)` was the port's invention). `SettingsScreen`
+// (the native `make_screen(kScreenSettings)` path) hosts the same dialog.
+bool settings_dialog_open();
+void open_settings_dialog(App& app);
+void close_settings_dialog();
+// `un.rHa` case 4 (L1931): advance `$u` through `iv` (L2477
+// `"en de it fr pt ru es tr ja ko"`); RESTART is revealed iff `$u != G.Rq()`.
+void settings_dialog_cycle_language(App& app);
+// D15: `Nm`/`Km` visibility (`R(t9)`/`X(t9)`) — hidden until a language change.
+bool settings_dialog_restart_visible();
 
 // The shared item catalog (the shop list + the equipment item lookup).
 // Loaded once from list.xml and cached.

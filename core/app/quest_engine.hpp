@@ -135,6 +135,34 @@ struct EngineDialog {
     // L1898 applies to the measured content height (`Od.lj` L1950
     // `Math.max(kb.ew(), this.cv)`).
     float min_content_height = 0.0f;
+    // --- D10 dialog attrs (`He` L1043-1045 parse, `He.S` L1051 apply) --------
+    // `Mirrored` -> `n4a` L1043, applied L1047 (`this.n4a&&(r+="|Flip")`, so the
+    //   parse appends "|Flip" to `image`; `v.RIa` L1222 detects it).
+    // `ImageScale` -> `iy` L1044, applied L1947 (`Zg.la(1.8*this.iy)`).
+    // `ContentOffsetX` -> `TM` L1044, applied to the content x (`Jva` L1951).
+    // `ImageOffsetX/Y` -> `OB`/`YV` L1044, applied L1051 `VLa`/`WLa`.
+    // `TextOffset` -> `ov` L1044 (`Xy`), applied L1051 `mMa` + `eba` L1950.
+    // `TextPosXByImage` -> `LH` L1045, applied L1051 `nMa` (`Jva` L1951).
+    // `BlockRaycast` -> `$Ta` L1044, the `Ib.Qhb(...,h)` L1050 dim gate.
+    // `DisableNotificationsButtons` -> `qUa` L1044 -> `Ib.RP` (L1045/L1050),
+    //   gating the notification OK plate (`Ib.Sr` L1910 `Ib.RP?b=!1:...`).
+    bool mirrored = false;
+    float image_scale = 1.0f;
+    float content_offset_x = 0.0f;
+    float image_offset_x = 0.0f;
+    float image_offset_y = 0.0f;
+    float text_offset_x = 0.0f;
+    float text_offset_y = 0.0f;
+    bool text_pos_x_by_image = true;
+    bool block_raycast = true;
+    bool disable_notifications_buttons = false;
+    // D8 `He.SK` L1043 (`u.H(ReadTime, ge.ZGa)`): the `Ib` bar's auto-dismiss
+    // budget in seconds (`Ib.aa` L1905 `this.SK-=a; this.SK<=0&&(this.qma=!0)`
+    // then `OZa` L1908 -> `y4(!1)`). Zero disables the countdown.
+    float read_time = 0.0f;
+    // `He.ah` L1045 `Item` -> L1046 `x=ba.Pc(a,this.ah); x=p.items.$b(x)`, whose
+    // `Ev` composite the portrait prefers (`Od.$A` L1945 `new or(this.sV)`).
+    std::string item;
     // `He.L` L1044 `Loot` -> the `ShowLoot` type's item list (`Xc.Uhb` L929:
     // `ba.Pc(a,this.IN).split("|")`, offers.xml is the only shipped one).
     std::vector<std::string> loot;
