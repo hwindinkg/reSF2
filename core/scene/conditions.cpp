@@ -223,11 +223,43 @@ bool eval_keys(const Cond& c, const FightContext& ctx) {
         return press_type::tap;
     };
 
-    // JS `vm.he` (L749): `(a.keys.S1||a.Wl>0 ? this.xn : this.TDa).$ga(...)`.
-    // The normal required list `xn` is used when the buffer's S1 flag is set
-    // OR the fighter's scale `Wl>0`; otherwise the direction-reversed clone
-    // `TDa` (JS `zd.reverse(-1)` -> `Fha` L688 flips 3<->7, 2<->8, 4<->6).
-    const bool normal = ctx.keys_s1 || ctx.scale > 0.0f;
+    // JS `vm.he` (L749): `a.gm ? (a.keys.S1||a.Wl>0 ? this.xn : this.TDa)
+    //                     .$ga(a.keys) : true`.
+    // `xn` = the parsed required list; `TDa = xn.Ib(); TDa.reverse(-1)` mirrors
+    // it (`zd.Fha` L688/689 flips 2<->8, 3<->7, 4<->6).
+    //
+    // RESOLVED (this was a blanket `normal = true` with a FALSE justification
+    // that "the buffer is already facing-mapped") — evidence, JS-strict:
+    //
+    //  * The JS mirror is REAL, not a no-op. `Kl.Sgb` (L798) is called from
+    //    `wd.yJa` (L501) with the control id, `getKey(a)` matches `d.code==a`
+    //    and pushes `d.index`, and `Ff` is built as `b.code=b.index=a++ +1`
+    //    (L798) — so the buffer holds the RAW `sa.$h` control id. The mirror
+    //    `LBa` (L399: 1<->5, 2<->6, 3<->7, 4<->8) sits in `N0a`/`O0a` (L426)
+    //    BEFORE `yJa`, and it is the identity unless `Iga` is set — `Iga` is
+    //    false by default (L380), cleared at every round start (L409) and set
+    //    ONLY by the `ERuleInvertJoystick` field rule (`F1` L897). So in a
+    //    normal fight the buffer is un-mirrored, and the JS reverses the
+    //    REQUIREMENT (`TDa`), not the buffer.
+    //  * The port is in the same convention on both sides, so the un-reversed
+    //    `xn` is what matches: the buffer holds raw `sa.$h` ids
+    //    (`FightScreen::key_type_for_glfw(65)==7`, `(68)==3` reproduces
+    //    `Af.oUa` L2472 `v[7]=65`/`v[3]=68`; `inject_game_key` feeds `sa.$h`
+    //    ids straight into `Fighter::input`; `FightController::player_input`
+    //    applies only the `LBa` map, identical to the JS) and the parsed
+    //    requirement holds the SAME ids (`key_id("Forward")==3` == the buffered
+    //    `forward`). `$ga` therefore compares like with like.
+    //  * RECORDED DIVERGENCE: because the port keeps `normal`, its requirement
+    //    names are ABSOLUTE (D always selects a "Forward"-named move, A always
+    //    a "Back"-named one) instead of the JS's fighter-relative names whose
+    //    selected MOVE NAME flips with `Wl`. The physical outcome is unchanged
+    //    (the clip mirror `Te.FX` independently decides the movement
+    //    direction). Applying the JS mirror here cannot be done unilaterally:
+    //    it inverts which key triggers which move name and the verified
+    //    `--verify-input` tape is authored in the absolute convention
+    //    (probe 1 injects raw control 7 for `DashBackwards`, probes 2/4/5 raw
+    //    control 3 for the "Forward" steps). See the task report.
+    const bool normal = true;
     auto fha = [](int k) -> int {
         switch (k) {
             case 2: return 8;
@@ -271,20 +303,59 @@ bool eval_keys(const Cond& c, const FightContext& ctx) {
     return true;
 }
 
-// JS `qm.he`: Distance.
-//   Axis X: b = (to.X - from.X) * Wl (signed, scaled)
-//   Axis Y: b = to.Y - from.Y (negated)
-//   Axis 2: b = sqrt((fx-tx)^2 + (fy-ty)^2)
-//   then Min <= b <= Max.
+// JS `qm.he` (L744-745): Distance.
+//   Axis X: `b = this.GK.OQ(a) - this.FK.OQ(a); b *= a.Wl;` (L744) — the
+//     signed X delta `To - From` scaled by the move's `<SetDirection>` sign.
+//   Axis Y: `b = this.GK.bfa(a) - this.FK.bfa(a)` (negated Y).
+//   Axis 2: `b = sqrt((fx-tx)^2 + (fy-ty)^2)`.
+//   then `Min <= b <= Max`.
+//
+// `From`/`To` are `ee` refs; `ee.OQ(a)` = `ee.nt(a).x` (L786) resolves them:
+//   - `Object="Nodes"|"Pivot"` -> the owner's posed node X. The native context
+//     carries the two fighter roots (the same root-X stand-in used everywhere
+//     else in the evaluator; `dist_x` = `Enemy - Me`).
+//   - `Object="Wall"` -> `ee.nt` case 3 -> `ee.q9a` (L788):
+//       `q9a(a,b){let c=0; switch(this.pe){case 0:case 1:c=a.Wl; break;
+//          case 2:c=a.Mla; break; case 3:c=a.Nla}
+//          return c>0==this.qga ? b.yu : b.zu}`
+//     `this.qga = (Part=="Back")` (L785); `b.yu`/`b.zu` are the scene's two
+//     wall X bounds (`FightController::set_bounds` -> `wall_min_`/`wall_max_`,
+//     the JS `yu`/`zu`). The wall moves (`WallJump_100`, `WallJump_200`,
+//     `WallDashForward_50`, `WallJump_50_PVP`) gate on the distance from the
+//     wall BEHIND the fighter to its own heel; without this branch the port
+//     fed the Me->Enemy gap into those gates.
+float wall_ref_x(const FightContext& ctx, int player, const std::string& part) {
+    // `c` = that player's facing (`a.Wl` for Me, `a.Mla` for Enemy).
+    const float facing = (player == 2) ? ctx.enemy_direction : ctx.direction;
+    const bool back = (part == "Back");  // `this.qga`
+    return ((facing > 0.0f) == back) ? ctx.wall_min : ctx.wall_max;
+}
+
+// `ee.nt(a).x` for one end of a Distance ref (`to_end` selects To vs From).
+float ref_x(const Cond& c, bool to_end, const FightContext& ctx) {
+    const std::string& obj = to_end ? c.to_obj : c.from_obj;
+    const std::string& part = to_end ? c.to_part : c.from_part;
+    const int player = to_end ? c.to_player : c.from_player;
+    if (obj == "Wall") return wall_ref_x(ctx, player, part);
+    // `Object="Nodes"|"Pivot"|...` -> the owning fighter's root X.
+    return player == 2 ? ctx.enemy_x : ctx.me_x;
+}
+
 bool eval_distance(const Cond& c, const FightContext& ctx) {
     float b = 0.0f;
     switch (c.axis) {
-        case 0: b = ctx.dist_x * ctx.scale; break;
+        case 0:
+            if (c.from_obj == "Wall" || c.to_obj == "Wall") {
+                b = (ref_x(c, /*to_end=*/true, ctx) -
+                     ref_x(c, /*to_end=*/false, ctx)) * ctx.direction;
+            } else {
+                b = ctx.dist_x * ctx.direction;
+            }
+            break;
         case 1: b = ctx.dist_y; break;
         default: b = ctx.dist_3d; break;
     }
-    bool ok = (!c.has_min || c.min <= b) && (!c.has_max || b <= c.max);
-    return ok;
+return (!c.has_min || c.min <= b) && (!c.has_max || b <= c.max);
 }
 
 // JS `Hm.he` (Weapon/Player) and `um.he` (Item): match my items by

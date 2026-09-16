@@ -294,6 +294,15 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
     ctx.anims_me = {st.my_anim};
     ctx.anims_enemy = {st.enemy_anim};
     ctx.dist_x = st.enemy_x - st.my_x;
+    ctx.me_x = st.my_x;
+    ctx.enemy_x = st.enemy_x;
+    // JS `Ae.Wl` (`Vi.SBa` L704): the move's `<SetDirection>` sign =
+    // sign(enemy - me); identical to the sign of `dist_x`.
+    ctx.direction = ctx.dist_x >= 0.0f ? 1.0f : -1.0f;
+    ctx.enemy_direction = -ctx.direction;
+    // `AiFightState` carries no location bounds, so the `Object="Wall"`
+    // Distance refs (`ee.q9a` L788) fall back to the context defaults — the
+    // shipped dojo walls (`FightController` `wall_min_`/`wall_max_`).
     ctx.dist_3d = std::fabs(ctx.dist_x);
     ctx.health_ratio = st.my_max_hp > 0.0f ? st.my_hp / st.my_max_hp : 1.0f;
     ctx.candidate_moves = {m.name};

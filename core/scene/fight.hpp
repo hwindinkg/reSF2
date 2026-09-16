@@ -1514,6 +1514,12 @@ private:
     const FightFighter& round_winner_by_hp() const;
     // The per-fighter update (AI / input + move execution + physics).
     void update_fighter(FightFighter& me, FightFighter& foe, float dt);
+    // Stamps the condition context's geometry: the two fighter roots, the
+    // signed gap, the move facing sign `Ae.Wl` (`Vi.SBa` L704) and the scene
+    // wall bounds the `Object="Wall"` Distance refs resolve against (`ee.q9a`
+    // L788). `me`/`foe` are the two sides in `To - From` = `foe - me` order.
+    void fill_ctx_geometry(FightContext& ctx, const FightFighter& me,
+                           const FightFighter& foe) const;
     // Builds one fighter (shared init helper). `weapon_subtype` selects the
     // TacticWeapon-based move list; `owned` (when non-empty) selects the
     // Locks-based list (JS `ra.Hza`). `not_ai` = JS `Fj==false` (NotAI, no

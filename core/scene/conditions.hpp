@@ -65,7 +65,7 @@ enum class round_stage : int {
 //   Oga/BEa/CEa = physics flags per player (lg.d7a)
 //   Mla/Nla = enemy facing/direction (pm.he Direction)
 //   sign = player facing (pm.he)
-//   Wl = player scale (qm.he Distance)
+//   Wl = the move's `<SetDirection>` sign (qm.he Distance + vm.he Keys)
 struct FightContext {
     // --- animation names currently active on the fighter/player slots ----
     std::vector<std::string> anims_me;     // XH (slot 1) — "my" animations
@@ -128,10 +128,39 @@ struct FightContext {
     // Precomputed distance between the From/To object refs. JS computes it
     // per axis from the two `ee` object refs; the native context fills the
     // 3 values (dx, dy, dist3d) and the evaluator picks by `axis`.
-    float dist_x = 0.0f;   // signed X delta (enemy - me, in scale units)
+    // `dist_x` is `To.OQ(a) - From.OQ(a)` (JS L744) — for every shipped move
+    // the pair is `<From Player="Me" Object="Nodes" Part="NPivot"/>` /
+    // `<To Player="Enemy" Object="Nodes" Part="NPivot"/>` (moves.xml, e.g.
+    // ShortUpwardElbowStrike / DoublePunch / DashBackwards / WallDashForward_50
+    // / WallJump_200 each carry that exact `<SetDirection>`), i.e. `enemy - me`.
+    float dist_x = 0.0f;   // signed X delta (`To - From` = enemy - me)
     float dist_y = 0.0f;   // Y delta
     float dist_3d = 0.0f;  // Euclidean 2D distance (JS qm case 2)
-    float scale = 1.0f;    // `Ae.Wl` (fighter scale, multiplies X distance)
+    // The two fighter roots, kept separately so `Object="Wall"` Distance refs
+    // can resolve their non-wall end (`ee.nt` L786). `dist_x == enemy_x - me_x`.
+    float me_x = 0.0f;     // this fighter's world X (`Me/...` refs)
+    float enemy_x = 0.0f;  // the opponent's world X (`Enemy/...` refs)
+    // The scene's two wall X bounds (JS `b.yu`/`b.zu`, `ee.q9a` L788) — filled
+    // from `FightController::set_bounds` (`wall_min_`/`wall_max_`). `q9a` picks
+    // by `(facing>0)==(Part=="Back") ? yu : zu`, and `yu` is the LEFT bound:
+    // facing right puts the fighter's back to the min-X wall.
+    float wall_min = 80.0f;
+    float wall_max = 1880.0f;
+    // JS `Ae.Wl`. Set once per candidate move at L677
+    //   `var l = b.jb!=null ? f.xD(this.Ek[d], b.da.hd()) : 1; this.Ek[d].Wl = l;`
+    // `xd(a,b){return this.va.vj.mh?this.va.vj.SBa(a):b}` (L697) with
+    // `Vi.SBa(a){return (this.fg!=0 ? … : this.to.OQ(a)-this.from.OQ(a))>=0?1:-1}`
+    // (L704) — so `Wl` is the sign of the move's `<SetDirection>` `To - From`,
+    // falling back to the model facing `hd()`. `qm.he` case 0 multiplies the X
+    // delta by it (L744 `b=this.GK.OQ(a)-this.FK.OQ(a);b*=a.Wl;`), which turns
+    // the raw signed delta into the FORWARD distance the gates are authored
+    // around (the shipped `Me -> Enemy` SetDirection makes this `|dist_x|`).
+    // `vm.he` (L749) also reads it: `a.keys.S1||a.Wl>0 ? this.xn : this.TDa`.
+    float direction = 1.0f;  // `Ae.Wl` (`sb.SBa` = sign(enemy - me))
+    // The OPPONENT's own `Wl` (JS `Ae.Mla` = `d.hd()`, L679). For a
+    // `Me -> Enemy` SetDirection the other side's sign is the negation of ours,
+    // so it is derived rather than tracked separately.
+    float enemy_direction = -1.0f;
 
     // --- health (rm.he) ---------------------------------------------------
     float health_ratio = 1.0f;  // yDa / zDa (current/max)

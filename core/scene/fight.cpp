@@ -2093,6 +2093,22 @@ void FightController::tick_bus_side(int side) {
 }
 
 
+void FightController::fill_ctx_geometry(FightContext& ctx, const FightFighter& me,
+                                       const FightFighter& foe) const {
+    // JS `qm.he` L744 reads `To.OQ(a) - From.OQ(a)` per ref; the native
+    // context carries the two roots (`Enemy - Me`) plus the wall bounds so the
+    // `Object="Wall"` refs can be resolved (`ee.q9a` L788).
+    ctx.me_x = me.fighter.world_x();
+    ctx.enemy_x = foe.fighter.world_x();
+    ctx.dist_x = ctx.enemy_x - ctx.me_x;
+    ctx.dist_3d = std::fabs(ctx.dist_x);
+    // JS `Ae.Wl` (`Vi.SBa` L704, from the move's `<SetDirection>`).
+    ctx.direction = ctx.dist_x >= 0.0f ? 1.0f : -1.0f;
+    ctx.enemy_direction = -ctx.direction;
+    ctx.wall_min = wall_min_;
+    ctx.wall_max = wall_max_;
+}
+
 void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_type press) {
     // JS `ca.LBa` (L399) via `N0a`/`O0a` (L426): when `Iga` (the
     // InvertJoystick flag, set by `F1` L897) is live, a directional control
@@ -2432,8 +2448,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         rctx.stage = sf2::scene::round_stage::fight;
         rctx.anims_me = {def.fighter.current_move() ? def.fighter.current_move()->name : ""};
         rctx.anims_enemy = {atk.fighter.current_move() ? atk.fighter.current_move()->name : ""};
-        rctx.dist_x = atk.fighter.world_x() - def.fighter.world_x();
-        rctx.dist_3d = std::fabs(rctx.dist_x);
+        fill_ctx_geometry(rctx, def, atk);
         rctx.health_ratio = def.max_hp > 0.0f ? def.hp / def.max_hp : 0.0f;
         rctx.last_hit_type = hit_critical ? "Critical" : (rec.shock ? "Shock" : "");
         rctx.candidate_moves = {};
@@ -2656,8 +2671,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
         // JS `Dm.he` Player condition source (`a.qb=b.parameters.qb` L680).
         ctx.qb = me.is_player;
-        ctx.dist_x = foe.fighter.world_x() - me.fighter.world_x();
-        ctx.dist_3d = std::fabs(ctx.dist_x);
+        fill_ctx_geometry(ctx, me, foe);
         ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
         const std::string chosen = me.fighter.try_select_move(ctx);
         if (!chosen.empty()) {
@@ -2718,8 +2732,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             ctx.anims_me = {idle_name, me.is_player ? "StanceLeft" : "StanceRight"};
             ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name
                                                           : idle_name};
-            ctx.dist_x = foe.fighter.world_x() - me.fighter.world_x();
-            ctx.dist_3d = std::fabs(ctx.dist_x);
+            fill_ctx_geometry(ctx, me, foe);
             ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
             me.fighter.ai_start_move(idle_it->second, ctx);
         }
@@ -2788,8 +2801,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
             ctx.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
             ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
-            ctx.dist_x = foe.fighter.world_x() - me.fighter.world_x();
-            ctx.dist_3d = std::fabs(ctx.dist_x);
+            fill_ctx_geometry(ctx, me, foe);
             ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
             if (me.fighter.ai_start_move(it->second, ctx)) {
                 ++me.moves_started;
@@ -2842,8 +2854,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 c.stage = static_cast<sf2::scene::round_stage>(phase_);
                 c.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
                 c.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
-                c.dist_x = foe.fighter.world_x() - me.fighter.world_x();
-                c.dist_3d = std::fabs(c.dist_x);
+                fill_ctx_geometry(c, me, foe);
                 c.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
                 return c;
             };
@@ -2873,8 +2884,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                     ctx.anims_enemy = {foe.fighter.current_move()
                                            ? foe.fighter.current_move()->name
                                            : ""};
-                    ctx.dist_x = foe.fighter.world_x() - me.fighter.world_x();
-                    ctx.dist_3d = std::fabs(ctx.dist_x);
+                    fill_ctx_geometry(ctx, me, foe);
                     ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
                     if (sf2::scene::eval_move_conditions(kv.second.tactics, ctx)) {
                         chosen = &kv.second;
@@ -2890,8 +2900,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 ctx.anims_enemy = {foe.fighter.current_move()
                                        ? foe.fighter.current_move()->name
                                        : ""};
-                ctx.dist_x = foe.fighter.world_x() - me.fighter.world_x();
-                ctx.dist_3d = std::fabs(ctx.dist_x);
+                fill_ctx_geometry(ctx, me, foe);
                 ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
                 if (me.fighter.ai_start_move(*chosen, ctx)) {
                     ++me.moves_started;
