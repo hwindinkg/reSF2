@@ -351,6 +351,39 @@ struct BattleRecord {
         if (money_prize > 0) money += money_prize;   // `exb` L2199
         if (bonus_prize > 0) bonus += bonus_prize;   // `exb` L2199
     }
+
+    // "New move" trick list (JS `Bt.NN`, `<OpenTricks><Trick Name=".."/>`).
+    // On save parse (`ht` L250) every `<Trick Name>` calls `Nua(name, false)`
+    // (L268), which pushes `NN` and sets `aE = true` on the matching `Ru`
+    // catalog entry (`ra.zfa()`). `Bt.sCa` (L256) - profile tab 1's badge -
+    // counts the CURRENT WEAPON's `v.uQ()` entries with `aE`; the Moves tab
+    // clears them on entry (`es.zha` L2239 -> `Bt.inb` L269 + save).
+    std::vector<std::string> open_tricks;
+
+    bool has_open_trick(const std::string& name) const {
+        for (const std::string& t : open_tricks) {
+            if (t == name) return true;
+        }
+        return false;
+    }
+
+    void clear_open_tricks() { open_tricks.clear(); }  // `es.zha` L2239
+
+    // "New item" list (JS `Bt.bM`/`Gjb`, `<CounterItems><Items><Item
+    // Name=".."/>`). `bM` (L269) persists every `p.items.Xm` def whose `yj`
+    // flag is set; `Gjb` (L269) restores `Ir(true)` on the named defs, gated
+    // on `gU == 0` (`SilentRecieve`). `Bt.vCa` (L256) - profile tab 3's
+    // badge - counts the owned `I.Vr` (Seal) rows with `pd() > 0` and
+    // `ib.yj`. All seven shipped `Type="Seal"` rows carry
+    // `SilentRecieve="0"`, so the `gU` gate is vacuous for them.
+    std::vector<std::string> counter_items;
+
+    bool has_counter_item(const std::string& name) const {
+        for (const std::string& i : counter_items) {
+            if (i == name) return true;
+        }
+        return false;
+    }
 };
 
 // Loads/saves the users.xml document. Portable C++17 — the path is passed

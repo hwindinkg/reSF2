@@ -522,6 +522,16 @@ public:
         std::string name;
         std::string type;
         int priority = 0;
+        // JS `Ru` (L1253) fields added by `Fa.Ueb` L712 from the move's
+        // `<Profile>` child: `image` = `Ye.qI(Icon)` (the `skills` atlas
+        // frame, drawn by `ls`/`Ed.ZL` L2203), `keys` = `KeysDescription`
+        // (`ls.ymb` L2238 label), `rank` = `v4` (the `es.uZ` L2239 order).
+        std::string image;
+        std::string keys;
+        int rank = 0;
+        // `ra.Ul` (L712) document order - the STABLE tie-break of the
+        // `es.uZ` (L2239) `pb(a.v4,b.v4)` sort when `Rank` values are equal.
+        int order = 0;
     };
 
     // One `gs` seal row (JS `gs.TA` entries, L2231; cell `js` L2232).
@@ -572,6 +582,12 @@ private:
     std::string weapon_ = "Fists";
     std::vector<MoveRow> move_rows_;
     int move_total_ = 0;
+    // `cs` tab badges (JS `Eg.GU` L1853 -> `Le.badge.lk(getCounterValue)`).
+    // Index = the `cs.Tw` tab id; `cs.getCounterValue` (L2189) defines each
+    // one (0 `co.uCa` L305, 1 `sCa` L256, 2 `yi.rCa` L294, 3 `vCa` L256).
+    // `Dg.lk` (L1850) hides a zero badge (`node.R(a > 0)`), so all-zero rows
+    // render nothing - which is exactly the shipped fresh-save state.
+    int tab_badges_[4] = {0, 0, 0, 0};
     // Ported `gs` SEALS tab data (owned `I.Vr` rows, L2231).
     std::vector<SealRow> seal_rows_;
     // Ported `ds` PERK TREE (tab 0) rows, L2227.

@@ -332,6 +332,16 @@ void draw_ui_label(App& app, float x, float y, float w, float h,
     (void)app.draw_text(dx, y, text, scale, r, g, b);
 }
 
+// JS `ea.ua(px)` -> glyph scale for a font size in PIXELS: `Qh.print` (L1631)
+// divides by `charset.eF` (the BMF line height), so the `ua_scale` param of
+// `draw_ui_label` is `px / eF` (it applies `ea.a1` itself). Same convention as
+// the boot splash (`app.cpp` `jo_scale`).
+float ui_ua_scale(App& app, float px) {
+    const sf2::data::font* f = app.menu_font();
+    const float eF = (f != nullptr && f->size > 0) ? static_cast<float>(f->size) : 100.0f;
+    return px / eF;
+}
+
 // JS `Y.na(key, ...)` (L917): the runtime string-table lookup (`Cc.F().ln`,
 // L920). Returns the localized text when the key is in the loaded table, else
 // `fallback` — never a raw key. The table ships as `res/lang/en.<hash>.xml`
@@ -9237,12 +9247,14 @@ void ShopScreen::render_impl(App& app) {
 //       seal def's `yj` flag.
 // `Eg.GU()` (L1853) pushes each value into `Le.badge.lk(...)` (`Dg` L1850:
 // notification_circle / notification_ellipse at local (71,48), `ba(72)`).
-// PORT BLOCKER (still OPEN): the move `aE` and item `yj` "new" flags are not
-// exposed by `SaveSystem` (core/app/save_system.*), so counters 1/3 cannot be
-// evaluated here; the profile strip therefore draws no badge yet. The banner
-// badges the audit flagged as missing are a real gap, not an undefined one.
-// The `Dg.ba(65)`/`Ia(128)` geometry is ported in `draw_za_chrome`'s badge
-// path.
+// All four are computed by `profile_badges` below: the move `aE` flag is the
+// save's `<OpenTricks>` (`Bt.parse` L250 -> `Nua` L268) and the item `yj` flag
+// the save's `<CounterItems>` (`Bt.Gjb` L269) - both now carried by
+// `WarriorSave::open_tricks` / `WarriorSave::counter_items`. On every shipped
+// fresh save both lists are empty, so the strip draws NO badge (which is what
+// the oracle `profile_tab*` captures show). The `gs.zha` (L2231) and
+// `es.zha` (L2239) sub-view hooks clear those flags on tab entry (see
+// `EquipmentScreen::update_impl`).
 // ---------------------------------------------------------------------------
 constexpr int kProfileTabCount = 4;
 constexpr int kProfileTabLeveling = 0;  // `ds` leveling tab (`Rl=ds` L2227) — perk tree body
@@ -9274,6 +9286,10 @@ struct ProfileTabLayout {
     float step = 0.0f;   // centre-to-centre
     float btn_w = 0.0f;
     float btn_h = 0.0f;
+    // `Eg.aa` (L1852) scale `c = this.height / button.Y.fa.y` applied to every
+    // button NODE (`g.node.la(c)`) - the badge `Dg` is a child of that node, so
+    // its `C(71)`/`D(48)`/`ba(72)` are in button-local units times this.
+    float btn_scale = 1.0f;
 };
 
 ProfileTabLayout profile_tab_layout() {
@@ -9284,6 +9300,7 @@ ProfileTabLayout profile_tab_layout() {
     const float scale = t.bar_h / kSrcH;             // Eg: height/button.Y.fa.y
     t.btn_h = t.bar_h;
     t.btn_w = kSrcW * scale;
+    t.btn_scale = scale;
     constexpr float kSpread = 1.2f;                  // Eg `b` (lc>1 clamp)
     t.step = t.btn_w * kSpread;
     const float total = t.btn_w + t.step * static_cast<float>(kProfileTabCount - 1);
@@ -9329,6 +9346,82 @@ ProfileLayout profile_layout() {
     return l;
 }
 
+// JS `Xd`/`Gg` slider row geometry. `Xd.Pn(a)` (L2185) sizes the `Fg` scroll
+// (`scroll.ba(a.N-a.J, a.W-a.P, (a.N-a.J)*.08)`) and then sizes the `Gg` cell
+// list `Pa.ba(this.scroll.Gv - 8, this.scroll.Xy)`. `Fg.ba` case 0 (L1870)
+// with `c = .08*w` and both `Zh` rails present (`d = 2`) gives
+//     Gv = w - 2*c = 0.84*w            (inner width)
+//     Xy = h - d*vk = h - 2*(.08*w)    (inner height)
+// (the rails are `vk = 0.08*w` thick - NOT a fixed 30px; `Vaa(30)` is
+// overwritten by every later `ba`). `Gg.ba` (L1884-1885) then calls
+// `cell.kf(A)` per cell with `A = size.x = Gv - 8`, and `ff.kf` (L1893) is
+// `node.la(A / ce.x)`, so a cell declared `ba(cw, ch)`
+// (`Xd.NC` L2216/2230/2232/2240) renders `ch * A / cw` tall (`ff.qa` L1893
+// returns `this.ce.y * this.node.Eb`) and the LIST PITCH is
+//     `ch * A / cw + Pa.spacing`
+// (`c += f.qa() + this.spacing`, L1885).
+constexpr float kGgPad = 8.0f;       // `Pa.ba(scroll.Gv - 8, ..)` L2185
+constexpr float kFgRailFrac = 0.08f; // `scroll.ba(.., (a.N-a.J)*.08)` L2185
+
+float profile_list_w(const ShopRect& v) {
+    return (1.0f - 2.0f * kFgRailFrac) * v.width() - kGgPad;  // scroll.Gv - 8
+}
+// `Fg.ba` case 0: `Xy = b - d*vk` with `d = 2` rails of `vk = .08*a` - the
+// `Gg` list's own height (`Gg.ba` L1884 keeps `size.y` and centres the cells
+// in it: `uz = (size.y - cells[0].qa())/2`, L1885).
+float profile_scroll_h(const ShopRect& v) {
+    return v.height() - 2.0f * kFgRailFrac * v.width();
+}
+// Rendered cell height: `ff.kf` scales the cell node by `A/ce.x`
+// (`node.Eb`), `ff.qa()` (L1893) is `ce.y * node.Eb`.
+float profile_cell_h(const ShopRect& v, float cell_w, float cell_h) {
+    const float w = profile_list_w(v);
+    if (cell_w <= 0.0f) return cell_h;
+    return cell_h * w / cell_w;
+}
+float profile_cell_pitch(const ShopRect& v, float cell_w, float cell_h, float spacing) {
+    return profile_cell_h(v, cell_w, cell_h) + spacing;
+}
+// The `Gg` node lives in `scroll.content`, which `Fg.ba` case 0 places at
+// `C(vk)` / `D(vk)` inside the scroll node (`vk = .08*a` = the rail
+// thickness, L1871) - so the cell list is inset by one rail on the LEFT/TOP
+// and is `Gv - 8` wide (`Xd.Pn` L2185).
+float profile_list_left(const ShopRect& v) {
+    return v.J + kFgRailFrac * v.width();
+}
+// `Gg.ba` (L1885) centres the whole cell list in the scroll: `uz`.
+float profile_list_top(const ShopRect& v, float cell_w, float cell_h) {
+    const float uz =
+        std::max(0.0f, (profile_scroll_h(v) - profile_cell_h(v, cell_w, cell_h)) * 0.5f);
+    return v.P + kFgRailFrac * v.width() + uz;
+}
+
+// The four `cs` tab badge values (JS `cs.getCounterValue` L2189):
+//   0 = `p.o.co.uCa()` (L305) = `id.ht().n5a() - co.KS.Oa.length`
+//       = `<PerkTree>` tiers whose `<Level Value>` <= player level, minus the
+//       `<PerkHistory>` rows. `n5a` L1354: `for(;c<d && !(Sx[c++].level>b);)++a`.
+//   1 = `p.o.sCa()` (L256) = count of `v.uQ()` (the wielded weapon's `Ru`
+//       catalog list, L1218) whose `aE` "new move" flag is set. `aE` comes
+//       from the save `<OpenTricks>` (`Bt.parse` L250 -> `Nua` L268); the
+//       Moves tab clears it on entry (`es.zha` L2239).
+//   2 = `p.o.yi.rCa()` (L294) = count of `v.uv` achievement defs whose `yj`
+//       is set. `yr.Yua` (L297) sets `Ir(!ObtainedReward)` for every save
+//       `<Achievement>` row, and `Ir(a){ this.yj = a && (AE>0 || dP>0) }`
+//       (L1248) - i.e. an unlocked, unclaimed entry that actually pays.
+//   3 = `p.o.vCa()` (L256) = count of owned `p.o.xa.hJ(I.Vr)` (Seal) rows
+//       with `pd() > 0` and the def's `yj` flag, restored from the save
+//       `<CounterItems>` by `Bt.Gjb` (L269) - the shipped `Type="Seal"` rows
+//       all carry `SilentRecieve="0"`, so `Gjb`'s `gU == 0` gate passes.
+// `Eg.GU` (L1853) pushes each into `Le.badge.lk(...)`; `Dg.lk` (L1850)
+// hides a non-positive badge. All four are 0 on a fresh save, so the strip
+// renders no badge then - which is what the oracle matrix shows.
+struct ProfileBadges {
+    int perk_points = 0;   // tab 0 (`uCa`, L305)
+    int new_moves = 0;     // tab 1 (`sCa`, L256)
+    int new_achievs = 0;   // tab 2 (`rCa`, L294)
+    int new_seals = 0;     // tab 3 (`vCa`, L256)
+};
+
 // JS `Zr.ba` (L2220) places the improve button `Yk` at `C(a/2)` and
 // `D(b - c*1.5)` inside the active `vb` viewer rect `a`; the native renders
 // it as a flat full-width button near the viewer bottom (the ASTC `Zr`
@@ -9346,15 +9439,17 @@ ShopRect profile_improve_rect() {
     return r;
 }
 
-// `fs.NC` (L2216) sizes every achievement cell `ba(400,130)`; the native
-// lays one per row (`row_h`). Shared by render + hit-test.
-constexpr float kAchievRowH = 46.0f;
+// `fs.NC` (L2216) sizes every achievement cell `ba(400,130)` and `fs.init`
+// (L2214) sets `Pa.spacing = 10`; the cell box is the `Gg` list rect (one rail
+// inset left/top, `Gv - 8` wide) and the row pitch is `130*A/400 + 10`
+// (`profile_cell_pitch`). Shared by render + hit-test.
 ShopRect profile_achiev_row_rect(const ShopRect& v, int i) {
+    const float row_h = profile_cell_h(v, 400.0f, 130.0f);
     ShopRect r;
-    r.J = v.J + 4.0f;
-    r.N = v.J + v.width() - 4.0f;
-    r.P = v.P + 6.0f + static_cast<float>(i) * kAchievRowH;
-    r.W = r.P + kAchievRowH;
+    r.J = profile_list_left(v);
+    r.N = r.J + profile_list_w(v);
+    r.P = profile_list_top(v, 400.0f, 130.0f) + static_cast<float>(i) * (row_h + 10.0f);
+    r.W = r.P + row_h;
     return r;
 }
 
@@ -9384,7 +9479,9 @@ int profile_tab_hit(double px, double py) {
 }
 
 // Draws the `cs` strip (art first; flat fallback only on a genuine miss).
-void draw_profile_tabs(App& app, int tab, int hover) {
+// `badges` = the four `cs.getCounterValue` (L2189) values `Eg.GU` (L1853)
+// pushes into each `Le.badge` (`Dg`, L1850).
+void draw_profile_tabs(App& app, int tab, int hover, const int* badges) {
     sf2::render::Renderer& ren = app.renderer();
     const ProfileTabLayout t = profile_tab_layout();
     const float bar[] = {0, kViewH - t.bar_h, kViewW, kViewH - t.bar_h, kViewW, kViewH,
@@ -9400,12 +9497,38 @@ void draw_profile_tabs(App& app, int tab, int hover) {
         const float cx = t.cx0 + static_cast<float>(i) * t.step;
         if (try_draw_atlas_button(app, frame, cx, t.cy, t.btn_w, t.btn_h,
                                   sel ? 1.0f : (hov ? 0.9f : 0.75f))) {
-            continue;
+            // fall through to the badge only on a hit
+        } else {
+            draw_flat_button(app, art.label, cx, t.cy, t.btn_w, t.btn_h,
+                             sel ? 0.55f : (hov ? 0.45f : 0.32f), 0.4f, 0.28f, hov);
+            draw_ui_label(app, cx - t.btn_w * 0.5f, t.cy - 10.0f, t.btn_w, 20.0f,
+                          art.label, 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
-        draw_flat_button(app, art.label, cx, t.cy, t.btn_w, t.btn_h,
-                         sel ? 0.55f : (hov ? 0.45f : 0.32f), 0.4f, 0.28f, hov);
-        draw_ui_label(app, cx - t.btn_w * 0.5f, t.cy - 10.0f, t.btn_w, 20.0f,
-                      art.label, 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        // `Le.badge` (JS `Dg`, L1850-1851): an `icon` (`E.get(260)` misc
+        // frame `y.V6` = `notification_circle`, swapped to `y.LRa` =
+        // `notification_ellipse` once the count reaches 10) + a `label`
+        // (`ba(72)` -> `icon.la(72/fa.x)`, `label.Fa(72,72)`, `ua(72*.8)`).
+        // `Eg.GU` (L1853) calls `buttons[c].badge.lk(this.getCounterValue(...))`;
+        // `lk` (L1850) hides the whole badge unless `count > 0` (`node.R(a>0)`)
+        // and shifts the label `C(a == 1 ? -2 : 0)`. The `Dg` container sits at
+        // `C(71)`/`D(48)` inside the button node and the icon/label are CENTRE
+        // anchored on it (`Ga()`), so in button-local units the badge centre is
+        // (71,48) with a 72-unit box; both are multiplied by `Eg`'s node scale.
+        if (badges != nullptr && badges[i] > 0) {
+            const int count = badges[i];
+            const float s = t.btn_scale;
+            const float bs = 72.0f * s;
+            const float bx = cx - t.btn_w * 0.5f + 71.0f * s;
+            const float by = t.cy - t.btn_h * 0.5f + 48.0f * s;
+            const char* bframe = count < 10 ? "notification_circle" : "notification_ellipse";
+            if (!try_draw_atlas_button(app, bframe, bx, by, bs, bs, 1.0f)) {
+                draw_flat_button(app, "", bx, by, bs * 0.9f, bs * 0.9f, 0.85f, 0.2f, 0.18f,
+                                 false);
+            }
+            draw_ui_label(app, bx - bs * 0.5f + (count == 1 ? -2.0f * s : 0.0f), by - 9.0f,
+                          bs, 18.0f, std::to_string(count), 0.6f, UiAlign::Center, 1.0f, 1.0f,
+                          1.0f);
+        }
     }
 }
 
@@ -9664,6 +9787,78 @@ std::vector<EquipmentScreen::AchievRow> load_achievements(App& app, const Warrio
     return out;
 }
 
+// `<PerkTree>` tier count whose `<Level Value>` the player has reached
+// (JS `Bt.n5a` L1354: `for(;c<d && !(this.Sx[c++].level>b);)++a`, `b =
+// p.o.bb()` = the save Level; `Sx` is sorted by level in `Bt.parse` L1353).
+int perk_tier_count_at_level(int player_level) {
+    sf2::data::xml_doc doc;
+    if (!parse_res_xml("reference/extracted/xml/res/character_progress.xml", doc)) return 0;
+    const pugi::xml_node root = doc.root().first_child();
+    if (!root) return 0;
+    int n = 0;
+    for (pugi::xml_node lvl : root.child("PerkTree").children("Level")) {
+        const int tier = sf2::data::xml_attr_int(lvl, "Value", 0);
+        if (tier > player_level) break;
+        ++n;
+    }
+    return n;
+}
+
+// achievements.xml Name -> (MoneyPrize, BonusPrize), the `xw.AE`/`xw.dP`
+// pair `rCa` (L294) needs for `Ir` (L1248).
+std::map<std::string, std::pair<int, int>> achievement_prizes() {
+    std::map<std::string, std::pair<int, int>> out;
+    sf2::data::xml_doc doc;
+    if (!parse_res_xml("reference/extracted/xml/res/achievements.xml", doc)) return out;
+    const pugi::xml_node root = doc.root().first_child();
+    if (!root) return out;
+    for (pugi::xml_node c : root.children("Counter")) {
+        for (pugi::xml_node a : c.children("Achievement")) {
+            const std::string name = a.attribute("Name").value();
+            if (name.empty()) continue;
+            out[name] = {sf2::data::xml_attr_int(a, "MoneyPrize", 0),
+                         sf2::data::xml_attr_int(a, "BonusPrize", 0)};
+        }
+    }
+    return out;
+}
+
+// The `cs` badge values for one save (`cs.getCounterValue` L2189).
+// `new_moves` is the caller's `sCa()` count (it needs the tab's `v.uQ()`
+// list, which lives with the Moves tab builder); `catalog` is
+// `load_full_catalog` for the `I.Vr` type test.
+ProfileBadges profile_badges(const WarriorSave& w, int new_moves,
+                             const std::vector<CatalogItem>& catalog) {
+    ProfileBadges b;
+    // 0: `uCa` (L305) = `n5a() - co.KS.Oa.length`.
+    b.perk_points =
+        perk_tier_count_at_level(w.level) - static_cast<int>(w.perk_history.size());
+    if (b.perk_points < 0) b.perk_points = 0;
+    // 1: `sCa` (L256) = `v.uQ()` entries with `aE`.
+    b.new_moves = new_moves;
+    // 2: `rCa` (L294): every `v.uv` def with `yj` - i.e. every save unlock
+    // whose `Ir(!gO)` (L297) survived, and which actually pays (L1248).
+    const std::map<std::string, std::pair<int, int>> prizes = achievement_prizes();
+    for (const WarriorSave::AchievementUnlock& u : w.achievement_unlocks) {
+        if (u.obtained_reward) continue;
+        const auto it = prizes.find(u.name);
+        if (it == prizes.end()) continue;
+        if (it->second.first > 0 || it->second.second > 0) ++b.new_achievs;
+    }
+    // 3: `vCa` (L256) = `xa.hJ(I.Vr)` rows with `pd() > 0 && ib.yj`.
+    for (const WarriorSave::OwnedItem& oi : w.items) {
+        if (oi.count <= 0) continue;
+        if (!w.has_counter_item(oi.name)) continue;
+        for (const CatalogItem& ci : catalog) {
+            if (ci.type == "Seal" && ci.name == oi.name) {
+                ++b.new_seals;
+                break;
+            }
+        }
+    }
+    return b;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -9712,6 +9907,37 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[profile] achievements load failed: %s\n", e.what());
     }
+    // `cs` tab badges (JS `Eg.GU` L1853 -> `Le.badge.lk(getCounterValue)`).
+    // Computed here, before the Moves block's own early-outs, so the strip
+    // always carries the real values. `sCa` (L256) counts the wielded
+    // weapon's `v.uQ()` list entries flagged `aE` (`<OpenTricks>`, L250/L268);
+    // the Moves block below rebuilds the same list for display.
+    try {
+        const WarriorSave w = app().save().load();
+        int new_moves = 0;
+        if (app().has_fight_assets()) {
+            FightAssets& fa = app().fight_assets();
+            sf2::scene::Fighter badge_fig;
+            badge_fig.set_model(fa.merged);
+            badge_fig.build_move_list_locks(fa.moves, owned_items(app()),
+                                            /*include_universal=*/true);
+            for (const sf2::scene::MoveDef* m : badge_fig.hb()) {
+                if (m != nullptr && m->profile_show && w.has_open_trick(m->name)) {
+                    ++new_moves;  // `Ru.aE` over `v.uQ()`
+                }
+            }
+        }
+        const ProfileBadges b = profile_badges(w, new_moves, load_full_catalog(app()));
+        tab_badges_[0] = b.perk_points;
+        tab_badges_[1] = b.new_moves;
+        tab_badges_[2] = b.new_achievs;
+        tab_badges_[3] = b.new_seals;
+        std::fprintf(stdout, "[profile] cs badges: %d/%d/%d/%d\n", tab_badges_[0],
+                     tab_badges_[1], tab_badges_[2], tab_badges_[3]);
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[profile] badge load failed: %s\n", e.what());
+    }
     // Folded Moves tab (JS Profile sub-view `qv`, To.kOa=11 L2201): the exact
     // learned list built with the fight rule (`build_move_list_locks` over the
     // save's owned items — display only, on a throwaway Fighter; never
@@ -9731,41 +9957,48 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
         }
         sf2::scene::Fighter fig;
         fig.set_model(assets.merged);
-        // JS `es.uZ` (L2239): `this.Ul=v.uQ(9)` — the MOVES list is the CURRENT
-        // WEAPON's move set (`v.cw()` -> `ra.e9a`/`ra.Z6a` L684-686, which test
-        // each weapon move-set's Locks against the weapon's items), NOT the
-        // fight's item-lock rule. `build_move_list_locks(..., true)` kept every
-        // no-lock move (moves.xml has 242 of 873) -> the port listed the whole
-        // catalog; the oracle shows the wielded weapon's few. Build the
-        // weapon-scoped list (the same primitive the fight uses per weapon,
-        // fight.cpp:362) from the equipped weapon's SubType.
-        std::string wsub;
-        try {
-            for (const CatalogItem& ci : load_full_catalog(app())) {
-                if (ci.name == weapon_ && ci.type == "Weapon") {
-                    wsub = ci.subtype;
-                    break;
-                }
-            }
-        } catch (const std::exception&) {
-        }
-        if (wsub.empty()) wsub = "Fists";
-        fig.build_move_list(assets.moves, wsub, /*include_universal=*/false);
-        if (fig.hb().empty()) {
-            // Defensive guard: never regress to an empty tab if the SubType
-            // resolves to no `TacticWeapon` row (the exact `v.uQ(9)` weapon-set
-            // join still needs a runtime trace — PORT_AUDIT_UI §5 OPEN).
-            fig.build_move_list_locks(assets.moves, owned_items(app()), true);
-        }
-        move_total_ = static_cast<int>(fig.hb().size());
+        // JS `es.uZ` (L2239): `this.Ul = v.uQ(9)` then
+        // `this.Ul.sort((a,b) => pb(a.v4, b.v4))`.
+        //   - `v.uQ(a)` (L1218) = `ra.e9a(b, v.cw().jt(), v.cw().Wk(), a)`:
+        //     `ra.Z6a` (L684) walks EVERY parsed move (`ra.Lk`) and keeps the
+        //     ones whose `<Locks>` pass for the fighter context
+        //     (`f.nw(g, b)`), so a NO-LOCK move is kept for every weapon
+        //     (moves.xml has 242). The shipped `HighBlockProfile` (no
+        //     `<Locks>`, no `TacticWeapon`, no `Rank`) is therefore row 0 of
+        //     the oracle `profile_tab1` capture - the "Автоматически"
+        //     (`Block_Keys`) row. The previous weapon-SubType-only list
+        //     dropped it, which is why the port's row 0 was DoublePunch.
+        //     `ra.e9a` (L686) then intersects that list with `ra.Ul`, i.e.
+        //     with the moves carrying `<Profile Show="1">` - see the filter
+        //     below.
+        //   - the sort key `v4` is `u.I(Profile/@Rank)`; a missing `Rank`
+        //     parses to 0 (`u.I` L2455 default `b = 0`, and `K.parseInt` of
+        //     an absent attr is not a number), so `HighBlockProfile` leads.
+        fig.build_move_list_locks(assets.moves, owned_items(app()), /*include_universal=*/true);
+        move_total_ = 0;
         for (const sf2::scene::MoveDef* m : fig.hb()) {
             if (m == nullptr) continue;
+            if (!m->profile_show) continue;  // `ra.Ul` membership (L712)
             MoveRow r;
             r.name = m->name;
             r.type = m->type;
             r.priority = m->priority;
+            r.image = m->profile_image;   // `Ru.image` (L1253) -> atlas 246
+            r.keys = m->profile_keys;     // `Ru.fFa` (L1253) -> `ls.ymb` label
+            r.rank = m->profile_rank;     // `v4` (`es.uZ` sort key, L2239)
+            r.order = m->profile_order;   // `ra.Ul` document order (L712)
             move_rows_.push_back(r);
         }
+        // `es.uZ` (L2239): `this.Ul.sort(function(a,b){return pb(a.v4,b.v4)})`
+        // with `pb(a,b){return a<b?-1:a>b?1:0}` (L9). V8's sort is STABLE, so
+        // equal `Rank` keeps `ra.Ul` document order - hence the `order`
+        // tie-break (a `std::map` walk would sort them alphabetically).
+        std::stable_sort(move_rows_.begin(), move_rows_.end(),
+                         [](const MoveRow& a, const MoveRow& b) {
+                             if (a.rank != b.rank) return a.rank < b.rank;
+                             return a.order < b.order;
+                         });
+        move_total_ = static_cast<int>(move_rows_.size());
         std::fprintf(stdout, "[profile] moves tab: %s, %d moves\n", weapon_.c_str(),
                      move_total_);
         std::fflush(stdout);
@@ -9878,6 +10111,35 @@ void EquipmentScreen::update_impl(float dt) {
                      kProfileTabs[tab_hover_].label);
         std::fflush(stdout);
         tab_ = tab_hover_;
+        // JS `vb.hla` (L2191): `this.jq != null && (this.jq.zha(),
+        // this.jq.X(!0)); this.zh.GU();` - the newly active sub-view's `zha()`
+        // runs on every tab switch (tabs 0/2 are the `Xd.zha(){}` no-op,
+        // L2185). Moves (`es.zha` L2239): for every `v.uQ()` entry with `aE`,
+        // clear it (`Bt.inb` L269 removes the `<Trick>` row) and `p.o.save()`.
+        // Seals (`gs.zha` L2231): every owned `I.Vr` item def `Ir(!1)` (clear
+        // the `<CounterItems>` flag) + `p.o.save()`. So both badges drop to 0
+        // as soon as their tab is opened; `this.zh.GU()` then rebuilds the
+        // strip from the cleared values.
+        if (tab_ == kProfileTabMoves || tab_ == kProfileTabSeals) {
+            try {
+                WarriorSave w = app().save().load();
+                if (tab_ == kProfileTabMoves && !w.open_tricks.empty()) {
+                    w.clear_open_tricks();
+                    app().save().save(w);
+                    tab_badges_[kProfileTabMoves] = 0;
+                    std::fprintf(stdout, "[profile] es.zha: cleared OpenTricks\n");
+                    std::fflush(stdout);
+                } else if (tab_ == kProfileTabSeals && !w.counter_items.empty()) {
+                    w.counter_items.clear();  // `Ir(!1)` on every owned Seal
+                    app().save().save(w);
+                    tab_badges_[kProfileTabSeals] = 0;
+                    std::fprintf(stdout, "[profile] gs.zha: cleared CounterItems\n");
+                    std::fflush(stdout);
+                }
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "[profile] zha failed: %s\n", e.what());
+            }
+        }
     }
     // --- Tab 0 PERK TREE: `uk` cell selection (`vb.hqb` L2198) + the flat
     // improve button (`Zr.ygb` L2222 -> `vb.Cab` -> `Jzb` case 1 L2200 ->
@@ -10000,7 +10262,7 @@ void EquipmentScreen::render_impl(App& app) {
         }
     }
     // `cs` tab strip (JS L2188) — always visible, drawn over the body bottom.
-    draw_profile_tabs(app, tab_, tab_hover_);
+    draw_profile_tabs(app, tab_, tab_hover_, tab_badges_);
     // JS `XB=ei` header is shown on tab 0 only (`hla` case 0 `ivb()`); the
     // other cases call `dga()` and hide it (L2190-2191).
     if (tab_ == kProfileTabLeveling) {
@@ -10041,12 +10303,12 @@ void EquipmentScreen::render_impl(App& app) {
         }
     }
     if (!perk_rows_.empty()) {
-        // `ds.NC` (L2230) sizes every `tk` cell `b.ba(400,150)` and the `Xd`
-        // slider scales the cell to the list width (`ff.kf`): cell height =
-        // 150 * (listW/400) = 0.375*listW. The native list width is the `jq`
-        // viewer width, so `row_h = 0.375*v.width()` (the old flat 52px was
-        // ~0.15x, packing the whole tree into the visible band).
-        const float row_h = 0.25f * v.width();
+        // `ds.NC` (L2230) sizes every `tk` cell `b.ba(400,150)`; `ds.init`
+        // (L2227) leaves `Pa.spacing` at the `Gg` default 0, so the row pitch
+        // is `150*A/400` with `A = scroll.Gv - 8` (see `profile_cell_pitch`).
+        // The previous `0.25*v.width()` was a measured stand-in for the
+        // declared height, not the rendered one.
+        const float row_h = profile_cell_pitch(v, 400.0f, 150.0f, 0.0f);
         const float gutter = 78.0f;  // `Rx` + tier-level track width
         // --- JS `tk`/`Rx`/`uk` row geometry (L2217-2230) ------------------
         // `ds.NC` (L2230) sizes every `tk` cell `b.ba(400,150)`. `tk.$i`
@@ -10087,9 +10349,15 @@ void EquipmentScreen::render_impl(App& app) {
                               kLevelSrcW * kFlagScale * 1.15f) * bdg_unit;
         const float bdg_dy = (kPerkbackSrc * 0.5f -
                               kLevelSrcH * kFlagScale * 1.15f) * bdg_unit;
-        // The `tk` is symmetric about the seam the `Rx` group docks to.
-        const float rcx = v.J + v.width() * 0.5f;  // pair centred on the scroll
-        float row_top = v.P + 40.0f;               // below the top `Zh` roll
+        // The `tk` is symmetric about the seam the `Rx` group docks to: the
+        // cell centre = `cell.ce.x/2` (L2218) in native px inside the `Gg`
+        // list rect.
+        const float rcx = profile_list_left(v) + profile_list_w(v) * 0.5f;
+        // `Gg.ba` (L1885): `this.uz = (this.size.y - this.cells[0].qa())/2;
+        // this.ei.D(this.gj = this.uz)`. `size.y` is the scroll's inner height
+        // (`Fg.ba` L1870 case 0: `Xy = b - 2*vk`, `vk = .08*w`), so the cell
+        // list is centred on the viewer as a whole.
+        float row_top = profile_list_top(v, 400.0f, 150.0f);
         int last_tier = -1;
         int tier_idx = -1;   // `tk.$i(a==0, a+1==len)` L2228 first/last gate
         int col = 0;
@@ -10097,7 +10365,10 @@ void EquipmentScreen::render_impl(App& app) {
             const PerkRow& r = perk_rows_[i];
             if (r.tier != last_tier) {
                 if (last_tier != -1) {
-                    row_top += row_h + 6.0f;
+                    // `Gg.ba` (L1885) advances by `f.qa() + this.spacing` only;
+                    // `ds.init` (L2227) leaves `spacing` at 0, so there is NO
+                    // extra inter-tier gap (the old invented +6px).
+                    row_top += row_h;
                     col = 0;
                 }
                 last_tier = r.tier;
@@ -10109,7 +10380,7 @@ void EquipmentScreen::render_impl(App& app) {
             }
             if (row_top + row_h > v.W - 34.0f) break;
             if (col >= 2) {  // `tk` packs two `uk` cells per tier
-                row_top += row_h + 6.0f;
+                row_top += row_h;
                 col = 0;
             }
             if (row_top + row_h > v.W - 34.0f) break;
@@ -10239,36 +10510,59 @@ void EquipmentScreen::render_impl(App& app) {
     }
     } else if (tab_ == kProfileTabMoves) {
         // Folded Moves sub-view (JS `qv`/`es`, To.kOa=11 L2201): the learned
-        // moves for the wielded weapon. `es.NC` (L2239) cells are
-        // `ba(400,150)`; the native lays the rows inside the `jq` viewer
-        // content band (below the top `Zh` roll) via `draw_ui_label`. The old
+        // moves for the wielded weapon. `es.NC` (L2240) cells are
+        // `ba(400,150)`, one `ks` cell per row inside the `Xd` scroll.
+        // The old
         // `app.draw_text` passed a RAW glyph scale (not `ua*ea_a1`) — the
         // giant overlapping text in the port capture.
-        const float inner_top = v.P + 34.0f;                 // below the `Zh` roll
-        const float inner_h = v.height() - 68.0f;
-        // `es.NC` (L2239): `b=new ks; b.init(this.Ul[a],this); b.ba(400,150)` —
-        // every skill row is a 400x150 cell, so only the oracle's few fit the
-        // viewer band. The old 44px pitch stacked ~8 rows of the full catalog.
-        constexpr float kMoveRowH = 150.0f;
-        draw_ui_label(app, v.J + 16.0f, inner_top, v.width() - 32.0f, 28.0f,
+        // JS `es.NC` (L2240) -> `ks.init(Ru, es)` (L2233) -> `ls.init(a.image,
+        // a)` (L2235): every row is a `ks` cell - a `gf`/`ff` slider cell
+        // declared `ba(400,150)` - whose content is the `ls` widget: the
+        // move's `skills`-atlas image (`Ed.ZL` L2203 `Fs.Cb(this.sO)`) plus
+        // the `ls.ymb` (L2238) `Y.na(KeysDescription)` label. The JS cell
+        // carries NO name / type / priority text.
+        // Pitch: `Gg.ba` (L1884-1885) `c += f.qa() + this.spacing` with
+        // `qa()` = `ff.qa` (L1893) = `ce.y * node.Eb`, `node.Eb = A/ce.x`;
+        // `es.init` (L2239) sets `spacing = 10`. See `profile_cell_pitch`.
+        const float cell_h = profile_cell_h(v, 400.0f, 150.0f);  // `ff.qa` L1893
+        const float row_h = cell_h + 10.0f;                      // + `spacing` L2239
+        // `Gg.ba` (L1885): `uz = (size.y - cells[0].qa())/2`, `ei.D(uz)`; the
+        // list itself sits in `scroll.content` at `C(0.08w)`/`D(0.08w)`
+        // (`Fg.ba` case 0, L1871).
+        const float cell_l = profile_list_left(v);
+        const float cell_w = profile_list_w(v);
+        const float row_top = profile_list_top(v, 400.0f, 150.0f);
+        draw_ui_label(app, v.J + 16.0f, v.P + 34.0f, v.width() - 32.0f, 28.0f,
                       loc(app, weapon_, weapon_), 0.85f, UiAlign::Center, 0.35f, 0.22f,
                       0.10f);
-        const int max_rows =
-            std::max(0, static_cast<int>((inner_h - 32.0f) / kMoveRowH));
-        const int n = std::min(static_cast<int>(move_rows_.size()), max_rows);
-        for (int i = 0; i < n; ++i) {
+        for (std::size_t i = 0; i < move_rows_.size(); ++i) {
             const MoveRow& r = move_rows_[i];
-            // JS `es.NC` (L2239) returns a `ks` cell whose content is `ls`
-            // initialized with the move IMAGE (`ls.init(a.image, a)`, L2235) —
-            // the JS cell carries NO "[type] P<priority>" text. The port cannot
-            // draw that image yet: `MoveDef` (core/scene/move_def.cpp:452)
-            // parses only the `FileName` clip, not the move `Image` attr, and
-            // core/scene is outside this task's file scope. Draw the move name
-            // alone instead of the invented composite string.
-            draw_ui_label(app, v.J + 20.0f,
-                          inner_top + 34.0f + static_cast<float>(i) * kMoveRowH,
-                          v.width() - 40.0f, 28.0f, r.name, 0.62f, UiAlign::Left, 0.18f,
-                          0.13f, 0.08f);
+            const float ry = row_top + static_cast<float>(i) * row_h;
+            if (ry + cell_h > v.W) break;
+            // `ls.ba` (L2236): `d = b/2`, `e = b*.1`, `this.icon.zf(b*.8)`
+            // (icon box = 0.8 * cell height, square) and
+            // `this.icon.C(this.icon.za()/2 + e)` / `D(d)` - the icon CENTRE
+            // is `0.5*icon + 0.1*cellH` from the cell's left edge and
+            // vertically centred in the cell.
+            const float icon_h = cell_h * 0.8f;                    // `zf(b*.8)`
+            const float icon_cx = cell_l + icon_h * 0.5f + cell_h * 0.1f;
+            const float icon_cy = ry + cell_h * 0.5f;              // `D(b/2)`
+            if (!r.image.empty()) {
+                // `Ed.ZL` (L2203): `this.Fs.Cb(this.sO)` draws the `skills`
+                // (atlas 246) frame `Ye.qI(Profile/@Icon)` (L1863).
+                draw_cell_icon(app, r.image, icon_cx, icon_cy, icon_h, icon_h, 1.0f);
+            }
+            // `ls.ymb` (L2238): `this.Zh.V(Y.na(this.Tp.fFa))`, hidden when
+            // `fFa` is null/empty; `Zh.C(this.icon.ya + this.icon.za()/2*1.2)`
+            // and `Zh.ua(b*.3)`, `D(0)` for a move with no requirement list
+            // (`Ck.length == 0` -> the `else` branch of `ls.ba`).
+            if (!r.keys.empty()) {
+                const float label_l = icon_cx + icon_h * 0.6f;  // `+za()/2*1.2`
+                const float label_w = cell_l + cell_w - label_l;
+                draw_ui_label(app, label_l, ry, label_w, cell_h,
+                              loc(app, r.keys, r.keys), ui_ua_scale(app, cell_h * 0.3f),
+                              UiAlign::Left, 0.16f, 0.11f, 0.06f);
+            }
         }
         if (move_rows_.empty()) {
             draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
@@ -10285,7 +10579,9 @@ void EquipmentScreen::render_impl(App& app) {
             const float bw2 = rp.width() * 0.72f, bh2 = 46.0f;
             const float bx2 = rp.J + rp.width() * 0.5f;
             const float by2 = rp.W - 70.0f;
-            if (!try_draw_atlas_button(app, "EButtonBeige", bx2, by2, bw2, bh2, 1.0f)) {
+            // `$r.Op.Wm(null, y.qB)` (L2234) with `y.qB` = "highlightButton"
+            // (L2470) - the sliced atlas name, not the `Bb` class key.
+            if (!try_draw_atlas_button(app, "highlightButton", bx2, by2, bw2, bh2, 1.0f)) {
                 draw_flat_button(app, "VIEW", bx2, by2, bw2, bh2, 0.85f, 0.78f, 0.55f,
                                  false);
             }
@@ -10296,38 +10592,43 @@ void EquipmentScreen::render_impl(App& app) {
     } else if (tab_ == kProfileTabSeals) {
         // Ported `gs` SEALS_SLIDER body (`gs.uZ` L2231): the owned `I.Vr`
         // rows. Cell `js` (L2232) draws `image = oe(a.fileName)`; native
-        // resolves `res/users/images/<Image>` via `draw_user_image`. JS
-        // `gs.NC` (`js.ba(400,300)`, L2232) is an `Xd` slider; the native
-        // lays a wrapped grid inside the `vb` viewer rect — the `Xd`
-        // scroll/centring behaviour is OPEN.
+        // resolves `res/users/images/<Image>` via `draw_user_image`. `gs` is
+        // an `Xd` slider like `es`/`fs`/`ds`, so the cell list uses the same
+        // `Gg` rect/pitch (`gs.init` L2231 leaves `Pa.spacing` at 0).
         if (seal_rows_.empty()) {
             draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 20.0f, v.width(), 40.0f,
                           "No seals owned yet.", 0.9f, UiAlign::Center, 0.7f, 0.7f, 0.7f);
         } else {
-            const float cw = std::min(400.0f, v.width() / 2.0f - 12.0f);
-            const float chh = cw * 0.75f;  // `js` cell 400x300 (L2232)
-            constexpr int kCols = 2;
-            const float x0 =
-                v.J + (v.width() - static_cast<float>(kCols) * cw) * 0.5f + cw * 0.5f;
-            const float y0 = v.P + 20.0f + chh * 0.5f;
+            // `gs.NC` (L2232) sizes every `js` cell `b.ba(400,300)`; `gs.init`
+            // (L2231) leaves `Pa.spacing` at 0, so the slider stacks the cells
+            // in ONE column with pitch `300*A/400` (`profile_cell_h`).
+            // `js.ba` (L2232) draws the `oe(a.fileName)` image at
+            // `la(b*1.25/image.size)` - the `oe` design box is 512 (`oe` ctor
+            // L1823 `this.size=512`), so the image box is `1.25 * cell height`
+            // square, centred in the cell (`C(a/2)`, `D(b/2)`).
+            const float chh = profile_cell_h(v, 400.0f, 300.0f);
+            const float cell_l = profile_list_left(v);
+            const float cell_w = profile_list_w(v);
+            const float img_h = chh * 1.25f;
+            const float cxc = cell_l + cell_w * 0.5f;
+            const float top = profile_list_top(v, 400.0f, 300.0f);
             for (std::size_t i = 0; i < seal_rows_.size(); ++i) {
                 const SealRow& s = seal_rows_[i];
-                const float cx = x0 + static_cast<float>(i % kCols) * cw;
-                const float cy = y0 + static_cast<float>(i / kCols) * (chh + 16.0f);
-                if (cy + chh * 0.5f > v.W) break;
-                if (!draw_user_image(app, s.image, cx, cy, chh * 0.75f, chh * 0.7f, 1.0f)) {
+                const float cy = top + chh * 0.5f + static_cast<float>(i) * chh;
+                if (cy - chh * 0.5f > v.W) break;
+                if (!draw_user_image(app, s.image, cxc, cy, img_h, img_h, 1.0f)) {
                     // Genuine art miss -> OPEN: JS `js` (L2232) draws only the
                     // `oe(a.fileName)` image; there is no JS flat/seal-name art.
-                    draw_flat_button(app, s.name, cx, cy, cw - 20.0f, chh, 0.3f, 0.3f, 0.4f,
-                                     false);
+                    draw_flat_button(app, s.name, cxc, cy, cell_w * 0.5f, chh * 0.5f,
+                                     0.3f, 0.3f, 0.4f, false);
                 }
                 char buf[64];
                 // list.xml Seal `Name` is a lang key ("drop_name_blueseal"
                 // -> "BLUE SEAL"); resolve it like every other item name.
                 std::snprintf(buf, sizeof(buf), "%s x%d", loc(app, s.name, s.name).c_str(),
                               s.count);
-                draw_ui_label(app, cx - cw * 0.5f + 10.0f, cy + chh * 0.5f - 24.0f, cw - 20.0f,
-                              20.0f, buf, 0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+                draw_ui_label(app, cell_l, cy + chh * 0.5f - 24.0f, cell_w, 20.0f, buf,
+                              0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
             }
         }
     } else if (tab_ == kProfileTabAchiev) {
@@ -10348,16 +10649,19 @@ void EquipmentScreen::render_impl(App& app) {
                           loc(app, "achievement_Completed", "Completed"), 0.8f, UiAlign::Center,
                           0.7f, 0.7f, 0.7f);
         } else {
-            const float row_h = kAchievRowH;
-            float yy = v.P + 6.0f;
+            const float cell_h = profile_cell_h(v, 400.0f, 130.0f);  // `ba(400,130)`
+            const float row_h = cell_h + 10.0f;                      // `fs.init` spacing
+            const float x0 = profile_list_left(v);
+            const float x1 = x0 + profile_list_w(v);
+            // `Gg.ba` (L1885) centres the cell list: `uz = (size.y - qa)/2`.
+            float yy = profile_list_top(v, 400.0f, 130.0f);
             for (std::size_t ri = 0; ri < achiev_rows_.size(); ++ri) {
                 const AchievRow& r = achiev_rows_[ri];
-                if (yy + row_h > v.W) break;
-                const float cy = yy + row_h * 0.5f;
+                if (yy + cell_h > v.W) break;
+                const float cy = yy + cell_h * 0.5f;
                 sf2::render::Renderer& rr = app.renderer();
-                const float x0 = v.J + 4.0f, x1 = v.J + v.width() - 4.0f;
-                const float q[] = {x0, yy + 2.0f, x1, yy + 2.0f, x1, yy + row_h - 2.0f,
-                                   x0, yy + 2.0f, x1, yy + row_h - 2.0f, x0, yy + row_h - 2.0f};
+                const float q[] = {x0, yy + 2.0f, x1, yy + 2.0f, x1, yy + cell_h - 2.0f,
+                                   x0, yy + 2.0f, x1, yy + cell_h - 2.0f, x0, yy + cell_h - 2.0f};
                 // `hs`/`is` cell band: the oracle `profile_tab2` rows read as a
                 // warm translucent band over the parchment (was an opaque
                 // near-black quad).
@@ -10365,16 +10669,20 @@ void EquipmentScreen::render_impl(App& app) {
                                   r.reward_available ? 0.30f : 0.25f,
                                   r.reward_available ? 0.16f : 0.14f, 0.55f);
                 // Icon `is` `Ed.Fs` (L2212): `Achievements01/ach_*` on atlas
-                // 270 (`y.MQa` "Achievements01/ach_block_gold", L2470). The
-                // flat square is the explicit miss fallback.
-                if (!draw_cell_icon(app, r.icon, x0 + 22.0f, cy, 34.0f, 34.0f, 1.0f)) {
-                    const float isz = 16.0f;
-                    const float iq[] = {x0 + 22.0f - isz, cy - isz, x0 + 22.0f + isz, cy - isz,
-                                        x0 + 22.0f + isz, cy + isz, x0 + 22.0f - isz, cy - isz,
-                                        x0 + 22.0f + isz, cy + isz, x0 + 22.0f - isz, cy + isz};
+                // 270 (`y.MQa` "Achievements01/ach_block_gold", L2470).
+                // `is.ba` (L2212) is the SAME cell layout as `ls.ba` (L2236):
+                // `icon.zf(b*.8)`, `C(icon.za()/2 + b*.1)`, `D(b/2)`.
+                const float icon_h = cell_h * 0.8f;
+                const float icon_cx = x0 + icon_h * 0.5f + cell_h * 0.1f;
+                const float e_x = icon_cx + icon_h * 0.5f + cell_h * 0.2f;  // `e` L2212
+                if (!draw_cell_icon(app, r.icon, icon_cx, cy, icon_h, icon_h, 1.0f)) {
+                    const float isz = icon_h * 0.5f;
+                    const float iq[] = {icon_cx - isz, cy - isz, icon_cx + isz, cy - isz,
+                                        icon_cx + isz, cy + isz, icon_cx - isz, cy - isz,
+                                        icon_cx + isz, cy + isz, icon_cx - isz, cy + isz};
                     rr.draw_triangles(iq, 6, 0.35f, 0.35f, 0.4f, 0.95f);
                 }
-                // `is` cell (L2212) draws NO description text — the text
+                // `is` cell (L2212) draws NO description text - the text
                 // lives in the `zr=Yr` info panel (below). Replaced the inline
                 // description with the cited cell (icon + bar + count).
                 // `is.D1a` (L2213): `min(QZ,counter)/counter` else
@@ -10393,9 +10701,9 @@ void EquipmentScreen::render_impl(App& app) {
                 // `Level_bar` fill (misc atlas, `y.HRa`) at
                 // min(value,target)/target (`is.D1a` `uH.PT`/`DF`, L2213). The
                 // flat backing is the explicit miss fallback.
-                const float pbx = x0 + 46.0f;
+                const float pbx = e_x;
                 const float pby = cy + 10.0f;
-                const float pbw = std::max(40.0f, x1 - 8.0f - pbx);
+                const float pbw = std::max(40.0f, x1 - cell_h * 0.2f - pbx);
                 const float pbh = 9.0f;
                 const float pfrac =
                     r.target > 0 ? std::clamp(static_cast<float>(r.value) /

@@ -243,6 +243,32 @@ WarriorSave SaveSystem::load() {
         if (!au.name.empty()) out.achievement_unlocks.push_back(std::move(au));
     }
 
+    // "New move" trick list (JS `Bt.lsa`, L250: `this.lsa = a.A("OpenTricks");
+    // this.lsa != null && for each child -> this.Nua(name, false)`). `Nua`
+    // (L268) pushes `Bt.NN` and flips `aE` on the matching `Ru` catalog
+    // entry; `Bt.sCa` (L256) - the profile tab 1 badge - counts the current
+    // weapon's `v.uQ()` (L1218) entries with `aE`. Absent in the seed -> 0.
+    out.open_tricks.clear();
+    for (pugi::xml_node t : warrior.child("OpenTricks").children("Trick")) {
+        if (t.attribute("Name")) {
+            const std::string n = t.attribute("Name").value();
+            if (!n.empty()) out.open_tricks.push_back(n);
+        }
+    }
+
+    // "New item" list (JS `Bt.Gjb` L269: `a = this.ga.A("CounterItems")` ->
+    // `a.A("Items")` -> each `<Item Name>` -> `p.items.$b(name)` ->
+    // `b.gU == 0 && b.Ir(true)`). `Bt.vCa` (L256) - the profile tab 3 badge -
+    // counts the owned `I.Vr` (Seal) rows with `pd() > 0` and `ib.yj`.
+    // Absent in the seed -> 0.
+    out.counter_items.clear();
+    for (pugi::xml_node i : warrior.child("CounterItems").child("Items").children("Item")) {
+        if (i.attribute("Name")) {
+            const std::string n = i.attribute("Name").value();
+            if (!n.empty()) out.counter_items.push_back(n);
+        }
+    }
+
     // Session settings (JS `jfa` L256 / `Aka` L264): `<SessionSettings>
     // <Disciple Value="0|1"/>` (`Y0` L271) + `<ShowDojoDisciple Value="0|1"/>`
     // (`g$a` L271). Absent in the seed -> both default 0.
@@ -552,6 +578,37 @@ void SaveSystem::save(const WarriorSave& w) {
             pugi::xml_node a = ach.append_child("Achievement");
             a.append_attribute("Name").set_value(au.name.c_str());
             a.append_attribute("ObtainedReward").set_value(au.obtained_reward ? "true" : "false");
+        }
+    }
+
+    // "New move" tricks (JS `Bt.Nua` L268 appends `<OpenTricks><Trick
+    // Name>`; `Bt.inb` L269 removes one row per cleared name). Materialize
+    // only when something is flagged, mirroring `es.zha` (L2239) which
+    // leaves an empty `<OpenTricks>` behind only if it already existed.
+    {
+        pugi::xml_node ot = warrior.child("OpenTricks");
+        if (!ot && !w.open_tricks.empty()) ot = warrior.append_child("OpenTricks");
+        if (ot) {
+            std::vector<pugi::xml_node> old;
+            for (pugi::xml_node t : ot.children("Trick")) old.push_back(t);
+            for (const pugi::xml_node& t : old) ot.remove_child(t);
+            for (const std::string& name : w.open_tricks) {
+                ot.append_child("Trick").append_attribute("Name").set_value(name.c_str());
+            }
+        }
+    }
+
+    // "New item" counters (JS `Bt.bM` L269: drop the existing
+    // `<CounterItems>`, then re-create `<CounterItems><Items><Item Name>`
+    // only when at least one def carries `yj`).
+    {
+        pugi::xml_node ci = warrior.child("CounterItems");
+        if (ci) warrior.remove_child(ci);
+        if (!w.counter_items.empty()) {
+            pugi::xml_node items_node = warrior.append_child("CounterItems").append_child("Items");
+            for (const std::string& name : w.counter_items) {
+                items_node.append_child("Item").append_attribute("Name").set_value(name.c_str());
+            }
         }
     }
 

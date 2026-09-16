@@ -181,6 +181,31 @@ struct MoveDef {
     std::string tactic_weapon;     // TacticWeapon
     std::string tactic_equivalent; // TacticEquivalent
     std::string mirror_node;       // MirrorNode
+    // JS `Fa.Ueb` (L712): after the move is parsed,
+    //   `k = k.A("Profile"); k != null && u.ka(k.attributes.get("Show"), !1)
+    //    && e.push(new Ru(k, l))`
+    // - a `<Profile Show="1">` child registers the move in the `Ru` catalog
+    // (`ra.Ul`) that `v.uQ()` (L1218) hands to the profile Moves tab. `Ru`
+    // ctor (L1253):
+    //   `image = Ye.qI(Profile/@Icon)` (`Ye.qI` L1863: first '.' -> '/'),
+    //   `v4    = u.I(Profile/@Rank)`   (the `es.uZ` L2239 sort key),
+    //   `fFa   = Profile/@KeysDescription` (`ls.ymb` L2238 label lang key).
+    // `es.NC` (L2240) builds the `ks` cell -> `ls.init(a.image, a)` (L2235);
+    // `Ed.ZL` (L2203) draws `sO` as a frame of atlas id 246
+    // (`res/ui/skills.json`, whose frame names ARE these paths, e.g.
+    // "Trick1/block"). `Show` is the membership gate - a move without it is
+    // not in `ra.Ul` and never appears in the tab.
+    bool profile_show = false;        // `<Profile Show="1">`
+    int profile_rank = 0;             // `u.I(Profile/@Rank)` (`v4`)
+    std::string profile_image;        // `Ye.qI(Profile/@Icon)` -> atlas 246 frame
+    std::string profile_keys;         // `Profile/@KeysDescription` (`fFa`)
+    // Document (`<Moves><Move>`) index. JS `ra.Ul` (the `Ru` catalog that
+    // `v.uQ()` L1218 returns) is filled by `Fa.Ueb` (L712) while it walks
+    // `<Move>` in file order, so `ra.Ul` is in document order; `es.uZ`
+    // (L2239) then `sort`es by `v4` with a STABLE V8 sort (`pb` L9 returns
+    // -1/0/1), so equal-`Rank` moves keep document order. This index is that
+    // tie-break (`std::map` iteration would otherwise give alphabetical).
+    int profile_order = 0;            // `ra.Ul` push order (L712)
     std::vector<Cond> conditions;      // <Conditions> (own + template)
     std::vector<Cond> tactics;         // <Tactics><Conditions> (own + template)
     std::vector<Interval> intervals;   // <Intervals><Interval> (own + template)

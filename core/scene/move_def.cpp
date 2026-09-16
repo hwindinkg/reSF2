@@ -438,8 +438,12 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
     // Templates table (JS `Fa.kxb`: <Templates><Template Name=..>`).
     pugi::xml_node templates_root = root.child("Templates");
 
+    int move_doc_index = 0;  // `<Move>` document order (`ra.Ul`, L712)
     for (pugi::xml_node move : root.child("Moves").children("Move")) {
         MoveDef def;
+        // JS `ra.Ul` document order (see `MoveDef::profile_order`): counts
+        // every `<Move>` element, mirroring `Fa.Ueb`'s single pass (L709).
+        def.profile_order = move_doc_index++;
         if (pugi::xml_attribute n = move.attribute("Name")) def.name = n.value();
         if (def.name.empty()) {
             continue;
@@ -459,6 +463,26 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         if (pugi::xml_attribute w = move.attribute("TacticWeapon")) def.tactic_weapon = w.value();
         if (pugi::xml_attribute e = move.attribute("TacticEquivalent")) def.tactic_equivalent = e.value();
         if (pugi::xml_attribute m = move.attribute("MirrorNode")) def.mirror_node = m.value();
+        // JS `Fa.Ueb` (L712) + `Ru` (L1253): `<Profile Show Rank Icon
+        // KeysDescription/>`. `Show="1"` registers the move in the `Ru`
+        // catalog (`ra.Ul`) that `v.uQ()` (L1218) feeds the profile Moves
+        // tab; `Rank` is the `es.uZ` (L2239) sort key; `image =
+        // Ye.qI(Icon)` (L1863: first '.' -> '/') is the `skills` atlas
+        // frame name; `KeysDescription` is the `ls.ymb` (L2238) label key.
+        if (pugi::xml_node prof = move.child("Profile")) {
+            def.profile_show = data::xml_attr_bool(prof, "Show", false);
+            def.profile_rank = data::xml_attr_int(prof, "Rank", 0);
+            if (pugi::xml_attribute ic = prof.attribute("Icon")) {
+                def.profile_image = ic.value();
+            }
+            if (pugi::xml_attribute kd = prof.attribute("KeysDescription")) {
+                def.profile_keys = kd.value();
+            }
+            // JS `Ye.qI` (L1863): `Eb.replace(a, ".", "/")` - a plain string
+            // pattern, so only the FIRST '.' is replaced.
+            const std::size_t dot = def.profile_image.find('.');
+            if (dot != std::string::npos) def.profile_image[dot] = '/';
+        }
 
         // Resolve Template inheritance.
         std::vector<pugi::xml_node> templates;
