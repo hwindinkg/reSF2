@@ -2542,9 +2542,13 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
             draw_ui_label(app, nav_cx - lay.nav_btn * 0.5f, cy_i - 10.0f, lay.nav_btn, 20.0f,
                           def.label, 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
         }
-        // Le badge (JS `Dg`/`Le` L1848-1850: notification_circle + count).
-        // The counts are screen-specific saves (Shop `tCa`, Profile totals)
-        // NOT derived natively — callers pass nullptr until then (OPEN).
+        // Le badge (JS `Dg`/`Le` L1848-1850: notification_circle +
+        // notification_ellipse + count). Each JS strip supplies its own values
+        // through an overridden `getCounterValue`: the shop tab strip (`ss`,
+        // L2284) uses `p.items.T5a(Cj.zxb(a))`, the profile strip (`cs`, L2189)
+        // uses `uCa()/sCa()/rCa()/vCa()` (see the profile block above). This
+        // helper serves the `za` NAV column, whose JS badge source is not
+        // re-read in this pass — callers pass nullptr, so no badge is drawn.
         if (badges != nullptr && badges[i] > 0) {
             const float bx = nav_cx + lay.nav_btn * 0.28f;
             const float by = cy_i - lay.nav_btn * 0.28f;
@@ -9209,20 +9213,41 @@ void ShopScreen::render_impl(App& app) {
 // Tab content: `vb.hla` (L2190-2191) routes tab 0 -> `Rl=ds`
 // (POWERLEVELING_SLIDER L2227), tab 1 -> `qv=es` (SKILLS_SLIDER L2239),
 // tab 2 -> `Zr=fs` (ACHIEVEMENT_SLIDER L2213), tab 3 -> `lv=gs`
-// (SEALS_SLIDER L2231). Tabs 1 (folded Moves) and 3 (`gs` SEALS) are
-// reproduced; tabs 0 (`ds`, needs `id.ht().Mi/tH`) and 2 (`fs`, needs
-// `v.uv.tI`) are OPEN — the native docks the real `vb.layout` `a =
-// b.fn(.75)` viewer rect (L2195) and shows a cited placeholder. Nav/`cs` badges
-// (`Dg`, L1850-1851):
-// `cs.getCounterValue` (L2189) reads `p.o.co.uCa()/p.o.sCa()/p.o.yi.rCa()/
-// p.o.vCa()` and `ss` (L2284) `p.items.T5a(Cj.zxb(a))` — the badge COUNTS are
-// not derivable from the native save (OPEN); the `Dg.ba(65)`/`Ia(128)`
-// geometry is ported in `draw_za_chrome`'s badge path.
+// (SEALS_SLIDER L2231). ALL FOUR bodies are reproduced below — tab 0 perk
+// tree (`ds`), tab 1 folded Moves (`es`), tab 2 achievements (`fs`), tab 3
+// seals (`gs`). The earlier "tabs 0/2 are OPEN" note was STALE and misled the
+// UI audit: each body docks into the real `vb.layout` `a = b.fn(.75)` viewer
+// rect (L2195).
+// UNVERIFIED (OPEN): the `Xd`/`Gg` slider cell scaling. `ff.kf(a)` (L1893)
+// sets the cell node scale to `a/ce.x`, so the RENDERED row height is
+// `ce.y * node.Eb` (`ff.qa`), not the declared `ff.ba(w,h)` — resolving the
+// per-row pitch needs `Gg`'s slot width. The tab rows below therefore still
+// use measured fixed pitches (150 Moves, 46 Achiev, 400x300 Seals cells).
+//
+// Nav/`cs` badge counters (`Eg.GU` L1853 -> `Le.badge`, `Dg` L1850-1851).
+// JS `cs.getCounterValue` (L2189) defines each tab badge EXACTLY — it is not
+// undefined, and three of the four are plain save joins (the port's earlier
+// note that they are "not derivable" was wrong):
+//   0 `p.o.co.uCa()` (L305) = `id.ht().n5a() - this.KS.Oa.length`
+//       = perk defs in the tree minus the `<PerkHistory>` entries.
+//   1 `p.o.sCa()` (L256) = count of `v.uQ()` moves whose `aE` "new" flag is
+//       set (`es.zha` L2239 clears it on tab entry; `p.o.inb` persists it).
+//   2 `p.o.yi.rCa()` (L294) = count of achievement `<Hy>` levels with `yj`.
+//   3 `p.o.vCa()` (L256) = owned seals (`xa.hJ(I.Vr)`) with `pd()>0` and the
+//       seal def's `yj` flag.
+// `Eg.GU()` (L1853) pushes each value into `Le.badge.lk(...)` (`Dg` L1850:
+// notification_circle / notification_ellipse at local (71,48), `ba(72)`).
+// PORT BLOCKER (still OPEN): the move `aE` and item `yj` "new" flags are not
+// exposed by `SaveSystem` (core/app/save_system.*), so counters 1/3 cannot be
+// evaluated here; the profile strip therefore draws no badge yet. The banner
+// badges the audit flagged as missing are a real gap, not an undefined one.
+// The `Dg.ba(65)`/`Ia(128)` geometry is ported in `draw_za_chrome`'s badge
+// path.
 // ---------------------------------------------------------------------------
 constexpr int kProfileTabCount = 4;
-constexpr int kProfileTabLeveling = 0;  // `ds` leveling tab (`Rl=ds` L2227) — body OPEN
+constexpr int kProfileTabLeveling = 0;  // `ds` leveling tab (`Rl=ds` L2227) — perk tree body
 constexpr int kProfileTabMoves = 1;  // folded Moves sub-view (JS `qv`, To.kOa=11 L2201)
-constexpr int kProfileTabAchiev = 2;  // `fs` ACHIEVEMENT_SLIDER (L2213) — body OPEN
+constexpr int kProfileTabAchiev = 2;  // `fs` ACHIEVEMENT_SLIDER (L2213) — achievements body
 constexpr int kProfileTabSeals = 3;  // `gs` SEALS_SLIDER (L2231) — ported
 
 struct ProfileTabArt {
@@ -10233,12 +10258,16 @@ void EquipmentScreen::render_impl(App& app) {
         const int n = std::min(static_cast<int>(move_rows_.size()), max_rows);
         for (int i = 0; i < n; ++i) {
             const MoveRow& r = move_rows_[i];
-            char buf[128];
-            std::snprintf(buf, sizeof(buf), "%s   [%s] P%d", r.name.c_str(),
-                          r.type.empty() ? "-" : r.type.c_str(), r.priority);
+            // JS `es.NC` (L2239) returns a `ks` cell whose content is `ls`
+            // initialized with the move IMAGE (`ls.init(a.image, a)`, L2235) —
+            // the JS cell carries NO "[type] P<priority>" text. The port cannot
+            // draw that image yet: `MoveDef` (core/scene/move_def.cpp:452)
+            // parses only the `FileName` clip, not the move `Image` attr, and
+            // core/scene is outside this task's file scope. Draw the move name
+            // alone instead of the invented composite string.
             draw_ui_label(app, v.J + 20.0f,
                           inner_top + 34.0f + static_cast<float>(i) * kMoveRowH,
-                          v.width() - 40.0f, 28.0f, buf, 0.62f, UiAlign::Left, 0.18f,
+                          v.width() - 40.0f, 28.0f, r.name, 0.62f, UiAlign::Left, 0.18f,
                           0.13f, 0.08f);
         }
         if (move_rows_.empty()) {
