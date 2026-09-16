@@ -115,6 +115,7 @@ void Fighter::set_model(const Model& model) {
     mirror_swap_ = false;
     mirror_x_ = false;
     mirror_prepend_ = false;
+    clip_mirror_ = 1;  // JS `Te` ctor L545 / `Te.reset` L548: `FX = 1`
     pose_sampled_ = false;
 }
 
@@ -371,9 +372,13 @@ void Fighter::clear_intervals(int type, const std::string& name) {    if (curren
 // JS `wd.NS` (L506) -> `Te.Skb` (L550): start the move's clip.
 //   - conditions tested by the caller (try_select_move)
 //   - `Mq = a.qx` (FirstFrame) — native: move_frame = FirstFrame
-//   - facing `b` = ±1 toward the enemy (JS `b6a`, L603:
-//     `my.ma.x - enemy.ma.x >= 0 ? 1 : -1`)
-//   - `Peb()` (L560) mirrors the clip BUFFER when the facing is -1 and swaps
+//   - `Skb`'s sign `b` = `Ae.Wl` (JS `Vi.SBa` L704, `sign(To-From)` =
+//     `sign(enemy_x - me_x)` for the shipped `Me -> Enemy` SetDirection) —
+//     the clip MIRROR, NOT the `b6a` lock (L603, a separate term).
+//   - the `b6a` facing LOCK (L603) and the `Te.FX` clip MIRROR (`hd()`,
+//     L547) are SEPARATE terms ([F10] in `start_move_impl`): `FX` =
+//     `sign(enemy_x - me_x)` from `Ae.Wl` (`Vi.SBa` L704).
+//   - `Peb()` (L560) mirrors the clip BUFFER when `hd()` is -1 and swaps
 //     the `_1`/`_2` pairs when the MirrorNode cross disagrees (Te.MYa, L566).
 //
 // Keys gating: the fighter's OWN context keeps `gm` true (only the AI
@@ -453,24 +458,37 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         current_clip_ = clip_lookup_(clip_name);
     }
 
-    // Facing toward the enemy (JS `b6a` L603).
-    // [F2] JS `b6a(a){a=a.Fe(); let b=this.Ji.Fe(); return a==null||b==null?0:
-    // a.ma.x-b.ma.x>=0?1:-1}` — `a` = MY anchor node (`wd.Fe()`), `b` = the
-    // ENEMY's. The old port computed `(enemy_x_ - world_x_)`, i.e. the sign is
-    // INVERTED. Evidence (same scenario, both traces): the old native run
-    // `traces/native_pose_prefix.jsonl` f1 has Me at x=971.812 facing Enemy at
-    // x=692.938 and reports `fx=-1`, while the oracle
-    // `traces/oracle_pose.jsonl` f0 has Me at x=972.954 facing Enemy at x=690
-    // and reports `fx=+1` (`972.954-690 >= 0`).
+    // [F10] The two terms wave 1 conflated: the `b6a` FACING LOCK and the
+    // `Te.FX` CLIP MIRROR. They are different quantities and must not share
+    // one variable — `b6a` is `a.ma.x-b.ma.x>=0?1:-1` (JS L603), while `FX`
+    // is `rub(b)` (L547) of `b = Ae.Wl` = `Vi.SBa` (L704) = `sign(To-From)`
+    // = `sign(enemy_x - me_x)` for the shipped `Me -> Enemy` SetDirection.
+    //
+    // Facing lock (JS `b6a` L603) — the movement/orientation term; the value
+    // `facing()` reports (pose-dump `fx`).
     facing_ = (world_x_ - enemy_x_) >= 0.0f ? 1 : -1;
 
-    // [F1] JS `Te.Peb` L560 -> `Te.Qeb` L550 -> `vu.Neb` L668: with facing -1
+    // [F10] Clip mirror (JS `Te.FX` / `hd()`, L547) — the term that decides
+    // the `Qeb`/`Neb` clip-buffer negation. From `Ae.Wl` (`Fa.xD` L697 →
+    // `Vi.SBa` L704 `(to.OQ(a)-from.OQ(a))>=0?1:-1`) = `sign(enemy_x - me_x)`
+    // for the shipped `Me -> Enemy` pair (moves.xml, e.g. StepForward L10702,
+    // StaffStepForward L10911, DoubleStepForward L12508, HighPunch L15074,
+    // ShortUpwardElbowStrike L15208, FistsStartStance-Left L4711). With no
+    // `<SetDirection>` the JS `xD` returns the previous `hd()`, so the value
+    // CARRIES OVER; the port's `MoveDef` carries no `vj.mh` presence flag
+    // (the same unconditional `Me -> Enemy` form is assumed by
+    // `FightController::fill_ctx_geometry` and `conditions.hpp`'s `direction`),
+    // so the term is re-derived here. The `Te` ctor (L545) / `Te.reset` (L548)
+    // default is +1, restored by `clear_move`/`set_model`.
+    //
+    // [F1] `Te.Peb` L560 -> `Te.Qeb` L550 -> `vu.Neb` L668: with `FX == -1`
     // the clip BUFFER x is negated about clip-space 0, from slot `jW?2:0` up.
     // `jW` is true whenever `qrb` seeded the two prepend slots (`vu.Cbb` L667
     // sets `this.jW=!0`), i.e. whenever the move does NOT carry
     // `NoInterpolationFrames`; in the `Pka`-prepend case (`no_interp`,
     // `jW==false`) the negation starts at slot 0 and covers the prepend too.
-    mirror_x_ = facing_ < 0;
+    clip_mirror_ = (enemy_x_ - world_x_) >= 0.0f ? 1 : -1;
+    mirror_x_ = clip_mirror_ < 0;
     mirror_prepend_ = mirror_x_ && move.no_interp;
 
     // [F3] JS `Te.Peb` L560: `this.rw = Te.MYa(this.model, this.Ua, this.hd(),
@@ -501,7 +519,10 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             const auto& rb = current_clip_->frames[ref].bones;
             const std::size_t zclip = std::min(rb.size(), model_.bones.size());
             int ia = ni_a, ib = ni_b;
-            if (facing_ == -1) std::swap(ia, ib);  // `lwa` swaps the operands
+            // [F10] `lwa`'s 3rd argument is `this.hd()` (`Peb` L560 =
+            // `Te.MYa(this.model, this.Ua, this.hd(), …)`) = the CLIP MIRROR,
+            // not the `b6a` lock.
+            if (clip_mirror_ == -1) std::swap(ia, ib);  // `lwa` swaps the operands
             if (static_cast<std::size_t>(ia) < zclip &&
                 static_cast<std::size_t>(ib) < zclip) {
                 // `Neb` already ran -> the buffer x is mirrored. `ma` (the
@@ -535,8 +556,9 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     //   `this.aV = t9a() = Coa; this.aV.x*=hd()`
     //     (aV = <Velocity Ax/Ay/Az>, x mirrored by facing — always).
     // Reference: `Fa.ykb` L721-722 (parse), `Te.Qfa`/`Te.t9a` L699,
-    // `Te.jub` L722 (`SaveVelocity` -> `qta`).
-    const float fsign = facing_ < 0 ? -1.0f : 1.0f;
+    // `Te.jub` L722 (`SaveVelocity` -> `qta`). The multiplier is the `Skb`
+    // sign `b` = the CLIP MIRROR (`hd()`), not the `b6a` lock.
+    const float fsign = clip_mirror_ < 0 ? -1.0f : 1.0f;
     if (move.velocity.has_velocity) {
         root_active_ = true;
         if (!move.velocity.save_velocity) {
@@ -840,7 +862,9 @@ void Fighter::advance_step() {
 
 void Fighter::sample_current() {
     if (current_clip_ != nullptr) {
-        sample(*current_clip_, move_frame_, world_x_, world_y_, facing_,
+        // [F10] The `sample()` mirror argument is the CLIP MIRROR (`Te.FX` /
+        // `hd()`), not the `b6a` facing lock.
+        sample(*current_clip_, move_frame_, world_x_, world_y_, clip_mirror_,
                /*interp=*/true, current_move_ != nullptr ? current_move_->first_frame : 0,
                playhead_);
     }
@@ -862,10 +886,12 @@ void Fighter::clear_move() {
     render_offset_ = 0.0f;
     render_offset_valid_ = true;
     align_pivot_u_ = -1;
-    // JS `stop()`/`jc.reset()` drops the per-clip mirror decision too.
+    // JS `stop()`/`jc.reset()` drops the per-clip mirror decision too;
+    // `Te.reset` L548 also restores the ctor default `FX = 1`.
     mirror_swap_ = false;
     mirror_x_ = false;
     mirror_prepend_ = false;
+    clip_mirror_ = 1;
 }
 
 // JS `Dl.NQ` (L575): `for(d in this.Wf.b3){if(a==d.first)return d.second;
@@ -927,7 +953,10 @@ void Fighter::compute_align(const MoveDef& move) {
                              static_cast<int>(current_clip_->frames.size()) - 1)));
     const auto& fb = current_clip_->frames[f0].bones;
     const int pivot_idx = model_.bone_by_name(al.pivot_part);  // UE / `this.os`
-    const float f = facing_ < 0 ? -1.0f : 1.0f;
+    // [F10] `Gub` L559's `e += this.hd()*a.dja` — `hd()` is the CLIP MIRROR
+    // (`Te.FX`), the same term `Qeb`/`Neb` used on the buffer above (the JS
+    // order is `Peb(); Gub();`, so `Gub` reads the mirrored buffer).
+    const float f = clip_mirror_ < 0 ? -1.0f : 1.0f;
     // [F1/F3] `Te.Skb` L551 order is `Mkb(); Mqb(); Peb(); Gub();`. `Mqb`
     // (L563) sets `os = align.UE` / `currentNode = Va.all[os]`; `Peb` (L560)
     // then — when `rw` — sets `os = model.NQ(os)` and `currentNode` to that
@@ -961,7 +990,9 @@ void Fighter::compute_align(const MoveDef& move) {
     if (ve == 1 || ve == 4) {  // EObjectNodes / EObjectPivot: clip buffer node
         if (align_idx >= 0 && static_cast<std::size_t>(align_idx) < fb.size()) {
             const std::size_t u = buf_src(align_idx);
-            const float msign = (facing_ < 0) ? -1.0f : 1.0f;
+            // [F10] `Gub` L558 reads `this.jc.Kh(2)` AFTER `Peb` ran
+            // `Qeb` → `Neb`, i.e. the clip mirror `Te.FX` (`hd()`).
+            const float msign = (clip_mirror_ < 0) ? -1.0f : 1.0f;
             dx = msign * fb[u].x;  // `Neb` negates x ONLY (`data[b].x*=-1`)
             dy = fb[u].y;
             dz = fb[u].z;
@@ -1127,7 +1158,7 @@ void Fighter::build_prepend(const MoveDef& move) {
 }
 
 void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
-                     float y, int facing, bool interp, int first_frame,
+                     float y, int mirror_sign, bool interp, int first_frame,
                      int playhead) {
     if (clip.frames.empty()) {
         return;
@@ -1170,8 +1201,9 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // the raw clip control points here; the prepend slots are already stored
     // mirrored by `build_prepend` for the `jW==false` case (`Neb` starts at
     // slot 0 there), so they are used verbatim. `sample_current()` always
-    // passes `facing_`, so this matches the `mirror_x_` used at move start.
-    const float mneg = (facing < 0) ? -1.0f : 1.0f;
+    // passes `clip_mirror_`, so this matches the `mirror_x_` used at move
+    // start (both are the `Te.FX`/`hd()` clip-mirror term, JS L547/L550).
+    const float mneg = (mirror_sign < 0) ? -1.0f : 1.0f;
 
     // Resolve one (control slot, bone) position in clip/model space. In the
     // playback path the buffer index is `playhead + rel`; slots 0,1 are the

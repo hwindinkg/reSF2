@@ -240,7 +240,9 @@ public:
     // Per-bone world positions at frame `f` of `clip`, anchored so the
     // fighter's PivotNode bone (`fighter_pivot_bone()`) sits at (x, y).
     // Bones beyond the clip's bone count keep their bind position.
-    // Facing -1 mirrors X.
+    // `mirror_sign` -1 negates the clip buffer x (JS `Te.Qeb` L550 →
+    // `vu.Neb` L668 `data[b].x*=-1`); it is the CLIP MIRROR (`Te.FX` /
+    // `hd()`), NOT the `b6a` facing lock — see `clip_mirror_`.
     //
     // `interp` selects the JS clip-playback sampling (`Te.Gka` L285802): the
     // interpolation buffer is [slot0, slot1, clip[FirstFrame], ...] where
@@ -249,7 +251,7 @@ public:
     // `interp=false` the legacy static mapping (frame, frame+1, frame+2) is
     // kept for the dojo probe/bag poses.
     void sample(const sf2::data::anim_clip& clip, int frame, float x, float y,
-                int facing, bool interp = false, int first_frame = 0,
+                int mirror_sign, bool interp = false, int first_frame = 0,
                 int playhead = 0);
 
     // Flat fill color (RGB, 0..255).
@@ -403,13 +405,32 @@ private:
     // NOT carry `NoInterpolationFrames`; in the `Pka`-prepend case
     // (`no_interp`, `jW == false`) the negation starts at slot 0 and the two
     // prepend slots are negated too.
-    bool mirror_x_ = false;        // facing_ < 0 for the current move
+    bool mirror_x_ = false;        // clip_mirror_ < 0 for the current move
     bool mirror_prepend_ = false;  // mirror_x_ && current_move_->no_interp
     // True once `sample()` has written a real frame into `pos_`. JS `ma` always
     // holds a pose (the bind pose before the first `eda`), so the `lwa` order
     // test in `start_move_impl` falls back to the BIND x until then.
     bool pose_sampled_ = false;
-    int facing_ = 1;                        // +1 (JS `Te.FX` / `hd()`)
+    // [F10] The `b6a` FACING LOCK (movement/orientation), JS L603
+    // `b6a(a){...a.ma.x-b.ma.x>=0?1:-1}` — set in `start_move_impl`. This is
+    // what `facing()` reports (the pose dump's `fx`).
+    int facing_ = 1;
+    // [F10] The CLIP-BUFFER MIRROR sign — JS `Te.FX`, read through
+    // `Te.hd()` (L547 `hd(){return this.FX}`). A term DISTINCT from the
+    // `b6a` lock above: `Te.Skb` L551 runs `this.rub(b)` (L547
+    // `rub(a){this.FX=a<0?-1:1}`) with `b` = the animation request's `sign`
+    // = `Ae.Wl` (L677), and `Ae.Wl` comes from `Fa.xD` (L697)
+    // `xD(a,b){return this.va.vj.mh?this.va.vj.SBa(a):b}` → `Vi.SBa` (L704)
+    // `(this.fg!=0 ? … : this.to.OQ(a)-this.from.OQ(a))>=0?1:-1`, i.e.
+    // `sign(To - From)` = `sign(enemy_x - me_x)` for the shipped
+    // `<From Player="Me" .../><To Player="Enemy" .../>` SetDirection; with no
+    // `<SetDirection>` (`vj.mh == false`) `xD` returns the caller's `b` =
+    // the previous `hd()`, so the value carries over. Initialized to +1 by
+    // the `Te` ctor (L545) and reset to +1 by `Te.reset` (L548).
+    // It drives the clip-buffer negation (`Qeb` L550 → `vu.Neb` L668), the
+    // `Peb`→`MYa` operand swap (L560), the `Gub` align `hd()` factors
+    // (L558-559) and the `<Velocity>` x seed (`Skb` L552 `this.DM.x*=b`).
+    int clip_mirror_ = 1;
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (pivot world pos)
     float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
     float scale_acc_ = 0.0f;   // timescale fractional accumulator
