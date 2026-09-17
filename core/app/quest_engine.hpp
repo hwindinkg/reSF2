@@ -355,6 +355,38 @@ public:
     // Drops every queued dialog (tutorial handoff / scene reset).
     void clear_dialogs() { dialogs_.clear(); }
 
+    // --- `Do`/`Eo`: the StoryTutorial lesson GATE (JS L1242/L1243) ----------
+    // `StoryTutorialWelcome` (reference/extracted/xml/res/quest_extensions/
+    // tutorial_quests.xml L26-42) is ONE serialized action list:
+    //   Dialog(Notification Move) -> <StoryTutorialMove/> ->
+    //   Dialog(Notification PunchBag) -> <StoryTutorialPunchbag/> ->
+    //   Dialog(Regular characterSensei = the В БОЙ training-fight modal).
+    // The JS `Do` (move) / `Eo` (punchbag) action classes SUSPEND the chain
+    // there: `Do.S` arms `this.Ni = new Re(w(this,this.Cm), v.su.a_)` — a
+    // timer of `v.su.a_` = `TutorialStepTimeout` (`internal_settings.xml`
+    // L115 `Value="15"`) — and `Cm` calls `this.sa()`, which resumes the tail
+    // (`Yb` L954 serializes the list). So the JS only ever has ONE tutorial
+    // beat queued at a time: the Move bar, then the PunchBag bar, then the
+    // Regular modal. The oracle tutorial captures are exactly those beats
+    // (`oracle_matrix/MANIFEST.md`: tut_fight_stance = the move lesson,
+    // tut_fight_phase2 = the punchbag lesson, tut_block/dojo_sensei = the
+    // modal).
+    // The port has no dojo move / punchbag lesson hooks (the actions were
+    // "record only"), so it queued the whole list at frame 0 and `Wb`'s top
+    // became the Regular from f=0 — which hides the bar beats. This gate
+    // restores the JS serialization using the JS timeout on the APP clock
+    // (the top screen's fixed 60 Hz `time()`, like the `ReadTime` bar budget),
+    // never the wall clock.
+    static constexpr float kTutorialStepTimeoutSec = 15.0f;
+    // Beat the suspended chain is parked at: 1 = `StoryTutorialMove`,
+    // 2 = `StoryTutorialPunchbag`, 0 = not gated. The fidelity driver waits on
+    // it so each tutorial capture lands on the oracle's own beat.
+    int tutorial_gate_beat() const { return tutorial_gate_.active ? tutorial_gate_.beat : 0; }
+    // Advances the gate clock by `dt` (app-time seconds); when it elapses the
+    // stashed tail runs (which may immediately hit the second lesson and
+    // re-park). Returns true when the tail resumed this call.
+    bool tutorial_gate_tick(App& app, float dt);
+
     // Test hook (the `--dialog-verify` harness): queue a dialog record built
     // in-process, so the display/dispatch contracts (Left-vs-Right plate,
     // colour→frame, page caption precedence) can be asserted without firing a
@@ -477,6 +509,21 @@ private:
         std::string quest;
         int frames = 0;
     };
+    // The StoryTutorial lesson gate (see `tutorial_gate_beat`): the tail of the
+    // suspended run plus its journal/locals and the remaining app-time.
+    struct TutorialGate {
+        bool active = false;
+        int beat = 0;          // 1 = move lesson, 2 = punchbag lesson
+        float remaining = 0.0f;  // app-time seconds until `Cm` (`TutorialStepTimeout`)
+        std::vector<QuestAction> rest;
+        QuestJournal journal;
+        std::map<std::string, std::string> locals;
+        std::string quest;
+    };
+    TutorialGate tutorial_gate_;
+    // Runs the stashed tail (shared by the resume path); returns true if the
+    // tail completed (false when it re-parked on the next lesson).
+    bool resume_tutorial_gate(App& app);
 
     ActionRest run_actions(App& app, const std::vector<QuestAction>& acts,
                            const QuestJournal& journal, QuestSideEffects& fx,

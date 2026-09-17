@@ -202,6 +202,30 @@ bool quest_read_time_tick(App& app) {
     return quest_read_time_advance(app, dt);
 }
 
+// The StoryTutorial lesson gate clock (JS `Do`/`Eo` `Cm`, L1242/L1243). Same
+// source as the bar's ReadTime budget: the top screen's fixed 60 Hz `time()`
+// delta, never the wall clock, so the headless drivers stay deterministic.
+// A screen change must not jump the budget, so the delta is clamped like
+// `quest_read_time_tick`.
+struct TutorialGateClock {
+    float last_time = -1.0f;
+};
+TutorialGateClock& tutorial_gate_clock() {
+    static TutorialGateClock s;
+    return s;
+}
+
+bool quest_tutorial_gate_tick(App& app) {
+    const float now = app.screens().top() != nullptr ? app.screens().top()->time() : 0.0f;
+    TutorialGateClock& st = tutorial_gate_clock();
+    if (st.last_time < 0.0f) st.last_time = now;
+    float dt = now - st.last_time;
+    st.last_time = now;
+    if (dt < 0.0f) dt = 0.0f;
+    if (dt > 0.5f) dt = 0.5f;
+    return app.quest_engine().tutorial_gate_tick(app, dt);
+}
+
 // JS `He` gating (L1045-1062): a `Notification` is fire-and-forget (any tap
 // advances, `sa()` continues); a `Regular` dialog holds the chain until its
 // button fires (`dhb(1)` L1061 -> the nested `Yb`), IgnoreBack="1" so a
@@ -214,6 +238,10 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
     if (settings_dialog_consume(app)) return true;
     // D8 `Ib.aa` L1905: the app-clock ReadTime countdown runs before input.
     quest_read_time_tick(app);
+    // `Do`/`Eo` L1242/L1243: the StoryTutorial lesson gate resumes the
+    // serialized chain on the same app clock (the next tutorial beat is only
+    // queued once the lesson budget elapses).
+    quest_tutorial_gate_tick(app);
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return false;
     // `He.S` L1048-1050: the Types whose JS body is a bare `debugger;`
@@ -6886,6 +6914,10 @@ std::string FightScreen::player_current_move() const {
 int FightScreen::fight_frame() const {
     return fight_ != nullptr ? fight_->frame() : -1;
 }
+
+bool FightScreen::vs_active() const { return vs_active_; }
+
+float FightScreen::vs_time() const { return vs_t_; }
 
 bool FightScreen::round_wait() const {
     return fight_ != nullptr && fight_->round_wait();

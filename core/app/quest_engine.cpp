@@ -1123,6 +1123,35 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // story-tutorial scene hooks (`Oa.ska`, fight move hooks) the
             // shell drives itself; record-only.
             fx.minigames.push_back(t + " (needs fight hooks)");
+            // The two lessons `StoryTutorialWelcome` rides on (`Do`/`Eo`, the
+            // xml L30/L35 actions BETWEEN the three dialogs) SERIALIZE the
+            // chain: the JS arms `Re(Cm, TutorialStepTimeout)` and `Cm` ->
+            // `this.sa()` resumes the tail, so the next `Dialog` (the next bar
+            // beat / the `Regular` modal) is not created yet. Park the tail on
+            // the app clock (see `tutorial_gate_beat`). Only the fresh-profile
+            // tutorial path gates; every other harness keeps the eager walk.
+            // Depth 0 only: both lessons sit at the top level of
+            // `StoryTutorialWelcome`'s `<Actions>`, so the parked tail is
+            // always complete (no outer remainder to re-attach).
+            if (depth == 0 && app.fresh_tutorial() && !tutorial_gate_.active &&
+                (t == "StoryTutorialMove" || t == "StoryTutorialPunchbag")) {
+                tutorial_gate_.active = true;
+                tutorial_gate_.beat = (t == "StoryTutorialMove") ? 1 : 2;
+                tutorial_gate_.remaining = kTutorialStepTimeoutSec;
+                tutorial_gate_.rest.assign(acts.begin() + i + 1, acts.end());
+                tutorial_gate_.journal = journal;
+                tutorial_gate_.locals = locals;
+                tutorial_gate_.quest = quest;
+                std::fprintf(stdout,
+                             "[quest] %s: chain parked %.1fs (beat %d, %zu tail actions)\n",
+                             t.c_str(), kTutorialStepTimeoutSec, tutorial_gate_.beat,
+                             tutorial_gate_.rest.size());
+                std::fflush(stdout);
+                ActionRest parked;
+                parked.suspended = true;  // the gate clock owns the resume, not `tick`
+                parked.frames = 0;
+                return parked;
+            }
         } else if (t == "Line" || t == "Button" || t == "Then" || t == "Else" ||
                    t == "Conditions") {
             ActionRest sub = run_actions(app, a.children, journal, fx, locals, quest,
@@ -1240,6 +1269,33 @@ void QuestEngine::resume_run(App& app, PendingRun& run) {
     } else {
         run.actions.clear();
     }
+}
+
+// The StoryTutorial lesson gate (see `tutorial_gate_beat` in the header): the
+// JS `Do`/`Eo` `Cm` (`sf2.502f0946.js` L1242/L1243) resumes the serialized
+// chain (`Yb` L954) once the `TutorialStepTimeout` budget elapses. Runs the
+// stashed tail; a second lesson re-parks it (the PunchBag beat).
+bool QuestEngine::resume_tutorial_gate(App& app) {
+    TutorialGate gate = std::move(tutorial_gate_);
+    tutorial_gate_ = TutorialGate{};  // cleared first: the tail may re-park
+    QuestSideEffects fx;
+    ActionRest rest =
+        run_actions(app, gate.rest, gate.journal, fx, gate.locals, gate.quest, 0);
+    (void)rest;  // a re-arm leaves the parked tail in `tutorial_gate_`
+    apply_effects(app, fx);
+    enqueue_effects(app, fx, gate.journal, gate.locals, gate.quest);
+    return !tutorial_gate_.active;
+}
+
+bool QuestEngine::tutorial_gate_tick(App& app, float dt) {
+    if (!tutorial_gate_.active) return false;
+    if (dt <= 0.0f) return false;
+    tutorial_gate_.remaining -= dt;
+    if (tutorial_gate_.remaining > 0.0f) return false;
+    std::fprintf(stdout, "[quest] tutorial lesson beat %d done -> chain resumes\n",
+                 tutorial_gate_.beat);
+    std::fflush(stdout);
+    return resume_tutorial_gate(app);
 }
 
 // `Gn.qIa` (L1032): `mp(a,null,null,CallEvents)` — push the target scene. The

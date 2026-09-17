@@ -394,6 +394,21 @@ struct UiTourStep {
     // meaning. The frozen `jk` pose for the roster hook: 3/4 = the `act_boss`
     // resting selection, 1 = a mid horizontal scroll-in (`act_boss_scroll`).
     int boss_state = 3;
+    // [fidelity VS-intro gate] The `ik` overlay (screens.cpp kVsTotal, JS
+    // `ik.yY` L2071 = 3.4 s) covers the fight scene while the native sim runs
+    // underneath, so a fixed frame no longer identifies a visible fight state.
+    // 0 = none; 1 = capture inside the composed hold (the `ik` roster, the
+    // oracle `fight_intro`); 2 = wait for the overlay to end, then honour
+    // `hold_frames` (the visible-fight captures: stance/block).
+    int vs_wait = 0;
+    // [fidelity tutorial-beat gate] The `StoryTutorialWelcome` chain is
+    // serialized by its two lesson actions (`Do`/`Eo`, quest_engine
+    // `tutorial_gate_beat`), so each tutorial capture waits on the app's OWN
+    // beat instead of a frame count: 0 = none, 1 = the move lesson bar (the
+    // oracle `tut_fight_stance`), 2 = the punchbag lesson bar (the oracle
+    // `tut_fight_phase2`), 3 = the `Regular characterSensei` training modal is
+    // up (the oracle `tut_block` / `dojo_sensei`).
+    int wait_gate = 0;
 };
 
 static const UiTourStep kUiTourSteps[] = {
@@ -459,6 +474,13 @@ constexpr int kUiTourStepCount = static_cast<int>(sizeof(kUiTourSteps) / sizeof(
 //   shop tab strip (shop_tab_layout): y=676, x = 418.7/529.3/640.0/750.7/861.3.
 //   profile tab strip (profile_tab_layout): y=672.5, x = 461.1/580.4/699.7/818.9.
 //   shop first card = (548.2, 218.4).
+// [fidelity VS-intro gate] The `ik` overlay's COMPOSED-hold lower bound: the
+// JS composes the roster at `kd7` (names in, ~1.7 s; `kVsNameT` 0.45 s in the
+// port's stage fold) and starts fading at `kd9` (`kVsFadeT` 2.90 s). 1.0 s sits
+// inside that window, so the `fight_intro` capture is the full roster and can
+// never catch the slide-in or the fade-out.
+static constexpr float kVsComposedT = 1.0f;
+
 static const UiTourStep kFidelitySteps[] = {
     // --- Fresh-profile tutorial (JS StoryTutorialWelcome) --------------------
     // Approved `fresh/tutorial-from-0` boot: the Dojo plays the Sensei beats
@@ -468,18 +490,29 @@ static const UiTourStep kFidelitySteps[] = {
     // dialog + dlgStoryBtnFight).
     // 0: beat 0 notification ("tutorial_move") -> tut_fight_stance.
     //    The beat notifications carry `ReadTime="5.0"` (tutorial_quests.xml
-    //    L26/L31), so the scripted taps below must land inside that window
-    //    (`Ib.aa` L1905 auto-dismisses) — the pre-ReadTime timing held 240
-    //    frames, which ran past 5 s and shifted the beats.
-    {0.0f, 0.0f, "tut stance (move notification)", 3, 60, -1, 30, "tut_fight_stance.png", 0, true},
-    // 1: tap the notification banner -> beat 1 ("tutorial_punchbag").
-    {1145.0f, 244.0f, "tut phase2 (punchbag notification)", 3, 10, -1, 30, "tut_fight_phase2.png", 0, false},
-    // 2: tap -> the Regular Sensei training-fight dialog. `tut_block`'s oracle
-    //    frame (`oracle_matrix/tut_block.png`, sourced from
+    //    L26/L31), so the capture must land inside that window — the settle
+    //    below does. The `StoryTutorialMove` lesson then parks the chain
+    //    (`wait_gate=1`, quest_engine `tutorial_gate_beat`), so the `Regular`
+    //    modal is NOT queued yet and the bar is the only dialog: the oracle
+    //    frame (`oracle_tutorial_stance.png` = the move banner over the dojo,
+    //    no modal) is what the port now shows.
+    {0.0f, 0.0f, "tut stance (move notification)", 3, 60, -1, 30, "tut_fight_stance.png", 0, true,
+     0.0f, 0.0f, -1, false, -1, false, 3, 0, 1},
+    // 1: beat 1 ("tutorial_punchbag") — the chain resumes from the move
+    //    lesson after its `TutorialStepTimeout` (the oracle's own driver waited
+    //    the same 15 s: `oracle_tutorial_move.png`). Wait on the beat, never on
+    //    a frame count.
+    {0.0f, 0.0f, "tut phase2 (punchbag notification)", 3, 10, -1, 30, "tut_fight_phase2.png", 0,
+     true, 0.0f, 0.0f, -1, false, -1, false, 3, 0, 2},
+    // 2: the `Regular` sensei training-fight dialog, queued once the punchbag
+    //    lesson completes. `tut_block`'s oracle frame
+    //    (`oracle_matrix/tut_block.png`, sourced from
     //    oracle_tutorial_punchbag) IS that modal (СЭНСЭЙ portrait + В БОЙ).
-    {1145.0f, 244.0f, "tut block (sensei training dialog)", 3, 10, -1, 50, "tut_block.png", 0, false},
+    {0.0f, 0.0f, "tut block (sensei training dialog)", 3, 10, -1, 50, "tut_block.png", 0, true,
+     0.0f, 0.0f, -1, false, -1, false, 3, 0, 3},
     // 3: the same training dialog (`oracle_tutorial_modal`) -> dojo_sensei.
-    {0.0f, 0.0f, "dojo sensei (training dialog)", 3, 10, -1, 30, "dojo_sensei.png", 0, true},
+    {0.0f, 0.0f, "dojo sensei (training dialog)", 3, 10, -1, 30, "dojo_sensei.png", 0, true, 0.0f,
+     0.0f, -1, false, -1, false, 3, 0, 3},
     // 4: the dialog FIGHT button (`dlgStoryBtnFight`) -> the training fight
     //    (a real tutorial fight state for tut_win).
     {860.0f, 554.0f, "tut fight (Punchbag training)", 3, 10, 6, 520, "tut_win.png", 0, false,
@@ -536,12 +569,17 @@ static const UiTourStep kFidelitySteps[] = {
     // take the oracle's own offsets from the press (attack 257=press+30 ->
     // 390, hit 501 -> 634). `auto_attack=0` keeps the player otherwise idle,
     // like the oracle's passive opponent.
+    // [VS-intro gate] `fight_intro` is the `ik` roster itself (the oracle's own
+    // shot: `MANIFEST.md` — "map -> В БОЙ -> VS (ТЕНЬ / ШИН)"), so it captures
+    // inside the composed hold (`vs_wait=1`). `fight_stance`/`fight_block` are
+    // VISIBLE-fight frames and wait for the overlay to end (`vs_wait=2`) — the
+    // pre-3.4 s driver's F120/F146 landed under the overlay once `ik.yY` grew.
     {0.0f, 0.0f, "map->fight", 5, 10, 6, 40, "fight_intro.png", 0, false, 0.0f, 0.0f, 0, false,
-     -1, true},
+     -1, true, 3, 1},
     {0.0f, 0.0f, "fight stance", 6, 0, -1, 0, "fight_stance.png", 0, true, 0.0f, 0.0f, -1, false,
-     120},
-    {0.0f, 0.0f, "fight block", 6, 0, -1, 0, "fight_block.png", 0, true, 0.0f, 0.0f, -1, false,
-     146},
+     -1, false, 3, 2},
+    {0.0f, 0.0f, "fight block", 6, 0, -1, 35, "fight_block.png", 0, true, 0.0f, 0.0f, -1, false,
+     -1, false, 3, 2},
     // The oracle's single fight input: punch (control 9 = K/Space) pressed at
     // phase-2 local 227 (oracle f=561 -> port frame 360).
     {0.0f, 0.0f, "fight punch (oracle control 9)", 6, 0, -1, 0, nullptr, 32, true, 0.0f, 0.0f,
@@ -611,6 +649,10 @@ struct TourDriver {
     bool finished = false;
     int applied_auto_attack = -1;  // last per-step auto-attack override applied
     int applied_force_roster = -1;  // last per-step boss-roster hook applied
+    int applied_boss_state = -1;    // last per-step frozen `jk` state applied
+    // The step_frame at which a `wait_gate` beat first appeared (so the
+    // tutorial settle counts from the beat, not from the stale step delay).
+    int gate_open_frame = -1;
 
     void frame_tick(sf2::app::App& app) {
         const UiTourStep& s = steps[step];
@@ -625,13 +667,20 @@ struct TourDriver {
                          s.auto_attack);
             std::fflush(stdout);
         }
-        // Per-step boss-roster capture hook (fidelity `act_boss`).
-    if ((s.force_boss_roster ? 1 : 0) != applied_force_roster) {
-        sf2::app::set_force_boss_roster(s.force_boss_roster);
-        sf2::app::set_force_boss_state(s.boss_state);
-        applied_force_roster = s.force_boss_roster ? 1 : 0;
-            std::fprintf(stdout, "%s step %d/%d force_boss_roster=%d\n", tag, step + 1, count,
-                         applied_force_roster);
+        // Per-step boss-roster capture hook (fidelity `act_boss`). The frozen
+        // pose (`boss_state`) must be re-applied when it CHANGES even though
+        // the roster flag stays set: `act_boss_scroll` follows `act_boss`
+        // (`force_boss_roster` already 1), and gating on the flag alone left
+        // both captures on the same state — the state-1 mid-scroll capture was
+        // byte-identical to the state-3/4 resting pose.
+        if ((s.force_boss_roster ? 1 : 0) != applied_force_roster ||
+            s.boss_state != applied_boss_state) {
+            sf2::app::set_force_boss_roster(s.force_boss_roster);
+            sf2::app::set_force_boss_state(s.boss_state);
+            applied_force_roster = s.force_boss_roster ? 1 : 0;
+            applied_boss_state = s.boss_state;
+            std::fprintf(stdout, "%s step %d/%d force_boss_roster=%d boss_state=%d\n", tag,
+                         step + 1, count, applied_force_roster, applied_boss_state);
             std::fflush(stdout);
         }
         if (cur != last_seen) {
@@ -668,13 +717,24 @@ struct TourDriver {
         // targets are the oracle phase-local frame mapped onto the port's
         // phase-local frame. A keyed step presses `key` once at the target and
         // waits `hold_frames` so the move / pause dialog is drawn at capture.
-        if (s.fight_frame >= 0) {
+        //
+        // [VS-intro gate] The frame counter keeps running under the `ik`
+        // overlay (`vs_wait == 2`), so an absolute frame no longer identifies
+        // a VISIBLE fight state: the pre-`ik.yY`-3.4 s driver captured F120/F146
+        // while the overlay still covered the scene. The JS creates the fight
+        // only after `ik.kg` (L2071), so a visible-fight capture waits for
+        // `!vs_active()` first; `hold_frames` then counts the visible frames.
+        if (s.fight_frame >= 0 || s.vs_wait == 2) {
             const bool on_fight = (cur == kScreenFight);
             sf2::app::Screen* ftop = app.screens().top();
-            const int ff = (on_fight && ftop != nullptr)
-                               ? static_cast<sf2::app::FightScreen*>(ftop)->fight_frame()
-                               : -1;
-            if (ff >= s.fight_frame || !on_fight) {
+            sf2::app::FightScreen* fs =
+                (on_fight && ftop != nullptr) ? static_cast<sf2::app::FightScreen*>(ftop)
+                                              : nullptr;
+            const int ff = fs != nullptr ? fs->fight_frame() : -1;
+            const bool vs_over = fs != nullptr && !fs->vs_active();
+            const bool ready =
+                !on_fight || (s.vs_wait == 2 ? vs_over : ff >= s.fight_frame);
+            if (ready) {
                 if (on_fight && s.key != 0 && !key_up_done) {
                     app.inject_key(s.key, true);
                     app.inject_key(s.key, false);
@@ -689,8 +749,13 @@ struct TourDriver {
                     ++step_frame;
                     return;
                 }
-                std::fprintf(stdout, "%s fight frame F%d (gate %d) capture %s\n", tag, ff,
-                             s.fight_frame, s.capture != nullptr ? s.capture : "-");
+                if (s.vs_wait == 2) {
+                    std::fprintf(stdout, "%s fight frame F%d (gate vs-over) capture %s\n", tag,
+                                 ff, s.capture != nullptr ? s.capture : "-");
+                } else {
+                    std::fprintf(stdout, "%s fight frame F%d (gate %d) capture %s\n", tag, ff,
+                                 s.fight_frame, s.capture != nullptr ? s.capture : "-");
+                }
                 std::fflush(stdout);
                 snap(app, s);
                 advance();
@@ -751,7 +816,44 @@ struct TourDriver {
             // (4.6 s) now delays the Fight push, so a capture must not fire
             // before the screen it belongs to has arrived.
             const bool arrived = s.expect_screen < 0 || cur == s.expect_screen;
-            if (arrived && step_frame >= s.min_delay + s.hold_frames) {
+            bool ready = arrived && step_frame >= s.min_delay + s.hold_frames;
+            // [fidelity tutorial-beat gate] Wait on the quest chain's own beat
+            // (quest_engine `tutorial_gate_beat`) instead of a frame count tied
+            // to the lesson timeout: 1/2 = the bar beat the chain is parked at,
+            // 3 = the `Regular` modal is queued. The oracle tutorial frames are
+            // exactly these beats (oracle_matrix/MANIFEST.md).
+            if (s.wait_gate != 0) {
+                const bool open = (s.wait_gate == 3)
+                                      ? app.quest_engine().has_modal()
+                                      : app.quest_engine().tutorial_gate_beat() == s.wait_gate;
+                if (!open) {
+                    ready = false;
+                } else if (gate_open_frame < 0) {
+                    // The beat has only just been queued — the bar rolls in and
+                    // the modal opens over `od.Ge`, so `hold_frames` counts from
+                    // the OPEN, not from the (already elapsed) step delay.
+                    gate_open_frame = step_frame;
+                    ready = false;
+                } else if (step_frame < gate_open_frame + s.hold_frames) {
+                    ready = false;
+                }
+            }
+            // [VS-intro gate] `fight_intro` is the `ik` ROSTER frame (the
+            // oracle's own capture), not a bare fight frame: hold until the
+            // overlay has composed (portraits slid in + strokes wiped + names,
+            // `kVsNameT`..`kVsFadeT`) so the capture cannot land in the
+            // slide-in or the fade-out window.
+            if (ready && s.vs_wait == 1) {
+                sf2::app::Screen* ftop = app.screens().top();
+                sf2::app::FightScreen* fs =
+                    (cur == kScreenFight && ftop != nullptr)
+                        ? static_cast<sf2::app::FightScreen*>(ftop)
+                        : nullptr;
+                if (fs != nullptr) {
+                    ready = fs->vs_active() && fs->vs_time() >= kVsComposedT;
+                }
+            }
+            if (ready) {
                 snap(app, s);
                 advance();
                 return;
@@ -781,6 +883,7 @@ struct TourDriver {
         acted = false;
         key_up_done = false;
         tab_clicked = false;
+        gate_open_frame = -1;
         if (step >= count) {
             finished = true;
             std::fprintf(stdout, "%s ALL %d STEPS DONE\n", tag, count);

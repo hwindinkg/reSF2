@@ -429,6 +429,15 @@ public:
     // controller exists.
     int fight_frame() const;
 
+    // [fidelity] The `ik` VS-intro overlay state (JS `ik`, L2069-2071): the
+    // overlay covers the scene for `ik.yY` = kVsTotal seconds while the native
+    // sim runs underneath (JS creates the fight only AFTER `ik.kg`, L2071).
+    // A fight capture must therefore wait for the overlay before framing, and
+    // the `fight_intro` capture must land INSIDE the composed hold. `vs_time`
+    // is the overlay clock in seconds (JS `ik.time`, reset per `kd` stage).
+    bool vs_active() const;
+    float vs_time() const;
+
     // [FIX Phase 4a verification] Prints the sampled bone positions of the
     // player/enemy (a clip-frame bone-sample check) + their triangle bbox
     // (the stretched/on-screen check). Defined in screens.cpp.
@@ -509,12 +518,12 @@ private:
     // fires; the port keeps the sim ticking underneath and covers it fully.
     // Presentation-only: render + one timer, no sim hooks.
     //
-    // NOTE (capture alignment, OPEN for strict timing): `ik.yY` is 3.4 s and
-    // the JS composition completes at kd7 (~1.7 s). The native timeline is
-    // compressed (compose by ~0.5 s, removed by ~1.8 s) so the fixed-frame
-    // fidelity captures land on the composed screen (`fight_intro`, frame 40
-    // ≈ 0.67 s) and on the bare fight scene (`pause`, ≈ 2.8 s). See
-    // `kVsTotal` in screens.cpp.
+    // NOTE (capture alignment): `ik.yY` = kVsTotal = 3.4 s (JS L2071) and the
+    // composition completes at the `kd7` name stage (~1.7 s), so the composed
+    // hold runs ~1.7..2.9 s (`kVsNameT`..`kVsFadeT`). The fidelity driver gates
+    // `fight_intro` on this clock and every other fight capture on `!vs_active`
+    // (the JS fight `ca.frame` starts only after the overlay) — see
+    // `kVsTotal`/`kVsFadeT`/`kVsNameT` in screens.cpp.
     float vs_t_ = 0.0f;              // seconds since the fight screen opened
     bool vs_active_ = true;
     std::string vs_player_name_;
