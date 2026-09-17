@@ -751,24 +751,65 @@ std::string Fighter::try_select_move(FightContext& ctx) {
     return "";
 }
 
-// Hit-reaction pick (JS `Gc.DK` L673-674, d-set first-match; see
-// fighter.hpp for the roulette caveat).
-std::string Fighter::try_react(FightContext& ctx, bool prefer_fall) {
-    auto try_pass = [&](bool falls_only) -> std::string {
-        for (const MoveDef* m : hb_) {
-            if (m == nullptr) continue;
-            if (!m->has_event("Hit")) continue;
-            const bool is_fall = m->name.find("Fall") != std::string::npos;
-            if (falls_only != is_fall) continue;
-            if (ai_start_move(*m, ctx)) return m->name;
-        }
-        return "";
-    };
-    if (prefer_fall) {
-        const std::string f = try_pass(true);
-        if (!f.empty()) return f;
+// Hit-reaction pick (JS `Gc.DK` L343452 + `Aua` L343447 + `uf.sja` L57426;
+// see fighter.hpp for the roulette caveat).
+//
+// `DK(a,b,c)`: partition the reaction set into `f` (Rha==false) / `g`
+// (Rha==true) with `Aua` — which keeps only the HIGHEST-`priority` group
+// (`c>=d && (c>d && b.length=0, b.push(a))`) — then
+//   `f.length>0 && (e = f[uf.sja(f.length)])`   // UNIFORM pick via Math.random
+//   `g.length>0 && a.Ukb(g[uf.sja(g.length)].animation)`
+// `uf.sja(n)` = `Math.floor(Math.random()*n)` (L57426 -> `at.RGa` ->
+// `Math.random`). The JS later feeds `e` into the `Pkb` weighted roulette
+// (tactic weights at reaction time are not ported — documented OPEN), so the
+// port starts the uniformly picked move directly. `rng` is the injected
+// `Math.random` analog (`FightController::math_random01`), never `Da.pg`.
+std::string Fighter::try_react(FightContext& ctx, bool prefer_fall,
+                               const std::function<float()>& rng) {
+    // Build the candidate list: moves with a Hit event (JS `b` = the
+    // candidate reactions), split by the Fall preference (`Ub`/MS proxy).
+    std::vector<const MoveDef*> cands;
+    for (const MoveDef* m : hb_) {
+        if (m == nullptr || !m->has_event("Hit")) continue;
+        const bool is_fall = m->name.find("Fall") != std::string::npos;
+        if (prefer_fall != is_fall) continue;
+        cands.push_back(m);
     }
-    return try_pass(false);
+    if (cands.empty() && prefer_fall) {
+        // The shock knockdown had no *Fall* candidate: fall back to the
+        // non-Fall reaction set (the JS `g`-empty path).
+        return try_react(ctx, false, rng);
+    }
+    // `Aua` (L343447): keep only the max-`priority` group.
+    std::vector<const MoveDef*> top;
+    for (const MoveDef* m : cands) {
+        // `Aua` partitions by `Rha` (NoAnimation) — false for all shipped
+        // moves, so every candidate lands in the non-Rha `f` group.
+        const int c = m->priority;
+        const int d = top.empty() ? 0 : top.front()->priority;
+        if (c >= d) {
+            if (c > d) top.clear();
+            top.push_back(m);
+        }
+    }
+    if (top.empty()) return "";
+    // `uf.sja(f.length)`: uniform index. JS `Math.random`; the port's
+    // injected `math_random01()` keeps it deterministic AND off `Da.pg`.
+    std::size_t idx = 0;
+    if (top.size() > 1 && rng) {
+        float r = rng();
+        if (r < 0.0f) r = 0.0f;
+        if (r >= 1.0f) r = 0.9999999f;
+        idx = static_cast<std::size_t>(r * static_cast<float>(top.size()));
+        if (idx >= top.size()) idx = top.size() - 1;
+    }
+    // JS `e.animation.MS ? a.jJa(...) : Nsb(...)` — start the picked move
+    // (the first candidate whose conditions pass, in the same order).
+    for (std::size_t k = 0; k < top.size(); ++k) {
+        const MoveDef* m = top[(idx + k) % top.size()];
+        if (ai_start_move(*m, ctx)) return m->name;
+    }
+    return "";
 }
 
 // JS `Te.ia` (L547-548): each 60 Hz update advances `Xh` (playback frame)
@@ -1717,6 +1758,114 @@ void Fighter::triangle_bbox(float& min_x, float& min_y, float& max_x,
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// `Vu` (mu g="D0" L249972) + `Cn` (tu g="DE" L297387) — the hit-reaction latch
+// and the strike memory. See the fighter.hpp comments for the JS cites.
+// ---------------------------------------------------------------------------
+
+// JS `Te.lrb(a,b,c)` (L523, called from `ca.Cgb` L395 when the attacker's
+// active Attack interval has `DL = !NoEffect`):
+//   `this.Vu.bk=a; this.Vu.fg=b; this.Vu.time=c; this.Vu.Ica=!0`
+void Fighter::latch_reaction(const sf2::scene::Vec3& pos,
+                             const sf2::scene::Vec3& dir, float time) {
+    reaction_.pos = pos;
+    reaction_.dir = dir;
+    reaction_.time = time;
+    reaction_.active = true;
+}
+
+// JS `Eu.gT(a,b)` (L298840): `let c=a-this.Yta; 0<c&&(b=Math.pow(2,-c/b),
+// this.Xb*=b, this.Yo*=b, this.count*=b, this.tf*=b, this.gy*=b);
+// this.Yta=a`. A non-positive half-life would divide by zero in JS; the
+// shipped `<Memory Strikes>` is 3, so guard it to a full decay.
+void StrikeMemory::decay(Accum& a, double t, double half_life) {
+    const double c = t - a.yta;
+    if (c > 0.0) {
+        double b = 0.0;
+        if (half_life > 0.0) b = std::pow(2.0, -c / half_life);
+        a.xb *= b;
+        a.yo *= b;
+        a.count *= b;
+        a.tf *= b;
+        a.gy *= b;
+    }
+    a.yta = t;
+}
+
+// JS `tu.F0(a,b)` (L297466): `a=a?this.Ysa:this.bqa; if(!has) set(new Eu)`
+// — the per-(side, move) accumulator, created on first touch.
+StrikeMemory::Accum& StrikeMemory::entry(
+    bool mine, const MoveDef* move) {
+    std::map<const MoveDef*, Accum>& m = mine ? mine_ : theirs_;
+    return m[move];
+}
+
+// JS `tu.nY(a,b,c)` (L297623): `let d=model.lU, e=kfa();
+// this.F0(a,b).nY(c,d,e)` and `Eu.nY` (L298864):
+// `this.gT(b,c); this.Yo+=a; this.gy+=1`.
+void StrikeMemory::nY(bool mine, const MoveDef* move, double value) {
+    Accum& a = entry(mine, move);
+    decay(a, time_, half_life_);
+    a.yo += value;
+    a.gy += 1.0;
+}
+
+// JS `tu.rY(a,b)` (L297684): `F0(a,b).rY(model.lU, kfa())` and
+// `Eu.rY` (L298970): `this.gT(a,b); this.count+=1`.
+void StrikeMemory::rY(bool mine, const MoveDef* move) {
+    Accum& a = entry(mine, move);
+    decay(a, time_, half_life_);
+    a.count += 1.0;
+}
+
+// JS `tu.v_(a,b)` (L297706): `F0(a,b).v_()` and `Eu.v_` (L298964):
+// `this.Xb+=this.Yo; this.Yo=0; this.tf+=this.gy; this.gy=0`.
+void StrikeMemory::v_(bool mine, const MoveDef* move) {
+    Accum& a = entry(mine, move);
+    a.xb += a.yo;
+    a.yo = 0.0;
+    a.tf += a.gy;
+    a.gy = 0.0;
+}
+
+// JS `tu.d0(a,b,c,d)` (L298213): `a=F0(!0,a); let e=model.lU, f=kfa();
+// b.G=a.c0(e,f); c.G=a.h6a(e,f); d.G=a.U6a(e,f)` where
+//   `c0`  (L298918): `gT(t,h); return this.count`
+//   `h6a` (L298902): `gT(t,h); return this.Xb`
+//   `U6a` (L298918): `gT(t,h); return this.tf`
+// JS `F0` INSERTS a zero entry on miss; a miss here yields the same zeros.
+void StrikeMemory::d0(const MoveDef* move, double& count, double& xb,
+                               double& tf) {
+    count = 0.0;
+    xb = 0.0;
+    tf = 0.0;
+    if (move == nullptr) return;
+    Accum& a = entry(true, move);
+    decay(a, time_, half_life_);
+    count = a.count;
+    xb = a.xb;
+    tf = a.tf;
+}
+
+// JS `tu.$K()` (L297964) + `Eu.aKa(a)` (L298976):
+// `c.count*=mt(); c.Xb*=mt(); c.Yo*=mt(); c.tf*=mt(); c.aKa(mt())` where
+// `aKa(a){this.Xb*=a;this.Yo*=a;this.count*=a;this.tf*=a;this.gy*=a}`.
+// `mt()` = the tactic's `<Memory RoundFactor>` (`KW.Q4`).
+void StrikeMemory::round_factor(double factor) {
+    auto scale = [factor](std::map<const MoveDef*, Accum>& m) {
+        for (auto& kv : m) {
+            Accum& a = kv.second;
+            a.count *= factor;
+            a.xb *= factor;
+            a.yo *= factor;
+            a.tf *= factor;
+            a.gy *= factor;
+        }
+    };
+    scale(mine_);
+    scale(theirs_);
 }
 
 } // namespace sf2::scene

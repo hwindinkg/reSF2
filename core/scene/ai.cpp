@@ -421,13 +421,32 @@ void parse_slots(const pugi::xml_node& parent, const char* container_name,
 }  // namespace
 
 void parse_tactic_settings(const std::string& xml_text,
-                           std::map<std::string, TacticDef>& out) {
+                           std::map<std::string, TacticDef>& out,
+                           AiGlobalLists* lists) {
     pugi::xml_document doc;
     pugi::xml_parse_result res = doc.load_string(xml_text.c_str());
     if (!res) throw std::runtime_error(std::string("parse_tactic_settings: ") + res.description());
 
     const pugi::xml_node root = doc.child("TacticsSettings");
     if (root.empty()) throw std::runtime_error("parse_tactic_settings: no <TacticsSettings>");
+
+    // `<NoDecision><Intervals><Interval Name/>...` + `<Moves><Move Name/>`
+    // (JS `td.Vdb` L1153-1158 -> `P.PE(b, P.osa, "Interval")` /
+    // `P.PE(b, P.psa, "Move")`; L319346). Read by `hcb` L598-599.
+    if (lists != nullptr) {
+        const pugi::xml_node nd = root.child("NoDecision");
+        if (!nd.empty()) {
+            for (const pugi::xml_node& iv : nd.child("Intervals").children()) {
+                const char* n = iv.attribute("Name").value();
+                if (n != nullptr) lists->no_decision_intervals.push_back(n);
+            }
+            for (const pugi::xml_node& mv : nd.child("Moves").children()) {
+                const char* n = mv.attribute("Name").value();
+                if (n != nullptr) lists->no_decision_moves.push_back(n);
+            }
+        }
+    }
+
     const pugi::xml_node tactics = root.child("Tactics");
     if (tactics.empty()) return;
 
@@ -501,6 +520,21 @@ void parse_tactic_settings(const std::string& xml_text,
         if (!rd.empty()) parse_min_max(rd, def.response_delay_min, def.response_delay_max);
         const pugi::xml_node erd = t.child("EnemyResponseDelay");
         if (!erd.empty()) parse_min_max(erd, def.enemy_response_delay_min, def.enemy_response_delay_max);
+
+        // `<Memory Strikes="f6" RoundFactor="Q4"/>` (JS `Md` L324810:
+        // `this.KW.f6=u.H(b.attributes.get("Strikes"))`,
+        // `this.KW.Q4=u.H(b.attributes.get("RoundFactor"))`).
+        const pugi::xml_node mem = t.child("Memory");
+        if (!mem.empty()) {
+            if (mem.attribute("Strikes")) def.memory_strikes = mem.attribute("Strikes").as_double();
+            if (mem.attribute("RoundFactor")) def.memory_round_factor = mem.attribute("RoundFactor").as_double();
+        }
+
+        // The global `<NoDecision>` lists, copied onto every tactic.
+        if (lists != nullptr) {
+            def.no_decision_intervals = lists->no_decision_intervals;
+            def.no_decision_moves = lists->no_decision_moves;
+        }
 
         out[def.name] = std::move(def);
     }

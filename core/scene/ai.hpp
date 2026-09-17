@@ -253,12 +253,34 @@ struct TacticDef {
     WeightCurve frame_error_min, frame_error_max;
     WeightCurve response_delay_min, response_delay_max;
     WeightCurve enemy_response_delay_min, enemy_response_delay_max;
+
+    // `<Memory Strikes="f6" RoundFactor="Q4"/>` (JS `Md.KW` = `Iu` L327938;
+    // parsed L324810 `b=a.A("Memory"); this.KW.f6=Strikes; this.KW.Q4=
+    // RoundFactor`). Defaults 10/10 (the `Iu` ctor).
+    double memory_strikes = 10.0;      // `f6` — the decay half-life
+    double memory_round_factor = 10.0; // `Q4` — the round-end multiplier
+
+    // The `<TacticsSettings><NoDecision>` lists (JS `P.osa`/`P.psa`). They
+    // are GLOBAL, but copied onto every tactic at parse so the AI needs no
+    // extra wiring; `hcb` (L598-599) reads them.
+    std::vector<std::string> no_decision_intervals;
+    std::vector<std::string> no_decision_moves;
+};
+
+// The `<TacticsSettings>`-level AI lists (JS `P` statics, filled by
+// `td.Qdb` L1153-1158): `<NoDecision><Intervals>/<Moves>` (P.osa / P.psa)
+// read by `hcb` L598-599.
+struct AiGlobalLists {
+    std::vector<std::string> no_decision_intervals;
+    std::vector<std::string> no_decision_moves;
 };
 
 // Parses tactic_settings.xml into the named TacticDefs (JS `P.hkb` L629 +
-// `Md` L636-643). Throws std::runtime_error on malformed XML.
+// Md L636-643). Throws std::runtime_error on malformed XML. When `lists` is
+// non-null it is filled with the `<NoDecision>` Intervals/Moves.
 void parse_tactic_settings(const std::string& xml_text,
-                           std::map<std::string, TacticDef>& out);
+                           std::map<std::string, TacticDef>& out,
+                           AiGlobalLists* lists = nullptr);
 
 // ---------------------------------------------------------------------------
 // The AI controller (JS `de` L589-621)
@@ -296,8 +318,23 @@ struct AiFightState {
     // Enemy's highest body-part animation frame (`Tba` L595: max over
     // `vd` parts of `da.M2`).
     int enemy_max_part_frames = 0;
-    // Ranged flag (`K0`): +1 if I have ranged, -1 otherwise.
+    // My fighter is PLAYING a clip (`Ji.Pe`): the `hcb` L598 gate requires
+    // it (`if(this.Ji.Pe&&this.cs!=null){...}else return!1`).
+    bool playing = false;
+    // The enemy's `cs` (L596-597 `iwb`/`jwb`: `this.cs = b.PX ?? a` — the
+    // enemy's current animation object). The port mirrors it as the enemy
+    // anim name (`enemy_anim`); `hcb` tests it against the NoDecision list.
+    // Ranged flag (`K0` L505): `ig!=null && ig.Yb=="NoRanged" ? 1 : -1`.
+    // NOTE the port's earlier comment had the sign inverted — +1 is the
+    // NoRanged (ranged UNAVAILABLE) case.
     int ranged = -1;
+    // JS `Da.pg` — the single shared fight RNG. When set, EVERY AI draw
+    // (`Da.jf`/`s4`/`dT`: QJa, dqb, jL, slots, XW) comes from it, exactly
+    // as in the JS (one global stream for the AI + the fight's crit rolls).
+    sf2::scene::DaPrng* da_pg = nullptr;
+    // JS `wd.Cn` (`tu` L297387) — the model's strike memory; `mQ` L620
+    // calls `Cn.d0(this.ds, c,d,e)` to fill `counter/Xb/tf`.
+    sf2::scene::StrikeMemory* strike_memory = nullptr;
     // Magic bullets (`bh`).
     int magic_bullets = 0;
     // My / enemy body-part frames (JS `vd` bone anim frames) — used for
@@ -326,7 +363,14 @@ public:
               const TacticDef* tactic,
               const std::map<std::string, MoveDef>* moves);
     // Mid-fight tactic switch (JS `qpb`: `model.yZa(LL)` for SetTactic).
-    void set_tactic(const TacticDef* tactic) { tactic_ = tactic; }
+    void set_tactic(const TacticDef* tactic) {
+        tactic_ = tactic;
+        if (tactic_ != nullptr) {
+            set_memory(tactic_->memory_strikes, tactic_->memory_round_factor);
+            set_no_decision(tactic_->no_decision_intervals,
+                            tactic_->no_decision_moves);
+        }
+    }
     // The per-frame decision (JS `de.ia` L592-594). Returns the chosen
     // move name, or "" when no move should start this frame.
     std::string update(const AiFightState& st);
@@ -334,6 +378,24 @@ public:
     // Without an explicit roll01 override, ALL draws (QJa, dqb, jL, slots)
     // come from this stream in JS call order.
     void set_seed(std::uint32_t seed) { prng_.seed(seed); }
+    // Points the controller at the fight's shared `Da.pg` (the JS single
+    // global stream). When set, EVERY draw (`next01`/`next_range` —
+    // QJa/gfa/aea/dqb/jL/slots/XW) is served from it, so the AI and the
+    // fight's crit rolls advance ONE stream exactly like the JS.
+    void set_da_pg(sf2::scene::DaPrng* pg) { da_pg_ = pg; }
+    // The `NoDecision` lists (JS `P.osa`/`P.psa`, loaded from
+    // tactic_settings.xml `<NoDecision><Intervals>/<Moves>`) — the `hcb`
+    // gate (L598-599). Empty vectors fall back to the shipped values.
+    void set_no_decision(std::vector<std::string> intervals,
+                         std::vector<std::string> moves);
+    // The tactic's `<Memory Strikes="f6" RoundFactor="Q4"/>` (`Md.KW`,
+    // `Iu` L327938). Defaults are 10/10 (the `Iu` ctor).
+    void set_memory(double half_life, double round_factor) {
+        memory_half_life_ = half_life;
+        memory_round_factor_ = round_factor;
+    }
+    double memory_half_life() const { return memory_half_life_; }
+    double memory_round_factor() const { return memory_round_factor_; }
 
     // The candidate list from the last decision (for logging; JS `wb`).
     const std::vector<AiCandidate>& candidates() const { return wb_; }
@@ -397,15 +459,33 @@ private:
     AiFeatureState feat_;
 
     // --- helpers (JS de methods) ---
-    // Default source: the owned DaPrng (`Da.pg.s4(1)`); tests/demos may
-    // inject an override (ai_demo uses mt19937 — then only the QJa/gfa/aea
-    // draws stay on the exact stream; full JS-stream parity needs
-    // set_seed() + no override).
-    float roll01() const {
+    // The JS `Da` stream selection (L2352): `Da.jf()` = the shared `Da.pg`
+    // when the fight installed it, else the owned DaPrng, else an injected
+    // U[0,1) override (the ai_demo's mt19937 — the documented non-exact
+    // path). `next01` = `Da.jf()`, `next_range(a,b)` = `Da.pg.dT(a,b)`.
+    double next01() const {
+        if (da_pg_ != nullptr) return da_pg_->jf();
         if (roll01_fn_) return roll01_fn_();
-        return static_cast<float>(prng_.s4(1.0));
+        return prng_.jf();
     }
+    double next_range(double a, double b) const {
+        if (da_pg_ != nullptr) return da_pg_->dT(a, b);
+        if (roll01_fn_) return a + roll01_fn_() * (b - a);
+        return prng_.dT(a, b);
+    }
+    // The `float` view of `next01` for the condition/roulette call sites.
+    float roll01() const { return static_cast<float>(next01()); }
     std::function<float()> roll01_fn_;
+
+    // The shared `Da.pg` pointer (null = owned/injected stream).
+    sf2::scene::DaPrng* da_pg_ = nullptr;
+    // The `NoDecision` lists (`P.osa`/`P.psa`); the shipped defaults.
+    std::vector<std::string> no_decision_intervals_{"Uninterrupt",
+                                                    "SemiUninterrupt"};
+    std::vector<std::string> no_decision_moves_{"Physical"};
+    // `<Memory Strikes>` half-life + `<Memory RoundFactor>` (JS `Iu`).
+    double memory_half_life_ = 10.0;
+    double memory_round_factor_ = 10.0;
 
     // Builds `feat_` from the fight state (JS `mQ` L620).
     void mq(const AiFightState& st);

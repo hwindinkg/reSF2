@@ -934,6 +934,11 @@ struct FightFighter {
                                                 // mapping lands)
     std::vector<sf2::scene::ActiveMod> dots;  // ticking DoTs/HoTs
     std::string weapon = "Fists";  // wielded weapon (disarm identity)
+    // JS `wd.K0` (L505): `parameters.ig != null && parameters.ig.Yb ==
+    // "NoRanged" ? 1 : -1`. `ig` is the equipped "NoRanged" item (type
+    // `I.Vh`, `vzb` L108540); `ranged_available` is its negation. Fed by
+    // the equipment setup; defaults true (no NoRanged item -> K0 = -1).
+    bool ranged_available = true;
     int hits_landed = 0;
     int hits_taken = 0;
     int combo_run = 0;        // consecutive landed hits (resets when taken)
@@ -1037,17 +1042,39 @@ struct FightCamera {
     float du_prev_x_ = 0.0f, du_prev_y_ = 0.0f;  // DO/Du.mf (previous target)
     float start_x_ = 0.0f, start_y_ = 0.0f;      // Lb.z9a (spawn midpoint)
 
-    // --- the hit shake (JS `d3a` + `DL`) ----------------------------------
-    // The camera kick on a landed hit. The JS shake needs the per-effect
-    // `em` trajectory configs (not in the specs); the port uses a decaying
-    // random offset: shake() rolls ±intensity on both axes, update()
-    // multiplies it by 0.85 per frame (→ ~0 after ~25 frames). The RNG is
-    // a PRIVATE LCG (see shake's impl) — never the fight's shared roll01
-    // (that would perturb the AI decisions and diverge the pose dump).
-    float shake_x_ = 0.0f;
+    // --- the hit-effects judder + hit-stop (JS `d3a`/`Fnb`/`DL`, L362-371) --
+    // The camera latch `DL(a)` (L370): `this.hw=a, this.U1=!0, this.N3=a.YIa,
+    // this.wR=!0, this.N5=this.cU=a.jz, this.gh(0,null)` where `a` is the
+    // `<HitEffect>` row `ZAa` (L422) selected by hit type. `Fnb` (L364):
+    //   `U1 && (N3<=0 && (U1=!1, Bob()), N3--)`   — the pause (hit-stop)
+    //   `wR && (cU<=0 && (wR=!1, Cwb()), cU--)`   — the judder
+    // `d3a` (L363): while `wR`, the camera offset is
+    //   `x = mva*b*sin($za*a*h)*(g-h)/g`, `y = nva*b*sin(aAa*a*h)*(g-h)/g`
+    // with `g=N5`, `h=N5-cU` and `a`/`b` the `ce.Bub` trajectory scale —
+    // the shipped config (`Bub:{lva:{x:.75,y:.3},Zza:{x:1,y:.75},
+    // j_:{x:10,y:30}}`) resolves BOTH interpolations to constants
+    // (`50>=e` : `b=lva.y=0.3`, `50>=a` : `a=Zza.y=0.75`) — verified, so no
+    // per-effect trajectory data is missing.
+    bool hit_effect_valid_ = false;   // `hw != null`
+    sf2::scene::HitEffect hw_;        // `hw` — the latched effect row
+    bool pause_active_ = false;       // `U1`
+    int pause_frames_ = 0;            // `N3`
+    int effect_frames_ = 0;           // `cU`
+    int effect_total_ = 0;            // `N5`
+    bool shake_active_ = false;       // `wR`
+    float shake_x_ = 0.0f;            // the `Byb(x,y)` camera-node offset
     float shake_y_ = 0.0f;
-    // Rolls a ±intensity kick on both axes (called on a landed hit).
-    void shake(float intensity);
+    // The peak |offset| reached during the live judder (report only).
+    float shake_peak_x_ = 0.0f;
+    float shake_peak_y_ = 0.0f;
+    // JS `ql.DL(a)` (L370): latch the hit effect + arm the pause/judder.
+    void apply_hit_effect(const sf2::scene::HitEffect& e);
+    // JS `ql.Fnb()` (L364) + `ql.d3a()` (L363), once per camera update.
+    void tick_hit_effect();
+    // The latched effect's type (log/report); "" when none.
+    const std::string& hit_effect_type() const { return hw_.type; }
+    int hit_stop_frames() const { return pause_frames_; }
+    bool hit_stop_active() const { return pause_active_; }
 
     // Recomputes center/zoom from the two fighters' world COM positions
     // (JS `Eu.ma` — the native fighter world_x/world_y anchors) and the
@@ -1432,6 +1459,9 @@ private:
     bool round_live_ = false;      // JS `h9` — a round is in progress
     bool dga_ = false;             // JS `Dga` — a hit landed this round
                                    // (`ep` = !Dga, L394; init false L380)
+    // Wave log: the last AI decision string, so the `[ai]` diagnostic line
+    // (K2/pZ/strike-memory) prints once per change instead of every frame.
+    std::string last_ai_log_;
     // Battle prize stats (JS `v.kD`/`bzb` factors, FLOW_STATIC section 4.3):
     // first-strike side, set on the battle's first landed hit (else none).
     bool battle_first_hit_ = false;  // any hit landed yet this battle

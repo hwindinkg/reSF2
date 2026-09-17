@@ -185,6 +185,10 @@ int main() {
         st.enemy_move_frame = 30;
         st.my_anim = "Idle";
         st.enemy_anim = "Idle";
+        // JS `de.hcb` (L598) requires `this.Ji.Pe && this.cs != null` — the
+        // real game always has a clip playing (the looping stance idle), so
+        // the scripted fighter is modelled as playing.
+        st.playing = true;
         st.roll01 = nullptr;  // owned DaPrng stream
         const std::string mv = ai.update(st);
         std::printf("%s{\"i\": %d, \"move\": \"%s\", \"stage\": %d}",

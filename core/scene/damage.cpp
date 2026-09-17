@@ -300,6 +300,51 @@ void load_fight_params_from_settings(const std::string& xml_text) {
     parse_shock(root.child("Shock"), v);
     // `v.jA` (L1158) = `<Magic>`.
     parse_magic(root.child("Magic"), v);
+    // `v.wDa` (L1158) = `<HitEffects>`: every `<HitEffect Type PauseTime
+    // EffectTime AmplitudeX FrequencyX AmplitudeY FrequencyY/>` (JS `em`
+    // L660438 `parse`). Document order is load-bearing: `ZAa` returns the
+    // first match, so CriticalHit shadows HeadHit/Shock when both fire.
+    if (const pugi::xml_node he = root.child("HitEffects")) {
+        v.hit_effects.clear();
+        for (const pugi::xml_node e : he.children("HitEffect")) {
+            HitEffect hef;
+            const char* t = e.attribute("Type").value();
+            hef.type = t != nullptr ? t : "";
+            hef.pause_time = e.attribute("PauseTime").as_int(0);
+            hef.effect_time = e.attribute("EffectTime").as_int(0);
+            hef.amplitude_x = e.attribute("AmplitudeX").as_float(0.0f);
+            hef.amplitude_y = e.attribute("AmplitudeY").as_float(0.0f);
+            hef.frequency_x = e.attribute("FrequencyX").as_float(0.0f);
+            hef.frequency_y = e.attribute("FrequencyY").as_float(0.0f);
+            v.hit_effects.push_back(hef);
+        }
+        // Diagnostic (boot, once): the parsed per-type hit-effect table —
+        // the values `ZAa`/`DL` drive (pause = hit-stop frames, effect =
+        // judder frames, amp/freq = the `d3a` sinusoid).
+        for (const HitEffect& e : v.hit_effects) {
+            std::fprintf(stdout,
+                         "[fx] HitEffects %s pause=%d effect=%d "
+                         "ampX=%.2f freqX=%.2f ampY=%.2f freqY=%.2f\n",
+                         e.type.c_str(), e.pause_time, e.effect_time,
+                         e.amplitude_x, e.frequency_x, e.amplitude_y,
+                         e.frequency_y);
+        }
+        std::fflush(stdout);
+    }
+}
+
+// JS `ca.ZAa(a,b,c)` (L422): `for(f of v.wDa.sda) if(c&&f.type=="Shock"||
+// a&&f.type=="CriticalHit"||b&&f.type=="HeadHit") return f; return null`.
+const HitEffect* select_hit_effect(bool critical, bool head, bool shock) {
+    const FightParams& v = fight_params();
+    for (const HitEffect& f : v.hit_effects) {
+        if ((shock && f.type == "Shock") ||
+            (critical && f.type == "CriticalHit") ||
+            (head && f.type == "HeadHit")) {
+            return &f;
+        }
+    }
+    return nullptr;
 }
 
 }  // namespace sf2::scene

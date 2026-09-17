@@ -152,6 +152,12 @@ void AiController::init(const std::string& weapon,
     weapon_ = weapon;
     tactics_ = tactics;
     tactic_ = tactic;
+    if (tactic_ != nullptr) {
+        // `<Memory Strikes/RoundFactor>` (`Md.KW`) + the global `<NoDecision>`
+        // lists copied onto the tactic at parse.
+        set_memory(tactic_->memory_strikes, tactic_->memory_round_factor);
+        set_no_decision(tactic_->no_decision_intervals, tactic_->no_decision_moves);
+    }
     moves_ = moves;
     // The `OO` weapon id (JS `P.dBa` L629-630): the weapon subtype, or the
     // first equivalent's subtype. The native port keeps the weapon name.
@@ -195,13 +201,22 @@ int AiController::facing(const AiFightState& st) const { return b6a(st); }
 //   xY = enemy `kJ()` (played steps); the port feeds `enemy_move_frame`
 //     (Xh-based, same quantity as `Fl_`) — the kJ-vs-Xh residual is OPEN.
 //   pZ = `Tba` (max M2 part frames) — `enemy_max_part_frames` ✓.
-//   counter/Xb/tf = strike-memory accumulators (`Cn.d0`) — the port has no
-//     strike memory yet, stays 0 (documented divergence, not silent).
+//   counter/Xb/tf = strike-memory accumulators (`Cn.d0`, JS `tu` L297387):
+//     the enemy's remembered damage/count/hits for the current move, decayed
+//     to the model's strike time by the tactic's `<Memory Strikes>`
+//     half-life. Fed from `st.strike_memory` (null in standalone probes ->
+//     the accumulators read 0, same as the JS pre-round state).
 void AiController::mq(const AiFightState& st) {
     AiFeatureState& f = feat_;
-    f.counter = 0.0f;              // no strike-memory accumulators yet
-    f.xb = 0.0f;
-    f.tf = 0.0f;
+    {
+        double count = 0.0, xb = 0.0, tf = 0.0;
+        if (st.strike_memory != nullptr) {
+            st.strike_memory->d0(st.enemy_move, count, xb, tf);
+        }
+        f.counter = static_cast<float>(count);
+        f.xb = static_cast<float>(xb);
+        f.tf = static_cast<float>(tf);
+    }
     f.o1 = st.my_hp;               // absolute gd (NOT a ratio — see above)
     f.q1 = st.enemy_hp;            // absolute gd
     f.xY = static_cast<float>(st.enemy_move_frame);
@@ -242,23 +257,44 @@ int AiController::dqb(const AiFightState& st) {
     return 1;
 }
 
-// JS `hcb` (L598-599): the no-decision gate. The JS requires the fighter
-// to be PLAYING an animation (`Ji.Pe && cs != null`) — the native fighter
-// plays the stance idle when idle, so the demo passes a non-null
-// current_move_ for the idle case via the caller; here we only gate on the
-// NoDecision lists.
+// JS `hcb` (L598-599): the no-decision gate.
+//   `for(a of P.u$a()) if(this.Ji.cBa(a)!=null) return false;`
+//   `if(this.Ji.Pe && this.cs != null) { for(m of P.v$a()) if(this.cs.$k(m))
+//    return false } else return false; return true;`
+// i.e. NO active NoDecision interval on ME, and MY fighter must be PLAYING
+// (`Ji.Pe`), and the ENEMY's current animation (`cs`) must not match a
+// NoDecision move. Both lists are loaded from tactic_settings.xml
+// `<NoDecision>` (shipped: Intervals = Uninterrupt|SemiUninterrupt,
+// Moves = Physical) — the port used the literal "Physical".
 bool AiController::hcb(const AiFightState& st) const {
-    // NoDecision intervals (P.osa = ["Uninterrupt","SemiUninterrupt"]).
+    // `this.Ji.cBa(name) != null` = the interval is active on me.
     for (const auto& iv : st.my_intervals) {
-        if (iv.first == "Uninterrupt" || iv.first == "SemiUninterrupt") {
-            return false;
+        for (const std::string& n : no_decision_intervals_) {
+            if (iv.first == n) return false;
         }
     }
-    // NoDecision moves (P.psa = ["Physical"]).
-    if (st.current_move != nullptr && st.current_move->name == "Physical") {
-        return false;
+    // `if(this.Ji.Pe && this.cs != null){...} else return false`.
+    if (!st.playing || st.enemy_anim.empty()) return false;
+    if (st.enemy_move != nullptr) {
+        for (const std::string& m : no_decision_moves_) {
+            // JS `$k(m)` matches the name OR an inherited template tag.
+            if (st.enemy_move->name == m ||
+                st.enemy_move->template_tags.count(m) > 0) {
+                return false;
+            }
+        }
+    } else {
+        for (const std::string& m : no_decision_moves_) {
+            if (st.enemy_anim == m) return false;
+        }
     }
     return true;
+}
+
+void AiController::set_no_decision(std::vector<std::string> intervals,
+                                   std::vector<std::string> moves) {
+    if (!intervals.empty()) no_decision_intervals_ = std::move(intervals);
+    if (!moves.empty()) no_decision_moves_ = std::move(moves);
 }
 
 // JS `fCa` (L599-600): whether the enemy is playing a cautious anim
@@ -607,7 +643,7 @@ int AiController::gfa_draw() const {
     if (tactic_ == nullptr) return 1;
     const double lo = weight_curve_eval(tactic_->response_delay_min, feat_);
     const double hi = weight_curve_eval(tactic_->response_delay_max, feat_);
-    return static_cast<int>(prng_.dT(lo, hi)) + 1;
+    return static_cast<int>(next_range(lo, hi)) + 1;
 }
 
 // JS `de.Aea` (L597) = `Gc.Aea(a)`, `Md.I0(v8)` (L640-643), truncated,
@@ -616,31 +652,33 @@ int AiController::aea_draw() const {
     if (tactic_ == nullptr) return 0;
     const double lo = weight_curve_eval(tactic_->enemy_response_delay_min, feat_);
     const double hi = weight_curve_eval(tactic_->enemy_response_delay_max, feat_);
-    return static_cast<int>(prng_.dT(lo, hi));
+    return static_cast<int>(next_range(lo, hi));
 }
 
 // JS `QJa` (L594-595): rebuild the enemy-relative context (the port's
 // `feat_` was already built by `mq`), draw the five `Da.jf()` rolls,
 // `Mu`/`lN` (yea/j0, L640-641) and cache `$x` (gfa). The JS additionally
 // snapshots strike-memory counters (`Cn.d0`) — the port has no
-// strike-memory yet, accumulators stay 0 (same as `mq`).
+// strike-memory accumulators (`Cn.d0`, via `mq`) now carry the real values.
 void AiController::qja(const AiFightState& st) {
     (void)st;
-    // NOTE the leading discarded draw (JS `QJa` L594-595 opens with a bare
-    // `Da.jf();` before the five assignments) — load-bearing for stream
-    // position: 6 jf() calls = 12 B0 draws, then Mu (2), lN (2), $x (2).
-    prng_.jf();  // discarded
-    tua_ = prng_.jf();
-    dua_ = prng_.jf();
-    bpa_ = prng_.jf();
-    rqa_ = prng_.jf();
-    oqa_ = prng_.jf();
+    // JS `QJa` (L594-595): a bare `Da.jf();` then five `Da.jf()` — all from
+    // the shared `Da.pg` (the port: the fight's `draw01()` stream when
+    // installed, else the owned DaPrng). Load-bearing for stream position:
+    // 6 jf() calls = 12 B0 draws, then Mu (2), lN (2), $x (2).
+    next01();  // discarded
+    tua_ = next01();
+    dua_ = next01();
+    bpa_ = next01();
+    rqa_ = next01();
+    oqa_ = next01();
     // yea (L640-641, untruncated) / j0 (truncated).
     if (tactic_ != nullptr) {
-        Mu_ = prng_.dT(weight_curve_eval(tactic_->distance_error_min, feat_),
-                       weight_curve_eval(tactic_->distance_error_max, feat_));
-        lN_ = static_cast<int>(prng_.dT(weight_curve_eval(tactic_->frame_error_min, feat_),
-                                       weight_curve_eval(tactic_->frame_error_max, feat_)));
+        Mu_ = next_range(weight_curve_eval(tactic_->distance_error_min, feat_),
+                         weight_curve_eval(tactic_->distance_error_max, feat_));
+        lN_ = static_cast<int>(next_range(
+            weight_curve_eval(tactic_->frame_error_min, feat_),
+            weight_curve_eval(tactic_->frame_error_max, feat_)));
     }
     x_ = gfa_draw();  // JS `jwb` (L596-597): `this.$x=this.gfa(this.Ol)`
 }

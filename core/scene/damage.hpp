@@ -84,6 +84,21 @@ struct FighterParams {
 //   Xpa = DamageFactor Attribute = "DamageFactor"
 //   lNa = SlowMotion Defense = ""
 //   wv = AlignTargetAttributes (empty for the default)
+//
+// One `<HitEffect>` (JS `em` g="2AB" L660438, parsed from
+// internal_settings.xml `<HitEffects>` by `v.wDa.parse` L1158). The camera
+// hit-effect config the `ZAa`/`DL` latch picks by hit type. Field names map
+// 1:1 to the JS fields (`type`/`YIa`/`jz`/`mva`/`nva`/`$za`/`aAa`).
+struct HitEffect {
+    std::string type;         // `type` — "CriticalHit" / "HeadHit" / "Shock"
+    int pause_time = 0;       // `YIa` — PauseTime (frames)
+    int effect_time = 0;      // `jz`  — EffectTime (frames)
+    float amplitude_x = 0.0f; // `mva` — AmplitudeX
+    float amplitude_y = 0.0f; // `nva` — AmplitudeY
+    float frequency_x = 0.0f; // `$za` — FrequencyX
+    float frequency_y = 0.0f; // `aAa` — FrequencyY
+};
+
 struct FightParams {
     std::string block_damage_attr = "BlockDamageFactor";
     float block_damage_base = 0.0001f;
@@ -133,10 +148,22 @@ struct FightParams {
     std::string magic_damage_attr = "MagicDamageRecharge";
     float magic_damage_base = 0.0001f;
 
+    // `v.wDa` = internal_settings.xml `<HitEffects>` (JS `Vv` g="2AC",
+    // parsed L1158 by `v.wDa.parse(a.A("HitEffects"))`). The shipped file
+    // carries exactly three rows in document order: CriticalHit, HeadHit,
+    // Shock (internal_settings.xml L556-558).
+    std::vector<HitEffect> hit_effects;
+
     // The process-wide instance (JS `v` statics), populated at boot from
     // internal_settings.xml by `load_fight_params_from_settings`.
     static const FightParams& defaults();
 };
+
+// JS `ca.ZAa(a,b,c)` (L422): scans `v.wDa.sda` IN DOCUMENT ORDER and
+// returns the first effect whose type matches an active flag —
+// `a` = critical (`se`), `b` = unblocked head hit (`Uq && !block`),
+// `c` = shock (`Ub`). Returns nullptr when none match.
+const HitEffect* select_hit_effect(bool critical, bool head, bool shock);
 
 // The mutable process-wide `FightParams` (JS `v`). `load_fight_params_from_settings`
 // writes it; `FightParams::defaults()` reads it.

@@ -117,6 +117,27 @@ struct Interval {
     // printouts; `attack_attrs` is the authoritative list the formula uses).
     std::string damage_type;  // e.g. "UnarmedDamage"
     float damage_shift = 0.0f;
+    // JS `Ul.Wsa` (L775-777): EVERY `<Hit Name Start End>` child of the
+    // Attack interval (`Xu` g="DZ", `f.start = Start ?? interval.start`,
+    // `f.end = End ?? interval.finish`). `B8a(frame)` resolves the name
+    // whose window contains the attacker's clip frame. 3 of the 618
+    // shipped attack intervals carry more than one (most carry one).
+    struct HitWindow {
+        std::string name;
+        int start = -1;
+        int end = -1;
+    };
+    std::vector<HitWindow> hit_windows;
+    // JS `Ul.B8a(a)` (L775): `for(d of Wsa) if(d.start<=a&&a<=d.end) return
+    // d.name; return ""`. First match in document order, inclusive bounds.
+    std::string hit_name_at(int frame) const {
+        for (const HitWindow& w : hit_windows) {
+            if (w.start <= frame && frame <= w.end) return w.name;
+        }
+        return "";
+    }
+    // Legacy mirror of `hit_windows[0].name` (kept for the probe/demo
+    // printouts; `hit_name_at` is the authoritative resolver).
     std::string hit_name;     // <Hit Name=..> inside the Attack interval
     float impulse_x = 0.0f, impulse_y = 0.0f, impulse_z = 0.0f;
     bool has_impulse = false;
@@ -244,6 +265,11 @@ struct MoveDef {
     // the clip plays two extra ranges (the source of the JS 133-vs-128 intro
     // frame count). Absent attr -> false (most moves).
     bool no_interp = false;
+    // JS `l.Rha` (L362621: `u.ka(k.attributes.get("NoAnimation"))`) — the
+    // move carries no animation. `Gc.DK`'s reaction partition branches on it.
+    // ABSENT from the shipped moves.xml (0 occurrences) -> always false; the
+    // `g` branch of `DK` is dead with shipped data.
+    bool no_animation = false;
     int end_frame = 0;   // EndFrame attr, else 0 (JS `jc.Lj`)
     int priority = 0;
     float style_factor = 1.0f;  // `RNa` (StyleFactor attr, default 1.0)

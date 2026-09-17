@@ -138,9 +138,17 @@ void parse_interval(pugi::xml_node node, int end_frame_default, Interval& out) {
                 }
             }
         }
-        if (pugi::xml_node hit = node.child("Hit")) {
-            out.hit_name = hit.attribute("Name") ? hit.attribute("Name").value() : "";
+        // JS `Ul.J3` (L776-777): EVERY `<Hit>` child (not just the first)
+        // pushes a window `{name, Start ?? interval.start, End ?? finish}`.
+        for (pugi::xml_node hit : node.children("Hit")) {
+            Interval::HitWindow w;
+            w.name = hit.attribute("Name") ? hit.attribute("Name").value() : "";
+            w.start = data::xml_attr_int(hit, "Start", out.start);
+            w.end = hit.attribute("End") ? data::xml_attr_int(hit, "End", out.end)
+                                         : out.end;
+            out.hit_windows.push_back(w);
         }
+        if (!out.hit_windows.empty()) out.hit_name = out.hit_windows.front().name;
         if (pugi::xml_node imp = node.child("Impulse")) {
             out.impulse_x = data::xml_attr_float(imp, "X", 0.0f);
             out.impulse_y = data::xml_attr_float(imp, "Y", 0.0f);
@@ -598,6 +606,7 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         def.mid_frames = data::xml_attr_int(move, "MidFrames", 0);
         def.first_frame = data::xml_attr_int(move, "FirstFrame", 0);
         def.no_interp = data::xml_attr_bool(move, "NoInterpolationFrames", false);
+        def.no_animation = data::xml_attr_bool(move, "NoAnimation", false);  // `Rha`
         def.end_frame = data::xml_attr_int(move, "EndFrame", 0);
         def.priority = data::xml_attr_int(move, "Priority", 0);
         def.style_factor = data::xml_attr_float(move, "StyleFactor", 1.0f);  // `RNa`

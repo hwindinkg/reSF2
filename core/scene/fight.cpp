@@ -104,23 +104,64 @@ void FightCamera::framing(float ax, float ay, float bx, float by, float view_w,
 // (the pre-wire body moved verbatim into framing_sya_impl; see
 // core/scene/fight_camera_sya.hpp)
 
-// The hit-shake kick (JS `d3a` + `DL` — see the FightCamera comment). The
-// RNG is a PRIVATE LCG (same shape as EffectSystem's): std::rand would be
-// fine for a visual-only roll, but a private LCG keeps the shake fully
-// deterministic AND independent of the fight's shared roll01 (which must
-// never be consumed by presentation code — it would perturb the AI
-// decisions and diverge the pose dump from the oracle).
-namespace {
-std::uint32_t g_shake_lcg = 0x9E3779B9u;  // private, fixed seed
-float shake_next01() {
-    g_shake_lcg = 1664525u * g_shake_lcg + 1013904223u;
-    return static_cast<float>(g_shake_lcg >> 8) * (1.0f / 16777216.0f);
+// The hit-judder + hit-stop (JS `ql.DL` L370, `ql.Fnb` L364, `ql.d3a` L363).
+// `apply_hit_effect` = `DL(a)`: latch the `<HitEffect>` row and arm the
+// pause (`U1/N3 = PauseTime`) and the judder (`wR/cU/N5 = EffectTime`).
+// `tick_hit_effect` = `Fnb()` then `d3a()`: count the two down and, while
+// the judder is live, write the JS camera-node offset
+//   x = mva*b*sin($za*a*h)*(g-h)/g
+//   y = nva*b*sin(aAa*a*h)*(g-h)/g
+// with `h = N5-cU` (elapsed) and `a=0.75`/`b=0.3` — the constant resolution
+// of the shipped `ce.Bub` trajectory config (see fight.hpp).
+void FightCamera::apply_hit_effect(const sf2::scene::HitEffect& e) {
+    hw_ = e;
+    hit_effect_valid_ = true;
+    pause_active_ = true;      // `U1=!0`
+    pause_frames_ = e.pause_time;    // `N3=a.YIa`
+    shake_active_ = true;      // `wR=!0`
+    effect_total_ = e.effect_time;   // `N5=a.jz`
+    effect_frames_ = e.effect_time;  // `cU=a.jz`
+    shake_peak_x_ = 0.0f;
+    shake_peak_y_ = 0.0f;
+    // JS `this.gh(0,null)` fires camera event 0 (the audio/state hook — the
+    // port has no camera event bus; the audio dispatch is out of scope).
 }
-}  // namespace
 
-void FightCamera::shake(float intensity) {
-    shake_x_ = intensity * (shake_next01() - 0.5f) * 2.0f;
-    shake_y_ = intensity * (shake_next01() - 0.5f) * 2.0f;
+void FightCamera::tick_hit_effect() {
+    // JS `Fnb()`: `U1&&(N3<=0&&(U1=!1,Bob()),N3--);
+    //              wR&&(cU<=0&&(wR=!1,Cwb()),cU--)`.
+    if (pause_active_) {
+        if (pause_frames_ <= 0) pause_active_ = false;  // `U1=!1, Bob()`
+        --pause_frames_;
+    }
+    if (shake_active_) {
+        if (effect_frames_ <= 0) {
+            shake_active_ = false;  // `wR=!1, Cwb()`
+            // Report: the actual judder envelope reached (JS `Byb` peak).
+            std::fprintf(stdout,
+                         "[fx] judder done type=%s peakX=%.3f peakY=%.3f\n",
+                         hw_.type.c_str(), static_cast<double>(shake_peak_x_),
+                         static_cast<double>(shake_peak_y_));
+            std::fflush(stdout);
+        }
+        --effect_frames_;
+    }
+    // JS `d3a()`: `if(this.wR&&this.hw!=null){ g=N5, h=N5-cU; ... }`.
+    if (shake_active_ && hit_effect_valid_) {
+        const float g = static_cast<float>(effect_total_);
+        const float h = static_cast<float>(effect_total_ - effect_frames_);
+        if (g > 0.0f) {
+            const float kAmp = 0.3f;   // `ce.Bub.lva.y` (50>=j_.y)
+            const float kFreq = 0.75f; // `ce.Bub.Zza.y` (50>=j_.x)
+            const float env = (g - h) / g;
+            shake_x_ = hw_.amplitude_x * kAmp *
+                       std::sin(hw_.frequency_x * kFreq * h) * env;
+            shake_y_ = hw_.amplitude_y * kAmp *
+                       std::sin(hw_.frequency_y * kFreq * h) * env;
+            if (std::fabs(shake_x_) > shake_peak_x_) shake_peak_x_ = std::fabs(shake_x_);
+            if (std::fabs(shake_y_) > shake_peak_y_) shake_peak_y_ = std::fabs(shake_y_);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -527,7 +568,20 @@ FightFighter FightController::make_fighter(
     if (!is_player && !not_ai && tactic_ != nullptr) {
         f.ai = std::make_unique<sf2::scene::AiController>();
         f.ai->init("Fists", tactics_, tactic_, moves_);
+        // Diagnostic (boot, once): the JS `Da.pg` split — which AI draws
+        // come from the single shared fight stream (`Da.jf`/`s4`/`dT`) and
+        // which from the `Math.random` analog (`uf.sja`/`uf.RJa`/`oa.eT`).
+        std::fprintf(stdout,
+                     "[ai] streams: Da.pg(draw01) <- QJa/gfa/aea/dqb/jL/"
+                     "slots/XW/crit; Math.random(pinned) <- R8a shock "
+                     "(uf.RJa), Gc.DK reaction pick (uf.sja)\n");
+        std::fflush(stdout);
     }
+    // The strike-memory half-life is the tactic's `<Memory Strikes>` for the
+    // AI side; a fighter with no AI has `model.nf == null` -> `kfa()` = 0
+    // (full decay, JS `decay` with half_life 0 -> 2^-inf = 0).
+    f.fighter.strike_memory().set_half_life(
+        tactic_ != nullptr ? tactic_->memory_strikes : 0.0);
     return f;
 }
 
@@ -1254,6 +1308,24 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
     rebuild_body(enemy_, player_);
     setup_bus(perk_setup_);
     init_magic();
+    // JS `wd.K0` (L505): the enemy's equipped `NoRanged` item (`parameters.ig`,
+    // type `I.Vh`; `vzb` L108540 maps the type to the name "NoRanged"). The
+    // app resolves the stage warrior's items to (type, subtype) pairs
+    // (`ModeEnemy.owned`); a `NoRanged` pair means `K2 = +1`. NOTE the item
+    // NAME list itself is not carried into `ModeSetup` (the app never fills
+    // `PerkSetup::enemy_items`), so with an empty/unresolved pair list this
+    // leaves `ranged_available = true` (K2 = -1) — reported as the exact
+    // missing input rather than guessed.
+    for (const auto& ow : setup.enemy.owned) {
+        if (ow.first == "NoRanged" || ow.second == "NoRanged") {
+            enemy_.ranged_available = false;
+        }
+    }
+    std::fprintf(stdout,
+                 "[ai] enemy ranged_available=%d -> K2=%d (owned pairs=%zu)\n",
+                 enemy_.ranged_available ? 1 : 0,
+                 enemy_.ranged_available ? -1 : 1, setup.enemy.owned.size());
+    std::fflush(stdout);
 }
 
 // JS `xF` (L388): set the fight phase and sync the fighters' `Je` stance
@@ -1634,6 +1706,17 @@ void FightController::between_rounds_recover() {
         f->shock.shocked_vc = false;   // `vc`
         f->kh = false;                 // `parameters.kh`
     }
+    // JS `Cn.$K()` (L297964): at the round boundary every strike-memory
+    // accumulator is scaled by the tactic's `<Memory RoundFactor>` (`mt()`
+    // = `KW.Q4`), then the model's strike clock `lU` resets (`reset()`
+    // L253395: `this.dz=this.lU=this.sI=this.sr=0`). Commit the pending
+    // buffer (`v_`) first so `$K` scales settled values.
+    for (FightFighter* f : {&player_, &enemy_}) {
+        double q4 = 10.0;  // `Iu` ctor default; overridden by the tactic
+        if (f->ai != nullptr) q4 = f->ai->memory_round_factor();
+        f->fighter.strike_memory().round_factor(q4);
+        f->fighter.strike_memory().set_time(0.0);
+    }
 }
 
 // JS `vfa` (L413): the round winner by HP.
@@ -1708,6 +1791,20 @@ void FightController::setup_bus(const PerkSetup& perks) {
     tactic_defs_ = perks.tactics;
     player_items_ = perks.player_items;
     enemy_items_ = perks.enemy_items;
+    // JS `wd.K0` (L505): `parameters.ig != null && parameters.ig.Yb ==
+    // "NoRanged" ? 1 : -1`. `parameters.ig` is the equipped item of the
+    // NoRanged type (`vzb` L108540 maps type `I.Vh` -> name "NoRanged").
+    // The shipped equipment carries an equipped `NoRanged` item, so
+    // `ranged_available == false` -> `K2 = +1` (the old hardcoded -1 was
+    // inverted). Derived from the equipped item names the caller supplies.
+    auto has_noranged = [](const std::vector<std::string>& items) {
+        for (const std::string& n : items) {
+            if (n == "NoRanged") return true;
+        }
+        return false;
+    };
+    player_.ranged_available = !has_noranged(player_items_);
+    enemy_.ranged_available = !has_noranged(enemy_items_);
     if (perks.catalog == nullptr) return;
     bus_.register_side(
         0, sf2::scene::build_side_triggers(perks.player_refs, *perks.catalog, bus_.log),
@@ -2195,6 +2292,7 @@ void FightController::tick_mods(int side) {
 void FightController::tick_bus_side(int side) {
     side &= 1;
     FightFighter& me = side == 0 ? player_ : enemy_;
+    FightFighter& foe = side == 0 ? enemy_ : player_;
     sf2::scene::TrigVars v;
     v.num["StepFrame"] = static_cast<double>(frame_);
     char stepbuf[32];
@@ -2232,6 +2330,14 @@ void FightController::tick_bus_side(int side) {
                               me.fighter.active_intervals().end());
     for (const std::string& n : cur) {
         if (me.prev_intervals.find(n) == me.prev_intervals.end()) {
+            // JS `fIa` (L258784): on the `Uninterrupt` interval start,
+            // `let a=this.da.Ua, b=this.jb; b!=null&&b.Kf().Cn.rY(!0,a);
+            // this.Kf().Cn.rY(!1,a)` — count the strike in BOTH memories.
+            if (n == "Uninterrupt" && me.fighter.current_move() != nullptr) {
+                const sf2::scene::MoveDef* mv = me.fighter.current_move();
+                foe.fighter.strike_memory().rY(true, mv);
+                me.fighter.strike_memory().rY(false, mv);
+            }
             sf2::scene::TrigVars ev;
             ev.str["Interval"] = n;
             ev.num["IntervalType"] = static_cast<double>(me.fighter.interval_type(n));
@@ -2423,7 +2529,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     sf2::scene::IntervalDamage idmg;
     idmg.base_damage = iv.damage;
     idmg.no_critical = iv.no_critical;
-    idmg.hit_body_part = iv.hit_name;
+    idmg.hit_body_part = iv.hit_name_at(frame);  // JS `Ul.B8a(e.M0())`
     // JS `wd.bCa(a,...)` receives `a.SZ` (EVERY sub-`<Damage>`) and `a.KP`
     // (EVERY `<Defense>`), plus `e.da.Ua.QX` for `c2a`. The old code pushed
     // only the FIRST sub-`<Damage>` (`iv.damage_type`) and stuffed the
@@ -2557,8 +2663,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         hit_blocked = rec.blocked;
         hit_critical = rec.critical;
     }
-    sf2::scene::apply_damage(rec, def.hp, false);
-    if (sethit_damage) {
+    sf2::scene::apply_damage(rec, def.hp, false);    if (sethit_damage) {
         // `ppb` sets `bR` AND `Zi` directly (no lethal clamp at set time).
         rec.raw_damage = sethit_value;
         rec.final_damage = sethit_value;
@@ -2577,6 +2682,14 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         rec.hp_after = def.hp;    // `aM(model, -0)` leaves HP untouched
     }
     def.hp = rec.hp_after;
+    // JS `strike` (L259058): `++this.lU` on the ATTACKER, and
+    // `LWa(a,b,c)` (L519, called at L260105 `this.LWa(e, this.Bb.aI,
+    // this.Bb.Zi)`): `this.Kf().Cn.nY(!0,b,c)` (my attack map) +
+    // `a.Cn.nY(!1,b,c)` (the target's `bqa` map) with `b = the move`,
+    // `c = the dealt damage`. Feeds the AI's `Cn.d0` strike-memory features.
+    atk.fighter.bump_strike_time();
+    atk.fighter.strike_memory().nY(true, &move, rec.final_damage);
+    def.fighter.strike_memory().nY(false, &move, rec.final_damage);
     // JS `$db(a,b,c){this.i_.add(a,b,c)}` (L523): `(Zi, i6a(SZ), JP)`.
     i_.push_back({rec.final_damage, i6a_attr(idmg.attack_attrs), defense_attr});
     // JS `this.udb(a.model.jb, b.Zi)` (L395 -> L403):
@@ -2660,7 +2773,12 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         rctx.health_ratio = def.max_hp > 0.0f ? def.hp / def.max_hp : 0.0f;
         rctx.last_hit_type = hit_critical ? "Critical" : (rec.shock ? "Shock" : "");
         rctx.candidate_moves = {};
-        const std::string reaction = def.fighter.try_react(rctx, rec.shock);
+        // JS `Gc.DK` (L343452): `f[uf.sja(f.length)]` — the reaction pick is
+        // a UNIFORM `Math.random` draw (`uf.sja` L57426), NOT `Da.pg`. The
+        // port routes it through the pinned `math_random01()` so it never
+        // perturbs the shared fight/AI stream.
+        const std::string reaction =
+            def.fighter.try_react(rctx, rec.shock);
         if (!reaction.empty()) {
             // JS `Gc.DK` (L673-674) -> `jJa`/`Qnb` -> `wd.Lwb` -> `ca.Lgb`
             // (L387) -> `PC(7,side)`: the knockdown reaction start is the
@@ -2772,33 +2890,62 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // (absent -> 0). `dir` = the real capsule motion delta (above).
     //
     // JS gate `a.Pd.da.yD(4).DL` (L395): the flash only fires when the
-    // ATTACKER's active Attack interval has `DL = !NoEffect`. `iv` is that
-    // interval (`hit_test`'s `d`), and `Interval::no_effect` is now parsed
-    // from the `<Interval NoEffect="1">` attribute -> `!iv.no_effect` is the
-    // exact gate.
+    // ATTACKER's active Attack interval has `DL = !NoEffect`. The JS arms
+    // the `Vu` latch there (`a.model.lrb(b.bk, d, b.se?.0166:.00833)`); the
+    // trigger consumer `Xvb` reads `Vu.Ica`. The port now latches the same
+    // reaction on the DEFENDER and the flash reads it, instead of
+    // re-deriving the gate — `iv` is that interval (`hit_test`'s `d`) and
+    // `Interval::no_effect` is the parsed `NoEffect` attribute.
     //
-    // Presentation only: no RNG, no sim effect (the sparks' private LCG is
-    // untouched).
+    // Presentation only: no RNG, no sim effect.
+    const float flash_time = hit_critical ? kFlashTimeCrit : kFlashTimeNormal;
+    // JS `a.Pd.da.yD(4).DL && a.model.lrb(...)` (L395): the latch is armed
+    // ONLY when the attacker's active Attack interval has `DL = !NoEffect`;
+    // the `Xvb` consumer (L266159) runs on that same `<Hit/>` trigger, so
+    // the flash fires exactly once per armed hit. `eob()` (L523, called by
+    // `kob` L403 at the round transition) clears it — and a NoEffect
+    // interval clears it here too, so a stale latch can never arm the flash.
+    bool flash_armed = false;
     if (!iv.no_effect) {
+        def.fighter.latch_reaction(ch.point, hdir, flash_time);  // `lrb`
+        flash_armed = true;
+    } else {
+        def.fighter.clear_reaction();  // `eob` on the NoEffect path
+    }
+    if (flash_armed) {  // JS `Xvb`: `this.Vu.Ica && ca.Ka()!=null && ...`
         const char* flash_prefix = hit_critical ? "critical"
                                  : hit_blocked  ? "block"
                                                 : "hit_blade";
         const int flash_frames = hit_critical ? kFlashFramesCritical
                                : hit_blocked  ? kFlashFramesBlock
                                               : kFlashFramesCritical;
-        const float flash_time = hit_critical ? kFlashTimeCrit : kFlashTimeNormal;
-        fx_.spawn_hit_flash(ch.point.x, ch.point.y, hdir.x, hdir.y, 0.0f,
-                            def.qz, flash_time, flash_prefix, flash_frames);
+        const Fighter::Reaction& r = def.fighter.reaction();
+        fx_.spawn_hit_flash(r.pos.x, r.pos.y, r.dir.x, r.dir.y, 0.0f,
+                            def.qz, r.time, flash_prefix, flash_frames);
     }
 
-    // [fx] The camera kick (JS `ca.Cgb` L396: `if(b.se||b.Uq&&!b.block||b.Ub)
-    // c=this.ZAa(...),c!=null&&this.Ta.DL(c)`) fires on a critical, a head
-    // hit that was not blocked, or a shock. The JS trajectory config (`ZAa`)
-    // is not in the specs; the native keeps the fixed decaying kick (`shake`)
-    // but now applies the SAME gate.
+    // [fx] The camera hit-judder + hit-stop (JS `ca.Cgb` L396:
+    // `if(b.se||b.Uq&&!b.block||b.Ub) c=this.ZAa(b.se,b.Uq&&!b.block,b.Ub),
+    // c!=null&&this.Ta.DL(c)`). `ZAa` scans the shipped `<HitEffects>` rows
+    // in document order and returns the first matching the active flags; the
+    // old port used an invented constant `shake(6.0)`. `DL` latches the row
+    // and arms the per-type PauseTime (hit-stop) + EffectTime judder.
     if (hit_critical || (hit_cap.body_part == "Head" && !hit_blocked) ||
         rec.shock) {
-        camera_.shake(6.0f);
+        const sf2::scene::HitEffect* he =
+            sf2::scene::select_hit_effect(hit_critical,
+                                          hit_cap.body_part == "Head" && !hit_blocked,
+                                          rec.shock);
+        if (he != nullptr) {
+            camera_.apply_hit_effect(*he);
+            std::fprintf(stdout,
+                         "[fx] hitstop type=%s pause=%d effect=%d "
+                         "ampX=%.1f freqX=%.2f ampY=%.1f freqY=%.2f\n",
+                         he->type.c_str(), he->pause_time, he->effect_time,
+                         he->amplitude_x, he->frequency_x, he->amplitude_y,
+                         he->frequency_y);
+            std::fflush(stdout);
+        }
     }
     if (hit_critical) {
         std::fprintf(stdout, "[fx] sparks at %.0f,%.0f\n", ch.point.x, ch.point.y);
@@ -3025,6 +3172,12 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // -> `CZa(10)`; `KNa` leaves `Ua` set, which is why the ended move is
         // captured in `Fighter::take_ended_move`).
         if (const sf2::scene::MoveDef* ended = me.fighter.take_ended_move()) {
+            // JS `Uza` (L258171): `let a=this.Sj(), b=this.jb; b!=null &&
+            // b.Kf().Cn.v_(!0,a); this.Kf().Cn.v_(!1,a)` — commit the
+            // buffered strike memory for the move that just ended, on BOTH
+            // sides (`v_` moves `Yo -> Xb` and `gy -> tf`).
+            foe.fighter.strike_memory().v_(true, ended);
+            me.fighter.strike_memory().v_(false, ended);
             std::vector<const sf2::scene::MoveAction*> end_acts;
             for (const sf2::scene::MoveAction& a : ended->actions) {
                 if (!a.frame_trigger && a.event == "AnimationEnd") end_acts.push_back(&a);
@@ -3087,16 +3240,43 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         for (const std::string& n : me.fighter.active_intervals()) {
             st.my_intervals.push_back({n, 0});
         }
-        st.enemy_max_part_frames = foe.fighter.move_frame();
-        st.ranged = -1;
+        st.enemy_max_part_frames = foe.fighter.m2();  // JS `Tba` (max `M2`)
+        // JS `wd.K0` (L505): NoRanged item equipped -> +1, else -1.
+        st.ranged = me.ranged_available ? -1 : 1;
+        st.playing = me.fighter.current_move() != nullptr;  // JS `Ji.Pe`
         st.magic_bullets = 0;
-        st.enemy_part_frames.push_back(foe.fighter.move_frame());
+        st.enemy_part_frames.push_back(foe.fighter.m2());
         st.fight_frame = frame_;
         st.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
+        // JS `Da.pg` — the ONE shared stream; hand it to the AI so QJa/gfa/
+        // aea/dqb/jL/slots all draw from it (the port previously kept QJa on
+        // a private DaPrng, splitting the stream). With a test override
+        // installed (`roll01_`) fall back to it so tests stay seeded.
+        st.da_pg = roll01_ ? nullptr : &prng_;
+        st.strike_memory = &me.fighter.strike_memory();
 
         const std::string decision = me.ai->update(st);
         me.last_decision = decision;
         me.last_ai_stage = me.ai->last_stage();
+        // Wave log: the JS-exact values the audit asked to surface —
+        // `K2` (with/without the NoRanged item), `pZ` (Tba = max `M2`)
+        // vs the raw move frame, the strike-memory counters, the stream.
+        if (decision != last_ai_log_) {
+            const sf2::scene::AiFeatureState& ff = me.ai->features();
+            std::fprintf(stdout,
+                         "[ai] F%d %s K2=%d (ranged_available=%d:"
+                         " true->-1, false(NoRanged)->+1; alt=%d)"
+                         " pZ(Tba/M2)=%d raw_move_frame=%d"
+                         " strike{counter=%.3f xb=%.3f tf=%.3f} stream=%s\n",
+                         frame_, me.name.c_str(), st.ranged,
+                         me.ranged_available ? 1 : 0,
+                         me.ranged_available ? 1 : -1,
+                         st.enemy_max_part_frames, foe.fighter.move_frame(),
+                         ff.counter, ff.xb, ff.tf,
+                         st.da_pg != nullptr ? "Da.pg(draw01)" : "override");
+            std::fflush(stdout);
+            last_ai_log_ = decision;
+        }
         if (!decision.empty()) {
             const sf2::scene::MoveDef* chosen = nullptr;
             auto pick_ctx = [&]() {
@@ -3270,15 +3450,15 @@ void FightController::banner_expire() {
 // JS `ca.Ea` (L385) + `ia` (L388): the per-frame fight update.
 void FightController::update(float dt) {
     ++frame_;
-    // [fx] The particle pool + the shake decay (presentation only — runs
-    // even after the battle ends so the KO burst finishes and the camera
-    // kick settles back to 0; neither touches the simulation).
+    // [fx] The particle pool + the hit judder/hit-stop tick (presentation
+    // only — runs even after the battle ends so the KO burst finishes and
+    // the camera kick settles back to 0; neither touches the simulation).
+    // JS `ql.Fnb` + `ql.d3a` run in the camera's `Ea()` (L364/L363).
     fx_.update();
     // Magic/effect containers (JS `tl.WL` L837 -> `Gq.WL`/`Hq.WL`; the
     // timescale `1/v.on()` = 1.0 here). Presentation only.
     magic_fx_.update(1.0f);
-    camera_.shake_x_ *= 0.85f;
-    camera_.shake_y_ *= 0.85f;
+    camera_.tick_hit_effect();
     if (battle_over_) return;
 
     // The K.O. slow-mo beat (JS: the KO freeze): the first 30 frames of

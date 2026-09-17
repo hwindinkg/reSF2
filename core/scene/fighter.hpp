@@ -78,6 +78,53 @@ void set_fighter_pivot_bone(const std::string& name);
 //                  Start/End ranges; the fighter exposes `P0()` (L493) =
 //                  `da.xj` — `Fc.xb` (CurrentInterval conditions) reads it
 //                  (L680).
+//
+// JS `wd.Cn` = `tu` (g="DE" L297387) — the strike memory. Per-move
+// accumulators (JS `Eu` g="DF" L298900) of dealt damage (`Xb`), strike count
+// (`count`) and hits (`tf`), exponentially decayed to the model's strike time
+// (`lU`, `++` per landed strike) by the tactic's `<Memory Strikes>` half-life
+// (`kfa`) and scaled by `<Memory RoundFactor>` at round end (`$K`).
+// `d0(move,b,c,d)` (L298213) writes `{count,Xb,tf}` for the AI's `mQ`
+// feature vector; `S5a` (L298213) sums them over body parts.
+class StrikeMemory {
+public:
+    // JS `Eu`: `Yo/gy` are the pending (uncommitted) damage/count;
+    // `Xb/tf/count` the committed values; `Yta` the last decay time.
+    struct Accum {
+        double xb = 0.0;   double yo = 0.0;
+        double tf = 0.0;   double gy = 0.0;
+        double count = 0.0;
+        double yta = 0.0;  // `Yta`
+    };
+    // JS `Eu.gT` (L298840): `b=2^(-(t-Yta)/half_life)` then scale every
+    // field, when `t-Yta > 0`. `half_life <= 0` is a guard (the shipped
+    // `<Memory Strikes>` is 3).
+    static void decay(Accum& a, double t, double half_life);
+    // JS `tu.nY` (L297623) + `Eu.nY` (L298864): buffer `value` (damage).
+    void nY(bool mine, const MoveDef* move, double value);
+    // JS `tu.rY` (L297684) + `Eu.rY` (L298970): count one strike.
+    void rY(bool mine, const MoveDef* move);
+    // JS `tu.v_` (L297706) + `Eu.v_` (L298964): commit the buffered Xb/tf.
+    void v_(bool mine, const MoveDef* move);
+    // JS `tu.d0` (L298213): write `{count, Xb, tf}` for `move`.
+    void d0(const MoveDef* move, double& count, double& xb, double& tf);
+    // JS `tu.$K` + `Eu.aKa` (L297964/L298976): scale every accumulator.
+    void round_factor(double factor);
+    // The model's strike time (`wd.lU`, reset per round) — decay clock.
+    void set_time(double t) { time_ = t; }
+    double time() const { return time_; }
+    // The tactic's `<Memory Strikes>` half-life (`Md.KW.f6` via `kfa`).
+    void set_half_life(double h) { half_life_ = h; }
+    double half_life() const { return half_life_; }
+private:
+    // `Ysa` = the "mine" map, `bqa` = the "theirs" map (`F0(ky,move)`).
+    std::map<const MoveDef*, Accum> mine_;
+    std::map<const MoveDef*, Accum> theirs_;
+    double time_ = 0.0;       // `model.lU`
+    double half_life_ = 3.0;  // `kfa` = `KW.f6` (shipped `<Memory Strikes="3">`)
+    Accum& entry(bool mine, const MoveDef* move);
+};
+
 class Fighter {
 public:
     // Model (already merged, skeleton-first) and rest bind positions.
@@ -133,10 +180,13 @@ public:
     // conditions pass (54 such moves in moves.xml: HighHit/MiddleHit/...,
     // PhysicalFall/...). `prefer_fall` (shock knockdown, `Ub`) tries
     // *Fall*-named reactions first — a proxy for the MS/jJa branch (the
-    // exact MS mapping is OPEN). Roulette-inside-Pkb stays OPEN (no tactic
-    // weights at reaction time); the partition ORDER matches `dk_partition`
-    // (priority descending = hb_ order). Returns the name or "".
-    std::string try_react(sf2::scene::FightContext& ctx, bool prefer_fall);
+    // exact MS mapping is OPEN). The JS `DK` picks the top-`priority` group
+    // and then `f[uf.sja(len)]` (uniform, `Math.random`); `rng` is the
+    // injected `Math.random` analog (never `Da.pg`). The `Pkb` weighted
+    // roulette at reaction time stays OPEN (no tactic weights available).
+    // Returns the name or "".
+    std::string try_react(sf2::scene::FightContext& ctx, bool prefer_fall,
+                          const std::function<float()>& rng = {});
 
     // Starts `move` if its conditions pass: sets current_move, move_frame=0,
     // loads the clip (FileName -> anim_archive clip), sets facing toward the
@@ -198,9 +248,50 @@ public:
     // don't keep sliding on stance_1/stance_2 into the idle phase.
     void clear_move();
 
+    // --- JS `Vu` (mu g="D0" L249972) — the pending hit-reaction latch -----
+    // `lrb(bk,fg,time)` (L523) arms it; `Xvb` (L266159) gates the hit flash
+    // on `Vu.Ica`; `eob()` (L523) clears it (the move/round reset `kob`
+    // L403). The port's flash spawn now reads this latch instead of
+    // re-deriving the gate.
+    struct Reaction {
+        bool active = false;      // `Ica`
+        sf2::scene::Vec3 pos{};   // `bk` — the contact point
+        sf2::scene::Vec3 dir{};   // `fg` — the strike direction
+        float time = 0.0f;        // `time` — the flash speed (1/60 or 1/120)
+    };
+    void latch_reaction(const sf2::scene::Vec3& pos, const sf2::scene::Vec3& dir,
+                        float time);
+    void clear_reaction() { reaction_.active = false; }
+    bool has_reaction() const { return reaction_.active; }
+    const Reaction& reaction() const { return reaction_; }
+
+    // --- JS `wd.Cn` = `tu` (g="DE" L297387) — the strike memory -----------
+    // Per-move accumulators (JS `Eu` g="DF" L298900) of dealt damage (`Xb`),
+    // strike count (`count`) and hits (`tf`), exponentially decayed to the
+    // model's strike time (`lU`, `++` per strike) by the tactic's
+    // `<Memory Strikes>` half-life (`kfa`) and scaled by `<Memory
+    // RoundFactor>` at round end (`$K`). `d0(move,b,c,d)` (L298213) writes
+    // `{count,Xb,tf}` for the AI's `mQ` feature vector. Type declared at
+    // namespace scope (below) so `AiFightState` can carry a pointer.
+    void bump_strike_time() { ++strike_time_; }  // `strike`: `++this.lU`
+    double strike_time() const { return strike_time_; }
+    StrikeMemory& strike_memory() { return strike_memory_; }
+    const StrikeMemory& strike_memory() const { return strike_memory_; }
+
     // --- state accessors (Phase 3.2b) -------------------------------------
     const MoveDef* current_move() const { return current_move_; }
     int move_frame() const { return move_frame_; }
+    // JS `Te.M2` — the anim controller move-frame counter. `Te.ia`
+    // (L547-548) opens with `this.M2++` and later in the SAME call does
+    // `this.Xh++`, so the two counters advance in LOCKSTEP: `M2 == Xh - 4`
+    // (`Xqb` L282808 seats `M2 = -4`, `Skb` L280606 seats `Xh = 0`). `Xh` is
+    // this port's `playhead_`. `Tba` (L595) = the max `M2` over the enemy's
+    // body parts; the port's single body maps to this. NOTE the shipped
+    // `Xqb` guards the `M2=-4` seat with `yra` (`this.yra||(...)`) and `yra`
+    // is never re-armed, so a literal reading would make `M2` a
+    // model-lifetime counter; the port re-seats it per move start (the only
+    // reading that keeps `Tba`/`Gea` a move-frame quantity). Reported OPEN.
+    int m2() const { return playhead_ - 4; }
     // Subframe state (JS `Te.mo`): `subframe()` is the current subframe
     // index within the clip-frame, `sub()` the subframes per clip-frame.
     // Pose-trace accessors only — no behavior change.
@@ -324,6 +415,11 @@ private:
     const MoveDef* current_move_ = nullptr; // playing move (JS `da.Ua`)
     const sf2::data::anim_clip* current_clip_ = nullptr; // clip for `current_move_`
     int move_frame_ = 0;                    // clip frame (JS `Te.M0()`) for intervals/cf
+    // JS `Vu` (mu L249972) — the pending hit-reaction latch (`lrb`/`eob`).
+    Reaction reaction_;
+    // JS `wd.Cn` (tu L297387) + `wd.lU` (the strike-time clock).
+    StrikeMemory strike_memory_;
+    double strike_time_ = 0.0;
     // JS `Te.Xh` (the playback/buffer index). The play buffer is
     // [slot0, slot1, clip[FirstFrame], clip[FirstFrame+1], ...]: slots 0,1
     // are the clip-start prepend (JS `vu.Pka` L340543 copies of clip
