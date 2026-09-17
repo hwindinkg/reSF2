@@ -365,6 +365,13 @@ struct MoveDef {
     int profile_order = 0;            // `ra.Ul` push order (L712)
     std::vector<Cond> conditions;      // <Conditions> (own + template)
     std::vector<Cond> tactics;         // <Tactics><Conditions> (own + template)
+    // JS `M7.$Q` (`Pu`, L703): the names of the HIGHER-`Priority` moves whose
+    // `<Conditions>` KeyPressed spec is a sub-multiset of one of this move's
+    // (`ra.c1a` -> `ra.b1a` L683-684). `Pu.Wcb` (L703) is the membership test.
+    // Read by `Gc.Pkb`'s mirror-compat filter (L674-675) and by `de.V1`
+    // (L601-602: `d=a.M7; if(0<d.$Q.length) ... return !1`). Filled once after
+    // the whole move table is parsed.
+    std::vector<std::string> mirror_exclusive;
     std::vector<Interval> intervals;   // <Intervals><Interval> (own + template)
     std::vector<Lock> locks;           // <Locks>
     // <Actions> (JS `Fa.CIa` L718 -> `Fa.DIa` L718 -> `lz.create` L737) —

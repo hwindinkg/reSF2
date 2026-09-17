@@ -408,6 +408,14 @@ public:
     void set_clip_lookup(const std::function<const sf2::data::anim_clip*(const std::string&)>& fn) {
         clip_lookup_ = fn;
     }
+    // JS `uf.OKa.RGa()` = `Math.random()` (`at.Nlb` L114; `uf.OKa=new at`
+    // L2471) — the UNSHARED stream `uf.sja` (L115:
+    // `Math.floor(uf.OKa.RGa()*(a-0))+0`) draws from for `Gc.DK`'s
+    // `e = f[uf.sja(f.length)]` (L674). Installed by the fight controller
+    // with the pinned `FightController::math_random01()` (never `Da.pg`).
+    // Unset -> index 0, which is VALUE-EXACT for a single-element `Aua`
+    // group (`floor(r*1) == 0`) — the case at every probe frame.
+    void set_math_random(std::function<float()> fn) { math_random_ = fn; }
 
     // --- existing render path ---------------------------------------------
     // Per-bone world positions at frame `f` of `clip`, anchored so the
@@ -466,6 +474,9 @@ private:
     // --- move execution state (Phase 3.2b) --------------------------------
     std::vector<const MoveDef*> hb_;        // move list (sorted, priority desc)
     RouletteRecord roulette_;               // last `Md.jL` outcome (probe/trace)
+    // `uf.sja`'s `Math.random` mirror (`set_math_random`); unset -> no draw is
+    // needed because the `Aua` group is a singleton (value-free).
+    std::function<float()> math_random_;
     const MoveDef* current_move_ = nullptr; // playing move (JS `da.Ua`)
     const sf2::data::anim_clip* current_clip_ = nullptr; // clip for `current_move_`
     int move_frame_ = 0;                    // clip frame (JS `Te.M0()`) for intervals/cf

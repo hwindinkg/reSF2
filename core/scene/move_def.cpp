@@ -56,6 +56,130 @@ std::vector<std::string> split_pipe(const std::string& s) {
     return out;
 }
 
+// JS `sa.$h` (`HQ` L2472 `v[7]=65` ...): key-type NAME -> control id.
+// 0 = unregistered, which never matches (the buffer holds ids 1..14).
+int key_type_id(const std::string& s) {
+    if (s == "Up") return 1;
+    if (s == "Up-Forward") return 2;
+    if (s == "Forward") return 3;
+    if (s == "Down-Forward") return 4;
+    if (s == "Down") return 5;
+    if (s == "Down-Back") return 6;
+    if (s == "Back") return 7;
+    if (s == "Up-Back") return 8;
+    if (s == "Punch") return 9;
+    if (s == "Kick") return 10;
+    if (s == "Ranged") return 11;
+    if (s == "Magic") return 12;
+    if (s == "RaidCharge") return 13;
+    if (s == "Super") return 14;
+    return 0;
+}
+
+// JS `vm.parse` (L749): `PressType` NAME -> `zd` list (1=sh/Tap, 2=Fh/Hold,
+// 3=released/Release).
+int press_type_id(const std::string& s) {
+    if (s == "Tap") return 1;
+    if (s == "Hold") return 2;
+    if (s == "Release") return 3;
+    return 1;  // JS: the else-branch of the Hold/Tap/Release chain
+}
+
+// `eca(a,b)`/`Eab` (L688-689): "every element of `a` matches a DISTINCT
+// element of `b`" (a is a sub-multiset of b; also requires `a.size()<=b.size()`).
+bool sub_multiset(const std::vector<int>& a, const std::vector<int>& b) {
+    if (a.size() > b.size()) return false;
+    std::vector<bool> used(b.size(), false);
+    for (const int x : a) {
+        bool hit = false;
+        for (std::size_t i = 0; i < b.size(); ++i) {
+            if (!used[i] && b[i] == x) {
+                used[i] = true;
+                hit = true;
+                break;
+            }
+        }
+        if (!hit) return false;
+    }
+    return true;
+}
+
+// `zd.$ga(a)` (L688): `eca(sh,a.sh) && eca(Fh,a.Fh) ? eca(released,a.released)
+// : false` — compares the three press lists SEPARATELY (no cross-press match).
+bool key_spec_ga(const std::vector<std::pair<int, int>>& p,
+                 const std::vector<std::pair<int, int>>& q) {
+    auto keys_for = [](const std::vector<std::pair<int, int>>& spec,
+                       int press) {
+        std::vector<int> out;
+        for (const auto& kv : spec) {
+            if (kv.second == press) out.push_back(kv.first);
+        }
+        return out;
+    };
+    const std::vector<int> p_sh = keys_for(p, 1), p_fh = keys_for(p, 2);
+    const std::vector<int> q_sh = keys_for(q, 1), q_fh = keys_for(q, 2);
+    if (!sub_multiset(p_sh, q_sh)) return false;
+    if (!sub_multiset(p_fh, q_fh)) return false;
+    return sub_multiset(keys_for(p, 3), keys_for(q, 3));
+}
+
+// JS `jc.BAa(a,b)` (L698: `qCa(){let a=m.l(); jc.BAa(this.va.rb,a); return a}`)
+// — collect the type-4 (`vm` Keys) leaves of a condition tree, recursing the
+// type-8 `Operator` containers. `cb` (Not) is NOT consulted by `$ga`.
+void collect_key_specs(const std::vector<Cond>& conds,
+                       std::vector<std::vector<std::pair<int, int>>>& out) {
+    for (const Cond& c : conds) {
+        if (c.op != cond_op::leaf) {
+            collect_key_specs(c.children, out);
+            continue;
+        }
+        if (c.type != "Keys") continue;
+        std::vector<std::pair<int, int>> spec;
+        std::string cur;
+        std::vector<std::string> parts;
+        for (const char ch : c.keys) {
+            if (ch == ',') { parts.push_back(cur); cur.clear(); }
+            else cur += ch;
+        }
+        if (!cur.empty()) parts.push_back(cur);
+        for (const std::string& w : parts) {
+            const std::size_t colon = w.find(':');
+            const std::string ts = colon == std::string::npos ? w : w.substr(0, colon);
+            const std::string ps = colon == std::string::npos ? "Tap" : w.substr(colon + 1);
+            spec.emplace_back(key_type_id(ts), press_type_id(ps));
+        }
+        out.push_back(std::move(spec));
+    }
+}
+
+// JS `ra.c1a`/`ra.b1a` (L683-684): for every move `a`, walk the whole move
+// list and append to `a.M7.$Q` every move `e` with `a.priority < e.priority`
+// whose KeyPressed spec `$ga`-conflicts with one of `a`'s:
+//   `g && a.M7.$Q.push(e)` where `g` = `qCa(e)[n].xn.$ga(qCa(a)[h].xn)`.
+void link_mirror_exclusive(std::map<std::string, MoveDef>& moves) {
+    std::map<std::string, std::vector<std::vector<std::pair<int, int>>>> qca;
+    for (const auto& kv : moves) collect_key_specs(kv.second.conditions, qca[kv.first]);
+    for (auto& kv : moves) {
+        MoveDef& a = kv.second;
+        const std::vector<std::vector<std::pair<int, int>>>& qa = qca[a.name];
+        if (qa.empty()) continue;  // `if(c.length>0)` (L683)
+        for (const auto& ke : moves) {
+            const MoveDef& e = ke.second;
+            if (!(a.priority < e.priority)) continue;
+            const std::vector<std::vector<std::pair<int, int>>>& qe = qca[e.name];
+            if (qe.empty()) continue;
+            bool conflict = false;
+            for (const auto& xa : qa) {
+                for (const auto& xe : qe) {
+                    if (key_spec_ga(xe, xa)) { conflict = true; break; }
+                }
+                if (conflict) break;
+            }
+            if (conflict) a.mirror_exclusive.push_back(e.name);
+        }
+    }
+}
+
 // JS `fe.init`: interval type resolution. The NAME overrides the Type:
 //   Name=="Unstable"->1, "Uninterrupt"->2, "SelfUninterrupt"->3; else
 //   `fe.G0(Type)` (Attack=4, Block=5, Invisible=7, Invulnerable=6, else 0).
@@ -876,6 +1000,9 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
 
         out.emplace(def.name, std::move(def));
     }
+    // JS `ra.c1a` (L683): the mirror-conflict table is linked over the WHOLE
+    // parsed move list, after every move exists.
+    link_mirror_exclusive(out);
     return true;
 }
 

@@ -860,7 +860,8 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
     }
     if (passing.empty()) return "";
 
-    // The JS `de.ia` (L592-594) tail, verbatim shape:
+    // The JS `de.ia` (L592-594) tail, verbatim shape, PLUS the `Gc.DK` tail
+    // (L673-674) that feeds the same roulette:
     //   this.ABa(this.wb); this.h2a();      // `ld` = passing animations
     //   a = this.jL(this.ld);               // the ROULETTE
     //   if (-1 < a) return this.eh = this.vs[a], this.ld[a];
@@ -870,12 +871,109 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
     // order and return the first index that goes negative. When the total is
     // <= 0 the JS returns -1 and `ia` returns null — NO move starts, and NO
     // draw is consumed.
+    // [D1] JS `Gc.DK` (L673-674) on the per-frame KeyPressed candidate set.
+    // Its `this.jL(a,d)` is `de.jL` (L597) -> `Md.jL` (L640) — the SAME
+    // weighted roulette `de.ia` drives — so the DK tail belongs here.
+    //
+    //  * `d` (`c||!h.eb||h.animation.Rha||d.push(h)`, `c==false`): `||`
+    //    SHORT-CIRCUITS, so the push runs only when `c` is false, `h.eb` is
+    //    true and `h.animation.Rha` is false — i.e. `d` = the eb
+    //    (KeyPressed, `Gc.Vkb` L671 -> `Ih(2,a,!0)`) candidates. `passing`
+    //    is exactly that set (every candidate carries the `KeyPressed` event).
+    //  * `f` = the `Aua` (L673) group of maximal `animation.priority`.
+    //  * `e = f[uf.sja(f.length)]` (L674) with
+    //    `uf.sja(n)=Math.floor(uf.OKa.RGa()*(n-0))+0` (L115) and
+    //    `uf.OKa.RGa()=Math.random()` (`at.Nlb` L114, `uf.OKa=new at`
+    //    L2471) — an UNSHARED stream, NOT `Da.pg`.
+    std::size_t e_idx = 0;
+    bool have_e = false;
+    {
+        std::vector<std::size_t> top;  // `f`
+        for (std::size_t i = 0; i < passing.size(); ++i) {
+            const int ap = passing[i]->priority;
+            const int bp = top.empty() ? 0 : passing[top.front()]->priority;
+            if (ap >= bp) {
+                if (ap > bp) top.clear();
+                top.push_back(i);
+            }
+        }
+        if (!top.empty()) {
+            std::size_t k = 0;
+            if (top.size() > 1 && math_random_) {
+                float r = math_random_();
+                if (r < 0.0f) r = 0.0f;
+                if (r >= 1.0f) r = 0.9999999f;
+                k = static_cast<std::size_t>(r * static_cast<float>(top.size()));
+                if (k >= top.size()) k = top.size() - 1;
+            }
+            e_idx = top[k];
+            have_e = true;
+        }
+    }
+    // `d.length>0 ? (e!=null&&d.push(e), Pkb(a,d))` (L674): the append.
+    std::vector<const MoveDef*> cand;
+    cand.reserve(passing.size() + 1);
+    cand.insert(cand.end(), passing.begin(), passing.end());
+    if (have_e) cand.push_back(passing[e_idx]);
+
+    // [D2] `Gc.Pkb` filter 1 (L674-675): keep an entry `f` only when
+    // `f.animation.M7.Wcb(l.animation)` holds for EVERY entry `l`.
+    // `Pu.Wcb(a)` (L703) is false when `a` is in this move's `$Q`
+    // (`mirror_exclusive`, `ra.b1a` L683-684). The JS compacts IN PLACE while
+    // its inner scan walks that same array (kept prefix + original suffix);
+    // reproduced verbatim below.
+    {
+        std::size_t wr = 0;
+        const std::size_t n = cand.size();
+        for (std::size_t rd = 0; rd < n; ++rd) {
+            const MoveDef* f = cand[rd];
+            bool keep = true;
+            for (std::size_t k = 0; k < n; ++k) {
+                const MoveDef* other = cand[k];
+                if (std::find(f->mirror_exclusive.begin(),
+                              f->mirror_exclusive.end(),
+                              other->name) != f->mirror_exclusive.end()) {
+                    keep = false;
+                    break;
+                }
+            }
+            if (keep) {
+                cand[wr] = f;
+                ++wr;
+            }
+        }
+        cand.resize(wr);
+    }
+    // [D2] `Gc.Pkb` filter 2 (L675): an entry whose `<Tactics><Conditions>`
+    // (`va.Ts`) is non-empty survives only when every node holds
+    // (`f.animation.nw(a.Fc, Ts, f.iza)` L691). JS sets `a.Fc.xK` to the
+    // candidate's animation names first; `Fc.gm` is still false (`de.V1`
+    // L601 cleared it), so Keys nodes pass.
+    {
+        std::size_t wr = 0;
+        const std::size_t n = cand.size();
+        for (std::size_t rd = 0; rd < n; ++rd) {
+            const MoveDef* f = cand[rd];
+            if (!f->tactics.empty()) {
+                ctx.candidate_moves = {f->name};
+                ctx.keys_gm = false;
+                if (!eval_move_conditions(f->tactics, ctx)) continue;
+            }
+            cand[wr] = f;
+            ++wr;
+        }
+        cand.resize(wr);
+    }
+    // `this.jL(a,b)` with `b` empty returns null (L673 `if(0<c)`), so the DK
+    // path starts NOTHING (and consumes no `Da.pg` draw).
+    if (cand.empty()) return "";
+
     std::size_t pick = 0;
     if (tactic != nullptr && feat != nullptr) {
-        std::vector<float> weights(passing.size(), 0.0f);
+        std::vector<float> weights(cand.size(), 0.0f);
         float sum = 0.0f;
-        for (std::size_t i = 0; i < passing.size(); ++i) {
-            const MoveDef& m = *passing[i];
+        for (std::size_t i = 0; i < cand.size(); ++i) {
+            const MoveDef& m = *cand[i];
             for (const auto& kv : tactic->anim_weights) {
                 // JS `iCa` (L640): the FIRST entry whose Name is "" (the
                 // wildcard default) or matches the move wins. `$k` (L698:
@@ -897,7 +995,7 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
         const float roll = ctx.roll01 ? ctx.roll01() : 0.0f;
         const float draw = roll * sum;
         float g = draw;
-        for (std::size_t i = 0; i < passing.size(); ++i) {
+        for (std::size_t i = 0; i < cand.size(); ++i) {
             g -= weights[i];
             if (g < 0.0f) {
                 pick = i;
@@ -915,19 +1013,19 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
         roulette_.draw = draw;
         roulette_.index = static_cast<int>(pick);
         roulette_.cands.clear();
-        roulette_.cands.reserve(passing.size());
-        for (std::size_t i = 0; i < passing.size(); ++i) {
-            roulette_.cands.emplace_back(passing[i]->name, weights[i]);
+        roulette_.cands.reserve(cand.size());
+        for (std::size_t i = 0; i < cand.size(); ++i) {
+            roulette_.cands.emplace_back(cand[i]->name, weights[i]);
         }
         std::fprintf(stdout, "[move] roulette: %zu candidates sum=%.4f draw=%.6f",
-                     passing.size(), static_cast<double>(sum),
+                     cand.size(), static_cast<double>(sum),
                      static_cast<double>(draw));
-        for (std::size_t i = 0; i < passing.size(); ++i) {
-            std::fprintf(stdout, " %s=%.4f", passing[i]->name.c_str(),
+        for (std::size_t i = 0; i < cand.size(); ++i) {
+            std::fprintf(stdout, " %s=%.4f", cand[i]->name.c_str(),
                          static_cast<double>(weights[i]));
         }
         std::fprintf(stdout, " -> idx=%zu %s\n", pick,
-                     passing[pick]->name.c_str());
+                     cand[pick]->name.c_str());
         std::fflush(stdout);
     }
 
@@ -935,8 +1033,8 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
     // animation starts. `start_move_impl` re-runs the same Conditions test
     // (now with a trace); should it no longer pass, fall through the
     // remaining candidates in order so the port never stalls on a stale pick.
-    for (std::size_t k = 0; k < passing.size(); ++k) {
-        const MoveDef* m = passing[(pick + k) % passing.size()];
+    for (std::size_t k = 0; k < cand.size(); ++k) {
+        const MoveDef* m = cand[(pick + k) % cand.size()];
         if (try_start_move(*m, ctx)) {
             if (roulette_.valid) roulette_.picked = m->name;
             return m->name;

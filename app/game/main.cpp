@@ -942,6 +942,17 @@ struct VerifyProbe {
 // jf()*d`, subtract the weights in candidate order and return the first index
 // that goes negative.
 //
+// [D1/D2] The list the roulette runs over is NOT the raw passing set: `Gc.DK`
+// (L673-674) partitions it first and, in the `d.length>0` branch, APPENDS
+// `e = f[uf.sja(f.length)]` — the `Aua` max-`animation.priority` pick, drawn
+// from `Math.random` (`uf.sja` L115, NOT `Da.pg`) — then hands `d+e` to
+// `Gc.Pkb` (L674-676), which applies TWO filters before its `this.jL(a,d)`
+// call: the `M7.Wcb` mirror-compat filter (keep `f` only when no other entry
+// is in `f.M7.$Q`, `Pu.Wcb` L703 / `ra.b1a` L683-684) and the `va.Ts`
+// `<Tactics><Conditions>` filter (`f.animation.nw(a.Fc, Ts, f.iza)` L691/L675).
+// `Fighter::try_select_move` reproduces all three steps; the appended `e` is
+// therefore a DUPLICATE entry and adds its weight to the total.
+//
 // The candidates are the JS `ra.Hza`-legal ones for the shipped Fists
 // loadout: the direct-boot fighter owns Skeleton + Weapon/Fists + Body/Head
 // (fight.cpp `make_fighter`), so a move is a candidate only when its
@@ -957,47 +968,59 @@ struct VerifyProbe {
 static const VerifyProbe kVerifyProbes[] = {
     // F180: Back Tap x2 at the spawn gap (dist 283). Candidate order is the
     // JS `ra.Lk` DOCUMENT order (P4a, `profile_order`): StepBack
-    // (moves.xml L6861) then BackHandflip (L7211). 249.647949 - 89.3593 =
-    // 160.2886 (>=0); the 178.0734 BackHandflip then takes it to -17.7848
-    // (<0) at index 1 -> BackHandflip (`Md.jL` L640).
+    // (moves.xml L6861) then BackHandflip (L7211). [D1] `Gc.DK` (L674)
+    // appends `e = f[uf.sja(f.length)]` — the `Aua` max-`priority` pick —
+    // AFTER the candidate list and BEFORE `Pkb`, so BackHandflip (Priority
+    // 20 > StepBack 10) is appended as a DUPLICATE: the weight total becomes
+    // 89.3593+178.0734+178.0734=445.5060. The same `Da.pg` draw scaled by the
+    // new total (415.879181) still lands past StepBack + BackHandflip at
+    // index 2 -> BackHandflip (`Md.jL` L640).
     {180, "Back Tap x2 (spawn gap 283)", "BackHandflip",
-     "sum=267.4326 draw=249.647949 idx=1 BackHandflip "
-     "cands=StepBack=89.3593,BackHandflip=178.0734",
+     "sum=445.5060 draw=415.879181 idx=2 BackHandflip "
+     "cands=StepBack=89.3593,BackHandflip=178.0734,BackHandflip=178.0734",
      4, false},
     // F300: Forward Tap x2. Document order (P4a): StepForward (L6756) then
-    // DoubleStepForward (L7056). The ForwardStep curve is Limit-capped here
-    // (1600) because the double tap lands mid-arena; 1581.174927 stays
-    // positive against it, so index 0 wins.
-    {300, "Forward Tap x2", "StepForward",
-     "sum=1700.0000 draw=1581.174927 idx=0 StepForward "
-     "cands=StepForward=1600.0000,DoubleStepForward=100.0000",
+    // DoubleStepForward (L7056). [D1] the DK append adds DoubleStepForward
+    // again (`Priority` 20 > 10), so the total is 1600+100+100=1800 and the
+    // scaled draw 1674.185181 now passes StepForward's 1600 -> index 1,
+    // DoubleStepForward: a Tap x2 selects the 2key double step (both moves'
+    // Conditions pass at this frame; the roulette decides).
+    {300, "Forward Tap x2", "DoubleStepForward",
+     "sum=1800.0000 draw=1674.185181 idx=1 DoubleStepForward "
+     "cands=StepForward=1600.0000,DoubleStepForward=100.0000,"
+     "DoubleStepForward=100.0000",
      4, false},
-    // F420: Punch Tap x2 + Forward Hold. Document order: StepForward (L6756),
-    // HighPunch (L8640), HeavyPunch (L8798), DoublePunch (L8846). The
-    // StepForward candidate is subtracted FIRST now, so 771.368225 goes
-    // negative at index 0 (it was index 3 under the old alphabetical
-    // `std::map` tie order of the unstable priority sort).
+    // F420: Punch Tap x2 + Forward Hold. [D1] e = DoublePunch (`Priority`
+    // 130, the unique max of {10,110,120,130}) is appended (total
+    // 1303.0918+100+100=1503.0918; the draw 626.827209 stays inside
+    // StepForward's 1303.0918 -> index 0). [D2] `Gc.Pkb`'s `va.Ts` filter
+    // (L675) drops HighPunch (`<Tactics>` Distance Max=250) and HeavyPunch
+    // (Max=350) — the gap here is ~350-450 — while DoublePunch (150..450)
+    // survives; the `M7.Wcb` mirror filter (L674) removes nothing.
     {420, "Punch Tap x2 + Forward Hold", "StepForward",
-     "sum=1849.6919 draw=771.368225 idx=0 StepForward "
-     "cands=StepForward=1549.6919,HighPunch=100.0000,HeavyPunch=100.0000,"
+     "sum=1503.0918 draw=626.827209 idx=0 StepForward "
+     "cands=StepForward=1303.0918,DoublePunch=100.0000,"
      "DoublePunch=100.0000",
      4, false},
-    // F520: single Forward tap -> the ONLY candidate, whatever the draw.
+    // F520: single Forward tap -> StepForward + its own DK append (total
+    // 1247.5417*2=2495.0835); the scaled draw 2331.547119 leaves index 0
+    // negative only after BOTH weights -> index 1, still StepForward.
     {520, "Forward Tap x1 (1key)", "StepForward",
-     "sum=1494.1418 draw=1396.210571 idx=0 StepForward "
-     "cands=StepForward=1494.1418",
+     "sum=2495.0835 draw=2331.547119 idx=1 StepForward "
+     "cands=StepForward=1247.5417,StepForward=1247.5417",
      4, false},
     // F550: single Forward tap 30 frames later (a fresh 1key step).
     {550, "Forward Tap x1 (+30f)", "StepForward",
-     "sum=1410.2307 draw=690.022644 idx=0 StepForward "
-     "cands=StepForward=1410.2307",
+     "sum=2327.2612 draw=1138.723633 idx=0 StepForward "
+     "cands=StepForward=1163.6306,StepForward=1163.6306",
      4, false},
-    // F620: K (GLFW 75) maps to Punch (id 9) -> the Punch-key candidate set;
-    // the one whose Conditions pass is HighPunch. 81.378464 - 100.0000 < 0 ->
-    // index 0.
-    {620, "K key -> Punch-key move", "HighPunch",
-     "sum=100.0000 draw=81.378464 idx=0 HighPunch cands=HighPunch=100.0000",
-     4, false},
+    // F620: K (GLFW 75) maps to Punch (id 9) -> the Punch-key candidate set.
+    // HighPunch is the only candidate whose Conditions pass, but [D2]
+    // `Gc.Pkb`'s `va.Ts` filter (L675) drops it here: its `<Tactics>`
+    // Distance gate is Min=0 Max=250 and the fighters are ~250-350 apart
+    // after the two forward steps, so the roulette never runs and NOTHING
+    // starts (`jL` over an empty list returns null, L673).
+    {620, "K key -> Punch-key move (Tactics range gate)", "<none>", "", 14, false},
     // F700: B (GLFW 66) is unbound -> no tap -> no roulette, no move.
     {700, "B key -> dropped (no move)", "<none>", "", 12, false},
 };
