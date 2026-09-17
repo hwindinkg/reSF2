@@ -243,8 +243,25 @@ void Fighter::age_keys() {
 // oldest past 2, then rebuild `zg.Fh` from the down keys. `zl.Xgb` (L799)
 // on release drops the hold and records the release only when the key was
 // never tapped (`!zg.sh.includes(index)`).
+//
+// `zl.Sgb` is guarded: `if(a!=null && !a.sl){ a.sl=!0; ... }` — a key that
+// is ALREADY down (`sl` set) produces no second tap row, so a held key
+// cannot spam duplicates. The body then calls `this.zg.clear()`
+// (`zd.clear` L688: `this.Fh.length=0; this.ev=this.released.length=0`),
+// which drops the stale `released` rows of the previous press (`Fh` is
+// immediately rebuilt by `yLa`).
 void Fighter::input(sf2::scene::key_type key, sf2::scene::press_type press) {
     if (press == press_type::tap) {
+        // JS `Sgb` guard `!a.sl` — the key is already down: ignore the
+        // duplicate edge (no second Tap row).
+        if (held_keys_.count(key) != 0) return;
+        // JS `Sgb` -> `zd.clear()` (L688): a new press clears the stale
+        // `released` rows (holds are rebuilt below by `rebuild_holds`).
+        keys_.erase(std::remove_if(keys_.begin(), keys_.end(),
+                                   [](const key_input& k) {
+                                       return k.press == press_type::release;
+                                   }),
+                    keys_.end());
         keys_.push_back({key, press_type::tap});
         int taps = 0;
         for (const key_input& k : keys_) {

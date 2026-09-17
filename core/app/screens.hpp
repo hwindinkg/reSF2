@@ -282,12 +282,11 @@ public:
     // (the stretched/on-screen check). Defined in screens.cpp.
     void verify_fight() const;
 
-    // The between-rounds HUD "Next" button (JS `vhb` L410 case 1): the
-    // fight holds in EndStance until the player confirms the next round.
-    // `round_wait()` mirrors FightController::round_wait(); the button is
-    // drawn + clickable only while it is true. `next_button_center` returns
-    // the button's screen center (the position render_impl draws it at) —
-    // the headless-loop driver injects its click there.
+    // The between-rounds gate (there is NO Next button — the JS round
+    // auto-advances): true from a round's end until the break plate
+    // (`Cr.tca` L2023) expires into `FNa`. The on-screen gamepad is hidden
+    // while it is true (JS `Ta.XF(!1)`), and the headless drivers' tap
+    // target (`next_button_center`) is the inert (0,0).
     bool round_wait() const;
     void next_button_center(float& cx, float& cy) const;
 
@@ -340,9 +339,8 @@ private:
 
     // --- round banner (JS `Cr` L2021-2026 — presentation only) -----------
     // The current banner's kind + the fight frame it was raised at (the
-    // screen-side age drives the hold-forever VICTORY/DEFEAT pop-in — the
-    // controller's banner_progress() divides by banner_len_, which is 1e9
-    // for those, so their controller progress stays ~0).
+    // screen-side age drives the pop-in of the VICTORY/DEFEAT plates, which
+    // have no `Cr.fu` timer).
     int banner_kind_seen_ = 0;      // banner_kind as int (0 = none)
     int banner_start_frame_ = 0;    // fight_->frame() when the banner changed
 

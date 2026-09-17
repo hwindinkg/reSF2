@@ -771,6 +771,19 @@ enum class fight_phase : int {
 // JS `Sf`'s round.png labels + the KO slow-mo). A pure PRESENTATION state:
 // the banner machine never touches the fight simulation (the pose dump is
 // byte-identical with or without it).
+// The center-screen banner (JS class `Cr` L2022-2027 — the HUD banner
+// state machine with its `type` field):
+//   - `round` = JS type 2 (`Cr.tca` L2023, `fu(1.666)` + a 500 ms arm
+//     delay): the between-rounds ROUND N plate. Its expiry -> `FNa` (L409)
+//     through `ca.vhb` (L410) case 2.
+//   - `fight` = the FIGHT! plate. The traced JS takes the
+//     `Da.type == "FightNone"` branch of `kg` (L387: `this.xF(2)` straight
+//     from the stance end — `oracle_pose.jsonl` shows `phase` 1 -> 2 at
+//     f=134), so this plate is display-only for the port's fight; its hold
+//     is the JS standard `fu(1.166)` (`Cr.Zy` L2024).
+//   - `ko` = the finish plate (JS `Cr.GZ` L2024 type 6/7, `fu(1.166)`).
+//   - `victory`/`defeat` = the battle end, no timer (the results screen
+//     takes over).
 enum class banner_kind : int {
     none = 0,   // no banner
     round,      // "ROUND N" — the round-start intro
@@ -778,6 +791,16 @@ enum class banner_kind : int {
     ko,         // "K.O." — a fighter was KO'd (with the slow-mo)
     victory,    // "VICTORY" — the player won the battle
     defeat,     // "DEFEAT" — the player lost the battle
+};
+
+// The banner's pending action — the JS `ca.vhb` (L410) dispatch on the
+// banner type, plus the port's stand-in for the JS end-stance animation
+// gate (`h4a` -> `Ewb` -> `h9`, L387/L404).
+enum class banner_action : int {
+    none = 0,     // display only (`vhb` has no case for the type; the first
+                  // round's plate, the FIGHT! plate, victory/defeat)
+    begin_round,  // JS type 2 -> `vhb` case 2 -> `FNa` (L409): phase 1
+    next_round,   // the round-end hold -> `NA()` + `Z2()` (L411/L414/L408)
 };
 
 // How a round ended (JS `ey` 0-6; the demo fight uses KO=0 and
@@ -869,6 +892,12 @@ struct FightFighter {
     float max_hp = 0.0f;      // `parameters.Zn`
     int rounds_won = 0;       // `parameters.ng` — rounds won
     bool is_winner = false;   // `zd` — the round/battle winner flag
+    // `kh` — the round-over latch (JS `E3a` L413 `a.kh=!0;b.kh=!0`). The
+    // per-frame attack pass is gated on the PLAYER's flag
+    // (JS `ca.Hnb` L389 `if(!this.kc.kh){...}`) and cleared at the
+    // between-round recovery (`NA` L414 `c.parameters.kh=!1`) + the round
+    // advance (`Z2` L409).
+    bool kh = false;
     sf2::scene::ShockState shock;  // pain/shock/disarm (`sr/vc/sn/Wx/ws`, L490)
     StyleMeter style;  // HUD style meter (`Gr`, feeds prize b6 via best)
     sf2::scene::Vec3 jg{1.0f, 1.0f, 1.0f};  // impulse scale (`wd.JG`;
@@ -1293,12 +1322,10 @@ public:
     int phase() const { return static_cast<int>(phase_); }
     const RoundState& round() const { return round_; }
     bool battle_over() const { return battle_over_; }
-    // JS `vhb` (L410) case 1 -> `Z2()`: the HUD "Next" button. When a round
-    // has ended and the host is waiting between rounds (round_wait_), runs
-    // the recovery and starts the next round. No-op while a round is live.
-    void next_round_requested();
-    // JS: the between-round wait gate — true after a round ends until the
-    // player requests the next round (the HUD Next button / `vhb` L410).
+    // JS: the between-round gate — true from a round's end until the
+    // round-break banner (`Cr.tca` L2023) expires into `FNa` (phase 1).
+    // The round auto-advances (`Onb` L411 `ZK(); NA(); Z2()`); there is NO
+    // host "Next" button in the JS (the old click rect was an invention).
     bool round_wait() const { return round_wait_; }
     // The battle winner (null until the battle ends).
     const FightFighter* winner() const { return winner_; }
@@ -1379,11 +1406,12 @@ private:
     // first-strike side, set on the battle's first landed hit (else none).
     bool battle_first_hit_ = false;  // any hit landed yet this battle
     bool battle_first_by_player_ = false;
-    bool round_wait_ = false;      // JS: the host waits for the player's
-                                   // Next between rounds (vhb L410 -> Z2)
+    bool round_wait_ = false;      // JS: between a round's end and `FNa`
+                                   // (the round-break banner holds it)
     // The StartStance input buffer (JS `wd.WC` L426 + `llb` L429): ONE slot
-    // - the LAST press during phase 1 (StartStance) wins; it is replayed
-    // when the fight starts (enter_fight) as if the player pressed now.
+    // - the FIRST press during phase 1 (StartStance) wins (JS `N0a` L426
+    // `b.WC==-1&&(b.WC=a)`); it is replayed when the fight starts
+    // (enter_fight) as if the player pressed now.
     sf2::scene::key_type start_buffer_key_ = sf2::scene::key_type::up;
     bool start_buffer_filled_ = false;
     // JS `Cl.ia` one-shot (`dW`, L566-567): last-tested (move, interval)
@@ -1395,11 +1423,21 @@ private:
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
     int start_stance_frames_ = 0;  // phase 1 hold counter
     int end_stance_frames_ = 0;    // phase 3 hold (the FIGHT!/KO banner)
-    // --- the banner machine (presentation only — see banner_kind) ---------
-    banner_kind cur_banner_ = banner_kind::none;
-    int banner_start_ = 0;        // frame_ when the banner was raised
-    int banner_len_ = 0;          // hold length in frames (0 = not timed)
-    int banner_round_ = 0;       // the ROUND N number (banner_round_+1 shown)
+    // --- the banner machine (JS class `Cr` L2022-2027) --------------------
+    // `Cr.Sc` is a SECONDS countdown and `Cr.wU` the arm flag:
+    //   `fu(a){this.Sc=a;this.X(!0);this.wU=!0;...}` (L2026)
+    //   `aa(a){...!this.pause&&this.wU&&(this.Sc-=a,this.Sc<=0&&this.ONa())}`
+    //   `ONa(){this.X(!1);this.wU=!1;this.yA.Z(this.type)}` (L2026)
+    // `Cr.tca` (L2023) additionally holds `wU` false for a 500 ms
+    // `wh.delay` before the countdown starts.
+    banner_kind cur_banner_ = banner_kind::none;   // JS `Cr.type`
+    float banner_time_ = 0.0f;     // JS `Cr.Sc` — hold remaining, SECONDS
+    float banner_total_ = 0.0f;    // `Cr.Sc` at `fu` time (progress source)
+    bool banner_armed_ = false;    // JS `Cr.wU` — the countdown is running
+    float banner_arm_delay_ = 0.f; // JS `wh.delay(...,500)` — the 500 ms arm
+    banner_action banner_action_ = banner_action::none;  // the `vhb` dispatch
+    int banner_start_ = 0;         // frame_ when the banner was raised
+    int banner_round_ = 0;        // the ROUND N number (banner_round_+1 shown)
     // The visual effects layer (hit sparks) — presentation only.
     EffectSystem fx_;
     // The magic/effect containers (JS `tl.Rf` = `Gq`/`Hq`, L842-844): the
@@ -1450,9 +1488,19 @@ private:
     void set_phase(fight_phase p);
     // JS `tx` (L407): round init (timer = round length, Vt = false).
     void round_init();
-    // JS `Z2` (L408-409): round start — increments the round counter,
-    // re-syncs the fighters, enters phase 1.
+    // JS `tx` (L407) / `Z2` (L408-409): the AUTOMATIC round advance. Raised
+    // by the round-end epilogue (`Onb` L411 `NA(); Z2()`) and by the
+    // round-plate chain `ca.tx` -> `Cr.wca` (L2023) -> `ONa` (L2026) ->
+    // `vhb` (L410) case 1. Increments the round counter, applies the
+    // round resets and raises the round-break banner (`Cr.tca` L2023).
     void round_start();
+    // --- the banner machine (JS class `Cr` L2022-2027) --------------------
+    // JS `Cr.fu` (L2026): raise a banner and start its `Sc` countdown.
+    void banner_show(banner_kind kind, float seconds, banner_action action,
+                     bool arm_after_delay);
+    void banner_tick(float dt);   // JS `Cr.aa` (L2027)
+    void banner_expire();         // JS `Cr.ONa` (L2026) + the `ca.vhb` (L410)
+                                  // dispatch carried by `banner_action_`
     // JS `FNa` (L409) / `Rkb` (L410) / `i4a` (L409): the phase transitions.
     void enter_start_stance();
     void enter_fight();

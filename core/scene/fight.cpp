@@ -38,6 +38,19 @@ constexpr int kFlashFramesBlock = 24;     // L731 "block" = 24
 constexpr float kFlashTimeCrit = 1.0f / 60.0f;
 constexpr float kFlashTimeNormal = 1.0f / 120.0f;
 
+// The banner machine timings (JS class `Cr` L2022-2027 — all in SECONDS:
+// `Cr.fu(a){this.Sc=a;...}` L2026). The old port used invented frame counts
+// (60 / 40 / 90).
+constexpr float kJsBannerRoundBreakSeconds = 1.666f;  // `Cr.tca` L2023 fu(1.666)
+constexpr float kJsBannerArmDelaySeconds = 0.5f;      // `Cr.tca` L2023
+                                                      // `wh.delay(...,500)`
+constexpr float kJsBannerHoldSeconds = 1.166f;        // `Cr.Zy`/`Cr.GZ` L2024
+// The phase-1 StartStance hold. The oracle trace (`oracle_pose.jsonl`)
+// shows `phase` 1 -> 2 at f=134, so phase 1 is 133 port frames (phase 2
+// starts on frame 133 of the port's 1-based counter, matching the oracle's
+// 0-based 134).
+constexpr int kStartStanceFrames = 133;
+
 // [fx] Latch a fighter's current strike-capsule endpoints (`HitCapsule.r1/r2`
 // = JS `sx.ma`/`Zs.ma`) into `prev_cap_ends` (= JS `sx.mf`/`Zs.mf`). Called
 // once per tick AFTER the hit pass, so the next frame's `apply_hit` reads the
@@ -293,16 +306,23 @@ void FightController::init_locks(
     round_.number = 0;
     round_init();
     enter_start_stance();
-    // The FIRST round's ROUND 1 banner. round_start() — which raises it for
-    // rounds 2+ — is NOT called for the first round (init enters
-    // start_stance directly with round_.number = 0), so raise it here.
+    // The FIRST round's ROUND 1 plate (`Cr.tca` L2023: type 2, `fu(1.666)`,
+    // armed after a 500 ms `wh.delay`). `round_start()` — which raises it
+    // for rounds 2+ through the `Z2` path — is NOT called for the first
+    // round (init enters start_stance directly with round_.number = 0), so
+    // raise it here. DISPLAY ONLY (`banner_action::none`): there is no
+    // preceding `Z2` to dispatch, so the expiry must not re-run `FNa`.
     // Presentation only; round_.number stays 0 (the pose dump's "round"
     // field is byte-identical).
     cur_banner_ = banner_kind::round;
-    banner_round_ = round_.number;   // 0 -> "ROUND 1"
+    banner_time_ = kJsBannerRoundBreakSeconds;
+    banner_total_ = kJsBannerRoundBreakSeconds;
+    banner_armed_ = false;                       // `tca` clears `wU` ...
+    banner_arm_delay_ = kJsBannerArmDelaySeconds;  // ... until the 500 ms delay
+    banner_action_ = banner_action::none;
     banner_start_ = frame_;
-    banner_len_ = 60;
-    std::fprintf(stdout, "[fight] banner: ROUND %d\n", banner_round_ + 1);
+    banner_round_ = round_.number;   // 0 -> "ROUND 1"
+    std::fprintf(stdout, "[fight] banner: ROUND %d (F%d)\n", banner_round_ + 1, frame_);
     std::fflush(stdout);
 }
 
@@ -1157,12 +1177,17 @@ void FightController::round_init() {
     end_stance_frames_ = 0;
 }
 
-// JS `Z2` (L408-409): round start — increments the round counter, re-syncs
-// the fighters and enters phase 1 (StartStance).
+// JS `Z2` (L408-409): the AUTOMATIC round advance. Reached from the
+// round-end epilogue (JS `Onb` L411 else branch: `ZK(); NA(); Z2()`) and
+// from the round plate chain `ca.tx` (L407) -> `Ar.wca` (L2019) ->
+// `Cr.wca` (L2023, `type=1; ONa()`) -> `ca.vhb` (L410) case 1 -> `Z2()`.
+// The JS increments the round, re-syncs everything, raises the ROUND N
+// break plate (`this.ha.tca(this.round.round,!1)`) whose expiry calls
+// `FNa()` (phase 1, L409). No host click exists anywhere in this path.
 void FightController::round_start() {
     // Snapshot the pre-round HP (JS Pm/vo) — the recovery is applied in
     // between_rounds_recover() when the previous round ends.
-    round_.number++;
+    round_.number++;   // JS `this.round.round++` (L409)
     round_init();
     // JS `IKa` L417 / ctor `F1` (L381): the rule pass runs at round SETUP,
     // before the StartStance, so `Iga` (InvertJoystick) is already live for
@@ -1187,22 +1212,42 @@ void FightController::round_start() {
     // sides — live timed mods do NOT persist across rounds).
     setup_bus(perk_setup_);
     dga_ = false;  // JS `Dga` reset per round (L409)
-    // JS `wd.wI` per-round re-init: `Wx=-1`, `sr=0` (`vc`/`sn` persist).
+    // JS `Z2` (L409): `this.Iga=this.kh=this.Dga=this.JJ=!1; this.ey=0;
+    // this.Pu=null; this.m$=!1;` — the per-fighter round-over latch `kh`
+    // (latched by `E3a` L413) is cleared for the new round.
+    player_.kh = false;
+    enemy_.kh = false;
+    // JS `wd.wI` per-round re-init: `Wx=-1`, `sr=0`; PLUS the shock/disarm
+    // latches `vc`/`sn`, which the JS clears at every round boundary
+    // (`NA` L414 `c.sn=!1;c.vc=!1` and the per-fighter `Z2` ->
+    // `Mtb(){this.vc=!1}` via `MHa` L409). The old port comment claiming
+    // `vc`/`sn` persist across rounds was WRONG.
     player_.shock.pain_sr = 0.0f;
     player_.shock.weapon_wx = -1;
+    player_.shock.shocked_vc = false;
+    player_.shock.disarm_sn = false;
     enemy_.shock.pain_sr = 0.0f;
     enemy_.shock.weapon_wx = -1;
-    // The ROUND N banner (presentation only — see banner_kind).
-    cur_banner_ = banner_kind::round;
-    banner_round_ = round_.number;
-    banner_start_ = frame_;
-    banner_len_ = 60;
-    std::fprintf(stdout, "[fight] banner: ROUND %d\n", banner_round_ + 1);
-    std::fflush(stdout);
+    enemy_.shock.shocked_vc = false;
+    enemy_.shock.disarm_sn = false;
     // Reset the round flags on the fighters (JS `c.parameters.nob()`).
     player_.fighter.set_enemy_x(enemy_.fighter.world_x());
     enemy_.fighter.set_enemy_x(player_.fighter.world_x());
-    enter_start_stance();
+    // JS `ha.tca(this.round.round, !1)` (L409) -> `Cr.tca` (L2023): type 2,
+    // `fu(1.666)`, `wU` cleared and re-armed by the 500 ms `wh.delay`. The
+    // expiry dispatches through `ca.vhb` (L410) case 2 -> `FNa` (phase 1).
+    cur_banner_ = banner_kind::round;
+    banner_time_ = kJsBannerRoundBreakSeconds;      // JS `fu(1.666)`
+    banner_total_ = kJsBannerRoundBreakSeconds;
+    banner_armed_ = false;                          // `tca` clears `wU` ...
+    banner_arm_delay_ = kJsBannerArmDelaySeconds;   // ... for 500 ms
+    banner_action_ = banner_action::begin_round;    // vhb case 2 -> `FNa`
+    banner_start_ = frame_;
+    banner_round_ = round_.number;
+    std::fprintf(stdout, "[fight] banner: ROUND %d (F%d)\n", banner_round_ + 1, frame_);
+    std::fflush(stdout);
+    // NOTE: phase 1 does NOT start here — the JS `FNa` (L409) runs when the
+    // break plate expires (`banner_expire`), exactly as `vhb` case 2 does.
 }
 
 // JS `FNa` (L409): phase 1 — fighters at their spawn, no input yet.
@@ -1226,6 +1271,7 @@ void FightController::enter_start_stance() {
     start_stance_done_ = false;
     start_stance_frames_ = 0;   // reset so every round re-plays the intro
     start_buffer_filled_ = false;  // fresh round, empty round-start buffer
+    round_wait_ = false;   // the break plate expired -> the round is running
 }
 
 // JS `Rkb` (L410): phase 2 — the round goes live (HUD play() sets
@@ -1403,12 +1449,21 @@ void FightController::apply_round_result(round_result result, const FightFighter
     w.is_winner = true;
     l.is_winner = false;
 
-    // The K.O. banner on a knockout round end (presentation only).
+    // JS `E3a` (L413): `a.kh=!0; b.kh=!0;` — both fighters latch the
+    // round-over flag, which gates the attack pass in `ca.Hnb` (L389).
+    player_.kh = true;
+    enemy_.kh = true;
+
+    // The K.O. finish plate (JS `Cr.GZ` L2024, type 6/7, `fu(1.166)`).
+    // `GZ` has no `ca.vhb` (L410) case, so its expiry does NOT dispatch —
+    // but the port uses it as the end-stance hold: JS advances the round
+    // when the end-stance animation finishes (`kg` L387 `h4a` -> `Ewb`
+    // L404 -> `h9` -> `Onb` L411 `ZK(); NA(); Z2()`), and the port has no
+    // end-stance clip, so the plate's `fu(1.166)` hold stands in for it.
     if (result == round_result::ko) {
-        cur_banner_ = banner_kind::ko;
-        banner_start_ = frame_;
-        banner_len_ = 90;
-        std::fprintf(stdout, "[fight] banner: K.O.\n");
+        banner_show(banner_kind::ko, kJsBannerHoldSeconds,
+                    banner_action::next_round, false);
+        std::fprintf(stdout, "[fight] banner: K.O. (F%d)\n", frame_);
         std::fflush(stdout);
     }
 
@@ -1417,25 +1472,22 @@ void FightController::apply_round_result(round_result result, const FightFighter
 
     // Battle end: the winner reached `round.eL` (Rounds) — JS Onb
     // `a = wo.nB.ng >= round.eL` -> `a ? bea(nB)`.
-    const bool battle_end = w.rounds_won >= round_.length;    if (battle_end) {
+    const bool battle_end = w.rounds_won >= round_.length;
+    if (battle_end) {
         end_battle(w);
-    } else {
-        // JS `Onb` (L411-412): the next round does NOT start automatically —
-        // the round ends into EndStance and the HOST waits for the player's
-        // "Next" (JS: the HUD button -> `vhb` case 1 -> `Z2()`). The
-        // recovery + round start happen in next_round_requested().
+    } else if (cur_banner_ == banner_kind::ko) {
+        // The K.O. plate holds the break (see above); its expiry runs
+        // `NA()` + `Z2()` through `banner_expire`.
         round_wait_ = true;
+    } else {
+        // JS `Onb` (L411) else branch: `this.Ta.XF(!1), this.ZK(),
+        // this.NA(), this.Z2()` — the next round starts AUTOMATICALLY.
+        // There is no host "Next" button in the JS; the round-break plate
+        // raised by `Z2` (`Cr.tca` L2023) holds the round until `FNa`.
+        round_wait_ = true;
+        between_rounds_recover();   // JS `NA` (L414)
+        round_start();              // JS `Z2` (L408) via `tx`/`wca`/`vhb`
     }
-}
-
-// JS `vhb` (L410) case 1 -> `Z2()` (L408): the HUD "Next" button pressed —
-// when the host is waiting between rounds, run the recovery and start the
-// next round. No-op while a round is live.
-void FightController::next_round_requested() {
-    if (!round_wait_) return;
-    round_wait_ = false;
-    between_rounds_recover();
-    round_start();
 }
 
 // JS `bea` (L413): the battle end — the winner is fixed, the fight stops.
@@ -1444,23 +1496,24 @@ void FightController::end_battle(const FightFighter& winner) {
     winner_ = &winner;
     round_.running = false;
     round_live_ = false;
+    round_wait_ = false;
     // The final banner: VICTORY for the player's win, DEFEAT for the loss
-    // (presentation only; effectively forever — the results screen takes
-    // over).
-    cur_banner_ = winner.is_player ? banner_kind::victory : banner_kind::defeat;
-    banner_start_ = frame_;
-    banner_len_ = 1000000000;
+    // (presentation only; no `fu` timer — the results screen takes over).
+    banner_show(winner.is_player ? banner_kind::victory : banner_kind::defeat,
+                0.0f, banner_action::none, false);
     // JS `tl.fB` (L844) / `ca.kD`: the effect containers drain at the battle
     // end (`fB()` -> `Gq.fB()`/`Hq.fB()`).
     magic_fx_.clear();
-    std::fprintf(stdout, "[fight] banner: %s\n",
-                 winner.is_player ? "VICTORY" : "DEFEAT");
+    std::fprintf(stdout, "[fight] banner: %s (F%d)\n",
+                 winner.is_player ? "VICTORY" : "DEFEAT", frame_);
     std::fflush(stdout);
 }
 
 // JS `NA` (L414): the between-round recovery. The game heals BOTH fighters
 // by `Da.qDa` (HealthRecovery, default 1) — `c.jT(this.Da.qDa)` — so the
 // fighters keep their damaged HP between rounds (NOT a full reset).
+// It also clears the per-fighter round latches: `c.sn=!1; c.vc=!1; ...
+// c.kh=!1` — the disarm/shock latches do NOT survive a round boundary.
 void FightController::between_rounds_recover() {
     const float recover = battle_.health_recovery;
     player_.hp = std::min(player_.max_hp, player_.hp + recover);
@@ -1468,6 +1521,11 @@ void FightController::between_rounds_recover() {
     // Reset the round flags (JS NA: zd/br/cE/kh/sn/sJ/pw/Iq).
     player_.is_winner = false;
     enemy_.is_winner = false;
+    for (FightFighter* f : {&player_, &enemy_}) {
+        f->shock.disarm_sn = false;    // `sn`
+        f->shock.shocked_vc = false;   // `vc`
+        f->kh = false;                 // `parameters.kh`
+    }
 }
 
 // JS `vfa` (L413): the round winner by HP.
@@ -2128,11 +2186,13 @@ void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_t
         }
     }
     // JS `ca.N0a` (L426): in phase 1 (StartStance) a PRESS goes into the
-    // round's single-slot input buffer `WC` (the last press wins; it is
-    // replayed by `llb` when the fight starts). In phase 2 the press is
-    // buffered into the fighter directly (`eu==2 && b.yJa(a)`).
+    // round's single-slot input buffer `WC` — `this.eu==1 ?
+    // b.WC==-1&&(b.WC=a) : ...` — so the FIRST press of the phase wins and
+    // later presses are ignored. It is replayed by `llb` when the fight
+    // starts. In phase 2 the press is buffered into the fighter directly
+    // (`eu==2 && b.yJa(a)`).
     if (phase_ == fight_phase::start_stance) {
-        if (press == press_type::tap) {
+        if (press == press_type::tap && !start_buffer_filled_) {
             start_buffer_key_ = key;
             start_buffer_filled_ = true;
         }
@@ -2937,12 +2997,83 @@ const char* FightController::banner_text() const {
 }
 
 // The banner's progress through its hold, clamped to 0..1 (for the
-// fade/scale-in; the victory/defeat banner holds at 1.0 forever).
+// fade/scale-in; the victory/defeat banner has no timer and holds at 1.0).
+// JS `Cr.Sc` counts DOWN from the `fu` value, so the progress is the
+// elapsed fraction of that value (`banner_total_`).
 float FightController::banner_progress() const {
-    if (banner_len_ <= 0) return 1.0f;
-    const float p = static_cast<float>(frame_ - banner_start_) /
-                    static_cast<float>(banner_len_);
+    if (banner_total_ <= 0.0f) return 1.0f;
+    const float p = (banner_total_ - banner_time_) / banner_total_;
     return std::max(0.0f, std::min(1.0f, p));
+}
+
+// JS `Cr.fu` (L2026): `this.Sc=a; this.X(!0); this.wU=!0; this.thb.Z(type)`.
+// `Cr.tca` (L2023) then clears `wU` and schedules a 500 ms `wh.delay` that
+// re-arms it, so the round-break plate passes `arm_after_delay = true`.
+void FightController::banner_show(banner_kind kind, float seconds,
+                                  banner_action action, bool arm_after_delay) {
+    cur_banner_ = kind;       // JS `Cr.type`
+    banner_time_ = seconds;   // JS `Cr.Sc`
+    banner_total_ = seconds;
+    banner_armed_ = !arm_after_delay;  // `fu` arms; `tca` clears it again
+    banner_arm_delay_ = arm_after_delay ? kJsBannerArmDelaySeconds : 0.0f;
+    banner_action_ = action;
+    banner_start_ = frame_;
+}
+
+// JS `Cr.aa` (L2027): `!this.pause && this.wU && (this.Sc -= a,
+// this.Sc <= 0 && this.ONa())`. `Sc` is a SECONDS countdown (the old port
+// used invented frame counts). `Cr.pause` is the HUD pause flag; the whole
+// fight update is frozen while paused, so it is always false here.
+void FightController::banner_tick(float dt) {
+    if (banner_arm_delay_ > 0.0f) {
+        banner_arm_delay_ -= dt;
+        if (banner_arm_delay_ > 0.0f) return;
+        banner_arm_delay_ = 0.0f;
+        banner_armed_ = true;   // the `wh.delay(...,500)` callback fired
+    }
+    if (!banner_armed_) return;
+    banner_time_ -= dt;
+    if (banner_time_ <= 0.0f) banner_expire();
+}
+
+// JS `Cr.ONa` (L2026): `this.X(!1); this.wU=!1; this.yA.Z(this.type)`.
+// `Ar.E1` (L2017) wires that vector to `Ar.ZHa` (L2020), which clears the
+// plate and re-fires `Ar.yA` — where `ca.ggb` (L383) registered `ca.vhb`
+// (L410): `switch(this.ha.lp()){case 1:this.Z2(); case 2:case 3:this.FNa();
+// case 5:this.Rkb()}` (`Ar.lp` L2017 = `this.Se.type`). The port carries
+// the same dispatch in `banner_action_` because its `banner_kind` values are
+// NOT the JS type numbers.
+void FightController::banner_expire() {
+    const banner_kind kind = cur_banner_;
+    const banner_action action = banner_action_;
+    cur_banner_ = banner_kind::none;
+    banner_time_ = 0.0f;
+    banner_armed_ = false;
+    banner_arm_delay_ = 0.0f;
+    banner_action_ = banner_action::none;
+    const char* what = kind == banner_kind::round ? "ROUND"
+                       : kind == banner_kind::fight ? "FIGHT"
+                       : kind == banner_kind::ko ? "K.O."
+                       : kind == banner_kind::victory ? "VICTORY"
+                       : kind == banner_kind::defeat ? "DEFEAT" : "none";
+    std::fprintf(stdout, "[fight] banner expiry: %s (F%d)\n", what, frame_);
+    std::fflush(stdout);
+    switch (action) {
+        case banner_action::begin_round:
+            // JS `vhb` (L410) case 2/3 -> `FNa` (L409): phase 1.
+            enter_start_stance();
+            break;
+        case banner_action::next_round:
+            // The port's stand-in for the JS end-stance gate
+            // (`kg` L387 -> `h4a` L413 -> `Ewb` L404 -> `h9` -> `Onb`
+            // L411): `ZK(); NA(); Z2()` — the round AUTO-advances.
+            between_rounds_recover();
+            round_start();
+            break;
+        case banner_action::none:
+        default:
+            break;
+    }
 }
 
 // JS `ca.Ea` (L385) + `ia` (L388): the per-frame fight update.
@@ -2974,26 +3105,17 @@ void FightController::update(float dt) {
     player_.reaction_fall = false;
     enemy_.reaction_fall = false;
 
-    // The banner countdown (PRESENTATION ONLY). JS `Cr.aa` (`sf2.502f0946.js`
-    // L2027) ticks the banner timer EVERY frame — `!this.pause && this.wU &&
-    // (this.Sc -= a, this.Sc <= 0 && this.ONa())` — it is NOT phase-gated:
-    // the total banner life is 1.666 s (`fu(1.666)` L2023 = 100 frames at
-    // 60 Hz, modelled here as ROUND N 60f + FIGHT! 40f), which already
-    // expires inside phase 1 (the JS phase 1 is 203 frames long). The old
-    // code ran this machine only inside `case fight_phase::fight`, so the
-    // ROUND banner overstayed the whole 133-frame phase 1 and FIGHT! spilled
-    // into phase 2 (F133-173), polluting the fight captures.
-    if (cur_banner_ == banner_kind::round && frame_ - banner_start_ >= banner_len_) {
-        cur_banner_ = banner_kind::fight;
-        banner_start_ = frame_;
-        banner_len_ = 40;
-        std::fprintf(stdout, "[fight] banner: FIGHT!\n");
-        std::fflush(stdout);
-    } else if (cur_banner_ == banner_kind::fight &&
-               frame_ - banner_start_ >= banner_len_) {
-        cur_banner_ = banner_kind::none;
-        banner_len_ = 0;
-    }
+    // The banner countdown — JS `Cr.aa` (`sf2.502f0946.js` L2027):
+    // `!this.pause && this.wU && (this.Sc -= a, this.Sc <= 0 && this.ONa())`.
+    // `Sc` is SECONDS and the machine is NOT phase-gated. In the JS it runs
+    // at the END of the fight update (`ca.ia` L389 ends with
+    // `this.Onb(); a=this.ha; a!=null&&a.ia()`), so the tick sits after the
+    // phase switch below: an expiry that dispatches `FNa`/`Rkb`/`Z2` takes
+    // effect on the next frame, exactly as in the JS.
+    // (The old port used invented 60/40-frame holds and chained ROUND N ->
+    // FIGHT! here; both are gone — the plates are raised by their JS
+    // callers: the round-break plate by `Z2`/init, the FIGHT! plate when
+    // the stance ends.)
 
     // The phase machine.
     switch (phase_) {
@@ -3016,7 +3138,19 @@ void FightController::update(float dt) {
             ++start_stance_frames_;
             update_fighter(player_, enemy_, dt);
             update_fighter(enemy_, player_, dt);
-            if (start_stance_frames_ >= 133) {
+            if (start_stance_frames_ >= kStartStanceFrames) {
+                // JS `kg` (L387): `this.eu==1 && a` (the stance clip
+                // finished) -> `this.Da.type!="FightNone" ? this.Am() :
+                // this.xF(2)`. `Am()` raises the FIGHT! plate (`Cr.Zy`
+                // L2024, `fu(1.166)`) and only its expiry (`vhb` L410 case
+                // 5) calls `Rkb`. The traced configuration takes the
+                // `xF(2)` branch — `oracle_pose.jsonl` shows `phase` 1 -> 2
+                // at f=134 — so the port enters phase 2 here and shows the
+                // plate for the same JS `fu(1.166)` hold (display only).
+                banner_show(banner_kind::fight, kJsBannerHoldSeconds,
+                            banner_action::none, false);
+                std::fprintf(stdout, "[fight] banner: FIGHT! (F%d)\n", frame_);
+                std::fflush(stdout);
                 enter_fight();
             }
             break;
@@ -3032,31 +3166,37 @@ void FightController::update(float dt) {
             update_fighter(player_, enemy_, dt);
             update_fighter(enemy_, player_, dt);
 
-            // Hit detection + damage (JS `ca.Enb` + `Cgb`).
-            const sf2::scene::MoveDef* p_move = player_.fighter.current_move();
-            const sf2::scene::MoveDef* e_move = enemy_.fighter.current_move();
-            const sf2::scene::Interval* hit_iv = nullptr;
-            sf2::scene::HitCapsule hit_cap;
-            sf2::scene::CapsuleHit ch;
-            const sf2::scene::HitCapsule* atk_cap = nullptr;
-            bool hit_player = false, hit_enemy = false;
-            if (p_move != nullptr &&
-                hza_pick(enemy_, *p_move, player_.fighter.move_frame()) != nullptr) {
-                hit_enemy = hit_test(player_, enemy_, *p_move, player_.fighter.move_frame(),
-                                     hit_cap, ch, hit_iv, atk_cap);
-            }
-            if (e_move != nullptr && !hit_enemy &&
-                hza_pick(player_, *e_move, enemy_.fighter.move_frame()) != nullptr) {
-                hit_player = hit_test(enemy_, player_, *e_move, enemy_.fighter.move_frame(),
-                                      hit_cap, ch, hit_iv, atk_cap);
-            }
-            if (hit_iv != nullptr) {
-                if (hit_enemy) {
-                    apply_hit(player_, enemy_, *p_move, *hit_iv, hit_cap, ch, frame_,
-                              atk_cap);
-                } else {
-                    apply_hit(enemy_, player_, *e_move, *hit_iv, hit_cap, ch, frame_,
-                              atk_cap);
+            // Hit detection + damage (JS `ca.Enb` + `Cgb`). Gated on the
+            // player's round-over latch `kh` exactly as `ca.Hnb` (L389):
+            // `if(!this.kc.kh) for(this.Enb(), this.Bg.Bx(), ...)` — once
+            // `E3a` (L413) latches the round over, no further hit test runs
+            // for the rest of the round.
+            if (!player_.kh) {
+                const sf2::scene::MoveDef* p_move = player_.fighter.current_move();
+                const sf2::scene::MoveDef* e_move = enemy_.fighter.current_move();
+                const sf2::scene::Interval* hit_iv = nullptr;
+                sf2::scene::HitCapsule hit_cap;
+                sf2::scene::CapsuleHit ch;
+                const sf2::scene::HitCapsule* atk_cap = nullptr;
+                bool hit_player = false, hit_enemy = false;
+                if (p_move != nullptr &&
+                    hza_pick(enemy_, *p_move, player_.fighter.move_frame()) != nullptr) {
+                    hit_enemy = hit_test(player_, enemy_, *p_move, player_.fighter.move_frame(),
+                                         hit_cap, ch, hit_iv, atk_cap);
+                }
+                if (e_move != nullptr && !hit_enemy &&
+                    hza_pick(player_, *e_move, enemy_.fighter.move_frame()) != nullptr) {
+                    hit_player = hit_test(enemy_, player_, *e_move, enemy_.fighter.move_frame(),
+                                          hit_cap, ch, hit_iv, atk_cap);
+                }
+                if (hit_iv != nullptr) {
+                    if (hit_enemy) {
+                        apply_hit(player_, enemy_, *p_move, *hit_iv, hit_cap, ch, frame_,
+                                  atk_cap);
+                    } else {
+                        apply_hit(enemy_, player_, *e_move, *hit_iv, hit_cap, ch, frame_,
+                                  atk_cap);
+                    }
                 }
             }
 
@@ -3084,6 +3224,12 @@ void FightController::update(float dt) {
             break;
         }
     }
+
+    // The banner countdown (JS `ca.ia` L389: `this.Onb(); a=this.ha;
+    // a!=null&&a.ia()` — the HUD tick that runs `Cr.aa`). It sits AFTER the
+    // phase machine, so a dispatch (`FNa`/`Rkb`/`Z2`) is applied from the
+    // next frame on — the JS ordering.
+    banner_tick(dt);
 
     // The camera follows the fight (JS ql.Ea -> tyb/dZa/c3a + ma.Sya).
     // JS `ql.tyb` (L363 + the L535/L581 `Dl.mea(a.Eu,b.Eu)`) targets the

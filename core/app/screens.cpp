@@ -836,14 +836,11 @@ HudBarDecay s_hud_enemy_decay_;
 sf2::audio::SpecialMeters s_regen_player_;
 sf2::audio::SpecialMeters s_regen_enemy_;
 
-// The between-rounds HUD "Next" button (JS `vhb` L410 case 1 -> `Z2()`):
-// center + size in screen coords. Drawn only while
-// FightController::round_wait(); a click (or Space/Enter, see on_key)
-// runs next_round_requested() (recovery + the next round).
-constexpr float kNextBtnCX = kViewW * 0.5f;
-constexpr float kNextBtnCY = kViewH * 0.6f;
-constexpr float kNextBtnW = 240.0f;
-constexpr float kNextBtnH = 80.0f;
+// The between-rounds "Next" button does NOT exist in the JS: the round
+// auto-advances (`ca.Onb` L411 `ZK(); NA(); Z2()`) and the HUD only shows
+// the round-break plate (`Cr.tca` L2023). The old `kNextBtn*` rect and its
+// click handler were an invention and are GONE; `next_button_center` now
+// reports the inert (0,0) so the non-owned headless drivers keep linking.
 
 // ---------------------------------------------------------------------------
 // On-screen gamepad geometry — [ORIGINAL] JS `Za.update()` (sf2.js L454-456)
@@ -3081,8 +3078,8 @@ const char* banner_atlas_frame(sf2::scene::banner_kind kind) {
 
 // The banner's animation envelope over `progress` (0..1): scale-in 0.5 -> 1.0
 // over the first 15%, hold at 1.0, fade out over the last 20%. The
-// victory/defeat banners hold forever (banner_len_ = 1e9 -> the controller's
-// progress stays ~0), so they pop in from the screen-tracked age and hold.
+// victory/defeat banners have no `Cr.fu` timer (banner_total_ = 0), so the
+// controller's progress is 1.0 and they pop in from the screen-tracked age.
 float banner_scale_at(float progress) {
     constexpr float kInEnd = 0.15f;  // scale-in window (first 15%)
     if (progress <= 0.0f) return 0.5f;
@@ -3110,9 +3107,8 @@ float banner_alpha_at(float progress) {
 // draw order).
 //
 // `banner_age` = fight frames since the banner was raised (tracked by the
-// FightScreen — the controller's banner_progress() divides by banner_len_,
-// which is 1e9 for the hold-forever VICTORY/DEFEAT banners, so their
-// controller progress stays ~0; the screen-side age drives their pop-in).
+// FightScreen — the hold-forever VICTORY/DEFEAT plates have no `Cr.fu`
+// timer, so the screen-side age drives their pop-in).
 void draw_fight_banner(App& app, const sf2::scene::FightController& fight, int banner_age) {
     const sf2::scene::banner_kind kind = fight.banner();
     if (kind == sf2::scene::banner_kind::none) return;
@@ -6652,16 +6648,9 @@ void FightScreen::on_key(int glfw_key, bool down) {
     // While paused, swallow every fight key (no sim input leak — the update
     // is frozen too, so buffered keys would otherwise fire on resume).
     if (paused_) return;
-    // Between rounds: Space (32) / Enter (257) = the HUD "Next" button (JS
-    // `vhb` L410 case 1) — a desktop alias, gated like the rest.
-    if (aliases && fight_ != nullptr && down && fight_->round_wait() &&
-        (glfw_key == 32 || glfw_key == 257)) {
-        sf2::audio::AudioEngine::instance().play("snd_click_1");
-        std::fprintf(stdout, "[fight] NEXT round requested (Space/Enter)\n");
-        std::fflush(stdout);
-        fight_->next_round_requested();
-        return;
-    }
+    // (The old Space/Enter "Next round" alias is GONE: the JS has no such
+    // binding — the round auto-advances through the banner machine, so a
+    // key that called `next_round_requested()` would double-advance.)
     // GLFW key codes -> the game's key_type, bound from the JS key map
     // `sc.OD` (`Af.oUa` L2472) — the ten keys in `key_type_for_glfw` above.
     // The desktop aliases (Left/Right/Up/Down/Space) are folded in only when
@@ -6717,8 +6706,14 @@ bool FightScreen::round_wait() const {
 }
 
 void FightScreen::next_button_center(float& cx, float& cy) const {
-    cx = kNextBtnCX;
-    cy = kNextBtnCY;
+    // There is NO Next button (see the header note): the JS round
+    // auto-advances. Report the inert (0,0) corner so the non-owned
+    // headless drivers' tap lands on no HUD/gamepad hit zone (the on-screen
+    // gamepad is bottom-left/bottom-right; the pause disc is at 640..708 x
+    // 117..185).
+    (void)fight_;
+    cx = 0.0f;
+    cy = 0.0f;
 }
 
 // [trace, Phase 0] Arms the FightController's per-frame pose dump (the
@@ -7214,24 +7209,12 @@ void FightScreen::update_impl(float dt) {
         std::fflush(stdout);
     }
 
-    // Between-rounds "Next" click rect (headless driver only): the fight
-    // holds in EndStance until next_round_requested(). The VISIBLE Next
-    // button was an invention and is removed (PORT_AUDIT_UI section 3 item
-    // 26); this invisible rect stays because the headless loop/tour clicks
-    // `next_button_center` (main.cpp) until the JS auto-advance (`Cr.tca`
-    // L2023) is ported into FightController — OPEN.
-    if (fight_->round_wait()) {
-        const App::PointerState& p = app().pointer();
-        if (p.pressed && p.x >= kNextBtnCX - kNextBtnW * 0.5f &&
-            p.x <= kNextBtnCX + kNextBtnW * 0.5f && p.y >= kNextBtnCY - kNextBtnH * 0.5f &&
-            p.y <= kNextBtnCY + kNextBtnH * 0.5f) {
-            sf2::audio::AudioEngine::instance().play("snd_click_1");
-            std::fprintf(stdout, "[fight] NEXT round requested (round %d done)\n",
-                         fight_->round().number);
-            std::fflush(stdout);
-            fight_->next_round_requested();
-        }
-    }
+    // There is NO between-rounds "Next" click rect. The JS round
+    // auto-advances through the banner machine (`ca.Onb` L411 `ZK(); NA();
+    // Z2()` -> `Cr.tca` L2023 -> `ca.vhb` L410 case 2 -> `FNa`); the old
+    // invisible rect (and its `snd_click_1`) was an invention and is
+    // DELETED. `round_wait()` is now only the break-window gate that hides
+    // the on-screen gamepad until `FNa`.
 
     // Battle end -> Results (JS `bea` L413 -> `v.kD` L622187 -> the
     // results; `qxa` L1213 pops back to the map).
@@ -7837,16 +7820,17 @@ void FightScreen::render_impl(App& app) {
 
     // The on-screen gamepad (JS `Za` virtual controls): the joystick
     // bottom-left + the punch/kick buttons bottom-right, drawn from the
-    // ui/controller atlas. Only while the round is live — the Next button
-    // replaces it between rounds (see the round_wait block below).
+    // ui/controller atlas. Hidden during the round-break window
+    // (`round_wait()`, JS `Ta.XF(!1)` until `FNa` shows it again).
     draw_gamepad(app);
 
-    // NOTE: the JS has NO between-rounds "NEXT" button (JS `ai`/`Cr` advances
-    // rounds with `Cr.tca` timers, L2023). The native Next button was
-    // INVENTED (PORT_AUDIT_UI §3 item 26) and is removed here. The keyboard
-    // path (Space/Enter -> next_round_requested, on_key) and the headless
-    // driver's `next_button_center` click rect (update_impl) remain until the
-    // JS auto-advance is ported into FightController — OPEN.
+    // The JS has NO between-rounds "NEXT" button (JS `Onb`/`Cr` advances
+    // rounds with the `Cr.tca` timers, L2023). The native Next button was
+    // INVENTED (PORT_AUDIT_UI §3 item 26); its click rect, its Space/Enter
+    // alias and the `snd_click_1` at the advance are now ALL removed — the
+    // auto-advance lives in FightController's banner machine
+    // (`round_start`/`banner_expire`). `next_button_center` reports (0,0)
+    // (no button).
     // Pause menu render (JS `Jn` button + `Ar.Qrb` overlay — display only).
     // Geometry mirrors update_impl.
     const bool live =
