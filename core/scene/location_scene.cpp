@@ -954,24 +954,33 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
         {
             const pugi::xml_node mv = layer_node.child("ModelsViewer");
             if (mv != nullptr) {
-                // [spawn-mapping] JS `Bf.zjb` L476 reads `Yia.x = PlayerPositionX`
-                // and `B_.x = EnemyPositionX`, but `ca` L381 assigns them the
-                // OTHER way round:
-                //   `a=this.kc.position; b=this.location.Yia; a.x=b.x; ...`
-                //   `a=this.Zb.position; b=this.location.B_;  a.x=b.x; ...`
-                // `kc` is the ENEMY warrior (`o1a` L403 `this.yb=this.Gf(this.kc)`
-                // -> trace id "Enemy") and `Zb` the PLAYER (`this.pb=this.Gf(this.Zb)`
-                // -> "Me"), so the XML's `PlayerPosition*` is the ENEMY's spawn and
-                // `EnemyPosition*` the PLAYER's. Confirmed against the oracle: the
-                // moon `ModelsViewer` has PlayerPositionX=868/EnemyPositionX=1068
-                // and the oracle trace has pb/Me root.x=1068, yb/Enemy root.x=868
-                // (reference/traces/_residual_pins.md §2). The old port kept the
-                // attribute names, which put the player on the wrong side — and so
-                // inverted every fighter's facing/mirror state.
-                player_spawn_x_ = sf2::data::xml_attr_float(mv, "EnemyPositionX", 0.0f);
-                player_spawn_y_ = sf2::data::xml_attr_float(mv, "EnemyPositionY", 0.0f);
-                enemy_spawn_x_ = sf2::data::xml_attr_float(mv, "PlayerPositionX", 0.0f);
-                enemy_spawn_y_ = sf2::data::xml_attr_float(mv, "PlayerPositionY", 0.0f);
+                // [spawn-mapping] JS `Bf.zjb` reads the ModelsViewer into
+                // `Yia`/`B_` VERBATIM:
+                //   `f=this.Yia; f.x=PlayerPositionX; f.y=PlayerPositionY;`
+                //   `f=this.B_;  f.x=EnemyPositionX;  f.y=EnemyPositionY;`
+                // JS `ca` L381 then spawns `this.kc.position = location.Yia`
+                // and `this.Zb.position = location.B_`. `kc` is the PLAYER:
+                // the fight factory (`static vJa(a,b,c)` L1208) builds it as
+                // `d = v.cw().clone()` and `e = v.EQ(a.Xs)`, and
+                // `cw()` (L1207) sets `a.qb=!0` (the PLAYER flag; `Wka` L1207
+                // sets `a.qb=!1` for every opponent), then `Yxa(a,b.G,c.G,d)`
+                // (L1209) calls `new ca(info, kc, pf, d)` whose ctor is
+                // `this.kc=b;this.pf=c` (L380). `o1a` L403 makes the fighter
+                // instances `this.yb=this.Gf(this.kc)` (PLAYER) and
+                // `this.pb=this.Gf(this.Zb)` (opponent, `Zb=pf[Rk]` L381).
+                // So `PlayerPosition*` IS the player's mark — there is no swap.
+                // Oracle confirmation (dojo Training, punchbag opponent):
+                // `reference/traces/oracle_pose.jsonl` places the 205-bone real
+                // fighter on `FistsStartStance-Left` at x=690 = PlayerPositionX
+                // and the 15-bone `PhysicalDummy` at x=972.95 = EnemyPositionX.
+                // `reference/www/trace.js` labels `fight.pb` as "Me" and
+                // `fight.yb` as "Enemy", which is INVERTED against the game's
+                // own roles; that mislabel is what the previous comment here
+                // trusted when it introduced the swap.
+                player_spawn_x_ = sf2::data::xml_attr_float(mv, "PlayerPositionX", 0.0f);
+                player_spawn_y_ = sf2::data::xml_attr_float(mv, "PlayerPositionY", 0.0f);
+                enemy_spawn_x_ = sf2::data::xml_attr_float(mv, "EnemyPositionX", 0.0f);
+                enemy_spawn_y_ = sf2::data::xml_attr_float(mv, "EnemyPositionY", 0.0f);
                 has_spawns_ = true;
             }
         }

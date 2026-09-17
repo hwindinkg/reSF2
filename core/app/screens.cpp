@@ -6333,13 +6333,17 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // container y anchor (`tl.init` L843 `height/2-ct`). Was hard-coded to
     // dojo's 80 for every location.
     const float floor_y = assets.fight_location.arena_floor();
-    // [FIX Phase 1 step 9 — spawn sides] Source BOTH spawns from the
-    // location's ModelsViewer (JS `Bf.zjb` L476 parses PlayerPositionX/Y ->
-    // `location.Yia`, EnemyPositionX/Y -> `location.B_`; JS L381 spawns the
-    // player `kc` at `Yia` and the enemy `Zb` at `B_`). Dojo: player
-    // (690,-93), enemy (973,-110) (dojo_params.b78df4b4.xml ModelsViewer). The old hard-coded 973/690 pair trusted
-    // the oracle dump's swapped `id` labels (the fighter at x=973 is the
-    // 15-bone Punchbag = the enemy) and put the player on the enemy's mark.
+    // [FIX spawn sides] Source BOTH spawns from the location's ModelsViewer
+    // (JS `Bf.zjb` L476 parses PlayerPositionX/Y -> `location.Yia`,
+    // EnemyPositionX/Y -> `location.B_`; JS L381 spawns the player `kc` at
+    // `Yia` and the enemy `Zb` at `B_`; `kc` is built from `v.cw().clone()`
+    // with `qb=!0`, `pf` from `v.EQ(a.Xs)` with `qb=!1`, and `o1a` L403 makes
+    // `yb=Gf(kc)` the player and `pb=Gf(Zb)` the opponent). Dojo: player
+    // (690,-93), enemy (973,-110) (dojo_params.b78df4b4.xml ModelsViewer).
+    // The previous "[Phase 1 step 9]" note here claimed to have flipped the old
+    // hard-coded 973/690 pair, but the flip lived in `LocationScene`'s
+    // ModelsViewer parse and read the attributes the WRONG way round, so the
+    // player still landed on 973. Removed there (see location_scene.cpp).
     // Falls back to the dojo defaults when a location has no <ModelsViewer>.
     if (assets.fight_location.has_spawns()) {
         battle.player_spawn_x = assets.fight_location.player_spawn_x();

@@ -583,6 +583,11 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // `Gla(0,0,0)`, no shift) the anchor stays where it was.
     align_pivot_u_ = -1;
     render_offset_valid_ = true;  // default: anchor-continuous (no align)
+    // [B1 FIX vertical anchor] No align / no Y axis -> the JS `Gla` y shift is
+    // `eja` (`ShiftY`, 0 shipped), so the whole clip's own y stands. Without
+    // this the old code pinned the model to the spawn y and dropped the clip's
+    // vertical root travel (the "floating / twitching legs" report).
+    render_offset_y_ = 0.0f;
     if (move.align.has_align) {
         const int pv = model_.bone_by_name(move.align.pivot_part);
         const int an = model_.bone_by_name(fighter_pivot_bone());
@@ -605,6 +610,12 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // threw the anchor 2x that offset off the spawn.
             prev_align_pivot_world_x_ =
                 (sol_ma_[pu * 3] - sol_ma_[au * 3]) + world_x_;
+            // [B1 FIX vertical anchor] `Gub` (L559) computes the SAME world
+            // delta on the y axis: `f = currentNode.ma.y (+ a.eja)`,
+            // `c.y = f - d.y`; `Gla` then shifts the buffer y by `Fk.y` when
+            // the `<Position>` declares the Y axis (`a.dI`), else by `ShiftY`.
+            prev_align_pivot_world_y_ =
+                (sol_ma_[pu * 3 + 1] - sol_ma_[au * 3 + 1]) + world_y_;
             align_pivot_u_ = aur;
             // JS `Gub` (L559) reads `d` from the RAW buffer (`jc.Kh(2)` =
             // clip[FirstFrame]) and `e` from the posed node (`currentNode.ma`)
@@ -614,6 +625,12 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // using the PRE-sample `sol_ma_`, not the first interpolated
             // sample (the buffer's slot-2 reference is the raw clip frame).
             render_offset_ = prev_align_pivot_world_x_ - sol_ma_[pu * 3];
+            // [B1 FIX vertical anchor] JS `Gla(a.dI ? Fk.y : a.eja)` (L559):
+            // the y shift is the world delta only when the Y axis is an align
+            // axis; otherwise it is `ShiftY` (0 shipped).
+            render_offset_y_ = move.align.axis_y
+                                   ? (prev_align_pivot_world_y_ - sol_ma_[pu * 3 + 1])
+                                   : move.align.shift_y;
             render_offset_valid_ = true;
         }
     }
@@ -841,6 +858,7 @@ void Fighter::advance_step() {
         root_dm_x_ = root_av_x_ = 0.0f;
         j8_x_ = 0.0f;
         render_offset_ = 0.0f;
+        render_offset_y_ = 0.0f;
         render_offset_valid_ = true;
         align_pivot_u_ = -1;
         return;
@@ -884,6 +902,7 @@ void Fighter::clear_move() {
     root_dm_x_ = root_av_x_ = 0.0f;
     j8_x_ = 0.0f;
     render_offset_ = 0.0f;
+    render_offset_y_ = 0.0f;
     render_offset_valid_ = true;
     align_pivot_u_ = -1;
     // JS `stop()`/`jc.reset()` drops the per-clip mirror decision too;
@@ -1308,6 +1327,16 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         }
         world_x_ = px[anchor_u] + render_offset_ + j8_x_;
         x = world_x_;  // `pos_` below is built from the recomputed anchor
+        // [B1 FIX vertical anchor] The SAME drive on y. JS `Te.eda` (L556)
+        // writes `ma = fq[mo] + j8` for every clip bone, so NPivot's y rides
+        // the clip exactly like its x (the anchor is NOT re-pinned to the
+        // spawn after `Dl.oL` at init). Leaving `world_y_` at the spawn placed
+        // the model at `clip_y - clip_pivot_y + spawn_y`: the feet sank and
+        // then floated by the clip's pivot travel (dojo `FistsStartStance-Left`
+        // pivot y runs -135..-84 against a -93 spawn, i.e. +42..-9 world units
+        // ≈ ±33 px at the fight zoom 1.3 — the reported float/twitch).
+        world_y_ = py[anchor_u] + render_offset_y_;
+        y = world_y_;
     }
 
     // 2. [FIX stretched mesh — ragdoll solver] The game's per-frame pose

@@ -358,6 +358,17 @@ private:
     float render_offset_ = 0.0f;
     bool render_offset_valid_ = true;
     float prev_align_pivot_world_x_ = 0.0f;  // previous frame's world x of the Part
+    // [B1 FIX — vertical render anchor] The y analog of `render_offset_`.
+    // The JS anchor is a POSED node: `Te.eda` (L556) writes `ma = fq[mo] + j8`
+    // for EVERY clip bone, so NPivot's y rides the clip exactly like its x, and
+    // `Dl.oL(spawn)` (L577) runs only at init / round reset — it is never
+    // re-pinned per frame. `Gla` selects the y shift the same way as x:
+    //   `Gla(a.cI?Fk.x:a.dja, a.dI?Fk.y:a.eja, a.MY?Fk.z:0)` (L559)
+    // i.e. `Fk.y` when the `<Align><Position>` declares the Y axis (JS `dI`),
+    // else `ShiftY` (`eja`, 0 shipped). Captured in `start_move_impl` next to
+    // `render_offset_`; 0 while no move plays.
+    float render_offset_y_ = 0.0f;
+    float prev_align_pivot_world_y_ = 0.0f;  // previous frame's world y of the Part
     int align_pivot_u_ = -1;                 // `<Align><Pivot Part>` bone index (`UE`)
     // [F1/F3] The bone the align actually reads after `Peb`'s `rw` node swap
     // (`Te.Peb` L560 `this.os = model.NQ(this.os)` -> `Gub` L558/559 read `os`,
