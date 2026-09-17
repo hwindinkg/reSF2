@@ -783,13 +783,24 @@ struct VerifyProbe {
 // down), so two same-frame downs of one key produce ONE tap, not two.
 // The earlier tape's `down;down` pairs were exactly that bug, plus Punch
 // was never released, which made the later K press (`sl` still set) a
-// no-op — both fixed here.
+// no-op - both fixed here.
+//
+// The expected moves are the JS `ra.Hza`-legal ones for the shipped Fists
+// loadout: the direct-boot fighter owns Skeleton + Weapon/Fists + Body/Head
+// (fight.cpp `make_fighter`), so a move is a candidate only when its
+// `<TacticWeapon>` matches Fists AND its `<Locks>` pass. Three expectations
+// were previously derived from the LOCK-IGNORING move list and had to be
+// corrected with it: `DashBackwards` (`<Locks>` = Armor `BODY_GATEKEEPER`)
+// -> `BackHandflip` (the same Priority 20 Back Tap x2 move whose Or-lock
+// `Armor BODY_GATEKEEPER Not=1` passes), and `StaffStepForward`
+// (`<Locks>` = Or{Weapon Staff|WandererStaff|CompositeStaff}) ->
+// `StepForward` (Skeleton-locked, the real 1-key forward step).
 static const VerifyProbe kVerifyProbes[] = {
-    {180, "Back Tap x2 (spawn gap 283)", "DashBackwards", 4, false},
+    {180, "Back Tap x2 (spawn gap 283)", "BackHandflip", 4, false},
     {300, "Forward Tap x2", "DoubleStepForward", 4, false},
     {420, "Punch Tap x2 + Forward Hold", "DoublePunch", 4, false},
-    {520, "Forward Tap x1 (1key)", "StaffStepForward", 4, false},
-    {550, "Forward Tap x1 (+30f)", "StaffStepForward", 4, false},
+    {520, "Forward Tap x1 (1key)", "StepForward", 4, false},
+    {550, "Forward Tap x1 (+30f)", "StepForward", 4, false},
     {620, "K key -> Punch-key move", "ShortUpwardElbowStrike", 4, false},
     {700, "B key -> dropped (no move)", "<none>", 12, false},
 };
@@ -800,9 +811,10 @@ std::vector<ReplayEdge> build_verify_edges() {
     std::vector<ReplayEdge> e;
     auto down = [&](int f, int c) { e.push_back(ReplayEdge{f, c, true}); };
     auto up = [&](int f, int c) { e.push_back(ReplayEdge{f, c, false}); };
-    // DashBackwards = Back Tap x2 (moves.xml L358527) FIRST, at the spawn gap
-    // (dist 283): once the higher-priority `WallDashForward_50` (Back Tap x2
-    // + a `Max=100` gap) is out of range. Tap = down;up;down (JS `!a.sl`).
+    // BackHandflip = Back Tap x2 (moves.xml L358527) FIRST, at the spawn gap
+    // (dist 283): the same Priority-20 Back Tap x2 slot DashBackwards used to
+    // win only because the lock-ignoring move list admitted its
+    // `Armor BODY_GATEKEEPER` lock. Tap = down;up;down (JS `!a.sl`).
     down(180, 7);
     up(180, 7);
     down(180, 7);
@@ -1035,6 +1047,15 @@ int main(int argc, char** argv) {
     bool dialog_verify = false;     // --dialog-verify: headless dialog harness
     bool replay_mode = false;
     bool verify_input = false;
+    // --input-tape [js|desktop]: the scripted key/pointer tape fed through the
+    // REAL input consumer (FightScreen::on_key, the function App::poll_input
+    // calls for every GLFW key edge). `js` forces the byte-exact `Af.oUa`
+    // table (set_desktop_key_aliases(false)); `desktop` (default) is the
+    // shipped desktop map. Prints per key: GLFW code -> key_type -> selected
+    // move -> the per-frame player move name (the move -> idle flip), then the
+    // dojo hub section.
+    bool input_tape = false;
+    bool input_tape_js_table = false;
     std::string replay_file = "reference/traces/recorded_inputs.txt";
     bool debug_ui = false;
     bool capture_fight = false;
@@ -1083,6 +1104,18 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--verify-input") {
             verify_input = true;
+        } else if (arg == "--input-tape") {
+            input_tape = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                const std::string m = argv[++i];
+                if (m == "js") {
+                    input_tape_js_table = true;
+                } else if (m != "desktop") {
+                    std::fprintf(stderr,
+                                 "game: --input-tape map must be 'js' or 'desktop'\n");
+                    return 1;
+                }
+            }
         } else if (arg == "--debug-ui") {
             debug_ui = true;
         } else if (arg == "--capture" && i + 1 < argc) {
@@ -1709,6 +1742,208 @@ int main(int argc, char** argv) {
                          after, ok ? "PASS" : "FAIL");
             std::fflush(stdout);
         }
+        app.shutdown();
+        return 0;
+    } else if (input_tape) {
+        // ------------------------------------------------------------------
+        // `--input-tape [js|desktop]`: the scripted key/pointer tape driven
+        // through the REAL input consumers. Every key edge goes through
+        // `FightScreen::on_key` - the exact function `App::poll_input`
+        // (app.cpp `kFightKeys` loop) calls for a GLFW edge - and every
+        // pointer edge through `App::inject_click` (the JS `ma.Bd` tap
+        // primitive the other drivers use). No OS input is generated.
+        // ------------------------------------------------------------------
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name = "Training";
+            pb.zone.clear();
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned.clear();
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[tape] no fight screen\n");
+            return 1;
+        }
+        fs->set_desktop_key_aliases(!input_tape_js_table);
+        std::fprintf(stdout, "[tape] key map = %s (desktop_key_aliases=%d)\n",
+                     input_tape_js_table ? "Af.oUa (js)" : "desktop",
+                     fs->desktop_key_aliases() ? 1 : 0);
+        std::fflush(stdout);
+
+        // The scripted tape. Each control is a press/release pair (a Tap in
+        // the JS `zl.Sgb` sense: `!a.sl` needs a release before a second
+        // press), spaced so the selected move's clip plays out and the
+        // per-frame log shows the flip back to the stance idle.
+        //   150/250/350 = D/A/W (Forward/Back/Up sectors 3/7/1)
+        //   450..896    = K/L/O/P J/Q (Punch/Kick/Ranged/Magic/RaidCharge/Super)
+        //   1000        = Left  (a desktop alias: sector 7)
+        //   1090        = Space (a desktop alias: Punch)
+        //   1180        = B     (bound by NOTHING - the dropped-key control)
+        struct TapeEdge { int frame; int glfw; bool down; };
+        static const TapeEdge kTape[] = {
+            {150, 68, true},  {156, 68, false},    // D -> Forward
+            {250, 65, true},  {256, 65, false},    // A -> Back
+            {350, 87, true},  {356, 87, false},    // W -> Up
+            {450, 75, true},  {456, 75, false},    // K -> Punch
+            {560, 76, true},  {566, 76, false},    // L -> Kick
+            {670, 79, true},  {676, 79, false},    // O -> Ranged
+            {780, 74, true},  {786, 74, false},    // J -> RaidCharge
+            {890, 81, true},  {896, 81, false},    // Q -> Super
+            {1000, 263, true}, {1006, 263, false}, // Left -> Back (alias)
+            {1090, 32, true}, {1096, 32, false},   // Space -> Punch (alias)
+            {1180, 66, true}, {1186, 66, false},   // B -> unbound
+        };
+        constexpr int kTapeCount = static_cast<int>(sizeof(kTape) / sizeof(kTape[0]));
+        const int last_frame = kTape[kTapeCount - 1].frame;
+
+        std::size_t ei = 0;
+        bool fight_seen = false;
+        int fight_frames = 0;
+        int guard = 0;
+        int started_seen = 0;
+        std::string last_move;
+        // Per-tape-key result: the move the key selected ("" = none).
+        std::map<int, std::string> selected_by_glfw;
+        while (guard < 9000) {
+            glfwPollEvents();
+            if (fight_seen) {
+                while (ei < static_cast<std::size_t>(kTapeCount) &&
+                       kTape[ei].frame <= fight_frames) {
+                    // The REAL consumer: App::poll_input calls exactly this.
+                    fs->on_key(kTape[ei].glfw, kTape[ei].down);
+                    std::fprintf(stdout,
+                                 "[tape] input F%d glfw=%d down=%d -> key_type=%d\n",
+                                 fight_frames, kTape[ei].glfw, kTape[ei].down ? 1 : 0,
+                                 fs->last_input_key_type());
+                    std::fflush(stdout);
+                    if (kTape[ei].down) {
+                        selected_by_glfw[kTape[ei].glfw];  // ensure a row
+                    }
+                    ++ei;
+                }
+            }
+            app.run_one_frame();
+            ++guard;
+            if (!fight_seen && app.screens().current_id() == kScreenFight) {
+                fight_seen = true;
+                fight_frames = 0;
+                std::fprintf(stdout, "[tape] fight screen up\n");
+                std::fflush(stdout);
+            } else if (fight_seen) {
+                ++fight_frames;
+                fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+                if (fs == nullptr) break;
+                // The move-selection edge: attribute the new move to the
+                // most recent pressed tape key.
+                const int started = fs->player_moves_started();
+                if (started > started_seen) {
+                    started_seen = started;
+                    const std::string dec = fs->player_last_decision();
+                    if (!dec.empty() && dec[0] == 'i') {
+                        const std::string mv = dec.substr(std::string("input:").size());
+                        for (int t = kTapeCount - 1; t >= 0; --t) {
+                            if (kTape[t].down && kTape[t].frame <= fight_frames) {
+                                selected_by_glfw[kTape[t].glfw] = mv;
+                                break;
+                            }
+                        }
+                    }
+                    std::fprintf(stdout, "[tape] F%d selected %s\n", fight_frames,
+                                 dec.c_str());
+                    std::fflush(stdout);
+                }
+                // The per-frame move name: printed only on a change so the
+                // move -> idle flip is visible without a 1300-line dump.
+                const std::string mv = fs->player_current_move();
+                if (mv != last_move) {
+                    last_move = mv;
+                    std::fprintf(stdout, "[tape] F%d player_move=%s\n", fight_frames,
+                                 mv.empty() ? "<none>" : mv.c_str());
+                    std::fflush(stdout);
+                }
+            }
+            if (fight_seen && fight_frames > last_frame + 60) break;
+        }
+        std::fprintf(stdout, "[tape] tape complete: %d fight frames\n", fight_frames);
+
+        // The accepted-key report LAST (the probes feed real taps, so they
+        // must not disturb the tape above).
+        struct KeyProbe { int glfw; const char* name; };
+        static const KeyProbe kProbes[] = {
+            {87, "W"}, {68, "D"}, {83, "S"}, {65, "A"},
+            {75, "K"}, {76, "L"}, {79, "O"}, {80, "P"}, {74, "J"}, {81, "Q"},
+            {263, "Left"}, {262, "Right"}, {265, "Up"}, {264, "Down"},
+            {32, "Space"}, {256, "Esc"}, {257, "Enter"}, {66, "B"},
+        };
+        int accepted = 0, accepted_js = 0, accepted_alias = 0;
+        std::fprintf(stdout, "[tape] accepted-key report:\n");
+        for (const KeyProbe& kp : kProbes) {
+            const int js_kt = sf2::app::FightScreen::key_type_for_glfw(kp.glfw);
+            fs->on_key(kp.glfw, true);
+            const int kt = fs->last_input_key_type();
+            fs->on_key(kp.glfw, false);
+            if (kt != 0) {
+                ++accepted;
+                if (js_kt != 0) ++accepted_js; else ++accepted_alias;
+            }
+            std::fprintf(stdout,
+                         "[tape]   %-6s glfw=%-4d Af.oUa=%-2d on_key->key_type=%-2d %s\n",
+                         kp.name, kp.glfw, js_kt, kt, kt == 0 ? "DROPPED" : "accept");
+        }
+        std::fprintf(stdout, "[tape] accepted=%d of %zu (Af.oUa=%d desktop-alias=%d)\n",
+                     accepted, sizeof(kProbes) / sizeof(kProbes[0]), accepted_js,
+                     accepted_alias);
+        std::fprintf(stdout, "[tape] per-key selected move:\n");
+        for (const auto& kv : selected_by_glfw) {
+            std::fprintf(stdout, "[tape]   glfw=%-4d -> %s\n", kv.first,
+                         kv.second.empty() ? "<no move>" : kv.second.c_str());
+        }
+        std::fflush(stdout);
+
+        // ------------------------------------------------------------------
+        // The dojo hub (JS `Tf` L1969-1972). The JS hub's only real input is
+        // the `za` nav column; the joystick/buttons the hub draws
+        // (`Za.F().update()`/`Za.F().Ea()`, L1971-1972) are the shared visual
+        // control surface and are wired to nothing on the hub. Feed both
+        // through the app's real entry points and report what happens.
+        // ------------------------------------------------------------------
+        app.screens().pop();  // the fight -> back to the Dojo hub
+        const int dojo_id = app.screens().current_id();
+        std::fprintf(stdout, "[tape] dojo hub up: screen id %d\n", dojo_id);
+        // (a) the drawn pad: the joystick centre (bottom-left). Display-only.
+        //     kViewH=720, kPadSizeE=288, kPadMarginC=72, kPadMarginD=21.6.
+        app.inject_click(216.0, 554.0);
+        for (int i = 0; i < 4; ++i) app.run_one_frame();
+        std::fprintf(stdout,
+                     "[tape] dojo pad tap (216,554): screen id %d -> %d %s\n", dojo_id,
+                     app.screens().current_id(),
+                     app.screens().current_id() == dojo_id ? "(unchanged)" : "(CHANGED)");
+        // (b) keyboard on the hub: no player-controlled fighter exists there.
+        for (const int k : {87, 68, 83, 65, 75, 32}) {
+            app.inject_key(k, true);
+            app.run_one_frame();
+            app.inject_key(k, false);
+        }
+        std::fprintf(stdout, "[tape] dojo keys W/D/S/A/K/Space: screen id %d %s\n",
+                     app.screens().current_id(),
+                     app.screens().current_id() == dojo_id ? "(unchanged)" : "(CHANGED)");
+        // (c) the real dojo input: the `za` nav column. Expand the collapsed
+        //     header (x64-176 y72-110) then tap the MAP row (184,231).
+        app.inject_click(120.0, 90.0);
+        for (int i = 0; i < 4; ++i) app.run_one_frame();
+        app.inject_click(184.0, 231.0);
+        for (int i = 0; i < 8; ++i) app.run_one_frame();
+        std::fprintf(stdout, "[tape] dojo nav MAP tap (184,231): screen id %d %s\n",
+                     app.screens().current_id(),
+                     app.screens().current_id() == kScreenMap ? "(-> Map) PASS"
+                                                               : "(expected Map) FAIL");
+        std::fflush(stdout);
         app.shutdown();
         return 0;
     } else if (fight_mode) {

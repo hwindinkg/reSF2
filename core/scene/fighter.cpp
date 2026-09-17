@@ -160,7 +160,7 @@ void Fighter::build_move_list(const std::map<std::string, MoveDef>& all_moves,
 void Fighter::build_move_list_locks(
     const std::map<std::string, MoveDef>& all_moves,
     const std::vector<std::pair<std::string, std::string>>& owned,
-    bool include_universal) {
+    bool include_universal, const std::string& weapon_subtype) {
     auto owned_item = [&owned](const Lock& l) {
         for (const auto& o : owned) {
             // Lock Type/SubType both match (JS `nw`: `b.type==a.type &&
@@ -174,6 +174,31 @@ void Fighter::build_move_list_locks(
     hb_.clear();
     for (const auto& kv : all_moves) {
         const MoveDef& m = kv.second;
+        // JS `ra.Hza` applies BOTH of the move's gates against the fighter:
+        //   - the TacticWeapon list (`Fa.Ueb` L711 -> `QX`, L800
+        //     `TacticWeapon.split("|")`; `bCa` L510 + `c2a` L820 test the
+        //     CURRENT move's `QX` membership) and
+        //   - the `<Locks>` item test (`f.nw(d,b)`).
+        // This builder used to apply only the Locks half, so weapon-locked
+        // moves whose locks happened to pass stayed in the list (e.g.
+        // `RatWavePlayer`, `TacticWeapon="MassBomb"`, `<Locks>` =
+        // PERK_RAT_WAVE + Skeleton, Priority 110 - it won the Up key and
+        // played `rats_wave`). `weapon_subtype` empty keeps the legacy
+        // Locks-only behaviour for the display/probe callers.
+        if (!weapon_subtype.empty() && !m.tactic_weapon.empty()) {
+            bool allows = false;
+            if (!m.qx.empty()) {
+                for (const std::string& w : m.qx) {
+                    if (w == weapon_subtype) {
+                        allows = true;
+                        break;
+                    }
+                }
+            } else {
+                allows = m.tactic_weapon == weapon_subtype;
+            }
+            if (!allows) continue;
+        }
         if (m.locks.empty()) {
             // No locks -> universal (JS: every move's Skeleton lock passes).
             if (include_universal) hb_.push_back(&m);
@@ -186,6 +211,18 @@ void Fighter::build_move_list_locks(
         bool or_group = false;
         bool any_or = false;
         for (const Lock& l : m.locks) {
+            if (l.never) {
+                // An unmodelled lock kind (`<Perk Name=..>`): the JS tests it,
+                // the port cannot, so it is never satisfied. A plain lock
+                // fails the move; an Or member leaves the group satisfiable
+                // only by its modelled members.
+                if (l.or_) {
+                    or_group = true;
+                    continue;
+                }
+                all_pass = false;
+                break;
+            }
             if (l.or_) {
                 or_group = true;
                 if (owned_item(l)) any_or = true;

@@ -6751,8 +6751,8 @@ int FightScreen::key_type_for_glfw(int glfw_key) {
     }
 }
 
-// Desktop-only movement/attack aliases (arrows + Space). Not part of
-// `Af.oUa`; only consulted when `desktop_key_aliases_` is on.
+// The desktop key aliases (arrows + Space). Not part of `Af.oUa`; folded in
+// when `desktop_key_aliases_` is on (the default, see on_key).
 int FightScreen::desktop_alias_for_glfw(int glfw_key) {
     switch (glfw_key) {
         case 263: return static_cast<int>(sf2::scene::key_type::back);     // Left
@@ -6765,17 +6765,21 @@ int FightScreen::desktop_alias_for_glfw(int glfw_key) {
 }
 
 void FightScreen::on_key(int glfw_key, bool down) {
-    // [F8] Every binding here that is not one of the ten `Af.oUa` keys is a
-    // desktop affordance and is OFF unless explicitly opted in, so the default
-    // key map equals the JS table exactly. The headless harness (`--fidelity-
-    // tour` / `--ui-tour` / `--headless-loop` / `--fight --headless`) injects
-    // Esc and Space as its own control surface and opts in here; a windowed
-    // session runs with `App::headless() == false` and gets the pure JS table
-    // (a user can opt in via `set_desktop_key_aliases(true)`).
-    const bool aliases = desktop_key_aliases_ || app().headless();
+    // Every key edge resets the reported key_type: an unbound key, the Esc
+    // pause control and Enter all leave it 0 (they produce no fight key).
+    last_input_key_type_ = 0;
+    // JS `Af.oUa` (L2472) is the BROWSER key map and binds exactly ten keys.
+    // `App::poll_input` (app.cpp) additionally polls the arrows, Space, Esc
+    // and Enter because the desktop player presses them; the desktop aliases
+    // fold those into the same `player_input` path. The map is a property of
+    // the SCREEN, not of the headless flag: the old `|| app().headless()`
+    // made every headless driver silently accept the arrows/Space while a
+    // real windowed player got nothing - the harness could not see the bug.
+    // Run `set_desktop_key_aliases(false)` for the byte-exact JS table.
+    const bool aliases = desktop_key_aliases_;
     // Pause toggle. The JS path is the HUD pause disc (`Jn` -> `Ar.Qg(0)` ->
-    // `Aia()` L425, drawn by this screen); Esc (256) is a desktop alias, so it
-    // is gated. The headless drivers inject the disc click, never keys.
+    // `Aia()` L425, drawn by this screen); Esc (256) is a desktop alias. The
+    // headless drivers inject the disc click, never keys.
     if (aliases && down && glfw_key == 256) {
         if (fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over()) {
             paused_ = !paused_;
@@ -6800,6 +6804,7 @@ void FightScreen::on_key(int glfw_key, bool down) {
     if (aliases && kt_id == 0) {
         kt_id = desktop_alias_for_glfw(glfw_key);
     }
+    last_input_key_type_ = kt_id;
     if (kt_id == 0) return;
     sf2::scene::key_type kt = static_cast<sf2::scene::key_type>(kt_id);
     const int idx = static_cast<int>(kt);
@@ -6835,6 +6840,12 @@ std::string FightScreen::player_last_decision() const {
 
 int FightScreen::player_moves_started() const {
     return fight_ != nullptr ? fight_->player().moves_started : 0;
+}
+
+std::string FightScreen::player_current_move() const {
+    if (fight_ == nullptr) return std::string();
+    const sf2::scene::MoveDef* m = fight_->player().fighter.current_move();
+    return m != nullptr ? m->name : std::string();
 }
 
 int FightScreen::fight_frame() const {

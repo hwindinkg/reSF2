@@ -636,9 +636,34 @@ FightFighter FightController::make_fighter(
             });
     }
     if (owned.empty()) {
-        f.fighter.build_move_list(*moves_, weapon_subtype);
+        // JS `ra.Hza` (L684-685) ALWAYS tests every move's `<Locks>` against
+        // the fighter's items - there is NO lock-free candidate path. The
+        // direct-boot fighter (`--fight` / `--input-tape` / `--verify-input`)
+        // owns the shipped default loadout: the Skeleton every fighter has
+        // (JS_FLOW "users_default Skeleton=Skeleton"), the FORCED weapon
+        // subtype (`weapon_subtype`, always "Fists" here), and the default
+        // Body/Head armor (`reference/save.xml` items Body/Head/Fists/
+        // NoRanged/NoMagic).
+        //
+        // Skipping the lock test here (`build_move_list`) put ALL 688
+        // `TacticWeapon`-less `<Move>`s of the 1048 in moves.xml into the
+        // player's list - every other weapon's step and every boss ability.
+        // The tape then resolved `Up` -> `HermitStormPlayer`
+        // (FileName hermit_super_attack, Priority 110) and `Back` ->
+        // `GiantSwordStepBack` (giant_sword_step_back, Priority 11, whose
+        // `<Locks>` require `Weapon SubType="GiantSword"`) - the reported
+        // "plays the WRONG animation". The lock test excludes both.
+        const std::vector<std::pair<std::string, std::string>> implicit = {
+            {"Skeleton", "Skeleton"},
+            {"Weapon", weapon_subtype},
+            {"Armor", "Body"},
+            {"Helm", "Head"},
+        };
+        f.fighter.build_move_list_locks(*moves_, implicit, /*include_universal=*/true,
+                                       weapon_subtype);
     } else {
-        f.fighter.build_move_list_locks(*moves_, owned);
+        f.fighter.build_move_list_locks(*moves_, owned, /*include_universal=*/true,
+                                       weapon_subtype);
     }
     f.fighter.set_world_pos(x, y);
     f.fighter.set_enemy_x(x);  // patched each frame

@@ -151,6 +151,14 @@ struct Lock {
     std::string subtype;  // "Fists", "Katana", ...
     std::string name;     // optional Name attr
     bool or_ = false;     // inside an Operator Type="Or" (any of the group)
+    // An UNPARSED lock kind (`<Perk Name=..>` and friends). The JS `ra.Hza`
+    // tests every lock node against the fighter; the port carries only item
+    // ownership here, so such a lock FAILS CLOSED. The old parser dropped the
+    // element silently, which made every perk-gated boss ability selectable
+    // (e.g. `HermitStormPlayer`, `<Locks>` = PERK_HERMITSTORM + Skeleton,
+    // Priority 110, TacticWeapon=None -> it won the Up key and played
+    // `hermit_super_attack`).
+    bool never = false;
 };
 
 // Align (JS `Ui`, g="109"; parse `Fa.jva` L719-721) — the evaluator fields

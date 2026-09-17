@@ -246,15 +246,30 @@ public:
     // the key-map verification can assert the binding without running a fight.
     static int key_type_for_glfw(int glfw_key);
 
-    // [F8] The desktop-only aliases (Left/Right/Up/Down movement, Space=Punch)
-    // — NOT part of `Af.oUa`, consulted only when opted in.
+    // The desktop-only aliases (Left/Right/Up/Down movement, Space=Punch) —
+    // NOT part of `Af.oUa`. The browser JS binds only the ten `Af.oUa` keys
+    // (W/A/S/D + K/L/O/P/J/Q, L2472); a desktop player reaches for the arrow
+    // keys and Space first, and `App::poll_input` (app.cpp) already POLLS
+    // GLFW_KEY_LEFT/RIGHT/UP/DOWN/SPACE/ESCAPE/ENTER and routes them here.
+    // Dropping them silently made the player's own keys dead in the windowed
+    // build ("controls barely respond"), so the desktop map is ON by default.
     static int desktop_alias_for_glfw(int glfw_key);
 
-    // [F8] Opt-in for the desktop key aliases (arrows / Space=Punch / Esc=pause
-    // / Space-Enter=next round). OFF by default so the default key map equals
-    // the JS `Af.oUa` table exactly.
+    // The desktop key map toggle. DEFAULT ON: the windowed desktop port
+    // accepts the JS ten keys PLUS the arrows/Space/Esc. Turn it OFF to get
+    // the byte-exact `Af.oUa` table only (the `--input-tape js` fidelity run,
+    // the `--verify-input` key-map assertion).
     void set_desktop_key_aliases(bool on) { desktop_key_aliases_ = on; }
     bool desktop_key_aliases() const { return desktop_key_aliases_; }
+
+    // The key_type id the LAST accepted key produced (0 = the key was not
+    // bound / was swallowed). The input-tape harness reads it to report which
+    // physical keys actually reach the fight.
+    int last_input_key_type() const { return last_input_key_type_; }
+
+    // The player's current move name ("" when idle-less). The input-tape
+    // harness logs it per frame to show the move -> idle flip.
+    std::string player_current_move() const;
 
     // Test/replay hook: inject a game key edge by key_type id (1..14) into
     // the same `player_input` path the keyboard uses, bypassing the GLFW key
@@ -309,13 +324,17 @@ private:
     // UI-layer only): the HUD pause icon freezes the sim (update skipped) and
     // shows the `Dr` dialog (`res/fight/pause.*`: Pause title,
     // PauseMusic/PauseSound toggles, play=resume, home=quit). The Esc key
-    // toggle is a desktop-only alias (NOT in `Af.oUa`) and is OFF unless
-    // `set_desktop_key_aliases(true)` is called.
+    // toggle is a desktop-only alias (NOT in `Af.oUa`), live whenever the
+    // desktop key map is on (the default).
     bool paused_ = false;
     bool music_off_ = false;  // `Dr.PauseMusic_on/off` toggle state
-    // [F8] Desktop key aliases opt-in (arrows/Space/Esc/Enter). OFF by default:
-    // the default key map is exactly the JS `Af.oUa` 10-key table.
-    bool desktop_key_aliases_ = false;
+    // The desktop key aliases (arrows/Space/Esc). DEFAULT ON: the default
+    // desktop key map is the JS `Af.oUa` ten keys PLUS the arrows/Space/Esc
+    // the windowed player will press (see `desktop_alias_for_glfw`).
+    bool desktop_key_aliases_ = true;
+    // The last accepted key's key_type id (0 = unbound/swallowed); the
+    // input-tape harness's per-key evidence.
+    int last_input_key_type_ = 0;
 
     // --- on-screen gamepad (JS `Za` virtual controls, JS_GAMEPLAY §2) ----
     // The original's touch gamepad: the joystick `ze` (base + knob, the

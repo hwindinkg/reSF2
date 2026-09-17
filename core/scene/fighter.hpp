@@ -157,7 +157,8 @@ public:
     // equips WEAPON_KNIVES (SubType="Knives"). Sorted by Priority desc.
     void build_move_list_locks(const std::map<std::string, MoveDef>& all_moves,
                                const std::vector<std::pair<std::string, std::string>>& owned,
-                               bool include_universal = true);
+                               bool include_universal = true,
+                               const std::string& weapon_subtype = std::string());
 
     // Buffers one key press (JS `Kl.Sgb`/`zl.Sgb`, L798): appends the key to
     // the 2-slot Tap sequence (`zg.sh`), rebuilds the held set (`zg.Fh`),

@@ -742,6 +742,34 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
                     l.or_ = true;
                     def.locks.push_back(std::move(l));
                 }
+                // Fail closed on unmodelled Or members too (`Or{<Perk A>,
+                // <Perk B>}`): with the perk children dropped the group became
+                // EMPTY, so `or_group` stayed false and the move looked
+                // lock-free (`AssistantBigMagariYariPlayer`,
+                // PERK_ASSISTANTS|PERK_ASSISTANTS_PVP, Priority 110, won the
+                // Super key). An unsatisfiable Or member keeps the group
+                // satisfiable only by its modelled members.
+                for (pugi::xml_node other : op.children()) {
+                    const std::string tag = other.name();
+                    if (tag == "Item") continue;
+                    Lock l;
+                    l.or_ = true;
+                    l.never = true;
+                    def.locks.push_back(std::move(l));
+                }
+            }
+            // Fail closed on every lock kind the port does not model
+            // (`<Perk Name=..>` etc.). Dropping the element silently made the
+            // move look lock-free: `HermitStormPlayer` (PERK_HERMITSTORM) and
+            // `RatWavePlayer` (PERK_RAT_WAVE) then entered the player's move
+            // list and won the Up key on Priority. The JS `ra.Hza` tests every
+            // lock node, so an untracked one must not pass.
+            for (pugi::xml_node other : locks.children()) {
+                const std::string tag = other.name();
+                if (tag == "Item" || tag == "Operator") continue;
+                Lock l;
+                l.never = true;
+                def.locks.push_back(std::move(l));
             }
         }
 
