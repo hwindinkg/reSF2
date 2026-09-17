@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <utility>
@@ -346,6 +347,32 @@ void FightController::reseed_stream(int seed) {
     prng_.seed(static_cast<std::uint32_t>(seed));
 }
 
+// JS `ca.i6a(a)` (L430): the `SZ` attribute name with the largest `Shift`
+// (strict `>` — a tie keeps the FIRST entry). `Cgb` labels `$db` with it.
+std::string i6a_attr(const std::vector<std::pair<std::string, float>>& sz) {
+    if (sz.empty()) return std::string();
+    std::size_t best = 0;
+    for (std::size_t i = 1; i < sz.size(); ++i) {
+        if (sz[i].second > sz[best].second) best = i;
+    }
+    return sz[best].first;
+}
+
+// JS `uf.RJa()` (L531 via `R8a`) = `Math.random()` (`at.Nlb` L114-115) — a
+// stream of its OWN, NOT `Da.pg` (routing the two shock rolls through the
+// shared stream desynced crit/AI). The oracle harness pins `Math.random` to
+// `mulberry32(0xC0FFEE)` (reference/traces/README.md `harness.mathRandom`), so
+// the native mirrors that pin — same spirit as the `Da.pg` replay seed
+// (0x5F2). Process-global state: the sequence is fixed per run.
+float FightController::math_random01() {
+    static std::uint32_t a = 0xC0FFEEu;
+    a += 0x6D2B79F5u;
+    std::uint32_t t = a;
+    t = (t ^ (t >> 15)) * (1u | t);
+    t = (t + (t ^ (t >> 7)) * (61u | t)) ^ t;
+    return static_cast<float>((t ^ (t >> 14))) / 4294967296.0f;
+}
+
 // JS `o1a` (L403) + `Gf` (L403-404): build one fighter. The move list is
 // the TacticWeapon-based list (`weapon_subtype`) or, when `owned` is
 // non-empty, the Locks-based list against the fighter's items (JS `ra.Hza`
@@ -395,6 +422,11 @@ FightFighter FightController::make_fighter(
     f.params.xb = 0.0f;
     f.params.dta = 1.0f;
     f.params.so = 1.0f;
+    // JS `xc.IY` (L191 via the `<AttributesAlign>` chain, `pGa` L198): the
+    // align-armor rows `pAa` blends with. Empty -> the min/max blend
+    // saturates, so every shipped fight resolves at least the `Default`
+    // template's rows.
+    f.params.iy = is_player ? battle_.player_align : battle_.enemy_align;
     f.params.attributes["UnarmedDamage"] =
         is_player ? battle_.player_unarmed_damage : 0.0f;
     f.params.attributes["BodyDefense"] = 0.0f;
@@ -2316,8 +2348,14 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     idmg.base_damage = iv.damage;
     idmg.no_critical = iv.no_critical;
     idmg.hit_body_part = iv.hit_name;
-    idmg.attack_attrs.push_back({iv.damage_type, iv.damage_shift});
-    if (!hit_cap.defense.empty()) idmg.defense_names.push_back(hit_cap.defense);
+    // JS `wd.bCa(a,...)` receives `a.SZ` (EVERY sub-`<Damage>`) and `a.KP`
+    // (EVERY `<Defense>`), plus `e.da.Ua.QX` for `c2a`. The old code pushed
+    // only the FIRST sub-`<Damage>` (`iv.damage_type`) and stuffed the
+    // defender capsule's `Xi` into `defense_names[0]`, which killed both the
+    // `KP[0]` branch and the `blocked` branch of `LAa` (L536).
+    idmg.attack_attrs = iv.attack_attrs;
+    idmg.defense_names = iv.defense_names;
+    idmg.qx = move.qx;
     // JS `wd.strike` (L509-510) order on the TARGET: block-break FIRST
     // (`g.DDa` -> `hT(5)`; shipped moves never set IgnoresBlock, so this
     // is dead with shipped data but faithful), then `Bb.block = Nbb()`
@@ -2376,13 +2414,18 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         const float b = dmg;  // Zi/so with so=1.0 (OPEN)
         const bool pain_c = sf2::scene::orb_hit(
             def.shock, def.shock.weapon_ws ? 0.0f : b, gfp.shock_threshold);
+        // JS `R8a` (L531): `a=v.Ub.iya; d.attributes.get(v.Ub.hya,e); a*=e.G`
+        // — MULTIPLY (an absent attr makes the chance 0), not the old `+`.
         const float crit_term =
-            gfp.shock_crit_base + atk.params.attr("ShockCriticalHitChance");
+            gfp.shock_crit_base * atk.params.attr("ShockCriticalHitChance");
         const float head_term =
-            gfp.shock_head_base + atk.params.attr("ShockHeadHitChance");
+            gfp.shock_head_base * atk.params.attr("ShockHeadHitChance");
+        // The two `r8a` draws come from `uf.RJa()` = `Math.random`, NOT the
+        // shared `Da.pg` crit/AI stream (`draw01()`).
         const bool ub = sf2::scene::r8a_decide(
-            false, def.shock.shocked_vc, b, pain_c, crit_term, critical, draw01(),
-            head_term, rec.head_hit, blocked, draw01()).raw;
+            false, def.shock.shocked_vc, b, pain_c, crit_term, critical,
+            math_random01(), head_term, rec.head_hit, blocked,
+            math_random01()).raw;
         rec.shock = ub;
         // JS `Cgb` shock apply (L394): `Ub&&(vc?Ub=false:vc=true)`.
         if (ub) {
@@ -2446,7 +2489,36 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         rec.hp_after = def.hp > sethit_value ? def.hp - sethit_value : 0.0f;
         rec.lethal = sethit_value >= def.hp;
     }
+    // JS `ca.Cgb` (L395) order after the lethal latch and the SetHit override:
+    //   `a.model.ws && (b.Zi = 0)`   -> the weapon/regen veto
+    //   `a.model.$db(b.Zi, ca.i6a(c), b.JP)`
+    //   `this.aM(a.model, -b.Zi)`    -> the HP spend
+    //   `this.udb(a.model.jb, b.Zi)` -> gear lifesteal heals the attacker
+    // `ws` is set only by the Invulnerability rule pass (L902 `ola(!b)`), so
+    // this is a no-op for rule-less fights, but the ORDER must match 1:1.
+    if (def.shock.weapon_ws) {
+        rec.final_damage = 0.0f;  // `Zi = 0`
+        rec.hp_after = def.hp;    // `aM(model, -0)` leaves HP untouched
+    }
     def.hp = rec.hp_after;
+    // JS `$db(a,b,c){this.i_.add(a,b,c)}` (L523): `(Zi, i6a(SZ), JP)`.
+    i_.push_back({rec.final_damage, i6a_attr(idmg.attack_attrs), defense_attr});
+    // JS `this.udb(a.model.jb, b.Zi)` (L395 -> L403):
+    //   `c.G * v.kha.Bc * Zi * (a.jb.so / a.so)` on the ATTACKER, healed via
+    //   `aM` (clamped to [0, Zn] = max HP). `a` inside `udb` is the
+    //   attacker, so `a.jb.so/a.so` = defender.so / attacker.so.
+    {
+        const sf2::scene::FightParams& gfp = sf2::scene::FightParams::defaults();
+        const float ls = atk.params.attr(gfp.lifesteal_attr);
+        if (ls != 0.0f) {
+            const float heal =
+                ls * gfp.lifesteal_base * rec.final_damage *
+                (atk.params.so != 0.0f ? def.params.so / atk.params.so : 0.0f);
+            if (heal != 0.0f) {
+                atk.hp = std::min(atk.max_hp, atk.hp + heal);
+            }
+        }
+    }
 
     // Magic recharge (`Jma`, lb==null branch — versus has no link model;
     // the lb!=null delegation is OPEN): attacker charges from dealt

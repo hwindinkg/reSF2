@@ -34,6 +34,19 @@ struct AttrValue {
     float value = 0.0f;
 };
 
+// One `<AttributesAlign><Delta Factor Shift Priority Eclipse>` row (JS class
+// `Ci`, L800 ctor). `bp`/`shift`/`priority` are the `Factor`/`Shift`/
+// `Priority` attrs; `eclipse_op` is `OP` (L191):
+//   absent Eclipse -> 2, Eclipse="0" -> 1, Eclipse="1" -> 0.
+// `eNa(M)` (L1204) keeps a row when `OP==2`, or `OP==1` outside eclipse, or
+// `OP==0` inside eclipse.
+struct AlignDelta {
+    float bp = 0.0f;      // `Factor`
+    float shift = 0.0f;   // `Shift`
+    int priority = 0;     // `Priority`
+    int eclipse_op = 2;   // `OP`
+};
+
 // Fighter parameters the damage formula reads (JS `xc`/`El` fields).
 struct FighterParams {
     bool is_player = false;   // `qb`
@@ -47,6 +60,10 @@ struct FighterParams {
     float ly = 0.0f;          // `wd.Ly` — extra base damage (0 by default)
     // Attribute map (JS `attributes` = the `ud` map).
     std::map<std::string, float> attributes;
+    // `IY` (JS `xc.IY`, parsed L191 from `<AttributesAlign><Delta>`): the
+    // fighter's align-armor rows. `pAa` reads `(attacker.qb ? defender :
+    // attacker).IY`, filtered to the max `Priority` by `Ci.a5a` (L800).
+    std::vector<AlignDelta> iy;
 
     // JS `ud.get(name, out)` — returns the attribute value (0 if absent).
     float attr(const std::string& name) const {
@@ -72,12 +89,23 @@ struct FightParams {
     float block_damage_base = 0.0001f;
     std::string crit_damage_attr = "CriticalDamage";
     float crit_damage_base = 0.0001f;
+    // `v.gya` = `<CriticalHit><Probability Base Attribute/>` (L1157) — the
+    // crit-chance row read by `A9a`/`p8a` (L529): Base * attr when present.
+    std::string crit_chance_attr = "CriticalChance";
+    float crit_chance_base = 0.0001f;
+    // `v.kha` = `<Lifesteal Attribute Base/>` (L1158, `Eh` L1180) — the
+    // gear-lifesteal row `udb` (L403) reads.
+    std::string lifesteal_attr = "Lifesteal";
+    float lifesteal_base = 0.0001f;
     std::string block_defense_attr = "BodyDefense";
     float damage_doubling_range = 10.0f;  // BP
     float damage_factor_base = 0.0001f;   // Ypa
     float damage_factor_max = 20000.0f;   // Zpa
     std::string damage_factor_attr = "DamageFactor";
-    std::string slowmotion_defense = "";  // lNa
+    // `v.lNa` (L1154): `<SlowMotion Defense="BodyDefense"/>` — the shipped
+    // value is "BodyDefense" (the static default is ""). The unblocked,
+    // no-`<Defense>`, no-hit-capsule-Xi fallback in `LAa`.
+    std::string slowmotion_defense = "BodyDefense";
     // Shock config (JS `hw` = `v.Ub`, parsed L1194-1196 from
     // internal_settings.xml `<Shock>` — values verified 2026-09-04).
     float shock_threshold = 999.0f;     // `Treshold.Value`
@@ -87,6 +115,15 @@ struct FightParams {
     float shock_head_base = 0.0001f;    // `HeadHitChance.Base`
     // AlignTargetAttributes (JS `v.wv`): attribute name -> Align value.
     std::map<std::string, float> align_target_attributes;
+    // `p.o.Yh` — the eclipse flag `v.eNa` (L1204) tests. The dojo has no
+    // eclipse, so `OP==1` rows apply and `OP==0` rows are filtered out.
+    bool eclipse = false;
+    // NOTE `<ModifiedAlignFormula>`: `pAa` L1205 gates on `v.Seb.g6a(name)`,
+    // but `$v` (L608763) is `constructor(){this.k8=[]} g6a(name){...}` with
+    // NO `parse` and no caller — `v.Seb.k8` is always empty, so `g6a` always
+    // returns null and the log-remap branch is DEAD in the shipped build
+    // (`<ModifiedAlignFormula>` is also absent from the JS string table).
+    // Not ported: implementing it would invent behaviour the game never runs.
     // Magic charge tables (JS `v.jA` = settings `<Magic>`, Yv rows:
     // InitialCharge/PainRecharge/DamageRecharge, Base=0.0001 + Mk attr).
     std::string magic_initial_attr = "MagicInitialCharge";
@@ -96,11 +133,23 @@ struct FightParams {
     std::string magic_damage_attr = "MagicDamageRecharge";
     float magic_damage_base = 0.0001f;
 
-    static const FightParams& defaults() {
-        static const FightParams k;
-        return k;
-    }
+    // The process-wide instance (JS `v` statics), populated at boot from
+    // internal_settings.xml by `load_fight_params_from_settings`.
+    static const FightParams& defaults();
 };
+
+// The mutable process-wide `FightParams` (JS `v`). `load_fight_params_from_settings`
+// writes it; `FightParams::defaults()` reads it.
+FightParams& fight_params();
+
+// Populate `fight_params()` from the internal_settings.xml text (JS `v` parse
+// L1154-1158): `<AlignTargetAttributes>` -> `v.wv`, `<BlockDefense Attribute>`
+// -> `v.pYa`, `<SlowMotion Defense>` -> `v.lNa`, `<DamageFactor>` ->
+// `ACa/zCa`, `<BlockDamageFactor>` -> `VY`, `<CriticalHit><Damage>` -> `HZ`,
+// `<DamageDoublingRange Value>` -> `BP`, `<ModifiedAlignFormula>` -> `v.Seb`,
+// `<Lifesteal Attribute/Base>` -> `v.kha`, `<Regeneration>` -> `v.Bja`.
+// Malformed/absent nodes leave the shipped default in place.
+void load_fight_params_from_settings(const std::string& xml_text);
 
 // One Attack interval's damage block (JS `Ul` L774): the base Damage value
 // + the sub-<Damage> attribute shifts (SZ) + the Defense names (KP).
@@ -112,6 +161,10 @@ struct IntervalDamage {
     std::vector<std::pair<std::string, float>> attack_attrs;
     // KP: Defense attribute names from the sub-<Damage><Defense> elements.
     std::vector<std::string> defense_names;
+    // QX: the ATTACK move's `TacticWeapon` split on '|' (JS `jc.Gsb` L800 ->
+    // `e.da.Ua.QX`, passed to `bCa` L510 and tested by `c2a` L820 for
+    // "Fists"). Empty for non-attack intervals.
+    std::vector<std::string> qx;
 };
 
 // The damage computation result (JS `wd.Bb` = `pu` L558).

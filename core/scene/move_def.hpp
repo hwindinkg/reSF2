@@ -86,6 +86,11 @@ struct Interval {
     // Attack damage block (<Damage Value=..><Damage Type=.. Shift=..>).
     float damage = 0.0f;
     bool no_critical = false;
+    // The interval carried an outer `<Damage Value=..>` element at all
+    // (JS: `a=this.il.A("Damage"); this.Xb=u.H(a.attributes.get("Value"))` —
+    // unguarded, so the node is expected). 3 shipped blocks have no
+    // sub-`<Damage>`, which leaves `SZ` empty and `pAa` returning -FLT_MAX.
+    bool has_damage = false;
     // JS `Ul.J3` (L775): `this.DL = !u.ka(attrs.get("NoEffect"), false)` —
     // the `<Interval NoEffect="1">` attribute. `DL` gates the hit flash
     // (`Hyb`): `a.Pd.da.yD(4).DL && a.model.lrb(...)` (L395). 118 shipped
@@ -98,7 +103,19 @@ struct Interval {
     bool ignores_block = false;
     std::vector<std::string> ignore_block_names;
     bool ignores_invuln = false;
-    std::vector<std::string> invuln_bypass_names;    std::string damage_type;  // e.g. "UnarmedDamage"
+    std::vector<std::string> invuln_bypass_names;
+    // SZ (`Ul.qjb` L777-778): EVERY `<Damage Type Shift>` child of the
+    // interval's outer `<Damage Value=..>` block, in document order. `pAa`
+    // iterates all of them (L1205) and `i6a` (L430) picks the max-`Shift`
+    // one. 572 of the 615 shipped outer blocks carry two.
+    std::vector<std::pair<std::string, float>> attack_attrs;
+    // KP (`Ul.qjb` L778: `e=="Defense"&&this.KP.push(d)`): every `<Defense
+    // Type=..>` child. `LAa` (L536) returns `KP[0]` first. 120 shipped
+    // blocks carry one.
+    std::vector<std::string> defense_names;
+    // Legacy mirrors of `attack_attrs[0]` (kept for the probe/demo apps'
+    // printouts; `attack_attrs` is the authoritative list the formula uses).
+    std::string damage_type;  // e.g. "UnarmedDamage"
     float damage_shift = 0.0f;
     std::string hit_name;     // <Hit Name=..> inside the Attack interval
     float impulse_x = 0.0f, impulse_y = 0.0f, impulse_z = 0.0f;
@@ -179,6 +196,10 @@ struct MoveDef {
     int priority = 0;
     float style_factor = 1.0f;  // `RNa` (StyleFactor attr, default 1.0)
     std::string tactic_weapon;     // TacticWeapon
+    // QX (`jc.Gsb` L800): `TacticWeapon.split("|")` — the move's weapon list
+    // `c2a` (L820, called from `bCa` L510 with `e.da.Ua.QX`) tests for
+    // "Fists". 101 shipped moves carry a multi-entry list.
+    std::vector<std::string> qx;
     std::string tactic_equivalent; // TacticEquivalent
     std::string mirror_node;       // MirrorNode
     // JS `Fa.Ueb` (L712): after the move is parsed,

@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "xml_doc.hpp"
+
 namespace sf2::scene {
 
 namespace {
@@ -17,62 +19,100 @@ float attr_exp(const FighterParams& who, const std::string& attr, float base,
     return std::pow(2.0f, who.attr(attr) * base);
 }
 
-// JS `Bh.Gb(v.wv, name)` (L1164): the AlignTargetAttributes lookup (0 if
+// JS `Bh.Gb(v.wv, name)` (L1165): the AlignTargetAttributes lookup (0 if
 // the attribute is not in the align list).
 float align_value(const FightParams& fp, const std::string& name) {
     const auto it = fp.align_target_attributes.find(name);
     return it != fp.align_target_attributes.end() ? it->second : 0.0f;
 }
 
-// JS `v.iea` (L1205) -> `pAa` (L1204) + `l5a` (L1206): the balance
-// multiplier. For the demo's zero-attr fighters with an empty
-// AlignTargetAttributes list and no AttributesAlign deltas the result is
-// exactly 1 (2^(0/BP)). The full pAa math is transcribed in README.md;
-// the port keeps the rating-curve branch (v.Seb.g6a) out (no Rating
-// evaluation exists for the demo fighters) and the eclipse filter (eNa)
-// out (no Eclipse mode).
+// JS `Ci.x7a` + `Ci.a5a` (L800): `x7a` = the max `Priority` in the list;
+// `a5a(a,b)` copies only the rows carrying that priority into `b`.
+std::vector<AlignDelta> max_priority_deltas(const std::vector<AlignDelta>& in) {
+    std::vector<AlignDelta> out;
+    if (in.empty()) return out;
+    int best = in.front().priority;
+    for (const AlignDelta& d : in) best = std::max(best, d.priority);
+    for (const AlignDelta& d : in) {
+        if (d.priority == best) out.push_back(d);
+    }
+    return out;
+}
+
+// JS `v.eNa(a)` (L1204): true = the row is FILTERED OUT. `b = p.o.Yh` is the
+// eclipse flag: `!(b&&OP==0 || !b&&OP==1 || OP==2)`. So outside an eclipse
+// the participating rows are OP==2 and OP==1; inside, OP==2 and OP==0.
+bool eclipse_filtered(const AlignDelta& d, bool eclipse) {
+    const bool in_eclipse_armor = eclipse && d.eclipse_op == 0;
+    const bool out_eclipse_armor = !eclipse && d.eclipse_op == 1;
+    const bool always = d.eclipse_op == 2;
+    return !(in_eclipse_armor || out_eclipse_armor || always);
+}
+
+// JS `v.pAa(a,b,c,d,e,f,g,h)` (L1204-1205) + `v.l5a(t)` (L1206): the balance
+// multiplier, verbatim.
+//   a = attacker.qb, b = attacker params, c = defender params,
+//   d = the interval's SZ (attack attrs), e = the defense attr name.
+//   k = align(e); l = -k; e := defender.attr(e)  (`<Damage>` `Value` term)
+//   x = Ci.a5a((a ? c : b).IY)                   (max-Priority subset)
+//   per attack attr (name C, shift S):
+//     B = attacker.attr(C) + S ; A = align(C)
+//     W = min (a) / max (!a) over the kept rows of
+//         (B-e)*(1-Q) + (A-k)*Q  -/+ M   (Q = row.bp, M = row.shift)
+//     t = max(t, W) ; l = A - k
+//   return t ; `iea` retries once when t > 10 then `l5a` = 2^(t/BP).
+// The `v.Seb.g6a(C)` log-remap between the two is DEAD in the shipped build
+// (`$v`/`v.Seb` has no `parse`, so `k8` is always empty) — see damage.hpp.
+// The caller (`iea`) discards the `g`/`h` out-params (`n`/`q`), so they are
+// not carried here.
 float balance_multiplier(const FighterParams& attacker,
                          const FighterParams& defender,
                          const IntervalDamage& interval,
                          const std::string& defense_attr,
                          const FightParams& fp) {
-    // pAa: k = align(attacker, defenseAttr); l = 0 - k; e = defender's
-    // defense attr value.
     const float k = align_value(fp, defense_attr);
     const float e = defender.attr(defense_attr);
+    const std::vector<AlignDelta> x = max_priority_deltas(
+        attacker.is_player ? defender.iy : attacker.iy);
 
-    // For each attack attribute (name, shift):
-    //   B = attacker.attr(name) + shift
-    //   A = align(attacker, name)
-    //   W = min/max over the fighter's IY Align deltas of
-    //       (B-e)*(1-Q) + (A-k)*Q  -/+ M   (attacker: min & -M, defender
-    //       would use the defender's IY; the demo fighters have none).
-    //   t = max(t, W); l = A - k.
     float t = -3.4028234663852886e38f;  // -FLT_MAX
-    float l = 0.0f - k;
     for (const auto& ad : interval.attack_attrs) {
         const float B = attacker.attr(ad.first) + ad.second;
         const float A = align_value(fp, ad.first);
-        float W = B - e;  // (B-e)*(1-0) + (A-k)*0 - 0  with no align deltas
-        // The attacker-side min over IY (JS `x` = the attacker's
-        // AttributesAlign list). The default warriors have no IY, so x is
-        // empty and the loop body never runs: W stays (B-e) and the min
-        // never updates. t takes the max over all attack attrs.
-        t = std::max(t, W);
-        l = A - k;
+        float W;
+        if (attacker.is_player) {
+            W = 3.4028234663852886e38f;  // +FLT_MAX (min over the rows)
+            for (const AlignDelta& m : x) {
+                if (eclipse_filtered(m, fp.eclipse)) continue;
+                const float U = (B - e) * (1.0f - m.bp) + (A - k) * m.bp - m.shift;
+                if (U < W) W = U;
+            }
+        } else {
+            W = -3.4028234663852886e38f;  // -FLT_MAX (max over the rows)
+            for (const AlignDelta& m : x) {
+                if (eclipse_filtered(m, fp.eclipse)) continue;
+                const float U = (B - e) * (1.0f - m.bp) + (A - k) * m.bp + m.shift;
+                if (W < U) W = U;
+            }
+        }
+        if (t < W) t = W;
     }
-    if (t < -3.4e37f) t = 0.0f;  // no attack attrs (shouldn't happen)
+    // No `SZ` entries (3 shipped blocks): the JS loop never runs, `t` stays
+    // -FLT_MAX and `l5a` = 2^(-FLT_MAX/BP) = 0 — i.e. the hit deals no
+    // damage. Deliberately NOT special-cased to 1.
 
-    // iea: k = pAa(...); if k > 10 recompute (the JS calls pAa twice when
-    // the first result exceeds 10 — a rounding retry). Then 2^(k/BP).
-    if (t > 10.0f) {
-        // Recompute with the same inputs (no state changes) — the retry is
-        // a no-op in the port.
-    }
+    // `iea` (L1205-1206): retry once when t > 10, then `l5a` = 2^(t/BP).
     return std::pow(2.0f, t / fp.damage_doubling_range);
 }
 
 }  // namespace
+
+FightParams& fight_params() {
+    static FightParams params;
+    return params;
+}
+
+const FightParams& FightParams::defaults() { return fight_params(); }
 
 std::string select_defense(const IntervalDamage& interval, bool blocked,
                            const HitCapsule* hit_cap, const FightParams& fp) {
@@ -109,9 +149,12 @@ float compute_damage(const IntervalDamage& interval, const FighterParams& attack
     g = (interval.base_damage + attacker.ly) * g * b * c * h * attacker.uz;
     g = std::max(g, 0.0f);
 
-    // g = attacker.c2a(d, g): Fists armor — if the defense attr is "Fists"
-    // (an unarmed block), scale by the attacker's FistsDamageMod.
-    if (d == "Fists") {
+    // g = attacker.c2a(interval.qx, g) (L514 -> L820): `c2a(a,b)` returns
+    // `b * M_` when the ATTACK MOVE's `QX` list (`TacticWeapon` split on
+    // '|', `jc.Gsb` L800) contains "Fists"; otherwise `b`. The old port
+    // tested the DEFENSE attribute name — the wrong operand.
+    if (std::find(interval.qx.begin(), interval.qx.end(), "Fists") !=
+        interval.qx.end()) {
         g *= attacker.m_;
     }
 
@@ -150,16 +193,13 @@ void apply_damage(HitRecord& rec, float hp, bool invulnerable) {
 }
 
 float crit_chance(const FighterParams& attacker, const FightParams& fp) {
-    (void)fp;
-    // v.gya = the CriticalHit Probability (Base=0.0001, Attribute=
-    // "CriticalChance") — internal_settings <CriticalHit><Probability>.
-    constexpr float kCritBase = 0.0001f;
-    const std::string kCritAttr = "CriticalChance";
-    // p8a: if the attr exists -> base * value, else base.
-    if (attacker.has_attr(kCritAttr)) {
-        return kCritBase * attacker.attr(kCritAttr);
+    // `v.gya` = the CriticalHit/Probability row (Base=0.0001, Attribute=
+    // "CriticalChance", internal_settings L487-488) — `p8a` (L529): if the
+    // attr exists -> base * value, else base.
+    if (!fp.crit_chance_attr.empty() && attacker.has_attr(fp.crit_chance_attr)) {
+        return fp.crit_chance_base * attacker.attr(fp.crit_chance_attr);
     }
-    return kCritBase;
+    return fp.crit_chance_base;
 }
 
 bool roll_crit(float chance) {
@@ -167,6 +207,99 @@ bool roll_crit(float chance) {
     if (chance > 100.0f) return true;
     const float r = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
     return r * 100.0f < chance;
+}
+
+// ---------------------------------------------------------------------------
+// internal_settings.xml -> fight_params() (JS `v` statics, parse L1154-1158)
+// ---------------------------------------------------------------------------
+namespace {
+
+// JS `Eh.parse` (L1180): `Mk = Attribute != null ? Attribute : "COM"`,
+// `Bc = Base`. `v.VY`/`v.HZ`/`v.kha`/`v.Bja`/`v.gya` all use this shape.
+void parse_eh(const pugi::xml_node n, std::string& attr, float& base) {
+    if (!n) return;
+    const char* a = n.attribute("Attribute").value();
+    attr = (a != nullptr && *a != '\0') ? a : "COM";
+    if (n.attribute("Base")) base = n.attribute("Base").as_float();
+}
+
+// JS `hw.parse` (L1194-1196) — the `<Shock>` block.
+void parse_shock(const pugi::xml_node n, FightParams& v) {
+    if (!n) return;
+    if (n.child("Treshold")) v.shock_threshold = n.child("Treshold").attribute("Value").as_float();
+    if (n.child("FrameReduction"))
+        v.shock_frame_reduction = n.child("FrameReduction").attribute("Value").as_float();
+    if (n.child("LooseningDelay"))
+        v.shock_loosening_delay = n.child("LooseningDelay").attribute("Frames").as_int();
+    const pugi::xml_node chc = n.child("CriticalHitChance");
+    if (chc.attribute("Base")) v.shock_crit_base = chc.attribute("Base").as_float();
+    const pugi::xml_node hhc = n.child("HeadHitChance");
+    if (hhc.attribute("Base")) v.shock_head_base = hhc.attribute("Base").as_float();
+}
+
+// JS `Yv` (`v.jA`, `<Magic>`, L1158) — the three recharge rows.
+void parse_magic(const pugi::xml_node n, FightParams& v) {
+    if (!n) return;
+    parse_eh(n.child("InitialCharge"), v.magic_initial_attr, v.magic_initial_base);
+    parse_eh(n.child("PainRecharge"), v.magic_pain_attr, v.magic_pain_base);
+    parse_eh(n.child("DamageRecharge"), v.magic_damage_attr, v.magic_damage_base);
+}
+
+}  // namespace
+
+void load_fight_params_from_settings(const std::string& xml_text) {
+    if (xml_text.empty()) return;
+    pugi::xml_document doc;
+    if (!doc.load_buffer(xml_text.data(), xml_text.size())) return;
+    const pugi::xml_node root = doc.document_element();
+    if (!root) return;
+    FightParams& v = fight_params();
+
+    // `v.wv` (L1157): `<AlignTargetAttributes><Attribute Name Value/>`.
+    if (const pugi::xml_node al = root.child("AlignTargetAttributes")) {
+        v.align_target_attributes.clear();
+        for (const pugi::xml_node a : al.children("Attribute")) {
+            const char* nm = a.attribute("Name").value();
+            if (nm != nullptr && *nm != '\0') {
+                v.align_target_attributes[nm] = a.attribute("Value").as_float();
+            }
+        }
+    }
+    // `v.pYa` (L1156) = `<BlockDefense Attribute>`.
+    if (const pugi::xml_node bd = root.child("BlockDefense")) {
+        const char* a = bd.attribute("Attribute").value();
+        if (a != nullptr) v.block_defense_attr = a;
+    }
+    // `v.lNa` (L1154) = `<SlowMotion Defense>`.
+    if (const pugi::xml_node sm = root.child("SlowMotion")) {
+        const char* d = sm.attribute("Defense").value();
+        if (d != nullptr) v.slowmotion_defense = d;
+    }
+    // `v.BP` (L1156) = `<DamageDoublingRange Value>`.
+    if (const pugi::xml_node bp = root.child("DamageDoublingRange")) {
+        if (bp.attribute("Value")) v.damage_doubling_range = bp.attribute("Value").as_float();
+    }
+    // `v.ACa/zCa/E9a` (L1155) = `<DamageFactor Base Attribute MaxValue>`.
+    if (const pugi::xml_node df = root.child("DamageFactor")) {
+        if (df.attribute("Base")) v.damage_factor_base = df.attribute("Base").as_float();
+        const char* a = df.attribute("Attribute").value();
+        if (a != nullptr && *a != '\0') v.damage_factor_attr = a;
+        if (df.attribute("MaxValue")) v.damage_factor_max = df.attribute("MaxValue").as_float();
+    }
+    // `v.VY` (L1156) = `<BlockDamageFactor Base Attribute>`.
+    parse_eh(root.child("BlockDamageFactor"), v.block_damage_attr, v.block_damage_base);
+    // `v.HZ` (L1156) = `<CriticalHit><Damage Base Attribute>`.
+    parse_eh(root.child("CriticalHit").child("Damage"), v.crit_damage_attr,
+             v.crit_damage_base);
+    // `v.gya` (L1157) = `<CriticalHit><Probability Base Attribute>`.
+    parse_eh(root.child("CriticalHit").child("Probability"), v.crit_chance_attr,
+             v.crit_chance_base);
+    // `v.kha` (L1158) = `<Lifesteal Base Attribute>`.
+    parse_eh(root.child("Lifesteal"), v.lifesteal_attr, v.lifesteal_base);
+    // `v.Ub` (L1158) = `<Shock>`.
+    parse_shock(root.child("Shock"), v);
+    // `v.jA` (L1158) = `<Magic>`.
+    parse_magic(root.child("Magic"), v);
 }
 
 }  // namespace sf2::scene

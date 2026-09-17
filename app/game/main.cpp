@@ -778,10 +778,12 @@ struct VerifyProbe {
 
 // The `--verify-input` tape. Control ids are JS `sa.$h`
 // (1=Up,3=Forward,5=Down,7=Back,9=Punch,10=Kick,11=Ranged,12=Magic,
-// 13=RaidCharge,14=Super). The double-taps are two same-frame taps: JS
-// `zl.Sgb` (L798) appends every keydown to the 2-slot `zg.sh`, so two taps
-// that never get consumed by a lower-priority move combine into the `2key`
-// move — exactly what the debug audit flagged as missing.
+// 13=RaidCharge,14=Super). A double-tap is press-RELEASE-press: JS
+// `zl.Sgb` (L798) is guarded by `!a.sl` (the key must not already be
+// down), so two same-frame downs of one key produce ONE tap, not two.
+// The earlier tape's `down;down` pairs were exactly that bug, plus Punch
+// was never released, which made the later K press (`sl` still set) a
+// no-op — both fixed here.
 static const VerifyProbe kVerifyProbes[] = {
     {180, "Back Tap x2 (spawn gap 283)", "DashBackwards", 4, false},
     {300, "Forward Tap x2", "DoubleStepForward", 4, false},
@@ -800,18 +802,23 @@ std::vector<ReplayEdge> build_verify_edges() {
     auto up = [&](int f, int c) { e.push_back(ReplayEdge{f, c, false}); };
     // DashBackwards = Back Tap x2 (moves.xml L358527) FIRST, at the spawn gap
     // (dist 283): once the higher-priority `WallDashForward_50` (Back Tap x2
-    // + a `Max=100` gap) is out of range.
+    // + a `Max=100` gap) is out of range. Tap = down;up;down (JS `!a.sl`).
     down(180, 7);
+    up(180, 7);
     down(180, 7);
     up(220, 7);
     // DoubleStepForward = Forward Tap x2 (moves.xml L499745).
     down(300, 3);
+    up(300, 3);
     down(300, 3);
     up(340, 3);
-    // DoublePunch = Punch Tap x2 + Forward Hold (moves.xml L609376).
+    // DoublePunch = Punch Tap x2 + Forward Hold (moves.xml L609376). Punch is
+    // released at 470 with Forward so the K press at 620 is a fresh down.
     down(400, 3);
     down(420, 9);
+    up(420, 9);
     down(420, 9);
+    up(470, 9);
     up(470, 3);
     // Single Forward taps: 1key StepForward; two lone taps 30 frames apart
     // are two single steps — never DoubleStepForward (the first tap is
@@ -1520,26 +1527,70 @@ int main(int argc, char** argv) {
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
 
-        // Unit-level buffer check (JS `zl.Sgb`/`ia` L798): 2-slot Tap
-        // sequence, no same-key replacement, holds rebuilt from the down
-        // keys, and the 15-frame tap window (present through +14, gone +15).
+        // Unit-level buffer check (JS `zl.Sgb`/`ia` L798): the `!a.sl`
+        // guard means a second down of a key that is still held is IGNORED
+        // (one Tap row, not two) — two taps require a release between them.
+        // Then the 2-slot Tap cap (a 3rd evicts the oldest), holds rebuilt
+        // from the down keys, and the 15-frame tap window (present through
+        // +14, gone +15).
         if (verify_input) {
             sf2::scene::Fighter f;
+            // JS-exact: a same-frame double-down of ONE key = 1 tap.
             f.input(sf2::scene::key_type::forward, sf2::scene::press_type::tap);
+            f.input(sf2::scene::key_type::forward, sf2::scene::press_type::tap);
+            const bool one = f.buffered_tap_count() == 1;
+            // Press-release-press = two taps.
+            f.input(sf2::scene::key_type::forward, sf2::scene::press_type::release);
             f.input(sf2::scene::key_type::forward, sf2::scene::press_type::tap);
             const bool two = f.buffered_tap_count() == 2;
+            // A third press again evicts the oldest (2-slot cap).
+            f.input(sf2::scene::key_type::forward, sf2::scene::press_type::release);
             f.input(sf2::scene::key_type::forward, sf2::scene::press_type::tap);
-            const bool cap = f.buffered_tap_count() == 2;  // 3rd evicts the oldest
+            const bool cap = f.buffered_tap_count() == 2;
             const bool hold = f.buffered_hold_count() == 1;
             for (int i = 0; i < 15; ++i) f.age_keys();
             const bool alive = f.buffered_tap_count() == 2;  // still there at +14
             f.age_keys();
             const bool gone = f.buffered_tap_count() == 0;  // cleared at +15
             std::fprintf(stdout,
-                         "[verify] buffer: 2-tap=%d cap2=%d hold=%d alive@+14=%d "
-                         "empty@+15=%d -> %s\n",
-                         two, cap, hold, alive, gone,
-                         (two && cap && hold && alive && gone) ? "PASS" : "FAIL");
+                         "[verify] buffer: dbl-down=1tap(%d) 2-tap=%d cap2=%d hold=%d "
+                         "alive@+14=%d empty@+15=%d -> %s\n",
+                         one, two, cap, hold, alive, gone,
+                         (one && two && cap && hold && alive && gone) ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        }
+
+        // Damage-parse assertion (JS `Ul.qjb` L777-778): EVERY sub-`<Damage>`
+        // child lands in `SZ` and every `<Defense>` child in `KP`. The old
+        // parser read `.child("Damage")` (first only) and ignored
+        // `<Defense>`. Counts below are the authoritative XML-tree scan of
+        // the shipped moves.xml (`617` outer `<Damage Value=..>` blocks, 568
+        // of them with 2 sub-`<Damage>`, 120 with a `<Defense>`, 1182
+        // sub-`<Damage>` entries, and 3 outer blocks with NO sub-entry —
+        // those carry no `SZ`, so they are excluded from the `outer` count).
+        if (verify_input) {
+            int outer = 0, two_sub = 0, with_defense = 0, sub_total = 0, no_sz = 0;
+            for (const auto& kv : app.fight_assets().moves) {
+                for (const sf2::scene::Interval& iv : kv.second.intervals) {
+                    if (iv.type != 4 || !iv.has_damage) continue;
+                    if (iv.attack_attrs.empty()) {
+                        ++no_sz;
+                        continue;
+                    }
+                    ++outer;
+                    sub_total += static_cast<int>(iv.attack_attrs.size());
+                    if (iv.attack_attrs.size() >= 2) ++two_sub;
+                    if (!iv.defense_names.empty()) ++with_defense;
+                }
+            }
+            const bool parse_ok = outer == 614 && two_sub == 568 &&
+                                  with_defense == 120 && sub_total == 1182 &&
+                                  no_sz == 3;
+            std::fprintf(stdout,
+                         "[verify] damage parse: outer=%d/614 2sub=%d/568 "
+                         "defense=%d/120 subTotal=%d/1182 noSZ=%d/3 -> %s\n",
+                         outer, two_sub, with_defense, sub_total, no_sz,
+                         parse_ok ? "PASS" : "FAIL");
             std::fflush(stdout);
         }
 

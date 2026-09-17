@@ -548,6 +548,12 @@ bool App::init(const std::string& res_root, const std::string& save_path,
                     sf2::scene::set_fighter_pivot_bone(pivot.attribute("Name").value());
                 }
             }
+            // JS `v` statics (parse L1154-1158): AlignTargetAttributes
+            // (`v.wv`), BlockDefense (`v.pYa`), SlowMotion (`v.lNa`),
+            // DamageDoublingRange (`v.BP`), DamageFactor/BlockDamageFactor/
+            // CriticalHit rows, Lifesteal (`v.kha`), Shock (`v.Ub`), Magic
+            // (`v.jA`). Loaded from the SAME document.
+            sf2::scene::load_fight_params_from_settings(settings_xml);
         } catch (const std::exception&) {
             // Config absent: keep the shipped default "NPivot".
         }

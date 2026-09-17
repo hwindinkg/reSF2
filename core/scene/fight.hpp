@@ -700,6 +700,14 @@ struct BattleParams {
     // 0+10·lvl, BlockDamageFactor −23219 ⇒ 2^(−2.3219)=0.2× on block). The
     // app layer fills this (character_progress.xml + the save's level/items).
     std::map<std::string, float> player_attrs;
+    // The fighter's `IY` align-armor rows (JS `xc.IY` -> `damage.hpp`
+    // `AlignDelta`), resolved from stages.xml `<AttributesAlign>` (own rows
+    // appended after the inherited `Default` template's — see
+    // `modes.hpp::stage_warrior_align`). `pAa` reads
+    // `(attacker.qb ? defender : attacker).IY`, so in a player-vs-enemy fight
+    // the ENEMY's rows always govern the blend; the player set is `Default`'s.
+    std::vector<sf2::scene::AlignDelta> player_align;
+    std::vector<sf2::scene::AlignDelta> enemy_align;
 };
 
 // JS `bb.OE` (L887-888) + `bb.M3`/`bb.xe` (L888-894): parse the stage
@@ -1378,9 +1386,22 @@ private:
     // The shared fight draw (JS `Da.pg.jf()`, L2352): the external override
     // when installed, else the owned `prng_` (`Rk.s4(1)` == `Rk.jf`).
     float draw01();
+    // JS `uf.RJa()` (L115) = `Math.random()` — the UNSEEDED stream `wd.R8a`
+    // (L531) pulls its two shock rolls from. Deliberately NOT `Da.pg`:
+    // routing them through the shared fight stream desynced crit/AI.
+    static float math_random01();
     // JS `Da.IT(a)` (L2353: `Da.pg.sL(a)`): reseed the shared stream in
     // place (the `cl.pmb` reseed).
     void reseed_stream(int seed);
+    // JS `wd.$db(a,b,c)` (L523: `this.i_.add(a,b,c)`) — the per-hit
+    // accumulator fed `(Zi, i6a(SZ), JP)` in `Cgb` (L395). Same call order
+    // as the HP spend, so the entries line up with the logged hits.
+    struct DamageLogEntry {
+        float zi = 0.0f;         // the post-`ws` Zi
+        std::string attr;        // `i6a(SZ)` — the max-Shift attack attr
+        std::string defense;     // `JP`
+    };
+    std::vector<DamageLogEntry> i_;
 
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)

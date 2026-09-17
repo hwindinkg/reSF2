@@ -147,12 +147,32 @@ void parse_interval(pugi::xml_node node, int end_frame_default, Interval& out) {
             out.impulse_z = data::xml_attr_float(imp, "Z", 0.0f);
             out.has_impulse = true;
         }
+        // JS `Ul.qjb` (L777-778): `Xb=Damage/@Value`,
+        // `a3=Damage/@NoCritical`, `HC=Damage/@BodyPart`, then child
+        // dispatch — EVERY `<Damage Type Shift>` -> SZ (`attack_attrs`),
+        // EVERY `<Defense Type>` -> KP (`defense_names`). The old port read
+        // `.child("Damage")` (the FIRST sub-block only) and never looked at
+        // `<Defense>`, so 572-43 = 529 blocks lost their second attribute
+        // and 120 lost their authored defense.
         if (pugi::xml_node dmg = node.child("Damage")) {
+            out.has_damage = true;
             out.damage = data::xml_attr_float(dmg, "Value", 0.0f);
             out.no_critical = data::xml_attr_bool(dmg, "NoCritical", false);
-            if (pugi::xml_node sub = dmg.child("Damage")) {
-                out.damage_type = sub.attribute("Type") ? sub.attribute("Type").value() : "";
-                out.damage_shift = data::xml_attr_float(sub, "Shift", 0.0f);
+            for (pugi::xml_node sub : dmg.children()) {
+                const std::string tag = sub.name();
+                const char* type = sub.attribute("Type").value();
+                const std::string t = type != nullptr ? type : "";
+                if (tag == "Damage") {
+                    out.attack_attrs.push_back(
+                        {t, data::xml_attr_float(sub, "Shift", 0.0f)});
+                } else if (tag == "Defense") {
+                    out.defense_names.push_back(t);
+                }
+            }
+            // Legacy mirror of the first sub-block (probe/demo printouts).
+            if (!out.attack_attrs.empty()) {
+                out.damage_type = out.attack_attrs[0].first;
+                out.damage_shift = out.attack_attrs[0].second;
             }
         }
         if (pugi::xml_node combo = node.child("Combo")) {
@@ -460,7 +480,19 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         def.end_frame = data::xml_attr_int(move, "EndFrame", 0);
         def.priority = data::xml_attr_int(move, "Priority", 0);
         def.style_factor = data::xml_attr_float(move, "StyleFactor", 1.0f);  // `RNa`
-        if (pugi::xml_attribute w = move.attribute("TacticWeapon")) def.tactic_weapon = w.value();
+        if (pugi::xml_attribute w = move.attribute("TacticWeapon")) {
+            def.tactic_weapon = w.value();
+            // JS `l.Gsb(n)` (L711): `n = TacticWeapon; QX = n.split("|")`.
+            const std::string raw = w.value();
+            std::size_t start = 0;
+            while (start <= raw.size()) {
+                const std::size_t bar = raw.find('|', start);
+                const std::size_t stop = bar == std::string::npos ? raw.size() : bar;
+                if (stop > start) def.qx.push_back(raw.substr(start, stop - start));
+                if (bar == std::string::npos) break;
+                start = bar + 1;
+            }
+        }
         if (pugi::xml_attribute e = move.attribute("TacticEquivalent")) def.tactic_equivalent = e.value();
         if (pugi::xml_attribute m = move.attribute("MirrorNode")) def.mirror_node = m.value();
         // JS `Fa.Ueb` (L712) + `Ru` (L1253): `<Profile Show Rank Icon

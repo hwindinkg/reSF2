@@ -3816,7 +3816,29 @@ struct BattleWarriorInfo {
     std::string tactic;
     std::map<std::string, std::string> attrs;
     std::vector<std::string> items;
+    // `xc.IY` (JS L191): the warrior's effective `<AttributesAlign>` rows —
+    // its own appended after the inherited `<Template Name="Default">` rows
+    // (`pGa` L198). `pAa` blends with these.
+    std::vector<sf2::scene::StageWarrior::Delta> align;
+    // The `Default` template's rows = the player/avatar `IY`.
+    std::vector<sf2::scene::StageWarrior::Delta> player_align;
 };
+
+// `StageWarrior::Delta` -> `damage.hpp` `AlignDelta` (same fields, float).
+std::vector<sf2::scene::AlignDelta> to_align_deltas(
+    const std::vector<sf2::scene::StageWarrior::Delta>& in) {
+    std::vector<sf2::scene::AlignDelta> out;
+    out.reserve(in.size());
+    for (const sf2::scene::StageWarrior::Delta& d : in) {
+        sf2::scene::AlignDelta a;
+        a.bp = static_cast<float>(d.factor);
+        a.shift = static_cast<float>(d.shift);
+        a.priority = d.priority;
+        a.eclipse_op = d.eclipse_op;
+        out.push_back(a);
+    }
+    return out;
+}
 
 BattleWarriorInfo battle_warrior(const std::string& battle_name,
                                  const std::string& zone_name, int fight_index = 0) {
@@ -3874,6 +3896,13 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         if (!warriors) return out;
         const pugi::xml_node w = warriors.child("Warrior");
         if (!w) return out;
+        {
+            // `xc.IY`: the warrior's own rows appended after `Default`'s
+            // (JS `pGa` L198; `stage_warrior_align` in modes.hpp).
+            const pugi::xml_node templates = root.child("Templates");
+            out.align = sf2::scene::modes_detail::stage_warrior_align(w, templates);
+            out.player_align = sf2::scene::modes_detail::default_align(templates);
+        }
         for (const pugi::xml_attribute a : w.attributes()) {
             out.attrs[a.name()] = a.value();
         }
@@ -6482,6 +6511,11 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     }
     battle.enemy_not_ai = bw.has_not_ai;
     battle.enemy_not_animation = bw.has_not_animation;
+    // `xc.IY` (JS L191): the align-armor rows `pAa` blends with. In a
+    // player-vs-enemy fight `pAa` reads `(attacker.qb ? defender : attacker).IY`,
+    // i.e. always the ENEMY's rows; the player's set is `Default`'s.
+    battle.enemy_align = to_align_deltas(bw.align);
+    battle.player_align = to_align_deltas(bw.player_align);
     if (!bw.tactic.empty()) { const auto tit = assets.tactic_defs.find(bw.tactic); if (tit != assets.tactic_defs.end()) tactic = &tit->second; }  // JS `ur` L194: stage warrior `Tactic`
     // JS `xc.cM` L809-810: each warrior is built from its OWN equipment
     // (Skeleton + Weapon + Armor + Helm `Model` list -> `Yc.load` L568 merges

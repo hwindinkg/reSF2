@@ -49,6 +49,10 @@ struct StageWarrior {
     struct Delta {
         double factor = 0.0, shift = 0.0;
         int priority = 0;
+        // `OP` (JS `Ci.OP`, L191): absent Eclipse -> 2, Eclipse="0" -> 1,
+        // Eclipse="1" -> 0. `v.eNa` (L1204) filters the damage `IY` rows by
+        // this and the eclipse flag.
+        int eclipse_op = 2;
     };
     std::vector<Delta> align;  // <AttributesAlign> (application OPEN)
 };
@@ -180,6 +184,61 @@ inline double xml_num(const pugi::xml_node& n, const char* attr, double def) {
     return def;
 }
 
+// One `<AttributesAlign><Delta Factor Shift Priority Eclipse>` child -> a
+// `StageWarrior::Delta` (JS `Ci` ctor L800 + the parse at L191). Shared by the
+// warrior parse and the inherited-align resolver so the two cannot drift.
+inline void collect_align(const pugi::xml_node& node,
+                          std::vector<StageWarrior::Delta>& out) {
+    if (!node) return;
+    for (const pugi::xml_node d : node.children("Delta")) {
+        StageWarrior::Delta dt;
+        dt.factor = xml_num(d, "Factor", 0.0);
+        dt.shift = xml_num(d, "Shift", 0.0);
+        dt.priority = xml_int(d, "Priority", 0);
+        // JS L191: `Eclipse==null ? OP=2 : (I(Eclipse)==0 ? 1 : 0)`.
+        const pugi::xml_attribute ecl = d.attribute("Eclipse");
+        dt.eclipse_op = !ecl ? 2 : (ecl.as_int() == 0 ? 1 : 0);
+        out.push_back(dt);
+    }
+}
+
+// The `<Template Name="Default">` align rows — the player/avatar `IY` (the
+// only template in stages.xml that carries an `<AttributesAlign>`).
+inline std::vector<StageWarrior::Delta> default_align(
+    const pugi::xml_node& templates) {
+    std::vector<StageWarrior::Delta> out;
+    if (!templates) return out;
+    for (const pugi::xml_node t : templates.children("Template")) {
+        const char* nm = t.attribute("Name").value();
+        if (nm != nullptr && std::string(nm) == "Default") {
+            collect_align(t.child("AttributesAlign"), out);
+            break;
+        }
+    }
+    return out;
+}
+
+// JS `pGa` (L198) + `xc` parse (L191): the EFFECTIVE `<AttributesAlign>` rows
+// of a stage warrior. `pGa` appends the derived node's `<AttributesAlign>`
+// child to the base clone, so inherited rows come FIRST and the warrior's own
+// rows last; the whole `Templates` section carries exactly ONE such block
+// (`<Template Name="Default">`, the player/avatar base), so the resolved list
+// is `Default`'s rows + the warrior's own. `Ci.a5a` (L800) then keeps only the
+// max-`Priority` rows — which is how a per-warrior set overrides `Default`'s
+// (e.g. Dojo_Disciple's two `Priority="1"` rows).
+inline std::vector<StageWarrior::Delta> stage_warrior_align(
+    const pugi::xml_node& warrior, const pugi::xml_node& templates) {
+    std::vector<StageWarrior::Delta> out;
+    if (!warrior) return out;
+    // Only a warrior that inherits (has a `Template` attr) picks up the
+    // `Default` rows; a standalone warrior (Punchbag) uses only its own.
+    if (warrior.attribute("Template")) {
+        out = default_align(templates);
+    }
+    collect_align(warrior.child("AttributesAlign"), out);
+    return out;
+}
+
 inline StageWarrior parse_warrior(const pugi::xml_node& w) {
     StageWarrior out;
     for (const pugi::xml_attribute a : w.attributes()) {
@@ -221,16 +280,7 @@ inline StageWarrior parse_warrior(const pugi::xml_node& w) {
             out.groups.push_back(std::move(r));
         }
     }
-    const pugi::xml_node align = w.child("AttributesAlign");
-    if (align) {
-        for (const pugi::xml_node d : align.children("Delta")) {
-            StageWarrior::Delta dt;
-            dt.factor = xml_num(d, "Factor", 0.0);
-            dt.shift = xml_num(d, "Shift", 0.0);
-            dt.priority = xml_int(d, "Priority", 0);
-            out.align.push_back(dt);
-        }
-    }
+    collect_align(w.child("AttributesAlign"), out.align);
     return out;
 }
 
