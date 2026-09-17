@@ -16,7 +16,7 @@
 #include <set>
 
 #include "anim_archive.hpp"
-#include "scene/ai.hpp"        // TacticDef / AiFeatureState / weight_curve_eval
+#include "scene/ai.hpp"        // StrikeMemory (the `wd.Cn` strike accumulator)
 #include "scene/conditions.hpp"
 #include "scene/move_def.hpp"
 
@@ -803,31 +803,36 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     return true;
 }
 
-// JS `wd.Lea` (L512) snapshots the buffered keys into `Fc.keys`; the move
-// selection tests each `hb` candidate in priority order (JS `Zka` L502 +
-// `de.V1` L601). The FIRST passing move starts. The `1key` template means
-// one buffered Tap of a single key.
-std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
-                                     const AiFeatureState* feat) {
-    // JS `wd.Ykb` (L500, the player's KeyPressed handler — `Anb` -> `Ykb` when
-    // `Je==2`/RoundStage Fight) calls the move finder `nf.ia(a, ...)`
-    // UNCONDITIONALLY: there is NO `da.Ua==null` (no-anim-playing) test. The
-    // only `da.Ua==null` guard in this area is in `wd.tKa` (L499) and gates
-    // the STRIKE/hit check, not move selection. The old blanket
-    // `current_move_ != nullptr` early-return was therefore a port bug: it
-    // locked the player into the auto-played stance idle (`ai_start_move`
-    // of FistsStartStanceIdle-*, a 38-frame clip x3 subframes = 114 fight
-    // frames), which outlasts the whole round, so every real-time key/pointer
-    // press was dropped — the reported dead fight input (menus/map pointer
-    // work; in-fight pad + keyboard "do nothing"). Interrupt gating is done
-    // by the candidate's OWN Conditions (Uninterrupt / SemiUninterrupt /
-    // CurrentAnimation), which `try_start_move` -> `eval_move_conditions`
-    // already evaluates below; `hb_` is in the JS `ra.Lk` document order
-    // (P4a), which is the order `Gc.EZa` L676 walks `ru.iQ` in.
-    // JS `wd.Ykb` fires from the `Anb` KeyPressed event (`Gc.type==2`) — on a
-    // PRESS EDGE, not every tick. Only attempt selection when a Tap is
-    // buffered; a lingering Hold is a continuation for the current move's
-    // conditions, not a new press.
+// The PLAYER's move start — the JS `Gc.DK` `c == false` branch (L673-674),
+// NOT the tactic roulette. Full hop table in `fighter.hpp`.
+//
+//   candidates: `Gc.EZa` (L676) walks `d.Su.dea(c.type)` with `c.type == 2`
+//     (`Gc.mS` L672 <- `wd.BHa` L507 <- `zl.rwa` L799 <- `zl.Sgb` L798 <-
+//     `wd.yJa` L501 <- `ca.N0a` L426 `this.eu==2 && b.yJa(a)`). `ru.FT`
+//     (L538) files a move under type 2 iff its `<Events>` contains
+//     `<KeyPressed/>` (the `1key` Template -> `Controlled`, moves.xml), and
+//     `EZa` then re-tests the move's own `<Conditions>` via `f.Yz(b,null,g)`
+//     (L677) — the `<Keys>` gate lives there.
+//   `DK(a,b,false)`: `d` = {eb && !Rha} = EMPTY because `Gc.mS` /
+//     `Gc.Ih(2,a)` leaves `eb` false, so `d.length>0` is false and `Pkb`
+//     never runs; therefore NO `M7.Wcb` mirror filter, NO `va.Ts`
+//     <Tactics><Conditions> filter and NO `this.jL` -> `de.jL` -> `Md.jL`
+//     weighted roulette (all of them live inside `Pkb`, L674-676).
+//   `DK` else branch: `f` = the `Aua` max-`priority` group of the non-`Rha`
+//     candidates; `g` = the same for the `Rha` ones; `g.length>0 &&
+//     a.Ukb(g[sja].animation)` (L674) only parks the name in `wd.P9` (no
+//     clip); `e = f[uf.sja(f.length)]` (L674) — a UNIFORM pick from
+//     `Math.random` (`uf.sja` L115 = `floor(uf.OKa.RGa()*n)`,
+//     `uf.OKa.RGa() = Math.random`, L114/L2471) — then
+//     `Gc.Nsb(a, this.Ek[e.index], e.animation, e.sign)` (L674) ->
+//     `wd.fJa` (L506) -> `Ml` -> `wd.Bnb` (L507) -> `wd.NS` (L505) ->
+//     `Te.Skb` (L550).
+//
+// PRECONDITION (JS `wd.BHa` <- `zl.rwa`): a press EDGE, i.e. a Tap in the
+// buffer. A lingering Hold is a continuation for the running move's
+// conditions, not a new press.
+std::string Fighter::try_select_move(FightContext& ctx) {
+    decision_ = MoveDecision();  // the previous decision is stale from here on
     bool has_tap = false;
     for (const auto& k : keys_) {
         if (k.press == press_type::tap) {
@@ -835,220 +840,99 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
             break;
         }
     }
-    roulette_ = RouletteRecord();  // the previous pick is stale from here on
     if (!has_tap) return "";
 
-    // [M1] JS `de.ABa` (L601) filters `wb` by `V1`: collect EVERY candidate
-    // whose Conditions pass, in the same `hb_` (JS `ra.Lk` document) order
-    // the JS `Gc.EZa` L676 / `ru.dea(2)` (L540) machinery yields. The
-    // first-passing pick is gone — it was the documented divergence this
-    // replaces (the human's "plays the WRONG animation" second cause: the
-    // move was never chosen by the JS roulette).
+    // `Gc.EZa` (L676) candidates, in the `hb_` (JS `ra.Lk` document) order
+    // that `ru.iQ` is filed in (`Su.FT` L538 pushes in `me` order, and `me`
+    // is built from `ra.Lk` in order):
+    //   * `m->has_event("KeyPressed")` = `ru.dea(2)` membership
+    //     (`d.va.Hc` type 2), the `<Events><KeyPressed/>` marker;
+    //   * `move_conditions_pass` = `f.Yz(b,null,g)` (L677), the move's own
+    //     `<Conditions>` tree with `gm` TRUE (the Keys condition really
+    //     matches the buffered keys — the AI's `de.V1` L601 clears `gm`).
     std::vector<const MoveDef*> passing;
     for (const MoveDef* m : hb_) {
         if (m == nullptr) continue;
-        // Input-selectable moves are those whose Events contain
-        // "KeyPressed" (JS `Gc.Vkb` L671 -> `Gc.EZa` L676: the KeyPressed
-        // event walks `d.Su.dea(2)` = the KeyPressed-indexed move list).
-        if (!m->has_event("KeyPressed")) {
-            continue;
-        }
-        if (!move_conditions_pass(*m, ctx)) {
-            continue;
-        }
+        if (!m->has_event("KeyPressed")) continue;
+        if (!move_conditions_pass(*m, ctx)) continue;
         passing.push_back(m);
     }
     if (passing.empty()) return "";
 
-    // The JS `de.ia` (L592-594) tail, verbatim shape, PLUS the `Gc.DK` tail
-    // (L673-674) that feeds the same roulette:
-    //   this.ABa(this.wb); this.h2a();      // `ld` = passing animations
-    //   a = this.jL(this.ld);               // the ROULETTE
-    //   if (-1 < a) return this.eh = this.vs[a], this.ld[a];
-    // `nf.jL` (L597) forwards to `this.Gc.jL(ld, this.cs, this.iN)` =
-    // `Md.jL` (L640): `d` = the SUM of the weights; ONE `Da.pg.s4(d)` draw
-    // (= `jf()*d`, a float in [0,d)); subtract the weights in candidate
-    // order and return the first index that goes negative. When the total is
-    // <= 0 the JS returns -1 and `ia` returns null — NO move starts, and NO
-    // draw is consumed.
-    // [D1] JS `Gc.DK` (L673-674) on the per-frame KeyPressed candidate set.
-    // Its `this.jL(a,d)` is `de.jL` (L597) -> `Md.jL` (L640) — the SAME
-    // weighted roulette `de.ia` drives — so the DK tail belongs here.
-    //
-    //  * `d` (`c||!h.eb||h.animation.Rha||d.push(h)`, `c==false`): `||`
-    //    SHORT-CIRCUITS, so the push runs only when `c` is false, `h.eb` is
-    //    true and `h.animation.Rha` is false — i.e. `d` = the eb
-    //    (KeyPressed, `Gc.Vkb` L671 -> `Ih(2,a,!0)`) candidates. `passing`
-    //    is exactly that set (every candidate carries the `KeyPressed` event).
-    //  * `f` = the `Aua` (L673) group of maximal `animation.priority`.
-    //  * `e = f[uf.sja(f.length)]` (L674) with
-    //    `uf.sja(n)=Math.floor(uf.OKa.RGa()*(n-0))+0` (L115) and
-    //    `uf.OKa.RGa()=Math.random()` (`at.Nlb` L114, `uf.OKa=new at`
-    //    L2471) — an UNSHARED stream, NOT `Da.pg`.
-    std::size_t e_idx = 0;
-    bool have_e = false;
-    {
-        std::vector<std::size_t> top;  // `f`
-        for (std::size_t i = 0; i < passing.size(); ++i) {
-            const int ap = passing[i]->priority;
-            const int bp = top.empty() ? 0 : passing[top.front()]->priority;
-            if (ap >= bp) {
-                if (ap > bp) top.clear();
-                top.push_back(i);
-            }
+    // `Aua(h, h.animation.Rha ? g : f)` (L673): keep only the max-`priority`
+    // group of each list (`ap>=bp && (ap>bp && b.length=0, b.push(a))`).
+    // `Rha` = `<NoAnimation>` (MoveDef::no_animation).
+    std::vector<const MoveDef*> f;  // non-Rha candidates
+    std::vector<const MoveDef*> g;  // `Rha` candidates
+    auto aua = [](std::vector<const MoveDef*>& b, const MoveDef* m) {
+        const int ap = m->priority;
+        const int bp = b.empty() ? 0 : b.front()->priority;
+        if (ap >= bp) {
+            if (ap > bp) b.clear();
+            b.push_back(m);
         }
-        if (!top.empty()) {
-            std::size_t k = 0;
-            if (top.size() > 1 && math_random_) {
-                float r = math_random_();
-                if (r < 0.0f) r = 0.0f;
-                if (r >= 1.0f) r = 0.9999999f;
-                k = static_cast<std::size_t>(r * static_cast<float>(top.size()));
-                if (k >= top.size()) k = top.size() - 1;
-            }
-            e_idx = top[k];
-            have_e = true;
+    };
+    for (const MoveDef* m : passing) {
+        if (m->no_animation) {
+            aua(g, m);
+        } else {
+            aua(f, m);
         }
-    }
-    // `d.length>0 ? (e!=null&&d.push(e), Pkb(a,d))` (L674): the append.
-    std::vector<const MoveDef*> cand;
-    cand.reserve(passing.size() + 1);
-    cand.insert(cand.end(), passing.begin(), passing.end());
-    if (have_e) cand.push_back(passing[e_idx]);
-
-    // [D2] `Gc.Pkb` filter 1 (L674-675): keep an entry `f` only when
-    // `f.animation.M7.Wcb(l.animation)` holds for EVERY entry `l`.
-    // `Pu.Wcb(a)` (L703) is false when `a` is in this move's `$Q`
-    // (`mirror_exclusive`, `ra.b1a` L683-684). The JS compacts IN PLACE while
-    // its inner scan walks that same array (kept prefix + original suffix);
-    // reproduced verbatim below.
-    {
-        std::size_t wr = 0;
-        const std::size_t n = cand.size();
-        for (std::size_t rd = 0; rd < n; ++rd) {
-            const MoveDef* f = cand[rd];
-            bool keep = true;
-            for (std::size_t k = 0; k < n; ++k) {
-                const MoveDef* other = cand[k];
-                if (std::find(f->mirror_exclusive.begin(),
-                              f->mirror_exclusive.end(),
-                              other->name) != f->mirror_exclusive.end()) {
-                    keep = false;
-                    break;
-                }
-            }
-            if (keep) {
-                cand[wr] = f;
-                ++wr;
-            }
-        }
-        cand.resize(wr);
-    }
-    // [D2] `Gc.Pkb` filter 2 (L675): an entry whose `<Tactics><Conditions>`
-    // (`va.Ts`) is non-empty survives only when every node holds
-    // (`f.animation.nw(a.Fc, Ts, f.iza)` L691). JS sets `a.Fc.xK` to the
-    // candidate's animation names first; `Fc.gm` is still false (`de.V1`
-    // L601 cleared it), so Keys nodes pass.
-    {
-        std::size_t wr = 0;
-        const std::size_t n = cand.size();
-        for (std::size_t rd = 0; rd < n; ++rd) {
-            const MoveDef* f = cand[rd];
-            if (!f->tactics.empty()) {
-                ctx.candidate_moves = {f->name};
-                ctx.keys_gm = false;
-                if (!eval_move_conditions(f->tactics, ctx)) continue;
-            }
-            cand[wr] = f;
-            ++wr;
-        }
-        cand.resize(wr);
-    }
-    // `this.jL(a,b)` with `b` empty returns null (L673 `if(0<c)`), so the DK
-    // path starts NOTHING (and consumes no `Da.pg` draw).
-    if (cand.empty()) return "";
-
-    std::size_t pick = 0;
-    if (tactic != nullptr && feat != nullptr) {
-        std::vector<float> weights(cand.size(), 0.0f);
-        float sum = 0.0f;
-        for (std::size_t i = 0; i < cand.size(); ++i) {
-            const MoveDef& m = *cand[i];
-            for (const auto& kv : tactic->anim_weights) {
-                // JS `iCa` (L640): the FIRST entry whose Name is "" (the
-                // wildcard default) or matches the move wins. `$k` (L698:
-                // `this.name != a ? this.d2(a) : !0`, `d2` scans `xl`) =
-                // the move name OR an inherited Template tag (`xl` is
-                // filled from the own name at L711 and each template name
-                // at L723).
-                if (kv.first.empty() || kv.first == m.name ||
-                    m.template_tags.count(kv.first) > 0) {
-                    weights[i] = weight_curve_eval(kv.second, *feat, &m.name);
-                    break;
-                }
-            }
-            sum += weights[i];
-        }
-        if (!(sum > 0.0f)) return "";  // JS `if(0<d)` false -> -1 -> null
-        // JS `Md.jL` (L640): `g = Da.pg.s4(d)` — ONE draw of the shared
-        // fight stream, scaled by the weight total (`jf()*d`).
-        const float roll = ctx.roll01 ? ctx.roll01() : 0.0f;
-        const float draw = roll * sum;
-        float g = draw;
-        for (std::size_t i = 0; i < cand.size(); ++i) {
-            g -= weights[i];
-            if (g < 0.0f) {
-                pick = i;
-                break;
-            }
-            pick = i;  // float-rounding guard (JS falls through to -1)
-        }
-        // The roulette record the probes assert (`last_roulette()`): the
-        // candidate set with each `cc.Gb` weight, the weight total, the raw
-        // `Da.pg.jf()` draw, the drawn index and the picked move. Printed
-        // too, so a failing run shows the whole roulette.
-        roulette_.valid = true;
-        roulette_.sum = sum;
-        roulette_.roll = roll;
-        roulette_.draw = draw;
-        roulette_.index = static_cast<int>(pick);
-        roulette_.cands.clear();
-        roulette_.cands.reserve(cand.size());
-        for (std::size_t i = 0; i < cand.size(); ++i) {
-            roulette_.cands.emplace_back(cand[i]->name, weights[i]);
-        }
-        std::fprintf(stdout, "[move] roulette: %zu candidates sum=%.4f draw=%.6f",
-                     cand.size(), static_cast<double>(sum),
-                     static_cast<double>(draw));
-        for (std::size_t i = 0; i < cand.size(); ++i) {
-            std::fprintf(stdout, " %s=%.4f", cand[i]->name.c_str(),
-                         static_cast<double>(weights[i]));
-        }
-        std::fprintf(stdout, " -> idx=%zu %s\n", pick,
-                     cand[pick]->name.c_str());
-        std::fflush(stdout);
     }
 
-    // JS `if(-1 < a) return this.eh = this.vs[a], this.ld[a]` — the picked
-    // animation starts. `start_move_impl` re-runs the same Conditions test
-    // (now with a trace); should it no longer pass, fall through the
+    decision_.valid = true;
+    decision_.cands.clear();
+    decision_.cands.reserve(passing.size());
+    for (const MoveDef* m : passing) {
+        decision_.cands.emplace_back(m->name, m->priority);
+    }
+    decision_.f_group.clear();
+    decision_.f_group.reserve(f.size());
+    for (const MoveDef* m : f) decision_.f_group.push_back(m->name);
+    // `g.length>0 && a.Ukb(g[sja].animation)` (L674) — `wd.Ukb` (L506) only
+    // stores into `P9`; `wd.Mnb` (L507) clears it on the next `ia`, so no
+    // clip starts from the `Rha` group. Recorded for the probe only.
+    if (!g.empty()) {
+        std::size_t gi = 0;
+        if (g.size() > 1 && math_random_) {
+            float r = math_random_();
+            if (r < 0.0f) r = 0.0f;
+            if (r >= 1.0f) r = 0.9999999f;
+            gi = static_cast<std::size_t>(r * static_cast<float>(g.size()));
+            if (gi >= g.size()) gi = g.size() - 1;
+        }
+        const char* gi_name = g[gi]->name.c_str();
+        decision_.ukb = gi_name;
+        decision_.ukb_set = true;
+    }
+    // `e = f[uf.sja(f.length)]` (L674). `|f| <= 1` needs no draw:
+    // `floor(r*1) == 0` for every `r`, so the pick is value-exact without
+    // consuming an `uf.OKa.RGa()` tick.
+    if (f.empty()) return "";  // `e == null` -> nothing fires
+    std::size_t idx = 0;
+    if (f.size() > 1 && math_random_) {
+        float r = math_random_();
+        if (r < 0.0f) r = 0.0f;
+        if (r >= 1.0f) r = 0.9999999f;
+        idx = static_cast<std::size_t>(r * static_cast<float>(f.size()));
+        if (idx >= f.size()) idx = f.size() - 1;
+        decision_.drew = true;
+        decision_.draw = r;
+    }
+    decision_.index = static_cast<int>(idx);
+    // `e.animation.MS ? a.jJa(...) : Gc.Nsb(a, Ek[e.index], e.animation, e.sign)`
+    // (L674). `jJa`/`Nsb` both end at `Te.Skb` (the `qs`/`Ml` queues are a
+    // port detail); `try_start_move` is the shared `NS`/`Skb` entry.
+    // Should the re-tested Conditions no longer hold, fall through the
     // remaining candidates in order so the port never stalls on a stale pick.
-    for (std::size_t k = 0; k < cand.size(); ++k) {
-        const MoveDef* m = cand[(pick + k) % cand.size()];
+    for (std::size_t k = 0; k < f.size(); ++k) {
+        const MoveDef* m = f[(idx + k) % f.size()];
         if (try_start_move(*m, ctx)) {
-            if (roulette_.valid) roulette_.picked = m->name;
+            decision_.picked = m->name;
             return m->name;
         }
     }
     return "";
-}
-
-// No tactic / feature state at hand (probe + demo callers): JS `nf.jL`
-// (L597) returns -1 when `this.model.jb == null`, so `ia` returns null. The
-// port keeps the legacy first-passing pick for these callers instead (see
-// fighter.hpp) and consumes NO `Da.pg` draw.
-std::string Fighter::try_select_move(FightContext& ctx) {
-    return try_select_move(ctx, nullptr, nullptr);
 }
 
 // Hit-reaction pick (JS `Gc.DK` L343452 + `Aua` L343447 + `uf.sja` L57426;

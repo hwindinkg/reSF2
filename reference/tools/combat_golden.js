@@ -153,7 +153,12 @@ function dkPartition(cands, c, sja) {
   let e = null, ukb = null;
   for (let k = 0; k < cands.length;) {
     const h = cands[k++];
-    if (c || !h.eb || h.animation.Rha) d.push(h);
+    // verbatim JS `c||!h.eb||h.animation.Rha||d.push(h)` (L674): the push is
+    // the LAST operand of ONE `||` chain, so it runs only when every prior
+    // operand is falsy -> `!c && h.eb && !h.Rha`. (An `if (c || !h.eb ||
+    // h.Rha) d.push(h)` transcription is the exact INVERSE: it pushes when
+    // `c` is TRUE, which is why `c==true` used to yield all candidates.)
+    if (!c && h.eb && !h.animation.Rha) d.push(h);
     if (h.animation.Rha) Aua(h, g); else Aua(h, f);
   }
   if (f.length > 0) e = f[sja(f.length)];
@@ -323,11 +328,11 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
   ];
   const sja0 = () => 0;
   const D10 = dkPartition(cands, false, sja0);
-  eq("S10 d", D10.d, ["a", "c"]); // c==false: !eb (a) or Rha (c) usable, L674
+  eq("S10 d", D10.d, ["b", "d"]); // c==false: the push is the LAST `||` operand, so only `eb && !Rha` (b, d) is usable-now, L674
   eq("S10 f", D10.f, ["b", "d"]); // equal priority appends (Aua: >= keep, > reset)
   eq("S10 g", D10.g, ["c"]);
-  const D10c = dkPartition(cands, true, sja0); // c==true: all usable
-  eq("S10c d all", D10c.d, ["a", "b", "c", "d"]);
+  const D10c = dkPartition(cands, true, sja0); // c==true: `c` short-circuits -> NOTHING is pushed
+  eq("S10c d empty", D10c.d, []);
   eq("S10 e pick", D10.e, "b");
   eq("S10 ukb", D10.ukb, "C");
   out.scenarios.push({ id: "S10-dk-partition", e: D10.e, ukb: D10.ukb });

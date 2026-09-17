@@ -9,17 +9,26 @@
 // stays OPEN here (the reaction path has no tactic/feature state, and
 // `Gc.DK`'s caller is the hit-reaction latch, not the per-frame `de.ia`).
 //
-// The OTHER roulette — the per-frame MOVE selection `de.ia` (L592-594) ->
-// `nf.jL` (L597) -> `Md.jL` (L640) + `iCa` — is IMPLEMENTED: see
-// `Fighter::try_select_move(ctx, tactic, feat)` (fighter.cpp), which gathers
-// every Conditions-passing candidate and draws one `Da.pg` (`s4(d)`) against
-// the tactic's `<AnimationWeights>` (`Md.$oa`, parsed L638) evaluated by
-// `cc.Gb` (L647) over the `mQ` (L620) feature state. This header is not on
-// that path.
+// `Gc.DK` (L673) has exactly TWO reachable shapes and this header models
+// the partition for both:
+//   * `c == false` (the per-frame `dxa` L678 call, and only that): `d` =
+//     the `eb`-true non-`Rha` candidates. `eb` is set solely by
+//     `Gc.Vkb` -> `Ih(2,a,!0)` (L673), which is reached only from the AI's
+//     Random-tactic `hJa` (L500 `a.type==1`) via `ca.Vgb` (L388). So this
+//     shape is the AI's `Pkb` (tactic-roulette) path.
+//   * `c == true` (the `Pkb` tail's `this.DK(a,d,!0)` re-entry, L676): `d`
+//     is EMPTY, so the tail takes the else branch and starts `e` (the
+//     `Aua` max-`priority` group pick) directly.
+//
+// The HUMAN key path never sets `eb`: `Gc.mS(a){this.Ih(2,a)}` (L672)
+// leaves it false, so on `c == false` the human's `d` is empty too and
+// `Pkb` — its `M7.Wcb` mirror filter, its `va.Ts` <Tactics><Conditions>
+// filter and its `Gc.jL` -> `de.jL` -> `Md.jL` weighted ROUTLETTE — is
+// never reached. See `Fighter::try_select_move` for the human path.
 //
 // JS (L673-674, verbatim shape):
 //   partition: d=[], f=[], g=[]; e=null; Ukb=null;
-//     per candidate h: (c || !h.eb || h.animation.Rha) -> d.push(h);
+//     per candidate h: c||!h.eb||h.animation.Rha||d.push(h);
 //       h.animation.Rha ? Aua(h,g) : Aua(h,f);
 //     Aua(a,b): ap=a.priority, bp=b[0]?.priority ?? 0;
 //       ap>=bp && (ap>bp && (b.length=0), b.push(a));
@@ -28,6 +37,16 @@
 //   tail: g.length>0 && a.Ukb(g[sja].animation);
 //     d.length>0 ? (e!=null && d.push(e), Pkb(a,d))
 //                : e!=null && (e.MS ? jJa(e) : Nsb(e), zY/jza set).
+//
+// The `d.push(h)` operand sits at the END of an `||` chain, so it runs only
+// when every prior operand is FALSY: push iff `!c && h.eb && !h.Rha`.
+// With `c == true` NOTHING is pushed (`d` empty -> the tail's else branch,
+// which starts `e` directly and skips `Pkb` entirely); with `c == false`
+// only the `eb`-true, non-`Rha` candidates are usable-now. This is exactly
+// the split the two callers rely on: `c == false` comes from the per-frame
+// `dxa` (L678) and keeps the AI's `Vkb` (`eb=true`) set on the filtered
+// `Pkb` path, while the `Pkb` tail re-enters with `DK(a,d,!0)`
+// (`c == true`) to start the surviving pick directly.
 
 #include <cstddef>
 #include <string>
@@ -75,7 +94,10 @@ inline DkPartition dk_partition(const std::vector<DkCandidate>& cands, bool c,
     };
     for (std::size_t k = 0; k < cands.size(); ++k) {
         const DkCandidate& h = cands[k];
-        if (c || !h.eb || h.rha) out.d.push_back(k);
+        // JS `c||!h.eb||h.animation.Rha||d.push(h)`: the push is the LAST
+        // operand of an `||` chain, so it runs only when `c`, `!h.eb` and
+        // `h.rha` are all falsy.
+        if (!c && h.eb && !h.rha) out.d.push_back(k);
         if (h.rha) {
             aua(k, out.g);
         } else {

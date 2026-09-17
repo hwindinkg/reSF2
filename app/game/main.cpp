@@ -912,13 +912,14 @@ struct VerifyProbe {
     int frame = 0;
     const char* label = "";
     const char* expect = "";  // "<..." = expect NO move
-    // The JS-exact roulette this probe must reproduce: the
-    // `FightScreen::player_roulette()` line MINUS the `roll=` token (see
-    // `strip_roulette_roll` below). It pins the candidate set + each `iCa`
-    // weight + the weight SUM `d` + the shared-stream draw `Da.pg.s4(d)` + the
-    // drawn index and pick, so a probe can never pass on a hard-coded move
-    // name alone. "" = nothing to assert (the no-move probe).
-    const char* roulette = "";
+    // The JS-exact player decision this probe must reproduce: the
+    // `FightScreen::player_decision()` line — `cands=<name>@<prio>,...`
+    // (the `hb_`/JS `ra.Lk` order candidate set), `f=<name>,...` (the `Aua`
+    // max-`priority` non-`Rha` group), `draw=<v>|-`, `idx=<i>`, the picked
+    // move and the optional `ukb=<name>` (`Rha` group). It pins the whole
+    // `Gc.DK` `c == false` branch (L673-674), so a probe can never pass on a
+    // hard-coded move name alone. "" = nothing to assert (the no-move probe).
+    const char* decision = "";
     int window = 4;           // frames after `frame` to observe the move start
     bool substring = false;   // expect is a substring of the move name
 };
@@ -932,114 +933,108 @@ struct VerifyProbe {
 // was never released, which made the later K press (`sl` still set) a
 // no-op - both fixed here.
 //
-// The expected picks are asserted through the JS-exact ROULETTE, not a single
-// move name: each probe carries the `player_roulette()` line it must
-// reproduce — every candidate with its `cc.Gb` weight, the weight SUM `d`,
-// the shared-stream draw `Da.pg.s4(d)` and the drawn index/pick. The JS never
-// takes "the first passing move" (the documented divergence this replaces);
-// it is `de.ia` (L592-594) -> `nf.jL` (L597) -> `Md.jL` (L640): sum the
-// `Locks`-passing candidates' weights, take ONE `Da.pg.jf()` draw `g = s4(d) =
-// jf()*d`, subtract the weights in candidate order and return the first index
-// that goes negative.
+// The expected picks are asserted through the JS-exact PLAYER decision, not a
+// single move name: each probe carries the `player_decision()` line it must
+// reproduce — the candidate set (`cands=<name>@<priority>,...`, the `hb_` /
+// JS `ra.Lk` document order `Gc.EZa` L676 walks), the `Aua` max-`priority`
+// non-`Rha` group (`f=...`), the `uf.sja` draw (`draw=`), the drawn index and
+// the pick.
 //
-// [D1/D2] The list the roulette runs over is NOT the raw passing set: `Gc.DK`
-// (L673-674) partitions it first and, in the `d.length>0` branch, APPENDS
-// `e = f[uf.sja(f.length)]` — the `Aua` max-`animation.priority` pick, drawn
-// from `Math.random` (`uf.sja` L115, NOT `Da.pg`) — then hands `d+e` to
-// `Gc.Pkb` (L674-676), which applies TWO filters before its `this.jL(a,d)`
-// call: the `M7.Wcb` mirror-compat filter (keep `f` only when no other entry
-// is in `f.M7.$Q`, `Pu.Wcb` L703 / `ra.b1a` L683-684) and the `va.Ts`
-// `<Tactics><Conditions>` filter (`f.animation.nw(a.Fc, Ts, f.iza)` L691/L675).
-// `Fighter::try_select_move` reproduces all three steps; the appended `e` is
-// therefore a DUPLICATE entry and adds its weight to the total.
+// Which branch of `Gc.DK` (L673-674) the human lands in is decided entirely by
+// the `eb` flag of the event that produced the candidates:
+//   * The HUMAN key press enters as `Gc.mS(a){this.Ih(2,a)}` (L672) <- `wd.BHa`
+//     (L507) <- `zl.rwa` (L799) <- `zl.Sgb` (L798) <- `wd.yJa` (L501) <-
+//     `ca.N0a` (L426 `this.eu==2 && b.yJa(a)`). `Ih` leaves `eb` FALSE.
+//   * `eb` is set TRUE only by `Gc.Vkb(a){this.Ih(2,a,!0)}` (L673), which is
+//     reached only from `ca.Vgb` (L388 `this.Bg.Vkb(a)`) <- `wd.hJa` (L500)
+//     <- `wd.Anb` (L499, gated `this.parameters.Fj||P.fP` = AI/BothBot) and
+//     only for a `type==1` (Random) tactic.
+// `Gc.DK(a,b,c)` with `c == false` (the per-frame `dxa` L678 call) evaluates
+// `c||!h.eb||h.animation.Rha||d.push(h)`: the `d.push` sits at the END of an
+// `||` chain, so it runs only when `c`, `!h.eb` and `h.Rha` are all falsy —
+// i.e. `d` = {eb && !Rha}. On the HUMAN path (`eb == false`) `d` is therefore
+// EMPTY, `d.length>0` is false, and `Gc.Pkb` (L674-676) — its `M7.Wcb`
+// mirror-compat filter, its `va.Ts` <Tactics><Conditions> filter and its
+// `this.jL(a,d)` -> `de.jL` (L597) -> `Md.jL` (L640) + `iCa` WEIGHTED
+// ROULETTE — is NEVER REACHED. The `Tactics` gate is an AI-tactic gate.
 //
-// The candidates are the JS `ra.Hza`-legal ones for the shipped Fists
-// loadout: the direct-boot fighter owns Skeleton + Weapon/Fists + Body/Head
-// (fight.cpp `make_fighter`), so a move is a candidate only when its
-// `<TacticWeapon>` matches Fists AND its `<Locks>` pass. Three picks differ
-// from the pre-lock tape: `DashBackwards` (`<Locks>` = Armor
-// `BODY_GATEKEEPER`) is gone — its Or-lock `Armor BODY_GATEKEEPER Not=1`
-// passes, so the surviving same-Priority Back Tap-x2 move is `BackHandflip`
-// and the weight set is not the lock-ignoring one; `StaffStepForward`
-// (`<Locks>` = Or{Weapon Staff|WandererStaff|CompositeStaff}) is gone —
-// Skeleton-locked `StepForward` is the real 1-key forward step; and at F620
-// the K tap's drawn pick is `HighPunch`, not the old hard-coded
-// `ShortUpwardElbowStrike`.
+// The human's pick is the `DK` else branch (L674):
+//   e = f[uf.sja(f.length)]     the `Aua` (L673) max-`priority` group of the
+//                               non-`Rha` candidates, picked UNIFORMLY from
+//                               `Math.random` (`uf.sja` L115 =
+//                               `floor(uf.OKa.RGa()*(n-0))+0`; `uf.OKa.RGa() =
+//                               Math.random`, `at.Nlb` L114, `uf.OKa=new at`
+//                               L2471) — an UNSHARED stream, NOT `Da.pg`;
+//   g.length>0 && a.Ukb(...)    the `Rha` group only parks a name in `wd.P9`
+//                               (`wd.Mnk` L507 clears it) — no clip starts;
+//   then `e.animation.MS ? a.jJa(e.animation,e.R1)
+//                        : Gc.Nsb(a, this.Ek[e.index], e.animation, e.sign)`
+//                               -> `wd.fJa` (L506) -> `Ml` -> `wd.Bnb` (L507)
+//                               -> `wd.NS` (L505) -> `Te.Skb` (L550).
+// `Fighter::try_select_move` is exactly that branch (`set_math_random`
+// installs the pinned `math_random01()` for the `uf.sja` draw).
+//
+// The candidates are the JS `ru.iQ` set for the shipped Fists loadout: a move
+// whose `<Events>` contains `<KeyPressed/>` (the `1key` Template chains to
+// `Controlled`, moves.xml, which owns `<KeyPressed/>`) AND whose own
+// `<Conditions>` (the `<Keys>` Tap requirement lives there) pass — for the
+// boot fighter that means the `<Locks>` pass too (Skeleton + Weapon/Fists +
+// Body/Head, fight.cpp `make_fighter`; `ra.Hza` L684-685 admits a move only
+// when its `<Locks>` hold). `ra.Lk` document order is the candidate order.
 static const VerifyProbe kVerifyProbes[] = {
     // F180: Back Tap x2 at the spawn gap (dist 283). Candidate order is the
-    // JS `ra.Lk` DOCUMENT order (P4a, `profile_order`): StepBack
-    // (moves.xml L6861) then BackHandflip (L7211). [D1] `Gc.DK` (L674)
-    // appends `e = f[uf.sja(f.length)]` — the `Aua` max-`priority` pick —
-    // AFTER the candidate list and BEFORE `Pkb`, so BackHandflip (Priority
-    // 20 > StepBack 10) is appended as a DUPLICATE: the weight total becomes
-    // 89.3593+178.0734+178.0734=445.5060. The same `Da.pg` draw scaled by the
-    // new total (415.879181) still lands past StepBack + BackHandflip at
-    // index 2 -> BackHandflip (`Md.jL` L640).
+    // JS `ra.Lk` DOCUMENT order: StepBack then BackHandflip. `Gc.DK` L673
+    // splits them with `Aua` (`animation.Rha` false for both -> the `f`
+    // group) and keeps the max-`<Priority>` group only: BackHandflip
+    // (Priority 20) beats StepBack (10), so `f` is a SINGLETON and L674's
+    // `e = f[uf.sja(f.length)]` needs no draw (`floor(r*1) == 0`). No `Pkb`.
     {180, "Back Tap x2 (spawn gap 283)", "BackHandflip",
-     "sum=445.5060 draw=415.879181 idx=2 BackHandflip "
-     "cands=StepBack=89.3593,BackHandflip=178.0734,BackHandflip=178.0734",
+     "cands=StepBack@10,BackHandflip@20 f=BackHandflip draw=- idx=0 BackHandflip",
      4, false},
-    // F300: Forward Tap x2. Document order (P4a): StepForward (L6756) then
-    // DoubleStepForward (L7056). [D1] the DK append adds DoubleStepForward
-    // again (`Priority` 20 > 10), so the total is 1600+100+100=1800 and the
-    // scaled draw 1674.185181 now passes StepForward's 1600 -> index 1,
-    // DoubleStepForward: a Tap x2 selects the 2key double step (both moves'
-    // Conditions pass at this frame; the roulette decides).
+    // F300: Forward Tap x2. Document order: StepForward then
+    // DoubleStepForward. `Aua` keeps DoubleStepForward (Priority 20 > 10),
+    // a singleton `f` -> no draw, no `Pkb`. The 2key double step wins on
+    // PRIORITY, not on a weight.
     {300, "Forward Tap x2", "DoubleStepForward",
-     "sum=1800.0000 draw=1674.185181 idx=1 DoubleStepForward "
-     "cands=StepForward=1600.0000,DoubleStepForward=100.0000,"
-     "DoubleStepForward=100.0000",
+     "cands=StepForward@10,DoubleStepForward@20 f=DoubleStepForward draw=- idx=0 DoubleStepForward",
      4, false},
-    // F420: Punch Tap x2 + Forward Hold. [D1] e = DoublePunch (`Priority`
-    // 130, the unique max of {10,110,120,130}) is appended (total
-    // 1303.0918+100+100=1503.0918; the draw 626.827209 stays inside
-    // StepForward's 1303.0918 -> index 0). [D2] `Gc.Pkb`'s `va.Ts` filter
-    // (L675) drops HighPunch (`<Tactics>` Distance Max=250) and HeavyPunch
-    // (Max=350) — the gap here is ~350-450 — while DoublePunch (150..450)
-    // survives; the `M7.Wcb` mirror filter (L674) removes nothing.
-    {420, "Punch Tap x2 + Forward Hold", "StepForward",
-     "sum=1503.0918 draw=626.827209 idx=0 StepForward "
-     "cands=StepForward=1303.0918,DoublePunch=100.0000,"
-     "DoublePunch=100.0000",
+    // F420: Punch Tap x2 + Forward Hold. PROOF that the `va.Ts`
+    // <Tactics><Conditions> filter of `Gc.Pkb` (L675) is NOT on this path:
+    // HighPunch (`<Tactics>` Distance Max=250) and HeavyPunch (Min=50
+    // Max=350) are both still candidates at a gap well past 350 — the old
+    // `Pkb` run dropped them here. `Aua` (L673) then keeps the unique max-
+    // `<Priority>` group: DoublePunch (130) over HeavyPunch (120), HighPunch
+    // (110) and StepForward (10).
+    {420, "Punch Tap x2 + Forward Hold", "DoublePunch",
+     "cands=StepForward@10,HighPunch@110,HeavyPunch@120,DoublePunch@130 f=DoublePunch draw=- idx=0 DoublePunch",
      4, false},
-    // F520: single Forward tap -> StepForward + its own DK append (total
-    // 1247.5417*2=2495.0835); the scaled draw 2331.547119 leaves index 0
-    // negative only after BOTH weights -> index 1, still StepForward.
+    // F520: single Forward tap -> the 1key StepForward (singleton `Aua`).
     {520, "Forward Tap x1 (1key)", "StepForward",
-     "sum=2495.0835 draw=2331.547119 idx=1 StepForward "
-     "cands=StepForward=1247.5417,StepForward=1247.5417",
+     "cands=StepForward@10 f=StepForward draw=- idx=0 StepForward",
      4, false},
     // F550: single Forward tap 30 frames later (a fresh 1key step).
     {550, "Forward Tap x1 (+30f)", "StepForward",
-     "sum=2327.2612 draw=1138.723633 idx=0 StepForward "
-     "cands=StepForward=1163.6306,StepForward=1163.6306",
+     "cands=StepForward@10 f=StepForward draw=- idx=0 StepForward",
      4, false},
     // F620: K (GLFW 75) maps to Punch (id 9) -> the Punch-key candidate set.
-    // HighPunch is the only candidate whose Conditions pass, but [D2]
-    // `Gc.Pkb`'s `va.Ts` filter (L675) drops it here: its `<Tactics>`
-    // Distance gate is Min=0 Max=250 and the fighters are ~250-350 apart
-    // after the two forward steps, so the roulette never runs and NOTHING
-    // starts (`jL` over an empty list returns null, L673).
-    {620, "K key -> Punch-key move (Tactics range gate)", "<none>", "", 14, false},
-    // F700: B (GLFW 66) is unbound -> no tap -> no roulette, no move.
+    // THE FIX PROBE: a SINGLE Punch tap cannot satisfy the `2key` Punch-x2
+    // moves, so the 1key candidates are HighPunch (`<Tactics>` Distance
+    // Max=250) and ShortUpwardElbowStrike. `Gc.Pkb`'s `va.Ts` gate (L675)
+    // lives on the AI's `eb=true` (`Gc.Vkb`) branch only, so the human CAN
+    // punch here; `Aua` then keeps ShortUpwardElbowStrike (Priority 150 >
+    // HighPunch 110) and it starts. Its OWN `<Conditions>` (the `f.Yz` L677
+    // test, `<Keys>` Punch Tap + `<Distance Max="130">`) do pass at this
+    // frame — the player has walked in from the spawn gap 283. Under the
+    // old `Pkb` path this probe expected "<none>": every attack key was
+    // dead at fight start.
+    {620, "K key -> Punch-key move (no Tactics gate)", "ShortUpwardElbowStrike",
+     "cands=HighPunch@110,ShortUpwardElbowStrike@150 f=ShortUpwardElbowStrike draw=- idx=0 ShortUpwardElbowStrike",
+     14, false},
+    // F700: B (GLFW 66) is unbound -> no tap -> no decision, no move.
     {700, "B key -> dropped (no move)", "<none>", "", 12, false},
 };
 constexpr int kVerifyProbeCount =
     static_cast<int>(sizeof(kVerifyProbes) / sizeof(kVerifyProbes[0]));
-
-// `FightScreen::player_roulette()` with the `roll=` token removed. `roll` is
-// the raw float in [0,1) from the shared `Da.pg` stream; `draw` is `roll*sum`
-// rendered at %.6f, so `draw` already pins the stream exactly and `roll`'s own
-// %.6f rendering is redundant — it is the one field whose float formatting
-// could drift without changing the pick. Stripping it lets the probe assert
-// candidate set + weights + draw + pick deterministically.
-std::string strip_roulette_roll(const std::string& s) {
-    const std::size_t p = s.find("roll=");
-    if (p == std::string::npos) return s;
-    std::size_t q = s.find(' ', p);
-    q = (q == std::string::npos) ? s.size() : q + 1;  // drop the separator too
-    return s.substr(0, p) + s.substr(q);
-}
 
 std::vector<ReplayEdge> build_verify_edges() {
     std::vector<ReplayEdge> e;
@@ -2013,37 +2008,38 @@ int main(int argc, char** argv) {
                 const int started = fs != nullptr ? fs->player_moves_started() : 0;
                 if (pending != nullptr && started > last_started) {
                     const std::string dec = fs->player_last_decision();
-                    const std::string rr = strip_roulette_roll(fs->player_roulette());
+                    const std::string rr = fs->player_decision();
                     const bool move_ok =
                         pending->substring
                             ? dec.find(pending->expect) != std::string::npos
                             : dec == std::string("input:") + pending->expect;
-                    // The JS-exact gate: the recorded roulette must reproduce
-                    // the expected candidate set + weights + draw + pick. An
-                    // empty expectation is not asserted (the no-move probe).
-                    const bool roulette_ok =
-                        pending->roulette[0] == '\0' || rr == pending->roulette;
-                    const bool pass = move_ok && roulette_ok;
+                    // The JS-exact gate: the recorded `Gc.DK` `c == false`
+                    // decision must reproduce the expected candidate set +
+                    // `Aua` group + draw + index + pick. An empty expectation
+                    // is not asserted (the no-move probe).
+                    const bool decision_ok =
+                        pending->decision[0] == '\0' || rr == pending->decision;
+                    const bool pass = move_ok && decision_ok;
                     if (!pass) ++probe_failures;
                     std::fprintf(stdout,
                                  "[verify] %s -> %s (F%d) expect=%s\n"
-                                 "[verify]   roulette got = %s\n"
-                                 "[verify]   roulette exp = %s -> %s\n",
+                                 "[verify]   decision got = %s\n"
+                                 "[verify]   decision exp = %s -> %s\n",
                                  pending->label, dec.c_str(), fight_frames,
                                  pending->expect, rr.c_str(),
-                                 pending->roulette[0] == '\0' ? "(none)"
-                                                             : pending->roulette,
+                                 pending->decision[0] == '\0' ? "(none)"
+                                                              : pending->decision,
                                  pass ? "PASS" : "FAIL");
                     std::fflush(stdout);
                     pending = nullptr;
                 } else if (pending != nullptr && pending->window > 0 &&
                            fight_frames > pending->frame + pending->window) {
                     const bool expect_none = pending->expect[0] == '<';
-                    const std::string rr = fs->player_roulette();
+                    const std::string rr = fs->player_decision();
                     if (!expect_none) ++probe_failures;
                     std::fprintf(stdout,
                                  "[verify] %s -> (no move) (F%d) expect=%s "
-                                 "roulette=%s %s\n",
+                                 "decision=%s %s\n",
                                  pending->label, fight_frames, pending->expect,
                                  rr.empty() ? "(none)" : rr.c_str(),
                                  expect_none ? "PASS" : "FAIL");

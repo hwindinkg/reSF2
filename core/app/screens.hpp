@@ -425,12 +425,11 @@ public:
     std::string player_last_decision() const;
     int player_moves_started() const;
 
-    // The player's last `Md.jL` (L640) weighted-roulette outcome, rendered as
-    // `sum=<s> draw=<d> r=<roll> idx=<i> <name>=<w>,...` — the candidate set
-    // (with each `iCa` weight), the weight total, the raw `Da.pg.jf()` draw,
-    // the returned index and the picked move. "" when no roulette has run.
-    // The `--verify-input` probes assert this whole record.
-    std::string player_roulette() const;
+    // The player's last move decision (JS `Gc.DK` `c == false`, L673-674),
+    // rendered as `cands=<name>@<prio>,... f=<name>,... draw=<v>|- idx=<i>
+    // <picked> ukb=<name>`. "" when no decision has run. The
+    // `--verify-input` probes assert this whole record.
+    std::string player_decision() const;
 
     // The owned rows this screen actually used (see `player_owned_`), and the
     // ordered player move-list names joined with "," (the boot-vs-Map

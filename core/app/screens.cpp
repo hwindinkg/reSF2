@@ -6959,28 +6959,41 @@ int FightScreen::player_moves_started() const {
     return fight_ != nullptr ? fight_->player().moves_started : 0;
 }
 
-// The `Md.jL` (L640) roulette record as one comparable line. Order: the
-// weight total, the raw `Da.pg.jf()` draw, the scaled `s4(d)` draw, the
-// returned index, the picked move, then the candidate set in `jL` order with
-// each candidate's `iCa` weight (`--verify-input` asserts this whole string).
-std::string FightScreen::player_roulette() const {
+// The player's last move decision rendered for `--verify-input`. It pins the
+// whole JS `Gc.DK` `c == false` branch (L673-674): candidate set with each
+// candidate's `<Priority>` in `hb_` (JS `ra.Lk`) order, the `Aua`
+// max-`priority` non-`Rha` group (`f`), the `g` (`Rha`) `Ukb` name, the
+// `uf.sja` draw (when the group is not a singleton), the drawn index and the
+// move that started.
+std::string FightScreen::player_decision() const {
     if (fight_ == nullptr) return std::string();
-    const sf2::scene::Fighter::RouletteRecord& r =
-        fight_->player().fighter.last_roulette();
+    const sf2::scene::Fighter::MoveDecision& r =
+        fight_->player().fighter.last_decision();
     if (!r.valid) return std::string();
     char buf[256];
-    std::string out;
-    std::snprintf(buf, sizeof(buf), "sum=%.4f draw=%.6f roll=%.6f idx=%d ",
-                  static_cast<double>(r.sum), static_cast<double>(r.draw),
-                  static_cast<double>(r.roll), r.index);
-    out += buf;
-    out += r.picked.empty() ? "<none>" : r.picked;
-    out += " cands=";
+    std::string out = "cands=";
     for (std::size_t i = 0; i < r.cands.size(); ++i) {
         if (i != 0) out += ",";
-        std::snprintf(buf, sizeof(buf), "%s=%.4f", r.cands[i].first.c_str(),
-                      static_cast<double>(r.cands[i].second));
+        std::snprintf(buf, sizeof(buf), "%s@%d", r.cands[i].first.c_str(),
+                      r.cands[i].second);
         out += buf;
+    }
+    out += " f=";
+    for (std::size_t i = 0; i < r.f_group.size(); ++i) {
+        if (i != 0) out += ",";
+        out += r.f_group[i];
+    }
+    if (r.drew) {
+        std::snprintf(buf, sizeof(buf), " draw=%.6f idx=%d ",
+                      static_cast<double>(r.draw), r.index);
+    } else {
+        std::snprintf(buf, sizeof(buf), " draw=- idx=%d ", r.index);
+    }
+    out += buf;
+    out += r.picked.empty() ? "<none>" : r.picked;
+    if (r.ukb_set) {
+        out += " ukb=";
+        out += r.ukb;
     }
     return out;
 }

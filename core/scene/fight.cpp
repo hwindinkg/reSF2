@@ -294,10 +294,13 @@ void FightController::init_locks(
     clips_ = &clips;
     tactics_ = tactics;
     tactic_ = tactic;
-    // P4b: the PLAYER's roulette tactic is a SEPARATE resolution (JS `IKa`
-    // L672) — the player's own `<Tactic>` when it resolves, else "Standard" —
-    // never the battle warrior's. nullptr keeps the legacy shared pointer for
-    // the AI-demo callers that attach their own player controller.
+    // P4b: the player's tactic resolution (JS `IKa` L672) — the player's own
+    // `<Tactic>` when it resolves, else "Standard". LOGGED ONLY: the player's
+    // move start is the JS `Gc.DK` `c == false` branch (L673-674) and never
+    // consults a tactic — the `Md`/`iCa` weighted roulette lives inside
+    // `Gc.Pkb`, which the human path cannot reach (`Fighter::try_select_move`).
+    // Kept because the AI-demo callers still pass their battle tactic here and
+    // the `[fight] ... player tactic:` line is part of the boot log.
     player_tactic_ = (player_tactic != nullptr) ? player_tactic : tactic;
     std::fprintf(stdout, "[fight] enemy tactic: %s ; player tactic: %s\n",
                  tactic_ != nullptr ? tactic_->name.c_str() : "<none>",
@@ -623,6 +626,12 @@ FightFighter FightController::make_fighter(
     // caller passes the enemy's model (the Punchbag) or nullptr for the
     // shared fight model.
     f.fighter.set_model(model != nullptr ? *model : model_);
+    // JS `uf.sja` (L115: `floor(uf.OKa.RGa()*n) + 0`, `uf.OKa.RGa()` =
+    // `Math.random` at L114, `uf.OKa=new at` L2471) is the UNSHARED stream
+    // the `Gc.DK` pick draws from (`e = f[uf.sja(f.length)]` L674). Install
+    // the pinned `math_random01()` (never `Da.pg`) so a multi-element `Aua`
+    // max-`<Priority>` group really draws instead of always taking index 0.
+    f.fighter.set_math_random([]() { return FightController::math_random01(); });
     // [FIX Phase 4b — black silhouettes] The fighters' fill color is the
     // LOCATION's Root Color (the dojo_params `<Root Color="0x000000">`),
     // not a hardcoded team color — the oracle's fighters are black
@@ -3193,39 +3202,6 @@ FightController::BattlePrize FightController::prize(int base_coins) const {
     return p;
 }
 
-// JS `mQ` (L620): the `cc.Gb` (L647) weight-curve feature state, filled from
-// ME (`this.model`) + the ENEMY. This mirrors `AiController::mq`
-// (ai_controller.cpp L209) — the AI path's builder — and is repeated here
-// because `mq` is private to the AI controller (outside this task's file
-// set) and both paths must feed the SAME state. Field semantics are the ones
-// documented on `AiFeatureState` / `AiController::mq` (o1/q1 = ABSOLUTE hp,
-// xY = enemy played steps, pZ = `Tba` max `M2`, lya = NPivot distance).
-static sf2::scene::AiFeatureState move_feature_state(
-    const sf2::scene::AiFightState& st) {
-    sf2::scene::AiFeatureState f;
-    {
-        double count = 0.0, xb = 0.0, tf = 0.0;
-        if (st.strike_memory != nullptr) {
-            st.strike_memory->d0(st.enemy_move, count, xb, tf);
-        }
-        f.counter = static_cast<float>(count);
-        f.xb = static_cast<float>(xb);
-        f.tf = static_cast<float>(tf);
-    }
-    f.o1 = st.my_hp;      // absolute gd (NOT a ratio — see `mq` L192-208)
-    f.q1 = st.enemy_hp;   // absolute gd
-    f.xY = static_cast<float>(st.enemy_move_frame);
-    f.cl = static_cast<float>(st.magic_bullets);
-    f.k2 = static_cast<float>(st.ranged);
-    f.pz = static_cast<float>(st.enemy_max_part_frames);
-    f.lya = std::fabs(st.enemy_x - st.my_x);  // JS `s6a` L619-620
-    f.shift = 0.0f;
-    f.my_anim = st.my_anim;
-    f.enemy_anim = st.enemy_anim;
-    f.zz.clear();
-    return f;
-}
-
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
     // The per-fighter update: the AI (or input) picks a move, the fighter
     // executes it, the physics body is rebuilt. Mirrors the JS `wd.ia` +
@@ -3257,17 +3233,16 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // [FIX Phase 4b — manual control] The PLAYER's key input FIRST: when
     // the fighter is a manual (non-AI, non-auto-attack) fighter, the
     // buffered keys (Fighter::input via the fight screen's on_key) are
-    // consumed here by the move selection (JS: the KeyPressed event handler
-    // calls `wd.Lea`/`try_select_move` when a key is pressed). This must
-    // run BEFORE the stance-idle auto-play below, so a key press interrupts
-    // the idle (otherwise the idle would re-start a clip every frame and
-    // the input could never win — "no input").
+    // consumed here by the move selection. This must run BEFORE the
+    // stance-idle auto-play below, so a key press interrupts the idle
+    // (otherwise the idle would re-start a clip every frame and the input
+    // could never win — "no input").
     if (me.ai == nullptr && !auto_attack_ && phase_ == fight_phase::fight) {
         // JS `zl.ia` (L798): one input-age tick per fight frame — drop the
         // Tap sequence at `dX>=15`, run the 30-frame hold/release cycle,
         // rebuild the held set from the down keys. Must run BEFORE the move
-        // selection so the selection sees the same aged buffer the JS `Ykb`
-        // handler would.
+        // selection so the selection sees the same aged buffer the JS
+        // `wd.BHa` handler would.
         me.fighter.age_keys();
         sf2::scene::FightContext ctx;
         ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
@@ -3289,26 +3264,14 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         ctx.qb = me.is_player;
         fill_ctx_geometry(ctx, me, foe);
         ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
-        // [M1] JS `de.ia` (L594) picks via the weighted roulette
-        // (`nf.jL` L597 -> `Md.jL` L640), whose weights come from the
-        // tactic's `<AnimationWeights>` evaluated against the `mQ` (L620)
-        // feature state. Build the state `mQ` reads (the same the AI block
-        // below builds), so the player and the AI weigh from one definition.
-        sf2::scene::AiFightState st;
-        st.my_hp = me.hp;                 // `a.o1 = parameters.gd`
-        st.enemy_hp = foe.hp;             // `a.q1 = b.parameters.gd`
-        st.enemy_move = foe.fighter.current_move();
-        st.enemy_move_frame = foe.fighter.move_frame();  // `a.xY = b.da.kJ()`
-        st.enemy_max_part_frames = foe.fighter.m2();     // `a.pZ = Tba(b)`
-        st.ranged = me.ranged_available ? -1 : 1;        // `a.K2 = K0()`
-        st.magic_bullets = 0;                            // `a.cl = bh`
-        st.my_x = me.fighter.world_x();                  // `a.Lya = s6a(me)`
-        st.enemy_x = foe.fighter.world_x();
-        st.my_anim = me.fighter.current_move() ? me.fighter.current_move()->name : "";
-        st.enemy_anim = foe.fighter.current_move() ? foe.fighter.current_move()->name : "";
-        st.strike_memory = &me.fighter.strike_memory();  // `Cn.d0` -> counter/xb/tf
-        const sf2::scene::AiFeatureState feat = move_feature_state(st);
-        const std::string chosen = me.fighter.try_select_move(ctx, player_tactic_, &feat);
+        // JS-exact PLAYER path — the `Gc.DK` `c == false` branch (L673-674):
+        // candidates by <KeyPressed> + own <Conditions>, then the `Aua`
+        // max-<Priority> group picked UNIFORMLY (`f[uf.sja(f.length)]`).
+        // The `Pkb` tail — `M7.Wcb` mirror filter, `va.Ts`
+        // <Tactics><Conditions> filter and the `Md.jL`/`iCa` weighted
+        // roulette — is on the AI's `eb=true` (`Gc.Vkb`) path only and is
+        // deliberately NOT applied here (see `Fighter::try_select_move`).
+        const std::string chosen = me.fighter.try_select_move(ctx);
         if (!chosen.empty()) {
             ++me.moves_started;
             me.last_decision = "input:" + chosen;

@@ -181,27 +181,46 @@ public:
     // the held set from the currently-down keys (`yLa`).
     void age_keys();
 
-    // Attempts move selection from `hb` (priority order) with the buffered
-    // keys + current state (JS `wd.Ykb` L500 -> `nf.ia` L592-594).
+    // Attempts move selection from `hb` (document order, matching the JS
+    // `ra.Lk` order `Gc.EZa` L676 walks) with the buffered keys + current
+    // state. This is the PLAYER's path — the JS `Gc.DK` `c == false`
+    // else-branch (L673-674), NOT the tactic roulette.
     //
-    // JS `de.ia` (L594) does NOT take the first passing candidate: it builds
-    // the candidate animation list (`h2a` L608: `ld.push(c.animation)`) and
-    // then `a = this.jL(this.ld)` — the WEIGHTED ROULETTE (`nf.jL` L597 ->
-    // `Md.jL` L640 + `iCa` L640) over ALL passing candidates, drawing from
-    // `Da.pg` (`s4`). The tactic's `<AnimationWeights>` table (`Md.$oa`,
-    // parsed L638) supplies the weights via `cc.Gb` (L647).
+    // Hop-by-hop (sf2.502f0946.js):
+    //   ca.N0a (L426)  `this.eu==2 && b.yJa(a)`      -- fight-phase key press
+    //   wd.yJa (L501)  `... || !this.sN || this.Kl.Sgb(a)`  -- buffer the id
+    //   zl.Sgb (L798)  push the tap, `rwa()` fires event 0
+    //   wd.BHa (L507)  `this.mS.Z(this.Vb)`          -- model event, NO eb
+    //   Gc.mS  (L672)  `this.Ih(2,a)`                -- `eb` stays FALSE
+    //   Gc.Gnb (L672)  `Rwa` -> `EZa` -> `dxa`       -- build + dispatch
+    //   Gc.EZa (L676)  candidates = `ru.iQ` (moves whose <Events> carry
+    //                  <KeyPressed/>, i.e. Template `1key` -> `Controlled`)
+    //                  that pass their own <Conditions> (incl. <Keys>)
+    //   Gc.DK  (L673)  `c==false`: `c||!h.eb||h.Rha||d.push(h)` -> `d`
+    //                  EMPTY (eb is false), so the `d.length>0` branch —
+    //                  and therefore all of `Gc.Pkb` (the `M7.Wcb` mirror
+    //                  filter, the `va.Ts` <Tactics><Conditions> filter and
+    //                  the `Gc.jL` -> `de.jL` -> `Md.jL` WEIGHTED ROULETTE)
+    //                  — is NOT reached.
+    //   Gc.DK  (L674)  the else branch: `e = f[uf.sja(f.length)]` — the
+    //                  `Aua` max-`priority` group of the non-`Rha` candidates
+    //                  picked UNIFORMLY from `Math.random` (`uf.sja` L115 =
+    //                  `floor(uf.OKa.RGa()*n)`, `uf.OKa.RGa() = Math.random`,
+    //                  L114/L2471), then `Gc.Nsb` (L674) -> `wd.fJa` (L506)
+    //                  -> `Ml.animation` -> `wd.Bnb` (L507) -> `wd.NS` (L505)
+    //                  -> `Te.Skb` (L550).
+    //   `g` (the `Rha` group) goes to `a.Ukb(g[sja].animation)` (L674) which
+    //   only parks the name in `wd.P9` for `Mnb` (L507) to clear — no clip.
     //
-    // 1-arg overload: no tactic/feature state available (probe/demo callers).
-    // It keeps the legacy first-passing pick and draws nothing.
-    // 3-arg overload (the fight path): full roulette. `tactic` = the tactic
-    // (`Md`), `feat` = the `iN` feature state (`mQ` L620). When the tactic is
-    // known but the total weight is 0 the JS `jL` returns -1 and `ia` returns
-    // null — no move starts (and NO draw is consumed).
-    // Returns the started move's name, or "" if none passed.
+    // The tactic `Md` (`parameters.Gc`) and the `mQ` feature state are NOT
+    // consulted here: the JS only reaches them through `Pkb`/`de.ia`, and
+    // `de.ia` is gated to AI control by `de.R0()` (L608:
+    // `de.tY ? (this.Ca.Fj ? true : P.fP) : false`) and `wd.Anb` (L499:
+    // `(this.parameters.Fj||P.fP) && this.Je==2`).
+    //
+    // PRECONDITION: a Tap is buffered (the JS fires this on a press EDGE,
+    // `wd.BHa` <- `zl.rwa`). Returns the started move's name, or "".
     std::string try_select_move(sf2::scene::FightContext& ctx);
-    std::string try_select_move(sf2::scene::FightContext& ctx,
-                                const sf2::scene::TacticDef* tactic,
-                                const sf2::scene::AiFeatureState* feat);
     // Hit-reaction pick (JS `Gc.DK` L673-674, d-set first-match): starts the
     // first priority-ordered `hb` move carrying a `Hit` event whose tactics
     // conditions pass (54 such moves in moves.xml: HighHit/MiddleHit/...,
@@ -231,12 +250,14 @@ public:
     bool start_move_impl(const MoveDef& move, sf2::scene::FightContext& ctx,
                          bool ai);
 
-    // Side-effect-free input-path condition test (JS `de.V1` L601-602 with
-    // `gm` left TRUE — the player path). Sets `ctx.candidate_moves` to the
+    // Side-effect-free input-path condition test (JS `f.Yz(b,null,g)` L677,
+    // the player path — `gm` left TRUE so the `<Keys>` Tap requirement
+    // really matches the buffered keys). Sets `ctx.candidate_moves` to the
     // move's animation-name list, snapshots the buffered keys, and runs the
     // move's own `<Conditions>` tree. Used by `try_select_move` to collect
-    // EVERY passing candidate before the roulette; `start_move_impl` re-runs
-    // the same test (with a trace) when the picked move actually starts.
+    // EVERY passing candidate before the `Aua` priority split;
+    // `start_move_impl` re-runs the same test (with a trace) when the picked
+    // move actually starts.
     bool move_conditions_pass(const MoveDef& move, FightContext& ctx,
                               std::string* trace = nullptr) const;
 
@@ -335,23 +356,30 @@ public:
     int sub() const { return sub_; }
     int facing() const { return facing_; }
     const std::vector<const MoveDef*>& hb() const { return hb_; }
-    // The last weighted-roulette outcome (JS `Md.jL` L640 + `iCa` L640) —
-    // the JS-exact pick record the `--verify-input` probes assert: the
-    // candidate animation list in `jL` order, each candidate's weight, the
-    // weight SUM (`d`), the raw shared-stream draw (`Da.pg.jf()`, one draw
-    // per pick), the returned index and the move that actually started.
-    // `valid` is false until a roulette runs (and resets to false on every
-    // `try_select_move` that returns before the roulette).
-    struct RouletteRecord {
+    // The last player move decision (the JS `Gc.DK` `c == false` branch,
+    // L673-674) — the record the `--verify-input` probes assert: the
+    // candidate set with each candidate's `priority`, the `Aua` max-priority
+    // non-`Rha` group (`f`), the `g` (`Rha`) `Ukb` name, the `uf.sja` draw,
+    // and the move that actually started. `valid` is false until a decision
+    // runs (and resets on every `try_select_move` call).
+    struct MoveDecision {
         bool valid = false;
-        std::vector<std::pair<std::string, float>> cands;  // animation -> `iCa`
-        float sum = 0.0f;    // JS `Md.jL` `d` (the weight total)
-        float roll = 0.0f;   // JS `Da.pg.jf()` (`s4(d)` = `jf()*d`)
-        float draw = 0.0f;   // JS `Da.pg.s4(d)` = roll * sum
-        int index = -1;      // JS `Md.jL` return (-1 = `if(0<d)` failed)
-        std::string picked;  // the move the pick actually started
+        // `hb_`-order passing candidates: move name + `priority`.
+        std::vector<std::pair<std::string, int>> cands;
+        // The `Aua` non-`Rha` max-`priority` group (`f`), in order.
+        std::vector<std::string> f_group;
+        // `a.Ukb(g[sja].animation)` (L674) — the `Rha` group pick, if any.
+        std::string ukb;
+        bool ukb_set = false;
+        // `uf.sja(f.length)`: whether `uf.OKa.RGa()` was drawn, its value,
+        // and the resulting index. No draw when `|f| <= 1` — `floor(r*1)`
+        // is 0 for every `r`, so the pick is value-exact without one.
+        bool drew = false;
+        float draw = 0.0f;
+        int index = -1;
+        std::string picked;  // the move the decision actually started
     };
-    const RouletteRecord& last_roulette() const { return roulette_; }
+    const MoveDecision& last_decision() const { return decision_; }
     // Test/trace accessors (no behavior change): live input-buffer counts.
     int buffered_tap_count() const;
     int buffered_hold_count() const;
@@ -472,8 +500,8 @@ private:
     float color_b_ = 1.0f;
 
     // --- move execution state (Phase 3.2b) --------------------------------
-    std::vector<const MoveDef*> hb_;        // move list (sorted, priority desc)
-    RouletteRecord roulette_;               // last `Md.jL` outcome (probe/trace)
+    std::vector<const MoveDef*> hb_;        // move list (document order, JS `ra.Lk`)
+    MoveDecision decision_;                 // last player decision (probe/trace)
     // `uf.sja`'s `Math.random` mirror (`set_math_random`); unset -> no draw is
     // needed because the `Aua` group is a singleton (value-free).
     std::function<float()> math_random_;
