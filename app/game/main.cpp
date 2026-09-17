@@ -955,35 +955,42 @@ struct VerifyProbe {
 // the K tap's drawn pick is `HighPunch`, not the old hard-coded
 // `ShortUpwardElbowStrike`.
 static const VerifyProbe kVerifyProbes[] = {
-    // F180: Back Tap x2 at the spawn gap (dist 283). 249.647949 - 178.0734 ->
-    // -89.3593 (<0) at index 1 -> StepBack (`Md.jL` L640).
-    {180, "Back Tap x2 (spawn gap 283)", "StepBack",
-     "sum=267.4326 draw=249.647949 idx=1 StepBack "
-     "cands=BackHandflip=178.0734,StepBack=89.3593",
+    // F180: Back Tap x2 at the spawn gap (dist 283). Candidate order is the
+    // JS `ra.Lk` DOCUMENT order (P4a, `profile_order`): StepBack
+    // (moves.xml L6861) then BackHandflip (L7211). 249.647949 - 89.3593 =
+    // 160.2886 (>=0); the 178.0734 BackHandflip then takes it to -17.7848
+    // (<0) at index 1 -> BackHandflip (`Md.jL` L640).
+    {180, "Back Tap x2 (spawn gap 283)", "BackHandflip",
+     "sum=267.4326 draw=249.647949 idx=1 BackHandflip "
+     "cands=StepBack=89.3593,BackHandflip=178.0734",
      4, false},
-    // F300: Forward Tap x2. 1230.425537 - 100.0000 < 0 -> index 1 ->
-    // StepForward.
+    // F300: Forward Tap x2. Document order (P4a): StepForward (L6756) then
+    // DoubleStepForward (L7056). The ForwardStep curve is Limit-capped here
+    // (1600) because the double tap lands mid-arena; 1581.174927 stays
+    // positive against it, so index 0 wins.
     {300, "Forward Tap x2", "StepForward",
-     "sum=1322.8918 draw=1230.425537 idx=1 StepForward "
-     "cands=DoubleStepForward=100.0000,StepForward=1222.8918",
+     "sum=1700.0000 draw=1581.174927 idx=0 StepForward "
+     "cands=StepForward=1600.0000,DoubleStepForward=100.0000",
      4, false},
-    // F420: Punch Tap x2 + Forward Hold. 568.068420 less the three 100.0 taps
-    // is still positive; the 1062.19 Forward candidate takes it negative at
-    // index 3 -> StepForward.
+    // F420: Punch Tap x2 + Forward Hold. Document order: StepForward (L6756),
+    // HighPunch (L8640), HeavyPunch (L8798), DoublePunch (L8846). The
+    // StepForward candidate is subtracted FIRST now, so 771.368225 goes
+    // negative at index 0 (it was index 3 under the old alphabetical
+    // `std::map` tie order of the unstable priority sort).
     {420, "Punch Tap x2 + Forward Hold", "StepForward",
-     "sum=1362.1919 draw=568.068420 idx=3 StepForward "
-     "cands=DoublePunch=100.0000,HeavyPunch=100.0000,HighPunch=100.0000,"
-     "StepForward=1062.1919",
+     "sum=1849.6919 draw=771.368225 idx=0 StepForward "
+     "cands=StepForward=1549.6919,HighPunch=100.0000,HeavyPunch=100.0000,"
+     "DoublePunch=100.0000",
      4, false},
     // F520: single Forward tap -> the ONLY candidate, whatever the draw.
     {520, "Forward Tap x1 (1key)", "StepForward",
-     "sum=1006.6419 draw=940.663086 idx=0 StepForward "
-     "cands=StepForward=1006.6419",
+     "sum=1494.1418 draw=1396.210571 idx=0 StepForward "
+     "cands=StepForward=1494.1418",
      4, false},
     // F550: single Forward tap 30 frames later (a fresh 1key step).
     {550, "Forward Tap x1 (+30f)", "StepForward",
-     "sum=922.7308 draw=451.490051 idx=0 StepForward "
-     "cands=StepForward=922.7308",
+     "sum=1410.2307 draw=690.022644 idx=0 StepForward "
+     "cands=StepForward=1410.2307",
      4, false},
     // F620: K (GLFW 75) maps to Punch (id 9) -> the Punch-key candidate set;
     // the one whose Conditions pass is HighPunch. 81.378464 - 100.0000 < 0 ->

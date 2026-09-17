@@ -128,8 +128,21 @@ void Fighter::set_model(const Model& model) {
 // every parsed move's Locks against the fighter's items. Task contract:
 // the equipped weapon (Fists) contributes all moves tagged
 // `TacticWeapon == weapon_subtype` (JS `Fa.Ueb` L711 reads TacticWeapon
-// into `QX`). Sorted by Priority desc so `hb[0]` = the highest-priority
-// candidate (`Ci` L800, `Zka` L502).
+// into `QX`).
+//
+// ORDER (P4a): the JS never priority-sorts `me`. `ra.Hza` (L684-685) walks
+// `ra.Lk` — the moves in `<Moves><Move>` DOCUMENT order — and pushes each
+// locks-passing move; every downstream consumer keeps that order:
+//   `wd.ia` L499/L502 `Su.FT(this.me)` -> `ru.iQ` (`ru.FT` L539 /
+//   `dea(2)` L540) -> `Gc.EZa` L676 walks it to build the KeyPressed
+//   candidates, `Gc.DK`/`Aua` L674 breaks equal-`priority` ties by
+//   insertion order, and `de.Pqb` L604-608 / `jL` L594 never re-sort.
+// The previous `std::sort(priority >)` was JS-wrong twice: it is not the
+// JS order at all, and being UNSTABLE it resolved equal-`priority` ties to
+// the `std::map` iteration order = ALPHABETICAL — the observed F420 list
+// `DoublePunch,HeavyPunch,HighPunch` (each 100) ahead of `StepForward`.
+// `MoveDef::profile_order` IS the JS document index (`ra.Ul` push order,
+// `Fa.Ueb` L712), so ordering by it reproduces `ra.Lk`.
 void Fighter::build_move_list(const std::map<std::string, MoveDef>& all_moves,
                               const std::string& weapon_subtype,
                               bool include_universal) {
@@ -147,8 +160,13 @@ void Fighter::build_move_list(const std::map<std::string, MoveDef>& all_moves,
         // No TacticWeapon -> universal (Skeleton lock passes for all).
         hb_.push_back(&m);
     }
-    std::sort(hb_.begin(), hb_.end(),
-              [](const MoveDef* a, const MoveDef* b) { return a->priority > b->priority; });
+    // P4a: JS `ra.Lk` document order (`profile_order`), NOT priority desc —
+    // see the ORDER note on `build_move_list` above. `Aua` (L674) does the
+    // priority grouping at selection/hit-reaction time, keeping ties in this
+    // document order (insertion order).
+    std::sort(hb_.begin(), hb_.end(), [](const MoveDef* a, const MoveDef* b) {
+        return a->profile_order < b->profile_order;
+    });
 }
 
 // JS `ra.Hza` (L684-685): the move set `me` is built by testing every move's
@@ -263,8 +281,13 @@ void Fighter::build_move_list_locks(
         if (or_group && !any_or) continue;
         hb_.push_back(&m);
     }
-    std::sort(hb_.begin(), hb_.end(),
-              [](const MoveDef* a, const MoveDef* b) { return a->priority > b->priority; });
+    // P4a: JS `ra.Lk` document order (`profile_order`), NOT priority desc —
+    // see the ORDER note on `build_move_list` above. `Aua` (L674) does the
+    // priority grouping at selection/hit-reaction time, keeping ties in this
+    // document order (insertion order).
+    std::sort(hb_.begin(), hb_.end(), [](const MoveDef* a, const MoveDef* b) {
+        return a->profile_order < b->profile_order;
+    });
 }
 
 // JS `zl.yLa` (L799): `zg.Fh` = a Hold for every currently-down key
@@ -799,7 +822,8 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
     // work; in-fight pad + keyboard "do nothing"). Interrupt gating is done
     // by the candidate's OWN Conditions (Uninterrupt / SemiUninterrupt /
     // CurrentAnimation), which `try_start_move` -> `eval_move_conditions`
-    // already evaluates below; `hb_` is priority-sorted like the JS finder.
+    // already evaluates below; `hb_` is in the JS `ra.Lk` document order
+    // (P4a), which is the order `Gc.EZa` L676 walks `ru.iQ` in.
     // JS `wd.Ykb` fires from the `Anb` KeyPressed event (`Gc.type==2`) — on a
     // PRESS EDGE, not every tick. Only attempt selection when a Tap is
     // buffered; a lingering Hold is a continuation for the current move's
@@ -815,11 +839,11 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
     if (!has_tap) return "";
 
     // [M1] JS `de.ABa` (L601) filters `wb` by `V1`: collect EVERY candidate
-    // whose Conditions pass, in the same `hb_` (Priority-descending) order
-    // the JS `Aua`/`Zka` machinery keeps. The first-passing pick is gone —
-    // it was the documented divergence this replaces (the human's "plays the
-    // WRONG animation" second cause: the move was never chosen by the JS
-    // roulette).
+    // whose Conditions pass, in the same `hb_` (JS `ra.Lk` document) order
+    // the JS `Gc.EZa` L676 / `ru.dea(2)` (L540) machinery yields. The
+    // first-passing pick is gone — it was the documented divergence this
+    // replaces (the human's "plays the WRONG animation" second cause: the
+    // move was never chosen by the JS roulette).
     std::vector<const MoveDef*> passing;
     for (const MoveDef* m : hb_) {
         if (m == nullptr) continue;
@@ -861,7 +885,7 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
                 // at L723).
                 if (kv.first.empty() || kv.first == m.name ||
                     m.template_tags.count(kv.first) > 0) {
-                    weights[i] = weight_curve_eval(kv.second, *feat);
+                    weights[i] = weight_curve_eval(kv.second, *feat, &m.name);
                     break;
                 }
             }

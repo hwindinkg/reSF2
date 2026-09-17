@@ -283,7 +283,8 @@ void FightController::init_locks(
     const PerkSetup& perks,
     std::function<void(int)> reseed01,
     const sf2::scene::Model* player_model,
-    const sf2::scene::Model* enemy_model) {
+    const sf2::scene::Model* enemy_model,
+    const sf2::scene::TacticDef* player_tactic) {
     battle_ = battle;
     prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
     player_.style = StyleMeter();  // style meters reset per battle
@@ -293,8 +294,14 @@ void FightController::init_locks(
     clips_ = &clips;
     tactics_ = tactics;
     tactic_ = tactic;
-    std::fprintf(stdout, "[fight] enemy tactic: %s\n",
-                 tactic_ != nullptr ? tactic_->name.c_str() : "<none>");
+    // P4b: the PLAYER's roulette tactic is a SEPARATE resolution (JS `IKa`
+    // L672) — the player's own `<Tactic>` when it resolves, else "Standard" —
+    // never the battle warrior's. nullptr keeps the legacy shared pointer for
+    // the AI-demo callers that attach their own player controller.
+    player_tactic_ = (player_tactic != nullptr) ? player_tactic : tactic;
+    std::fprintf(stdout, "[fight] enemy tactic: %s ; player tactic: %s\n",
+                 tactic_ != nullptr ? tactic_->name.c_str() : "<none>",
+                 player_tactic_ != nullptr ? player_tactic_->name.c_str() : "<none>");
     std::fflush(stdout);
     roll01_ = std::move(roll01);
     reseed01_ = std::move(reseed01);
@@ -3215,7 +3222,7 @@ static sf2::scene::AiFeatureState move_feature_state(
     f.shift = 0.0f;
     f.my_anim = st.my_anim;
     f.enemy_anim = st.enemy_anim;
-    f.conditional = false;
+    f.zz.clear();
     return f;
 }
 
@@ -3301,7 +3308,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.enemy_anim = foe.fighter.current_move() ? foe.fighter.current_move()->name : "";
         st.strike_memory = &me.fighter.strike_memory();  // `Cn.d0` -> counter/xb/tf
         const sf2::scene::AiFeatureState feat = move_feature_state(st);
-        const std::string chosen = me.fighter.try_select_move(ctx, tactic_, &feat);
+        const std::string chosen = me.fighter.try_select_move(ctx, player_tactic_, &feat);
         if (!chosen.empty()) {
             ++me.moves_started;
             me.last_decision = "input:" + chosen;

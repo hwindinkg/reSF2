@@ -229,7 +229,7 @@ void AiController::mq(const AiFightState& st) {
     f.shift = 0.0f;
     f.my_anim = st.my_anim;
     f.enemy_anim = st.enemy_anim;
-    f.conditional = false;
+    f.zz.clear();
 }
 
 // JS `dqb` (L600): the distance category via the UseDefense cumulative
@@ -418,7 +418,7 @@ int AiController::pick(const std::vector<AiCandidate>& cands) const {
         float w = 0.0f;
         for (const auto& kv : tactic_->anim_weights) {
             if (kv.first.empty() || kv.first == anim) {
-                w = weight_curve_eval(kv.second, feat_);
+                w = weight_curve_eval(kv.second, feat_, &anim);
                 break;
             }
         }
@@ -431,7 +431,7 @@ int AiController::pick(const std::vector<AiCandidate>& cands) const {
         float w = 0.0f;
         for (const auto& kv : tactic_->anim_weights) {
             if (kv.first.empty() || kv.first == anim) {
-                w = weight_curve_eval(kv.second, feat_);
+                w = weight_curve_eval(kv.second, feat_, &anim);
                 break;
             }
         }
@@ -633,6 +633,9 @@ int AiController::nwa(const std::vector<AiAnimSlot>& slots, const std::string& a
         }
         if (dup) continue;
         wb_.push_back({n, 0});
+        // JS `Nwa` (L603): `this.iN.zZ.push(c.name)` — the name feeds the
+        // `cc.Gb` conditional term when this candidate is weighed by `iCa`.
+        feat_.zz.push_back(n);
         ++added;
     }
     return added;
@@ -686,6 +689,9 @@ void AiController::qja(const AiFightState& st) {
 // JS `Pqb` (L604-608): the core decision. Returns the candidate count.
 int AiController::pqb(const AiFightState& st) {
     wb_.clear();
+    // JS `Pqb` (L604): `this.iN.zZ.length=0` — the appended-name list the
+    // `cc.Gb` conditional term (L647) tests is reset per decision pass.
+    feat_.zz.clear();
     pH_ = F8_ = false;
 
     // Facing lock (JS L604): `b6a(b)*b.hd()>0` — when the direction toward

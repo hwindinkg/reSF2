@@ -1258,7 +1258,17 @@ public:
                     // (its <Items> = PunchingBag + SkeletonPunchingBag,
                     // stages.xml L14-15).
                     const sf2::scene::Model* player_model = nullptr,
-                    const sf2::scene::Model* enemy_model = nullptr);
+                    const sf2::scene::Model* enemy_model = nullptr,
+                    // P4b: the PLAYER's roulette tactic. JS `IKa` (L672):
+                    //   `this.pb.NT(this.tC);                       // enemy
+                    //    this.yb.parameters.Fj && (this.kc.Gc != null ?
+                    //        this.yb.NT(this.kc.Gc) : this.yb.s5("Standard"));`
+                    // i.e. the ENEMY gets the battle warrior's tactic
+                    // (`tC = Zb.Gc`) and the PLAYER gets its OWN save
+                    // warrior's `<Tactic>` when it resolves, else "Standard".
+                    // `tactic` is the enemy's; nullptr here = fall back to it
+                    // (keeps the ai_demo AI-player path unchanged).
+                    const sf2::scene::TacticDef* player_tactic = nullptr);
 
     // Seeds the OWNED fight stream (JS `Da.pg=new Rk(L.seed)`, L67). Every
     // fight draw - rules (`cl.pmb`/`pn.M4`), combat (`Lcb`/`R8a`), the AI
@@ -1408,6 +1418,11 @@ private:
     const std::map<std::string, sf2::data::anim_clip>* clips_ = nullptr;
     std::vector<sf2::scene::TacticsFile> tactics_;
     const sf2::scene::TacticDef* tactic_ = nullptr;
+    // P4b: the tactic the PLAYER's roulette weighs with (JS `IKa` L672 —
+    // the player's own resolved `<Tactic>`, else "Standard"). Kept separate
+    // from `tactic_` (the battle warrior's = the ENEMY's) so the player is
+    // never weighted by the enemy's tactic. nullptr = `tactic_`.
+    const sf2::scene::TacticDef* player_tactic_ = nullptr;
     // External stream override (the demo/probe path). Empty -> the OWNED
     // `prng_` (JS `Da.pg`) is used for every fight draw.
     std::function<float()> roll01_;

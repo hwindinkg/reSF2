@@ -201,13 +201,22 @@ struct AiFeatureState {
     // My/enemy current animation names (for the per-anim weight lookups).
     std::string my_anim;
     std::string enemy_anim;
-    // Conditional decision flag (`zZ` — whether a ConditionalDecision fired).
-    bool conditional = false;
+    // JS `de.iN.zZ` (L590, cleared at `Pqb` L604): the animation names the
+    // safe/quick-attack slots appended (`Nwa` L603 `this.iN.zZ.push(c.name)`).
+    // `cc.Gb` (L647) adds `ConditionalDesigionFactor` only when the evaluated
+    // animation's OWN name is in this list — the name is passed per candidate
+    // from `iCa` (L640 `e.second.Gb(b, a.name)`).
+    std::vector<std::string> zz;
 };
 
 // Evaluates one weight curve against the feature state (JS `cc.Gb` L647 +
 // `NYa`/`QYa` L648). `curve` is the parsed curve, `f` the feature state.
-float weight_curve_eval(const WeightCurve& curve, const AiFeatureState& f);
+// `anim_name` is the evaluated animation's name (`iCa` L640 passes `a.name`);
+// the scalar callers (`dqb` L600, `gfa`/`Aea` L597, the slot chance curves)
+// pass none — the JS one-argument `Gb(b)` calls, where `a.zZ.includes(undefined)`
+// is false, so no conditional term is added.
+float weight_curve_eval(const WeightCurve& curve, const AiFeatureState& f,
+                        const std::string* anim_name = nullptr);
 
 // One QuickAttack / Evade slot (JS `Hl` g="E6" + the `$E`/`nD` lists):
 // animation names + priority + conditions (all must pass) + the chance

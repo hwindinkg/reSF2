@@ -543,7 +543,8 @@ void parse_tactic_settings(const std::string& xml_text,
 // ---------------------------------------------------------------------------
 // Weight curve evaluator — JS `cc.Gb` (L647) + `NYa`/`QYa` (L648)
 // ---------------------------------------------------------------------------
-float weight_curve_eval(const WeightCurve& c, const AiFeatureState& f) {
+float weight_curve_eval(const WeightCurve& c, const AiFeatureState& f,
+                        const std::string* anim_name) {
     // The dot product (JS `cc.Gb` L647), in the exact operand order.
     float total = f.counter * c.counter_factor +
                   f.xb * c.damage_factor +
@@ -561,9 +562,20 @@ float weight_curve_eval(const WeightCurve& c, const AiFeatureState& f) {
     // where D/C/H are the decaying per-animation memory accumulators. The
     // native port has no strike-memory yet — the accumulators are 0, so the
     // term is 0 (see README for the full mechanism).
-    // Conditional decision term (JS: adds ConditionalDesigionFactor when the
-    // conditional-decision flag is set).
-    if (f.conditional) total += c.conditional_factor;
+    // Conditional decision term (JS `cc.Gb` L647):
+    //   `b!=null && a.zZ.includes(b) && (c+=this.Opa)`
+    // `b` is the animation's OWN name — `iCa` (L640) passes `a.name`; the
+    // scalar callers pass none, matching the one-arg `Gb(b)` calls where the
+    // test is false. `a.zZ` (`de.iN.zZ`, L590) holds the names the
+    // safe/quick-attack slots appended (`Nwa` L603).
+    if (anim_name != nullptr && !f.zz.empty()) {
+        for (const std::string& n : f.zz) {
+            if (n == *anim_name) {
+                total += c.conditional_factor;
+                break;
+            }
+        }
+    }
 
     if (c.linear) {
         // QYa (L648): total>=0 -> base + (limit-base)*min(1,total)

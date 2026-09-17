@@ -6694,6 +6694,29 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     battle.enemy_align = to_align_deltas(bw.align);
     battle.player_align = to_align_deltas(bw.player_align);
     if (!bw.tactic.empty()) { const auto tit = assets.tactic_defs.find(bw.tactic); if (tit != assets.tactic_defs.end()) tactic = &tit->second; }  // JS `ur` L194: stage warrior `Tactic`
+    // P4b — the PLAYER's roulette tactic (JS `IKa` L672):
+    //   `this.pb.NT(this.tC);                       // ENEMY  <- `tactic` above
+    //    this.yb.parameters.Fj && (this.kc.Gc != null ?
+    //        this.yb.NT(this.kc.Gc) : this.yb.s5("Standard"));`
+    // `kc` is the player's SAVE warrior, so the player is weighted by its OWN
+    // `<Tactic>` when that name resolves in tactic_settings.xml, else
+    // "Standard" — never by the battle warrior's. The shipped save carries
+    // `Tactic="Player"` (saves/save.xml), which has no `<Tactic>` entry (the
+    // 14 shipped names: Standard/NoTables/UseTables/Sensei/Lynx_*/Shogun*/
+    // Titan_*/Careful/Aggressive/Beginner), so the JS lands on "Standard".
+    const sf2::scene::TacticDef* player_tactic = nullptr;
+    {
+        const auto sit = assets.tactic_defs.find("Standard");
+        if (sit != assets.tactic_defs.end()) player_tactic = &sit->second;
+        try {
+            const std::string pt = app().save().load().tactic;
+            if (!pt.empty()) {
+                const auto pit = assets.tactic_defs.find(pt);
+                if (pit != assets.tactic_defs.end()) player_tactic = &pit->second;
+            }
+        } catch (const std::exception&) {
+        }
+    }
     // JS `xc.cM` L809-810: each warrior is built from its OWN equipment
     // (Skeleton + Weapon + Armor + Helm `Model` list -> `Yc.load` L568 merges
     // them into ONE bone hierarchy, skeleton first). Resolve the PLAYER from
@@ -6758,7 +6781,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
                        battle.max_hp, battle.max_hp, {},
                        player_owned, equipped_perks(app(), assets), nullptr,
-                       player_model, enemy_model);
+                       player_model, enemy_model, player_tactic);
     fight_->set_seed(fight_seed);  // JS `Da.pg=new Rk(L.seed)` (L67)
     // The player's Locks move list (`ra.Hza` L684-685) — identical for the
     // direct boot and the Map/Dojo launch (both feed `player_owned_`).
