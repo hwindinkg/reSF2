@@ -675,8 +675,8 @@ inline bool advance_series(const StageBattle& battle, ModeSeries& s, bool won) {
 // Enemy config for fight init (resolved from a ResolvedWarrior).
 struct ModeEnemy {
     std::string tactic;  // "" = keep the init tactic
-    // Locks items for the enemy move list (type, subtype) pairs.
-    std::vector<std::pair<std::string, std::string>> owned;
+    // Locks items for the enemy move list (Type / SubType / Name).
+    std::vector<OwnedItem> owned;
     std::map<std::string, double> attrs;  // numeric stat overrides
     std::vector<std::string> perk_names;  // Warrior <Perks> (enemy_refs)
 };
@@ -693,15 +693,15 @@ struct ModeSetup {
     bool no_bullets = false;  // NoBulletsReplenishment (ApplyTo=Player)
 };
 
-// Build a ModeSetup from a resolved ModeFight. `enemy_owned` (type,
-// subtype) pairs come from the app layer (item catalog); numeric attrs
-// parse from the warrior strings (non-numeric skipped). Rules mapping:
+// Build a ModeSetup from a resolved ModeFight. `enemy_owned` (Type /
+// SubType / Name rows, `Hm.he` L758) comes from the app layer (item catalog);
+// numeric attrs parse from the warrior strings (non-numeric skipped). Rules mapping:
 // `<Attributes DamageFactor ApplyTo=Player/Bot>` → side adds;
 // `<NoBulletsReplenishment ApplyTo=Player>` → flag; Eclipse → noted
 // OPEN (no Cea setter found; bp stays 1.0).
 inline ModeSetup mode_setup_from_fight(
     const ModeFight& mf,
-    const std::vector<std::pair<std::string, std::string>>& enemy_owned) {
+    const std::vector<OwnedItem>& enemy_owned) {
     ModeSetup out;
     out.rounds = mf.rounds;
     out.round_time = mf.round_time;

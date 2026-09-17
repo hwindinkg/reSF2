@@ -168,6 +168,22 @@ struct Lock {
     bool never = false;
 };
 
+// One owned item — the three fields the JS lock test `Hm.he` (L758)
+// compares: `uc` (Type), `Zta` (SubType), `Ba` (name):
+//   c = (this.uc==""||this.uc==b.type) ? (this.Zta==""||this.Zta==b.Yb) : false;
+//   c = c ? (this.Ba==""||this.Ba==b.name) : false;
+// A lock's empty field is a wildcard; the item carries whatever list.xml
+// declares (e.g. armor `Body` has NO `SubType`, so `Yb` is undefined and a
+// lock with `SubType="Body"` can never match it — only the NAME can).
+// Lives here (not nested in `Fighter`) because the app layer
+// (`PendingBattle`) carries the player's owned list across the
+// Map/Dojo -> Fight boundary and must not include `scene/fighter.hpp`.
+struct OwnedItem {
+    std::string type;
+    std::string subtype;
+    std::string name;
+};
+
 // Align (JS `Ui`, g="109"; parse `Fa.jva` L719-721) — the evaluator fields
 // plus the pose-align fields read by `Te.Gub` (L557-559).
 struct Align {

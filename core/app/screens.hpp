@@ -365,10 +365,12 @@ class FightScreen : public Screen {
 public:
     // `battle_name`/`location` = the stages.xml battle; `reward_money`/
     // `reward_exp` = the fight's reward (from the pending battle). `owned`
-    // = the player's (type, subtype) items for the Locks move list.
+    // = the player's items (Type / SubType / Name) for the Locks move list;
+    // EMPTY means "resolve from the save" (`owned_items`) so the direct boot
+    // and the Map/Dojo launch build the identical list.
     FightScreen(ScreenManager& mgr, const std::string& battle_name,
                 const std::string& location, int reward_money, int reward_exp,
-                const std::vector<std::pair<std::string, std::string>>& owned);
+                const std::vector<sf2::scene::OwnedItem>& owned);
 
     ScreenId id() const override { return kScreenFight; }
 
@@ -423,6 +425,21 @@ public:
     std::string player_last_decision() const;
     int player_moves_started() const;
 
+    // The player's last `Md.jL` (L640) weighted-roulette outcome, rendered as
+    // `sum=<s> draw=<d> r=<roll> idx=<i> <name>=<w>,...` — the candidate set
+    // (with each `iCa` weight), the weight total, the raw `Da.pg.jf()` draw,
+    // the returned index and the picked move. "" when no roulette has run.
+    // The `--verify-input` probes assert this whole record.
+    std::string player_roulette() const;
+
+    // The owned rows this screen actually used (see `player_owned_`), and the
+    // ordered player move-list names joined with "," (the boot-vs-Map
+    // comparison). Both are test/replay hooks — no behavior change.
+    const std::vector<sf2::scene::OwnedItem>& resolved_owned() const {
+        return player_owned_;
+    }
+    std::string move_list_digest() const;
+
     // [fidelity] The fight controller's frame counter (JS `ca.frame`). The
     // fidelity tour uses it to capture a fight state at a deterministic frame
     // (the oracle fight captures are pinned to `fight.frame`). -1 before the
@@ -461,6 +478,10 @@ private:
     std::string location_;
     int reward_money_ = 0;
     int reward_exp_ = 0;
+    // The owned items this screen actually built the player's move list from
+    // (the ctor param, or `owned_items(app())` when it was empty). The
+    // boot-vs-Map comparison reads it back.
+    std::vector<sf2::scene::OwnedItem> player_owned_;
     std::unique_ptr<sf2::scene::FightController> fight_;
     bool results_pushed_ = false;
     bool key_state_[16] = {};

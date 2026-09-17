@@ -4122,10 +4122,16 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
     return out;
 }
 
-// The player's (type, subtype) items for the Locks move list: the equipped
-// slots (JS `xc.hk`) + the owned inventory (JS `p.o.xa`).
-std::vector<std::pair<std::string, std::string>> owned_items(App& app) {
-    std::vector<std::pair<std::string, std::string>> out;
+// The player's owned items for the Locks move list: the equipped slots
+// (JS `xc.hk` — Skeleton/Weapon/Armor/Helm) + the owned inventory
+// (JS `p.o.xa`). Each row carries the item's NAME too — `Hm.he` (L758)
+// compares Type AND SubType AND Name, so an item shipped WITHOUT a `SubType`
+// (list.xml: armor `Body`, helm `Head`, `NoRanged`, `NoMagic` all lack the
+// attribute) is only addressable by its name and was silently dropped by the
+// old empty-SubType filter. Both the direct boot and the Map/Dojo launch use
+// this one function, so they build the SAME list from the same save.
+std::vector<sf2::scene::OwnedItem> owned_items(App& app) {
+    std::vector<sf2::scene::OwnedItem> out;
     WarriorSave w;
     try {
         w = app.save().load();
@@ -4133,38 +4139,36 @@ std::vector<std::pair<std::string, std::string>> owned_items(App& app) {
         return out;
     }
     const std::vector<CatalogItem> catalog = load_full_catalog(app);
-    const auto subtype_of = [&catalog](const std::string& name) {
+    const auto push = [&catalog, &out](const std::string& name) {
+        if (name.empty()) return;
         for (const CatalogItem& ci : catalog) {
-            if (ci.name == name) return ci.subtype;
-        }
-        return std::string();
-    };
-    for (const std::string& slot : {w.weapon, w.armor, w.helm}) {
-        const std::string st = subtype_of(slot);
-        if (!st.empty()) {
-            for (const CatalogItem& ci : catalog) {
-                if (ci.name == slot) {
-                    out.emplace_back(ci.type, st);
-                    break;
-                }
+            if (ci.name == name) {
+                out.push_back({ci.type, ci.subtype, ci.name});
+                return;
             }
         }
-    }
+    };
+    // JS `xc.hk`: the four equipped slots, in the Of/Hd/hg/Lg order.
+    push(w.skeleton);
+    push(w.weapon);
+    push(w.armor);
+    push(w.helm);
+    // JS `p.o.xa`: every owned inventory row with a positive count.
     for (const auto& oi : w.items) {
         if (oi.count <= 0) continue;
-        for (const CatalogItem& ci : catalog) {
-            if (ci.name == oi.name && !ci.subtype.empty()) {
-                out.emplace_back(ci.type, ci.subtype);
-                break;
-            }
-        }
+        push(oi.name);
     }
-    // The fighter's Skeleton (the Skeleton lock passes for every move — the
-    // JS fighter always owns the Skeleton item, `users_default` has
-    // Skeleton="Skeleton").
-    out.emplace_back("Skeleton", "Skeleton");
-    // The default Fists (the unarmed weapon subtype).
-    out.emplace_back("Weapon", "Fists");
+    // The fighter always owns a Skeleton (the Skeleton lock passes for every
+    // move — `users_default` has Skeleton="Skeleton") and a weapon; a save
+    // with an empty slot still fights unarmed.
+    const auto has_type = [&out](const std::string& t) {
+        for (const sf2::scene::OwnedItem& o : out) {
+            if (o.type == t) return true;
+        }
+        return false;
+    };
+    if (!has_type("Skeleton")) out.push_back({"Skeleton", "Skeleton", "Skeleton"});
+    if (!has_type("Weapon")) out.push_back({"Weapon", "Fists", "Fists"});
     return out;
 }
 
@@ -6445,12 +6449,21 @@ void MapScreen::render_impl(App& app) {
 
 FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                          const std::string& location, int reward_money, int reward_exp,
-                         const std::vector<std::pair<std::string, std::string>>& owned)
+                         const std::vector<sf2::scene::OwnedItem>& owned)
     : Screen(mgr, "Fight"),
       battle_name_(battle_name),
       location_(location),
       reward_money_(reward_money),
       reward_exp_(reward_exp) {
+    // An EMPTY owned list means "resolve from the save" — the direct boot
+    // (`--fight`/`--verify-input`/`--input-tape`/capture drivers) and the
+    // Map/Dojo launch then build the IDENTICAL player move list from the same
+    // save (JS `ra.Hza` L684-685 always tests the fighter's real items).
+    const std::vector<sf2::scene::OwnedItem> player_owned =
+        owned.empty() ? owned_items(app()) : owned;
+    player_owned_ = player_owned;
+    std::fprintf(stdout, "[fight] player owned items: %zu\n", player_owned.size());
+    std::fflush(stdout);
     FightAssets& assets = app().fight_assets();
     std::fprintf(stdout, "[fight] battle=%s location=%s reward money=%d exp=%d\n",
                  battle_name_.c_str(), location_.c_str(), reward_money_, reward_exp_);
@@ -6744,9 +6757,14 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
                        battle.max_hp, battle.max_hp, {},
-                       owned, equipped_perks(app(), assets), nullptr,
+                       player_owned, equipped_perks(app(), assets), nullptr,
                        player_model, enemy_model);
     fight_->set_seed(fight_seed);  // JS `Da.pg=new Rk(L.seed)` (L67)
+    // The player's Locks move list (`ra.Hza` L684-685) — identical for the
+    // direct boot and the Map/Dojo launch (both feed `player_owned_`).
+    std::fprintf(stdout, "[fight] player move list: %zu moves (owned rows=%zu)\n",
+                 fight_->player().fighter.hb().size(), player_owned_.size());
+    std::fflush(stdout);
     // [Phase 1 step 9] The resolved stage Warrior (JS `ur` L186-195) and the
     // input it feeds: the NotAI/NotAnimation gates, the player's resolved
     // UnarmedDamage and the location-sourced spawns.
@@ -6897,12 +6915,51 @@ std::size_t FightScreen::move_list_size() const {
     return fight_ != nullptr ? fight_->player().fighter.hb().size() : 0;
 }
 
+// The ordered player move-list names, ","-joined — the boot-vs-Map
+// comparison's exact-content digest (the size alone could hide a swap).
+std::string FightScreen::move_list_digest() const {
+    if (fight_ == nullptr) return std::string();
+    std::string out;
+    for (const sf2::scene::MoveDef* m : fight_->player().fighter.hb()) {
+        if (m == nullptr) continue;
+        if (!out.empty()) out += ",";
+        out += m->name;
+    }
+    return out;
+}
+
 std::string FightScreen::player_last_decision() const {
     return fight_ != nullptr ? fight_->player().last_decision : std::string();
 }
 
 int FightScreen::player_moves_started() const {
     return fight_ != nullptr ? fight_->player().moves_started : 0;
+}
+
+// The `Md.jL` (L640) roulette record as one comparable line. Order: the
+// weight total, the raw `Da.pg.jf()` draw, the scaled `s4(d)` draw, the
+// returned index, the picked move, then the candidate set in `jL` order with
+// each candidate's `iCa` weight (`--verify-input` asserts this whole string).
+std::string FightScreen::player_roulette() const {
+    if (fight_ == nullptr) return std::string();
+    const sf2::scene::Fighter::RouletteRecord& r =
+        fight_->player().fighter.last_roulette();
+    if (!r.valid) return std::string();
+    char buf[256];
+    std::string out;
+    std::snprintf(buf, sizeof(buf), "sum=%.4f draw=%.6f roll=%.6f idx=%d ",
+                  static_cast<double>(r.sum), static_cast<double>(r.draw),
+                  static_cast<double>(r.roll), r.index);
+    out += buf;
+    out += r.picked.empty() ? "<none>" : r.picked;
+    out += " cands=";
+    for (std::size_t i = 0; i < r.cands.size(); ++i) {
+        if (i != 0) out += ",";
+        std::snprintf(buf, sizeof(buf), "%s=%.4f", r.cands[i].first.c_str(),
+                      static_cast<double>(r.cands[i].second));
+        out += buf;
+    }
+    return out;
 }
 
 std::string FightScreen::player_current_move() const {

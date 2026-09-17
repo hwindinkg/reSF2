@@ -574,6 +574,73 @@ void merge_intervals(const std::vector<pugi::xml_node>& templates, pugi::xml_nod
     }
 }
 
+// One `<Locks>` block -> `Lock` records. Mirrors `Fa.H3` (L371011): walk the
+// block's children through `Tl.create`; an `Operator` group flattens its
+// `<Item>` members with `or_=true`.
+void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
+    if (!locks) return;
+    for (pugi::xml_node item : locks.children("Item")) {
+        Lock l;
+        if (pugi::xml_attribute t = item.attribute("Type")) l.type = t.value();
+        if (pugi::xml_attribute s = item.attribute("SubType")) l.subtype = s.value();
+        if (pugi::xml_attribute n = item.attribute("Name")) l.name = n.value();
+        l.not_ = data::xml_attr_bool(item, "Not", false);
+        out.push_back(std::move(l));
+    }
+    for (pugi::xml_node op : locks.children("Operator")) {
+        for (pugi::xml_node item : op.children("Item")) {
+            Lock l;
+            if (pugi::xml_attribute t = item.attribute("Type")) l.type = t.value();
+            if (pugi::xml_attribute s = item.attribute("SubType")) l.subtype = s.value();
+            if (pugi::xml_attribute n = item.attribute("Name")) l.name = n.value();
+            l.not_ = data::xml_attr_bool(item, "Not", false);
+            l.or_ = true;
+            out.push_back(std::move(l));
+        }
+        // Fail closed on unmodelled Or members too (`Or{<Perk A>,
+        // <Perk B>}`): with the perk children dropped the group became
+        // EMPTY, so `or_group` stayed false and the move looked
+        // lock-free (`AssistantBigMagariYariPlayer`,
+        // PERK_ASSISTANTS|PERK_ASSISTANTS_PVP, Priority 110, won the
+        // Super key). An unsatisfiable Or member keeps the group
+        // satisfiable only by its modelled members.
+        for (pugi::xml_node other : op.children()) {
+            const std::string tag = other.name();
+            if (tag == "Item") continue;
+            Lock l;
+            l.or_ = true;
+            l.never = true;
+            out.push_back(std::move(l));
+        }
+    }
+    // Fail closed on every lock kind the port does not model
+    // (`<Perk Name=..>` etc.). Dropping the element silently made the
+    // move look lock-free: `HermitStormPlayer` (PERK_HERMITSTORM) and
+    // `RatWavePlayer` (PERK_RAT_WAVE) then entered the player's move
+    // list and won the Up key on Priority. The JS `ra.Hza` tests every
+    // lock node, so an untracked one must not pass.
+    for (pugi::xml_node other : locks.children()) {
+        const std::string tag = other.name();
+        if (tag == "Item" || tag == "Operator") continue;
+        Lock l;
+        l.never = true;
+        out.push_back(std::move(l));
+    }
+}
+
+// JS `Fa.xbb` (L694): `d.locks = Fa.HS("Locks", a, b)` — `Fa.HS(a,b,c)`
+// (L371013) reads the node's OWN `<Locks>` first and then EVERY resolved
+// Template's (`for(;b<e;) Fa.H3(c[b++].A(a),d)`), so a Template can impose
+// locks the move's own block does not carry. The port parsed only the move's
+// own block. Same own-then-templates order as `merge_conds`/`merge_intervals`.
+void merge_locks(const std::vector<pugi::xml_node>& templates, pugi::xml_node own,
+                 std::vector<Lock>& out) {
+    parse_locks_node(own, out);
+    for (pugi::xml_node tpl : templates) {
+        parse_locks_node(tpl.child("Locks"), out);
+    }
+}
+
 } // namespace
 
 bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& out,
@@ -724,56 +791,8 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         // inherited template's, in template order.
         merge_actions(templates, move.child("Actions"), def.actions);
 
-        // Locks.
-        if (pugi::xml_node locks = move.child("Locks")) {
-            for (pugi::xml_node item : locks.children("Item")) {
-                Lock l;
-                if (pugi::xml_attribute t = item.attribute("Type")) l.type = t.value();
-                if (pugi::xml_attribute s = item.attribute("SubType")) l.subtype = s.value();
-                if (pugi::xml_attribute n = item.attribute("Name")) l.name = n.value();
-                l.not_ = data::xml_attr_bool(item, "Not", false);
-                def.locks.push_back(std::move(l));
-            }
-            for (pugi::xml_node op : locks.children("Operator")) {
-                for (pugi::xml_node item : op.children("Item")) {
-                    Lock l;
-                    if (pugi::xml_attribute t = item.attribute("Type")) l.type = t.value();
-                    if (pugi::xml_attribute s = item.attribute("SubType")) l.subtype = s.value();
-                    if (pugi::xml_attribute n = item.attribute("Name")) l.name = n.value();
-                    l.not_ = data::xml_attr_bool(item, "Not", false);
-                    l.or_ = true;
-                    def.locks.push_back(std::move(l));
-                }
-                // Fail closed on unmodelled Or members too (`Or{<Perk A>,
-                // <Perk B>}`): with the perk children dropped the group became
-                // EMPTY, so `or_group` stayed false and the move looked
-                // lock-free (`AssistantBigMagariYariPlayer`,
-                // PERK_ASSISTANTS|PERK_ASSISTANTS_PVP, Priority 110, won the
-                // Super key). An unsatisfiable Or member keeps the group
-                // satisfiable only by its modelled members.
-                for (pugi::xml_node other : op.children()) {
-                    const std::string tag = other.name();
-                    if (tag == "Item") continue;
-                    Lock l;
-                    l.or_ = true;
-                    l.never = true;
-                    def.locks.push_back(std::move(l));
-                }
-            }
-            // Fail closed on every lock kind the port does not model
-            // (`<Perk Name=..>` etc.). Dropping the element silently made the
-            // move look lock-free: `HermitStormPlayer` (PERK_HERMITSTORM) and
-            // `RatWavePlayer` (PERK_RAT_WAVE) then entered the player's move
-            // list and won the Up key on Priority. The JS `ra.Hza` tests every
-            // lock node, so an untracked one must not pass.
-            for (pugi::xml_node other : locks.children()) {
-                const std::string tag = other.name();
-                if (tag == "Item" || tag == "Operator") continue;
-                Lock l;
-                l.never = true;
-                def.locks.push_back(std::move(l));
-            }
-        }
+        // Locks (own + inherited Template `<Locks>`; `Fa.HS("Locks",a,b)`).
+        merge_locks(templates, move.child("Locks"), def.locks);
 
         // Align.
         if (pugi::xml_node align = move.child("Align")) {

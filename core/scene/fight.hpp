@@ -1229,9 +1229,10 @@ public:
     // Variant that builds the PLAYER's move list from its OWNED items via
     // the Locks test (JS `ra.Hza` L684-685 — `f.nw(d,b)` against the
     // fighter's items) instead of the TacticWeapon string. `owned` is the
-    // player's (type, subtype) item list. The enemy stays TacticWeapon-
-    // based ("Fists"). Used by the shop/equipment flow: equipping a weapon
-    // adds the weapon's Locks-matching moves to the player's move list.
+    // player's item list as `OwnedItem` (Type / SubType / Name — the three
+    // fields `Hm.he` L758 compares). The enemy stays TacticWeapon-based
+    // ("Fists"). Used by the shop/equipment flow: equipping a weapon adds the
+    // weapon's Locks-matching moves to the player's move list.
     void init_locks(const BattleParams& battle,
                     const sf2::scene::Model& model,
                     const std::map<std::string, sf2::scene::MoveDef>& moves,
@@ -1244,7 +1245,7 @@ public:
                     float enemy_x, float enemy_y,
                     int player_max_hp, int enemy_max_hp,
                     std::function<float()> roll01,
-                    const std::vector<std::pair<std::string, std::string>>& player_owned,
+                    const std::vector<sf2::scene::OwnedItem>& player_owned,
                     const PerkSetup& perks = PerkSetup(),
                     // JS `Da.IT` reseed hook for the shared fight stream
                     // (`Da.pg` analog). See `rules_begin_round` (`cl.pmb`).
@@ -1636,7 +1637,7 @@ private:
     // model (nullptr = the shared fight `model`).
     FightFighter make_fighter(const std::string& nm, bool is_player, float x, float y,
                               int max_hp, const std::string& weapon_subtype,
-                              const std::vector<std::pair<std::string, std::string>>& owned,
+                              const std::vector<sf2::scene::OwnedItem>& owned,
                               bool not_ai = false, bool not_animation = false,
                               const sf2::scene::Model* model = nullptr);
     // The hit test (JS `ca.Enb` -> `wd.tKa` -> `Fu.ia`).

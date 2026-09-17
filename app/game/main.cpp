@@ -912,6 +912,13 @@ struct VerifyProbe {
     int frame = 0;
     const char* label = "";
     const char* expect = "";  // "<..." = expect NO move
+    // The JS-exact roulette this probe must reproduce: the
+    // `FightScreen::player_roulette()` line MINUS the `roll=` token (see
+    // `strip_roulette_roll` below). It pins the candidate set + each `iCa`
+    // weight + the weight SUM `d` + the shared-stream draw `Da.pg.s4(d)` + the
+    // drawn index and pick, so a probe can never pass on a hard-coded move
+    // name alone. "" = nothing to assert (the no-move probe).
+    const char* roulette = "";
     int window = 4;           // frames after `frame` to observe the move start
     bool substring = false;   // expect is a substring of the move name
 };
@@ -925,27 +932,84 @@ struct VerifyProbe {
 // was never released, which made the later K press (`sl` still set) a
 // no-op - both fixed here.
 //
-// The expected moves are the JS `ra.Hza`-legal ones for the shipped Fists
+// The expected picks are asserted through the JS-exact ROULETTE, not a single
+// move name: each probe carries the `player_roulette()` line it must
+// reproduce — every candidate with its `cc.Gb` weight, the weight SUM `d`,
+// the shared-stream draw `Da.pg.s4(d)` and the drawn index/pick. The JS never
+// takes "the first passing move" (the documented divergence this replaces);
+// it is `de.ia` (L592-594) -> `nf.jL` (L597) -> `Md.jL` (L640): sum the
+// `Locks`-passing candidates' weights, take ONE `Da.pg.jf()` draw `g = s4(d) =
+// jf()*d`, subtract the weights in candidate order and return the first index
+// that goes negative.
+//
+// The candidates are the JS `ra.Hza`-legal ones for the shipped Fists
 // loadout: the direct-boot fighter owns Skeleton + Weapon/Fists + Body/Head
 // (fight.cpp `make_fighter`), so a move is a candidate only when its
-// `<TacticWeapon>` matches Fists AND its `<Locks>` pass. Three expectations
-// were previously derived from the LOCK-IGNORING move list and had to be
-// corrected with it: `DashBackwards` (`<Locks>` = Armor `BODY_GATEKEEPER`)
-// -> `BackHandflip` (the same Priority 20 Back Tap x2 move whose Or-lock
-// `Armor BODY_GATEKEEPER Not=1` passes), and `StaffStepForward`
-// (`<Locks>` = Or{Weapon Staff|WandererStaff|CompositeStaff}) ->
-// `StepForward` (Skeleton-locked, the real 1-key forward step).
+// `<TacticWeapon>` matches Fists AND its `<Locks>` pass. Three picks differ
+// from the pre-lock tape: `DashBackwards` (`<Locks>` = Armor
+// `BODY_GATEKEEPER`) is gone — its Or-lock `Armor BODY_GATEKEEPER Not=1`
+// passes, so the surviving same-Priority Back Tap-x2 move is `BackHandflip`
+// and the weight set is not the lock-ignoring one; `StaffStepForward`
+// (`<Locks>` = Or{Weapon Staff|WandererStaff|CompositeStaff}) is gone —
+// Skeleton-locked `StepForward` is the real 1-key forward step; and at F620
+// the K tap's drawn pick is `HighPunch`, not the old hard-coded
+// `ShortUpwardElbowStrike`.
 static const VerifyProbe kVerifyProbes[] = {
-    {180, "Back Tap x2 (spawn gap 283)", "BackHandflip", 4, false},
-    {300, "Forward Tap x2", "DoubleStepForward", 4, false},
-    {420, "Punch Tap x2 + Forward Hold", "DoublePunch", 4, false},
-    {520, "Forward Tap x1 (1key)", "StepForward", 4, false},
-    {550, "Forward Tap x1 (+30f)", "StepForward", 4, false},
-    {620, "K key -> Punch-key move", "ShortUpwardElbowStrike", 4, false},
-    {700, "B key -> dropped (no move)", "<none>", 12, false},
+    // F180: Back Tap x2 at the spawn gap (dist 283). 249.647949 - 178.0734 ->
+    // -89.3593 (<0) at index 1 -> StepBack (`Md.jL` L640).
+    {180, "Back Tap x2 (spawn gap 283)", "StepBack",
+     "sum=267.4326 draw=249.647949 idx=1 StepBack "
+     "cands=BackHandflip=178.0734,StepBack=89.3593",
+     4, false},
+    // F300: Forward Tap x2. 1230.425537 - 100.0000 < 0 -> index 1 ->
+    // StepForward.
+    {300, "Forward Tap x2", "StepForward",
+     "sum=1322.8918 draw=1230.425537 idx=1 StepForward "
+     "cands=DoubleStepForward=100.0000,StepForward=1222.8918",
+     4, false},
+    // F420: Punch Tap x2 + Forward Hold. 568.068420 less the three 100.0 taps
+    // is still positive; the 1062.19 Forward candidate takes it negative at
+    // index 3 -> StepForward.
+    {420, "Punch Tap x2 + Forward Hold", "StepForward",
+     "sum=1362.1919 draw=568.068420 idx=3 StepForward "
+     "cands=DoublePunch=100.0000,HeavyPunch=100.0000,HighPunch=100.0000,"
+     "StepForward=1062.1919",
+     4, false},
+    // F520: single Forward tap -> the ONLY candidate, whatever the draw.
+    {520, "Forward Tap x1 (1key)", "StepForward",
+     "sum=1006.6419 draw=940.663086 idx=0 StepForward "
+     "cands=StepForward=1006.6419",
+     4, false},
+    // F550: single Forward tap 30 frames later (a fresh 1key step).
+    {550, "Forward Tap x1 (+30f)", "StepForward",
+     "sum=922.7308 draw=451.490051 idx=0 StepForward "
+     "cands=StepForward=922.7308",
+     4, false},
+    // F620: K (GLFW 75) maps to Punch (id 9) -> the Punch-key candidate set;
+    // the one whose Conditions pass is HighPunch. 81.378464 - 100.0000 < 0 ->
+    // index 0.
+    {620, "K key -> Punch-key move", "HighPunch",
+     "sum=100.0000 draw=81.378464 idx=0 HighPunch cands=HighPunch=100.0000",
+     4, false},
+    // F700: B (GLFW 66) is unbound -> no tap -> no roulette, no move.
+    {700, "B key -> dropped (no move)", "<none>", "", 12, false},
 };
 constexpr int kVerifyProbeCount =
     static_cast<int>(sizeof(kVerifyProbes) / sizeof(kVerifyProbes[0]));
+
+// `FightScreen::player_roulette()` with the `roll=` token removed. `roll` is
+// the raw float in [0,1) from the shared `Da.pg` stream; `draw` is `roll*sum`
+// rendered at %.6f, so `draw` already pins the stream exactly and `roll`'s own
+// %.6f rendering is redundant — it is the one field whose float formatting
+// could drift without changing the pick. Stripping it lets the probe assert
+// candidate set + weights + draw + pick deterministically.
+std::string strip_roulette_roll(const std::string& s) {
+    const std::size_t p = s.find("roll=");
+    if (p == std::string::npos) return s;
+    std::size_t q = s.find(' ', p);
+    q = (q == std::string::npos) ? s.size() : q + 1;  // drop the separator too
+    return s.substr(0, p) + s.substr(q);
+}
 
 std::vector<ReplayEdge> build_verify_edges() {
     std::vector<ReplayEdge> e;
@@ -1885,6 +1949,7 @@ int main(int argc, char** argv) {
         int last_started = 0;
         const VerifyProbe* pending = nullptr;
         int guard = 0;
+        int probe_failures = 0;
         const int last_frame = edges.empty() ? 0 : edges.back().frame;
         while (guard < 6000) {
             glfwPollEvents();
@@ -1918,20 +1983,39 @@ int main(int argc, char** argv) {
                 const int started = fs != nullptr ? fs->player_moves_started() : 0;
                 if (pending != nullptr && started > last_started) {
                     const std::string dec = fs->player_last_decision();
-                    const bool pass =
+                    const std::string rr = strip_roulette_roll(fs->player_roulette());
+                    const bool move_ok =
                         pending->substring
                             ? dec.find(pending->expect) != std::string::npos
                             : dec == std::string("input:") + pending->expect;
-                    std::fprintf(stdout, "[verify] %s -> %s (F%d) expect=%s %s\n",
-                                 pending->label, dec.c_str(), fight_frames, pending->expect,
+                    // The JS-exact gate: the recorded roulette must reproduce
+                    // the expected candidate set + weights + draw + pick. An
+                    // empty expectation is not asserted (the no-move probe).
+                    const bool roulette_ok =
+                        pending->roulette[0] == '\0' || rr == pending->roulette;
+                    const bool pass = move_ok && roulette_ok;
+                    if (!pass) ++probe_failures;
+                    std::fprintf(stdout,
+                                 "[verify] %s -> %s (F%d) expect=%s\n"
+                                 "[verify]   roulette got = %s\n"
+                                 "[verify]   roulette exp = %s -> %s\n",
+                                 pending->label, dec.c_str(), fight_frames,
+                                 pending->expect, rr.c_str(),
+                                 pending->roulette[0] == '\0' ? "(none)"
+                                                             : pending->roulette,
                                  pass ? "PASS" : "FAIL");
                     std::fflush(stdout);
                     pending = nullptr;
                 } else if (pending != nullptr && pending->window > 0 &&
                            fight_frames > pending->frame + pending->window) {
                     const bool expect_none = pending->expect[0] == '<';
-                    std::fprintf(stdout, "[verify] %s -> (no move) (F%d) expect=%s %s\n",
+                    const std::string rr = fs->player_roulette();
+                    if (!expect_none) ++probe_failures;
+                    std::fprintf(stdout,
+                                 "[verify] %s -> (no move) (F%d) expect=%s "
+                                 "roulette=%s %s\n",
                                  pending->label, fight_frames, pending->expect,
+                                 rr.empty() ? "(none)" : rr.c_str(),
                                  expect_none ? "PASS" : "FAIL");
                     std::fflush(stdout);
                     pending = nullptr;
@@ -1954,7 +2038,12 @@ int main(int argc, char** argv) {
             std::fflush(stdout);
         }
         app.shutdown();
-        return 0;
+        if (verify_input) {
+            std::fprintf(stdout, "[verify] probes: %d/%d PASS\n",
+                         kVerifyProbeCount - probe_failures, kVerifyProbeCount);
+            std::fflush(stdout);
+        }
+        return probe_failures == 0 ? 0 : 1;
     } else if (input_tape) {
         // ------------------------------------------------------------------
         // `--input-tape [js|desktop]`: the scripted key/pointer tape driven

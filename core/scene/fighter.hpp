@@ -149,32 +149,26 @@ public:
 
     // Locks-aware variant (JS `ra.Hza` L684-685 — `f.nw(d,b)` tests the
     // move's <Locks> against the fighter's ITEMS, not the TacticWeapon
-    // string). `owned` is the fighter's item list as (type, subtype) pairs
-    // (the Warrior's <Items> + equipment slots). A move passes when every
+    // string). `owned` is the fighter's item list as `OwnedItem` triples
+    // (JS `Hm.he` L758: Type / SubType / Name — the Warrior's <Items> +
+    // equipment slots resolved through list.xml). A move passes when every
     // Lock group resolves against the owned items: a plain <Item> lock
-    // passes when an owned item matches Type AND SubType; an Or-group
-    // passes when ANY item in the group matches. Moves with no locks are
-    // universal (the Skeleton lock passes for every fighter). This is what
-    // lets TacticWeapon="Knives|Keris" moves join the list when the fighter
-    // equips WEAPON_KNIVES (SubType="Knives"). Sorted by Priority desc.
-    void build_move_list_locks(const std::map<std::string, MoveDef>& all_moves,
-                               const std::vector<std::pair<std::string, std::string>>& owned,
-                               bool include_universal = true,
-                               const std::string& weapon_subtype = std::string());
-    // One owned item, the full JS `Hc` shape (`type`/`Yb`/`name` — the three
-    // fields `Hm.he` L758 compares). The (type, subtype) pair overload above
-    // cannot express `Lock::name`, so a NAME-bearing lock could only be
-    // tested against an item name that is not carried; the fight path passes
-    // this richer list.
-    struct OwnedItem {
-        std::string type;
-        std::string subtype;
-        std::string name;
-    };
+    // passes when an owned item matches the lock's non-empty Type AND SubType
+    // AND Name (`Not` inverts); an Or-group passes when ANY item in the group
+    // matches. Moves with no locks are universal (the Skeleton lock passes
+    // for every fighter). This is what lets TacticWeapon="Knives|Keris" moves
+    // join the list when the fighter equips WEAPON_KNIVES (SubType="Knives").
+    // Sorted by Priority desc.
+    // One owned item: `sf2::scene::OwnedItem` (move_def.hpp) — the JS `Hm.he`
+    // comparison triple. The old (type, subtype) pair overload could not
+    // express `Lock::name`, so a NAME-bearing lock could never match and the
+    // Map/Dojo path silently dropped every named-lock move (the boot path
+    // hardcoded names). The pair shape is gone; every caller passes names.
+    using OwnedItem = ::sf2::scene::OwnedItem;
     void build_move_list_locks(const std::map<std::string, MoveDef>& all_moves,
                                const std::vector<OwnedItem>& owned,
-                               bool include_universal,
-                               const std::string& weapon_subtype);
+                               bool include_universal = true,
+                               const std::string& weapon_subtype = std::string());
 
     // Buffers one key press (JS `Kl.Sgb`/`zl.Sgb`, L798): appends the key to
     // the 2-slot Tap sequence (`zg.sh`), rebuilds the held set (`zg.Fh`),
@@ -341,6 +335,23 @@ public:
     int sub() const { return sub_; }
     int facing() const { return facing_; }
     const std::vector<const MoveDef*>& hb() const { return hb_; }
+    // The last weighted-roulette outcome (JS `Md.jL` L640 + `iCa` L640) —
+    // the JS-exact pick record the `--verify-input` probes assert: the
+    // candidate animation list in `jL` order, each candidate's weight, the
+    // weight SUM (`d`), the raw shared-stream draw (`Da.pg.jf()`, one draw
+    // per pick), the returned index and the move that actually started.
+    // `valid` is false until a roulette runs (and resets to false on every
+    // `try_select_move` that returns before the roulette).
+    struct RouletteRecord {
+        bool valid = false;
+        std::vector<std::pair<std::string, float>> cands;  // animation -> `iCa`
+        float sum = 0.0f;    // JS `Md.jL` `d` (the weight total)
+        float roll = 0.0f;   // JS `Da.pg.jf()` (`s4(d)` = `jf()*d`)
+        float draw = 0.0f;   // JS `Da.pg.s4(d)` = roll * sum
+        int index = -1;      // JS `Md.jL` return (-1 = `if(0<d)` failed)
+        std::string picked;  // the move the pick actually started
+    };
+    const RouletteRecord& last_roulette() const { return roulette_; }
     // Test/trace accessors (no behavior change): live input-buffer counts.
     int buffered_tap_count() const;
     int buffered_hold_count() const;
@@ -454,6 +465,7 @@ private:
 
     // --- move execution state (Phase 3.2b) --------------------------------
     std::vector<const MoveDef*> hb_;        // move list (sorted, priority desc)
+    RouletteRecord roulette_;               // last `Md.jL` outcome (probe/trace)
     const MoveDef* current_move_ = nullptr; // playing move (JS `da.Ua`)
     const sf2::data::anim_clip* current_clip_ = nullptr; // clip for `current_move_`
     int move_frame_ = 0;                    // clip frame (JS `Te.M0()`) for intervals/cf

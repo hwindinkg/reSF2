@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "atlas.hpp"
+#include "scene/move_def.hpp"  // `scene::OwnedItem` (the PendingBattle.owned row)
 
 struct GLFWwindow;
 
@@ -93,8 +94,11 @@ struct PendingBattle {
     // The fight outcome (set by the FightScreen at battle end).
     bool has_result = false;
     bool player_won = false;
-    // The owned items the player's move list was built from.
-    std::vector<std::pair<std::string, std::string>> owned;
+    // The owned items the player's move list was built from. Carries the
+    // item NAME too (JS `Hm.he` L758 compares Type / SubType / Name): the
+    // direct-boot and the Map/Dojo launch must build the SAME list from the
+    // same save, so this is the one shape both paths pass through.
+    std::vector<sf2::scene::OwnedItem> owned;
 };
 
 // A text glyph run: screen-space position + the glyph quads. The shell

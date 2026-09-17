@@ -188,19 +188,6 @@ static bool owned_item_matches(const Lock& l, const Owned& owned) {
 
 void Fighter::build_move_list_locks(
     const std::map<std::string, MoveDef>& all_moves,
-    const std::vector<std::pair<std::string, std::string>>& owned,
-    bool include_universal, const std::string& weapon_subtype) {
-    // The (type, subtype) caller shape carries no item NAME — a named lock
-    // can therefore never match (JS-faithful for a loadout whose item names
-    // are unknown). The fight path passes the named `OwnedItem` list.
-    std::vector<OwnedItem> named;
-    named.reserve(owned.size());
-    for (const auto& o : owned) named.push_back({o.first, o.second, std::string()});
-    build_move_list_locks(all_moves, named, include_universal, weapon_subtype);
-}
-
-void Fighter::build_move_list_locks(
-    const std::map<std::string, MoveDef>& all_moves,
     const std::vector<OwnedItem>& owned,
     bool include_universal, const std::string& weapon_subtype) {
     auto owned_item = [&owned](const Lock& l) {
@@ -824,6 +811,7 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
             break;
         }
     }
+    roulette_ = RouletteRecord();  // the previous pick is stale from here on
     if (!has_tap) return "";
 
     // [M1] JS `de.ABa` (L601) filters `wb` by `V1`: collect EVERY candidate
@@ -880,7 +868,11 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
             sum += weights[i];
         }
         if (!(sum > 0.0f)) return "";  // JS `if(0<d)` false -> -1 -> null
-        float g = ctx.roll01 ? ctx.roll01() * sum : 0.0f;  // `Da.pg.s4(d)`
+        // JS `Md.jL` (L640): `g = Da.pg.s4(d)` — ONE draw of the shared
+        // fight stream, scaled by the weight total (`jf()*d`).
+        const float roll = ctx.roll01 ? ctx.roll01() : 0.0f;
+        const float draw = roll * sum;
+        float g = draw;
         for (std::size_t i = 0; i < passing.size(); ++i) {
             g -= weights[i];
             if (g < 0.0f) {
@@ -889,10 +881,23 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
             }
             pick = i;  // float-rounding guard (JS falls through to -1)
         }
-        // The roulette log the audit asks for: the candidate set, each
-        // `cc.Gb` weight, the drawn index and the picked move.
-        std::fprintf(stdout, "[move] roulette: %zu candidates sum=%.4f",
-                     passing.size(), static_cast<double>(sum));
+        // The roulette record the probes assert (`last_roulette()`): the
+        // candidate set with each `cc.Gb` weight, the weight total, the raw
+        // `Da.pg.jf()` draw, the drawn index and the picked move. Printed
+        // too, so a failing run shows the whole roulette.
+        roulette_.valid = true;
+        roulette_.sum = sum;
+        roulette_.roll = roll;
+        roulette_.draw = draw;
+        roulette_.index = static_cast<int>(pick);
+        roulette_.cands.clear();
+        roulette_.cands.reserve(passing.size());
+        for (std::size_t i = 0; i < passing.size(); ++i) {
+            roulette_.cands.emplace_back(passing[i]->name, weights[i]);
+        }
+        std::fprintf(stdout, "[move] roulette: %zu candidates sum=%.4f draw=%.6f",
+                     passing.size(), static_cast<double>(sum),
+                     static_cast<double>(draw));
         for (std::size_t i = 0; i < passing.size(); ++i) {
             std::fprintf(stdout, " %s=%.4f", passing[i]->name.c_str(),
                          static_cast<double>(weights[i]));
@@ -909,6 +914,7 @@ std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
     for (std::size_t k = 0; k < passing.size(); ++k) {
         const MoveDef* m = passing[(pick + k) % passing.size()];
         if (try_start_move(*m, ctx)) {
+            if (roulette_.valid) roulette_.picked = m->name;
             return m->name;
         }
     }

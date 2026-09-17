@@ -279,7 +279,7 @@ void FightController::init_locks(
     const std::string& enemy_name, float player_x, float player_y,
     float enemy_x, float enemy_y, int player_max_hp, int enemy_max_hp,
     std::function<float()> roll01,
-    const std::vector<std::pair<std::string, std::string>>& player_owned,
+    const std::vector<sf2::scene::OwnedItem>& player_owned,
     const PerkSetup& perks,
     std::function<void(int)> reseed01,
     const sf2::scene::Model* player_model,
@@ -607,7 +607,7 @@ float FightController::math_random01() {
 FightFighter FightController::make_fighter(
     const std::string& nm, bool is_player, float x, float y, int max_hp,
     const std::string& weapon_subtype,
-    const std::vector<std::pair<std::string, std::string>>& owned,
+    const std::vector<sf2::scene::OwnedItem>& owned,
     bool not_ai, bool not_animation, const sf2::scene::Model* model) {
     FightFighter f;
     f.name = nm;
@@ -668,9 +668,10 @@ FightFighter FightController::make_fighter(
         f.fighter.build_move_list_locks(*moves_, implicit, /*include_universal=*/true,
                                        weapon_subtype);
     } else {
-        // The `owned` (type, subtype) list carries no item NAMES (the app
-        // layer's `owned_items` returns pairs); a named lock can therefore
-        // not match on this path. See the M3 note in move_def.hpp.
+        // The app layer's `owned_items` list carries the NAME of every owned
+        // item (JS `Hm.he` L758 `this.Ba == b.name`), so both the direct boot
+        // (`--fight`/`--verify-input`/`--input-tape`) and the Map/Dojo launch
+        // build the IDENTICAL move list from the same save.
         f.fighter.build_move_list_locks(*moves_, owned, /*include_universal=*/true,
                                        weapon_subtype);
     }
@@ -1459,19 +1460,17 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
     init_magic();
     // JS `wd.K0` (L505): the enemy's equipped `NoRanged` item (`parameters.ig`,
     // type `I.Vh`; `vzb` L108540 maps the type to the name "NoRanged"). The
-    // app resolves the stage warrior's items to (type, subtype) pairs
-    // (`ModeEnemy.owned`); a `NoRanged` pair means `K2 = +1`. NOTE the item
-    // NAME list itself is not carried into `ModeSetup` (the app never fills
-    // `PerkSetup::enemy_items`), so with an empty/unresolved pair list this
-    // leaves `ranged_available = true` (K2 = -1) — reported as the exact
-    // missing input rather than guessed.
+    // app resolves the stage warrior's items to `OwnedItem` rows
+    // (`ModeEnemy.owned`); a `NoRanged` row (name or subtype) means `K2 = +1`.
+    // With an empty/unresolved list this leaves `ranged_available = true`
+    // (K2 = -1) — reported as the exact missing input rather than guessed.
     for (const auto& ow : setup.enemy.owned) {
-        if (ow.first == "NoRanged" || ow.second == "NoRanged") {
+        if (ow.name == "NoRanged" || ow.subtype == "NoRanged" || ow.type == "NoRanged") {
             enemy_.ranged_available = false;
         }
     }
     std::fprintf(stdout,
-                 "[ai] enemy ranged_available=%d -> K2=%d (owned pairs=%zu)\n",
+                 "[ai] enemy ranged_available=%d -> K2=%d (owned items=%zu)\n",
                  enemy_.ranged_available ? 1 : 0,
                  enemy_.ranged_available ? -1 : 1, setup.enemy.owned.size());
     std::fflush(stdout);
