@@ -29,6 +29,7 @@ struct anim_clip;
 }
 namespace sf2::scene {
 struct MoveDef;
+struct MoveAction;
 struct FightContext;
 } // namespace sf2::scene
 
@@ -162,6 +163,34 @@ public:
     // L547-548: `Xh+2 >= len` -> stop). Samples the pose at move_frame.
     void advance(float dt);
     void advance_step();  // one fixed sub-step (timescale loop calls this)
+
+    // --- move-frame action dispatch (JS `Te.Lwa` L563-564) -----------------
+    // JS `xc.voice` (the fighter XML `<Voice>` attr; `Vo` ctor default ""
+    // L807, filled by `ur` L186 from the Warrior's Voice). The
+    // `<Sound Voice=..>`/`<RandomSound Voice=..>` gate reads it
+    // (`wd.dwb`/`wd.fwb` L519 -> `fm.fka` L735 `t7 ? true : voice == J8`).
+    // An EMPTY voice therefore silences every Voice-gated action (JS-exact:
+    // `"" == "Male"` is false).
+    void set_voice(const std::string& v) { voice_ = v; }
+    const std::string& voice() const { return voice_; }
+
+    // The current move's FRAME-triggered actions whose `Frame` equals the
+    // clip frame the last `advance()` displayed, collected once per frame
+    // change (`Te.Lwa` L563-564: `e.$eb(this.ip(), ...) && c.push(e)`).
+    // Drained by the caller (the JS `gh("EActionStart", c)` L564 -> `wd.mHa`
+    // L530 -> `wd.BNa` L523 path). Empty when no move is playing.
+    const std::vector<const MoveAction*>& take_frame_actions();
+
+    // The current move's EVENT-triggered actions with `Event == name`
+    // (JS `Te.CZa(a)` L555: `e.afb(a, this.Ua, ...) && c.push(e)`). The
+    // caller evaluates each action's `<Conditions>` (`cb.Ti` L724) before
+    // firing. Used for the landed-hit `Strike` (7) / `Hit` (6) dispatch.
+    std::vector<const MoveAction*> move_actions_for_event(const std::string& event) const;
+
+    // Collects (and clears) the move whose clip ended during the last
+    // `advance()` — the `AnimationEnd` (10) action source (JS `Te.lS`
+    // L553 -> `wd.kg` -> `Gc.Ih(10,..)` L671 -> `Gnb` L672 -> `CZa(10)`).
+    const MoveDef* take_ended_move();
 
     // [FIX idle-slide — Phase 1] Clears the current move (JS `KNa`): the
     // fighter returns to idle. Used by the fight controller when the
@@ -447,6 +476,20 @@ private:
     float scale_acc_ = 0.0f;   // timescale fractional accumulator
     std::vector<sf2::scene::Vec3> kb_;  // per-bone knockback offsets (world)
     std::set<std::string> active_intervals_; // active interval names (JS `Te.xj`)
+    // --- move-frame action dispatch (JS `Te.Lwa` / `Te.CZa`) --------------
+    // JS `xc.voice` (see `set_voice`).
+    std::string voice_;
+    // The actions collected by the last `advance()` (frame triggers). JS
+    // `Te.Lwa` L563-564 builds `c` and fires `gh("EActionStart", c)`.
+    std::vector<const MoveAction*> frame_actions_;
+    // JS `Te.cX` (L546 ctor `this.cX=2147483647`; `vp` L563
+    // `a != this.cX && (this.cX = a, this.rrb(), this.N9 = !0)`): the last
+    // clip frame the action pass ran for. -1 = none yet, so the first frame
+    // of a move fires (the JS MAX_INT sentinel).
+    int last_action_frame_ = -1;
+    // JS `KNa`/`Sca` leaves `Ua` set; the `AnimationEnd` actions read it
+    // (`Gnb` L672 `c.model.da.CZa(c.type)` -> `Te.CZa` reads `this.Ua`).
+    const MoveDef* ended_move_ = nullptr;
     float enemy_x_ = 0.0f;                  // enemy world X (for facing)
     std::vector<sf2::scene::key_input> keys_; // buffered inputs (JS `Kl.zg`)
     int tap_age_ = 0;                       // frames since last tap (JS `zl.dX`)

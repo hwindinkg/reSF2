@@ -181,6 +181,127 @@ void parse_interval(pugi::xml_node node, int end_frame_default, Interval& out) {
     }
 }
 
+void parse_cond_children(pugi::xml_node parent, std::vector<Cond>& out);
+
+// JS `Nd.ol` (L705): the `Player` attribute -> the side enum. Me=1, Enemy=2,
+// Both=5, Child=4, Parent=3, EnemyChild=6, SuperParent=7, default 0.
+int player_from_attr(const char* player) {
+    if (player == nullptr) return 0;
+    if (std::strcmp(player, "Me") == 0) return 1;
+    if (std::strcmp(player, "Enemy") == 0) return 2;
+    if (std::strcmp(player, "Both") == 0) return 5;
+    if (std::strcmp(player, "Child") == 0) return 4;
+    if (std::strcmp(player, "Parent") == 0) return 3;
+    if (std::strcmp(player, "EnemyChild") == 0) return 6;
+    if (std::strcmp(player, "SuperParent") == 0) return 7;
+    return 0;
+}
+
+// JS `lz.create` (L737-739): the `<Actions>` child element name -> the
+// concrete `cb` sub-class' `type` (its ctor `super(N)`). -1 = no class
+// (`lz.create` returns null; `Fa.DIa` L718 skips the node).
+int action_type_for(const std::string& tag) {
+    // L737: AddBullets=8 (Vl), CameraWeight=13 (Wl), CreatePlayer=0 (mh).
+    if (tag == "AddBullets") return 8;
+    if (tag == "CameraWeight") return 13;
+    if (tag == "CreatePlayer") return 0;
+    // L738: Delete=1 (Xl), Effect=5 (Yl), EnableBossAbility=14 (Zl),
+    // HitEffect=10 (jg), PlayAnimation=17 ($l), RandomSound=4 (am),
+    // SetCooldown=12 (bm), SetEndStage=15 (cm), ShakeScreen=9 (dm),
+    // Sound=2 (fm), StopEffect=6 (gm), StopFollowEffect=7 (hm), StopSound=3 (im).
+    if (tag == "Delete") return 1;
+    if (tag == "Effect") return 5;
+    if (tag == "EnableBossAbility") return 14;
+    if (tag == "HitEffect") return 10;
+    if (tag == "PlayAnimation") return 17;
+    if (tag == "RandomSound") return 4;
+    if (tag == "SetCooldown") return 12;
+    if (tag == "SetEndStage") return 15;
+    if (tag == "ShakeScreen") return 9;
+    if (tag == "Sound") return 2;
+    if (tag == "StopEffect") return 6;
+    if (tag == "StopFollowEffect") return 7;
+    if (tag == "StopSound") return 3;
+    // L739: TryOnEnd=1 (jm - the same code as Delete's Xl), ZoomEffect=11 (km).
+    if (tag == "TryOnEnd") return 1;
+    if (tag == "ZoomEffect") return 11;
+    return -1;
+}
+
+// ONE `<Actions>` child -> MoveAction. Mirrors JS `cb.parse` (L724-725) plus
+// the per-kind parse bodies (L725-737). The base parse reads `Frame` XOR
+// `Event` (the trigger), `Player` and the `<Conditions>` child; the ported
+// kinds add their own fields. The remaining kinds keep the base record (their
+// own attrs - FileName/Animation/Value/EffectTime/... - have no consumer yet;
+// they are reported as follow-up, never faked).
+void parse_action(pugi::xml_node node, MoveAction& out) {
+    out.kind = node.name();
+    out.js_type = action_type_for(out.kind);
+    // JS `cb.parse`: `Frame` first (Z5=0), else `Event` (Z5=1).
+    if (pugi::xml_attribute f = node.attribute("Frame")) {
+        out.frame_trigger = true;
+        out.frame = f.as_int();
+    } else {
+        out.frame_trigger = false;
+        if (pugi::xml_attribute e = node.attribute("Event")) out.event = e.value();
+    }
+    out.player = player_from_attr(node.attribute("Player")
+                                      ? node.attribute("Player").value()
+                                      : nullptr);
+    if (pugi::xml_node cond = node.child("Conditions")) {
+        parse_cond_children(cond, out.conditions);
+    }
+    // `fm` (Sound, L735): Name + Volume + Looped + Voice + PackName.
+    if (out.js_type == 2) {
+        if (pugi::xml_attribute n = node.attribute("Name")) out.name = n.value();
+        out.volume = data::xml_attr_float(node, "Volume", 1.0f);
+        out.looped = data::xml_attr_bool(node, "Looped", false);
+        if (pugi::xml_attribute v = node.attribute("Voice")) {
+            out.has_voice = true;
+            out.voice = v.value();
+        }
+        if (pugi::xml_attribute p = node.attribute("PackName")) out.pack = p.value();
+        return;
+    }
+    // `am` (RandomSound, L733): Voice + every child's Name attr (`qq`).
+    if (out.js_type == 4) {
+        if (pugi::xml_attribute v = node.attribute("Voice")) {
+            out.has_voice = true;
+            out.voice = v.value();
+        }
+        for (pugi::xml_node ch : node.children()) {
+            out.names.push_back(ch.attribute("Name")
+                                    ? ch.attribute("Name").value()
+                                    : "ERR_RAND_SOUND_NO_NAME");
+        }
+        return;
+    }
+    // `im` (StopSound, L736) / `gm` (StopEffect, L735-736) /
+    // `hm` (StopFollowEffect, L736): a single Name attr.
+    if (out.js_type == 3 || out.js_type == 6 || out.js_type == 7) {
+        if (pugi::xml_attribute n = node.attribute("Name")) out.name = n.value();
+        return;
+    }
+    // Every other kind: keep the Name attr when present (informational; the
+    // kind is parsed data until its consumer system is ported).
+    if (pugi::xml_attribute n = node.attribute("Name")) out.name = n.value();
+}
+
+void merge_actions(const std::vector<pugi::xml_node>& templates, pugi::xml_node own,
+                   std::vector<MoveAction>& out) {
+    auto parse_list = [&](pugi::xml_node list) {
+        if (!list) return;
+        for (pugi::xml_node a : list.children()) {
+            MoveAction act;
+            parse_action(a, act);
+            if (act.js_type < 0) continue;  // JS `lz.create` -> null, skipped
+            out.push_back(std::move(act));
+        }
+    };
+    parse_list(own);
+    for (pugi::xml_node tpl : templates) parse_list(tpl.child("Actions"));
+}
+
 // JS `Fa.H3`/`Fa.HS`: parse a <Conditions>/<Locks> list of child nodes into
 // Cond trees. `create` mirrors `Tl.create` (element name -> typed cond).
 void parse_cond_node(pugi::xml_node node, Cond& out);
@@ -554,6 +675,10 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
 
         // Intervals (own + inherited).
         merge_intervals(templates, move.child("Intervals"), def.end_frame, def.intervals);
+
+        // Actions (JS `Fa.CIa` L718): own `<Actions>` first, then each
+        // inherited template's, in template order.
+        merge_actions(templates, move.child("Actions"), def.actions);
 
         // Locks.
         if (pugi::xml_node locks = move.child("Locks")) {

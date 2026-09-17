@@ -16,10 +16,12 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "audio/sfx_table.hpp"  // `sfx_stem_for_js` = JS `ta.WBa` (L1265-1274)
 #include "scene/conditions.hpp"
 #include "scene/move_def.hpp"
 #include "xml_archive.hpp"
@@ -229,6 +231,61 @@ int main(int argc, char** argv) {
             std::cout << "  type " << kv.first << ": " << kv.second << "\n";
         }
         std::cout << "attack intervals with parts: " << attack_intervals << "\n";
+
+        // `<Actions>` census (JS `Fa.CIa` L718 / `lz.create` L737-739). The
+        // counts below are the PORT's parsed record counts — they must match
+        // the moves.xml element counts (980 `<Actions>`, 3276 `<Sound>`,
+        // 505 `<RandomSound>`). The resolution column is the JS `ta.WBa`
+        // lookup: a name outside the id table can never play (`ta.ak` L1264
+        // returns on the null), so those rows are reported, not faked.
+        {
+            std::map<std::string, std::size_t> kinds;
+            std::size_t total = 0, frame_trig = 0, event_trig = 0;
+            std::size_t sound_n = 0, rand_n = 0, rand_names = 0;
+            std::size_t resolved = 0, unresolved = 0;
+            std::set<std::string> unresolved_names;
+            for (const auto& kv : moves) {
+                for (const sf2::scene::MoveAction& a : kv.second.actions) {
+                    ++total;
+                    kinds[a.kind]++;
+                    if (a.frame_trigger) {
+                        ++frame_trig;
+                    } else {
+                        ++event_trig;
+                    }
+                    if (a.kind == "Sound") {
+                        ++sound_n;
+                        if (sf2::audio::sfx_stem_for_js(a.name.c_str()) != nullptr) {
+                            ++resolved;
+                        } else {
+                            ++unresolved;
+                            unresolved_names.insert(a.name);
+                        }
+                    } else if (a.kind == "RandomSound") {
+                        ++rand_n;
+                        rand_names += a.names.size();
+                        for (const std::string& nm : a.names) {
+                            if (sf2::audio::sfx_stem_for_js(nm.c_str()) != nullptr) {
+                                ++resolved;
+                            } else {
+                                ++unresolved;
+                                unresolved_names.insert(nm);
+                            }
+                        }
+                    }
+                }
+            }
+            std::cout << "\n<Actions> census: total=" << total
+                      << " (frame=" << frame_trig << " event=" << event_trig << ")\n";
+            for (const auto& kv : kinds) {
+                std::cout << "  " << kv.first << ": " << kv.second << "\n";
+            }
+            std::cout << "  <Sound>=" << sound_n << " <RandomSound>=" << rand_n
+                      << " (rand names=" << rand_names << ")\n";
+            std::cout << "  sound names resolved by ta.WBa: " << resolved
+                      << ", silent: " << unresolved
+                      << " (distinct silent names: " << unresolved_names.size() << ")\n";
+        }
 
         std::cout << "\nmove_probe: done\n";
         return 0;

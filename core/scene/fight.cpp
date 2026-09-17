@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "audio/audio.hpp"
+#include "audio/sfx_table.hpp"  // `sfx_stem_for_js` = JS `ta.WBa` (L1265-1274)
 #include "scene/fight_camera_sya.hpp"
 
 namespace sf2::scene {
@@ -325,6 +326,13 @@ void FightController::init_locks(
     banner_round_ = round_.number;   // 0 -> "ROUND 1"
     std::fprintf(stdout, "[fight] banner: ROUND %d (F%d)\n", banner_round_ + 1, frame_);
     std::fflush(stdout);
+
+    // JS `rb.Wkb()` (L1277: `ta.ak("snd_gong")`), called from the
+    // fight-registration success branch (L1216: `p.o.save(), d && rb.Wkb()`)
+    // — ONCE per fight entry, not per round. `init_locks` is that entry
+    // (the ctor path the fight screen / `--fight` / the drivers all take).
+    // `snd_gong` = 65591 -> `gong.wav` (the `ta.WBa` row is L1266).
+    sf2::audio::AudioEngine::instance().play("snd_gong");
 }
 
 // The shared fight draw (JS `Da.pg.jf()`, L2352). An injected override (the
@@ -345,6 +353,69 @@ void FightController::reseed_stream(int seed) {
         return;
     }
     prng_.seed(static_cast<std::uint32_t>(seed));
+}
+
+// JS `uf.sja(a)` (L115: `Math.floor(uf.OKa.RGa() * (a - 0)) + 0`, and
+// `at.Nlb` L115 is `Math.random()`): the RandomSound name pick. The stream is
+// the UNSHARED `Math.random` — `ta.ak`'s RandomSound path must never eat the
+// fight's `Da.pg` draws. Native: the pinned `math_random01()`.
+int FightController::random_sound_index(int n) {
+    if (n <= 0) return -1;
+    return static_cast<int>(math_random01() * static_cast<float>(n));
+}
+
+// JS `wd.BNa(a)` (L523): `let b = 0; for (; b < a.length;) a[b++].Uh(this);`
+// — every action's `Uh` reaches the per-kind `wd` handler (L518-520). The
+// ported kinds:
+//   Sound (fm, L735):       `wd.dwb(a)` L519 -> `a.fka(this.parameters.voice)
+//                           && ta.ak(a.name, a.ceb, a.volume)`.
+//   RandomSound (am, L733): `wd.fwb(a)` L519 -> `a.fka(...) && ta.ak(a.ab())`.
+// StopSound (`wd.ewb` L519 -> `ta.Jwb` L1264) needs an `AudioEngine::stop`
+// the native engine does not have; the remaining kinds are parsed records
+// only (no consumer system yet) — both are listed in the follow-up report.
+void FightController::dispatch_move_actions(
+    const std::vector<const sf2::scene::MoveAction*>& acts, const FightFighter& owner,
+    const char* why, const sf2::scene::FightContext& conds) {
+    for (const sf2::scene::MoveAction* act : acts) {
+        if (act == nullptr) continue;
+        const bool sound_kind = act->js_type == 2 || act->js_type == 4;
+        if (!sound_kind) continue;
+        // JS `cb.Ti(a,b)` (L724): `if (Fd(this.$c)) return true;` then the
+        // `<Conditions>` tree. `$c` empty -> always true.
+        if (!act->conditions.empty() &&
+            !sf2::scene::eval_move_conditions(act->conditions, conds)) {
+            continue;
+        }
+        // JS `fm.fka(voice)` L735 / `am.fka(voice)` L733:
+        // `return this.t7 ? true : a == this.J8` — a `<Sound Voice="X">` only
+        // fires when X equals the fighter's own `xc.voice` (empty voice ->
+        // every Voice-gated action is silent, JS-exact).
+        if (act->has_voice && act->voice != owner.fighter.voice()) continue;
+        if (act->js_type == 2) {  // Sound
+            // JS `ta.ak(a.name, a.ceb, a.volume)` L1264: the name resolves
+            // through `ta.WBa`; a miss plays NOTHING (logged as `<none>`).
+            const char* stem = sf2::audio::sfx_stem_for_js(act->name.c_str());
+            std::fprintf(stdout, "[sfx] F%d %s %s %s name=%s stem=%s\n", frame_,
+                         owner.name.c_str(), why, act->kind.c_str(), act->name.c_str(),
+                         stem != nullptr ? stem : "<none>");
+            std::fflush(stdout);
+            if (stem != nullptr) sf2::audio::AudioEngine::instance().play(act->name);
+            continue;
+        }
+        // RandomSound — JS `am.ab()` L733: `b == 0 ? null : a[uf.sja(b)]`,
+        // one uniform pick over the action's `<Name>` children.
+        const int idx = random_sound_index(static_cast<int>(act->names.size()));
+        const std::string pick =
+            idx >= 0 ? act->names[static_cast<std::size_t>(idx)] : std::string();
+        const char* stem =
+            idx >= 0 ? sf2::audio::sfx_stem_for_js(pick.c_str()) : nullptr;
+        std::fprintf(stdout, "[sfx] F%d %s %s %s (%d names) name=%s stem=%s\n", frame_,
+                     owner.name.c_str(), why, act->kind.c_str(),
+                     static_cast<int>(act->names.size()), pick.c_str(),
+                     stem != nullptr ? stem : "<none>");
+        std::fflush(stdout);
+        if (stem != nullptr) sf2::audio::AudioEngine::instance().play(pick);
+    }
 }
 
 // JS `ca.i6a(a)` (L430): the `SZ` attribute name with the largest `Shift`
@@ -444,6 +515,11 @@ FightFighter FightController::make_fighter(
             f.params.attributes[kv.first] = kv.second;
         }
     }
+    // JS `xc.voice` (L807 default "", filled by `ur` L186 from the Warrior's
+    // `<Voice>` attr): the `<Sound Voice="..">` gate (`fm.fka` L735 via
+    // `wd.dwb` L519). The app layer resolves the two sides' Voice
+    // (users_default.xml player / stages.xml stage-Warrior template).
+    f.fighter.set_voice(is_player ? battle_.player_voice : battle_.enemy_voice);
     f.max_hp = static_cast<float>(max_hp);
     f.hp = f.max_hp;
     // JS `ur` L194: `Fj = NotAI==null`; the AI is created ONLY when the
@@ -2624,9 +2700,39 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     }
     }
 
-    // [Phase A3] SFX: a landed hit (the game plays the impact sample —
-    // JS ca.Cgb's `ta.ak` after the strike lands).
-    sf2::audio::AudioEngine::instance().play("hit");
+    // `<Actions>` on the landed hit (JS `ca.Cgb` L396:
+    //   `this.Bg.Ih(6, a); this.Bg.Ih(7, a);`
+    // `Gc.Ih(a,b,c)` L671 stores `d.model = a==7 ? b.Pd : b.model`, and
+    // `Gnb` L672 dispatches `c.model.da.CZa(c.type)`). With `strike`'s
+    // payload (`Vb.Pd` = the ATTACKER, `Vb.model` = the DEFENDER):
+    //   Strike (7) -> the ATTACKER's current move -> the authored
+    //                 `<RandomSound Event="Strike">` (snd_hit1..6 — 481 of
+    //                 them in moves.xml) plus the per-move Strike `<Sound>`s.
+    //   Hit (6)    -> the DEFENDER's current move -> its `Event="Hit"`
+    //                 actions (the 24 StopSound/StopEffect/Delete entries; the
+    //                 StopSound half needs `AudioEngine::stop` — follow-up).
+    // NOTE: there is NO `ta.ak` in `ca.Cgb` itself (L394-397) — the previous
+    // `play("hit")` here was invented and is removed.
+    {
+        sf2::scene::FightContext ev;
+        ev.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
+        ev.stage = sf2::scene::round_stage::fight;
+        ev.anims_me = {atk.fighter.current_move() ? atk.fighter.current_move()->name
+                                                 : ""};
+        ev.anims_enemy = {def.fighter.current_move() ? def.fighter.current_move()->name
+                                                    : ""};
+        fill_ctx_geometry(ev, atk, def);
+        ev.health_ratio = atk.max_hp > 0.0f ? atk.hp / atk.max_hp : 0.0f;
+        ev.last_hit_type = hit_critical ? "Critical" : (rec.shock ? "Shock" : "");
+        // `CZa(7)` reads the attacker's move; `move` IS the attacker's move.
+        std::vector<const sf2::scene::MoveAction*> strike_acts;
+        for (const sf2::scene::MoveAction& a : move.actions) {
+            if (!a.frame_trigger && a.event == "Strike") strike_acts.push_back(&a);
+        }
+        dispatch_move_actions(strike_acts, atk, "Strike", ev);
+        // `CZa(6)` reads the defender's CURRENT move (`Vb.model`).
+        dispatch_move_actions(def.fighter.move_actions_for_event("Hit"), def, "Hit", ev);
+    }
 
     // [fx] The `Hyb` hit direction (JS L395): the strike capsule's per-frame
     // motion delta `b.Py.sx/Zs .ma-.mf` -- the endpoints' current minus
@@ -2895,33 +3001,47 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     me.fighter.advance(dt);
     me.last_move = me.fighter.current_move() ? me.fighter.current_move()->name : "";
 
-    // [Phase A3] SFX: when a movement move STARTS (the fighter transitions
-    // into a new move), play the jump/step sample — the game's movement
-    // whooshes (f_pl_jump* for jumping moves, swish* for steps/dashes).
-    // A move "starts" when its name differs from the fighter's previous
-    // move (the idle loops keep the same name, so they don't re-trigger).
+    // The move's authored `<Actions>` (JS `Te.Lwa` L563-564 -> the
+    // `EActionStart` event L530 -> `wd.BNa` L523). The frame-triggered
+    // actions whose `Frame` matched the clip frame just displayed play here;
+    // the JP/EN whooshes (`snd_swishN` on the authored frames) and the
+    // attack grunts (`snd_m_pl_attackN` gated on `xc.voice`) come from this
+    // path. The old invented name-substring jump/step triggers are REMOVED
+    // (no JS counterpart: `Cgb` L394-397 has no `ta.ak`, and moves.xml has
+    // no `snd_jump`/`snd_step` ids).
     {
-        static std::map<std::string, std::string> s_prev_move;
-        const std::string& prev = s_prev_move[me.name];
-        const std::string& cur = me.last_move;
-        if (cur != prev && !cur.empty()) {
-            // Jumping: JumpUp / FrontJumpKick / ShortJumpKick /
-            // DoubleJumpKick / ReverseJumpKick / WallJump* / BackFlip.
-            // Stepping: *StepForward / *StepBack / DoubleStepForward /
-            // ForwardRoll / BackRoll / DashBackwards / WallDashForward*.
-            if (cur.find("Jump") != std::string::npos || cur == "BackFlip") {
-                sf2::audio::AudioEngine::instance().play("jump");
-            } else if (cur.find("Step") != std::string::npos ||
-                       cur.find("Roll") != std::string::npos ||
-                       cur.find("Dash") != std::string::npos) {
-                sf2::audio::AudioEngine::instance().play("step");
+        sf2::scene::FightContext actx;
+        actx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
+        actx.stage = static_cast<sf2::scene::round_stage>(phase_);
+        actx.anims_me = {me.last_move};
+        actx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name
+                                                      : ""};
+        actx.qb = me.is_player;
+        fill_ctx_geometry(actx, me, foe);
+        actx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+        dispatch_move_actions(me.fighter.take_frame_actions(), me, "frame", actx);
+        // `AnimationEnd` (10) actions of the move whose clip just ended
+        // (JS `Te.lS` L553 -> `wd.kg` -> `Gc.Ih(10,..)` L671 -> `Gnb` L672
+        // -> `CZa(10)`; `KNa` leaves `Ua` set, which is why the ended move is
+        // captured in `Fighter::take_ended_move`).
+        if (const sf2::scene::MoveDef* ended = me.fighter.take_ended_move()) {
+            std::vector<const sf2::scene::MoveAction*> end_acts;
+            for (const sf2::scene::MoveAction& a : ended->actions) {
+                if (!a.frame_trigger && a.event == "AnimationEnd") end_acts.push_back(&a);
             }
+            dispatch_move_actions(end_acts, me, "AnimationEnd", actx);
         }
-        s_prev_move[me.name] = cur;
     }
 
-    // The demo's simple auto-attack (the game's FightAuto): when idle,
-    // step toward the enemy when beyond reach, punch when in reach.
+    // The demo's simple auto-attack (the game's FightAuto `P.fP` = BothBot):
+    // when idle, step toward the enemy when beyond reach, punch when in
+    // reach. It is a DEMO-ONLY harness (`set_auto_attack`, default off) with
+    // NO JS counterpart in the fight, so its condition contexts must NOT draw
+    // from the fight's shared `Da.pg` stream — that would shift every later
+    // AI/crit draw (and the pose dump) away from the oracle. `roll01` is
+    // deliberately left UNSET here: `eval_random` then uses the pinned
+    // independent stream (`conditions.cpp`'s private `DaPrng`, the documented
+    // probe/demo fallback), so the demo's rolls stay off `draw01()`.
     if (auto_attack_ && me.is_player && me.fighter.current_move() == nullptr) {
         const float dist = std::fabs(foe.fighter.world_x() - me.fighter.world_x());
         const std::string move_name =
@@ -2929,7 +3049,6 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         const auto it = moves_->find(move_name);
         if (it != moves_->end()) {
             sf2::scene::FightContext ctx;
-        ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
             ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
             ctx.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
             ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};

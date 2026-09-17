@@ -1,65 +1,64 @@
 #pragma once
 
-// Table-driven SFX mapping (Phase 7.1) — the native equivalent of the JS
-// `ta.WBa()` name -> asset table (sf2.502f0946.js L1265-1274).
+// Table-driven SFX mapping — the native equivalent of the JS `ta.WBa()`
+// name -> asset-id table (sf2.502f0946.js L1264-1274).
 //
 // JS cites:
-//   - `ta.ak(name, volume)` (L1264): `a = ta.WBa(a); if (a != null)
-//     L.K.$f.play(a, b)` — the single "play sound by name" point.
-//   - `WBa()` (L1265-1274): `snd_hit1..6 = 65536-65541`,
-//     `snd_super_hit1/2 = 65673/65674`, `snd_swish1..7 = 65551-65557`,
-//     `snd_armor = 65558`, `snd_bodyfall1/3 = 65563/65564`,
-//     `snd_f_pl_attack1..6 = 65581-65586`, `snd_f_pl_death = 65587`,
-//     `snd_f_pl_jump1..3 = 65588-65590`, `snd_m_pl_attack1..6 = 65542-65547`,
-//     `snd_m_pl_jump1..3 = 65548-65550`, `snd_gong = 65591`,
-//     `snd_win = 65703`, `snd_shuriken_fly = 65667`,
-//     `snd_smoke_bomb = 65670`, `snd_bow_fast/long = 65565/65566`,
-//     `snd_titan_attack1..4 = 65680-65683`, `snd_titan_hit1..4 = 65685-65688`,
-//     `snd_blizzard_1..3 = 65559-65561`, `snd_blizzard_hit = 65562`,
-//     `snd_magic_*` (fireball/energyball/ice/water/wave/lightning/massbomb/
-//     bomb/asteroid/firepillar/fire_splash/mind_throw/saw/acid_cloud/deathray),
-//     `snd_wasp_fly_* = 65698-65700`, `snd_widow_teleport_* = 65701/65702`,
-//     `snd_musket_shot_1/2 = 65654/65555`, `snd_roots_start/end = 65658/65659`,
-//     `snd_click_1 = 65535`, `snd_click_2 = 65570`.
-//   - Combat triggers: `wd.dwb(a)` (L519 weapon events ->
-//     `ta.ak(a.name, ...)`), `fwb`/`ewb` (L519 start/stop), scenario action
-//     `S.S()` (L945: `ta.ak(this.Tla)`).
-//   - UI `rb` (L1277) — the JS UI-sound helpers, one id each:
-//       `rb.um()`  -> `snd_click_1` (65535): EVERY `Bb` button press
-//                     (`Bb.Xw` L1844 `a&&rb.um()`), settings rows
-//                     (`un.rHa` L1930), pause dialog (`Dr.aa` L2067), pause
-//                     HUD disc (`Aia` L2018), disciple toggle (`Nfb` L1981),
-//                     nav `Le` buttons (L1978-1982).
-//       `rb.iJa()` -> `snd_click_2` (65570): tab/cell strip selection
-//                     (`Eg.pa` L1853, inherited by the profile `cs` L2189 and
-//                     the shop `ss` strip), map node select (`qe.mK` L2139).
-//       `rb.PS()`  -> `snd_focus_1` (65579): scroll-header toggle (`gk.Bgb`
-//                     L2000), scroll-arrow `je` (L2145), icon cell `Ed.JE`
-//                     (L2204), `Chb` (L1980).
-//       `rb.U3()`  -> `snd_buy` (65569), `rb.QS()` -> `snd_upgrade` (65696),
-//                     `rb.Xkb()` -> `snd_learn` (65598),
-//                     `rb.Wkb()` -> `snd_gong` (65591).
-//     BACKGROUND/EMPTY-SPACE TAPS HAVE NO JS SOUND TRIGGER — a tap that is not
-//     inside one of the widgets above must play NOTHING.
-//   - Music `ta.u0()` (L1275-1276): `menu = 1318`, `act = 1353`,
-//     `fightN_* = 1319-1352` — files live in `reference/www/res/audio/`
-//     (ogg/m4a pairs + `sounds_a`/`sounds_b` bundles). Music is NOT wired
-//     here: this engine plays wav stems through miniaudio and has no music
-//     backend — streaming the ogg/m4a tracks is a follow-up.
+//   - `ta.ak(name, looped)` (L1264): `a = ta.WBa(name); if (a != null)
+//     L.K.$f.play(a, looped)` — the single "play sound by id" point. A name
+//     ABSENT from `ta.WBa` plays NOTHING. The third argument callers pass
+//     (`wd.dwb` L519 `ta.ak(a.name, a.ceb, a.volume)`) is ignored — `ak`
+//     takes only (name, looped), so `<Sound Volume=..>` never reaches the
+//     mixer (`fm.volume` L735 is parsed and unused).
+//   - `ta.WBa()` (L1265-1274) builds ONE table: 154 `snd_*` names -> the
+//     bundled asset ids (`snd_armor`=65558 ... `snd_win`=65703). The native
+//     port plays wav stems, so each row also resolves to a file: the stem is
+//     the name minus the `snd_` prefix (`snd_hit1` -> `hit1.wav`), which is
+//     exactly how `assets/sounds/` was extracted.
+//   - Combat triggers: `wd.dwb` (L519 Sound -> `ta.ak(a.name, a.ceb, ...)`),
+//     `wd.fwb` (L519 RandomSound -> `ta.ak(a.ab())`), `wd.ewb` (L519
+//     StopSound -> `ta.Jwb(a.name)`).
+//   - UI ids L1277 (`rb`): `um()`/`iJa()`/`PS()`/`U3()`/`QS()`/`Xkb()`/
+//     `Wkb()` -> `snd_click_1`/`snd_click_2`/`snd_focus_1`/`snd_buy`/
+//     `snd_upgrade`/`snd_learn`/`snd_gong`.
 //
-// Disk truth (read-only inventory, 2026-09-04): `assets/sounds/` holds 166
-// wav stems; every `files[]` entry below was verified present on disk. The
-// JS `snd_` prefix is stripped for the stem (`snd_hit1` -> `hit1.wav`).
-// `snd_click_1`/`snd_click_2`/`snd_focus_1` (the three UI ticks) shipped ONLY
-// inside the web audio bank `reference/www/res/audio/sounds_a.ogg` — the APK
-// wav set never carried them. `click_1.wav` here is that bank's slot 0,
-// extracted 1:1: `Ss.kWa` (L1237018) assigns each bank sub-sound
-// `id = GL_index + 65535`, and `ta.WBa` (L1266) pins `snd_click_1 = 65535`,
-// i.e. GL index 0 == the bank's first slot, which the decoded bank confirms
-// (23 bursts == the 23 ids <= 65557, grouped 1/6/6/3/7 exactly like
-// click_1 | hit1-6 | m_pl_attack1-6 | m_pl_jump1-3 | swish1-7). The previous
-// `snd_click_* -> buy.wav` alias was WRONG: `buy` is `snd_buy` (65569), the
-// PURCHASE sound (`rb.U3`), not the button tick.
+// PRUNED (were invented rows with no JS id AND no JS trigger):
+//   `hit`, `jump`, `step` (played by the removed fabricated triggers in
+//   `fight.cpp`) and `voice_hit` (no caller at all). Their stems
+//   `f_pl_hit1..3` / `m_pl_hit1,3,4` / `m_pl_death` / `coin_hit1..3` are
+//   APK-only wavs with NO `ta.WBa` id — `snd_f_pl_hit*` and `snd_m_pl_hit1/3/4`
+//   are absent from the JS table, and searches of moves.xml for those names
+//   return 0 hits. They stay on disk (unreferenced) but resolve to nothing.
+//   The real ids in that family — `snd_m_pl_hit2` (65657), `snd_f_pl_death`
+//   (65587), `snd_f_cough` (65580), `snd_m_cough` (65656) — are all rows of
+//   the table below, so any authored `<Sound>` naming them now plays.
+//
+// NAMES IN moves.xml THAT RESOLVE TO NOTHING (JS-identical silence — the
+// shipped data references names `ta.WBa` does not carry, so the real game
+// plays nothing either; reported, never faked):
+//   - the PACK voices/impacts `<Sound PackName="CLANS|ZONE_*">`:
+//     `snd_low_pl_attack1..6`, `snd_low_pl_jump1..3`, `snd_low_pl_hit2`,
+//     `snd_low_cough`, `snd_midsphere_*`, `snd_bigsphere_end`,
+//     `snd_smallsphere_*`, `snd_magic_ice_cloud`, `snd_gust_whoosh_*`,
+//     `snd_arcane_attack`, `snd_rats_*`, `snd_hoaxen_cast`,
+//     `snd_hoaxen_tentacle_hit1..3`, `snd_perk_hunger_claws`,
+//     `snd_magic_dragon`, `snd_blade_fury`, `snd_rayshot*`,
+//     `snd_electric_hit`, `snd_magic_nrtyu_scythe_1`, `snd_bone_boss_soul`,
+//     `snd_energy_burst`, `snd_saturn_blaster_shot`, `snd_knife_reveal`,
+//     `snd_knife_stroke`, `snd_electric_release`, `snd_shadow_grasp`,
+//     `snd_time_shift`, `snd_ability_root_start`, `snd_cleric_bottle`.
+//     `fm.parse` (L735) reads `PackName` into `ES` and `ta.ak` NEVER consults
+//     it, so pack sounds are silent through this path.
+//   - the case typo `snd_Roots_start` / `snd_Roots_end`: `ta.WBa` registers
+//     `snd_roots_start`/`snd_roots_end` (65559/65658 are `blizzard_*`/... —
+//     the ids ARE lowercase) while moves.xml spells them with a capital R,
+//     so `WBa("snd_Roots_start")` returns null. The stems on disk kept the
+//     capital (`Roots_start.wav`) — reproduced 1:1 below.
+//
+// `volume`/`voices` are NATIVE MIXING choices (the JS `ta.ak` has neither):
+// `volume` is the per-event gain and `voices` the number of overlapping
+// `ma_sound` copies so rapid re-triggers mix instead of cutting each other
+// off. They never affect which id resolves.
 
 #include <cstddef>
 
@@ -75,140 +74,97 @@ constexpr bool eq(const char* a, const char* b) {
     return *a == *b;
 }
 
-// One round-robin pool: play(event) walks `files` across `voices` copies so
-// rapid re-triggers MIX instead of cutting each other off (see audio.cpp).
+// One JS sound id (`ta.WBa` L1265-1274).
 struct SfxGroup {
-    const char* event;          // play("event")
-    const char* const* files;   // wav stems under the sfx dir
-    std::size_t count;          // stems in files[]
-    float volume;               // event loudness
-    int voices;                 // overlapping copies
+    const char* event;  // the JS `snd_*` id name (`ta.WBa` key) — play(name)
+    float volume;       // native mixing gain (JS carries none)
+    int voices;         // overlapping copies (native mixing)
 };
 
-namespace sfx_detail {
-
-constexpr const char* kHit[] = {"hit1", "hit2", "hit3", "hit4", "hit5", "hit6"};
-constexpr const char* kSuperHit[] = {"super_hit1", "super_hit2"};
-constexpr const char* kSwish[] = {"swish1", "swish2", "swish3", "swish4",
-                                  "swish5", "swish6", "swish7"};
-constexpr const char* kArmor[] = {"armor"};
-constexpr const char* kBodyfall[] = {"bodyfall1", "bodyfall3"};
-constexpr const char* kAttack[] = {"f_pl_attack1", "f_pl_attack2", "f_pl_attack3",
-                                   "f_pl_attack4", "f_pl_attack5", "f_pl_attack6",
-                                   "m_pl_attack1", "m_pl_attack2", "m_pl_attack3",
-                                   "m_pl_attack4", "m_pl_attack5", "m_pl_attack6"};
-constexpr const char* kVoiceHit[] = {"f_pl_hit1", "f_pl_hit2", "f_pl_hit3",
-                                     "m_pl_hit1", "m_pl_hit2", "m_pl_hit3",
-                                     "m_pl_hit4"};
-constexpr const char* kDeath[] = {"f_pl_death", "m_pl_death"};
-constexpr const char* kJump[] = {"f_pl_jump1", "f_pl_jump2", "f_pl_jump3",
-                                 "m_pl_jump1", "m_pl_jump2", "m_pl_jump3"};
-constexpr const char* kStep[] = {"swish1", "swish2", "swish3", "swish4"};
-constexpr const char* kMagic[] = {"magic_fireball_start", "magic_energyball_start",
-                                  "magic_ice_ball_start", "magic_water_ball_start",
-                                  "magic_wave_start", "magic_lightningarrow_start"};
-constexpr const char* kMagicHit[] = {"blizzard_hit", "magic_mind_throw_hit",
-                                     "titan_throw_hit"};
-constexpr const char* kBlizzard[] = {"blizzard_1", "blizzard_2", "blizzard_3"};
-constexpr const char* kBow[] = {"bow_fast", "bow_long"};
-constexpr const char* kTitan[] = {"titan_attack1", "titan_attack2", "titan_attack3",
-                                  "titan_attack4"};
-constexpr const char* kShuriken[] = {"shuriken_fly", "throwing", "shopshuriken"};
-constexpr const char* kSmoke[] = {"smoke_bomb"};
-constexpr const char* kCoin[] = {"coin_hit1", "coin_hit2", "coin_hit3", "coin_hit4"};
-constexpr const char* kClick[] = {"click_1"};
-constexpr const char* kBuy[] = {"buy"};
-constexpr const char* kLearn[] = {"learn"};
-constexpr const char* kUpgrade[] = {"upgrade"};
-constexpr const char* kWin[] = {"win"};
-constexpr const char* kGong[] = {"gong"};
-
-}  // namespace sfx_detail
-
-// The full event table (order is stable — AudioEngine sizes its per-event
-// counters/voices from this; the first three rows preserve the legacy
-// hit/jump/step pools 1:1, and the `snd_*` rows are the JS `rb` UI ids).
+// The full `ta.WBa` id table (154 rows, L1265-1274), in the JS source order.
 inline const SfxGroup* sfx_groups(std::size_t& count) {
     static constexpr SfxGroup kGroups[] = {
-        {"hit", sfx_detail::kHit, 6, 0.85f, 4},
-        {"jump", sfx_detail::kJump, 6, 0.80f, 2},
-        {"step", sfx_detail::kStep, 4, 0.45f, 2},
-        // The JS `rb` UI ids (L1277). `snd_click_1` is the only one with its
-        // own sample; `snd_click_2`/`snd_focus_1` are the same bank's sibling
-        // ticks (ids 65570/65579, slots 12/21 of `sounds_b.ogg`, whose slot
-        // boundaries are not recoverable from the shipped assets) and
-        // therefore reuse the proven `click_1` sample rather than the
-        // PURCHASE sound.
-        {"snd_click_1", sfx_detail::kClick, 1, 0.55f, 2},
-        {"snd_click_2", sfx_detail::kClick, 1, 0.55f, 2},
-        {"snd_focus_1", sfx_detail::kClick, 1, 0.55f, 2},
-        {"snd_buy", sfx_detail::kBuy, 1, 0.55f, 2},
-        {"snd_upgrade", sfx_detail::kUpgrade, 1, 0.55f, 1},
-        {"snd_learn", sfx_detail::kLearn, 1, 0.55f, 1},
-        {"snd_gong", sfx_detail::kGong, 1, 0.80f, 1},
-        {"super_hit", sfx_detail::kSuperHit, 2, 0.90f, 2},
-        {"swish", sfx_detail::kSwish, 7, 0.45f, 2},
-        {"armor", sfx_detail::kArmor, 1, 0.70f, 1},
-        {"bodyfall", sfx_detail::kBodyfall, 2, 0.70f, 1},
-        {"attack", sfx_detail::kAttack, 12, 0.70f, 2},
-        {"voice_hit", sfx_detail::kVoiceHit, 7, 0.70f, 2},
-        {"death", sfx_detail::kDeath, 2, 0.80f, 1},
-        {"magic", sfx_detail::kMagic, 6, 0.75f, 2},
-        {"magic_hit", sfx_detail::kMagicHit, 3, 0.80f, 2},
-        {"blizzard", sfx_detail::kBlizzard, 3, 0.70f, 1},
-        {"bow", sfx_detail::kBow, 2, 0.70f, 1},
-        {"titan", sfx_detail::kTitan, 4, 0.80f, 2},
-        {"shuriken", sfx_detail::kShuriken, 3, 0.60f, 1},
-        {"smoke", sfx_detail::kSmoke, 1, 0.70f, 1},
-        {"coin", sfx_detail::kCoin, 4, 0.60f, 1},
-        {"buy", sfx_detail::kBuy, 1, 0.55f, 2},
-        {"learn", sfx_detail::kLearn, 1, 0.55f, 1},
-        {"upgrade", sfx_detail::kUpgrade, 1, 0.55f, 1},
-        {"win", sfx_detail::kWin, 1, 0.80f, 1},
-        {"gong", sfx_detail::kGong, 1, 0.80f, 1},
+        {"snd_armor", 0.70f, 1}, {"snd_bodyfall1", 0.70f, 1}, {"snd_bodyfall3", 0.70f, 1}, {"snd_buy", 0.55f, 2},
+        {"snd_click_1", 0.55f, 2}, {"snd_click_2", 0.55f, 2}, {"snd_coin_hit4", 0.60f, 1}, {"snd_disk", 0.60f, 1},
+        {"snd_f_pl_attack1", 0.70f, 2}, {"snd_f_pl_attack2", 0.70f, 2}, {"snd_f_pl_attack3", 0.70f, 2}, {"snd_f_pl_attack4", 0.70f, 2},
+        {"snd_f_pl_attack5", 0.70f, 2}, {"snd_f_pl_attack6", 0.70f, 2}, {"snd_f_pl_death", 0.80f, 1}, {"snd_f_pl_jump1", 0.70f, 2},
+        {"snd_f_pl_jump2", 0.70f, 2}, {"snd_f_pl_jump3", 0.70f, 2}, {"snd_focus_1", 0.55f, 2}, {"snd_gong", 0.80f, 1},
+        {"snd_hit1", 0.85f, 4}, {"snd_hit2", 0.85f, 4}, {"snd_hit3", 0.85f, 4}, {"snd_hit4", 0.85f, 4},
+        {"snd_hit5", 0.85f, 4}, {"snd_hit6", 0.85f, 4}, {"snd_knife", 0.60f, 1}, {"snd_learn", 0.55f, 2},
+        {"snd_m_pl_attack1", 0.70f, 2}, {"snd_m_pl_attack2", 0.70f, 2}, {"snd_m_pl_attack3", 0.70f, 2}, {"snd_m_pl_attack4", 0.70f, 2},
+        {"snd_m_pl_attack5", 0.70f, 2}, {"snd_m_pl_attack6", 0.70f, 2}, {"snd_m_pl_jump1", 0.70f, 2}, {"snd_m_pl_jump2", 0.70f, 2},
+        {"snd_m_pl_jump3", 0.70f, 2}, {"snd_shopshuriken", 0.60f, 1}, {"snd_shopshurikencatch", 0.60f, 1}, {"snd_shuriken_fly", 0.60f, 1},
+        {"snd_smoke_bomb", 0.70f, 1}, {"snd_super_hit1", 0.90f, 2}, {"snd_swish_sword1", 0.45f, 2}, {"snd_swish_sword2", 0.45f, 2},
+        {"snd_swish_sword3", 0.45f, 2}, {"snd_swish1", 0.45f, 2}, {"snd_swish2", 0.45f, 2}, {"snd_swish3", 0.45f, 2},
+        {"snd_swish4", 0.45f, 2}, {"snd_swish5", 0.45f, 2}, {"snd_swish6", 0.45f, 2}, {"snd_swish7", 0.45f, 2},
+        {"snd_throwing", 0.60f, 1}, {"snd_upgrade", 0.55f, 2}, {"snd_wall3", 0.70f, 2}, {"snd_win", 0.80f, 1},
+        {"snd_blizzard_hit", 0.75f, 2}, {"snd_magic_bomb_end", 0.75f, 2}, {"snd_magic_acid_cloud", 0.75f, 2}, {"snd_magic_asteroid_end", 0.75f, 2},
+        {"snd_magic_asteroid_start", 0.75f, 2}, {"snd_magic_asteroid", 0.75f, 2}, {"snd_magic_bomb_middle", 0.75f, 2}, {"snd_magic_bomb_start", 0.75f, 2},
+        {"snd_magic_deathray", 0.75f, 2}, {"snd_magic_energyball_end", 0.75f, 2}, {"snd_magic_energyball_middle", 0.75f, 2}, {"snd_magic_energyball_start", 0.75f, 2},
+        {"snd_magic_fire_splash_end", 0.75f, 2}, {"snd_magic_fire_splash_middle1", 0.75f, 2}, {"snd_magic_fire_splash_middle2", 0.75f, 2}, {"snd_magic_fire_splash_middle3", 0.75f, 2},
+        {"snd_magic_fire_splash_start", 0.75f, 2}, {"snd_magic_fireball_end", 0.75f, 2}, {"snd_magic_fireball_middle", 0.75f, 2}, {"snd_magic_fireball_start", 0.75f, 2},
+        {"snd_magic_firepillar_end", 0.75f, 2}, {"snd_magic_firepillar_start", 0.75f, 2}, {"snd_magic_ice_ball_end", 0.75f, 2}, {"snd_magic_ice_ball_start", 0.75f, 2},
+        {"snd_magic_ice_pins_end", 0.75f, 2}, {"snd_magic_ice_pins_middle", 0.75f, 2}, {"snd_magic_ice_pins_start", 0.75f, 2}, {"snd_magic_lightningarrow_end", 0.75f, 2},
+        {"snd_magic_lightningarrow_middle", 0.75f, 2}, {"snd_magic_lightningarrow_start", 0.75f, 2}, {"snd_magic_massbomb_end", 0.75f, 2}, {"snd_magic_massbomb_middle", 0.75f, 2},
+        {"snd_magic_massbomb_middle2", 0.75f, 2}, {"snd_magic_massbomb_start", 0.75f, 2}, {"snd_magic_mind_throw_hit", 0.75f, 2}, {"snd_magic_mind_throw_start", 0.75f, 2},
+        {"snd_magic_saw_long", 0.75f, 2}, {"snd_magic_water_ball_end", 0.75f, 2}, {"snd_magic_water_ball_start", 0.75f, 2}, {"snd_magic_wave_end", 0.75f, 2},
+        {"snd_magic_wave_start", 0.75f, 2}, {"snd_blizzard_1", 0.75f, 2}, {"snd_blizzard_2", 0.75f, 2}, {"snd_blizzard_3", 0.75f, 2},
+        {"snd_bow_fast", 0.70f, 1}, {"snd_bow_long", 0.70f, 1}, {"snd_bucher_jump_new", 0.70f, 2}, {"snd_bucher_touchdown", 0.70f, 2},
+        {"snd_composite_sword_heavy_slash1", 0.70f, 2}, {"snd_composite_sword_heavy_slash2", 0.70f, 2}, {"snd_composite_sword_heavy_slash3", 0.70f, 2}, {"snd_composite_sword_stance", 0.70f, 2},
+        {"snd_composite_sword_whip", 0.70f, 2}, {"snd_earthquake", 0.70f, 2}, {"snd_f_cough", 0.70f, 1}, {"snd_harpoon_shoot", 0.70f, 2},
+        {"snd_hermit_lightning", 0.70f, 2}, {"snd_hermit_lightning2", 0.70f, 2}, {"snd_hermit_storm_idle", 0.70f, 2}, {"snd_hermit_storm_start", 0.70f, 2},
+        {"snd_m_cough", 0.70f, 1}, {"snd_m_pl_hit2", 0.70f, 2}, {"snd_musket_shot_1", 0.70f, 2}, {"snd_musket_shot_2", 0.70f, 2},
+        {"snd_roots_end", 0.70f, 2}, {"snd_roots_start", 0.70f, 2}, {"snd_sawblade_1", 0.70f, 2}, {"snd_sawblade_2", 0.70f, 2},
+        {"snd_sawblade_3", 0.70f, 2}, {"snd_sawblade_long", 0.70f, 2}, {"snd_shoker2", 0.70f, 2}, {"snd_smallsphere_middle", 0.75f, 2},
+        {"snd_smallsphere_start", 0.75f, 2}, {"snd_spin1", 0.70f, 2}, {"snd_spin2", 0.70f, 2}, {"snd_super_hit2", 0.90f, 2},
+        {"snd_sword_pierce", 0.70f, 2}, {"snd_titan_attack1", 0.80f, 1}, {"snd_titan_attack2", 0.80f, 1}, {"snd_titan_attack3", 0.80f, 1},
+        {"snd_titan_attack4", 0.80f, 1}, {"snd_titan_death", 0.80f, 1}, {"snd_titan_hit1", 0.80f, 2}, {"snd_titan_hit2", 0.80f, 2},
+        {"snd_titan_hit3", 0.80f, 2}, {"snd_titan_hit4", 0.80f, 2}, {"snd_titan_laugh", 0.80f, 1}, {"snd_titan_loose", 0.80f, 1},
+        {"snd_titan_swish1", 0.80f, 2}, {"snd_titan_swish2", 0.80f, 2}, {"snd_titan_swish3", 0.80f, 2}, {"snd_titan_swish4", 0.80f, 2},
+        {"snd_titan_throw_hit", 0.80f, 2}, {"snd_wasp_fly_end", 0.70f, 2}, {"snd_wasp_fly_mid", 0.70f, 2}, {"snd_wasp_fly_start", 0.70f, 2},
+        {"snd_widow_teleport_end", 0.70f, 2}, {"snd_widow_teleport_start", 0.70f, 2},
     };
     count = sizeof(kGroups) / sizeof(kGroups[0]);
     return kGroups;
 }
 
-// The `ta.WBa()` equivalent: JS `snd_*` name -> wav stem on this table.
-// Returns nullptr when the JS name has no mapped stem (e.g. music ids,
-// `snd_focus_1`'s bank-only tick). Callers strip nothing — pass the full JS
-// name.
-inline const char* sfx_stem_for_js(const char* js_name) {
-    if (js_name == nullptr || *js_name == '\0') return nullptr;
+// Is `js_name` one of the 154 `ta.WBa` ids?
+inline bool sfx_is_js_id(const char* js_name) {
+    if (js_name == nullptr || *js_name == '\0') return false;
     std::size_t n = 0;
-    const SfxGroup* groups = sfx_groups(n);
-    // Match "snd_<stem>" against every pooled stem (one linear pass; the
-    // table is tiny and this runs only on cache-miss paths).
-    for (std::size_t g = 0; g < n; ++g) {
-        for (std::size_t f = 0; f < groups[g].count; ++f) {
-            const char* stem = groups[g].files[f];
-            // Compare "snd_" + stem with js_name without strcmp (no <cstring>
-            // needed — keeps this header dependency-free).
-            const char* p = js_name;
-            for (const char* q = "snd_"; *q != '\0'; ++q, ++p) {
-                if (*p != *q) goto next_stem;
-            }
-            for (const char* q = stem;; ++q, ++p) {
-                if (*q == '\0') {
-                    if (*p == '\0') return stem;
-                    goto next_stem;
-                }
-                if (*p != *q) goto next_stem;
-            }
-        next_stem:;
-        }
+    const SfxGroup* g = sfx_groups(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (eq(js_name, g[i].event)) return true;
     }
-    // The JS UI ids with no standalone wav: all three are the web bank's UI
-    // tick and resolve to `click_1` (see the module comment). NOTE: `snd_buy`
-    // (65569) is a DIFFERENT id and maps to `buy` above — never alias these
-    // to it (that alias was the "screen click plays the purchase sound" bug).
+    return false;
+}
+
+// The `ta.WBa()` + "which wav" resolution: a JS `snd_*` name -> the wav stem
+// under the sfx dir, or nullptr when NOTHING may play. nullptr covers both
+// "not a `ta.WBa` id" (the JS `WBa` miss — pack sounds, the `snd_Roots_*`
+// case typo) and "id present but the APK shipped no sample"
+// (`snd_smallsphere_start/middle`).
+inline const char* sfx_stem_for_js(const char* js_name) {
+    if (!sfx_is_js_id(js_name)) return nullptr;
+    // The three UI ticks shipped ONLY inside the web audio bank
+    // `reference/www/res/audio/sounds_a.ogg`; the APK wav set never carried
+    // them. `click_1.wav` here is that bank's slot 0 (see the module comment
+    // history): `Ss.kWa` (L1237018) assigns each bank sub-sound
+    // `id = GL_index + 65535`, and `ta.WBa` pins `snd_click_1 = 65535`.
     if (eq(js_name, "snd_click_1") || eq(js_name, "snd_click_2") ||
         eq(js_name, "snd_focus_1")) {
         return "click_1";
     }
-    return nullptr;
+    // Two stems were extracted with a capital R (`Roots_start.wav` /
+    // `Roots_end.wav`) while the id table spells them lowercase.
+    if (eq(js_name, "snd_roots_start")) return "Roots_start";
+    if (eq(js_name, "snd_roots_end")) return "Roots_end";
+    // Id present, sample absent from the shipped APK wav set -> JS-silent.
+    if (eq(js_name, "snd_smallsphere_start") ||
+        eq(js_name, "snd_smallsphere_middle")) {
+        return nullptr;
+    }
+    return js_name + 4;  // skip the "snd_" prefix
 }
 
 }  // namespace sf2::audio

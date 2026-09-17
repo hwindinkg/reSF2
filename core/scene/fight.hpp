@@ -708,6 +708,15 @@ struct BattleParams {
     // the ENEMY's rows always govern the blend; the player set is `Default`'s.
     std::vector<sf2::scene::AlignDelta> player_align;
     std::vector<sf2::scene::AlignDelta> enemy_align;
+    // The fighters' `xc.voice` (JS `ur` L186 reads the Warrior's `Voice`
+    // attr into `xc.voice`; `Vo` ctor default "" L807). The move actions'
+    // `<Sound Voice="Male|Female|MaleLow">` gate compares against it
+    // (`fm.fka` L735: `t7 ? true : voice == J8`). The app fills the player's
+    // from the save Warrior (`users_default.xml` `<Warrior Voice="Male">`)
+    // and the enemy's from the stage Warrior's merged `<Template Voice=..>`
+    // (stages.xml). Empty = no voice -> every Voice-gated action silent.
+    std::string player_voice;
+    std::string enemy_voice;
 };
 
 // JS `bb.OE` (L887-888) + `bb.M3`/`bb.xe` (L888-894): parse the stage
@@ -1618,6 +1627,23 @@ private:
                    const sf2::scene::MoveDef& move, const sf2::scene::Interval& iv,
                    const sf2::scene::HitCapsule& hit_cap, const sf2::scene::CapsuleHit& ch,
                    int frame, const sf2::scene::HitCapsule* atk_cap = nullptr);
+    // --- move `<Actions>` dispatch (JS `wd.BNa` L523) ----------------------
+    // The ported action kinds: `Sound` (`wd.dwb` L519 -> `fm.fka` L735 gate +
+    // `ta.ak(name, looped, volume)` L1264), `RandomSound` (`wd.fwb` L519 ->
+    // `am.ab()` pick + `ta.ak`), `StopSound` (`wd.ewb` L519 -> `ta.Jwb`).
+    // `owner` supplies `xc.voice` for the `fka` gate; `why` tags the log
+    // line ("frame", "Strike", "Hit", "AnimationEnd"). `conds` is the
+    // condition context used for each action's own `<Conditions>` (JS
+    // `cb.Ti` L724, `Fd($c)` -> true when empty).
+    void dispatch_move_actions(
+        const std::vector<const sf2::scene::MoveAction*>& acts,
+        const FightFighter& owner, const char* why,
+        const sf2::scene::FightContext& conds);
+    // JS `uf.sja(a)` (L115): `Math.floor(uf.OKa.RGa() * a)` with
+    // `at.Nlb` (L115) = `Math.random()` — an UNSHARED global stream, NOT the
+    // fight's `Da.pg`. Native: `math_random01()` (the pinned mulberry32 —
+    // see `R8a`'s note), so the pick never perturbs `draw01()`.
+    int random_sound_index(int n);
     // Rebuilds a fighter's physics body from its current pose.
     void rebuild_body(FightFighter& f, const FightFighter& foe);
     // --- perk trigger bus (`tb`) -----------------------------------------

@@ -150,6 +150,58 @@ struct Align {
     std::string shift_model_node;  // <Align ShiftModelNode> (JS `Fla`)
 };
 
+// One `<Actions>` child of a move — a frame- or event-triggered action
+// (JS base class `cb`, g="110", L724; the 19 concrete kinds `Vl`/`Wl`/`mh`/
+// `Xl`/`Yl`/`Zl`/`jg`/`$l`/`am`/`bm`/`cm`/`dm`/`fm`/`gm`/`hm`/`im`/`jm`/`km`
+// L725-737, built by the `lz.create` factory L737-739).
+//
+// Trigger (`cb.parse` L724-725): a `<X Frame="N">` sets `zy.Z5=0`,
+// `zy.frame=N`; otherwise `<X Event="Name">` sets `zy.Z5=1`,
+// `zy.event=tb.D6a(Name)` (the L763-764 map: RoundStage 1, KeyPressed 2,
+// KeyReleased 3, RoundStart 4, RoundEnd 5, Hit 6, Strike 7, WallHit 8,
+// AnimationStart 9, AnimationEnd 10, AnimationInterrupted 11,
+// IntervalStart 12, IntervalEnd 13, EveryFrame 14, Birth 15, ModExpires 16).
+// `Player` (default "Me") -> `pe`; a `<Conditions>` child -> `$c`.
+//
+// Dispatch: frame actions are collected by `Te.Lwa` (L563-564) —
+// `e.$eb(this.ip(), ...) && c.push(e)` — once per completed clip frame and
+// fired as the `EActionStart` event (L564 `this.gh("EActionStart", c)`);
+// event actions by `Te.CZa(a)` (L555) — `e.afb(a, ...) && c.push(e)`.
+// Both reach `wd.mHa` (L530) -> `wd.BNa` (L523) -> each action's `Uh(this)`,
+// which routes to the per-kind `wd` handler (L518-520); the sound kinds are
+// `wd.dwb` (Sound, L519), `wd.fwb` (RandomSound, L519), `wd.ewb`
+// (StopSound, L519).
+//
+// The port stores every kind as a record; the sound kinds (Sound /
+// RandomSound / StopSound) are dispatched, the rest are parsed data (the
+// remaining kinds are reported as follow-up — they need the FX/magic/
+// bullet/camera systems).
+struct MoveAction {
+    std::string kind;       // element name ("Sound", "RandomSound", ...)
+    int js_type = -1;       // JS `cb.type` (0..17); -1 = unknown (never pushed)
+    // Trigger (JS `cb.zy`).
+    bool frame_trigger = true;  // `zy.Z5 == 0` (a Frame attr was present)
+    int frame = 0;              // `zy.frame` (<X Frame=N>)
+    std::string event;          // `zy.event` name (<X Event="Strike">)
+    int player = 1;             // `pe` (Nd.ol; default "Me")
+    std::vector<Cond> conditions;  // `$c` (<Conditions> child)
+    // Sound (`fm` L735) / StopSound (`im`) / StopEffect (`gm`) / StopFollowEffect (`hm`).
+    std::string name;           // <X Name=..> (JS `fm.name` / `im.name` / ...)
+    // Sound only (`fm` L735): `volume`, `ceb` (Looped), `J8`/`t7` (Voice),
+    // `ES` (PackName). `PackName` is parsed and NEVER read at play time
+    // (`ta.ak` L1264 only consults `ta.WBa(name)`), so it is informational.
+    float volume = 1.0f;        // `fm.volume` (default 1)
+    bool looped = false;        // `fm.ceb`
+    bool has_voice = false;     // JS `!fm.t7` (a Voice attr was present)
+    std::string voice;          // `fm.J8`
+    std::string pack;           // `fm.ES`
+    // RandomSound (`am` L733): the `<Name Name=..>` children (`am.qq`).
+    // `am.ab()` picks one at random — JS `uf.sja(n)` (L115) =
+    // `floor(Math.random()*n)`, the UNSHARED global stream (`at.Nlb`
+    // L115 `return Math.random()`), NOT the fight's `Da.pg`.
+    std::vector<std::string> names;
+};
+
 // <Velocity> (JS `Fa.ykb` L721-722 -> `jc.wub`/`jc.btb`/`jc.jub`).
 // `wua` (X/Y/Z) seeds `Te.DM` on move start (`Skb` L551) and `Coa`
 // (Ax/Ay/Az) seeds `Te.aV`; `qta` (SaveVelocity) keeps `DM` across moves.
@@ -231,6 +283,16 @@ struct MoveDef {
     std::vector<Cond> tactics;         // <Tactics><Conditions> (own + template)
     std::vector<Interval> intervals;   // <Intervals><Interval> (own + template)
     std::vector<Lock> locks;           // <Locks>
+    // <Actions> (JS `Fa.CIa` L718 -> `Fa.DIa` L718 -> `lz.create` L737) —
+    // own list first, then each inherited template's, in template order
+    // (`Fa.DIa(b[a++].A("Actions"), c)`). 980 `<Actions>` blocks ship in
+    // res/moves.xml (3276 `<Sound>`, 505 `<RandomSound>`, 467 `<Effect>`,
+    // 210 `<Delete>`, 154 `<CreatePlayer>`, 96 `<StopEffect>`, 76
+    // `<TryOnEnd>`, 37 `<StopSound>`, 36 `<ShakeScreen>`, 30 `<AddBullets>`,
+    // 23 `<StopFollowEffect>`, 23 `<SetCooldown>`, 16 `<CameraWeight>`, 9
+    // `<PlayAnimation>`, 8 `<HitEffect>`, 4 `<EnableBossAbility>`,
+    // 1 `<SetEndStage>`, 1 `<ZoomEffect>`).
+    std::vector<MoveAction> actions;   // <Actions> (own + template)
     Align align;                       // <Align>
     Velocity velocity;                 // <Velocity> (JS `jc.wua`/`Coa`/`qta`)
     Rotation rotation;                 // <Rotation> (JS `jc.zX`/`AX`)

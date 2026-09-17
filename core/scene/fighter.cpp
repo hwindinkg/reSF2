@@ -449,6 +449,11 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
     playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
     active_intervals_.clear();
+    // JS `Skb` L551: `this.cX = 2147483647` — the sentinel that makes the
+    // first `vp()` (L563) see a frame change and run the action pass, so the
+    // move's FIRST-frame actions fire (`Te.Lwa` L563-564).
+    last_action_frame_ = -1;
+    ended_move_ = nullptr;
     // [FIX Phase 4a — pacing] Subframes per clip-frame (JS `Te.Gka`:
     // `Tx = model.model.HD()`, `rpa.initialize((Ua.XJ+1)*Tx)`; `eda`
     // advances `mo` by `Tx` per step with HD()==1). MidFrames=2 -> 3.
@@ -788,6 +793,10 @@ std::string Fighter::try_react(FightContext& ctx, bool prefer_fall) {
 // now advances a subframe counter and samples the interpolated pose.
 void Fighter::advance(float dt) {
     (void)dt;  // fixed 60 Hz - one frame per call (JS 1/60 step)
+    // Frame-action drain: the actions collected by the sub-steps of THIS
+    // advance() are what the caller dispatches (JS `Te.Lwa` L563-564 runs
+    // inside `Te.ia`, i.e. once per frame advance).
+    frame_actions_.clear();
     // Knockback offsets decay every tick (JS Vc.sk friction - OPEN rate).
     if (!kb_.empty()) sf2::scene::decay_knockback(kb_);
     // Timescale steps (SlowModel KT): scale>=1 verbatim (Speed<1 no-ops
@@ -863,9 +872,15 @@ void Fighter::advance_step() {
     // at `sub` subframes.
     if (playhead_ >= clip_len - ff) {
         // The clip has fully played (the last play buffer range's subframes).
+        // JS `Te.lS` L553 (`gh("EStopAnimationEvent", Ua)`) -> `wd.eIa` ->
+        // `Gc.kg` L671 `Ih(10,..)` -> `Gnb` L672 `CZa(10)` reads `this.Ua`,
+        // which `KNa` did NOT clear. Hand the ended move to the caller for
+        // the `AnimationEnd` action pass.
+        ended_move_ = current_move_;
         current_move_ = nullptr;
         current_clip_ = nullptr;
         active_intervals_.clear();
+        last_action_frame_ = -1;
         subframe_ = 0;
         playhead_ = 0;
         prepend_.clear();
@@ -888,11 +903,52 @@ void Fighter::advance_step() {
     }
     move_frame_ = ff + std::max(0, playhead_ - 2);
     sample_current();
+    // JS `Te.ia` L547-548 order: `eda()` (the pose apply) THEN `vp()`
+    // (L563) which detects the frame change (`a != this.cX`) and runs
+    // `rrb()` + the action pass `Lwa()` (L563-564:
+    // `e.$eb(b, this.Ua, ...) && c.push(e)` with `b = this.ip()` = the clip
+    // frame `move_frame_`). Collect once per frame change; the caller
+    // dispatches them (`gh("EActionStart", c)` L564).
+    if (current_move_ != nullptr && move_frame_ != last_action_frame_) {
+        last_action_frame_ = move_frame_;
+        for (const MoveAction& act : current_move_->actions) {
+            if (act.frame_trigger && act.frame == move_frame_) {
+                frame_actions_.push_back(&act);
+            }
+        }
+    }
     // JS `Te.eda` L556 frame END: `Nab`/`Oab(aV)` -> `DM += aV*sG` (only the
     // authored `<Velocity>` path carries a non-zero `aV`).
     if (root_active_) {
         root_dm_x_ += root_av_x_ * kSG;
     }
+}
+
+// JS `Te.Lwa` (L563-564) drain: the frame actions collected by the last
+// `advance()`. `gh("EActionStart", c)` L530 -> `wd.mHa` L530 -> `wd.BNa`
+// L523 -> each action's `Uh(this)`.
+const std::vector<const MoveAction*>& Fighter::take_frame_actions() {
+    return frame_actions_;
+}
+
+// JS `Te.CZa(a)` (L555): every action of the CURRENT move whose trigger is
+// the event `a` (`cb.afb` L724: `zy.Z5 == 1 && zy.event == a`).
+std::vector<const MoveAction*> Fighter::move_actions_for_event(
+    const std::string& event) const {
+    std::vector<const MoveAction*> out;
+    if (current_move_ == nullptr) return out;
+    for (const MoveAction& act : current_move_->actions) {
+        if (!act.frame_trigger && act.event == event) out.push_back(&act);
+    }
+    return out;
+}
+
+// The move whose clip ended during the last `advance()` (JS `KNa` keeps
+// `Ua`; `Gnb` L672 then runs `CZa(10)` on it). One-shot.
+const MoveDef* Fighter::take_ended_move() {
+    const MoveDef* m = ended_move_;
+    ended_move_ = nullptr;
+    return m;
 }
 
 void Fighter::sample_current() {
@@ -912,6 +968,10 @@ void Fighter::clear_move() {
     subframe_ = 0;
     playhead_ = 0;
     prepend_.clear();
+    // The action sentinels are per-move (JS `Te.reset` L548 clears `Ua`).
+    last_action_frame_ = -1;
+    ended_move_ = nullptr;
+    frame_actions_.clear();
     align_x_ = align_y_ = align_z_ = 0.0f;
     // JS `stop()` -> `jc.reset()` / `Skb` L551: the authored root state is
     // per-move; clear it so a later move starts from a zero `j8`.

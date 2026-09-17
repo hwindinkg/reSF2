@@ -3822,6 +3822,11 @@ struct BattleWarriorInfo {
     std::vector<sf2::scene::StageWarrior::Delta> align;
     // The `Default` template's rows = the player/avatar `IY`.
     std::vector<sf2::scene::StageWarrior::Delta> player_align;
+    // `xc.voice` (JS `ur` L186 reads the Warrior node's `Voice` attr).
+    // The enemy's from its `<Template>` chain; the player's from the
+    // `Default` template (`Default` ships `Voice="Male"`, stages.xml).
+    std::string voice;
+    std::string player_voice;
 };
 
 // `StageWarrior::Delta` -> `damage.hpp` `AlignDelta` (same fields, float).
@@ -3921,6 +3926,11 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         // `Templates` (the file nests `<Templates>` inside `<Warriors>`), NOT
         // a root sibling.
         std::map<std::string, std::string> tmpl_attrs;
+        // The `Default` template's `Voice` — the player's `xc.voice`
+        // (`users_default.xml` `<Warrior Voice="Male">` is seeded from the
+        // same Default identity). Captured here because `templates` goes out
+        // of scope below.
+        std::string default_voice;
         {
             std::map<std::string, pugi::xml_node> templates;
             const pugi::xml_node templates_node =
@@ -3928,6 +3938,13 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
             for (const pugi::xml_node t : templates_node.children("Template")) {
                 const std::string nm = t.attribute("Name").value();
                 if (!nm.empty()) templates.emplace(nm, t);
+            }
+            {
+                const auto dflt = templates.find("Default");
+                if (dflt != templates.end()) {
+                    const char* dv = dflt->second.attribute("Voice").value();
+                    if (dv != nullptr) default_voice = dv;
+                }
             }
             std::vector<std::string> chain;
             for (std::string cur = w.attribute("Template").value();
@@ -3958,6 +3975,12 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         }
         // The Warrior's own attrs win over the inherited template ones.
         for (const auto& kv : tmpl_attrs) out.attrs.emplace(kv.first, kv.second);
+        // `xc.voice`: the merged `<Template Voice=..>` (JS `ur` L186) for the
+        // enemy — the warrior WITH a `Template` inherits it (Man_Kunai ships
+        // `Voice="Male"`); a bare `<Warrior>` (the dojo Punchbag) has none.
+        const auto v = tmpl_attrs.find("Voice");
+        if (v != tmpl_attrs.end()) out.voice = v->second;
+        out.player_voice = default_voice;
         if (const pugi::xml_attribute a = w.attribute("FirstName")) {
             out.first_name = a.value();
         } else {
@@ -6511,6 +6534,13 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     }
     battle.enemy_not_ai = bw.has_not_ai;
     battle.enemy_not_animation = bw.has_not_animation;
+    // JS `xc.voice` (L807/L186): the Warrior's `<Voice>` attr feeds the move
+    // actions' `<Sound Voice="..">` gate (`fm.fka` L735). The enemy's comes
+    // from its stages.xml Warrior template chain; the player's from the
+    // `Default` template (`users_default.xml` `<Warrior Voice="Male">`), the
+    // same identity source `player_align` above uses.
+    battle.enemy_voice = bw.voice;
+    battle.player_voice = bw.player_voice;
     // `xc.IY` (JS L191): the align-armor rows `pAa` blends with. In a
     // player-vs-enemy fight `pAa` reads `(attacker.qb ? defender : attacker).IY`,
     // i.e. always the ENEMY's rows; the player's set is `Default`'s.

@@ -55,9 +55,16 @@ const std::vector<EventDef>& events() {
         std::size_t n = 0;
         const SfxGroup* groups = sfx_groups(n);
         for (std::size_t g = 0; g < n; ++g) {
+            // `ta.WBa` is name -> ONE asset id: resolve the row's wav stem.
+            // A row whose stem is missing on disk has no JS-playable sample
+            // (`sfx_stem_for_js` returns nullptr exactly where the JS plays
+            // nothing), so it is NOT registered — `play(name)` then finds no
+            // event and `played(name)` stays 0.
+            const char* stem = sfx_stem_for_js(groups[g].event);
+            if (stem == nullptr) continue;
             EventDef e;
             e.name = groups[g].event;
-            e.files.assign(groups[g].files, groups[g].files + groups[g].count);
+            e.files.push_back(stem);
             e.volume = groups[g].volume;
             e.voices = groups[g].voices;
             out.push_back(e);
