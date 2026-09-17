@@ -838,9 +838,10 @@ sf2::audio::SpecialMeters s_regen_enemy_;
 
 // The between-rounds "Next" button does NOT exist in the JS: the round
 // auto-advances (`ca.Onb` L411 `ZK(); NA(); Z2()`) and the HUD only shows
-// the round-break plate (`Cr.tca` L2023). The old `kNextBtn*` rect and its
-// click handler were an invention and are GONE; `next_button_center` now
-// reports the inert (0,0) so the non-owned headless drivers keep linking.
+// the round-break plate (`Cr.tca` L2023). The old invisible Next-button
+// rect and its click handler were an invention and are GONE;
+// `next_button_center` now reports the inert (0,0) so the non-owned
+// headless drivers keep linking.
 
 // ---------------------------------------------------------------------------
 // On-screen gamepad geometry — [ORIGINAL] JS `Za.update()` (sf2.js L454-456)
@@ -6650,7 +6651,7 @@ void FightScreen::on_key(int glfw_key, bool down) {
     if (paused_) return;
     // (The old Space/Enter "Next round" alias is GONE: the JS has no such
     // binding — the round auto-advances through the banner machine, so a
-    // key that called `next_round_requested()` would double-advance.)
+    // key-driven advance would double-step the round.)
     // GLFW key codes -> the game's key_type, bound from the JS key map
     // `sc.OD` (`Af.oUa` L2472) — the ten keys in `key_type_for_glfw` above.
     // The desktop aliases (Left/Right/Up/Down/Space) are folded in only when
