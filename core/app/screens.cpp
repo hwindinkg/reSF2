@@ -92,7 +92,7 @@ constexpr int kSettingsLangCount = 10;
 // headless_frames_ > 0 pattern the driver sets) EXCEPT on the armed
 // fresh-tutorial path, where the fidelity tour captures the real beats.
 const EngineDialog* quest_modal_top(App& app) {
-    if (app.headless() && !app.fresh_tutorial()) {
+    if (app.headless() && !app.fresh_tutorial() && !app.dialog_observe()) {
         while (app.quest_engine().has_dialog()) {
             std::fprintf(stdout, "[quest] dialog skipped (headless): %s\n",
                          app.quest_engine().dialog().title.c_str());
@@ -101,8 +101,23 @@ const EngineDialog* quest_modal_top(App& app) {
         }
         return nullptr;
     }
-    if (!app.quest_engine().has_dialog()) return nullptr;
-    return &app.quest_engine().dialog();
+    // JS `He.S` L1050 sends a `Notification` to the `Ib` BAR and a `Regular`
+    // to `Wb.openDialog` (L931 -> `Wb.Xob` L927). The `Wb` queue therefore
+    // holds no Notification, so its top is the first non-Notification — the
+    // `Regular characterSensei` shows the moment `StoryTutorialWelcome` runs,
+    // while the bar carries the LAST posted Notification (`Ib.Qhb` L1907
+    // overwrites the single instance). A lone Notification (no `Wb` modal) is
+    // still the display top so the bar draws/advances as before.
+    if (const EngineDialog* m = app.quest_engine().modal_top()) return m;
+    return app.quest_engine().has_notification() ? app.quest_engine().notification_top()
+                                                 : nullptr;
+}
+
+// The `Ib` bar's content (`Ib.F().Qhb` L1050). `Ib` is one instance, so the
+// LAST queued Notification is what the bar shows.
+const EngineDialog* quest_notification_top(App& app) {
+    if (app.headless() && !app.fresh_tutorial() && !app.dialog_observe()) return nullptr;
+    return app.quest_engine().notification_top();
 }
 
 // Regular-dialog button hit-test (defined after the `od` dialog layout
@@ -142,8 +157,8 @@ ReadTimeState& read_time_state() {
 // is popped, with the JS close tween). A non-Notification, a missing budget or
 // no top dialog is a no-op.
 bool quest_read_time_advance(App& app, float dt) {
-    const EngineDialog* d = quest_modal_top(app);
-    if (d == nullptr || dialog_kind(d->type) != DialogKind::kIbBar) return false;
+    const EngineDialog* d = quest_notification_top(app);
+    if (d == nullptr) return false;
     if (d->read_time <= 0.0f) return false;
     // `Qhb` L1907 resets `this.SK=f` on EVERY post, so the identity of the
     // visible bar is its whole content — the tutorial notifications carry an
@@ -165,7 +180,7 @@ bool quest_read_time_advance(App& app, float dt) {
                  d->read_time, st.elapsed);
     std::fflush(stdout);
     dialog_capture_closing(app, *d);  // `Ib.close` L1911 (0.5 s collapse)
-    app.quest_engine().pop_dialog();
+    app.quest_engine().pop_notifications();
     st.key.clear();
     st.elapsed = 0.0f;
     return true;
@@ -577,6 +592,13 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
     draw_settings_dialog(app, ren);
     draw_closing_dialog(app, ren);  // `od.Ge(1)` L1898: the dismissed tween
     const EngineDialog* d = quest_modal_top(app);
+    // The `Ib` bar (`Ib.F().Qhb` L1050) sits UNDER the `Wb` modal. When a
+    // `Regular` is queued the bar still shows the last posted Notification
+    // (`I.Qhb` L1907 overwrite) — both are visible at once (JS `He.S` L1050
+    // posts the bar and the `Regular` opens without waiting).
+    if (const EngineDialog* n = quest_notification_top(app)) {
+        if (n != d) draw_notification(app, ren, *n);
+    }
     if (d == nullptr) return;
     const DialogAnim anim = dialog_anim_now(app, *d);
     switch (dialog_kind(d->type)) {
@@ -2955,16 +2977,17 @@ bool load_vs_atlas(App& app) {
     return ok;
 }
 
-// VS-intro timeline (JS `ik.aa` L2071-2073, `yY` 3.4). The native timeline is
-// COMPRESSED so the fixed-frame fidelity captures land on the composed screen
-// (`fight_intro`, screen frame 40 ≈ 0.67 s) and the bare fight scene (`pause`,
-// ≈ 2.8 s); see the OPEN note on `FightScreen::vs_t_` in screens.hpp.
+// VS-intro timeline (JS `ik.aa` L2071-2073). The TOTAL is the JS `ik.yY`
+// (3.4 s, L2071) and the composed pose holds until `kVsFadeT` (~2.9 s, the
+// JS `kd9` `time>2` hold). The sub-stage times stay compressed so the
+// fixed-frame `fight_intro` capture (screen frame 40 ≈ 0.67 s) still lands on
+// the fully composed screen, as the oracle record shows.
 constexpr float kVsSlideT = 0.35f;   // JS kd0 ed(.6): portraits slide in
 constexpr float kVsGlyphT = 0.42f;   // JS kd2 ed(.2): VS glyph fade + scale
 constexpr float kVsStrokeT = 0.48f;  // JS kd4/kd5 ed(.1): left/right strokes
 constexpr float kVsNameT = 0.45f;    // JS kd7: names appear
-constexpr float kVsFadeT = 1.55f;    // JS kd10 fade-out begins
-constexpr float kVsTotal = 1.85f;    // JS yY 3.4 (compressed; see header)
+constexpr float kVsFadeT = 2.90f;    // JS kd9 time>2: the 2 s composed hold ends
+constexpr float kVsTotal = 3.40f;    // JS `ik.yY` L2071 = 3.4000000000000004
 
 // Quadratic ease-out (the JS `dc.Ln()` family; monotone 0->1).
 float vs_ease(float x) {
@@ -5710,11 +5733,68 @@ void MapScreen::launch_battle(const Node& n) {
     push(kScreenFight);
 }
 
+// One `jk` roster entry per `<Fight>` of the boss battle (`ai.aa` L2007
+// `ca.hCa(this.Da,…)` fills `TF.lD`; `jk.init` L2062 iterates it: `g.Hf` is
+// the warrior portrait, `g.$s` its name). Shared by the real flow and the
+// forced tour pose so both show the same row.
+std::vector<BossRosterEntry> boss_roster_entries(App& app, const MapScreen::Node& n) {
+    std::vector<BossRosterEntry> entries;
+    // `jk.init(lD)` iterates exactly the battle's `<Fight>` list
+    // (`TF.lD.length`, L2007) — `n.fight_count` is that `<Fight>` count, so
+    // the row length is bounded by it (BOSS_LYNX -> 3 portraits).
+    const int want = n.fight_count > 0 ? n.fight_count : 1;
+    for (int i = 0; i < want; ++i) {
+        const BattleWarriorInfo bw = battle_warrior(n.name, n.zone, i);
+        if (bw.attrs.empty()) break;  // no Nth `<Fight>`
+        BossRosterEntry e;
+        e.name = bw.first_name.empty() ? n.name : loc(app, bw.first_name, bw.first_name);
+        const auto av = bw.attrs.find("Avatar");
+        std::string img =
+            (av != bw.attrs.end() && !av->second.empty()) ? av->second : "avatar_masked";
+        std::transform(img.begin(), img.end(), img.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        e.image = img;
+        entries.push_back(e);
+    }
+    return entries;
+}
+
 void MapScreen::update_impl(float dt) {
-    (void)dt;
-    // Fidelity-tour boss-roster capture: freeze the map (no taps/launches)
-    // while the roster overlay is forced (render_impl draws it).
-    if (force_boss_roster()) return;
+    // Fidelity-tour boss-roster capture: arm the `jk` machine frozen at the
+    // requested pose (3/4 = the `act_boss` resting selection, 1 = mid
+    // scroll-in) and freeze the map (no taps/launches) while it is forced.
+    if (force_boss_roster()) {
+        roster_forced_ = true;
+        if (!roster_.started || roster_.state != force_boss_state()) {
+            std::vector<BossRosterEntry> entries;
+            if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size()) {
+                for (const Node& n : zones_[zone_sel_].nodes) {
+                    if (n.type != "BOSSES" && n.type != "BOSSES_REPLAYABLE") continue;
+                    entries = boss_roster_entries(app(), n);
+                    break;
+                }
+            }
+            roster_.start(std::move(entries), 0);
+            const int want = force_boss_state();
+            int guard = 0;
+            while (roster_.state < want && roster_.active() && ++guard < 100000) {
+                roster_.tick(1.0f / 60.0f);
+            }
+            if (want >= 3 && roster_.state == 3) {
+                roster_.time = 1.0f;  // the state-3 END pose (the `act_boss` ring)
+            } else if (want == 1 && roster_.state == 1) {
+                roster_.time *= 0.5f;  // mid-tween: the row is part-scrolled
+                roster_.row_alpha = 1.0f;
+            }
+        }
+        return;
+    }
+    if (roster_forced_) {
+        // The capture hook turned off: drop the frozen roster so the real flow
+        // re-arms the machine (or the plain map is live) cleanly.
+        roster_forced_ = false;
+        roster_ = BossRosterScroll{};
+    }
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     // `SetMapFocus` focus refresh (`qo` L1086 = `p.o.m5(battle)` + the `Ya`
     // focus refresh): StoryTutorialBossFight fires on THIS map's SceneLoaded
@@ -5764,12 +5844,14 @@ void MapScreen::update_impl(float dt) {
         }
     }
     const App::PointerState& p = app().pointer();
-    // Boss-intro act (Rd machine): ticks here; taps skip; completion
-    // launches the armed battle. Tabs/nodes/BACK wait below.
-    if (act_pending_) {
-        act_.tick(dt, p.pressed);
-        if (act_.done()) {
-            act_pending_ = false;
+    // Boss-intro `jk` roster (`ai.aa` case 0 L2007 -> L2009): ticks with the
+    // screen clock; state 4 fires `qd` -> `ngb()` -> start the fight. Input is
+    // held while the scroll runs (the JS row is a display-only act).
+    if (roster_.active()) {
+        if (roster_.tick(dt)) {
+            std::fprintf(stdout, "[map] jk qd (state 4) -> start fight %s\n",
+                         act_node_.name.c_str());
+            std::fflush(stdout);
             launch_battle(act_node_);
         }
         return;
@@ -5841,29 +5923,24 @@ void MapScreen::update_impl(float dt) {
                 std::fprintf(stdout, "[map] FIGHT ignored: %s [%s] locked\n", n.name.c_str(),
                              n.zone.c_str());
                 std::fflush(stdout);
-            } else if (!app().headless() &&
-                       (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE")) {
-                std::vector<ActLine> lines;
-                for (const Node& b : zones_[zone_sel_].nodes) {
-                    if (b.type == "BOSSES" || b.type == "BOSSES_REPLAYABLE") {
-                        ActLine ln;
-                        ln.text = b.name;
-                        ln.seconds = 2.5f;
-                        lines.push_back(ln);
-                    }
+            } else if (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE") {
+                // JS `ai.aa` case 0 (L2007): `this.TF.lD.length>1 && this.TF.eE`
+                // -> `lca(this.TF.lD, this.TF.uP, this.TF.Y1)` = the `jk`
+                // opponent scroll (`this.Ws = this.Qo(jk)`, L2009), whose `qd`
+                // (state 4) -> `ngb()` -> `tx()` (the `ik` VS intro). Runs in
+                // BOTH the windowed and headless builds (the player must see
+                // the scroll-in; the tour captures it).
+                std::vector<BossRosterEntry> entries = boss_roster_entries(app(), n);
+                if (entries.size() > 1) {
+                    act_node_ = n;
+                    roster_.start(std::move(entries), 0);
+                    std::fprintf(stdout,
+                                 "[map] FIGHT -> jk roster armed (%zu entries, first %s)\n",
+                                 roster_.entries.size(), n.name.c_str());
+                    std::fflush(stdout);
+                    return;
                 }
-                if (lines.empty()) {
-                    ActLine ln;
-                    ln.text = n.name;
-                    ln.seconds = 2.5f;
-                    lines.push_back(ln);
-                }
-                act_node_ = n;
-                act_pending_ = true;
-                act_.start(lines, false);
-                std::fprintf(stdout, "[map] FIGHT -> boss intro act armed (%zu intros, first %s)\n",
-                             lines.size(), n.name.c_str());
-                std::fflush(stdout);
+                launch_battle(n);
             } else {
                 launch_battle(n);
             }
@@ -6152,10 +6229,13 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
 // ---------------------------------------------------------------------------
 namespace {
 bool g_force_boss_roster = false;
+int g_force_boss_state = 3;
 }  // namespace
 
 bool force_boss_roster() { return g_force_boss_roster; }
 void set_force_boss_roster(bool on) { g_force_boss_roster = on; }
+void set_force_boss_state(int state) { g_force_boss_state = state; }
+int force_boss_state() { return g_force_boss_state; }
 
 // `jk` (L2061-2065): a horizontal row of circular warrior portraits on the
 // `hf = Fc.Ed(-16777216)` fader + `Qa = R.$(E.get(3,6))` panel. `jk.aa`
@@ -6165,7 +6245,7 @@ void set_force_boss_roster(bool on) { g_force_boss_roster = on; }
 // centred, the others ~180 px at +-265 px. The portrait art carries its own
 // circular frame, so it is drawn at its natural 512 px canvas.
 void draw_boss_roster(App& app, sf2::render::Renderer& ren,
-                      const std::vector<BossRosterEntry>& roster, int index) {
+                      const BossRosterScroll& r) {
     // `hf = Fc.Ed(-16777216)` full-screen fader (near-black corners).
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.02f, 0.015f, 0.01f, 1.0f);
@@ -6177,20 +6257,21 @@ void draw_boss_roster(App& app, sf2::render::Renderer& ren,
         try_draw_atlas_button(app, "vs_bg", kViewW * 0.5f, kViewH * 0.5f, kViewW, kViewH,
                               1.0f, /*fill=*/true);
     }
-    if (roster.empty()) return;
-    if (index < 0 || index >= static_cast<int>(roster.size())) index = 0;
-    // Geometry pinned to the oracle capture (`act_boss`): selected disc
-    // d~271 (canvas 504), others d~213 (canvas 353), row pitch 282.4 =
-    // `d += g*.8` with g = the 353 canvas (L2062), vertical centre 362.
-    constexpr float kStep = 282.4f;   // `d += g*.8` row pitch (L2062)
-    constexpr float kSelD = 504.0f;   // selected canvas (1.4x) -> ~295 px ring
-    constexpr float kOtherD = 353.0f; // others canvas -> ~207 px ring
-    constexpr float kCy = 362.0f;
-    for (int i = 0; i < static_cast<int>(roster.size()); ++i) {
-        const float cx = kViewW * 0.5f + static_cast<float>(i - index) * kStep;
-        const float d = (i == index) ? kSelD : kOtherD;
-        const float a = (i == index) ? 1.0f : 0.5f;
-        if (!draw_user_image(app, roster[i].image, cx, kCy, d, d, a)) {
+    if (r.entries.empty()) return;
+    // `jk.aa` L2064 per frame: `bQ.C(this.scrollX); bQ.D(512)` — the row sits
+    // at `scroll_x` with entry `i` at `i*g*.8`; `bQ.node.wa` is the state-0
+    // fade-in and the selected `la` / others' `Hf.node.wa(1+-.5*a)` are the
+    // state-3 ramp. Oracle-pinned canvas: others 353 (= `g`), the selected
+    // 353*1.4 = 494; vertical centre 362.
+    const float kCy = 362.0f;
+    const float sel_scale = r.selected_scale();
+    const float oth_alpha = r.other_alpha();
+    for (int i = 0; i < static_cast<int>(r.entries.size()); ++i) {
+        const float cx = r.scroll_x + r.entry_x(i);
+        const bool sel = i == r.index;
+        const float d = BossRosterScroll::kBaseD * (sel ? sel_scale : 1.0f);
+        const float a = r.row_alpha * (sel ? 1.0f : oth_alpha);
+        if (!draw_user_image(app, r.entries[i].image, cx, kCy, d, d, a)) {
             draw_user_image(app, "avatar_masked", cx, kCy, d, d, a);
         }
     }
@@ -6198,37 +6279,12 @@ void draw_boss_roster(App& app, sf2::render::Renderer& ren,
 
 void MapScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
-    // Fidelity-tour boss-roster capture (`--fidelity-tour`): draw the
-    // boss-intro roster (`jk`) instead of the map while the hook is on.
+    // Fidelity-tour boss-roster capture (`--fidelity-tour`): draw the `jk`
+    // boss-intro roster instead of the map while the hook is on (update_impl
+    // armed + froze the machine at the requested pose).
     if (force_boss_roster()) {
         ensure_lang(app);
-        std::vector<BossRosterEntry> roster;
-        std::string boss_battle, boss_zone;
-        if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size()) {
-            for (const Node& n : zones_[zone_sel_].nodes) {
-                if (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE") {
-                    boss_battle = n.name;
-                    boss_zone = n.zone;
-                    break;
-                }
-            }
-        }
-        // `jk.init(lD)` iterates the boss battle's `<Fight>` list (BOSS_LYNX
-        // has Fight 1/2/3 -> three roster portraits, the oracle capture).
-        for (int i = 0; i < 3 && !boss_battle.empty(); ++i) {
-            const BattleWarriorInfo bw = battle_warrior(boss_battle, boss_zone, i);
-            if (bw.attrs.empty()) break;  // no Nth <Fight>
-            BossRosterEntry e;
-            e.name = bw.first_name.empty() ? boss_battle : loc(app, bw.first_name, bw.first_name);
-            const auto av = bw.attrs.find("Avatar");
-            std::string img = (av != bw.attrs.end() && !av->second.empty()) ? av->second
-                                                                            : "avatar_masked";
-            std::transform(img.begin(), img.end(), img.begin(),
-                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-            e.image = img;
-            roster.push_back(e);
-        }
-        draw_boss_roster(app, ren, roster, 0);
+        draw_boss_roster(app, ren, roster_);
         return;
     }
     load_map_backdrops(app);  // once; silent unless frames decode
@@ -6344,33 +6400,12 @@ void MapScreen::render_impl(App& app) {
     }
     draw_map_info_panel(app, sel, mm);
 
-    // Boss-intro act overlay (Rd machine over the lD multi-intro list;
-    // boss names are display strings, shown raw). Skippable by tap.
-    // Boss-intro act overlay: skipped while a quest modal is up (same
-    // exclusivity rule as Dojo - single voice, modal wins).
-    if (act_pending_ && act_.active() && quest_modal_top(app) == nullptr) {
-        const float a = act_.fade();
-        if (a > 0.01f) {
-            const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH,
-                                 0, 0, kViewW, kViewH, 0, kViewH};
-            ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, a);
-        }
-        // `label = ea` (L2095): geometry `Fa(N.width/this.node.Eb*
-        // (.9+(N.lc-.4)/1.6*-.5), 400)` + `ua(130)` (L2096; menu eF=100 ->
-        // native scale 1.3) + color `Na.cd(13743222)` = (0.82,0.71,0.46).
-        // Shown from the node fade-in (step 1) through the timed lines
-        // (step 3). Replaces the invented flat "BOSS"/"TAP TO SKIP" text
-        // (PORT_AUDIT_UI §3 item 15).
-        const std::string line = act_.label();
-        if (!line.empty()) {
-            const float lc = kViewW / kViewH;
-            const float label_w = kViewW * (0.9f + (lc - 0.4f) / 1.6f * -0.5f);
-            const float label_h = 400.0f;
-            const float label_x = (kViewW - label_w) * 0.5f;
-            const float label_y = (kViewH - label_h) * 0.5f;  // box height-centred
-            draw_ui_label(app, label_x, label_y, label_w, label_h, line, 1.3f,
-                          UiAlign::Center, 0.82f, 0.71f, 0.46f);
-        }
+    // Boss-intro `jk` roster (`ai.aa` case 0 L2007 -> `lca` -> `Ws=new jk`):
+    // the row-a `bQ` at the state-machine `scroll_x`, the state-0 fade-in and
+    // the state-3 selection ramp. Skipped while a quest modal is up (same
+    // exclusivity rule as the Dojo — single voice, the modal wins).
+    if (roster_.active() && quest_modal_top(app) == nullptr) {
+        draw_boss_roster(app, ren, roster_);
     }
     // Sensei dialog modal on top of the map.
     draw_quest_modal(app, ren, app.screens().top() == this);
@@ -8519,6 +8554,26 @@ ShopRect shop_try_rect(const ShopLayout& l) {
     return {cx - w * 0.5f, cy - h * 0.5f, cx + w * 0.5f, cy + h * 0.5f};
 }
 
+// The `M8` GoldButton rect (`Ne.Wub` L2254-2255 -> `c5(this.M8, Aa.jp(), …)`).
+// `Ne.ba` L2249 stacks the `Cd` buttons up from `d = b - c*3` with
+// `c = a*.05`, each `kf(a)` (full content width) and `qa()` tall; the detail
+// panel box is `rp` (`shop_layout.right_panel`) inset by `28/24*pscale`. This
+// MUST equal the render block that draws the green plate, so the confirm
+// hit-test cannot drift from the drawn art.
+ShopRect shop_price_rect(const ShopLayout& sl) {
+    const ShopRect& rp = sl.right_panel;
+    const float pscale = rp.width() / 608.0f;  // info_panel_h 608x866
+    const float bx = 28.0f * pscale, by = 24.0f * pscale;
+    const float cx0 = rp.J + bx;
+    const float cw0 = rp.width() - 3.0f * bx;
+    const float cy0 = rp.P + by;
+    const float ch0 = rp.height() - 2.0f * by;
+    const float bpad = cw0 * 0.05f;
+    const float bh = 112.0f * pscale;
+    const float byy = cy0 + ch0 - bpad * 3.0f - bh * 0.5f;
+    return {cx0, byy - bh * 0.5f, cx0 + cw0, byy + bh * 0.5f};
+}
+
 // The `Oe` viewer scroll = JS `new Fg(500,800,0,30)` + `.Vaa(30)` (L2261-2262)
 // rendered in `Fg.ba` (L1869-1871) + `Zh.ba` (L1872):
 //   rails  `paper_edge_left/right` (`y.nSa/oSa` L2467), width `c = w*.08`,
@@ -8665,8 +8720,11 @@ bool shop_equipped(const WarriorSave& w, const CatalogItem& it) {
 // resolves the JS keys to the human captions; the fallbacks mirror those
 // captions (never a raw key).
 std::string shop_action_label(App& app, const WarriorSave& w, const CatalogItem& it) {
+    // `Oa.DU` L2299 verbatim: `c.G ? btnShopUnequip : (b.G || a.type==I.sB) ?
+    // btnShopEquip : btnShopTry`. `I.sB` = "RaidItemPack" (L2473 `I.sB=`).
     if (shop_equipped(w, it)) return loc(app, "btnShopUnequip", "UNEQUIP");
-    if (shop_owned_live(w, it.name)) return loc(app, "btnShopEquip", "EQUIP");
+    if (shop_owned_live(w, it.name) || it.type == "RaidItemPack")
+        return loc(app, "btnShopEquip", "EQUIP");
     return loc(app, "btnShopTry", "TRY ON");
 }
 
@@ -8845,12 +8903,89 @@ void ShopScreen::update_impl(float dt) {
         }
     }
     // BACK (top-left) -> the previous screen (the loop's shop -> dojo leg).
+    // With the `Pi` purchase panel up (`buy_armed_ >= 0`) BACK is the panel's
+    // cancel (`Oa.yS` L2300: `Ad.$Ma(); fU(); Oya=!0`), not a screen pop.
     if (p.x >= 20 && p.x <= 108 && p.y >= 12 && p.y <= 68) {
         if (p.pressed) {
+            if (buy_armed_ >= 0) {
+                std::fprintf(stdout, "[shop] Pi panel cancel -> detail (Oa.yS)\n");
+                std::fflush(stdout);
+                buy_armed_ = -1;
+                return;
+            }
             std::fprintf(stdout, "[shop] BACK -> previous screen\n");
             std::fflush(stdout);
             manager().pop();
             return;
+        }
+    }
+    // The `Pi` purchase panel (`Oa.Fhb` L2300 unowned -> `this.Ex(a,7)`). Its
+    // ONLY control is the `M8` GoldButton (`Ne.Wub` L2254 `c5(this.M8,
+    // Aa.jp())`), which the quest buy wires to the confirm (`Ao.Qg` L1120 ->
+    // `Pa.iwa(b)`, L1228 `p.o.Tb >= a.jp()` money gate; the else is
+    // `v.Bv(a,2)`). A backdrop tap is `Oa.yS` (close). While the panel is up
+    // the tab strip / cells / TRY plate are inert.
+    if (buy_armed_ >= 0) {
+        const std::vector<std::size_t> brows = shop_tab_rows(items_, tab_);
+        if (brows.empty() || buy_armed_ >= static_cast<int>(brows.size())) {
+            buy_armed_ = -1;  // the list changed under the panel
+        } else {
+            const CatalogItem& bit = items_[brows[static_cast<std::size_t>(buy_armed_)]];
+            const ShopRect pr = shop_price_rect(shop_layout(tab_));
+            const bool on_confirm =
+                p.x >= pr.J && p.x <= pr.N && p.y >= pr.P && p.y <= pr.W;
+            if (!on_confirm && p.pressed) {
+                std::fprintf(stdout, "[shop] Pi panel backdrop -> cancel (Oa.yS)\n");
+                std::fflush(stdout);
+                buy_armed_ = -1;
+                return;
+            }
+            if (on_confirm && p.pressed) {
+                WarriorSave bw;
+                try {
+                    bw = app().save().load();
+                } catch (const std::exception&) {
+                    return;
+                }
+                if (bw.money >= bit.price) {
+                    // `Pa.iwa` L1228 head: `p.o.Fr(Tb - jp())` + `p.o.save()`
+                    // + `Pa.Wz(a)`; `rb.U3()` = snd_buy (L1226).
+                    bw.money -= bit.price;
+                    sf2::audio::AudioEngine::instance().play("snd_buy");
+                    WarriorSave::OwnedItem oi;
+                    oi.name = bit.name;
+                    oi.count = 1;
+                    const bool tut_buy =
+                        bit.name == "WEAPON_KNIVES" &&
+                        (bw.story_step() == "STEP_BUY_ITEM" ||
+                         (bw.story_step().empty() && bw.tutorial == "MOVE"));
+                    if (tut_buy) {
+                        shop_apply_slot(bw, bit.type, bit.name);
+                        oi.equipped = true;
+                        bw.set_story_step("MAP");
+                    }
+                    bw.items.push_back(oi);
+                    app().save().save(bw);
+                    seen_ = bw;
+                    confirm_ = "BOUGHT " + item_display_name(app(), bit) + "!";
+                    confirm_until_ = time() + 2.5f;
+                    std::fprintf(stdout,
+                                 "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%d -> money %d%s\n",
+                                 bit.name.c_str(), bit.price, bw.money,
+                                 tut_buy ? " + EQUIPPED, step -> MAP (Ao)" : "");
+                    std::fflush(stdout);
+                    buy_armed_ = -1;
+                    return;
+                }
+                // `Pa.iwa` L1228 else: `v.Bv(a,2)` — the "not enough" notice.
+                // The panel STAYS open (the player can back out or earn gold).
+                std::fprintf(stdout,
+                             "[shop] Pi confirm Pa.iwa v.Bv(a,2): NOT ENOUGH MONEY for %s "
+                             "(need %d, have %d)\n",
+                             bit.name.c_str(), bit.price, bw.money);
+                std::fflush(stdout);
+                return;
+            }
         }
     }
     // Pending deliveries (top-right, mirrors render): click a READY row to
@@ -9094,7 +9229,14 @@ void ShopScreen::update_impl(float dt) {
                         std::fflush(stdout);
                     }
                 } else {
-                    std::fprintf(stdout, "[shop] NOT ENOUGH MONEY for %s (need %d, have %d)\n",
+                    // `Oa.Fhb` L2300 unowned branch: `this.Ex(a,7)` opens the
+                    // `Pi` purchase panel (`this.Ad = new Pi`, L2291) — the
+                    // press is NOT a silent no-op. The panel's confirm is the
+                    // `M8` GoldButton (`Ne.Wub` L2254), wired to `Pa.iwa` by
+                    // `Ao.Qg` L1120; `Pa.iwa` L1228 is the money gate.
+                    buy_armed_ = sel;
+                    std::fprintf(stdout,
+                                 "[shop] Fhb -> Ex(a,7) Pi panel OPEN for %s (price %d, have %d)\n",
                                  it.name.c_str(), it.price, w.money);
                     std::fflush(stdout);
                 }
@@ -9322,6 +9464,12 @@ void ShopScreen::render_impl(App& app) {
         try_draw_atlas_button(app, "gold", cx0 + 30.0f, byy, 40.0f, 40.0f, 1.0f, false, false);
         draw_ui_label(app, cx0 + 56.0f, byy - 15.0f, cw0 - 56.0f, 30.0f,
                       std::to_string(sel_it->price), 0.9f, UiAlign::Left, 0.15f, 0.10f, 0.05f);
+        // `Pi` purchase panel up (`Oa.Ex(a,7)` L2301): the `M8` plate IS the
+        // confirm (`Ao.Qg` L1120 -> `Pa.iwa`), so it is highlighted + labelled.
+        if (buy_armed_ >= 0) {
+            draw_ui_label(app, cx0, byy - 15.0f, cw0, 30.0f, loc(app, "btnShopBuy", "CONFIRM"),
+                          0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+        }
     }
     // `MJ` (`ps` params, L2275) / `op` (`qs` enchantments, L2280) are CLOSED in
     // the oracle shop states: `Oa.init` opens only `bc` (`init(a,!0)`); MJ/op
@@ -9377,6 +9525,15 @@ void ShopScreen::render_impl(App& app) {
     if (!confirm_.empty() && time() <= confirm_until_) {
         draw_ui_label(app, kViewW * 0.5f - 220.0f, 678.0f, 440.0f, 26.0f,
                           confirm_, 1.0f, UiAlign::Center, 0.4f, 1.0f, 0.4f);
+    }
+    // `Pi` purchase panel (`Oa.Fhb` L2300 -> `Ex(a,7)`, L2301): while armed the
+    // shop dims and the confirm prompt sits above the `M8` plate.
+    if (buy_armed_ >= 0 && sel_it != nullptr) {
+        const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+        ren.draw_triangles(dim, 6, 0.02f, 0.015f, 0.01f, 0.45f);
+        draw_ui_label(app, kViewW * 0.5f - 320.0f, 116.0f, 640.0f, 34.0f,
+                      "PURCHASE " + item_display_name(app, *sel_it) + "?", 0.9f,
+                      UiAlign::Center, 1.0f, 0.95f, 0.6f);
     }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
     // `D1` (L1831) re-appends a fresh, collapsed `za` -> the oracle shop shows

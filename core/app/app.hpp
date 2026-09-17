@@ -263,6 +263,16 @@ public:
     void set_fresh_tutorial(bool on);
     bool fresh_tutorial() const { return fresh_tutorial_; }
 
+    // Dialog-observation harness flag (`--observe-dialogs`). The headless
+    // probe above makes `quest_modal_top` silently DRAIN the queue (see
+    // screens.cpp), which hides the queue ORDER from the harness. With this
+    // on, headless runs keep the queue observable (the bar + the `Wb` top are
+    // displayed/advanced exactly as in the windowed build). It changes NOTHING
+    // about how dialogs are queued or ordered — it only stops the silent
+    // drain, so the mode cannot alter the behaviour it exists to measure.
+    void set_dialog_observe(bool on) { dialog_observe_ = on; }
+    bool dialog_observe() const { return dialog_observe_; }
+
     // Tutorial handoff (harness): lands the post-tutorial seed the oracle
     // harness installs (`Tutorial="END"`) so the remaining fidelity-tour
     // states run the clean seeded profile. The tutorial chain steps beyond
@@ -401,6 +411,8 @@ private:
     bool debug_ui_ = false;
     // Fresh-profile tutorial (see set_fresh_tutorial).
     bool fresh_tutorial_ = false;
+    // Dialog-observation harness flag (see set_dialog_observe).
+    bool dialog_observe_ = false;
     // Quest `OpenShop` request (see set_pending_shop).
     bool has_pending_shop_ = false;
     std::string pending_shop_tab_;

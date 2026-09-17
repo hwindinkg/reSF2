@@ -286,6 +286,55 @@ public:
         if (!dialogs_.empty()) dialogs_.erase(dialogs_.begin());
     }
 
+    // --- `Ib` bar vs `Wb` modal (JS `He.S` L1050 / `Wb.Xob` L927) ----------
+    // JS `He.S` L1050 routes a `Notification` to `Ib.F().Qhb(r,z,c,g,k,SK,x,
+    // $Ta)` — the BAR — and NOT to `Wb.openDialog`; `Wb.Xob` (L927) is the
+    // only `this.II.push(this.If)` site and it is reached from `Xc.Xhb` (the
+    // `Regular` path, L931). So a Notification never enters the `Wb` queue and
+    // the `Regular` is `Wb`'s top dialog the moment `He.S` runs (its chained
+    // condition `this.type=="Notification"&&x || … || (Ib.RP=!1, this.sa())`
+    // advances the chain when `x=ba.Zv(a,XVa="0")` is false, L1050). The bar is
+    // ONE instance (`Ib`), so the LAST posted Notification is what it shows
+    // (`Ib.Qhb` L1907 overwrites the visible bar).
+    static bool is_bar_notification(const EngineDialog& d) {
+        return d.type == "Notification";
+    }
+    // `Wb`'s top = the first queued dialog that is NOT a bar Notification.
+    std::size_t modal_index() const {
+        for (std::size_t i = 0; i < dialogs_.size(); ++i) {
+            if (!is_bar_notification(dialogs_[i])) return i;
+        }
+        return dialogs_.size();
+    }
+    const EngineDialog* modal_top() const {
+        const std::size_t i = modal_index();
+        return i < dialogs_.size() ? &dialogs_[i] : nullptr;
+    }
+    // The `Ib` bar's content = the LAST queued Notification (`Ib.Qhb` L1907
+    // overwrites the single bar instance, so `_NotificationTextPunchBag` wins
+    // over `_NotificationTextMove` in `StoryTutorialWelcome`).
+    const EngineDialog* notification_top() const {
+        for (std::size_t i = dialogs_.size(); i-- > 0;) {
+            if (is_bar_notification(dialogs_[i])) return &dialogs_[i];
+        }
+        return nullptr;
+    }
+    bool has_modal() const { return modal_index() < dialogs_.size(); }
+    bool has_notification() const { return notification_top() != nullptr; }
+    std::size_t dialog_count() const { return dialogs_.size(); }
+    // `Ib.close` (the ReadTime budget spent, `Ib.aa` L1905 -> `y4(!1)`)
+    // drops the BAR entry only — the `Wb` queue is untouched.
+    void pop_notifications() {
+        std::size_t w = 0;
+        for (std::size_t i = 0; i < dialogs_.size(); ++i) {
+            if (!is_bar_notification(dialogs_[i])) {
+                if (w != i) dialogs_[w] = std::move(dialogs_[i]);
+                ++w;
+            }
+        }
+        dialogs_.resize(w);
+    }
+
     // JS `He.dhb(a)` L1061: pops the head dialog and runs the deferred nested
     // actions of the slot selected by `button_index` — 0=Left(`Ng`),
     // 1=Right(`rh`, the historical default), 2=Middle(`Nh`), 100=Close(`Hj`).
@@ -295,12 +344,12 @@ public:
 
     // JS `hab()` L1060: any slot carries actions (`Ng`/`rh`/`Nh`/`Hj`). A
     // dialog with no such slot advances on tap instead of firing a plate.
+    // Reads the `Wb` top (the first non-Notification), not a bar Notification.
     bool dialog_has_button() const {
-        return !dialogs_.empty() &&
-               (!dialogs_.front().button_actions.empty() ||
-                !dialogs_.front().left_.actions.empty() ||
-                !dialogs_.front().middle_.actions.empty() ||
-                !dialogs_.front().close_.actions.empty());
+        const EngineDialog* d = modal_top();
+        return d != nullptr &&
+               (!d->button_actions.empty() || !d->left_.actions.empty() ||
+                !d->middle_.actions.empty() || !d->close_.actions.empty());
     }
 
     // Drops every queued dialog (tutorial handoff / scene reset).

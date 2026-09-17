@@ -1496,8 +1496,9 @@ void QuestEngine::note_fight(const std::string& name, const std::string& result)
 //     to the row caption when `qy` is empty.
 // The port returned the row caption on EVERY page (the precedence inverted).
 std::string QuestEngine::dialog_button_text() const {
-    if (dialogs_.empty()) return std::string();
-    const EngineDialog& d = dialogs_.front();
+    const EngineDialog* dp = modal_top();
+    if (dp == nullptr) return std::string();
+    const EngineDialog& d = *dp;
     const std::size_t n = d.lines.size();
     // `uj.sqb()` L1953: `Multiline`/`MultilineBig` have no pager, so the plate
     // carries the LAST row's caption (or the authored right `Text`) at once.
@@ -1520,18 +1521,19 @@ std::string QuestEngine::dialog_button_text() const {
 }
 
 bool QuestEngine::dialog_has_next_page() const {
-    if (dialogs_.empty()) return false;
-    const EngineDialog& d = dialogs_.front();
+    const EngineDialog* d = modal_top();
+    if (d == nullptr) return false;
     // `uj.sqb()` L1953 (`Multiline`/`MultilineBig`) lays out EVERY `<Line>` as
     // one scrollable body, so there is NO pager: `Od.EF`/`Od.X2` L1946/L1950
     // never run and the plate carries the last-page caption straight away.
-    if (d.type == "Multiline" || d.type == "MultilineBig") return false;
-    return d.page + 1 < d.lines.size();
+    if (d->type == "Multiline" || d->type == "MultilineBig") return false;
+    return d->page + 1 < d->lines.size();
 }
 
 void QuestEngine::advance_dialog_page() {
-    if (dialogs_.empty()) return;
-    EngineDialog& d = dialogs_.front();
+    const std::size_t mi = modal_index();
+    if (mi >= dialogs_.size()) return;
+    EngineDialog& d = dialogs_[mi];
     if (d.page + 1 >= d.lines.size()) return;
     ++d.page;
     std::fprintf(stdout, "[quest] dialog page -> %zu/%zu (%s, more=%d)\n", d.page + 1,
@@ -1542,9 +1544,12 @@ void QuestEngine::advance_dialog_page() {
 
 std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
     std::vector<std::string> fights;
-    if (dialogs_.empty()) return fights;
-    EngineDialog dlg = dialogs_.front();
-    dialogs_.erase(dialogs_.begin());
+    // `Wb` pops its TOP dialog (`Xc`/`dhb`); a bar Notification is not in that
+    // queue (`He.S` L1050 -> `Ib.F().Qhb`), so pop the first non-Notification.
+    const std::size_t mi = modal_index();
+    if (mi >= dialogs_.size()) return fights;
+    EngineDialog dlg = dialogs_[mi];
+    dialogs_.erase(dialogs_.begin() + static_cast<std::ptrdiff_t>(mi));
     // `He.dhb(a)` L1061: 0=Left(`Ng`), 1=Right(`rh`), 2=Middle(`Nh`),
     // 100=Close(`Hj`). Anything else fires nothing (`dhb` falls through).
     const std::vector<QuestAction>* chosen = &dlg.button_actions;

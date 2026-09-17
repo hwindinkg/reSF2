@@ -131,9 +131,142 @@ struct BossRosterEntry {
 // roster (`jk`, JS L2061-2065) full-screen and freezes input, so
 // `--fidelity-tour` can capture `act_boss` headlessly (the JS shows `jk` at
 // the start of a multi-fight boss battle; `act_boss` is the oracle matrix's
-// name for that roster capture).
+// name for that roster capture). `state` selects the frozen pose: 3/4 = the
+// resting selection (`act_boss`), 1 = mid horizontal scroll-in.
 bool force_boss_roster();
 void set_force_boss_roster(bool on);
+// The frozen `jk` pose the forced roster holds (3/4 = `act_boss`, 1 = mid
+// scroll-in for the extra capture step).
+void set_force_boss_state(int state);
+int force_boss_state();
+
+// JS `jk` (L2061-2065) — the boss-intro OPPONENT SCROLL. `ai.aa` case 0
+// (L2007) runs `lca(this.TF.lD, this.TF.uP, this.TF.Y1)` when the boss battle
+// has more than one `<Fight>`: `this.Ws = this.Qo(jk); this.Ws.init(a,b,c,…)`
+// (L2009), and the scroll's `qd` signal (state 4) -> `ngb()` -> `tx()` (the
+// `ik` VS intro). Five states, all driven by the `ed(t)` ease:
+//   0 `scrollX=Pp; bQ.node.wa(ed(.1))`                     fade-in  (0.1 s)
+//   1 `scrollX = Pp + (512 - Jq[index].node.ya - Pp)*ed(e)` scroll-in
+//     (`e` = 1 s when `index` is the LAST entry, else 2 s)
+//   2 `time>.5`                                            hold     (0.5 s)
+//   3 `ed(.5)`: the selected `la(from -> to)` (1->1.4, or 1.4->2 at the LAST
+//     index) and every other entry's `Hf.node.wa(1 -> .5)`  (0.5 s)
+//   4 `ed(1.5)==1` -> `this.qd.Z()` (start the fight)       (1.5 s)
+// per-frame `bQ.C(this.scrollX); bQ.D(512)`; `this.yY = 4.6` (L2063) is the
+// sum of the five stages (0.1+2+0.5+0.5+1.5).
+struct BossRosterScroll {
+    // Screen-space (1280x720) adaptation of the JS 1024-design geometry:
+    // `g = h.Hf.size` = the entry art at scale 1 = 353 (the pinned 1280-space
+    // canvas), so the row pitch `g*.8` = 282.4 and the selected `la(1.4)` =
+    // 353*1.4 = 494 (`kSelD` 504). The JS `512` centre is the screen centre
+    // 640 = `kViewW*0.5f`.
+    static constexpr float kBaseD = 353.0f;
+    static constexpr float kStep = 282.4f;   // `d += g*.8` pitch (L2062)
+    static constexpr float kCentre = 640.0f; // the JS (512,512) canvas centre
+    static constexpr float kTotal = 4.6f;    // `this.yY=4.6` (L2063)
+
+    std::vector<BossRosterEntry> entries;
+    int index = 0;
+    int state = 0;
+    float time = 0.0f;
+    float scroll_x = 0.0f;
+    float row_alpha = 0.0f;
+    float Pp = 0.0f;
+    bool started = false;
+    bool done = false;
+
+    bool active() const { return started && !done; }
+
+    // `jk.init(a,b,c,d)` L2062-2063. `idx` = `this.index = b`.
+    void start(std::vector<BossRosterEntry> e, int idx) {
+        entries = std::move(e);
+        const int n = static_cast<int>(entries.size());
+        index = n == 0 ? 0 : (idx < 0 ? 0 : (idx >= n ? n - 1 : idx));
+        state = 0;
+        time = 0.0f;
+        row_alpha = 0.0f;
+        done = false;
+        started = true;
+        // L2063: `Pp = -(Jq[last].node.ya - Jq[0].node.ya)` then
+        // `-= Jq[0].Hf.size/2` and `-= Jq[last].Hf.size/2`.
+        const float span = static_cast<float>(n > 0 ? n - 1 : 0) * kStep;
+        Pp = -span - kBaseD;
+        scroll_x = Pp;  // case 0: `this.scrollX = this.Pp`
+    }
+
+    // `Jq[i].node.ya` — the entry's row x (L2062 `h.node.C(d); d += g*.8`).
+    float entry_x(int i) const { return static_cast<float>(i) * kStep; }
+
+    // `ed(t)` (L2064): the shared 0->1 ease over `t` seconds.
+    static float ed(float t, float elapsed) {
+        if (t <= 0.0f) return 1.0f;
+        float x = elapsed / t;
+        if (x < 0.0f) x = 0.0f;
+        if (x > 1.0f) x = 1.0f;
+        return 1.0f - (1.0f - x) * (1.0f - x);
+    }
+    bool is_last() const { return index >= static_cast<int>(entries.size()) - 1; }
+    float stage_a() const {
+        if (state < 3) return 0.0f;
+        if (state > 3) return 1.0f;
+        return ed(0.5f, time);
+    }
+    float selected_scale() const {
+        const float from = is_last() ? 1.4f : 1.0f;
+        const float to = is_last() ? 2.0f : 1.4f;
+        return from + (to - from) * stage_a();
+    }
+    float other_alpha() const { return 1.0f - 0.5f * stage_a(); }
+
+    // Advances one fixed step. Returns true on the single frame the state-4
+    // ease completes (`this.qd.Z()` L2064 — start the fight).
+    bool tick(float dt) {
+        if (!active()) return false;
+        if (dt < 0.0f) dt = 0.0f;
+        time += dt;
+        switch (state) {
+            case 0:
+                scroll_x = Pp;
+                row_alpha = ed(0.1f, time);
+                if (ed(0.1f, time) >= 1.0f) {
+                    time = 0.0f;
+                    ++state;
+                }
+                break;
+            case 1: {
+                const float e = ed(is_last() ? 1.0f : 2.0f, time);
+                scroll_x = Pp + (kCentre - entry_x(index) - Pp) * e;
+                if (e >= 1.0f) {
+                    time = 0.0f;
+                    ++state;
+                }
+                break;
+            }
+            case 2:
+                if (time > 0.5f) {
+                    time = 0.0f;
+                    ++state;
+                }
+                break;
+            case 3:
+                if (ed(0.5f, time) >= 1.0f) {
+                    time = 0.0f;
+                    ++state;
+                }
+                break;
+            case 4:
+                if (ed(1.5f, time) >= 1.0f) {
+                    row_alpha = 1.0f;
+                    done = true;
+                    return true;
+                }
+                break;
+            default:
+                break;
+        }
+        return false;
+    }
+};
 
 // The map — native Map (screen 5).
 class MapScreen : public Screen {
@@ -201,11 +334,15 @@ private:
     // Tournament-series progress (save Fights/yc win counts, cached at
     // construction; the Map remounts every visit so it stays fresh).
     std::vector<WarriorSave::FightWins> fight_wins_;
-    // Boss-intro act (JS hCa lD + Rd player): armed node + player while the
-    // intro runs; the fight launches when done (headless bypasses).
-    ActPlayer act_;
+    // Boss-intro act (JS `ai` L2007 `lca(TF.lD, TF.uP, TF.Y1)` -> `jk`): the
+    // roster scroll runs on the FIGHT press for a multi-`<Fight>` boss battle,
+    // then launches the battle when state 4 fires `qd` (L2064/L2009).
+    BossRosterScroll roster_;
     Node act_node_;
-    bool act_pending_ = false;
+    // True while the fidelity-tour `force_boss_roster` hook owns the machine;
+    // when it turns off the frozen roster is dropped so the REAL flow (or the
+    // live map) re-arms cleanly instead of ticking the stale frozen pose.
+    bool roster_forced_ = false;
     // The `qo` focus-refresh marker (JS `Ya.Uw` L2129): the last
     // `SetMapFocus Battle=` the quest engine applied. A focus landing AFTER
     // this screen was constructed (the StoryTutorialBossFight SceneLoaded
@@ -485,6 +622,16 @@ private:
     // until which the confirmation line shows.
     std::string confirm_;
     float confirm_until_ = 0.0f;
+    // --- `Pi` purchase panel (`Oa.Fhb` L2300 unowned branch) --------------
+    // `Oa.Fhb` L2300: unowned -> `this.Ad.qr.addListener(this.yS);
+    // this.Ex(a,7); this.Ad.aa(L.K.sk.Bm); this.sab()`, with `this.Ad=new Pi`
+    // (L2291). The panel's CONFIRM control is the `M8` GoldButton (`Ne.Wub`
+    // L2254 `kL(this.M8, Aa.jp(), …)` = `EButtonGreen` + the `p.o.Vf` gold
+    // icon): the quest buy (`Ao` L1119-1120) wires exactly `M8.pa` ->
+    // `Ao.Qg` -> `Pa.iwa(b)` + `xa.$o` + `rb.U3()` (snd_buy). `Oa.yS` L2300
+    // (fired from `Pi.qr`/`Jc.qr`) is the close: `Ad.$Ma(); fU(); Oya=!0`.
+    // `buy_armed_` = the row index whose panel is open, -1 = plain detail.
+    int buy_armed_ = -1;
     // --- Backdrop = the persistent dojo scene ----------------------------
     // JS `Oa extends ma` (L2285) is an overlay on the running dojo location,
     // so the oracle `shop_tab1..5`/`shop_detail` captures show the dojo

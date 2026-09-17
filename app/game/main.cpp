@@ -269,6 +269,24 @@ struct HeadlessLoopDriver {
         // actions), then advance.
         if (s.hold_frames > 0) {
             if (step_frame >= s.min_delay + s.hold_frames) {
+                // D2: a shop step must NOT print a bare "done" for a failed
+                // purchase — report the REAL save outcome of the click.
+                if (step == 5 || step == 6) {
+                    bool owns = false;
+                    std::string weapon;
+                    try {
+                        const sf2::app::WarriorSave w = app.save().load();
+                        weapon = w.weapon;
+                        for (const auto& mi : w.items) {
+                            if (mi.name == "WEAPON_KNIVES") owns = true;
+                        }
+                    } catch (const std::exception&) {
+                    }
+                    std::fprintf(stdout, "[loop] step %d/%d %s -> owns_knives=%d weapon=%s\n",
+                                 step + 1, kLoopStepCount, s.label, owns ? 1 : 0,
+                                 weapon.c_str());
+                    std::fflush(stdout);
+                }
                 std::fprintf(stdout, "[loop] step %d/%d done (%s)\n", step + 1, kLoopStepCount,
                              s.label);
                 std::fflush(stdout);
@@ -372,6 +390,10 @@ struct UiTourStep {
     // resolved at click time (`MapScreen::fight_button_center`) instead of a
     // literal coordinate. JS starts a fight ONLY on that button.
     bool map_fight = false;
+    // APPENDED LAST so the existing positional initializers above keep their
+    // meaning. The frozen `jk` pose for the roster hook: 3/4 = the `act_boss`
+    // resting selection, 1 = a mid horizontal scroll-in (`act_boss_scroll`).
+    int boss_state = 3;
 };
 
 static const UiTourStep kUiTourSteps[] = {
@@ -486,6 +508,11 @@ static const UiTourStep kFidelitySteps[] = {
     // `!app().headless()`), so the capture is the roster, not the map.
     {0.0f, 0.0f, "act_boss (boss roster)", 5, 10, -1, 30, "act_boss.png", 0, true, 0.0f, 0.0f, -1,
      true},
+    // act_boss_scroll: the SAME `jk` machine frozen mid scroll-in (state 1) —
+    // `scrollX = Pp + (512 - Jq[index].node.ya - Pp)*ed(index==last?1:2)`
+    // (L2064). This is the "add a mid-scroll capture for state 1" beat.
+    {0.0f, 0.0f, "act_boss_scroll (jk state 1)", 5, 10, -1, 30, "act_boss_scroll.png", 0, true,
+     0.0f, 0.0f, -1, true, -1, false, 1},
     // --- Fight (passive player so round 0 survives, like the oracle) --------
     // [fidelity fight-frame alignment] The oracle `fight_*` captures are
     // pinned to `fight.frame` (each shot is row-adjacent to its `oracle`
@@ -553,7 +580,11 @@ static const UiTourStep kFidelitySteps[] = {
     {818.9f, 672.5f, "profile tab 3", 7, 10, -1, 40, "profile_tab3.png", 0, false},
     {64.0f, 40.0f, "profile->dojo", 7, 10, 3, 0, nullptr},
     // --- Settings (last; no nav column) -------------------------------------
-    {184.0f, 547.0f, "dojo->settings", 3, 10, 11, 60, "settings.png", 0, false},
+    // D13: nav #5 opens the `un` Settings dialog OVER the Dojo (`Vfb` L1981 ->
+    // `Xc.Shb` L931) — it does NOT navigate, so the step STAYS on the Dojo
+    // (id 3); the old `expect_screen=11` was unreachable and only worked
+    // because the hold branch ignored it.
+    {184.0f, 547.0f, "dojo->settings", 3, 10, 3, 60, "settings.png", 0, false},
 };
 constexpr int kFidelityStepCount =
     static_cast<int>(sizeof(kFidelitySteps) / sizeof(kFidelitySteps[0]));
@@ -595,9 +626,10 @@ struct TourDriver {
             std::fflush(stdout);
         }
         // Per-step boss-roster capture hook (fidelity `act_boss`).
-        if ((s.force_boss_roster ? 1 : 0) != applied_force_roster) {
-            sf2::app::set_force_boss_roster(s.force_boss_roster);
-            applied_force_roster = s.force_boss_roster ? 1 : 0;
+    if ((s.force_boss_roster ? 1 : 0) != applied_force_roster) {
+        sf2::app::set_force_boss_roster(s.force_boss_roster);
+        sf2::app::set_force_boss_state(s.boss_state);
+        applied_force_roster = s.force_boss_roster ? 1 : 0;
             std::fprintf(stdout, "%s step %d/%d force_boss_roster=%d\n", tag, step + 1, count,
                          applied_force_roster);
             std::fflush(stdout);
@@ -714,7 +746,12 @@ struct TourDriver {
         }
 
         if (s.hold_frames > 0) {
-            if (step_frame >= s.min_delay + s.hold_frames) {
+            // Wait for the destination screen BEFORE the hold (a same-screen
+            // step has expect_screen == -1). The boss-intro `jk` roster
+            // (4.6 s) now delays the Fight push, so a capture must not fire
+            // before the screen it belongs to has arrived.
+            const bool arrived = s.expect_screen < 0 || cur == s.expect_screen;
+            if (arrived && step_frame >= s.min_delay + s.hold_frames) {
                 snap(app, s);
                 advance();
                 return;
@@ -1045,6 +1082,7 @@ int main(int argc, char** argv) {
     bool quest_verify = false;  // --quest-verify: interactive action check
     bool quest_verify_buy = false;  // --quest-verify-buy: seeded STEP_BUY_ITEM
     bool dialog_verify = false;     // --dialog-verify: headless dialog harness
+    bool observe_dialogs = false;   // --observe-dialogs: keep the queue observable
     bool replay_mode = false;
     bool verify_input = false;
     // --input-tape [js|desktop]: the scripted key/pointer tape fed through the
@@ -1097,6 +1135,8 @@ int main(int argc, char** argv) {
             quest_verify_buy = true;
         } else if (arg == "--dialog-verify") {
             dialog_verify = true;
+        } else if (arg == "--observe-dialogs") {
+            observe_dialogs = true;
         } else if (arg == "--replay") {
             replay_mode = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -1210,7 +1250,7 @@ int main(int argc, char** argv) {
     // END step (L200) — once short-circuited the chain cannot be armed, so a
     // stale completed local save would make the tutorial steps stall. The
     // oracle harness seeds the same fresh state.
-    if (fidelity_tour || quest_verify) {
+    if (fidelity_tour || quest_verify || observe_dialogs) {
         std::string def = res_root + "/users_default.xml";
         if (!std::filesystem::exists(def)) {
             const std::string hashed = res_root + "/users_default.b7da2019.xml";
@@ -1325,6 +1365,25 @@ int main(int argc, char** argv) {
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[loop] save read failed: %s\n", e.what());
         }
+        // D1/D2: the shop steps click the TRY plate on row 0 (WEAPON_KNIVES,
+        // price 50), but `users_default.xml` carries `Money="0"` — so the buy
+        // was a VACUOUS no-op that still printed "step done". Seed the
+        // purchase money so the scripted loop exercises the REAL `Pa.iwa`
+        // gate (`p.o.Tb >= a.jp()`, L1228), and assert the outcome at the end.
+        try {
+            sf2::app::SaveSystem ss(save_path, def);
+            sf2::app::WarriorSave w = ss.load();
+            const int before = w.money;
+            if (w.money < 50) {
+                w.money = 200;
+                ss.save(w);
+                std::fprintf(stdout, "[loop] seeded purchase money: money=%d (was %d)\n",
+                             w.money, before);
+                std::fflush(stdout);
+            }
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[loop] save seed failed: %s\n", e.what());
+        }
         // The driver needs the FightScreen's move-list size to log the
         // before/after equip diff.
         app.set_auto_attack(true);
@@ -1361,6 +1420,21 @@ int main(int argc, char** argv) {
             std::fprintf(stdout, "[loop] save/load after loop: money=%d items=%zu weapon=%s -> %s\n",
                          w2.money, w2.items.size(), w2.weapon.c_str(),
                          persist ? "PASS" : "FAIL");
+            // D2: the shop BUY + EQUIP steps must have REALLY landed (the
+            // driver used to print "step done" for a failed purchase).
+            bool owns_knives = false;
+            for (const auto& mi : w.items) {
+                if (mi.name == "WEAPON_KNIVES") owns_knives = true;
+            }
+            const bool shop_ok = owns_knives && w.weapon == "WEAPON_KNIVES";
+            std::fprintf(stdout,
+                         "[loop] shop BUY/EQUIP outcome: owns_knives=%d weapon=%s -> %s\n",
+                         owns_knives ? 1 : 0, w.weapon.c_str(), shop_ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+            if (!shop_ok) {
+                std::fprintf(stderr, "[loop] shop steps did not buy+equip WEAPON_KNIVES\n");
+                return 1;
+            }
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[loop] end save read failed: %s\n", e.what());
         }
@@ -1438,6 +1512,40 @@ int main(int argc, char** argv) {
                          driver.guard, driver.step + 1);
             app.shutdown();
             return 1;
+        }
+        app.shutdown();
+        return 0;
+    } else if (observe_dialogs) {
+        // --- dialog-observation harness (`--observe-dialogs`) ---------------
+        // The headless probe normally makes `quest_modal_top` silently DRAIN
+        // the queue (screens.cpp), which hides the queue ORDER from every
+        // other harness. `App::set_dialog_observe` stops that drain, so this
+        // mode reports the FRESH-profile queue exactly as `He.S` (L1050)
+        // builds it: the `Ib` bar (last `Notification` wins, `Ib.Qhb` L1907)
+        // and the `Wb` top (the first non-Notification — `Wb.Xob` L927 is
+        // only reached from the `Regular` path, L931). No OS input.
+        app.set_dialog_observe(true);
+        app.set_fresh_tutorial(true);  // arm StoryTutorialWelcome
+        app.set_auto_attack(false);
+        app.set_headless_frames(1);
+        std::size_t last_q = static_cast<std::size_t>(-1);
+        std::string last_wb = "\x01", last_bar = "\x01";
+        for (int f = 0; f < 300; ++f) {
+            app.run_one_frame();
+            const sf2::app::EngineDialog* m = app.quest_engine().modal_top();
+            const sf2::app::EngineDialog* n = app.quest_engine().notification_top();
+            const std::size_t q = app.quest_engine().dialog_count();
+            const std::string wb = m != nullptr ? (m->type + "/" + m->title) : std::string("-");
+            const std::string bar = n != nullptr ? (n->type + "/" + n->title) : std::string("-");
+            if (q != last_q || wb != last_wb || bar != last_bar) {
+                std::fprintf(stdout,
+                             "[observe] f=%d queue=%zu wb_top=%s bar=%s\n", f, q,
+                             wb.c_str(), bar.c_str());
+                std::fflush(stdout);
+                last_q = q;
+                last_wb = wb;
+                last_bar = bar;
+            }
         }
         app.shutdown();
         return 0;
