@@ -12,10 +12,16 @@
 //   "jump"  -> jumping moves start (JumpUp/Jump*Kick/BackFlip/WallJump;
 //              JS plays the jump whoosh) -> f_pl/m_pl_jump1..3.wav (0.8)
 //   "step"  -> stepping/dash moves start (StepForward/StepBack/
-//              DoubleStep/Dash/Roll) -> swish1..4.wav (0.45 — a step is
+//              DoubleStep/Dash/Roll) -> swish1..4.wav (0.45 - a step is
 //              quieter than a jump)
-//   "click" -> UI button press (the menu "snd_click_1" equivalent)
-//              -> buy.wav (the closest single UI tick in the sample set)
+//   "snd_click_1" -> UI BUTTON press, the JS `rb.um()` id (65535, played by
+//              `Bb.Xw` for every button) -> click_1.wav
+//   "snd_click_2" -> tab/cell strip selection, JS `rb.iJa()` (65570)
+//   "snd_focus_1" -> scroll/arrow/icon-cell tap, JS `rb.PS()` (65579)
+//   "snd_buy"/"snd_upgrade"/"snd_learn"/"snd_gong" -> the JS `rb.U3`/`QS`/
+//              `Xkb`/`Wkb` ids (65569/65696/65598/65591)
+// A tap that is not inside a JS sound-triggering widget must play NOTHING —
+// the JS has no background/empty-space tap sound (see sfx_table.hpp).
 //
 // Design: ONE preloaded sample per (event, voice). Every event has a small
 // pool of overlapping voices so rapid re-triggers MIX instead of cutting

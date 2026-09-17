@@ -2141,7 +2141,7 @@ int za_nav_hit(double px, double py) {
 // other four push their `kZaNav` screen unless it is already showing.
 void za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
     if (hit < 0 || hit >= kZaNavCount) return;
-    sf2::audio::AudioEngine::instance().play("click");
+    sf2::audio::AudioEngine::instance().play("snd_click_1");
     if (hit == 4) {  // Settings (JS `Vfb` L1981 -> `Xc.Shb()` L931)
         std::fprintf(stdout, "[za] nav %s -> settings dialog (no nav)\n", kZaNav[hit].label);
         std::fflush(stdout);
@@ -2187,7 +2187,7 @@ void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = f
                     } catch (const std::exception& e) {
                         std::fprintf(stderr, "[za] disciple toggle failed: %s\n", e.what());
                     }
-                    sf2::audio::AudioEngine::instance().play("click");
+                    sf2::audio::AudioEngine::instance().play("snd_click_1");
                     std::fprintf(stdout, "[za] disciple toggle -> %d\n", disc ? 0 : 1);
                     std::fflush(stdout);
                 }
@@ -2208,7 +2208,7 @@ void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = f
     if (force_collapsed || !g_za_nav_open) {
         if (!force_collapsed && header_hit && app.pointer().pressed) {
             g_za_nav_open = true;
-            sf2::audio::AudioEngine::instance().play("click");
+            sf2::audio::AudioEngine::instance().play("snd_focus_1");
         }
         return;
     }
@@ -2221,7 +2221,7 @@ void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = f
     }
     if (header_hit && app.pointer().pressed) {
         g_za_nav_open = false;
-        sf2::audio::AudioEngine::instance().play("click");
+        sf2::audio::AudioEngine::instance().play("snd_focus_1");
     }
 }
 
@@ -2482,14 +2482,33 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
     if (force_collapsed || !g_za_nav_open) {
         float hx = 0.0f, hy = 0.0f, hw = 0.0f, hh = 0.0f;
         za_header_rect(hx, hy, hw, hh);
-        // The collapsed header over the `gk` scroll art (`Zh` roll frames);
-        // the label is `Y.na("menu")` ("МЕНЮ" in the oracle locale).
+        // The collapsed header is `gk.Af` — the SAME `Zh` rail the expanded
+        // state uses (`gk.Af = new Zh(this.width, 90*d)` L1996-1997,
+        // `Af.ba(e, 90*d)` in `gk.ba` L1999): `roll_end` + stretched
+        // `roll_center` + mirrored `roll_end` (`Zh` ctor L1872). `Af` is a
+        // child of `gk.node`, NOT of the collapsed-hidden `iL` layer
+        // (`gk.aa` L1998 `iL.R(this.yI>0)`), so the roll caps answer in BOTH
+        // states — oracle dojo_hub carries the wooden end caps at
+        // x~93..127 / 236..273 around the "МЕНЮ" plate.
         load_scroll_atlas(app);
-        if (!try_draw_atlas_button(app, "roll_center", hx + hw * 0.5f, hy + hh * 0.5f, hw,
-                                   hh, 1.0f, /*fill=*/true)) {
-            const float panel[] = {hx, hy, hx + hw, hy, hx, hy + hh,
-                                   hx + hw, hy, hx + hw, hy + hh, hx, hy + hh};
-            ren.draw_triangles(panel, 6, 0.10f, 0.07f, 0.05f, 0.9f);
+        {
+            // `Zh.ba(a,b)`: `c = b>a` is false for the horizontal rail, so the
+            // cap scale is `min(w,h)/roll_end.source_h` (`d = c?a:b`) and the
+            // centre is stretched to `max(len - 2*cap, 10)`.
+            constexpr float kCapSrcW = 101.0f, kCapSrcH = 114.0f;  // scroll.json roll_end
+            const float cap_w = kCapSrcW * (std::min(hw, hh) / kCapSrcH);
+            const float body_w = std::max(hw - 2.0f * cap_w, 10.0f);
+            if (!try_draw_atlas_button(app, "roll_end", hx + cap_w * 0.5f, hy + hh * 0.5f,
+                                       cap_w, hh, 1.0f, /*fill=*/true) ||
+                !try_draw_atlas_button(app, "roll_center", hx + cap_w + body_w * 0.5f,
+                                       hy + hh * 0.5f, body_w, hh, 1.0f, /*fill=*/true) ||
+                !try_draw_atlas_button(app, "roll_end", hx + hw - cap_w * 0.5f,
+                                       hy + hh * 0.5f, cap_w, hh, 1.0f, /*fill=*/true,
+                                       /*flip_x=*/true)) {
+                const float panel[] = {hx, hy, hx + hw, hy, hx, hy + hh,
+                                       hx + hw, hy, hx + hw, hy + hh, hx, hy + hh};
+                ren.draw_triangles(panel, 6, 0.10f, 0.07f, 0.05f, 0.9f);
+            }
         }
         // The label is `Y.na("menu")`: UTF-8 bytes for `МЕНЮ` (0xD0 0x9C
         // 0xD0 0x95 0xD0 0x9D 0xD0 0xAE) written as escapes so the string
@@ -2974,11 +2993,20 @@ void draw_vs_intro(App& app, float t, const std::string& pname,
         ren.draw_triangles(bgq, 6, 0.05f, 0.02f, 0.02f, alpha);
     }
     // Stroke pair `KF`/`ux` on `Sn` (C(512,286) la(1.6) `Wg(27)`): the red
-    // brush band across the backdrop (`vs/sprites` "left"/"right"). OPEN: the
-    // native atlas path has no node rotation, so the `Wg(27)` tilt is not
+    // brush band across the backdrop (`vs/sprites` "left"/"right"). OPEN (B4a):
+    // the native atlas path has no node rotation, so the `Wg(27)` tilt is not
     // applied — the band is drawn axis-aligned at its 1.6x `Sn` scale, which
-    // keeps the red mass in the capture's central band (the rotated edges
-    // remain a gap).
+    // keeps the red mass in the capture's central band (the tilted edges
+    // remain a gap). Four measured variants (oracle `fight_intro`, %pixels>12):
+    // axis-aligned 41.12 (this), tilt about `Sn` 43.79, strokes re-centred on
+    // `Sn` 53.83, tilt about each band's centre 48.78 — every tilt REGRESSES,
+    // because the oracle's capture shows the pair MID-WIPE: `KF.wl(vc.ho(
+    // Jc.io,b))` (L2069) reveals each stroke over `b`=0..1 in 0.1 s (kd4/kd5
+    // L2072) — a horizontal reveal in the sprite's LOCAL space — and the oracle
+    // frame (~1.2-1.4 s in) catches only a slice of each brush. Reproducing it
+    // needs a rotated PARTIAL-frame draw (local-space UV clip) plus the
+    // capture's wipe progress; the full-band tilts all paint red where the
+    // oracle is still bare. Kept axis-aligned until that lands.
     if (t >= kVsStrokeT - kVsStrokeT * 0.5f) {
         const float sa = std::clamp((t - kVsStrokeT * 0.5f) / std::max(0.01f, kVsStrokeT * 0.5f),
                                     0.0f, 1.0f) * alpha;
@@ -6615,7 +6643,7 @@ void FightScreen::on_key(int glfw_key, bool down) {
     if (aliases && down && glfw_key == 256) {
         if (fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over()) {
             paused_ = !paused_;
-            sf2::audio::AudioEngine::instance().play("click");
+            sf2::audio::AudioEngine::instance().play("snd_click_1");
             std::fprintf(stdout, "[fight] pause %s (Esc)\n", paused_ ? "ON" : "OFF");
             std::fflush(stdout);
         }
@@ -6628,7 +6656,7 @@ void FightScreen::on_key(int glfw_key, bool down) {
     // `vhb` L410 case 1) — a desktop alias, gated like the rest.
     if (aliases && fight_ != nullptr && down && fight_->round_wait() &&
         (glfw_key == 32 || glfw_key == 257)) {
-        sf2::audio::AudioEngine::instance().play("click");
+        sf2::audio::AudioEngine::instance().play("snd_click_1");
         std::fprintf(stdout, "[fight] NEXT round requested (Space/Enter)\n");
         std::fflush(stdout);
         fight_->next_round_requested();
@@ -7102,7 +7130,7 @@ void FightScreen::update_impl(float dt) {
                           kPauseDlgToggleS)) {
                 // `play` frame = resume (PAUSE_STATIC §3 `tZ`).
                 paused_ = false;
-                sf2::audio::AudioEngine::instance().play("click");
+                sf2::audio::AudioEngine::instance().play("snd_click_1");
                 std::fprintf(stdout, "[fight] pause OFF (resume, Dr.play)\n");
                 std::fflush(stdout);
             } else if (pause_hit(kPauseDlgMusicX, kPauseDlgRowY, kPauseDlgToggleS,
@@ -7116,7 +7144,7 @@ void FightScreen::update_impl(float dt) {
                     sf2::audio::AudioEngine::instance().play_music(
                         sf2::audio::AudioEngine::instance().music_track());
                 }
-                sf2::audio::AudioEngine::instance().play("click");
+                sf2::audio::AudioEngine::instance().play("snd_click_1");
                 std::fprintf(stdout, "[fight] pause music %s (Dr.PauseMusic)\n",
                              music_off_ ? "OFF" : "ON");
                 std::fflush(stdout);
@@ -7124,7 +7152,7 @@ void FightScreen::update_impl(float dt) {
                                  kPauseDlgToggleS)) {
                 // `PauseSound_on/off` (display only — no runtime SFX mute API;
                 // see the stream report).
-                sf2::audio::AudioEngine::instance().play("click");
+                sf2::audio::AudioEngine::instance().play("snd_click_1");
                 std::fprintf(stdout,
                              "[fight] pause sound toggle (Dr.PauseSound, display-only)\n");
                 std::fflush(stdout);
@@ -7132,7 +7160,7 @@ void FightScreen::update_impl(float dt) {
                                  kPauseDlgToggleS)) {
                 // `home` = quit (JS `Xc.Zhb` exit-confirm -> `O3a`; the confirm
                 // dialog is not ported — direct pop, OPEN).
-                sf2::audio::AudioEngine::instance().play("click");
+                sf2::audio::AudioEngine::instance().play("snd_click_1");
                 std::fprintf(stdout, "[fight] pause QUIT (Dr.home -> caller)\n");
                 std::fflush(stdout);
                 paused_ = false;
@@ -7147,7 +7175,7 @@ void FightScreen::update_impl(float dt) {
         const App::PointerState& p = app().pointer();
         if (p.pressed && pause_hit(kPauseIx, kPauseIy, kPauseIw, kPauseIh)) {
             paused_ = true;
-            sf2::audio::AudioEngine::instance().play("click");
+            sf2::audio::AudioEngine::instance().play("snd_click_1");
             std::fprintf(stdout, "[fight] pause ON (HUD icon -> Dr)\n");
             std::fflush(stdout);
             return;
@@ -7197,7 +7225,7 @@ void FightScreen::update_impl(float dt) {
         if (p.pressed && p.x >= kNextBtnCX - kNextBtnW * 0.5f &&
             p.x <= kNextBtnCX + kNextBtnW * 0.5f && p.y >= kNextBtnCY - kNextBtnH * 0.5f &&
             p.y <= kNextBtnCY + kNextBtnH * 0.5f) {
-            sf2::audio::AudioEngine::instance().play("click");
+            sf2::audio::AudioEngine::instance().play("snd_click_1");
             std::fprintf(stdout, "[fight] NEXT round requested (round %d done)\n",
                          fight_->round().number);
             std::fflush(stdout);
@@ -8170,13 +8198,15 @@ void ResultsScreen::render_impl(App& app) {
         draw_ui_label(app, kViewW * 0.5f - 300.0f, kViewH - 96.0f, 600.0f, 28.0f,
                       quest_toast_, 0.9f, UiAlign::Center, 1.0f, 0.9f, 0.4f);
     }
-    // OK button (JS `Lr.$g = new Bb("EButtonWhite"); $g.V(Y.na("OK"))`, L2075)
-    // bottom-centre in the beige hexagon fleet (`EButtonBeige`). Flat is the
-    // genuine atlas-miss fallback.
+    // OK button (JS `Lr.$g = new Bb("EButtonWhite"); $g.V(Y.na("OK"))`, L2075).
+    // `Bb.fza` (L1844 `"btn"+K.T(a).substr(7)`) resolves the style key to a
+    // FRAME: "EButtonWhite" -> `btnWhite` of `ui/sliced.json`. There is no
+    // `EButtonBeige` FRAME (the style keys are `Bb` class keys) — the old
+    // literal always missed the atlas and fell through to the flat plate.
     {
         const float okx = kViewW * 0.5f;
         const float oky = 645.0f;
-        if (!try_draw_atlas_button(app, "EButtonBeige", okx, oky, 230.0f, 52.0f, 1.0f)) {
+        if (!draw_bb_plate(app, "btnWhite", okx, oky, 230.0f, 52.0f, 1.0f)) {
             draw_flat_button(app, "OK", okx, oky, 210.0f, 48.0f, 0.85f, 0.78f, 0.55f,
                              false);
         }
@@ -8670,7 +8700,7 @@ void ShopScreen::update_impl(float dt) {
                 if (p.pressed && t != tab_) {
                     tab_ = t;
                     sel_ = 0;  // Oa.f5 -> usb() auto-selects the first cell
-                    sf2::audio::AudioEngine::instance().play("click");
+                    sf2::audio::AudioEngine::instance().play("snd_click_2");
                     std::fprintf(stdout, "[shop] tab %s (E0=%d)\n", kShopTabs[tab_].label,
                                  kShopTabs[tab_].e0);
                     std::fflush(stdout);
@@ -8836,7 +8866,7 @@ void ShopScreen::update_impl(float dt) {
         hover_ = i;
         if (p.pressed) {
             sel_ = i;  // tap-select (`Oa.xA` L2296)
-            sf2::audio::AudioEngine::instance().play("click");
+            sf2::audio::AudioEngine::instance().play("snd_click_2");
             std::fprintf(stdout, "[shop] select %s\n",
                          items_[rows[static_cast<std::size_t>(i)]].name.c_str());
             std::fflush(stdout);
@@ -8853,6 +8883,10 @@ void ShopScreen::update_impl(float dt) {
         if (p.x >= ar.J && p.x <= ar.N && p.y >= ar.P && p.y <= ar.W) {
             side_hover_ = 1;
             if (p.pressed) {
+                // The TRY/EQUIP/UNEQUIP plate is a `Bb` (`Oa.init` L2289
+                // `Bb("EButtonWhite")`), so every press plays `rb.um()` =
+                // `snd_click_1` (`Bb.Xw` L1844) — the shop press was silent.
+                sf2::audio::AudioEngine::instance().play("snd_click_1");
                 WarriorSave w;
                 try {
                     w = app().save().load();
@@ -8883,6 +8917,9 @@ void ShopScreen::update_impl(float dt) {
                     // The `ph` dialog is OPEN; native collapses it to the
                     // gate+grant.
                     w.money -= it.price;
+                    // `Pa.gwa`/`Pa.Qkb` (L1230/L222) purchase branch: the
+                    // bought id `snd_buy` (65569) -> `rb.U3()`.
+                    sf2::audio::AudioEngine::instance().play("snd_buy");
                     if (it.delivery_sec > 0) {
                         // Pa z2a timed delivery: paid upfront, arrives on
                         // claim (Gb Cla(now) stamped).
@@ -10045,6 +10082,9 @@ void EquipmentScreen::perk_buy(int index) {
         app().save().save(w);
         perk_rows_ = load_perk_tree(app(), w);
         player_level_ = w.level;
+        // `Bt.L1a` (L306) -> `Bt.Qua` (L307) ends in `rb.Xkb()` = `snd_learn`
+        // (65598): every perk learn/upgrade plays it after the write.
+        sf2::audio::AudioEngine::instance().play("snd_learn");
         std::fprintf(stdout, "[profile] perk buy %s (tier %d, upgrade %d)\n",
                      r.name.c_str(), r.tier, r.upgrade_max);
         std::fflush(stdout);
@@ -10110,7 +10150,7 @@ void EquipmentScreen::update_impl(float dt) {
     // latch keeps the last logical position -> byte-identical captures.
     if (p.pressed || p.down) tab_hover_ = profile_tab_hit(p.x, p.y);
     if (tab_hover_ >= 0 && p.pressed) {
-        sf2::audio::AudioEngine::instance().play("click");
+        sf2::audio::AudioEngine::instance().play("snd_click_2");
         std::fprintf(stdout, "[profile] tab %d (%s)\n", tab_hover_,
                      kProfileTabs[tab_hover_].label);
         std::fflush(stdout);
@@ -10157,7 +10197,7 @@ void EquipmentScreen::update_impl(float dt) {
                 p.y >= h.cy - h.half && p.y <= h.cy + h.half) {
                 perk_hover_ = h.index;
                 if (p.pressed) {
-                    sf2::audio::AudioEngine::instance().play("click");
+                    sf2::audio::AudioEngine::instance().play("snd_focus_1");
                     perk_sel_ = h.index;  // `vb.uj = a` (L2198)
                 }
                 return;
@@ -10167,7 +10207,7 @@ void EquipmentScreen::update_impl(float dt) {
         if (perk_sel_ >= 0 && perk_buyable(perk_sel_) && p.x >= ib.J && p.x <= ib.N &&
             p.y >= ib.P && p.y <= ib.W) {
             if (p.pressed) {
-                sf2::audio::AudioEngine::instance().play("click");
+                sf2::audio::AudioEngine::instance().play("snd_click_1");
                 perk_buy(perk_sel_);
             }
             return;
@@ -10186,7 +10226,7 @@ void EquipmentScreen::update_impl(float dt) {
             if (p.x >= rb.J && p.x <= rb.N && p.y >= rb.P && p.y <= rb.W) {
                 achiev_hover_ = i;
                 if (p.pressed) {
-                    sf2::audio::AudioEngine::instance().play("click");
+                    sf2::audio::AudioEngine::instance().play("snd_buy");
                     achiev_claim(i);
                 }
                 return;
@@ -10905,7 +10945,7 @@ bool settings_run_row(App& app, SettingsRow row) {
                 sf2::audio::AudioEngine::instance().play_music(
                     sf2::audio::AudioEngine::instance().music_track());
             }
-            sf2::audio::AudioEngine::instance().play("click");
+            sf2::audio::AudioEngine::instance().play("snd_click_1");
             std::fprintf(stdout, "[settings] music %s\n", g_settings_music_off ? "OFF" : "ON");
             std::fflush(stdout);
             return false;
@@ -10913,7 +10953,7 @@ bool settings_run_row(App& app, SettingsRow row) {
             settings_dialog_cycle_language(app);
             return false;
         case SettingsRow::kRestart:
-            sf2::audio::AudioEngine::instance().play("click");
+            sf2::audio::AudioEngine::instance().play("snd_click_1");
             // `un.rHa` case 5 (L1932): `G.Ska(this.$u); p.TJ.save(!0)` then
             // `L.K.reload()`. The port exposes no runtime language setter nor a
             // reload path, so the press is reported, never faked.

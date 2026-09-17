@@ -210,9 +210,15 @@ is emitted into the single `Fk` mesh; every capsule into the single `Jba` node.
 
 1. **`wd.Erb(this.parameters.lx)`** (L496 in `wd`, called from `init`) — `lx` is
    the **list of model names** for this fighter (built by `xc.cM`, L809-810, from
-   equipment: `Of.model`=weapon, `Hd.model`=weapon-in-hand, `hg.model`=helm,
-   `Lg.model`=armor + `Kv` extras; each item's `Model` attribute in items.xml is
-   the exact archive name, e.g. `Model="mdl_armor_alloy"`).
+   equipment: `Of.model`=**skeleton**, `Hd.model`=**weapon**,
+   `hg.model`=**armor**, `Lg.model`=**helm** + `Kv` extras; each item's `Model`
+   attribute in items.xml is the exact archive name, e.g.
+   `Model="mdl_armor_alloy"`). The 4 slots are pinned by `xc.Fd(a)` (L808) —
+   `case I.Px: return this.Of` / `case I.vg: return this.Hd` /
+   `case I.Ai: return this.hg` / `case I.Bi: return this.Lg` — against the
+   `I` enum (L2473): `I.Px="Skeleton"`, `I.vg="Weapon"`, `I.Ai="Armor"`,
+   `I.Bi="Helm"` (`I.Vh="Ranged"`=`ig`, `I.Cf="Magic"`=`Mg` are the other two
+   equipment slots; the same mapping is repeated by the setter `xc.hk` L809).
 2. **`Yc.load(oa, lx)`** (L568) — for each name: `e = Ja.Lh(d)` (extract XML from
    the models archive by name; L45 `Ja.Lh` = `Mda(Ja.Ra,name)`), then
    `Yc.parse(oa, e, d)`.
