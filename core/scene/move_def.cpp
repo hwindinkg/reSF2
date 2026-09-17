@@ -414,6 +414,40 @@ void parse_action(pugi::xml_node node, MoveAction& out) {
         if (pugi::xml_attribute n = node.attribute("Name")) out.name = n.value();
         return;
     }
+    // `dm` (ShakeScreen, L734): `this.hw = new em` + `this.hw.parse(a)`
+    // (`em.parse` L1288) — Type/PauseTime/EffectTime/AmplitudeX/Y/
+    // FrequencyX/Y. `wd.Wvb` (L519) hands `hw` to the camera `ql.DL` (L370).
+    if (out.kind == "ShakeScreen") {
+        if (pugi::xml_attribute t = node.attribute("Type")) out.shake_type = t.value();
+        out.pause_time = data::xml_attr_int(node, "PauseTime", 0);
+        out.effect_time = data::xml_attr_int(node, "EffectTime", 0);
+        out.amplitude_x = data::xml_attr_float(node, "AmplitudeX", 0.0f);
+        out.amplitude_y = data::xml_attr_float(node, "AmplitudeY", 0.0f);
+        out.frequency_x = data::xml_attr_float(node, "FrequencyX", 0.0f);
+        out.frequency_y = data::xml_attr_float(node, "FrequencyY", 0.0f);
+        return;
+    }
+    // `Wl` (CameraWeight, L726): `time = u.H(Time)`, `$x = u.H(Delay)`.
+    if (out.kind == "CameraWeight") {
+        out.weight_time = data::xml_attr_float(node, "Time", 0.0f);
+        out.weight_delay = data::xml_attr_float(node, "Delay", 0.0f);
+        return;
+    }
+    // `Zl` (EnableBossAbility, L730): `this.value = u.ka(Value)`.
+    if (out.kind == "EnableBossAbility") {
+        out.bool_value = data::xml_attr_bool(node, "Value", false);
+        return;
+    }
+    // `Vl` (AddBullets, L725): `Type` -> `s6` (MagicBullet 0 /
+    // RaidChargeBullet 1 / anything else leaves it undefined = no-op) and
+    // `this.value = u.I(Value)`.
+    if (out.kind == "AddBullets") {
+        const std::string bt =
+            node.attribute("Type") ? node.attribute("Type").value() : std::string();
+        out.bullet_kind = bt == "MagicBullet" ? 0 : bt == "RaidChargeBullet" ? 1 : -1;
+        out.bullet_value = data::xml_attr_int(node, "Value", 0);
+        return;
+    }
     // Every other kind: keep the Name attr when present (informational; the
     // kind is parsed data until its consumer system is ported).
     if (pugi::xml_attribute n = node.attribute("Name")) out.name = n.value();

@@ -1676,14 +1676,22 @@ private:
     // --- move `<Actions>` dispatch (JS `wd.BNa` L523) ----------------------
     // The ported action kinds: `Sound` (`wd.dwb` L519 -> `fm.fka` L735 gate +
     // `ta.ak(name, looped, volume)` L1264), `RandomSound` (`wd.fwb` L519 ->
-    // `am.ab()` pick + `ta.ak`), `StopSound` (`wd.ewb` L519 -> `ta.Jwb`).
-    // `owner` supplies `xc.voice` for the `fka` gate; `why` tags the log
-    // line ("frame", "Strike", "Hit", "AnimationEnd"). `conds` is the
-    // condition context used for each action's own `<Conditions>` (JS
-    // `cb.Ti` L724, `Fd($c)` -> true when empty).
+    // `am.ab()` pick + `ta.ak`), `StopSound` (`wd.ewb` L519 -> `ta.Jwb`),
+    // `SetEndStage` (`cm.Uh()` L738 — empty), `ShakeScreen` (`wd.Wvb` L519 ->
+    // `Pi.uS` L424 -> `ql.DL` L370 = `FightCamera::apply_hit_effect`),
+    // `CameraWeight` (`wd.ANa` L520 -> `Pi.fS` L424 `{debugger}` — a no-op),
+    // `EnableBossAbility` (`wd.$vb` L520 -> `Pi.dS` L397 `{debugger}` — a
+    // no-op) and `AddBullets` (`wd.Tvb` L519 -> `hZ`+`LA` L505 MagicBullet /
+    // `vZa`+`Amb` L524 RaidChargeBullet).
+    // `owner` supplies `xc.voice` for the `fka` gate and is MUTATED by
+    // `AddBullets` (the JS `wd` IS the fighter — `hZ`/`vZa` write its
+    // `bh`/`dO`); `why` tags the log line ("frame", "Strike", "Hit",
+    // "AnimationEnd"). `conds` is the condition context used for each
+    // action's own `<Conditions>` (JS `cb.Ti` L724, `Fd($c)` -> true when
+    // empty).
     void dispatch_move_actions(
         const std::vector<const sf2::scene::MoveAction*>& acts,
-        const FightFighter& owner, const char* why,
+        FightFighter& owner, const char* why,
         const sf2::scene::FightContext& conds);
     // JS `uf.sja(a)` (L115): `Math.floor(uf.OKa.RGa() * a)` with
     // `at.Nlb` (L115) = `Math.random()` — an UNSHARED global stream, NOT the
@@ -1721,7 +1729,20 @@ private:
     // contain `event` (the MOVE event name, `kz.create`) and whose
     // `<Conditions>` pass, dispatching their supported actions through
     // `dispatch_move_actions` (owner side's fighter + context).
-    void dispatch_global_triggers(const char* event_name, const char* why);
+    // `value` is the event payload for the subclasses whose `compare`
+    // filters on it (`Sm` ModExpires L770: exact `Ki==data`; `Tm`
+    // RoundStageStart L772: `iz.XBa(Ki)==data`; `Km` AnimationStart L766:
+    // `Ki==""` or `Ki` in the owner's animation list). An event node with a
+    // non-empty `Name` that does not equal `value` is skipped; `nullptr`
+    // (Strike/Hit) keeps the name-agnostic behaviour the earlier waves had.
+    // `side` = 0/1 restricts the scan to that side's registered set (the
+    // per-model publishers: ModExpires/AnimationStart); -1 scans both.
+    void dispatch_global_triggers(const char* event_name, const char* why,
+                                 const char* value = nullptr, int side = -1);
+    // The `<Triggers>` EveryFrame publish is per-frame, so its
+    // informational line is printed once per side+trigger (the dispatch
+    // itself runs every frame — only the log is deduped).
+    std::set<std::string> global_logged_;
 
     const std::vector<sf2::scene::GlobalTrigger>* global_triggers_ = nullptr;
     std::vector<const sf2::scene::GlobalTrigger*> global_me_;

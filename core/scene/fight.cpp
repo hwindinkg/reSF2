@@ -426,20 +426,118 @@ int FightController::random_sound_index(int n) {
 //                           NOTE: `ewb` has NO `fka` voice gate (only the two
 //                           play kinds check `Voice`), so StopSound fires for
 //                           every matching trigger.
-// The remaining kinds are parsed records only (their consumer systems —
-// child models / effects / bullets / camera — are not ported); each is
-// listed with its exact missing subsystem in the follow-up report.
+//   ShakeScreen (dm, L734): `wd.Wvb(a)` L519 -> `this.uS.Z(a)` -> the fight
+//                           screen's `Pi.uS(a){this.Ta.DL(a.hw)}` (L424) ->
+//                           `ql.DL(a)` L370 (`hw=a, U1=!0, N3=a.YIa, wR=!0,
+//                           N5=cU=a.jz`). `Ta` IS the `ql` camera, so this is
+//                           the same latch `HitEffect` uses; the port's
+//                           `FightCamera::apply_hit_effect` (L116 above) is
+//                           that exact function.
+//   CameraWeight (Wl, L726): `wd.ANa(a)` L520 -> `this.fS.Z(a)`; the only
+//                           subscriber is `Pi.fS(){debugger}` (L424) — an
+//                           EMPTY body. Dispatched as a logged no-op.
+//   EnableBossAbility (Zl, L730): `wd.$vb(a)` L520 -> `this.dS.Z(a)`; the
+//                           only subscriber is `Pi.dS(){debugger}` (L397) —
+//                           EMPTY. Dispatched as a logged no-op.
+//   AddBullets (Vl, L725):  `wd.Tvb(a)` L519 — `s6==0` (MagicBullet):
+//                           `hZ(value)` (= `zL(bh+value)` L505) then `LA()`
+//                           L505; `s6==1` (RaidChargeBullet): `vZa(value)`
+//                           (= `dO+=value` L524) then `Amb()` L524.
+// The remaining kinds (CreatePlayer/Delete/PlayAnimation/Effect/StopEffect/
+// StopFollowEffect/TryOnEnd/HitEffect/SetCooldown/ZoomEffect) need the child
+// models / magic-effect containers / perk cooldown timers / intro lens — each
+// is listed with its exact missing subsystem in the follow-up report.
 void FightController::dispatch_move_actions(
-    const std::vector<const sf2::scene::MoveAction*>& acts, const FightFighter& owner,
+    const std::vector<const sf2::scene::MoveAction*>& acts, FightFighter& owner,
     const char* why, const sf2::scene::FightContext& conds) {
     for (const sf2::scene::MoveAction* act : acts) {
         if (act == nullptr) continue;
         const bool sound_kind = act->js_type == 2 || act->js_type == 3 || act->js_type == 4;
-        if (!sound_kind) continue;
+        // The four non-audio kinds this wave wired. Keyed on `kind`, not
+        // `js_type`: `Xl` (Delete) and `jm` (TryOnEnd) BOTH declare
+        // `super(1)` (L728/L737), so `js_type == 1` is ambiguous.
+        const bool fx_kind = act->kind == "ShakeScreen" || act->kind == "CameraWeight" ||
+                             act->kind == "EnableBossAbility" ||
+                             act->kind == "AddBullets";
+        if (!sound_kind && !fx_kind) continue;
         // JS `cb.Ti(a,b)` (L724): `if (Fd(this.$c)) return true;` then the
         // `<Conditions>` tree. `$c` empty -> always true.
         if (!act->conditions.empty() &&
             !sf2::scene::eval_move_conditions(act->conditions, conds)) {
+            continue;
+        }
+        // --- ShakeScreen (`dm` L734 -> `wd.Wvb` L519 -> `Pi.uS` L424) -----
+        if (act->kind == "ShakeScreen") {
+            sf2::scene::HitEffect e;
+            e.type = act->shake_type;
+            e.pause_time = act->pause_time;      // `YIa`
+            e.effect_time = act->effect_time;    // `jz`
+            e.amplitude_x = act->amplitude_x;    // `mva`
+            e.amplitude_y = act->amplitude_y;    // `nva`
+            e.frequency_x = act->frequency_x;    // `$za`
+            e.frequency_y = act->frequency_y;    // `aAa`
+            std::fprintf(stdout,
+                         "[fx] F%d %s %s ShakeScreen type=%s pause=%d eff=%d "
+                         "ampX=%.1f freqX=%.2f ampY=%.1f freqY=%.2f\n",
+                         frame_, owner.name.c_str(), why, act->shake_type.c_str(),
+                         act->pause_time, act->effect_time,
+                         static_cast<double>(act->amplitude_x),
+                         static_cast<double>(act->frequency_x),
+                         static_cast<double>(act->amplitude_y),
+                         static_cast<double>(act->frequency_y));
+            std::fflush(stdout);
+            camera_.apply_hit_effect(e);
+            continue;
+        }
+        // --- the two kinds whose JS consumer is a `debugger` no-op --------
+        if (act->kind == "CameraWeight") {
+            // `wd.ANa` L520 -> `Pi.fS` L424 `{debugger}`. `Wl.Uh` L726 delays
+            // the call by `$x` seconds when `$x >= .01` (a `Re` timer); the
+            // callback is the same no-op, so the port logs and does nothing.
+            std::fprintf(stdout,
+                         "[fx] F%d %s %s CameraWeight time=%.2f delay=%.2f "
+                         "(JS Pi.fS no-op)\n",
+                         frame_, owner.name.c_str(), why,
+                         static_cast<double>(act->weight_time),
+                         static_cast<double>(act->weight_delay));
+            std::fflush(stdout);
+            continue;
+        }
+        if (act->kind == "EnableBossAbility") {
+            // `wd.$vb` L520 -> `Pi.dS` L397 `{debugger}`.
+            std::fprintf(stdout, "[fx] F%d %s %s EnableBossAbility value=%d (JS Pi.dS no-op)\n",
+                         frame_, owner.name.c_str(), why, act->bool_value ? 1 : 0);
+            std::fflush(stdout);
+            continue;
+        }
+        // --- AddBullets (`Vl` L725 -> `wd.Tvb` L519) ----------------------
+        if (act->kind == "AddBullets") {
+            if (act->bullet_kind == 0) {
+                // `hZ(value)` L505 = `zL(this.bh + value)`; `LA()` L505 then
+                // normalizes (`my>=1` converts to a bullet + resets,
+                // `bh` capped at 1) — the port's `la_normalize` (L2451).
+                owner.bullets =
+                    sf2::scene::bullets_add(owner.bullets, act->bullet_value);
+                la_normalize(owner);
+                std::fprintf(stdout,
+                             "[fx] F%d %s %s AddBullets MagicBullet value=%d -> bh=%d "
+                             "my=%.3f\n",
+                             frame_, owner.name.c_str(), why, act->bullet_value,
+                             owner.bullets, static_cast<double>(owner.charge));
+                std::fflush(stdout);
+            } else if (act->bullet_kind == 1) {
+                // `vZa(value)` L524 = `this.dO += value`; `Amb()` L524 then
+                // publishes `yd(13, -1, -1, dO)` on the `lHa` bus (the raid
+                // charge animation channel, not ported) and, when `dO==0`, a
+                // `yd(13, 0, 0)` on the `yp` bus.
+                owner.raid_bullets += act->bullet_value;
+                std::fprintf(stdout,
+                             "[fx] F%d %s %s AddBullets RaidChargeBullet value=%d -> dO=%d "
+                             "(Amb yd(13) not ported)\n",
+                             frame_, owner.name.c_str(), why, act->bullet_value,
+                             owner.raid_bullets);
+                std::fflush(stdout);
+            }
             continue;
         }
         if (act->js_type == 3) {  // StopSound — no voice gate (JS `wd.ewb`)
@@ -486,12 +584,17 @@ void FightController::dispatch_move_actions(
 // --- root `<Triggers>` (JS `Fa.Exb` L708 -> `ra.Dm`) ---------------------
 // The 18 move-action kinds (`lz.create` L737-739). The port DISPATCHES the
 // three audio kinds (Sound `wd.dwb` L519, RandomSound `wd.fwb` L519,
-// StopSound `wd.ewb` L519 -> `ta.Jwb` L1264) plus `SetEndStage` (`cm`, whose
-// JS `Uh()` L738 is an EMPTY no-op); the rest have no consumer subsystem in
-// the port yet and are reported, never faked.
+// StopSound `wd.ewb` L519 -> `ta.Jwb` L1264), `SetEndStage` (`cm`, whose JS
+// `Uh()` L738 is an EMPTY no-op), ShakeScreen (`wd.Wvb` L519 -> `ql.DL`
+// L370), CameraWeight (`wd.ANa` L520 -> `Pi.fS` L424 `{debugger}`),
+// EnableBossAbility (`wd.$vb` L520 -> `Pi.dS` L397 `{debugger}`) and
+// AddBullets (`wd.Tvb` L519 -> `hZ`/`LA`/`vZa`/`Amb`). The rest have no
+// consumer subsystem in the port yet and are reported, never faked.
 bool FightController::global_kind_dispatched(const std::string& kind) {
     return kind == "Sound" || kind == "RandomSound" || kind == "StopSound" ||
-           kind == "SetEndStage";
+           kind == "SetEndStage" || kind == "ShakeScreen" ||
+           kind == "CameraWeight" || kind == "EnableBossAbility" ||
+           kind == "AddBullets";
 }
 
 std::size_t FightController::global_action_kinds() const {
@@ -529,22 +632,67 @@ void FightController::register_global_triggers(const sf2::scene::FightContext& m
                  global_triggers_->size(), global_action_kinds(), global_me_.size(),
                  global_enemy_.size(), dispatched);
     std::fflush(stdout);
+
+    // Per-kind census of the REACHABLE data (the player's + enemy's
+    // `ra.Hza` move lists and the registered global set). This is the
+    // "which action kinds matter in the shipped fights" table: it is read
+    // from the live move tables at fight setup, so a kind that shows 0
+    // here cannot fire in this fight no matter how the fighters move.
+    {
+        static const char* const kKinds[18] = {
+            "AddBullets",     "CameraWeight",   "CreatePlayer", "Delete",
+            "Effect",         "EnableBossAbility", "HitEffect", "PlayAnimation",
+            "RandomSound",    "SetCooldown",    "SetEndStage",  "ShakeScreen",
+            "Sound",          "StopEffect",     "StopFollowEffect", "StopSound",
+            "TryOnEnd",       "ZoomEffect"};
+        const std::vector<const sf2::scene::MoveDef*>& pm = player_.fighter.hb();
+        const std::vector<const sf2::scene::MoveDef*>& em = enemy_.fighter.hb();
+        std::fprintf(stdout, "[triggers] action-kind census (player-move/enemy-move/"
+                             "global):\n");
+        for (const char* k : kKinds) {
+            std::size_t cp = 0, ce = 0, cg = 0;
+            for (const sf2::scene::MoveDef* m : pm) {
+                for (const sf2::scene::MoveAction& a : m->actions) {
+                    if (a.kind == k) ++cp;
+                }
+            }
+            for (const sf2::scene::MoveDef* m : em) {
+                for (const sf2::scene::MoveAction& a : m->actions) {
+                    if (a.kind == k) ++ce;
+                }
+            }
+            if (global_triggers_ != nullptr) {
+                for (const sf2::scene::GlobalTrigger& t : *global_triggers_) {
+                    for (const sf2::scene::MoveAction& a : t.actions) {
+                        if (a.kind == k) ++cg;
+                    }
+                }
+            }
+            std::fprintf(stdout, "[triggers]   %-17s %4zu/%4zu/%4zu  %s\n", k, cp, ce,
+                         cg, global_kind_dispatched(k) ? "DISPATCHED" : "record-only");
+        }
+        std::fflush(stdout);
+    }
 }
 
 // The event sites the port publishes for the global set. `event_name` is the
-// MOVE event name (`kz`/`tb.D6a` L763): Hit (6), Strike (7), EveryFrame (14)
-// and RoundStageStart (1) are wired; AnimationStart (9) and ModExpires (16)
-// are parsed but their publish sites are not (see the report).
-void FightController::dispatch_global_triggers(const char* event_name, const char* why) {
+// MOVE event name (`kz`/`tb.D6a` L763): Hit (6), Strike (7), EveryFrame
+// (14), RoundStageStart (1), AnimationStart (9) and ModExpires (16) are all
+// wired (see the call sites). `value` carries the event payload for the
+// subclasses whose `compare` filters on it; `side` -1 = both sides.
+void FightController::dispatch_global_triggers(const char* event_name, const char* why,
+                                               const char* value, int side) {
     if (global_triggers_ == nullptr || (global_me_.empty() && global_enemy_.empty())) {
         return;
     }
-    const FightFighter* side_f[2] = {&player_, &enemy_};
+    if (side >= 0) side &= 1;
+    FightFighter* side_f[2] = {&player_, &enemy_};
     const std::vector<const sf2::scene::GlobalTrigger*>* lists[2] = {&global_me_,
                                                                     &global_enemy_};
-    for (int side = 0; side < 2; ++side) {
-        const FightFighter& owner = *side_f[side];
-        const FightFighter& other = *side_f[1 - side];
+    for (int s = 0; s < 2; ++s) {
+        if (side >= 0 && s != side) continue;
+        const FightFighter& owner = *side_f[s];
+        const FightFighter& other = *side_f[1 - s];
         sf2::scene::FightContext ctx;
         // NOT the fight's `Da.pg` stream: the global triggers are an
         // additive evaluation the pre-existing captures never had, so a
@@ -558,13 +706,24 @@ void FightController::dispatch_global_triggers(const char* event_name, const cha
             {other.fighter.current_move() ? other.fighter.current_move()->name : ""};
         fill_ctx_geometry(ctx, owner, other);
         ctx.health_ratio = owner.max_hp > 0.0f ? owner.hp / owner.max_hp : 0.0f;
-        for (const sf2::scene::GlobalTrigger* t : *lists[side]) {
+        for (const sf2::scene::GlobalTrigger* t : *lists[s]) {
             bool event_ok = false;
             for (const sf2::scene::Cond& e : t->events) {
-                if (e.type == event_name) {
-                    event_ok = true;
-                    break;
-                }
+                if (e.type != event_name) continue;
+                // The per-subclass payload filter (JS `compare`):
+                //   `Sm` (ModExpires, L770): `typeof a.data!="string"&&(a="");
+                //      a=this.Ki==a` — EXACT `Name` equality.
+                //   `Tm` (RoundStageStart, L772): `a=a.data==this.Nta` with
+                //      `Nta=iz.XBa(Ki)` — equal stage codes; the port passes
+                //      the JS stage NAME (the enum is the same 1..7 map).
+                //   `Km` (AnimationStart, L766): `Ki==""` passes, else `Ki`
+                //      is looked up in the owner's animation-name list
+                //      (`vQ(a.rb, this.Ob)`) — the port passes the started
+                //      move's name and the list holds exactly that name.
+                // A non-empty `Name` that does not match excludes the node.
+                if (value != nullptr && !e.name.empty() && e.name != value) continue;
+                event_ok = true;
+                break;
             }
             if (!event_ok) continue;
             if (!t->conditions.empty() &&
@@ -576,10 +735,16 @@ void FightController::dispatch_global_triggers(const char* event_name, const cha
                 if (global_kind_dispatched(a.kind)) acts.push_back(&a);
             }
             if (acts.empty()) continue;
-            std::fprintf(stdout, "[triggers] %s %s (%s)\n", owner.name.c_str(),
-                         t->name.c_str(), why);
-            std::fflush(stdout);
-            dispatch_move_actions(acts, owner, why, ctx);
+            // The dispatch runs every time the event fires; the INFO line is
+            // printed once per side+trigger+event (an EveryFrame trigger
+            // would otherwise print 60x/s and swamp the capture logs).
+            const std::string key = owner.name + "|" + t->name + "|" + event_name;
+            if (global_logged_.insert(key).second) {
+                std::fprintf(stdout, "[triggers] %s %s (%s)\n", owner.name.c_str(),
+                             t->name.c_str(), why);
+                std::fflush(stdout);
+            }
+            dispatch_move_actions(acts, *side_f[s], why, ctx);
         }
     }
 }
@@ -1616,6 +1781,11 @@ void FightController::enter_start_stance() {
     start_stance_frames_ = 0;   // reset so every round re-plays the intro
     start_buffer_filled_ = false;  // fresh round, empty round-start buffer
     round_wait_ = false;   // the break plate expired -> the round is running
+    // Root `<Triggers>` `RoundStageStart` (`kz.create` `Tm` L772, whose
+    // `parse` maps `Name` through `iz.XBa` L447: StartStance=1, Fight=2,
+    // EndStance=3, ...). The port publishes the JS stage NAME, which is the
+    // same 1..7 map as `sf2::scene::round_stage`.
+    dispatch_global_triggers("RoundStageStart", "RoundStageStart", "StartStance");
 }
 
 // JS `Rkb` (L410): phase 2 — the round goes live (HUD play() sets
@@ -1667,6 +1837,10 @@ void FightController::enter_fight() {
         player_.fighter.input(start_buffer_key_, press_type::tap);
         start_buffer_filled_ = false;
     }
+    // Root `<Triggers>` `RoundStageStart Name="Fight"` (`Tm` L772; the
+    // stage code 2). Published at the phase-2 transition, the only site the
+    // round-stage machine raises (`kg` handler L412/L387 -> `Rkb`).
+    dispatch_global_triggers("RoundStageStart", "RoundStageStart", "Fight");
 }
 
 // JS `i4a` (L409): phase 3 — the round's EndStance (results shown).
@@ -1679,9 +1853,12 @@ void FightController::enter_end_stance() {
     // ringout arrows are removed at the round-end cleanup and every active
     // rule is stopped. `rules_end_round` clears the marker + rule set.
     rules_end_round();
+    // Root `<Triggers>` `RoundStageStart Name="EndStance"` (`Tm` L772,
+    // stage code 3) — 3 of the 4 shipped RoundStageStart triggers use it.
+    dispatch_global_triggers("RoundStageStart", "RoundStageStart", "EndStance");
 }
 
-// JS `Onb` (L411): the round-end check. KO when a fighter's hp <= 0;
+    // JS `Onb` (L411): the round-end check. KO when a fighter's hp <= 0;
 // timeout ONLY when the fight has the TimeoutWin rule (JS `BT` L392 sets
 // `ey=2` for ERuleTimeoutWin; the shipped stages use no timeout rule).
 // The timeout winner is the ENEMY (JS E3a c==3 branch: `a.ng++` on Zb).
@@ -2485,6 +2662,13 @@ void FightController::tick_mods(int side) {
             bus_.drain(q, pairs);
             for (const auto& pr : pairs) exec_action(pr.first, pr.second, q);
         }
+        // Root `<Triggers>` `ModExpires` (`kz.create` `Sm` L770): the event's
+        // `Name` must equal the expired mod's name (`Sm.compare` L770:
+        // unchanged `Ki==data` string compare). 63 of the shipped global
+        // triggers sit here, so this is by far the busiest event site.
+        if (s >= 0) {
+            dispatch_global_triggers("ModExpires", "ModExpires", m.name.c_str(), s & 1);
+        }
     };
     sf2::scene::tick_side_mods(bus_, side, ctx);
 }
@@ -2526,6 +2710,9 @@ void FightController::tick_bus_side(int side) {
                 bus_.drain(q, p2);
                 for (const auto& pr : p2) exec_action(pr.first, pr.second, q);
             }
+            // Root `<Triggers>` ModExpires for the flushed (`qw`) mods.
+            dispatch_global_triggers("ModExpires", "ModExpires",
+                                     fm.second.name.c_str(), fm.first & 1);
         }
     }
     // Interval edges (`Lj`): added → Start(12), removed → End(13).
@@ -3221,6 +3408,18 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         if (it == cl_move_.end() || it->second != cur) {
             cl_move_[me.name] = cur;
             cl_last_.erase(me.name);
+            // Root `<Triggers>` `AnimationStart` (`kz.create` `Km` L766): the
+            // JS animator raises `EStartAnimationEvent` at the end of
+            // `Te.Skb` (`this.x3(this.Ua)` L551 -> `gh`, L553), and the
+            // listener chain lands on `CZa(9)`. The move-change edge above IS
+            // that start; the event's `Name` filter is the started move name
+            // (`Km.compare` L766 checks `Ki` against the owner's animation
+            // list, which holds exactly this name).
+            if (cur != nullptr && me.fighter.current_move() != nullptr) {
+                dispatch_global_triggers("AnimationStart", "AnimationStart",
+                                         me.fighter.current_move()->name.c_str(),
+                                         &me == &player_ ? 0 : 1);
+            }
         }
     }
     // [FIX Phase 4b — fighters stay in the arena] The root-motion walk
@@ -3807,6 +4006,19 @@ void FightController::update(float dt) {
             // apply_round_result — nothing to do here.
             break;
         }
+    }
+
+    // The global `<Triggers>` EveryFrame publish (JS `kz.create` `Mm`,
+    // L771): the trigger bus fires type 14 once per frame while the model's
+    // animator runs. The port publishes it for BOTH sides once per frame in
+    // the two live phases — exactly where `update_fighter` runs (the
+    // `tick_bus_side` perk-bus EveryFrame is the per-side analogue).
+    // `Mm.compare` (L767) filters on `data % Step` when `<EveryFrame Step>`
+    // is set; `Step` is not part of the move `Cond` record, so the port
+    // publishes unconditionally (Step is absent from all 4 shipped
+    // EveryFrame triggers).
+    if (phase_ == fight_phase::fight || phase_ == fight_phase::start_stance) {
+        dispatch_global_triggers("EveryFrame", "EveryFrame");
     }
 
     // The banner countdown (JS `ca.ia` L389: `this.Onb(); a=this.ha;

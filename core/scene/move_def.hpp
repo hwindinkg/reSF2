@@ -224,10 +224,15 @@ struct Align {
 // `wd.dwb` (Sound, L519), `wd.fwb` (RandomSound, L519), `wd.ewb`
 // (StopSound, L519).
 //
-// The port stores every kind as a record; the sound kinds (Sound /
-// RandomSound / StopSound) are dispatched, the rest are parsed data (the
-// remaining kinds are reported as follow-up — they need the FX/magic/
-// bullet/camera systems).
+// The port DISPATCHES: Sound / RandomSound / StopSound (audio), SetEndStage
+// (`cm.Uh()` L738 is an empty body), ShakeScreen (`wd.Wvb` L519 ->
+// `Pi.uS` L424 -> `ql.DL` L370 = the port's `FightCamera::apply_hit_effect`),
+// CameraWeight (`wd.ANa` L520 -> `Pi.fS` L424 `{debugger}` = NO-OP),
+// EnableBossAbility (`wd.$vb` L520 -> `Pi.dS` L397 `{debugger}` = NO-OP) and
+// AddBullets (`wd.Tvb` L519 -> `hZ`+`LA` L505 / `vZa`+`Amb` L524). The rest
+// are parsed records whose consumer systems are not ported (child models,
+// the magic-effect containers, the perk cooldown timers, the intro lens);
+// each is reported with its exact missing subsystem — never faked.
 struct MoveAction {
     std::string kind;       // element name ("Sound", "RandomSound", ...)
     int js_type = -1;       // JS `cb.type` (0..17); -1 = unknown (never pushed)
@@ -252,6 +257,43 @@ struct MoveAction {
     // `floor(Math.random()*n)`, the UNSHARED global stream (`at.Nlb`
     // L115 `return Math.random()`), NOT the fight's `Da.pg`.
     std::vector<std::string> names;
+
+    // --- ShakeScreen (`dm` L734) -----------------------------------------
+    // `dm.parse` builds `this.hw = new em` and parses the SAME node into it
+    // (`em.parse` L1288): `Type`, `PauseTime`->`YIa`, `EffectTime`->`jz`,
+    // `AmplitudeX`->`mva`, `AmplitudeY`->`nva`, `FrequencyX`->`$za`,
+    // `FrequencyY`->`aAa`. `wd.Wvb` (L519) passes `a.hw` to the camera's
+    // `ql.DL` (L370), the latch that shares its shape with the
+    // `<HitEffect>` row (`sf2::scene::HitEffect`) — so these fields map 1:1
+    // onto that struct's `pause_time`/`effect_time`/`amplitude_*`/
+    // `frequency_*`.
+    std::string shake_type;    // `em.type` (<ShakeScreen Type=..>)
+    int pause_time = 0;        // `YIa` (PauseTime, frames)
+    int effect_time = 0;       // `jz`  (EffectTime, frames; ZoomEffect's too)
+    float amplitude_x = 0.0f;  // `mva` (AmplitudeX)
+    float amplitude_y = 0.0f;  // `nva` (AmplitudeY)
+    float frequency_x = 0.0f;  // `$za` (FrequencyX)
+    float frequency_y = 0.0f;  // `aAa` (FrequencyY)
+    // --- CameraWeight (`Wl` L726) ----------------------------------------
+    // `Wl.parse`: `this.time = u.H(Time)`, `this.$x = u.H(Delay)`. `Uh`
+    // either calls `wd.ANa` at once (`$x < .01`) or schedules it after
+    // `$x`; `ANa` (L520) ends at `Pi.fS()` — a bare `debugger` (L424), so
+    // the whole kind has NO effect in the JS.
+    float weight_time = 0.0f;   // `Wl.time`  (<CameraWeight Time=..>)
+    float weight_delay = 0.0f;  // `Wl.$x`    (<CameraWeight Delay=..>)
+    // --- EnableBossAbility (`Zl` L730) -----------------------------------
+    // `this.value = u.ka(Value)`; `Uh` -> `wd.$vb` (L520) -> `Pi.dS()` —
+    // also a bare `debugger` (L397), so no effect in the JS either.
+    bool bool_value = false;  // `Zl.value`
+    // --- AddBullets (`Vl` L725) ------------------------------------------
+    // `s6`: `Type=="MagicBullet"` -> 0, `Type=="RaidChargeBullet"` -> 1,
+    // anything else leaves `this.s6` UNDEFINED (the ctor never initialises
+    // it) and `wd.Tvb` (L519) matches neither branch -> no-op. `value =
+    // u.I(Value)`: the `s6!=0&&s6!=1||!v.$aa||(value=0)` guard evaluates
+    // `!v.$aa` = `!false` = true and SHORT-CIRCUITS, so `(value=0)` never
+    // runs — the shipped `Value` stands.
+    int bullet_kind = -1;   // `Vl.s6` (0 MagicBullet / 1 RaidChargeBullet / -1)
+    int bullet_value = 0;   // `Vl.value` (<AddBullets Value=..>)
 };
 
 // One child of the root `<Triggers>` block (JS `Fa.Exb` L708 ->
