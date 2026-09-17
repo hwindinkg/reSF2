@@ -223,6 +223,33 @@ struct MoveAction {
     std::vector<std::string> names;
 };
 
+// One child of the root `<Triggers>` block (JS `Fa.Exb` L708 ->
+// `new Su(d)` + `Sl`): the GLOBAL trigger set. Structurally a perk trigger —
+// `<Events>` (`Fa.GIa` L708 -> `kz.create` L771), `<Conditions>`/`<Locks>`
+// (`Fa.HS` -> `Fa.H3` -> `Tl.create`), `<Actions>` (`Fa.CIa` L718 ->
+// `lz.create` L737, i.e. the MOVE action kinds) — plus a `Name`.
+//
+// JS `Fa.parse` (L708) calls `Fa.Exb(f, e)` with `e = ra.Dm` (the static
+// global list, `ra.load` L?); `ra.Z6a`/`ra.yz` then add each `Su` to a
+// fight's trigger set per model, gated by its `<Locks>` (`Su.nw` L?).
+// res/moves.xml ships 86 `<Trigger>` / 172 actions here (CreatePlayer 12,
+// Delete 5, Effect 39, HitEffect 8, PlayAnimation 2, ShakeScreen 10,
+// Sound 32, StopEffect 39, StopSound 23, TryOnEnd 2); 81 of the 86 carry
+// `<Locks>` (perk/item names), so in a fight without those perks equipped
+// they never fire.
+//
+// EVENT ID SPACE: the global block's events use the MOVE map (`kz.create` /
+// `tb.D6a` L763: Hit 6, Strike 7, AnimationStart 9, EveryFrame 14,
+// ModExpires 16, RoundStageStart 1) — NOT the perk map in trigger.hpp. The
+// native stores the parsed event `Cond`s and matches them by element name.
+struct GlobalTrigger {
+    std::string name;                 // `<Trigger Name=..>`
+    std::vector<Cond> events;         // `<Events>` children (`kz.create`)
+    std::vector<Cond> conditions;     // `<Conditions>` children (`Tl.create`)
+    std::vector<Cond> locks;          // `<Locks>` children (`Tl.create`)
+    std::vector<MoveAction> actions;  // `<Actions>` children (`lz.create`)
+};
+
 // <Velocity> (JS `Fa.ykb` L721-722 -> `jc.wub`/`jc.btb`/`jc.jub`).
 // `wua` (X/Y/Z) seeds `Te.DM` on move start (`Skb` L551) and `Coa`
 // (Ax/Ay/Az) seeds `Te.aV`; `qta` (SaveVelocity) keeps `DM` across moves.
@@ -340,7 +367,10 @@ struct MoveDef {
 //     <Template Name="Y"> (Fa.dMa walks the template chain).
 //   - Returns false if the <Moves> root is missing; throws std::runtime_error
 //     on malformed XML.
-bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& out);
+// When `global_out` is non-null it also receives the root `<Triggers>` block
+// (JS `Fa.Exb` L708 -> `ra.Dm`).
+bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& out,
+                 std::vector<GlobalTrigger>* global_out = nullptr);
 
 // Debug helper: print one condition tree (for the probe).
 std::string cond_to_string(const Cond& c, int depth = 0);

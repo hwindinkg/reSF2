@@ -2868,7 +2868,7 @@ bool load_ringout_atlas(App& app) {
 // `fight_intro` shows. `ik` (ctor L2069-2071, `aa` L2071-2073, `layout`
 // L2073-2074):
 //   Qa = R.$(E.get(3,6))        full-screen `res/vs/bg.*` backdrop
-//   Sn = Ea(node) C(512) D(286) la(1.6) Wg(27)   stroke container
+//   Sn = Ea(node) C(512) D(286) -> D(ra+10)=296, la(1.6), Wg(27)  stroke container
 //     KF = R.$(E.get(1), y.jTa) ("left") / ux (y.kTa, "right")  brush strokes
 //   Tr = R.$(E.get(1), y.lTa) ("vs")   VS glyph: la(10) -> la(Izb) + wa fade
 //   EK = oe(a.Hf) C(182) D(366)        player portrait (slides from x=-388)
@@ -2972,6 +2972,74 @@ float vs_ease(float x) {
     return 1.0f - (1.0f - x) * (1.0f - x);
 }
 
+// One `vs/sprites` brush stroke with the JS `ik` transform + EFilled wipe.
+//
+// JS (L2069): `this.Sn = new Ea(this.node); Sn.C(512); Sn.D(286);
+// d=this.Sn; d.D(d.ra+10); Sn.la(1.6); Sn.Wg(27)` — the brush PAIR's
+// container sits at design (512, 296) (the `D(286)` is overwritten by
+// `D(ra+10)` = 296), scaled 1.6, rotated +27 deg about that origin.
+//   `KF = R.$(E.get(1), y.jTa="left", Sn)` with `ik(1,.5)`/`Rn(1,.5)`
+//   (anchor = the frame's RIGHT edge, vertical centre) and NO `C/D`, so the
+//   left brush's right edge sits on the Sn origin and it extends LEFT:
+//   local x [-492,0], y [-121,121] (frame sourceSize 492x242).
+//   `ux = R.$(E.get(1), y.kTa="right", Sn)` with `ik(0,.5)`/`Rn(0,.5)`
+//   (anchor = LEFT edge) at `C(ya-2)`, `D(ra-6)` -> local (-2,-6): local
+//   x [-2,490], y [-133,121] (frame sourceSize 492x254).
+// The wipe is `wl(vc.ho(Jc.io, b))` (L2069) animated 0->1 in `kd4` (left)
+// and `kd5` (right) (L2072). `Jc.io` = `gfx.effect.FillMode.EHorizontal`
+// (L1663 enum) and `vc.ho(mode,amount)` = `DrawMode.EFilled`. Both backends
+// draw EFilled/EHorizontal as the frame's LEFT `amount` fraction into the
+// node box's LEFT `amount` fraction (canvas `dda` case 0:
+// `drawImage(img, Nc.x,Nc.y,Nc.w*e,Nc.h, 0,0, size.x*e,size.y)`; WebGL
+// `dda` case 0: `u/x in [0,d]` at `x in [b.x, b.x + b.w*d]`).
+//
+// So: local x is clipped to `rx0 + rw*amount`, the UV u to `[0, amount]`
+// (in LOCAL frame space, BEFORE the rotation) — the drawn quad is the
+// rotated, UV-clipped band the oracle `fight_intro` shows.
+void draw_vs_brush(App& app, const char* frame_name, float rx0, float ry0, float rw,
+                   float rh, float amount, float alpha) {
+    if (amount <= 0.0f || alpha <= 0.0f) return;
+    amount = std::min(amount, 1.0f);
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl)) return;
+
+    // Design base 1024 wide -> the view (JS `ik.layout` node scale
+    // `(a.N-a.J)/1024`); `Sn.la(1.6)` stacks on top of it.
+    const float s = kViewW / 1024.0f;
+    const float sn_x = 512.0f * s, sn_y = 296.0f * s;   // JS Sn (C/D + D(ra+10))
+    const float kScale = 1.6f;                          // JS Sn.la(1.6)
+    const float kRot = 27.0f;                           // JS Sn.Wg(27)
+    const float th_rad = kRot * 3.14159265358979323846f / 180.0f;
+    const float ct = std::cos(th_rad), st = std::sin(th_rad);
+
+    // Local corners (design units, before the 1.6 * s and the rotation):
+    // TL, TR, BL, BR. The reveal edge is `rx0 + rw*amount` (EFilled).
+    const float rx1 = rx0 + rw * amount;
+    const float lx[4] = {rx0, rx1, rx0, rx1};
+    const float ly[4] = {ry0, ry0, ry0 + rh, ry0 + rh};
+
+    float xy[8];
+    for (int c = 0; c < 4; ++c) {
+        // Scale (Sn 1.6 * node scale s), rotate about Sn (+27 deg, the same
+        // [ct,-st;st,ct] convention as `sprite_to_quad`), then place.
+        const float px = lx[c] * kScale * s;
+        const float py = ly[c] * kScale * s;
+        xy[c * 2] = sn_x + px * ct - py * st;
+        xy[c * 2 + 1] = sn_y + px * st + py * ct;
+    }
+    // Atlas UVs: the frame's left `amount` fraction (EHorizontal).
+    const float un = tw > 0 ? 1.0f / static_cast<float>(tw) : 0.0f;
+    const float vn = th > 0 ? 1.0f / static_cast<float>(th) : 0.0f;
+    const float u0 = static_cast<float>(fr.x) * un;
+    const float u1 = (static_cast<float>(fr.x) + static_cast<float>(fr.w) * amount) * un;
+    const float v0 = static_cast<float>(fr.y) * vn;
+    const float v1 = (static_cast<float>(fr.y) + static_cast<float>(fr.h)) * vn;
+    const float uv[8] = {u0, v0, u1, v0, u0, v1, u1, v1};
+    app.renderer().draw_textured_quad(frame_name, xy, uv, 1.0f, 1.0f, 1.0f, alpha);
+}
+
 // Draws the `ik` VS screen. Design base 1024x576 (JS `ik.layout` node scale
 // `(a.N-a.J)/1024`); `s = kViewW/1024` reproduces the 1280x720 oracle layout.
 void draw_vs_intro(App& app, float t, const std::string& pname,
@@ -2990,28 +3058,31 @@ void draw_vs_intro(App& app, float t, const std::string& pname,
         const float bgq[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(bgq, 6, 0.05f, 0.02f, 0.02f, alpha);
     }
-    // Stroke pair `KF`/`ux` on `Sn` (C(512,286) la(1.6) `Wg(27)`): the red
-    // brush band across the backdrop (`vs/sprites` "left"/"right"). OPEN (B4a):
-    // the native atlas path has no node rotation, so the `Wg(27)` tilt is not
-    // applied — the band is drawn axis-aligned at its 1.6x `Sn` scale, which
-    // keeps the red mass in the capture's central band (the tilted edges
-    // remain a gap). Four measured variants (oracle `fight_intro`, %pixels>12):
-    // axis-aligned 41.12 (this), tilt about `Sn` 43.79, strokes re-centred on
-    // `Sn` 53.83, tilt about each band's centre 48.78 — every tilt REGRESSES,
-    // because the oracle's capture shows the pair MID-WIPE: `KF.wl(vc.ho(
-    // Jc.io,b))` (L2069) reveals each stroke over `b`=0..1 in 0.1 s (kd4/kd5
-    // L2072) — a horizontal reveal in the sprite's LOCAL space — and the oracle
-    // frame (~1.2-1.4 s in) catches only a slice of each brush. Reproducing it
-    // needs a rotated PARTIAL-frame draw (local-space UV clip) plus the
-    // capture's wipe progress; the full-band tilts all paint red where the
-    // oracle is still bare. Kept axis-aligned until that lands.
-    if (t >= kVsStrokeT - kVsStrokeT * 0.5f) {
-        const float sa = std::clamp((t - kVsStrokeT * 0.5f) / std::max(0.01f, kVsStrokeT * 0.5f),
-                                    0.0f, 1.0f) * alpha;
-        try_draw_atlas_button(app, "left", 512.0f * s - 246.0f * s * 1.6f, 286.0f * s,
-                              492.0f * s * 1.6f, 242.0f * s * 1.6f, sa);
-        try_draw_atlas_button(app, "right", 512.0f * s + 246.0f * s * 1.6f, 286.0f * s,
-                              492.0f * s * 1.6f, 254.0f * s * 1.6f, sa);
+    // Stroke pair `KF`/`ux` on `Sn` (C(512,296) la(1.6) `Wg(27)`): the red
+    // brush band across the backdrop (`vs/sprites` "left"/"right"), drawn as
+    // the JS rotated, UV-clipped EFilled wipe (see `draw_vs_brush`). The
+    // wipe amounts come from the VS clock: the JS stages are `kd4` (left,
+    // `ed(.1)`) then `kd5` (right, `ed(.1)`) after the slide/glyph stages;
+    // the native timeline is compressed, so both are folded into the
+    // `kVsStrokeT` window (left over its first half, right over the second)
+    // and reach 1.0 well before the `fight_intro` capture (~0.67 s).
+    // Measured vs the oracle (`fight_intro`, red mask r>100 & r-g>50 &
+    // r-b>40): oracle red mass 39.67 %, top-edge slope 20.06 deg; the
+    // pre-change axis-aligned port 28.22 % / 6.09 deg (IoU 0.508, rotated
+    // footprint fit IoU 0.614 vs axis-aligned 0.314). The exact oracle wipe
+    // progress is NOT separable from this frame (the IoU surface is flat
+    // across amount 0.7..1.0 for both brushes); the JS-exact full-band
+    // rotation is what the frame discriminates.
+    if (t >= kVsStrokeT * 0.5f) {
+        const float half = std::max(0.01f, kVsStrokeT * 0.5f);
+        const float wipe_l = std::clamp((t - half * 0.0f) / half, 0.0f, 1.0f);
+        const float wipe_r = std::clamp((t - half * 1.0f) / half, 0.0f, 1.0f);
+        if (wipe_l > 0.0f) {
+            draw_vs_brush(app, "left", -492.0f, -121.0f, 492.0f, 242.0f, wipe_l, alpha);
+        }
+        if (wipe_r > 0.0f) {
+            draw_vs_brush(app, "right", -2.0f, -133.0f, 492.0f, 254.0f, wipe_r, alpha);
+        }
     }
     // Portraits `EK`/`RS` (JS `ik` L2069-2071): `oe(Hf)` draws the users
     // image at its natural 512 px canvas, scaled by the `ik` node scale
@@ -6601,6 +6672,10 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         std::fflush(stdout);
     }
     const std::string& enemy_name = app().pending_battle().enemy_name;
+    // Root `<Triggers>` (JS `ra.Dm`): hand the global set to the controller
+    // BEFORE init — `setup_bus` (inside init) lock-filters + registers it per
+    // side, and per-round re-registers (`setup_bus` L1504) keep it live.
+    fight_->set_global_triggers(&assets.global_triggers);
     fight_->init_locks(battle, assets.merged, assets.moves, assets.clips,
                        assets.tactics_sets, tactic, "Player", enemy_name,
                        battle.player_spawn_x, battle.player_spawn_y,

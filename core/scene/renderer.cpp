@@ -359,6 +359,22 @@ void Renderer::draw_triangles(const float* verts, std::size_t vertex_count,
     batch_.add_triangles(verts, vertex_count, r, g, b, a);
 }
 
+// Explicit-geometry textured quad (see the header). Corners are already in
+// screen pixels; the two triangles use the sprite path's winding
+// (TL,TR,BL) (BL,TR,BR).
+void Renderer::draw_textured_quad(const std::string& texture_name, const float* xy,
+                                  const float* uv, float r, float g, float b, float a) {
+    const GLuint texture =
+        textures_.count(texture_name) ? textures_[texture_name] : 0;
+    static const int kOrder[6] = {0, 1, 2, 2, 1, 3};
+    SpriteQuad quad;
+    for (int i = 0; i < 6; ++i) {
+        const int k = kOrder[i];
+        quad.v[i] = {xy[k * 2], xy[k * 2 + 1], uv[k * 2], uv[k * 2 + 1], r, g, b, a};
+    }
+    batch_.add_quad(quad, texture);
+}
+
 void Renderer::draw_effect_quad(float cx, float cy, float w, float h,
                                 float rotation_deg, float r, float g, float b,
                                 float a) {

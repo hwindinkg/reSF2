@@ -63,6 +63,12 @@ public:
     // off) so the headless log proves the integration: played("hit") > 0.
     void play(const std::string& event);
 
+    // Stops every live voice of a named event — JS `ta.Jwb(a)` (L1264):
+    // `a=ta.WBa(a); a!=null && L.K.$f.stop(a)`. The name resolves through
+    // the same `ta.WBa` table `play` uses; an unknown name is a silent
+    // no-op (JS `WBa` miss = nothing stopped). Never blocks, never throws.
+    void stop(const std::string& event);
+
     // Music streaming (JS `ta.Ut(name, loop=true)` L1264-1265):
     // `assets/music/<name>.mp3` streamed from disk (never fully preloaded).
     // Same-track re-play is a no-op. Silent no-op when the engine is off or

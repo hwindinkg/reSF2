@@ -411,20 +411,34 @@ int FightController::random_sound_index(int n) {
 //   Sound (fm, L735):       `wd.dwb(a)` L519 -> `a.fka(this.parameters.voice)
 //                           && ta.ak(a.name, a.ceb, a.volume)`.
 //   RandomSound (am, L733): `wd.fwb(a)` L519 -> `a.fka(...) && ta.ak(a.ab())`.
-// StopSound (`wd.ewb` L519 -> `ta.Jwb` L1264) needs an `AudioEngine::stop`
-// the native engine does not have; the remaining kinds are parsed records
-// only (no consumer system yet) — both are listed in the follow-up report.
+//   StopSound (im, L736):   `wd.ewb(a)` L519 -> `ta.Jwb(a.name)` L1264
+//                           (`a=ta.WBa(name); a!=null && L.K.$f.stop(a)`).
+//                           NOTE: `ewb` has NO `fka` voice gate (only the two
+//                           play kinds check `Voice`), so StopSound fires for
+//                           every matching trigger.
+// The remaining kinds are parsed records only (their consumer systems —
+// child models / effects / bullets / camera — are not ported); each is
+// listed with its exact missing subsystem in the follow-up report.
 void FightController::dispatch_move_actions(
     const std::vector<const sf2::scene::MoveAction*>& acts, const FightFighter& owner,
     const char* why, const sf2::scene::FightContext& conds) {
     for (const sf2::scene::MoveAction* act : acts) {
         if (act == nullptr) continue;
-        const bool sound_kind = act->js_type == 2 || act->js_type == 4;
+        const bool sound_kind = act->js_type == 2 || act->js_type == 3 || act->js_type == 4;
         if (!sound_kind) continue;
         // JS `cb.Ti(a,b)` (L724): `if (Fd(this.$c)) return true;` then the
         // `<Conditions>` tree. `$c` empty -> always true.
         if (!act->conditions.empty() &&
             !sf2::scene::eval_move_conditions(act->conditions, conds)) {
+            continue;
+        }
+        if (act->js_type == 3) {  // StopSound — no voice gate (JS `wd.ewb`)
+            const char* s_stem = sf2::audio::sfx_stem_for_js(act->name.c_str());
+            std::fprintf(stdout, "[sfx] F%d %s %s %s name=%s stem=%s\n", frame_,
+                         owner.name.c_str(), why, act->kind.c_str(), act->name.c_str(),
+                         s_stem != nullptr ? s_stem : "<none>");
+            std::fflush(stdout);
+            if (s_stem != nullptr) sf2::audio::AudioEngine::instance().stop(act->name);
             continue;
         }
         // JS `fm.fka(voice)` L735 / `am.fka(voice)` L733:
@@ -456,6 +470,107 @@ void FightController::dispatch_move_actions(
                      stem != nullptr ? stem : "<none>");
         std::fflush(stdout);
         if (stem != nullptr) sf2::audio::AudioEngine::instance().play(pick);
+    }
+}
+
+// --- root `<Triggers>` (JS `Fa.Exb` L708 -> `ra.Dm`) ---------------------
+// The 18 move-action kinds (`lz.create` L737-739). The port DISPATCHES the
+// three audio kinds (Sound `wd.dwb` L519, RandomSound `wd.fwb` L519,
+// StopSound `wd.ewb` L519 -> `ta.Jwb` L1264) plus `SetEndStage` (`cm`, whose
+// JS `Uh()` L738 is an EMPTY no-op); the rest have no consumer subsystem in
+// the port yet and are reported, never faked.
+bool FightController::global_kind_dispatched(const std::string& kind) {
+    return kind == "Sound" || kind == "RandomSound" || kind == "StopSound" ||
+           kind == "SetEndStage";
+}
+
+std::size_t FightController::global_action_kinds() const {
+    std::size_t n = 0;
+    if (global_triggers_ == nullptr) return 0;
+    for (const sf2::scene::GlobalTrigger& t : *global_triggers_) n += t.actions.size();
+    return n;
+}
+
+// `ra.Z6a`/`ra.yz` + `Su.nw` (L?): a global trigger joins a model's set when
+// its `<Locks>` pass against that model's context. The port evaluates the
+// locks twice — once per side — mirroring the per-model registration.
+void FightController::register_global_triggers(const sf2::scene::FightContext& me_ctx,
+                                               const sf2::scene::FightContext& enemy_ctx) {
+    global_me_.clear();
+    global_enemy_.clear();
+    if (global_triggers_ == nullptr) return;
+    for (const sf2::scene::GlobalTrigger& t : *global_triggers_) {
+        if (t.locks.empty() || sf2::scene::eval_move_conditions(t.locks, me_ctx)) {
+            global_me_.push_back(&t);
+        }
+        if (t.locks.empty() || sf2::scene::eval_move_conditions(t.locks, enemy_ctx)) {
+            global_enemy_.push_back(&t);
+        }
+    }
+    std::size_t dispatched = 0;
+    for (const sf2::scene::GlobalTrigger& t : *global_triggers_) {
+        for (const sf2::scene::MoveAction& a : t.actions) {
+            if (global_kind_dispatched(a.kind)) ++dispatched;
+        }
+    }
+    std::fprintf(stdout,
+                 "[triggers] global <Triggers>: %zu triggers / %zu actions "
+                 "(locks-pass: me %zu, enemy %zu); %zu actions dispatched\n",
+                 global_triggers_->size(), global_action_kinds(), global_me_.size(),
+                 global_enemy_.size(), dispatched);
+    std::fflush(stdout);
+}
+
+// The event sites the port publishes for the global set. `event_name` is the
+// MOVE event name (`kz`/`tb.D6a` L763): Hit (6), Strike (7), EveryFrame (14)
+// and RoundStageStart (1) are wired; AnimationStart (9) and ModExpires (16)
+// are parsed but their publish sites are not (see the report).
+void FightController::dispatch_global_triggers(const char* event_name, const char* why) {
+    if (global_triggers_ == nullptr || (global_me_.empty() && global_enemy_.empty())) {
+        return;
+    }
+    const FightFighter* side_f[2] = {&player_, &enemy_};
+    const std::vector<const sf2::scene::GlobalTrigger*>* lists[2] = {&global_me_,
+                                                                    &global_enemy_};
+    for (int side = 0; side < 2; ++side) {
+        const FightFighter& owner = *side_f[side];
+        const FightFighter& other = *side_f[1 - side];
+        sf2::scene::FightContext ctx;
+        // NOT the fight's `Da.pg` stream: the global triggers are an
+        // additive evaluation the pre-existing captures never had, so a
+        // `<Random>` condition here would shift every later draw. Same
+        // unshared-stream rule as the lock scan in `setup_bus`.
+        ctx.roll01 = [this]() { return math_random01(); };
+        ctx.stage = sf2::scene::round_stage::fight;
+        ctx.anims_me = {owner.fighter.current_move() ? owner.fighter.current_move()->name
+                                                     : ""};
+        ctx.anims_enemy =
+            {other.fighter.current_move() ? other.fighter.current_move()->name : ""};
+        fill_ctx_geometry(ctx, owner, other);
+        ctx.health_ratio = owner.max_hp > 0.0f ? owner.hp / owner.max_hp : 0.0f;
+        for (const sf2::scene::GlobalTrigger* t : *lists[side]) {
+            bool event_ok = false;
+            for (const sf2::scene::Cond& e : t->events) {
+                if (e.type == event_name) {
+                    event_ok = true;
+                    break;
+                }
+            }
+            if (!event_ok) continue;
+            if (!t->conditions.empty() &&
+                !sf2::scene::eval_move_conditions(t->conditions, ctx)) {
+                continue;
+            }
+            std::vector<const sf2::scene::MoveAction*> acts;
+            for (const sf2::scene::MoveAction& a : t->actions) {
+                if (global_kind_dispatched(a.kind)) acts.push_back(&a);
+            }
+            if (acts.empty()) continue;
+            std::fprintf(stdout, "[triggers] %s %s (%s)\n", owner.name.c_str(),
+                         t->name.c_str(), why);
+            std::fflush(stdout);
+            dispatch_move_actions(acts, owner, why, ctx);
+        }
     }
 }
 
@@ -1812,6 +1927,45 @@ void FightController::setup_bus(const PerkSetup& perks) {
     bus_.register_side(
         1, sf2::scene::build_side_triggers(perks.enemy_refs, *perks.catalog, bus_.log),
         enemy_items_);
+
+    // Root `<Triggers>` (JS `Fa.Exb` L708 -> `ra.Dm`): lock-filter the global
+    // set per side against the same items/perks the perk bus uses. The lock
+    // evaluation reuses the MOVE condition evaluator (`ra.yz` -> `Su.nw` ->
+    // `Ha.he`, i.e. `Tl` conditions: `<Perk>`/`<Item>`/`<ModExists>`/...).
+    {
+        using FC = sf2::scene::FightContext;
+        auto fill = [](FC& ctx, const std::vector<std::string>& own_items,
+                       const std::vector<std::string>& foe_items,
+                       const std::vector<sf2::scene::ItemPerkRef>& own_refs,
+                       const std::vector<sf2::scene::ItemPerkRef>& foe_refs) {
+            for (const std::string& n : own_items) ctx.items.push_back(FC::item_info{"", "", n});
+            for (const std::string& n : foe_items) {
+                ctx.items_enemy.push_back(FC::item_info{"", "", n});
+            }
+            for (const sf2::scene::ItemPerkRef& r : own_refs) {
+                ctx.perks_me.push_back(FC::perk_info{"", r.name});
+            }
+            for (const sf2::scene::ItemPerkRef& r : foe_refs) {
+                ctx.perks_enemy.push_back(FC::perk_info{"", r.name});
+            }
+            ctx.health_ratio = 1.0f;  // fresh fight: both sides at full HP
+        };
+        FC me_ctx, foe_ctx;
+        fill(me_ctx, perks.player_items, perks.enemy_items, perks.player_refs,
+             perks.enemy_refs);
+        fill(foe_ctx, perks.enemy_items, perks.player_items, perks.enemy_refs,
+             perks.player_refs);
+        // The global set's condition rolls must NOT touch a shared stream
+        // (the fight's `Da.pg` replay stream, or conditions.cpp's static
+        // fallback): a build-time lock scan that consumed them desynced the
+        // deterministic captures (the tutorial fight shifted 2 frames).
+        // Route `<Random>` through the port's already-unshared pinned stream
+        // (`math_random01` — the RandomSound convention).
+        auto unshared = [this]() { return math_random01(); };
+        me_ctx.roll01 = unshared;
+        foe_ctx.roll01 = unshared;
+        register_global_triggers(me_ctx, foe_ctx);
+    }
 }
 
 namespace {
@@ -2850,6 +3004,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         dispatch_move_actions(strike_acts, atk, "Strike", ev);
         // `CZa(6)` reads the defender's CURRENT move (`Vb.model`).
         dispatch_move_actions(def.fighter.move_actions_for_event("Hit"), def, "Hit", ev);
+        // Root `<Triggers>` (JS `ra.Dm`, registered per model by `ra.yz`):
+        // the global set's own `<Hit>`/`<Strike>` events (`kz` Nm/Um).
+        dispatch_global_triggers("Strike", "Strike");
+        dispatch_global_triggers("Hit", "Hit");
     }
 
     // [fx] The `Hyb` hit direction (JS L395): the strike capsule's per-frame

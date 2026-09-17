@@ -576,12 +576,47 @@ void merge_intervals(const std::vector<pugi::xml_node>& templates, pugi::xml_nod
 
 } // namespace
 
-bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& out) {
+bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& out,
+                 std::vector<GlobalTrigger>* global_out) {
     data::xml_doc doc;
     doc.parse(xml_text);
     pugi::xml_node root = doc.root().child("Movesxml");
     if (!root) {
         return false;
+    }
+
+    // Root `<Triggers>` (JS `Fa.Exb` L708 -> `ra.Dm`, called from
+    // `Fa.parse` with `f = f.A("Triggers")`). Each `<Trigger Name=..>`:
+    //   `f.Hc    = Fa.GIa(d)`  -> `<Events>`  (`kz.create`)
+    //   `f.rb    = Fa.HS("Conditions",d)` -> `<Conditions>` (`Tl.create`)
+    //   `f.locks = Fa.HS("Locks",d)`      -> `<Locks>`      (`Tl.create`)
+    //   `f.actions = Fa.CIa(d)`           -> `<Actions>`    (`lz.create`)
+    if (global_out != nullptr) {
+        global_out->clear();
+        if (pugi::xml_node trigs = root.child("Triggers")) {
+            for (pugi::xml_node t : trigs.children("Trigger")) {
+                GlobalTrigger gt;
+                if (pugi::xml_attribute n = t.attribute("Name")) gt.name = n.value();
+                if (pugi::xml_node ev = t.child("Events")) {
+                    parse_cond_children(ev, gt.events);
+                }
+                if (pugi::xml_node cd = t.child("Conditions")) {
+                    parse_cond_children(cd, gt.conditions);
+                }
+                if (pugi::xml_node lk = t.child("Locks")) {
+                    parse_cond_children(lk, gt.locks);
+                }
+                if (pugi::xml_node ac = t.child("Actions")) {
+                    for (pugi::xml_node a : ac.children()) {
+                        MoveAction act;
+                        parse_action(a, act);
+                        if (act.js_type < 0) continue;  // `lz.create` -> null
+                        gt.actions.push_back(std::move(act));
+                    }
+                }
+                global_out->push_back(std::move(gt));
+            }
+        }
     }
 
     // Templates table (JS `Fa.kxb`: <Templates><Template Name=..>`).

@@ -305,6 +305,23 @@ std::uint64_t AudioEngine::played(const std::string& event) const {
     return impl_->played[static_cast<std::size_t>(e)];
 }
 
+// JS `ta.Jwb(a)` (L1264): `a=ta.WBa(a); a!=null && L.K.$f.stop(a)`. `WBa`
+// resolves the event name to the ONE playing source; a miss stops nothing.
+// Native: stop + rewind every voice of the event (the port has no
+// per-instance handle, so a stop clears the whole pool — the JS `$f.stop`
+// stops the single active source per name).
+void AudioEngine::stop(const std::string& event) {
+    const int e = find_event_index(event);
+    if (e < 0 || impl_ == nullptr) return;
+    std::fprintf(stdout, "[audio] stop '%s'\n", event.c_str());
+    std::fflush(stdout);
+    if (!enabled_ || !impl_->engine_ok) return;  // headless: logged only
+    for (ma_sound& s : impl_->sounds[static_cast<std::size_t>(e)]) {
+        ma_sound_stop(&s);
+        ma_sound_seek_to_pcm_frame(&s, 0);
+    }
+}
+
 void AudioEngine::play_music(const std::string& track, bool loop) {
     if (impl_ == nullptr || track.empty()) return;
     ++impl_->music_plays;

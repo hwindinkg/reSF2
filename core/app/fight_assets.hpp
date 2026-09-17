@@ -103,6 +103,9 @@ struct FightAssets {
     // The shared data (JS `G.data`).
     std::map<std::string, sf2::data::anim_clip> clips;
     std::map<std::string, sf2::scene::MoveDef> moves;
+    // Root `<Triggers>` (JS `Fa.Exb` L708 -> `ra.Dm`): the global trigger
+    // set, registered into every fight (locks-gated) alongside the perks.
+    std::vector<sf2::scene::GlobalTrigger> global_triggers;
     std::vector<sf2::scene::TacticsFile> tactics_sets;
     std::map<std::string, sf2::scene::TacticDef> tactic_defs;  // by name
     // Perk catalog (res/perks.xml `Be` defs) for the fight trigger bus

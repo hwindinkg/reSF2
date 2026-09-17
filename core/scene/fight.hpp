@@ -1676,6 +1676,41 @@ private:
     int random_sound_index(int n);
     // Rebuilds a fighter's physics body from its current pose.
     void rebuild_body(FightFighter& f, const FightFighter& foe);
+
+public:
+    // --- root `<Triggers>` (JS `Fa.Exb` L708 -> `ra.Dm`) --------------------
+    // The GLOBAL trigger set (the parsed root `<Triggers>` block), handed in
+    // by the app before `init`; `setup_bus` (inside init, and per round)
+    // lock-filters + registers it per side. A setter rather than another
+    // `init` parameter keeps the two `init` overloads and their call sites
+    // untouched.
+    void set_global_triggers(const std::vector<sf2::scene::GlobalTrigger>* triggers) {
+        global_triggers_ = triggers;
+    }
+    // Number of global triggers whose `<Locks>` passed for `side` (0 =
+    // player, 1 = enemy). Diagnostics only.
+    std::size_t global_trigger_count(int side) const {
+        return side == 0 ? global_me_.size() : global_enemy_.size();
+    }
+    // The parsed global set's action count, for the report.
+    std::size_t global_action_kinds() const;
+    // Whether the port dispatches this global action kind (`lz.create` name).
+    static bool global_kind_dispatched(const std::string& kind);
+
+private:
+    // `ra.yz`/`Su.nw`: lock-filter `*global_triggers_` against `conds`.
+    void register_global_triggers(const sf2::scene::FightContext& me_ctx,
+                                  const sf2::scene::FightContext& enemy_ctx);
+    // Evaluate the lock-passing global triggers of BOTH sides whose `<Events>`
+    // contain `event` (the MOVE event name, `kz.create`) and whose
+    // `<Conditions>` pass, dispatching their supported actions through
+    // `dispatch_move_actions` (owner side's fighter + context).
+    void dispatch_global_triggers(const char* event_name, const char* why);
+
+    const std::vector<sf2::scene::GlobalTrigger>* global_triggers_ = nullptr;
+    std::vector<const sf2::scene::GlobalTrigger*> global_me_;
+    std::vector<const sf2::scene::GlobalTrigger*> global_enemy_;
+
     // --- perk trigger bus (`tb`) -----------------------------------------
     // `ZOa` (L398-399): build live trigger sets from the PerkSetup and
     // register both sides (`Gf`).

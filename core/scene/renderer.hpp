@@ -156,6 +156,21 @@ public:
     void draw_effect_quad(float cx, float cy, float w, float h, float rotation_deg,
                           float r, float g, float b, float a = 1.0f);
 
+    // Textured screen-space quad with EXPLICIT corner positions and UVs —
+    // the native stand-in for the JS partial-frame draw (`le.mode`, the
+    // `EFilled` mode `vc.ho` L1663). The canvas backend draws it with
+    // `drawImage(img, srcRect, dstRect)` (`dda` L802087 case 0-3) and the
+    // WebGL backend writes the same two rects straight into the quad's
+    // xy/uv arrays (`dda` L911151): the visible box is the frame's source
+    // SUB-RECT and the destination is a SUB-RECT of the node box. A rotated
+    // node (JS `Wg` -> `Ar`, L486) therefore draws a rotated, UV-CLIPPED
+    // quad — the VS intro's brush wipe (`ik` L2069/2072).
+    // `xy` = 4 (x,y) pairs in SCREEN pixels, order TL, TR, BL, BR; `uv` = 4
+    // (u,v) pairs aligned to the same corners (atlas-normalized). `texture_name`
+    // is resolved through the renderer's texture cache (0 = solid fill).
+    void draw_textured_quad(const std::string& texture_name, const float* xy,
+                            const float* uv, float r, float g, float b, float a);
+
     // Render pass: renders `node` (and its children) through `camera`.
     void render_node(sf2::scene::Node& node, const Camera& camera);
 

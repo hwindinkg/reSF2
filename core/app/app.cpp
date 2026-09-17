@@ -621,9 +621,13 @@ bool App::init(const std::string& res_root, const std::string& save_path,
         }
 
         const std::string moves_xml = extracted_xml("moves.xml");
-        if (!sf2::scene::parse_moves(moves_xml, fight_assets_->moves)) {
+        if (!sf2::scene::parse_moves(moves_xml, fight_assets_->moves,
+                                     &fight_assets_->global_triggers)) {
             throw std::runtime_error("parse_moves failed");
         }
+        std::fprintf(stdout, "[moves] parsed %zu moves, %zu global <Triggers>\n",
+                     fight_assets_->moves.size(), fight_assets_->global_triggers.size());
+        std::fflush(stdout);
 
         const std::string t_settings = extracted_xml("tactic_settings.xml");
         sf2::scene::parse_tactic_settings(t_settings, fight_assets_->tactic_defs);
