@@ -149,7 +149,14 @@ struct Interval {
 struct Lock {
     std::string type;     // "Weapon", "Skeleton", ...
     std::string subtype;  // "Fists", "Katana", ...
-    std::string name;     // optional Name attr
+    std::string name;     // optional Name attr (JS `Hm.Ba`)
+    // `Not="1"` (JS `tb.init` L763: `this.cb = u.ka(a.attributes.get("Not"),
+    // false)` — read for EVERY lock kind). `Hm.he` (L758) returns `!this.cb`
+    // when an item matches and `this.cb` when none does, so `Not` INVERTS the
+    // whole test. Before this field existed the attribute was parsed away and
+    // a `Not="1"` lock passed on an OWNED item — the exact opposite of the JS
+    // (HighKick's `Or{<Item Type="Armor" Name="BODY_GATEKEEPER" Not="1"/>}`).
+    bool not_ = false;
     bool or_ = false;     // inside an Operator Type="Or" (any of the group)
     // An UNPARSED lock kind (`<Perk Name=..>` and friends). The JS `ra.Hza`
     // tests every lock node against the fighter; the port carries only item

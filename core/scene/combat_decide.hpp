@@ -6,7 +6,16 @@
 // both the Node harness and this header agree bit-for-bit; the runtime
 // reaction pick (Fighter::try_react) uses the partition ORDER (priority
 // descending, matching hb_) while the weighted-roulette pick inside Pkb
-// stays OPEN (tactic weights are not available at reaction time).
+// stays OPEN here (the reaction path has no tactic/feature state, and
+// `Gc.DK`'s caller is the hit-reaction latch, not the per-frame `de.ia`).
+//
+// The OTHER roulette — the per-frame MOVE selection `de.ia` (L592-594) ->
+// `nf.jL` (L597) -> `Md.jL` (L640) + `iCa` — is IMPLEMENTED: see
+// `Fighter::try_select_move(ctx, tactic, feat)` (fighter.cpp), which gathers
+// every Conditions-passing candidate and draws one `Da.pg` (`s4(d)`) against
+// the tactic's `<AnimationWeights>` (`Md.$oa`, parsed L638) evaluated by
+// `cc.Gb` (L647) over the `mQ` (L620) feature state. This header is not on
+// that path.
 //
 // JS (L673-674, verbatim shape):
 //   partition: d=[], f=[], g=[]; e=null; Ukb=null;

@@ -731,6 +731,7 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
                 if (pugi::xml_attribute t = item.attribute("Type")) l.type = t.value();
                 if (pugi::xml_attribute s = item.attribute("SubType")) l.subtype = s.value();
                 if (pugi::xml_attribute n = item.attribute("Name")) l.name = n.value();
+                l.not_ = data::xml_attr_bool(item, "Not", false);
                 def.locks.push_back(std::move(l));
             }
             for (pugi::xml_node op : locks.children("Operator")) {
@@ -739,6 +740,7 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
                     if (pugi::xml_attribute t = item.attribute("Type")) l.type = t.value();
                     if (pugi::xml_attribute s = item.attribute("SubType")) l.subtype = s.value();
                     if (pugi::xml_attribute n = item.attribute("Name")) l.name = n.value();
+                    l.not_ = data::xml_attr_bool(item, "Not", false);
                     l.or_ = true;
                     def.locks.push_back(std::move(l));
                 }

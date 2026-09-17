@@ -16,6 +16,7 @@
 #include <set>
 
 #include "anim_archive.hpp"
+#include "scene/ai.hpp"        // TacticDef / AiFeatureState / weight_curve_eval
 #include "scene/conditions.hpp"
 #include "scene/move_def.hpp"
 
@@ -152,24 +153,58 @@ void Fighter::build_move_list(const std::map<std::string, MoveDef>& all_moves,
 
 // JS `ra.Hza` (L684-685): the move set `me` is built by testing every move's
 // Locks against the fighter's items (`f.nw(d,b)`). A lock group passes when:
-//   - a plain <Item Type SubType> matches an owned (type, subtype) item;
+//   - a plain <Item Type SubType Name> matches an owned item;
 //   - an <Operator Type="Or"> group passes when ANY member item matches;
 // moves with no locks are universal (every fighter has the Skeleton).
 // This mirrors the game exactly: a WEAPON_KNIVES (SubType="Knives") owner
 // gets KnivesSlash (Locks: Or{Weapon Knives, Weapon Keris}).
+//
+// The item test is the JS `Hm.he` (L758) VERBATIM:
+//   c = (this.uc==""||this.uc==b.type)
+//       ? (this.Zta==""||this.Zta==b.Yb) : false;
+//   c = c ? (this.Ba==""||this.Ba==b.name) : false;
+//   if(c) return !this.cb;   return this.cb;
+// i.e. Type / SubType / Name must all match (an empty lock field is a
+// wildcard) and `this.cb` (`Not`, `tb.init` L763) INVERTS the result —
+// `Not="1"` passes when NO owned item matches. Both halves were missing:
+// the name was never compared (so `Armor Name="BODY_GATEKEEPER"` matched ANY
+// armor) and `Not` was parsed away (so `Not="1"` passed on an OWNED item —
+// the exact opposite).
+template <typename Owned>
+static bool owned_item_matches(const Lock& l, const Owned& owned) {
+    bool matched = false;
+    for (const auto& o : owned) {
+        if (o.type != l.type) continue;
+        if (!l.subtype.empty() && o.subtype != l.subtype) continue;
+        // `this.Ba == b.name`: a NAME-bearing lock requires the item name.
+        // An owned entry with no name can never satisfy a named lock.
+        if (!l.name.empty() && o.name != l.name) continue;
+        matched = true;
+        break;
+    }
+    // `Hm.he`: `if(c) return !this.cb; return this.cb;`
+    return l.not_ ? !matched : matched;
+}
+
 void Fighter::build_move_list_locks(
     const std::map<std::string, MoveDef>& all_moves,
     const std::vector<std::pair<std::string, std::string>>& owned,
     bool include_universal, const std::string& weapon_subtype) {
+    // The (type, subtype) caller shape carries no item NAME — a named lock
+    // can therefore never match (JS-faithful for a loadout whose item names
+    // are unknown). The fight path passes the named `OwnedItem` list.
+    std::vector<OwnedItem> named;
+    named.reserve(owned.size());
+    for (const auto& o : owned) named.push_back({o.first, o.second, std::string()});
+    build_move_list_locks(all_moves, named, include_universal, weapon_subtype);
+}
+
+void Fighter::build_move_list_locks(
+    const std::map<std::string, MoveDef>& all_moves,
+    const std::vector<OwnedItem>& owned,
+    bool include_universal, const std::string& weapon_subtype) {
     auto owned_item = [&owned](const Lock& l) {
-        for (const auto& o : owned) {
-            // Lock Type/SubType both match (JS `nw`: `b.type==a.type &&
-            // b.Yb==a.Yb`; an empty lock SubType matches any owned subtype).
-            if (o.first != l.type) continue;
-            if (!l.subtype.empty() && o.second != l.subtype) continue;
-            return true;
-        }
-        return false;
+        return owned_item_matches(l, owned);
     };
     hb_.clear();
     for (const auto& kv : all_moves) {
@@ -212,10 +247,16 @@ void Fighter::build_move_list_locks(
         bool any_or = false;
         for (const Lock& l : m.locks) {
             if (l.never) {
-                // An unmodelled lock kind (`<Perk Name=..>`): the JS tests it,
-                // the port cannot, so it is never satisfied. A plain lock
-                // fails the move; an Or member leaves the group satisfiable
-                // only by its modelled members.
+                // An unmodelled lock kind (`<Perk Name=..>`, `<Screen
+                // Name=..>`): the JS tests it (`Bm`/`Gm`), the port cannot,
+                // so it is never satisfied. A plain lock fails the move; an
+                // Or member leaves the group satisfiable only by its modelled
+                // members. Shipped census (`res/moves.xml`): 87 `<Perk>` +
+                // 221 `<Screen>` children, 0 of them carrying `Not` — so the
+                // fail-closed choice cannot be inverted by the attribute.
+                // `<Screen>` is benign in a fight (the JS `Gm` passes only
+                // for the shop screens, never `Fight`), `<Perk>` is exact for
+                // a perk-less fighter and conservative for a perk owner.
                 if (l.or_) {
                     or_group = true;
                     continue;
@@ -445,6 +486,22 @@ bool Fighter::try_start_move(const MoveDef& move, FightContext& ctx) {
     return start_move_impl(move, ctx, /*ai=*/false);
 }
 
+// JS `de.V1` (L601-602): the candidate test. `b = this.model.me` (the move
+// set), `c.gm = !1` only for the AI; the PLAYER path keeps `gm` true so the
+// Keys conditions match the buffered keys (`vm.he` L749). The candidate's
+// animation-name list goes into `c.xK` (`ctx.candidate_moves`) and the
+// `<Conditions>` tree runs via `a.Yz(...)`.
+bool Fighter::move_conditions_pass(const MoveDef& move, FightContext& ctx,
+                                  std::string* trace) const {
+    ctx.candidate_moves = {move.name};
+    ctx.keys.clear();
+    for (const auto& k : keys_) {
+        ctx.keys.push_back({k.key, k.press});
+    }
+    ctx.keys_gm = true;
+    return eval_move_conditions(move.conditions, ctx, trace);
+}
+
 // JS `de.V1` (L601-602): the AI tests a candidate with `Fc.gm=!1`, which
 // makes every Keys condition pass (`vm.he` L749 returns true). The native
 // port mirrors this with `keys_gm=false`.
@@ -470,14 +527,8 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         // Input path (JS `wd.NS` L506): the caller (try_select_move) has
         // already tested the main Conditions; here they are re-checked with
         // the buffered keys (gm=true).
-        ctx.candidate_moves = {move.name};
-        ctx.keys.clear();
-        for (const auto& k : keys_) {
-            ctx.keys.push_back({k.key, k.press});
-        }
-        ctx.keys_gm = true;
         std::string trace;
-        if (!eval_move_conditions(move.conditions, ctx, &trace)) {
+        if (!move_conditions_pass(move, ctx, &trace)) {
             return false;
         }
     }
@@ -746,7 +797,8 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
 // selection tests each `hb` candidate in priority order (JS `Zka` L502 +
 // `de.V1` L601). The FIRST passing move starts. The `1key` template means
 // one buffered Tap of a single key.
-std::string Fighter::try_select_move(FightContext& ctx) {
+std::string Fighter::try_select_move(FightContext& ctx, const TacticDef* tactic,
+                                     const AiFeatureState* feat) {
     // JS `wd.Ykb` (L500, the player's KeyPressed handler — `Anb` -> `Ykb` when
     // `Je==2`/RoundStage Fight) calls the move finder `nf.ia(a, ...)`
     // UNCONDITIONALLY: there is NO `da.Ua==null` (no-anim-playing) test. The
@@ -773,6 +825,14 @@ std::string Fighter::try_select_move(FightContext& ctx) {
         }
     }
     if (!has_tap) return "";
+
+    // [M1] JS `de.ABa` (L601) filters `wb` by `V1`: collect EVERY candidate
+    // whose Conditions pass, in the same `hb_` (Priority-descending) order
+    // the JS `Aua`/`Zka` machinery keeps. The first-passing pick is gone —
+    // it was the documented divergence this replaces (the human's "plays the
+    // WRONG animation" second cause: the move was never chosen by the JS
+    // roulette).
+    std::vector<const MoveDef*> passing;
     for (const MoveDef* m : hb_) {
         if (m == nullptr) continue;
         // Input-selectable moves are those whose Events contain
@@ -781,11 +841,86 @@ std::string Fighter::try_select_move(FightContext& ctx) {
         if (!m->has_event("KeyPressed")) {
             continue;
         }
+        if (!move_conditions_pass(*m, ctx)) {
+            continue;
+        }
+        passing.push_back(m);
+    }
+    if (passing.empty()) return "";
+
+    // The JS `de.ia` (L592-594) tail, verbatim shape:
+    //   this.ABa(this.wb); this.h2a();      // `ld` = passing animations
+    //   a = this.jL(this.ld);               // the ROULETTE
+    //   if (-1 < a) return this.eh = this.vs[a], this.ld[a];
+    // `nf.jL` (L597) forwards to `this.Gc.jL(ld, this.cs, this.iN)` =
+    // `Md.jL` (L640): `d` = the SUM of the weights; ONE `Da.pg.s4(d)` draw
+    // (= `jf()*d`, a float in [0,d)); subtract the weights in candidate
+    // order and return the first index that goes negative. When the total is
+    // <= 0 the JS returns -1 and `ia` returns null — NO move starts, and NO
+    // draw is consumed.
+    std::size_t pick = 0;
+    if (tactic != nullptr && feat != nullptr) {
+        std::vector<float> weights(passing.size(), 0.0f);
+        float sum = 0.0f;
+        for (std::size_t i = 0; i < passing.size(); ++i) {
+            const MoveDef& m = *passing[i];
+            for (const auto& kv : tactic->anim_weights) {
+                // JS `iCa` (L640): the FIRST entry whose Name is "" (the
+                // wildcard default) or matches the move wins. `$k` (L698:
+                // `this.name != a ? this.d2(a) : !0`, `d2` scans `xl`) =
+                // the move name OR an inherited Template tag (`xl` is
+                // filled from the own name at L711 and each template name
+                // at L723).
+                if (kv.first.empty() || kv.first == m.name ||
+                    m.template_tags.count(kv.first) > 0) {
+                    weights[i] = weight_curve_eval(kv.second, *feat);
+                    break;
+                }
+            }
+            sum += weights[i];
+        }
+        if (!(sum > 0.0f)) return "";  // JS `if(0<d)` false -> -1 -> null
+        float g = ctx.roll01 ? ctx.roll01() * sum : 0.0f;  // `Da.pg.s4(d)`
+        for (std::size_t i = 0; i < passing.size(); ++i) {
+            g -= weights[i];
+            if (g < 0.0f) {
+                pick = i;
+                break;
+            }
+            pick = i;  // float-rounding guard (JS falls through to -1)
+        }
+        // The roulette log the audit asks for: the candidate set, each
+        // `cc.Gb` weight, the drawn index and the picked move.
+        std::fprintf(stdout, "[move] roulette: %zu candidates sum=%.4f",
+                     passing.size(), static_cast<double>(sum));
+        for (std::size_t i = 0; i < passing.size(); ++i) {
+            std::fprintf(stdout, " %s=%.4f", passing[i]->name.c_str(),
+                         static_cast<double>(weights[i]));
+        }
+        std::fprintf(stdout, " -> idx=%zu %s\n", pick,
+                     passing[pick]->name.c_str());
+        std::fflush(stdout);
+    }
+
+    // JS `if(-1 < a) return this.eh = this.vs[a], this.ld[a]` — the picked
+    // animation starts. `start_move_impl` re-runs the same Conditions test
+    // (now with a trace); should it no longer pass, fall through the
+    // remaining candidates in order so the port never stalls on a stale pick.
+    for (std::size_t k = 0; k < passing.size(); ++k) {
+        const MoveDef* m = passing[(pick + k) % passing.size()];
         if (try_start_move(*m, ctx)) {
             return m->name;
         }
     }
     return "";
+}
+
+// No tactic / feature state at hand (probe + demo callers): JS `nf.jL`
+// (L597) returns -1 when `this.model.jb == null`, so `ia` returns null. The
+// port keeps the legacy first-passing pick for these callers instead (see
+// fighter.hpp) and consumes NO `Da.pg` draw.
+std::string Fighter::try_select_move(FightContext& ctx) {
+    return try_select_move(ctx, nullptr, nullptr);
 }
 
 // Hit-reaction pick (JS `Gc.DK` L343452 + `Aua` L343447 + `uf.sja` L57426;

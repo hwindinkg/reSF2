@@ -31,6 +31,8 @@ namespace sf2::scene {
 struct MoveDef;
 struct MoveAction;
 struct FightContext;
+struct TacticDef;       // ai.hpp (tactic_settings.xml <Tactic>)
+struct AiFeatureState;  // ai.hpp (the `cc.Gb` weight-curve input)
 } // namespace sf2::scene
 
 namespace sf2::scene {
@@ -159,6 +161,20 @@ public:
                                const std::vector<std::pair<std::string, std::string>>& owned,
                                bool include_universal = true,
                                const std::string& weapon_subtype = std::string());
+    // One owned item, the full JS `Hc` shape (`type`/`Yb`/`name` — the three
+    // fields `Hm.he` L758 compares). The (type, subtype) pair overload above
+    // cannot express `Lock::name`, so a NAME-bearing lock could only be
+    // tested against an item name that is not carried; the fight path passes
+    // this richer list.
+    struct OwnedItem {
+        std::string type;
+        std::string subtype;
+        std::string name;
+    };
+    void build_move_list_locks(const std::map<std::string, MoveDef>& all_moves,
+                               const std::vector<OwnedItem>& owned,
+                               bool include_universal,
+                               const std::string& weapon_subtype);
 
     // Buffers one key press (JS `Kl.Sgb`/`zl.Sgb`, L798): appends the key to
     // the 2-slot Tap sequence (`zg.sh`), rebuilds the held set (`zg.Fh`),
@@ -172,10 +188,26 @@ public:
     void age_keys();
 
     // Attempts move selection from `hb` (priority order) with the buffered
-    // keys + current state. The FIRST passing move starts (JS `Zka` picks
-    // `HB[0]`; `de.V1` tests each candidate in priority order).
+    // keys + current state (JS `wd.Ykb` L500 -> `nf.ia` L592-594).
+    //
+    // JS `de.ia` (L594) does NOT take the first passing candidate: it builds
+    // the candidate animation list (`h2a` L608: `ld.push(c.animation)`) and
+    // then `a = this.jL(this.ld)` — the WEIGHTED ROULETTE (`nf.jL` L597 ->
+    // `Md.jL` L640 + `iCa` L640) over ALL passing candidates, drawing from
+    // `Da.pg` (`s4`). The tactic's `<AnimationWeights>` table (`Md.$oa`,
+    // parsed L638) supplies the weights via `cc.Gb` (L647).
+    //
+    // 1-arg overload: no tactic/feature state available (probe/demo callers).
+    // It keeps the legacy first-passing pick and draws nothing.
+    // 3-arg overload (the fight path): full roulette. `tactic` = the tactic
+    // (`Md`), `feat` = the `iN` feature state (`mQ` L620). When the tactic is
+    // known but the total weight is 0 the JS `jL` returns -1 and `ia` returns
+    // null — no move starts (and NO draw is consumed).
     // Returns the started move's name, or "" if none passed.
     std::string try_select_move(sf2::scene::FightContext& ctx);
+    std::string try_select_move(sf2::scene::FightContext& ctx,
+                                const sf2::scene::TacticDef* tactic,
+                                const sf2::scene::AiFeatureState* feat);
     // Hit-reaction pick (JS `Gc.DK` L673-674, d-set first-match): starts the
     // first priority-ordered `hb` move carrying a `Hit` event whose tactics
     // conditions pass (54 such moves in moves.xml: HighHit/MiddleHit/...,
@@ -204,6 +236,15 @@ public:
     // Shared implementation of try_start_move / ai_start_move.
     bool start_move_impl(const MoveDef& move, sf2::scene::FightContext& ctx,
                          bool ai);
+
+    // Side-effect-free input-path condition test (JS `de.V1` L601-602 with
+    // `gm` left TRUE — the player path). Sets `ctx.candidate_moves` to the
+    // move's animation-name list, snapshots the buffered keys, and runs the
+    // move's own `<Conditions>` tree. Used by `try_select_move` to collect
+    // EVERY passing candidate before the roulette; `start_move_impl` re-runs
+    // the same test (with a trace) when the picked move actually starts.
+    bool move_conditions_pass(const MoveDef& move, FightContext& ctx,
+                              std::string* trace = nullptr) const;
 
     // Anim timescale (SlowModel `Kvb`/`KT`): apply sets scale (Speed>=1;
     // Speed<1 is a verbatim no-op), revert restores 1.0 (`v.dB` assumed).

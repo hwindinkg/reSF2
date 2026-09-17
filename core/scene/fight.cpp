@@ -653,15 +653,24 @@ FightFighter FightController::make_fighter(
         // `GiantSwordStepBack` (giant_sword_step_back, Priority 11, whose
         // `<Locks>` require `Weapon SubType="GiantSword"`) - the reported
         // "plays the WRONG animation". The lock test excludes both.
-        const std::vector<std::pair<std::string, std::string>> implicit = {
-            {"Skeleton", "Skeleton"},
-            {"Weapon", weapon_subtype},
-            {"Armor", "Body"},
-            {"Helm", "Head"},
+        // The item NAMES matter: `Hm.he` (L758) compares `this.Ba == b.name`,
+        // so a named lock (`<Item Type="Armor" Name="BODY_GATEKEEPER"/>`,
+        // 64 occurrences in res/moves.xml) only passes for an item carrying
+        // that name. The shipped default loadout's item ids are exactly
+        // Body/Head/Fists/NoRanged/NoMagic (`reference/save.xml`), so the
+        // name equals the subtype here.
+        const std::vector<Fighter::OwnedItem> implicit = {
+            {"Skeleton", "Skeleton", "Skeleton"},
+            {"Weapon", weapon_subtype, weapon_subtype},
+            {"Armor", "Body", "Body"},
+            {"Helm", "Head", "Head"},
         };
         f.fighter.build_move_list_locks(*moves_, implicit, /*include_universal=*/true,
                                        weapon_subtype);
     } else {
+        // The `owned` (type, subtype) list carries no item NAMES (the app
+        // layer's `owned_items` returns pairs); a named lock can therefore
+        // not match on this path. See the M3 note in move_def.hpp.
         f.fighter.build_move_list_locks(*moves_, owned, /*include_universal=*/true,
                                        weapon_subtype);
     }
@@ -3178,10 +3187,43 @@ FightController::BattlePrize FightController::prize(int base_coins) const {
     return p;
 }
 
-// The per-fighter update: the AI (or input) picks a move, the fighter
-// executes it, the physics body is rebuilt. Mirrors the JS `wd.ia` +
-// `de.ia` path (see core/scene/README.md).
+// JS `mQ` (L620): the `cc.Gb` (L647) weight-curve feature state, filled from
+// ME (`this.model`) + the ENEMY. This mirrors `AiController::mq`
+// (ai_controller.cpp L209) — the AI path's builder — and is repeated here
+// because `mq` is private to the AI controller (outside this task's file
+// set) and both paths must feed the SAME state. Field semantics are the ones
+// documented on `AiFeatureState` / `AiController::mq` (o1/q1 = ABSOLUTE hp,
+// xY = enemy played steps, pZ = `Tba` max `M2`, lya = NPivot distance).
+static sf2::scene::AiFeatureState move_feature_state(
+    const sf2::scene::AiFightState& st) {
+    sf2::scene::AiFeatureState f;
+    {
+        double count = 0.0, xb = 0.0, tf = 0.0;
+        if (st.strike_memory != nullptr) {
+            st.strike_memory->d0(st.enemy_move, count, xb, tf);
+        }
+        f.counter = static_cast<float>(count);
+        f.xb = static_cast<float>(xb);
+        f.tf = static_cast<float>(tf);
+    }
+    f.o1 = st.my_hp;      // absolute gd (NOT a ratio — see `mq` L192-208)
+    f.q1 = st.enemy_hp;   // absolute gd
+    f.xY = static_cast<float>(st.enemy_move_frame);
+    f.cl = static_cast<float>(st.magic_bullets);
+    f.k2 = static_cast<float>(st.ranged);
+    f.pz = static_cast<float>(st.enemy_max_part_frames);
+    f.lya = std::fabs(st.enemy_x - st.my_x);  // JS `s6a` L619-620
+    f.shift = 0.0f;
+    f.my_anim = st.my_anim;
+    f.enemy_anim = st.enemy_anim;
+    f.conditional = false;
+    return f;
+}
+
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
+    // The per-fighter update: the AI (or input) picks a move, the fighter
+    // executes it, the physics body is rebuilt. Mirrors the JS `wd.ia` +
+    // `de.ia` path (see core/scene/README.md).
     // Perk bus per-frame work (EveryFrame slot 2 + mod ia + 12/13 edges).
     tick_bus_side(&me == &player_ ? 0 : 1);
     // Perk DoTs/HoTs (JS `znb`/`Inb`, L1290/L1298): tick installed mods
@@ -3241,7 +3283,26 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         ctx.qb = me.is_player;
         fill_ctx_geometry(ctx, me, foe);
         ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
-        const std::string chosen = me.fighter.try_select_move(ctx);
+        // [M1] JS `de.ia` (L594) picks via the weighted roulette
+        // (`nf.jL` L597 -> `Md.jL` L640), whose weights come from the
+        // tactic's `<AnimationWeights>` evaluated against the `mQ` (L620)
+        // feature state. Build the state `mQ` reads (the same the AI block
+        // below builds), so the player and the AI weigh from one definition.
+        sf2::scene::AiFightState st;
+        st.my_hp = me.hp;                 // `a.o1 = parameters.gd`
+        st.enemy_hp = foe.hp;             // `a.q1 = b.parameters.gd`
+        st.enemy_move = foe.fighter.current_move();
+        st.enemy_move_frame = foe.fighter.move_frame();  // `a.xY = b.da.kJ()`
+        st.enemy_max_part_frames = foe.fighter.m2();     // `a.pZ = Tba(b)`
+        st.ranged = me.ranged_available ? -1 : 1;        // `a.K2 = K0()`
+        st.magic_bullets = 0;                            // `a.cl = bh`
+        st.my_x = me.fighter.world_x();                  // `a.Lya = s6a(me)`
+        st.enemy_x = foe.fighter.world_x();
+        st.my_anim = me.fighter.current_move() ? me.fighter.current_move()->name : "";
+        st.enemy_anim = foe.fighter.current_move() ? foe.fighter.current_move()->name : "";
+        st.strike_memory = &me.fighter.strike_memory();  // `Cn.d0` -> counter/xb/tf
+        const sf2::scene::AiFeatureState feat = move_feature_state(st);
+        const std::string chosen = me.fighter.try_select_move(ctx, tactic_, &feat);
         if (!chosen.empty()) {
             ++me.moves_started;
             me.last_decision = "input:" + chosen;
