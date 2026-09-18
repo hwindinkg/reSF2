@@ -113,6 +113,10 @@ public:
     float dojo_player_x() const;
     float dojo_player_y() const;
     int dojo_fight_frame() const;
+    // The hub player's clip frame (JS `Te.M0()`). The pad-punch probe uses it
+    // to prove the punch lands OUTSIDE the running move's `Uninterrupt`
+    // interval (FrontFlip 4..23, moves.xml) before it asserts the punch move.
+    int dojo_player_move_frame() const;
     // The last control the hub's keyboard produced (0 = unbound/swallowed);
     // the dojo keyboard-parity evidence (JS `Za.bbb` diagonal pairs).
     int dojo_last_key_type() const;
@@ -458,6 +462,17 @@ public:
     // the same `player_input` path the keyboard uses, bypassing the GLFW key
     // map. The `atframe <n> press <control>` replay stream uses these ids.
     void inject_game_key(int key_type_index, bool down);
+
+    // Test hooks (`--verify-place`): move both fighters to explicit world x so
+    // a probe can force either facing (`Ae.Wl`), and read the resulting
+    // positions / clip frame back. No behaviour change.
+    void place_fighters(float me_x, float enemy_x);
+    float player_world_x() const;
+    float enemy_world_x() const;
+    int player_move_frame() const;
+    // Clears the player's current move (`Fighter::clear_move`) so a probe
+    // starts from a neutral state.
+    void reset_player_move();
 
     // The player's move-list size (the equipment-change evidence: the
     // headless-loop driver logs it before/after equipping a weapon).

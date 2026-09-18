@@ -1382,6 +1382,17 @@ public:
         player_.weapon = player_weapon;
         enemy_.weapon = enemy_weapon;
     }
+    // Test hook (`--verify-place`): move both anchors so a probe can force
+    // either facing. `Ae.Wl` (`Vi.SBa` L704) = sign(enemy_x - me_x); placing
+    // the enemy LEFT makes `Wl < 0`, the mirrored-requirement branch of
+    // `vm.he` L749 (`a.keys.S1||a.Wl>0 ? this.xn : this.TDa`).
+    void debug_place_fighters(float me_x, float enemy_x) {
+        player_.fighter.teleport(me_x, player_.fighter.world_y());
+        enemy_.fighter.teleport(enemy_x, enemy_.fighter.world_y());
+    }
+    // Test hook (`--verify-place`): drop the player's current move so a probe
+    // starts from a neutral state.
+    void debug_reset_player_move() { player_.fighter.clear_move(); }
     // Battle prize breakdown (JS `v.kD`/`bzb`/`Fh.lXa`, FLOW_STATIC 4.3).
     // Factors from internal_settings `<RewardsPrize>` (verified values):
     // Perfect $Ia=5, FirstStrike ep=2, ComboCount Ui=1, Shock Ub=3,

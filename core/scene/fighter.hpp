@@ -435,7 +435,23 @@ public:
     void set_world_pos(float x, float y) {
         world_x_ = x;
         world_y_ = y;
-        sample_current();
+    }
+    // Test hook: move the anchor so it STICKS. `set_world_pos` alone is undone
+    // by the next `sample()`: with an active move the anchor is rebuilt as
+    // `world_x_ = px[anchor] + render_offset_ + j8_x_` (fighter.cpp:1663), so
+    // the per-move constant must absorb the delta (and the `<Align>`
+    // continuity target `prev_align_pivot_world_*` shifts with it).
+    void teleport(float x, float y) {
+        const float dx = x - world_x_;
+        const float dy = y - world_y_;
+        render_offset_ += dx;
+        render_offset_y_ += dy;
+        render_offset_valid_ = true;
+        j8_x_ = 0.0f;
+        prev_align_pivot_world_x_ += dx;
+        prev_align_pivot_world_y_ += dy;
+        world_x_ = x;
+        world_y_ = y;
     }
     float world_x() const { return world_x_; }
     float world_y() const { return world_y_; }

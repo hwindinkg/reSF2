@@ -1340,6 +1340,13 @@ int main(int argc, char** argv) {
     // dojo hub section.
     bool input_tape = false;
     bool input_tape_js_table = false;
+    // `--verify-place <me_x> <enemy_x>`: boot the direct fight, park the two
+    // fighters at explicit world x, and run the mirror / throw / interval
+    // proof probes. The caller must pass the enemy on the player's LEFT
+    // (`me_x > enemy_x`) and a gap <= 100 (the throw `Distance Max="100"`).
+    bool verify_place = false;
+    float place_me_x = 0.0f;
+    float place_enemy_x = 0.0f;
     std::string replay_file = "reference/traces/recorded_inputs.txt";
     bool debug_ui = false;
     bool capture_fight = false;
@@ -1412,6 +1419,10 @@ int main(int argc, char** argv) {
                     return 1;
                 }
             }
+        } else if (arg == "--verify-place" && i + 2 < argc) {
+            verify_place = true;
+            place_me_x = static_cast<float>(std::atof(argv[++i]));
+            place_enemy_x = static_cast<float>(std::atof(argv[++i]));
         } else if (arg == "--debug-ui") {
             debug_ui = true;
         } else if (arg == "--capture" && i + 1 < argc) {
@@ -2191,6 +2202,182 @@ int main(int argc, char** argv) {
             std::fflush(stdout);
         }
         return probe_failures == 0 ? 0 : 1;
+    } else if (verify_place) {
+        // ------------------------------------------------------------------
+        // `--verify-place <me_x> <enemy_x>`: the proof hooks for the two
+        // 900490d6 fixes + the item-1 restart gate.
+        //   * MIRROR (`vm.he` L749): with the enemy on the player's LEFT
+        //     (`Ae.Wl = sign(enemy_x-me_x) < 0`) the parsed requirement is
+        //     direction-reversed (`zd.Fha` L688, 2<->8 / 3<->7 / 4<->6), so the
+        //     `Forward` key (control 3) must resolve a `Back`-requiring move
+        //     instead of `StepForward`. The unmirrored formula picks
+        //     `StepForward`.
+        //   * THROW (`CurrentInterval Player="Enemy"`): a held Back + Punch
+        //     tap in range must resolve `ThrowSuplex` / `ThrowThroughTheBack`
+        //     through the fixed `ctx.intervals_enemy` fill.
+        //   * ITEM 1 (interval restart gate): a re-press inside the running
+        //     move's `SelfUninterrupt` window must NOT restart it.
+        // ------------------------------------------------------------------
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name = fight_battle.empty() ? std::string("Training") : fight_battle;
+            pb.zone = fight_zone;
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[place] no fight screen\n");
+            return 1;
+        }
+        int guard = 0;
+        while (guard < 6000 && fs->fight_frame() < 140) {
+            glfwPollEvents();
+            app.run_one_frame();
+            ++guard;
+        }
+        // Park the fighters and let the update rebuild the context geometry.
+        fs->reset_player_move();
+        fs->place_fighters(place_me_x, place_enemy_x);
+        for (int i = 0; i < 3; ++i) app.run_one_frame();
+        const float me_actual = fs->player_world_x();
+        const float en_actual = fs->enemy_world_x();
+        const float wl = en_actual - me_actual;
+        // ---- probe 1: mirrored directional resolution --------------------
+        // With the enemy LEFT (`Wl = sign(enemy-me) < 0`) `vm.he` L749 takes
+        // the `TDa` branch: the parsed requirement is reversed (`zd.Fha` L688:
+        // 2<->8 / 3<->7 / 4<->6). So the FORWARD key (control 3) resolves a
+        // `Back`-requiring move (`StepBack`), while the FORWARD MOVE
+        // (`StepForward`) is now reached by the BACK key (control 7) and
+        // travels TOWARD the enemy. The unmirrored formula would pick
+        // `StepForward` for the Forward key.
+        const std::string mir_mv0 = fs->player_current_move();
+        const float mir_x0 = fs->player_world_x();
+        fs->on_key(68, true);   // D -> Forward (control 3)
+        fs->on_key(68, false);
+        for (int i = 0; i < 6; ++i) app.run_one_frame();
+        const std::string mir_fwd = fs->player_current_move();
+        const float mir_x1 = fs->player_world_x();
+        const bool mir_ok = (wl < 0.0f) ? (mir_fwd != "StepForward" && !mir_fwd.empty())
+                                        : (mir_fwd == "StepForward");
+        std::fprintf(stdout,
+                     "[place] MIRROR placed(%.0f,%.0f) actual(%.0f,%.0f) Wl=%+.0f "
+                     "Forward-key(D): '%s'->'%s' x %.0f->%.0f dx=%+.0f "
+                     "(unmirrored formula would pick StepForward) %s\n",
+                     place_me_x, place_enemy_x, me_actual, en_actual,
+                     wl < 0.0f ? -1.0f : 1.0f, mir_mv0.c_str(), mir_fwd.c_str(),
+                     mir_x0, mir_x1, mir_x1 - mir_x0, mir_ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        // The forward MOVE via the mirrored key: with `Wl<0` the `Back` key
+        // (control 7) maps to the `Forward` requirement, so `StepForward` must
+        // resolve and the fighter must travel TOWARD the enemy (dx < 0 here).
+        for (int i = 0; i < 90; ++i) app.run_one_frame();
+        fs->reset_player_move();
+        fs->place_fighters(place_me_x, place_enemy_x);
+        for (int i = 0; i < 2; ++i) app.run_one_frame();
+        const float fwd_x0 = fs->player_world_x();
+        fs->inject_game_key(7, true);   // Back key (mirrored -> Forward move)
+        fs->inject_game_key(7, false);
+        for (int i = 0; i < 6; ++i) app.run_one_frame();
+        const std::string fwd_mv = fs->player_current_move();
+        const float fwd_x1 = fs->player_world_x();
+        const bool fwd_ok = (fwd_mv == "StepForward") && (fwd_x1 < fwd_x0);
+        std::fprintf(stdout,
+                     "[place] MIRROR forward-move via Back key(7): '%s' x %.0f->%.0f dx=%+.0f "
+                     "toward-enemy=%s %s\n",
+                     fwd_mv.c_str(), fwd_x0, fwd_x1, fwd_x1 - fwd_x0,
+                     fwd_x1 < fwd_x0 ? "yes" : "no", fwd_ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        // Settle to the idle before the next probe.
+        for (int i = 0; i < 90; ++i) app.run_one_frame();
+        // ---- probe 2: throw gate (retry while the enemy is Throwable) ----
+        // The throw keys are `Punch Tap + Back Hold` (moves.xml ThrowSuplex
+        // L1714552). The requirement is MIRRORED when `Wl<0` (`vm.he` L749:
+        // `Back`(7) -> `Forward`(3)), so the physical hold key that satisfies
+        // `Back Hold` flips with the facing. Try both hold keys x both facings;
+        // the first combination that resolves a `Throw*` proves the
+        // `<CurrentInterval Player="Enemy" Name="Throwable"/>` gate (the
+        // `Cond::player` / `ctx.intervals_enemy` fix).
+        const char* hold_label[2] = {"Back(7)", "Forward(3)"};
+        const int hold_key[2] = {7, 3};
+        std::string thr_mv0, thr_mv1, thr_dec, thr_last, thr_label;
+        bool thr_ok = false;
+        for (int er = 0; er < 2 && !thr_ok; ++er) {
+            const float tme = er ? place_enemy_x : place_me_x;
+            const float ten = er ? place_me_x : place_enemy_x;
+            for (int h = 0; h < 2 && !thr_ok; ++h) {
+                for (int attempt = 0; attempt < 40 && !thr_ok; ++attempt) {
+                    fs->reset_player_move();
+                    fs->place_fighters(tme, ten);
+                    app.run_one_frame();
+                    thr_mv0 = fs->player_current_move();
+                    fs->inject_game_key(hold_key[h], true);
+                    app.run_one_frame();
+                    app.run_one_frame();
+                    // Re-park right before the tap: the AI opponent drifts, and
+                    // the throw `Distance Max="100"` gate is measured at the tap.
+                    fs->place_fighters(tme, ten);
+                    fs->inject_game_key(9, true);   // Punch Tap (control 9)
+                    fs->inject_game_key(9, false);
+                    app.run_one_frame();
+                    thr_mv1 = fs->player_current_move();
+                    thr_dec = fs->player_decision();
+                    thr_last = fs->player_last_decision();
+                    fs->inject_game_key(hold_key[h], false);
+                    thr_ok = (thr_mv1 == "ThrowSuplex" ||
+                              thr_mv1 == "ThrowThroughTheBack");
+                    if (thr_ok) {
+                        thr_label = std::string(hold_label[h]) +
+                                    (er ? " enemyRIGHT(Wl>0)" : " enemyLEFT(Wl<0)");
+                    } else {
+                        for (int i = 0; i < 20; ++i) app.run_one_frame();
+                    }
+                }
+            }
+        }
+        const float thr_gap = place_enemy_x > place_me_x ? place_enemy_x - place_me_x
+                                                         : place_me_x - place_enemy_x;
+        std::fprintf(stdout,
+                     "[place] THROW BackHold+PunchTap gap=%.0f: '%s'->'%s' hold=%s %s\n"
+                     "[place]   last=%s\n[place]   decision: %s\n",
+                     thr_gap, thr_mv0.c_str(), thr_mv1.c_str(),
+                     thr_label.empty() ? "<none-worked>" : thr_label.c_str(),
+                     thr_ok ? "PASS" : "FAIL", thr_last.c_str(), thr_dec.c_str());
+        std::fflush(stdout);
+        // ---- probe 3: the interval restart gate (item 1) -----------------
+        // Place the enemy on the RIGHT so the FORWARD key resolves
+        // `StepForward` (the `SelfUninterrupt[0,13]` guard owner).
+        for (int i = 0; i < 60; ++i) app.run_one_frame();
+        fs->reset_player_move();
+        fs->place_fighters(place_enemy_x, place_me_x);
+        for (int i = 0; i < 2; ++i) app.run_one_frame();
+        const int rs_start = fs->player_moves_started();
+        fs->inject_game_key(3, true);   // Forward Tap -> StepForward
+        fs->inject_game_key(3, false);
+        for (int i = 0; i < 3; ++i) app.run_one_frame();
+        const std::string rs_mv = fs->player_current_move();
+        const int rs_after_first = fs->player_moves_started();
+        fs->inject_game_key(3, true);   // re-press inside SelfUninterrupt [0,13]
+        fs->inject_game_key(3, false);
+        for (int i = 0; i < 2; ++i) app.run_one_frame();
+        const int rs_after_second = fs->player_moves_started();
+        const std::string rs_dec = fs->player_decision();
+        const bool rs_blocked = (rs_after_second == rs_after_first);
+        std::fprintf(stdout,
+                     "[place] INTERVAL restart: first='%s' started %d->%d, re-press in "
+                     "SelfUninterrupt[0,13] -> started=%d %s\n"
+                     "[place]   reject decision: %s\n",
+                     rs_mv.c_str(), rs_start, rs_after_first, rs_after_second,
+                     rs_blocked ? "PASS (no restart)" : "FAIL (restarted)",
+                     rs_dec.c_str());
+        std::fflush(stdout);
+        app.shutdown();
+        return (mir_ok && fwd_ok && thr_ok && rs_blocked) ? 0 : 1;
     } else if (input_tape) {
         // ------------------------------------------------------------------
         // `--input-tape [js|desktop]`: the scripted key/pointer tape driven
@@ -2221,6 +2408,29 @@ int main(int argc, char** argv) {
         std::fprintf(stdout, "[tape] key map = %s (desktop_key_aliases=%d)\n",
                      input_tape_js_table ? "Af.oUa (js)" : "desktop",
                      fs->desktop_key_aliases() ? 1 : 0);
+        std::fflush(stdout);
+        // (live-path parity, item 3) The REAL running game polls GLFW in
+        // `App::poll_input` (app.cpp:807 `kFightKeys`, L814-827) and routes
+        // every edge to `screens_->top()->on_key`; `App::inject_key`
+        // (app.cpp:1169) calls the SAME `screens_->top()->on_key`, and the
+        // tape calls `fs->on_key` where `fs == screens_->top()`. Byte-identical
+        // consumer, so no routing divergence. Remaining live-only differences
+        // are structural: (a) `poll_input` returns early while an injected
+        // click is pending (app.cpp:763-775) — a one-frame delay, never a
+        // dropped key; (b) `glfwGetKey` is level-based, so a press+release
+        // inside one frame is invisible; (c) a RELEASE routes to the CURRENT
+        // top screen (L824), not the screen that saw the press. Prove the
+        // D + punch x2 pair through that same consumer:
+        app.inject_key(68, true);
+        const int live_d = fs->last_input_key_type();
+        app.inject_key(68, false);
+        app.inject_key(75, true);
+        const int live_k = fs->last_input_key_type();
+        app.inject_key(75, false);
+        std::fprintf(stdout,
+                     "[tape] live-path parity (App::inject_key -> screens_->top()->on_key): "
+                     "D->key_type=%d (direct=3) punch(K)->key_type=%d (direct=9) %s\n",
+                     live_d, live_k, (live_d == 3 && live_k == 9) ? "PASS" : "FAIL");
         std::fflush(stdout);
 
         // The scripted tape. Each control is a press/release pair (a Tap in
@@ -2427,7 +2637,24 @@ int main(int argc, char** argv) {
             std::fprintf(stdout,
                          "[tape] dojo KEY diagonal W(->%d)+D(->%d) expect 1->2 %s\n",
                          d1, d2, (d1 == 1 && d2 == 2) ? "PASS" : "FAIL");
-            for (int i = 0; i < 30; ++i) app.run_one_frame();  // settle to idle
+            // Clear the running move before the pad probes: a punch delivered
+            // inside a move's `Uninterrupt` window cannot start (JS `vm.he`
+            // L749 gates every attack on `CurrentInterval Uninterrupt Not=1`).
+            // Waiting for the stance idle is exactly how the fight tape spaces
+            // its keys. (Before the 900490d6 gate fix `ctx.intervals` was never
+            // filled, so the guard was silently OFF and the punch started for
+            // the WRONG reason.)
+            for (int i = 0; i < 600; ++i) {
+                const std::string m = ds->dojo_player_move();
+                if (m.find("Idle") != std::string::npos ||
+                    m.find("Stance") != std::string::npos) {
+                    break;
+                }
+                app.run_one_frame();
+            }
+            std::fprintf(stdout,
+                         "[tape] dojo settle: move='%s' frame=%d (idle reached)\n",
+                         ds->dojo_player_move().c_str(), ds->dojo_player_move_frame());
             std::fflush(stdout);
         }
         // (a) the drawn joystick (bottom-left, centre (216,554.4)). A press at

@@ -5240,6 +5240,10 @@ int DojoScreen::dojo_fight_frame() const {
     return dojo_fight_ != nullptr ? dojo_fight_->frame() : -1;
 }
 
+int DojoScreen::dojo_player_move_frame() const {
+    return dojo_fight_ != nullptr ? dojo_fight_->player().fighter.move_frame() : -1;
+}
+
 int DojoScreen::dojo_last_key_type() const { return dojo_last_key_type_; }
 
 // The hub's keyboard -> its own `FightNone` controller. The JS hub runs a
@@ -7550,6 +7554,26 @@ void FightScreen::inject_game_key(int key_type_index, bool down) {
                              down ? sf2::scene::press_type::tap
                                   : sf2::scene::press_type::release);
     }
+}
+
+void FightScreen::place_fighters(float me_x, float enemy_x) {
+    if (fight_ != nullptr) fight_->debug_place_fighters(me_x, enemy_x);
+}
+
+float FightScreen::player_world_x() const {
+    return fight_ != nullptr ? fight_->player().fighter.world_x() : 0.0f;
+}
+
+float FightScreen::enemy_world_x() const {
+    return fight_ != nullptr ? fight_->enemy().fighter.world_x() : 0.0f;
+}
+
+int FightScreen::player_move_frame() const {
+    return fight_ != nullptr ? fight_->player().fighter.move_frame() : -1;
+}
+
+void FightScreen::reset_player_move() {
+    if (fight_ != nullptr) fight_->debug_reset_player_move();
 }
 
 std::size_t FightScreen::move_list_size() const {
