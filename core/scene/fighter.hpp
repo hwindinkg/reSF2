@@ -182,6 +182,21 @@ public:
     const MoveDef* stance_move(const std::vector<std::string>& templates,
                                bool is_player) const;
 
+    // --- shop `TryOn` preview (JS `Pi.Ex` L2301; `iz.XBa("TryOn")=7` L444) --
+    // The item's TryOn move from the loaded table: a move whose Template
+    // carries "ShopTryOn" and whose locks pass for `shop_screen` + `worn`.
+    // The `<Screen Name>` lock (`Lock::screen`) is evaluated against
+    // `shop_screen` (the JS `Gm` — the fight path keeps failing it closed);
+    // the modelled `<Item>` locks run through the same `Hm.he` test the fight
+    // move list uses. A `<Perk>` (never, no screen) fails the move closed.
+    // The max-`priority` passing group wins (JS `Aua` L673). `shop_screen` is
+    // the list.xml type mapped by the caller (`shop_screen_for_type`:
+    // Weapon->ShopWeapon, Armor->ShopArmor, Helm->ShopHelm, Ranged->
+    // ShopMissile, Magic->ShopMagic, else ShopOther). nullptr when none.
+    static const MoveDef* shop_tryon_move(
+        const std::map<std::string, MoveDef>& all_moves,
+        const std::vector<OwnedItem>& worn, const std::string& shop_screen);
+
     // Buffers one key press (JS `Kl.Sgb`/`zl.Sgb`, L798): appends the key to
     // the 2-slot Tap sequence (`zg.sh`), rebuilds the held set (`zg.Fh`),
     // resets the tap age (`dX=0`). `release` (JS `zl.Xgb`, L799) drops the

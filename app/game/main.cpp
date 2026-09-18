@@ -53,7 +53,7 @@ void print_usage(const char* argv0) {
                  "  save_path default reference/saves/save.xml\n"
                  "  --headless-loop  run the scripted playable loop, then exit\n"
                  "                   (dojo -> map -> BOSS_LYNX fight -> results -> shop\n"
-                 "                    buy WEAPON_KNIVES -> profile viewer (equip OPEN)\n"
+                 "                    buy+equip WEAPON_KNIVES -> profile viewer\n"
                  "                    -> map -> BOSS_LYNX fight -> results)\n"
                  "  --fight          boot DIRECTLY into the dojo fight (skip menu/map):\n"
                  "                   dojo, player Fists (keyboard) vs enemy Fists (AI)\n"
@@ -101,10 +101,12 @@ struct LoopStep {
 //   dojo -> Shop -> BUY knives -> EQUIP knives -> BACK to dojo
 //   dojo -> Profile -> BACK to dojo
 //   dojo -> Map -> BOSS_LYNX fight -> Results -> Map
-// (Equip lives in the shop detail `$o` (SHOP_STATIC §4): the detail-panel
-//  action button buys while the item is unowned, then equips the owned item.
-//  The loop exercises both, so the second fight's Locks move list reflects
-//  the equipped weapon.)
+// (Equip lives in the shop detail: the TRY plate (`Oa.Fhb` L2300) wears an
+//  unowned item on the `Pi` model + plays `TryOn` (JS `Ex(a,7)` L2301) and
+//  arms the `Pi` panel; the `M8` price plate then buys AND equips (`Pa.iwa`
+//  L1228 + `$o(b,!0)`, `ZYa` L2251). An owned+equipped item's TRY/EQUIP plate
+//  UNEQUIPS. The loop exercises buy+equip, so the second fight's Locks move
+//  list reflects the equipped weapon.)
 //
 // Layout math (matches the screen implementations in core/app/screens.cpp):
 //   - dojo/shell nav: the shared `za` VERTICAL column (kZaNav, za_layout):
@@ -144,16 +146,20 @@ static const LoopStep kLoopSteps[] = {
     // 4: Dojo -> Shop (the SHOP button). Capture loop_shop.png on arrival.
     {184.0f, 337.0f, "dojo->shop", kScreenDojo, 0, kScreenShop, 0,
      "loop_shop.png"},
-    // 5: Shop -> BUY WEAPON_KNIVES (row 0, price 50). The grid click only
-    //    SELECTS (JS `Oa.xA` L2296); the purchase is the `Up.Fhb` action
-    //    button (`Oa.layout` L2295: left-slot top, `jP.C((b.J+b.N)*.5*.9)`,
-    //    `jP.D(b.P+Up.qa())`). `sel_` already defaults to row 0 on entry, so
-    //    the action click alone buys. Button centre from `shop_try_rect` =
-    //    (305.4, 199.5) at 1280x720.
-    {305.4f, 199.5f, "shop->buy WEAPON_KNIVES", kScreenShop, 0, -1, 12, nullptr},
-    // 6: Shop -> EQUIP WEAPON_KNIVES (same action button; now owned ->
-    //    `xa.$o`, L2300). The honest buy->equip path.
-    {305.4f, 199.5f, "shop->equip WEAPON_KNIVES", kScreenShop, 0, -1, 12, nullptr},
+    // 5: Shop -> WEAPON_KNIVES: the `Oa.Fhb` L2300 unowned path (JS
+    //    `this.Ex(a,7)` L2301) wears the item on the `Pi` model + plays its
+    //    `TryOn` clip and arms the `Pi` panel; the `M8` GoldButton (the price
+    //    plate, `Pa.iwa` L1228 + `p.o.xa.$o(b,!0)` equip, `ZYa` L2251) then
+    //    buys AND equips. `tab_x/tab_y` = the TRY plate press (JS `Up`, opens
+    //    the panel ~5 frames early); the main click is the price-plate centre
+    //    (`shop_price_rect` at 1280x720 = 934.6, 460.1).
+    {934.6f, 460.1f, "shop->buy+equip WEAPON_KNIVES (M8)", kScreenShop, 0, -1, 12,
+     nullptr, 305.4f, 199.5f},
+    // 6: No re-toggle. After step 5 the item is owned+equipped, so the TRY/
+    //    EQUIP plate (`Up`) would UNEQUIP (`xa.Qxb` L2300). The `Pi` panel is
+    //    closed, so this click at the price-plate position is inert; the step
+    //    only reports the save state.
+    {934.6f, 460.1f, "shop->no re-toggle (owned)", kScreenShop, 0, -1, 12, nullptr},
     // 7: Shop -> BACK to the Dojo hub.
     {64.0f, 40.0f, "shop->dojo (BACK)", kScreenShop, 0, kScreenDojo, 0, nullptr},
     // 8: Dojo -> Equipment (the PROFILE button). Capture loop_equip.png on

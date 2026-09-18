@@ -713,6 +713,22 @@ private:
     bool backdrop_fig_tried_ = false;
     bool backdrop_fig_ok_ = false;
     const sf2::data::anim_clip* backdrop_idle_ = nullptr;  // owned by FightAssets
+    // --- `Pi` try-on preview (`Oa.Fhb` L2300 unowned -> `Ex(a,7)` L2301) ----
+    // The unowned press wears the item on the `Pi` model and plays its `TryOn`
+    // clip (JS `iz.XBa("TryOn")=7` L444) BEFORE any purchase; the buy is the
+    // `M8` plate (`Pa.iwa` L1228 / `ZYa` L2251) wired from the panel below.
+    // The body is merged into `preview_model_` (this screen's storage), so the
+    // shared FightAssets::merged — the dojo/fight body — is never rebuilt.
+    std::unique_ptr<sf2::scene::Fighter> preview_fighter_;
+    sf2::scene::Model preview_model_;
+    const sf2::data::anim_clip* preview_clip_ = nullptr;  // owned by FightAssets
+    int preview_frame_ = 0;
+    bool preview_active_ = false;
+
+    // `Oa.Fhb` L2300 unowned -> `this.Ex(a,7)` (L2301): build the preview body
+    // wearing `it` and load the item's `TryOn` move clip. Preview-owned
+    // storage; no shared asset is touched.
+    void arm_preview(App& app, const CatalogItem& it);
 };
 
 // The Profile — native `vb` (JS L2189-2201, `dJ()==7`): a tabbed screen with

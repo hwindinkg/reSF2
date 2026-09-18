@@ -5011,6 +5011,8 @@ constexpr float kDestinationModelLocalY = -93.0f;
 // The `Pi` model (`this.Jc`, a `wd` fighter at `Pi.Ca.position = J9 = (0,-93)`
 // L441) nested in `hn` (scale 1.8, translate (offset,412)). Its clip/model
 // source is the same player warrior + idle clip the dojo hub uses.
+void draw_pi_fighter(sf2::render::Renderer& ren, sf2::scene::Fighter& fighter,
+                     const sf2::data::anim_clip& clip, int frame);
 void draw_destination_model(App& app, sf2::render::Renderer& ren,
                             std::unique_ptr<sf2::scene::Fighter>& fighter,
                             bool& tried, bool& ok, const sf2::data::anim_clip*& idle) {
@@ -5032,10 +5034,19 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
         }
     }
     if (!ok || fighter == nullptr || idle == nullptr || idle->frames.empty()) return;
+    draw_pi_fighter(ren, *fighter, *idle, 0);
+}
+
+// Draws one `Pi` model at frame `frame` of `clip` (the `Pi.Jc` viewer). Shared
+// by the idle backdrop (`draw_destination_model`) and the shop's `TryOn`
+// preview (`Oa.Fhb` L2300 -> `Ex(a,7)`): both nest the body in the same `hn`
+// transform (scale 1.8, translate (offset, 412), local y -93).
+void draw_pi_fighter(sf2::render::Renderer& ren, sf2::scene::Fighter& fighter,
+                     const sf2::data::anim_clip& clip, int frame) {
     sf2::render::Camera cam;
     sf2::scene::LocationScene::destination_camera(cam, kViewW, kViewH);
-    fighter->sample(*idle, 0, 0.0f, kDestinationModelLocalY, 1);
-    draw_dojo_figure(ren, cam, *fighter, kDestinationModelScale,
+    fighter.sample(clip, frame, 0.0f, kDestinationModelLocalY, 1);
+    draw_dojo_figure(ren, cam, fighter, kDestinationModelScale,
                      sf2::scene::LocationScene::destination_model_offset_x(kViewW, kViewH),
                      kDestinationModelY);
 }
@@ -9228,6 +9239,116 @@ const char* shop_default_for_type(const std::string& type) {
     return "Fists";
 }
 
+// The `<Screen Name>` a shop item's `TryOn` move is gated to (`Gm` L?; the
+// shipped names are ShopWeapon/ShopArmor/ShopHelm/ShopMagic/ShopMissile/
+// ShopOther). The list.xml Type buckets: Weapon->ShopWeapon (58 moves),
+// Ranged->ShopMissile (15), Magic->ShopMagic (32), Armor/Helm their own
+// (2 each); everything else (Seal/RaidItemPack/...) shares `ShopOther`.
+const char* shop_screen_for_type(const std::string& type) {
+    if (type == "Weapon") return "ShopWeapon";
+    if (type == "Armor") return "ShopArmor";
+    if (type == "Helm") return "ShopHelm";
+    if (type == "Ranged") return "ShopMissile";
+    if (type == "Magic") return "ShopMagic";
+    return "ShopOther";
+}
+
+// `FileName` -> anim archive key (JS `Te.Skb` L551: `FileName` minus
+// ".bytes"; the moves.xml ".bin" is normalized to ".bytes" by the parser).
+std::string shop_clip_key(const sf2::scene::MoveDef& m) {
+    std::string base = m.file_name;
+    const std::string suffix = ".bytes";
+    if (base.size() > suffix.size() &&
+        base.compare(base.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        base = base.substr(0, base.size() - suffix.size());
+    }
+    if (base.empty()) base = m.name;
+    return base;
+}
+
+// `Oa.Fhb` L2300 unowned -> `this.Ex(a,7)` (L2301 region): wear the item on
+// the `Pi` body and load its `TryOn` clip. `Pi.Ex` writes the item into its
+// typed slot (`a.type==I.vg?this.Ca.Hd=a : ...`), rebuilds (`this.Ca.cM()` ->
+// `xc.cM` L809-810) and runs the `TryOn` animation (`this.LX=7`,
+// `iz.XBa("TryOn")=7` L444). The merged body lands in `preview_model_`
+// (screen storage) — the shared FightAssets::merged is never rebuilt, so a
+// dojo/fight return is unaffected. The clip is the move the worn item's
+// `<Screen>` + `<Item>` locks admit (WEAPON_KNIVES -> `ShopKnivesSuperSlash`,
+// moves.xml L9437 -> `knives_super_slash.bin`).
+void ShopScreen::arm_preview(App& app, const CatalogItem& it) {
+    preview_fighter_.reset();
+    preview_model_ = sf2::scene::Model{};
+    preview_clip_ = nullptr;
+    preview_frame_ = 0;
+    preview_active_ = false;
+    if (!app.has_fight_assets()) return;
+    FightAssets& assets = app.fight_assets();
+
+    // The worn set: the save's items + the previewed one (JS `Pi.Ex` writes
+    // the item into its slot before `cM()`), for the TryOn move's locks.
+    std::vector<sf2::scene::OwnedItem> worn = owned_items(app);
+    bool present = false;
+    for (const sf2::scene::OwnedItem& o : worn) {
+        if (o.name == it.name) present = true;
+    }
+    if (!present) worn.push_back({it.type, it.subtype, it.name});
+
+    // Body: the save's typed slots with the item swapped into its own
+    // (`fighter_model_names` buckets by list.xml Type, last-in wins).
+    std::vector<std::string> names;
+    try {
+        const WarriorSave w = app.save().load();
+        names = {w.skeleton, w.weapon, w.armor, w.helm};
+    } catch (const std::exception&) {
+    }
+    names.push_back(it.name);
+    const std::vector<std::string> model_names = fighter_model_names(app, names);
+    if (model_names.empty() || model_names[0].empty()) {
+        std::fprintf(stdout, "[shop] Ex(a,7) preview: no model names for %s\n",
+                     it.name.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    preview_model_ = assets.merge_names(model_names);
+    if (preview_model_.bones.empty()) {
+        std::fprintf(stdout, "[shop] Ex(a,7) preview: empty merge for %s\n",
+                     it.name.c_str());
+        std::fflush(stdout);
+        return;
+    }
+
+    const sf2::scene::MoveDef* tm = sf2::scene::Fighter::shop_tryon_move(
+        assets.moves, worn, shop_screen_for_type(it.type));
+    if (tm == nullptr) {
+        std::fprintf(stdout, "[shop] Ex(a,7) preview: no TryOn move (screen %s) for %s\n",
+                     shop_screen_for_type(it.type), it.name.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    const auto cit = assets.clips.find(shop_clip_key(*tm));
+    if (cit == assets.clips.end() || cit->second.frames.empty()) {
+        std::fprintf(stdout, "[shop] Ex(a,7) preview: clip %s missing\n",
+                     tm->file_name.c_str());
+        std::fflush(stdout);
+        return;
+    }
+
+    preview_fighter_ = std::make_unique<sf2::scene::Fighter>();
+    preview_fighter_->set_model(preview_model_);
+    preview_fighter_->set_color(assets.dojo.root_color());
+    preview_clip_ = &cit->second;
+    preview_active_ = true;
+    // Preview-owned storage: the shared body (`assets.merged`, used by the
+    // dojo/fight and the idle backdrop) is NEVER rebuilt here, so returning
+    // to the dojo/fight after a preview shows the same model.
+    std::fprintf(stdout,
+                 "[shop] Ex(a,7) TryOn %s -> move %s clip %s (preview %zu bones; shared "
+                 "merged %zu unchanged)\n",
+                 it.name.c_str(), tm->name.c_str(), tm->file_name.c_str(),
+                 preview_model_.bones.size(), assets.merged.bones.size());
+    std::fflush(stdout);
+}
+
 // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width bar
 // `height = za.Sp*1.2` with `Le` buttons (id 248 shop atlas) scaled to the
 // bar height and laid left->right (spacing factor 1.2 at lc>1.2), centred.
@@ -9559,30 +9680,50 @@ void ShopScreen::update_impl(float dt) {
                 }
                 if (bw.money >= bit.price) {
                     // `Pa.iwa` L1228 head: `p.o.Fr(Tb - jp())` + `p.o.save()`
-                    // + `Pa.Wz(a)`; `rb.U3()` = snd_buy (L1226).
+                    // + `Pa.Wz(a)`; `rb.U3()` = snd_buy (L1226). The grant is
+                    // followed by the equip (`ZYa` L2251 / `Ao.Qg` L1120:
+                    // `Pa.iwa(b) && p.o.xa.$o(b,!0)`) — a purchase ALWAYS
+                    // wears the item, not only the tutorial buy.
                     bw.money -= bit.price;
                     sf2::audio::AudioEngine::instance().play("snd_buy");
+                    if (bit.delivery_sec > 0) {
+                        // `Pa.iwa` L1228: `a.Ec>0 ? d=Pa.y2a(a)` — the timed
+                        // order leaves the grant flag `c` false, so the `$o`
+                        // equip after `Pa.iwa` is SKIPPED (a not-yet-delivered
+                        // item is not worn).
+                        bw.timers[bit.name] = WarriorSave::wall_now() + bit.delivery_sec;
+                        app().save().save(bw);
+                        seen_ = bw;
+                        confirm_ = "ORDERED " + item_display_name(app(), bit) + "!";
+                        confirm_until_ = time() + 2.5f;
+                        std::fprintf(stdout,
+                                     "[shop] Pi confirm Pa.iwa (Ec) -> ORDERED %s price=%d -> "
+                                     "arrives in %ds (no equip)\n",
+                                     bit.name.c_str(), bit.price, bit.delivery_sec);
+                        std::fflush(stdout);
+                        buy_armed_ = -1;
+                        return;
+                    }
                     WarriorSave::OwnedItem oi;
                     oi.name = bit.name;
                     oi.count = 1;
+                    shop_apply_slot(bw, bit.type, bit.name);
+                    oi.equipped = true;
                     const bool tut_buy =
                         bit.name == "WEAPON_KNIVES" &&
                         (bw.story_step() == "STEP_BUY_ITEM" ||
                          (bw.story_step().empty() && bw.tutorial == "MOVE"));
-                    if (tut_buy) {
-                        shop_apply_slot(bw, bit.type, bit.name);
-                        oi.equipped = true;
-                        bw.set_story_step("MAP");
-                    }
+                    if (tut_buy) bw.set_story_step("MAP");
                     bw.items.push_back(oi);
                     app().save().save(bw);
                     seen_ = bw;
                     confirm_ = "BOUGHT " + item_display_name(app(), bit) + "!";
                     confirm_until_ = time() + 2.5f;
                     std::fprintf(stdout,
-                                 "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%d -> money %d%s\n",
+                                 "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%d -> money %d"
+                                 " + EQUIPPED ($o)%s\n",
                                  bit.name.c_str(), bit.price, bw.money,
-                                 tut_buy ? " + EQUIPPED, step -> MAP (Ao)" : "");
+                                 tut_buy ? ", step -> MAP (Ao)" : "");
                     std::fflush(stdout);
                     buy_armed_ = -1;
                     return;
@@ -9791,59 +9932,14 @@ void ShopScreen::update_impl(float dt) {
                                  was_equipped ? "Qxb UNEQUIP" : "$o EQUIP", it.name.c_str(),
                                  it.type.c_str(), new_slot.c_str());
                     std::fflush(stdout);
-                } else if (w.money >= it.price) {
-                    // `Fhb` else-branch `Ex(a,7)` -> buy dialog -> `Pa.iwa`
-                    // (SHOP_STATIC §6): `Tb >= jp` -> deduct + grant + save.
-                    // The `ph` dialog is OPEN; native collapses it to the
-                    // gate+grant.
-                    w.money -= it.price;
-                    // `Pa.gwa`/`Pa.Qkb` (L1230/L222) purchase branch: the
-                    // bought id `snd_buy` (65569) -> `rb.U3()`.
-                    sf2::audio::AudioEngine::instance().play("snd_buy");
-                    if (it.delivery_sec > 0) {
-                        // Pa z2a timed delivery: paid upfront, arrives on
-                        // claim (Gb Cla(now) stamped).
-                        w.timers[it.name] = WarriorSave::wall_now() + it.delivery_sec;
-                        app().save().save(w);
-                        seen_ = w;
-                        confirm_ = "ORDERED " + item_display_name(app(), it) + "!";
-                        confirm_until_ = time() + 2.5f;
-                        std::fprintf(stdout,
-                                     "[shop] ORDERED %s price=%d -> arrives in %ds\n",
-                                     it.name.c_str(), it.price, it.delivery_sec);
-                        std::fflush(stdout);
-                    } else {
-                        WarriorSave::OwnedItem oi;
-                        oi.name = it.name;
-                        oi.count = 1;
-                        // Tutorial-buy force-equip (JS `Ao` Qg L1120:
-                        // `Pa.iwa(b) && xa.$o(b)`); step -> MAP.
-                        const bool tut_buy =
-                            it.name == "WEAPON_KNIVES" &&
-                            (w.story_step() == "STEP_BUY_ITEM" ||
-                             (w.story_step().empty() && w.tutorial == "MOVE"));
-                        if (tut_buy) {
-                            shop_apply_slot(w, it.type, it.name);
-                            oi.equipped = true;
-                            w.set_story_step("MAP");
-                        }
-                        w.items.push_back(oi);
-                        app().save().save(w);
-                        seen_ = w;
-                        confirm_ = "BOUGHT " + item_display_name(app(), it) + "!";
-                        confirm_until_ = time() + 2.5f;
-                        std::fprintf(stdout,
-                                     "[shop] BOUGHT %s (%s) price=%d -> money %d%s\n",
-                                     it.name.c_str(), it.subtype.c_str(), it.price, w.money,
-                                     tut_buy ? " + EQUIPPED, step -> MAP (Ao)" : "");
-                        std::fflush(stdout);
-                    }
                 } else {
-                    // `Oa.Fhb` L2300 unowned branch: `this.Ex(a,7)` opens the
-                    // `Pi` purchase panel (`this.Ad = new Pi`, L2291) — the
-                    // press is NOT a silent no-op. The panel's confirm is the
-                    // `M8` GoldButton (`Ne.Wub` L2254), wired to `Pa.iwa` by
-                    // `Ao.Qg` L1120; `Pa.iwa` L1228 is the money gate.
+                    // `Oa.Fhb` L2300 unowned branch: `this.Ex(a,7)` — wear the
+                    // item on the `Pi` model and play its `TryOn` clip
+                    // (`iz.XBa("TryOn")=7` L444) BEFORE any purchase. The buy
+                    // is the `M8` price plate (`Ne.Wub` L2254 -> `Pa.iwa`
+                    // L1228) handled while the panel is armed below; a TRY
+                    // press never buys directly.
+                    arm_preview(app(), it);
                     buy_armed_ = sel;
                     std::fprintf(stdout,
                                  "[shop] Fhb -> Ex(a,7) Pi panel OPEN for %s (price %d, have %d)\n",
@@ -9862,6 +9958,13 @@ void ShopScreen::update_impl(float dt) {
     // `dojo_hub` wall (no 0.5 dim), vs the port's 0.5-dimmed, icon-column
     // capture. `force_collapsed` = the Map/Profile precedent
     // (screens.cpp:4623 / 8731), both already oracle-matched.
+    // TryOn playback (`Oa.Fhb` L2300 -> `iz.XBa("TryOn")=7`): advance the
+    // preview clip one frame per tick and hold on the last (the JS ends the
+    // clip on `TryOnEnd`/AnimationEnd, moves.xml L1454 etc.).
+    if (preview_active_ && preview_clip_ != nullptr && !preview_clip_->frames.empty() &&
+        preview_frame_ + 1 < static_cast<int>(preview_clip_->frames.size())) {
+        ++preview_frame_;
+    }
     // Display-only: `g_za_nav_open` is left intact so the Dojo keeps its column.
     za_update(app(), *this, kScreenShop, /*force_collapsed=*/true);
 }
@@ -9874,8 +9977,14 @@ void ShopScreen::render_impl(App& app) {
     // `locations/dojo_shop/bg.{image}` under `ma.Tya` (L1832) — a dedicated
     // destination background, NOT the dojo location layers.
     draw_destination_backdrop(app, 1.0f);  // JS `Oa.Zkb` resets Qa to white
-    draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
-                           backdrop_fig_ok_, backdrop_idle_);
+    if (preview_active_ && preview_fighter_ != nullptr && preview_clip_ != nullptr) {
+        // `Oa.Fhb` L2300 unowned -> `Ex(a,7)`: the `Pi` model wears the item
+        // and plays its `TryOn` clip.
+        draw_pi_fighter(ren, *preview_fighter_, *preview_clip_, preview_frame_);
+    } else {
+        draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
+                               backdrop_fig_ok_, backdrop_idle_);
+    }
     draw_destination_dim(ren);
 
     // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width

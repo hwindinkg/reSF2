@@ -166,6 +166,13 @@ struct Lock {
     // Priority 110, TacticWeapon=None -> it won the Up key and played
     // `hermit_super_attack`).
     bool never = false;
+    // A `<Screen Name="..">` lock (JS `Gm`): the UI screen the move is gated
+    // to ("ShopWeapon"/"ShopArmor"/"ShopHelm"/"ShopMagic"/"ShopMissile"/
+    // "ShopOther"/"Fight"/"Profile"). Stored while `never` stays true, so the
+    // FIGHT move list keeps failing it closed exactly as before; the shop's
+    // `TryOn` preview (`Fighter::shop_tryon_move`) is the one caller that
+    // evaluates it. Empty for the other unmodelled kinds (`<Perk>`).
+    std::string screen;
 };
 
 // One owned item — the three fields the JS lock test `Hm.he` (L758)

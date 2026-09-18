@@ -325,6 +325,52 @@ const MoveDef* Fighter::stance_move(const std::vector<std::string>& templates,
     return unsuffixed != nullptr ? unsuffixed : group.front();
 }
 
+// JS `Pi.Ex` (L2301 region): the shop's try-on animation state is `LX=7`
+// (`iz.XBa("TryOn")=7`, L444). The move that plays is resolved by the normal
+// move machinery against the WORN items + the open shop screen: a move whose
+// Template carries `ShopTryOn` (moves.xml L229 `<Template Name="ShopTryOn">`)
+// and whose `<Screen>` + `<Item>` locks pass. E.g. WEAPON_KNIVES
+// (SubType="Knives") resolves `ShopKnivesSuperSlash` (moves.xml L9437,
+// `knives_super_slash.bin`; Screen ShopWeapon + Item{Weapon,Knives}).
+// `Aua` (L673) keeps the max-`priority` group; ties stay in document order.
+const MoveDef* Fighter::shop_tryon_move(
+    const std::map<std::string, MoveDef>& all_moves,
+    const std::vector<OwnedItem>& worn, const std::string& shop_screen) {
+    const auto screen_pass = [&shop_screen](const Lock& l) {
+        return !l.screen.empty() && l.screen == shop_screen;
+    };
+    // Evaluate a move's lock list. `<Screen>` passes on the shop screen;
+    // `<Item>` uses the `Hm.he` test; any other unmodelled lock (`<Perk>`)
+    // fails the move closed (the shipped ShopTryOn moves carry none).
+    const auto locks_pass = [&](const MoveDef& m) {
+        bool any_or = false, or_group = false;
+        for (const Lock& l : m.locks) {
+            if (!l.screen.empty()) {
+                if (l.or_) { or_group = true; if (screen_pass(l)) any_or = true; }
+                else if (!screen_pass(l)) return false;
+                continue;
+            }
+            if (l.never) return false;  // `<Perk>` / other unmodelled: closed
+            if (l.or_) {
+                or_group = true;
+                if (owned_item_matches(l, worn)) any_or = true;
+            } else if (!owned_item_matches(l, worn)) {
+                return false;
+            }
+        }
+        return !or_group || any_or;
+    };
+    const MoveDef* best = nullptr;
+    for (const auto& kv : all_moves) {
+        const MoveDef& m = kv.second;
+        if (m.template_tags.count("ShopTryOn") == 0) continue;
+        if (!locks_pass(m)) continue;
+        // `Aua` (L673): max-priority group, document order on ties.
+        if (best == nullptr || m.priority > best->priority) best = &m;
+    }
+    return best;
+}
+
 // JS `zl.yLa` (L799): `zg.Fh` = a Hold for every currently-down key
 // (`Ff[].sl`). Rebuilt from the physical held set each tick/press.
 void Fighter::rebuild_holds() {

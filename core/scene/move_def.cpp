@@ -779,6 +779,12 @@ void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
             Lock l;
             l.or_ = true;
             l.never = true;
+            // `<Screen Name="..">` inside an Or group (`ShopOther` gates the
+            // missile/ruby/free/pack screens): keep the name for the shop
+            // TryOn resolver; the fight move list still fails it closed.
+            if (tag == "Screen") {
+                if (pugi::xml_attribute n = other.attribute("Name")) l.screen = n.value();
+            }
             out.push_back(std::move(l));
         }
     }
@@ -793,6 +799,9 @@ void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
         if (tag == "Item" || tag == "Operator") continue;
         Lock l;
         l.never = true;
+        if (tag == "Screen") {
+            if (pugi::xml_attribute n = other.attribute("Name")) l.screen = n.value();
+        }
         out.push_back(std::move(l));
     }
 }
