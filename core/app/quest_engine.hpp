@@ -466,6 +466,16 @@ private:
     };
 
     bool ensure_loaded(App& app);
+    // JS `ha.GEa` (L521470): true while a quest instance with this name is
+    // still in the ACTIVE queue (`Dh`) — a queued dialog, a deferred `Wait`
+    // run, or the parked StoryTutorial gate. `RP.a.RXa` (`AllowDoubles`)
+    // bypasses it. This is the ONLY re-entry gate: `Unresumable` (`be.cyb`,
+    // L518544) is read solely by the resume path (`p.o.lpb`/`ResumeQuests`
+    // `REa()`), never by the fire gate — so a quest whose event+conditions
+    // recur re-fires once its run completes. That is what re-opens the Lynx
+    // `StoryTutorialBossFight` dialog on the Map after a LOSS
+    // (`tutorial_quests.xml` L131-152: `step==MAP && SceneTo==Map`).
+    bool quest_active(const std::string& name) const;
     // JS `L3(a,b)` (L184): read one file, walk the root's children —
     // `Quest` -> register, `Include` -> `Sjb`.
     void load_quest_file(App& app, const std::string& rel);

@@ -2387,6 +2387,14 @@ int za_nav_hit(double px, double py) {
 }
 
 // The `za` nav-button tap (JS listeners Ofb/Qfb/Wfb/Rfb/Vfb -> `ma.Jg().jI`).
+// GATING RULE (cited): the five `Le` buttons are created unconditionally
+// (`a.EL=!0`, L1978-1979) and every listener is `d1(a){rb.um();wa.F().mp(a)||
+// (this.xba.Nf=!0)}` (Ofb/Qfb/Wfb/Rfb, L1020xx) — `mp` navigates with NO
+// quest/step guard. There is NO hard lock on Dojo/Shop/Map/Profile; the story
+// only GUIDES via `MenuBtnFlashing BtnName` (JS `eo` L1117 -> the port's
+// `nav_flash`) plus `StoryTutorialOpenScene`/`StoryTutorialRetryGoToMap`
+// re-navigation. The port matches (free switching is correct); the log below
+// records the guidance target so the rule is observable.
 // Button #5 is `Vfb` (L1981) — NOT a screen: it loads the per-language atlases
 // then `Xc.Shb()` opens the `un` dialog OVER the current screen (D13). The
 // other four push their `kZaNav` screen unless it is already showing.
@@ -2400,8 +2408,9 @@ void za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
         return;
     }
     const ScreenId target = kZaNav[hit].nav;
-    std::fprintf(stdout, "[za] nav %s -> screen %d\n", kZaNav[hit].label,
-                 static_cast<int>(target));
+    const std::string& guide = app.quest_engine().nav_flash();
+    std::fprintf(stdout, "[za] nav %s -> screen %d (guidance=%s)\n", kZaNav[hit].label,
+                 static_cast<int>(target), guide.empty() ? "-" : guide.c_str());
     std::fflush(stdout);
     if (target != active) {
         self.push(target);

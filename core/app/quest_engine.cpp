@@ -1381,6 +1381,24 @@ void QuestEngine::tick(App& app) {
     }
 }
 
+// JS `ha.GEa` (L521470): is a quest with this name still in the active queue
+// (`Dh`)? The port has no explicit `Dh`; the equivalent live state is a queued
+// dialog from the quest, a deferred `Wait` run, or the parked StoryTutorial
+// gate — all three carry the firing quest name. `Mt` (L521470) removes the
+// instance from `Dh` when its run completes, so once none of these reference
+// the name the quest is eligible again (exactly the JS re-fire rule).
+bool QuestEngine::quest_active(const std::string& name) const {
+    if (name.empty()) return false;
+    for (const EngineDialog& d : dialogs_) {
+        if (d.quest == name) return true;
+    }
+    for (const PendingRun& r : pending_) {
+        if (r.quest == name) return true;
+    }
+    if (tutorial_gate_.active && tutorial_gate_.quest == name) return true;
+    return false;
+}
+
 void QuestEngine::fire_inner(App& app, const std::string& event,
                              const QuestJournal& journal,
                              std::vector<std::string>& fired, int depth) {
@@ -1411,6 +1429,14 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         }
         if (!listens) continue;
         if (q.unresumable) {
+            // `ha.GEa` (L521470): skip ONLY while this quest is still in the
+            // active queue. `Unresumable` (`be.cyb`, L518544) gates the RESUME
+            // path (`REa()`), not the fire gate — so the Lynx boss dialog
+            // re-fires on the next `SceneLoaded`/Map after a loss (step stays
+            // MAP), and is stopped only when `FirstGuardBeaten` writes
+            // LEARN_PERK (quests.xml L260-263). A `ClearQuestQueue` name
+            // (`fired_`) stays latched.
+            if (quest_active(q.name)) continue;
             bool seen = false;
             for (const std::string& f : fired_) {
                 if (f == q.name) {
@@ -1445,7 +1471,9 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         if (!fx.flash_targets.empty()) flash_target_ = fx.flash_targets.back();
         if (!fx.menu_flashes.empty()) nav_flash_ = fx.menu_flashes.back();
         if (fx.has_map_focus) last_map_focus_ = fx.map_focus;
-        if (q.unresumable) fired_.push_back(q.name);
+        // `Unresumable` is NOT a session latch (see the fire gate above):
+        // the instance leaves `Dh` when its run ends, so `fired_` now tracks
+        // only `ClearQuestQueue` names.
         fired.push_back(q.name);
         std::fprintf(stdout, "[quest] FIRED %s on %s (step=%s scene=%s->%s)\n", q.name.c_str(),
                      event.c_str(), ctx.story_step.c_str(), journal.scene_from.c_str(),
@@ -1542,6 +1570,12 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
 void QuestEngine::note_fight(const std::string& name, const std::string& result) {
     last_fight_ = name;
     last_result_ = result;
+    // Observability: the exact triple/result the next `FightEnd` condition
+    // reads (`_$Fight`/`_$FightResult`). `FirstGuardBeaten` keys on
+    // `ZONE_1|BOSS_LYNX|1` + Win (quests.xml L260-263) -> LEARN_PERK.
+    std::fprintf(stdout, "[story] fight recorded: %s -> %s\n", name.c_str(),
+                 result.c_str());
+    std::fflush(stdout);
 }
 
 // `He` pager (L1042-1062). The head dialog's current page caption. `Od.EF`
@@ -1639,6 +1673,14 @@ std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
         pending_.push_back(std::move(run));
     }
     for (const std::string& f : fx.fight_requests) fights.push_back(f);
+    if (!fights.empty()) {
+        // Observability for the story/fight handshake: the dialog plate that
+        // carries `<Fight>` (the Lynx `StoryTutorialBossFight`, tutorial_
+        // quests.xml L147-151) started a real fight.
+        std::fprintf(stdout, "[story] dialog '%s' (%s) -> launch fight '%s'\n",
+                     dlg.title.c_str(), dlg.quest.c_str(), fights.front().c_str());
+        std::fflush(stdout);
+    }
     return fights;
 }
 

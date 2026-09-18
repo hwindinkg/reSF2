@@ -1884,6 +1884,41 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(std::chrono::milliseconds(6));  // pace the 60 Hz steps
         }
         sf2::app::QuestEngine& q = app.quest_engine();
+        // --- task 3 (win marking) assertion --------------------------------
+        // The live fight can LOSE to Shin (the BeginnerCheat bot), so the
+        // shipped win path is asserted deterministically by replaying the
+        // exact `FightEnd` journal a win publishes. The data: quests.xml
+        // L260-263 `FirstGuardBeaten` — `_$Fight==ZONE_1|BOSS_LYNX|1` AND
+        // `_$FightResult==Win` -> `SetStoryTutorialStep=LEARN_PERK` +
+        // `ClearQuestQueue StoryTutorialBossFight`. No OS input, no screen.
+        bool ok_story_advance = false;
+        if (drv.saw_shin) {
+            std::string pre_step;
+            try {
+                pre_step = app.save().load().story_step();
+            } catch (const std::exception&) {
+            }
+            sf2::app::QuestJournal j;
+            j.fight = "ZONE_1|BOSS_LYNX|1";
+            j.fight_result = "Win";
+            q.note_fight(j.fight, j.fight_result);
+            q.fire(app, "FightEnd", j);
+            try {
+                ok_story_advance = app.save().load().story_step() == "LEARN_PERK";
+            } catch (const std::exception&) {
+            }
+            std::fprintf(stdout, "[qverify] FirstGuardBeaten win -> step=%s (%s)\n",
+                         ok_story_advance ? "LEARN_PERK" : "?", ok_story_advance ? "PASS" : "FAIL");
+            // The verifier must not advance the SHARED save past the step the
+            // loop/tour drivers expect, so put it back after asserting.
+            try {
+                sf2::app::WarriorSave w = app.save().load();
+                w.set_story_step(pre_step);
+                app.save().save(w);
+            } catch (const std::exception&) {
+            }
+            std::fflush(stdout);
+        }
         const bool ok_chain = drv.saw_chain && quests_loaded > 0;
         const bool ok_change = q.scene_actions() > 0;
         const bool ok_flash = drv.saw_nav_flash;
@@ -1899,15 +1934,17 @@ int main(int argc, char** argv) {
                      q.shop_actions(), ok_lynx ? 1 : 0, ok_shin ? 1 : 0, ok_fight ? 1 : 0);
         const bool all = quest_verify_buy
                              ? (ok_chain && ok_change && ok_flash && ok_shop && ok_open &&
-                                ok_lynx && ok_shin)
+                                ok_lynx && ok_shin && ok_story_advance)
                              : (ok_chain && ok_change && ok_fight);
         std::fprintf(stdout,
                      "[qverify] RESULT chain=%s ChangeScene=%s navflash=%s Shop=%s "
-                     "OpenShop=%s LynxDialog=%s ShinFight=%s trainingFight=%s -> %s\n",
+                     "OpenShop=%s LynxDialog=%s ShinFight=%s trainingFight=%s "
+                     "StoryAdvance=%s -> %s\n",
                      ok_chain ? "PASS" : "FAIL", ok_change ? "PASS" : "FAIL",
                      ok_flash ? "PASS" : "FAIL", ok_shop ? "PASS" : "FAIL",
                      ok_open ? "PASS" : "FAIL", ok_lynx ? "PASS" : "FAIL",
                      ok_shin ? "PASS" : "FAIL", ok_fight ? "PASS" : "FAIL",
+                     ok_story_advance ? "PASS" : "FAIL",
                      all ? "PASS" : "FAIL");
         std::fflush(stdout);
         app.shutdown();
