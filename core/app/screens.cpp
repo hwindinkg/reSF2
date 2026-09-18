@@ -1024,6 +1024,91 @@ int joy_sector_of(float dx, float dy, float base_r) {
     }
 }
 
+// [ORIGINAL] The JS `Za.bbb()` KEYBOARD bindings (`gu.De`), in registration
+// order (the `gu.RL` list, minified sf2 js @232345):
+//   De(2,0,key(1),key(3)) -> up_forward   = W+D
+//   De(8,0,key(1),key(7)) -> up_back      = W+A
+//   De(4,0,key(5),key(3)) -> down_forward = S+D
+//   De(6,0,key(5),key(7)) -> down_back    = S+A
+//   De(1,0,key(1)) up | De(5,0,key(5)) down | De(7,0,key(7)) back | De(3,0,key(3)) forward
+// `gu.Oba` (@234895) fires only the FIRST satisfied movement binding per pass
+// (the `this.TD` latch), and releases a binding when ANY of its keys is
+// released — so W+D selects up_forward(2) while up(1) stays held (it is NOT
+// released), and W alone selects up(1). dir index: 0=up, 1=forward, 2=down,
+// 3=back; dir_b = -1 for the single-key cardinals.
+struct KeyboardBinding {
+    int control;
+    int dir_a;
+    int dir_b;
+};
+constexpr KeyboardBinding kKeyboardBindings[] = {
+    {2, 0, 1}, {8, 0, 3}, {4, 2, 1}, {6, 2, 3},   // the diagonal pairs FIRST
+    {1, 0, -1}, {5, 2, -1}, {7, 3, -1}, {3, 1, -1}  // the cardinals
+};
+
+// A GLFW key -> the physical movement slot, or -1 when it is not a movement
+// key. The WASD keys are the JS `Af.oUa` directions (key(1)/(3)/(5)/(7)); the
+// arrows are the desktop aliases folded in only when opted in. They share the
+// slots so an alias and its JS key combine into the same diagonal.
+int keyboard_move_slot(int glfw_key, bool aliases) {
+    switch (glfw_key) {
+        case 87: return 0;  // W -> up
+        case 68: return 2;  // D -> forward
+        case 83: return 4;  // S -> down
+        case 65: return 6;  // A -> back
+        case 265: return aliases ? 1 : -1;  // Up
+        case 262: return aliases ? 3 : -1;  // Right
+        case 264: return aliases ? 5 : -1;  // Down
+        case 263: return aliases ? 7 : -1;  // Left
+        default: return -1;
+    }
+}
+
+// One keyboard movement edge for a fight controller: JS `gu.Oba` over the
+// bindings above. Returns the control whose PRESS fired (0 = none). The emit
+// order matches the JS exactly: a satisfied binding that is the first press
+// this pass fires a Tap; an unsatisfied binding whose changed key was released
+// fires a Release. `Fighter::input` ignores a duplicate Tap on a held key, so
+// the re-press of a still-satisfied cardinal on a diagonal release is a no-op.
+int keyboard_move_edge(sf2::scene::FightController* fight, KeyInputState& st,
+                       int slot, bool down, const char* tag) {
+    if (slot < 0 || slot >= 8) return 0;
+    st.phys[slot] = down;
+    const int dir = slot / 2;
+    auto dir_held = [&st](int d) {
+        return st.phys[d * 2] || st.phys[d * 2 + 1];
+    };
+    bool td = false;
+    int fired = 0;
+    for (const KeyboardBinding& b : kKeyboardBindings) {
+        const bool satisfied =
+            dir_held(b.dir_a) && (b.dir_b < 0 || dir_held(b.dir_b));
+        if (satisfied) {
+            if (!td) {
+                td = true;
+                fired = b.control;
+                if (fight != nullptr) {
+                    fight->player_input(
+                        static_cast<sf2::scene::key_type>(b.control),
+                        sf2::scene::press_type::tap);
+                }
+            }
+        } else if (!down && (b.dir_a == dir || b.dir_b == dir) &&
+                   !dir_held(dir)) {
+            if (fight != nullptr) {
+                fight->player_input(
+                    static_cast<sf2::scene::key_type>(b.control),
+                    sf2::scene::press_type::release);
+            }
+        }
+    }
+    st.sector = fired;
+    std::fprintf(stdout, "[%s] player input -> key slot %d %s (sector %d)\n",
+                 tag, slot, down ? "down" : "up", st.sector);
+    std::fflush(stdout);
+    return fired;
+}
+
 // The pointer -> gamepad events (JS `ze.nia/Qgb/oia` for the joystick,
 // `fu.nia/oia` for the buttons). ONE code path for the fight screen and the
 // Dojo `FightNone` viewer: the drawn pad feeds the SAME
@@ -5122,6 +5207,36 @@ int DojoScreen::dojo_fight_frame() const {
     return dojo_fight_ != nullptr ? dojo_fight_->frame() : -1;
 }
 
+int DojoScreen::dojo_last_key_type() const { return dojo_last_key_type_; }
+
+// The hub's keyboard -> its own `FightNone` controller. The JS hub runs a
+// REAL `ca` (`Tf` L1971 `this.Ig=v.m1a(a)`; `aa(): this.YL(Ig,a)` steps it),
+// and the keyboard is wired to it through `Za.bbb` -> `Za.hS` -> `ca.N0a` —
+// the SAME `player_input` path the drawn pad uses (`update_pad_input`). The
+// base `Screen::on_key` is a no-op, which is why only the pad worked here.
+void DojoScreen::on_key(int glfw_key, bool down) {
+    // The hub's FightNone battle is put straight into phase 2 (`xF(2)`, JS
+    // `kg` L387) with no round flow, so every fight key is live — no pause
+    // gate. Directions use the JS diagonal-pair table; the arrows are the
+    // desktop aliases the fight screen also accepts.
+    const int move_slot = keyboard_move_slot(glfw_key, /*aliases=*/true);
+    if (move_slot >= 0) {
+        keyboard_move_edge(dojo_fight_.get(), dojo_keys_, move_slot, down, "dojo");
+        dojo_last_key_type_ = dojo_keys_.sector;
+        return;
+    }
+    int kt_id = FightScreen::key_type_for_glfw(glfw_key);
+    if (kt_id == 0) kt_id = FightScreen::desktop_alias_for_glfw(glfw_key);
+    dojo_last_key_type_ = kt_id;
+    if (kt_id == 0 || dojo_fight_ == nullptr) return;
+    dojo_fight_->player_input(static_cast<sf2::scene::key_type>(kt_id),
+                              down ? sf2::scene::press_type::tap
+                                   : sf2::scene::press_type::release);
+    std::fprintf(stdout, "[dojo] player input -> key %d (%s)\n", kt_id,
+                 down ? "press" : "release");
+    std::fflush(stdout);
+}
+
 DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
     // Menu music (JS `lb.OS` -> `ta.Ut("menu")`, L1276-1277).
     sf2::audio::AudioEngine::instance().play_music("menu");
@@ -7264,9 +7379,21 @@ void FightScreen::on_key(int glfw_key, bool down) {
     // key-driven advance would double-step the round.)
     // GLFW key codes -> the game's key_type, bound from the JS key map
     // `sc.OD` (`Af.oUa` L2472) — the ten keys in `key_type_for_glfw` above.
-    // The desktop aliases (Left/Right/Up/Down/Space) are folded in only when
-    // opted in. Blocking is NOT a raw key in this game: the fighter blocks
-    // while any move's `Block` interval is active (e.g. HighPunch recovery).
+    // The desktop aliases (arrows/Space) fold in only when opted in. Blocking
+    // is NOT a raw key in this game: the fighter blocks while any move's
+    // `Block` interval is active (e.g. HighPunch recovery).
+    //
+    // DIRECTIONAL keys go through the JS `Za.bbb` binding table (the `gu`
+    // driver): the four movement directions are a held set and the JS checks
+    // the DIAGONAL key-pairs BEFORE the cardinals, so W+D selects
+    // up_forward(2) — not up(1)+forward(3). The on-screen pad reaches the
+    // SAME `player_input` edges through `update_pad_input`.
+    const int move_slot = keyboard_move_slot(glfw_key, aliases);
+    if (move_slot >= 0) {
+        keyboard_move_edge(fight_.get(), keys_, move_slot, down, "fight");
+        last_input_key_type_ = keys_.sector;
+        return;
+    }
     int kt_id = key_type_for_glfw(glfw_key);
     if (aliases && kt_id == 0) {
         kt_id = desktop_alias_for_glfw(glfw_key);

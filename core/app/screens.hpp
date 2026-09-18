@@ -71,6 +71,18 @@ struct PadInputState {
     bool btn_kick_down = false;
 };
 
+// The keyboard's directional state (JS `gu` keyboard + `Za.bbb` bindings).
+// `phys` holds the four logical movement directions, each with TWO physical
+// slots (primary WASD / desktop arrow alias): 0=up(W/Up), 1=forward(D/Right),
+// 2=down(S/Down), 3=back(A/Left). The JS binds DIAGONAL key-pairs BEFORE the
+// cardinals (`bbb()` `De(2,0,key(1),key(3))` ... before `De(1,0,key(1))`), so
+// W+D selects up_forward(2), not up(1)+forward(3). ONE instance per screen
+// that owns a fight controller (the fight and the Dojo `FightNone` viewer).
+struct KeyInputState {
+    bool phys[8] = {};  // [dir*2 + alias] held
+    int sector = 0;     // last movement control emitted (1-8, 0 = neutral)
+};
+
 // The dojo — the home screen (native Dojo screen 3, JS `Tf`). The screen
 // the game boots into: the dojo location layer stack + the `FightNone`
 // ModelViewer (player idle + Punchbag enemy) + the shared `za` top chrome
@@ -86,6 +98,13 @@ public:
     void update_impl(float dt) override;
     void render_impl(App& app) override;
 
+    // Keyboard -> the hub's own controller. The dojo is a real `FightNone`
+    // fight (JS `Tf` L1971 `this.Ig=v.m1a(a)`), so a key edge must reach it
+    // through the SAME `player_input` path the drawn pad uses. Without this
+    // override the base `Screen::on_key` swallowed every key and only the
+    // on-screen pad worked.
+    void on_key(int glfw_key, bool down) override;
+
     // --- test/replay hooks (`--input-tape` dojo pad evidence) --------------
     // The hub's `FightNone` controller state. Null-safe: false/""/0 until the
     // controller exists.
@@ -94,6 +113,9 @@ public:
     float dojo_player_x() const;
     float dojo_player_y() const;
     int dojo_fight_frame() const;
+    // The last control the hub's keyboard produced (0 = unbound/swallowed);
+    // the dojo keyboard-parity evidence (JS `Za.bbb` diagonal pairs).
+    int dojo_last_key_type() const;
 
 private:
     bool money_logged_ = false;
@@ -113,6 +135,8 @@ private:
     bool dojo_fight_tried_ = false;
     bool dojo_fight_ok_ = false;
     PadInputState dojo_pad_;  // the shared on-screen gamepad interaction state
+    KeyInputState dojo_keys_;  // the hub's keyboard directional state (JS `gu`)
+    int dojo_last_key_type_ = 0;
     // Builds `dojo_fight_` at the current dojo location (JS `Tf.init` L1971).
     void build_dojo_fight(App& app);
     // Tutorial quest banner state (quest_panel.hpp; derived read-only from
@@ -504,6 +528,8 @@ private:
     std::unique_ptr<sf2::scene::FightController> fight_;
     bool results_pushed_ = false;
     bool key_state_[16] = {};
+    // The keyboard directional state (JS `gu` + the `Za.bbb` key-pair table).
+    KeyInputState keys_;
     int last_log_frame_ = 0;
     bool auto_attack_wired_ = false;
     // Pause dialog (JS `Jn` -> `Ar.Qg(0)` -> `Aia()` `Dr`, L2018/L425 —

@@ -2276,6 +2276,34 @@ int main(int argc, char** argv) {
         }
         std::fprintf(stdout, "[tape] tape complete: %d fight frames\n", fight_frames);
 
+        // The JS DIAGONAL rule (`Za.bbb` keyboard setup, `gu.De` L232345): the
+        // movement key-PAIRS are registered BEFORE the cardinals and `gu.Oba`
+        // fires only the FIRST satisfied binding (the `this.TD` latch), so
+        // W+D must emit up_forward(2) and W+A up_back(8) - never up(1)/
+        // forward(3). Prove the exact control each key combination emits.
+        struct ComboProbe { int a; int b; int expect; const char* name; };
+        static const ComboProbe kCombos[] = {
+            {87, 68, 2, "W+D"}, {87, 65, 8, "W+A"},
+            {83, 68, 4, "S+D"}, {83, 65, 6, "S+A"},
+            {87, 0, 1, "W"},    {68, 0, 3, "D"},
+            {83, 0, 5, "S"},    {65, 0, 7, "A"},
+        };
+        int combo_ok = 0;
+        const int combo_n = static_cast<int>(sizeof(kCombos) / sizeof(kCombos[0]));
+        std::fprintf(stdout, "[tape] JS diagonal combos (Za.bbb):\n");
+        for (const ComboProbe& cp : kCombos) {
+            fs->on_key(cp.a, true);
+            if (cp.b != 0) fs->on_key(cp.b, true);
+            const int got = fs->last_input_key_type();
+            if (cp.b != 0) fs->on_key(cp.b, false);
+            fs->on_key(cp.a, false);
+            if (got == cp.expect) ++combo_ok;
+            std::fprintf(stdout, "[tape]   %-4s -> control %d (expect %d) %s\n",
+                         cp.name, got, cp.expect, got == cp.expect ? "PASS" : "FAIL");
+        }
+        std::fprintf(stdout, "[tape] diagonal combos %d/%d\n", combo_ok, combo_n);
+        std::fflush(stdout);
+
         // The accepted-key report LAST (the probes feed real taps, so they
         // must not disturb the tape above).
         struct KeyProbe { int glfw; const char* name; };
@@ -2326,6 +2354,39 @@ int main(int argc, char** argv) {
         std::fprintf(stdout, "[tape] dojo hub up: screen id %d fight_ready=%d frame=%d\n",
                      dojo_id, dojo_ready ? 1 : 0,
                      ds != nullptr ? ds->dojo_fight_frame() : -1);
+        // (a0) the KEYBOARD on the hub. A physical key must reach the hub's
+        //      own controller through the SAME `player_input` path the drawn
+        //      pad uses (JS `Za.bbb` keyboard -> `Za.hS` -> `ca.N0a`). Before
+        //      the fix the base `Screen::on_key` swallowed every key here, so
+        //      only the pad moved the character.
+        if (ds != nullptr) {
+            for (int i = 0; i < 6; ++i) app.run_one_frame();  // settle to idle
+            const float kx0 = ds->dojo_player_x();
+            const std::string km0 = ds->dojo_player_move();
+            ds->on_key(68, true);  // D -> forward (control 3)
+            const int kKeyCtl = ds->dojo_last_key_type();
+            for (int i = 0; i < 8; ++i) app.run_one_frame();
+            const float kx1 = ds->dojo_player_x();
+            const std::string km1 = ds->dojo_player_move();
+            ds->on_key(68, false);
+            std::fprintf(stdout,
+                         "[tape] dojo KEY forward (D, control %d): move '%s'->'%s' "
+                         "x %.2f->%.2f dx=%.2f %s\n",
+                         kKeyCtl, km0.c_str(), km1.c_str(), kx0, kx1,
+                         kx1 - kx0, (kx1 != kx0 || km1 != km0) ? "PASS" : "FAIL");
+            // The JS diagonal pair: W then D must emit up(1) then up_forward(2).
+            ds->on_key(87, true);  // W -> up (control 1)
+            const int d1 = ds->dojo_last_key_type();
+            ds->on_key(68, true);  // + D -> up_forward (control 2)
+            const int d2 = ds->dojo_last_key_type();
+            ds->on_key(68, false);
+            ds->on_key(87, false);
+            std::fprintf(stdout,
+                         "[tape] dojo KEY diagonal W(->%d)+D(->%d) expect 1->2 %s\n",
+                         d1, d2, (d1 == 1 && d2 == 2) ? "PASS" : "FAIL");
+            for (int i = 0; i < 30; ++i) app.run_one_frame();  // settle to idle
+            std::fflush(stdout);
+        }
         // (a) the drawn joystick (bottom-left, centre (216,554.4)). A press at
         //     (316,554) is the forward sector (3): it must start the forward
         //     move and displace the fighter in +x. kViewH=720, kPadSizeE=288,
