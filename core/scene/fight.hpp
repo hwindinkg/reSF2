@@ -1324,6 +1324,21 @@ public:
     // Kept as a plumbed default-off hook.
     void set_no_bullets_replenish(bool on) { no_bullets_replenish_ = on; }
 
+    // Suppresses the fight-entry gong (`rb.Wkb` -> `snd_gong`). The JS fires
+    // it from the battle-registration success branch (`sf2.502f0946.js`
+    // L1216 `d && rb.Wkb()`), NOT from the `m1a` fight factory the Dojo hub
+    // uses (`Tf.init` L1971). Must be set BEFORE `init_locks`. Default off.
+    void set_silent_entry(bool on) { silent_entry_ = on; }
+
+    // JS `ca.o1a` L403 (`type=="FightNone" ? a() : ...`) + `ca.kg` L387
+    // (`this.Da.type!="FightNone" ? this.Am() : this.xF(2)`): the hub's
+    // `FightNone` viewer enters phase 2 DIRECTLY — no StartStance wait, no
+    // FIGHT!/ROUND plate, no round timer, no KO/timeout. `xF(2)` (L387-388)
+    // also arms the virtual pad (`Za.F().nla(!0)` -> `Za.F().isVisible=true`).
+    // Pins the controller in the fight phase: the round-end checks
+    // (`Onb` -> `E3a`) never run while this is set.
+    void enter_fight_none();
+
     // [trace, Phase 0] Arms the per-frame pose dump: for the first `frames`
     // fight frames, update() appends one JSONL line to `path` (reference/
     // traces/native_pose.jsonl). Pure trace — the simulation is untouched.
@@ -1484,6 +1499,12 @@ private:
     bool battle_first_by_player_ = false;
     bool round_wait_ = false;      // JS: between a round's end and `FNa`
                                    // (the round-break banner holds it)
+    // JS `ca.o1a` L403 / `kg` L387: the `FightNone` viewer (the Dojo hub)
+    // pins phase 2 and skips the round flow (`Onb`/`E3a`) entirely.
+    bool fight_none_ = false;
+    // The fight-entry gong is a battle-registration artifact (see
+    // `set_silent_entry`), not an `m1a` factory one.
+    bool silent_entry_ = false;
     // The StartStance input buffer (JS `wd.WC` L426 + `llb` L429): ONE slot
     // - the FIRST press during phase 1 (StartStance) wins (JS `N0a` L426
     // `b.WC==-1&&(b.WC=a)`); it is replayed when the fight starts

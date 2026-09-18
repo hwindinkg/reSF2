@@ -2233,34 +2233,48 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
 
         // ------------------------------------------------------------------
-        // The dojo hub (JS `Tf` L1969-1972). The JS hub's only real input is
-        // the `za` nav column; the joystick/buttons the hub draws
-        // (`Za.F().update()`/`Za.F().Ea()`, L1971-1972) are the shared visual
-        // control surface and are wired to nothing on the hub. Feed both
-        // through the app's real entry points and report what happens.
+        // The dojo hub (JS `Tf` L1969-1972). The JS hub runs a REAL `FightNone`
+        // `ca` (`this.Ig=v.m1a(a)`, `aa(): this.YL(Ig,a)`), and the gamepad it
+        // draws (`Za.F()`) is WIRED to it: `Za.hS` L453 -> `ca.Ka()` ->
+        // `ca.N0a` L426 -> the controlled fighter. Prove it end to end: a
+        // joystick sector press must start the move / displace the hub
+        // fighter, and a punch press must start the punch move.
         // ------------------------------------------------------------------
         app.screens().pop();  // the fight -> back to the Dojo hub
+        auto* ds = static_cast<sf2::app::DojoScreen*>(app.screens().top());
         const int dojo_id = app.screens().current_id();
-        std::fprintf(stdout, "[tape] dojo hub up: screen id %d\n", dojo_id);
-        // (a) the drawn pad: the joystick centre (bottom-left). Display-only.
-        //     kViewH=720, kPadSizeE=288, kPadMarginC=72, kPadMarginD=21.6.
-        app.inject_click(216.0, 554.0);
-        for (int i = 0; i < 4; ++i) app.run_one_frame();
+        for (int i = 0; i < 4; ++i) app.run_one_frame();  // let the pad settle
+        const bool dojo_ready = ds != nullptr && ds->dojo_fight_ready();
+        std::fprintf(stdout, "[tape] dojo hub up: screen id %d fight_ready=%d frame=%d\n",
+                     dojo_id, dojo_ready ? 1 : 0,
+                     ds != nullptr ? ds->dojo_fight_frame() : -1);
+        // (a) the drawn joystick (bottom-left, centre (216,554.4)). A press at
+        //     (316,554) is the forward sector (3): it must start the forward
+        //     move and displace the fighter in +x. kViewH=720, kPadSizeE=288,
+        //     kPadMarginC=72, kPadMarginD=21.6, joy_r=144 (dead 72, grab 216).
+        const float x0 = ds != nullptr ? ds->dojo_player_x() : 0.0f;
+        const std::string m0 = ds != nullptr ? ds->dojo_player_move() : std::string();
+        app.inject_click(316.0, 554.0, 3);
+        for (int i = 0; i < 8; ++i) app.run_one_frame();
+        const float x1 = ds != nullptr ? ds->dojo_player_x() : 0.0f;
+        const std::string m1 = ds != nullptr ? ds->dojo_player_move() : std::string();
         std::fprintf(stdout,
-                     "[tape] dojo pad tap (216,554): screen id %d -> %d %s\n", dojo_id,
-                     app.screens().current_id(),
-                     app.screens().current_id() == dojo_id ? "(unchanged)" : "(CHANGED)");
-        // (b) keyboard on the hub: no player-controlled fighter exists there.
-        for (const int k : {87, 68, 83, 65, 75, 32}) {
-            app.inject_key(k, true);
-            app.run_one_frame();
-            app.inject_key(k, false);
-        }
-        std::fprintf(stdout, "[tape] dojo keys W/D/S/A/K/Space: screen id %d %s\n",
-                     app.screens().current_id(),
-                     app.screens().current_id() == dojo_id ? "(unchanged)" : "(CHANGED)");
-        // (c) the real dojo input: the `za` nav column. Expand the collapsed
-        //     header (x64-176 y72-110) then tap the MAP row (184,231).
+                     "[tape] dojo joystick forward (sector 3): move '%s'->'%s' x %.2f->%.2f "
+                     "dx=%.2f %s\n",
+                     m0.c_str(), m1.c_str(), x0, x1, x1 - x0,
+                     (x1 != x0 || m1 != m0) ? "PASS" : "FAIL");
+        for (int i = 0; i < 4; ++i) app.run_one_frame();  // release the stick
+        // (b) the drawn punch button (right cluster, centre ~(1142.5,521.7)).
+        //     The press must start the Punch move.
+        const std::string m2 = ds != nullptr ? ds->dojo_player_move() : std::string();
+        app.inject_click(1142.5, 521.7, 3);
+        for (int i = 0; i < 6; ++i) app.run_one_frame();
+        const std::string m3 = ds != nullptr ? ds->dojo_player_move() : std::string();
+        std::fprintf(stdout, "[tape] dojo pad punch (1142.5,521.7): move '%s'->'%s' %s\n",
+                     m2.c_str(), m3.c_str(), m3 != m2 ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        // (c) the real dojo navigation: the `za` nav column. Expand the
+        //     collapsed header (x64-176 y72-110) then tap the MAP row (184,231).
         app.inject_click(120.0, 90.0);
         for (int i = 0; i < 4; ++i) app.run_one_frame();
         app.inject_click(184.0, 231.0);

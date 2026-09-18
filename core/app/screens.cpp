@@ -1024,6 +1024,124 @@ int joy_sector_of(float dx, float dy, float base_r) {
     }
 }
 
+// The pointer -> gamepad events (JS `ze.nia/Qgb/oia` for the joystick,
+// `fu.nia/oia` for the buttons). ONE code path for the fight screen and the
+// Dojo `FightNone` viewer: the drawn pad feeds the SAME
+// `FightController::player_input` edges the keyboard does (JS `Za.hS` L453
+// -> `ca.Ka()` -> `ca.N0a` L426, the current controller's own fighter).
+// `live` = the pad is armed (the fight: round running; the dojo: `xF(2)`
+// armed it). `tag` prefixes the log lines. `fight` may be null (no release
+// target yet).
+static void update_pad_input(App& app, sf2::scene::FightController* fight,
+                             PadInputState& st, bool live, const char* tag) {
+    auto key = [fight](sf2::scene::key_type k, sf2::scene::press_type pt) {
+        if (fight != nullptr) fight->player_input(k, pt);
+    };
+    if (!live) {
+        // Round ended mid-drag: release everything so no key stays held.
+        if (st.joy_grabbed || st.joy_sector != 0 || st.btn_punch_down ||
+            st.btn_kick_down) {
+            st.joy_grabbed = false;
+            st.joy_knob_x = st.joy_knob_y = 0.0f;
+            st.joy_sector = 0;
+            st.btn_punch_down = st.btn_kick_down = false;
+        }
+        return;
+    }
+    const App::PointerState& p = app.pointer();
+    const GamepadLayout pad;
+
+    // --- Joystick (JS `ze`): grab inside the base's 1.5x zone, drag the
+    // knob, map the offset to the movement sector 1-8. The knob follows
+    // the pointer clamped to the base radius (JS `e5` + `Mz.G_a`).
+    if (p.pressed && !st.joy_grabbed) {
+        const float dx = static_cast<float>(p.x) - pad.joy_cx;
+        const float dy = static_cast<float>(p.y) - pad.joy_cy;
+        const float grab_r = pad.joy_r * kJoyGrabScale;
+        if (dx * dx + dy * dy <= grab_r * grab_r) {
+            st.joy_grabbed = true;
+        }
+    }
+    if (st.joy_grabbed) {
+        if (!p.down) {
+            // Released (JS `oia`): neutral + the key release event.
+            st.joy_grabbed = false;
+            st.joy_knob_x = st.joy_knob_y = 0.0f;
+            if (st.joy_sector != 0) {
+                key(static_cast<sf2::scene::key_type>(st.joy_sector),
+                    sf2::scene::press_type::release);
+                std::fprintf(stdout, "[%s] player input -> joy release %d\n", tag,
+                             st.joy_sector);
+                st.joy_sector = 0;
+            }
+        } else {
+            // Drag (JS `Qgb`): clamp the knob to the base, recompute the
+            // sector, and emit the key change (release the old sector's
+            // key, tap the new one — the same edges the keyboard path
+            // produces via on_key).
+            float dx = static_cast<float>(p.x) - pad.joy_cx;
+            float dy = static_cast<float>(p.y) - pad.joy_cy;
+            const float len = std::sqrt(dx * dx + dy * dy);
+            const float max_off = pad.joy_r;
+            if (len > max_off) {
+                dx *= max_off / len;
+                dy *= max_off / len;
+            }
+            st.joy_knob_x = dx;
+            st.joy_knob_y = dy;
+            const int sector = joy_sector_of(dx, dy, pad.joy_r);
+            if (sector != st.joy_sector) {
+                if (st.joy_sector != 0) {
+                    key(static_cast<sf2::scene::key_type>(st.joy_sector),
+                        sf2::scene::press_type::release);
+                }
+                if (sector != 0) {
+                    key(static_cast<sf2::scene::key_type>(sector),
+                        sf2::scene::press_type::tap);
+                }
+                std::fprintf(stdout, "[%s] player input -> joy sector %d -> %d\n", tag,
+                             st.joy_sector, sector);
+                std::fflush(stdout);
+                st.joy_sector = sector;
+            }
+        }
+    }
+
+    // --- Attack buttons (JS `fu.nia/oia`): a press inside a button's
+    // circle taps the attack key; the release ends it. The JS hit test is
+    // the node-local x*x+y*y < 115^2 — the native tests the view-space
+    // circle around each button center.
+    const float px = static_cast<float>(p.x);
+    const float py = static_cast<float>(p.y);
+    if (p.pressed && !st.joy_grabbed) {
+        const float pdx = px - pad.punch_cx;
+        const float pdy = py - pad.punch_cy;
+        if (pdx * pdx + pdy * pdy <= pad.btn_r * pad.btn_r) {
+            st.btn_punch_down = true;
+            key(sf2::scene::key_type::punch, sf2::scene::press_type::tap);
+            std::fprintf(stdout, "[%s] player input -> punch (pad)\n", tag);
+            std::fflush(stdout);
+        } else {
+            const float kdx = px - pad.kick_cx;
+            const float kdy = py - pad.kick_cy;
+            if (kdx * kdx + kdy * kdy <= pad.btn_r * pad.btn_r) {
+                st.btn_kick_down = true;
+                key(sf2::scene::key_type::kick, sf2::scene::press_type::tap);
+                std::fprintf(stdout, "[%s] player input -> kick (pad)\n", tag);
+                std::fflush(stdout);
+            }
+        }
+    }
+    if (st.btn_punch_down && !p.down) {
+        st.btn_punch_down = false;
+        key(sf2::scene::key_type::punch, sf2::scene::press_type::release);
+    }
+    if (st.btn_kick_down && !p.down) {
+        st.btn_kick_down = false;
+        key(sf2::scene::key_type::kick, sf2::scene::press_type::release);
+    }
+}
+
 // Loads the ui/controller atlas (the virtual gamepad art: Joystick*,
 // btn_punch_*, btn_kick_*) into the app's atlas cache. Returns true when
 // the frames are registered (logged once). The atlas ships as ASTC ktx -
@@ -4800,6 +4918,159 @@ void draw_destination_dim(sf2::render::Renderer& ren) {
     ren.draw_triangles(verts, 6, 0.0f, 0.0f, 0.0f, kAlpha);
 }
 
+// Builds the Dojo hub's `FightNone` FightController. JS `Tf.init` L1971:
+// `a = p.V$a().a0("FightNone")[0].g0(0)` — the current zone's FIRST
+// `FightNone` battle (the Punchbag `Training`, DOJO_BG_STATIC §1), then
+// `this.Ig=v.m1a(a)`. The JS `ca.o1a` L403 builds BOTH fighters
+// (`yb=Gf(kc)` player, `pb=Gf(Zb)` enemy): for `FightNone` there is no
+// opponent — the enemy is the Punchbag Warrior (`NotAI=1 NotAnimation=1`,
+// items PunchingBag/SkeletonPunchingBag, stages.xml L12-16), i.e. the
+// training bag at the ModelsViewer enemy spawn, present and drawn behind the
+// player, holding its bind pose (`merged_bag`). Built exactly like the battle
+// fight (same save-sourced player model + move list + spawns), then put
+// straight into phase 2 with NO round flow (`enter_fight_none`). The entry
+// gong is suppressed: it fires from the battle-registration branch (L1216),
+// not from this `m1a` factory path.
+void DojoScreen::build_dojo_fight(App& app) {
+    FightAssets& assets = app.fight_assets();
+    sf2::scene::LocationScene& loc = assets.dojo;
+    const std::string battle_name = "Training";
+    const float arena_w = loc.arena_width() > 0.0f ? loc.arena_width() : 1960.0f;
+    const float wall = loc.arena_wall();
+
+    // The enemy Warrior (JS `ur` L186-195): NotAI -> no AI controller,
+    // NotAnimation -> no animation attach (bind pose).
+    const BattleWarriorInfo bw = battle_warrior(battle_name, app.pending_battle().zone);
+
+    sf2::scene::BattleParams battle;
+    battle.name = battle_name;
+    battle.type = "FightNone";  // JS `p.Wab` DUMMY -> FightNone (FLOW_STATIC)
+    battle.location = "dojo";
+    battle.rounds = 2;
+    battle.round_time = 99;
+    battle.health_recovery = 1.0f;
+    battle.max_hp = 1;
+    battle.player_attrs = resolve_player_attributes(app);
+    battle.player_unarmed_damage = battle.player_attrs.count("UnarmedDamage")
+                                       ? battle.player_attrs["UnarmedDamage"]
+                                       : 0.0f;
+    // Spawns from the dojo's ModelsViewer (JS `Bf.zjb` L476 -> L381).
+    if (loc.has_spawns()) {
+        battle.player_spawn_x = loc.player_spawn_x();
+        battle.player_spawn_y = loc.player_spawn_y();
+        battle.enemy_spawn_x = loc.enemy_spawn_x();
+        battle.enemy_spawn_y = loc.enemy_spawn_y();
+    }
+    battle.enemy_not_ai = bw.has_not_ai;
+    battle.enemy_not_animation = bw.has_not_animation;
+    battle.enemy_voice = bw.voice;
+    battle.player_voice = bw.player_voice;
+    battle.enemy_align = to_align_deltas(bw.align);
+    battle.player_align = to_align_deltas(bw.player_align);
+
+    // The player's move list from its OWNED items (JS `ra.Hza` L684-685).
+    const std::vector<sf2::scene::OwnedItem> player_owned = owned_items(app);
+
+    // Player model from the save's typed slots (JS `xc.cM` L809-810).
+    sf2::scene::Model player_model_storage;
+    const sf2::scene::Model* player_model = nullptr;
+    {
+        std::vector<std::string> player_items;
+        try {
+            const WarriorSave w = app.save().load();
+            player_items = {w.skeleton, w.weapon, w.armor, w.helm};
+        } catch (const std::exception&) {
+        }
+        const std::vector<std::string> pnames = fighter_model_names(app, player_items);
+        if (!pnames.empty() && !pnames[0].empty()) {
+            player_model_storage = assets.merge_names(pnames);
+            if (!player_model_storage.bones.empty()) player_model = &player_model_storage;
+        }
+    }
+
+    const sf2::scene::TacticDef* tactic = nullptr;
+    {
+        const auto it = assets.tactic_defs.find("Standard");
+        if (it != assets.tactic_defs.end()) tactic = &it->second;
+        if (!bw.tactic.empty()) {
+            const auto tit = assets.tactic_defs.find(bw.tactic);
+            if (tit != assets.tactic_defs.end()) tactic = &tit->second;
+        }
+    }
+    // Player tactic (JS `IKa` L672): the save warrior's own `<Tactic>` when it
+    // resolves, else "Standard".
+    const sf2::scene::TacticDef* player_tactic = nullptr;
+    {
+        const auto sit = assets.tactic_defs.find("Standard");
+        if (sit != assets.tactic_defs.end()) player_tactic = &sit->second;
+        try {
+            const std::string pt = app.save().load().tactic;
+            if (!pt.empty()) {
+                const auto pit = assets.tactic_defs.find(pt);
+                if (pit != assets.tactic_defs.end()) player_tactic = &pit->second;
+            }
+        } catch (const std::exception&) {
+        }
+    }
+
+    dojo_fight_ = std::make_unique<sf2::scene::FightController>();
+    dojo_fight_->set_silent_entry(true);  // no gong (the `m1a` factory path)
+    dojo_fight_->set_global_triggers(&assets.global_triggers);
+    dojo_fight_->init_locks(
+        battle, assets.merged, assets.moves, assets.clips, assets.tactics_sets, tactic,
+        "Player", bw.first_name.empty() ? battle_name : bw.first_name,
+        battle.player_spawn_x, battle.player_spawn_y, battle.enemy_spawn_x,
+        battle.enemy_spawn_y, battle.max_hp, battle.max_hp, {}, player_owned,
+        equipped_perks(app, assets), nullptr, player_model, &assets.merged_bag,
+        player_tactic);
+    dojo_fight_->set_seed(0x5F2u);  // JS `Da.pg=new Rk(L.seed)` (L67)
+    dojo_fight_->set_bounds(wall, arena_w - wall, loc.arena_floor());
+    dojo_fight_->set_fighter_color(loc.root_color());
+    {
+        // Disarm identity (JS `$b(Au)` vs `ownHd`, L394): the player wields
+        // the save's weapon (Fists fallback).
+        std::string pw = "Fists";
+        try {
+            pw = app.save().load().weapon;
+        } catch (const std::exception&) {
+        }
+        if (pw.empty()) pw = "Fists";
+        dojo_fight_->set_fighter_weapons(pw, "Fists");
+    }
+    dojo_fight_->enter_fight_none();
+    dojo_fight_ok_ = true;
+    std::fprintf(stdout,
+                 "[dojo] FightNone controller ready (battle=%s enemy='%s' not_ai=%d "
+                 "not_anim=%d moves=%zu spawn P=(%.0f,%.0f) E=(%.0f,%.0f))\n",
+                 battle_name.c_str(), bw.first_name.c_str(), battle.enemy_not_ai ? 1 : 0,
+                 battle.enemy_not_animation ? 1 : 0, player_owned.size(),
+                 battle.player_spawn_x, battle.player_spawn_y, battle.enemy_spawn_x,
+                 battle.enemy_spawn_y);
+    std::fflush(stdout);
+}
+
+// The hub controller state for the `--input-tape` pad evidence (no behavior
+// change; null-safe before the controller is built).
+bool DojoScreen::dojo_fight_ready() const { return dojo_fight_ != nullptr; }
+
+std::string DojoScreen::dojo_player_move() const {
+    if (dojo_fight_ == nullptr) return std::string();
+    const sf2::scene::MoveDef* m = dojo_fight_->player().fighter.current_move();
+    return m != nullptr ? m->name : std::string();
+}
+
+float DojoScreen::dojo_player_x() const {
+    return dojo_fight_ != nullptr ? dojo_fight_->player().fighter.world_x() : 0.0f;
+}
+
+float DojoScreen::dojo_player_y() const {
+    return dojo_fight_ != nullptr ? dojo_fight_->player().fighter.world_y() : 0.0f;
+}
+
+int DojoScreen::dojo_fight_frame() const {
+    return dojo_fight_ != nullptr ? dojo_fight_->frame() : -1;
+}
+
 DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
     // Menu music (JS `lb.OS` -> `ta.Ut("menu")`, L1276-1277).
     sf2::audio::AudioEngine::instance().play_music("menu");
@@ -4811,7 +5082,15 @@ DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
 }
 
 void DojoScreen::update_impl(float dt) {
-    idle_frame_++;  // drives the idle-stance frame cycle (display only)
+    // The hub's live `FightNone` controller (JS `Tf.init` L1971
+    // `this.Ig=v.m1a(a)`; `aa(): this.YL(Ig,a)` steps it every frame). Build
+    // once the fight assets are up; null-safe when they are not. Built before
+    // the modal gate so the viewers exist even under a `He` dialog (the
+    // oracle `dojo_sensei` shows them behind the modal).
+    if (!dojo_fight_tried_ && app().has_fight_assets()) {
+        dojo_fight_tried_ = true;
+        build_dojo_fight(app());
+    }
     // Location timeline (D6): advance the SimpleEffect Transparency loop
     // (`xl.ia` L478-481) once per frame for the hub backdrop.
     if (app().has_fight_assets()) {
@@ -4889,6 +5168,15 @@ void DojoScreen::update_impl(float dt) {
             return;
         }
     }
+    // The drawn gamepad -> the hub's own controller (JS `Za.hS` L453 ->
+    // `ca.Ka()` -> `ca.N0a` L426): the SAME shared pad path the fight uses,
+    // BEFORE the step so a buffered key lands the same frame. `xF(2)`
+    // (L387-388) armed the pad. The `za` nav runs after (a nav tap is not a
+    // pad tap).
+    if (dojo_fight_ != nullptr) {
+        update_pad_input(app(), dojo_fight_.get(), dojo_pad_, /*live=*/true, "dojo");
+        dojo_fight_->update(dt);
+    }
     // The shared `za` nav column (JS `za.Aub` L1978-1980 / `za.Ofb`..`Vfb`):
     // a tap switches to Dojo/Map/Shop/Profile/Settings (JS `ma.Jg().jI`).
     za_update(app(), *this, kScreenDojo);
@@ -4922,9 +5210,12 @@ void ensure_dojo_location(App& app) {
 }
 
 // Dojo gamepad (display only): the oracle Dojo shows the joystick +
-// punch/kick buttons (same ui/controller frames as the fight pad, norm
-// state — no input handling on the hub).
-void draw_dojo_gamepad(App& app) {
+// punch/kick buttons (same ui/controller frames as the fight pad). The hub's
+// drawn pad reflects its live interaction state (the knob follows a drag, the
+// base/buttons swap to their _action frames) — the same frames the fight pad
+// uses. The hub's pad is wired to its `FightNone` controller (see
+// DojoScreen::update_impl / draw_dojo_figure callers).
+void draw_dojo_gamepad(App& app, const PadInputState& pad_in) {
     const GamepadLayout pad;
     const float base_size = pad.joy_r * 2.0f;
     const float knob_size = pad.knob_r * 2.0f;
@@ -4932,14 +5223,23 @@ void draw_dojo_gamepad(App& app) {
     // fh(-50,198) + uab 115): the 200px art at full hit-diameter left a
     // 4px gap that read as touching; 0.9 leaves a 12px gap.
     const float btn_size = pad.btn_r * 2.0f * 0.9f;
-    try_draw_atlas_button(app, "JoystickContainer_norm", pad.joy_cx, pad.joy_cy,
-                          base_size, base_size, 1.0f);
-    try_draw_atlas_button(app, "Joystick_norm", pad.joy_cx, pad.joy_cy, knob_size,
-                          knob_size, 1.0f);
-    try_draw_atlas_button(app, "btn_punch_normal", pad.punch_cx, pad.punch_cy,
-                          btn_size, btn_size, 1.0f);
-    try_draw_atlas_button(app, "btn_kick_normal", pad.kick_cx, pad.kick_cy,
-                          btn_size, btn_size, 1.0f);
+    const bool grabbed = pad_in.joy_grabbed;
+    try_draw_atlas_button(app,
+                          grabbed ? "JoystickContainer_action"
+                                  : "JoystickContainer_norm",
+                          pad.joy_cx, pad.joy_cy, base_size, base_size, 1.0f);
+    try_draw_atlas_button(app, grabbed ? "Joystick_action" : "Joystick_norm",
+                          pad.joy_cx + pad_in.joy_knob_x,
+                          pad.joy_cy + pad_in.joy_knob_y, knob_size, knob_size,
+                          1.0f);
+    try_draw_atlas_button(app,
+                          pad_in.btn_punch_down ? "btn_punch_action"
+                                                : "btn_punch_normal",
+                          pad.punch_cx, pad.punch_cy, btn_size, btn_size, 1.0f);
+    try_draw_atlas_button(app,
+                          pad_in.btn_kick_down ? "btn_kick_action"
+                                               : "btn_kick_normal",
+                          pad.kick_cx, pad.kick_cy, btn_size, btn_size, 1.0f);
 }
 
 namespace {
@@ -5589,13 +5889,14 @@ void DojoScreen::render_impl(App& app) {
         draw_scene_letterbox(ren, hub_cam);
     }
     // --- Dojo aliveness (JS `Tf` L1969-1972: the hub runs the `FightNone`
-    // ModelViewer through the live `Sya` framing) -------------------------
-    // The idle figure is the player at the location's ModelsViewer spawn
-    // (dojo 690,-93 — Bf.zjb L476), projected through the SAME hub camera
-    // the location layers use, plus the fighter container transform
-    // (tl.init L843: translate.x = -width/2, translate.y = height/2 - floor).
-    // NOT the old hand-placed kFigX/kFeetY capsule (PORT_AUDIT_UI §2.2).
-    // Display only — no fight logic runs.
+    // battle through the live `Sya` framing) ------------------------------
+    // The two viewers are the CONTROLLER's own fighters — the real `ca` the
+    // hub steps in `update_impl` — projected through the SAME hub camera the
+    // location layers use, plus the fighter container transform (`tl.init`
+    // L843: x=-width/2, y=height/2-Floor). `ev.Gf` L845 draws the enemy FIRST
+    // (z=-.001, behind), then the player (z=0). This replaces the old
+    // display-only `sample(idle_frame_/10)` copy: the drawn pad now drives
+    // this figure through the shared `player_input` path.
     {
         const float arena_half = app.has_fight_assets()
                                      ? app.fight_assets().dojo.arena_width() * 0.5f
@@ -5604,80 +5905,16 @@ void DojoScreen::render_impl(App& app) {
                                  ? app.fight_assets().dojo.arena_height() * 0.5f -
                                        app.fight_assets().dojo.arena_floor()
                                  : 200.0f;
-        if (!dojo_fig_tried_) {
-            dojo_fig_tried_ = true;
-            if (app.has_fight_assets()) {
-                FightAssets& assets = app.fight_assets();
-                const std::string idle_name =
-                    find_idle_clip_name(assets.moves, assets.clips,
-                                        player_weapon_token(app));
-                const auto it = idle_name.empty() ? assets.clips.end()
-                                                  : assets.clips.find(idle_name);
-                if (!assets.merged.bones.empty() && it != assets.clips.end() &&
-                    !it->second.frames.empty()) {
-                    dojo_fighter_ = std::make_unique<sf2::scene::Fighter>();
-                    dojo_fighter_->set_model(assets.merged);
-                    dojo_fighter_->set_color(assets.dojo.root_color());
-                    dojo_idle_ = &it->second;
-                    dojo_fig_ok_ = true;
-                    std::fprintf(stdout, "[dojo] idle figure ready (clip %s, frames %zu)\n",
-                                 idle_name.c_str(), it->second.frames.size());
-                    std::fflush(stdout);
-                } else {
-                    std::fprintf(stdout, "[dojo] idle figure skipped (no stance clip/model)\n");
-                    std::fflush(stdout);
-                }
-            }
+        if (dojo_fight_ != nullptr && have_hub_cam) {
+            // The container->location offset is the same `project()` the fight
+            // applies (-arena_half, +contY); `draw_dojo_figure`'s offset args
+            // are exactly that transform (the model scale stays 1).
+            draw_dojo_figure(ren, hub_cam, dojo_fight_->enemy().fighter, 1.0f,
+                             -arena_half, cont_y);
+            draw_dojo_figure(ren, hub_cam, dojo_fight_->player().fighter, 1.0f,
+                             -arena_half, cont_y);
         }
-        // The hub's enemy = the Punchbag dummy (`merged_bag`). JS runs the
-        // `FightNone` Punchbag Training viewer on the hub (`Tf.init` L1971),
-        // so its enemy is the dummy at the ModelsViewer enemy spawn
-        // (973,-110; `Bf.zjb` L476 `B_ = EnemyPosition`). The Warrior is
-        // `NotAnimation=1` (JS_FLOW.md:66), so the dummy HOLDS its bind pose
-        // (no clip needed — a 1-frame empty clip keeps every bone at bind).
-        // `ev.Gf` L845 draws the enemy FIRST (z=-.001), behind the player.
-        if (!dojo_bag_tried_) {
-            dojo_bag_tried_ = true;
-            if (app.has_fight_assets()) {
-                FightAssets& assets = app.fight_assets();
-                if (!assets.merged_bag.bones.empty()) {
-                    dojo_bag_ = std::make_unique<sf2::scene::Fighter>();
-                    dojo_bag_->set_model(assets.merged_bag);
-                    dojo_bag_->set_color(assets.dojo.root_color());
-                    dojo_bag_ok_ = true;
-                    std::fprintf(stdout,
-                                 "[dojo] punchbag dummy ready (bones %zu, bind pose)\n",
-                                 assets.merged_bag.bones.size());
-                    std::fflush(stdout);
-                }
-            }
-        }
-        if (dojo_bag_ok_ && dojo_bag_ != nullptr && have_hub_cam) {
-            const float enemy_x =
-                (app.has_fight_assets() ? app.fight_assets().dojo.enemy_spawn_x() : 973.0f) -
-                arena_half;
-            const float enemy_y =
-                (app.has_fight_assets() ? app.fight_assets().dojo.enemy_spawn_y() : -110.0f) +
-                cont_y;
-            sf2::data::anim_clip bind_clip;  // NotAnimation=1: bind pose (empty frame)
-            bind_clip.frames.resize(1);
-            dojo_bag_->sample(bind_clip, 0, enemy_x, enemy_y, 1);
-            draw_dojo_figure(ren, hub_cam, *dojo_bag_);
-        }
-        if (dojo_fig_ok_ && dojo_fighter_ != nullptr && dojo_idle_ != nullptr &&
-            !dojo_idle_->frames.empty() && have_hub_cam) {
-            const int nframes = static_cast<int>(dojo_idle_->frames.size());
-            const int fr = (idle_frame_ / 10) % nframes;  // slow idle cycle
-            const float spawn_x =
-                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_x() : 690.0f) -
-                arena_half;
-            const float spawn_y =
-                (app.has_fight_assets() ? app.fight_assets().dojo.player_spawn_y() : -93.0f) +
-                cont_y;
-            dojo_fighter_->sample(*dojo_idle_, fr, spawn_x, spawn_y, 1);
-            draw_dojo_figure(ren, hub_cam, *dojo_fighter_);
-        }
-        draw_dojo_gamepad(app);
+        draw_dojo_gamepad(app, dojo_pad_);
         // Shared `za` chrome (topPanel + wr/xr/yr widgets + the vertical nav
         // column) — the JS `ma.D1` chrome on every shell screen
         // (PORT_AUDIT_UI §2.1). Replaces the invented draw_dojo_hud_bar
@@ -7119,112 +7356,12 @@ bool FightScreen::pad_visible() const {
     return fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over();
 }
 
-// The pointer -> gamepad events (JS `ze.nia/Qgb/oia` for the joystick,
-// `fu.nia/oia` for the buttons). Runs in update_impl BEFORE the fight
-// update so the buffered keys land the same frame (like on_key).
+// The pointer -> gamepad events. Runs in update_impl BEFORE the fight
+// update so the buffered keys land the same frame (like on_key). The body
+// lives in the shared `update_pad_input` (the dojo's `FightNone` viewer
+// calls the SAME helper).
 void FightScreen::update_gamepad_input() {
-    if (fight_ == nullptr || !pad_visible()) {
-        // Round ended mid-drag: release everything so no key stays held.
-        if (joy_grabbed_ || joy_sector_ != 0 || btn_punch_down_ || btn_kick_down_) {
-            joy_grabbed_ = false;
-            joy_knob_x_ = joy_knob_y_ = 0.0f;
-            joy_sector_ = 0;
-            btn_punch_down_ = btn_kick_down_ = false;
-        }
-        return;
-    }
-    const App::PointerState& p = app().pointer();
-    const GamepadLayout pad;
-
-    // --- Joystick (JS `ze`): grab inside the base's 1.5x zone, drag the
-    // knob, map the offset to the movement sector 1-8. The knob follows
-    // the pointer clamped to the base radius (JS `e5` + `Mz.G_a`).
-    if (p.pressed && !joy_grabbed_) {
-        const float dx = static_cast<float>(p.x) - pad.joy_cx;
-        const float dy = static_cast<float>(p.y) - pad.joy_cy;
-        const float grab_r = pad.joy_r * kJoyGrabScale;
-        if (dx * dx + dy * dy <= grab_r * grab_r) {
-            joy_grabbed_ = true;
-        }
-    }
-    if (joy_grabbed_) {
-        if (!p.down) {
-            // Released (JS `oia`): neutral + the key release event.
-            joy_grabbed_ = false;
-            joy_knob_x_ = joy_knob_y_ = 0.0f;
-            if (joy_sector_ != 0) {
-                fight_->player_input(static_cast<sf2::scene::key_type>(joy_sector_),
-                                     sf2::scene::press_type::release);
-                std::fprintf(stdout, "[fight] player input -> joy release %d\n",
-                             joy_sector_);
-                joy_sector_ = 0;
-            }
-        } else {
-            // Drag (JS `Qgb`): clamp the knob to the base, recompute the
-            // sector, and emit the key change (release the old sector's
-            // key, tap the new one — the same edges the keyboard path
-            // produces via on_key).
-            float dx = static_cast<float>(p.x) - pad.joy_cx;
-            float dy = static_cast<float>(p.y) - pad.joy_cy;
-            const float len = std::sqrt(dx * dx + dy * dy);
-            const float max_off = pad.joy_r;
-            if (len > max_off) {
-                dx *= max_off / len;
-                dy *= max_off / len;
-            }
-            joy_knob_x_ = dx;
-            joy_knob_y_ = dy;
-            const int sector = joy_sector_of(dx, dy, pad.joy_r);
-            if (sector != joy_sector_) {
-                if (joy_sector_ != 0) {
-                    fight_->player_input(static_cast<sf2::scene::key_type>(joy_sector_),
-                                         sf2::scene::press_type::release);
-                }
-                if (sector != 0) {
-                    fight_->player_input(static_cast<sf2::scene::key_type>(sector),
-                                         sf2::scene::press_type::tap);
-                }
-                std::fprintf(stdout, "[fight] player input -> joy sector %d -> %d\n",
-                             joy_sector_, sector);
-                std::fflush(stdout);
-                joy_sector_ = sector;
-            }
-        }
-    }
-
-    // --- Attack buttons (JS `fu.nia/oia`): a press inside a button's
-    // circle taps the attack key; the release ends it. The JS hit test is
-    // the node-local x*x+y*y < 115^2 — the native tests the view-space
-    // circle around each button center.
-    const float px = static_cast<float>(p.x);
-    const float py = static_cast<float>(p.y);
-    if (p.pressed && !joy_grabbed_) {
-        const float pdx = px - pad.punch_cx;
-        const float pdy = py - pad.punch_cy;
-        if (pdx * pdx + pdy * pdy <= pad.btn_r * pad.btn_r) {
-            btn_punch_down_ = true;
-            fight_->player_input(sf2::scene::key_type::punch, sf2::scene::press_type::tap);
-            std::fprintf(stdout, "[fight] player input -> punch (pad)\n");
-            std::fflush(stdout);
-        } else {
-            const float kdx = px - pad.kick_cx;
-            const float kdy = py - pad.kick_cy;
-            if (kdx * kdx + kdy * kdy <= pad.btn_r * pad.btn_r) {
-                btn_kick_down_ = true;
-                fight_->player_input(sf2::scene::key_type::kick, sf2::scene::press_type::tap);
-                std::fprintf(stdout, "[fight] player input -> kick (pad)\n");
-                std::fflush(stdout);
-            }
-        }
-    }
-    if (btn_punch_down_ && !p.down) {
-        btn_punch_down_ = false;
-        fight_->player_input(sf2::scene::key_type::punch, sf2::scene::press_type::release);
-    }
-    if (btn_kick_down_ && !p.down) {
-        btn_kick_down_ = false;
-        fight_->player_input(sf2::scene::key_type::kick, sf2::scene::press_type::release);
-    }
+    update_pad_input(app(), fight_.get(), pad_, pad_visible(), "fight");
 }
 
 // The gamepad render (JS `Za.Ea` -> `ze.Ea` + `fu.Ea`): the atlas frames
@@ -7238,7 +7375,7 @@ void FightScreen::draw_gamepad(App& app) const {
 
     // --- Joystick: base + knob. The JS swaps the base frame to _action
     // while grabbed (`RT(a)` toggles aX/EH/$W/DX) — the native mirrors it.
-    const bool grabbed = joy_grabbed_;
+    const bool grabbed = pad_.joy_grabbed;
     const char* base_frame = grabbed ? "JoystickContainer_action" : "JoystickContainer_norm";
     const char* knob_frame = grabbed ? "Joystick_action" : "Joystick_norm";
     const float base_size = pad.joy_r * 2.0f;
@@ -7261,8 +7398,8 @@ void FightScreen::draw_gamepad(App& app) const {
             ren.draw_triangles(tri, 3, 0.08f, 0.08f, 0.1f, 0.55f);
         }
     }
-    const float knob_cx = pad.joy_cx + joy_knob_x_;
-    const float knob_cy = pad.joy_cy + joy_knob_y_;
+    const float knob_cx = pad.joy_cx + pad_.joy_knob_x;
+    const float knob_cy = pad.joy_cy + pad_.joy_knob_y;
     if (!try_draw_atlas_button(app, knob_frame, knob_cx, knob_cy, knob_size, knob_size,
                                1.0f)) {
         constexpr float kPi = 3.14159265358979323846f;
@@ -7286,10 +7423,10 @@ void FightScreen::draw_gamepad(App& app) const {
     // untouched — JS fu/uab; draw only): 4px gap -> 12px gap.
     const float btn_size = pad.btn_r * 2.0f * 0.9f;
     const bool punch_drawn =
-        try_draw_atlas_button(app, btn_punch_down_ ? "btn_punch_action" : "btn_punch_normal",
+        try_draw_atlas_button(app, pad_.btn_punch_down ? "btn_punch_action" : "btn_punch_normal",
                               pad.punch_cx, pad.punch_cy, btn_size, btn_size, 1.0f);
     const bool kick_drawn =
-        try_draw_atlas_button(app, btn_kick_down_ ? "btn_kick_action" : "btn_kick_normal",
+        try_draw_atlas_button(app, pad_.btn_kick_down ? "btn_kick_action" : "btn_kick_normal",
                               pad.kick_cx, pad.kick_cy, btn_size, btn_size, 1.0f);
     if (!punch_drawn) {
         constexpr float kPi = 3.14159265358979323846f;
@@ -7304,7 +7441,7 @@ void FightScreen::draw_gamepad(App& app) const {
                            pad.punch_cy + std::sin(a0) * pad.btn_r,
                             pad.punch_cx + std::cos(a1) * pad.btn_r,
                            pad.punch_cy + std::sin(a1) * pad.btn_r};
-            ren.draw_triangles(tri, 3, btn_punch_down_ ? 0.9f : 0.3f, 0.55f, 0.15f, 0.85f);
+            ren.draw_triangles(tri, 3, pad_.btn_punch_down ? 0.9f : 0.3f, 0.55f, 0.15f, 0.85f);
         }
     }
     if (!kick_drawn) {
@@ -7320,7 +7457,7 @@ void FightScreen::draw_gamepad(App& app) const {
                            pad.kick_cy + std::sin(a0) * pad.btn_r,
                            pad.kick_cx + std::cos(a1) * pad.btn_r,
                            pad.kick_cy + std::sin(a1) * pad.btn_r};
-            ren.draw_triangles(tri, 3, btn_kick_down_ ? 0.9f : 0.3f, 0.55f, 0.15f, 0.85f);
+            ren.draw_triangles(tri, 3, pad_.btn_kick_down ? 0.9f : 0.3f, 0.55f, 0.15f, 0.85f);
         }
     }
 }

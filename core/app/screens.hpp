@@ -58,6 +58,19 @@ class LocationScene;
 
 namespace sf2::app {
 
+// The on-screen gamepad's per-screen interaction state (JS `ze` joystick +
+// `fu` attack buttons). ONE instance per screen that shows the pad; the
+// shared `update_pad_input` in screens.cpp turns pointer events into
+// `FightController::player_input` edges for both the fight and the dojo.
+struct PadInputState {
+    bool joy_grabbed = false;   // a pointer owns the joystick
+    float joy_knob_x = 0.0f;    // knob offset from center (view px)
+    float joy_knob_y = 0.0f;
+    int joy_sector = 0;         // the active movement key 1-8 (0 = neutral)
+    bool btn_punch_down = false;
+    bool btn_kick_down = false;
+};
+
 // The dojo — the home screen (native Dojo screen 3, JS `Tf`). The screen
 // the game boots into: the dojo location layer stack + the `FightNone`
 // ModelViewer (player idle + Punchbag enemy) + the shared `za` top chrome
@@ -73,28 +86,35 @@ public:
     void update_impl(float dt) override;
     void render_impl(App& app) override;
 
+    // --- test/replay hooks (`--input-tape` dojo pad evidence) --------------
+    // The hub's `FightNone` controller state. Null-safe: false/""/0 until the
+    // controller exists.
+    bool dojo_fight_ready() const;
+    std::string dojo_player_move() const;
+    float dojo_player_x() const;
+    float dojo_player_y() const;
+    int dojo_fight_frame() const;
+
 private:
     bool money_logged_ = false;
 
     // --- Dojo aliveness (JS `Tf` L1969-1972: the hub runs the `FightNone`
-    // ModelViewer — the idle stance figure at the location's ModelsViewer
-    // spawn, not a hand-placed capsule) -----------------------------------
-    // The idle player figure: a scene Fighter sampling the stance clip
-    // (display only — never stepped through fight logic). Built lazily on
-    // first render; null-safe when assets are missing (headless).
-    std::unique_ptr<sf2::scene::Fighter> dojo_fighter_;
-    bool dojo_fig_tried_ = false;
-    bool dojo_fig_ok_ = false;
-    const sf2::data::anim_clip* dojo_idle_ = nullptr;  // owned by FightAssets
-    int idle_frame_ = 0;   // fixed-step counter driving the idle cycle
-    // The hub's Punchbag dummy (the `FightNone` viewer's enemy, `Tf.init`
-    // L1971; enemy spawn 973,-110 parsed at `Bf.zjb` L476). It is a STATIC
-    // prop — the Warrior is `NotAnimation=1` (JS_FLOW.md:66) — so it keeps
-    // its bind pose. Drawn through the same hub camera as the idle figure
-    // (`ev.Gf` L845 draws the enemy first, behind the player).
-    std::unique_ptr<sf2::scene::Fighter> dojo_bag_;
-    bool dojo_bag_tried_ = false;
-    bool dojo_bag_ok_ = false;
+    // battle through a REAL `ca` — `this.Ig=v.m1a(a)`, `aa(): this.YL(Ig,a)`
+    // steps it every frame) -------------------------------------------------
+    // The hub's fight is built like any battle (`ca.ggb` L383): the player
+    // from the save's gear, the enemy = the zone's first `FightNone` warrior
+    // — the Punchbag training bag (`NotAI=1 NotAnimation=1`, stages.xml
+    // L12-16 -> `merged_bag` bind pose). It is put straight into phase 2
+    // (`xF(2)`, JS `kg` L387) with NO round flow (no ROUND/FIGHT plate, no
+    // timer, no KO). The drawn gamepad feeds it through the SAME
+    // `player_input` path the fight uses. Built lazily; null-safe when assets
+    // are missing (headless).
+    std::unique_ptr<sf2::scene::FightController> dojo_fight_;
+    bool dojo_fight_tried_ = false;
+    bool dojo_fight_ok_ = false;
+    PadInputState dojo_pad_;  // the shared on-screen gamepad interaction state
+    // Builds `dojo_fight_` at the current dojo location (JS `Tf.init` L1971).
+    void build_dojo_fight(App& app);
     // Tutorial quest banner state (quest_panel.hpp; derived read-only from
     // the save's Tutorial field + the last Training result).
     std::string tutorial_ = "MOVE";
@@ -513,14 +533,9 @@ private:
     bool pad_visible() const;          // false while round_wait()
     void update_gamepad_input();       // pointer -> joystick/button events
     void draw_gamepad(App& app) const; // the atlas-frame render
-    // Joystick state: the knob drag (JS `ze.nia/Qgb/oia`).
-    bool joy_grabbed_ = false;   // a pointer owns the joystick
-    float joy_knob_x_ = 0.0f;     // knob offset from center (view px)
-    float joy_knob_y_ = 0.0f;
-    int joy_sector_ = 0;          // the active movement key 1-8 (0 = neutral)
-    // Attack buttons: pressed state (JS `ig.nia/oia` -> frame swap).
-    bool btn_punch_down_ = false;
-    bool btn_kick_down_ = false;
+    // The joystick/button interaction state (JS `ze.nia/Qgb/oia`, `fu.nia/oia`),
+    // read by the shared `update_pad_input` and by `draw_gamepad`.
+    PadInputState pad_;
 
     // --- round banner (JS `Cr` L2021-2026 — presentation only) -----------
     // The current banner's kind + the fight frame it was raised at (the

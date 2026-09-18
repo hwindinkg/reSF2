@@ -383,7 +383,12 @@ void FightController::init_locks(
     // — ONCE per fight entry, not per round. `init_locks` is that entry
     // (the ctor path the fight screen / `--fight` / the drivers all take).
     // `snd_gong` = 65591 -> `gong.wav` (the `ta.WBa` row is L1266).
-    sf2::audio::AudioEngine::instance().play("snd_gong");
+    // The Dojo hub's `FightNone` viewer is built through the `m1a` factory
+    // (`Tf.init` L1971), NOT the registration path, so it suppresses this
+    // (`set_silent_entry`, called before `init_locks`).
+    if (!silent_entry_) {
+        sf2::audio::AudioEngine::instance().play("snd_gong");
+    }
 }
 
 // The shared fight draw (JS `Da.pg.jf()`, L2352). An injected override (the
@@ -1840,6 +1845,40 @@ void FightController::enter_fight() {
     // Root `<Triggers>` `RoundStageStart Name="Fight"` (`Tm` L772; the
     // stage code 2). Published at the phase-2 transition, the only site the
     // round-stage machine raises (`kg` handler L412/L387 -> `Rkb`).
+    dispatch_global_triggers("RoundStageStart", "RoundStageStart", "Fight");
+}
+
+// JS `ca.o1a` L403 (`Da.type=="FightNone" ? a() : ...`) + `ca.kg` L387
+// (`this.eu==1&&a&&(this.fxa(), this.Da.type!="FightNone" ? this.Am() :
+// this.xF(2))`): the Dojo hub's `FightNone` viewer goes straight to phase 2.
+// No StartStance wait, no FIGHT!/ROUND plate (`Am` is not taken), no round
+// timer (`Rkb`/`Sf.play` is not reached) and no round flow (`Onb`/`E3a` are
+// gated off in `update`). `xF(2)` also arms the virtual gamepad
+// (`Za.F().nla(!0)` -> `Za.F().isVisible=true`).
+void FightController::enter_fight_none() {
+    fight_none_ = true;
+    set_phase(fight_phase::fight);
+    round_live_ = true;      // `xF(2)` makes the fight phase live for hits/fx
+    round_.running = false;  // NO `Sf.play()`: the round timer never ticks
+    start_stance_done_ = true;
+    // Same idle hand-off as `enter_fight` (drop the intro stance clip so the
+    // static idle plays; keep the NotAnimation bag at bind pose).
+    player_.fighter.clear_move();
+    enemy_.fighter.clear_move();
+    if (battle_.enemy_not_animation) sample_enemy_idle();
+    rebuild_body(player_, enemy_);
+    rebuild_body(enemy_, player_);
+    // No plate: `xF(2)` skips `Am()`; the ROUND 1 plate raised by `init_locks`
+    // belongs to the battle flow (JS `ggb` -> `swb` -> `FNa`).
+    cur_banner_ = banner_kind::none;
+    banner_time_ = 0.0f;
+    banner_total_ = 0.0f;
+    banner_armed_ = false;
+    banner_arm_delay_ = 0.0f;
+    banner_action_ = banner_action::none;
+    round_wait_ = false;
+    // `xF` dispatches the phase to the fighters (RoundStageStart slot 1 via
+    // `set_phase`) and the root `<Triggers>` like `enter_fight` does.
     dispatch_global_triggers("RoundStageStart", "RoundStageStart", "Fight");
 }
 
@@ -3983,13 +4022,20 @@ void FightController::update(float dt) {
                 }
             }
 
-            // JS `ca.ia` L389 `PC(1,3)` -> `du.Ih(1,3,ze)` (rule detection:
-            // the Ringout field exit + the TimeOutWin timer end). Runs before
-            // the round-end check so the fired `Pu` ends the round this frame.
-            rules_frame();
+            // JS `ca.o1a` L403 / `kg` L387: the `FightNone` viewer has NO
+            // round flow — the round-end checks (`Onb` -> `E3a`) and the
+            // stage-rule pass (`du.Ih`) never run for it. Everything else in
+            // the phase-2 body (fighter step, hit detection, sparks) is the
+            // same live path the fight uses.
+            if (!fight_none_) {
+                // JS `ca.ia` L389 `PC(1,3)` -> `du.Ih(1,3,ze)` (rule detection:
+                // the Ringout field exit + the TimeOutWin timer end). Runs
+                // before the round-end check so the fired `Pu` ends the round.
+                rules_frame();
 
-            // The round-end check (JS `Onb`).
-            check_round_end();
+                // The round-end check (JS `Onb`).
+                check_round_end();
+            }
 
             // [fx] Latch this frame's strike-capsule endpoints as the next
             // frame's `sx.mf`/`Zs.mf` (JS `Vc.f4`/`sk` L794-796). The hit
