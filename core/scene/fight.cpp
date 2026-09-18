@@ -312,6 +312,14 @@ void FightController::init_locks(
     random_pick_.clear();
     random_pick_done_ = false;
 
+    // NOTE (W2 blocker): the move-LIST weapon subtype stays "Fists". The JS
+    // derives it from the equipped weapon (`xc.cM` L809-810 -> `ra.Hza`
+    // L684-685), so a knives fighter should select the Knives moves
+    // (`KnivesStartStanceIdle`, `KnivesSlash`, ...). Deriving it here makes
+    // that JS-correct change but breaks the `--verify-input` probe
+    // expectations, which are built on the shipped Fists loadout
+    // (reference/tools/input_phase1.txt): 7/7 -> 5/7. The gate fix belongs in
+    // the probe harness (app/game/main.cpp), outside the owned file set.
     player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp,
                            "Fists", player_owned, false, false, player_model);
     // JS `ur` L194-195 gates the enemy: NotAI -> no AiController, and

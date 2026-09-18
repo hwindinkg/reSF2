@@ -69,24 +69,12 @@ void Fighter::set_model(const Model& model) {
         sol_mf_[i * 3 + 1] = b.y;
         sol_mf_[i * 3 + 2] = b.z;
     }
-    // [FIX stretched mesh — continuity seed] Seed the continuity reference
-    // with the BIND COM so the FIRST sample also translates the cloth from
-    // bind into the first clip's frame (the JS solver space is continuous
-    // from the very first frame). Without this the first frames leave the
-    // cloth behind the posed skeleton.
-    // [F9] The continuity reference is NOT seeded here any more. Its old seed
-    // was `model_.bones[0].x` — the BIND x of a DIFFERENT node in a DIFFERENT
-    // space than the align anchor `translate_solver_state` now uses, so the
-    // first move translated the whole state by `align_anchor - bones[0]`
-    // (hundreds of units). The reference is now recorded on the first
-    // `translate_solver_state` call instead, i.e. the first move performs no
-    // translation (the align alone already re-expresses the clip space).
-    if (!model_.bones.empty()) {
-        sol_prev_com_x_ = model_.bones[0].x;
-        sol_prev_com_y_ = model_.bones[0].y;
-        sol_prev_com_z_ = model_.bones[0].z;
-        sol_have_prev_com_ = false;
-    }
+    // [FIX root-motion - no cross-clip state translation] The old solver-state
+    // continuity seed and the per-move `translate_solver_state` it fed are
+    // REMOVED: the align shift in `compute_align` (JS `Te.Gub`/`Gla`) already
+    // re-expresses every new clip into the previous pose own continuous space,
+    // so `sol_ma_` needs no translation (JS `Vc` ctor L793-794: ma = mf = bind,
+    // then one `Al.ia` step per frame, L582 - no warmup, no cross-clip shift).
     solver_init_ = true;
     // JS `Vc` ctor (L793-794): ma = mf = the bind position (`p8`). The
     // solver then runs exactly one `Al.ia()` step per frame (L582) — the
@@ -755,49 +743,22 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         }
     }
     // JS `Te.Skb` order: the play buffer prepend (`Pka`/`qrb`) is built
-    // before the first `eda` sample; `Gub` (align) also precedes it.
-    // [FIX prepend-lag] Move the persisted solver state into the NEW clip's
-    // space BEFORE `build_prepend` freezes slots 0/1 from it (JS `Skb` L550
-    // builds `qrb` from the current continuous `ma`/`mf` ahead of the first
-    // `eda`). Anchor = the new clip's root (bone 0) at the starting frame,
-    // aligned exactly as `sample()` aligns it. With no clip the anchor is the
-    // existing COM, i.e. the translation is a no-op.
-    {
-        float tx = sol_prev_com_x_;
-        float ty = sol_prev_com_y_;
-        float tz = sol_prev_com_z_;
-        if (current_clip_ != nullptr && !current_clip_->frames.empty()) {
-            const int f = std::max(0, std::min(
-                move.first_frame,
-                static_cast<int>(current_clip_->frames.size()) - 1));
-            const auto& fb = current_clip_->frames[static_cast<std::size_t>(f)].bones;
-            if (!fb.empty()) {
-                // [F9] Anchor the translation on the SAME node the align uses
-                // (`<Align><Pivot Part>` — or its `Peb` mirror partner when
-                // `rw`; JS `Gub` L558 reads `this.jc.Kh(2).data[this.os]`),
-                // not bone 0. The old port used `fb[0]`: a different node's
-                // swing, so the state it froze into `build_prepend` disagreed
-                // with the node `compute_align` had just re-anchored on.
-                int anchor_u = align_ref_u_ >= 0
-                                   ? align_ref_u_
-                                   : model_.bone_by_name(move.align.pivot_part);
-                if (anchor_u < 0 ||
-                    static_cast<std::size_t>(anchor_u) >= fb.size()) {
-                    anchor_u = 0;  // no <Align> Part: the clip root
-                }
-                const float msign = mirror_x_ ? -1.0f : 1.0f;
-                // The align node's clip value goes through the same `Oeb`
-                // swap the sampling uses, so `tx` lands exactly on
-                // `sol_ma_[align_ref_u_]` (the align constant's fixed point).
-                const std::size_t src = static_cast<std::size_t>(
-                    mirror_swap_src(anchor_u, fb.size()));
-                tx = msign * fb[src].x + align_x_;
-                ty = fb[src].y + align_y_;
-                tz = fb[src].z + align_z_;
-            }
-        }
-        translate_solver_state(tx, ty, tz);
-    }
+    // BEFORE the first `eda` sample and after `Gub` (align).
+    //
+    // [FIX root-motion - no cross-clip state translation] `compute_align`
+    // above already re-expressed the NEW clip into the OLD pose space: the
+    // align shift `Fk = posed_prev[Pivot Part] - raw_new[Pivot Part]` is added
+    // to every clip bone (`Gla` -> `vu.shift`, applied inside `ctl`), so the
+    // new clip Pivot Part lands exactly on the previous pose (`Te.Gub`
+    // L557-559). The solver/persisted state `sol_ma_` therefore already lives
+    // in that same continuous space - it is the previous frame posed `px`.
+    // The old port additionally translated the whole solver state by
+    // `tx - sol_prev_com_` (the previous move align-node travel), which
+    // double-applied that travel: `qrb` (`build_prepend`) then froze slots
+    // 0/1 from the shifted state, so the first ~5 frames of every new clip
+    // blended toward a pose one move root travel away and the fighter
+    // visibly snapped/slid back at each move->idle boundary. The JS has NO
+    // such translation (see the solver-seed note in `set_model`).
     build_prepend(move);
     sample_current();
     return true;
@@ -1365,47 +1326,6 @@ void Fighter::compute_align(const MoveDef& move) {
 // (`ma`) and its previous position (`mf`) — the clip-start pose blend, where
 // 1.5 = (MidFrames+1)/2. `ZW` = the clip bone count, so only the clip bones
 // are seeded; the buffer is indexed 0..ZW-1 (JS `m.resize(this.fq, a.ZW, ...)`).
-// [FIX prepend-lag — JS `Te.Skb` L550 order] The JS play-buffer prepend
-// (`Te.qrb`, L282683) is built from the CURRENT continuous pose (`ma`/`mf`)
-// at `Skb` time, i.e. BEFORE the first `eda` sample. The native solver state
-// is authored in raw clip coordinates (the clips' root bones differ by
-// hundreds of units: stance_2 root x=-502 vs an attack clip x=+237), so it
-// must be moved into the NEW clip's space BEFORE `build_prepend` freezes
-// slots 0/1 from it. Otherwise the two prepended slots describe a pose a
-// whole COM delta away from the clip, and the first sampled frame of every
-// move inherits that offset (the observed idle cf=2 weapon-bone error). This
-// applies the SAME delta `sample()` would apply on its first frame; that
-// frame's own translation is then a no-op (sol_prev_com_ already updated).
-// [F9] Anchored on the `<Align><Pivot Part>` node's clip position (see the
-// header doc) — NOT bone 0. Called ONCE per move start; the per-sample
-// re-application inside `sample()` is removed (it re-stepped the same delta
-// and used bone 0, desyncing it from `compute_align`).
-void Fighter::translate_solver_state(float px, float py, float pz) {
-    const std::size_t n3 = model_.bones.size() * 3;
-    if (!solver_init_ || sol_ma_.size() != n3 || sol_mf_.size() != n3) {
-        return;
-    }
-    if (sol_have_prev_com_) {
-        const float dx = px - sol_prev_com_x_;
-        const float dy = py - sol_prev_com_y_;
-        const float dz = pz - sol_prev_com_z_;
-        if (dx != 0.0f || dy != 0.0f || dz != 0.0f) {
-            for (std::size_t i = 0; i < n3; i += 3) {
-                sol_ma_[i] += dx;
-                sol_ma_[i + 1] += dy;
-                sol_ma_[i + 2] += dz;
-                sol_mf_[i] += dx;
-                sol_mf_[i + 1] += dy;
-                sol_mf_[i + 2] += dz;
-            }
-        }
-    }
-    sol_prev_com_x_ = px;
-    sol_prev_com_y_ = py;
-    sol_prev_com_z_ = pz;
-    sol_have_prev_com_ = true;
-}
-
 void Fighter::build_prepend(const MoveDef& move) {
     prepend_.clear();
     if (current_clip_ == nullptr || current_clip_->frames.empty()) {
@@ -1671,18 +1591,12 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     const std::size_t n3 = n * 3;
     if (solver_init_ && sol_ma_.size() == n3) {
         // [F9] The per-sample COM translation that used to live here is
-        // REMOVED. The JS solver space is inherently continuous, so the port's
-        // bridge only needs to move the persisted state ONCE per clip switch
-        // (`translate_solver_state`, called from `start_move_impl`, anchored on
-        // the `<Align><Pivot Part>` node). Re-applying the delta here every
-        // frame re-stepped the same translation on top of that and measured it
-        // from bone 0 — a node the align never uses. During playback the cloth
-        // follows the posed skeleton through the `<Edges>` relaxation (`jE`)
-        // exactly as in JS.
-        // [FIX stretched mesh — JS-faithful] `Al.ia()` (L582) is exactly
-        // `sk(); jE();` per frame. `eda` (JS L556) sets each clip bone's
-        // mf = ma (the previous solved position) then ma = the (align-shifted)
-        // clip pose; the cloth bones keep their prior state.
+        // REMOVED. The JS solver space is inherently continuous: compute_align
+        // (JS Te.Gub/Gla, L557-560/L550) re-expresses each new clip into the
+        // previous pose own space via the align shift, and the persisted solver
+        // state is that same space, so no per-sample or per-clip translation is
+        // needed. Re-applying a delta here re-stepped a translation and measured
+        // it from bone 0 - a node the align never uses.
         // (a) eda: clip bones mf = solved, ma = interpolated clip pose.
         for (std::size_t i = 0; i < nclip; ++i) {
             sol_mf_[i * 3] = sol_ma_[i * 3];

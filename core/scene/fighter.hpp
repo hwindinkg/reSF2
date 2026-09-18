@@ -543,18 +543,6 @@ private:
     std::vector<float> sol_ma_;  // 3*n: current posed positions (JS `ma`)
     std::vector<float> sol_mf_;  // 3*n: previous positions (JS `mf`)
     bool solver_init_ = false;   // ma/mf seeded from the bind pose once
-    // [FIX stretched mesh — continuous solver space] The JS solver state
-    // (`ma`/`mf`) lives in the fighter's CONTINUOUS space: the whole fighter
-    // (skeleton AND cloth) shares one world placement, so switching clips
-    // never teleports the cloth. The native solver is authored in raw CLIP
-    // coordinates, which jump ~740 units between clips (stance_2 COM x=-502
-    // vs an attack clip x=+237); without compensation the cloth is left
-    // behind on every clip switch. Translate the persisted state by the COM
-    // delta each sample (the native-space equivalent of the JS continuity).
-    float sol_prev_com_x_ = 0.0f;
-    float sol_prev_com_y_ = 0.0f;
-    float sol_prev_com_z_ = 0.0f;
-    bool sol_have_prev_com_ = false;
     // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550
     // (`jc.shift`)] The move's <Align> offset, applied ONCE at clip start as
     // a shift of the whole clip buffer. Native equivalent: added to every
@@ -700,20 +688,6 @@ private:
     // reads the buffer value of its partner. `zclip` guards the JS
     // `a[c].first<e&&a[c].second<e` test (`e` = `Kh(2).size`).
     int mirror_swap_src(int i, std::size_t zclip) const;
-    // [FIX prepend-lag / F9] Translate the persisted ragdoll solver state
-    // (`sol_ma_`/`sol_mf_`) from the previous clip's raw coordinate space into
-    // the new clip's space, anchored at the new clip's `<Align><Pivot Part>`
-    // node position `(px,py,pz)` (NOT bone 0 — the align's own reference node
-    // is the one whose world continuity `Te.Gub` L558-559 preserves).
-    // JS `Te.Skb` L550 builds the play-buffer prepend (`Te.qrb` L282683) from
-    // the CURRENT continuous `ma`/`mf` BEFORE the first `eda` sample, so the
-    // native prepend must be frozen in the NEW clip space too (otherwise the
-    // two prepended slots sit a whole cross-clip COM delta away, and every
-    // move start snaps). This is the port's bridge (the JS has no counterpart);
-    // it runs ONCE per move start — the per-sample re-application that used to
-    // follow inside `sample()` re-stepped the same delta every frame (and used
-    // bone 0), which is removed.
-    void translate_solver_state(float px, float py, float pz);
     void build_prepend(const MoveDef& move);
     void sample_current();
 
