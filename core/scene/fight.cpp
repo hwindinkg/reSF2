@@ -2999,8 +2999,14 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
     if (!def.collidable) return false;
     const auto key = std::make_pair(static_cast<const void*>(&move),
                                     static_cast<const void*>(d));
-    if (last == key) return false;  // dW: already tested
-    last = key;
+    if (last == key) return false;  // dW == c: already CONNECTED
+    // JS `Cl.ia` (L566-567): `dW` latches ONLY on a successful test --
+    // `if(this.W1a(...)) return this.dW=c,!0` (and the `!c.aEa` early
+    // return). Latching before the geometry (as this port did) gives the
+    // swing exactly ONE geometry sample per interval activation: if the
+    // first active frame does not overlap, the whole attack whiffs even as
+    // the fist crosses the target on a later frame -- the reported "most
+    // attacks pass through". Latch at each success below.
     {
         // JS `!c.aEa` (L566-567): no AttackingParts = always connects
         // (11/618 shipped attack intervals); n$=o$=(0,0,0), KD=null.
@@ -3018,6 +3024,7 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                 ch.point.y = (tgt.p1.y + tgt.p2.y) * 0.5f;
                 ch.point.z = (tgt.p1.z + tgt.p2.z) * 0.5f;
                 hit_interval = d;
+                last = key;  // `dW = c`
                 return true;
             }
             return false;
@@ -3031,6 +3038,7 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                     hit_cap = tgt;
                     atk_cap = ac;  // JS `b.Py` (L395)
                     hit_interval = d;
+                    last = key;  // `dW = c`
                     return true;
                 }
             }
@@ -3562,11 +3570,11 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // once per frame (signed per-frame value, clamped, expired dropped).
     if (!me.dots.empty()) sf2::scene::tick_active_mods(me.dots, me.hp, me.max_hp);
     me.fighter.set_enemy_x(foe.fighter.world_x());
-    // JS `wd.x3` -> `Fu.hob()` (dW=null): every new move start resets the
-    // Cl one-shot, so a repeat swing of the same move re-tests instead of
-    // being skipped forever by the (move, interval) key.
+    // JS `wd.x3` -> `Fu.hob()` (dW=null): `x3` runs from `Te.Skb` at EVERY
+    // clip start, so a repeat swing of the SAME move must clear the one-shot
+    // too. The move POINTER is unchanged on a self-repeat, hence the serial.
     {
-        const void* cur = static_cast<const void*>(me.fighter.current_move());
+        const int cur = me.fighter.move_start_count();
         auto it = cl_move_.find(me.name);
         if (it == cl_move_.end() || it->second != cur) {
             cl_move_[me.name] = cur;
@@ -3578,7 +3586,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             // that start; the event's `Name` filter is the started move name
             // (`Km.compare` L766 checks `Ki` against the owner's animation
             // list, which holds exactly this name).
-            if (cur != nullptr && me.fighter.current_move() != nullptr) {
+            if (me.fighter.current_move() != nullptr) {
                 dispatch_global_triggers("AnimationStart", "AnimationStart",
                                          me.fighter.current_move()->name.c_str(),
                                          &me == &player_ ? 0 : 1);

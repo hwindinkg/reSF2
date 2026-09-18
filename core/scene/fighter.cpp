@@ -649,6 +649,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     }
 
     current_move_ = &move;
+    ++move_start_count_;  // JS `Te.Skb` L551 -> `x3` -> `Fu.hob()` (dW=null)
     move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
     playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
     active_intervals_.clear();

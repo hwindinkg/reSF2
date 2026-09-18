@@ -1534,12 +1534,15 @@ private:
     // (enter_fight) as if the player pressed now.
     sf2::scene::key_type start_buffer_key_ = sf2::scene::key_type::up;
     bool start_buffer_filled_ = false;
-    // JS `Cl.ia` one-shot (`dW`, L566-567): last-tested (move, interval)
-    // per attacker name - the same attack object never tests twice in a row.
-    // Reset on every new move start (JS `wd.x3` -> `Fu.hob()`, dW=null), so
-    // repeat swings of the same move re-test.
+    // JS `Cl.ia` one-shot (`dW`, L566-567): last-SUCCESSFULLY-tested
+    // (move, interval) per attacker name. `dW` latches ONLY on a successful
+    // test (`return this.dW=c,!0`), so a frame whose geometry whiffs
+    // re-tests on the next frame instead of killing the whole swing.
+    // Cleared at every clip start (JS `wd.x3` -> `Fu.hob()`, dW=null),
+    // keyed by the per-move-start serial so a repeat of the SAME move
+    // (unchanged pointer) also re-tests.
     std::map<std::string, std::pair<const void*, const void*>> cl_last_;
-    std::map<std::string, const void*> cl_move_;
+    std::map<std::string, int> cl_move_;
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
     int start_stance_frames_ = 0;  // phase 1 hold counter
     int end_stance_frames_ = 0;    // phase 3 hold (the FIGHT!/KO banner)

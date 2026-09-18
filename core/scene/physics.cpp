@@ -160,8 +160,13 @@ bool capsule_capsule_overlap(const HitCapsule& atk, const HitCapsule& tgt,
         return true;
     }
 
-    // Endpoint-vs-capsule checks. n$ = the tested endpoint, o$ = its
-    // projection (Ls writes o1..o4; locals keep X8 dirt contained).
+    // Endpoint-vs-capsule checks (JS `Bz` L13). The `n$`/`o$` pairing is
+    // NOT uniform: cases 1-2 (`Ls(n/f,...)`) set `o$` to the Ls PROJECTION,
+    // but cases 3-4 (`Ls(q/r,...)`) set BOTH `n$` and `o$` to the tested
+    // point itself (`h.x=d.x` / `h.x=e.x`). `o$` is the impulse anchor
+    // (`Bl.strike` -> `apply_impulse`), so storing the projection here
+    // mis-splits the knockback between the endpoint bodies and deforms the
+    // mesh.
     Vec3 o1 = x8, o2 = x8, o3 = x8, o4 = x8;
     if (in_capsule(n, c, l, a, o1, d, e)) {
         out.n = a; out.o = o1; out.point = a; out.hit = true; return true;
@@ -170,10 +175,10 @@ bool capsule_capsule_overlap(const HitCapsule& atk, const HitCapsule& tgt,
         out.n = b; out.o = o2; out.point = b; out.hit = true; return true;
     }
     if (in_capsule(q, c, k, d, o3, a, b)) {
-        out.n = d; out.o = o3; out.point = d; out.hit = true; return true;
+        out.n = d; out.o = d; out.point = d; out.hit = true; return true;
     }
     if (in_capsule(r, c, k, e, o4, a, b)) {
-        out.n = e; out.o = o4; out.point = e; out.hit = true; return true;
+        out.n = e; out.o = e; out.point = e; out.hit = true; return true;
     }
     return false;
 }

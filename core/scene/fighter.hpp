@@ -365,6 +365,10 @@ public:
     // --- state accessors (Phase 3.2b) -------------------------------------
     const MoveDef* current_move() const { return current_move_; }
     int move_frame() const { return move_frame_; }
+    // Per-clip-start serial: JS `Te.Skb` -> `x3` -> `Fu.hob()` clears the
+    // `Cl` one-shot at EVERY move start, including a repeat of the same
+    // move (whose pointer is unchanged).
+    int move_start_count() const { return move_start_count_; }
     // JS `Te.M2` — the anim controller move-frame counter. `Te.ia`
     // (L547-548) opens with `this.M2++` and later in the SAME call does
     // `this.Xh++`, so the two counters advance in LOCKSTEP: `M2 == Xh - 4`
@@ -566,6 +570,8 @@ private:
     // template's `Throwable` interval live for the whole clip instead of the
     // dead `0..2` window (which is why the throw gate never resolved).
     int move_end_frame_ = 0;
+    // Incremented in `start_move_impl` (JS `Te.Skb` L551 -> `x3` -> `hob`).
+    int move_start_count_ = 0;
     int interval_last(const Interval& iv) const {
         return iv.end_default ? move_end_frame_ + 2 : iv.end;
     }
