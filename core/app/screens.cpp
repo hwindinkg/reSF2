@@ -1979,31 +1979,44 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     const float oy = sp;
     auto lx = [&](float v) { return ox + v * c; };
     auto ly = [&](float v) { return oy + v * c; };
-    // JS `Ib` (L1906) builds the bar as the `gk(600,250,50,0,!1)` scroll
-    // (L1906 `O1a`), whose art is the `Zh` roll composite (L1872-1873),
-    // NOT the `paper` sheet: `Zh` ctor adds `roll_end` (child 0),
-    // `roll_center` (child 1) and `roll_end` flipped `Hr(!0)` (child 2)
-    // (`y.goa`/`y.pSa` L2467-2468). `Zh.ba(600,250)` (horizontal: `c =
-    // h>w = false`, `d = min(w,h) = 250`, `h = d/capSrcH`):
-    //   capW  = 101 * 250/114      (roll_end sourceSize 101x114)
-    //   bodyW = max(600 - 2*capW, 10)
-    //   left cap x=0, body x=capW, right cap x=capW+bodyW (all 250 tall).
-    constexpr float kRollEndW = 101.0f, kRollEndH = 114.0f;  // scroll.json roll_end
-    constexpr float kBarW = 600.0f, kBarH = 250.0f;          // gk(600,250)
-    const float cap_w = kRollEndW * (kBarH / kRollEndH);     // 221.49 local
-    const float body_w = std::max(kBarW - 2.0f * cap_w, 10.0f);
-    const float ph = kBarH * c;
+    // JS `Ib.O1a` (L1906): `this.scroll = new gk(600,250,50,0,!1); let a =
+    // new Fg(600,250,1,30); this.scroll.iL.appendChild(a.node);` — the bar's
+    // art is the `Fg` content frame (paper rails), NOT the `Zh` roll
+    // composite. `Zh` is only ever built by `Fg.Vaa()` (L1869), which `Ib`
+    // never calls; the previous wave mistook the `gk` scrollbar for the bar
+    // art and stretched the 101x114 `roll_end` cap to the full 250 height
+    // (`cap_w = 101*250/114 = 221 px`, 74% of the 600 bar) — the reported
+    // STRETCHED scroll.
+    //
+    // `Fg` ctor L1868 registers the three `wc` children as
+    // `paper_edge_left`/`paper`/`paper_edge_right` (`y.nSa`/`y.mSa`/`y.oSa`,
+    // L2467-2468). `Fg.ba(a=600,b=250,c=30)` L1870-1871, orientation 1:
+    //   d = b = 250, e = a = 600; `wc.Wg(90)` + `wc.C(a=600)` rotates the
+    //   250x600 composite into the 600x250 bar;
+    //   k = c / paper_edge_left.fa.x; f.la(k) -> each edge frame's display
+    //   width == the cap `c` = 30 (NOT aspect-scaled to 250);
+    //   centre `g.xc(max(1, d - 2*f.za()))` = 250 - 2*30 = 190 (the `paper`
+    //   body); every frame `Pb(e=600)` = the 600 axis is the cross length.
+    // Post-rotation the `paper_edge_left` rail is the 30 px TOP strip, the
+    // `paper` body the 190 px middle, `paper_edge_right` the 30 px BOTTOM
+    // strip; each sprawls the full 600 width (stretched whole-frame, exactly
+    // what `try_draw_atlas_button(..., fill=true)` does).
+    constexpr float kBarW = 600.0f;    // `Fg(600,250,...)` long axis
+    constexpr float kBarH = 250.0f;    // short axis (pre-rotation width)
+    constexpr float kPaperCap = 30.0f; // `Fg(...,1,30)` cap `c`
+    const float mid_h = std::max(kBarH - 2.0f * kPaperCap, 10.0f);  // 190
     bool drew = false;
     if (load_scroll_atlas(app)) {
-        drew = try_draw_atlas_button(app, "roll_end", lx(cap_w * 0.5f), ly(kBarH * 0.5f),
-                                     cap_w * c, ph, 1.0f, /*fill=*/true);
+        drew = try_draw_atlas_button(app, "paper_edge_left", lx(kBarW * 0.5f),
+                                     ly(kPaperCap * 0.5f), kBarW * c, kPaperCap * c,
+                                     1.0f, /*fill=*/true);
         if (drew) {
-            try_draw_atlas_button(app, "roll_center", lx(cap_w + body_w * 0.5f),
-                                  ly(kBarH * 0.5f), body_w * c, ph, 1.0f, /*fill=*/true);
-            // Right cap: the third `Zh` child is `roll_end` with `Hr(!0)`.
-            try_draw_atlas_button(app, "roll_end",
-                                  lx(cap_w + body_w + cap_w * 0.5f), ly(kBarH * 0.5f),
-                                  cap_w * c, ph, 1.0f, /*fill=*/true, /*flip_x=*/true);
+            try_draw_atlas_button(app, "paper", lx(kBarW * 0.5f),
+                                  ly(kPaperCap + mid_h * 0.5f), kBarW * c, mid_h * c,
+                                  1.0f, /*fill=*/true);
+            try_draw_atlas_button(app, "paper_edge_right", lx(kBarW * 0.5f),
+                                  ly(kPaperCap + mid_h + kPaperCap * 0.5f), kBarW * c,
+                                  kPaperCap * c, 1.0f, /*fill=*/true);
         }
     }
     if (!drew) {

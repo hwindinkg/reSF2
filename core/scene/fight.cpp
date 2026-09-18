@@ -3676,9 +3676,29 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // (11) beats the universal `FistsStartStanceIdle-Left` (10) exactly as
         // in the JS — and the `-Left`/`-Right` variant follows the controlled
         // side within a tie.
+        // [N2] The LIVE combat idle is the `IdleStance` family, not
+        // `StartIdleStance`. `StanceIdle` (moves.xml L4,
+        // `Template="IdleStance|Stance"`, FileName `stance_idle.bytes`,
+        // Priority 0) matches once the intro `Stance*` clip is over and after
+        // ANY move (`<Conditions>`: `CurrentAnimation Name="Stance" Not="1"`
+        // OR `Transition` OR `$Move`). `computer_settings.xml` L24
+        // (`<OutcomeTables><StartAnimation Name="StanceIdle"/>`) starts the
+        // stance into it, and every attack gates on
+        // `<CurrentAnimation Name="IdleStance"/>` plus
+        // `<CurrentAnimation Name="StartIdleStance" Not="1"/>`
+        // (moves.xml L6916/L6919): a fighter can only attack FROM the regular
+        // idle. `StartIdleStance` (`FistsStartStanceIdle-Left`, moves.xml
+        // L3843, FileName `fists1_stance_idle.bytes`, Priority 10,
+        // `EndsStage="1"`) is the ONE-SHOT transition out of the intro stance.
+        // The old rule played `StartIdleStance` after every move as well, so
+        // the fighter snapped back to the INITIAL/stance-start idle pose the
+        // moment an attack ended — the reported symptom.
+        const bool post_intro_transition = !intro && me.moves_started == 0;
         const std::vector<std::string> stance_templates =
             intro ? std::vector<std::string>{"StanceLeft", "StanceRight"}
-                  : std::vector<std::string>{"StartIdleStance"};
+                  : (post_intro_transition
+                         ? std::vector<std::string>{"StartIdleStance"}
+                         : std::vector<std::string>{"IdleStance"});
         const sf2::scene::MoveDef* idle_move =
             me.fighter.stance_move(stance_templates, me.is_player);
         if (idle_move != nullptr) {
