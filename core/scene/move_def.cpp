@@ -251,6 +251,7 @@ void parse_interval(pugi::xml_node node, int end_frame_default, Interval& out) {
         out.end = data::xml_attr_int(node, "End", 2147483647);
     } else {
         out.end = end_frame_default + 2;  // JS: this.pva+2
+        out.end_default = true;           // `pva` = clip length when EndFrame absent
     }
 
     // Attack sub-type (JS `Ul.J3`): AttackingParts + Hit + Impulse + Damage.
@@ -930,6 +931,27 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         std::vector<pugi::xml_node> templates;
         std::set<std::string> visited;
         collect_templates(templates_root, tpl, templates, visited);
+
+        // JS `jc.xl` (`lg.vQ` slot 1 -> `XH`, `lg.he` L749): the animation-name
+        // list = the move's own name + its TRANSITIVE `<Template>` chain. The
+        // JS appends each template node's `Name` (`lh.nd`/`jc.ava` L368460,
+        // `m.bd` de-dups), so a move's `<CurrentAnimation Name="Step"/>` guard
+        // (inherited via `ForwardStep -> Step`) matches while the move plays.
+        // Own name first, then the move's own Template tokens, then each
+        // collected template's Name (its own token), in chain order.
+        def.anim_names.clear();
+        auto add_anim = [&def](const std::string& s) {
+            if (s.empty()) return;
+            for (const std::string& e : def.anim_names) {
+                if (e == s) return;
+            }
+            def.anim_names.push_back(s);
+        };
+        add_anim(def.name);
+        for (const std::string& tag : def.template_tags) add_anim(tag);
+        for (pugi::xml_node tpl_node : templates) {
+            if (pugi::xml_attribute n = tpl_node.attribute("Name")) add_anim(n.value());
+        }
 
         // Conditions (own + inherited).
         merge_conds(templates, move.child("Conditions"), def.conditions);

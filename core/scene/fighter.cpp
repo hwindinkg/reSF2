@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <set>
@@ -241,15 +242,24 @@ void Fighter::build_move_list_locks(
         for (const Lock& l : m.locks) {
             if (l.never) {
                 // An unmodelled lock kind (`<Perk Name=..>`, `<Screen
-                // Name=..>`): the JS tests it (`Bm`/`Gm`), the port cannot,
-                // so it is never satisfied. A plain lock fails the move; an
-                // Or member leaves the group satisfiable only by its modelled
-                // members. Shipped census (`res/moves.xml`): 87 `<Perk>` +
-                // 221 `<Screen>` children, 0 of them carrying `Not` — so the
-                // fail-closed choice cannot be inverted by the attribute.
-                // `<Screen>` is benign in a fight (the JS `Gm` passes only
-                // for the shop screens, never `Fight`), `<Perk>` is exact for
-                // a perk-less fighter and conservative for a perk owner.
+                // Name=..>`): the JS tests it (`Bm`/`Gm`), the port cannot.
+                // `<Screen>` IS modelled (the `Lock::screen` name + the JS
+                // `Gm.he` class 18 map `hfa`: "Fight" -> 10, "Profile" -> 9,
+                // "ShopWeapon" -> 2, ...; `he`: `a.ul == this.tVa`). This list
+                // is built for the FIGHT screen, so a `Screen Name="Fight"`
+                // lock PASSES. Failing it closed removed every `Throw*` move
+                // from `hb_` (they all inherit `<Locks><Screen
+                // Name="Fight"/></Locks>` from the `Throw` template,
+                // moves.xml L546), so no throw could ever be selected — the
+                // throw-gate bug. Every other screen name stays fail-closed
+                // (the ShopTryOn moves never belong in a fight list).
+                if (l.screen == "Fight") {
+                    if (l.or_) {
+                        or_group = true;
+                        any_or = true;
+                    }
+                    continue;
+                }
                 if (l.or_) {
                     or_group = true;
                     continue;
@@ -486,7 +496,9 @@ std::vector<std::string> Fighter::intervals_at(int frame) const {
     if (current_move_ == nullptr) return out;
     for (const Interval& iv : current_move_->intervals) {
         const int s = std::max(iv.start, current_move_->first_frame);
-        const int e = iv.end;  // parse already applied EndFrame+2 default
+        // JS `fe.init`: finish = `End` attr, else `pva+2` (`Interval::
+        // end_default` -> the loaded clip's length + 2).
+        const int e = interval_last(iv);
         if (s <= frame && frame <= e) {
             out.push_back(iv.name.empty() ? "type" + std::to_string(iv.type) : iv.name);
         }
@@ -510,7 +522,7 @@ bool Fighter::has_block() const {
     for (const Interval& iv : current_move_->intervals) {
         if (iv.type != 5) continue;  // `fe.G0`: Block = 5 (L774)
         const int s = std::max(iv.start, current_move_->first_frame);
-        if (s <= move_frame_ && move_frame_ <= iv.end) return true;
+        if (s <= move_frame_ && move_frame_ <= interval_last(iv)) return true;
     }
     return false;
 }
@@ -521,7 +533,7 @@ bool Fighter::has_invuln() const {
     for (const Interval& iv : current_move_->intervals) {
         if (iv.type != 6) continue;  // `fe.G0`: Invulnerable = 6 (L774)
         const int s = std::max(iv.start, current_move_->first_frame);
-        if (s <= move_frame_ && move_frame_ <= iv.end) return true;
+        if (s <= move_frame_ && move_frame_ <= interval_last(iv)) return true;
     }
     return false;
 }
@@ -549,7 +561,7 @@ void Fighter::clear_intervals(int type, const std::string& name) {    if (curren
         if (type >= 0 && iv.type != type) continue;
         if (!name.empty() && iv.name != name) continue;
         const int s = std::max(iv.start, current_move_->first_frame);
-        if (s <= move_frame_ && move_frame_ <= iv.end) {
+        if (s <= move_frame_ && move_frame_ <= interval_last(iv)) {
             active_intervals_.erase(iv.name.empty() ? "type" + std::to_string(iv.type) : iv.name);
         }
     }
@@ -670,6 +682,13 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         }
         current_clip_ = clip_lookup_(clip_name);
     }
+    // JS `jc.Lj` (`Vlb`/`Cdb` resolves it from the loaded clip when the move
+    // carries no `EndFrame`): finish intervals whose `<Interval>` had no `End`.
+    move_end_frame_ = move.end_frame != 0
+                          ? move.end_frame
+                          : (current_clip_ != nullptr
+                                 ? static_cast<int>(current_clip_->frames.size())
+                                 : 0);
 
     // [F10] The two terms wave 1 conflated: the `b6a` FACING LOCK and the
     // `Te.FX` CLIP MIRROR. They are different quantities and must not share
@@ -920,7 +939,31 @@ std::string Fighter::try_select_move(FightContext& ctx) {
     for (const MoveDef* m : hb_) {
         if (m == nullptr) continue;
         if (!m->has_event("KeyPressed")) continue;
-        if (!move_conditions_pass(*m, ctx)) continue;
+        std::string trace;
+        // [TASK B DIAGNOSTIC] `SF2_TRACE_COND=1` dumps the failing condition
+        // tree + the enemy interval list for the throw family so the exact
+        // gate is visible (no effect when the env var is unset).
+        static const bool trace_cond = std::getenv("SF2_TRACE_COND") != nullptr;
+        const bool pass = move_conditions_pass(*m, ctx, trace_cond ? &trace : nullptr);
+        if (!pass) {
+            if (trace_cond &&
+                (m->name.rfind("Throw", 0) == 0 || m->name == "HighPunch" ||
+                 m->name == "StepForward" || m->name == "ShortUpwardElbowStrike")) {
+                std::fprintf(stdout, "[cond] %s FAIL cur=%s@%d enemy_intervals=[",
+                             m->name.c_str(),
+                             current_move_ != nullptr ? current_move_->name.c_str() : "",
+                             move_frame_);
+                for (const FightContext::interval_state& iv : ctx.intervals_enemy) {
+                    std::fprintf(stdout, "%s/t%d%s ", iv.name.c_str(), iv.type,
+                                 iv.active ? "" : "!");
+                }
+                std::fprintf(stdout, "] me=%.1f en=%.1f dist=%.1f dir=%.0f\n%s",
+                             ctx.me_x, ctx.enemy_x, ctx.dist_x, ctx.direction,
+                             trace.c_str());
+                std::fflush(stdout);
+            }
+            continue;
+        }
         passing.push_back(m);
     }
     if (passing.empty()) return "";
@@ -1263,6 +1306,7 @@ void Fighter::sample_current() {
 void Fighter::clear_move() {
     current_move_ = nullptr;
     current_clip_ = nullptr;
+    move_end_frame_ = 0;
     active_intervals_.clear();
     subframe_ = 0;
     playhead_ = 0;

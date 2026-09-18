@@ -22,6 +22,17 @@ namespace {
 // Forward: Jf.OBa stage ids (defined with the bus block below).
 int oba_phase(fight_phase p);
 
+// JS `lg.vQ` slot 1/2 (`XH`/`z_`; `lg.he` L749 `lg.xEa(this.Ba, c)`): a
+// fighter's animation-NAME list is the current animation's `xl` = the move's
+// own name plus its TRANSITIVE `<Template>` chain (`MoveDef::anim_names`).
+// The old fill used the move NAME alone, so a template-tag guard such as the
+// `Step` template's `<CurrentAnimation Name="Step"/>` (inherited by
+// StepForward) never matched and the restart gate read false.
+std::vector<std::string> anim_names_of(const Fighter& f) {
+    if (f.current_move() == nullptr) return {};
+    return f.current_move()->anim_names;
+}
+
 // The fight viewport (JS `Lb.width`/`Lb.height` for the fight screen) - the
 // same 1280x720 the camera framing hardcodes (framing calls below). The
 // `sXa` ringout arrows are screen-space and need it.
@@ -778,10 +789,8 @@ void FightController::dispatch_global_triggers(const char* event_name, const cha
         // unshared-stream rule as the lock scan in `setup_bus`.
         ctx.roll01 = [this]() { return math_random01(); };
         ctx.stage = sf2::scene::round_stage::fight;
-        ctx.anims_me = {owner.fighter.current_move() ? owner.fighter.current_move()->name
-                                                     : ""};
-        ctx.anims_enemy =
-            {other.fighter.current_move() ? other.fighter.current_move()->name : ""};
+        ctx.anims_me = anim_names_of(owner.fighter);
+        ctx.anims_enemy = anim_names_of(other.fighter);
         fill_ctx_geometry(ctx, owner, other);
         ctx.health_ratio = owner.max_hp > 0.0f ? owner.hp / owner.max_hp : 0.0f;
         // The owner's live intervals (JS `Ae.xb`): the BlockEffect / HitEffect
@@ -3314,8 +3323,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         sf2::scene::FightContext rctx;
         rctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
         rctx.stage = sf2::scene::round_stage::fight;
-        rctx.anims_me = {def.fighter.current_move() ? def.fighter.current_move()->name : ""};
-        rctx.anims_enemy = {atk.fighter.current_move() ? atk.fighter.current_move()->name : ""};
+        rctx.anims_me = anim_names_of(def.fighter);
+        rctx.anims_enemy = anim_names_of(atk.fighter);
         fill_ctx_geometry(rctx, def, atk);
         rctx.health_ratio = def.max_hp > 0.0f ? def.hp / def.max_hp : 0.0f;
         rctx.last_hit_type = hit_critical ? "Critical" : (rec.shock ? "Shock" : "");
@@ -3409,10 +3418,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         sf2::scene::FightContext ev;
         ev.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
         ev.stage = sf2::scene::round_stage::fight;
-        ev.anims_me = {atk.fighter.current_move() ? atk.fighter.current_move()->name
-                                                 : ""};
-        ev.anims_enemy = {def.fighter.current_move() ? def.fighter.current_move()->name
-                                                    : ""};
+        ev.anims_me = anim_names_of(atk.fighter);
+        ev.anims_enemy = anim_names_of(def.fighter);
         fill_ctx_geometry(ev, atk, def);
         ev.health_ratio = atk.max_hp > 0.0f ? atk.hp / atk.max_hp : 0.0f;
         // JS `sm.he` reads `a.IL` (the hit event data): `se` -> "Critical",
@@ -3609,12 +3616,15 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // carries the current move plus the logical stance state
         // (`StanceLeft`/`StanceRight` — the names used by moves.xml
         // `<CurrentAnimation Name="StanceLeft"/>` in the stance-idle set).
-        ctx.anims_me.clear();
-        if (me.fighter.current_move() != nullptr) {
-            ctx.anims_me.push_back(me.fighter.current_move()->name);
-        }
+        // [TASK A] JS `lg.vQ` slot 1 (`XH`) = the current animation's `xl`:
+        // the move's own name + its transitive `<Template>` chain. The old
+        // fill carried only the move NAME + the logical stance state, so the
+        // `Step` template's `<CurrentAnimation Name="Step"/>` restart guard
+        // (inherited by StepForward) read false and the move restarted on a
+        // re-press inside `SelfUninterrupt`.
+        ctx.anims_me = anim_names_of(me.fighter);
         ctx.anims_me.push_back(me.is_player ? "StanceLeft" : "StanceRight");
-        ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
+        ctx.anims_enemy = anim_names_of(foe.fighter);
         // `<CurrentInterval Player="Enemy">` reads the OPPONENT's live
         // intervals (JS `tm.he` + `Nd.ol`); the `Throw` template's Throwable
         // gate (moves.xml:553/565) depends on it.
@@ -3721,9 +3731,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             // JS `Dm.he` Player source + the fighter's animation-name list
             // (current move + the logical stance state; see the input path).
             ctx.qb = me.is_player;
-            ctx.anims_me = {idle_name, me.is_player ? "StanceLeft" : "StanceRight"};
-            ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name
-                                                          : idle_name};
+            ctx.anims_me = idle_move->anim_names;
+            ctx.anims_me.push_back(me.is_player ? "StanceLeft" : "StanceRight");
+            ctx.anims_enemy = anim_names_of(foe.fighter);
+            if (ctx.anims_enemy.empty()) ctx.anims_enemy.push_back(idle_name);
             fill_ctx_geometry(ctx, me, foe);
             ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
             me.fighter.ai_start_move(*idle_move, ctx);
@@ -3810,8 +3821,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         if (it != moves_->end()) {
             sf2::scene::FightContext ctx;
             ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
-            ctx.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
-            ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
+            ctx.anims_me = anim_names_of(me.fighter);
+            ctx.anims_enemy = anim_names_of(foe.fighter);
             fill_ctx_geometry(ctx, me, foe);
             ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
             if (me.fighter.ai_start_move(it->second, ctx)) {
@@ -3890,8 +3901,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 sf2::scene::FightContext c;
                 c.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
                 c.stage = static_cast<sf2::scene::round_stage>(phase_);
-                c.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
-                c.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
+                c.anims_me = anim_names_of(me.fighter);
+                c.anims_enemy = anim_names_of(foe.fighter);
                 fill_ctx_geometry(c, me, foe);
                 c.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
                 return c;
@@ -3916,12 +3927,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                     sf2::scene::FightContext ctx;
         ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
                     ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
-                    ctx.anims_me = {me.fighter.current_move()
-                                        ? me.fighter.current_move()->name
-                                        : ""};
-                    ctx.anims_enemy = {foe.fighter.current_move()
-                                           ? foe.fighter.current_move()->name
-                                           : ""};
+                    ctx.anims_me = anim_names_of(me.fighter);
+                    ctx.anims_enemy = anim_names_of(foe.fighter);
                     fill_ctx_geometry(ctx, me, foe);
                     ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
                     if (sf2::scene::eval_move_conditions(kv.second.tactics, ctx)) {
@@ -3934,10 +3941,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 sf2::scene::FightContext ctx;
         ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
                 ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
-                ctx.anims_me = {me.fighter.current_move() ? me.fighter.current_move()->name : ""};
-                ctx.anims_enemy = {foe.fighter.current_move()
-                                       ? foe.fighter.current_move()->name
-                                       : ""};
+                ctx.anims_me = anim_names_of(me.fighter);
+                ctx.anims_enemy = anim_names_of(foe.fighter);
                 fill_ctx_geometry(ctx, me, foe);
                 ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
                 if (me.fighter.ai_start_move(*chosen, ctx)) {

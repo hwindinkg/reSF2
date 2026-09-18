@@ -82,6 +82,13 @@ struct Interval {
                            //         4=Attack, 5=Block, 6=Invulnerable, 7=Invisible
     int start = 0;         // Start frame (1-based)
     int end = 0;           // End frame (inclusive). Default = EndFrame+2.
+    // No `End` attribute: the JS `fe.init` finish is `this.pva+2` where
+    // `pva` = `jc.Lj` = the move's `EndFrame`, or the LOADED CLIP's frame
+    // count when the move carries no `EndFrame` (`jc.Lj` is resolved in
+    // `Vlb`/`Cdb`). The parser only sees the XML, so it stores
+    // `EndFrame+2` (= 2 for an `EndFrame`-less move) and flags the default
+    // here; `Fighter` re-resolves it to `clip_len+2` once the clip is loaded.
+    bool end_default = false;
     std::vector<std::string> attacking_parts;  // Attack intervals: Edge names
     // Attack damage block (<Damage Value=..><Damage Type=.. Shift=..>).
     float damage = 0.0f;
@@ -373,6 +380,14 @@ struct Rotation {
 struct MoveDef {
     std::string name;
     std::set<std::string> template_tags;  // Template "A|B|C" split on '|'
+    // JS `jc.xl` (`lg.vQ` slot selection -> `XH`): the animation-NAME list the
+    // `<CurrentAnimation Name=".."/>` gate matches against (`lg.he` L749:
+    // `lg.xEa(this.Ba, c)`). `lh.nd` (L368460) + `jc.ava` (`m.bd`) build it as
+    // the animation's own name plus every name in its TRANSITIVE `<Template>`
+    // chain (`ForwardStep -> Step|Forward`). Filled in move_def.cpp from
+    // `collect_templates` (own name + own Template tokens + each collected
+    // template's Name).
+    std::vector<std::string> anim_names;
     std::string type;                     // "ATTACK"/"MOVE"/empty
     std::string file_name;
     int mid_frames = 0;

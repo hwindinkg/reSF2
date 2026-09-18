@@ -1026,32 +1026,44 @@ static const VerifyProbe kVerifyProbes[] = {
     // HighPunch (`<Tactics>` Distance Max=250) and HeavyPunch (Min=50
     // Max=350) are both still candidates at a gap well past 350 — the old
     // `Pkb` run dropped them here. `Aua` (L673) then keeps the unique max-
-    // `<Priority>` group: DoublePunch (130) over HeavyPunch (120), HighPunch
-    // (110) and StepForward (10).
+    // `<Priority>` group: DoublePunch (130) over HeavyPunch (120) and
+    // HighPunch (110). [item-1 fix] `StepForward` is NOT a candidate here:
+    // the fighter is still inside its own `SelfUninterrupt [0,13]` window, and
+    // with `ctx.anims_me` now carrying the move's transitive `<Template>` chain
+    // (`StepForward -> ForwardStep -> Step`, the JS `jc.xl`/`lg.vQ` `XH`), the
+    // `Step` template's `<CurrentAnimation Name="Step"/>` half is TRUE — so the
+    // `<And Not="1"><CurrentInterval SelfUninterrupt/><Or>Step/DoubleStep</Or>`
+    // guard correctly rejects the restart (the pre-fix expectation listed it
+    // only because `anims_me` held the move NAME and the guard never matched).
     {420, "Punch Tap x2 + Forward Hold", "DoublePunch",
-     "cands=StepForward@10,HighPunch@110,HeavyPunch@120,DoublePunch@130 f=DoublePunch draw=- idx=0 DoublePunch",
+     "cands=HighPunch@110,HeavyPunch@120,DoublePunch@130 f=DoublePunch draw=- idx=0 DoublePunch",
      4, false},
     // F520: single Forward tap -> the 1key StepForward (singleton `Aua`).
     {520, "Forward Tap x1 (1key)", "StepForward",
      "cands=StepForward@10 f=StepForward draw=- idx=0 StepForward",
      4, false},
-    // F550: single Forward tap 30 frames later (a fresh 1key step).
-    {550, "Forward Tap x1 (+30f)", "StepForward",
-     "cands=StepForward@10 f=StepForward draw=- idx=0 StepForward",
-     4, false},
+    // F550: single Forward tap 30 frames later. [item-1 fix] The tap lands
+    // while the previous `StepForward` is still inside `SelfUninterrupt [0,13]`
+    // (the trace shows the fighter at `StepForward@12`), so the `Step`
+    // template's `<CurrentAnimation Name="Step"/>` guard — now reachable
+    // because `ctx.anims_me` carries the transitive template chain — rejects
+    // the restart: no NEW move starts (`decision=(none)`). The pre-fix
+    // expectation of a fresh `StepForward` encoded the inert guard.
+    {550, "Forward Tap x1 (+30f) [item-1 guard]", "<none>", "", 4, false},
     // F620: K (GLFW 75) maps to Punch (id 9) -> the Punch-key candidate set.
     // THE FIX PROBE: a SINGLE Punch tap cannot satisfy the `2key` Punch-x2
     // moves, so the 1key candidates are HighPunch (`<Tactics>` Distance
     // Max=250) and ShortUpwardElbowStrike. `Gc.Pkb`'s `va.Ts` gate (L675)
     // lives on the AI's `eb=true` (`Gc.Vkb`) branch only, so the human CAN
-    // punch here; `Aua` then keeps ShortUpwardElbowStrike (Priority 150 >
-    // HighPunch 110) and it starts. Its OWN `<Conditions>` (the `f.Yz` L677
-    // test, `<Keys>` Punch Tap + `<Distance Max="130">`) do pass at this
-    // frame — the player has walked in from the spawn gap 283. Under the
-    // old `Pkb` path this probe expected "<none>": every attack key was
-    // dead at fight start.
-    {620, "K key -> Punch-key move (no Tactics gate)", "ShortUpwardElbowStrike",
-     "cands=HighPunch@110,ShortUpwardElbowStrike@150 f=ShortUpwardElbowStrike draw=- idx=0 ShortUpwardElbowStrike",
+    // punch here. [item-1 fix] `ShortUpwardElbowStrike` is NOT a candidate at
+    // this frame: its OWN `<Distance Max="130">` fails because the working
+    // `Step` guard stops the extra restarts that used to carry the fighter
+    // deeper in (trace: `dist=208`), so HighPunch (no Conditions `Distance`)
+    // wins. The probe still proves the human punch path (it did under the old
+    // `Pkb` behaviour this probe expected "<none>": every attack key was dead
+    // at fight start).
+    {620, "K key -> Punch-key move (no Tactics gate)", "HighPunch",
+     "cands=HighPunch@110 f=HighPunch draw=- idx=0 HighPunch",
      14, false},
     // F700: B (GLFW 66) is unbound -> no tap -> no decision, no move.
     {700, "B key -> dropped (no move)", "<none>", "", 12, false},
@@ -1073,15 +1085,17 @@ static const VerifyProbe kVerifyProbesKnives[] = {
     {300, "Forward Tap x2 [Knives]", "DoubleStepForward",
      "cands=StepForward@10,DoubleStepForward@20 f=DoubleStepForward draw=- idx=0 DoubleStepForward",
      4, false},
+    // [item-1 fix] `StepForward` absent here for the same reason as the Fists
+    // F420 probe (the `Step` guard now rejects the mid-`SelfUninterrupt`
+    // restart; see the note there).
     {420, "Punch Tap x2 + Forward Hold [Knives]", "KnivesSuperSlash",
-     "cands=StepForward@10,KnivesSlash@110,KnivesDoubleSlash@115,KnivesHeavySlash@120,KnivesSuperSlash@130 f=KnivesSuperSlash draw=- idx=0 KnivesSuperSlash",
+     "cands=KnivesSlash@110,KnivesDoubleSlash@115,KnivesHeavySlash@120,KnivesSuperSlash@130 f=KnivesSuperSlash draw=- idx=0 KnivesSuperSlash",
      4, false},
     {520, "Forward Tap x1 (1key) [Knives]", "StepForward",
      "cands=StepForward@10 f=StepForward draw=- idx=0 StepForward",
      4, false},
-    {550, "Forward Tap x1 (+30f) [Knives]", "StepForward",
-     "cands=StepForward@10 f=StepForward draw=- idx=0 StepForward",
-     4, false},
+    // [item-1 fix] same blocked mid-window restart as the Fists F550 probe.
+    {550, "Forward Tap x1 (+30f) [Knives]", "<none>", "", 4, false},
     {620, "K key -> Punch-key move (Knives) [Knives]", "KnivesSlash",
      "cands=KnivesSlash@110 f=KnivesSlash draw=- idx=0 KnivesSlash",
      14, false},
@@ -2220,8 +2234,13 @@ int main(int argc, char** argv) {
         // ------------------------------------------------------------------
         {
             PendingBattle& pb = app.pending_battle();
-            pb.battle_name = fight_battle.empty() ? std::string("Training") : fight_battle;
-            pb.zone = fight_zone;
+            // The throw probe needs an ANIMATED AI opponent: the Training
+            // punchbag is `NotAnimation="1"` (stages.xml L12) and never plays a
+            // move, so its interval set is empty and the `Throw` template's
+            // `<CurrentInterval Player="Enemy" Name="Throwable"/>` gate can
+            // never pass. `Duel` (ZONE_1) is the shipped animated duel.
+            pb.battle_name = fight_battle.empty() ? std::string("Duel") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
             pb.location = "dojo";
             pb.has_result = false;
             pb.reward_money = 0;
@@ -2307,13 +2326,19 @@ int main(int argc, char** argv) {
         const int hold_key[2] = {7, 3};
         std::string thr_mv0, thr_mv1, thr_dec, thr_last, thr_label;
         bool thr_ok = false;
+        // The throw's `Distance Max="100"` gate measures the fighters' ROOT x,
+        // which the clip anchor re-pins every frame — a fixed teleport does not
+        // stick (the player snaps back to its stance anchor). Park the ENEMY 60
+        // units from the player's ACTUAL settled x (<= 100 with slack) instead.
         for (int er = 0; er < 2 && !thr_ok; ++er) {
-            const float tme = er ? place_enemy_x : place_me_x;
-            const float ten = er ? place_me_x : place_enemy_x;
             for (int h = 0; h < 2 && !thr_ok; ++h) {
                 for (int attempt = 0; attempt < 40 && !thr_ok; ++attempt) {
+                    fs->inject_game_key(hold_key[h], false);
                     fs->reset_player_move();
-                    fs->place_fighters(tme, ten);
+                    for (int i = 0; i < 4; ++i) app.run_one_frame();
+                    const float px = fs->player_world_x();
+                    const float ex = er ? px + 60.0f : px - 60.0f;
+                    fs->place_fighters(px, ex);
                     app.run_one_frame();
                     thr_mv0 = fs->player_current_move();
                     fs->inject_game_key(hold_key[h], true);
@@ -2321,7 +2346,8 @@ int main(int argc, char** argv) {
                     app.run_one_frame();
                     // Re-park right before the tap: the AI opponent drifts, and
                     // the throw `Distance Max="100"` gate is measured at the tap.
-                    fs->place_fighters(tme, ten);
+                    const float px2 = fs->player_world_x();
+                    fs->place_fighters(px2, er ? px2 + 60.0f : px2 - 60.0f);
                     fs->inject_game_key(9, true);   // Punch Tap (control 9)
                     fs->inject_game_key(9, false);
                     app.run_one_frame();
@@ -2340,8 +2366,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        const float thr_gap = place_enemy_x > place_me_x ? place_enemy_x - place_me_x
-                                                         : place_me_x - place_enemy_x;
+        const float thr_gap = 60.0f;  // the enemy is parked 60 from the player root
         std::fprintf(stdout,
                      "[place] THROW BackHold+PunchTap gap=%.0f: '%s'->'%s' hold=%s %s\n"
                      "[place]   last=%s\n[place]   decision: %s\n",
@@ -2350,11 +2375,18 @@ int main(int argc, char** argv) {
                      thr_ok ? "PASS" : "FAIL", thr_last.c_str(), thr_dec.c_str());
         std::fflush(stdout);
         // ---- probe 3: the interval restart gate (item 1) -----------------
-        // Place the enemy on the RIGHT so the FORWARD key resolves
-        // `StepForward` (the `SelfUninterrupt[0,13]` guard owner).
+        // The `Step` template's `<CurrentAnimation Name="Step"/>` guard is the
+        // restart blocker: with `anims_me` carrying the move's transitive
+        // template chain, a StepForward re-press inside `SelfUninterrupt[0,13]`
+        // must NOT restart. Park the enemy on the RIGHT of the player's ACTUAL
+        // settled x so the unmirrored FORWARD key resolves `StepForward`.
         for (int i = 0; i < 60; ++i) app.run_one_frame();
         fs->reset_player_move();
-        fs->place_fighters(place_enemy_x, place_me_x);
+        for (int i = 0; i < 4; ++i) app.run_one_frame();
+        {
+            const float px = fs->player_world_x();
+            fs->place_fighters(px, px + 120.0f);
+        }
         for (int i = 0; i < 2; ++i) app.run_one_frame();
         const int rs_start = fs->player_moves_started();
         fs->inject_game_key(3, true);   // Forward Tap -> StepForward
@@ -2375,6 +2407,50 @@ int main(int argc, char** argv) {
                      rs_mv.c_str(), rs_start, rs_after_first, rs_after_second,
                      rs_blocked ? "PASS (no restart)" : "FAIL (restarted)",
                      rs_dec.c_str());
+        std::fflush(stdout);
+        // ---- probe 4: HighPunch (control — its chain has no `Step`) --------
+        // HighPunch's chain (`1key|Central|Unarmed|Punch`) carries no `Step`
+        // tag, so the item-1 fix adds nothing to it. Its re-press is governed
+        // by the inherited `Controlled` template's
+        // `<CurrentInterval Name="Uninterrupt" Not="1"/>` (HighPunch owns
+        // `<Interval Name="Uninterrupt" End="9"/>`), which is JS-exact and
+        // UNCHANGED by the item-1 guard — reported for contrast (not gated).
+        for (int i = 0; i < 60; ++i) app.run_one_frame();
+        fs->reset_player_move();
+        for (int i = 0; i < 4; ++i) app.run_one_frame();
+        {
+            const float px = fs->player_world_x();
+            fs->place_fighters(px, px + 150.0f);
+        }
+        for (int i = 0; i < 2; ++i) app.run_one_frame();
+        const int hp_start = fs->player_moves_started();
+        fs->inject_game_key(9, true);   // Punch Tap -> HighPunch
+        fs->inject_game_key(9, false);
+        for (int i = 0; i < 3; ++i) app.run_one_frame();
+        const std::string hp_mv = fs->player_current_move();
+        const int hp_after_first = fs->player_moves_started();
+        // Re-press AFTER HighPunch's `Uninterrupt` window (`<Interval
+        // Name="Uninterrupt" End="9"/>`; the inherited `Controlled` template
+        // gates on `<CurrentInterval Name="Uninterrupt" Not="1"/>`, so an
+        // in-window re-press is blocked for BOTH fighters' moves — JS-exact).
+        // The item-1 fix is specific to the `Step`/`DoubleStep` chain, so
+        // HighPunch's re-press outside that window must still restart.
+        for (int i = 0; i < 10; ++i) app.run_one_frame();
+        const std::string hp_pre = fs->player_current_move();
+        const int hp_pre_frame = fs->player_move_frame();
+        fs->inject_game_key(9, true);   // re-press: no `Step` guard on this chain
+        fs->inject_game_key(9, false);
+        for (int i = 0; i < 2; ++i) app.run_one_frame();
+        const std::string hp_post = fs->player_current_move();
+        const int hp_after_second = fs->player_moves_started();
+        const bool hp_restarted = (hp_after_second > hp_after_first);
+        std::fprintf(stdout,
+                     "[place] HIGHPUNCH restart: first='%s' started %d->%d, re-press "
+                     "-> started=%d %s\n[place]   pre='%s'@%d post='%s' F=%d decision: %s\n",
+                     hp_mv.c_str(), hp_start, hp_after_first, hp_after_second,
+                     hp_restarted ? "PASS (restarted)" : "FAIL (blocked)",
+                     hp_pre.c_str(), hp_pre_frame, hp_post.c_str(), fs->fight_frame(),
+                     fs->player_decision().c_str());
         std::fflush(stdout);
         app.shutdown();
         return (mir_ok && fwd_ok && thr_ok && rs_blocked) ? 0 : 1;

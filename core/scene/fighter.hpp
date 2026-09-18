@@ -558,6 +558,17 @@ private:
     const MoveDef* current_move_ = nullptr; // playing move (JS `da.Ua`)
     const sf2::data::anim_clip* current_clip_ = nullptr; // clip for `current_move_`
     int move_frame_ = 0;                    // clip frame (JS `Te.M0()`) for intervals/cf
+    // JS `jc.Lj` (`fe.init`'s `pva`): the move's `EndFrame`, or the LOADED
+    // clip's frame count when `EndFrame` is absent. Resolved in
+    // `start_move_impl` right after the clip lookup. Finishes every interval
+    // whose `<Interval>` carried no `End` (`Interval::end_default`), so a
+    // `StartIdleStance`-family move with no `EndFrame` keeps its `Stance`
+    // template's `Throwable` interval live for the whole clip instead of the
+    // dead `0..2` window (which is why the throw gate never resolved).
+    int move_end_frame_ = 0;
+    int interval_last(const Interval& iv) const {
+        return iv.end_default ? move_end_frame_ + 2 : iv.end;
+    }
     // JS `Vu` (mu L249972) — the pending hit-reaction latch (`lrb`/`eob`).
     Reaction reaction_;
     // JS `wd.Cn` (tu L297387) + `wd.lU` (the strike-time clock).
