@@ -963,6 +963,14 @@ std::string Fighter::try_react(FightContext& ctx, bool prefer_fall,
     std::vector<const MoveDef*> cands;
     for (const MoveDef* m : hb_) {
         if (m == nullptr || !m->has_event("Hit")) continue;
+        // A hit reaction is the `Recoil|...|Hit` family. The Titan boss's
+        // `TitanBlock` (`moves.xml` Template="Block|Hit", Priority 720, no
+        // <Locks> - universal, so it sits in EVERY fighter's list) would
+        // otherwise win the max-`priority` partition for BOTH fighters and
+        // play `titan_block.bytes` - a clip authored for the Titan skeleton -
+        // on a humanoid mesh (corrupted pose, no visible reaction). A block
+        // is never a hit reaction, so the `Block` tag is excluded here.
+        if (m->template_tags.count("Block") != 0) continue;
         const bool is_fall = m->name.find("Fall") != std::string::npos;
         if (prefer_fall != is_fall) continue;
         cands.push_back(m);

@@ -687,6 +687,18 @@ struct BattleParams {
     // (`battle_warrior`, screens.cpp).
     bool enemy_not_ai = false;
     bool enemy_not_animation = false;
+    // The enemy Warrior's OWN equipment, resolved from the stage
+    // `<Warrior Template="X"/>` -> `<Template Name="X">` <Items> chain
+    // (screens.cpp `battle_warrior` -> `bw.items`). JS `ra.Hza` L684-685
+    // builds the move list from the fighter's items (`d.items =
+    // a.parameters.jt()`), so the boss must be built from HIS kit (e.g.
+    // Man_Kunai -> WEAPON_KUNAI/BODY_SHIN/HELM_GREEN_MASK) and not the
+    // hardcoded implicit Fists loadout. Empty (demo callers) keeps the
+    // implicit shipped default.
+    std::vector<sf2::scene::OwnedItem> enemy_owned;
+    // The enemy's move-LIST weapon subtype: the equipped Weapon slot item's
+    // `SubType` (JS `Fd` L808 `Hd` slot). Empty -> "Fists".
+    std::string enemy_weapon_subtype;
     // The player's resolved `UnarmedDamage` (JS `wd.Fm` L811: item bonus
     // `m7a` + group `g8a` + StartingAttributes + level × LevelAttributeGain)
     // — the bCa balance input, not a tuning knob. Dojo default = 15.

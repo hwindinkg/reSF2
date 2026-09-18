@@ -4333,6 +4333,56 @@ std::vector<std::string> fighter_model_names(
     return out;
 }
 
+// Resolves the ENEMY's move-list loadout from his stage-Warrior items.
+// JS `ra.Hza` L684-685 (`d.items = a.parameters.jt()`) + `Fd` L808 (`Hd`
+// Weapon slot): the move list and the move-LIST subtype come from the
+// fighter's OWN equipment, not an implicit default. The stage
+// `<Warrior Template="X"/>` inherits its kit from `<Template Name="X">`
+// (`battle_warrior` -> `bw.items`), e.g. BOSS_LYNX Fight 1's Man_Kunai ->
+// WEAPON_KUNAI (list.xml L1819, Type="Weapon" SubType="Knives") + BODY_SHIN
+// + HELM_GREEN_MASK + Skeleton. Buckets by type with last-wins (the derived
+// template overrides its base), exactly as `fighter_model_names` reads the
+// same list for the model. A warrior with no resolvable items keeps the
+// implicit default (`enemy_owned` empty / subtype empty -> "Fists").
+void resolve_enemy_loadout(App& app, const BattleWarriorInfo& bw,
+                          sf2::scene::BattleParams& battle) {
+    const std::vector<CatalogItem> cat = load_full_catalog(app);
+    const auto find_ci = [&cat](const std::string& nm) -> const CatalogItem* {
+        for (const CatalogItem& c : cat) {
+            if (c.name == nm) return &c;
+        }
+        return nullptr;
+    };
+    std::map<std::string, sf2::scene::OwnedItem> slot;
+    std::vector<sf2::scene::OwnedItem> extras;
+    for (const std::string& nm : bw.items) {
+        if (nm.empty()) continue;
+        const CatalogItem* ci = find_ci(nm);
+        if (ci == nullptr) continue;  // unknown id is simply not worn
+        if (ci->type == "Skeleton" || ci->type == "Weapon" ||
+            ci->type == "Armor" || ci->type == "Helm") {
+            slot[ci->type] = {ci->type, ci->subtype, ci->name};
+        } else {
+            extras.push_back({ci->type, ci->subtype, ci->name});
+        }
+    }
+    battle.enemy_owned.clear();
+    for (const auto& kv : slot) battle.enemy_owned.push_back(kv.second);
+    for (const auto& e : extras) battle.enemy_owned.push_back(e);
+    const auto wit = slot.find("Weapon");
+    if (wit != slot.end()) {
+        battle.enemy_weapon_subtype = !wit->second.subtype.empty()
+                                          ? wit->second.subtype
+                                          : wit->second.name;
+    }
+    std::fprintf(stdout, "[fight] enemy items: %zu (template) subtype=%s\n",
+                 battle.enemy_owned.size(),
+                 battle.enemy_weapon_subtype.empty()
+                     ? "Fists"
+                     : battle.enemy_weapon_subtype.c_str());
+    std::fflush(stdout);
+}
+
 // Perk setup for the fight trigger bus (`ZOa` analog, PERKS §5.4/§5.7):
 // equipped items' `<Perks>`/`<Enchantments>` rows + names from the save,
 // resolved against the perk catalog. Enemy gear is not modeled (empty).
@@ -4967,6 +5017,7 @@ void DojoScreen::build_dojo_fight(App& app) {
     battle.player_voice = bw.player_voice;
     battle.enemy_align = to_align_deltas(bw.align);
     battle.player_align = to_align_deltas(bw.player_align);
+    resolve_enemy_loadout(app, bw, battle);
 
     // The player's move list from its OWNED items (JS `ra.Hza` L684-685).
     const std::vector<sf2::scene::OwnedItem> player_owned = owned_items(app);
@@ -7004,6 +7055,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // i.e. always the ENEMY's rows; the player's set is `Default`'s.
     battle.enemy_align = to_align_deltas(bw.align);
     battle.player_align = to_align_deltas(bw.player_align);
+    resolve_enemy_loadout(app(), bw, battle);
     if (!bw.tactic.empty()) { const auto tit = assets.tactic_defs.find(bw.tactic); if (tit != assets.tactic_defs.end()) tactic = &tit->second; }  // JS `ur` L194: stage warrior `Tactic`
     // P4b — the PLAYER's roulette tactic (JS `IKa` L672):
     //   `this.pb.NT(this.tC);                       // ENEMY  <- `tactic` above

@@ -338,8 +338,20 @@ void FightController::init_locks(
     // NotAnimation -> no animation attach (bind pose). Each side also renders
     // its OWN equipment model (JS `xc.cM` L809-810; the Punchbag dummy's
     // `merged_bag`, the boss's gear model).
-    enemy_ = make_fighter(enemy_name, false, enemy_x, enemy_y, enemy_max_hp, "Fists", {},
-                          battle.enemy_not_ai, battle.enemy_not_animation, enemy_model);
+    // JS `ra.Hza` L684-685 builds the move list from the fighter's OWN items
+    // (`d.items = a.parameters.jt()`) and `Fd` L808 takes the move-LIST
+    // subtype from the equipped Weapon slot's `SubType`. The enemy's
+    // items/subtype are resolved from his stage `<Warrior>/<Template>`
+    // (screens.cpp `battle_warrior` -> `BattleParams::enemy_owned` /
+    // `enemy_weapon_subtype`), so a boss fights with his real kit (Shin:
+    // WEAPON_KUNAI -> Knives) instead of the implicit Fists default.
+    const std::string enemy_subtype =
+        battle_.enemy_weapon_subtype.empty() ? std::string("Fists")
+                                             : battle_.enemy_weapon_subtype;
+    enemy_ = make_fighter(enemy_name, false, enemy_x, enemy_y, enemy_max_hp,
+                          enemy_subtype, battle_.enemy_owned,
+                          battle.enemy_not_ai, battle.enemy_not_animation,
+                          enemy_model);
     // [FIX Phase 4b — manual control] The player is MANUAL: no AiController,
     // no auto-attack. The input path (player_input -> Fighter::input ->
     // try_select_move) drives the player's moves; the enemy keeps the AI.
@@ -991,7 +1003,10 @@ FightFighter FightController::make_fighter(
     // warrior is not an AI-less dummy (and the tactic resolved).
     if (!is_player && !not_ai && tactic_ != nullptr) {
         f.ai = std::make_unique<sf2::scene::AiController>();
-        f.ai->init("Fists", tactics_, tactic_, moves_);
+        // JS `de` L589: the AI's weapon pair is the fighter's OWN move-list
+        // subtype (`Fd` L808) — not a hardcoded "Fists" — so a knives boss
+        // resolves the Knives tactics tables.
+        f.ai->init(subtype, tactics_, tactic_, moves_);
         // Diagnostic (boot, once): the JS `Da.pg` split — which AI draws
         // come from the single shared fight stream (`Da.jf`/`s4`/`dT`) and
         // which from the `Math.random` analog (`uf.sja`/`uf.RJa`/`oa.eT`).
@@ -3294,8 +3309,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         // a UNIFORM `Math.random` draw (`uf.sja` L57426), NOT `Da.pg`. The
         // port routes it through the pinned `math_random01()` so it never
         // perturbs the shared fight/AI stream.
-        const std::string reaction =
-            def.fighter.try_react(rctx, rec.shock);
+        const std::string reaction = def.fighter.try_react(rctx, rec.shock);
         if (!reaction.empty()) {
             // JS `Gc.DK` (L673-674) -> `jJa`/`Qnb` -> `wd.Lwb` -> `ca.Lgb`
             // (L387) -> `PC(7,side)`: the knockdown reaction start is the
