@@ -1758,8 +1758,13 @@ private:
     // (Strike/Hit) keeps the name-agnostic behaviour the earlier waves had.
     // `side` = 0/1 restricts the scan to that side's registered set (the
     // per-model publishers: ModExpires/AnimationStart); -1 scans both.
+    // `hit` (Hit/Strike only) is the landed-hit context: its `has_last_hit`/
+    // `last_hit_type`/`last_hit_animation` (JS `sm.he` reads `a.IL`) are
+    // copied into the per-side context so the global `<Hit>` trigger
+    // conditions (CriticalEffect/BlockEffect/HitEffect) evaluate.
     void dispatch_global_triggers(const char* event_name, const char* why,
-                                 const char* value = nullptr, int side = -1);
+                                 const char* value = nullptr, int side = -1,
+                                 const sf2::scene::FightContext* hit = nullptr);
     // The `<Triggers>` EveryFrame publish is per-frame, so its
     // informational line is printed once per side+trigger (the dispatch
     // itself runs every frame — only the log is deduped).

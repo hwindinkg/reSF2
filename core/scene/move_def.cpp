@@ -448,6 +448,17 @@ void parse_action(pugi::xml_node node, MoveAction& out) {
         out.bullet_value = data::xml_attr_int(node, "Value", 0);
         return;
     }
+    // `jg` (HitEffect, L731): `FileName` -> `vT`, `StartingRotation` ->
+    // `ywb`, `ChangeHitEffectScale` -> `aza` (`u.H` default 0). `wd.Xvb`
+    // (L519) consumes exactly these three.
+    if (out.kind == "HitEffect") {
+        if (pugi::xml_attribute fn = node.attribute("FileName")) {
+            out.hit_effect_file = fn.value();
+        }
+        out.hit_effect_scale = data::xml_attr_float(node, "ChangeHitEffectScale", 0.0f);
+        out.hit_effect_rotation = data::xml_attr_float(node, "StartingRotation", 0.0f);
+        return;
+    }
     // Every other kind: keep the Name attr when present (informational; the
     // kind is parsed data until its consumer system is ported).
     if (pugi::xml_attribute n = node.attribute("Name")) out.name = n.value();

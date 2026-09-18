@@ -29,12 +29,24 @@ constexpr float kFightViewW = 1280.0f;
 constexpr float kFightViewH = 720.0f;
 
 // JS `jg.parse` (L731): the `fight/fx` run lengths keyed by the HitEffect
-// `FileName` (`vT`). The native hit path has no per-hit HitEffect XML (the
-// global moves.xml `<Triggers>` HitEffect actions are not loaded - see
-// apply_hit), so the shipped Crit/Block/HitEffect trigger conditions pick
-// the run (moves.xml L33561-33602).
+// `FileName` (`vT`). The `jg` action is dispatched from the root `<Triggers>`
+// HitEvent set (see `dispatch_move_actions`), so the FileName the shipped
+// CriticalEffect/BlockEffect/HitEffect trigger conditions select picks the
+// run (moves.xml: `critical` / `block` / `hit_blade`).
 constexpr int kFlashFramesCritical = 29;  // L731 "critical"/"hit_blade" = 29
 constexpr int kFlashFramesBlock = 24;     // L731 "block" = 24
+constexpr int kFlashFramesShieldHex = 16; // L731 "effect_shield_hex_hit" = 16
+
+// JS `jg.parse` (L731) switch on `this.vT`: the `<vT>/<vT>_N` sprite-run
+// length. "effect_tornado_hit"/"mgc_effect_gust_up"/unknown = 0 (no run ->
+// `Hyb` starts no flash, `EffectSystem::spawn_hit_flash` sets `active=false`).
+int hit_effect_run_frames(const std::string& file) {
+    if (file == "block") return kFlashFramesBlock;
+    if (file == "effect_shield_hex_hit") return kFlashFramesShieldHex;
+    if (file == "critical" || file == "hit_blade") return kFlashFramesCritical;
+    return 0;
+}
+
 // JS `lrb` (L395): the flash time `c` (`Vu.time`) = 1/60 on a critical hit,
 // else 1/120.
 constexpr float kFlashTimeCrit = 1.0f / 60.0f;
@@ -471,7 +483,7 @@ void FightController::dispatch_move_actions(
         // `super(1)` (L728/L737), so `js_type == 1` is ambiguous.
         const bool fx_kind = act->kind == "ShakeScreen" || act->kind == "CameraWeight" ||
                              act->kind == "EnableBossAbility" ||
-                             act->kind == "AddBullets";
+                             act->kind == "AddBullets" || act->kind == "HitEffect";
         if (!sound_kind && !fx_kind) continue;
         // JS `cb.Ti(a,b)` (L724): `if (Fd(this.$c)) return true;` then the
         // `<Conditions>` tree. `$c` empty -> always true.
@@ -553,6 +565,40 @@ void FightController::dispatch_move_actions(
             }
             continue;
         }
+        // --- HitEffect (`jg` L731 -> `wd.Xvb` L519) ------------------------
+        // JS `wd.Xvb(a)` (L519):
+        //   `Xvb(a){this.Vu.Ica && ca.Ka()!=null &&
+        //           ca.Ka().Kla(this.Vu.bk, this.Vu.fg, this.Vu.time,
+        //                       a.vT, a.aza>0?a.aza:this.Qz, a.ywb)}`
+        // `ca.Kla(a,b,c,d,e,f)` (L397) -> `Ta.Kla(a,b,c,!1,d,e,f)` ->
+        // `ql.Kla(a,b,c,d,e,f,g){this.ia.Hyb(a,b,c,e,f,g)}` (L370) -> the
+        // `Ut.Hyb` flash spawn (L825) = the port's `spawn_hit_flash`.
+        // `this.Vu` is the OWNER's `lrb` latch (`reaction()`); the action's
+        // `vT`/`aza`/`ywb` are FileName / ChangeHitEffectScale / StartingRotation.
+        // The `ca.Ka()!=null` camera test has no port equivalent (the fight
+        // always owns a camera), so it is not reproduced.
+        if (act->kind == "HitEffect") {
+            if (!owner.fighter.has_reaction()) continue;  // `this.Vu.Ica`
+            const sf2::scene::Fighter::Reaction& r = owner.fighter.reaction();
+            // `a.aza>0?a.aza:this.Qz` — a positive authored scale, else the
+            // fighter's live `Qz` (`ChangeHitEffectScale` perk mods write it).
+            const float scale =
+                act->hit_effect_scale > 0.0f ? act->hit_effect_scale : owner.qz;
+            const int frames = hit_effect_run_frames(act->hit_effect_file);
+            fx_.spawn_hit_flash(r.pos.x, r.pos.y, r.dir.x, r.dir.y,
+                                act->hit_effect_rotation, scale, r.time,
+                                act->hit_effect_file, frames);
+            std::fprintf(stdout,
+                         "[fx] F%d %s %s HitEffect file=%s scale=%.2f rot=%.2f "
+                         "pos=%.0f,%.0f frames=%d speed=%.5f\n",
+                         frame_, owner.name.c_str(), why,
+                         act->hit_effect_file.c_str(), static_cast<double>(scale),
+                         static_cast<double>(act->hit_effect_rotation),
+                         static_cast<double>(r.pos.x), static_cast<double>(r.pos.y),
+                         frames, static_cast<double>(r.time));
+            std::fflush(stdout);
+            continue;
+        }
         if (act->js_type == 3) {  // StopSound — no voice gate (JS `wd.ewb`)
             const char* s_stem = sf2::audio::sfx_stem_for_js(act->name.c_str());
             std::fprintf(stdout, "[sfx] F%d %s %s %s name=%s stem=%s\n", frame_,
@@ -607,7 +653,7 @@ bool FightController::global_kind_dispatched(const std::string& kind) {
     return kind == "Sound" || kind == "RandomSound" || kind == "StopSound" ||
            kind == "SetEndStage" || kind == "ShakeScreen" ||
            kind == "CameraWeight" || kind == "EnableBossAbility" ||
-           kind == "AddBullets";
+           kind == "AddBullets" || kind == "HitEffect";
 }
 
 std::size_t FightController::global_action_kinds() const {
@@ -694,7 +740,8 @@ void FightController::register_global_triggers(const sf2::scene::FightContext& m
 // wired (see the call sites). `value` carries the event payload for the
 // subclasses whose `compare` filters on it; `side` -1 = both sides.
 void FightController::dispatch_global_triggers(const char* event_name, const char* why,
-                                               const char* value, int side) {
+                                               const char* value, int side,
+                                               const sf2::scene::FightContext* hit) {
     if (global_triggers_ == nullptr || (global_me_.empty() && global_enemy_.empty())) {
         return;
     }
@@ -719,6 +766,21 @@ void FightController::dispatch_global_triggers(const char* event_name, const cha
             {other.fighter.current_move() ? other.fighter.current_move()->name : ""};
         fill_ctx_geometry(ctx, owner, other);
         ctx.health_ratio = owner.max_hp > 0.0f ? owner.hp / owner.max_hp : 0.0f;
+        // The owner's live intervals (JS `Ae.xb`): the BlockEffect / HitEffect
+        // global triggers gate on `<CurrentInterval Type="Block">` and
+        // `<CurrentInterval Not="1" Type="Block">`. Entries carry
+        // `active=true` — `FightContext::interval_active` skips inactive ones.
+        for (const std::string& n : owner.fighter.active_intervals()) {
+            ctx.intervals.push_back({n, owner.fighter.interval_type(n), true});
+        }
+        // The landed-hit payload (JS `Bg.Ih(6,a)` passes the SAME `a` to every
+        // subscriber; `sm.he` reads `a.IL`): copied so the global `<Hit>`
+        // trigger conditions (CriticalEffect/BlockEffect/HitEffect) evaluate.
+        if (hit != nullptr) {
+            ctx.has_last_hit = hit->has_last_hit;
+            ctx.last_hit_type = hit->last_hit_type;
+            ctx.last_hit_animation = hit->last_hit_animation;
+        }
         for (const sf2::scene::GlobalTrigger* t : *lists[s]) {
             bool event_ok = false;
             for (const sf2::scene::Cond& e : t->events) {
@@ -3284,33 +3346,6 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     //   Hit (6)    -> the DEFENDER's current move -> its `Event="Hit"`
     //                 actions (the 24 StopSound/StopEffect/Delete entries; the
     //                 StopSound half needs `AudioEngine::stop` — follow-up).
-    // NOTE: there is NO `ta.ak` in `ca.Cgb` itself (L394-397) — the previous
-    // `play("hit")` here was invented and is removed.
-    {
-        sf2::scene::FightContext ev;
-        ev.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
-        ev.stage = sf2::scene::round_stage::fight;
-        ev.anims_me = {atk.fighter.current_move() ? atk.fighter.current_move()->name
-                                                 : ""};
-        ev.anims_enemy = {def.fighter.current_move() ? def.fighter.current_move()->name
-                                                    : ""};
-        fill_ctx_geometry(ev, atk, def);
-        ev.health_ratio = atk.max_hp > 0.0f ? atk.hp / atk.max_hp : 0.0f;
-        ev.last_hit_type = hit_critical ? "Critical" : (rec.shock ? "Shock" : "");
-        // `CZa(7)` reads the attacker's move; `move` IS the attacker's move.
-        std::vector<const sf2::scene::MoveAction*> strike_acts;
-        for (const sf2::scene::MoveAction& a : move.actions) {
-            if (!a.frame_trigger && a.event == "Strike") strike_acts.push_back(&a);
-        }
-        dispatch_move_actions(strike_acts, atk, "Strike", ev);
-        // `CZa(6)` reads the defender's CURRENT move (`Vb.model`).
-        dispatch_move_actions(def.fighter.move_actions_for_event("Hit"), def, "Hit", ev);
-        // Root `<Triggers>` (JS `ra.Dm`, registered per model by `ra.yz`):
-        // the global set's own `<Hit>`/`<Strike>` events (`kz` Nm/Um).
-        dispatch_global_triggers("Strike", "Strike");
-        dispatch_global_triggers("Hit", "Hit");
-    }
-
     // [fx] The `Hyb` hit direction (JS L395): the strike capsule's per-frame
     // motion delta `b.Py.sx/Zs .ma-.mf` -- the endpoints' current minus
     // previous-frame world positions. `r1/r2` are `sx.ma`/`Zs.ma`; the
@@ -3326,6 +3361,52 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         }
     }
 
+    // JS `a.Pd.da.yD(4).DL && a.model.lrb(b.bk, d, b.se?.0166:.00833)` (L395):
+    // the `Vu` latch is armed BEFORE `Bg.Ih(6,a)` fires the `<Hit/>` event
+    // (the JS call order: offset 200831 `lrb`, 201585 `Bg.Ih(6,a)`), so the
+    // global HitEffect trigger's `Xvb` (L519) consumer sees `Vu.Ica`. `bk` =
+    // contact point, `fg` = the strike capsule's motion direction, `time` =
+    // the flash speed (1/60 crit else 1/120). Presentation only: no RNG/sim.
+    const float flash_time = hit_critical ? kFlashTimeCrit : kFlashTimeNormal;
+    if (!iv.no_effect) {
+        def.fighter.latch_reaction(ch.point, hdir, flash_time);  // `lrb`
+    } else {
+        def.fighter.clear_reaction();  // no `lrb` on a NoEffect interval
+    }
+
+    // NOTE: there is NO `ta.ak` in `ca.Cgb` itself (L394-397) — the previous
+    // `play("hit")` here was invented and is removed.
+    {
+        sf2::scene::FightContext ev;
+        ev.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
+        ev.stage = sf2::scene::round_stage::fight;
+        ev.anims_me = {atk.fighter.current_move() ? atk.fighter.current_move()->name
+                                                 : ""};
+        ev.anims_enemy = {def.fighter.current_move() ? def.fighter.current_move()->name
+                                                    : ""};
+        fill_ctx_geometry(ev, atk, def);
+        ev.health_ratio = atk.max_hp > 0.0f ? atk.hp / atk.max_hp : 0.0f;
+        // JS `sm.he` reads `a.IL` (the hit event data): `se` -> "Critical",
+        // `Ub` -> "Shock". `has_last_hit` arms the `<Hit>` conditions.
+        ev.last_hit_type = hit_critical ? "Critical" : (rec.shock ? "Shock" : "");
+        ev.has_last_hit = true;
+        // `CZa(7)` reads the attacker's move; `move` IS the attacker's move.
+        std::vector<const sf2::scene::MoveAction*> strike_acts;
+        for (const sf2::scene::MoveAction& a : move.actions) {
+            if (!a.frame_trigger && a.event == "Strike") strike_acts.push_back(&a);
+        }
+        dispatch_move_actions(strike_acts, atk, "Strike", ev);
+        // `CZa(6)` reads the defender's CURRENT move (`Vb.model`).
+        dispatch_move_actions(def.fighter.move_actions_for_event("Hit"), def, "Hit", ev);
+        // Root `<Triggers>` (JS `ra.Dm`, registered per model by `ra.yz`):
+        // the global set's own `<Hit>`/`<Strike>` events (`kz` Nm/Um). The
+        // Hit event dispatches on the DEFENDER's set (`d.model = b.model`)
+        // and carries the landed-hit context so the `<Hit>` conditions of the
+        // CriticalEffect/BlockEffect/HitEffect rows evaluate (`sm.he`).
+        dispatch_global_triggers("Strike", "Strike");
+        dispatch_global_triggers("Hit", "Hit", nullptr, def.is_player ? 0 : 1, &ev);
+    }
+
     // [fx] Hit sparks `ql.Rub`/`Ut.ryb` (JS L369/L824): the burst is spawned
     // ONLY on a critical strike -- JS L395 `b.se && this.Ta.Rub(b.bk,b.fg)`.
     // The burst origin is the contact point (`strike.n$` = `ch.point`). The
@@ -3336,52 +3417,12 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         fx_.spawn_hit_sparks(ch.point.x, ch.point.y, atk.fighter.facing());
     }
 
-    // [fx] The hit flash `Hyb` (JS L825). JS fires the `HitEffect` trigger
-    // action (`jg`, L738) on the landed `<Hit/>` event; `Xvb` (L519) then
-    // calls `Kla(Vu.bk, Vu.fg, Vu.time, a.vT, a.aza>0?a.aza:this.Qz, a.ywb)`
-    // -> `Hyb(point, dir, speed, run, scale, offset)`. The native sim does
-    // NOT load the global moves.xml `<Triggers>` (the HitEffect actions), so
-    // the run is selected from the shipped Crit/Block/HitEffect trigger
-    // conditions (moves.xml L33561-33602): critical -> "critical", block ->
-    // "block", otherwise "hit_blade"; the run length comes from `jg.Rza`
-    // (L731). `speed` = `Vu.time` (L395: 1/60 critical else 1/120), `scale`
-    // = the target's `Qz` (`this.Qz` -> `def.qz`), `offset` = StartingRotation
-    // (absent -> 0). `dir` = the real capsule motion delta (above).
-    //
-    // JS gate `a.Pd.da.yD(4).DL` (L395): the flash only fires when the
-    // ATTACKER's active Attack interval has `DL = !NoEffect`. The JS arms
-    // the `Vu` latch there (`a.model.lrb(b.bk, d, b.se?.0166:.00833)`); the
-    // trigger consumer `Xvb` reads `Vu.Ica`. The port now latches the same
-    // reaction on the DEFENDER and the flash reads it, instead of
-    // re-deriving the gate — `iv` is that interval (`hit_test`'s `d`) and
-    // `Interval::no_effect` is the parsed `NoEffect` attribute.
-    //
-    // Presentation only: no RNG, no sim effect.
-    const float flash_time = hit_critical ? kFlashTimeCrit : kFlashTimeNormal;
-    // JS `a.Pd.da.yD(4).DL && a.model.lrb(...)` (L395): the latch is armed
-    // ONLY when the attacker's active Attack interval has `DL = !NoEffect`;
-    // the `Xvb` consumer (L266159) runs on that same `<Hit/>` trigger, so
-    // the flash fires exactly once per armed hit. `eob()` (L523, called by
-    // `kob` L403 at the round transition) clears it — and a NoEffect
-    // interval clears it here too, so a stale latch can never arm the flash.
-    bool flash_armed = false;
-    if (!iv.no_effect) {
-        def.fighter.latch_reaction(ch.point, hdir, flash_time);  // `lrb`
-        flash_armed = true;
-    } else {
-        def.fighter.clear_reaction();  // `eob` on the NoEffect path
-    }
-    if (flash_armed) {  // JS `Xvb`: `this.Vu.Ica && ca.Ka()!=null && ...`
-        const char* flash_prefix = hit_critical ? "critical"
-                                 : hit_blocked  ? "block"
-                                                : "hit_blade";
-        const int flash_frames = hit_critical ? kFlashFramesCritical
-                               : hit_blocked  ? kFlashFramesBlock
-                                              : kFlashFramesCritical;
-        const Fighter::Reaction& r = def.fighter.reaction();
-        fx_.spawn_hit_flash(r.pos.x, r.pos.y, r.dir.x, r.dir.y, 0.0f,
-                            def.qz, r.time, flash_prefix, flash_frames);
-    }
+    // [fx] The hit flash `Hyb` (JS L825) is now driven by the parsed
+    // `HitEffect` (`jg`) action: the root `<Triggers>` CriticalEffect /
+    // BlockEffect / HitEffect rows dispatch through `dispatch_move_actions`
+    // on the `<Hit/>` event above, and each reads the `lrb` latch armed
+    // earlier to `spawn_hit_flash` (`ca.Kla` -> `ql.Kla` -> `Ut.Hyb`). No
+    // flash is spawned here — the action dispatch is the single source.
 
     // [fx] The camera hit-judder + hit-stop (JS `ca.Cgb` L396:
     // `if(b.se||b.Uq&&!b.block||b.Ub) c=this.ZAa(b.se,b.Uq&&!b.block,b.Ub),

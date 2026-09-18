@@ -228,11 +228,13 @@ struct Align {
 // (`cm.Uh()` L738 is an empty body), ShakeScreen (`wd.Wvb` L519 ->
 // `Pi.uS` L424 -> `ql.DL` L370 = the port's `FightCamera::apply_hit_effect`),
 // CameraWeight (`wd.ANa` L520 -> `Pi.fS` L424 `{debugger}` = NO-OP),
-// EnableBossAbility (`wd.$vb` L520 -> `Pi.dS` L397 `{debugger}` = NO-OP) and
-// AddBullets (`wd.Tvb` L519 -> `hZ`+`LA` L505 / `vZa`+`Amb` L524). The rest
-// are parsed records whose consumer systems are not ported (child models,
-// the magic-effect containers, the perk cooldown timers, the intro lens);
-// each is reported with its exact missing subsystem — never faked.
+// EnableBossAbility (`wd.$vb` L520 -> `Pi.dS` L397 `{debugger}` = NO-OP),
+// AddBullets (`wd.Tvb` L519 -> `hZ`+`LA` L505 / `vZa`+`Amb` L524) and
+// HitEffect (`wd.Xvb` L519 -> `ca.Kla` -> `ql.Kla` L370 -> `Ut.Hyb` L825 =
+// the port's `EffectSystem::spawn_hit_flash`; gated on the `lrb` latch). The
+// rest are parsed records whose consumer systems are not ported (child
+// models, the magic-effect containers, the perk cooldown timers, the intro
+// lens); each is reported with its exact missing subsystem — never faked.
 struct MoveAction {
     std::string kind;       // element name ("Sound", "RandomSound", ...)
     int js_type = -1;       // JS `cb.type` (0..17); -1 = unknown (never pushed)
@@ -294,6 +296,18 @@ struct MoveAction {
     // runs — the shipped `Value` stands.
     int bullet_kind = -1;   // `Vl.s6` (0 MagicBullet / 1 RaidChargeBullet / -1)
     int bullet_value = 0;   // `Vl.value` (<AddBullets Value=..>)
+    // --- HitEffect (`jg` L731) -------------------------------------------
+    // `jg.parse` (L731): `FileName` -> `vT`, `StartingRotation` -> `ywb`,
+    // `ChangeHitEffectScale` -> `aza`. `Uh` (L731) calls `wd.Xvb(this)`
+    // (L519), which hands these to `ca.Kla(Vu.bk, Vu.fg, Vu.time, vT,
+    // aza>0?aza:Qz, ywb)` -> `ql.Kla` (L370) -> `Ut.Hyb` (L825). `parse`
+    // also fills the preload cache `jg.Rza.v[vT]` with the `<vT>_1..N`
+    // sprite-frame names (block 24 / effect_shield_hex_hit 16 / critical &
+    // hit_blade 29 / others 0) — a PRELOAD-only list; the run length is
+    // mirrored by `hit_effect_run_frames` in fight.cpp.
+    std::string hit_effect_file;      // `vT` (FileName)
+    float hit_effect_scale = 0.0f;    // `aza` (ChangeHitEffectScale; 0 = use Qz)
+    float hit_effect_rotation = 0.0f; // `ywb` (StartingRotation, degrees)
 };
 
 // One child of the root `<Triggers>` block (JS `Fa.Exb` L708 ->
