@@ -89,6 +89,14 @@ struct FightContext {
     };
     std::vector<interval_state> intervals;
 
+    // The OPPONENT's active intervals: `<CurrentInterval Player="Enemy" ...>`.
+    // JS `tm.he` selects the per-player interval list via the condition's
+    // `player` field (`Nd.ol` L705; Me=1, Enemy=2). The shipped `Throw`
+    // template gates on `<CurrentInterval Player="Enemy" Name="Throwable"/>`
+    // (moves.xml:553/565), so without this the throw gate tested the
+    // ATTACKER's own intervals and could never pass.
+    std::vector<interval_state> intervals_enemy;
+
     // --- round stage (JS `Ae.Je`, iz.XBa) --------------------------------
     round_stage stage = round_stage::unknown;
 
@@ -194,7 +202,8 @@ struct FightContext {
     bool has_last_hit = false;
 
     // Helpers.
-    bool interval_active(const std::string& name, int type = 0) const;
+    bool interval_active(const std::string& name, int type = 0,
+                         int player = 1) const;
     bool key_pressed(key_type k, press_type p) const;
     bool has_mod(const std::string& name) const;
     bool has_item(const std::string& type, const std::string& subtype,

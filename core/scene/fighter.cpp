@@ -590,6 +590,18 @@ bool Fighter::move_conditions_pass(const MoveDef& move, FightContext& ctx,
         ctx.keys.push_back({k.key, k.press});
     }
     ctx.keys_gm = true;
+    // JS `Ae.xb`: the fighter's LIVE interval set. A move's OWN
+    // `<Conditions>` is gated on `<CurrentInterval Type="..."/>` — including
+    // the `Not="1"` restart guards carried by StepForward / DoubleStepForward
+    // / ShortUpwardElbowStrike. `FightContext::interval_state::active` defaults
+    // to false and `eval_current_interval` SKIPS inactive entries, so leaving
+    // this vector empty makes every `<CurrentInterval>` base-FALSE: each
+    // `Not="1"` guard then evaluates TRUE and the guard was silently OFF.
+    // Mirrors the global-trigger fill at fight.cpp:791-793.
+    ctx.intervals.clear();
+    for (const std::string& n : intervals_at(move_frame_)) {
+        ctx.intervals.push_back({n, interval_type(n), true});
+    }
     return eval_move_conditions(move.conditions, ctx, trace);
 }
 

@@ -791,6 +791,11 @@ void FightController::dispatch_global_triggers(const char* event_name, const cha
         for (const std::string& n : owner.fighter.active_intervals()) {
             ctx.intervals.push_back({n, owner.fighter.interval_type(n), true});
         }
+        // `<CurrentInterval Player="Enemy">` reads the OTHER fighter's live
+        // intervals (JS `tm.he` + `Nd.ol`).
+        for (const std::string& n : other.fighter.active_intervals()) {
+            ctx.intervals_enemy.push_back({n, other.fighter.interval_type(n), true});
+        }
         // The landed-hit payload (JS `Bg.Ih(6,a)` passes the SAME `a` to every
         // subscriber; `sm.he` reads `a.IL`): copied so the global `<Hit>`
         // trigger conditions (CriticalEffect/BlockEffect/HitEffect) evaluate.
@@ -3610,6 +3615,13 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         }
         ctx.anims_me.push_back(me.is_player ? "StanceLeft" : "StanceRight");
         ctx.anims_enemy = {foe.fighter.current_move() ? foe.fighter.current_move()->name : ""};
+        // `<CurrentInterval Player="Enemy">` reads the OPPONENT's live
+        // intervals (JS `tm.he` + `Nd.ol`); the `Throw` template's Throwable
+        // gate (moves.xml:553/565) depends on it.
+        ctx.intervals_enemy.clear();
+        for (const std::string& n : foe.fighter.active_intervals()) {
+            ctx.intervals_enemy.push_back({n, foe.fighter.interval_type(n), true});
+        }
         // JS `Dm.he` Player condition source (`a.qb=b.parameters.qb` L680).
         ctx.qb = me.is_player;
         fill_ctx_geometry(ctx, me, foe);

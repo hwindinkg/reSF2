@@ -59,11 +59,16 @@ namespace sf2::scene {
 // FightContext helpers
 // ---------------------------------------------------------------------------
 
-bool FightContext::interval_active(const std::string& name, int type) const {
+bool FightContext::interval_active(const std::string& name, int type,
+                                   int player) const {
     // JS `tm.he`: a CurrentInterval condition matches an active interval if
     //   (this.uc==0 || this.uc==d.type) && (this.Ba=="" || d.name==this.Ba)
     // where this.uc = the condition's Type (fe.G0) and this.Ba = its Name.
-    for (const interval_state& iv : intervals) {
+    // `Player` (Nd.ol L705): Me=1 (default) reads `Ae.xb` (this fighter);
+    // Enemy=2 reads the opponent's list (the `Throw` Throwable gate).
+    const std::vector<interval_state>& list =
+        (player == 2) ? intervals_enemy : intervals;
+    for (const interval_state& iv : list) {
         if (!iv.active) continue;
         const bool type_ok = type == 0 || iv.type == type;
         const bool name_ok = name.empty() || iv.name == name;
@@ -249,17 +254,16 @@ bool eval_keys(const Cond& c, const FightContext& ctx) {
     //    applies only the `LBa` map, identical to the JS) and the parsed
     //    requirement holds the SAME ids (`key_id("Forward")==3` == the buffered
     //    `forward`). `$ga` therefore compares like with like.
-    //  * RECORDED DIVERGENCE: because the port keeps `normal`, its requirement
-    //    names are ABSOLUTE (D always selects a "Forward"-named move, A always
-    //    a "Back"-named one) instead of the JS's fighter-relative names whose
-    //    selected MOVE NAME flips with `Wl`. The physical outcome is unchanged
-    //    (the clip mirror `Te.FX` independently decides the movement
-    //    direction). Applying the JS mirror here cannot be done unilaterally:
-    //    it inverts which key triggers which move name and the verified
-    //    `--verify-input` tape is authored in the absolute convention
-    //    (probe 1 injects raw control 7 for `DashBackwards`, probes 2/4/5 raw
-    //    control 3 for the "Forward" steps). See the task report.
-    const bool normal = true;
+    //  * JS-exact mirroring (`zd.reverse` L688 / `vm.he` L749): the requirement
+    //    list is the normal `xn` when the fighter's move-executing flag `S1`
+    //    is set OR its `Wl` (`ctx.direction`) is forward (>0); otherwise the
+    //    direction-reversed `TDa` (`zd.Fha`, 2<->8 / 3<->7 / 4<->6). The BUFFER
+    //    is NOT mirrored (`zl.Lea` L798 ignores the sign arg), so only the
+    //    requirement reverses. `ctx.direction` is `Ae.Wl` filled by
+    //    `fill_ctx_geometry` (fight.cpp:3615 -> 2916) and is +1 while the
+    //    player faces an opponent on the right, so the un-mirrored tape is
+    //    unchanged; a mirrored player reverses the directional requirement.
+    const bool normal = ctx.keys_s1 || ctx.direction > 0.0f;
     auto fha = [](int k) -> int {
         switch (k) {
             case 2: return 8;
@@ -378,7 +382,9 @@ bool eval_health(const Cond& c, const FightContext& ctx) {
 
 // JS `tm.he`: CurrentInterval — active interval Name and/or Type.
 bool eval_current_interval(const Cond& c, const FightContext& ctx) {
-    bool ok = ctx.interval_active(c.name, c.value_int);
+    // `Player` (Nd.ol L705): Me=1 (default) reads `Ae.xb`; Enemy=2 reads the
+    // opponent's interval list — the `Throw` template's Throwable gate.
+    bool ok = ctx.interval_active(c.name, c.value_int, c.player);
     return ok;
 }
 
