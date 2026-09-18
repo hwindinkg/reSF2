@@ -1919,8 +1919,17 @@ void FightController::enter_start_stance() {
     // the clip's ground-contact bones rest on the dojo floor line
     // (dojo_params Floor="80"). The old COM anchor sat the pivot ~17 units
     // high (bag: 226).
-    player_.fighter.set_world_pos(battle_.player_spawn_x, battle_.player_spawn_y);
-    enemy_.fighter.set_world_pos(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
+    // [FIX round-start positions] `set_world_pos` alone is UNDONE by the very
+    // next `sample()`: fighter.hpp L443-447 documents that with an active move
+    // the anchor is rebuilt as `world_x_ = px[anchor] + render_offset_ +
+    // j8_x_`, so the spawn was silently discarded and the fighters kept the
+    // previous round's x after the ROUND plate. The JS writes an ABSOLUTE
+    // anchor — the ctor `this.kc.position = location.Yia` / `this.Zb.position
+    // = location.B_` (L381) and the boss advance `this.Zb.position =
+    // location.B_` (`mfb`, L405) — which is exactly what `teleport` does (it
+    // absorbs the delta into `render_offset_` so the anchor STICKS).
+    player_.fighter.teleport(battle_.player_spawn_x, battle_.player_spawn_y);
+    enemy_.fighter.teleport(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
     sample_idle(player_);
     sample_enemy_idle();
     rebuild_body(player_, enemy_);
@@ -4002,7 +4011,16 @@ const char* FightController::banner_text() const {
                          banner_round_ + 1);
             return round_buf;
         case banner_kind::fight:  return "FIGHT!";
-        case banner_kind::ko:     return "K.O.";
+        // The JS draws NO "K.O."/"KO" text anywhere — the literal "K.O."
+        // appears 0 times in sf2.502f0946.js. The round-end plate is `Cr.GZ`
+        // (L2024, type 6/7) with the callouts-atlas frames `y.zQa="perfect"` /
+        // `y.wQa="great"`; the full `Cr` plate set is `uQa="fight"`,
+        // `BQa="round"`, `zQa="perfect"`, `wQa="great"`, `DQa="timesup"`,
+        // `AQa="ringout"`, `Kna="label_lose"`, `Lna="label_win"`. The "K.O."
+        // label was a port invention; the ko banner is a HOLD only and draws
+        // no flat text (the atlas path in screens.cpp `banner_atlas_frame`
+        // already returns nullptr for it — no invented frame is added here).
+        case banner_kind::ko:     return "";
         case banner_kind::victory: return "VICTORY";
         case banner_kind::defeat: return "DEFEAT";
         default:                  return "";

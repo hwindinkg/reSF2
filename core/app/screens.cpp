@@ -6400,6 +6400,29 @@ std::vector<BossRosterEntry> boss_roster_entries(App& app, const MapScreen::Node
     return entries;
 }
 
+void MapScreen::start_battle(const Node& n) {
+    // JS `ai.aa` case 0 (L2007): `this.TF.lD.length>1 && this.TF.eE`
+    // -> `lca(this.TF.lD, this.TF.uP, this.TF.Y1)` = the `jk` opponent
+    // scroll (`this.Ws = this.Qo(jk)`, L2009), whose `qd` (state 4) ->
+    // `ngb()` -> `tx()` (the `ik` VS intro). `ca.hCa` fills `TF.lD` ONLY for
+    // `FightBosses`/`FightBossesReplayable`/`FightFinalTitan`, so the gate is
+    // "boss type AND more than one `<Fight>`"; every other battle takes the
+    // direct branch. This is the ONE gate both real entries share.
+    if (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE") {
+        std::vector<BossRosterEntry> entries = boss_roster_entries(app(), n);
+        if (entries.size() > 1) {
+            act_node_ = n;
+            roster_.start(std::move(entries), 0);
+            std::fprintf(stdout,
+                         "[map] FIGHT -> jk roster armed (%zu entries, first %s)\n",
+                         roster_.entries.size(), n.name.c_str());
+            std::fflush(stdout);
+            return;
+        }
+    }
+    launch_battle(n);
+}
+
 void MapScreen::update_impl(float dt) {
     // Fidelity-tour boss-roster capture: arm the `jk` machine frozen at the
     // requested pose (3/4 = the `act_boss` resting selection, 1 = mid
@@ -6474,7 +6497,11 @@ void MapScreen::update_impl(float dt) {
                     if (!z.empty() && zt.name != z) continue;
                     for (const Node& n : zt.nodes) {
                         if (n.name == b) {
-                            launch_battle(n);
+                            // The deferred quest `Fight` action is just another
+                            // battle start — run it through the SAME `jk` gate
+                            // as the FIGHT button so a multi-`<Fight>` boss
+                            // battle still plays the opponent scroll.
+                            start_battle(n);
                             return;
                         }
                     }
@@ -6564,26 +6591,11 @@ void MapScreen::update_impl(float dt) {
                 std::fprintf(stdout, "[map] FIGHT ignored: %s [%s] locked\n", n.name.c_str(),
                              n.zone.c_str());
                 std::fflush(stdout);
-            } else if (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE") {
-                // JS `ai.aa` case 0 (L2007): `this.TF.lD.length>1 && this.TF.eE`
-                // -> `lca(this.TF.lD, this.TF.uP, this.TF.Y1)` = the `jk`
-                // opponent scroll (`this.Ws = this.Qo(jk)`, L2009), whose `qd`
-                // (state 4) -> `ngb()` -> `tx()` (the `ik` VS intro). Runs in
-                // BOTH the windowed and headless builds (the player must see
-                // the scroll-in; the tour captures it).
-                std::vector<BossRosterEntry> entries = boss_roster_entries(app(), n);
-                if (entries.size() > 1) {
-                    act_node_ = n;
-                    roster_.start(std::move(entries), 0);
-                    std::fprintf(stdout,
-                                 "[map] FIGHT -> jk roster armed (%zu entries, first %s)\n",
-                                 roster_.entries.size(), n.name.c_str());
-                    std::fflush(stdout);
-                    return;
-                }
-                launch_battle(n);
             } else {
-                launch_battle(n);
+                // JS `ai.aa` case 0 (L2007): the ONE shared gate — a
+                // multi-`<Fight>` boss battle arms the `jk` opponent scroll
+                // (`lca` L2009) first; everything else launches directly.
+                start_battle(n);
             }
         }
     }

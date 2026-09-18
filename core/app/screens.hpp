@@ -402,6 +402,14 @@ private:
     // Shared battle-start body (JS `Ya` mp(6)): fills pending_battle and
     // pushes the fight. Used by node clicks and act completion alike.
     void launch_battle(const Node& n);
+    // The shared `jk` gate for EVERY battle start (JS `ai.aa` case 0, L2007):
+    // a boss battle with more than one `<Fight>` (`this.TF.lD.length>1 &&
+    // this.TF.eE`) arms the opponent scroll and only launches when its state 4
+    // fires `qd` (`ngb()` -> `tx()`, L2009); every other battle launches
+    // directly. Both real entries run through here — the `Rr` FIGHT button and
+    // the quest modal's deferred `Fight` action — so the real Map->FIGHT entry
+    // cannot skip the scroll.
+    void start_battle(const Node& n);
 };
 
 // The fight — native Fight screen (screen 6, JS `ai`/`ma` L2004-2010).
