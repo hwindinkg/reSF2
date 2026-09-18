@@ -4487,12 +4487,83 @@ void load_map_backdrops(App& app) {
 // ---------------------------------------------------------------------------
 
 // --- Dojo idle figure (FightNone viewer, display only) ---------------------
-// Finds the stance-idle clip (moves.xml `StanceIdle` FileName
-// "stance_idle.bytes"): first clip whose archive name contains it, else any
-// "stance" clip, else "" (caller skips the figure).
+// Finds the stance-idle clip the fighter's own move machinery would settle
+// into. JS `Tf.init` (L1971) runs the player's REAL fighter on the hub, so its
+// idle is whatever `ra.Hza`'s unlocked move list picks - the player's
+// `<Weapon>StartStanceIdle*` move (moves.xml `Template="StartIdleStance|Stance"`,
+// Priority 10) and its `FileName` clip. The shipped Fists fighter therefore
+// idles on `fists1_stance_idle` (`FistsStartStanceIdle-Left`,
+// FileName="fists1_stance_idle.bytes") - the exact clip the fight log and the
+// oracle pose trace show (`clip":"fists1_stance_idle"`).
+//
+// The old scan took the FIRST clip whose archive name contained "stance_idle";
+// the archive also ships `axe_stance_idle`, `katana_stance_idle`, ... and
+// "axe..." sorts first, so the hub rendered the AXE stance on a Fists fighter
+// (the oracle `dojo_hub` shows the wide Fists lunge, not the narrow axe guard).
+//
+// Order: the equipped weapon's own start idle -> the unarmed (Fists) default ->
+// the legacy name scan. `""` means "no clip" (caller skips the figure).
+// The player's equipped weapon token (from the save; e.g. "Fists"). The hub
+// and the destination viewers resolve their idle the same way the fight does
+// (`find_idle_clip_name`). Empty when the save read fails (the unarmed
+// default then applies).
+std::string player_weapon_token(App& app) {
+    try {
+        return app.save().load().weapon;
+    } catch (const std::exception&) {
+        return "";
+    }
+}
+
 std::string find_idle_clip_name(
-    const std::map<std::string, sf2::data::anim_clip>& clips) {
-    for (const auto& kv : clips) {
+    const std::map<std::string, sf2::scene::MoveDef>& moves,
+    const std::map<std::string, sf2::data::anim_clip>& clips,
+    const std::string& weapon) {
+    // Resolve a move's `FileName` to an existing archive clip (JS `Te.Skb`
+    // L551: `FileName` minus ".bytes" -> the anim archive key).
+    auto clip_for_move = [&clips](const sf2::scene::MoveDef& m) -> std::string {
+        std::string base = m.file_name;
+        const std::string suffix = ".bytes";
+        if (base.size() > suffix.size() &&
+            base.compare(base.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            base = base.substr(0, base.size() - suffix.size());
+        }
+        if (base.empty()) base = m.name;
+        return clips.count(base) != 0 ? base : std::string();
+    };
+    // The save stores the weapon as an item token ("WEAPON_KNIVES",
+    // "One Handed Sword"), while the move name is the CamelCase class
+    // (`KnivesStartStanceIdle`). Normalize both to lowercase alnum: drop the
+    // `WEAPON_` class prefix, fold case, drop separators.
+    auto norm_token = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c >= 'A' && c <= 'Z') {
+                out.push_back(static_cast<char>(c - 'A' + 'a'));
+            } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                out.push_back(c);
+            }
+        }
+        if (out.size() > 6 && out.compare(0, 6, "weapon") == 0) out.erase(0, 6);
+        return out;
+    };
+    auto weapon_start_idle = [&](const std::string& raw) -> std::string {
+        const std::string key = norm_token(raw);
+        if (key.empty()) return "";
+        for (const auto& kv : moves) {
+            const std::string& n = kv.second.name.empty() ? kv.first : kv.second.name;
+            if (n.find("StartStanceIdle") == std::string::npos) continue;
+            const std::string ln = norm_token(n);
+            if (ln.size() < key.size() || ln.compare(0, key.size(), key) != 0) continue;
+            const std::string c = clip_for_move(kv.second);
+            if (!c.empty()) return c;
+        }
+        return "";
+    };
+    std::string idle = weapon_start_idle(weapon);        // the equipped weapon
+    if (idle.empty()) idle = weapon_start_idle("Fists");  // unarmed default
+    if (!idle.empty()) return idle;
+    for (const auto& kv : clips) {  // legacy fallback
         if (kv.first.find("stance_idle") != std::string::npos) return kv.first;
     }
     for (const auto& kv : clips) {
@@ -4694,7 +4765,8 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
     if (!tried) {
         tried = true;
         FightAssets& assets = app.fight_assets();
-        const std::string idle_name = find_idle_clip_name(assets.clips);
+        const std::string idle_name =
+            find_idle_clip_name(assets.moves, assets.clips, player_weapon_token(app));
         const auto it = idle_name.empty() ? assets.clips.end()
                                           : assets.clips.find(idle_name);
         if (!assets.merged.bones.empty() && it != assets.clips.end() &&
@@ -5536,7 +5608,9 @@ void DojoScreen::render_impl(App& app) {
             dojo_fig_tried_ = true;
             if (app.has_fight_assets()) {
                 FightAssets& assets = app.fight_assets();
-                const std::string idle_name = find_idle_clip_name(assets.clips);
+                const std::string idle_name =
+                    find_idle_clip_name(assets.moves, assets.clips,
+                                        player_weapon_token(app));
                 const auto it = idle_name.empty() ? assets.clips.end()
                                                   : assets.clips.find(idle_name);
                 if (!assets.merged.bones.empty() && it != assets.clips.end() &&
