@@ -981,6 +981,23 @@ struct VerifyProbe {
 // boot fighter that means the `<Locks>` pass too (Skeleton + Weapon/Fists +
 // Body/Head, fight.cpp `make_fighter`; `ra.Hza` L684-685 admits a move only
 // when its `<Locks>` hold). `ra.Lk` document order is the candidate order.
+//
+// The explicit direct-boot loadout for `--loadout <WeaponSubType>`: the
+// equipped slots in the JS `xc.hk` order (`Of`/`Hd`/`hg`/`Lg` = Skeleton /
+// Weapon / Armor / Helm), each row the `Hm.he` (L758) Type/SubType/Name
+// triple. Empty string -> empty list -> the app resolves the save
+// (`owned_items`). The Weapon row's SubType is what the scene layer derives
+// the move-list subtype from (`Fd` L808, `I.vg` L2473).
+std::vector<sf2::scene::OwnedItem> loadout_owned(const std::string& weapon) {
+    if (weapon.empty()) return {};
+    return {
+        {"Skeleton", "Skeleton", "Skeleton"},
+        {"Weapon", weapon, weapon},
+        {"Armor", "Body", "Body"},
+        {"Helm", "Head", "Head"},
+    };
+}
+
 static const VerifyProbe kVerifyProbes[] = {
     // F180: Back Tap x2 at the spawn gap (dist 283). Candidate order is the
     // JS `ra.Lk` DOCUMENT order: StepBack then BackHandflip. `Gc.DK` L673
@@ -1035,6 +1052,37 @@ static const VerifyProbe kVerifyProbes[] = {
 };
 constexpr int kVerifyProbeCount =
     static_cast<int>(sizeof(kVerifyProbes) / sizeof(kVerifyProbes[0]));
+
+// The `--verify-input --loadout Knives` probe set: the SAME tape frames, but
+// the weapon-subtype derivation (`Fd` L808) admits the Knives move set
+// (`ra.Hza` L684-685 over `TacticWeapon="Knives|Keris"`), so the Punch key
+// resolves `KnivesSlash` instead of `HighPunch`, and the idle is
+// `KnivesStartStanceIdle` (`knives_stance_idle`). No Kick-key knives move
+// exists (all 20 knives-keyed moves in moves.xml are `<Key Type="Punch"/>`),
+// so the Kick tap keeps the universal `HighKick` on both loadouts.
+static const VerifyProbe kVerifyProbesKnives[] = {
+    {180, "Back Tap x2 (spawn gap 283) [Knives]", "BackHandflip",
+     "cands=StepBack@10,BackHandflip@20 f=BackHandflip draw=- idx=0 BackHandflip",
+     4, false},
+    {300, "Forward Tap x2 [Knives]", "DoubleStepForward",
+     "cands=StepForward@10,DoubleStepForward@20 f=DoubleStepForward draw=- idx=0 DoubleStepForward",
+     4, false},
+    {420, "Punch Tap x2 + Forward Hold [Knives]", "KnivesSuperSlash",
+     "cands=StepForward@10,KnivesSlash@110,KnivesDoubleSlash@115,KnivesHeavySlash@120,KnivesSuperSlash@130 f=KnivesSuperSlash draw=- idx=0 KnivesSuperSlash",
+     4, false},
+    {520, "Forward Tap x1 (1key) [Knives]", "StepForward",
+     "cands=StepForward@10 f=StepForward draw=- idx=0 StepForward",
+     4, false},
+    {550, "Forward Tap x1 (+30f) [Knives]", "StepForward",
+     "cands=StepForward@10 f=StepForward draw=- idx=0 StepForward",
+     4, false},
+    {620, "K key -> Punch-key move (Knives) [Knives]", "KnivesSlash",
+     "cands=KnivesSlash@110 f=KnivesSlash draw=- idx=0 KnivesSlash",
+     14, false},
+    {700, "B key -> dropped (no move) [Knives]", "<none>", "", 12, false},
+};
+constexpr int kVerifyProbesKnivesCount =
+    static_cast<int>(sizeof(kVerifyProbesKnives) / sizeof(kVerifyProbesKnives[0]));
 
 std::vector<ReplayEdge> build_verify_edges() {
     std::vector<ReplayEdge> e;
@@ -1302,6 +1350,14 @@ int main(int argc, char** argv) {
     // the Training dojo battle with no zone (legacy first-match scan).
     std::string fight_battle;
     std::string fight_zone;
+    // `--loadout <WeaponSubType>`: pins the player's EQUIPPED Weapon slot for
+    // the direct-boot paths (`--fight` / `--verify-input` / `--input-tape`).
+    // Empty = resolve from the save (the shipped JS behaviour: `owned_items`
+    // reads the save's equipped slots, each row a Type/SubType/Name triple).
+    // A non-empty value seeds the same triple set explicitly, so a run is
+    // deterministic regardless of the ambient save — required by the probe
+    // harness, whose expectations are authored per loadout.
+    std::string loadout;
 
     // Positional args (res_root, save_path) are assigned by slot, not by
     // value: a user passing the default res_root explicitly used to collide
@@ -1336,6 +1392,8 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--verify-input") {
             verify_input = true;
+        } else if (arg == "--loadout" && i + 1 < argc) {
+            loadout = argv[++i];
         } else if (arg == "--input-tape") {
             input_tape = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -1394,6 +1452,13 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+
+    // The `--verify-input` tape + probe expectations are authored on the
+    // shipped Fists loadout (`reference/tools/input_phase1.txt`), so an
+    // unspecified verify run pins Fists. `--loadout <WeaponSubType>` runs the
+    // same tape against another weapon (the knives probe set), so the
+    // weapon-subtype derivation is exercised for both.
+    if (verify_input && loadout.empty()) loadout = "Fists";
 
     // Verify the save round-trip before opening the window (the same
     // SaveSystem the shell uses): load users_default -> bump money ->
@@ -1856,7 +1921,7 @@ int main(int argc, char** argv) {
             pb.has_result = false;
             pb.reward_money = 0;
             pb.reward_exp = 0;
-            pb.owned.clear();
+            pb.owned = loadout_owned(loadout);
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
 
@@ -1933,6 +1998,19 @@ int main(int argc, char** argv) {
                      verify_input ? "verify tape" : replay_file.c_str(), edges.size());
         std::fflush(stdout);
 
+        // The probe expectations are authored per loadout (the decision record
+        // carries the candidate set, so it differs with the equipped weapon):
+        // the default Fists tape uses `kVerifyProbes`; `--loadout Knives`
+        // runs the same tape against the knives move set.
+        const VerifyProbe* active_probes = kVerifyProbes;
+        int active_probe_count = kVerifyProbeCount;
+        if (loadout == "Knives") {
+            active_probes = kVerifyProbesKnives;
+            active_probe_count = kVerifyProbesKnivesCount;
+        }
+        (void)active_probes;
+        (void)active_probe_count;
+
         if (verify_input) {
             // Key-map assertion (JS `sc.OD` `Af.oUa` L2472): K->Punch(9) not
             // Super(14), Q->Super(14), P->Magic(12), and the non-JS B is
@@ -1991,8 +2069,8 @@ int main(int argc, char** argv) {
                 }
             }
             if (fight_seen && verify_input) {
-                for (int p = 0; p < kVerifyProbeCount; ++p) {
-                    if (kVerifyProbes[p].frame == fight_frames) pending = &kVerifyProbes[p];
+                for (int p = 0; p < active_probe_count; ++p) {
+                    if (active_probes[p].frame == fight_frames) pending = &active_probes[p];
                 }
             }
             app.run_one_frame();
@@ -2066,7 +2144,7 @@ int main(int argc, char** argv) {
         app.shutdown();
         if (verify_input) {
             std::fprintf(stdout, "[verify] probes: %d/%d PASS\n",
-                         kVerifyProbeCount - probe_failures, kVerifyProbeCount);
+                         active_probe_count - probe_failures, active_probe_count);
             std::fflush(stdout);
         }
         return probe_failures == 0 ? 0 : 1;
@@ -2087,7 +2165,7 @@ int main(int argc, char** argv) {
             pb.has_result = false;
             pb.reward_money = 0;
             pb.reward_exp = 0;
-            pb.owned.clear();
+            pb.owned = loadout_owned(loadout);
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
         app.set_headless_frames(1);
@@ -2297,12 +2375,11 @@ int main(int argc, char** argv) {
         //   game --fight --headless N    run N frames then exit (verify)
         // The fight push mirrors the MapScreen node click: carry the battle
         // (name/location/reward) into pending_battle, then push
-        // kScreenFight. The player's owned list is EMPTY on purpose: the
-        // Fists fallback in FightController::make_fighter builds the player
-        // move list from the "Fists" TacticWeapon, so the direct boot is
-        // ALWAYS the fists fight (player Fists vs enemy Fists/AI) regardless
-        // of the user's save state (a save with WEAPON_KNIVES equipped would
-        // otherwise pull the knives moves into the player's list).
+        // kScreenFight. The player's move list is built from the EQUIPPED
+        // Weapon slot (JS `ra.Hza` L684-685 + `Fd` L808): with no
+        // `--loadout` the boot resolves the save's equipped slots
+        // (`owned_items`), so a save with WEAPON_KNIVES equipped gets the
+        // knives moves; `--loadout Fists` pins the shipped Fists default.
         if (auto_attack) {
             app.set_auto_attack(true);
         }
@@ -2314,7 +2391,7 @@ int main(int argc, char** argv) {
             pb.has_result = false;
             pb.reward_money = 0;
             pb.reward_exp = 0;
-            pb.owned.clear();
+            pb.owned = loadout_owned(loadout);
             std::fprintf(stdout, "[fight] direct boot: battle=%s zone=%s location=%s owned=%zu\n",
                          pb.battle_name.c_str(), pb.zone.c_str(), pb.location.c_str(),
                          pb.owned.size());

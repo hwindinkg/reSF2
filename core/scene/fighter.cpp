@@ -278,6 +278,53 @@ void Fighter::build_move_list_locks(
     });
 }
 
+// The idle auto-play's move pick, JS `Aua` (L673) over the fighter's OWN
+// unlocked list. `hb_` already carries only the moves the equipped weapon
+// admits (`ra.Hza` L684-685), so the `Template` tag is enough to isolate the
+// stance family — the old hardcoded `FistsStartStanceIdle-*` name ignored the
+// equipped weapon and made a knives fighter play the Fists stance.
+const MoveDef* Fighter::stance_move(const std::vector<std::string>& templates,
+                                    bool is_player) const {
+    // `Aua` (L673): keep the max-`priority` group. Equal priorities stay in
+    // `hb_` (document) order.
+    std::vector<const MoveDef*> group;
+    for (const MoveDef* m : hb_) {
+        bool has = false;
+        for (const std::string& t : templates) {
+            if (m->template_tags.count(t) != 0) {
+                has = true;
+                break;
+            }
+        }
+        if (!has) continue;
+        if (group.empty() || m->priority > group.front()->priority) {
+            group.clear();
+            group.push_back(m);
+        } else if (m->priority == group.front()->priority) {
+            group.push_back(m);
+        }
+    }
+    if (group.empty()) return nullptr;
+    // Within the group: the `<Player Number=1>` (controlled) variant is the
+    // `-Left` one (`Dm.he` L755 `Number==1 == qb`); the other side takes
+    // `-Right`. A variant with no side suffix is common to both and wins when
+    // it is the only one (Knives/Daggers/... one idle move per weapon).
+    const std::string want = is_player ? "-Left" : "-Right";
+    const MoveDef* unsuffixed = nullptr;
+    for (const MoveDef* m : group) {
+        if (m->name.size() >= want.size() &&
+            m->name.compare(m->name.size() - want.size(), want.size(), want) == 0) {
+            return m;
+        }
+        const bool has_left =
+            m->name.size() >= 5 && m->name.compare(m->name.size() - 5, 5, "-Left") == 0;
+        const bool has_right =
+            m->name.size() >= 6 && m->name.compare(m->name.size() - 6, 6, "-Right") == 0;
+        if (!has_left && !has_right) unsuffixed = m;
+    }
+    return unsuffixed != nullptr ? unsuffixed : group.front();
+}
+
 // JS `zl.yLa` (L799): `zg.Fh` = a Hold for every currently-down key
 // (`Ff[].sl`). Rebuilt from the physical held set each tick/press.
 void Fighter::rebuild_holds() {

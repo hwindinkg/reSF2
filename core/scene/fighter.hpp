@@ -170,6 +170,18 @@ public:
                                bool include_universal = true,
                                const std::string& weapon_subtype = std::string());
 
+    // The stance move the idle auto-play settles into, resolved from THIS
+    // fighter's own unlocked list (`hb_`, JS `ra.Hza` L684-685) instead of a
+    // hardcoded weapon name. `templates` = the candidate Template tags
+    // (`StanceLeft`/`StanceRight` for the phase-1 intro, `StartIdleStance`
+    // for the phase-2 loop, moves.xml). JS `Aua` (L673) keeps the
+    // MAX-`<Priority>` group; within it the variant matching the controlled
+    // side wins (`-Left` for the player, `-Right` otherwise — the
+    // `Player Number=1` gate, `Dm.he` L755), and an unsuffixed variant
+    // (`KnivesStartStanceIdle`) serves both. nullptr when `hb_` has none.
+    const MoveDef* stance_move(const std::vector<std::string>& templates,
+                               bool is_player) const;
+
     // Buffers one key press (JS `Kl.Sgb`/`zl.Sgb`, L798): appends the key to
     // the 2-slot Tap sequence (`zg.sh`), rebuilds the held set (`zg.Fh`),
     // resets the tap age (`dX=0`). `release` (JS `zl.Xgb`, L799) drops the

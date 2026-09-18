@@ -829,6 +829,24 @@ FightFighter FightController::make_fighter(
                 return it != clips_->end() ? &it->second : nullptr;
             });
     }
+    // JS `Fd` (L808) + the slot enum (L2473 `I.vg="Weapon"`): the move-LIST
+    // weapon subtype is the EQUIPPED Weapon slot item's `SubType` — the `Hd`
+    // slot whose model `cM` (L809-810) pushes. `ra.Hza` (L684-685) then
+    // admits every move whose TacticWeapon list (`Fa.Ueb` L711 -> `qx`)
+    // contains it. Hardcoding "Fists" kept a knives fighter on the Fists move
+    // set (and, with the hardcoded idle name, the Fists stance clip) however
+    // the save was equipped. The owned list starts with the equipped slots
+    // (screens.cpp `owned_items`, JS `xc.hk`), so the FIRST Weapon row IS the
+    // equipped slot; an empty owned list keeps the caller's `weapon_subtype`
+    // (the implicit shipped loadout: Skeleton + Weapon/<subtype> + Body/Head).
+    std::string subtype = weapon_subtype;
+    for (const auto& o : owned) {
+        if (o.type != "Weapon") continue;
+        if (!o.subtype.empty()) subtype = o.subtype;
+        else if (!o.name.empty()) subtype = o.name;
+        break;
+    }
+    if (subtype.empty()) subtype = "Fists";
     if (owned.empty()) {
         // JS `ra.Hza` (L684-685) ALWAYS tests every move's `<Locks>` against
         // the fighter's items - there is NO lock-free candidate path. The
@@ -855,19 +873,19 @@ FightFighter FightController::make_fighter(
         // name equals the subtype here.
         const std::vector<Fighter::OwnedItem> implicit = {
             {"Skeleton", "Skeleton", "Skeleton"},
-            {"Weapon", weapon_subtype, weapon_subtype},
+            {"Weapon", subtype, subtype},
             {"Armor", "Body", "Body"},
             {"Helm", "Head", "Head"},
         };
         f.fighter.build_move_list_locks(*moves_, implicit, /*include_universal=*/true,
-                                       weapon_subtype);
+                                       subtype);
     } else {
         // The app layer's `owned_items` list carries the NAME of every owned
         // item (JS `Hm.he` L758 `this.Ba == b.name`), so both the direct boot
         // (`--fight`/`--verify-input`/`--input-tape`) and the Map/Dojo launch
         // build the IDENTICAL move list from the same save.
         f.fighter.build_move_list_locks(*moves_, owned, /*include_universal=*/true,
-                                       weapon_subtype);
+                                       subtype);
     }
     f.fighter.set_world_pos(x, y);
     f.fighter.set_enemy_x(x);  // patched each frame
@@ -3561,12 +3579,24 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // player the enemy clip `…-Right` (clip stance_2 / fists2_stance_idle,
         // the wrong mirror), and hard-coded `Idle-Left` for BOTH sides — the
         // reported wrong models/animations.
-        const char* const side = me.is_player ? "Left" : "Right";
-        const std::string idle_name =
-            intro ? std::string("FistsStartStance-") + side
-                  : std::string("FistsStartStanceIdle-") + side;
-        const auto idle_it = moves_->find(idle_name);
-        if (idle_it != moves_->end()) {
+        // [W2] Resolve the stance from THIS fighter's OWN unlocked list
+        // (`hb_`), not a hardcoded Fists name. `hb_` already excludes every
+        // other weapon's TacticWeapon moves, so the `Template` tag isolates
+        // the equipped weapon's stance family: the phase-1 intro uses
+        // `StanceLeft`/`StanceRight` (`FistsStartStance-Left`,
+        // `KnivesStartStance-Left`, ...), the phase-2 loop `StartIdleStance`
+        // (`FistsStartStanceIdle-Left`, `KnivesStartStanceIdle`, ...). JS
+        // `Aua` (L673) keeps the max-`<Priority>` group — `KnivesStartStanceIdle`
+        // (11) beats the universal `FistsStartStanceIdle-Left` (10) exactly as
+        // in the JS — and the `-Left`/`-Right` variant follows the controlled
+        // side within a tie.
+        const std::vector<std::string> stance_templates =
+            intro ? std::vector<std::string>{"StanceLeft", "StanceRight"}
+                  : std::vector<std::string>{"StartIdleStance"};
+        const sf2::scene::MoveDef* idle_move =
+            me.fighter.stance_move(stance_templates, me.is_player);
+        if (idle_move != nullptr) {
+            const std::string& idle_name = idle_move->name;
             sf2::scene::FightContext ctx;
         ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
             ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
@@ -3578,7 +3608,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                                                           : idle_name};
             fill_ctx_geometry(ctx, me, foe);
             ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
-            me.fighter.ai_start_move(idle_it->second, ctx);
+            me.fighter.ai_start_move(*idle_move, ctx);
         }
     }
 
