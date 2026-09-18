@@ -1411,6 +1411,28 @@ void FightController::rules_begin_round(int round) {
     rule_round_ = round > 0 ? round : 1;  // JS `rob` L900
     rule_pending_ = false;
     rules_ = battle_.rules;
+    // JS `dl.jh()` (L1421): the ACTIVE rule list is `p.o.Yh ? this.CV
+    // : this.Ae`, and `dl.OK` (L1423-1424) routes each parsed rule by its
+    // `Lb.mode` (`Lb.MIa` L847: `Eclipse` absent -> 2; `Eclipse="1"` -> 0;
+    // `Eclipse="0"` -> 1):
+    //   mode 0 -> the `CV` (eclipse-only) list; mode 1 -> `Ae` (normal
+    //   list); mode 2 -> both lists.
+    // So an `Eclipse`-tagged rule runs ONLY in its matching eclipse state.
+    // The port parsed `eclipse_mode` but never enforced it, so the BOSS_LYNX
+    // bot's `<Attributes Eclipse="1" WarriorPower="32" ApplyTo="Bot"/>` ran
+    // every round outside the eclipse, adding +32 `UnarmedDamage`/`BodyDefense`
+    // (and every other `v.wv` name) each round. That inflated the defender's
+    // `pAa` `e = defender.attr(defense_attr)` and collapsed the player's
+    // balance term toward 0 (dmg 0.11 -> 0.019 -> 0.0024 -> 0.00).
+    const bool eclipse = fight_params().eclipse;
+    rules_.erase(
+        std::remove_if(rules_.begin(), rules_.end(),
+                       [eclipse](const FightRule& r) {
+                           return !(r.eclipse_mode == 2 ||
+                                    (eclipse ? r.eclipse_mode == 0
+                                             : r.eclipse_mode == 1));
+                       }),
+        rules_.end());
     // JS `du.osb` (L898): `active = kI(cz) && Ti()`. `cz` = the round
     // (`rob(round>0?round:1)` L900, called by `ca.F1` L428 — for round 1 in
     // the ctor and for every `round.round>=2` in `IKa` L417, so every round
