@@ -444,6 +444,13 @@ public:
         if (world_x_ < min_x) world_x_ = min_x;
         if (world_x_ > max_x) world_x_ = max_x;
     }
+    // JS `sI` (L491/L498/L511): the number of landed hits this fighter has
+    // TAKEN (`Bb.ep = (sI==0)` then `sI++`). `ca.Cgb` L396 gates the
+    // Punchbag's forced reaction on `a.model.sI == v.Qxa`
+    // (`<CounterPunches>` = 50, internal_settings.xml; JS L1157).
+    void note_hit_taken() { ++hits_taken_; }
+    int hits_taken() const { return hits_taken_; }
+    int hits_taken_ = 0;  // JS `sI`
     // Clip lookup callback — the demo supplies the archive.
     void set_clip_lookup(const std::function<const sf2::data::anim_clip*(const std::string&)>& fn) {
         clip_lookup_ = fn;

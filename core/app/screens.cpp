@@ -6004,6 +6004,9 @@ void DojoScreen::render_impl(App& app) {
     // the same framing as the location layers.
     sf2::render::Camera hub_cam;
     bool have_hub_cam = false;
+    // The player's live location-space x (JS `Ut.kyb` L825 argument `c.x`):
+    // shared by the hub camera focus and the `arrow` marker.
+    float hub_player_loc_x = 0.0f;
     if (app.has_fight_assets()) {
         FightAssets& assets = app.fight_assets();
         // Hub framing = the LIVE viewer CoM midpoint (JS `Tf.Ea` L1972 runs
@@ -6023,11 +6026,31 @@ void DojoScreen::render_impl(App& app) {
         float focus_x = -1.0f;
         float fighter_span = -1.0f;
         {
-            const float half = assets.dojo.arena_width() * 0.5f;
-            const float player_x = assets.dojo.player_spawn_x() - half;
-            const float enemy_x = assets.dojo.enemy_spawn_x() - half;
-            focus_x = (player_x + enemy_x) * 0.5f + half;
+            // JS `Ut.Al` (L826) recomputes `Io = Lb.width/2 - a.x` EVERY
+            // frame from `a` = `ql`'s `this.Go.ma` (the fighter midpoint, fed
+            // by `ql.d3a` L366 `this.ia.Al(this.Go.ma, ...)`). The hub steps
+            // its live `FightNone` controller (JS `Tf.aa` L1972
+            // `this.YL(this.Ig,a)`), so the midpoint is the live fighter
+            // anchor. `Fighter::world_x()` is the LOCATION-space x (the
+            // controller spawns it `set_world_pos(battle_.player_spawn_x, ..)`,
+            // fight.cpp L1886, and clamps it to the arena walls, L3581) - the
+            // same space `default_camera`'s focus uses.
+            float player_x = assets.dojo.player_spawn_x();
+            float enemy_x = assets.dojo.enemy_spawn_x();
+            if (dojo_fight_ != nullptr) {
+                const float pw = dojo_fight_->player().fighter.world_x();
+                const float ew = dojo_fight_->enemy().fighter.world_x();
+                // Guard the unassigned-anchor case (both zero) the old
+                // `sample`-only path hit; the live controller writes the
+                // spawns via `set_world_pos` on build.
+                if (pw != 0.0f || ew != 0.0f) {
+                    player_x = pw;
+                    enemy_x = ew;
+                }
+            }
+            focus_x = (player_x + enemy_x) * 0.5f;
             fighter_span = std::fabs(enemy_x - player_x);
+            hub_player_loc_x = player_x;
         }
         // Hub framing correction vs the oracle `dojo_hub`/`dojo_menu_open`:
         // the JS `Ut.Al` focus is the raw fighter midpoint (`wd.mea(Rw,pF)`,
@@ -6079,6 +6102,78 @@ void DojoScreen::render_impl(App& app) {
                              -arena_half, cont_y);
             draw_dojo_figure(ren, hub_cam, dojo_fight_->player().fighter, 1.0f,
                              -arena_half, cont_y);
+            // JS `Ut.V0a` (L831) + `Ut.kyb` (L825): the flashing `arrow`
+            // marker (atlas `E.get(268)` = the controller atlas, frame
+            // `y.OQa` = "arrow") is a child of the location `go` node,
+            // centre-anchored (`Rh(.5)`/`mj(.5)`, L831), and placed under the
+            // player every frame:
+            //   x = Io - (Lb.width/2 - c.x)*Bj          (c = the player)
+            //   y = Lb.hn.go.node.translate.y + 2*F9*Bj + 10
+            //   alpha = .5 + .5*sin(pi/ArrowFlashingFrames * $O)   (`kyb` L825)
+            // `F9 = (Lb.height/2 - Lb.ct)/2` (L823), `Bj` = the live layer
+            // zoom (`Ut.xCa` L831 -> `camera.layer_zoom`),
+            // `ArrowFlashingFrames` = `ge.gba` (L1278). Projecting through
+            // `hub_cam` reproduces the `go`-node transform the figures use.
+            {
+                sf2::data::atlas_frame afr;
+                int atw = 0, ath = 0;
+                unsigned int agl = 0;
+                if (app.get_atlas_frame("arrow", &afr, &atw, &ath, &agl)) {
+                    const float f9 = (app.fight_assets().dojo.arena_height() * 0.5f -
+                                      app.fight_assets().dojo.arena_floor()) *
+                                     0.5f;
+                    const float bj = hub_cam.layer_zoom;
+                    // JS `kyb` L825: `y = Lb.hn.go.node.translate.y +
+                    // 2*F9*Bj + 10`. The figures are already projected from
+                    // the models-container origin (their verts carry
+                    // `cont_y`), and `2*F9 = Lb.height/2 - Lb.ct` is that same
+                    // container translate (L823/L843), so the marker's drop
+                    // from the figures' origin is `2*F9*Bj + 10` (the arena
+                    // floor line + 10).
+                    const float arrow_world_y = 2.0f * f9 * bj + 10.0f;
+                    // `world_to_screen_x` takes CONTAINER-space x (the figure
+                    // draw passes `verts - arena_half`), so the location-space
+                    // player x is converted the same way.
+                    const float sx =
+                        hub_cam.world_to_screen_x(hub_player_loc_x - arena_half, 1.0f);
+                    const float sy = hub_cam.world_to_screen_y(arrow_world_y);
+                    const float nat_w = afr.source_w > 0
+                                            ? static_cast<float>(afr.source_w)
+                                            : static_cast<float>(afr.w);
+                    const float nat_h = afr.source_h > 0
+                                            ? static_cast<float>(afr.source_h)
+                                            : static_cast<float>(afr.h);
+                    constexpr float kArrowFlashingFrames = 120.0f;  // `ge.gba` L1278
+                    static int arrow_phase = 0;                      // JS `Ut.$O`
+                    const float alpha =
+                        0.5f + 0.5f * std::sin(3.14159265358979323846f /
+                                               kArrowFlashingFrames *
+                                               static_cast<float>(arrow_phase));
+                    arrow_phase =
+                        (arrow_phase + 1) % static_cast<int>(kArrowFlashingFrames);
+                    // One-shot evidence line (JS `Ut.V0a` L831 / `kyb` L825):
+                    // the marker frame resolved + its projected screen pos.
+                    static bool arrow_logged = false;
+                    if (!arrow_logged) {
+                        arrow_logged = true;
+                        std::fprintf(stdout,
+                                     "[dojo] arrow frame=%dx%d player_loc_x=%.1f -> "
+                                     "screen=(%.1f,%.1f) alpha=%.2f\n",
+                                     static_cast<int>(nat_w), static_cast<int>(nat_h),
+                                     static_cast<double>(hub_player_loc_x),
+                                     static_cast<double>(sx), static_cast<double>(sy),
+                                     static_cast<double>(alpha));
+                        std::fflush(stdout);
+                    }
+                    draw_atlas_region(app, "arrow", static_cast<float>(afr.x),
+                                      static_cast<float>(afr.y),
+                                      static_cast<float>(afr.w),
+                                      static_cast<float>(afr.h),
+                                      static_cast<float>(atw), static_cast<float>(ath), sx,
+                                      sy, nat_w * hub_cam.zoom, nat_h * hub_cam.zoom, alpha,
+                                      /*flip_x=*/false);
+                }
+            }
         }
         draw_dojo_gamepad(app, dojo_pad_);
         // Shared `za` chrome (topPanel + wr/xr/yr widgets + the vertical nav

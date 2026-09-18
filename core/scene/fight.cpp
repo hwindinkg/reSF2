@@ -52,6 +52,12 @@ int hit_effect_run_frames(const std::string& file) {
 constexpr float kFlashTimeCrit = 1.0f / 60.0f;
 constexpr float kFlashTimeNormal = 1.0f / 120.0f;
 
+// `<CounterPunches Value="50"/>` (reference/extracted/xml/res/internal_settings.xml;
+// JS `v.Qxa` L1157 `v.Qxa=u.I(a.A("CounterPunches").attributes.get("Value"),2)`).
+// `ca.Cgb` L396 forces the Punchbag's hit reaction when the defender's hit
+// counter `sI` reaches this cadence.
+constexpr int kCounterPunches = 50;
+
 // The banner machine timings (JS class `Cr` L2022-2027 — all in SECONDS:
 // `Cr.fu(a){this.Sc=a;...}` L2026). The old port used invented frame counts
 // (60 / 40 / 90).
@@ -3176,6 +3182,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     if (!blocked) {
         dga_ = true;
     }
+    // JS `Jma` L511: `Bb.ep = (sI==0); ...; this.sI++` - the defender's
+    // landed-hit counter advances on every resolved hit (blocked or not);
+    // `ca.Cgb` L396 reads it back for the Punchbag reaction cadence.
+    def.fighter.note_hit_taken();
     // Perk trigger bus, hit scope (replaces the direct hook):
     // slot 7 = PostHit at the `Cgb` point (`Sba(a.model,b,7)` — after the
     // R8a/disarm rolls, before `LWa`/damage; SetHit overrides land on the
@@ -3419,6 +3429,27 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         // CriticalEffect/BlockEffect/HitEffect rows evaluate (`sm.he`).
         dispatch_global_triggers("Strike", "Strike");
         dispatch_global_triggers("Hit", "Hit", nullptr, def.is_player ? 0 : 1, &ev);
+    }
+
+    // JS `ca.Cgb` L396 tail (the Punchbag's forced reaction):
+    //   `wa.F().gE() || this.Da.type!="FightNone" || this.Zb.$s!="Punchbag" ||
+    //    a.model.sI != v.Qxa || (this.rwb(), a.model.oa.vc=!0, a.model.V_a());`
+    // `rwb()` (L431) = `this.Ta.DL(this.ZAa(false,false,true))` - force the
+    // `<HitEffects>` "Shock" row (`select_hit_effect(false,false,true)` = the
+    // `ZAa` port, L422) through the camera hit-effect latch. `v.Qxa` =
+    // `kCounterPunches`. `FightNone` is uniquely the dojo Punchbag
+    // (`stages.xml` zone Punchbag node `Training` Type="DUMMY"; JS also
+    // checks `Zb.$s=="Punchbag"`, a fighter label the controller does not
+    // carry). `oa.vc=!0` + `V_a()` (L517) release the model's `Weak="1"`
+    // parts via `kla(false)`; `mdl_punching_bag` (the dojo dummy's Armor)
+    // has NO `Weak` part (only `mdl_skeleton_punching_bag` `Node12` does),
+    // so `V_a()` is unobservable here and is omitted.
+    if (battle_.type == "FightNone" && !def.is_player &&
+        def.fighter.hits_taken() == kCounterPunches) {
+        if (const sf2::scene::HitEffect* forced =
+                sf2::scene::select_hit_effect(false, false, true)) {
+            camera_.apply_hit_effect(*forced);
+        }
     }
 
     // [fx] Hit sparks `ql.Rub`/`Ut.ryb` (JS L369/L824): the burst is spawned
