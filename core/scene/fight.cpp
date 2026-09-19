@@ -121,6 +121,45 @@ void snapshot_capsule_ends(FightFighter& f) {
 // and the shake (d3a + DL) — the oracle capture never triggers the lens
 // (trace zoom=1 throughout) and the shake needs the per-effect
 // trajectory (`em`) configs.
+// JS `ql.Dvb(a)` (L370): `IJ=!0; Bf=a; a.nM<1&&(a.nM=1); a.DS=ia.xCa();
+// a.currentScale=a.DS; a.currentFrame=0; R5=a.jz`. `ia.xCa()` is the layer
+// zoom `Ut.Bj` the port already computes into `zoom_layer`.
+void FightCamera::apply_zoom_effect(int effect_time, float scale) {
+    zoom_effect_active_ = true;                            // `IJ=!0`
+    zoom_effect_time_ = static_cast<float>(effect_time);   // `Bf.jz`
+    zoom_effect_scale_ = scale < 1.0f ? 1.0f : scale;      // `nM` clamp
+    zoom_effect_base_ = zoom_layer;                        // `DS = ia.xCa()`
+    zoom_effect_current_ = zoom_effect_base_;              // `currentScale = DS`
+    zoom_effect_frame_ = 0;                                // `currentFrame = 0`
+    std::fprintf(stdout, "[fx] ZoomEffect latch jz=%d zoomScale=%.3f base=%.3f\n",
+                 effect_time, static_cast<double>(scale),
+                 static_cast<double>(zoom_effect_base_));
+    std::fflush(stdout);
+}
+
+// JS `ql.f3a()` (L367):
+//   a = |Bf.nM - Bf.DS| / (Bf.jz*.5);
+//   Bf.currentFrame <= Bf.jz/2 ? Bf.currentScale -= a (floor Bf.nM)
+//                              : Bf.currentScale += a (ceil Bf.DS);
+//   Bf.currentFrame++.
+void FightCamera::tick_zoom_effect() {
+    if (!zoom_effect_active_) return;
+    const float half = zoom_effect_time_ * 0.5f;
+    const float a = std::fabs(zoom_effect_scale_ - zoom_effect_base_) / half;
+    if (static_cast<float>(zoom_effect_frame_) <= half) {
+        zoom_effect_current_ -= a;
+        if (zoom_effect_current_ < zoom_effect_scale_) {
+            zoom_effect_current_ = zoom_effect_scale_;
+        }
+    } else {
+        zoom_effect_current_ += a;
+        if (zoom_effect_current_ > zoom_effect_base_) {
+            zoom_effect_current_ = zoom_effect_base_;
+        }
+    }
+    ++zoom_effect_frame_;
+}
+
 void FightCamera::framing(float ax, float ay, float bx, float by, float view_w,
                           float view_h) {
     // Wired: the exact JS camera chain lives in fight_camera_sya.hpp
@@ -501,6 +540,18 @@ int FightController::random_sound_index(int n) {
 // StopFollowEffect/TryOnEnd/HitEffect/SetCooldown/ZoomEffect) need the child
 // models / magic-effect containers / perk cooldown timers / intro lens — each
 // is listed with its exact missing subsystem in the follow-up report.
+// JS `sa.HQ(0, name)` (L707) over the `sa.$h` map (L706): the ability-button
+// name -> slot. Absent/unknown -> 0 (`HQ` returns 0).
+static int button_slot(const std::string& name) {
+    if (name == "Punch") return 9;
+    if (name == "Kick") return 10;
+    if (name == "Ranged") return 11;
+    if (name == "Magic") return 12;
+    if (name == "RaidCharge") return 13;
+    if (name == "Super") return 14;
+    return 0;
+}
+
 void FightController::dispatch_move_actions(
     const std::vector<const sf2::scene::MoveAction*>& acts, FightFighter& owner,
     const char* why, const sf2::scene::FightContext& conds) {
@@ -516,7 +567,9 @@ void FightController::dispatch_move_actions(
                              // Child-model kinds (JS `mh`/`Xl`/`$l`): none of
                              // them has an `fka` voice gate.
                              act->kind == "CreatePlayer" || act->kind == "Delete" ||
-                             act->kind == "PlayAnimation";
+                             act->kind == "PlayAnimation" ||
+                             act->kind == "SetCooldown" || act->kind == "ZoomEffect" ||
+                             act->kind == "TryOnEnd";
         if (!sound_kind && !fx_kind) continue;
         // JS `cb.Ti(a,b)` (L724): `if (Fd(this.$c)) return true;` then the
         // `<Conditions>` tree. `$c` empty -> always true.
@@ -565,6 +618,42 @@ void FightController::dispatch_move_actions(
             // `wd.$vb` L520 -> `Pi.dS` L397 `{debugger}`.
             std::fprintf(stdout, "[fx] F%d %s %s EnableBossAbility value=%d (JS Pi.dS no-op)\n",
                          frame_, owner.name.c_str(), why, act->bool_value ? 1 : 0);
+            std::fflush(stdout);
+            continue;
+        }
+        // --- SetCooldown (`bm` L733 -> `wd.Zvb` L520) ----------------------
+        // `slot = sa.HQ(0, Button)` (`sa.$h` L706: Punch 9 / Kick 10 /
+        // Ranged 11 / Magic 12 / RaidCharge 13 / Super 14; unknown -> 0, and
+        // every `wKa`/`b5` case is 9/10/11/14 so 0 is a silent no-op), then
+        // `wKa(slot)` (reset + `yd(slot,0,0)`) and `b5(slot, duration)`
+        // (arm + `yd`). `wd.yJa` (L501) is the availability gate that reads
+        // the armed timers.
+        if (act->kind == "SetCooldown") {
+            const int slot = button_slot(act->button);
+            owner.fighter.ability_cooldown_reset(slot);
+            owner.fighter.ability_cooldown_start(slot, static_cast<float>(act->duration));
+            std::fprintf(stdout,
+                         "[fx] F%d %s %s SetCooldown button='%s' slot=%d duration=%d\n",
+                         frame_, owner.name.c_str(), why, act->button.c_str(), slot,
+                         act->duration);
+            std::fflush(stdout);
+            continue;
+        }
+        // --- ZoomEffect (`km` L737 -> `wd.Yvb` L520 -> `Pi.AS` L424) --------
+        // `Pi.AS(a){this.Ta.Dvb(a.Bf)}` (L424) -> `ql.Dvb` (L370).
+        if (act->kind == "ZoomEffect") {
+            camera_.apply_zoom_effect(act->effect_time, act->zoom_scale);
+            continue;
+        }
+        // --- TryOnEnd (`jm` L737 -> `wd.Vvb` L519 -> `wd.qr`) --------------
+        // `wd.Vvb(){this.qr.Z()}` fires the model's `qr` bus; `Pi.wia`
+        // (L446) relays it to the screen listener `Oa.yS` (L2301:
+        // `Ad.$Ma(); fU(); Oya=!0`) which restores `PeacefulRestore`. The
+        // port's TryOn preview lives in the shop screen (screens.cpp), not a
+        // FightController, so this only records the JS dispatch.
+        if (act->kind == "TryOnEnd") {
+            std::fprintf(stdout, "[fx] F%d %s %s TryOnEnd (wd.Vvb -> qr)\n",
+                         frame_, owner.name.c_str(), why);
             std::fflush(stdout);
             continue;
         }
@@ -1045,7 +1134,11 @@ bool FightController::global_kind_dispatched(const std::string& kind) {
            // StopEffect / StopFollowEffect branches (the global `<Triggers>`
            // ships Effect 39 / StopEffect 39).
            kind == "Effect" || kind == "StopEffect" ||
-           kind == "StopFollowEffect";
+           kind == "StopFollowEffect" ||
+           // JS `bm`/`km`/`jm` (L733/L737): SetCooldown / ZoomEffect /
+           // TryOnEnd — dispatched to the `ju` cooldown state, the `ql` lens
+           // latch and the `wd.qr` TryOn-end record respectively.
+           kind == "SetCooldown" || kind == "ZoomEffect" || kind == "TryOnEnd";
 }
 
 std::size_t FightController::global_action_kinds() const {
@@ -3790,6 +3883,9 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     sf2::scene::ImpulseResult imp;
     // KD=null (no AttackingParts) skips Bl.strike: no knockback.
     if (!ch.kd_null) {
+    // JS `Bl.strike` (L588) top: `this.s2a()` — midpoint-smooth every body
+    // (`mf = (mf+ma)*0.5`) on the struck model before splitting the impulse.
+    def.fighter.strike_midpoint_smooth();
     const float new_x =
         sf2::scene::apply_impulse(hit_cap, ch, impulse, def.fighter.world_x(),
                                   wall_min_, wall_max_, imp);
@@ -4540,6 +4636,12 @@ void FightController::update(float dt) {
     // clips + fire their own `AnimationEnd` actions. Presentation only.
     update_children();
     camera_.tick_hit_effect();
+    // JS `ql.f3a()` (L367) — the intro-lens ease (part of the camera update
+    // chain `ql.dZa`->`tyb`->`dZa`->`c3a`->`d3a`->`f3a`, L369).
+    camera_.tick_zoom_effect();
+    // JS `wd.MOa()` (L532): `ca.Ka()` (the player) advances its ability
+    // cooldowns when `ca.Ka().eu == 2`. `v.on()` = 1 here.
+    player_.fighter.tick_ability_cooldowns(1.0f);
     if (battle_over_) return;
 
     // The K.O. slow-mo beat (JS: the KO freeze): the first 30 frames of

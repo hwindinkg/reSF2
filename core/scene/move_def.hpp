@@ -360,6 +360,19 @@ struct MoveAction {
     std::string child_name;   // `$l.cxa` (<PlayAnimation ChildName>)
     std::string animation;    // `$l.ova` (<PlayAnimation Animation>)
     bool force_play = false;  // `$l.r4a` (<PlayAnimation ForcePlay>)
+    // --- SetCooldown (`bm` L733, type 12) --------------------------------
+    // `bm.parse`: `this.duration = u.I(Duration)` and `this.Av = Button ?? ""`.
+    // `wd.Zvb` (L520): `slot = sa.HQ(0, Av)` (the `$h` button map:
+    // Punch 9 / Kick 10 / Ranged 11 / Magic 12 / RaidCharge 13 / Super 14),
+    // then `wKa(slot)` (reset) + `b5(slot, duration)` (arm). `yJa` (L501) is
+    // the availability gate that reads the armed timers.
+    int duration = 0;          // `bm.duration` (<SetCooldown Duration>)
+    std::string button;        // `bm.Av` (<SetCooldown Button>)
+    // --- ZoomEffect (`km` L737, type 11) ---------------------------------
+    // `km.parse`: `this.Bf = new Wu` then `Bf.jz = u.I(EffectTime)` (reuses
+    // `effect_time`) and `Bf.nM = u.H(ZoomScale)`. `wd.Yvb` (L520) hands
+    // `Bf` to the camera `ql.Dvb` (L370).
+    float zoom_scale = 0.0f;   // `Bf.nM` (<ZoomEffect ZoomScale>)
 };
 
 // One child of the root `<Triggers>` block (JS `Fa.Exb` L708 ->

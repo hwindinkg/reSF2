@@ -53,7 +53,12 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
     }
     const float n_c = view_w / (view_h / cam.arena_h);  // mwa: nC = b/Ira
     cam.zoom_layer = std::min(1.0f, n_c / (span + 300.0f));  // Ut.xCa() -> Bj
-    const float e = cam.arena_h * cam.zoom_layer;       // m$a() = Lb.height*Bj
+    // JS `ql.c3a` (L365): `ia.Al(..., this.IJ ? this.Bf.currentScale : 0)` —
+    // while the intro lens is live (`IJ`) it supplies the layer scale in
+    // place of `Bj`. `cam.zoom_layer` stays the RAW Bj for the pano clamp.
+    const float layer_eff =
+        cam.zoom_effect_active_ ? cam.zoom_effect_current_ : cam.zoom_layer;
+    const float e = cam.arena_h * layer_eff;            // m$a() = Lb.height*Bj
     float f = view_h / e;
     f *= (aspect < 0.45f ? 0.45f : aspect > 1.0f ? 1.0f : aspect);  // c<.45?.45:c>1?1:c
     if (aspect < 0.8f) {

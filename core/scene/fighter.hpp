@@ -557,6 +557,52 @@ public:
     // the next frame's hit capsules via positions() (emergent correctness).
     void add_knockback(int bone, const sf2::scene::Vec3& v);
 
+    // --- JS `ju` (g="D3" L545) — `wd.Ja`, the ability cooldown/reload state --
+    // Slots (`sa.$h` L706): Punch 9, Kick 10, Ranged 11, Magic 12,
+    // RaidCharge 13, Super 14. Only 9/10/11/14 carry timers (`wKa`/`b5`/`MOa`
+    // L523-533). Field names keep the JS minified names for the cite.
+    struct AbilityCooldown {
+        float super_reload_ = 500.0f;  // `UNa`
+        float super_target_ = 1.0f;    // `pU`
+        float kick_reload_ = 0.0f;     // `hFa`
+        float super_elapsed_ = 0.0f;   // `iu`
+        float kick_target_ = 1.0f;     // `DR`
+        float punch_reload_ = 0.0f;    // `rlb`
+        float kick_elapsed_ = 0.0f;    // `eA`
+        float punch_target_ = 1.0f;    // `aT`
+        float ranged_reload_ = 0.0f;   // `wGa`
+        float punch_elapsed_ = 0.0f;   // `JA`
+        float ranged_target_ = 1.0f;   // `TR`
+        float punch_duration_ = 0.0f;  // `teb`
+        float ranged_elapsed_ = 0.0f;  // `mA`
+        bool super_active_ = true;     // `oU`
+        bool ranged_active_ = false;   // `SR`
+        bool punch_active_ = false;    // `m4`
+        bool kick_active_ = false;     // `i2`
+    };
+    AbilityCooldown ability_cooldowns_;  // JS `wd.Ja` (`new ju`, L491)
+    // JS `wd.wKa(a)` (L523): reset the slot's cooldown (inactive + elapsed 0)
+    // and emit the ability-animation event `yd(slot, 0, 0)` onto `this.yp`
+    // (the port has no ability-animation bus — it logs).
+    void ability_cooldown_reset(int slot);
+    // JS `wd.b5(a, b)` (L524): arm the slot's cooldown for `b` (`b <= 0 -> 1`).
+    void ability_cooldown_start(int slot, float duration);
+    // JS `wd.MOa()` (L532-533), once per fight frame: advance each live
+    // cooldown and emit `yd(slot, elapsed, 1)`. `game_speed` is `v.on()`
+    // (the JS global time-scale; the port passes the fight frame speed).
+    void tick_ability_cooldowns(float game_speed);
+    // The cooldown terms of the JS `wd.yJa(a)` availability gate (L501):
+    //   `a==11 && SR && mA<TR` / `a==10 && i2 && eA<DR` /
+    //   `a==9 && m4 && JA<aT` / `a==14 && iu<pU`.
+    // True while the named slot's cooldown is still running. `yJa`'s other
+    // terms (`bh`/`$aa` magic gate, `sN`, `Kl.Sgb`) have no port consumer.
+    bool ability_cooldown_running(int slot) const;
+
+    // JS `Bl.s2a()` (L588) — the pre-strike midpoint smoothing: for every
+    // solver body, `mf = (mf + ma) * 0.5` (per x,y,z). `Bl.strike` calls it
+    // before splitting the impulse onto the hit bodies.
+    void strike_midpoint_smooth();
+
     // Fills `out` with the triangle vertex list (screen-space x,y pairs, z
     // dropped). Returns the vertex count (3 * triangle count).
     std::size_t build_vertices(std::vector<float>& out) const;

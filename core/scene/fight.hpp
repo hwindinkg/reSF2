@@ -1126,6 +1126,23 @@ struct FightCamera {
     int hit_stop_frames() const { return pause_frames_; }
     bool hit_stop_active() const { return pause_active_; }
 
+    // --- JS `ql` intro-lens (class `Wu` L1223; `ql.Dvb` L370 / `ql.f3a` L367)
+    // The `km` ZoomEffect (L737) carries a `Wu` (`Bf`) whose `jz` = EffectTime
+    // and `nM` = ZoomScale. `wd.Yvb` (L520) -> `Pi.AS` (L424 `Ta.Dvb(a.Bf)`)
+    // -> `ql.Dvb` (L370). `f3a` (L367) eases `currentScale` down to `nM` over
+    // the first half of `jz` then back up to `DS`; `c3a` (L365) feeds the live
+    // `currentScale` into `Ut.Al` in place of the layer zoom `Bj`.
+    bool zoom_effect_active_ = false;   // `IJ`
+    float zoom_effect_time_ = 0.0f;     // `Bf.jz`
+    float zoom_effect_scale_ = 0.0f;    // `Bf.nM` (clamped >= 1 at latch)
+    float zoom_effect_base_ = 0.0f;     // `Bf.DS` (`ia.xCa()` at latch)
+    float zoom_effect_current_ = 0.0f;  // `Bf.currentScale`
+    int zoom_effect_frame_ = 0;         // `Bf.currentFrame`
+    // JS `ql.Dvb(a)` (L370): latch the lens.
+    void apply_zoom_effect(int effect_time, float scale);
+    // JS `ql.f3a()` (L367): advance the eased `currentScale` one frame.
+    void tick_zoom_effect();
+
     // Recomputes center/zoom from the two fighters' world COM positions
     // (JS `Eu.ma` — the native fighter world_x/world_y anchors) and the
     // view size. An exact port of the JS camera chain (see the struct

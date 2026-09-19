@@ -553,6 +553,112 @@ void Fighter::add_knockback(int bone, const sf2::scene::Vec3& v) {
         kb_[static_cast<std::size_t>(bone)] + v;
 }
 
+// JS `wd.wKa(a)` (L523) — reset the slot's cooldown. Emits `yd(slot,0,0)`.
+void Fighter::ability_cooldown_reset(int slot) {
+    switch (slot) {
+        case 9:  ability_cooldowns_.punch_active_ = false;  ability_cooldowns_.punch_elapsed_ = 0.0f;  break;
+        case 10: ability_cooldowns_.kick_active_ = false;   ability_cooldowns_.kick_elapsed_ = 0.0f;   break;
+        case 11: ability_cooldowns_.ranged_active_ = false; ability_cooldowns_.ranged_elapsed_ = 0.0f; break;
+        case 14: ability_cooldowns_.super_active_ = false;  ability_cooldowns_.super_elapsed_ = 0.0f;  break;
+        default: break;  // JS: no case -> no-op
+    }
+    if (slot == 9 || slot == 10 || slot == 11 || slot == 14) {
+        std::fprintf(stdout, "[cd] wKa slot=%d emit yd(%d,0,0)\n", slot, slot);
+        std::fflush(stdout);
+    }
+}
+
+// JS `wd.b5(a, b)` (L524) — arm the slot's cooldown.
+void Fighter::ability_cooldown_start(int slot, float duration) {
+    if (duration <= 0.0f) duration = 1.0f;  // `b<=0&&(b=1)`
+    switch (slot) {
+        case 9:  ability_cooldowns_.punch_active_ = true;  ability_cooldowns_.punch_duration_ = duration; break;
+        case 10: ability_cooldowns_.kick_active_ = true;   ability_cooldowns_.kick_reload_ = duration;   break;
+        case 11: ability_cooldowns_.ranged_active_ = true; ability_cooldowns_.ranged_reload_ = duration; break;
+        case 14: ability_cooldowns_.super_active_ = true;  ability_cooldowns_.super_reload_ = duration;  break;
+        default: break;
+    }
+    if (slot == 9 || slot == 10 || slot == 11 || slot == 14) {
+        std::fprintf(stdout, "[cd] b5 slot=%d duration=%.3f active\n", slot,
+                     static_cast<double>(duration));
+        std::fflush(stdout);
+    }
+}
+
+// JS `wd.MOa()` (L532-533): advance the live cooldowns one frame. The `!=`
+// guards on 9/10/11 and the `<` on 14 are load-bearing (they suppress the
+// emit once the timer reaches its target / clears `oU`).
+void Fighter::tick_ability_cooldowns(float game_speed) {
+    AbilityCooldown& cd = ability_cooldowns_;
+    auto step = [game_speed](float target, float reload) {
+        const float denom = reload * game_speed;
+        if (denom == 0.0f) return std::numeric_limits<float>::infinity();
+        return target / denom;
+    };
+    // The JS emit `yd(slot, elapsed, 1)` fires every frame onto `this.yp`
+    // (the ability-animation bus the port does not have), so only the
+    // transition to ready is logged — a per-frame print would flood the
+    // capture/trace output (the Super charge runs 500 frames at fight start).
+    if (cd.punch_active_ && cd.punch_elapsed_ != cd.punch_target_) {
+        cd.punch_elapsed_ += step(cd.punch_target_, cd.punch_reload_);
+        if (cd.punch_elapsed_ > cd.punch_target_) cd.punch_elapsed_ = cd.punch_target_;
+        if (cd.punch_elapsed_ == cd.punch_target_) {
+            std::fprintf(stdout, "[cd] MOa slot=9 ready (yd(9,%.3f,1))\n",
+                         static_cast<double>(cd.punch_elapsed_));
+            std::fflush(stdout);
+        }
+    }
+    if (cd.kick_active_ && cd.kick_elapsed_ != cd.kick_target_) {
+        cd.kick_elapsed_ += step(cd.kick_target_, cd.kick_reload_);
+        if (cd.kick_elapsed_ > cd.kick_target_) cd.kick_elapsed_ = cd.kick_target_;
+        if (cd.kick_elapsed_ == cd.kick_target_) {
+            std::fprintf(stdout, "[cd] MOa slot=10 ready (yd(10,%.3f,1))\n",
+                         static_cast<double>(cd.kick_elapsed_));
+            std::fflush(stdout);
+        }
+    }
+    if (cd.ranged_active_ && cd.ranged_elapsed_ != cd.ranged_target_) {
+        cd.ranged_elapsed_ += step(cd.ranged_target_, cd.ranged_reload_);
+        if (cd.ranged_elapsed_ > cd.ranged_target_) cd.ranged_elapsed_ = cd.ranged_target_;
+        if (cd.ranged_elapsed_ == cd.ranged_target_) {
+            std::fprintf(stdout, "[cd] MOa slot=11 ready (yd(11,%.3f,1))\n",
+                         static_cast<double>(cd.ranged_elapsed_));
+            std::fflush(stdout);
+        }
+    }
+    if (cd.super_active_ && cd.super_elapsed_ < cd.super_target_) {
+        cd.super_elapsed_ += step(cd.super_target_, cd.super_reload_);
+        if (cd.super_elapsed_ > cd.super_target_) cd.super_elapsed_ = cd.super_target_;
+        if (cd.super_elapsed_ >= cd.super_target_) {
+            cd.super_active_ = false;
+            std::fprintf(stdout, "[cd] MOa slot=14 ready (yd(14,%.3f,1))\n",
+                         static_cast<double>(cd.super_elapsed_));
+            std::fflush(stdout);
+        }
+    }
+}
+
+bool Fighter::ability_cooldown_running(int slot) const {
+    const AbilityCooldown& cd = ability_cooldowns_;
+    switch (slot) {
+        case 9:  return cd.punch_active_ && cd.punch_elapsed_ < cd.punch_target_;
+        case 10: return cd.kick_active_ && cd.kick_elapsed_ < cd.kick_target_;
+        case 11: return cd.ranged_active_ && cd.ranged_elapsed_ < cd.ranged_target_;
+        case 14: return cd.super_elapsed_ < cd.super_target_;
+        default: return false;
+    }
+}
+
+// JS `Bl.s2a()` (L588): `for each body c: c.mf = (c.mf + c.ma) * 0.5`. The
+// port's solver state is `sol_ma_` (JS `Vc.ma`) / `sol_mf_` (JS `Vc.mf`),
+// stride 3 (x,y,z) over the model bone count.
+void Fighter::strike_midpoint_smooth() {
+    if (!solver_init_ || sol_ma_.size() != sol_mf_.size()) return;
+    for (std::size_t i = 0; i < sol_ma_.size(); ++i) {
+        sol_mf_[i] = (sol_mf_[i] + sol_ma_[i]) * 0.5f;
+    }
+}
+
 void Fighter::clear_intervals(int type, const std::string& name) {    if (current_move_ == nullptr) {
         active_intervals_.clear();
         return;

@@ -497,6 +497,23 @@ void parse_action(pugi::xml_node node, MoveAction& out) {
     if (out.kind == "Delete") {
         return;
     }
+    // `bm` (SetCooldown, L733): `duration = u.I(Duration)`; `Button` -> `Av`.
+    if (out.kind == "SetCooldown") {
+        out.duration = data::xml_attr_int(node, "Duration", 0);
+        if (pugi::xml_attribute b = node.attribute("Button")) out.button = b.value();
+        return;
+    }
+    // `km` (ZoomEffect, L737): `Bf.jz = u.I(EffectTime)`, `Bf.nM = u.H(ZoomScale)`.
+    if (out.kind == "ZoomEffect") {
+        out.effect_time = data::xml_attr_int(node, "EffectTime", 0);
+        out.zoom_scale = data::xml_attr_float(node, "ZoomScale", 0.0f);
+        return;
+    }
+    // `jm` (TryOnEnd, L737): `super.parse(a)` only — the base parse already
+    // read `Frame`/`Event`/`Player`/`<Conditions>`.
+    if (out.kind == "TryOnEnd") {
+        return;
+    }
     // Every other kind: keep the Name attr when present (informational; the
     // kind is parsed data until its consumer system is ported).
     if (pugi::xml_attribute n = node.attribute("Name")) out.name = n.value();
