@@ -752,6 +752,11 @@ private:
     // wearing `it` and load the item's `TryOn` move clip. Preview-owned
     // storage; no shared asset is touched.
     void arm_preview(App& app, const CatalogItem& it);
+
+    // `Ne.ZYa` L2251 (`Pa.iwa(this.Ch) && p.o.xa.$o(this.Ch,!0)`) = the shop's
+    // BUY + EQUIP at the `M8` price plate, gated by `Pa.iwa` L1228
+    // (`p.o.Tb >= a.jp()`, else `v.Bv(a,2)`). Returns true when accepted.
+    bool purchase_price_plate(App& app, const CatalogItem& bit);
 };
 
 // The Profile — native `vb` (JS L2189-2201, `dJ()==7`): a tabbed screen with

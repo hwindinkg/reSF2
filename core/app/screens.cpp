@@ -9413,6 +9413,71 @@ void ShopScreen::arm_preview(App& app, const CatalogItem& it) {
     std::fflush(stdout);
 }
 
+// Defined further below, with the other shop slot statics.
+void shop_apply_slot(WarriorSave& w, const std::string& type, const std::string& name);
+
+// `Ne.ZYa` L2251 (`Pa.iwa(this.Ch) && p.o.xa.$o(this.Ch,!0), this.Sr()`) =
+// the shop's BUY + EQUIP at the `M8` GoldButton, gated by `Pa.iwa` L1228
+// (`p.o.Tb >= a.jp()`; else `v.Bv(a,2)` = the "not enough" notice). The timed
+// `Ec` branch (`d=Pa.y2a(a)`) leaves the grant flag unset, so the `$o` equip
+// is skipped for a not-yet-delivered order.
+bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
+    WarriorSave bw;
+    try {
+        bw = app.save().load();
+    } catch (const std::exception&) {
+        return false;
+    }
+    if (bw.money < bit.price) {
+        // `Pa.iwa` L1228 else: `v.Bv(a,2)` — the "not enough" notice.
+        std::fprintf(stdout,
+                     "[shop] Pi confirm Pa.iwa v.Bv(a,2): NOT ENOUGH MONEY for %s "
+                     "(need %d, have %d)\n",
+                     bit.name.c_str(), bit.price, bw.money);
+        std::fflush(stdout);
+        return false;
+    }
+    bw.money -= bit.price;
+    sf2::audio::AudioEngine::instance().play("snd_buy");
+    if (bit.delivery_sec > 0) {
+        // `Pa.iwa` L1228: `a.Ec>0 ? d=Pa.y2a(a)` — the timed order leaves the
+        // grant flag false, so the `$o` equip after `Pa.iwa` is SKIPPED.
+        bw.timers[bit.name] = WarriorSave::wall_now() + bit.delivery_sec;
+        app.save().save(bw);
+        seen_ = bw;
+        confirm_ = "ORDERED " + item_display_name(app, bit) + "!";
+        confirm_until_ = time() + 2.5f;
+        std::fprintf(stdout,
+                     "[shop] Pi confirm Pa.iwa (Ec) -> ORDERED %s price=%d -> "
+                     "arrives in %ds (no equip)\n",
+                     bit.name.c_str(), bit.price, bit.delivery_sec);
+        std::fflush(stdout);
+        return true;
+    }
+    WarriorSave::OwnedItem oi;
+    oi.name = bit.name;
+    oi.count = 1;
+    shop_apply_slot(bw, bit.type, bit.name);
+    oi.equipped = true;
+    const bool tut_buy =
+        bit.name == "WEAPON_KNIVES" &&
+        (bw.story_step() == "STEP_BUY_ITEM" ||
+         (bw.story_step().empty() && bw.tutorial == "MOVE"));
+    if (tut_buy) bw.set_story_step("MAP");
+    bw.items.push_back(oi);
+    app.save().save(bw);
+    seen_ = bw;
+    confirm_ = "BOUGHT " + item_display_name(app, bit) + "!";
+    confirm_until_ = time() + 2.5f;
+    std::fprintf(stdout,
+                 "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%d -> money %d"
+                 " + EQUIPPED ($o)%s\n",
+                 bit.name.c_str(), bit.price, bw.money,
+                 tut_buy ? ", step -> MAP (Ao)" : "");
+    std::fflush(stdout);
+    return true;
+}
+
 // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width bar
 // `height = za.Sp*1.2` with `Le` buttons (id 248 shop atlas) scaled to the
 // bar height and laid left->right (spacing factor 1.2 at lc>1.2), centred.
@@ -9736,69 +9801,12 @@ void ShopScreen::update_impl(float dt) {
                 return;
             }
             if (on_confirm && p.pressed) {
-                WarriorSave bw;
-                try {
-                    bw = app().save().load();
-                } catch (const std::exception&) {
-                    return;
-                }
-                if (bw.money >= bit.price) {
-                    // `Pa.iwa` L1228 head: `p.o.Fr(Tb - jp())` + `p.o.save()`
-                    // + `Pa.Wz(a)`; `rb.U3()` = snd_buy (L1226). The grant is
-                    // followed by the equip (`ZYa` L2251 / `Ao.Qg` L1120:
-                    // `Pa.iwa(b) && p.o.xa.$o(b,!0)`) — a purchase ALWAYS
-                    // wears the item, not only the tutorial buy.
-                    bw.money -= bit.price;
-                    sf2::audio::AudioEngine::instance().play("snd_buy");
-                    if (bit.delivery_sec > 0) {
-                        // `Pa.iwa` L1228: `a.Ec>0 ? d=Pa.y2a(a)` — the timed
-                        // order leaves the grant flag `c` false, so the `$o`
-                        // equip after `Pa.iwa` is SKIPPED (a not-yet-delivered
-                        // item is not worn).
-                        bw.timers[bit.name] = WarriorSave::wall_now() + bit.delivery_sec;
-                        app().save().save(bw);
-                        seen_ = bw;
-                        confirm_ = "ORDERED " + item_display_name(app(), bit) + "!";
-                        confirm_until_ = time() + 2.5f;
-                        std::fprintf(stdout,
-                                     "[shop] Pi confirm Pa.iwa (Ec) -> ORDERED %s price=%d -> "
-                                     "arrives in %ds (no equip)\n",
-                                     bit.name.c_str(), bit.price, bit.delivery_sec);
-                        std::fflush(stdout);
-                        buy_armed_ = -1;
-                        return;
-                    }
-                    WarriorSave::OwnedItem oi;
-                    oi.name = bit.name;
-                    oi.count = 1;
-                    shop_apply_slot(bw, bit.type, bit.name);
-                    oi.equipped = true;
-                    const bool tut_buy =
-                        bit.name == "WEAPON_KNIVES" &&
-                        (bw.story_step() == "STEP_BUY_ITEM" ||
-                         (bw.story_step().empty() && bw.tutorial == "MOVE"));
-                    if (tut_buy) bw.set_story_step("MAP");
-                    bw.items.push_back(oi);
-                    app().save().save(bw);
-                    seen_ = bw;
-                    confirm_ = "BOUGHT " + item_display_name(app(), bit) + "!";
-                    confirm_until_ = time() + 2.5f;
-                    std::fprintf(stdout,
-                                 "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%d -> money %d"
-                                 " + EQUIPPED ($o)%s\n",
-                                 bit.name.c_str(), bit.price, bw.money,
-                                 tut_buy ? ", step -> MAP (Ao)" : "");
-                    std::fflush(stdout);
+                // `Pa.iwa` L1228 head + `ZYa` L2251 (`p.o.xa.$o(b,!0)`):
+                // deduct, grant + equip, save. A shortfall (`v.Bv(a,2)`) keeps
+                // the panel open so the player can back out or earn gold.
+                if (purchase_price_plate(app(), bit)) {
                     buy_armed_ = -1;
-                    return;
                 }
-                // `Pa.iwa` L1228 else: `v.Bv(a,2)` — the "not enough" notice.
-                // The panel STAYS open (the player can back out or earn gold).
-                std::fprintf(stdout,
-                             "[shop] Pi confirm Pa.iwa v.Bv(a,2): NOT ENOUGH MONEY for %s "
-                             "(need %d, have %d)\n",
-                             bit.name.c_str(), bit.price, bw.money);
-                std::fflush(stdout);
                 return;
             }
         }
@@ -10013,6 +10021,29 @@ void ShopScreen::update_impl(float dt) {
             }
         }
     }
+    // `Ne.ZYa` (L2251) -> `Pa.iwa` (L1228) + `p.o.xa.$o(b,!0)`: the `M8`
+    // price plate is the shop's BUY control. An UNARMED press on it buys +
+    // equips the selected UNOWNED item directly — the `Up` TRY press (which
+    // opens the `Pi` preview panel) is NOT a prerequisite. Owned items are
+    // left to the TRY/EQUIP plate (`xa.$o`/`Qxb`), so a re-press stays inert.
+    if (buy_armed_ < 0 && !rows.empty()) {
+        const ShopRect pr = shop_price_rect(sl);
+        if (p.pressed && p.x >= pr.J && p.x <= pr.N && p.y >= pr.P && p.y <= pr.W) {
+            const int psel = std::clamp(sel_, 0, static_cast<int>(rows.size()) - 1);
+            const CatalogItem& pit = items_[rows[static_cast<std::size_t>(psel)]];
+            WarriorSave pw;
+            bool powned = false;
+            try {
+                pw = app().save().load();
+                powned = shop_owned_live(pw, pit.name);
+            } catch (const std::exception&) {
+                return;
+            }
+            if (!powned) {
+                purchase_price_plate(app(), pit);
+            }
+        }
+    }
     // Shared `za` nav column (JS `ma.D1` L1831): `D1` destroys the live `za`
     // and re-appends a FRESH one (`this.kA=this.Qo(za)`), whose `gk` nav scroll
     // ctor starts COLLAPSED (`collapse(0)`, L1978). So on entering the Shop the
@@ -10022,12 +10053,23 @@ void ShopScreen::update_impl(float dt) {
     // `dojo_hub` wall (no 0.5 dim), vs the port's 0.5-dimmed, icon-column
     // capture. `force_collapsed` = the Map/Profile precedent
     // (screens.cpp:4623 / 8731), both already oracle-matched.
-    // TryOn playback (`Oa.Fhb` L2300 -> `iz.XBa("TryOn")=7`): advance the
-    // preview clip one frame per tick and hold on the last (the JS ends the
-    // clip on `TryOnEnd`/AnimationEnd, moves.xml L1454 etc.).
-    if (preview_active_ && preview_clip_ != nullptr && !preview_clip_->frames.empty() &&
-        preview_frame_ + 1 < static_cast<int>(preview_clip_->frames.size())) {
-        ++preview_frame_;
+    // TryOn playback (`Oa.Fhb` L2300 -> `iz.XBa("TryOn")=7`). The JS ENDS the
+    // clip at `TryOnEnd` (the `Em` action L755 tests `Je==7 && Name=="TryOn"`)
+    // and `Pi.wia` (L446 `this.qr.Z()`) fires that clip-end into `Oa.yS`
+    // (L2301 `Ad.$Ma(); fU(); Oya=!0`) -> `Oa.aa` (L2293
+    // `Oya&&(Oya=!1,Ex(null,6))`) which restores `PeacefulRestore`
+    // (`iz.XBa("PeacefulRestore")=6`). So the preview RETURNS TO THE IDLE after
+    // the last frame — it must NOT freeze on the TryOn end pose (the helm
+    // clip ends lowered, which read as "dropped + stuck").
+    if (preview_active_ && preview_clip_ != nullptr && !preview_clip_->frames.empty()) {
+        if (preview_frame_ + 1 < static_cast<int>(preview_clip_->frames.size())) {
+            ++preview_frame_;
+        } else {
+            preview_active_ = false;
+            preview_fighter_.reset();
+            preview_clip_ = nullptr;
+            preview_frame_ = 0;
+        }
     }
     // Display-only: `g_za_nav_open` is left intact so the Dojo keeps its column.
     za_update(app(), *this, kScreenShop, /*force_collapsed=*/true);
