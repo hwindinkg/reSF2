@@ -32,6 +32,9 @@ Bone parse_bone(const pugi::xml_node& node) {
     b.cloth = sf2::data::xml_attr_bool(node, "Cloth", false);
     b.attenuation = sf2::data::xml_attr_float(node, "Attenuation", 0.0f);
     b.fixed = sf2::data::xml_attr_bool(node, "Fixed", false);
+    // JS `Yc.Ijb` L572: `d.UEa=u.ka(b.attributes.get("Weak"))` - the node's
+    // `V_a()` release flag (`mdl_skeleton_punching_bag` Node12 `Weak="1"`).
+    b.weak = sf2::data::xml_attr_bool(node, "Weak", false);
     return b;
 }
 

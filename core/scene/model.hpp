@@ -38,6 +38,11 @@ struct Bone {
     bool cloth = false;
     float attenuation = 0.0f;
     bool fixed = false;
+    // `Weak="1"` (`Vc.UEa`, JS `Yc.Ijb` L572 `d.UEa=u.ka(b.attributes.get("Weak"))`):
+    // a node released by `V_a()` (L517 `c.UEa&&c.kla(!1)` -> `MG=false`) on a
+    // landed hit. `mdl_skeleton_punching_bag` Node12 is the only shipped Weak
+    // node (`Weak="1" Fixed="1"`); the Punchbag's forced reaction calls it.
+    bool weak = false;
 };
 
 // One mesh triangle: the three referenced bone NAMES. The game resolves

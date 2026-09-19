@@ -4174,6 +4174,13 @@ struct BattleWarriorInfo {
     // `Default` template (`Default` ships `Voice="Male"`, stages.xml).
     std::string voice;
     std::string player_voice;
+    // The battle's `<Battle Type="KIND">` stages.xml token (raw: "DUMMY" /
+    // "BOSSES" / "SURVIVAL" / ...) and its mapped fight type (JS `p.Wab`
+    // L181-183 via `b0` L180, stamped by `Lc.pkb` L1407 `this.type=b0(a)`).
+    std::string kind;
+    // Default matches JS `b0` (L180): a missing/unknown kind maps to
+    // "FightNone", so an unresolved battle never yields an empty type.
+    std::string type = "FightNone";
 };
 
 // `StageWarrior::Delta` -> `damage.hpp` `AlignDelta` (same fields, float).
@@ -4232,6 +4239,12 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
             }
         }
         if (!battle) return out;
+        // JS `Lc.pkb` L1407: `this.type = p.F().b0(a)` where `a` is the
+        // battle's `<Battle Type>` attribute -> the RAW KIND plus its mapped
+        // fight type (`p.Wab` L181-183). Every `Da.type` consumer checks the
+        // MAPPED value, never the raw token.
+        out.kind = battle.attribute("Type").value();
+        out.type = sf2::scene::battle_type_for_kind(out.kind);
         // The Nth `<Fight>` (JS `lD`: one `jk` roster entry per boss-fight).
         pugi::xml_node fight;
         {
@@ -5112,7 +5125,11 @@ void DojoScreen::build_dojo_fight(App& app) {
 
     sf2::scene::BattleParams battle;
     battle.name = battle_name;
-    battle.type = "FightNone";  // JS `p.Wab` DUMMY -> FightNone (FLOW_STATIC)
+    battle.type = bw.type;  // JS `Lc.pkb` L1407 `b0(<Battle Type>)`: the dojo
+                            // `Training` is Type="DUMMY" -> stays "FightNone"
+    std::fprintf(stdout, "[dojo] battle type: %s kind='%s' -> type=%s\n",
+                 battle_name.c_str(), bw.kind.c_str(), battle.type.c_str());
+    std::fflush(stdout);
     battle.location = "dojo";
     battle.rounds = 2;
     battle.round_time = 99;
@@ -7165,7 +7182,20 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
 
     sf2::scene::BattleParams battle;
     battle.name = battle_name_;
-    battle.type = "FightNone";
+    // JS `Lc.pkb` L1407: the fight type comes from the battle's `<Battle
+    // Type>` KIND via `p.Wab`/`b0` (L180-183) - NOT a hardcoded "FightNone".
+    // Hardcoding it made every non-DUMMY battle (BOSS_LYNX Type="BOSSES" ->
+    // "FightBosses", Survival -> "FightSurvival", QuestBattle / Stranger
+    // Type="HIDDEN" -> "FightUnregister", ...) read as FightNone on the
+    // `e$a`/`kg`/`aM` paths and in the `lm` ERuleBattleType rule.
+    {
+        const BattleWarriorInfo btype =
+            battle_warrior(battle_name_, app().pending_battle().zone);
+        battle.type = btype.type;
+        std::fprintf(stdout, "[fight] battle type: %s kind='%s' -> type=%s\n",
+                     battle_name_.c_str(), btype.kind.c_str(), battle.type.c_str());
+        std::fflush(stdout);
+    }
     battle.location = location_;
     battle.rounds = 2;
     battle.round_time = 99;

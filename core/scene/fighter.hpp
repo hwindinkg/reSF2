@@ -530,6 +530,18 @@ public:
     const Model& model() const { return model_; }
     const std::vector<float>& positions() const { return pos_; }  // x,y pairs
 
+    // JS `oa.V_a()` (L517): releases the model's `Weak="1"` figures -
+    // `let a=0,b=this.oa.Va.all;for(;a<b.length;){let c=b[a];++a;c.UEa&&c.kla(!1)}`
+    // i.e. every node carrying `Vc.UEa` gets `kla(false)` -> `MG=false`
+    // (`kla(a){this.NG=(this.MG=a)||!this.nh}`, L795). The only shipped Weak
+    // node is `mdl_skeleton_punching_bag` Node12 (`Weak="1" Fixed="1"`); the
+    // Punchbag's forced reaction calls it (JS `ca.Cgb` L396 tail, fight.cpp).
+    void release_weak() {
+        for (Bone& b : model_.bones) {
+            if (b.weak) b.fixed = false;
+        }
+    }
+
     // Per-bone knockback offsets (JS `Bl.strike` L582 moves the hit
     // capsule's endpoint BODIES, not the whole fighter). `add_knockback`
     // accumulates the impulse-split vector onto a bone; the offsets ride on

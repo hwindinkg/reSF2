@@ -3496,13 +3496,18 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // flag `wd.vc` the port keeps as `FightFighter::shock.shocked_vc`
     // (JS `Cgb` L394 `Ub&&(a.model.vc?...:a.model.vc=!0)`). `V_a()` (L517:
     // `let a=0,b=this.oa.Va.all; ... c.UEa&&c.kla(!1)`) releases the model's
-    // `Weak="1"` figures. The NotAnimation dummy DOES wear
-    // `SkeletonPunchingBag` (`stages.xml` L15; model merge in the FightScreen
-    // ctor keeps `assets.merged_bag`), whose Node12 carries `Weak`
-    // (MODEL_FORMAT §, JS `UEa` L572), so `V_a()` is NOT unobservable in
-    // principle — but the port has no `Weak`-figure release (`kla`)
-    // subsystem (the model parse drops the attribute), so `V_a()` remains
-    // unimplemented (OPEN) rather than "no such part".
+    // `Weak="1"` figures - now implemented as `Fighter::release_weak()`, fed
+    // by the `Vc.UEa` parse (`Bone::weak`, JS `Yc.Ijb` L572
+    // `d.UEa=u.ka(b.attributes.get("Weak"))`). The NotAnimation dummy DOES
+    // wear `SkeletonPunchingBag` (`stages.xml` L15; the FightScreen-ctor merge
+    // keeps `assets.merged_bag`), whose Node12 carries `Weak="1"`
+    // (`mdl_skeleton_punching_bag.xml`), so the release has a real target.
+    // OBSERVABILITY (still OPEN, JS-STRICT): clearing the node's `MG`
+    // (`Bone::fixed`) is read by the JS `strike` edge gate (L588
+    // `if(!d.MG||!e.MG)`) and the `jE` `cA` gate (L583 `d.nh&&!d.NG&&...`);
+    // the port's Verlet gates on `cloth` only (fighter.cpp `Al.sk`,
+    // `nk=false`) and its capsule hit test has no endpoint-immovability gate,
+    // so the value flips exactly but has no consumer yet.
     if (battle_.type == "FightNone" && !def.is_player &&
         def.fighter.hits_taken() == kCounterPunches) {
         if (const sf2::scene::HitEffect* forced =
@@ -3510,6 +3515,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             camera_.apply_hit_effect(*forced);
         }
         def.shock.shocked_vc = true;  // `a.model.oa.vc=!0` (L396)
+        def.fighter.release_weak();   // `a.model.V_a()` (L396 -> V_a L517)
     }
 
     // [fx] Hit sparks `ql.Rub`/`Ut.ryb` (JS L369/L824): the burst is spawned

@@ -636,6 +636,44 @@ inline bool fight_rule_gate(const FightRule& r, int round, long power) {
     return true;
 }
 
+// JS `p.Wab` (L181-183) builds the `Df` table and `b0(a)` (L180) looks a KIND
+// up in it, defaulting to "FightNone". `Lc.pkb` (L1407) is the single consumer
+// that stamps it: `this.type = p.F().b0(a)` where `a` is the `<Battle Type>`
+// attribute - so the stages.xml KIND token (`DUMMY` / `BOSSES` / `SURVIVAL`)
+// maps to the canonical fight type every `Da.type` consumer switches on
+// (`ca.kg` L387, `e$a` L383, the `lm` ERuleBattleType rule L740, `cl` L1416,
+// the `jk` roster L2107, `bi` L2134). Unknown / absent -> "FightNone".
+inline std::string battle_type_for_kind(const std::string& kind) {
+    struct KindType { const char* kind; const char* type; };
+    static const KindType kWab[] = {
+        {"DUMMY", "FightNone"},
+        {"TUTORIAL", "FightTutorial"},
+        {"CHALLENGE", "FightChallenge"},
+        {"BOSSES", "FightBosses"},
+        {"TOURNAMENT", "FightTournament"},
+        {"STORY", "FightStory"},
+        {"SURVIVAL", "FightSurvival"},
+        {"TACTICS", "FightFriendly"},
+        {"AUTO", "FightAuto"},
+        {"AI", "FightAi"},
+        {"HIDDEN", "FightUnregister"},
+        {"FAKE", "FightFake"},
+        {"PVP", "FightPVP"},
+        {"PERIODIC", "FightPeriodic"},
+        {"FINAL_BATTLE", "FightFinal"},
+        {"FINAL_BATTLE_REPLAYABLE", "FightFinalReplayable"},
+        {"BOSSES_INTERMISSION", "FightBossesIntermission"},
+        {"REPLAYABLE", "FightReplayable"},
+        {"BOSSES_REPLAYABLE", "FightBossesReplayable"},
+        {"FINAL_BATTLE_TITAN", "FightFinalTitan"},
+        {"RAID", "FightRaid"},
+    };
+    for (const KindType& kt : kWab) {
+        if (kind == kt.kind) return kt.type;
+    }
+    return "FightNone";  // `b0` L180: no match -> "FightNone"
+}
+
 // The battle parameters (JS `Da`, L1418-1424): the fight's config read from
 // the stages.xml <Fight> element.
 struct BattleParams {
