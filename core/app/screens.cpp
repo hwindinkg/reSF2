@@ -8082,6 +8082,33 @@ void FightScreen::update_impl(float dt) {
     // the buffered keys land this frame (the same ordering as on_key).
     update_gamepad_input();
     fight_->update(dt);
+    // [child-model probe] The shipped fights reach 0 `<CreatePlayer>` rows
+    // (the action-kind census), so `SF2_CHILD_PROBE=1` drives one synthetic
+    // create -> render -> delete cycle through the EXACT dispatch path and
+    // logs the observed counts. No effect unless the variable is set.
+    {
+        static int child_probe_state = -1;  // -1 unread, 0 off, 1 armed, 2 done
+        if (child_probe_state == -1) {
+            const char* env = std::getenv("SF2_CHILD_PROBE");
+            child_probe_state =
+                (env != nullptr && env[0] != '\0' && env[0] != '0') ? 1 : 0;
+        }
+        if (child_probe_state == 1) {
+            child_probe_state = 2;
+            int spawned = 0, live_after_spawn = 0, live_after_delete = 0;
+            fight_->probe_child_cycle(true, 6, &spawned, &live_after_spawn,
+                                      &live_after_delete);
+            std::fprintf(stdout,
+                         "[child-probe] create->render->delete spawned=%d "
+                         "live=%d after-delete=%d -> %s\n",
+                         spawned, live_after_spawn, live_after_delete,
+                         (spawned == 1 && live_after_spawn == 1 &&
+                          live_after_delete == 0)
+                             ? "PASS"
+                             : "FAIL");
+            std::fflush(stdout);
+        }
+    }
 
     // Phase 7.4 display-layer tick (NO gameplay impact — presentation
     // copies only; the sim never reads them). The magic/effect containers
@@ -8259,8 +8286,9 @@ void FightScreen::render_impl(App& app) {
     // the collidable capsule edges as thick quads over the mesh so the
     // fighter is a solid humanoid silhouette (head/neck/chest/stomach/
     // arms/legs) matching the oracle.
-    auto draw_capsules = [&camera, &ren, &assets, arena_half](const sf2::scene::FightFighter& f) {
-        const float r = f.fighter.color_r(), g = f.fighter.color_g(), b = f.fighter.color_b();
+    auto draw_capsules = [&camera, &ren, &assets, arena_half](
+                             const sf2::scene::Model& model,
+                             const std::vector<float>& pos, float r, float g, float b) {
         // [F6 — capsule-figure render] JS `Yc.Uib` L570 walks
         // `A("Figures").children` in DOCUMENT ORDER and calls `Yc.Tib` (L573)
         // for every `Type="Capsule"` figure, so there is ONE `zu` visual per
@@ -8274,8 +8302,6 @@ void FightScreen::render_impl(App& app) {
         // `sx.ma`). The old port deduped by edge into an `unordered_map`
         // (nondeterministic draw order, 76 strips instead of 84), kept the max
         // Radius1 per edge and ignored Margin1/Margin2 entirely.
-        const sf2::scene::Model& model = f.fighter.model();
-        const std::vector<float>& pos = f.fighter.positions();
         constexpr float kPi = 3.14159265358979323846f;
         constexpr int kDiscSegments = 12;
         for (const sf2::scene::Capsule& cap : model.capsules) {
@@ -8365,12 +8391,30 @@ void FightScreen::render_impl(App& app) {
     // Dla L1599 (translate.z=). The batch preserves submission order, so draw
     // the whole enemy node FIRST (capsules+mesh, z=-.001) then the whole
     // player node (z=0) on top.
-    draw_capsules(fight_->enemy());
+    draw_capsules(fight_->enemy().fighter.model(), fight_->enemy().fighter.positions(),
+                  fight_->enemy().fighter.color_r(), fight_->enemy().fighter.color_g(),
+                  fight_->enemy().fighter.color_b());
     ren.draw_triangles(ev.data(), ev.size() / 2, fight_->enemy().fighter.color_r(),
                        fight_->enemy().fighter.color_g(), fight_->enemy().fighter.color_b());
-    draw_capsules(fight_->player());
+    draw_capsules(fight_->player().fighter.model(), fight_->player().fighter.positions(),
+                  fight_->player().fighter.color_r(), fight_->player().fighter.color_g(),
+                  fight_->player().fighter.color_b());
     ren.draw_triangles(pv.data(), pv.size() / 2, fight_->player().fighter.color_r(),
                        fight_->player().fighter.color_g(), fight_->player().fighter.color_b());
+    // [child models] JS `wd.vd` (the `<CreatePlayer>` spawns): each live child
+    // is a full model (`ih extends wd`) drawn with the SAME capsule-strip +
+    // mesh path as a fighter, at the spawner's layer. Drawn after both
+    // fighters so a freshly spawned magic model is visible on top.
+    for (const sf2::scene::ChildModel& ch : fight_->children()) {
+        if (!ch.active) continue;
+        std::vector<float> cv;
+        ch.fighter.build_vertices(cv);
+        std::vector<float> cpv = project(cv);
+        draw_capsules(ch.fighter.model(), ch.fighter.positions(),
+                      ch.fighter.color_r(), ch.fighter.color_g(), ch.fighter.color_b());
+        ren.draw_triangles(cpv.data(), cpv.size() / 2, ch.fighter.color_r(),
+                           ch.fighter.color_g(), ch.fighter.color_b());
+    }
 
     // The hit sparks (JS `Hyb`/`ryb`/`av`): world-space particles projected
     // through the SAME camera the fighters used (factor 1.0 — the shake is

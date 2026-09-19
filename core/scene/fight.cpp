@@ -512,7 +512,11 @@ void FightController::dispatch_move_actions(
         // `super(1)` (L728/L737), so `js_type == 1` is ambiguous.
         const bool fx_kind = act->kind == "ShakeScreen" || act->kind == "CameraWeight" ||
                              act->kind == "EnableBossAbility" ||
-                             act->kind == "AddBullets" || act->kind == "HitEffect";
+                             act->kind == "AddBullets" || act->kind == "HitEffect" ||
+                             // Child-model kinds (JS `mh`/`Xl`/`$l`): none of
+                             // them has an `fka` voice gate.
+                             act->kind == "CreatePlayer" || act->kind == "Delete" ||
+                             act->kind == "PlayAnimation";
         if (!sound_kind && !fx_kind) continue;
         // JS `cb.Ti(a,b)` (L724): `if (Fd(this.$c)) return true;` then the
         // `<Conditions>` tree. `$c` empty -> always true.
@@ -628,6 +632,22 @@ void FightController::dispatch_move_actions(
             std::fflush(stdout);
             continue;
         }
+        // --- child models (JS `mh`/`Xl`/`$l`) ----------------------------
+        // `mh.Uh(a){a.bwb(this)}` L727 -> `wd.bwb` L518.
+        if (act->kind == "CreatePlayer") {
+            spawn_child(owner, *act);
+            continue;
+        }
+        // `Xl.Uh(a){a.cwb(this)}` L728 -> `wd.cwb` L519.
+        if (act->kind == "Delete") {
+            delete_child_target(owner, *act);
+            continue;
+        }
+        // `$l.Uh(a){a.awb(this)}` L732 -> `wd.awb` L518.
+        if (act->kind == "PlayAnimation") {
+            play_child_animation(owner, *act);
+            continue;
+        }
         if (act->js_type == 3) {  // StopSound — no voice gate (JS `wd.ewb`)
             const char* s_stem = sf2::audio::sfx_stem_for_js(act->name.c_str());
             std::fprintf(stdout, "[sfx] F%d %s %s %s name=%s stem=%s\n", frame_,
@@ -669,6 +689,343 @@ void FightController::dispatch_move_actions(
     }
 }
 
+// --- child models (JS `ih` / `wd.vd` / the `su` spawn cache) -------------
+// `wd.fya(a,b,c,d)` (L535-536) builds or recycles one child:
+//   `e = d!="" && a.cache.pull(d)`                        (recycled `ih`)
+//   else `b = a.h7a(b); e = new ih(b)`                    (fresh from items)
+//   `e.cacheName=d; e.Kd(c); e.ola(a.ws); e.parameters.ul=a.parameters.ul;
+//    e.oa==null ? e.wI(a) : e.Rlb(); e.Naa(a.jb); e.prb(a.JG); e.TT(a.so);
+//    a.zWa(e)`
+// then `wd.bwb` (L518) plays `a.nx` on it. The port keeps one `ChildModel`
+// per spawner side (the `vd` list) plus the `su` cache keyed by `cacheName`.
+void FightController::spawn_child(FightFighter& owner,
+                                  const sf2::scene::MoveAction& act) {
+    if (clips_ == nullptr) return;
+    // `d!="" && e = a.cache.pull(d)` — recycle a retired child.
+    auto& pool = child_cache_[act.create_cache_key];
+    sf2::scene::ChildModel* c = nullptr;
+    if (!pool.empty()) {
+        const std::size_t idx = pool.back();
+        pool.pop_back();
+        c = &children_[idx];
+        c->active = true;
+    } else {
+        children_.emplace_back();
+        c = &children_.back();
+        // `b = a.h7a(items)` -> the child's parameters (its item set is
+        // COPIED from the spawner, so `ra.Hza` gives it the spawner's move
+        // list); `new ih(b)` -> the `wd` ctor + `Yc.load` of its model.
+        // The per-child skeleton part (`<Item Type="Skeleton"
+        // Name="SkeletonMagic">` and friends) is resolved by the app-side
+        // model cache in a follow-up; the mirrored items keep the merged
+        // bone hierarchy identical, which is what the clip indices address.
+        c->fighter.set_model(model_);
+        c->fighter.set_math_random([]() { return FightController::math_random01(); });
+        c->fighter.set_color(fighter_color_);
+        // `me` — the child's move list. JS `ra.Hza` rebuilds it from the
+        // child's parameters (the COPIED items), so it is the spawner's own
+        // list: `Fighter::hb()` (the `ra.Lk` list), NOT the `FightFighter`
+        // scratch member.
+        c->hb = owner.fighter.hb();
+    }
+    // `e.cacheName=d; e.Kd(c)` — the child's identity.
+    c->name = act.create_name;
+    c->cache_key = act.create_cache_key;
+    c->is_player = owner.is_player;
+    // `e.Naa(a.jb); e.prb(a.JG); e.TT(a.so)` — parent to the spawner and
+    // inherit its live position/facing (`ih.NS` seeds from `lb.sxb()`).
+    c->x = owner.fighter.world_x();
+    c->y = owner.fighter.world_y();
+    c->facing = owner.fighter.facing();
+    c->clip = nullptr;
+    c->clip_name.clear();
+    c->clip_frame = 0;
+    // `a.zWa(e)` — `vd.push(e)`.
+    std::fprintf(stdout,
+                 "[child] F%d %s CreatePlayer name=%s key=%s at=%.0f,%.0f\n",
+                 frame_, owner.name.c_str(), act.create_name.c_str(),
+                 act.create_cache_key.c_str(), static_cast<double>(c->x),
+                 static_cast<double>(c->y));
+    std::fflush(stdout);
+    // `var c=a.nx; c!=null&&c!="" && (c=m.find(b.me, d=>d.name==a.nx), ...)`
+    if (!act.start_animation.empty()) {
+        play_child_clip(*c, act.start_animation, owner);
+    }
+}
+
+// `m.find(c.me, d => d.name == anim)` (L518), then `c.NS(clip,
+// clip.xD(c.Fc, c.da.hd()))` (L505) starts it. The port resolves the clip
+// from the shared archive by the move's `FileName` stem — exactly what
+// `Fighter::start_move_impl` does (fighter.cpp:675-684) — and drives it from
+// `advance_child`.
+void FightController::play_child_clip(sf2::scene::ChildModel& c,
+                                      const std::string& anim,
+                                      FightFighter& owner) {
+    if (clips_ == nullptr) return;
+    const sf2::scene::MoveDef* mov = nullptr;
+    for (const sf2::scene::MoveDef* m : c.hb) {
+        if (m != nullptr && m->name == anim) {
+            mov = m;
+            break;
+        }
+    }
+    if (mov == nullptr) {
+        std::fprintf(stdout, "[child] F%d %s child '%s' no move '%s' in list\n",
+                     frame_, owner.name.c_str(), c.name.c_str(), anim.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    // `jc.uja` L693: the clip key is `FileName` minus ".bytes" (`Eza`).
+    std::string key = mov->file_name;
+    const std::string suffix = ".bytes";
+    if (key.size() > suffix.size() &&
+        key.compare(key.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        key = key.substr(0, key.size() - suffix.size());
+    }
+    const sf2::data::anim_clip* clip = nullptr;
+    const auto it = clips_->find(key);
+    if (it != clips_->end()) clip = &it->second;
+    if (clip == nullptr) {
+        const auto it2 = clips_->find(mov->name);
+        if (it2 != clips_->end()) clip = &it2->second;
+    }
+    if (clip == nullptr) {
+        std::fprintf(stdout,
+                     "[child] F%d %s child '%s' clip '%s' (stem=%s) not in archive\n",
+                     frame_, owner.name.c_str(), c.name.c_str(), anim.c_str(),
+                     key.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    c.clip = clip;
+    c.clip_name = anim;
+    c.clip_frame = 0;
+    std::fprintf(stdout,
+                 "[child] F%d %s child '%s' PlayAnimation '%s' frames=%zu\n",
+                 frame_, owner.name.c_str(), c.name.c_str(), anim.c_str(),
+                 clip->frames.size());
+    std::fflush(stdout);
+}
+
+// `Vv(a)` (L516): the child whose `ab()==a`, else `vd[0]`.
+sf2::scene::ChildModel* FightController::find_child(const std::string& name,
+                                                    bool is_player) {
+    sf2::scene::ChildModel* first = nullptr;
+    for (sf2::scene::ChildModel& c : children_) {
+        if (!c.active || c.is_player != is_player) continue;
+        if (first == nullptr) first = &c;
+        if (!name.empty() && c.name == name) return &c;
+    }
+    return first;
+}
+
+// `wd.awb(a)` (L518).
+void FightController::play_child_animation(FightFighter& owner,
+                                           const sf2::scene::MoveAction& act) {
+    if (act.animation.empty()) return;  // `b==null || b==""` -> no-op
+    sf2::scene::ChildModel* target = nullptr;
+    switch (act.player) {
+        case 4:  // `Child` -> `c = this.Vv(a.cxa)`
+            target = find_child(act.child_name, owner.is_player);
+            break;
+        case 6:  // `EnemyChild` -> `c = this.jb.Vv(a.cxa)`
+            target = find_child(act.child_name, !owner.is_player);
+            break;
+        default:
+            // `Me`/`Enemy`/`Parent` -> `this.ef(a.pe)`, a live FIGHTER: the
+            // JS `c.NS(b, ...)` starts the clip on that fighter's animation
+            // controller. The port's `Fighter` starts clips only through its
+            // own move flow, so this is reported, never faked mid-clip.
+            std::fprintf(stdout,
+                         "[child] F%d %s PlayAnimation '%s' on FIGHTER player=%d "
+                         "(no child target)\n",
+                         frame_, owner.name.c_str(), act.animation.c_str(),
+                         act.player);
+            std::fflush(stdout);
+            return;
+    }
+    if (target == nullptr) {
+        std::fprintf(stdout,
+                     "[child] F%d %s PlayAnimation '%s' child '%s' not found\n",
+                     frame_, owner.name.c_str(), act.animation.c_str(),
+                     act.child_name.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    // `a.r4a || b.Yz(c)` gates the play; `ForcePlay="1"` bypasses the move's
+    // own conditions (the port has no per-child move gate yet, so both paths
+    // resolve to the same clip start).
+    play_child_clip(*target, act.animation, owner);
+}
+
+// `wd.cwb(a)` (L519): `a=this.ef(a.pe); this.Uza(); this.tK.Z(a)`. `ef`:
+// Me(1)=this, Enemy(2)=jb, Parent(3)=lb, Child(4)=the last `vd` entry,
+// EnemyChild(6)=the enemy's child. `Pi.Kja` (L405) queues the signalled
+// model for removal (`m.bd(this.gv, a)` -> `Nw`).
+void FightController::delete_child_target(FightFighter& owner,
+                                          const sf2::scene::MoveAction& act) {
+    if (act.player == 4 || act.player == 6) {
+        const bool side = (act.player == 4) ? owner.is_player : !owner.is_player;
+        sf2::scene::ChildModel* c = find_child(std::string(), side);
+        if (c == nullptr) return;
+        const std::size_t idx = static_cast<std::size_t>(c - children_.data());
+        std::fprintf(stdout, "[child] F%d %s Delete(Child) removes '%s'\n",
+                     frame_, owner.name.c_str(), c->name.c_str());
+        std::fflush(stdout);
+        remove_child(idx);
+        return;
+    }
+    // Me(1)/Enemy(2)/Parent(3) resolve to a live fighter model. A shipped
+    // `Delete Player="Me"` inside a child clip is handled by
+    // `advance_child` (the child removes itself); a Delete aimed at a
+    // fighter is reported, never faked.
+    std::fprintf(stdout,
+                 "[child] F%d %s Delete player=%d targets a FIGHTER (no-op)\n",
+                 frame_, owner.name.c_str(), act.player);
+    std::fflush(stdout);
+}
+
+// `wd.pKa` (L517) / `Pi.Kja` (L405): an `ih` with a non-empty `cacheName`
+// and a live `lb` is cleared and pushed back into the spawner's `su` cache
+// (`this.lb.cache.push(this.cacheName, this)`); the slot stays in `children_`
+// so its index remains stable for the recycle pool.
+void FightController::remove_child(std::size_t i) {
+    if (i >= children_.size()) return;
+    sf2::scene::ChildModel& c = children_[i];
+    if (!c.active) return;
+    c.active = false;
+    c.clip = nullptr;
+    c.clip_frame = 0;
+    if (!c.cache_key.empty()) child_cache_[c.cache_key].push_back(i);
+}
+
+void FightController::update_children() {
+    for (std::size_t i = 0; i < children_.size(); ++i) {
+        if (children_[i].active && children_[i].clip != nullptr) advance_child(i);
+    }
+}
+
+// JS `da.ia` (L547): advance the clip one 60 Hz frame and re-sample the pose.
+// When the clip ends, the child's own `Event="AnimationEnd"` actions run —
+// the shipped child clips (`ShopMagicMassBomb`, moves.xml:46230) carry
+// `<Delete Player="Me" Event="AnimationEnd"/>`, which removes the child.
+void FightController::advance_child(std::size_t i) {
+    sf2::scene::ChildModel& c = children_[i];
+    const std::size_t n = c.clip->frames.size();
+    if (n == 0) {
+        c.clip = nullptr;
+        return;
+    }
+    c.fighter.sample(*c.clip, c.clip_frame, c.x, c.y, c.facing);
+    if (static_cast<std::size_t>(c.clip_frame) + 1 < n) {
+        ++c.clip_frame;
+        return;
+    }
+    const std::string anim = c.clip_name;
+    c.clip = nullptr;
+    c.clip_frame = 0;
+    const sf2::scene::MoveDef* mov = nullptr;
+    for (const sf2::scene::MoveDef* m : c.hb) {
+        if (m != nullptr && m->name == anim) {
+            mov = m;
+            break;
+        }
+    }
+    if (mov == nullptr) return;
+    for (const sf2::scene::MoveAction& a : mov->actions) {
+        if (a.frame_trigger || a.event != "AnimationEnd") continue;
+        // Delete(Me) on a child removes the child (the shipped self-delete);
+        // the other kinds are not child-scoped yet and are reported.
+        if (a.kind == "Delete" && a.player == 1) {
+            std::fprintf(stdout,
+                         "[child] F%d child '%s' Delete(Me) at AnimationEnd -> removed\n",
+                         frame_, c.name.c_str());
+            std::fflush(stdout);
+            remove_child(i);
+            return;
+        }
+        std::fprintf(stdout,
+                     "[child] F%d child '%s' AnimationEnd action %s (not child-scoped)\n",
+                     frame_, c.name.c_str(), a.kind.c_str());
+        std::fflush(stdout);
+    }
+}
+
+// Probe (env `SF2_CHILD_PROBE`). The shipped `res/moves.xml` reaches 0
+// `<CreatePlayer>` rows in the fight's own move lists (the census), so this
+// drives one synthetic `mh`/`$l`/`Xl` triple through the exact dispatch path
+// (`dispatch_move_actions` -> `spawn_child` -> `play_child_clip` ->
+// `update_children` -> `Fighter::sample`/`build_vertices` -> `remove_child`)
+// to prove the create -> render -> delete cycle. Pure probe: no sim state
+// other than `children_`/`child_cache_` is touched.
+void FightController::probe_child_cycle(bool for_player, int ticks,
+                                        int* spawned, int* live_after_spawn,
+                                        int* live_after_delete) {
+    if (spawned != nullptr) *spawned = 0;
+    if (live_after_spawn != nullptr) *live_after_spawn = 0;
+    if (live_after_delete != nullptr) *live_after_delete = 0;
+    if (clips_ == nullptr) return;
+    FightFighter& owner = for_player ? player_ : enemy_;
+    // The synthetic `mh.nx`: the spawner's first move with a FileName (its
+    // clip resolves through the shared archive).
+    const sf2::scene::MoveDef* pick = nullptr;
+    for (const sf2::scene::MoveDef* m : owner.fighter.hb()) {
+        if (m == nullptr || m->file_name.empty()) continue;
+        pick = m;
+        break;
+    }
+    sf2::scene::MoveAction create;
+    create.kind = "CreatePlayer";
+    create.js_type = 0;
+    create.frame_trigger = true;
+    create.create_name = "ProbeChild";
+    create.create_cache_key = "probe_child_key";
+    if (pick != nullptr) create.start_animation = pick->name;
+    std::fprintf(stdout,
+                 "[child-probe] spawner=%s hb=%zu clips=%zu pick=%s\n",
+                 owner.name.c_str(), owner.fighter.hb().size(), clips_->size(),
+                 pick != nullptr ? pick->name.c_str() : "<none>");
+    std::fflush(stdout);
+    const std::vector<const sf2::scene::MoveAction*> acts{&create};
+    // The synthetic action carries no `<Conditions>`, so the dispatch's
+    // condition gate never runs and a default context is enough.
+    sf2::scene::FightContext child_ctx;
+    child_ctx.qb = owner.is_player;
+    dispatch_move_actions(acts, owner, "child-probe", child_ctx);
+    int live = 0;
+    for (const sf2::scene::ChildModel& c : children_) {
+        if (c.active) ++live;
+    }
+    if (spawned != nullptr) *spawned = live;
+    if (live_after_spawn != nullptr) *live_after_spawn = live;
+    // `da.ia` ticks so the child is posed for the render path.
+    for (int i = 0; i < ticks; ++i) update_children();
+    for (const sf2::scene::ChildModel& c : children_) {
+        if (!c.active) continue;
+        std::vector<float> verts;
+        c.fighter.build_vertices(verts);
+        std::fprintf(stdout,
+                     "[child-probe] render: child '%s' clip=%s frame=%d verts=%zu "
+                     "bones=%zu\n",
+                     c.name.c_str(), c.clip_name.c_str(), c.clip_frame,
+                     verts.size() / 2, c.fighter.model().bones.size());
+        std::fflush(stdout);
+        break;
+    }
+    // The `Delete` half of the cycle.
+    for (std::size_t i = 0; i < children_.size(); ++i) {
+        if (children_[i].active) {
+            remove_child(i);
+            break;
+        }
+    }
+    live = 0;
+    for (const sf2::scene::ChildModel& c : children_) {
+        if (c.active) ++live;
+    }
+    if (live_after_delete != nullptr) *live_after_delete = live;
+}
+
 // --- root `<Triggers>` (JS `Fa.Exb` L708 -> `ra.Dm`) ---------------------
 // The 18 move-action kinds (`lz.create` L737-739). The port DISPATCHES the
 // three audio kinds (Sound `wd.dwb` L519, RandomSound `wd.fwb` L519,
@@ -682,7 +1039,8 @@ bool FightController::global_kind_dispatched(const std::string& kind) {
     return kind == "Sound" || kind == "RandomSound" || kind == "StopSound" ||
            kind == "SetEndStage" || kind == "ShakeScreen" ||
            kind == "CameraWeight" || kind == "EnableBossAbility" ||
-           kind == "AddBullets" || kind == "HitEffect";
+           kind == "AddBullets" || kind == "HitEffect" ||
+           kind == "CreatePlayer" || kind == "Delete" || kind == "PlayAnimation";
 }
 
 std::size_t FightController::global_action_kinds() const {
@@ -4145,6 +4503,9 @@ void FightController::update(float dt) {
     // Magic/effect containers (JS `tl.WL` L837 -> `Gq.WL`/`Hq.WL`; the
     // timescale `1/v.on()` = 1.0 here). Presentation only.
     magic_fx_.update(1.0f);
+    // Child models (JS `wd.vd` — the `<CreatePlayer>` spawns): advance their
+    // clips + fire their own `AnimationEnd` actions. Presentation only.
+    update_children();
     camera_.tick_hit_effect();
     if (battle_over_) return;
 

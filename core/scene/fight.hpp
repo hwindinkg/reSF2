@@ -1255,6 +1255,30 @@ struct PerkSetup {
 };
 
 // The fight controller (JS `ca` L379-433).
+// One child model (JS `ih extends wd`, L589): a full model instance spawned
+// by a `<CreatePlayer>` action (`mh` L727 -> `wd.bwb` L518 -> `wd.fya`
+// L535-536), parented to its spawner, holding its own clip + move list.
+// JS fields that drive it: `aK` (name), `cacheName` (the `su` recycle key),
+// `lb` (the spawner, set by `wI` L514), `vd` (the spawner's child list,
+// `zWa` L520), `me` (the move list — built by `ra.Hza` from the COPIED
+// items, so the port reuses the spawner's `hb`), `Fc`/`da` (the animation
+// state: `NS` L505 starts a clip, `da.ia` L547 advances it). `ih.mJ()`
+// returns true and `ih.NS` seeds the spawner once (`this.lb.sxb()`).
+struct ChildModel {
+    std::string name;        // JS `aK` (<CreatePlayer Name>)
+    std::string cache_key;   // JS `cacheName` (`K.T(++mh.dUa)`)
+    bool is_player = false;  // the spawner's side (`parameters.qb`)
+    bool active = true;      // false once deleted (the slot is recyclable)
+    sf2::scene::Fighter fighter;                  // its own `wd`/`da` state
+    std::vector<const sf2::scene::MoveDef*> hb;   // JS `me` (copied items)
+    const sf2::data::anim_clip* clip = nullptr;   // the playing clip (`Ua`)
+    std::string clip_name;   // current animation name
+    int clip_frame = 0;      // frame cursor (60 Hz)
+    float x = 0.0f;          // world anchor (`prb`/`TT` inherit the spawner)
+    float y = 0.0f;
+    int facing = 1;          // spawner's `da.hd()` sign
+};
+
 class FightController {
 public:
     ~FightController();  // closes the pose dump file if the dump is cut short
@@ -1805,6 +1829,42 @@ public:
     std::size_t global_action_kinds() const;
     // Whether the port dispatches this global action kind (`lz.create` name).
     static bool global_kind_dispatched(const std::string& kind);
+
+    // The live child models (JS `wd.vd` / the spawner's child list, filled by
+    // `<CreatePlayer>`). Presentation only — they never enter the hit test.
+    const std::vector<sf2::scene::ChildModel>& children() const { return children_; }
+
+    // Probe (env `SF2_CHILD_PROBE`): the shipped fights reach 0
+    // `<CreatePlayer>` rows (the action-kind census), so this drives one
+    // synthetic create -> play -> render -> delete cycle through the EXACT
+    // dispatch path and writes the observed child counts to the out-params.
+    void probe_child_cycle(bool for_player, int ticks, int* spawned,
+                           int* live_after_spawn, int* live_after_delete);
+
+private:
+    // --- child models (JS `ih`, `wd.vd`, the `su` spawn cache) -----------
+    // JS `wd.bwb` (L518) -> `wd.fya` (L535-536): `<CreatePlayer>`.
+    void spawn_child(FightFighter& owner, const sf2::scene::MoveAction& act);
+    // JS `wd.cwb` (L519) -> `Pi.Kja` (L405): `<Delete>`.
+    void delete_child_target(FightFighter& owner, const sf2::scene::MoveAction& act);
+    // JS `wd.awb` (L518): `<PlayAnimation>`.
+    void play_child_animation(FightFighter& owner, const sf2::scene::MoveAction& act);
+    // `Vv(a)` (L516): the child whose `ab()==name`, else the first child.
+    sf2::scene::ChildModel* find_child(const std::string& name, bool is_player);
+    // `m.find(c.me, d => d.name == anim)` + `c.NS(...)` (L505): start a clip
+    // on `c` by animation name from its move list.
+    void play_child_clip(sf2::scene::ChildModel& c, const std::string& anim,
+                         FightFighter& owner);
+    // `wd.pKa` (L517) / `Pi.Kja` (L405): retire the child and push it back
+    // into the spawner's `su` cache keyed by `cacheName`.
+    void remove_child(std::size_t i);
+    // Per-frame child clip advance (`da.ia` L547) + the child's own
+    // `AnimationEnd` actions (the shipped child clips self-delete).
+    void update_children();
+    void advance_child(std::size_t i);
+    std::vector<sf2::scene::ChildModel> children_;
+    // JS `su` (L536-537): `pull(cacheName)` recycles, `push(cacheName, m)`.
+    std::map<std::string, std::vector<std::size_t>> child_cache_;
 
 private:
     // `ra.yz`/`Su.nw`: lock-filter `*global_triggers_` against `conds`.

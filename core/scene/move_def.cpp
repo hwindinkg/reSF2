@@ -460,6 +460,43 @@ void parse_action(pugi::xml_node node, MoveAction& out) {
         out.hit_effect_rotation = data::xml_attr_float(node, "StartingRotation", 0.0f);
         return;
     }
+    // `mh` (CreatePlayer, L727): `cacheName = K.T(++mh.dUa)` (unique per
+    // authored element — the spawner's `su` cache is keyed by it),
+    // `Name` -> `aK`, `StartAnimation` -> `nx`, and every child `<Item>` ->
+    // an `nl` (`CopyParentType`/`CopyParentSubtype` + the element's own
+    // Type/Name, `nl extends I`). The port keeps only the COPY pair.
+    if (out.kind == "CreatePlayer") {
+        static int s_create_serial = 0;  // `++mh.dUa`
+        out.create_cache_key = "cpk_" + std::to_string(++s_create_serial);
+        if (pugi::xml_attribute n = node.attribute("Name")) out.create_name = n.value();
+        if (pugi::xml_attribute a = node.attribute("StartAnimation")) {
+            out.start_animation = a.value();
+        }
+        for (pugi::xml_node ch : node.children()) {
+            const std::string cpt = ch.attribute("CopyParentType")
+                                        ? ch.attribute("CopyParentType").value()
+                                        : std::string();
+            const std::string cps = ch.attribute("CopyParentSubtype")
+                                        ? ch.attribute("CopyParentSubtype").value()
+                                        : std::string();
+            out.copy_parent_items.emplace_back(cpt, cps);
+        }
+        return;
+    }
+    // `$l` (PlayAnimation, L732): `ChildName` -> `cxa`, `Animation` ->
+    // `ova`, `ForcePlay` -> `r4a`.
+    if (out.kind == "PlayAnimation") {
+        if (pugi::xml_attribute c = node.attribute("ChildName")) out.child_name = c.value();
+        if (pugi::xml_attribute a = node.attribute("Animation")) out.animation = a.value();
+        out.force_play = data::xml_attr_bool(node, "ForcePlay", false);
+        return;
+    }
+    // `Xl` (Delete, L728): `super.parse(a)` only — the base parse already
+    // read `Frame`/`Event`/`Player`/`<Conditions>`; the target model is the
+    // `Player` selector resolved by `wd.cwb`.
+    if (out.kind == "Delete") {
+        return;
+    }
     // Every other kind: keep the Name attr when present (informational; the
     // kind is parsed data until its consumer system is ported).
     if (pugi::xml_attribute n = node.attribute("Name")) out.name = n.value();

@@ -322,6 +322,44 @@ struct MoveAction {
     std::string hit_effect_file;      // `vT` (FileName)
     float hit_effect_scale = 0.0f;    // `aza` (ChangeHitEffectScale; 0 = use Qz)
     float hit_effect_rotation = 0.0f; // `ywb` (StartingRotation, degrees)
+    // --- CreatePlayer (`mh` L727) ----------------------------------------
+    // JS `mh`: `super(0)`; `parse` sets `this.cacheName = K.T(++mh.dUa)` (a
+    // per-authored-element recycle key), `Name` -> `aK`,
+    // `StartAnimation` -> `nx`, and each child `<Item CopyParentType
+    // CopyParentSubtype Type Name>` -> an `nl` in `this.items`. `Uh` ->
+    // `wd.bwb` (L518):
+    //   `wd.fya(this.ef(pe), items, aK, cacheName)` pulls a recycled child
+    //   from the spawner's `su` cache or builds a new `ih` (parented to the
+    //   spawner, inheriting its position/scale), then, when `nx != ""`,
+    //   plays the child clip `nx` (`m.find(c.me, d => d.name == nx)` +
+    //   `c.NS`). `mh` has NO `fka` (voice) gate.
+    std::string create_name;       // `mh.aK`  (<CreatePlayer Name>)
+    std::string start_animation;   // `mh.nx`  (<CreatePlayer StartAnimation>)
+    std::string create_cache_key;  // `mh.cacheName` (`K.T(++mh.dUa)`)
+    // The `nl` children's `CopyParentType`/`CopyParentSubtype` pairs. The
+    // shipped `CreatePlayer` rows copy the SPAWNER's item set (e.g.
+    // `<Item CopyParentType="Magic" Type="Weapon"/>`), so the child's move
+    // list (`me`, built by `ra.Hza`) is the spawner's own list.
+    std::vector<std::pair<std::string, std::string>> copy_parent_items;
+    // --- Delete (`Xl` L728) ----------------------------------------------
+    // `super(1)`; `parse` is only `super.parse(a)`. `Uh` -> `wd.cwb` (L519):
+    //   `a = this.ef(a.pe); this.Uza(); this.tK.Z(a)`
+    // — signal the model the `Player` selector resolves to; the fight screen
+    // (`Pi.Kja` L405) removes it and (for an `ih` with a `cacheName`, JS
+    // `wd.pKa` L517) recycles it into the spawner's cache. No extra fields:
+    // only `player` (`pe`) matters.
+    // --- PlayAnimation (`$l` L732) ---------------------------------------
+    // `super(17)`; `parse`: `ChildName` -> `cxa`, `Animation` -> `ova`,
+    // `ForcePlay` -> `r4a`. `Uh` -> `wd.awb` (L518):
+    //   `pe==4` -> `c = this.Vv(cxa)` (the spawner's child whose
+    //             `ab()==cxa`, else its `vd[0]`),
+    //   `pe==6` -> `c = this.jb.Vv(cxa)` (the ENEMY's child),
+    //   default -> `c = this.ef(pe)` (the owning fighter);
+    //   then `b = m.find(c.me, d => d.name == ova)` and, when
+    //   `r4a || b.Yz(c)`, `c.NS(b, b.xD(c.Fc, c.da.hd()))` + `c.Ml.clear()`.
+    std::string child_name;   // `$l.cxa` (<PlayAnimation ChildName>)
+    std::string animation;    // `$l.ova` (<PlayAnimation Animation>)
+    bool force_play = false;  // `$l.r4a` (<PlayAnimation ForcePlay>)
 };
 
 // One child of the root `<Triggers>` block (JS `Fa.Exb` L708 ->
