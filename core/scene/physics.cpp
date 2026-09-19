@@ -238,6 +238,15 @@ void BodyState::build(const Model& model, const std::vector<float>& pose_xy,
         cap.defense = edge.defense;
         cap.weight1 = (foe1 ? foe_model->bones[u1].mass : node_mass[u1]);
         cap.weight2 = (foe2 ? foe_model->bones[u2].mass : node_mass[u2]);
+        // JS `Bl.strike` endpoint gates: MG = Fixed (`Vc.MG`; cleared for
+        // `Weak="1"` nodes by `V_a()` -> `kla(false)`), NG = MG || !nh
+        // (`nh` false for MacroNodes, `Fl` ctor `QMa(1)`).
+        const Bone& b1 = foe1 ? foe_model->bones[u1] : model.bones[u1];
+        const Bone& b2 = foe2 ? foe_model->bones[u2] : model.bones[u2];
+        cap.mg1 = b1.fixed;
+        cap.mg2 = b2.fixed;
+        cap.ng1 = b1.fixed || b1.is_macro;
+        cap.ng2 = b2.fixed || b2.is_macro;
         capsules.push_back(std::move(cap));
     }
     wall_min = wall;
@@ -291,10 +300,17 @@ float apply_impulse(const HitCapsule& hit_cap, const CapsuleHit& hit,
 
     // Node displacement, full vector: d * (1-b)/w1 on node1, d * b/w2 on
     // node2 (`a.sx.XA(l)` / `a.Zs.XA(c)` — x, y AND z move).
+    // JS `Bl.strike` (L588) gate: `if(!d.MG||!e.MG){ ... }` — at least one
+    // endpoint must be non-fixed for the impulse block to run at all, and
+    // each endpoint is displaced only when its own `NG` is false. A released
+    // `Weak="1"` node has MG=false (V_a) and NG=false, so it now receives the
+    // impulse; normal dynamic endpoints were already MG=false/NG=false.
     const float w1 = hit_cap.weight1 > 0.0f ? hit_cap.weight1 : 1.0f;
     const float w2 = hit_cap.weight2 > 0.0f ? hit_cap.weight2 : 1.0f;
-    out.node1_vec = impulse * ((1.0f - b) / w1);
-    out.node2_vec = impulse * (b / w2);
+    if (!hit_cap.mg1 || !hit_cap.mg2) {
+        if (!hit_cap.ng1) out.node1_vec = impulse * ((1.0f - b) / w1);
+        if (!hit_cap.ng2) out.node2_vec = impulse * (b / w2);
+    }
     out.node1_disp = out.node1_vec.x;
     out.node2_disp = out.node2_vec.x;
 

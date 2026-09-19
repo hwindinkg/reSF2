@@ -542,6 +542,13 @@ public:
         }
     }
 
+    // JS `Al.oa.vc` (the model's shock latch; `ca.Cgb` L394 `a.model.vc=!0`,
+    // mirrored by `FightFighter::shock.shocked_vc`). Read by the `Al.sk`/`jE`
+    // participation gate (`!NG && (nk || jy || oa.vc && c.vc)`): a non-cloth
+    // node with `Shock="1"` integrates/relaxes while the model is shocked.
+    void set_shock_latch(bool v) { shock_latch_ = v; }
+    bool shock_latch() const { return shock_latch_; }
+
     // Per-bone knockback offsets (JS `Bl.strike` L582 moves the hit
     // capsule's endpoint BODIES, not the whole fighter). `add_knockback`
     // accumulates the impulse-split vector onto a bone; the offsets ride on
@@ -622,6 +629,9 @@ private:
     std::vector<float> sol_ma_;  // 3*n: current posed positions (JS `ma`)
     std::vector<float> sol_mf_;  // 3*n: previous positions (JS `mf`)
     bool solver_init_ = false;   // ma/mf seeded from the bind pose once
+    // JS `Al.oa.vc`: the model's shock latch (see `set_shock_latch`). Starts
+    // false; the fight sets it when a shock lands (`ca.Cgb` L394).
+    bool shock_latch_ = false;
     // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550
     // (`jc.shift`)] The move's <Align> offset, applied ONCE at clip start as
     // a shift of the whole clip buffer. Native equivalent: added to every

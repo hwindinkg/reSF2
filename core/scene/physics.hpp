@@ -74,6 +74,14 @@ struct HitCapsule {
     // is unverified — the guard only fires on absent/zero Mass.
     float weight1 = 1.0f;     // endpoint-1 node mass (`Vc.weight`)
     float weight2 = 1.0f;     // endpoint-2 node mass
+    // JS `Bl.strike` (L588) endpoint gates. `MG` = `Vc.MG` (the `Fixed="1"`
+    // flag; `V_a()` clears it for `Weak="1"` nodes) — the impulse block only
+    // runs when `!sx.MG || !Zs.MG`. `NG` = `Vc.NG` (`MG || !nh`; `nh` is false
+    // for MacroNodes) — an endpoint with `NG` set is skipped (`d.NG || (...)`).
+    bool mg1 = false;  // `sx.MG` (Fixed="1" -> immovable)
+    bool mg2 = false;  // `Zs.MG`
+    bool ng1 = false;  // `sx.NG` (MG || !nh)
+    bool ng2 = false;  // `Zs.NG`
 };
 
 // The result of one capsule-vs-capsule hit test (JS `Cl.W1a` L566).
@@ -148,9 +156,13 @@ struct BodyState {
 //   Kwb: d = (b.kw, b.gR, b.hR) * facing * JG
 //   Bl.strike: node1 += d * (1-b)/w1; node2 += d * b/w2
 // where b = min(1, |nJa - sx.ma| / rest_length), w = node mass.
-// MG/NG gate (`!sx.MG || !Zs.MG`, NG endpoints skipped) is OPEN: MG/NG are
-// runtime `Vc.sk`-solver flags with no XML source — all endpoints land as
-// dynamic, so the gate always passes (noted, not lowered).
+// MG/NG gate (JS L588): the whole impulse block runs only when
+// `!sx.MG || !Zs.MG` (at least one endpoint is NOT fixed), and each endpoint
+// is displaced only when its `NG` is false. `MG` = `Fixed="1"` (`Vc.MG`),
+// cleared for `Weak="1"` nodes by `V_a()` (`kla(false)`), so a released Weak
+// node starts receiving the strike impulse; `NG` = `MG || !nh` (MacroNodes
+// are immovable). Normal dynamic endpoints are `MG=false, NG=false`, i.e.
+// the gate always passes and both endpoints move — unchanged behavior.
 // Unmodeled by design: s2a() midpoint smoothing (presentation average
 // over Va.all, L588) and bFa length refit (cA-gated spring solve,
 // L583/L792 — needs the Vc.sk integrator state). Both are outside the

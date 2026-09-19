@@ -35,6 +35,9 @@ Bone parse_bone(const pugi::xml_node& node) {
     // JS `Yc.Ijb` L572: `d.UEa=u.ka(b.attributes.get("Weak"))` - the node's
     // `V_a()` release flag (`mdl_skeleton_punching_bag` Node12 `Weak="1"`).
     b.weak = sf2::data::xml_attr_bool(node, "Weak", false);
+    // JS `Yc.Ijb` L572: `d.vc=u.ka(b.attributes.get("Shock"))` - the node's
+    // `Al.sk`/`jE` shock-participation flag.
+    b.shock = sf2::data::xml_attr_bool(node, "Shock", false);
     return b;
 }
 

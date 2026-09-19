@@ -38,6 +38,10 @@ struct Bone {
     bool cloth = false;
     float attenuation = 0.0f;
     bool fixed = false;
+    // `Shock="1"` (`Vc.vc`, JS `Yc.Ijb` L572 `d.vc=u.ka(b.attributes.get("Shock"))`):
+    // the node integrates/relaxes while the model's shock latch (`Al.oa.vc`)
+    // is set, even when NOT cloth (`Al.sk` L583: `!NG && (nk||jy||oa.vc&&c.vc)`).
+    bool shock = false;
     // `Weak="1"` (`Vc.UEa`, JS `Yc.Ijb` L572 `d.UEa=u.ka(b.attributes.get("Weak"))`):
     // a node released by `V_a()` (L517 `c.UEa&&c.kla(!1)` -> `MG=false`) on a
     // landed hit. `mdl_skeleton_punching_bag` Node12 is the only shipped Weak

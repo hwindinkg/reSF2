@@ -1884,6 +1884,7 @@ void FightController::round_start() {
     player_.shock.pain_sr = 0.0f;
     player_.shock.weapon_wx = -1;
     player_.shock.shocked_vc = false;
+    player_.fighter.set_shock_latch(false);  // `oa.vc` reset
     player_.shock.disarm_sn = false;
     enemy_.shock.pain_sr = 0.0f;
     enemy_.shock.weapon_wx = -1;
@@ -2238,6 +2239,7 @@ void FightController::between_rounds_recover() {
     for (FightFighter* f : {&player_, &enemy_}) {
         f->shock.disarm_sn = false;    // `sn`
         f->shock.shocked_vc = false;   // `vc`
+        f->fighter.set_shock_latch(false);  // `oa.vc` reset
         f->kh = false;                 // `parameters.kh`
     }
     // JS `Cn.$K()` (L297964): at the round boundary every strike-memory
@@ -2962,6 +2964,13 @@ void FightController::fill_ctx_geometry(FightContext& ctx, const FightFighter& m
     ctx.enemy_direction = -ctx.direction;
     ctx.wall_min = wall_min_;
     ctx.wall_max = wall_max_;
+    // JS `Ae.To` (the event-context factory: `Z6a`/`Hza`/`e4a` L685 all stamp
+    // `d.To = ca.Ka()!=null ? ca.Ka().Da.type : "FightNone"`), consumed by the
+    // `lm` BattleType condition (`lm.he`: `ctx.To == Value`). `battle_.type` is
+    // the `Da.type` derived from the stage KIND (`p.Wab` -> `b0`, fight.hpp
+    // `battle_type_for_kind`). Every fight.cpp `FightContext` site routes
+    // through this fill, so the rule evaluates instead of reading "".
+    ctx.battle_type = battle_.type;
 }
 
 void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_type press) {
@@ -3206,6 +3215,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
                 rec.shock = false;
             } else {
                 def.shock.shocked_vc = true;
+                def.fighter.set_shock_latch(true);  // `oa.vc` (Al.sk/jE gate)
             }
         }
         // JS `Cgb` disarm (L394): `Yi&&(d=$b(Au); sn||own?Yi=false:...)`
@@ -3515,6 +3525,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             camera_.apply_hit_effect(*forced);
         }
         def.shock.shocked_vc = true;  // `a.model.oa.vc=!0` (L396)
+        def.fighter.set_shock_latch(true);  // `oa.vc` (Al.sk/jE gate)
         def.fighter.release_weak();   // `a.model.V_a()` (L396 -> V_a L517)
     }
 
@@ -3807,6 +3818,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             // latch. Fling/`Wsb`/drop-event bodies are presentation (OPEN).
             me.weapon = "Fists";
             me.shock.shocked_vc = true;
+            me.fighter.set_shock_latch(true);  // `oa.vc` (Al.sk/jE gate)
             me.params.attributes["WeaponDamage"] = 0.0f;
             std::fprintf(stdout, "[fight] F%d %s WQB pickup -> Fists\n",
                          frame_, me.name.c_str());

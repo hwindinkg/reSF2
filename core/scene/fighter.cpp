@@ -1780,7 +1780,15 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         constexpr float kGrav = 0.4f;
         for (std::size_t i = 0; i < n; ++i) {
             const Bone& b = bones[i];
-            if (!b.cloth || b.fixed || b.is_macro) continue;  // cloth-only (JS nk=false)
+            // JS `Al.sk` (L583): `!c.NG && (this.nk || c.jy || oa.vc && c.vc)`.
+            // NG = MG || !nh (MG = Fixed; nh false for MacroNodes, `QMa(1)`);
+            // jy = PG && nh = cloth. `nk` is false (no ragdoll start in the
+            // port), so a NON-cloth node integrates only under the model shock
+            // latch and its own Shock flag — identical to cloth-only when no
+            // node carries Shock="1".
+            const bool ng = b.fixed || b.is_macro;
+            const bool jy = b.cloth && !b.is_macro;
+            if (ng || !(jy || (shock_latch_ && b.shock))) continue;
             const std::size_t i3 = i * 3;
             float vx = sol_ma_[i3] - sol_mf_[i3];
             float vy = sol_ma_[i3 + 1] - sol_mf_[i3 + 1];
@@ -1799,6 +1807,16 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             sol_ma_[i3 + 2] += vz;
         }
         // (c) jE: 2 edge-relaxation passes (`yu.bFa` mass-weighted).
+        // JS `Al.jE` (L583) cA per node: `d.cA = d.nh && !d.NG &&
+        // (this.nk || d.jy || oa.vc && d.vc)` — with `nh` true for ordinary
+        // Nodes, this is the SAME predicate as `Al.sk` (non-macro, non-NG,
+        // cloth or shock-participating).
+        auto cA_of = [&](std::size_t u) {
+            const Bone& b = bones[u];
+            if (b.fixed || b.is_macro) return false;
+            const bool jy = b.cloth && !b.is_macro;
+            return jy || (shock_latch_ && b.shock);
+        };
         constexpr int kEdgeIters = 2;  // `xd.jE` IterativeProcess
         for (int it = 0; it < kEdgeIters; ++it) {
             for (const EdgeDef& e : model_.edges) {
@@ -1808,14 +1826,14 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 const std::size_t i1 = static_cast<std::size_t>(bi1);
                 const std::size_t i2 = static_cast<std::size_t>(bi2);
                 if (i1 >= n || i2 >= n) continue;
-                // [FIX stretched mesh — cloth-only] JS `Al.jE` @296592:
-                // `d.cA = d.nh && !d.NG && (this.nk || d.jy || a && d.vc)`.
-                // `nh` = the body participates, `NG` = immovable (Fixed /
-                // MacroNode), `jy` = cloth. With `nk` false a body is a
-                // relaxation endpoint ONLY when it is cloth. Non-cloth clip
-                // bones are NOT relaxed (they stay exactly at the clip pose).
-                const bool cA1 = bones[i1].cloth && !bones[i1].fixed && !bones[i1].is_macro;
-                const bool cA2 = bones[i2].cloth && !bones[i2].fixed && !bones[i2].is_macro;
+                // JS `Al.jE` @296592: `d.cA = d.nh && !d.NG &&
+                // (this.nk || d.jy || a && d.vc)`. `nh` = the body
+                // participates, `NG` = immovable (Fixed / MacroNode),
+                // `jy` = cloth; a Shock node also relaxes while the model
+                // shock latch is set. Non-cloth clip bones are NOT relaxed
+                // (they stay exactly at the clip pose).
+                const bool cA1 = cA_of(i1);
+                const bool cA2 = cA_of(i2);
                 if (!cA1 && !cA2) continue;
                 const std::size_t u1 = i1 * 3;
                 const std::size_t u2 = i2 * 3;
