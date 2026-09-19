@@ -553,6 +553,117 @@ void Fighter::add_knockback(int bone, const sf2::scene::Vec3& v) {
         kb_[static_cast<std::size_t>(bone)] + v;
 }
 
+// JS `Al.start(a)` (L582): `this.nk=!0; this.frameCount=0; this.names=[];
+// a!=null&&addRange(this.names,a); this.oa.BKa()`. `BKa()` re-seeds the
+// solver bodies; the port promotes the whole solver state to WORLD space
+// (the JS node `ma` is world) seeded from the current sampled pose with
+// zero velocity.
+void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
+                            float wall_max, float floor_y) {
+    nk_ = true;
+    ragdoll_frame_count_ = 0;
+    ragdoll_names_.clear();
+    if (!reaction.empty()) ragdoll_names_.push_back(reaction);
+    ragdoll_wall_min_ = wall_min;
+    ragdoll_wall_max_ = wall_max;
+    ragdoll_floor_y_ = floor_y;
+    const std::size_t n = model_.bones.size();
+    if (n == 0) return;
+    sol_ma_.assign(n * 3, 0.0f);
+    sol_mf_.assign(n * 3, 0.0f);
+    const bool have_pos = pos_.size() == n * 2;
+    for (std::size_t i = 0; i < n; ++i) {
+        const float wx = have_pos ? pos_[i * 2] : model_.bones[i].x;
+        const float wy = have_pos ? pos_[i * 2 + 1] : model_.bones[i].y;
+        sol_ma_[i * 3] = wx;
+        sol_ma_[i * 3 + 1] = wy;
+        sol_ma_[i * 3 + 2] = model_.bones[i].z;
+        sol_mf_[i * 3] = wx;
+        sol_mf_[i * 3 + 1] = wy;
+        sol_mf_[i * 3 + 2] = model_.bones[i].z;
+    }
+    solver_init_ = true;
+    solver_world_ = true;
+    // `pos = px - px[anchor] + world_x` with `world_x = px[anchor] +
+    // render_offset + j8`, so the placement base (world -> clip) is
+    // `render_offset + j8`. Captured here so `ragdoll_stop` is continuous.
+    solver_base_x_ = render_offset_ + j8_x_;
+    solver_base_y_ = render_offset_y_;
+}
+
+// JS `Al.stop()` (L582): clears `nk` (frameCount/names reset on next start).
+void Fighter::ragdoll_stop() {
+    if (!nk_ && !solver_world_) return;
+    const bool was_world = solver_world_;
+    nk_ = false;
+    ragdoll_frame_count_ = 0;
+    ragdoll_names_.clear();
+    if (was_world && solver_init_ && !sol_ma_.empty()) {
+        // Return the solver state to the clip space the resuming `eda` uses,
+        // and zero the Verlet velocity so the world delta is not read as an
+        // impulse on the transition frame.
+        for (std::size_t i = 0; i < sol_ma_.size(); i += 3) {
+            sol_ma_[i] -= solver_base_x_;
+            sol_ma_[i + 1] -= solver_base_y_;
+        }
+        sol_mf_ = sol_ma_;
+    }
+    solver_world_ = false;
+    render_offset_valid_ = false;  // re-anchor on the next clip sample
+}
+
+// JS `Bl.strike` (L587-588): `a.sx.XA(l)` / `a.Zs.XA(c)` — the impulse-split
+// vectors are ADDED to the endpoint nodes' world `ma` (persistent while the
+// ragdoll is active; the clip apply never overwrites them then).
+void Fighter::strike_node(int bone, const sf2::scene::Vec3& v) {
+    if (bone < 0 || model_.bones.empty()) return;
+    const std::size_t n = model_.bones.size();
+    const std::size_t u = static_cast<std::size_t>(bone);
+    if (u >= n) return;
+    if (solver_world_ && sol_ma_.size() == n * 3) {
+        sol_ma_[u * 3] += v.x;
+        sol_ma_[u * 3 + 1] += v.y;
+        sol_ma_[u * 3 + 2] += v.z;
+    }
+    if (pos_.size() == n * 2) {
+        pos_[u * 2] += v.x;
+        pos_[u * 2 + 1] += v.y;
+    }
+}
+
+int Fighter::capsule_bbox(float& min_x, float& min_y, float& max_x,
+                          float& max_y) const {
+    min_x = min_y = max_x = max_y = 0.0f;
+    const std::size_t n = model_.bones.size();
+    if (pos_.size() < n * 2) return 0;
+    int count = 0;
+    bool first = true;
+    for (const EdgeDef& e : model_.edges) {
+        const int i1 = model_.bone_by_name(e.end1);
+        const int i2 = model_.bone_by_name(e.end2);
+        const int idx[2] = {i1, i2};
+        for (int k = 0; k < 2; ++k) {
+            const int bi = idx[k];
+            if (bi < 0 || static_cast<std::size_t>(bi) >= n) continue;
+            const float vx = pos_[static_cast<std::size_t>(bi) * 2];
+            const float vy = pos_[static_cast<std::size_t>(bi) * 2 + 1];
+            const float r = e.radius;
+            if (first) {
+                min_x = vx - r; max_x = vx + r;
+                min_y = vy - r; max_y = vy + r;
+                first = false;
+            } else {
+                min_x = std::min(min_x, vx - r);
+                max_x = std::max(max_x, vx + r);
+                min_y = std::min(min_y, vy - r);
+                max_y = std::max(max_y, vy + r);
+            }
+        }
+        if (i1 >= 0 || i2 >= 0) ++count;
+    }
+    return count;
+}
+
 // JS `wd.wKa(a)` (L523) — reset the slot's cooldown. Emits `yd(slot,0,0)`.
 void Fighter::ability_cooldown_reset(int slot) {
     switch (slot) {
@@ -754,6 +865,9 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         }
     }
 
+    // JS `Te.Skb` (L551) — the move-start (NS/Skb) transition stops the
+    // ragdoll (`Nd.stop`): a new animation clip takes over from the solver.
+    ragdoll_stop();
     current_move_ = &move;
     ++move_start_count_;  // JS `Te.Skb` L551 -> `x3` -> `Fu.hob()` (dW=null)
     move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
@@ -1804,7 +1918,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // The old code instead accumulated the raw clip bone-0 delta onto
     // `world_x_` — a different node's swing — which is the intro-stance drift
     // (~19u at the idle start) this fixes.
-    if (interp && current_move_ != nullptr) {
+    if (interp && current_move_ != nullptr && !solver_world_) {
         if (!render_offset_valid_) {
             // No `<Align>` (JS `Gla(0,0,0)` shifts nothing): hold the anchor
             // itself continuous.
@@ -1862,13 +1976,19 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // needed. Re-applying a delta here re-stepped a translation and measured
         // it from bone 0 - a node the align never uses.
         // (a) eda: clip bones mf = solved, ma = interpolated clip pose.
-        for (std::size_t i = 0; i < nclip; ++i) {
-            sol_mf_[i * 3] = sol_ma_[i * 3];
-            sol_mf_[i * 3 + 1] = sol_ma_[i * 3 + 1];
-            sol_mf_[i * 3 + 2] = sol_ma_[i * 3 + 2];
-            sol_ma_[i * 3] = px[i];
-            sol_ma_[i * 3 + 1] = py[i];
-            sol_ma_[i * 3 + 2] = pz[i];
+        // While the ragdoll is active (`nk`/`solver_world_`) the clip apply
+        // does NOT overwrite the solver bodies — their `ma` is world space
+        // and must persist (the JS node `ma` is world; this is the
+        // hit-reaction that no longer snaps back).
+        if (!solver_world_) {
+            for (std::size_t i = 0; i < nclip; ++i) {
+                sol_mf_[i * 3] = sol_ma_[i * 3];
+                sol_mf_[i * 3 + 1] = sol_ma_[i * 3 + 1];
+                sol_mf_[i * 3 + 2] = sol_ma_[i * 3 + 2];
+                sol_ma_[i * 3] = px[i];
+                sol_ma_[i * 3 + 1] = py[i];
+                sol_ma_[i * 3 + 2] = pz[i];
+            }
         }
         // [FIX stretched mesh — JS-faithful] `Al.ia()` (L582) runs exactly
         // ONE solver step per 60 Hz frame: `sk(); jE();`. The invented
@@ -1894,7 +2014,8 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             // node carries Shock="1".
             const bool ng = b.fixed || b.is_macro;
             const bool jy = b.cloth && !b.is_macro;
-            if (ng || !(jy || (shock_latch_ && b.shock))) continue;
+            // JS `Al.sk` L583: `!c.NG && (this.nk || c.jy || oa.vc && c.vc)`.
+            if (ng || !(nk_ || jy || (shock_latch_ && b.shock))) continue;
             const std::size_t i3 = i * 3;
             float vx = sol_ma_[i3] - sol_mf_[i3];
             float vy = sol_ma_[i3 + 1] - sol_mf_[i3 + 1];
@@ -1921,7 +2042,9 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             const Bone& b = bones[u];
             if (b.fixed || b.is_macro) return false;
             const bool jy = b.cloth && !b.is_macro;
-            return jy || (shock_latch_ && b.shock);
+            // JS `Al.jE` L583: `d.cA = d.nh && !d.NG && (this.nk || d.jy ||
+            // a && d.vc)` — the same predicate as `Al.sk`.
+            return nk_ || jy || (shock_latch_ && b.shock);
         };
         constexpr int kEdgeIters = 2;  // `xd.jE` IterativeProcess
         for (int it = 0; it < kEdgeIters; ++it) {
@@ -1967,6 +2090,26 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                     sol_ma_[u2 + 1] = sol_ma_[u2 + 1] * r + by;
                     sol_ma_[u2 + 2] = sol_ma_[u2 + 2] * r + bz;
                 }
+            }
+        }
+        // JS `Al.ia` (L582) tail: `sk(); jE(); nk&&frameCount++`.
+        if (nk_) ++ragdoll_frame_count_;
+        // JS `Al.fha` (L582, run from `Al.ia`): clamp every body node to the
+        // arena bounds (x in [wall, width-wall], y >= the floor). Only the
+        // world-space ragdoll state needs it — the clip-space solver is
+        // authored inside the arena.
+        if (solver_world_) {
+            // NOTE: the port's world y is DOWN-positive (`world_to_screen_y`
+            // = `(world_y - center_y)*zoom + view_h/2`), so the arena floor is
+            // the MAX y a body may reach — the clamp is `y <= floor` (the JS
+            // `fha` `y >= 0` in its up-positive world, mirrored by the parse
+            // negation `H(X,-Y,Z)`).
+            for (std::size_t i = 0; i < n; ++i) {
+                float& nx = sol_ma_[i * 3];
+                float& ny = sol_ma_[i * 3 + 1];
+                if (nx < ragdoll_wall_min_) nx = ragdoll_wall_min_;
+                else if (nx > ragdoll_wall_max_) nx = ragdoll_wall_max_;
+                if (ny > ragdoll_floor_y_) ny = ragdoll_floor_y_;
             }
         }
         // (d) Qja/seb: macros re-derived from the solved children.
@@ -2039,7 +2182,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // after the solver — the JS `bYa` runs in `eda` before `Al.ia`, so the
     // native cloth solver state (`sol_ma_`) is NOT rotated (OPEN, cloth-only
     // on rotation moves).
-    if (current_move_ != nullptr && current_move_->rotation.has_rotation &&
+    if (!solver_world_ && current_move_ != nullptr && current_move_->rotation.has_rotation &&
         current_move_->rotation.angle != 0.0f &&
         current_move_->rotation.pos_object == "Nodes") {
         const int pit = model_.bone_by_name(current_move_->rotation.pos_part);
@@ -2076,6 +2219,18 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     //    L1155, default "NPivot"); `anchor`/`anchor_u` were resolved above
     //    (shared with the anchor drive, which rewrites `x` to the JS-posed
     //    NPivot world x).
+    if (solver_world_) {
+        // The ragdoll wins: `px/py` are already WORLD (the solver state was
+        // promoted to world by `ragdoll_start`), so there is no clip
+        // placement and no offset — the clipped/reaction displacement
+        // persists across frames.
+        world_x_ = px[anchor_u];
+        world_y_ = py[anchor_u];
+        for (std::size_t i = 0; i < n; ++i) {
+            pos_[i * 2] = px[i];
+            pos_[i * 2 + 1] = py[i];
+        }
+    } else {
     const float anchor_y = py[anchor_u];
     const float dy = y - anchor_y;
     for (std::size_t i = 0; i < n; ++i) {
@@ -2088,6 +2243,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             pos_[i * 2] += kb_[i].x;
             pos_[i * 2 + 1] += kb_[i].y;
         }
+    }
     }
     // JS `dv.ia` (L840) drops z when it skins the mesh (`Xg[a++] = d.x;
     // Xg[a++] = d.y`), so no per-bone depth is retained for drawing — the

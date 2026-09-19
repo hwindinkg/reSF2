@@ -4106,6 +4106,14 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             if (reaction.find("Fall") != std::string::npos) {
                 def.reaction_fall = true;
             }
+            // JS `Gc.DK` (L673) -> `jJa`/`Qnb` (L507) -> `wd.Mwb`/`Lwb`
+            // (L507/L511) -> `ca.Lwb` (L387) -> `Nd.start(a)` (L582): the
+            // landed reaction STARTS the ragdoll (`nk=true; frameCount=0;
+            // names={reaction}`). `Te.Skb` (`Fighter::start_move_impl`)
+            // calls `Al.stop` when the next clip starts.
+            def.fighter.ragdoll_start(reaction, wall_min_, wall_max_, floor_y_);
+            std::fprintf(stdout, "[ragdoll] F%d %s START '%s' (nk=1)\n", frame,
+                         def.name.c_str(), reaction.c_str());
             std::fprintf(stdout, "[react] F%d %s -> %s\n", frame,
                          def.name.c_str(), reaction.c_str());
             std::fflush(stdout);
@@ -4127,16 +4135,22 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     const float new_x =
         sf2::scene::apply_impulse(hit_cap, ch, impulse, def.fighter.world_x(),
                                   wall_min_, wall_max_, imp);
-    def.fighter.set_world_pos(new_x, def.fighter.world_y());
-    // Per-bone feed (JS `Bl.strike`: the impulse-split vectors move the hit
-    // capsule's endpoint BODIES `sx`/`Zs` — resolved per-label via `wBa` at
-    // build time). The offsets ride the pose + decay per tick, and feed the
-    // next frame's capsules via positions().
+    (void)new_x;  // the displacement now lives on the endpoint NODES (below)
+    // JS `Bl.strike` (L587-588): `a.sx.XA(l)` / `a.Zs.XA(c)` add the
+    // impulse-split vectors to the endpoint nodes' WORLD `ma` directly. While
+    // the ragdoll is active the clip apply never overwrites those nodes, so
+    // the reaction PERSISTS across frames (no decaying offset, no snap-back).
     {
         const int b1 = def.fighter.model().bone_by_name(hit_cap.end1);
         const int b2 = def.fighter.model().bone_by_name(hit_cap.end2);
-        if (b1 >= 0) def.fighter.add_knockback(b1, imp.node1_vec);
-        if (b2 >= 0 && b2 != b1) def.fighter.add_knockback(b2, imp.node2_vec);
+        if (b1 >= 0) def.fighter.strike_node(b1, imp.node1_vec);
+        if (b2 >= 0 && b2 != b1) def.fighter.strike_node(b2, imp.node2_vec);
+        std::fprintf(stdout,
+                     "[strike] F%d %s x1=%.2f x2=%.2f nk=%d frame=%d\n", frame,
+                     def.name.c_str(), imp.node1_vec.x, imp.node2_vec.x,
+                     def.fighter.ragdoll_active() ? 1 : 0,
+                     def.fighter.ragdoll_frame_count());
+        std::fflush(stdout);
     }
     }
 
@@ -4374,6 +4388,15 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // the dojo into the void (the enemy AI previously wandered to x=1244,
     // past the right wall at 900, and stood on the black background).
     me.fighter.clamp_x(wall_min_, wall_max_);
+
+    // [ragdoll probe] Per-frame world position while the `Al` ragdoll latch
+    // is active — the reproduction for "the hit reaction must not snap back".
+    if (me.fighter.ragdoll_active()) {
+        std::fprintf(stdout, "[rdx] F%d %s x=%.2f y=%.2f fc=%d\n", frame(),
+                     me.name.c_str(), me.fighter.world_x(),
+                     me.fighter.world_y(), me.fighter.ragdoll_frame_count());
+        std::fflush(stdout);
+    }
 
     // [FIX Phase 4b — manual control] The PLAYER's key input FIRST: when
     // the fighter is a manual (non-AI, non-auto-attack) fighter, the

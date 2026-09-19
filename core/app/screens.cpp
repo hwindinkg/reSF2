@@ -8059,6 +8059,24 @@ void FightScreen::verify_fight() const {
                          pos[static_cast<std::size_t>(idx) * 2],
                          pos[static_cast<std::size_t>(idx) * 2 + 1]);
         }
+        // Capsule bbox: the <Edges> capsule endpoints inflated by the
+        // capsule radius. Measures MESHLESS models (the dojo Punchbag has no
+        // triangles, so the tri-bbox below is empty for it).
+        {
+            float cmin_x = 0.0f, cmin_y = 0.0f, cmax_x = 0.0f, cmax_y = 0.0f;
+            const int cap_n = f.capsule_bbox(cmin_x, cmin_y, cmax_x, cmax_y);
+            if (cap_n > 0) {
+                std::fprintf(stdout,
+                             "[verify] %s capsule-bbox: (%.1f, %.1f)-(%.1f, %.1f) "
+                             "w=%.1f h=%.1f edges=%d\n",
+                             who, cmin_x, cmin_y, cmax_x, cmax_y,
+                             cmax_x - cmin_x, cmax_y - cmin_y, cap_n);
+            }
+        }
+        // Ragdoll latch (JS `Al.nk`/`frameCount`/`names`).
+        std::fprintf(stdout, "[verify] %s ragdoll nk=%d frame=%d names=%zu\n",
+                     who, f.ragdoll_active() ? 1 : 0, f.ragdoll_frame_count(),
+                     f.ragdoll_names().size());
         float min_x, min_y, max_x, max_y;
         f.triangle_bbox(min_x, min_y, max_x, max_y);
         const float bw = max_x - min_x, bh = max_y - min_y;

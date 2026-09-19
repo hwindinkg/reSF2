@@ -549,6 +549,36 @@ public:
     void set_shock_latch(bool v) { shock_latch_ = v; }
     bool shock_latch() const { return shock_latch_; }
 
+    // --- JS `Al` (L582) — the ragdoll solver latch ------------------------
+    // `Al` ctor (L582): `frameCount=0; names=[]; nk=false`. `Al.start(a)`
+    // (L582): `nk=true; frameCount=0; names=[]; a!=null&&addRange(names,a);
+    // this.oa.BKa()`. `Al.stop()` (L582) clears `nk`. `Al.ia()` (L582) runs
+    // `sk(); jE(); nk&&frameCount++`. While `nk` is set, `Al.sk`/`Al.jE`
+    // (L583) integrate EVERY non-immovable node
+    // (`!NG && (nk || jy || oa.vc && c.vc)`), and a node's `ma` is WORLD
+    // space and is NOT overwritten by the per-frame clip apply — that is
+    // what makes a hit reaction persist (no snap-back).
+    //
+    // `wall_min`/`wall_max`/`floor_y` are the arena bounds `Al.fha` (L582)
+    // clamps every body node to (x in [wall, width-wall], y >= 0 in JS).
+    void ragdoll_start(const std::string& reaction, float wall_min,
+                       float wall_max, float floor_y);
+    void ragdoll_stop();
+    bool ragdoll_active() const { return nk_; }
+    int ragdoll_frame_count() const { return ragdoll_frame_count_; }
+    const std::vector<std::string>& ragdoll_names() const { return ragdoll_names_; }
+
+    // JS `Bl.strike` (L587-588): `a.sx.XA(l)` / `a.Zs.XA(c)` add the
+    // impulse-split displacement to the endpoint nodes' WORLD `ma`.
+    // Persistent across frames while the ragdoll is active.
+    void strike_node(int bone, const sf2::scene::Vec3& v);
+
+    // World-space bbox of every <Edges> capsule endpoint, inflated by the
+    // capsule radius (the meshless Punchbag has no triangles; the capsule
+    // list still measures it). Returns the number of resolved edges.
+    int capsule_bbox(float& min_x, float& min_y, float& max_x,
+                     float& max_y) const;
+
     // Per-bone knockback offsets (JS `Bl.strike` L582 moves the hit
     // capsule's endpoint BODIES, not the whole fighter). `add_knockback`
     // accumulates the impulse-split vector onto a bone; the offsets ride on
@@ -787,6 +817,21 @@ private:
     float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
     float scale_acc_ = 0.0f;   // timescale fractional accumulator
     std::vector<sf2::scene::Vec3> kb_;  // per-bone knockback offsets (world)
+    // --- JS `Al` solver latch (see `ragdoll_start`) -----------------------
+    bool nk_ = false;                         // JS `Al.nk` (ragdoll active)
+    int ragdoll_frame_count_ = 0;             // JS `Al.frameCount`
+    std::vector<std::string> ragdoll_names_;  // JS `Al.names`
+    // The solver state (`sol_ma_`/`sol_mf_`) is promoted to WORLD space while
+    // the ragdoll is active (the JS node `ma` is world). `solver_base_*` is
+    // the world->clip placement base captured at start; `ragdoll_stop`
+    // subtracts it so the resuming clip apply stays continuous.
+    bool solver_world_ = false;
+    float solver_base_x_ = 0.0f;
+    float solver_base_y_ = 0.0f;
+    // Arena bounds for the per-frame body clamp (JS `Al.fha` L582).
+    float ragdoll_wall_min_ = 0.0f;
+    float ragdoll_wall_max_ = 0.0f;
+    float ragdoll_floor_y_ = 0.0f;
     std::set<std::string> active_intervals_; // active interval names (JS `Te.xj`)
     // --- move-frame action dispatch (JS `Te.Lwa` / `Te.CZa`) --------------
     // JS `xc.voice` (see `set_voice`).
