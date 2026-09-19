@@ -3489,18 +3489,27 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // `<HitEffects>` "Shock" row (`select_hit_effect(false,false,true)` = the
     // `ZAa` port, L422) through the camera hit-effect latch. `v.Qxa` =
     // `kCounterPunches`. `FightNone` is uniquely the dojo Punchbag
-    // (`stages.xml` zone Punchbag node `Training` Type="DUMMY"; JS also
-    // checks `Zb.$s=="Punchbag"`, a fighter label the controller does not
-    // carry). `oa.vc=!0` + `V_a()` (L517) release the model's `Weak="1"`
-    // parts via `kla(false)`; `mdl_punching_bag` (the dojo dummy's Armor)
-    // has NO `Weak` part (only `mdl_skeleton_punching_bag` `Node12` does),
-    // so `V_a()` is unobservable here and is omitted.
+    // (`stages.xml` zone Punchbag node `Training` Type="DUMMY"; JS `p.Wab`
+    // L181 maps DUMMY -> "FightNone"; JS also checks `Zb.$s=="Punchbag"`, a
+    // fighter label the controller does not carry).
+    // `oa.vc=!0` (`a.model.oa.vc=!0`) is the model's shock latch — the same
+    // flag `wd.vc` the port keeps as `FightFighter::shock.shocked_vc`
+    // (JS `Cgb` L394 `Ub&&(a.model.vc?...:a.model.vc=!0)`). `V_a()` (L517:
+    // `let a=0,b=this.oa.Va.all; ... c.UEa&&c.kla(!1)`) releases the model's
+    // `Weak="1"` figures. The NotAnimation dummy DOES wear
+    // `SkeletonPunchingBag` (`stages.xml` L15; model merge in the FightScreen
+    // ctor keeps `assets.merged_bag`), whose Node12 carries `Weak`
+    // (MODEL_FORMAT §, JS `UEa` L572), so `V_a()` is NOT unobservable in
+    // principle — but the port has no `Weak`-figure release (`kla`)
+    // subsystem (the model parse drops the attribute), so `V_a()` remains
+    // unimplemented (OPEN) rather than "no such part".
     if (battle_.type == "FightNone" && !def.is_player &&
         def.fighter.hits_taken() == kCounterPunches) {
         if (const sf2::scene::HitEffect* forced =
                 sf2::scene::select_hit_effect(false, false, true)) {
             camera_.apply_hit_effect(*forced);
         }
+        def.shock.shocked_vc = true;  // `a.model.oa.vc=!0` (L396)
     }
 
     // [fx] Hit sparks `ql.Rub`/`Ut.ryb` (JS L369/L824): the burst is spawned

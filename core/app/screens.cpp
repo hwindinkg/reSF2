@@ -8444,6 +8444,71 @@ void FightScreen::render_impl(App& app) {
         }
     }
 
+    // --- JS `Ut.V0a` (L831) + `Ut.kyb` (L825): the flashing `arrow` marker --
+    // `Ut.V0a` creates the marker (`E.get(268)`, frame `y.OQa` = "arrow") and
+    // appends it to the arena render node `this.go.node`; `Ut.init` (L823) runs
+    // `UWa()` (which appends the camera-glued `Cu` container) BEFORE `V0a()`, so
+    // the marker is the LAST child and draws over every layer and overlay.
+    // `ql.init` (L368) builds ONE `Ut` per camera (`this.ia = new Ut(this.go)`)
+    // and the FIGHT drives it every frame (`ql.Zga` L369 -> `ql.d3a` L366 ->
+    // `this.ia.Al(...)`), exactly like the Dojo `FightNone` viewer. The marker
+    // is therefore part of the shared arena and must be drawn in every battle.
+    // `Ut.Al` (L827) places it under the PLAYER every frame:
+    //   x = Io - (Lb.width/2 - c.x)*Bj        (c = the player)
+    //   y = Lb.hn.go.node.translate.y + 2*F9*Bj + 10
+    //   alpha = .5 + .5*sin(pi/ArrowFlashingFrames * $O)     (`Ut.kyb` L825)
+    // `F9 = (Lb.height/2 - Lb.ct)/2` (L823); `ArrowFlashingFrames` = `ge.gba`
+    // (L1278, default 120). Same frame, position rule, alpha and z as the dojo
+    // draw site (DojoScreen::render_impl) — one `Ut`, both screens.
+    {
+        sf2::data::atlas_frame afr;
+        int atw = 0, ath = 0;
+        unsigned int agl = 0;
+        if (app.get_atlas_frame("arrow", &afr, &atw, &ath, &agl)) {
+            constexpr float kPi = 3.14159265358979323846f;
+            constexpr float kArrowFlashingFrames = 120.0f;  // `ge.gba` L1278
+            // `2*F9 = Lb.height/2 - Lb.ct` = the `tl` container y translate the
+            // fighters' `project()` already carries as `cont_y`, so the marker's
+            // drop from the container origin is `2*F9*Bj + 10` (the arena floor
+            // line + 10) — the same `world_to_screen_y` space the fighters use.
+            const float f9 = (camera.arena_h * 0.5f - camera.arena_floor) * 0.5f;
+            const float bj = camera.layer_zoom;  // JS `Ut.Bj` (`xCa` L831)
+            const float arrow_world_y = 2.0f * f9 * bj + 10.0f;
+            // The player's LOCATION-space x, converted to the container space
+            // `world_to_screen_x` takes (`verts - arena_half`, `git` `tl.init`
+            // L843 x=-width/2) exactly like the dojo draw site.
+            const float px = fight_->player().fighter.world_x();
+            const float sx = camera.world_to_screen_x(px - arena_half, 1.0f);
+            const float sy = camera.world_to_screen_y(arrow_world_y);
+            const float nat_w = afr.source_w > 0 ? static_cast<float>(afr.source_w)
+                                                : static_cast<float>(afr.w);
+            const float nat_h = afr.source_h > 0 ? static_cast<float>(afr.source_h)
+                                                : static_cast<float>(afr.h);
+            static int arrow_phase = 0;  // JS `Ut.$O` (reset to 0 in `V0a` L831)
+            const float alpha =
+                0.5f + 0.5f * std::sin(kPi / kArrowFlashingFrames *
+                                       static_cast<float>(arrow_phase));
+            arrow_phase =
+                (arrow_phase + 1) % static_cast<int>(kArrowFlashingFrames);
+            static bool fight_arrow_logged = false;
+            if (!fight_arrow_logged) {
+                fight_arrow_logged = true;
+                std::fprintf(stdout,
+                             "[fight] arrow frame=%dx%d player_loc_x=%.1f -> "
+                             "screen=(%.1f,%.1f) alpha=%.2f\n",
+                             static_cast<int>(nat_w), static_cast<int>(nat_h),
+                             static_cast<double>(px), static_cast<double>(sx),
+                             static_cast<double>(sy), static_cast<double>(alpha));
+                std::fflush(stdout);
+            }
+            draw_atlas_region(app, "arrow", static_cast<float>(afr.x),
+                              static_cast<float>(afr.y), static_cast<float>(afr.w),
+                              static_cast<float>(afr.h), static_cast<float>(atw),
+                              static_cast<float>(ath), sx, sy, nat_w * camera.zoom,
+                              nat_h * camera.zoom, alpha, /*flip_x=*/false);
+        }
+    }
+
     // Scene letterbox bars (JS `ma.Sya` L1833-1834; PORT_AUDIT_SCENE D10):
     // drawn over the scene, under the HUD — no-op at 16:9 (BK=0, arena
     // 728px spans y[-4,724]).
