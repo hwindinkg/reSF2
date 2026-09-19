@@ -68,6 +68,26 @@ struct MagicInstance {
     bool playing = true;      // JS `ni.LJ`
     float accum = 0.0f;       // JS `ni.Qe` — frame-time accumulator (seconds)
     float age = 0.0f;         // ticks lived (for the end-fade)
+    // JS `bv.model` — the emitting model, the second half of the effect
+    // identity used by `LNa`/`Gwb` (`b == f.model`). 0/1 = the native fight
+    // sides (player/enemy); -1 = unbound (legacy spawn).
+    int owner = -1;
+    // JS `bv.effect.P1` — a follow/attach effect (set by `<Attach>` or
+    // `<Position Follow="true">`, `Yl.parse` L730). Repositioned every tick
+    // from the owner's live transform by `bv.update` (L834).
+    bool follow = false;
+    // JS `bv.Yla` — latched by `StopFollowEffect` (`cv.Gwb` L838). While set,
+    // `cv.WL` (L839) skips the `d.update()` follow step but keeps advancing
+    // the frame animation (`d.animate.ia`) to completion.
+    bool detached = false;
+};
+
+// One owner transform for the follow update (JS `bv.update` reads
+// `model.Fc` + `model.da.hd()`): world anchor + facing sign.
+struct EffectAnchor {
+    float x = 0.0f;
+    float y = 0.0f;
+    int facing = 1;
 };
 
 // The two render containers (JS `Xm` + `cv`, L836-839): descriptors + live
@@ -92,17 +112,33 @@ public:
     void add_default_descs();
 
     // Spawns a live instance (JS `Nt`/`lwb`). Returns false for unknown
-    // names (never throws, never touches the sim).
-    bool spawn(const std::string& name, float x, float y, int facing);
+    // names (never throws, never touches the sim). `owner` is the emitting
+    // model (JS `bv.model`); `follow` marks a follow/attach effect (JS `P1`).
+    bool spawn(const std::string& name, float x, float y, int facing,
+               int owner = -1, bool follow = false);
 
-    // Stops live instances of `name` (JS `Pt`/`Hwb`); `stop_all` clears.
-    void stop(const std::string& name);
+    // JS `cv.Dwb`/`LNa` (L838): StopEffect. Destroys the FIRST live instance
+    // whose `(effect.name == name && model == owner)` matches (the loop
+    // `break`s on the first hit). `owner < 0` keeps the legacy remove-all of
+    // every instance with that name.
+    void stop(const std::string& name, int owner);
+    // Legacy name-only stop (remove every instance with that name).
+    void stop(const std::string& name) { stop(name, -1); }
     void stop_all();
+
+    // JS `cv.Hwb`/`Gwb` (L838): StopFollowEffect. Latches `Yla` on the first
+    // live instance whose `(effect.name == name && model == owner)` matches,
+    // which stops the follow update while the animation plays out.
+    void stop_follow(const std::string& name, int owner);
 
     // Advances one 60 Hz tick (JS `ni.ia`: `animate.ia(Bm * (1 / v.on()))`).
     // `timescale` is JS `v.on()` (1.0 = real time). Finished one-shots
-    // (`!LJ`) are destroyed (JS `LNa`); loopers wrap.
-    void update(float timescale);
+    // (`!LJ`) are destroyed (JS `LNa`); loopers wrap. `owners`/`owner_count`
+    // are the live model transforms for the follow update (`bv.update` L834):
+    // a live `follow && !detached` instance is repositioned from
+    // `owners[in.owner]` before the frame step.
+    void update(float timescale, const EffectAnchor* owners = nullptr,
+                int owner_count = 0);
 
     // The two render containers (JS `tl.Gq`/`tl.Hq`, L842-844). `background`
     // holds the `OnBackground` (`Gfb`) instances (JS `Gq`, z=+.01) that draw

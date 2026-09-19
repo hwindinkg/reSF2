@@ -68,7 +68,8 @@ const MagicEffectDesc* MagicEffects::find(const std::string& name) const {
     return nullptr;
 }
 
-bool MagicEffects::spawn(const std::string& name, float x, float y, int facing) {
+bool MagicEffects::spawn(const std::string& name, float x, float y, int facing,
+                         int owner, bool follow) {
     const MagicEffectDesc* d = find(name);
     if (d == nullptr) return false;
     const std::size_t idx = static_cast<std::size_t>(d - descs_.data());
@@ -88,6 +89,8 @@ bool MagicEffects::spawn(const std::string& name, float x, float y, int facing) 
     in.playing = true;
     in.accum = 0.0f;
     in.age = 0.0f;
+    in.owner = owner;    // JS `bv.model`
+    in.follow = follow;  // JS `bv.effect.P1`
     // JS `tl.Nt(a)` (L842): `a.Gfb ? this.Gq.Nt(a) : this.Hq.Nt(a)` — the
     // `Yl` (Effect trigger action, L728: `Uh(a){a.gwb(this)}` -> fighter `Nt`
     // bus -> `tl.ZP` listener) routes by the descriptor's `OnBackground`
@@ -110,15 +113,49 @@ std::vector<MagicInstance> MagicEffects::live() const {
     return all;
 }
 
-void MagicEffects::stop(const std::string& name) {
+void MagicEffects::stop(const std::string& name, int owner) {
     const MagicEffectDesc* d = find(name);
     if (d == nullptr) return;
     const std::size_t idx = static_cast<std::size_t>(d - descs_.data());
-    const auto dead = [idx](const MagicInstance& in) { return in.desc == idx; };
-    background_.erase(std::remove_if(background_.begin(), background_.end(), dead),
-                      background_.end());
-    foreground_.erase(std::remove_if(foreground_.begin(), foreground_.end(), dead),
-                      foreground_.end());
+    // JS `tl.Ot` (L843) calls `Gq.Ot(a)` then `Hq.Ot(a)`; each `cv.Dwb` ->
+    // `LNa` (L838) removes the FIRST entry matching `(model, name)` and
+    // `break`s. `owner < 0` keeps the legacy remove-all-by-name.
+    const auto purge = [idx, owner](std::vector<MagicInstance>& v) {
+        if (owner < 0) {
+            v.erase(std::remove_if(v.begin(), v.end(),
+                                   [idx](const MagicInstance& in) {
+                                       return in.desc == idx;
+                                   }),
+                    v.end());
+            return;
+        }
+        for (std::size_t i = 0; i < v.size(); ++i) {
+            if (v[i].desc == idx && v[i].owner == owner) {
+                v.erase(v.begin() + static_cast<std::ptrdiff_t>(i));
+                return;  // JS `break` — first match only
+            }
+        }
+    };
+    purge(background_);
+    purge(foreground_);
+}
+
+void MagicEffects::stop_follow(const std::string& name, int owner) {
+    const MagicEffectDesc* d = find(name);
+    if (d == nullptr) return;
+    const std::size_t idx = static_cast<std::size_t>(d - descs_.data());
+    // JS `cv.Hwb` -> `Gwb` (L838): latch `Yla` on the first `(model, name)`
+    // match, `break`ing. `tl.Pt` (L843) runs it for both `Gq` and `Hq`.
+    const auto latch = [idx, owner](std::vector<MagicInstance>& v) {
+        for (MagicInstance& in : v) {
+            if (in.desc == idx && in.owner == owner) {
+                in.detached = true;  // JS `e.Yla = !0`
+                return;
+            }
+        }
+    };
+    latch(background_);
+    latch(foreground_);
 }
 
 void MagicEffects::stop_all() {
@@ -126,17 +163,29 @@ void MagicEffects::stop_all() {
     foreground_.clear();
 }
 
-void MagicEffects::update(float timescale) {
+void MagicEffects::update(float timescale, const EffectAnchor* owners,
+                          int owner_count) {
     const float ts = timescale > 0.0f ? timescale : 1.0f;
     // JS `cv.WL` (L839): `animate.ia(L.K.sk.Bm * a)` with `a = 1/v.on()`.
     const float dt = (1.0f / 60.0f) / ts;
     // The same stepping runs for both containers (JS `Gq.WL()` + `Hq.WL()`,
     // `tl.WL` L837 calls each `Xm.WL`).
-    const auto step = [this, ts, dt](std::vector<MagicInstance>& live) {
+    const auto step = [this, ts, dt, owners, owner_count](
+                          std::vector<MagicInstance>& live) {
         std::size_t w = 0;
         for (std::size_t i = 0; i < live.size(); ++i) {
             MagicInstance& in = live[i];
             const MagicEffectDesc& d = descs_[in.desc];
+            // JS `bv.update` (L834, reached from `cv.WL` L839 only while
+            // `effect.P1 && !Yla`): reposition a live follow/attach effect
+            // onto its model before the frame advance. StopFollowEffect
+            // latches `Yla` (`detached`) and suppresses this.
+            if (in.follow && !in.detached && owners != nullptr &&
+                in.owner >= 0 && in.owner < owner_count) {
+                in.x = owners[in.owner].x;
+                in.y = owners[in.owner].y;
+                in.facing = owners[in.owner].facing >= 0 ? 1 : -1;
+            }
             in.age += 1.0f;
             in.x += in.vx / ts;
             in.y += in.vy / ts;

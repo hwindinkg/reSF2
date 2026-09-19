@@ -1040,7 +1040,12 @@ bool FightController::global_kind_dispatched(const std::string& kind) {
            kind == "SetEndStage" || kind == "ShakeScreen" ||
            kind == "CameraWeight" || kind == "EnableBossAbility" ||
            kind == "AddBullets" || kind == "HitEffect" ||
-           kind == "CreatePlayer" || kind == "Delete" || kind == "PlayAnimation";
+           kind == "CreatePlayer" || kind == "Delete" || kind == "PlayAnimation" ||
+           // JS `Yl`/`gm`/`hm` (L728/L735/L736) -> `exec_action`'s Effect /
+           // StopEffect / StopFollowEffect branches (the global `<Triggers>`
+           // ships Effect 39 / StopEffect 39).
+           kind == "Effect" || kind == "StopEffect" ||
+           kind == "StopFollowEffect";
 }
 
 std::size_t FightController::global_action_kinds() const {
@@ -3038,20 +3043,41 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         m.col_side = tgt;
         bus_.install_mod(owner_side, std::move(m));
     } else if (type == "Effect") {
-        // JS `Yl` (L728) trigger action -> `wd.gwb` (L519: `this.Nt.Z(a)`) ->
-        // `tl.Nt` (L842): route the started effect by `Gfb` (OnBackground)
-        // into `Gq`/`Hq` (modelled by `magic_fx_`). OPEN: this snapshot ships
-        // no `magic/*.json` registry, so an unknown Name is a no-op; the
-        // `<Position>`/bone attach (L730) is not modelled (the effect spawns
-        // at the owner's anchor).
+        // JS `Yl` (L728) -> `wd.gwb` (L519: `this.Nt.Z(a)`) -> `tl.Nt`
+        // (L842): route the started effect by `Gfb` (OnBackground) into
+        // `Gq`/`Hq` (modelled by `magic_fx_`). The identity is `(Name, model)`
+        // — `bv.model` is stamped here so `StopEffect`/`StopFollowEffect` can
+        // resolve it (L838 `LNa`/`Gwb`). The `<Attach>`/`<Position Follow>`
+        // follow (`P1`, L730) is not parsed yet, so `follow` stays false; an
+        // unknown Name is a no-op.
         const std::string nm = str("Name");
         if (!nm.empty()) {
             FightFighter& owner = (owner_side == 0) ? player_ : enemy_;
+            const int side = (owner_side == 0) ? 0 : 1;
             const bool ok = magic_fx_.spawn(nm, owner.fighter.world_x(),
                                             owner.fighter.world_y(),
-                                            owner.fighter.facing());
+                                            owner.fighter.facing(), side);
             bus_.log("effect " + nm +
                      (ok ? std::string() : std::string(" (no descriptor)")));
+        }
+    } else if (type == "StopEffect") {
+        // JS `gm` (L735) -> `wd.Svb` (L519: `a.model=…; this.Ot.Z(a)`) ->
+        // `tl.Ot` (L843) -> `cv.Dwb` -> `LNa(name, model)` (L838): destroy
+        // the first live effect matching `(name, owner model)`.
+        const std::string nm = str("Name");
+        if (!nm.empty()) {
+            magic_fx_.stop(nm, (owner_side == 0) ? 0 : 1);
+            bus_.log("stopeffect " + nm);
+        }
+    } else if (type == "StopFollowEffect") {
+        // JS `hm` (L736) -> `wd.Uvb` (L519: `a.model=this; this.Pt.Z(a)`) ->
+        // `tl.Pt` (L843) -> `cv.Hwb` -> `Gwb` (L838): latch `Yla` on the
+        // matching `(name, owner model)` so `cv.WL` stops the follow update
+        // but keeps the animation running to its end.
+        const std::string nm = str("Name");
+        if (!nm.empty()) {
+            magic_fx_.stop_follow(nm, (owner_side == 0) ? 0 : 1);
+            bus_.log("stopfolloweffect " + nm);
         }
     } else if (is_combat_action(type)) {
         bus_.log("perknoop " + type + " (outside hit scope, OPEN)");
@@ -4501,8 +4527,15 @@ void FightController::update(float dt) {
     // JS `ql.Fnb` + `ql.d3a` run in the camera's `Ea()` (L364/L363).
     fx_.update();
     // Magic/effect containers (JS `tl.WL` L837 -> `Gq.WL`/`Hq.WL`; the
-    // timescale `1/v.on()` = 1.0 here). Presentation only.
-    magic_fx_.update(1.0f);
+    // timescale `1/v.on()` = 1.0 here). Presentation only. The two owner
+    // anchors feed the follow update (`bv.update` L834) for `follow` effects.
+    const sf2::scene::EffectAnchor fx_anchors[2] = {
+        {player_.fighter.world_x(), player_.fighter.world_y(),
+         player_.fighter.facing()},
+        {enemy_.fighter.world_x(), enemy_.fighter.world_y(),
+         enemy_.fighter.facing()},
+    };
+    magic_fx_.update(1.0f, fx_anchors, 2);
     // Child models (JS `wd.vd` — the `<CreatePlayer>` spawns): advance their
     // clips + fire their own `AnimationEnd` actions. Presentation only.
     update_children();

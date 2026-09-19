@@ -36,6 +36,7 @@
 #include "app/save_system.hpp"
 #include "app/screens.hpp"
 #include "scene/fighter.hpp"
+#include "scene/magic_effects.hpp"
 #include "scene/renderer.hpp"
 
 namespace {
@@ -1345,6 +1346,7 @@ int main(int argc, char** argv) {
     bool observe_dialogs = false;   // --observe-dialogs: keep the queue observable
     bool replay_mode = false;
     bool verify_input = false;
+    bool fx_probe = false;  // --fx-probe: targeted FX-bus self-check (no OS input)
     // --input-tape [js|desktop]: the scripted key/pointer tape fed through the
     // REAL input consumer (FightScreen::on_key, the function App::poll_input
     // calls for every GLFW key edge). `js` forces the byte-exact `Af.oUa`
@@ -1419,6 +1421,63 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--verify-input") {
             verify_input = true;
+        } else if (arg == "--fx-probe") {
+            // Targeted FX-bus self-check (no OS input, no sim): exercises the
+            // three kinds end to end — spawn (`Yl`/`lwb`), the follow update
+            // (`bv.update`), a draw-list/frame read (`cv.WL` state),
+            // StopEffect (`gm`/`Dwb`/`LNa` destroy) and StopFollowEffect
+            // (`hm`/`Hwb`/`Gwb` `Yla` latch, animation runs to completion).
+            fx_probe = true;
+            sf2::scene::MagicEffects fx;
+            fx.add_default_descs();
+            sf2::scene::EffectAnchor anchors[2] = {
+                {100.0f, -10.0f, 1}, {-100.0f, -8.0f, -1}};
+            const bool s0 = fx.spawn("hit_flash", anchors[0].x, anchors[0].y, 1,
+                                     0, /*follow=*/true);
+            const bool s1 = fx.spawn("hit_flash", anchors[1].x, anchors[1].y, -1,
+                                     1, /*follow=*/true);
+            const std::size_t spawned = fx.live().size();
+            // Follow update: move owner 0 and tick once.
+            anchors[0].x = 250.0f;
+            anchors[0].y = -30.0f;
+            fx.update(1.0f, anchors, 2);
+            bool follow_ok = false, draw_ok = false;
+            for (const sf2::scene::MagicInstance& in : fx.live()) {
+                if (in.owner == 0 && std::fabs(in.x - 250.0f) < 0.01f) {
+                    follow_ok = true;
+                }
+                if (!fx.frame_for(in).empty()) draw_ok = true;
+            }
+            // StopEffect: destroy the owner-0 instance only.
+            fx.stop("hit_flash", 0);
+            bool destroyed = true;
+            for (const sf2::scene::MagicInstance& in : fx.live()) {
+                if (in.owner == 0) destroyed = false;
+            }
+            // StopFollowEffect: latch the owner-1 instance (keeps animating).
+            fx.stop_follow("hit_flash", 1);
+            bool latch_alive = false, latch_detached = false;
+            for (const sf2::scene::MagicInstance& in : fx.live()) {
+                if (in.owner == 1) {
+                    latch_alive = true;
+                    latch_detached = in.detached;
+                }
+            }
+            // The latched one-shot (29 frames) must run out and be removed.
+            for (int f = 0; f < 40; ++f) fx.update(1.0f, anchors, 2);
+            const bool emptied = fx.empty();
+            const bool pass = s0 && s1 && spawned == 2 && follow_ok && draw_ok &&
+                              destroyed && latch_alive && latch_detached && emptied;
+            std::fprintf(stdout,
+                         "[fxprobe] spawn=%zu/%d follow=%d draw=%d "
+                         "stopeffect_destroyed=%d stopfollow_alive=%d "
+                         "detached=%d finished_empty=%d -> %s\n",
+                         spawned, (s0 && s1) ? 1 : 0, follow_ok ? 1 : 0,
+                         draw_ok ? 1 : 0, destroyed ? 1 : 0, latch_alive ? 1 : 0,
+                         latch_detached ? 1 : 0, emptied ? 1 : 0,
+                         pass ? "PASS" : "FAIL");
+            (void)fx_probe;
+            return 0;
         } else if (arg == "--loadout" && i + 1 < argc) {
             loadout = argv[++i];
         } else if (arg == "--input-tape") {
