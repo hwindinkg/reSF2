@@ -5772,8 +5772,14 @@ QuestDialogRow quest_dialog_row(App& app, const EngineDialog& d,
             secondary = true;
         }
     };
-    // `hab()` L1060: a slot "exists" when its nested action list is non-empty.
-    if (!d.button_actions.empty()) add(1, true, d.button_text, d.button_color);
+    // `He.Rib` L1057-1058: an authored `<Button Type="Right">` creates the `rh`
+    // slot even when it nests no actions, and `Xc.Xhb` L1047 always hands it to
+    // `Od`. `hab()` L1060 gates ONLY the Notification OK plate (L1050), so a
+    // `Regular` plate exists whenever the slot does (tests that populate
+    // `button_actions` directly are covered by the second clause).
+    if (d.has_right_button || !d.button_actions.empty()) {
+        add(1, true, d.button_text, d.button_color);
+    }
     if (!d.left_.actions.empty()) add(0, false, d.left_.text, d.left_.color);
     if (r.count < 2 && !d.middle_.actions.empty()) {
         add(2, false, d.middle_.text, d.middle_.color);

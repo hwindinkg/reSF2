@@ -127,6 +127,13 @@ struct EngineDialog {
     // press via `He.dhb(1)` L1061). Empty = no button (Notification OK with
     // no actions, `hab()` false).
     std::vector<QuestAction> button_actions;
+    // `He.Rib` L1057-1058: an authored `<Button Type="Right">` (or a bare
+    // `<Button>` with no `Type`) creates the `rh` slot even with NO nested
+    // actions. `Xc.Xhb` L1047 always passes that slot to `Od` (`e`/`k`); `hab()`
+    // L1060 gates ONLY the Notification OK plate (L1050). tutorial_quests.xml
+    // L112 (`<Button Type="Right" Color="White" />`) is exactly this: a
+    // `Regular` whose plate the port dropped because `button_actions` was empty.
+    bool has_right_button = false;
     // The other `He` slots (`He.Rib` L1057-1058): Left→`Ng`, Middle→`Nh`,
     // Close→`Hj`. `dhb` L1061 dispatches them by index (0/2/100); the Right
     // slot above is index 1.
@@ -283,7 +290,16 @@ public:
     bool has_dialog() const { return !dialogs_.empty(); }
     const EngineDialog& dialog() const { return dialogs_.front(); }
     void pop_dialog() {
-        if (!dialogs_.empty()) dialogs_.erase(dialogs_.begin());
+        // `Wb`'s top is the first NON-Notification (`modal_index`) — the same
+        // entry `press_dialog` erases. Erasing `begin()` dropped a leading bar
+        // Notification instead: the `tutorial_shop` bar entry queued by
+        // `StoryTutorialOpenScene` (tutorial_quests.xml L350) was still in the
+        // queue when the follow-up `Regular` (L327/L110) arrived, so dismissing
+        // the `Regular` left IT queued and the modal re-blocked the Shop forever.
+        const std::size_t i = modal_index();
+        if (i < dialogs_.size()) {
+            dialogs_.erase(dialogs_.begin() + static_cast<std::ptrdiff_t>(i));
+        }
     }
 
     // --- `Ib` bar vs `Wb` modal (JS `He.S` L1050 / `Wb.Xob` L927) ----------
@@ -348,8 +364,9 @@ public:
     bool dialog_has_button() const {
         const EngineDialog* d = modal_top();
         return d != nullptr &&
-               (!d->button_actions.empty() || !d->left_.actions.empty() ||
-                !d->middle_.actions.empty() || !d->close_.actions.empty());
+               (d->has_right_button || !d->button_actions.empty() ||
+                !d->left_.actions.empty() || !d->middle_.actions.empty() ||
+                !d->close_.actions.empty());
     }
 
     // Drops every queued dialog (tutorial handoff / scene reset).

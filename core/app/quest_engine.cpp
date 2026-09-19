@@ -919,6 +919,9 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                         const std::string bc = attr_or(c.attrs, "Color");
                         const bool hint = attr_or(c.attrs, "Flashing") == "1";
                         if (btype.empty() || btype == "Right") {
+                            // `He.Rib` L1057-1058: the `<Button>` creates the
+                            // `rh` slot regardless of nested actions.
+                            dlg.has_right_button = true;
                             // Defer the nested actions (`dhb(1)` L1061).
                             for (const QuestAction& sub : c.children) {
                                 dlg.button_actions.push_back(sub);
