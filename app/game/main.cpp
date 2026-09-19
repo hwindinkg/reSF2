@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -55,7 +56,9 @@ void print_usage(const char* argv0) {
                   "                  [--dump-pose N] [--dump-clip <name>]\n"
                   "                  [--ui-tour] [--fidelity-tour] [--quest-verify]\n"
                   "                  [--dialog-verify] [--replay [file]] [--verify-input]\n"
-                 "  res_root  default reference/www/res\n"
+                  "  --watchdog N     RULE 0: force-exit a driver run after N seconds\n"
+                  "                   (0 disables; default 900)\n"
+                  "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
                  "  --headless-loop  run the scripted playable loop, then exit\n"
                  "                   (dojo -> map -> BOSS_LYNX fight -> results -> shop\n"
@@ -1337,6 +1340,25 @@ struct QuestVerifyDriver {
 
 } // namespace
 
+// RULE 0: the hard watchdog. Every driver/tour/probe run must be incapable of
+// blocking forever on a modal/settle/wait loop, so a detached thread force-
+// exits the process after `seconds` with a printed reason. Only installed for
+// driver modes (never the plain interactive launch). `--watchdog <sec>`
+// overrides the default; `<= 0` disables it.
+constexpr int kDefaultWatchdogSeconds = 900;
+static void install_watchdog(int seconds) {
+    if (seconds <= 0) {
+        return;
+    }
+    std::thread([seconds]() {
+        std::this_thread::sleep_for(std::chrono::seconds(seconds));
+        std::fprintf(stdout, "[watchdog] timeout after %ds\n", seconds);
+        std::fflush(stdout);
+        std::fflush(stderr);
+        std::_Exit(7);
+    }).detach();
+}
+
 int main(int argc, char** argv) {
     std::string res_root = "reference/www/res";
     std::string save_path = "reference/saves/save.xml";
@@ -1392,6 +1414,8 @@ int main(int argc, char** argv) {
     // deterministic regardless of the ambient save — required by the probe
     // harness, whose expectations are authored per loadout.
     std::string loadout;
+    // RULE 0: the hard watchdog bound (seconds). See install_watchdog().
+    int watchdog_secs = kDefaultWatchdogSeconds;
 
     // Positional args (res_root, save_path) are assigned by slot, not by
     // value: a user passing the default res_root explicitly used to collide
@@ -1402,6 +1426,8 @@ int main(int argc, char** argv) {
         const std::string arg = argv[i];
         if (arg == "--headless" && i + 1 < argc) {
             headless = std::atoi(argv[++i]);
+        } else if (arg == "--watchdog" && i + 1 < argc) {
+            watchdog_secs = std::atoi(argv[++i]);
         } else if (arg == "--autoclick") {
             auto_click = true;
         } else if (arg == "--headless-loop") {
@@ -1612,6 +1638,20 @@ int main(int argc, char** argv) {
         }
     }
 
+    // RULE 0: driver/tour/probe modes run INVISIBLE and under a hard watchdog.
+    // Every flag below turns the process into a non-interactive driver; only a
+    // plain `game` launch (no flags) is a real, visible, user-driven window.
+    const bool driver_mode =
+        headless > 0 || auto_click || headless_loop || ui_tour || fidelity_tour ||
+        quest_verify || quest_verify_buy || dialog_verify || observe_dialogs ||
+        replay_mode || verify_input || fx_probe || input_tape || verify_place ||
+        debug_ui || capture_fight || capture_idle_fight || auto_attack ||
+        fight_mode || !capture_dir.empty() || !dump_clip.empty() ||
+        dump_pose_frames > 0 || !fight_battle.empty() || !fight_zone.empty();
+    if (driver_mode) {
+        install_watchdog(watchdog_secs);
+    }
+
     // The `--verify-input` tape + probe expectations are authored on the
     // shipped Fists loadout (`reference/tools/input_phase1.txt`), so an
     // unspecified verify run pins Fists. `--loadout <WeaponSubType>` runs the
@@ -1705,7 +1745,7 @@ int main(int argc, char** argv) {
     }
 
     sf2::app::App app;
-    if (!app.init(res_root, save_path)) {
+    if (!app.init(res_root, save_path, std::string(), /*hidden=*/driver_mode)) {
         std::fprintf(stderr, "game: app init failed\n");
         return 1;
     }

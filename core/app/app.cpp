@@ -299,7 +299,7 @@ App::App() = default;
 App::~App() { shutdown(); }
 
 bool App::init(const std::string& res_root, const std::string& save_path,
-               const std::string& lang) {
+               const std::string& lang, bool hidden) {
     res_root_ = res_root;
     save_path_ = save_path;
     // JS `G.Ska` (L2392): lowercase + default/coerce to "en" (the supported
@@ -313,7 +313,7 @@ bool App::init(const std::string& res_root, const std::string& save_path,
 
     renderer_ = std::make_unique<sf2::render::Renderer>();
     GLFWwindow* window = nullptr;
-    if (!renderer_->init(view_w_, view_h_, /*hidden=*/false, &window)) {
+    if (!renderer_->init(view_w_, view_h_, /*hidden=*/hidden, &window)) {
         std::fprintf(stderr, "app: renderer init failed\n");
         return false;
     }
@@ -322,7 +322,8 @@ bool App::init(const std::string& res_root, const std::string& save_path,
     // focus while playing). A window launched under a terminal can open
     // inactive, so request focus explicitly; otherwise no key reaches
     // `poll_input` until the user clicks.
-    if (window != nullptr) {
+    // RULE 0: a hidden (driver/tour/probe) window must NEVER be foregrounded.
+    if (window != nullptr && !hidden) {
         glfwFocusWindow(window);
     }
 

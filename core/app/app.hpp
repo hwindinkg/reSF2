@@ -126,8 +126,12 @@ public:
     // returns (`Ca.c6a()` -> `p.get().locale || navigator.language`,
     // microsite-game-interface L61141; `L.web` L33041). The result is coerced
     // by `G.Ska` (L2392): lowercase + the supported set `G.v9`, else "en".
+    // `hidden` (RULE 0): create the GLFW window invisible (GLFW_VISIBLE =
+    // GLFW_FALSE) and never foreground it. EVERY driver/tour/probe mode passes
+    // true so a headless run can never block on a human-visible window; only
+    // the plain interactive launch leaves it false.
     bool init(const std::string& res_root, const std::string& save_path,
-              const std::string& lang = std::string());
+              const std::string& lang = std::string(), bool hidden = false);
 
     // The main loop — runs until the window closes. `headless_frames`
     // > 0 runs that many frames then closes (used by the log-only verify
