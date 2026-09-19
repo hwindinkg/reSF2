@@ -330,6 +330,15 @@ public:
     // The headless-loop/tour's battle-start step clicks this.
     void fight_button_center(float& x, float& y) const;
 
+    // `Ur` zone-dot strip geometry (JS L2112-2116, `qk.layout` L2137): the
+    // centre of the dot drawn for zone `zi`, or false when that zone renders
+    // none (`Vr.HXa` L2123-2124). The draw AND the click hit-test both read
+    // this, so the rect a player taps is exactly the rect that was painted.
+    bool zone_dot_center(std::size_t zi, float& cx, float& cy) const;
+    // The zone the map is showing (`Vr` selection; seeded from the save's
+    // CurrentZone and written back on a dot tap).
+    int zone_selected() const { return zone_sel_; }
+
     struct Node {
         std::string name;
         std::string alias;     // stages.xml Alias — the JS `Qr.Bka(a.Cg)`
@@ -975,6 +984,17 @@ std::string catalog_item_type(App& app, const std::string& item_name);
 // the shared `za` nav scroll flag (the collapsed header then carries the
 // `MenuBtnFlashing` pulse until the player expands it).
 void set_za_nav_open(bool open);
+// The `za` column's expanded state for a shell screen (`gk.uJ`) — asserted by
+// the `--flow-verify` probe for the Map/Shop header tap.
+bool za_nav_expanded(ScreenId id);
+// JS `lca(TF.lD, TF.uP, TF.Y1)` (L2009): the `<Fight>` the boss ladder is on —
+// the wins recorded for the battle, clamped to its `<Fight>` count, so the
+// quest journal's `_$Fight` is `zone|name|(index+1)`.
+int map_fight_index(App& app, const std::string& name, int fight_count);
+// The live Map screen's `Ur` strip, for probes/drivers — null-safe (returns
+// false / -1 when the Map is not the top screen).
+bool map_zone_dot_center(App& app, std::size_t zi, float& cx, float& cy);
+int map_zone_selected(App& app);
 
 // `go.Thb` (L1092) + `Oa.uLa` (L1181866): open the Shop at the `vj.E0` tab
 // name and select the item by name. Pushes the Shop when it is not current;

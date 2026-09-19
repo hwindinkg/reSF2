@@ -1365,6 +1365,7 @@ int main(int argc, char** argv) {
     int headless = 0;
     bool auto_click = false;
     bool headless_loop = false;
+    bool flow_verify = false;  // --flow-verify: the repaired map/menu/ladder flows
     bool ui_tour = false;
     bool fidelity_tour = false;
     bool quest_verify = false;  // --quest-verify: interactive action check
@@ -1430,6 +1431,8 @@ int main(int argc, char** argv) {
             watchdog_secs = std::atoi(argv[++i]);
         } else if (arg == "--autoclick") {
             auto_click = true;
+        } else if (arg == "--flow-verify") {
+            flow_verify = true;
         } else if (arg == "--headless-loop") {
             headless_loop = true;
         } else if (arg == "--ui-tour") {
@@ -1642,7 +1645,8 @@ int main(int argc, char** argv) {
     // Every flag below turns the process into a non-interactive driver; only a
     // plain `game` launch (no flags) is a real, visible, user-driven window.
     const bool driver_mode =
-        headless > 0 || auto_click || headless_loop || ui_tour || fidelity_tour ||
+        headless > 0 || auto_click || headless_loop || flow_verify || ui_tour ||
+        fidelity_tour ||
         quest_verify || quest_verify_buy || dialog_verify || observe_dialogs ||
         replay_mode || verify_input || fx_probe || input_tape || verify_place ||
         debug_ui || capture_fight || capture_idle_fight || auto_attack ||
@@ -2142,6 +2146,86 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (flow_verify) {
+        // ---- flow-verify: the three repaired flow bugs, asserted headlessly --
+        // Every click is an `App::inject_click` tap (the JS `ma.Bd` primitive);
+        // the window is hidden and RULE 0's watchdog is armed (driver_mode).
+        glfwHideWindow(app.renderer().window());
+        app.set_headless_frames(1);
+        int checks = 0;
+        int passed = 0;
+        const auto check = [&](bool ok, const char* what) {
+            ++checks;
+            if (ok) ++passed;
+            std::fprintf(stdout, "[flowverify] %-52s %s\n", what, ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        };
+        const auto tick = [&](int n) {
+            for (int i = 0; i < n; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+        };
+        tick(600);  // settle the boot (Preloader -> Loader -> Dojo)
+        // (1) BOSS LADDER: the win must walk `_$Fight` |1 (SHIN) -> |2 (BRICK).
+        check(map_fight_index(app, "BOSS_LYNX", 3) == 0,
+              "BOSS_LYNX fresh -> _$Fight |1 (SHIN)");
+        try {
+            sf2::app::WarriorSave w = app.save().load();
+            bool found = false;
+            for (auto& f : w.fights) {
+                if (f.name == "BOSS_LYNX") {
+                    ++f.wins;
+                    found = true;
+                }
+            }
+            if (!found) w.fights.push_back({"BOSS_LYNX", 1});
+            w.battle_unlock("ZONE_2", "BOSS_HERMIT");  // a 2nd dot for (3)
+            app.save().save(w);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[flowverify] seed failed: %s\n", e.what());
+        }
+        check(map_fight_index(app, "BOSS_LYNX", 3) == 1,
+              "1 win -> _$Fight |2 (BRICK intro)");
+        // (2) MENU: the collapsed `za` header must expand on the MAP (it did
+        // not outside the Dojo: the `force_collapsed` early-return).
+        app.screens().push(make_screen(app.screens(), kScreenMap));
+        tick(10);
+        check(!za_nav_expanded(kScreenMap), "map `za` starts collapsed (fresh)");
+        app.inject_click(120.0, 90.0);  // the header (`dojo_menu_open` beat)
+        tick(8);
+        check(za_nav_expanded(kScreenMap), "map header tap EXPANDS the menu column");
+        app.inject_click(120.0, 90.0);
+        tick(8);
+        check(!za_nav_expanded(kScreenMap), "map header tap collapses it again");
+        // (3) ZONE DOTS: a tap on the strip must switch the shown zone.
+        const int before = map_zone_selected(app);
+        int target = -1;
+        float dot_x = 0.0f;
+        float dot_y = 0.0f;
+        for (std::size_t zi = 0; zi < 32 && target < 0; ++zi) {
+            float cx = 0.0f;
+            float cy = 0.0f;
+            if (!map_zone_dot_center(app, zi, cx, cy)) continue;
+            if (static_cast<int>(zi) == before) continue;
+            target = static_cast<int>(zi);
+            dot_x = cx;
+            dot_y = cy;
+        }
+        check(before >= 0, "map is live and a zone is selected");
+        check(target >= 0, "a SECOND zone dot renders (ZONE_2 unlocked)");
+        if (target >= 0) {
+            std::fprintf(stdout, "[flowverify] zone dot %d at (%.0f, %.0f) -> click\n",
+                         target, dot_x, dot_y);
+            std::fflush(stdout);
+            app.inject_click(dot_x, dot_y);
+            tick(8);
+            check(map_zone_selected(app) == target, "zone dot tap SWITCHES the map zone");
+        }
+        std::fprintf(stdout, "[flowverify] RESULT %d/%d\n", passed, checks);
+        std::fflush(stdout);
+        app.shutdown();
+        return passed == checks ? 0 : 1;
     } else if (replay_mode || verify_input) {
         // ---- Input replay / scripted verification (phase1 step9) ----------
         // Boots the direct dojo fight (same as --fight) and feeds a game

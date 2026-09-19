@@ -2334,9 +2334,21 @@ ZaLayout za_layout() {
 // COLLAPSED default. `gk.NLa` (L2001) then sets `zI=2` (collapsed) and hides
 // the `Le` buttons (`i3.Z(!1)`); expanding (`zI=1`) reveals them. Only the
 // `Lx` title (`Y.na("menu")` = "МЕНЮ", oracle x64-176 y72-110) shows while
-// collapsed. The native keeps one shared flag (JS `za.instance` is a
-// singleton mounted on every shell screen). `gk.Bgb` (L2000) toggles it.
-bool g_za_nav_open = false;  // JS `collapse(0)` (L1978) default = collapsed
+// collapsed, and `gk.Bgb` (L2000) toggles it.
+// JS `ma.D1` builds a FRESH `za` column per screen (`gk.Af = new Zh(...)`
+// L1996), so EVERY screen starts COLLAPSED (`collapse(0)` L1978) and its own
+// header tap expands it (`gk.Bgb` L2000). The port keeps one flag PER SCREEN:
+// with a single shared flag the `МЕНЮ` column was dead on every screen that
+// was not the last one expanded (the reported bug: the menu only worked in
+// the Dojo), and a collapsed-by-default screen could only reset it.
+enum { kZaNavScreenSlots = 16 };
+static bool g_za_nav_open_by_screen[kZaNavScreenSlots] = {};
+static bool& za_nav_flag(ScreenId id) {
+    const int i = static_cast<int>(id);
+    static bool unused_slot = false;
+    if (i < 0 || i >= kZaNavScreenSlots) return unused_slot;
+    return g_za_nav_open_by_screen[i];
+}
 
 // JS `za.zq` (L1983) + `ndb` (L1975): the disciple toggle icon-button. `zq`
 // is scaled `scroll.Af.width*.5 / zq.Y.fa.x` (so the on-screen width is half
@@ -2435,6 +2447,7 @@ void za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
 // the screen already showing (the JS highlights that one active, `xyb`
 // L1982).
 void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = false) {
+    (void)force_collapsed;  // the per-screen `za_nav_flag` owns collapse state
     // `za.zq` disciple toggle (JS L1983, `Nfb` L1981): a child of `za`, so it
     // answers taps regardless of the nav collapse. Shown only on the Dojo
     // (`v.FU` L1207 `Td.Tf==3`) while `ShowDojoDisciple > 0` (`g$a` L271).
@@ -2478,9 +2491,16 @@ void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = f
     // Collapsed (JS `collapse(0)` L1978): the header expands the column.
     // `force_collapsed` (the Map) draws/behaves collapsed without touching the
     // shared flag, so returning to the Dojo keeps its expanded column.
-    if (force_collapsed || !g_za_nav_open) {
-        if (!force_collapsed && header_hit && app.pointer().pressed) {
-            g_za_nav_open = true;
+    bool& nav_open = za_nav_flag(active);
+    if (!nav_open) {
+        // `gk.Bgb` (L2000): the header tap expands the column. It must work on
+        // EVERY screen — the old `force_collapsed` early-return skipped it, so
+        // the `МЕНЮ` button was dead on the Map/Shop/Profile.
+        if (header_hit && app.pointer().pressed) {
+            nav_open = true;
+            std::fprintf(stdout, "[za] nav column expanded (screen %d)\n",
+                         static_cast<int>(active));
+            std::fflush(stdout);
             sf2::audio::AudioEngine::instance().play("snd_focus_1");
         }
         return;
@@ -2493,7 +2513,7 @@ void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = f
         return;
     }
     if (header_hit && app.pointer().pressed) {
-        g_za_nav_open = false;
+        nav_open = false;
         sf2::audio::AudioEngine::instance().play("snd_focus_1");
     }
 }
@@ -2576,7 +2596,11 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
     // `dojo_hub` (measured 0.50x at every sampled scene pixel). Drawn BEFORE
     // the topPanel/widgets (JS appends `scroll` before `PL`, ctor L1973), so
     // the bar + column stay undimmed.
-    const bool nav_expanded = !force_collapsed && g_za_nav_open;
+    // `force_collapsed` no longer owns the state — the per-screen `za_nav_flag`
+    // does (a `force_collapsed` screen simply starts collapsed); the argument
+    // documents that the screen builds a fresh `za`.
+    (void)force_collapsed;
+    const bool nav_expanded = za_nav_flag(active);
     const int flash_idx = za_nav_index_for_scene(app.quest_engine().nav_flash());
     if (nav_expanded) {
         const float dim[] = {0, 0, w, 0, w, kViewH, 0, 0, w, kViewH, 0, kViewH};
@@ -2752,7 +2776,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
     // forces the collapsed header (JS mounts a fresh `za` per screen,
     // `Aub` -> `collapse(0)`) without disturbing the shared nav flag other
     // shell screens rely on.
-    if (force_collapsed || !g_za_nav_open) {
+    if (!za_nav_flag(active)) {
         float hx = 0.0f, hy = 0.0f, hw = 0.0f, hh = 0.0f;
         za_header_rect(hx, hy, hw, hh);
         // The collapsed header is `gk.Af` — the SAME `Zh` rail the expanded
@@ -6504,16 +6528,43 @@ void MapScreen::apply_map_focus(const std::string& battle) {
     }
 }
 
+// JS `lca(TF.lD, TF.uP, TF.Y1)` (L2009): `TF.uP` is the `<Fight>` the boss
+// ladder is ON — the number of wins already recorded for this battle
+// (`<Fights><Fight Name Wins>`, `yc`/`no`), i.e. the 0-based index of the next
+// un-beaten `<Fight>`. Clamped to the battle's `<Fight>` count so a cleared
+// boss replays its LAST fight (exactly the roster's `jk.init(a,b,c,d)` index
+// clamp, L2062). A fresh battle is 0 -> `|1`.
+int map_fight_index(App& app, const std::string& name, int fight_count) {
+    int wins = 0;
+    try {
+        const WarriorSave w = app.save().load();
+        for (const WarriorSave::FightWins& f : w.fights) {
+            if (f.name == name) {
+                wins = f.wins;
+                break;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    const int last = fight_count > 0 ? fight_count - 1 : 0;
+    if (wins < 0) wins = 0;
+    if (wins > last) wins = last;
+    return wins;
+}
+
 void MapScreen::launch_battle(const Node& n) {
     // JS `Ya` battle-start (L2131-2132): `wa.F().mp(6, battle)`.
     // Carry the battle into the pending flow: name/location +
     // the reward (the first non-zero <Reward>).
     PendingBattle& pb = app().pending_battle();
     pb.battle_name = n.name;
-    // JS `hb.toString()` (L1416): the map launches Fight 1 of the battle,
-    // so the quest journal's `_$Fight` is `zone|name|1`
-    // (FirstGuardBeaten keys on `ZONE_1|BOSS_LYNX|1`, quests.xml L265).
-    pb.fight_triple = n.zone + "|" + n.name + "|1";
+    // JS `hb.toString()` (L1416): the map launches the ladder's CURRENT
+    // `<Fight>`, so the quest journal's `_$Fight` is `zone|name|<n>`
+    // (FirstGuardBeaten keys on `ZONE_1|BOSS_LYNX|1`, quests.xml L265; the
+    // ladder's next opponent is `|2` = BRICK, zone_1/story.xml L176-193).
+    const int fight_index = map_fight_index(app(), n.name, n.fight_count);
+    pb.fight_triple =
+        n.zone + "|" + n.name + "|" + std::to_string(fight_index + 1);
     pb.zone = n.zone;  // stages.xml Zone (`hp` scope for the <Rules> feeder)
     pb.location = n.location.empty() ? "dojo" : n.location;
     pb.has_result = false;
@@ -6555,6 +6606,36 @@ std::vector<BossRosterEntry> boss_roster_entries(App& app, const MapScreen::Node
 }
 
 void MapScreen::start_battle(const Node& n) {
+    const int fight_index = map_fight_index(app(), n.name, n.fight_count);
+    // JS `ha.RA("FightEnter")` (`be.FightEnter` -> `QUEST_EVENT_FIGHT_ENTER`,
+    // sf2.js L998): fired on ENTERING a fight, before the `ik` VS intro. The
+    // zone-1 ladder greets each opponent on it (`zone_1/story.xml` L176-193
+    // `Zone1Guard2Greetings`: `_$Fight == ZONE_1|BOSS_LYNX|2` -> the
+    // `NAME_BRICK` dialog). Its actions are `Place="Map"`, so the greeting
+    // lands on THIS screen and owns the launch: while the modal is up the
+    // battle is NOT pushed — its `Fight Name="_$Fight"` plate re-enters here,
+    // and the quest's own guard (`_Zone1Guard2Greetings != 1`) lets the
+    // second pass through to the battle.
+    {
+        QuestJournal j;
+        j.fight = n.zone + "|" + n.name + "|" + std::to_string(fight_index + 1);
+        j.scene_from = "Map";
+        try {
+            j.player_level = app().save().load().level;
+        } catch (const std::exception&) {
+        }
+        app().quest_engine().fire(app(), "FightEnter", j);
+        // Headless keeps its own modal semantics (dialog taps are drained), so
+        // the deferral only applies to a live app — this keeps the scripted
+        // tour/loop deterministic on the map.
+        if (!app().headless() && quest_modal_top(app()) != nullptr) {
+            std::fprintf(stdout,
+                         "[map] FightEnter %s -> greeting modal (launch deferred)\n",
+                         j.fight.c_str());
+            std::fflush(stdout);
+            return;
+        }
+    }
     // JS `ai.aa` case 0 (L2007): `this.TF.lD.length>1 && this.TF.eE`
     // -> `lca(this.TF.lD, this.TF.uP, this.TF.Y1)` = the `jk` opponent
     // scroll (`this.Ws = this.Qo(jk)`, L2009), whose `qd` (state 4) ->
@@ -6566,7 +6647,7 @@ void MapScreen::start_battle(const Node& n) {
         std::vector<BossRosterEntry> entries = boss_roster_entries(app(), n);
         if (entries.size() > 1) {
             act_node_ = n;
-            roster_.start(std::move(entries), 0);
+            roster_.start(std::move(entries), fight_index);
             std::fprintf(stdout,
                          "[map] FIGHT -> jk roster armed (%zu entries, first %s)\n",
                          roster_.entries.size(), n.name.c_str());
@@ -6575,6 +6656,39 @@ void MapScreen::start_battle(const Node& n) {
         }
     }
     launch_battle(n);
+}
+
+// `Ur` zone-dot strip geometry (JS L2112-2116, `qk.layout` L2137): one row of
+// dots on the map's bottom bar, 34 px each at a 60 px pitch starting at
+// x=547 (1280-space), centred on the bar. The draw and the click hit-test
+// both read these so they can never drift.
+constexpr float kMapZoneDotX0 = 547.0f;
+constexpr float kMapZoneDotPitch = 60.0f;
+constexpr float kMapZoneDotD = 34.0f;
+
+// See screens.hpp. The dotted slot is the zone's index among the zones that
+// RENDER a dot (`Vr.HXa` L2123-2124), not its raw index.
+bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {
+    if (zi >= zones_.size()) return false;
+    std::size_t slot = 0;
+    for (std::size_t i = 0; i < zones_.size(); ++i) {
+        bool any = false;
+        for (const Node& n : zones_[i].nodes) {
+            if (n.visible) {
+                any = true;
+                break;
+            }
+        }
+        if (!any) continue;  // no dot drawn -> no rect
+        if (i == zi) {
+            const MapMetrics mm = map_metrics();
+            cx = kMapZoneDotX0 + static_cast<float>(slot) * kMapZoneDotPitch;
+            cy = mm.bar_y + mm.bar_h * 0.5f;
+            return true;
+        }
+        ++slot;
+    }
+    return false;
 }
 
 void MapScreen::update_impl(float dt) {
@@ -6697,6 +6811,38 @@ void MapScreen::update_impl(float dt) {
     // PORT_AUDIT_UI 2.3/2.4). The native BracketScreen was deleted with the
     // id (screens.hpp / screen_manager.hpp).
     if (zone_sel_ < 0 || static_cast<std::size_t>(zone_sel_) >= zones_.size()) return;
+    // `Ur` zone strip (JS L2112-2116, `qk.layout` L2137): a tap on a zone dot
+    // SELECTS that zone (`Vr`/`Ur` — the map re-renders on the new zone's
+    // backdrop). The dots were drawn with NO hit test, which is the reported
+    // "the zone dots at the bottom do not respond" bug. Only zones that render
+    // a dot (`Vr.HXa` L2123-2124: at least one visible node) are pickable.
+    {
+        for (std::size_t zi = 0; zi < zones_.size(); ++zi) {
+            float dot_cx = 0.0f, dot_cy = 0.0f;
+            if (!zone_dot_center(zi, dot_cx, dot_cy)) continue;
+            const float dot_half = kMapZoneDotD * 0.5f;
+            if (p.x >= dot_cx - dot_half && p.x <= dot_cx + dot_half &&
+                p.y >= dot_cy - dot_half && p.y <= dot_cy + dot_half) {
+                if (p.pressed && static_cast<int>(zi) != zone_sel_) {
+                    zone_sel_ = static_cast<int>(zi);
+                    hover_ = -1;
+                    apply_map_focus(app().quest_engine().last_map_focus());
+                    try {
+                        WarriorSave w = app().save().load();
+                        if (w.current_zone != zones_[zi].name) {
+                            w.current_zone = zones_[zi].name;
+                            app().save().save(w);
+                        }
+                    } catch (const std::exception&) {
+                    }
+                    std::fprintf(stdout, "[map] zone dot -> %s (%zu nodes)\n",
+                                 zones_[zi].name.c_str(), zones_[zi].nodes.size());
+                    std::fflush(stdout);
+                }
+                return;  // the dot strip owns its rect
+            }
+        }
+    }
     // JS `Ya.Uw` (L2129) focuses the save MapFocus node at init and `Rr`
     // tracks it (`ue.tea()`); a tap re-targets (`qe.jhb` -> `GT`). The focus
     // persists between taps, so it is NOT reset here — `hover_` holds it.
@@ -7174,25 +7320,15 @@ void MapScreen::render_impl(App& app) {
                       0.52f, UiAlign::Left, 0.78f, 0.655f, 0.451f);
         // One dot per rendered zone widget (`Vr.HXa` L2123-2124: only zones
         // with an active battle render).
-        float dot_x = 547.0f;
-        const float dot_d = 34.0f;
-        const float dot_cy = mm.bar_y + mm.bar_h * 0.5f;
         for (std::size_t zi = 0; zi < zones_.size(); ++zi) {
-            bool any = false;
-            for (const Node& n : zones_[zi].nodes) {
-                if (n.visible) {
-                    any = true;
-                    break;
-                }
-            }
-            if (!any) continue;
+            float dot_x = 0.0f, dot_cy = 0.0f;
+            if (!zone_dot_center(zi, dot_x, dot_cy)) continue;
             const bool sel = static_cast<int>(zi) == zone_sel_;
             if (!try_draw_atlas_button(app, sel ? "bulb" : "inactive_bulb", dot_x, dot_cy,
-                                       dot_d, dot_d, 1.0f)) {
-                draw_flat_button(app, "", dot_x, dot_cy, dot_d * 0.5f, dot_d * 0.5f, 0.8f,
-                                 0.45f, 0.15f, false);
+                                       kMapZoneDotD, kMapZoneDotD, 1.0f)) {
+                draw_flat_button(app, "", dot_x, dot_cy, kMapZoneDotD * 0.5f,
+                                 kMapZoneDotD * 0.5f, 0.8f, 0.45f, 0.15f, false);
             }
-            dot_x += 60.0f;
         }
     }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets, or the collapsed
@@ -10376,7 +10512,7 @@ void ShopScreen::update_impl(float dt) {
             preview_frame_ = 0;
         }
     }
-    // Display-only: `g_za_nav_open` is left intact so the Dojo keeps its column.
+    // Display-only: the screen's own `za_nav_flag` is left intact so the Dojo keeps its column.
     za_update(app(), *this, kScreenShop, /*force_collapsed=*/true);
 }
 
@@ -12560,7 +12696,29 @@ std::string catalog_item_type(App& app, const std::string& item_name) {
 }
 
 // `eo.N3a` (L1117 `za.instance.sxa()` -> `scroll.collapse(0)`, L2001).
-void set_za_nav_open(bool open) { g_za_nav_open = open; }
+// The `za` column's expanded state for a shell screen (`gk.uJ`). One flag per
+// screen (`za_nav_flag`) — the `--flow-verify` probe asserts the Map's header
+// tap opens it.
+bool za_nav_expanded(ScreenId id) { return za_nav_flag(id); }
+
+// The live Map screen's `Ur` strip (see screens.hpp). Null-safe: a probe run
+// with another screen on top gets false / -1 instead of a crash.
+bool map_zone_dot_center(App& app, std::size_t zi, float& cx, float& cy) {
+    MapScreen* m = dynamic_cast<MapScreen*>(app.screens().top());
+    return m != nullptr && m->zone_dot_center(zi, cx, cy);
+}
+int map_zone_selected(App& app) {
+    MapScreen* m = dynamic_cast<MapScreen*>(app.screens().top());
+    return m == nullptr ? -1 : m->zone_selected();
+}
+
+// `eo.N3a` (L1117 `za.instance.sxa()` -> `scroll.collapse(0)`): the quest
+// engine asks for the ACTIVE screen's column collapsed. The port has no
+// per-screen `za` instance, so the request resets every screen's flag (the
+// old single global behaved the same way).
+void set_za_nav_open(bool open) {
+    for (bool& f : g_za_nav_open_by_screen) f = open;
+}
 
 namespace {
 
