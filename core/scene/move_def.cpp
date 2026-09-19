@@ -473,13 +473,16 @@ void parse_action(pugi::xml_node node, MoveAction& out) {
             out.start_animation = a.value();
         }
         for (pugi::xml_node ch : node.children()) {
-            const std::string cpt = ch.attribute("CopyParentType")
-                                        ? ch.attribute("CopyParentType").value()
-                                        : std::string();
-            const std::string cps = ch.attribute("CopyParentSubtype")
-                                        ? ch.attribute("CopyParentSubtype").value()
-                                        : std::string();
-            out.copy_parent_items.emplace_back(cpt, cps);
+            sf2::scene::MoveAction::ChildItem item;
+            if (pugi::xml_attribute t = ch.attribute("Type")) item.type = t.value();
+            if (pugi::xml_attribute n = ch.attribute("Name")) item.name = n.value();
+            if (pugi::xml_attribute a = ch.attribute("CopyParentType")) {
+                item.copy_type = a.value();
+            }
+            if (pugi::xml_attribute a = ch.attribute("CopyParentSubtype")) {
+                item.copy_subtype = a.value();
+            }
+            out.child_items.push_back(std::move(item));
         }
         return;
     }

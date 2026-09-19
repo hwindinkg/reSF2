@@ -4526,6 +4526,64 @@ std::vector<std::string> fighter_model_names(
     return out;
 }
 
+// JS `wd.ylb` (L268939): resolve ONE `<CreatePlayer>` `<Item>` (`nl`) to the
+// list.xml row it stands for —
+//   `d = a.name; d != "" && (d = p.items.$b(a.name), d != null &&
+//    (c = d.clone()))`                       — the element's OWN `Name`;
+//   else `d = a.Mxa; d != "" && (d = this.parameters.Fd(a.Mxa, a.Q0a),
+//    d != null && (c = d.clone()))`          — the SPAWNER's item matching
+//                                             `CopyParentType`/`Subtype`.
+// Returns "" when neither resolves (the part is simply not worn).
+std::string child_item_model(const std::vector<CatalogItem>& catalog,
+                             const sf2::scene::MoveAction::ChildItem& item,
+                             const std::vector<std::string>& spawner_items) {
+    const auto find = [&catalog](const std::string& name) -> const CatalogItem* {
+        if (name.empty()) return nullptr;
+        for (const CatalogItem& ci : catalog) {
+            if (ci.name == name) return &ci;
+        }
+        return nullptr;
+    };
+    const CatalogItem* ci = find(item.name);
+    if (ci == nullptr && !item.copy_type.empty()) {
+        for (const std::string& sn : spawner_items) {
+            const CatalogItem* s = find(sn);
+            if (s == nullptr || s->type != item.copy_type) continue;
+            if (!item.copy_subtype.empty() && s->subtype != item.copy_subtype) {
+                continue;
+            }
+            ci = s;
+            break;
+        }
+    }
+    return ci != nullptr ? ci->model : std::string();
+}
+
+// JS `wd.fya` (L535-536): `e == null -> (b = a.h7a(a.items), e = new ih(b))`
+// — the child's OWN model is `Yc.load` (L289330) over its resolved item
+// parts, NOT the spawner's merged body. Cached per spawner side + the
+// `mh.cacheName` key so the returned pointer stays valid for the run.
+const sf2::scene::Model* child_model_for(
+    FightAssets& assets, const std::vector<CatalogItem>& catalog,
+    const sf2::scene::MoveAction& act, bool is_player,
+    const std::vector<std::string>& spawner_items) {
+    const std::string key =
+        std::string(is_player ? "P:" : "E:") + act.create_cache_key;
+    const auto it = assets.child_models.find(key);
+    if (it != assets.child_models.end()) {
+        return it->second.bones.empty() ? nullptr : &it->second;
+    }
+    std::vector<std::string> parts;
+    for (const sf2::scene::MoveAction::ChildItem& item : act.child_items) {
+        const std::string m = child_item_model(catalog, item, spawner_items);
+        if (!m.empty()) parts.push_back(m);
+    }
+    sf2::scene::Model built =
+        parts.empty() ? sf2::scene::Model{} : assets.merge_names(parts);
+    const auto ins = assets.child_models.emplace(key, std::move(built));
+    return ins.first->second.bones.empty() ? nullptr : &ins.first->second;
+}
+
 // Resolves the ENEMY's move-list loadout from his stage-Warrior items.
 // JS `ra.Hza` L684-685 (`d.items = a.parameters.jt()`) + `Fd` L808 (`Hd`
 // Weapon slot): the move list and the move-LIST subtype come from the
@@ -7500,6 +7558,23 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                          : (enemy_model != nullptr ? "gear" : "base"),
                      em.bones.size(), em.resolved_tris.size());
         std::fflush(stdout);
+
+        // JS `wd.fya` (L535-536) + `wd.ylb` (L268939): give the fight the
+        // child's OWN model (its `<Item>` set resolved against list.xml + the
+        // spawner's items), instead of the spawner's merged body. The
+        // resolver is looked up lazily and cached in `assets.child_models`.
+        const std::vector<CatalogItem> child_catalog = load_full_catalog(app());
+        const std::vector<std::string> p_items = player_items;
+        const std::vector<std::string> e_items = bw.items;
+        App* app_ptr = &app();
+        fight_->set_child_model_provider(
+            [app_ptr, child_catalog, p_items, e_items](
+                const sf2::scene::MoveAction& act, bool is_player)
+                -> const sf2::scene::Model* {
+                return child_model_for(app_ptr->fight_assets(), child_catalog,
+                                       act, is_player,
+                                       is_player ? p_items : e_items);
+            });
     }
     const std::string& enemy_name = app().pending_battle().enemy_name;
     // Root `<Triggers>` (JS `ra.Dm`): hand the global set to the controller

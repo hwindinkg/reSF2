@@ -886,11 +886,27 @@ void FightController::spawn_child(FightFighter& owner,
         // `b = a.h7a(items)` -> the child's parameters (its item set is
         // COPIED from the spawner, so `ra.Hza` gives it the spawner's move
         // list); `new ih(b)` -> the `wd` ctor + `Yc.load` of its model.
-        // The per-child skeleton part (`<Item Type="Skeleton"
-        // Name="SkeletonMagic">` and friends) is resolved by the app-side
-        // model cache in a follow-up; the mirrored items keep the merged
-        // bone hierarchy identical, which is what the clip indices address.
-        c->fighter.set_model(model_);
+        // `wd.fya` L535-536 builds a FRESH `ih` from `a.h7a(a.items)`:
+        // `wd.ylb` (L268939) resolves each `<Item>` to a list.xml item (its
+        // own `Name`, else the spawner's `CopyParentType`/`Subtype`), and
+        // `Yc.load` (L289330) merges their `<Item Model>` parts — so the
+        // child wears its OWN skeleton (SkeletonMagic/SkeletonMissile/...)
+        // plus the spawner's copied magic weapon, NOT the spawner's merged
+        // body. The app owns the models.dat cache, so it supplies the model
+        // here; without a provider the spawner's `model_` is kept.
+        const sf2::scene::Model* child_model = nullptr;
+        if (child_model_provider_) {
+            child_model = child_model_provider_(act, owner.is_player);
+        }
+        c->fighter.set_model(child_model != nullptr ? *child_model : model_);
+        std::fprintf(stdout,
+                     "[child] model %s bones=%zu tris=%zu capsules=%zu "
+                     "(spawner bones=%zu)\n",
+                     child_model != nullptr ? "OWN" : "spawner",
+                     c->fighter.model().bones.size(),
+                     c->fighter.model().resolved_tris.size(),
+                     c->fighter.model().capsules.size(), model_.bones.size());
+        std::fflush(stdout);
         c->fighter.set_math_random([]() { return FightController::math_random01(); });
         c->fighter.set_color(fighter_color_);
         // `me` — the child's move list. JS `ra.Hza` rebuilds it from the
@@ -1002,18 +1018,68 @@ void FightController::play_child_animation(FightFighter& owner,
         case 6:  // `EnemyChild` -> `c = this.jb.Vv(a.cxa)`
             target = find_child(act.child_name, !owner.is_player);
             break;
-        default:
-            // `Me`/`Enemy`/`Parent` -> `this.ef(a.pe)`, a live FIGHTER: the
-            // JS `c.NS(b, ...)` starts the clip on that fighter's animation
-            // controller. The port's `Fighter` starts clips only through its
-            // own move flow, so this is reported, never faked mid-clip.
+        default: {
+            // `c = this.ef(a.pe)` (L262140) for the live-FIGHTER targets:
+            //   1 (Me)     -> `this`     -> the owning fighter
+            //   2 (Enemy)  -> `this.jb`  -> the opponent
+            //   3 (Parent) -> `this.lb`  -> the spawner (null on a top-level
+            //                               fighter, which has no `lb`)
+            // `c.NS(b, b.xD(c.Fc, c.da.hd()))` (L505) then STARTS move `b` on
+            // that fighter's animation controller (`da.Skb`), gated by
+            // `(a.r4a || b.Yz(c))` — `ForcePlay="1"` bypasses the condition
+            // test (`ai_start_move`'s `gm = !1`), else the move's own
+            // `<Conditions>` run (`try_start_move`).
+            FightFighter* target = nullptr;
+            if (act.player == 1) {
+                target = &owner;
+            } else if (act.player == 2) {
+                target = owner.is_player ? &enemy_ : &player_;
+            }
+            if (target == nullptr) {  // `lb` — no spawner on a top fighter
+                std::fprintf(stdout,
+                             "[child] F%d %s PlayAnimation '%s' player=%d -> "
+                             "no model (this.ef)\n",
+                             frame_, owner.name.c_str(), act.animation.c_str(),
+                             act.player);
+                std::fflush(stdout);
+                return;
+            }
+            const sf2::scene::MoveDef* mov = nullptr;
+            for (const sf2::scene::MoveDef* m : target->fighter.hb()) {
+                if (m != nullptr && m->name == act.animation) {
+                    mov = m;
+                    break;
+                }
+            }
+            if (mov == nullptr) {
+                std::fprintf(stdout,
+                             "[child] F%d %s PlayAnimation '%s' player=%d -> "
+                             "no move in %s's list\n",
+                             frame_, owner.name.c_str(), act.animation.c_str(),
+                             act.player, target->name.c_str());
+                std::fflush(stdout);
+                return;
+            }
+            FightFighter& foe = (target == &player_) ? enemy_ : player_;
+            sf2::scene::FightContext ctx;
+            fill_ctx_geometry(ctx, *target, foe);
+            const sf2::scene::MoveDef* was = target->fighter.current_move();
+            const bool started = act.force_play
+                                     ? target->fighter.ai_start_move(*mov, ctx)
+                                     : target->fighter.try_start_move(*mov, ctx);
+            const sf2::scene::MoveDef* now = target->fighter.current_move();
             std::fprintf(stdout,
-                         "[child] F%d %s PlayAnimation '%s' on FIGHTER player=%d "
-                         "(no child target)\n",
+                         "[child] F%d %s PlayAnimation '%s' player=%d -> FIGHTER "
+                         "'%s' %s force=%d was='%s' now='%s'\n",
                          frame_, owner.name.c_str(), act.animation.c_str(),
-                         act.player);
+                         act.player, target->name.c_str(),
+                         started ? "STARTED" : "conditions failed",
+                         act.force_play ? 1 : 0,
+                         was != nullptr ? was->name.c_str() : "<none>",
+                         now != nullptr ? now->name.c_str() : "<none>");
             std::fflush(stdout);
             return;
+        }
     }
     if (target == nullptr) {
         std::fprintf(stdout,
@@ -1046,12 +1112,21 @@ void FightController::delete_child_target(FightFighter& owner,
         remove_child(idx);
         return;
     }
-    // Me(1)/Enemy(2)/Parent(3) resolve to a live fighter model. A shipped
-    // `Delete Player="Me"` inside a child clip is handled by
-    // `advance_child` (the child removes itself); a Delete aimed at a
-    // fighter is reported, never faked.
+    // Me(1)/Enemy(2)/Parent(3) resolve to a live fighter model. JS
+    // `wd.cwb` (L519) -> `this.tK.Z(a)` -> `Pi.Kja` (L405):
+    //   `Kja(a){ a.Dfa() || this.Zw(!1); m.bd(this.gv, a) }`
+    // and `wd.Dfa` (L251005) is `this.lb != null ? this.lb.Dfa() : this.xpa`
+    // with `this.xpa = !0` set by the `wd` ctor (L249463). A live top-level
+    // fighter therefore has `Dfa() == true`, so `Zw(!1)` (the defeat/teardown
+    // signal) is SKIPPED and only `m.bd(this.gv, a)` runs — removing the
+    // model from the FIGHTER-CHILD container `gv`, where a top-level fighter
+    // is not a member. The JS-exact outcome for a live fighter is hence a
+    // no-op on the fight state (which is what this branch reports);
+    // `Cwb`-side `Uza()` (L258171) is the actor's `Cn.v_` animation-cancel
+    // bus, which the port does not have.
     std::fprintf(stdout,
-                 "[child] F%d %s Delete player=%d targets a FIGHTER (no-op)\n",
+                 "[child] F%d %s Delete player=%d targets a FIGHTER "
+                 "(JS-exact no-op: Dfa()=1 skips Zw; m.bd(gv) is child-scoped)\n",
                  frame_, owner.name.c_str(), act.player);
     std::fflush(stdout);
 }
@@ -1152,6 +1227,21 @@ void FightController::probe_child_cycle(bool for_player, int ticks,
     create.create_name = "ProbeChild";
     create.create_cache_key = "probe_child_key";
     if (pick != nullptr) create.start_animation = pick->name;
+    // The shipped `<CreatePlayer Name="Fireball">` item pair (moves.xml:
+    // `<Item Type="Skeleton" Name="SkeletonMagic"/>` +
+    // `<Item CopyParentType="Magic" Type="Weapon"/>`) so the app provider
+    // resolves the child's OWN skeleton + the spawner's magic part
+    // (`wd.ylb` L268939) instead of the spawner's merged body.
+    {
+        sf2::scene::MoveAction::ChildItem sk;
+        sk.type = "Skeleton";
+        sk.name = "SkeletonMagic";
+        create.child_items.push_back(sk);
+        sf2::scene::MoveAction::ChildItem mg;
+        mg.type = "Weapon";
+        mg.copy_type = "Magic";
+        create.child_items.push_back(mg);
+    }
     std::fprintf(stdout,
                  "[child-probe] spawner=%s hb=%zu clips=%zu pick=%s\n",
                  owner.name.c_str(), owner.fighter.hb().size(), clips_->size(),
@@ -1195,6 +1285,49 @@ void FightController::probe_child_cycle(bool for_player, int ticks,
         if (c.active) ++live;
     }
     if (live_after_delete != nullptr) *live_after_delete = live;
+
+    // --- (b) `<PlayAnimation>` aimed at a LIVE FIGHTER -------------------
+    // JS `wd.awb` (L518) `pe==1|2|3` (`Me`/`Enemy`/`Parent`) resolves
+    // `c = this.ef(pe)` — a live fighter — and `c.NS(b, ...)` (L505) starts
+    // the move `b` on its animation controller (`da.Skb`). Drive the exact
+    // path from the spawner at the OPPONENT fighter (`pe==2` -> `this.jb`),
+    // which is the strongest form (a cross-fighter start).
+    FightFighter& foe = for_player ? enemy_ : player_;
+    const sf2::scene::MoveDef* foe_move = nullptr;
+    for (const sf2::scene::MoveDef* m : foe.fighter.hb()) {
+        if (m == nullptr || m->file_name.empty()) continue;
+        foe_move = m;
+        break;
+    }
+    sf2::scene::MoveAction play;
+    play.kind = "PlayAnimation";
+    play.js_type = 17;
+    play.frame_trigger = true;
+    play.player = for_player ? 2 : 1;  // `Enemy` relative to the spawner
+    play.force_play = true;            // `$l.r4a` -> bypass `b.Yz(c)`
+    if (foe_move != nullptr) play.animation = foe_move->name;
+    const sf2::scene::MoveDef* foe_before = foe.fighter.current_move();
+    std::fprintf(stdout,
+                 "[child-probe] PlayAnimation fighter probe: actor=%s player=%d "
+                 "anim=%s foe_was='%s'\n",
+                 owner.name.c_str(), play.player, play.animation.c_str(),
+                 foe_before != nullptr ? foe_before->name.c_str() : "<none>");
+    std::fflush(stdout);
+    if (foe_move != nullptr) {
+        const std::vector<const sf2::scene::MoveAction*> play_acts{&play};
+        sf2::scene::FightContext play_ctx;
+        play_ctx.qb = owner.is_player;
+        dispatch_move_actions(play_acts, owner, "child-probe-play", play_ctx);
+        const sf2::scene::MoveDef* foe_now = foe.fighter.current_move();
+        std::fprintf(stdout,
+                     "[child-probe] PlayAnimation fighter probe result: %s "
+                     "now='%s' frame=%d\n",
+                     (foe_now != nullptr && foe_now == foe_move) ? "STARTED"
+                                                                 : "not-started",
+                     foe_now != nullptr ? foe_now->name.c_str() : "<none>",
+                     foe.fighter.move_frame());
+        std::fflush(stdout);
+    }
 }
 
 // --- root `<Triggers>` (JS `Fa.Exb` L708 -> `ra.Dm`) ---------------------
@@ -3564,6 +3697,29 @@ void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_t
         return;  // holds/releases during the intro are not moves — ignore
     }
     if (phase_ != fight_phase::fight) return;  // JS: input only in phases 1/2
+    // JS `wd.yJa(a)` (L501) — the ability PRESS gate. The method is an
+    // OR-chain whose SHORT-CIRCUIT is the gate: it reaches
+    // `this.Kl.Sgb(a)` (the key-buffer forward) only when every cooldown
+    // term is false. `ca.N0a` (L426) calls it as `eu==2 && b.yJa(a)` and
+    // discards the return value, so the observable effect is: an ability key
+    // (slot 9..14) is forwarded ONLY while its cooldown is not running.
+    //   `a==12 && bh==0 && !$aa` / `a==11 && SR && mA<TR` /
+    //   `a==10 && i2 && eA<DR`   / `a==9 && m4 && JA<aT` /
+    //   `a==14 && iu<pU`         / `!sN` / `Kl.Sgb(a)`
+    const int slot = static_cast<int>(key);
+    if (press == press_type::tap && slot >= 9 && slot <= 14) {
+        if (player_.fighter.ability_cooldown_running(slot)) {
+            std::fprintf(stdout,
+                         "[cd] yJa F%d key=%d slot=%d BLOCKED (cooldown "
+                         "running)\n",
+                         frame_, slot, slot);
+            std::fflush(stdout);
+            return;
+        }
+        std::fprintf(stdout, "[cd] yJa F%d key=%d slot=%d ready -> Kl.Sgb\n",
+                     frame_, slot, slot);
+        std::fflush(stdout);
+    }
     player_.fighter.input(key, press);
 }
 

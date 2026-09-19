@@ -1851,6 +1851,18 @@ public:
     // `<CreatePlayer>`). Presentation only — they never enter the hit test.
     const std::vector<sf2::scene::ChildModel>& children() const { return children_; }
 
+    // JS `wd.fya` (L535-536): `e == null -> (b = a.h7a(a.items), e = new ih(b))`
+    // — the child is built from ITS OWN resolved item set (`wd.ylb` L268939:
+    // the named list.xml item, else the spawner's `CopyParentType` item), NOT
+    // from the spawner's merged body. The models.dat cache lives in the app
+    // layer, so the app supplies the resolved child model here (nullptr = keep
+    // the spawner's shared `model_`, the previous behaviour).
+    using ChildModelProvider = std::function<const sf2::scene::Model*(
+        const sf2::scene::MoveAction&, bool /*is_player*/)>;
+    void set_child_model_provider(ChildModelProvider f) {
+        child_model_provider_ = std::move(f);
+    }
+
     // Probe (env `SF2_CHILD_PROBE`): the shipped fights reach 0
     // `<CreatePlayer>` rows (the action-kind census), so this drives one
     // synthetic create -> play -> render -> delete cycle through the EXACT
@@ -1882,6 +1894,9 @@ private:
     std::vector<sf2::scene::ChildModel> children_;
     // JS `su` (L536-537): `pull(cacheName)` recycles, `push(cacheName, m)`.
     std::map<std::string, std::vector<std::size_t>> child_cache_;
+    // The app-supplied per-`<CreatePlayer>` model resolver (see the public
+    // `set_child_model_provider`). Unset -> the spawner's merged `model_`.
+    ChildModelProvider child_model_provider_;
 
 private:
     // `ra.yz`/`Su.nw`: lock-filter `*global_triggers_` against `conds`.

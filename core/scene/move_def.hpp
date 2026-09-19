@@ -336,11 +336,28 @@ struct MoveAction {
     std::string create_name;       // `mh.aK`  (<CreatePlayer Name>)
     std::string start_animation;   // `mh.nx`  (<CreatePlayer StartAnimation>)
     std::string create_cache_key;  // `mh.cacheName` (`K.T(++mh.dUa)`)
-    // The `nl` children's `CopyParentType`/`CopyParentSubtype` pairs. The
-    // shipped `CreatePlayer` rows copy the SPAWNER's item set (e.g.
-    // `<Item CopyParentType="Magic" Type="Weapon"/>`), so the child's move
-    // list (`me`, built by `ra.Hza`) is the spawner's own list.
-    std::vector<std::pair<std::string, std::string>> copy_parent_items;
+    // The `nl` children (`nl extends I` L90): the element's OWN `Type`/`Name`
+    // plus its `CopyParentType`/`CopyParentSubtype` pair. `wd.ylb` (L268939)
+    // resolves each one against the item catalog:
+    //   `d = a.name; d != "" && (d = p.items.$b(a.name), d != null &&
+    //    (c = d.clone()))`                     — a NAMED list.xml item;
+    //   else `d = a.Mxa; d != "" && (d = this.parameters.Fd(a.Mxa, a.Q0a),
+    //    d != null && (c = d.clone()))`          — the SPAWNER's item of
+    //                                             that type/subtype;
+    //   then `c.Geb(a); b.hk(c.type, c)` — the child's `El` item map, which
+    //   `El.cM()` turns into the model-name list.
+    // The shipped rows use BOTH forms, e.g.
+    //   `<Item Type="Skeleton" Name="SkeletonMagic"/>` +
+    //   `<Item CopyParentType="Magic" Type="Weapon"/>`,
+    // so the child wears its OWN skeleton + the spawner's magic part — NOT
+    // the spawner's merged body.
+    struct ChildItem {
+        std::string type;          // the element's own Type
+        std::string name;          // the element's own Name
+        std::string copy_type;     // CopyParentType ("" when absent)
+        std::string copy_subtype;  // CopyParentSubtype ("" when absent)
+    };
+    std::vector<ChildItem> child_items;
     // --- Delete (`Xl` L728) ----------------------------------------------
     // `super(1)`; `parse` is only `super.parse(a)`. `Uh` -> `wd.cwb` (L519):
     //   `a = this.ef(a.pe); this.Uza(); this.tK.Z(a)`

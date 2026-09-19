@@ -69,6 +69,12 @@ struct FightAssets {
     std::vector<sf2::data::archive_entry> model_archive;
     std::map<std::string, sf2::scene::Model> model_cache;
 
+    // Per-`<CreatePlayer>` child models (JS `wd.fya` L535-536:
+    // `e = a.cache.pull(d)` recycles, else `new ih(a.h7a(items))`). Keyed by
+    // "<P|E>:<cacheName>" so the two spawner sides never share; the merged
+    // model is built once and the returned pointer stays valid for the run.
+    std::map<std::string, sf2::scene::Model> child_models;
+
     // Parses (once) + returns the model for an archive entry name, or
     // nullptr when the archive has no such entry (JS `Yc.parse` on a name
     // that is not in models.dat) — the caller then keeps the base body.
@@ -77,6 +83,21 @@ struct FightAssets {
         if (it != model_cache.end()) return &it->second;
         for (const sf2::data::archive_entry& e : model_archive) {
             if (e.name != model_name) continue;
+            return &model_cache
+                        .emplace(model_name,
+                                 sf2::scene::model_parse(e.data.data(), e.data.size()))
+                        .first->second;
+        }
+        // The ShopHide skeleton/magic items carry a list.xml `Model` WITHOUT
+        // the archive's `mdl_` prefix: `<Item Name="SkeletonMagic"
+        // Model="skeleton_magic">`, while the models.dat entry is
+        // `mdl_skeleton_magic` (verified against the 408 entry names of
+        // models.473fd74f.dat). JS `Ja.Lh` (L21326) resolves the name through
+        // the model registry, so the prefixed entry is what the game loads.
+        // The fallback can only turn a miss into a hit.
+        const std::string prefixed = "mdl_" + model_name;
+        for (const sf2::data::archive_entry& e : model_archive) {
+            if (e.name != prefixed) continue;
             return &model_cache
                         .emplace(model_name,
                                  sf2::scene::model_parse(e.data.data(), e.data.size()))
