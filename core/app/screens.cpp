@@ -3661,6 +3661,67 @@ bool draw_fx_frame(App& app, const std::string& frame_name, float cx, float cy,
     return true;
 }
 
+// Source-size sibling of `draw_fx_frame` for the REAL magic descriptors: the
+// frame is drawn at its TexturePacker `sourceSize` scaled by (w_scale,
+// h_scale) * zoom (JS `ve(Vs.Qq(g), g.WJ.scale)` L839 + `e.scale.x = Wl*scale.x`
+// / `e.scale.y = scale.y`, L838). `w_scale` is signed (facing mirror).
+bool draw_fx_frame_source(App& app, const std::string& frame_name, float cx,
+                          float cy, float w_scale, float h_scale, float zoom,
+                          float r, float g, float b, float alpha,
+                          float rotation_deg = 0.0f) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl)) {
+        // A genuine atlas miss. Log only when the missing name changes.
+        static std::string last_miss;
+        if (last_miss != frame_name) {
+            last_miss = frame_name;
+            std::fprintf(stderr, "[fx] magic atlas miss: %s\n", frame_name.c_str());
+        }
+        return false;
+    }
+    if (fr.w <= 0 || fr.h <= 0) return false;
+    if (w_scale == 0.0f || h_scale == 0.0f) return false;
+    sf2::scene::Sprite s;
+    s.texture_name = frame_name;
+    s.frame_x = static_cast<float>(fr.x);
+    s.frame_y = static_cast<float>(fr.y);
+    s.frame_w = static_cast<float>(fr.w);
+    s.frame_h = static_cast<float>(fr.h);
+    s.tex_w = static_cast<float>(tw);
+    s.tex_h = static_cast<float>(th);
+    s.solid = false;
+    s.color_r = r;
+    s.color_g = g;
+    s.color_b = b;
+    s.color_a = alpha;
+    s.rotated = fr.rotated;
+    // The frame is packed TRIMMED into `sourceSize`; the renderer applies the
+    // trim compensation from `trim_x`/`trim_y` (same as `draw_fx_frame`).
+    s.trim_x = static_cast<float>(fr.offset_x);
+    s.trim_y = static_cast<float>(fr.offset_y);
+    s.source_w = static_cast<float>(fr.source_w);
+    s.source_h = static_cast<float>(fr.source_h);
+    s.transform.set_pos(cx, cy);
+    // The sprite's natural size is `sourceSize`; the node scale is exactly the
+    // descriptor scale (JS `e.scale`), times the camera zoom.
+    s.transform.set_scale(w_scale * zoom, h_scale * zoom);
+    s.transform.rotation = rotation_deg;  // JS `Vla` (`a.rotate()`)
+    // Effects are screen-projected already: draw through the identity camera.
+    sf2::render::Camera ui_cam;
+    ui_cam.center_x = 640.0f;
+    ui_cam.center_y = 360.0f;
+    ui_cam.zoom = 1.0f;
+    ui_cam.view_w = 1280.0f;
+    ui_cam.view_h = 720.0f;
+    ui_cam.arena_h = 720.0f;
+    ui_cam.arena_floor = 0.0f;
+    ui_cam.arena_center_x = 640.0f;
+    app.renderer().draw_sprite(s, ui_cam);
+    return true;
+}
+
 // Magic containers (JS `Xm`/`cv` L836-839, Phase 7.2): the REAL `ni` frame
 // runs (JS `ni` L1141-1144 via `cv.lwb` L838-839) for each live instance,
 // faded by age/life — the same world->screen path the hit sparks use, with
@@ -3690,11 +3751,23 @@ void draw_magic_effects(App& app, sf2::render::Renderer& ren,
         const float sx = camera.world_to_screen_x(in.x - xoff, 1.0f);
         const float sy = camera.world_to_screen_y(in.y + yoff);
         const float size = fx.size_for(in) * camera.zoom;
+        const std::string frame = fx.frame_for(in);
+        // The REAL magic atlas frames (loaded from magic_ktx.72456186.dat):
+        // drawn at their sourceSize * descriptor scale * camera zoom (JS
+        // `ve(Vs.Qq(g), g.WJ.scale)` L839 + `e.scale.x = Wl*scale.x` L838),
+        // honouring the `Vla` start rotation. The signed x scale carries the
+        // facing mirror (`Wl`).
+        if (!frame.empty() && fx.source_size_for(in) &&
+            draw_fx_frame_source(app, frame, sx, sy,
+                                 fx.scale_x_for(in) * (in.facing < 0 ? -1.0f : 1.0f),
+                                 fx.scale_y_for(in), camera.zoom, r, g, b, alpha,
+                                 fx.rotation_for(in))) {
+            continue;
+        }
         if (size < 1.0f) continue;
-        // The REAL frame (JS `ni` L1141-1144): draw the atlas frame; the flat
-        // tinted quad is the fallback ONLY on a genuine atlas/frame miss.
-        const std::string frame = have_fx ? fx.frame_for(in) : std::string();
-        if (!frame.empty() &&
+        // The legacy `fight/fx` frames (JS `ni` L1141-1144): the fitted path;
+        // the flat tinted quad is the fallback ONLY on a genuine atlas miss.
+        if (!frame.empty() && have_fx &&
             draw_fx_frame(app, frame, sx, sy, size, in.facing, r, g, b, alpha)) {
             continue;
         }

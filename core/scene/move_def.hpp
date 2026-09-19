@@ -373,6 +373,45 @@ struct MoveAction {
     // `effect_time`) and `Bf.nM = u.H(ZoomScale)`. `wd.Yvb` (L520) hands
     // `Bf` to the camera `ql.Dvb` (L370).
     float zoom_scale = 0.0f;   // `Bf.nM` (<ZoomEffect ZoomScale>)
+    // --- Effect (`Yl` L728-730, type 5) ----------------------------------
+    // `Yl.parse` (L729): `Name` -> `name` (the shared field), `Sequence` ->
+    // `fileName`, `Scale`/`ScaleX`/`ScaleY` -> `scale` (x, y), `TimeScale` ->
+    // `NL`, `Looped` -> `wcb`, `OnBackground` -> `Gfb`, `Backwards` -> `lYa`,
+    // `StartRotation` -> `Vla`, `PackName` -> `ES`. The child element decides
+    // the placement (L730): `<Attach>` (`Vu`, L781-783) sets `FY` and forces
+    // `P1=!0`; otherwise `<Position>` (`ee.Ij`, L784-786) fills the anchor and
+    // `Follow` -> `P1`.
+    //
+    // `frames` are NOT stored here: JS resolves `G.qf("magic/<fileName>.json")`
+    // at spawn (`cv.lwb` L839), so the port resolves the Sequence against the
+    // loaded magic atlas registry at descriptor-build time (magic_effects).
+    std::string sequence;             // `Yl.fileName` (<Effect Sequence>)
+    float effect_scale_x = 1.0f;      // `Yl.scale.x` (ScaleX ?? Scale)
+    float effect_scale_y = 1.0f;      // `Yl.scale.y` (ScaleY ?? Scale)
+    float time_scale = 1.0f;          // `Yl.NL` (<Effect TimeScale>)
+    bool effect_looped = false;       // `Yl.wcb` (<Effect Looped>)
+    bool effect_backwards = false;    // `Yl.lYa` (<Effect Backwards>)
+    bool effect_on_background = false;  // `Yl.Gfb` (<Effect OnBackground>)
+    float start_rotation = 0.0f;      // `Yl.Vla` (<Effect StartRotation>)
+    std::string effect_pack;          // `Yl.ES` (<Effect PackName>)
+    // `<Position>` (`ee`, L784-786) — `P1` (Follow) + the named anchor.
+    bool effect_follow = false;       // `Yl.P1` (Follow ?? false)
+    int stop_follow_frame = -1;       // `ee` StopFollowframe (u.I default -1)
+    std::string effect_pos_player;    // `ee.pe` (Player ?? "Null")
+    std::string effect_pos_object;    // `ee.object` (Object; HQ(1,..))
+    std::string effect_pos_part;      // `ee.part` (Part)
+    int effect_pos_frame = 1;         // `ee.frame` (1; 2 when Frame="Previous")
+    float effect_shift_x = 0.0f;      // `ee.ix` (<Position ShiftX>)
+    float effect_shift_y = 0.0f;      // `ee.jx` (<Position ShiftY>)
+    // `<Attach>` (`Vu`, L781-783): the effect rides the RootPoint/AttachPoint
+    // pair with `OffsetVector` + `StartRotAngle`. The native port has no
+    // attach-point solver (JS `Vu.C7a` carries a `debugger`), so the RootPoint
+    // bone is used as the anchor and the offset is applied as a shift.
+    bool has_attach = false;          // `<Attach>` present (`Yl.FY != null`)
+    std::string attach_root_point;    // `Vu.jta` (<Attach RootPoint>)
+    std::string attach_point;         // `Vu.jpa` (<Attach AttachPoint>)
+    std::string attach_offset;        // `Vu.kpa` (<Attach OffsetVector> "x;y")
+    float attach_start_rot = 0.0f;    // <Attach StartRotAngle> (deg)
 };
 
 // One child of the root `<Triggers>` block (JS `Fa.Exb` L708 ->

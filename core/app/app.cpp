@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <locale>
+#include <map>
 #include <vector>
 
 #include "app/fight_assets.hpp"
@@ -26,6 +27,7 @@
 #include "audio/audio.hpp"
 #include "font.hpp"
 #include "render/gl.hpp"
+#include "scene/magic_effects.hpp"
 #include "scene/renderer.hpp"
 #include "scene/sprite.hpp"
 #include "texture.hpp"
@@ -223,6 +225,70 @@ static GLuint load_ui_atlas_bundle_impl(sf2::app::App& app, const std::string& d
     } catch (const std::exception& e) {
         std::fprintf(stderr, "app: atlas parse failed %s: %s\n", json_path.c_str(), e.what());
         return 0;
+    }
+}
+
+// The magic effect atlases: `res/magic_ktx.72456186.dat` is a zstd-packed
+// xml-archive (158 entries = 79 `res/magic/mgc_*.json` + 79 sibling `.ktx`).
+// Each json is a TexturePacker atlas (JS `pi.VJa`, L1703) whose frame run is
+// the `magic/<Sequence>` descriptor's `ni` source (`cv.lwb` L839). The frames
+// are registered for drawing (the app atlas cache, keyed by frame name) and
+// the Sequence stem -> frame-name run is handed to `sf2::scene` for the
+// descriptor build (`set_magic_atlas_frames`).
+void load_magic_atlas_bundle(sf2::app::App& app, const std::string& res) {
+    try {
+        const std::vector<sf2::data::archive_entry> ar =
+            load_archive(res + "/magic_ktx.72456186.dat");
+        std::map<std::string, const sf2::data::archive_entry*> ktx;
+        for (const auto& e : ar) {
+            if (e.name.size() > 4 &&
+                e.name.compare(e.name.size() - 4, 4, ".ktx") == 0) {
+                ktx.emplace(e.name, &e);
+            }
+        }
+        std::map<std::string, std::vector<std::string>> atlas_frames;
+        std::size_t atlases = 0, frames = 0, textured = 0;
+        for (const auto& e : ar) {
+            if (e.name.size() <= 5 ||
+                e.name.compare(e.name.size() - 5, 5, ".json") != 0) {
+                continue;
+            }
+            const std::string stem = e.name.substr(0, e.name.size() - 5);
+            const std::string leaf = stem.substr(stem.find_last_of('/') + 1);
+            const sf2::data::atlas a =
+                sf2::data::atlas_parse(e.data.data(), e.data.size());
+            // Texture: the sibling `.ktx` archive entry, decoded in memory.
+            unsigned int gl = 0;
+            const auto kt = ktx.find(stem + ".ktx");
+            if (kt != ktx.end()) {
+                sf2::data::Texture tex;
+                if (sf2::data::decode_texture_bytes(kt->second->data.data(),
+                                                    kt->second->data.size(),
+                                                    ".ktx", tex)) {
+                    gl = app.renderer().texture_for(leaf + "_atlas", tex);
+                }
+            }
+            if (gl != 0) {
+                for (const auto& fr : a.frames) {
+                    app.register_atlas_frame(fr, a.w, a.h, gl);
+                }
+                ++textured;
+            }
+            std::vector<std::string> names;
+            names.reserve(a.frames.size());
+            for (const auto& fr : a.frames) names.push_back(fr.name);
+            frames += names.size();
+            atlas_frames[leaf] = std::move(names);
+            ++atlases;
+        }
+        sf2::scene::set_magic_atlas_frames(std::move(atlas_frames));
+        std::fprintf(stdout,
+                     "[app] magic atlases: %zu json (%zu textured, %zu frames) "
+                     "from magic_ktx.72456186.dat\n",
+                     atlases, textured, frames);
+        std::fflush(stdout);
+    } catch (const std::exception& ex) {
+        std::fprintf(stderr, "app: magic atlas load failed: %s\n", ex.what());
     }
 }
 
@@ -619,6 +685,11 @@ bool App::init(const std::string& res_root, const std::string& save_path,
             fight_assets_->clips.emplace(
                 e.name, sf2::data::anim_clip_parse(e.name, e.data.data(), e.data.size()));
         }
+
+        // Magic effect atlases (the real `magic/*.json` registry, packed in
+        // the zstd archive). Registers the frames + publishes the Sequence
+        // frame runs for the descriptor build (magic_effects.cpp).
+        load_magic_atlas_bundle(*this, res);
 
         const std::string moves_xml = extracted_xml("moves.xml");
         if (!sf2::scene::parse_moves(moves_xml, fight_assets_->moves,

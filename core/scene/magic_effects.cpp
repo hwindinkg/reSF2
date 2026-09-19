@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,125 @@ std::vector<std::string> fx_frames(const char* prefix, int count) {
 }
 
 }  // namespace
+
+// The loaded magic atlas registry (one entry per `res/magic/mgc_*.json`):
+// the Sequence stem -> frame names in atlas order. Set once by the app asset
+// load (app.cpp); read by `build_magic_descs`.
+static std::map<std::string, std::vector<std::string>>& magic_atlas_registry() {
+    static std::map<std::string, std::vector<std::string>> s;
+    return s;
+}
+
+void set_magic_atlas_frames(std::map<std::string, std::vector<std::string>> frames) {
+    magic_atlas_registry() = std::move(frames);
+}
+
+const std::map<std::string, std::vector<std::string>>& magic_atlas_frames() {
+    return magic_atlas_registry();
+}
+
+namespace {
+
+// JS `Xy("x;y")` (the `<Attach OffsetVector>`): the two components as a
+// shift; anything unparsable stays (0, 0).
+void parse_offset_vector(const std::string& s, float& x, float& y) {
+    const std::size_t sep = s.find(';');
+    if (sep == std::string::npos) return;
+    try {
+        x = std::stof(s.substr(0, sep));
+        y = std::stof(s.substr(sep + 1));
+    } catch (const std::exception&) {
+        x = 0.0f;
+        y = 0.0f;
+    }
+}
+
+}  // namespace
+
+std::vector<MagicEffectDesc> build_magic_descs(
+    const std::map<std::string, std::vector<std::string>>& atlas_frames,
+    const std::map<std::string, MoveDef>& moves,
+    const std::vector<GlobalTrigger>* global_triggers) {
+    std::vector<MagicEffectDesc> descs;
+    std::map<std::string, std::size_t> by_name;  // identity -> desc index
+    std::size_t rows = 0, resolved = 0, dupes = 0, unresolved = 0;
+
+    const auto add_row = [&](const MoveAction& a) {
+        if (a.kind != "Effect") return;
+        ++rows;
+        if (a.name.empty() || a.sequence.empty()) return;
+        const auto fit = atlas_frames.find(a.sequence);
+        if (fit == atlas_frames.end() || fit->second.empty()) {
+            ++unresolved;
+            return;
+        }
+        ++resolved;
+        // The JS descriptor lives on the ACTION instance (one `Yl` per
+        // authored `<Effect>`); the native registry is keyed by the spawn
+        // identity (`<Effect Name>`, the `cv.LNa`/`Gwb` match key). The first
+        // authored row for a name wins; later duplicates are counted, never
+        // silently merged.
+        if (!by_name.emplace(a.name, descs.size()).second) {
+            ++dupes;
+            return;
+        }
+        MagicEffectDesc d;
+        d.name = a.name;
+        d.frames = fit->second;  // atlas order (`pi.VJa` -> `ve(...)`, L839)
+        d.loop = a.effect_looped;              // `wcb`
+        d.reverse = a.effect_backwards;        // `lYa`
+        d.on_background = a.effect_on_background;  // `Gfb`
+        d.ticks_per_frame = a.time_scale;      // `NL` (mP = NL/60 s)
+        d.scale = 1.0f;
+        d.scale_x = a.effect_scale_x;          // `scale.x`
+        d.scale_y = a.effect_scale_y;          // `scale.y`
+        d.start_rotation = a.start_rotation;   // `Vla`
+        d.size = 1.0f;
+        d.draw_source_size = true;             // sourceSize * scale (L839)
+        d.pos_player = a.effect_pos_player;
+        if (a.has_attach) {
+            // `Vu` (L781-783): the RootPoint bone is the anchor and the
+            // OffsetVector is the shift. The AttachPoint/`C7a` solver is a
+            // bare `debugger` in the JS, so it is not reproduced.
+            d.pos_object = "";
+            d.pos_part = a.attach_root_point;
+            parse_offset_vector(a.attach_offset, d.shift_x, d.shift_y);
+        } else {
+            d.pos_object = a.effect_pos_object;
+            d.pos_part = a.effect_pos_part;
+            d.shift_x = a.effect_shift_x;
+            d.shift_y = a.effect_shift_y;
+        }
+        descs.push_back(std::move(d));
+    };
+
+    for (const auto& kv : moves) {
+        for (const MoveAction& a : kv.second.actions) add_row(a);
+    }
+    if (global_triggers != nullptr) {
+        for (const GlobalTrigger& t : *global_triggers) {
+            for (const MoveAction& a : t.actions) add_row(a);
+        }
+    }
+    std::fprintf(stdout,
+                 "[fx] magic descriptors: %zu loaded (rows=%zu resolved=%zu "
+                 "unresolved=%zu duplicate-names=%zu atlas-sets=%zu)\n",
+                 descs.size(), rows, resolved, unresolved, dupes,
+                 atlas_frames.size());
+    std::fflush(stdout);
+    return descs;
+}
+
+std::size_t MagicEffects::load_descriptors(
+    const std::map<std::string, std::vector<std::string>>& atlas_frames,
+    const std::map<std::string, MoveDef>& moves,
+    const std::vector<GlobalTrigger>* global_triggers) {
+    std::vector<MagicEffectDesc> descs =
+        build_magic_descs(atlas_frames, moves, global_triggers);
+    const std::size_t n = descs.size();
+    if (n > 0) load(descs);
+    return n;
+}
 
 bool MagicEffects::load(const std::vector<MagicEffectDesc>& descs) {
     if (descs.empty()) return false;
@@ -69,7 +189,8 @@ const MagicEffectDesc* MagicEffects::find(const std::string& name) const {
 }
 
 bool MagicEffects::spawn(const std::string& name, float x, float y, int facing,
-                         int owner, bool follow) {
+                         int owner, bool follow, float anchor_dx,
+                         float anchor_dy) {
     const MagicEffectDesc* d = find(name);
     if (d == nullptr) return false;
     const std::size_t idx = static_cast<std::size_t>(d - descs_.data());
@@ -91,6 +212,11 @@ bool MagicEffects::spawn(const std::string& name, float x, float y, int facing,
     in.age = 0.0f;
     in.owner = owner;    // JS `bv.model`
     in.follow = follow;  // JS `bv.effect.P1`
+    // JS `cv.lwb` (L838): the spawn position IS `a.position.nt(model.Fc)`
+    // (the named Part anchor + shift), so `(x,y)` already carries it; keep
+    // the offset from the owner CoM for the follow update.
+    in.anchor_dx = anchor_dx;
+    in.anchor_dy = anchor_dy;
     // JS `tl.Nt(a)` (L842): `a.Gfb ? this.Gq.Nt(a) : this.Hq.Nt(a)` — the
     // `Yl` (Effect trigger action, L728: `Uh(a){a.gwb(this)}` -> fighter `Nt`
     // bus -> `tl.ZP` listener) routes by the descriptor's `OnBackground`
@@ -182,8 +308,12 @@ void MagicEffects::update(float timescale, const EffectAnchor* owners,
             // latches `Yla` (`detached`) and suppresses this.
             if (in.follow && !in.detached && owners != nullptr &&
                 in.owner >= 0 && in.owner < owner_count) {
-                in.x = owners[in.owner].x;
-                in.y = owners[in.owner].y;
+                // JS `bv.update` (L834): re-anchor on the model. The native
+                // anchor keeps the spawn-time `<Position>` offset from the
+                // owner CoM (`cv.lwb` L838), so a named-Part effect stays on
+                // that part instead of snapping to the CoM.
+                in.x = owners[in.owner].x + in.anchor_dx;
+                in.y = owners[in.owner].y + in.anchor_dy;
                 in.facing = owners[in.owner].facing >= 0 ? 1 : -1;
             }
             in.age += 1.0f;
@@ -235,6 +365,24 @@ float MagicEffects::size_for(const MagicInstance& in) const {
 
 std::uint32_t MagicEffects::color_for(const MagicInstance& in) const {
     return descs_[in.desc].color;
+}
+
+float MagicEffects::scale_x_for(const MagicInstance& in) const {
+    // JS `cv.lwb` (L838): `e.scale.x = c.Wl * a.scale.x` — the facing sign is
+    // applied by the caller (kept unsigned here so `size_for` stays valid).
+    return descs_[in.desc].scale_x;
+}
+
+float MagicEffects::scale_y_for(const MagicInstance& in) const {
+    return descs_[in.desc].scale_y;  // JS `e.scale.y = a.scale.y`
+}
+
+float MagicEffects::rotation_for(const MagicInstance& in) const {
+    return descs_[in.desc].start_rotation;  // JS `Vla` (`a.rotate()`)
+}
+
+bool MagicEffects::source_size_for(const MagicInstance& in) const {
+    return descs_[in.desc].draw_source_size;
 }
 
 bool MagicEffects::background_for(const MagicInstance& in) const {

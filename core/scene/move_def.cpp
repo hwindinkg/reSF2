@@ -514,6 +514,60 @@ void parse_action(pugi::xml_node node, MoveAction& out) {
     if (out.kind == "TryOnEnd") {
         return;
     }
+    // `Yl` (Effect, L728-730): the `magic/<Sequence>.json` atlas descriptor
+    // plus its placement. `Scale` is the fallback for both axes; `ScaleX`/
+    // `ScaleY` override it (`u.H(ScaleX, c)` / `u.H(ScaleY, c)`). The child
+    // element is `<Attach>` (`Vu`, L781-783) when present, else `<Position>`
+    // (`ee.Ij`, L784-786).
+    if (out.js_type == 5) {
+        if (pugi::xml_attribute n = node.attribute("Name")) out.name = n.value();
+        if (pugi::xml_attribute s = node.attribute("Sequence")) out.sequence = s.value();
+        const float sc = data::xml_attr_float(node, "Scale", 1.0f);
+        out.effect_scale_x = data::xml_attr_float(node, "ScaleX", sc);
+        out.effect_scale_y = data::xml_attr_float(node, "ScaleY", sc);
+        out.time_scale = data::xml_attr_float(node, "TimeScale", 1.0f);
+        out.effect_looped = data::xml_attr_bool(node, "Looped", false);
+        out.effect_backwards = data::xml_attr_bool(node, "Backwards", false);
+        out.effect_on_background = data::xml_attr_bool(node, "OnBackground", false);
+        out.start_rotation = data::xml_attr_float(node, "StartRotation", 0.0f);
+        if (pugi::xml_attribute p = node.attribute("PackName")) out.effect_pack = p.value();
+        if (pugi::xml_node at = node.child("Attach")) {
+            // JS `b != null ? (this.FY = new Vu(b), this.P1 = !0) : ...`.
+            out.has_attach = true;
+            out.effect_follow = true;
+            if (pugi::xml_attribute a = at.attribute("Player")) {
+                out.effect_pos_player = a.value();
+            }
+            if (pugi::xml_attribute a = at.attribute("RootPoint")) {
+                out.attach_root_point = a.value();
+            }
+            if (pugi::xml_attribute a = at.attribute("AttachPoint")) {
+                out.attach_point = a.value();
+            }
+            if (pugi::xml_attribute a = at.attribute("OffsetVector")) {
+                out.attach_offset = a.value();
+            }
+            out.attach_start_rot = data::xml_attr_float(at, "StartRotAngle", 0.0f);
+        } else if (pugi::xml_node pos = node.child("Position")) {
+            out.effect_follow = data::xml_attr_bool(pos, "Follow", false);
+            out.stop_follow_frame = data::xml_attr_int(pos, "StopFollowframe", -1);
+            out.effect_pos_player =
+                pos.attribute("Player") ? pos.attribute("Player").value() : "Null";
+            out.effect_pos_object =
+                pos.attribute("Object") ? pos.attribute("Object").value() : "";
+            out.effect_pos_part =
+                pos.attribute("Part") ? pos.attribute("Part").value() : "";
+            // `ee.Ij` L785: `this.frame = 1;` then `Frame == "Previous"` -> 2.
+            out.effect_pos_frame =
+                (pos.attribute("Frame") &&
+                 std::string(pos.attribute("Frame").value()) == "Previous")
+                    ? 2
+                    : 1;
+            out.effect_shift_x = data::xml_attr_float(pos, "ShiftX", 0.0f);
+            out.effect_shift_y = data::xml_attr_float(pos, "ShiftY", 0.0f);
+        }
+        return;
+    }
     // Every other kind: keep the Name attr when present (informational; the
     // kind is parsed data until its consumer system is ported).
     if (pugi::xml_attribute n = node.attribute("Name")) out.name = n.value();

@@ -425,10 +425,17 @@ void FightController::init_locks(
     // Perk bus register (ZOa analog).
     perk_setup_ = perks;
     setup_bus(perks);
-    // Magic/effect containers (JS `tl.Rf` L842-844): the `fight/fx` frame
-    // runs are the available `ni` sets (this snapshot has no `magic/*.json`);
-    // `Yl` "Effect" actions route here via `tl.Nt`.
-    magic_fx_.add_default_descs();
+    // Magic/effect containers (JS `tl.Rf` L842-844): the descriptors come
+    // from the `<Effect>` rows (JS `Yl` L728-730) joined to the REAL
+    // `res/magic/mgc_*.json` frame runs (app.cpp `load_magic_atlas_bundle`
+    // publishes them via `magic_atlas_frames()`); `Yl` "Effect" actions route
+    // here via `tl.Nt`. The `fight/fx` built-ins are only the fallback when
+    // no magic atlas resolved.
+    {
+        const std::size_t n = magic_fx_.load_descriptors(
+            sf2::scene::magic_atlas_frames(), *moves_, global_triggers_);
+        if (n == 0) magic_fx_.add_default_descs();
+    }
     // Magic init (`Ka`: `zL(0)`, `yL($6a)` = InitialCharge table, `LA`).
     init_magic();
 
@@ -564,6 +571,11 @@ void FightController::dispatch_move_actions(
         const bool fx_kind = act->kind == "ShakeScreen" || act->kind == "CameraWeight" ||
                              act->kind == "EnableBossAbility" ||
                              act->kind == "AddBullets" || act->kind == "HitEffect" ||
+                             // Magic-effect kinds (JS `Yl`/`gm`/`hm`
+                             // L728/L735/L736): routed to the `tl` containers
+                             // (`Xm`/`cv`) below.
+                             act->kind == "Effect" || act->kind == "StopEffect" ||
+                             act->kind == "StopFollowEffect" ||
                              // Child-model kinds (JS `mh`/`Xl`/`$l`): none of
                              // them has an `fka` voice gate.
                              act->kind == "CreatePlayer" || act->kind == "Delete" ||
@@ -719,6 +731,76 @@ void FightController::dispatch_move_actions(
                          static_cast<double>(r.pos.x), static_cast<double>(r.pos.y),
                          frames, static_cast<double>(r.time));
             std::fflush(stdout);
+            continue;
+        }
+        // --- Effect (`Yl` L728-730 -> `wd.gwb` L519 -> `tl.Nt` L842) -------
+        // `cv.lwb` (L838): the spawn anchor is `a.position.nt(model.Fc)` —
+        // the named `<Position>` Part's world position plus the facing-scaled
+        // ShiftX (`c.x += ix*a.Wl`, L786) and `-ShiftY` (`c.y -= jx`), NOT the
+        // owner CoM. `<Attach>` (`Vu` L781-783) anchors on its RootPoint.
+        // `bv.model` is stamped here so StopEffect/StopFollowEffect resolve
+        // the same `(Name, model)` identity (L838 `LNa`/`Gwb`).
+        if (act->kind == "Effect") {
+            if (!act->name.empty()) {
+                const int side = (&owner == &player_) ? 0 : 1;
+                const int facing = owner.fighter.facing() >= 0 ? 1 : -1;
+                float ax = owner.fighter.world_x();
+                float ay = owner.fighter.world_y();
+                const std::string& part =
+                    act->has_attach ? act->attach_root_point : act->effect_pos_part;
+                bool part_ok = part.empty();
+                if (!part.empty()) {
+                    const int bi = owner.fighter.model().bone_by_name(part);
+                    const std::vector<float>& pos = owner.fighter.positions();
+                    if (bi >= 0 &&
+                        static_cast<std::size_t>(bi) * 2 + 1 < pos.size()) {
+                        ax = pos[static_cast<std::size_t>(bi) * 2];
+                        ay = pos[static_cast<std::size_t>(bi) * 2 + 1];
+                        part_ok = true;
+                    }
+                }
+                // `ee.nt` L786: `c.x += this.ix*a.Wl; c.y -= this.jx`.
+                ax += act->effect_shift_x * static_cast<float>(facing);
+                ay -= act->effect_shift_y;
+                const bool ok = magic_fx_.spawn(
+                    act->name, ax, ay, owner.fighter.facing(), side,
+                    act->effect_follow, ax - owner.fighter.world_x(),
+                    ay - owner.fighter.world_y());
+                std::fprintf(stdout,
+                             "[fx] F%d %s %s Effect name=%s seq=%s anchor=%.0f,%.0f "
+                             "part=%s follow=%d scale=%.2f,%.2f rot=%.1f -> %s\n",
+                             frame_, owner.name.c_str(), why, act->name.c_str(),
+                             act->sequence.c_str(), static_cast<double>(ax),
+                             static_cast<double>(ay),
+                             part.empty() ? "<com>"
+                                          : (part_ok ? part.c_str() : "<unresolved>"),
+                             act->effect_follow ? 1 : 0,
+                             static_cast<double>(act->effect_scale_x),
+                             static_cast<double>(act->effect_scale_y),
+                             static_cast<double>(act->start_rotation),
+                             ok ? "spawned" : "no descriptor");
+                std::fflush(stdout);
+            }
+            continue;
+        }
+        // --- StopEffect (`gm` L735 -> `wd.Svb` L519 -> `tl.Ot` L843) -------
+        if (act->kind == "StopEffect") {
+            if (!act->name.empty()) {
+                magic_fx_.stop(act->name, (&owner == &player_) ? 0 : 1);
+                std::fprintf(stdout, "[fx] F%d %s %s StopEffect name=%s\n", frame_,
+                             owner.name.c_str(), why, act->name.c_str());
+                std::fflush(stdout);
+            }
+            continue;
+        }
+        // --- StopFollowEffect (`hm` L736 -> `wd.Uvb` L519 -> `tl.Pt` L843) -
+        if (act->kind == "StopFollowEffect") {
+            if (!act->name.empty()) {
+                magic_fx_.stop_follow(act->name, (&owner == &player_) ? 0 : 1);
+                std::fprintf(stdout, "[fx] F%d %s %s StopFollowEffect name=%s\n",
+                             frame_, owner.name.c_str(), why, act->name.c_str());
+                std::fflush(stdout);
+            }
             continue;
         }
         // --- child models (JS `mh`/`Xl`/`$l`) ----------------------------

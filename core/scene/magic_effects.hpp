@@ -22,10 +22,15 @@
 //     `d.animate.ia(L.K.sk.Bm*a)`; a finished one-shot (`!LJ`) is removed.
 //
 // Asset facts (manifest L2490): hit flash `E.get(1306)` = `fight/fx` (frames
-// `hit_blade/*`, `critical/*`, `block/*`, `effect_shield_hex_hit/*` — the
-// real `ni` frame source); markers `E.get(1300)` = `fight/ringout`; sparks
-// `E.get(260)` = `ui/misc`. There are NO `magic/*.json` in this snapshot; the
-// `fight/fx` atlas frame runs are the available `ni` frame sets.
+// `hit_blade/*`, `critical/*`, `block/*`, `effect_shield_hex_hit/*`); markers
+// `E.get(1300)` = `fight/ringout`; sparks `E.get(260)` = `ui/misc`. The
+// `magic/*.json` registry IS shipped: the 79 `res/magic/mgc_*.json`
+// TexturePacker atlases (with their `.ktx` textures) are packed inside the
+// zstd archive `res/magic_ktx.72456186.dat` — they are NOT loose files, which
+// is why an earlier note claimed they were absent. `cv.lwb` (L839) loads
+// `magic/<Sequence>.json` per spawn; `set_magic_atlas_frames` carries the
+// frame runs parsed from that archive. The `fight/fx` runs remain only the
+// fallback for descriptors whose Sequence does not resolve.
 //
 // NO gameplay impact: instances carry only presentation state (position,
 // facing, frame cursor). Spawning/updating/destroying never touches the
@@ -33,10 +38,22 @@
 // sparks — the pose dump is byte-identical with or without effects).
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
+#include "scene/move_def.hpp"
+
 namespace sf2::scene {
+
+// The loaded magic atlas frame sets (JS `G.qf("magic/<fileName>.json")`): the
+// `Sequence` stem -> frame names in atlas order. Filled once by the app asset
+// load (app.cpp) from the packed archive res/magic_ktx.72456186.dat (79
+// `res/magic/mgc_*.json` TexturePacker atlases). The real `magic/*.json`
+// registry IS shipped in this snapshot - it lives inside that zstd archive,
+// not as loose files.
+void set_magic_atlas_frames(std::map<std::string, std::vector<std::string>> frames);
+const std::map<std::string, std::vector<std::string>>& magic_atlas_frames();
 
 // One data-loaded effect kind (one `magic/<fileName>` in JS terms).
 struct MagicEffectDesc {
@@ -47,12 +64,41 @@ struct MagicEffectDesc {
     bool on_background = false;        // JS `Gfb` (L729) -> `tl.Nt` ground layer
     float ticks_per_frame = 1.0f;      // JS `NL` (TimeScale, L729); mP = NL/60 s
     float scale = 1.0f;                // JS `Wl * scale` (with facing)
+    // JS `Yl.scale` is an `H(x, y, 0, 1)` (L729): `ScaleX`/`ScaleY` with the
+    // `Scale` fallback. `cv.lwb` (L838) writes `e.scale.x = Wl*scale.x` and
+    // `e.scale.y = scale.y`; the facing sign is applied at draw time.
+    float scale_x = 1.0f;
+    float scale_y = 1.0f;
+    float start_rotation = 0.0f;  // JS `Vla` (`a.rotate()`, degrees)
+    // A real TexturePacker atlas frame is drawn at its `sourceSize` * scale
+    // (JS `ve(Vs.Qq(g), g.WJ.scale)` L839), not fitted into a square. The
+    // legacy `fight/fx` built-ins keep the fitted `size` path.
+    bool draw_source_size = false;
+    // Placement (`ee` L784-786 / `Vu` L781-783): the named anchor part and
+    // the facing-scaled ShiftX (`x += ix*Wl`) / ShiftY (`y -= jx`). Empty
+    // `pos_part` => the owner CoM anchor.
+    std::string pos_player;
+    std::string pos_object;
+    std::string pos_part;
+    float shift_x = 0.0f;
+    float shift_y = 0.0f;
     float size = 24.0f;                // world-unit quad size
     std::uint32_t color = 0xFFFFFFFFu;  // 0xRRGGBB tint
     float gravity = 0.0f;              // world units/frame^2 (+y = down)
     float vx = 0.0f;                   // drift, world units/frame
     float vy = 0.0f;
 };
+
+// Builds the descriptor set from every move's `<Effect>` rows (JS `Yl`
+// L728-730) and the global `<Triggers>` block, resolving each `Sequence`
+// against `atlas_frames` (JS `G.qf("magic/<fileName>.json")` -> `pi.VJa`).
+// A row whose Sequence has no loaded atlas is skipped (the JS spawn on a
+// missing asset produces an empty frame run). Rows with an empty Sequence
+// (a Name-only row) are skipped too.
+std::vector<MagicEffectDesc> build_magic_descs(
+    const std::map<std::string, std::vector<std::string>>& atlas_frames,
+    const std::map<std::string, MoveDef>& moves,
+    const std::vector<GlobalTrigger>* global_triggers = nullptr);
 
 // One live effect (a `bv`-wrapped `dd` in JS terms).
 struct MagicInstance {
@@ -80,6 +126,12 @@ struct MagicInstance {
     // `cv.WL` (L839) skips the `d.update()` follow step but keeps advancing
     // the frame animation (`d.animate.ia`) to completion.
     bool detached = false;
+    // JS `cv.lwb` (L838): the resolved `<Position>` anchor (named Part world
+    // position + ShiftX/ShiftY, L786) is the spawn point; these keep its
+    // offset from the owner CoM so the follow update (`bv.update` L834)
+    // re-anchors identically.
+    float anchor_dx = 0.0f;
+    float anchor_dy = 0.0f;
 };
 
 // One owner transform for the follow update (JS `bv.update` reads
@@ -106,16 +158,30 @@ public:
     // Returns false when `descs` is empty (keeps the old set).
     bool load(const std::vector<MagicEffectDesc>& descs);
 
+    // Builds the descriptor set from the moves' `<Effect>` rows joined to the
+    // loaded magic atlas frame runs (JS `Yl` L728-730 + `cv.lwb` L839) and
+    // installs it. Returns the number of descriptors installed (0 leaves the
+    // previous set; the caller then falls back to `add_default_descs`).
+    std::size_t load_descriptors(
+        const std::map<std::string, std::vector<std::string>>& atlas_frames,
+        const std::map<std::string, MoveDef>& moves,
+        const std::vector<GlobalTrigger>* global_triggers = nullptr);
+
     // Seeds the two built-in descriptors from the real `fight/fx` atlas
-    // frame runs (the available `ni` frames): "hit_flash" (hit_blade),
-    // "magic_trail" (effect_shield_hex_hit, looping).
+    // frame runs (the fallback when no `magic/*.json` registry is loaded):
+    // "hit_flash" (hit_blade), "magic_trail" (effect_shield_hex_hit, looping).
     void add_default_descs();
+
+    std::size_t descriptor_count() const { return descs_.size(); }
 
     // Spawns a live instance (JS `Nt`/`lwb`). Returns false for unknown
     // names (never throws, never touches the sim). `owner` is the emitting
     // model (JS `bv.model`); `follow` marks a follow/attach effect (JS `P1`).
+    // `anchor_dx`/`anchor_dy` are the spawn anchor's offset from the owner's
+    // CoM (`cv.lwb` L838) and drive the follow update.
     bool spawn(const std::string& name, float x, float y, int facing,
-               int owner = -1, bool follow = false);
+               int owner = -1, bool follow = false, float anchor_dx = 0.0f,
+               float anchor_dy = 0.0f);
 
     // JS `cv.Dwb`/`LNa` (L838): StopEffect. Destroys the FIRST live instance
     // whose `(effect.name == name && model == owner)` matches (the loop
@@ -171,6 +237,12 @@ public:
     // Presentation fields of the instance's descriptor (for the renderer).
     float size_for(const MagicInstance& in) const;
     std::uint32_t color_for(const MagicInstance& in) const;
+    // JS `cv.lwb` (L838): `e.scale.x = Wl*scale.x`, `e.scale.y = scale.y` —
+    // the caller multiplies the SIGNED x scale by the instance facing.
+    float scale_x_for(const MagicInstance& in) const;
+    float scale_y_for(const MagicInstance& in) const;
+    float rotation_for(const MagicInstance& in) const;   // JS `Vla` (deg)
+    bool source_size_for(const MagicInstance& in) const;  // draw at sourceSize
 
     // JS `Gfb` (L729) -> JS `tl.Nt` (L842) picks `Gq` (ground) vs `Hq` (air).
     bool background_for(const MagicInstance& in) const;

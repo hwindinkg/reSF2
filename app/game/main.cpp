@@ -19,10 +19,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <set>
 #include <sstream>
@@ -35,9 +37,12 @@
 #include "app/quest_engine.hpp"
 #include "app/save_system.hpp"
 #include "app/screens.hpp"
+#include "atlas.hpp"
 #include "scene/fighter.hpp"
 #include "scene/magic_effects.hpp"
 #include "scene/renderer.hpp"
+#include "xml_archive.hpp"
+#include "zstd_stream.hpp"
 
 namespace {
 
@@ -1466,8 +1471,72 @@ int main(int argc, char** argv) {
             // The latched one-shot (29 frames) must run out and be removed.
             for (int f = 0; f < 40; ++f) fx.update(1.0f, anchors, 2);
             const bool emptied = fx.empty();
+            // --- real shipped descriptor check -----------------------------
+            // Load the packed `magic/*.json` registry (the 79
+            // `res/magic/mgc_*.json` atlases inside the zstd archive) and
+            // build one real `<Effect Sequence="mgc_effect_fall">` descriptor.
+            // Asserts: the atlas resolves (frame count > 0) and a real frame
+            // name is produced by the `ni` cursor.
+            std::map<std::string, std::vector<std::string>> atlas_frames;
+            std::size_t magic_atlas_count = 0, magic_frame_count = 0;
+            try {
+                std::ifstream in(res_root + "/magic_ktx.72456186.dat",
+                                 std::ios::binary);
+                std::vector<std::uint8_t> cz((std::istreambuf_iterator<char>(in)),
+                                             std::istreambuf_iterator<char>());
+                const std::vector<std::uint8_t> dc = sf2::data::zstd_decompress(cz);
+                const std::vector<sf2::data::archive_entry> ar =
+                    sf2::data::xml_archive_parse(dc.data(), dc.size());
+                for (const auto& e : ar) {
+                    if (e.name.size() <= 5 ||
+                        e.name.compare(e.name.size() - 5, 5, ".json") != 0) {
+                        continue;
+                    }
+                    const std::string stem = e.name.substr(0, e.name.size() - 5);
+                    const std::string leaf =
+                        stem.substr(stem.find_last_of('/') + 1);
+                    const sf2::data::atlas a =
+                        sf2::data::atlas_parse(e.data.data(), e.data.size());
+                    std::vector<std::string> nm;
+                    nm.reserve(a.frames.size());
+                    for (const auto& fr : a.frames) nm.push_back(fr.name);
+                    magic_frame_count += nm.size();
+                    atlas_frames[leaf] = std::move(nm);
+                    ++magic_atlas_count;
+                }
+            } catch (const std::exception& ex) {
+                std::fprintf(stderr, "[fxprobe] magic archive load failed: %s\n",
+                             ex.what());
+            }
+            sf2::scene::set_magic_atlas_frames(atlas_frames);
+            sf2::scene::MagicEffects real_fx;
+            bool real_spawn = false;
+            std::string real_frame;
+            const auto fit = atlas_frames.find("mgc_effect_fall");
+            if (fit != atlas_frames.end() && !fit->second.empty()) {
+                sf2::scene::MagicEffectDesc d;
+                d.name = "mgc_effect_fall";
+                d.frames = fit->second;   // atlas order
+                d.draw_source_size = true;  // TexturePacker sourceSize path
+                real_fx.load({d});
+                real_spawn = real_fx.spawn("mgc_effect_fall", 10.0f, -5.0f, 1, 0, false);
+                if (real_spawn) {
+                    const std::vector<sf2::scene::MagicInstance> live = real_fx.live();
+                    if (!live.empty()) real_frame = real_fx.frame_for(live.front());
+                }
+            }
+            const bool real_ok =
+                real_spawn && !real_frame.empty() && magic_frame_count > 0;
+            std::fprintf(stdout,
+                         "[fxprobe] magic atlases=%zu frames=%zu real_spawn=%d "
+                         "real_frame=%s -> %s\n",
+                         magic_atlas_count, magic_frame_count, real_spawn ? 1 : 0,
+                         real_frame.empty() ? "<none>" : real_frame.c_str(),
+                         real_ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
             const bool pass = s0 && s1 && spawned == 2 && follow_ok && draw_ok &&
-                              destroyed && latch_alive && latch_detached && emptied;
+                              destroyed && latch_alive && latch_detached && emptied &&
+                              real_ok;
             std::fprintf(stdout,
                          "[fxprobe] spawn=%zu/%d follow=%d draw=%d "
                          "stopeffect_destroyed=%d stopfollow_alive=%d "
