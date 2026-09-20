@@ -225,6 +225,12 @@ struct BattleRecord {
     bool disciple = false;
     bool show_dojo_disciple = false;
 
+    // Persisted bus mutes (JS `sc.Gpb` L114249 / `sc.ckb` L113759):
+    // `<CurrentUser><Sounds><Sound Mute>` = `ta.$D` (SFX, `lb.Mz()`),
+    // `<Music Mute>` = `ta.ZD` (music, `lb.Lz()`). "1" = muted.
+    bool sound_muted = false;  // `ta.$D` / `lb.Mz()` (L1265/L1276)
+    bool music_muted = false;  // `ta.ZD` / `lb.Lz()` (L1265/L1276)
+
     // Delivery countdowns (JS `yl`/`Ct` timers: `Uaa/BXa/bva` set, `gJ`
     // get, `H4` clear, persisted under save `<Timers>`, L250/291; `Gb`
     // setTime/Tma stamps Cla(now) + save): item name -> wall-clock due

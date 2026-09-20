@@ -79,6 +79,7 @@ std::string g_settings_lang;  // `un.$u`
 int g_settings_hover = -1;    // flat-fallback hover (`Kb`/`Km`/rows)
 int g_settings_age = 0;       // frames since open (press debounce)
 bool g_settings_music_off = false;  // `un.W$`/`lb.Lz()` state (shared)
+bool g_settings_sound_off = false;  // `un.Y$`/`lb.Mz()` state (shared)
 // JS `iv` (L2477): the language cycle order `un.rHa` case 4 walks (L1931).
 const char* const kSettingsLangs[] = {"en", "de", "it", "fr", "pt",
                                       "ru", "es", "tr", "ja", "ko"};
@@ -2689,13 +2690,17 @@ void draw_flash_tint(sf2::render::Renderer& ren, float cx, float cy, float w, fl
 // `min(W,H)*0.1` wide, centres it on the target rect x and pins it at the
 // rect top (`node.C((a.J+a.N)*.5)`, `node.D(a.W+...)`), bobbing ±0.8 with a
 // 30-frame direction flip (`this.cV`, `this.UUa=30`).
-void draw_nav_hint_arrow(App& app, float cx, float top_y) {
+void draw_nav_hint_arrow(App& app, float cx, float bottom_y) {
     const float w = std::min(kViewW, kViewH) * 0.1f;
     const float h = w * 0.75f;
     static int phase = 0;
     const float bob = ((phase++ / 30) % 2 == 0) ? 0.8f : -0.8f;
-    if (!try_draw_atlas_button(app, "Arrow", cx, top_y - h * 0.5f + bob, w, h, 1.0f)) {
-        draw_flat_button(app, "v", cx, top_y - h * 0.5f + bob, w, h, 0.9f, 0.8f, 0.3f, true);
+    // JS `he.aa` L2315: `this.node.D(a.W + this.Oy.qa()*.1)` pins the arrow node
+    // TOP `0.1*arrowHeight` BELOW the target rect BOTTOM (`a.W`; the rect `gb`
+    // ctor L795087 is `{J=x1,P=y1,N=x2,W=y2}` so W = y2 = bottom).
+    const float top = bottom_y + h * 0.1f;
+    if (!try_draw_atlas_button(app, "Arrow", cx, top + h * 0.5f + bob, w, h, 1.0f)) {
+        draw_flat_button(app, "v", cx, top + h * 0.5f + bob, w, h, 0.9f, 0.8f, 0.3f, true);
     }
 }
 
@@ -2942,7 +2947,9 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         // longer gates the collapsed header flash.
         if (!app.quest_engine().nav_flash().empty()) {
             draw_flash_tint(ren, hx + hw * 0.5f, hy + hh * 0.5f, hw, hh);
-            draw_nav_hint_arrow(app, hx + hw * 0.5f, hy);
+            // The `he` target is the collapsed MENU button (header rect `hx,hy,hw,hh`),
+            // so its BOTTOM is `hy + hh` (`a.W`, L2315).
+            draw_nav_hint_arrow(app, hx + hw * 0.5f, hy + hh);
         }
         return;
     }
@@ -12749,6 +12756,17 @@ void open_settings_dialog(App& app) {
     g_settings_lang = app.language().empty() ? "en" : app.language();
     g_settings_restart_visible = false;
     g_settings_age = 0;
+    // JS `sc.ckb` (L113759): the save `<Sounds>/<Sound|Music>@Mute` restores the
+    // bus mutes on load. Re-apply so the row icons match the persisted state.
+    try {
+        const WarriorSave w = app.save().load();
+        sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+        if (au.sfx_muted() != w.sound_muted) au.set_sfx_muted(w.sound_muted);
+        if (au.music_muted() != w.music_muted) au.set_music_muted(w.music_muted);
+        g_settings_sound_off = w.sound_muted;
+        g_settings_music_off = w.music_muted;
+    } catch (const std::exception&) {
+    }
 }
 
 void close_settings_dialog() { g_settings_dialog_open = false; }
@@ -12776,7 +12794,7 @@ void settings_dialog_cycle_language(App& app) {
 namespace {
 
 // `un.rHa` (L1930-1932) row switch, shared by the overlay + the hosted screen.
-enum class SettingsRow { kNone = 0, kBack, kMusic, kRestart, kLanguage };
+enum class SettingsRow { kNone = 0, kBack, kMusic, kRestart, kLanguage, kSound };
 
 SettingsRow settings_row_at(const SettingsLayout& s, double x, double y) {
     auto in = [&](float cx, float cy, float w, float h) {
@@ -12788,9 +12806,27 @@ SettingsRow settings_row_at(const SettingsLayout& s, double x, double y) {
         return SettingsRow::kRestart;
     }
     // `un`'s `c` hit-rect (L1917): 800 x icon, one per container.
+        if (in(s.sound_row_cx, s.sound_cy, s.row_w, s.row_h)) return SettingsRow::kSound;
     if (in(s.music_row_cx, s.music_cy, s.row_w, s.row_h)) return SettingsRow::kMusic;
     if (in(s.lang_row_cx, s.lang_cy, s.row_w, s.row_h)) return SettingsRow::kLanguage;
     return SettingsRow::kNone;
+}
+
+// JS `lb.VT`/`lb.WT` (L1276) call `p.TJ.save()` right after writing the bus
+// state, so a Settings toggle persists immediately. The port writes it into
+// the save `<Sounds>/<Sound|Music>@Mute>` (JS `sc.Gpb` L114249); load side is
+// `sc.ckb` L113759. Best-effort: a failure is reported, never fatal.
+void persist_settings_mutes(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+        w.sound_muted = au.sfx_muted();
+        w.music_muted = au.music_muted();
+        app.save().save(w);
+    } catch (const std::exception& e) {
+        std::fprintf(stdout, "[settings] mute save failed: %s\n", e.what());
+        std::fflush(stdout);
+    }
 }
 
 // Runs a row action; returns true when the dialog must close (`Ge(0)` L1930 /
@@ -12809,8 +12845,21 @@ bool settings_run_row(App& app, SettingsRow row) {
             // no-op. The mute now rides the engine (`ta.$D`, `lb.Mz()`).
             g_settings_music_off = !g_settings_music_off;
             sf2::audio::AudioEngine::instance().set_music_muted(g_settings_music_off);
+            persist_settings_mutes(app);
             sf2::audio::AudioEngine::instance().play("snd_click_1");
             std::fprintf(stdout, "[settings] music %s\n", g_settings_music_off ? "OFF" : "ON");
+            std::fflush(stdout);
+            return false;
+        case SettingsRow::kSound:
+            // `un.Y$`/`lb.Mz()` (L1928) + `case 1: lb.WT(!lb.Mz())` (L1931):
+            // `ta.WT(a)` (L1265) = `L.K.$f.cMa(a?0:1); ta.$D=a` (the SFX bus;
+            // `cMa` -> `oBa`, the non-`tR` bus, L1240813). Row id 1 = "sound".
+            g_settings_sound_off = !g_settings_sound_off;
+            sf2::audio::AudioEngine::instance().set_sfx_muted(g_settings_sound_off);
+            sf2::audio::AudioEngine::instance().play("snd_click_1");
+            persist_settings_mutes(app);
+            std::fprintf(stdout, "[settings] sound %s\n",
+                         g_settings_sound_off ? "OFF" : "ON");
             std::fflush(stdout);
             return false;
         case SettingsRow::kLanguage:
@@ -12870,7 +12919,8 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
     draw_ui_label(app, s.title_x, s.title_y, s.title_w, s.title_h,
                   loc(app, "Settings_Title", "SETTINGS"), 1.52f, UiAlign::Center, 0.404f,
                   0.243f, 0.141f);
-    const bool sfx_on = sf2::audio::AudioEngine::instance().enabled();
+    // JS `y.loa/koa` (L1928): the Sound row icon reflects the SFX mute (`lb.Mz()`).
+    const bool sfx_on = !sf2::audio::AudioEngine::instance().sfx_muted();
     const std::string lang = g_settings_lang.empty() ? "en" : g_settings_lang;
     if (load_settings_icons_atlas(app)) {
         try_draw_atlas_button(app, sfx_on ? "sound" : "sound_off", s.sound_cx, s.sound_cy,

@@ -110,6 +110,17 @@ WarriorSave SaveSystem::load() {
     if (warrior.attribute("Tactic")) out.tactic = warrior.attribute("Tactic").value();
     if (warrior.attribute("CurrentZone")) out.current_zone = warrior.attribute("CurrentZone").value();
 
+    // Bus mutes (JS `sc.ckb` L113759): `<CurrentUser><Sounds>/<Sound|Music>@Mute`.
+    // where `a` is the CurrentUser node (`sc.Ju`, `Aa.save(sc.Ju.parent)`).
+    if (pugi::xml_node cu = root.child("CurrentUser")) {
+        if (pugi::xml_node snd_root = cu.child("Sounds")) {
+            out.sound_muted =
+                sf2::data::xml_attr_bool(snd_root.child("Sound"), "Mute", false);
+            out.music_muted =
+                sf2::data::xml_attr_bool(snd_root.child("Music"), "Mute", false);
+        }
+    }
+
     // The owned items (JS `$g.parse` reads the Warrior <Items> children).
     out.items.clear();
     for (pugi::xml_node item : warrior.child("Items").children("Item")) {
@@ -337,6 +348,19 @@ void SaveSystem::save(const WarriorSave& w) {
     warrior.attribute("Tutorial").set_value(w.tutorial.c_str());
     warrior.attribute("Tactic").set_value(w.tactic.c_str());
     warrior.attribute("CurrentZone").set_value(w.current_zone.c_str());
+
+    // Bus mutes (JS `sc.Gpb` L114249): `<Sounds>/<Sound|Music>@Mute` from `ta.$D`
+    // (SFX bus = `sound_muted`, `lb.Mz()`) / `ta.ZD` (music bus, `lb.Lz()`).
+    if (pugi::xml_node cu = root.child("CurrentUser")) {
+        pugi::xml_node snd_root = cu.child("Sounds");
+        if (!snd_root) snd_root = cu.append_child("Sounds");
+        pugi::xml_node snd = snd_root.child("Sound");
+        if (!snd) snd = snd_root.append_child("Sound");
+        snd.attribute("Mute").set_value(w.sound_muted ? "1" : "0");
+        pugi::xml_node mus = snd_root.child("Music");
+        if (!mus) mus = snd_root.append_child("Music");
+        mus.attribute("Mute").set_value(w.music_muted ? "1" : "0");
+    }
 
     // The owned items (JS `$g` + `Aa.save`): replace the <Items> children.
     // The template always has an <Items> element (the Warrior's equipped

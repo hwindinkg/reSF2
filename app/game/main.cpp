@@ -39,6 +39,7 @@
 #include "app/save_system.hpp"
 #include "app/screens.hpp"
 #include "atlas.hpp"
+#include "audio/audio.hpp"
 #include "scene/fighter.hpp"
 #include "scene/magic_effects.hpp"
 #include "scene/renderer.hpp"
@@ -1856,6 +1857,19 @@ int main(int argc, char** argv) {
     }
     std::fprintf(stdout, "[game] booted: window %dx%d, save '%s'\n", app.view_w(), app.view_h(),
                  save_path.c_str());
+
+    // JS `sc` ctor `ckb` (L113759): `<CurrentUser><Sounds>/<Sound|Music>@Mute`
+    // restore the bus mutes at save-parse. Apply right after boot so the menu
+    // music/SFX obey the persisted state (`ta.WT`/`ta.VT`, L1265).
+    {
+        sf2::audio::AudioEngine& boot_au = sf2::audio::AudioEngine::instance();
+        try {
+            const sf2::app::WarriorSave boot_w = app.save().load();
+            if (boot_au.sfx_muted() != boot_w.sound_muted) boot_au.set_sfx_muted(boot_w.sound_muted);
+            if (boot_au.music_muted() != boot_w.music_muted) boot_au.set_music_muted(boot_w.music_muted);
+        } catch (const std::exception&) {
+        }
+    }
 
     if (!dump_clip.empty()) {
         // [trace, Phase 0] Clip dump: find the named clip in the loaded anim
