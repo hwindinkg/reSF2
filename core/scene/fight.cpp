@@ -476,7 +476,6 @@ void FightController::init_locks(
     // 133-frame stance mid-way).
     cur_banner_ = banner_kind::round;
     banner_time_ = kJsBannerRoundBreakSeconds;
-    banner_total_ = kJsBannerRoundBreakSeconds;
     banner_armed_ = false;                       // `tca` clears `wU` ...
     banner_arm_delay_ = kJsBannerArmDelaySeconds;  // ... until the 500 ms delay
     banner_action_ = banner_action::none;
@@ -2581,7 +2580,6 @@ void FightController::round_start() {
     // expiry dispatches through `ca.vhb` (L410) case 2 -> `FNa` (phase 1).
     cur_banner_ = banner_kind::round;
     banner_time_ = kJsBannerRoundBreakSeconds;      // JS `fu(1.666)`
-    banner_total_ = kJsBannerRoundBreakSeconds;
     banner_armed_ = false;                          // `tca` clears `wU` ...
     banner_arm_delay_ = kJsBannerArmDelaySeconds;   // ... for 500 ms
     banner_action_ = banner_action::begin_round;    // vhb case 2 -> `FNa`
@@ -2721,7 +2719,6 @@ void FightController::enter_fight_none() {
     // belongs to the battle flow (JS `ggb` -> `swb` -> `FNa`).
     cur_banner_ = banner_kind::none;
     banner_time_ = 0.0f;
-    banner_total_ = 0.0f;
     banner_armed_ = false;
     banner_arm_delay_ = 0.0f;
     banner_action_ = banner_action::none;
@@ -4871,44 +4868,6 @@ int FightController::hud_timer() const {
     return std::max(0, round_.time_nf);
 }
 
-// The banner's display text ("" when no banner). banner_round_ is the
-// 0-based round number (round_.number), so the label is +1. The ROUND
-// text is formatted into a function-local static buffer (single-threaded
-// game loop; the caller reads it before the next call).
-const char* FightController::banner_text() const {
-    static char round_buf[32];
-    switch (cur_banner_) {
-        case banner_kind::round:
-            std::snprintf(round_buf, sizeof(round_buf), "ROUND %d",
-                         banner_round_ + 1);
-            return round_buf;
-        case banner_kind::fight:  return "FIGHT!";
-        // The JS draws NO "K.O."/"KO" text anywhere — the literal "K.O."
-        // appears 0 times in sf2.502f0946.js. The round-end plate is `Cr.GZ`
-        // (L2024, type 6/7) with the callouts-atlas frames `y.zQa="perfect"` /
-        // `y.wQa="great"`; the full `Cr` plate set is `uQa="fight"`,
-        // `BQa="round"`, `zQa="perfect"`, `wQa="great"`, `DQa="timesup"`,
-        // `AQa="ringout"`, `Kna="label_lose"`, `Lna="label_win"`. The "K.O."
-        // label was a port invention; the ko banner is a HOLD only and draws
-        // no flat text (the atlas path in screens.cpp `banner_atlas_frame`
-        // already returns nullptr for it — no invented frame is added here).
-        case banner_kind::ko:     return "";
-        case banner_kind::victory: return "VICTORY";
-        case banner_kind::defeat: return "DEFEAT";
-        default:                  return "";
-    }
-}
-
-// The banner's progress through its hold, clamped to 0..1 (for the
-// fade/scale-in; the victory/defeat banner has no timer and holds at 1.0).
-// JS `Cr.Sc` counts DOWN from the `fu` value, so the progress is the
-// elapsed fraction of that value (`banner_total_`).
-float FightController::banner_progress() const {
-    if (banner_total_ <= 0.0f) return 1.0f;
-    const float p = (banner_total_ - banner_time_) / banner_total_;
-    return std::max(0.0f, std::min(1.0f, p));
-}
-
 // JS `Cr.fu` (L2026): `this.Sc=a; this.X(!0); this.wU=!0; this.thb.Z(type)`.
 // `Cr.tca` (L2023) then clears `wU` and schedules a 500 ms `wh.delay` that
 // re-arms it, so the round-break plate passes `arm_after_delay = true`.
@@ -4916,7 +4875,6 @@ void FightController::banner_show(banner_kind kind, float seconds,
                                   banner_action action, bool arm_after_delay) {
     cur_banner_ = kind;       // JS `Cr.type`
     banner_time_ = seconds;   // JS `Cr.Sc`
-    banner_total_ = seconds;
     banner_armed_ = !arm_after_delay;  // `fu` arms; `tca` clears it again
     banner_arm_delay_ = arm_after_delay ? kJsBannerArmDelaySeconds : 0.0f;
     banner_action_ = action;

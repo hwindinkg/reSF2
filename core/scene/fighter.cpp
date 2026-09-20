@@ -558,15 +558,6 @@ void Fighter::clear_block() { clear_intervals(5, ""); }
 // JS `Te.hT(type)` / `F4(name)` (L554) + scripted `Yob` (L1294): drop every
 // active interval matching TYPE (-1 = any) or NAME ("" = any). Interval
 // identity is the active-set key (name, or "type<N>" for nameless).
-// Per-bone knockback feed (JS `Bl.strike` L582 moves the endpoint bodies).
-void Fighter::add_knockback(int bone, const sf2::scene::Vec3& v) {
-    if (bone < 0 || model_.bones.empty()) return;
-    const std::size_t n = model_.bones.size();
-    if (kb_.size() != n) kb_.assign(n, sf2::scene::Vec3{});
-    kb_[static_cast<std::size_t>(bone)] =
-        kb_[static_cast<std::size_t>(bone)] + v;
-}
-
 // JS `Al.start(a)` (L582): `this.nk=!0; this.frameCount=0; this.names=[];
 // a!=null&&addRange(this.names,a); this.oa.BKa()`. `BKa()` re-seeds the
 // solver bodies; the port promotes the whole solver state to WORLD space

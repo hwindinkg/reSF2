@@ -3063,8 +3063,8 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
 // (`round = ea(E.get(1298), content)`, id 1298 = fight/round.fnt). `image`
 // is scaled `min(800, min(W,H))/image.fa.x*0.6` (layout L2027) and centred
 // (`content.setPosition(ma.Kq.F5a())`). The banner is a pure presentation
-// layer over the fight (reads FightController::banner()/banner_text()/
-// banner_progress()), never the simulation.
+// layer over the fight (reads FightController::banner()), never the
+// simulation.
 //
 // App::init registers menu/misc/controller/fight-ui but not callouts, so the
 // atlas is loaded lazily here (the `load_controller_atlas` pattern; ASTC KTX
@@ -3580,124 +3580,39 @@ const char* banner_atlas_frame(sf2::scene::banner_kind kind) {
     }
 }
 
-// The banner's animation envelope over `progress` (0..1): scale-in 0.5 -> 1.0
-// over the first 15%, hold at 1.0, fade out over the last 20%. The
-// victory/defeat banners have no `Cr.fu` timer (banner_total_ = 0), so the
-// controller's progress is 1.0 and they pop in from the screen-tracked age.
-float banner_scale_at(float progress) {
-    constexpr float kInEnd = 0.15f;  // scale-in window (first 15%)
-    if (progress <= 0.0f) return 0.5f;
-    if (progress < kInEnd) {
-        const float t = progress / kInEnd;              // 0..1
-        const float rise = t * t * (3.0f - 2.0f * t);   // smoothstep 0..1
-        return 0.5f + 0.5f * rise;                      // 0.5 -> 1.0
-    }
-    return 1.0f;
-}
-
-float banner_alpha_at(float progress) {
-    constexpr float kFadeStart = 0.8f;  // fade-out window (last 20%)
-    if (progress >= kFadeStart) {
-        const float t = (progress - kFadeStart) / (1.0f - kFadeStart);
-        return 1.0f - t;  // linear 1 -> 0
-    }
-    return 1.0f;
-}
-
-// Draws the current fight banner centered at ~35% of the view height: the
-// callouts atlas art (id 1310) for round/fight/victory/defeat, with the
-// menu-font text as the fallback when the frame is missing. Screen-space
-// (the UI camera), drawn over the fight and under the gamepad (the caller's
-// draw order).
-//
-// `banner_age` = fight frames since the banner was raised (tracked by the
-// FightScreen — the hold-forever VICTORY/DEFEAT plates have no `Cr.fu`
-// timer, so the screen-side age drives their pop-in).
-void draw_fight_banner(App& app, const sf2::scene::FightController& fight, int banner_age) {
+// Draws the current fight plate centered at ~35% of the view height: the
+// callouts atlas art (id 1310) for round/fight/victory/defeat. The JS `Cr`
+// (L2021-2027) shows the plate with NO tween - `fu(a)` only sets `Sc=a` and
+// `X(!0)`, `aa` counts `Sc` down - so the port draws it at the constant
+// `layout()` scale with alpha 1.0 for the whole hold. There is no
+// scale-in/fade-out and no fallback text (the JS draws atlas ART only).
+// Screen-space (the UI camera), drawn over the fight and under the gamepad.
+void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
     const sf2::scene::banner_kind kind = fight.banner();
     if (kind == sf2::scene::banner_kind::none) return;
 
-    float progress = fight.banner_progress();
-    if (kind == sf2::scene::banner_kind::victory ||
-        kind == sf2::scene::banner_kind::defeat) {
-        // Hold-forever banner: pop in over ~0.75 s from the screen-tracked
-        // age, then HOLD (no fade — the results screen takes over). The
-        // envelope's fade window starts at 0.8, so clamp the pop-in
-        // progress at 0.8: alpha stays 1.0 forever.
-        constexpr float kHoldBannerInFrames = 45.0f;
-        constexpr float kHoldProgressCap = 0.8f;
-        progress = std::min(kHoldProgressCap,
-                           static_cast<float>(banner_age) / kHoldBannerInFrames);
-    }
-    const float scale_anim = banner_scale_at(progress);
-    const float alpha = banner_alpha_at(progress);
-    if (alpha <= 0.01f) return;
-
-    // Centered at ~35% of the view height (draw_text_* anchors a line at its
-    // top y; the pop-in scale animates the art's box too).
     const float cx = kViewW * 0.5f;
     const float cy = kViewH * 0.35f;
 
     // The callouts atlas art (JS `Cr` L2022: `image = R.$(E.get(1310))`);
     // scaled min(800,min(W,H))/image.w*0.6 (layout L2027), centred.
     const char* frame = banner_atlas_frame(kind);
-    if (frame != nullptr && load_callouts_atlas(app)) {
-        const float art = std::min(800.0f, std::min(kViewW, kViewH)) * 0.6f;
-        if (try_draw_atlas_button(app, frame, cx, cy, art * scale_anim, art * scale_anim,
-                                  alpha)) {
-            // The ROUND number: `round = ea(E.get(1298))`, Ia(64),
-            // ua(fontSize*1.6) (JS `Cr` L2022/L2026) — round digits above
-            // the ROUND art.
-            if (kind == sf2::scene::banner_kind::round) {
-                const sf2::data::font* rf = app.round_font();
-                const unsigned int rtex = app.round_texture();
-                if (rf != nullptr && rtex != 0) {
-                    const float rscale = (64.0f * 1.6f) / 140.0f;  // round eF=140
-                    app.draw_text_centered(*rf, rtex, cx,
-                                           cy - art * 0.5f * scale_anim - 78.0f * scale_anim,
-                                           std::to_string(fight.round().number),
-                                           rscale * scale_anim, 1.0f, 1.0f, 1.0f, alpha);
-                }
-            }
-            return;
+    if (frame == nullptr || !load_callouts_atlas(app)) return;
+    const float art = std::min(800.0f, std::min(kViewW, kViewH)) * 0.6f;
+    if (!try_draw_atlas_button(app, frame, cx, cy, art, art, 1.0f)) return;
+    // The round NUMBER: `round = ea(E.get(1298))`, Ia(64), ua(fontSize*1.6)
+    // (JS `Cr` L2022/L2026) - the round digits above the ROUND art. The JS
+    // draws the number only; there is no "ROUND" text.
+    if (kind == sf2::scene::banner_kind::round) {
+        const sf2::data::font* rf = app.round_font();
+        const unsigned int rtex = app.round_texture();
+        if (rf != nullptr && rtex != 0) {
+            const float rscale = (64.0f * 1.6f) / 140.0f;  // round eF=140
+            app.draw_text_centered(*rf, rtex, cx, cy - art * 0.5f - 78.0f,
+                                   std::to_string(fight.round().number), rscale,
+                                   1.0f, 1.0f, 1.0f, 1.0f);
         }
     }
-
-    // Flat fallback: menu-font text when the callouts frame is missing.
-    const char* text = fight.banner_text();
-    if (text == nullptr || text[0] == '\0') return;
-    const sf2::data::font* fnt = app.menu_font();
-    const unsigned int tex = app.font_texture();
-    if (fnt == nullptr || tex == 0) return;  // no font -> no banner
-
-    // The base glyph scale: font-en caps are ~53px tall; the banner reads
-    // big at ~1.6x, K.O. bigger still.
-    float r = 1.0f, g = 1.0f, b = 1.0f;
-    float size = 1.6f;
-    if (kind == sf2::scene::banner_kind::ko) {
-        r = 0.95f;
-        g = 0.12f;
-        b = 0.10f;
-        size = 2.2f;
-    } else if (kind == sf2::scene::banner_kind::victory) {
-        r = 1.0f;
-        g = 0.82f;
-        b = 0.25f;
-        size = 1.9f;
-    } else if (kind == sf2::scene::banner_kind::defeat) {
-        r = 0.90f;
-        g = 0.15f;
-        b = 0.12f;
-        size = 1.9f;
-    }
-    const float scale = size * scale_anim;
-    const float y = cy - static_cast<float>(fnt->line_height) * scale * 0.5f;
-
-    // The black drop shadow (offset ~2px per scale unit), then the text.
-    const float shadow_off = 2.0f + scale * 0.8f;
-    app.draw_text_centered(*fnt, tex, cx + shadow_off, y + shadow_off, text, scale,
-                           0.0f, 0.0f, 0.0f, 0.75f * alpha);
-    app.draw_text_centered(*fnt, tex, cx, y, text, scale, r, g, b, alpha);
 }
 
 // Draws the live hit-spark particles (world space -> screen through the SAME
@@ -5581,16 +5496,19 @@ int DojoScreen::dojo_last_key_type() const { return dojo_last_key_type_; }
 void DojoScreen::on_key(int glfw_key, bool down) {
     // The hub's FightNone battle is put straight into phase 2 (`xF(2)`, JS
     // `kg` L387) with no round flow, so every fight key is live — no pause
-    // gate. Directions use the JS diagonal-pair table; the arrows are the
-    // desktop aliases the fight screen also accepts.
-    const int move_slot = keyboard_move_slot(glfw_key, /*aliases=*/true);
+    // gate. Directions use the JS diagonal-pair table (`Af.oUa` L2472; the
+    // ten W/A/S/D + K/L/O/P/J/Q keys); the arrows/Space are the desktop
+    // aliases, gated by `desktop_key_aliases_` exactly like `FightScreen`.
+    const int move_slot = keyboard_move_slot(glfw_key, desktop_key_aliases_);
     if (move_slot >= 0) {
         keyboard_move_edge(dojo_fight_.get(), dojo_keys_, move_slot, down, "dojo");
         dojo_last_key_type_ = dojo_keys_.sector;
         return;
     }
     int kt_id = FightScreen::key_type_for_glfw(glfw_key);
-    if (kt_id == 0) kt_id = FightScreen::desktop_alias_for_glfw(glfw_key);
+    if (desktop_key_aliases_ && kt_id == 0) {
+        kt_id = FightScreen::desktop_alias_for_glfw(glfw_key);
+    }
     dojo_last_key_type_ = kt_id;
     if (kt_id == 0 || dojo_fight_ == nullptr) return;
     dojo_fight_->player_input(static_cast<sf2::scene::key_type>(kt_id),
@@ -8742,6 +8660,11 @@ void FightScreen::update_impl(float dt) {
     }
 }
 
+// (fwd) the `E.Zxa` gradient sampler (defined below): the fight `kk` base and
+// the `Dr` pause overlay (`wh(6,1,.25)`, L2065) both use it.
+void draw_kk_gradient(sf2::render::Renderer& ren, float x, float y, float w, float h,
+                      float alpha = 1.0f);
+
 void FightScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     if (fight_ == nullptr) return;
@@ -9365,19 +9288,9 @@ void FightScreen::render_impl(App& app) {
                   kPipW, e_done);
     }
 
-    // The round banner (ROUND N / FIGHT! / K.O. / VICTORY / DEFEAT — JS
-    // `Cr` L2021-2026): over the fight + HUD, UNDER the gamepad and the
-    // Next button (the draw order below). The screen tracks the banner's
-    // age for the hold-forever VICTORY/DEFEAT pop-in (see draw_fight_banner).
-    {
-        const int kind_now = static_cast<int>(fight_->banner());
-        if (kind_now != banner_kind_seen_) {
-            banner_kind_seen_ = kind_now;
-            banner_start_frame_ = fight_->frame();
-        }
-        const int banner_age = fight_->frame() - banner_start_frame_;
-        draw_fight_banner(app, *fight_, banner_age);
-    }
+    // The round plate (JS `Cr` L2021-2026): over the fight + HUD, UNDER the
+    // gamepad. Atlas art only - no text and no tween (see draw_fight_banner).
+    draw_fight_banner(app, *fight_);
 
     // The on-screen gamepad (JS `Za` virtual controls): the joystick
     // bottom-left + the punch/kick buttons bottom-right, drawn from the
@@ -9418,11 +9331,10 @@ void FightScreen::render_impl(App& app) {
                       vs_enemy_image_);
     }
     if (paused_) {
-        const float dim[] = {0, 0,         kViewW, 0,         kViewW, kViewH,
-                             0, 0,         kViewW, kViewH,    0,      kViewH};
-        // `Dr.Qa` (L2065): `R.$(E.Zxa(900))` `wa(0)` `wh(6,1,.25)` full-screen
-        // -> a ~0.25-alpha dim (was an invented 0.65).
-        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.35f);
+        // `Dr.Qa` (L2065): the SAME `E.Zxa` horizontal gradient as the fight
+        // (`E.Eua` stops #00000020/80/80/80/20), tweened `wh(6,1,.25)` so the
+        // node alpha settles at .25: overlay = gradient alpha * 0.25.
+        draw_kk_gradient(ren, 0.0f, 0.0f, kViewW, kViewH, 0.25f);
         // `Dr` pause dialog (JS L2018; PAUSE_STATIC §3): `res/fight/pause.*`
         // frames — `Pause` title, `PauseMusic_on/off`, `PauseSound_on/off`,
         // `play` (resume), `home` (quit). Flat fallback only on a genuine
@@ -9598,17 +9510,6 @@ void ResultsScreen::update_impl(float dt) {
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[result] save failed: %s\n", e.what());
         }
-        // Tutorial quest nudge (quest_panel.hpp — read-only derivation via
-        // the existing pending-battle hook; the Dojo hint panel picks the
-        // step up from here, no save writes).
-        {
-            const PendingBattle& pb = app().pending_battle();
-            if (player_won_ && pb.has_result && pb.battle_name == "Training") {
-                quest_toast_ = "Quest update: the dummy falls! Sensei awaits in the Dojo.";
-                std::fprintf(stdout, "[result] quest: first Training win -> Sensei hint advanced\n");
-                std::fflush(stdout);
-            }
-        }
     }
     const App::PointerState& p = app().pointer();
     if (p.pressed) {
@@ -9632,7 +9533,8 @@ void ResultsScreen::update_impl(float dt) {
 // (`Rh/mj`), i.e. the whole fight viewport — the "panel" is a full-viewport
 // alpha gradient, not a flat rect. `draw_triangles` is flat-color, so the
 // gradient is sampled into N vertical strips.
-void draw_kk_gradient(sf2::render::Renderer& ren, float x, float y, float w, float h) {
+void draw_kk_gradient(sf2::render::Renderer& ren, float x, float y, float w, float h,
+                      float alpha) {
     struct Stop {
         float t;
         float a;
@@ -9656,7 +9558,7 @@ void draw_kk_gradient(sf2::render::Renderer& ren, float x, float y, float w, flo
         }
         const float x0 = x + w * t0, x1 = x + w * t1;
         const float v[] = {x0, y, x1, y, x1, y + h, x0, y, x1, y + h, x0, y + h};
-        ren.draw_triangles(v, 6, 0.0f, 0.0f, 0.0f, a);
+        ren.draw_triangles(v, 6, 0.0f, 0.0f, 0.0f, a * alpha);
     }
 }
 
@@ -9796,10 +9698,6 @@ void ResultsScreen::render_impl(App& app) {
         draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
                       std::to_string(shown), 0.95f, UiAlign::Left, 0.31f * slide,
                       0.79f * slide, 0.84f * slide);
-    }
-    if (!quest_toast_.empty()) {
-        draw_ui_label(app, kViewW * 0.5f - 300.0f, kViewH - 96.0f, 600.0f, 28.0f,
-                      quest_toast_, 0.9f, UiAlign::Center, 1.0f, 0.9f, 0.4f);
     }
     // OK button (JS `Lr.$g = new Bb("EButtonWhite"); $g.V(Y.na("OK"))`, L2075).
     // `Bb.fza` (L1844 `"btn"+K.T(a).substr(7)`) resolves the style key to a
@@ -12479,11 +12377,6 @@ void EquipmentScreen::render_impl(App& app) {
                               UiAlign::Left, 0.16f, 0.11f, 0.06f);
             }
         }
-        if (move_rows_.empty()) {
-            draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
-                          "No moves for this weapon.", 0.8f, UiAlign::Center, 0.4f, 0.3f,
-                          0.2f);
-        }
         // `zr=Yr` right panel: the selected move name + the `$r.Op`
         // `Y.na("profile_BtnShow")` view button (L2234 `$r.ba`).
         if (!move_rows_.empty()) {
@@ -12510,10 +12403,7 @@ void EquipmentScreen::render_impl(App& app) {
         // resolves `res/users/images/<Image>` via `draw_user_image`. `gs` is
         // an `Xd` slider like `es`/`fs`/`ds`, so the cell list uses the same
         // `Gg` rect/pitch (`gs.init` L2231 leaves `Pa.spacing` at 0).
-        if (seal_rows_.empty()) {
-            draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 20.0f, v.width(), 40.0f,
-                          "No seals owned yet.", 0.9f, UiAlign::Center, 0.7f, 0.7f, 0.7f);
-        } else {
+        {
             // `gs.NC` (L2232) sizes every `js` cell `b.ba(400,300)`; `gs.init`
             // (L2231) leaves `Pa.spacing` at 0, so the slider stacks the cells
             // in ONE column with pitch `300*A/400` (`profile_cell_h`).

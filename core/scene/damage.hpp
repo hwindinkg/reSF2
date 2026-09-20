@@ -306,10 +306,6 @@ inline double magic_recharge(double e, double b, double c, double zi) {
 float crit_chance(const FighterParams& attacker,
                   const FightParams& fp = FightParams::defaults());
 
-// Whether a crit roll succeeds (JS `v.Lcb` L604 + `Da.cT` L1200):
-//   chance > 100 || random01 * 100 < chance
-bool roll_crit(float chance);
-
 // ---------------------------------------------------------------------------
 // Shock / pain / disarm (JS `wd` L490/L517-528 + `R8a` L531-532)
 // ---------------------------------------------------------------------------

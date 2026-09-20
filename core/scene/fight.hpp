@@ -851,13 +851,19 @@ enum class fight_phase : int {
 //   - `ko` = the finish plate (JS `Cr.GZ` L2024 type 6/7, `fu(1.166)`).
 //   - `victory`/`defeat` = the battle end, no timer (the results screen
 //     takes over).
+// The JS `Cr` plate SET is callout ATLAS ART only: `y.BQa="round"`,
+// `y.uQa="fight"`, `y.zQa="perfect"`, `y.wQa="great"`, `y.DQa="timesup"`,
+// `y.AQa="ringout"`, `y.Kna="label_lose"`, `y.Lna="label_win"` (L2021-2024).
+// There is NO "ROUND"/"FIGHT!"/"VICTORY"/"DEFEAT" TEXT anywhere in
+// sf2.502f0946.js (0 occurrences) — the port draws the plate frames, never
+// invented strings.
 enum class banner_kind : int {
-    none = 0,   // no banner
-    round,      // "ROUND N" — the round-start intro
-    fight,      // "FIGHT!" — the round goes live
-    ko,         // "K.O." — a fighter was KO'd (with the slow-mo)
-    victory,    // "VICTORY" — the player won the battle
-    defeat,     // "DEFEAT" — the player lost the battle
+    none = 0,   // no plate
+    round,      // `Cr.tca` round plate (atlas frame `round` + the round number)
+    fight,      // `Cr.Zy` fight plate (atlas frame `fight`)
+    ko,         // `Cr.GZ` round-end plate (atlas frame `perfect`/`great`)
+    victory,    // the battle-end win plate
+    defeat,     // the battle-end lose plate
 };
 
 // The banner's pending action — the JS `ca.vhb` (L410) dispatch on the
@@ -1560,13 +1566,8 @@ public:
     // The magic/effect containers (JS `tl.Rf`, L842-844) fed by the `Yl`
     // "Effect" trigger action (`tl.Nt` L842; split `Gq`/`Hq`). Presentation.
     const MagicEffects& magic_fx() const { return magic_fx_; }
-    // The current center-screen banner (ROUND N / FIGHT! / K.O. /
-    // VICTORY / DEFEAT) — presentation only.
+    // The current center-screen plate (JS `Cr.type`) — presentation only.
     banner_kind banner() const { return cur_banner_; }
-    // The banner's display text ("" for none).
-    const char* banner_text() const;
-    // The banner's progress through its hold, 0..1 (for the fade/scale).
-    float banner_progress() const;
 
 private:
     BattleParams battle_;
@@ -1674,7 +1675,6 @@ private:
     // `wh.delay` before the countdown starts.
     banner_kind cur_banner_ = banner_kind::none;   // JS `Cr.type`
     float banner_time_ = 0.0f;     // JS `Cr.Sc` — hold remaining, SECONDS
-    float banner_total_ = 0.0f;    // `Cr.Sc` at `fu` time (progress source)
     bool banner_armed_ = false;    // JS `Cr.wU` — the countdown is running
     float banner_arm_delay_ = 0.f; // JS `wh.delay(...,500)` — the 500 ms arm
     banner_action banner_action_ = banner_action::none;  // the `vhb` dispatch

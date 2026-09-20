@@ -105,6 +105,12 @@ public:
     // on-screen pad worked.
     void on_key(int glfw_key, bool down) override;
 
+    // The desktop key-alias gate (arrows/Space) - the SAME flag every other
+    // screen uses (`Af.oUa` L2472 binds only the ten JS keys; the arrows/Space
+    // are a deliberate desktop affordance, ON by default).
+    void set_desktop_key_aliases(bool on) { desktop_key_aliases_ = on; }
+    bool desktop_key_aliases() const { return desktop_key_aliases_; }
+
     // --- test/replay hooks (`--input-tape` dojo pad evidence) --------------
     // The hub's `FightNone` controller state. Null-safe: false/""/0 until the
     // controller exists.
@@ -140,6 +146,10 @@ private:
     bool dojo_fight_ok_ = false;
     PadInputState dojo_pad_;  // the shared on-screen gamepad interaction state
     KeyInputState dojo_keys_;  // the hub's keyboard directional state (JS `gu`)
+    // The desktop key-alias gate (arrows/Space), the SAME flag every other
+    // screen uses (ON by default; see `set_desktop_key_aliases` above). The
+    // hub previously passed `aliases=true` unconditionally and ignored it.
+    bool desktop_key_aliases_ = true;
     int dojo_last_key_type_ = 0;
     // Builds `dojo_fight_` at the current dojo location (JS `Tf.init` L1971).
     void build_dojo_fight(App& app);
@@ -624,13 +634,6 @@ private:
     // read by the shared `update_pad_input` and by `draw_gamepad`.
     PadInputState pad_;
 
-    // --- round banner (JS `Cr` L2021-2026 — presentation only) -----------
-    // The current banner's kind + the fight frame it was raised at (the
-    // screen-side age drives the pop-in of the VICTORY/DEFEAT plates, which
-    // have no `Cr.fu` timer).
-    int banner_kind_seen_ = 0;      // banner_kind as int (0 = none)
-    int banner_start_frame_ = 0;    // fight_->frame() when the banner changed
-
     // --- VS intro (JS `ik`, g="419", L2069-2074) --------------------------
     // The pre-fight VS screen the oracle `fight_intro` shows: the full-screen
     // `vs/bg` backdrop, the two warrior portraits (`oe(a.Hf)`/`oe(b.Hf)`)
@@ -676,9 +679,6 @@ private:
     int money_reward_ = 0;
     int exp_reward_ = 0;
     bool applied_ = false;
-    // Tutorial quest toast (quest_panel.hpp; derived read-only in update -
-    // e.g. the first Training win nudges the player back to Sensei).
-    std::string quest_toast_;
     // Prize breakdown snapshot (copied from PendingBattle in update — the
     // `v.kD`/`bzb` factor lines; render reads these, never the sim).
     int prize_base_ = 0;

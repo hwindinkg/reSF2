@@ -192,9 +192,11 @@ float fha_body(float& x, float& y, float& z, float px, float pz,
 // The displacement is applied to the DEMO's fighter world-x directly (the
 // full ragdoll integration — Vc.sk L796 gravity/friction — is out of scope
 // for this milestone; the knockback FEEL — direction, weight split,
-// bounds clamp — is exact). The per-bone vectors below ALSO feed the
-// defender's bone-knock offsets (`Fighter::add_knockback`), so the hit
-// capsule endpoints visibly displace (WEA_STATIC §5).
+// bounds clamp — is exact). The per-bone vectors below describe the hit
+// capsule endpoint displacement (WEA_STATIC §5); the JS `Bl.strike`
+// (L587-588) writes the endpoint node `ma` — there is no per-bone clip-space
+// knock pool (the old `Fighter::add_knockback` pool was a port invention and
+// has been removed).
 struct ImpulseResult {
     Vec3 impulse;       // the scaled impulse vector
     Vec3 node1_vec;     // full-vector displacement of endpoint 1

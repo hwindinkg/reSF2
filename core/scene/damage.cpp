@@ -202,13 +202,6 @@ float crit_chance(const FighterParams& attacker, const FightParams& fp) {
     return fp.crit_chance_base;
 }
 
-bool roll_crit(float chance) {
-    // JS `Da.cT(a, b=100)`: a > b || RNG.s4(b) < a — s4(100) = random01*100.
-    if (chance > 100.0f) return true;
-    const float r = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
-    return r * 100.0f < chance;
-}
-
 // ---------------------------------------------------------------------------
 // internal_settings.xml -> fight_params() (JS `v` statics, parse L1154-1158)
 // ---------------------------------------------------------------------------

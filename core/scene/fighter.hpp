@@ -592,15 +592,6 @@ public:
     int capsule_bbox(float& min_x, float& min_y, float& max_x,
                      float& max_y) const;
 
-    // DEAD — port-only invention, NOT in the JS, and no longer called. The
-    // real JS impulse path is `Bl.strike` (L587-588) -> the endpoint node `ma`
-    // write (`strike_node` above), which is the ONLY place a landed hit
-    // displaces a body. This per-bone CLIP-space offset pool and its per-tick
-    // `decay_knockback` (physics.hpp L215) have no JS counterpart; the feed
-    // and the decay call were removed from the port. Kept only so the header
-    // API stays stable — do NOT revive.
-    void add_knockback(int bone, const sf2::scene::Vec3& v);
-
     // --- JS `ju` (g="D3" L545) — `wd.Ja`, the ability cooldown/reload state --
     // Slots (`sa.$h` L706): Punch 9, Kick 10, Ranged 11, Magic 12,
     // RaidCharge 13, Super 14. Only 9/10/11/14 carry timers (`wKa`/`b5`/`MOa`
@@ -833,7 +824,6 @@ private:
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (pivot world pos)
     float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
     float scale_acc_ = 0.0f;   // timescale fractional accumulator
-    std::vector<sf2::scene::Vec3> kb_;  // DEAD (port-only; JS uses `strike_node`)
     // --- JS `Al` solver latch (see `ragdoll_start`) -----------------------
     bool nk_ = false;                         // JS `Al.nk` (ragdoll active)
     int ragdoll_frame_count_ = 0;             // JS `Al.frameCount`
