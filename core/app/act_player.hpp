@@ -54,7 +54,15 @@ public:
             step_ = 8;
             return;
         }
-        sf2::audio::AudioEngine::instance().play_music("act");
+        // JS `Rd.Ut` (L2098): `lb.GMa(1); ta.Zla(); lb.rJ=!1; lb.OS("act",!1)`.
+        // `GMa(1)` = `$f.uF(1)` restores the SFX bus; `ta.Zla()` stops the
+        // current track; the guard `lb.rJ` is CLEARED; and the act track is
+        // NON-looping (`Ut`'s second arg `!1`).
+        sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+        au.set_sfx_muted(false);  // lb.GMa(1)
+        au.stop_music();          // ta.Zla()
+        au.reset_music_guard();   // lb.rJ = !1
+        au.play_music("act", false);
     }
 
     // Advances one frame; skip_pressed jumps to the fade-out (step 5).
@@ -160,7 +168,15 @@ private:
         if (!done_) {
             done_ = true;
             step_ = 8;
-            sf2::audio::AudioEngine::instance().stop_music();
+            // JS `Rd.end` (L2096): `ta.ZD||(lb.rJ=!1, lb.OS())` — when the SFX
+            // bus is not muted, clear the play-once guard and resume the MENU
+            // track (loop). The old port only stopped, leaving the shell
+            // silent after a cutscene.
+            sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+            if (!au.sfx_muted()) {
+                au.reset_music_guard();
+                au.play_music_once("menu");
+            }
         }
     }
 

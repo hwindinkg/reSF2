@@ -47,6 +47,12 @@ struct EventDef {
     int voices = 1;                  // overlapping copies per event
 };
 
+// The bus levels `$f.cMa` (music) / `$f.uF` (sfx) fade between — JS `ta.WT`
+// and `ta.VT` (L1264) write 0 (muted) or the normal level; the port's music
+// bus level is its fixed 0.7 and the engine (sfx) bus the miniaudio default.
+constexpr float kMusicVolume = 0.7f;
+constexpr float kSfxVolume = 1.0f;
+
 // The table-driven event list (Phase 7.1): built once from sfx_table.hpp so
 // the JS mapping stays in exactly one place. Stable after construction.
 const std::vector<EventDef>& events() {
@@ -434,10 +440,11 @@ void AudioEngine::play_music(const std::string& track, bool loop) {
         latency_tick_impl(impl_->engine, enabled_ && impl_->engine_ok);
     }
     ++impl_->music_plays;
-    if (impl_->music_ok && impl_->music_current == track &&
-        ma_sound_is_playing(&impl_->music)) {
-        return;  // same track already playing
-    }
+    // JS `ta.Ut(a,b)` (L1264) is `ta.Zla()` (stop the previous, clear `yP`)
+    // then `$f.play(id,b)` — ALWAYS a stop-then-start, even for the same name
+    // (the play-once guard `lb.rJ` is what suppresses the repeat, not the
+    // player). The old same-track early return made the fight-start
+    // `ta.Ut(this.Da.tp)` (L2008) a no-op on a repeated track.
     std::fprintf(stdout, "[music] play '%s'%s\n", track.c_str(),
                  loop ? "" : " (once)");
     std::fflush(stdout);
@@ -463,7 +470,7 @@ void AudioEngine::play_music(const std::string& track, bool loop) {
     }
     impl_->music_ok = true;
     impl_->music_current = track;
-    ma_sound_set_volume(&impl_->music, 0.7f);
+    ma_sound_set_volume(&impl_->music, music_muted_ ? 0.0f : kMusicVolume);
     ma_sound_set_looping(&impl_->music, loop ? MA_TRUE : MA_FALSE);
     ma_sound_start(&impl_->music);
     log_latency(impl_->engine, impl_->engine_ok, "music", track, &impl_->music);
@@ -476,6 +483,29 @@ void AudioEngine::play_music_once(const std::string& track, bool loop) {
     if (music_guard_) return;
     music_guard_ = true;
     play_music(track, loop);
+}
+
+// JS `ta.WT(a)` (L1264): `L.K.$f.cMa(a?0:1); ta.$D=a`. `cMa` is the music
+// BUS volume, so the streamed track keeps playing (silently) and unmuting
+// resumes it — `lb.Mz()` (L1276) reads the same `ta.$D`.
+void AudioEngine::set_music_muted(bool muted) {
+    music_muted_ = muted;
+    if (impl_ != nullptr && impl_->music_ok) {
+        ma_sound_set_volume(&impl_->music, muted ? 0.0f : kMusicVolume);
+    }
+    std::fprintf(stdout, "[music] mute %s\n", muted ? "ON" : "OFF");
+    std::fflush(stdout);
+}
+
+// JS `ta.VT(a)` (L1264): `L.K.$f.uF(a?0:1); ta.ZD=a` — the master SFX bus.
+// `lb.Lz()` (L1276) reads `ta.ZD`; `Rd.end` (L2096) gates on it too.
+void AudioEngine::set_sfx_muted(bool muted) {
+    sfx_muted_ = muted;
+    if (impl_ != nullptr && impl_->engine_ok) {
+        ma_engine_set_volume(&impl_->engine, muted ? 0.0f : kSfxVolume);
+    }
+    std::fprintf(stdout, "[audio] sfx mute %s\n", muted ? "ON" : "OFF");
+    std::fflush(stdout);
 }
 
 void AudioEngine::stop_music() {

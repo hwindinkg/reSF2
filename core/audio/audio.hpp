@@ -83,6 +83,18 @@ public:
     // L2096-2098): clear the guard so the next `play_music_once` replays.
     void reset_music_guard() { music_guard_ = false; }
     bool music_guard() const { return music_guard_; }
+    // JS `ta.WT(a)` (L1264): `L.K.$f.cMa(a?0:1); ta.$D=a` — the MUSIC BUS
+    // volume mute, NOT a stop: the track keeps its position and unmute
+    // resumes it. Read back by `lb.Mz()` (L1276) -> `ta.$D`. The port modelled
+    // this as a stop/restart, which lost the track (`music_track()` reads ""
+    // after a stop), so the ON path was a silent no-op.
+    void set_music_muted(bool muted);
+    bool music_muted() const { return music_muted_; }
+    // JS `ta.VT(a)` (L1264): `L.K.$f.uF(a?0:1); ta.ZD=a` — the master SFX
+    // bus volume mute. Read back by `lb.Lz()` (L1276) -> `ta.ZD`. `lb.WT`/
+    // `lb.VT` (L1276) persist it via `p.TJ.save()`.
+    void set_sfx_muted(bool muted);
+    bool sfx_muted() const { return sfx_muted_; }
     void stop_music();
     // [latency probe] Per-frame audio-feed measurement (no-op unless
     // `SF2_AUDIO_LATENCY=1`). The port also self-polls it on every play/music
@@ -100,6 +112,8 @@ private:
     Impl* impl_ = nullptr;  // owns the miniaudio state (hpp stays header-light)
     bool enabled_ = false;
     bool music_guard_ = false;  // JS `lb.rJ` (L1276).
+    bool music_muted_ = false;  // JS `ta.$D` (L1264), `lb.Mz()` (L1276).
+    bool sfx_muted_ = false;    // JS `ta.ZD` (L1264), `lb.Lz()` (L1276).
     std::uint64_t played_total_ = 0;
 };
 

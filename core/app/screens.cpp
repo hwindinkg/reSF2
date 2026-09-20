@@ -8553,15 +8553,13 @@ void FightScreen::update_impl(float dt) {
                 std::fflush(stdout);
             } else if (pause_hit(kPauseDlgMusicX, kPauseDlgRowY, kPauseDlgToggleS,
                                  kPauseDlgToggleS)) {
-                // `PauseMusic_on/off` toggle (JS music keeps playing under a
-                // pause — PAUSE_STATIC §5; this toggle is UI-layer).
+                // `Dr.Sla` (L2066-2067): `this.Sla.Db?(lb.WT(!lb.Mz()), ...)`
+                // -> `ta.WT(a)` L1264 `L.K.$f.cMa(a?0:1)` = the music BUS
+                // volume, so the track keeps playing (muted) and unmute
+                // resumes it. The old port stopped the sound and could not
+                // restart it (`music_track()` reads "" after a stop).
                 music_off_ = !music_off_;
-                if (music_off_) {
-                    sf2::audio::AudioEngine::instance().stop_music();
-                } else {
-                    sf2::audio::AudioEngine::instance().play_music(
-                        sf2::audio::AudioEngine::instance().music_track());
-                }
+                sf2::audio::AudioEngine::instance().set_music_muted(music_off_);
                 sf2::audio::AudioEngine::instance().play("snd_click_1");
                 std::fprintf(stdout, "[fight] pause music %s (Dr.PauseMusic)\n",
                              music_off_ ? "OFF" : "ON");
@@ -8570,9 +8568,15 @@ void FightScreen::update_impl(float dt) {
                                  kPauseDlgToggleS)) {
                 // `PauseSound_on/off` (display only — no runtime SFX mute API;
                 // see the stream report).
-                sf2::audio::AudioEngine::instance().play("snd_click_1");
-                std::fprintf(stdout,
-                             "[fight] pause sound toggle (Dr.PauseSound, display-only)\n");
+                // `Dr.tp` (L2066-2067): `this.tp.Db?(lb.VT(!lb.Lz()), ...)`
+                // -> `ta.VT(a)` L1264 `L.K.$f.uF(a?0:1)` = the master SFX BUS
+                // volume (`ta.ZD`, read back by `lb.Lz()`). Was a no-op log
+                // ("no runtime SFX mute API").
+                sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+                au.set_sfx_muted(!au.sfx_muted());
+                au.play("snd_click_1");
+                std::fprintf(stdout, "[fight] pause sound %s (Dr.PauseSound)\n",
+                             au.sfx_muted() ? "OFF" : "ON");
                 std::fflush(stdout);
             } else if (pause_hit(kPauseDlgHomeX, kPauseDlgRowY, kPauseDlgToggleS,
                                  kPauseDlgToggleS)) {
@@ -10177,7 +10181,16 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
         return false;
     }
     bw.money -= bit.price;
-    sf2::audio::AudioEngine::instance().play("snd_buy");
+    // `Pa.iwa` L1228 picks the branch: `a.Ec>0 ? d=Pa.y2a(a) : c=d=Pa.gI(a,
+    // true,false)`. The two helpers play DIFFERENT ids: `Pa.y2a` L1227 ends
+    // `b&&rb.QS()` = `ta.ak("snd_upgrade")` (id 65596) and `Pa.gI` L1227 ends
+    // `b&&rb.U3()` = `ta.ak("snd_buy")` (id 65569). The pre-fix port played
+    // `snd_buy` on BOTH paths (`snd_upgrade` was never triggered).
+    if (bit.delivery_sec > 0) {
+        sf2::audio::AudioEngine::instance().play("snd_upgrade");
+    } else {
+        sf2::audio::AudioEngine::instance().play("snd_buy");
+    }
     if (bit.delivery_sec > 0) {
         // `Pa.iwa` L1228: `a.Ec>0 ? d=Pa.y2a(a)` — the timed order leaves the
         // grant flag false, so the `$o` equip after `Pa.iwa` is SKIPPED.
@@ -12789,14 +12802,13 @@ bool settings_run_row(App& app, SettingsRow row) {
             std::fflush(stdout);
             return true;
         case SettingsRow::kMusic:
-            // `un.W$`/`lb.Lz()` (L1928) + case 0 (L1931): stop/restart the track.
+            // `un.W$`/`lb.Mz()` (L1928) + `case 1: lb.WT(!lb.Mz())` (L1931):
+            // `ta.WT(a)` L1264 = `L.K.$f.cMa(a?0:1)` — the music BUS volume,
+            // NOT a stop. The old stop/restart lost the track (`music_track()`
+            // reads "" after `stop_music`), so turning music back ON was a
+            // no-op. The mute now rides the engine (`ta.$D`, `lb.Mz()`).
             g_settings_music_off = !g_settings_music_off;
-            if (g_settings_music_off) {
-                sf2::audio::AudioEngine::instance().stop_music();
-            } else {
-                sf2::audio::AudioEngine::instance().play_music(
-                    sf2::audio::AudioEngine::instance().music_track());
-            }
+            sf2::audio::AudioEngine::instance().set_music_muted(g_settings_music_off);
             sf2::audio::AudioEngine::instance().play("snd_click_1");
             std::fprintf(stdout, "[settings] music %s\n", g_settings_music_off ? "OFF" : "ON");
             std::fflush(stdout);
