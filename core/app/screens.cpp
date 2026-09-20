@@ -8567,6 +8567,7 @@ void FightScreen::update_impl(float dt) {
                 // restart it (`music_track()` reads "" after a stop).
                 music_off_ = !music_off_;
                 sf2::audio::AudioEngine::instance().set_music_muted(music_off_);
+                persist_bus_mutes(app());  // JS `lb.WT` L1276: `p.TJ.save()`
                 sf2::audio::AudioEngine::instance().play("snd_click_1");
                 std::fprintf(stdout, "[fight] pause music %s (Dr.PauseMusic)\n",
                              music_off_ ? "OFF" : "ON");
@@ -8581,6 +8582,7 @@ void FightScreen::update_impl(float dt) {
                 // ("no runtime SFX mute API").
                 sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
                 au.set_sfx_muted(!au.sfx_muted());
+                persist_bus_mutes(app());  // JS `lb.VT` L1276: `p.TJ.save()`
                 au.play("snd_click_1");
                 std::fprintf(stdout, "[fight] pause sound %s (Dr.PauseSound)\n",
                              au.sfx_muted() ? "OFF" : "ON");
@@ -12771,9 +12773,45 @@ void open_settings_dialog(App& app) {
 
 void close_settings_dialog() { g_settings_dialog_open = false; }
 
+// JS `lb.WT`/`lb.VT` (L1276) end in `p.TJ.save()`, so a bus-mute toggle
+// persists at once. Shared by the Settings `un` rows and the fight pause `Dr`
+// rows (both write `ta.$D`/`ta.ZD` -> the save `<Sounds>/<Sound|Music>@Mute`).
+void persist_bus_mutes(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+        w.sound_muted = au.sfx_muted();
+        w.music_muted = au.music_muted();
+        app.save().save(w);
+    } catch (const std::exception& e) {
+        std::fprintf(stdout, "[settings] mute save failed: %s\n", e.what());
+        std::fflush(stdout);
+    }
+}
+
 bool settings_dialog_open() { return g_settings_dialog_open; }
 
 bool settings_dialog_restart_visible() { return g_settings_restart_visible; }
+
+bool settings_bus_row_center(bool music, float& cx, float& cy, float& w, float& h) {
+    const SettingsLayout s = settings_layout();
+    const float row_cx = music ? s.music_row_cx : s.sound_row_cx;
+    const float row_cy = music ? s.music_cy : s.sound_cy;
+    if (row_cx <= 0.0f || s.row_w <= 0.0f || s.row_h <= 0.0f) return false;
+    cx = row_cx;
+    cy = row_cy;
+    w = s.row_w;
+    h = s.row_h;
+    return true;
+}
+
+int catalog_max_delivery_sec(App& app) {
+    int best = 0;
+    for (const CatalogItem& ci : load_catalog(app)) {
+        if (ci.delivery_sec > best) best = ci.delivery_sec;
+    }
+    return best;
+}
 
 // `un.rHa` case 4 (L1931): `this.u9=(this.u9+1)%iv.length; this.$u=iv[this.u9];
 // this.t9=G.Rq()!=this.$u;` then `this.t9?(this.Km.X(!0),...)` reveals RESTART.
@@ -12816,18 +12854,7 @@ SettingsRow settings_row_at(const SettingsLayout& s, double x, double y) {
 // state, so a Settings toggle persists immediately. The port writes it into
 // the save `<Sounds>/<Sound|Music>@Mute>` (JS `sc.Gpb` L114249); load side is
 // `sc.ckb` L113759. Best-effort: a failure is reported, never fatal.
-void persist_settings_mutes(App& app) {
-    try {
-        WarriorSave w = app.save().load();
-        sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
-        w.sound_muted = au.sfx_muted();
-        w.music_muted = au.music_muted();
-        app.save().save(w);
-    } catch (const std::exception& e) {
-        std::fprintf(stdout, "[settings] mute save failed: %s\n", e.what());
-        std::fflush(stdout);
-    }
-}
+void persist_settings_mutes(App& app) { persist_bus_mutes(app); }
 
 // Runs a row action; returns true when the dialog must close (`Ge(0)` L1930 /
 // L1932 RESTART `close()`).

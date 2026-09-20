@@ -565,6 +565,13 @@ public:
     bool round_wait() const;
     void next_button_center(float& cx, float& cy) const;
 
+    // [--flow-verify] The fight pause `Dr` dialog is open (`paused_`). The
+    // row geometry is fixed by the screens.cpp `kPauseDlg*` constants (HUD
+    // pause icon 640,117 68px; row y=396; Music x=561.25, Sound x=718.75,
+    // tile 135) — the driver clicks those constants directly, exactly as the
+    // headless-loop shop step clicks `shop_price_rect`'s centre.
+    bool pause_dialog_open() const { return paused_; }
+
     // [trace, Phase 0] Arms the FightController's per-frame pose dump
     // (the first `frames` fight frames -> `path` JSONL). Defined in
     // screens.cpp (needs the full FightController type).
@@ -995,6 +1002,22 @@ void close_settings_dialog();
 void settings_dialog_cycle_language(App& app);
 // D15: `Nm`/`Km` visibility (`R(t9)`/`X(t9)`) — hidden until a language change.
 bool settings_dialog_restart_visible();
+
+// [--flow-verify] The Settings `un` dialog Music/Sound row centre + hit size
+// (`un` icon rect, screens.cpp `settings_layout()`). `music=false` selects the
+// Sound row. Read-only geometry; only meaningful while the dialog is open.
+bool settings_bus_row_center(bool music, float& cx, float& cy, float& w, float& h);
+// [--flow-verify] The largest `DeliveryTime` (`Ec`) across the shop-visible
+// catalog. 0 when no shipped row is a timed-delivery order, i.e. the
+// `Pa.iwa` `Ec>0` (`Pa.y2a` -> `snd_upgrade`) branch is unreachable from the
+// price plate and only the immediate `Pa.gI` -> `snd_buy` branch can be
+// driven. Read-only catalog scan.
+int catalog_max_delivery_sec(App& app);
+// JS `lb.WT(a){ta.WT(a);p.TJ.save()}` / `lb.VT(a){ta.VT(a);p.TJ.save()}`
+// (L1276): EVERY bus-mute toggle writes the save immediately. The Settings
+// `un` rows and the fight pause `Dr` rows (`tp`/`Sla`, L2066-2067) both call
+// this; the pause rows previously set the bus only and lost it on reload.
+void persist_bus_mutes(App& app);
 
 // The shared item catalog (the shop list + the equipment item lookup).
 // Loaded once from list.xml and cached.

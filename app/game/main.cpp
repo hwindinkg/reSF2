@@ -2349,6 +2349,143 @@ int main(int argc, char** argv) {
             tick(8);
             check(map_zone_selected(app) == target, "zone dot tap SWITCHES the map zone");
         }
+        // ===== NEW (this task): Settings / Pause / shop-confirm gates ========
+        // All through the internal injection path (`App::inject_click`; the JS
+        // `ma.Bd` tap). No OS input. The window stays hidden + watchdog-armed.
+        sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+        // (4) SETTINGS `un` dialog bus rows (JS L1916-1931): `un.rHa` case 1
+        // calls `lb.WT`/`lb.VT` (L1276 `ta.WT(a);p.TJ.save()`), so each row
+        // drives ITS OWN bus AND persists it. The dialogue is the shared
+        // overlay (`open_settings_dialog`); it is consumed by the ACTIVE
+        // screen's input gate (`quest_modal_consume` -> `settings_dialog_consume`).
+        {
+            open_settings_dialog(app);
+            tick(14);  // `settings_dialog_consume` press debounce (`age_ > 10`)
+            float cx = 0.0f, cy = 0.0f, w = 0.0f, h = 0.0f;
+            const bool have = settings_bus_row_center(true, cx, cy, w, h);
+            const bool m0 = au.music_muted();
+            const bool s0 = au.sfx_muted();
+            app.inject_click(cx, cy);  // Music row
+            tick(10);
+            check(have && au.music_muted() != m0 && au.sfx_muted() == s0,
+                  "settings Music row -> MUSIC bus only");
+            const bool m1 = au.music_muted();
+            const bool s1 = au.sfx_muted();
+            settings_bus_row_center(false, cx, cy, w, h);
+            app.inject_click(cx, cy);  // Sound row
+            tick(10);
+            check(au.sfx_muted() != s1 && au.music_muted() == m1,
+                  "settings Sound row -> SFX bus only");
+            sf2::app::WarriorSave pw = app.save().load();
+            check(pw.music_muted == au.music_muted() && pw.sound_muted == au.sfx_muted(),
+                  "settings bus mutes persist to the save <Sounds>");
+            const bool keep_m = pw.music_muted, keep_s = pw.sound_muted;
+            au.set_music_muted(!keep_m);  // poison the live bus
+            au.set_sfx_muted(!keep_s);
+            open_settings_dialog(app);    // re-reads + re-applies the save
+            check(au.music_muted() == keep_m && au.sfx_muted() == keep_s,
+                  "bus mutes RESTORED from the save");
+            close_settings_dialog();
+            tick(4);
+        }
+        // (5) PAUSE `Dr` dialog rows (JS L2066-2067): the HUD pause icon
+        // (screens.cpp `kPauseIx/Iy` = 640,117 68px) opens it; the Music row
+        // (x=561.25) toggles the MUSIC bus, the Sound row (x=718.75) the SFX
+        // bus (row y=396, tile 135). Each must move ITS OWN bus only, and (JS
+        // `lb.WT`/`lb.VT` L1276 `p.TJ.save()`) persist the change.
+        {
+            // Deterministic start: the Settings block above left both buses
+            // muted AND persisted. Clear the live buses AND the save's mute
+            // fields so each pause row's change is observable and its
+            // persistence is unambiguous (a stale `true` would mask a missing
+            // `lb.WT`/`lb.VT` save).
+            {
+                sf2::app::WarriorSave rw = app.save().load();
+                rw.music_muted = false;
+                rw.sound_muted = false;
+                app.save().save(rw);
+            }
+            au.set_music_muted(false);
+            au.set_sfx_muted(false);
+            sf2::app::PendingBattle& pb = app.pending_battle();
+            pb.battle_name = "Training";
+            pb.zone.clear();
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            app.screens().push(make_screen(app.screens(), kScreenFight));
+            tick(4);
+            sf2::app::FightScreen* fs = nullptr;
+            for (int i = 0; i < 900 && fs == nullptr; ++i) {
+                tick(1);
+                sf2::app::Screen* t = app.screens().top();
+                if (t != nullptr && t->id() == kScreenFight) {
+                    sf2::app::FightScreen* c = static_cast<sf2::app::FightScreen*>(t);
+                    if (!c->round_wait()) fs = c;  // a live round (icon hittable)
+                }
+            }
+            check(fs != nullptr, "fight reaches a live round (pause icon live)");
+            if (fs != nullptr) {
+                app.inject_click(640.0, 117.0);  // HUD pause icon (`Jn`)
+                tick(8);
+                check(fs->pause_dialog_open(), "pause HUD icon opens the `Dr` dialog");
+                const bool m0 = au.music_muted();
+                const bool s0 = au.sfx_muted();
+                app.inject_click(561.25, 396.0);  // Music row (`tp`)
+                tick(8);
+                check(au.music_muted() != m0 && au.sfx_muted() == s0,
+                      "pause Music row -> MUSIC bus only");
+                app.inject_click(718.75, 396.0);  // Sound row (`Sla`)
+                tick(8);
+                check(au.sfx_muted() != s0 && au.music_muted() != m0,
+                      "pause Sound row -> SFX bus only");
+                sf2::app::WarriorSave fw = app.save().load();
+                check(fw.music_muted == au.music_muted() &&
+                          fw.sound_muted == au.sfx_muted(),
+                      "pause bus mutes persist to the save");
+            }
+            app.screens().pop();
+            tick(4);
+        }
+        // (6) SHOP `M8` price plate -> `Ne.ZYa` L2251 / `Pa.iwa` L1228: the
+        // UNOWNED press runs the confirm/buy flow. `Pa.iwa` L1228 picks the
+        // branch `a.Ec>0 ? Pa.y2a -> rb.QS() (snd_upgrade) : Pa.gI -> rb.U3()
+        // (snd_buy)`. The immediate `Ec==0` branch is the one the shipped
+        // catalog can reach; assert it fires `snd_buy` (not `snd_upgrade`)
+        // and grants+equips the item.
+        {
+            sf2::app::WarriorSave sw = app.save().load();  // fund the buy
+            if (sw.money < 5000) sw.money = 5000;
+            app.save().save(sw);
+            shop_open_at(app, "Weapon", "WEAPON_KNIVES");  // unowned baseline
+            tick(20);
+            const auto buy0 = au.played("snd_buy");
+            const auto up0 = au.played("snd_upgrade");
+            app.inject_click(934.6, 460.1);  // the `M8` plate centre (1280x720)
+            tick(14);
+            bool owned = false;
+            try {
+                const sf2::app::WarriorSave nw = app.save().load();
+                for (const auto& oi : nw.items) {
+                    if (oi.name == "WEAPON_KNIVES") owned = true;
+                }
+            } catch (const std::exception&) {
+            }
+            check(au.played("snd_buy") == buy0 + 1 && au.played("snd_upgrade") == up0 &&
+                      owned,
+                  "shop price plate (Ec==0) fires snd_buy + buys/equips");
+            if (catalog_max_delivery_sec(app) <= 0) {
+                std::fprintf(stdout,
+                             "[flowverify] shop Ec>0 (snd_upgrade) branch NOT DRIVEN: "
+                             "no shipped catalog row carries DeliveryTime>0 (list.xml "
+                             "uses DeliveryDescription); hook: a catalog item with "
+                             "delivery_sec>0 at the price plate\n");
+                std::fflush(stdout);
+            }
+            app.screens().pop();
+            tick(4);
+        }
         std::fprintf(stdout, "[flowverify] RESULT %d/%d\n", passed, checks);
         std::fflush(stdout);
         app.shutdown();
