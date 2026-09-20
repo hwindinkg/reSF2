@@ -922,10 +922,37 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         }
     }
 
-    // JS `Te.Skb` (L551) — the move-start (NS/Skb) transition stops the
-    // ragdoll (`Nd.stop`): a new animation clip takes over from the solver.
-    ragdoll_stop();
     current_move_ = &move;
+
+    // Clip lookup: FileName -> anim_archive entry (JS `jc.uja` L693 loads
+    // the clip by `Eza` = FileName minus ".bytes"). Resolved BEFORE the
+    // ragdoll stop so that stop can be gated on the clip resolving (JS
+    // `Te.Skb` L550 gates its whole body on `if(a != null)`).
+    current_clip_ = nullptr;
+    if (clip_lookup_) {
+        std::string clip_name = move.file_name;
+        const std::string suffix = ".bytes";
+        if (clip_name.size() > suffix.size() &&
+            clip_name.compare(clip_name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            clip_name = clip_name.substr(0, clip_name.size() - suffix.size());
+        }
+        current_clip_ = clip_lookup_(clip_name);
+    }
+
+    // JS `Te.Skb` (L550) gates its whole body on `if(a != null)` — with NO
+    // animation there is no `Te.stop()` (`{this.jc.reset();
+    // this.mo=2147483647}`, L556 — a CLIP reset, NOT a ragdoll stop) and no
+    // clip takes over from the solver. The ragdoll stop on a move start is
+    // `wd.Bnb` (L507 `this.Nd.nk && this.Nd.stop()`), i.e. it fires only when
+    // an actual clip replaces the solver. The NotAnimation bag's reaction
+    // move resolves NO clip (`current_clip_ == nullptr`), so the port's old
+    // unconditional stop killed the hit reaction the same frame
+    // (`[ragdoll] STOP ... frame=0`) before the impulse could ever reach the
+    // drawn pose. Gate the stop on a resolved clip, exactly like `Skb`.
+    if (current_clip_ != nullptr) {
+        ragdoll_stop();
+    }
+
     ++move_start_count_;  // JS `Te.Skb` L551 -> `x3` -> `Fu.hob()` (dW=null)
     move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
     playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
@@ -949,17 +976,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         else ++it;
     }
 
-    // Clip lookup: FileName -> anim_archive entry (JS `jc.uja` L693 loads
-    // the clip by `Eza` = FileName minus ".bytes").
-    if (clip_lookup_) {
-        std::string clip_name = move.file_name;
-        const std::string suffix = ".bytes";
-        if (clip_name.size() > suffix.size() &&
-            clip_name.compare(clip_name.size() - suffix.size(), suffix.size(), suffix) == 0) {
-            clip_name = clip_name.substr(0, clip_name.size() - suffix.size());
-        }
-        current_clip_ = clip_lookup_(clip_name);
-    }
+    // (Clip lookup moved above, before the ragdoll-stop gate.)
     // JS `jc.Lj` (`Vlb`/`Cdb` resolves it from the loaded clip when the move
     // carries no `EndFrame`): finish intervals whose `<Interval>` had no `End`.
     move_end_frame_ = move.end_frame != 0
@@ -1433,6 +1450,18 @@ void Fighter::advance(float dt) {
 
 void Fighter::advance_step() {
     if (current_move_ == nullptr || current_clip_ == nullptr) {
+        // JS `ia` (L499): `this.parameters.QD && (this.da.ia(), ...)` gates
+        // ONLY the clip advance (`da.ia`); `this.Nd.ia()` (the ragdoll
+        // solver, L582 `sk(); jE(); nk&&frameCount++`) runs UNCONDITIONALLY
+        // every frame, and the renderer reads the node `ma`. The NotAnimation
+        // bag (`parameters.QD`) therefore has no clip advance but DOES get
+        // its solver stepped. The port used to `return` here, freezing the
+        // clip-less bag's `ma` so a hit's `Bl.strike` node impulse was never
+        // drawn. Re-run the SAME solver/placement path `sample()` uses via
+        // the 1-frame, bone-less bind clip (`nclip == 0` — the established
+        // `sample_idle`/`sample_enemy_idle` no-clip path, NOT an invented
+        // animation).
+        sample_bind_pose();
         return;
     }
 
@@ -1581,6 +1610,19 @@ void Fighter::sample_current() {
                /*interp=*/true, current_move_ != nullptr ? current_move_->first_frame : 0,
                playhead_);
     }
+}
+
+// JS `ia` (L499) clip-less cadence: with `parameters.QD` (NotAnimation) the
+// clip advance (`da.ia`) is skipped, but `this.Nd.ia()` (the ragdoll solver,
+// L582) still runs every frame — the node `ma` keeps its state (including any
+// `Bl.strike` impulse) and the renderer draws it. The port's `advance_step`
+// early-returned instead, freezing the clip-less bag's drawn pose. Sampling
+// the 1-frame, bone-less bind clip re-runs the exact solver/placement path
+// `sample()` uses (`nclip == 0`), so `sol_ma_` steps and `pos_` follows.
+void Fighter::sample_bind_pose() {
+    sf2::data::anim_clip bind_clip;
+    bind_clip.frames.resize(1);
+    sample(bind_clip, 0, world_x_, world_y_, facing_);
 }
 
 void Fighter::clear_move() {

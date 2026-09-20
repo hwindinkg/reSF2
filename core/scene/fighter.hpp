@@ -890,6 +890,11 @@ private:
     int mirror_swap_src(int i, std::size_t zclip) const;
     void build_prepend(const MoveDef& move);
     void sample_current();
+    // JS `ia` (L499) clip-less cadence: `Nd.ia()` (the ragdoll solver) runs
+    // every frame even when `parameters.QD` skips the clip advance. Samples
+    // the 1-frame, bone-less bind clip so the solver/placement path of
+    // `sample()` runs (`nclip == 0`) — the NotAnimation bag's drawn pose.
+    void sample_bind_pose();
 
     // [F4] Mass-weighted centroid of the posed body over the COM child list
     // (JS `Dl.v6` L577: `Eu.ma`). `axis` 0 = x, 1 = y. Falls back to the
