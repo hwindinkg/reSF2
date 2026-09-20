@@ -4362,12 +4362,17 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
 
     ++atk.hits_landed;
     ++def.hits_taken;
-    // Prize stats (JS `v.kD`/`bzb` factors): the attacker's consecutive run
-    // grows, the target's resets; shocks dealt accumulate; the battle's
-    // first striker is latched once.
-    ++atk.combo_run;
-    if (atk.combo_run > atk.max_combo) atk.max_combo = atk.combo_run;
-    def.combo_run = 0;
+    // Prize stats (JS `v.kD`/`bzb` factors): shocks dealt accumulate; the
+    // battle's first striker is latched once.
+    // JS `wd.strike` (L510): `this.Bb.block||(e.JCa()||this.Era++,e.dca())`
+    // — the whole combo statement sits behind `!block`, so a BLOCKED hit
+    // neither raises the attacker's ladder (`e.dca()` -> `Vx.wgb`) nor
+    // resets the target's. The old port bumped it on blocked hits too.
+    if (!hit_blocked) {
+        ++atk.combo_run;
+        if (atk.combo_run > atk.max_combo) atk.max_combo = atk.combo_run;
+        def.combo_run = 0;
+    }
     if (rec.shock) ++atk.shocks_dealt;
     if (!battle_first_hit_) {
         battle_first_hit_ = true;
