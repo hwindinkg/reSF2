@@ -2169,6 +2169,16 @@ int main(int argc, char** argv) {
             j.fight_result = "Win";
             q.note_fight(j.fight, j.fight_result);
             q.fire(app, "FightEnd", j);
+            // `Actions Place="Map"` (JS `be.Gib` L1007): the set is parked
+            // while the Fight screen is mounted and runs once the Map is
+            // (re)entered. Leave the fight/result screen the way the shipped
+            // flow does — the pop fires the ChangeTab/SceneLoaded edge the
+            // gate waits on.
+            for (int k = 0; k < 4 && !ok_story_advance; ++k) {
+                const int c = app.screens().current_id();
+                if (c != kScreenFight && c != kScreenResults) break;
+                app.screens().pop();
+            }
             try {
                 ok_story_advance = app.save().load().story_step() == "LEARN_PERK";
             } catch (const std::exception&) {

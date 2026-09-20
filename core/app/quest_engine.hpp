@@ -78,6 +78,13 @@ struct QuestDef {
     int priority = 0;
     bool unresumable = false;
     std::vector<std::string> events;  // ChangeTab/SceneLoaded/Activate/…
+    // `<Actions Place="…">` (JS `be.Gib` L1007: `this.k7=be.ifa(Place!=null?
+    // Place:"Map")`): the scene the action SET belongs to. 0 = no Place
+    // authored (ungated — the JS reads `k7` as the checkpoint scene `Faa`,
+    // never as a fire gate, so only an EXPLICIT Place creates a gate).
+    // Otherwise the `be.ifa`/`xn.jOa` screen id (`scene_id_for_name`): Fight→6,
+    // Dojo→3, Map→5 (the port's resolver also answers Shop→4).
+    int place = 0;
     QuestCond root;                   // AND of top-level Conditions
     std::vector<QuestAction> actions;
 };
@@ -509,8 +516,17 @@ private:
     void load_include(App& app, const pugi::xml_node& include_node);
     void parse_quest_node(App& app, const pugi::xml_node& quest_node,
                           const std::string& file);
+    // `only` (non-null) restricts the pass to the single named quest — the
+    // Place-gate retry path re-runs exactly the parked quest.
     void fire_inner(App& app, const std::string& event, const QuestJournal& journal,
-                    std::vector<std::string>& fired, int depth);
+                    std::vector<std::string>& fired, int depth,
+                    const std::string* only = nullptr);
+    // Place-gated runs parked while their authored scene was not mounted
+    // (JS `be.Gib` L1007 `k7`; the `RA` L1018 / `qT` L1019 pump): replay each
+    // whose scene is now current, with the journal captured at the original
+    // match (the JS `Dh` pump runs `this.ta` as of `RA`).
+    void retry_place_pending(App& app, std::vector<std::string>& fired);
+    bool place_pending_has(std::size_t quest_index) const;
     // JS `yb.compare` (L959): 3-valued so a condition using a query the
     // shell cannot answer is UNKNOWN (the quest does not fire) instead of
     // silently true/false.
@@ -584,6 +600,15 @@ private:
     EvalCtx load_ctx_;
     std::vector<std::string> loaded_files_;  // shipped files the loader read
     std::vector<std::string> fired_;  // Unresumable session latch
+    // Place-gated runs parked until their scene is entered (see
+    // `retry_place_pending`). `quest_index` indexes `quests_` (stable: the
+    // loader only appends).
+    struct PlacePending {
+        std::size_t quest_index = 0;
+        std::string event;   // the event the set matched
+        QuestJournal journal;  // match-time context (JS `ta`)
+    };
+    std::vector<PlacePending> place_pending_;
     std::map<std::string, std::string> battle_zone_;  // battle -> zone index
     std::string last_fight_;
     std::string last_result_;

@@ -399,6 +399,12 @@ void QuestEngine::parse_quest_node(App& app, const pugi::xml_node& q,
     if (conds) parse_conds(conds, def.root);
     const pugi::xml_node acts = q.child("Actions");
     if (acts) {
+        // JS `be.Gib` (L1007): `this.k7 = be.ifa(Place!=null ? Place : "Map")`
+        // — the scene the SET belongs to. Only an explicit `Place` gates in
+        // the port (the JS reads `k7` as the checkpoint scene `Faa`, never as
+        // a fire gate), so an absent attribute leaves `place` at 0 (ungated).
+        const std::string place_name = acts.attribute("Place").value();
+        if (!place_name.empty()) def.place = scene_id_for_name(place_name);
         for (pugi::xml_node a = acts.first_child(); a; a = a.next_sibling()) {
             if (a.type() != pugi::node_element) continue;
             QuestAction act;
@@ -1404,8 +1410,12 @@ bool QuestEngine::quest_active(const std::string& name) const {
 
 void QuestEngine::fire_inner(App& app, const std::string& event,
                              const QuestJournal& journal,
-                             std::vector<std::string>& fired, int depth) {
+                             std::vector<std::string>& fired, int depth,
+                             const std::string* only) {
     if (depth > kMaxActivateDepth) return;
+    // The screen currently mounted (JS `wa.F().Td.Tf`): the Place gate below
+    // compares a set's authored scene against it.
+    const int cur = app.screens().current_id();
     EvalCtx ctx;
     ctx.journal = journal;
     ctx.level = journal.player_level;
@@ -1423,6 +1433,7 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
     const std::size_t quest_total = quests_.size();
     for (std::size_t i = 0; i < quest_total; ++i) {
         const QuestDef& q = quests_[i];
+        if (only != nullptr && q.name != *only) continue;
         bool listens = false;
         for (const std::string& e : q.events) {
             if (e == event) {
@@ -1450,6 +1461,28 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
             if (seen) continue;
         }
         if (!conditions_hold(app, q.root, ctx)) continue;
+        // Place gate (JS `be.Gib` L1007): a set authored for another screen
+        // must NOT run here. Park it (JS `Dh` queue) and replay it once that
+        // scene is entered (`retry_place_pending`). Only an EXPLICIT Place
+        // gates (`q.place != 0`), so an unauthored set keeps the old timing.
+        if (q.place != 0 && q.place != cur) {
+            bool dup = false;
+            for (const PlacePending& p : place_pending_) {
+                if (p.quest_index == i) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup) place_pending_.push_back(PlacePending{i, event, journal});
+            std::fprintf(stdout,
+                         "[quest] DEFER %s on %s: Place id=%d, current scene id=%d "
+                         "(set parked until that screen is entered)\n",
+                         q.name.c_str(), event.c_str(), q.place, cur);
+            std::fflush(stdout);
+            continue;
+        }
+        // A parked set is replayed by the retry pass, never twice here.
+        if (only == nullptr && place_pending_has(i)) continue;
         QuestSideEffects fx;
         std::map<std::string, std::string> locals;  // run-local vars
         const ActionRest rest =
@@ -1478,9 +1511,9 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         // the instance leaves `Dh` when its run ends, so `fired_` now tracks
         // only `ClearQuestQueue` names.
         fired.push_back(q.name);
-        std::fprintf(stdout, "[quest] FIRED %s on %s (step=%s scene=%s->%s)\n", q.name.c_str(),
-                     event.c_str(), ctx.story_step.c_str(), journal.scene_from.c_str(),
-                     journal.scene_to.c_str());
+        std::fprintf(stdout, "[quest] FIRED %s on %s (step=%s scene=%s->%s cur=%d)\n",
+                     q.name.c_str(), event.c_str(), ctx.story_step.c_str(),
+                     journal.scene_from.c_str(), journal.scene_to.c_str(), cur);
         if (!fx.dialogs.empty()) {
             for (const std::string& d : fx.dialogs) {
                 std::fprintf(stdout, "[quest]   dialog: %s\n", d.c_str());
@@ -1732,7 +1765,37 @@ std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
     if (j.fight_zone.empty() && !j.fight.empty()) j.fight_zone = battle_zone(j.fight);
     if (j.player_level <= 0) j.player_level = 1;
     fire_inner(app, event, j, fired, 0);
+    // Parked Place sets whose screen is now mounted (JS `RA`/`qT` pump).
+    retry_place_pending(app, fired);
     return fired;
+}
+
+// JS `be.Gib` (L1007) gate retry: replay every parked set whose authored
+// scene is the CURRENT screen (`wa.F().Td.Tf`), with the journal captured at
+// the original match (the JS `Dh` pump runs `this.ta` as of `RA`). Runs after
+// the normal pass, so a quest that fires normally never double-fires (it is
+// skipped by `place_pending_has` while parked).
+void QuestEngine::retry_place_pending(App& app, std::vector<std::string>& fired) {
+    if (place_pending_.empty()) return;
+    const int cur = app.screens().current_id();
+    for (std::size_t i = 0; i < place_pending_.size();) {
+        if (place_pending_[i].quest_index >= quests_.size() ||
+            quests_[place_pending_[i].quest_index].place != cur) {
+            ++i;
+            continue;
+        }
+        const PlacePending p = place_pending_[i];
+        place_pending_.erase(place_pending_.begin() + static_cast<std::ptrdiff_t>(i));
+        const std::string only = quests_[p.quest_index].name;
+        fire_inner(app, p.event, p.journal, fired, 0, &only);
+    }
+}
+
+bool QuestEngine::place_pending_has(std::size_t quest_index) const {
+    for (const PlacePending& p : place_pending_) {
+        if (p.quest_index == quest_index) return true;
+    }
+    return false;
 }
 
 QuestEngine& App::quest_engine() {
