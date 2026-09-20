@@ -52,10 +52,24 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
         cam.arena_h = loc_h;
     }
     const float n_c = view_w / (view_h / cam.arena_h);  // mwa: nC = b/Ira
-    cam.zoom_layer = std::min(1.0f, n_c / (span + 300.0f));  // Ut.xCa() -> Bj
+    // Ut.mwa (L823): `NW = nC / Lb.width`. Ut.Al (L826-827), JS-exact:
+    //   this.Bj = e>0 ? e : this.xCa();      // xCa = min(nC/(ECa+300),1)
+    //   [maxWidth/kJa pan branch]            // ...
+    //   this.Bj = 1;                         // ^ that value is DISCARDED
+    //   this.Bj = this.Kga ? this.NW : Math.max(this.Bj, this.NW);
+    // `Kga` is the developer toggle `ql.Uyb(){this.ia.Kga=!this.ia.Kga}`,
+    // bound to key code 14 (sf2.502f0946.js) — FALSE in normal play. The
+    // layer zoom is therefore `max(1, NW)`, INDEPENDENT of the fighter span;
+    // the old span-dependent `xCa` value shrank `Bj` (`e = arena_h*Bj`) as
+    // the fighters separated, and the min-zoom clamp (`f >= 1.3`) could not
+    // re-fill the view -> the ~200 px top/bottom black bars at max separation.
+    const float n_w = n_c / cam.arena_w;                // mwa: NW = nC/Lb.width
+    cam.zoom_layer = std::max(1.0f, n_w);               // Ut.Al: Kga?NW:max(1,NW)
     // JS `ql.c3a` (L365): `ia.Al(..., this.IJ ? this.Bf.currentScale : 0)` —
     // while the intro lens is live (`IJ`) it supplies the layer scale in
-    // place of `Bj`. `cam.zoom_layer` stays the RAW Bj for the pano clamp.
+    // place of `Bj` (the intro `e > 0` path; Al then overrides `Bj` with the
+    // Kga/max(1,NW) value above). `cam.zoom_layer` is the post-override Bj,
+    // which is also what the pano clamp below consumes (JS `d` formula).
     const float layer_eff =
         cam.zoom_effect_active_ ? cam.zoom_effect_current_ : cam.zoom_layer;
     const float e = cam.arena_h * layer_eff;            // m$a() = Lb.height*Bj
