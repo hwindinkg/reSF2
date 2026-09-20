@@ -253,6 +253,24 @@ struct TacticDef {
     std::vector<AiAnimSlot> quick_attacks;
     std::vector<AiAnimSlot> evades;
 
+    // `<CautiousMovements>` / `<EvadeThrowDodges>` (JS `P.nCa`=`P.nG` /
+    // `P.H9a`=`P.Bqa`, parsed by `P.yK` L622 + L628). `yK` resolves each
+    // `<Animation Name="X"/>` to its animation GROUP (`ra.b9a` L622) whose
+    // `.children` are the moves carrying that name in `ra.xC` (the JS
+    // `anim_names` group). The port keeps the names and resolves the group
+    // at decision time. GLOBAL lists, copied onto each tactic like the
+    // NoDecision lists. Used by the cautious branch (`Pqb` L605/L607) and
+    // the evade-throw branch (`Pqb` L607).
+    std::vector<std::string> cautious_movements;
+    std::vector<std::string> evade_throw_dodges;
+
+    // `<ConditionalDecisions>` (JS `P.Xsa`=`P.z$a()` / `P.tpa`=`P.y9a()`,
+    // L628-629): the per-`<PlayerAnimation Name>` `<Reactions>` slots
+    // (`P.cjb`) and the `<BotAnimation>` slots (`Hl`). Read by `k_a`/`Nwa`
+    // (L594, L603). GLOBAL, copied onto each tactic.
+    std::vector<std::pair<std::string, std::vector<AiAnimSlot>>> conditional_player;
+    std::vector<AiAnimSlot> conditional_bot;
+
     // ExpectedWait (JS `x8`) — the per-anim "wait after this move" curves.
     std::vector<std::pair<std::string, WeightCurve>> expected_wait;
 
@@ -282,6 +300,12 @@ struct TacticDef {
 struct AiGlobalLists {
     std::vector<std::string> no_decision_intervals;
     std::vector<std::string> no_decision_moves;
+    // `<CautiousMovements>` / `<EvadeThrowDodges>` (JS `P.nG`/`P.Bqa`).
+    std::vector<std::string> cautious_movements;
+    std::vector<std::string> evade_throw_dodges;
+    // `<ConditionalDecisions>` (JS `P.Xsa`/`P.tpa`).
+    std::vector<std::pair<std::string, std::vector<AiAnimSlot>>> conditional_player;
+    std::vector<AiAnimSlot> conditional_bot;
 };
 
 // Parses tactic_settings.xml into the named TacticDefs (JS `P.hkb` L629 +
@@ -460,15 +484,20 @@ private:
     std::string last_enemy_anim_;   // enemy-move-change detector (anim-name proxy)
     bool qja_done_ = false;
     mutable DaPrng prng_;           // owned stream (JS `Da.pg`)
-    int aqa_ = 1;                   // `aqa` — the distance category (dqb)
-    // The chance curves' evaluated scores (JS `CZ/bda/tba` from dqb).
+    int aqa_ = 1;                   // `aqa` — the distance category (dqb)    // The chance curves' evaluated scores (JS `CZ/bda/tba` from dqb).
     int CZ_ = 0, bda_ = 0, tba_ = 0;
     float CZ_f_ = 0.0f, bda_f_ = 0.0f, tba_f_ = 0.0f;
-    // The per-frame curve scores + decided flags (JS `csb`/`bsb`/`Yqb`).
-    std::vector<float> quick_scores_, evade_scores_;
-    std::vector<bool> quick_decided_, evade_decided_;
-    std::vector<float> stage_scores_;  // UseSafeAttack/TableAttack/Cautious/...
-    std::vector<bool> stage_decided_;
+    // One `Gl` slot-roll state (JS `Gl` g="E4"): the rolled threshold `t4`,
+    // the evaluated chance `gZ` and the fire latch `N_`. `cO` (the quick
+    // `$E` list) and `hN` (the evade `nD` list) are the raw `Gl` lists
+    // (`de.cO`/`de.hN`, L590; sized by `csb`/`Zqb` L618-619).
+    struct SlotRoll {
+        double t4 = 0.0;   // `Gl.t4` — one `Da.jf()` per slot per pass
+        float gz = 0.0f;   // `Gl.gZ` — the slot's chance curve `Gb(feat)`
+        bool na = false;   // `Gl.N_` — `t4 < gZ`
+    };
+    std::vector<SlotRoll> quick_rolls_;  // JS `de.cO`
+    std::vector<SlotRoll> evade_rolls_;  // JS `de.hN`
 
     // The per-frame feature state (JS `Ue` + `mQ`).
     AiFeatureState feat_;
@@ -526,8 +555,36 @@ private:
     int xaa(const AiFightState& st);
     // Fills `wb_` from the throw table (JS `Gea` L613-616).
     int gea(const AiFightState& st, int variant);
-    // The per-slot QuickAttack/Evade evaluate (JS `Nwa` L603 + `bqb`).
+    // The per-slot QuickAttack/Evade evaluate (JS `bqb` L642 + `Nwa` L603):
+    // pick the highest-priority slot whose conditions pass, resolve its
+    // animation names to moves and append them to `wb_` (dedup, wait 0).
+    // NOTE (JS-STRICT): `Nwa` does NOT roll a chance — the chance gate lives
+    // in `bsb`/`Yqb` (`t4 < gZ`) and is consumed by `Pqb` L606.
     int nwa(const std::vector<AiAnimSlot>& slots, const std::string& anim);
+    // JS `bqb` (L642): the highest-priority slot whose conditions all pass,
+    // or null (`b!=null&&b.priority>d.priority||(b=d)` — strict `>`, so on
+    // equal priority the LAST slot wins).
+    const AiAnimSlot* bqb(const std::vector<AiAnimSlot>& slots,
+                          const std::string& anim) const;
+    // JS `csb`/`Zqb` (L618-619): roll each base QuickAttack (`$E`) /
+    // Evade (`nD`) slot's `t4` with `Da.jf()`.
+    void roll_slots();
+    // JS `bsb`/`Yqb` (L619): evaluate each slot's chance curve (`gZ`) and
+    // set `N_ = t4 < gZ`.
+    void eval_slots();
+    // JS `Pqb` L606 (the `else` path): push EVERY V1-valid move of each
+    // FIRING base QuickAttack slot, with wait `$I()` (the move's Strict
+    // end); `fk=6` when anything was pushed.
+    int quick_slots(const AiFightState& st);
+    // JS `Pqb` L606: set `IB_` when a firing Evade (`nD`) slot resolves to a
+    // move the opponent could start (`a.nf.V1`; the port uses its own V1 as
+    // the documented proxy — both fighters share the move table).
+    void evade_ib(const AiFightState& st);
+    // JS `h2a` (L608): split `wb_` into `ld_` (animations) / `vs_` (waits).
+    void h2a();
+    // JS `k_a` (L603): find the `<PlayerAnimation>` conditional entry whose
+    // name matches MY current move and run `Nwa` on its `<Reactions>` slots.
+    int ka(const AiFightState& st);
     // The dodge candidate list (JS `VAa` L617).
     void vaa(const AiFightState& st, int variant);
     // The weighted roulette pick (JS `Md.jL` L640).

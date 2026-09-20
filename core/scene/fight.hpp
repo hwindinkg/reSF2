@@ -1003,6 +1003,13 @@ struct FightFighter {
     int combo_frames = 0;        // `iu.OV`
     bool combo_active = false;   // `iu.v1`
     int shocks_dealt = 0;     // shock hits landed (prize Shock factor)
+    // JS `wd.Era` (init 0 L490; `++` only at L510 `e.JCa()||this.Era++`):
+    // the hits-TAKEN counter, incremented on an unblocked hit when the
+    // attacker was NOT already mid-combo (`e.JCa()` = the attacker's `Vx.v1`
+    // latch, read BEFORE this hit's `e.dca()` arms it). The victim's own
+    // combo ladder (`combo_run` = `Vx.tf`) is NEVER reset by being hit —
+    // only the `Vx.wyb` window decay (L5131) resets it.
+    int era = 0;              // JS `Era` (`Bb.r0a`)
     int moves_started = 0;
     std::string last_move;    // current move name (for the log/HUD)
     std::string last_decision;  // the AI's last decision (log)

@@ -381,7 +381,9 @@ std::vector<const MoveDef*> resolve_candidate(const std::string& anim,
     std::vector<const MoveDef*> out;
     for (const auto& kv : moves) {
         const MoveDef& m = kv.second;
-        if (m.name == anim || m.template_tags.count(anim) > 0) {
+        if (m.name == anim || m.template_tags.count(anim) > 0 ||
+            std::find(m.anim_names.begin(), m.anim_names.end(), anim) !=
+                m.anim_names.end()) {
             out.push_back(&m);
         }
     }
@@ -600,18 +602,15 @@ int AiController::gea(const AiFightState& st, int variant) {
 // chance curve passes (the `Gl`/`bsb` gate: `N_ = t4 < gZ` where gZ is the
 // curve score and t4 the last-fire frame) contributes its animation names.
 // The slot fires when `roll < score` (JS `Gl.N_` — a per-pass chance draw).
-int AiController::nwa(const std::vector<AiAnimSlot>& slots, const std::string& anim) {
+const AiAnimSlot* AiController::bqb(const std::vector<AiAnimSlot>& slots,
+                                    const std::string& anim) const {
     // JS `bqb` (L642): pick the highest-priority slot whose conditions
-    // pass (`d.compare()`); if none, return null.
+    // pass (`d.compare()`); if none, return null. `Nwa` (L603) uses this
+    // for the CONDITIONAL slot lists; the BASE `$E`/`nD` lists are gated by
+    // the `bsb`/`Yqb` chance rolls instead (consumed in `Pqb` L606).
     const AiAnimSlot* best = nullptr;
     for (const AiAnimSlot& s : slots) {
         if (s.names.empty()) continue;
-        // The slot's chance gate: fires when `roll < score` (JS `Gl.N_` =
-        // the per-slot curve evaluate vs the rolled threshold). The native
-        // port rolls fresh each pass (the JS re-rolls when the enemy plays
-        // a RandomizingEnemyAnimation — documented in README).
-        const float score = weight_curve_eval(s.chance, feat_);
-        if (!(roll01() < score)) continue;
         bool ok = true;
         // The slot conditions are evaluated against the fight state; the
         // native port evaluates them like move conditions (documented:
@@ -632,27 +631,144 @@ int AiController::nwa(const std::vector<AiAnimSlot>& slots, const std::string& a
         // LAST one wins (the `>` is strict, so equal -> `b=d`).
         if (best == nullptr || s.priority >= best->priority) best = &s;
     }
-    if (best == nullptr) return 0;
+    return best;
+}
 
+int AiController::nwa(const std::vector<AiAnimSlot>& slots, const std::string& anim) {
+    const AiAnimSlot* best = bqb(slots, anim);
+    if (best == nullptr || moves_ == nullptr) return 0;
     int added = 0;
     for (const std::string& n : best->names) {
-        // Skip names already in wb_ (JS L603: `J.remove(a, wb[d].animation
-        // .name)`).
-        bool dup = false;
-        for (const AiCandidate& c : wb_) {
-            if (c.animation == n) {
-                dup = true;
-                break;
+        // JS `ra.nAa(a,b)` (L603): resolve the slot's animation names to
+        // move objects; push each move's name (dedup against `wb_`:
+        // `J.remove(a, wb[d].animation.name)`).
+        const std::vector<const MoveDef*> group = resolve_candidate(n, *moves_);
+        for (const MoveDef* m : group) {
+            bool dup = false;
+            for (const AiCandidate& c : wb_) {
+                if (c.animation == m->name) {
+                    dup = true;
+                    break;
+                }
             }
+            if (dup) continue;
+            wb_.push_back({m->name, 0});
+            // JS `Nwa` (L603): `this.iN.zZ.push(c.name)` — the name feeds
+            // the `cc.Gb` conditional term when weighed by `iCa`.
+            feat_.zz.push_back(m->name);
+            ++added;
         }
-        if (dup) continue;
-        wb_.push_back({n, 0});
-        // JS `Nwa` (L603): `this.iN.zZ.push(c.name)` — the name feeds the
-        // `cc.Gb` conditional term when this candidate is weighed by `iCa`.
-        feat_.zz.push_back(n);
-        ++added;
     }
     return added;
+}
+
+// JS `csb`/`Zqb` (L618-619): size `cO`/`hN` to the tactic's `$E`/`nD` slot
+// count and roll each slot's `t4` with one `Da.jf()`.
+void AiController::roll_slots() {
+    const std::size_t nq = tactic_ != nullptr ? tactic_->quick_attacks.size() : 0;
+    quick_rolls_.resize(nq);
+    for (std::size_t i = 0; i < nq; ++i) quick_rolls_[i].t4 = next01();
+    const std::size_t ne = tactic_ != nullptr ? tactic_->evades.size() : 0;
+    evade_rolls_.resize(ne);
+    for (std::size_t i = 0; i < ne; ++i) evade_rolls_[i].t4 = next01();
+}
+
+// JS `bsb`/`Yqb` (L619): `gZ = slot.chance.Gb(feat)`; `N_ = t4 < gZ`.
+// Draw-free (the curves are evaluated, not rolled).
+void AiController::eval_slots() {
+    if (tactic_ == nullptr) return;
+    for (std::size_t i = 0;
+         i < quick_rolls_.size() && i < tactic_->quick_attacks.size(); ++i) {
+        quick_rolls_[i].gz =
+            weight_curve_eval(tactic_->quick_attacks[i].chance, feat_);
+        quick_rolls_[i].na =
+            quick_rolls_[i].t4 < static_cast<double>(quick_rolls_[i].gz);
+    }
+    for (std::size_t i = 0;
+         i < evade_rolls_.size() && i < tactic_->evades.size(); ++i) {
+        evade_rolls_[i].gz = weight_curve_eval(tactic_->evades[i].chance, feat_);
+        evade_rolls_[i].na =
+            evade_rolls_[i].t4 < static_cast<double>(evade_rolls_[i].gz);
+    }
+}
+
+// JS `Pqb` L606: every FIRING base QuickAttack slot (`cO[f].N_`) contributes
+// each of its moves that passes `V1`, with wait `$I()` (the Strict end).
+// `fk=6` when anything was pushed.
+int AiController::quick_slots(const AiFightState& st) {
+    if (tactic_ == nullptr || moves_ == nullptr) return 0;
+    int added = 0;
+    for (std::size_t f = 0;
+         f < tactic_->quick_attacks.size() && f < quick_rolls_.size(); ++f) {
+        if (!quick_rolls_[f].na) continue;
+        for (const std::string& n : tactic_->quick_attacks[f].names) {
+            const std::vector<const MoveDef*> group = resolve_candidate(n, *moves_);
+            for (const MoveDef* m : group) {
+                if (!v1(*m, st)) continue;
+                wb_.push_back({m->name, strict_end(*m)});
+                ++added;
+            }
+        }
+    }
+    if (added > 0) fk_ = 6;
+    return added;
+}
+
+// JS `Pqb` L606: `IB` is set when a FIRING Evade (`nD`) slot resolves to a
+// move the OPPONENT's `de` would accept (`a.nf.V1(h)`). The port has no
+// opponent controller, so its own `V1` is the documented proxy (both
+// fighters share the move table).
+void AiController::evade_ib(const AiFightState& st) {
+    IB_ = false;
+    if (tactic_ == nullptr || moves_ == nullptr) return;
+    for (std::size_t d = 0;
+         d < tactic_->evades.size() && d < evade_rolls_.size(); ++d) {
+        if (!evade_rolls_[d].na) continue;
+        bool hit = false;
+        for (const std::string& n : tactic_->evades[d].names) {
+            const std::vector<const MoveDef*> group = resolve_candidate(n, *moves_);
+            for (const MoveDef* m : group) {
+                if (v1(*m, st)) {
+                    hit = true;
+                    break;
+                }
+            }
+            if (hit) break;
+        }
+        if (hit) {
+            IB_ = true;
+            return;
+        }
+    }
+}
+
+// JS `h2a` (L608): `ld` = the candidate animations, `vs` = their waits.
+void AiController::h2a() {
+    ld_.clear();
+    vs_.clear();
+    ld_.reserve(wb_.size());
+    vs_.reserve(wb_.size());
+    for (const AiCandidate& c : wb_) {
+        ld_.push_back(c);
+        vs_.push_back(c.wait);
+    }
+}
+
+// JS `k_a` (L603): find the `<ConditionalDecisions>` `<PlayerAnimation>`
+// entry whose name MY current move matches (`c.$k(d.first)`) and run `Nwa`
+// on its `<Reactions>` slots. The shipped names are boss/bot animations
+// (`MagicSawPlayer`, `GroundPunch`, `RangedPlayer`), so this is normally 0.
+int AiController::ka(const AiFightState& st) {
+    if (tactic_ == nullptr || st.current_move == nullptr) return 0;
+    const MoveDef& mv = *st.current_move;
+    for (const auto& kv : tactic_->conditional_player) {
+        if (mv.name == kv.first || mv.template_tags.count(kv.first) > 0 ||
+            std::find(mv.anim_names.begin(), mv.anim_names.end(), kv.first) !=
+                mv.anim_names.end()) {
+            return nwa(kv.second, st.my_anim);
+        }
+    }
+    return 0;
 }
 // JS `de.gfa` (L597) = `Gc.gfa(a)+1` where `G` = `Md.I0(z$)` (L640-643):
 // `I0(a,b) = Da.pg.dT(a,b)` truncated. `+1` is the de-level addition.
@@ -785,12 +901,29 @@ int AiController::pqb(const AiFightState& st) {
                         if (b > 0) fk_ = 0;
                         if (Ao_ || b > 0) return static_cast<int>(wb_.size());
                     }
-                    // Cautious movements (JS L605): the P.nCa list — the
-                    // native port pushes the CautiousMovements animations.
+                    // Cautious movements (JS L605): `b=P.nCa()` — the
+                    // `<CautiousMovements>` groups; wait = the enemy's
+                    // Uninterrupt end (`d.zD(!0)-Fl+1`, 0 when idle) clamped
+                    // by each move's Extended then Strict end.
                     if (nG) {
-                        wb_.push_back({"StepForward", 0});
-                        wb_.push_back({"StepBack", 0});
-                        fk_ = 5;
+                        wb_.clear();
+                        int c = 0;
+                        if (st.enemy_move != nullptr) {
+                            c = uninterrupt_end(*st.enemy_move) - Fl_ + 1;
+                        }
+                        if (moves_ != nullptr) {
+                            for (const std::string& grp : tactic_->cautious_movements) {
+                                for (const MoveDef* m : resolve_candidate(grp, *moves_)) {
+                                    int g = c;
+                                    const int tea = extended_end(*m);
+                                    if (g > tea) g = tea;
+                                    const int se = strict_end(*m);
+                                    if (se > g) g = se;
+                                    wb_.push_back({m->name, g});
+                                }
+                            }
+                        }
+                        if (!wb_.empty()) fk_ = 5;
                         return static_cast<int>(wb_.size());
                     }
                 }
@@ -828,19 +961,12 @@ int AiController::pqb(const AiFightState& st) {
         return 0;
     }
 
-    // QuickAttack / Evade slots (JS L606-608).
-    bool quick_fired = false;
-    if (tactic_ != nullptr) {
-        for (const auto& s : tactic_->quick_attacks) { (void)s;
-            // The slot fires with probability = its score (the JS uses the
-            // per-slot curve evaluated against the feature state; the
-            // native port rolls uniformly for the demo's Base-only slots).
-            const int before = static_cast<int>(wb_.size());
-            nwa(tactic_->quick_attacks, st.my_anim);
-            if (static_cast<int>(wb_.size()) > before) quick_fired = true;
-        }
-        if (quick_fired) fk_ = 6;
-    }
+    // QuickAttack slots (JS L606, the `else` path): every FIRING base `$E`
+    // slot (`cO[f].N_`, rolled by `csb`/`bsb`) contributes its V1-valid
+    // moves with wait `$I()`; then the Evade (`nD`) slots decide `IB`.
+    eval_slots();
+    quick_slots(st);
+    evade_ib(st);
 
     // The surprise / evade-throw branch (JS L607-608):
     //   XW = 1 - 1/expectedWait < roll   (surprise)
@@ -871,18 +997,31 @@ int AiController::pqb(const AiFightState& st) {
             }
         }
         if (IB_) {
-            // EvadeThrowDodges (P.H9a = Bqa): BackHandflip.
-            wb_.push_back({"BackHandflip", 0});
+            // JS L607: `a=P.H9a()` — `wb` is CLEARED and refilled with
+            // every <EvadeThrowDodges> group move, wait `$I()`; `fk=9`.
+            wb_.clear();
+            if (moves_ != nullptr) {
+                for (const std::string& grp : tactic_->evade_throw_dodges) {
+                    for (const MoveDef* m : resolve_candidate(grp, *moves_)) {
+                        wb_.push_back({m->name, strict_end(*m)});
+                    }
+                }
+            }
             b = static_cast<int>(wb_.size());
             if (b > 0) fk_ = 9;
         } else if (tactic_ != nullptr) {
-            // JS L607-608 reuses the CACHED `nG` here.
-            if (nG) {
-                wb_.push_back({"StepForward", 0});
-                wb_.push_back({"StepBack", 0});
-                b = static_cast<int>(wb_.size());
-                if (b > 0) fk_ = 5;
+            // JS L607-608: `a=P.nCa()` — `wb` cleared, each
+            // <CautiousMovements> group move with wait `$I()`; `fk=5`.
+            wb_.clear();
+            if (moves_ != nullptr) {
+                for (const std::string& grp : tactic_->cautious_movements) {
+                    for (const MoveDef* m : resolve_candidate(grp, *moves_)) {
+                        wb_.push_back({m->name, strict_end(*m)});
+                    }
+                }
             }
+            b = static_cast<int>(wb_.size());
+            if (b > 0) fk_ = 5;
         }
         if (b == 0) {
             oC_ = 3;
@@ -979,6 +1118,12 @@ std::string AiController::update(const AiFightState& st) {
         return "";
     }
 
+    // JS `ia` L593: `this.csb(); this.Zqb();` — roll every base
+    // QuickAttack/Evade slot's `t4` (`Da.jf()` each, in slot order) before
+    // the `hcb` gate and `dqb`. The `bsb`/`Yqb` curve evaluation is
+    // draw-free and runs later (`eval_slots`, inside `pqb`).
+    roll_slots();
+
     // The distance category + chance draws (JS L593-594).
     aqa_ = dqb(st);
 
@@ -988,12 +1133,14 @@ std::string AiController::update(const AiFightState& st) {
     // The core decision (JS L594).
     int cnt = pqb(st);
 
-    // The QuickAttack/Evade additions (JS L594: `b+=this.k_a(...),
-    // b+=this.Nwa(...)`).
+    // The conditional-slot additions (JS L594: `b+=this.k_a(a.da,this.u$),
+    // b+=this.Nwa(this.E7), this.iN.zZ.length>0&&(this.fk=11)`). `u$`/`E7`
+    // are the <ConditionalDecisions> lists — NOT the base `$E`/`nD`.
     if (!F8_ && fk_ != 11) {
         if (tactic_ != nullptr) {
-            cnt += static_cast<int>(nwa(tactic_->quick_attacks, st.my_anim));
-            cnt += static_cast<int>(nwa(tactic_->evades, st.my_anim));
+            cnt += ka(st);
+            cnt += nwa(tactic_->conditional_bot, st.my_anim);
+            if (!feat_.zz.empty()) fk_ = 11;
         }
     }
 
@@ -1009,12 +1156,9 @@ std::string AiController::update(const AiFightState& st) {
 
     if (cnt > 0) {
         XW_ = false;
-        // Filter by V1 (JS ABa L600).
+        // Filter by V1 (JS ABa L600), then split into ld/vs (JS h2a L608).
         filter_by_v1(wb_, st);
-        // Copy to ld/vs (JS h2a L608).
-        ld_ = wb_;
-        vs_.resize(ld_.size(), 0);
-        for (std::size_t i = 0; i < ld_.size(); ++i) vs_[i] = ld_[i].wait;
+        h2a();
         // The weighted roulette (JS jL L598).
         const int idx = pick(ld_);
         if (idx >= 0) {

@@ -418,6 +418,72 @@ void parse_slots(const pugi::xml_node& parent, const char* container_name,
     }
 }
 
+// JS `P.PE`/`P.yK` (L622-623): the `<Animation Name="X"/>` name list of a
+// node. `yK` resolves each name to its animation GROUP at parse time
+// (`ra.b9a` L622, whose `.children` are the moves carrying that name in
+// `anim_names`); the port keeps the raw names and resolves the group at
+// decision time (its `anim_names` analogue).
+std::vector<std::string> parse_anim_names(const pugi::xml_node& node) {
+    std::vector<std::string> out;
+    if (node.empty()) return out;
+    for (const pugi::xml_node& c : node.children()) {
+        if (std::strcmp(c.name(), "Animation") != 0) continue;
+        const char* n = c.attribute("Name").value();
+        if (n != nullptr && n[0] != '\0') out.push_back(n);
+    }
+    return out;
+}
+
+// JS `Hl.parse` (L629/L633): one `<Animations>`/`<BotAnimation>` slot. The
+// `Names` ("A|B") list carries the slot's animations; `Priority` the bqb
+// order. The `<Conditions>` tree is NOT parsed here — the port's existing
+// `AiAnimSlot.conditions` gap (see parse_slots); `V1` still gates the
+// resolved moves at decision time.
+AiAnimSlot parse_conditional_slot(const pugi::xml_node& node) {
+    AiAnimSlot slot;
+    const std::string names = node.attribute("Names").as_string("");
+    std::string cur;
+    for (char ch : names) {
+        if (ch == '|') {
+            if (!cur.empty()) slot.names.push_back(cur);
+            cur.clear();
+        } else {
+            cur.push_back(ch);
+        }
+    }
+    if (!cur.empty()) slot.names.push_back(cur);
+    if (slot.names.empty()) {
+        const std::string one = node.attribute("Animation").as_string("");
+        if (!one.empty()) slot.names.push_back(one);
+    }
+    slot.priority = node.attribute("Priority").as_int(0);
+    return slot;
+}
+
+// JS `P.Bmb` `<ConditionalDecisions>` (L628-629): `P.cjb` for a
+// `<PlayerAnimation Name="X"><Reactions>` (a `(name, slots)` pair) and a
+// bare `Hl.parse` for each `<BotAnimation>`.
+void parse_conditional_decisions(
+    const pugi::xml_node& cd,
+    std::vector<std::pair<std::string, std::vector<AiAnimSlot>>>& player,
+    std::vector<AiAnimSlot>& bot) {
+    if (cd.empty()) return;
+    for (const pugi::xml_node& c : cd.children()) {
+        if (std::strcmp(c.name(), "PlayerAnimation") == 0) {
+            const std::string name = c.attribute("Name").as_string("");
+            const pugi::xml_node react = c.child("Reactions");
+            if (react.empty()) continue;
+            std::vector<AiAnimSlot> slots;
+            for (const pugi::xml_node& s : react.children()) {
+                slots.push_back(parse_conditional_slot(s));
+            }
+            player.emplace_back(name, std::move(slots));
+        } else if (std::strcmp(c.name(), "BotAnimation") == 0) {
+            bot.push_back(parse_conditional_slot(c));
+        }
+    }
+}
+
 }  // namespace
 
 void parse_tactic_settings(const std::string& xml_text,
@@ -433,18 +499,38 @@ void parse_tactic_settings(const std::string& xml_text,
     // `<NoDecision><Intervals><Interval Name/>...` + `<Moves><Move Name/>`
     // (JS `td.Vdb` L1153-1158 -> `P.PE(b, P.osa, "Interval")` /
     // `P.PE(b, P.psa, "Move")`; L319346). Read by `hcb` L598-599.
-    if (lists != nullptr) {
+    // `<CautiousMovements>` / `<EvadeThrowDodges>` (JS `P.yK` L628 ->
+    // `P.nG`/`P.Bqa`, read by `Pqb` L605/L607). `<ConditionalDecisions>`
+    // (JS `P.Xsa`/`P.tpa`, read by `k_a`/`Nwa` L594/L603). All GLOBAL (JS
+    // `P` statics); collected once, then copied onto every tactic.
+    std::vector<std::string> g_nd_intervals, g_nd_moves;
+    std::vector<std::string> g_cautious, g_evade_throw;
+    std::vector<std::pair<std::string, std::vector<AiAnimSlot>>> g_cond_player;
+    std::vector<AiAnimSlot> g_cond_bot;
+    {
         const pugi::xml_node nd = root.child("NoDecision");
         if (!nd.empty()) {
             for (const pugi::xml_node& iv : nd.child("Intervals").children()) {
                 const char* n = iv.attribute("Name").value();
-                if (n != nullptr) lists->no_decision_intervals.push_back(n);
+                if (n != nullptr) g_nd_intervals.push_back(n);
             }
             for (const pugi::xml_node& mv : nd.child("Moves").children()) {
                 const char* n = mv.attribute("Name").value();
-                if (n != nullptr) lists->no_decision_moves.push_back(n);
+                if (n != nullptr) g_nd_moves.push_back(n);
             }
         }
+        g_cautious = parse_anim_names(root.child("CautiousMovements"));
+        g_evade_throw = parse_anim_names(root.child("EvadeThrowDodges"));
+        parse_conditional_decisions(root.child("ConditionalDecisions"),
+                                    g_cond_player, g_cond_bot);
+    }
+    if (lists != nullptr) {
+        lists->no_decision_intervals = g_nd_intervals;
+        lists->no_decision_moves = g_nd_moves;
+        lists->cautious_movements = g_cautious;
+        lists->evade_throw_dodges = g_evade_throw;
+        lists->conditional_player = g_cond_player;
+        lists->conditional_bot = g_cond_bot;
     }
 
     const pugi::xml_node tactics = root.child("Tactics");
@@ -530,11 +616,15 @@ void parse_tactic_settings(const std::string& xml_text,
             if (mem.attribute("RoundFactor")) def.memory_round_factor = mem.attribute("RoundFactor").as_double();
         }
 
-        // The global `<NoDecision>` lists, copied onto every tactic.
-        if (lists != nullptr) {
-            def.no_decision_intervals = lists->no_decision_intervals;
-            def.no_decision_moves = lists->no_decision_moves;
-        }
+        // The global lists (NoDecision / CautiousMovements /
+        // EvadeThrowDodges / ConditionalDecisions), copied onto every
+        // tactic so the AI needs no extra wiring (JS `P` statics).
+        def.no_decision_intervals = g_nd_intervals;
+        def.no_decision_moves = g_nd_moves;
+        def.cautious_movements = g_cautious;
+        def.evade_throw_dodges = g_evade_throw;
+        def.conditional_player = g_cond_player;
+        def.conditional_bot = g_cond_bot;
 
         out[def.name] = std::move(def);
     }

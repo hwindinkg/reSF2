@@ -4371,12 +4371,17 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     if (!hit_blocked) {
         ++atk.combo_run;
         if (atk.combo_run > atk.max_combo) atk.max_combo = atk.combo_run;
+        // JS `wd.strike` (L510): `this.Bb.block||(e.JCa()||this.Era++,
+        // e.dca())`. `e.JCa()` (= the attacker's `Vx.v1` latch, read BEFORE
+        // `e.dca()` arms it) — only the FIRST hit of a combo increments the
+        // victim's `Era`. The victim's own ladder (`combo_run`=`Vx.tf`) is
+        // NOT reset here (the JS reset is the `Vx.wyb` window decay only).
+        if (!atk.combo_active) ++def.era;
         // JS `Vx.wgb` (L510 `e.dca()`): `this.v1=!0; this.OV=0; ++this.tf`.
         // The latch + window counter arm the time decay in the per-frame
         // `Vx.wyb` tick below.
         atk.combo_active = true;
         atk.combo_frames = 0;
-        def.combo_run = 0;
     }
     if (rec.shock) ++atk.shocks_dealt;
     if (!battle_first_hit_) {
