@@ -1662,8 +1662,32 @@ std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
     std::fflush(stdout);
     QuestSideEffects fx;
     std::map<std::string, std::string> locals;
+    // JS `Yb` (L954) runs the outer quest chain STRICTLY SEQUENTIALLY and
+    // SUSPENDS it at a `Regular` modal (`He.S` L1047-1051 -> `Wb.Xob` L927);
+    // a button's nested actions are a SEPARATE sub-`Yb` (`He.Rib` L1057-1058
+    // installs `g.actions`, fired by `dhb(0)` L1061 as `this.Ng.actions.S`).
+    // So a nested `<Dialog>` becomes the NEXT modal, and the quest's later
+    // sibling dialogs are not even queued yet. The port drains the whole
+    // action list up-front, so splice the dialogs the nested run appended
+    // back to the FRONT of the `Wb` queue (where the pressed dialog's slot
+    // opened) instead of leaving them behind the queued siblings.
+    // Cite: quests.xml L859-872 (`FirstGuardBeaten`) — hello -> (refuse)
+    // `tutorial_girl_please` -> `tutorial_girl_end` -> tournament.
+    const std::size_t queue_before = dialogs_.size();
     const ActionRest rest =
         run_actions(app, *chosen, dlg.journal, fx, locals, dlg.quest, 0);
+    if (dialogs_.size() > queue_before) {
+        std::vector<EngineDialog> nested;
+        nested.reserve(dialogs_.size() - queue_before);
+        for (std::size_t i = queue_before; i < dialogs_.size(); ++i) {
+            nested.push_back(std::move(dialogs_[i]));
+        }
+        dialogs_.resize(queue_before);
+        const std::size_t at = std::min(mi, dialogs_.size());
+        dialogs_.insert(dialogs_.begin() + static_cast<std::ptrdiff_t>(at),
+                        std::make_move_iterator(nested.begin()),
+                        std::make_move_iterator(nested.end()));
+    }
     apply_effects(app, fx);
     enqueue_effects(app, fx, dlg.journal, locals, dlg.quest);
     if (rest.suspended) {

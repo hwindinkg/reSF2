@@ -2589,6 +2589,22 @@ void draw_flash_tint(sf2::render::Renderer& ren, float cx, float cy, float w, fl
     ren.draw_triangles(verts, 6, 1.0f, 0.88f, 0.35f, 0.20f + 0.45f * p);
 }
 
+// `he` — the `MenuBtnFlashing` hint arrow (`eo.N3a` L1117 -> `he.show(a.target)`,
+// `he` ctor: `this.Oy=R.$(E.get(260), y.sRa, this.node)`; `y.sRa="Arrow"`).
+// `he.aa`: `this.Oy.la(min(W,H)*0.1/fa.x)` scales the arrow to
+// `min(W,H)*0.1` wide, centres it on the target rect x and pins it at the
+// rect top (`node.C((a.J+a.N)*.5)`, `node.D(a.W+...)`), bobbing ±0.8 with a
+// 30-frame direction flip (`this.cV`, `this.UUa=30`).
+void draw_nav_hint_arrow(App& app, float cx, float top_y) {
+    const float w = std::min(kViewW, kViewH) * 0.1f;
+    const float h = w * 0.75f;
+    static int phase = 0;
+    const float bob = ((phase++ / 30) % 2 == 0) ? 0.8f : -0.8f;
+    if (!try_draw_atlas_button(app, "Arrow", cx, top_y - h * 0.5f + bob, w, h, 1.0f)) {
+        draw_flat_button(app, "v", cx, top_y - h * 0.5f + bob, w, h, 0.9f, 0.8f, 0.3f, true);
+    }
+}
+
 // Draws the shared chrome on top of a shell screen's own content. `active`
 // selects the active nav frame (JS `xyb`). The widget strip mirrors `odb`:
 // widgets are laid left->right and the strip is centred; each widget is
@@ -2826,8 +2842,15 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
         // is hidden (JS `NLa` L2001), so the header carries the flash — the
         // player is shown that the menu must be opened. The JS nav flash
         // itself lands on the row once expanded (below).
-        if (flash_idx >= 0) {
+        // `eo.N3a` L1117: `scroll.button.tk=!0` — the flash lands on the
+        // collapsed MENU button (`scroll.button`) regardless of `BtnName`
+        // (`N3a` only STORES `vpa`; the destination row flash is `dia`, which
+        // runs only after a nav click `u3`). `he.show(a.target)` then pins the
+        // `Arrow` hint above that button. The row pulse below therefore no
+        // longer gates the collapsed header flash.
+        if (!app.quest_engine().nav_flash().empty()) {
             draw_flash_tint(ren, hx + hw * 0.5f, hy + hh * 0.5f, hw, hh);
+            draw_nav_hint_arrow(app, hx + hw * 0.5f, hy);
         }
         return;
     }
