@@ -279,6 +279,42 @@ const HitCapsule* BodyState::by_name(const std::string& name) const {
     return nullptr;
 }
 
+float fha_body(float& x, float& y, float& z, float px, float pz,
+               bool collisible, float wall_min, float wall_max, float floor_y) {
+    const float x_before = x;
+    // JS `Al.fha` L582: `b=a.ma; b.y>=0 && this.P6a(a)` — the response runs
+    // only for a body at/below the floor plane.
+    if (y >= floor_y) {
+        // JS `Al.P6a` L582: revert to the previous position, snap y to the
+        // floor, then re-advance along the frame's horizontal delta minus the
+        // friction distance `a.y*bQa` (the depth below the floor). A body that
+        // is only touching the floor keeps its horizontal motion (`f ~ 0`); a
+        // deeply penetrating one is stopped. This is what keeps a body at the
+        // wall/floor instead of letting the plain clamp teleport it.
+        if (collisible && wall_min != wall_max) {
+            const float dx = x - px;
+            const float dz = z - pz;
+            const float e = dx * dx + dz * dz;         // `c*c+d*d`
+            float f = (y - floor_y) * kFrictionForce;  // `a.y*this.bQa`
+            x = px;                                    // `a.x=b.x`
+            y = floor_y;                               // `a.y=0`
+            z = pz;                                    // `a.z=b.z`
+            if (f * f < e) {
+                f = 1.0f - f / std::sqrt(e);
+                x += dx * f;                           // `a.x+=c*f`
+                z += dz * f;                           // `a.z+=d*f`
+            }
+        }
+    }
+    // JS `Al.fha` L582 tail: `this.NO!=this.MO && (b.x<this.NO ? b.x=this.NO
+    // : this.MO<b.x && (b.x=this.MO))`.
+    if (wall_min != wall_max) {
+        if (x < wall_min) x = wall_min;
+        else if (x > wall_max) x = wall_max;
+    }
+    return x - x_before;
+}
+
 float apply_impulse(const HitCapsule& hit_cap, const CapsuleHit& hit,
                     Vec3 impulse, float fighter_x, float wall,
                     float width_minus_wall, ImpulseResult& out) {

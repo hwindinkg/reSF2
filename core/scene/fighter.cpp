@@ -2094,23 +2094,34 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         }
         // JS `Al.ia` (L582) tail: `sk(); jE(); nk&&frameCount++`.
         if (nk_) ++ragdoll_frame_count_;
-        // JS `Al.fha` (L582, run from `Al.ia`): clamp every body node to the
-        // arena bounds (x in [wall, width-wall], y >= the floor). Only the
-        // world-space ragdoll state needs it — the clip-space solver is
+        // JS `Al.fha` (L582, run from `Al.ia`): the arena/ground response for
+        // every solver body — `Al.P6a` (revert to the previous position, snap
+        // y to the floor, re-advance minus the friction distance) for a
+        // collidable body at/below the floor, then the `NO`/`MO` x clamp. Only
+        // the world-space ragdoll state needs it — the clip-space solver is
         // authored inside the arena.
         if (solver_world_) {
-            // NOTE: the port's world y is DOWN-positive (`world_to_screen_y`
-            // = `(world_y - center_y)*zoom + view_h/2`), so the arena floor is
-            // the MAX y a body may reach — the clamp is `y <= floor` (the JS
-            // `fha` `y >= 0` in its up-positive world, mirrored by the parse
-            // negation `H(X,-Y,Z)`).
+            // The port's world y is down-positive (the model parse negates the
+            // XML Y), so the floor is the MAX y a body may reach: `y >= floor`
+            // is the JS `b.y >= 0`, and `Al.P6a`'s `a.y = 0` is `y = floor`.
+            int wall_hits = 0;
             for (std::size_t i = 0; i < n; ++i) {
                 float& nx = sol_ma_[i * 3];
                 float& ny = sol_ma_[i * 3 + 1];
-                if (nx < ragdoll_wall_min_) nx = ragdoll_wall_min_;
-                else if (nx > ragdoll_wall_max_) nx = ragdoll_wall_max_;
-                if (ny > ragdoll_floor_y_) ny = ragdoll_floor_y_;
+                float& nz = sol_ma_[i * 3 + 2];
+                const float px = sol_mf_[i * 3];
+                const float pz = sol_mf_[i * 3 + 2];
+                const float dx = sf2::scene::fha_body(
+                    nx, ny, nz, px, pz, bones[i].collisible,
+                    ragdoll_wall_min_, ragdoll_wall_max_, ragdoll_floor_y_);
+                if (dx != 0.0f) {
+                    ++wall_hits;
+                    std::fprintf(stdout,
+                                 "[wall] F%d node=%s x %.2f -> %.2f (d=%.2f)\n",
+                                 frame, bones[i].name.c_str(), nx - dx, nx, dx);
+                }
             }
+            if (wall_hits > 0) std::fflush(stdout);
         }
         // (d) Qja/seb: macros re-derived from the solved children.
         std::vector<std::uint8_t> visiting(n, 0);

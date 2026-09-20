@@ -47,6 +47,12 @@ struct Bone {
     // landed hit. `mdl_skeleton_punching_bag` Node12 is the only shipped Weak
     // node (`Weak="1" Fixed="1"`); the Punchbag's forced reaction calls it.
     bool weak = false;
+    // `Collisible="1"` (`Vc.$Da`; JS `Yc.Ijb` L572
+    // `d.$Da=u.ka(b.attributes.get("Collisible"))`): the body takes part in
+    // the arena/ground response (`Al.P6a` L582) — only collidable bodies are
+    // reverted/snapped at the floor. 46 of the 59 `mdl_skeleton` nodes are
+    // `Collisible="1"`; every `mdl_body` (cloth) node is `Collisible="0"`.
+    bool collisible = false;
 };
 
 // One mesh triangle: the three referenced bone NAMES. The game resolves

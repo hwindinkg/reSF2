@@ -148,6 +148,28 @@ struct BodyState {
     float wall_max = 0.0f;
 };
 
+// --- arena/ground response (JS `Al.fha` L582 + `Al.P6a` L582) ----------
+// `this.bQa` = `xd.bAa` (`internal_settings.xml` `<FrictionForce Value="0.2"/>`;
+// JS default `xd.uya` = 0.2).
+inline constexpr float kFrictionForce = 0.2f;
+
+// Applies `Al.fha` (L582) to ONE solver body (`Vc`), verbatim:
+//   fha(a){ let b=a.ma; b.y>=0 && this.P6a(a);
+//           this.NO!=this.MO && (b.x<this.NO ? b.x=this.NO : this.MO<b.x && (b.x=this.MO)) }
+//   P6a(a){ if(a.$Da && this.NO!=this.MO){ var b=a.mf; a=a.ma;
+//           var c=a.x-b.x, d=a.z-b.z, e=c*c+d*d, f=a.y*this.bQa;
+//           a.x=b.x; a.y=0; a.z=b.z;
+//           f*f<e && (f=1-f/Math.sqrt(e), a.x+=c*f, a.y+=0, a.z+=d*f) } }
+// `x`/`y`/`z` = the node's current world position (`ma`), `px`/`pz` = the
+// previous one (`mf`), `collisible` = the node's `Collisible` flag (`$Da`).
+// `wall_min`/`wall_max` = `NO`/`MO` (set by `Al.pMa`), `floor_y` = the port's
+// image of the JS floor `y = 0` (the JS world y is down-positive — the model
+// parse negates the XML Y — so `y >= 0` means at/below the floor and the JS
+// friction term `a.y*bQa` is the depth below the floor).
+// Returns `x_after - x_before` (the horizontal effect of the response).
+float fha_body(float& x, float& y, float& z, float px, float pz,
+               bool collisible, float wall_min, float wall_max, float floor_y);
+
 // --- impulse / knockback (JS `Bl.strike` L582 + `wd.Kwb` L509) ---------
 // Applies the move interval's Impulse (X/Y/Z) to the target's hit capsule
 // endpoint nodes, split by the hit position along the capsule, then clamps

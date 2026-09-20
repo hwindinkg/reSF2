@@ -38,6 +38,9 @@ Bone parse_bone(const pugi::xml_node& node) {
     // JS `Yc.Ijb` L572: `d.vc=u.ka(b.attributes.get("Shock"))` - the node's
     // `Al.sk`/`jE` shock-participation flag.
     b.shock = sf2::data::xml_attr_bool(node, "Shock", false);
+    // JS `Yc.Ijb` L572: `d.$Da=u.ka(b.attributes.get("Collisible"))` — the
+    // node's arena/ground-response flag (`Al.P6a` L582 gates on `$Da`).
+    b.collisible = sf2::data::xml_attr_bool(node, "Collisible", false);
     return b;
 }
 
