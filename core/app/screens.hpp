@@ -482,6 +482,16 @@ public:
     float player_facing() const;
     float enemy_facing() const;
 
+    // [probe, authorised] The ENEMY's live hit-reaction state for the
+    // `--boss-hit-probe` (no OS input): the ragdoll latch (JS `Al.nk`, set by
+    // `ragdoll_start` on a landed hit and cleared by `Al.stop` at the next
+    // move start), its frame count / reaction name, and the enemy's
+    // started-move counter (an AI replacement would bump it). Read-only.
+    bool enemy_ragdoll_active() const;
+    int enemy_ragdoll_frame() const;
+    std::string enemy_ragdoll_name() const;
+    int enemy_moves_started() const;
+
     // Test/replay hook: inject a game key edge by key_type id (1..14) into
     // the same `player_input` path the keyboard uses, bypassing the GLFW key
     // map. The `atframe <n> press <control>` replay stream uses these ids.

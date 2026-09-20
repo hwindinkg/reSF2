@@ -1406,6 +1406,10 @@ int main(int argc, char** argv) {
     bool capture_fight = false;
     bool capture_idle_fight = false;  // --capture-idle-fight-at N: boot direct + no input, capture at fight frame N
     bool round_log = false;  // --round-log: per-frame scene_visible/x/camera around a round transition
+    // --boss-hit-probe: boot a BOSS fight, drive the player into range via the
+    // internal `player_input` path (no OS input), land an attack, and log the
+    // boss's per-frame hit reaction (move/ragdoll/world_x).
+    bool boss_hit_probe = false;
     bool auto_attack = false;
     bool fight_mode = false;  // --fight: boot DIRECTLY into the dojo fight
     int capture_fight_frame = 300;  // fight frames after the Fight screen appears
@@ -1623,6 +1627,8 @@ int main(int argc, char** argv) {
             // Per-frame round-transition log (scene_visible + fighter x +
             // camera x); no input, no capture, no OS input.
             round_log = true;
+        } else if (arg == "--boss-hit-probe") {
+            boss_hit_probe = true;
         } else if (arg == "--auto-attack") {
             auto_attack = true;
         } else if (arg == "--dump-clip" && i + 1 < argc) {
@@ -1668,7 +1674,7 @@ int main(int argc, char** argv) {
         quest_verify || quest_verify_buy || dialog_verify || observe_dialogs ||
         replay_mode || verify_input || fx_probe || input_tape || verify_place ||
         debug_ui || capture_fight || capture_idle_fight || round_log ||
-        auto_attack ||
+        auto_attack || boss_hit_probe ||
         fight_mode || !capture_dir.empty() || !dump_clip.empty() ||
         dump_pose_frames > 0 || !fight_battle.empty() || !fight_zone.empty();
     if (driver_mode) {
@@ -3421,6 +3427,133 @@ int main(int argc, char** argv) {
         }
         app.shutdown();
         return 0;
+    } else if (boss_hit_probe) {
+        // [probe] `--boss-hit-probe`: boot a BOSS fight (default
+        // BOSS_LYNX/ZONE_1), drive the player into range through the internal
+        // `player_input` path (`inject_game_key` — NO OS input), land an attack
+        // on the boss, then log ~150 fight frames of the boss's hit reaction:
+        // its `current_move()` name, `ragdoll_active()` (JS `Al.nk`), its
+        // `world_x`, its facing and the started-move counter (an AI replacement
+        // bumps it). This is the end-to-end proof that the 22cbe41f reaction
+        // gate (`de.hcb` L598 + `wd.Qnb` L507) survives a scripted player hit:
+        // `wd.Qnb` starts the reaction and leaves `Te.Pe=false`, `de.hcb` then
+        // returns false so `de.ia` issues no decision and `Al.nk` keeps driving
+        // the pose instead of the AI replacing it the next frame.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name =
+                fight_battle.empty() ? std::string("BOSS_LYNX") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);  // uncapped deterministic stepping
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        std::fprintf(stdout, "[bossprobe] boot battle=%s zone=%s\n",
+                     fight_battle.empty() ? "BOSS_LYNX" : fight_battle.c_str(),
+                     fight_zone.empty() ? "ZONE_1" : fight_zone.c_str());
+        std::fflush(stdout);
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[bossprobe] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        // --- 1. wait for the live fight (past the 133-frame StartStance) ----
+        //    The sim runs under the VS overlay; gate on `fight_frame`.
+        int guard = 0;
+        while (guard < 20000 && app.screens().current_id() == kScreenFight &&
+               fs->fight_frame() < 140) {
+            glfwPollEvents();
+            app.run_one_frame();
+            ++guard;
+        }
+        std::fprintf(stdout,
+                     "[bossprobe] live at fight frame %d (guard %d) px=%.1f "
+                     "ex=%.1f gap=%.1f\n",
+                     fs->fight_frame(), guard,
+                     static_cast<double>(fs->player_world_x()),
+                     static_cast<double>(fs->enemy_world_x()),
+                     static_cast<double>(fs->enemy_world_x() - fs->player_world_x()));
+        std::fflush(stdout);
+        // --- 2. approach: tap the toward-key until within punch range -------
+        //    With the enemy on the RIGHT the Forward key (3) walks toward it;
+        //    on the LEFT the Back key (7) does (the `vm.he` mirror; see the
+        //    `--verify-place` mirror probe). Taps only — no OS input.
+        for (int f = 0; f < 420; ++f) {
+            glfwPollEvents();
+            const float px = fs->player_world_x();
+            const float ex = fs->enemy_world_x();
+            if (std::fabs(ex - px) <= 70.0f) break;
+            if (f % 8 == 0) {
+                const int toward = (ex >= px) ? 3 : 7;
+                fs->inject_game_key(toward, true);
+                fs->inject_game_key(toward, false);
+            }
+            app.run_one_frame();
+        }
+        std::fprintf(stdout, "[bossprobe] after approach px=%.1f ex=%.1f gap=%.1f\n",
+                     static_cast<double>(fs->player_world_x()),
+                     static_cast<double>(fs->enemy_world_x()),
+                     static_cast<double>(fs->enemy_world_x() - fs->player_world_x()));
+        std::fflush(stdout);
+        // --- 3. attack until a hit lands; then log ~150 frames --------------
+        //    Re-park the boss at punch range right before each tap (the
+        //    `--verify-place` throw technique: the AI drifts, and the move's
+        //    Distance gate + the capsule overlap are measured at the tap).
+        const int kLogFrames = 150;
+        int react_at = -1;
+        int react_started = 0;
+        std::string react_move;
+        for (int f = 0; f < 1200; ++f) {
+            glfwPollEvents();
+            if (react_at < 0 && f % 16 == 0) {
+                const float px = fs->player_world_x();
+                const float ex = fs->enemy_world_x();
+                const float side = (ex >= px) ? 1.0f : -1.0f;
+                fs->place_fighters(px, px + side * 55.0f);
+                app.run_one_frame();
+                const int atk = ((f / 16) % 2 == 0) ? 9 : 10;  // Punch / Kick
+                fs->inject_game_key(atk, true);
+                fs->inject_game_key(atk, false);
+            }
+            app.run_one_frame();
+            if (react_at < 0 && fs->enemy_ragdoll_active()) {
+                react_at = f;
+                react_started = fs->enemy_moves_started();
+                react_move = fs->enemy_ragdoll_name();
+                std::fprintf(stdout,
+                             "[bossprobe] HIT at f=%d reaction='%s' nk=1 "
+                             "started=%d\n",
+                             f, react_move.c_str(), react_started);
+                std::fflush(stdout);
+            }
+            if (react_at >= 0) {
+                const int t = f - react_at;
+                std::fprintf(stdout,
+                             "[bossreact] t=%d move=%s nk=%d rframe=%d "
+                             "started=%d px=%.1f ex=%.1f efac=%+.0f\n",
+                             t, fs->enemy_current_move().c_str(),
+                             fs->enemy_ragdoll_active() ? 1 : 0,
+                             fs->enemy_ragdoll_frame(), fs->enemy_moves_started(),
+                             static_cast<double>(fs->player_world_x()),
+                             static_cast<double>(fs->enemy_world_x()),
+                             static_cast<double>(fs->enemy_facing()));
+                std::fflush(stdout);
+                if (t + 1 >= kLogFrames) break;
+            }
+        }
+        std::fprintf(stdout,
+                     "[bossprobe] done: react_at=%d reaction='%s' "
+                     "started_before=%d started_after=%d -> %s\n",
+                     react_at, react_move.c_str(), react_started,
+                     fs->enemy_moves_started(), react_at >= 0 ? "HIT" : "NO-HIT");
+        std::fflush(stdout);
+        app.shutdown();
+        return react_at >= 0 ? 0 : 1;
     } else if (capture_idle_fight) {
         // [Phase 4d] Boot DIRECTLY into the dojo fight with NO input and NO
         // auto-attack, run to fight frame `capture_fight_frame`, then capture

@@ -8165,6 +8165,25 @@ std::string FightScreen::enemy_current_move() const {
     return m != nullptr ? m->name : std::string();
 }
 
+// [probe, authorised] Enemy hit-reaction state for `--boss-hit-probe`.
+bool FightScreen::enemy_ragdoll_active() const {
+    return fight_ != nullptr && fight_->enemy().fighter.ragdoll_active();
+}
+
+int FightScreen::enemy_ragdoll_frame() const {
+    return fight_ != nullptr ? fight_->enemy().fighter.ragdoll_frame_count() : 0;
+}
+
+std::string FightScreen::enemy_ragdoll_name() const {
+    if (fight_ == nullptr) return std::string();
+    const std::vector<std::string>& n = fight_->enemy().fighter.ragdoll_names();
+    return n.empty() ? std::string() : n.front();
+}
+
+int FightScreen::enemy_moves_started() const {
+    return fight_ != nullptr ? fight_->enemy().moves_started : 0;
+}
+
 float FightScreen::player_facing() const {
     return fight_ != nullptr ? static_cast<float>(fight_->player().fighter.facing())
                              : 0.0f;
