@@ -505,6 +505,7 @@ void parse_tactic_settings(const std::string& xml_text,
     // `P` statics); collected once, then copied onto every tactic.
     std::vector<std::string> g_nd_intervals, g_nd_moves;
     std::vector<std::string> g_cautious, g_evade_throw;
+    std::vector<std::string> g_ignored_enemy, g_randomizing_enemy;
     std::vector<std::pair<std::string, std::vector<AiAnimSlot>>> g_cond_player;
     std::vector<AiAnimSlot> g_cond_bot;
     {
@@ -521,6 +522,12 @@ void parse_tactic_settings(const std::string& xml_text,
         }
         g_cautious = parse_anim_names(root.child("CautiousMovements"));
         g_evade_throw = parse_anim_names(root.child("EvadeThrowDodges"));
+        // JS `P.PE` (L622): a bare `<Animation Name="X"/>` NAME list (NOT
+        // resolved to a group) — read by `mcb` (L596-597).
+        g_ignored_enemy = parse_anim_names(root.child("IgnoredEnemyAnimations"));
+        // JS `P.yK` (L622): resolved to animation GROUPS at decision time.
+        g_randomizing_enemy =
+            parse_anim_names(root.child("RandomizingEnemyAnimation"));
         parse_conditional_decisions(root.child("ConditionalDecisions"),
                                     g_cond_player, g_cond_bot);
     }
@@ -529,6 +536,8 @@ void parse_tactic_settings(const std::string& xml_text,
         lists->no_decision_moves = g_nd_moves;
         lists->cautious_movements = g_cautious;
         lists->evade_throw_dodges = g_evade_throw;
+        lists->ignored_enemy_animations = g_ignored_enemy;
+        lists->randomizing_enemy_animation = g_randomizing_enemy;
         lists->conditional_player = g_cond_player;
         lists->conditional_bot = g_cond_bot;
     }
@@ -623,6 +632,8 @@ void parse_tactic_settings(const std::string& xml_text,
         def.no_decision_moves = g_nd_moves;
         def.cautious_movements = g_cautious;
         def.evade_throw_dodges = g_evade_throw;
+        def.ignored_enemy_animations = g_ignored_enemy;
+        def.randomizing_enemy_animation = g_randomizing_enemy;
         def.conditional_player = g_cond_player;
         def.conditional_bot = g_cond_bot;
 

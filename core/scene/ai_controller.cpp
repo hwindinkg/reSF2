@@ -77,7 +77,7 @@ int attack_end(const MoveDef& m) {
     for (const Interval& iv : m.intervals) {
         if (iv.type == 4) best = std::max(best, iv.end);
     }
-    if (m.end_frame > 0) best = std::min(best, m.end_frame);
+    // JS `jc.p0` (L697) does NOT clamp to `Lj` (only `zD` does).
     return best;
 }
 int uninterrupt_end(const MoveDef& m) {
@@ -97,7 +97,6 @@ int strict_end(const MoveDef& m) {
         if (iv.name == "Uninterrupt" || iv.name == "SemiUninterrupt")
             best = std::max(best, iv.end);
     }
-    if (m.end_frame > 0) best = std::min(best, m.end_frame);
     return best;
 }
 // JS `jc.Tea` (L697): `vBa(P.r$a())` — the max finish among the Extended
@@ -110,8 +109,29 @@ int extended_end(const MoveDef& m) {
             iv.name == "SelfUninterrupt")
             best = std::max(best, iv.end);
     }
-    if (m.end_frame > 0) best = std::min(best, m.end_frame);
     return best;
+}
+
+// JS `jc.i0` (L698): the animation sub-frame index of logical frame `a` —
+// `(a-qx+1)*(XJ+1)+1` with qx=FirstFrame, XJ=MidFrames. `M6a` (L698) is its
+// inverse; `Fl`/`p0(!0)`/`zD(!0)` live in this sub-frame space.
+int i0(const MoveDef& m, int a) {
+    return (a - m.first_frame + 1) * (m.mid_frames + 1) + 1;
+}
+// JS `jc.zD(!0)` (L698): the Uninterrupt end (already `Lj`-capped in `zD(!1)`)
+// mapped to animation sub-frames.
+int uninterrupt_end_full(const MoveDef& m) {
+    return i0(m, uninterrupt_end(m) + 1) - 1;
+}
+// JS `jc.p0(!0)` (L697): the Attack end (NO `Lj` cap in `p0`) mapped to
+// animation sub-frames.
+int attack_end_full(const MoveDef& m) {
+    return i0(m, attack_end(m) + 1) - 1;
+}
+// JS `jc.vBa` (L697): `$I`/`Tea` — the raw max finish, or 0, mapped through
+// `i0(b+1)`. Used for `vBa(P.s$a())` (Strict) and `vBa(P.r$a())` (Extended).
+int vba_full(const MoveDef& m, int raw) {
+    return raw > 0 ? i0(m, raw + 1) : 0;
 }
 
 // JS `de.Ycb` (L620): `if(a.Pe){let b=a.Ua; if(b!=null&&a.ip()<=b.zD(!1))
@@ -162,6 +182,10 @@ void AiController::init(const std::string& weapon,
         // lists copied onto the tactic at parse.
         set_memory(tactic_->memory_strikes, tactic_->memory_round_factor);
         set_no_decision(tactic_->no_decision_intervals, tactic_->no_decision_moves);
+        // `<IgnoredEnemyAnimations>` / `<RandomizingEnemyAnimation>` (JS
+        // `P.Xoa` / `P.Vsa`), copied onto every tactic at parse.
+        set_ignored_enemy_animations(tactic_->ignored_enemy_animations);
+        set_randomizing_enemy_animation(tactic_->randomizing_enemy_animation);
     }
     moves_ = moves;
     // The `OO` weapon id (JS `P.dBa` L629-630): the weapon subtype, or the
@@ -224,7 +248,7 @@ void AiController::mq(const AiFightState& st) {
     }
     f.o1 = st.my_hp;               // absolute gd (NOT a ratio — see above)
     f.q1 = st.enemy_hp;            // absolute gd
-    f.xY = static_cast<float>(st.enemy_move_frame);
+    f.xY = static_cast<float>(st.enemy_playhead);
     f.cl = static_cast<float>(st.magic_bullets);
     f.k2 = static_cast<float>(st.ranged);
     f.pz = static_cast<float>(st.enemy_max_part_frames);
@@ -839,6 +863,32 @@ void AiController::qja(const AiFightState& st) {
     x_ = gfa_draw();  // JS `jwb` (L596-597): `this.$x=this.gfa(this.Ol)`
 }
 
+// JS `de.mcb` (L596-597): `let b=0,c=P.S9a();for(;b<c.length;)if(a.$k(c[b++]))
+// return!0;return!1` — `jc.$k(n)` is `n == this.name || this.d2(n)`, where
+// `d2` scans the move's inherited tags (`xl`). Read by `jwb` (L596-597) to
+// gate the `$x` ResponseDelay cache.
+bool AiController::mcb(const MoveDef& m) const {
+    for (const std::string& n : ignored_enemy_anims_) {
+        if (n.empty()) continue;
+        if (m.name == n || m.template_tags.count(n) > 0) return true;
+    }
+    return false;
+}
+
+// JS `ia` L593: `for(d=P.y$a();c<d.length;)if(d[c++].children.includes(b))`
+// — the move is one of the resolved `<RandomizingEnemyAnimation>` group's
+// children (the port resolves the group by name at decision time).
+bool AiController::in_randomizing_group(const MoveDef& m) const {
+    if (moves_ == nullptr) return false;
+    for (const std::string& n : randomizing_enemy_anims_) {
+        if (n.empty()) continue;
+        for (const MoveDef* c : resolve_candidate(n, *moves_)) {
+            if (c == &m) return true;
+        }
+    }
+    return false;
+}
+
 // JS `Pqb` (L604-608): the core decision. Returns the candidate count.
 int AiController::pqb(const AiFightState& st) {
     wb_.clear();
@@ -850,7 +900,7 @@ int AiController::pqb(const AiFightState& st) {
     // Probe snapshot (`--ai-probe` / the fight `[ai]` log): reset and record
     // the operands of the JS gate (L604) so the fired branch is auditable.
     dbg_ = AiDebug{};
-    dbg_.enemy_frame = st.enemy_move_frame;
+    dbg_.enemy_frame = st.enemy_playhead;
     dbg_.x = x_;
     dbg_.aqa = aqa_;
     if (st.enemy_move != nullptr) {
@@ -923,7 +973,7 @@ int AiController::pqb(const AiFightState& st) {
     //   `Ua`), `Fl` the opponent's offset frame.
     // `$x` is the CACHED ResponseDelay from `jwb` (NOT re-rolled per pass).
     // `ycb`/`lbb` test the OPPONENT's current move.
-    const int enemy_frame = st.enemy_move_frame;
+    const int enemy_frame = st.enemy_playhead;  // JS `b.kJ()`
     dbg_.gate = enemy_frame > x_ && !ycb(st);
     dbg_.ycb = ycb(st);
     dbg_.lbb = lbb(st);
@@ -961,21 +1011,19 @@ int AiController::pqb(const AiFightState& st) {
                         // JS `Pqb` (L605): `b=P.nCa();var d=a.da.Ua;c=0;
                         // d!=null&&a.da.Pe&&(c=d.zD(!0)-this.Fl+1)` — the wait
                         // requires the ENEMY PLAYING (`a.da.Pe`) as well as a
-                        // non-null move. NOTE: the `zD(!0)` conversion
-                        // (`i0(b+1)-1`) is BLOCKED — the port has no per-move
-                        // `qx`/`XJ` (see the OPEN `Fl` kJ-vs-Xh note in `mq`),
-                        // so this reads the raw `zD(!1)` end.
+                        // non-null move, and uses the `zD(!0)` sub-frame value
+                        // (`i0(b+1)-1`).
                         int c = 0;
                         if (st.enemy_move != nullptr && st.enemy_playing) {
-                            c = uninterrupt_end(*st.enemy_move) - Fl_ + 1;
+                            c = uninterrupt_end_full(*st.enemy_move) - Fl_ + 1;
                         }
                         if (moves_ != nullptr) {
                             for (const std::string& grp : tactic_->cautious_movements) {
                                 for (const MoveDef* m : resolve_candidate(grp, *moves_)) {
                                     int g = c;
-                                    const int tea = extended_end(*m);
+                                    const int tea = vba_full(*m, extended_end(*m));
                                     if (g > tea) g = tea;
-                                    const int se = strict_end(*m);
+                                    const int se = vba_full(*m, strict_end(*m));
                                     if (se > g) g = se;
                                     wb_.push_back({m->name, g});
                                 }
@@ -1124,22 +1172,26 @@ std::string AiController::update(const AiFightState& st) {
     // JS `de.ia` (L592): `b=a.da` (a = the ENEMY) -> `Fl = b.kJ()+b.Q_+
     // j0(Uu)` = the ENEMY's animation frame; `q7 = this.Ji.kJ()+...` = MY
     // animation frame.
-    Fl_ = st.enemy_move_frame;
-    q7_ = st.move_frame;
+    Fl_ = st.enemy_playhead;  // `kJ()` (`lq` == `Xh`) + `Q_` (== 0 in the shipped JS)
+    q7_ = st.move_playhead;
 
     // JS `de.jwb` (L596-597), invoked from `wd.mwb` (L527) when the ENEMY
     // STARTS a move: `var b=a.da,c=b.Ua; if(b.Pe&&c!=null){...this.QJa(a);
     // if(!this.mcb(c)){...this.$x=this.gfa(this.Ol)}}`. The port detects the
     // move start by the enemy anim name; it must ALSO require the enemy to be
     // PLAYING with a move (`b.Pe && c!=null`) — a hit reaction (`Pe=!1`,
-    // `Ua` possibly still set) must draw NOTHING. The `mcb(c)` `$x` gate is
-    // vacuous in this build: `<IgnoredEnemyAnimations>` ships EMPTY
-    // (commented out in tacticSettings.xml), so `mcb` is always false.
+    // `Ua` possibly still set) must draw NOTHING. `mcb(c)` gates the `$x`
+    // ResponseDelay cache (see `mcb`).
     if (!qja_done_ || st.enemy_anim != last_enemy_anim_) {
         last_enemy_anim_ = st.enemy_anim;
         if (st.enemy_playing && st.enemy_move != nullptr) {
             qja(st);
             qja_done_ = true;
+            // JS `jwb` L596-597: `...this.QJa(a); if(!this.mcb(c)){...
+            // this.$x=this.gfa(this.Ol)}` — the ResponseDelay cache is
+            // (re)rolled ONLY for moves NOT in `<IgnoredEnemyAnimations>`;
+            // otherwise `$x` keeps its previous value.
+            if (!mcb(*st.enemy_move)) x_ = gfa_draw();
         }
     }
 
@@ -1150,20 +1202,29 @@ std::string AiController::update(const AiFightState& st) {
     // `d=b.Ua` (the opponent's move); `e=c.$I()` (my Strict end).
     if (mW_) {
         mW_ = false;
-        if (st.current_move != nullptr && st.enemy_move != nullptr) {
-            const int eI = strict_end(*st.current_move);
+        // JS `ia` L592: `this.mW&&(this.mW=!1,this.Ji.Pe&&b.Pe)` — `mW` is
+        // ALWAYS cleared, but the recompute requires BOTH fighters to be
+        // PLAYING (`Ji.Pe` = mine, `b.Pe` = the enemy's).
+        if (st.playing && st.enemy_playing && st.current_move != nullptr &&
+            st.enemy_move != nullptr) {
+            const int eI = vba_full(*st.current_move, strict_end(*st.current_move));
             switch (oC_) {
                 case 1: {
-                    int d = attack_end(*st.enemy_move) - Fl_ + 1;
-                    const int c = extended_end(*st.current_move);
+                    // JS: `d=this.eh=d.p0(!0)-this.Fl+1` — the `i0` sub-frame
+                    // conversion of the Attack end.
+                    int d = attack_end_full(*st.enemy_move) - Fl_ + 1;
+                    const int c =
+                        vba_full(*st.current_move, extended_end(*st.current_move));
                     eh_ = d > c ? c : d;
                     if (eI > eh_) eh_ = eI;
                     --eh_;
                     break;
                 }
                 case 2: {
-                    int d = uninterrupt_end(*st.enemy_move) - Fl_ + 1;
-                    const int c = extended_end(*st.current_move);
+                    // JS: `d=this.eh=d.zD(!0)-this.Fl+1`.
+                    int d = uninterrupt_end_full(*st.enemy_move) - Fl_ + 1;
+                    const int c =
+                        vba_full(*st.current_move, extended_end(*st.current_move));
                     eh_ = d > c ? c : d;
                     if (eI > eh_) eh_ = eI;
                     --eh_;
@@ -1184,6 +1245,15 @@ std::string AiController::update(const AiFightState& st) {
     if (eh_ > 1) {
         --eh_;
         return "";
+    }
+
+    // JS `ia` L593: `b=b.Ua; if(b!=null){e=!1;c=0;for(d=P.y$a();c<d.length;)
+    // if(d[c++].children.includes(b)){e=!0;break} e&&this.QJa(a)}` — while the
+    // ENEMY's move is a child of a `<RandomizingEnemyAnimation>` group the JS
+    // REBUILDS the QJa roll cache EVERY frame (6 `Da.jf()` + `Mu`/`lN`), on
+    // top of the `jwb` rebuild at the move start.
+    if (st.enemy_move != nullptr && in_randomizing_group(*st.enemy_move)) {
+        qja(st);
     }
 
     // JS `ia` L593: `this.csb(); this.Zqb();` — roll every base

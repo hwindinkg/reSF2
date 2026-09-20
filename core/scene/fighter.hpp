@@ -365,6 +365,10 @@ public:
     // --- state accessors (Phase 3.2b) -------------------------------------
     const MoveDef* current_move() const { return current_move_; }
     int move_frame() const { return move_frame_; }
+    // The raw playback counter (JS `Te.Xh`) — the quantity the JS `kJ()`
+    // returns (`kJ()` reads `lq`, which the `Te.ia` tick advances in lockstep
+    // with `Xh`). `Fl`/`q7` are built from it.
+    int playhead() const { return playhead_; }
     // Per-clip-start serial: JS `Te.Skb` -> `x3` -> `Fu.hob()` clears the
     // `Cl` one-shot at EVERY move start, including a repeat of the same
     // move (whose pointer is unchanged).

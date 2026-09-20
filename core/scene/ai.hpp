@@ -264,6 +264,13 @@ struct TacticDef {
     std::vector<std::string> cautious_movements;
     std::vector<std::string> evade_throw_dodges;
 
+    // `<IgnoredEnemyAnimations>` (JS `P.Xoa`=`P.S9a()`) and
+    // `<RandomizingEnemyAnimation>` (JS `P.Vsa`=`P.y$a()`) — GLOBAL lists
+    // copied onto every tactic like the NoDecision lists. Read by `mcb`
+    // (`jwb` L596-597) and the per-frame `QJa` redraw (`ia` L593).
+    std::vector<std::string> ignored_enemy_animations;
+    std::vector<std::string> randomizing_enemy_animation;
+
     // `<ConditionalDecisions>` (JS `P.Xsa`=`P.z$a()` / `P.tpa`=`P.y9a()`,
     // L628-629): the per-`<PlayerAnimation Name>` `<Reactions>` slots
     // (`P.cjb`) and the `<BotAnimation>` slots (`Hl`). Read by `k_a`/`Nwa`
@@ -306,6 +313,12 @@ struct AiGlobalLists {
     // `<ConditionalDecisions>` (JS `P.Xsa`/`P.tpa`).
     std::vector<std::pair<std::string, std::vector<AiAnimSlot>>> conditional_player;
     std::vector<AiAnimSlot> conditional_bot;
+    // `<IgnoredEnemyAnimations>` (JS `P.Xoa` = `P.S9a()`, filled by `P.PE`
+    // L622) — read by `mcb` (`jwb` L596-597).
+    std::vector<std::string> ignored_enemy_animations;
+    // `<RandomizingEnemyAnimation>` (JS `P.Vsa` = `P.y$a()`, filled by
+    // `P.yK` L622) — read by the per-frame `QJa` redraw (`ia` L593).
+    std::vector<std::string> randomizing_enemy_animation;
 };
 
 // Parses tactic_settings.xml into the named TacticDefs (JS `P.hkb` L629 +
@@ -346,6 +359,12 @@ struct AiFightState {
     // AI reads `a.da.Ua` = the enemy's current animation).
     const MoveDef* enemy_move = nullptr;
     int enemy_move_frame = 0;
+    // The raw playback counters (`Te.Xh`): JS `kJ()` returns `lq`, which the
+    // `Te.ia` tick advances in lockstep with `Xh`. `Fl = kJ()+Q_+j0(Uu)` and
+    // `q7 = kJ()+Q_` are built from them (`Q_` is the shipped-JS `(qx-qx)*
+    // (XJ+1)` == 0).
+    int move_playhead = 0;    // MY `Te.Xh`
+    int enemy_playhead = 0;   // the ENEMY's `Te.Xh`
     // MY OWN move list (JS `this.model.me`, the fighter's `hb`): `de.V1`
     // (L601-602) rejects any candidate not in it. Without this the slots
     // resolve weapon-mismatched moves (Spear/Staff/Tonfa for a Knives boss)
@@ -440,6 +459,14 @@ public:
     // gate (L598-599). Empty vectors fall back to the shipped values.
     void set_no_decision(std::vector<std::string> intervals,
                          std::vector<std::string> moves);
+    // `<IgnoredEnemyAnimations>` (JS `P.Xoa`) / `<RandomizingEnemyAnimation>`
+    // (JS `P.Vsa`) — the two global animation-name lists.
+    void set_ignored_enemy_animations(std::vector<std::string> names) {
+        ignored_enemy_anims_ = std::move(names);
+    }
+    void set_randomizing_enemy_animation(std::vector<std::string> names) {
+        randomizing_enemy_anims_ = std::move(names);
+    }
     // The tactic's `<Memory Strikes="f6" RoundFactor="Q4"/>` (`Md.KW`,
     // `Iu` L327938). Defaults are 10/10 (the `Iu` ctor).
     void set_memory(double half_life, double round_factor) {
@@ -563,6 +590,10 @@ private:
     std::vector<std::string> no_decision_intervals_{"Uninterrupt",
                                                     "SemiUninterrupt"};
     std::vector<std::string> no_decision_moves_{"Physical"};
+    // `<IgnoredEnemyAnimations>` (JS `P.Xoa`) / `<RandomizingEnemyAnimation>`
+    // (JS `P.Vsa`); empty in the shipped settings.
+    std::vector<std::string> ignored_enemy_anims_;
+    std::vector<std::string> randomizing_enemy_anims_;
     // `<Memory Strikes>` half-life + `<Memory RoundFactor>` (JS `Iu`).
     double memory_half_life_ = 10.0;
     double memory_round_factor_ = 10.0;
@@ -581,6 +612,13 @@ private:
     // Whether the fighter is "watching" (JS `hcb` L598-599): no active
     // NoDecision intervals/moves and not in a NoDecision enemy anim.
     bool hcb(const AiFightState& st) const;
+    // JS `de.mcb` (L596-597): true when any `<IgnoredEnemyAnimations>` name is
+    // carried by the move (JS `jc.$k` = the move's own name or an inherited
+    // template tag).
+    bool mcb(const MoveDef& m) const;
+    // JS `ia` L593: the move is a child of a `<RandomizingEnemyAnimation>`
+    // group (`P.y$a()`), i.e. one of the group's moves.
+    bool in_randomizing_group(const MoveDef& m) const;
     // The unconditional-move check (JS `Pqb` L604): returns >0 when a
     // move must start this frame.
     int pqb(const AiFightState& st);

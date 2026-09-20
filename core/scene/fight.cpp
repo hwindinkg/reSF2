@@ -4739,6 +4739,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.enemy_anim = foe.fighter.current_move() ? foe.fighter.current_move()->name : "";
         st.enemy_move = foe.fighter.current_move();
         st.enemy_move_frame = foe.fighter.move_frame();
+        // JS `kJ()` (`Te.lq`, advanced in lockstep with `Te.Xh`): the raw
+        // playback counters feeding `Fl`/`q7` (`de.ia` L592).
+        st.move_playhead = me.fighter.playhead();
+        st.enemy_playhead = foe.fighter.playhead();
         for (const std::string& n : me.fighter.active_intervals()) {
             st.my_intervals.push_back({n, 0});
         }
