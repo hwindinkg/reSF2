@@ -237,8 +237,18 @@ void Fighter::build_move_list_locks(
         // Or-group locks (l.or_) pass when ANY member passes — the parser
         // flattens the Or group into one lock per member item with or_=true.
         bool all_pass = true;
-        bool or_group = false;
-        bool any_or = false;
+        // Locks flattened from ONE `<Operator>` form ONE group (JS: a single
+        // Or node); the group passes when ANY member passes. SEPARATE
+        // operators are separate groups, AND-combined (`Lock::group`). The
+        // old single `or_group`/`any_or` pair conflated them: the `StanceLeft`
+        // template carries `Or{Screen ShopWeapon, Screen Profile, Screen
+        // Fight}` and `KnucklesStartStance-Left` adds `Or{Item
+        // Weapon/Knuckles, ...}`; the passing `Screen="Fight"` set `any_or`,
+        // so the item requirement was satisfied and EVERY weapon's
+        // `StartStance*` entered `hb_` — the highest-priority one (Knuckles,
+        // Priority 12) then played regardless of the equipped weapon (the
+        // reported wrong intro). Per-group evaluation fixes it.
+        std::map<int, bool> groups;  // group id -> a member has passed
         for (const Lock& l : m.locks) {
             if (l.never) {
                 // An unmodelled lock kind (`<Perk Name=..>`, `<Screen
@@ -253,30 +263,34 @@ void Fighter::build_move_list_locks(
                 // moves.xml L546), so no throw could ever be selected — the
                 // throw-gate bug. Every other screen name stays fail-closed
                 // (the ShopTryOn moves never belong in a fight list).
-                if (l.screen == "Fight") {
-                    if (l.or_) {
-                        or_group = true;
-                        any_or = true;
-                    }
+                const bool screen_pass = (l.screen == "Fight");
+                if (l.group >= 0) {
+                    if (screen_pass) groups[l.group] = true;
+                    else groups.emplace(l.group, false);
                     continue;
                 }
-                if (l.or_) {
-                    or_group = true;
-                    continue;
-                }
+                if (screen_pass) continue;
                 all_pass = false;
                 break;
             }
-            if (l.or_) {
-                or_group = true;
-                if (owned_item(l)) any_or = true;
-            } else if (!owned_item(l)) {
+            const bool pass = owned_item(l);
+            if (l.group >= 0) {
+                if (pass) groups[l.group] = true;
+                else groups.emplace(l.group, false);
+            } else if (!pass) {
                 all_pass = false;
                 break;
             }
         }
         if (!all_pass) continue;
-        if (or_group && !any_or) continue;
+        bool groups_ok = true;
+        for (const auto& g : groups) {
+            if (!g.second) {
+                groups_ok = false;
+                break;
+            }
+        }
+        if (!groups_ok) continue;
         hb_.push_back(&m);
     }
     // P4a: JS `ra.Lk` document order (`profile_order`), NOT priority desc —

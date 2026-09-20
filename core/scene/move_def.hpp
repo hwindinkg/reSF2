@@ -180,6 +180,14 @@ struct Lock {
     // `TryOn` preview (`Fighter::shop_tryon_move`) is the one caller that
     // evaluates it. Empty for the other unmodelled kinds (`<Perk>`).
     std::string screen;
+    // The `<Operator>` block this lock was flattened from (JS: one Or node).
+    // Two SEPARATE operators (e.g. a template's `<Screen>` group and the
+    // move's own `<Item>` group) are separate groups AND-combined; the old
+    // single flat `or_` flag conflated them, so a passing `<Screen
+    // Name="Fight"/>` satisfied the move's `<Item>` requirement and every
+    // weapon's `StartStance*` entered `hb_` (the wrong intro). -1 = a
+    // top-level lock, held to the plain AND.
+    int group = -1;
 };
 
 // One owned item — the three fields the JS lock test `Hm.he` (L758)

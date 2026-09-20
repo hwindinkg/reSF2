@@ -743,8 +743,8 @@ private:
     WarriorSave seen_;
     // Buy confirmation (display-only): last bought item + the screen time
     // until which the confirmation line shows.
-    std::string confirm_;
-    float confirm_until_ = 0.0f;
+    // (The old green `confirm_`/`confirm_until_` post-purchase toast was an
+    // invention: JS `Pa.iwa` L1228 renders no caption on success. Removed.)
     // --- `Pi` purchase panel (`Oa.Fhb` L2300 unowned branch) --------------
     // `Oa.Fhb` L2300: unowned -> `this.Ad.qr.addListener(this.yS);
     // this.Ex(a,7); this.Ad.aa(L.K.sk.Bm); this.sab()`, with `this.Ad=new Pi`

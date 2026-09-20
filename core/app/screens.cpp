@@ -10031,8 +10031,6 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
         bw.timers[bit.name] = WarriorSave::wall_now() + bit.delivery_sec;
         app.save().save(bw);
         seen_ = bw;
-        confirm_ = "ORDERED " + item_display_name(app, bit) + "!";
-        confirm_until_ = time() + 2.5f;
         std::fprintf(stdout,
                      "[shop] Pi confirm Pa.iwa (Ec) -> ORDERED %s price=%d -> "
                      "arrives in %ds (no equip)\n",
@@ -10053,8 +10051,6 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     bw.items.push_back(oi);
     app.save().save(bw);
     seen_ = bw;
-    confirm_ = "BOUGHT " + item_display_name(app, bit) + "!";
-    confirm_until_ = time() + 2.5f;
     std::fprintf(stdout,
                  "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%d -> money %d"
                  " + EQUIPPED ($o)%s\n",
@@ -10431,8 +10427,6 @@ void ShopScreen::update_impl(float dt) {
             w2.timers.erase(kv.first);
             app().save().save(w2);
             seen_ = w2;
-            confirm_ = "CLAIMED " + loc(app(), kv.first, kv.first) + "!";
-            confirm_until_ = time() + 2.5f;
             std::fprintf(stdout, "[shop] delivery claimed: %s (Vxa notify)\n",
                          kv.first.c_str());
             std::fflush(stdout);
@@ -10583,9 +10577,6 @@ void ShopScreen::update_impl(float dt) {
                     shop_apply_slot(w, it.type, new_slot);
                     app().save().save(w);
                     seen_ = w;
-                    confirm_ = (was_equipped ? "UNEQUIPPED " : "EQUIPPED ") +
-                               item_display_name(app(), it) + "!";
-                    confirm_until_ = time() + 2.5f;
                     std::fprintf(stdout, "[shop] %s %s -> %s slot %s\n",
                                  was_equipped ? "Qxb UNEQUIP" : "$o EQUIP", it.name.c_str(),
                                  it.type.c_str(), new_slot.c_str());
@@ -10933,10 +10924,12 @@ void ShopScreen::render_impl(App& app) {
                       text, 0.7f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
         }
     }
-    if (!confirm_.empty() && time() <= confirm_until_) {
-        draw_ui_label(app, kViewW * 0.5f - 220.0f, 678.0f, 440.0f, 26.0f,
-                          confirm_, 1.0f, UiAlign::Center, 0.4f, 1.0f, 0.4f);
-    }
+    // JS `Pa.iwa` (L1228) renders NO caption after a successful buy — it
+    // commits money + `p.o.save()` + `Pa.Wz` (the QUEST_EVENT_PURCHASE
+    // dispatch) and nothing else; the ONLY badge it shows is `v.Bv(a,2)`,
+    // the "not enough money" NOTICE on the FAILURE branch. The port drew a
+    // green "BOUGHT …!" / "EQUIPPED …!" / "ORDERED …!" toast here — an
+    // invention (the reported green label). REMOVED.
     // `Pi` purchase panel (`Oa.Fhb` L2300 -> `Ex(a,7)`, L2301): while armed the
     // shop dims and the confirm prompt sits above the `M8` plate.
     if (buy_armed_ >= 0 && sel_it != nullptr) {

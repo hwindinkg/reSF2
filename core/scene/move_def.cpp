@@ -869,6 +869,10 @@ void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
         out.push_back(std::move(l));
     }
     for (pugi::xml_node op : locks.children("Operator")) {
+        // One `<Operator>` block = ONE group (JS: a single Or node). The id
+        // is taken from `out.size()` so it stays unique across the move's own
+        // and the inherited Template `<Locks>` blocks merged into this list.
+        const int group = static_cast<int>(out.size());
         for (pugi::xml_node item : op.children("Item")) {
             Lock l;
             if (pugi::xml_attribute t = item.attribute("Type")) l.type = t.value();
@@ -876,6 +880,7 @@ void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
             if (pugi::xml_attribute n = item.attribute("Name")) l.name = n.value();
             l.not_ = data::xml_attr_bool(item, "Not", false);
             l.or_ = true;
+            l.group = group;
             out.push_back(std::move(l));
         }
         // Fail closed on unmodelled Or members too (`Or{<Perk A>,
@@ -891,6 +896,7 @@ void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
             Lock l;
             l.or_ = true;
             l.never = true;
+            l.group = group;
             // `<Screen Name="..">` inside an Or group (`ShopOther` gates the
             // missile/ruby/free/pack screens): keep the name for the shop
             // TryOn resolver; the fight move list still fails it closed.
