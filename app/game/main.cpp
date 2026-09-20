@@ -3504,21 +3504,49 @@ int main(int argc, char** argv) {
         //    Re-park the boss at punch range right before each tap (the
         //    `--verify-place` throw technique: the AI drifts, and the move's
         //    Distance gate + the capsule overlap are measured at the tap).
+        //    A parked boss stays in its `*StartStanceIdle`, which inherits
+        //    the `<Stance>` template's Block interval (moves.xml L75-82), so
+        //    a tap then is always ABSORBED (`[hit] ... BLOCK`). The boss
+        //    only leaves the idle when its AI reaches the JS `Pqb` L606
+        //    `else` path — i.e. while the PLAYER is not inside its own
+        //    Uninterrupt window (`de.Ycb(b)` false, L604). So the probe taps
+        //    ONLY while the boss is outside its stance idle (a real window);
+        //    between windows it leaves the player idle, which is what lets
+        //    the boss's `$E` QuickAttack slots fire at all.
         const int kLogFrames = 150;
         int react_at = -1;
         int react_started = 0;
         std::string react_move;
         for (int f = 0; f < 1200; ++f) {
             glfwPollEvents();
-            if (react_at < 0 && f % 16 == 0) {
+            if (react_at < 0) {
                 const float px = fs->player_world_x();
                 const float ex = fs->enemy_world_x();
-                const float side = (ex >= px) ? 1.0f : -1.0f;
-                fs->place_fighters(px, px + side * 55.0f);
-                app.run_one_frame();
-                const int atk = ((f / 16) % 2 == 0) ? 9 : 10;  // Punch / Kick
-                fs->inject_game_key(atk, true);
-                fs->inject_game_key(atk, false);
+                // Keep the pair at punch range (the AI drifts).
+                if (std::fabs(ex - px) > 70.0f) {
+                    const float side = (ex >= px) ? 1.0f : -1.0f;
+                    fs->place_fighters(px, px + side * 55.0f);
+                }
+                // The boss is hittable only once it has left the blocking
+                // stance idle; the name carries the weapon prefix
+                // (`KnivesStartStanceIdle`), so match the suffix. The player
+                // may only START a move while it is itself idle, otherwise
+                // the tap restarts its move and the pair stays permanently
+                // committed — which would stop the boss's AI ever reaching
+                // the `Pqb` L606 `else` path again.
+                const std::string boss_move = fs->enemy_current_move();
+                const bool boss_hittable =
+                    !boss_move.empty() &&
+                    boss_move.find("StartStanceIdle") == std::string::npos;
+                const std::string my_move = fs->player_current_move();
+                const bool player_idle =
+                    my_move.empty() ||
+                    my_move.find("StartStanceIdle") != std::string::npos;
+                if (boss_hittable && player_idle) {
+                    const int atk = ((f / 8) % 2 == 0) ? 9 : 10;  // Punch / Kick
+                    fs->inject_game_key(atk, true);
+                    fs->inject_game_key(atk, false);
+                }
             }
             app.run_one_frame();
             if (react_at < 0 && fs->enemy_ragdoll_active()) {
