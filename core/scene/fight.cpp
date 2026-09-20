@@ -4358,6 +4358,13 @@ FightController::BattlePrize FightController::prize(int base_coins) const {
     p.coins_total = static_cast<int>(kx.m6);
     p.coins_bonus = p.coins_total - static_cast<int>(prize_vk(base_coins, 0));
     p.gems_bonus = static_cast<int>(kx.mOa);
+    // The per-category `Fh.Kx` rows (JS `oc.P3/ep/Ui/DZ/Ub`): the Results
+    // breakdown shows each bonus, not the 0/1 flag or the combo count.
+    p.coins_perfect = static_cast<int>(kx.p3);
+    p.coins_first = static_cast<int>(kx.ep);
+    p.coins_combo = static_cast<int>(kx.ui);
+    p.coins_style = static_cast<int>(kx.dz);
+    p.coins_shock = static_cast<int>(kx.ub);
     return p;
 }
 

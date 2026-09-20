@@ -1492,6 +1492,15 @@ public:
         int coins_bonus = 0;       // m6 minus base (display)
         int coins_total = 0;       // m6: what the player receives
         int gems_bonus = 0;        // mOa (no fight source evidenced)
+        // Per-category bonus COINS (`Fh.lXa` L2054-2056 `oc.P3/ep/Ui/DZ/Ub`).
+        // The `goldPerfect`/`goldFirstStrike`/`goldCombo`/`goldShock`/style
+        // RESULT rows show these values; the row's `{0}` suffix is the COUNT
+        // (`d6`/`c6`/`jU`/`e6`), never the value (see screens.cpp ResultsScreen).
+        int coins_perfect = 0;     // oc.P3
+        int coins_first = 0;       // oc.ep
+        int coins_combo = 0;       // oc.Ui
+        int coins_style = 0;       // oc.DZ
+        int coins_shock = 0;       // oc.Ub
     };
     BattlePrize prize(int base_coins) const;
     int phase() const { return static_cast<int>(phase_); }

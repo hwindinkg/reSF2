@@ -91,6 +91,14 @@ struct PendingBattle {
     int prize_shocks = 0;
     bool prize_perfect = false;
     bool prize_first = false;
+    // Per-category bonus COINS (`Fh.lXa` `oc.P3/ep/Ui/DZ/Ub`, L2054-2056): the
+    // Results rows show these values; `prize_combo`/`prize_shocks` above are
+    // the counts (`jU`/`e6`) that label them (`PERFECT ×{0}`).
+    int prize_perfect_coins = 0;
+    int prize_first_coins = 0;
+    int prize_combo_coins = 0;
+    int prize_style_coins = 0;
+    int prize_shock_coins = 0;
     // The fight outcome (set by the FightScreen at battle end).
     bool has_result = false;
     bool player_won = false;

@@ -658,6 +658,20 @@ private:
     int prize_shocks_ = 0;
     bool prize_perfect_ = false;
     bool prize_first_ = false;
+    // Per-category bonus COINS (`Fh.lXa` `oc.P3/ep/Ui/DZ/Ub`): the Results
+    // rows show these; `prize_combo_`/`prize_shocks_` are the counts (`jU`/
+    // `e6`) that label them (`PERFECT ×{0}`).
+    int prize_perfect_coins_ = 0;
+    int prize_first_coins_ = 0;
+    int prize_combo_coins_ = 0;
+    int prize_style_coins_ = 0;
+    int prize_shock_coins_ = 0;
+    // JS `Lr`/`Or` reveal clock (L2057-2078): row `i` slides in (`Or.aa`
+    // case 0, `ed(.5)`) then counts up (case 1), pipelined one slide behind —
+    // the list settles at `0.5*(rows+1)` s and the OK plate only appears then
+    // (`Lr.XMa`/`bza` L2071-2072). `pc.tB` = 400 ms/phase (`Or.aa`).
+    float reveal_t_ = 0.0f;
+    bool reveal_done_ = false;
 };
 
 // The shop — native Shop screen (screen 4, JS `Oa` g="468").

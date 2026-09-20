@@ -8503,6 +8503,13 @@ void FightScreen::update_impl(float dt) {
             pb.prize_shocks = prize.shocks;
             pb.prize_perfect = prize.perfect;
             pb.prize_first = prize.first_strike;
+            // The per-category bonus coins (`Fh.lXa` `oc.P3/ep/Ui/DZ/Ub`) the
+            // Results rows display (`Lr.ZMa` L2078-2079 `vI` calls).
+            pb.prize_perfect_coins = prize.coins_perfect;
+            pb.prize_first_coins = prize.coins_first;
+            pb.prize_combo_coins = prize.coins_combo;
+            pb.prize_style_coins = prize.coins_style;
+            pb.prize_shock_coins = prize.coins_shock;
             if (player_won) pb.reward_money = prize.coins_total;
         }
         std::fflush(stdout);
@@ -9260,12 +9267,22 @@ int ResultsScreen::exp_for_level(int level) {
 }
 
 void ResultsScreen::update_impl(float dt) {
-    (void)dt;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
-    // D3: `Wb` is a GLOBAL overlay — a dialog queued on ANY screen blocks that
-    // screen's input (`Wb.NOa` L927; the JS dialog node is parented to the
-    // ACTIVE screen's content root).
-    if (quest_modal_consume(app())) return;
+    // JS `Lr`/`Or` reveal clock (L2057-2078): row `i` slides over `[.5i,
+    // .5i+.5]` then counts over `[.5i+.5, .5i+1]`; the list settles at
+    // `0.5*(rows+1)` s (`Or.aa` `this.ed(.5)`).
+    if (!reveal_done_) {
+        reveal_t_ += dt;
+        if (reveal_t_ >= 0.5f * 8.0f) {  // 7 rows -> `0.5*(7+1)` = `Lr.XMa`
+            reveal_done_ = true;
+            std::fprintf(stdout, "[result] reveal done -> OK plate shown\n");
+            std::fflush(stdout);
+        }
+    }
+    // The quest modal is deliberately NOT consumed here: the
+    // `FirstGuardBeaten` chain (`quests.xml` L260-282) fires on `FightEnd`
+    // with `Place="Map"` (JS `Gib` L517394 `be.ifa(...)`), so its dialogs own
+    // the MAP after the OK press (`v.qxa` L1213) — never the Results overlay.
     if (!applied_) {
         applied_ = true;
         WarriorSave w;
@@ -9317,6 +9334,11 @@ void ResultsScreen::update_impl(float dt) {
                 prize_shocks_ = pb.prize_shocks;
                 prize_perfect_ = pb.prize_perfect;
                 prize_first_ = pb.prize_first;
+                prize_perfect_coins_ = pb.prize_perfect_coins;
+                prize_first_coins_ = pb.prize_first_coins;
+                prize_combo_coins_ = pb.prize_combo_coins;
+                prize_style_coins_ = pb.prize_style_coins;
+                prize_shock_coins_ = pb.prize_shock_coins;
             }
             // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds
             // (`v.FR` = character_progress.xml `<Threshold Level Exp>`).
@@ -9464,39 +9486,79 @@ void ResultsScreen::render_impl(App& app) {
     struct KkRow {
         const char* key;
         const char* fallback;
-        int value;
-        bool mult;
+        int value;      // the `Fh.Kx` bonus COIN value (`oc.P3/ep/Ui/DZ/Ub`)
+        int count;      // the `{0}` suffix (the row multiplier `d6`/`c6`/`jU`/`e6`)
+        bool has_count;
         bool star;
     };
     const KkRow kk_rows[7] = {
-        {"goldPrize", "PRIZE", money_reward_, false, false},
-        {"goldPerfect", "PERFECT", prize_perfect_ ? 1 : 0, true, false},
-        {"goldFirstStrike", "FIRST STRIKE", prize_first_ ? 1 : 0, true, false},
-        {"goldCombo", "MAX COMBO", prize_combo_, true, false},
-        {"goldShock", "SHOCK", prize_shocks_, true, false},
-        {"goldPassiveStyle", "PASSIVE STYLE", 0, false, false},
-        {"", "", 0, false, true},  // star row (`v1a`, L2078)
+        {"goldPrize", "PRIZE", prize_base_, 0, false, false},
+        {"goldPerfect", "PERFECT x{0}", prize_perfect_coins_,
+         prize_perfect_ ? 1 : 0, true, false},
+        {"goldFirstStrike", "FIRST STRIKE x{0}", prize_first_coins_,
+         prize_first_ ? 1 : 0, true, false},
+        {"goldCombo", "MAX COMBO x{0}", prize_combo_coins_, prize_combo_, true,
+         false},
+        {"goldShock", "SHOCK x{0}", prize_shock_coins_, prize_shocks_, true, false},
+        {"goldTurtleStyle", "PASSIVE STYLE", prize_style_coins_, 0, false, false},
+        // Star row (`Pr`/`v1a`, L2078): `Pr(Math.trunc(Hi.ap), m6)` — the exp
+        // counter beside the star, the total money beside the gold.
+        {"", "", exp_reward_, 0, false, true},
     };
     constexpr float kKkRowX = 420.0f;    // label left edge
     constexpr float kKkCoinX = 822.0f;   // gold coin centre
     constexpr float kKkValX = 838.0f;    // value left edge (cyan)
     constexpr float kKkRowY0 = 155.0f;
     constexpr float kKkRowStep = 58.0f;
+    // `Lr.ZMa` (L2078): the non-star rows start at dialog x -500; the reveal
+    // ends at `Or.y_ = (750-(pc.tB+pc.oM))/2`; `pc.oM` is 40/80/120 by the
+    // total money `oc.m6` (`Lr` ctor L2059).
+    const float kk_oM =
+        money_reward_ > 100000 ? 120.0f : (money_reward_ > 10000 ? 80.0f : 40.0f);
+    const float row_to = px + (750.0f - (400.0f + kk_oM)) * 0.5f;
+    const float row_from = px - 500.0f;
+    constexpr float kPhase = 0.5f;  // `Or.aa` `this.ed(.5)`
+    auto cl01 = [](float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); };
+    auto with_count = [](std::string s, int n) {
+        const std::string p = "{0}";
+        const std::size_t at = s.find(p);
+        if (at != std::string::npos) s.replace(at, p.size(), std::to_string(n));
+        return s;
+    };
     for (int i = 0; i < 7; ++i) {
         const KkRow& r = kk_rows[i];
+        const float slide = cl01((reveal_t_ - kPhase * static_cast<float>(i)) / kPhase);
+        const float count =
+            cl01((reveal_t_ - kPhase * static_cast<float>(i + 1)) / kPhase);
+        if (slide <= 0.0f) continue;  // still off-panel (`ZMa` `C(-500)`)
+        const float from = r.star ? px : row_from;  // only rows 0..n-2 set -500
+        const float rx = from + (row_to - from) * slide;
         const float ry = kKkRowY0 + static_cast<float>(i) * kKkRowStep;
+        const int shown = static_cast<int>(static_cast<float>(r.value) * count + 0.5f);
+        const float coin_dx = kKkCoinX - kKkRowX;
+        const float val_dx = kKkValX - kKkRowX;
         if (r.star) {
-            (void)try_draw_atlas_button(app, "star", kKkRowX + 26.0f, ry, 52.0f, 48.0f,
-                                        1.0f);
-        } else {
-            std::string lab = loc(app, r.key, r.fallback);
-            if (r.mult) lab += " x" + std::to_string(r.value);
-            draw_ui_label(app, kKkRowX, ry - 16.0f, 400.0f, 32.0f, lab, 0.95f,
-                          UiAlign::Left, 0.94f, 0.89f, 0.72f);
-            (void)try_draw_atlas_button(app, "gold", kKkCoinX, ry, 48.0f, 48.0f, 1.0f);
+            (void)try_draw_atlas_button(app, "star", rx + 26.0f, ry, 52.0f, 48.0f,
+                                        slide);
+            draw_ui_label(app, rx + 60.0f, ry - 16.0f, 120.0f, 32.0f,
+                          std::to_string(shown), 0.95f, UiAlign::Left, 0.31f * slide,
+                          0.79f * slide, 0.84f * slide);
+            (void)try_draw_atlas_button(app, "gold", rx + coin_dx, ry, 48.0f, 48.0f,
+                                        slide);
+            draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
+                          std::to_string(money_reward_), 0.95f, UiAlign::Left,
+                          0.31f * slide, 0.79f * slide, 0.84f * slide);
+            continue;
         }
-        draw_ui_label(app, kKkValX, ry - 16.0f, 60.0f, 32.0f, std::to_string(r.value),
-                      0.95f, UiAlign::Left, 0.31f, 0.79f, 0.84f);
+        std::string lab = loc(app, r.key, r.fallback);
+        if (r.has_count) lab = with_count(std::move(lab), r.count);
+        draw_ui_label(app, rx, ry - 16.0f, 400.0f, 32.0f, lab, 0.95f, UiAlign::Left,
+                      0.94f * slide, 0.89f * slide, 0.72f * slide);
+        (void)try_draw_atlas_button(app, "gold", rx + coin_dx, ry, 48.0f, 48.0f,
+                                    slide);
+        draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
+                      std::to_string(shown), 0.95f, UiAlign::Left, 0.31f * slide,
+                      0.79f * slide, 0.84f * slide);
     }
     if (!quest_toast_.empty()) {
         draw_ui_label(app, kViewW * 0.5f - 300.0f, kViewH - 96.0f, 600.0f, 28.0f,
@@ -9507,7 +9569,10 @@ void ResultsScreen::render_impl(App& app) {
     // FRAME: "EButtonWhite" -> `btnWhite` of `ui/sliced.json`. There is no
     // `EButtonBeige` FRAME (the style keys are `Bb` class keys) — the old
     // literal always missed the atlas and fell through to the flat plate.
-    {
+    // OK plate (`Lr.$g`, L2075): `$g.X(!1)` at build, shown only by `bza()`
+    // once the last row lands (`Lr.XMa` L2071-2072) — the port gates it on
+    // `reveal_done_`.
+    if (reveal_done_) {
         const float okx = kViewW * 0.5f;
         const float oky = 645.0f;
         if (!draw_bb_plate(app, "btnWhite", okx, oky, 230.0f, 52.0f, 1.0f)) {
@@ -9518,10 +9583,11 @@ void ResultsScreen::render_impl(App& app) {
                       UiAlign::Center, 0.20f, 0.15f, 0.08f);
     }
     std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
-    // D3: `Wb` is a GLOBAL overlay — `Wb.Xob` L927 appends the dialog node to
-    // the ACTIVE screen's content root, so a queued dialog draws on ANY screen
-    // (Results included), not just Dojo/Map/Shop/Fight.
-    draw_quest_modal(app, ren, app.screens().top() == this);
+    // The `FirstGuardBeaten` chain (`quests.xml` L260-282) is `Place="Map"`
+    // (JS `Gib` L517394): its dialogs own the MAP after the OK press
+    // (`v.qxa` L1213), never the Results overlay. The old unconditional
+    // `draw_quest_modal`/`quest_modal_consume` here was what played the story
+    // DURING the results instead of after OK.
 }
 
 // ---------------------------------------------------------------------------
