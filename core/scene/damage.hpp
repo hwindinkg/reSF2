@@ -16,6 +16,13 @@
 //   g *= a.Cea(attackerIsPlayer?1:2).bp // interval Vm multiplier (L395)
 //   g *= attacker.dta
 //   g *= attacker.so
+//
+// `a.Cea(side)` (JS `Ul.Cea` L395) returns the per-side `Vm` (L396: `k$` for
+// side 1, `FV` for side 2, default `FV`). `Vm.bp` defaults to 1 and is set by
+// the `ERuleDamageFactor` rule (`bn.Zk` L436: `c.bp = this.zUa`, where
+// `this.zUa = u.H(attributes.get("Factor"), 1)` from `bn.parse` L436508). The
+// native carries the resolved value on `IntervalDamage::side_bp` (set by
+// `FightController::apply_hit` from the per-round rule pass).
 // Application (Cgb): lethal check (hp < bR -> Zi = hp + 0.01, lethal),
 // invulnerable -> 0, HP -= Zi.
 
@@ -204,6 +211,12 @@ struct IntervalDamage {
     // `e.da.Ua.QX`, passed to `bCa` L510 and tested by `c2a` L820 for
     // "Fists"). Empty for non-attack intervals.
     std::vector<std::string> qx;
+    // `a.Cea(attackerIsPlayer?1:2).bp` (JS `Ul.Cea` L395 + `Vm.bp` L396).
+    // 1.0 unless an active `ERuleDamageFactor` (`bn.Zk` L436) set the interval's
+    // `Vm.bp` to its `Factor` for the attacker's side. Shipped `stages.xml`
+    // carries 54 such rules (9 `THROWS_ONLY` blocks: `Throw` Factor=1,
+    // `Punch`/`Kick`/`Weapon`/`Missile`/`Magic` Factor=0, ApplyTo=Player).
+    float side_bp = 1.0f;
 };
 
 // The damage computation result (JS `wd.Bb` = `pu` L558).

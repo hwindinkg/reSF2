@@ -185,24 +185,43 @@ struct BattleRecord {
         }
     }
 
-    // Fight win counts (JS `yc`, `<Fights>/<Fight>`; the `no` win count).
-    // The count attr name is OPEN (no <Fights> in the seed) — "Wins" used.
+    // Fight records (JS `yc` = `il`, L141476): `<Fights><Fight .../></Fights>`.
+    // The record's identity is the `IDS` attribute (`il.Atb` L143548:
+    // `this.yG = a; this.node.set("IDS", a)`; the ctor defaults a missing
+    // `IDS` to `"-1|-1|-1"`) and the win count is `CompletedCount`
+    // (`il.Fab` L143548: `this.no++; this.node.set("CompletedCount", K.T(no))`).
+    // `il` also reads/writes LossCount, EclipseCompletedCount,
+    // EclipseLossCount, StoryCount, CompletedTime, TimeLeft,
+    // RandomizeTimeLeft and Level; the port tracks only the win count.
     struct FightWins {
-        std::string name;
-        int wins = 0;
+        std::string name;  // `IDS` (the JS `il.yG`)
+        int wins = 0;      // `CompletedCount` (the JS `il.no`)
     };
     std::vector<FightWins> fights;
 
-    // Quest states + story variables (JS `kF`/`rv`:
-    // `<Quests>/<Quest Name State>` + `<Quests>/<Variables>/<Variable>`).
-    // Nesting follows FLOW_STATIC section 3.2; attr names flagged OPEN
-    // (no <Quests> in the seed).
+    // Quest records + story variables (JS `kF`/`rv`). The save shape is
+    // `<Quests><Quests><Quest Name FileName/></Quests><Variables>
+    // <Variable Name Value/></Variables></Quests>` (`sc` parse L126400:
+    // `a.A("Quests").A("Quests")` -> `SIa` -> `new Et`; the quest writer
+    // `WO` L132600 appends into the nested `Quests`). `Et` (L144813) reads
+    // `FileName`, `Name` and `Type` — there is no `State` attribute.
     struct QuestState {
-        std::string name;
-        std::string state;
+        std::string name;       // `Et.name` (`Name` attr)
+        std::string file_name;  // `Et.fileName` (`FileName` attr)
     };
     std::vector<QuestState> quests;
+    // `rv`: the quest variables. JS keys carry a LEADING `_` (`wkb` L132880:
+    // `c = "_" + Name`; `WA` L133404 writes the public name back), so the
+    // port's map uses the same `_`-prefixed key. See `variable_key_for`.
     std::map<std::string, std::string> variables;  // quest vars (`rv`)
+
+    // The JS `rv` key for a save `<Variable Name>` (L132880: `"_" + Name`).
+    // Reading a real authored save therefore stores BOTH the raw `Name` and
+    // the `_`-prefixed key, so `story_step()` (which looks up
+    // `_$StoryTutorialStep`) and the port's raw-name readers both resolve.
+    static std::string variable_key_for(const std::string& name) {
+        return name.empty() || name[0] == '_' ? name : ("_" + name);
+    }
 
     // Story tutorial step (JS `_$StoryTutorialStep`, `p.L3`/`ha.WO`).
     // Stored as a quest variable; empty = not started.
@@ -248,8 +267,11 @@ struct BattleRecord {
     // Current wall-clock epoch seconds (Cla(now) analog).
     static std::int64_t wall_now();
 
-    // Currencies (JS `pG`: `<Currencies>/<Currency Name Count>`; the Count
-    // attr name is OPEN) and Resistances (JS `Pw`: `<Resistances>` ATTRS,
+    // Currencies (JS `pG`, L126965/L139448). `xf.Jia` (L139448) reads the
+    // counts as ATTRIBUTES of `<Currencies>` keyed by the currency's name
+    // (`a.attributes.get(d.name)`), and `GLa` (L137813) writes
+    // `this.pG.set(a, "" + b)` — there is no `<Currency Name Count>` child
+    // and no `Count` attribute. Resistances (JS `Pw`: `<Resistances>` ATTRS,
     // e.g. `Resistance_2="0"` — certain, in the seed).
     std::map<std::string, int> currencies;
     std::map<std::string, int> resistances;

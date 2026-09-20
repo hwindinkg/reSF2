@@ -159,31 +159,40 @@ WarriorSave SaveSystem::load() {
         out.battle_records.push_back(std::move(r));
     }
 
-    // Fight win counts (JS `yc`): `<Fights>/<Fight Name Wins>` (`Wins`
-    // attr name OPEN — no <Fights> in the seed).
+    // Fight records (JS `yc` = `il`, L141476): `<Fights><Fight .../></Fights>`.
+    // Identity = `IDS` (`il.Atb` L143548), win count = `CompletedCount`
+    // (`il.Fab` L143548: `this.no++`). The old `Name`/`Wins` pair was a guess.
     out.fights.clear();
     for (pugi::xml_node f : warrior.child("Fights").children("Fight")) {
         WarriorSave::FightWins fw;
-        if (f.attribute("Name")) fw.name = f.attribute("Name").value();
-        fw.wins = sf2::data::xml_attr_int(f, "Wins", 0);
+        if (f.attribute("IDS")) fw.name = f.attribute("IDS").value();
+        fw.wins = sf2::data::xml_attr_int(f, "CompletedCount", 0);
         out.fights.push_back(std::move(fw));
     }
 
     // Quests + variables (JS `kF`/`rv`). Absent in the seed -> empty.
+    // The quest list is the NESTED `<Quests><Quests>` (sc parse L126400:
+    // `a.A("Quests").A("Quests")`), and each `<Quest>` carries `Name` +
+    // `FileName` (`Et` ctor L144813); there is no `State` attribute.
     out.quests.clear();
     out.variables.clear();
     if (pugi::xml_node quests = warrior.child("Quests")) {
-        for (pugi::xml_node q : quests.children("Quest")) {
+        for (pugi::xml_node q : quests.child("Quests").children("Quest")) {
             WarriorSave::QuestState qs;
             if (q.attribute("Name")) qs.name = q.attribute("Name").value();
-            if (q.attribute("State")) qs.state = q.attribute("State").value();
+            if (q.attribute("FileName")) qs.file_name = q.attribute("FileName").value();
             out.quests.push_back(std::move(qs));
         }
         if (pugi::xml_node vars = quests.child("Variables")) {
             for (pugi::xml_node v : vars.children("Variable")) {
                 if (v.attribute("Name")) {
-                    out.variables[v.attribute("Name").value()] =
+                    const std::string name = v.attribute("Name").value();
+                    const std::string val =
                         v.attribute("Value") ? v.attribute("Value").value() : "";
+                    // `wkb` (L132880) stores `"_" + Name`; the port also keeps
+                    // the raw name so its unprefixed readers still resolve.
+                    out.variables[WarriorSave::variable_key_for(name)] = val;
+                    out.variables[name] = val;
                 }
             }
         }
@@ -193,12 +202,15 @@ WarriorSave SaveSystem::load() {
     out.map_focus.clear();
     if (warrior.attribute("MapFocus")) out.map_focus = warrior.attribute("MapFocus").value();
 
-    // Currencies (`pG`: `<Currencies>/<Currency Name Count>`; Count OPEN).
+    // Currencies (`pG`): ATTRIBUTES on `<Currencies>` keyed by currency name
+    // (`xf.Jia` L139448 reads `a.attributes.get(d.name)`); no child elements.
     out.currencies.clear();
-    for (pugi::xml_node c : warrior.child("Currencies").children("Currency")) {
-        if (c.attribute("Name")) {
-            out.currencies[c.attribute("Name").value()] =
-                sf2::data::xml_attr_int(c, "Count", 0);
+    if (pugi::xml_node cur = warrior.child("Currencies")) {
+        for (pugi::xml_attribute a : cur.attributes()) {
+            try {
+                out.currencies[a.name()] = std::stoi(a.value());
+            } catch (const std::exception&) {
+            }
         }
     }
 
@@ -447,7 +459,8 @@ void SaveSystem::save(const WarriorSave& w) {
         }
     }
 
-    // Fights (`yc`): replace the <Fight> children.
+    // Fights (`yc` = `il`): replace the <Fight> children. Identity = `IDS`
+    // (`il.Atb` L143548), win count = `CompletedCount` (`il.Fab` L143548).
     {
         pugi::xml_node fights = warrior.child("Fights");
         if (!fights) fights = warrior.append_child("Fights");
@@ -456,36 +469,54 @@ void SaveSystem::save(const WarriorSave& w) {
         for (const pugi::xml_node& f : old) fights.remove_child(f);
         for (const WarriorSave::FightWins& fw : w.fights) {
             pugi::xml_node f = fights.append_child("Fight");
-            f.append_attribute("Name").set_value(fw.name.c_str());
-            f.append_attribute("Wins").set_value(fw.wins);
+            f.append_attribute("IDS").set_value(fw.name.c_str());
+            f.append_attribute("CompletedCount").set_value(fw.wins);
         }
     }
 
-    // Quests + variables (`kF`/`rv`).
+    // Quests + variables (`kF`/`rv`). The quest list is the NESTED
+    // `<Quests><Quests><Quest Name FileName/></Quests>` (`WO` L132600:
+    // `c.A("Quests") ?? c.appendChild("Quests")` then `appendChild("Quest")`,
+    // setting `Name` + `FileName`); the variables stay direct children of the
+    // outer `<Quests><Variables>` (`WA` L133404).
     {
         pugi::xml_node quests = warrior.child("Quests");
         if (!quests) quests = warrior.append_child("Quests");
+        pugi::xml_node quest_list = quests.child("Quests");
+        if (!quest_list) quest_list = quests.append_child("Quests");
         std::vector<pugi::xml_node> old;
-        for (pugi::xml_node q : quests.children("Quest")) old.push_back(q);
-        for (const pugi::xml_node& q : old) quests.remove_child(q);
+        for (pugi::xml_node q : quest_list.children("Quest")) old.push_back(q);
+        for (const pugi::xml_node& q : old) quest_list.remove_child(q);
         for (const WarriorSave::QuestState& qs : w.quests) {
-            pugi::xml_node q = quests.append_child("Quest");
+            pugi::xml_node q = quest_list.append_child("Quest");
             q.append_attribute("Name").set_value(qs.name.c_str());
-            q.append_attribute("State").set_value(qs.state.c_str());
+            q.append_attribute("FileName").set_value(qs.file_name.c_str());
         }
         pugi::xml_node vars = quests.child("Variables");
         if (!vars) vars = quests.append_child("Variables");
         std::vector<pugi::xml_node> old_vars;
         for (pugi::xml_node v : vars.children("Variable")) old_vars.push_back(v);
         for (const pugi::xml_node& v : old_vars) vars.remove_child(v);
+        // `WA` (L133404) writes the PUBLIC name (`c.set("Name", a)`), i.e. the
+        // `rv` key without its leading `_`. The parse keeps both forms, so the
+        // `_`-prefixed twin is skipped when the raw key is also present.
         for (const auto& kv : w.variables) {
+            const std::string& key = kv.first;
+            const bool prefixed = !key.empty() && key[0] == '_';
+            // `WA` (L133404) writes the PUBLIC name (the `rv` key minus its
+            // leading `_`). The parse keeps both forms, so a `_`-prefixed key
+            // whose raw twin is present is already emitted by the twin.
+            if (prefixed && w.variables.find(key.substr(1)) != w.variables.end()) {
+                continue;
+            }
             pugi::xml_node v = vars.append_child("Variable");
-            v.append_attribute("Name").set_value(kv.first.c_str());
+            v.append_attribute("Name").set_value(key.c_str());
             v.append_attribute("Value").set_value(kv.second.c_str());
         }
     }
 
-    // Currencies (`pG`).
+    // Currencies (`pG`): counts are ATTRIBUTES on `<Currencies>` keyed by the
+    // currency name (`GLa` L137813: `this.pG.set(a, "" + b)`).
     {
         pugi::xml_node cur = warrior.child("Currencies");
         if (!cur) cur = warrior.append_child("Currencies");
@@ -493,9 +524,9 @@ void SaveSystem::save(const WarriorSave& w) {
         for (pugi::xml_node c : cur.children("Currency")) old.push_back(c);
         for (const pugi::xml_node& c : old) cur.remove_child(c);
         for (const auto& kv : w.currencies) {
-            pugi::xml_node c = cur.append_child("Currency");
-            c.append_attribute("Name").set_value(kv.first.c_str());
-            c.append_attribute("Count").set_value(kv.second);
+            pugi::xml_attribute a = cur.attribute(kv.first.c_str());
+            if (!a) a = cur.append_attribute(kv.first.c_str());
+            a.set_value(kv.second);
         }
     }
 

@@ -2093,6 +2093,14 @@ void FightController::rules_begin_round(int round) {
     rule_round_ = round > 0 ? round : 1;  // JS `rob` L900
     rule_pending_ = false;
     rules_ = battle_.rules;
+    // JS `du.rob(a)` (L459272) calls `this.mxa()` FIRST: `mxa` (L457799)
+    // walks EVERY rule and calls `clear()`, and `bn.clear` (L436) resets each
+    // matching animation's `type == 4` intervals back to `bp = 1`,
+    // `JU = KU = false`, `Rja = 1`. Without it a previous round's / fight's
+    // `ERuleDamageFactor` charge would leak (the JS mutates the GLOBAL
+    // animation table). The port's map is per-controller, so clearing it
+    // reproduces `mxa` exactly for this fight's rule set.
+    damage_bp_.clear();
     // JS `dl.jh()` (L1421): the ACTIVE rule list is `p.o.Yh ? this.CV
     // : this.Ae`, and `dl.OK` (L1423-1424) routes each parsed rule by its
     // `Lb.mode` (`Lb.MIa` L847: `Eclipse` absent -> 2; `Eclipse="1"` -> 0;
@@ -2271,6 +2279,59 @@ void FightController::rules_apply_round_effects() {
                 // `F1` (L897): `ERuleInvertJoystick -> this.Oe.Iga=!0`.
                 invert_joystick_ = true;
                 break;
+            case FightRuleKind::damage_factor: {
+                // `F1` (L897) -> `bn.Zk` (L436): for each animation in `EM`
+                // (the `Animation` group expansion + any `<Animation Name>`
+                // child expansion, `ra.yz` L848), for each interval with
+                // `type == 4`: `c = Cea(this.Li)`; `if (c.JU || c.KU) break;`
+                // else `c.JU = true; c.bp = this.zUa; c.KU = true;
+                // c.Rja = this.lVa`. `Cea(1)` = `k$` (side 1), else `FV`.
+                // The port's `EM` membership test is `MoveDef::anim_names`
+                // containing the group name (the same transitive `<Template>`
+                // chain `ra.yz` expands to); `anim_names` also carries the
+                // move's own name, which no shipped group name collides with.
+                const int side = (r.apply_to == 1) ? 0 : 1;
+                std::vector<std::string> groups = r.animations;
+                if (!r.damage_animation.empty()) {
+                    groups.push_back(r.damage_animation);
+                }
+                if (moves_ == nullptr || groups.empty()) break;
+                int marked = 0;
+                for (const auto& kv : *moves_) {
+                    const sf2::scene::MoveDef& m = kv.second;
+                    bool in_group = false;
+                    for (const std::string& g : groups) {
+                        if (std::find(m.anim_names.begin(), m.anim_names.end(),
+                                      g) != m.anim_names.end()) {
+                            in_group = true;
+                            break;
+                        }
+                    }
+                    if (!in_group) continue;
+                    for (const sf2::scene::Interval& iv : m.intervals) {
+                        if (iv.type != 4) continue;
+                        DamageBp& v = damage_bp_[&iv][side];
+                        if (v.ju || v.ku) break;  // JS `if(c.JU||c.KU) break`
+                        v.ju = true;
+                        v.bp = r.damage_factor_value;
+                        v.ku = true;
+                        v.rja = r.damage_repeat_factor;
+                        ++marked;
+                    }
+                }
+                if (marked > 0) {
+                    // Diagnostic (once per active rule per round): the shipped
+                    // `THROWS_ONLY` charge (`Factor` per animation group).
+                    std::fprintf(stdout,
+                                 "[fx] R%d ERuleDamageFactor anim=%s side=%d "
+                                 "Factor=%.4g Repeat=%.4g intervals=%d\n",
+                                 rule_round_, r.damage_animation.c_str(), r.apply_to,
+                                 static_cast<double>(r.damage_factor_value),
+                                 static_cast<double>(r.damage_repeat_factor), marked);
+                    std::fflush(stdout);
+                }
+                break;
+            }
             case FightRuleKind::invulnerability:
                 // `gn.Zk` (L863): `this.ws=!0`.
                 r.ws = true;
@@ -3897,8 +3958,27 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     bool critical =
         !blocked && !iv.no_critical && (a9 > 1.0f || draw01() < a9);
     const std::string defense_attr = sf2::scene::select_defense(idmg, blocked, &hit_cap);
+    // JS `bCa` L510: `g *= a.Cea(f.parameters.qb?1:2).bp` — the ATTACKER's
+    // side (`Cea(1)` = `k$` for the player, `Cea(2)` = `FV` for the bot).
+    // The per-round `ERuleDamageFactor` pass filled `damage_bp_`.
+    {
+        const auto it = damage_bp_.find(&iv);
+        if (it != damage_bp_.end()) {
+            idmg.side_bp = it->second[atk.is_player ? 0 : 1].bp;
+        }
+    }
     const float dmg = sf2::scene::compute_damage(idmg, atk.params, def.params, defense_attr,
                                                  blocked, critical, &hit_cap);
+    // JS hit-landing (L259952): `g.XL(this.parameters.qb?2:1)` runs AFTER
+    // `bR = bCa(...)` on the DEFENDER's model, so it charges the NEXT hit of
+    // the attacker's side (`Vm.XL` L396: `JU && KU && (bp *= Rja)`).
+    {
+        const auto it = damage_bp_.find(&iv);
+        if (it != damage_bp_.end()) {
+            DamageBp& v = it->second[atk.is_player ? 0 : 1];
+            if (v.ju && v.ku) v.bp *= v.rja;
+        }
+    }
     sf2::scene::HitRecord rec;
     rec.raw_damage = dmg;
     rec.defense = defense_attr;

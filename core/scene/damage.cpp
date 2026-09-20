@@ -159,8 +159,12 @@ float compute_damage(const IntervalDamage& interval, const FighterParams& attack
     }
 
     // g *= a.Cea(attackerIsPlayer ? 1 : 2).bp — the interval's per-side
-    // multiplier (default 1; a fight rule `bn` L436 sets it).
-    g *= 1.0f;
+    // multiplier (`Vm.bp`, default 1). `a.Cea` (L395) selects `k$` for side 1
+    // and `FV` for side 2; `bCa` asks for the ATTACKER's side. The value is
+    // resolved per round by the `ERuleDamageFactor` rule (`bn.Zk` L436, via
+    // `FightController::rules_apply_round_effects`) and carried on
+    // `IntervalDamage::side_bp` (the port's `Ul.Cea(side).bp` analog).
+    g *= interval.side_bp;
 
     g *= attacker.dta;
     g *= attacker.so;

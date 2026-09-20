@@ -39,13 +39,13 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <array>
 #include <functional>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
-
 #include "anim_archive.hpp"
 #include "atlas.hpp"
 #include "render/gl_types.hpp"
@@ -285,6 +285,15 @@ struct FightRule {
     // current animation (`Lba`, L848); `Mwa("Physical")` (L866) tests this
     // list for the "Physical" group.
     std::vector<std::string> animations;
+    // `bn` (`ERuleDamageFactor`, L436): `damage_animation` = the `Animation`
+    // GROUP name (the attr, expanded by `ra.yz` to the group's animations),
+    // `damage_factor_value` = `zUa` (`Factor`, default 1),
+    // `damage_repeat_factor` = `lVa` (`RepeatFactor`, default 1). Applied by
+    // `bn.Zk` (L436) per round to each matching animation's `type == 4`
+    // intervals' `Vm(side).bp`.
+    std::string damage_animation;
+    float damage_factor_value = 1.0f;
+    float damage_repeat_factor = 1.0f;
     bool physical = false;   // `Mwa("Physical")` (L866) — gates `Zf(7)`.
     // `jn.tN` (L866): LoseFall armed flag. Armed by the current animation
     // (cp==4 `tN=this.Lba(a.AI)`, L867) or, for a Physical rule, by the
@@ -572,12 +581,21 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
         // `tj.parse` (L913) via `bb.VIa` (L891): Type -> `BVa`.
         r.win_style_type = fight_rule_style_type(sr.attrs);
     } else if (r.kind == FightRuleKind::damage_factor) {
-        // `bn.parse` (L855-856): `Animation` attr + `Factor`/`RepeatFactor`
-        // -> the per-interval charge (`zUa`/`lVa`). Effect OPEN: the native
-        // has no per-interval `Cea(side)` setter (`Vm.bp/Rja/JU/KU`, L775) —
-        // `damage.cpp:118` keeps `bp=1` (documented at `modes.hpp:562`), so
-        // the charge cannot be wired (COMBAT_STATIC A5: no shipped
-        // `ERuleDamageFactor` element either).
+        // `bn.parse` (L436508): `ra.yz(attributes.get("Animation") ?? "", EM)`
+        // expands the `Animation` GROUP name into the animation list `EM`
+        // (union with any `<Animation Name>` child expansions, `ra.yz` L848),
+        // `this.zUa = u.H(attributes.get("Factor"), 1)`,
+        // `this.lVa = u.H(attributes.get("RepeatFactor"), 1)`.
+        // `bn.Zk` (L436) then walks each animation's intervals and, for
+        // `type == 4`, sets `Cea(Li).bp = zUa` (+ `JU/KU`, `Rja = lVa`).
+        // Shipped `stages.xml` (9 `THROWS_ONLY` blocks, 54 rules): `Throw`
+        // Factor=1, `Punch`/`Kick`/`Weapon`/`Missile`/`Magic` Factor=0, all
+        // ApplyTo=Player; no `RepeatFactor` anywhere (so `Vm.XL`'s
+        // `bp *= Rja` is a no-op on shipped data).
+        const auto an = sr.attrs.find("Animation");
+        if (an != sr.attrs.end()) r.damage_animation = an->second;
+        r.damage_factor_value = fight_rule_float(sr.attrs, "Factor", 1.0f);
+        r.damage_repeat_factor = fight_rule_float(sr.attrs, "RepeatFactor", 1.0f);
     }
     // ApplyTo overrides from the `bb.xe` dispatch (L891-893): Points is
     // always All (`new gj(b,3)`) -> split; Darkness always Player
@@ -1573,6 +1591,20 @@ private:
     BattleParams battle_;
     sf2::scene::Model model_;
     const std::map<std::string, sf2::scene::MoveDef>* moves_ = nullptr;
+    // JS `Vm` per interval per side (`bp`/`Rja`/`JU`/`KU`, L396), driven by
+    // the `ERuleDamageFactor` rules: `bn.clear` (L436, via `du.mxa` L457799)
+    // resets it every round, `bn.Zk` (L436, via `du.F1` L897) sets
+    // `bp = Factor` for the rule's side, and `Ul.XL(defender.qb?2:1)` (L395,
+    // from the hit-landing path) does `bp *= Rja` while `JU && KU`. Keyed by
+    // the `Interval` pointer (stable: the move catalog outlives the fight).
+    // Index 0 = JS side 1 (`k$`, the PLAYER's attack side), 1 = side 2 (`FV`).
+    struct DamageBp {
+        float bp = 1.0f;
+        float rja = 1.0f;
+        bool ju = false;
+        bool ku = false;
+    };
+    std::map<const sf2::scene::Interval*, std::array<DamageBp, 2>> damage_bp_;
     const std::map<std::string, sf2::data::anim_clip>* clips_ = nullptr;
     std::vector<sf2::scene::TacticsFile> tactics_;
     const sf2::scene::TacticDef* tactic_ = nullptr;
