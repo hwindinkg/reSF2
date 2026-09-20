@@ -2509,16 +2509,22 @@ void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = f
         }
         return;
     }
-    // Expanded: a nav button wins over the header (the compact top-left
-    // column overlaps); a header tap with no button collapses (L2000 toggle).
+    // Expanded: the `gk.Af` header rail answers in BOTH states (JS `gk.Bgb`
+    // L2000; `Af` is a child of `gk.node`, NOT of the collapsed-hidden `iL`
+    // layer — `gk.aa` L1998), so a header tap collapses FIRST. The five `Le`
+    // buttons sit BELOW the rail; testing them first made the header rect
+    // (x89..279, y72..112) hit the Dojo button (x122..246, y64..188) and
+    // navigate instead of collapsing — the `МЕНЮ` column could not be closed
+    // outside the Dojo.
+    if (header_hit && app.pointer().pressed) {
+        nav_open = false;
+        sf2::audio::AudioEngine::instance().play("snd_focus_1");
+        return;
+    }
     const int hit = za_nav_hit(px, py);
     if (hit >= 0 && app.pointer().pressed) {
         za_nav_activate(app, self, active, hit);
         return;
-    }
-    if (header_hit && app.pointer().pressed) {
-        nav_open = false;
-        sf2::audio::AudioEngine::instance().play("snd_focus_1");
     }
 }
 
@@ -6484,10 +6490,18 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
         fight_wins_ = map_save.fights;
     } catch (const std::exception&) {
     }
-    zone_sel_ = 0;
+    // The zone the map opens on: the save's `CurrentZone` (`xf.ro` L248),
+    // but only among MAP zones (a `FileName` backdrop). The `Start` zone
+    // (Punchbag) has no backdrop, so a save whose CurrentZone points there
+    // (e.g. after the invented zone-dot write) recovers to the first map
+    // zone instead of showing the null/zero location with the Training bag.
+    zone_sel_ = -1;
     for (std::size_t i = 0; i < zones_.size(); ++i) {
+        if (zones_[i].part < 0) continue;   // not a map zone
+        if (zone_sel_ < 0) zone_sel_ = static_cast<int>(i);  // first map zone
         if (zones_[i].name == cur) zone_sel_ = static_cast<int>(i);
     }
+    if (zone_sel_ < 0) zone_sel_ = 0;  // no map zone at all (degraded)
     // WDa/`Qr.lla` VERBATIM (JS L256/L2094). `WDa(a) = iF.get(a) != null`:
     // a battle node is ACTIVE iff the save carries a `<Battles>` record for
     // `zone|name|` (written by `J1a` L259 / `Iaa` L260-261, native
@@ -6700,7 +6714,11 @@ constexpr float kMapZoneDotPitch = 60.0f;
 constexpr float kMapZoneDotD = 34.0f;
 
 // See screens.hpp. The dotted slot is the zone's index among the zones that
-// RENDER a dot (`Vr.HXa` L2123-2124), not its raw index.
+// RENDER a dot (`Vr.HXa` L2123-2124), not its raw index. Only zones with a
+// MAP backdrop (`FileName` -> `part`) are map zones: the `Start` zone
+// (Punchbag) has no `FileName`, so it must not appear in the `Ur` strip nor
+// be selectable — its only node is the Training dummy (the reported "the map
+// shows only the null/zero location (with the bag)").
 bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {
     if (zi >= zones_.size()) return false;
     std::size_t slot = 0;
@@ -6712,7 +6730,8 @@ bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {
                 break;
             }
         }
-        if (!any) continue;  // no dot drawn -> no rect
+        if (!any) continue;                // no dot drawn -> no rect
+        if (zones_[i].part < 0) continue;  // no map backdrop -> not a map zone
         if (i == zi) {
             const MapMetrics mm = map_metrics();
             cx = kMapZoneDotX0 + static_cast<float>(slot) * kMapZoneDotPitch;
