@@ -835,6 +835,18 @@ int AiController::aea_draw() const {
     return static_cast<int>(next_range(lo, hi));
 }
 
+// JS `de.j0` (L592: `this.Fl=b.Pe?b.kJ()+b.Q_+this.j0(this.Uu):-1`, then
+// `Gc.j0` L640-641 and `Md.I0` L643/L2352): `Md.I0(a,b)=Da.pg.dT(a,b)
+// = a+jf()*(b-a)`, truncated (`|0`). The curve is evaluated on the `Uu`
+// snapshot built by `mq`/`mQ` above (NOT the `QJa` `zk` cache `lN_`, which is
+// written but never read in the JS). One `jf()` = TWO sequential `B0()` words.
+int AiController::j0_draw() const {
+    if (tactic_ == nullptr) return 0;
+    const double lo = weight_curve_eval(tactic_->frame_error_min, feat_);
+    const double hi = weight_curve_eval(tactic_->frame_error_max, feat_);
+    return static_cast<int>(next_range(lo, hi));
+}
+
 // JS `QJa` (L594-595): rebuild the enemy-relative context (the port's
 // `feat_` was already built by `mq`), draw the five `Da.jf()` rolls,
 // `Mu`/`lN` (yea/j0, L640-641) and cache `$x` (gfa). The JS additionally
@@ -1169,10 +1181,13 @@ std::string AiController::update(const AiFightState& st) {
 
     // Snapshot the features (JS mQ L620).
     mq(st);
-    // JS `de.ia` (L592): `b=a.da` (a = the ENEMY) -> `Fl = b.kJ()+b.Q_+
-    // j0(Uu)` = the ENEMY's animation frame; `q7 = this.Ji.kJ()+...` = MY
-    // animation frame.
-    Fl_ = st.enemy_playhead;  // `kJ()` (`lq` == `Xh`) + `Q_` (== 0 in the shipped JS)
+    // JS `de.ia` (L592): `b=a.da` (a = the ENEMY) -> `Fl = b.Pe ?
+    // b.kJ()+b.Q_+this.j0(this.Uu) : -1` (the ENEMY's animation frame + the
+    // per-frame `<FrameError>` draw); `q7 = this.Ji.kJ()+...` = MY frame.
+    // `b.Q_` == 0 in the shipped JS. The `j0(Uu)` draw is the frame-start
+    // `Da.pg` consumption (two `B0()` words) that precedes the `jwb`/`QJa`
+    // caches below; no draw when the enemy is not playing (`Fl == -1`).
+    Fl_ = st.enemy_playing ? st.enemy_playhead + j0_draw() : -1;
     q7_ = st.move_playhead;
 
     // JS `de.jwb` (L596-597), invoked from `wd.mwb` (L527) when the ENEMY

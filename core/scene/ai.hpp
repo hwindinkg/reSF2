@@ -679,6 +679,12 @@ private:
     int gfa_draw() const;
     // JS `de.Aea` (L597: `Gc.Aea(a)`, `Md.I0(v8)` L640-643, truncated).
     int aea_draw() const;
+    // JS `de.j0` (L592 + L640-641: `Gc.j0(a)` = `Md.I0(lN.first.Gb(a),
+    // lN.second.Gb(a))|0`) — the per-frame `<FrameError>` draw added to `Fl`,
+    // evaluated on the `Uu` snapshot (`mq`, NOT the `QJa` `zk`). One `jf()`
+    // (= two `B0()` words) on the shared `Da.pg`; no draw when the enemy is
+    // not playing (`b.Pe == false` -> `Fl == -1`).
+    int j0_draw() const;
 };
 
 } // namespace sf2::scene
