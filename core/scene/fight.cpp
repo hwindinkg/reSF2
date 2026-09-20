@@ -4729,7 +4729,16 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.enemy_max_part_frames = foe.fighter.m2();  // JS `Tba` (max `M2`)
         // JS `wd.K0` (L505): NoRanged item equipped -> +1, else -1.
         st.ranged = me.ranged_available ? -1 : 1;
-        st.playing = me.fighter.current_move() != nullptr;  // JS `Ji.Pe`
+        // JS `Ji.Pe` (`Te.Pe`): a hit reaction forces it FALSE. `wd.Qnb`
+        // (L507) starts the reaction via `Mwb`->`Lwb` (`Te.Sca` L548 sets
+        // `Pe=!1`) then `da.reset()` (L548 again `Pe=!1`) + `da.etb`, while
+        // the ragdoll latch `Nd.nk` (`Al.start`, L582) is what drives the
+        // pose. With `Pe=!1` `de.hcb` (L598) returns false and `de.ia`
+        // (L593) issues NO move — the reaction runs to completion instead of
+        // being replaced by the AI the very next frame.
+        st.playing = me.fighter.current_move() != nullptr &&
+                     !me.fighter.ragdoll_active();  // JS `Ji.Pe`
+        st.my_reacting = me.fighter.ragdoll_active();  // JS `Nd.nk`
         st.magic_bullets = 0;
         st.enemy_part_frames.push_back(foe.fighter.m2());
         st.fight_frame = frame_;

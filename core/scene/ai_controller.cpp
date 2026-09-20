@@ -273,19 +273,33 @@ bool AiController::hcb(const AiFightState& st) const {
             if (iv.first == n) return false;
         }
     }
-    // `if(this.Ji.Pe && this.cs != null){...} else return false`.
-    if (!st.playing || st.enemy_anim.empty()) return false;
-    if (st.enemy_move != nullptr) {
-        for (const std::string& m : no_decision_moves_) {
-            // JS `$k(m)` matches the name OR an inherited template tag.
-            if (st.enemy_move->name == m ||
-                st.enemy_move->template_tags.count(m) > 0) {
-                return false;
-            }
-        }
-    } else {
-        for (const std::string& m : no_decision_moves_) {
-            if (st.enemy_anim == m) return false;
+    // JS `de.hcb` (L598-599):
+    //   `if(this.Ji.Pe && this.cs != null){ a=this.cs; for(...P.v$a()...)
+    //     if(a.$k(c[b++])) return !1 } else return !1; return !0`
+    //   - `this.cs` is MY OWN current move, NOT the enemy's. It is set by
+    //     `de.iwb(a)` (L596), called from `wd.mwb(a)` (L527) as
+    //     `b.nf.iwb(a)` with `a` = THIS fighter's started animation; the
+    //     sibling call `this.nf.jwb(b)` fills `de.ds` = the OPPONENT's move.
+    //     (`de.ia`'s `a` argument is the enemy, but `cs` comes from `iwb`.)
+    //   - `this.Ji.Pe` = MY clip is playing. A hit reaction leaves it FALSE:
+    //     `wd.ia` (L498) runs `Qnb()` first, and `wd.Qnb` (L507) does
+    //     `this.Mwb(...); this.da.reset(); this.da.etb(this.qs.animation)`
+    //     — `Te.reset` (L548) sets `Pe=!1` and `Te.Sca` (L548, inside
+    //     `Lwb` L511) sets `Pe=!1`, with only the ragdoll latch
+    //     `Nd.nk` (`Al.start`, L582) left set. With `Pe=!1` this branch
+    //     fails and `de.ia` (L593 `if(!this.hcb())return null`) issues NO
+    //     decision — that is the gate that stops the AI replacing a running
+    //     reaction. `st.playing` is set with that `!Nd.nk` term in
+    //     `FightController::update_fighter`.
+    if (!st.playing || st.my_reacting || st.current_move == nullptr) {
+        return false;
+    }
+    // JS `P.v$a()` = the NoDecision MOVES; `cs.$k(name)` matches the name or
+    // an inherited template tag.
+    for (const std::string& m : no_decision_moves_) {
+        if (st.current_move->name == m ||
+            st.current_move->template_tags.count(m) > 0) {
+            return false;
         }
     }
     return true;

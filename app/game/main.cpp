@@ -1066,18 +1066,22 @@ static const VerifyProbe kVerifyProbes[] = {
     {550, "Forward Tap x1 (+30f) [item-1 guard]", "<none>", "", 4, false},
     // F620: K (GLFW 75) maps to Punch (id 9) -> the Punch-key candidate set.
     // THE FIX PROBE: a SINGLE Punch tap cannot satisfy the `2key` Punch-x2
-    // moves, so the 1key candidates are HighPunch (`<Tactics>` Distance
-    // Max=250) and ShortUpwardElbowStrike. `Gc.Pkb`'s `va.Ts` gate (L675)
-    // lives on the AI's `eb=true` (`Gc.Vkb`) branch only, so the human CAN
-    // punch here. [item-1 fix] `ShortUpwardElbowStrike` is NOT a candidate at
-    // this frame: its OWN `<Distance Max="130">` fails because the working
-    // `Step` guard stops the extra restarts that used to carry the fighter
-    // deeper in (trace: `dist=208`), so HighPunch (no Conditions `Distance`)
-    // wins. The probe still proves the human punch path (it did under the old
-    // `Pkb` behaviour this probe expected "<none>": every attack key was dead
-    // at fight start).
-    {620, "K key -> Punch-key move (no Tactics gate)", "HighPunch",
-     "cands=HighPunch@110 f=HighPunch draw=- idx=0 HighPunch",
+    // moves, so the 1key candidates are HighPunch and
+    // ShortUpwardElbowStrike. `Gc.Pkb`'s `va.Ts` gate (L675) lives on the
+    // AI's `eb=true` (`Gc.Vkb`) branch only, so the human CAN punch here.
+    // [stale-expectation fix] The old expectation was `HighPunch` on the
+    // belief that ShortUpwardElbowStrike's `<Conditions>` `<Distance
+    // Max="130">` (moves.xml:15156, From Me/Pivot -> To Enemy/NPivot) fails
+    // at this frame ("trace: dist=208"). That `dist` predates the current
+    // tape/step-guard behaviour. The LIVE geometry at the F620 tap is
+    // `me=891.8 en=973.0 dist=81.2` (`SF2_TRACE_COND=1` dump), so the
+    // Distance gate PASSES, and `Gc.Aua` (L673) keeps the max-`<Priority>`
+    // group — ShortUpwardElbowStrike Priority 150 (moves.xml:15147) beats
+    // HighPunch 110. ShortUpwardElbowStrike is therefore the JS-exact pick
+    // at this distance; the port's selection is correct and only the
+    // authored expectation was stale.
+    {620, "K key -> Punch-key move (no Tactics gate)", "ShortUpwardElbowStrike",
+     "cands=HighPunch@110,ShortUpwardElbowStrike@150 f=ShortUpwardElbowStrike draw=- idx=0 ShortUpwardElbowStrike",
      14, false},
     // F700: B (GLFW 66) is unbound -> no tap -> no decision, no move.
     {700, "B key -> dropped (no move)", "<none>", "", 12, false},

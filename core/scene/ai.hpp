@@ -330,9 +330,15 @@ struct AiFightState {
     // My fighter is PLAYING a clip (`Ji.Pe`): the `hcb` L598 gate requires
     // it (`if(this.Ji.Pe&&this.cs!=null){...}else return!1`).
     bool playing = false;
-    // The enemy's `cs` (L596-597 `iwb`/`jwb`: `this.cs = b.PX ?? a` — the
-    // enemy's current animation object). The port mirrors it as the enemy
-    // anim name (`enemy_anim`); `hcb` tests it against the NoDecision list.
+    // My fighter is inside a hit reaction (`Al.nk` / `Nd.nk`). `wd.Qnb`
+    // (L507) starts the reaction and leaves `Te.Pe` false (`da.reset()` +
+    // `da.etb`), so `de.hcb` (L598) sees `!Ji.Pe` and the AI issues no
+    // decision — the reaction can never be replaced next frame.
+    bool my_reacting = false;
+    // `de.cs` (L596 `iwb`, set from `wd.mwb` L527 `b.nf.iwb(a)` with `a` =
+    // THIS fighter's started animation) = MY OWN current move. The sibling
+    // `this.nf.jwb(b)` (L596) fills `de.ds` = the OPPONENT's move; `hcb`
+    // (L598) tests `cs` against the NoDecision move list.
     // Ranged flag (`K0` L505): `ig!=null && ig.Yb=="NoRanged" ? 1 : -1`.
     // NOTE the port's earlier comment had the sign inverted — +1 is the
     // NoRanged (ranged UNAVAILABLE) case.
