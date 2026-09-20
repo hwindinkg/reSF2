@@ -494,6 +494,11 @@ public:
     float player_world_x() const;
     float enemy_world_x() const;
     int player_move_frame() const;
+    // [probe] Round-transition frame log hooks (JS `XF` L370): the whole 3-D
+    // view's visibility (`camera_.visible`, the M2 round-transition hide) and
+    // the current camera centre x. Read-only — no behaviour change.
+    bool scene_visible() const;
+    float camera_center_x() const;
     // Clears the player's current move (`Fighter::clear_move`) so a probe
     // starts from a neutral state.
     void reset_player_move();

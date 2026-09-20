@@ -56,6 +56,7 @@ void print_usage(const char* argv0) {
                   "                  [--dump-pose N] [--dump-clip <name>]\n"
                   "                  [--ui-tour] [--fidelity-tour] [--quest-verify]\n"
                   "                  [--dialog-verify] [--replay [file]] [--verify-input]\n"
+                  "                  [--round-log] [--fx-probe]\n"
                   "  --watchdog N     RULE 0: force-exit a driver run after N seconds\n"
                   "                   (0 disables; default 900)\n"
                   "  res_root  default reference/www/res\n"
@@ -1388,6 +1389,7 @@ int main(int argc, char** argv) {
     bool debug_ui = false;
     bool capture_fight = false;
     bool capture_idle_fight = false;  // --capture-idle-fight-at N: boot direct + no input, capture at fight frame N
+    bool round_log = false;  // --round-log: per-frame scene_visible/x/camera around a round transition
     bool auto_attack = false;
     bool fight_mode = false;  // --fight: boot DIRECTLY into the dojo fight
     int capture_fight_frame = 300;  // fight frames after the Fight screen appears
@@ -1599,6 +1601,10 @@ int main(int argc, char** argv) {
         } else if (arg == "--capture-idle-fight-at" && i + 1 < argc) {
             capture_idle_fight = true;
             capture_fight_frame = std::atoi(argv[++i]);
+        } else if (arg == "--round-log") {
+            // Per-frame round-transition log (scene_visible + fighter x +
+            // camera x); no input, no capture, no OS input.
+            round_log = true;
         } else if (arg == "--auto-attack") {
             auto_attack = true;
         } else if (arg == "--dump-clip" && i + 1 < argc) {
@@ -1642,7 +1648,8 @@ int main(int argc, char** argv) {
         fidelity_tour ||
         quest_verify || quest_verify_buy || dialog_verify || observe_dialogs ||
         replay_mode || verify_input || fx_probe || input_tape || verify_place ||
-        debug_ui || capture_fight || capture_idle_fight || auto_attack ||
+        debug_ui || capture_fight || capture_idle_fight || round_log ||
+        auto_attack ||
         fight_mode || !capture_dir.empty() || !dump_clip.empty() ||
         dump_pose_frames > 0 || !fight_battle.empty() || !fight_zone.empty();
     if (driver_mode) {
@@ -3236,6 +3243,100 @@ int main(int argc, char** argv) {
             // Windowed: run until the window closes (the user plays).
             app.run(0, false);
         }
+    } else if (round_log) {
+        // [probe] Round-transition frame log (M2 verification). Boot the
+        // direct fight, run with NO input until the first round transition
+        // hides the 3-D view (`FightController::apply_round_result` ->
+        // `set_scene_visible(false)`), then print per frame: the
+        // `scene_visible()` flag, both fighters' world x and the camera
+        // centre x. `enter_start_stance` repositions the fighters (teleport)
+        // and then re-shows the scene in the SAME function, so the x jump
+        // must only ever land on the first visible frame — never on a drawn
+        // old->new step. No capture, no OS input.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name = fight_battle.empty() ? std::string("Duel") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);  // uncapped deterministic stepping
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        std::fprintf(stdout, "[roundlog] boot battle=%s zone=%s\n",
+                     fight_battle.empty() ? "Duel" : fight_battle.c_str(),
+                     fight_zone.empty() ? "ZONE_1" : fight_zone.c_str());
+        std::fflush(stdout);
+        int guard = 0;
+        bool fight_seen = false;
+        int ff = 0;
+        bool found = false;
+        int hidden_at = -1;
+        std::string pre[4];  // ring of the last <=4 visible frames
+        int pre_n = 0;
+        while (guard < 20000 && fs != nullptr) {
+            glfwPollEvents();
+            app.run_one_frame();
+            ++guard;
+            if (app.screens().current_id() != kScreenFight) {
+                std::fprintf(stdout, "[roundlog] fight screen left at guard %d\n", guard);
+                std::fflush(stdout);
+                break;
+            }
+            if (!fight_seen) {
+                fight_seen = true;
+                ff = 0;
+                continue;
+            }
+            ++ff;
+            const bool vis = fs->scene_visible();
+            char line[192];
+            std::snprintf(line, sizeof(line),
+                          "[roundlog] F%d vis=%d px=%.1f ex=%.1f cx=%.1f rw=%d",
+                          ff, vis ? 1 : 0,
+                          static_cast<double>(fs->player_world_x()),
+                          static_cast<double>(fs->enemy_world_x()),
+                          static_cast<double>(fs->camera_center_x()),
+                          fs->round_wait() ? 1 : 0);
+            if (!found) {
+                if (vis) {
+                    pre[pre_n & 3] = line;
+                    ++pre_n;
+                } else {
+                    found = true;
+                    hidden_at = ff;
+                    const int start = pre_n > 4 ? pre_n - 4 : 0;
+                    for (int i = start; i < pre_n; ++i) {
+                        std::fprintf(stdout, "%s\n", pre[i & 3].c_str());
+                    }
+                    std::fprintf(stdout, "%s\n", line);
+                    std::fflush(stdout);
+                }
+            } else {
+                std::fprintf(stdout, "%s\n", line);
+                std::fflush(stdout);
+                if (vis) {
+                    std::fprintf(stdout,
+                                 "[roundlog] transition: hidden F%d..F%d (%d frames), "
+                                 "scene re-shown at F%d\n",
+                                 hidden_at, ff - 1, ff - hidden_at, ff);
+                    std::fflush(stdout);
+                    break;
+                }
+            }
+        }
+        if (!found) {
+            std::fprintf(stdout,
+                         "[roundlog] no round transition within %d frames "
+                         "(last fight frame %d)\n",
+                         guard, ff);
+            std::fflush(stdout);
+        }
+        app.shutdown();
+        return 0;
     } else if (capture_idle_fight) {
         // [Phase 4d] Boot DIRECTLY into the dojo fight with NO input and NO
         // auto-attack, run to fight frame `capture_fight_frame`, then capture

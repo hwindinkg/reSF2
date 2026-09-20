@@ -7979,6 +7979,16 @@ float FightScreen::enemy_world_x() const {
     return fight_ != nullptr ? fight_->enemy().fighter.world_x() : 0.0f;
 }
 
+// [probe] The M2 round-transition hide flag (JS `Ta.XF` L370 -> the whole
+// 3-D view's `isVisible`) and the camera centre x. Read-only.
+bool FightScreen::scene_visible() const {
+    return fight_ != nullptr ? fight_->scene_visible() : true;
+}
+
+float FightScreen::camera_center_x() const {
+    return fight_ != nullptr ? fight_->camera().center_x : 0.0f;
+}
+
 int FightScreen::player_move_frame() const {
     return fight_ != nullptr ? fight_->player().fighter.move_frame() : -1;
 }
