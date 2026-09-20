@@ -356,6 +356,15 @@ void AudioEngine::play_music(const std::string& track, bool loop) {
     ma_sound_start(&impl_->music);
 }
 
+// JS `lb.OS(a,b)` (L1276): `b==null&&(b=!0); a==null&&(a="menu");
+// lb.rJ||(lb.rJ=!0,ta.Ut(a,b))`. The guard makes the menu track survive
+// Map/Shop/Profile/Dojo hops and only restart after a fight/act cleared it.
+void AudioEngine::play_music_once(const std::string& track, bool loop) {
+    if (music_guard_) return;
+    music_guard_ = true;
+    play_music(track, loop);
+}
+
 void AudioEngine::stop_music() {
     if (impl_ == nullptr) return;
     if (impl_->music_ok) {

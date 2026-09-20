@@ -4701,6 +4701,29 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets) {
 
 } // namespace
 
+// JS `Oa.f5` (L2286-2288): the shop tab lists are the `it.Lia` type
+// partitions (L166-167: Weapon `Au`, Armor `Cva`, Helm `sDa`, Ranged `SJa`,
+// Magic `WFa`) filtered by `Oa.jAa` (L2297) `isActive && !li()` =
+// `!ShopHide` (`I.isActive`, L332) and not `Hidden` (`hl.li`, L278).
+// `PaidItem` is NOT a shop filter — premium rows stay in their type tab
+// (only the `wk`/IAP tab is gated by `iap`). Replaces
+// `item_catalog.cpp::shop_items`, which dropped Ranged/Magic and the
+// non-gold premium rows entirely (human report: "the SHOP does not show all
+// items"; the Ranged/Magic tabs rendered empty).
+std::vector<CatalogItem> shop_visible_items(const std::vector<CatalogItem>& all) {
+    std::vector<CatalogItem> out;
+    out.reserve(all.size());
+    for (const CatalogItem& ci : all) {
+        if (ci.type != "Weapon" && ci.type != "Armor" && ci.type != "Helm" &&
+            ci.type != "Ranged" && ci.type != "Magic") {
+            continue;
+        }
+        if (ci.shop_hide || ci.hidden) continue;  // `!isActive || li()`
+        out.push_back(ci);
+    }
+    return out;
+}
+
 // The shared catalog (loaded once, cached).
 std::vector<CatalogItem> load_catalog(App& app) {
     static std::vector<CatalogItem> cached;
@@ -4715,7 +4738,7 @@ std::vector<CatalogItem> load_catalog(App& app) {
                                        std::istreambuf_iterator<char>());
                 const std::vector<CatalogItem> all =
                     parse_item_catalog(std::string(data.begin(), data.end()));
-                cached = shop_items(all);
+                cached = shop_visible_items(all);
             }
         } catch (const std::exception& e) {
             std::fprintf(stderr, "item catalog load failed: %s\n", e.what());
@@ -5451,8 +5474,9 @@ void DojoScreen::on_key(int glfw_key, bool down) {
 }
 
 DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
-    // Menu music (JS `lb.OS` -> `ta.Ut("menu")`, L1276-1277).
-    sf2::audio::AudioEngine::instance().play_music("menu");
+    // Menu music (JS `lb.OS()` -> `ta.Ut("menu")` under the `lb.rJ` guard,
+    // L1276-1277; the FightNone hub ctor calls it).
+    sf2::audio::AudioEngine::instance().play_music_once("menu");
     // No bespoke ctor art: the JS hub is the `FightNone` ModelViewer over
     // the dojo layer stack + the shared `za` chrome (Tf L1969-1972). The
     // FIGHT/MAP/SHOP/PROFILE 4-up row, punchbag, gear and disciple chrome
@@ -6442,6 +6466,11 @@ void DojoScreen::render_impl(App& app) {
 // ---------------------------------------------------------------------------
 
 MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
+    // JS `Ya.init` (L2125): `lb.rJ||lb.OS()` — the Map inherits the menu
+    // track (guard no-op when the Dojo already set it) and REPLAYS it when a
+    // fight/act cleared `lb.rJ`, so leaving a fight never leaves the fight
+    // track running (JS `ai.B()` teardown -> `lb.OS()`, L384).
+    sf2::audio::AudioEngine::instance().play_music_once("menu");
     zones_ = load_zone_map(kViewW, kViewH);
     // The current zone from the save (JS `xf.ro` / CurrentZone, L248) plus
     // the battle records (iF) and MapFocus (ys) for the live rules below.
@@ -7392,6 +7421,10 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         if (!track.empty()) {
             sf2::audio::AudioEngine::instance().play_music(track);
         }
+        // JS `ai.Ut()` (L2008): `ta.Ut(this.Da.tp); lb.rJ=!1`. The fight start
+        // plays the battle track directly (bypassing `lb.OS`) and clears the
+        // menu guard, so the fight-end `lb.OS()` (L384) restores the menu.
+        sf2::audio::AudioEngine::instance().reset_music_guard();
     }
 
     // The on-screen gamepad art (JS `Za`): the ui/controller atlas
@@ -9244,9 +9277,12 @@ ResultsScreen::ResultsScreen(ScreenManager& mgr, bool player_won, int money_rewa
                              int exp_reward)
     : Screen(mgr, "Results"), player_won_(player_won), money_reward_(money_reward),
       exp_reward_(exp_reward) {
-    // No win/lose stinger files ship on disk — stop the fight track on
-    // Results instead (documented approximation).
-    sf2::audio::AudioEngine::instance().stop_music();
+    // JS `ai.B()` fight teardown (L384): `this.Da.type!="FightNone"&&lb.OS()`
+    // — leaving a fight restores the MENU track (the guard was cleared at
+    // fight start `ai.Ut` L2008, so this replays it; the Map/Shop/Profile
+    // then inherit it). Replaces the old stop-only approximation, which left
+    // everything after a fight silent.
+    sf2::audio::AudioEngine::instance().play_music_once("menu");
 }
 
 // JS `OLa`/`Oz` (L253-254): the level-up thresholds (`v.FR`) parsed once

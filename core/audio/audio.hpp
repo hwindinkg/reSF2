@@ -75,6 +75,14 @@ public:
     // the file is missing (headless-safe); every call is counted + logged.
     // NOTE: www/res ogg/m4a are NOT wired (miniaudio has no AAC decoder).
     void play_music(const std::string& track, bool loop = true);
+    // JS `lb.OS(a="menu", b=true)` (L1276-1277): `lb.rJ||(lb.rJ=!0,ta.Ut(a,b))`
+    // — the play-once-across-screen-hops guard. The Map/Dojo call this with
+    // `menu`; after a fight/act cleared the guard the track replays.
+    void play_music_once(const std::string& track, bool loop = true);
+    // JS `lb.rJ=!1` (fight start `ai.Ut` L2008; act `Rd.Ut`/`Rd.end`
+    // L2096-2098): clear the guard so the next `play_music_once` replays.
+    void reset_music_guard() { music_guard_ = false; }
+    bool music_guard() const { return music_guard_; }
     void stop_music();
     std::string music_track() const;
     std::uint64_t music_plays() const;
@@ -87,6 +95,7 @@ private:
     struct Impl;
     Impl* impl_ = nullptr;  // owns the miniaudio state (hpp stays header-light)
     bool enabled_ = false;
+    bool music_guard_ = false;  // JS `lb.rJ` (L1276).
     std::uint64_t played_total_ = 0;
 };
 
