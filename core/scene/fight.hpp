@@ -1429,6 +1429,9 @@ public:
     // Pins the controller in the fight phase: the round-end checks
     // (`Onb` -> `E3a`) never run while this is set.
     void enter_fight_none();
+    // Start the intro's plate clock (called by the fight screen once the `ik`
+    // VS overlay is gone). Idempotent.
+    void release_intro();
 
     // [trace, Phase 0] Arms the per-frame pose dump: for the first `frames`
     // fight frames, update() appends one JSONL line to `path` (reference/
@@ -1640,6 +1643,10 @@ private:
     banner_action banner_action_ = banner_action::none;  // the `vhb` dispatch
     int banner_start_ = 0;         // frame_ when the banner was raised
     int banner_round_ = 0;        // the ROUND N number (banner_round_+1 shown)
+    // The `ik` VS overlay (`screens.cpp`) holds the intro's plate clock: while
+    // set, `banner_tick` does not run, so the ROUND plate is not consumed
+    // during the overlay. Cleared by `release_intro` once `!vs_active_`.
+    bool intro_hold_ = true;
     // The visual effects layer (hit sparks) — presentation only.
     EffectSystem fx_;
     // The magic/effect containers (JS `tl.Rf` = `Gq`/`Hq`, L842-844): the

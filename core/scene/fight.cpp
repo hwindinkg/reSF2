@@ -453,21 +453,29 @@ void FightController::init_locks(
     // The fight start (JS ggb L383): round 0 -> the first round init.
     round_.number = 0;
     round_init();
-    enter_start_stance();
+    // [ROUND-plate lead-in] Do NOT enter the stance directly: the ROUND 1
+    // plate raised below EXPIRES into `enter_start_stance()` (JS `vhb` L410
+    // case 2 -> `FNa` L409), exactly like rounds 2+ through the `Z2` path.
+    // The controller idles at frame 0 until then, so phase 1 is frame-indexed
+    // from its own start (`enter_start_stance` resets `frame_`).
+    frame_ = 0;
+    phase_ = fight_phase::idle;
+    // The plate clock is HELD until the `ik` VS overlay ends (`release_intro`,
+    // called by the fight screen via `screens.cpp` once `!vs_active_`): the
+    // plate must not be consumed while the overlay covers the scene.
+    intro_hold_ = true;
     // The FIRST round's ROUND 1 plate (`Cr.tca` L2023: type 2, `fu(1.666)`,
     // armed after a 500 ms `wh.delay`). `round_start()` — which raises it
     // for rounds 2+ through the `Z2` path — is NOT called for the first
     // round (init enters start_stance directly with round_.number = 0), so
-    // raise it here. DISPLAY ONLY (`banner_action::none`): there is no
-    // preceding `Z2` to dispatch, so the expiry must not re-run `FNa`.
-    // Presentation only; round_.number stays 0 (the pose dump's "round"
-    // field is byte-identical).
+    // raise it here with the SAME dispatch (`vhb` case 2 -> `FNa`) the `Z2`
+    // path carries, so its expiry enters the stance (phase 1).
     cur_banner_ = banner_kind::round;
     banner_time_ = kJsBannerRoundBreakSeconds;
     banner_total_ = kJsBannerRoundBreakSeconds;
     banner_armed_ = false;                       // `tca` clears `wU` ...
     banner_arm_delay_ = kJsBannerArmDelaySeconds;  // ... until the 500 ms delay
-    banner_action_ = banner_action::none;
+    banner_action_ = banner_action::begin_round;
     banner_start_ = frame_;
     banner_round_ = round_.number;   // 0 -> "ROUND 1"
     std::fprintf(stdout, "[fight] banner: ROUND %d (F%d)\n", banner_round_ + 1, frame_);
@@ -2583,6 +2591,10 @@ void FightController::round_start() {
 
 // JS `FNa` (L409): phase 1 — fighters at their spawn, no input yet.
 void FightController::enter_start_stance() {
+    // JS `FNa` (L409) starts the phase-1 clock: `frame_ == 0` coincides with
+    // phase 1 so the frame-indexed fight timelines (drivers, oracle mapping)
+    // stay phase-local (the plate lead-in ran at frame 0 in the idle phase).
+    frame_ = 0;
     // Respawn the fighters at their spawn positions (JS `tja`/`Qlb`).
     // [FIX Phase 4a — fighters on the floor; Wave U pivot anchor] The dojo
     // spawn Y (-110/-93, the ModelsViewer Y) is the PivotNode world y:
@@ -4824,6 +4836,9 @@ void FightController::banner_show(banner_kind kind, float seconds,
 // used invented frame counts). `Cr.pause` is the HUD pause flag; the whole
 // fight update is frozen while paused, so it is always false here.
 void FightController::banner_tick(float dt) {
+    // [ROUND-plate lead-in] The intro's plate clock is held until the `ik` VS
+    // overlay ends (`release_intro`); nothing ticks before then.
+    if (intro_hold_) return;
     if (banner_arm_delay_ > 0.0f) {
         banner_arm_delay_ -= dt;
         if (banner_arm_delay_ > 0.0f) return;
@@ -4833,6 +4848,13 @@ void FightController::banner_tick(float dt) {
     if (!banner_armed_) return;
     banner_time_ -= dt;
     if (banner_time_ <= 0.0f) banner_expire();
+}
+
+// Start the intro's plate clock once the `ik` VS overlay (`screens.cpp`) is
+// gone. Idempotent: `intro_hold_` stays false after the first call, so the
+// per-frame `!vs_active_` guard cannot disturb a running plate.
+void FightController::release_intro() {
+    intro_hold_ = false;
 }
 
 // JS `Cr.ONa` (L2026): `this.X(!1); this.wU=!1; this.yA.Z(this.type)`.
@@ -4877,7 +4899,10 @@ void FightController::banner_expire() {
 
 // JS `ca.Ea` (L385) + `ia` (L388): the per-frame fight update.
 void FightController::update(float dt) {
-    ++frame_;
+    // The fight frame counter (JS `ca.frame`): counts the LIVE phases only.
+    // The idle lead-in (the ROUND plate, before phase 1) keeps it at 0 so
+    // `frame_ == 0` coincides with phase 1 (`enter_start_stance` resets it).
+    if (phase_ != fight_phase::idle) ++frame_;
     // [fx] The particle pool + the hit judder/hit-stop tick (presentation
     // only — runs even after the battle ends so the KO burst finishes and
     // the camera kick settles back to 0; neither touches the simulation).

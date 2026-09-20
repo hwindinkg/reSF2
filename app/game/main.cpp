@@ -587,14 +587,14 @@ static const UiTourStep kFidelitySteps[] = {
     // [VS-intro gate] `fight_intro` is the `ik` roster itself (the oracle's own
     // shot: `MANIFEST.md` — "map -> В БОЙ -> VS (ТЕНЬ / ШИН)"), so it captures
     // inside the composed hold (`vs_wait=1`). `fight_stance`/`fight_block` are
-    // VISIBLE-fight frames and wait for the overlay to end (`vs_wait=2`) — the
-    // pre-3.4 s driver's F120/F146 landed under the overlay once `ik.yY` grew.
+    // VISIBLE-fight frames and gate on the SIM frame (`fight_frame` 120 / 146,
+    // phase-local: phase 1 = frame 0, phase 2 = frame 133).
     {0.0f, 0.0f, "map->fight", 5, 10, 6, 40, "fight_intro.png", 0, false, 0.0f, 0.0f, 0, false,
      -1, true, 3, 1},
     {0.0f, 0.0f, "fight stance", 6, 0, -1, 0, "fight_stance.png", 0, true, 0.0f, 0.0f, -1, false,
-     -1, false, 3, 2},
-    {0.0f, 0.0f, "fight block", 6, 0, -1, 35, "fight_block.png", 0, true, 0.0f, 0.0f, -1, false,
-     -1, false, 3, 2},
+     120, false, 3, 0},
+    {0.0f, 0.0f, "fight block", 6, 0, -1, 0, "fight_block.png", 0, true, 0.0f, 0.0f, -1, false,
+     146, false, 3, 0},
     // The oracle's single fight input: punch (control 9 = K/Space) pressed at
     // phase-2 local 227 (oracle f=561 -> port frame 360).
     {0.0f, 0.0f, "fight punch (oracle control 9)", 6, 0, -1, 0, nullptr, 32, true, 0.0f, 0.0f,
@@ -733,22 +733,20 @@ struct TourDriver {
         // phase-local frame. A keyed step presses `key` once at the target and
         // waits `hold_frames` so the move / pause dialog is drawn at capture.
         //
-        // [VS-intro gate] The frame counter keeps running under the `ik`
-        // overlay (`vs_wait == 2`), so an absolute frame no longer identifies
-        // a VISIBLE fight state: the pre-`ik.yY`-3.4 s driver captured F120/F146
-        // while the overlay still covered the scene. The JS creates the fight
-        // only after `ik.kg` (L2071), so a visible-fight capture waits for
-        // `!vs_active()` first; `hold_frames` then counts the visible frames.
-        if (s.fight_frame >= 0 || s.vs_wait == 2) {
+        // [fight-frame gate] The step waits on the SIM frame (JS `ca.frame`):
+        // the ROUND-plate lead-in runs the intro at frame 0 (`init_locks` ->
+        // plate -> `enter_start_stance`), so phase 1 is frame 0 and phase 2 is
+        // frame 133 again. `fight_stance`/`fight_block` gate at their
+        // phase-local oracle frames (120 / 146); the old `vs_wait == 2`
+        // overlay workaround is gone.
+        if (s.fight_frame >= 0) {
             const bool on_fight = (cur == kScreenFight);
             sf2::app::Screen* ftop = app.screens().top();
             sf2::app::FightScreen* fs =
                 (on_fight && ftop != nullptr) ? static_cast<sf2::app::FightScreen*>(ftop)
                                               : nullptr;
             const int ff = fs != nullptr ? fs->fight_frame() : -1;
-            const bool vs_over = fs != nullptr && !fs->vs_active();
-            const bool ready =
-                !on_fight || (s.vs_wait == 2 ? vs_over : ff >= s.fight_frame);
+            const bool ready = !on_fight || ff >= s.fight_frame;
             if (ready) {
                 if (on_fight && s.key != 0 && !key_up_done) {
                     app.inject_key(s.key, true);
@@ -764,13 +762,8 @@ struct TourDriver {
                     ++step_frame;
                     return;
                 }
-                if (s.vs_wait == 2) {
-                    std::fprintf(stdout, "%s fight frame F%d (gate vs-over) capture %s\n", tag,
-                                 ff, s.capture != nullptr ? s.capture : "-");
-                } else {
-                    std::fprintf(stdout, "%s fight frame F%d (gate %d) capture %s\n", tag, ff,
-                                 s.fight_frame, s.capture != nullptr ? s.capture : "-");
-                }
+                std::fprintf(stdout, "%s fight frame F%d (gate %d) capture %s\n", tag, ff,
+                             s.fight_frame, s.capture != nullptr ? s.capture : "-");
                 std::fflush(stdout);
                 snap(app, s);
                 advance();
@@ -1703,6 +1696,41 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --- Save hygiene (bug 2) ----------------------------------------------
+    // Every driver/tour/probe starts from a well-defined profile: the ambient
+    // `save_path` (gitignored) is mutated by each run (money, items, battles,
+    // fights, story step), so a gate asserting a FRESH state (flow-verify's
+    // BOSS_LYNX ladder, the shop BUY/EQUIP) failed depending on the previous
+    // run. Reset to the shipped template before boot; the per-mode seeds
+    // (fidelity/quest-verify story step, headless-loop END+money) apply on top.
+    if (driver_mode) {
+        std::string def = res_root + "/users_default.xml";
+        if (!std::filesystem::exists(def)) {
+            const std::string hashed = res_root + "/users_default.b7da2019.xml";
+            if (std::filesystem::exists(hashed)) {
+                def = hashed;
+            } else {
+                const std::string extracted = "reference/extracted/xml/res/users_default.xml";
+                if (std::filesystem::exists(extracted)) def = extracted;
+            }
+        }
+        try {
+            std::filesystem::remove(save_path);  // drop the ambient save
+        } catch (const std::exception&) {
+            // no ambient save is the normal first-run case
+        }
+        try {
+            sf2::app::SaveSystem ss(save_path, def);
+            sf2::app::WarriorSave w = ss.load();  // template (save was removed)
+            ss.save(w);                           // well-defined baseline
+            std::fprintf(stdout, "[save] driver baseline: %s -> '%s'\n", def.c_str(),
+                         save_path.c_str());
+            std::fflush(stdout);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[save] driver baseline failed: %s\n", e.what());
+        }
+    }
+
     // `--fidelity-tour` captures the stock FRESH tutorial beats, so start the
     // story at NotStarted BEFORE boot: the JS loads `quests.xml` with the
     // `tutorial_quests.xml` include gated on `_$StoryTutorialStep != END`
@@ -1745,6 +1773,47 @@ int main(int argc, char** argv) {
             }
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[qverify] story-step reset failed: %s\n", e.what());
+        }
+    }
+
+    // `--headless-loop`: reset the run save from the shipped template so the
+    // 13-step gate is deterministic regardless of the ambient (gitignored)
+    // save. Bug (2): the ambient save is mutated by every gate, so a prior run
+    // already owns WEAPON_KNIVES and the shop TRY/price plate toggles the
+    // equipped weapon instead of buying — the BUY/EQUIP gate then FAILs
+    // (`owns_knives=1 weapon=Fists`). The well-defined baseline is the shipped
+    // `users_default.b7da2019.xml` with `_$StoryTutorialStep=END` (the loop's
+    // steps assume the clean post-tutorial hub, not the StoryTutorial chain)
+    // and the 200-coin purchase float (`users_default` ships Money="0", so the
+    // JS `Pa.iwa` price gate would otherwise void the buy).
+    if (headless_loop) {
+        std::string def = res_root + "/users_default.xml";
+        if (!std::filesystem::exists(def)) {
+            const std::string hashed = res_root + "/users_default.b7da2019.xml";
+            if (std::filesystem::exists(hashed)) {
+                def = hashed;
+            } else {
+                const std::string extracted = "reference/extracted/xml/res/users_default.xml";
+                if (std::filesystem::exists(extracted)) def = extracted;
+            }
+        }
+        try {
+            std::filesystem::remove(save_path);  // drop the ambient save
+        } catch (const std::exception&) {
+            // no ambient save is the normal first-run case
+        }
+        try {
+            sf2::app::SaveSystem ss(save_path, def);
+            sf2::app::WarriorSave w = ss.load();  // template (save was removed)
+            w.set_story_step("END");
+            w.money = 200;
+            ss.save(w);  // well-defined baseline on disk
+            std::fprintf(stdout,
+                         "[loop] seeded baseline save '%s' from %s (money=200, tutorial=END)\n",
+                         save_path.c_str(), def.c_str());
+            std::fflush(stdout);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[loop] baseline seed failed: %s\n", e.what());
         }
     }
 
@@ -2401,8 +2470,15 @@ int main(int argc, char** argv) {
                 std::fprintf(stdout, "[replay] fight screen up\n");
                 std::fflush(stdout);
             } else if (fight_seen) {
-                ++fight_frames;
                 fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+                // [ROUND-plate lead-in] Index the tape/probes on the FIGHT's
+                // own phase-local frame (`FightController::frame_` resets to 0
+                // at phase 1, JS `FNa` L409; the ROUND-plate lead-in is
+                // excluded from the counter). The tape frames below are
+                // authored phase-local, so the wall-clock count from the
+                // screen push would land every edge `lead-in` frames early and
+                // the 2key double-tap windows would miss.
+                fight_frames = fs != nullptr ? fs->fight_frame() : fight_frames + 1;
                 const int started = fs != nullptr ? fs->player_moves_started() : 0;
                 if (pending != nullptr && started > last_started) {
                     const std::string dec = fs->player_last_decision();

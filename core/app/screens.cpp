@@ -97,7 +97,11 @@ const EngineDialog* quest_modal_top(App& app) {
             std::fprintf(stdout, "[quest] dialog skipped (headless): %s\n",
                          app.quest_engine().dialog().title.c_str());
             std::fflush(stdout);
-            app.quest_engine().pop_dialog();
+            // Pop the entry we just logged (the FRONT). `pop_dialog()` is
+            // modal-aware (`modal_index()` skips bar Notifications), so a
+            // Notification at the front never popped and this `while` spun
+            // forever (soft lock: `fight_->update()` never ran).
+            app.quest_engine().pop_head_dialog();
         }
         return nullptr;
     }
@@ -8296,6 +8300,10 @@ void FightScreen::update_impl(float dt) {
         vs_t_ += dt;
         if (vs_t_ >= kVsTotal) vs_active_ = false;
     }
+    // [ROUND-plate lead-in] The intro's ROUND plate must not be consumed while
+    // the `ik` VS overlay covers the scene: release the plate clock once the
+    // overlay ends so `ROUND -> phase 1 -> FIGHT` plays on the visible fight.
+    if (!vs_active_ && fight_ != nullptr) fight_->release_intro();
     // Location timeline (D6): advance the battle location's SimpleEffect
     // Transparency loop per frame (its own `fight_location`, separate from
     // the hub's `dojo`).

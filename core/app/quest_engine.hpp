@@ -301,6 +301,14 @@ public:
             dialogs_.erase(dialogs_.begin() + static_cast<std::ptrdiff_t>(i));
         }
     }
+    // Headless drain pops the entry it LOGGED (`dialog()` = the FRONT), not
+    // `modal_index()`. `pop_dialog()` is modal-aware and is a NO-OP when the
+    // queue holds only bar Notifications, so a Notification at the front made
+    // the headless `while (has_dialog())` loop spin forever (the `Regular`
+    // behind it never drained) — a soft lock. This erase always progresses.
+    void pop_head_dialog() {
+        if (!dialogs_.empty()) dialogs_.erase(dialogs_.begin());
+    }
 
     // --- `Ib` bar vs `Wb` modal (JS `He.S` L1050 / `Wb.Xob` L927) ----------
     // JS `He.S` L1050 routes a `Notification` to `Ib.F().Qhb(r,z,c,g,k,SK,x,
