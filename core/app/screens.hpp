@@ -475,6 +475,13 @@ public:
     // harness logs it per frame to show the move -> idle flip.
     std::string player_current_move() const;
 
+    // The ENEMY's current move name and each fighter's reported facing
+    // (`Fighter::facing()`, the pose dump's `fx`). The `--verify-place` victim
+    // probe reads them to log what the throw's victim actually does.
+    std::string enemy_current_move() const;
+    float player_facing() const;
+    float enemy_facing() const;
+
     // Test/replay hook: inject a game key edge by key_type id (1..14) into
     // the same `player_input` path the keyboard uses, bypassing the GLFW key
     // map. The `atframe <n> press <control>` replay stream uses these ids.

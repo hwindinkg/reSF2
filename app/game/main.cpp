@@ -2688,6 +2688,38 @@ int main(int argc, char** argv) {
                     if (thr_ok) {
                         thr_label = std::string(hold_label[h]) +
                                     (er ? " enemyRIGHT(Wl>0)" : " enemyLEFT(Wl<0)");
+                        // ---- probe 2b: the THROW VICTIM -----------------
+                        // The thrower fires `<PlayAnimation Player="Enemy"
+                        // Animation="…V"/>` (moves.xml:42439/42632/42835); the
+                        // victim's `…V` move opens with
+                        //   <Align Axis="X|Z"><Pivot Object="Animation"/>
+                        //   <Position Player="Enemy" Object="Animation"/></Align>
+                        // so (JS `Te.Gub` L557-559) `d = 0`, `e = c.Fk` where
+                        // `c = BBa(b4=Enemy)` (L563, `Te.cQ` = the THROWER) and
+                        // `this.Fk = e - d`; `Gla(Fk.x, eja, Fk.z)` (L559) then
+                        // shifts the victim's clip ONTO the thrower. Log both
+                        // fighters' x + facing per victim frame: the victim must
+                        // NOT be pulled back to its own origin and must NOT be
+                        // turned away from the thrower.
+                        std::fprintf(stdout,
+                                     "[victim] t=%d BEFORE thrower='%s' x=%.1f f=%+.0f "
+                                     "| victim='%s' x=%.1f f=%+.0f\n",
+                                     fs->fight_frame(), thr_mv1.c_str(),
+                                     fs->player_world_x(), fs->player_facing(),
+                                     fs->enemy_current_move().c_str(),
+                                     fs->enemy_world_x(), fs->enemy_facing());
+                        for (int vf = 0; vf < 48; ++vf) {
+                            app.run_one_frame();
+                            std::fprintf(stdout,
+                                         "[victim] t=%d thrower='%s' x=%.1f f=%+.0f "
+                                         "| victim='%s' x=%.1f f=%+.0f\n",
+                                         fs->fight_frame(),
+                                         fs->player_current_move().c_str(),
+                                         fs->player_world_x(), fs->player_facing(),
+                                         fs->enemy_current_move().c_str(),
+                                         fs->enemy_world_x(), fs->enemy_facing());
+                        }
+                        std::fflush(stdout);
                     } else {
                         for (int i = 0; i < 20; ++i) app.run_one_frame();
                     }

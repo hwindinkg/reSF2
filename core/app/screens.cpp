@@ -7982,6 +7982,22 @@ std::string FightScreen::player_current_move() const {
     return m != nullptr ? m->name : std::string();
 }
 
+std::string FightScreen::enemy_current_move() const {
+    if (fight_ == nullptr) return std::string();
+    const sf2::scene::MoveDef* m = fight_->enemy().fighter.current_move();
+    return m != nullptr ? m->name : std::string();
+}
+
+float FightScreen::player_facing() const {
+    return fight_ != nullptr ? static_cast<float>(fight_->player().fighter.facing())
+                             : 0.0f;
+}
+
+float FightScreen::enemy_facing() const {
+    return fight_ != nullptr ? static_cast<float>(fight_->enemy().fighter.facing())
+                             : 0.0f;
+}
+
 int FightScreen::fight_frame() const {
     return fight_ != nullptr ? fight_->frame() : -1;
 }
