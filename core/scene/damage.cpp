@@ -296,6 +296,15 @@ void load_fight_params_from_settings(const std::string& xml_text) {
              v.crit_chance_base);
     // `v.kha` (L1158) = `<Lifesteal Base Attribute>`.
     parse_eh(root.child("Lifesteal"), v.lifesteal_attr, v.lifesteal_base);
+    // `v.Qxa` (L1157) = `u.I(a.A("CounterPunches").attributes.get("Value"),2)`
+    // — the Punchbag reaction cadence. `as_int(2)` is the `u.I(...,2)` fallback.
+    if (const pugi::xml_node cp = root.child("CounterPunches")) {
+        v.counter_punches = cp.attribute("Value").as_int(2);
+    }
+    // Diagnostic (boot, once): the shipped value vs the JS `u.I(...,2)` fallback.
+    std::fprintf(stdout, "[fx] CounterPunches=%d (shipped XML; fallback=2)\n",
+                 v.counter_punches);
+    std::fflush(stdout);
     // `v.Ub` (L1158) = `<Shock>`.
     parse_shock(root.child("Shock"), v);
     // `v.jA` (L1158) = `<Magic>`.

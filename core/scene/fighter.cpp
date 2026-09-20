@@ -671,6 +671,23 @@ void Fighter::strike_node(int bone, const sf2::scene::Vec3& v) {
     sol_ma_[u * 3 + 2] += v.z;
 }
 
+// [probe, authorised] The struck node's solver `ma` (JS `Vc.ma`).
+float Fighter::solver_ma_x(int bone) const {
+    if (bone < 0 || sol_ma_.size() != model_.bones.size() * 3) return 0.0f;
+    return sol_ma_[static_cast<std::size_t>(bone) * 3];
+}
+float Fighter::solver_ma_y(int bone) const {
+    if (bone < 0 || sol_ma_.size() != model_.bones.size() * 3) return 0.0f;
+    return sol_ma_[static_cast<std::size_t>(bone) * 3 + 1];
+}
+
+// [probe, authorised] Snapshot the current DRAWN pose; `sample()` reports the
+// delta on the next call (one `[bagmove]` line).
+void Fighter::arm_strike_move_probe() {
+    strike_probe_pose_ = pos_;
+    strike_probe_pending_ = !pos_.empty();
+}
+
 int Fighter::capsule_bbox(float& min_x, float& min_y, float& max_x,
                           float& max_y) const {
     min_x = min_y = max_x = max_y = 0.0f;
@@ -2348,6 +2365,35 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                      n > 0 ? static_cast<float>(sum_d / n) : 0.0f);
         std::fflush(stdout);
         ragdoll_recover_from_.clear();
+    }
+    // [probe, authorised] Per-hit DRAWN-pose evidence: the render-pose delta
+    // (per-node + capsule bbox) since `arm_strike_move_probe()` — the frame the
+    // impulse was written. Answers "does the struck bag move in the drawn pose".
+    if (strike_probe_pending_) {
+        strike_probe_pending_ = false;
+        if (strike_probe_pose_.size() == pos_.size() && !pos_.empty()) {
+            float max_d = 0.0f, sum_d = 0.0f;
+            std::size_t moved = 0;
+            for (std::size_t i = 0; i < n; ++i) {
+                const float ddx = pos_[i * 2] - strike_probe_pose_[i * 2];
+                const float ddy = pos_[i * 2 + 1] - strike_probe_pose_[i * 2 + 1];
+                const float d = std::sqrt(ddx * ddx + ddy * ddy);
+                if (d > max_d) max_d = d;
+                sum_d += d;
+                if (d > 0.01f) ++moved;
+            }
+            float b0x, b0y, b1x, b1y;
+            const int bc = capsule_bbox(b0x, b0y, b1x, b1y);
+            (void)bc;
+            std::fprintf(stdout,
+                         "[bagmove] frame=%d nodes=%zu moved=%zu max=%.3f "
+                         "mean=%.3f box=(%.2f,%.2f)-(%.2f,%.2f)\n",
+                         frame, n, moved, max_d,
+                         n > 0 ? static_cast<float>(sum_d / n) : 0.0f, b0x, b0y,
+                         b1x, b1y);
+            std::fflush(stdout);
+        }
+        strike_probe_pose_.clear();
     }
     pose_sampled_ = true;  // `pos_` now holds a real frame (the `ma` analog)
 }

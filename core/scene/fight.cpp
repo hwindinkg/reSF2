@@ -63,11 +63,13 @@ int hit_effect_run_frames(const std::string& file) {
 constexpr float kFlashTimeCrit = 1.0f / 60.0f;
 constexpr float kFlashTimeNormal = 1.0f / 120.0f;
 
-// `<CounterPunches Value="50"/>` (reference/extracted/xml/res/internal_settings.xml;
-// JS `v.Qxa` L1157 `v.Qxa=u.I(a.A("CounterPunches").attributes.get("Value"),2)`).
+// `<CounterPunches Value="50"/>` (reference/extracted/xml/res/internal_settings.xml
+// L557; JS `v.Qxa` L1157
+// `v.Qxa=u.I(a.A("CounterPunches").attributes.get("Value"),2)`).
 // `ca.Cgb` L396 forces the Punchbag's hit reaction when the defender's hit
-// counter `sI` reaches this cadence.
-constexpr int kCounterPunches = 50;
+// counter `sI` reaches this cadence. DATA-DRIVEN (JS-STRICT): parsed into
+// `FightParams::counter_punches` by `load_fight_params_from_settings` — the
+// shipped XML resolves to 50; the `u.I(...,2)` fallback is 2.
 
 // The banner machine timings (JS class `Cr` L2022-2027 — all in SECONDS:
 // `Cr.fu(a){this.Sc=a;...}` L2026). The old port used invented frame counts
@@ -4171,13 +4173,36 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     {
         const int b1 = def.fighter.model().bone_by_name(hit_cap.end1);
         const int b2 = def.fighter.model().bone_by_name(hit_cap.end2);
+        // [probe, authorised] Per-hit impulse evidence for the NotAnimation
+        // dojo bag: the struck endpoint nodes' solver `ma` before/after the
+        // `Bl.strike` write, plus the DRAWN-pose delta armed for the next
+        // `sample()` (`[bagmove]`).
+        const bool bag_probe = battle_.enemy_not_animation && !def.is_player;
+        const bool has2 = b2 >= 0 && b2 != b1;
+        const float p1x = bag_probe && b1 >= 0 ? def.fighter.solver_ma_x(b1) : 0.0f;
+        const float p1y = bag_probe && b1 >= 0 ? def.fighter.solver_ma_y(b1) : 0.0f;
+        const float p2x = bag_probe && has2 ? def.fighter.solver_ma_x(b2) : 0.0f;
+        const float p2y = bag_probe && has2 ? def.fighter.solver_ma_y(b2) : 0.0f;
         if (b1 >= 0) def.fighter.strike_node(b1, imp.node1_vec);
-        if (b2 >= 0 && b2 != b1) def.fighter.strike_node(b2, imp.node2_vec);
+        if (has2) def.fighter.strike_node(b2, imp.node2_vec);
         std::fprintf(stdout,
                      "[strike] F%d %s x1=%.2f x2=%.2f nk=%d frame=%d\n", frame,
                      def.name.c_str(), imp.node1_vec.x, imp.node2_vec.x,
                      def.fighter.ragdoll_active() ? 1 : 0,
                      def.fighter.ragdoll_frame_count());
+        if (bag_probe) {
+            const float q1x = b1 >= 0 ? def.fighter.solver_ma_x(b1) : 0.0f;
+            const float q1y = b1 >= 0 ? def.fighter.solver_ma_y(b1) : 0.0f;
+            const float q2x = has2 ? def.fighter.solver_ma_x(b2) : 0.0f;
+            const float q2y = has2 ? def.fighter.solver_ma_y(b2) : 0.0f;
+            std::fprintf(stdout,
+                         "[bagimp] F%d n1=%s ma(%.3f,%.3f)->(%.3f,%.3f) "
+                         "d=(%.3f,%.3f) n2=%s d=(%.3f,%.3f) imp1=(%.3f,%.3f)\n",
+                         frame, hit_cap.end1.c_str(), p1x, p1y, q1x, q1y,
+                         q1x - p1x, q1y - p1y, hit_cap.end2.c_str(), q2x - p2x,
+                         q2y - p2y, imp.node1_vec.x, imp.node1_vec.y);
+            def.fighter.arm_strike_move_probe();
+        }
         std::fflush(stdout);
     }
     }
@@ -4279,7 +4304,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // `nk=false`) and its capsule hit test has no endpoint-immovability gate,
     // so the value flips exactly but has no consumer yet.
     if (battle_.type == "FightNone" && !def.is_player &&
-        def.fighter.hits_taken() == kCounterPunches) {
+        def.fighter.hits_taken() ==
+            sf2::scene::FightParams::defaults().counter_punches) {
         if (const sf2::scene::HitEffect* forced =
                 sf2::scene::select_hit_effect(false, false, true)) {
             camera_.apply_hit_effect(*forced);

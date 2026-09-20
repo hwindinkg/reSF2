@@ -573,6 +573,15 @@ public:
     // Persistent across frames while the ragdoll is active.
     void strike_node(int bone, const sf2::scene::Vec3& v);
 
+    // [probe, authorised] The struck endpoint node's solver `ma` component
+    // (JS `Vc.ma` = the node `ma` `Bl.strike` writes).
+    float solver_ma_x(int bone) const;
+    float solver_ma_y(int bone) const;
+    // [probe, authorised] Arm the NEXT `sample()` to report the DRAWN pose
+    // delta (per-node + capsule bbox) since this call — the per-hit motion of
+    // the render pose (`pos_`). One `[bagmove]` line on that sample.
+    void arm_strike_move_probe();
+
     // World-space bbox of every <Edges> capsule endpoint, inflated by the
     // capsule radius (the meshless Punchbag has no triangles; the capsule
     // list still measures it). Returns the number of resolved edges.
@@ -706,6 +715,9 @@ private:
     std::vector<float> sol_ma_;  // 3*n: current posed positions (JS `ma`)
     std::vector<float> sol_mf_;  // 3*n: previous positions (JS `mf`)
     bool solver_init_ = false;   // ma/mf seeded from the bind pose once
+    // [probe, authorised] per-hit drawn-pose evidence (arm_strike_move_probe).
+    bool strike_probe_pending_ = false;
+    std::vector<float> strike_probe_pose_;
     // JS `Al.oa.vc`: the model's shock latch (see `set_shock_latch`). Starts
     // false; the fight sets it when a shock lands (`ca.Cgb` L394).
     bool shock_latch_ = false;

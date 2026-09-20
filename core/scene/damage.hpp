@@ -128,6 +128,12 @@ struct FightParams {
     int shock_loosening_delay = 12;     // `LooseningDelay.Frames` (MFa)
     float shock_crit_base = 0.0001f;    // `CriticalHitChance.Base`
     float shock_head_base = 0.0001f;    // `HeadHitChance.Base`
+    // `v.Qxa` (L1157): `<CounterPunches Value="50"/>` — the Punchbag hit
+    // cadence `ca.Cgb` L396 tests against the defender's landed-hit counter
+    // (`a.model.sI != v.Qxa`). Data-driven: `u.I(...,2)` is the JS fallback
+    // (radix-10 parse, `2` when the attribute is absent/unparseable), so the
+    // static default here is 2 and the shipped file resolves it to 50.
+    int counter_punches = 2;
     // AlignTargetAttributes (JS `v.wv`): attribute name -> Align value.
     std::map<std::string, float> align_target_attributes;
     // `p.o.Yh` — the eclipse flag `v.eNa` (L1204) tests. The dojo has no
