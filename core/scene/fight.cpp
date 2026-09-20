@@ -4371,6 +4371,11 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     if (!hit_blocked) {
         ++atk.combo_run;
         if (atk.combo_run > atk.max_combo) atk.max_combo = atk.combo_run;
+        // JS `Vx.wgb` (L510 `e.dca()`): `this.v1=!0; this.OV=0; ++this.tf`.
+        // The latch + window counter arm the time decay in the per-frame
+        // `Vx.wyb` tick below.
+        atk.combo_active = true;
+        atk.combo_frames = 0;
         def.combo_run = 0;
     }
     if (rec.shock) ++atk.shocks_dealt;
@@ -5105,6 +5110,25 @@ void FightController::update(float dt) {
                     } else {
                         apply_hit(enemy_, player_, *e_move, *hit_iv, hit_cap, ch, frame_,
                                   atk_cap);
+                    }
+                }
+            }
+
+            // JS `wd.Ax` -> `Vx.wyb` (`iu`, g="C5"), once per frame per
+            // fighter: `this.v1&&(++this.OV, this.OV>v.pCa()&&(this.j2=
+            // this.Ui, this.reset()))` where `reset(){v1=!1; Ui=tf=OV=0}`.
+            // `pCa()` = `v.Lpa` = internal_settings `<Combo Time="90"/>`.
+            // Ordered AFTER the hit pass so a landed hit's `wgb` (`OV=0`)
+            // precedes the tick — exactly `Te.ia`'s `da.ia()` (strike) then
+            // `this.Ax()`. This is the combo time decay the port lacked.
+            {
+                const int combo_window = fight_params().combo_time;
+                for (FightFighter* fr : {&player_, &enemy_}) {
+                    if (!fr->combo_active) continue;
+                    if (++fr->combo_frames > combo_window) {
+                        fr->combo_active = false;
+                        fr->combo_frames = 0;
+                        fr->combo_run = 0;
                     }
                 }
             }

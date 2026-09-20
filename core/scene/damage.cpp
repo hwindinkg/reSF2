@@ -301,6 +301,18 @@ void load_fight_params_from_settings(const std::string& xml_text) {
     if (const pugi::xml_node cp = root.child("CounterPunches")) {
         v.counter_punches = cp.attribute("Value").as_int(2);
     }
+    // `v.nV`/`v.Lpa` (L1157) = `<Combo MinHits="3" Time="90"/>` — the `iu`
+    // (`Vx`) combo tracker: `wyb` resets the run once `OV > pCa()` (= Time)
+    // frames pass with no landed hit; `wgb` arms the announce at `aw()`
+    // (= MinHits). Values verified 2026-09-20 against
+    // reference/extracted/xml/res/internal_settings.xml `<Combo>`.
+    if (const pugi::xml_node cb = root.child("Combo")) {
+        v.combo_min_hits = cb.attribute("MinHits").as_int(3);
+        v.combo_time = cb.attribute("Time").as_int(90);
+    }
+    std::fprintf(stdout, "[fx] Combo MinHits=%d Time=%d (shipped XML)\n",
+                 v.combo_min_hits, v.combo_time);
+    std::fflush(stdout);
     // Diagnostic (boot, once): the shipped value vs the JS `u.I(...,2)` fallback.
     std::fprintf(stdout, "[fx] CounterPunches=%d (shipped XML; fallback=2)\n",
                  v.counter_punches);

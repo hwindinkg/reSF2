@@ -993,6 +993,15 @@ struct FightFighter {
     int hits_taken = 0;
     int combo_run = 0;        // consecutive landed hits (resets when taken)
     int max_combo = 0;        // battle-best run (prize ComboCount factor)
+    // JS `wd.Vx` (`iu`, g="C5") per-fighter combo tracker. `combo_run` is the
+    // landed-hit ladder (`iu.tf`, armed by `wgb` via `dca`); `combo_frames`
+    // is the per-frame window counter (`iu.OV`) and `combo_active` the latch
+    // (`iu.v1`). `iu.wyb` (the per-frame `wd.Ax`) ticks `OV` while `v1` and
+    // runs `reset()` once `OV > Combo.Time` (`pCa()` = `v.Lpa`,
+    // internal_settings `<Combo Time="90"/>`). This is the time decay the
+    // port previously lacked — it only reset the run on a taken hit.
+    int combo_frames = 0;        // `iu.OV`
+    bool combo_active = false;   // `iu.v1`
     int shocks_dealt = 0;     // shock hits landed (prize Shock factor)
     int moves_started = 0;
     std::string last_move;    // current move name (for the log/HUD)

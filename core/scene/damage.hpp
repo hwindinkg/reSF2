@@ -134,6 +134,12 @@ struct FightParams {
     // (radix-10 parse, `2` when the attribute is absent/unparseable), so the
     // static default here is 2 and the shipped file resolves it to 50.
     int counter_punches = 2;
+    // `v.nV` (L1157) = `u.I(a.A("Combo").attributes.get("MinHits"),3)` — the
+    // `aw()` announce threshold the `iu` (`Vx`) combo tracker arms `Ui` at.
+    int combo_min_hits = 3;
+    // `v.Lpa` (L1157) = `u.I(a.A("Combo").attributes.get("Time"),90)` — the
+    // `pCa()` frame budget `iu.wyb` counts `OV` against (the combo window).
+    int combo_time = 90;
     // AlignTargetAttributes (JS `v.wv`): attribute name -> Align value.
     std::map<std::string, float> align_target_attributes;
     // `p.o.Yh` — the eclipse flag `v.eNa` (L1204) tests. The dojo has no
