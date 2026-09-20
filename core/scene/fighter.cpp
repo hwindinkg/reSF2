@@ -448,6 +448,8 @@ void Fighter::input(sf2::scene::key_type key, sf2::scene::press_type press) {
         // JS `Sgb` guard `!a.sl` — the key is already down: ignore the
         // duplicate edge (no second Tap row).
         if (held_keys_.count(key) != 0) return;
+        // JS `zl.rwa` (L799): the press EDGE fires the KeyPressed event once.
+        key_edge_ = true;
         // JS `Sgb` -> `zd.clear()` (L688): a new press clears the stale
         // `released` rows (holds are rebuilt below by `rebuild_holds`).
         keys_.erase(std::remove_if(keys_.begin(), keys_.end(),
@@ -959,13 +961,15 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     sub_ = std::max(1, (move.mid_frames + 1) * 1);
     subframe_ = 0;
 
-    // Consume the buffered tap (JS `Okb` L506: `Kl.reset()` + `Kl.Ptb(a)`
-    // sets the current key as the move's trigger).
-    tap_age_ = 0;
-    for (auto it = keys_.begin(); it != keys_.end();) {
-        if (it->press == press_type::tap) it = keys_.erase(it);
-        else ++it;
-    }
+    // The buffered Tap is NOT consumed here. JS `Okb` (L506:
+    // `Kl.reset(); Kl.Ptb(a); Kl.rwa()`) is called ONLY from the AI path
+    // (`Ykb` L500); the player's `zl.Sgb` ring (`zg.sh`) keeps its taps until
+    // the 15-frame `dX` age-out (`zl.ia` L798). That persistence is exactly
+    // what lets two taps of the SAME key accumulate into the `2key` /
+    // `DoubleStepForward` multiset requirement (`zd.$ga` L688 -> `zd.eca`/
+    // `Eab`: `have >= need`, `need == 2`). The old erase (plus the `dX=0`
+    // reset) dropped tap 1 on the first started move, so tap 2 could never
+    // satisfy `need == 2` — the reported "double tap is hard".
 
     // (Clip lookup moved above, before the ragdoll-stop gate.)
     // JS `jc.Lj` (`Vlb`/`Cdb` resolves it from the loaded clip when the move
@@ -1202,16 +1206,21 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
 // PRECONDITION (JS `wd.BHa` <- `zl.rwa`): a press EDGE, i.e. a Tap in the
 // buffer. A lingering Hold is a continuation for the running move's
 // conditions, not a new press.
-std::string Fighter::try_select_move(FightContext& ctx) {
+std::string Fighter::try_select_move(FightContext& ctx, const std::string& event) {
     decision_ = MoveDecision();  // the previous decision is stale from here on
-    bool has_tap = false;
-    for (const auto& k : keys_) {
-        if (k.press == press_type::tap) {
-            has_tap = true;
-            break;
-        }
+    // JS `Gc.Gnb` (L672) walks the queued events (`this.Tu`) and runs one
+    // `EZa` pass per event with the candidate set `d.Su.dea(event)`. The port
+    // keeps the two triggers the PLAYER can reach: the press edge (`Gc.mS`
+    // -> `Ih(2)`, `KeyPressed`) and the clip end (`Gc.kg` -> `Ih(10)`,
+    // `AnimationEnd`).
+    const std::string ev = event.empty() ? std::string("KeyPressed") : event;
+    if (event.empty()) {
+        // Press edge only (`zl.rwa` L799 fires once per `zl.Sgb` L798
+        // `!a.sl` edge). Consume it so a lingering Tap cannot re-select on
+        // the following frames of the 15-frame `dX` window.
+        if (!key_edge_) return "";
+        key_edge_ = false;
     }
-    if (!has_tap) return "";
 
     // `Gc.EZa` (L676) candidates, in the `hb_` (JS `ra.Lk` document) order
     // that `ru.iQ` is filed in (`Su.FT` L538 pushes in `me` order, and `me`
@@ -1224,7 +1233,7 @@ std::string Fighter::try_select_move(FightContext& ctx) {
     std::vector<const MoveDef*> passing;
     for (const MoveDef* m : hb_) {
         if (m == nullptr) continue;
-        if (!m->has_event("KeyPressed")) continue;
+        if (!m->has_event(ev)) continue;
         std::string trace;
         // [TASK B DIAGNOSTIC] `SF2_TRACE_COND=1` dumps the failing condition
         // tree + the enemy interval list for the throw family so the exact

@@ -4761,6 +4761,45 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 if (!a.frame_trigger && a.event == "AnimationEnd") end_acts.push_back(&a);
             }
             dispatch_move_actions(end_acts, me, "AnimationEnd", actx);
+
+            // JS `Gc.kg` (L671) <- `wd.eIa` (L508) <- `Te.lS` (L553): the
+            // clip-end event re-tests the moves carrying
+            // `<Events><AnimationEnd/>` with the LIVE buffered keys (`gm`
+            // stays true for the player). This is the HELD-direction re-fire:
+            // `StepForward`'s `<Keys>Forward:Hold</Keys>` (moves.xml
+            // L10658-10662) is still satisfied (`zl.yLa` L799 rebuilt `zg.Fh`
+            // this frame), so the step restarts at every clip end — the
+            // continuous walk. On release the Hold drops and no candidate
+            // passes, so the fighter falls back to the stance idle. Same
+            // PLAYER gate as the press-edge path (the AI has its own `de`).
+            if (me.ai == nullptr && !auto_attack_ &&
+                phase_ == fight_phase::fight) {
+                sf2::scene::FightContext ectx;
+                ectx.roll01 = [this]() { return draw01(); };
+                ectx.stage = static_cast<sf2::scene::round_stage>(phase_);
+                // `KNa` leaves `Ua` set (`Te.lS` -> `CZa(10)` reads `this.Ua`
+                // and the port captures it in `take_ended_move`), so the
+                // animation-name list is the ENDED move's — the
+                // `<CurrentAnimation Name="Step"/>` restart guard reads it.
+                ectx.anims_me = ended->anim_names;
+                ectx.anims_me.push_back(me.is_player ? "StanceLeft"
+                                                     : "StanceRight");
+                ectx.anims_enemy = anim_names_of(foe.fighter);
+                ectx.qb = me.is_player;
+                fill_ctx_geometry(ectx, me, foe);
+                ectx.health_ratio =
+                    me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+                const std::string again =
+                    me.fighter.try_select_move(ectx, "AnimationEnd");
+                if (!again.empty()) {
+                    ++me.moves_started;
+                    me.last_decision = "end:" + again;
+                    std::fprintf(stdout,
+                                 "[fight] player AnimationEnd -> %s (F%d)\n",
+                                 again.c_str(), frame_);
+                    std::fflush(stdout);
+                }
+            }
         }
     }
 

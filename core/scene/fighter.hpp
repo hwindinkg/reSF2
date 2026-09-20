@@ -245,9 +245,20 @@ public:
     // `de.tY ? (this.Ca.Fj ? true : P.fP) : false`) and `wd.Anb` (L499:
     // `(this.parameters.Fj||P.fP) && this.Je==2`).
     //
-    // PRECONDITION: a Tap is buffered (the JS fires this on a press EDGE,
-    // `wd.BHa` <- `zl.rwa`). Returns the started move's name, or "".
-    std::string try_select_move(sf2::scene::FightContext& ctx);
+    // `event` selects the JS event-type candidate set (`d.Su.dea(type)`, the
+    // list `Gc.EZa` L676 walks):
+    //   "" / "KeyPressed" — the press edge (`Gc.mS` L672 <- `wd.BHa` L507 <-
+    //     `zl.rwa` L799). Runs ONLY on a fresh press edge: `zl.rwa` fires the
+    //     `gh(0, zg)` event once per `zl.Sgb` (L798) `!a.sl` edge.
+    //   "AnimationEnd" — the clip-end event (`Gc.kg` L671 <- `wd.eIa` L508 <-
+    //     `Te.lS` L553). This is the HELD-move re-fire: `StepForward`'s
+    //     `<Keys>Forward:Hold</Keys>` (moves.xml L10658-10662) stays true
+    //     while the key is down (`zl.yLa` L799 rebuilds `zg.Fh` on every
+    //     `zl.ia` L798), so the step restarts at every clip end — the
+    //     continuous walk. On release the Hold drops and nothing passes.
+    // Returns the started move's name, or "".
+    std::string try_select_move(sf2::scene::FightContext& ctx,
+                                const std::string& event = std::string());
     // Hit-reaction pick (JS `Gc.DK` L673-674, d-set first-match): starts the
     // first priority-ordered `hb` move carrying a `Hit` event whose tactics
     // conditions pass (54 such moves in moves.xml: HighHit/MiddleHit/...,
@@ -864,6 +875,13 @@ private:
     float enemy_x_ = 0.0f;                  // enemy world X (for facing)
     std::vector<sf2::scene::key_input> keys_; // buffered inputs (JS `Kl.zg`)
     int tap_age_ = 0;                       // frames since last tap (JS `zl.dX`)
+    // JS `zl.rwa` (L799) fires the `KeyPressed` event (`gh(0, zg)`) exactly
+    // ONCE, on the `zl.Sgb` (L798) `!a.sl` press edge. The old selection ran
+    // on every frame a Tap lingered in `keys_` (the 15-frame `dX` window) and
+    // consumed it at the first started move, so a 2-Tap move
+    // (`DoubleStepForward`, moves.xml L12467-12470) could never see tap 1 and
+    // tap 2 together. This flag is that one-frame edge.
+    bool key_edge_ = false;
     // Keys currently held down (JS `zl.Ff[].sl` -> rebuilt `zg.Fh`): the
     // physical keydown set. `input(tap)` inserts, `input(release)` erases;
     // `rebuild_holds()` projects it into the `keys_` Hold entries.
