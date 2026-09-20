@@ -8648,6 +8648,14 @@ void FightScreen::render_impl(App& app) {
     // the fight-start focus 831.5 -> Io = 148.5.
     camera.arena_center_x = arena_half - cam.center_x;
     ren.begin_frame(camera);
+    // [M2 — scene/camera visibility gate] JS `XF` (L370):
+    // `(Za.F().isVisible=a) ? this.aha=a : this.ia.visible(a)`. While the
+    // round transition is hidden (`Onb` L411 `XF(!1)` .. `FNa` L409
+    // `XF(!0)`) the whole 3-D view is skipped: the location layers, the
+    // fighters, the spawned children, the hit sparks/magic and the markers.
+    // Only the HUD below (`Ar`/`Sf`) still draws. The gate body keeps its
+    // original indentation so the change stays a surgical 2-line diff.
+    if (fight_->scene_visible()) {
     // [fix(render): arena layer order] The original game draws the fighters
     // INSIDE the ModelsViewer (Type=2) layer — background layers first, then
     // the fighters, then every layer AFTER the ModelsViewer (the floor /
@@ -8995,6 +9003,7 @@ void FightScreen::render_impl(App& app) {
     // drawn over the scene, under the HUD — no-op at 16:9 (BK=0, arena
     // 728px spans y[-4,724]).
     draw_scene_letterbox(ren, camera);
+    }  // [M2] end of the scene/camera visibility-gated 3-D draws
 
     // --- Fight HUD (JS `Ar`/`Sf`/`lk`/`Er` L2016-2041) ------------------
     // Frames: fight/ui.json -> HealthBar_Empty (bg), HealthBar_Full (player

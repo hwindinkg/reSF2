@@ -1075,6 +1075,13 @@ struct FightCamera {
                                // `Ut.Al`, which receives this.Bj), and what
                                // the panorama clamp (Ut.Al `d`) uses.
 
+    // JS `this.ia.visible(a)` (`XF` L370): the scene/camera visibility.
+    // `false` hides the whole 3-D view (the fighters + the location layers)
+    // between `Onb`'s `XF(!1)` (L411) and `FNa`'s `XF(!0)` (L409); the HUD
+    // (`Ar`/`Sf`) stays up, so the round reset repositions the fighters with
+    // nothing drawn — no visible teleport.
+    bool visible = true;
+
     // Arena geometry (from the location params).
     float arena_w = 1960.0f;    // the RAW location width (JS `Lb.width`)
     float arena_h = 560.0f;     // JS `Lb.height`
@@ -1511,6 +1518,11 @@ public:
     // The round auto-advances (`Onb` L411 `ZK(); NA(); Z2()`); there is NO
     // host "Next" button in the JS (the old click rect was an invention).
     bool round_wait() const { return round_wait_; }
+    // JS `XF` (L370): `(Za.F().isVisible=a) ? this.aha=a : this.ia.visible(a)`
+    // — the scene/camera visibility (the whole 3-D view). The draw gate in
+    // `FightScreen::render_impl` reads this; the HUD is never hidden.
+    bool scene_visible() const { return camera_.visible; }
+    void set_scene_visible(bool a) { camera_.visible = a; }
     // The battle winner (null until the battle ends).
     const FightFighter* winner() const { return winner_; }
     const std::vector<RoundOutcome>& round_history() const { return history_; }

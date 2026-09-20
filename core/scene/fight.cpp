@@ -2626,6 +2626,12 @@ void FightController::enter_start_stance() {
     start_stance_frames_ = 0;   // reset so every round re-plays the intro
     start_buffer_filled_ = false;  // fresh round, empty round-start buffer
     round_wait_ = false;   // the break plate expired -> the round is running
+    // JS `FNa` (L409): `this.Ta.XF(!0); this.xF(1)`. The JS re-shows the
+    // scene at the START of `FNa` because its round-reset reposition (`Z2`)
+    // already ran while hidden; the port performs that reposition HERE (the
+    // `teleport` above), so the re-show runs AFTER it — the teleport still
+    // executes inside the hidden window (the whole function is one frame).
+    set_scene_visible(true);
     // Root `<Triggers>` `RoundStageStart` (`kz.create` `Tm` L772, whose
     // `parse` maps `Name` through `iz.XBa` L447: StartStance=1, Fight=2,
     // EndStance=3, ...). The port publishes the JS stage NAME, which is the
@@ -2697,6 +2703,7 @@ void FightController::enter_fight() {
 // (`Za.F().nla(!0)` -> `Za.F().isVisible=true`).
 void FightController::enter_fight_none() {
     fight_none_ = true;
+    set_scene_visible(true);  // JS `xF(2)` -> `Za.F().nla(!0)`: isVisible=true
     set_phase(fight_phase::fight);
     round_live_ = true;      // `xF(2)` makes the fight phase live for hits/fx
     round_.running = false;  // NO `Sf.play()`: the round timer never ticks
@@ -2853,6 +2860,13 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // round-over flag, which gates the attack pass in `ca.Hnb` (L389).
     player_.kh = true;
     enemy_.kh = true;
+
+    // JS `Onb` (L411) FIRST statement: `this.Ta.XF(!1)` — hide the whole
+    // 3-D view (the fighters + the location draw) for the round transition.
+    // It stays hidden through `ZK()`/`NA()`/`Z2()` (the round-reset
+    // reposition) until `FNa` (L409) re-shows it, so the reset never draws a
+    // visible teleport. The HUD (the ROUND/K.O. plate + bars) keeps drawing.
+    set_scene_visible(false);
 
     // The K.O. finish plate (JS `Cr.GZ` L2024, type 6/7, `fu(1.166)`).
     // `GZ` has no `ca.vhb` (L410) case, so its expiry does NOT dispatch —
