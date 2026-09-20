@@ -84,6 +84,10 @@ public:
     void reset_music_guard() { music_guard_ = false; }
     bool music_guard() const { return music_guard_; }
     void stop_music();
+    // [latency probe] Per-frame audio-feed measurement (no-op unless
+    // `SF2_AUDIO_LATENCY=1`). The port also self-polls it on every play/music
+    // trigger, so it is measurable without any app-loop hook.
+    void latency_tick();
     std::string music_track() const;
     std::uint64_t music_plays() const;
 

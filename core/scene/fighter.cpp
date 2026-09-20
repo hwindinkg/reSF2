@@ -608,7 +608,27 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
 // JS `Al.stop()` (L582): clears `nk` (frameCount/names reset on next start).
 void Fighter::ragdoll_stop() {
     if (!nk_ && !solver_world_) return;
+    const bool was_active = nk_;
     const bool was_world = solver_world_;
+    // JS `Al.stop()` (L582) is only `nk=!1; frameCount=0` — no position
+    // reset. The port additionally releases the WORLD solver pose back to
+    // clip space (below) so the resuming `Te.eda` clip apply stays
+    // continuous. The recovery probe records the released world pose so the
+    // next `sample()` can report the per-bone delta back to the clip pose.
+    {
+        const std::size_t np = model_.bones.size();
+        if (was_active && ragdoll_stop_logs_ < 4 && np > 0 &&
+            pos_.size() == np * 2) {
+            ++ragdoll_stop_logs_;
+            ragdoll_recover_from_ = pos_;
+            ragdoll_recover_log_ = 1;
+            std::fprintf(stdout, "[ragdoll] STOP name=%s frame=%d bones=%zu\n",
+                         ragdoll_names_.empty() ? "(none)"
+                                                : ragdoll_names_[0].c_str(),
+                         ragdoll_frame_count_, np);
+            std::fflush(stdout);
+        }
+    }
     nk_ = false;
     ragdoll_frame_count_ = 0;
     ragdoll_names_.clear();
@@ -634,15 +654,21 @@ void Fighter::strike_node(int bone, const sf2::scene::Vec3& v) {
     const std::size_t n = model_.bones.size();
     const std::size_t u = static_cast<std::size_t>(bone);
     if (u >= n) return;
-    if (solver_world_ && sol_ma_.size() == n * 3) {
-        sol_ma_[u * 3] += v.x;
-        sol_ma_[u * 3 + 1] += v.y;
-        sol_ma_[u * 3 + 2] += v.z;
-    }
-    if (pos_.size() == n * 2) {
-        pos_[u * 2] += v.x;
-        pos_[u * 2 + 1] += v.y;
-    }
+    // JS `Bl.strike` (L587-588) writes the endpoint node `ma` ONLY —
+    // `a.sx.XA(l)` / `a.Zs.XA(c)`, gated by `if(!d.MG||!e.MG)` and per-node
+    // `d.NG`/`e.NG`. There is NO clip-space array write in the JS; the old
+    // port write to `pos_` was overwritten by the next `sample()`'s `Te.eda`
+    // clip apply (L282908 re-poses every clip bone) and is removed.
+    // `sol_ma_` IS the node `ma` (JS `Vc.ma`). While `Al.nk` is set
+    // (`solver_world_`) the clip apply does not touch it, so the reaction
+    // persists — the JS `Al.sk`/`Al.jE` (L583) gate `!NG && (nk || jy ||
+    // oa.vc && c.vc)`. With `nk==0` the next `eda` overwrites a clip-driven
+    // bone; bones past the clip bone count (cloth/macro) keep their state —
+    // identical to the JS.
+    if (sol_ma_.size() != n * 3) return;  // no solver state yet
+    sol_ma_[u * 3] += v.x;
+    sol_ma_[u * 3 + 1] += v.y;
+    sol_ma_[u * 3 + 2] += v.z;
 }
 
 int Fighter::capsule_bbox(float& min_x, float& min_y, float& max_x,
@@ -1375,7 +1401,9 @@ void Fighter::advance(float dt) {
     // inside `Te.ia`, i.e. once per frame advance).
     frame_actions_.clear();
     // Knockback offsets decay every tick (JS Vc.sk friction - OPEN rate).
-    if (!kb_.empty()) sf2::scene::decay_knockback(kb_);
+    // DEAD: the `kb_` pool + `decay_knockback` were a port-only invention
+    // (no JS counterpart) and are no longer fed or decayed — the JS impulse
+    // path is `Bl.strike` (L587-588) -> `strike_node` (endpoint node `ma`).
     // Timescale steps (SlowModel KT): scale>=1 verbatim (Speed<1 no-ops
     // at apply); fractional remainder carries to the next tick.
     scale_acc_ += time_scale_;
@@ -1539,6 +1567,13 @@ void Fighter::sample_current() {
 }
 
 void Fighter::clear_move() {
+    // JS `Te.Bnb` (L507): `this.KCa() ? (this.Nd.nk && this.Nd.stop(), ...)`
+    // — starting/replacing/clearing the move STOPS the ragdoll solver
+    // (`Al.stop` L582 = `nk=!1; frameCount=0`), and `Te.reset` (L498) resets
+    // `Nd` too. Before this the solver stayed latched after a hit whose
+    // reaction move never started, so the struck bones never returned to the
+    // clip pose (the `[ragdoll] START` with no matching STOP).
+    ragdoll_stop();
     current_move_ = nullptr;
     current_clip_ = nullptr;
     move_end_frame_ = 0;
@@ -2061,6 +2096,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             return nk_ || jy || (shock_latch_ && b.shock);
         };
         constexpr int kEdgeIters = 2;  // `xd.jE` IterativeProcess
+        int wall_hits = 0;             // `[wall]` probe (JS `Al.fha` calls)
         for (int it = 0; it < kEdgeIters; ++it) {
             for (const EdgeDef& e : model_.edges) {
                 const int bi1 = model_.bone_by_name(e.end1);
@@ -2078,6 +2114,37 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 const bool cA1 = cA_of(i1);
                 const bool cA2 = cA_of(i2);
                 if (!cA1 && !cA2) continue;
+                // JS `Al.jE` (L583) -> `fdb(g)` (L583):
+                //   `b.cA ? (this.fha(b), c.cA && this.fha(c), a.bFa())
+                //          : c.cA && (this.fha(c), a.bFa())`
+                // `fha` runs on the JOINT's endpoints that carry `cA`, BEFORE
+                // the pair relax (`bFa`), `oTa` (=`xd.jE`) passes per frame.
+                // The old port ran `fha` on EVERY body once per frame in a
+                // separate loop — that is the `[wall]` re-advance: a
+                // MacroNode has `nh=false` -> `NG=true` -> `cA=false` in the
+                // JS and must NEVER be ground/wall-responded, yet the head
+                // macro was clamped toward the wall every frame.
+                if (solver_world_) {
+                    const std::size_t idx[2] = {i1, i2};
+                    const bool cax[2] = {cA1, cA2};
+                    for (int k = 0; k < 2; ++k) {
+                        if (!cax[k]) continue;
+                        const std::size_t u = idx[k] * 3;
+                        const float dx = sf2::scene::fha_body(
+                            sol_ma_[u], sol_ma_[u + 1], sol_ma_[u + 2],
+                            sol_mf_[u], sol_mf_[u + 2], bones[idx[k]].collisible,
+                            ragdoll_wall_min_, ragdoll_wall_max_,
+                            ragdoll_floor_y_);
+                        if (dx != 0.0f) {
+                            ++wall_hits;
+                            std::fprintf(
+                                stdout,
+                                "[wall] F%d node=%s x %.2f -> %.2f (d=%.2f)\n",
+                                frame, bones[idx[k]].name.c_str(),
+                                sol_ma_[u] - dx, sol_ma_[u], dx);
+                        }
+                    }
+                }
                 const std::size_t u1 = i1 * 3;
                 const std::size_t u2 = i2 * 3;
                 const float ex = sol_ma_[u2] - sol_ma_[u1];
@@ -2108,35 +2175,13 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         }
         // JS `Al.ia` (L582) tail: `sk(); jE(); nk&&frameCount++`.
         if (nk_) ++ragdoll_frame_count_;
-        // JS `Al.fha` (L582, run from `Al.ia`): the arena/ground response for
-        // every solver body — `Al.P6a` (revert to the previous position, snap
-        // y to the floor, re-advance minus the friction distance) for a
-        // collidable body at/below the floor, then the `NO`/`MO` x clamp. Only
-        // the world-space ragdoll state needs it — the clip-space solver is
-        // authored inside the arena.
-        if (solver_world_) {
-            // The port's world y is down-positive (the model parse negates the
-            // XML Y), so the floor is the MAX y a body may reach: `y >= floor`
-            // is the JS `b.y >= 0`, and `Al.P6a`'s `a.y = 0` is `y = floor`.
-            int wall_hits = 0;
-            for (std::size_t i = 0; i < n; ++i) {
-                float& nx = sol_ma_[i * 3];
-                float& ny = sol_ma_[i * 3 + 1];
-                float& nz = sol_ma_[i * 3 + 2];
-                const float px = sol_mf_[i * 3];
-                const float pz = sol_mf_[i * 3 + 2];
-                const float dx = sf2::scene::fha_body(
-                    nx, ny, nz, px, pz, bones[i].collisible,
-                    ragdoll_wall_min_, ragdoll_wall_max_, ragdoll_floor_y_);
-                if (dx != 0.0f) {
-                    ++wall_hits;
-                    std::fprintf(stdout,
-                                 "[wall] F%d node=%s x %.2f -> %.2f (d=%.2f)\n",
-                                 frame, bones[i].name.c_str(), nx - dx, nx, dx);
-                }
-            }
-            if (wall_hits > 0) std::fflush(stdout);
-        }
+        // JS `Al.fha` (L582) now runs INSIDE the `jE` loop above (via `fdb`),
+        // on the joint endpoints that carry `cA` — the JS call site/cadence.
+        // Only the world-space ragdoll state needs it (the clip-space solver
+        // is authored inside the arena). The port's world y is down-positive
+        // (the model parse negates the XML Y), so `Al.P6a`'s `a.y = 0` is
+        // `y = floor`.
+        if (solver_world_ && wall_hits > 0) std::fflush(stdout);
         // (d) Qja/seb: macros re-derived from the solved children.
         std::vector<std::uint8_t> visiting(n, 0);
         std::function<void(std::size_t)> compute_macro = [&](std::size_t idx) {
@@ -2261,18 +2306,49 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     for (std::size_t i = 0; i < n; ++i) {
         pos_[i * 2] = px[i] - px[anchor_u] + x;
         pos_[i * 2 + 1] = py[i] + dy;
-        // Knockback ride: the impulse-split offsets displace the hit bones
-        // on top of the clip pose (JS endpoint-body moves persist into the
-        // next frame's `ma`).
-        if (i < kb_.size()) {
-            pos_[i * 2] += kb_[i].x;
-            pos_[i * 2 + 1] += kb_[i].y;
-        }
+        // DEAD `kb_` knockback ride REMOVED (port-only, not in the JS): a
+        // landed hit displaces the endpoint node `ma` via `Bl.strike`
+        // (L587-588) -> `strike_node`; there is no per-bone clip-space offset
+        // pool. Keeping it here layered the dead offsets on top of the clip
+        // pose every frame.
     }
     }
     // JS `dv.ia` (L840) drops z when it skins the mesh (`Xg[a++] = d.x;
     // Xg[a++] = d.y`), so no per-bone depth is retained for drawing — the
     // triangles draw in XML document order (see build_vertices).
+    // [ragdoll recovery probe] After `ragdoll_stop()` released the solver, the
+    // first clip-posed frame reports the per-bone delta from the released world
+    // pose to the resumed clip pose — the hit->recovery window. Before the
+    // `clear_move()`-stop fix there was no STOP line and the solver stayed
+    // latched, so the struck bones never returned to the clip pose.
+    if (ragdoll_recover_log_ > 0 && !solver_world_ &&
+        ragdoll_recover_from_.size() == pos_.size() && !pos_.empty()) {
+        ragdoll_recover_log_ = 0;
+        float max_d = 0.0f;
+        double sum_d = 0.0;
+        std::size_t moved = 0;
+        for (std::size_t i = 0; i < n; ++i) {
+            const float dx = pos_[i * 2] - ragdoll_recover_from_[i * 2];
+            const float dy =
+                pos_[i * 2 + 1] - ragdoll_recover_from_[i * 2 + 1];
+            const float d = std::sqrt(dx * dx + dy * dy);
+            if (d > max_d) max_d = d;
+            sum_d += d;
+            if (d > 0.01f) ++moved;
+            if (d > 0.01f) {
+                std::fprintf(stdout,
+                             "[ragdoll]   RECOVER %s d=(%.2f,%.2f) |d|=%.3f\n",
+                             bones[i].name.c_str(), dx, dy, d);
+            }
+        }
+        std::fprintf(stdout,
+                     "[ragdoll] RECOVER frame=%d bones=%zu moved=%zu max=%.3f "
+                     "mean=%.3f\n",
+                     frame, n, moved, max_d,
+                     n > 0 ? static_cast<float>(sum_d / n) : 0.0f);
+        std::fflush(stdout);
+        ragdoll_recover_from_.clear();
+    }
     pose_sampled_ = true;  // `pos_` now holds a real frame (the `ma` analog)
 }
 

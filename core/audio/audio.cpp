@@ -259,14 +259,119 @@ void AudioEngine::shutdown() {
     enabled_ = false;
 }
 
+namespace {
+
+// [latency probe] Enabled by env `SF2_AUDIO_LATENCY=1`. Measurement only — it
+// adds NO latency to the audio path. The trigger logs the engine clock and the
+// sound's `ma_sound_get_cursor_in_pcm_frames` read cursor; the per-frame
+// `latency_tick()` then reports how many 60 Hz frames pass before the device
+// actually starts feeding the sound (the port-side latency the JS WebAudio
+// path `ta.ak` L1264 does not add).
+struct LatencyProbe {
+    bool pending = false;
+    ma_sound* node = nullptr;
+    int ticks = 0;
+    ma_uint64 t0_ms = 0;
+    std::string kind;
+    std::string name;
+};
+LatencyProbe g_latency;
+
+bool latency_probe_enabled() {
+    static const bool on = std::getenv("SF2_AUDIO_LATENCY") != nullptr;
+    return on;
+}
+
+void log_latency(const ma_engine& engine, bool engine_ok, const char* kind,
+                 const std::string& name, ma_sound* sound) {
+    if (!latency_probe_enabled()) return;
+    if (!engine_ok) {
+        std::fprintf(stdout,
+                     "[latency] %s '%s' engine=off (no device; unmeasurable)\n",
+                     kind, name.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    const ma_uint32 sr = ma_engine_get_sample_rate(&engine);
+    const ma_uint64 t_ms = ma_engine_get_time_in_milliseconds(&engine);
+    ma_uint64 cursor = 0;
+    if (sound != nullptr) ma_sound_get_cursor_in_pcm_frames(sound, &cursor);
+    const double cursor_ms =
+        sr > 0 ? 1000.0 * static_cast<double>(cursor) / sr : 0.0;
+    std::fprintf(stdout,
+                 "[latency] TRIGGER %s '%s' engine_ms=%llu frame=%.1f "
+                 "cursor=%.3f ms sr=%u\n",
+                 kind, name.c_str(), static_cast<unsigned long long>(t_ms),
+                 60.0 * static_cast<double>(t_ms) / 1000.0, cursor_ms, sr);
+    std::fflush(stdout);
+    g_latency.pending = true;
+    g_latency.node = sound;
+    g_latency.ticks = 0;
+    g_latency.t0_ms = t_ms;
+    g_latency.kind = kind;
+    g_latency.name = name;
+}
+
+void latency_tick_impl(const ma_engine& engine, bool engine_ok) {
+    if (!g_latency.pending) return;
+    if (!engine_ok) {
+        g_latency.pending = false;
+        return;
+    }
+    ++g_latency.ticks;
+    const ma_uint32 sr = ma_engine_get_sample_rate(&engine);
+    ma_uint64 cursor = 0;
+    if (g_latency.node != nullptr) {
+        ma_sound_get_cursor_in_pcm_frames(g_latency.node, &cursor);
+    }
+    const ma_uint64 now = ma_engine_get_time_in_milliseconds(&engine);
+    const double cursor_ms =
+        sr > 0 ? 1000.0 * static_cast<double>(cursor) / sr : 0.0;
+    const double elapsed = static_cast<double>(now - g_latency.t0_ms);
+    if (cursor > 0 || g_latency.ticks >= 30) {
+        std::fprintf(stdout,
+                     "[latency] FEED %s '%s' after %d polls (%.1f ms) "
+                     "cursor=%.3f ms\n",
+                     g_latency.kind.c_str(), g_latency.name.c_str(),
+                     g_latency.ticks, elapsed, cursor_ms);
+        std::fflush(stdout);
+        g_latency.pending = false;
+        return;
+    }
+    std::fprintf(stdout, "[latency]   poll +%d cursor=%.3f ms\n",
+                 g_latency.ticks, cursor_ms);
+    std::fflush(stdout);
+}
+
+}  // namespace
+
+// Called once per presented frame by the game loop (main.cpp driver tick).
+void AudioEngine::latency_tick() {
+    if (impl_ == nullptr) return;
+    latency_tick_impl(impl_->engine, enabled_ && impl_->engine_ok);
+}
+
 void AudioEngine::play(const std::string& event) {
+    // [latency probe] poll the pending trigger so the feed point is measured
+    // from the audio events themselves (no app-loop hook required).
+    if (impl_ != nullptr && latency_probe_enabled()) {
+        latency_tick_impl(impl_->engine, enabled_ && impl_->engine_ok);
+    }
     ++played_total_;
     const int e = find_event_index(event);
     if (e < 0) return;
     const EventDef& ev = events()[static_cast<std::size_t>(e)];
     ++impl_->played[static_cast<std::size_t>(e)];
 
-    if (!enabled_ || !impl_->engine_ok) return;
+    if (!enabled_ || !impl_->engine_ok) {
+        // [latency probe] the off-device path still reports the (unmeasurable)
+        // trigger for the FIRST play of each event.
+        if (impl_->first_logged[static_cast<std::size_t>(e)] == 0) {
+            impl_->first_logged[static_cast<std::size_t>(e)] = 1;
+            log_latency(impl_->engine, false, "sfx", event, nullptr);
+        }
+        return;
+    }
 
     // Round-robin over the event's voices: voice v always holds the sample
     // files[v % n], so consecutive plays walk the event's file pool.
@@ -295,6 +400,7 @@ void AudioEngine::play(const std::string& event) {
             static_cast<std::size_t>(v) % ev.files.size();
         std::fprintf(stdout, "[audio] play '%s' (voice %d -> %s.wav)\n", ev.name, v,
                      ev.files[fi]);
+        log_latency(impl_->engine, impl_->engine_ok, "sfx", event, sound);
         std::fflush(stdout);
     }
 }
@@ -324,6 +430,9 @@ void AudioEngine::stop(const std::string& event) {
 
 void AudioEngine::play_music(const std::string& track, bool loop) {
     if (impl_ == nullptr || track.empty()) return;
+    if (latency_probe_enabled()) {
+        latency_tick_impl(impl_->engine, enabled_ && impl_->engine_ok);
+    }
     ++impl_->music_plays;
     if (impl_->music_ok && impl_->music_current == track &&
         ma_sound_is_playing(&impl_->music)) {
@@ -332,7 +441,10 @@ void AudioEngine::play_music(const std::string& track, bool loop) {
     std::fprintf(stdout, "[music] play '%s'%s\n", track.c_str(),
                  loop ? "" : " (once)");
     std::fflush(stdout);
-    if (!impl_->engine_ok) return;  // counted + logged, silent headless
+    if (!impl_->engine_ok) {
+        log_latency(impl_->engine, false, "music", track, nullptr);
+        return;  // counted + logged, silent headless
+    }
     if (impl_->music_ok) {
         ma_sound_stop(&impl_->music);
         ma_sound_uninit(&impl_->music);
@@ -354,6 +466,7 @@ void AudioEngine::play_music(const std::string& track, bool loop) {
     ma_sound_set_volume(&impl_->music, 0.7f);
     ma_sound_set_looping(&impl_->music, loop ? MA_TRUE : MA_FALSE);
     ma_sound_start(&impl_->music);
+    log_latency(impl_->engine, impl_->engine_ok, "music", track, &impl_->music);
 }
 
 // JS `lb.OS(a,b)` (L1276): `b==null&&(b=!0); a==null&&(a="menu");

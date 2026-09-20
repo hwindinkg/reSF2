@@ -579,12 +579,13 @@ public:
     int capsule_bbox(float& min_x, float& min_y, float& max_x,
                      float& max_y) const;
 
-    // Per-bone knockback offsets (JS `Bl.strike` L582 moves the hit
-    // capsule's endpoint BODIES, not the whole fighter). `add_knockback`
-    // accumulates the impulse-split vector onto a bone; the offsets ride on
-    // top of the clip sample, decay per tick in advance() (`decay_knockback`,
-    // OPEN exact rate — the `Vc.sk` integrator is out of scope), and feed
-    // the next frame's hit capsules via positions() (emergent correctness).
+    // DEAD — port-only invention, NOT in the JS, and no longer called. The
+    // real JS impulse path is `Bl.strike` (L587-588) -> the endpoint node `ma`
+    // write (`strike_node` above), which is the ONLY place a landed hit
+    // displaces a body. This per-bone CLIP-space offset pool and its per-tick
+    // `decay_knockback` (physics.hpp L215) have no JS counterpart; the feed
+    // and the decay call were removed from the port. Kept only so the header
+    // API stays stable — do NOT revive.
     void add_knockback(int bone, const sf2::scene::Vec3& v);
 
     // --- JS `ju` (g="D3" L545) — `wd.Ja`, the ability cooldown/reload state --
@@ -816,11 +817,18 @@ private:
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (pivot world pos)
     float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
     float scale_acc_ = 0.0f;   // timescale fractional accumulator
-    std::vector<sf2::scene::Vec3> kb_;  // per-bone knockback offsets (world)
+    std::vector<sf2::scene::Vec3> kb_;  // DEAD (port-only; JS uses `strike_node`)
     // --- JS `Al` solver latch (see `ragdoll_start`) -----------------------
     bool nk_ = false;                         // JS `Al.nk` (ragdoll active)
     int ragdoll_frame_count_ = 0;             // JS `Al.frameCount`
     std::vector<std::string> ragdoll_names_;  // JS `Al.names`
+    // [ragdoll recovery probe] World `pos_` snapshot taken in
+    // `ragdoll_stop()`; the next `sample()` logs the per-bone delta between
+    // the released solver pose and the resumed clip pose (`[ragdoll] RECOVER`).
+    // `ragdoll_stop_logs_` caps the probe output.
+    std::vector<float> ragdoll_recover_from_;
+    int ragdoll_recover_log_ = 0;
+    int ragdoll_stop_logs_ = 0;
     // The solver state (`sol_ma_`/`sol_mf_`) is promoted to WORLD space while
     // the ragdoll is active (the JS node `ma` is world). `solver_base_*` is
     // the world->clip placement base captured at start; `ragdoll_stop`
