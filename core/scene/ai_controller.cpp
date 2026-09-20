@@ -337,6 +337,24 @@ bool AiController::fca(const AiFightState& st, int variant) const {
 bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
     if (moves_ == nullptr || moves_->find(m.name) == moves_->end()) return false;
 
+    // JS `de.V1` (L601-602): `let b=this.model.me; if(!b.includes(a))return!1;`
+    // - the candidate must be one of MY OWN moves. The tactic's slot names
+    // (`Throw`, `ShortAttack`, the <CautiousMovements> groups) resolve to
+    // every move carrying that animation across ALL weapons, so without this
+    // gate a Knives fighter accepts Spear/Staff/Tonfa candidates whose clips
+    // do not exist; `start_move_impl` then starts a clip-less move and the
+    // fighter never animates (the "enemies do not react" symptom).
+    if (st.my_moves != nullptr) {
+        bool own = false;
+        for (const MoveDef* om : *st.my_moves) {
+            if (om != nullptr && om->name == m.name) {
+                own = true;
+                break;
+            }
+        }
+        if (!own) return false;
+    }
+
     // Build a FightContext with the AI's state for the tactics conditions.
     FightContext ctx;
     ctx.roll01 = [this]() { return roll01(); };  // owned stream or override
@@ -824,6 +842,17 @@ int AiController::pqb(const AiFightState& st) {
     feat_.zz.clear();
     pH_ = F8_ = false;
 
+    // Probe snapshot (`--ai-probe` / the fight `[ai]` log): reset and record
+    // the operands of the JS gate (L604) so the fired branch is auditable.
+    dbg_ = AiDebug{};
+    dbg_.enemy_frame = st.enemy_move_frame;
+    dbg_.x = x_;
+    dbg_.aqa = aqa_;
+    if (st.enemy_move != nullptr) {
+        dbg_.enemy_uninterrupt_end = uninterrupt_end(*st.enemy_move);
+        dbg_.enemy_attack_end = attack_end(*st.enemy_move);
+    }
+
     // Facing lock (JS L604): `b6a(b)*b.hd()>0` — when the direction toward
     // the enemy matches my facing... wait — the JS is `b6a(b)` where b =
     // the OPPONENT's anim controller; `b6a` returns sign(opponent.x -
@@ -837,6 +866,7 @@ int AiController::pqb(const AiFightState& st) {
     // away, the AI watches (doesn't attack).
     const int dir_to_opp = b6a(st);
     if (dir_to_opp * st.enemy_facing > 0) {
+        dbg_.branch = "facing-lock";
         pH_ = F8_ = true;
         oC_ = 3;
         return 0;
@@ -862,7 +892,10 @@ int AiController::pqb(const AiFightState& st) {
             dodge_fired = true;
         }
     }
-    if (dodge_fired) return static_cast<int>(wb_.size());
+    if (dodge_fired) {
+        dbg_.branch = "dodge-missile";
+        return static_cast<int>(wb_.size());
+    }
 
     // Per-pass evaluated chances vs the CACHED QJa rolls (JS `ia` L593-594):
     //   qPa=k9a (UseSafeAttack), vO=a9a (TableAttack), Awa=A5a (Cautious);
@@ -886,17 +919,29 @@ int AiController::pqb(const AiFightState& st) {
     // `$x` is the CACHED ResponseDelay from `jwb` (NOT re-rolled per pass).
     // `ycb`/`lbb` test the OPPONENT's current move.
     const int enemy_frame = st.enemy_move_frame;
-    if (enemy_frame > x_ && !ycb(st)) {
+    dbg_.gate = enemy_frame > x_ && !ycb(st);
+    dbg_.ycb = ycb(st);
+    dbg_.lbb = lbb(st);
+    if (st.enemy_move != nullptr) dbg_.pcb = pcb(*st.enemy_move, Fl_);
+    if (dbg_.gate) {
+        dbg_.branch = "gate/reactive";
         if (st.enemy_move == nullptr || pcb(*st.enemy_move, Fl_)) {
+            dbg_.pcb = st.enemy_move != nullptr;
             if (lbb(st)) {
+                dbg_.branch = "reactive/lbb";
+                dbg_.rua = rua;
+                dbg_.caa = caa;
+                dbg_.nG = nG;
                 // Safe attack / attack table (JS L605).
                 if (tactic_ != nullptr) {
                     if (rua) {
+                        dbg_.branch = "reactive/safe-attack";
                         const int b = yaa(st);
                         if (b > 0) fk_ = 1;
                         if (Ao_ || b > 0) return static_cast<int>(wb_.size());
                     }
                     if (caa) {
+                        dbg_.branch = "reactive/table-attack";
                         const int b = xaa(st);
                         if (b > 0) fk_ = 0;
                         if (Ao_ || b > 0) return static_cast<int>(wb_.size());
@@ -906,6 +951,7 @@ int AiController::pqb(const AiFightState& st) {
                     // Uninterrupt end (`d.zD(!0)-Fl+1`, 0 when idle) clamped
                     // by each move's Extended then Strict end.
                     if (nG) {
+                        dbg_.branch = "reactive/cautious";
                         wb_.clear();
                         int c = 0;
                         if (st.enemy_move != nullptr) {
@@ -927,12 +973,14 @@ int AiController::pqb(const AiFightState& st) {
                         return static_cast<int>(wb_.size());
                     }
                 }
+                dbg_.branch = "reactive/watch(lbb)";
                 oC_ = 2;
                 pH_ = true;
                 return 0;
             }
             // The enemy is in its attack window -> distance-based response
             // (JS L605 switch on aqa).
+            dbg_.branch = "reactive/aqa-switch";
             switch (aqa_) {
                 case 2: {
                     int b = yaa(st);
@@ -964,6 +1012,7 @@ int AiController::pqb(const AiFightState& st) {
     // QuickAttack slots (JS L606, the `else` path): every FIRING base `$E`
     // slot (`cO[f].N_`, rolled by `csb`/`bsb`) contributes its V1-valid
     // moves with wait `$I()`; then the Evade (`nD`) slots decide `IB`.
+    dbg_.branch = "base-slots";
     eval_slots();
     quick_slots(st);
     evade_ib(st);
@@ -1128,10 +1177,13 @@ std::string AiController::update(const AiFightState& st) {
     aqa_ = dqb(st);
 
     // The no-decision gate (JS L593: `if(!this.hcb()) return null`).
-    if (!hcb(st)) return "";
+    dbg_.hcb = hcb(st);
+    if (!dbg_.hcb) return "";
 
     // The core decision (JS L594).
     int cnt = pqb(st);
+    dbg_.fk = fk_;
+    dbg_.wb = cnt;
 
     // The conditional-slot additions (JS L594: `b+=this.k_a(a.da,this.u$),
     // b+=this.Nwa(this.E7), this.iN.zZ.length>0&&(this.fk=11)`). `u$`/`E7`

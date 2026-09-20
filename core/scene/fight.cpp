@@ -4723,6 +4723,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // aligned with the game.
     if (me.ai != nullptr && phase_ == fight_phase::fight) {
         sf2::scene::AiFightState st;        st.current_move = me.fighter.current_move();
+        st.my_moves = &me.fighter.hb();    // JS `this.model.me` (`de.V1` L601)
         st.move_frame = me.fighter.move_frame();
         st.move_len = st.current_move ? st.current_move->end_frame : 0;
         st.my_hp = me.hp;
@@ -4773,17 +4774,26 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // vs the raw move frame, the strike-memory counters, the stream.
         if (decision != last_ai_log_) {
             const sf2::scene::AiFeatureState& ff = me.ai->features();
+            const sf2::scene::AiController::AiDebug& d = me.ai->last_debug();
             std::fprintf(stdout,
                          "[ai] F%d %s K2=%d (ranged_available=%d:"
                          " true->-1, false(NoRanged)->+1; alt=%d)"
                          " pZ(Tba/M2)=%d raw_move_frame=%d"
-                         " strike{counter=%.3f xb=%.3f tf=%.3f} stream=%s\n",
+                         " strike{counter=%.3f xb=%.3f tf=%.3f} stream=%s"
+                         " | branch=%s fk=%d aqa=%d gate=%d ycb=%d lbb=%d"
+                         " pcb=%d rua=%d caa=%d nG=%d hcb=%d ef=%d x=%d"
+                         " ue=%d ae=%d wb=%d dec='%s'\n",
                          frame_, me.name.c_str(), st.ranged,
                          me.ranged_available ? 1 : 0,
                          me.ranged_available ? 1 : -1,
                          st.enemy_max_part_frames, foe.fighter.move_frame(),
                          ff.counter, ff.xb, ff.tf,
-                         st.da_pg != nullptr ? "Da.pg(draw01)" : "override");
+                         st.da_pg != nullptr ? "Da.pg(draw01)" : "override",
+                         d.branch, d.fk, d.aqa, d.gate ? 1 : 0, d.ycb ? 1 : 0,
+                         d.lbb ? 1 : 0, d.pcb ? 1 : 0, d.rua ? 1 : 0,
+                         d.caa ? 1 : 0, d.nG ? 1 : 0, d.hcb ? 1 : 0,
+                         d.enemy_frame, d.x, d.enemy_uninterrupt_end,
+                         d.enemy_attack_end, d.wb, decision.c_str());
             std::fflush(stdout);
             last_ai_log_ = decision;
         }

@@ -346,6 +346,12 @@ struct AiFightState {
     // AI reads `a.da.Ua` = the enemy's current animation).
     const MoveDef* enemy_move = nullptr;
     int enemy_move_frame = 0;
+    // MY OWN move list (JS `this.model.me`, the fighter's `hb`): `de.V1`
+    // (L601-602) rejects any candidate not in it. Without this the slots
+    // resolve weapon-mismatched moves (Spear/Staff/Tonfa for a Knives boss)
+    // whose clips do not exist, so the fighter starts a dead move and the
+    // clip gate (`Te.Skb` L550 `if(a!=null)`) freezes it instead of attacking.
+    const std::vector<const MoveDef*>* my_moves = nullptr;
     // Active intervals on my fighter (name -> type) (`da.xj` / `P0()`).
     std::vector<std::pair<std::string, int>> my_intervals;
     // Enemy's highest body-part animation frame (`Tba` L595: max over
@@ -449,6 +455,27 @@ public:
     // The fighter's feature state from the last decision (for logging).
     const AiFeatureState& features() const { return feat_; }
 
+    // Probe snapshot of the last `de.Pqb` pass (`--ai-probe`). Reports which
+    // branch fired (`branch`), the `fk`/`aqa` values and the JS gate operands
+    // (`$x`, the enemy's `kJ`, `Ycb`/`Lbb`/`pcb`, `rua`/`caa`/`nG`).
+    struct AiDebug {
+        const char* branch = "none";  // which Pqb branch ran
+        int fk = -1;                  // JS `fk`
+        int aqa = 1;                  // JS `aqa` (dqb)
+        int enemy_frame = 0;          // JS `b.kJ()` (the enemy's played frame)
+        int x = 0;                    // JS `$x` (cached ResponseDelay)
+        int enemy_uninterrupt_end = 0;  // JS `b.Ua.zD(!1)`
+        int enemy_attack_end = 0;       // JS `b.Ua.p0(!1)`
+        bool gate = false;         // `$x < kJ && !Ycb(b)`
+        bool ycb = false;          // JS `de.Ycb(b)`
+        bool lbb = false;          // JS `de.Lbb(b)`
+        bool pcb = false;          // JS `ds.pcb(Fl)`
+        bool rua = false, caa = false, nG = false;  // safe/table/cautious
+        bool hcb = false;          // JS `hcb` gate
+        int wb = 0;                // candidate count returned
+    };
+    const AiDebug& last_debug() const { return dbg_; }
+
 private:
     std::string weapon_;
     const TacticDef* tactic_ = nullptr;
@@ -501,6 +528,8 @@ private:
 
     // The per-frame feature state (JS `Ue` + `mQ`).
     AiFeatureState feat_;
+    // Probe snapshot (see `AiDebug`).
+    AiDebug dbg_;
 
     // --- helpers (JS de methods) ---
     // The JS `Da` stream selection (L2352): `Da.jf()` = the shared `Da.pg`
