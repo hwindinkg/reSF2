@@ -114,19 +114,24 @@ int extended_end(const MoveDef& m) {
     return best;
 }
 
-// JS `de.Ycb` (L620): false when the fighter is playing and its current
-// frame is inside its Uninterrupt window (`ip() <= zD(!1)`). Called with
-// the ENEMY's state (JS `de.Ycb(b)` where b = the enemy's da controller).
+// JS `de.Ycb` (L620): `if(a.Pe){let b=a.Ua; if(b!=null&&a.ip()<=b.zD(!1))
+// return!1} return!0` — false ONLY when the enemy is PLAYING (`a.Pe`) AND
+// holds a move (`a.Ua != null`) AND its current frame is inside the move's
+// Uninterrupt window. The port omitted the `a.Pe` term, so an enemy in a hit
+// reaction (`Pe=!1`) whose `Ua` is still set was wrongly reported
+// uninterruptible. Called with the ENEMY's state (JS `de.Ycb(b)` where
+// b = the enemy's da controller).
 bool ycb(const AiFightState& st) {
-    if (st.enemy_move == nullptr) return true;
+    if (!st.enemy_playing || st.enemy_move == nullptr) return true;
     return !(st.enemy_move_frame <= uninterrupt_end(*st.enemy_move));
 }
 
-// JS `de.Lbb` (L621): false when the fighter is playing and its current
-// frame is inside its attack window (`ip() <= p0(!1)`). Called with the
-// ENEMY's state.
+// JS `de.Lbb` (L621): `if(a.Pe){let b=a.Ua; if(b!=null&&a.ip()<=b.p0(!1))
+// return!1} return!0` — the same `a.Pe` guard as `Ycb`; false only while the
+// enemy is PLAYING inside the move's attack window (`p0(!1)`). Called with
+// the ENEMY's state.
 bool lbb(const AiFightState& st) {
-    if (st.enemy_move == nullptr) return true;
+    if (!st.enemy_playing || st.enemy_move == nullptr) return true;
     return !(st.enemy_move_frame <= attack_end(*st.enemy_move));
 }
 
@@ -953,8 +958,15 @@ int AiController::pqb(const AiFightState& st) {
                     if (nG) {
                         dbg_.branch = "reactive/cautious";
                         wb_.clear();
+                        // JS `Pqb` (L605): `b=P.nCa();var d=a.da.Ua;c=0;
+                        // d!=null&&a.da.Pe&&(c=d.zD(!0)-this.Fl+1)` — the wait
+                        // requires the ENEMY PLAYING (`a.da.Pe`) as well as a
+                        // non-null move. NOTE: the `zD(!0)` conversion
+                        // (`i0(b+1)-1`) is BLOCKED — the port has no per-move
+                        // `qx`/`XJ` (see the OPEN `Fl` kJ-vs-Xh note in `mq`),
+                        // so this reads the raw `zD(!1)` end.
                         int c = 0;
-                        if (st.enemy_move != nullptr) {
+                        if (st.enemy_move != nullptr && st.enemy_playing) {
                             c = uninterrupt_end(*st.enemy_move) - Fl_ + 1;
                         }
                         if (moves_ != nullptr) {
@@ -1115,13 +1127,20 @@ std::string AiController::update(const AiFightState& st) {
     Fl_ = st.enemy_move_frame;
     q7_ = st.move_frame;
 
-    // Enemy move change -> refresh the QJa roll cache (JS `mwb`->`jwb`
-    // L596-597; the port detects the change by enemy anim name — the
-    // observable proxy for the move-object swap).
+    // JS `de.jwb` (L596-597), invoked from `wd.mwb` (L527) when the ENEMY
+    // STARTS a move: `var b=a.da,c=b.Ua; if(b.Pe&&c!=null){...this.QJa(a);
+    // if(!this.mcb(c)){...this.$x=this.gfa(this.Ol)}}`. The port detects the
+    // move start by the enemy anim name; it must ALSO require the enemy to be
+    // PLAYING with a move (`b.Pe && c!=null`) — a hit reaction (`Pe=!1`,
+    // `Ua` possibly still set) must draw NOTHING. The `mcb(c)` `$x` gate is
+    // vacuous in this build: `<IgnoredEnemyAnimations>` ships EMPTY
+    // (commented out in tacticSettings.xml), so `mcb` is always false.
     if (!qja_done_ || st.enemy_anim != last_enemy_anim_) {
-        qja(st);
         last_enemy_anim_ = st.enemy_anim;
-        qja_done_ = true;
+        if (st.enemy_playing && st.enemy_move != nullptr) {
+            qja(st);
+            qja_done_ = true;
+        }
     }
 
     // JS `de.ia` (L592) — the `mW` watch-recompute, the load-bearing piece
@@ -1173,12 +1192,15 @@ std::string AiController::update(const AiFightState& st) {
     // draw-free and runs later (`eval_slots`, inside `pqb`).
     roll_slots();
 
-    // The distance category + chance draws (JS L593-594).
-    aqa_ = dqb(st);
-
     // The no-decision gate (JS L593: `if(!this.hcb()) return null`).
+    // ORDER MATTERS: the JS runs `hcb` BEFORE `dqb`. The port drew `dqb`
+    // first, so every gated (`hcb` false) frame consumed one extra
+    // `Da.jf()` roll and shifted the whole shared stream.
     dbg_.hcb = hcb(st);
     if (!dbg_.hcb) return "";
+
+    // The distance category + chance draw (JS L593: `this.aqa=this.dqb(a)`).
+    aqa_ = dqb(st);
 
     // The core decision (JS L594).
     int cnt = pqb(st);

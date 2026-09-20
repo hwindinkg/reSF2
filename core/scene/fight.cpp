@@ -4754,6 +4754,11 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // being replaced by the AI the very next frame.
         st.playing = me.fighter.current_move() != nullptr &&
                      !me.fighter.ragdoll_active();  // JS `Ji.Pe`
+        // JS `a.Pe` — the ENEMY's clip must be playing for `de.Ycb`/`de.Lbb`
+        // (L620-621) and the `Pqb` nG wait (L605). A reaction forces it false
+        // (`Te.Sca`/`da.reset`) while `Ua` can still be set.
+        st.enemy_playing = foe.fighter.current_move() != nullptr &&
+                           !foe.fighter.ragdoll_active();
         st.my_reacting = me.fighter.ragdoll_active();  // JS `Nd.nk`
         st.magic_bullets = 0;
         st.enemy_part_frames.push_back(foe.fighter.m2());

@@ -360,6 +360,13 @@ struct AiFightState {
     // My fighter is PLAYING a clip (`Ji.Pe`): the `hcb` L598 gate requires
     // it (`if(this.Ji.Pe&&this.cs!=null){...}else return!1`).
     bool playing = false;
+    // The ENEMY is PLAYING a clip (`a.Pe`). JS `de.Ycb`/`de.Lbb` (L620-621)
+    // and the `Pqb` nG wait (L605 `d!=null&&a.da.Pe`) all require it: a hit
+    // reaction leaves it FALSE while `enemy_move` can still be non-null, and
+    // the JS then reports "interruptible" and draws no nG wait. Defaults
+    // true so probe harnesses that only model the move pointer keep their
+    // pre-existing semantics — the fight path sets it explicitly.
+    bool enemy_playing = true;
     // My fighter is inside a hit reaction (`Al.nk` / `Nd.nk`). `wd.Qnb`
     // (L507) starts the reaction and leaves `Te.Pe` false (`da.reset()` +
     // `da.etb`), so `de.hcb` (L598) sees `!Ji.Pe` and the AI issues no
