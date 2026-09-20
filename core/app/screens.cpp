@@ -2345,14 +2345,33 @@ ZaLayout za_layout() {
 // with a single shared flag the `МЕНЮ` column was dead on every screen that
 // was not the last one expanded (the reported bug: the menu only worked in
 // the Dojo), and a collapsed-by-default screen could only reset it.
+// JS `gk` (L1996-2001) nav-column state machine, per screen MOUNT. Fields
+// mirror the JS exactly: `uJ` the TARGET (`expand` L2000 `this.uJ=!0` /
+// `collapse` `this.uJ=!1`), `yI` the animated open fraction (`NLa` L2001),
+// `PF` the animation LOCK (`Gwa` L2000 sets it on a timed run, `aa` L1998
+// clears it at progress 1 and gates every input while set), `pma`/`time` the
+// run duration/elapsed, `zI` 2 collapsed / 1 expanded / 0 mid (`NLa` L2001).
+struct ZaNavState {
+    bool uJ = false;
+    bool PF = false;
+    float yI = 0.0f;
+    float pma = 0.0f;
+    float time = 0.0f;
+    int zI = 2;
+};
 enum { kZaNavScreenSlots = 16 };
-static bool g_za_nav_open_by_screen[kZaNavScreenSlots] = {};
-static bool& za_nav_flag(ScreenId id) {
+static ZaNavState g_za_nav_by_screen[kZaNavScreenSlots];
+static ZaNavState& za_nav_state(ScreenId id) {
     const int i = static_cast<int>(id);
-    static bool unused_slot = false;
+    static ZaNavState unused_slot;
     if (i < 0 || i >= kZaNavScreenSlots) return unused_slot;
-    return g_za_nav_open_by_screen[i];
+    return g_za_nav_by_screen[i];
 }
+// JS `gk` ctor (L1998) `this.collapse(0)`: a fresh `za` is COLLAPSED. Called by
+// `make_screen` at every screen MOUNT, so the state is per-screen and never
+// carries history across mounts (the old `g_za_nav_open_by_screen` persisted
+// across instances -> the reported "sometimes it closes sometimes not").
+static void za_nav_reset(ScreenId id) { za_nav_state(id) = ZaNavState{}; }
 
 // JS `za.zq` (L1983) + `ndb` (L1975): the disciple toggle icon-button. `zq`
 // is scaled `scroll.Af.width*.5 / zq.Y.fa.x` (so the on-screen width is half
@@ -2450,8 +2469,75 @@ void za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
 // Rfb/Vfb -> `ma.Jg().jI(cls)`): a tap pushes the target screen unless it is
 // the screen already showing (the JS highlights that one active, `xyb`
 // L1982).
-void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = false) {
-    (void)force_collapsed;  // the per-screen `za_nav_flag` owns collapse state
+// `gk.Gwa(a,b)` (L2000): `b<=0 ? (this.PF=!1,this.NLa(a)) : (this.pma=b,
+// this.PF=!0,this.time=0)`. `NLa` (L2001) stores the fraction + the 2/1/0 `zI`
+// state. The timed run is `expand(.3)`/`collapse(.3)` (L2000), so the lock is
+// 0.3 s.
+constexpr float kZaNavAnimSeconds = 0.3f;
+
+// `gk.NLa(a)` (L2001): `this.yI=a; ... let b=a==0; this.dr=a==1; this.zI =
+// b?2 : dr?1 : 0`.
+static void za_nav_settle(ZaNavState& st, float y) {
+    st.yI = y;
+    if (y <= 0.0f) {
+        st.zI = 2;  // collapsed
+    } else if (y >= 1.0f) {
+        st.zI = 1;  // expanded
+    } else {
+        st.zI = 0;  // mid-run
+    }
+}
+
+// `gk.expand(a)` (L2000): `this.uJ=!0; this.Gwa(this.width,a)`. NO `PF` guard:
+// an expand re-targets even mid-animation.
+static void za_nav_expand_run(ZaNavState& st, float dur) {
+    st.uJ = true;
+    if (dur <= 0.0f) {
+        st.PF = false;
+        st.pma = 0.0f;
+        st.time = 0.0f;
+        za_nav_settle(st, 1.0f);  // `Gwa(a,0)` -> immediate
+    } else {
+        st.pma = dur;
+        st.PF = true;
+        st.time = 0.0f;
+    }
+}
+
+// `gk.collapse(a)` (L2000): `this.uJ=!1; a>0&&this.PF||this.Gwa(0,a)`. The
+// `a>0 && this.PF` short-circuit is the "a close during the run is a NO-OP"
+// rule (the animation lock). Returns false when the call was swallowed.
+static bool za_nav_collapse_run(ZaNavState& st, float dur) {
+    st.uJ = false;
+    if (dur > 0.0f && st.PF) return false;  // the JS no-op while animating
+    if (dur <= 0.0f) {
+        st.PF = false;
+        st.pma = 0.0f;
+        st.time = 0.0f;
+        za_nav_settle(st, 0.0f);  // immediate (`Gwa(0,0)`)
+    } else {
+        st.pma = dur;
+        st.PF = true;
+        st.time = 0.0f;
+    }
+    return true;
+}
+
+void za_update(App& app, Screen& self, ScreenId active, float dt) {
+    ZaNavState& st = za_nav_state(active);
+    // `gk.aa` (L1998): the animation advances FIRST and clears its own lock at
+    // progress 1 (`a=this.ed(this.pma); a==1&&(this.PF=!1)`), easing `yI`
+    // toward the target (`this.NLa(dc.Ln()(this.uJ?a:1-a))`). The easing curve
+    // is observable only mid-run; the settled `yI` is identical.
+    if (st.PF) {
+        st.time += dt;
+        float p = st.pma > 0.0f ? st.time / st.pma : 1.0f;
+        if (p >= 1.0f) {
+            p = 1.0f;
+            st.PF = false;  // the lock clears at the animation's end
+        }
+        za_nav_settle(st, st.uJ ? p : 1.0f - p);
+    }
     // `za.zq` disciple toggle (JS L1983, `Nfb` L1981): a child of `za`, so it
     // answers taps regardless of the nav collapse. Shown only on the Dojo
     // (`v.FU` L1207 `Td.Tf==3`) while `ShowDojoDisciple > 0` (`g$a` L271).
@@ -2493,17 +2579,22 @@ void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = f
     const double px = app.pointer().x, py = app.pointer().y;
     const bool header_hit = px >= hx && px <= hx + hw && py >= hy && py <= hy + hh;
     // Collapsed (JS `collapse(0)` L1978): the header expands the column.
-    // `force_collapsed` (the Map) draws/behaves collapsed without touching the
-    // shared flag, so returning to the Dojo keeps its expanded column.
-    bool& nav_open = za_nav_flag(active);
+    // While collapsed only the header answers (`NLa` L2001 hides the five
+    // `Le` rows); a header press toggles the column.
+    // `gk.aa` (L1998): the input switch runs only `if(!this.PF)`, so a nav tap
+    // during the open/close run is swallowed (and `collapse(a>0)` is a no-op,
+    // L2000). The lock makes the header toggle deterministic instead of
+    // history-dependent (the reported "sometimes it closes sometimes not").
+    if (st.PF) return;
+    bool& nav_open = st.uJ;  // the JS `gk.uJ` target
     if (!nav_open) {
         // `gk.Bgb` (L2000): the header tap expands the column. It must work on
         // EVERY screen — the old `force_collapsed` early-return skipped it, so
         // the `МЕНЮ` button was dead on the Map/Shop/Profile.
         if (header_hit && app.pointer().pressed) {
-            nav_open = true;
-            std::fprintf(stdout, "[za] nav column expanded (screen %d)\n",
-                         static_cast<int>(active));
+            za_nav_expand_run(st, kZaNavAnimSeconds);
+            std::fprintf(stdout, "[za] nav EXPAND (screen %d) target=%d lock=%d\n",
+                         static_cast<int>(active), st.uJ ? 1 : 0, st.PF ? 1 : 0);
             std::fflush(stdout);
             sf2::audio::AudioEngine::instance().play("snd_focus_1");
         }
@@ -2517,7 +2608,10 @@ void za_update(App& app, Screen& self, ScreenId active, bool force_collapsed = f
     // navigate instead of collapsing — the `МЕНЮ` column could not be closed
     // outside the Dojo.
     if (header_hit && app.pointer().pressed) {
-        nav_open = false;
+        za_nav_collapse_run(st, kZaNavAnimSeconds);
+        std::fprintf(stdout, "[za] nav COLLAPSE (screen %d) target=%d lock=%d\n",
+                     static_cast<int>(active), st.uJ ? 1 : 0, st.PF ? 1 : 0);
+        std::fflush(stdout);
         sf2::audio::AudioEngine::instance().play("snd_focus_1");
         return;
     }
@@ -2609,8 +2703,7 @@ void draw_nav_hint_arrow(App& app, float cx, float top_y) {
 // selects the active nav frame (JS `xyb`). The widget strip mirrors `odb`:
 // widgets are laid left->right and the strip is centred; each widget is
 // icon + value (+ bar), scaled to `widget_h` (JS wr/xr/yr `layout`).
-void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
-                    bool force_collapsed = false) {
+void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     sf2::render::Renderer& ren = app.renderer();
     const float w = kViewW;
     const ZaLayout lay = za_layout();
@@ -2622,15 +2715,14 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
     // `dojo_hub` (measured 0.50x at every sampled scene pixel). Drawn BEFORE
     // the topPanel/widgets (JS appends `scroll` before `PL`, ctor L1973), so
     // the bar + column stay undimmed.
-    // `force_collapsed` no longer owns the state — the per-screen `za_nav_flag`
-    // does (a `force_collapsed` screen simply starts collapsed); the argument
-    // documents that the screen builds a fresh `za`.
-    (void)force_collapsed;
-    const bool nav_expanded = za_nav_flag(active);
+    // The per-screen `za_nav_state` owns the collapse (`gk.uJ`/`yI`); a
+    // column with `yI==0` draws only the header + its flash (the JS
+    // `iL.R(this.yI>0)` visibility, `NLa` L2001).
+    const float nav_frac = za_nav_state(active).yI;
     const int flash_idx = za_nav_index_for_scene(app.quest_engine().nav_flash());
-    if (nav_expanded) {
+    if (nav_frac > 0.0f) {
         const float dim[] = {0, 0, w, 0, w, kViewH, 0, 0, w, kViewH, 0, kViewH};
-        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f);
+        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.502f * nav_frac);
     }
     // topPanel (misc id 260) stretched full width (odb L1975).
     if (!try_draw_atlas_button(app, "topPanel", w * 0.5f, lay.bar_h * 0.5f, w, lay.bar_h,
@@ -2802,7 +2894,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr,
     // forces the collapsed header (JS mounts a fresh `za` per screen,
     // `Aub` -> `collapse(0)`) without disturbing the shared nav flag other
     // shell screens rely on.
-    if (!za_nav_flag(active)) {
+    if (nav_frac <= 0.0f) {
         float hx = 0.0f, hy = 0.0f, hw = 0.0f, hh = 0.0f;
         za_header_rect(hx, hy, hw, hh);
         // The collapsed header is `gk.Af` — the SAME `Zh` rail the expanded
@@ -5611,7 +5703,7 @@ void DojoScreen::update_impl(float dt) {
     }
     // The shared `za` nav column (JS `za.Aub` L1978-1980 / `za.Ofb`..`Vfb`):
     // a tap switches to Dojo/Map/Shop/Profile/Settings (JS `ma.Jg().jI`).
-    za_update(app(), *this, kScreenDojo);
+    za_update(app(), *this, kScreenDojo, dt);
 }
 
 // Dojo location ensure (the hub's own `assets.dojo`; the fight keeps a
@@ -6976,7 +7068,7 @@ void MapScreen::update_impl(float dt) {
     }
     // Shared `za` nav column (JS `ma.D1`): Dojo/Shop/Profile/Settings hops.
     // The Map forces the collapsed header (fresh `za` per screen).
-    za_update(app(), *this, kScreenMap, /*force_collapsed=*/true);
+    za_update(app(), *this, kScreenMap, dt);
 }
 
 // --- Map info panel (JS `Rr` L2098-2104, `pk` L2160, `Xr` L2133, `Wc`
@@ -7408,7 +7500,7 @@ void MapScreen::render_impl(App& app) {
     }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets, or the collapsed
     // `МЕНЮ` header (JS `za.Aub` collapse(0) — the map's default).
-    draw_za_chrome(app, kScreenMap, nullptr, /*force_collapsed=*/true);
+    draw_za_chrome(app, kScreenMap);
     // The `Rr` info panel (JS `Ya.Zq = Qo(Rr)` L2125) draws last, over the
     // `Vr` strip and the `Ur` bar (the oracle panel overlaps both).
     const Node* sel = nullptr;
@@ -10670,7 +10762,7 @@ void ShopScreen::update_impl(float dt) {
     // paints NO `gk.background` 0.5-black dim over the dojo backdrop — the
     // oracle `shop_tab*`/`shop_detail` right-wall backdrop measures ~0.7x the
     // `dojo_hub` wall (no 0.5 dim), vs the port's 0.5-dimmed, icon-column
-    // capture. `force_collapsed` = the Map/Profile precedent
+    // capture. the per-screen `za` state (`gk.uJ`) owns the column, not a flag override
     // (screens.cpp:4623 / 8731), both already oracle-matched.
     // TryOn playback (`Oa.Fhb` L2300 -> `iz.XBa("TryOn")=7`). The JS ENDS the
     // clip at `TryOnEnd` (the `Em` action L755 tests `Je==7 && Name=="TryOn"`)
@@ -10690,8 +10782,8 @@ void ShopScreen::update_impl(float dt) {
             preview_frame_ = 0;
         }
     }
-    // Display-only: the screen's own `za_nav_flag` is left intact so the Dojo keeps its column.
-    za_update(app(), *this, kScreenShop, /*force_collapsed=*/true);
+    // Display-only: the screen's own `za` state (`gk.uJ`) is untouched so the Dojo keeps its column.
+    za_update(app(), *this, kScreenShop, dt);
 }
 
 void ShopScreen::render_impl(App& app) {
@@ -10986,7 +11078,7 @@ void ShopScreen::render_impl(App& app) {
     // the collapsed header and NO `gk.background` 0.5-black dim (measured: the
     // oracle shop right-wall backdrop is ~0.7x the hub, not 0.5x). Same
     // force-collapsed draw as the Map/Profile (L5078/L9345).
-    draw_za_chrome(app, kScreenShop, nullptr, /*force_collapsed=*/true);
+    draw_za_chrome(app, kScreenShop);
     // Sensei/tutorial dialog modal over the shop (the tutorial's
     // `tutorial_buy_knives` beat, `He` L1042; see update_impl).
     draw_quest_modal(app, ren, app.screens().top() == this);
@@ -11974,7 +12066,7 @@ void EquipmentScreen::update_impl(float dt) {
     // Shared `za` nav column (JS `ma.D1`): Dojo/Map/Shop/Settings hops. The
     // oracle `profile_tab*` captures show the nav COLLAPSED (the `МЕНО`
     // header only) — force it like the Map (`za.xyb` collapses on arrival).
-    za_update(app(), *this, kScreenProfile, /*force_collapsed=*/true);
+    za_update(app(), *this, kScreenProfile, dt);
 }
 
 void EquipmentScreen::render_impl(App& app) {
@@ -12548,7 +12640,7 @@ void EquipmentScreen::render_impl(App& app) {
     }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
     // Collapsed on arrival (oracle `profile_tab*` shows the `МЕНО` header).
-    draw_za_chrome(app, kScreenProfile, nullptr, /*force_collapsed=*/true);
+    draw_za_chrome(app, kScreenProfile);
     // The BACK button (top-left) is drawn AFTER the `za` chrome so the chrome's
     // full-width topPanel (`odb` L1975, height min(H*.13,100)) no longer
     // occludes it. NOTE: the JS Profile `vb` (L2189-2201) is a tabbed screen
@@ -12583,7 +12675,10 @@ SettingsScreen::SettingsScreen(ScreenManager& mgr) : Screen(mgr, "Settings") {
 
 void SettingsScreen::update_impl(float dt) {
     ++age_;  // press debounce: ignore the push-frame held click
-    (void)dt;
+    // The `za` state machine ticks on Settings too (the one shell screen that
+    // omitted it): the mount reset + the animation lock share the per-screen
+    // slot, and nav #5 (`Vfb` L1981) opens the settings dialog from here.
+    za_update(app(), *this, kScreenSettings, dt);
     // D3/D13: `Wb` is a GLOBAL overlay — the settings dialog (and any queued
     // quest dialog) blocks the screen beneath.
     quest_modal_consume(app());
@@ -12832,6 +12927,12 @@ void SettingsScreen::render_impl(App& app) {
 // ---------------------------------------------------------------------------
 
 std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id) {
+    // JS `ma.D1` (L1832) builds a FRESH `za` per screen (`gk.Af = new Zh(...)`
+    // L1996) whose ctor `collapse(0)` (L1998) starts it COLLAPSED. The mount is
+    // the screen construction, so reset the slot here: a new instance never
+    // inherits the previous occupant's column (the old persistent
+    // `g_za_nav_open_by_screen` made the toggle history-dependent).
+    za_nav_reset(id);
     switch (id) {
         case kScreenDojo:
         case kScreenGeneralMenu:
@@ -12875,11 +12976,8 @@ std::string catalog_item_type(App& app, const std::string& item_name) {
     return std::string();
 }
 
-// `eo.N3a` (L1117 `za.instance.sxa()` -> `scroll.collapse(0)`, L2001).
-// The `za` column's expanded state for a shell screen (`gk.uJ`). One flag per
-// screen (`za_nav_flag`) — the `--flow-verify` probe asserts the Map's header
-// tap opens it.
-bool za_nav_expanded(ScreenId id) { return za_nav_flag(id); }
+// The `za` column's expanded TARGET (JS `gk.uJ`), read by --flow-verify.
+bool za_nav_expanded(ScreenId id) { return za_nav_state(id).uJ; }
 
 // The live Map screen's `Ur` strip (see screens.hpp). Null-safe: a probe run
 // with another screen on top gets false / -1 instead of a crash.
@@ -12893,11 +12991,20 @@ int map_zone_selected(App& app) {
 }
 
 // `eo.N3a` (L1117 `za.instance.sxa()` -> `scroll.collapse(0)`): the quest
-// engine asks for the ACTIVE screen's column collapsed. The port has no
-// per-screen `za` instance, so the request resets every screen's flag (the
-// old single global behaved the same way).
+// engine asks for the ACTIVE screen's column collapsed; the port has one
+// state per screen slot, so the request resets every slot.
 void set_za_nav_open(bool open) {
-    for (bool& f : g_za_nav_open_by_screen) f = open;
+    // `za.sxa(a)` (L1981) -> `scroll.collapse(a)` (L2000). The quest engine
+    // calls it with the 0 default, i.e. the INSTANT collapse (no animation,
+    // no lock); the counterpart expand is kept for symmetry.
+    for (ZaNavState& s : g_za_nav_by_screen) {
+        s.uJ = open;
+        s.PF = false;
+        s.pma = 0.0f;
+        s.time = 0.0f;
+        s.yI = open ? 1.0f : 0.0f;
+        s.zI = open ? 1 : 2;
+    }
 }
 
 namespace {

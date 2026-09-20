@@ -80,6 +80,15 @@ void print_usage(const char* argv0) {
 //   to). `hold_frames` (>0) advances after that many frames post-click for
 //   same-screen actions (buy/equip) where the screen id doesn't change.
 // `capture` snapshots the expected screen on arrival.
+// The `za` nav header tap (120,90) opens the column with `expand(.3)` (JS `gk`
+// L2000) = 18 fixed steps, and `gk.aa` (L1998) swallows input until the run
+// ends, so a follow-up row click must wait it out. Non-nav tabs (e.g. the shop
+// TRY plate) keep the old 5-frame lead.
+constexpr int kZaNavOpenLockFrames = 18;
+static int za_tab_lead_frames(float tab_y) {
+    return (tab_y > 0.0f && tab_y <= 100.0f) ? kZaNavOpenLockFrames + 6 : 5;
+}
+
 struct LoopStep {
     float x = 0.0f;
     float y = 0.0f;
@@ -252,7 +261,7 @@ struct HeadlessLoopDriver {
                     std::fflush(stdout);
                     app.inject_click(s.tab_x, s.tab_y);
                     tab_clicked = true;
-                    step_frame = s.min_delay - 5;
+                    step_frame = s.min_delay - za_tab_lead_frames(s.tab_y);
                     return;
                 }
                 if (step == 0 && !captured_menu) {
@@ -782,7 +791,9 @@ struct TourDriver {
                     std::fflush(stdout);
                     app.inject_click(s.tab_x, s.tab_y);
                     tab_clicked = true;
-                    step_frame = s.min_delay - 5;  // 5 frames for the list to switch
+                    // The `za` header tap needs the open run to finish (the lock
+                    // swallows input); other tabs keep the old 5-frame lead.
+                    step_frame = s.min_delay - za_tab_lead_frames(s.tab_y);
                     return;
                 }
                 if (s.key != 0) {
@@ -1221,8 +1232,8 @@ struct QuestVerifyDriver {
     bool go_map = false;          // post-OpenShop: navigate to the Map
 
     // Queue an internal click at the view coordinate (no OS input).
-    void tap(sf2::app::App& app, int x, int y) {
-        cooldown = 8;
+    void tap(sf2::app::App& app, int x, int y, int cd = 8) {
+        cooldown = cd;
         std::fprintf(stdout, "[qverify] injected click (%d, %d)\n", x, y);
         std::fflush(stdout);
         app.inject_click(x, y);
@@ -1300,7 +1311,7 @@ struct QuestVerifyDriver {
                 if (nav_toggle) {
                     tap(app, 184, kRowY[idx]);
                 } else {
-                    tap(app, 184, 92);  // the collapsed `gk` header (za_header_rect)
+                    tap(app, 184, 92, 90);  // `gk` header; wait out the 18-step run
                 }
                 nav_toggle = !nav_toggle;
             }
@@ -1322,7 +1333,7 @@ struct QuestVerifyDriver {
                     if (nav_toggle) {
                         tap(app, 184, kRowY[1]);  // Map
                     } else {
-                        tap(app, 184, 92);  // header
+                        tap(app, 184, 92, 90);  // header; wait out the run
                     }
                     nav_toggle = !nav_toggle;
                 }
@@ -1360,6 +1371,7 @@ int main(int argc, char** argv) {
     bool auto_click = false;
     bool headless_loop = false;
     bool flow_verify = false;  // --flow-verify: the repaired map/menu/ladder flows
+    bool za_nav_verify = false;  // --za-nav-verify: the per-screen `za` open/close proof
     bool ui_tour = false;
     bool fidelity_tour = false;
     bool quest_verify = false;  // --quest-verify: interactive action check
@@ -1428,6 +1440,8 @@ int main(int argc, char** argv) {
             auto_click = true;
         } else if (arg == "--flow-verify") {
             flow_verify = true;
+        } else if (arg == "--za-nav-verify") {
+            za_nav_verify = true;
         } else if (arg == "--headless-loop") {
             headless_loop = true;
         } else if (arg == "--ui-tour") {
@@ -1644,7 +1658,8 @@ int main(int argc, char** argv) {
     // Every flag below turns the process into a non-interactive driver; only a
     // plain `game` launch (no flags) is a real, visible, user-driven window.
     const bool driver_mode =
-        headless > 0 || auto_click || headless_loop || flow_verify || ui_tour ||
+        headless > 0 || auto_click || headless_loop || flow_verify || za_nav_verify ||
+        ui_tour ||
         fidelity_tour ||
         quest_verify || quest_verify_buy || dialog_verify || observe_dialogs ||
         replay_mode || verify_input || fx_probe || input_tape || verify_place ||
@@ -2279,10 +2294,12 @@ int main(int argc, char** argv) {
         tick(10);
         check(!za_nav_expanded(kScreenMap), "map `za` starts collapsed (fresh)");
         app.inject_click(120.0, 90.0);  // the header (`dojo_menu_open` beat)
-        tick(8);
+        // The `gk` open run is `expand(.3)` (L2000) = 18 fixed steps and
+        // `gk.aa` (L1998) swallows input while `PF`, so wait the run out.
+        tick(28);
         check(za_nav_expanded(kScreenMap), "map header tap EXPANDS the menu column");
         app.inject_click(120.0, 90.0);
-        tick(8);
+        tick(28);
         check(!za_nav_expanded(kScreenMap), "map header tap collapses it again");
         // (3) ZONE DOTS: a tap on the strip must switch the shown zone.
         const int before = map_zone_selected(app);
@@ -2312,6 +2329,67 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
         app.shutdown();
         return passed == checks ? 0 : 1;
+    } else if (za_nav_verify) {
+        // ---- M4: the `za` nav open/close proof on EVERY main screen --------
+        // JS `ma.D1` (L1832) builds a fresh `za` per screen and the `gk` ctor
+        // `collapse(0)` (L1998) starts it COLLAPSED; the header tap toggles it
+        // (`Bgb` L2000) under the 0.3 s `PF` input lock (`aa` L1998). Per
+        // screen: after the MOUNT -> collapsed, after the OPEN tap -> expanded,
+        // after the CLOSE tap -> collapsed.
+        glfwHideWindow(app.renderer().window());
+        app.set_headless_frames(1);
+        struct ZaScreen {
+            sf2::app::ScreenId id;
+            const char* name;
+        };
+        const ZaScreen za_screens[5] = {
+            {sf2::app::kScreenDojo, "Dojo"},
+            {sf2::app::kScreenMap, "Map"},
+            {sf2::app::kScreenShop, "Shop"},
+            {sf2::app::kScreenProfile, "Profile"},
+            {sf2::app::kScreenSettings, "Settings"},
+        };
+        int za_checks = 0;
+        int za_passed = 0;
+        const auto za_tick = [&](int n) {
+            for (int i = 0; i < n; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+        };
+        za_tick(600);  // Preloader -> Loader -> Dojo
+        for (const ZaScreen& zs : za_screens) {
+            if (app.screens().current_id() != static_cast<int>(zs.id)) {
+                app.screens().push(make_screen(app.screens(), zs.id));  // mount
+            }
+            za_tick(20);
+            const bool after_mount = za_nav_expanded(zs.id);
+            app.inject_click(120.0, 90.0);  // the collapsed `gk` header
+            za_tick(4);                     // still INSIDE the expand(.3) run
+            app.inject_click(120.0, 90.0);  // a close DURING the run
+            za_tick(1);
+            const bool swallow_open = za_nav_expanded(zs.id);  // lock held
+            za_tick(27);                    // the run ends, the lock clears
+            const bool after_open = za_nav_expanded(zs.id);
+            app.inject_click(120.0, 90.0);
+            za_tick(28);                    // the collapse(.3) run + lock clear
+            const bool after_close = za_nav_expanded(zs.id);
+            const bool ok = !after_mount && swallow_open && after_open && !after_close;
+            std::fprintf(stdout,
+                         "[zanav] %-8s mount=%s open=%s lock_swallow=%s close=%s -> %s\n",
+                         zs.name, after_mount ? "OPEN" : "shut",
+                         after_open ? "OPEN" : "shut",
+                         swallow_open ? "OPEN(kept)" : "closed(LEAK)",
+                         after_close ? "OPEN" : "shut", ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+            ++za_checks;
+            if (ok) ++za_passed;
+        }
+        std::fprintf(stdout, "[zanav] RESULT %d/%d\n", za_passed, za_checks);
+        std::fflush(stdout);
+        app.shutdown();
+        return za_passed == za_checks ? 0 : 1;
+
     } else if (replay_mode || verify_input) {
         // ---- Input replay / scripted verification (phase1 step9) ----------
         // Boots the direct dojo fight (same as --fight) and feeds a game
@@ -3138,7 +3216,9 @@ int main(int argc, char** argv) {
         // (c) the real dojo navigation: the `za` nav column. Expand the
         //     collapsed header (x64-176 y72-110) then tap the MAP row (184,231).
         app.inject_click(120.0, 90.0);
-        for (int i = 0; i < 4; ++i) app.run_one_frame();
+        // The `gk` open run (`expand(.3)` L2000) swallows input while `PF`
+        // (L1998), so wait the run out before the MAP row tap.
+        for (int i = 0; i < 40; ++i) app.run_one_frame();
         app.inject_click(184.0, 231.0);
         for (int i = 0; i < 8; ++i) app.run_one_frame();
         std::fprintf(stdout, "[tape] dojo nav MAP tap (184,231): screen id %d %s\n",
