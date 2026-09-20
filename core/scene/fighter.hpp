@@ -430,6 +430,12 @@ public:
     int buffered_tap_count() const;
     int buffered_hold_count() const;
     const std::set<std::string>& active_intervals() const { return active_intervals_; }
+    // The ended move's still-active intervals, snapshotted at clip end.
+    // JS `KNa()` (L548) does NOT clear `Ua`/`Te.xj`, so the `AnimationEnd`
+    // pass sees `Ae.xb = b.P0()` = the last played frame's intervals.
+    const std::vector<std::pair<std::string, int>>& ended_intervals() const {
+        return ended_intervals_;
+    }
     // Interval names active at `frame` (JS `jc.c7a` L691 semantics).
     std::vector<std::string> intervals_at(int frame) const;
     // `fe.G0` type of the named interval in the CURRENT move (0 when
@@ -857,7 +863,9 @@ private:
     float ragdoll_wall_min_ = 0.0f;
     float ragdoll_wall_max_ = 0.0f;
     float ragdoll_floor_y_ = 0.0f;
-    std::set<std::string> active_intervals_; // active interval names (JS `Te.xj`)
+    std::set<std::string> active_intervals_;
+    // Clip-end snapshot of the above (JS `Ae.xb` at the `AnimationEnd` pass).
+    std::vector<std::pair<std::string, int>> ended_intervals_; // active interval names (JS `Te.xj`)
     // --- move-frame action dispatch (JS `Te.Lwa` / `Te.CZa`) --------------
     // JS `xc.voice` (see `set_voice`).
     std::string voice_;

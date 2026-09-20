@@ -4782,11 +4782,17 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 // animation-name list is the ENDED move's — the
                 // `<CurrentAnimation Name="Step"/>` restart guard reads it.
                 ectx.anims_me = ended->anim_names;
-                ectx.anims_me.push_back(me.is_player ? "StanceLeft"
-                                                     : "StanceRight");
                 ectx.anims_enemy = anim_names_of(foe.fighter);
                 ectx.qb = me.is_player;
                 fill_ctx_geometry(ectx, me, foe);
+                // `Ae.xb` (`Gc.yma` L680 `a.xb=b.P0()`) + `Ae.F3a`: the
+                // live interval lists the clip-end pass evaluates.
+                for (const auto& p : me.fighter.ended_intervals()) {
+                    ectx.intervals.push_back({p.first, p.second, true});
+                }
+                for (const std::string& ivn : foe.fighter.active_intervals()) {
+                    ectx.intervals_enemy.push_back({ivn, 0, true});
+                }
                 ectx.health_ratio =
                     me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
                 const std::string again =

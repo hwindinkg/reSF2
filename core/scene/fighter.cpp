@@ -1234,6 +1234,15 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
     for (const MoveDef* m : hb_) {
         if (m == nullptr) continue;
         if (!m->has_event(ev)) continue;
+        // Clip-end gate (`Gc.kg` L671 -> `Ih(10)`): a candidate may only
+        // re-fire from `AnimationEnd` if it is ALSO key-triggered
+        // (`Gc.mS` L672 -> `Ih(2)`). A pure idle/`AnimationEnd`-loop move
+        // (`FistsStartStanceIdle`, `StanceIdle`) carries only
+        // `<AnimationEnd/>`; re-selecting it with no input keeps the fighter
+        // `Pe=true` with its `Uninterrupt` window live, which blocks the
+        // opponent AI (`Pqb` L604 via `de.Ycb` L620). `StepForward` also
+        // carries `<KeyPressed/>`, so the held re-fire is unaffected.
+        if (ev == "AnimationEnd" && !m->has_event("KeyPressed")) continue;
         std::string trace;
         // [TASK B DIAGNOSTIC] `SF2_TRACE_COND=1` dumps the failing condition
         // tree + the enemy interval list for the throw family so the exact
@@ -1527,6 +1536,14 @@ void Fighter::advance_step() {
         // `Gc.kg` L671 `Ih(10,..)` -> `Gnb` L672 `CZa(10)` reads `this.Ua`,
         // which `KNa` did NOT clear. Hand the ended move to the caller for
         // the `AnimationEnd` action pass.
+        // JS `KNa()` (L548) leaves `Ua`/`xj` set: the `AnimationEnd` pass
+        // (`Gc.yma` L680 `a.xb=b.P0()`) still sees the last frame's live
+        // intervals. Snapshot them (with their `fe.G0` types) before the
+        // port drops the move, so `ectx.intervals` is not empty.
+        ended_intervals_.clear();
+        for (const std::string& ivn : active_intervals_) {
+            ended_intervals_.emplace_back(ivn, interval_type(ivn));
+        }
         ended_move_ = current_move_;
         current_move_ = nullptr;
         current_clip_ = nullptr;
