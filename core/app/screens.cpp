@@ -9706,13 +9706,20 @@ void ResultsScreen::render_impl(App& app) {
         if (r.star) {
             (void)try_draw_atlas_button(app, "star", rx + 26.0f, ry, 52.0f, 48.0f,
                                         slide);
+            // JS `Pr.aa` (L2083): the GOLD value (`this.el`, `w_` = `oc.m6`
+            // coins) is `a=dc.Ln()(b); a=Math.round(this.w_*a)` - the
+            // `1-(1-b)^2` ease over the same `ed(1)` clock as the LINEAR
+            // star value (`this.exp` = `Math.round(this.B3a*b)`, `B3a` =
+            // `Hi.ap` exp). The port rendered the gold value STATIC.
+            const int money_shown = static_cast<int>(
+                static_cast<float>(money_reward_) * dialog_ease_out(count) + 0.5f);
             draw_ui_label(app, rx + 60.0f, ry - 16.0f, 120.0f, 32.0f,
                           std::to_string(shown), 0.95f, UiAlign::Left, 0.31f * slide,
                           0.79f * slide, 0.84f * slide);
             (void)try_draw_atlas_button(app, "gold", rx + coin_dx, ry, 48.0f, 48.0f,
                                         slide);
             draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
-                          std::to_string(money_reward_), 0.95f, UiAlign::Left,
+                          std::to_string(money_shown), 0.95f, UiAlign::Left,
                           0.31f * slide, 0.79f * slide, 0.84f * slide);
             continue;
         }
