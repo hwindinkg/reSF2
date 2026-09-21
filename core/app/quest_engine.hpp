@@ -43,8 +43,13 @@ class App;
 
 // Journal for one event firing (JS `ha.ta`/`Bj` readable subset).
 struct QuestJournal {
-    std::string scene_to;     // JS scene name (Dojo/Map/Fight/Shop/Profile/…)
-    std::string scene_from;   // JS scene name
+    std::string scene_to;     // JS `Bj.nLa` (`_$SceneTo`; `wa.mp` L933)
+    std::string scene_from;   // JS `Bj.lLa` (`_$SceneFrom`; `wa.mp` L933)
+    // JS `Bj.XNa`/`Bj.YNa` (ctor L1005; `_$TabFrom`/`_$TabTo` read L964). Set
+    // by `v.qwa` (L1212: `c.XNa=uh.getName(a); c.YNa=uh.getName(b)`) on every
+    // screen change, from the `vj.E0` tab names. Distinct from the scene pair.
+    std::string tab_from;     // JS `Bj.XNa`
+    std::string tab_to;       // JS `Bj.YNa`
     std::string fight;        // last fight name ("Punchbag|Bosses|1" or bare)
     std::string fight_result;  // "Win" / "Loss" / ""
     std::string fight_zone;   // resolved zone ("" when unknown)
@@ -228,6 +233,17 @@ struct QuestShopOpen {
     std::string item;  // items.xml Name, or "" (tab only)
 };
 
+// `Hn` `ChangeTab` (L948 factory `case "EChangeTab"`; `S` L1032-1034): resolve
+// the `Tab` attr (`ba.Pc` -> `vj.E0` index L1168 -> `vj.ifa` screen id L1169)
+// and select that screen's tab when it is the current screen. The port can
+// only drive the Shop (`Oa.ska`, case 4); Map/Profile have no exposed tab API.
+struct QuestTabSelect {
+    std::string tab;    // resolved `vj.E0` category name
+    std::string focus;  // `Hn.jN` (`Focus` attr)
+    int tab_index = 0;  // `Hn.Ay` (`vj.E0`)
+    int screen_id = 0;  // `Hn.CX` (`vj.ifa`)
+};
+
 // Side effects of one run: save writes (applied) + records (logged only).
 struct QuestSideEffects {
     bool has_story_step = false;
@@ -275,6 +291,8 @@ struct QuestSideEffects {
     std::vector<QuestSceneRequest> navigate;
     // `go` L1092: `wa.F().mp(4, new Gj(tab,item))` + `Oa.uLa(tab,item)`.
     std::vector<QuestShopOpen> shop_opens;
+    // `Hn` L1032-1034: `ChangeTab` tab selection requests (applied in `tick`).
+    std::vector<QuestTabSelect> tab_selects;
     // `Nn` L1114 WITHOUT `IgnoreCallback`: the target's own click listeners
     // stay live (`xk.pa` is NOT cleared), so the player's press dispatches the
     // target's callback. The engine only ARMS + logs it (the JS never

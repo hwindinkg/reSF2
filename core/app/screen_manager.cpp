@@ -36,6 +36,14 @@ void quest_nav(App& app, const std::string& from, const std::string& to) {
         QuestJournal j;
         j.scene_from = from;
         j.scene_to = to;
+        // `v.qwa` (L1212: `c.XNa=uh.getName(a); c.YNa=uh.getName(b)`) writes the
+        // `_$TabFrom`/`_$TabTo` pair (`Bj.XNa`/`YNa`, read L964) on EVERY screen
+        // change. The port's nav edge carries the scene names, not the tracked
+        // `Bj.DI` tab index, so the names are recorded as-is here: the pair is
+        // modelled + resolvable (no longer `note_unanswerable`), while the
+        // `vj.E0(DI)` tab-owner normalization remains the port's gap.
+        j.tab_from = from;
+        j.tab_to = to;
         try {
             j.player_level = app.save().load().level;
         } catch (const std::exception&) {

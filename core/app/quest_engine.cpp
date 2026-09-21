@@ -703,6 +703,16 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             out = ctx.journal.scene_from;
             return true;
         }
+        // `Bj` L964: `_$TabFrom`/`_$TabTo` read `this.ta.XNa`/`YNa`, the pair
+        // `v.qwa` (L1212) writes on every screen change.
+        if (token == "_$TabFrom") {
+            out = ctx.journal.tab_from;
+            return true;
+        }
+        if (token == "_$TabTo") {
+            out = ctx.journal.tab_to;
+            return true;
+        }
         if (token == "_$Fight") {
             out = ctx.journal.fight;
             return true;
