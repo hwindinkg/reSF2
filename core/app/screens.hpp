@@ -695,10 +695,12 @@ private:
     int prize_combo_coins_ = 0;
     int prize_style_coins_ = 0;
     int prize_shock_coins_ = 0;
-    // JS `Lr`/`Or` reveal clock (L2057-2078): row `i` slides in (`Or.aa`
-    // case 0, `ed(.5)`) then counts up (case 1), pipelined one slide behind —
-    // the list settles at `0.5*(rows+1)` s and the OK plate only appears then
-    // (`Lr.XMa`/`bza` L2071-2072). `pc.tB` = 400 ms/phase (`Or.aa`).
+    // JS `Lr`/`Or` reveal clock (L2057-2081): the `kk` results container
+    // holds the list for 500 ms (`kk.rxa` `wh.delay(...,500)`), then row `i`
+    // slides in (`Or.aa` case 0, `ed(.5)` = 500 ms) and counts up (case 1,
+    // 500 ms), each row starting when the previous slide lands; the star row
+    // (`Pr`) never slides and counts over `ed(1)` = 1 s. The list therefore
+    // settles at 4.5 s and the OK plate appears only then (`Lr.XMa`/`bza`).
     float reveal_t_ = 0.0f;
     bool reveal_done_ = false;
 };

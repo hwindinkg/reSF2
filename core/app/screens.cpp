@@ -9415,14 +9415,31 @@ int ResultsScreen::exp_for_level(int level) {
     return it != thresholds.end() ? it->second : 100;
 }
 
+// JS `Lr`/`Or`/`Pr` reveal timeline (L2057-2081). `ed(a)` is a DURATION in
+// seconds, not an ease curve: `ed(a){return a==0?1:Math.min(1,this.time/a)}`
+// (JS @13398), so `ed(.5)` = a 500 ms phase and `ed(1)` = a 1 s phase.
+namespace {
+constexpr float kRevealDelay = 0.5f;      // `kk.rxa` `wh.delay(...,500)`
+constexpr float kRevealSlide = 0.5f;      // `Or.aa` case 0 `this.ed(.5)`
+constexpr float kRevealCount = 0.5f;      // `Or.aa` case 1 `this.ed(.5)`
+constexpr float kRevealCountStar = 1.0f;  // `Pr.aa` `this.ed(1)`
+// `Lr.XMa` -> `bza()` (the OK plate) once the star row lands:
+// delay + 6 slides (rows 0..5) + the star's 1 s count.
+constexpr float kRevealSettle = kRevealDelay + kRevealSlide * 6.0f + kRevealCountStar;
+} // namespace
+
 void ResultsScreen::update_impl(float dt) {
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
-    // JS `Lr`/`Or` reveal clock (L2057-2078): row `i` slides over `[.5i,
-    // .5i+.5]` then counts over `[.5i+.5, .5i+1]`; the list settles at
-    // `0.5*(rows+1)` s (`Or.aa` `this.ed(.5)`).
+    // JS `Lr`/`Or` reveal clock (L2057-2081): the `kk` results container
+    // schedules the list 500 ms after the battle end (`kk.rxa`:
+    // `wh.delay(function(){...Yub},500)`), then row `i` slides over
+    // `[.5+.5i, 1+.5i]` and counts over the next `.5` (`Or.aa` `ed(.5)`);
+    // the star row (`Pr`) never slides and counts over `ed(1)`, so the list
+    // settles at 4.5 s and the OK plate appears only then
+    // (`Lr.XMa`/`bza`).
     if (!reveal_done_) {
         reveal_t_ += dt;
-        if (reveal_t_ >= 0.5f * 8.0f) {  // 7 rows -> `0.5*(7+1)` = `Lr.XMa`
+        if (reveal_t_ >= kRevealSettle) {
             reveal_done_ = true;
             std::fprintf(stdout, "[result] reveal done -> OK plate shown\n");
             std::fflush(stdout);
@@ -9656,7 +9673,9 @@ void ResultsScreen::render_impl(App& app) {
         money_reward_ > 100000 ? 120.0f : (money_reward_ > 10000 ? 80.0f : 40.0f);
     const float row_to = px + (750.0f - (400.0f + kk_oM)) * 0.5f;
     const float row_from = px - 500.0f;
-    constexpr float kPhase = 0.5f;  // `Or.aa` `this.ed(.5)`
+    // The `kk.rxa` lead-in is part of the clock: every row curve is measured
+    // from `t = reveal_t_ - 0.5` (`wh.delay(...,500)`).
+    const float t = reveal_t_ - kRevealDelay;
     auto cl01 = [](float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); };
     auto with_count = [](std::string s, int n) {
         const std::string p = "{0}";
@@ -9666,11 +9685,19 @@ void ResultsScreen::render_impl(App& app) {
     };
     for (int i = 0; i < 7; ++i) {
         const KkRow& r = kk_rows[i];
-        const float slide = cl01((reveal_t_ - kPhase * static_cast<float>(i)) / kPhase);
+        // `Or` rows slide in (`ed(.5)`) then count (`ed(.5)`); the `Pr` star
+        // row never slides (`Pr.nx` shows it in place via `APa(!0)`) and its
+        // count runs `ed(1)` = 1 s — so it is hidden until its count starts.
+        const float slide =
+            r.star ? 1.0f
+                   : cl01((t - kRevealSlide * static_cast<float>(i)) / kRevealSlide);
+        // Row `i` counts once its own slide lands (`i+1` slides in); the star
+        // row counts once ROW 5's slide lands (`i` slides in — it has none).
         const float count =
-            cl01((reveal_t_ - kPhase * static_cast<float>(i + 1)) / kPhase);
-        if (slide <= 0.0f) continue;  // still off-panel (`ZMa` `C(-500)`)
-        const float from = r.star ? px : row_from;  // only rows 0..n-2 set -500
+            cl01((t - kRevealSlide * static_cast<float>(r.star ? i : i + 1)) /
+                 (r.star ? kRevealCountStar : kRevealCount));
+        if (r.star ? count <= 0.0f : slide <= 0.0f) continue;
+        const float from = r.star ? row_to : row_from;  // rows 0..n-2 set -500
         const float rx = from + (row_to - from) * slide;
         const float ry = kKkRowY0 + static_cast<float>(i) * kKkRowStep;
         const int shown = static_cast<int>(static_cast<float>(r.value) * count + 0.5f);
@@ -9698,6 +9725,28 @@ void ResultsScreen::render_impl(App& app) {
         draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
                       std::to_string(shown), 0.95f, UiAlign::Left, 0.31f * slide,
                       0.79f * slide, 0.84f * slide);
+    }
+    // PROBE (temporary, `SF2_REVEAL_PROBE=1`): per-frame reveal telemetry —
+    // the clock, the visible-row count and every row's slide/count progress,
+    // so the Results timeline can be compared with the JS `Lr`/`Or` clock.
+    if (std::getenv("SF2_REVEAL_PROBE") != nullptr) {
+        static int probe_frame = 0;
+        std::string line = "[reveal] f=" + std::to_string(probe_frame++) +
+                           " t=" + std::to_string(reveal_t_) +
+                           (reveal_done_ ? " done" : " run");
+        for (int i = 0; i < 7; ++i) {
+            const bool star = kk_rows[i].star;
+            const float s =
+                star ? 1.0f
+                     : cl01((t - kRevealSlide * static_cast<float>(i)) / kRevealSlide);
+            const float c = cl01((t - kRevealSlide * static_cast<float>(star ? i : i + 1)) /
+                                 (star ? kRevealCountStar : kRevealCount));
+            char buf[48];
+            std::snprintf(buf, sizeof(buf), " r%d=%.2f/%.2f", i, s, c);
+            line += buf;
+        }
+        std::fprintf(stdout, "%s\n", line.c_str());
+        std::fflush(stdout);
     }
     // OK button (JS `Lr.$g = new Bb("EButtonWhite"); $g.V(Y.na("OK"))`, L2075).
     // `Bb.fza` (L1844 `"btn"+K.T(a).substr(7)`) resolves the style key to a
