@@ -3678,21 +3678,33 @@ int main(int argc, char** argv) {
                     const float side = (ex >= px) ? 1.0f : -1.0f;
                     fs->place_fighters(px, px + side * 55.0f);
                 }
-                // The boss is hittable only once it has left the blocking
-                // stance idle; the name carries the weapon prefix
-                // (`KnivesStartStanceIdle`), so match the suffix. The player
-                // may only START a move while it is itself idle, otherwise
-                // the tap restarts its move and the pair stays permanently
-                // committed — which would stop the boss's AI ever reaching
-                // the `Pqb` L606 `else` path again.
+                // [FIX probe gate] The boss's LIVE idle is the
+                // `*StartStanceIdle` family (`KnivesStartStanceIdle`) — the
+                // exact same class the player's live idle belongs to. It is
+                // NOT a transient "parked" state to exclude: excluding it
+                // left `boss_hittable` permanently false (the boss never
+                // leaves the idle on its own), so no tap was ever injected
+                // -> NO-HIT. Taps landed while the boss guards are absorbed
+                // (`[hit] ... BLOCK`), but they provoke the boss's AI, which
+                // then leaves the idle and opens the real reaction window the
+                // probe waits for. The player may only START a move while it
+                // is itself idle, otherwise the tap restarts its move and the
+                // pair stays permanently committed — which would stop the
+                // boss's AI ever reaching the `Pqb` L606 `else` path again.
                 const std::string boss_move = fs->enemy_current_move();
-                const bool boss_hittable =
-                    !boss_move.empty() &&
-                    boss_move.find("StartStanceIdle") == std::string::npos;
+                const bool boss_hittable = !boss_move.empty();
                 const std::string my_move = fs->player_current_move();
+                // [FIX probe gate] The player's LIVE idle after the intro is
+                // the `IdleStance` family — `StanceIdle` (moves.xml L1056,
+                // Priority 0) — once the one-shot `StartIdleStance`
+                // (`FistsStartStanceIdle-*`) opening frame is over. BOTH names
+                // carry the `StanceIdle` substring, so match that; the old
+                // `StartStanceIdle`-only test missed the plain `StanceIdle`
+                // the player actually sits in, so `player_idle` was never true
+                // and no attack was ever injected -> NO-HIT.
                 const bool player_idle =
                     my_move.empty() ||
-                    my_move.find("StartStanceIdle") != std::string::npos;
+                    my_move.find("StanceIdle") != std::string::npos;
                 if (boss_hittable && player_idle) {
                     const int atk = ((f / 8) % 2 == 0) ? 9 : 10;  // Punch / Kick
                     fs->inject_game_key(atk, true);
