@@ -9579,6 +9579,36 @@ void draw_kk_gradient(sf2::render::Renderer& ren, float x, float y, float w, flo
     }
 }
 
+// JS `Lr.mBa` + `Lr.RYa` (L2081): the results `eZ` coin formatter. The star
+// row's GOLD value (`Pr.el`, L2083) and every `Or` breakdown row's value
+// (`Or.el`, L2086 `this.el.lj(d(0))` / L2087 `this.el.lj(this.eZ(...))`) go
+// through it. Shape: `K.T(gM)` raw digits below 1000, else
+// `""+gM+"."+UR+Y.na(suffix)` — the fraction is `Math.trunc`'d (never
+// zero-padded) and the suffix is the lang `tsdShort`/`mlnShort`/`blnShort`
+// ("K"/"m"/"bn" in EN). The exp counter (`Pr.exp`) is the ONE raw value
+// (`Pr.aa` L2083 `""+a`), so it keeps `std::to_string`.
+std::string results_coin_text(App& app, int value) {
+    if (value < 1000) return std::to_string(value);  // `K.T(b.gM)`
+    int whole = 0, frac = 0;
+    const char* key = "tsdShort";
+    const char* fb = "K";
+    if (value < 1000000) {  // `a<1E6`: gM=trunc(a/1E3), UR=trunc(a%1E3/10)
+        whole = value / 1000;
+        frac = (value % 1000) / 10;
+    } else if (value < 1000000000) {  // `a<1E9`: gM=trunc(a/1E6), UR=trunc(a%1E6/1E4)
+        whole = value / 1000000;
+        frac = (value % 1000000) / 10000;
+        key = "mlnShort";
+        fb = "m";
+    } else {  // `a>=1E9`: gM=trunc(a/1E9), UR=trunc(a%1E9/1E7)
+        whole = value / 1000000000;
+        frac = (value % 1000000000) / 10000000;
+        key = "blnShort";
+        fb = "bn";
+    }
+    return std::to_string(whole) + "." + std::to_string(frac) + loc(app, key, fb);
+}
+
 void ResultsScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     // `kk.Qa` base (L2057): the `E.Zxa(750)` gradient over `ma.Kq` (native =
@@ -9704,7 +9734,12 @@ void ResultsScreen::render_impl(App& app) {
         const float coin_dx = kKkCoinX - kKkRowX;
         const float val_dx = kKkValX - kKkRowX;
         if (r.star) {
-            (void)try_draw_atlas_button(app, "star", rx + 26.0f, ry, 52.0f, 48.0f,
+            // `Pr.exp = new Hg(60,!0); this.exp.nL(y.Zna)` (L2083): the exp
+            // counter's ICON frame is `y.Zna` = "level" (L2465), NOT "star"
+            // (`y.PRa` = "star" is the PROFILE level bar's star, L2466). The
+            // "gold" icon beside it is `p.o.Vf` (L2083; default `Z.Hna` =
+            // "gold", L2478) - already correct below.
+            (void)try_draw_atlas_button(app, "level", rx + 26.0f, ry, 52.0f, 48.0f,
                                         slide);
             // JS `Pr.aa` (L2083): the GOLD value (`this.el`, `w_` = `oc.m6`
             // coins) is `a=dc.Ln()(b); a=Math.round(this.w_*a)` - the
@@ -9718,8 +9753,10 @@ void ResultsScreen::render_impl(App& app) {
                           0.79f * slide, 0.84f * slide);
             (void)try_draw_atlas_button(app, "gold", rx + coin_dx, ry, 48.0f, 48.0f,
                                         slide);
+            // `Pr.aa` L2083: the GOLD value is `this.el.lj(this.eZ(a))` - the
+            // `eZ` = `mBa` compact formatter, NOT raw digits.
             draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
-                          std::to_string(money_shown), 0.95f, UiAlign::Left,
+                          results_coin_text(app, money_shown), 0.95f, UiAlign::Left,
                           0.31f * slide, 0.79f * slide, 0.84f * slide);
             continue;
         }
@@ -9730,7 +9767,7 @@ void ResultsScreen::render_impl(App& app) {
         (void)try_draw_atlas_button(app, "gold", rx + coin_dx, ry, 48.0f, 48.0f,
                                     slide);
         draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
-                      std::to_string(shown), 0.95f, UiAlign::Left, 0.31f * slide,
+                      results_coin_text(app, shown), 0.95f, UiAlign::Left, 0.31f * slide,
                       0.79f * slide, 0.84f * slide);
     }
     // PROBE (temporary, `SF2_REVEAL_PROBE=1`): per-frame reveal telemetry —
