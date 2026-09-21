@@ -464,21 +464,25 @@ void FightController::init_locks(
     // f=0 phase 1, clip null; NO idle lead-in).
     frame_ = 0;
     phase_ = fight_phase::idle;
+    // The 3-D view stays HIDDEN through the whole intro (JS `ggb` L383
+    // `Ta.XF(!1)` + the `ai` screen L2007 `this.Ig.Ta.ia.visible(!1)`). Only
+    // the `FNa` (L409 `this.Ta.XF(!0); this.xF(1)`) expiry of the ROUND plate
+    // re-shows it — and that same frame is phase 1's first frame.
+    set_scene_visible(false);
     // The plate clock is HELD until the `ik` VS overlay ends (`release_intro`):
     // the plate must not be consumed while the overlay covers the scene.
     intro_hold_ = true;
-    // The FIRST round's ROUND 1 plate (`Cr.tca` L2023: type 2, `fu(1.666)`,
-    // armed after a 500 ms `wh.delay`). `round_start()` — which raises it
-    // for rounds 2+ through the `Z2` path — is NOT called for the first
-    // round. It is DISPLAY ONLY (`banner_action::none`): the JS init already
-    // entered the start stance (the oracle's f=0 IS phase 1), so the plate
-    // must not re-run `FNa` when it expires (a re-entry would restart the
-    // 133-frame stance mid-way).
+    // The FIRST round's ROUND 1 plate (JS `Z2` L409 -> `ha.tca(1,!1)` ->
+    // `Cr.tca` L2023: type 2, `fu(1.666)`, armed after a 500 ms `wh.delay`).
+    // The JS reaches `Z2` at fight init through the `ai` screen `tx()` (L407)
+    // -> `Ar.wca` (L2019) -> `Cr.wca` (L2023, `type=1; ONa()`) -> `ca.vhb`
+    // (L410) case 1 — the SAME chain `round_start()` models. Its expiry
+    // dispatches `vhb` case 2 -> `FNa` (L409): show the scene + phase 1.
     cur_banner_ = banner_kind::round;
     banner_time_ = kJsBannerRoundBreakSeconds;
     banner_armed_ = false;                       // `tca` clears `wU` ...
     banner_arm_delay_ = kJsBannerArmDelaySeconds;  // ... until the 500 ms delay
-    banner_action_ = banner_action::none;
+    banner_action_ = banner_action::begin_round;
     banner_start_ = frame_;
     banner_round_ = round_.number;   // 0 -> "ROUND 1"
     std::fprintf(stdout, "[fight] banner: ROUND %d (F%d)\n", banner_round_ + 1, frame_);
@@ -5025,17 +5029,17 @@ void FightController::banner_tick(float dt) {
     if (banner_time_ <= 0.0f) banner_expire();
 }
 
-// The `ik` VS overlay (`screens.cpp`) is gone: start the intro's plate clock
-// AND enter the start stance (phase 1) immediately. The JS creates the fight
-// only after `ik.kg` (L2071), so its first recorded frame is phase 1 at f=0
-// with no idle lead-in (reference/traces/oracle_pose.jsonl). The ROUND plate
-// raised by `init_locks` keeps ticking as a display-only banner over the
-// stance. Idempotent: `intro_hold_` stays false after the first call, so the
-// per-frame `!vs_active_` guard cannot restart the stance.
+// The `ik` VS overlay (`screens.cpp`) is gone: release the intro plate clock.
+// The JS reaches `Z2` (L409) at this point (`ai.w3` L2008 -> `Ig.tx` L407 ->
+// `Ar.wca` L2019 -> `Cr.wca` L2023 `type=1; ONa()` -> `ca.vhb` L410 case 1),
+// which raises the ROUND 1 plate with the 3-D view HIDDEN; the plate's expiry
+// (`vhb` case 2) runs `FNa` (L409 `Ta.XF(!0); xF(1)`) — show + phase 1. So the
+// stance must NOT start here: the port keeps `frame_` at 0 / phase idle under
+// the plate, matching the oracle's f=0 = the first phase-1 frame.
+// Idempotent: `intro_hold_` stays false after the first call.
 void FightController::release_intro() {
     if (!intro_hold_) return;
     intro_hold_ = false;
-    enter_start_stance();
 }
 
 // JS `Cr.ONa` (L2026): `this.X(!1); this.wU=!1; this.yA.Z(this.type)`.
