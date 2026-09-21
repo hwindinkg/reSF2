@@ -781,6 +781,12 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             out = ctx.journal.action_id;
             return true;
         }
+        if (token == "_$Iterator") {
+            // `zj` L1072 (`EForeach`): `this.parameters.iterator = Pg[lq]`
+            // before each `Sl.compare`/`Sl.lF`.
+            out = ctx.iterator;
+            return true;
+        }
         // Other `Bj` journal fields (`_$CurrentScene`, `_$Iterator`, ...):
         // the shell does not model them -> UNKNOWN.
         note_unanswerable(token);
@@ -1205,16 +1211,113 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // `za` scroll so the collapsed header carries the pulse; the row
             // flash lands once the player expands it.
             fx.collapse_nav = true;
-        } else if (t == "ClickHint") {
-            // `Fe.S0a` (L947-953) has NO `EClickHint` case, so `Fe.Ij`
-            // (`Nz.hi` L953 matches "ClickHint") falls back to the base `S`
-            // (L945 `S.S` = no-op) — the shipped build does NOT render an
-            // arrow for it. Recorded (never invents an arrow the JS lacks).
-            fx.click_hints.push_back(attr_or(a.attrs, "Target"));
-        } else if (t == "SceneMenuScroll") {
-            // Same as `ClickHint`: no `ESceneMenuScroll` case in `Fe.S0a`
-            // (L947-953) -> base `S` no-op. Recorded only.
-            fx.scene_menu_scroll.push_back(attr_or(a.attrs, "Action"));
+        } else if (t == "ClickHint" || t == "SceneMenuScroll") {
+            // `Nz.hi` (L487253) matches both names, so `Fe.Ij` builds
+            // `"E"+name`; `Fe.S0a` (L487290) has NO `EClickHint`/
+            // `ESceneMenuScroll` case -> `default:a=null` -> `Fe.Wxa()` = the
+            // base `S` (L485232), whose `S(a)` only applies `Lock`/`Sound`
+            // and resumes the serialized tail — it renders NOTHING. The port
+            // matches: silent no-op. (Neither tag occurs in any shipped XML.)
+        } else if (t == "ToggleItems") {
+            // `Io` L1107 (`EToggleItems`): `Toggle` (default "on"), `Label`
+            // (default ""); `p.iMa(ba.Pc(a,Label), ba.Pc(a,Toggle)=="on")`
+            // (`p.iMa` L112418 -> `p.o.vq`/`tnb` + `p.items.Jrb`/`hnb`:
+            // equip/unequip the item). No inventory-write path here -> record.
+            const std::string label = quest_var(app, locals, attr_or(a.attrs, "Label"));
+            const std::string toggle = attr_or(a.attrs, "Toggle", "on");
+            fx.toggle_items.push_back(label + "=" + (toggle == "on" ? "on" : "off"));
+        } else if (t == "Discount") {
+            // `Pn` L1064 (`EDiscount`): Item/Percent/Toggle/NewAmount/
+            // NewPrice/Period/Sale; `getParameters` builds the `yf` price
+            // override and applies it to the shop offer, then `p.o.xa.vu()`.
+            // No offer/price model -> record the parsed request.
+            fx.discounts.push_back(
+                attr_or(a.attrs, "Item") + ":" + attr_or(a.attrs, "Percent") +
+                ":toggle=" + attr_or(a.attrs, "Toggle") +
+                ":newAmount=" + attr_or(a.attrs, "NewAmount", "0") +
+                ":newPrice=" + attr_or(a.attrs, "NewPrice") +
+                ":period=" + attr_or(a.attrs, "Period", "0") +
+                ":sale=" + attr_or(a.attrs, "Sale"));
+        } else if (t == "ShowMapButton") {
+            // `wo` L1097 (`EShowMapButton`): builds an `hg` (Name/Image/Timer/
+            // X/Y/anchors/Type/ImagePath/...) and adds it to `Vb.F()`. No
+            // map-button manager -> record the resolved Name.
+            fx.map_button_shows.push_back(attr_or(a.attrs, "Name"));
+        } else if (t == "HideMapButton") {
+            // `bo` L1086 (`EHideMapButton`): `Vb.F().oKa(ba.Pc(a,Name))`.
+            fx.map_button_hides.push_back(attr_or(a.attrs, "Name"));
+        } else if (t == "ResetDuelTimer") {
+            // `ho` L1090 (`EResetDuelTimer`): `Gb.reset(!1)` on the fight
+            // controller. No duel-timer controller here -> record.
+            fx.duel_timer_resets.push_back("reset");
+        } else if (t == "ActivateTimer" || t == "Timer") {
+            // `yj` L1024 (`ETimer`/`EActivateTimer`): Name + Value + Absolute;
+            // `p.o.yl.Uaa(name, Absolute ? trunc(Value) : p.Dc+trunc(expr))`.
+            fx.timer_sets.push_back(
+                attr_or(a.attrs, "Name") + "=" + attr_or(a.attrs, "Value") +
+                (attr_bool01(attr_or(a.attrs, "Absolute", "0")) ? " (abs)" : ""));
+        } else if (t == "EndTimer") {
+            // `Rn` L1069 (`EEndTimer`): `p.o.yl.H4(Name)`.
+            fx.timer_ends.push_back(attr_or(a.attrs, "Name"));
+        } else if (t == "Foreach") {
+            // `zj` L1072 (`EForeach`): `Sl = ha.F().AD(Name)` (`ha.AD`
+            // L522769 = `m.find(this.OJa, b=>b.name==a)` — the NAMED
+            // sub-quest), `p0a()` fills `Pg` from the collection by `Type`
+            // (`getType` L1072), and `dLa`/`Qh` loop: bind
+            // `parameters.iterator = Pg[lq]`, `Sl.compare(parameters)` (the
+            // sub-quest's conditions) and on match `Sl.lF(parameters,!1)`
+            // (its actions). The port runs the named quest's conditions +
+            // actions once per iterator with `_$Iterator` bound.
+            const std::string fname = attr_or(a.attrs, "Name");
+            const std::string ftype = attr_or(a.attrs, "Type");
+            const QuestDef* sub = nullptr;
+            for (const QuestDef& q : quests_) {
+                if (q.name == fname) {
+                    sub = &q;
+                    break;
+                }
+            }
+            if (sub == nullptr) {
+                fx.unknown.push_back("Foreach:" + ftype + "/" + fname +
+                                     " (no such sub-quest)");
+            } else {
+                std::vector<std::string> items;
+                if (ftype == "Battles") {
+                    // `Tob` L1072: `p.F().Jm` battle list (`battle_zone_`).
+                    for (const auto& kv : battle_zone_) items.push_back(kv.first);
+                } else if (ftype == "Items") {
+                    // `$ob` L1072: `p.o.xa.items` slot names (`ab()`).
+                    static const char* const kSlots[] = {
+                        "Head",  "Fists", "Body",  "Armor", "Weapon",
+                        "Helm",  "Ranged", "Magic", "NoRanged", "NoMagic"};
+                    for (const char* s : kSlots) items.push_back(s);
+                } else {
+                    fx.unknown.push_back("Foreach:" + ftype + "/" + fname +
+                                         " (collection not modelled)");
+                }
+                for (const std::string& item : items) {
+                    EvalCtx c;
+                    c.journal = journal;
+                    c.level = journal.player_level;
+                    try {
+                        const WarriorSave w = app.save().load();
+                        c.story_step = w.story_step();
+                        c.level = w.level;
+                        c.save = w;
+                        c.save_loaded = true;
+                    } catch (const std::exception&) {
+                    }
+                    c.iterator = item;
+                    if (!conditions_hold(app, sub->root, c)) continue;
+                    ActionRest s = run_actions(app, sub->actions, journal, fx, locals,
+                                               fname, depth + 1);
+                    if (s.suspended) {
+                        s.rest.insert(s.rest.end(), acts.begin() + i + 1, acts.end());
+                        return s;
+                    }
+                    fx.foreach_runs.push_back(ftype + "/" + fname + ":" + item);
+                }
+            }
         } else if (t == "ClearQuestQueue") {
             fx.clears.push_back(attr_or(a.attrs, "Name"));
         } else if (t == "AttachQuestFile") {
@@ -1809,9 +1912,47 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
                 std::fprintf(stdout, "[quest]   click (record only): %s\n", s.c_str());
             }
         }
-        if (!fx.click_hints.empty()) {
-            for (const std::string& s : fx.click_hints) {
-                std::fprintf(stdout, "[quest]   click hint (record only): %s\n", s.c_str());
+        if (!fx.toggle_items.empty()) {
+            for (const std::string& s : fx.toggle_items) {
+                std::fprintf(stdout, "[quest]   toggle item (record only): %s\n", s.c_str());
+            }
+        }
+        if (!fx.discounts.empty()) {
+            for (const std::string& s : fx.discounts) {
+                std::fprintf(stdout, "[quest]   discount (record only): %s\n", s.c_str());
+            }
+        }
+        if (!fx.map_button_shows.empty()) {
+            for (const std::string& s : fx.map_button_shows) {
+                std::fprintf(stdout, "[quest]   show map button (record only): %s\n",
+                             s.c_str());
+            }
+        }
+        if (!fx.map_button_hides.empty()) {
+            for (const std::string& s : fx.map_button_hides) {
+                std::fprintf(stdout, "[quest]   hide map button (record only): %s\n",
+                             s.c_str());
+            }
+        }
+        if (!fx.duel_timer_resets.empty()) {
+            for (const std::string& s : fx.duel_timer_resets) {
+                std::fprintf(stdout, "[quest]   reset duel timer (record only): %s\n",
+                             s.c_str());
+            }
+        }
+        if (!fx.timer_sets.empty()) {
+            for (const std::string& s : fx.timer_sets) {
+                std::fprintf(stdout, "[quest]   timer set (record only): %s\n", s.c_str());
+            }
+        }
+        if (!fx.timer_ends.empty()) {
+            for (const std::string& s : fx.timer_ends) {
+                std::fprintf(stdout, "[quest]   timer end (record only): %s\n", s.c_str());
+            }
+        }
+        if (!fx.foreach_runs.empty()) {
+            for (const std::string& s : fx.foreach_runs) {
+                std::fprintf(stdout, "[quest]   foreach (record only): %s\n", s.c_str());
             }
         }
         if (!fx.menu_flashes.empty()) {

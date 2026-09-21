@@ -271,9 +271,26 @@ struct QuestSideEffects {
     // The desktop guidance for `_NextScene` (FLOW_STATIC L140-142: the web/
     // else branch shows the notification + the flash and does NOT navigate).
     std::vector<std::string> menu_flashes;
-    // `ClickHint Target` (L338, the Switch/Steam branch): arrow hint. Recorded
-    // (the desktop shell drives navigation through the nav flash).
-    std::vector<std::string> click_hints;
+    // `Io` L1107 (`EToggleItems`): `p.iMa(ba.Pc(a,Label), ba.Pc(a,Toggle)=="on")`
+    // — equip/unequip the named item (`p.iMa` L112418 -> `p.o.vq`/`tnb` +
+    // `p.items.Jrb`/`hnb`). The engine has no inventory-write path here ->
+    // record the resolved `label=toggle`.
+    std::vector<std::string> toggle_items;
+    // `Pn` L1064 (`EDiscount`): the price override `getParameters` builds and
+    // applies to the shop offer (`yf` + `p.o.xa.vu`). No offer model -> record.
+    std::vector<std::string> discounts;
+    // `wo`/`bo` L1097/L1086 (`EShowMapButton`/`EHideMapButton`): `Vb.F()`
+    // map-button manager add (`hg`) / remove (`oKa`). No manager -> record.
+    std::vector<std::string> map_button_shows;
+    std::vector<std::string> map_button_hides;
+    // `ho` L1090 (`EResetDuelTimer`): `Gb.reset(!1)` on the fight controller.
+    std::vector<std::string> duel_timer_resets;
+    // `yj` L1024 (`ETimer`/`EActivateTimer`): `p.o.yl.Uaa(name, value)`.
+    std::vector<std::string> timer_sets;
+    // `Rn` L1069 (`EEndTimer`): `p.o.yl.H4(name)`.
+    std::vector<std::string> timer_ends;
+    // `zj` L1072 (`EForeach`): one `Type/Name:iterator` per executed item.
+    std::vector<std::string> foreach_runs;
     std::vector<std::string> clears;              // Mn queue names
     std::vector<std::string> minigames;           // Do/Eo/Ao/Bo/Co/Fo (record)
     // `Bn.S` (L1025): `AttachQuestFile File` loads a quest file at this
@@ -284,8 +301,6 @@ struct QuestSideEffects {
     // `Ge.S` (L1023-1024): `Activate ActionID` (re-fires the Activate
     // event with `_$ActionID` bound; the JS `Ge.MZ` handshake).
     std::vector<std::string> activate_requests;
-    // `SceneMenuScroll Action` (the Switch/Steam branch): recorded.
-    std::vector<std::string> scene_menu_scroll;
     // --- live action execution (interactive; headless keeps records) -------
     // The JS action classes that ACT (not merely record), collected during the
     // run and performed by `tick` after the firing pass (so a `mp` push never
@@ -553,6 +568,9 @@ private:
     struct EvalCtx {
         QuestJournal journal;
         std::string story_step;
+        // `_$Iterator` (JS `Bj` field; `zj` L1072 writes
+        // `parameters.iterator` before each `Sl.compare`/`Sl.lF`).
+        std::string iterator;
         int level = 1;
         mutable bool save_loaded = false;
         mutable WarriorSave save;
