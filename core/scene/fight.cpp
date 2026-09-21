@@ -18,6 +18,11 @@
 
 namespace sf2::scene {
 
+// `[hitaudit]` process-wide probe switch (see fight.hpp).
+static bool g_hit_audit = false;
+void set_hit_audit_global(bool enabled) { g_hit_audit = enabled; }
+bool hit_audit_global() { return g_hit_audit; }
+
 namespace {
 // Forward: Jf.OBa stage ids (defined with the bus block below).
 int oba_phase(fight_phase p);
@@ -3815,6 +3820,20 @@ void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_t
     player_.fighter.input(key, press);
 }
 
+// JS `Te.xqb` (L553): while the clip mirror flag `rw` is set, an
+// AttackingParts edge name whose 2nd-to-last char is `_` and last char is
+// `1`/`2` has those swapped (`EHand_2` -> `EHand_1`). 1477 of the 2112
+// shipped AttackingParts names carry the suffix, so without this the mirror
+// pass resolves the authored part against the WRONG limb capsule.
+static std::string mirrored_edge_name(const std::string& n, bool rw) {
+    if (!rw || n.size() < 2 || n[n.size() - 2] != '_') return n;
+    std::string out = n;
+    const char c = out[out.size() - 1];
+    if (c == '1') out[out.size() - 1] = '2';
+    else if (c == '2') out[out.size() - 1] = '1';
+    return out;
+}
+
 // JS `ca.Enb` (L390) + `wd.tKa` -> `Fu.ia`: the attack check — the
 // attacker's active Attack-interval AttackingParts capsules vs the target's
 // collidable capsules.
@@ -3835,7 +3854,10 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
     for (const sf2::scene::Interval& iv : move.intervals) {
         if (iv.type != 4) continue;  // Attack
         const int s = std::max(iv.start, move.first_frame);
-        const int e = iv.end;
+        // JS `jc.c7a` (L691): the end is `min(g.finish, Lj)`, NOT the raw
+        // `finish` — a no-`End` interval's finish is `Lj+2`, so the raw
+        // value kept the swing live two frames past the move's end frame.
+        const int e = atk.fighter.interval_last(iv);
         if (s <= frame && frame <= e) {
             d = &iv;
             break;
@@ -3846,7 +3868,21 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
     if (!def.collidable) return false;
     const auto key = std::make_pair(static_cast<const void*>(&move),
                                     static_cast<const void*>(d));
-    if (last == key) return false;  // dW == c: already CONNECTED
+    if (last == key) {
+        if (hit_audit_ || hit_audit_global()) {
+            std::fprintf(stdout,
+                         "[hitaudit] F%d atk=%s move=%s mf=%d gate=1 iv=[%d,%d] "
+                         "win=\"%s\" tgt=%zu latch=1 res=MISS(oneshot)\n",
+                         frame, atk.name.c_str(), move.name.c_str(), frame,
+                         std::max(d->start, move.first_frame),
+                         atk.fighter.interval_last(*d),
+                         d->hit_name_at(frame).c_str(), def.body.capsules.size());
+            std::fflush(stdout);
+        }
+        return false;  // dW == c: already CONNECTED
+    }
+    // JS `Te.rw` (L560) + `xqb` (L553): the mirrored AttackingParts swap.
+    const bool rw = atk.fighter.mirror_swap();
     // JS `Cl.ia` (L566-567): `dW` latches ONLY on a successful test --
     // `if(this.W1a(...)) return this.dW=c,!0` (and the `!c.aEa` early
     // return). Latching before the geometry (as this port did) gives the
@@ -3872,13 +3908,55 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                 ch.point.z = (tgt.p1.z + tgt.p2.z) * 0.5f;
                 hit_interval = d;
                 last = key;  // `dW = c`
+                if (hit_audit_ || hit_audit_global()) {
+                    std::fprintf(stdout,
+                                 "[hitaudit] F%d atk=%s move=%s mf=%d gate=1 "
+                                 "iv=[%d,%d] win=\"%s\" tgt=%zu rw=%d "
+                                 "parts=<none> res=HIT(noParts) cap=%s\n",
+                                 frame, atk.name.c_str(), move.name.c_str(), frame,
+                                 std::max(d->start, move.first_frame),
+                                 atk.fighter.interval_last(*d),
+                                 d->hit_name_at(frame).c_str(),
+                                 def.body.capsules.size(), rw ? 1 : 0,
+                                 tgt.name.c_str());
+                    std::fflush(stdout);
+                }
                 return true;
+            }
+            if (hit_audit_ || hit_audit_global()) {
+                std::fprintf(stdout,
+                             "[hitaudit] F%d atk=%s move=%s mf=%d gate=1 "
+                             "iv=[%d,%d] win=\"%s\" tgt=%zu rw=%d "
+                             "parts=<none> res=MISS(noCollidableTarget)\n",
+                             frame, atk.name.c_str(), move.name.c_str(), frame,
+                             std::max(d->start, move.first_frame),
+                             atk.fighter.interval_last(*d),
+                             d->hit_name_at(frame).c_str(),
+                             def.body.capsules.size(), rw ? 1 : 0);
+                std::fflush(stdout);
             }
             return false;
         }
         for (const std::string& edge : d->attacking_parts) {
-            const sf2::scene::HitCapsule* ac = atk.body.by_name(edge);
-            if (ac == nullptr) continue;
+            // JS `xqb` (L553): the mirrored name is the one `RAa` resolves.
+            const std::string ename = mirrored_edge_name(edge, rw);
+            const sf2::scene::HitCapsule* ac = atk.body.by_name(ename);
+            if (ac == nullptr) {
+                if (hit_audit_ || hit_audit_global()) {
+                    std::fprintf(stdout,
+                                 "[hitaudit] F%d atk=%s move=%s mf=%d gate=1 "
+                                 "iv=[%d,%d] win=\"%s\" tgt=%zu rw=%d "
+                                 "part=%s->%s UNRESOLVED\n",
+                                 frame, atk.name.c_str(), move.name.c_str(), frame,
+                                 std::max(d->start, move.first_frame),
+                                 atk.fighter.interval_last(*d),
+                                 d->hit_name_at(frame).c_str(),
+                                 def.body.capsules.size(), rw ? 1 : 0,
+                                 edge.c_str(), ename.c_str());
+                    std::fflush(stdout);
+                }
+                continue;
+            }
             for (const auto& tgt : def.body.capsules) {
                 if (!tgt.collidable) continue;
                 if (sf2::scene::capsule_capsule_overlap(*ac, tgt, ch)) {
@@ -3886,8 +3964,34 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                     atk_cap = ac;  // JS `b.Py` (L395)
                     hit_interval = d;
                     last = key;  // `dW = c`
+                    if (hit_audit_ || hit_audit_global()) {
+                        std::fprintf(stdout,
+                                     "[hitaudit] F%d atk=%s move=%s mf=%d gate=1 "
+                                     "iv=[%d,%d] win=\"%s\" tgt=%zu rw=%d "
+                                     "part=%s->%s res=HIT cap=%s\n",
+                                     frame, atk.name.c_str(), move.name.c_str(), frame,
+                                     std::max(d->start, move.first_frame),
+                                     atk.fighter.interval_last(*d),
+                                     d->hit_name_at(frame).c_str(),
+                                     def.body.capsules.size(), rw ? 1 : 0,
+                                     edge.c_str(), ename.c_str(), tgt.name.c_str());
+                        std::fflush(stdout);
+                    }
                     return true;
                 }
+            }
+            if (hit_audit_ || hit_audit_global()) {
+                std::fprintf(stdout,
+                             "[hitaudit] F%d atk=%s move=%s mf=%d gate=1 "
+                             "iv=[%d,%d] win=\"%s\" tgt=%zu rw=%d "
+                             "part=%s->%s NO-OVERLAP\n",
+                             frame, atk.name.c_str(), move.name.c_str(), frame,
+                             std::max(d->start, move.first_frame),
+                             atk.fighter.interval_last(*d),
+                             d->hit_name_at(frame).c_str(),
+                             def.body.capsules.size(), rw ? 1 : 0,
+                             edge.c_str(), ename.c_str());
+                std::fflush(stdout);
             }
         }
     }
@@ -3897,14 +4001,17 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
 // JS `wd.HZa` gate position (hzaGate L500-501): the yD(4) pick + the
 // invuln/bypass check run BEFORE geometry (a blocked chain must not
 // consume dW). Returns the attack interval to test, or null.
-const sf2::scene::Interval* FightController::hza_pick(const FightFighter& target,
+const sf2::scene::Interval* FightController::hza_pick(const FightFighter& atk,
+                                                      const FightFighter& target,
                                                       const sf2::scene::MoveDef& move,
                                                       int frame) {
     const sf2::scene::Interval* d = nullptr;
     for (const auto& iv : move.intervals) {
         if (iv.type != 4) continue;
         const int s = std::max(iv.start, move.first_frame);
-        if (s <= frame && frame <= iv.end) {
+        // JS `jc.c7a` (L691): `min(g.finish, Lj)` — the unclamped `finish`
+        // is `Lj+2` for a no-`End` interval.
+        if (s <= frame && frame <= atk.fighter.interval_last(iv)) {
             d = &iv;
             break;
         }
@@ -5205,12 +5312,12 @@ void FightController::update(float dt) {
                 const sf2::scene::HitCapsule* atk_cap = nullptr;
                 bool hit_player = false, hit_enemy = false;
                 if (p_move != nullptr &&
-                    hza_pick(enemy_, *p_move, player_.fighter.move_frame()) != nullptr) {
+                    hza_pick(player_, enemy_, *p_move, player_.fighter.move_frame()) != nullptr) {
                     hit_enemy = hit_test(player_, enemy_, *p_move, player_.fighter.move_frame(),
                                          hit_cap, ch, hit_iv, atk_cap);
                 }
                 if (e_move != nullptr && !hit_enemy &&
-                    hza_pick(player_, *e_move, enemy_.fighter.move_frame()) != nullptr) {
+                    hza_pick(enemy_, player_, *e_move, enemy_.fighter.move_frame()) != nullptr) {
                     hit_player = hit_test(enemy_, player_, *e_move, enemy_.fighter.move_frame(),
                                           hit_cap, ch, hit_iv, atk_cap);
                 }

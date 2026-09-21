@@ -376,6 +376,16 @@ public:
     // --- state accessors (Phase 3.2b) -------------------------------------
     const MoveDef* current_move() const { return current_move_; }
     int move_frame() const { return move_frame_; }
+    // JS `jc.c7a` (L691): an interval is active iff
+    //   `(g.start>=qx?g.start:qx) <= frame <= (g.finish<=Lj?g.finish:Lj)`.
+    // The end term is `h`, i.e. `finish` CLAMPED DOWN to `Lj`. `fe.init`
+    // (L773) makes a no-`End` interval's `finish = pva+2` and `OWa` (L694)
+    // sets `pva = Lj`, so its raw finish is always `Lj+2` — unclamped the
+    // interval stays live two frames past the move's end frame.
+    int interval_last(const Interval& iv) const;
+    // JS `Te.rw` (L560): the per-clip mirror flag. `Te.xqb` (L553) swaps
+    // every AttackingParts edge name ending `_1`/`_2` while it is set.
+    bool mirror_swap() const { return mirror_swap_; }
     // The raw playback counter (JS `Te.Xh`) — the quantity the JS `kJ()`
     // returns (`kJ()` reads `lq`, which the `Te.ia` tick advances in lockstep
     // with `Xh`). `Fl`/`q7` are built from it.
@@ -689,9 +699,6 @@ private:
     int move_end_frame_ = 0;
     // Incremented in `start_move_impl` (JS `Te.Skb` L551 -> `x3` -> `hob`).
     int move_start_count_ = 0;
-    int interval_last(const Interval& iv) const {
-        return iv.end_default ? move_end_frame_ + 2 : iv.end;
-    }
     // JS `Vu` (mu L249972) — the pending hit-reaction latch (`lrb`/`eob`).
     Reaction reaction_;
     // JS `wd.Cn` (tu L297387) + `wd.lU` (the strike-time clock).

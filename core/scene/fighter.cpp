@@ -507,6 +507,18 @@ int Fighter::buffered_hold_count() const {
 
 // JS `jc.c7a` (L691): an interval is active when
 //   max(start, qx) <= frame <= min(finish, Lj).
+int Fighter::interval_last(const Interval& iv) const {
+    // JS `fe.init` (L773-774): `finish = End!=null ? End : pva+2`, and
+    // `OWa` (L694) sets `pva = this.Lj` when the intervals are added to the
+    // move — so a no-`End` interval's raw finish is `Lj+2`. `c7a` then
+    // clamps it: `h = g.finish <= this.Lj ? g.finish : this.Lj`.
+    const int finish = iv.end_default ? move_end_frame_ + 2 : iv.end;
+    // `Lj` is only meaningful while a clip is running (0 = no live move);
+    // the JS always has a concrete `Lj` here.
+    if (move_end_frame_ <= 0) return finish;
+    return finish <= move_end_frame_ ? finish : move_end_frame_;
+}
+
 std::vector<std::string> Fighter::intervals_at(int frame) const {
     std::vector<std::string> out;
     if (current_move_ == nullptr) return out;

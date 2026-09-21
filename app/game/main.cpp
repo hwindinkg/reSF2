@@ -42,6 +42,7 @@
 #include "atlas.hpp"
 #include "audio/audio.hpp"
 #include "scene/fighter.hpp"
+#include "scene/fight.hpp"
 #include "scene/magic_effects.hpp"
 #include "scene/renderer.hpp"
 #include "xml_archive.hpp"
@@ -58,7 +59,7 @@ void print_usage(const char* argv0) {
                   "                  [--dump-pose N] [--dump-clip <name>]\n"
                   "                  [--ui-tour] [--fidelity-tour] [--quest-verify]\n"
                   "                  [--dialog-verify] [--replay [file]] [--verify-input]\n"
-                  "                  [--round-log] [--fx-probe]\n"
+                  "                  [--round-log] [--fx-probe] [--hit-audit]\n"
                   "  --watchdog N     RULE 0: force-exit a driver run after N seconds\n"
                    "                   (0 disables; default 900)\n"
                    "  --windowed       open the VISIBLE interactive window (the ONLY\n"
@@ -1661,6 +1662,11 @@ int main(int argc, char** argv) {
             round_log = true;
         } else if (arg == "--boss-hit-probe") {
             boss_hit_probe = true;
+        } else if (arg == "--hit-audit") {
+            // Probe: arm the per-frame `[hitaudit]` hit-row log (the
+            // attacker's active Window / active parts / overlap / `<Hit>`
+            // window / outcome). Simulation-neutral.
+            sf2::scene::set_hit_audit_global(true);
         } else if (arg == "--auto-attack") {
             auto_attack = true;
         } else if (arg == "--dump-clip" && i + 1 < argc) {

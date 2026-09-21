@@ -64,6 +64,12 @@
 
 namespace sf2::scene {
 
+// `[hitaudit]` process-wide hit-row probe switch (probes only; off by
+// default). A free toggle so the CLI probe can arm it without any app-layer
+// plumbing; `FightController`'s `hit_test` consults it per call.
+void set_hit_audit_global(bool enabled);
+bool hit_audit_global();
+
 // ---------------------------------------------------------------------------
 // Stage <Rules> engine (JS `bb.OE`/`M3`/`xe` L887-894 + manager `du` L894-910).
 //
@@ -1695,6 +1701,7 @@ private:
     // (unchanged pointer) also re-tests.
     std::map<std::string, std::pair<const void*, const void*>> cl_last_;
     std::map<std::string, int> cl_move_;
+    bool hit_audit_ = false;  // `[hitaudit]` per-frame hit row probe
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
     int start_stance_frames_ = 0;  // phase 1 hold counter
     int end_stance_frames_ = 0;    // phase 3 hold (the FIGHT!/KO banner)
@@ -1865,8 +1872,14 @@ private:
                   const sf2::scene::HitCapsule*& atk_cap);
     // JS `wd.HZa` gate position (hzaGate L500-501): yD(4) pick + invuln
     // bypass check BEFORE geometry. Returns the interval to test, or null.
-    const sf2::scene::Interval* hza_pick(const FightFighter& target,
+    const sf2::scene::Interval* hza_pick(const FightFighter& atk,
+                                         const FightFighter& target,
                                          const sf2::scene::MoveDef& move, int frame);
+    // `[hitaudit]` per-frame hit row probe (off by default): the attacker's
+    // active Window (`c7a` L691), the active parts (`xqb` L553 incl. the
+    // `rw` swap), the overlap result and the chosen `<Hit>` window name
+    // (`Ul.B8a` L775). Toggled process-wide via `sf2::scene::set_hit_audit`.
+    void set_hit_audit(bool v) { hit_audit_ = v; }
     // Applies a landed hit (damage + knockback; JS `ca.Cgb` L394-397).
     // `atk_cap` is the attacker's strike capsule (`b.Py`, L395) - the source
     // of the `Hyb` hit direction (`sx/Zs .ma-.mf`); null when the interval
