@@ -8,7 +8,8 @@
 // SaveSystem (load users_default -> modify -> save -> reload).
 //
 // Usage:
-//   game [res_root] [save_path]
+//   game [res_root] [save_path]                 HIDDEN by default (no window)
+//   game [res_root] [save_path] --windowed      the ONLY visible window
 //   game [res_root] [save_path] --headless N   run N frames then exit (log-only)
 //   game [res_root] [save_path] --autoclick     click the Fight button once
 //
@@ -60,10 +61,11 @@ void print_usage(const char* argv0) {
                   "                  [--round-log] [--fx-probe]\n"
                   "  --watchdog N     RULE 0: force-exit a driver run after N seconds\n"
                    "                   (0 disables; default 900)\n"
-                   "  --windowed       force the visible interactive window (only\n"
-                   "                   a flagless launch is visible by default)\n"
+                   "  --windowed       open the VISIBLE interactive window (the ONLY\n"
+                   "                   way to get a window; every launch is hidden by\n"
+                   "                   default, flagless included)\n"
                    "  --hidden         force the hidden + watchdog driver path\n"
-                   "                   (any flag already implies hidden)\n"
+                   "                   (the default; wins over --windowed)\n"
                   "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
                  "  --headless-loop  run the scripted playable loop, then exit\n"
@@ -223,6 +225,8 @@ struct HeadlessLoopDriver {
     bool logged_before = false;
     bool logged_after = false;
     std::string last_capture;
+    int probe_hold_ = -1;   // SF2_REVEAL_PROBE frames to hold on Results
+    int probe_ticks_ = 0;
 
     // Called once per present frame (before the fixed-step update).
     void frame_tick(sf2::app::App& app) {
@@ -233,6 +237,16 @@ struct HeadlessLoopDriver {
             std::fprintf(stdout, "[loop] screen %d (step %d/%d)\n", cur, step + 1,
                          kLoopStepCount);
             std::fflush(stdout);
+        }
+
+        // PROBE (temporary, `SF2_REVEAL_PROBE=N`): hold the Results screen for
+        // N present frames so the reveal timeline can be sampled (0 = off).
+        if (probe_hold_ == -1) {
+            const char* env = std::getenv("SF2_REVEAL_PROBE");
+            probe_hold_ = env != nullptr ? std::atoi(env) : 0;
+        }
+        if (probe_hold_ > 0 && cur == kScreenResults) {
+            if (probe_ticks_++ < probe_hold_) return;
         }
 
         // Between-rounds NEXT: while the top screen is the FightScreen
@@ -1697,24 +1711,59 @@ int main(int argc, char** argv) {
         }
     }
 
-    // RULE 0 (inverted default): the window is VISIBLE only for a plain
-    // interactive launch — `game` with NO flags (the only extras allowed are
-    // the optional `res_root` / `save_path` positionals). ANY flag present,
-    // known or unknown, makes this a non-interactive driver run: hidden window
-    // + hard watchdog. So a forgotten or typo'd flag can never open a visible,
-    // hanging window. `--windowed` forces the visible window back on;
-    // `--hidden` forces hidden and wins over `--windowed`.
-    const bool plain_interactive = !saw_flag;
-    bool driver_mode = !plain_interactive;
-    if (force_hidden) driver_mode = true;
-    if (force_windowed && !force_hidden) driver_mode = false;
+    // RULE 0 (hidden-by-default): the window is HIDDEN for EVERY launch —
+    // flagless included. The visible interactive window requires an EXPLICIT
+    // `--windowed`; a flagless run (or any driver/tour/probe flag) is hidden
+    // + hard-watchdogged. `--hidden` forces hidden and wins over `--windowed`.
+    // So a forgotten flag, a typo'd flag, or a bare launch can never pop a
+    // visible (possibly empty) window.
+    const bool flagless = !saw_flag;
+    bool driver_mode = true;                  // hidden unless --windowed says otherwise
+    if (force_windowed) driver_mode = false;  // the ONLY way to a visible window
+    if (force_hidden) driver_mode = true;     // --hidden wins over --windowed
     std::fprintf(stdout,
-                 "[gate] hidden=%d plain=%d unknown_flag=%d windowed=%d "
+                 "[gate] hidden=%d flagless=%d unknown_flag=%d windowed=%d "
                  "hidden_override=%d\n",
-                 driver_mode ? 1 : 0, plain_interactive ? 1 : 0,
+                 driver_mode ? 1 : 0, flagless ? 1 : 0,
                  unknown_flag ? 1 : 0, force_windowed ? 1 : 0,
                  force_hidden ? 1 : 0);
     std::fflush(stdout);
+    // A human launching with no flag would otherwise stare at nothing (the run
+    // is hidden by default) — say so in one line, so the invisible run is never
+    // a mystery. `--windowed` is the way to see the game.
+    if (flagless && driver_mode) {
+        std::fprintf(stdout,
+                     "game: no --windowed flag -> running hidden (add --windowed to play)\n");
+        std::fflush(stdout);
+    }
+
+    // Asset guard: validate the res_root BEFORE anything opens a window. An
+    // asset-less/missing root used to reach App::init, which creates the GLFW
+    // window first and only then finds nothing to draw — a visible (or hidden)
+    // empty shell. Fail fast instead, so no window is ever created for a bad
+    // root.
+    {
+        const std::filesystem::path rr(res_root);
+        std::error_code ec;
+        const bool is_dir = std::filesystem::is_directory(rr, ec);
+        // The shipped res carries the packed XML archive + the default save;
+        // any of these proves the root is a real game asset tree.
+        const bool has_assets = std::filesystem::exists(rr / "xml.9e0b4b10.dat", ec) ||
+                                std::filesystem::exists(rr / "users_default.b7da2019.xml", ec) ||
+                                std::filesystem::exists(rr / "ui", ec);
+        if (!is_dir || !has_assets) {
+            std::fprintf(stderr,
+                         "game: res_root '%s' has no game assets -> aborting before any "
+                         "window is created\n",
+                         res_root.c_str());
+            std::fprintf(stderr,
+                         "      expected the packed res tree (e.g. reference/www/res "
+                         "with xml.9e0b4b10.dat)\n");
+            std::fflush(stderr);
+            return 1;
+        }
+    }
+
     if (driver_mode) {
         install_watchdog(watchdog_secs);
     }
