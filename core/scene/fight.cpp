@@ -3883,6 +3883,32 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
     }
     // JS `Te.rw` (L560) + `xqb` (L553): the mirrored AttackingParts swap.
     const bool rw = atk.fighter.mirror_swap();
+    // JS `xqb` (L553) + its caller (L552): `GY` is the UNION of the resolved
+    // AttackingParts capsules over EVERY active type-4 interval, not just the
+    // `yD(4)` pick. The caller loops `for(...){let d=c[b];++b; d.type==4 &&
+    // this.xqb(d); ...}` and `xqb` pushes each resolved capsule into `GY`;
+    // `Wba()` (L553) clears it. `HZa` (L500) then passes the whole `GY` to
+    // `Fu.ia` (L566), which tests EVERY capsule in it. Testing only the
+    // `yD(4)` interval's parts (the old port) misses a second overlapping
+    // Attack interval's limbs — the 4 shipped pairs (FansSuperSlash,
+    // RifleSuperSlash) carry two active type-4 intervals.
+    struct GyEntry {
+        const sf2::scene::HitCapsule* cap;
+        std::string edge;   // authored name
+        std::string ename;  // mirrored name `RAa` resolved
+    };
+    std::vector<GyEntry> gy;
+    for (const sf2::scene::Interval& iv : move.intervals) {
+        if (iv.type != 4) continue;  // Attack
+        const int s = std::max(iv.start, move.first_frame);
+        if (s <= frame && frame <= atk.fighter.interval_last(iv)) {
+            for (const std::string& edge : iv.attacking_parts) {
+                const std::string ename = mirrored_edge_name(edge, rw);
+                const sf2::scene::HitCapsule* ac = atk.body.by_name(ename);
+                if (ac != nullptr) gy.push_back({ac, edge, ename});
+            }
+        }
+    }
     // JS `Cl.ia` (L566-567): `dW` latches ONLY on a successful test --
     // `if(this.W1a(...)) return this.dW=c,!0` (and the `!c.aEa` early
     // return). Latching before the geometry (as this port did) gives the
@@ -3937,26 +3963,8 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
             }
             return false;
         }
-        for (const std::string& edge : d->attacking_parts) {
-            // JS `xqb` (L553): the mirrored name is the one `RAa` resolves.
-            const std::string ename = mirrored_edge_name(edge, rw);
-            const sf2::scene::HitCapsule* ac = atk.body.by_name(ename);
-            if (ac == nullptr) {
-                if (hit_audit_ || hit_audit_global()) {
-                    std::fprintf(stdout,
-                                 "[hitaudit] F%d atk=%s move=%s mf=%d gate=1 "
-                                 "iv=[%d,%d] win=\"%s\" tgt=%zu rw=%d "
-                                 "part=%s->%s UNRESOLVED\n",
-                                 frame, atk.name.c_str(), move.name.c_str(), frame,
-                                 std::max(d->start, move.first_frame),
-                                 atk.fighter.interval_last(*d),
-                                 d->hit_name_at(frame).c_str(),
-                                 def.body.capsules.size(), rw ? 1 : 0,
-                                 edge.c_str(), ename.c_str());
-                    std::fflush(stdout);
-                }
-                continue;
-            }
+        for (const GyEntry& g : gy) {
+            const sf2::scene::HitCapsule* ac = g.cap;
             for (const auto& tgt : def.body.capsules) {
                 if (!tgt.collidable) continue;
                 if (sf2::scene::capsule_capsule_overlap(*ac, tgt, ch)) {
@@ -3974,7 +3982,7 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                                      atk.fighter.interval_last(*d),
                                      d->hit_name_at(frame).c_str(),
                                      def.body.capsules.size(), rw ? 1 : 0,
-                                     edge.c_str(), ename.c_str(), tgt.name.c_str());
+                                     g.edge.c_str(), g.ename.c_str(), tgt.name.c_str());
                         std::fflush(stdout);
                     }
                     return true;
@@ -3990,12 +3998,124 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                              atk.fighter.interval_last(*d),
                              d->hit_name_at(frame).c_str(),
                              def.body.capsules.size(), rw ? 1 : 0,
-                             edge.c_str(), ename.c_str());
+                             g.edge.c_str(), g.ename.c_str());
                 std::fflush(stdout);
             }
         }
     }
     return false;
+}
+
+// [probe, authorised] `--d3-probe`: force the named move on the PLAYER.
+bool FightController::debug_force_player_move(const std::string& name) {
+    const auto it = moves_->find(name);
+    if (it == moves_->end()) return false;
+    sf2::scene::FightContext ctx;
+    ctx.qb = true;
+    ctx.roll01 = [this]() { return math_random01(); };
+    ctx.stage = sf2::scene::round_stage::fight;
+    ctx.anims_me = anim_names_of(player_.fighter);
+    ctx.anims_enemy = anim_names_of(enemy_.fighter);
+    ctx.health_ratio =
+        player_.max_hp > 0.0f ? player_.hp / player_.max_hp : 0.0f;
+    fill_ctx_geometry(ctx, player_, enemy_);
+    for (const std::string& n : player_.fighter.active_intervals()) {
+        ctx.intervals.push_back({n, player_.fighter.interval_type(n), true});
+    }
+    for (const std::string& n : enemy_.fighter.active_intervals()) {
+        ctx.intervals_enemy.push_back({n, enemy_.fighter.interval_type(n), true});
+    }
+    return player_.fighter.ai_start_move(it->second, ctx);
+}
+
+// [probe, authorised] `--d3-probe`: print the OLD vs NEW attacker part set at
+// `frame`, then run `hit_test`. The OLD set is the `yD(4)` interval's
+// AttackingParts only (the pre-D3 port); the NEW set is the `xqb` union over
+// every active type-4 interval (JS L552-553).
+bool FightController::debug_d3_probe(int frame) {
+    const sf2::scene::MoveDef* mv = player_.fighter.current_move();
+    if (mv == nullptr) {
+        std::fprintf(stdout, "[d3probe] no current player move\n");
+        std::fflush(stdout);
+        return false;
+    }
+    const bool rw = player_.fighter.mirror_swap();
+    // OLD: the first active type-4 interval (`yD(4)`).
+    const sf2::scene::Interval* d = nullptr;
+    for (const sf2::scene::Interval& iv : mv->intervals) {
+        if (iv.type != 4) continue;
+        const int s = std::max(iv.start, mv->first_frame);
+        if (s <= frame && frame <= player_.fighter.interval_last(iv)) {
+            d = &iv;
+            break;
+        }
+    }
+    std::fprintf(stdout, "[d3probe] move=%s frame=%d rw=%d\n", mv->name.c_str(),
+                 frame, rw ? 1 : 0);
+    if (d != nullptr) {
+        std::fprintf(stdout, "[d3probe] OLD yD(4) iv=[%d,%d] parts=%zu:",
+                     std::max(d->start, mv->first_frame),
+                     player_.fighter.interval_last(*d), d->attacking_parts.size());
+        for (const std::string& e : d->attacking_parts) {
+            std::fprintf(stdout, " %s", mirrored_edge_name(e, rw).c_str());
+        }
+        std::fprintf(stdout, "\n");
+    } else {
+        std::fprintf(stdout, "[d3probe] OLD yD(4) = none\n");
+    }
+    // NEW: the union over every active type-4 interval.
+    std::size_t n_new = 0;
+    std::fprintf(stdout, "[d3probe] NEW union:");
+    for (const sf2::scene::Interval& iv : mv->intervals) {
+        if (iv.type != 4) continue;
+        const int s = std::max(iv.start, mv->first_frame);
+        if (s <= frame && frame <= player_.fighter.interval_last(iv)) {
+            for (const std::string& e : iv.attacking_parts) {
+                const std::string en = mirrored_edge_name(e, rw);
+                if (player_.body.by_name(en) != nullptr) {
+                    std::fprintf(stdout, " %s", en.c_str());
+                    ++n_new;
+                }
+            }
+        }
+    }
+    std::fprintf(stdout, " (n=%zu)\n", n_new);
+    std::fflush(stdout);
+    // The OLD geometry test: only the `yD(4)` interval's parts (the pre-D3
+    // port). Reported alongside the NEW `hit_test` so the union's effect on
+    // the outcome is visible.
+    bool old_hit = false;
+    std::string old_cap;
+    if (d != nullptr) {
+        for (const std::string& e : d->attacking_parts) {
+            const sf2::scene::HitCapsule* ac =
+                player_.body.by_name(mirrored_edge_name(e, rw));
+            if (ac == nullptr) continue;
+            for (const auto& tgt : enemy_.body.capsules) {
+                if (!tgt.collidable) continue;
+                sf2::scene::CapsuleHit och;
+                if (sf2::scene::capsule_capsule_overlap(*ac, tgt, och)) {
+                    old_hit = true;
+                    old_cap = tgt.name;
+                    break;
+                }
+            }
+            if (old_hit) break;
+        }
+    }
+    std::fprintf(stdout, "[d3probe] OLD-only test=%s cap=%s\n",
+                 old_hit ? "HIT" : "MISS", old_hit ? old_cap.c_str() : "-");
+    std::fflush(stdout);
+    sf2::scene::HitCapsule hit_cap;
+    sf2::scene::CapsuleHit ch;
+    const sf2::scene::Interval* hit_iv = nullptr;
+    const sf2::scene::HitCapsule* atk_cap = nullptr;
+    const bool hit = hit_test(player_, enemy_, *mv, frame, hit_cap, ch, hit_iv,
+                              atk_cap);
+    std::fprintf(stdout, "[d3probe] hit_test=%s cap=%s\n", hit ? "HIT" : "MISS",
+                 hit ? hit_cap.name.c_str() : "-");
+    std::fflush(stdout);
+    return hit;
 }
 
 // JS `wd.HZa` gate position (hzaGate L500-501): the yD(4) pick + the

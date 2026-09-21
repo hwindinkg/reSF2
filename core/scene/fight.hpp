@@ -1528,6 +1528,17 @@ public:
     // Test hook (`--verify-place`): drop the player's current move so a probe
     // starts from a neutral state.
     void debug_reset_player_move() { player_.fighter.clear_move(); }
+    // [probe, authorised] `--d3-probe`: force the named move on the PLAYER
+    // (bypassing the Keys conditions via `ai_start_move`) and return whether
+    // it started. Used to drive a specific shipped move (e.g. FansSuperSlash)
+    // deterministically for the D3 union proof.
+    bool debug_force_player_move(const std::string& name);
+    // [probe, authorised] `--d3-probe`: at the player's current move frame,
+    // print the attacker's part set the OLD way (the `yD(4)` interval's
+    // AttackingParts only) and the NEW way (the `xqb` union over every active
+    // type-4 interval), then run `hit_test` and print its result. Returns the
+    // hit_test outcome.
+    bool debug_d3_probe(int frame);
     // Battle prize breakdown (JS `v.kD`/`bzb`/`Fh.lXa`, FLOW_STATIC 4.3).
     // Factors from internal_settings `<RewardsPrize>` (verified values):
     // Perfect $Ia=5, FirstStrike ep=2, ComboCount Ui=1, Shock Ub=3,

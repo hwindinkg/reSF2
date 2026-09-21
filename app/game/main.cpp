@@ -28,6 +28,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <random>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1430,6 +1431,14 @@ int main(int argc, char** argv) {
     // internal `player_input` path (no OS input), land an attack, and log the
     // boss's per-frame hit reaction (move/ragdoll/world_x).
     bool boss_hit_probe = false;
+    // --d3-probe: force a named move on the player and print the attacker's
+    // part set the OLD way (yD(4) only) vs the NEW way (the xqb union over
+    // every active type-4 interval), then the hit_test result. Proves the D3
+    // union fix on a shipped two-interval pair (default FansSuperSlash).
+    bool d3_probe = false;
+    std::string d3_probe_move = "FansSuperSlash";
+    int d3_probe_frame = 36;
+    float d3_probe_dist = 500.0f;  // enemy x offset from the player
     bool auto_attack = false;
     bool fight_mode = false;  // --fight: boot DIRECTLY into the dojo fight
     int capture_fight_frame = 300;  // fight frames after the Fight screen appears
@@ -1662,6 +1671,14 @@ int main(int argc, char** argv) {
             round_log = true;
         } else if (arg == "--boss-hit-probe") {
             boss_hit_probe = true;
+        } else if (arg == "--d3-probe") {
+            d3_probe = true;
+        } else if (arg == "--d3-probe-move" && i + 1 < argc) {
+            d3_probe_move = argv[++i];
+        } else if (arg == "--d3-probe-frame" && i + 1 < argc) {
+            d3_probe_frame = std::atoi(argv[++i]);
+        } else if (arg == "--d3-probe-dist" && i + 1 < argc) {
+            d3_probe_dist = static_cast<float>(std::atof(argv[++i]));
         } else if (arg == "--hit-audit") {
             // Probe: arm the per-frame `[hitaudit]` hit-row log (the
             // attacker's active Window / active parts / overlap / `<Hit>`
@@ -3670,6 +3687,106 @@ int main(int argc, char** argv) {
         }
         app.shutdown();
         return 0;
+    } else if (d3_probe) {
+        // [probe] `--d3-probe`: build a headless FightController with a Fans
+        // loadout, force the named move (default FansSuperSlash) on the
+        // player, step to the target frame, then print the attacker's part
+        // set the OLD way (yD(4) only) vs the NEW way (the xqb union over
+        // every active type-4 interval) and the hit_test result. No OS input,
+        // no window (driver_mode), watchdog armed.
+        if (!app.has_fight_assets()) {
+            std::fprintf(stderr, "[d3probe] fight assets not loaded\n");
+            app.shutdown();
+            return 1;
+        }
+        sf2::app::FightAssets& fa = app.fight_assets();
+        sf2::scene::BattleParams battle;
+        battle.name = "Training";
+        battle.location = "dojo";
+        battle.rounds = 2;
+        battle.round_time = 99;
+        battle.max_hp = 100;
+        battle.player_spawn_x = 690.0f;
+        battle.player_spawn_y = -93.0f;
+        battle.enemy_spawn_x = 973.0f;
+        battle.enemy_spawn_y = -110.0f;
+        const std::vector<sf2::scene::OwnedItem> owned =
+            loadout_owned(loadout.empty() ? std::string("Fans") : loadout);
+        // The player's OWN model must carry the Fans weapon capsules (the
+        // `FansSuperSlash` AttackingParts resolve against them). Build it from
+        // the skeleton + the Fans weapon part (JS `xc.cM`).
+        sf2::scene::Model player_model_storage;
+        const sf2::scene::Model* player_model = nullptr;
+        {
+            std::vector<sf2::scene::Model> parts;
+            parts.push_back(fa.skeleton);
+            const sf2::scene::Model* wp = fa.load_part("mdl_weapon_val17_fans");
+            if (wp != nullptr) parts.push_back(*wp);
+            if (!fa.body.bones.empty()) parts.push_back(fa.body);
+            if (!fa.head.bones.empty()) parts.push_back(fa.head);
+            player_model_storage = sf2::scene::build_fighter_model(parts);
+            if (!player_model_storage.bones.empty()) {
+                player_model = &player_model_storage;
+            }
+        }
+        sf2::scene::FightController ctl;
+        std::mt19937 rng(0x5F2);
+        auto roll01 = [&rng]() {
+            return static_cast<float>(rng()) / static_cast<float>(rng.max());
+        };
+        const sf2::scene::TacticDef* tactic = nullptr;
+        const auto tit = fa.tactic_defs.find("Standard");
+        if (tit != fa.tactic_defs.end()) tactic = &tit->second;
+        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips, fa.tactics_sets,
+                       tactic, "Player", "Enemy", battle.player_spawn_x,
+                       battle.player_spawn_y, battle.enemy_spawn_x,
+                       battle.enemy_spawn_y, battle.max_hp, battle.max_hp,
+                       roll01, owned, sf2::scene::PerkSetup(), nullptr,
+                       player_model);
+        std::fprintf(stdout, "[d3probe] forced move=%s\n", d3_probe_move.c_str());
+        std::fflush(stdout);
+        // The move's tactics gate the Distance (FansSuperSlash: 300..800), so
+        // park the fighters inside that band before forcing.
+        ctl.debug_place_fighters(690.0f, 1190.0f);
+        // Advance the phase machine to the live FIGHT phase (2) first: a move
+        // forced during the StartStance intro is reset by the phase switch.
+        // `release_intro` ends the held ROUND-plate lead-in (the VS overlay
+        // gate) so the phase machine can run.
+        ctl.release_intro();
+        {
+            int pguard = 0;
+            while (pguard < 20000 && ctl.phase() != 2) {
+                ctl.update(1.0f / 60.0f);
+                ++pguard;
+            }
+            std::fprintf(stdout, "[d3probe] phase=%d (guard %d)\n", ctl.phase(),
+                         pguard);
+            std::fflush(stdout);
+        }
+        ctl.debug_place_fighters(690.0f, 1190.0f);
+        if (!ctl.debug_force_player_move(d3_probe_move)) {
+            std::fprintf(stderr, "[d3probe] move '%s' did not start\n",
+                         d3_probe_move.c_str());
+            app.shutdown();
+            return 1;
+        }
+        // Step the sim to the target move frame (the probe frame is a MOVE
+        // frame, not a fight frame). The enemy is parked at the probe distance
+        // each step so the geometry test sees the requested gap.
+        int guard = 0;
+        while (guard < 20000 &&
+               ctl.player().fighter.move_frame() < d3_probe_frame) {
+            ctl.debug_place_fighters(690.0f, 690.0f + d3_probe_dist);
+            ctl.update(1.0f / 60.0f);
+            ++guard;
+        }
+        ctl.debug_place_fighters(690.0f, 690.0f + d3_probe_dist);
+        std::fprintf(stdout, "[d3probe] reached move frame %d (guard %d)\n",
+                     ctl.player().fighter.move_frame(), guard);
+        std::fflush(stdout);
+        const bool hit = ctl.debug_d3_probe(d3_probe_frame);
+        app.shutdown();
+        return hit ? 0 : 1;
     } else if (boss_hit_probe) {
         // [probe] `--boss-hit-probe`: boot a BOSS fight (default
         // BOSS_LYNX/ZONE_1), drive the player into range through the internal
