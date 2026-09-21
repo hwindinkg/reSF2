@@ -36,9 +36,14 @@
 //     the JS move-object change (`mwb`->`jwb`); `iwb`'s `eh=1` reset on my
 //     move change is not ported (OPEN — needs a live trace to confirm the
 //     `mwb` call context).
-//   - `xaa` consumes the `Aea` draw for stream position; the Ju-frame-horizon
-//     application (`b=Fl+b` windowing over `Ju.frames`, L611) is OPEN — the
-//     port keys outcomes off distance windows only.
+//   - `xaa` applies the Ju-frame horizon `b=Fl+Aea` and the Hu frame pick
+//     `Ju.$_(Fl)`; the outcome window pick now follows `Gu.acb`/`Gu.n0`
+//     (L610-612) exactly (`NDa[i-1]`, lower edge gated). `yaa`/`gea` still
+//     pass `hu_pick=-1` (all Hu frames) — cited divergence, see `yaa`.
+//   - the table target: JS `Wea` (L600) returns the FIGHTER BONE named
+//     `row.label` (`da.Ic(label, t0(me,enemy)).ma.x`) and the enemy body
+//     contributes `dw()`/`hd()`; `AiFightState` carries no bone world-x, so
+//     the port keeps `my_facing * enemy_x` (the one value not JS-exact).
 // Exact since this wave (no oracle needed — pure JS math):
 //   - the `mW` watch-recompute (JS `de.ia` L592): after `dsb` the port now
 //     recomputes `eh` from the OPPONENT's move length (`p0`/`zD`/`$I`/`Tea`
@@ -504,8 +509,8 @@ int AiController::pick(const std::vector<AiCandidate>& cands) const {
     return static_cast<int>(cands.size()) - 1;
 }
 
-// The per-row outcome lookup (JS `PBa` L617 + `Gu.n0` L634): for a table
-// row, find the outcome case whose distance window contains `dist` and
+// The per-row outcome lookup (JS `PBa` L617 + `Gu.acb`/`Gu.n0` L634): for a
+// table row, find the outcome case whose distance window contains `dist` and
 // append kd(animation, outcome_id) to `out`. Returns the count added.
 // `hu_pick >= 0` restricts to one Hu frame's outcomes (JS `Ju.frames[k]`,
 // L611); `horizon >= 0` drops waits beyond it (JS `r<=b`, `b=Fl+Aea`).
@@ -515,23 +520,30 @@ int pba_append(const TacticRow& row, float dist, std::vector<AiCandidate>& out,
     int added = 0;
     for (const TacticOutcome& oc : row.outcomes) {
         if (hu_pick >= 0 && oc.hu_index != hu_pick) continue;
-        // Gu.n0 (L634): JI = the sorted float edges, NDa = the u32
-        // outcomes. `n0(d)` returns the u32 whose window contains d:
-        //   JI[0] <= d < JI[last] -> NDa[first index with JI[i] > d]
-        // The native port uses oc.window_outcomes paired with
-        // oc.window_edges (same layout).
-        if (oc.window_edges.empty()) continue;
+        // JS `Gu` (g="E8"): JI (`window_edges`) = the float edge list,
+        // NDa (`window_outcomes`) = the u32 outcome list. The file stores
+        // NDa.length == JI.length - 1 (measured 16769/16769 in the fists
+        // table): NDa[i] is the outcome of the window [JI[i], JI[i+1]).
+        //
+        // JS `Gu.acb(a)` (L634): `0 < JI.length-1 && JI[0] <= a && a < JI[last]`.
+        // JS `Gu.n0(a)`  (L634): first i>=1 with `a < JI[i]` -> `NDa[i-1]`,
+        //                         else -1.  NOTE `i-1` (the window index),
+        //                         not `i` (the first edge above `a`).
+        if (oc.window_edges.size() < 2) continue;
+        if (!(oc.window_edges.front() <= dist && dist < oc.window_edges.back())) {
+            continue;
+        }
         int idx = -1;
-        for (std::size_t i = 0; i < oc.window_edges.size(); ++i) {
+        for (std::size_t i = 1; i < oc.window_edges.size(); ++i) {
             if (dist < oc.window_edges[i]) {
                 idx = static_cast<int>(i);
                 break;
             }
         }
-        if (idx < 0 || static_cast<std::size_t>(idx) >= oc.window_outcomes.size()) {
-            continue;
-        }
-        const std::uint32_t outcome = oc.window_outcomes[static_cast<std::size_t>(idx)];
+        if (idx < 1) continue;
+        const std::size_t wi = static_cast<std::size_t>(idx - 1);
+        if (wi >= oc.window_outcomes.size()) continue;
+        const std::uint32_t outcome = oc.window_outcomes[wi];
         if (outcome == 0) continue;
         // JS `r<=b` (L611): the outcome wait must fit the Ju horizon.
         if (horizon >= 0 && static_cast<int>(outcome) > horizon) continue;
@@ -572,12 +584,16 @@ int AiController::yaa(const AiFightState& st) {
     const int f = (g % 5) != 0 ? g + 5 - g % 5 : g;
 
     // For each condition row, the target x (JS `Wea` L600: the row label's
-    // NPivot x — the native port uses the enemy x) and the frame window:
+    // bone world-x — the native port uses the enemy x) and the frame window:
     //   l*(t + (b.aU.xea(f,r) - b.aU.xea(g,r))*d - e) + h
-    // where l = my facing, t = the enemy bone x, d = my facing, e = the
-    // enemy's dw (body width), h = the DistanceError draw. The native
-    // fighter has one body; the xea displacement is 0, so the target =
-    // l*(t - e) + h.
+    // where l = my facing, t = the fighter bone x, d = my facing, e = the
+    // enemy's dw, h = the DistanceError draw.
+    // REMAINING (cited, not guessed): JS also picks the Hu frame
+    // `k = row.$_(f)` at the ROUNDED frame and then, when `f!=g` and any
+    // outcome matched, REPLACES the candidates by a single wait `f-g`
+    // (L611). The port leaves `hu_pick=-1` (all Hu frames) and the raw
+    // frame — this is a known divergence, deliberately not changed without
+    // the `Fl`/`g` owner pinned.
     const float target = st.my_facing * (st.enemy_x - 0.0f) + static_cast<float>(Mu_);
     for (const TacticRow& row : rec->rows) {
         pba_append(row, target, wb_);
@@ -604,21 +620,27 @@ int AiController::xaa(const AiFightState& st) {
     Ao_ = false;
     if (st.enemy_anim.empty()) return 0;
 
-    // JS `XAa` (L611): `b=this.Aea(this.Eqa)` — the EnemyResponseDelay draw,
-    // then `b=this.Fl+b` (the Ju-frame horizon). The draw is consumed here
-    // so the stream position matches; the horizon windowing over Ju.frames
-    // is OPEN (the port keys outcomes off distance windows only).
+    // JS `XAa` (L611): `for(var b=this.Aea(this.Eqa),...)` then
+    // `b=this.Fl+b` — the Ju-frame horizon = `Fl + Aea(Eqa)`. The draw is
+    // consumed here so the shared `Da.pg` stream position matches.
     aea_ = aea_draw();
 
     const TacticRecord* rec = find_record(st.enemy_anim);
     if (rec == nullptr) return 0;
 
-    // JS L611-612: per Ju row, the Hu frame `k = $_(Fl)` (row frame at
-    // the enemy frame) selects that frame's outcomes; each outcome's
-    // `n0(n)` (distance window) picks the anim, and waits beyond the
-    // horizon `b = Fl + Aea` are dropped (`r<=b`). The Wea-per-label
-    // target needs enemy bone data (OPEN) — the port keeps enemy x.
-    (void)Fl_; (void)feat_.pz;
+    // JS L611-612 (exact):
+    //   b = this.Fl + this.Aea(this.Eqa)                 // horizon
+    //   for each Ju row: k = row.$(this.Fl)              // Hu frame pick
+    //     n = hd_e*(Wea(row.label, this.model, a) - dw_e) + this.Mu
+    //     for each Gu in frames[k].Ny: r = Gu.n0(n)
+    //       0 < r && animation != null && r <= b          // kept
+    // The horizon IS applied (each kept outcome has wait <= Fl+Aea, via
+    // `pba_append`'s `horizon` argument below).
+    // REMAINING SUBSTITUTION: the target. JS `Wea` (L600) returns the
+    // fighter bone named `row.label` (`da.Ic(label, t0(me,enemy)).ma.x`) and
+    // the enemy body contributes `dw()`/`hd()`; `AiFightState` carries no
+    // bone world-x, so the port keeps `my_facing * enemy_x` here. This is
+    // the one value on this path still not JS-exact.
     const float target = st.my_facing * st.enemy_x + static_cast<float>(Mu_);
     const int horizon = Fl_ + aea_;
     for (const TacticRow& row : rec->rows) {
