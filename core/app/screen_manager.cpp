@@ -28,28 +28,52 @@ std::string quest_scene_name(ScreenId id) {
     }
 }
 
-// Fires ChangeTab + SceneLoaded for a navigation edge (JS `v.qwa` L1212 +
-// `wa.ghb` L934). Never throws, never navigates (engine records only).
-void quest_nav(App& app, const std::string& from, const std::string& to) {
+// `wa.V8a` (L478476): the DESTINATION screen's tab index for the ChangeTab
+// journal. Shop(4) = the pushed payload's `Gj.T5` (the `vj.E0` tab index,
+// default 1); Map(5) = 16 (`StoryMapStage`); Profile(7) = 10 (`Perks`);
+// else 0 (`Default`).
+int wa_v8a(ScreenId id, int shop_tab_index) {
+    switch (id) {
+        case kScreenShop: return shop_tab_index;
+        case kScreenMap: return 16;
+        case kScreenProfile: return 10;
+        default: return 0;
+    }
+}
+
+// Fires ChangeTab + SceneLoaded for a navigation edge (JS `wa.mp` L933 +
+// `v.qwa` L621757 + `wa.ghb` L934). Never throws, never navigates.
+void quest_nav(App& app, const std::string& from, ScreenId to_id) {
+    const std::string to = quest_scene_name(to_id);
     if (to.empty()) return;
     try {
         QuestJournal j;
         j.scene_from = from;
         j.scene_to = to;
-        // `v.qwa` (L1212: `c.XNa=uh.getName(a); c.YNa=uh.getName(b)`) writes the
-        // `_$TabFrom`/`_$TabTo` pair (`Bj.XNa`/`YNa`, read L964) on EVERY screen
-        // change. The port's nav edge carries the scene names, not the tracked
-        // `Bj.DI` tab index, so the names are recorded as-is here: the pair is
-        // modelled + resolvable (no longer `note_unanswerable`), while the
-        // `vj.E0(DI)` tab-owner normalization remains the port's gap.
-        j.tab_from = from;
-        j.tab_to = to;
+        // `wa.mp` L933: `var e=ha.F().ta; e.lLa=e.Xo; e.nLa=xn.iOa(a);
+        // e=vj.E0(e.DI); let f=wa.V8a(a,b); ... v.qwa(e,f)`. `v.qwa`
+        // (L621757) writes `XNa=uh.getName(from)`, `YNa=uh.getName(to)` — tab
+        // NAMES normalized through the index tables, never the scene names.
+        // `DI` is the CURRENT screen's tracked tab (`Bj.DI`, ctor L1005); ""
+        // normalizes to "Default". `V8a`'s shop payload is the pending
+        // `OpenShop` tab (the `Gj.T5` the push carried).
+        j.tab_from = QuestEngine::tab_name_for_index(
+            QuestEngine::tab_index_for_name(app.quest_engine().tab_owner()));
+        int shop_idx = 1;  // `b!=null ? b.T5 : 1`
+        if (to_id == kScreenShop && app.has_pending_shop()) {
+            shop_idx = QuestEngine::tab_index_for_name(app.pending_shop_tab());
+            if (shop_idx == 0) shop_idx = 1;
+        }
+        j.tab_to = QuestEngine::tab_name_for_index(wa_v8a(to_id, shop_idx));
         try {
             j.player_level = app.save().load().level;
         } catch (const std::exception&) {
         }
         app.quest_engine().fire(app, "ChangeTab", j);
         app.quest_engine().fire(app, "SceneLoaded", j);
+        // The destination ctor's own `DI` write (JS): the Map sets
+        // `StoryMapStage` (L1094741/L1096479); Shop/Profile leave it.
+        if (to_id == kScreenMap) app.quest_engine().set_tab_owner("StoryMapStage");
     } catch (const std::exception&) {
     }
 }
@@ -91,7 +115,7 @@ void ScreenManager::push(std::unique_ptr<Screen> screen) {
                  static_cast<int>(screen->id()), stack_.size() + 1);
     std::fflush(stdout);
     stack_.push_back(std::move(screen));
-    quest_nav(app_, nav_from, quest_scene_name(pushed_id));
+    quest_nav(app_, nav_from, pushed_id);
 }
 
 void ScreenManager::pop() {
@@ -108,7 +132,7 @@ void ScreenManager::pop() {
     // The screen beneath (the JS "caller") reactivates.
     if (!stack_.empty()) {
         stack_.back()->set_state(kStateActive);
-        quest_nav(app_, nav_from, quest_scene_name(stack_.back()->id()));
+        quest_nav(app_, nav_from, stack_.back()->id());
     }
 }
 

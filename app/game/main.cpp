@@ -1412,6 +1412,7 @@ int main(int argc, char** argv) {
     bool fidelity_tour = false;
     bool quest_verify = false;  // --quest-verify: interactive action check
     bool quest_verify_buy = false;  // --quest-verify-buy: seeded STEP_BUY_ITEM
+    bool changetab_probe = false;   // --changetab-probe: synthetic `Hn` action
     bool dialog_verify = false;     // --dialog-verify: headless dialog harness
     bool observe_dialogs = false;   // --observe-dialogs: keep the queue observable
     // --tutorial-real-verify: boot the REAL path (NO `fresh_tutorial` arm, NO
@@ -1523,6 +1524,8 @@ int main(int argc, char** argv) {
             fidelity_tour = true;
         } else if (arg == "--quest-verify") {
             quest_verify = true;
+        } else if (arg == "--changetab-probe") {
+            changetab_probe = true;
         } else if (arg == "--quest-verify-buy") {
             quest_verify = true;
             quest_verify_buy = true;
@@ -2456,6 +2459,85 @@ int main(int argc, char** argv) {
                      ok_open ? "PASS" : "FAIL", ok_lynx ? "PASS" : "FAIL",
                      ok_shin ? "PASS" : "FAIL", ok_fight ? "PASS" : "FAIL",
                      ok_story_advance ? "PASS" : "FAIL",
+                     all ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return all ? 0 : 1;
+    } else if (changetab_probe) {
+        // --- `--changetab-probe`: the `Hn` ChangeTab action, JS-exact --------
+        // Hidden window + RULE 0 watchdog (driver_mode). Mounts the Shop/Profile
+        // (so `wa.F().Td.Tf==this.CX`), fires a synthetic `<ChangeTab .../>`
+        // through the engine's own parse path (`run_action_probe`) and logs the
+        // resulting screen/tab. NO OS input, no visible window.
+        glfwHideWindow(app.renderer().window());
+        int checks = 0, passed = 0;
+        const auto check = [&](bool ok, const char* what) {
+            ++checks;
+            if (ok) ++passed;
+            std::fprintf(stdout, "[changetab] %-44s %s\n", what, ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        };
+        const auto fire = [&](const char* tab, const char* focus,
+                              const std::string& tab_to) {
+            sf2::app::QuestAction act;
+            act.tag = "ChangeTab";
+            act.attrs["Tab"] = tab;
+            act.attrs["Focus"] = focus;
+            sf2::app::QuestJournal j;
+            j.tab_from = "Default";
+            j.tab_to = tab_to;
+            app.quest_engine().run_action_probe(app, {act}, j);
+        };
+        // 1. Shop (screen 4): open on Weapon (tab 0), then `Tab="Armor"` (vj 2
+        //    -> Cj.l6 1).
+        app.screens().push(sf2::app::make_screen(app.screens(), sf2::app::kScreenShop));
+        app.run_one_frame();
+        sf2::app::ShopScreen* shop =
+            dynamic_cast<sf2::app::ShopScreen*>(app.screens().top());
+        const int shop_before = shop != nullptr ? shop->tab() : -1;
+        fire("Armor", "Helm_Test", "");
+        const int shop_armor = shop != nullptr ? shop->tab() : -1;
+        std::fprintf(stdout, "[changetab] shop tab before=%d after(Armor)=%d\n",
+                     shop_before, shop_armor);
+        check(shop_before == 0 && shop_armor == 1, "Shop: Tab=Armor selects tab 1");
+        // 2. The `_$TabTo` form (the shipped FreeReminderOnTabLeave action): the
+        //    journal's YNa resolves through `vj.E0` to the owning screen.
+        fire("_$TabTo", "Tapjoy", "Magic");
+        const int shop_magic = shop != nullptr ? shop->tab() : -1;
+        std::fprintf(stdout, "[changetab] shop tab after(_$TabTo=Magic)=%d\n",
+                     shop_magic);
+        check(shop_magic == 4, "Shop: Tab=_$TabTo=Magic selects tab 4");
+        // 3. A bare `<ChangeTab/>` (Tab="" -> vj.E0 0 -> vj.ifa 11 != 4) is a
+        //    no-op on the Shop, exactly the JS `Td.Tf==CX` guard.
+        const std::size_t ta0 = app.quest_engine().tab_actions();
+        fire("", "", "");
+        check(app.quest_engine().tab_actions() == ta0,
+              "Shop: bare ChangeTab is a no-op");
+        // 4. Profile (screen 7): `Tab="Moves"` (vj 11 -> To.hOa 1) then
+        //    `Tab="Perks"` (vj 10 -> To.hOa 0) via `vb.rF`/`hla`.
+        app.screens().pop();
+        app.screens().push(sf2::app::make_screen(app.screens(), sf2::app::kScreenProfile));
+        app.run_one_frame();
+        sf2::app::EquipmentScreen* prof =
+            dynamic_cast<sf2::app::EquipmentScreen*>(app.screens().top());
+        fire("Moves", "", "");
+        const int prof_moves = prof != nullptr ? prof->tab() : -1;
+        fire("Perks", "PERK_DOUBLE_SWEEP", "");
+        const int prof_perks = prof != nullptr ? prof->tab() : -1;
+        std::fprintf(stdout, "[changetab] profile tab Moves=%d Perks=%d\n",
+                     prof_moves, prof_perks);
+        check(prof_moves == 1 && prof_perks == 0, "Profile: Moves->1, Perks->0");
+        // 5. Map `Tab="StoryMapStage"`: the JS `Ya.rF` is an EMPTY stub
+        //    (L1096890), so the action executes but changes no map state.
+        app.screens().pop();
+        app.screens().push(sf2::app::make_screen(app.screens(), sf2::app::kScreenMap));
+        app.run_one_frame();
+        const std::size_t ta1 = app.quest_engine().tab_actions();
+        fire("StoryMapStage", "", "");
+        check(app.quest_engine().tab_actions() == ta1 + 1,
+              "Map: StoryMapStage executes (Ya.rF empty stub)");
+        const bool all = checks == passed;
+        std::fprintf(stdout, "[changetab] RESULT %d/%d -> %s\n", passed, checks,
                      all ? "PASS" : "FAIL");
         std::fflush(stdout);
         app.shutdown();

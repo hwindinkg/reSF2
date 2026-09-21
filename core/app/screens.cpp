@@ -13205,6 +13205,23 @@ bool shop_open_at(App& app, const std::string& tab, const std::string& item) {
     return true;
 }
 
+// `vb.rF(a,b)` (L1131579) -> `vb.hla(a)` (L1127569): select the profile slot.
+// The JS guard `if(this.vV!=a&&a!=5)` skips slot 5 (the `To.hOa` default, no
+// such profile tab); the shell renders `kProfileTabCount` (4) tabs, so a slot
+// outside 0..3 has no target either and is rejected (logged by the caller).
+bool EquipmentScreen::select_tab(int slot, const std::string& focus) {
+    if (slot < 0 || slot >= kProfileTabCount) {
+        return false;
+    }
+    tab_ = slot;      // `this.vV=a`
+    tab_hover_ = -1;
+    hover_ = -1;
+    std::fprintf(stdout, "[profile] rF slot=%d focus=%s -> tab %d\n", slot,
+                 focus.c_str(), tab_);
+    std::fflush(stdout);
+    return true;
+}
+
 // --- `--dialog-verify` self-check (see screens.hpp) ------------------------
 namespace {
 

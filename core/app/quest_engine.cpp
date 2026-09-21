@@ -323,6 +323,62 @@ std::string scene_name_for_id(int id) {
 
 } // namespace
 
+// `vj.E0` (L1168): tab NAME -> index (0 = "Default", the JS default).
+int QuestEngine::tab_index_for_name(const std::string& name) {
+    if (name == "Weapon") return 1;
+    if (name == "Armor") return 2;
+    if (name == "Helm") return 3;
+    if (name == "Ranged") return 4;
+    if (name == "Magic") return 5;
+    if (name == "Ruby") return 6;
+    if (name == "Free") return 7;
+    if (name == "RaidConsumable") return 8;
+    if (name == "Cheat") return 9;
+    if (name == "Perks") return 10;
+    if (name == "Moves") return 11;
+    if (name == "Achievements") return 12;
+    if (name == "QuestItems") return 13;
+    if (name == "Count") return 14;
+    if (name == "BattlePass") return 15;
+    if (name == "StoryMapStage") return 16;
+    if (name == "RaidMapStage") return 17;
+    return 0;
+}
+
+// `uh.getName` (L1169): index -> tab NAME ("Default" when unknown).
+std::string QuestEngine::tab_name_for_index(int index) {
+    switch (index) {
+        case 1: return "Weapon";
+        case 2: return "Armor";
+        case 3: return "Helm";
+        case 4: return "Ranged";
+        case 5: return "Magic";
+        case 6: return "Ruby";
+        case 7: return "Free";
+        case 8: return "RaidConsumable";
+        case 9: return "Cheat";
+        case 10: return "Perks";
+        case 11: return "Moves";
+        case 12: return "Achievements";
+        case 13: return "QuestItems";
+        case 14: return "Count";
+        case 15: return "BattlePass";
+        case 16: return "StoryMapStage";
+        case 17: return "RaidMapStage";
+        default: return "Default";
+    }
+}
+
+// `vj.ifa` (L1169): tab index -> owning screen id (11 = the JS default).
+int QuestEngine::tab_screen_for_index(int index) {
+    switch (index) {
+        case 1: case 2: case 3: case 4: case 5: case 6: case 7: return 4;
+        case 10: case 11: case 12: case 13: case 15: return 7;
+        case 16: case 17: return 5;
+        default: return 11;
+    }
+}
+
 const WarriorSave& QuestEngine::EvalCtx::live(App& app) const {
     if (!save_loaded) {
         try {
@@ -878,6 +934,20 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             open.tab = tab;
             open.item = item;
             fx.shop_opens.push_back(std::move(open));
+        } else if (t == "ChangeTab") {
+            // `Hn.parse` L1032: `Tab` (`this.cua`), `Focus` (`this.jN`); both
+            // default "". `ba.Pc` resolves the `_$TabTo`/`_$TabFrom` journal
+            // names (the only expression the shipped actions use). `Hn.S`
+            // L1032: `Ay = vj.E0(name)`, `CX = vj.ifa(Ay)`.
+            std::string tab = attr_or(a.attrs, "Tab");
+            if (tab == "_$TabTo") tab = journal.tab_to;
+            else if (tab == "_$TabFrom") tab = journal.tab_from;
+            QuestTabSelect sel;
+            sel.tab = tab;
+            sel.focus = attr_or(a.attrs, "Focus");
+            sel.tab_index = tab_index_for_name(tab);
+            sel.screen_id = tab_screen_for_index(sel.tab_index);
+            fx.tab_selects.push_back(std::move(sel));
         } else if (t == "Dialog") {
             // D1: the widget-building Types park the chain at this dialog
             // (`He.S` L1051) — see the park branch below.
@@ -1341,6 +1411,7 @@ void QuestEngine::enqueue_effects(App& app, const QuestSideEffects& fx,
     if (app.headless()) return;
     for (const QuestSceneRequest& s : fx.navigate) nav_queue_.push_back(s);
     for (const QuestShopOpen& s : fx.shop_opens) shop_queue_.push_back(s);
+    for (const QuestTabSelect& s : fx.tab_selects) tab_queue_.push_back(s);
     for (const std::string& t : fx.click_arm) {
         armed_clicks_.push_back(t);
         std::fprintf(stdout, "[quest] ClickButton armed: %s (callback live)\n", t.c_str());
@@ -1454,6 +1525,92 @@ void QuestEngine::do_open_shop(App& app, const QuestShopOpen& open) {
     shop_open_at(app, open.tab, open.item);
 }
 
+// `Hn.S` (L1032-1034): select the target screen's tab. The JS acts only when
+// the target screen IS current (`if(wa.F().Td.Tf==this.CX)`); otherwise the
+// action completes with no side effect. Case 5's `Ya.rF` is an EMPTY stub
+// (L1096890), so the map select is a no-op in the JS too. `Oa.get()==null`/
+// `vb.get()==null` arms the `wa.F().Qf` listener because the JS builds screen
+// controllers asynchronously; `make_screen` builds them at push here, so the
+// owner is live whenever the id matches and the listener is unreachable.
+void QuestEngine::do_tab_select(App& app, const QuestTabSelect& sel) {
+    const int cur = app.screens().current_id();
+    if (cur != sel.screen_id) {
+        std::fprintf(stdout,
+                     "[quest] ChangeTab tab=%s idx=%d screen=%d: not current (%d), skip\n",
+                     sel.tab.c_str(), sel.tab_index, sel.screen_id, cur);
+        std::fflush(stdout);
+        return;
+    }
+    ++tab_actions_;  // `Hn` executed (test hook; not a record)
+    switch (sel.screen_id) {
+        case 4: {  // `Oa.ska(Cj.l6(this.Ay), this.jN)`
+            ShopScreen* shop = dynamic_cast<ShopScreen*>(app.screens().top());
+            if (shop != nullptr) {
+                shop->open_at(sel.tab, sel.focus);
+            } else {
+                std::fprintf(stdout, "[quest] ChangeTab Shop: Oa null (Qf listener)\n");
+            }
+            break;
+        }
+        case 5:  // `Ya.rF(this.Ay)` — the JS stub is EMPTY (L1096890).
+            break;
+        case 7: {  // `vb.rF(To.hOa(this.Ay), this.jN)`
+            EquipmentScreen* prof = dynamic_cast<EquipmentScreen*>(app.screens().top());
+            if (prof != nullptr) {
+                // `To.hOa` (L1131579): vj index -> profile slot.
+                int slot = 5;
+                switch (sel.tab_index) {
+                    case 10: slot = 0; break;
+                    case 11: slot = 1; break;
+                    case 12: slot = 2; break;
+                    case 13: slot = 3; break;
+                    case 15: slot = 4; break;
+                    default: slot = 5; break;
+                }
+                if (prof->select_tab(slot, sel.focus)) {
+                    // `hla` L1127569: `b.DI = uh.getName(To.kOa(a))`.
+                    int vj = 0;
+                    switch (slot) {
+                        case 0: vj = 10; break;
+                        case 1: vj = 11; break;
+                        case 2: vj = 12; break;
+                        case 3: vj = 13; break;
+                        case 4: vj = 15; break;
+                        default: vj = 0; break;
+                    }
+                    tab_owner_ = tab_name_for_index(vj);
+                } else {
+                    std::fprintf(stdout, "[quest] ChangeTab Profile slot=%d: no shell tab\n",
+                                 slot);
+                }
+            } else {
+                std::fprintf(stdout, "[quest] ChangeTab Profile: vb null (Qf listener)\n");
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    std::fprintf(stdout,
+                 "[quest] ChangeTab tab=%s focus=%s idx=%d screen=%d -> applied\n",
+                 sel.tab.c_str(), sel.focus.c_str(), sel.tab_index, sel.screen_id);
+    std::fflush(stdout);
+}
+
+// Test hook (`--changetab-probe`): parse+run one in-process action list (the
+// same path `fire` uses: run_actions -> apply_effects -> enqueue -> tick).
+void QuestEngine::run_action_probe(App& app, const std::vector<QuestAction>& acts,
+                                   const QuestJournal& journal) {
+    if (!ensure_loaded(app)) return;
+    QuestSideEffects fx;
+    std::map<std::string, std::string> locals;
+    const ActionRest rest = run_actions(app, acts, journal, fx, locals, "<probe>", 0);
+    (void)rest;
+    apply_effects(app, fx);
+    enqueue_effects(app, fx, journal, locals, "<probe>");
+    tick(app);
+}
+
 void QuestEngine::tick(App& app) {
     if (app.headless()) {
         // The driver paths never auto-run: drop anything queued so a stale
@@ -1461,6 +1618,7 @@ void QuestEngine::tick(App& app) {
         pending_.clear();
         nav_queue_.clear();
         shop_queue_.clear();
+        tab_queue_.clear();
         collapse_nav_pending_ = false;
         return;
     }
@@ -1479,16 +1637,22 @@ void QuestEngine::tick(App& app) {
     // `Gn`/`go`/`eo`: perform the queued navigation. Bounded drain — a push
     // fires ChangeTab/SceneLoaded, which may enqueue more work.
     for (int pass = 0; pass < 16; ++pass) {
-        if (nav_queue_.empty() && shop_queue_.empty() && !collapse_nav_pending_) break;
+        if (nav_queue_.empty() && shop_queue_.empty() && tab_queue_.empty() &&
+            !collapse_nav_pending_) {
+            break;
+        }
         std::vector<QuestSceneRequest> navs;
         navs.swap(nav_queue_);
         std::vector<QuestShopOpen> shops;
         shops.swap(shop_queue_);
+        std::vector<QuestTabSelect> tabs;
+        tabs.swap(tab_queue_);
         const bool collapse = collapse_nav_pending_;
         collapse_nav_pending_ = false;
         if (collapse) set_za_nav_open(false);  // `eo` L1117 -> `za.sxa()`
         for (const QuestSceneRequest& n : navs) do_navigate(app, n);
         for (const QuestShopOpen& s : shops) do_open_shop(app, s);
+        for (const QuestTabSelect& s : tabs) do_tab_select(app, s);
     }
 }
 

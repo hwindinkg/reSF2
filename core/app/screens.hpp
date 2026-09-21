@@ -736,6 +736,9 @@ public:
     // unknown tab (the caller logs; no screen change).
     bool open_at(const std::string& tab, const std::string& item);
 
+    // The live `Oa.Hg` shop tab index (probe/verify read).
+    int tab() const { return tab_; }
+
 private:
     std::vector<CatalogItem> items_;
     int hover_ = -1;      // grid cell hover (row index within the tab)
@@ -849,6 +852,13 @@ public:
 
     void update_impl(float dt) override;
     void render_impl(App& app) override;
+
+    // `vb.rF(a,b)` (L1131579): `this.hla(a)` (select profile slot `a`) then
+    // `this.jq.Dr(b)` (focus item `b`). `slot` is `To.hOa(vj index)`; returns
+    // false when the slot has no shell tab (the shell renders 4: 0..3).
+    bool select_tab(int slot, const std::string& focus);
+    // The live profile tab index (probe/verify read).
+    int tab() const { return tab_; }
 
     // The folded Moves tab row (JS Profile sub-view `qv`; same rule as the
     // deleted standalone MovesScreen — build_move_list_locks over the save's

@@ -235,10 +235,14 @@ struct QuestShopOpen {
 
 // `Hn` `ChangeTab` (L948 factory `case "EChangeTab"`; `S` L1032-1034): resolve
 // the `Tab` attr (`ba.Pc` -> `vj.E0` index L1168 -> `vj.ifa` screen id L1169)
-// and select that screen's tab when it is the current screen. The port can
-// only drive the Shop (`Oa.ska`, case 4); Map/Profile have no exposed tab API.
+// and select that screen's tab when it is the current screen (`wa.F().Td.Tf
+// == this.CX`). Cases (L1033): 4 Shop `Oa.ska(Cj.l6(Ay), jN)`; 5 Map
+// `Ya.rF(Ay)` (an EMPTY stub, L1096890); 7 Profile `vb.rF(To.hOa(Ay), jN)`.
+// When the screen controller is not live the JS arms the `wa.F().Qf`
+// screen-change listener; the port constructs screens synchronously at push,
+// so the owner is always live once `screen_id` matches.
 struct QuestTabSelect {
-    std::string tab;    // resolved `vj.E0` category name
+    std::string tab;    // resolved `vj.E0` category name (`Hn.cua`)
     std::string focus;  // `Hn.jN` (`Focus` attr)
     int tab_index = 0;  // `Hn.Ay` (`vj.E0`)
     int screen_id = 0;  // `Hn.CX` (`vj.ifa`)
@@ -465,6 +469,11 @@ public:
         dialogs_.push_back(std::move(d));
     }
 
+    // Test hook (`--changetab-probe`): parse+run ONE in-process action list so
+    // a synthetic `Hn` ChangeTab can be asserted without a shipped quest.
+    void run_action_probe(App& app, const std::vector<QuestAction>& acts,
+                          const QuestJournal& journal);
+
     // One fixed step (called by App::update_fixed AFTER the screen update):
     // resumes deferred `Wait` runs (`Ro` L1119) and performs the queued
     // scene/shop navigation (`Gn`/`go`). A no-op while headless (the driver
@@ -488,6 +497,22 @@ public:
     // being recorded. Monotonic; headless runs leave them at 0.
     std::size_t scene_actions() const { return scene_actions_; }
     std::size_t shop_actions() const { return shop_actions_; }
+    // `Hn` (L1032-1034) ChangeTab actions actually EXECUTED (target live).
+    std::size_t tab_actions() const { return tab_actions_; }
+
+    // --- tab tables (JS `vj` L1168-1169 / `uh` L1169) ---------------------
+    // `vj.E0`: tab NAME -> index (0 = "Default", the JS default).
+    static int tab_index_for_name(const std::string& name);
+    // `uh.getName`: index -> tab NAME ("Default" when unknown).
+    static std::string tab_name_for_index(int index);
+    // `vj.ifa`: tab index -> owning screen id (11 = the JS unknown default).
+    static int tab_screen_for_index(int index);
+    // `Bj.DI` (ctor L1005): the CURRENT screen's tracked tab NAME. `wa.mp`
+    // normalizes it (`e=vj.E0(e.DI)`, L933) before `v.qwa` writes the
+    // `_$TabFrom`/`_$TabTo` pair, so the journal carries a valid `vj.E0`
+    // name, never a scene name.
+    const std::string& tab_owner() const { return tab_owner_; }
+    void set_tab_owner(std::string name) { tab_owner_ = std::move(name); }
 
     // --- live UI-guidance signals (draw-only; no navigation) --------------
     // `Nn` `ClickButton UseFlashing="1"` target — the shell pulses the named
@@ -655,6 +680,8 @@ private:
     void do_navigate(App& app, const QuestSceneRequest& req);
     // `go.Thb` (L1092): open/point the Shop at a tab + item.
     void do_open_shop(App& app, const QuestShopOpen& open);
+    // `Hn.S` (L1032-1034): select the target screen's tab (case 4/5/7).
+    void do_tab_select(App& app, const QuestTabSelect& sel);
     void apply_effects(App& app, const QuestSideEffects& fx);
     std::string battle_zone(const std::string& battle) const;
     bool loaded_ = false;
@@ -689,10 +716,13 @@ private:
     std::vector<PendingRun> pending_;
     std::vector<QuestSceneRequest> nav_queue_;
     std::vector<QuestShopOpen> shop_queue_;
+    std::vector<QuestTabSelect> tab_queue_;
     bool collapse_nav_pending_ = false;
     std::vector<std::string> armed_clicks_;  // `Nn` non-ignored targets
     std::size_t scene_actions_ = 0;          // executed `ChangeScene` count
     std::size_t shop_actions_ = 0;           // executed `OpenShop` count
+    std::size_t tab_actions_ = 0;            // executed `ChangeTab` count
+    std::string tab_owner_;                  // `Bj.DI` (ctor L1005)
 };
 
 // The `<Button Type>` slot census of the shipped quest tree (`quests.xml` plus
