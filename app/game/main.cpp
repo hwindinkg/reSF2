@@ -1414,6 +1414,10 @@ int main(int argc, char** argv) {
     bool quest_verify_buy = false;  // --quest-verify-buy: seeded STEP_BUY_ITEM
     bool dialog_verify = false;     // --dialog-verify: headless dialog harness
     bool observe_dialogs = false;   // --observe-dialogs: keep the queue observable
+    // --tutorial-real-verify: boot the REAL path (NO `fresh_tutorial` arm, NO
+    // tutorial-END seed), hidden, and assert the engine's own `_$StoryTutorialStep`
+    // default starts StoryTutorialWelcome + the lesson gate serializes to the modal.
+    bool tutorial_real_verify = false;
     bool replay_mode = false;
     bool verify_input = false;
     bool fx_probe = false;  // --fx-probe: targeted FX-bus self-check (no OS input)
@@ -1507,6 +1511,8 @@ int main(int argc, char** argv) {
             headless_loop = true;
         } else if (arg == "--ui-tour") {
             ui_tour = true;
+        } else if (arg == "--tutorial-real-verify") {
+            tutorial_real_verify = true;
         } else if (arg == "--fidelity-tour") {
             fidelity_tour = true;
         } else if (arg == "--quest-verify") {
@@ -1875,6 +1881,14 @@ int main(int argc, char** argv) {
         try {
             sf2::app::SaveSystem ss(save_path, def);
             sf2::app::WarriorSave w = ss.load();  // template (save was removed)
+            // The driver baseline emulates a POST-tutorial profile: the JS
+            // `zt.Pla()` (`zi`, bundle idx 156971) finishes the story by
+            // writing `kU[kU.length-1]` = END. The shipped `users_default`
+            // carries `Tutorial="MOVE"`, which `zt.parse` normalizes to
+            // `kU[0]` = NotStarted (a FRESH profile), so without this seed
+            // every driver gate would arm the tutorial chain. The
+            // fresh-tutorial modes reset it just below.
+            w.set_story_step("END");
             ss.save(w);                           // well-defined baseline
             std::fprintf(stdout, "[save] driver baseline: %s -> '%s'\n", def.c_str(),
                          save_path.c_str());
@@ -1891,7 +1905,7 @@ int main(int argc, char** argv) {
     // END step (L200) — once short-circuited the chain cannot be armed, so a
     // stale completed local save would make the tutorial steps stall. The
     // oracle harness seeds the same fresh state.
-    if (fidelity_tour || quest_verify || observe_dialogs) {
+    if (fidelity_tour || quest_verify || observe_dialogs || tutorial_real_verify) {
         std::string def = res_root + "/users_default.xml";
         if (!std::filesystem::exists(def)) {
             const std::string hashed = res_root + "/users_default.b7da2019.xml";
@@ -2288,6 +2302,53 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
         app.shutdown();
         return (selfcheck_ok && census_ok) ? 0 : 1;
+    } else if (tutorial_real_verify) {
+        // --- REAL-PATH tutorial gate (permanent, NO harness arm) -------------
+        // Boots the way the REAL app does: NO `fresh_tutorial` arm and NO
+        // tutorial-END seed — only the fresh save. The shipped default's
+        // `Tutorial="MOVE"` is not a valid step, so the engine's own
+        // `resolve_token` falls back to `kU[0]` = NotStarted (`zt.parse`). This
+        // proves the ENGINE default starts `StoryTutorialWelcome` and that the
+        // lesson gate (`Do`/`Eo`) serializes the chain to the sensei modal with
+        // no flag. Live app (headless_frames_ == 0 -> no silent dialog drain),
+        // HIDDEN window (RULE 0), no OS input.
+        glfwHideWindow(app.renderer().window());
+        app.set_auto_attack(false);
+        app.set_headless_frames(0);
+        std::fprintf(stdout, "[tutreal] engine live: no fresh_tutorial, no END seed\n");
+        std::fflush(stdout);
+        bool saw_welcome = false, saw_beat1 = false, saw_beat2 = false, saw_sensei = false;
+        std::string sensei_title;
+        int last_beat = -1;
+        for (int f = 0; f < 4000; ++f) {
+            if (glfwWindowShouldClose(app.renderer().window())) break;
+            app.run_one_frame();
+            sf2::app::QuestEngine& q = app.quest_engine();
+            if (!saw_welcome && q.dialog_count() > 0) saw_welcome = true;
+            const int beat = q.tutorial_gate_beat();
+            if (beat != last_beat) {
+                std::fprintf(stdout, "[tutreal] f=%d lesson gate beat=%d\n", f, beat);
+                std::fflush(stdout);
+                last_beat = beat;
+            }
+            if (beat == 1) saw_beat1 = true;
+            if (beat == 2) saw_beat2 = true;
+            if (const sf2::app::EngineDialog* m = q.modal_top()) {
+                if (m->title == "characterSensei") {
+                    saw_sensei = true;
+                    sensei_title = m->title;
+                }
+            }
+            if (saw_beat1 && saw_beat2 && saw_sensei) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));  // pace 60 Hz
+        }
+        const bool ok = saw_beat1 && saw_beat2 && saw_sensei;
+        std::fprintf(stdout, "[tutreal] %s welcome=%d beat1=%d beat2=%d sensei=%d title=%s\n",
+                     ok ? "PASS" : "FAIL", saw_welcome ? 1 : 0, saw_beat1 ? 1 : 0,
+                     saw_beat2 ? 1 : 0, saw_sensei ? 1 : 0, sensei_title.c_str());
+        std::fflush(stdout);
+        app.shutdown();
+        return ok ? 0 : 1;
     } else if (quest_verify || quest_verify_buy) {
         // --- interactive quest-action verification (internal injection) -----
         // A live app (headless_frames_ == 0, so the engine EXECUTES actions

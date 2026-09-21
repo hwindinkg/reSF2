@@ -433,6 +433,10 @@ public:
     // stashed tail runs (which may immediately hit the second lesson and
     // re-park). Returns true when the tail resumed this call.
     bool tutorial_gate_tick(App& app, float dt);
+    // JS `zt.VQ()` (`zi`, bundle idx 156971): `return this.HH != "END"` — the
+    // tutorial chain is live while the normalized step is not the terminal
+    // `END`. Keyed on the SAVE, not a harness flag.
+    bool tutorial_live(App& app) const;
 
     // Test hook (the `--dialog-verify` harness): queue a dialog record built
     // in-process, so the display/dispatch contracts (Left-vs-Right plate,
@@ -591,6 +595,9 @@ private:
         QuestJournal journal;
         std::map<std::string, std::string> locals;
         std::string quest;
+        // Live step at park time: a change is the JS `p.o.zi.LE` event `Cm`
+        // listens on (see `fire`), the real resume condition besides timeout.
+        std::string step_at_park;
     };
     TutorialGate tutorial_gate_;
     // Runs the stashed tail (shared by the resume path); returns true if the
@@ -656,10 +663,6 @@ private:
     std::string flash_target_;
     std::string nav_flash_;
     std::string last_map_focus_;
-    // Harness gate (JS fresh profile): an empty `_$StoryTutorialStep` reads
-    // as `NotStarted` only while the fresh-tutorial path is armed (the
-    // fidelity tour), so the seeded post-tutorial saves stay chain-silent.
-    bool fresh_tutorial_ = false;
     // `?`-queries the shell could not answer (JS has a full query engine;
     // the port answers the subset it models). Logged once each; a condition
     // whose operand is unanswerable is UNKNOWN (never fires).

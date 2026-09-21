@@ -637,6 +637,24 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
     return false;
 }
 
+// `v.su.kU` — the story-step universe the JS validates against. `nw.parse`
+// (`sf2.502f0946.js` idx 614997: `this.kU.push(c.attributes.get("Name"))`)
+// fills it from `internal_settings.xml` L116-126 `<StepsNames>`; `nw.Ucb(a)`
+// is `kU.includes(a)`. `zt.parse` (`zi.g="81"`, bundle idx 157285) reads the
+// save's `Tutorial` attribute and sets `this.HH = v.su.Ucb(a) ? a :
+// v.su.kU[0]`, so an absent OR invalid step normalizes to `kU[0]` =
+// "NotStarted". The shipped `users_default.b7da2019.xml` carries
+// `Tutorial="MOVE"` — not a member — i.e. a FRESH tutorial profile.
+static const char* const kStorySteps[] = {
+    "NotStarted", "FIGHT",  "STEP_BUY_ITEM", "STEP_BUY_ITEM_FINISH", "MAP",
+    "LEARN_PERK", "SHOW_DOUBLE_SWEEP",     "SHOW_BLOCK",           "END"};
+static bool valid_story_step(const std::string& s) {
+    for (const char* step : kStorySteps) {
+        if (s == step) return true;
+    }
+    return false;
+}
+
 bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCtx& ctx,
                                 std::string& out) {
     out.clear();
@@ -667,18 +685,14 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
     }
     if (token.rfind("_$", 0) == 0) {
         if (token == "_$StoryTutorialStep") {
-            // JS `p.o.zi.HH`: the live step defaults to `kU[0]` =
-            // "NotStarted" for a fresh profile (the stock
-            // `<Warrior Tutorial="MOVE">` is not a valid step name). The
-            // port keeps the step in the save's quest variables, so an
-            // absent value reads as NotStarted ONLY on the armed
-            // fresh-tutorial path — the seeded post-tutorial saves stay
-            // chain-silent.
-            if (ctx.story_step.empty() && fresh_tutorial_) {
-                out = "NotStarted";
-                return true;
-            }
-            out = ctx.story_step;
+            // JS `zt.parse` (`zi.g="81"`, bundle idx 157285): `this.HH =
+            // v.su.Ucb(a) ? a : v.su.kU[0]` — the step read from the save,
+            // falling back to `kU[0]` = "NotStarted" whenever the saved value
+            // is absent or not a member of `v.su.kU` (`internal_settings.xml`
+            // L116-126). This is the ENGINE's own default, keyed on the saved
+            // value alone — NOT on any harness flag. Post-tutorial profiles
+            // carry `END`, so their gate stays closed.
+            out = valid_story_step(ctx.story_step) ? ctx.story_step : "NotStarted";
             return true;
         }
         if (token == "_$SceneTo") {
@@ -1187,12 +1201,17 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // chain: the JS arms `Re(Cm, TutorialStepTimeout)` and `Cm` ->
             // `this.sa()` resumes the tail, so the next `Dialog` (the next bar
             // beat / the `Regular` modal) is not created yet. Park the tail on
-            // the app clock (see `tutorial_gate_beat`). Only the fresh-profile
-            // tutorial path gates; every other harness keeps the eager walk.
+            // the app clock (see `tutorial_gate_beat`), but gate on the REAL
+            // live-tutorial predicate (`zt.VQ()`, bundle idx 156971: `return
+            // this.HH != "END"`), NOT a harness flag, so the shipped fresh
+            // profile serializes without any arm. The `lJ()` animation shortcut
+            // (`ca.Ka()!=null && Ra.length>=1` — an ACTIVE FIGHT) never holds in
+            // the Dojo beats, so `TutorialStepTimeout` + the `p.o.zi.LE`
+            // step-change (`fire`) are the only resume sources here.
             // Depth 0 only: both lessons sit at the top level of
             // `StoryTutorialWelcome`'s `<Actions>`, so the parked tail is
             // always complete (no outer remainder to re-attach).
-            if (depth == 0 && app.fresh_tutorial() && !tutorial_gate_.active &&
+            if (depth == 0 && tutorial_live(app) && !tutorial_gate_.active &&
                 (t == "StoryTutorialMove" || t == "StoryTutorialPunchbag")) {
                 tutorial_gate_.active = true;
                 tutorial_gate_.beat = (t == "StoryTutorialMove") ? 1 : 2;
@@ -1201,6 +1220,10 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 tutorial_gate_.journal = journal;
                 tutorial_gate_.locals = locals;
                 tutorial_gate_.quest = quest;
+                try {
+                    tutorial_gate_.step_at_park = app.save().load().story_step();
+                } catch (const std::exception&) {
+                }
                 std::fprintf(stdout,
                              "[quest] %s: chain parked %.1fs (beat %d, %zu tail actions)\n",
                              t.c_str(), kTutorialStepTimeoutSec, tutorial_gate_.beat,
@@ -1362,6 +1385,18 @@ bool QuestEngine::tutorial_gate_tick(App& app, float dt) {
                  tutorial_gate_.beat);
     std::fflush(stdout);
     return resume_tutorial_gate(app);
+}
+
+// JS `zt.VQ()` (`zi`, bundle idx 156971): `return this.HH != "END"`. `HH` is
+// the normalized live step (`zt.parse` -> `kU[0]` when absent/invalid), so an
+// absent step (fresh profile) or an invalid one reads as NotStarted, i.e.
+// live. Only the terminal `END` closes the gate.
+bool QuestEngine::tutorial_live(App& app) const {
+    try {
+        return app.save().load().story_step() != "END";
+    } catch (const std::exception&) {
+        return true;  // no readable save -> fresh profile
+    }
 }
 
 // `Gn.qIa` (L1032): `mp(a,null,null,CallEvents)` — push the target scene. The
@@ -1910,7 +1945,21 @@ std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
 std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
                                            const QuestJournal& journal) {
     std::vector<std::string> fired;
-    fresh_tutorial_ = app.fresh_tutorial();
+    // JS `Do`/`Eo` register `Cm` on `p.o.zi.LE` — the story-step change event
+    // (`zt.PMa` fires `LE`). A step change while a lesson is parked resumes the
+    // chain immediately; the `TutorialStepTimeout` is only the fallback.
+    if (tutorial_gate_.active) {
+        std::string live;
+        try {
+            live = app.save().load().story_step();
+        } catch (const std::exception&) {
+        }
+        if (live != tutorial_gate_.step_at_park) {
+            std::fprintf(stdout, "[quest] step changed -> lesson gate resumes\n");
+            std::fflush(stdout);
+            resume_tutorial_gate(app);
+        }
+    }
     // Scene-scoped UI guidance resets on the navigation edge: a flash target
     // belongs to the screen that requested it (the map's FIGHT plate), and a
     // nav highlight clears once the player reaches its named screen (`Mn`/
