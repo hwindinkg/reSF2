@@ -34,6 +34,7 @@
 #include <string>
 #include <vector>
 
+#include "app/item_catalog.hpp"
 #include "app/save_system.hpp"
 #include "xml_doc.hpp"
 
@@ -489,6 +490,12 @@ public:
     void run_action_probe(App& app, const std::vector<QuestAction>& acts,
                           const QuestJournal& journal);
 
+    // Test hook (`--quest-query-probe`): resolve ONE expression through the
+    // engine's own path (`resolve_token`) against the live save/journal.
+    // Returns "" when the expression is UNKNOWN (unanswerable).
+    std::string resolve_for_test(App& app, const std::string& expr,
+                                 const QuestJournal& journal);
+
     // One fixed step (called by App::update_fixed AFTER the screen update):
     // resumes deferred `Wait` runs (`Ro` L1119) and performs the queued
     // scene/shop navigation (`Gn`/`go`). A no-op while headless (the driver
@@ -514,6 +521,11 @@ public:
     std::size_t shop_actions() const { return shop_actions_; }
     // `Hn` (L1032-1034) ChangeTab actions actually EXECUTED (target live).
     std::size_t tab_actions() const { return tab_actions_; }
+    // `zj.Qh` L1072 (`EForeach`): the number of `Sl.compare` matches — one per
+    // executed sub-quest item (the port's `fx.foreach_runs` count). Monotonic;
+    // the `--quest-query-probe` uses it to prove a sub-quest whose conditions
+    // read the `?`-queries actually MATCHED.
+    std::size_t foreach_matches() const { return foreach_matches_; }
 
     // --- tab tables (JS `vj` L1168-1169 / `uh` L1169) ---------------------
     // `vj.E0`: tab NAME -> index (0 = "Default", the JS default).
@@ -623,6 +635,12 @@ private:
     bool resolve_query(App& app, const std::string& token, const EvalCtx& ctx,
                        std::string& out);
     void note_unanswerable(const std::string& token);
+    // `p.items.$b(name)` — the list.xml catalog (`Item`/`Purchase` queries).
+    // Cached: the catalog is static for the process. Null when absent.
+    const CatalogItem* catalog_find(App& app, const std::string& name) const;
+    // `?Item[x].BonusPrice` = the list.xml `BonusPrice` attr (the JS `od`).
+    // `CatalogItem` does not carry it, so it is read direct + cached.
+    int catalog_bonus_price(App& app, const std::string& name) const;
     // Remainder of one action list when a `Wait` suspends it: `Yb` (L954)
     // serializes the list and `Ro` (L1119) completes N frames later, so the
     // actions AFTER the Wait run only once the delay elapses. `rest` is the
@@ -719,6 +737,12 @@ private:
     };
     std::vector<PlacePending> place_pending_;
     std::map<std::string, std::string> battle_zone_;  // battle -> zone index
+    // `p.items` catalog cache + the list.xml `BonusPrice` map (see
+    // `catalog_find`/`catalog_bonus_price`).
+    mutable std::vector<CatalogItem> catalog_cache_;
+    mutable bool catalog_ready_ = false;
+    mutable std::map<std::string, int> bonus_price_cache_;
+    mutable bool bonus_price_ready_ = false;
     std::string last_fight_;
     std::string last_result_;
     std::vector<EngineDialog> dialogs_;  // Sensei-modal queue (cap below)
@@ -740,6 +764,7 @@ private:
     std::size_t scene_actions_ = 0;          // executed `ChangeScene` count
     std::size_t shop_actions_ = 0;           // executed `OpenShop` count
     std::size_t tab_actions_ = 0;            // executed `ChangeTab` count
+    std::size_t foreach_matches_ = 0;        // `zj.Qh` sub-quest match count
     std::string tab_owner_;                  // `Bj.DI` (ctor L1005)
 };
 

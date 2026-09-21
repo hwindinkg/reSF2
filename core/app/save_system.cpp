@@ -128,6 +128,7 @@ WarriorSave SaveSystem::load() {
         if (item.attribute("Name")) oi.name = item.attribute("Name").value();
         oi.count = sf2::data::xml_attr_int(item, "Count", 1);
         oi.equipped = sf2::data::xml_attr_bool(item, "Equipped", false);
+        oi.upgrade_level = sf2::data::xml_attr_int(item, "UpgradeLevel", 0);
         out.items.push_back(std::move(oi));
     }
 
@@ -397,6 +398,11 @@ void SaveSystem::save(const WarriorSave& w) {
         item.append_attribute("Name").set_value(oi.name.c_str());
         item.append_attribute("Equipped").set_value(oi.equipped ? "1" : "0");
         item.append_attribute("Count").set_value(oi.count);
+        // `Ce` round-trip: only materialize a non-zero level so an unupgraded
+        // item row keeps the shipped shape (no spurious UpgradeLevel="0").
+        if (oi.upgrade_level > 0) {
+            item.append_attribute("UpgradeLevel").set_value(oi.upgrade_level);
+        }
     }
 
     // MapFocus (`ys`): get-or-append (absent in the seed).

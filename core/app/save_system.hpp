@@ -58,6 +58,10 @@ struct WarriorSave {
         std::string name;      // the list.xml Item Name ("WEAPON_KNIVES", "Body", ...)
         int count = 1;
         bool equipped = false; // Equipped="1"
+        // JS `$g` item `Ce` (upgrade level): `this.Ce =
+        // u.I(this.ga.attributes.get("UpgradeLevel"))` — the owned item node's
+        // `UpgradeLevel` attr, default 0. Read by `?Purchase[x].UpgradeLevel`.
+        int upgrade_level = 0;
     };
     std::vector<OwnedItem> items;
 

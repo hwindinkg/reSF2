@@ -8,12 +8,14 @@
 #include "app/quest_engine.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <random>
 
 #include "app/app.hpp"
 #include "app/lang_table.hpp"
@@ -553,6 +555,53 @@ std::string QuestEngine::battle_zone(const std::string& battle) const {
     return it != battle_zone_.end() ? it->second : std::string();
 }
 
+// `p.items.$b(name)` (the list.xml catalog, JS `it` g="5A"): cached because
+// the catalog is static for the process. Returns null when the name is absent.
+const CatalogItem* QuestEngine::catalog_find(App& app, const std::string& name) const {
+    if (name.empty()) return nullptr;
+    if (!catalog_ready_) {
+        try {
+            catalog_cache_ = load_full_catalog(app);
+        } catch (const std::exception&) {
+            catalog_cache_.clear();
+        }
+        catalog_ready_ = true;
+    }
+    for (const CatalogItem& ci : catalog_cache_) {
+        if (ci.name == name) return &ci;
+    }
+    return nullptr;
+}
+
+// The list.xml `BonusPrice` (the JS item `od`). `CatalogItem` does not carry
+// it, so it is read direct from the catalog file and cached.
+int QuestEngine::catalog_bonus_price(App& app, const std::string& name) const {
+    (void)app;
+    if (!bonus_price_ready_) {
+        try {
+            const std::string xml =
+                read_file_text(std::string(kQuestResRoot) + "list.xml");
+            if (!xml.empty()) {
+                sf2::data::xml_doc doc;
+                doc.parse(reinterpret_cast<const std::uint8_t*>(xml.data()), xml.size());
+                const pugi::xml_node root = doc.root().first_child();
+                if (root && std::string(root.name()) == "List") {
+                    for (pugi::xml_node item : root.child("Items").children("Item")) {
+                        const std::string n = item.attribute("Name").value();
+                        if (n.empty()) continue;
+                        bonus_price_cache_[n] =
+                            sf2::data::xml_attr_int(item, "BonusPrice", 0);
+                    }
+                }
+            }
+        } catch (const std::exception&) {
+        }
+        bonus_price_ready_ = true;
+    }
+    const auto it = bonus_price_cache_.find(name);
+    return it != bonus_price_cache_.end() ? it->second : 0;
+}
+
 void QuestEngine::note_unanswerable(const std::string& token) {
     if (logged_queries_.insert(token).second) {
         std::fprintf(stdout,
@@ -562,27 +611,159 @@ void QuestEngine::note_unanswerable(const std::string& token) {
     }
 }
 
-// `?Method[arg].Field` queries the shell models. Mirrors the JS `sg.gAa`
-// dispatch (L959) for the methods the shipped quests actually read through
-// conditions; everything else is UNKNOWN (logged) rather than invented.
+// `?Method[args].Field` queries the shell models. Mirrors the JS `sg.gAa`
+// dispatch (L967-969) for the methods the shipped quests actually read
+// through conditions/actions; everything else is UNKNOWN (logged) rather
+// than invented.
+namespace {
+
+// The index of the `]` matching the `[` at `open` (nested brackets counted).
+std::size_t query_match_bracket(const std::string& s, std::size_t open) {
+    int depth = 0;
+    for (std::size_t i = open; i < s.size(); ++i) {
+        if (s[i] == '[') ++depth;
+        else if (s[i] == ']' && --depth == 0) return i;
+    }
+    return std::string::npos;
+}
+
+// Split at TOP-LEVEL commas (bracket depth 0): the JS query parser keeps each
+// argument node separate (`sg` L955-957 `a.zb`), so nested `?Q[...]` args
+// (`?Sum[?Multi[100,?Player[].Level],30]`) survive intact.
+std::vector<std::string> query_split_args(const std::string& s) {
+    std::vector<std::string> out;
+    std::string cur;
+    int depth = 0;
+    for (char ch : s) {
+        if (ch == '[') ++depth;
+        else if (ch == ']' && depth > 0) --depth;
+        if (ch == ',' && depth == 0) {
+            out.push_back(cur);
+            cur.clear();
+            continue;
+        }
+        cur.push_back(ch);
+    }
+    out.push_back(cur);
+    return out;
+}
+
+// JS `""+f` for the arithmetic folds: an integral value prints without a
+// decimal point (`?Multi[100,3]` -> "300", never "300.0").
+std::string query_num_to_string(double v) {
+    const double t = std::trunc(v);
+    if (t == v && v >= -9007199254740992.0 && v <= 9007199254740992.0) {
+        return std::to_string(static_cast<long long>(t));
+    }
+    char buf[40];
+    std::snprintf(buf, sizeof(buf), "%.17g", v);
+    return buf;
+}
+
+// JS `Da.pg.jf()` (Math.random) for `?UniformIntRandom[a,b]`. Deterministic
+// seed: no shipped CONDITION uses the op (it appears only in action values),
+// so a stable stream is safe and keeps the port's runs reproducible.
+double query_rng01() {
+    static std::mt19937 gen(0x5f2f2f31u);
+    static std::uniform_real_distribution<double> dist(0.0, 1.0);
+    return dist(gen);
+}
+
+}  // namespace
+
 bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCtx& ctx,
                                 std::string& out) {
     const std::size_t lb = token.find('[');
-    const std::size_t rb = (lb == std::string::npos) ? std::string::npos : token.find(']', lb);
+    const std::size_t rb =
+        (lb == std::string::npos) ? std::string::npos : query_match_bracket(token, lb);
     if (lb == std::string::npos || rb == std::string::npos) {
         note_unanswerable(token);
         return false;
     }
     const std::string method = token.substr(1, lb - 1);
-    std::string arg = token.substr(lb + 1, rb - lb - 1);
+    const std::string inner = token.substr(lb + 1, rb - lb - 1);
     std::string field = token.substr(rb + 1);
     if (!field.empty() && field[0] == '.') field = field.substr(1);
-    // A nested `_$`/`_` reference inside the brackets (`?Fight[_$Fight].Zone`).
-    if (!arg.empty() && arg[0] == '_') {
-        std::string inner;
-        if (!resolve_token(app, arg, ctx, inner)) return false;
-        arg = inner;
+
+    // Resolve every top-level argument through the token evaluator: JS
+    // evaluates the argument nodes before the method body (each `a.zb[i].body`
+    // is a resolved value). A nested `?Q[...]` or a `_$`/`_` reference
+    // resolves; a literal passes through; an unanswerable nested expression
+    // makes the whole query UNKNOWN (the JS parser would have thrown).
+    std::vector<std::string> args;
+    bool args_ok = true;
+    for (const std::string& raw : query_split_args(inner)) {
+        std::string v;
+        if (!raw.empty() && (raw.find('?') != std::string::npos || raw[0] == '_')) {
+            if (!resolve_token(app, raw, ctx, v)) {
+                args_ok = false;
+                v.clear();
+            }
+        } else {
+            v = raw;
+        }
+        args.push_back(v);
     }
+    const std::string arg = args.empty() ? std::string() : args[0];
+
+    // `sg.yE` (L955-957): the arithmetic fold ops. `Sum`/`Sub`/`Multi` fold
+    // left-to-right (first arg sets, the rest apply); `NDiv`/`Mod` take two;
+    // `UniformIntRandom(a,b)` = a + trunc(((b+1)|0 - a) * random()).
+    if (method == "Sum" || method == "Sub" || method == "Multi" || method == "NDiv" ||
+        method == "Mod" || method == "UniformIntRandom") {
+        if (!args_ok) {
+            note_unanswerable(token);
+            return false;
+        }
+        const auto num = [](const std::string& s) {
+            return is_numeric(s) ? to_number(s) : 0.0;
+        };
+        if (method == "Sum" || method == "Sub" || method == "Multi") {
+            double f = 0.0;
+            int e = 0;
+            for (const std::string& a : args) {
+                const double d = num(a);
+                if (e == 0) f = d;
+                else if (method == "Sum") f += d;
+                else if (method == "Sub") f -= d;
+                else f *= d;
+                ++e;
+            }
+            out = query_num_to_string(f);
+            return true;
+        }
+        if (args.size() != 2) {
+            note_unanswerable(token);
+            return false;
+        }
+        if (method == "NDiv") {
+            // `K.T(parseInt(a)/parseInt(b))` — the JS `K.T` truncates.
+            const long long a = static_cast<long long>(to_number(args[0]));
+            const long long b = static_cast<long long>(to_number(args[1]));
+            if (b == 0) {  // JS would produce Infinity; never a wrong value.
+                note_unanswerable(token);
+                return false;
+            }
+            out = std::to_string(a / b);
+            return true;
+        }
+        if (method == "Mod") {
+            const long long a = static_cast<long long>(to_number(args[0]));
+            const long long b = static_cast<long long>(to_number(args[1]));
+            if (b == 0) {
+                note_unanswerable(token);
+                return false;
+            }
+            out = std::to_string(a % b);
+            return true;
+        }
+        const double lo = static_cast<double>(static_cast<int>(to_number(args[0])));
+        const double hi1 = static_cast<double>(static_cast<int>(to_number(args[1]) + 1.0));
+        const double v = lo + (hi1 - lo) * query_rng01();
+        out = std::to_string(static_cast<long long>(std::trunc(v)));
+        return true;
+    }
+
     if (method == "SysInfo") {
         // JS `$wb` (L983-987) for the shipped desktop/web build.
         static const char* const kSys[][2] = {
@@ -680,12 +861,161 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
         return false;
     }
     if (method == "Purchase") {
-        // Only the shipped tutorial lookup is modelled (JS `IJa` on the
-        // weapons purchase the chain performs).
-        if (field == "Type" && arg == "WEAPON_KNIVES") {
-            out = "Weapon";
+        // `IJa` (L980): arg = "name|failure". `e=p.rf(name)` (the owned
+        // instance via `p.o.xa.Qj`), `d = e!=null ? e.ib : p.items.$b(name)`.
+        std::string name = arg;
+        std::string failure;
+        const std::size_t bar = name.find('|');
+        if (bar != std::string::npos) {
+            failure = name.substr(bar + 1);
+            name = name.substr(0, bar);
+        }
+        if (!args_ok) {
+            note_unanswerable(token);
+            return false;
+        }
+        if (field == "Failure") {
+            out = failure;
             return true;
         }
+        const WarriorSave& w = ctx.live(app);
+        const WarriorSave::OwnedItem* owned = nullptr;
+        for (const WarriorSave::OwnedItem& it : w.items) {
+            if (it.name == name) {
+                owned = &it;
+                break;
+            }
+        }
+        const CatalogItem* ci = catalog_find(app, name);
+        if (field == "Type") {
+            out = ci != nullptr ? ci->type : std::string();
+            return true;
+        }
+        if (field == "Name") {
+            out = ci != nullptr ? ci->name : std::string();
+            return true;
+        }
+        if (field == "UpgradeLevel") {
+            out = std::to_string(owned != nullptr ? owned->upgrade_level : 0);
+            return true;
+        }
+        // `PaidItem` (`d.D3`, the raw list.xml string — the catalog models a
+        // bool only) and `Timeout` (`e.Bh` delivery time — no purchase-
+        // instance model) are not sourceable -> UNKNOWN.
+        note_unanswerable(token);
+        return false;
+    }
+    if (method == "Item") {
+        // `cdb` (L976-978): `c = p.items.$b(name)`. A name not in the catalog
+        // leaves the JS `b.result` unset -> "" (authoritative: the catalog IS
+        // `p.items`, so this is a real empty value, never UNKNOWN).
+        const CatalogItem* ci = catalog_find(app, arg);
+        if (ci == nullptr) {
+            out.clear();
+            return true;
+        }
+        if (field == "Quantity") {
+            // `c = p.o.xa.te(c)` (the inventory entry); `c!=null ? c.pd() : "0"`.
+            int q = 0;
+            for (const WarriorSave::OwnedItem& it : ctx.live(app).items) {
+                if (it.name == arg) {
+                    q = it.count;
+                    break;
+                }
+            }
+            out = std::to_string(q);
+            return true;
+        }
+        if (field == "SubType") {
+            out = ci->subtype;
+            return true;
+        }
+        if (field == "Type") {
+            out = ci->type;
+            return true;
+        }
+        if (field == "Name") {
+            out = ci->name;
+            return true;
+        }
+        if (field == "Price") {
+            out = std::to_string(ci->price);
+            return true;
+        }
+        if (field == "Level") {
+            out = std::to_string(ci->level);
+            return true;
+        }
+        if (field == "BonusPrice") {
+            // `c.od` = the list.xml `BonusPrice` (see `catalog_bonus_price`).
+            out = std::to_string(catalog_bonus_price(app, arg));
+            return true;
+        }
+        if (field == "Availability") {
+            // `LCa()` (L1272275): `!li() && isActive && HJ(lock)`. `li()` =
+            // `this.hidden` (item `li()` L1271725) and `isActive` = `!ShopHide`
+            // (item ctor L1266096: `this.isActive=!b; this.eW=!b`). `HJ(lock)`
+            // is a zone gate keyed on the item's `lock`; a lock-less shipped
+            // item returns true, so the sourceable form is `!Hidden && !ShopHide`.
+            out = (ci->hidden || ci->shop_hide) ? "0" : "1";
+            return true;
+        }
+        note_unanswerable(token);
+        return false;
+    }
+    if (method == "Battle") {
+        // `nYa` (L981-982): `d=new hb; d.kj(arg)` (the "zone|name|" triple or
+        // a bare battle name); `a=p.Uk(d)` = the stages battle def.
+        std::string zone;
+        std::string name = arg;
+        const std::size_t bar = arg.find('|');
+        if (bar != std::string::npos) {
+            zone = arg.substr(0, bar);
+            const std::size_t bar2 = arg.find('|', bar + 1);
+            name = arg.substr(bar + 1, bar2 == std::string::npos ? std::string::npos
+                                                                 : bar2 - bar - 1);
+        } else {
+            const auto it = battle_zone_.find(arg);
+            if (it != battle_zone_.end()) zone = it->second;
+        }
+        const bool def_exists = battle_zone_.find(name) != battle_zone_.end();
+        const WarriorSave& w = ctx.live(app);
+        const WarriorSave::BattleRecord* rec = w.find_battle(zone, name);
+        if (field == "Available") {
+            // `p.Uk(d)!=null ? (p.o.WDa(d)?"1":"0") : "0"`; `WDa(a) =
+            // this.iF.get(a)!=null` (L129828) = the save carries the record.
+            out = (def_exists && w.has_battle(name)) ? "1" : "0";
+            return true;
+        }
+        if (field == "Name") {
+            out = def_exists ? name : std::string();
+            return true;
+        }
+        if (field == "Zone") {
+            out = def_exists ? zone : std::string();
+            return true;
+        }
+        if (field == "Hidden") {
+            // `a!=null && a.ob!=null ? (a.ob.li()?"1":"0") : "-1"`.
+            out = (def_exists && rec != nullptr) ? (rec->hidden ? "1" : "0") : "-1";
+            return true;
+        }
+        if (field == "Locked") {
+            // `c=!0; a!=null&&(c=a.ob==null||a.ob.tt())` — locked when the
+            // def OR the record is missing, or the record carries Locked.
+            const bool locked = !def_exists || rec == nullptr || rec->locked;
+            out = locked ? "1" : "0";
+            return true;
+        }
+        if (field == "IsOpened") {
+            // `b.result="0"; a!=null&&(a.ob!=null&&(b.result=a.ob.tt()||a.ob.li()?"0":"1"), ...)`.
+            out = (def_exists && rec != nullptr && !rec->locked && !rec->hidden)
+                      ? "1"
+                      : "0";
+            return true;
+        }
+        // `Type` maps through `p.F().rAa(c)` (a stages-fight-type table the
+        // port's `battle_zone_` index does not carry) -> UNKNOWN.
         note_unanswerable(token);
         return false;
     }
@@ -1315,6 +1645,7 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                         s.rest.insert(s.rest.end(), acts.begin() + i + 1, acts.end());
                         return s;
                     }
+                    ++foreach_matches_;
                     fx.foreach_runs.push_back(ftype + "/" + fname + ":" + item);
                 }
             }
@@ -1712,6 +2043,24 @@ void QuestEngine::run_action_probe(App& app, const std::vector<QuestAction>& act
     apply_effects(app, fx);
     enqueue_effects(app, fx, journal, locals, "<probe>");
     tick(app);
+}
+
+std::string QuestEngine::resolve_for_test(App& app, const std::string& expr,
+                                          const QuestJournal& journal) {
+    EvalCtx c;
+    c.journal = journal;
+    c.level = journal.player_level;
+    try {
+        const WarriorSave w = app.save().load();
+        c.story_step = w.story_step();
+        c.level = w.level;
+        c.save = w;
+        c.save_loaded = true;
+    } catch (const std::exception&) {
+    }
+    std::string out;
+    if (!resolve_token(app, expr, c, out)) return std::string();
+    return out;
 }
 
 void QuestEngine::tick(App& app) {

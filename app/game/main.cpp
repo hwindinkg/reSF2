@@ -59,6 +59,7 @@ void print_usage(const char* argv0) {
                   "                  [--fight] [--battle <name>] [--zone <name>]\n"
                   "                  [--dump-pose N] [--dump-clip <name>]\n"
                   "                  [--ui-tour] [--fidelity-tour] [--quest-verify]\n"
+                  "                  [--quest-query-probe]\n"
                   "                  [--dialog-verify] [--replay [file]] [--verify-input]\n"
                   "                  [--round-log] [--fx-probe] [--hit-audit]\n"
                   "  --watchdog N     RULE 0: force-exit a driver run after N seconds\n"
@@ -1413,6 +1414,7 @@ int main(int argc, char** argv) {
     bool quest_verify = false;  // --quest-verify: interactive action check
     bool quest_verify_buy = false;  // --quest-verify-buy: seeded STEP_BUY_ITEM
     bool changetab_probe = false;   // --changetab-probe: synthetic `Hn` action
+    bool quest_query_probe = false;  // --quest-query-probe: Foreach query proof
     bool dialog_verify = false;     // --dialog-verify: headless dialog harness
     bool observe_dialogs = false;   // --observe-dialogs: keep the queue observable
     // --tutorial-real-verify: boot the REAL path (NO `fresh_tutorial` arm, NO
@@ -1526,6 +1528,8 @@ int main(int argc, char** argv) {
             quest_verify = true;
         } else if (arg == "--changetab-probe") {
             changetab_probe = true;
+        } else if (arg == "--quest-query-probe") {
+            quest_query_probe = true;
         } else if (arg == "--quest-verify-buy") {
             quest_verify = true;
             quest_verify_buy = true;
@@ -2459,6 +2463,126 @@ int main(int argc, char** argv) {
                      ok_open ? "PASS" : "FAIL", ok_lynx ? "PASS" : "FAIL",
                      ok_shin ? "PASS" : "FAIL", ok_fight ? "PASS" : "FAIL",
                      ok_story_advance ? "PASS" : "FAIL",
+                     all ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return all ? 0 : 1;
+    } else if (quest_query_probe) {
+        // --- `--quest-query-probe`: the query engine's Foreach proof ---------
+        // Runs the SHIPPED sub-quest `FindLastAvailableFight` (utils.xml) via
+        // a real `<Foreach Type="Battles" Name="FindLastAvailableFight"
+        // OnlyActiveBattles="1"/>` action. Its conditions read
+        // `?Battle[_$Iterator].Available/Name` and its action writes
+        // `CurrentZone` from `?Battle[_$Iterator].Zone` — all previously logged
+        // UNKNOWN. A battle record is seeded into a COPY of the save so the
+        // `Available` bit can be true; the original save is restored after.
+        // Hidden window + RULE 0 watchdog (driver_mode). NO OS input.
+        glfwHideWindow(app.renderer().window());
+        sf2::app::WarriorSave original;
+        bool have_original = false;
+        try {
+            original = app.save().load();
+            have_original = true;
+            sf2::app::WarriorSave seeded = original;
+            seeded.battle_unlock("ZONE_1", "Survival");  // make one Available
+            seeded.variables.erase("CurrentZone");       // prove the write
+            seeded.variables.erase("_CurrentZone");
+            app.save().save(seeded);
+            const sf2::app::WarriorSave chk = app.save().load();
+            std::fprintf(stdout,
+                         "[qquery] seeded: battles=%zu records=%zu hasSurvival=%d\n",
+                         chk.battles.size(), chk.battle_records.size(),
+                         chk.has_battle("Survival") ? 1 : 0);
+        } catch (const std::exception& e) {
+            std::fprintf(stdout, "[qquery] seed failed: %s\n", e.what());
+        }
+        const auto has_battle_unknown = [&]() {
+            for (const std::string& s : app.quest_engine().unanswerable_queries()) {
+                if (s.find("?Battle[_$Iterator]") != std::string::npos) return true;
+            }
+            return false;
+        };
+        const bool battle_unknown_before = has_battle_unknown();
+        sf2::app::QuestAction act;
+        act.tag = "Foreach";
+        act.attrs["Type"] = "Battles";
+        act.attrs["Name"] = "FindLastAvailableFight";
+        act.attrs["OnlyActiveBattles"] = "1";
+        sf2::app::QuestJournal j;
+        const std::size_t before_matches = app.quest_engine().foreach_matches();
+        app.quest_engine().run_action_probe(app, {act}, j);
+        const bool fired = app.quest_engine().foreach_matches() > before_matches;
+        std::string after_zone;
+        try {
+            const sf2::app::WarriorSave after = app.save().load();
+            const auto it = after.variables.find("CurrentZone");
+            if (it != after.variables.end()) after_zone = it->second;
+        } catch (const std::exception&) {
+        }
+        const bool battle_unknown_after = has_battle_unknown();
+        // Per-query resolution table (the AFTER values; UNKNOWN -> "").
+        {
+            const sf2::app::QuestJournal qj;
+            const char* const exprs[] = {
+                "?Purchase[WEAPON_KNIVES].Type",
+                "?Purchase[WEAPON_KNIVES].Name",
+                "?Purchase[WEAPON_KNIVES].UpgradeLevel",
+                "?Item[WEAPON_KNIVES].Quantity",
+                "?Item[WEAPON_KNIVES].SubType",
+                "?Item[WEAPON_KNIVES].Type",
+                "?Item[WEAPON_KNIVES].Price",
+                "?Item[WEAPON_KNIVES].Level",
+                "?Item[WEAPON_KNIVES].Availability",
+                "?Item[WEAPON_KNIVES].BonusPrice",
+                "?Battle[ZONE_1|BOSS_LYNX].Available",
+                "?Battle[ZONE_1|BOSS_LYNX].Name",
+                "?Battle[ZONE_1|BOSS_LYNX].Zone",
+                "?Battle[BOSS_LYNX].Available",
+                "?Sum[?Multi[100,?Player[].Level],30]",
+                "?Multi[7,6]",
+                "?Sub[10,3]",
+                "?NDiv[10,3]",
+                "?Mod[10,3]",
+                "?UniformIntRandom[1,1]",
+            };
+            for (const char* e : exprs) {
+                const std::string v =
+                    app.quest_engine().resolve_for_test(app, e, qj);
+                std::fprintf(stdout, "[qquery]   %-42s = '%s'\n", e, v.c_str());
+            }
+        }
+        std::fprintf(stdout, "[qquery] quests=%zu\n", app.quest_engine().quest_count());
+        try {
+            const sf2::app::WarriorSave chk2 = app.save().load();
+            std::fprintf(stdout, "[qquery] after run: records=%zu hasSurvival=%d\n",
+                         chk2.battle_records.size(), chk2.has_battle("Survival") ? 1 : 0);
+        } catch (const std::exception&) {
+        }
+        if (have_original) {
+            try {
+                app.save().save(original);  // leave the profile as we found it
+            } catch (const std::exception&) {
+            }
+        }
+        std::fprintf(stdout,
+                     "[qquery] BEFORE: ?Battle[_$Iterator] unanswerable=%d, "
+                     "sub-quest FindLastAvailableFight fired=0 (conditions UNKNOWN)\n",
+                     battle_unknown_before ? 1 : 0);
+        std::fprintf(stdout,
+                     "[qquery] AFTER:  ?Battle[_$Iterator] unanswerable=%d, "
+                     "sub-quest fired=%d, CurrentZone='%s'\n",
+                     battle_unknown_after ? 1 : 0, fired ? 1 : 0, after_zone.c_str());
+        int checks = 0, passed = 0;
+        const auto check = [&](bool ok, const char* what) {
+            ++checks;
+            if (ok) ++passed;
+            std::fprintf(stdout, "[qquery] %-50s %s\n", what, ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        };
+        check(fired, "FindLastAvailableFight MATCHED + ran");
+        check(!battle_unknown_after, "?Battle[_$Iterator].* answered (not UNKNOWN)");
+        const bool all = checks == passed;
+        std::fprintf(stdout, "[qquery] RESULT %d/%d -> %s\n", passed, checks,
                      all ? "PASS" : "FAIL");
         std::fflush(stdout);
         app.shutdown();
