@@ -182,6 +182,15 @@ struct EngineDialog {
     std::vector<std::string> loot;
     std::string quest;               // firing quest name
     QuestJournal journal;            // `Qt` (He.S stores the firing journal)
+    // D1 `He.S` L1051: a widget-building Type assigns `C != null`, so the
+    // final `C!=null?...:(Ib.RP=!1,this.sa())` never runs `this.sa()` — the
+    // serialized `Yb` (L954) PARKS its remaining actions here. `He.gf` L1062
+    // (`gf(){Ib.RP=!1;this.sa()}`) resumes them on dismissal, AFTER the
+    // pressed button's nested `Yb` (`He.dhb` L1061) completed. The tail lives
+    // on the dialog (not in `pending_`) because the resume trigger is the
+    // dismissal, not a frame count.
+    std::vector<QuestAction> continuation;
+    std::map<std::string, std::string> continuation_locals;
 };
 // One `<Battles>` write a quest action asks for. JS mapping:
 //   ShowBattle            -> `Aj(true)`  L1108 -> `Iaa(hb,true,true,..)` +
@@ -373,6 +382,12 @@ public:
     // launch (the engine never navigates). Save writes are applied.
     std::vector<std::string> press_dialog(App& app, int button_index = 1);
 
+    // D1 `He.gf` L1062 / `He.dhb(0)` with no `Ng` slot (L1061): dismiss the
+    // top modal and resume the chain parked at it (the `continuation` tail).
+    // Used by the buttonless-Regular, Notification and no-renderer advance
+    // paths — the JS always ends them in `(Ib.RP=!1, this.sa())`.
+    void dismiss_dialog(App& app);
+
     // JS `hab()` L1060: any slot carries actions (`Ng`/`rh`/`Nh`/`Hj`). A
     // dialog with no such slot advances on tap instead of firing a plate.
     // Reads the `Wb` top (the first non-Notification), not a bar Notification.
@@ -551,6 +566,12 @@ private:
         bool suspended = false;
         int frames = 0;
         std::vector<QuestAction> rest;
+        // D1: the suspension is a WIDGET-building `Dialog` (`He.S` L1051), not
+        // a `Wait`. `rest` is the parked outer chain and `dialog_index` is the
+        // queued `dialogs_` entry that owns the resume (`He.gf` L1062). `tick`
+        // must NOT resume it — the dismissal does.
+        bool dialog_parked = false;
+        std::size_t dialog_index = static_cast<std::size_t>(-1);
     };
     // One deferred action run (a suspended tail + its journal/locals).
     struct PendingRun {
@@ -580,6 +601,24 @@ private:
                            const QuestJournal& journal, QuestSideEffects& fx,
                            std::map<std::string, std::string>& locals,
                            const std::string& quest, int depth);
+    // D1: runs one action list + its side effects (save writes, live actions,
+    // guidance signals, chained `Activate` re-fires). `outer` is the
+    // continuation of the ENCLOSING chain: a park here stores `rest ++ outer`
+    // as the new dialog's continuation; a `Wait` defers `rest ++ outer` to
+    // `tick`. This is the `Yb` L954 composition, shared by `fire_inner`,
+    // `press_dialog` and the dialog-resume paths.
+    ActionRest run_chain_effects(App& app, const std::vector<QuestAction>& acts,
+                                 const QuestJournal& journal,
+                                 std::map<std::string, std::string>& locals,
+                                 const std::string& quest,
+                                 const std::vector<QuestAction>& outer,
+                                 std::vector<std::string>* fights_out);
+    // D1: stores `rest.rest` as the parked dialog's continuation (`He.gf`).
+    void attach_dialog_park(const ActionRest& rest,
+                            const std::map<std::string, std::string>& locals);
+    // D1 `He.gf` L1062: resumes a dismissed dialog's parked tail.
+    void resume_dialog_chain(App& app, EngineDialog& dlg,
+                             std::vector<std::string>* fights_out);
     // Collects the executable side effects of one run (interactive only).
     void enqueue_effects(App& app, const QuestSideEffects& fx,
                          const QuestJournal& journal,

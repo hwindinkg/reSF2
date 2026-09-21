@@ -1247,6 +1247,7 @@ struct QuestVerifyDriver {
     int cooldown = 0;  // frames before the next injected click
     bool nav_toggle = false;
     int last_screen = -1;
+    std::string last_dialog_key;  // frame-stamped dialog census (one per top)
     // Assertions (PASS/FAIL logged at the end).
     bool saw_chain = false;       // the fresh tutorial chain fired
     bool saw_nav_flash = false;   // `MenuBtnFlashing` resolved a nav target
@@ -1259,7 +1260,7 @@ struct QuestVerifyDriver {
     // Queue an internal click at the view coordinate (no OS input).
     void tap(sf2::app::App& app, int x, int y, int cd = 8) {
         cooldown = cd;
-        std::fprintf(stdout, "[qverify] injected click (%d, %d)\n", x, y);
+        std::fprintf(stdout, "[qverify] f%d injected click (%d, %d)\n", frame, x, y);
         std::fflush(stdout);
         app.inject_click(x, y);
     }
@@ -1270,7 +1271,7 @@ struct QuestVerifyDriver {
         const int cur = app.screens().current_id();
         if (cur != last_screen) {
             last_screen = cur;
-            std::fprintf(stdout, "[qverify] screen -> %d\n", cur);
+            std::fprintf(stdout, "[qverify] f%d screen -> %d\n", frame, cur);
             std::fflush(stdout);
         }
         if (app.quest_engine().scene_actions() > 0) saw_chain = true;
@@ -1285,6 +1286,16 @@ struct QuestVerifyDriver {
         // 1. A queued dialog owns the input (advance / fire the plate).
         if (q.has_dialog()) {
             const sf2::app::EngineDialog& d = q.dialog();
+            // Frame-anchored dialog census (one line per distinct top dialog):
+            // brackets the engine's `[quest] dialog queued`/dismiss logs so the
+            // before/after chain order is provable.
+            const std::string dkey = d.type + "|" + d.title;
+            if (dkey != last_dialog_key) {
+                last_dialog_key = dkey;
+                std::fprintf(stdout, "[qverify] f%d dialog up: %s\n", frame,
+                             dkey.c_str());
+                std::fflush(stdout);
+            }
             if (d.image.find("boss_lynx") != std::string::npos ||
                 d.title.find("Lynx") != std::string::npos) {
                 saw_lynx_dialog = true;

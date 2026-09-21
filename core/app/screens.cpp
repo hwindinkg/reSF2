@@ -257,7 +257,7 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
         std::fprintf(stdout, "[quest] dialog Type '%s' has no renderer (JS debugger) -> advance\n",
                      d->type.c_str());
         std::fflush(stdout);
-        app.quest_engine().pop_dialog();
+        app.quest_engine().dismiss_dialog(app);  // D1: resume any parked chain
         return false;
     }
     if (!app.pointer().pressed) return true;
@@ -265,7 +265,7 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
         std::fprintf(stdout, "[quest] notification advanced: %s\n", d->title.c_str());
         std::fflush(stdout);
         dialog_capture_closing(app, *d);  // `Ib.close` L1911 (0.5 s collapse)
-        app.quest_engine().pop_dialog();
+        app.quest_engine().dismiss_dialog(app);  // `He.gf` L1062
         return true;
     }
     // Regular. `He` pages a multi-row dialog (`He.jkb` L1042: every `<Line>`
@@ -285,7 +285,7 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
         std::fprintf(stdout, "[quest] dialog advanced (no button): %s\n", d->title.c_str());
         std::fflush(stdout);
         dialog_capture_closing(app, *d);
-        app.quest_engine().pop_dialog();
+        app.quest_engine().dismiss_dialog(app);  // `He.dhb(0)` no `Ng` -> `sa()`
         return true;
     }
     // `He.dhb(a)` L1061: the plate's slot index (0=Left, 1=Right, 2=Middle,

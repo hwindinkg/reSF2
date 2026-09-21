@@ -30,6 +30,26 @@ constexpr int kMaxActionDepth = 6;
 
 constexpr const char* kQuestResRoot = "reference/extracted/xml/res/";
 
+// D1 `He.S` L1047-1051: the `<Dialog Type>` values whose JS body ASSIGNS the
+// widget `C`. Only those reach the final `C!=null?...` branch, so only they
+// skip `(Ib.RP=!1, this.sa())` and PARK the serialized `Yb` (L954) until
+// `He.gf` L1062. Every other Type falls through to `this.sa()`:
+//   - `Notification`  -> `Ib.F().Qhb(...)` bar post (L1050); the final guard
+//     `this.type=="Notification"&&x` only parks it when `WaitNotificationClose`
+//     (`XVa`, L1043 defaults "0") is set, so it is fire-and-forget by default.
+//   - `Native`        -> L1051 short-circuits (`this.type=="Native"`).
+//   - `Scroll`/`MultiLineScroll`/`ThreeButtons`/`ItemSetDialog`/
+//     `MultilineTMP`/`Simple`/`Probability` -> a bare `debugger;` (or the
+//     `Probability` guard) leaves `C` null -> advance. This matches the port's
+//     own `dialog_kind()==kNone` renderer split (screens.cpp L5743-5750).
+bool dialog_builds_widget(const std::string& type) {
+    // `He` L1043: an absent `Type` is "Regular" (the port keeps "" — the
+    // renderer maps "" and "Regular" to the same 280 `od` widget).
+    return type.empty() || type == "Regular" || type == "Stranger" ||
+           type == "NoAvatar" || type == "Multiline" || type == "MultilineBig" ||
+           type == "ShowLoot";
+}
+
 int parse_int_or(const std::string& s, int fallback) {
     try {
         std::size_t pos = 0;
@@ -835,6 +855,11 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             open.item = item;
             fx.shop_opens.push_back(std::move(open));
         } else if (t == "Dialog") {
+            // D1: the widget-building Types park the chain at this dialog
+            // (`He.S` L1051) — see the park branch below.
+            const std::string dlg_type = attr_or(a.attrs, "Type");
+            bool dlg_queued = false;
+            std::size_t dlg_queue_index = 0;
             std::string lines;
             for (const QuestAction& c : a.children) {
                 if (c.tag == "Line") {
@@ -971,6 +996,31 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                     std::fprintf(stdout, "[quest] dialog queued (%s/%s): %zu lines\n",
                                  dlg.type.c_str(), dlg.title.c_str(), dlg.lines.size());
                     dialogs_.push_back(std::move(dlg));
+                    dlg_queued = true;
+                    dlg_queue_index = dialogs_.size() - 1;
+                }
+                // D1 `He.S` L1051: a Type that builds a widget (`C != null`)
+                // never reaches `(Ib.RP=!1, this.sa())`, so the serialized
+                // `Yb` (L954) parks here and only `He.gf` L1062 (on dismissal)
+                // resumes the tail. Interactive only — like `Wait`, a headless
+                // run collapses the modal gate (screens.cpp drains the queue
+                // synchronously). A lineless widget dialog is not queued by the
+                // port, so parking would have no dismissal to resume it; it
+                // keeps the eager walk (see the D1 report).
+                if (!app.headless() && dlg_queued &&
+                    dialog_builds_widget(dlg_type)) {
+                    std::fprintf(stdout,
+                                 "[quest] chain parked at dialog (%s/%s, %zu tail actions)\n",
+                                 dlg_type.c_str(), attr_or(a.attrs, "Title").c_str(),
+                                 acts.size() - i - 1);
+                    std::fflush(stdout);
+                    ActionRest parked;
+                    parked.suspended = true;
+                    parked.frames = 0;
+                    parked.dialog_parked = true;
+                    parked.dialog_index = dlg_queue_index;
+                    parked.rest.assign(acts.begin() + i + 1, acts.end());
+                    return parked;
                 }
             }
             // Dialog children (Line/Button) are NOT run here: Line is a data
@@ -1272,7 +1322,12 @@ void QuestEngine::resume_run(App& app, PendingRun& run) {
         run_actions(app, run.actions, run.journal, fx, run.locals, run.quest, 0);
     apply_effects(app, fx);
     enqueue_effects(app, fx, run.journal, run.locals, run.quest);
-    if (rest.suspended) {
+    if (rest.dialog_parked) {
+        // D1: the `Wait` tail parked on a widget dialog; the dismissal owns
+        // the resume now.
+        attach_dialog_park(rest, run.locals);
+        run.actions.clear();
+    } else if (rest.suspended) {
         run.actions = rest.rest;
         run.frames = rest.frames;
     } else {
@@ -1290,6 +1345,8 @@ bool QuestEngine::resume_tutorial_gate(App& app) {
     QuestSideEffects fx;
     ActionRest rest =
         run_actions(app, gate.rest, gate.journal, fx, gate.locals, gate.quest, 0);
+    // D1: the resumed tail may itself park on a widget dialog.
+    if (rest.dialog_parked) attach_dialog_park(rest, gate.locals);
     (void)rest;  // a re-arm leaves the parked tail in `tutorial_gate_`
     apply_effects(app, fx);
     enqueue_effects(app, fx, gate.journal, gate.locals, gate.quest);
@@ -1490,7 +1547,11 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         apply_effects(app, fx);
         // Live actions (`Gn`/`go`/`Nn`/`eo`) + a suspended `Wait` tail.
         enqueue_effects(app, fx, journal, locals, q.name);
-        if (rest.suspended) {
+        if (rest.dialog_parked) {
+            // D1: the chain parked at a widget dialog; `He.gf` L1062 (the
+            // dismissal) owns the resume, NOT `tick`.
+            attach_dialog_park(rest, locals);
+        } else if (rest.suspended) {
             PendingRun run;
             run.actions = rest.rest;
             run.journal = journal;
@@ -1668,13 +1729,118 @@ void QuestEngine::advance_dialog_page() {
     std::fflush(stdout);
 }
 
+// D1 `He.gf` L1062 (`gf(){Ib.RP=!1;this.sa()}`): resume the chain parked at a
+// dismissed dialog (`dlg.continuation`, `Yb` L954).
+void QuestEngine::resume_dialog_chain(App& app, EngineDialog& dlg,
+                                      std::vector<std::string>* fights_out) {
+    if (dlg.continuation.empty()) return;
+    std::map<std::string, std::string> locals = dlg.continuation_locals;
+    std::fprintf(stdout, "[quest] dialog dismissed -> resume chain (%zu actions)\n",
+                 dlg.continuation.size());
+    std::fflush(stdout);
+    run_chain_effects(app, dlg.continuation, dlg.journal, locals, dlg.quest,
+                      std::vector<QuestAction>(), fights_out);
+}
+
+void QuestEngine::dismiss_dialog(App& app) {
+    // `He.dhb(0)` with no `Ng` slot (L1061) / `He.gf` L1062: pop the top modal
+    // and resume its parked chain.
+    const std::size_t mi = modal_index();
+    if (mi >= dialogs_.size()) return;
+    EngineDialog dlg = std::move(dialogs_[mi]);
+    dialogs_.erase(dialogs_.begin() + static_cast<std::ptrdiff_t>(mi));
+    resume_dialog_chain(app, dlg, nullptr);
+}
+
+void QuestEngine::attach_dialog_park(
+    const ActionRest& rest, const std::map<std::string, std::string>& locals) {
+    if (!rest.dialog_parked || rest.dialog_index >= dialogs_.size()) return;
+    dialogs_[rest.dialog_index].continuation = rest.rest;
+    dialogs_[rest.dialog_index].continuation_locals = locals;
+    std::fprintf(stdout, "[quest] chain parked -> dialog owns %zu tail actions\n",
+                 rest.rest.size());
+    std::fflush(stdout);
+}
+
+QuestEngine::ActionRest QuestEngine::run_chain_effects(
+    App& app, const std::vector<QuestAction>& acts, const QuestJournal& journal,
+    std::map<std::string, std::string>& locals, const std::string& quest,
+    const std::vector<QuestAction>& outer, std::vector<std::string>* fights_out) {
+    QuestSideEffects fx;
+    ActionRest rest = run_actions(app, acts, journal, fx, locals, quest, 0);
+    // `Yb` (L954) composition: a park stores `rest ++ outer` (finish this
+    // list, then resume the ENCLOSING one); a `Wait` defers the same
+    // composition to `tick`.
+    if (rest.dialog_parked || rest.suspended) {
+        if (!outer.empty()) {
+            rest.rest.insert(rest.rest.end(), outer.begin(), outer.end());
+        }
+        if (rest.dialog_parked) {
+            attach_dialog_park(rest, locals);
+        } else {
+            PendingRun run;
+            run.actions = rest.rest;
+            run.journal = journal;
+            run.locals = locals;
+            run.quest = quest;
+            run.frames = rest.frames;
+            std::fprintf(stdout, "[quest] Wait %d frames -> deferred %zu actions\n",
+                         run.frames, run.actions.size());
+            std::fflush(stdout);
+            pending_.push_back(std::move(run));
+        }
+    }
+    apply_effects(app, fx);
+    enqueue_effects(app, fx, journal, locals, quest);
+    // Live UI guidance (draw-only, last value wins) — the same signals
+    // `fire_inner` publishes for a chain that runs there.
+    if (!fx.flash_targets.empty()) flash_target_ = fx.flash_targets.back();
+    if (!fx.menu_flashes.empty()) nav_flash_ = fx.menu_flashes.back();
+    if (fx.has_map_focus) last_map_focus_ = fx.map_focus;
+    if (fights_out != nullptr) {
+        for (const std::string& f : fx.fight_requests) fights_out->push_back(f);
+    }
+    for (const std::string& c : fx.clears) {
+        bool seen = false;
+        for (const std::string& f : fired_) {
+            if (f == c) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) fired_.push_back(c);
+    }
+    if (!fx.attach_files.empty()) {
+        EvalCtx c;
+        c.journal = journal;
+        c.level = journal.player_level;
+        try {
+            const WarriorSave w = app.save().load();
+            c.story_step = w.story_step();
+            c.level = w.level;
+            c.save = w;
+            c.save_loaded = true;
+        } catch (const std::exception&) {
+        }
+        load_ctx_ = c;
+        for (const std::string& f : fx.attach_files) load_quest_file(app, f);
+    }
+    // Chained `Activate` (`Ge` L1024): re-fire with `Ge.MZ` = ActionID.
+    for (const std::string& u : fx.activate_requests) {
+        QuestJournal j2 = journal;
+        j2.action_id = u;
+        fire(app, "Activate", j2);
+    }
+    return rest;
+}
+
 std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
     std::vector<std::string> fights;
     // `Wb` pops its TOP dialog (`Xc`/`dhb`); a bar Notification is not in that
     // queue (`He.S` L1050 -> `Ib.F().Qhb`), so pop the first non-Notification.
     const std::size_t mi = modal_index();
     if (mi >= dialogs_.size()) return fights;
-    EngineDialog dlg = dialogs_[mi];
+    EngineDialog dlg = std::move(dialogs_[mi]);
     dialogs_.erase(dialogs_.begin() + static_cast<std::ptrdiff_t>(mi));
     // `He.dhb(a)` L1061: 0=Left(`Ng`), 1=Right(`rh`), 2=Middle(`Nh`),
     // 100=Close(`Hj`). Anything else fires nothing (`dhb` falls through).
@@ -1693,22 +1859,31 @@ std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
     std::fprintf(stdout, "[quest] dialog button pressed: %s (%s, %s)\n", dlg.title.c_str(),
                  dlg.button_text.c_str(), slot);
     std::fflush(stdout);
-    QuestSideEffects fx;
     std::map<std::string, std::string> locals;
     // JS `Yb` (L954) runs the outer quest chain STRICTLY SEQUENTIALLY and
-    // SUSPENDS it at a `Regular` modal (`He.S` L1047-1051 -> `Wb.Xob` L927);
-    // a button's nested actions are a SEPARATE sub-`Yb` (`He.Rib` L1057-1058
+    // SUSPENDS it at a widget dialog (`He.S` L1051 -> `Wb.Xob` L927); a
+    // button's nested actions are a SEPARATE sub-`Yb` (`He.Rib` L1057-1058
     // installs `g.actions`, fired by `dhb(0)` L1061 as `this.Ng.actions.S`).
-    // So a nested `<Dialog>` becomes the NEXT modal, and the quest's later
-    // sibling dialogs are not even queued yet. The port drains the whole
-    // action list up-front, so splice the dialogs the nested run appended
-    // back to the FRONT of the `Wb` queue (where the pressed dialog's slot
-    // opened) instead of leaving them behind the queued siblings.
+    // `He.gf` L1062 (`this.sa()`) resumes the OUTER chain only once the nested
+    // sub-`Yb` COMPLETES. `dlg.continuation` is that parked outer chain.
+    const std::size_t queue_before = dialogs_.size();
+    {
+        const ActionRest rest = run_chain_effects(
+            app, *chosen, dlg.journal, locals, dlg.quest, dlg.continuation,
+            &fights);
+        // The nested list completed (no park, no `Wait`): `He.gf` L1062 ->
+        // `this.sa()` -> the outer chain resumes now.
+        if (!rest.suspended && !dlg.continuation.empty()) {
+            run_chain_effects(app, dlg.continuation, dlg.journal,
+                              dlg.continuation_locals, dlg.quest,
+                              std::vector<QuestAction>(), &fights);
+        }
+    }
+    // Splice the dialogs this press queued (the nested list's, then the
+    // resumed tail's) back to the FRONT of the `Wb` queue, where the pressed
+    // dialog's slot opened.
     // Cite: quests.xml L859-872 (`FirstGuardBeaten`) — hello -> (refuse)
     // `tutorial_girl_please` -> `tutorial_girl_end` -> tournament.
-    const std::size_t queue_before = dialogs_.size();
-    const ActionRest rest =
-        run_actions(app, *chosen, dlg.journal, fx, locals, dlg.quest, 0);
     if (dialogs_.size() > queue_before) {
         std::vector<EngineDialog> nested;
         nested.reserve(dialogs_.size() - queue_before);
@@ -1721,18 +1896,6 @@ std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
                         std::make_move_iterator(nested.begin()),
                         std::make_move_iterator(nested.end()));
     }
-    apply_effects(app, fx);
-    enqueue_effects(app, fx, dlg.journal, locals, dlg.quest);
-    if (rest.suspended) {
-        PendingRun run;
-        run.actions = rest.rest;
-        run.journal = dlg.journal;
-        run.locals = locals;
-        run.quest = dlg.quest;
-        run.frames = rest.frames;
-        pending_.push_back(std::move(run));
-    }
-    for (const std::string& f : fx.fight_requests) fights.push_back(f);
     if (!fights.empty()) {
         // Observability for the story/fight handshake: the dialog plate that
         // carries `<Fight>` (the Lynx `StoryTutorialBossFight`, tutorial_
