@@ -223,6 +223,26 @@ int AiController::b6a(const AiFightState& st) const {
 
 int AiController::facing(const AiFightState& st) const { return b6a(st); }
 
+// JS `t0(a,b)` (L618):
+//   `a.oa.Fe()==null||b.oa.Fe()==null?0:a.oa.Fe().ma.x<b.oa.Fe().ma.x?1:-1`
+// `oa.Fe()` is the fighter's pivot/render root, whose `ma.x` is the port's
+// `world_x()`; the port always has it, so the null guard never fires.
+int AiController::t0(const AiFightState& st) const {
+    return st.my_x < st.enemy_x ? 1 : -1;
+}
+
+// JS `Wea(a,b,c)` (L600):
+//   `a=b.da.Ic(a,this.t0(b,c)); return a!=null?a.ma.x:3.4028234663852886E38`
+// b = MY fighter's model (`this.model`), c = the enemy. The bone lookup +
+// `NE` left/right pick live in `Fighter::bone_world_x`.
+float AiController::wea(const AiFightState& st, const std::string& label) const {
+    // No pose resolver (the ai_demo / golden / probe harnesses that model no
+    // skeleton): keep the pre-fix `enemy_x` proxy so those paths are
+    // byte-identical to before — the fight always supplies the resolver.
+    if (!st.my_bone_world_x) return st.enemy_x;
+    return st.my_bone_world_x(label, t0(st));
+}
+
 // JS `mQ` (L620): build the feature state from the fight snapshot.
 // Field semantics (exact):
 //   o1/q1 = ABSOLUTE hp (`this.model.parameters.gd` / `b.parameters.gd`;
@@ -583,19 +603,25 @@ int AiController::yaa(const AiFightState& st) {
     const int g = st.enemy_max_part_frames;
     const int f = (g % 5) != 0 ? g + 5 - g % 5 : g;
 
-    // For each condition row, the target x (JS `Wea` L600: the row label's
-    // bone world-x — the native port uses the enemy x) and the frame window:
+    // For each condition row, the target distance (JS `Wea` L600 + L610:
+    // the row label's bone world-x) and the frame window:
     //   l*(t + (b.aU.xea(f,r) - b.aU.xea(g,r))*d - e) + h
-    // where l = my facing, t = the fighter bone x, d = my facing, e = the
-    // enemy's dw, h = the DistanceError draw.
+    // where t = `Wea(label, my, enemy)` = MY fighter's bone world-x, l = my
+    // facing, d = my facing, e = the enemy's dw, h = the DistanceError draw.
+    // The port keeps the `l*t + h` shell; the `xea` and `-e` terms are still
+    // dropped (no move `xea` table / enemy `dw` on this path).
     // REMAINING (cited, not guessed): JS also picks the Hu frame
     // `k = row.$_(f)` at the ROUNDED frame and then, when `f!=g` and any
     // outcome matched, REPLACES the candidates by a single wait `f-g`
     // (L611). The port leaves `hu_pick=-1` (all Hu frames) and the raw
     // frame — this is a known divergence, deliberately not changed without
     // the `Fl`/`g` owner pinned.
-    const float target = st.my_facing * (st.enemy_x - 0.0f) + static_cast<float>(Mu_);
     for (const TacticRow& row : rec->rows) {
+        const float target =
+            st.my_facing * wea(st, row.label) + static_cast<float>(Mu_);
+        dbg_.target = target;
+        dbg_.mu = static_cast<float>(Mu_);
+        dbg_.label = row.label;
         pba_append(row, target, wb_);
     }
     if (f == g || wb_.empty()) {
@@ -636,16 +662,19 @@ int AiController::xaa(const AiFightState& st) {
     //       0 < r && animation != null && r <= b          // kept
     // The horizon IS applied (each kept outcome has wait <= Fl+Aea, via
     // `pba_append`'s `horizon` argument below).
-    // REMAINING SUBSTITUTION: the target. JS `Wea` (L600) returns the
-    // fighter bone named `row.label` (`da.Ic(label, t0(me,enemy)).ma.x`) and
-    // the enemy body contributes `dw()`/`hd()`; `AiFightState` carries no
-    // bone world-x, so the port keeps `my_facing * enemy_x` here. This is
-    // the one value on this path still not JS-exact.
-    const float target = st.my_facing * st.enemy_x + static_cast<float>(Mu_);
+    // The target: JS `Wea` (L600) — the fighter bone named `row.label`
+    // (`da.Ic(label, t0(me,enemy)).ma.x`) — now resolved from MY fighter
+    // (`st.my_bone_world_x`). The port keeps the `my_facing * t + Mu` shell;
+    // the enemy `dw()`/`hd()` terms remain collapsed as before.
     const int horizon = Fl_ + aea_;
     for (const TacticRow& row : rec->rows) {
         const int k = ju_frame_index(Fl_, row.rda, row.hu_frames);
         if (k < 0) continue;
+        const float target =
+            st.my_facing * wea(st, row.label) + static_cast<float>(Mu_);
+        dbg_.target = target;
+        dbg_.mu = static_cast<float>(Mu_);
+        dbg_.label = row.label;
         pba_append(row, target, wb_, k, horizon);
     }
     return static_cast<int>(wb_.size());
@@ -653,15 +682,20 @@ int AiController::xaa(const AiFightState& st) {
 
 // JS `Gea` (L613-616): the throw-table selection (Z0()[2]). The JS uses
 // the move's third table (throws) with a single candidate; the native port
-// looks up the throw table records the same way.
+// looks up the throw table records the same way. The target is the same
+// `Wea` bone world-x.
 int AiController::gea(const AiFightState& st, int variant) {
     (void)variant;
     wb_.clear();
     if (st.enemy_anim.empty()) return 0;
     const TacticRecord* rec = find_record(st.enemy_anim);
     if (rec == nullptr) return 0;
-    const float target = st.my_facing * st.enemy_x + static_cast<float>(Mu_);
     for (const TacticRow& row : rec->rows) {
+        const float target =
+            st.my_facing * wea(st, row.label) + static_cast<float>(Mu_);
+        dbg_.target = target;
+        dbg_.mu = static_cast<float>(Mu_);
+        dbg_.label = row.label;
         pba_append(row, target, wb_);
     }
     return static_cast<int>(wb_.size());

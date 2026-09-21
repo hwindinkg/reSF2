@@ -1631,6 +1631,46 @@ const MoveDef* Fighter::take_ended_move() {
     return m;
 }
 
+// JS `Te.Ic` (L549) + `de.Wea` (L600): resolve a bone label to its CURRENT
+// world x. `Ic` looks the node up by name (miss -> null -> `Wea`'s 3.4E38),
+// then takes the node's `NE` neighbour — the trailing `1`<->`2` partner
+// (`Ou.Grb` L702) — and, only when that exists, uses `facing` to pick the
+// left/right of the pair by POSED x order. A label whose last char is neither
+// `1` nor `2` falls through `Ic`'s switch to null (also a miss).
+float Fighter::bone_world_x(const std::string& name, int facing) const {
+    if (name.empty()) return kNoBoneX;
+    const int c = model_.bone_by_name(name);
+    if (c < 0) return kNoBoneX;
+    // `Ic`: `let d=c.NE; if(d==null)return c;`
+    std::string partner = name;
+    if (partner.back() == '1') partner.back() = '2';
+    else if (partner.back() == '2') partner.back() = '1';
+    else partner.clear();
+    const int nb = partner.empty() ? -1 : model_.bone_by_name(partner);
+    // `c.ma.x` = the posed world x; before the first `sample()` the bind x
+    // stands in (the JS node `ma` always holds a pose).
+    const auto ma_x = [this](int i) -> float {
+        return pose_sampled_ ? pos_[static_cast<std::size_t>(i) * 2]
+                             : model_.bones[static_cast<std::size_t>(i)].x;
+    };
+    if (nb < 0) return ma_x(c);  // no NE partner -> the node itself
+    const char last = name.back();
+    const bool c_lt_d = ma_x(c) < ma_x(nb);
+    switch (facing) {
+        case -1:
+            if (last == '1') return c_lt_d ? ma_x(c) : ma_x(nb);
+            if (last == '2') return c_lt_d ? ma_x(nb) : ma_x(c);
+            break;
+        case 1:
+            if (last == '1') return c_lt_d ? ma_x(nb) : ma_x(c);
+            if (last == '2') return c_lt_d ? ma_x(c) : ma_x(nb);
+            break;
+        default:
+            return ma_x(c);
+    }
+    return kNoBoneX;  // JS `Ic` falls through to `return null` -> `Wea` miss
+}
+
 void Fighter::sample_current() {
     if (current_clip_ != nullptr) {
         // [F10] The `sample()` mirror argument is the CLIP MIRROR (`Te.FX` /

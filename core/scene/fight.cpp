@@ -5127,6 +5127,13 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // installed (`roll01_`) fall back to it so tests stay seeded.
         st.da_pg = roll01_ ? nullptr : &prng_;
         st.strike_memory = &me.fighter.strike_memory();
+        // JS `Wea` (L600) resolves `row.label` on `this.model` = MY fighter's
+        // posed skeleton (`da.Ic(label, t0(me,enemy)).ma.x`). Wire the
+        // resolver to MY fighter's current pose (`pos_`, refreshed by the
+        // `advance(dt)` above); the controller supplies `t0` as the facing.
+        st.my_bone_world_x = [&me](const std::string& label, int facing) {
+            return me.fighter.bone_world_x(label, facing);
+        };
 
         const std::string decision = me.ai->update(st);
         me.last_decision = decision;
@@ -5144,7 +5151,9 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          " strike{counter=%.3f xb=%.3f tf=%.3f} stream=%s"
                          " | branch=%s fk=%d aqa=%d gate=%d ycb=%d lbb=%d"
                          " pcb=%d rua=%d caa=%d nG=%d hcb=%d ef=%d x=%d"
-                         " ue=%d ae=%d wb=%d dec='%s'\n",
+                         " ue=%d ae=%d wb=%d"
+                         " wea{target=%.3f old=%.3f mu=%.3f my_facing=%d"
+                         " label='%s'} dec='%s'\n",
                          frame_, me.name.c_str(), st.ranged,
                          me.ranged_available ? 1 : 0,
                          me.ranged_available ? 1 : -1,
@@ -5155,7 +5164,9 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          d.lbb ? 1 : 0, d.pcb ? 1 : 0, d.rua ? 1 : 0,
                          d.caa ? 1 : 0, d.nG ? 1 : 0, d.hcb ? 1 : 0,
                          d.enemy_frame, d.x, d.enemy_uninterrupt_end,
-                         d.enemy_attack_end, d.wb, decision.c_str());
+                         d.enemy_attack_end, d.wb,
+                         d.target, st.my_facing * st.enemy_x + d.mu, d.mu,
+                         st.my_facing, d.label.c_str(), decision.c_str());
             std::fflush(stdout);
             last_ai_log_ = decision;
         }

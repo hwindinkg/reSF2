@@ -417,6 +417,13 @@ struct AiFightState {
     // Random source for the chance draws (injected; the native demo
     // supplies a std::mt19937). `roll01()` returns a value in [0,1).
     std::function<float()> roll01;
+    // JS `de.Wea` (L600) + `Te.Ic` (L549): resolve a bone label to MY
+    // fighter's current posed world x, with `facing` selecting the `NE`
+    // left/right partner. Injected by the fight from `me.fighter`; the
+    // controller supplies `facing` from `t0` (L618). When unset (a probe that
+    // models no pose) `wea` falls back to the pre-fix `enemy_x` proxy so the
+    // ai_demo/golden paths stay byte-identical.
+    std::function<float(const std::string&, int)> my_bone_world_x;
     // Cautious-movements condition: whether the enemy is playing a
     // cautious animation (JS `fCa` — body-part anim in `P.nG`).
     bool enemy_cautious = false;
@@ -507,6 +514,11 @@ public:
         bool rua = false, caa = false, nG = false;  // safe/table/cautious
         bool hcb = false;          // JS `hcb` gate
         int wb = 0;                // candidate count returned
+        // The last `Wea` (L600) target distance fed to `PBa`, with the row
+        // label (`Ju.label`) and the `Mu_` term, for the before/after audit.
+        float target = 0.0f;
+        float mu = 0.0f;
+        std::string label;
     };
     const AiDebug& last_debug() const { return dbg_; }
 
@@ -609,6 +621,13 @@ private:
     const TacticRecord* find_record(const std::string& enemy_anim) const;
     // The facing (JS `b6a` L603).
     int b6a(const AiFightState& st) const;
+    // JS `t0` (L618): `a.oa.Fe().ma.x < b.oa.Fe().ma.x ? 1 : -1` minus the
+    // null guard — the pivot-x order of the two fighters (MY x vs enemy x),
+    // used as `Ic`'s facing sign.
+    int t0(const AiFightState& st) const;
+    // JS `Wea` (L600): `b.da.Ic(label, t0(me, foe)).ma.x` — MY fighter's
+    // named-bone world x, or `Fighter::kNoBoneX` (`3.4028234663852886E38`).
+    float wea(const AiFightState& st, const std::string& label) const;
     // Whether the fighter is "watching" (JS `hcb` L598-599): no active
     // NoDecision intervals/moves and not in a NoDecision enemy anim.
     bool hcb(const AiFightState& st) const;

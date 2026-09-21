@@ -561,6 +561,16 @@ public:
     const Model& model() const { return model_; }
     const std::vector<float>& positions() const { return pos_; }  // x,y pairs
 
+    // JS `Te.Ic(name, facing)` (L549) consumed by `de.Wea` (L600): the world
+    // x of the named skeleton node in MY current posed frame (the node `ma.x`
+    // analog, i.e. `positions()`). The node's `NE` neighbour is the trailing
+    // `1`<->`2` name flip (`Ou.Grb` L702, the same partner rule as `Peb`);
+    // when it resolves, `facing` (±1 = the `de.t0` pivot-x order, L618)
+    // selects the left/right node (`NHeel_1`/`NHeel_2`). Returns `kNoBoneX`
+    // (`Wea`'s `3.4028234663852886E38`) exactly when `Ic` returns null.
+    float bone_world_x(const std::string& name, int facing) const;
+    static constexpr float kNoBoneX = 3.4028234663852886E38f;
+
     // JS `oa.V_a()` (L517): releases the model's `Weak="1"` figures -
     // `let a=0,b=this.oa.Va.all;for(;a<b.length;){let c=b[a];++a;c.UEa&&c.kla(!1)}`
     // i.e. every node carrying `Vc.UEa` gets `kla(false)` -> `MG=false`

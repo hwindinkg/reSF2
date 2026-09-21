@@ -1446,6 +1446,12 @@ int main(int argc, char** argv) {
     // internal `player_input` path (no OS input), land an attack, and log the
     // boss's per-frame hit reaction (move/ragdoll/world_x).
     bool boss_hit_probe = false;
+    // --boss-loss-probe: boot a BOSS fight and drive a COMPETENT scripted
+    // player (approach + punch/kick via `inject_game_key`, NO OS input) until
+    // the battle ends, so the per-second `[fight]` HP log, the `[hit]` damage
+    // lines and the `[fight] summary` decide whether the JS would let the
+    // player win or the port mis-resolves the loss.
+    bool boss_loss_probe = false;
     // --d3-probe: force a named move on the player and print the attacker's
     // part set the OLD way (yD(4) only) vs the NEW way (the xqb union over
     // every active type-4 interval), then the hit_test result. Proves the D3
@@ -1688,6 +1694,8 @@ int main(int argc, char** argv) {
             round_log = true;
         } else if (arg == "--boss-hit-probe") {
             boss_hit_probe = true;
+        } else if (arg == "--boss-loss-probe") {
+            boss_loss_probe = true;
         } else if (arg == "--d3-probe") {
             d3_probe = true;
         } else if (arg == "--d3-probe-move" && i + 1 < argc) {
@@ -4026,6 +4034,78 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
         app.shutdown();
         return react_at >= 0 ? 0 : 1;
+    } else if (boss_loss_probe) {
+        // [probe] Drive a COMPETENT scripted player through a full BOSS fight
+        // via the internal `inject_game_key` path (NO OS input): approach the
+        // boss, then punch/kick whenever the player is idle and in range,
+        // through every round. The per-second `[fight]` HP log, the `[hit]`
+        // damage lines and the `[fight] summary` carry the evidence.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name =
+                fight_battle.empty() ? std::string("BOSS_LYNX") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned =
+                loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        std::fprintf(stdout, "[bossloss] boot battle=%s zone=%s loadout=%s\n",
+                     fight_battle.empty() ? "BOSS_LYNX" : fight_battle.c_str(),
+                     fight_zone.empty() ? "ZONE_1" : fight_zone.c_str(),
+                     loadout.empty() ? "Fists" : loadout.c_str());
+        std::fflush(stdout);
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[bossloss] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        int guard = 0;
+        while (guard < 20000 && app.screens().current_id() == kScreenFight &&
+               fs->fight_frame() < 140) {
+            glfwPollEvents();
+            app.run_one_frame();
+            ++guard;
+        }
+        int drive_frames = 0;
+        for (int f = 0; f < 40000; ++f) {
+            glfwPollEvents();
+            if (app.screens().current_id() != kScreenFight) {
+                drive_frames = f;
+                break;
+            }
+            const float px = fs->player_world_x();
+            const float ex = fs->enemy_world_x();
+            if (std::fabs(ex - px) > 80.0f) {
+                if (f % 8 == 0) {
+                    const int toward = (ex >= px) ? 3 : 7;
+                    fs->inject_game_key(toward, true);
+                    fs->inject_game_key(toward, false);
+                }
+            } else {
+                const std::string my_move = fs->player_current_move();
+                const bool player_idle =
+                    my_move.empty() ||
+                    my_move.find("StanceIdle") != std::string::npos;
+                if (player_idle) {
+                    const int atk = ((f / 8) % 2 == 0) ? 9 : 10;  // Punch / Kick
+                    fs->inject_game_key(atk, true);
+                    fs->inject_game_key(atk, false);
+                }
+            }
+            app.run_one_frame();
+            drive_frames = f + 1;
+        }
+        std::fprintf(stdout, "[bossloss] end frames=%d screen=%d\n",
+                     drive_frames, static_cast<int>(app.screens().current_id()));
+        std::fflush(stdout);
+        app.shutdown();
+        return 0;
     } else if (capture_idle_fight) {
         // [Phase 4d] Boot DIRECTLY into the dojo fight with NO input and NO
         // auto-attack, run to fight frame `capture_fight_frame`, then capture
