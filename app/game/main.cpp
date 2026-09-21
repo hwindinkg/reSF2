@@ -52,14 +52,18 @@ using namespace sf2::app;  // kScreen* ids + the App/SaveSystem types
 
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
-                 "usage: %s [res_root] [save_path] [--headless N] [--autoclick] [--headless-loop]\n"
+                 "usage: %s [res_root] [save_path] [--headless N] [--autoclick] [--headless-loop] [--windowed|--hidden]\n"
                   "                  [--fight] [--battle <name>] [--zone <name>]\n"
                   "                  [--dump-pose N] [--dump-clip <name>]\n"
                   "                  [--ui-tour] [--fidelity-tour] [--quest-verify]\n"
                   "                  [--dialog-verify] [--replay [file]] [--verify-input]\n"
                   "                  [--round-log] [--fx-probe]\n"
                   "  --watchdog N     RULE 0: force-exit a driver run after N seconds\n"
-                  "                   (0 disables; default 900)\n"
+                   "                   (0 disables; default 900)\n"
+                   "  --windowed       force the visible interactive window (only\n"
+                   "                   a flagless launch is visible by default)\n"
+                   "  --hidden         force the hidden + watchdog driver path\n"
+                   "                   (any flag already implies hidden)\n"
                   "  res_root  default reference/www/res\n"
                  "  save_path default reference/saves/save.xml\n"
                  "  --headless-loop  run the scripted playable loop, then exit\n"
@@ -1439,8 +1443,21 @@ int main(int argc, char** argv) {
     // with the value-dependent check and overwrite res_root with the second
     // positional (breaking asset loading). Count the positionals instead.
     int positional = 0;
+    // The safety gate (see the `driver_mode` block after the loop): the window
+    // is VISIBLE only for a plain interactive launch. ANY flag at all — known
+    // or unknown — forces the hidden + watchdog driver path, so a forgotten or
+    // typo'd flag can never open a visible, hanging window. `--windowed`
+    // forces the visible window; `--hidden` forces hidden (and wins).
+    bool saw_flag = false;
+    bool force_windowed = false;
+    bool force_hidden = false;
+    bool unknown_flag = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
+        // Any `-`-prefixed token is a flag. A flag's *value* is consumed with
+        // `argv[++i]` and never reaches this line, so this cannot misfire on a
+        // value; only a genuine flag token flips the gate.
+        if (arg.size() > 1 && arg[0] == '-') saw_flag = true;
         if (arg == "--headless" && i + 1 < argc) {
             headless = std::atoi(argv[++i]);
         } else if (arg == "--watchdog" && i + 1 < argc) {
@@ -1650,9 +1667,24 @@ int main(int argc, char** argv) {
             fight_battle = argv[++i];
         } else if (arg == "--zone" && i + 1 < argc) {
             fight_zone = argv[++i];
+        } else if (arg == "--windowed") {
+            // Explicit override: a human wants the real, visible window.
+            force_windowed = true;
+        } else if (arg == "--hidden") {
+            // Explicit override: force the hidden + watchdog driver path.
+            force_hidden = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
+        } else if (arg.size() > 1 && arg[0] == '-') {
+            // Unknown/typo'd flag. NEVER let it fall through to the positional
+            // res_root slot — that used to look like a plain launch and open a
+            // visible, hanging window. Name the offender and force hidden.
+            unknown_flag = true;
+            std::fprintf(stderr,
+                         "game: unknown flag '%s' -> forcing hidden+watchdog "
+                         "mode (no window)\n",
+                         arg.c_str());
         } else if (positional == 0) {
             res_root = arg;
             ++positional;
@@ -1665,19 +1697,24 @@ int main(int argc, char** argv) {
         }
     }
 
-    // RULE 0: driver/tour/probe modes run INVISIBLE and under a hard watchdog.
-    // Every flag below turns the process into a non-interactive driver; only a
-    // plain `game` launch (no flags) is a real, visible, user-driven window.
-    const bool driver_mode =
-        headless > 0 || auto_click || headless_loop || flow_verify || za_nav_verify ||
-        ui_tour ||
-        fidelity_tour ||
-        quest_verify || quest_verify_buy || dialog_verify || observe_dialogs ||
-        replay_mode || verify_input || fx_probe || input_tape || verify_place ||
-        debug_ui || capture_fight || capture_idle_fight || round_log ||
-        auto_attack || boss_hit_probe ||
-        fight_mode || !capture_dir.empty() || !dump_clip.empty() ||
-        dump_pose_frames > 0 || !fight_battle.empty() || !fight_zone.empty();
+    // RULE 0 (inverted default): the window is VISIBLE only for a plain
+    // interactive launch — `game` with NO flags (the only extras allowed are
+    // the optional `res_root` / `save_path` positionals). ANY flag present,
+    // known or unknown, makes this a non-interactive driver run: hidden window
+    // + hard watchdog. So a forgotten or typo'd flag can never open a visible,
+    // hanging window. `--windowed` forces the visible window back on;
+    // `--hidden` forces hidden and wins over `--windowed`.
+    const bool plain_interactive = !saw_flag;
+    bool driver_mode = !plain_interactive;
+    if (force_hidden) driver_mode = true;
+    if (force_windowed && !force_hidden) driver_mode = false;
+    std::fprintf(stdout,
+                 "[gate] hidden=%d plain=%d unknown_flag=%d windowed=%d "
+                 "hidden_override=%d\n",
+                 driver_mode ? 1 : 0, plain_interactive ? 1 : 0,
+                 unknown_flag ? 1 : 0, force_windowed ? 1 : 0,
+                 force_hidden ? 1 : 0);
+    std::fflush(stdout);
     if (driver_mode) {
         install_watchdog(watchdog_secs);
     }
