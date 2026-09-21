@@ -9505,6 +9505,9 @@ void ResultsScreen::update_impl(float dt) {
                 prize_combo_coins_ = pb.prize_combo_coins;
                 prize_style_coins_ = pb.prize_style_coins;
                 prize_shock_coins_ = pb.prize_shock_coins;
+                // `oc.OY` ruby (`Fh.lXa` arg `c` L2054-2055 -> `oc.mOa`): the
+                // goldPrize row's `Or.x_` (`Lr.ZMa` L2078).
+                prize_ruby_ = pb.prize_gems;
             }
             // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds
             // (`v.FR` = character_progress.xml `<Threshold Level Exp>`).
@@ -9607,6 +9610,20 @@ std::string results_coin_text(App& app, int value) {
         fb = "bn";
     }
     return std::to_string(whole) + "." + std::to_string(frac) + loc(app, key, fb);
+}
+
+// JS `We.Sfa` (L2445): the ruby sub-row formatter — digits grouped in 3s
+// from the right, joined by a space (`b=" "`). `1000` -> "1 000",
+// `1234567` -> "1 234 567"; below 1000 it is the raw `c` digits.
+std::string results_spaced_text(int value) {
+    std::string digits = std::to_string(value < 0 ? -value : value);
+    std::string out;
+    const std::size_t n = digits.size();
+    for (std::size_t i = 0; i < n; ++i) {
+        if (i > 0 && ((n - i) % 3) == 0) out.push_back(' ');
+        out.push_back(digits[i]);
+    }
+    return (value < 0 ? "-" : "") + out;
 }
 
 void ResultsScreen::render_impl(App& app) {
@@ -9769,6 +9786,20 @@ void ResultsScreen::render_impl(App& app) {
         draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
                       results_coin_text(app, shown), 0.95f, UiAlign::Left, 0.31f * slide,
                       0.79f * slide, 0.84f * slide);
+        // `Or.Qw` ruby sub-row (L2086-2088): the `ruby` icon (`y.boa`
+        // L2466) + the `We.Sfa`-formatted `oc.OY` value, shown only when
+        // `x_>0` (`Or.nx` L2087) and placed LEFT of the gold value
+        // (`Or.align` L2088 `Qw.C(el.node.ya - Qw.za())`). `Lr.ZMa` (L2078)
+        // passes `oc.OY` only to the `goldPrize` row, so this is row 0.
+        if (i == 0 && prize_ruby_ > 0) {
+            const int ruby_shown =
+                static_cast<int>(static_cast<float>(prize_ruby_) * count + 0.5f);
+            (void)try_draw_atlas_button(app, "ruby", rx + coin_dx - 66.0f, ry, 40.0f,
+                                        40.0f, slide);
+            draw_ui_label(app, rx + coin_dx - 252.0f, ry - 16.0f, 160.0f, 32.0f,
+                          results_spaced_text(ruby_shown), 0.9f, UiAlign::Right,
+                          0.31f * slide, 0.79f * slide, 0.84f * slide);
+        }
     }
     // PROBE (temporary, `SF2_REVEAL_PROBE=1`): per-frame reveal telemetry —
     // the clock, the visible-row count and every row's slide/count progress,
@@ -11563,8 +11594,19 @@ std::vector<EquipmentScreen::PerkRow> load_perk_tree(App& app, const WarriorSave
             const auto um = upgrade_max.find(r.name);
             if (um != upgrade_max.end()) r.upgrade_max = um->second;
             for (const WarriorSave::PerkLevel& pl : w.perk_history) {
-                if (pl.name == r.name) r.learned_level = std::max(r.learned_level, pl.level);
+                if (pl.name != r.name) continue;
+                ++r.history_count;  // `id.cPa` runs once per record (L1353)
+                r.learned_level = std::max(r.learned_level, pl.level);
             }
+            r.type = tag == "Perk" ? 1 : 2;  // `id.f8a` L1357
+            // `Ih.PQ()` = `Lc.Tc` (L1371). `e8a` (L1357) returns the FIRST
+            // remaining `v.Rg.XS` def for the name; `cPa` -> `lnb` (L1353)
+            // removes ONE def per `<PerkHistory>` record, so the matched
+            // `UpgradeLevel` is `history_count+1` while defs remain, else the
+            // base def `Tc=0` (L1328-1329).
+            r.pq = (r.upgrade_max > 0 && r.history_count + 1 <= r.upgrade_max)
+                       ? r.history_count + 1
+                       : 0;
             // Description: the upgrade tier's text when learned, else the base
             // perk text, else the perks.xml def text (`Be.description`).
             const auto up = upgrade_desc.find({r.name, r.learned_level});
@@ -11581,6 +11623,35 @@ std::vector<EquipmentScreen::PerkRow> load_perk_tree(App& app, const WarriorSave
             r.available = tag == "Perk" ? (!learned || r.learned_level >= tier)
                                         : (learned && r.learned_level <= tier);
             out.push_back(std::move(r));
+        }
+    }
+    // `id.bya` (L1353) `Ih.Be` state machine. Every cell starts owned
+    // (`EWa` L1356 `new Ih(null,level,3)`); `Txb` (L1356) sets the LOWEST
+    // PerkTree tier to `Bla(0)`. Each `<PerkHistory>` record then runs
+    // `cPa` -> `dzb` (L1356): every cell at the record's tier becomes
+    // `Bla(1)` (`Bla(2)` for the matching name) and the NEXT tier above
+    // becomes `Bla(0)` (`u8a` L1357). Records apply in save order, so a
+    // later record's `dzb` wins.
+    std::vector<int> tiers;
+    for (const EquipmentScreen::PerkRow& r : out) {
+        if (tiers.empty() || tiers.back() != r.tier) tiers.push_back(r.tier);
+    }
+    if (!tiers.empty()) {
+        for (EquipmentScreen::PerkRow& r : out) {
+            if (r.tier == tiers.front()) r.state = 0;  // `Txb` L1356
+        }
+    }
+    for (const WarriorSave::PerkLevel& pl : w.perk_history) {
+        for (EquipmentScreen::PerkRow& r : out) {
+            if (r.tier != pl.level) continue;
+            r.state = (r.name == pl.name) ? 2 : 1;  // `dzb` -> `t8a` L1354
+        }
+        for (const int t : tiers) {                  // `dzb` -> `u8a` L1357
+            if (t <= pl.level) continue;
+            for (EquipmentScreen::PerkRow& r : out) {
+                if (r.tier == t) r.state = 0;
+            }
+            break;
         }
     }
     return out;
@@ -11782,7 +11853,7 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
             for (const auto& oi : w.items) {
                 if (oi.name == ci.name) count += oi.count;
             }
-            if (count > 0) seal_rows_.push_back({ci.name, count, ci.image});
+            if (count > 0) seal_rows_.push_back({ci.name, ci.image});
         }
         std::fprintf(stdout, "[profile] seals tab: %zu owned\n", seal_rows_.size());
         std::fflush(stdout);
@@ -11912,20 +11983,16 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
 
 // JS `Zr.ROa` (L2222) improve-button gate: `Lc.Be!=3 && Lc.Be!=2 && Lc.Be!=1
 // && !zo && vb.uwa()`. `Be==0` is the learnable cell (`id.Txb` L1356 sets
-// `Bla(0)` on the first tier's items; `mXa` L1355 pushes the owned `Be==3`
-// cells); `zo` = `uk.k5(p.o.bb()<a.level)` (L2223) = the player level gate.
-// Native mapping: an unlearned "Perk" row (type 1) above the player level is
-// not buyable; a "Perk" row at/below level is (`Be==0`). An "Upgrade" row
-// (type 2) improves an ALREADY-learned perk (`Bt.L1a` L306 `e&&f` branch).
+// `Bla(0)` on the lowest tier's items; `dzb` L1356 sets the tier above each
+// learned record to `Bla(0)`); `zo` = `uk.k5(p.o.bb()<a.level)` (L2223) = the
+// player level gate. `Bt.L1a` (L306) then writes the `<Perks>`/`<PerkHistory>`
+// record — a type-2 Upgrade (`e&&f` branch) reuses the existing name.
 bool EquipmentScreen::perk_buyable(int index) const {
     if (index < 0 || index >= static_cast<int>(perk_rows_.size())) return false;
     const PerkRow& r = perk_rows_[index];
-    if (!r.available) return false;          // `Mw.K1` L1358
+    if (!r.available) return false;            // `Mw.K1` L1358
     if (player_level_ < r.tier) return false;  // `zo` (L2223) -> hidden button
-    if (r.kind == "Perk") return r.learned_level == 0;  // `Be==0` learn target
-    // Upgrade: `L1a` L306 matches the existing `<Perk>` by name (`e`) and
-    // type 2 (`f`) -> `Np(PQ())`.
-    return r.learned_level > 0;
+    return r.state == 0;                       // `Zr.ROa` L2222: `Be==0` only
 }
 
 // JS `vb.Jzb` case 1 (L2200): `p.o.co.L1a(this.ql)` (the `<Perks>` write) +
@@ -12189,7 +12256,7 @@ void EquipmentScreen::render_impl(App& app) {
             // `ds.MCa` (L2227): a learnable (`Be==0`) perk whose `level` the
             // player has reached. The oracle `profile_tab0` (level 1) shows
             // `profileNoSkills` — the min perk tier is 2.
-            if (pr.kind == "Perk" && w.level >= pr.tier) any_avail = true;
+            if (pr.state == 0 && w.level >= pr.tier) any_avail = true;
         }
         if (!any_learned) {
             // `ei.zs` wraps (`ea.rd(!0)`, L2206) into the panel: oracle shows
@@ -12215,7 +12282,6 @@ void EquipmentScreen::render_impl(App& app) {
         // The previous `0.25*v.width()` was a measured stand-in for the
         // declared height, not the rendered one.
         const float row_h = profile_cell_pitch(v, 400.0f, 150.0f, 0.0f);
-        const float gutter = 78.0f;  // `Rx` + tier-level track width
         // --- JS `tk`/`Rx`/`uk` row geometry (L2217-2230) ------------------
         // `ds.NC` (L2230) sizes every `tk` cell `b.ba(400,150)`. `tk.$i`
         // (L2217) fixes `H9=80`; `tk.ba` (L2218) centres the two `uk` nodes
@@ -12279,10 +12345,8 @@ void EquipmentScreen::render_impl(App& app) {
                 }
                 last_tier = r.tier;
                 ++tier_idx;
-                char tbuf[32];
-                std::snprintf(tbuf, sizeof(tbuf), "LV %d", r.tier);
-                draw_ui_label(app, v.J + 16.0f, row_top + 8.0f, gutter - 10.0f, 20.0f, tbuf,
-                              0.6f, UiAlign::Left, 1.0f, 0.9f, 0.4f);
+                // The JS `tk` compare cell (L2217-2222) draws NO tier text —
+                // only the two `uk` cells and the `Rx` arrows.
             }
             if (row_top + row_h > v.W - 34.0f) break;
             if (col >= 2) {  // `tk` packs two `uk` cells per tier
@@ -12348,8 +12412,9 @@ void EquipmentScreen::render_impl(App& app) {
             // When `zo` the icon `Fs` is HIDDEN and `pieces/icons_kick_blocked`
             // (`V$`) is shown; `Ed.DOa` overlays `pieces/icons_kick_off` (`X$`)
             // whenever the perk is not active (`!$r`).
-            const bool perk_owned = r.learned_level > 0;
-            const bool perk_locked = (w.level < r.tier) || perk_owned;
+            // `uk.k5`/`r0` (L2224): `EW || Be==3` — `EW` = the player level is
+            // below the tier (`p.o.bb()<a.level`), `Be==3` = owned/placeholder.
+            const bool perk_locked = (w.level < r.tier) || r.state == 3;
             if (perk_locked) {
                 (void)try_draw_atlas_button(app, "pieces/icons_kick_blocked", icx, cy, ico, ico,
                                             0.95f);
@@ -12363,38 +12428,20 @@ void EquipmentScreen::render_impl(App& app) {
             if (!r.available) {
                 (void)try_draw_atlas_button(app, "pieces/icons_kick_off", icx, cy, ico, ico, 0.9f);
             }
-            // `uk.Dy` perk-level badge (`i9a` "pieces/level<N>", L2222):
-            // `la(.8)`, `C(FH.x/2 - za()*1.15)`, `D(FH.y/2 - qa()*1.15)`.
-            if (r.learned_level >= 1 && r.learned_level <= 9) {
+            // `uk.Dy` badge (`uk.vca`/`i9a` L2225): `i9a()` = "pieces/level"+
+            // `PQ()`, `la(.8)`, `C(FH.x/2 - za()*1.15)`, `D(FH.y/2 - qa()*1.15)`.
+            // Gate: hidden when `PQ()<=0` OR (`PQ()==1 && type!=2 && type!=3`)
+            // — i.e. an unlearned Perk (type 1) that has no upgrade yet.
+            const bool badge_on = r.pq > 0 && !(r.pq == 1 && r.type != 2);
+            if (badge_on) {
                 char lb[24];
-                std::snprintf(lb, sizeof(lb), "pieces/level%d", r.learned_level);
+                std::snprintf(lb, sizeof(lb), "pieces/level%d", r.pq);
                 (void)try_draw_atlas_button(app, lb, icx + bdg_dx + bdg_w * 0.5f,
                                             cy + bdg_dy + bdg_h * 0.5f, bdg_w, bdg_h, 1.0f);
             }
-            // In-cell name/status label (native fallback; the JS `uk` cell
-            // draws no text). Flanks the `tk` pair — the left cell is right
-            // aligned into the gutter side, the right/lone cell left aligned
-            // outward — so it never crosses the `Rx` seam.
-            const std::string nm = loc(app, r.name, r.name);
-            char sbuf[64];
-            if (r.kind == "Upgrade") {
-                std::snprintf(sbuf, sizeof(sbuf), "UPGRADE %d/%d", r.learned_level, r.tier);
-            } else if (r.learned_level > 0) {
-                std::snprintf(sbuf, sizeof(sbuf), "LEARNED %d", r.learned_level);
-            } else {
-                std::snprintf(sbuf, sizeof(sbuf), "LEARN AT LV %d", r.tier);
-            }
-            float tx = icx + ico * 0.5f + 6.0f;
-            float tw = v.N - 2.0f - tx;
-            UiAlign al = UiAlign::Left;
-            if (pair_left) {
-                tx = v.J + gutter;
-                tw = (icx - ico * 0.5f - 6.0f) - tx;
-                al = UiAlign::Right;
-            }
-            tw = std::max(24.0f, tw);
-            draw_ui_label(app, tx, cy - 17.0f, tw, 18.0f, nm, 0.52f, al, 1.0f, 1.0f, 1.0f);
-            draw_ui_label(app, tx, cy + 3.0f, tw, 16.0f, sbuf, 0.44f, al, 0.8f, 0.85f, 0.9f);
+            // The JS `uk` cell (L2222-2225) draws NO text: only `Ed.Fs` (the
+            // perk icon / `V$` blocked / `X$` off overlays) and the `Dy`
+            // level badge. The former native name/status labels were invented.
             ++col;
         }
         // `Zr` improve button (`ygb` L2222 -> `vb.Cab` L2199): shown while
@@ -12520,13 +12567,8 @@ void EquipmentScreen::render_impl(App& app) {
                     draw_flat_button(app, s.name, cxc, cy, cell_w * 0.5f, chh * 0.5f,
                                      0.3f, 0.3f, 0.4f, false);
                 }
-                char buf[64];
-                // list.xml Seal `Name` is a lang key ("drop_name_blueseal"
-                // -> "BLUE SEAL"); resolve it like every other item name.
-                std::snprintf(buf, sizeof(buf), "%s x%d", loc(app, s.name, s.name).c_str(),
-                              s.count);
-                draw_ui_label(app, cell_l, cy + chh * 0.5f - 24.0f, cell_w, 20.0f, buf,
-                              0.6f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+                // `js.j5` (L2233) draws ONLY `new oe(a.fileName)`: no name
+                // text, no count. The former "<name> x<count>" row was invented.
             }
         }
     } else if (tab_ == kProfileTabAchiev) {

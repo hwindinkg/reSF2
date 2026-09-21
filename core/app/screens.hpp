@@ -695,6 +695,9 @@ private:
     int prize_combo_coins_ = 0;
     int prize_style_coins_ = 0;
     int prize_shock_coins_ = 0;
+    // `oc.OY` ruby (`Fh.lXa` arg `c`, L2054-2055; `oc.mOa = oc.OY`). The
+    // goldPrize row's `Or.x_` (`Lr.ZMa` L2078) renders it as the `Qw` sub-row.
+    int prize_ruby_ = 0;
     // JS `Lr`/`Or` reveal clock (L2057-2081): the `kk` results container
     // holds the list for 500 ms (`kk.rxa` `wh.delay(...,500)`), then row `i`
     // slides in (`Or.aa` case 0, `ed(.5)` = 500 ms) and counts up (case 1,
@@ -866,11 +869,13 @@ public:
         int order = 0;
     };
 
-    // One `gs` seal row (JS `gs.TA` entries, L2231; cell `js` L2232).
+    // One `gs` seal row (JS `gs.TA` entries, L2231; cell `js` L2232). The
+    // cell (`js.j5` L2233) draws ONLY the `oe(a.fileName)` image — there is
+    // no name/count text in the JS. `a.fileName` is the list.xml `Image`
+    // attribute (`pL` L322 `this.fileName = a.attributes.get("Image")`).
     struct SealRow {
-        std::string name;
-        int count = 0;
-        std::string image;  // list.xml Image ("drop_blue_seal") -> `oe` name
+        std::string name;   // list.xml Item Name (the `gs.TA` identity)
+        std::string image;  // list.xml `Image` == the JS `a.fileName`
     };
 
     // One `ds` perk-tier row item (JS `id.ht().tH` tiers of `Ih`, L1353/2227;
@@ -889,6 +894,18 @@ public:
         int upgrade_max = 0;      // `Lc.Tc` (`Be.Tc`): the def's max
                                   // UpgradeLevel value (character_progress.xml
                                   // `<UpgradeLevel Value>`; written as `Ji.Ce`)
+        // `Ih.type` (`id.f8a` L1357): 1 = Perk, 2 = Upgrade (0 = neither).
+        int type = 0;
+        // `Ih.Be` (L1371) — the `uk` cell state machine (L2222/L2224). Built
+        // by `id.bya`/`Txb`/`dzb` (L1353-1356): 0 = learn target, 1 = sibling
+        // at a learned tier, 2 = the learned cell, 3 = owned/placeholder.
+        int state = 3;
+        // `Ih.PQ()` = `Lc.Tc` (L1371): the matched `UpgradeLevel` def
+        // (`j0a` L1190). `e8a`/`lnb` (L1353-1357) leave `history_count+1`
+        // while defs remain, else 0 (the base def `Tc=0`, L1328-1329).
+        int pq = 0;
+        // `p.o.co.KS.Oa` records for this name (`id.cPa` L1353).
+        int history_count = 0;
     };
 
     // One `fs` achievement row (JS `fs.El` of `Ba(def, value)`, L2214-2216;
