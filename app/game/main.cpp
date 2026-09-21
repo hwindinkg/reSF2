@@ -2527,6 +2527,13 @@ int main(int argc, char** argv) {
         std::fprintf(stdout, "[changetab] profile tab Moves=%d Perks=%d\n",
                      prof_moves, prof_perks);
         check(prof_moves == 1 && prof_perks == 0, "Profile: Moves->1, Perks->0");
+        // 4b. Slot 4 (BattlePass, vj 15 -> `To.hOa(15)` 4): `vb.hla`'s guard is
+        //     `a != 5` (L1127569), so slot 4 is ACCEPTED and stored in `vV`
+        //     even though the `cs.Tw` strip renders only 4 buttons.
+        fire("BattlePass", "", "");
+        const int prof_bp = prof != nullptr ? prof->tab() : -1;
+        std::fprintf(stdout, "[changetab] profile tab BattlePass=%d\n", prof_bp);
+        check(prof_bp == 4, "Profile: BattlePass->4 (hla a!=5)");
         // 5. Map `Tab="StoryMapStage"`: the JS `Ya.rF` is an EMPTY stub
         //    (L1096890), so the action executes but changes no map state.
         app.screens().pop();

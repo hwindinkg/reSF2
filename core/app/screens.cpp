@@ -4757,8 +4757,14 @@ std::vector<CatalogItem> shop_visible_items(const std::vector<CatalogItem>& all)
     std::vector<CatalogItem> out;
     out.reserve(all.size());
     for (const CatalogItem& ci : all) {
+        // The `Oa.jAa` tab buckets (L2297): Weapon/Armor/Helm/Ranged/Magic
+        // plus tab5's `Dp`(RealMoneyItem)+`hca`(Consumable) and tab7's
+        // `S_`(Free); RaidConsumable (tab6) has no bucket but is kept here
+        // (every shipped row is `ShopHide` anyway).
         if (ci.type != "Weapon" && ci.type != "Armor" && ci.type != "Helm" &&
-            ci.type != "Ranged" && ci.type != "Magic") {
+            ci.type != "Ranged" && ci.type != "Magic" &&
+            ci.type != "RealMoneyItem" && ci.type != "Consumable" &&
+            ci.type != "Free" && ci.type != "RaidConsumable") {
             continue;
         }
         if (ci.shop_hide || ci.hidden) continue;  // `!isActive || li()`
@@ -9853,8 +9859,14 @@ void ResultsScreen::render_impl(App& app) {
 // ShopScreen
 // ---------------------------------------------------------------------------
 
-// Shop tabs (JS `vj.E0` L1168-1169 category ids → `vj.ifa` tab lists,
-// `Oa.f5`): 1 Weapon, 2 Armor, 3 Helm, 4 Ranged, 5 Magic.
+// Shop tabs (JS `vj.E0` L1168-1169 category ids → `Cj.l6` tab ids L2302,
+// `Cj.zxb` tab→type L2303, `Oa.jAa`/`f5` per-tab lists L2286-2288/L2297).
+// `Cj.l6` (L2302): 1→0 Weapon, 2→1 Armor, 3→2 Helm, 4→3 Ranged, 5→4 Magic,
+// 6→5 Ruby, 7→7 Free, 8→6 RaidConsumable.
+// `Cj.zxb` (L2303): 5→`I.wk` "RealMoneyItem", 6→`I.Hm` "RaidConsumable",
+// 7→`I.Bu` "Free". `jAa` (L2297) fills tab5 from BOTH `p.items.Dp`
+// (RealMoneyItem) and `p.items.hca` (Consumable), tab7 from `p.items.S_`
+// (Free); tab6 has NO `f5` case and no `it.parse` bucket → always empty.
 struct ShopTab {
     const char* label;
     const char* type;
@@ -9866,8 +9878,11 @@ constexpr ShopTab kShopTabs[] = {
     {"HELMS", "Helm", 3},
     {"RANGED", "Ranged", 4},
     {"MAGIC", "Magic", 5},
+    {"RUBY", "RealMoneyItem", 6},
+    {"RAID", "RaidConsumable", 8},
+    {"FREE", "Free", 7},
 };
-constexpr int kShopTabCount = 5;
+constexpr int kShopTabCount = 8;
 
 // Responsive shop layout (JS `Oa.layout` L2293-2295 + the `gb` rect class
 // L1551-1552). Replaces the invented fixed grid (PORT_AUDIT_UI §3 #16,
@@ -9934,6 +9949,9 @@ constexpr ShopViewerParams kShopViewer[kShopTabCount] = {
     {300.0f, 280.0f, 100.0f},  // tab2 Helm:   uw=(300,280) LT(100)
     {300.0f, 220.0f, 50.0f},   // tab3 Ranged: uw=(300,220) LT(50)
     {300.0f, 220.0f, 50.0f},   // tab4 Magic:  uw=(300,220) LT(50)
+    {300.0f, 320.0f, 50.0f},   // tab5 Ruby/IAP: uw=(300,320) (`f5` case 5, no LT)
+    {300.0f, 220.0f, 50.0f},   // tab6 RaidConsumable: no `f5` case
+    {670.0f, 500.0f, 50.0f},   // tab7 Free: uw=(670,500) (`f5` case 7, no LT)
 };
 
 struct ShopLayout {
@@ -10279,6 +10297,35 @@ constexpr float kTabBarHeightK = 1.5f;
 constexpr float kShopTabBarK = kTabBarHeightK;
 constexpr float kShopTabSpread = 1.2f;
 
+// `ss.Tw` (L2283) + `Oa.oab` (L2297) — which shop tabs the strip actually
+// shows. `Tw` is the base `[0,1,2,3,4]`, then `push(5)` under
+// `Ca.hasFeature("iap")` and `push(7)` under `L.K.Yja` (`hasFeature
+// ("rewarded")`). `oab` then `qJ`s: tab5 gone while the offers list
+// `L.K.Wt` is empty; tab7 gone while `QV` is empty; tab6 ALWAYS (`qJ(6)`).
+// The shell has iap (the `AddMoney` box, L1995) but no `L.K.Wt` offers, and
+// its oracle capture `loop_shop.png` shows the base five — so the strip
+// renders 0..4 and 5/6/7 stay off-strip but remain selectable by
+// `ChangeTab` (the `Cj.l6` tab ids).
+bool shop_tab_visible(int tab) {
+    if (tab < 0 || tab >= kShopTabCount) return false;
+    switch (tab) {
+        case 5:   // `oab`: `gC.length!=0 && L.K.Wt.length!=0` — no offers here
+        case 6:   // `oab` `qJ(6)` — RaidConsumable is never a `Tw` button
+        case 7:   // `L.K.Yja` (`rewarded`) off in the shell
+            return false;
+        default:
+            return true;
+    }
+}
+
+std::vector<int> shop_visible_tabs() {
+    std::vector<int> out;
+    for (int t = 0; t < kShopTabCount; ++t) {
+        if (shop_tab_visible(t)) out.push_back(t);
+    }
+    return out;
+}
+
 struct ShopTabLayout {
     float bar_h = 0.0f;
     float btn_w = 0.0f;
@@ -10295,7 +10342,10 @@ ShopTabLayout shop_tab_layout() {
     l.btn_h = l.bar_h;
     l.btn_w = kShopTabSrcW * (l.bar_h / kShopTabSrcH);
     l.step = l.btn_w * kShopTabSpread;
-    const float row = l.btn_w + static_cast<float>(kShopTabCount - 1) * l.step;
+    // `Eg.aa` packs/sizes the ACTIVE buttons only, so the row width is the
+    // visible `Tw` subset, not `kShopTabCount`.
+    const int visible = static_cast<int>(shop_visible_tabs().size());
+    const float row = l.btn_w + static_cast<float>(visible - 1) * l.step;
     l.cx0 = (kViewW - row) * 0.5f + l.btn_w * 0.5f;
     l.cy = kViewH - l.bar_h * 0.5f;
     return l;
@@ -10306,8 +10356,16 @@ ShopTabLayout shop_tab_layout() {
 std::vector<std::size_t> shop_tab_rows(const std::vector<CatalogItem>& items, int tab) {
     std::vector<std::size_t> out;
     if (tab < 0 || tab >= kShopTabCount) return out;
+    // `Oa.jAa` (L2297): tab5 `gC` = `p.items.Dp` (RealMoneyItem) +
+    // `p.items.hca` (Consumable); tab6 has no `f5` case and no `it.parse`
+    // bucket, so it lists nothing.
+    if (tab == 6) return out;
+    const bool tab5 = tab == 5;
     for (std::size_t i = 0; i < items.size(); ++i) {
-        if (items[i].type == kShopTabs[tab].type) out.push_back(i);
+        const std::string& ty = items[i].type;
+        const bool keep = tab5 ? (ty == "RealMoneyItem" || ty == "Consumable")
+                               : (ty == kShopTabs[tab].type);
+        if (keep) out.push_back(i);
     }
     return out;
 }
@@ -10524,8 +10582,10 @@ void ShopScreen::update_impl(float dt) {
     tab_hover_ = -1;
     {
         const ShopTabLayout tl = shop_tab_layout();
-        for (int t = 0; t < kShopTabCount; ++t) {
-            const float cx = tl.cx0 + static_cast<float>(t) * tl.step;
+        const std::vector<int> vis = shop_visible_tabs();
+        for (std::size_t k = 0; k < vis.size(); ++k) {
+            const int t = vis[k];
+            const float cx = tl.cx0 + static_cast<float>(k) * tl.step;
             if (p.x >= cx - tl.btn_w / 2 && p.x <= cx + tl.btn_w / 2 &&
                 p.y >= tl.cy - tl.btn_h / 2 && p.y <= tl.cy + tl.btn_h / 2) {
                 tab_hover_ = t;
@@ -10875,8 +10935,10 @@ void ShopScreen::render_impl(App& app) {
         const float bar[] = {0, kViewH - tl.bar_h, kViewW, kViewH - tl.bar_h, kViewW, kViewH,
                              0, kViewH - tl.bar_h, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(bar, 6, kTabBarBgR, kTabBarBgG, kTabBarBgB, 1.0f);
-        for (int t = 0; t < kShopTabCount; ++t) {
-            const float cx = tl.cx0 + static_cast<float>(t) * tl.step;
+        const std::vector<int> strip = shop_visible_tabs();
+        for (std::size_t k = 0; k < strip.size(); ++k) {
+            const int t = strip[k];
+            const float cx = tl.cx0 + static_cast<float>(k) * tl.step;
             const bool sel = t == tab_;
             const bool hov = t == tab_hover_;
             const int state = sel ? 1 : (hov ? 2 : 0);  // normal/active/pushed
@@ -11190,7 +11252,12 @@ void ShopScreen::render_impl(App& app) {
 // `es.zha` (L2239) sub-view hooks clear those flags on tab entry (see
 // `EquipmentScreen::update_impl`).
 // ---------------------------------------------------------------------------
-constexpr int kProfileTabCount = 4;
+constexpr int kProfileTabCount = 4;  // `cs.Tw = [0,1,2,3]` (L2188) — 4 buttons
+// `vb.hla(a)` guard `if(this.vV!=a&&a!=5)` (L1127569) accepts slot 4
+// (BattlePass, `To.hOa(15)`) and sets `vV=4`; the `hla` switch has no
+// `case 4` body, so it shows no pane — but the JS does NOT reject it. Only 5
+// (the `init` "no tab" default) and negatives are rejected.
+constexpr int kProfileSlotMax = 4;
 constexpr int kProfileTabLeveling = 0;  // `ds` leveling tab (`Rl=ds` L2227) — perk tree body
 constexpr int kProfileTabMoves = 1;  // folded Moves sub-view (JS `qv`, To.kOa=11 L2201)
 constexpr int kProfileTabAchiev = 2;  // `fs` ACHIEVEMENT_SLIDER (L2213) — achievements body
@@ -13142,9 +13209,9 @@ void set_za_nav_open(bool open) {
 
 namespace {
 
-// `vj.E0` (L1168) category name -> the `kShopTabs` index (0 Weapon .. 4
-// Magic). Only the five shipped shop tabs exist (`vj.ifa` L1168); Ruby(6)/
-// Free(7)/event tabs have no `kShopTabs` row -> -1.
+// `vj.E0` (L1168) category name -> the `kShopTabs` index via `Cj.l6`
+// (L2302). `vj.ifa` (L1168) routes E0 1..7 to the Shop (screen 4); E0 8
+// (RaidConsumable) maps to 11 there, but `Cj.l6(8)` is still tab 6.
 int shop_tab_index_for(const std::string& tab) {
     int e0 = 0;
     if (tab == "Weapon") e0 = 1;
@@ -13152,6 +13219,9 @@ int shop_tab_index_for(const std::string& tab) {
     else if (tab == "Helm") e0 = 3;
     else if (tab == "Ranged") e0 = 4;
     else if (tab == "Magic") e0 = 5;
+    else if (tab == "Ruby") e0 = 6;
+    else if (tab == "Free") e0 = 7;
+    else if (tab == "RaidConsumable") e0 = 8;
     else return -1;
     for (int i = 0; i < kShopTabCount; ++i) {
         if (kShopTabs[i].e0 == e0) return i;
@@ -13206,11 +13276,14 @@ bool shop_open_at(App& app, const std::string& tab, const std::string& item) {
 }
 
 // `vb.rF(a,b)` (L1131579) -> `vb.hla(a)` (L1127569): select the profile slot.
-// The JS guard `if(this.vV!=a&&a!=5)` skips slot 5 (the `To.hOa` default, no
-// such profile tab); the shell renders `kProfileTabCount` (4) tabs, so a slot
-// outside 0..3 has no target either and is rejected (logged by the caller).
+// The JS guard is `if(this.vV!=a&&a!=5)` — only slot 5 (the `init` "no tab"
+// default) and negatives are rejected; slot 4 is the BattlePass pane
+// (`To.hOa(15)=4`) which `hla` accepts and stores in `vV` even though its
+// switch has no `case 4` body (so the strip shows `kProfileTabCount` = 4
+// buttons and nothing highlights for slot 4). The old port guard wrongly
+// bound the slot range to the strip count and rejected 4.
 bool EquipmentScreen::select_tab(int slot, const std::string& focus) {
-    if (slot < 0 || slot >= kProfileTabCount) {
+    if (slot < 0 || slot > kProfileSlotMax) {
         return false;
     }
     tab_ = slot;      // `this.vV=a`
