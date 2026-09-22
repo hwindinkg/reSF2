@@ -2574,6 +2574,30 @@ int main(int argc, char** argv) {
                 "?Purchase[WEAPON_KNIVES].Timeout",   // IJa L980 -> 0
                 "_$BestAcquiredArmorLevel",           // Bj L960 -> "0"
                 "_$BestAcquiredWeaponLevel",          // Bj L960 -> "0"
+                // --- Slice: DataVersion/VersionController, SysInfo extras,
+                // Item Recieve*, ItemsOfType, Pack, Player Bonus/Power/CoinIcon,
+                // Enchantment (JS cites in the handlers).
+                "?DataVersion().DataVersion",         // yzb L982 -> "0"
+                "?DataVersion().Major",               // yzb L982 -> "0"
+                "?DataVersion().Minor",               // yzb L982 -> "13"
+                "?DataVersion().Production",          // yzb L982 -> "1"
+                "?DataVersion().Version",             // yzb L982 -> "1.0.13"
+                "?VersionController().Production",    // Czb L983 -> "1"
+                "?VersionController().Minor",         // Czb L983 -> "13"
+                "?SysInfo().OsName",                  // $wb L983 -> "Windows"
+                "?SysInfo().NBO",                     // $wb L983 -> "1"
+                "?SysInfo().StarterPacksAvailable",   // $wb L987 -> "0"
+                "?Item[WEAPON_KNIVES].RecieveGold",   // cdb L978 -> 0
+                "?Item[Casket_Gems].RecieveBonus",    // cdb L978 -> 1000
+                "?ItemsOfType[Weapon].Quantity",      // edb L981 -> owned count
+                "?Pack[ZONE_1].IsAvailable",          // zib L979 -> "0"
+                "?Player().Bonus",                    // blb L973 -> w.bonus
+                "?Player().Power",                    // blb L975 -> w.power
+                "?Player().CoinIcon",                 // blb L973 -> "gold"
+                "?Enchantment[ENCH_A|RECIPE_B].Item",       // z3a L967 -> ENCH_A
+                "?Enchantment[ENCH_A|RECIPE_B].Recipe",     // z3a L967 -> RECIPE_B
+                "?Enchantment[ENCH_A|RECIPE_B|30].DeliveryTime",  // z3a L967 -> 30
+                "?Enchantment[ONLYONE].Item",         // z3a L967 -> UNKNOWN (<2 parts)
             };
             for (const char* e : exprs) {
                 const std::string v =

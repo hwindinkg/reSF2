@@ -63,6 +63,12 @@ struct CatalogItem {
     int delivery_sec = 0;   // DeliveryTime/Ec (timed delivery; 0 = instant)
     int delivery_coin = 0;  // MoneyDeliveryPrice (O2 instant-delivery fee)
     int delivery_gems = 0;  // BonusDeliveryPrice (Od instant-delivery fee)
+    // JS `Mn`/`Ip` (item ctor L164808/164852:
+    // `this.Mn=xb(a.attributes.get("RecieveGold"))`,
+    // `this.Ip=xb(a.attributes.get("RecieveBonus"))`). `?Item[x].RecieveGold`
+    // -> `K.T(c.Mn)`, `.RecieveBonus` -> `K.T(c.Ip)` (`cdb` L978).
+    int recieve_gold = 0;   // RecieveGold
+    int recieve_bonus = 0;  // RecieveBonus
     bool shop_hide = false; // ShopHide="1" (not offered in the shop)
     bool hidden = false;    // Hidden="1"
     bool paid = false;      // PaidItem="Paid"/"SuperPaid" (premium-only)

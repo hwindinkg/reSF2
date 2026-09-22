@@ -53,6 +53,9 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         ci.delivery_sec = sf2::data::xml_attr_int(item, "DeliveryTime", 0);
         ci.delivery_coin = sf2::data::xml_attr_int(item, "MoneyDeliveryPrice", 0);
         ci.delivery_gems = sf2::data::xml_attr_int(item, "BonusDeliveryPrice", 0);
+        // JS `xb(a.attributes.get("RecieveGold"/"RecieveBonus"))` (L164808/164852).
+        ci.recieve_gold = sf2::data::xml_attr_int(item, "RecieveGold", 0);
+        ci.recieve_bonus = sf2::data::xml_attr_int(item, "RecieveBonus", 0);
         ci.shop_hide = attr_bool_str(item.attribute("ShopHide").value());
         ci.hidden = attr_bool_str(item.attribute("Hidden").value());
         ci.paid_item =

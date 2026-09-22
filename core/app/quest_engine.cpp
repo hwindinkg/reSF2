@@ -927,6 +927,31 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
         return true;
     }
 
+    if (method == "DataVersion" || method == "VersionController") {
+        // `yzb` (L982) reads `tg.fz` for `?DataVersion`; `Czb` (L983) reads
+        // `tg.version` for `?VersionController`. Both are set to the same
+        // `new Dh(1,0,13,0)` (`Wdb` L594899, also static-init L1280835). `Dh`
+        // ctor L1210840: (WS=Production, wE=Major, zE=Minor, fz); `toString`
+        // L1210846 = "WS.wE.zE" (the `.fz` suffix only when its arg is true).
+        // Fields read: DataVersion->`.fz`, Major->`.wE`, Minor->`.zE`,
+        // Production->`.WS`, Full/Version->`toString()`; any other leaves the
+        // JS `b.result` unset -> UNKNOWN.
+        if (field == "DataVersion") {
+            out = "0";
+        } else if (field == "Major") {
+            out = "0";
+        } else if (field == "Minor") {
+            out = "13";
+        } else if (field == "Production") {
+            out = "1";
+        } else if (field == "Full" || field == "Version") {
+            out = "1.0.13";
+        } else {
+            note_unanswerable(token);
+            return false;
+        }
+        return true;
+    }
     if (method == "SysInfo") {
         // JS `$wb` (L983-987) for the shipped desktop/web build.
         static const char* const kSys[][2] = {
@@ -939,12 +964,25 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
             {"MyGamezF2P", "0"},    {"RaidsSupport", "0"},     {"SamsungF2P", "0"},
             {"QualityCondition", "HIGH"}, {"CurrentPlatformName", "PAID"},
             {"DeviceType", "Desktop"}, {"HasPayments", "0"},
+            // `$wb` L983-987 extras. `NBO` = `L.K.Wt==null||L.K.Wt.length==0
+            // ? "1":"0"` — `Wt` is the store SKU list, `[]` in a non-store
+            // build (init L32668) -> "1". `OsName` = `L.K.R7a()` (L26795): the
+            // UA test yields "Windows" on this platform. `StarterPacksAvailable`
+            // = a==7?"1":"0" over 7 named SKUs; none present -> "0".
+            {"NBO", "1"}, {"OsName", "Windows"}, {"StarterPacksAvailable", "0"},
         };
         for (const auto& row : kSys) {
             if (field == row[0]) {
                 out = row[1];
                 return true;
             }
+        }
+        if (field == "Time") {
+            // `$wb` L987: `case "Time":b.result=K.T(p.Dc)`. `p.Dc` is the game
+            // clock, set at `Edb` (L89485): `p.Dc=Math.round(Hb.instance.getTime())`
+            // — the `Hb` seconds the port maps onto `quest_now()`.
+            out = std::to_string(static_cast<long long>(std::llround(quest_now())));
+            return true;
         }
         note_unanswerable(token);
         return false;
@@ -1003,6 +1041,22 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
         }
         if (field == "HasPayments") {
             out = "0";
+            return true;
+        }
+        // `blb` (L973-975): `Bonus`->`K.T(c.fd)` (the player's Bonus, default 0
+        // in the JS ctor L124164), `Power`->`c.dk==null?"null":""+c.dk`
+        // (`this.dk` = the `Power` attr, L124993), `CoinIcon`->`c.Vf`
+        // (`this.Vf=b!=null?b:Z.Hna`, L124569; `Z.Hna="gold"` L1274515).
+        if (field == "Bonus") {
+            out = std::to_string(w.bonus);
+            return true;
+        }
+        if (field == "Power") {
+            out = std::to_string(w.power);
+            return true;
+        }
+        if (field == "CoinIcon") {
+            out = "gold";
             return true;
         }
         note_unanswerable(token);
@@ -1152,6 +1206,16 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
             out = std::to_string(catalog_bonus_price(app, arg));
             return true;
         }
+        if (field == "RecieveGold") {
+            // `cdb` L978: `case "RecieveGold":b.result=K.T(c.Mn)`.
+            out = std::to_string(ci->recieve_gold);
+            return true;
+        }
+        if (field == "RecieveBonus") {
+            // `cdb` L978: `case "RecieveBonus":b.result=K.T(c.Ip)`.
+            out = std::to_string(ci->recieve_bonus);
+            return true;
+        }
         if (field == "Availability") {
             // `LCa()` (L1272275): `!li() && isActive && HJ(lock)`. `li()` =
             // `this.hidden` (item `li()` L1271725) and `isActive` = `!ShopHide`
@@ -1159,6 +1223,72 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
             // is a zone gate keyed on the item's `lock`; a lock-less shipped
             // item returns true, so the sourceable form is `!Hidden && !ShopHide`.
             out = (ci->hidden || ci->shop_hide) ? "0" : "1";
+            return true;
+        }
+        note_unanswerable(token);
+        return false;
+    }
+    if (method == "ItemsOfType") {
+        // `edb` (L981): `c=p.o.xa.hJ(arg); a.Sd=="Quantity"&&(b.result=K.T(c.length))`.
+        // `hJ` (L151584) keeps the inventory entries whose catalog type equals
+        // `arg` (subtype "" = any) and which are `isActive` (its `c` flag
+        // defaults true; `isActive` = `!ShopHide`, item ctor L1266096).
+        const WarriorSave& w = ctx.live(app);
+        std::size_t n = 0;
+        for (const WarriorSave::OwnedItem& it : w.items) {
+            const CatalogItem* ci = catalog_find(app, it.name);
+            if (ci != nullptr && ci->type == arg && !ci->shop_hide) ++n;
+        }
+        if (field == "Quantity") {
+            out = std::to_string(n);
+            return true;
+        }
+        note_unanswerable(token);
+        return false;
+    }
+    if (method == "Pack") {
+        // `zib` (L979): `IsAvailable -> Mc.F().T1(c)?"1":"0"`. `T1` L478996:
+        // `c=m.find(this.wq, d=>d.name==arg); return c==null?!1:...` — `wq` is
+        // the downloaded-pack registry; the port has no pack downloader, so the
+        // registry is empty, `c==null` -> false -> "0".
+        if (field == "IsAvailable") {
+            out = "0";
+            return true;
+        }
+        note_unanswerable(token);
+        return false;
+    }
+    if (method == "Enchantment") {
+        // `z3a` (L967): the raw arg is split on "|"; fewer than 2 parts leaves
+        // the JS `b.result` unset -> UNKNOWN. `Item`=parts[0], `Recipe`=parts[1],
+        // `DeliveryTime`=`Math.trunc(parts[2])` (0 when only 2 parts).
+        std::vector<std::string> parts;
+        std::size_t p0 = 0;
+        for (;;) {
+            const std::size_t bar = arg.find('|', p0);
+            if (bar == std::string::npos) {
+                parts.push_back(arg.substr(p0));
+                break;
+            }
+            parts.push_back(arg.substr(p0, bar - p0));
+            p0 = bar + 1;
+        }
+        if (parts.size() < 2) {
+            note_unanswerable(token);
+            return false;
+        }
+        if (field == "Item") {
+            out = parts[0];
+            return true;
+        }
+        if (field == "Recipe") {
+            out = parts[1];
+            return true;
+        }
+        if (field == "DeliveryTime") {
+            long long h = 0;
+            if (parts.size() == 3) query_parse_int(parts[2], h);
+            out = std::to_string(h);
             return true;
         }
         note_unanswerable(token);
