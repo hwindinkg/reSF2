@@ -2554,6 +2554,8 @@ int main(int argc, char** argv) {
                 "?Battle[ZONE_1|BOSS_LYNX].Available",
                 "?Battle[ZONE_1|BOSS_LYNX].Name",
                 "?Battle[ZONE_1|BOSS_LYNX].Zone",
+                "?Battle[ZONE_1|BOSS_LYNX].Type",        // nYa L982 -> BOSSES
+                "?Fight[ZONE_1|BOSS_LYNX|BOSS_LYNX].Type",  // X3a L972 -> BOSSES
                 "?Battle[BOSS_LYNX].Available",
                 "?Sum[?Multi[100,?Player[].Level],30]",
                 "?Multi[7,6]",
@@ -2607,7 +2609,8 @@ int main(int argc, char** argv) {
                 "?Offer[DailyOffer_3_4].Description",     // -> "dailyOfferDescr"
                 "?Offer[DailyOffer_3_4].Image",           // Image attr -> ""
                 "?Offer[DailyOffer_3_4].ProfitImage",     // -> ""
-                "?Offer[DailyOffer_3_4].RealPrice",       // -> "$2.99"
+                "?Offer[DailyOffer_3_4].RealPrice",       // -> Ela markup
+                "?Item[Casket_Gems].RealPrice",           // -> "" (no xr)
                 "?Offer[DailyOffer_3_4].FocusOnBuy",      // -> WEAPON_VAL20_SAI
                 "?Offer[DailyOffer_3_4].ShowLastChance",  // -> "0"
                 "?Offer[DailyOffer_3_4].Type",            // lp() -> "1"

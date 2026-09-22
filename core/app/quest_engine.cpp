@@ -33,6 +33,111 @@ constexpr int kMaxActionDepth = 6;
 
 constexpr const char* kQuestResRoot = "reference/extracted/xml/res/";
 
+// --- RealPrice markup (JS `aa` L1217616-1217700) -------------------------
+// `aa.Z6` L1280957 = "+-*^(){}|/&#%=! "; `aa.pM` L1280988 = `Z6+"?.$,:;"`.
+// `Ela(a,b)` = `yxa(Dub(a),b)`; `Dub` escapes every `pM` char with `@`;
+// `yxa` collapses each `@X` (X in `pM`) into ONE codepoint `10240+g`
+// (`n0a` L1217655 = `String.fromCodePoint(10240+a)`). Chars outside `pM`
+// (and already-`@`-escaped pairs) pass through. The JS `b.Cq+=b.G` glyph
+// count drives layout only; the query result is the string alone.
+constexpr int kMarkupGlyphBase = 10240;
+const char* const kMarkupZ6 = "+-*^(){}|/&#%=! ";
+
+const std::string& markup_pm() {
+    static const std::string pm = std::string(kMarkupZ6) + "?.$,:;";
+    return pm;
+}
+
+// `Kg` L3847: true when any char is a digit; called on `charAt(0)`.
+bool js_any_digit(const std::string& s) {
+    for (char c : s) {
+        if (c > 47 && c < 58) return true;
+    }
+    return false;
+}
+
+// `aa.Dub` L1217628.
+std::string markup_dub(const std::string& a) {
+    const std::string& pm = markup_pm();
+    std::string r;
+    r.reserve(a.size() * 2);
+    char prev = '\\0';
+    bool have_prev = false;
+    for (char e : a) {
+        const bool skip = (e == '@') || (have_prev && prev == '@') ||
+                          (pm.find(e) == std::string::npos);
+        if (!skip) r.push_back('@');
+        r.push_back(e);
+        prev = e;
+        have_prev = true;
+    }
+    return r;
+}
+
+// `aa.yxa` L1217655.
+std::string markup_yxa(const std::string& a) {
+    if (a.find('@') == std::string::npos) return a;
+    const std::string& pm = markup_pm();
+    std::string r;
+    std::size_t d = 0;
+    while (d + 1 < a.size()) {
+        const char e = a[d];
+        const char f = a[d + 1];
+        if (e == '@') {
+            const std::size_t g = pm.find(f);
+            if (g != std::string::npos) {
+                const unsigned cp = unsigned(kMarkupGlyphBase + g);
+                r.push_back(char(0xE0 | (cp >> 12)));
+                r.push_back(char(0x80 | ((cp >> 6) & 0x3F)));
+                r.push_back(char(0x80 | (cp & 0x3F)));
+            } else {
+                r.push_back(e);
+                r.push_back(f);
+            }
+            d += 2;
+            if (d == a.size() - 1) {
+                r.push_back(a[d]);
+                break;
+            }
+        } else {
+            r.push_back(e);
+            ++d;
+            if (d == a.size() - 1) {
+                r.push_back(f);
+                break;
+            }
+        }
+    }
+    return r;
+}
+
+// `aa.Ela` L1217616 plus the shared RealPrice body (`cdb` L978 / `wfb` L992).
+std::string real_price_text(const std::string& xr) {
+    std::string a = xr;
+    if (!a.empty() && js_any_digit(a.substr(0, 1))) a = " " + a;
+    return markup_yxa(markup_dub(a));
+}
+
+// `p.F().Df` (L90916 `Wab`, 21 rows) + `b0`/`rAa` (L90727). The stages
+// `<Battle Type>` is the KEY; `pkb` L719570 sets `type = b0(key)`
+// (key -> FightXxx) and `?Fight.Type`/`?Battle.Type` read it back with
+// `rAa(type)` (value -> key). The round trip is the key when it is one of
+// the 21 shipped rows, else DUMMY (`b0` defaults to FightNone, `rAa` to
+// DUMMY).
+const char* fight_type_label(const std::string& key) {
+    static const char* const kKeys[] = {
+        "DUMMY", "TUTORIAL", "CHALLENGE", "BOSSES", "TOURNAMENT", "STORY",
+        "SURVIVAL", "TACTICS", "AUTO", "AI", "HIDDEN", "FAKE", "PVP",
+        "PERIODIC", "FINAL_BATTLE", "FINAL_BATTLE_REPLAYABLE",
+        "BOSSES_INTERMISSION", "REPLAYABLE", "BOSSES_REPLAYABLE",
+        "FINAL_BATTLE_TITAN", "RAID"};
+    for (const char* k : kKeys) {
+        if (key == k) return k;
+    }
+    return "DUMMY";
+}
+
+
 // D1 `He.S` L1047-1051: the `<Dialog Type>` values whose JS body ASSIGNS the
 // widget `C`. Only those reach the final `C!=null?...` branch, so only they
 // skip `(Ib.RP=!1, this.sa())` and PARK the serialized `Yb` (L954) until
@@ -493,6 +598,9 @@ bool QuestEngine::ensure_loaded(App& app) {
                         const std::string bname = b.attribute("Name").value();
                         if (!bname.empty() && battle_zone_.find(bname) == battle_zone_.end()) {
                             battle_zone_[bname] = zname;
+                            // `pkb` L719570: `this.type = p.F().b0(<Battle
+                            // Type>)`; the query maps it back via `rAa`.
+                            battle_type_[bname] = b.attribute("Type").value();
                         }
                     }
                 }
@@ -1332,6 +1440,19 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
             out = triple;
             return true;
         }
+        if (field == "Type") {
+            // `X3a` L972: `case "Type":a=p.F().rAa(c.type)`. The fight
+            // controller `dl` L726825 inherits the owning battle type
+            // (`IIa(c, fight, a.type, ...)` L98334 with `pkb` L719570),
+            // so the label is that battle stages `Type` key, else DUMMY.
+            const std::string battle = triple_field(triple, 1);
+            out = "DUMMY";
+            if (!battle.empty()) {
+                const auto it = battle_type_.find(battle);
+                if (it != battle_type_.end()) out = fight_type_label(it->second);
+            }
+            return true;
+        }
         if (field == "WinCount") {
             const WarriorSave& w = ctx.live(app);
             int wins = 0;
@@ -1444,6 +1565,13 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
             out = std::to_string(ci->price);
             return true;
         }
+        if (field == "RealPrice") {
+            // `cdb` L978: `a=c.xr; a!=null&&a!=""&&Kg(c.xr.charAt(0))&&
+            // (a=" "+a); c=new Ia; b.result=aa.Ela(a,c)`. `c.xr` = the
+            // list.xml RealPrice (`CatalogItem::offer_real_price`).
+            out = real_price_text(ci->offer_real_price);
+            return true;
+        }
         if (field == "Level") {
             // `cdb` L977: `case "Level":b.result=c.xf==null?"null":""+c.xf`.
             // A Level-less list.xml row answers the STRING "null".
@@ -1540,9 +1668,8 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
             // `case "RealPrice":a=d.item.xr; a!=null&&a!=""&&Kg(a.charAt(0))
             // &&(a=" "+a); b.result=aa.Ela(a,d)`. `Kg` L3847 = "any char is a
             // digit"; `charAt(0)` -> the first char. `Ela` L1217616 is the
-            // text-builder pass-through for a brace-free string.
-            out = d->offer_real_price;
-            if (!out.empty() && out[0] >= '0' && out[0] <= '9') out = " " + out;
+            // `Ela` L1217616 = `yxa(Dub(a))` (see `real_price_text`).
+            out = real_price_text(d->offer_real_price);
             return true;
         }
         if (field == "ShowLastChance") {
@@ -1712,8 +1839,18 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
                       : "0";
             return true;
         }
-        // `Type` maps through `p.F().rAa(c)` (a stages-fight-type table the
-        // port's `battle_zone_` index does not carry) -> UNKNOWN.
+        if (field == "Type") {
+            // `nYa` L982: `c="FightDummy"; a!=null&&(c=a.type); b.result=
+            // p.F().rAa(c)`. `a.type = p.F().b0(<Battle Type>)` (`pkb`
+            // L719570); the `b0`/`rAa` round trip is the stages `Type`
+            // key when known, else DUMMY (both defaults).
+            out = "DUMMY";
+            if (def_exists) {
+                const auto it = battle_type_.find(name);
+                if (it != battle_type_.end()) out = fight_type_label(it->second);
+            }
+            return true;
+        }
         note_unanswerable(token);
         return false;
     }
