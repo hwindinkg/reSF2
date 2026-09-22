@@ -571,31 +571,42 @@ void QuestEngine::apply_toggle_items(App& app, const std::string& label, bool on
     } catch (const std::exception&) {
         return;
     }
+    // `p.iMa(a,b)` L112419: `if (b ? p.o.vq(a,!0) : p.o.tnb(a)) b ?
+    // p.items.Jrb(a,p.o.bb()) : p.items.hnb(a)`. The FIRST half is the shop
+    // lock write — `vq` L267 (`<Shop><Lock Name=a>` + `R$.add`) or `tnb` L267
+    // (remove the `<Lock>` + `R$` entry). When the label is ALREADY in that
+    // state the toggle is false and the equip/unequip half is SKIPPED
+    // (JS-exact: `iMa` only calls `Jrb`/`hnb` on a successful toggle).
+    const bool toggled = on ? w.shop_lock_add(label) : w.shop_lock_remove(label);
     std::size_t n = 0;
-    for (WarriorSave::OwnedItem& oi : w.items) {
-        const CatalogItem* ci = catalog_find(app, oi.name);
-        if (ci == nullptr || ci->pack_label != label) continue;
-        if (!on) {
-            oi.equipped = false;
+    if (toggled) {
+        for (WarriorSave::OwnedItem& oi : w.items) {
+            const CatalogItem* ci = catalog_find(app, oi.name);
+            if (ci == nullptr || ci->pack_label != label) continue;
+            if (!on) {
+                oi.equipped = false;
+                ++n;
+                continue;
+            }
+            if (ci->type == "Armor") w.armor = ci->name;
+            else if (ci->type == "Helm") w.helm = ci->name;
+            else if (ci->type == "Ranged") w.ranged = ci->name;
+            else if (ci->type == "Magic") w.magic = ci->name;
+            else if (ci->type == "Weapon") w.weapon = ci->name;
+            oi.equipped = true;
             ++n;
-            continue;
         }
-        if (ci->type == "Armor") w.armor = ci->name;
-        else if (ci->type == "Helm") w.helm = ci->name;
-        else if (ci->type == "Ranged") w.ranged = ci->name;
-        else if (ci->type == "Magic") w.magic = ci->name;
-        else if (ci->type == "Weapon") w.weapon = ci->name;
-        oi.equipped = true;
-        ++n;
     }
-    if (n > 0) {
+    if (toggled || n > 0) {
         try {
             app.save().save(w);
         } catch (const std::exception&) {
         }
     }
-    std::fprintf(stdout, "[quest] ToggleItems %s=%s -> %zu owned item(s) %s\n",
-                 label.c_str(), on ? "on" : "off", n,
+    std::fprintf(stdout,
+                 "[quest] ToggleItems %s=%s -> lock %s, %zu owned item(s) %s\n",
+                 label.c_str(), on ? "on" : "off",
+                 toggled ? (on ? "granted" : "cleared") : "unchanged", n,
                  on ? "equipped (Jrb)" : "unequipped (hnb)");
     std::fflush(stdout);
 }

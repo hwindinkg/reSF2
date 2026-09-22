@@ -132,6 +132,16 @@ WarriorSave SaveSystem::load() {
         out.items.push_back(std::move(oi));
     }
 
+    // Shop locks (JS `p.o.R$`, ctor L124103; the `sc` parse L126188 walks
+    // every `<Shop>` child's `Name` -> `vq(name)` -> `R$.add`). The writer
+    // emits `<Shop><Lock Name="...">`.
+    out.shop_locks.clear();
+    for (pugi::xml_node lock : warrior.child("Shop").children("Lock")) {
+        if (lock.attribute("Name")) {
+            out.shop_locks.push_back(lock.attribute("Name").value());
+        }
+    }
+
     // Battle records (JS `iF`): `<Battles><Battle Name="...">` presence.
     out.battles.clear();
     for (pugi::xml_node b : warrior.child("Battles").children("Battle")) {
@@ -402,6 +412,24 @@ void SaveSystem::save(const WarriorSave& w) {
         // item row keeps the shipped shape (no spurious UpgradeLevel="0").
         if (oi.upgrade_level > 0) {
             item.append_attribute("UpgradeLevel").set_value(oi.upgrade_level);
+        }
+    }
+
+    // Shop locks (`p.o.R$` -> `<Shop><Lock Name>`; `vq` L267 appends, `tnb`
+    // L267 removes). Replace the `<Lock>` children; the `<Shop>` node is
+    // created lazily (`vq` L267 `ga.A("Shop") ?? ga.appendChild("Shop")`).
+    {
+        pugi::xml_node shop = warrior.child("Shop");
+        if (shop) {
+            std::vector<pugi::xml_node> old;
+            for (pugi::xml_node l : shop.children("Lock")) old.push_back(l);
+            for (const pugi::xml_node& l : old) shop.remove_child(l);
+        }
+        if (!w.shop_locks.empty()) {
+            if (!shop) shop = warrior.append_child("Shop");
+            for (const std::string& n : w.shop_locks) {
+                shop.append_child("Lock").append_attribute("Name").set_value(n.c_str());
+            }
         }
     }
 

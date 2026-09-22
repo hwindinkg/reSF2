@@ -288,9 +288,10 @@ struct QuestSideEffects {
     // else branch shows the notification + the flash and does NOT navigate).
     std::vector<std::string> menu_flashes;
     // `Io` L1107 (`EToggleItems`): `p.iMa(ba.Pc(a,Label), ba.Pc(a,Toggle)=="on")`
-    // — equip/unequip the named item (`p.iMa` L112418 -> `p.o.vq`/`tnb` +
-    // `p.items.Jrb`/`hnb`). The engine has no inventory-write path here ->
-    // record the resolved `label=toggle`.
+    // — `p.iMa` L112419 writes the shop lock (`p.o.vq`/`tnb` L267:
+    // `<Shop><Lock Name>` + `R$`) then equips/unequips the matching pack
+    // (`p.items.Jrb`/`hnb` L167). Record the resolved `label=toggle`; the
+    // write itself is applied by `apply_toggle_items`.
     std::vector<std::string> toggle_items;
     // `Pn` L1064 (`EDiscount`): the price override `getParameters` builds and
     // applies to the shop offer (`yf` + `p.o.xa.vu`). No offer model -> record.
@@ -648,10 +649,11 @@ public:
     int offer_price(const std::string& item, int base) const;
     std::size_t offer_count() const { return offers_.size(); }
 
-    // `p.iMa` (L112419) -> `p.items.Jrb`/`hnb` (L167): equip (`on`) / unequip
-    // every owned item whose catalog `lock` (PackLabel) equals `label`, and
-    // persist the save (`p.o.vq`/`tnb` + `Ir` L322). `--headless-loop`'s shop
-    // BUY/EQUIP path already writes the same slot + `Equipped` flags.
+    // `p.iMa` (L112419): the shop lock write (`p.o.vq`/`tnb` L267 —
+    // `<Shop><Lock Name>` + `R$`) then equip (`on`) / unequip every owned item
+    // whose catalog `lock` (PackLabel) equals `label` (`Jrb`/`hnb` L167,
+    // `Ir` L322), persisting the save. `Jrb`/`hnb` run ONLY on a successful
+    // lock toggle (JS-exact: `iMa` gates them on the `vq`/`tnb` result).
     void apply_toggle_items(App& app, const std::string& label, bool on);
 
     // `Pn.S` (L1064): build/replace (`on`) or clear the `yf` offer for `item`

@@ -59,7 +59,7 @@ void print_usage(const char* argv0) {
                   "                  [--fight] [--battle <name>] [--zone <name>]\n"
                   "                  [--dump-pose N] [--dump-clip <name>]\n"
                   "                  [--ui-tour] [--fidelity-tour] [--quest-verify]\n"
-                  "                  [--quest-query-probe]\n"
+                  "                  [--quest-query-probe] [--quest-action-probe]\n"
                   "                  [--dialog-verify] [--replay [file]] [--verify-input]\n"
                   "                  [--round-log] [--fx-probe] [--hit-audit]\n"
                   "  --watchdog N     RULE 0: force-exit a driver run after N seconds\n"
@@ -1416,6 +1416,9 @@ int main(int argc, char** argv) {
     bool changetab_probe = false;   // --changetab-probe: synthetic `Hn` action
     bool quest_query_probe = false;  // --quest-query-probe: Foreach query proof
     bool map_button_probe = false;   // --map-button-probe: Vb map-button proof
+    // --quest-action-probe: fire the shipped ToggleItems/Discount actions
+    // through the engine path and log the save/price before/after.
+    bool quest_action_probe = false;
     bool dialog_verify = false;     // --dialog-verify: headless dialog harness
     bool observe_dialogs = false;   // --observe-dialogs: keep the queue observable
     // --tutorial-real-verify: boot the REAL path (NO `fresh_tutorial` arm, NO
@@ -1533,6 +1536,8 @@ int main(int argc, char** argv) {
             quest_query_probe = true;
         } else if (arg == "--map-button-probe") {
             map_button_probe = true;
+        } else if (arg == "--quest-action-probe") {
+            quest_action_probe = true;
         } else if (arg == "--quest-verify-buy") {
             quest_verify = true;
             quest_verify_buy = true;
@@ -2823,6 +2828,179 @@ int main(int argc, char** argv) {
               "Map: StoryMapStage executes (Ya.rF empty stub)");
         const bool all = checks == passed;
         std::fprintf(stdout, "[changetab] RESULT %d/%d -> %s\n", passed, checks,
+                     all ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return all ? 0 : 1;
+    } else if (quest_action_probe) {
+        // --- `--quest-action-probe`: the shipped `ToggleItems`/`Discount` ----
+        // Neither action fires in ANY gate (their quests need a purchase/
+        // session condition), so this drives the SHIPPED actions directly
+        // through the engine's own parse path (`run_action_probe`) and logs
+        // the save/price before/after. Hidden window + RULE 0 watchdog
+        // (driver_mode). NO OS input, no visible window.
+        //
+        // `ToggleItems Label="ZONE_2" Toggle="on"` is the shipped
+        // quests.xml L3019 action; `ZONE_2` owns the shipped
+        // `WEAPON_CRESCENT_KNIVES` (list.xml PackLabel="ZONE_2"), so both
+        // halves of `p.iMa` (L112419: `p.o.vq`/`tnb` L267 + `Jrb`/`hnb`
+        // L167) are observable. `Discount Item=... Percent=25 Toggle=1` is
+        // the dynamic_discounts.xml L319 shape.
+        glfwHideWindow(app.renderer().window());
+        int checks = 0, passed = 0;
+        const auto check = [&](bool ok, const char* what) {
+            ++checks;
+            if (ok) ++passed;
+            std::fprintf(stdout, "[qa] %-58s %s\n", what, ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        };
+        const char* const kItem = "WEAPON_CRESCENT_KNIVES";  // PackLabel ZONE_2
+        const char* const kLabel = "ZONE_2";                 // quests.xml L3019
+        const auto fire_action =
+            [&](const char* tag,
+                const std::vector<std::pair<const char*, const char*>>& attrs) {
+                sf2::app::QuestAction act;
+                act.tag = tag;
+                for (const auto& kv : attrs) act.attrs[kv.first] = kv.second;
+                sf2::app::QuestJournal j;
+                app.quest_engine().run_action_probe(app, {act}, j);
+            };
+        const auto lock_present = [&](const char* name) -> int {
+            try {
+                return app.save().load().shop_lock_contains(name) ? 1 : 0;
+            } catch (const std::exception&) {
+                return -1;
+            }
+        };
+        const auto equipped_of = [&](const char* name) -> int {
+            try {
+                for (const auto& oi : app.save().load().items) {
+                    if (oi.name == name) return oi.equipped ? 1 : 0;
+                }
+            } catch (const std::exception&) {
+            }
+            return -1;  // not owned
+        };
+        const auto weapon_slot = [&]() -> std::string {
+            try {
+                return app.save().load().weapon;
+            } catch (const std::exception&) {
+                return std::string();
+            }
+        };
+        const auto base_price = [&](const char* name) -> int {
+            for (const sf2::app::CatalogItem& ci : sf2::app::load_full_catalog(app)) {
+                if (ci.name == name) return ci.price;
+            }
+            return 0;
+        };
+        const auto shown_price = [&](const char* name) -> int {
+            return app.quest_engine().offer_price(name, base_price(name));
+        };
+        // Seed a COPY: own the ZONE_2 weapon so the equip half is observable.
+        sf2::app::WarriorSave original;
+        bool have_original = false;
+        try {
+            original = app.save().load();
+            have_original = true;
+            sf2::app::WarriorSave seeded = original;
+            bool owned = false;
+            for (const auto& oi : seeded.items) {
+                if (oi.name == kItem) owned = true;
+            }
+            if (!owned) {
+                sf2::app::WarriorSave::OwnedItem oi;
+                oi.name = kItem;
+                oi.count = 1;
+                oi.equipped = false;
+                seeded.items.push_back(oi);
+            }
+            app.save().save(seeded);
+        } catch (const std::exception& e) {
+            std::fprintf(stdout, "[qa] seed failed: %s\n", e.what());
+        }
+        const int base = base_price(kItem);
+        // --- BEFORE -------------------------------------------------------
+        const int lock_before = lock_present(kLabel);
+        const int eq_before = equipped_of(kItem);
+        const std::string slot_before = weapon_slot();
+        const int price_before = shown_price(kItem);
+        std::fprintf(stdout,
+                     "[qa] BEFORE: lock(%s)=%d equipped(%s)=%d weapon=%s "
+                     "price(base %d)=%d\n",
+                     kLabel, lock_before, kItem, eq_before, slot_before.c_str(),
+                     base, price_before);
+        std::fflush(stdout);
+        // --- ToggleItems on (the lock-grant half of `iMa`) ----------------
+        fire_action("ToggleItems", {{"Label", kLabel}, {"Toggle", "on"}});
+        const int lock_on = lock_present(kLabel);
+        const int eq_on = equipped_of(kItem);
+        const std::string slot_on = weapon_slot();
+        std::fprintf(stdout,
+                     "[qa] AFTER  ToggleItems %s=on : lock=%d equipped=%d "
+                     "weapon=%s\n",
+                     kLabel, lock_on, eq_on, slot_on.c_str());
+        std::fflush(stdout);
+        check(lock_before == 0 && lock_on == 1,
+              "ToggleItems on: <Shop><Lock Name> granted + persisted");
+        check(eq_before == 0 && eq_on == 1,
+              "ToggleItems on: pack item equipped (Jrb)");
+        check(slot_on == kItem, "ToggleItems on: weapon slot written");
+        // --- ToggleItems on AGAIN (already locked): `vq` false -> no Jrb ---
+        {
+            sf2::app::WarriorSave w = app.save().load();
+            for (auto& oi : w.items) {
+                if (oi.name == kItem) oi.equipped = false;
+            }
+            w.weapon = "Fists";
+            app.save().save(w);
+        }
+        fire_action("ToggleItems", {{"Label", kLabel}, {"Toggle", "on"}});
+        const int lock_reon = lock_present(kLabel);
+        const int eq_reon = equipped_of(kItem);
+        std::fprintf(stdout,
+                     "[qa] AFTER  ToggleItems %s=on (again) : lock=%d equipped=%d\n",
+                     kLabel, lock_reon, eq_reon);
+        std::fflush(stdout);
+        check(lock_reon == 1 && eq_reon == 0,
+              "ToggleItems on (already locked): vq false -> no re-equip");
+        // --- ToggleItems off (the unlock half: `tnb` + `hnb`) -------------
+        fire_action("ToggleItems", {{"Label", kLabel}, {"Toggle", "off"}});
+        const int lock_off = lock_present(kLabel);
+        const int eq_off = equipped_of(kItem);
+        std::fprintf(stdout,
+                     "[qa] AFTER  ToggleItems %s=off : lock=%d equipped=%d\n",
+                     kLabel, lock_off, eq_off);
+        std::fflush(stdout);
+        check(lock_off == 0, "ToggleItems off: <Shop><Lock Name> removed (tnb)");
+        check(eq_off == 0, "ToggleItems off: pack item unequipped (hnb)");
+        // --- Discount on/off (the offer price shown/charged) --------------
+        fire_action("Discount",
+                    {{"Item", kItem}, {"Percent", "25"}, {"Toggle", "1"}});
+        const int price_on = shown_price(kItem);
+        std::fprintf(stdout,
+                     "[qa] AFTER  Discount %s Percent=25 Toggle=1 : "
+                     "shown/charged=%d (base %d)\n",
+                     kItem, price_on, base);
+        std::fflush(stdout);
+        check(base > 0 && price_before == base && price_on == (base * 75) / 100,
+              "Discount on: shop price shown/charged = base*0.75");
+        fire_action("Discount", {{"Item", kItem}, {"Toggle", "0"}});
+        const int price_off = shown_price(kItem);
+        std::fprintf(stdout,
+                     "[qa] AFTER  Discount %s Toggle=0 : shown/charged=%d\n",
+                     kItem, price_off);
+        std::fflush(stdout);
+        check(price_off == base, "Discount off: offer cleared -> base price");
+        // Restore the profile exactly as found.
+        if (have_original) {
+            try {
+                app.save().save(original);
+            } catch (const std::exception&) {
+            }
+        }
+        const bool all = checks == passed;
+        std::fprintf(stdout, "[qa] RESULT %d/%d -> %s\n", passed, checks,
                      all ? "PASS" : "FAIL");
         std::fflush(stdout);
         app.shutdown();

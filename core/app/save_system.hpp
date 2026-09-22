@@ -72,6 +72,45 @@ struct WarriorSave {
         return false;
     }
 
+    // Shop locks (JS `p.o.R$`, ctor L124103 `this.R$=new gd`; the `sc` save
+    // parse L126188 walks every `<Shop>` child and calls `vq(name)` for its
+    // `Name`). `vq(a,b)` L267 appends a `<Lock Name=a>` under `<Shop>` (when
+    // `b`) and adds `a`; `tnb(a)` L267 removes the matching `<Lock>` and `a`;
+    // `Uga(a)` L267 tests membership; `HJ(a)` L267 = `a!="" ? Uga(a) : true`.
+    // Written/read by SaveSystem (the `<Shop><Lock Name>` rows).
+    std::vector<std::string> shop_locks;
+
+    // `Uga(a)` L267: `a!="" && R$.contains(a)`.
+    bool shop_lock_contains(const std::string& name) const {
+        if (name.empty()) return false;
+        for (const std::string& s : shop_locks) {
+            if (s == name) return true;
+        }
+        return false;
+    }
+
+    // `HJ(a)` L267: `a!="" ? Uga(a) : true` — the empty/absent label is
+    // treated as locked (the `eMa`/`LCa` gates rely on this).
+    bool shop_is_locked(const std::string& name) const {
+        if (name.empty()) return true;
+        return shop_lock_contains(name);
+    }
+
+    // `vq(a,true)` L267: false when already locked (`HJ(a)`), else add + true.
+    bool shop_lock_add(const std::string& name) {
+        if (shop_is_locked(name)) return false;
+        shop_locks.push_back(name);
+        return true;
+    }
+
+    // `tnb(a)` L267: true only when it WAS in `R$` (removes the `<Lock>` row).
+    bool shop_lock_remove(const std::string& name) {
+        if (!shop_lock_contains(name)) return false;
+        shop_locks.erase(std::remove(shop_locks.begin(), shop_locks.end(), name),
+                         shop_locks.end());
+        return true;
+    }
+
     // Battle records (JS `iF`, `<Battles><Battle Name="ZONE_1|BOSS_LYNX|">`).
     // Presence = node progress record for the `WDa` unlock rule.
     std::vector<std::string> battles;
