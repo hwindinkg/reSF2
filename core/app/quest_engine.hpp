@@ -536,6 +536,26 @@ public:
     // read the `?`-queries actually MATCHED.
     std::size_t foreach_matches() const { return foreach_matches_; }
 
+    // --- `Ct` timer registry (JS `p.o.yl`, L291-292) ----------------------
+    // The shipped `<ActivateTimer Name=... Value=.../>` (quests.xml L2154) sets
+    // a named deadline (`bh.Nv`); `?Timer[Name].Value` (L988) reads the
+    // REMAINING seconds (`v.ZI` L1218); expiry fires `QUEST_EVENT_TIMER_END`
+    // (`Ct.swa` L292). Test hooks for the `--quest-query-probe` timer proof.
+    std::size_t timer_count() const { return timers_.size(); }
+    bool timer_present(const std::string& name) const {
+        return timers_.find(name) != timers_.end();
+    }
+    // `v.ZI(bh.Nv)` (L1218): remaining seconds (0 when past); -1 when absent.
+    double timer_remaining(const std::string& name) const;
+    // `Ct.swa` (L292) `Sf("QUEST_EVENT_TIMER_END")` dispatches so far.
+    std::size_t timer_end_fires() const { return timer_end_fires_; }
+    // `ha.F().ta.dza` (L292): the timer whose `TimerEnd` last fired.
+    const std::string& timer_end_name() const { return timer_end_name_; }
+    // `Ct.t_a(a)` (L292) against an explicit clock (the JS tick is
+    // parameterized by `p.Dc`): expire every `Nv <= now`, fire `TimerEnd`
+    // per timer, then remove them. Returns the expired count.
+    std::size_t run_timer_tick_for_test(App& app, double now);
+
     // --- tab tables (JS `vj` L1168-1169 / `uh` L1169) ---------------------
     // `vj.E0`: tab NAME -> index (0 = "Default", the JS default).
     static int tab_index_for_name(const std::string& name);
@@ -787,6 +807,17 @@ private:
     std::size_t tab_actions_ = 0;            // executed `ChangeTab` count
     std::size_t foreach_matches_ = 0;        // `zj.Qh` sub-quest match count
     std::string tab_owner_;                  // `Bj.DI` (ctor L1005)
+    // --- `Ct` (L291) timer registry (`p.o.yl`) ---------------------------
+    // `Uaa`/`H4` (L291): name -> absolute deadline `bh.Nv` in `p.Dc` seconds
+    // (`p.Dc=Math.round(Hb.instance.getTime())`, L178 — SECONDS, confirmed by
+    // the shipped `Value="86400"` = 24 h). `t_a` (L292) expires them; `swa`
+    // raises `TimerEnd`. `dza` (L292) is the firing timer's name.
+    std::map<std::string, double> timers_;
+    std::string timer_end_name_;       // `ha.F().ta.dza`
+    std::size_t timer_end_fires_ = 0;  // `Sf("QUEST_EVENT_TIMER_END")` count
+    void timer_activate(const std::string& name, double deadline);  // `Uaa`
+    void timer_end(const std::string& name);                        // `H4`
+    void tick_timers(App& app, double now);                         // `t_a`
 };
 
 // The `<Button Type>` slot census of the shipped quest tree (`quests.xml` plus

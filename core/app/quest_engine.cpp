@@ -8,6 +8,7 @@
 #include "app/quest_engine.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -651,6 +652,19 @@ double query_rng01() {
     return dist(gen);
 }
 
+// JS `p.Dc` (L178 `Math.round(Hb.instance.getTime())`, L1218 `v.f0()`): the
+// game clock in SECONDS. The shell has no `Hb` time source, so the port uses
+// the steady clock since first use — same monotonic seconds semantics.
+double quest_now() {
+    static const std::chrono::steady_clock::time_point epoch =
+        std::chrono::steady_clock::now();
+    const double s = std::chrono::duration<double>(
+                         std::chrono::steady_clock::now() - epoch)
+                         .count();
+    // `p.Dc=Math.round(Hb.instance.getTime())` (L178): integer SECONDS.
+    return std::round(s);
+}
+
 }  // namespace
 
 bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCtx& ctx,
@@ -767,6 +781,24 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
         }
         note_unanswerable(token);
         return false;
+    }
+    if (method == "Timer") {
+        // `uxb` L988: `c=a.Xl(); ... (a=d.yl.gJ(c), b.result=a!=null ?
+        // K.T(v.ZI(a.Nv)) : "")`. Only the `.Value` field is handled; `v.ZI`
+        // (L1218) = `a>b ? a-b : 0` — the REMAINING seconds. An absent timer
+        // yields "" (not UNKNOWN): the shipped `Not="1"` (`<=0`) gates on it.
+        if (field != "Value") {
+            note_unanswerable(token);
+            return false;
+        }
+        const auto it = timers_.find(arg);
+        if (it == timers_.end()) {
+            out = "";
+            return true;
+        }
+        const double now = quest_now();
+        out = query_num_to_string(it->second > now ? it->second - now : 0.0);
+        return true;
     }
     if (method == "Player") {
         const WarriorSave& w = ctx.live(app);
@@ -1643,14 +1675,33 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // controller. No duel-timer controller here -> record.
             fx.duel_timer_resets.push_back("reset");
         } else if (t == "ActivateTimer" || t == "Timer") {
-            // `yj` L1024 (`ETimer`/`EActivateTimer`): Name + Value + Absolute;
-            // `p.o.yl.Uaa(name, Absolute ? trunc(Value) : p.Dc+trunc(expr))`.
-            fx.timer_sets.push_back(
-                attr_or(a.attrs, "Name") + "=" + attr_or(a.attrs, "Value") +
-                (attr_bool01(attr_or(a.attrs, "Absolute", "0")) ? " (abs)" : ""));
+            // `yj` L1024-1025 (`ETimer`/`EActivateTimer`): Name + Value +
+            // Absolute. `S` does `p.o.yl.Uaa(name, Absolute ? trunc(kc(Value))
+            // : p.Dc + trunc(expr))` — `Uaa` (`bva` L291) REPLACES any
+            // same-name timer; a zero ABSOLUTE value is a no-op (L1025
+            // `a!=0 && Uaa`). Mutated live (the JS `S` runs during the pass),
+            // so a later `?Timer` in the same pass sees it.
+            const std::string tname =
+                quest_var(app, locals, attr_or(a.attrs, "Name"));
+            const std::string tval =
+                quest_var(app, locals, attr_or(a.attrs, "Value"));
+            const double v = is_numeric(tval) ? to_number(tval) : 0.0;
+            const bool abs = attr_bool01(attr_or(a.attrs, "Absolute", "0"));
+            if (abs) {
+                const double d = std::trunc(v);
+                if (d != 0.0) timer_activate(tname, d);
+            } else {
+                timer_activate(tname, quest_now() + std::trunc(v));
+            }
+            fx.timer_sets.push_back(tname + "=" + tval +
+                                    (abs ? " (abs)" : ""));
         } else if (t == "EndTimer") {
-            // `Rn` L1069 (`EEndTimer`): `p.o.yl.H4(Name)`.
-            fx.timer_ends.push_back(attr_or(a.attrs, "Name"));
+            // `Rn` L1069 (`EEndTimer`): `p.o.yl.H4(Name)` with NO 2nd arg, so
+            // `H4`'s `swa` is gated off — the timer is removed WITHOUT firing
+            // `TimerEnd`. Name is the RAW attribute (JS never `Pc`-resolves it).
+            const std::string tname = attr_or(a.attrs, "Name");
+            timer_end(tname);
+            fx.timer_ends.push_back(tname);
         } else if (t == "Foreach") {
             // `zj` L1072 (`EForeach`): `Sl = ha.F().AD(Name)` (`ha.AD`
             // L522769 = `m.find(this.OJa, b=>b.name==a)` — the NAMED
@@ -1899,6 +1950,54 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
     }
 }
 
+// --- `Ct` timer registry (JS `p.o.yl`, L291-292) --------------------------
+// `Uaa` (L291) -> `bva`: `this.H4(a.name); this.tq.set(a.name, a)` — replace.
+void QuestEngine::timer_activate(const std::string& name, double deadline) {
+    if (name.empty()) return;
+    timers_.erase(name);
+    timers_[name] = deadline;
+}
+// `H4` (L291): remove by name; the JS 2nd arg (which would `swa`) is absent.
+void QuestEngine::timer_end(const std::string& name) {
+    if (name.empty()) return;
+    timers_.erase(name);
+}
+// `t_a` (L292): fire `TimerEnd` for every `Nv <= now`, THEN remove them.
+void QuestEngine::tick_timers(App& app, double now) {
+    if (timers_.empty()) return;
+    std::vector<std::string> expired;
+    for (const auto& kv : timers_) {
+        if (kv.second <= now) expired.push_back(kv.first);
+    }
+    for (const std::string& name : expired) {
+        // `swa(a)` (L292): `this.iIa.Z(a); ha.F().ta.dza=a;
+        // ha.F().Sf("QUEST_EVENT_TIMER_END")`.
+        timer_end_name_ = name;
+        ++timer_end_fires_;
+        QuestJournal j;
+        try {
+            j.player_level = app.save().load().level;
+        } catch (const std::exception&) {
+        }
+        fire(app, "TimerEnd", j);
+    }
+    for (const std::string& name : expired) timers_.erase(name);
+}
+double QuestEngine::timer_remaining(const std::string& name) const {
+    const auto it = timers_.find(name);
+    if (it == timers_.end()) return -1.0;  // absent (JS `gJ` -> null)
+    const double now = quest_now();
+    return it->second > now ? it->second - now : 0.0;  // `v.ZI` L1218
+}
+std::size_t QuestEngine::run_timer_tick_for_test(App& app, double now) {
+    std::size_t n = 0;
+    for (const auto& kv : timers_) {
+        if (kv.second <= now) ++n;
+    }
+    tick_timers(app, now);
+    return n;
+}
+
 // --- live action execution ------------------------------------------------
 // The JS action classes do their work in `S(a)`; the port collects the
 // executable ones in `QuestSideEffects` and performs the navigations here.
@@ -2144,6 +2243,10 @@ void QuestEngine::tick(App& app) {
         return;
     }
     if (!loaded_) return;
+    // `xx` (L198): `p.o.yl.t_a(p.Dc)` every frame — expire due timers (each
+    // fires `TimerEnd`). Live path only (headless keeps the record-only
+    // contract, like the rest of `tick`).
+    tick_timers(app, quest_now());
     // `Ro` (L1119): resume every run whose frame delay elapsed.
     std::vector<PendingRun> due;
     for (std::size_t i = 0; i < pending_.size();) {

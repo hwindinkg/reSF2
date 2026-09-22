@@ -2582,6 +2582,42 @@ int main(int argc, char** argv) {
                      "sub-quest fired=%d, CurrentZone='%s' readback='%s'\n",
                      battle_unknown_after ? 1 : 0, fired ? 1 : 0, after_zone.c_str(),
                      after_readback.c_str());
+        // --- `Ct` timer registry proof (JS L291-292) ----------------------
+        // The SHIPPED `<ActivateTimer Name="Timer_StarterPack" Value="86400"/>`
+        // (quests.xml L2154) sets a 24 h deadline (`p.Dc` is in seconds);
+        // `?Timer[].Value` (L988) reads the remaining seconds; the tick (`t_a`
+        // L292) fires `QUEST_EVENT_TIMER_END` and removes the timer.
+        bool timer_ok = false;
+        {
+            sf2::app::QuestAction ta;
+            ta.tag = "ActivateTimer";
+            ta.attrs["Name"] = "Timer_StarterPack";
+            ta.attrs["Value"] = "86400";
+            const sf2::app::QuestJournal tj;
+            const std::size_t fires0 = app.quest_engine().timer_end_fires();
+            app.quest_engine().run_action_probe(app, {ta}, tj);
+            const bool present =
+                app.quest_engine().timer_present("Timer_StarterPack");
+            const double rem =
+                app.quest_engine().timer_remaining("Timer_StarterPack");
+            const std::string qv = app.quest_engine().resolve_for_test(
+                app, "?Timer[Timer_StarterPack].Value", tj);
+            std::fprintf(stdout,
+                         "[qtimer] BEFORE: ActivateTimer Timer_StarterPack=86400 "
+                         "present=%d remaining=%.0f ?Timer[].Value='%s'\n",
+                         present ? 1 : 0, rem, qv.c_str());
+            const std::size_t expired =
+                app.quest_engine().run_timer_tick_for_test(app, 1.0e9);
+            const std::size_t fires1 = app.quest_engine().timer_end_fires();
+            const bool gone =
+                !app.quest_engine().timer_present("Timer_StarterPack");
+            std::fprintf(stdout,
+                         "[qtimer] AFTER:  tick(1e9) expired=%zu fires=%zu "
+                         "present=%d\n",
+                         expired, fires1, gone ? 0 : 1);
+            timer_ok = present && rem > 86390.0 && qv == "86400" &&
+                       expired >= 1 && fires1 > fires0 && gone;
+        }
         int checks = 0, passed = 0;
         const auto check = [&](bool ok, const char* what) {
             ++checks;
@@ -2614,6 +2650,7 @@ int main(int argc, char** argv) {
         } catch (const std::exception&) {
         }
         check(!local_in_save, "SetVariable Local NOT persisted (in-memory only)");
+        check(timer_ok, "shipped ActivateTimer -> ?Timer[] -> TimerEnd fired");
         const bool all = checks == passed;
         std::fprintf(stdout, "[qquery] RESULT %d/%d -> %s\n", passed, checks,
                      all ? "PASS" : "FAIL");
