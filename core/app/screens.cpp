@@ -10263,6 +10263,14 @@ void ShopScreen::arm_preview(App& app, const CatalogItem& it) {
 // Defined further below, with the other shop slot statics.
 void shop_apply_slot(WarriorSave& w, const std::string& type, const std::string& name);
 
+// `p.o.xa.vu()` L301 -> `item.uu(p.o.bb())`: the effective gold price of an
+// item = the live `Discount` offer (`yf.KA`) while one is active, else the
+// list.xml `Price` (`Ofa()`). The shop DISPLAYS (detail plate) and CHARGES
+// (`Pa.iwa` L1228) this value.
+int shop_effective_price(App& app, const CatalogItem& it) {
+    return app.quest_engine().offer_price(it.name, it.price);
+}
+
 // `Ne.ZYa` L2251 (`Pa.iwa(this.Ch) && p.o.xa.$o(this.Ch,!0), this.Sr()`) =
 // the shop's BUY + EQUIP at the `M8` GoldButton, gated by `Pa.iwa` L1228
 // (`p.o.Tb >= a.jp()`; else `v.Bv(a,2)` = the "not enough" notice). The timed
@@ -10275,16 +10283,19 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     } catch (const std::exception&) {
         return false;
     }
-    if (bw.money < bit.price) {
+    // `Pa.iwa` L1228 money gate `p.o.Tb >= a.jp()`: the charged price is the
+    // offer-aware one (`p.o.xa.vu()` -> `yf.KA`), not the raw list.xml `Price`.
+    const int price = shop_effective_price(app, bit);
+    if (bw.money < price) {
         // `Pa.iwa` L1228 else: `v.Bv(a,2)` — the "not enough" notice.
         std::fprintf(stdout,
                      "[shop] Pi confirm Pa.iwa v.Bv(a,2): NOT ENOUGH MONEY for %s "
                      "(need %d, have %d)\n",
-                     bit.name.c_str(), bit.price, bw.money);
+                     bit.name.c_str(), price, bw.money);
         std::fflush(stdout);
         return false;
     }
-    bw.money -= bit.price;
+    bw.money -= price;
     // `Pa.iwa` L1228 picks the branch: `a.Ec>0 ? d=Pa.y2a(a) : c=d=Pa.gI(a,
     // true,false)`. The two helpers play DIFFERENT ids: `Pa.y2a` L1227 ends
     // `b&&rb.QS()` = `ta.ak("snd_upgrade")` (id 65596) and `Pa.gI` L1227 ends
@@ -10304,7 +10315,7 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
         std::fprintf(stdout,
                      "[shop] Pi confirm Pa.iwa (Ec) -> ORDERED %s price=%d -> "
                      "arrives in %ds (no equip)\n",
-                     bit.name.c_str(), bit.price, bit.delivery_sec);
+                     bit.name.c_str(), price, bit.delivery_sec);
         std::fflush(stdout);
         return true;
     }
@@ -10324,7 +10335,7 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     std::fprintf(stdout,
                  "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%d -> money %d"
                  " + EQUIPPED ($o)%s\n",
-                 bit.name.c_str(), bit.price, bw.money,
+                 bit.name.c_str(), price, bw.money,
                  tut_buy ? ", step -> MAP (Ao)" : "");
     std::fflush(stdout);
     return true;
@@ -11179,7 +11190,8 @@ void ShopScreen::render_impl(App& app) {
         }
         try_draw_atlas_button(app, "gold", cx0 + 30.0f, byy, 40.0f, 40.0f, 1.0f, false, false);
         draw_ui_label(app, cx0 + 56.0f, byy - 15.0f, cw0 - 56.0f, 30.0f,
-                      std::to_string(sel_it->price), 0.9f, UiAlign::Left, 0.15f, 0.10f, 0.05f);
+                      std::to_string(shop_effective_price(app, *sel_it)), 0.9f, UiAlign::Left,
+                      0.15f, 0.10f, 0.05f);
         // `Pi` purchase panel up (`Oa.Ex(a,7)` L2301): the `M8` plate IS the
         // confirm (`Ao.Qg` L1120 -> `Pa.iwa`), so it is highlighted + labelled.
         if (buy_armed_ >= 0) {

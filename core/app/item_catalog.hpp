@@ -42,6 +42,11 @@ struct CatalogItem {
     std::string name;       // Name ("WEAPON_KNIVES")
     std::string type;       // Type ("Weapon"/"Armor"/"Helm"/"Ranged"/"Magic")
     std::string subtype;    // SubType ("Knives", "" for armor/helm)
+    // PackLabel — the JS item `lock` (`pL` L322: `this.lock = PackLabel ??
+    // GroupID`). Groups a shop pack / equipment set; the `ToggleItems` action
+    // (`Io` L1107 -> `p.items.Jrb`/`hnb` L167) equips/unequips every item whose
+    // `lock` matches the resolved Label.
+    std::string pack_label;
     std::string model;      // Model ("mdl_weapon_knives", "" when none)
     std::string image;      // Image (the shop card art ref)
     int price = 0;          // Price (gold; the JS `jp()` uses `mi` when no

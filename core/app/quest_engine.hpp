@@ -350,6 +350,18 @@ struct EngineMapButton {
     std::string show_type;  // `Kr` (L2177 default "Both")
 };
 
+// `yf` (L1246): the offer object. `Pn.S` (L1064, `EDiscount`) builds one per
+// discounted item and stores it at `p.o.xa.<item>.Gp`; `p.o.xa.vu()` (L301 ->
+// `item.uu(p.o.bb())`) then re-derives the item's displayed/charged price.
+struct EngineItemOffer {
+    std::string item;          // `yf.og` (the list.xml Name)
+    int percent = 0;           // `yf.TP` (`K.T(e)`; the `<Offer Percent>`)
+    int price = 0;             // `yf.KA` = base * ((100 - percent) / 100)
+    bool sale = false;         // `yf.V4` (the `<Sale>` flag)
+    long long end_time = 0;    // `yf.yn` (0 = no expiry; `p.Dc + Period + tz`)
+    bool active = true;        // `yf.fE`
+};
+
 class QuestEngine {
 public:
     QuestEngine() = default;
@@ -628,7 +640,29 @@ public:
     std::size_t unanswerable_count() const { return logged_queries_.size(); }
     const std::set<std::string>& unanswerable_queries() const { return logged_queries_; }
 
+    // --- offer/price model (`yf` L1246 + `Pn.S` L1064, `EDiscount`) --------
+    // The live `p.o.xa.<item>.Gp` offer, or null when the item carries none.
+    // `offer_price` is the `item.uu(p.o.bb())` read (`p.o.xa.vu()` L301): the
+    // `yf.KA` override while an active offer exists, else the list.xml base.
+    const EngineItemOffer* offer_for(const std::string& item) const;
+    int offer_price(const std::string& item, int base) const;
+    std::size_t offer_count() const { return offers_.size(); }
+
+    // `p.iMa` (L112419) -> `p.items.Jrb`/`hnb` (L167): equip (`on`) / unequip
+    // every owned item whose catalog `lock` (PackLabel) equals `label`, and
+    // persist the save (`p.o.vq`/`tnb` + `Ir` L322). `--headless-loop`'s shop
+    // BUY/EQUIP path already writes the same slot + `Equipped` flags.
+    void apply_toggle_items(App& app, const std::string& label, bool on);
+
+    // `Pn.S` (L1064): build/replace (`on`) or clear the `yf` offer for `item`
+    // with `KA = base * ((100 - percent) / 100)`; `Toggle="0"` -> `b.G.E4()`.
+    void apply_discount(App& app, const std::string& item, int percent, bool on);
+
 private:
+    // `p.o.xa.<item>.Gp` (the live per-item offer; `Pn.S` L1064 writes it,
+    // `p.o.xa.vu()` L301 + the shop price render read it).
+    std::map<std::string, EngineItemOffer> offers_;
+
     // One condition-evaluation context (the JS `Bj` journal `ta` plus the
     // live save snapshot the `?`-queries read).
     struct EvalCtx {

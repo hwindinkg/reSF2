@@ -37,6 +37,9 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         if (item.attribute("Name")) ci.name = item.attribute("Name").value();
         if (item.attribute("Type")) ci.type = item.attribute("Type").value();
         if (item.attribute("SubType")) ci.subtype = item.attribute("SubType").value();
+        // JS `pL` L322: `lock` = `PackLabel` (the GroupID fallback never occurs
+        // in the shipped list.xml — 378 `PackLabel`, 0 `GroupID`).
+        if (item.attribute("PackLabel")) ci.pack_label = item.attribute("PackLabel").value();
         if (item.attribute("Model")) ci.model = item.attribute("Model").value();
         if (item.attribute("Image")) ci.image = item.attribute("Image").value();
         ci.price = sf2::data::xml_attr_int(item, "Price", 0);

@@ -556,6 +556,90 @@ const CatalogItem* QuestEngine::catalog_find(App& app, const std::string& name) 
     return nullptr;
 }
 
+// `p.iMa` L112419 -> `p.items.Jrb`/`hnb` L167. `Jrb(a,b)` walks every catalog
+// item whose `lock` (`pL` L322 = PackLabel) equals `a` and equips it (`eMa`
+// L167 -> `Ir(true)` L322 `this.yj=a`); `hnb(a)` unequips the same set
+// (`Ir(false)`). The port stores the equip as the type slot (weapon/armor/
+// helm/ranged/magic) plus the `OwnedItem::equipped` flag — the identical write
+// the shop's `Pa.iwa` + `$o` (`ZYa` L2251) path performs, so the shop, profile
+// and loadout read it back.
+void QuestEngine::apply_toggle_items(App& app, const std::string& label, bool on) {
+    if (label.empty()) return;
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return;
+    }
+    std::size_t n = 0;
+    for (WarriorSave::OwnedItem& oi : w.items) {
+        const CatalogItem* ci = catalog_find(app, oi.name);
+        if (ci == nullptr || ci->pack_label != label) continue;
+        if (!on) {
+            oi.equipped = false;
+            ++n;
+            continue;
+        }
+        if (ci->type == "Armor") w.armor = ci->name;
+        else if (ci->type == "Helm") w.helm = ci->name;
+        else if (ci->type == "Ranged") w.ranged = ci->name;
+        else if (ci->type == "Magic") w.magic = ci->name;
+        else if (ci->type == "Weapon") w.weapon = ci->name;
+        oi.equipped = true;
+        ++n;
+    }
+    if (n > 0) {
+        try {
+            app.save().save(w);
+        } catch (const std::exception&) {
+        }
+    }
+    std::fprintf(stdout, "[quest] ToggleItems %s=%s -> %zu owned item(s) %s\n",
+                 label.c_str(), on ? "on" : "off", n,
+                 on ? "equipped (Jrb)" : "unequipped (hnb)");
+    std::fflush(stdout);
+}
+
+// `Pn.S` L1064: `l = base.Ofa() * ((100 - e.G) / 100)`; `g=new yf(n,
+// "#internalQuest#", a, g.G, k.G); g.KA=l; g.TP=K.T(e)` then
+// `p.o.xa.<item>.Gp = g` + `p.o.xa.vu()` (L301). `Toggle="0"` takes the
+// `f.G<0 -> b.G.E4()` branch (clear the offer).
+void QuestEngine::apply_discount(App& app, const std::string& item, int percent, bool on) {
+    if (item.empty()) return;
+    if (!on || percent <= 0) {
+        offers_.erase(item);
+        std::fprintf(stdout, "[quest] Discount %s toggle=0 -> offer cleared (E4)\n",
+                     item.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    const CatalogItem* ci = catalog_find(app, item);
+    const int base = ci != nullptr ? ci->price : 0;
+    EngineItemOffer o;
+    o.item = item;
+    o.percent = percent;
+    o.sale = false;
+    o.end_time = 0;
+    o.active = true;
+    o.price = static_cast<int>(std::trunc(static_cast<double>(base) *
+                                          (100.0 - static_cast<double>(percent)) / 100.0));
+    offers_[item] = o;
+    std::fprintf(stdout, "[quest] Discount %s percent=%d -> price %d (base %d, vu)\n",
+                 item.c_str(), percent, o.price, base);
+    std::fflush(stdout);
+}
+
+const EngineItemOffer* QuestEngine::offer_for(const std::string& item) const {
+    const auto it = offers_.find(item);
+    return it == offers_.end() ? nullptr : &it->second;
+}
+
+int QuestEngine::offer_price(const std::string& item, int base) const {
+    const EngineItemOffer* o = offer_for(item);
+    if (o == nullptr || !o->active) return base;
+    return o->price;
+}
+
 // The list.xml `BonusPrice` (the JS item `od`). `CatalogItem` does not carry
 // it, so it is read direct from the catalog file and cached.
 int QuestEngine::catalog_bonus_price(App& app, const std::string& name) const {
@@ -1655,24 +1739,32 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // matches: silent no-op. (Neither tag occurs in any shipped XML.)
         } else if (t == "ToggleItems") {
             // `Io` L1107 (`EToggleItems`): `Toggle` (default "on"), `Label`
-            // (default ""); `p.iMa(ba.Pc(a,Label), ba.Pc(a,Toggle)=="on")`
-            // (`p.iMa` L112418 -> `p.o.vq`/`tnb` + `p.items.Jrb`/`hnb`:
-            // equip/unequip the item). No inventory-write path here -> record.
+            // (default ""); `p.iMa(ba.Pc(a,Label), ba.Pc(a,Toggle)=="on")`.
+            // `p.iMa` L112419 -> `p.o.vq`/`tnb` L267 + `p.items.Jrb`/`hnb`
+            // L167: `Jrb` equips every catalog item whose `lock` (= PackLabel,
+            // `pL` L322) matches the label (`eMa` L167 -> `Ir(true)` L322
+            // `this.yj=a`); `hnb` unequips them (`Ir(false)`). The port writes
+            // the owned item's type slot + `equipped` flag into the save — the
+            // same write the shop's `Pa.iwa` + `$o` path performs.
             const std::string label = quest_var(app, locals, attr_or(a.attrs, "Label"));
-            const std::string toggle = attr_or(a.attrs, "Toggle", "on");
+            const std::string toggle = quest_var(app, locals, attr_or(a.attrs, "Toggle", "on"));
+            apply_toggle_items(app, label, toggle == "on");
             fx.toggle_items.push_back(label + "=" + (toggle == "on" ? "on" : "off"));
         } else if (t == "Discount") {
-            // `Pn` L1064 (`EDiscount`): Item/Percent/Toggle/NewAmount/
-            // NewPrice/Period/Sale; `getParameters` builds the `yf` price
-            // override and applies it to the shop offer, then `p.o.xa.vu()`.
-            // No offer/price model -> record the parsed request.
-            fx.discounts.push_back(
-                attr_or(a.attrs, "Item") + ":" + attr_or(a.attrs, "Percent") +
-                ":toggle=" + attr_or(a.attrs, "Toggle") +
-                ":newAmount=" + attr_or(a.attrs, "NewAmount", "0") +
-                ":newPrice=" + attr_or(a.attrs, "NewPrice") +
-                ":period=" + attr_or(a.attrs, "Period", "0") +
-                ":sale=" + attr_or(a.attrs, "Sale"));
+            // `Pn` L1064 (`EDiscount`): `Item`, `Percent`, `Toggle` (the
+            // NewAmount/NewPrice/Period/Sale attrs carry no shipped use).
+            // `getParameters` (L1065) resolves `Item`/`Percent` through the
+            // formula lexer; `S` (L1065) builds `new yf(item,"#internalQuest#",
+            // end,amount,price)` with `KA = base * ((100-percent)/100)`, stores
+            // it at `p.o.xa.<item>.Gp`, then `p.o.xa.vu()` (L301) re-derives.
+            // `Toggle="0"` clears it (`b.G.E4()`).
+            const std::string ditem = quest_var(app, locals, attr_or(a.attrs, "Item"));
+            const std::string dtgl = quest_var(app, locals, attr_or(a.attrs, "Toggle"));
+            const std::string dpct = quest_var(app, locals, attr_or(a.attrs, "Percent"));
+            const int percent = static_cast<int>(std::strtod(dpct.c_str(), nullptr));
+            const bool don = std::strtod(dtgl.c_str(), nullptr) > 0.0;
+            apply_discount(app, ditem, percent, don);
+            fx.discounts.push_back(ditem + ":" + dpct + ":toggle=" + (don ? "1" : "0"));
         } else if (t == "ShowMapButton") {
             // `wo` L1100-1101 (`EShowMapButton`): builds an `hg` from the
             // resolved attrs and calls `Vb.F().Lua(b,null,!0)`. `Lua` (L2167)
