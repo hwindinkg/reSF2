@@ -6104,6 +6104,38 @@ void draw_dialog_buttons(App& app, const EngineDialog& d, const DialogAnim& anim
     }
 }
 
+// `He.Gz` L1058 (`this.Yca`): the `DifficultyOf` fight's difficulty number.
+// The JS resolves the fight record (`p.Wv`) and returns `-1` when it is null
+// (`b!=null&&(a=v.EQ(b.Xs),a=b.Gz(v.cw(),a))`); the port has no fight-power
+// model, so an unresolved fight yields the JS default.
+int dialog_difficulty_value(App& app, const EngineDialog& d) {
+    (void)app;
+    if (d.difficulty_fight.empty()) return -1;  // `Yca==""` -> `a=-1`
+    return -1;  // `p.Wv` miss -> `a=-1`
+}
+
+// `He.Wib` L1058-1059: the `CheckBox` row (`uv`, `this.Gg`). The box is a
+// togglable plate; `InitialValue=="1"` draws the checked state.
+void draw_dialog_extras(App& app, const OdLayout& L, const EngineDialog& d) {
+    const float c = L.panel.c > 0.0f ? L.panel.c : 1.0f;
+    float y = L.body_y + L.body_h + 8.0f * c;
+    if (!d.difficulty_fight.empty()) {
+        const std::string num = std::to_string(dialog_difficulty_value(app, d));
+        draw_ui_label(app, L.body_x, y, L.body_w, 28.0f, num, 0.8f, UiAlign::Left,
+                      0.12f, 0.09f, 0.06f);
+        y += 30.0f * c;
+    }
+    if (d.has_checkbox) {
+        const float box = 24.0f * c;
+        const bool on = d.checkbox.initial_value == "1";
+        draw_flat_button(app, on ? "x" : "", L.body_x + box * 0.5f,
+                         y + box * 0.5f, box, box, 0.35f, 0.30f, 0.22f, false);
+        draw_ui_label(app, L.body_x + box + 8.0f * c, y, L.body_w - box, 28.0f,
+                      loc(app, d.checkbox.text, d.checkbox.text), 0.8f, UiAlign::Left,
+                      0.12f, 0.09f, 0.06f);
+    }
+}
+
 // `Xc.Xhb` L931 -> `Wb.openDialog(280, new mv(..))` -> `Od`: the `Wb` dim +
 // `od` 9-slice + `Vc` title + the `Image` avatar + the CURRENT page row
 // (`Od.EF`/`Od.X2` L1946/L1950) + the plate row.
@@ -6116,6 +6148,7 @@ void draw_od280_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     draw_dialog_portrait(app, d, L);
     draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, L.body_h, dialog_page_body(app, d),
                     0.70f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
+    draw_dialog_extras(app, L, d);
     draw_dialog_buttons(app, d, anim);
 }
 
@@ -6147,6 +6180,7 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
                         dialog_page_body(app, d), 0.70f, UiAlign::Left, 0.12f, 0.09f,
                         0.06f);
     }
+    draw_dialog_extras(app, L, d);
     draw_dialog_buttons(app, d, anim);
 }
 

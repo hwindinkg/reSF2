@@ -3341,6 +3341,92 @@ int main(int argc, char** argv) {
             std::fprintf(stdout,
                          "[qa] GivePerk Player probe skipped (no perk catalog)\n");
         }
+        // --- `He.jkb` L1056-1057 row-button: the `DeliveryDelay` bug ---------
+        // Before the fix a `DeliveryDelay` row was not a row at all, so its
+        // nested `<GiveItem>` NEVER ran (the shipped quests.xml L1395 shape).
+        // Prove the child now runs through the row-button dispatch
+        // (`He.dhb` L1061 `a<this.eOa`, first row id 5).
+        {
+            const int before_cnt = owned_count("Energy_Refill");
+            sf2::app::QuestAction dlg;
+            dlg.tag = "Dialog";
+            dlg.attrs["Type"] = "Multiline";
+            dlg.attrs["Title"] = "_Title_Assistant";
+            sf2::app::QuestAction row;
+            row.tag = "DeliveryDelay";
+            row.attrs["Item"] = "Energy_Refill";
+            row.attrs["Text"] = "dlgInstantBuyMessage1";
+            row.attrs["ButtonText"] = "dlgStoryBtnMore";
+            sf2::app::QuestAction give;
+            give.tag = "GiveItem";
+            give.attrs["Name"] = "Energy_Refill";
+            give.attrs["PutOn"] = "1";
+            give.attrs["Quantity"] = "0";
+            row.children.push_back(give);
+            dlg.children.push_back(row);
+            sf2::app::QuestJournal dj;
+            app.quest_engine().run_action_probe(app, {dlg}, dj);
+            const bool queued = app.quest_engine().has_dialog();
+            const int mid_cnt = owned_count("Energy_Refill");
+            app.quest_engine().press_dialog(app, 5);  // row id 5 (`this.eOa`)
+            const int after_cnt = owned_count("Energy_Refill");
+            std::fprintf(stdout,
+                         "[qa] DELIVERYDELAY row: queued=%d owned %d->%d "
+                         "(after press id5) ->%d\n",
+                         queued ? 1 : 0, before_cnt, mid_cnt, after_cnt);
+            std::fflush(stdout);
+            check(queued && mid_cnt == before_cnt && after_cnt > before_cnt,
+                  "DeliveryDelay nested <GiveItem> runs (row-button id 5)");
+        }
+        // --- `sh` `BuyItem` (`EBuyItem` g="1D4" L526589) Ruby path ----------
+        // `Energy_Refill` (list.xml L2318, BonusPrice=5); the shipped form is
+        // quests.xml L1762 `<BuyItem Name="Energy_Refill" Currency="Ruby"/>`
+        // inside the Right plate. `YDa` L107236 case 2 reads `p.o.fd` (the
+        // port's `bonus`), so seed that balance.
+        {
+            sf2::app::WarriorSave w = app.save().load();
+            w.bonus += 100;  // seed the Ruby (bonus) balance
+            app.save().save(w);
+            const int bonus_before = app.save().load().bonus;
+            const int cnt_before = owned_count("Energy_Refill");
+            const std::size_t buys_before = app.quest_engine().purchase_actions();
+            sf2::app::QuestAction dlg;
+            dlg.tag = "Dialog";
+            dlg.attrs["Type"] = "Multiline";
+            dlg.attrs["Title"] = "_Title_Assistant";
+            sf2::app::QuestAction line;
+            line.tag = "Line";
+            line.attrs["Text"] = "dlgBuyEnergyMessage1";
+            dlg.children.push_back(line);
+            sf2::app::QuestAction btn;
+            btn.tag = "Button";
+            btn.attrs["Type"] = "Right";
+            btn.attrs["Color"] = "Green";
+            btn.attrs["Text"] = "dlgStoryBtnBuyEnergyForGems";
+            sf2::app::QuestAction buy;
+            buy.tag = "BuyItem";
+            buy.attrs["Name"] = "Energy_Refill";
+            buy.attrs["Currency"] = "Ruby";
+            btn.children.push_back(buy);
+            dlg.children.push_back(btn);
+            sf2::app::QuestJournal bj;
+            app.quest_engine().run_action_probe(app, {dlg}, bj);
+            app.quest_engine().press_dialog(app, 1);  // the Right plate
+            const int bonus_after = app.save().load().bonus;
+            const int cnt_after = owned_count("Energy_Refill");
+            const std::size_t buys_after = app.quest_engine().purchase_actions();
+            const int price =
+                app.quest_engine().bonus_price(app, "Energy_Refill");
+            std::fprintf(stdout,
+                         "[qa] BUYITEM Ruby: bonus %d->%d (price=%d) owned %d->%d "
+                         "purchase %zu->%zu\n",
+                         bonus_before, bonus_after, price, cnt_before, cnt_after,
+                         buys_before, buys_after);
+            std::fflush(stdout);
+            check(price > 0 && bonus_after == bonus_before - price &&
+                      cnt_after > cnt_before && buys_after == buys_before + 1,
+                  "BuyItem Ruby (Energy_Refill) -> deduct bonus + grant + Purchase");
+        }
         // Restore the profile exactly as found.
         if (have_original) {
             try {

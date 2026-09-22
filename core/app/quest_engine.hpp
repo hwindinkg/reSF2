@@ -214,6 +214,31 @@ struct EngineDialog {
     // dismissal, not a frame count.
     std::vector<QuestAction> continuation;
     std::map<std::string, std::string> continuation_locals;
+    // `He.jkb` (L1056): the row content type — `PriceLine`->1, `LineButton`->2,
+    // every other row tag (`Line`/`DeliveryDelay`)->0. Parallel to `lines`.
+    std::vector<int> line_content_types;
+    // `He.jkb` (L1056-1057): a row carrying `Item`/`Enchantment` becomes a row
+    // button (`tv`, pushed to `this.ima`) whose nested actions are its own
+    // sub-`Yb`; `He.dhb` (L1061 `a<this.eOa`, ids from 5) dispatches it by id.
+    // The port keeps one action list per row (parallel to `lines`) and
+    // `press_dialog` runs it by row id. Before this the nested `<GiveItem>` of
+    // a `DeliveryDelay` row was dropped entirely (a real divergence).
+    std::vector<std::vector<QuestAction>> line_actions;
+    // `He.gjb` (L1058): `DifficultyOf Fight` -> `this.Yca` (the resolved fight
+    // triple). `He.Gz()` resolves it and returns the difficulty number.
+    std::string difficulty_fight;
+    // `He.Wib` (L1058-1059): the `CheckBox` row (`uv`, `this.Gg`).
+    // `InitialValue`/`Text` are parse attrs; `<On>` -> `kY`, `<Off>` -> `jY`
+    // (`He.dhb` L1061 `a==3`/`a==4`). `align_middle` mirrors `YO`.
+    struct CheckBox {
+        std::string text;
+        std::string initial_value;
+        std::vector<QuestAction> on;
+        std::vector<QuestAction> off;
+        bool align_middle = false;
+    };
+    bool has_checkbox = false;
+    CheckBox checkbox;
 };
 // One `<Battles>` write a quest action asks for. JS mapping:
 //   ShowBattle            -> `Aj(true)`  L1108 -> `Iaa(hb,true,true,..)` +
@@ -362,6 +387,12 @@ struct QuestSideEffects {
     // `GiveItem` grants (`Pa.W$a` L631756): applied to the save inventory in
     // `apply_effects` (the JS acts immediately; the port batches save writes).
     std::vector<QuestGiveItem> give_items;
+    // `sh` `BuyItem` (`EBuyItem` g="1D4" L526589) with `SB!=3` (Coins/Ruby):
+    // `S` L526709 -> `v.fZ(item, SB)` (L620099 -> `VYa` -> `Pa.Wz` L1234) —
+    // the synchronous purchase (currency deduct + item grant) is committed in
+    // `apply_effects`, which then fires `purchase` (the SAME call the Shop
+    // uses). One resolved item name per entry, in action order.
+    std::vector<std::string> purchases;
     // `Xn`/`rg` (`EGiveCurrency` g="1F1" L554285 / `ETakeCurrency` g="20C"
     // L567355): one resolved currency write. `Xn.S`: `Type`=`Gold` ->
     // `Fr(Tb+Value)`, `Bonus` -> `vl(fd+Value,6)`, else `TH(Type,Value)`
@@ -663,6 +694,14 @@ public:
     // `Tn` (`EFightEnd` L485079) `FightEnd` actions that produced a
     // fight-scene end request (`ca.Ka().kD(!1)`). Monotonic.
     std::size_t fight_end_actions() const { return fight_end_actions_; }
+    // `sh` `BuyItem` `SB!=3`: purchased items whose `QUEST_EVENT_PURCHASE` was
+    // fired (the `v.fZ` commit path). Monotonic; used by `--quest-action-probe`.
+    std::size_t purchase_actions() const { return purchase_actions_; }
+    // The list.xml `BonusPrice` (`catalog_bonus_price`) — the Ruby price
+    // `BuyItem Currency="Ruby"` charges. Public for the probe.
+    int bonus_price(App& app, const std::string& name) const {
+        return catalog_bonus_price(app, name);
+    }
 
     // --- `Ct` timer registry (JS `p.o.yl`, L291-292) ----------------------
     // The shipped `<ActivateTimer Name=... Value=.../>` (quests.xml L2154) sets
@@ -1014,6 +1053,7 @@ private:
     std::size_t tab_actions_ = 0;            // executed `ChangeTab` count
     std::size_t foreach_matches_ = 0;        // `zj.Qh` sub-quest match count
     std::size_t fight_end_actions_ = 0;      // `Tn` (`EFightEnd`) action count
+    std::size_t purchase_actions_ = 0;       // `sh` BuyItem purchase fires
     std::string tab_owner_;                  // `Bj.DI` (ctor L1005)
     // --- `Ct` (L291) timer registry (`p.o.yl`) ---------------------------
     // `Uaa`/`H4` (L291): name -> absolute deadline `bh.Nv` in `p.Dc` seconds

@@ -2267,7 +2267,8 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             std::size_t dlg_queue_index = 0;
             std::string lines;
             for (const QuestAction& c : a.children) {
-                if (c.tag == "Line") {
+                if (c.tag == "Line" || c.tag == "LineButton" ||
+                    c.tag == "DeliveryDelay" || c.tag == "PriceLine") {
                     if (!lines.empty()) lines += " | ";
                     lines += attr_or(c.attrs, "Text");
                 }
@@ -2334,16 +2335,42 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 dlg.quest = quest;
                 dlg.journal = journal;
                 for (const QuestAction& c : a.children) {
-                    if (c.tag == "Line") {
+                    // `He.parse` L1055: `Line`/`LineButton`/`DeliveryDelay`/
+                    // `PriceLine` all build a row via `He.jkb` (L1056). The
+                    // row content type is `PriceLine`->1, `LineButton`->2,
+                    // every other row tag ->0.
+                    const bool is_row = c.tag == "Line" || c.tag == "LineButton" ||
+                                        c.tag == "DeliveryDelay" ||
+                                        c.tag == "PriceLine";
+                    if (is_row) {
                         std::string text = attr_or(c.attrs, "Text");
                         // `_`-refs: run-locals then the global quest variables
                         // (see `quest_var`). An unresolved ref drops the row.
                         if (!text.empty() && text[0] == '_') {
                             text = quest_var(app, locals, text);
                         }
-                        if (!text.empty()) dlg.lines.push_back(text);
                         // `He.jkb` (L1042): the row keeps its own caption.
                         dlg.line_buttons.push_back(attr_or(c.attrs, "ButtonText"));
+                        if (!text.empty()) {
+                            dlg.lines.push_back(text);
+                            dlg.line_content_types.push_back(
+                                c.tag == "PriceLine"   ? 1
+                                : c.tag == "LineButton" ? 2
+                                                        : 0);
+                            // `He.jkb` L1056-1057: a row carrying `Item`/
+                            // `Enchantment` becomes a row button whose nested
+                            // actions are its OWN sub-`Yb` (`this.ima`). The
+                            // port keeps them per row; `press_dialog` runs the
+                            // list by row id (`He.dhb` L1061 `a<this.eOa`).
+                            // Before this the nested `<GiveItem>` of a
+                            // `DeliveryDelay` row was dropped entirely.
+                            std::vector<QuestAction> row_actions;
+                            if (!attr_or(c.attrs, "Item").empty() ||
+                                !attr_or(c.attrs, "Enchantment").empty()) {
+                                row_actions = c.children;
+                            }
+                            dlg.line_actions.push_back(std::move(row_actions));
+                        }
                     } else if (c.tag == "Button") {
                         // JS `He.Rib` L1057-1058: `Type` selects the slot —
                         // `Left`→`Ng`, `Middle`→`Nh`, `Right`→`rh`,
@@ -2377,6 +2404,28 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                             if (!bt.empty()) slot.text = bt;
                             slot.color = bc;
                             slot.hint = hint;
+                        }
+                    } else if (c.tag == "DifficultyOf") {
+                        // `He.gjb` L1058: `DifficultyOf Fight` -> `this.Yca`
+                        // (resolved later by `He.Gz`).
+                        dlg.difficulty_fight =
+                            quest_var(app, locals, attr_or(c.attrs, "Fight"));
+                    } else if (c.tag == "CheckBox") {
+                        // `He.Wib` L1058-1059: the `uv` row (`this.Gg`).
+                        // `<On>` -> `kY`, `<Off>` -> `jY` (`dhb` L1061
+                        // `a==3`/`a==4`).
+                        dlg.has_checkbox = true;
+                        dlg.checkbox.text = attr_or(c.attrs, "Text");
+                        dlg.checkbox.initial_value =
+                            attr_or(c.attrs, "InitialValue");
+                        dlg.checkbox.align_middle =
+                            attr_or(c.attrs, "AlignMiddle", "0") == "1";
+                        for (const QuestAction& sub : c.children) {
+                            if (sub.tag == "On") {
+                                dlg.checkbox.on = sub.children;
+                            } else if (sub.tag == "Off") {
+                                dlg.checkbox.off = sub.children;
+                            }
                         }
                     }
                 }
@@ -2805,6 +2854,82 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                     fx.give_items.push_back(std::move(gi));
                 }
             }
+        } else if (t == "BuyItem") {
+            // `sh` (`EBuyItem` g="1D4" L526589; parse L526589, `S` L526709):
+            //   `Name` -> `Ba`; `Currency` -> `SB`: Coins=1 / Ruby=2 / Real=3.
+            //   `eBa(a)` = `p.items.$b(ba.cg(a, Ba))` — resolve `Name`, then the
+            //   catalog lookup (a miss is a NO-OP, `b!=null` gate).
+            //   `SB!=3` -> `v.fZ(item, SB)` (L620099 -> `VYa` -> `YDa` L107236
+            //   commits the currency + grant, then `Pa.Wz` fires
+            //   `QUEST_EVENT_PURCHASE`) and `this.sa()`. `YDa` case 1/2 reads
+            //   `p.o.Tb` (money) / `p.o.fd` (bonus = the Ruby balance) and
+            //   gates on `a.xf <= e.bb()` (level) + `f-g >= 0` (affordable);
+            //   `v.Bv` fires `PurchaseUnsuccessful` on failure.
+            //   `SB==3` (Real) is the async store handshake (`ub.si`/`ub.rm`)
+            //   — no store in the port, so record it (cf. `BuyOffer`).
+            EvalCtx bc;
+            bc.journal = journal;
+            bc.iterator = iterator;
+            bc.locals = &locals;
+            bc.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                bc.story_step = w.story_step();
+                bc.level = w.level;
+                bc.save = w;
+                bc.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            const std::string raw_bi = attr_or(a.attrs, "Name");
+            std::string bi_name = raw_bi;
+            bool bi_ok = true;
+            if (!raw_bi.empty() &&
+                (raw_bi.find('?') != std::string::npos || raw_bi[0] == '_')) {
+                bi_ok = resolve_token(app, raw_bi, bc, bi_name);  // `ba.cg`
+            }
+            const std::string bi_cur = attr_or(a.attrs, "Currency");
+            const int sb = bi_cur == "Coins"   ? 1
+                           : bi_cur == "Ruby"  ? 2
+                           : bi_cur == "Real"  ? 3
+                                               : 0;
+            const CatalogItem* bi_cat =
+                bi_ok && !bi_name.empty() ? catalog_find(app, bi_name) : nullptr;
+            if (!bi_ok || bi_name.empty()) {
+                fx.unknown.push_back("BuyItem (Name unresolved): " + raw_bi);
+            } else if (bi_cat == nullptr) {
+                // `p.items.$b` miss -> `b==null` -> the action does nothing.
+                fx.unknown.push_back("BuyItem (not in catalog): " + bi_name);
+            } else if (sb == 3) {
+                fx.unknown.push_back("BuyItem:Real (store async): " + bi_name);
+            } else {
+                // `YDa` L107236: case 1 (`Coins`) -> `p.o.Tb`; case 2 (`Ruby`)
+                // -> `p.o.fd`; `g = a.jp()`/`a.nn()` (the resolved price).
+                const int price =
+                    sb == 2 ? catalog_bonus_price(app, bi_name) : bi_cat->price;
+                const int have = sb == 2 ? bc.save.bonus
+                                         : sb == 1 ? bc.save.money : 0;
+                if (bc.save_loaded && sb != 0 && have >= price) {
+                    QuestSideEffects::QuestCurrencyWrite cw;
+                    cw.type = sb == 2 ? "Bonus" : "Gold";  // `vl` / `Fr`
+                    cw.amount = price;
+                    cw.take = true;
+                    cw.apply = true;
+                    fx.currency_writes.push_back(std::move(cw));
+                    QuestGiveItem gi;
+                    gi.name = bi_name;
+                    gi.quantity = 1;  // `gI` -> `fab` grants one
+                    fx.give_items.push_back(std::move(gi));
+                    fx.purchases.push_back(bi_name);
+                    std::fprintf(stdout,
+                                 "[quest] BuyItem %s currency=%s price=%d -> buy\n",
+                                 bi_name.c_str(), bi_cur.c_str(), price);
+                    std::fflush(stdout);
+                } else {
+                    // `YDa` value==-1 -> `v.Bv(a, e.type)`: record only (the
+                    // port has no `PurchaseUnsuccessful` observable here).
+                    fx.unknown.push_back("BuyItem (unaffordable): " + bi_name);
+                }
+            }
         } else if (t == "ShowNews") {
             // `xo` (L1246): `S(a){super.S(a); this.sa()}` — the shipped build
             // is a NO-OP. Nothing to execute.
@@ -3222,6 +3347,15 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
                          fx.has_current_zone ? fx.current_zone.c_str() : "-",
                          fx.set_vars.size());
             std::fflush(stdout);
+        }
+        // `sh` `BuyItem` `SB!=3` (`S` L526709 -> `v.fZ` -> `VYa` L620099 ->
+        // `Pa.Wz` L1234): the commit succeeded, so fire `QUEST_EVENT_PURCHASE`
+        // for each bought item — the SAME call the Shop's buy uses
+        // (`ShopScreen::purchase_price_plate`), AFTER the save so a purchase
+        // quest reading `?Purchase(_$Purchase).*` sees the committed state.
+        for (const std::string& bought : fx.purchases) {
+            ++purchase_actions_;
+            (void)purchase(app, bought);
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[quest] save apply failed: %s\n", e.what());
@@ -4011,6 +4145,20 @@ std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
     } else if (button_index == 100) {
         chosen = &dlg.close_.actions;
         slot = "Close";
+    } else if (button_index == 3 || button_index == 4) {
+        // `He.dhb` L1061: `a==3`/`a==4` fire the checkbox `<On>` (`kY`) /
+        // `<Off>` (`jY`); when no `uv` exists the `a<this.eOa` lookup misses
+        // and `dhb` fires NOTHING.
+        if (!dlg.has_checkbox) return fights;
+        chosen = button_index == 3 ? &dlg.checkbox.on : &dlg.checkbox.off;
+        slot = button_index == 3 ? "CheckBoxOn" : "CheckBoxOff";
+    } else if (button_index >= 5) {
+        // `He.dhb` L1061 `a<this.eOa`: the `ima` row button with this id
+        // (base `this.eOa=5`). `b==null` -> `dhb` fires nothing.
+        const std::size_t row = static_cast<std::size_t>(button_index - 5);
+        if (row >= dlg.line_actions.size()) return fights;
+        chosen = &dlg.line_actions[row];
+        slot = "Row";
     }
     std::fprintf(stdout, "[quest] dialog button pressed: %s (%s, %s)\n", dlg.title.c_str(),
                  dlg.button_text.c_str(), slot);
