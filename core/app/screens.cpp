@@ -10271,6 +10271,18 @@ int shop_effective_price(App& app, const CatalogItem& it) {
     return app.quest_engine().offer_price(it.name, it.price);
 }
 
+// `Pa.Wz` (L1234) / `Pa.Bv` (L1211) fire the quest event; print the fired set
+// (the observable result) — a purchase-driven quest appearing here is the
+// proof the event reached the quest hub.
+static void log_purchase_fired(const char* kind,
+                               const std::vector<std::string>& fired) {
+    if (fired.empty()) return;
+    std::fprintf(stdout, "[shop] %s -> %zu quest(s):", kind, fired.size());
+    for (const std::string& n : fired) std::fprintf(stdout, " %s", n.c_str());
+    std::fprintf(stdout, "\n");
+    std::fflush(stdout);
+}
+
 // `Ne.ZYa` L2251 (`Pa.iwa(this.Ch) && p.o.xa.$o(this.Ch,!0), this.Sr()`) =
 // the shop's BUY + EQUIP at the `M8` GoldButton, gated by `Pa.iwa` L1228
 // (`p.o.Tb >= a.jp()`; else `v.Bv(a,2)` = the "not enough" notice). The timed
@@ -10292,6 +10304,11 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
                      "[shop] Pi confirm Pa.iwa v.Bv(a,2): NOT ENOUGH MONEY for %s "
                      "(need %d, have %d)\n",
                      bit.name.c_str(), price, bw.money);
+        // `Pa.iwa` L1228 else: `v.Bv(a,2)` -> the reason string is `p.XPa`
+        // ("Coins") and the hub fires `QUEST_EVENT_PURCHASE_UNSUCCESSFUL`.
+        log_purchase_fired(
+            "PurchaseUnsuccessful",
+            app.quest_engine().purchase_unsuccessful(app, bit.name, 2));
         std::fflush(stdout);
         return false;
     }
@@ -10316,6 +10333,9 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
                      "[shop] Pi confirm Pa.iwa (Ec) -> ORDERED %s price=%d -> "
                      "arrives in %ds (no equip)\n",
                      bit.name.c_str(), price, bit.delivery_sec);
+        // `Pa.iwa` L1228: `d=Pa.y2a(a)` truthy -> `p.o.save(); Pa.Wz(a)` fires
+        // `QUEST_EVENT_PURCHASE` (the timed order still counts as a purchase).
+        log_purchase_fired("Purchase", app.quest_engine().purchase(app, bit.name));
         std::fflush(stdout);
         return true;
     }
@@ -10337,6 +10357,10 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
                  " + EQUIPPED ($o)%s\n",
                  bit.name.c_str(), price, bw.money,
                  tut_buy ? ", step -> MAP (Ao)" : "");
+    // `Pa.iwa` L1228: `c=d=Pa.gI(a,!0,!1)` truthy -> `p.o.Fr(b); p.o.save();
+    // Pa.Wz(a)` fires `QUEST_EVENT_PURCHASE` AFTER the save (so a purchase
+    // quest reading `?Purchase(_$Purchase).*` sees the committed state).
+    log_purchase_fired("Purchase", app.quest_engine().purchase(app, bit.name));
     std::fflush(stdout);
     return true;
 }

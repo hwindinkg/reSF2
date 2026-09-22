@@ -2580,6 +2580,26 @@ int main(int argc, char** argv) {
                     app.quest_engine().resolve_for_test(app, e, qj);
                 std::fprintf(stdout, "[qquery]   %-42s = '%s'\n", e, v.c_str());
             }
+            // The purchase journal (`Pa.Wz` L1234 / `Pa.Bv` L1211): the tokens
+            // the shipped `<Purchase/>`/`<PurchaseUnsuccessful/>` quests read,
+            // incl. the PAREN arg form (`Bj.vNa` L965 strips `(`/`)`).
+            sf2::app::QuestJournal pj;
+            pj.item = "WEAPON_KNIVES";
+            pj.purchase_failure = "Coins";
+            const char* const pexprs[] = {
+                "_$Purchase",                             // Bj L963 -> name
+                "_$PurchaseUnsuccessful",                 // Bj v8a L989 -> name|reason
+                "?Purchase(_$Purchase).Type",             // quests.xml L1845 -> Weapon
+                "?Purchase(_$Purchase).UpgradeLevel",     // L9829/L1846 -> 0
+                "?Item(_$Purchase).Quantity",             // L1390 -> owned count
+                "?Purchase(_$PurchaseUnsuccessful).Failure",  // L9501 -> Coins
+                "?Sub(?Multi(100,?Player().Level),?Purchase(_$Purchase).UpgradeLevel)",
+            };
+            for (const char* e : pexprs) {
+                const std::string v =
+                    app.quest_engine().resolve_for_test(app, e, pj);
+                std::fprintf(stdout, "[qquery]   %-42s = '%s'\n", e, v.c_str());
+            }
         }
         std::fprintf(stdout, "[qquery] quests=%zu\n", app.quest_engine().quest_count());
         try {

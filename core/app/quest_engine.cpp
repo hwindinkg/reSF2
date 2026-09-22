@@ -695,26 +695,32 @@ void QuestEngine::note_unanswerable(const std::string& token) {
 // than invented.
 namespace {
 
-// The index of the `]` matching the `[` at `open` (nested brackets counted).
-std::size_t query_match_bracket(const std::string& s, std::size_t open) {
+// The index of the closer matching the opener at `open` (nested counted).
+// `closer` is `]` for the `?M[..]` form or `)` for the `?M(..)` form (both
+// legal in the JS: `vNa` L965 strips `(`/`)`; the shipped quests mix them).
+std::size_t query_match_bracket(const std::string& s, std::size_t open,
+                                char closer = ']') {
+    const char opener = (closer == ')') ? '(' : '[';
     int depth = 0;
     for (std::size_t i = open; i < s.size(); ++i) {
-        if (s[i] == '[') ++depth;
-        else if (s[i] == ']' && --depth == 0) return i;
+        if (s[i] == opener) ++depth;
+        else if (s[i] == closer && --depth == 0) return i;
     }
     return std::string::npos;
 }
 
-// Split at TOP-LEVEL commas (bracket depth 0): the JS query parser keeps each
+// Split at TOP-LEVEL commas (depth 0): the JS query parser keeps each
 // argument node separate (`sg` L955-957 `a.zb`), so nested `?Q[...]` args
-// (`?Sum[?Multi[100,?Player[].Level],30]`) survive intact.
+// (`?Sum[?Multi[100,?Player[].Level],30]`) survive intact. Both bracket
+// styles count: `?Sub(?Multi(100,?Player().Level),?Purchase(_$Purchase)..)`
+// (quests.xml L9829) nests parens.
 std::vector<std::string> query_split_args(const std::string& s) {
     std::vector<std::string> out;
     std::string cur;
     int depth = 0;
     for (char ch : s) {
-        if (ch == '[') ++depth;
-        else if (ch == ']' && depth > 0) --depth;
+        if (ch == '[' || ch == '(') ++depth;
+        else if ((ch == ']' || ch == ')') && depth > 0) --depth;
         if (ch == ',' && depth == 0) {
             out.push_back(cur);
             cur.clear();
@@ -785,9 +791,17 @@ bool query_parse_int(const std::string& s, long long& out) {
 
 bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCtx& ctx,
                                 std::string& out) {
-    const std::size_t lb = token.find('[');
+    const std::size_t lb_b = token.find('[');
+    const std::size_t lb_p = token.find('(');
+    const std::size_t lb =
+        (lb_p != std::string::npos && (lb_b == std::string::npos || lb_p < lb_b))
+            ? lb_p
+            : lb_b;
+    const char closer =
+        (lb != std::string::npos && token[lb] == '(') ? ')' : ']';
     const std::size_t rb =
-        (lb == std::string::npos) ? std::string::npos : query_match_bracket(token, lb);
+        (lb == std::string::npos) ? std::string::npos
+                                  : query_match_bracket(token, lb, closer);
     if (lb == std::string::npos || rb == std::string::npos) {
         note_unanswerable(token);
         return false;
@@ -1357,6 +1371,25 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             auto it = w.variables.find(key);
             if (it == w.variables.end()) it = w.variables.find(key.substr(1));
             out = (it != w.variables.end()) ? it->second : "0";
+            return true;
+        }
+        // `Bj` L963: `case "_$Purchase": a.Fb.result = this.ta.item!=null ?
+        // this.ta.item.name : ""`. `Pa.Wz` (L1234) sets `ta.item` before the
+        // `QUEST_EVENT_PURCHASE` fire.
+        if (token == "_$Purchase") {
+            out = ctx.journal.item;
+            return true;
+        }
+        // `Bj.v8a` (L989): `let a=new Fb; b=this.ta.item; b!=null&&(a.M+=b.name,
+        // b=this.ta.I_, b!=null&&b!=""&&(a.M+="|",a.M+=this.ta.I_)); return a.M`.
+        // `Pa.Bv` (L1211) sets `ta.item`+`ta.I_` before the
+        // `QUEST_EVENT_PURCHASE_UNSUCCESSFUL` fire.
+        if (token == "_$PurchaseUnsuccessful") {
+            out = ctx.journal.item;
+            if (!ctx.journal.purchase_failure.empty()) {
+                out += "|";
+                out += ctx.journal.purchase_failure;
+            }
             return true;
         }
         // Other `Bj` journal fields (`_$CurrentScene`, `_$Iterator`, ...):
@@ -3135,6 +3168,33 @@ std::vector<std::string> QuestEngine::press_map_button(App& app,
     std::fprintf(stdout, "[quest] MapButtonPress %s -> event\n", name.c_str());
     std::fflush(stdout);
     return fire(app, "MapButtonPress", j);
+}
+
+// JS `Pa.Wz` (L1234): `Pa.bia.Z(a); let b=ha.F().ta,c=b.Nb; b.Nb=hb.empty();
+// b.Qv=""; b.bT=""; b.item=a; ha.F().Sf("QUEST_EVENT_PURCHASE"); b.Nb=c`.
+// The `Nb`/`Qv`/`bT` clear+restore is dialog-text scratch the port does not
+// model (no `_$` reader); the observable effect is `ta.item=a` then the event.
+std::vector<std::string> QuestEngine::purchase(App& app, const std::string& item) {
+    QuestJournal j;
+    j.item = item;
+    return fire(app, "Purchase", j);
+}
+
+// JS `Pa.Bv` (L1211): `let c=ha.F().ta; c.item=a; switch(b){case 2:a=p.XPa;
+// break;case 3:a=p.$Pa;break;case 4:a=p.WPa;break;case 6:a=p.ZPa;break;
+// default:a=null} c.I_=a; ha.F().Sf("QUEST_EVENT_PURCHASE_UNSUCCESSFUL")`.
+std::vector<std::string> QuestEngine::purchase_unsuccessful(
+    App& app, const std::string& item, int code) {
+    QuestJournal j;
+    j.item = item;
+    switch (code) {
+        case 2: j.purchase_failure = "Coins"; break;       // `p.XPa` L2472
+        case 3: j.purchase_failure = "Ruby"; break;        // `p.$Pa`
+        case 4: j.purchase_failure = "Connection"; break;  // `p.WPa`
+        case 6: j.purchase_failure = "RaidCurr"; break;    // `p.ZPa`
+        default: break;                                    // `default:a=null`
+    }
+    return fire(app, "PurchaseUnsuccessful", j);
 }
 
 std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,

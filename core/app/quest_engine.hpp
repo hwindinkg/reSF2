@@ -62,6 +62,12 @@ struct QuestJournal {
     // `_$ButtonName` -> `ta.Av` (L960) and `_$ButtonType` -> `ta.yYa`.
     std::string button_name;  // `_$ButtonName`
     std::string button_type;  // `_$ButtonType`
+    // JS `Bj.item`/`Bj.I_` (ctor L995; `_$Purchase` reads `item.name` at L963,
+    // `v8a` L989 reads `item.name`+`I_`). `Pa.Wz` (L1234) writes `item` then
+    // fires `QUEST_EVENT_PURCHASE`; `Pa.Bv` (L1211) writes `item`+`I_` then
+    // fires `QUEST_EVENT_PURCHASE_UNSUCCESSFUL` (`I_` = the failure reason).
+    std::string item;              // `_$Purchase`
+    std::string purchase_failure;  // `_$PurchaseUnsuccessful` suffix (`I_`)
 };
 
 // Condition node (leaf comparison or And/Or operator). Leaf kinds mirror
@@ -391,6 +397,16 @@ public:
     // navigates. `journal` carries the event context.
     std::vector<std::string> fire(App& app, const std::string& event,
                                   const QuestJournal& journal);
+
+    // JS `Pa.Wz` (L1234): the successful-buy dispatch. Sets `ta.item` and
+    // fires `QUEST_EVENT_PURCHASE`; returns the fired quest names.
+    std::vector<std::string> purchase(App& app, const std::string& item);
+    // JS `Pa.Bv` (L1211): the failed-buy dispatch. Sets `ta.item` + `ta.I_`
+    // (code 2 -> "Coins", 3 -> "Ruby", 4 -> "Connection", 6 -> "RaidCurr",
+    // else null/""; `p.XPa`/`$Pa`/`WPa`/`ZPa` L2472), then fires
+    // `QUEST_EVENT_PURCHASE_UNSUCCESSFUL`.
+    std::vector<std::string> purchase_unsuccessful(App& app, const std::string& item,
+                                                   int code);
 
     // Records the last fight triple (Bj Nb/Qv analog; set on FightEnd).
     // ChangeTab/SceneLoaded journals leave fight empty and inherit this.
