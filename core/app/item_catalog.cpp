@@ -44,6 +44,7 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         if (item.attribute("Image")) ci.image = item.attribute("Image").value();
         ci.price = sf2::data::xml_attr_int(item, "Price", 0);
         ci.level = sf2::data::xml_attr_int(item, "Level", 1);
+        ci.has_level = static_cast<bool>(item.attribute("Level"));
         ci.weapon_damage = sf2::data::xml_attr_int(item, "WeaponDamage", 0);
         ci.body_defense = sf2::data::xml_attr_int(item, "BodyDefense", 0);
         ci.head_defense = sf2::data::xml_attr_int(item, "HeadDefense", 0);
@@ -54,6 +55,8 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         ci.delivery_gems = sf2::data::xml_attr_int(item, "BonusDeliveryPrice", 0);
         ci.shop_hide = attr_bool_str(item.attribute("ShopHide").value());
         ci.hidden = attr_bool_str(item.attribute("Hidden").value());
+        ci.paid_item =
+            item.attribute("PaidItem") ? item.attribute("PaidItem").value() : "None";
         if (item.attribute("PaidItem")) ci.paid = true;
         // `<Perks>` + `<Enchantments>` rows (JS `xe.Qd` be-entries, L1257):
         // perk name + `<Set>` overrides (numeric vs string by parse).

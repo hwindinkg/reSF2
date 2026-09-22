@@ -52,6 +52,9 @@ struct CatalogItem {
     int price = 0;          // Price (gold; the JS `jp()` uses `mi` when no
                             // price attr — the shipped priced items carry Price)
     int level = 1;          // Level
+    // `Level` attr PRESENT (JS `xf` = `u.I(Level)`; null when absent).
+    // `?Item[x].Level` answers "null" for a Level-less row (`cdb` L977).
+    bool has_level = false;
     int weapon_damage = 0;  // WeaponDamage
     int body_defense = 0;   // BodyDefense
     int head_defense = 0;   // HeadDefense
@@ -63,6 +66,9 @@ struct CatalogItem {
     bool shop_hide = false; // ShopHide="1" (not offered in the shop)
     bool hidden = false;    // Hidden="1"
     bool paid = false;      // PaidItem="Paid"/"SuperPaid" (premium-only)
+    // Raw `PaidItem` attr (`D3`, ctor default "None") — `?Purchase[x].PaidItem`
+    // returns this string (`IJa` L980).
+    std::string paid_item = "None";
     std::vector<ItemPerkRef> perks;  // `<Perks>` + `<Enchantments>` rows
     // Owned-equip status comes from the save (users.xml <Items>), not here.
 };

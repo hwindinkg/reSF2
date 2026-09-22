@@ -1008,9 +1008,27 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
             out = std::to_string(owned != nullptr ? owned->upgrade_level : 0);
             return true;
         }
-        // `PaidItem` (`d.D3`, the raw list.xml string — the catalog models a
-        // bool only) and `Timeout` (`e.Bh` delivery time — no purchase-
-        // instance model) are not sourceable -> UNKNOWN.
+        if (field == "PaidItem") {
+            // `IJa` L980: `case "PaidItem":b.result=d!=null?d.D3:""`. `D3` =
+            // the list.xml `PaidItem` attr, default "None" (item ctor
+            // L1266096); `d` is the catalog item (owned or list).
+            out = ci != nullptr ? ci->paid_item : std::string();
+            return true;
+        }
+        if (field == "Timeout") {
+            // `IJa` L980: `case "Timeout":a=e!=null?e.Bh:0;d=v.f0();
+            // b.result=K.T(a>d?a-d:0)`. `e.Bh` = the owned item's DeliveryTime
+            // (`zF` L643170), `v.f0()` = `p.Dc`. The port keys pending
+            // deliveries by item name in `WarriorSave::timers` (wall clock), so
+            // the remaining seconds are the same countdown (0 when absent).
+            const WarriorSave& w = ctx.live(app);
+            const auto it = w.timers.find(name);
+            const std::int64_t now = WarriorSave::wall_now();
+            const std::int64_t left =
+                (it != w.timers.end() && it->second > now) ? it->second - now : 0;
+            out = std::to_string(left);
+            return true;
+        }
         note_unanswerable(token);
         return false;
     }
@@ -1052,7 +1070,9 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
             return true;
         }
         if (field == "Level") {
-            out = std::to_string(ci->level);
+            // `cdb` L977: `case "Level":b.result=c.xf==null?"null":""+c.xf`.
+            // A Level-less list.xml row answers the STRING "null".
+            out = ci->has_level ? std::to_string(ci->level) : std::string("null");
             return true;
         }
         if (field == "BonusPrice") {
@@ -1264,6 +1284,23 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             out = ctx.journal.button_type;
             return true;
         }
+        // `Bj` L960 (offset 492745): `case "_$BestAcquiredArmorLevel": ... :
+        // let e=p.o, f=e!=null?e.rt(Rc(b,yb.Elb,yb.Dlb),0):null;
+        // a.Fb.result=f!=null?f.value:"0"`. `Rc(b,"_$","_")` (`yb.Elb="_$"`,
+        // `yb.Dlb="_"`, L1274298) maps the field to the `_`-prefixed Users
+        // variable; absent -> "0".
+        if (token == "_$BestAcquiredArmorLevel" ||
+            token == "_$BestAcquiredHelmLevel" ||
+            token == "_$BestAcquiredMagicLevel" ||
+            token == "_$BestAcquiredRangedLevel" ||
+            token == "_$BestAcquiredWeaponLevel" || token == "_$BestArmor") {
+            const std::string key = "_" + token.substr(2);
+            const WarriorSave& w = ctx.live(app);
+            auto it = w.variables.find(key);
+            if (it == w.variables.end()) it = w.variables.find(key.substr(1));
+            out = (it != w.variables.end()) ? it->second : "0";
+            return true;
+        }
         // Other `Bj` journal fields (`_$CurrentScene`, `_$Iterator`, ...):
         // the shell does not model them -> UNKNOWN.
         note_unanswerable(token);
@@ -1411,7 +1448,13 @@ QuestEngine::ActionRest QuestEngine::run_actions(
         } else if (t == "Fight") {
             fx.fight_requests.push_back(attr_or(a.attrs, "Name"));
         } else if (t == "FightEnd") {
-            fx.unknown.push_back("FightEnd (needs ca.Ka().kD scene hook)");
+            // `Tn.S` (`class Tn`, factory `EFightEnd` L485079): `if(ca.Ka()!=
+            // null) if(a=ba.Nj(a,Delay),a>0){...new Re(function(){b.kD(!1)},a)}
+            // else ca.Ka().kD(!1)`. `ca.Ka()` = the live fight controller;
+            // `kD(!1)` ends the fight. The engine holds no controller, so it
+            // records the request for the fight scene (never silent).
+            fx.fight_end_requests.push_back(attr_or(a.attrs, "Delay", "0"));
+            ++fight_end_actions_;
         } else if (t == "OpenShop") {
             std::string tab = attr_or(a.attrs, "Tab");
             // `vj.E0(ba.Pc(a, Tab))` (L1093): the tab arg is resolved through
@@ -1943,12 +1986,60 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             }
             fx.unknown.push_back("Wait:" + raw + "f (collapsed)");
         } else if (t == "GiveItem") {
-            // `Yn.S` (L1238): `Pa.W$a(name, level, qty, putOn, packItem)`.
-            // The port's WarriorSave has no `Pa.W$a` inventory-write path and
-            // the Name is usually a `?Concat[...]` the query engine does not
-            // model -> record-only.
-            fx.unknown.push_back("GiveItem (needs Pa.W$a; ?Concat unresolved): " +
-                                 attr_or(a.attrs, "Name"));
+            // `Yn.S` (offset 554285; factory `EGiveItem` L485299): split the
+            // resolved `Name` on `|` (`li(...,"|")`) — left = item, right =
+            // `K.parseInt` count; then `Pa.W$a(name, count, ba.UBa(a,Quantity),
+            // ba.Zv(a,PutOn), PackItem)` (L631756) -> `bDa` grants the item.
+            EvalCtx gc;
+            gc.journal = journal;
+            gc.iterator = iterator;
+            gc.locals = &locals;
+            gc.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                gc.story_step = w.story_step();
+                gc.level = w.level;
+                gc.save = w;
+                gc.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            const std::string raw_name = attr_or(a.attrs, "Name");
+            std::string gname = raw_name;
+            bool gok = true;
+            if (!raw_name.empty() &&
+                (raw_name.find('?') != std::string::npos || raw_name[0] == '_')) {
+                gok = resolve_token(app, raw_name, gc, gname);  // `ba.Pc`
+            }
+            if (!gok) {
+                // Never invent a name (the shipped `?Concat[...]` names need the
+                // unmodelled `Concat` op) -> UNKNOWN, as before.
+                fx.unknown.push_back("GiveItem (Name unresolved): " + raw_name);
+            } else {
+                int gcount = 0;
+                const std::size_t bar = gname.find('|');
+                if (bar != std::string::npos) {
+                    gcount = parse_int_or(gname.substr(bar + 1), 0);
+                    gname = gname.substr(0, bar);
+                }
+                int quantity = 0;
+                const std::string qattr = attr_or(a.attrs, "Quantity");
+                if (!qattr.empty()) {
+                    std::string qv;
+                    if (resolve_token(app, qattr, gc, qv) && is_numeric(qv)) {
+                        quantity = static_cast<int>(to_number(qv));
+                    }
+                }
+                if (gname.empty()) {
+                    fx.unknown.push_back("GiveItem (empty Name)");
+                } else {
+                    QuestGiveItem gi;
+                    gi.name = gname;
+                    gi.count = gcount;
+                    gi.quantity = quantity;
+                    gi.put_on = attr_bool01(attr_or(a.attrs, "PutOn"));
+                    fx.give_items.push_back(std::move(gi));
+                }
+            }
         } else if (t == "ShowNews") {
             // `xo` (L1246): `S(a){super.S(a); this.sa()}` — the shipped build
             // is a NO-OP. Nothing to execute.
@@ -2084,6 +2175,52 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
                          bw.zone.c_str(), bw.name.c_str(), bw.locked ? 1 : 0,
                          bw.hidden ? 1 : 0);
             dirty = true;
+        }
+        // `Yn` GiveItem -> `Pa.W$a` (L631756) -> `bDa`: the item lands in the
+        // inventory (`Pa.Kua`); `PutOn` equips it. The shipped promo forms are
+        // `Name="ITEM|count"` with no `Quantity`, whose JS net is an UNEQUIPPED
+        // grant carrying the stack count (`bDa` auto-equips only when the item
+        // level <= the player's, then `c<=0&&!d` unequips).
+        for (const QuestGiveItem& gi : fx.give_items) {
+            if (gi.name.empty()) continue;
+            const CatalogItem* cat = catalog_find(app, gi.name);
+            WarriorSave::OwnedItem* owned = nullptr;
+            for (WarriorSave::OwnedItem& it : w.items) {
+                if (it.name == gi.name) {
+                    owned = &it;
+                    break;
+                }
+            }
+            if (owned == nullptr) {
+                WarriorSave::OwnedItem oi;
+                oi.name = gi.name;
+                oi.count = gi.quantity > 0 ? gi.quantity : 1;
+                if (gi.count > 0) oi.upgrade_level = gi.count;  // `Np`
+                w.items.push_back(std::move(oi));
+                owned = &w.items.back();
+            } else {
+                if (gi.quantity > 0) owned->count += gi.quantity;
+                else if (gi.count > 0) owned->count = gi.count;
+                if (gi.count > 0) owned->upgrade_level = gi.count;
+            }
+            if (gi.put_on && cat != nullptr) {
+                if (cat->type == "Weapon") w.weapon = gi.name;
+                else if (cat->type == "Armor") w.armor = gi.name;
+                else if (cat->type == "Helm") w.helm = gi.name;
+                else if (cat->type == "Ranged") w.ranged = gi.name;
+                else if (cat->type == "Magic") w.magic = gi.name;
+                owned->equipped = true;
+            } else {
+                owned->equipped = false;  // `c<=0&&!d` -> `Ir(!1)`
+            }
+            dirty = true;
+            std::fprintf(stdout, "[quest] GiveItem %s count=%d qty=%d putOn=%d\n",
+                         gi.name.c_str(), gi.count, gi.quantity, gi.put_on ? 1 : 0);
+        }
+        for (const std::string& d : fx.fight_end_requests) {
+            std::fprintf(stdout,
+                         "[quest] FightEnd request (Delay=%s) -> fight scene\n",
+                         d.c_str());
         }
         if (dirty) {
             app.save().save(w);

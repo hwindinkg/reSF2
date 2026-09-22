@@ -255,6 +255,17 @@ struct QuestTabSelect {
     int screen_id = 0;  // `Hn.CX` (`vj.ifa`)
 };
 
+// `Yn` `GiveItem` (JS factory `EGiveItem` L485299; `Yn.S` offset 554285 ->
+// `Pa.W$a` L631756 -> `bDa`): grant one item. `Name` is `ITEM` or `ITEM|count`
+// (`K.parseInt`); `Quantity` (`c`) adds copies, `PutOn` (`d`) equips. The
+// shipped promo forms are `Name="ITEM|100*level+230"` with no other attrs.
+struct QuestGiveItem {
+    std::string name;      // resolved `Name` (the `|`-split left part)
+    int count = 0;         // `|count` (`b`); `>0` -> the stack/upgrade count
+    int quantity = 0;      // resolved `Quantity` (`c`)
+    bool put_on = false;   // `PutOn` (`d`)
+};
+
 // Side effects of one run: save writes (applied) + records (logged only).
 struct QuestSideEffects {
     bool has_story_step = false;
@@ -337,6 +348,12 @@ struct QuestSideEffects {
     // `eo` L1117 (`Nn`… `sxa()`): `MenuBtnFlashing` collapses the `za` scroll
     // (`za.instance.sxa()` -> `scroll.collapse(0)`, L2001) before it flashes.
     bool collapse_nav = false;
+    // `GiveItem` grants (`Pa.W$a` L631756): applied to the save inventory in
+    // `apply_effects` (the JS acts immediately; the port batches save writes).
+    std::vector<QuestGiveItem> give_items;
+    // `FightEnd` (JS `Tn.S`): `ca.Ka().kD(!1)` — end the live fight. The
+    // engine records it; the fight scene consumes the request.
+    std::vector<std::string> fight_end_requests;
     std::vector<std::string> unknown;             // unhandled tags
 };
 
@@ -573,6 +590,9 @@ public:
     // the `--quest-query-probe` uses it to prove a sub-quest whose conditions
     // read the `?`-queries actually MATCHED.
     std::size_t foreach_matches() const { return foreach_matches_; }
+    // `Tn` (`EFightEnd` L485079) `FightEnd` actions that produced a
+    // fight-scene end request (`ca.Ka().kD(!1)`). Monotonic.
+    std::size_t fight_end_actions() const { return fight_end_actions_; }
 
     // --- `Ct` timer registry (JS `p.o.yl`, L291-292) ----------------------
     // The shipped `<ActivateTimer Name=... Value=.../>` (quests.xml L2154) sets
@@ -869,6 +889,7 @@ private:
     std::size_t shop_actions_ = 0;           // executed `OpenShop` count
     std::size_t tab_actions_ = 0;            // executed `ChangeTab` count
     std::size_t foreach_matches_ = 0;        // `zj.Qh` sub-quest match count
+    std::size_t fight_end_actions_ = 0;      // `Tn` (`EFightEnd`) action count
     std::string tab_owner_;                  // `Bj.DI` (ctor L1005)
     // --- `Ct` (L291) timer registry (`p.o.yl`) ---------------------------
     // `Uaa`/`H4` (L291): name -> absolute deadline `bh.Nv` in `p.Dc` seconds

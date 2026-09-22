@@ -2561,6 +2561,13 @@ int main(int argc, char** argv) {
                 "?NDiv[10,3]",
                 "?Mod[10,3]",
                 "?UniformIntRandom[1,1]",
+                // The named remainder fixes (JS cite per row):
+                "?Item[WEAPON_KNIVES].Level",         // cdb L977 (has Level)
+                "?Item[Pile_Gems].Level",             // cdb L977 -> "null"
+                "?Purchase[WEAPON_KNIVES].PaidItem",  // IJa L980 -> "None"
+                "?Purchase[WEAPON_KNIVES].Timeout",   // IJa L980 -> 0
+                "_$BestAcquiredArmorLevel",           // Bj L960 -> "0"
+                "_$BestAcquiredWeaponLevel",          // Bj L960 -> "0"
             };
             for (const char* e : exprs) {
                 const std::string v =
@@ -2992,6 +2999,37 @@ int main(int argc, char** argv) {
                      kItem, price_off);
         std::fflush(stdout);
         check(price_off == base, "Discount off: offer cleared -> base price");
+        // --- GiveItem (`Yn.S` 554285 -> `Pa.W$a` L631756) -------------------
+        const auto owned_count = [&](const char* name) -> int {
+            try {
+                for (const auto& oi : app.save().load().items) {
+                    if (oi.name == name) return oi.count;
+                }
+            } catch (const std::exception&) {
+            }
+            return 0;
+        };
+        const auto owned_upgrade = [&](const char* name) -> int {
+            try {
+                for (const auto& oi : app.save().load().items) {
+                    if (oi.name == name) return oi.upgrade_level;
+                }
+            } catch (const std::exception&) {
+            }
+            return 0;
+        };
+        fire_action("GiveItem", {{"Name", "ARMOR_CEREMONIAL"}});
+        check(owned_count("ARMOR_CEREMONIAL") == 1,
+              "GiveItem ARMOR_CEREMONIAL -> granted to inventory");
+        fire_action("GiveItem", {{"Name", "HELM_CEREMONIAL|330"}});
+        check(owned_count("HELM_CEREMONIAL") == 1 &&
+                  owned_upgrade("HELM_CEREMONIAL") == 330,
+              "GiveItem HELM_CEREMONIAL|330 -> count 1, upgrade 330");
+        // `FightEnd` (`Tn.S`): recorded as a fight-scene request, not UNKNOWN.
+        const std::size_t fe_before = app.quest_engine().fight_end_actions();
+        fire_action("FightEnd", {});
+        check(app.quest_engine().fight_end_actions() == fe_before + 1,
+              "FightEnd action -> recorded fight-scene request");
         // Restore the profile exactly as found.
         if (have_original) {
             try {
