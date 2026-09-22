@@ -1415,6 +1415,7 @@ int main(int argc, char** argv) {
     bool quest_verify_buy = false;  // --quest-verify-buy: seeded STEP_BUY_ITEM
     bool changetab_probe = false;   // --changetab-probe: synthetic `Hn` action
     bool quest_query_probe = false;  // --quest-query-probe: Foreach query proof
+    bool map_button_probe = false;   // --map-button-probe: Vb map-button proof
     bool dialog_verify = false;     // --dialog-verify: headless dialog harness
     bool observe_dialogs = false;   // --observe-dialogs: keep the queue observable
     // --tutorial-real-verify: boot the REAL path (NO `fresh_tutorial` arm, NO
@@ -1530,6 +1531,8 @@ int main(int argc, char** argv) {
             changetab_probe = true;
         } else if (arg == "--quest-query-probe") {
             quest_query_probe = true;
+        } else if (arg == "--map-button-probe") {
+            map_button_probe = true;
         } else if (arg == "--quest-verify-buy") {
             quest_verify = true;
             quest_verify_buy = true;
@@ -2653,6 +2656,87 @@ int main(int argc, char** argv) {
         check(timer_ok, "shipped ActivateTimer -> ?Timer[] -> TimerEnd fired");
         const bool all = checks == passed;
         std::fprintf(stdout, "[qquery] RESULT %d/%d -> %s\n", passed, checks,
+                     all ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return all ? 0 : 1;
+    } else if (map_button_probe) {
+        // --- `--map-button-probe`: the `Vb` map-button manager, JS-exact ------
+        // Hidden window + RULE 0 watchdog (driver_mode). NO OS input.
+        // 1. `wo` L1100 (`EShowMapButton`) -> `Vb.F().Lua` (L2167) adds an `hg`
+        //    to `ny` (deduped by name).
+        // 2. `bo` L1086 (`EHideMapButton`) -> `Vb.F().oKa` removes it.
+        // 3. `Qg` L2173 (`MapButtonPress`) -> `ta.Av=name` +
+        //    `Sf("QUEST_EVENT_MAP_BUTTON_PRESS")`; the shipped `StarterPackPress`
+        //    quest (quests.xml L2123-2133) matches on `_$ButtonName` (L960).
+        glfwHideWindow(app.renderer().window());
+        int checks = 0, passed = 0;
+        const auto check = [&](bool ok, const char* what) {
+            ++checks;
+            if (ok) ++passed;
+            std::fprintf(stdout, "[mapbtn] %-52s %s\n", what, ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        };
+        const auto count_named = [&](const char* name) {
+            std::size_t n = 0;
+            for (const sf2::app::EngineMapButton& b : app.quest_engine().map_buttons()) {
+                if (b.name == name) ++n;
+            }
+            return n;
+        };
+        sf2::app::QuestAction show;
+        show.tag = "ShowMapButton";
+        show.attrs["Name"] = "Button_StarterPack";
+        show.attrs["Image"] = "starter_pack";
+        show.attrs["Timer"] = "Timer_StarterPack";
+        show.attrs["ShowType"] = "Story";
+        const sf2::app::QuestJournal sj;
+        app.quest_engine().run_action_probe(app, {show}, sj);
+        std::string img;
+        for (const sf2::app::EngineMapButton& b : app.quest_engine().map_buttons()) {
+            if (b.name == "Button_StarterPack") img = b.image;
+        }
+        std::fprintf(stdout,
+                     "[mapbtn] BEFORE: Vb.ny=%zu Button_StarterPack x%zu image='%s'\n",
+                     app.quest_engine().map_buttons().size(),
+                     count_named("Button_StarterPack"), img.c_str());
+        check(app.quest_engine().map_buttons().size() == 1 &&
+                  count_named("Button_StarterPack") == 1 && img == "starter_pack",
+              "ShowMapButton -> Vb.ny has the button (image resolved)");
+        // Dedup (`Lua` L2167: `m.find(ny, d=>d.name==a.name)==null`).
+        app.quest_engine().run_action_probe(app, {show}, sj);
+        check(app.quest_engine().map_buttons().size() == 1,
+              "ShowMapButton repeat is a no-op (Lua dedup by name)");
+        // Press: the shipped `StarterPackPress` quest must fire.
+        const std::vector<std::string> fired =
+            app.quest_engine().press_map_button(app, "Button_StarterPack");
+        bool press_fired = false;
+        for (const std::string& f : fired) {
+            if (f == "StarterPackPress") press_fired = true;
+        }
+        std::string bn;
+        try {
+            sf2::app::QuestJournal jj;
+            jj.button_name = "Button_StarterPack";
+            bn = app.quest_engine().resolve_for_test(app, "_$ButtonName", jj);
+        } catch (const std::exception&) {
+        }
+        std::fprintf(stdout,
+                     "[mapbtn] PRESS: fired=%zu StarterPackPress=%d _$ButtonName='%s'\n",
+                     fired.size(), press_fired ? 1 : 0, bn.c_str());
+        check(press_fired, "MapButtonPress fired shipped quest StarterPackPress");
+        check(bn == "Button_StarterPack", "_$ButtonName reads Bj.Av (L960)");
+        sf2::app::QuestAction hide;
+        hide.tag = "HideMapButton";
+        hide.attrs["Name"] = "Button_StarterPack";
+        app.quest_engine().run_action_probe(app, {hide}, sj);
+        std::fprintf(stdout, "[mapbtn] AFTER:  Vb.ny=%zu Button_StarterPack x%zu\n",
+                     app.quest_engine().map_buttons().size(),
+                     count_named("Button_StarterPack"));
+        check(app.quest_engine().map_buttons().empty(),
+              "HideMapButton -> Vb.ny empty (oKa removed it)");
+        const bool all = checks == passed;
+        std::fprintf(stdout, "[mapbtn] RESULT %d/%d -> %s\n", passed, checks,
                      all ? "PASS" : "FAIL");
         std::fflush(stdout);
         app.shutdown();

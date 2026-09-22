@@ -56,6 +56,12 @@ struct QuestJournal {
     std::string fight_zone;   // resolved zone ("" when unknown)
     int player_level = 1;
     std::string action_id;  // Activate ActionID
+    // JS `Bj.Av`/`Bj.yYa` (ctor L1004 `this.yYa=this.Av=...=""`): the map-button
+    // press payload. `Vb.Qg` (L2173) writes `ta.Av = name` before it fires
+    // `QUEST_EVENT_MAP_BUTTON_PRESS`; the condition resolver maps
+    // `_$ButtonName` -> `ta.Av` (L960) and `_$ButtonType` -> `ta.yYa`.
+    std::string button_name;  // `_$ButtonName`
+    std::string button_type;  // `_$ButtonType`
 };
 
 // Condition node (leaf comparison or And/Or operator). Leaf kinds mirror
@@ -333,6 +339,17 @@ struct QuestSideEffects {
     std::vector<std::string> unknown;             // unhandled tags
 };
 
+// One live map button (`hg`, JS L2176-2177): an entry of the `Vb` manager's
+// `ny` list. `Lua` (L2167) appends it on `ShowMapButton` (deduped by `name`);
+// `oKa` removes it on `HideMapButton`. `image` is a user-image key resolved by
+// `sk.xmb` (L2165 `$w(E.get(338), a)`), `timer` is the `Sc` timer key.
+struct EngineMapButton {
+    std::string name;
+    std::string image;
+    std::string timer;      // `Sc`
+    std::string show_type;  // `Kr` (L2177 default "Both")
+};
+
 class QuestEngine {
 public:
     QuestEngine() = default;
@@ -348,6 +365,14 @@ public:
     // Records the last fight triple (Bj Nb/Qv analog; set on FightEnd).
     // ChangeTab/SceneLoaded journals leave fight empty and inherit this.
     void note_fight(const std::string& name, const std::string& result);
+
+    // Live `Vb.F().ny` (JS L2167): the map buttons currently shown. `Lua`
+    // appends on `ShowMapButton`; `oKa` removes on `HideMapButton`.
+    const std::vector<EngineMapButton>& map_buttons() const { return map_buttons_; }
+    // JS `Vb.Qg` (L2173): `ha.F().ta.Av=name; ha.F().Sf(
+    // "QUEST_EVENT_MAP_BUTTON_PRESS")`. Fires the `MapButtonPress` quest event
+    // with `button_name` in the journal and returns the fired quest names.
+    std::vector<std::string> press_map_button(App& app, const std::string& name);
 
     // Sensei-modal queue (He records): display + advance live in screens.
     bool has_dialog() const { return !dialogs_.empty(); }
@@ -768,6 +793,8 @@ private:
     std::map<std::string, std::string> global_vars_;
     std::vector<std::string> loaded_files_;  // shipped files the loader read
     std::vector<std::string> fired_;  // Unresumable session latch
+    // Live map-button registry (JS `Vb.F().ny`, L2167).
+    std::vector<EngineMapButton> map_buttons_;
     // Place-gated runs parked until their scene is entered (see
     // `retry_place_pending`). `quest_index` indexes `quests_` (stable: the
     // loader only appends).

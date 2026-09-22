@@ -6765,8 +6765,23 @@ constexpr float kMapZoneDotD = 34.0f;
 // (Punchbag) has no `FileName`, so it must not appear in the `Ur` strip nor
 // be selectable — its only node is the Training dummy (the reported "the map
 // shows only the null/zero location (with the bag)").
-bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {
-    if (zi >= zones_.size()) return false;
+// `Wr.qFa` (L2179) lays out the story map buttons: `a.C(this.node.ya+d-d*.3)`
+// (x) and `a.D((N.height+b)*.5)` / `N.height-c*.55` (y), where `d` is the
+// widget's scaled width and `b`/`c` the panel/cell sizes. The port does not
+// model the `Wr` container's measured layout, so it stacks the registry in `ny`
+// order down the left edge of the map area with a fixed plate size — the ONE
+// layout approximation (see the report). A draw and its hit test read the same
+// rect. The size is a screen-fraction so it scales with the viewport.
+void MapScreen::map_button_rect(std::size_t i, float& cx, float& cy, float& w,
+                                float& h) const {
+    const MapMetrics mm = map_metrics();
+    w = kViewW * 0.20f;
+    h = w * 0.52f;
+    cx = w * 0.7f;
+    cy = mm.map_y + h * 0.5f + static_cast<float>(i) * (h + kViewH * 0.02f);
+}
+
+bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {    if (zi >= zones_.size()) return false;
     std::size_t slot = 0;
     for (std::size_t i = 0; i < zones_.size(); ++i) {
         bool any = false;
@@ -6939,6 +6954,25 @@ void MapScreen::update_impl(float dt) {
                 }
                 return;  // the dot strip owns its rect
             }
+        }
+    }
+    // Live map buttons (`Vb.F().ny`, JS L2167): the `Wr`/`sk` story plates.
+    // `Z0a` (L2172) binds `pa.addListener(... -> d.Qg(b.name))`, so a press
+    // runs `Qg` (L2173): `ta.Av = name` + `Sf("QUEST_EVENT_MAP_BUTTON_PRESS")`.
+    {
+        const std::vector<EngineMapButton>& mbs =
+            app().quest_engine().map_buttons();
+        for (std::size_t i = 0; i < mbs.size(); ++i) {
+            float bx = 0.0f, by = 0.0f, bw = 0.0f, bh = 0.0f;
+            map_button_rect(i, bx, by, bw, bh);
+            if (p.x < bx - bw * 0.5f || p.x > bx + bw * 0.5f ||
+                p.y < by - bh * 0.5f || p.y > by + bh * 0.5f) {
+                continue;
+            }
+            if (p.pressed) {
+                app().quest_engine().press_map_button(app(), mbs[i].name);
+            }
+            return;  // the plate owns its rect
         }
     }
     // JS `Ya.Uw` (L2129) focuses the save MapFocus node at init and `Rr`
@@ -7431,6 +7465,27 @@ void MapScreen::render_impl(App& app) {
     }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets, or the collapsed
     // `МЕНЮ` header (JS `za.Aub` collapse(0) — the map's default).
+    // Live map buttons (`Vb.F().ny`): `Wr.HWa`/`qY` (L2178) mount the `sk`
+    // story plates. `sk.xmb` (L2165) resolves `hg.image` through the user-image
+    // loader (`$w(E.get(338), a)`), so `draw_user_image` is the port's match.
+    // A miss falls back to a flat plate carrying the name. Draws the SAME rect
+    // the update_impl hit test arms.
+    {
+        const std::vector<EngineMapButton>& mbs =
+            app.quest_engine().map_buttons();
+        for (std::size_t i = 0; i < mbs.size(); ++i) {
+            float bx = 0.0f, by = 0.0f, bw = 0.0f, bh = 0.0f;
+            map_button_rect(i, bx, by, bw, bh);
+            if (!mbs[i].image.empty() &&
+                draw_user_image(app, mbs[i].image, bx, by, bw, bh, 1.0f, false)) {
+                continue;
+            }
+            draw_flat_button(app, "", bx, by, bw * 0.5f, bh * 0.5f, 0.85f, 0.7f,
+                             0.2f, false);
+            draw_ui_label(app, bx - bw * 0.5f, by - bh * 0.5f, bw, bh, mbs[i].name,
+                          0.5f, UiAlign::Left, 0.0f, 0.0f, 0.0f);
+        }
+    }
     draw_za_chrome(app, kScreenMap);
     // The `Rr` info panel (JS `Ya.Zq = Qo(Rr)` L2125) draws last, over the
     // `Vr` strip and the `Ur` bar (the oracle panel overlaps both).

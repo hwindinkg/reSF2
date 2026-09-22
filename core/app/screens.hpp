@@ -418,6 +418,11 @@ private:
     // Re-targets `Rr` to the node named in a MapFocus string (the `Ya.Uw` +
     // `ue.tea` focus rule, incl. the BOSSES/first-visible fallbacks).
     void apply_map_focus(const std::string& battle);
+    // The plate rect for live map-button registry index `i` (JS `Wr.qFa`
+    // L2179). Shared by the draw and the hit test so the rect a player taps is
+    // exactly the rect that was painted.
+    void map_button_rect(std::size_t i, float& cx, float& cy, float& w,
+                         float& h) const;
     // Shared battle-start body (JS `Ya` mp(6)): fills pending_battle and
     // pushes the fight. Used by node clicks and act completion alike.
     void launch_battle(const Node& n);

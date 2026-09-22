@@ -1158,6 +1158,17 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             out = ctx.iterator;
             return true;
         }
+        if (token == "_$ButtonName") {
+            // `Bj` L960: `case "_$ButtonName": a.Fb.result = this.ta.Av`. `Av`
+            // is written by `Vb.Qg` (L2173) before the MapButtonPress fire.
+            out = ctx.journal.button_name;
+            return true;
+        }
+        if (token == "_$ButtonType") {
+            // `Bj` L961: `case "_$ButtonType": a.Fb.result = this.ta.yYa`.
+            out = ctx.journal.button_type;
+            return true;
+        }
         // Other `Bj` journal fields (`_$CurrentScene`, `_$Iterator`, ...):
         // the shell does not model them -> UNKNOWN.
         note_unanswerable(token);
@@ -1663,13 +1674,49 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 ":period=" + attr_or(a.attrs, "Period", "0") +
                 ":sale=" + attr_or(a.attrs, "Sale"));
         } else if (t == "ShowMapButton") {
-            // `wo` L1097 (`EShowMapButton`): builds an `hg` (Name/Image/Timer/
-            // X/Y/anchors/Type/ImagePath/...) and adds it to `Vb.F()`. No
-            // map-button manager -> record the resolved Name.
-            fx.map_button_shows.push_back(attr_or(a.attrs, "Name"));
+            // `wo` L1100-1101 (`EShowMapButton`): builds an `hg` from the
+            // resolved attrs and calls `Vb.F().Lua(b,null,!0)`. `Lua` (L2167)
+            // DEDUPS by name (`m.find(this.ny, d=>d.name==a.name)==null`), so
+            // a repeat show of the same name is a no-op. Attributes resolve
+            // via `ba.Pc` like every other action.
+            const std::string bname =
+                quest_var(app, locals, attr_or(a.attrs, "Name"));
+            fx.map_button_shows.push_back(bname);
+            bool exists = false;
+            for (const EngineMapButton& mb : map_buttons_) {
+                if (mb.name == bname) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists && !bname.empty()) {
+                EngineMapButton mb;
+                mb.name = bname;
+                mb.image = quest_var(app, locals, attr_or(a.attrs, "Image"));
+                mb.timer = quest_var(app, locals, attr_or(a.attrs, "Timer"));
+                mb.show_type = attr_or(a.attrs, "ShowType", "Both");
+                map_buttons_.push_back(mb);
+                std::fprintf(stdout, "[quest] map button show %s image=%s timer=%s\n",
+                             mb.name.c_str(), mb.image.c_str(), mb.timer.c_str());
+                std::fflush(stdout);
+            }
         } else if (t == "HideMapButton") {
-            // `bo` L1086 (`EHideMapButton`): `Vb.F().oKa(ba.Pc(a,Name))`.
-            fx.map_button_hides.push_back(attr_or(a.attrs, "Name"));
+            // `bo` L1086 (`EHideMapButton`): `Vb.F().oKa(ba.Pc(a,Name))` —
+            // `oKa` (L2167) finds the `ny` entry with that name, removes it and
+            // drops its XML node.
+            const std::string bname =
+                quest_var(app, locals, attr_or(a.attrs, "Name"));
+            fx.map_button_hides.push_back(bname);
+            for (std::size_t i = 0; i < map_buttons_.size(); ++i) {
+                if (map_buttons_[i].name == bname) {
+                    map_buttons_.erase(map_buttons_.begin() +
+                                       static_cast<std::ptrdiff_t>(i));
+                    std::fprintf(stdout, "[quest] map button hide %s\n",
+                                 bname.c_str());
+                    std::fflush(stdout);
+                    break;
+                }
+            }
         } else if (t == "ResetDuelTimer") {
             // `ho` L1090 (`EResetDuelTimer`): `Gb.reset(!1)` on the fight
             // controller. No duel-timer controller here -> record.
@@ -2776,6 +2823,20 @@ std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
         std::fflush(stdout);
     }
     return fights;
+}
+
+// JS `Vb.Qg` (L2173): `Qg(a){ha.F().ta.Av=a; ha.F().Sf(
+// "QUEST_EVENT_MAP_BUTTON_PRESS"); let b=this.Agb; b!=null&&b.Z(a)}`. `ta.Av`
+// is `Bj.Av` (the `_$ButtonName` payload, L960); `Sf` routes the event through
+// the quest hub. The `Agb` signal is the button's own press callback — no port
+// consumer, so the fired quests are the observable result.
+std::vector<std::string> QuestEngine::press_map_button(App& app,
+                                                       const std::string& name) {
+    QuestJournal j;
+    j.button_name = name;
+    std::fprintf(stdout, "[quest] MapButtonPress %s -> event\n", name.c_str());
+    std::fflush(stdout);
+    return fire(app, "MapButtonPress", j);
 }
 
 std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
