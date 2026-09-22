@@ -2561,6 +2561,12 @@ int main(int argc, char** argv) {
                 "?NDiv[10,3]",
                 "?Mod[10,3]",
                 "?UniformIntRandom[1,1]",
+                // `QNa` L956-957: Concat (c=1) vs Slice (c=2, INCLUSIVE
+                // [start,end]; <3 args returns the first arg untouched).
+                "?Concat[A,B,C]",
+                "?Concat[ITEM|,?Sum[?Multi[100,?Player[].Level],230]]",
+                "?Slice[ABCDEF,1,3]",
+                "?Slice[ABCDEF,2]",
                 // The named remainder fixes (JS cite per row):
                 "?Item[WEAPON_KNIVES].Level",         // cdb L977 (has Level)
                 "?Item[Pile_Gems].Level",             // cdb L977 -> "null"
@@ -2646,6 +2652,22 @@ int main(int argc, char** argv) {
               "SetVariable Users persisted CurrentZone='ZONE_1'");
         check(after_readback == "ZONE_1",
               "_CurrentZone reads back via f5a (save round-trip)");
+        {
+            const sf2::app::QuestJournal cqj;
+            const auto rq = [&](const char* e) {
+                return app.quest_engine().resolve_for_test(app, e, cqj);
+            };
+            const std::string cat_sum = rq("?Sum[?Multi[100,?Player[].Level],230]");
+            check(rq("?Concat[A,B,C]") == "ABC",
+                  "?Concat[A,B,C] -> 'ABC' (QNa c=1)");
+            check(rq("?Concat[ITEM|,?Sum[?Multi[100,?Player[].Level],230]]") ==
+                      "ITEM|" + cat_sum,
+                  "?Concat[ITEM|,?Sum[?Multi[100,Level],230]] -> shipped form");
+            check(rq("?Slice[ABCDEF,1,3]") == "BCD",
+                  "?Slice[ABCDEF,1,3] -> 'BCD' (inclusive [1,3])");
+            check(rq("?Slice[ABCDEF,2]") == "ABCDEF",
+                  "?Slice[ABCDEF,2] -> first arg (needs 3 args to slice)");
+        }
         // Local (CH2) must NOT persist: JS `ha.F().Cja`/`q0` (L517259) is a
         // session/scoped map, never the save. The probe's run-local map is
         // discarded, so a Local write must never land in the save.
@@ -3025,6 +3047,27 @@ int main(int argc, char** argv) {
         check(owned_count("HELM_CEREMONIAL") == 1 &&
                   owned_upgrade("HELM_CEREMONIAL") == 330,
               "GiveItem HELM_CEREMONIAL|330 -> count 1, upgrade 330");
+        // The SHIPPED form: `GiveItem Name="?Concat[ITEM|,?Sum[?Multi[100,
+        // ?Player[].Level],230]]"`. Before the `QNa` port this Name was UNKNOWN
+        // (`GiveItem (Name unresolved)`) and granted nothing; the `|`-right
+        // value becomes the upgrade level (cf. HELM_CEREMONIAL|330 above).
+        {
+            const char* const kConcatName =
+                "?Concat[ARMOR_CEREMONIAL|,?Sum[?Multi[100,?Player[].Level],230]]";
+            sf2::app::QuestJournal cj;
+            const std::string csum =
+                app.quest_engine().resolve_for_test(
+                    app, "?Sum[?Multi[100,?Player[].Level],230]", cj);
+            fire_action("GiveItem", {{"Name", kConcatName}});
+            std::fprintf(stdout,
+                         "[qa] GIVEITEM CONCAT: resolved_sum=%s upgrade=%d "
+                         "count=%d\n",
+                         csum.c_str(), owned_upgrade("ARMOR_CEREMONIAL"),
+                         owned_count("ARMOR_CEREMONIAL"));
+            check(owned_count("ARMOR_CEREMONIAL") >= 1 &&
+                      std::to_string(owned_upgrade("ARMOR_CEREMONIAL")) == csum,
+                  "GiveItem Name=\"?Concat[...]\" -> resolved + granted");
+        }
         // `FightEnd` (`Tn.S`): recorded as a fight-scene request, not UNKNOWN.
         const std::size_t fe_before = app.quest_engine().fight_end_actions();
         fire_action("FightEnd", {});

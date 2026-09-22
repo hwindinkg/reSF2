@@ -760,6 +760,27 @@ double quest_now() {
     return std::round(s);
 }
 
+// JS `K.parseInt` for the `Slice` bounds (`Nwb` L957): leading whitespace, an
+// optional sign, then decimal digits; no digits -> NaN, which makes every
+// `Nwb` guard false and `J.substr(str, NaN, NaN)` yield "".
+bool query_parse_int(const std::string& s, long long& out) {
+    std::size_t i = 0;
+    while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) {
+        ++i;
+    }
+    bool neg = false;
+    if (i < s.size() && (s[i] == '+' || s[i] == '-')) {
+        neg = s[i] == '-';
+        ++i;
+    }
+    const std::size_t first = i;
+    long long v = 0;
+    while (i < s.size() && s[i] >= '0' && s[i] <= '9') v = v * 10 + (s[i++] - '0');
+    if (i == first) return false;  // NaN
+    out = neg ? -v : v;
+    return true;
+}
+
 }  // namespace
 
 bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCtx& ctx,
@@ -852,6 +873,43 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
         const double hi1 = static_cast<double>(static_cast<int>(to_number(args[1]) + 1.0));
         const double v = lo + (hi1 - lo) * query_rng01();
         out = std::to_string(static_cast<long long>(std::trunc(v)));
+        return true;
+    }
+
+    // `QNa` (L956-957) — the ONE handler behind both `Concat` (dispatch `fAa`
+    // L967: `case "Concat":this.QNa(b,a,1)`) and `Slice` (L969:
+    // `case "Slice":this.QNa(b,a,2)`). The loop concatenates every evaluated
+    // argument when c==1; for c==2 only the first is kept, and with 3+
+    // arguments `Nwb(f[0],parseInt(f[1]),parseInt(f[2]))` (L957) carves an
+    // INCLUSIVE `[start,end]` range: `d = 1 + end - start`, clamped to the
+    // tail, `""` when `start>len || end<start || start<0 || end<0`.
+    if (method == "Concat" || method == "Slice") {
+        if (!args_ok) {
+            note_unanswerable(token);
+            return false;
+        }
+        if (method == "Concat") {
+            std::string s;
+            for (const std::string& a : args) s += a;
+            out = s;
+            return true;
+        }
+        if (args.size() < 3) {
+            out = args.empty() ? std::string() : args[0];
+            return true;
+        }
+        long long start = 0;
+        long long end = 0;
+        const long long len = static_cast<long long>(args[0].size());
+        if (!query_parse_int(args[1], start) || !query_parse_int(args[2], end) ||
+            start > len || end < start || start < 0 || end < 0) {
+            out.clear();
+            return true;
+        }
+        long long d = 1 + end - start;
+        if (1 + end > len) d = len - start;
+        out = args[0].substr(static_cast<std::size_t>(start),
+                             static_cast<std::size_t>(d));
         return true;
     }
 
