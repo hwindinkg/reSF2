@@ -213,27 +213,9 @@ void split_battle_triple(const std::string& s, std::string& zone, std::string& n
 // `u.ka(a,b)` L2455: "1"/"true" -> true.
 bool attr_bool01(const std::string& v) { return v == "1" || v == "true"; }
 
-// `_Name` quest-variable reference (JS `to` + the `_`-prefixed resolver).
-// `StoryTutorialOpenScene` passes its arguments through refs — `Dialog`
-// `Line Text="_SenseiDialogText"` (tutorial_quests.xml L328) and
-// `MenuBtnFlashing BtnName="_NextScene"` (L361) — while the producer quests
-// write them with `SetVariable Scope="Global"` (L115-116, L137-138), i.e.
-// into the save's quest variables. A run-local (`NotificationTextMove`,
-// L18) wins; an unknown name is the empty string (so `!= ""` reads false).
-std::string quest_var(App& app, const std::map<std::string, std::string>& locals,
-                      const std::string& token) {
-    if (token.size() < 2 || token[0] != '_' || token[1] == '$') return token;
-    const std::string name = token.substr(1);
-    const auto it = locals.find(name);
-    if (it != locals.end()) return it->second;
-    try {
-        const WarriorSave w = app.save().load();
-        const auto gv = w.variables.find(name);
-        if (gv != w.variables.end()) return gv->second;
-    } catch (const std::exception&) {
-    }
-    return std::string();
-}
+// `_Name` quest-variable reference (JS `to` + the `_`-prefixed resolver) is
+// now a `QuestEngine` member (`quest_var`), so it can read the session map
+// `global_vars_` (JS `p.o.AG`) with the JS `f5a` precedence.
 
 // `ge.ZGa` (L1278): `u.H(<NotificationDlgDefaultReadTime Value>)` from
 // internal_settings.xml (<Basic>), statically 0 (L2481). The shipped file has
@@ -1041,6 +1023,33 @@ static bool valid_story_step(const std::string& s) {
     return false;
 }
 
+// `_Name` quest-variable reference. JS `p.o.f5a` (L133027) resolves in
+// precedence order: `ha.F().q0(a)` (Local/CH2) -> `this.AG.get(a)`
+// (Global/CH1) -> `this.rv.get(a)` (Users/CH0). The JS `rv`/`AG`/`aH` keys
+// carry the leading `_` (`wkb` L132880 `c = "_" + Name`); the port's maps use
+// the PUBLIC `Name` (`variable_key_for` bridges at the save boundary), so the
+// `_` is stripped here. An unknown name is the empty string, so a `!= ""`
+// condition reads false (the pre-fix behaviour and the JS null default).
+std::string QuestEngine::quest_var(
+    App& app, const std::map<std::string, std::string>& locals,
+    const std::string& token) {
+    if (token.size() < 2 || token[0] != '_' || token[1] == '$') return token;
+    const std::string name = token.substr(1);
+    const auto it = locals.find(name);            // Local (CH2)
+    if (it != locals.end()) return it->second;
+    const auto gv = global_vars_.find(name);      // Global (CH1)
+    if (gv != global_vars_.end()) return gv->second;
+    try {
+        const WarriorSave w = app.save().load();  // Users (CH0)
+        const auto uv = w.variables.find(name);
+        if (uv != w.variables.end()) return uv->second;
+        const auto pv = w.variables.find("_" + name);
+        if (pv != w.variables.end()) return pv->second;
+    } catch (const std::exception&) {
+    }
+    return std::string();
+}
+
 bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCtx& ctx,
                                 std::string& out) {
     out.clear();
@@ -1123,13 +1132,31 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
         return false;
     }
     if (token[0] == '_') {
-        // `_Name` quest/session variable (JS `p.o.f5a`: the variable's
-        // value, default "0"). The save's `<Variables>` store holds the
-        // `SetVariable Scope="Global"` writes.
+        // `_Name` quest/session variable (JS `p.o.f5a` L133027): Local
+        // (`ha.F().q0`) -> Global (`p.o.AG`) -> Users (`p.o.rv` = the save's
+        // `<Variables>`). `wkb` (L132880) keys `rv` with `"_" + Name`; the
+        // port's maps use the public Name, so the `_` is stripped. Default "0".
         const std::string name = token.substr(1);
-        const WarriorSave& w = ctx.live(app);
+        if (ctx.locals != nullptr) {              // Local (CH2)
+            const auto lv = ctx.locals->find(name);
+            if (lv != ctx.locals->end()) {
+                out = lv->second;
+                return true;
+            }
+        }
+        const auto gv = global_vars_.find(name);  // Global (CH1)
+        if (gv != global_vars_.end()) {
+            out = gv->second;
+            return true;
+        }
+        const WarriorSave& w = ctx.live(app);     // Users (CH0)
         const auto it = w.variables.find(name);
-        out = (it != w.variables.end()) ? it->second : "0";
+        if (it != w.variables.end()) {
+            out = it->second;
+            return true;
+        }
+        const auto pit = w.variables.find("_" + name);
+        out = (pit != w.variables.end()) ? pit->second : "0";
         return true;
     }
     if (token[0] == '?') return resolve_query(app, token, ctx, out);
@@ -1202,7 +1229,7 @@ bool QuestEngine::conditions_hold(App& app, const QuestCond& cond, const EvalCtx
 QuestEngine::ActionRest QuestEngine::run_actions(
     App& app, const std::vector<QuestAction>& acts, const QuestJournal& journal,
     QuestSideEffects& fx, std::map<std::string, std::string>& locals,
-    const std::string& quest, int depth) {
+    const std::string& quest, int depth, const std::string& iterator) {
     ActionRest result;
     if (depth > kMaxActionDepth) return result;
     for (std::size_t i = 0; i < acts.size(); ++i) {
@@ -1213,6 +1240,8 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // journal/save; an UNKNOWN operand takes the Else branch.
             EvalCtx c;
             c.journal = journal;
+            c.iterator = iterator;
+            c.locals = &locals;
             c.level = journal.player_level;
             try {
                 const WarriorSave w = app.save().load();
@@ -1224,7 +1253,7 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             }
             const bool take = conditions_hold(app, a.if_cond, c);
             ActionRest sub = run_actions(app, take ? a.if_then : a.if_else, journal, fx,
-                                         locals, quest, depth + 1);
+                                         locals, quest, depth + 1, iterator);
             // `co` (L1038) runs the chosen `Yb`; a `Wait` inside it suspends
             // the whole walk, so the outer tail is appended to the remainder.
             if (sub.suspended) {
@@ -1499,16 +1528,49 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 fx.battle_writes.push_back(std::move(bw));
             }
         } else if (t == "SetVariable") {
-            if (attr_or(a.attrs, "Scope") == "Global") {
-                fx.set_vars[attr_or(a.attrs, "Name")] = attr_or(a.attrs, "Value");
-            } else {
-                // Local run vars (NotificationTextMove/PunchBag) feed Dialog
-                // line refs below; `?`-expressions stay unresolved (noted).
-                const std::string v = attr_or(a.attrs, "Value");
-                if (!attr_or(a.attrs, "Name").empty() &&
-                    v.find('?') == std::string::npos) {
-                    locals[attr_or(a.attrs, "Name")] = v;
+            // `to` (`to.g="218"`) -> `Jpb` (L133404): `p.o.WA(ba.Pc(a,Name),
+            // ba.cg(a,Value), this.CH)` for EVERY scope, then
+            // `this.CH==0 && p.o.save()`. `parse` maps the `Scope` attr:
+            // "Global"->CH1, "Local"->CH2, "Users"/absent->CH0. `ba.cg`
+            // resolves the `Value` expression (`_`-refs + `?`-queries); a
+            // plain literal passes through. `WA` (L133478): CH0 = the save's
+            // `<Variables>` (persisted by `Jpb`'s `save()`), CH1 = the session
+            // map `p.o.AG`, CH2 = `ha.F().aH` (`Cja` L517259).
+            const std::string scope = attr_or(a.attrs, "Scope");
+            const std::string name = attr_or(a.attrs, "Name");
+            const std::string raw = attr_or(a.attrs, "Value");
+            std::string value = raw;
+            bool resolved = true;
+            if (!raw.empty() && (raw[0] == '?' || raw[0] == '_')) {
+                EvalCtx c;
+                c.journal = journal;
+                c.iterator = iterator;
+                c.locals = &locals;
+                c.level = journal.player_level;
+                try {
+                    const WarriorSave w = app.save().load();
+                    c.story_step = w.story_step();
+                    c.level = w.level;
+                    c.save = w;
+                    c.save_loaded = true;
+                } catch (const std::exception&) {
                 }
+                std::string r;
+                resolved = resolve_token(app, raw, c, r);
+                if (resolved) value = r;
+            }
+            if (name.empty()) {
+                // `qd(a,"_")` (L3387) is a no-op assertion; nothing to write.
+            } else if (!resolved) {
+                // JS always resolves; the port logs an unanswerable value
+                // rather than persisting a raw `?`-expression (a query gap).
+                fx.unknown.push_back("SetVariable:" + scope + "/" + name + "=" + raw);
+            } else if (scope == "Local") {
+                locals[name] = value;
+            } else if (scope == "Global") {
+                fx.global_vars[name] = value;
+            } else {
+                fx.set_vars[name] = value;  // Users (CH0) / absent -> save
             }
         } else if (t == "ClickButton") {
             const std::string target = attr_or(a.attrs, "Target");
@@ -1638,9 +1700,10 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                     } catch (const std::exception&) {
                     }
                     c.iterator = item;
+                    c.locals = &locals;
                     if (!conditions_hold(app, sub->root, c)) continue;
                     ActionRest s = run_actions(app, sub->actions, journal, fx, locals,
-                                               fname, depth + 1);
+                                               fname, depth + 1, item);
                     if (s.suspended) {
                         s.rest.insert(s.rest.end(), acts.begin() + i + 1, acts.end());
                         return s;
@@ -1751,7 +1814,7 @@ QuestEngine::ActionRest QuestEngine::run_actions(
         } else if (t == "Line" || t == "Button" || t == "Then" || t == "Else" ||
                    t == "Conditions") {
             ActionRest sub = run_actions(app, a.children, journal, fx, locals, quest,
-                                         depth + 1);
+                                         depth + 1, iterator);
             if (sub.suspended) {
                 sub.rest.insert(sub.rest.end(), acts.begin() + i + 1, acts.end());
                 return sub;
@@ -1786,6 +1849,12 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
                 w.variables[kv.first] = kv.second;
                 dirty = true;
             }
+        }
+        // `to.Jpb` CH1 (L133404): the `Scope="Global"` writes land in the
+        // session map `p.o.AG` only — `WA` (L133478) does `this.AG.set(a,d)`
+        // and `Jpb` skips `save()` unless `CH==0`. Apply in memory, no dirty.
+        for (const auto& kv : fx.global_vars) {
+            if (!kv.first.empty()) global_vars_[kv.first] = kv.second;
         }
         // `hl` battle-record writes (JS `J1a` L259 / `Iaa` L260-261 /
         // `Eja` L261 / `Ho` L1106) — the `WDa` unlock bit `Qr.lla` reads.

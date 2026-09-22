@@ -2519,6 +2519,15 @@ int main(int argc, char** argv) {
             if (it != after.variables.end()) after_zone = it->second;
         } catch (const std::exception&) {
         }
+        // Read-back through the engine's own `f5a` path (Local -> Global ->
+        // Users `rv`); after the restore below the profile is pristine again,
+        // so this must run first.
+        std::string after_readback;
+        {
+            const sf2::app::QuestJournal qj;
+            after_readback =
+                app.quest_engine().resolve_for_test(app, "_CurrentZone", qj);
+        }
         const bool battle_unknown_after = has_battle_unknown();
         // Per-query resolution table (the AFTER values; UNKNOWN -> "").
         {
@@ -2570,8 +2579,9 @@ int main(int argc, char** argv) {
                      battle_unknown_before ? 1 : 0);
         std::fprintf(stdout,
                      "[qquery] AFTER:  ?Battle[_$Iterator] unanswerable=%d, "
-                     "sub-quest fired=%d, CurrentZone='%s'\n",
-                     battle_unknown_after ? 1 : 0, fired ? 1 : 0, after_zone.c_str());
+                     "sub-quest fired=%d, CurrentZone='%s' readback='%s'\n",
+                     battle_unknown_after ? 1 : 0, fired ? 1 : 0, after_zone.c_str(),
+                     after_readback.c_str());
         int checks = 0, passed = 0;
         const auto check = [&](bool ok, const char* what) {
             ++checks;
@@ -2581,6 +2591,29 @@ int main(int argc, char** argv) {
         };
         check(fired, "FindLastAvailableFight MATCHED + ran");
         check(!battle_unknown_after, "?Battle[_$Iterator].* answered (not UNKNOWN)");
+        check(after_zone == "ZONE_1",
+              "SetVariable Users persisted CurrentZone='ZONE_1'");
+        check(after_readback == "ZONE_1",
+              "_CurrentZone reads back via f5a (save round-trip)");
+        // Local (CH2) must NOT persist: JS `ha.F().Cja`/`q0` (L517259) is a
+        // session/scoped map, never the save. The probe's run-local map is
+        // discarded, so a Local write must never land in the save.
+        {
+            sf2::app::QuestAction la;
+            la.tag = "SetVariable";
+            la.attrs["Scope"] = "Local";
+            la.attrs["Name"] = "ProbeLocalOnly";
+            la.attrs["Value"] = "LocalVal";
+            const sf2::app::QuestJournal lj;
+            app.quest_engine().run_action_probe(app, {la}, lj);
+        }
+        bool local_in_save = false;
+        try {
+            const sf2::app::WarriorSave s2 = app.save().load();
+            local_in_save = s2.variables.find("ProbeLocalOnly") != s2.variables.end();
+        } catch (const std::exception&) {
+        }
+        check(!local_in_save, "SetVariable Local NOT persisted (in-memory only)");
         const bool all = checks == passed;
         std::fprintf(stdout, "[qquery] RESULT %d/%d -> %s\n", passed, checks,
                      all ? "PASS" : "FAIL");

@@ -257,7 +257,16 @@ struct QuestSideEffects {
     std::string map_focus;
     bool has_current_zone = false;
     std::string current_zone;
-    std::map<std::string, std::string> set_vars;  // Global SetVariable
+    // `to` (SetVariable, `to.g="218"`) -> `Jpb` (L133404): `p.o.WA(Name,
+    // resolved Value, this.CH)` runs for EVERY scope, then `this.CH==0 &&
+    // p.o.save()`. `parse` maps `Scope`: "Global"->CH1, "Local"->CH2,
+    // "Users"/absent->CH0. `WA` (L133478) writes: CH0 -> the save's
+    // `<Quests><Variables>` (`rv`) and PERSISTS; CH1 -> the session map
+    // `p.o.AG` (`new Map` ctor L124266, never saved); CH2 -> `ha.F().aH`
+    // (`Cja`/`q0` L517259). The key is the PUBLIC `Name` (`WA` does
+    // `c.set("Name", a)`), no `_`; `wkb` (L132880) adds the `_` for `rv`.
+    std::map<std::string, std::string> set_vars;     // Users (CH0) -> save
+    std::map<std::string, std::string> global_vars;  // Global (CH1) -> `AG`
     std::vector<QuestBattleWrite> battle_writes;  // Show/Hide/SetVisibility/Toggle
     std::vector<std::string> scene_requests;      // Gn (record only)
     std::vector<std::string> fight_requests;      // Sn (record only)
@@ -583,6 +592,10 @@ private:
         // `_$Iterator` (JS `Bj` field; `zj` L1072 writes
         // `parameters.iterator` before each `Sl.compare`/`Sl.lF`).
         std::string iterator;
+        // The active run's Local/CH2 store (`ha.F().aH`), consulted by a
+        // sub-evaluation (`resolve_token`/`quest_var`). Null at fire time —
+        // no quest-local scope is pushed yet (JS `p.o.f5a` L133027).
+        const std::map<std::string, std::string>* locals = nullptr;
         int level = 1;
         mutable bool save_loaded = false;
         mutable WarriorSave save;
@@ -625,6 +638,10 @@ private:
     enum class Tri { False, True, Unknown };
     Tri eval_cond(App& app, const QuestCond& cond, const EvalCtx& ctx);
     bool conditions_hold(App& app, const QuestCond& cond, const EvalCtx& ctx);
+    // `_Name` quest-variable ref (JS `p.o.f5a` L133027): Local (`ha.F().q0`)
+    // -> Global (`AG`) -> Users (`rv`). Unknown -> the empty string.
+    std::string quest_var(App& app, const std::map<std::string, std::string>& locals,
+                          const std::string& token);
     // Resolves one Value1/Value2 expression. Returns false when the shell
     // cannot answer it (a `?`-query it does not model) — the caller then
     // treats the comparison as UNKNOWN.
@@ -686,7 +703,8 @@ private:
     ActionRest run_actions(App& app, const std::vector<QuestAction>& acts,
                            const QuestJournal& journal, QuestSideEffects& fx,
                            std::map<std::string, std::string>& locals,
-                           const std::string& quest, int depth);
+                           const std::string& quest, int depth,
+                           const std::string& iterator = std::string());
     // D1: runs one action list + its side effects (save writes, live actions,
     // guidance signals, chained `Activate` re-fires). `outer` is the
     // continuation of the ENCLOSING chain: a park here stores `rest ++ outer`
@@ -725,6 +743,9 @@ private:
     // Evaluation context of the load pass (the JS `ha.ta` journal an
     // `<Include>`'s conditions read). The root pass uses the boot journal.
     EvalCtx load_ctx_;
+    // JS `p.o.AG` (ctor L124266 `this.AG=new Map`): the `Scope="Global"`
+    // store. Session-scoped only — never parsed from or written to the save.
+    std::map<std::string, std::string> global_vars_;
     std::vector<std::string> loaded_files_;  // shipped files the loader read
     std::vector<std::string> fired_;  // Unresumable session latch
     // Place-gated runs parked until their scene is entered (see
