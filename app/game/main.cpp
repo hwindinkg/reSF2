@@ -3298,6 +3298,49 @@ int main(int argc, char** argv) {
                       wa.currencies.size() == wb.currencies.size(),
                   "UnlockCharacter -> no-op (Ko.S empty; name ignored)");
         }
+        // SetDataVersion (`po` L1039 -> `Oqb` L181): writes the ROOT
+        // `<Versions><DataVersion Value>`. `Full` empty -> `u7a` =
+        // Production.Major.Minor.DataVersion.
+        {
+            const std::string dv_before = app.save().data_version();
+            fire_action("SetDataVersion", {{"Production", "1"},
+                                           {"Major", "0"},
+                                           {"Minor", "42"},
+                                           {"DataVersion", "0"}});
+            const std::string dv_after = app.save().data_version();
+            check(dv_after == "1.0.42.0",
+                  "SetDataVersion -> root <Versions><DataVersion Value=1.0.42.0>");
+            std::fprintf(stdout, "[qa]   DataVersion %s -> %s\n",
+                         dv_before.c_str(), dv_after.c_str());
+        }
+        // GivePerk `ApplyTo="Player"` (`$n` -> `jXa` -> `C1a` L555926):
+        // `<Perk Name Level UpgradeLevel>` rows are granted when the name is in
+        // the catalog (`d8a`) via `p.o.co.K1a` (port `WarriorSave::learn_perk`).
+        if (app.has_fight_assets() && !app.fight_assets().perk_catalog.empty()) {
+            const std::string perk_name =
+                app.fight_assets().perk_catalog.begin()->first;
+            const std::size_t perks_before = app.save().load().perks.size();
+            sf2::app::QuestAction gp;
+            gp.tag = "GivePerk";
+            gp.attrs["ApplyTo"] = "Player";
+            sf2::app::QuestAction pk;
+            pk.tag = "Perk";
+            pk.attrs["Name"] = perk_name;
+            pk.attrs["Level"] = "1";
+            pk.attrs["UpgradeLevel"] = "0";
+            gp.children.push_back(pk);
+            sf2::app::QuestJournal pj;
+            app.quest_engine().run_action_probe(app, {gp}, pj);
+            bool granted = false;
+            for (const auto& ps : app.save().load().perks) {
+                if (ps.name == perk_name) granted = true;
+            }
+            check(granted && app.save().load().perks.size() >= perks_before,
+                  "GivePerk ApplyTo=Player -> <Perk Name Level UpgradeLevel> granted");
+        } else {
+            std::fprintf(stdout,
+                         "[qa] GivePerk Player probe skipped (no perk catalog)\n");
+        }
         // Restore the profile exactly as found.
         if (have_original) {
             try {

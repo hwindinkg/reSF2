@@ -351,6 +351,43 @@ std::int64_t WarriorSave::wall_now() {
     return static_cast<std::int64_t>(std::time(nullptr));
 }
 
+// JS `Oqb` (L181): `p.o.EB.A("Root").A("Versions").A("DataVersion")
+// .set("Value", a); p.o.save(!0)`. Reads the current document (save or
+// template), sets the ROOT `<Versions><DataVersion Value>`, and writes the
+// whole document back (plain XML, like every other port save).
+void SaveSystem::set_data_version(const std::string& value) {
+    const std::string src_path = has_save() ? save_path_ : default_path_;
+    sf2::data::xml_doc doc;
+    doc.parse(read_file_text(src_path));
+    pugi::xml_node root = doc.root().first_child();
+    if (root == nullptr || std::string(root.name()) != "Root") {
+        throw std::runtime_error(
+            "SaveSystem: cannot set DataVersion - root element missing");
+    }
+    pugi::xml_node versions = root.child("Versions");
+    if (!versions) versions = root.append_child("Versions");
+    pugi::xml_node dv = versions.child("DataVersion");
+    if (!dv) dv = versions.append_child("DataVersion");
+    dv.attribute("Value").set_value(value.c_str());
+    std::ostringstream oss;
+    doc.save(oss, "\t", pugi::format_default, pugi::encoding_auto);
+    write_file_text(save_path_, oss.str());
+}
+
+std::string SaveSystem::data_version() {
+    const std::string src_path = has_save() ? save_path_ : default_path_;
+    sf2::data::xml_doc doc;
+    doc.parse(read_file_text(src_path));
+    const pugi::xml_node root = doc.root().first_child();
+    if (root == nullptr || std::string(root.name()) != "Root") return std::string();
+    const pugi::xml_node versions = root.child("Versions");
+    if (!versions) return std::string();
+    const pugi::xml_node dv = versions.child("DataVersion");
+    if (!dv) return std::string();
+    const pugi::xml_attribute v = dv.attribute("Value");
+    return v ? std::string(v.value()) : std::string();
+}
+
 void SaveSystem::save(const WarriorSave& w) {
     // Load the current document (the save, or the template when none yet),
     // patch the Warrior attributes, and write back. This preserves the

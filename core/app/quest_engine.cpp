@@ -293,6 +293,20 @@ void parse_action(const pugi::xml_node& node, QuestAction& act) {
             parse_action(ch, sub);
             act.children.push_back(std::move(sub));
         }
+    } else {
+        // JS `S.parse` keeps the whole action subtree (`$n`/EGivePerk clones
+        // the node via `a.st().clone()`, L555926 `parse`). The port only
+        // structured If/Dialog/Button before, so a data-bearing action such as
+        // `<GivePerk><Perk Name Level UpgradeLevel/></GivePerk>` lost its
+        // children. Capture the remaining element children generically; only
+        // the Line/Button/Then/Else/Conditions dispatch in `run_actions`
+        // executes `children`, so this adds data without changing others.
+        for (pugi::xml_node ch = node.first_child(); ch; ch = ch.next_sibling()) {
+            if (ch.type() != pugi::node_element) continue;
+            QuestAction sub;
+            parse_action(ch, sub);
+            act.children.push_back(std::move(sub));
+        }
     }
 }
 
@@ -2953,6 +2967,92 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 cw.apply = known && have >= amount;  // `Xfa` -> `Y5a >= c`
             }
             fx.currency_writes.push_back(std::move(cw));
+        } else if (t == "SetDataVersion") {
+            // `po` (`ESetDataVersion` g="1E0", factory L950; parse/`S` L1039):
+            //   b = `R6a` = Full resolved, kept only when it has exactly 3 dots;
+            //   when null/empty: b = `u7a` = Production.Major.Minor.DataVersion;
+            //   then `p.F().Oqb(b)` (L181) -> ROOT `<Versions><DataVersion Value>`.
+            // `ba.cg` token-substitutes each part (literals pass through).
+            const auto part = [&](const char* key) -> std::string {
+                const std::string raw = attr_or(a.attrs, key);
+                if (raw.empty()) return raw;
+                if (raw.find('?') == std::string::npos && raw[0] != '_') return raw;
+                EvalCtx cc;
+                cc.journal = journal;
+                cc.iterator = iterator;
+                cc.locals = &locals;
+                cc.level = journal.player_level;
+                try {
+                    const WarriorSave w = app.save().load();
+                    cc.level = w.level;
+                    cc.save = w;
+                    cc.save_loaded = true;
+                } catch (const std::exception&) {
+                }
+                std::string out = raw;
+                if (!resolve_token(app, raw, cc, out)) out = raw;
+                return out;
+            };
+            std::string ver;
+            const std::string full = part("Full");
+            int dots = 0;
+            for (char cch : full) {
+                if (cch == '.') ++dots;
+            }
+            if (!full.empty() && dots == 3) ver = full;
+            if (ver.empty()) {
+                ver = part("Production") + "." + part("Major") + "." +
+                      part("Minor") + "." + part("DataVersion");
+            }
+            fx.data_version_writes.push_back(ver);
+        } else if (t == "GivePerk") {
+            // `$n` (`EGivePerk`, factory L950; class ends L555926): `parse`
+            // reads `ApplyTo`/`Item` and clones the node. `S` resolves `ApplyTo`
+            // -> "Item" (`RWa`, enchant path) | "Player" (`jXa` -> `C1a`).
+            // Player: `C1a` walks `<Perk Name Level UpgradeLevel>` and, when the
+            // perk exists in the catalog (`d8a`), records it via `p.o.co.K1a`.
+            const auto resolve_apply = [&](const std::string& raw) -> std::string {
+                if (raw.empty()) return raw;
+                if (raw.find('?') == std::string::npos && raw[0] != '_') return raw;
+                EvalCtx cc;
+                cc.journal = journal;
+                cc.iterator = iterator;
+                cc.locals = &locals;
+                cc.level = journal.player_level;
+                try {
+                    const WarriorSave w = app.save().load();
+                    cc.level = w.level;
+                    cc.save = w;
+                    cc.save_loaded = true;
+                } catch (const std::exception&) {
+                }
+                std::string out = raw;
+                if (!resolve_token(app, raw, cc, out)) out = raw;
+                return out;
+            };
+            const std::string apply_to = resolve_apply(attr_or(a.attrs, "ApplyTo"));
+            if (apply_to == "Player") {
+                for (const QuestAction& ch : a.children) {
+                    if (ch.tag != "Perk") continue;
+                    QuestSideEffects::PerkGrant g;
+                    g.name = resolve_apply(attr_or(ch.attrs, "Name"));
+                    const std::string lv = resolve_apply(attr_or(ch.attrs, "Level"));
+                    const std::string uv =
+                        resolve_apply(attr_or(ch.attrs, "UpgradeLevel"));
+                    g.level = is_numeric(lv) ? static_cast<int>(to_number(lv)) : 0;
+                    g.upgrade = is_numeric(uv) ? static_cast<int>(to_number(uv)) : 0;
+                    const bool in_catalog =
+                        app.has_fight_assets() &&
+                        app.fight_assets().perk_catalog.count(g.name) != 0;
+                    if (in_catalog) fx.perk_grants.push_back(std::move(g));
+                }
+            } else if (apply_to == "Item") {
+                // `RWa` (`$n` L555926): item enchant path (`Pa.cDa`/enchant
+                // model not ported) -> record so it surfaces in the census.
+                fx.unknown.push_back("GivePerk:Item");
+            } else {
+                fx.unknown.push_back(t);
+            }
         } else if (t == "Line" || t == "Button" || t == "Then" || t == "Else" ||
                    t == "Conditions") {
             ActionRest sub = run_actions(app, a.children, journal, fx, locals, quest,
@@ -3020,6 +3120,24 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
                     dirty = true;
                 }
             }
+        }
+        // `po` (`ESetDataVersion`): `Oqb` (L181) writes the ROOT
+        // `<Versions><DataVersion Value>` and saves the whole document.
+        for (const std::string& dv : fx.data_version_writes) {
+            try {
+                app.save().set_data_version(dv);
+                std::fprintf(stdout, "[quest] DataVersion -> %s\n", dv.c_str());
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "[quest] DataVersion write failed: %s\n",
+                             e.what());
+            }
+        }
+        // `$n` `GivePerk` `ApplyTo="Player"` (`C1a` -> `p.o.co.K1a` L154884):
+        // record each `<Perk Name Level UpgradeLevel>` row (`Ji` -> `<Perks>`).
+        for (const QuestSideEffects::PerkGrant& pg : fx.perk_grants) {
+            if (pg.name.empty()) continue;
+            w.learn_perk(pg.name, pg.level, pg.upgrade);
+            dirty = true;
         }
         // `hl` battle-record writes (JS `J1a` L259 / `Iaa` L260-261 /
         // `Eja` L261 / `Ho` L1106) — the `WDa` unlock bit `Qr.lla` reads.

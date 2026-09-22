@@ -377,6 +377,21 @@ struct QuestSideEffects {
         bool apply = true;   // `rg` affordability failed -> false (Error branch)
     };
     std::vector<QuestCurrencyWrite> currency_writes;
+    // `po` (`ESetDataVersion` g="1E0", L1039 `S`): the computed version string
+    // (Full when it has exactly 3 dots, else Production.Major.Minor.DataVersion).
+    // `apply_effects` performs `p.F().Oqb(b)` (L181) -> ROOT
+    // `<Versions><DataVersion Value>` via `SaveSystem::set_data_version`.
+    std::vector<std::string> data_version_writes;
+    // `$n` (`EGivePerk`) `ApplyTo="Player"` (`jXa` -> `C1a` L555926): the
+    // `<Perk Name Level UpgradeLevel>` rows granted via `p.o.co.K1a` (L154884
+    // -> port `WarriorSave::learn_perk`). The JS `d8a(name)!=null` gate is the
+    // catalog-membership check applied in `run_actions`.
+    struct PerkGrant {
+        std::string name;
+        int level = 0;
+        int upgrade = 0;
+    };
+    std::vector<PerkGrant> perk_grants;
     // `FightEnd` (JS `Tn.S`): `ca.Ka().kD(!1)` — end the live fight. The
     // engine records it; the fight scene consumes the request.
     std::vector<std::string> fight_end_requests;

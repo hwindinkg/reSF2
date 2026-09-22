@@ -506,6 +506,16 @@ public:
     // `Aa.save` re-serializing the whole document).
     void save(const WarriorSave& warrior);
 
+    // JS `Oqb` (L181, the `ESetDataVersion` action `po`, g="1E0"): writes the
+    // ROOT-level `<Root><Versions><DataVersion Value="...">` (NOT a Warrior
+    // attribute) and re-serializes/saves the whole document. `A(name)` creates
+    // a missing child, so absent <Versions>/<DataVersion> nodes are added.
+    void set_data_version(const std::string& value);
+
+    // Reads the ROOT-level `<Versions><DataVersion Value>` back (empty when
+    // absent). Lets the probe observe `Oqb`.
+    std::string data_version();
+
     // The SF2User envelope (FLOW_STATIC section 3.1 + R7, JS L70-73/L2333):
     // decode: base64 -> `Ug` frames (`ke(len)+yna(bytes)` length-prefixed
     // zstd frames, no separator) -> XML text (`Aa.load`); the `.sf2` export
