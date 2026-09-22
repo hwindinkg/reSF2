@@ -882,3 +882,32 @@ oracle `ma.Kq` projection not re-derived (constants calibrated to the capture).
 Goldens: combat_golden GREEN; spatial_golden 17 GREEN; ai_golden Node<->C++
 prng bit-exact, gb S-variant max-abs 1.11e-08 <= 1e-5, ju k=3/0/-1/-1/-1,
 horizon T/F/T. COMMIT+PUSH per orchestrator (STATE.md untouched).
+
+--- 2026-09-22 (HEAD 65ef9035) - full gate battery + UpgradeToLevelReminder triage ---
+Method (RULE 0: hidden + watchdog, serial): game.exe reference/www/res
+reference/saves/save.xml --hidden --watchdog 600 <flag>, from E:\reSF2.
+Gates: --verify-input 7/7 PASS; --input-tape exit 0 / 0 FAIL; --flow-verify
+RESULT 18/18; --quest-verify RESULT -> PASS; --quest-verify-buy all sub-items
+PASS -> PASS; --tutorial-real-verify PASS (welcome/beat1/beat2/sensei);
+--quest-query-probe 10/10 PASS; --quest-action-probe 12/12 PASS;
+--dialog-verify PASS (Right 668 / Left 153 / Middle 16 / Close 1); --fx-probe
+PASS (79 atlases / 2011 frames, real frame effect_fall_1); --boss-hit-probe HIT
+(ShroudFakeRecoil react_at=325, started 2->6); --fidelity-tour ALL 40 STEPS
+DONE; --headless-loop ALL 13 STEPS DONE + save/load PASS + shop BUY/EQUIP PASS;
+--ui-tour ALL 15 STEPS DONE; --capture-idle-fight-at 300 x2 -> sha256 identical
+(29728DFF...D13FFCAD7, 290672 B). No regression.
+UpgradeToLevelReminder triage (NEW divergence, quest log L9824): a clean-save
+Purchase probe logged cond0..cond6 tri = 0 / 1 / 1 / 1 / 1 / 1 / 1, i.e.
+GreaterEqual / Or(Type) / Shown!=1 / CheckBox!=1 / PaidItem!=Paid /
+PaidItem!=SuperPaid / And!=[SUPER_KUSARIGAMA...]. The BLOCKER is cond0 (the
+first condition): `(100*?Player[].Level) - ?Purchase[_$Purchase].UpgradeLevel
+>= 100`. On the WEAPON_KNIVES buy (level=1, step=END) the operand is 100 (the
+item's shipped UpgradeLevel, list.xml L153) -> 100*1-100 = 0 >= 100 = false.
+JS `IJa` (sf2.502f0946.js:503069) `case "UpgradeLevel": b.result = e!=null ?
+K.T(e.Ce) : "0"` where `e` is the owned item and `Ce` its UpgradeLevel attr;
+the port's `owned->upgrade_level` matches. VERDICT: NOT a port bug - the shipped
+conditions legitimately block the reminder (fires only once
+100*PlayerLevel - UpgradeLevel >= 100, i.e. Level >= 2 for knives). The report's
+premise ("first condition now resolves true") is incorrect; no condition other
+than cond0 blocks it. Build: incremental Release, 0 errors. COMMIT+PUSH per
+orchestrator (STATE.md untouched).
