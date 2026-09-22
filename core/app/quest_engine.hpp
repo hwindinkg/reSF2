@@ -68,6 +68,11 @@ struct QuestJournal {
     // fires `QUEST_EVENT_PURCHASE_UNSUCCESSFUL` (`I_` = the failure reason).
     std::string item;              // `_$Purchase`
     std::string purchase_failure;  // `_$PurchaseUnsuccessful` suffix (`I_`)
+    // JS `Bj.eHa` (the "received offer item" journal): `_$Offer` (L494107)
+    // reads `this.ta.eHa != null ? eHa.ab() : ""` — the offer NAME whose
+    // item was just received (`OfferItemRecieved`, `G_` L513220 maps it to
+    // `QUEST_EVENT_OFFER_ITEM_RECIEVED`). Set by `offer_purchase`.
+    std::string offer;             // `_$Offer`
 };
 
 // Condition node (leaf comparison or And/Or operator). Leaf kinds mirror
@@ -361,6 +366,11 @@ struct QuestSideEffects {
     // engine records it; the fight scene consumes the request.
     std::vector<std::string> fight_end_requests;
     std::vector<std::string> unknown;             // unhandled tags
+    // Shop-offer controller actions (`nt` g="5B", `p.Cw`): `CheckOffersStart`
+    // (`Jn` L531140 -> `p.Cw.a_a()`), `ChangeOfferState` (`En` L528761 ->
+    // `rc.state` write) and `CheckItemsFromPurchasedOffers` (`In` L530984 ->
+    // `TZa()`). One entry per executed action (`tag:detail`).
+    std::vector<std::string> offer_actions;
 };
 
 // One live map button (`hg`, JS L2176-2177): an entry of the `Vb` manager's
@@ -384,6 +394,20 @@ struct EngineItemOffer {
     bool sale = false;         // `yf.V4` (the `<Sale>` flag)
     long long end_time = 0;    // `yf.yn` (0 = no expiry; `p.Dc + Period + tz`)
     bool active = true;        // `yf.fE`
+};
+
+// `jl` (L180945): the persisted per-offer state object (`p.o.P7a(name)`,
+// L130088). The shop-offer controller (`nt` g="5B") wraps every list.xml
+// `SubType="Offer"/"DailyOffer"` item in an `hh`/`pl` and reads its `rc`
+// (this struct). Loaded from the save's `<Offers><Offer ..>` rows (`Ldb`
+// L130280) and written back (`Wyb` L130310).
+struct EngineOfferState {
+    int ox = 0;                     // `ox` (StartCount; Ldb bumps 0 -> 1)
+    bool UH = false;                // `UH` (AllItemsRecieved)
+    long long n4 = 0;               // `n4` (PurchaseTime, `p.Dc` seconds)
+    std::string state = "NotStarted"; // `state` (NotStarted/Active/JustStarted/
+                                      // LastChance/End/Purchased/Unknown)
+    std::string name;               // `name`
 };
 
 class QuestEngine {
@@ -685,6 +709,39 @@ public:
     int offer_price(const std::string& item, int base) const;
     std::size_t offer_count() const { return offers_.size(); }
 
+    // --- shop-offer controller (`nt` g="5B", `p.Cw`; `hh`/`pl` model) ------
+    // The list.xml offer DEFINITIONS (JS `p.Cw.It`, built by `A1a` L180xxx
+    // from `p.items.gHa` — every item whose SubType is Offer/DailyOffer). File
+    // order. Distinct from the EDiscount `offers_` above.
+    const std::vector<CatalogItem>& offer_defs(App& app);
+    // The live `rc` state (`p.o.P7a(name)`, L130088); default NotStarted.
+    const EngineOfferState& offer_state(const std::string& name) const;
+    // `a_a()` (L180xxx): start eligible NotStarted offers (`Qba` -> `pwb`:
+    // state="JustStarted", `ox`++, arm `OfferTimer_<name>`). Run by the
+    // `CheckOffersStart` quest command (`Jn` L531140).
+    void offer_check_start(App& app);
+    // `QEa()` (L180xxx): the offer's `OfferTimer_<name>` deadline is in the
+    // future (`p.o.yl.gJ(oJ()) != null && Nv - p.Dc > 0`).
+    bool offer_timer_active(const std::string& name) const;
+    // `isActive()` (L180xxx): QEa() || state in {JustStarted,Active} ||
+    // (state=="LastChance").
+    bool offer_is_active(const std::string& name) const;
+    // `En` L528761 (`EChangeOfferState`): `<ChangeOfferState Name Value>` sets
+    // `rc.state = Value` when the resolved Value != "Unknown" and differs.
+    void offer_change_state(App& app, const std::string& name,
+                            const std::string& state);
+    // `tlb` L180xxx (the purchase-success path): state="Purchased", log `n4`,
+    // then grant the not-yet-received offer items (`Wwa`).
+    void offer_purchase(App& app, const std::string& name);
+    // `tick_timers` hook: an expired `OfferTimer_<name>` -> `$Za` -> `C3a`:
+    // state = `dU` (ShowLastChance) ? "LastChance" : "End" (never from
+    // Purchased).
+    void offer_timer_expired(App& app, const std::string& name);
+    // `CheckItemsFromPurchasedOffers` (`In` L530984 -> `TZa` L180xxx).
+    void offer_check_purchased(App& app);
+    // `In`/`fz.Wn` (L180...): the state -> ordinal used by the `a_a` sort.
+    static int offer_state_rank(const std::string& state);
+
     // `p.iMa` (L112419): the shop lock write (`p.o.vq`/`tnb` L267 —
     // `<Shop><Lock Name>` + `R$`) then equip (`on`) / unequip every owned item
     // whose catalog `lock` (PackLabel) equals `label` (`Jrb`/`hnb` L167,
@@ -700,6 +757,24 @@ private:
     // `p.o.xa.<item>.Gp` (the live per-item offer; `Pn.S` L1064 writes it,
     // `p.o.xa.vu()` L301 + the shop price render read it).
     std::map<std::string, EngineItemOffer> offers_;
+
+    // The list.xml offer-definition cache (`p.Cw.It`; static for the process)
+    // and the live per-offer `rc` states (`p.o.QN`, `P7a` L130088).
+    mutable std::vector<CatalogItem> offer_defs_;
+    mutable bool offer_defs_ready_ = false;
+    std::map<std::string, EngineOfferState> offer_states_;
+
+    // `Qba` L180xxx: `!Nga() && (BCa()<=0 || BCa()<p.Dc) && (N0()<=0 ||
+    // N0()>p.Dc) && Ti(player)`; on success `pwb` (state=JustStarted, ox++,
+    // arm `OfferTimer_<name>`). Returns whether the offer started.
+    bool offer_try_start(App& app, const CatalogItem& ci);
+    // `Nga()`: `p.o.xa.Jga(name)` (the inventory owns the offer) or, for a
+    // `pl` (DailyOffer), `m.any(item.Ht, b => p.o.xa.Jga(b.name))`.
+    bool offer_owned(App& app, const CatalogItem& ci) const;
+    // `Ti(player)` L180xxx: every `OfferConditions` (`CE`) leaf holds.
+    bool offer_conditions_hold(App& app, const CatalogItem& ci);
+    // The offer def with that name, or null (`m.dn(p.Cw.It, e.ab()==name)`).
+    const CatalogItem* offer_def(App& app, const std::string& name);
 
     // One condition-evaluation context (the JS `Bj` journal `ta` plus the
     // live save snapshot the `?`-queries read).

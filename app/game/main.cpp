@@ -2598,11 +2598,72 @@ int main(int argc, char** argv) {
                 "?Enchantment[ENCH_A|RECIPE_B].Recipe",     // z3a L967 -> RECIPE_B
                 "?Enchantment[ENCH_A|RECIPE_B|30].DeliveryTime",  // z3a L967 -> 30
                 "?Enchantment[ONLYONE].Item",         // z3a L967 -> UNKNOWN (<2 parts)
+                // --- shop offers (`p.Cw.It`, `hh`/`pl` L180...): the model +
+                // the `?Offer(s)` queries (JS `wfb` L508754 / `yfb` L509394).
+                // The 30 shipped defs are list.xml `SubType="DailyOffer"` items.
+                "?Offer[DailyOffer_3_4].Exists",          // wfb -> "1"
+                "?Offer[DailyOffer_3_4].State",           // -> "NotStarted"
+                "?Offer[DailyOffer_3_4].Title",           // Text -> "dailyOfferTitel"
+                "?Offer[DailyOffer_3_4].Description",     // -> "dailyOfferDescr"
+                "?Offer[DailyOffer_3_4].Image",           // Image attr -> ""
+                "?Offer[DailyOffer_3_4].ProfitImage",     // -> ""
+                "?Offer[DailyOffer_3_4].RealPrice",       // -> "$2.99"
+                "?Offer[DailyOffer_3_4].FocusOnBuy",      // -> WEAPON_VAL20_SAI
+                "?Offer[DailyOffer_3_4].ShowLastChance",  // -> "0"
+                "?Offer[DailyOffer_3_4].Type",            // lp() -> "1"
+                "?Offer[DailyOffer_3_4].TimerActive",     // QEa() -> "0"
+                "?Offer[DailyOffer_3_4].TimerName",       // oJ() -> OfferTimer_DailyOffer_3_4
+                "?Offer[DailyOffer_3_4].AllItemsRecieved",// rc.UH -> "0"
+                "?Offer[NOPE].Exists",                    // -> "0"
+                "?Offers[].First",                        // -> DailyOffer_3_4
+                "?Offers[].FirstNotStarted",              // -> DailyOffer_3_4
+                "?Offers[].FirstJustStarted",             // -> "0" (none start)
+                "?Offers[].FirstLastChance",              // -> "0"
+                "?Offers[].FirstPurchased",               // -> "0"
             };
             for (const char* e : exprs) {
                 const std::string v =
                     app.quest_engine().resolve_for_test(app, e, qj);
                 std::fprintf(stdout, "[qquery]   %-42s = '%s'\n", e, v.c_str());
+            }
+            // --- shop-offer state machine (`a_a` -> `En` -> `tlb`) ---------
+            // `CheckOffersStart` (`Jn` L531140) runs `a_a`; every shipped offer
+            // carries `<Equal Value1="?Pack[CLANS].IsAvailable" Value2="1"/>`
+            // (list.xml) which is "0" in this build -> none starts (`Ti` false).
+            {
+                sf2::app::QuestAction oa;
+                oa.tag = "CheckOffersStart";
+                sf2::app::QuestJournal oj;
+                const std::size_t before = app.quest_engine().unanswerable_count();
+                app.quest_engine().run_action_probe(app, {oa}, oj);
+                std::fprintf(stdout,
+                             "[qquery] CheckOffersStart ran (unanswerable %zu->%zu)\n",
+                             before, app.quest_engine().unanswerable_count());
+                const std::string js =
+                    app.quest_engine().resolve_for_test(app, "?Offers[].FirstJustStarted", oj);
+                std::fprintf(stdout, "[qquery]   after a_a FirstJustStarted='%s'\n", js.c_str());
+            }
+            // `En` L528761 (`ChangeOfferState`) then re-read the `?Offers` list.
+            app.quest_engine().offer_change_state(app, "DailyOffer_3_4", "JustStarted");
+            {
+                const sf2::app::QuestJournal oj;
+                const std::string a =
+                    app.quest_engine().resolve_for_test(app, "?Offers[].FirstJustStarted", oj);
+                const std::string b =
+                    app.quest_engine().resolve_for_test(app, "?Offer[DailyOffer_3_4].State", oj);
+                std::fprintf(stdout, "[qquery]   En JustStarted: FirstJustStarted='%s' State='%s'\n",
+                             a.c_str(), b.c_str());
+            }
+            // `tlb` L180xxx (`offer_purchase`): state=Purchased + `n4`.
+            app.quest_engine().offer_purchase(app, "DailyOffer_3_4");
+            {
+                const sf2::app::QuestJournal oj;
+                const std::string a =
+                    app.quest_engine().resolve_for_test(app, "?Offers[].FirstPurchased", oj);
+                const std::string b =
+                    app.quest_engine().resolve_for_test(app, "?Offer[DailyOffer_3_4].State", oj);
+                std::fprintf(stdout, "[qquery]   tlb Purchased: FirstPurchased='%s' State='%s'\n",
+                             a.c_str(), b.c_str());
             }
             // The purchase journal (`Pa.Wz` L1234 / `Pa.Bv` L1211): the tokens
             // the shipped `<Purchase/>`/`<PurchaseUnsuccessful/>` quests read,

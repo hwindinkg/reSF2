@@ -90,6 +90,51 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
                 ci.perks.push_back(std::move(ref));
             }
         }
+        // Shop-offer definition (JS item ctor L162822-16733x). `mt.Mga`
+        // L175260: `a.Yb != "Offer" ? a.Yb == "DailyOffer" : true` — i.e. the
+        // `SubType` is "Offer" or "DailyOffer" (both carry `Type="RealMoneyItem"`,
+        // `I.wk` L1272054).
+        ci.is_offer = ci.subtype == "Offer" || ci.subtype == "DailyOffer";
+        if (ci.is_offer) {
+            ci.offer_kind = ci.subtype;
+            if (item.attribute("Text")) ci.offer_text = item.attribute("Text").value();
+            if (item.attribute("Description"))
+                ci.offer_description = item.attribute("Description").value();
+            if (item.attribute("ProfitImage"))
+                ci.offer_profit_image = item.attribute("ProfitImage").value();
+            if (item.attribute("ButtonImage"))
+                ci.offer_button_image = item.attribute("ButtonImage").value();
+            if (item.attribute("RealPrice"))
+                ci.offer_real_price = item.attribute("RealPrice").value();
+            if (item.attribute("FocusOnBuy"))
+                ci.offer_focus_on_buy = item.attribute("FocusOnBuy").value();
+            ci.offer_show_last_chance =
+                attr_bool_str(item.attribute("ShowLastChance").value());
+            ci.offer_duration = sf2::data::xml_attr_int(item, "Duration", 0);
+            // `<OfferItems><Item Name=..>` -> `Ht` (Lt entries; the shipped
+            // `AllItemsRecieved`/`Nga` paths read only the names).
+            const pugi::xml_node offer_items = item.child("OfferItems");
+            if (offer_items) {
+                for (const pugi::xml_node oi : offer_items.children("Item")) {
+                    if (oi.attribute("Name"))
+                        ci.offer_items.push_back(oi.attribute("Name").value());
+                }
+            }
+            // `<OfferConditions>` -> `CE` (leaf conditions; `And`/`Operator`
+            // nested rows are kept as-is and never pass — no shipped use).
+            const pugi::xml_node offer_conditions = item.child("OfferConditions");
+            if (offer_conditions) {
+                for (const pugi::xml_node oc : offer_conditions.children()) {
+                    if (oc.type() != pugi::node_element) continue;
+                    OfferCondition cond;
+                    cond.kind = oc.name();
+                    if (oc.attribute("Value1")) cond.value1 = oc.attribute("Value1").value();
+                    if (oc.attribute("Value2")) cond.value2 = oc.attribute("Value2").value();
+                    cond.invert = attr_bool_str(oc.attribute("Not").value());
+                    ci.offer_conditions.push_back(std::move(cond));
+                }
+            }
+        }
         out.push_back(std::move(ci));
     }
     return out;

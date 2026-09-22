@@ -651,6 +651,7 @@ int QuestEngine::offer_price(const std::string& item, int base) const {
     return o->price;
 }
 
+
 // The list.xml `BonusPrice` (the JS item `od`). `CatalogItem` does not carry
 // it, so it is read direct from the catalog file and cached.
 int QuestEngine::catalog_bonus_price(App& app, const std::string& name) const {
@@ -789,6 +790,254 @@ bool query_parse_int(const std::string& s, long long& out) {
 
 }  // namespace
 
+// --- shop-offer controller (`nt` g="5B", `p.Cw`; `hh`/`pl` model) ----------
+
+// The `p.Cw.It` list is built in `A1a` (L180xxx) from `p.items.gHa` — every
+// list.xml item whose `SubType` is "Offer"/"DailyOffer" (`mt.Mga` L175260,
+// pushed into `gHa` by `Lia` L86475). Order = list.xml order.
+const std::vector<CatalogItem>& QuestEngine::offer_defs(App& app) {
+    if (!offer_defs_ready_) {
+        offer_defs_.clear();
+        try {
+            const std::vector<CatalogItem> all = load_full_catalog(app);
+            for (const CatalogItem& ci : all) {
+                if (ci.is_offer) offer_defs_.push_back(ci);
+            }
+        } catch (const std::exception&) {
+            offer_defs_.clear();
+        }
+        offer_defs_ready_ = true;
+    }
+    return offer_defs_;
+}
+
+const CatalogItem* QuestEngine::offer_def(App& app, const std::string& name) {
+    if (name.empty()) return nullptr;
+    for (const CatalogItem& ci : offer_defs(app)) {
+        if (ci.name == name) return &ci;
+    }
+    return nullptr;
+}
+
+// `fz.Wn` L180945: the state ordinal the `a_a` sort keys on.
+int QuestEngine::offer_state_rank(const std::string& state) {
+    if (state == "Active") return 3;
+    if (state == "End") return 6;
+    if (state == "JustStarted") return 2;
+    if (state == "LastChance") return 5;
+    if (state == "NotStarted") return 1;
+    if (state == "Purchased") return 4;
+    if (state == "Unknown") return 0;
+    return -1;
+}
+
+// `p.o.P7a(name)` L130088: the live `rc`; a fresh one is NotStarted.
+const EngineOfferState& QuestEngine::offer_state(const std::string& name) const {
+    const auto it = offer_states_.find(name);
+    if (it != offer_states_.end()) return it->second;
+    static const EngineOfferState kDefault;
+    return kDefault;
+}
+
+// `QEa()` L180xxx: `let a=this.o.yl.gJ(this.oJ()); return a!=null ?
+// a.Nv - p.Dc > 0 : false`. `oJ()` = `Ai.fHa + name`; `Ai.fHa="OfferTimer_"`
+// (L1272450). The timer lives in the SAME `p.o.yl` store as `timers_`.
+bool QuestEngine::offer_timer_active(const std::string& name) const {
+    const auto it = timers_.find("OfferTimer_" + name);
+    return it != timers_.end() && it->second - quest_now() > 0.0;
+}
+
+// `isActive()` L180xxx: `QEa() || state=="JustStarted" || state=="Active" ?
+// true : state=="LastChance"`.
+bool QuestEngine::offer_is_active(const std::string& name) const {
+    if (offer_timer_active(name)) return true;
+    const std::string st = offer_state(name).state;
+    if (st == "JustStarted" || st == "Active") return true;
+    return st == "LastChance";
+}
+
+// `Nga()` (`hh` L180xxx + `pl` override): `p.o.xa.Jga(name)` = the inventory
+// entry exists with count>0 (`Jga` L151772). `pl` ORs every `item.Ht` name.
+bool QuestEngine::offer_owned(App& app, const CatalogItem& ci) const {
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return false;
+    }
+    if (w.has_item(ci.name)) return true;
+    if (ci.offer_kind == "DailyOffer") {
+        for (const std::string& n : ci.offer_items) {
+            if (w.has_item(n)) return true;
+        }
+    }
+    return false;
+}
+
+// `Ti(player)` L180xxx: `if(this.item.CE==null) return true; for(c : CE)
+// if(!c.compare(a)) return false; return true;`. `CE` is never null (empty
+// array -> true). Each leaf evaluates through the shared condition engine.
+bool QuestEngine::offer_conditions_hold(App& app, const CatalogItem& ci) {
+    if (ci.offer_conditions.empty()) return true;
+    QuestCond cond;
+    cond.kind = "And";
+    for (const OfferCondition& oc : ci.offer_conditions) {
+        QuestCond leaf;
+        leaf.kind = oc.kind;
+        leaf.value1 = oc.value1;
+        leaf.value2 = oc.value2;
+        leaf.invert = oc.invert;
+        cond.children.push_back(std::move(leaf));
+    }
+    EvalCtx c;
+    try {
+        const WarriorSave w = app.save().load();
+        c.story_step = w.story_step();
+        c.level = w.level;
+    } catch (const std::exception&) {
+    }
+    c.journal.player_level = c.level;
+    return conditions_hold(app, cond, c);
+}
+
+// `Qba(a)` + `pwb(a)` L180xxx: `!Nga() && (BCa()<=0 || BCa()<p.Dc) &&
+// (N0()<=0 || N0()>p.Dc) && Ti(player)` then `qwb(); YWa();
+// rc.state="JustStarted"; rc.ox++`. `BCa`/`N0` come from DateStart/DateEnd
+// (absent in the shipped list.xml -> both 0 -> pass).
+bool QuestEngine::offer_try_start(App& app, const CatalogItem& ci) {
+    EngineOfferState& st = offer_states_[ci.name];
+    if (st.name.empty()) st.name = ci.name;
+    if (st.state.empty()) st.state = "NotStarted";
+    if (offer_owned(app, ci)) return false;             // !Nga()
+    if (!offer_conditions_hold(app, ci)) return false;  // Ti(player)
+    // `qwb()`: `N0()>0 ? N0() : p.Dc + F9a()`.
+    const double deadline = quest_now() + static_cast<double>(ci.offer_duration);
+    timer_activate("OfferTimer_" + ci.name, deadline);
+    st.state = "JustStarted";
+    ++st.ox;
+    std::fprintf(stdout,
+                 "[quest] CheckOffersStart: %s -> JustStarted (timer %.0fs, ox=%d)\n",
+                 ci.name.c_str(), static_cast<double>(ci.offer_duration), st.ox);
+    std::fflush(stdout);
+    return true;
+}
+
+// `a_a()` L180xxx: start the eligible offers. `hHa` (lp()==0, "Offer") starts
+// every NotStarted one; `Vha` (lp()==1, "DailyOffer") starts at most one,
+// only when none is already active, after sorting by `fz.Wn(state)` then `ox`.
+void QuestEngine::offer_check_start(App& app) {
+    const std::vector<CatalogItem>& defs = offer_defs(app);
+    for (const CatalogItem& ci : defs) {
+        if (ci.offer_kind != "Offer") continue;
+        EngineOfferState& st = offer_states_[ci.name];
+        if (st.name.empty()) st.name = ci.name;
+        if (st.state.empty()) st.state = "NotStarted";
+        if (st.state == "NotStarted") offer_try_start(app, ci);
+    }
+    for (const CatalogItem& ci : defs) {
+        if (ci.offer_kind != "DailyOffer") continue;
+        if (offer_is_active(ci.name)) return;
+    }
+    // `m.rj(Vha, state!="NotStarted" ? state=="End" : true)`.
+    std::vector<const CatalogItem*> vip;
+    for (const CatalogItem& ci : defs) {
+        if (ci.offer_kind != "DailyOffer") continue;
+        const std::string st = offer_state(ci.name).state;
+        if (st == "NotStarted" || st == "End") vip.push_back(&ci);
+    }
+    std::stable_sort(vip.begin(), vip.end(),
+                     [this](const CatalogItem* x, const CatalogItem* y) {
+                         return offer_state_rank(offer_state(x->name).state) <
+                                offer_state_rank(offer_state(y->name).state);
+                     });
+    std::stable_sort(vip.begin(), vip.end(),
+                     [this](const CatalogItem* x, const CatalogItem* y) {
+                         return offer_state(x->name).ox < offer_state(y->name).ox;
+                     });
+    for (const CatalogItem* ci : vip) {
+        if (offer_try_start(app, *ci)) break;
+    }
+}
+
+// `En.S` L528761 (`EChangeOfferState`): resolve Name/Value; `if(a!="Unknown")
+// { c=find(p.Cw.It, c.ab()==name); c!=null && c.rc.state!=a && (c.rc.state=a,
+// p.o.save()) }`.
+void QuestEngine::offer_change_state(App& app, const std::string& name,
+                                     const std::string& state) {
+    if (state == "Unknown") return;
+    if (offer_def(app, name) == nullptr) return;
+    EngineOfferState& st = offer_states_[name];
+    if (st.name.empty()) st.name = name;
+    if (st.state.empty()) st.state = "NotStarted";
+    if (st.state == state) return;
+    st.state = state;
+    std::fprintf(stdout, "[quest] ChangeOfferState %s -> %s\n", name.c_str(),
+                 state.c_str());
+    std::fflush(stdout);
+}
+
+// `$Za` L180xxx -> `C3a`: on the `OfferTimer_<name>` expiry,
+// `if(rc.state!="Purchased"){ a.nKa(); rc.state = item.dU ? "LastChance" : "End" }`.
+void QuestEngine::offer_timer_expired(App& app, const std::string& name) {
+    const CatalogItem* ci = offer_def(app, name);
+    EngineOfferState& st = offer_states_[name];
+    if (st.name.empty()) st.name = name;
+    if (st.state.empty()) st.state = "NotStarted";
+    if (st.state == "Purchased") return;
+    const bool last_chance = ci != nullptr && ci->offer_show_last_chance;
+    st.state = last_chance ? "LastChance" : "End";
+    std::fprintf(stdout, "[quest] offer timer %s expired -> %s\n",
+                 name.c_str(), st.state.c_str());
+    std::fflush(stdout);
+}
+
+// `tlb(a)` L180xxx: `a.lp()!=1 && a.D3a(); a.nKa(); a.rc.n4=p.Dc;
+// a.rc.state="Purchased"; save; a.Wwa(a)`.
+void QuestEngine::offer_purchase(App& app, const std::string& name) {
+    (void)app;
+    const CatalogItem* ci = offer_def(app, name);
+    if (ci == nullptr) return;
+    EngineOfferState& st = offer_states_[name];
+    if (st.name.empty()) st.name = name;
+    if (ci->offer_kind != "DailyOffer") timer_end("OfferTimer_" + name);  // D3a
+    st.n4 = static_cast<long long>(std::llround(quest_now()));
+    st.state = "Purchased";
+    std::fprintf(stdout, "[quest] offer %s purchased (n4=%lld)\n", name.c_str(),
+                 st.n4);
+    std::fflush(stdout);
+}
+
+// `TZa`/`Wwa` L180xxx: for every Purchased offer with `!rc.UH`, grant the
+// not-yet-received items and set `rc.UH` when all are in. The port has no
+// store grant path, so this marks `UH` only when the player already owns the
+// whole offer content (the shipped `CheckItemsFromPurchasedOffers` restore).
+void QuestEngine::offer_check_purchased(App& app) {
+    for (const CatalogItem& ci : offer_defs(app)) {
+        EngineOfferState& st = offer_states_[ci.name];
+        if (st.state != "Purchased" || st.UH) continue;
+        if (ci.offer_items.empty()) continue;
+        WarriorSave w;
+        try {
+            w = app.save().load();
+        } catch (const std::exception&) {
+            continue;
+        }
+        bool all = true;
+        for (const std::string& n : ci.offer_items) {
+            if (!w.has_item(n)) {
+                all = false;
+                break;
+            }
+        }
+        if (all) {
+            st.UH = true;
+            std::fprintf(stdout,
+                         "[quest] CheckItemsFromPurchasedOffers: %s UH=1\n",
+                         ci.name.c_str());
+            std::fflush(stdout);
+        }
+    }
+}
 bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCtx& ctx,
                                 std::string& out) {
     const std::size_t lb_b = token.find('[');
@@ -1246,6 +1495,124 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
         note_unanswerable(token);
         return false;
     }
+    if (method == "Offer") {
+        // `wfb` L508754 (dispatch L497065 `case "Offer":this.wfb(b,a)`):
+        // `c=a.Xl(); d=m.dn(p.Cw.It, e=>e.ab()==c); if(Sd=="Exists") result=
+        // d!=null?"1":"0"; else if(d!=null) switch(Sd){...}`. An absent offer
+        // leaves `b.result` at the builder default "".
+        if (!args_ok) {
+            note_unanswerable(token);
+            return false;
+        }
+        const CatalogItem* d = offer_def(app, arg);
+        if (field == "Exists") {
+            out = d != nullptr ? "1" : "0";
+            return true;
+        }
+        if (d == nullptr) {
+            out.clear();
+            return true;
+        }
+        if (field == "AllItemsRecieved") {
+            out = offer_state(arg).UH ? "1" : "0";
+            return true;
+        }
+        if (field == "Description") {
+            out = d->offer_description;
+            return true;
+        }
+        if (field == "FocusOnBuy") {
+            out = d->offer_focus_on_buy;
+            return true;
+        }
+        if (field == "Image") {
+            // `case "Image":b.result=d.item.fileName` — `fileName` = the
+            // list.xml `Image` attr (L163660), NOT ButtonImage; the shipped
+            // offers carry only ButtonImage -> "".
+            out = d->image;
+            return true;
+        }
+        if (field == "ProfitImage") {
+            out = d->offer_profit_image;
+            return true;
+        }
+        if (field == "RealPrice") {
+            // `case "RealPrice":a=d.item.xr; a!=null&&a!=""&&Kg(a.charAt(0))
+            // &&(a=" "+a); b.result=aa.Ela(a,d)`. `Kg` L3847 = "any char is a
+            // digit"; `charAt(0)` -> the first char. `Ela` L1217616 is the
+            // text-builder pass-through for a brace-free string.
+            out = d->offer_real_price;
+            if (!out.empty() && out[0] >= '0' && out[0] <= '9') out = " " + out;
+            return true;
+        }
+        if (field == "ShowLastChance") {
+            out = d->offer_show_last_chance ? "1" : "0";
+            return true;
+        }
+        if (field == "State") {
+            out = offer_state(arg).state;
+            return true;
+        }
+        if (field == "TimerActive") {
+            out = offer_timer_active(arg) ? "1" : "0";
+            return true;
+        }
+        if (field == "TimerName") {
+            out = "OfferTimer_" + arg;  // `d.oJ()` = `Ai.fHa + ab()`
+            return true;
+        }
+        if (field == "Title") {
+            out = d->offer_text;
+            return true;
+        }
+        if (field == "Type") {
+            out = d->offer_kind == "DailyOffer" ? "1" : "0";  // `K.T(d.lp())`
+            return true;
+        }
+        note_unanswerable(token);
+        return false;
+    }
+    if (method == "Offers") {
+        // `yfb` L509394: the LIST query over `p.Cw.It`. Each `First*` finds
+        // the first offer in that state (`m.dn`) and yields `a.ab()`; the JS
+        // writes `null` when none matches (the shipped gate accepts "" or "0").
+        if (!args_ok) {
+            note_unanswerable(token);
+            return false;
+        }
+        const std::vector<CatalogItem>& defs = offer_defs(app);
+        auto first_with = [&](const char* st) -> const CatalogItem* {
+            for (const CatalogItem& ci : defs) {
+                if (offer_state(ci.name).state == st) return &ci;
+            }
+            return nullptr;
+        };
+        const CatalogItem* m = nullptr;
+        bool known = true;
+        if (field == "First") {
+            m = defs.empty() ? nullptr : &defs.front();
+        } else if (field == "FirstActive") {
+            m = first_with("Active");
+        } else if (field == "FirstEnd") {
+            m = first_with("End");
+        } else if (field == "FirstJustStarted") {
+            m = first_with("JustStarted");
+        } else if (field == "FirstLastChance") {
+            m = first_with("LastChance");
+        } else if (field == "FirstNotStarted") {
+            m = first_with("NotStarted");
+        } else if (field == "FirstPurchased") {
+            m = first_with("Purchased");
+        } else {
+            known = false;
+        }
+        if (!known) {
+            note_unanswerable(token);
+            return false;
+        }
+        out = m != nullptr ? m->name : "0";
+        return true;
+    }
     if (method == "Pack") {
         // `zib` (L979): `IsAvailable -> Mc.F().T1(c)?"1":"0"`. `T1` L478996:
         // `c=m.find(this.wq, d=>d.name==arg); return c==null?!1:...` — `wq` is
@@ -1520,6 +1887,14 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
                 out += "|";
                 out += ctx.journal.purchase_failure;
             }
+            return true;
+        }
+        // `Bj` L494107: `case "_$Offer": let h=this.ta.eHa, k=h!=null?h.ab():""`.
+        // `ta.eHa` is the offer whose item was just received
+        // (`OfferItemRecieved`, `G_` L513220 -> `QUEST_EVENT_OFFER_ITEM_RECIEVED`);
+        // the journal carries its name in `offer`.
+        if (token == "_$Offer") {
+            out = ctx.journal.offer;
             return true;
         }
         // Other `Bj` journal fields (`_$CurrentScene`, `_$Iterator`, ...):
@@ -2324,6 +2699,33 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 parked.frames = 0;
                 return parked;
             }
+        } else if (t == "CheckOffersStart") {
+            // `Jn` L531140 (`ECheckOffersStart`): `p.Cw.a_a()` — start the
+            // eligible offers (`Qba` -> `pwb`). See `offer_check_start`.
+            offer_check_start(app);
+            fx.offer_actions.push_back("CheckOffersStart");
+        } else if (t == "ChangeOfferState") {
+            // `En` L528761 (`EChangeOfferState`): `<ChangeOfferState Name Value>`.
+            const std::string oname = quest_var(app, locals, attr_or(a.attrs, "Name"));
+            const std::string oval = quest_var(app, locals, attr_or(a.attrs, "Value"));
+            offer_change_state(app, oname, oval);
+            fx.offer_actions.push_back("ChangeOfferState:" + oname + "=" + oval);
+        } else if (t == "CheckItemsFromPurchasedOffers") {
+            // `In` L530984 (`ECheckItemsFromPurchasedOffers`): `p.Cw.TZa()`.
+            offer_check_purchased(app);
+            fx.offer_actions.push_back("CheckItemsFromPurchasedOffers");
+        } else if (t == "BuyOffer") {
+            // `Dn` L528334 (`EBuyOffer`): the store purchase handshake
+            // (`ub.si`/`ub.rm` purchase events; `S` waits for the callback).
+            // No store in the port -> record only (the port's own purchase
+            // path drives `tlb` via `purchase`).
+            const std::string bname = quest_var(app, locals, attr_or(a.attrs, "Name"));
+            fx.offer_actions.push_back("BuyOffer:" + bname);
+        } else if (t == "RestoreOfferItemsPerks") {
+            // `RestoreOfferItemsPerks` (offers.xml L360): grants the perks of
+            // purchased-offer items on the zone roll. No per-offer perk grant
+            // in the port -> record only.
+            fx.offer_actions.push_back("RestoreOfferItemsPerks");
         } else if (t == "Line" || t == "Button" || t == "Then" || t == "Else" ||
                    t == "Conditions") {
             ActionRest sub = run_actions(app, a.children, journal, fx, locals, quest,
@@ -2478,6 +2880,13 @@ void QuestEngine::tick_timers(App& app, double now) {
         if (kv.second <= now) expired.push_back(kv.first);
     }
     for (const std::string& name : expired) {
+        // `$Za` L180xxx (the `p.o.yl.iIa` listener): an expired
+        // `OfferTimer_<name>` flips the offer to LastChance/End (`C3a`).
+        static const std::string kOfferTimer = "OfferTimer_";
+        if (name.size() > kOfferTimer.size() &&
+            name.compare(0, kOfferTimer.size(), kOfferTimer) == 0) {
+            offer_timer_expired(app, name.substr(kOfferTimer.size()));
+        }
         // `swa(a)` (L292): `this.iIa.Z(a); ha.F().ta.dza=a;
         // ha.F().Sf("QUEST_EVENT_TIMER_END")`.
         timer_end_name_ = name;

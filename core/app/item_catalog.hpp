@@ -37,6 +37,16 @@ struct ItemPerkRef {
     bool enchant = false;
 };
 
+// One `<OfferConditions>` leaf (JS `yb` node kept in the offer's `CE`,
+// item ctor L166270 `d(a.A("OfferConditions"),this.CE)`). `Ti(a)`
+// (L180xxx) requires EVERY leaf to hold before the offer may start.
+struct OfferCondition {
+    std::string kind;    // Equal|Greater|GreaterEqual|Less|LessEqual|Contains|Starts|Ends
+    std::string value1;  // Value1
+    std::string value2;  // Value2
+    bool invert = false; // Not="1"
+};
+
 // One list.xml <Item> (JS `p.items.Xm` element).
 struct CatalogItem {
     std::string name;       // Name ("WEAPON_KNIVES")
@@ -77,6 +87,25 @@ struct CatalogItem {
     std::string paid_item = "None";
     std::vector<ItemPerkRef> perks;  // `<Perks>` + `<Enchantments>` rows
     // Owned-equip status comes from the save (users.xml <Items>), not here.
+
+    // --- shop-offer definition (JS `hh`/`pl`, built for every list.xml item
+    // whose `SubType` is "Offer"/"DailyOffer" — `mt.Mga` L175260, bucketed
+    // into the catalog's `gHa` by `Lia` L86475). The controller (`nt` g="5B",
+    // `p.Cw.It`) wraps each into an `hh` (lp 0) or `pl` (lp 1, DailyOffer).
+    // These ARE NOT the EDiscount `yf` offer (`EngineItemOffer` in
+    // quest_engine.hpp) — that is the `Pn`/`EDiscount` price override.
+    bool is_offer = false;             // `mt.Mga`: SubType in {Offer, DailyOffer}
+    std::string offer_kind;            // JS `Yb` (SubType): "Offer"|"DailyOffer"
+    std::string offer_text;            // `text` <- Text (dialog Title)
+    std::string offer_description;     // `description` <- Description
+    std::string offer_profit_image;    // `Xt` <- ProfitImage
+    std::string offer_button_image;    // `dZ` <- ButtonImage (map-button art)
+    std::string offer_real_price;      // `xr` <- RealPrice ("$2.99")
+    std::string offer_focus_on_buy;    // `O_` <- FocusOnBuy
+    bool offer_show_last_chance = false;  // `dU` <- ShowLastChance (`u.ka`)
+    int offer_duration = 0;            // `duration` <- Duration (seconds)
+    std::vector<std::string> offer_items;  // `Ht` <- <OfferItems><Item Name>
+    std::vector<OfferCondition> offer_conditions;  // `CE` <- <OfferConditions>
 };
 
 // Parses list.xml into the item list (JS `it.parse`). `xml_text` is the
