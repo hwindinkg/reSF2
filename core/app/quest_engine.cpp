@@ -2881,6 +2881,78 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // purchased-offer items on the zone roll. No per-offer perk grant
             // in the port -> record only.
             fx.offer_actions.push_back("RestoreOfferItemsPerks");
+        } else if (t == "UnlockCharacter") {
+            // `Ko` (`EUnlockCharacter` g="210", factory L486887): `parse` reads
+            // `Name` and DISCARDS it (`a.attributes.get("Name")` with no
+            // assignment); `S(a){super.S(a); this.sa()}` is a NO-OP in the
+            // shipped build. Nothing to execute (cf. `ShowNews`).
+        } else if (t == "GiveCurrency" || t == "TakeCurrency") {
+            // `Xn` (`EGiveCurrency` g="1F1" L554263) / `rg` (`ETakeCurrency`
+            // g="20C" L567355): `tfa`/`lp` resolve `Type`, `Value` (`ab`/`JD`
+            // the `Name`), then
+            //   `Gold`  -> `p.o.Fr(p.o.Tb +/- v)`   (`money`)
+            //   `Bonus` -> `p.o.vl(p.o.fd +/- v, 6)` (`bonus`)
+            //   else    -> `p.o.TH(Type, +/- v)`     (`currencies[Type]`).
+            // `rg` first gates on `p.o.Xfa(Type,Name,v)` (`Xbb` affordability +
+            // `Y5a` current >= v); on failure the `<Error>` chain runs and
+            // `J0a` is NOT called.
+            EvalCtx cc;
+            cc.journal = journal;
+            cc.iterator = iterator;
+            cc.locals = &locals;
+            cc.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                cc.story_step = w.story_step();
+                cc.level = w.level;
+                cc.save = w;
+                cc.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            const auto resolve_cur = [&](const std::string& raw, std::string& out) {
+                out = raw;
+                if (raw.empty()) return true;
+                if (raw.find('?') != std::string::npos || raw[0] == '_') {
+                    return resolve_token(app, raw, cc, out);
+                }
+                return true;
+            };
+            std::string ctype;
+            std::string cval;
+            resolve_cur(attr_or(a.attrs, "Type"), ctype);
+            resolve_cur(attr_or(a.attrs, "Value"), cval);
+            const int amount =
+                is_numeric(cval) ? static_cast<int>(to_number(cval)) : 0;
+            QuestSideEffects::QuestCurrencyWrite cw;
+            cw.type = ctype;
+            cw.amount = amount;
+            if (t == "TakeCurrency") {
+                std::string cname;
+                resolve_cur(attr_or(a.attrs, "Name"), cname);
+                cw.name = cname;
+                cw.take = true;
+                // `Xbb(a,b)`: "Bonus"/"Gold" always resolvable; "Currency" ->
+                // `rea(b)` (the named currency exists); default -> `rea(a)`.
+                const std::string key = ctype == "Currency" ? cname : ctype;
+                bool known = ctype == "Gold" || ctype == "Bonus";
+                if (!known && !key.empty()) {
+                    known = cc.save_loaded &&
+                            cc.save.currencies.find(key) != cc.save.currencies.end();
+                }
+                int have = 0;
+                if (known) {
+                    if (ctype == "Gold") {
+                        have = cc.save.money;
+                    } else if (ctype == "Bonus") {
+                        have = cc.save.bonus;
+                    } else {
+                        const auto it = cc.save.currencies.find(key);
+                        have = it != cc.save.currencies.end() ? it->second : 0;
+                    }
+                }
+                cw.apply = known && have >= amount;  // `Xfa` -> `Y5a >= c`
+            }
+            fx.currency_writes.push_back(std::move(cw));
         } else if (t == "Line" || t == "Button" || t == "Then" || t == "Else" ||
                    t == "Conditions") {
             ActionRest sub = run_actions(app, a.children, journal, fx, locals, quest,
@@ -2925,6 +2997,29 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
         // and `Jpb` skips `save()` unless `CH==0`. Apply in memory, no dirty.
         for (const auto& kv : fx.global_vars) {
             if (!kv.first.empty()) global_vars_[kv.first] = kv.second;
+        }
+        // `Xn`/`rg` (`EGiveCurrency` g="1F1" / `ETakeCurrency` g="20C") save
+        // writes: `Gold` -> `p.o.Fr(p.o.Tb +/- v)` (`money`), `Bonus` ->
+        // `p.o.vl(p.o.fd +/- v, 6)` (`bonus`), else `p.o.TH(type, +/- v)`
+        // (`currencies[type]`; the "Currency" subtype keys on the resolved
+        // `Name`). `rg` with `apply=false` is the `<Error>` branch — no write.
+        for (const QuestSideEffects::QuestCurrencyWrite& cw : fx.currency_writes) {
+            if (!cw.apply) continue;
+            const int d = cw.take ? -cw.amount : cw.amount;
+            if (d == 0) continue;
+            if (cw.type == "Gold") {
+                w.money += d;  // `Fr`
+                dirty = true;
+            } else if (cw.type == "Bonus") {
+                w.bonus += d;  // `vl` (no clamp; `vl` just writes)
+                dirty = true;
+            } else {
+                const std::string key = cw.type == "Currency" ? cw.name : cw.type;
+                if (!key.empty()) {
+                    w.currencies[key] += d;  // `TH` -> `Hua`/`GLa` count+delta
+                    dirty = true;
+                }
+            }
         }
         // `hl` battle-record writes (JS `J1a` L259 / `Iaa` L260-261 /
         // `Eja` L261 / `Ho` L1106) — the `WDa` unlock bit `Qr.lla` reads.

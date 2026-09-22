@@ -3221,6 +3221,83 @@ int main(int argc, char** argv) {
         fire_action("FightEnd", {});
         check(app.quest_engine().fight_end_actions() == fe_before + 1,
               "FightEnd action -> recorded fight-scene request");
+        // --- GiveCurrency/TakeCurrency (`Xn` g="1F1" / `rg` g="20C") ---------
+        // The two shipped currency actions: `Xn.S` grants (`Fr`/`vl`/`TH`),
+        // `rg.S` gates on `p.o.Xfa` then `J0a` deducts. Observables: the save's
+        // `Money`/`Bonus`/`<Currencies>` (persisted by `apply_effects`).
+        {
+            const auto money_now = [&]() -> int {
+                try {
+                    return app.save().load().money;
+                } catch (const std::exception&) {
+                    return -1;
+                }
+            };
+            const auto bonus_now = [&]() -> int {
+                try {
+                    return app.save().load().bonus;
+                } catch (const std::exception&) {
+                    return -1;
+                }
+            };
+            const auto ruby_now = [&]() -> int {
+                try {
+                    const sf2::app::WarriorSave w = app.save().load();
+                    const auto it = w.currencies.find("Ruby");
+                    return it != w.currencies.end() ? it->second : 0;
+                } catch (const std::exception&) {
+                    return -1;
+                }
+            };
+            const int m0 = money_now(), b0 = bonus_now(), r0 = ruby_now();
+            fire_action("GiveCurrency", {{"Type", "Gold"}, {"Value", "500"}});
+            fire_action("GiveCurrency", {{"Type", "Bonus"}, {"Value", "7"}});
+            fire_action("GiveCurrency", {{"Type", "Ruby"}, {"Value", "3"}});
+            const int m1 = money_now(), b1 = bonus_now(), r1 = ruby_now();
+            std::fprintf(stdout,
+                         "[qa] CURRENCY give: Money %d->%d Bonus %d->%d Ruby %d->%d\n",
+                         m0, m1, b0, b1, r0, r1);
+            std::fflush(stdout);
+            check(m1 == m0 + 500 && b1 == b0 + 7 && r1 == r0 + 3,
+                  "GiveCurrency Gold/Bonus/Ruby -> money/bonus/currencies");
+            // `rg` unaffordable: `Xfa` false -> `<Error>`, `J0a` not called.
+            fire_action("TakeCurrency",
+                        {{"Type", "Ruby"}, {"Name", "Ruby"}, {"Value", "9999"}});
+            const int m2 = money_now(), b2 = bonus_now(), r2 = ruby_now();
+            check(m2 == m1 && b2 == b1 && r2 == r1,
+                  "TakeCurrency unaffordable -> no write (Xfa/Error branch)");
+            // `rg` affordable: `J0a` deducts exactly (`Gold` -> `Fr(Tb-c)`).
+            fire_action("TakeCurrency",
+                        {{"Type", "Gold"}, {"Name", "Gold"}, {"Value", "200"}});
+            const int m3 = money_now(), b3 = bonus_now(), r3 = ruby_now();
+            std::fprintf(stdout, "[qa] CURRENCY take: Money %d->%d\n", m2, m3);
+            std::fflush(stdout);
+            check(m3 == m2 - 200 && b3 == b2 && r3 == r2,
+                  "TakeCurrency Gold 200 -> money -200 (J0a)");
+        }
+        // --- UnlockCharacter (`Ko` g="210"): JS no-op -----------------------
+        // `Ko.S` is `super.S(a); this.sa()` — nothing; `parse` discards `Name`.
+        {
+            const sf2::app::WarriorSave wb = [&] {
+                try {
+                    return app.save().load();
+                } catch (const std::exception&) {
+                    return sf2::app::WarriorSave{};
+                }
+            }();
+            fire_action("UnlockCharacter", {{"Name", "AnyCharacter"}});
+            const sf2::app::WarriorSave wa = [&] {
+                try {
+                    return app.save().load();
+                } catch (const std::exception&) {
+                    return sf2::app::WarriorSave{};
+                }
+            }();
+            check(wb.money == wa.money && wb.bonus == wa.bonus &&
+                      wa.perks.size() == wb.perks.size() &&
+                      wa.currencies.size() == wb.currencies.size(),
+                  "UnlockCharacter -> no-op (Ko.S empty; name ignored)");
+        }
         // Restore the profile exactly as found.
         if (have_original) {
             try {

@@ -362,6 +362,21 @@ struct QuestSideEffects {
     // `GiveItem` grants (`Pa.W$a` L631756): applied to the save inventory in
     // `apply_effects` (the JS acts immediately; the port batches save writes).
     std::vector<QuestGiveItem> give_items;
+    // `Xn`/`rg` (`EGiveCurrency` g="1F1" L554285 / `ETakeCurrency` g="20C"
+    // L567355): one resolved currency write. `Xn.S`: `Type`=`Gold` ->
+    // `Fr(Tb+Value)`, `Bonus` -> `vl(fd+Value,6)`, else `TH(Type,Value)`
+    // (`p.o.Tb`=`money`, `p.o.fd`=`bonus`, `p.o.TH`=`currencies[Type]`).
+    // `rg.S` first gates on `p.o.Xfa(Type,Name,Value)` (affordable) and only
+    // then `J0a` deducts (same three shapes, negative); when the gate fails the
+    // `<Error>` chain runs with NO write (`apply=false`).
+    struct QuestCurrencyWrite {
+        std::string type;    // resolved `Type` ("Gold"/"Bonus"/<currency name>)
+        std::string name;    // resolved `Name` (`rg` only; the "Currency" key)
+        int amount = 0;      // resolved `Value` (`Math.trunc`)
+        bool take = false;   // `rg` (deduct) vs `Xn` (grant)
+        bool apply = true;   // `rg` affordability failed -> false (Error branch)
+    };
+    std::vector<QuestCurrencyWrite> currency_writes;
     // `FightEnd` (JS `Tn.S`): `ca.Ka().kD(!1)` — end the live fight. The
     // engine records it; the fight scene consumes the request.
     std::vector<std::string> fight_end_requests;
