@@ -237,10 +237,36 @@ struct BattleRecord {
     // EclipseLossCount, StoryCount, CompletedTime, TimeLeft,
     // RandomizeTimeLeft and Level; the port tracks only the win count.
     struct FightWins {
-        std::string name;  // `IDS` (the JS `il.yG`)
-        int wins = 0;      // `CompletedCount` (the JS `il.no`)
+        std::string name;            // `IDS` (the JS `il.yG`, `Atb` L143548)
+        int wins = 0;                // `CompletedCount` (`il.no`, `Fab`)
+        int losses = 0;              // `LossCount` (`il.FW`, `Lab` L143548)
+        int eclipse_completed = 0;   // `EclipseCompletedCount` (`il.eN`)
+        int eclipse_loss = 0;        // `EclipseLossCount` (`il.uqa`)
+        int story_count = 0;         // `StoryCount` (read + defaulted)
+        int completed_time = 0;      // `CompletedTime`
+        int time_left = 0;           // `TimeLeft` (`il.Gs`; `?Fight.Timestamp`)
+        int randomize_time_left = 0; // `RandomizeTimeLeft` (`il.wH`)
+        int level = 0;               // `Level` (`il.ZB`, `xL` L143548)
     };
     std::vector<FightWins> fights;
+
+    // `il` find by IDS (`il.Sq` L131102: `a.RI(b.yG)`). Null when absent.
+    FightWins* fight_record(const std::string& ids) {
+        for (FightWins& f : fights) {
+            if (f.name == ids) return &f;
+        }
+        return nullptr;
+    }
+
+    // `il.Yea` L131102 (`Sq` else `eya` L131102: append a fresh `<Fight>` with
+    // `Atb(IDS)`). The record's `IDS` is the JS `hb.toString()` triple.
+    FightWins& fight_record_or_create(const std::string& ids) {
+        if (FightWins* r = fight_record(ids)) return *r;
+        FightWins fw;
+        fw.name = ids;
+        fights.push_back(std::move(fw));
+        return fights.back();
+    }
 
     // Quest records + story variables (JS `kF`/`rv`). The save shape is
     // `<Quests><Quests><Quest Name FileName/></Quests><Variables>

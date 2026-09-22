@@ -1453,13 +1453,31 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
             }
             return true;
         }
+        // `X3a` L498367: the data fields read the live fight record `c.Wc`
+        // (`il`), defaulting to "0" when absent. `Level`=`bb()` (L143548),
+        // `LossCount`=`FW`, `WinCount`=`no`, `Timestamp`=`Pz()` (the `TimeLeft`
+        // attr). `TimeLeft`=`f9a()` (L727530) needs the fight def's
+        // `ReplayInterval` (`Nn`, L98652) and the player quest timer `e4`
+        // (`aPa` L138972) — neither is modelled, so it stays UNKNOWN.
+        const WarriorSave& w = ctx.live(app);
+        const WarriorSave::FightWins* rec = nullptr;
+        for (const WarriorSave::FightWins& f : w.fights) {
+            if (f.name == triple) rec = &f;
+        }
         if (field == "WinCount") {
-            const WarriorSave& w = ctx.live(app);
-            int wins = 0;
-            for (const WarriorSave::FightWins& f : w.fights) {
-                if (f.name == triple) wins = f.wins;
-            }
-            out = std::to_string(wins);
+            out = std::to_string(rec != nullptr ? rec->wins : 0);
+            return true;
+        }
+        if (field == "Level") {
+            out = std::to_string(rec != nullptr ? rec->level : 0);
+            return true;
+        }
+        if (field == "LossCount") {
+            out = std::to_string(rec != nullptr ? rec->losses : 0);
+            return true;
+        }
+        if (field == "Timestamp") {
+            out = std::to_string(rec != nullptr ? rec->time_left : 0);
             return true;
         }
         note_unanswerable(token);

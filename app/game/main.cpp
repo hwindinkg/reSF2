@@ -2491,8 +2491,35 @@ int main(int argc, char** argv) {
         try {
             original = app.save().load();
             have_original = true;
+            // Fight-record round-trip proof (`il` L141476 / `?Fight.*` L498367).
+            // BEFORE: the shipped profile has no `<Fight>` for this triple.
+            {
+                const sf2::app::QuestJournal bj;
+                const char* const fe[] = {
+                    "?Fight[ZONE_1|BOSS_LYNX|1].Level",
+                    "?Fight[ZONE_1|BOSS_LYNX|1].LossCount",
+                    "?Fight[ZONE_1|BOSS_LYNX|1].Timestamp",
+                    "?Fight[ZONE_1|BOSS_LYNX|1].WinCount",
+                };
+                for (const char* e : fe) {
+                    std::fprintf(stdout, "[qquery] fight BEFORE %-38s = '%s'\n", e,
+                                 app.quest_engine().resolve_for_test(app, e, bj).c_str());
+                }
+            }
             sf2::app::WarriorSave seeded = original;
             seeded.battle_unlock("ZONE_1", "Survival");  // make one Available
+            {
+                // Seed a `<Fight IDS="ZONE_1|BOSS_LYNX|1">` with the JS `il`
+                // ctor attrs so the `?Fight.*` fields resolve from the save.
+                sf2::app::WarriorSave::FightWins& fr =
+                    seeded.fight_record_or_create("ZONE_1|BOSS_LYNX|1");
+                fr.wins = 2;
+                fr.losses = 1;
+                fr.level = 7;
+                fr.time_left = 1234;
+                fr.randomize_time_left = 9;
+                fr.completed_time = 55;
+            }
             seeded.variables.erase("CurrentZone");       // prove the write
             seeded.variables.erase("_CurrentZone");
             app.save().save(seeded);
@@ -2501,6 +2528,19 @@ int main(int argc, char** argv) {
                          "[qquery] seeded: battles=%zu records=%zu hasSurvival=%d\n",
                          chk.battles.size(), chk.battle_records.size(),
                          chk.has_battle("Survival") ? 1 : 0);
+            {
+                const sf2::app::QuestJournal aj;
+                const char* const fe[] = {
+                    "?Fight[ZONE_1|BOSS_LYNX|1].Level",
+                    "?Fight[ZONE_1|BOSS_LYNX|1].LossCount",
+                    "?Fight[ZONE_1|BOSS_LYNX|1].Timestamp",
+                    "?Fight[ZONE_1|BOSS_LYNX|1].WinCount",
+                };
+                for (const char* e : fe) {
+                    std::fprintf(stdout, "[qquery] fight AFTER  %-38s = '%s'\n", e,
+                                 app.quest_engine().resolve_for_test(app, e, aj).c_str());
+                }
+            }
         } catch (const std::exception& e) {
             std::fprintf(stdout, "[qquery] seed failed: %s\n", e.what());
         }

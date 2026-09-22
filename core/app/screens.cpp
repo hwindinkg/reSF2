@@ -6628,13 +6628,25 @@ void MapScreen::apply_map_focus(const std::string& battle) {
 // boss replays its LAST fight (exactly the roster's `jk.init(a,b,c,d)` index
 // clamp, L2062). A fresh battle is 0 -> `|1`.
 int map_fight_index(App& app, const std::string& name, int fight_count) {
+    // JS `lca(TF.lD, TF.uP, TF.Y1)` (L2009): `TF.uP` = the fight index the
+    // ladder is on = the number of this battle's `<Fight>`s already won.
+    // `yc` records are keyed by the `hb` triple `zone|name|fight` (`il.Atb`
+    // L143548), so sum the wins over the battle's records (the legacy
+    // bare-name record still matches).
     int wins = 0;
     try {
         const WarriorSave w = app.save().load();
         for (const WarriorSave::FightWins& f : w.fights) {
             if (f.name == name) {
-                wins = f.wins;
-                break;
+                wins += f.wins;
+                continue;
+            }
+            const std::size_t p1 = f.name.find('|');
+            if (p1 == std::string::npos) continue;
+            const std::size_t p2 = f.name.find('|', p1 + 1);
+            if (p2 == std::string::npos) continue;
+            if (f.name.compare(p1 + 1, p2 - (p1 + 1), name) == 0) {
+                wins += f.wins;
             }
         }
     } catch (const std::exception&) {
@@ -9540,16 +9552,19 @@ void ResultsScreen::update_impl(float dt) {
                 // zone-qualified `hb` key (`Me+"|"+Re+"|"`, L1416), never a
                 // bare name (the legacy `record_battle_win` is superseded).
                 w.battle_unlock(pb.zone, pb.battle_name);
-                bool found = false;
-                for (auto& f : w.fights) {
-                    if (f.name == pb.battle_name) {
-                        ++f.wins;
-                        found = true;
-                    }
-                }
-                if (!found) w.fights.push_back({pb.battle_name, 1});
-                std::fprintf(stdout, "[result] battle record: %s\n",
-                             pb.battle_name.c_str());
+                // JS `Dxa` L111216 (win): `B0a(a.Nb)` -> `il.Fab` (`no++`),
+                // then `b.xL(p.o.bb())` sets the record `Level` to the player
+                // level. The record `IDS` is the `hb` triple (`il.Atb`); the
+                // direct-boot path has no triple -> the battle name.
+                const std::string ids = pb.fight_triple.empty()
+                                            ? pb.battle_name
+                                            : pb.fight_triple;
+                WarriorSave::FightWins& fr = w.fight_record_or_create(ids);
+                ++fr.wins;
+                fr.level = w.level;
+                std::fprintf(stdout,
+                             "[result] fight record: %s wins=%d level=%d\n",
+                             ids.c_str(), fr.wins, fr.level);
             }
             // Prize breakdown snapshot for render (JS `v.kD` factor lines;
             // base + bonus were captured by the FightScreen handoff).
@@ -9581,6 +9596,22 @@ void ResultsScreen::update_impl(float dt) {
                 std::fprintf(stdout, "[result] LEVEL UP -> %d (power %d)\n", w.level, w.power);
             }
         } else {
+            // JS `Dxa` L111216 (loss): `eeb(a.Nb)` -> `il.Sq` (find ONLY) then
+            // `il.Lab` (`FW++`) and, when found, `b.xL(p.o.bb())` (record Level
+            // = player level). A loss with NO record creates none (`eeb`
+            // returns null when `Sq` misses) — unlike a win (`Yea`/`eya`).
+            const PendingBattle& pb = app().pending_battle();
+            const std::string ids = pb.fight_triple.empty()
+                                        ? pb.battle_name
+                                        : pb.fight_triple;
+            WarriorSave::FightWins* fr = w.fight_record(ids);
+            if (fr != nullptr) {
+                ++fr->losses;
+                fr->level = w.level;
+                std::fprintf(stdout,
+                             "[result] fight record: %s losses=%d level=%d\n",
+                             ids.c_str(), fr->losses, fr->level);
+            }
             std::fprintf(stdout, "[result] LOSS (no reward)\n");
         }
         try {

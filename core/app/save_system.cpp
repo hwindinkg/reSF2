@@ -171,13 +171,26 @@ WarriorSave SaveSystem::load() {
     }
 
     // Fight records (JS `yc` = `il`, L141476): `<Fights><Fight .../></Fights>`.
-    // Identity = `IDS` (`il.Atb` L143548), win count = `CompletedCount`
-    // (`il.Fab` L143548: `this.no++`). The old `Name`/`Wins` pair was a guess.
+    // Identity = `IDS` (`il.Atb` L143548), and the ctor (L141476) guarantees
+    // `CompletedCount`/`LossCount`/`EclipseCompletedCount`/`EclipseLossCount`/
+    // `StoryCount`/`CompletedTime`/`TimeLeft`/`RandomizeTimeLeft`/`Level`.
+    // The win/loss/level writers are `Fab`/`Lab`/`xL` (L143548); `Pz` (L143548)
+    // is the `TimeLeft` attr the `?Fight.Timestamp` query reads (L498369).
     out.fights.clear();
     for (pugi::xml_node f : warrior.child("Fights").children("Fight")) {
         WarriorSave::FightWins fw;
         if (f.attribute("IDS")) fw.name = f.attribute("IDS").value();
         fw.wins = sf2::data::xml_attr_int(f, "CompletedCount", 0);
+        fw.losses = sf2::data::xml_attr_int(f, "LossCount", 0);
+        fw.eclipse_completed =
+            sf2::data::xml_attr_int(f, "EclipseCompletedCount", 0);
+        fw.eclipse_loss = sf2::data::xml_attr_int(f, "EclipseLossCount", 0);
+        fw.story_count = sf2::data::xml_attr_int(f, "StoryCount", 0);
+        fw.completed_time = sf2::data::xml_attr_int(f, "CompletedTime", 0);
+        fw.time_left = sf2::data::xml_attr_int(f, "TimeLeft", 0);
+        fw.randomize_time_left =
+            sf2::data::xml_attr_int(f, "RandomizeTimeLeft", 0);
+        fw.level = sf2::data::xml_attr_int(f, "Level", 0);
         out.fights.push_back(std::move(fw));
     }
 
@@ -494,7 +507,8 @@ void SaveSystem::save(const WarriorSave& w) {
     }
 
     // Fights (`yc` = `il`): replace the <Fight> children. Identity = `IDS`
-    // (`il.Atb` L143548), win count = `CompletedCount` (`il.Fab` L143548).
+    // (`il.Atb` L143548); the full ctor attr set (`il` L141476) is written so
+    // the record round-trips the JS shape.
     {
         pugi::xml_node fights = warrior.child("Fights");
         if (!fights) fights = warrior.append_child("Fights");
@@ -505,6 +519,16 @@ void SaveSystem::save(const WarriorSave& w) {
             pugi::xml_node f = fights.append_child("Fight");
             f.append_attribute("IDS").set_value(fw.name.c_str());
             f.append_attribute("CompletedCount").set_value(fw.wins);
+            f.append_attribute("LossCount").set_value(fw.losses);
+            f.append_attribute("EclipseCompletedCount")
+                .set_value(fw.eclipse_completed);
+            f.append_attribute("EclipseLossCount").set_value(fw.eclipse_loss);
+            f.append_attribute("StoryCount").set_value(fw.story_count);
+            f.append_attribute("CompletedTime").set_value(fw.completed_time);
+            f.append_attribute("TimeLeft").set_value(fw.time_left);
+            f.append_attribute("RandomizeTimeLeft")
+                .set_value(fw.randomize_time_left);
+            f.append_attribute("Level").set_value(fw.level);
         }
     }
 
