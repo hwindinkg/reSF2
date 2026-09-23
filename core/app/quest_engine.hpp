@@ -637,6 +637,14 @@ public:
     // stashed tail runs (which may immediately hit the second lesson and
     // re-park). Returns true when the tail resumed this call.
     bool tutorial_gate_tick(App& app, float dt);
+    // JS `Bo`/`Do`/`Eo` `Pf` (sf2.502f0946.js L1121/L1123/L1125 <- the model
+    // `Pf` L386): the player fighter STARTED the animation `name` (its JS
+    // `zY` type `type`, "EAnimationMove"/"EAnimationAttack"). Runs the JS
+    // arm/count and resumes the parked lesson on the REAL condition; the 15 s
+    // `TutorialStepTimeout` stays the fallback. `end=true` is the `kg` event
+    // (`Fo` L1126/L387, the animation END): it resumes the block lesson.
+    void on_lesson_anim(App& app, const std::string& name, const std::string& type,
+                        bool end = false);
     // JS `zt.VQ()` (`zi`, bundle idx 156971): `return this.HH != "END"` — the
     // tutorial chain is live while the normalized step is not the terminal
     // `END`. Keyed on the SAVE, not a harness flag.
@@ -956,6 +964,11 @@ private:
         // Live step at park time: a change is the JS `p.o.zi.LE` event `Cm`
         // listens on (see `fire`), the real resume condition besides timeout.
         std::string step_at_park;
+        // JS `Bo`/`Do`/`Eo` `Pf` arm/count (sf2.502f0946.js L1121/L1123/
+        // L1125): `anim_armed` = `w9`/`y9`/`x9` (armed by the animation
+        // start), `anim_count` = `dsa`/`Ara` (the resumed arm count).
+        int anim_count = 0;
+        bool anim_armed = false;
     };
     TutorialGate tutorial_gate_;
     // Runs the stashed tail (shared by the resume path); returns true if the

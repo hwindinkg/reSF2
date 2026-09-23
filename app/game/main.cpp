@@ -2343,8 +2343,26 @@ int main(int argc, char** argv) {
         bool saw_welcome = false, saw_beat1 = false, saw_beat2 = false, saw_sensei = false;
         std::string sensei_title;
         int last_beat = -1;
+        bool move_held = false;
         for (int f = 0; f < 4000; ++f) {
             if (glfwWindowShouldClose(app.renderer().window())) break;
+            // [lesson-anim proof] Perform a MOVE in the dojo so the parked
+            // lesson resumes on the REAL animation condition (JS `Do.Pf`
+            // L1123: `Ra[0].zY=="EAnimationMove"`), not the 15 s
+            // `TutorialStepTimeout`. D is the JS forward key (StepForward is a
+            // MOVE-type animation); injected through the app's OWN key path
+            // (`inject_key` -> the top screen's `on_key`), so NO OS input and
+            // no visible window (RULE 0). Edge-only: hold while the lesson is
+            // parked at beat 1 and no modal is up (a modal blocks the dojo
+            // step).
+            {
+                sf2::app::QuestEngine& q0 = app.quest_engine();
+                const bool hold = q0.tutorial_gate_beat() == 1 && !q0.has_modal();
+                if (hold != move_held) {
+                    app.inject_key(GLFW_KEY_D, hold);
+                    move_held = hold;
+                }
+            }
             app.run_one_frame();
             sf2::app::QuestEngine& q = app.quest_engine();
             if (!saw_welcome && q.dialog_count() > 0) saw_welcome = true;

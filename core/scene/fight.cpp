@@ -4979,8 +4979,26 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         style_decay(me.style, kStyleDecay.tya);
     }
 
+    const std::string prev_move = me.last_move;
     me.fighter.advance(dt);
     me.last_move = me.fighter.current_move() ? me.fighter.current_move()->name : "";
+    // [dojo lesson] JS `Te.x3` (L508) fires the model's `Pf` (L671) with the
+    // newly started animation; the lesson handlers `Bo`/`Do`/`Eo` arm on it
+    // (sf2 L1121/L1123/L1125). The port's `advance` starts a new
+    // `current_move`, so a change from the previous frame's move is the
+    // animation-start edge. PLAYER only (`ca.Ka().Ra[0]`).
+    if (me.is_player && !me.last_move.empty() && me.last_move != prev_move) {
+        const sf2::scene::MoveDef* cm = me.fighter.current_move();
+        player_anim_start_.valid = true;
+        player_anim_start_.name = me.last_move;
+        // JS `zY` (`animation.type`, move_def.cpp L12: MOVE->EAnimationMove,
+        // ATTACK->EAnimationAttack).
+        player_anim_start_.type =
+            (cm != nullptr && cm->type == "ATTACK")
+                ? "EAnimationAttack"
+                : ((cm != nullptr && cm->type == "MOVE") ? "EAnimationMove"
+                                                         : std::string());
+    }
 
     // The move's authored `<Actions>` (JS `Te.Lwa` L563-564 -> the
     // `EActionStart` event L530 -> `wd.BNa` L523). The frame-triggered

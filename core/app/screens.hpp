@@ -375,10 +375,19 @@ public:
         // when that fight's `dl.status==1` (`YL` L111266: the `il` record's
         // `CompletedCount >= <Fight Replays>`). `pip_beaten[k]` is that bit.
         std::vector<std::string> fight_names;
+        // Per-`<Fight>` `Locked` attribute (JS `dl.locked`, the `il` parse
+        // `a.locked=u.ka(b.attributes.get("Locked"),!1)`; `Xr` L2134
+        // `c[k].locked?l.wMa(2)`), parallel to `fight_names`.
+        std::vector<bool> fight_locked;
         std::vector<bool> pip_beaten;
         float x = 0.0f;  // screen pos (center; JS `qe.X0a` L2144)
         float y = 0.0f;
         bool active = true;
+        // JS `Lc.tt()` (L1406) / `hl.tt` (L278): the `<Battle>` record's
+        // `Locked` attribute. `Qr` (L2092) picks the `BattleBtnLock/locked_`
+        // frame from THIS, not from `active` (`Qr.lla` L2094 hides the
+        // record-less node instead).
+        bool locked = false;
         // JS `Qr.lla` (L2094): the button draws only while
         // `hs.isActive && !a.li()` (a save `<Battles>` record exists and is
         // not Hidden/expired). `alt_state` marks the `*_INTERMISSION` /

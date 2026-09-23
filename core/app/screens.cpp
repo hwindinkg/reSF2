@@ -4137,6 +4137,10 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                     // JS `dl.name` (the `<Fight Name>`; the `hb` triple's
                     // `Lq`, `hb.toString` L1416) — the `il` record key tail.
                     n.fight_names.push_back(fight.attribute("Name").value());
+                    // JS `dl.locked` (`il` parse: `Locked` attr) — the `Xr`
+                    // pip lock (`c[k].locked?l.wMa(2)`, L2134).
+                    n.fight_locked.push_back(
+                        sf2::data::xml_attr_bool(fight, "Locked", false));
                     // First positive <Reward Money> of the first fight (the
                     // `ci` gold icon value under the difficulty bar, L2133).
                     if (n.fight_count == 1 && n.reward_money == 0) {
@@ -5701,6 +5705,15 @@ void DojoScreen::update_impl(float dt) {
     if (dojo_fight_ != nullptr) {
         update_pad_input(app(), dojo_fight_.get(), dojo_pad_, /*live=*/true, "dojo");
         dojo_fight_->update(dt);
+        // [dojo lesson] Publish the player fighter's animation START to the
+        // quest engine (JS `Te.x3` L508 -> `Gc.Pf` L671 -> `Bo`/`Do`/`Eo`
+        // L1121/L1123/L1125). This is the REAL resume condition for the
+        // parked StoryTutorial lesson beats; the 15 s timeout is the fallback.
+        const sf2::scene::FightController::AnimStart as =
+            dojo_fight_->take_player_anim_start();
+        if (as.valid) {
+            app().quest_engine().on_lesson_anim(app(), as.name, as.type, false);
+        }
     }
     // The shared `za` nav column (JS `za.Aub` L1978-1980 / `za.Ofb`..`Vfb`):
     // a tap switches to Dojo/Map/Shop/Profile/Settings (JS `ma.Jg().jI`).
@@ -6717,6 +6730,13 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
             const bool hidden = has_rec && rec->hidden;
             n.active = has_rec;                 // `WDa` (JS L256)
             n.visible = n.active && !hidden;    // `Qr.lla` (JS L2094)
+            // `Qr` (L2092) `let b=a.tt()` = the `<Battle>` record's `Locked`
+            // (`Lc.tt()` L1406 -> `hl.tt` L278). The button then picks
+            // `BattleBtnLock/locked_<icon>` over `BattleBtnBase/base_<icon>`.
+            // The old port used `!n.active`, which is ALWAYS false for a
+            // visible node (`visible = active && !hidden`), so the `locked_*`
+            // art was never drawn.
+            n.locked = has_rec && rec->locked;
             // `Xr` pip lit state (L2133-2136): the pip count is the rendered
             // `<Fight>` count, minus the last for boss families (`Xr` ctor
             // L2134 `a.type!="FightBosses"&&...||--d`). Pip `k` is lit when
@@ -7435,13 +7455,20 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
             const float px = body_x + (body_w - in_row * pip) * 0.5f +
                              static_cast<float>(col) * pip;
             const float py = body_y + pip_label_h + static_cast<float>(row) * pip;
-            // `Ox.wMa` (L2134): `c[k].status==1` (beaten) -> `indicatorOn`,
-            // else `indicatorOff` (a locked fight would be `indicatorLocked`).
+            // `Ox.wMa` (L2134): `c[k].locked ? wMa(2) : wMa(h ? 0 : 1)` —
+            // `indicatorLocked` for a locked fight, else `indicatorOn` when
+            // beaten (`c[k].status==1`) / `indicatorOff` otherwise.
             const bool beaten =
                 static_cast<std::size_t>(i) < node->pip_beaten.size() &&
                 node->pip_beaten[static_cast<std::size_t>(i)];
-            try_draw_atlas_button(app, beaten ? "indicatorOn" : "indicatorOff",
-                                  px + pip * 0.5f, py + pip * 0.5f, pip, pip, 1.0f);
+            const bool pip_locked =
+                static_cast<std::size_t>(i) < node->fight_locked.size() &&
+                node->fight_locked[static_cast<std::size_t>(i)];
+            const char* pip_frame = pip_locked ? "indicatorLocked"
+                                               : (beaten ? "indicatorOn"
+                                                         : "indicatorOff");
+            try_draw_atlas_button(app, pip_frame, px + pip * 0.5f, py + pip * 0.5f,
+                                  pip, pip, 1.0f);
         }
     }
     // --- `Wc` difficulty (L2161 `b = b*.35 + c`, `Lm.D(b)`, `Lm.ba(a,
@@ -7611,7 +7638,9 @@ void MapScreen::render_impl(App& app) {
         const Node& n = zones_[zone_sel_].nodes[i];
         if (!n.visible) continue;  // `WDa` + `Qr.lla` (JS L256/L2094)
         const bool hovered = static_cast<int>(i) == hover_;
-        const bool locked = !n.active;
+        // JS `Qr` (L2092-2095) `b=a.tt()`: the `<Battle>` record's `Locked`
+        // (not `!active` — the visible-node gate already implies `active`).
+        const bool locked = n.locked;
         // JS `Qr` (L2092-2095): frame = "BattleBtn<State>/<suffix>", suffix
         // base_/active_/locked_/locked_active_/pressed_ + Icon (`Lc.*` L2482,
         // `U9a..X9a` L1405). Hover swaps to Active; locked uses BattleBtnLock*.

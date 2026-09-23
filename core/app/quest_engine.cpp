@@ -3501,6 +3501,71 @@ bool QuestEngine::tutorial_gate_tick(App& app, float dt) {
     return resume_tutorial_gate(app);
 }
 
+// JS `Bo`/`Do`/`Eo` `Pf` (sf2.502f0946.js L1121/L1123/L1125) + `Fo` `kg`
+// (L1126/L387). The player fighter's animation event is the REAL resume
+// condition; `TutorialStepTimeout` (and the `p.o.zi.LE` step change in
+// `fire`) stay the fallbacks.
+//   `Bo` (beat 3, L1121): `Pf(a){ w9&&(w9=!1,Cm()); a.data.name=="DoubleSweep"
+//   &&(w9=!0) }` — arm on the DoubleSweep start, resume on the NEXT start.
+//   `Do` (beat 1, L1123): `Pf(){ y9&&(y9=!1,dsa++,dsa>=3&&Cm());
+//   Ra[0].zY=="EAnimationMove"&&(y9=!0) }` — 3 armed starts.
+//   `Eo` (beat 2, L1125): same with `EAnimationAttack`.
+//   `Fo` (beat 4, L1126): `Ad.kg` (animation END) resumes directly.
+void QuestEngine::on_lesson_anim(App& app, const std::string& name,
+                                 const std::string& type, bool end) {
+    if (!tutorial_gate_.active) return;
+    const int beat = tutorial_gate_.beat;
+    if (beat == 4) {  // `Fo` (L1126): `kg` -> `oHa` -> `Cxa` -> `sa()`.
+        if (!end) return;
+        std::fprintf(stdout, "[quest] lesson beat 4 block anim-end -> chain resumes\n");
+        std::fflush(stdout);
+        resume_tutorial_gate(app);
+        return;
+    }
+    if (end) return;  // `Pf` is the animation START (L386 `Gj(a.model,9)`).
+    switch (beat) {
+        case 3:  // `Bo` (L1121): arm on the DoubleSweep animation start.
+            if (tutorial_gate_.anim_armed) {
+                tutorial_gate_.anim_armed = false;
+                std::fprintf(stdout,
+                             "[quest] lesson beat 3 DoubleSweep anim -> chain resumes\n");
+                std::fflush(stdout);
+                resume_tutorial_gate(app);
+                return;
+            }
+            if (name == "DoubleSweep") tutorial_gate_.anim_armed = true;
+            break;
+        case 1:  // `Do` (L1123): 3 x (arm on EAnimationMove -> next start).
+            if (tutorial_gate_.anim_armed) {
+                tutorial_gate_.anim_armed = false;
+                if (++tutorial_gate_.anim_count >= 3) {
+                    std::fprintf(stdout,
+                                 "[quest] lesson beat 1 move x3 anim -> chain resumes\n");
+                    std::fflush(stdout);
+                    resume_tutorial_gate(app);
+                    return;
+                }
+            }
+            if (type == "EAnimationMove") tutorial_gate_.anim_armed = true;
+            break;
+        case 2:  // `Eo` (L1125): 3 x (arm on EAnimationAttack -> next start).
+            if (tutorial_gate_.anim_armed) {
+                tutorial_gate_.anim_armed = false;
+                if (++tutorial_gate_.anim_count >= 3) {
+                    std::fprintf(stdout,
+                                 "[quest] lesson beat 2 attack x3 anim -> chain resumes\n");
+                    std::fflush(stdout);
+                    resume_tutorial_gate(app);
+                    return;
+                }
+            }
+            if (type == "EAnimationAttack") tutorial_gate_.anim_armed = true;
+            break;
+        default:
+            break;
+    }
+}
+
 // JS `zt.VQ()` (`zi`, bundle idx 156971): `return this.HH != "END"`. `HH` is
 // the normalized live step (`zt.parse` -> `kU[0]` when absent/invalid), so an
 // absent step (fresh profile) or an invalid one reads as NotStarted, i.e.

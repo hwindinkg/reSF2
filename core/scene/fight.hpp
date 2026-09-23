@@ -1519,6 +1519,21 @@ public:
     // --- fight state accessors -------------------------------------------
     const FightFighter& player() const { return player_; }
     const FightFighter& enemy() const { return enemy_; }
+    // [dojo lesson] The PLAYER fighter's animation START since the last drain
+    // (JS `Te.x3` L508 -> `Gc.Pf` L671: the model's `Pf` event the lesson
+    // handlers `Bo`/`Do`/`Eo` listen on, sf2 L1121/L1123/L1125). `name` is the
+    // started move's `Name` (the JS `a.data.name`); `type` is the JS `zY`
+    // ("EAnimationMove"/"EAnimationAttack" from the move's XML `Type`).
+    struct AnimStart {
+        bool valid = false;
+        std::string name;
+        std::string type;
+    };
+    AnimStart take_player_anim_start() {
+        AnimStart a = player_anim_start_;
+        player_anim_start_ = AnimStart{};
+        return a;
+    }
     // Wielded weapons (disarm identity; JS `$b(Au)` vs `ownHd`, L394).
     // Defaults are Fists; the host sets the player's from the save.
     void set_fighter_weapons(const std::string& player_weapon,
@@ -1673,6 +1688,7 @@ private:
 
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)
+    AnimStart player_anim_start_;  // [dojo lesson] see take_player_anim_start
     sf2::scene::TrigBus bus_;      // perk trigger bus (`tb`; ZOa registers)
     sf2::scene::PerkSetup perk_setup_;  // stashed for per-round Yka
     bool no_bullets_replenish_ = false;  // `ERuleNoBulletsReplenishment`
