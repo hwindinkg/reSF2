@@ -146,10 +146,43 @@ std::vector<CatalogItem> shop_items(const std::vector<CatalogItem>& all);
 // (JS L2274) iterates these in file order; `fi.init` (L2270-2271) resolves the
 // row icon as `"attributes/" + Icon` in atlas 248 (fallback: `Icon` in 266).
 struct ShopAttributeDef {
-    const char* name;  // `Name`  ("WeaponDamage")
-    const char* icon;  // `Icon`  ("weapon_attack"; "" when the XML has none)
-    bool hidden;       // `Hidden="1"` — `ms` skips these (`!h.hidden`)
+    const char* name;       // `Name`  ("WeaponDamage")
+    const char* icon;       // `Icon`  ("weapon_attack"; "" when the XML has none)
+    const char* bar_scale;  // `BarScale` (`gp.bP`, `ow.parse` L615845); "" if absent
+    bool hidden;            // `Hidden="1"` — `ms` skips these (`!h.hidden`)
 };
+
+// One `<Limit>` row of a `<BarScale>` (JS `Ew` L659xxx; filled by `Nv.kBa`
+// L659xxx): `LevelMultiplier`/`Shift`/`LeftLimit`/`RightLimit` default to -1
+// and `Level` (a `a|b|c` list) to empty (the no-Level default row).
+struct ShopBarScaleLimit {
+    float level_multiplier;   // `LevelMultiplier` (`yFa`)
+    int shift;                // `Shift` (`shift`)
+    int left_limit;           // `LeftLimit` (`rFa`)
+    int right_limit;          // `RightLimit` (`MKa`)
+    std::vector<int> levels;  // `Level` (`ir`; empty = the default row)
+};
+
+// One `internal_settings.xml` `<BarScale>` (JS `Nv`, L659xxx; `Mv.parse`
+// L604556). `type` = `Type` (default "Linear"), `power` = `Power` (`dk`),
+// `min` = `Min` (`min`). The shop path (`fi.tbb` L2272-2273, `b=true`) reads
+// `item_limits` (`dha` via `f7a`/`g7a`); `attribute_limits` (`kba`) is the
+// profile path (`ps` L2277) and is kept only for table fidelity.
+struct ShopBarScale {
+    const char* name;
+    const char* type;
+    float power;
+    float min;
+    std::vector<ShopBarScaleLimit> attribute_limits;  // `<AttributeLimits>` (`kba`)
+    std::vector<ShopBarScaleLimit> item_limits;       // `<ItemLimits>` (`dha`)
+};
+
+// JS `fi.Z7a` (L2273-2274): the value -> bar-fill ratio for one shop attribute
+// row (`fi.Gr` L2273 `this.vH.Gr(this.Z7a(a), b)`). Resolves `bar_scale` in the
+// `v.Ova` (`Mv` L604556) table, selects its `<ItemLimits>` row for
+// `player_level`, and applies the `Exp`/`Linear` formula clamped to
+// `[max(0,Min), 1]` (`v.BP` = `<DamageDoublingRange>` = 10).
+float shop_attribute_bar_fill(const char* bar_scale, int value, int player_level);
 
 // The shipped `<Attributes>` defs (internal_settings.xml L21744-23450), in
 // file order. `ShopHidden`/`ProfileHidden` do NOT gate the shop list — only

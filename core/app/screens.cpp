@@ -11671,15 +11671,17 @@ void ShopScreen::render_impl(App& app) {
                               stat_h * 0.4f, dtxt, 0.8f, UiAlign::Left, dr, dg, db);
             }
             // `vH` (`os`, L2268) value bar: `fi.ba` bottom-aligns it under the
-            // row. The exact `Z7a` fill formula (`v.Ova` BarScale table, not
-            // ported) is approximated with a value-scaled fill.
+            // row; `fi.Gr` (L2273) fills it with `fi.Z7a(value)` — the `v.Ova`
+            // (`Mv` L604556) `<ItemLimits>` ratio for the player level.
             {
                 const float bxx = cx0 + stat_h * 1.1f;
                 const float bww = cw0 - stat_h * 1.1f - 8.0f;
                 const float bh2 = stat_h * 0.4f;
                 const ShopRect track{bxx, row_y + stat_h - bh2, bxx + bww, row_y + stat_h};
                 quad(track, 0.35f, 0.24f, 0.14f, 0.6f);
-                const ShopRect fill{bxx, track.P, bxx + bww * 0.7f, track.W};
+                const float fill_frac =
+                    shop_attribute_bar_fill(def.bar_scale, value, seen_.level);
+                const ShopRect fill{bxx, track.P, bxx + bww * fill_frac, track.W};
                 quad(fill, 0.95f, 0.62f, 0.20f, 1.0f);
             }
             row_y += stat_h;  // `ms.ba`: `c += f.node.qa()` L2274

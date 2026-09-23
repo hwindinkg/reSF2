@@ -2,6 +2,8 @@
 
 #include "app/item_catalog.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 #include "xml_doc.hpp"
@@ -20,32 +22,395 @@ bool attr_bool_str(const char* v) { return v != nullptr && std::string(v) == "1"
 } // namespace
 
 // `internal_settings.xml` `<Attributes>` (L21744-23450), file order. The JS
-// `ow.parse` (L615263) reads Name/Icon/Hidden; `ms`/`fi` (L2274-2275) consume
-// them in this order.
+// `ow.parse` (L615263) reads Name/Icon/Hidden + `BarScale` (`gp.bP`, L615845);
+// `ms`/`fi` (L2274-2275) consume them in this order.
 const std::vector<ShopAttributeDef>& shop_attribute_defs() {
     static const std::vector<ShopAttributeDef> kDefs = {
-        {"HeadDefense", "head_armor", false},
-        {"BodyDefense", "body_armor", false},
-        {"UnarmedDamage", "unarmed_attack", false},
-        {"WeaponDamage", "weapon_attack", false},
-        {"RangedDamage", "ranged_attack", false},
-        {"MagicDamage", "magic_attack", false},
-        {"CriticalChance", "critical_chance", true},
-        {"CriticalRating", "critical_chance", false},  // ShopHidden, not Hidden
-        {"BlockDamageFactor", "", true},
-        {"DamageFactor", "", true},
-        {"RangedQuantity", "ranged_quantity", true},
-        {"CriticalDamage", "", true},
-        {"MagicInitialCharge", "", true},
-        {"MagicPainRecharge", "", true},
-        {"MagicDamageRecharge", "", true},
-        {"RegenerationRate", "", true},
-        {"Lifesteal", "", true},
-        {"ShockCriticalHitChance", "", true},
-        {"ShockHeadHitChance", "", true},
-        {"EnchantmentResistance", "", true},
+        {"HeadDefense", "head_armor", "HeadDefense", false},
+        {"BodyDefense", "body_armor", "BodyDefense", false},
+        {"UnarmedDamage", "unarmed_attack", "BodyDefense", false},  // BarScale=BodyDefense
+        {"WeaponDamage", "weapon_attack", "WeaponDamage", false},
+        {"RangedDamage", "ranged_attack", "RangedDamage", false},
+        {"MagicDamage", "magic_attack", "MagicDamage", false},
+        {"CriticalChance", "critical_chance", "Chance", true},
+        {"CriticalRating", "critical_chance", "Enchantment", false},  // ShopHidden, not Hidden
+        {"BlockDamageFactor", "", "", true},
+        {"DamageFactor", "", "", true},
+        {"RangedQuantity", "ranged_quantity", "RangedQuantity", true},
+        {"CriticalDamage", "", "", true},
+        {"MagicInitialCharge", "", "", true},
+        {"MagicPainRecharge", "", "", true},
+        {"MagicDamageRecharge", "", "", true},
+        {"RegenerationRate", "", "", true},
+        {"Lifesteal", "", "", true},
+        {"ShockCriticalHitChance", "", "", true},
+        {"ShockHeadHitChance", "", "", true},
+        {"EnchantmentResistance", "", "", true},
     };
     return kDefs;
+}
+
+namespace {
+
+// `internal_settings.xml` `<BarScales>` — the `v.Ova` `Mv` table (JS L604556;
+// `Mv.parse` reads Name/Type/Power/Min + the `<AttributeLimits>`/`<ItemLimits>`
+// rows via `Nv.kBa` L659xxx). Each row is `{LevelMultiplier, Shift, LeftLimit,
+// RightLimit, Level[]}` (`Ew`, defaults -1/-1/-1/-1/empty). `v.BP`
+// (`<DamageDoublingRange Value="10"/>`) is the `Exp` formula divisor.
+constexpr float kDamageDoublingRange = 10.0f;
+
+const std::vector<ShopBarScale>& shop_bar_scales() {
+    static const std::vector<ShopBarScale> kScales = {
+        {"WeaponDamage", "Exp", 0.5f, 0.03f,
+         { // AttributeLimits
+            {10.0f, 10, -1, -1, {1}},
+            {27.0f, -7, -1, -1, {2}},
+            {35.0f, -16, -1, -1, {3, 4, 5}},
+            {41.0f, -46, -1, -1, {6}},
+            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
+            {41.0f, -76, -1, -1, {12}},
+            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
+            {41.0f, -106, -1, -1, {18}},
+            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
+            {41.0f, -136, -1, -1, {24}},
+            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
+            {41.0f, -166, -1, -1, {30}},
+            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
+            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {41.0f, -244, -1, -1, {52}},
+            {41.0f, -244, -1, -1, {}},
+         },
+         { // ItemLimits
+            {25.0f, -20, -1, -1, {1}},
+            {25.0f, -30, -1, -1, {2}},
+            {25.0f, -21, -1, -1, {3, 4, 5}},
+            {31.0f, -51, -1, -1, {6}},
+            {25.0f, -15, -1, -1, {7, 8, 9, 10, 11}},
+            {31.0f, -81, -1, -1, {12}},
+            {25.0f, -9, -1, -1, {13, 14, 15, 16, 17}},
+            {31.0f, -111, -1, -1, {18}},
+            {25.0f, -3, -1, -1, {19, 20, 21, 22, 23}},
+            {31.0f, -141, -1, -1, {24}},
+            {25.0f, 3, -1, -1, {25, 26, 27, 28, 29}},
+            {31.0f, -171, -1, -1, {30}},
+            {25.0f, 9, -1, -1, {31, 32, 33, 34, 35}},
+            {31.0f, -201, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {25.0f, 57, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {31.0f, -249, -1, -1, {52}},
+            {31.0f, -249, -1, -1, {}},
+         }},
+        {"UnarmedDamage", "Exp", 0.5f, 0.03f,
+         { // AttributeLimits
+            {10.0f, 10, -1, -1, {1}},
+            {27.0f, -7, -1, -1, {2}},
+            {35.0f, -16, -1, -1, {3, 4, 5}},
+            {41.0f, -46, -1, -1, {6}},
+            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
+            {41.0f, -76, -1, -1, {12}},
+            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
+            {41.0f, -106, -1, -1, {18}},
+            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
+            {41.0f, -136, -1, -1, {24}},
+            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
+            {41.0f, -166, -1, -1, {30}},
+            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
+            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {41.0f, -244, -1, -1, {52}},
+            {41.0f, -244, -1, -1, {}},
+         },
+         { // ItemLimits
+            {25.0f, -20, -1, -1, {1}},
+            {27.0f, -32, -1, -1, {2}},
+            {25.0f, -21, -1, -1, {3, 4, 5}},
+            {31.0f, -51, -1, -1, {6}},
+            {25.0f, -15, -1, -1, {7, 8, 9, 10, 11}},
+            {31.0f, -81, -1, -1, {12}},
+            {25.0f, -9, -1, -1, {13, 14, 15, 16, 17}},
+            {31.0f, -111, -1, -1, {18}},
+            {25.0f, -3, -1, -1, {19, 20, 21, 22, 23}},
+            {31.0f, -141, -1, -1, {24}},
+            {25.0f, 3, -1, -1, {25, 26, 27, 28, 29}},
+            {31.0f, -171, -1, -1, {30}},
+            {25.0f, 9, -1, -1, {31, 32, 33, 34, 35}},
+            {31.0f, -201, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {25.0f, 57, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {31.0f, -249, -1, -1, {52}},
+            {31.0f, -249, -1, -1, {}},
+         }},
+        {"BodyDefense", "Exp", 0.5f, 0.03f,
+         { // AttributeLimits
+            {10.0f, 10, -1, -1, {1}},
+            {27.0f, -7, -1, -1, {2}},
+            {35.0f, -16, -1, -1, {3, 4, 5}},
+            {41.0f, -46, -1, -1, {6}},
+            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
+            {41.0f, -76, -1, -1, {12}},
+            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
+            {41.0f, -106, -1, -1, {18}},
+            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
+            {41.0f, -136, -1, -1, {24}},
+            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
+            {41.0f, -166, -1, -1, {30}},
+            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
+            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {41.0f, -244, -1, -1, {52}},
+            {41.0f, -244, -1, -1, {}},
+         },
+         { // ItemLimits
+            {25.0f, -20, -1, -1, {1}},
+            {27.0f, -32, -1, -1, {2}},
+            {25.0f, -21, -1, -1, {3, 4, 5}},
+            {31.0f, -51, -1, -1, {6}},
+            {25.0f, -15, -1, -1, {7, 8, 9, 10, 11}},
+            {31.0f, -81, -1, -1, {12}},
+            {25.0f, -9, -1, -1, {13, 14, 15, 16, 17}},
+            {31.0f, -111, -1, -1, {18}},
+            {25.0f, -3, -1, -1, {19, 20, 21, 22, 23}},
+            {31.0f, -141, -1, -1, {24}},
+            {25.0f, 3, -1, -1, {25, 26, 27, 28, 29}},
+            {31.0f, -171, -1, -1, {30}},
+            {25.0f, 9, -1, -1, {31, 32, 33, 34, 35}},
+            {31.0f, -201, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {25.0f, 57, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {31.0f, -249, -1, -1, {52}},
+            {31.0f, -249, -1, -1, {}},
+         }},
+        {"HeadDefense", "Exp", 0.5f, 0.03f,
+         { // AttributeLimits
+            {10.0f, 10, -1, -1, {1}},
+            {27.0f, -7, -1, -1, {2}},
+            {35.0f, -16, -1, -1, {3, 4, 5}},
+            {41.0f, -46, -1, -1, {6}},
+            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
+            {41.0f, -76, -1, -1, {12}},
+            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
+            {41.0f, -106, -1, -1, {18}},
+            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
+            {41.0f, -136, -1, -1, {24}},
+            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
+            {41.0f, -166, -1, -1, {30}},
+            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
+            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {41.0f, -244, -1, -1, {52}},
+            {41.0f, -244, -1, -1, {}},
+         },
+         { // ItemLimits
+            {25.0f, -15, -1, -1, {1}},
+            {13.0f, -13, -1, -1, {2}},
+            {25.0f, -23, -1, -1, {3, 4, 5}},
+            {31.0f, -53, -1, -1, {6}},
+            {25.0f, -17, -1, -1, {7, 8, 9, 10, 11}},
+            {31.0f, -83, -1, -1, {12}},
+            {25.0f, -11, -1, -1, {13, 14, 15, 16, 17}},
+            {31.0f, -113, -1, -1, {18}},
+            {25.0f, -5, -1, -1, {19, 20, 21, 22, 23}},
+            {31.0f, -143, -1, -1, {24}},
+            {25.0f, 1, -1, -1, {25, 26, 27, 28, 29}},
+            {31.0f, -173, -1, -1, {30}},
+            {25.0f, 7, -1, -1, {31, 32, 33, 34, 35}},
+            {31.0f, -203, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {25.0f, 55, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {31.0f, -251, -1, -1, {52}},
+            {31.0f, -251, -1, -1, {}},
+         }},
+        {"RangedDamage", "Exp", 0.5f, 0.03f,
+         { // AttributeLimits
+            {10.0f, 10, -1, -1, {1}},
+            {27.0f, -7, -1, -1, {2}},
+            {35.0f, -16, -1, -1, {3, 4, 5}},
+            {41.0f, -46, -1, -1, {6}},
+            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
+            {41.0f, -76, -1, -1, {12}},
+            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
+            {41.0f, -106, -1, -1, {18}},
+            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
+            {41.0f, -136, -1, -1, {24}},
+            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
+            {41.0f, -166, -1, -1, {30}},
+            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
+            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {41.0f, -244, -1, -1, {52}},
+            {41.0f, -244, -1, -1, {}},
+         },
+         { // ItemLimits
+            {25.0f, -15, -1, -1, {1}},
+            {25.0f, -25, -1, -1, {2}},
+            {25.0f, -16, -1, -1, {3, 4, 5}},
+            {31.0f, -46, -1, -1, {6}},
+            {25.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
+            {31.0f, -76, -1, -1, {12}},
+            {25.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
+            {31.0f, -106, -1, -1, {18}},
+            {25.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
+            {31.0f, -136, -1, -1, {24}},
+            {25.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
+            {31.0f, -166, -1, -1, {30}},
+            {25.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
+            {31.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {25.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {31.0f, -244, -1, -1, {52}},
+            {31.0f, -244, -1, -1, {}},
+         }},
+        {"MagicDamage", "Exp", 0.5f, 0.03f,
+         { // AttributeLimits
+            {10.0f, 10, -1, -1, {1}},
+            {27.0f, -7, -1, -1, {2}},
+            {35.0f, -16, -1, -1, {3, 4, 5}},
+            {41.0f, -46, -1, -1, {6}},
+            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
+            {41.0f, -76, -1, -1, {12}},
+            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
+            {41.0f, -106, -1, -1, {18}},
+            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
+            {41.0f, -136, -1, -1, {24}},
+            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
+            {41.0f, -166, -1, -1, {30}},
+            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
+            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {41.0f, -244, -1, -1, {52}},
+            {41.0f, -244, -1, -1, {}},
+         },
+         { // ItemLimits
+            {25.0f, -15, -1, -1, {1}},
+            {25.0f, -25, -1, -1, {2}},
+            {25.0f, -16, -1, -1, {3, 4, 5}},
+            {31.0f, -46, -1, -1, {6}},
+            {25.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
+            {31.0f, -76, -1, -1, {12}},
+            {25.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
+            {31.0f, -106, -1, -1, {18}},
+            {25.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
+            {31.0f, -136, -1, -1, {24}},
+            {25.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
+            {31.0f, -166, -1, -1, {30}},
+            {25.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
+            {31.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
+            {25.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
+            {31.0f, -244, -1, -1, {52}},
+            {31.0f, -244, -1, -1, {}},
+         }},
+        {"Chance", "Linear", 1.0f, 0.0f,
+         { // AttributeLimits
+            {-1.0f, -1, 0, 10000, {}},
+         },
+         { // ItemLimits
+            {-1.0f, -1, 0, 10000, {}},
+         }},
+        {"Enchantment", "Exp", 0.128f, 0.03f,
+         { // AttributeLimits
+            {10.0f, 50, -1, -1, {1}},
+            {27.0f, 31, -1, -1, {2}},
+            {35.0f, 0, -1, -1, {3, 4, 5, 6}},
+            {35.0f, 6, -1, -1, {7, 8, 9, 10, 11, 12}},
+            {35.0f, 12, -1, -1, {13, 14, 15, 16, 17, 18}},
+            {35.0f, 18, -1, -1, {19, 20, 21, 22, 23, 24}},
+            {35.0f, 24, -1, -1, {25, 26, 27, 28, 29, 30}},
+            {35.0f, 30, -1, -1, {31, 32, 33, 34, 35, 36}},
+            {41.0f, -186, -1, -1, {37, 38, 39, 40, 41, 42, 43}},
+            {35.0f, 72, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51, 52}},
+            {35.0f, 0, -1, -1, {}},
+         },
+         { // ItemLimits
+            {10.0f, 50, -1, -1, {1}},
+            {27.0f, 31, -1, -1, {2}},
+            {35.0f, 0, -1, -1, {3, 4, 5, 6}},
+            {35.0f, 6, -1, -1, {7, 8, 9, 10, 11, 12}},
+            {35.0f, 12, -1, -1, {13, 14, 15, 16, 17, 18}},
+            {35.0f, 18, -1, -1, {19, 20, 21, 22, 23, 24}},
+            {35.0f, 24, -1, -1, {25, 26, 27, 28, 29, 30}},
+            {35.0f, 30, -1, -1, {31, 32, 33, 34, 35, 36}},
+            {41.0f, -186, -1, -1, {37, 38, 39, 40, 41, 42, 43}},
+            {35.0f, 72, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51, 52}},
+            {35.0f, 0, -1, -1, {}},
+         }},
+    };
+    return kScales;
+}
+
+} // namespace
+
+// `fi.Z7a` (L2273-2274): the value -> bar-fill ratio. Mirrors `fi.tbb`
+// (L2272-2273) field resolution exactly:
+//   a==null||a==""  -> xW=iO=-1, B9=1, Fk=0
+//   else            -> xW=iO=0 then (limit!=null) xW=rFa, iO=MKa, B9=yFa, Fk=shift
+//                      rH=dk<0?0:dk, bC=min<0?0:min, XTa=type
+//   b = xW>=0 && iO>=0 ? iO : level*B9 + Fk          (`A$a` L2270)
+//   Exp:    c = 2^((value-b)*rH/v.BP)                 (`v.BP`=kDamageDoublingRange)
+//   Linear: c = (value/b)^rH
+//   c<0?c=0 : c>1?c=1 ; return max(c, bC)
+float shop_attribute_bar_fill(const char* bar_scale, int value, int player_level) {
+    const ShopBarScale* bs = nullptr;
+    if (bar_scale != nullptr && bar_scale[0] != '\0') {
+        for (const ShopBarScale& s : shop_bar_scales()) {
+            if (std::string(s.name) == bar_scale) {
+                bs = &s;
+                break;
+            }
+        }
+    }
+    int xw = 0;              // `xW`
+    int io = 0;              // `iO`
+    float level_mult = 0.0f; // `B9`
+    float shift = 0.0f;      // `Fk`
+    float power = 0.0f;      // `rH`
+    float min_fill = 0.0f;   // `bC`
+    std::string type;        // `XTa`
+    if (bs == nullptr) {
+        xw = -1;
+        io = -1;
+        level_mult = 1.0f;
+    } else {
+        // `f7a(player_level)` then the `g7a()` no-Level default (`tbb` b=true).
+        const ShopBarScaleLimit* lim = nullptr;
+        for (const ShopBarScaleLimit& l : bs->item_limits) {
+            if (std::find(l.levels.begin(), l.levels.end(), player_level) !=
+                l.levels.end()) {
+                lim = &l;
+                break;
+            }
+        }
+        if (lim == nullptr) {
+            for (const ShopBarScaleLimit& l : bs->item_limits) {
+                if (l.levels.empty()) {
+                    lim = &l;
+                    break;
+                }
+            }
+        }
+        if (lim != nullptr) {
+            xw = lim->left_limit;
+            io = lim->right_limit;
+            level_mult = lim->level_multiplier;
+            shift = static_cast<float>(lim->shift);
+        }
+        power = bs->power < 0.0f ? 0.0f : bs->power;
+        min_fill = bs->min < 0.0f ? 0.0f : bs->min;
+        type = bs->type;
+    }
+    const float baseline = (xw >= 0 && io >= 0)
+                               ? static_cast<float>(io)
+                               : static_cast<float>(player_level) * level_mult + shift;
+    float c;
+    if (type == "Exp") {
+        c = std::pow(2.0f,
+                     (static_cast<float>(value) - baseline) * power / kDamageDoublingRange);
+    } else if (type == "Linear") {
+        c = std::pow(static_cast<float>(value) / baseline, power);
+    } else {
+        return 0.0f;  // `XTa` undefined (unreachable: shipped types are Exp/Linear)
+    }
+    if (c < 0.0f) {
+        c = 0.0f;
+    } else if (c > 1.0f) {
+        c = 1.0f;
+    }
+    return std::max(c, min_fill);
 }
 
 std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
