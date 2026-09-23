@@ -3368,15 +3368,29 @@ int main(int argc, char** argv) {
             app.quest_engine().run_action_probe(app, {dlg}, dj);
             const bool queued = app.quest_engine().has_dialog();
             const int mid_cnt = owned_count("Energy_Refill");
-            app.quest_engine().press_dialog(app, 5);  // row id 5 (`this.eOa`)
+            // REAL click: hit-test the row's own box and inject the tap
+            // through the app's own pointer path (`inject_click` ->
+            // `poll_input` -> the screen's `quest_modal_consume` ->
+            // `He.dhb` L1061 row id). No OS input, hidden window (RULE 0).
+            double row_cx = 0.0, row_cy = 0.0;
+            const std::vector<sf2::app::QuestDialogRowButton> rb =
+                sf2::app::quest_dialog_row_buttons(app, app.quest_engine().dialog());
+            if (!rb.empty()) {
+                row_cx = rb[0].x + rb[0].w * 0.5;
+                row_cy = rb[0].y + rb[0].h * 0.5;
+            }
+            app.inject_click(row_cx, row_cy);
+            for (int f = 0; f < 4 && app.quest_engine().has_dialog(); ++f) {
+                app.run_one_frame();
+            }
             const int after_cnt = owned_count("Energy_Refill");
             std::fprintf(stdout,
                          "[qa] DELIVERYDELAY row: queued=%d owned %d->%d "
-                         "(after press id5) ->%d\n",
-                         queued ? 1 : 0, before_cnt, mid_cnt, after_cnt);
+                         "(after row click %.1f,%.1f -> id5) ->%d\n",
+                         queued ? 1 : 0, before_cnt, mid_cnt, row_cx, row_cy, after_cnt);
             std::fflush(stdout);
             check(queued && mid_cnt == before_cnt && after_cnt > before_cnt,
-                  "DeliveryDelay nested <GiveItem> runs (row-button id 5)");
+                  "DeliveryDelay nested <GiveItem> runs (real row click id 5)");
         }
         // --- `sh` `BuyItem` (`EBuyItem` g="1D4" L526589) Ruby path ----------
         // `Energy_Refill` (list.xml L2318, BonusPrice=5); the shipped form is

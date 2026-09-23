@@ -1102,6 +1102,28 @@ bool shop_open_at(App& app, const std::string& tab, const std::string& item);
 // `od.jR` L1899 primary `EButtonWhite` / secondary `EButtonDark` convention.
 const char* quest_button_frame(const std::string& color, bool primary);
 
+// --- `He.jkb` L1056-1057 row buttons (`this.ima`, id from `this.eOa=5`) -----
+// A row carrying `Item`/`Enchantment` becomes a `tv` pushed to `this.ima` with
+// `id=this.eOa++`; `He.dhb` L1061 `a<this.eOa` finds it by id and runs its
+// nested `Yb`. One clickable box per such row; `slot` is the `dhb` id (5+row).
+struct EngineDialog;
+struct QuestDialogRowButton {
+    int slot = 0;  // `tv.id` = `this.eOa++` (the first row button is 5)
+    float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;  // the row's body box (screen px)
+};
+
+// The modal's row-button boxes for `d` (empty when no row carries an
+// Item/Enchantment). `Multiline`/`MultilineBig` stack every row (`uj.sqb`
+// L1953); the paged `Od` shows the current page row alone (`Od.Xma` L1948).
+std::vector<QuestDialogRowButton> quest_dialog_row_buttons(App& app,
+                                                           const EngineDialog& d);
+
+// The `He.dhb` L1061 row id (`>=5`) of the row box under (x, y), or -1.
+// `Od.Jsb`/`Od.xx` L1948-1949 dispatch `this.Ge(row id)` on the delivery
+// countdown's expiry; the port has no countdown model, so the row's own box
+// is the tap target.
+int quest_dialog_row_hit_index(App& app, const EngineDialog& d, double x, double y);
+
 // `--dialog-verify` headless self-check (no OS input, no pixels): queues the
 // crafted `He` dialogs and asserts the D1/D2/D7 display + dispatch contracts,
 // printing `[dlgverify] PASS/FAIL <case>` per case. Returns true only when

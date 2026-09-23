@@ -129,6 +129,9 @@ const EngineDialog* quest_notification_top(App& app) {
 // helpers below). Returns the `He.dhb` L1061 slot index of the plate under
 // (x, y) — 0=Left, 1=Right, 2=Middle, 100=Close — or -1 for no hit.
 int quest_dialog_button_hit_index(App& app, const EngineDialog& d, double x, double y);
+// `He.jkb` L1056-1057 row buttons (`this.ima`, ids from `this.eOa=5`): the
+// row's own box is the `He.dhb` L1061 tap target. `quest_dialog_row_hit_index`
+// is declared in screens.hpp (used by the modal + `--quest-action-probe`).
 // `He.S` L1045-1051 Type routing + the `od.close` L1898 retained-dialog copy
 // (both defined with the dialog layout below; `quest_modal_consume` needs
 // them first).
@@ -266,6 +269,20 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
         std::fflush(stdout);
         dialog_capture_closing(app, *d);  // `Ib.close` L1911 (0.5 s collapse)
         app.quest_engine().dismiss_dialog(app);  // `He.gf` L1062
+        return true;
+    }
+    // `He.dhb(a)` L1061 `a<this.eOa` (L1062): a row-button row (`He.jkb`
+    // L1056-1057 `tv` in `this.ima`, id 5+) fires its OWN nested `Yb` by id,
+    // BEFORE the pager/plate paths — the row box is the tap target (the port
+    // has no delivery countdown; see `quest_dialog_row_buttons`).
+    const int row_id = quest_dialog_row_hit_index(app, *d, app.pointer().x, app.pointer().y);
+    if (row_id >= 0) {
+        std::fprintf(stdout, "[quest] dialog row pressed: %s (row id %d)\n", d->title.c_str(),
+                     row_id);
+        std::fflush(stdout);
+        dialog_capture_closing(app, *d);  // `od.Ge(1)` L1898 close tween
+        const std::vector<std::string> fights = app.quest_engine().press_dialog(app, row_id);
+        if (fight_out != nullptr && !fights.empty()) *fight_out = fights.front();
         return true;
     }
     // Regular. `He` pages a multi-row dialog (`He.jkb` L1042: every `<Line>`
@@ -5954,6 +5971,54 @@ const char* quest_button_frame(const std::string& color, bool primary) {
     if (color == "White" || color == "Beige") return "btnWhite";
     if (color == "Gold") return "btnGold";
     return primary ? "btnWhite" : "btnDark";
+}
+
+// `He.jkb` L1056-1057: a row carrying `Item`/`Enchantment` becomes a `tv`
+// pushed to `this.ima` with `id=this.eOa++`. `He.eOa` starts at 5 (L1042
+// `this.eOa=5`), so the FIRST row button is id 5. `He.dhb` L1061 `a<this.eOa`
+// (L1062) finds it by id — `m.find(this.ima,function(c){return c.id==a})` —
+// and runs its nested sub-`Yb` (`b.actions.S(this.Qt)`); that sub-`Yb`'s
+// completion listener (`b.actions.qd.addListener(w(this,this.gf))`, L1056)
+// then resumes the parked outer chain (`He.gf` L1062). `Od.Jsb`/`Od.xx`
+// L1948-1949 dispatch `this.Ge(this.gaa)` (that same row id) when the row's
+// delivery countdown (`Dj.SMa` L1045 `Sc`) expires; the port has no countdown
+// model, so the row's own body box is the tap target.
+constexpr int kDialogRowIdBase = 5;  // `He` ctor L1042 `this.eOa=5`
+
+std::vector<QuestDialogRowButton> quest_dialog_row_buttons(App& app,
+                                                           const EngineDialog& d) {
+    std::vector<QuestDialogRowButton> out;
+    if (d.line_actions.empty()) return out;
+    const OdLayout L = dialog_layout_for(app, d, DialogAnim{});
+    const float c = L.panel.c > 0.0f ? L.panel.c : 1.0f;
+    // `uj.sqb` L1953 stacks EVERY `<Line>` row (`Multiline`/`MultilineBig`);
+    // the paged `Od` shows the current row alone (`Od.Xma` L1948).
+    const bool all = dialog_scrolls_all_lines(d.type);
+    float y = L.body_y;
+    for (std::size_t i = 0; i < d.lines.size(); ++i) {
+        const float h = all ? measure_ui_wrapped(app, loc(app, d.lines[i], d.lines[i]),
+                                                 kOdBodyW * c, 0.70f)
+                            : L.body_h;
+        const bool button = i < d.line_actions.size() && !d.line_actions[i].empty();
+        if (button && (all || i == d.page)) {
+            QuestDialogRowButton b;
+            b.slot = kDialogRowIdBase + static_cast<int>(i);
+            b.x = L.body_x;
+            b.y = y;
+            b.w = L.body_w;
+            b.h = h;
+            out.push_back(b);
+        }
+        y += h;
+    }
+    return out;
+}
+
+int quest_dialog_row_hit_index(App& app, const EngineDialog& d, double x, double y) {
+    for (const QuestDialogRowButton& b : quest_dialog_row_buttons(app, d)) {
+        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.slot;
+    }
+    return -1;
 }
 
 namespace {
@@ -13605,6 +13670,27 @@ bool run_quest_dialog_selfcheck(App& app) {
         dlg_case("D7 LAST page, no authored Text: row caption (cap_b)",
                  q.dialog_button_text() == "cap_b");
     }
+
+    // --- `He.jkb` L1056-1057 row button (`this.ima`, id from `this.eOa=5`).
+    {
+        q.clear_dialogs();
+        EngineDialog d = probe_dialog("d_rowbtn");
+        d.lines = {"row_text"};
+        d.line_actions.push_back({marker_action("ROW_FIRED")});
+        q.push_dialog_for_test(d);
+        const std::vector<QuestDialogRowButton> rb =
+            quest_dialog_row_buttons(app, q.dialog());
+        const bool laid = rb.size() == 1 && rb[0].slot == 5;
+        dlg_case("He.jkb row button: first row id 5 (this.eOa)", laid);
+        const int hit = laid ? quest_dialog_row_hit_index(app, q.dialog(),
+                                                          rb[0].x + rb[0].w * 0.5,
+                                                          rb[0].y + rb[0].h * 0.5)
+                             : -1;
+        dlg_case("He.dhb row button hit-tests to id 5", hit == 5);
+        dlg_case("He.dhb row button miss -> -1",
+                 quest_dialog_row_hit_index(app, q.dialog(), -100.0, -100.0) == -1);
+    }
+    q.clear_dialogs();
 
     // --- D1 (case 4): a dialog queued on the FIGHT screen renders + blocks.
     {
