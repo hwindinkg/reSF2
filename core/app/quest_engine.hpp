@@ -452,9 +452,15 @@ struct EngineItemOffer {
     std::string item;          // `yf.og` (the list.xml Name)
     int percent = 0;           // `yf.TP` (`K.T(e)`; the `<Offer Percent>`)
     int price = 0;             // `yf.KA` = base * ((100 - percent) / 100)
-    bool sale = false;         // `yf.V4` (the `<Sale>` flag)
-    long long end_time = 0;    // `yf.yn` (0 = no expiry; `p.Dc + Period + tz`)
-    bool active = true;        // `yf.fE`
+    bool sale = false;         // `yf.V4` (`Pn.S` L1065 `f.V4 = d.G`)
+    // `yf.yn`: the `Pn.S` L1065 end time `a = h.G>0 ? p.Dc + h.G + tz : 0`
+    // (0 = no expiry). `tz = trunc(ed.getTimezoneOffset())` — a hardcoded
+    // `return 0` (L2204), so the port adds no timezone term.
+    long long end_time = 0;
+    // `yf.fE`: `Pn.S` writes `h.G>0`, but the shipped bundle never READS it
+    // (only the ctor default `!0`, L28C, and the `from` copy) — the port keeps
+    // the default.
+    bool active = true;
 };
 
 // `jl` (L180945): the persisted per-offer state object (`p.o.P7a(name)`,
@@ -786,6 +792,11 @@ public:
     const EngineItemOffer* offer_for(const std::string& item) const;
     int offer_price(const std::string& item, int base) const;
     std::size_t offer_count() const { return offers_.size(); }
+    // JS `p.Dc` (`Math.round(Hb.instance.getTime())`, L178): the game clock in
+    // SECONDS — the SAME `quest_now()` the offer deadlines use. Public so the
+    // shop cell's `b.yn > p.Dc` sale sub-branch (`ns.j5` L2308-2309) reads the
+    // clock `apply_discount` writes into `yf.yn`.
+    static double now_seconds();
 
     // --- shop-offer controller (`nt` g="5B", `p.Cw`; `hh`/`pl` model) ------
     // The list.xml offer DEFINITIONS (JS `p.Cw.It`, built by `A1a` L180xxx
@@ -828,8 +839,12 @@ public:
     void apply_toggle_items(App& app, const std::string& label, bool on);
 
     // `Pn.S` (L1064): build/replace (`on`) or clear the `yf` offer for `item`
-    // with `KA = base * ((100 - percent) / 100)`; `Toggle="0"` -> `b.G.E4()`.
-    void apply_discount(App& app, const std::string& item, int percent, bool on);
+    // with `KA = base * ((100 - percent) / 100)` (only when `percent > 0` —
+    // `e.G>0 &&` in L1065); `Toggle="0"` -> `b.G.E4()`. `period` = `Csa`
+    // (`h.G`, `Math.trunc`) -> `yf.yn` (`a = h.G>0 ? p.Dc + h.G + tz : 0`);
+    // `sale` = `pta` (`d.G`, `l.Ie>0`) -> `yf.V4`.
+    void apply_discount(App& app, const std::string& item, int percent, bool on,
+                        long long period = 0, bool sale = false);
 
 private:
     // `p.o.xa.<item>.Gp` (the live per-item offer; `Pn.S` L1064 writes it,

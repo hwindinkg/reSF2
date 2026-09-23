@@ -737,9 +737,13 @@ void QuestEngine::apply_toggle_items(App& app, const std::string& label, bool on
 // "#internalQuest#", a, g.G, k.G); g.KA=l; g.TP=K.T(e)` then
 // `p.o.xa.<item>.Gp = g` + `p.o.xa.vu()` (L301). `Toggle="0"` takes the
 // `f.G<0 -> b.G.E4()` branch (clear the offer).
-void QuestEngine::apply_discount(App& app, const std::string& item, int percent, bool on) {
+void QuestEngine::apply_discount(App& app, const std::string& item, int percent,
+                                 bool on, long long period, bool sale) {
     if (item.empty()) return;
-    if (!on || percent <= 0) {
+    // `Pn.S` L1065: `if(c.G)` (the resolved `Toggle` > 0) gates the whole
+    // write — `Percent` only gates the `KA` override (`e.G>0 &&`), never the
+    // offer's creation. `Toggle="0"` runs `b.G.E4()` (clear).
+    if (!on) {
         offers_.erase(item);
         std::fprintf(stdout, "[quest] Discount %s toggle=0 -> offer cleared (E4)\n",
                      item.c_str());
@@ -751,14 +755,23 @@ void QuestEngine::apply_discount(App& app, const std::string& item, int percent,
     EngineItemOffer o;
     o.item = item;
     o.percent = percent;
-    o.sale = false;
-    o.end_time = 0;
-    o.active = true;
-    o.price = static_cast<int>(std::trunc(static_cast<double>(base) *
-                                          (100.0 - static_cast<double>(percent)) / 100.0));
+    // `f.V4 = d.G` (the resolved `Sale` > 0) and `a = h.G>0 ? p.Dc + h.G + tz
+    // : 0` (the `yf.yn` end time; `tz` = `trunc(ed.getTimezoneOffset())` = 0,
+    // L2204).
+    o.sale = sale;
+    o.end_time = period > 0 ? static_cast<long long>(now_seconds()) + period : 0;
+    o.active = true;  // `yf.fE` (written `h.G>0`, never read in the bundle)
+    // `KA` is set ONLY when `e.G>0`; a `Percent="0"` offer keeps the base.
+    o.price = percent > 0
+                  ? static_cast<int>(std::trunc(static_cast<double>(base) *
+                                                (100.0 - static_cast<double>(percent)) /
+                                                100.0))
+                  : base;
     offers_[item] = o;
-    std::fprintf(stdout, "[quest] Discount %s percent=%d -> price %d (base %d, vu)\n",
-                 item.c_str(), percent, o.price, base);
+    std::fprintf(stdout,
+                 "[quest] Discount %s percent=%d period=%lld sale=%d -> price %d end=%lld "
+                 "(base %d, vu)\n",
+                 item.c_str(), percent, period, sale ? 1 : 0, o.price, o.end_time, base);
     std::fflush(stdout);
 }
 
@@ -911,6 +924,11 @@ bool query_parse_int(const std::string& s, long long& out) {
 }
 
 }  // namespace
+
+// JS `p.Dc` (L178): the game clock in SECONDS — the SAME `quest_now()` the
+// offer deadlines use. Public so the shop cell's `b.yn > p.Dc` sale test
+// (`ns.j5` L2308-2309) reads the clock `apply_discount` writes into `yf.yn`.
+double QuestEngine::now_seconds() { return quest_now(); }
 
 // --- shop-offer controller (`nt` g="5B", `p.Cw`; `hh`/`pl` model) ----------
 
@@ -2619,20 +2637,31 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             apply_toggle_items(app, label, toggle == "on");
             fx.toggle_items.push_back(label + "=" + (toggle == "on" ? "on" : "off"));
         } else if (t == "Discount") {
-            // `Pn` L1064 (`EDiscount`): `Item`, `Percent`, `Toggle` (the
-            // NewAmount/NewPrice/Period/Sale attrs carry no shipped use).
-            // `getParameters` (L1065) resolves `Item`/`Percent` through the
-            // formula lexer; `S` (L1065) builds `new yf(item,"#internalQuest#",
-            // end,amount,price)` with `KA = base * ((100-percent)/100)`, stores
-            // it at `p.o.xa.<item>.Gp`, then `p.o.xa.vu()` (L301) re-derives.
-            // `Toggle="0"` clears it (`b.G.E4()`).
+            // `Pn` L1064 (`EDiscount`): `Item`, `Percent`, `Toggle`, `Period`,
+            // `Sale` (+ NewAmount/NewPrice). `getParameters` (L1065-1067)
+            // resolves each attr through the formula lexer and maps it by the
+            // ARG order `getParameters(a,b,f,e,c,g,h,k,d)`: `Percent`->`e`
+            // (`l.Ie`), `Toggle`->`c` (`>0`), `Period`->`h`
+            // (`Math.trunc(l.Ie)`), `Sale`->`d` (`l.Ie>0`). `S` (L1065) then
+            // builds the `yf` at `p.o.xa.<item>.Gp` with the end time
+            // `a = h.G>0 ? p.Dc + h.G + tz : 0` (`tz` = 0, L2204), `f.V4=d.G`
+            // (`Sale`), `f.fE=h.G>0`, and `KA = base*((100-e.G)/100)` ONLY
+            // when `e.G>0`; `p.o.xa.vu()` (L301) re-derives. `Toggle="0"`
+            // clears it (`b.G.E4()`).
             const std::string ditem = quest_var(app, locals, attr_or(a.attrs, "Item"));
             const std::string dtgl = quest_var(app, locals, attr_or(a.attrs, "Toggle"));
             const std::string dpct = quest_var(app, locals, attr_or(a.attrs, "Percent"));
+            const std::string dper = quest_var(app, locals, attr_or(a.attrs, "Period"));
+            const std::string dsale = quest_var(app, locals, attr_or(a.attrs, "Sale"));
             const int percent = static_cast<int>(std::strtod(dpct.c_str(), nullptr));
             const bool don = std::strtod(dtgl.c_str(), nullptr) > 0.0;
-            apply_discount(app, ditem, percent, don);
-            fx.discounts.push_back(ditem + ":" + dpct + ":toggle=" + (don ? "1" : "0"));
+            // `g.G=Math.trunc(l.Ie)` (Period) / `k.G=l.Ie>0` (Sale).
+            const long long period =
+                static_cast<long long>(std::trunc(std::strtod(dper.c_str(), nullptr)));
+            const bool sale = std::strtod(dsale.c_str(), nullptr) > 0.0;
+            apply_discount(app, ditem, percent, don, period, sale);
+            fx.discounts.push_back(ditem + ":" + dpct + ":toggle=" + (don ? "1" : "0") +
+                                   ":period=" + dper + ":sale=" + (sale ? "1" : "0"));
         } else if (t == "ShowMapButton") {
             // `wo` L1100-1101 (`EShowMapButton`): builds an `hg` from the
             // resolved attrs and calls `Vb.F().Lua(b,null,!0)`. `Lua` (L2167)

@@ -10153,11 +10153,14 @@ void ResultsScreen::render_impl(App& app) {
     if (reveal_done_) {
         const float okx = kViewW * 0.5f;
         const float oky = 645.0f;
+        // `$g.V(Y.na("OK"))` (L2075): the plate caption is the localized `OK`
+        // key, not a literal.
+        const std::string ok_label = loc(app, "OK", "OK");
         if (!draw_bb_plate(app, "btnWhite", okx, oky, 230.0f, 52.0f, 1.0f)) {
-            draw_flat_button(app, "OK", okx, oky, 210.0f, 48.0f, 0.85f, 0.78f, 0.55f,
+            draw_flat_button(app, ok_label, okx, oky, 210.0f, 48.0f, 0.85f, 0.78f, 0.55f,
                              false);
         }
-        draw_ui_label(app, okx - 105.0f, oky - 13.0f, 210.0f, 26.0f, "OK", 0.85f,
+        draw_ui_label(app, okx - 105.0f, oky - 13.0f, 210.0f, 26.0f, ok_label, 0.85f,
                       UiAlign::Center, 0.20f, 0.15f, 0.08f);
     }
     std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
@@ -11528,15 +11531,15 @@ void ShopScreen::render_impl(App& app) {
         // `ns.ba` (L2306) + `ns.j5` (L2308-2309): the sale/`badge` flag `Di`
         // (atlas 248 `pieces/*`) + its text `Im`. Resolved by `shop_cell_badge`
         // (the single rule shared with the `--settings-profile-shop-probe`).
-        // The `b.yn > p.Dc` "shopSale" sub-branch needs the item's `am(0)`
-        // offer record: `QuestEngine::offer_for(name)` carries `end_time`
-        // (`yf.yn`), but the engine's `<Discount>` handler (`apply_discount`,
-        // quest_engine.cpp:740) does not populate it and the `p.Dc` clock
-        // (`quest_now()`, quest_engine.cpp:882, anonymous namespace) is not
-        // exposed — no shipped `<Discount>` sets `Period` either (the only one
-        // is reference/extracted/xml/res/quest_extensions/test_quests.xml), so
-        // `b == null` for every shipped row and `shop_sale` is false.
-        const ShopBadge badge = shop_cell_badge(app, it, /*shop_sale=*/false);
+        // The `b.yn > p.Dc` "shopSale" sub-branch (`ns.j5` L2308-2309:
+        // `b=this.bc.am(0); b!=null&&b.yn>p.Dc ? SALE : badge`) reads the
+        // item's `yf` offer (`QuestEngine::offer_for`): `end_time` (`yf.yn`,
+        // written by `apply_discount`) against the public clock
+        // (`QuestEngine::now_seconds()` = `p.Dc`).
+        const EngineItemOffer* const item_offer = app.quest_engine().offer_for(it.name);
+        const bool shop_sale =
+            item_offer != nullptr && item_offer->end_time > QuestEngine::now_seconds();
+        const ShopBadge badge = shop_cell_badge(app, it, shop_sale);
         const char* badge_art = badge.art;
         std::string badge_text = badge.text;
         if (badge_art != nullptr) {
@@ -13099,9 +13102,14 @@ void EquipmentScreen::render_impl(App& app) {
         const float cell_l = profile_list_left(v);
         const float cell_w = profile_list_w(v);
         const float row_top = profile_list_top(v, 400.0f, 150.0f);
-        draw_ui_label(app, v.J + 16.0f, v.P + 34.0f, v.width() - 32.0f, 28.0f,
-                      loc(app, weapon_, weapon_), 0.85f, UiAlign::Center, 0.35f, 0.22f,
-                      0.10f);
+        // NO weapon-name header: the JS `es` (L2238-2240) is a bare `Xd`
+        // slider — `es.init` (L2239) sets only `spacing`/`v2`, `es.NC` (L2240)
+        // returns a `ks`/`ls` cell whose `ymb` (L2238) label is the move's own
+        // `KeysDescription`, and `ls` "carries NO name / type / priority text".
+        // The former header was an invention (the JS Profile `vb` header
+        // `XB`/`ei` is `show()`n only on tab 0 and `pn()`-hidden for Moves,
+        // `hla` L2190-2191); the selected move's name lives in the `$r` right
+        // panel below (`Yr.umb` -> `B4`, L2183).
         move_cell_hits_.clear();
         for (std::size_t i = 0; i < move_rows_.size(); ++i) {
             const MoveRow& r = move_rows_[i];
@@ -14647,6 +14655,39 @@ int run_shell_probe(App& app) {
         std::fflush(stdout);
         check(!found.empty(),
               "(iii) RUBY-tab sale cell badge = pieces/FreeGems_red (SubType=Bonus)");
+    }
+    // (iv) `Pn` L1064 (`EDiscount`) `Period` -> `yf.yn`: a discount carrying a
+    // `Period` yields the shopSale state (`ns.j5` L2308-2309 `b.yn > p.Dc`).
+    // The shipped `Period` shape is `test_quests.xml` (`Toggle="1"` + a
+    // `Period="?Timer[..]"` query, NO `Percent`), so fire it through the real
+    // engine action path (`run_action_probe`) and read the offer back.
+    {
+        QuestEngine& qe = app.quest_engine();
+        const std::string kDisc = "WEAPON_CRESCENT_KNIVES";  // any catalog item
+        const auto fire_discount = [&](const char* toggle, const char* period,
+                                       const char* sale) {
+            QuestAction act;
+            act.tag = "Discount";
+            act.attrs["Item"] = kDisc;
+            act.attrs["Toggle"] = toggle;
+            act.attrs["Period"] = period;
+            act.attrs["Sale"] = sale;
+            QuestJournal j;
+            qe.run_action_probe(app, {act}, j);
+        };
+        fire_discount("1", "3600", "1");
+        const EngineItemOffer* of = qe.offer_for(kDisc);
+        const double now = QuestEngine::now_seconds();
+        std::fprintf(stdout, "[sps] discount offer=%d sale=%d end=%lld now=%.0f\n",
+                     of != nullptr ? 1 : 0, (of != nullptr && of->sale) ? 1 : 0,
+                     of != nullptr ? of->end_time : 0, now);
+        std::fflush(stdout);
+        check(of != nullptr && of->sale && of->end_time > now,
+              "(iv) Discount Period>0 -> yf.yn > p.Dc (shopSale state)");
+        // `Toggle="0"` clears it (`b.G.E4()`).
+        fire_discount("0", "3600", "1");
+        check(qe.offer_for(kDisc) == nullptr,
+              "(iv) Discount Toggle=0 -> offer cleared (E4)");
     }
     std::fprintf(stdout, "[sps] RESULT %s (%d fail)\n", fails == 0 ? "PASS" : "FAIL",
                  fails);
