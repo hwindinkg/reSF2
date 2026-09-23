@@ -4134,6 +4134,9 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                 for (pugi::xml_node fight = battle.child("Fight"); fight;
                      fight = fight.next_sibling("Fight")) {
                     ++n.fight_count;  // JS `Lc.Kz().length` (Xr pip count)
+                    // JS `dl.name` (the `<Fight Name>`; the `hb` triple's
+                    // `Lq`, `hb.toString` L1416) — the `il` record key tail.
+                    n.fight_names.push_back(fight.attribute("Name").value());
                     // First positive <Reward Money> of the first fight (the
                     // `ci` gold icon value under the difficulty bar, L2133).
                     if (n.fight_count == 1 && n.reward_money == 0) {
@@ -6696,6 +6699,41 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
             const bool hidden = has_rec && rec->hidden;
             n.active = has_rec;                 // `WDa` (JS L256)
             n.visible = n.active && !hidden;    // `Qr.lla` (JS L2094)
+            // `Xr` pip lit state (L2133-2136): the pip count is the rendered
+            // `<Fight>` count, minus the last for boss families (`Xr` ctor
+            // L2134 `a.type!="FightBosses"&&...||--d`). Pip `k` is lit when
+            // `dl.status==1` = `YL` L111266 `c.no >= a.repeat` (the `il`
+            // record's `CompletedCount` >= `<Fight Replays>`; every shipped
+            // row carries `Replays="1"`). The record key is the `hb` triple
+            // `zone|battle|<Fight Name>` (`il.Atb` L143548). The direct-boot
+            // path records the bare battle name, so a single-fight node
+            // falls back to it.
+            int pip_n = static_cast<int>(n.fight_names.size());
+            if (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE" ||
+                n.type == "FINAL_BATTLE_TITAN") {
+                --pip_n;
+            }
+            if (pip_n < 0) pip_n = 0;
+            n.pip_beaten.assign(static_cast<std::size_t>(pip_n), false);
+            auto wins_for = [&map_save](const std::string& ids) -> int {
+                for (const WarriorSave::FightWins& fw : map_save.fights) {
+                    if (fw.name == ids) return fw.wins;
+                }
+                return 0;
+            };
+            for (int k = 0; k < pip_n; ++k) {
+                const std::string ids =
+                    n.zone + "|" + n.name + "|" + n.fight_names[k];
+                int wins = wins_for(ids);
+                if (wins == 0 && pip_n == 1) wins = wins_for(n.name);
+                n.pip_beaten[static_cast<std::size_t>(k)] = wins >= 1;
+            }
+            {
+                int lit = 0;
+                for (bool b : n.pip_beaten) lit += b ? 1 : 0;
+                std::fprintf(stdout, "[map] node %s pips=%d beaten=%d\n", n.name.c_str(),
+                             pip_n, lit);
+            }
         }
     }
     // MapFocus (JS `Ya.bKa` L2129 focuses the save's MapFocus `p.o.ys` via
@@ -7379,8 +7417,13 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
             const float px = body_x + (body_w - in_row * pip) * 0.5f +
                              static_cast<float>(col) * pip;
             const float py = body_y + pip_label_h + static_cast<float>(row) * pip;
-            try_draw_atlas_button(app, "indicatorOff", px + pip * 0.5f, py + pip * 0.5f,
-                                  pip, pip, 1.0f);
+            // `Ox.wMa` (L2134): `c[k].status==1` (beaten) -> `indicatorOn`,
+            // else `indicatorOff` (a locked fight would be `indicatorLocked`).
+            const bool beaten =
+                static_cast<std::size_t>(i) < node->pip_beaten.size() &&
+                node->pip_beaten[static_cast<std::size_t>(i)];
+            try_draw_atlas_button(app, beaten ? "indicatorOn" : "indicatorOff",
+                                  px + pip * 0.5f, py + pip * 0.5f, pip, pip, 1.0f);
         }
     }
     // --- `Wc` difficulty (L2161 `b = b*.35 + c`, `Lm.D(b)`, `Lm.ba(a,
@@ -10260,7 +10303,7 @@ ShopRect shop_try_rect(const ShopLayout& l) {
 // panel box is `rp` (`shop_layout.right_panel`) inset by `28/24*pscale`. This
 // MUST equal the render block that draws the green plate, so the confirm
 // hit-test cannot drift from the drawn art.
-ShopRect shop_price_rect(const ShopLayout& sl) {
+ShopRect shop_price_rect(const ShopLayout& sl, int slot) {
     const ShopRect& rp = sl.right_panel;
     const float pscale = rp.width() / 608.0f;  // info_panel_h 608x866
     const float bx = 28.0f * pscale, by = 24.0f * pscale;
@@ -10270,7 +10313,11 @@ ShopRect shop_price_rect(const ShopLayout& sl) {
     const float ch0 = rp.height() - 2.0f * by;
     const float bpad = cw0 * 0.05f;
     const float bh = 112.0f * pscale;
-    const float byy = cy0 + ch0 - bpad * 3.0f - bh * 0.5f;
+    // `Ne.ba` L2249: `d = b - c*3` for the first active button, then
+    // `d -= e.qa() + c` per stacked button. `slot` is the 0-based position
+    // from the BOTTOM (ruby at 0 when both prices are live).
+    const float byy =
+        cy0 + ch0 - bpad * 3.0f - bh * 0.5f - static_cast<float>(slot) * (bh + bpad);
     return {cx0, byy - bh * 0.5f, cx0 + cw0, byy + bh * 0.5f};
 }
 
@@ -10439,6 +10486,15 @@ int shop_effective_price(App& app, const CatalogItem& it) {
     return app.quest_engine().offer_price(it.name, it.price);
 }
 
+// `nn()` (item ctor L168907): the Ruby/crystal price (`od`). `Ne.Wub` L2254
+// shows it at the `pVa` RubyButton and `Pa.EYa` L1228 charges it
+// (`p.o.fd >= a.nn()`). No shipped `Discount` offer carries a gem override,
+// so the raw `BonusPrice` is the effective value (a `ShopHide`-free row).
+int shop_effective_bonus(App& app, const CatalogItem& it) {
+    (void)app;
+    return it.bonus_price;
+}
+
 // `Pa.Wz` (L1234) / `Pa.Bv` (L1211) fire the quest event; print the fired set
 // (the observable result) — a purchase-driven quest appearing here is the
 // proof the event reached the quest hub.
@@ -10528,6 +10584,52 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     // `Pa.iwa` L1228: `c=d=Pa.gI(a,!0,!1)` truthy -> `p.o.Fr(b); p.o.save();
     // Pa.Wz(a)` fires `QUEST_EVENT_PURCHASE` AFTER the save (so a purchase
     // quest reading `?Purchase(_$Purchase).*` sees the committed state).
+    log_purchase_fired("Purchase", app.quest_engine().purchase(app, bit.name));
+    std::fflush(stdout);
+    return true;
+}
+
+// `Ne.Ehb` case 2 (L2254) -> `bka(0, Aa.nn())` -> `Pa.EYa` L1228: the `pVa`
+// RubyButton charges the Ruby/crystal balance (`p.o.fd`), not gold. Gate
+// `p.o.fd >= a.nn()`, else `v.Bv(a,3)` (the Ruby "not enough" notice), then
+// grant + equip + save + `Pa.Wz` (`QUEST_EVENT_PURCHASE`).
+bool ShopScreen::purchase_gem_price_plate(App& app, const CatalogItem& bit) {
+    WarriorSave bw;
+    try {
+        bw = app.save().load();
+    } catch (const std::exception&) {
+        return false;
+    }
+    const int price = shop_effective_bonus(app, bit);
+    if (price <= 0) return false;  // `kL` L2254 never activates a 0-price plate
+    if (bw.bonus < price) {
+        // `Pa.EYa` L1228 else: `v.Bv(a,3)` -> reason 3 (`p.o.$Pa` = "Ruby").
+        std::fprintf(stdout,
+                     "[shop] Pi confirm Pa.EYa v.Bv(a,3): NOT ENOUGH RUBIES for %s "
+                     "(need %d, have %d)\n",
+                     bit.name.c_str(), price, bw.bonus);
+        log_purchase_fired(
+            "PurchaseUnsuccessful",
+            app.quest_engine().purchase_unsuccessful(app, bit.name, 3));
+        std::fflush(stdout);
+        return false;
+    }
+    bw.bonus -= price;
+    // `Pa.EYa` L1228: `c=Pa.gI(a,!0,!0)` — the gem grant (no separate `$o`,
+    // so `gI`'s equip flag does the slot write). `snd_buy` matches `Pa.gI`.
+    sf2::audio::AudioEngine::instance().play("snd_buy");
+    WarriorSave::OwnedItem oi;
+    oi.name = bit.name;
+    oi.count = 1;
+    shop_apply_slot(bw, bit.type, bit.name);
+    oi.equipped = true;
+    bw.items.push_back(oi);
+    app.save().save(bw);
+    seen_ = bw;
+    std::fprintf(stdout,
+                 "[shop] Pi confirm Pa.EYa -> BOUGHT %s price=%dR -> bonus %d"
+                 " + EQUIPPED\n",
+                 bit.name.c_str(), price, bw.bonus);
     log_purchase_fired("Purchase", app.quest_engine().purchase(app, bit.name));
     std::fflush(stdout);
     return true;
@@ -10771,9 +10873,13 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
     items_ = load_catalog(app());
     std::fprintf(stdout, "[shop] %zu shop items\n", items_.size());
     for (const auto& it : items_) {
-        std::fprintf(stdout, "[shop] item %s (%s) price=%d model=%s\n", it.name.c_str(),
+        // `price` = `jp()` (gold), `bonus` = `nn()` (Ruby/crystal, `od`). A
+        // `price=0 bonus=N` row is a crystal-only shop item (`Ne.Wub` L2254
+        // draws only the `pVa` RubyButton).
+        std::fprintf(stdout, "[shop] item %s (%s) price=%d bonus=%d model=%s\n",
+                     it.name.c_str(),
                      it.subtype.empty() ? it.type.c_str() : it.subtype.c_str(), it.price,
-                     it.model.c_str());
+                     it.bonus_price, it.model.c_str());
     }
     std::fflush(stdout);
     // Tutorial-buy focus (JS `Ao` S(): `Oa.ska(0, Pca)` — Weapons tab with
@@ -10888,9 +10994,16 @@ void ShopScreen::update_impl(float dt) {
             buy_armed_ = -1;  // the list changed under the panel
         } else {
             const CatalogItem& bit = items_[brows[static_cast<std::size_t>(buy_armed_)]];
-            const ShopRect pr = shop_price_rect(shop_layout(tab_));
-            const bool on_confirm =
-                p.x >= pr.J && p.x <= pr.N && p.y >= pr.P && p.y <= pr.W;
+            const int b_gold = shop_effective_price(app(), bit);
+            const int b_gems = shop_effective_bonus(app(), bit);
+            const int b_gold_slot = (b_gems > 0 && b_gold > 0) ? 1 : 0;
+            const ShopRect gold_pr = shop_price_rect(shop_layout(tab_), b_gold_slot);
+            const ShopRect gem_pr = shop_price_rect(shop_layout(tab_), 0);
+            const bool on_gold = b_gold > 0 && p.x >= gold_pr.J && p.x <= gold_pr.N &&
+                                 p.y >= gold_pr.P && p.y <= gold_pr.W;
+            const bool on_gem = b_gems > 0 && p.x >= gem_pr.J && p.x <= gem_pr.N &&
+                                p.y >= gem_pr.P && p.y <= gem_pr.W;
+            const bool on_confirm = on_gold || on_gem;
             if (!on_confirm && p.pressed) {
                 std::fprintf(stdout, "[shop] Pi panel backdrop -> cancel (Oa.yS)\n");
                 std::fflush(stdout);
@@ -10901,7 +11014,11 @@ void ShopScreen::update_impl(float dt) {
                 // `Pa.iwa` L1228 head + `ZYa` L2251 (`p.o.xa.$o(b,!0)`):
                 // deduct, grant + equip, save. A shortfall (`v.Bv(a,2)`) keeps
                 // the panel open so the player can back out or earn gold.
-                if (purchase_price_plate(app(), bit)) {
+                // `ZYa` L2251 (`Pa.iwa`, gold) vs `$Ya` L2251 (`Pa.EYa`, gems):
+                // the plate the player pressed picks the currency.
+                const bool ok = on_gem ? purchase_gem_price_plate(app(), bit)
+                                       : purchase_price_plate(app(), bit);
+                if (ok) {
                     buy_armed_ = -1;
                 }
                 return;
@@ -11119,10 +11236,20 @@ void ShopScreen::update_impl(float dt) {
     // opens the `Pi` preview panel) is NOT a prerequisite. Owned items are
     // left to the TRY/EQUIP plate (`xa.$o`/`Qxb`), so a re-press stays inert.
     if (buy_armed_ < 0 && !rows.empty()) {
-        const ShopRect pr = shop_price_rect(sl);
-        if (p.pressed && p.x >= pr.J && p.x <= pr.N && p.y >= pr.P && p.y <= pr.W) {
-            const int psel = std::clamp(sel_, 0, static_cast<int>(rows.size()) - 1);
-            const CatalogItem& pit = items_[rows[static_cast<std::size_t>(psel)]];
+        const int psel = std::clamp(sel_, 0, static_cast<int>(rows.size()) - 1);
+        const CatalogItem& pit = items_[rows[static_cast<std::size_t>(psel)]];
+        const int p_gold = shop_effective_price(app(), pit);
+        const int p_gems = shop_effective_bonus(app(), pit);
+        // `Ne.ba` L2249 stacks ruby (`pVa`) at the bottom when both are live,
+        // gold (`M8`) above; `kL` L2254 hides a 0-price plate.
+        const int gold_slot = (p_gems > 0 && p_gold > 0) ? 1 : 0;
+        const ShopRect gold_rect = shop_price_rect(sl, gold_slot);
+        const ShopRect gem_rect = shop_price_rect(sl, 0);
+        const bool hit_gold = p_gold > 0 && p.pressed && p.x >= gold_rect.J &&
+                              p.x <= gold_rect.N && p.y >= gold_rect.P && p.y <= gold_rect.W;
+        const bool hit_gem = p_gems > 0 && p.pressed && p.x >= gem_rect.J &&
+                             p.x <= gem_rect.N && p.y >= gem_rect.P && p.y <= gem_rect.W;
+        if (hit_gold || hit_gem) {
             WarriorSave pw;
             bool powned = false;
             try {
@@ -11132,7 +11259,11 @@ void ShopScreen::update_impl(float dt) {
                 return;
             }
             if (!powned) {
-                purchase_price_plate(app(), pit);
+                if (hit_gem) {
+                    purchase_gem_price_plate(app(), pit);
+                } else {
+                    purchase_price_plate(app(), pit);
+                }
             }
         }
     }
@@ -11375,20 +11506,39 @@ void ShopScreen::render_impl(App& app) {
         // (`Ne.ba` L2249).
         const float bpad = cw0 * 0.05f;
         const float bh = 112.0f * pscale;
-        const float byy = cy0 + ch0 - bpad * 3.0f - bh * 0.5f;
-        if (!(load_sliced_atlas(app) &&
-              draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, byy, cw0, bh, 1.0f))) {
-            draw_flat_button(app, "", cx0 + cw0 * 0.5f, byy, cw0, bh, 0.30f, 0.62f, 0.30f, false);
-        }
-        try_draw_atlas_button(app, "gold", cx0 + 30.0f, byy, 40.0f, 40.0f, 1.0f, false, false);
-        draw_ui_label(app, cx0 + 56.0f, byy - 15.0f, cw0 - 56.0f, 30.0f,
-                      std::to_string(shop_effective_price(app, *sel_it)), 0.9f, UiAlign::Left,
-                      0.15f, 0.10f, 0.05f);
+        const float byy0 = cy0 + ch0 - bpad * 3.0f - bh * 0.5f;
+        // `Ne.Wub` L2254 verbatim: the default branch draws the `M8`
+        // GoldButton (`c5(M8, Aa.jp())`) AND the `pVa` RubyButton
+        // (`c5(pVa, Aa.nn())`); `kL` L2254 activates a button only while its
+        // price > 0. `Ne.ba` L2249 walks the `Cd` buttons in REVERSE from
+        // `d = b-c*3`, so `pVa` (pushed after `M8`) lands at the BOTTOM and
+        // `M8` above it. A crystal-only row (Price absent, BonusPrice set)
+        // therefore shows its Ruby cost, never a "0" gold plate.
+        const int gold = shop_effective_price(app, *sel_it);
+        const int gems = shop_effective_bonus(app, *sel_it);
+        auto draw_price_plate = [&](int slot, const char* icon, int value) {
+            const float py = byy0 - static_cast<float>(slot) * (bh + bpad);
+            if (!(load_sliced_atlas(app) &&
+                  draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, py, cw0, bh, 1.0f))) {
+                draw_flat_button(app, "", cx0 + cw0 * 0.5f, py, cw0, bh, 0.30f, 0.62f,
+                                 0.30f, false);
+            }
+            try_draw_atlas_button(app, icon, cx0 + 30.0f, py, 40.0f, 40.0f, 1.0f, false,
+                                  false);
+            draw_ui_label(app, cx0 + 56.0f, py - 15.0f, cw0 - 56.0f, 30.0f,
+                          std::to_string(value), 0.9f, UiAlign::Left, 0.15f, 0.10f, 0.05f);
+        };
+        int slot = 0;
+        if (gems > 0) draw_price_plate(slot++, "ruby", gems);  // `pVa` (L2254)
+        if (gold > 0) draw_price_plate(slot, "gold", gold);    // `M8` (L2254)
         // `Pi` purchase panel up (`Oa.Ex(a,7)` L2301): the `M8` plate IS the
         // confirm (`Ao.Qg` L1120 -> `Pa.iwa`), so it is highlighted + labelled.
         if (buy_armed_ >= 0) {
-            draw_ui_label(app, cx0, byy - 15.0f, cw0, 30.0f, loc(app, "btnShopBuy", "CONFIRM"),
-                          0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+            const int gold_slot = (gems > 0 && gold > 0) ? 1 : 0;
+            const float gold_py = byy0 - static_cast<float>(gold_slot) * (bh + bpad);
+            draw_ui_label(app, cx0, gold_py - 15.0f, cw0, 30.0f,
+                          loc(app, "btnShopBuy", "CONFIRM"), 0.9f, UiAlign::Center, 1.0f,
+                          1.0f, 1.0f);
         }
     }
     // `MJ` (`ps` params, L2275) / `op` (`qs` enchantments, L2280) are CLOSED in

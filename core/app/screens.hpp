@@ -369,6 +369,13 @@ public:
         int reward_money = 0;  // first <Reward Money> (the `ci`/`bi` gold icon
                                // value shown under the difficulty bar, L2133)
         std::vector<std::string> warriors;  // Fight Warriors FirstNames (Xs)
+        // The `<Fight Name>` per ladder slot (JS `dl.name`), in order. The
+        // `Xr` pip row (L2133-2136) draws one pip per rendered fight (boss
+        // types drop the last) and lights it (`indicatorOn`, `Ox.wMa(0)`)
+        // when that fight's `dl.status==1` (`YL` L111266: the `il` record's
+        // `CompletedCount >= <Fight Replays>`). `pip_beaten[k]` is that bit.
+        std::vector<std::string> fight_names;
+        std::vector<bool> pip_beaten;
         float x = 0.0f;  // screen pos (center; JS `qe.X0a` L2144)
         float y = 0.0f;
         bool active = true;
@@ -822,6 +829,9 @@ private:
     // BUY + EQUIP at the `M8` price plate, gated by `Pa.iwa` L1228
     // (`p.o.Tb >= a.jp()`, else `v.Bv(a,2)`). Returns true when accepted.
     bool purchase_price_plate(App& app, const CatalogItem& bit);
+    // `Ne.Ehb` case 2 L2254 -> `bka(0, Aa.nn())` -> `Pa.EYa` L1228: the `pVa`
+    // RubyButton buys with the Ruby/crystal balance (`p.o.fd`).
+    bool purchase_gem_price_plate(App& app, const CatalogItem& bit);
 };
 
 // The Profile — native `vb` (JS L2189-2201, `dJ()==7`): a tabbed screen with

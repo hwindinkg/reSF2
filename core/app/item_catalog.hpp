@@ -61,6 +61,11 @@ struct CatalogItem {
     std::string image;      // Image (the shop card art ref)
     int price = 0;          // Price (gold; the JS `jp()` uses `mi` when no
                             // price attr — the shipped priced items carry Price)
+    // BonusPrice (the JS item `od`; `nn()` = `od` with any discount). The
+    // Ruby/crystal cost shown at the `pVa` RubyButton (`Ne.Wub` L2254) and
+    // charged by `Pa.EYa` L1228 (`p.o.fd >= a.nn()`). Items with no `Price`
+    // but a `BonusPrice` are crystal-only shop rows (120 shipped).
+    int bonus_price = 0;
     int level = 1;          // Level
     // `Level` attr PRESENT (JS `xf` = `u.I(Level)`; null when absent).
     // `?Item[x].Level` answers "null" for a Level-less row (`cdb` L977).
