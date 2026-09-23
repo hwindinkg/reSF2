@@ -251,8 +251,9 @@ void Fighter::build_move_list_locks(
         std::map<int, bool> groups;  // group id -> a member has passed
         for (const Lock& l : m.locks) {
             if (l.never) {
-                // An unmodelled lock kind (`<Perk Name=..>`, `<Screen
-                // Name=..>`): the JS tests it (`Bm`/`Gm`), the port cannot.
+                // An unmodelled lock kind (`<Screen Name=..>` and friends):
+                // the JS tests it (`Gm`), the port cannot. (`<Perk Name=..>`
+                // is modelled just below.)
                 // `<Screen>` IS modelled (the `Lock::screen` name + the JS
                 // `Gm.he` class 18 map `hfa`: "Fight" -> 10, "Profile" -> 9,
                 // "ShopWeapon" -> 2, ...; `he`: `a.ul == this.tVa`). This list
@@ -272,6 +273,29 @@ void Fighter::build_move_list_locks(
                 if (screen_pass) continue;
                 all_pass = false;
                 break;
+            }
+            // `<Perk Name="..">` lock (JS `Bm.he`, L753-754): the move is
+            // admitted only while the named perk is in the fighter's live perk
+            // set (`parameters.Oa`). This is the DoubleSweep gate: without it
+            // the lock fell into the `never` fail-closed branch above, so the
+            // level-2 lesson taught the move but it never entered `hb_`.
+            if (!l.perk.empty()) {
+                bool matched = false;
+                for (const std::string& p : perks_) {
+                    if (p == l.perk) {
+                        matched = true;
+                        break;
+                    }
+                }
+                const bool pass = l.not_ ? !matched : matched;
+                if (l.group >= 0) {
+                    if (pass) groups[l.group] = true;
+                    else groups.emplace(l.group, false);
+                } else if (!pass) {
+                    all_pass = false;
+                    break;
+                }
+                continue;
             }
             const bool pass = owned_item(l);
             if (l.group >= 0) {

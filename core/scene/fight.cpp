@@ -396,7 +396,8 @@ void FightController::init_locks(
     // (reference/tools/input_phase1.txt): 7/7 -> 5/7. The gate fix belongs in
     // the probe harness (app/game/main.cpp), outside the owned file set.
     player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp,
-                           "Fists", player_owned, false, false, player_model);
+                           "Fists", player_owned, false, false, player_model,
+                           perks.learned);
     // JS `ur` L194-195 gates the enemy: NotAI -> no AiController, and
     // NotAnimation -> no animation attach (bind pose). Each side also renders
     // its OWN equipment model (JS `xc.cM` L809-810; the Punchbag dummy's
@@ -414,7 +415,7 @@ void FightController::init_locks(
     enemy_ = make_fighter(enemy_name, false, enemy_x, enemy_y, enemy_max_hp,
                           enemy_subtype, battle_.enemy_owned,
                           battle.enemy_not_ai, battle.enemy_not_animation,
-                          enemy_model);
+                          enemy_model, {});
     // [FIX Phase 4b — manual control] The player is MANUAL: no AiController,
     // no auto-attack. The input path (player_input -> Fighter::input ->
     // try_select_move) drives the player's moves; the enemy keeps the AI.
@@ -1581,10 +1582,15 @@ FightFighter FightController::make_fighter(
     const std::string& nm, bool is_player, float x, float y, int max_hp,
     const std::string& weapon_subtype,
     const std::vector<sf2::scene::OwnedItem>& owned,
-    bool not_ai, bool not_animation, const sf2::scene::Model* model) {
+    bool not_ai, bool not_animation, const sf2::scene::Model* model,
+    const std::vector<std::string>& perks) {
     FightFighter f;
     f.name = nm;
     f.is_player = is_player;
+    // JS `Bm.he` (L753-754): the fighter's LIVE perk set (`parameters.Oa`) is
+    // what a `<Perk Name=..>` lock is tested against when `ra.Hza` builds the
+    // move list. Set it before `build_move_list_locks` below.
+    f.fighter.set_perks(perks);
     // JS `xc.cM`: the fighter is built from its OWN equipment model. The
     // caller passes the enemy's model (the Punchbag) or nullptr for the
     // shared fight model.

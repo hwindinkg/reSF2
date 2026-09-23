@@ -1326,6 +1326,10 @@ struct PerkSetup {
     std::vector<sf2::scene::ItemPerkRef> enemy_refs;
     std::vector<std::string> player_items;  // equipped names (Item conds)
     std::vector<std::string> enemy_items;
+    // The save's LEARNED perk names (JS `Bt.KS.Oa` / `Ht`, merged into the
+    // live set by `Wk`). `Bm.he` (L753-754) scans this set for a move's
+    // `<Perk Name=..>` lock; the player's move list is built from it.
+    std::vector<std::string> learned;
     const std::map<std::string, sf2::scene::TacticDef>* tactics = nullptr;
 };
 
@@ -1879,7 +1883,8 @@ private:
                               int max_hp, const std::string& weapon_subtype,
                               const std::vector<sf2::scene::OwnedItem>& owned,
                               bool not_ai = false, bool not_animation = false,
-                              const sf2::scene::Model* model = nullptr);
+                              const sf2::scene::Model* model = nullptr,
+                              const std::vector<std::string>& perks = {});
     // The hit test (JS `ca.Enb` -> `wd.tKa` -> `Fu.ia`).
     bool hit_test(FightFighter& atk, FightFighter& def, const sf2::scene::MoveDef& move,
                   int frame, sf2::scene::HitCapsule& hit_cap,

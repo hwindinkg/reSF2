@@ -415,6 +415,13 @@ public:
     // `b6a` facing lock above; the impulse mirror (`wd.Kwb` L509) uses THIS.
     int clip_mirror() const { return clip_mirror_; }
     const std::vector<const MoveDef*>& hb() const { return hb_; }
+    // The fighter's LIVE perk set (JS `parameters.Oa`, built by `Wk`/`Pma`):
+    // the names `Bm.he` (L753-754) scans when a move carries a `<Perk
+    // Name=..>` lock. Fed from the save's learned perks (`Bt.KS.Oa`) +
+    // equipped-item perks. `build_move_list_locks` admits a perk-locked move
+    // only while its perk is present here (the `DoubleSweep` gate).
+    void set_perks(std::vector<std::string> perks) { perks_ = std::move(perks); }
+    const std::vector<std::string>& perks() const { return perks_; }
     // The last player move decision (the JS `Gc.DK` `c == false` branch,
     // L673-674) — the record the `--verify-input` probes assert: the
     // candidate set with each candidate's `priority`, the `Aua` max-priority
@@ -695,6 +702,8 @@ private:
 
     // --- move execution state (Phase 3.2b) --------------------------------
     std::vector<const MoveDef*> hb_;        // move list (document order, JS `ra.Lk`)
+    // Live perk names for the `<Perk Name=..>` lock test (JS `Bm.he` L753).
+    std::vector<std::string> perks_;
     MoveDecision decision_;                 // last player decision (probe/trace)
     // `uf.sja`'s `Math.random` mirror (`set_math_random`); unset -> no draw is
     // needed because the `Aua` group is a singleton (value-free).

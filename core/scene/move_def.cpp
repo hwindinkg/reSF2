@@ -895,8 +895,15 @@ void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
             if (tag == "Item") continue;
             Lock l;
             l.or_ = true;
-            l.never = true;
             l.group = group;
+            // `<Perk Name="..">` inside an Or group (`Bm`, L753): MODELLED —
+            // the member passes when the fighter owns the named perk.
+            if (tag == "Perk") {
+                if (pugi::xml_attribute n = other.attribute("Name")) l.perk = n.value();
+                out.push_back(std::move(l));
+                continue;
+            }
+            l.never = true;
             // `<Screen Name="..">` inside an Or group (`ShopOther` gates the
             // missile/ruby/free/pack screens): keep the name for the shop
             // TryOn resolver; the fight move list still fails it closed.
@@ -906,8 +913,8 @@ void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
             out.push_back(std::move(l));
         }
     }
-    // Fail closed on every lock kind the port does not model
-    // (`<Perk Name=..>` etc.). Dropping the element silently made the
+    // Fail closed on every lock kind the port does not model; `<Perk>` is now
+    // modelled (above). Dropping an untracked element silently made the
     // move look lock-free: `HermitStormPlayer` (PERK_HERMITSTORM) and
     // `RatWavePlayer` (PERK_RAT_WAVE) then entered the player's move
     // list and won the Up key on Priority. The JS `ra.Hza` tests every
@@ -916,6 +923,16 @@ void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
         const std::string tag = other.name();
         if (tag == "Item" || tag == "Operator") continue;
         Lock l;
+        // `<Perk Name="..">` (JS `Bm` L753): MODELLED. `he` scans the
+        // fighter's live perk set (`a.rr.parameters.Oa`); the move list admits
+        // the move only while the named perk is learned/active. `Not` inverts
+        // the whole test (`Ha.Nba` -> `this.cb`).
+        if (tag == "Perk") {
+            if (pugi::xml_attribute n = other.attribute("Name")) l.perk = n.value();
+            l.not_ = data::xml_attr_bool(other, "Not", false);
+            out.push_back(std::move(l));
+            continue;
+        }
         l.never = true;
         if (tag == "Screen") {
             if (pugi::xml_attribute n = other.attribute("Name")) l.screen = n.value();

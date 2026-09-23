@@ -2971,9 +2971,21 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // `StoryTutorialWelcome`'s `<Actions>`, so the parked tail is
             // always complete (no outer remainder to re-attach).
             if (depth == 0 && tutorial_live(app) && !tutorial_gate_.active &&
-                (t == "StoryTutorialMove" || t == "StoryTutorialPunchbag")) {
+                (t == "StoryTutorialMove" || t == "StoryTutorialPunchbag" ||
+                 t == "StoryTutorialDoubleSweep" || t == "StoryTutorialShowBlock")) {
                 tutorial_gate_.active = true;
-                tutorial_gate_.beat = (t == "StoryTutorialMove") ? 1 : 2;
+                // `Do`=1, `Eo`=2 (the welcome lessons), `Bo`=3 (the double
+                // sweep), `Fo`=4 (the block). All four are the JS actions whose
+                // `S()` does NOT call `this.sa()` (L1123/L1125/L1121/L1126):
+                // the chain WAITS for the `Re(Cm, TutorialStepTimeout)` timer
+                // (or the `p.o.zi.LE` step change) before resuming. Before this
+                // the dojo beats ran straight through (record-only), so the
+                // lesson never "acted".
+                tutorial_gate_.beat =
+                    (t == "StoryTutorialMove")       ? 1
+                    : (t == "StoryTutorialPunchbag") ? 2
+                    : (t == "StoryTutorialDoubleSweep") ? 3
+                                                        : 4;
                 tutorial_gate_.remaining = kTutorialStepTimeoutSec;
                 tutorial_gate_.rest.assign(acts.begin() + i + 1, acts.end());
                 tutorial_gate_.journal = journal;

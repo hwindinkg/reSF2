@@ -629,7 +629,8 @@ public:
     // never the wall clock.
     static constexpr float kTutorialStepTimeoutSec = 15.0f;
     // Beat the suspended chain is parked at: 1 = `StoryTutorialMove`,
-    // 2 = `StoryTutorialPunchbag`, 0 = not gated. The fidelity driver waits on
+    // 2 = `StoryTutorialPunchbag`, 3 = `StoryTutorialDoubleSweep`,
+    // 4 = `StoryTutorialShowBlock`, 0 = not gated. The fidelity driver waits on
     // it so each tutorial capture lands on the oracle's own beat.
     int tutorial_gate_beat() const { return tutorial_gate_.active ? tutorial_gate_.beat : 0; }
     // Advances the gate clock by `dt` (app-time seconds); when it elapses the
@@ -946,7 +947,7 @@ private:
     // suspended run plus its journal/locals and the remaining app-time.
     struct TutorialGate {
         bool active = false;
-        int beat = 0;          // 1 = move lesson, 2 = punchbag lesson
+        int beat = 0;          // 1 = move, 2 = punchbag, 3 = double sweep, 4 = block
         float remaining = 0.0f;  // app-time seconds until `Cm` (`TutorialStepTimeout`)
         std::vector<QuestAction> rest;
         QuestJournal journal;

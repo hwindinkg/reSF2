@@ -180,6 +180,15 @@ struct Lock {
     // `TryOn` preview (`Fighter::shop_tryon_move`) is the one caller that
     // evaluates it. Empty for the other unmodelled kinds (`<Perk>`).
     std::string screen;
+    // A `<Perk Name="..">` lock (JS `Bm`, `Tl.create` case 15, L753-754):
+    // `he(a)` scans the fighter's live perk set (`a.rr.parameters.Oa`, built
+    // by `Wk`/`Pma` from the save's learned perks + equipped-item perks) for a
+    // perk whose `.name` equals the lock's. A move carrying this lock is
+    // admitted only while the perk is learned/active — this is the gate that
+    // puts `DoubleSweep` (`<Locks><Perk Name="PERK_DOUBLE_SWEEP"/>…`,
+    // moves.xml L14391-14397) into the list after the level-2 lesson. `never`
+    // stays false for it (modelled), unlike the still-untracked kinds.
+    std::string perk;
     // The `<Operator>` block this lock was flattened from (JS: one Or node).
     // Two SEPARATE operators (e.g. a template's `<Screen>` group and the
     // move's own `<Item>` group) are separate groups AND-combined; the old

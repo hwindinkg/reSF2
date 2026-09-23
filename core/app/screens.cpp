@@ -4556,6 +4556,17 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
     return out;
 }
 
+// The save's LEARNED perk names (JS `Bt.KS.Oa`/`Ht`, merged into the fighter's
+// live `parameters.Oa` by `Wk` L811-812). `Bm.he` (L753-754) scans this set
+// for a move's `<Perk Name=..>` lock; the display + fight move lists use it.
+std::vector<std::string> learned_perk_names(const WarriorSave& w) {
+    std::vector<std::string> out;
+    for (const auto& pr : w.perks) {
+        if (!pr.name.empty()) out.push_back(pr.name);
+    }
+    return out;
+}
+
 // The player's owned items for the Locks move list: the equipped slots
 // (JS `xc.hk` — Skeleton/Weapon/Armor/Helm) + the owned inventory
 // (JS `p.o.xa`). Each row carries the item's NAME too — `Hm.he` (L758)
@@ -4774,6 +4785,13 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets) {
     std::vector<std::string> equipped = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
     for (const auto& oi : w.items) {
         if (oi.count > 0 && oi.equipped) equipped.push_back(oi.name);
+    }
+    // The save's learned perks (`Bt.KS.Oa`/`Ht`, merged into `parameters.Oa`
+    // by `Wk` L811-812). `Bm.he` (L753-754) scans them for a move's `<Perk
+    // Name=..>` lock — this is what admits `DoubleSweep` after the lesson.
+    for (const auto& pr : w.perks) {
+        if (pr.name.empty()) continue;
+        ps.learned.push_back(pr.name);
     }
     for (const std::string& name : equipped) {
         if (name.empty()) continue;
@@ -12369,6 +12387,7 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
             FightAssets& fa = app().fight_assets();
             sf2::scene::Fighter badge_fig;
             badge_fig.set_model(fa.merged);
+            badge_fig.set_perks(learned_perk_names(w));
             badge_fig.build_move_list_locks(fa.moves, owned_items(app()),
                                             /*include_universal=*/true);
             for (const sf2::scene::MoveDef* m : badge_fig.hb()) {
@@ -12407,6 +12426,7 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
         }
         sf2::scene::Fighter fig;
         fig.set_model(assets.merged);
+        fig.set_perks(learned_perk_names(w));
         // JS `es.uZ` (L2239): `this.Ul = v.uQ(9)` then
         // `this.Ul.sort((a,b) => pb(a.v4, b.v4))`.
         //   - `v.uQ(a)` (L1218) = `ra.e9a(b, v.cw().jt(), v.cw().Wk(), a)`:

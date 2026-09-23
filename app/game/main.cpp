@@ -3341,6 +3341,76 @@ int main(int argc, char** argv) {
             std::fprintf(stdout,
                          "[qa] GivePerk Player probe skipped (no perk catalog)\n");
         }
+        // --- `<Perk Name>` move lock (JS `Bm.he` L753-754) -------------------
+        // The level-2 lesson learns PERK_DOUBLE_SWEEP (`Co` L1122:
+        // `a.rF(0,"PERK_DOUBLE_SWEEP")`); its move `DoubleSweep` (moves.xml
+        // L14345, `<Locks><Perk Name="PERK_DOUBLE_SWEEP"/>…`) must then enter
+        // the player's list and be selectable. Before the fix every `<Perk>`
+        // lock fell into the `never` fail-closed branch of
+        // `build_move_list_locks`, so the learned move never entered `hb_`.
+        if (app.has_fight_assets() && !app.fight_assets().moves.empty()) {
+            const std::vector<sf2::scene::OwnedItem> implicit = {
+                {"Skeleton", "Skeleton", "Skeleton"},
+                {"Weapon", "Fists", "Fists"},
+                {"Armor", "Body", "Body"},
+                {"Helm", "Head", "Head"},
+            };
+            const auto has_move = [](const sf2::scene::Fighter& f, const char* n) {
+                for (const sf2::scene::MoveDef* m : f.hb()) {
+                    if (m != nullptr && m->name == n) return true;
+                }
+                return false;
+            };
+            sf2::scene::Fighter no_perk;
+            no_perk.set_model(app.fight_assets().merged);
+            no_perk.build_move_list_locks(app.fight_assets().moves, implicit, true,
+                                          "Fists");
+            sf2::scene::Fighter with_perk;
+            with_perk.set_model(app.fight_assets().merged);
+            with_perk.set_perks({"PERK_DOUBLE_SWEEP"});
+            with_perk.build_move_list_locks(app.fight_assets().moves, implicit, true,
+                                            "Fists");
+            const bool absent = !has_move(no_perk, "DoubleSweep");
+            const bool present = has_move(with_perk, "DoubleSweep");
+            std::fprintf(stdout, "[qa] DoubleSweep lock: no-perk=%s with-perk=%s\n",
+                         absent ? "absent PASS" : "present FAIL",
+                         present ? "present PASS" : "absent FAIL");
+            check(absent, "Perk lock: DoubleSweep absent without PERK_DOUBLE_SWEEP");
+            check(present, "Perk lock: DoubleSweep present with PERK_DOUBLE_SWEEP");
+            // The key sequence selects it: Kick Tap, Kick Tap, Down Hold
+            // (moves.xml L14368-14372) with the combo animation live
+            // (`<CurrentAnimation Name="1key"/>|<CurrentAnimation Name="2key"/>`)
+            // and the gap in the move's `Distance Min=100 Max=500` window —
+            // `LowKick` (Priority 160) needs the SAME keys but only at
+            // `Distance Max=100`, so the farther gap is what isolates
+            // DoubleSweep.
+            sf2::scene::FightContext ctx;
+            ctx.stage = sf2::scene::round_stage::fight;
+            ctx.anims_me = {"2key"};
+            ctx.me_x = 0.0f;
+            ctx.enemy_x = 200.0f;
+            ctx.dist_x = 200.0f;
+            ctx.direction = 1.0f;
+            with_perk.input(sf2::scene::key_type::kick, sf2::scene::press_type::tap);
+            // `zl.Sgb`'s `!a.sl` guard (L798): a key already down yields no
+            // second Tap row, so the double tap needs a release between.
+            with_perk.input(sf2::scene::key_type::kick, sf2::scene::press_type::release);
+            with_perk.input(sf2::scene::key_type::kick, sf2::scene::press_type::tap);
+            with_perk.input(sf2::scene::key_type::down, sf2::scene::press_type::hold);
+            const std::string picked = with_perk.try_select_move(ctx, "KeyPressed");
+            std::fprintf(stdout, "[qa] DoubleSweep key pick: %s\n",
+                         picked.empty() ? "(none)" : picked.c_str());
+            std::fprintf(stdout, "[qa]   candidates:");
+            for (const auto& c : with_perk.last_decision().cands) {
+                std::fprintf(stdout, " %s(%d)", c.first.c_str(), c.second);
+            }
+            std::fprintf(stdout, "\n");
+            check(picked == "DoubleSweep",
+                  "Perk lock: the Kick,Kick,Down sequence selects DoubleSweep");
+        } else {
+            std::fprintf(stdout,
+                         "[qa] DoubleSweep lock probe skipped (no fight assets)\n");
+        }
         // --- `He.jkb` L1056-1057 row-button: the `DeliveryDelay` bug ---------
         // Before the fix a `DeliveryDelay` row was not a row at all, so its
         // nested `<GiveItem>` NEVER ran (the shipped quests.xml L1395 shape).
