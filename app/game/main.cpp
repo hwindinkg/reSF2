@@ -1416,6 +1416,9 @@ int main(int argc, char** argv) {
     bool changetab_probe = false;   // --changetab-probe: synthetic `Hn` action
     bool quest_query_probe = false;  // --quest-query-probe: Foreach query proof
     bool map_button_probe = false;   // --map-button-probe: Vb map-button proof
+    // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
+    // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
+    bool settings_profile_shop_probe = false;
     // --quest-action-probe: fire the shipped ToggleItems/Discount actions
     // through the engine path and log the save/price before/after.
     bool quest_action_probe = false;
@@ -1536,6 +1539,8 @@ int main(int argc, char** argv) {
             quest_query_probe = true;
         } else if (arg == "--map-button-probe") {
             map_button_probe = true;
+        } else if (arg == "--settings-profile-shop-probe") {
+            settings_profile_shop_probe = true;
         } else if (arg == "--quest-action-probe") {
             quest_action_probe = true;
         } else if (arg == "--quest-verify-buy") {
@@ -3542,6 +3547,18 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (settings_profile_shop_probe) {
+        // ---- settings-profile-shop-probe: the three `e567dcb8` behaviours ----
+        // RULE 0: force the hidden window; the driver watchdog is already armed
+        // (driver_mode). NO OS input, no visible window. `run_shell_probe`
+        // prints one `[sps]` line per assertion and returns the FAIL count.
+        glfwHideWindow(app.renderer().window());
+        const int sps_fails = sf2::app::run_shell_probe(app);
+        std::fprintf(stdout, "[sps] RESULT %s (%d fail)\n",
+                     sps_fails == 0 ? "PASS" : "FAIL", sps_fails);
+        std::fflush(stdout);
+        app.shutdown();
+        return sps_fails == 0 ? 0 : 1;
     } else if (flow_verify) {
         // ---- flow-verify: the three repaired flow bugs, asserted headlessly --
         // Every click is an `App::inject_click` tap (the JS `ma.Bd` primitive);

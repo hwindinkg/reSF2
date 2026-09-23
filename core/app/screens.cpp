@@ -10777,6 +10777,46 @@ std::vector<std::size_t> shop_tab_rows(const std::vector<CatalogItem>& items, in
     return out;
 }
 
+// `ns.j5` (L2308-2309) shop-cell badge resolution, shared by the cell draw and
+// the `--settings-profile-shop-probe`. `art` is the `Di` atlas frame (`pieces/*`
+// from atlas 248 / `E.get(248)`), `text` the `Im` label (`""` = hidden).
+//   - sale row (`a = bc.Zz && bc.Ms > 0` = `ConsumableProduct`+`AddPercent>0`):
+//     JS builds `Di` with `y.tM` ("Stripe") first; the `b.yn > p.Dc` sub-branch
+//     keeps it and shows `Y.na("shopSale")` ("SALE"), else the `badge`/`Yb`
+//     switch runs (`I.QPa` MostPopular / `I.PPa` BestValue / `I.$F` Bonus->
+//     FreeGems / else FreeCoins) with the label hidden.
+//   - `c = name == I.nTa` ("Video") -> `y.moa` (FreeGems).
+//   - else a `bc.bU` (`ShopLabel`) -> `y.tM` (Stripe) + its localized text.
+struct ShopBadge {
+    const char* art = nullptr;
+    std::string text;
+};
+ShopBadge shop_cell_badge(App& app, const CatalogItem& it, bool shop_sale) {
+    ShopBadge b;
+    const bool sale = it.consumable_product && it.add_percent > 0;  // `a` (L2308)
+    if (sale) {
+        b.art = "pieces/Stripe";  // `this.Di = R.$(E.get(248), y.tM, ...)`
+        if (shop_sale) {
+            // `this.Di.Cb(y.tM); this.Im.V(Y.na("shopSale"))` (L2309).
+            b.text = loc(app, "shopSale", "SALE");
+        } else if (it.badge == "MostPopular") {
+            b.art = "pieces/MostPopular_red";  // I.QPa
+        } else if (it.badge == "BestValue") {
+            b.art = "pieces/BestValue_red";  // I.PPa
+        } else if (it.subtype == "Bonus") {
+            b.art = "pieces/FreeGems_red";  // I.$F
+        } else {
+            b.art = "pieces/FreeCoins_red";  // else (L2309)
+        }
+    } else if (it.name == "Video") {  // `c` (L2308)
+        b.art = "pieces/FreeGems_red";  // `y.moa`
+    } else if (!it.shop_label.empty()) {  // `bc.bU` (L2309)
+        b.art = "pieces/Stripe";  // `y.tM`
+        b.text = loc(app, it.shop_label, it.shop_label);
+    }
+    return b;
+}
+
 // Shop atlas art per tab (shop.<hash>.json buttons/* — the JS `vj.ifa` tab
 // icons). Index matches kShopTabs order; state = 0 normal / 1 active / 2
 // pushed (JS `ss`: `a(n, y.KSa, y.MSa, y.LSa)`, L2284 = normal/active/pushed).
@@ -11486,26 +11526,19 @@ void ShopScreen::render_impl(App& app) {
                           0.8f, UiAlign::Left, 0.25f, 0.18f, 0.10f);
         }
         // `ns.ba` (L2306) + `ns.j5` (L2308-2309): the sale/`badge` flag `Di`
-        // (atlas 248 `pieces/*`) + its text `Im`. `a = bc.Zz && bc.Ms > 0`
-        // (`ConsumableProduct` + `AddPercent`), `c = bc.name == I.nTa`
-        // ("Video"), else the `bc.bU` (`ShopLabel`) `pieces/Stripe`. The
-        // `b.yn > p.Dc` "shopSale" sub-branch needs the item's `am(0)` offer
-        // record (not carried by the port), so the `badge`/`SubType` switch
-        // (L2309) runs for the shipped RealMoneyItem sale rows.
-        const bool sale = it.consumable_product && it.add_percent > 0;
-        const char* badge_art = nullptr;
-        std::string badge_text;
-        if (sale) {
-            if (it.badge == "MostPopular") badge_art = "pieces/MostPopular_red";  // I.QPa
-            else if (it.badge == "BestValue") badge_art = "pieces/BestValue_red";  // I.PPa
-            else if (it.subtype == "Bonus") badge_art = "pieces/FreeGems_red";  // I.$F
-            else badge_art = "pieces/FreeCoins_red";  // else (L2309)
-        } else if (it.name == "Video") {  // `c` (L2308)
-            badge_art = "pieces/FreeGems_red";  // `y.moa`
-        } else if (!it.shop_label.empty()) {  // `bc.bU` (L2309)
-            badge_art = "pieces/Stripe";  // `y.tM`
-            badge_text = loc(app, it.shop_label, it.shop_label);
-        }
+        // (atlas 248 `pieces/*`) + its text `Im`. Resolved by `shop_cell_badge`
+        // (the single rule shared with the `--settings-profile-shop-probe`).
+        // The `b.yn > p.Dc` "shopSale" sub-branch needs the item's `am(0)`
+        // offer record: `QuestEngine::offer_for(name)` carries `end_time`
+        // (`yf.yn`), but the engine's `<Discount>` handler (`apply_discount`,
+        // quest_engine.cpp:740) does not populate it and the `p.Dc` clock
+        // (`quest_now()`, quest_engine.cpp:882, anonymous namespace) is not
+        // exposed — no shipped `<Discount>` sets `Period` either (the only one
+        // is reference/extracted/xml/res/quest_extensions/test_quests.xml), so
+        // `b == null` for every shipped row and `shop_sale` is false.
+        const ShopBadge badge = shop_cell_badge(app, it, /*shop_sale=*/false);
+        const char* badge_art = badge.art;
+        std::string badge_text = badge.text;
         if (badge_art != nullptr) {
             const float bw = cw * 0.55f;                          // `Di.kf(a*.55)`
             const float bh = ch * 0.18f;                          // `c = Di.qa()`
@@ -12717,7 +12750,7 @@ void EquipmentScreen::update_impl(float dt) {
                 move_hover_ = h.index;
                 if (p.pressed) {
                     sf2::audio::AudioEngine::instance().play("snd_focus_1");
-                    move_sel_ = h.index;  // `vb.uj = a` (L2198)
+                    select_move(h.index);  // `vb.uj = a` (L2198)
                 }
                 return;
             }
@@ -13110,9 +13143,7 @@ void EquipmentScreen::render_impl(App& app) {
             // `vb.hqb` (L2198) sets `this.uj = a` (the clicked `ks` cell) and
             // `umb` (L2183) calls `this.Lo.refresh(a.Tp, a.jea())` -> the `$r`
             // panel shows the SELECTED move, not `move_rows_.front()`.
-            const int msel =
-                std::clamp(move_sel_, 0, static_cast<int>(move_rows_.size()) - 1);
-            const std::string& nm = move_rows_[static_cast<std::size_t>(msel)].name;
+            const std::string nm = shown_move();
             draw_ui_label(app, rp.J + 8.0f, rp.P + 26.0f, rp.width() - 16.0f, 44.0f,
                           loc(app, nm, nm), 0.95f, UiAlign::Center, 0.16f, 0.11f, 0.06f);
             const float bw2 = rp.width() * 0.72f, bh2 = 46.0f;
@@ -14544,6 +14575,83 @@ bool run_quest_dialog_selfcheck(App& app) {
     std::fprintf(stdout, "[dlgverify] %d passed, %d failed\n", g_dlg_passed, g_dlg_failed);
     std::fflush(stdout);
     return g_dlg_failed == 0;
+}
+
+// ---------------------------------------------------------------------------
+// [probe, authorised] `--settings-profile-shop-probe` (app/game/main.cpp): the
+// three shell behaviours added in `e567dcb8`, driven through the real code
+// paths. NO OS input; the driver forces the hidden window + RULE 0 watchdog.
+// ---------------------------------------------------------------------------
+void EquipmentScreen::select_move(int index) {
+    move_sel_ = index;  // `vb.uj = a` (L2198); the same assignment `update_impl` runs
+}
+
+std::string EquipmentScreen::shown_move() const {
+    if (move_rows_.empty()) return std::string();
+    const int sel = std::clamp(move_sel_, 0, static_cast<int>(move_rows_.size()) - 1);
+    return move_rows_[static_cast<std::size_t>(sel)].name;
+}
+
+int run_shell_probe(App& app) {
+    int fails = 0;
+    const auto check = [&](bool ok, const char* what) {
+        std::fprintf(stdout, "[sps] %-62s %s\n", what, ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        if (!ok) ++fails;
+    };
+    // (i) Settings Credits row -> the credits view (`un.rHa` case 2 -> `xh.show`,
+    // screens.cpp `settings_run_row` -> `credits_show`).
+    g_credits_open = false;
+    settings_run_row(app, SettingsRow::kCredits);
+    std::fprintf(stdout, "[sps] credits open=%d rows=%zu lang=%s\n",
+                 g_credits_open ? 1 : 0, g_credits_rows.size(), g_credits_lang.c_str());
+    std::fflush(stdout);
+    check(g_credits_open && !g_credits_rows.empty(),
+          "(i) Settings Credits row opens the credits view (rows > 0)");
+    credits_close();
+    // (ii) Moves-tab cell selection -> the `$r` right panel's shown move. The
+    // throwaway `EquipmentScreen` runs the real ctor (which builds `move_rows_`
+    // via `build_move_list_locks`); `select_move` is the `vb.hqb` assignment.
+    {
+        EquipmentScreen eq(app.screens());
+        const int rows = eq.move_row_count();
+        eq.select_move(0);
+        const std::string first = eq.shown_move();
+        const int sel_idx = rows >= 2 ? 1 : 0;
+        eq.select_move(sel_idx);
+        const std::string second = eq.shown_move();
+        std::fprintf(stdout, "[sps] moves rows=%d sel0='%s' sel%d='%s'\n", rows,
+                     first.c_str(), sel_idx, second.c_str());
+        std::fflush(stdout);
+        check(!first.empty() && !second.empty() && (rows < 2 || second != first),
+              "(ii) Moves cell selection drives the panel (not pinned to row 0)");
+    }
+    // (iii) Shop cell sale badge on the RUBY tab (kShopTabs index 5): the
+    // shipped `ConsumableProduct` + `AddPercent` + `SubType="Bonus"` row draws
+    // `pieces/FreeGems_red` (`I.$F`). Same rule the cell draw uses.
+    {
+        const std::vector<CatalogItem> cat = load_catalog(app);
+        const std::vector<std::size_t> ruby = shop_tab_rows(cat, 5);
+        std::string found;
+        for (const std::size_t r : ruby) {
+            const CatalogItem& it = cat[r];
+            const ShopBadge b = shop_cell_badge(app, it, /*shop_sale=*/false);
+            if (it.subtype == "Bonus" && it.consumable_product && it.add_percent > 0 &&
+                b.art != nullptr && std::string(b.art) == "pieces/FreeGems_red") {
+                found = it.name;
+                break;
+            }
+        }
+        std::fprintf(stdout, "[sps] RUBY tab rows=%zu FreeGems_red item='%s'\n",
+                     ruby.size(), found.c_str());
+        std::fflush(stdout);
+        check(!found.empty(),
+              "(iii) RUBY-tab sale cell badge = pieces/FreeGems_red (SubType=Bonus)");
+    }
+    std::fprintf(stdout, "[sps] RESULT %s (%d fail)\n", fails == 0 ? "PASS" : "FAIL",
+                 fails);
+    std::fflush(stdout);
+    return fails;
 }
 
 } // namespace sf2::app

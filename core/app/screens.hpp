@@ -884,6 +884,16 @@ public:
     // The live profile tab index (probe/verify read).
     int tab() const { return tab_; }
 
+    // --- [probe] `--settings-profile-shop-probe` (ii) --------------------
+    // The folded Moves tab selection (`vb.uj` L2198 -> `umb`/`$r.refresh`
+    // L2183/L2234). `select_move` performs the SAME `move_sel_ = index`
+    // assignment `update_impl`'s captured-hit test performs (the `vb.hqb`
+    // L2198 click); `shown_move` returns exactly the name the `$r` right
+    // panel draws (the SELECTED row, not `move_rows_.front()`).
+    void select_move(int index);
+    std::string shown_move() const;
+    int move_row_count() const { return static_cast<int>(move_rows_.size()); }
+
     // The folded Moves tab row (JS Profile sub-view `qv`; same rule as the
     // deleted standalone MovesScreen — build_move_list_locks over the save's
     // owned items, display only).
@@ -1164,5 +1174,13 @@ int quest_dialog_row_hit_index(App& app, const EngineDialog& d, double x, double
 // printing `[dlgverify] PASS/FAIL <case>` per case. Returns true only when
 // every case passes.
 bool run_quest_dialog_selfcheck(App& app);
+
+// `--settings-profile-shop-probe`: the three shell behaviours added in
+// `e567dcb8` asserted against the real code paths (no OS input, hidden window
+// + RULE 0 watchdog from the driver) — (i) the Settings Credits row opens the
+// credits view; (ii) selecting a Moves cell changes the `$r` right panel's
+// shown move; (iii) the shop cell draws the sale badge on the RUBY tab.
+// Prints one `[sps]` line per assertion and returns the FAIL count.
+int run_shell_probe(App& app);
 
 } // namespace sf2::app
