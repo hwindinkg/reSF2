@@ -11547,6 +11547,36 @@ void ShopScreen::render_impl(App& app) {
             const ShopRect fill{bxx, track.P, bxx + bww * 0.7f, track.W};
             quad(fill, 0.95f, 0.62f, 0.20f, 1.0f);
         }
+        // `Sb` status line (`Ne.Qqb` L2259): `kW` -> "shopMaking", else `tra`
+        // -> "shopOrder", else hidden. (`Ne.Uqb` L2257 resets `Sb`/`xg`; the
+        // `xg` description branch is `I.Ox`/`I.Bu`/`I.wk` only — consumable /
+        // Bonus / RealMoneyItem — so a Weapon/Armor/Helm row NEVER shows `xg`.
+        // `re.xcb` L2285: `kW = $e.Bh > now` (the selected item is in
+        // delivery); `re.Ccb` L2285: `tra = $e==null && Aa.Ec > 0` (no owned
+        // save entry and the item carries a `DeliveryTime`).
+        const std::int64_t shop_now = WarriorSave::wall_now();
+        const auto sel_timer = seen_.timers.find(sel_it->name);
+        const bool making = sel_timer != seen_.timers.end() && sel_timer->second > shop_now;
+        const bool order = !seen_.has_item(sel_it->name) && sel_it->delivery_sec > 0;
+        const std::string status = making ? loc(app, "shopMaking", "MAKING")
+                                          : (order ? loc(app, "shopOrder", "ORDER") : "");
+        if (!status.empty()) {
+            const float sb_y = cy0 + ch0 * 0.1f + tfont * 1.3f + cw0 * 0.27f;
+            draw_ui_label(app, cx0, sb_y, cw0, cw0 * 0.14f, status, 0.8f, UiAlign::Center,
+                          0.30f, 0.20f, 0.10f);
+        }
+        // `Tl` delivery countdown (`Ne.j7a` L2256 -> `Ksb` L2256, `Ne.aa` L2248):
+        // the remaining seconds of the SELECTED item's delivery, shown inside
+        // the `bc` panel; hidden when `j7a()` == 0. `Xe.qfa` format -> the
+        // port's `shop_countdown` (MM:SS).
+        if (making) {
+            const std::int64_t left = sel_timer->second - shop_now;
+            if (left > 0) {
+                const float tl_y = cy0 + ch0 * 0.1f + tfont * 1.3f + cw0 * 0.44f;
+                draw_ui_label(app, cx0, tl_y, cw0, cw0 * 0.16f, shop_countdown(left), 0.9f,
+                              UiAlign::Center, 0.30f, 0.20f, 0.10f);
+            }
+        }
         // Bottom price button `M8` = `GoldButton` (`EButtonGreen` + the
         // `p.o.Vf` gold icon), `Ne.Wub` L2254-2255 -> `c5(M8, Aa.jp())`. The
         // buttons stack up from `d=b-c*3`, each `e.kf(a)` (full content width)
@@ -11578,15 +11608,10 @@ void ShopScreen::render_impl(App& app) {
         int slot = 0;
         if (gems > 0) draw_price_plate(slot++, "ruby", gems);  // `pVa` (L2254)
         if (gold > 0) draw_price_plate(slot, "gold", gold);    // `M8` (L2254)
-        // `Pi` purchase panel up (`Oa.Ex(a,7)` L2301): the `M8` plate IS the
-        // confirm (`Ao.Qg` L1120 -> `Pa.iwa`), so it is highlighted + labelled.
-        if (buy_armed_ >= 0) {
-            const int gold_slot = (gems > 0 && gold > 0) ? 1 : 0;
-            const float gold_py = byy0 - static_cast<float>(gold_slot) * (bh + bpad);
-            draw_ui_label(app, cx0, gold_py - 15.0f, cw0, 30.0f,
-                          loc(app, "btnShopBuy", "CONFIRM"), 0.9f, UiAlign::Center, 1.0f,
-                          1.0f, 1.0f);
-        }
+        // JS `Ne` draws NO caption over the `M8`/`pVa` plates. The old native
+        // label keyed `loc(app,"btnShopBuy",...)`, but `btnShopBuy` does NOT
+        // exist in sf2.502f0946.js (0 occurrences), so it always fell back to
+        // the hard-coded "CONFIRM". Invented; removed.
     }
     // `MJ` (`ps` params, L2275) / `op` (`qs` enchantments, L2280) are CLOSED in
     // the oracle shop states: `Oa.init` opens only `bc` (`init(a,!0)`); MJ/op
@@ -11614,46 +11639,22 @@ void ShopScreen::render_impl(App& app) {
         draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
                           "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
-    // Buy confirmation (display only; the wielding summary now lives in the
-    // `MJ` left side panel).
-    // Wallet top-right (was invisible — affordability guessing papercut).
-    {
-        char mbuf[64];
-        std::snprintf(mbuf, sizeof(mbuf), "COINS %d", seen_.money);
-        draw_ui_label(app, 1060.0f, 32.0f, 180.0f, 24.0f,
-                      mbuf, 0.9f, UiAlign::Right, 1.0f, 0.9f, 0.4f);
-    }
-    // Incoming deliveries (mirrors the update rects above): name + countdown
-    // or READY-claim hint, capped at 3 rows.
-    {
-        const std::int64_t now = WarriorSave::wall_now();
-        int row = 0;
-        for (const auto& kv : seen_.timers) {
-            if (row >= 3) break;
-            const float ry = 84.0f + static_cast<float>(row) * 24.0f;
-            ++row;
-            const std::int64_t left = kv.second - now;
-            const std::string text =
-                kv.first + (left > 0 ? " " + shop_countdown(left) : " READY");
-            draw_ui_label(app, 950.0f, ry - 8.0f, 300.0f, 20.0f,
-                      text, 0.7f, UiAlign::Left, 1.0f, 1.0f, 1.0f);
-        }
-    }
+    // JS `Ne`/`Oa` render NO wallet label: there is no "COINS <money>" caption
+    // anywhere in the shop chrome (grep sf2.502f0946.js: 0 "COINS"), and NO
+    // deliveries list — the ONLY delivery UI is the per-item `Sb` MAKING line
+    // + `Tl` countdown drawn INSIDE the `bc` panel above (`Ne.Qqb` L2259,
+    // `Ne.j7a` L2256). The old native wallet label + "READY"/countdown row list
+    // were both inventions; removed.
     // JS `Pa.iwa` (L1228) renders NO caption after a successful buy — it
     // commits money + `p.o.save()` + `Pa.Wz` (the QUEST_EVENT_PURCHASE
     // dispatch) and nothing else; the ONLY badge it shows is `v.Bv(a,2)`,
     // the "not enough money" NOTICE on the FAILURE branch. The port drew a
     // green "BOUGHT …!" / "EQUIPPED …!" / "ORDERED …!" toast here — an
     // invention (the reported green label). REMOVED.
-    // `Pi` purchase panel (`Oa.Fhb` L2300 -> `Ex(a,7)`, L2301): while armed the
-    // shop dims and the confirm prompt sits above the `M8` plate.
-    if (buy_armed_ >= 0 && sel_it != nullptr) {
-        const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-        ren.draw_triangles(dim, 6, 0.02f, 0.015f, 0.01f, 0.45f);
-        draw_ui_label(app, kViewW * 0.5f - 320.0f, 116.0f, 640.0f, 34.0f,
-                      "PURCHASE " + item_display_name(app, *sel_it) + "?", 0.9f,
-                      UiAlign::Center, 1.0f, 0.95f, 0.6f);
-    }
+    // JS `Pi` purchase panel (`Oa.Fhb` L2300 -> `Ex(a,7)`): it SLIDES in as a
+    // panel (`Pi.er`/`u6` L2312) — it draws no full-screen dim and no
+    // "PURCHASE <item>?" caption (grep sf2.502f0946.js: 0 "PURCHASE "). Both
+    // were inventions; removed. `buy_armed_` state is kept (update/`Ao.Qg`).
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
     // `D1` (L1831) re-appends a fresh, collapsed `za` -> the oracle shop shows
     // the collapsed header and NO `gk.background` 0.5-black dim (measured: the
