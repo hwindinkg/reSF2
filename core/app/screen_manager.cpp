@@ -70,6 +70,11 @@ void quest_nav(App& app, const std::string& from, ScreenId to_id) {
         } catch (const std::exception&) {
         }
         app.quest_engine().fire(app, "ChangeTab", j);
+        // `wa.ghb` L934: `ha.F().ta.Xo = xn.iOa(this.Td.Tf)` immediately before
+        // `Sf("QUEST_EVENT_SCENE_LOADED")`. Set AFTER the ChangeTab fire (which
+        // still sees the OLD `Xo`, as `wa.mp` L933 captured `lLa` first) and
+        // before SceneLoaded so `_$CurrentScene` (`Bj` L961) reads the new scene.
+        app.quest_engine().set_current_scene(to);
         app.quest_engine().fire(app, "SceneLoaded", j);
         // The destination ctor's own `DI` write (JS): the Map sets
         // `StoryMapStage` (L1094741/L1096479); Shop/Profile leave it.

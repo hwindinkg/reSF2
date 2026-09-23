@@ -742,6 +742,13 @@ public:
     std::size_t timer_end_fires() const { return timer_end_fires_; }
     // `ha.F().ta.dza` (L292): the timer whose `TimerEnd` last fired.
     const std::string& timer_end_name() const { return timer_end_name_; }
+    // `wa.ghb` L934: `ha.F().ta.Xo = xn.iOa(this.Td.Tf)` on every scene
+    // change, written right before `Sf("QUEST_EVENT_SCENE_LOADED")`. `Bj`
+    // L961 `_$CurrentScene` reads it (`a.Fb.result = this.ta.Xo`); the `Bj`
+    // ctor (L1004) initializes `Xo = "None"`. Distinct from the per-event
+    // `_$SceneTo` (`ta.nLa`, written by `wa.mp` L933).
+    void set_current_scene(const std::string& name) { current_scene_ = name; }
+    const std::string& current_scene() const { return current_scene_; }
     // `Ct.t_a(a)` (L292) against an explicit clock (the JS tick is
     // parameterized by `p.Dc`): expire every `Nv <= now`, fire `TimerEnd`
     // per timer, then remove them. Returns the expired count.
@@ -1114,6 +1121,9 @@ private:
     std::map<std::string, double> timers_;
     std::string timer_end_name_;       // `ha.F().ta.dza`
     std::size_t timer_end_fires_ = 0;  // `Sf("QUEST_EVENT_TIMER_END")` count
+    // `ha.F().ta.Xo` (ctor L1004 `this.Xo="None"`; `wa.ghb` L934 writes it):
+    // the current scene NAME read by `_$CurrentScene` (`Bj` L961).
+    std::string current_scene_ = "None";
     void timer_activate(const std::string& name, double deadline);  // `Uaa`
     void timer_end(const std::string& name);                        // `H4`
     void tick_timers(App& app, double now);                         // `t_a`

@@ -2069,6 +2069,22 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             out = ctx.journal.scene_from;
             return true;
         }
+        // `Bj` L961: `case "_$CurrentScene": a.Fb.result = this.ta.Xo`. `ta.Xo`
+        // is session state written by `wa.ghb` (L934) on every scene change
+        // (right before SCENE_LOADED); the `Bj` ctor (L1004) initializes it to
+        // "None". Read from the engine, NOT the per-event journal.
+        if (token == "_$CurrentScene") {
+            out = current_scene_;
+            return true;
+        }
+        // `Bj` L964: `case "_$TimerName": let l=this.ta.dza;
+        // a.Fb.result = l!=null ? l : ""`. `ta.dza` (ctor L1004 null) is
+        // written by `Ct.swa` (L292) right before `QUEST_EVENT_TIMER_END`;
+        // the port stores it in `timer_end_name_` (empty == the JS null -> "").
+        if (token == "_$TimerName") {
+            out = timer_end_name_;
+            return true;
+        }
         // `Bj` L964: `_$TabFrom`/`_$TabTo` read `this.ta.XNa`/`YNa`, the pair
         // `v.qwa` (L1212) writes on every screen change.
         if (token == "_$TabFrom") {
@@ -2152,8 +2168,8 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             out = ctx.journal.offer;
             return true;
         }
-        // Other `Bj` journal fields (`_$CurrentScene`, `_$Iterator`, ...):
-        // the shell does not model them -> UNKNOWN.
+        // Other `Bj` journal fields (`_$Iterator` is modelled above; the rest
+        // the shell does not model) -> UNKNOWN.
         note_unanswerable(token);
         return false;
     }

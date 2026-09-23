@@ -2859,6 +2859,45 @@ int main(int argc, char** argv) {
         }
         check(!local_in_save, "SetVariable Local NOT persisted (in-memory only)");
         check(timer_ok, "shipped ActivateTimer -> ?Timer[] -> TimerEnd fired");
+        // --- `_$CurrentScene` / `_$TimerName` (Bj L961/L964) ----------------
+        // Both are SESSION state (`ha.F().ta.Xo` / `ta.dza`), so they resolve
+        // from the engine, not the per-event journal. The ctor defaults are
+        // proven on a FRESH engine (`Xo="None"` L1004, `dza=null`); the live
+        // engine proves the two write sites: `wa.ghb` L934 (scene change) and
+        // `Ct.swa` L292 (the shipped `Timer_StarterPack` fired above).
+        {
+            const sf2::app::QuestJournal cj;
+            const auto rq = [&](const char* e) {
+                return app.quest_engine().resolve_for_test(app, e, cj);
+            };
+            sf2::app::QuestEngine fresh;
+            const std::string ctor_scene =
+                fresh.resolve_for_test(app, "_$CurrentScene", cj);
+            const std::string ctor_timer =
+                fresh.resolve_for_test(app, "_$TimerName", cj);
+            const std::string scene_before = rq("_$CurrentScene");
+            const std::string live_scene = app.quest_engine().current_scene();
+            const std::string timer_after = rq("_$TimerName");
+            app.quest_engine().set_current_scene("Shop");
+            const std::string scene_after = rq("_$CurrentScene");
+            std::fprintf(stdout,
+                         "[qjournal] ctor: _$CurrentScene='%s' _$TimerName='%s'; "
+                         "live: scene '%s' -> set 'Shop' -> '%s'; timer '%s'\n",
+                         ctor_scene.c_str(), ctor_timer.c_str(),
+                         scene_before.c_str(), scene_after.c_str(),
+                         timer_after.c_str());
+            check(ctor_scene == "None",
+                  "_$CurrentScene ctor default = 'None' (Bj L961, ctor L1004)");
+            check(ctor_timer.empty(),
+                  "_$TimerName ctor default = '' (Bj L964, dza null)");
+            check(!scene_before.empty() && scene_before == live_scene,
+                  "_$CurrentScene = the live scene (wa.ghb L934)");
+            check(scene_after == "Shop",
+                  "_$CurrentScene follows a scene change (wa.ghb L934)");
+            check(timer_after == app.quest_engine().timer_end_name() &&
+                      timer_after == "Timer_StarterPack",
+                  "_$TimerName = the last-fired timer (Ct.swa L292)");
+        }
         const bool all = checks == passed;
         std::fprintf(stdout, "[qquery] RESULT %d/%d -> %s\n", passed, checks,
                      all ? "PASS" : "FAIL");
