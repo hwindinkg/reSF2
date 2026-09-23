@@ -63,6 +63,14 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         ci.paid_item =
             item.attribute("PaidItem") ? item.attribute("PaidItem").value() : "None";
         if (item.attribute("PaidItem")) ci.paid = true;
+        // JS item ctor L321-327: `badge` (Badge), `bU` (ShopLabel), `Ms`
+        // (AddPercent) and `Zz` (ConsumableProduct). `ns.j5` (L2308-2309)
+        // reads all four for the shop-cell sale badge.
+        if (item.attribute("Badge")) ci.badge = item.attribute("Badge").value();
+        if (item.attribute("ShopLabel")) ci.shop_label = item.attribute("ShopLabel").value();
+        ci.add_percent = sf2::data::xml_attr_int(item, "AddPercent", 0);
+        ci.consumable_product =
+            attr_bool_str(item.attribute("ConsumableProduct").value());
         // `<Perks>` + `<Enchantments>` rows (JS `xe.Qd` be-entries, L1257):
         // perk name + `<Set>` overrides (numeric vs string by parse).
         for (const char* section : {"Perks", "Enchantments"}) {

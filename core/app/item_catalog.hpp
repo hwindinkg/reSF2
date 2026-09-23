@@ -90,6 +90,18 @@ struct CatalogItem {
     // Raw `PaidItem` attr (`D3`, ctor default "None") — `?Purchase[x].PaidItem`
     // returns this string (`IJa` L980).
     std::string paid_item = "None";
+    // JS item ctor L321-327: `this.badge = Badge ?? ""` (the `I.QPa`
+    // "MostPopular" / `I.PPa` "BestValue" sale-flag switch, `ns.j5` L2309) and
+    // `this.bU = ShopLabel ?? ""` (the `pieces/Stripe` badge text). Both are
+    // ABSENT from the shipped list.xml (0 rows), so the `bU` branch never fires.
+    std::string badge;       // Badge
+    std::string shop_label;  // ShopLabel (`bU`)
+    // JS `this.Ms = u.I(a.attributes.get("AddPercent"))` (L326) and
+    // `this.Zz = u.ka(a.attributes.get("ConsumableProduct"))` (L324). The sale
+    // gate `a = bc.Zz && bc.Ms > 0` (L2308) drives the `Di` badge on the
+    // RealMoneyItem rows (35 `AddPercent` / 46 `ConsumableProduct` shipped).
+    int add_percent = 0;             // AddPercent
+    bool consumable_product = false; // ConsumableProduct="1"
     std::vector<ItemPerkRef> perks;  // `<Perks>` + `<Enchantments>` rows
     // Owned-equip status comes from the save (users.xml <Items>), not here.
 

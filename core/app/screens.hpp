@@ -965,6 +965,22 @@ private:
     std::string weapon_ = "Fists";
     std::vector<MoveRow> move_rows_;
     int move_total_ = 0;
+    // Moves-tab selection (JS `vb.uj`/`hqb` L2198 -> `$r.refresh` L2234): the
+    // selected `ks`/`ls` cell index drives the `$r` right panel. The old port
+    // pinned the panel to `move_rows_.front()`; `es.Upb` (L2239) defaults the
+    // selection to row 0 / the last-used move, so 0 matches the initial state.
+    int move_sel_ = 0;
+    int move_hover_ = -1;
+    // Cell hit rects captured during render (the `perk_cell_hits_` pattern) so
+    // update_impl hit-tests the SAME layout the renderer produced.
+    struct MoveCellHit {
+        float cx = 0.0f;
+        float cy = 0.0f;
+        float half_w = 0.0f;
+        float half_h = 0.0f;
+        int index = -1;
+    };
+    std::vector<MoveCellHit> move_cell_hits_;
     // `cs` tab badges (JS `Eg.GU` L1853 -> `Le.badge.lk(getCounterValue)`).
     // Index = the `cs.Tw` tab id; `cs.getCounterValue` (L2189) defines each
     // one (0 `co.uCa` L305, 1 `sCa` L256, 2 `yi.rCa` L294, 3 `vCa` L256).

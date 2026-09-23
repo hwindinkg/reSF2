@@ -11485,6 +11485,43 @@ void ShopScreen::render_impl(App& app) {
             draw_ui_label(app, sx + 20.0f, sy - 16.0f, 60.0f, 32.0f, std::to_string(it.level),
                           0.8f, UiAlign::Left, 0.25f, 0.18f, 0.10f);
         }
+        // `ns.ba` (L2306) + `ns.j5` (L2308-2309): the sale/`badge` flag `Di`
+        // (atlas 248 `pieces/*`) + its text `Im`. `a = bc.Zz && bc.Ms > 0`
+        // (`ConsumableProduct` + `AddPercent`), `c = bc.name == I.nTa`
+        // ("Video"), else the `bc.bU` (`ShopLabel`) `pieces/Stripe`. The
+        // `b.yn > p.Dc` "shopSale" sub-branch needs the item's `am(0)` offer
+        // record (not carried by the port), so the `badge`/`SubType` switch
+        // (L2309) runs for the shipped RealMoneyItem sale rows.
+        const bool sale = it.consumable_product && it.add_percent > 0;
+        const char* badge_art = nullptr;
+        std::string badge_text;
+        if (sale) {
+            if (it.badge == "MostPopular") badge_art = "pieces/MostPopular_red";  // I.QPa
+            else if (it.badge == "BestValue") badge_art = "pieces/BestValue_red";  // I.PPa
+            else if (it.subtype == "Bonus") badge_art = "pieces/FreeGems_red";  // I.$F
+            else badge_art = "pieces/FreeCoins_red";  // else (L2309)
+        } else if (it.name == "Video") {  // `c` (L2308)
+            badge_art = "pieces/FreeGems_red";  // `y.moa`
+        } else if (!it.shop_label.empty()) {  // `bc.bU` (L2309)
+            badge_art = "pieces/Stripe";  // `y.tM`
+            badge_text = loc(app, it.shop_label, it.shop_label);
+        }
+        if (badge_art != nullptr) {
+            const float bw = cw * 0.55f;                          // `Di.kf(a*.55)`
+            const float bh = ch * 0.18f;                          // `c = Di.qa()`
+            const float bcx = cell.N - bw * 0.5f;                 // `Di.C(a - Di.za())`
+            const float bcy = cell.P + ch - 2.5f * bh + bh * 0.5f;  // `Di.D(b-2.5*c)`
+            if (!try_draw_atlas_button(app, badge_art, bcx, bcy, bw, bh, 1.0f, false, false)) {
+                const ShopRect bq{bcx - bw * 0.5f, bcy - bh * 0.5f, bcx + bw * 0.5f,
+                                  bcy + bh * 0.5f};
+                quad(bq, 0.85f, 0.25f, 0.20f, 0.9f);
+            }
+            if (!badge_text.empty()) {
+                // `Im.C(Di.ya); Im.D(Di.ra); Im.Fa(a*.55,c); Im.ua(c)` (L2306).
+                draw_ui_label(app, bcx - bw * 0.5f, bcy - bh * 0.5f, bw, bh, badge_text, 0.9f,
+                              UiAlign::Center, 1.0f, 1.0f, 1.0f);
+            }
+        }
     }
     ren.pop_clip();  // end the `Gg` scroller viewer mask
     // `bc` item-detail panel (JS `hi(1,!1)` docked right, `Oa.init` L2290;
@@ -12668,6 +12705,24 @@ void EquipmentScreen::update_impl(float dt) {
             return;
         }
     }
+    // --- Tab 1 MOVES: the `es` cell selection (`vb.hqb` L2198 -> `umb`
+    // L2183 -> `$r.refresh` L2234). The `ks` hit rects were captured by
+    // render_impl so update hit-tests the exact list layout.
+    move_hover_ = -1;
+    if (tab_ == kProfileTabMoves) {
+        for (const MoveCellHit& h : move_cell_hits_) {
+            if (h.index < 0) continue;
+            if (p.x >= h.cx - h.half_w && p.x <= h.cx + h.half_w &&
+                p.y >= h.cy - h.half_h && p.y <= h.cy + h.half_h) {
+                move_hover_ = h.index;
+                if (p.pressed) {
+                    sf2::audio::AudioEngine::instance().play("snd_focus_1");
+                    move_sel_ = h.index;  // `vb.uj = a` (L2198)
+                }
+                return;
+            }
+        }
+    }
     // --- Tab 2 ACHIEVEMENTS: the cell reward button (`as.zhb` L2211 ->
     // `vb.exb` L2199 -> `yt.sca` L296 + money/bonus payout).
     achiev_hover_ = -1;
@@ -13014,10 +13069,15 @@ void EquipmentScreen::render_impl(App& app) {
         draw_ui_label(app, v.J + 16.0f, v.P + 34.0f, v.width() - 32.0f, 28.0f,
                       loc(app, weapon_, weapon_), 0.85f, UiAlign::Center, 0.35f, 0.22f,
                       0.10f);
+        move_cell_hits_.clear();
         for (std::size_t i = 0; i < move_rows_.size(); ++i) {
             const MoveRow& r = move_rows_[i];
             const float ry = row_top + static_cast<float>(i) * row_h;
             if (ry + cell_h > v.W) break;
+            // `es`/`ks` cell hit rect (captured for the `vb.hqb` L2198
+            // selection that refreshes the `$r` right panel).
+            move_cell_hits_.push_back({cell_l + cell_w * 0.5f, ry + cell_h * 0.5f,
+                                       cell_w * 0.5f, cell_h * 0.5f, static_cast<int>(i)});
             // `ls.ba` (L2236): `d = b/2`, `e = b*.1`, `this.icon.zf(b*.8)`
             // (icon box = 0.8 * cell height, square) and
             // `this.icon.C(this.icon.za()/2 + e)` / `D(d)` - the icon CENTRE
@@ -13047,7 +13107,12 @@ void EquipmentScreen::render_impl(App& app) {
         // `Y.na("profile_BtnShow")` view button (L2234 `$r.ba`).
         if (!move_rows_.empty()) {
             const ShopRect& rp = pl.right_slot;
-            const std::string& nm = move_rows_.front().name;
+            // `vb.hqb` (L2198) sets `this.uj = a` (the clicked `ks` cell) and
+            // `umb` (L2183) calls `this.Lo.refresh(a.Tp, a.jea())` -> the `$r`
+            // panel shows the SELECTED move, not `move_rows_.front()`.
+            const int msel =
+                std::clamp(move_sel_, 0, static_cast<int>(move_rows_.size()) - 1);
+            const std::string& nm = move_rows_[static_cast<std::size_t>(msel)].name;
             draw_ui_label(app, rp.J + 8.0f, rp.P + 26.0f, rp.width() - 16.0f, 44.0f,
                           loc(app, nm, nm), 0.95f, UiAlign::Center, 0.16f, 0.11f, 0.06f);
             const float bw2 = rp.width() * 0.72f, bh2 = 46.0f;
@@ -13383,7 +13448,116 @@ void settings_dialog_cycle_language(App& app) {
 namespace {
 
 // `un.rHa` (L1930-1932) row switch, shared by the overlay + the hosted screen.
-enum class SettingsRow { kNone = 0, kBack, kMusic, kRestart, kLanguage, kSound };
+enum class SettingsRow { kNone = 0, kBack, kMusic, kRestart, kLanguage, kSound, kCredits };
+
+// --- The credits view (JS `xh`, L1854-1857; opened by `un.rHa` case 2
+// `xh.show()` L1931) -------------------------------------------------------
+// `xh.show` appends a full-screen overlay to `L.K.root`, filled from
+// `Ja.ki(1312)` (res/credits.xml): for the current language (`c=G.Rq()`;
+// `c!="en"&&c!="ru"&&(c="en")` L1855) it walks `<Part Name=..>value</Part>`
+// and builds one `zx` row (`$ja` = the Name label, `V2` = the value with
+// `{br}` -> "\n"), then the `CreditsFamilies` title. `aa` scrolls the content
+// UP 1.3 px/frame (`this.content.D(this.content.ra-1.3)` L1856) and closes
+// (`pn`) once the last title passes the top, or on a click
+// (`L.K.dd().Db(0)` L1856).
+struct CreditsRow {
+    std::string name;
+    std::string value;
+};
+bool g_credits_open = false;
+float g_credits_scroll = 0.0f;
+std::string g_credits_lang;
+std::vector<CreditsRow> g_credits_rows;
+
+// `zx.constructor` (L1857-1858): `e.replace(RegExp("{br}","g"),"\n")`.
+std::string credits_br_to_nl(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (std::size_t i = 0; i < s.size();) {
+        if (s.compare(i, 4, "{br}") == 0) {
+            out += '\n';
+            i += 4;
+        } else {
+            out += s[i++];
+        }
+    }
+    return out;
+}
+
+// `Ja.ki(1312)` = res/credits.xml. Best-effort: a failure leaves an empty list.
+void credits_load() {
+    g_credits_rows.clear();
+    try {
+        std::ifstream in("reference/extracted/xml/res/credits.xml", std::ios::binary);
+        if (!in) return;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        sf2::data::xml_doc doc;
+        doc.parse(std::string(data.begin(), data.end()));
+        const pugi::xml_node root = doc.root().first_child();  // <Credits>
+        if (root == nullptr) return;
+        std::string lang = g_credits_lang;
+        if (lang != "en" && lang != "ru") lang = "en";
+        const pugi::xml_node sec = root.child(lang.c_str());
+        if (!sec) return;
+        for (const pugi::xml_node part : sec.children("Part")) {
+            CreditsRow r;
+            if (part.attribute("Name")) r.name = part.attribute("Name").value();
+            r.value = credits_br_to_nl(part.text().get());
+            g_credits_rows.push_back(std::move(r));
+        }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[credits] load failed: %s\n", e.what());
+    }
+}
+
+void credits_show(App& app) {
+    g_credits_lang = app.language().empty() ? "en" : app.language();
+    g_credits_scroll = 0.0f;
+    credits_load();
+    g_credits_open = true;
+    std::fprintf(stdout, "[credits] show: %zu rows (lang %s)\n", g_credits_rows.size(),
+                 g_credits_lang.c_str());
+    std::fflush(stdout);
+}
+
+void credits_close() {
+    g_credits_open = false;
+    std::fprintf(stdout, "[credits] close\n");
+    std::fflush(stdout);
+}
+
+// `xh.aa` (L1856): scroll up + a click closes. Returns true while up (the
+// overlay consumes the input frame, like the settings dialog it sits on).
+bool credits_consume(App& app) {
+    if (!g_credits_open) return false;
+    g_credits_scroll += 1.3f;  // `this.content.D(this.content.ra-1.3)`
+    const App::PointerState& p = app.pointer();
+    if (p.pressed) credits_close();  // `L.K.dd().Db(0)&&this.pn()`
+    return true;
+}
+
+void credits_draw(App& app, sf2::render::Renderer& ren) {
+    if (!g_credits_open) return;
+    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
+    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 1.0f);
+    // `a.Fa(1E3,120); a.C(-500); a.ua(120); a.V(Y.na("credits"))` (L1855).
+    float y = 120.0f - g_credits_scroll;
+    draw_ui_label(app, kViewW * 0.5f - 500.0f, y - 60.0f, 1000.0f, 120.0f,
+                  loc(app, "credits", "CREDITS"), 1.0f, UiAlign::Center, 0.83f, 0.66f, 0.68f);
+    y += 220.0f;  // `a=220` (L1855)
+    for (const CreditsRow& r : g_credits_rows) {
+        // `$ja=c(Name,60)` at `C(-520)`, `V2=c(value,50)` at `C(20)` (L1857-1858).
+        draw_ui_label(app, 60.0f, y, 500.0f, 60.0f, r.name, 0.9f, UiAlign::Left, 0.83f, 0.66f,
+                      0.68f);
+        draw_ui_wrapped(app, 620.0f, y, kViewW - 680.0f, 50.0f, r.value, 0.9f, UiAlign::Left,
+                        0.83f, 0.66f, 0.68f);
+        y += 90.0f + 60.0f;  // `a += d.height + 90` (L1855)
+    }
+    draw_ui_label(app, kViewW * 0.5f - 500.0f, y, 1000.0f, 120.0f,
+                  loc(app, "CreditsFamilies", "CREDITS"), 1.0f, UiAlign::Center, 0.83f, 0.66f,
+                  0.68f);
+}
 
 SettingsRow settings_row_at(const SettingsLayout& s, double x, double y) {
     auto in = [&](float cx, float cy, float w, float h) {
@@ -13398,6 +13572,8 @@ SettingsRow settings_row_at(const SettingsLayout& s, double x, double y) {
         if (in(s.sound_row_cx, s.sound_cy, s.row_w, s.row_h)) return SettingsRow::kSound;
     if (in(s.music_row_cx, s.music_cy, s.row_w, s.row_h)) return SettingsRow::kMusic;
     if (in(s.lang_row_cx, s.lang_cy, s.row_w, s.row_h)) return SettingsRow::kLanguage;
+    // `un`'s `c(2,this.Mta)` credits row (L1929): hit-rect like the other rows.
+    if (in(s.credits_row_cx, s.credits_cy, s.row_w, s.row_h)) return SettingsRow::kCredits;
     return SettingsRow::kNone;
 }
 
@@ -13451,6 +13627,12 @@ bool settings_run_row(App& app, SettingsRow row) {
             std::fprintf(stdout, "[settings] RESTART (needs L.K.reload; not modelled)\n");
             std::fflush(stdout);
             return true;
+        case SettingsRow::kCredits:
+            // `un.rHa` case 2 (L1931): `xh.show()`. Unlike BACK/`Ge(0)` the
+            // credits case does NOT `close()` the dialog, so the overlay sits
+            // on top of the still-open settings surface.
+            credits_show(app);
+            return false;
         case SettingsRow::kNone:
         default:
             return false;
@@ -13461,6 +13643,7 @@ bool settings_run_row(App& app, SettingsRow row) {
 // the settings dialog is open.
 bool settings_dialog_consume(App& app) {
     if (!g_settings_dialog_open) return false;
+    if (credits_consume(app)) return true;  // `xh` overlay blocks on top
     ensure_lang(app);
     ++g_settings_age;
     const App::PointerState& p = app.pointer();
@@ -13553,6 +13736,9 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
                       28.0f, loc(app, "dlgServiceRestart", "RESTART"), 0.9f, UiAlign::Center,
                       1.0f, 1.0f, 1.0f);
     }
+    // `xh` credits overlay (L1854-1857): drawn over the settings surface,
+    // exactly as `xh.show` appends to the root above the `Wb` dialog.
+    credits_draw(app, ren);
 }
 
 }  // namespace
