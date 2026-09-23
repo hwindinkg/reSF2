@@ -4871,8 +4871,14 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // (L499) gates `da.ia`, and the idle move would otherwise register as a
     // started move. It stays exactly where `sample_enemy_idle` left it.
     const bool stance_locked = battle_.enemy_not_animation && &me == &enemy_;
-    if (me.fighter.current_move() == nullptr && !stance_locked) {
-        const bool intro = phase_ == fight_phase::start_stance;
+    // [FIX intro double-play] JS kg (L387) leaves the StartStance when the
+    // intro clip's OCa() fires and never re-plays it. The port holds the
+    // 133-frame phase-1 clock, so once the intro clip has been auto-played for
+    // THIS round do NOT start it again - the old code re-played the intro for
+    // the final frames of the StartStance (the reported "plays a bit more").
+    const bool intro = phase_ == fight_phase::start_stance;
+    if (me.fighter.current_move() == nullptr && !stance_locked &&
+        !(intro && me.intro_played_round == round_.number)) {
         // The mirror variant is picked from the direction to the enemy
         // (JS `wd.NS` L506: facing = sign(enemyX - myX); the move's
         // MirrorNode maps it to the -Left/-Right variant). The FIRST
@@ -4940,6 +4946,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             fill_ctx_geometry(ctx, me, foe);
             ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
             me.fighter.ai_start_move(*idle_move, ctx);
+            if (intro) me.intro_played_round = round_.number;  // [FIX intro double-play]
         }
     }
 

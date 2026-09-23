@@ -3609,7 +3609,39 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
     if (kind == sf2::scene::banner_kind::none) return;
 
     const float cx = kViewW * 0.5f;
-    const float cy = kViewH * 0.35f;
+    // JS Cr.layout (L2027): 	his.content.setPosition(a.F5a()) where
+    //  = ma.Kq and gb.F5a() (L1552) is the rect CENTRE - the plate is
+    // centred on screen, not at 35%. The old 0.35 anchor sat it too high.
+    const float cy = kViewH * 0.5f;
+    // JS Cr.Qa (L2022, init L2026 	his.Qa.R(!0)): the plate's full-screen
+    // backdrop is the E.q1a() VERTICAL gradient (E.Eua stops
+    // #00000020/80/80/80/20, L93-94) - semi-transparent, NOT a black box. The
+    // port was missing it, so the ROUND/FIGHT plate sat on the bare clear.
+    {
+        sf2::render::Renderer& bren = app.renderer();
+        struct GStop { float t; float a; };
+        static const GStop gs[5] = {{0.0f, 0x20 / 255.0f}, {0.25f, 0x80 / 255.0f},
+                                    {0.5f, 0x80 / 255.0f},  {0.75f, 0x80 / 255.0f},
+                                    {1.0f, 0x20 / 255.0f}};
+        constexpr int kStrips = 48;
+        for (int i = 0; i < kStrips; ++i) {
+            const float t0 = static_cast<float>(i) / kStrips;
+            const float t1 = static_cast<float>(i + 1) / kStrips;
+            const float tm = (t0 + t1) * 0.5f;
+            float ga = gs[0].a;
+            for (int s = 0; s < 4; ++s) {
+                if (tm <= gs[s + 1].t) {
+                    const float f = (tm - gs[s].t) / (gs[s + 1].t - gs[s].t);
+                    ga = gs[s].a + (gs[s + 1].a - gs[s].a) * f;
+                    break;
+                }
+                ga = gs[s + 1].a;
+            }
+            const float y0 = kViewH * t0, y1 = kViewH * t1;
+            const float gv[] = {0, y0, kViewW, y0, kViewW, y1, 0, y0, kViewW, y1, 0, y1};
+            bren.draw_triangles(gv, 6, 0.0f, 0.0f, 0.0f, ga);
+        }
+    }
 
     // The callouts atlas art (JS `Cr` L2022: `image = R.$(E.get(1310))`);
     // scaled min(800,min(W,H))/image.w*0.6 (layout L2027), centred.
@@ -3626,7 +3658,7 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
         if (rf != nullptr && rtex != 0) {
             const float rscale = (64.0f * 1.6f) / 140.0f;  // round eF=140
             app.draw_text_centered(*rf, rtex, cx, cy - art * 0.5f - 78.0f,
-                                   std::to_string(fight.round().number), rscale,
+                                   std::to_string(fight.round().number + 1), rscale,
                                    1.0f, 1.0f, 1.0f, 1.0f);
         }
     }
@@ -9551,7 +9583,13 @@ ResultsScreen::ResultsScreen(ScreenManager& mgr, bool player_won, int money_rewa
     // fight start `ai.Ut` L2008, so this replays it; the Map/Shop/Profile
     // then inherit it). Replaces the old stop-only approximation, which left
     // everything after a fight silent.
-    sf2::audio::AudioEngine::instance().play_music_once("menu");
+    // JS keeps the BATTLE track through the results: the jk results panel is
+    // a CHILD of the fight screen i (i.lca L2008 	his.Ws=Qo(jk)), so
+    // the fight's lb.rJ guard stays cleared and lb.OS() (the menu restore)
+    // only runs at the i.B() teardown (L384) - i.e. when the fight screen is
+    // left for the Map, not when the results appear. The old port played the
+    // menu track HERE, cutting the battle music the moment Results was pushed.
+    // The Map ctor's play_music_once("menu") (L2125) is the teardown point.
 }
 
 // JS `OLa`/`Oz` (L253-254): the level-up thresholds (`v.FR`) parsed once

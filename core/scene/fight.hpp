@@ -1008,6 +1008,11 @@ struct FightFighter {
     // `apply_hit` when a Fall reaction starts, consumed by `rules_frame`
     // the same frame (cleared at the top of `update`).
     bool reaction_fall = false;
+    // [FIX intro double-play] The round number whose phase-1 StartStance
+    // clip has already been auto-played (JS kg L387 leaves the stance on
+    // the clip OCa() and never re-plays it). -1 = none; compared against
+    // round_.number so each round plays the intro exactly once.
+    int intro_played_round = -1;
     std::set<std::string> prev_intervals;  // last tick's intervals (12/13 edge)
     std::vector<sf2::scene::PerkAction> perks;  // equipped perk actions
                                                 // (empty until perk-equip
