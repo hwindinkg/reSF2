@@ -477,6 +477,14 @@ public:
     // Enemies (for facing). Set by the caller (demo).
     float enemy_x() const { return enemy_x_; }
     void set_enemy_x(float x) { enemy_x_ = x; }
+    // [cross-fighter align — JS `Te.BBa` L563 + `Gub` L557-559] The
+    // opponent-controller link (JS `Te.cQ`). `<Align><Position Player="Enemy"
+    // Object="Animation"/>` — the throw victim's `?V` move — reads the OTHER
+    // controller's `Fk`: `e = opponent.Fk`, `d = 0`, so `self.Fk =
+    // opponent.Fk` and `Gla(Fk.x, eja, Fk.z)` shifts the victim's whole clip
+    // onto the thrower's clip-space origin. Set by the fight each round.
+    void set_opponent(Fighter* o) { opponent_ = o; }
+    const Fighter* opponent() const { return opponent_; }
     void set_world_pos(float x, float y) {
         world_x_ = x;
         world_y_ = y;
@@ -910,6 +918,14 @@ private:
     // (`Gnb` L672 `c.model.da.CZa(c.type)` -> `Te.CZa` reads `this.Ua`).
     const MoveDef* ended_move_ = nullptr;
     float enemy_x_ = 0.0f;                  // enemy world X (for facing)
+    // [cross-fighter align — JS `Te.BBa` L563 + `Gub` L557-559] The opponent
+    // controller (JS `Te.cQ`) and this controller's `Te.Fk` vector (ctor L546
+    // `this.Fk = new H(0,0,0,1)`): the last `Gub` result `(e - d)` in CLIP
+    // space. A `<Position Player="Enemy" Object="Animation"/>` align of the
+    // OTHER controller reads it verbatim (`e = c.Fk`). `Gub` runs on every
+    // clip start, so a move with no `<Align>` resets it to 0 (JS default `Ui`).
+    Fighter* opponent_ = nullptr;
+    float fk_x_ = 0.0f, fk_y_ = 0.0f, fk_z_ = 0.0f;
     std::vector<sf2::scene::key_input> keys_; // buffered inputs (JS `Kl.zg`)
     int tap_age_ = 0;                       // frames since last tap (JS `zl.dX`)
     // JS `zl.rwa` (L799) fires the `KeyPressed` event (`gh(0, zg)`) exactly

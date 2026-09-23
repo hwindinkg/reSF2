@@ -2578,6 +2578,8 @@ void FightController::set_phase(fight_phase p) {
     }
     player_.fighter.set_enemy_x(enemy_.fighter.world_x());
     enemy_.fighter.set_enemy_x(player_.fighter.world_x());
+    player_.fighter.set_opponent(&enemy_.fighter);
+    enemy_.fighter.set_opponent(&player_.fighter);
 }
 
 // JS `tx` (L407): round init — the timer is the round length, Vt=false.
@@ -2651,6 +2653,11 @@ void FightController::round_start() {
     // Reset the round flags on the fighters (JS `c.parameters.nob()`).
     player_.fighter.set_enemy_x(enemy_.fighter.world_x());
     enemy_.fighter.set_enemy_x(player_.fighter.world_x());
+    // [cross-fighter align — JS `Te.cQ`] The `<Align><Position Player="Enemy"
+    // Object="Animation"/>` of a throw victim reads the thrower controller's
+    // `Fk` (`Te.BBa` L563), so both sides need the opponent link.
+    player_.fighter.set_opponent(&enemy_.fighter);
+    enemy_.fighter.set_opponent(&player_.fighter);
     // JS `ha.tca(this.round.round, !1)` (L409) -> `Cr.tca` (L2023): type 2,
     // `fu(1.666)`, `wU` cleared and re-armed by the 500 ms `wh.delay`. The
     // expiry dispatches through `ca.vhb` (L410) case 2 -> `FNa` (phase 1).

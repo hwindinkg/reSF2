@@ -1790,8 +1790,14 @@ int Fighter::mirror_swap_src(int i, std::size_t zclip) const {
 // keep the pivot bone where the previous pose left it.
 void Fighter::compute_align(const MoveDef& move) {
     align_x_ = align_y_ = align_z_ = 0.0f;
-    if (!move.align.has_align || current_clip_ == nullptr ||
-        current_clip_->frames.empty()) {
+    // JS `Te.Skb` L551 bails before `Gub` when no clip is loaded, so `Fk`
+    // PERSISTS. With a clip but NO `<Align>`, `Gub` still runs on the default
+    // `Ui` (`VE`/`JK` = EObjectNone), which writes `Fk = e - d = 0`.
+    if (current_clip_ == nullptr || current_clip_->frames.empty()) {
+        return;
+    }
+    if (!move.align.has_align) {
+        fk_x_ = fk_y_ = fk_z_ = 0.0f;
         return;
     }
     const Align& al = move.align;
@@ -1884,14 +1890,33 @@ void Fighter::compute_align(const MoveDef& move) {
         posed(pi, ex, ey, ez);
     } else if (jk == 4) { // EObjectPivot: posed pivot node (`currentNode.ma`)
         posed(align_idx, ex, ey, ez);
+    } else if (jk == 2) { // EObjectAnimation: ANOTHER controller's `Fk`
+        // JS `Gub` L559 `case "EObjectAnimation": g=c.Fk; e=g.x; f=g.y;
+        // g=g.z;` where `c = this.BBa(a.b4)` (L563). `BBa` maps the resolved
+        // `Player` index (`Nd.ol` L633176: Me=1/Null=0 -> `this`, Enemy=2 ->
+        // `this.cQ`, Parent=3 -> `this.F3`; others -> null) and a null
+        // controller falls back to `this` (`c==null&&(c=this)`). The port has
+        // no parent controller, so `Parent` falls back to `this` exactly as
+        // the JS does when `F3` is null.
+        const Fighter* c = this;
+        if (al.pos_player == "Enemy" && opponent_ != nullptr) c = opponent_;
+        ex = c->fk_x_;
+        ey = c->fk_y_;
+        ez = c->fk_z_;
     }
-    // jk == 2 (EObjectAnimation) -> e = this.Fk = 0 at clip start.
     // jk == 3 (EObjectWall) needs the wall bounds — OPEN, e stays 0.
     ex += f * al.shift_x;  // JS `e += this.hd()*a.dja`
     ey += al.shift_y;      // JS `f += a.eja`
 
-    // `Fk = e - d` (JS L559 `c.x=e-d.x; ...`); `Gla` selects the per-axis
-    // component (X/Z here; `ShiftY` when Y is not an align axis).
+    // JS `c=this.Fk; c.x=e-d.x; c.y=f-d.y; c.z=g-d.z` — the RAW `Fk` vector,
+    // stored BEFORE the per-axis `Gla` selection so a cross-fighter align of
+    // the OTHER controller (jk == 2) reads it verbatim.
+    fk_x_ = ex - dx;
+    fk_y_ = ey - dy;
+    fk_z_ = ez - dz;
+
+    // `Gla` selects the per-axis component (X/Z here; `ShiftY` when Y is not
+    // an align axis).
     align_x_ = al.axis_x ? (ex - dx) : al.shift_x;
     align_y_ = al.axis_y ? (ey - dy) : al.shift_y;
     align_z_ = al.axis_z ? (ez - dz) : 0.0f;
