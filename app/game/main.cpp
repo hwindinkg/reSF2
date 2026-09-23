@@ -3192,6 +3192,41 @@ int main(int argc, char** argv) {
                      kItem, price_off);
         std::fflush(stdout);
         check(price_off == base, "Discount off: offer cleared -> base price");
+        // --- Discount `Item|count` upgrade branch + NewAmount/NewPrice -------
+        // `Pn.S` L1065: with a `|count` the action takes the UPGRADE branch
+        // `if(X.Xa(b.G.lB,f.G)&&b.G.JQ(f.G)!=null){ ... b.G.lB.set(f.G,g) }`
+        // and NEVER touches `Gp` — no base offer is created. `X.Xa` = `Map.has`
+        // and `lB` is written only here, so on a fresh item the branch is a
+        // NO-OP (JS-exact). Before the port split `Item` on `|`, this created a
+        // bogus base-0 offer keyed by the raw `NAME|count`.
+        fire_action("Discount",
+                    {{"Item", "WEAPON_CRESCENT_KNIVES|100"}, {"Percent", "25"},
+                     {"Toggle", "1"}});
+        const int price_up = shown_price(kItem);
+        std::fprintf(stdout,
+                     "[qa] AFTER  Discount %s|100 Percent=25 Toggle=1 : shown=%d "
+                     "upgrade_offers=%zu\n",
+                     kItem, price_up, app.quest_engine().upgrade_offer_count());
+        std::fflush(stdout);
+        check(app.quest_engine().offer_for(kItem) == nullptr &&
+                  app.quest_engine().offer_for("WEAPON_CRESCENT_KNIVES|100") == nullptr &&
+                  app.quest_engine().upgrade_offer_count() == 0 && price_up == base,
+              "Discount Item|count: no base offer, no bogus NAME|count key (lB no-op)");
+        fire_action("Discount", {{"Item", "WEAPON_CRESCENT_KNIVES|100"}, {"Toggle", "0"}});
+        check(app.quest_engine().offer_for(kItem) == nullptr &&
+                  app.quest_engine().upgrade_offer_count() == 0,
+              "Discount Item|count Toggle=0: ynb no-op -> base offer still absent");
+        // `NewAmount`/`NewPrice` (`yf.Aw`/`yf.KA` initial, L1065/L1246) are
+        // carried on the simple branch too.
+        fire_action("Discount", {{"Item", kItem}, {"Percent", "25"}, {"Toggle", "1"},
+                                 {"NewAmount", "7"}, {"NewPrice", "99"}});
+        {
+            const sf2::app::EngineItemOffer* const oo =
+                app.quest_engine().offer_for(kItem);
+            check(oo != nullptr && oo->new_amount == 7 && oo->new_price == "99",
+                  "Discount NewAmount/NewPrice -> yf.Aw/yf.KA carried");
+        }
+        fire_action("Discount", {{"Item", kItem}, {"Toggle", "0"}});
         // --- GiveItem (`Yn.S` 554285 -> `Pa.W$a` L631756) -------------------
         const auto owned_count = [&](const char* name) -> int {
             try {

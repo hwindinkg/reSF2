@@ -738,12 +738,27 @@ void QuestEngine::apply_toggle_items(App& app, const std::string& label, bool on
 // `p.o.xa.<item>.Gp = g` + `p.o.xa.vu()` (L301). `Toggle="0"` takes the
 // `f.G<0 -> b.G.E4()` branch (clear the offer).
 void QuestEngine::apply_discount(App& app, const std::string& item, int percent,
-                                 bool on, long long period, bool sale) {
+                                 bool on, long long period, bool sale, int count,
+                                 int new_amount, const std::string& new_price) {
     if (item.empty()) return;
     // `Pn.S` L1065: `if(c.G)` (the resolved `Toggle` > 0) gates the whole
     // write — `Percent` only gates the `KA` override (`e.G>0 &&`), never the
-    // offer's creation. `Toggle="0"` runs `b.G.E4()` (clear).
+    // offer's creation. The `Toggle="0"` tail is
+    // `f.G<0 ? b.G.E4() : b.G.ynb(f.G)`: `E4` clears the item's `Gp`; `ynb`
+    // (L170xxx `X.remove(this.lB, a)`) removes the UPGRADE offer at `count`.
     if (!on) {
+        if (count >= 0) {
+            const auto it = upgrade_offers_.find(item);
+            if (it != upgrade_offers_.end()) {
+                it->second.erase(count);
+                if (it->second.empty()) upgrade_offers_.erase(it);
+            }
+            std::fprintf(stdout,
+                         "[quest] Discount %s|%d toggle=0 -> upgrade offer removed (ynb)\n",
+                         item.c_str(), count);
+            std::fflush(stdout);
+            return;
+        }
         offers_.erase(item);
         std::fprintf(stdout, "[quest] Discount %s toggle=0 -> offer cleared (E4)\n",
                      item.c_str());
@@ -761,6 +776,45 @@ void QuestEngine::apply_discount(App& app, const std::string& item, int percent,
     o.sale = sale;
     o.end_time = period > 0 ? static_cast<long long>(now_seconds()) + period : 0;
     o.active = true;  // `yf.fE` (written `h.G>0`, never read in the bundle)
+    // `new yf(og, Q2a, yn, g.G, k.G)` (L1065/1066): `yf.Aw = NewAmount`,
+    // `yf.KA` initial = `"" + NewPrice`.
+    o.new_amount = new_amount;
+    o.new_price = new_price;
+    // `Pn.S` L1065 `|count` UPGRADE branch:
+    //   `if(X.Xa(b.G.lB,f.G) && b.G.JQ(f.G)!=null){ ... b.G.lB.set(f.G,g) }`
+    // `X.Xa` = `Map.has` (class `X` L52808 `static Xa(a,b){return a.has(b)}`).
+    // `lB` is written ONLY by this branch, so on a fresh item it is always
+    // empty -> the branch is a NO-OP (JS-exact; the shipped
+    // `dynamic_discounts.xml` L261 `Item="_DiscountItem|100*Level"` therefore
+    // never sets an upgrade offer — `UpgradeDiscountWrapper` L248 has no
+    // effect). The port reproduces the guard verbatim rather than inventing a
+    // positive path. No base offer is created for a `|count` form (the JS
+    // never touches `Gp` here).
+    if (count >= 0) {
+        const auto it = upgrade_offers_.find(item);
+        const bool has = it != upgrade_offers_.end() && it->second.count(count) != 0;
+        if (has) {
+            // `l = b.G.JQ(f.G).Ofa() * ((100-e.G)/100)` — the upgrade entry's
+            // own `Ofa()` (the item's price at that level).
+            const int ub = it->second[count].price;
+            EngineItemOffer u = o;
+            u.price = percent > 0
+                          ? static_cast<int>(std::trunc(
+                                static_cast<double>(ub) * (100.0 - percent) / 100.0))
+                          : ub;
+            upgrade_offers_[item][count] = u;
+            std::fprintf(stdout,
+                         "[quest] Discount %s|%d percent=%d -> upgrade offer price %d "
+                         "(lB.set)\n",
+                         item.c_str(), count, percent, u.price);
+        } else {
+            std::fprintf(stdout,
+                         "[quest] Discount %s|%d percent=%d -> no-op (lB lacks level)\n",
+                         item.c_str(), count, percent);
+        }
+        std::fflush(stdout);
+        return;
+    }
     // `KA` is set ONLY when `e.G>0`; a `Percent="0"` offer keeps the base.
     o.price = percent > 0
                   ? static_cast<int>(std::trunc(static_cast<double>(base) *
@@ -773,6 +827,20 @@ void QuestEngine::apply_discount(App& app, const std::string& item, int percent,
                  "(base %d, vu)\n",
                  item.c_str(), percent, period, sale ? 1 : 0, o.price, o.end_time, base);
     std::fflush(stdout);
+}
+
+const EngineItemOffer* QuestEngine::upgrade_offer_for(const std::string& item,
+                                                      int level) const {
+    const auto it = upgrade_offers_.find(item);
+    if (it == upgrade_offers_.end()) return nullptr;
+    const auto jt = it->second.find(level);
+    return jt == it->second.end() ? nullptr : &jt->second;
+}
+
+std::size_t QuestEngine::upgrade_offer_count() const {
+    std::size_t n = 0;
+    for (const auto& kv : upgrade_offers_) n += kv.second.size();
+    return n;
 }
 
 const EngineItemOffer* QuestEngine::offer_for(const std::string& item) const {
@@ -2648,20 +2716,44 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // (`Sale`), `f.fE=h.G>0`, and `KA = base*((100-e.G)/100)` ONLY
             // when `e.G>0`; `p.o.xa.vu()` (L301) re-derives. `Toggle="0"`
             // clears it (`b.G.E4()`).
-            const std::string ditem = quest_var(app, locals, attr_or(a.attrs, "Item"));
+            const std::string ditem_raw = quest_var(app, locals, attr_or(a.attrs, "Item"));
+            // `getParameters` L1066: `r=l.toString().split("|")`; `a=r[0]`
+            // (the item), `q=r[1]` (the `|count`). `q!="" ? c.G=l.Ie|0 :
+            // c.G=-1`.
+            std::string ditem = ditem_raw;
+            std::string dcount_s;
+            int dcount = -1;
+            const std::size_t dbar = ditem_raw.find('|');
+            if (dbar != std::string::npos) {
+                ditem = ditem_raw.substr(0, dbar);
+                const std::string right = ditem_raw.substr(dbar + 1);
+                const std::size_t dbar2 = right.find('|');
+                dcount_s = (dbar2 == std::string::npos) ? right : right.substr(0, dbar2);
+                if (!dcount_s.empty()) {
+                    dcount = static_cast<int>(std::strtod(dcount_s.c_str(), nullptr));
+                }
+            }
             const std::string dtgl = quest_var(app, locals, attr_or(a.attrs, "Toggle"));
             const std::string dpct = quest_var(app, locals, attr_or(a.attrs, "Percent"));
             const std::string dper = quest_var(app, locals, attr_or(a.attrs, "Period"));
             const std::string dsale = quest_var(app, locals, attr_or(a.attrs, "Sale"));
+            // `this.jsa` (`NewAmount`, default "0") -> `f.G=Math.trunc(l.Ie)`;
+            // `this.O9` (`NewPrice`, default "") -> `h.G` (the resolved string).
+            const std::string dnamt = quest_var(app, locals, attr_or(a.attrs, "NewAmount", "0"));
+            const std::string dnpr = quest_var(app, locals, attr_or(a.attrs, "NewPrice"));
             const int percent = static_cast<int>(std::strtod(dpct.c_str(), nullptr));
             const bool don = std::strtod(dtgl.c_str(), nullptr) > 0.0;
             // `g.G=Math.trunc(l.Ie)` (Period) / `k.G=l.Ie>0` (Sale).
             const long long period =
                 static_cast<long long>(std::trunc(std::strtod(dper.c_str(), nullptr)));
             const bool sale = std::strtod(dsale.c_str(), nullptr) > 0.0;
-            apply_discount(app, ditem, percent, don, period, sale);
+            const int new_amount =
+                static_cast<int>(std::trunc(std::strtod(dnamt.c_str(), nullptr)));
+            apply_discount(app, ditem, percent, don, period, sale, dcount, new_amount, dnpr);
             fx.discounts.push_back(ditem + ":" + dpct + ":toggle=" + (don ? "1" : "0") +
-                                   ":period=" + dper + ":sale=" + (sale ? "1" : "0"));
+                                   ":period=" + dper + ":sale=" + (sale ? "1" : "0") +
+                                   ":count=" + std::to_string(dcount) + ":new=" + dnamt +
+                                   "/" + dnpr);
         } else if (t == "ShowMapButton") {
             // `wo` L1100-1101 (`EShowMapButton`): builds an `hg` from the
             // resolved attrs and calls `Vb.F().Lua(b,null,!0)`. `Lua` (L2167)

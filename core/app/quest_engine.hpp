@@ -461,6 +461,15 @@ struct EngineItemOffer {
     // (only the ctor default `!0`, L28C, and the `from` copy) — the port keeps
     // the default.
     bool active = true;
+    // `yf.Aw`: `Pn.S` L1065/1066 builds `new yf(og, Q2a, yn, g.G, k.G)` where
+    // `g.G` is the resolved `NewAmount` (`Math.trunc(l.Ie)`, getParameters
+    // `this.jsa`). Carried verbatim (0 when the attr is absent).
+    int new_amount = 0;
+    // `yf.KA` BEFORE the `e.G>0` overwrite: the `yf` ctor (L1246) sets
+    // `vja = KA = f+e = "" + NewPrice`, so a `Percent="0"` offer keeps the
+    // `NewPrice` string. `Pn.S` resolves it from `this.O9` (`NewPrice`), which
+    // is `""` when the attr is absent.
+    std::string new_price;
 };
 
 // `jl` (L180945): the persisted per-offer state object (`p.o.P7a(name)`,
@@ -842,14 +851,27 @@ public:
     // with `KA = base * ((100 - percent) / 100)` (only when `percent > 0` —
     // `e.G>0 &&` in L1065); `Toggle="0"` -> `b.G.E4()`. `period` = `Csa`
     // (`h.G`, `Math.trunc`) -> `yf.yn` (`a = h.G>0 ? p.Dc + h.G + tz : 0`);
-    // `sale` = `pta` (`d.G`, `l.Ie>0`) -> `yf.V4`.
+    // `sale` = `pta` (`d.G`, `l.Ie>0`) -> `yf.V4`. `count` = the `Item|count`
+    // right-hand side (`getParameters` L1066 `r[1]`; `-1` when absent) — the
+    // UPGRADE branch (`b.G.lB.set(f.G,g)` L1065). `new_amount`/`new_price` =
+    // `NewAmount`/`NewPrice` (`yf.Aw`/`yf.KA` initial).
     void apply_discount(App& app, const std::string& item, int percent, bool on,
-                        long long period = 0, bool sale = false);
+                        long long period = 0, bool sale = false, int count = -1,
+                        int new_amount = 0, const std::string& new_price = {});
+    // `b.G.lB.get(level)` (`I` L171xxx `Xv`): the live UPGRADE offer at an
+    // `Item|level`, or null. `Pn.S` L1065 writes it (`lB.set`).
+    const EngineItemOffer* upgrade_offer_for(const std::string& item,
+                                             int level) const;
+    std::size_t upgrade_offer_count() const;
 
 private:
     // `p.o.xa.<item>.Gp` (the live per-item offer; `Pn.S` L1064 writes it,
     // `p.o.xa.vu()` L301 + the shop price render read it).
     std::map<std::string, EngineItemOffer> offers_;
+    // `item.lB` (`I` ctor L162531 `this.lB = new Map`): the per-item
+    // UPGRADE-level offers keyed by the `Item|count` level (`Pn.S` L1065
+    // `b.G.lB.set(f.G,g)`; read back by `Xv` L171xxx `b.Gp = this.lB.get(b.Tg)`).
+    std::map<std::string, std::map<int, EngineItemOffer>> upgrade_offers_;
 
     // The list.xml offer-definition cache (`p.Cw.It`; static for the process)
     // and the live per-offer `rc` states (`p.o.QN`, `P7a` L130088).

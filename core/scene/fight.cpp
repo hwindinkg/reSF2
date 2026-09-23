@@ -3116,8 +3116,25 @@ void FightController::setup_bus(const PerkSetup& perks) {
     player_.ranged_available = !has_noranged(player_items_);
     enemy_.ranged_available = !has_noranged(enemy_items_);
     if (perks.catalog == nullptr) return;
+    // JS `Wk` L811-812: `let a=m.l(); m.addRange(a,this.AK); m.addRange(a,
+    // this.TE); ... this.Mja(a,this.ZR)` — the save's LEARNED perks
+    // (`Bt.KS.Oa`; port `PerkSetup::learned`) merge into the SAME live set the
+    // trigger bus registers, not only the move-list build (`Bm.he` L753-754).
+    // They come FIRST (`AK` before the per-item `Oa`), with no Set overrides:
+    // `build_side_triggers` then inserts the def's own triggers verbatim (the
+    // empty-`set_num`/`set_str` path), exactly like `Wk`'s raw `AK` entries.
+    std::vector<sf2::scene::ItemPerkRef> player_refs;
+    player_refs.reserve(perks.learned.size() + perks.player_refs.size());
+    for (const std::string& n : perks.learned) {
+        if (n.empty()) continue;
+        sf2::scene::ItemPerkRef r;
+        r.name = n;
+        player_refs.push_back(std::move(r));
+    }
+    player_refs.insert(player_refs.end(), perks.player_refs.begin(),
+                       perks.player_refs.end());
     bus_.register_side(
-        0, sf2::scene::build_side_triggers(perks.player_refs, *perks.catalog, bus_.log),
+        0, sf2::scene::build_side_triggers(player_refs, *perks.catalog, bus_.log),
         player_items_);
     bus_.register_side(
         1, sf2::scene::build_side_triggers(perks.enemy_refs, *perks.catalog, bus_.log),
