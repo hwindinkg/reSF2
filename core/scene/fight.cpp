@@ -4461,7 +4461,15 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // Knockback (JS Kwb + bounds): interval impulse mirrored by facing,
     // scaled by the attacker JG (ChangeImpulse shapes FUTURE hits).
     sf2::scene::Vec3 impulse{iv.impulse_x, iv.impulse_y, iv.impulse_z};
-    impulse.x *= static_cast<float>(atk.fighter.facing()) * atk.jg.x;
+    // JS `wd.Kwb` (L509): `d.x *= this.da.hd()` — `da` is the `Te` anim
+    // (L496), so `hd()` is the `Te.FX` CLIP MIRROR (L547), NOT the `b6a`
+    // facing lock (L603). The port's two terms are OPPOSITES:
+    //   `facing_ = sign(me_x - enemy_x)` (`b6a`),
+    //   `clip_mirror_ = sign(enemy_x - me_x)` (`FX`/`hd()`).
+    // Using `facing()` here negated the impulse, so the victim was driven
+    // TOWARD the attacker: the dojo bag flew at the player, a normal enemy
+    // was dragged in, and a throw pulled the victim back.
+    impulse.x *= static_cast<float>(atk.fighter.clip_mirror()) * atk.jg.x;
     impulse.y *= atk.jg.y;
     impulse.z *= atk.jg.z;
     sf2::scene::ImpulseResult imp;
@@ -4494,8 +4502,12 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         if (b1 >= 0) def.fighter.strike_node(b1, imp.node1_vec);
         if (has2) def.fighter.strike_node(b2, imp.node2_vec);
         std::fprintf(stdout,
-                     "[strike] F%d %s x1=%.2f x2=%.2f nk=%d frame=%d\n", frame,
-                     def.name.c_str(), imp.node1_vec.x, imp.node2_vec.x,
+                     "[strike] F%d %s->%s ax=%.1f dx=%.1f imp=(%.2f,%.2f,%.2f) "
+                     "x1=%.2f x2=%.2f hd=%d fx=%d nk=%d frame=%d\n",
+                     frame, atk.name.c_str(), def.name.c_str(),
+                     atk.fighter.world_x(), def.fighter.world_x(), impulse.x,
+                     impulse.y, impulse.z, imp.node1_vec.x, imp.node2_vec.x,
+                     atk.fighter.clip_mirror(), atk.fighter.facing(),
                      def.fighter.ragdoll_active() ? 1 : 0,
                      def.fighter.ragdoll_frame_count());
         if (bag_probe) {

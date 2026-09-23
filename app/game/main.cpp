@@ -4917,7 +4917,12 @@ int main(int argc, char** argv) {
         //    With the enemy on the RIGHT the Forward key (3) walks toward it;
         //    on the LEFT the Back key (7) does (the `vm.he` mirror; see the
         //    `--verify-place` mirror probe). Taps only — no OS input.
-        for (int f = 0; f < 420; ++f) {
+        // [probe] The `Punchbag` DUMMY needs no approach: its queued forward
+        // taps keep the player in a perpetual walk combo (never idle), so the
+        // attack loop can never start a move. Skip the approach for the bag;
+        // the attack loop's re-park snaps the pair to punch range instead.
+        const bool bag_probe = (fight_zone == "Punchbag");
+        for (int f = 0; f < (bag_probe ? 0 : 420); ++f) {
             glfwPollEvents();
             const float px = fs->player_world_x();
             const float ex = fs->enemy_world_x();
@@ -4956,10 +4961,25 @@ int main(int argc, char** argv) {
             if (react_at < 0) {
                 const float px = fs->player_world_x();
                 const float ex = fs->enemy_world_x();
+                // [probe] The `Punchbag` zone's DUMMY enemy is `NotAI` (never
+                // drifts) and `NotAnimation` (no live move name), so the boss
+                // re-park / `boss_hittable` gates leave it permanently out of
+                // punch reach (NO-HIT). Park it tighter and tap
+                // unconditionally; the non-bag path is byte-identical.
                 // Keep the pair at punch range (the AI drifts).
-                if (std::fabs(ex - px) > 70.0f) {
+                if (bag_probe) {
+                    // [probe] Hold the DUMMY 30 to the player's right EVERY
+                    // frame: it never drifts, so a one-shot park lets the
+                    // player's root motion carry it straight past the bag
+                    // (facing flips, every attack misses).
+                    fs->place_fighters(px, px + 30.0f);
+                } else if (std::fabs(ex - px) > 40.0f) {
+                    // [probe] Park at 28 (was 55/70): with the `Kwb` impulse
+                    // sign fixed a landed hit now pushes the victim AWAY, so
+                    // the old 55-gap park never closed to punch reach and the
+                    // probe stopped landing its scripted hit.
                     const float side = (ex >= px) ? 1.0f : -1.0f;
-                    fs->place_fighters(px, px + side * 55.0f);
+                    fs->place_fighters(px, px + side * 28.0f);
                 }
                 // [FIX probe gate] The boss's LIVE idle is the
                 // `*StartStanceIdle` family (`KnivesStartStanceIdle`) — the
@@ -4975,7 +4995,7 @@ int main(int argc, char** argv) {
                 // pair stays permanently committed — which would stop the
                 // boss's AI ever reaching the `Pqb` L606 `else` path again.
                 const std::string boss_move = fs->enemy_current_move();
-                const bool boss_hittable = !boss_move.empty();
+                const bool boss_hittable = bag_probe || !boss_move.empty();
                 const std::string my_move = fs->player_current_move();
                 // [FIX probe gate] The player's LIVE idle after the intro is
                 // the `IdleStance` family — `StanceIdle` (moves.xml L1056,

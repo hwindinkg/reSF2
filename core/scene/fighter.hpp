@@ -411,6 +411,9 @@ public:
     int subframe() const { return subframe_; }
     int sub() const { return sub_; }
     int facing() const { return facing_; }
+    // JS `Te.FX` / `hd()` (L547): the CLIP MIRROR (±1). Distinct from the
+    // `b6a` facing lock above; the impulse mirror (`wd.Kwb` L509) uses THIS.
+    int clip_mirror() const { return clip_mirror_; }
     const std::vector<const MoveDef*>& hb() const { return hb_; }
     // The last player move decision (the JS `Gc.DK` `c == false` branch,
     // L673-674) — the record the `--verify-input` probes assert: the
