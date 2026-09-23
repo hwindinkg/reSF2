@@ -10545,6 +10545,43 @@ int shop_effective_bonus(App& app, const CatalogItem& it) {
     return it.bonus_price;
 }
 
+// `ie.Or(a)` = `We.Sfa(a)` (JS L633556 / L1257554): the display number, with a
+// space as the thousands separator. `<1e3` is the raw string; the shipped shop
+// combat stats are all small, but the grouping is exact for every magnitude.
+std::string shop_format_number(int a) {
+    if (a < 0) return std::to_string(a);
+    std::string c = std::to_string(a);
+    for (int i = static_cast<int>(c.size()) - 3; i > 0; i -= 3) c.insert(i, 1, ' ');
+    return c;
+}
+
+// The item the save has EQUIPPED in `it`'s slot. JS `Ne.refresh` L2247-2248
+// feeds `ms.refresh(Aa, $e.Qi, qC&&gW&&$e.Qi!=null)` where `$e` is the owned
+// inventory entry for the selected item and `$e.Qi` (`zf.uu` L1253) is that
+// entry's CURRENT version (the upgrade compare). The port has no upgrade-recipe
+// table (`ib.zz()`/`vu`), so the compare source is the equipped slot item —
+// `$e.Qi`'s observable analogue. Returns {} when the slot is empty or holds
+// `it` itself.
+std::map<std::string, int> shop_equipped_attrs(App& app, const CatalogItem& it) {
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return {};
+    }
+    std::string slot;
+    if (it.type == "Weapon") slot = w.weapon;
+    else if (it.type == "Armor") slot = w.armor;
+    else if (it.type == "Helm") slot = w.helm;
+    else if (it.type == "Ranged") slot = w.ranged;
+    else if (it.type == "Magic") slot = w.magic;
+    if (slot.empty() || slot == it.name) return {};
+    for (const CatalogItem& ci : load_full_catalog(app)) {
+        if (ci.name == slot) return ci.attributes;
+    }
+    return {};
+}
+
 // `Pa.Wz` (L1234) / `Pa.Bv` (L1211) fire the quest event; print the fired set
 // (the observable result) — a purchase-driven quest appearing here is the
 // proof the event reached the quest hub.
@@ -11588,37 +11625,64 @@ void ShopScreen::render_impl(App& app) {
         const float ty = cy0 + ch0 * 0.1f - tfont * 0.5f;
         draw_ui_label(app, cx0, ty, cw0, tfont, item_display_name(app, *sel_it), 0.85f,
                       UiAlign::Center, 0.30f, 0.20f, 0.10f);
-        // `lH` = the `ms` attribute list (`lH.ba(a, a*.22)`, L2248): the primary
-        // combat stat icon + value + a parameter bar (`shop.json attributes/*`).
-        const char* sicon = "attributes/weapon_attack";
-        int sval = sel_it->weapon_damage;
-        if (sel_it->type == "Armor") {
-            sicon = "attributes/body_armor";
-            sval = sel_it->body_defense;
-        } else if (sel_it->type == "Helm") {
-            sicon = "attributes/head_armor";
-            sval = sel_it->head_defense;
-        } else if (sel_it->type == "Ranged") {
-            sicon = "attributes/ranged_attack";
-        } else if (sel_it->type == "Magic") {
-            sicon = "attributes/magic_attack";
-        }
-        const float stat_h = cw0 * 0.22f;
+        // `lH` = the `ms` attribute list (`Ne.refresh` L2248
+        // `lH.refresh(Aa, $e.Qi, qC&&gW&&$e.Qi!=null)`; `lH.ba(a, a*.22)`
+        // L2248). `ms.setParameters` (L2274-2275): for each `v.eo` attribute
+        // def `h` in file order, when the item carries `h.name` and `!h.hidden`
+        // push one `fi` cell (`ms.oca` L2275 `d.init(h.name,h.icon,d.G,e.G,!0)`).
+        // The cell (`fi.init` L2270-2271, `fi.ba` L2271, `fi.OT`/`IXa` L2272)
+        // draws the `attributes/<icon>` art + `ie.Or(value)` + the
+        // `(±(compare-value))` delta. The old native hard-picked ONE stat.
+        const float stat_h = cw0 * 0.22f;   // `lH.ba(a, a*.22)` L2248
         const float stat_y = cy0 + ch0 * 0.1f + tfont * 1.3f;
-        try_draw_atlas_button(app, sicon, cx0 + 24.0f, stat_y + stat_h * 0.5f, 44.0f, 44.0f,
-                              1.0f, false, false);
-        draw_ui_label(app, cx0 + 50.0f, stat_y + stat_h * 0.5f - 15.0f, 56.0f, 30.0f,
-                      std::to_string(sval), 0.9f, UiAlign::Left, 0.20f, 0.12f, 0.06f);
-        // `parametersBar/bar_N` is the value bar behind the number (shop atlas).
-        {
-            const float bxx = cx0 + 110.0f;
-            const float bww = cw0 - 110.0f;
-            const float bh2 = 16.0f;
-            const ShopRect track{bxx, stat_y + stat_h * 0.5f - bh2 * 0.5f, bxx + bww,
-                                 stat_y + stat_h * 0.5f + bh2 * 0.5f};
-            quad(track, 0.35f, 0.24f, 0.14f, 0.6f);
-            const ShopRect fill{bxx, track.P, bxx + bww * 0.7f, track.W};
-            quad(fill, 0.95f, 0.62f, 0.20f, 1.0f);
+        const std::map<std::string, int> equipped_attrs =
+            shop_equipped_attrs(app, *sel_it);  // JS `$e.Qi`
+        float row_y = stat_y;
+        for (const ShopAttributeDef& def : shop_attribute_defs()) {
+            if (def.hidden) continue;  // `!h.hidden` L2274
+            const auto vit = sel_it->attributes.find(def.name);
+            if (vit == sel_it->attributes.end()) continue;  // `a.attributes.get` L2275
+            const int value = vit->second;
+            int compare = value;  // `e.G=d.G` L2275
+            const auto cit = equipped_attrs.find(def.name);
+            if (cit != equipped_attrs.end()) compare = cit->second;  // `b.attributes.get`
+            const int delta = compare - value;  // `IXa(b-a)` L2272
+            const float row_cy = row_y + stat_h * 0.5f;
+            // `fi.init`: `"attributes/" + Icon` in atlas 248 (fallback 266).
+            const std::string icon_key = std::string("attributes/") + def.icon;
+            try_draw_atlas_button(app, icon_key.c_str(), cx0 + stat_h * 0.5f, row_cy, stat_h,
+                                  stat_h, 1.0f, false, false);
+            // `fi.Isb(a)` L2272: `Mb.R(a>0)` — the value label shows only when
+            // `a>0`; `Mb.V(ie.Or(a))`.
+            if (value > 0) {
+                draw_ui_label(app, cx0 + stat_h * 1.1f, row_cy - stat_h * 0.3f, cw0 * 0.6f,
+                              stat_h * 0.6f, shop_format_number(value), 0.9f, UiAlign::Left,
+                              0.20f, 0.12f, 0.06f);
+            }
+            // `fi.IXa(a)` L2272: `(+N)` in `Z.mTa` (green) when >0, `(N)` in
+            // `Z.RED` when <0; hidden when 0.
+            if (delta != 0) {
+                const std::string dtxt = delta > 0 ? "(+" + std::to_string(delta) + ")"
+                                                   : "(" + std::to_string(delta) + ")";
+                const float dr = delta > 0 ? 0.267f : 0.608f;
+                const float dg = delta > 0 ? 0.478f : 0.110f;
+                const float db = delta > 0 ? 0.008f : 0.027f;
+                draw_ui_label(app, cx0 + cw0 * 0.6f, row_cy - stat_h * 0.2f, cw0 * 0.4f,
+                              stat_h * 0.4f, dtxt, 0.8f, UiAlign::Left, dr, dg, db);
+            }
+            // `vH` (`os`, L2268) value bar: `fi.ba` bottom-aligns it under the
+            // row. The exact `Z7a` fill formula (`v.Ova` BarScale table, not
+            // ported) is approximated with a value-scaled fill.
+            {
+                const float bxx = cx0 + stat_h * 1.1f;
+                const float bww = cw0 - stat_h * 1.1f - 8.0f;
+                const float bh2 = stat_h * 0.4f;
+                const ShopRect track{bxx, row_y + stat_h - bh2, bxx + bww, row_y + stat_h};
+                quad(track, 0.35f, 0.24f, 0.14f, 0.6f);
+                const ShopRect fill{bxx, track.P, bxx + bww * 0.7f, track.W};
+                quad(fill, 0.95f, 0.62f, 0.20f, 1.0f);
+            }
+            row_y += stat_h;  // `ms.ba`: `c += f.node.qa()` L2274
         }
         // `Sb` status line (`Ne.Qqb` L2259): `kW` -> "shopMaking", else `tra`
         // -> "shopOrder", else hidden. (`Ne.Uqb` L2257 resets `Sb`/`xg`; the

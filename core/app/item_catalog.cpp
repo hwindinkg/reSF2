@@ -19,6 +19,35 @@ bool attr_bool_str(const char* v) { return v != nullptr && std::string(v) == "1"
 
 } // namespace
 
+// `internal_settings.xml` `<Attributes>` (L21744-23450), file order. The JS
+// `ow.parse` (L615263) reads Name/Icon/Hidden; `ms`/`fi` (L2274-2275) consume
+// them in this order.
+const std::vector<ShopAttributeDef>& shop_attribute_defs() {
+    static const std::vector<ShopAttributeDef> kDefs = {
+        {"HeadDefense", "head_armor", false},
+        {"BodyDefense", "body_armor", false},
+        {"UnarmedDamage", "unarmed_attack", false},
+        {"WeaponDamage", "weapon_attack", false},
+        {"RangedDamage", "ranged_attack", false},
+        {"MagicDamage", "magic_attack", false},
+        {"CriticalChance", "critical_chance", true},
+        {"CriticalRating", "critical_chance", false},  // ShopHidden, not Hidden
+        {"BlockDamageFactor", "", true},
+        {"DamageFactor", "", true},
+        {"RangedQuantity", "ranged_quantity", true},
+        {"CriticalDamage", "", true},
+        {"MagicInitialCharge", "", true},
+        {"MagicPainRecharge", "", true},
+        {"MagicDamageRecharge", "", true},
+        {"RegenerationRate", "", true},
+        {"Lifesteal", "", true},
+        {"ShockCriticalHitChance", "", true},
+        {"ShockHeadHitChance", "", true},
+        {"EnchantmentResistance", "", true},
+    };
+    return kDefs;
+}
+
 std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
     std::vector<CatalogItem> out;
     sf2::data::xml_doc doc;
@@ -71,6 +100,15 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         ci.add_percent = sf2::data::xml_attr_int(item, "AddPercent", 0);
         ci.consumable_product =
             attr_bool_str(item.attribute("ConsumableProduct").value());
+        // JS item ctor: `for(e of v.eo.attributes) { let f=a.attributes.get(e.name);
+        // f!=null && this.attributes.set(e.name, u.I(f)) }` — the item's combat
+        // stats, keyed by the `internal_settings.xml` attribute names.
+        for (const ShopAttributeDef& def : shop_attribute_defs()) {
+            if (item.attribute(def.name)) {
+                ci.attributes[def.name] =
+                    sf2::data::xml_attr_int(item, def.name, 0);
+            }
+        }
         // `<Perks>` + `<Enchantments>` rows (JS `xe.Qd` be-entries, L1257):
         // perk name + `<Set>` overrides (numeric vs string by parse).
         for (const char* section : {"Perks", "Enchantments"}) {

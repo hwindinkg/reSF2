@@ -103,6 +103,14 @@ struct CatalogItem {
     int add_percent = 0;             // AddPercent
     bool consumable_product = false; // ConsumableProduct="1"
     std::vector<ItemPerkRef> perks;  // `<Perks>` + `<Enchantments>` rows
+    // The item's combat stats (JS `this.attributes`, a `ud` map; item ctor
+    // `for(e of v.eo.attributes) node.attributes.get(e.name)!=null &&
+    // this.attributes.set(e.name, u.I(...))`). Raw list.xml XML-attribute
+    // values keyed by attribute name — `ms.setParameters` (JS L2274) walks
+    // `v.eo.attributes` and reads `a.attributes.get(h.name, out)` to build the
+    // shop detail's attribute list. Only the names that appear as XML
+    // attributes are present.
+    std::map<std::string, int> attributes;
     // Owned-equip status comes from the save (users.xml <Items>), not here.
 
     // --- shop-offer definition (JS `hh`/`pl`, built for every list.xml item
@@ -132,5 +140,21 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text);
 // The shop-visible subset (JS `Oa.f5` tab lists): non-hidden, non-paid
 // Weapon/Armor/Helm items with a gold Price.
 std::vector<CatalogItem> shop_items(const std::vector<CatalogItem>& all);
+
+// One `internal_settings.xml` `<Attributes><Attribute>` definition (JS `gp`,
+// built by `ow.parse` L615263 into `v.eo.attributes`). `ms.setParameters`
+// (JS L2274) iterates these in file order; `fi.init` (L2270-2271) resolves the
+// row icon as `"attributes/" + Icon` in atlas 248 (fallback: `Icon` in 266).
+struct ShopAttributeDef {
+    const char* name;  // `Name`  ("WeaponDamage")
+    const char* icon;  // `Icon`  ("weapon_attack"; "" when the XML has none)
+    bool hidden;       // `Hidden="1"` — `ms` skips these (`!h.hidden`)
+};
+
+// The shipped `<Attributes>` defs (internal_settings.xml L21744-23450), in
+// file order. `ShopHidden`/`ProfileHidden` do NOT gate the shop list — only
+// `Hidden` does (JS L2274-2275 checks `!h.hidden`), so `CriticalRating`
+// (`ShopHidden="1"`, no `Hidden`) is included.
+const std::vector<ShopAttributeDef>& shop_attribute_defs();
 
 } // namespace sf2::app
