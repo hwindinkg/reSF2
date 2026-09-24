@@ -13311,12 +13311,115 @@ void EquipmentScreen::achiev_claim(int index) {
     }
 }
 
+// [tutorial beat 4] Build the profile avatar's `Pi` move-preview: the save's
+// worn body + the SELECTED Moves-tab clip (JS `Fo.rF(1,..)` L1126 selects the
+// hero and the `$r` panel's move, `Lc` L2234). Returns false when nothing
+// resolves — the caller then takes the JS `aDa()==null` immediate-resume branch.
+bool EquipmentScreen::arm_block_preview(App& app) {
+    if (!app.has_fight_assets()) return false;
+    FightAssets& assets = app.fight_assets();
+    std::vector<std::string> names;
+    try {
+        const WarriorSave w = app.save().load();
+        names = {w.skeleton, w.weapon, w.armor, w.helm};
+    } catch (const std::exception&) {
+    }
+    const std::vector<std::string> model_names = fighter_model_names(app, names);
+    if (model_names.empty() || model_names[0].empty()) return false;
+    block_preview_model_ = assets.merge_names(model_names);
+    if (block_preview_model_.bones.empty()) {
+        block_preview_model_ = assets.merged;  // the shared dojo body
+    }
+    if (block_preview_model_.bones.empty()) return false;
+    // The SELECTED Moves-tab move (`$r` panel, `vb.uj` L2198); scanned by Name
+    // so the moves-map key convention does not matter.
+    const sf2::scene::MoveDef* md = nullptr;
+    std::string mv;
+    if (!move_rows_.empty()) {
+        const int sel = std::min<int>(move_sel_, static_cast<int>(move_rows_.size()) - 1);
+        mv = move_rows_[sel].name;
+        for (const auto& kv : assets.moves) {
+            if (kv.second.name == mv) {
+                md = &kv.second;
+                break;
+            }
+        }
+    }
+    // The move's clip; fall back to the avatar's idle clip when the selected
+    // move has no shipped clip — either way the model plays ONE finite clip and
+    // publishes its end (the JS `Pa`/`Ad.kg` animation-end).
+    auto cit = assets.clips.end();
+    if (md != nullptr) cit = assets.clips.find(shop_clip_key(*md));
+    if (cit == assets.clips.end() || cit->second.frames.empty()) {
+        const std::string idle =
+            find_idle_clip_name(assets.moves, assets.clips, player_weapon_token(app));
+        if (!idle.empty()) cit = assets.clips.find(idle);
+    }
+    if (cit == assets.clips.end() || cit->second.frames.empty()) return false;
+    block_preview_fighter_ = std::make_unique<sf2::scene::Fighter>();
+    block_preview_fighter_->set_model(block_preview_model_);
+    block_preview_fighter_->set_color(assets.dojo.root_color());
+    block_preview_clip_ = &cit->second;
+    block_preview_frame_ = 0;
+    block_preview_active_ = true;
+    std::fprintf(stdout, "[profile] ShowBlock preview: move %s clip %s (%zu frames)\n",
+                 mv.empty() ? "(idle)" : mv.c_str(), cit->first.c_str(),
+                 cit->second.frames.size());
+    std::fflush(stdout);
+    return true;
+}
+
 void EquipmentScreen::update_impl(float dt) {
     (void)dt;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     // D3: `Wb` is a GLOBAL overlay — a dialog queued on ANY screen blocks that
     // screen's input (the Profile tab strip included).
     if (quest_modal_consume(app())) return;
+    // [tutorial beat 4] `StoryTutorialShowBlock` (JS `Fo` L1126): the profile
+    // avatar model plays the selected move; the lesson resumes on the model's
+    // animation END (`Ad.kg` -> `oHa` -> `Cxa`). Parked-only; the JS
+    // `aDa()==null` branch resumes immediately.
+    {
+        auto& q = app().quest_engine();
+        if (q.tutorial_gate_beat() != 4) {
+            block_preview_armed_ = false;
+            block_preview_active_ = false;
+            block_preview_fighter_.reset();
+            block_preview_clip_ = nullptr;
+            block_preview_frame_ = 0;
+            block_preview_completed_ = false;
+        } else {
+            if (!block_preview_armed_) {
+                block_preview_armed_ = true;
+                if (!arm_block_preview(app())) {
+                    std::fprintf(stdout,
+                                 "[profile] ShowBlock: no avatar model/clip -> "
+                                 "immediate resume (`aDa()==null`)\n");
+                    std::fflush(stdout);
+                    q.on_lesson_anim(app(), std::string(), std::string(), /*end=*/true);
+                }
+            }
+            if (block_preview_active_ && block_preview_clip_ != nullptr &&
+                !block_preview_clip_->frames.empty()) {
+                if (block_preview_frame_ + 1 <
+                    static_cast<int>(block_preview_clip_->frames.size())) {
+                    ++block_preview_frame_;
+                } else {
+                    // The `Pi` model's animation END (`Ad.kg` L1126) resumes the
+                    // parked lesson (`oHa` -> `Cxa` -> `sa()`).
+                    std::fprintf(stdout,
+                                 "[profile] ShowBlock block anim-end -> lesson resumes\n");
+                    std::fflush(stdout);
+                    block_preview_completed_ = true;
+                    block_preview_active_ = false;
+                    block_preview_fighter_.reset();
+                    block_preview_clip_ = nullptr;
+                    block_preview_frame_ = 0;
+                    q.on_lesson_anim(app(), std::string(), std::string(), /*end=*/true);
+                }
+            }
+        }
+    }
     const App::PointerState& p = app().pointer();
     hover_ = -1;
     // BACK (top-left) -> the previous screen (the loop's equipment -> dojo
@@ -13457,8 +13560,16 @@ void EquipmentScreen::render_impl(App& app) {
     // `locations/dojo_shop/bg.{image}` under `ma.Tya` (L1832) — a dedicated
     // destination background, NOT the dojo location layers.
     draw_destination_backdrop(app, 0.6392156862745098f);  // JS `Z.Ena` (L2479)
-    draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
-                           backdrop_fig_ok_, backdrop_idle_);
+    if (block_preview_active_ && block_preview_fighter_ != nullptr &&
+        block_preview_clip_ != nullptr) {
+        // JS `$r.Op.Vg(!0)` (L2234): the `Pi` avatar model plays the selected
+        // move (the parked `StoryTutorialShowBlock` lesson waits on its end).
+        draw_pi_fighter(ren, *block_preview_fighter_, *block_preview_clip_,
+                        block_preview_frame_);
+    } else {
+        draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
+                               backdrop_fig_ok_, backdrop_idle_);
+    }
     draw_destination_dim(ren);
 
     WarriorSave w;

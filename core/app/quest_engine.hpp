@@ -719,6 +719,11 @@ public:
     // stashed tail runs (which may immediately hit the second lesson and
     // re-park). Returns true when the tail resumed this call.
     bool tutorial_gate_tick(App& app, float dt);
+    // Test hook (`--tutorial-showblock-probe`): park the StoryTutorial gate at
+    // beat 4 (`StoryTutorialShowBlock`) with an EMPTY tail, so the
+    // `EquipmentScreen` avatar-anim-end publisher (`on_lesson_anim(...,
+    // end=true)`) can be asserted without the whole StoryTutorial chain.
+    void arm_showblock_gate_for_test(App& app);
     // JS `Bo`/`Do`/`Eo` `Pf` (sf2.502f0946.js L1121/L1123/L1125 <- the model
     // `Pf` L386): the player fighter STARTED the animation `name` (its JS
     // `zY` type `type`, "EAnimationMove"/"EAnimationAttack"). Runs the JS

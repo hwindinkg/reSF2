@@ -1430,6 +1430,9 @@ int main(int argc, char** argv) {
     // tutorial-END seed), hidden, and assert the engine's own `_$StoryTutorialStep`
     // default starts StoryTutorialWelcome + the lesson gate serializes to the modal.
     bool tutorial_real_verify = false;
+    // --tutorial-showblock-probe: park a synthetic beat-4 gate and assert the
+    // EquipmentScreen profile-avatar animation END resumes it (JS `Fo` L1126).
+    bool tutorial_showblock_probe = false;
     bool replay_mode = false;
     bool verify_input = false;
     bool fx_probe = false;  // --fx-probe: targeted FX-bus self-check (no OS input)
@@ -1531,6 +1534,8 @@ int main(int argc, char** argv) {
             ui_tour = true;
         } else if (arg == "--tutorial-real-verify") {
             tutorial_real_verify = true;
+        } else if (arg == "--tutorial-showblock-probe") {
+            tutorial_showblock_probe = true;
         } else if (arg == "--fidelity-tour") {
             fidelity_tour = true;
         } else if (arg == "--quest-verify") {
@@ -2347,6 +2352,45 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
         app.shutdown();
         return (selfcheck_ok && census_ok) ? 0 : 1;
+    } else if (tutorial_showblock_probe) {
+        // --- [tutorial beat 4] `StoryTutorialShowBlock` avatar-anim-end -------
+        // The JS `Fo` (sf2.502f0946.js L1126) resumes the parked lesson on the
+        // profile avatar MODEL's animation END (`Ad.kg` -> `oHa` -> `Cxa`); the
+        // model is a `Pi` 3D preview (`vb.Ad` L2196). The bounded slice: the
+        // EquipmentScreen plays the selected move's clip ONCE on the `Pi`
+        // viewer (`draw_pi_fighter`) and publishes that animation end to the
+        // quest engine, resuming the lesson. This probe parks a synthetic
+        // beat-4 gate (empty tail) and asserts the resume lands via the avatar
+        // anim end, NOT the 15 s `TutorialStepTimeout` (~900 frames @60 Hz).
+        // HIDDEN window (RULE 0), no OS input.
+        glfwHideWindow(app.renderer().window());
+        app.set_auto_attack(false);
+        app.set_headless_frames(0);
+        app.screens().push(sf2::app::make_screen(app.screens(), sf2::app::kScreenProfile));
+        app.run_one_frame();
+        sf2::app::QuestEngine& q = app.quest_engine();
+        q.arm_showblock_gate_for_test(app);
+        const int start_beat = q.tutorial_gate_beat();
+        bool resumed = false;
+        int frames = 0;
+        for (; frames < 1200; ++frames) {
+            app.run_one_frame();
+            if (q.tutorial_gate_beat() != 4) {
+                resumed = true;
+                break;
+            }
+        }
+        auto* es = dynamic_cast<sf2::app::EquipmentScreen*>(app.screens().top());
+        const bool completed = es != nullptr && es->block_preview_completed();
+        const bool ok = start_beat == 4 && resumed && completed && frames < 900;
+        std::fprintf(stdout,
+                     "[sbprobe] %s beat4=%d resumed=%d avatar_anim_end=%d frames=%d "
+                     "(timeout ~900)\n",
+                     ok ? "PASS" : "FAIL", start_beat, resumed ? 1 : 0, completed ? 1 : 0,
+                     frames);
+        std::fflush(stdout);
+        app.shutdown();
+        return ok ? 0 : 1;
     } else if (tutorial_real_verify) {
         // --- REAL-PATH tutorial gate (permanent, NO harness arm) -------------
         // Boots the way the REAL app does: NO `fresh_tutorial` arm and NO

@@ -4109,6 +4109,23 @@ bool QuestEngine::resume_tutorial_gate(App& app) {
     return !tutorial_gate_.active;
 }
 
+// Test hook (`--tutorial-showblock-probe`): mirror the `Fo` park site
+// (quest_engine.cpp ~L3527) at beat 4 with an EMPTY tail, so the resume is
+// observable as `tutorial_gate_.active` clearing. The `EquipmentScreen`
+// publisher is the ONLY resume source then (the timeout is 15 s away).
+void QuestEngine::arm_showblock_gate_for_test(App& app) {
+    tutorial_gate_ = TutorialGate{};
+    tutorial_gate_.active = true;
+    tutorial_gate_.beat = 4;
+    tutorial_gate_.remaining = kTutorialStepTimeoutSec;
+    tutorial_gate_.rest.clear();
+    tutorial_gate_.quest = "TestShowBlock";
+    try {
+        tutorial_gate_.step_at_park = app.save().load().story_step();
+    } catch (const std::exception&) {
+    }
+}
+
 bool QuestEngine::tutorial_gate_tick(App& app, float dt) {
     if (!tutorial_gate_.active) return false;
     if (dt <= 0.0f) return false;

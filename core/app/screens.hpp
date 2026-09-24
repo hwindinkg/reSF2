@@ -922,6 +922,12 @@ public:
     std::string shown_move() const;
     int move_row_count() const { return static_cast<int>(move_rows_.size()); }
 
+    // --- [probe] `--tutorial-showblock-probe` --------------------------------
+    // Did the ShowBlock avatar move-preview actually RUN and publish its
+    // animation end (the JS `Ad.kg` path), rather than the `aDa()==null`
+    // immediate-resume fallback? Latch, cleared when the beat is not parked.
+    bool block_preview_completed() const { return block_preview_completed_; }
+
     // The folded Moves tab row (JS Profile sub-view `qv`; same rule as the
     // deleted standalone MovesScreen — build_move_list_locks over the save's
     // owned items, display only).
@@ -1043,6 +1049,27 @@ private:
     bool backdrop_fig_tried_ = false;
     bool backdrop_fig_ok_ = false;
     const sf2::data::anim_clip* backdrop_idle_ = nullptr;  // owned by FightAssets
+
+    // --- [tutorial beat 4] the profile avatar's move-preview animation --------
+    // JS `Fo` = `StoryTutorialShowBlock` (sf2.502f0946.js L1126): the profile
+    // avatar MODEL (`vb.Ad` = a `Pi`, L2196) plays the SELECTED move on the
+    // Moves tab (`$r.Op.Vg(!0)`, L2234) and the parked lesson resumes on the
+    // model's animation END (`Ad.kg` -> `oHa` -> `Cxa` -> `sa()`). The port has
+    // no `Pi` avatar preview (only the static 2D portrait/idle backdrop), so
+    // this bounded slice plays the selected move's clip ONCE through the SAME
+    // `Pi` viewer machinery the Shop uses (`draw_pi_fighter`) and then publishes
+    // the animation end to the quest engine (`on_lesson_anim(..., end=true)`),
+    // so beat 4 resumes on the avatar condition instead of the 15 s
+    // `TutorialStepTimeout`. When no model/clip resolves the JS `aDa()==null`
+    // branch resumes immediately (`Cxa()`).
+    std::unique_ptr<sf2::scene::Fighter> block_preview_fighter_;
+    sf2::scene::Model block_preview_model_;
+    const sf2::data::anim_clip* block_preview_clip_ = nullptr;  // owned by FightAssets
+    int block_preview_frame_ = 0;
+    bool block_preview_active_ = false;
+    bool block_preview_armed_ = false;  // armed once per parked beat
+    bool block_preview_completed_ = false;  // the clip-end publisher fired
+    bool arm_block_preview(App& app);   // build the body + the selected move clip
 
     // `uk` cell hit rects captured during render (so update_impl hit-tests
     // the SAME wrapping layout the renderer produced). `index` = perk_rows_.
