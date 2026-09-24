@@ -490,6 +490,19 @@ struct QuestSideEffects {
         int upgrade = 0;
     };
     std::vector<PerkGrant> perk_grants;
+    // `$n` (`EGivePerk`) `ApplyTo="Item"` (`RWa` L555926 -> `Pa.cDa` L632540 ->
+    // `dDa` L632561 -> `rf(item).VXa(models)` L647359): the enchant model is
+    // `xe.Qd(children[0])` (`st()` L1262115) — `Name`, `ItemType.split("|")`
+    // and the `<Set>` attrs. `cDa` gates on `p.items.$b(item)!=null`; `dDa`
+    // gates on the owned holder (`rf`) existing, then `anb` (L647337) drops any
+    // same-`Name` enchant and `mY` (L646355) appends. Shipped form:
+    // `<GivePerk ApplyTo="Item" Item="X"><Perk Name=".."><Set/></Perk></GivePerk>`
+    // (item_restore_quests.xml:82, quests.xml:3344).
+    struct ItemEnchantGrant {
+        std::string item;                   // resolved `this.Bo` (`Item`)
+        WarriorSave::ItemEnchantment ench;  // `xe.Qd(children[0])`
+    };
+    std::vector<ItemEnchantGrant> enchant_grants;
     // `FightEnd` (JS `Tn.S`): `ca.Ka().kD(!1)` — end the live fight. The
     // engine records it; the fight scene consumes the request.
     std::vector<std::string> fight_end_requests;
@@ -756,6 +769,13 @@ public:
     // Returns "" when the expression is UNKNOWN (unanswerable).
     std::string resolve_for_test(App& app, const std::string& expr,
                                  const QuestJournal& journal);
+
+    // Test hook (`--quest-action-probe`): `p.items.$b(name) != null` — the
+    // `RWa` -> `Pa.cDa` catalog gate. Public so the probe can pick a real
+    // catalog item for the `GivePerk ApplyTo="Item"` enchant check.
+    bool catalog_has(App& app, const std::string& name) const {
+        return catalog_find(app, name) != nullptr;
+    }
 
     // Test hook (`--quest-query-probe`): append one synthetic `<Rules>` leaf
     // to the `?Fight[triple].*` list so the currency queries

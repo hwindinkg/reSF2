@@ -3726,6 +3726,58 @@ int main(int argc, char** argv) {
             std::fprintf(stdout,
                          "[qa] GivePerk Player probe skipped (no perk catalog)\n");
         }
+        // GivePerk `ApplyTo="Item"` (`$n` L555926 -> `RWa` -> `Pa.cDa` ->
+        // `rf(item).VXa` L647359): the `children[0]` `<Perk>` model becomes the
+        // owned item's `<Enchantments><Perk Name=..>`. Uses the SHIPPED pairing
+        // (`RANGED_NEEDLE` + `PERK_ITEM_SPECIAL_FRENZY_RANGED`,
+        // item_restore_quests.xml:82).
+        {
+            const std::string kPerkItem = "RANGED_NEEDLE";
+            if (app.quest_engine().catalog_has(app, kPerkItem)) {
+                sf2::app::WarriorSave w = app.save().load();
+                bool have = false;
+                for (const auto& it : w.items) {
+                    if (it.name == kPerkItem) have = true;
+                }
+                if (!have) {  // ensure the `rf(item)` holder exists
+                    sf2::app::WarriorSave::OwnedItem oi;
+                    oi.name = kPerkItem;
+                    oi.count = 1;
+                    w.items.push_back(oi);
+                    app.save().save(w);
+                }
+                sf2::app::QuestAction act;
+                act.tag = "GivePerk";
+                act.attrs["ApplyTo"] = "Item";
+                act.attrs["Item"] = kPerkItem;
+                sf2::app::QuestAction pk;
+                pk.tag = "Perk";
+                pk.attrs["Name"] = "PERK_ITEM_SPECIAL_FRENZY_RANGED";
+                sf2::app::QuestAction set_attr;
+                set_attr.tag = "Set";
+                set_attr.attrs["Aspect"] = "4000";
+                pk.children.push_back(set_attr);
+                act.children.push_back(pk);  // `a.st()` = children[0]
+                sf2::app::QuestJournal pj;
+                app.quest_engine().run_action_probe(app, {act}, pj);
+                bool enchanted = false;
+                for (const auto& it : app.save().load().items) {
+                    if (it.name != kPerkItem) continue;
+                    for (const auto& e : it.enchantments) {
+                        if (e.name == "PERK_ITEM_SPECIAL_FRENZY_RANGED") {
+                            enchanted = true;
+                        }
+                    }
+                }
+                check(enchanted,
+                      "GivePerk ApplyTo=Item -> item <Enchantments><Perk> granted");
+                std::fprintf(stdout, "[qa]   GivePerk Item: enchanted=%d\n",
+                             enchanted ? 1 : 0);
+            } else {
+                std::fprintf(stdout,
+                             "[qa] GivePerk Item probe skipped (no catalog item)\n");
+            }
+        }
         // --- `<Perk Name>` move lock (JS `Bm.he` L753-754) -------------------
         // The level-2 lesson learns PERK_DOUBLE_SWEEP (`Co` L1122:
         // `a.rF(0,"PERK_DOUBLE_SWEEP")`); its move `DoubleSweep` (moves.xml

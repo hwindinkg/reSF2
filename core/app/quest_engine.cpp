@@ -3741,15 +3741,59 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                     break;  // `a.st()` = `children[0]`: the first `<Perk>` only
                 }
             } else if (apply_to == "Item") {
-                // `RWa` (`$n` L555926): `Eba` substitutes the action's attrs
-                // into the cloned node, then `b.fc(this.Bo,a)` re-tags it with
-                // the `Item` value and `Pa.cDa(name, [xe.Qd(node)])` runs the
-                // grant. `xe.Qd` builds the item MODEL from the node — the
-                // enchant/item model is not ported, so record it (with the
-                // resolved `Item`, `this.Bo`) for the census.
-                const std::string item = resolve_apply(attr_or(a.attrs, "Item"));
-                fx.unknown.push_back(item.empty() ? std::string("GivePerk:Item")
-                                                  : ("GivePerk:Item:" + item));
+                // `RWa` (`$n` L555926): `this.ga = a.st().clone()` = the clone
+                // of `children[0]` (`st(){return this.children[0]}` L1262115).
+                // `Lxa` copies the node's attrs+children; `Eba` evaluates every
+                // DESCENDANT attr (not the root's own). `b.fc(this.Bo,a)` then
+                // evaluates `Item` and `Pa.cDa(item,[xe.Qd(clone)])` runs the
+                // grant. Shipped shape (item_restore_quests.xml:82,
+                // quests.xml:3344):
+                //   `<GivePerk ApplyTo="Item" Item="X">
+                //      <Perk Name=".."><Set .. /></Perk></GivePerk>`
+                // — the `<Perk>` IS the `children[0]` model, so `Name`/
+                // `ItemType` are read raw and the `<Set>` attrs are evaluated.
+                const std::string item =
+                    resolve_apply(attr_or(a.attrs, "Item"));  // `this.Bo`
+                if (a.children.empty() || item.empty()) {
+                    fx.unknown.push_back(
+                        item.empty() ? std::string("GivePerk:Item")
+                                     : ("GivePerk:Item:" + item));
+                } else {
+                    const QuestAction& model = a.children.front();  // `a.st()`
+                    QuestSideEffects::ItemEnchantGrant eg;
+                    eg.item = item;
+                    // `xe.Qd` L692882: `Name` = the node's `Name` attr (the
+                    // root attr is NOT touched by `Eba`, so kept raw).
+                    eg.ench.name = attr_or(model.attrs, "Name");
+                    // `xe.Qd`: `ItemType.split("|")` -> `g2`.
+                    const std::string it = attr_or(model.attrs, "ItemType");
+                    if (!it.empty()) {
+                        std::size_t s = 0;
+                        for (;;) {
+                            const std::size_t bar = it.find('|', s);
+                            if (bar == std::string::npos) {
+                                eg.ench.item_types.push_back(it.substr(s));
+                                break;
+                            }
+                            eg.ench.item_types.push_back(it.substr(s, bar - s));
+                            s = bar + 1;
+                        }
+                    }
+                    // `xe.Qd`: `a.A("Set")` -> `ll` (the `<Set>` attrs, in
+                    // map order; JS uses document order, identical for the
+                    // shipped single-attr `<Set Aspect=..>`).
+                    for (const QuestAction& ch : model.children) {
+                        if (ch.tag != "Set") continue;
+                        for (const auto& kv : ch.attrs) {
+                            eg.ench.sets.push_back({kv.first, resolve_apply(kv.second)});
+                        }
+                    }
+                    if (eg.ench.name.empty()) {
+                        fx.unknown.push_back("GivePerk:Item:" + item);
+                    } else {
+                        fx.enchant_grants.push_back(std::move(eg));
+                    }
+                }
             } else {
                 fx.unknown.push_back(t);
             }
@@ -3863,6 +3907,39 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
             if (pg.name.empty()) continue;
             w.learn_perk(pg.name, pg.level, pg.upgrade);
             dirty = true;
+        }
+        // `$n` GivePerk `ApplyTo="Item"` (`RWa` L555926 -> `Pa.cDa` L632540 ->
+        // `dDa` L632561 -> `rf(item).VXa(models)` L647359 + `Kia` + save):
+        // `cDa` gates on `p.items.$b(item)!=null`; `dDa` on the owned holder
+        // (`rf(def.name)` = `p.o.xa.Qj`, `Qj` L151521) existing. `VXa` ->
+        // `anb` (L647337) removes an existing `<Perk>` with the same `Name`,
+        // then `mY` (L646355) appends the new one under `<Enchantments>`.
+        for (const QuestSideEffects::ItemEnchantGrant& eg : fx.enchant_grants) {
+            if (eg.item.empty() || eg.ench.name.empty()) continue;
+            const CatalogItem* ci = catalog_find(app, eg.item);  // `$b` L82463
+            if (ci == nullptr) continue;  // no catalog def -> no-op
+            WarriorSave::OwnedItem* owned = nullptr;  // `rf(def.name)`
+            for (WarriorSave::OwnedItem& it : w.items) {
+                if (it.name == ci->name) {
+                    owned = &it;
+                    break;
+                }
+            }
+            if (owned == nullptr) continue;  // holder absent -> no-op
+            for (auto it2 = owned->enchantments.begin();
+                 it2 != owned->enchantments.end();) {
+                if (it2->name == eg.ench.name) {
+                    it2 = owned->enchantments.erase(it2);  // `anb`
+                } else {
+                    ++it2;
+                }
+            }
+            owned->enchantments.push_back(eg.ench);  // `mY`
+            dirty = true;
+            std::fprintf(stdout,
+                         "[quest] GivePerk item enchant %s <- %s (%zu set)\n",
+                         ci->name.c_str(), eg.ench.name.c_str(),
+                         eg.ench.sets.size());
         }
         // `hl` battle-record writes (JS `J1a` L259 / `Iaa` L260-261 /
         // `Eja` L261 / `Ho` L1106) — the `WDa` unlock bit `Qr.lla` reads.
